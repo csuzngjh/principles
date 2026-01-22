@@ -25,9 +25,11 @@ PROFILE="$PROJECT_DIR/docs/PROFILE.json"
 PLAN="$PROJECT_DIR/docs/PLAN.md"
 AUDIT="$PROJECT_DIR/docs/AUDIT.md"
 
-# DEBUG: Print raw inputs
-echo "DEBUG: Raw FILE_PATH=$FILE_PATH" >&2
-echo "DEBUG: PROJECT_DIR=$PROJECT_DIR" >&2
+# DEBUG: Print raw inputs (controlled by DEBUG_HOOKS env var)
+if [[ "${DEBUG_HOOKS:-0}" == "1" ]]; then
+  echo "DEBUG: Raw FILE_PATH=$FILE_PATH" >&2
+  echo "DEBUG: PROJECT_DIR=$PROJECT_DIR" >&2
+fi
 
 # Context: WSL environment where FILE_PATH input is Windows format (e.g. d:\Code)
 # but PROJECT_DIR is WSL format (e.g. /mnt/d/Code). We must normalize FILE_PATH.
@@ -81,11 +83,13 @@ if [[ -n "$FILE_PATH" ]]; then
   done < <(jq -r '.risk_paths[]? // empty' "$PROFILE")
 fi
 
-# DEBUG
-echo "DEBUG: is_risky=$is_risky" >&2
-echo "DEBUG: require_plan=$require_plan" >&2
-echo "DEBUG: PLAN=$PLAN" >&2
-ls -l "$PLAN" >&2 || echo "PLAN file not found" >&2
+# DEBUG: Print gate state (controlled by DEBUG_HOOKS env var)
+if [[ "${DEBUG_HOOKS:-0}" == "1" ]]; then
+  echo "DEBUG: is_risky=$is_risky" >&2
+  echo "DEBUG: require_plan=$require_plan" >&2
+  echo "DEBUG: PLAN=$PLAN" >&2
+  ls -l "$PLAN" >&2 || echo "PLAN file not found" >&2
+fi
 
 # Gate only for risky paths (or if file path unknown, be conservative)
 if [[ "$is_risky" == "true" || -z "$FILE_PATH" ]]; then
