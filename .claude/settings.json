@@ -64,22 +64,28 @@
                 ]
             }
         ],
-        "SubagentStop": [
-            {
-                "matcher": "implementer|reviewer",
-                "hooks": [
-                    {
-                        "type": "command",
-                        "command": "CLAUDE_HOOK_TYPE=SubagentStop \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/audit_log.sh"
-                    },
-                    {
-                        "type": "command",
-                        "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/subagent_complete.sh"
-                    }
-                ]
-            }
-        ],
-        "PreCompact": [
+    "SubagentStop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/subagent_complete.sh"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/sync_user_context.sh"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
             {
                 "hooks": [
                     {

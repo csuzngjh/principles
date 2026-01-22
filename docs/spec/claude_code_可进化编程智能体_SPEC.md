@@ -529,6 +529,9 @@ docs/
 STATUS: DRAFT | READY
 UPDATED: <ISO timestamp>
 
+## Target Files
+- <file_path>
+
 ## Steps
 1.
 2.

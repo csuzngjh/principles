@@ -47,6 +47,17 @@ if [[ -n "$FILE_PATH" ]]; then
 fi
 
 # Pick test level
+# 检查是否配置了测试（如果没有 tests section 或 commands section，跳过测试）
+if ! jq -e '.tests' "$PROFILE" > /dev/null 2>&1; then
+  # 没有 tests 配置，静默跳过
+  exit 0
+fi
+
+if ! jq -e '.tests.commands' "$PROFILE" > /dev/null 2>&1; then
+  # 没有 tests.commands 配置，静默跳过
+  exit 0
+fi
+
 level="$(jq -r '.tests.on_change // "smoke"' "$PROFILE")"
 if [[ "$is_risky" == "true" ]]; then
   level="$(jq -r '.tests.on_risk_change // "unit"' "$PROFILE")"
@@ -54,7 +65,7 @@ fi
 
 cmd="$(jq -r --arg lvl "$level" '.tests.commands[$lvl] // empty' "$PROFILE")"
 if [[ -z "$cmd" ]]; then
-  # If not configured, do nothing to avoid surprising behavior
+  # 如果没有配置对应级别的测试命令，静默跳过
   exit 0
 fi
 

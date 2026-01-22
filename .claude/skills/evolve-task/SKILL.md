@@ -24,43 +24,75 @@ allowed-tools: Read, Grep, Glob, Bash, Write, Edit
 - Risk level（low/medium/high）
 
 ## Step 3: 委派 Explorer（证据收集）
-让 Explorer 子智能体输出：Evidence list / Repro / Hypotheses(<=3)
+- 让 Explorer 子智能体输出：Evidence list / Repro / Hypotheses(<=3)
+- **绩效评估**: 任务完成后，评估 Explorer 表现并写入 `docs/.verdict.json`:
+  ```json
+  {"target_agent": "explorer", "win": true, "score_delta": 1, "reason": "Found critical evidence"}
+  ```
 
 ## Step 4: 委派 Diagnostician（根因）
-让 Diagnostician 输出：
-- Proximal cause（动词）
-- Root cause（形容词/设计/假设）
-- 5 Whys（>=3）
-- 分类 People/Design/Assumption
+- 让 Diagnostician 输出：Proximal cause / Root cause / 5 Whys / Category
+- **绩效评估**: 任务完成后，写入 `docs/.verdict.json`:
+  ```json
+  {"target_agent": "diagnostician", "win": true, "score_delta": 1, "reason": "Accurate root cause"}
+  ```
 
 ## Step 5: 委派 Auditor（演绎审计）
-让 Auditor 输出：
-- Axiom/System/Via negativa
-- RESULT: PASS/FAIL + Must-fix
-
-将审计结果写入 docs/AUDIT.md（RESULT 行必须存在）。
+- 让 Auditor 输出：Axiom/System/Via negativa / RESULT: PASS/FAIL
+- 将审计结果写入 docs/AUDIT.md（RESULT 行必须存在）。
+- **绩效评估**: 任务完成后，写入 `docs/.verdict.json`:
+  ```json
+  {"target_agent": "auditor", "win": true, "score_delta": 1, "reason": "Passed safety audit"}
+  ```
 
 ### 分支处理（必须遵守）
 - 若 RESULT = FAIL：
   1. 将 Must-fix 列表写入 docs/AUDIT.md
   2. 回到 Step 4 重新委派 Diagnostician，要求补充根因
-  3. 最多重试 2 次，若仍 FAIL 则写入 docs/DECISIONS.md 并请求用户介入
+  3. 最多重试 2 次，若仍 FAIL 则写入 docs/DECISIONS.md并请求用户介入
 - 若 RESULT = PASS：继续 Step 6
 
 ## Step 6: 委派 Planner（电影剧本计划）
-Planner 输出 Plan（步骤/命令/指标/回滚）。
-将计划写入 docs/PLAN.md（STATUS 行必须存在）。
+- Planner 输出 Plan（步骤/命令/指标/回滚）。
+- 将计划写入 docs/PLAN.md（STATUS 行必须存在）。
+- **绩效评估**: 任务完成后，写入 `docs/.verdict.json`:
+  ```json
+  {"target_agent": "planner", "win": true, "score_delta": 1, "reason": "Plan is executable"}
+  ```
 
 ## Step 7: 委派 Implementer（执行）
-Implementer 只能按 PLAN 执行。任何偏离必须先更新 PLAN。
+- Implementer 只能按 PLAN 执行。任何偏离必须先更新 PLAN。
+- **绩效评估**: 任务完成后，根据验证结果写入 `docs/.verdict.json`:
+  ```json
+  {"target_agent": "implementer", "win": true, "score_delta": 1, "reason": "Implemented as planned"}
+  ```
 
 ## Step 8: 委派 Reviewer（审查）
-Reviewer 输出：Critical/Warning/Suggestion。
+- Reviewer 输出：Critical/Warning/Suggestion。
+- **绩效评估**: 任务完成后，写入 `docs/.verdict.json`:
+  ```json
+  {"target_agent": "reviewer", "win": true, "score_delta": 1, "reason": "Detailed review"}
+  ```
 
 ### 分支处理
 - 若有 Critical：回到 Step 6 修订计划，最多重试 2 次
 - 若无 Critical：继续 Step 9
 
 ## Step 9: 反思与落盘
-将 Pain/Root cause/新原则候选/门禁建议追加到 docs/ISSUE_LOG.md
-并更新 docs/DECISIONS.md（记录关键决策与理由）。
+1. **系统进化**: 将 Pain/Root cause/新原则候选/门禁建议追加到 docs/ISSUE_LOG.md，并更新 docs/DECISIONS.md。
+2. **用户画像更新 (强制)**:
+   - 回顾用户在本任务中的表现（指令质量、领域知识、偏好）。
+   - **必须**写入 `docs/.user_verdict.json` (增量更新):
+   ```json
+   {
+     "updates": [
+       {"domain": "frontend", "delta": 1, "reason": "Provided correct React code"},
+       {"domain": "security", "delta": -1, "reason": "Ignored safety warning"}
+     ],
+     "preferences": {
+       "language": "zh-CN",
+       "verbosity": "detailed"
+     }
+   }
+   ```
+   - 注意：如果用户没有表现出明显特征或偏好，对应字段可为空。
