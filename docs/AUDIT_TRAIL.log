@@ -1,0 +1,60 @@
+# Audit Trail Log
+
+本日志自动记录所有 Claude Code hooks 的执行历史。
+
+**格式说明**：
+```
+[时间戳] HOOK类型 | 工具/详情 | 附加信息
+```
+
+**HOOK 类型**：
+- `START` - 会话初始化
+- `PRE` - 工具执行前（PreToolUse）
+- `POST` - 工具执行后（PostToolUse）
+- `STOP` - 会话结束
+- `AGENT` - 子智能体完成
+- `COMPACT` - 上下文压缩
+
+---
+
+[2026-01-22T10:59:33] PRE   | Write | file=/mnt/d/code/principles/src/server/test.ts | risk=Y
+[2026-01-22T11:21:04] PRE   | Edit | file=/mnt/d/code/principles/.claude/hooks/shellcheck_guard.sh | risk=N
+[2026-01-22T11:21:05] POST  | Edit | file=/mnt/d/code/principles/.claude/hooks/shellcheck_guard.sh | risk=N
+[2026-01-22T11:22:30] PRE   | Edit | file=/mnt/d/code/principles/.claude/hooks/shellcheck_guard.sh | risk=N
+[2026-01-22T11:22:31] POST  | Edit | file=/mnt/d/code/principles/.claude/hooks/shellcheck_guard.sh | risk=N
+[2026-01-22T11:23:17] PRE   | Edit | file=/mnt/d/code/principles/tests/test_hooks.sh | risk=N
+[2026-01-22T11:23:17] POST  | Edit | file=/mnt/d/code/principles/tests/test_hooks.sh | risk=N
+[2026-01-22T11:25:13] STOP  | reason=- | pain_flag=Y
+[2026-01-22T11:25:22] AGENT | - | completed
+[2026-01-22T11:26:18] PRE   | Write | file=/mnt/d/code/principles/docs/SHELLCHECK_GUIDE.md | risk=N
+[2026-01-22T11:26:18] POST  | Write | file=/mnt/d/code/principles/docs/SHELLCHECK_GUIDE.md | risk=N
+[2026-01-22T11:27:15] STOP  | reason=- | pain_flag=Y
+[2026-01-22T11:28:08] AGENT | - | completed
+[2026-01-22T11:39:10] PRE   | Write | file=/mnt/d/code/principles/docs/CLAUDE_CODE_MASTER_REVIEW.md | risk=N
+[2026-01-22T11:38:46] POST  | Write | file=/mnt/d/code/principles/docs/CLAUDE_CODE_MASTER_REVIEW.md | risk=N
+[2026-01-22T11:39:05] STOP  | reason=- | pain_flag=Y
+[2026-01-22T11:39:21] AGENT | - | completed
+[2026-01-22T11:39:22] STOP  | reason=- | pain_flag=N
+[2026-01-22T11:39:32] AGENT | - | completed
+[2026-01-22T11:48:58] PRE   | Edit | file=/mnt/d/code/principles/.claude/hooks/audit_log.sh | risk=N
+[2026-01-22T11:48:58] POST  | Edit | file=/mnt/d/code/principles/.claude/hooks/audit_log.sh | risk=N
+[2026-01-22T11:49:32] PRE   | Edit | file=/mnt/d/code/principles/.claude/hooks/post_write_checks.sh | risk=N
+[2026-01-22T11:49:33] POST  | Edit | file=/mnt/d/code/principles/.claude/hooks/post_write_checks.sh | risk=N
+[2026-01-22T11:49:53] PRE   | Edit | file=/mnt/d/code/principles/.claude/hooks/pre_write_gate.sh | risk=N
+[2026-01-22T11:49:53] POST  | Edit | file=/mnt/d/code/principles/.claude/hooks/pre_write_gate.sh | risk=N
+[2026-01-22T11:50:16] PRE   | Edit | file=/mnt/d/code/principles/.claude/hooks/precompact_checkpoint.sh | risk=N
+[2026-01-22T11:50:16] POST  | Edit | file=/mnt/d/code/principles/.claude/hooks/precompact_checkpoint.sh | risk=N
+[2026-01-22T11:50:47] PRE   | Edit | file=/mnt/d/code/principles/.claude/hooks/session_init.sh | risk=N
+[2026-01-22T11:50:48] POST  | Edit | file=/mnt/d/code/principles/.claude/hooks/session_init.sh | risk=N
+[2026-01-22T11:51:05] PRE   | Edit | file=/mnt/d/code/principles/.claude/hooks/statusline.sh | risk=N
+[2026-01-22T11:51:06] POST  | Edit | file=/mnt/d/code/principles/.claude/hooks/statusline.sh | risk=N
+[2026-01-22T11:52:07] PRE   | Edit | file=/mnt/d/code/principles/.claude/hooks/stop_evolution_update.sh | risk=N
+[2026-01-22T11:51:41] POST  | Edit | file=/mnt/d/code/principles/.claude/hooks/stop_evolution_update.sh | risk=N
+[2026-01-22T11:52:01] PRE   | Edit | file=/mnt/d/code/principles/.claude/hooks/subagent_complete.sh | risk=N
+[2026-01-22T11:52:02] POST  | Edit | file=/mnt/d/code/principles/.claude/hooks/subagent_complete.sh | risk=N
+[2026-01-22T11:52:37] PRE   | Edit | file=/mnt/d/code/principles/.claude/hooks/shellcheck_guard.sh | risk=N
+[2026-01-22T11:52:38] POST  | Edit | file=/mnt/d/code/principles/.claude/hooks/shellcheck_guard.sh | risk=N
+[2026-01-22T11:54:14] STOP  | reason=- | pain_flag=N
+[2026-01-22T11:54:27] AGENT | - | completed
+[2026-01-22T11:57:41] STOP  | reason=- | pain_flag=N
+[2026-01-22T11:57:53] AGENT | - | completed

@@ -1,0 +1,40 @@
+{
+    "agents": {
+        "explorer": {
+            "score": 0,
+            "wins": 0,
+            "losses": 0,
+            "failure_modes": {}
+        },
+        "diagnostician": {
+            "score": 0,
+            "wins": 0,
+            "losses": 0,
+            "failure_modes": {}
+        },
+        "auditor": {
+            "score": 0,
+            "wins": 0,
+            "losses": 0,
+            "failure_modes": {}
+        },
+        "planner": {
+            "score": 0,
+            "wins": 0,
+            "losses": 0,
+            "failure_modes": {}
+        },
+        "implementer": {
+            "score": 0,
+            "wins": 0,
+            "losses": 0,
+            "failure_modes": {}
+        },
+        "reviewer": {
+            "score": 0,
+            "wins": 0,
+            "losses": 0,
+            "failure_modes": {}
+        }
+    }
+}

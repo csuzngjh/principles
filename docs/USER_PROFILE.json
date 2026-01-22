@@ -1,0 +1,6 @@
+{
+  "domains": {"frontend": 0, "backend": 0, "infra": 0, "security": 0},
+  "signals": {"accepted_suggestions": 0, "rejected_suggestions": 0, "skip_test_requests": 0},
+  "interaction_mode": {"verbosity": "balanced", "accepts_pushback": true},
+  "notes": []
+}

@@ -36,7 +36,21 @@
       "Bash(npm install:*)",
       "mcp__zread__read_file",
       "mcp__zread__get_repo_structure",
-      "Bash(tasklist.exe:*)"
+      "Bash(tasklist.exe:*)",
+      "Bash(bash:*)",
+      "Bash(jq:*)",
+      "Bash(CLAUDE_PROJECT_DIR=\"/mnt/d/code/principles\" bash:*)",
+      "Bash(then)",
+      "Bash(fi:*)",
+      "Bash(CLAUDE_PROJECT_DIR=\"/mnt/d/code/principles\" CLAUDE_HOOK_TYPE=\"PreToolUse\" bash:*)",
+      "Bash(sudo:*)",
+      "Bash(sudo apt-get install:*)",
+      "Bash(shellcheck:*)",
+      "Bash(do:*)",
+      "Bash(chmod:*)",
+      "mcp__web-reader__webReader",
+      "mcp__web-search-prime__webSearchPrime",
+      "Bash(curl:*)"
     ]
   },
   "disableAllHooks": true
