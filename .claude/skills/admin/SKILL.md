@@ -13,8 +13,25 @@ allowed-tools: Bash, Write, Read, Glob
 
 ## 核心功能
 
-### 1. `init` (初始化)
-**动作**: 检查 `docs/` 下的核心文件。如果缺失，使用内置模板创建。
+### 1. `init` (系统初始化)
+**动作**: 部署系统的“毛坯房”架构。
+- **源文件**: 使用 `${CLAUDE_PLUGIN_ROOT}/templates/` 下的模板。
+- **安全协议 (Safe Mode)**:
+  - **docs/PROFILE.json**: 若存在则**跳过**。若不存在，从模板复制。
+  - **.claude/rules/00-kernel.md**: 若存在则**跳过**。若不存在，从模板复制。
+  - **CLAUDE.md**: 
+    - 若不存在，创建新文件。
+    - 若存在，**不要覆盖**。检查是否已包含 `@docs/USER_CONTEXT.md` 等引用。若未包含，则在文件末尾**追加**以下挂载点：
+      ```markdown
+      
+      ## System Integration (Principles Disciple)
+      - User Awareness: @docs/USER_CONTEXT.md
+      - Agent Performance: @docs/AGENT_CONTEXT.md
+      - Strategic Focus: @docs/okr/CURRENT_FOCUS.md
+      - Principles: @docs/PRINCIPLES.md
+      - Active Plan: @docs/PLAN.md
+      ```
+  - **其他文件** (`PLAN.md`, `AUDIT.md`, `USER_PROFILE.json`, `AGENT_SCORECARD.json`): 若不存在则创建默认空值。
 
 ### 2. `repair` (自检修复)
 **动作**: 

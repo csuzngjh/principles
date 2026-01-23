@@ -1,0 +1,88 @@
+{
+  "name": "principles-disciple",
+  "version": "1.0.0",
+  "description": "An evolutionary programming agent framework inspired by Ray Dalio's Principles. Features stable evolution loops, anti-sycophancy guardrails, and strategic OKR management.",
+  "author": {
+    "name": "Principles Disciple Team"
+  },
+  "keywords": ["evolution", "guardrails", "okr", "anti-sycophancy", "principles"],
+  "skills": "./.claude/skills/",
+  "agents": "./.claude/agents/",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/.claude/hooks/hook_runner.py --hook session_init"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/.claude/hooks/hook_runner.py --hook pre_write_gate"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/.claude/hooks/hook_runner.py --hook post_write_checks"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/.claude/hooks/hook_runner.py --hook stop_evolution_update"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/.claude/hooks/hook_runner.py --hook subagent_complete"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "auto|manual",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/.claude/hooks/hook_runner.py --hook precompact_checkpoint"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/.claude/hooks/hook_runner.py --hook sync_user_context"
+          }
+        ]
+      }
+    ]
+  }
+}

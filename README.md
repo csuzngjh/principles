@@ -1,0 +1,87 @@
+# Principles Disciple (原则信徒)
+
+> **可进化编程智能体框架 (Evolutionary Programming Agent Framework)**
+> Inspired by Ray Dalio's *Principles*.
+
+[![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-Plugin-5865F2)](https://code.claude.com)
+
+Principles Disciple 是一个为 Claude Code 设计的插件，它将你的 AI 助手转化为一个具备**自我防御、自我反思、自我进化**能力的数字生命体。它通过门禁、画像、OKR 和 痛觉机制，防止 AI 盲目执行错误指令，并从每次失败中学习。
+
+---
+
+## 🚀 快速开始
+
+### 1. 安装插件
+在你的项目目录中运行：
+```bash
+/plugin install <git-repo-url>
+```
+
+### 2. 初始化“毛坯房”
+插件安装后，你需要初始化系统的核心文件（如规则库、配置文件）。
+运行以下命令：
+```bash
+/admin init
+```
+*这将安全地创建 `docs/` 目录和配置文件，不会覆盖你已有的 `CLAUDE.md`。*
+
+### 3. 设定战略（可选但推荐）
+告诉智能体你的项目愿景，让它更有方向感：
+```bash
+/init-strategy
+```
+
+---
+
+## 💡 核心功能使用指南
+
+### 🛡️ 门禁与防御 (The Gatekeeper)
+你不需要做任何事。系统会自动拦截对 **高风险目录**（如 `src/db/`）的未授权修改。
+* **遇到拦截怎么办？**
+  - AI 会自动提示你需要先制定计划。
+  - 你只需同意它运行 `/evolve-task` 即可。
+
+### 🧠 痛定思痛 (Reflection Loop)
+当任务长期停滞或报错过多时，系统会在上下文压缩前触发**红色警报**。
+* **看到 `🛑 URGENT` 提示怎么办？**
+  - 运行 `/reflection-log`。AI 会自动复盘并生成新的原则，防止下次再犯。
+
+### 🎯 战略管理 (OKR)
+让 AI 不仅仅是修 Bug，而是朝着你的长期目标前进。
+* **`/init-strategy`**: 深度访谈，确立愿景。
+* **`/manage-okr`**: 将战略拆解为每个子智能体的具体 KPI。
+
+### 🎮 人类控制台 (Human Console)
+当 AI 跑偏时，你是拥有最高权限的驾驶员。
+* **`/pain "别试了"`**: 强制触发痛苦信号，让 AI 停下反思。
+* **`/profile "Frontend: Expert"`**: 告诉 AI 你是专家，让它少废话，多听你的。
+* **`/inject-rule "No Python"`**: 立刻注入一条临时规则。
+* **`/admin repair`**: 系统文件坏了？一键修复。
+
+---
+
+## 🔍 排错与反馈 (Troubleshooting)
+
+### 我怎么知道系统有没有在工作？
+运行健康检查命令：
+```bash
+/system-status
+```
+它会显示 Hooks 的运行状态、报错率以及当前的风险路径配置。
+
+### 常见问题
+* **Q: 为什么 AI 拒绝修改文件？**
+  * A: 检查 `docs/PROFILE.json` 中的 `risk_paths`。如果是风险路径，必须先有 `docs/PLAN.md`。
+* **Q: AI 好像变笨了，不听我的指挥？**
+  * A: 检查 `docs/USER_CONTEXT.md`。可能系统把你标记为了“新手”。运行 `/profile "Domain: Expert"` 来修正。
+
+### 报告 Bug
+如果发现插件本身报错（如 Hook 崩溃），请查看系统日志：
+```bash
+cat docs/SYSTEM.log
+```
+将日志内容提交给开发者。
+
+---
+
+> *"Pain + Reflection = Progress"*

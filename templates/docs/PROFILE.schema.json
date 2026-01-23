@@ -1,0 +1,56 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "System Profile Schema",
+  "description": "Schema for the evolutionary agent framework configuration (The Interception Database)",
+  "type": "object",
+  "properties": {
+    "audit_level": {
+      "type": "string",
+      "enum": ["low", "medium", "high"],
+      "default": "medium"
+    },
+    "risk_paths": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "description": "Project-relative directory or file paths that require mandatory gating."
+      },
+      "default": []
+    },
+    "gate": {
+      "type": "object",
+      "properties": {
+        "require_plan_for_risk_paths": { "type": "boolean", "default": true },
+        "require_audit_before_write": { "type": "boolean", "default": true },
+        "require_reviewer_after_write": { "type": "boolean", "default": true }
+      }
+    },
+    "tests": {
+      "type": "object",
+      "properties": {
+        "on_change": { "type": "string", "enum": ["smoke", "unit", "full"], "default": "smoke" },
+        "on_risk_change": { "type": "string", "enum": ["smoke", "unit", "full"], "default": "unit" },
+        "commands": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Key-value pairs mapping test levels to shell commands."
+        }
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "properties": {
+        "deny_skip_tests": { "type": "boolean", "default": true },
+        "deny_unsafe_db_ops": { "type": "boolean", "default": true }
+      }
+    },
+    "output": {
+      "type": "object",
+      "properties": {
+        "verbosity": { "type": "string", "enum": ["concise", "balanced", "detailed"], "default": "balanced" },
+        "show_evidence": { "type": "boolean", "default": true }
+      }
+    }
+  },
+  "required": ["risk_paths", "gate", "tests"]
+}
