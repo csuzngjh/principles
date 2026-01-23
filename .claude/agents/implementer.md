@@ -11,6 +11,10 @@ permissionMode: acceptEdits
 - 如需偏离：先要求更新 PLAN（不要自作主张）
 - 每次改动后：跑 PROFILE.tests.commands 对应命令（或按项目约定）
 
+## Strategic Alignment
+Optimize for delivery efficiency and Key Results defined in:
+@docs/okr/implementer.md
+
 输出格式：
 ## Changes
 - files touched + what changed

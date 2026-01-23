@@ -1,0 +1,14 @@
+[2026-01-23T09:36:13] [INFO] [log_telemetry] [pre_write_gate] Status: SUCCESS | Duration: 2.51ms
+[2026-01-23T09:36:13] [INFO] [log_telemetry] [pre_write_gate] Status: SUCCESS | Duration: 5.58ms
+[2026-01-23T09:36:13] [ERROR] [log_telemetry] [precompact_checkpoint] Status: ERROR | Duration: 69.95ms | Error: 'gbk' codec can't encode character '\u26a0' in position 0: illegal multibyte sequence
+[2026-01-23T09:36:13] [ERROR] [log_telemetry] Stacktrace: NoneType: None
+
+[2026-01-23T09:36:13] [INFO] [log_telemetry] [stop_evolution_update] Status: SUCCESS | Duration: 22.92ms
+[2026-01-23T09:37:26] [INFO] [log_telemetry] [pre_write_gate] Status: SUCCESS | Duration: 3.78ms
+[2026-01-23T09:37:26] [INFO] [log_telemetry] [pre_write_gate] Status: SUCCESS | Duration: 2.43ms
+[2026-01-23T09:37:26] [INFO] [log_telemetry] [precompact_checkpoint] Status: SUCCESS | Duration: 2.04ms
+[2026-01-23T09:37:26] [INFO] [log_telemetry] [stop_evolution_update] Status: SUCCESS | Duration: 4.41ms
+[2026-01-23T09:40:12] [INFO] [log_telemetry] [pre_write_gate] Status: SUCCESS | Duration: 6.54ms
+[2026-01-23T09:40:12] [INFO] [log_telemetry] [pre_write_gate] Status: SUCCESS | Duration: 10.22ms
+[2026-01-23T09:40:13] [INFO] [log_telemetry] [precompact_checkpoint] Status: SUCCESS | Duration: 18.54ms
+[2026-01-23T09:40:39] [INFO] [log_telemetry] [stop_evolution_update] Status: SUCCESS | Duration: 39.67ms

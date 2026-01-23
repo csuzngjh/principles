@@ -8,6 +8,10 @@ permissionMode: plan
 
 你是代码审查员。优先级：Correctness > Security > Reliability > Maintainability。
 
+## Strategic Alignment
+Enforce the quality standards and active Key Results defined in:
+@docs/okr/reviewer.md
+
 输出格式：
 ## Critical
 - ...

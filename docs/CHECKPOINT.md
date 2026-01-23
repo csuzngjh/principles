@@ -9,3 +9,12 @@
 ## PreCompact checkpoint [2026-01-22T16:21:51+08:00]
 - PROFILE.audit_level: medium
 - PROFILE.risk_paths: ["src/server/","infra/","db/"]
+
+## PreCompact checkpoint [2026-01-23T09:36:13.570552]
+- PROFILE.audit_level: None
+
+## PreCompact checkpoint [2026-01-23T09:37:26.327843]
+- PROFILE.audit_level: None
+
+## PreCompact checkpoint [2026-01-23T09:40:13.068815]
+- PROFILE.audit_level: None

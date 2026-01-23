@@ -1,103 +1,70 @@
 {
-    "statusLine": {
-        "type": "command",
-        "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/statusline.sh",
-        "padding": 0
-    },
-    "hooks": {
-        "SessionStart": [
-            {
-                "matcher": "startup|resume",
-                "hooks": [
-                    {
-                        "type": "command",
-                        "command": "CLAUDE_HOOK_TYPE=SessionStart \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/audit_log.sh"
-                    },
-                    {
-                        "type": "command",
-                        "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/session_init.sh"
-                    }
-                ]
-            }
-        ],
-        "PreToolUse": [
-            {
-                "matcher": "Write|Edit",
-                "hooks": [
-                    {
-                        "type": "command",
-                        "command": "CLAUDE_HOOK_TYPE=PreToolUse \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/audit_log.sh"
-                    },
-                    {
-                        "type": "command",
-                        "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pre_write_gate.sh"
-                    }
-                ]
-            }
-        ],
-        "PostToolUse": [
-            {
-                "matcher": "Write|Edit",
-                "hooks": [
-                    {
-                        "type": "command",
-                        "command": "CLAUDE_HOOK_TYPE=PostToolUse \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/audit_log.sh"
-                    },
-                    {
-                        "type": "command",
-                        "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/post_write_checks.sh"
-                    }
-                ]
-            }
-        ],
-        "Stop": [
-            {
-                "hooks": [
-                    {
-                        "type": "command",
-                        "command": "CLAUDE_HOOK_TYPE=Stop \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/audit_log.sh"
-                    },
-                    {
-                        "type": "command",
-                        "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/stop_evolution_update.sh"
-                    }
-                ]
-            }
-        ],
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/hook_runner.py --hook session_init"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/hook_runner.py --hook pre_write_gate"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/hook_runner.py --hook post_write_checks"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/hook_runner.py --hook stop_evolution_update"
+          }
+        ]
+      }
+    ],
     "SubagentStop": [
       {
         "matcher": "*",
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/subagent_complete.sh"
-          }
-        ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/sync_user_context.sh"
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/hook_runner.py --hook subagent_complete"
           }
         ]
       }
     ],
     "PreCompact": [
-            {
-                "hooks": [
-                    {
-                        "type": "command",
-                        "command": "CLAUDE_HOOK_TYPE=PreCompact \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/audit_log.sh"
-                    },
-                    {
-                        "type": "command",
-                        "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/precompact_checkpoint.sh"
-                    }
-                ]
-            }
+      {
+        "matcher": "auto|manual",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/hook_runner.py --hook precompact_checkpoint"
+          }
         ]
-    }
+      }
+    ]
+  }
 }
