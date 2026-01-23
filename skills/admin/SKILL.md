@@ -33,11 +33,15 @@ allowed-tools: Bash, Write, Read, Glob
       ```
   - **其他文件** (`PLAN.md`, `AUDIT.md`, `USER_PROFILE.json`, `AGENT_SCORECARD.json`): 若不存在则创建默认空值。
 
-### 2. `repair` (自检修复)
+### 2. `repair` (系统自检与修复)
 **动作**: 
 - 参照 `docs/PROFILE.schema.json` 校验 `PROFILE.json`。
 - 确保 `PLAN.md` 包含 `## Target Files`。
-- **强制清理**: 删除 `.pain_flag`, `.verdict.json`, `.user_verdict.json`, `.pending_reflection` 等临时标记，解除死锁。
+- **强制清理**: 直接检查并删除以下特定路径的文件（无需搜索）：
+  - `docs/.pain_flag`
+  - `docs/.verdict.json`
+  - `docs/.user_verdict.json`
+  - `docs/.pending_reflection`
 
 ### 3. `reset` (强制重置)
 **动作**: 在得到用户明确确认后，将 `USER_PROFILE.json` 和 `AGENT_SCORECARD.json` 归零。

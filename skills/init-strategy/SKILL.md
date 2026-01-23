@@ -50,4 +50,4 @@ allowed-tools: AskUserQuestion, Read, Write
 ```
 
 ## 结项
-完成写入后，提示用户：“✅ 战略锚点已锁定。建议运行 `/plan-okr` 进行季度/迭代级的任务拆解。”
+完成写入后，提示用户：“✅ 战略锚点已锁定。建议运行 `/manage-okr` 进行季度/迭代级的任务拆解。”
