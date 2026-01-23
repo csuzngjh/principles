@@ -1,0 +1,13 @@
+{
+  "name": "principles-local",
+  "owner": {
+    "name": "Local Dev"
+  },
+  "plugins": [
+    {
+      "name": "principles-disciple",
+      "source": "./",
+      "description": "The Evolutionary Programming Agent framework (Local Dev)."
+    }
+  ]
+}

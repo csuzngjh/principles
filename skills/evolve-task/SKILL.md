@@ -15,7 +15,7 @@ allowed-tools: Read, Grep, Glob, Bash, Write, Edit
 
 ## Step 1: 读取运行参数与能力自检
 - 读取 docs/PROFILE.json，理解 risk_paths、gate、tests.commands。
-- **能力自检**: 快速扫描 `.claude/skills/` 和 `.claude/agents/`。如果有针对当前任务的专门 Skill (如 `/deep-search`) 或 Agent (如 `security-expert`)，请在后续步骤中优先使用。
+- **能力自检**: 快速扫描插件目录下的 `skills/` 和 `agents/`。如果有针对当前任务的专门 Skill (如 `/deep-search`) 或 Agent (如 `security-expert`)，请在后续步骤中优先使用。
 
 ## Step 2: TRIAGE（补齐信息）
 输出：

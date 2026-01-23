@@ -13,7 +13,7 @@ allowed-tools: AskUserQuestion, Read, Write, Glob, Task
 
 ### 1. 准备 (Preparation)
 - 读取 `docs/STRATEGY.md` (如果不存在，提示用户运行 `/init-strategy`)。
-- 扫描 `.claude/agents/*.md` 获取所有在职员工。
+- 扫描插件目录下的 `agents/*.md` 获取所有在职员工。
 
 ### 2. 协商与对齐 (Negotiation & Alignment)
 - **逐个面试**: 对每个 Agent，调用 `Task()` 工具发起一次询问。
