@@ -7,6 +7,13 @@ set -e
 # 1. 确定目标目录 (默认为当前目录)
 TARGET_DIR="${1:-$(pwd)}"
 TARGET_DIR="${TARGET_DIR%/}" # 去掉末尾的斜杠，防止双斜杠输出
+FORCE_MODE=false
+
+if [[ "$2" == "--force" ]]; then
+    FORCE_MODE=true
+    echo "🔥 FORCE MODE ENABLED: Overwriting all components."
+fi
+
 SOURCE_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 echo "🚀 Installing Principles Disciple to: $TARGET_DIR"
@@ -31,6 +38,13 @@ mkdir -p "$TARGET_DIR/docs/okr"
 smart_copy() {
     src="$1"
     dest="$2"
+    if [ "$FORCE_MODE" = true ]; then
+        mkdir -p "$(dirname "$dest")"
+        cp "$src" "$dest"
+        echo "  - Updated: $dest (Forced)"
+        return
+    fi
+
     if [ ! -f "$dest" ]; then
         mkdir -p "$(dirname "$dest")"
         cp "$src" "$dest"

@@ -33,19 +33,21 @@ allowed-tools: Read, GoogleSearch, Bash, AskUserQuestion, Write
 
 ### 4. 部署与登记 (Deploy & Register)
 - 获得批准后，执行安装命令。
-- **关键动作 1**: 更新 `docs/SYSTEM_CAPABILITIES.json`。
-  - 记录新工具的路径和用途。
-- **关键动作 2 (全员广播)**: 
-  - 扫描 `.claude/agents/*.md`。
-  - 检查每个文件是否包含 `@docs/SYSTEM_CAPABILITIES.json`。
-  - 若未包含，在文件末尾追加：
-    ```markdown
-    
-    ## Environment Capabilities
-    Check @docs/SYSTEM_CAPABILITIES.json for high-performance tools (e.g., ripgrep, ast-grep) available in this environment. Use them!
-    ```
-  - 提示用户运行 `/manage-okr` 或 `/admin diagnose` 以让 Agent 感知新能力。
-
+    - **验证 (Verification - 强制)**:
+      - 安装完成后，**必须**运行 `<tool> --version` 或 `command -v <tool>` 来验证是否真的安装成功。
+      - **若失败**: 告知用户（可能是权限问题），请求用户手动安装，**不要**更新能力文件。
+      - **若成功**: 
+        - 更新 `docs/SYSTEM_CAPABILITIES.json`。记录新工具的路径。
+        - **全员广播**: 
+          - 扫描 `.claude/agents/*.md`。
+          - 检查每个文件是否包含 `@docs/SYSTEM_CAPABILITIES.json`。
+          - 若未包含，在文件末尾追加：
+            ```markdown
+            
+            ## Environment Capabilities
+            Check @docs/SYSTEM_CAPABILITIES.json for high-performance tools (e.g., ripgrep, ast-grep) available in this environment. Use them!
+            ```
+          - 提示用户运行 `/manage-okr` 或 `/admin diagnose` 以让 Agent 感知新能力。
 ## 核心原则
 - **喜新厌旧**: 敢于推荐新工具替代旧工具（如推荐 `pnpm` 替 `npm`，推荐 `vitest` 替 `jest`），但要说明理由。
 - **安全第一**: 在安装前必须获得用户明确授权。
