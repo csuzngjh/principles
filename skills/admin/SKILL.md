@@ -13,35 +13,21 @@ allowed-tools: Bash, Write, Read, Glob
 
 ## 核心功能
 
-### 1. `init` (系统初始化)
-**动作**: 部署系统的“毛坯房”架构。
-- **源文件**: 使用 `${CLAUDE_PLUGIN_ROOT}/templates/` 下的模板。
-- **安全协议 (Safe Mode)**:
-  - **docs/PROFILE.json**: 若存在则**跳过**。若不存在，从模板复制。
-  - **.claude/rules/00-kernel.md**: 若存在则**跳过**。若不存在，从模板复制。
-  - **CLAUDE.md**: 
-    - 若不存在，创建新文件。
-    - 若存在，**不要覆盖**。检查是否已包含 `@docs/USER_CONTEXT.md` 等引用。若未包含，则在文件末尾**追加**以下挂载点：
-      ```markdown
-      
-      ## System Integration (Principles Disciple)
-      - User Awareness: @docs/USER_CONTEXT.md
-      - Agent Performance: @docs/AGENT_CONTEXT.md
-      - Strategic Focus: @docs/okr/CURRENT_FOCUS.md
-      - Principles: @docs/PRINCIPLES.md
-      - Active Plan: @docs/PLAN.md
-      ```
-  - **其他文件** (`PLAN.md`, `AUDIT.md`, `USER_PROFILE.json`, `AGENT_SCORECARD.json`): 若不存在则创建默认空值。
+### 1. `diagnose` (系统诊断)
+**动作**: 检查“毛坯房”架构的完整性。
+- **核心组件**: 检查 `.claude/hooks/hook_runner.py` 是否存在且可执行。
+- **文档完整性**: 检查 `docs/PROFILE.json`, `docs/PLAN.md` 等是否存在。
+- **记忆挂载**: 检查 `CLAUDE.md` 是否包含 `System Integration` 章节。
+- **输出**: 生成一份健康报告，列出缺失或异常的项目。
 
-### 2. `repair` (系统自检与修复)
+### 2. `repair` (系统修复)
 **动作**: 
-- 参照 `docs/PROFILE.schema.json` 校验 `PROFILE.json`。
-- 确保 `PLAN.md` 包含 `## Target Files`。
-- **强制清理**: 直接检查并删除以下特定路径的文件（无需搜索）：
-  - `docs/.pain_flag`
-  - `docs/.verdict.json`
-  - `docs/.user_verdict.json`
-  - `docs/.pending_reflection`
+- **配置恢复**: 如果 `PROFILE.json` 缺失或损坏，尝试从 `.claude/templates/PROFILE.json` 恢复。
+- **规则恢复**: 如果 `00-kernel.md` 缺失，从 `.claude/templates/00-kernel.md` 恢复。
+- **结构补全**: 确保 `PLAN.md` 包含 `## Target Files` 标题。
+- **强制清理**: 删除 `.pain_flag`, `.verdict.json`, `.user_verdict.json`, `.pending_reflection` 等临时标记。
+
+### 3. `reset` (强制重置)
 
 ### 3. `reset` (强制重置)
 **动作**: 在得到用户明确确认后，将 `USER_PROFILE.json` 和 `AGENT_SCORECARD.json` 归零。

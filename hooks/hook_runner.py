@@ -340,6 +340,16 @@ def stop_evolution_update(payload, project_dir):
             new_prefs = verdict.get("preferences", {})
             profile["preferences"].update(new_prefs)
             
+            # 更新 Achievements (新增)
+            new_achievement = verdict.get("achievement")
+            if new_achievement:
+                if "achievements" not in profile:
+                    profile["achievements"] = []
+                profile["achievements"] = ([{
+                    "date": _dt.datetime.now().strftime("%Y-%m-%d"),
+                    "pattern": new_achievement
+                }] + profile["achievements"])[:5] # 只保留最近 5 条高光时刻
+            
             # 更新 History (追加并切片)
             profile["history"] = (updates + profile.get("history", []))[:20]
             
@@ -378,9 +388,19 @@ def sync_user_context(payload, project_dir):
             if score >= 0: return "Intermediate"
             return "Novice/Low"
             
+        # 读取 Achievements (新增)
+        achievements = data.get("achievements", [])
+
         with open(user_context, "w", encoding="utf-8") as f:
             f.write(f"# User Cognitive Profile (System Generated)\n")
             f.write(f"> 🛑 DO NOT EDIT MANUALLY. Updated: {_dt.datetime.now().isoformat()}\n\n")
+            
+            if achievements:
+                f.write("## 🎖️ Achievement Wall (Success Patterns)\n")
+                for ach in achievements:
+                    f.write(f"- **[{ach['date']}]**: {ach['pattern']}\n")
+                f.write("\n")
+
             f.write("## Current Domain Expertise\n")
             for domain, score in domains.items():
                 level = get_level(score)

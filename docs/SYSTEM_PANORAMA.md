@@ -126,7 +126,17 @@
 
 ---
 
-## 6. 文件清单 (File Inventory)
+## 6. 数据协议 (Data Contracts)
+
+系统采用严谨的 JSON Schema 来约束 LLM 的结构化输出，防止格式漂移。
+
+- **`docs/schemas/user_verdict_schema.json`**: 定义用户画像更新与偏好捕捉格式。
+- **`docs/schemas/agent_verdict_schema.json`**: 定义子智能体绩效评分标准。
+- **`docs/PROFILE.schema.json`**: 定义系统配置文件的合法结构（拦截数据库模式）。
+
+---
+
+## 7. 文件清单 (File Inventory)
 
 - **Rules**: `.claude/rules/00-kernel.md`, `10-guardrails.md`
 - **Skills**: `.claude/skills/{init-strategy, manage-okr, triage, root-cause, deductive-audit, plan-script, reflection-log, evolve-task, admin, pain, profile, inject-rule}/SKILL.md`

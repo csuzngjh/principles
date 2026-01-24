@@ -11,6 +11,12 @@ allowed-tools: AskUserQuestion, Read, Write, Glob, Task
 
 ## 核心流程
 
+## 执行原则 (The Principles)
+1. **SMART 强制**: 所有的 KR 必须可量化、有边界、有时限。
+2. **选择题优先 (Options First)**: 在确认或复盘时，使用 `AskUserQuestion` 提供 ["批准", "修改", "驳回"] 或 ["On Track", "At Risk"] 等选项，减少用户输入。
+3. **职责对齐**: 自动识别 KR 应该归属于哪个维度（质量/架构/执行速度）。
+4. **动态演进**: KR 是有生命周期的。通过此命令可以更新、完成或废弃 KR。
+
 ### 1. 准备与状态检查 (Preparation & Resume)
 - 读取 `docs/STRATEGY.md`。
 - **构建全量名册**:
@@ -21,7 +27,15 @@ allowed-tools: AskUserQuestion, Read, Write, Glob, Task
   - **若存在**: 读取 `pending` 列表。告知用户：“检测到上次未完成的协商（剩余: ...）。正在恢复进度。”
   - **若不存在**: 初始化该文件，将所有名册写入 `pending` 列表。
 
-### 2. 协商与对齐 (Negotiation & Alignment)
+### 2. 用户承诺 (User Commitment) - *New*
+- **转向用户**: 在面试子智能体之前，先与用户对齐。
+- **提问**: 使用 `AskUserQuestion`。
+  > "为了确保项目成功，除了 AI 团队的努力，也需要您的协同。
+  > **您在本周期的个人 OKR 是什么？**
+  > (建议方向：行为约束如'不改需求'、个人贡献如'完成设计稿'、或学习目标)"
+- **落盘**: 将用户承诺写入 `docs/okr/user.md`。
+
+### 3. 协商与对齐 (Negotiation & Alignment)
 - **调度原则**: ⚠️ **必须串行 (Sequential Only)**。逐一处理 `pending` 列表中的 Agent，严禁并发。
 - **面试循环**:
   1. 从 `pending` 中取出一个 Agent。

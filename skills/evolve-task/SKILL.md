@@ -26,25 +26,16 @@ allowed-tools: Read, Grep, Glob, Bash, Write, Edit
 
 ## Step 3: 委派 Explorer（证据收集）
 - 让 Explorer 子智能体输出：Evidence list / Repro / Hypotheses(<=3)
-- **绩效评估**: 任务完成后，评估 Explorer 表现并写入 `docs/.verdict.json`:
-  ```json
-  {"target_agent": "explorer", "win": true, "score_delta": 1, "reason": "Found critical evidence"}
-  ```
+- **绩效评估**: 任务完成后，评估 Explorer 表现并写入 `docs/.verdict.json`。格式必须严格遵守 `@docs/schemas/agent_verdict_schema.json`。
 
 ## Step 4: 委派 Diagnostician（根因）
 - 让 Diagnostician 输出：Proximal cause / Root cause / 5 Whys / Category
-- **绩效评估**: 任务完成后，写入 `docs/.verdict.json`:
-  ```json
-  {"target_agent": "diagnostician", "win": true, "score_delta": 1, "reason": "Accurate root cause"}
-  ```
+- **绩效评估**: 任务完成后，写入 `docs/.verdict.json`。格式遵循 `@docs/schemas/agent_verdict_schema.json`。
 
 ## Step 5: 委派 Auditor（演绎审计）
 - 让 Auditor 输出：Axiom/System/Via negativa / RESULT: PASS/FAIL
 - 将审计结果写入 docs/AUDIT.md（RESULT 行必须存在）。
-- **绩效评估**: 任务完成后，写入 `docs/.verdict.json`:
-  ```json
-  {"target_agent": "auditor", "win": true, "score_delta": 1, "reason": "Passed safety audit"}
-  ```
+- **绩效评估**: 任务完成后，写入 `docs/.verdict.json`。格式遵循 `@docs/schemas/agent_verdict_schema.json`。
 
 ### 分支处理（必须遵守）
 - 若 RESULT = FAIL：
@@ -56,24 +47,15 @@ allowed-tools: Read, Grep, Glob, Bash, Write, Edit
 ## Step 6: 委派 Planner（电影剧本计划）
 - Planner 输出 Plan（步骤/命令/指标/回滚）。
 - 将计划写入 docs/PLAN.md（STATUS 行必须存在）。
-- **绩效评估**: 任务完成后，写入 `docs/.verdict.json`:
-  ```json
-  {"target_agent": "planner", "win": true, "score_delta": 1, "reason": "Plan is executable"}
-  ```
+- **绩效评估**: 任务完成后，写入 `docs/.verdict.json`。格式遵循 `@docs/schemas/agent_verdict_schema.json`。
 
 ## Step 7: 委派 Implementer（执行）
 - Implementer 只能按 PLAN 执行。任何偏离必须先更新 PLAN。
-- **绩效评估**: 任务完成后，根据验证结果写入 `docs/.verdict.json`:
-  ```json
-  {"target_agent": "implementer", "win": true, "score_delta": 1, "reason": "Implemented as planned"}
-  ```
+- **绩效评估**: 任务完成后，根据验证结果写入 `docs/.verdict.json`。格式遵循 `@docs/schemas/agent_verdict_schema.json`。
 
 ## Step 8: 委派 Reviewer（审查）
 - Reviewer 输出：Critical/Warning/Suggestion。
-- **绩效评估**: 任务完成后，写入 `docs/.verdict.json`:
-  ```json
-  {"target_agent": "reviewer", "win": true, "score_delta": 1, "reason": "Detailed review"}
-  ```
+- **绩效评估**: 任务完成后，写入 `docs/.verdict.json`。格式遵循 `@docs/schemas/agent_verdict_schema.json`。
 
 ### 分支处理
 - 若有 Critical：回到 Step 6 修订计划，最多重试 2 次
@@ -82,18 +64,11 @@ allowed-tools: Read, Grep, Glob, Bash, Write, Edit
 ## Step 9: 反思与落盘
 1. **系统进化**: 将 Pain/Root cause/新原则候选/门禁建议追加到 docs/ISSUE_LOG.md，并更新 docs/DECISIONS.md。
 2. **用户画像更新 (强制)**:
-   - 回顾用户在本任务中的表现（指令质量、领域知识、偏好）。
-   - **必须**写入 `docs/.user_verdict.json` (增量更新):
-   ```json
-   {
-     "updates": [
-       {"domain": "frontend", "delta": 1, "reason": "Provided correct React code"},
-       {"domain": "security", "delta": -1, "reason": "Ignored safety warning"}
-     ],
-     "preferences": {
-       "language": "zh-CN",
-       "verbosity": "detailed"
-     }
-   }
-   ```
+   - 回顾用户在本任务中的表现（指令质量、领域知识、偏好）以及系统的高光时刻。
+   - **必须**写入 `docs/.user_verdict.json` (增量更新)。格式必须严格遵守 `@docs/schemas/user_verdict_schema.json`。
    - 注意：如果用户没有表现出明显特征或偏好，对应字段可为空。
+
+## Step 10: 最终汇报 (Final Briefing)
+- **动作**: 委派 `Task(reporter)` 进行结项陈述。
+- **要求**: 将 Implementer 和 Reviewer 的最终产出作为输入传给它。让它根据 `USER_CONTEXT.md` 决定汇报的深度和风格。
+- **目标**: 确保老板（用户）在不产生认知负荷的前提下，清楚了解任务成果与潜在风险。
