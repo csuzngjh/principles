@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e
 
-# Principles Disciple Installer
-# 将进化智能体架构部署到当前项目
+# Principles Disciple Installer (Smart Version)
+# 将进化智能体架构部署到当前项目，保护已进化的 Prompt 和配置。
 
 # 1. 确定目标目录 (默认为当前目录)
 TARGET_DIR="${1:-$(pwd)}"
@@ -24,44 +24,71 @@ mkdir -p "$TARGET_DIR/.claude/rules"
 mkdir -p "$TARGET_DIR/.claude/templates"
 mkdir -p "$TARGET_DIR/docs/okr"
 
-# 4. 复制核心组件
-echo "📦 Copying components..."
+# --- Utility Functions ---
 
-# Agents
-cp "$SOURCE_DIR/agents/"*.md "$TARGET_DIR/.claude/agents/"
+# 智能拷贝：不覆盖已存在且有变动的文件，而是生成 .update 副本
+smart_copy() {
+    src="$1"
+    dest="$2"
+    if [ ! -f "$dest" ]; then
+        mkdir -p "$(dirname "$dest")"
+        cp "$src" "$dest"
+        echo "  - Created: $dest"
+    else
+        # 检查内容是否一致
+        if ! cmp -s "$src" "$dest"; then
+            cp "$src" "$dest.update"
+            echo "  ⚠️  Conflict: $dest differs from source. New version saved as .update"
+        fi
+    fi
+}
 
-# Skills (递归)
-cp -r "$SOURCE_DIR/skills/"* "$TARGET_DIR/.claude/skills/"
-
-# Hooks (Python Runner + Config)
-cp "$SOURCE_DIR/hooks/hook_runner.py" "$TARGET_DIR/.claude/hooks/"
-# 注意：我们这里使用源码里的 hooks.json 作为 settings 的蓝本，
-# 但需要把路径变量替换掉
-sed 's/${CLAUDE_PLUGIN_ROOT}\/hooks\//.claude\/hooks\//g' "$SOURCE_DIR/hooks/hooks.json" > "$TARGET_DIR/.claude/hooks/hooks.json"
-
-# Rules
-# 源文件现在位于 templates/rules/
-cp "$SOURCE_DIR/templates/rules/"*.md "$TARGET_DIR/.claude/rules/"
-
-# Templates (用于自检恢复)
-# 将核心文件的副本作为模板保存
-cp "$SOURCE_DIR/templates/rules/00-kernel.md" "$TARGET_DIR/.claude/templates/"
-cp "$SOURCE_DIR/docs/PROFILE.json" "$TARGET_DIR/.claude/templates/"
-cp "$SOURCE_DIR/docs/PROFILE.schema.json" "$TARGET_DIR/.claude/templates/"
-
-# 5. 初始化文档 (安全模式：不覆盖)
-echo "📄 Initializing docs..."
-
+# 安全拷贝：存在即跳过 (用于 docs 数据)
 safe_copy() {
     src="$1"
     dest="$2"
     if [ ! -f "$dest" ]; then
+        mkdir -p "$(dirname "$dest")"
         cp "$src" "$dest"
         echo "  - Created: $dest"
     else
-        echo "  - Skipped: $dest (Already exists)"
+        echo "  - Skipped: $dest (User data preserved)"
     fi
 }
+
+# 4. 复制核心组件 (使用 Smart Copy)
+echo "📦 Copying components..."
+
+# Agents
+for f in "$SOURCE_DIR/agents/"*.md; do
+    fname=$(basename "$f")
+    smart_copy "$f" "$TARGET_DIR/.claude/agents/$fname"
+done
+
+# Skills (递归处理所有 SKILL.md)
+cd "$SOURCE_DIR/skills"
+find . -type f -name "*" | while read f; do
+    smart_copy "$SOURCE_DIR/skills/$f" "$TARGET_DIR/.claude/skills/$f"
+done
+cd "$SOURCE_DIR"
+
+# Hooks (Python Runner 总是更新，因为它是系统逻辑)
+cp "$SOURCE_DIR/hooks/hook_runner.py" "$TARGET_DIR/.claude/hooks/"
+sed 's/${CLAUDE_PLUGIN_ROOT}\/hooks\//.claude\/hooks\//g' "$SOURCE_DIR/hooks/hooks.json" > "$TARGET_DIR/.claude/hooks/hooks.json"
+
+# Rules
+for f in "$SOURCE_DIR/templates/rules/"*.md; do
+    fname=$(basename "$f")
+    smart_copy "$f" "$TARGET_DIR/.claude/rules/$fname"
+done
+
+# Templates (始终同步最新模板)
+cp "$SOURCE_DIR/templates/rules/00-kernel.md" "$TARGET_DIR/.claude/templates/"
+cp "$SOURCE_DIR/docs/PROFILE.json" "$TARGET_DIR/.claude/templates/"
+cp "$SOURCE_DIR/docs/PROFILE.schema.json" "$TARGET_DIR/.claude/templates/"
+
+# 5. 初始化文档 (使用 Safe Copy，绝对保护用户数据)
+echo "📄 Initializing docs..."
 
 safe_copy "$SOURCE_DIR/docs/PROFILE.json" "$TARGET_DIR/docs/PROFILE.json"
 safe_copy "$SOURCE_DIR/docs/PROFILE.schema.json" "$TARGET_DIR/docs/PROFILE.schema.json"
@@ -79,7 +106,6 @@ if [ ! -f "$SETTINGS_FILE" ]; then
     echo "{ \"hooks\": {} }" > "$SETTINGS_FILE"
 fi
 
-# 使用 Python 来合并 JSON (避免 jq 依赖问题)
 python3 -c "
 import json
 import os
@@ -92,15 +118,11 @@ with open(target, 'r') as f:
 with open(source, 'r') as f:
     s_data = json.load(f)
 
-# 合并 hooks
 if 'hooks' not in t_data:
     t_data['hooks'] = {}
 
 for event, hooks in s_data.items():
     t_data['hooks'][event] = hooks
-
-# 确保 enabledPlugins 不会冲突 (既然是本地部署，不需要启用插件)
-# t_data.pop('enabledPlugins', None)
 
 with open(target, 'w') as f:
     json.dump(t_data, f, indent=2)
@@ -126,10 +148,9 @@ EOF
 fi
 
 # 8. 生成动态文件
-# 运行一次 sync 脚本以生成 Context 文件 (传入空 JSON 以防 stdin 阻塞)
 export CLAUDE_PROJECT_DIR="$TARGET_DIR"
 echo "{}" | python3 "$TARGET_DIR/.claude/hooks/hook_runner.py" --hook sync_user_context > /dev/null 2>&1 || true
 echo "{}" | python3 "$TARGET_DIR/.claude/hooks/hook_runner.py" --hook sync_agent_context > /dev/null 2>&1 || true
 
-echo "✅ Installation Complete!"
-echo "👉 Run 'claude' to start using your evolutionary agent."
+echo "✅ Smart Installation Complete!"
+echo "👉 If you saw ⚠️  warnings, check .update files and merge manually."

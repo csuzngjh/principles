@@ -99,6 +99,15 @@
 **场景**: 任务结束或子任务结束。
 - **Agent 归因**: 主智能体写 `.verdict.json` -> `SubagentStop` -> 更新 Scorecard -> 更新 `AGENT_CONTEXT.md`。
 - **用户归因**: 主智能体写 `.user_verdict.json` -> `Stop` -> 更新 Profile -> 更新 `USER_CONTEXT.md`。
+- **多巴胺回路**: 如果任务成功且质量高，提取 `achievement` -> 存入成就墙 -> 强化正向行为。
+
+### 🧬 循环六：二阶观察环 (The Meta-Evolution Loop)
+**场景**: 周期性系统体检 (每周或按需)。
+- **Trigger**: 用户运行 `/evolve-system`。
+- **Observe**: 分析 `AGENT_SCORECARD` 胜率和 `ISSUE_LOG` 顽疾。
+- **Diagnose**: 识别低效 Agent (胜率<50%) 或 系统性故障。
+- **Propose**: 生成 `SYSTEM_OPTIMIZATION_PLAN.md` (修改 Prompt/Hook)。
+- **Evolve**: 用户批准后，系统修改自身的源代码，实现基因层面的进化。
 
 ---
 

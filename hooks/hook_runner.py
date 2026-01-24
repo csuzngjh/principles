@@ -286,6 +286,76 @@ def session_init(payload, project_dir):
 
     return 0
 
+def statusline(payload, project_dir):
+    """
+    Generate a custom status line for Claude Code.
+    Display: [Model Context%] [Plan Status] [Audit] [Pain] [Current OKR]
+    """
+    # 1. Parse Payload
+    model = (payload.get("model") or {}).get("display_name") or "?"
+    usage = (payload.get("context_window") or {}).get("used_percentage") or 0
+    try:
+        usage_pct = int(usage * 100) if usage <= 1 else int(usage) # Handle 0.45 vs 45
+    except:
+        usage_pct = 0
+        
+    # Context Color
+    ctx_icon = "🟢"
+    if usage_pct > 80: ctx_icon = "🔴"
+    elif usage_pct > 60: ctx_icon = "🟡"
+    
+    # 2. Plan Status
+    plan_path = os.path.join(project_dir, "docs", "PLAN.md")
+    plan_status = "NoPlan"
+    if os.path.isfile(plan_path):
+        with open(plan_path, "r", encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("STATUS:"):
+                    plan_status = line.split(":", 1)[1].strip()
+                    break
+    
+    # 3. Audit Status
+    audit_path = os.path.join(project_dir, "docs", "AUDIT.md")
+    audit_icon = ""
+    if os.path.isfile(audit_path):
+        with open(audit_path, "r", encoding="utf-8") as f:
+            content = f.read()
+            if "RESULT: PASS" in content: audit_icon = "🛡️✅"
+            elif "RESULT: FAIL" in content: audit_icon = "🛡️❌"
+            
+    # 4. Pain/Issue
+    pain_flag = os.path.join(project_dir, "docs", ".pain_flag")
+    pain_icon = ""
+    if os.path.isfile(pain_flag):
+        pain_icon = "💊"
+        
+    # 5. OKR Focus (New)
+    okr_path = os.path.join(project_dir, "docs", "okr", "CURRENT_FOCUS.md")
+    okr_text = ""
+    if os.path.isfile(okr_path):
+        with open(okr_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+            # Try to find the first KR
+            for line in lines:
+                if line.strip().startswith("- [ ]"):
+                    # Extract text like "Zero TypeScript errors"
+                    okr_text = f"🎯{line.strip()[5:].strip()[:20]}..."
+                    break
+                    
+    # Output Format
+    # [Model 🟢45%] Plan:READY 🛡️✅ 💊 🎯KR...
+    
+    parts = [
+        f"[{model} {ctx_icon}{usage_pct}%]",
+        f"💾{plan_status}",
+    ]
+    if audit_icon: parts.append(audit_icon)
+    if pain_icon: parts.append(pain_icon)
+    if okr_text: parts.append(okr_text)
+    
+    print(" ".join(parts))
+    return 0
+
 def stop_evolution_update(payload, project_dir):
     docs_dir = os.path.join(project_dir, "docs")
     pain_flag = os.path.join(docs_dir, ".pain_flag")
