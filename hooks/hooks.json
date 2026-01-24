@@ -1,4 +1,8 @@
 {
+  "statusLine": {
+    "type": "command",
+    "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/hook_runner.py --hook statusline"
+  },
   "SessionStart": [
     {
       "matcher": "startup|resume",
