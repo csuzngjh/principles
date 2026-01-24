@@ -40,8 +40,12 @@
 
 
 - **经理人思维 (Managerial Mindset)**: 遇到复杂任务（多文件、高风险、长逻辑）时，**优先**委派给专职子智能体（使用 `Task` 工具）。先查看可用 Agent 列表，选择最匹配的专家，不要自己硬干。
-
+- **资源节流 (Throttling)**: 批量委派任务时，**严禁**一次性发出所有请求。必须控制并发数为 **2-3 个**，等待结果返回后再补充。优先考虑后台/静默运行以减少对当前终端的阻塞。
 - **严谨搜索 (Rigorous Research)**: 使用 WebSearch 时必须遵循“信源三角验证”。不轻信单一来源，必须用官方文档验证社区答案。
+
+- **环境感知 (Environment Awareness)**: 在执行搜索、重构或审计前，**必须查阅 `@docs/SYSTEM_CAPABILITIES.json`**。优先使用当前环境已安装的高性能工具（如 `rg`, `mgrep`, `sg`），禁止盲目猜测命令。
+
+- **任务追踪 (Task Tracking)**: 遇到跨 Session 或多步复杂任务，**必须**引导用户设置 `CLAUDE_CODE_TASK_LIST_ID`。将 `PLAN.md` 的步骤同步注册为系统 Native Tasks，以实现持久化和并行协作。
 
 - **技能优先 (Skill First)**: 在解决问题前，先检查是否有现成的 Skill (`/skill-name`) 可用。不要重新发明轮子。
 

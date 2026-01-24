@@ -47,6 +47,9 @@ allowed-tools: Read, Grep, Glob, Bash, Write, Edit
 ## Step 6: 委派 Planner（电影剧本计划）
 - Planner 输出 Plan（步骤/命令/指标/回滚）。
 - 将计划写入 docs/PLAN.md（STATUS 行必须存在）。
+- **任务同步 (Task Sync)**: 
+  - 如果 `CLAUDE_CODE_TASK_LIST_ID` 已设置，你必须将上述 Plan 的核心步骤直接转化为 Native Tasks（通过自然语言指令"Add task..."或相关工具）。
+  - 如果未设置，提示用户："建议运行 `export CLAUDE_CODE_TASK_LIST_ID=task-$(date +%s)` 以启用持久化任务追踪。"
 - **绩效评估**: 任务完成后，写入 `docs/.verdict.json`。格式遵循 `@docs/schemas/agent_verdict_schema.json`。
 
 ## Step 7: 委派 Implementer（执行）

@@ -17,6 +17,7 @@ allowed-tools: Bash, Write, Read, Glob
 **动作**: 检查“毛坯房”架构的完整性。
 - **核心组件**: 检查 `.claude/hooks/hook_runner.py` 是否存在且可执行。
 - **文档完整性**: 检查 `docs/PROFILE.json`, `docs/PLAN.md` 等是否存在。
+- **工具感知**: 检查 `docs/SYSTEM_CAPABILITIES.json`。若缺失，提示用户："⚠️ 尚未进行工具链升级。建议运行 `/bootstrap-tools` 以大幅提升系统能力。"
 - **记忆挂载**: 检查 `CLAUDE.md` 是否包含 `System Integration` 章节。
 - **输出**: 生成一份健康报告，列出缺失或异常的项目。
 

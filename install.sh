@@ -162,6 +162,7 @@ if ! grep -q "System Integration (Principles Disciple)" "$CLAUDE_MD"; then
 - User Awareness: @docs/USER_CONTEXT.md
 - Agent Performance: @docs/AGENT_CONTEXT.md
 - Strategic Focus: @docs/okr/CURRENT_FOCUS.md
+- System Capabilities: @docs/SYSTEM_CAPABILITIES.json
 - Principles: @docs/PRINCIPLES.md
 - Active Plan: @docs/PLAN.md
 EOF
