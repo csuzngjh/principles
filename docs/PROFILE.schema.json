@@ -40,17 +40,27 @@
     "permissions": {
       "type": "object",
       "properties": {
-        "deny_skip_tests": { "type": "boolean", "default": true },
-        "deny_unsafe_db_ops": { "type": "boolean", "default": true }
+        "deny_skip_tests": { "type": "boolean" },
+        "deny_unsafe_db_ops": { "type": "boolean" }
       }
     },
-    "output": {
-      "type": "object",
-      "properties": {
-        "verbosity": { "type": "string", "enum": ["concise", "balanced", "detailed"], "default": "balanced" },
-        "show_evidence": { "type": "boolean", "default": true }
+    "custom_guards": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "pattern": { "type": "string", "description": "Regex pattern to match tool and path, e.g., 'Edit.*SYSTEM_CAPABILITIES'" },
+          "message": { "type": "string", "description": "Warning message to display when blocked." },
+          "severity": {
+            "type": "string",
+            "enum": ["error", "warning"],
+            "default": "error",
+            "description": "Block execution (error) or just display message (warning)."
+          }
+        },
+        "required": ["pattern", "message"]
       }
     }
   },
-  "required": ["risk_paths", "gate", "tests"]
+  "required": ["audit_level", "risk_paths", "gate"]
 }

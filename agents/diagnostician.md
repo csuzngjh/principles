@@ -1,7 +1,7 @@
 ---
 name: diagnostician
 description: Root cause analysis using verb/adjective + 5Whys + People/Design/Assumption.
-tools: Read, Grep
+tools: Read, Grep, Glob, Bash
 model: sonnet
 permissionMode: plan
 ---

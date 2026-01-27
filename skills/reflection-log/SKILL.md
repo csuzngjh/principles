@@ -18,7 +18,9 @@ disable-model-invocation: true
 
 ## 3. Evolution Candidates
 - **Principle**: 提议一条新原则（P-XX）。
-- **Guardrail**: 建议一个具体的 Hook、Rule 或 Test。**必须**输出可执行的配置建议（例如：将 `xxx` 路径加入 `risk_paths` 或在 `danger_op_guard.sh` 中增加对 `yyy` 命令的匹配）。
+- **Guardrail**: 建议一个具体的 Hook、Rule 或 Test。
+  - **路径拦截**: 建议将敏感目录加入 `docs/PROFILE.json` 的 `risk_paths`。
+  - **行为拦截**: 建议在 `docs/PROFILE.json` 的 `custom_guards` 中添加正则，以拦截特定工具的危险调用（如 `Edit.*SYSTEM`）。
 
 ## 4. Positive Reinforcement (正向强化)
 - **检查卓越信号**: 

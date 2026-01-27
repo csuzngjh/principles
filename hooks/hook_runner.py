@@ -8,9 +8,15 @@ import posixpath
 import re
 import shutil
 import subprocess
-import sys
 import traceback
+import sys
 from pathlib import PurePosixPath, PureWindowsPath
+
+# --- Encoding Fix for Windows ---
+if sys.platform == "win32":
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 # --- Telemetry & Logging Setup ---
 # 设置日志文件路径
@@ -204,21 +210,54 @@ def post_write_checks(payload, project_dir):
         return 0
 
     rc = _run_command(cmd)
-    if rc == 0:
-        return 0
+    
+    # --- Pain Escalation: Death Spiral Detection ---
+    spiral_warning = ""
+    is_spiral = False
+    try:
+        # Check last 5 commits for "fix" patterns
+        if os.path.exists(os.path.join(project_dir, ".git")):
+            git_log = subprocess.check_output(
+                ["git", "-C", project_dir, "log", "--oneline", "-n", "5"], 
+                text=True, stderr=subprocess.DEVNULL
+            ).lower()
+            
+            fix_count = 0
+            for keyword in ["fix", "fail", "error", "repair", "patch", "revert"]:
+                fix_count += git_log.count(keyword)
+            
+            if fix_count >= 3:
+                is_spiral = True
+                spiral_warning = f"\n💀 DEATH SPIRAL DETECTED: {fix_count} recent fixes found. STOP CODING. THINK."
+    except Exception:
+        pass
 
-    pain_flag = os.path.join(project_dir, "docs", ".pain_flag")
-    with open(pain_flag, "w", encoding="utf-8") as handle:
-        handle.write(f"time: {_dt.datetime.now().isoformat()}\n")
-        handle.write(f"tool: {tool}\n")
-        handle.write(f"file_path: {file_path}\n")
-        handle.write(f"risk: {str(risky).lower()}\n")
-        handle.write(f"test_level: {level}\n")
-        handle.write(f"command: {cmd}\n")
-        handle.write(f"exit_code: {rc}\n")
+    if rc != 0 or is_spiral:
+        pain_flag = os.path.join(project_dir, "docs", ".pain_flag")
+        
+        # If it's a spiral, we flag it even if rc==0 (sometimes commits succeed but are useless)
+        # But here we only flag if rc!=0 OR spiral is detected during a check failure.
+        # Actually, let's allow spiral to trigger pain even if this specific check passed?
+        # No, post_write_checks usually runs tests. If tests pass, maybe we are out of the spiral.
+        # So we only escalate if rc!=0.
+        
+        if rc != 0:
+            with open(pain_flag, "w", encoding="utf-8") as handle:
+                handle.write(f"time: {_dt.datetime.now().isoformat()}\n")
+                handle.write(f"tool: {tool}\n")
+                handle.write(f"file_path: {file_path}\n")
+                handle.write(f"risk: {str(risky).lower()}\n")
+                handle.write(f"test_level: {level}\n")
+                handle.write(f"command: {cmd}\n")
+                handle.write(f"exit_code: {rc}\n")
+                if is_spiral:
+                    handle.write(f"severity: CRITICAL\n")
+                    handle.write(f"diagnosis: POTENTIAL DEATH SPIRAL\n")
 
-    print(f"Post-write checks failed (rc={rc}). Pain flag written to docs/.pain_flag", file=sys.stderr)
-    return rc
+            print(f"❌ Post-write checks failed (rc={rc}). Pain flag written.{spiral_warning}", file=sys.stderr)
+            return rc
+
+    return 0
 
 def session_init(payload, project_dir):
     profile, _ = load_profile(project_dir)
@@ -668,6 +707,7 @@ def shellcheck_guard(payload, project_dir):
 
 def pre_write_gate(payload, project_dir):
     tool = payload.get("tool_name") or ""
+    # 我们只对具有修改能力的工具进行门禁检查
     if tool not in ("Write", "Edit"):
         return 0
 
@@ -678,6 +718,32 @@ def pre_write_gate(payload, project_dir):
 
     file_path = (payload.get("tool_input") or {}).get("file_path") or ""
     rel = normalize_path(file_path, project_dir) if file_path else ""
+    
+    # --- 1. 动态自定义钩子检查 (Dynamic Custom Guards) ---
+    # 允许系统通过修改 PROFILE.json 实现自我进化
+    custom_guards = profile.get("custom_guards", [])
+    if custom_guards:
+        test_str = f"{tool} {rel}"
+        for guard in custom_guards:
+            pattern = guard.get("pattern")
+            message = guard.get("message")
+            severity = guard.get("severity", "error") # Default to blocking
+            
+            if pattern and message:
+                try:
+                    if re.search(pattern, test_str, re.IGNORECASE):
+                        prefix = "⛔ Blocked" if severity == "error" else "⚠️ Warning"
+                        print(f"{prefix} by Evolutionary Guardrail:", file=sys.stderr)
+                        print(f"Reason: {message}", file=sys.stderr)
+                        
+                        if severity == "error":
+                            print(f"Pattern Matched: {pattern}", file=sys.stderr)
+                            return 2
+                        # If warning, just continue loop (or return 0? No, checking other guards)
+                except re.error as e:
+                    logging.error(f"Invalid regex in custom_guards: {pattern} - {e}")
+
+    # --- 2. 传统风险路径检查 ---
     risk_paths = profile.get("risk_paths") or []
     risky = is_risky(rel, risk_paths) if file_path else True
 

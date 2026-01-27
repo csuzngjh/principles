@@ -187,7 +187,21 @@ export CLAUDE_PROJECT_DIR="$TARGET_DIR"
 echo "{}" | python3 "$TARGET_DIR/.claude/hooks/hook_runner.py" --hook sync_user_context > /dev/null 2>&1 || true
 echo "{}" | python3 "$TARGET_DIR/.claude/hooks/hook_runner.py" --hook sync_agent_context > /dev/null 2>&1 || true
 
-# 9. 资产保护声明 (原地加固)
+# 9. 部署辅助脚本 (Feedback & Update)
+echo "🛠️  Deploying utility scripts..."
+mkdir -p "$TARGET_DIR/scripts"
+cp "$SOURCE_DIR/scripts/update_agent_framework.sh" "$TARGET_DIR/scripts/"
+
+# 注入源仓库路径
+# 使用 | 作为分隔符避免路径中的 / 冲突
+if [[ "$OSTYPE" == "darwin"* ]]; then
+  sed -i '' "s|SOURCE_REPO=.*|SOURCE_REPO=\"$SOURCE_DIR\"|g" "$TARGET_DIR/scripts/update_agent_framework.sh"
+else
+  sed -i "s|SOURCE_REPO=.*|SOURCE_REPO=\"$SOURCE_DIR\"|g" "$TARGET_DIR/scripts/update_agent_framework.sh"
+fi
+chmod +x "$TARGET_DIR/scripts/update_agent_framework.sh"
+
+# 10. 资产保护声明 (原地加固)
 echo "🛡️  Protecting system assets..."
 CATALOG_FILE="$TARGET_DIR/docs/.memory-index.md"
 cat <<EOF > "$CATALOG_FILE"

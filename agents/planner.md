@@ -1,7 +1,7 @@
 ---
 name: planner
 description: Produce a film-script plan with steps, metrics, and rollback. Use before any edits.
-tools: Read
+tools: Read, Glob, Bash
 model: sonnet
 permissionMode: plan
 ---

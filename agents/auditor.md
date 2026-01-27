@@ -1,7 +1,7 @@
 ---
 name: auditor
 description: Deductive audit (axiom/system/via-negativa). Block unsafe plans; require must-fix list.
-tools: Read, Grep
+tools: Read, Grep, Glob, Bash
 model: sonnet
 permissionMode: plan
 ---

@@ -43,6 +43,7 @@
 - **资源节流 (Throttling)**: 批量委派任务时，**严禁**一次性发出所有请求。必须控制并发数为 **2-3 个**，等待结果返回后再补充。优先考虑后台/静默运行以减少对当前终端的阻塞。
 - **严谨搜索 (Rigorous Research)**: 使用 WebSearch 时必须遵循“信源三角验证”。不轻信单一来源，必须用官方文档验证社区答案。
 
+- **进化边界 (Evolution Boundary)**: 当你需要新增 Hook 或修改配置时，**必须**优先修改项目级配置文件。对于特定的工具拦截或行为约束，请在 `docs/PROFILE.json` 的 `custom_guards` 数组中添加正则匹配规则，**严禁**直接修改用户全局或项目级的 `settings.json` 文件。
 - **环境感知 (Environment Awareness)**: 在执行搜索、重构或审计前，**必须查阅 `@docs/SYSTEM_CAPABILITIES.json`**。优先使用当前环境已安装的高性能工具（如 `rg`, `mgrep`, `sg`），禁止盲目猜测命令。
 
 - **任务追踪 (Task Tracking)**: 遇到跨 Session 或多步复杂任务，**必须**引导用户设置 `CLAUDE_CODE_TASK_LIST_ID`。将 `PLAN.md` 的步骤同步注册为系统 Native Tasks，以实现持久化和并行协作。

@@ -1,86 +1,92 @@
-# Principles & Evolutionary Agent Framework
+# Principles Disciple: Evolutionary Agent Framework (v2.5)
 
-## Project Overview
-This repository contains the configuration, rules, and scripts for an "Evolutionary Programming Agent" framework. The system is designed to create a stable, self-correcting development loop that learns from mistakes ("Pain Signals") by converting them into permanent rules and guardrails.
+## 1. Project Identity
+**Principles Disciple** is no longer just a plugin; it is a **Scaffold & Installer Toolkit** that transforms any Claude Code project into a self-evolving, principle-driven digital lifeform. It replaces default behaviors with a rigorous loop of Strategy, Execution, Reflection, and Evolution.
 
 **Core Philosophy:**
-- **Evolution:** Negative feedback (Pain) -> Issue Log -> Principle -> Guardrail (Rule/Hook/Test).
-- **Anti-Sycophancy:** Hard constraints and audits override user requests if they violate safety or principles.
-- **Deductive Audit:** Rigorous checks must be performed before execution.
-- **Credibility Weighted:** Decisions are influenced by the historical reliability of the user and sub-agents.
+- **System Dynamics**: Optimizes for leveraged evolution (Information Flow, Rules, Self-Organization).
+- **Anti-Sycophancy**: Enforces principles over user whims via strict gates and audits.
+- **Evidence-Driven**: Decisions must be backed by logs, metrics, or tests (Clinical Trials).
+- **Tool Empowerment**: Proactively detects environment capabilities (`ripgrep`, `ast-grep`) to empower agents.
 
-## Key Components
+---
 
-### 1. Rules (`.claude/rules/`)
-Defines the agent's behavior and constraints.
-- **`00-kernel.md`**: The invariant core logic (Goal → Problem → Diagnosis → Audit → Plan → Execute → Review → Log).
-- **`10-guardrails.md`**: Runtime restrictions derived from principles.
+## 2. Architecture: The "Scaffold" Model
 
-### 2. Skills (`.claude/skills/`)
-Specialized capabilities invokable by the agent.
-- **`/evolve-task`**: The main entry point enforcing the rigid Triage → Plan → Execute loop.
-- **`/triage`**: Initial problem definition.
-- **`/root-cause`**: Deep dive analysis (5 Whys, Proximal/Root causes).
-- **`/deductive-audit`**: Pre-plan verification (Axiom, System, Via Negativa tests).
-- **`/plan-script`**: Generates step-by-step execution plans.
+### Deployment
+- **`install.sh`**: The core delivery vehicle.
+    - **Smart Copy**: Preserves user-evolved prompts (saving updates as `*.update`).
+    - **Safe Copy**: Protects critical data (`docs/`).
+    - **Path Fix**: Injects absolute paths into `settings.json` for WSL/Windows compatibility.
+- **Self-Update**: Target projects can pull upstream changes via `scripts/update_agent_framework.sh`.
 
-### 3. Hooks (`.claude/hooks/`)
-Shell scripts triggered by agent actions (tool use, session events) to enforce safety.
-- **`pre_write_gate.sh`**: Prevents writes to configured `risk_paths` without a valid `docs/PLAN.md` and a passing `docs/AUDIT.md`.
-- **`post_write_checks.sh`**: Automatically runs tests after changes.
-- **`stop_evolution_update.sh`**: Updates profiles and logs issues upon session end.
+### Key Directories (Flattened Structure)
+- **`hooks/hook_runner.py`**: The central nervous system (Python-based). Handles all events, telemetry (`SYSTEM.log`), and dynamic guardrails.
+- **`agents/`**: Specialized sub-agents (`Explorer`, `Diagnostician`, `Auditor`, `Planner`, `Implementer`, `Reviewer`, `Reporter`). **Unlocked**: All have `Glob` and `Bash` permissions.
+- **`skills/`**: High-level capabilities (Strategy, OKR, Evolution, Feedback).
+- **`docs/`**: The system's memory and configuration.
+    - **`schemas/`**: JSON Schemas for data contracts (`user_verdict`, `agent_verdict`).
+    - **`system/`** (Virtual): Core config files are protected via `.memory-index.md`.
 
-### 4. Documentation & Memory (`docs/`)
-- **`PRINCIPLES.md`**: The source of truth for all engineering principles.
-- **`ISSUE_LOG.md`**: Record of all "Pain Signals" and their root causes.
-- **`PROFILE.json`**: Runtime configuration (risk paths, audit levels, permissions).
-- **`USER_PROFILE.json`** & **`AGENT_SCORECARD.json`**: Tracks credibility scores for the user and sub-agents.
-- **`PLAN.md`** & **`AUDIT.md`**: Marker files used by the gate hooks to track state.
+---
 
-## Usage & Workflows
+## 3. The 6 Evolutionary Loops
 
-### Standard Workflow
-1.  **Start Task:** Agent receives a complex request.
-2.  **Triage & Plan:** Agent uses `/evolve-task` or manually invokes `/triage` -> `/root-cause` -> `/deductive-audit`.
-3.  **Gate Check:** Before modifying code in risky areas (e.g., `src/server/`, `infra/`), the `pre_write_gate.sh` hook checks for:
-    - Existence of `docs/PLAN.md` (Status: READY).
-    - `docs/AUDIT.md` with `RESULT: PASS`.
-4.  **Execute:** Agent modifies code using `Write` or `Edit` tools.
-5.  **Verify:** `post_write_checks.sh` runs configured tests immediately after writing.
-6.  **Reflect:** If failure occurs, it is logged as a "Pain Signal" in `docs/ISSUE_LOG.md` via `stop_evolution_update.sh`.
+### 🔄 1. The Gatekeeper Loop (Safety)
+- **Mechanism**: `pre_write_gate` (Hook).
+- **Logic**: Blocks modifications to `risk_paths` unless `PLAN.md` is `READY` and `AUDIT.md` is `PASS`.
+- **Dynamic**: Supports regex-based `custom_guards` defined in `PROFILE.json`.
 
-### Running Tests
-To verify the integrity of the hooks and gate logic:
+### 🧠 2. The Reflection Loop (Pain)
+- **Mechanism**: `post_write_checks` -> `.pain_flag` -> `/reflection-log`.
+- **Logic**: Runtime failures triggers immediate reflection, generating new Principles or Guardrails.
 
-```bash
-# Run the hook unit tests
-bash tests/test_hooks.sh
+### 🎯 3. The Strategy Loop (Goal)
+- **Mechanism**: `/init-strategy` -> `/manage-okr`.
+- **Logic**: Align project Strategy -> Agent OKRs -> User OKRs (`docs/okr/user.md`).
+- **Feature**: Supports "User Commitment" to prevent scope creep.
 
-# Debug the gate manually (simulates a tool call)
-bash debug_gate.sh
-```
+### 💖 4. The Positive Reinforcement Loop (Dopamine)
+- **Mechanism**: `/reflection-log` (Positive) -> `Achievement Wall`.
+- **Logic**: Success patterns are recorded in `USER_PROFILE` and displayed in `USER_CONTEXT` to reinforce excellence.
 
-## Configuration
+### 🧬 5. The Meta-Evolution Loop (Self-Correction)
+- **Mechanism**: `/evolve-system` (The Architect).
+- **Logic**: Analyzes `AGENT_SCORECARD` win rates.
+    - **Clinical Trial**: Automatically runs `Task()` to verify agent defects.
+    - **Proposal**: Suggests modifying `.claude/` source code (Prompt/Hook).
 
-### `docs/PROFILE.json`
-Controls the behavior of the safety gates.
-```json
-{
-  "risk_paths": ["src/server/", "infra/", "db/"],
-  "gate": {
-    "require_plan_for_risk_paths": true,
-    "require_audit_before_write": true
-  }
-}
-```
+### 👁️ 6. The Perception Loop (Environment)
+- **Mechanism**: `/bootstrap-tools`.
+- **Logic**: Scans environment (npm, pip, cargo) -> Recommends Tools (rg, sg) -> Installs -> Broadcasts capabilities to all Agents via `SYSTEM_CAPABILITIES.json`.
 
-## Principles Format
-When adding new principles to `docs/PRINCIPLES.md`, strictly follow this format:
-```markdown
-### P-XX: <One-line principle>
-- Trigger: <When to trigger>
-- Constraint (Must/Forbidden): <What must/must not happen>
-- Verification: <How to verify>
-- Exceptions: <Exceptions>
-- Source: <Issue Log #XX / Date / Reference>
-```
+---
+
+## 4. Key Features & Tools
+
+### Human Console
+- **`/bootstrap-tools`**: Auto-detect and install high-performance CLI tools.
+- **`/system-status`**: (Via `statusline`) Real-time dashboard in terminal: `[Model 🟢] 💾Plan:READY 🛡️✅ 💊Pain 🎯OKR:Fix...`.
+- **`/report`**: Executive summary by the `Reporter` agent (tailored to user expertise).
+- **`/feedback`**: Standardized bug reporting, auto-delivered to source repo.
+
+### Engineering Standards
+- **Throttling**: Concurrency limit (2-3 tasks) to prevent resource exhaustion.
+- **Entropy Audit**: `Auditor` checks for minimalism and necessity (Occam's Razor).
+- **Native Tasks**: Integration with Claude Code Tasks (`CLAUDE_CODE_TASK_LIST_ID`) for parallel collaboration.
+
+---
+
+## 5. Development Protocols
+
+### Contributing
+1.  **Modify Source**: Edit files in `D:\Code\principles`.
+2.  **Sync**: Run `bash install.sh /path/to/target --force`.
+3.  **Verify**: Check `statusline` and run `/admin diagnose` in target.
+
+### Data Contracts
+- **`docs/schemas/*.json`**: All inter-agent data exchange (verdicts, profiles) must validate against these schemas.
+
+### Critical Paths
+- **`hooks/hook_runner.py`**: Do not break the `statusline` or `pre_write_gate` logic.
+- **`install.sh`**: Ensure `smart_copy` logic preserves user data while updating system logic.

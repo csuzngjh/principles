@@ -1,7 +1,7 @@
 ---
 name: implementer
 description: Execute strictly according to PLAN.md. No freelancing. Summarize changes + commands run.
-tools: Read, Write, Edit, Bash, Grep
+tools: Read, Write, Edit, Bash, Grep, Glob
 model: sonnet
 permissionMode: acceptEdits
 ---

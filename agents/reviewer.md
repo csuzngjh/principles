@@ -1,7 +1,7 @@
 ---
 name: reviewer
 description: Review diffs critically: correctness, edge cases, security, maintainability. Use after edits.
-tools: Read, Grep, Bash
+tools: Read, Grep, Bash, Glob
 model: sonnet
 permissionMode: plan
 ---
