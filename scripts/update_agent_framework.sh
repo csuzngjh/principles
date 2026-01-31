@@ -2,7 +2,7 @@
 # Self-Update Script for Principles Disciple
 # 由 install.sh 自动生成，包含源仓库路径。
 
-SOURCE_REPO="/mnt/d/Code/principles" # Placeholder, will be replaced by install.sh
+SOURCE_REPO="/mnt/d/Code/principles" # Placeholder
 
 echo "🔄 Principles Disciple Self-Updater"
 echo "-----------------------------------"
@@ -23,16 +23,18 @@ bash "$SOURCE_REPO/install.sh" "$(pwd)"
 UPDATES=$(find .claude -name "*.update")
 
 if [ -n "$UPDATES" ]; then
-    echo ''
-    echo '[WARNING] Updates found with conflicts (User customizations detected).'
-    echo ''
-    echo '[SUGGESTION] AUTOMATION SUGGESTION:'
-    echo 'Copy and paste the following prompt to Claude to handle the merge:'
+    echo ""
+    echo "⚠️  Updates found with conflicts (User customizations detected)."
+    echo ""
+    echo "🤖 AUTOMATION SUGGESTION:"
+    echo "Copy and paste the following prompt to Claude to handle the merge:"
     echo "------------------------------------------------------------------"
     echo "I see .update files in .claude/. Please read the following files and their .update versions:"
     echo "$UPDATES"
     echo ""
-    echo "Task: Compare and merge them. Keep my local customizations (like specific tools or rules), but accept upstream improvements (like bug fixes or new capabilities). After merging, delete the .update files."
+    cat <<EOF
+Task: Compare and merge them. Keep my local customizations (like specific tools or rules), but accept upstream improvements (like bug fixes or new capabilities). After merging, delete the .update files.
+EOF
     echo "------------------------------------------------------------------"
 else
     echo "✅ Update complete. No conflicts."

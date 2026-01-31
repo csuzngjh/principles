@@ -162,15 +162,25 @@ else
   sed -i "s|python3 .claude/hooks|python3 $ABS_TARGET_DIR/.claude/hooks|g" "$SETTINGS_FILE"
 fi
 
-# 8. 更新 CLAUDE.md
+# 8. 更新 CLAUDE.md (Smart Update)
 echo "🧠 Updating memory..."
 CLAUDE_MD="$TARGET_DIR/CLAUDE.md"
-if [ ! -f "$CLAUDE_MD" ]; then
-    echo "# Project Memory" > "$CLAUDE_MD"
-fi
 
-if ! grep -q "System Integration (Principles Disciple)" "$CLAUDE_MD"; then
-    cat <<EOF >> "$CLAUDE_MD"
+if [ "$FORCE_MODE" = true ]; then
+    cp "$SOURCE_DIR/CLAUDE.md" "$CLAUDE_MD"
+    echo "  - Updated: $CLAUDE_MD (Forced)"
+else
+    if [ ! -f "$CLAUDE_MD" ]; then
+        cp "$SOURCE_DIR/CLAUDE.md" "$CLAUDE_MD"
+        echo "  - Created: $CLAUDE_MD"
+    else
+        # 总是生成 .new 版本供用户对比
+        cp "$SOURCE_DIR/CLAUDE.md" "$CLAUDE_MD.new"
+        echo "  - Generated: $CLAUDE_MD.new (Review and replace manually if needed)"
+        
+        # 依然保留旧的追加逻辑作为保底（如果用户完全没用过我们的框架）
+        if ! grep -q "System Integration" "$CLAUDE_MD"; then
+             cat <<EOF >> "$CLAUDE_MD"
 
 ## System Integration (Principles Disciple)
 - User Awareness: @docs/USER_CONTEXT.md
@@ -179,7 +189,10 @@ if ! grep -q "System Integration (Principles Disciple)" "$CLAUDE_MD"; then
 - System Capabilities: @docs/SYSTEM_CAPABILITIES.json
 - Principles: @docs/PRINCIPLES.md
 - Active Plan: @docs/PLAN.md
+- Evolution Queue: @docs/EVOLUTION_QUEUE.json
 EOF
+        fi
+    fi
 fi
 
 # 8. 生成动态文件
@@ -191,6 +204,7 @@ echo "{}" | python3 "$TARGET_DIR/.claude/hooks/hook_runner.py" --hook sync_agent
 echo "🛠️  Deploying utility scripts..."
 mkdir -p "$TARGET_DIR/scripts"
 cp "$SOURCE_DIR/scripts/update_agent_framework.sh" "$TARGET_DIR/scripts/"
+cp "$SOURCE_DIR/scripts/evolution_daemon.py" "$TARGET_DIR/scripts/"  # Deploy Daemon
 
 # 注入源仓库路径
 # 使用 | 作为分隔符避免路径中的 / 冲突
