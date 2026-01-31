@@ -8,6 +8,21 @@ This is the project's primary memory file. It contains project-specific instruct
 - Strategic Focus: @docs/okr/CURRENT_FOCUS.md
 - Principles: @docs/PRINCIPLES.md
 - Active Plan: @docs/PLAN.md
+- Evolution Queue: @docs/EVOLUTION_QUEUE.json
+
+## Orchestrator Mode (Default)
+**You are the Architect, not just the Builder.**
+- **L2 Delegation**: For complex tasks (>2 files), generating a `PLAN.md` and delegating to Sub-agents is **MANDATORY**.
+- **Map-First**: Read `codemaps/` (e.g., `architecture.md`) before searching.
+- **Verification**: No code without a verification plan.
+
+## Skill Triggers (Skill-First Protocol)
+Use these skills instead of general knowledge whenever applicable:
+- **Diagnose/Debug** -> `/root-cause`
+- **Reflect/Log** -> `/reflection-log`
+- **Optimize System** -> `/evolve-system`
+- **Background Tasks** -> `/watch-evolution` (Daemon)
+- **Strategy/Goals** -> `/init-strategy`, `/manage-okr`
 
 ## Strategic Management
 Use these tools to align the system with long-term goals:
@@ -17,6 +32,6 @@ Use these tools to align the system with long-term goals:
 
 
 ## Core Guidance
-- Follow the sequence: Goal -> Problem -> Diagnosis -> Audit -> Plan -> Execute -> Review -> Log.
+- Follow the sequence: Goal -> Map -> Plan -> Delegate -> Review -> Verify ->Log.
 - Refer to `docs/USER_CONTEXT.md` to understand user's expertise level and adjust your "Anti-Sycophancy" stance accordingly.
 - If the user provides a directive in a domain where their expertise is "Low", prioritize established best practices and perform a rigorous "Deductive Audit".

@@ -22,6 +22,33 @@ if sys.platform == "win32":
 # 设置日志文件路径
 PROJECT_ROOT = os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
 LOG_FILE = os.path.join(PROJECT_ROOT, "docs", "SYSTEM.log")
+QUEUE_FILE = os.path.join(PROJECT_ROOT, "docs", "EVOLUTION_QUEUE.json")
+
+def enqueue_evolution_task(task_type, details, project_dir):
+    """将进化工单推入队列"""
+    try:
+        queue = []
+        if os.path.isfile(QUEUE_FILE):
+            with open(QUEUE_FILE, "r", encoding="utf-8") as f:
+                queue = json.load(f)
+        
+        task_id = f"evt-{_dt.datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        new_task = {
+            "id": task_id,
+            "timestamp": _dt.datetime.now().isoformat(),
+            "type": task_type,
+            "details": details,
+            "status": "pending",
+            "retry_count": 0
+        }
+        queue.append(new_task)
+        
+        with open(QUEUE_FILE, "w", encoding="utf-8") as f:
+            json.dump(queue, f, ensure_ascii=False, indent=2)
+        return task_id
+    except Exception as e:
+        logging.error(f"Failed to enqueue task: {e}")
+        return None
 
 # 简单的日志配置
 logging.basicConfig(
@@ -233,6 +260,24 @@ def post_write_checks(payload, project_dir):
         pass
 
     if rc != 0 or is_spiral:
+        evolution_mode = profile.get("evolution_mode") or "realtime"
+        
+        # 如果是异步模式，入队后返回 0，不阻塞用户
+        if evolution_mode == "async":
+            details = {
+                "tool": tool,
+                "file_path": file_path,
+                "exit_code": rc,
+                "command": cmd,
+                "is_spiral": is_spiral
+            }
+            task_id = enqueue_evolution_task("test_failure", details, project_dir)
+            if rc != 0:
+                print(f"⚠️  Post-write checks failed (rc={rc}). Issue queued (ID: {task_id}).", file=sys.stderr)
+            if is_spiral:
+                print(f"💀 DEATH SPIRAL DETECTED. Queued for background analysis.", file=sys.stderr)
+            return 0
+
         pain_flag = os.path.join(project_dir, "docs", ".pain_flag")
         
         # If it's a spiral, we flag it even if rc==0 (sometimes commits succeed but are useless)
@@ -268,7 +313,20 @@ def session_init(payload, project_dir):
 
     print("[INFO] Evolutionary Programming Agent Initialized")
 
-    # 1. 优先检查反思要求 (Ported from Bash)
+    evolution_mode = (profile or {}).get("evolution_mode") or "realtime"
+
+    # 1. 检查异步队列状态
+    if os.path.isfile(QUEUE_FILE):
+        try:
+            with open(QUEUE_FILE, "r", encoding="utf-8") as f:
+                queue = json.load(f)
+            pending = [t for t in queue if t["status"] == "pending"]
+            if pending:
+                print(f"[INFO] 🚀 {len(pending)} tasks in evolution queue. Run /watch-evolution to start worker.")
+        except:
+            pass
+
+    # 2. 优先检查反思要求
     if os.path.isfile(pending_reflection):
         try:
             with open(pending_reflection, "r", encoding="utf-8") as f:
@@ -286,10 +344,10 @@ def session_init(payload, project_dir):
     if profile:
         audit_level = profile.get("audit_level") or "medium"
         risk_paths = profile.get("risk_paths") or []
-        print(f"  - Audit Level: {audit_level}")
+        print(f"  - Mode: {evolution_mode} | Audit: {audit_level}")
         print(f"  - Risk Paths: {json.dumps(risk_paths, ensure_ascii=False)}")
 
-    if os.path.isfile(pain_flag):
+    if os.path.isfile(pain_flag) and evolution_mode != "async":
         print("")
         print("[WARNING] Unresolved pain flag detected from last session.")
         print("Summary:")
