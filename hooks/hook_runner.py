@@ -535,7 +535,7 @@ def stop_evolution_update(payload, project_dir):
     return 0
 
 def sync_user_context(payload, project_dir):
-    """同步 USER_PROFILE.json 到 USER_CONTEXT.md"""
+    """同步 USER_PROFILE.json 到 USER_CONTEXT.md (支持保留手动笔记)"""
     user_profile = os.path.join(project_dir, "docs", "USER_PROFILE.json")
     user_context = os.path.join(project_dir, "docs", "USER_CONTEXT.md")
     
@@ -543,29 +543,37 @@ def sync_user_context(payload, project_dir):
         return 0
         
     try:
+        # 1. 读取旧文件中的手动部分
+        manual_content = ""
+        manual_marker = "<!-- MANUAL_START -->"
+        if os.path.isfile(user_context):
+            with open(user_context, "r", encoding="utf-8") as f:
+                content = f.read()
+                if manual_marker in content:
+                    manual_content = content.split(manual_marker)[1]
+        
+        # 2. 生成系统部分
         with open(user_profile, "r", encoding="utf-8") as f:
             data = json.load(f)
             
         domains = data.get("domains", {})
         prefs = data.get("preferences", {})
+        achievements = data.get("achievements", [])
         
         def get_level(score):
             if score >= 10: return "Expert"
             if score >= 5: return "Proficient"
             if score >= 0: return "Intermediate"
             return "Novice/Low"
-            
-        # 读取 Achievements (新增)
-        achievements = data.get("achievements", [])
 
         with open(user_context, "w", encoding="utf-8") as f:
             f.write(f"# User Cognitive Profile (System Generated)\n")
-            f.write(f"> 🛑 DO NOT EDIT MANUALLY. Updated: {_dt.datetime.now().isoformat()}\n\n")
+            f.write(f"> 🛑 DO NOT EDIT ABOVE THIS LINE. Updated: {_dt.datetime.now().isoformat()}\n\n")
             
             if achievements:
                 f.write("## 🎖️ Achievement Wall (Success Patterns)\n")
                 for ach in achievements:
-                    f.write(f"- **[{ach['date']}]**: {ach['pattern']}\n")
+                    f.write(f"- **[{ach.get('date','?')}]**: {ach.get('pattern')}\n")
                 f.write("\n")
 
             f.write("## Current Domain Expertise\n")
@@ -579,10 +587,16 @@ def sync_user_context(payload, project_dir):
                     f.write(f"- **{k}**: {v}\n")
             
             f.write("\n## Interaction Strategy\n")
-            # 简单的策略生成逻辑
             for domain, score in domains.items():
                 if score < 0:
                     f.write(f"- **{domain} Control**: High vigilance. Verify strictly.\n")
+            
+            # 3. 追加手动部分
+            f.write(f"\n\n{manual_marker}\n")
+            if manual_content:
+                f.write(manual_content)
+            else:
+                f.write("## Manual Notes (User Preserved)\n> You can write your permanent notes below. They will be preserved during updates.\n")
                     
     except Exception as e:
         logging.error(f"Failed to sync user context: {e}")

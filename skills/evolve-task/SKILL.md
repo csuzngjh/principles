@@ -17,7 +17,13 @@ allowed-tools: Read, Grep, Glob, Bash, Write, Edit
 - 读取 docs/PROFILE.json，理解 risk_paths、gate、tests.commands。
 - **能力自检**: 快速扫描插件目录下的 `skills/` 和 `agents/`。如果有针对当前任务的专门 Skill (如 `/deep-search`) 或 Agent (如 `security-expert`)，请在后续步骤中优先使用。
 
+## Step 1.5: 全维环境感知 (Full-Spectrum Awareness)
+- **本地**: 运行 `git status` 和 `git log -n 5` 了解代码现状。
+- **远程**: 如果可用 `gh`，必须运行 `gh issue list --limit 5` 和 `gh pr list --limit 5`。
+- **关联**: 如果发现相关 Issue，必须将其 ID 记录在本次任务的上下文中。
+
 ## Step 2: TRIAGE（补齐信息）
+- **地图优先**: 必须先阅读 `codemaps/` 下的架构图或 `docs/SYSTEM_PANORAMA.md`，准确评估修改风险。
 输出：
 - Goal（一句话）
 - Problem（可复现描述）
@@ -49,7 +55,8 @@ allowed-tools: Read, Grep, Glob, Bash, Write, Edit
 - 将计划写入 docs/PLAN.md（STATUS 行必须存在）。
 - **任务同步 (Task Sync)**: 
   - 如果 `CLAUDE_CODE_TASK_LIST_ID` 已设置，你必须将上述 Plan 的核心步骤直接转化为 Native Tasks（通过自然语言指令"Add task..."或相关工具）。
-  - 如果未设置，提示用户："建议运行 `export CLAUDE_CODE_TASK_LIST_ID=task-$(date +%s)` 以启用持久化任务追踪。"
+  - 如果未设置且为交互模式，提示用户："建议运行 `export CLAUDE_CODE_TASK_LIST_ID=task-$(date +%s)` 以启用持久化任务追踪。"
+  - 如果是后台/无头模式，跳过提示。
 - **绩效评估**: 任务完成后，写入 `docs/.verdict.json`。格式遵循 `@docs/schemas/agent_verdict_schema.json`。
 
 ## Step 7: 委派 Implementer（执行）

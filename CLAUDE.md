@@ -17,12 +17,12 @@ This is the project's primary memory file. It contains project-specific instruct
 - **Verification**: No code without a verification plan.
 
 ## Skill Triggers (Skill-First Protocol)
-Use these skills instead of general knowledge whenever applicable:
-- **Diagnose/Debug** -> `/root-cause`
-- **Reflect/Log** -> `/reflection-log`
-- **Optimize System** -> `/evolve-system`
-- **Background Tasks** -> `/watch-evolution` (Daemon)
-- **Strategy/Goals** -> `/init-strategy`, `/manage-okr`
+**Before acting, CHECK /skills.** Use specialized skills for:
+- **Development**: `/feature-dev`, `/refactor`, `/test-gen`
+- **Quality**: `/code-review`, `/security-audit`
+- **Maintenance**: `/root-cause`, `/reflection-log`, `/evolve-system`
+- **Operations**: `/watch-evolution`, `/manage-okr`
+*(The above are examples. Always run `/help` to see the full arsenal available to you.)*
 
 ## Strategic Management
 Use these tools to align the system with long-term goals:
