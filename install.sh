@@ -89,7 +89,8 @@ cd "$SOURCE_DIR"
 
 # Hooks (Python Runner 总是更新，因为它是系统逻辑)
 cp "$SOURCE_DIR/hooks/hook_runner.py" "$TARGET_DIR/.claude/hooks/"
-sed 's/${CLAUDE_PLUGIN_ROOT}\/hooks\//.claude\/hooks\//g' "$SOURCE_DIR/hooks/hooks.json" > "$TARGET_DIR/.claude/hooks/hooks.json"
+cp "$SOURCE_DIR/hooks/hooks.json" "$TARGET_DIR/.claude/hooks/"
+# 原本这里的 sed 替换被移除，以保持路径的原始性和可预测性
 
 # Rules
 for f in "$SOURCE_DIR/templates/rules/"*.md; do
@@ -162,18 +163,10 @@ with open(target, 'w') as f:
     json.dump(t_data, f, indent=2)
 "
 
-# 7. 路径绝对化 (Absolute Path Fix)
-# 在 WSL/混合环境中，相对路径可能导致 statusLine 无法加载。
-# 我们将 settings.json 中的 "python3 .claude/hooks" 替换为绝对路径。
-ABS_TARGET_DIR=$(cd "$TARGET_DIR" && pwd)
-# 使用 sed 替换 (注意转义)
-if [[ "$OSTYPE" == "darwin"* ]]; then
-  # macOS sed 需要空扩展名
-  sed -i '' "s|python3 .claude/hooks|python3 $ABS_TARGET_DIR/.claude/hooks|g" "$SETTINGS_FILE"
-else
-  # GNU sed
-  sed -i "s|python3 .claude/hooks|python3 $ABS_TARGET_DIR/.claude/hooks|g" "$SETTINGS_FILE"
-fi
+# 7. 路径绝对化 (已移除，优先使用相对路径保证可移植性)
+# 之前的绝对路径逻辑会导致 Git 污染，现已废弃。
+echo "📍 Using portable relative paths for hooks."
+
 
 # 8. 更新 CLAUDE.md (Smart Update)
 echo "🧠 Updating memory..."
@@ -187,9 +180,9 @@ else
         cp "$SOURCE_DIR/CLAUDE.md" "$CLAUDE_MD"
         echo "  - Created: $CLAUDE_MD"
     else
-        # 总是生成 .new 版本供用户对比
-        cp "$SOURCE_DIR/CLAUDE.md" "$CLAUDE_MD.new"
-        echo "  - Generated: $CLAUDE_MD.new (Review and replace manually if needed)"
+        # 总是生成 .update 版本供用户对比
+        cp "$SOURCE_DIR/CLAUDE.md" "$CLAUDE_MD.update"
+        echo "  - Generated: $CLAUDE_MD.update (Review and replace manually if needed)"
         
         # 依然保留旧的追加逻辑作为保底（如果用户完全没用过我们的框架）
         if ! grep -q "System Integration" "$CLAUDE_MD"; then

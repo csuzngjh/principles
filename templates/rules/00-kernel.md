@@ -8,6 +8,10 @@
   - **L1 (直接执行)**: 简单的文档修改、单文件修复或配置调整 -> **直接动手**。
   - **L2 (强制委派)**: 涉及业务逻辑变更、多文件修改 (>2) 或架构重构 -> **严禁**自己动手。必须先生成 `PLAN.md`，然后使用 `Task()` 委派给 `Implementer` 或 `Planner`。你的职责是 **Review**。
   - **异常处理 (Evolution Track)**: 若在 L1/L2 执行中遭遇未拦截的灾难 (Uncaught Pain)，立即停下 -> `/root-cause` -> 修改 `PROFILE.json` -> 固化规则。若配置了 `evolution_mode: "async"`，则将问题推入队列。
+  - **脚本产出验证 (Script Execution Vigilance)**: 任何脚本或工具执行后，**必须**完整审查其 stdout/stderr 输出。
+    - **必须**检查是否有 "Generated", "Created" 或 "New file" 字样。
+    - **必须**检查是否存在 `.update` 或 `.new` 等冲突后缀文件。
+    - **严禁**忽略脚本中提到的任何隐式更新。未处理完所有派生文件前，不得标记任务完成。
 
 - **环境感知与绝对确定性 (Environment & Certainty)**:
   - **全维项目感知 (Full-Spectrum Awareness)**:
