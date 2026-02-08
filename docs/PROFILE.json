@@ -1,9 +1,32 @@
 {
-  "gate": {
-    "require_plan_for_risk_paths": true
-  },
+  "audit_level": "medium",
   "risk_paths": [
     "src/"
   ],
-  "evolution_mode": "async"
+  "evolution_mode": "async",
+  "gate": {
+    "require_plan_for_risk_paths": true,
+    "require_audit_before_write": true,
+    "require_reviewer_after_write": true
+  },
+  "tests": {
+    "on_change": "smoke",
+    "on_risk_change": "unit",
+    "commands": {
+      "smoke": "",
+      "unit": "",
+      "full": ""
+    }
+  },
+  "pain": {
+    "soft_capture_threshold": 30,
+    "adaptive": {
+      "enabled": true,
+      "min_threshold": 15,
+      "max_threshold": 70,
+      "backlog_trigger": 6,
+      "hard_failure_trigger": 2,
+      "stable_quality_threshold": 5
+    }
+  }
 }

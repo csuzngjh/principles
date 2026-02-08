@@ -9,7 +9,19 @@
       "hooks": [
         {
           "type": "command",
-          "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/hook_runner.py --hook session_init"
+          "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/hook_runner.py --hook session_init",
+          "timeout": 8
+        }
+      ]
+    }
+  ],
+  "UserPromptSubmit": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/hook_runner.py --hook user_prompt_context",
+          "timeout": 5
         }
       ]
     }
@@ -20,7 +32,8 @@
       "hooks": [
         {
           "type": "command",
-          "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/hook_runner.py --hook pre_write_gate"
+          "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/hook_runner.py --hook pre_write_gate",
+          "timeout": 8
         }
       ]
     }
@@ -31,7 +44,8 @@
       "hooks": [
         {
           "type": "command",
-          "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/hook_runner.py --hook post_write_checks"
+          "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/hook_runner.py --hook post_write_checks",
+          "timeout": 180
         }
       ]
     }
@@ -41,7 +55,8 @@
       "hooks": [
         {
           "type": "command",
-          "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/hook_runner.py --hook stop_evolution_update"
+          "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/hook_runner.py --hook stop_evolution_update",
+          "timeout": 12
         }
       ]
     }
@@ -52,7 +67,8 @@
       "hooks": [
         {
           "type": "command",
-          "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/hook_runner.py --hook subagent_complete"
+          "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/hook_runner.py --hook subagent_complete",
+          "timeout": 12
         }
       ]
     }
@@ -63,7 +79,8 @@
       "hooks": [
         {
           "type": "command",
-          "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/hook_runner.py --hook precompact_checkpoint"
+          "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/hook_runner.py --hook precompact_checkpoint",
+          "timeout": 12
         }
       ]
     }
@@ -73,7 +90,8 @@
       "hooks": [
         {
           "type": "command",
-          "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/hook_runner.py --hook sync_user_context"
+          "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/hook_runner.py --hook sync_user_context",
+          "timeout": 8
         }
       ]
     }

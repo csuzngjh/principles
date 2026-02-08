@@ -17,6 +17,12 @@
       },
       "default": []
     },
+    "evolution_mode": {
+      "type": "string",
+      "enum": ["realtime", "async"],
+      "default": "realtime",
+      "description": "realtime blocks current flow on failures; async records/queues failures for background handling."
+    },
     "gate": {
       "type": "object",
       "properties": {
@@ -34,6 +40,29 @@
           "type": "object",
           "additionalProperties": { "type": "string" },
           "description": "Key-value pairs mapping test levels to shell commands."
+        }
+      }
+    },
+    "pain": {
+      "type": "object",
+      "properties": {
+        "soft_capture_threshold": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "default": 30,
+          "description": "Minimum pain_score for capturing soft signals when no hard failure occurred."
+        },
+        "adaptive": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean", "default": true },
+            "min_threshold": { "type": "integer", "minimum": 0, "maximum": 100, "default": 15 },
+            "max_threshold": { "type": "integer", "minimum": 0, "maximum": 100, "default": 70 },
+            "backlog_trigger": { "type": "integer", "minimum": 1, "default": 6 },
+            "hard_failure_trigger": { "type": "integer", "minimum": 1, "default": 2 },
+            "stable_quality_threshold": { "type": "integer", "minimum": 1, "default": 5 }
+          }
         }
       }
     },

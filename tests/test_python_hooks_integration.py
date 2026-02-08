@@ -12,7 +12,9 @@ from pathlib import Path
 
 # 定位项目根目录
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
-HOOK_RUNNER = PROJECT_ROOT / ".claude" / "hooks" / "hook_runner.py"
+HOOK_RUNNER = PROJECT_ROOT / "hooks" / "hook_runner.py"
+if not HOOK_RUNNER.exists():
+    HOOK_RUNNER = PROJECT_ROOT / ".claude" / "hooks" / "hook_runner.py"
 DOCS_DIR = PROJECT_ROOT / "docs"
 
 class TestPythonHooks(unittest.TestCase):
@@ -24,7 +26,13 @@ class TestPythonHooks(unittest.TestCase):
         for fname in self.backup_files:
             fpath = DOCS_DIR / fname
             if fpath.exists():
-                shutil.copy(fpath, fpath.with_suffix(".bak"))
+                shutil.copy(fpath, DOCS_DIR / (fname + ".bak"))
+        # 备份运行态临时文件，避免测试污染工作区
+        self.temp_files = [".pain_flag", ".verdict.json", ".user_verdict.json", ".pending_reflection"]
+        for temp in self.temp_files:
+            tpath = DOCS_DIR / temp
+            if tpath.exists():
+                shutil.copy(tpath, DOCS_DIR / (temp + ".bak"))
 
     def tearDown(self):
         # 恢复备份
@@ -39,8 +47,13 @@ class TestPythonHooks(unittest.TestCase):
                 pass
         
         # 清理临时文件
-        for temp in [".pain_flag", ".verdict.json", ".user_verdict.json", ".pending_reflection"]:
-            (DOCS_DIR / temp).unlink(missing_ok=True)
+        for temp in self.temp_files:
+            bak_path = DOCS_DIR / (temp + ".bak")
+            orig_path = DOCS_DIR / temp
+            if bak_path.exists():
+                shutil.move(bak_path, orig_path)
+            else:
+                orig_path.unlink(missing_ok=True)
 
     def run_hook(self, hook_name, payload):
         """运行 Hook 并返回 (returncode, stderr)"""
@@ -57,7 +70,9 @@ class TestPythonHooks(unittest.TestCase):
             stdout=subprocess.PIPE, # 捕获 stdout 避免干扰测试输出
             stderr=subprocess.PIPE,
             env=env,
-            text=True
+            text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         
         stdout, stderr = process.communicate(input=json.dumps(payload))

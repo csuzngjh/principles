@@ -72,5 +72,46 @@ class TestStatusLine(unittest.TestCase):
         
         self.assertIn("💊", output)
 
+    def test_statusline_queue_metrics(self):
+        queue = [
+            {
+                "id": "task-1",
+                "status": "pending",
+                "priority": 90,
+                "timestamp": "2026-02-08T10:00:00",
+            },
+            {
+                "id": "task-2",
+                "status": "retrying",
+                "priority": 80,
+                "next_retry_at": "2020-01-01T00:00:00",
+                "timestamp": "2026-02-08T10:05:00",
+            },
+        ]
+        with open(os.path.join(self.docs_dir, "EVOLUTION_QUEUE.json"), "w", encoding="utf-8") as f:
+            json.dump(queue, f, ensure_ascii=False, indent=2)
+
+        hook_runner.statusline({}, self.test_dir)
+        output = self.sys_stdout.getvalue().strip()
+
+        self.assertIn("🚦P1|R1|Ndue", output)
+
+    def test_statusline_queue_metrics_absent_when_no_open_tasks(self):
+        queue = [
+            {
+                "id": "task-1",
+                "status": "completed",
+                "priority": 90,
+                "timestamp": "2026-02-08T10:00:00",
+            }
+        ]
+        with open(os.path.join(self.docs_dir, "EVOLUTION_QUEUE.json"), "w", encoding="utf-8") as f:
+            json.dump(queue, f, ensure_ascii=False, indent=2)
+
+        hook_runner.statusline({}, self.test_dir)
+        output = self.sys_stdout.getvalue().strip()
+
+        self.assertNotIn("🚦", output)
+
 if __name__ == '__main__':
     unittest.main()

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import copy
 import datetime as _dt
 import json
 import logging
@@ -10,6 +11,7 @@ import shutil
 import subprocess
 import traceback
 import sys
+import uuid
 from pathlib import PurePosixPath, PureWindowsPath
 
 # --- Encoding Fix for Windows ---
@@ -23,32 +25,182 @@ if sys.platform == "win32":
 PROJECT_ROOT = os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
 LOG_FILE = os.path.join(PROJECT_ROOT, "docs", "SYSTEM.log")
 QUEUE_FILE = os.path.join(PROJECT_ROOT, "docs", "EVOLUTION_QUEUE.json")
+QUIET_SUCCESS_HOOKS = {"statusline"}
+QUEUE_OPEN_STATES = {"pending", "processing", "retrying"}
+QUEUE_MAX_SIZE = 300
+
+PROFILE_DEFAULTS = {
+    "audit_level": "medium",
+    "risk_paths": [],
+    "evolution_mode": "realtime",
+    "gate": {
+        "require_plan_for_risk_paths": True,
+        "require_audit_before_write": True,
+        "require_reviewer_after_write": True,
+    },
+    "tests": {
+        "on_change": "smoke",
+        "on_risk_change": "unit",
+        "commands": {},
+    },
+    "pain": {
+        "soft_capture_threshold": 30,
+        "adaptive": {
+            "enabled": True,
+            "min_threshold": 15,
+            "max_threshold": 70,
+            "backlog_trigger": 6,
+            "hard_failure_trigger": 2,
+            "stable_quality_threshold": 5,
+        },
+    },
+    "permissions": {},
+    "custom_guards": [],
+}
+PROFILE_AUDIT_LEVELS = {"low", "medium", "high"}
+PROFILE_EVOLUTION_MODES = {"realtime", "async"}
+PROFILE_TEST_LEVELS = {"smoke", "unit", "full"}
+
+def _queue_file(project_dir=None):
+    if project_dir:
+        return os.path.join(project_dir, "docs", "EVOLUTION_QUEUE.json")
+    return QUEUE_FILE
+
+def _compute_task_priority(task_type, details):
+    try:
+        pain_score = int(details.get("pain_score") or 0)
+    except Exception:
+        pain_score = 0
+
+    if details.get("is_spiral"):
+        return 100
+    if task_type == "test_failure":
+        if int(details.get("exit_code") or 0) != 0:
+            return 90
+        return 80
+    if pain_score >= 80:
+        return 85
+    if details.get("missing_test_command"):
+        return 70
+    if pain_score >= 50:
+        return 65
+    return 50
+
+def _task_fingerprint(task_type, details):
+    key = {
+        "type": task_type,
+        "reason": details.get("reason") or "",
+        "file_path": details.get("file_path") or "",
+        "tool": details.get("tool") or "",
+        "command": details.get("command") or "",
+    }
+    return json.dumps(key, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+def _retry_backoff_seconds(retry_count):
+    try:
+        count = max(0, int(retry_count))
+    except Exception:
+        count = 0
+    # 15s, 30s, 60s, ... capped at 15min
+    return min(900, 15 * (2 ** count))
+
+def _next_retry_at(retry_count, now=None):
+    current = now or _dt.datetime.now()
+    wait_seconds = _retry_backoff_seconds(retry_count)
+    return (current + _dt.timedelta(seconds=wait_seconds)).isoformat()
+
+def _queue_sort_key(task):
+    status = str(task.get("status") or "").lower()
+    open_rank = 0 if status in QUEUE_OPEN_STATES else 1
+    try:
+        priority = int(task.get("priority") or 0)
+    except Exception:
+        priority = 0
+    first_seen = task.get("first_seen") or task.get("timestamp") or ""
+    return (open_rank, -priority, first_seen)
+
+def _write_queue(queue, project_dir):
+    queue_file = _queue_file(project_dir)
+    ordered = sorted(queue, key=_queue_sort_key)[:QUEUE_MAX_SIZE]
+    with open(queue_file, "w", encoding="utf-8") as f:
+        json.dump(ordered, f, ensure_ascii=False, indent=2)
 
 def enqueue_evolution_task(task_type, details, project_dir):
     """将进化工单推入队列"""
     try:
         queue = []
-        if os.path.isfile(QUEUE_FILE):
-            with open(QUEUE_FILE, "r", encoding="utf-8") as f:
-                queue = json.load(f)
-        
-        task_id = f"evt-{_dt.datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        queue_file = _queue_file(project_dir)
+        if os.path.isfile(queue_file):
+            with open(queue_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    queue = data
+
+        now = _dt.datetime.now()
+        details = details or {}
+        priority = _compute_task_priority(task_type, details)
+        fingerprint = _task_fingerprint(task_type, details)
+
+        for task in queue:
+            status = str(task.get("status") or "").lower()
+            if status not in QUEUE_OPEN_STATES:
+                continue
+            if str(task.get("fingerprint") or "") != fingerprint:
+                continue
+            task["details"] = details
+            task["priority"] = max(int(task.get("priority") or 0), priority)
+            task["occurrences"] = int(task.get("occurrences") or 1) + 1
+            task["last_seen"] = now.isoformat()
+            if status == "retrying":
+                retry_count = int(task.get("retry_count") or 0)
+                task["next_retry_at"] = _next_retry_at(retry_count, now)
+            _write_queue(queue, project_dir)
+            return task.get("id")
+
+        task_id = f"evt-{now.strftime('%Y%m%d-%H%M%S-%f')}-{uuid.uuid4().hex[:6]}"
         new_task = {
             "id": task_id,
-            "timestamp": _dt.datetime.now().isoformat(),
+            "timestamp": now.isoformat(),
             "type": task_type,
             "details": details,
             "status": "pending",
-            "retry_count": 0
+            "retry_count": 0,
+            "priority": priority,
+            "fingerprint": fingerprint,
+            "occurrences": 1,
+            "first_seen": now.isoformat(),
+            "last_seen": now.isoformat(),
+            "next_retry_at": _next_retry_at(0, now),
+            "retry_policy": {
+                "base_seconds": 15,
+                "max_seconds": 900,
+            },
         }
         queue.append(new_task)
-        
-        with open(QUEUE_FILE, "w", encoding="utf-8") as f:
-            json.dump(queue, f, ensure_ascii=False, indent=2)
+        _write_queue(queue, project_dir)
         return task_id
     except Exception as e:
         logging.error(f"Failed to enqueue task: {e}")
         return None
+
+def _load_queue(project_dir=None):
+    queue_file = _queue_file(project_dir)
+    if not os.path.isfile(queue_file):
+        return []
+    try:
+        with open(queue_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            return data
+    except Exception:
+        pass
+    return []
+
+def _has_open_evolution_tasks(project_dir=None):
+    for task in _load_queue(project_dir):
+        if str(task.get("status", "")).lower() in QUEUE_OPEN_STATES:
+            return True
+    return False
 
 # 简单的日志配置
 logging.basicConfig(
@@ -60,11 +212,19 @@ logging.basicConfig(
 
 def log_telemetry(hook_name, status, duration=0, error=None):
     """统一遥测记录"""
+    if status == "SUCCESS" and hook_name in QUIET_SUCCESS_HOOKS:
+        return
+
     msg = f"Status: {status} | Duration: {duration:.2f}ms"
     if error:
         msg += f" | Error: {str(error)}"
     
-    level = logging.ERROR if status == "ERROR" else logging.INFO
+    if status == "ERROR":
+        level = logging.ERROR
+    elif status == "BLOCKED":
+        level = logging.WARNING
+    else:
+        level = logging.INFO
     logging.log(level, f"[{hook_name}] {msg}")
     
     if status == "ERROR":
@@ -153,16 +313,194 @@ def is_risky(rel_path, risk_paths):
             return True
     return False
 
+def _pick_bool(value, default):
+    return value if isinstance(value, bool) else default
+
+def _normalize_profile(raw_profile, profile_path):
+    defaults = copy.deepcopy(PROFILE_DEFAULTS)
+    warnings = []
+    normalized = copy.deepcopy(defaults)
+    invalid = False
+
+    if not isinstance(raw_profile, dict):
+        warnings.append("PROFILE root must be an object; defaults applied.")
+        invalid = True
+    else:
+        for key, value in raw_profile.items():
+            if key not in normalized:
+                normalized[key] = value
+
+        audit_level = raw_profile.get("audit_level")
+        if isinstance(audit_level, str) and audit_level in PROFILE_AUDIT_LEVELS:
+            normalized["audit_level"] = audit_level
+        elif audit_level is not None:
+            warnings.append(f"Invalid audit_level '{audit_level}', fallback to '{defaults['audit_level']}'.")
+
+        evolution_mode = raw_profile.get("evolution_mode")
+        if isinstance(evolution_mode, str) and evolution_mode in PROFILE_EVOLUTION_MODES:
+            normalized["evolution_mode"] = evolution_mode
+        elif evolution_mode is not None:
+            warnings.append(f"Invalid evolution_mode '{evolution_mode}', fallback to '{defaults['evolution_mode']}'.")
+
+        raw_risk_paths = raw_profile.get("risk_paths", defaults["risk_paths"])
+        if isinstance(raw_risk_paths, str):
+            raw_risk_paths = [raw_risk_paths]
+        if isinstance(raw_risk_paths, list):
+            normalized["risk_paths"] = [str(p) for p in raw_risk_paths if isinstance(p, str) and p.strip()]
+        else:
+            warnings.append("risk_paths must be an array of strings; fallback to defaults.")
+
+        raw_gate = raw_profile.get("gate", {})
+        if isinstance(raw_gate, dict):
+            # Legacy compatibility: old profiles did not have full gate keys and defaulted to non-blocking behavior.
+            gate = {
+                "require_plan_for_risk_paths": False,
+                "require_audit_before_write": False,
+                "require_reviewer_after_write": False,
+            }
+            gate["require_plan_for_risk_paths"] = _pick_bool(
+                raw_gate.get("require_plan_for_risk_paths"), gate["require_plan_for_risk_paths"]
+            )
+            gate["require_audit_before_write"] = _pick_bool(
+                raw_gate.get("require_audit_before_write"), gate["require_audit_before_write"]
+            )
+            gate["require_reviewer_after_write"] = _pick_bool(
+                raw_gate.get("require_reviewer_after_write"), gate["require_reviewer_after_write"]
+            )
+            normalized["gate"] = gate
+        else:
+            warnings.append("gate must be an object; fallback to defaults.")
+
+        raw_tests = raw_profile.get("tests", {})
+        if isinstance(raw_tests, dict):
+            tests = copy.deepcopy(defaults["tests"])
+            on_change = raw_tests.get("on_change")
+            if isinstance(on_change, str) and on_change in PROFILE_TEST_LEVELS:
+                tests["on_change"] = on_change
+            elif on_change is not None:
+                warnings.append(f"Invalid tests.on_change '{on_change}', fallback to '{tests['on_change']}'.")
+
+            on_risk_change = raw_tests.get("on_risk_change")
+            if isinstance(on_risk_change, str) and on_risk_change in PROFILE_TEST_LEVELS:
+                tests["on_risk_change"] = on_risk_change
+            elif on_risk_change is not None:
+                warnings.append(
+                    f"Invalid tests.on_risk_change '{on_risk_change}', fallback to '{tests['on_risk_change']}'."
+                )
+
+            commands = {}
+            raw_commands = raw_tests.get("commands")
+            if isinstance(raw_commands, dict):
+                for key, value in raw_commands.items():
+                    if isinstance(key, str) and isinstance(value, str):
+                        commands[key] = value
+                    else:
+                        warnings.append("tests.commands only accepts string-to-string pairs.")
+            elif raw_commands is not None:
+                warnings.append("tests.commands must be an object; fallback to empty commands.")
+            tests["commands"] = commands
+            normalized["tests"] = tests
+        else:
+            warnings.append("tests must be an object; fallback to defaults.")
+
+        raw_pain = raw_profile.get("pain", {})
+        if isinstance(raw_pain, dict):
+            pain = copy.deepcopy(defaults["pain"])
+            soft_capture_threshold = raw_pain.get("soft_capture_threshold")
+            if isinstance(soft_capture_threshold, int):
+                pain["soft_capture_threshold"] = max(0, min(100, soft_capture_threshold))
+            elif soft_capture_threshold is not None:
+                warnings.append(
+                    f"Invalid pain.soft_capture_threshold '{soft_capture_threshold}', fallback to "
+                    f"'{pain['soft_capture_threshold']}'."
+                )
+
+            raw_adaptive = raw_pain.get("adaptive")
+            adaptive = pain.get("adaptive") or {}
+            if raw_adaptive is None:
+                pass
+            elif isinstance(raw_adaptive, dict):
+                adaptive["enabled"] = _pick_bool(raw_adaptive.get("enabled"), adaptive.get("enabled", True))
+                adaptive["min_threshold"] = max(
+                    0, min(100, _coerce_int(raw_adaptive.get("min_threshold"), adaptive.get("min_threshold", 15)))
+                )
+                adaptive["max_threshold"] = max(
+                    0, min(100, _coerce_int(raw_adaptive.get("max_threshold"), adaptive.get("max_threshold", 70)))
+                )
+                if adaptive["min_threshold"] > adaptive["max_threshold"]:
+                    adaptive["min_threshold"], adaptive["max_threshold"] = (
+                        adaptive["max_threshold"],
+                        adaptive["min_threshold"],
+                    )
+                adaptive["backlog_trigger"] = max(
+                    1, _coerce_int(raw_adaptive.get("backlog_trigger"), adaptive.get("backlog_trigger", 6))
+                )
+                adaptive["hard_failure_trigger"] = max(
+                    1,
+                    _coerce_int(raw_adaptive.get("hard_failure_trigger"), adaptive.get("hard_failure_trigger", 2)),
+                )
+                adaptive["stable_quality_threshold"] = max(
+                    1,
+                    _coerce_int(
+                        raw_adaptive.get("stable_quality_threshold"),
+                        adaptive.get("stable_quality_threshold", 5),
+                    ),
+                )
+            else:
+                warnings.append("pain.adaptive must be an object; fallback to defaults.")
+            pain["adaptive"] = adaptive
+            normalized["pain"] = pain
+        else:
+            warnings.append("pain must be an object; fallback to defaults.")
+
+        raw_permissions = raw_profile.get("permissions", {})
+        if isinstance(raw_permissions, dict):
+            normalized["permissions"] = raw_permissions
+        elif raw_permissions is not None:
+            warnings.append("permissions must be an object; fallback to defaults.")
+
+        raw_guards = raw_profile.get("custom_guards", defaults["custom_guards"])
+        valid_guards = []
+        if isinstance(raw_guards, list):
+            for idx, guard in enumerate(raw_guards):
+                if not isinstance(guard, dict):
+                    warnings.append(f"custom_guards[{idx}] must be an object; skipped.")
+                    continue
+                pattern = guard.get("pattern")
+                message = guard.get("message")
+                if not isinstance(pattern, str) or not pattern.strip():
+                    warnings.append(f"custom_guards[{idx}] missing valid pattern; skipped.")
+                    continue
+                if not isinstance(message, str) or not message.strip():
+                    warnings.append(f"custom_guards[{idx}] missing valid message; skipped.")
+                    continue
+                severity = guard.get("severity", "error")
+                if severity not in ("error", "warning"):
+                    severity = "error"
+                    warnings.append(f"custom_guards[{idx}] has invalid severity; fallback to 'error'.")
+                valid_guards.append({"pattern": pattern, "message": message, "severity": severity})
+            normalized["custom_guards"] = valid_guards
+        else:
+            warnings.append("custom_guards must be an array; fallback to empty list.")
+
+    normalized["_profile_invalid"] = invalid
+    normalized["_profile_warnings"] = warnings
+    if warnings:
+        logging.warning("[%s] PROFILE normalization warnings: %s", profile_path, " | ".join(warnings))
+    return normalized
+
 def load_profile(project_dir):
     profile_path = os.path.join(project_dir, "docs", "PROFILE.json")
     if not os.path.isfile(profile_path):
         return None, profile_path
     try:
         with open(profile_path, "r", encoding="utf-8") as handle:
-            return json.load(handle), profile_path
+            raw_profile = json.load(handle)
     except json.JSONDecodeError as exc:
         print(f"Invalid PROFILE.json: {exc}", file=sys.stderr)
-        sys.exit(2)
+        logging.error("[%s] PROFILE parse failed: %s", profile_path, exc)
+        return _normalize_profile(None, profile_path), profile_path
+    return _normalize_profile(raw_profile, profile_path), profile_path
 
 def _run_command(cmd):
     if os.name == "nt":
@@ -170,6 +508,313 @@ def _run_command(cmd):
     else:
         result = subprocess.run(["bash", "-lc", cmd])
     return result.returncode
+
+def _read_text_file(path):
+    with open(path, "rb") as handle:
+        raw = handle.read()
+    for encoding in ("utf-8", "utf-8-sig", "utf-16", "utf-16-le", "utf-16-be"):
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors="replace")
+
+def _parse_iso_datetime(value):
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        return _dt.datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+def _format_queue_status(project_dir, now=None):
+    queue = _load_queue(project_dir)
+    if not queue:
+        return ""
+
+    current = now or _dt.datetime.now()
+    pending = 0
+    retrying = 0
+    retry_deltas = []
+
+    for task in queue:
+        status = str(task.get("status") or "").lower()
+        if status == "pending":
+            pending += 1
+            continue
+        if status != "retrying":
+            continue
+
+        retrying += 1
+        due = _parse_iso_datetime(task.get("next_retry_at"))
+        if due is None:
+            retry_deltas.append(0)
+            continue
+
+        if due.tzinfo is not None:
+            if current.tzinfo is None:
+                current_cmp = _dt.datetime.now(tz=due.tzinfo)
+            else:
+                current_cmp = current.astimezone(due.tzinfo)
+        else:
+            current_cmp = current.replace(tzinfo=None)
+
+        retry_deltas.append(int((due - current_cmp).total_seconds()))
+
+    if pending + retrying == 0:
+        return ""
+
+    if retrying == 0:
+        next_label = "now"
+    else:
+        min_delta = min(retry_deltas) if retry_deltas else 0
+        if min_delta <= 0:
+            next_label = "due"
+        elif min_delta < 60:
+            next_label = f"{min_delta}s"
+        else:
+            next_label = f"{(min_delta + 59) // 60}m"
+
+    return f"🚦P{pending}|R{retrying}|N{next_label}"
+
+def _parse_kv_lines(text):
+    data = {}
+    for line in (text or "").splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        data[key.strip()] = value.strip()
+    return data
+
+def _serialize_kv_lines(data):
+    ordered_keys = [
+        "time",
+        "tool",
+        "file_path",
+        "risk",
+        "test_level",
+        "command",
+        "exit_code",
+        "pain_score",
+        "severity",
+        "diagnosis",
+        "reason",
+        "soft_signals",
+        "soft_capture_threshold_base",
+        "soft_capture_threshold_effective",
+        "soft_threshold_reasons",
+        "mode",
+        "queue_task_id",
+        "issue_logged",
+    ]
+    lines = []
+    for key in ordered_keys:
+        value = data.get(key)
+        if value is None or value == "":
+            continue
+        lines.append(f"{key}: {value}")
+    for key in sorted(data.keys()):
+        if key in ordered_keys:
+            continue
+        value = data.get(key)
+        if value is None or value == "":
+            continue
+        lines.append(f"{key}: {value}")
+    return "\n".join(lines) + ("\n" if lines else "")
+
+def _pain_flag_path(project_dir):
+    return os.path.join(project_dir, "docs", ".pain_flag")
+
+def _write_pain_flag(project_dir, pain_data):
+    path = _pain_flag_path(project_dir)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(_serialize_kv_lines(pain_data))
+    return path
+
+def _read_pain_flag_data(project_dir):
+    path = _pain_flag_path(project_dir)
+    if not os.path.isfile(path):
+        return {}, path, ""
+    raw = _read_text_file(path)
+    return _parse_kv_lines(raw), path, raw
+
+def _plan_status(project_dir):
+    plan_path = os.path.join(project_dir, "docs", "PLAN.md")
+    if not os.path.isfile(plan_path):
+        return ""
+    with open(plan_path, "r", encoding="utf-8") as handle:
+        for line in handle:
+            if line.startswith("STATUS:"):
+                return line.split(":", 1)[1].strip().split()[0]
+    return ""
+
+def _coerce_int(value, default=0):
+    try:
+        return int(value)
+    except Exception:
+        return default
+
+def _effective_soft_capture_threshold(profile, project_dir):
+    pain_cfg = profile.get("pain") or {}
+    base = max(0, min(100, _coerce_int(pain_cfg.get("soft_capture_threshold"), 30)))
+    adaptive = pain_cfg.get("adaptive") or {}
+    if not _pick_bool(adaptive.get("enabled"), True):
+        return base, {"base": base, "effective": base, "delta": 0, "reasons": []}
+
+    min_threshold = max(0, min(100, _coerce_int(adaptive.get("min_threshold"), 15)))
+    max_threshold = max(0, min(100, _coerce_int(adaptive.get("max_threshold"), 70)))
+    if min_threshold > max_threshold:
+        min_threshold, max_threshold = max_threshold, min_threshold
+
+    backlog_trigger = max(1, _coerce_int(adaptive.get("backlog_trigger"), 6))
+    hard_failure_trigger = max(1, _coerce_int(adaptive.get("hard_failure_trigger"), 2))
+    stable_quality_threshold = max(1, _coerce_int(adaptive.get("stable_quality_threshold"), 5))
+
+    queue = _load_queue(project_dir)
+    open_tasks = [t for t in queue if str(t.get("status") or "").lower() in QUEUE_OPEN_STATES]
+    backlog = len(open_tasks)
+    open_hard_failures = sum(1 for t in open_tasks if str(t.get("type") or "") == "test_failure")
+    recent = queue[-50:] if isinstance(queue, list) else []
+    recent_hard_failures = sum(
+        1 for t in recent if str(t.get("type") or "") == "test_failure" and str(t.get("status") or "") == "failed"
+    )
+    recent_quality_completed = sum(
+        1 for t in recent if str(t.get("type") or "") == "quality_signal" and str(t.get("status") or "") == "completed"
+    )
+    recent_quality_failed = sum(
+        1 for t in recent if str(t.get("type") or "") == "quality_signal" and str(t.get("status") or "") == "failed"
+    )
+
+    delta = 0
+    reasons = []
+    if backlog >= backlog_trigger:
+        delta -= 10
+        reasons.append("backlog_pressure")
+    if (open_hard_failures + recent_hard_failures) >= hard_failure_trigger:
+        delta -= 10
+        reasons.append("hard_failure_pressure")
+    if recent_quality_failed >= 3 and backlog > 0:
+        delta -= 5
+        reasons.append("quality_signal_retries")
+    if (
+        backlog == 0
+        and open_hard_failures == 0
+        and recent_hard_failures == 0
+        and recent_quality_completed >= stable_quality_threshold
+    ):
+        delta += 8
+        reasons.append("stable_completion_streak")
+    if recent_quality_completed >= 10 and recent_quality_failed == 0 and backlog <= 1:
+        delta += 5
+        reasons.append("high_quality_throughput")
+
+    effective = max(min_threshold, min(max_threshold, base + delta))
+    return effective, {
+        "base": base,
+        "effective": effective,
+        "delta": delta,
+        "reasons": reasons,
+        "backlog": backlog,
+        "open_hard_failures": open_hard_failures,
+        "recent_hard_failures": recent_hard_failures,
+        "recent_quality_completed": recent_quality_completed,
+        "recent_quality_failed": recent_quality_failed,
+    }
+
+def _detect_soft_pain_signals(project_dir, file_path, risky, test_level):
+    signals = []
+    score = 0
+
+    plan_status = (_plan_status(project_dir) or "").upper()
+    if risky and plan_status in ("", "DRAFT", "IN_PROGRESS"):
+        signals.append("plan_not_ready_on_risky_write")
+        score += 20
+
+    if risky and test_level == "smoke":
+        signals.append("risky_edit_with_smoke_tests")
+        score += 10
+
+    open_tasks = [t for t in _load_queue(project_dir) if str(t.get("status") or "").lower() in QUEUE_OPEN_STATES]
+    if len(open_tasks) >= 5:
+        signals.append("queue_backlog_pressure")
+        score += 15
+
+    if file_path:
+        same_file_open = 0
+        for task in open_tasks:
+            details = task.get("details") or {}
+            if str(details.get("file_path") or "") == str(file_path):
+                same_file_open += 1
+        if same_file_open >= 2:
+            signals.append("same_file_repeated_incidents")
+            score += 25
+
+    return signals, score
+
+def _compute_pain_score(rc, is_spiral, missing_test_command, soft_score):
+    score = max(0, _coerce_int(soft_score, 0))
+    if rc != 0:
+        score += 70
+    if is_spiral:
+        score += 40
+    if missing_test_command:
+        score += 30
+    return min(100, score)
+
+def _pain_severity_label(pain_score, is_spiral=False):
+    score = _coerce_int(pain_score, 0)
+    if is_spiral or score >= 85:
+        return "CRITICAL"
+    if score >= 65:
+        return "HIGH"
+    if score >= 35:
+        return "MEDIUM"
+    return "LOW"
+
+def _append_issue_from_pain(issue_log_path, decisions_path, pain_content):
+    ts = _dt.datetime.now().isoformat()
+    title_snippet = " ".join(pain_content.splitlines()[:6])[:80]
+    title = f"Pain detected - {title_snippet}".strip()
+
+    with open(issue_log_path, "a", encoding="utf-8") as handle:
+        handle.write(
+            f"\n## [{ts}] {title}\n\n### Pain Signal (auto-captured)\n```\n{pain_content}\n```\n\n"
+            "### Diagnosis (Pending)\n- Run /evolve-task to diagnose.\n"
+        )
+
+    with open(decisions_path, "a", encoding="utf-8") as handle:
+        handle.write(f"\n## [{ts}] Decision checkpoint\n- Pain flag detected; IssueLog entry appended.\n")
+
+def _update_workboard(project_dir, event):
+    docs_dir = os.path.join(project_dir, "docs")
+    os.makedirs(docs_dir, exist_ok=True)
+    workboard_path = os.path.join(docs_dir, "WORKBOARD.json")
+    board = {"events": []}
+
+    if os.path.isfile(workboard_path):
+        try:
+            with open(workboard_path, "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+            if isinstance(data, dict):
+                board = data
+        except Exception:
+            pass
+
+    events = board.setdefault("events", [])
+    if not isinstance(events, list):
+        events = []
+    events.append(event)
+    board["events"] = events[-200:]
+    board["updated_at"] = _dt.datetime.now().isoformat()
+
+    with open(workboard_path, "w", encoding="utf-8") as handle:
+        json.dump(board, handle, ensure_ascii=False, indent=2)
 
 # --- Hook Handlers ---
 
@@ -233,10 +878,8 @@ def post_write_checks(payload, project_dir):
 
     commands = tests.get("commands") or {}
     cmd = commands.get(level) or ""
-    if not cmd:
-        return 0
-
-    rc = _run_command(cmd)
+    missing_test_command = risky and not cmd
+    rc = _run_command(cmd) if cmd else 0
     
     # --- Pain Escalation: Death Spiral Detection ---
     spiral_warning = ""
@@ -259,48 +902,110 @@ def post_write_checks(payload, project_dir):
     except Exception:
         pass
 
-    if rc != 0 or is_spiral:
-        evolution_mode = profile.get("evolution_mode") or "realtime"
-        
-        # 如果是异步模式，入队后返回 0，不阻塞用户
-        if evolution_mode == "async":
-            details = {
-                "tool": tool,
-                "file_path": file_path,
-                "exit_code": rc,
-                "command": cmd,
-                "is_spiral": is_spiral
-            }
-            task_id = enqueue_evolution_task("test_failure", details, project_dir)
-            if rc != 0:
-                print(f"⚠️  Post-write checks failed (rc={rc}). Issue queued (ID: {task_id}).", file=sys.stderr)
-            if is_spiral:
-                print(f"💀 DEATH SPIRAL DETECTED. Queued for background analysis.", file=sys.stderr)
-            return 0
+    soft_signals, soft_score = _detect_soft_pain_signals(project_dir, file_path, risky, level)
+    soft_threshold, threshold_diag = _effective_soft_capture_threshold(profile, project_dir)
+    base_threshold = _coerce_int(threshold_diag.get("base"), soft_threshold)
 
-        pain_flag = os.path.join(project_dir, "docs", ".pain_flag")
-        
-        # If it's a spiral, we flag it even if rc==0 (sometimes commits succeed but are useless)
-        # But here we only flag if rc!=0 OR spiral is detected during a check failure.
-        # Actually, let's allow spiral to trigger pain even if this specific check passed?
-        # No, post_write_checks usually runs tests. If tests pass, maybe we are out of the spiral.
-        # So we only escalate if rc!=0.
-        
+    hard_signal = (rc != 0) or is_spiral or missing_test_command
+    pain_score = _compute_pain_score(rc, is_spiral, missing_test_command, soft_score)
+    if not hard_signal and pain_score < soft_threshold:
+        return 0
+
+    evolution_mode = profile.get("evolution_mode") or "realtime"
+    if rc != 0:
+        reason = "post_write_checks_failed"
+        diagnosis = "POST_WRITE_TEST_FAILED"
+    elif missing_test_command:
+        reason = "missing_test_command_on_risky_edit"
+        diagnosis = "NO_TEST_COMMAND_FOR_RISKY_EDIT"
+    elif is_spiral:
+        reason = "death_spiral_detected"
+        diagnosis = "POTENTIAL_DEATH_SPIRAL"
+    elif soft_signals:
+        reason = f"soft_signal:{soft_signals[0]}"
+        diagnosis = "SOFT_SIGNAL_CAPTURED"
+    else:
+        reason = "quality_signal_detected"
+        diagnosis = "QUALITY_SIGNAL_CAPTURED"
+
+    pain_data = {
+        "time": _dt.datetime.now().isoformat(),
+        "tool": tool,
+        "file_path": file_path,
+        "risk": str(risky).lower(),
+        "test_level": level,
+        "command": cmd or "<missing>",
+        "exit_code": rc,
+        "pain_score": pain_score,
+        "severity": _pain_severity_label(pain_score, is_spiral=is_spiral),
+        "diagnosis": diagnosis,
+        "mode": evolution_mode,
+        "reason": reason,
+        "issue_logged": "false",
+        "soft_capture_threshold_base": base_threshold,
+        "soft_capture_threshold_effective": soft_threshold,
+    }
+    if soft_signals:
+        pain_data["soft_signals"] = ",".join(soft_signals)
+    if threshold_diag.get("reasons"):
+        pain_data["soft_threshold_reasons"] = ",".join(threshold_diag.get("reasons") or [])
+
+    _write_pain_flag(project_dir, pain_data)
+
+    details = {
+        "tool": tool,
+        "file_path": file_path,
+        "exit_code": rc,
+        "command": cmd,
+        "is_spiral": is_spiral,
+        "missing_test_command": missing_test_command,
+        "reason": reason,
+        "pain_score": pain_score,
+        "soft_signals": soft_signals,
+        "soft_score": soft_score,
+        "soft_capture_threshold_base": base_threshold,
+        "soft_capture_threshold": soft_threshold,
+        "soft_threshold_reasons": threshold_diag.get("reasons") or [],
+    }
+    task_type = "test_failure" if rc != 0 else "quality_signal"
+    if evolution_mode == "async":
+        task_id = enqueue_evolution_task(task_type, details, project_dir)
+        if task_id:
+            pain_data["queue_task_id"] = task_id
+            _write_pain_flag(project_dir, pain_data)
         if rc != 0:
-            with open(pain_flag, "w", encoding="utf-8") as handle:
-                handle.write(f"time: {_dt.datetime.now().isoformat()}\n")
-                handle.write(f"tool: {tool}\n")
-                handle.write(f"file_path: {file_path}\n")
-                handle.write(f"risk: {str(risky).lower()}\n")
-                handle.write(f"test_level: {level}\n")
-                handle.write(f"command: {cmd}\n")
-                handle.write(f"exit_code: {rc}\n")
-                if is_spiral:
-                    handle.write(f"severity: CRITICAL\n")
-                    handle.write(f"diagnosis: POTENTIAL DEATH SPIRAL\n")
+            print(f"⚠️  Post-write checks failed (rc={rc}). Issue queued (ID: {task_id}).", file=sys.stderr)
+        if missing_test_command:
+            print("⚠️  Risky edit has no configured test command. Pain signal queued.", file=sys.stderr)
+        if is_spiral:
+            print(f"💀 DEATH SPIRAL DETECTED. Queued for background analysis.{spiral_warning}", file=sys.stderr)
+        if (not hard_signal) and soft_signals:
+            print(
+                f"⚠️  Soft pain signals captured (score={pain_score}, "
+                f"threshold={soft_threshold}, base={base_threshold}). "
+                f"Queued (ID: {task_id}).",
+                file=sys.stderr,
+            )
+        return 0
 
-            print(f"❌ Post-write checks failed (rc={rc}). Pain flag written.{spiral_warning}", file=sys.stderr)
-            return rc
+    if missing_test_command:
+        print("⚠️  Risky edit has no configured test command. Pain flag written.", file=sys.stderr)
+        return 0
+
+    if rc != 0:
+        print(f"❌ Post-write checks failed (rc={rc}). Pain flag written.{spiral_warning}", file=sys.stderr)
+        return rc
+
+    if is_spiral:
+        print(f"💀 DEATH SPIRAL DETECTED. Pain flag written.{spiral_warning}", file=sys.stderr)
+        return 0
+
+    if soft_signals:
+        print(
+            f"⚠️  Soft pain signals captured (score={pain_score}, "
+            f"threshold={soft_threshold}, base={base_threshold}). Pain flag written.",
+            file=sys.stderr,
+        )
 
     return 0
 
@@ -316,11 +1021,12 @@ def session_init(payload, project_dir):
     evolution_mode = (profile or {}).get("evolution_mode") or "realtime"
 
     # 1. 检查异步队列状态
-    if os.path.isfile(QUEUE_FILE):
+    queue_file = _queue_file(project_dir)
+    if os.path.isfile(queue_file):
         try:
-            with open(QUEUE_FILE, "r", encoding="utf-8") as f:
+            with open(queue_file, "r", encoding="utf-8") as f:
                 queue = json.load(f)
-            pending = [t for t in queue if t["status"] == "pending"]
+            pending = [t for t in queue if str(t.get("status", "")).lower() == "pending"]
             if pending:
                 print(f"[INFO] 🚀 {len(pending)} tasks in evolution queue. Run /watch-evolution to start worker.")
         except:
@@ -347,15 +1053,20 @@ def session_init(payload, project_dir):
         print(f"  - Mode: {evolution_mode} | Audit: {audit_level}")
         print(f"  - Risk Paths: {json.dumps(risk_paths, ensure_ascii=False)}")
 
-    if os.path.isfile(pain_flag) and evolution_mode != "async":
+    if os.path.isfile(pain_flag):
         print("")
         print("[WARNING] Unresolved pain flag detected from last session.")
         print("Summary:")
-        with open(pain_flag, "r", encoding="utf-8") as handle:
-            for line in handle.read().splitlines()[:6]:
-                print(f"    {line}")
+        for line in _read_text_file(pain_flag).splitlines()[:6]:
+            print(f"    {line}")
         print("")
-        print("Suggestion: Run /evolve-task --recover to diagnose.")
+        if evolution_mode == "async":
+            if _has_open_evolution_tasks(project_dir):
+                print("Suggestion: Run /watch-evolution to process queued pain signals.")
+            else:
+                print("Suggestion: Queue is clear. Run /reflection-log and clear the pain flag.")
+        else:
+            print("Suggestion: Run /evolve-task --recover to diagnose.")
 
     if os.path.isfile(plan_path):
         status = ""
@@ -381,6 +1092,70 @@ def session_init(payload, project_dir):
         if last_issue:
             print(f"  - Latest Issue: {last_issue}")
 
+    return 0
+
+def user_prompt_context(payload, project_dir):
+    docs_dir = os.path.join(project_dir, "docs")
+    pain_flag = os.path.join(docs_dir, ".pain_flag")
+    pending_reflection = os.path.join(docs_dir, ".pending_reflection")
+    plan_status = _plan_status(project_dir)
+
+    context_lines = [
+        "[System Anchors]",
+        "- Workflow order is mandatory: Goal -> Map -> Plan -> Delegate -> Review -> Verify -> Log.",
+        "- Risky writes require PLAN READY and AUDIT PASS.",
+    ]
+    signal_lines = []
+
+    if os.path.isfile(pain_flag):
+        try:
+            with open(pain_flag, "r", encoding="utf-8") as handle:
+                preview = [line.strip() for line in handle.read().splitlines()[:3] if line.strip()]
+            if preview:
+                signal_lines.append("- Unresolved pain signal:")
+                for line in preview:
+                    signal_lines.append(f"  {line}")
+            else:
+                signal_lines.append("- Unresolved pain signal exists.")
+        except Exception:
+            signal_lines.append("- Unresolved pain signal exists.")
+
+    if os.path.isfile(pending_reflection):
+        signal_lines.append("- Pending reflection marker exists. `/reflection` should run before new implementation.")
+
+    if plan_status in ("DRAFT", "IN_PROGRESS"):
+        signal_lines.append(f"- Active plan status: STATUS: {plan_status}")
+
+    current_focus = os.path.join(docs_dir, "okr", "CURRENT_FOCUS.md")
+    if os.path.isfile(current_focus):
+        try:
+            with open(current_focus, "r", encoding="utf-8") as handle:
+                for line in handle:
+                    text = line.strip()
+                    if text.startswith("- [None]"):
+                        signal_lines.append("- Strategic focus is not initialized. Run `/init-strategy` then `/manage-okr`.")
+                        break
+                    if text.startswith("- [") or text.startswith("- "):
+                        signal_lines.append(f"- Current focus: {text[:120]}")
+                        break
+        except Exception:
+            pass
+
+    if not signal_lines:
+        signal_lines.append("- State: stable. Keep the workflow order and guardrails active.")
+
+    additional_context = "\n".join(context_lines + signal_lines)
+    print(
+        json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "UserPromptSubmit",
+                    "additionalContext": additional_context,
+                }
+            },
+            ensure_ascii=False,
+        )
+    )
     return 0
 
 def statusline(payload, project_dir):
@@ -426,7 +1201,10 @@ def statusline(payload, project_dir):
     if os.path.isfile(pain_flag):
         pain_icon = "💊"
         
-    # 5. OKR Focus (New)
+    # 5. Queue Metrics
+    queue_text = _format_queue_status(project_dir)
+
+    # 6. OKR Focus
     okr_path = os.path.join(project_dir, "docs", "okr", "CURRENT_FOCUS.md")
     okr_text = ""
     if os.path.isfile(okr_path):
@@ -448,6 +1226,7 @@ def statusline(payload, project_dir):
     ]
     if audit_icon: parts.append(audit_icon)
     if pain_icon: parts.append(pain_icon)
+    if queue_text: parts.append(queue_text)
     if okr_text: parts.append(okr_text)
     
     print(" ".join(parts))
@@ -462,23 +1241,25 @@ def stop_evolution_update(payload, project_dir):
     user_verdict = os.path.join(docs_dir, ".user_verdict.json")
 
     os.makedirs(docs_dir, exist_ok=True)
+    profile, _ = load_profile(project_dir)
+    evolution_mode = (profile or {}).get("evolution_mode") or "realtime"
 
     # 1. 处理 Pain Flag
     if os.path.isfile(pain_flag):
-        with open(pain_flag, "r", encoding="utf-8") as handle:
-            pain_content = handle.read()
+        pain_content = _read_text_file(pain_flag)
+        pain_data = _parse_kv_lines(pain_content)
+        issue_logged = str(pain_data.get("issue_logged", "false")).lower() == "true"
 
-        ts = _dt.datetime.now().isoformat()
-        title_snippet = " ".join(pain_content.splitlines()[:6])[:80]
-        title = f"Pain detected - {title_snippet}".strip()
+        if not issue_logged:
+            _append_issue_from_pain(issue_log, decisions, pain_content)
+            pain_data["issue_logged"] = "true"
+            pain_content = _serialize_kv_lines(pain_data)
 
-        with open(issue_log, "a", encoding="utf-8") as handle:
-            handle.write(f"\n## [{ts}] {title}\n\n### Pain Signal (auto-captured)\n```\n{pain_content}\n```\n\n### Diagnosis (Pending)\n- Run /evolve-task to diagnose.\n")
-
-        with open(decisions, "a", encoding="utf-8") as handle:
-            handle.write(f"\n## [{ts}] Decision checkpoint\n- Pain flag detected; IssueLog entry appended.\n")
-
-        os.remove(pain_flag)
+        if evolution_mode == "async" and _has_open_evolution_tasks(project_dir):
+            with open(pain_flag, "w", encoding="utf-8") as handle:
+                handle.write(pain_content)
+        else:
+            os.remove(pain_flag)
 
     # 2. 处理用户画像更新 (Ported from Bash)
     if os.path.isfile(user_verdict):
@@ -623,12 +1404,17 @@ def sync_agent_context(payload, project_dir):
             f.write("## Current Agent Reliability\n")
             
             for name, stats in agents.items():
+                clean_name = str(name).strip()
+                if not clean_name:
+                    continue
                 score = stats.get("score", 0)
                 level = "Neutral (Standard)"
                 if score >= 5: level = "High (Trustworthy)"
                 elif score < 0: level = "Low (Risky)"
                 
-                f.write(f"- **{name}**: [{level}] (Score: {score}, Wins: {stats.get('wins',0)}, Losses: {stats.get('losses',0)})\n")
+                wins = int(stats.get("wins", 0) or 0)
+                losses = int(stats.get("losses", 0) or 0)
+                f.write(f"- **{clean_name}**: [{level}] (Score: {score}, Wins: {wins}, Losses: {losses})\n")
                 
             f.write("\n## Operational Guidance\n")
             f.write("- If an agent has a **Low/Risky** status, you MUST double-check its output.\n")
@@ -639,7 +1425,7 @@ def sync_agent_context(payload, project_dir):
     return 0
 
 def subagent_complete(payload, project_dir):
-    agent_name = payload.get("agent_type") or ""
+    agent_name = str(payload.get("agent_type") or "").strip()
     scorecard = os.path.join(project_dir, "docs", "AGENT_SCORECARD.json")
     verdict_file = os.path.join(project_dir, "docs", ".verdict.json")
     pain_flag = os.path.join(project_dir, "docs", ".pain_flag")
@@ -651,14 +1437,17 @@ def subagent_complete(payload, project_dir):
     win = True
     score_delta = 1
     
+    verdict_reason = ""
     if os.path.isfile(verdict_file):
         try:
             with open(verdict_file, "r", encoding="utf-8") as f:
                 verdict = json.load(f)
             # 校验 target_agent
-            if verdict.get("target_agent") == agent_name:
+            target_agent = str(verdict.get("target_agent") or "").strip()
+            if target_agent == agent_name:
                 win = verdict.get("win", True)
                 score_delta = verdict.get("score_delta", 0)
+                verdict_reason = verdict.get("reason", "")
                 os.remove(verdict_file)
         except Exception:
             pass # Fallback to heuristic
@@ -687,6 +1476,17 @@ def subagent_complete(payload, project_dir):
             
         # 3. 触发上下文同步
         sync_agent_context(payload, project_dir)
+        _update_workboard(
+            project_dir,
+            {
+                "timestamp": _dt.datetime.now().isoformat(),
+                "session_id": payload.get("session_id"),
+                "agent": agent_name,
+                "result": "win" if win else "loss",
+                "score_delta": score_delta,
+                "reason": verdict_reason or ("pain_flag_fallback" if not win else "default_increment"),
+            },
+        )
         
     except Exception as e:
         logging.error(f"Failed to update scorecard: {e}")
@@ -786,6 +1586,9 @@ def pre_write_gate(payload, project_dir):
     profile, profile_path = load_profile(project_dir)
     if profile is None:
         print("Blocked: missing docs/PROFILE.json (required for gating).", file=sys.stderr)
+        return 2
+    if profile.get("_profile_invalid"):
+        print("Blocked: docs/PROFILE.json is invalid and was auto-sanitized. Fix the file before risky writes.", file=sys.stderr)
         return 2
 
     file_path = (payload.get("tool_input") or {}).get("file_path") or ""
@@ -905,6 +1708,7 @@ def main(argv):
             "audit_log": lambda: audit_log(payload, project_dir),
             "post_write_checks": lambda: post_write_checks(payload, project_dir),
             "session_init": lambda: session_init(payload, project_dir),
+            "user_prompt_context": lambda: user_prompt_context(payload, project_dir),
             "statusline": lambda: statusline(payload, project_dir),
             "stop_evolution_update": lambda: stop_evolution_update(payload, project_dir),
             "subagent_complete": lambda: subagent_complete(payload, project_dir),
@@ -919,7 +1723,14 @@ def main(argv):
             print(f"Unknown hook: {hook}", file=sys.stderr)
             return 2
 
-        return handler()
+        rc = handler()
+        if rc == 0:
+            status = "SUCCESS"
+        elif rc == 2:
+            status = "BLOCKED"
+        else:
+            status = "ERROR"
+        return rc
         
     except Exception as e:
         status = "ERROR"
