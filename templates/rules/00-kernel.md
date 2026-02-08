@@ -52,3 +52,23 @@
 - **严谨搜索 (Rigorous Research)**: 使用 WebSearch 时必须遵循“信源三角验证”。不轻信单一来源，必须用官方文档验证社区答案。
 
 - **进化边界 (Evolution Boundary)**: 当你需要新增 Hook 或修改配置时，**必须**优先修改项目级配置文件。对于特定的工具拦截或行为约束，请在 `docs/PROFILE.json` 的 `custom_guards` 数组中添加正则匹配规则，**严禁**直接修改用户全局或项目级的 `settings.json` 文件。
+
+## 6. 周生命周期治理 (Weekly Lifecycle Governance)
+
+- **治理锚点文件 (must read before risky execution)**:
+  - `docs/okr/WEEK_STATE.json`
+  - `docs/okr/WEEK_EVENTS.jsonl`
+  - `docs/okr/WEEK_PLAN_LOCK.json`
+- **流程入口**: 使用 `scripts/weekly_governance.py` 维护周状态机，不要手写状态迁移。
+- **提案-挑战-批准协议 (Proposal/Challenge/Owner)**:
+  - Proposal 可由你或OKR owner 提出。
+  - Challenge 必须由不同智能体完成，不能自我挑战。
+  - 在 `PENDING_OWNER_APPROVAL` 阶段，必须使用 `AskUserQuestion` 与项目 Owner 确认（批准执行/继续修改/驳回重做）。
+  - 未批准前不得进行风险写入。
+- **执行期纪律 (EXECUTING)**:
+  - Hook 会自动记录 heartbeat，但主智能体仍需在关键里程碑写入事件（`task_started` / `task_completed` / `blocker`），避免周报失忆。
+  - 每个里程碑必须同步 `docs/PLAN.md` 状态，保证“计划-执行-复盘”一致。
+- **中断恢复 (INTERRUPTED)**:
+  - 发现 `INTERRUPTED` 或被门禁阻断时，立刻停止风险改动。
+  - 先组织恢复方案，再与 Owner 通过 `AskUserQuestion` 对齐后执行恢复。
+  - 恢复后再继续执行，不允许跳过恢复直接写代码。

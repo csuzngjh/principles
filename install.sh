@@ -114,6 +114,16 @@ safe_copy "$SOURCE_DIR/docs/PLAN.md" "$TARGET_DIR/docs/PLAN.md"
 safe_copy "$SOURCE_DIR/docs/AUDIT.md" "$TARGET_DIR/docs/AUDIT.md"
 safe_copy "$SOURCE_DIR/docs/okr/CURRENT_FOCUS.md" "$TARGET_DIR/docs/okr/CURRENT_FOCUS.md"
 
+# PROFILE 生命周期配置迁移（兼容老项目）
+echo "🧩 Checking PROFILE lifecycle migration..."
+if python3 "$SOURCE_DIR/scripts/profile_lifecycle_migrator.py" --profile "$TARGET_DIR/docs/PROFILE.json"; then
+    echo "  - Lifecycle migration check complete."
+else
+    echo "  ⚠️  Lifecycle migration skipped: docs/PROFILE.json is invalid or incompatible."
+    echo "     Fix docs/PROFILE.json, then rerun:"
+    echo "     python3 scripts/profile_lifecycle_migrator.py --profile docs/PROFILE.json"
+fi
+
 # 6. 配置注入 (Merge Settings)
 echo "⚙️ Configuring settings..."
 
@@ -206,6 +216,8 @@ echo "🛠️  Deploying utility scripts..."
 mkdir -p "$TARGET_DIR/scripts"
 cp "$SOURCE_DIR/scripts/update_agent_framework.sh" "$TARGET_DIR/scripts/"
 cp "$SOURCE_DIR/scripts/evolution_daemon.py" "$TARGET_DIR/scripts/"  # Deploy Daemon
+cp "$SOURCE_DIR/scripts/weekly_governance.py" "$TARGET_DIR/scripts/"
+cp "$SOURCE_DIR/scripts/profile_lifecycle_migrator.py" "$TARGET_DIR/scripts/"
 
 # 注入源仓库路径
 # 使用 | 作为分隔符避免路径中的 / 冲突
@@ -215,6 +227,8 @@ else
   sed -i "s|SOURCE_REPO=.*|SOURCE_REPO=\"$SOURCE_DIR\"|g" "$TARGET_DIR/scripts/update_agent_framework.sh"
 fi
 chmod +x "$TARGET_DIR/scripts/update_agent_framework.sh"
+chmod +x "$TARGET_DIR/scripts/weekly_governance.py"
+chmod +x "$TARGET_DIR/scripts/profile_lifecycle_migrator.py"
 
 # 10. 资产保护声明 (原地加固)
 echo "🛡️  Protecting system assets..."

@@ -34,6 +34,19 @@ class TestHookRunnerAdvanced(unittest.TestCase):
         with open(os.path.join(self.docs_dir, "PROFILE.json"), "w", encoding="utf-8") as f:
             json.dump(content, f)
 
+    def write_week_state(self, content):
+        okr_dir = os.path.join(self.docs_dir, "okr")
+        os.makedirs(okr_dir, exist_ok=True)
+        with open(os.path.join(okr_dir, "WEEK_STATE.json"), "w", encoding="utf-8") as f:
+            json.dump(content, f, ensure_ascii=False, indent=2)
+
+    def append_week_event(self, event):
+        okr_dir = os.path.join(self.docs_dir, "okr")
+        os.makedirs(okr_dir, exist_ok=True)
+        path = os.path.join(okr_dir, "WEEK_EVENTS.jsonl")
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(event, ensure_ascii=False) + "\n")
+
     def test_backward_compatibility_old_profile(self):
         """测试旧版 PROFILE.json (无 custom_guards) 是否会导致崩溃"""
         profile = {
@@ -110,6 +123,58 @@ class TestHookRunnerAdvanced(unittest.TestCase):
         err = self.sys_stderr.getvalue()
         self.assertIn("Invalid PROFILE.json", err)
         self.assertIn("Blocked: docs/PROFILE.json is invalid", err)
+
+    def test_pre_write_gate_blocks_risky_write_without_week_lock(self):
+        """测试生命周期门禁：未获 Owner 批准时禁止风险写入"""
+        profile = {
+            "risk_paths": ["src/"],
+            "gate": {"require_plan_for_risk_paths": False},
+            "lifecycle": {
+                "enabled": True,
+                "require_owner_approval_for_risk_writes": True,
+                "require_challenge_before_approval": True
+            }
+        }
+        self.create_profile(profile)
+        self.write_week_state({
+            "stage": "PENDING_OWNER_APPROVAL",
+            "owner_approved": False,
+            "proposer_agent": "planner",
+            "challenger_agent": ""
+        })
+        payload = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": "src/risky.ts"}
+        }
+        rc = hook_runner.pre_write_gate(payload, self.test_dir)
+        self.assertEqual(rc, 2)
+        self.assertIn("weekly plan lock", self.sys_stderr.getvalue().lower())
+
+    def test_pre_write_gate_allows_risky_write_when_week_locked(self):
+        """测试生命周期门禁：已锁定周计划后允许风险写入"""
+        profile = {
+            "risk_paths": ["src/"],
+            "gate": {"require_plan_for_risk_paths": False},
+            "lifecycle": {
+                "enabled": True,
+                "require_owner_approval_for_risk_writes": True,
+                "require_challenge_before_approval": True
+            }
+        }
+        self.create_profile(profile)
+        self.write_week_state({
+            "stage": "LOCKED",
+            "owner_approved": True,
+            "proposer_agent": "planner",
+            "challenger_agent": "reviewer",
+            "lock": {"locked": True}
+        })
+        payload = {
+            "tool_name": "Edit",
+            "tool_input": {"file_path": "src/risky.ts"}
+        }
+        rc = hook_runner.pre_write_gate(payload, self.test_dir)
+        self.assertEqual(rc, 0)
 
     def test_custom_guards_block(self):
         """测试自定义正则拦截"""
@@ -302,6 +367,39 @@ class TestHookRunnerAdvanced(unittest.TestCase):
             self.assertGreaterEqual(int(queue[0]["details"]["pain_score"]), 30)
         finally:
             hook_runner._run_command = old_run_command
+
+    def test_post_write_checks_updates_week_heartbeat(self):
+        """测试执行期写入会刷新周执行心跳与事件日志"""
+        profile = {
+            "risk_paths": ["src/"],
+            "evolution_mode": "async",
+            "gate": {"require_plan_for_risk_paths": False},
+            "tests": {"on_change": "smoke", "commands": {"smoke": ""}},
+            "lifecycle": {
+                "enabled": True,
+                "require_owner_approval_for_risk_writes": False
+            }
+        }
+        self.create_profile(profile)
+        self.write_week_state({
+            "stage": "LOCKED",
+            "owner_approved": True,
+            "proposer_agent": "planner",
+            "challenger_agent": "reviewer",
+            "execution": {"heartbeat_count": 0}
+        })
+        rc = hook_runner.post_write_checks(
+            {"tool_name": "Edit", "tool_input": {"file_path": "src/safe.ts"}},
+            self.test_dir
+        )
+        self.assertEqual(rc, 0)
+        state_path = os.path.join(self.docs_dir, "okr", "WEEK_STATE.json")
+        with open(state_path, "r", encoding="utf-8") as f:
+            state = json.load(f)
+        self.assertEqual(state.get("stage"), "EXECUTING")
+        self.assertGreaterEqual(int((state.get("execution") or {}).get("heartbeat_count", 0)), 1)
+        events_path = os.path.join(self.docs_dir, "okr", "WEEK_EVENTS.jsonl")
+        self.assertTrue(os.path.isfile(events_path))
 
     def test_effective_soft_threshold_adapts_to_queue_pressure(self):
         """测试队列压力下自适应阈值下调"""
@@ -528,6 +626,60 @@ class TestHookRunnerAdvanced(unittest.TestCase):
         self.assertIn("[System Anchors]", context)
         self.assertIn("Workflow order is mandatory", context)
         self.assertIn("State: stable", context)
+
+    def test_user_prompt_context_includes_weekly_execution_recap(self):
+        """测试上下文注入包含周执行状态与近况回顾"""
+        self.write_week_state({
+            "stage": "EXECUTING",
+            "owner_approved": True,
+            "proposer_agent": "planner",
+            "challenger_agent": "reviewer",
+            "execution": {
+                "heartbeat_count": 4,
+                "completed_events": 2,
+                "blocked_events": 1,
+                "last_heartbeat_at": "2026-02-08T12:00:00"
+            }
+        })
+        self.append_week_event({
+            "type": "task_completed",
+            "summary": "finish parser migration",
+            "timestamp": "2026-02-08T11:58:00"
+        })
+        rc = hook_runner.user_prompt_context({}, self.test_dir)
+        self.assertEqual(rc, 0)
+        raw = self.sys_stdout.getvalue().strip()
+        payload = json.loads(raw)
+        context = payload["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("Weekly lifecycle stage", context)
+        self.assertIn("Completed this week: 2", context)
+        self.assertIn("finish parser migration", context)
+
+    def test_session_init_marks_week_interrupted_when_heartbeat_stale(self):
+        """测试 SessionStart 能检测并标记执行中断"""
+        profile = {
+            "lifecycle": {
+                "enabled": True,
+                "heartbeat_timeout_minutes": 1
+            }
+        }
+        self.create_profile(profile)
+        self.write_week_state({
+            "stage": "EXECUTING",
+            "owner_approved": True,
+            "execution": {
+                "last_heartbeat_at": "2020-01-01T00:00:00",
+                "heartbeat_count": 10
+            }
+        })
+        rc = hook_runner.session_init({}, self.test_dir)
+        self.assertEqual(rc, 0)
+        state_path = os.path.join(self.docs_dir, "okr", "WEEK_STATE.json")
+        with open(state_path, "r", encoding="utf-8") as f:
+            state = json.load(f)
+        self.assertEqual(state.get("stage"), "INTERRUPTED")
+        self.assertTrue((state.get("interruption") or {}).get("active"))
+        self.assertIn("WEEKLY EXECUTION INTERRUPTED", self.sys_stdout.getvalue())
 
     def test_subagent_complete_ignores_blank_agent_name(self):
         """测试空白 agent_name 不应污染 scorecard"""

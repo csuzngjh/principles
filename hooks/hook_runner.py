@@ -54,12 +54,29 @@ PROFILE_DEFAULTS = {
             "stable_quality_threshold": 5,
         },
     },
+    "lifecycle": {
+        "enabled": True,
+        "require_owner_approval_for_risk_writes": True,
+        "require_challenge_before_approval": True,
+        "heartbeat_timeout_minutes": 180,
+    },
     "permissions": {},
     "custom_guards": [],
 }
 PROFILE_AUDIT_LEVELS = {"low", "medium", "high"}
 PROFILE_EVOLUTION_MODES = {"realtime", "async"}
 PROFILE_TEST_LEVELS = {"smoke", "unit", "full"}
+WEEK_STAGES = {
+    "UNPLANNED",
+    "DRAFT",
+    "CHALLENGE",
+    "PENDING_OWNER_APPROVAL",
+    "LOCKED",
+    "EXECUTING",
+    "REVIEW",
+    "CLOSED",
+    "INTERRUPTED",
+}
 
 def _queue_file(project_dir=None):
     if project_dir:
@@ -453,6 +470,31 @@ def _normalize_profile(raw_profile, profile_path):
         else:
             warnings.append("pain must be an object; fallback to defaults.")
 
+        raw_lifecycle = raw_profile.get("lifecycle")
+        if raw_lifecycle is None:
+            # Legacy compatibility: old profiles had no lifecycle section and should not
+            # suddenly start blocking risky writes after upgrade.
+            lifecycle = copy.deepcopy(defaults["lifecycle"])
+            lifecycle["enabled"] = False
+            normalized["lifecycle"] = lifecycle
+        elif isinstance(raw_lifecycle, dict):
+            lifecycle = copy.deepcopy(defaults["lifecycle"])
+            lifecycle["enabled"] = _pick_bool(raw_lifecycle.get("enabled"), lifecycle["enabled"])
+            lifecycle["require_owner_approval_for_risk_writes"] = _pick_bool(
+                raw_lifecycle.get("require_owner_approval_for_risk_writes"),
+                lifecycle["require_owner_approval_for_risk_writes"],
+            )
+            lifecycle["require_challenge_before_approval"] = _pick_bool(
+                raw_lifecycle.get("require_challenge_before_approval"),
+                lifecycle["require_challenge_before_approval"],
+            )
+            lifecycle["heartbeat_timeout_minutes"] = max(
+                1, _coerce_int(raw_lifecycle.get("heartbeat_timeout_minutes"), lifecycle["heartbeat_timeout_minutes"])
+            )
+            normalized["lifecycle"] = lifecycle
+        elif raw_lifecycle is not None:
+            warnings.append("lifecycle must be an object; fallback to defaults.")
+
         raw_permissions = raw_profile.get("permissions", {})
         if isinstance(raw_permissions, dict):
             normalized["permissions"] = raw_permissions
@@ -581,6 +623,28 @@ def _format_queue_status(project_dir, now=None):
             next_label = f"{(min_delta + 59) // 60}m"
 
     return f"🚦P{pending}|R{retrying}|N{next_label}"
+
+def _format_week_status(project_dir):
+    state, _, exists = _load_week_state(project_dir)
+    stage = str(state.get("stage") or "UNPLANNED").upper()
+    if not exists and stage == "UNPLANNED":
+        return ""
+
+    tags = {
+        "UNPLANNED": "U",
+        "DRAFT": "D",
+        "CHALLENGE": "C",
+        "PENDING_OWNER_APPROVAL": "A",
+        "LOCKED": "L",
+        "EXECUTING": "E",
+        "REVIEW": "R",
+        "CLOSED": "X",
+        "INTERRUPTED": "I",
+    }
+    execution = state.get("execution") or {}
+    completed = int(execution.get("completed_events") or 0)
+    blocked = int(execution.get("blocked_events") or 0)
+    return f"📅{tags.get(stage, '?')} C{completed}/B{blocked}"
 
 def _parse_kv_lines(text):
     data = {}
@@ -816,6 +880,241 @@ def _update_workboard(project_dir, event):
     with open(workboard_path, "w", encoding="utf-8") as handle:
         json.dump(board, handle, ensure_ascii=False, indent=2)
 
+def _week_state_path(project_dir):
+    return os.path.join(project_dir, "docs", "okr", "WEEK_STATE.json")
+
+def _week_events_path(project_dir):
+    return os.path.join(project_dir, "docs", "okr", "WEEK_EVENTS.jsonl")
+
+def _current_week_id(now=None):
+    dt = now or _dt.datetime.now()
+    iso = dt.isocalendar()
+    return f"{iso.year}-W{iso.week:02d}"
+
+def _default_week_state(now=None):
+    ts = (now or _dt.datetime.now()).isoformat()
+    return {
+        "version": 1,
+        "week_id": _current_week_id(now),
+        "stage": "UNPLANNED",
+        "owner_approved": False,
+        "owner_decision": "",
+        "owner_note": "",
+        "proposer_agent": "",
+        "challenger_agent": "",
+        "lock": {"locked": False, "locked_at": ""},
+        "execution": {
+            "started_at": "",
+            "last_heartbeat_at": "",
+            "heartbeat_count": 0,
+            "completed_events": 0,
+            "blocked_events": 0,
+        },
+        "interruption": {
+            "active": False,
+            "detected_at": "",
+            "reason": "",
+        },
+        "updated_at": ts,
+    }
+
+def _normalize_week_state(raw_state, now=None):
+    state = _default_week_state(now)
+    if not isinstance(raw_state, dict):
+        return state
+
+    for key, value in raw_state.items():
+        if key not in state:
+            state[key] = value
+
+    stage = str(raw_state.get("stage") or state["stage"]).upper()
+    if stage not in WEEK_STAGES:
+        stage = state["stage"]
+    state["stage"] = stage
+    state["owner_approved"] = bool(raw_state.get("owner_approved", state["owner_approved"]))
+    state["owner_decision"] = str(raw_state.get("owner_decision") or state["owner_decision"])
+    state["owner_note"] = str(raw_state.get("owner_note") or state["owner_note"])
+    state["proposer_agent"] = str(raw_state.get("proposer_agent") or state["proposer_agent"]).strip()
+    state["challenger_agent"] = str(raw_state.get("challenger_agent") or state["challenger_agent"]).strip()
+
+    lock = raw_state.get("lock")
+    if isinstance(lock, dict):
+        state["lock"]["locked"] = bool(lock.get("locked", state["lock"]["locked"]))
+        state["lock"]["locked_at"] = str(lock.get("locked_at") or state["lock"]["locked_at"])
+
+    execution = raw_state.get("execution")
+    if isinstance(execution, dict):
+        state["execution"]["started_at"] = str(execution.get("started_at") or state["execution"]["started_at"])
+        state["execution"]["last_heartbeat_at"] = str(
+            execution.get("last_heartbeat_at") or state["execution"]["last_heartbeat_at"]
+        )
+        state["execution"]["heartbeat_count"] = max(
+            0, _coerce_int(execution.get("heartbeat_count"), state["execution"]["heartbeat_count"])
+        )
+        state["execution"]["completed_events"] = max(
+            0, _coerce_int(execution.get("completed_events"), state["execution"]["completed_events"])
+        )
+        state["execution"]["blocked_events"] = max(
+            0, _coerce_int(execution.get("blocked_events"), state["execution"]["blocked_events"])
+        )
+
+    interruption = raw_state.get("interruption")
+    if isinstance(interruption, dict):
+        state["interruption"]["active"] = bool(interruption.get("active", state["interruption"]["active"]))
+        state["interruption"]["detected_at"] = str(
+            interruption.get("detected_at") or state["interruption"]["detected_at"]
+        )
+        state["interruption"]["reason"] = str(interruption.get("reason") or state["interruption"]["reason"])
+
+    state["updated_at"] = str(raw_state.get("updated_at") or state["updated_at"])
+    return state
+
+def _load_week_state(project_dir):
+    path = _week_state_path(project_dir)
+    if not os.path.isfile(path):
+        return _default_week_state(), path, False
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            raw = json.load(handle)
+        return _normalize_week_state(raw), path, True
+    except Exception:
+        return _default_week_state(), path, False
+
+def _save_week_state(project_dir, state):
+    path = _week_state_path(project_dir)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    state["updated_at"] = _dt.datetime.now().isoformat()
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(state, handle, ensure_ascii=False, indent=2)
+    return path
+
+def _append_week_event(project_dir, event_type, payload=None):
+    state, _, _ = _load_week_state(project_dir)
+    path = _week_events_path(project_dir)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    event = {
+        "timestamp": _dt.datetime.now().isoformat(),
+        "week_id": state.get("week_id") or _current_week_id(),
+        "type": event_type,
+    }
+    if isinstance(payload, dict):
+        event.update(payload)
+    with open(path, "a", encoding="utf-8") as handle:
+        handle.write(json.dumps(event, ensure_ascii=False) + "\n")
+
+def _read_week_events(project_dir, limit=50):
+    path = _week_events_path(project_dir)
+    if not os.path.isfile(path):
+        return []
+    rows = []
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            for line in handle:
+                text = line.strip()
+                if not text:
+                    continue
+                try:
+                    rows.append(json.loads(text))
+                except Exception:
+                    continue
+    except Exception:
+        return []
+    return rows[-limit:]
+
+def _week_lock_is_valid(state, lifecycle_cfg):
+    if not _pick_bool(lifecycle_cfg.get("enabled"), True):
+        return True
+    if not _pick_bool(lifecycle_cfg.get("require_owner_approval_for_risk_writes"), True):
+        return True
+    if not bool(state.get("owner_approved")):
+        return False
+    if _pick_bool(lifecycle_cfg.get("require_challenge_before_approval"), True):
+        if not str(state.get("challenger_agent") or "").strip():
+            return False
+    if state.get("stage") == "INTERRUPTED":
+        return False
+    stage = str(state.get("stage") or "").upper()
+    lock = state.get("lock") or {}
+    locked = bool(lock.get("locked"))
+    return stage in {"LOCKED", "EXECUTING", "REVIEW", "CLOSED"} or locked
+
+def _record_execution_heartbeat(project_dir, profile, payload, file_path):
+    lifecycle = (profile or {}).get("lifecycle") or {}
+    if not _pick_bool(lifecycle.get("enabled"), True):
+        return
+
+    state, _, _ = _load_week_state(project_dir)
+    if not bool(state.get("owner_approved")):
+        return
+
+    stage = str(state.get("stage") or "").upper()
+    if stage not in {"LOCKED", "EXECUTING", "REVIEW"}:
+        return
+
+    now = _dt.datetime.now().isoformat()
+    if stage == "LOCKED":
+        state["stage"] = "EXECUTING"
+        if not state.get("execution", {}).get("started_at"):
+            state["execution"]["started_at"] = now
+    state["execution"]["last_heartbeat_at"] = now
+    state["execution"]["heartbeat_count"] = int(state["execution"].get("heartbeat_count") or 0) + 1
+    state["interruption"]["active"] = False
+    state["interruption"]["detected_at"] = ""
+    state["interruption"]["reason"] = ""
+
+    _save_week_state(project_dir, state)
+    _append_week_event(
+        project_dir,
+        "heartbeat",
+        {
+            "tool": payload.get("tool_name"),
+            "file_path": file_path,
+            "summary": f"heartbeat after {payload.get('tool_name')} {file_path or ''}".strip(),
+        },
+    )
+
+def _mark_week_interrupted_if_stale(project_dir, profile):
+    lifecycle = (profile or {}).get("lifecycle") or {}
+    if not _pick_bool(lifecycle.get("enabled"), True):
+        return None
+
+    state, _, exists = _load_week_state(project_dir)
+    if not exists:
+        return None
+    if str(state.get("stage") or "").upper() != "EXECUTING":
+        return None
+
+    timeout_minutes = max(1, _coerce_int(lifecycle.get("heartbeat_timeout_minutes"), 180))
+    last_heartbeat = _parse_iso_datetime((state.get("execution") or {}).get("last_heartbeat_at"))
+    if last_heartbeat is None:
+        return None
+
+    now = _dt.datetime.now()
+    if last_heartbeat.tzinfo is not None and now.tzinfo is None:
+        now_cmp = _dt.datetime.now(tz=last_heartbeat.tzinfo)
+    elif last_heartbeat.tzinfo is None and now.tzinfo is not None:
+        now_cmp = now.replace(tzinfo=None)
+    else:
+        now_cmp = now
+
+    age_minutes = (now_cmp - last_heartbeat).total_seconds() / 60.0
+    if age_minutes < timeout_minutes:
+        return None
+
+    state["stage"] = "INTERRUPTED"
+    state["interruption"]["active"] = True
+    state["interruption"]["detected_at"] = _dt.datetime.now().isoformat()
+    state["interruption"]["reason"] = (
+        f"No heartbeat for {int(age_minutes)}m (timeout={timeout_minutes}m)."
+    )
+    _save_week_state(project_dir, state)
+    _append_week_event(
+        project_dir,
+        "interruption_detected",
+        {"summary": state["interruption"]["reason"]},
+    )
+    return state
+
 # --- Hook Handlers ---
 
 def audit_log(payload, project_dir):
@@ -870,6 +1169,7 @@ def post_write_checks(payload, project_dir):
     rel = normalize_path(file_path, project_dir) if file_path else ""
     risk_paths = profile.get("risk_paths") or []
     risky = is_risky(rel, risk_paths) if file_path else False
+    _record_execution_heartbeat(project_dir, profile, payload, file_path)
 
     tests = profile.get("tests") or {}
     level = tests.get("on_change") or "smoke"
@@ -1019,6 +1319,12 @@ def session_init(payload, project_dir):
     print("[INFO] Evolutionary Programming Agent Initialized")
 
     evolution_mode = (profile or {}).get("evolution_mode") or "realtime"
+    interrupted_state = _mark_week_interrupted_if_stale(project_dir, profile or {})
+    if interrupted_state:
+        print("")
+        print("[WARNING] WEEKLY EXECUTION INTERRUPTED")
+        print(f"Reason: {(interrupted_state.get('interruption') or {}).get('reason')}")
+        print("Action: Recover lifecycle state before new risky execution.")
 
     # 1. 检查异步队列状态
     queue_file = _queue_file(project_dir)
@@ -1052,6 +1358,12 @@ def session_init(payload, project_dir):
         risk_paths = profile.get("risk_paths") or []
         print(f"  - Mode: {evolution_mode} | Audit: {audit_level}")
         print(f"  - Risk Paths: {json.dumps(risk_paths, ensure_ascii=False)}")
+        week_state, _, week_exists = _load_week_state(project_dir)
+        if week_exists or str(week_state.get("stage") or "").upper() != "UNPLANNED":
+            print(
+                "  - Weekly Lifecycle: "
+                f"{week_state.get('stage')} | owner_approved={week_state.get('owner_approved')}"
+            )
 
     if os.path.isfile(pain_flag):
         print("")
@@ -1099,6 +1411,7 @@ def user_prompt_context(payload, project_dir):
     pain_flag = os.path.join(docs_dir, ".pain_flag")
     pending_reflection = os.path.join(docs_dir, ".pending_reflection")
     plan_status = _plan_status(project_dir)
+    profile, _ = load_profile(project_dir)
 
     context_lines = [
         "[System Anchors]",
@@ -1125,6 +1438,36 @@ def user_prompt_context(payload, project_dir):
 
     if plan_status in ("DRAFT", "IN_PROGRESS"):
         signal_lines.append(f"- Active plan status: STATUS: {plan_status}")
+
+    lifecycle = (profile or {}).get("lifecycle") or {}
+    if _pick_bool(lifecycle.get("enabled"), True):
+        week_state, _, week_exists = _load_week_state(project_dir)
+        if week_exists or str(week_state.get("stage") or "").upper() != "UNPLANNED":
+            stage = str(week_state.get("stage") or "UNPLANNED").upper()
+            signal_lines.append(f"- Weekly lifecycle stage: {stage}")
+            execution = week_state.get("execution") or {}
+            signal_lines.append(
+                f"- Completed this week: {int(execution.get('completed_events') or 0)} | "
+                f"Blocked: {int(execution.get('blocked_events') or 0)} | "
+                f"Heartbeats: {int(execution.get('heartbeat_count') or 0)}"
+            )
+
+            if stage == "PENDING_OWNER_APPROVAL" and not week_state.get("owner_approved"):
+                signal_lines.append("- Owner approval missing: use AskUserQuestion before execution.")
+            if stage == "INTERRUPTED":
+                reason = (week_state.get("interruption") or {}).get("reason") or "unknown interruption"
+                signal_lines.append(f"- Lifecycle interrupted: {reason}")
+                signal_lines.append("- Recover plan state before continuing risky execution.")
+
+            recent_events = _read_week_events(project_dir, limit=30)
+            completed = [e for e in recent_events if str(e.get("type") or "") == "task_completed"]
+            if completed:
+                latest = completed[-1]
+                summary = (
+                    str(latest.get("summary") or latest.get("task") or latest.get("file_path") or "").strip()
+                    or "latest completion recorded"
+                )
+                signal_lines.append(f"- Latest completed task: {summary[:140]}")
 
     current_focus = os.path.join(docs_dir, "okr", "CURRENT_FOCUS.md")
     if os.path.isfile(current_focus):
@@ -1203,6 +1546,7 @@ def statusline(payload, project_dir):
         
     # 5. Queue Metrics
     queue_text = _format_queue_status(project_dir)
+    week_text = _format_week_status(project_dir)
 
     # 6. OKR Focus
     okr_path = os.path.join(project_dir, "docs", "okr", "CURRENT_FOCUS.md")
@@ -1227,6 +1571,7 @@ def statusline(payload, project_dir):
     if audit_icon: parts.append(audit_icon)
     if pain_icon: parts.append(pain_icon)
     if queue_text: parts.append(queue_text)
+    if week_text: parts.append(week_text)
     if okr_text: parts.append(okr_text)
     
     print(" ".join(parts))
@@ -1487,7 +1832,27 @@ def subagent_complete(payload, project_dir):
                 "reason": verdict_reason or ("pain_flag_fallback" if not win else "default_increment"),
             },
         )
-        
+        week_state, _, _ = _load_week_state(project_dir)
+        stage = str(week_state.get("stage") or "").upper()
+        if stage in {"LOCKED", "EXECUTING", "REVIEW", "INTERRUPTED"}:
+            if win:
+                week_state["execution"]["completed_events"] = int(
+                    week_state.get("execution", {}).get("completed_events") or 0
+                ) + 1
+            else:
+                week_state["execution"]["blocked_events"] = int(
+                    week_state.get("execution", {}).get("blocked_events") or 0
+                ) + 1
+            _save_week_state(project_dir, week_state)
+            _append_week_event(
+                project_dir,
+                "task_completed" if win else "blocker",
+                {
+                    "agent": agent_name,
+                    "summary": verdict_reason or ("subagent finished with win" if win else "subagent hit blocker"),
+                },
+            )
+         
     except Exception as e:
         logging.error(f"Failed to update scorecard: {e}")
 
@@ -1625,11 +1990,26 @@ def pre_write_gate(payload, project_dir):
     gate = profile.get("gate") or {}
     require_plan = bool(gate.get("require_plan_for_risk_paths", False))
     require_audit = bool(gate.get("require_audit_before_write", False))
+    lifecycle = profile.get("lifecycle") or {}
 
     plan_path = os.path.join(project_dir, "docs", "PLAN.md")
     audit_path = os.path.join(project_dir, "docs", "AUDIT.md")
 
     if risky:
+        state, _, _ = _load_week_state(project_dir)
+        if str(state.get("stage") or "").upper() == "INTERRUPTED":
+            print(
+                "Blocked: weekly execution interrupted. Recover lifecycle state before risky writes.",
+                file=sys.stderr,
+            )
+            return 2
+        if not _week_lock_is_valid(state, lifecycle):
+            print(
+                "Blocked: weekly plan lock missing. Use proposal+challenge flow and AskUserQuestion owner approval first.",
+                file=sys.stderr,
+            )
+            return 2
+
         if require_plan:
             if not os.path.isfile(plan_path):
                 print(f"Blocked: Writing to risky path '{rel}' requires 'docs/PLAN.md'.", file=sys.stderr)

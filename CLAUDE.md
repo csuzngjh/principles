@@ -6,6 +6,9 @@ This is the project's primary memory file. It contains project-specific instruct
 - User Awareness: @docs/USER_CONTEXT.md
 - Agent Performance: @docs/AGENT_CONTEXT.md
 - Strategic Focus: @docs/okr/CURRENT_FOCUS.md
+- Weekly State: @docs/okr/WEEK_STATE.json
+- Weekly Events: @docs/okr/WEEK_EVENTS.jsonl
+- Weekly Plan Lock: @docs/okr/WEEK_PLAN_LOCK.json
 - Principles: @docs/PRINCIPLES.md
 - Active Plan: @docs/PLAN.md
 - Evolution Queue: @docs/EVOLUTION_QUEUE.json
@@ -28,6 +31,7 @@ This is the project's primary memory file. It contains project-specific instruct
 Use these tools to align the system with long-term goals:
 - **`/init-strategy`**: Run this once per project to define the Vision and core Objectives.
 - **`/manage-okr`**: Run this per sprint/iteration to decompose objectives into specific Agent Key Results and track progress.
+- **`scripts/weekly_governance.py`**: Use this to manage weekly lifecycle transitions (proposal/challenge/owner approval/interrupt/recover).
 - Always refer to `docs/okr/CURRENT_FOCUS.md` to ensure your current task aligns with the project's "North Star".
 
 
