@@ -1771,6 +1771,77 @@ def user_prompt_context(payload, project_dir):
     )
     return 0
 
+def emit_signal(payload, project_dir):
+    """Event Bus: Emit a signal to WORKBOARD.json"""
+    hook_event = os.environ.get("CLAUDE_HOOK_TYPE", "Unknown")
+    agent_type = payload.get("agent_type") or "main"
+    tool_input = payload.get("tool_input") or {}
+    
+    # 自动推断信号类型
+    sig_type = "generic"
+    if hook_event == "PostToolUse":
+        sig_type = "discovery" if payload.get("tool_name") in ("Grep", "Glob") else "modification"
+    elif "Stop" in hook_event:
+        sig_type = "milestone"
+
+    signal = {
+        "timestamp": _dt.datetime.now().isoformat(),
+        "event": "signal",
+        "type": sig_type,
+        "source": agent_type,
+        "hook": hook_event,
+        "message": f"{agent_type} executed {payload.get('tool_name') or 'task'}",
+        "details": tool_input
+    }
+    _update_workboard(project_dir, signal)
+    return 0
+
+def subagent_onboarding(payload, project_dir):
+    """通用智能体入职协议：向总线广播新成员加入"""
+    agent_type = payload.get("agent_type") or "unknown"
+    session_id = payload.get("session_id")
+    
+    signal = {
+        "timestamp": _dt.datetime.now().isoformat(),
+        "event": "team_entry",
+        "type": "onboarding",
+        "source": agent_type,
+        "session_id": session_id,
+        "message": f"Teammate [{agent_type}] has joined the session."
+    }
+    _update_workboard(project_dir, signal)
+    return 0
+
+def subagent_init_map(payload, project_dir):
+    """为子智能体注入地图上下文 (v2.1.0+ 特性)"""
+    maps = []
+    # 查找可能的地图目录
+    map_dirs = ["codemaps", "docs/codemaps", "docs"]
+    for d in map_dirs:
+        full_path = os.path.join(project_dir, d)
+        if os.path.isdir(full_path):
+            for f in os.listdir(full_path):
+                if f.endswith(".md") and ("architecture" in f or "backend" in f or "map" in f):
+                    maps.append(os.path.join(d, f))
+    
+    if not maps:
+        return 0
+
+    # 构造注入信息
+    context = "[Subagent Context Injection: Map Awareness]\n"
+    context += "You are provided with the following architectural maps. READ THEM before searching code:\n"
+    for m in maps:
+        context += f"- @{m}\n"
+    
+    # 利用 v2.1.0+ 的 additionalContext 响应格式
+    print(json.dumps({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "additionalContext": context
+        }
+    }))
+    return 0
+
 def statusline(payload, project_dir):
     """
     Generate a custom status line for Claude Code.
@@ -2412,6 +2483,9 @@ def main(argv):
             "shellcheck_guard": lambda: shellcheck_guard(payload, project_dir),
             "sync_user_context": lambda: sync_user_context(payload, project_dir), # New
             "sync_agent_context": lambda: sync_agent_context(payload, project_dir), # New
+            "subagent_init_map": lambda: subagent_init_map(payload, project_dir), # New
+            "subagent_onboarding": lambda: subagent_onboarding(payload, project_dir), # New
+            "emit_signal": lambda: emit_signal(payload, project_dir), # New
         }
 
         handler = handlers.get(hook)

@@ -4,6 +4,8 @@ description: Collect evidence fast (files, logs, repro steps). Use proactively b
 tools: Read, Grep, Glob, Bash
 model: haiku
 permissionMode: plan
+skills:
+  - triage
 ---
 
 # Role
