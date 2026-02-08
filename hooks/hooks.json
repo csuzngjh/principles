@@ -28,6 +28,16 @@
   ],
   "PreToolUse": [
     {
+      "matcher": "AskUserQuestion",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/hook_runner.py --hook pre_ask_user_gate",
+          "timeout": 8
+        }
+      ]
+    },
+    {
       "matcher": "Write|Edit",
       "hooks": [
         {

@@ -101,12 +101,14 @@ done
 cp "$SOURCE_DIR/templates/rules/00-kernel.md" "$TARGET_DIR/.claude/templates/"
 cp "$SOURCE_DIR/docs/PROFILE.json" "$TARGET_DIR/.claude/templates/"
 cp "$SOURCE_DIR/docs/PROFILE.schema.json" "$TARGET_DIR/.claude/templates/"
+cp "$SOURCE_DIR/docs/DECISION_POLICY.json" "$TARGET_DIR/.claude/templates/"
 
 # 5. 初始化文档 (使用 Safe Copy，绝对保护用户数据)
 echo "📄 Initializing docs..."
 
 safe_copy "$SOURCE_DIR/docs/PROFILE.json" "$TARGET_DIR/docs/PROFILE.json"
 safe_copy "$SOURCE_DIR/docs/PROFILE.schema.json" "$TARGET_DIR/docs/PROFILE.schema.json"
+safe_copy "$SOURCE_DIR/docs/DECISION_POLICY.json" "$TARGET_DIR/docs/DECISION_POLICY.json"
 safe_copy "$SOURCE_DIR/docs/USER_PROFILE.json" "$TARGET_DIR/docs/USER_PROFILE.json"
 safe_copy "$SOURCE_DIR/docs/AGENT_SCORECARD.json" "$TARGET_DIR/docs/AGENT_SCORECARD.json"
 safe_copy "$SOURCE_DIR/docs/WORKBOARD.json" "$TARGET_DIR/docs/WORKBOARD.json"
@@ -241,6 +243,7 @@ Deleting these files will cause loss of memory, personality, and guardrails.
 ## Core Identity
 - **PRINCIPLES.md**: The permanent rules learned from failures.
 - **PROFILE.json**: The system's hardware configuration and risk gates.
+- **DECISION_POLICY.json**: The autonomy policy for AskUserQuestion escalation.
 - **USER_PROFILE.json**: Your cognitive portrait (expertise & preferences).
 - **AGENT_SCORECARD.json**: The track record of all subagents.
 

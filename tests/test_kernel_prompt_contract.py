@@ -19,6 +19,7 @@ class TestKernelPromptContract(unittest.TestCase):
             "WEEK_STATE.json",
             "WEEK_EVENTS.jsonl",
             "WEEK_PLAN_LOCK.json",
+            "DECISION_POLICY.json",
             "scripts/weekly_governance.py",
             "AskUserQuestion",
             "PENDING_OWNER_APPROVAL",
@@ -33,6 +34,7 @@ class TestKernelPromptContract(unittest.TestCase):
             "WEEK_STATE.json",
             "WEEK_EVENTS.jsonl",
             "WEEK_PLAN_LOCK.json",
+            "DECISION_POLICY.json",
             "scripts/weekly_governance.py",
         ]
         for token in required_tokens:

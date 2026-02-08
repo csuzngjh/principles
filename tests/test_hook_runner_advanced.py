@@ -34,6 +34,14 @@ class TestHookRunnerAdvanced(unittest.TestCase):
         with open(os.path.join(self.docs_dir, "PROFILE.json"), "w", encoding="utf-8") as f:
             json.dump(content, f)
 
+    def create_decision_policy(self, content):
+        with open(os.path.join(self.docs_dir, "DECISION_POLICY.json"), "w", encoding="utf-8") as f:
+            json.dump(content, f, ensure_ascii=False, indent=2)
+
+    def create_user_profile(self, content):
+        with open(os.path.join(self.docs_dir, "USER_PROFILE.json"), "w", encoding="utf-8") as f:
+            json.dump(content, f, ensure_ascii=False, indent=2)
+
     def write_week_state(self, content):
         okr_dir = os.path.join(self.docs_dir, "okr")
         os.makedirs(okr_dir, exist_ok=True)
@@ -123,6 +131,99 @@ class TestHookRunnerAdvanced(unittest.TestCase):
         err = self.sys_stderr.getvalue()
         self.assertIn("Invalid PROFILE.json", err)
         self.assertIn("Blocked: docs/PROFILE.json is invalid", err)
+
+    def test_pre_ask_user_gate_blocks_micro_decision_for_expert(self):
+        """测试 AskUserQuestion 门禁：专家用户下微观决策应自动化执行，不应频繁打扰"""
+        self.create_decision_policy({
+            "enabled": True,
+            "autonomy": {
+                "block_micro_ask_user_question": True,
+                "high_impact_score_threshold": 70,
+                "medium_impact_score_threshold": 40
+            },
+            "user_profile": {
+                "domain_low_threshold": 0,
+                "ask_on_medium_for_low_expertise": True
+            }
+        })
+        self.create_user_profile({
+            "domains": {"frontend": 9},
+            "preferences": {}
+        })
+
+        payload = {
+            "tool_name": "AskUserQuestion",
+            "tool_input": {
+                "question": "Should I rename this local variable to foo or bar?",
+                "decision_context": {
+                    "domain": "frontend",
+                    "impact_level": "low",
+                    "impact_score": 10,
+                    "reversible": True
+                }
+            }
+        }
+        rc = hook_runner.pre_ask_user_gate(payload, self.test_dir)
+        self.assertEqual(rc, 2)
+        self.assertIn("decide autonomously", self.sys_stderr.getvalue().lower())
+
+    def test_pre_ask_user_gate_allows_high_impact_question(self):
+        """测试 AskUserQuestion 门禁：高影响决策可向用户请示"""
+        self.create_decision_policy({
+            "enabled": True,
+            "autonomy": {
+                "block_micro_ask_user_question": True,
+                "high_impact_score_threshold": 70,
+                "medium_impact_score_threshold": 40
+            }
+        })
+        payload = {
+            "tool_name": "AskUserQuestion",
+            "tool_input": {
+                "question": "Should we proceed with irreversible DB migration in production?",
+                "decision_context": {
+                    "impact_level": "high",
+                    "impact_score": 95,
+                    "reversible": False,
+                    "requires_owner_decision": True
+                }
+            }
+        }
+        rc = hook_runner.pre_ask_user_gate(payload, self.test_dir)
+        self.assertEqual(rc, 0)
+
+    def test_pre_ask_user_gate_allows_medium_when_user_expertise_low(self):
+        """测试 AskUserQuestion 门禁：中等影响在低熟练度领域可升级为请示"""
+        self.create_decision_policy({
+            "enabled": True,
+            "autonomy": {
+                "block_micro_ask_user_question": True,
+                "high_impact_score_threshold": 70,
+                "medium_impact_score_threshold": 40
+            },
+            "user_profile": {
+                "domain_low_threshold": 0,
+                "ask_on_medium_for_low_expertise": True
+            }
+        })
+        self.create_user_profile({
+            "domains": {"architecture": -2},
+            "preferences": {}
+        })
+        payload = {
+            "tool_name": "AskUserQuestion",
+            "tool_input": {
+                "question": "Should we split this service into two modules now?",
+                "decision_context": {
+                    "domain": "architecture",
+                    "impact_level": "medium",
+                    "impact_score": 50,
+                    "reversible": True
+                }
+            }
+        }
+        rc = hook_runner.pre_ask_user_gate(payload, self.test_dir)
+        self.assertEqual(rc, 0)
 
     def test_pre_write_gate_blocks_risky_write_without_week_lock(self):
         """测试生命周期门禁：未获 Owner 批准时禁止风险写入"""

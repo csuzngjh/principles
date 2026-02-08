@@ -59,6 +59,7 @@
   - `docs/okr/WEEK_STATE.json`
   - `docs/okr/WEEK_EVENTS.jsonl`
   - `docs/okr/WEEK_PLAN_LOCK.json`
+  - `docs/DECISION_POLICY.json`
 - **流程入口**: 使用 `scripts/weekly_governance.py` 维护周状态机，不要手写状态迁移。
 - **提案-挑战-批准协议 (Proposal/Challenge/Owner)**:
   - Proposal 可由你或OKR owner 提出。
@@ -72,3 +73,15 @@
   - 发现 `INTERRUPTED` 或被门禁阻断时，立刻停止风险改动。
   - 先组织恢复方案，再与 Owner 通过 `AskUserQuestion` 对齐后执行恢复。
   - 恢复后再继续执行，不允许跳过恢复直接写代码。
+
+## 7. 决策分级协议 (Decision Autonomy)
+
+- **A: 自动执行**（低影响、可回滚、局部变更）:
+  - 不要调用 `AskUserQuestion`。
+  - 直接执行并在结果中简短告知。
+- **B: 通知后执行**（中影响、可回滚）:
+  - 默认不提问，先执行再报告取舍。
+  - 仅当用户在该领域熟练度极低且影响接近高阈值，才允许升级到提问。
+- **C: 必须请示**（高影响、不可逆、Owner 决策）:
+  - 才可以调用 `AskUserQuestion`。
+  - 提供推荐方案 + 风险 + 回滚方案，避免让用户做微观选择。

@@ -9,6 +9,7 @@ This is the project's primary memory file. It contains project-specific instruct
 - Weekly State: @docs/okr/WEEK_STATE.json
 - Weekly Events: @docs/okr/WEEK_EVENTS.jsonl
 - Weekly Plan Lock: @docs/okr/WEEK_PLAN_LOCK.json
+- Decision Policy: @docs/DECISION_POLICY.json
 - Principles: @docs/PRINCIPLES.md
 - Active Plan: @docs/PLAN.md
 - Evolution Queue: @docs/EVOLUTION_QUEUE.json

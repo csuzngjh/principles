@@ -78,6 +78,51 @@ WEEK_STAGES = {
     "INTERRUPTED",
 }
 
+DECISION_POLICY_DEFAULTS = {
+    "enabled": True,
+    "autonomy": {
+        "block_micro_ask_user_question": True,
+        "high_impact_score_threshold": 70,
+        "medium_impact_score_threshold": 40,
+        "allow_force_ask_override": True,
+        "high_impact_keywords": [
+            "production",
+            "database migration",
+            "schema",
+            "security",
+            "compliance",
+            "breaking change",
+            "cost",
+            "budget",
+            "architecture",
+            "data loss",
+            "permission",
+            "privacy",
+            "delete",
+            "irreversible",
+            "rollout",
+            "rollback",
+        ],
+        "micro_keywords": [
+            "rename",
+            "variable",
+            "format",
+            "style",
+            "spacing",
+            "comment",
+            "minor",
+            "typo",
+            "wording",
+            "small refactor",
+            "which name",
+        ],
+    },
+    "user_profile": {
+        "domain_low_threshold": 0,
+        "ask_on_medium_for_low_expertise": True,
+    },
+}
+
 def _queue_file(project_dir=None):
     if project_dir:
         return os.path.join(project_dir, "docs", "EVOLUTION_QUEUE.json")
@@ -723,6 +768,222 @@ def _coerce_int(value, default=0):
         return int(value)
     except Exception:
         return default
+
+def _decision_policy_path(project_dir):
+    return os.path.join(project_dir, "docs", "DECISION_POLICY.json")
+
+def _normalize_decision_policy(raw_policy):
+    defaults = copy.deepcopy(DECISION_POLICY_DEFAULTS)
+    policy = copy.deepcopy(defaults)
+    warnings = []
+
+    if not isinstance(raw_policy, dict):
+        warnings.append("Decision policy root must be an object; defaults applied.")
+        return policy, warnings
+
+    policy["enabled"] = _pick_bool(raw_policy.get("enabled"), defaults["enabled"])
+
+    raw_autonomy = raw_policy.get("autonomy")
+    if raw_autonomy is None:
+        pass
+    elif isinstance(raw_autonomy, dict):
+        autonomy = policy["autonomy"]
+        autonomy["block_micro_ask_user_question"] = _pick_bool(
+            raw_autonomy.get("block_micro_ask_user_question"),
+            autonomy["block_micro_ask_user_question"],
+        )
+        autonomy["high_impact_score_threshold"] = max(
+            0, min(100, _coerce_int(raw_autonomy.get("high_impact_score_threshold"), autonomy["high_impact_score_threshold"]))
+        )
+        autonomy["medium_impact_score_threshold"] = max(
+            0, min(100, _coerce_int(raw_autonomy.get("medium_impact_score_threshold"), autonomy["medium_impact_score_threshold"]))
+        )
+        if autonomy["medium_impact_score_threshold"] > autonomy["high_impact_score_threshold"]:
+            autonomy["medium_impact_score_threshold"] = autonomy["high_impact_score_threshold"]
+        autonomy["allow_force_ask_override"] = _pick_bool(
+            raw_autonomy.get("allow_force_ask_override"),
+            autonomy["allow_force_ask_override"],
+        )
+        for list_key in ("high_impact_keywords", "micro_keywords"):
+            raw_list = raw_autonomy.get(list_key)
+            if raw_list is None:
+                continue
+            if isinstance(raw_list, list):
+                autonomy[list_key] = [str(item).lower() for item in raw_list if isinstance(item, str) and item.strip()]
+            else:
+                warnings.append(f"autonomy.{list_key} must be an array of strings; defaults applied.")
+    else:
+        warnings.append("autonomy must be an object; defaults applied.")
+
+    raw_profile = raw_policy.get("user_profile")
+    if raw_profile is None:
+        pass
+    elif isinstance(raw_profile, dict):
+        user_profile = policy["user_profile"]
+        user_profile["domain_low_threshold"] = _coerce_int(
+            raw_profile.get("domain_low_threshold"),
+            user_profile["domain_low_threshold"],
+        )
+        user_profile["ask_on_medium_for_low_expertise"] = _pick_bool(
+            raw_profile.get("ask_on_medium_for_low_expertise"),
+            user_profile["ask_on_medium_for_low_expertise"],
+        )
+    else:
+        warnings.append("user_profile must be an object; defaults applied.")
+
+    return policy, warnings
+
+def load_decision_policy(project_dir):
+    path = _decision_policy_path(project_dir)
+    if not os.path.isfile(path):
+        return copy.deepcopy(DECISION_POLICY_DEFAULTS), path
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            raw_policy = json.load(handle)
+    except Exception as exc:
+        logging.error(f"[{path}] Decision policy parse failed: {exc}")
+        return copy.deepcopy(DECISION_POLICY_DEFAULTS), path
+
+    normalized, warnings = _normalize_decision_policy(raw_policy)
+    if warnings:
+        logging.warning(f"[{path}] Decision policy warnings: {' | '.join(warnings)}")
+    return normalized, path
+
+def _load_user_profile(project_dir):
+    path = os.path.join(project_dir, "docs", "USER_PROFILE.json")
+    if not os.path.isfile(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+def _extract_question_text(tool_input):
+    if not isinstance(tool_input, dict):
+        return ""
+    for key in ("question", "prompt", "message", "title"):
+        value = tool_input.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+def _extract_decision_context(tool_input):
+    if not isinstance(tool_input, dict):
+        return {}
+    context = tool_input.get("decision_context")
+    return context if isinstance(context, dict) else {}
+
+def _domain_expertise_score(user_profile, domain):
+    domains = user_profile.get("domains") if isinstance(user_profile, dict) else {}
+    if not isinstance(domains, dict) or not domains:
+        return 0
+
+    clean_domain = str(domain or "").strip().lower()
+    if clean_domain:
+        for key, value in domains.items():
+            if str(key).strip().lower() == clean_domain:
+                return _coerce_int(value, 0)
+    return max((_coerce_int(v, 0) for v in domains.values()), default=0)
+
+def _classify_ask_user_decision(tool_input, policy, user_profile):
+    autonomy = (policy or {}).get("autonomy") or {}
+    profile_cfg = (policy or {}).get("user_profile") or {}
+
+    question = _extract_question_text(tool_input)
+    question_text = question.lower()
+    context = _extract_decision_context(tool_input)
+    force_ask = bool(
+        context.get("force_ask_user")
+        or context.get("force_owner_question")
+        or tool_input.get("force_ask_user")
+    )
+    if force_ask and _pick_bool(autonomy.get("allow_force_ask_override"), True):
+        return "ask", "force_ask_override", {"impact_level": "high", "impact_score": 100}
+
+    impact_level = str(
+        context.get("impact_level")
+        or tool_input.get("impact_level")
+        or ""
+    ).strip().lower()
+    impact_score = _coerce_int(
+        context.get("impact_score", tool_input.get("impact_score", -1)),
+        -1,
+    )
+    reversible = _pick_bool(
+        context.get("reversible", tool_input.get("reversible", True)),
+        True,
+    )
+    requires_owner_decision = bool(
+        context.get("requires_owner_decision")
+        or tool_input.get("requires_owner_decision")
+    )
+    domain = str(context.get("domain") or tool_input.get("domain") or "").strip().lower()
+
+    high_keywords = [str(k).lower() for k in (autonomy.get("high_impact_keywords") or []) if str(k).strip()]
+    micro_keywords = [str(k).lower() for k in (autonomy.get("micro_keywords") or []) if str(k).strip()]
+    has_high_keyword = any(keyword in question_text for keyword in high_keywords) if question_text else False
+    has_micro_keyword = any(keyword in question_text for keyword in micro_keywords) if question_text else False
+
+    if not impact_level:
+        if has_high_keyword:
+            impact_level = "high"
+        elif has_micro_keyword:
+            impact_level = "low"
+        elif impact_score >= 0:
+            if impact_score >= _coerce_int(autonomy.get("high_impact_score_threshold"), 70):
+                impact_level = "high"
+            elif impact_score >= _coerce_int(autonomy.get("medium_impact_score_threshold"), 40):
+                impact_level = "medium"
+            else:
+                impact_level = "low"
+        else:
+            impact_level = "medium"
+
+    if impact_score < 0:
+        if impact_level == "high":
+            impact_score = 85
+        elif impact_level == "medium":
+            impact_score = 50
+        else:
+            impact_score = 20
+
+    high_threshold = _coerce_int(autonomy.get("high_impact_score_threshold"), 70)
+    medium_threshold = _coerce_int(autonomy.get("medium_impact_score_threshold"), 40)
+
+    if requires_owner_decision:
+        route = "ask"
+        reason = "owner_decision_required"
+    elif (impact_level == "high") or (impact_score >= high_threshold) or (not reversible) or has_high_keyword:
+        route = "ask"
+        reason = "high_impact_decision"
+    elif (impact_level == "medium") or (impact_score >= medium_threshold):
+        route = "notify"
+        reason = "medium_impact_decision"
+    else:
+        route = "auto"
+        reason = "micro_or_low_impact_decision"
+
+    if route == "notify" and _pick_bool(profile_cfg.get("ask_on_medium_for_low_expertise"), True):
+        score = _domain_expertise_score(user_profile, domain)
+        low_threshold = _coerce_int(profile_cfg.get("domain_low_threshold"), 0)
+        if score <= low_threshold:
+            route = "ask"
+            reason = "medium_impact_with_low_user_expertise"
+
+    if route != "ask" and not _pick_bool(autonomy.get("block_micro_ask_user_question"), True):
+        route = "ask"
+        reason = "decision_gate_disabled_for_ask_user"
+
+    return route, reason, {
+        "impact_level": impact_level,
+        "impact_score": impact_score,
+        "reversible": reversible,
+        "requires_owner_decision": requires_owner_decision,
+        "domain": domain,
+        "question_preview": question[:120],
+    }
 
 def _effective_soft_capture_threshold(profile, project_dir):
     pain_cfg = profile.get("pain") or {}
@@ -1418,6 +1679,15 @@ def user_prompt_context(payload, project_dir):
         "- Workflow order is mandatory: Goal -> Map -> Plan -> Delegate -> Review -> Verify -> Log.",
         "- Risky writes require PLAN READY and AUDIT PASS.",
     ]
+    decision_policy, _ = load_decision_policy(project_dir)
+    if _pick_bool((decision_policy or {}).get("enabled"), True):
+        autonomy = (decision_policy.get("autonomy") or {})
+        high_score = _coerce_int(autonomy.get("high_impact_score_threshold"), 70)
+        medium_score = _coerce_int(autonomy.get("medium_impact_score_threshold"), 40)
+        context_lines.append(
+            f"- Decision policy: auto/notify for low-medium impact (<{high_score}); "
+            f"AskUserQuestion only for high-impact or owner decisions (medium >= {medium_score})."
+        )
     signal_lines = []
 
     if os.path.isfile(pain_flag):
@@ -1942,6 +2212,51 @@ def shellcheck_guard(payload, project_dir):
 
     return 0
 
+def pre_ask_user_gate(payload, project_dir):
+    tool = payload.get("tool_name") or ""
+    if tool != "AskUserQuestion":
+        return 0
+
+    policy, _ = load_decision_policy(project_dir)
+    if not _pick_bool(policy.get("enabled"), True):
+        return 0
+
+    tool_input = payload.get("tool_input") or {}
+    user_profile = _load_user_profile(project_dir)
+    route, reason, details = _classify_ask_user_decision(tool_input, policy, user_profile)
+
+    _update_workboard(
+        project_dir,
+        {
+            "timestamp": _dt.datetime.now().isoformat(),
+            "session_id": payload.get("session_id"),
+            "event": "ask_user_decision_gate",
+            "route": route,
+            "reason": reason,
+            "impact_level": details.get("impact_level"),
+            "impact_score": details.get("impact_score"),
+            "domain": details.get("domain"),
+        },
+    )
+
+    if route == "ask":
+        return 0
+
+    print("Blocked: AskUserQuestion is not required for this decision.", file=sys.stderr)
+    print(
+        "Action: decide autonomously from current goal and environment, then continue execution.",
+        file=sys.stderr,
+    )
+    print(
+        f"Route={route}; reason={reason}; impact={details.get('impact_level')}:{details.get('impact_score')}.",
+        file=sys.stderr,
+    )
+    print(
+        "Escalate to AskUserQuestion only for high-impact or owner-required decisions.",
+        file=sys.stderr,
+    )
+    return 2
+
 def pre_write_gate(payload, project_dir):
     tool = payload.get("tool_name") or ""
     # 我们只对具有修改能力的工具进行门禁检查
@@ -2084,6 +2399,7 @@ def main(argv):
         project_dir = resolve_project_dir(payload)
 
         handlers = {
+            "pre_ask_user_gate": lambda: pre_ask_user_gate(payload, project_dir),
             "pre_write_gate": lambda: pre_write_gate(payload, project_dir),
             "audit_log": lambda: audit_log(payload, project_dir),
             "post_write_checks": lambda: post_write_checks(payload, project_dir),
