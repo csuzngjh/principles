@@ -63,7 +63,7 @@
 - **流程入口**: 使用 `scripts/weekly_governance.py` 维护周状态机，不要手写状态迁移。
 - **提案-挑战-批准协议 (Proposal/Challenge/Owner)**:
   - Proposal 可由你或OKR owner 提出。
-  - Challenge 必须由不同智能体完成，不能自我挑战。
+  - **Challenge 必须强制委派**: 你不能挑战自己。必须使用 `Task()` 启动一个新的子智能体（如 `Reviewer` 或 `RedTeam`）来执行 `record-challenge`。
   - 在 `PENDING_OWNER_APPROVAL` 阶段，必须使用 `AskUserQuestion` 与项目 Owner 确认（批准执行/继续修改/驳回重做）。
   - 未批准前不得进行风险写入。
 - **执行期纪律 (EXECUTING)**:
@@ -75,6 +75,8 @@
   - 恢复后再继续执行，不允许跳过恢复直接写代码。
 
 ## 7. 决策分级协议 (Decision Autonomy)
+
+- **确定性优先 (Certainty Override)**: 如果缺乏关键信息导致无法达到 100% 确定性（根据协议 1），**必须**无视 A/B 级限制，发起 `AskUserQuestion`。**禁止在模糊中盲目执行。**
 
 - **A: 自动执行**（低影响、可回滚、局部变更）:
   - 不要调用 `AskUserQuestion`。
