@@ -16,6 +16,20 @@ fi
 
 SOURCE_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# 1.5 路径安全性校验
+if [[ "$TARGET_DIR" == *"/"* ]] && [[ ! -d "$TARGET_DIR" ]]; then
+    # 如果路径包含斜杠但目录不存在，尝试创建。如果创建失败，可能是路径格式有问题。
+    mkdir -p "$TARGET_DIR" || { echo "❌ Invalid target directory path: $TARGET_DIR"; exit 1; }
+fi
+
+# 绝对路径标准化 (针对 Windows Git Bash 的路径纠偏)
+TARGET_DIR="$(cd "$TARGET_DIR" && pwd)"
+
+if [ "$TARGET_DIR" == "$SOURCE_DIR" ]; then
+    echo "❌ Error: Target directory cannot be the same as Source directory."
+    exit 1
+fi
+
 echo "🚀 Installing Principles Disciple to: $TARGET_DIR"
 
 # 2. 检查依赖
@@ -118,7 +132,15 @@ safe_copy "$SOURCE_DIR/docs/AUDIT.md" "$TARGET_DIR/docs/AUDIT.md"
 safe_copy "$SOURCE_DIR/docs/okr/CURRENT_FOCUS.md" "$TARGET_DIR/docs/okr/CURRENT_FOCUS.md"
 
 # PROFILE 生命周期配置迁移（兼容老项目）
-echo "🧩 Checking PROFILE lifecycle migration..."
+echo "🧩 Checking PROFILE logic audit..."
+if [ -f "$TARGET_DIR/docs/PROFILE.json" ]; then
+    if grep -q "riskPaths" "$TARGET_DIR/docs/PROFILE.json"; then
+        echo "  ⚠️  LEGACY DETECTED: docs/PROFILE.json uses 'riskPaths'. "
+        echo "     The framework now uses 'risk_paths' (lowercase). "
+        echo "     Please rename the field or let the migrator try to fix it."
+    fi
+fi
+
 if python3 "$SOURCE_DIR/scripts/profile_lifecycle_migrator.py" --profile "$TARGET_DIR/docs/PROFILE.json"; then
     echo "  - Lifecycle migration check complete."
 else
@@ -136,6 +158,7 @@ if [ ! -f "$SETTINGS_FILE" ]; then
 fi
 
 # 使用 Python 来合并 JSON (支持顶级 statusLine 和 嵌套 hooks)
+# 强制清除旧的 hooks 块以防止冲突
 python3 -c "
 import json
 import os
@@ -143,14 +166,17 @@ import os
 target = '$SETTINGS_FILE'
 source = '$TARGET_DIR/.claude/hooks/hooks.json'
 
-with open(target, 'r') as f:
+with open(target, 'r', encoding='utf-8') as f:
     t_data = json.load(f)
-with open(source, 'r') as f:
+with open(source, 'r', encoding='utf-8') as f:
     s_data = json.load(f)
 
-# 初始化 hooks
-if 'hooks' not in t_data:
-    t_data['hooks'] = {}
+# 1. 彻底清除旧的钩子配置（防止 settings.json 里的残留导致冲突）
+t_data.pop('hooks', None)
+t_data.pop('statusLine', None)
+
+# 2. 初始化新的 hooks
+t_data['hooks'] = {}
 
 for key, value in s_data.items():
     if key == 'statusLine':
@@ -159,7 +185,7 @@ for key, value in s_data.items():
         # 其他所有 key 都被视为 Hook 事件
         t_data['hooks'][key] = value
 
-with open(target, 'w') as f:
+with open(target, 'w', encoding='utf-8') as f:
     json.dump(t_data, f, indent=2)
 "
 

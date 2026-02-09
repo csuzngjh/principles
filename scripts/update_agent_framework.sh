@@ -1,8 +1,8 @@
 #!/bin/bash
 # Self-Update Script for Principles Disciple
-# 由 install.sh 自动生成，包含源仓库路径。
+# This script is used by target projects to sync with the source repo.
 
-SOURCE_REPO="/mnt/d/Code/principles" # Placeholder
+SOURCE_REPO="/mnt/d/Code/principles"
 
 echo "-----------------------------------"
 echo "Principles Disciple Self-Updater"
@@ -15,13 +15,13 @@ if [ ! -d "$SOURCE_REPO" ]; then
     exit 1
 fi
 
-# 1. 调用源头的 install.sh
-echo "Pulling latest components..."
+# 1. Trigger the source install.sh
+echo "Pulling latest components from source..."
 bash "$SOURCE_REPO/install.sh" "$(pwd)"
 
-# 2. 智能合并引导
-# 扩大搜索范围至项目根目录，以捕获 CLAUDE.md.update 等文件
-UPDATES=$(find . -maxdepth 2 -name "*.update" 2>/dev/null | grep -v "\.git")
+# 2. Identify updates and guide merge
+# Search up to depth 3 to find .update files
+UPDATES=$(find . -maxdepth 3 -name "*.update" 2>/dev/null | grep -v "\.git")
 
 if [ -n "$UPDATES" ]; then
     echo ""
@@ -34,10 +34,9 @@ if [ -n "$UPDATES" ]; then
     echo ""
     cat <<'EOF'
 Task: Compare and merge them. 
-IMPORTANT: Check the script's original output for any "Generated" or "Created" files that might not have the .update suffix.
 Keep my local customizations, but accept upstream improvements. After merging, delete the .update files.
 EOF
     echo "------------------------------------------------------------------"
 else
-    echo "Update complete. No conflicts."
+    echo "Update successful. No conflicts found."
 fi

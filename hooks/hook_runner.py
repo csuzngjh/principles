@@ -311,14 +311,26 @@ def parse_args(argv):
     return parser.parse_args(argv)
 
 def resolve_project_dir(payload):
+    # 1. Priority: Environment Variable
     env_dir = os.environ.get("CLAUDE_PROJECT_DIR", "").strip()
-    if env_dir:
-        return env_dir
+    if env_dir and os.path.isdir(env_dir):
+        return env_dir.replace("\\", "/")
+    
+    # 2. Priority: Payload data
     workspace = payload.get("workspace") or {}
     project_dir = (workspace.get("project_dir") or "").strip()
-    if project_dir:
-        return project_dir
-    return os.getcwd()
+    if project_dir and os.path.isdir(project_dir):
+        return project_dir.replace("\\", "/")
+
+    # 3. Priority: Self-healing Backtracking
+    # If this script is at .claude/hooks/hook_runner.py, its grandparent is the root
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    potential_root = os.path.abspath(os.path.join(script_dir, "..", ".."))
+    if os.path.isdir(os.path.join(potential_root, ".claude")):
+        return potential_root.replace("\\", "/")
+    
+    # 4. Fallback: CWD
+    return os.getcwd().replace("\\", "/")
 
 def _is_windows_path(path):
     return bool(re.match(r"^[a-zA-Z]:[\\/]", path))
@@ -1467,12 +1479,22 @@ def post_write_checks(payload, project_dir):
     soft_threshold, threshold_diag = _effective_soft_capture_threshold(profile, project_dir)
     base_threshold = _coerce_int(threshold_diag.get("base"), soft_threshold)
 
-    hard_signal = (rc != 0) or is_spiral or missing_test_command
+    hard_signal = (rc != 0) or missing_test_command
     pain_score = _compute_pain_score(rc, is_spiral, missing_test_command, soft_score)
-    if not hard_signal and pain_score < soft_threshold:
+    if not (hard_signal or (is_spiral and rc != 0)) and pain_score < soft_threshold:
         return 0
 
     evolution_mode = profile.get("evolution_mode") or "realtime"
+    
+    # 判定优先级和严重程度
+    severity = _pain_severity_label(pain_score, is_spiral=(is_spiral and rc != 0))
+    task_priority = _compute_task_priority(task_type, {"exit_code": rc, "is_spiral": (is_spiral and rc != 0), "pain_score": pain_score})
+    
+    if is_spiral and rc == 0:
+        # rc=0 时的螺旋通常是微调，降低优先级并抑制痛觉
+        task_priority = 30
+        severity = "LOW"
+        pain_score = min(pain_score, 25) # 强制低于阈值 30
     if rc != 0:
         reason = "post_write_checks_failed"
         diagnosis = "POST_WRITE_TEST_FAILED"
@@ -2010,7 +2032,7 @@ def sync_user_context(payload, project_dir):
         return 0
         
     try:
-        # 1. 读取旧文件中的手动部分
+        # 1. 读取旧文件中的手动部分 (保护机制)
         manual_content = ""
         manual_marker = "<!-- MANUAL_START -->"
         if os.path.isfile(user_context):
@@ -2049,18 +2071,22 @@ def sync_user_context(payload, project_dir):
                 f.write(f"- **{domain}**: [{level}] (Score: {score})\n")
             
             if prefs:
+                # 兼容不同格式的 Preferences
                 f.write("\n## Communication Preferences\n")
-                for k, v in prefs.items():
-                    f.write(f"- **{k}**: {v}\n")
+                if isinstance(prefs, dict):
+                    for k, v in prefs.items():
+                        f.write(f"- **{k}**: {v}\n")
+                else:
+                    f.write(f"- {prefs}\n")
             
             f.write("\n## Interaction Strategy\n")
             for domain, score in domains.items():
-                if score < 0:
+                if _coerce_int(score, 0) < 0:
                     f.write(f"- **{domain} Control**: High vigilance. Verify strictly.\n")
             
-            # 3. 追加手动部分
+            # 3. 追加并写回手动部分
             f.write(f"\n\n{manual_marker}\n")
-            if manual_content:
+            if manual_content.strip():
                 f.write(manual_content)
             else:
                 f.write("## Manual Notes (User Preserved)\n> You can write your permanent notes below. They will be preserved during updates.\n")
