@@ -102,7 +102,7 @@ done
 cd "$SOURCE_DIR"
 
 # Hooks (Python Runner 总是更新，因为它是系统逻辑)
-cp "$SOURCE_DIR/hooks/hook_runner.py" "$TARGET_DIR/.claude/hooks/"
+cp "$SOURCE_DIR/hooks/"*.py "$TARGET_DIR/.claude/hooks/"
 cp "$SOURCE_DIR/hooks/hooks.json" "$TARGET_DIR/.claude/hooks/"
 # 原本这里的 sed 替换被移除，以保持路径的原始性和可预测性
 
