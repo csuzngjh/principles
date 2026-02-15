@@ -14,6 +14,20 @@ import sys
 import uuid
 from pathlib import PurePosixPath, PureWindowsPath
 
+# Phase 2 Architecture: Import extracted modules
+try:
+    from hooks.io_utils import *
+    from hooks.profile import *
+    from hooks.pain import *
+    from hooks.evolution_queue import *
+    from hooks.week_lifecycle import *
+    from hooks.telemetry import *
+    from hooks.debug_utils import debug_log
+except ImportError:
+    # Fallback: functions are still defined in this file
+    pass
+
+
 # --- Encoding Fix for Windows ---
 if sys.platform == "win32":
     import io
@@ -22,247 +36,10 @@ if sys.platform == "win32":
 
 # --- Telemetry & Logging Setup ---
 # 设置日志文件路径
-PROJECT_ROOT = os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
+PROJECT_ROOT = os.getcwd()
 LOG_FILE = os.path.join(PROJECT_ROOT, "docs", "SYSTEM.log")
-QUEUE_FILE = os.path.join(PROJECT_ROOT, "docs", "EVOLUTION_QUEUE.json")
 QUIET_SUCCESS_HOOKS = {"statusline"}
-QUEUE_OPEN_STATES = {"pending", "processing", "retrying"}
-QUEUE_MAX_SIZE = 300
 
-PROFILE_DEFAULTS = {
-    "audit_level": "medium",
-    "risk_paths": [],
-    "evolution_mode": "realtime",
-    "gate": {
-        "require_plan_for_risk_paths": True,
-        "require_audit_before_write": True,
-        "require_reviewer_after_write": True,
-    },
-    "tests": {
-        "on_change": "smoke",
-        "on_risk_change": "unit",
-        "commands": {},
-    },
-    "pain": {
-        "soft_capture_threshold": 30,
-        "adaptive": {
-            "enabled": True,
-            "min_threshold": 15,
-            "max_threshold": 70,
-            "backlog_trigger": 6,
-            "hard_failure_trigger": 2,
-            "stable_quality_threshold": 5,
-        },
-    },
-    "lifecycle": {
-        "enabled": True,
-        "require_owner_approval_for_risk_writes": True,
-        "require_challenge_before_approval": True,
-        "heartbeat_timeout_minutes": 180,
-    },
-    "permissions": {},
-    "custom_guards": [],
-}
-PROFILE_AUDIT_LEVELS = {"low", "medium", "high"}
-PROFILE_EVOLUTION_MODES = {"realtime", "async"}
-PROFILE_TEST_LEVELS = {"smoke", "unit", "full"}
-WEEK_STAGES = {
-    "UNPLANNED",
-    "DRAFT",
-    "CHALLENGE",
-    "PENDING_OWNER_APPROVAL",
-    "LOCKED",
-    "EXECUTING",
-    "REVIEW",
-    "CLOSED",
-    "INTERRUPTED",
-}
-
-DECISION_POLICY_DEFAULTS = {
-    "enabled": True,
-    "autonomy": {
-        "block_micro_ask_user_question": True,
-        "high_impact_score_threshold": 70,
-        "medium_impact_score_threshold": 40,
-        "allow_force_ask_override": True,
-        "high_impact_keywords": [
-            "production",
-            "database migration",
-            "schema",
-            "security",
-            "compliance",
-            "breaking change",
-            "cost",
-            "budget",
-            "architecture",
-            "data loss",
-            "permission",
-            "privacy",
-            "delete",
-            "irreversible",
-            "rollout",
-            "rollback",
-        ],
-        "micro_keywords": [
-            "rename",
-            "variable",
-            "format",
-            "style",
-            "spacing",
-            "comment",
-            "minor",
-            "typo",
-            "wording",
-            "small refactor",
-            "which name",
-        ],
-    },
-    "user_profile": {
-        "domain_low_threshold": 0,
-        "ask_on_medium_for_low_expertise": True,
-    },
-}
-
-def _queue_file(project_dir=None):
-    if project_dir:
-        return os.path.join(project_dir, "docs", "EVOLUTION_QUEUE.json")
-    return QUEUE_FILE
-
-def _compute_task_priority(task_type, details):
-    try:
-        pain_score = int(details.get("pain_score") or 0)
-    except Exception:
-        pain_score = 0
-
-    if details.get("is_spiral"):
-        return 100
-    if task_type == "test_failure":
-        if int(details.get("exit_code") or 0) != 0:
-            return 90
-        return 80
-    if pain_score >= 80:
-        return 85
-    if details.get("missing_test_command"):
-        return 70
-    if pain_score >= 50:
-        return 65
-    return 50
-
-def _task_fingerprint(task_type, details):
-    key = {
-        "type": task_type,
-        "reason": details.get("reason") or "",
-        "file_path": details.get("file_path") or "",
-        "tool": details.get("tool") or "",
-        "command": details.get("command") or "",
-    }
-    return json.dumps(key, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-
-def _retry_backoff_seconds(retry_count):
-    try:
-        count = max(0, int(retry_count))
-    except Exception:
-        count = 0
-    # 15s, 30s, 60s, ... capped at 15min
-    return min(900, 15 * (2 ** count))
-
-def _next_retry_at(retry_count, now=None):
-    current = now or _dt.datetime.now()
-    wait_seconds = _retry_backoff_seconds(retry_count)
-    return (current + _dt.timedelta(seconds=wait_seconds)).isoformat()
-
-def _queue_sort_key(task):
-    status = str(task.get("status") or "").lower()
-    open_rank = 0 if status in QUEUE_OPEN_STATES else 1
-    try:
-        priority = int(task.get("priority") or 0)
-    except Exception:
-        priority = 0
-    first_seen = task.get("first_seen") or task.get("timestamp") or ""
-    return (open_rank, -priority, first_seen)
-
-def _write_queue(queue, project_dir):
-    queue_file = _queue_file(project_dir)
-    ordered = sorted(queue, key=_queue_sort_key)[:QUEUE_MAX_SIZE]
-    with open(queue_file, "w", encoding="utf-8") as f:
-        json.dump(ordered, f, ensure_ascii=False, indent=2)
-
-def enqueue_evolution_task(task_type, details, project_dir):
-    """将进化工单推入队列"""
-    try:
-        queue = []
-        queue_file = _queue_file(project_dir)
-        if os.path.isfile(queue_file):
-            with open(queue_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if isinstance(data, list):
-                    queue = data
-
-        now = _dt.datetime.now()
-        details = details or {}
-        priority = _compute_task_priority(task_type, details)
-        fingerprint = _task_fingerprint(task_type, details)
-
-        for task in queue:
-            status = str(task.get("status") or "").lower()
-            if status not in QUEUE_OPEN_STATES:
-                continue
-            if str(task.get("fingerprint") or "") != fingerprint:
-                continue
-            task["details"] = details
-            task["priority"] = max(int(task.get("priority") or 0), priority)
-            task["occurrences"] = int(task.get("occurrences") or 1) + 1
-            task["last_seen"] = now.isoformat()
-            if status == "retrying":
-                retry_count = int(task.get("retry_count") or 0)
-                task["next_retry_at"] = _next_retry_at(retry_count, now)
-            _write_queue(queue, project_dir)
-            return task.get("id")
-
-        task_id = f"evt-{now.strftime('%Y%m%d-%H%M%S-%f')}-{uuid.uuid4().hex[:6]}"
-        new_task = {
-            "id": task_id,
-            "timestamp": now.isoformat(),
-            "type": task_type,
-            "details": details,
-            "status": "pending",
-            "retry_count": 0,
-            "priority": priority,
-            "fingerprint": fingerprint,
-            "occurrences": 1,
-            "first_seen": now.isoformat(),
-            "last_seen": now.isoformat(),
-            "next_retry_at": _next_retry_at(0, now),
-            "retry_policy": {
-                "base_seconds": 15,
-                "max_seconds": 900,
-            },
-        }
-        queue.append(new_task)
-        _write_queue(queue, project_dir)
-        return task_id
-    except Exception as e:
-        logging.error(f"Failed to enqueue task: {e}")
-        return None
-
-def _load_queue(project_dir=None):
-    queue_file = _queue_file(project_dir)
-    if not os.path.isfile(queue_file):
-        return []
-    try:
-        with open(queue_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if isinstance(data, list):
-            return data
-    except Exception:
-        pass
-    return []
-
-def _has_open_evolution_tasks(project_dir=None):
-    for task in _load_queue(project_dir):
-        if str(task.get("status", "")).lower() in QUEUE_OPEN_STATES:
-            return True
-    return False
 
 # 简单的日志配置
 logging.basicConfig(
@@ -272,26 +49,6 @@ logging.basicConfig(
     datefmt="%Y-%m-%dT%H:%M:%S"
 )
 
-def log_telemetry(hook_name, status, duration=0, error=None):
-    """统一遥测记录"""
-    if status == "SUCCESS" and hook_name in QUIET_SUCCESS_HOOKS:
-        return
-
-    msg = f"Status: {status} | Duration: {duration:.2f}ms"
-    if error:
-        msg += f" | Error: {str(error)}"
-    
-    if status == "ERROR":
-        level = logging.ERROR
-    elif status == "BLOCKED":
-        level = logging.WARNING
-    else:
-        level = logging.INFO
-    logging.log(level, f"[{hook_name}] {msg}")
-    
-    if status == "ERROR":
-        # 记录详细堆栈到 debug 日志（如果有）或直接到 SYSTEM.log
-        logging.error(f"Stacktrace: {traceback.format_exc()}")
 
 # --- Core Utilities ---
 
@@ -332,274 +89,7 @@ def resolve_project_dir(payload):
     # 4. Fallback: CWD
     return os.getcwd().replace("\\", "/")
 
-def _is_windows_path(path):
-    return bool(re.match(r"^[a-zA-Z]:[\\/]", path))
 
-def _wsl_from_windows(path):
-    drive = path[0].lower()
-    rest = path[2:].replace("\\", "/").lstrip("/")
-    return f"/mnt/{drive}/{rest}"
-
-def normalize_path(file_path, project_dir):
-    if not file_path:
-        return ""
-
-    fp = file_path.strip().rstrip("\r")
-    proj = project_dir.strip().rstrip("\r")
-
-    if _is_windows_path(proj):
-        fp_win = PureWindowsPath(fp) if _is_windows_path(fp) else PureWindowsPath(fp.replace("/", "\\"))
-        proj_win = PureWindowsPath(proj)
-        try:
-            rel = fp_win.relative_to(proj_win)
-            return rel.as_posix().lstrip("/")
-        except ValueError:
-            return fp_win.as_posix().lstrip("/")
-
-    if _is_windows_path(fp):
-        fp = _wsl_from_windows(fp)
-
-    fp = fp.replace("\\", "/")
-    proj = proj.replace("\\", "/")
-
-    fp_norm = posixpath.normpath(fp)
-    proj_norm = posixpath.normpath(proj)
-
-    if fp_norm == proj_norm:
-        return ""
-    if fp_norm.startswith(proj_norm + "/"):
-        return fp_norm[len(proj_norm) + 1 :]
-    return fp_norm.lstrip("/")
-
-def normalize_risk_path(path):
-    p = (path or "").strip().rstrip("\r").replace("\\", "/")
-    if p.startswith("./"):
-        p = p[2:]
-    return p
-
-def is_risky(rel_path, risk_paths):
-    rel = (rel_path or "").replace("\\", "/")
-    for p in risk_paths or []:
-        rp = normalize_risk_path(p)
-        if not rp:
-            continue
-        if rel == rp or rel.startswith(rp):
-            return True
-    return False
-
-def _pick_bool(value, default):
-    return value if isinstance(value, bool) else default
-
-def _normalize_profile(raw_profile, profile_path):
-    defaults = copy.deepcopy(PROFILE_DEFAULTS)
-    warnings = []
-    normalized = copy.deepcopy(defaults)
-    invalid = False
-
-    if not isinstance(raw_profile, dict):
-        warnings.append("PROFILE root must be an object; defaults applied.")
-        invalid = True
-    else:
-        for key, value in raw_profile.items():
-            if key not in normalized:
-                normalized[key] = value
-
-        audit_level = raw_profile.get("audit_level")
-        if isinstance(audit_level, str) and audit_level in PROFILE_AUDIT_LEVELS:
-            normalized["audit_level"] = audit_level
-        elif audit_level is not None:
-            warnings.append(f"Invalid audit_level '{audit_level}', fallback to '{defaults['audit_level']}'.")
-
-        evolution_mode = raw_profile.get("evolution_mode")
-        if isinstance(evolution_mode, str) and evolution_mode in PROFILE_EVOLUTION_MODES:
-            normalized["evolution_mode"] = evolution_mode
-        elif evolution_mode is not None:
-            warnings.append(f"Invalid evolution_mode '{evolution_mode}', fallback to '{defaults['evolution_mode']}'.")
-
-        raw_risk_paths = raw_profile.get("risk_paths", defaults["risk_paths"])
-        if isinstance(raw_risk_paths, str):
-            raw_risk_paths = [raw_risk_paths]
-        if isinstance(raw_risk_paths, list):
-            normalized["risk_paths"] = [str(p) for p in raw_risk_paths if isinstance(p, str) and p.strip()]
-        else:
-            warnings.append("risk_paths must be an array of strings; fallback to defaults.")
-
-        raw_gate = raw_profile.get("gate", {})
-        if isinstance(raw_gate, dict):
-            # Legacy compatibility: old profiles did not have full gate keys and defaulted to non-blocking behavior.
-            gate = {
-                "require_plan_for_risk_paths": False,
-                "require_audit_before_write": False,
-                "require_reviewer_after_write": False,
-            }
-            gate["require_plan_for_risk_paths"] = _pick_bool(
-                raw_gate.get("require_plan_for_risk_paths"), gate["require_plan_for_risk_paths"]
-            )
-            gate["require_audit_before_write"] = _pick_bool(
-                raw_gate.get("require_audit_before_write"), gate["require_audit_before_write"]
-            )
-            gate["require_reviewer_after_write"] = _pick_bool(
-                raw_gate.get("require_reviewer_after_write"), gate["require_reviewer_after_write"]
-            )
-            normalized["gate"] = gate
-        else:
-            warnings.append("gate must be an object; fallback to defaults.")
-
-        raw_tests = raw_profile.get("tests", {})
-        if isinstance(raw_tests, dict):
-            tests = copy.deepcopy(defaults["tests"])
-            on_change = raw_tests.get("on_change")
-            if isinstance(on_change, str) and on_change in PROFILE_TEST_LEVELS:
-                tests["on_change"] = on_change
-            elif on_change is not None:
-                warnings.append(f"Invalid tests.on_change '{on_change}', fallback to '{tests['on_change']}'.")
-
-            on_risk_change = raw_tests.get("on_risk_change")
-            if isinstance(on_risk_change, str) and on_risk_change in PROFILE_TEST_LEVELS:
-                tests["on_risk_change"] = on_risk_change
-            elif on_risk_change is not None:
-                warnings.append(
-                    f"Invalid tests.on_risk_change '{on_risk_change}', fallback to '{tests['on_risk_change']}'."
-                )
-
-            commands = {}
-            raw_commands = raw_tests.get("commands")
-            if isinstance(raw_commands, dict):
-                for key, value in raw_commands.items():
-                    if isinstance(key, str) and isinstance(value, str):
-                        commands[key] = value
-                    else:
-                        warnings.append("tests.commands only accepts string-to-string pairs.")
-            elif raw_commands is not None:
-                warnings.append("tests.commands must be an object; fallback to empty commands.")
-            tests["commands"] = commands
-            normalized["tests"] = tests
-        else:
-            warnings.append("tests must be an object; fallback to defaults.")
-
-        raw_pain = raw_profile.get("pain", {})
-        if isinstance(raw_pain, dict):
-            pain = copy.deepcopy(defaults["pain"])
-            soft_capture_threshold = raw_pain.get("soft_capture_threshold")
-            if isinstance(soft_capture_threshold, int):
-                pain["soft_capture_threshold"] = max(0, min(100, soft_capture_threshold))
-            elif soft_capture_threshold is not None:
-                warnings.append(
-                    f"Invalid pain.soft_capture_threshold '{soft_capture_threshold}', fallback to "
-                    f"'{pain['soft_capture_threshold']}'."
-                )
-
-            raw_adaptive = raw_pain.get("adaptive")
-            adaptive = pain.get("adaptive") or {}
-            if raw_adaptive is None:
-                pass
-            elif isinstance(raw_adaptive, dict):
-                adaptive["enabled"] = _pick_bool(raw_adaptive.get("enabled"), adaptive.get("enabled", True))
-                adaptive["min_threshold"] = max(
-                    0, min(100, _coerce_int(raw_adaptive.get("min_threshold"), adaptive.get("min_threshold", 15)))
-                )
-                adaptive["max_threshold"] = max(
-                    0, min(100, _coerce_int(raw_adaptive.get("max_threshold"), adaptive.get("max_threshold", 70)))
-                )
-                if adaptive["min_threshold"] > adaptive["max_threshold"]:
-                    adaptive["min_threshold"], adaptive["max_threshold"] = (
-                        adaptive["max_threshold"],
-                        adaptive["min_threshold"],
-                    )
-                adaptive["backlog_trigger"] = max(
-                    1, _coerce_int(raw_adaptive.get("backlog_trigger"), adaptive.get("backlog_trigger", 6))
-                )
-                adaptive["hard_failure_trigger"] = max(
-                    1,
-                    _coerce_int(raw_adaptive.get("hard_failure_trigger"), adaptive.get("hard_failure_trigger", 2)),
-                )
-                adaptive["stable_quality_threshold"] = max(
-                    1,
-                    _coerce_int(
-                        raw_adaptive.get("stable_quality_threshold"),
-                        adaptive.get("stable_quality_threshold", 5),
-                    ),
-                )
-            else:
-                warnings.append("pain.adaptive must be an object; fallback to defaults.")
-            pain["adaptive"] = adaptive
-            normalized["pain"] = pain
-        else:
-            warnings.append("pain must be an object; fallback to defaults.")
-
-        raw_lifecycle = raw_profile.get("lifecycle")
-        if raw_lifecycle is None:
-            # Legacy compatibility: old profiles had no lifecycle section and should not
-            # suddenly start blocking risky writes after upgrade.
-            lifecycle = copy.deepcopy(defaults["lifecycle"])
-            lifecycle["enabled"] = False
-            normalized["lifecycle"] = lifecycle
-        elif isinstance(raw_lifecycle, dict):
-            lifecycle = copy.deepcopy(defaults["lifecycle"])
-            lifecycle["enabled"] = _pick_bool(raw_lifecycle.get("enabled"), lifecycle["enabled"])
-            lifecycle["require_owner_approval_for_risk_writes"] = _pick_bool(
-                raw_lifecycle.get("require_owner_approval_for_risk_writes"),
-                lifecycle["require_owner_approval_for_risk_writes"],
-            )
-            lifecycle["require_challenge_before_approval"] = _pick_bool(
-                raw_lifecycle.get("require_challenge_before_approval"),
-                lifecycle["require_challenge_before_approval"],
-            )
-            lifecycle["heartbeat_timeout_minutes"] = max(
-                1, _coerce_int(raw_lifecycle.get("heartbeat_timeout_minutes"), lifecycle["heartbeat_timeout_minutes"])
-            )
-            normalized["lifecycle"] = lifecycle
-        elif raw_lifecycle is not None:
-            warnings.append("lifecycle must be an object; fallback to defaults.")
-
-        raw_permissions = raw_profile.get("permissions", {})
-        if isinstance(raw_permissions, dict):
-            normalized["permissions"] = raw_permissions
-        elif raw_permissions is not None:
-            warnings.append("permissions must be an object; fallback to defaults.")
-
-        raw_guards = raw_profile.get("custom_guards", defaults["custom_guards"])
-        valid_guards = []
-        if isinstance(raw_guards, list):
-            for idx, guard in enumerate(raw_guards):
-                if not isinstance(guard, dict):
-                    warnings.append(f"custom_guards[{idx}] must be an object; skipped.")
-                    continue
-                pattern = guard.get("pattern")
-                message = guard.get("message")
-                if not isinstance(pattern, str) or not pattern.strip():
-                    warnings.append(f"custom_guards[{idx}] missing valid pattern; skipped.")
-                    continue
-                if not isinstance(message, str) or not message.strip():
-                    warnings.append(f"custom_guards[{idx}] missing valid message; skipped.")
-                    continue
-                severity = guard.get("severity", "error")
-                if severity not in ("error", "warning"):
-                    severity = "error"
-                    warnings.append(f"custom_guards[{idx}] has invalid severity; fallback to 'error'.")
-                valid_guards.append({"pattern": pattern, "message": message, "severity": severity})
-            normalized["custom_guards"] = valid_guards
-        else:
-            warnings.append("custom_guards must be an array; fallback to empty list.")
-
-    normalized["_profile_invalid"] = invalid
-    normalized["_profile_warnings"] = warnings
-    if warnings:
-        logging.warning("[%s] PROFILE normalization warnings: %s", profile_path, " | ".join(warnings))
-    return normalized
-
-def load_profile(project_dir):
-    profile_path = os.path.join(project_dir, "docs", "PROFILE.json")
-    if not os.path.isfile(profile_path):
-        return None, profile_path
-    try:
-        with open(profile_path, "r", encoding="utf-8") as handle:
-            raw_profile = json.load(handle)
-    except json.JSONDecodeError as exc:
-        print(f"Invalid PROFILE.json: {exc}", file=sys.stderr)
-        logging.error("[%s] PROFILE parse failed: %s", profile_path, exc)
-        return _normalize_profile(None, profile_path), profile_path
-    return _normalize_profile(raw_profile, profile_path), profile_path
 
 def _run_command(cmd):
     if os.name == "nt":
@@ -608,269 +98,7 @@ def _run_command(cmd):
         result = subprocess.run(["bash", "-lc", cmd])
     return result.returncode
 
-def _read_text_file(path):
-    with open(path, "rb") as handle:
-        raw = handle.read()
-    for encoding in ("utf-8", "utf-8-sig", "utf-16", "utf-16-le", "utf-16-be"):
-        try:
-            return raw.decode(encoding)
-        except UnicodeDecodeError:
-            continue
-    return raw.decode("utf-8", errors="replace")
 
-def _parse_iso_datetime(value):
-    if not isinstance(value, str):
-        return None
-    text = value.strip()
-    if not text:
-        return None
-    if text.endswith("Z"):
-        text = text[:-1] + "+00:00"
-    try:
-        return _dt.datetime.fromisoformat(text)
-    except ValueError:
-        return None
-
-def _format_queue_status(project_dir, now=None):
-    queue = _load_queue(project_dir)
-    if not queue:
-        return ""
-
-    current = now or _dt.datetime.now()
-    pending = 0
-    retrying = 0
-    retry_deltas = []
-
-    for task in queue:
-        status = str(task.get("status") or "").lower()
-        if status == "pending":
-            pending += 1
-            continue
-        if status != "retrying":
-            continue
-
-        retrying += 1
-        due = _parse_iso_datetime(task.get("next_retry_at"))
-        if due is None:
-            retry_deltas.append(0)
-            continue
-
-        if due.tzinfo is not None:
-            if current.tzinfo is None:
-                current_cmp = _dt.datetime.now(tz=due.tzinfo)
-            else:
-                current_cmp = current.astimezone(due.tzinfo)
-        else:
-            current_cmp = current.replace(tzinfo=None)
-
-        retry_deltas.append(int((due - current_cmp).total_seconds()))
-
-    if pending + retrying == 0:
-        return ""
-
-    if retrying == 0:
-        next_label = "now"
-    else:
-        min_delta = min(retry_deltas) if retry_deltas else 0
-        if min_delta <= 0:
-            next_label = "due"
-        elif min_delta < 60:
-            next_label = f"{min_delta}s"
-        else:
-            next_label = f"{(min_delta + 59) // 60}m"
-
-    return f"🚦P{pending}|R{retrying}|N{next_label}"
-
-def _format_week_status(project_dir):
-    state, _, exists = _load_week_state(project_dir)
-    stage = str(state.get("stage") or "UNPLANNED").upper()
-    if not exists and stage == "UNPLANNED":
-        return ""
-
-    tags = {
-        "UNPLANNED": "U",
-        "DRAFT": "D",
-        "CHALLENGE": "C",
-        "PENDING_OWNER_APPROVAL": "A",
-        "LOCKED": "L",
-        "EXECUTING": "E",
-        "REVIEW": "R",
-        "CLOSED": "X",
-        "INTERRUPTED": "I",
-    }
-    execution = state.get("execution") or {}
-    completed = int(execution.get("completed_events") or 0)
-    blocked = int(execution.get("blocked_events") or 0)
-    return f"📅{tags.get(stage, '?')} C{completed}/B{blocked}"
-
-def _parse_kv_lines(text):
-    data = {}
-    for line in (text or "").splitlines():
-        if ":" not in line:
-            continue
-        key, value = line.split(":", 1)
-        data[key.strip()] = value.strip()
-    return data
-
-def _serialize_kv_lines(data):
-    ordered_keys = [
-        "time",
-        "tool",
-        "file_path",
-        "risk",
-        "test_level",
-        "command",
-        "exit_code",
-        "pain_score",
-        "severity",
-        "diagnosis",
-        "reason",
-        "soft_signals",
-        "soft_capture_threshold_base",
-        "soft_capture_threshold_effective",
-        "soft_threshold_reasons",
-        "mode",
-        "queue_task_id",
-        "issue_logged",
-    ]
-    lines = []
-    for key in ordered_keys:
-        value = data.get(key)
-        if value is None or value == "":
-            continue
-        lines.append(f"{key}: {value}")
-    for key in sorted(data.keys()):
-        if key in ordered_keys:
-            continue
-        value = data.get(key)
-        if value is None or value == "":
-            continue
-        lines.append(f"{key}: {value}")
-    return "\n".join(lines) + ("\n" if lines else "")
-
-def _pain_flag_path(project_dir):
-    return os.path.join(project_dir, "docs", ".pain_flag")
-
-def _write_pain_flag(project_dir, pain_data):
-    path = _pain_flag_path(project_dir)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as handle:
-        handle.write(_serialize_kv_lines(pain_data))
-    return path
-
-def _read_pain_flag_data(project_dir):
-    path = _pain_flag_path(project_dir)
-    if not os.path.isfile(path):
-        return {}, path, ""
-    raw = _read_text_file(path)
-    return _parse_kv_lines(raw), path, raw
-
-def _plan_status(project_dir):
-    plan_path = os.path.join(project_dir, "docs", "PLAN.md")
-    if not os.path.isfile(plan_path):
-        return ""
-    with open(plan_path, "r", encoding="utf-8") as handle:
-        for line in handle:
-            if line.startswith("STATUS:"):
-                return line.split(":", 1)[1].strip().split()[0]
-    return ""
-
-def _coerce_int(value, default=0):
-    try:
-        return int(value)
-    except Exception:
-        return default
-
-def _decision_policy_path(project_dir):
-    return os.path.join(project_dir, "docs", "DECISION_POLICY.json")
-
-def _normalize_decision_policy(raw_policy):
-    defaults = copy.deepcopy(DECISION_POLICY_DEFAULTS)
-    policy = copy.deepcopy(defaults)
-    warnings = []
-
-    if not isinstance(raw_policy, dict):
-        warnings.append("Decision policy root must be an object; defaults applied.")
-        return policy, warnings
-
-    policy["enabled"] = _pick_bool(raw_policy.get("enabled"), defaults["enabled"])
-
-    raw_autonomy = raw_policy.get("autonomy")
-    if raw_autonomy is None:
-        pass
-    elif isinstance(raw_autonomy, dict):
-        autonomy = policy["autonomy"]
-        autonomy["block_micro_ask_user_question"] = _pick_bool(
-            raw_autonomy.get("block_micro_ask_user_question"),
-            autonomy["block_micro_ask_user_question"],
-        )
-        autonomy["high_impact_score_threshold"] = max(
-            0, min(100, _coerce_int(raw_autonomy.get("high_impact_score_threshold"), autonomy["high_impact_score_threshold"]))
-        )
-        autonomy["medium_impact_score_threshold"] = max(
-            0, min(100, _coerce_int(raw_autonomy.get("medium_impact_score_threshold"), autonomy["medium_impact_score_threshold"]))
-        )
-        if autonomy["medium_impact_score_threshold"] > autonomy["high_impact_score_threshold"]:
-            autonomy["medium_impact_score_threshold"] = autonomy["high_impact_score_threshold"]
-        autonomy["allow_force_ask_override"] = _pick_bool(
-            raw_autonomy.get("allow_force_ask_override"),
-            autonomy["allow_force_ask_override"],
-        )
-        for list_key in ("high_impact_keywords", "micro_keywords"):
-            raw_list = raw_autonomy.get(list_key)
-            if raw_list is None:
-                continue
-            if isinstance(raw_list, list):
-                autonomy[list_key] = [str(item).lower() for item in raw_list if isinstance(item, str) and item.strip()]
-            else:
-                warnings.append(f"autonomy.{list_key} must be an array of strings; defaults applied.")
-    else:
-        warnings.append("autonomy must be an object; defaults applied.")
-
-    raw_profile = raw_policy.get("user_profile")
-    if raw_profile is None:
-        pass
-    elif isinstance(raw_profile, dict):
-        user_profile = policy["user_profile"]
-        user_profile["domain_low_threshold"] = _coerce_int(
-            raw_profile.get("domain_low_threshold"),
-            user_profile["domain_low_threshold"],
-        )
-        user_profile["ask_on_medium_for_low_expertise"] = _pick_bool(
-            raw_profile.get("ask_on_medium_for_low_expertise"),
-            user_profile["ask_on_medium_for_low_expertise"],
-        )
-    else:
-        warnings.append("user_profile must be an object; defaults applied.")
-
-    return policy, warnings
-
-def load_decision_policy(project_dir):
-    path = _decision_policy_path(project_dir)
-    if not os.path.isfile(path):
-        return copy.deepcopy(DECISION_POLICY_DEFAULTS), path
-    try:
-        with open(path, "r", encoding="utf-8") as handle:
-            raw_policy = json.load(handle)
-    except Exception as exc:
-        logging.error(f"[{path}] Decision policy parse failed: {exc}")
-        return copy.deepcopy(DECISION_POLICY_DEFAULTS), path
-
-    normalized, warnings = _normalize_decision_policy(raw_policy)
-    if warnings:
-        logging.warning(f"[{path}] Decision policy warnings: {' | '.join(warnings)}")
-    return normalized, path
-
-def _load_user_profile(project_dir):
-    path = os.path.join(project_dir, "docs", "USER_PROFILE.json")
-    if not os.path.isfile(path):
-        return {}
-    try:
-        with open(path, "r", encoding="utf-8") as handle:
-            data = json.load(handle)
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
 
 def _extract_question_text(tool_input):
     if not isinstance(tool_input, dict):
@@ -1114,280 +342,6 @@ def _pain_severity_label(pain_score, is_spiral=False):
         return "MEDIUM"
     return "LOW"
 
-def _append_issue_from_pain(issue_log_path, decisions_path, pain_content):
-    ts = _dt.datetime.now().isoformat()
-    title_snippet = " ".join(pain_content.splitlines()[:6])[:80]
-    title = f"Pain detected - {title_snippet}".strip()
-
-    with open(issue_log_path, "a", encoding="utf-8") as handle:
-        handle.write(
-            f"\n## [{ts}] {title}\n\n### Pain Signal (auto-captured)\n```\n{pain_content}\n```\n\n"
-            "### Diagnosis (Pending)\n- Run /evolve-task to diagnose.\n"
-        )
-
-    with open(decisions_path, "a", encoding="utf-8") as handle:
-        handle.write(f"\n## [{ts}] Decision checkpoint\n- Pain flag detected; IssueLog entry appended.\n")
-
-def _update_workboard(project_dir, event):
-    docs_dir = os.path.join(project_dir, "docs")
-    os.makedirs(docs_dir, exist_ok=True)
-    workboard_path = os.path.join(docs_dir, "WORKBOARD.json")
-    board = {"events": []}
-
-    if os.path.isfile(workboard_path):
-        try:
-            with open(workboard_path, "r", encoding="utf-8") as handle:
-                data = json.load(handle)
-            if isinstance(data, dict):
-                board = data
-        except Exception:
-            pass
-
-    events = board.setdefault("events", [])
-    if not isinstance(events, list):
-        events = []
-    events.append(event)
-    board["events"] = events[-200:]
-    board["updated_at"] = _dt.datetime.now().isoformat()
-
-    with open(workboard_path, "w", encoding="utf-8") as handle:
-        json.dump(board, handle, ensure_ascii=False, indent=2)
-
-def _week_state_path(project_dir):
-    return os.path.join(project_dir, "docs", "okr", "WEEK_STATE.json")
-
-def _week_events_path(project_dir):
-    return os.path.join(project_dir, "docs", "okr", "WEEK_EVENTS.jsonl")
-
-def _current_week_id(now=None):
-    dt = now or _dt.datetime.now()
-    iso = dt.isocalendar()
-    return f"{iso.year}-W{iso.week:02d}"
-
-def _default_week_state(now=None):
-    ts = (now or _dt.datetime.now()).isoformat()
-    return {
-        "version": 1,
-        "week_id": _current_week_id(now),
-        "stage": "UNPLANNED",
-        "owner_approved": False,
-        "owner_decision": "",
-        "owner_note": "",
-        "proposer_agent": "",
-        "challenger_agent": "",
-        "lock": {"locked": False, "locked_at": ""},
-        "execution": {
-            "started_at": "",
-            "last_heartbeat_at": "",
-            "heartbeat_count": 0,
-            "completed_events": 0,
-            "blocked_events": 0,
-        },
-        "interruption": {
-            "active": False,
-            "detected_at": "",
-            "reason": "",
-        },
-        "updated_at": ts,
-    }
-
-def _normalize_week_state(raw_state, now=None):
-    state = _default_week_state(now)
-    if not isinstance(raw_state, dict):
-        return state
-
-    for key, value in raw_state.items():
-        if key not in state:
-            state[key] = value
-
-    stage = str(raw_state.get("stage") or state["stage"]).upper()
-    if stage not in WEEK_STAGES:
-        stage = state["stage"]
-    state["stage"] = stage
-    state["owner_approved"] = bool(raw_state.get("owner_approved", state["owner_approved"]))
-    state["owner_decision"] = str(raw_state.get("owner_decision") or state["owner_decision"])
-    state["owner_note"] = str(raw_state.get("owner_note") or state["owner_note"])
-    state["proposer_agent"] = str(raw_state.get("proposer_agent") or state["proposer_agent"]).strip()
-    state["challenger_agent"] = str(raw_state.get("challenger_agent") or state["challenger_agent"]).strip()
-
-    lock = raw_state.get("lock")
-    if isinstance(lock, dict):
-        state["lock"]["locked"] = bool(lock.get("locked", state["lock"]["locked"]))
-        state["lock"]["locked_at"] = str(lock.get("locked_at") or state["lock"]["locked_at"])
-
-    execution = raw_state.get("execution")
-    if isinstance(execution, dict):
-        state["execution"]["started_at"] = str(execution.get("started_at") or state["execution"]["started_at"])
-        state["execution"]["last_heartbeat_at"] = str(
-            execution.get("last_heartbeat_at") or state["execution"]["last_heartbeat_at"]
-        )
-        state["execution"]["heartbeat_count"] = max(
-            0, _coerce_int(execution.get("heartbeat_count"), state["execution"]["heartbeat_count"])
-        )
-        state["execution"]["completed_events"] = max(
-            0, _coerce_int(execution.get("completed_events"), state["execution"]["completed_events"])
-        )
-        state["execution"]["blocked_events"] = max(
-            0, _coerce_int(execution.get("blocked_events"), state["execution"]["blocked_events"])
-        )
-
-    interruption = raw_state.get("interruption")
-    if isinstance(interruption, dict):
-        state["interruption"]["active"] = bool(interruption.get("active", state["interruption"]["active"]))
-        state["interruption"]["detected_at"] = str(
-            interruption.get("detected_at") or state["interruption"]["detected_at"]
-        )
-        state["interruption"]["reason"] = str(interruption.get("reason") or state["interruption"]["reason"])
-
-    state["updated_at"] = str(raw_state.get("updated_at") or state["updated_at"])
-    return state
-
-def _load_week_state(project_dir):
-    path = _week_state_path(project_dir)
-    if not os.path.isfile(path):
-        return _default_week_state(), path, False
-    try:
-        with open(path, "r", encoding="utf-8") as handle:
-            raw = json.load(handle)
-        return _normalize_week_state(raw), path, True
-    except Exception:
-        return _default_week_state(), path, False
-
-def _save_week_state(project_dir, state):
-    path = _week_state_path(project_dir)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    state["updated_at"] = _dt.datetime.now().isoformat()
-    with open(path, "w", encoding="utf-8") as handle:
-        json.dump(state, handle, ensure_ascii=False, indent=2)
-    return path
-
-def _append_week_event(project_dir, event_type, payload=None):
-    state, _, _ = _load_week_state(project_dir)
-    path = _week_events_path(project_dir)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    event = {
-        "timestamp": _dt.datetime.now().isoformat(),
-        "week_id": state.get("week_id") or _current_week_id(),
-        "type": event_type,
-    }
-    if isinstance(payload, dict):
-        event.update(payload)
-    with open(path, "a", encoding="utf-8") as handle:
-        handle.write(json.dumps(event, ensure_ascii=False) + "\n")
-
-def _read_week_events(project_dir, limit=50):
-    path = _week_events_path(project_dir)
-    if not os.path.isfile(path):
-        return []
-    rows = []
-    try:
-        with open(path, "r", encoding="utf-8") as handle:
-            for line in handle:
-                text = line.strip()
-                if not text:
-                    continue
-                try:
-                    rows.append(json.loads(text))
-                except Exception:
-                    continue
-    except Exception:
-        return []
-    return rows[-limit:]
-
-def _week_lock_is_valid(state, lifecycle_cfg):
-    if not _pick_bool(lifecycle_cfg.get("enabled"), True):
-        return True
-    if not _pick_bool(lifecycle_cfg.get("require_owner_approval_for_risk_writes"), True):
-        return True
-    if not bool(state.get("owner_approved")):
-        return False
-    if _pick_bool(lifecycle_cfg.get("require_challenge_before_approval"), True):
-        if not str(state.get("challenger_agent") or "").strip():
-            return False
-    if state.get("stage") == "INTERRUPTED":
-        return False
-    stage = str(state.get("stage") or "").upper()
-    lock = state.get("lock") or {}
-    locked = bool(lock.get("locked"))
-    return stage in {"LOCKED", "EXECUTING", "REVIEW", "CLOSED"} or locked
-
-def _record_execution_heartbeat(project_dir, profile, payload, file_path):
-    lifecycle = (profile or {}).get("lifecycle") or {}
-    if not _pick_bool(lifecycle.get("enabled"), True):
-        return
-
-    state, _, _ = _load_week_state(project_dir)
-    if not bool(state.get("owner_approved")):
-        return
-
-    stage = str(state.get("stage") or "").upper()
-    if stage not in {"LOCKED", "EXECUTING", "REVIEW"}:
-        return
-
-    now = _dt.datetime.now().isoformat()
-    if stage == "LOCKED":
-        state["stage"] = "EXECUTING"
-        if not state.get("execution", {}).get("started_at"):
-            state["execution"]["started_at"] = now
-    state["execution"]["last_heartbeat_at"] = now
-    state["execution"]["heartbeat_count"] = int(state["execution"].get("heartbeat_count") or 0) + 1
-    state["interruption"]["active"] = False
-    state["interruption"]["detected_at"] = ""
-    state["interruption"]["reason"] = ""
-
-    _save_week_state(project_dir, state)
-    _append_week_event(
-        project_dir,
-        "heartbeat",
-        {
-            "tool": payload.get("tool_name"),
-            "file_path": file_path,
-            "summary": f"heartbeat after {payload.get('tool_name')} {file_path or ''}".strip(),
-        },
-    )
-
-def _mark_week_interrupted_if_stale(project_dir, profile):
-    lifecycle = (profile or {}).get("lifecycle") or {}
-    if not _pick_bool(lifecycle.get("enabled"), True):
-        return None
-
-    state, _, exists = _load_week_state(project_dir)
-    if not exists:
-        return None
-    if str(state.get("stage") or "").upper() != "EXECUTING":
-        return None
-
-    timeout_minutes = max(1, _coerce_int(lifecycle.get("heartbeat_timeout_minutes"), 180))
-    last_heartbeat = _parse_iso_datetime((state.get("execution") or {}).get("last_heartbeat_at"))
-    if last_heartbeat is None:
-        return None
-
-    now = _dt.datetime.now()
-    if last_heartbeat.tzinfo is not None and now.tzinfo is None:
-        now_cmp = _dt.datetime.now(tz=last_heartbeat.tzinfo)
-    elif last_heartbeat.tzinfo is None and now.tzinfo is not None:
-        now_cmp = now.replace(tzinfo=None)
-    else:
-        now_cmp = now
-
-    age_minutes = (now_cmp - last_heartbeat).total_seconds() / 60.0
-    if age_minutes < timeout_minutes:
-        return None
-
-    state["stage"] = "INTERRUPTED"
-    state["interruption"]["active"] = True
-    state["interruption"]["detected_at"] = _dt.datetime.now().isoformat()
-    state["interruption"]["reason"] = (
-        f"No heartbeat for {int(age_minutes)}m (timeout={timeout_minutes}m)."
-    )
-    _save_week_state(project_dir, state)
-    _append_week_event(
-        project_dir,
-        "interruption_detected",
-        {"summary": state["interruption"]["reason"]},
-    )
-    return state
-
 # --- Hook Handlers ---
 
 def audit_log(payload, project_dir):
@@ -1458,16 +412,18 @@ def post_write_checks(payload, project_dir):
     spiral_warning = ""
     is_spiral = False
     try:
-        # Check last 5 commits for "fix" patterns
+        # Check last 5 commits for "fix" patterns (使用词边界避免误判)
         if os.path.exists(os.path.join(project_dir, ".git")):
             git_log = subprocess.check_output(
                 ["git", "-C", project_dir, "log", "--oneline", "-n", "5"], 
                 text=True, stderr=subprocess.DEVNULL
             ).lower()
             
-            fix_count = 0
-            for keyword in ["fix", "fail", "error", "repair", "patch", "revert"]:
-                fix_count += git_log.count(keyword)
+            # 使用正则词边界匹配，避免 prefix/suffix/affix 等误判
+            import re as _re_for_spiral
+            SPIRAL_KEYWORDS = r'\b(?:fix|fail|error|repair|patch|revert)\b'
+            matches = _re_for_spiral.findall(SPIRAL_KEYWORDS, git_log, _re_for_spiral.IGNORECASE)
+            fix_count = len(matches)
             
             if fix_count >= 3:
                 is_spiral = True
@@ -1486,7 +442,8 @@ def post_write_checks(payload, project_dir):
 
     evolution_mode = profile.get("evolution_mode") or "realtime"
     
-    # 判定优先级和严重程度
+    # 判定优先级和严重程度（先定义 task_type）
+    task_type = "test_failure" if rc != 0 else "quality_signal"
     severity = _pain_severity_label(pain_score, is_spiral=(is_spiral and rc != 0))
     task_priority = _compute_task_priority(task_type, {"exit_code": rc, "is_spiral": (is_spiral and rc != 0), "pain_score": pain_score})
     
@@ -1550,7 +507,7 @@ def post_write_checks(payload, project_dir):
         "soft_capture_threshold": soft_threshold,
         "soft_threshold_reasons": threshold_diag.get("reasons") or [],
     }
-    task_type = "test_failure" if rc != 0 else "quality_signal"
+    # task_type 已在前面定义（line ~1492）
     if evolution_mode == "async":
         task_id = enqueue_evolution_task(task_type, details, project_dir)
         if task_id:
@@ -1618,8 +575,8 @@ def session_init(payload, project_dir):
             pending = [t for t in queue if str(t.get("status", "")).lower() == "pending"]
             if pending:
                 print(f"[INFO] 🚀 {len(pending)} tasks in evolution queue. Run /watch-evolution to start worker.")
-        except:
-            pass
+        except (json.JSONDecodeError, OSError, KeyError) as exc:
+            logging.debug("Non-critical: failed to parse evolution queue: %s", exc)
 
     # 2. 优先检查反思要求
     if os.path.isfile(pending_reflection):
@@ -1722,7 +679,8 @@ def user_prompt_context(payload, project_dir):
                     signal_lines.append(f"  {line}")
             else:
                 signal_lines.append("- Unresolved pain signal exists.")
-        except Exception:
+        except (OSError, UnicodeDecodeError) as exc:
+            logging.debug("Failed to read pain_flag preview: %s", exc)
             signal_lines.append("- Unresolved pain signal exists.")
 
     if os.path.isfile(pending_reflection):
@@ -1773,8 +731,8 @@ def user_prompt_context(payload, project_dir):
                     if text.startswith("- [") or text.startswith("- "):
                         signal_lines.append(f"- Current focus: {text[:120]}")
                         break
-        except Exception:
-            pass
+        except (OSError, UnicodeDecodeError) as exc:
+            logging.debug("Failed to read CURRENT_FOCUS: %s", exc)
 
     if not signal_lines:
         signal_lines.append("- State: stable. Keep the workflow order and guardrails active.")
@@ -2018,8 +976,8 @@ def stop_evolution_update(payload, project_dir):
             # 触发 sync_user_context (直接调用函数，不再 spawn shell)
             sync_user_context(payload, project_dir)
             
-        except Exception as e:
-            logging.error(f"Failed to update user profile: {e}")
+        except (json.JSONDecodeError, OSError, KeyError, TypeError) as exc:
+            logging.error("Failed to update user profile: %s", exc)
 
     return 0
 
@@ -2370,6 +1328,11 @@ def pre_write_gate(payload, project_dir):
 
     file_path = (payload.get("tool_input") or {}).get("file_path") or ""
     rel = normalize_path(file_path, project_dir) if file_path else ""
+
+    # Debug
+    debug_log(f"Profile gate: {profile.get('gate')}", "debug_log.txt", project_dir)
+    debug_log(f"Profile risk_paths: {profile.get('risk_paths')}", "debug_log.txt", project_dir)
+    debug_log(f"tool={tool}, file_path={file_path}, rel={rel}", "debug_log.txt", project_dir)
     
     # --- 1. 动态自定义钩子检查 (Dynamic Custom Guards) ---
     # 允许系统通过修改 PROFILE.json 实现自我进化
@@ -2399,23 +1362,34 @@ def pre_write_gate(payload, project_dir):
     risk_paths = profile.get("risk_paths") or []
     risky = is_risky(rel, risk_paths) if file_path else True
 
+    debug_log(f"Risky check: rel={rel}, risk_paths={risk_paths}, risky={risky}", "debug_log.txt", project_dir)
+
     gate = profile.get("gate") or {}
     require_plan = bool(gate.get("require_plan_for_risk_paths", False))
     require_audit = bool(gate.get("require_audit_before_write", False))
     lifecycle = profile.get("lifecycle") or {}
 
+    debug_log(f"require_plan={require_plan}, require_audit={require_audit}", "debug_log.txt", project_dir)
+
     plan_path = os.path.join(project_dir, "docs", "PLAN.md")
     audit_path = os.path.join(project_dir, "docs", "AUDIT.md")
-
+    
     if risky:
+        debug_log("Entered risky block", "debug_log.txt", project_dir)
+
         state, _, _ = _load_week_state(project_dir)
         if str(state.get("stage") or "").upper() == "INTERRUPTED":
+            debug_log("Blocked by INTERRUPTED stage", "debug_log.txt", project_dir)
             print(
                 "Blocked: weekly execution interrupted. Recover lifecycle state before risky writes.",
                 file=sys.stderr,
             )
             return 2
+
+        debug_log(f"Checking week lock: state={state}, lifecycle={lifecycle}", "debug_log.txt", project_dir)
+            
         if not _week_lock_is_valid(state, lifecycle):
+            debug_log("Blocked by week lock invalid", "debug_log.txt", project_dir)
             print(
                 "Blocked: weekly plan lock missing. Use proposal+challenge flow and AskUserQuestion owner approval first.",
                 file=sys.stderr,
