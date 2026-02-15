@@ -311,3 +311,4 @@
 [2026-02-15T13:32:20] [WARNING] [log_telemetry] [pre_write_gate] Status: BLOCKED
 [2026-02-15T13:32:21] [WARNING] [log_telemetry] [precompact_checkpoint] Status: SUCCESS
 [2026-02-15T13:32:22] [WARNING] [log_telemetry] [stop_evolution_update] Status: SUCCESS
+[2026-02-15T14:11:15] [WARNING] [log_telemetry] [statusline] Status: SUCCESS
