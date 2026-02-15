@@ -12,3 +12,302 @@
 [2026-01-23T09:40:12] [INFO] [log_telemetry] [pre_write_gate] Status: SUCCESS | Duration: 10.22ms
 [2026-01-23T09:40:13] [INFO] [log_telemetry] [precompact_checkpoint] Status: SUCCESS | Duration: 18.54ms
 [2026-01-23T09:40:39] [INFO] [log_telemetry] [stop_evolution_update] Status: SUCCESS | Duration: 39.67ms
+[2026-02-13T20:58:14] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp1evwk7qg\docs\PROFILE.json] PROFILE normalization warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'. | custom_guards[0] has invalid severity; fallback to 'error'. | custom_guards[1] missing valid pattern; skipped. | custom_guards[2] must be an object; skipped.
+[2026-02-13T20:58:17] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmps8x33doa\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-13T20:58:17] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmps8x33doa\docs\PROFILE.json] PROFILE normalization warnings: PROFILE root must be an object; defaults applied.
+[2026-02-13T21:17:35] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp1o5bqc4w\docs\PROFILE.json] PROFILE normalization warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'. | custom_guards[0] has invalid severity; fallback to 'error'. | custom_guards[1] missing valid pattern; skipped. | custom_guards[2] must be an object; skipped.
+[2026-02-13T21:17:36] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmply55x_cj\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-13T21:17:36] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmply55x_cj\docs\PROFILE.json] PROFILE normalization warnings: PROFILE root must be an object; defaults applied.
+[2026-02-13T21:37:35] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpvzoocd8a\docs\PROFILE.json] PROFILE normalization warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'. | custom_guards[0] has invalid severity; fallback to 'error'. | custom_guards[1] missing valid pattern; skipped. | custom_guards[2] must be an object; skipped.
+[2026-02-13T21:37:36] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpkkfmgkvq\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-13T21:37:36] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpkkfmgkvq\docs\PROFILE.json] PROFILE normalization warnings: PROFILE root must be an object; defaults applied.
+[2026-02-13T21:45:01] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp122mkz37\docs\PROFILE.json] PROFILE normalization warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'. | custom_guards[0] has invalid severity; fallback to 'error'. | custom_guards[1] missing valid pattern; skipped. | custom_guards[2] must be an object; skipped.
+[2026-02-13T21:45:02] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpuzukbguc\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-13T21:45:02] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpuzukbguc\docs\PROFILE.json] PROFILE normalization warnings: PROFILE root must be an object; defaults applied.
+[2026-02-13T21:53:02] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp5ft3s1df\docs\PROFILE.json] PROFILE normalization warnings: Invalid audit_level 'invalid_level', fallback to 'medium'.
+[2026-02-13T22:05:20] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpk5_5cahj\docs\PROFILE.json] PROFILE normalization warnings: Invalid audit_level 'invalid_level', fallback to 'medium'.
+[2026-02-13T22:06:57] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpmoy6fxe3\docs\PROFILE.json] PROFILE normalization warnings: Invalid audit_level 'invalid_level', fallback to 'medium'.
+[2026-02-13T22:17:30] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmps27dpc7z\docs\PROFILE.json] PROFILE normalization warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'. | custom_guards[0] has invalid severity; fallback to 'error'. | custom_guards[1] missing valid pattern; skipped. | custom_guards[2] must be an object; skipped.
+[2026-02-13T22:17:30] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpqa0ngi0v\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-13T22:17:30] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpqa0ngi0v\docs\PROFILE.json] PROFILE normalization warnings: PROFILE root must be an object; defaults applied.
+[2026-02-13T22:17:30] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp_mz2bwbh\docs\PROFILE.json] PROFILE normalization warnings: Invalid audit_level 'invalid_level', fallback to 'medium'.
+[2026-02-13T22:20:42] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpeu96g_40\docs\PROFILE.json] PROFILE normalization warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'. | custom_guards[0] has invalid severity; fallback to 'error'. | custom_guards[1] missing valid pattern; skipped. | custom_guards[2] must be an object; skipped.
+[2026-02-13T22:20:42] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpgkzw0rej\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-13T22:20:42] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpgkzw0rej\docs\PROFILE.json] PROFILE normalization warnings: PROFILE root must be an object; defaults applied.
+[2026-02-13T22:26:07] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpb9_26vpq\docs\PROFILE.json] PROFILE normalization warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'. | custom_guards[0] has invalid severity; fallback to 'error'. | custom_guards[1] missing valid pattern; skipped. | custom_guards[2] must be an object; skipped.
+[2026-02-13T22:26:07] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpkynkv6zv\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-13T22:26:07] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpkynkv6zv\docs\PROFILE.json] PROFILE normalization warnings: PROFILE root must be an object; defaults applied.
+[2026-02-13T22:27:42] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpyaq8yapy\docs\PROFILE.json] PROFILE normalization warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'. | custom_guards[0] has invalid severity; fallback to 'error'. | custom_guards[1] missing valid pattern; skipped. | custom_guards[2] must be an object; skipped.
+[2026-02-13T22:27:42] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmppytgg889\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-13T22:27:42] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmppytgg889\docs\PROFILE.json] PROFILE normalization warnings: PROFILE root must be an object; defaults applied.
+[2026-02-13T22:30:10] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpcfi5gkr0\docs\PROFILE.json] PROFILE normalization warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'. | custom_guards[0] has invalid severity; fallback to 'error'. | custom_guards[1] missing valid pattern; skipped. | custom_guards[2] must be an object; skipped.
+[2026-02-13T22:30:10] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp0dcmfskt\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-13T22:30:10] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp0dcmfskt\docs\PROFILE.json] PROFILE normalization warnings: PROFILE root must be an object; defaults applied.
+[2026-02-13T22:30:14] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp4vl6rrpb\docs\PROFILE.json] PROFILE normalization warnings: Invalid audit_level 'invalid_level', fallback to 'medium'.
+[2026-02-13T22:53:56] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp1svaivod\docs\PROFILE.json] PROFILE normalization warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'. | custom_guards[0] has invalid severity; fallback to 'error'. | custom_guards[1] missing valid pattern; skipped. | custom_guards[2] must be an object; skipped.
+[2026-02-13T22:53:56] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpzm4x43qv\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-13T22:53:56] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpzm4x43qv\docs\PROFILE.json] PROFILE normalization warnings: PROFILE root must be an object; defaults applied.
+[2026-02-13T22:55:09] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp4g4rqpmr\docs\PROFILE.json] PROFILE normalization warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'. | custom_guards[0] has invalid severity; fallback to 'error'. | custom_guards[1] missing valid pattern; skipped. | custom_guards[2] must be an object; skipped.
+[2026-02-13T22:55:09] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpvztxd3gd\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-13T22:55:09] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpvztxd3gd\docs\PROFILE.json] PROFILE normalization warnings: PROFILE root must be an object; defaults applied.
+[2026-02-13T22:56:15] [INFO] [log_telemetry] [pre_write_gate] Status: SUCCESS | Duration: 40.94ms
+[2026-02-13T22:56:16] [WARNING] [log_telemetry] [pre_write_gate] Status: BLOCKED | Duration: 25.60ms
+[2026-02-13T22:56:16] [INFO] [log_telemetry] [precompact_checkpoint] Status: SUCCESS | Duration: 3.82ms
+[2026-02-13T22:56:16] [INFO] [log_telemetry] [stop_evolution_update] Status: SUCCESS | Duration: 57.33ms
+[2026-02-13T22:57:54] [INFO] [log_telemetry] [pre_write_gate] Status: SUCCESS | Duration: 18.60ms
+[2026-02-13T22:57:54] [WARNING] [log_telemetry] [pre_write_gate] Status: BLOCKED | Duration: 18.99ms
+[2026-02-13T22:57:55] [INFO] [log_telemetry] [precompact_checkpoint] Status: SUCCESS | Duration: 2.40ms
+[2026-02-13T22:57:55] [INFO] [log_telemetry] [stop_evolution_update] Status: SUCCESS | Duration: 17.57ms
+[2026-02-13T23:00:53] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpk0hyo672\docs\PROFILE.json] PROFILE normalization warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'. | custom_guards[0] has invalid severity; fallback to 'error'. | custom_guards[1] missing valid pattern; skipped. | custom_guards[2] must be an object; skipped.
+[2026-02-13T23:00:53] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpcblsfqd2\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-13T23:00:53] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpcblsfqd2\docs\PROFILE.json] PROFILE normalization warnings: PROFILE root must be an object; defaults applied.
+[2026-02-13T23:00:58] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp3ho5ollr\docs\PROFILE.json] PROFILE normalization warnings: Invalid audit_level 'invalid_level', fallback to 'medium'.
+[2026-02-13T23:00:58] [ERROR] [record_failure] [Circuit Breaker test_op] CLOSED -> OPEN after 3 failures
+[2026-02-13T23:18:12] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp5xxyjbfx\docs\PROFILE.json] Profile warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'.
+[2026-02-13T23:18:12] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp2_ijc7ha\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-13T23:18:12] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp2_ijc7ha\docs\PROFILE.json] Profile warnings: PROFILE root must be an object; defaults applied.
+[2026-02-13T23:18:12] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-13T23:18:12] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-13T23:18:12] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-13T23:18:12] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-13T23:18:32] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp7ax7z7hz\docs\PROFILE.json] Profile warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'.
+[2026-02-13T23:18:32] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmputtjm2xc\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-13T23:18:32] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmputtjm2xc\docs\PROFILE.json] Profile warnings: PROFILE root must be an object; defaults applied.
+[2026-02-13T23:18:32] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-13T23:18:32] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-13T23:18:32] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-13T23:18:32] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-13T23:19:16] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpmutoy_t_\docs\PROFILE.json] Profile warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'.
+[2026-02-13T23:19:17] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp0vk6a3jc\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-13T23:19:17] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp0vk6a3jc\docs\PROFILE.json] Profile warnings: PROFILE root must be an object; defaults applied.
+[2026-02-13T23:19:17] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-13T23:19:46] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpnvm_mcoj\docs\PROFILE.json] Profile warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'.
+[2026-02-13T23:19:46] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp5w82spsu\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-13T23:19:46] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp5w82spsu\docs\PROFILE.json] Profile warnings: PROFILE root must be an object; defaults applied.
+[2026-02-13T23:19:46] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-13T23:19:46] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-13T23:19:46] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-13T23:19:46] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-13T23:20:53] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp981rwl2e\docs\PROFILE.json] Profile warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'.
+[2026-02-13T23:20:53] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpqa7x5rn4\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-13T23:20:53] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpqa7x5rn4\docs\PROFILE.json] Profile warnings: PROFILE root must be an object; defaults applied.
+[2026-02-13T23:20:53] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-13T23:20:53] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-13T23:20:53] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-13T23:20:53] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-13T23:21:19] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpnp7ckn58\docs\PROFILE.json] Profile warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'.
+[2026-02-13T23:21:20] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpw064oese\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-13T23:21:20] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpw064oese\docs\PROFILE.json] Profile warnings: PROFILE root must be an object; defaults applied.
+[2026-02-13T23:21:20] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-13T23:21:20] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-13T23:21:20] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-13T23:21:20] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-13T23:21:47] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp4gomfrrw\docs\PROFILE.json] Profile warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'.
+[2026-02-13T23:21:47] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpg0p9ipvj\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-13T23:21:47] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpg0p9ipvj\docs\PROFILE.json] Profile warnings: PROFILE root must be an object; defaults applied.
+[2026-02-13T23:21:47] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-13T23:21:47] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-13T23:21:47] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-13T23:21:47] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-13T23:31:08] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpynfmsrns\docs\PROFILE.json] Profile warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'.
+[2026-02-13T23:31:08] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp24hn2shh\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-13T23:31:08] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp24hn2shh\docs\PROFILE.json] Profile warnings: PROFILE root must be an object; defaults applied.
+[2026-02-13T23:31:08] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-13T23:31:08] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-13T23:31:08] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-13T23:31:08] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:21:28] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpw50xvg79\docs\PROFILE.json] Profile warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'.
+[2026-02-14T06:21:28] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp1gkufjab\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-14T06:21:28] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp1gkufjab\docs\PROFILE.json] Profile warnings: PROFILE root must be an object; defaults applied.
+[2026-02-14T06:21:28] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:21:28] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:21:28] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:21:28] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:22:17] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpizyxrn68\docs\PROFILE.json] Profile warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'.
+[2026-02-14T06:22:17] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpa7halc45\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-14T06:22:17] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpa7halc45\docs\PROFILE.json] Profile warnings: PROFILE root must be an object; defaults applied.
+[2026-02-14T06:22:17] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:22:17] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:22:17] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:22:17] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:23:54] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp4hgwwcgc\docs\PROFILE.json] Profile warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'.
+[2026-02-14T06:23:54] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmplirgafvt\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-14T06:23:54] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmplirgafvt\docs\PROFILE.json] Profile warnings: PROFILE root must be an object; defaults applied.
+[2026-02-14T06:23:54] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:23:54] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:23:54] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:23:54] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:25:38] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp5qqe79fz\docs\PROFILE.json] Profile warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'.
+[2026-02-14T06:25:39] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmptjipfks7\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-14T06:25:39] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmptjipfks7\docs\PROFILE.json] Profile warnings: PROFILE root must be an object; defaults applied.
+[2026-02-14T06:25:39] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:25:39] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:25:39] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:25:39] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:27:17] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpiimt3y_j\docs\PROFILE.json] Profile warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'.
+[2026-02-14T06:27:18] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp7p9a3big\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-14T06:27:18] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp7p9a3big\docs\PROFILE.json] Profile warnings: PROFILE root must be an object; defaults applied.
+[2026-02-14T06:27:18] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:27:19] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:27:19] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:27:19] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:29:32] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpddntpvxx\docs\PROFILE.json] Profile warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'.
+[2026-02-14T06:29:32] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpu1tv7hlk\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-14T06:29:32] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpu1tv7hlk\docs\PROFILE.json] Profile warnings: PROFILE root must be an object; defaults applied.
+[2026-02-14T06:29:32] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:29:32] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:29:32] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:29:32] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:31:00] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpsmwim4pr\docs\PROFILE.json] Profile warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'.
+[2026-02-14T06:31:00] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpkvbr97c9\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-14T06:31:00] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpkvbr97c9\docs\PROFILE.json] Profile warnings: PROFILE root must be an object; defaults applied.
+[2026-02-14T06:31:00] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:31:00] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:31:00] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:31:00] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:33:47] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp9f7f8gla\docs\PROFILE.json] Profile warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'.
+[2026-02-14T06:33:48] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmprzt6ytem\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-14T06:33:48] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmprzt6ytem\docs\PROFILE.json] Profile warnings: PROFILE root must be an object; defaults applied.
+[2026-02-14T06:33:48] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:33:48] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:33:48] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:33:48] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:36:10] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp4b_x8chi\docs\PROFILE.json] Profile warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'.
+[2026-02-14T06:36:11] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpuvq9wb9l\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-14T06:36:11] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpuvq9wb9l\docs\PROFILE.json] Profile warnings: PROFILE root must be an object; defaults applied.
+[2026-02-14T06:36:11] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:36:11] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:36:11] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:36:11] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:36:55] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmplk2w_lo0\docs\PROFILE.json] Profile warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'.
+[2026-02-14T06:36:56] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpi6p9b7r6\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-14T06:36:56] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpi6p9b7r6\docs\PROFILE.json] Profile warnings: PROFILE root must be an object; defaults applied.
+[2026-02-14T06:36:56] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:36:56] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:36:56] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:36:56] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:40:54] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpyicli23d\docs\PROFILE.json] Profile warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'.
+[2026-02-14T06:40:56] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpy12dy9r0\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-14T06:40:56] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpy12dy9r0\docs\PROFILE.json] Profile warnings: PROFILE root must be an object; defaults applied.
+[2026-02-14T06:40:56] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:40:56] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:40:57] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:40:57] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:41:41] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpr7epss95\docs\PROFILE.json] Profile warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'.
+[2026-02-14T06:41:42] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp08yd35ms\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-14T06:41:42] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp08yd35ms\docs\PROFILE.json] Profile warnings: PROFILE root must be an object; defaults applied.
+[2026-02-14T06:41:42] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:41:42] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:41:42] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:41:43] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:45:13] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpuxgnsswb\docs\PROFILE.json] Profile warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'.
+[2026-02-14T06:45:14] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp1infxsvz\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-14T06:45:14] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp1infxsvz\docs\PROFILE.json] Profile warnings: PROFILE root must be an object; defaults applied.
+[2026-02-14T06:45:14] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:45:14] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:45:15] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:45:15] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:47:26] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpvrrv87ny\docs\PROFILE.json] Profile warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'.
+[2026-02-14T06:47:27] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp46tj9yhe\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-14T06:47:27] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp46tj9yhe\docs\PROFILE.json] Profile warnings: PROFILE root must be an object; defaults applied.
+[2026-02-14T06:47:27] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:47:28] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:47:28] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:47:28] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:51:27] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpv_eehkva\docs\PROFILE.json] Profile warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'.
+[2026-02-14T06:51:27] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp_7iwjn_z\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-14T06:51:27] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp_7iwjn_z\docs\PROFILE.json] Profile warnings: PROFILE root must be an object; defaults applied.
+[2026-02-14T06:51:28] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:51:28] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:51:28] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:51:28] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:52:51] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpkiwf7ckw\docs\PROFILE.json] Profile warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'.
+[2026-02-14T06:52:52] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpb2h7coub\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-14T06:52:52] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpb2h7coub\docs\PROFILE.json] Profile warnings: PROFILE root must be an object; defaults applied.
+[2026-02-14T06:52:52] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:52:52] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:52:52] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:52:52] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:55:07] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp7tucpkd3\docs\PROFILE.json] Profile warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'.
+[2026-02-14T06:55:08] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpw8y6ajlh\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-14T06:55:08] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpw8y6ajlh\docs\PROFILE.json] Profile warnings: PROFILE root must be an object; defaults applied.
+[2026-02-14T06:55:08] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:55:08] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:55:08] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T06:55:08] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T07:08:05] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpnqpz0pj3\docs\PROFILE.json] Profile warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'.
+[2026-02-14T07:08:07] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp_rgk8sl5\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-14T07:08:07] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp_rgk8sl5\docs\PROFILE.json] Profile warnings: PROFILE root must be an object; defaults applied.
+[2026-02-14T07:08:07] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T07:08:07] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T07:08:07] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T07:08:08] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T07:10:19] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpwhv59u88\docs\PROFILE.json] Profile warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'.
+[2026-02-14T07:10:20] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpz1gnbmpp\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-14T07:10:20] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpz1gnbmpp\docs\PROFILE.json] Profile warnings: PROFILE root must be an object; defaults applied.
+[2026-02-14T07:10:20] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T07:10:20] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T07:10:20] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T07:10:20] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T07:14:06] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpxzqkq3if\docs\PROFILE.json] Profile warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'.
+[2026-02-14T07:14:07] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmppxxo92q8\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-14T07:14:07] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmppxxo92q8\docs\PROFILE.json] Profile warnings: PROFILE root must be an object; defaults applied.
+[2026-02-14T07:14:07] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T07:14:07] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T07:14:07] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T07:14:07] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T07:25:39] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp752fkeof\docs\PROFILE.json] Profile warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'.
+[2026-02-14T07:25:40] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpz8psm9vk\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-14T07:25:40] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpz8psm9vk\docs\PROFILE.json] Profile warnings: PROFILE root must be an object; defaults applied.
+[2026-02-14T07:25:40] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T07:25:40] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T07:25:40] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T07:25:40] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T07:28:05] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmppsjoyof0\docs\PROFILE.json] Profile warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'.
+[2026-02-14T07:28:05] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpgosf8v44\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-14T07:28:05] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpgosf8v44\docs\PROFILE.json] Profile warnings: PROFILE root must be an object; defaults applied.
+[2026-02-14T07:28:05] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T07:28:05] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T07:28:05] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T07:28:05] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T07:28:44] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpy1pd25u5\docs\PROFILE.json] Profile warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'.
+[2026-02-14T07:28:44] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmperof1vma\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-14T07:28:44] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmperof1vma\docs\PROFILE.json] Profile warnings: PROFILE root must be an object; defaults applied.
+[2026-02-14T07:28:44] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T07:28:44] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T07:28:44] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-14T07:28:44] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-15T10:34:32] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpnh8scxyj\docs\PROFILE.json] Profile warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'.
+[2026-02-15T10:34:33] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp4jciu65t\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-15T10:34:33] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp4jciu65t\docs\PROFILE.json] Profile warnings: PROFILE root must be an object; defaults applied.
+[2026-02-15T10:34:33] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-15T10:34:33] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-15T10:34:33] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-15T10:34:33] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-15T10:35:05] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpbrwm5c9a\docs\PROFILE.json] Profile warnings: Invalid audit_level 'invalid_level', fallback to 'medium'.
+[2026-02-15T10:35:05] [ERROR] [record_failure] [Circuit Breaker test_op] CLOSED -> OPEN after 3 failures
+[2026-02-15T11:13:16] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmpfssuvy22\docs\PROFILE.json] Profile warnings: Invalid audit_level 'critical', fallback to 'medium'. | Invalid evolution_mode 'background', fallback to 'realtime'. | Invalid tests.on_change 'quick', fallback to 'smoke'. | tests.commands only accepts string-to-string pairs. | Invalid pain.soft_capture_threshold 'high', fallback to '30'.
+[2026-02-15T11:13:16] [ERROR] [load_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp_5joo882\docs\PROFILE.json] PROFILE parse failed: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)
+[2026-02-15T11:13:16] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp_5joo882\docs\PROFILE.json] Profile warnings: PROFILE root must be an object; defaults applied.
+[2026-02-15T11:13:17] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-15T11:13:17] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-15T11:13:17] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-15T11:13:17] [INFO] [load_profile] DEBUG: Using NEW profile module
+[2026-02-15T11:13:22] [WARNING] [_normalize_profile] [C:\Users\Thinkpad\AppData\Local\Temp\tmp8f0xcx9o\docs\PROFILE.json] Profile warnings: Invalid audit_level 'invalid_level', fallback to 'medium'.
+[2026-02-15T11:13:22] [ERROR] [record_failure] [Circuit Breaker test_op] CLOSED -> OPEN after 3 failures
+[2026-02-15T13:18:10] [WARNING] [log_telemetry] [emit_signal] Status: SUCCESS
+[2026-02-15T13:18:11] [WARNING] [log_telemetry] [emit_signal] Status: SUCCESS
+[2026-02-15T13:18:22] [WARNING] [log_telemetry] [pre_write_gate] Status: BLOCKED
+[2026-02-15T13:18:23] [WARNING] [log_telemetry] [pre_write_gate] Status: BLOCKED
+[2026-02-15T13:18:23] [WARNING] [log_telemetry] [precompact_checkpoint] Status: SUCCESS
+[2026-02-15T13:18:24] [WARNING] [log_telemetry] [stop_evolution_update] Status: SUCCESS
+[2026-02-15T13:23:13] [WARNING] [log_telemetry] [pre_write_gate] Status: BLOCKED
+[2026-02-15T13:23:13] [WARNING] [log_telemetry] [pre_write_gate] Status: BLOCKED
+[2026-02-15T13:23:14] [WARNING] [log_telemetry] [precompact_checkpoint] Status: SUCCESS
+[2026-02-15T13:23:14] [WARNING] [log_telemetry] [stop_evolution_update] Status: SUCCESS
+[2026-02-15T13:31:59] [WARNING] [log_telemetry] [emit_signal] Status: SUCCESS
+[2026-02-15T13:32:00] [WARNING] [log_telemetry] [emit_signal] Status: SUCCESS
+[2026-02-15T13:32:19] [WARNING] [log_telemetry] [pre_write_gate] Status: SUCCESS
+[2026-02-15T13:32:20] [WARNING] [log_telemetry] [pre_write_gate] Status: BLOCKED
+[2026-02-15T13:32:21] [WARNING] [log_telemetry] [precompact_checkpoint] Status: SUCCESS
+[2026-02-15T13:32:22] [WARNING] [log_telemetry] [stop_evolution_update] Status: SUCCESS

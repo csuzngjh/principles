@@ -226,11 +226,20 @@ def run_headless_claude(prompt, system_prompt="", allowed_tools="Read,Edit,Bash,
     
     logging.info(f"Executing: {' '.join(cmd[:5])}...")
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
+        result = subprocess.run(
+            cmd, 
+            capture_output=True, 
+            text=True, 
+            encoding="utf-8",
+            timeout=300  # 5 分钟硬超时
+        )
         if result.returncode != 0:
             logging.error(f"Claude failed: {result.stderr}")
             return None
         return result.stdout
+    except subprocess.TimeoutExpired:
+        logging.error("Claude execution timed out after 300s")
+        return None
     except Exception as e:
         logging.error(f"Failed to run Claude: {e}")
         return None
@@ -245,17 +254,73 @@ def update_prd(task_id, phase, result):
         if mode == "w": f.write("# Evolution Progress Board\n")
         f.write(entry)
 
+def _rollback_stash(stash_name):
+    """回滚到指定的 git stash 快照"""
+    try:
+        # 查找 stash
+        result = subprocess.run(
+            ["git", "stash", "list"],
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        
+        stash_index = None
+        for i, line in enumerate(result.stdout.splitlines()):
+            if stash_name in line:
+                stash_index = f"stash@{{{i}}}"
+                break
+        
+        if stash_index:
+            # 重置到 stash 状态
+            subprocess.run(
+                ["git", "reset", "--hard"],
+                cwd=PROJECT_ROOT,
+                capture_output=True,
+                check=True
+            )
+            subprocess.run(
+                ["git", "stash", "apply", stash_index],
+                cwd=PROJECT_ROOT,
+                capture_output=True,
+                check=True
+            )
+            logging.info(f"Rollback successful: applied {stash_index}")
+        else:
+            logging.warning(f"Stash {stash_name} not found, skipping rollback")
+            
+    except Exception as exc:
+        logging.error(f"Rollback failed: {exc}")
+
+
 def process_task(task):
     task_id = task["id"]
     details = task["details"]
     logging.info(f"Processing Task {task_id}: {details.get('file_path')}")
+
+    # 进化前快照（git stash）
+    stash_name = f"evolution-{task_id}-{int(time.time())}"
+    try:
+        subprocess.run(
+            ["git", "stash", "push", "-m", stash_name],
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            check=False  # 允许 "No local changes" 的情况
+        )
+        logging.info(f"Created evolution snapshot: {stash_name}")
+    except Exception as exc:
+        logging.warning(f"Failed to create git stash snapshot: {exc}")
 
     # Phase 1: Diagnosis
     diagnosis_prompt = f"你正在后台处理一个进化任务 (ID: {task_id})。\n错误现场：{json.dumps(details, indent=2)}\n请使用 /root-cause 技能分析原因并输出诊断报告。"
     diagnosis_skill = load_skill_prompt("root-cause")
     
     report = run_headless_claude(diagnosis_prompt, system_prompt=diagnosis_skill, allowed_tools="Read,Glob")
-    if not report: return False
+    if not report:
+        logging.error("Phase 1 (Diagnosis) failed, attempting rollback")
+        _rollback_stash(stash_name)
+        return False
     
     update_prd(task_id, "PHASE 1: DIAGNOSIS", report)
 
@@ -265,7 +330,10 @@ def process_task(task):
     fix_skill = load_skill_prompt("reflection-log") # 引导它最后落盘
     
     fix_result = run_headless_claude(fix_prompt, system_prompt=fix_skill, allowed_tools="Read,Edit,Bash,Glob")
-    if not fix_result: return False
+    if not fix_result:
+        logging.error("Phase 2 (Fix) failed, attempting rollback")
+        _rollback_stash(stash_name)
+        return False
     
     update_prd(task_id, "PHASE 2: FIX & REFLECT", fix_result)
     return True

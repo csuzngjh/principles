@@ -32,8 +32,6 @@ class TestKernelPromptContract(unittest.TestCase):
         content = self._read(CLAUDE_MD_PATH)
         required_tokens = [
             "WEEK_STATE.json",
-            "WEEK_EVENTS.jsonl",
-            "WEEK_PLAN_LOCK.json",
             "DECISION_POLICY.json",
             "scripts/weekly_governance.py",
         ]

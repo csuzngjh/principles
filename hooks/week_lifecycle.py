@@ -14,7 +14,11 @@ try:
     from hooks.io_utils import _read_text_file, _coerce_int, _parse_iso_datetime
     from hooks.debug_utils import debug_log, debug_stderr, debug_enabled
 except ImportError:
-    pass
+    try:
+        from io_utils import _read_text_file, _coerce_int, _parse_iso_datetime
+        from debug_utils import debug_log, debug_stderr, debug_enabled
+    except ImportError:
+        pass
 
 __all__ = [
     "WEEK_STAGES",

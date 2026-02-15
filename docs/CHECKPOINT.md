@@ -18,3 +18,18 @@
 
 ## PreCompact checkpoint [2026-01-23T09:40:13.068815]
 - PROFILE.audit_level: None
+
+## PreCompact checkpoint [2026-02-13T22:56:16.312431]
+- PROFILE.audit_level: medium
+
+## PreCompact checkpoint [2026-02-13T22:57:55.074004]
+- PROFILE.audit_level: medium
+
+## PreCompact checkpoint [2026-02-15T13:18:23.974605]
+- PROFILE.audit_level: medium
+
+## PreCompact checkpoint [2026-02-15T13:23:14.164333]
+- PROFILE.audit_level: medium
+
+## PreCompact checkpoint [2026-02-15T13:32:21.758259]
+- PROFILE.audit_level: medium

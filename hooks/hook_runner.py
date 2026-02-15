@@ -15,6 +15,8 @@ import uuid
 from pathlib import PurePosixPath, PureWindowsPath
 
 # Phase 2 Architecture: Import extracted modules
+# Support both package mode (from hooks import hook_runner)
+# and script mode (python hooks/hook_runner.py)
 try:
     from hooks.io_utils import *
     from hooks.profile import *
@@ -24,8 +26,27 @@ try:
     from hooks.telemetry import *
     from hooks.debug_utils import debug_log
 except ImportError:
-    # Fallback: functions are still defined in this file
-    pass
+    try:
+        # Script mode: hooks/ is the current package directory
+        from io_utils import *
+        from profile import *
+        from pain import *
+        from evolution_queue import *
+        from week_lifecycle import *
+        from telemetry import *
+        from debug_utils import debug_log
+    except ImportError:
+        # Last resort: add hooks dir to path
+        _hooks_dir = os.path.dirname(os.path.abspath(__file__))
+        if _hooks_dir not in sys.path:
+            sys.path.insert(0, _hooks_dir)
+        from io_utils import *
+        from profile import *  # type: ignore
+        from pain import *
+        from evolution_queue import *
+        from week_lifecycle import *
+        from telemetry import *
+        from debug_utils import debug_log
 
 
 # --- Encoding Fix for Windows ---

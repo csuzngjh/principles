@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*.log
+.DS_Store
+.venv
+.pylint
+.pytest_cache
+debug_*.txt
+*_debug.txt
+test_log_*.txt
+full_test_report*.txt
+temp/
+tmp/
+docs/SYSTEM.log
+docs/PHASE2_SUMMARY.md
+docs/PHASE3_SUMMARY.md
+docs/REFACTORING_COMPLETE.md

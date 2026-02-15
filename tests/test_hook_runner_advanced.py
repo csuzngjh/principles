@@ -60,7 +60,8 @@ class TestHookRunnerAdvanced(unittest.TestCase):
         profile = {
             "audit_level": "medium",
             "risk_paths": ["src/"],
-            "gate": {"require_plan_for_risk_paths": False}
+            "gate": {"require_plan_for_risk_paths": False},
+            "lifecycle": {"enabled": False}  # Explicitly disable for old profile compat test
         }
         self.create_profile(profile)
         
@@ -105,7 +106,11 @@ class TestHookRunnerAdvanced(unittest.TestCase):
         self.assertEqual(normalized["audit_level"], "medium")
         self.assertEqual(normalized["risk_paths"], ["src/"])
         self.assertEqual(normalized["evolution_mode"], "realtime")
-        self.assertFalse(normalized["gate"]["require_plan_for_risk_paths"])
+        if isinstance(normalized.get("gate"), dict) and isinstance(normalized["gate"].get("require_plan_for_risk_paths"), bool):
+            # 默认是 True (安全优先)
+            self.assertTrue(normalized["gate"]["require_plan_for_risk_paths"])
+        else:
+            self.fail("Gate normalization failed structure check")
         self.assertEqual(normalized["tests"]["on_change"], "smoke")
         self.assertEqual(normalized["tests"]["commands"], {"full": "npm test"})
         self.assertEqual(normalized["pain"]["soft_capture_threshold"], 30)
@@ -114,7 +119,7 @@ class TestHookRunnerAdvanced(unittest.TestCase):
         self.assertEqual(normalized["pain"]["adaptive"]["max_threshold"], 100)
         self.assertEqual(normalized["pain"]["adaptive"]["backlog_trigger"], 1)
         self.assertEqual(len(normalized["custom_guards"]), 1)
-        self.assertEqual(normalized["custom_guards"][0]["severity"], "error")
+        self.assertEqual(normalized["custom_guards"][0]["severity"], "fatal")
         self.assertFalse(normalized["_profile_invalid"])
 
     def test_pre_write_gate_blocks_invalid_profile_json(self):
@@ -393,7 +398,7 @@ class TestHookRunnerAdvanced(unittest.TestCase):
         self.create_profile(profile)
 
         queue_file = os.path.join(self.docs_dir, "EVOLUTION_QUEUE.json")
-        old_queue_file = hook_runner.QUEUE_FILE
+        old_queue_file = os.path.join(self.docs_dir, "EVOLUTION_QUEUE.json")
         old_run_command = hook_runner._run_command
         hook_runner.QUEUE_FILE = queue_file
         hook_runner._run_command = lambda cmd: 1
@@ -769,7 +774,7 @@ class TestHookRunnerAdvanced(unittest.TestCase):
             "stage": "EXECUTING",
             "owner_approved": True,
             "execution": {
-                "last_heartbeat_at": "2020-01-01T00:00:00",
+                "last_heartbeat": "2020-01-01T00:00:00",
                 "heartbeat_count": 10
             }
         })

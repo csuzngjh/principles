@@ -94,7 +94,8 @@ class TestStatusLine(unittest.TestCase):
         hook_runner.statusline({}, self.test_dir)
         output = self.sys_stdout.getvalue().strip()
 
-        self.assertIn("🚦P1|R1|Ndue", output)
+        self.assertIn("Pending:1", output)
+        self.assertIn("Retry:1(due)", output)
 
     def test_statusline_queue_metrics_absent_when_no_open_tasks(self):
         queue = [

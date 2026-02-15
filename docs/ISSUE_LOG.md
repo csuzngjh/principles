@@ -33,3 +33,55 @@
 ---
 
 <!-- 实际 issue 记录从下方追加（使用 ## [时间戳] 标题）-->
+
+## [2026-02-13T22:56:16.570184] Pain detected - Simulated Pain
+
+### Pain Signal (auto-captured)
+```
+Simulated Pain
+
+```
+
+### Diagnosis (Pending)
+- Run /evolve-task to diagnose.
+
+## [2026-02-13T22:57:55.232305] Pain detected - Simulated Pain
+
+### Pain Signal (auto-captured)
+```
+Simulated Pain
+
+```
+
+### Diagnosis (Pending)
+- Run /evolve-task to diagnose.
+
+## [2026-02-15T13:18:24.498349] Pain detected -
+
+### Pain Signal (auto-captured)
+```
+
+```
+
+### Diagnosis (Pending)
+- Run /evolve-task to diagnose.
+
+## [2026-02-15T13:23:14.567542] Pain detected -
+
+### Pain Signal (auto-captured)
+```
+
+```
+
+### Diagnosis (Pending)
+- Run /evolve-task to diagnose.
+
+## [2026-02-15T13:32:22.506057] Pain detected -
+
+### Pain Signal (auto-captured)
+```
+
+```
+
+### Diagnosis (Pending)
+- Run /evolve-task to diagnose.

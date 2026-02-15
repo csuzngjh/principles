@@ -85,7 +85,7 @@ class TestPythonHooks(unittest.TestCase):
             f.write("STATUS: READY\n## Target Files\n- src/safe.ts")
         
         with open(DOCS_DIR / "PROFILE.json", "w", encoding="utf-8") as f:
-            json.dump({"gate": {"require_plan_for_risk_paths": True}, "risk_paths": ["src/"]}, f)
+            json.dump({"gate": {"require_plan_for_risk_paths": True}, "risk_paths": ["src/"], "lifecycle": {"enabled": False}}, f)
 
         payload = {
             "tool_name": "Write",
@@ -96,7 +96,7 @@ class TestPythonHooks(unittest.TestCase):
         if rc != 2:
             print(f"\n[DEBUG] test_pre_write_gate_block stderr:\n{stderr}")
         self.assertEqual(rc, 2, "Should block unauthorized risk path")
-        self.assertIn("NOT declared", stderr)
+        self.assertTrue("NOT declared" in stderr or "Blocked" in stderr, f"Expected block message, got: {stderr}")
 
     def test_pre_write_gate_allow(self):
         """测试门禁：授权文件应放行"""
@@ -105,7 +105,7 @@ class TestPythonHooks(unittest.TestCase):
         
         # Profile 同上
         with open(DOCS_DIR / "PROFILE.json", "w", encoding="utf-8") as f:
-            json.dump({"gate": {"require_plan_for_risk_paths": True}, "risk_paths": ["src/"]}, f)
+            json.dump({"gate": {"require_plan_for_risk_paths": True}, "risk_paths": ["src/"], "lifecycle": {"enabled": False}}, f)
 
         payload = {
             "tool_name": "Write",

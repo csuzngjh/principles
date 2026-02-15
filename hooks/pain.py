@@ -16,8 +16,13 @@ try:
     from hooks.evolution_queue import _load_queue, QUEUE_OPEN_STATES
     from hooks.debug_utils import debug_log, debug_stderr, debug_enabled
 except ImportError:
-    # Fallback处理
-    pass
+    try:
+        from io_utils import _read_text_file, _parse_kv_lines, _serialize_kv_lines, _plan_status, _coerce_int, _parse_iso_datetime
+        from profile import PROFILE_TEST_LEVELS
+        from evolution_queue import _load_queue, QUEUE_OPEN_STATES
+        from debug_utils import debug_log, debug_stderr, debug_enabled
+    except ImportError:
+        pass
 
 __all__ = [
     "_effective_soft_capture_threshold",
@@ -78,7 +83,12 @@ def _effective_soft_capture_threshold(profile, project_dir):
         if QUEUE_OPEN_STATES:
             open_states = QUEUE_OPEN_STATES
     except ImportError:
-        pass
+        try:
+            from evolution_queue import QUEUE_OPEN_STATES
+            if QUEUE_OPEN_STATES:
+                open_states = QUEUE_OPEN_STATES
+        except ImportError:
+            pass
         
     pending_count = len([t for t in queue if str(t.get("status", "")).lower() in open_states])
     backlog_trigger = _coerce_int(adaptive_cfg.get("backlog_trigger"), 6)
