@@ -2,14 +2,14 @@
 name: manage-okr
 description: Full-lifecycle OKR management. Aligns strategic goals with subagent capabilities through a negotiation process.
 disable-model-invocation: true
-allowed-tools: AskUserQuestion, Read, Write, Glob, Task
+user-invocable: true
+allowed-tools: AskUserQuestion, Read, Write, Glob, agent_send
+metadata: '{"openclaw": {"category": "strategy", "priority": 9}}'
 ---
 
 # /manage-okr: 目标与关键结果管理
 
 你是一位 OKR 组织专家。你的任务是协调总战略 (`STRATEGY.md`) 与各岗位子智能体 (`agents/*.md`) 之间的目标对齐。
-
-## 核心流程
 
 ## 执行原则 (The Principles)
 1. **SMART 强制**: 所有的 KR 必须可量化、有边界、有时限。
@@ -48,7 +48,7 @@ python scripts/weekly_governance.py status
   - 读取 `docs/okr/WEEK_STATE.json`（如果不存在，使用 `weekly_governance.py new-week` 初始化）。
   - 若 `stage=INTERRUPTED`，先组织恢复方案并与用户确认，再继续计划编排。
 
-### 2. 用户承诺 (User Commitment) - *New*
+### 2. 用户承诺 (User Commitment)
 - **转向用户**: 在面试子智能体之前，先与用户对齐。
 - **提问**: 使用 `AskUserQuestion`。
   > "为了确保项目成功，除了 AI 团队的努力，也需要您的协同。
@@ -57,54 +57,31 @@ python scripts/weekly_governance.py status
 - **落盘**: 将用户承诺写入 `docs/okr/user.md`。
 
 ### 3. 协商与对齐 (Negotiation & Alignment)
-- **调度原则**: ⚠️ **受控并发 (Throttled Concurrency)**。每次最多并发委派 **2-3 个** Task，等待结果返回后再补充新的任务。严禁一次性发出所有请求以防终端卡死。
+- **调度原则**: ⚠️ **受控并发 (Throttled Concurrency)**。每次最多并发委派 **2-3 个** 任务，等待结果返回后再补充新的任务。
 - **面试循环**:
   1. 从 `pending` 中取出一批 Agent (2-3个)。
- 2. 调用 `Task()` 发起面试（Prompt 见下文）。
+  2. 调用 `agent_send` 发起面试（携带 `--session-id`）。
   3. 每获取一个回复后，**立即更新** `docs/okr/.negotiation_status.json`：
      - 将该 Agent 移入 `completed` 列表。
-     - 这一步确保了系统崩溃后可恢复。
 - **面试 Prompt**:
-  > "你好，<AgentName>。公司的年度战略是 [Strategy Summary]。
-  > **强制动作**: 在回答之前，你必须调用工具 (Glob/Grep/Read) **扫描当前代码库**，了解与你职责相关的现状。
-  > 基于你的**实地调研**、能力和战略，提出 1-3 个你在本周期内承诺达成的 **关键结果 (KR)**。
-  > 要求：必须具体、可量化、且**符合项目实际**。请直接输出 Markdown 格式的 KR 列表。"
+  > "你好，<AgentName>。公司的年度战略是 [Strategy Summary]。基于你的实地调研、能力和战略，提出 1-3 个关键结果 (KR)。"
 
-### 3.5 反向挑战与比较（新增，必做）
-- 从候选方案中选择一个提案者（主智能体或对应 OKR owner）输出 Proposal。
+### 3.5 反向挑战与比较
+- 从候选方案中选择一个提案者输出 Proposal。
 - 指派不同智能体输出 Challenge（至少 3 条批评 + 1 个替代方案）。
-- 将 Proposal 与 Challenge 合并为 Final Plan 草案，并落盘到治理状态机：
-  - `record-proposal`
-  - `record-challenge`
+- 将 Proposal 与 Challenge 合并为 Final Plan 草案。
 
 ### 3. 确认与公示 (Confirmation)
-- 汇总所有（包括本次新完成和之前已完成的）Agent 的提案。
-- 使用 `AskUserQuestion` 展示给用户确认（必须包含选项：`批准执行` / `继续修改` / `驳回重做`）。
-- 根据用户选项更新治理状态：
-  - `批准执行` -> `owner-decision approve`（生成 `WEEK_PLAN_LOCK.json`）
-  - `继续修改` / `驳回重做` -> `owner-decision revise|reject`
+- 汇总所有提案。
+- 使用 `AskUserQuestion` 展示给用户确认。
 
 ### 4. 落盘 (Commitment)
 - 仅在 `WEEK_PLAN_LOCK.json` 存在时进入本步骤。
-- 如果批准，将每个 Agent 的 KR 写入专属文件 `docs/okr/<agent_name>.md`。
+- 将每个 Agent 的 KR 写入专属文件 `docs/okr/<agent_name>.md`。
 - **汇总重点**: 更新 `docs/okr/CURRENT_FOCUS.md`。
-- **Agent 自动纳管 (Onboarding)**: 检查并注入 `@docs/okr/...` 引用到外置 Agent 定义文件。
-- **清理**: 删除 `docs/okr/.negotiation_status.json`。
-  ```markdown
-  # OKR: <agent_name>
-  > Status: Active | Last Updated: [Date]
-  
-  ## Strategic Context
-  - [Relevant Vision from STRATEGY.md]
-  
-  ## Committed Key Results
-  - [KR 1 from Agent Proposal]
-  - [KR 2 from Agent Proposal]
-  ```
 
 ### 5. 进度复盘 (Check-in) - *Optional*
-- 如果用户目的是复盘，则读取上述文件，询问用户当前进度，并更新文件中的完成度标记。
-- 同步读取 `docs/okr/WEEK_EVENTS.jsonl`，按事件流输出“本周完成 / 阻塞 / 进行中”摘要，避免遗忘。
+- 如果用户目的是复盘，则读取上述文件，询问用户当前进度。
 
 ## 结项
 输出：“✅ OKR 协商已完成。全员目标已对齐。”

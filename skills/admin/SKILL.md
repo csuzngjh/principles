@@ -2,7 +2,9 @@
 name: admin
 description: System administration and recovery tool for humans. Use to init, repair, or reset the evolutionary agent framework.
 disable-model-invocation: true
+user-invocable: true
 allowed-tools: Bash, Write, Read, Glob
+metadata: '{"openclaw": {"requires": {"bins": ["python3"]}, "category": "system"}}'
 ---
 
 # Admin Console (管理员控制台)

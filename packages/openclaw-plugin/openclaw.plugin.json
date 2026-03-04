@@ -11,7 +11,31 @@
       "auditLevel": {
         "type": "string",
         "enum": ["low", "medium", "high"],
-        "default": "medium"
+        "default": "medium",
+        "description": "The strictness of the gatekeeper."
+      },
+      "riskPaths": {
+        "type": "array",
+        "items": { "type": "string" },
+        "default": ["src/", "infra/", "db/", ".claude/rules/"],
+        "description": "Paths that require a READY plan before modification."
+      },
+      "gate": {
+        "type": "object",
+        "properties": {
+          "requirePlanForRiskPaths": { "type": "boolean", "default": true },
+          "requireAuditBeforeWrite": { "type": "boolean", "default": true }
+        }
+      },
+      "tests": {
+        "type": "object",
+        "properties": {
+          "onChange": { "type": "string", "default": "smoke" },
+          "commands": {
+            "type": "object",
+            "additionalProperties": { "type": "string" }
+          }
+        }
       }
     }
   }

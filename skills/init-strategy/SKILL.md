@@ -2,7 +2,9 @@
 name: init-strategy
 description: Initialize project-level strategy and vision. Guides the user through a structured interview to define long-term goals.
 disable-model-invocation: true
+user-invocable: true
 allowed-tools: AskUserQuestion, Read, Write
+metadata: '{"openclaw": {"category": "strategy", "priority": 10}}'
 ---
 
 # /init-strategy: 战略锚点初始化

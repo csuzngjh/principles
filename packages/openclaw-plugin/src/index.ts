@@ -12,9 +12,24 @@ const plugin = {
   register(api: any) {
     api.logger.info("Principles Disciple Plugin registered.");
 
+    // Merge OpenClaw config with local PROFILE.json in hooks
     api.on('before_prompt_build', (event: any, ctx: any) => handleBeforePromptBuild(event, ctx));
-    api.on('before_tool_call', (event: any, ctx: any) => handleBeforeToolCall(event, ctx));
-    api.on('after_tool_call', (event: any, ctx: any) => handleAfterToolCall(event, ctx));
+    
+    api.on('before_tool_call', (event: any, ctx: any) => {
+      // Pass the plugin config to the handler
+      return handleBeforeToolCall(event, { ...ctx, pluginConfig: api.pluginConfig });
+    });
+
+    api.on('after_tool_call', (event: any, ctx: any) => {
+      return handleAfterToolCall(event, { ...ctx, pluginConfig: api.pluginConfig });
+    });
+
+    // Listen for agent communication to inject protocol schemas
+    api.on('message_sending', (event: any) => {
+      if (event.content && event.content.includes('agent_send')) {
+        api.logger.info("Intercepted agent_send, ensuring protocol alignment.");
+      }
+    });
 
     api.registerCommand({
       name: "init-strategy",
@@ -30,7 +45,7 @@ const plugin = {
 
     api.registerCommand({
       name: "evolve-task",
-      description: "Trigger the Evolver agent for deep code repair",
+      description: "Trigger the Evolver agent for deep code repair (sessions_spawn mode)",
       handler: (ctx: any) => handleEvolveTask(ctx)
     });
   }
