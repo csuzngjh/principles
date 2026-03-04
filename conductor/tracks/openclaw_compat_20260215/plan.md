@@ -15,7 +15,7 @@
 - [x] Task: Port I/O, Path, and Parsing Utilities to TS [01bf68d]
     - [ ] Write Tests (Red Phase): Write `vitest` suites for path normalization and JSON/KV parsing.
     - [ ] Implement (Green Phase): Implement `src/utils/io.ts`.
-- [ ] Task: Port Profile and Pain Signal Logic
+- [x] Task: Port Profile and Pain Signal Logic [8cce990]
     - [ ] Write Tests (Red Phase): Write tests for risk path matching and pain score calculation.
     - [ ] Implement (Green Phase): Implement `src/core/profile.ts` and `src/core/pain.ts`.
 - [ ] Task: Conductor - User Manual Verification 'Phase 2: Core Logic Porting (TDD)' (Protocol in workflow.md)
