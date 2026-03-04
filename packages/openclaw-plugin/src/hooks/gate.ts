@@ -56,7 +56,7 @@ export function handleBeforeToolCall(
     if (!planReady) {
       return {
         block: true,
-        blockReason: `[Principles Gate] Blocked write to risk path '${relPath}'. PLAN.md is not READY.`,
+        blockReason: `[PRINCIPLES_GATE] Write blocked for risk path '${relPath}'. \nREASON: No READY plan found in docs/PLAN.md. \nACTION: You MUST update docs/PLAN.md to STATUS: READY and describe the intended changes before you can modify this file.`,
       };
     }
   }
