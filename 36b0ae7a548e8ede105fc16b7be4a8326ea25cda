@@ -1,0 +1,4 @@
+Phase 2: Core Logic Porting (TDD) verified.
+Automated tests command: cd packages/openclaw-plugin && npm test
+Manual verification steps provided to user.
+User confirmed expectations.
