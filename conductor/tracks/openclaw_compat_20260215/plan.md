@@ -39,4 +39,4 @@
 - [x] Task: Implement Evolver Handoff interface [9945847]
     - [ ] Write Tests (Red Phase): Test payload generation for `sessions_spawn` or `solidify.js` invocation.
     - [ ] Implement (Green Phase): Create the TS bridge to `evolver` for deep repairs.
-- [~] Task: Conductor - User Manual Verification 'Phase 4: Commands & Evolver Synergy (TDD)' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 4: Commands & Evolver Synergy (TDD)' (Protocol in workflow.md) [checkpoint: 9c6550e]
