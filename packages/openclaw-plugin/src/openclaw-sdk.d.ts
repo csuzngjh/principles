@@ -60,7 +60,12 @@ export type PluginCommandContext = {
 };
 
 export type PluginCommandResult = {
-    text: string;
+    text?: string;
+    mediaUrl?: string;
+    mediaUrls?: string[];
+    replyToId?: string;
+    isError?: boolean;
+    channelData?: Record<string, unknown>;
 };
 
 // ── Hook names ──────────────────────────────────────────────────────────────

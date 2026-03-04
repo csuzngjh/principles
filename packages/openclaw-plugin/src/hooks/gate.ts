@@ -8,12 +8,14 @@ export function handleBeforeToolCall(
   event: PluginHookBeforeToolCallEvent,
   ctx: PluginHookToolContext & { workspaceDir?: string; pluginConfig?: Record<string, unknown> }
 ): PluginHookBeforeToolCallResult | void {
-  // OpenClaw tool names for file writes
-  if (!ctx.workspaceDir || !['fs_write', 'fs_replace', 'fs_delete'].includes(event.toolName)) {
+  // OpenClaw core tool names for file mutations (from tool-catalog.ts)
+  const WRITE_TOOLS = ['write', 'edit', 'apply_patch'];
+  if (!ctx.workspaceDir || !WRITE_TOOLS.includes(event.toolName)) {
     return;
   }
 
-  const filePath = event.params.file_path || event.params.path;
+  // 'write' uses file_path; 'edit' uses file_path; 'apply_patch' uses file_path
+  const filePath = event.params.file_path || event.params.path || event.params.file;
   if (typeof filePath !== 'string') {
     return;
   }

@@ -9,7 +9,9 @@ export function handleAfterToolCall(
   event: PluginHookAfterToolCallEvent,
   ctx: PluginHookToolContext & { workspaceDir?: string; pluginConfig?: Record<string, unknown> }
 ): void {
-  if (!ctx.workspaceDir || !['fs_write', 'fs_replace', 'fs_delete'].includes(event.toolName)) {
+  // OpenClaw core tool names for file mutations (from tool-catalog.ts)
+  const WRITE_TOOLS = ['write', 'edit', 'apply_patch'];
+  if (!ctx.workspaceDir || !WRITE_TOOLS.includes(event.toolName)) {
     return;
   }
 
@@ -18,7 +20,7 @@ export function handleAfterToolCall(
     return;
   }
 
-  const filePath = event.params.file_path || event.params.path;
+  const filePath = event.params.file_path || event.params.path || event.params.file;
   const relPath = typeof filePath === 'string' ? normalizePath(filePath, ctx.workspaceDir) : 'unknown';
 
   const profilePath = path.join(ctx.workspaceDir, 'docs', 'PROFILE.json');
