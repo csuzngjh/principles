@@ -1,0 +1,1 @@
+Task: Implement Evolver Handoff interface. Implemented /evolve-task command which generates sessions_spawn payload.
