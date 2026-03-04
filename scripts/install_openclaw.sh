@@ -55,7 +55,7 @@ fi
 # 6. 部署运行时文档 (DNA Rebuild)
 echo "🧬 Rebuilding OpenClaw runtime documents..."
 DOCS_SRC="$PLUGIN_SRC/templates/openclaw"
-for doc in SOUL.md AGENTS.md TOOLS.md USER.md; do
+for doc in SOUL.md AGENTS.md TOOLS.md USER.md HEARTBEAT.md; do
     if [ -f "$OPENCLAW_WORKSPACE/$doc" ]; then
         echo "⚠️  $doc already exists in workspace. Backup created at $doc.bak"
         cp "$OPENCLAW_WORKSPACE/$doc" "$OPENCLAW_WORKSPACE/$doc.bak"
@@ -63,6 +63,31 @@ for doc in SOUL.md AGENTS.md TOOLS.md USER.md; do
     cp "$DOCS_SRC/$doc" "$OPENCLAW_WORKSPACE/$doc"
     echo "📄 Deployed: $doc"
 done
+
+# 7. 注册定时任务 (Automation)
+echo "⏰ Registering PD default cron jobs..."
+# 检查 openclaw 命令是否可用
+if command -v openclaw >/dev/null 2>&1; then
+    # 周五下午 4 点进行周治理
+    openclaw cron add \
+      --name "PD Weekly Governance" \
+      --cron "0 16 * * 5" \
+      --session isolated \
+      --message "Execute full weekly governance flow using scripts/weekly_governance.py. Align OKRs and review week events." \
+      --agent ops \
+      --enabled true || echo "⚠️ Failed to add weekly cron job (maybe exists?)"
+
+    # 每晚 9 点进行深度反思
+    openclaw cron add \
+      --name "PD Daily Reflection" \
+      --cron "0 21 * * *" \
+      --session isolated \
+      --message "Review Daily Logs and ISSUE_LOG.md. Identify recurring pain points and suggest new principles." \
+      --agent diagnostician \
+      --enabled true || echo "⚠️ Failed to add daily cron job (maybe exists?)"
+else
+    echo "⚠️  'openclaw' command not found. Skipping cron registration."
+fi
 
 echo "------------------------------------------"
 echo "🎉 Deployment Successful!"

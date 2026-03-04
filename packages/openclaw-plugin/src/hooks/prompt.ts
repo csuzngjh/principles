@@ -36,5 +36,27 @@ export function handleBeforePromptBuild(
     }
   }
 
+  // 3. Proactive Evolution (Heartbeat specialized logic)
+  const painFlagPath = path.join(ctx.workspaceDir, 'docs', '.pain_flag');
+  if (fs.existsSync(painFlagPath)) {
+    try {
+      const painData = fs.readFileSync(painFlagPath, 'utf8');
+      if (painData.trim()) {
+        const isHeartbeat = (ctx as any).trigger === 'heartbeat';
+        const warning = `\n⚠️ CRITICAL PAIN SIGNAL DETECTED:\n${painData}\n${isHeartbeat ? "You are currently in a HEARTBEAT turn. You MUST assess if an immediate /reflection or /evolve-task is required based on this pain." : ""}\n`;
+        prependContext += `\n<evolution_context>${warning}</evolution_context>\n`;
+      }
+    } catch (e) {}
+  }
+
+  // 4. Environment Capabilities
+  const capsPath = path.join(ctx.workspaceDir, 'docs', 'SYSTEM_CAPABILITIES.json');
+  if (fs.existsSync(capsPath)) {
+    try {
+      const capsData = fs.readFileSync(capsPath, 'utf8');
+      prependContext += `\n<system_capabilities>\n${capsData}\n</system_capabilities>\n`;
+    } catch (e) {}
+  }
+
   return { prependContext: prependContext.trim() };
 }

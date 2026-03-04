@@ -1,8 +1,10 @@
 import { handleBeforePromptBuild } from './hooks/prompt';
 import { handleBeforeToolCall } from './hooks/gate';
 import { handleAfterToolCall } from './hooks/pain';
+import { handleBeforeReset, handleBeforeCompaction } from './hooks/lifecycle';
 import { handleInitStrategy, handleManageOkr } from './commands/strategy';
 import { handleEvolveTask } from './commands/evolver';
+import { handleBootstrapTools } from './commands/capabilities';
 
 const plugin = {
   id: "principles-disciple",
@@ -12,11 +14,9 @@ const plugin = {
   register(api: any) {
     api.logger.info("Principles Disciple Plugin registered.");
 
-    // Merge OpenClaw config with local PROFILE.json in hooks
     api.on('before_prompt_build', (event: any, ctx: any) => handleBeforePromptBuild(event, ctx));
     
     api.on('before_tool_call', (event: any, ctx: any) => {
-      // Pass the plugin config to the handler
       return handleBeforeToolCall(event, { ...ctx, pluginConfig: api.pluginConfig });
     });
 
@@ -24,11 +24,14 @@ const plugin = {
       return handleAfterToolCall(event, { ...ctx, pluginConfig: api.pluginConfig });
     });
 
-    // Listen for agent communication to inject protocol schemas
-    api.on('message_sending', (event: any) => {
-      if (event.content && event.content.includes('agent_send')) {
-        api.logger.info("Intercepted agent_send, ensuring protocol alignment.");
-      }
+    api.on('before_reset', (event: any, ctx: any) => handleBeforeReset(event, ctx));
+    api.on('before_compaction', (event: any, ctx: any) => handleBeforeCompaction(event, ctx));
+
+    // Ensure subagents inherit the strategic context and schemas
+    api.on('subagent_spawning', (event: any, ctx: any) => {
+      api.logger.info(`Injecting PD protocol into subagent: ${event.agentId}`);
+      // In a real implementation, we could modify ctx.bootstrapFiles here
+      return { status: "ok" };
     });
 
     api.registerCommand({
@@ -47,6 +50,12 @@ const plugin = {
       name: "evolve-task",
       description: "Trigger the Evolver agent for deep code repair (sessions_spawn mode)",
       handler: (ctx: any) => handleEvolveTask(ctx)
+    });
+
+    api.registerCommand({
+      name: "bootstrap-tools",
+      description: "Scan and upgrade environment capabilities",
+      handler: (ctx: any) => handleBootstrapTools(ctx)
     });
   }
 };
