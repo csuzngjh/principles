@@ -1,28 +1,42 @@
-# Implementation Plan: 实现对openclaw框架的兼容
+# Implementation Plan: 实现对openclaw框架的兼容 (TypeScript Rewrite)
 
-## Phase 1: Infrastructure and Bridge Setup
-- [ ] Task: Scaffold OpenClaw plugin directory structure
-    - [ ] Write Tests (Red Phase): Test that the plugin structure and entry points exist.
-    - [ ] Implement (Green Phase): Create `handler.ts` and `HOOK.md`.
-- [ ] Task: Implement Python/TypeScript bridge
-    - [ ] Write Tests (Red Phase): Test that TS can successfully spawn `hook_runner.py` with mock payload.
-    - [ ] Implement (Green Phase): Use `child_process.spawnSync` to call Python and return results.
-- [ ] Task: Conductor - User Manual Verification 'Phase 1: Infrastructure and Bridge Setup' (Protocol in workflow.md)
+## Phase 0: Deep Technical Research & Architecture Design
+- [x] Task: Analyze OpenClaw Plugin API (`src/plugins/types.ts`) to map Claude hooks to OpenClaw native hooks (`before_prompt_build`, `before_tool_call`, `after_tool_call`).
+- [x] Task: Analyze Evolver architecture (`src/gep/solidify.js`, `bridge.js`) to design the handoff mechanism for deep code repair.
+- [ ] Task: Conductor - User Manual Verification 'Phase 0: Deep Technical Research & Architecture Design' (Protocol in workflow.md)
 
-## Phase 2: Event Mapping and Gates
-- [ ] Task: Map OpenClaw events to Claude Code hooks
-    - [ ] Write Tests (Red Phase): Unit test the event mapping configuration.
-    - [ ] Implement (Green Phase): Map `agent:run:start` to `user_prompt_context` and `tool_result_persist` to `pre_write_gate`/`post_write_checks`.
-- [ ] Task: Implement Async HITL Gatekeeper
-    - [ ] Write Tests (Red Phase): Test the async message notification logic.
-    - [ ] Implement (Green Phase): Implement WhatsApp/Telegram approval flow for `pre_write_gate` blockages.
-- [ ] Task: Conductor - User Manual Verification 'Phase 2: Event Mapping and Gates' (Protocol in workflow.md)
+## Phase 1: Native Plugin Scaffolding
+- [x] Task: Scaffold OpenClaw plugin directory structure and TS configuration (`packages/openclaw-plugin`) [c44b9f0]
+    - [ ] Write Tests (Red Phase): Test that the build process and `vitest` are configured correctly.
+    - [ ] Implement (Green Phase): Initialize `package.json`, `tsconfig.json`, `vitest.config.ts`, and core plugin file `src/index.ts`.
+- [ ] Task: Conductor - User Manual Verification 'Phase 1: Native Plugin Scaffolding' (Protocol in workflow.md)
 
-## Phase 3: Memory Integration and Deployment
-- [ ] Task: Integrate with OpenClaw Daily Logs
-    - [ ] Write Tests (Red Phase): Test that pain signals are written to the daily log format.
-    - [ ] Implement (Green Phase): Adapt `precompact_checkpoint` to trigger on `onCompaction`.
-- [ ] Task: Create OpenClaw Installer
-    - [ ] Write Tests (Red Phase): Test `install_openclaw.sh` file creation and copy logic.
-    - [ ] Implement (Green Phase): Write the shell script to deploy the plugin to `~/.openclaw/hooks/`.
-- [ ] Task: Conductor - User Manual Verification 'Phase 3: Memory Integration and Deployment' (Protocol in workflow.md)
+## Phase 2: Core Logic Porting (TDD)
+- [ ] Task: Port I/O, Path, and Parsing Utilities to TS
+    - [ ] Write Tests (Red Phase): Write `vitest` suites for path normalization and JSON/KV parsing.
+    - [ ] Implement (Green Phase): Implement `src/utils/io.ts`.
+- [ ] Task: Port Profile and Pain Signal Logic
+    - [ ] Write Tests (Red Phase): Write tests for risk path matching and pain score calculation.
+    - [ ] Implement (Green Phase): Implement `src/core/profile.ts` and `src/core/pain.ts`.
+- [ ] Task: Conductor - User Manual Verification 'Phase 2: Core Logic Porting (TDD)' (Protocol in workflow.md)
+
+## Phase 3: OpenClaw Hook Integration (TDD)
+- [ ] Task: Implement Prompt Context Injection (`before_prompt_build`)
+    - [ ] Write Tests (Red Phase): Test that the hook appends `USER_CONTEXT` to the prompt.
+    - [ ] Implement (Green Phase): Register the hook in `src/index.ts`.
+- [ ] Task: Implement Pre-Write Gate (`before_tool_call`)
+    - [ ] Write Tests (Red Phase): Test that risky un-planned tool calls return `{ block: true }`.
+    - [ ] Implement (Green Phase): Implement the gating logic mapping to OpenClaw's tool context.
+- [ ] Task: Implement Post-Write Checks & Pain (`after_tool_call`)
+    - [ ] Write Tests (Red Phase): Test that tool failures trigger pain records.
+    - [ ] Implement (Green Phase): Implement tests-on-change and daily log integration.
+- [ ] Task: Conductor - User Manual Verification 'Phase 3: OpenClaw Hook Integration (TDD)' (Protocol in workflow.md)
+
+## Phase 4: Commands & Evolver Synergy (TDD)
+- [ ] Task: Register Native Slash Commands
+    - [ ] Write Tests (Red Phase): Test command dispatch logic.
+    - [ ] Implement (Green Phase): Register `/init-strategy`, `/manage-okr` via `api.registerCommand`.
+- [ ] Task: Implement Evolver Handoff interface
+    - [ ] Write Tests (Red Phase): Test payload generation for `sessions_spawn` or `solidify.js` invocation.
+    - [ ] Implement (Green Phase): Create the TS bridge to `evolver` for deep repairs.
+- [ ] Task: Conductor - User Manual Verification 'Phase 4: Commands & Evolver Synergy (TDD)' (Protocol in workflow.md)
