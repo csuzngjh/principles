@@ -1,1 +1,7 @@
-export declare function register(api: any): void;
+declare const plugin: {
+    id: string;
+    name: string;
+    description: string;
+    register(api: any): void;
+};
+export default plugin;
