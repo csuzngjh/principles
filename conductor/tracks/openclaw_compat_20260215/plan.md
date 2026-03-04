@@ -24,7 +24,7 @@
 - [x] Task: Implement Prompt Context Injection (`before_prompt_build`) [4578d91]
     - [ ] Write Tests (Red Phase): Test that the hook appends `USER_CONTEXT` to the prompt.
     - [ ] Implement (Green Phase): Register the hook in `src/index.ts`.
-- [ ] Task: Implement Pre-Write Gate (`before_tool_call`)
+- [x] Task: Implement Pre-Write Gate (`before_tool_call`) [5faf2f8]
     - [ ] Write Tests (Red Phase): Test that risky un-planned tool calls return `{ block: true }`.
     - [ ] Implement (Green Phase): Implement the gating logic mapping to OpenClaw's tool context.
 - [ ] Task: Implement Post-Write Checks & Pain (`after_tool_call`)
