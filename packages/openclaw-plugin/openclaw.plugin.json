@@ -3,10 +3,10 @@
   "name": "Principles Disciple",
   "description": "Evolutionary programming agent framework with strategic guardrails and reflection loops.",
   "version": "1.0.0",
-  "author": "Principles Disciple Team",
-  "skills": ["../../agents", "../../skills"],
+  "skills": ["./agents", "./skills"],
   "configSchema": {
     "type": "object",
+    "additionalProperties": false,
     "properties": {
       "auditLevel": {
         "type": "string",
@@ -17,11 +17,12 @@
       "riskPaths": {
         "type": "array",
         "items": { "type": "string" },
-        "default": ["src/", "infra/", "db/", ".claude/rules/"],
+        "default": ["src/", "infra/", "db/"],
         "description": "Paths that require a READY plan before modification."
       },
       "gate": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
           "requirePlanForRiskPaths": { "type": "boolean", "default": true },
           "requireAuditBeforeWrite": { "type": "boolean", "default": true }
@@ -29,6 +30,7 @@
       },
       "tests": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
           "onChange": { "type": "string", "default": "smoke" },
           "commands": {
@@ -38,5 +40,9 @@
         }
       }
     }
+  },
+  "uiHints": {
+    "auditLevel": { "label": "Audit Level", "placeholder": "medium" },
+    "riskPaths": { "label": "Risk Paths (require READY plan before write)" }
   }
 }

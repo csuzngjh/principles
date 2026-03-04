@@ -1,54 +1,53 @@
----
+﻿---
 name: feedback
 description: Standardized bug reporting and feedback mechanism. Collects system logs and profile data to generate a structured issue report for the Principles Disciple engineering team.
 disable-model-invocation: true
-allowed-tools: Read, Write, Bash, AskUserQuestion
 ---
 
-# /feedback: 提交系统反馈
+# /feedback: 鎻愪氦绯荤粺鍙嶉
 
-你遇到了系统 Bug 或设计缺陷？请使用此技能生成一份标准化的反馈报告，并自动投递给上游开发团队。
+浣犻亣鍒颁簡绯荤粺 Bug 鎴栬璁＄己闄凤紵璇蜂娇鐢ㄦ鎶€鑳界敓鎴愪竴浠芥爣鍑嗗寲鐨勫弽棣堟姤鍛婏紝骞惰嚜鍔ㄦ姇閫掔粰涓婃父寮€鍙戝洟闃熴€?
 
-## 执行流程
+## 鎵ц娴佺▼
 
-### 1. 收集证据 (Evidence Collection)
-- **Log Analysis**: 读取 `docs/ISSUE_LOG.md` (最近 20 行) 和 `docs/SYSTEM.log` (如果有报错堆栈)。
-- **Config Check**: 读取 `docs/PROFILE.json` 确认当前配置。
-- **Version Check**: 尝试获取当前版本信息（如有）。
+### 1. 鏀堕泦璇佹嵁 (Evidence Collection)
+- **Log Analysis**: 璇诲彇 `docs/ISSUE_LOG.md` (鏈€杩?20 琛? 鍜?`docs/SYSTEM.log` (濡傛灉鏈夋姤閿欏爢鏍?銆?
+- **Config Check**: 璇诲彇 `docs/PROFILE.json` 纭褰撳墠閰嶇疆銆?
+- **Version Check**: 灏濊瘯鑾峰彇褰撳墠鐗堟湰淇℃伅锛堝鏈夛級銆?
 
-### 2. 生成报告 (Report Generation)
-在 `temp/` 目录下生成 `feedback-YYYYMMDD-HHMMSS.md`。
-**内容模板**:
+### 2. 鐢熸垚鎶ュ憡 (Report Generation)
+鍦?`temp/` 鐩綍涓嬬敓鎴?`feedback-YYYYMMDD-HHMMSS.md`銆?
+**鍐呭妯℃澘**:
 ```markdown
 # Bug Report / Feature Request
 
 **Severity**: HIGH | MEDIUM | LOW
 **Component**: Agent | Hook | Skill | Installer
-**Context**: [简述你在做什么时遇到的问题]
+**Context**: [绠€杩颁綘鍦ㄥ仛浠€涔堟椂閬囧埌鐨勯棶棰榏
 
 ## Evidence
 ### Log Snippet
 ```
-[粘贴日志]
+[绮樿创鏃ュ織]
 ```
 
 ### Diagnosis (Self-Correction)
-我分析这个问题可能是由于 [原因] 导致的。
-建议修改 [文件] 的 [逻辑]。
+鎴戝垎鏋愯繖涓棶棰樺彲鑳芥槸鐢变簬 [鍘熷洜] 瀵艰嚧鐨勩€?
+寤鸿淇敼 [鏂囦欢] 鐨?[閫昏緫]銆?
 
 ## Environment
 - OS: [OS]
 - Project: [Project Name]
 ```
 
-### 3. 自动投递 (Auto-Delivery)
-- **检查上游**: 检查 `scripts/update_agent_framework.sh` 中定义的 `SOURCE_REPO` 路径。
-- **投递**:
-  - 如果上游目录存在且可写，将报告**复制**到 `$SOURCE_REPO/docs/feedback/`。
-  - 输出: "✅ 报告已直达架构师桌面 (docs/feedback/)"。
-- **Fallback**: 如果不可达，输出文件路径，请用户手动发送。
+### 3. 鑷姩鎶曢€?(Auto-Delivery)
+- **妫€鏌ヤ笂娓?*: 妫€鏌?`scripts/update_agent_framework.sh` 涓畾涔夌殑 `SOURCE_REPO` 璺緞銆?
+- **鎶曢€?*:
+  - 濡傛灉涓婃父鐩綍瀛樺湪涓斿彲鍐欙紝灏嗘姤鍛?*澶嶅埗**鍒?`$SOURCE_REPO/docs/feedback/`銆?
+  - 杈撳嚭: "鉁?鎶ュ憡宸茬洿杈炬灦鏋勫笀妗岄潰 (docs/feedback/)"銆?
+- **Fallback**: 濡傛灉涓嶅彲杈撅紝杈撳嚭鏂囦欢璺緞锛岃鐢ㄦ埛鎵嬪姩鍙戦€併€?
 
-## 交互
-- 使用 `AskUserQuestion` 询问用户问题的严重程度和简要描述。
+## 浜や簰
+- 浣跨敤 `AskUserQuestion` 璇㈤棶鐢ㄦ埛闂鐨勪弗閲嶇▼搴﹀拰绠€瑕佹弿杩般€?
 
 ```

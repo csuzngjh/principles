@@ -2,94 +2,130 @@
 set -e
 
 # Principles Disciple - OpenClaw Plugin Installer
-# ----------------------------------------------
+# -----------------------------------------------
 
-# 1. 配置路径
+# 1. Path configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PLUGIN_SRC="$PROJECT_ROOT/packages/openclaw-plugin"
-# 默认 OpenClaw 工作区 (根据您的 openclaw config 自动检测或设置)
-OPENCLAW_WORKSPACE="/home/csuzngjh/clawd"
+
+# Default OpenClaw workspace — override via OPENCLAW_WORKSPACE env var
+OPENCLAW_WORKSPACE="${OPENCLAW_WORKSPACE:-$HOME/clawd}"
 EXTENSIONS_DIR="$OPENCLAW_WORKSPACE/.openclaw/extensions"
 TARGET_DIR="$EXTENSIONS_DIR/principles-disciple"
 
 echo "🦞 Principles Disciple - OpenClaw Installer"
 echo "------------------------------------------"
+echo "  Workspace : $OPENCLAW_WORKSPACE"
+echo "  Plugin src: $PLUGIN_SRC"
+echo ""
 
-# 2. 检查源目录
+# 2. Check source directory exists
 if [ ! -d "$PLUGIN_SRC" ]; then
     echo "❌ Error: Plugin source not found at $PLUGIN_SRC"
     exit 1
 fi
 
-# 3. 构建插件
+# 3. Build plugin
 echo "📦 Building plugin..."
 cd "$PLUGIN_SRC"
 npm install --silent
 npm run build --silent
 echo "✅ Build complete."
 
-# 4. 准备目标目录
+# 4. Ensure extensions directory exists
 mkdir -p "$EXTENSIONS_DIR"
 
-# 5. 执行部署
-# 如果用户传入 --copy 参数，则执行物理拷贝，否则默认使用软链接（开发模式）
+# 5. Deploy
 if [[ "$1" == "--copy" ]]; then
+    # ── RELEASE MODE (copy files) ───────────────────────────────────────
     echo "🚚 Deploying in RELEASE mode (copying files)..."
     rm -rf "$TARGET_DIR"
     mkdir -p "$TARGET_DIR"
-    cp -r dist package.json openclaw.plugin.json SKILL.md templates "$TARGET_DIR/"
+
+    # Copy plugin specifics
+    cp -r dist package.json openclaw.plugin.json "$TARGET_DIR/"
+    [ -f "tsconfig.json" ] && cp tsconfig.json "$TARGET_DIR/"
+
+    # Copy shared assets from project root so that openclaw.plugin.json
+    # can resolve "./agents" and "./skills" relative to plugin root.
+    cp -r "$PROJECT_ROOT/agents" "$TARGET_DIR/agents"
+    cp -r "$PROJECT_ROOT/skills"  "$TARGET_DIR/skills"
+
     echo "✅ Files copied to $TARGET_DIR"
 else
+    # ── DEV MODE (symlink) ──────────────────────────────────────────────
     echo "🔗 Deploying in DEV mode (creating symlink)..."
+
     if [ -L "$TARGET_DIR" ]; then
         rm "$TARGET_DIR"
     elif [ -d "$TARGET_DIR" ]; then
-        echo "⚠️ Warning: $TARGET_DIR already exists as a directory. Use --copy or remove it manually."
+        echo "⚠️ Warning: $TARGET_DIR already exists as a directory."
+        echo "   Remove it manually or use --copy to overwrite."
         exit 1
     fi
+
     ln -s "$PLUGIN_SRC" "$TARGET_DIR"
     echo "✅ Symlink created: $TARGET_DIR -> $PLUGIN_SRC"
+
+    # In dev mode openclaw.plugin.json resolves "./agents" and "./skills"
+    # relative to $PLUGIN_SRC. Create symlinks there if they don't exist yet.
+    for dir in agents skills; do
+        LINK="$PLUGIN_SRC/$dir"
+        TARGET="$PROJECT_ROOT/$dir"
+        if [ ! -e "$LINK" ]; then
+            ln -s "$TARGET" "$LINK"
+            echo "🔗 Linked: $LINK -> $TARGET"
+        fi
+    done
 fi
 
-# 6. 部署运行时文档 (DNA Rebuild)
-echo "🧬 Rebuilding OpenClaw runtime documents..."
+# 6. Deploy runtime workspace documents (safe — only creates, never overwrites)
+echo ""
+echo "🧬 Installing OpenClaw workspace documents (safe mode)..."
 DOCS_SRC="$PLUGIN_SRC/templates/openclaw"
+
 for doc in SOUL.md AGENTS.md TOOLS.md USER.md HEARTBEAT.md; do
-    if [ -f "$OPENCLAW_WORKSPACE/$doc" ]; then
-        echo "⚠️  $doc already exists in workspace. Backup created at $doc.bak"
-        cp "$OPENCLAW_WORKSPACE/$doc" "$OPENCLAW_WORKSPACE/$doc.bak"
+    DEST="$OPENCLAW_WORKSPACE/$doc"
+    SRC="$DOCS_SRC/$doc"
+    if [ ! -f "$SRC" ]; then
+        continue
     fi
-    cp "$DOCS_SRC/$doc" "$OPENCLAW_WORKSPACE/$doc"
-    echo "📄 Deployed: $doc"
+    if [ -f "$DEST" ]; then
+        echo "  ⏭️  Skipping $doc (already exists). Delete it first if you want to reset."
+    else
+        cp "$SRC" "$DEST"
+        echo "  📄 Created: $doc"
+    fi
 done
 
-# 7. 注册定时任务 (Automation)
-echo "⏰ Registering PD default cron jobs..."
-# 检查 openclaw 命令是否可用
-if command -v openclaw >/dev/null 2>&1; then
-    # 周五下午 4 点进行周治理
+# 7. Register cron jobs (optional — requires openclaw CLI)
+echo ""
+echo "⏰ Registering cron jobs..."
+if command -v openclaw > /dev/null 2>&1; then
     openclaw cron add \
       --name "PD Weekly Governance" \
       --cron "0 16 * * 5" \
-      --session isolated \
-      --message "Execute full weekly governance flow using scripts/weekly_governance.py. Align OKRs and review week events." \
-      --agent ops \
-      --enabled true || echo "⚠️ Failed to add weekly cron job (maybe exists?)"
+      --message "Execute full weekly governance flow: review WEEK_EVENTS.jsonl, align OKRs, and produce a weekly summary in docs/okr/WEEK_STATE.json." \
+      2>/dev/null && echo "  ✅ Weekly Governance cron registered." \
+      || echo "  ⚠️ Failed to add weekly cron (may already exist)."
 
-    # 每晚 9 点进行深度反思
     openclaw cron add \
       --name "PD Daily Reflection" \
       --cron "0 21 * * *" \
-      --session isolated \
-      --message "Review Daily Logs and ISSUE_LOG.md. Identify recurring pain points and suggest new principles." \
-      --agent diagnostician \
-      --enabled true || echo "⚠️ Failed to add daily cron job (maybe exists?)"
+      --message "Review docs/ISSUE_LOG.md and docs/.pain_flag. Identify recurring pain points and append new principles to docs/PRINCIPLES.md." \
+      2>/dev/null && echo "  ✅ Daily Reflection cron registered." \
+      || echo "  ⚠️ Failed to add daily cron (may already exist)."
 else
-    echo "⚠️  'openclaw' command not found. Skipping cron registration."
+    echo "  ⚠️ 'openclaw' not found. Skipping cron registration."
+    echo "  💡 Run this script again after installing OpenClaw to register cron jobs."
 fi
 
+echo ""
 echo "------------------------------------------"
-echo "🎉 Deployment Successful!"
-echo "👉 Next Step: Restart your OpenClaw Gateway to apply changes."
-echo "💡 Hint: Check logs for '[Principles Disciple] Plugin registered.'"
+echo "🎉 Deployment Complete!"
+echo ""
+echo "👉 Next steps:"
+echo "   1. Restart your OpenClaw Gateway to apply the plugin."
+echo "   2. Check logs for: [Principles Disciple] Plugin registered."
+echo "   3. Run /system-status to verify the plugin is active."

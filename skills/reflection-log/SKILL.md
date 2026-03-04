@@ -1,37 +1,37 @@
----
+﻿---
 name: reflection-log
 description: Final task reflection and evolution logging. Use to capture pain signals, update profiles, and propose new principles.
 disable-model-invocation: true
 ---
 
-# Reflection & Evolution (反思与落盘)
+# Reflection & Evolution (鍙嶆€濅笌钀界洏)
 
-**目标**: 将单次任务的经验转化为系统的永久记忆。
+**鐩爣**: 灏嗗崟娆′换鍔＄殑缁忛獙杞寲涓虹郴缁熺殑姘镐箙璁板繂銆?
 
-请执行以下结项操作：
+璇锋墽琛屼互涓嬬粨椤规搷浣滐細
 
-## 1. Pain Summary (痛苦摘要)
-- 简述本次任务中最折磨、最耗时或导致失败的点。
+## 1. Pain Summary (鐥涜嫤鎽樿)
+- 绠€杩版湰娆′换鍔′腑鏈€鎶樼（銆佹渶鑰楁椂鎴栧鑷村け璐ョ殑鐐广€?
 
 ## 2. Issue Logging
-- **Action**: 将详细的 Pain Signal 和诊断结果追加到 `docs/ISSUE_LOG.md`。
+- **Action**: 灏嗚缁嗙殑 Pain Signal 鍜岃瘖鏂粨鏋滆拷鍔犲埌 `docs/ISSUE_LOG.md`銆?
 
 ## 3. Evolution Candidates
-- **Principle**: 提议一条新原则（P-XX）。
-- **Guardrail**: 建议一个具体的 Hook、Rule 或 Test。
-  - **路径拦截**: 建议将敏感目录加入 `docs/PROFILE.json` 的 `risk_paths`。
-  - **行为拦截**: 建议在 `docs/PROFILE.json` 的 `custom_guards` 中添加正则，以拦截特定工具的危险调用（如 `Edit.*SYSTEM`）。
+- **Principle**: 鎻愯涓€鏉℃柊鍘熷垯锛圥-XX锛夈€?
+- **Guardrail**: 寤鸿涓€涓叿浣撶殑 Hook銆丷ule 鎴?Test銆?
+  - **璺緞鎷︽埅**: 寤鸿灏嗘晱鎰熺洰褰曞姞鍏?`docs/PROFILE.json` 鐨?`risk_paths`銆?
+  - **琛屼负鎷︽埅**: 寤鸿鍦?`docs/PROFILE.json` 鐨?`custom_guards` 涓坊鍔犳鍒欙紝浠ユ嫤鎴壒瀹氬伐鍏风殑鍗遍櫓璋冪敤锛堝 `Edit.*SYSTEM`锛夈€?
 
-## 4. Positive Reinforcement (正向强化)
-- **检查卓越信号**: 
-  1. 用户明确的赞赏 (Quote user).
-  2. 性能/质量指标的客观跃迁 (Cite data).
-  3. Reviewer 的高度评价 (Excellent/Elegant).
-- **提取模式**: 如果存在上述信号，在 `docs/.user_verdict.json` 中额外记录 `achievement` 字段，描述本次成功的行为模式。
+## 4. Positive Reinforcement (姝ｅ悜寮哄寲)
+- **妫€鏌ュ崜瓒婁俊鍙?*: 
+  1. 鐢ㄦ埛鏄庣‘鐨勮禐璧?(Quote user).
+  2. 鎬ц兘/璐ㄩ噺鎸囨爣鐨勫瑙傝穬杩?(Cite data).
+  3. Reviewer 鐨勯珮搴﹁瘎浠?(Excellent/Elegant).
+- **鎻愬彇妯″紡**: 濡傛灉瀛樺湪涓婅堪淇″彿锛屽湪 `docs/.user_verdict.json` 涓澶栬褰?`achievement` 瀛楁锛屾弿杩版湰娆℃垚鍔熺殑琛屼负妯″紡銆?
 
-## 5. Attribution (画像更新)
-- **Agent Scorecard**: 评估本次使用的子智能体表现，写入 `docs/.verdict.json`。格式遵循 `@docs/schemas/agent_verdict_schema.json`。
-- **User Profile**: 评估用户指令质量与偏好，写入 `docs/.user_verdict.json`。格式遵循 `@docs/schemas/user_verdict_schema.json`。
+## 5. Attribution (鐢诲儚鏇存柊)
+- **Agent Scorecard**: 璇勪及鏈浣跨敤鐨勫瓙鏅鸿兘浣撹〃鐜帮紝鍐欏叆 `docs/.verdict.json`銆傛牸寮忛伒寰?`@docs/schemas/agent_verdict_schema.json`銆?
+- **User Profile**: 璇勪及鐢ㄦ埛鎸囦护璐ㄩ噺涓庡亸濂斤紝鍐欏叆 `docs/.user_verdict.json`銆傛牸寮忛伒寰?`@docs/schemas/user_verdict_schema.json`銆?
 
 ## 6. Cleanup
-- 清理所有中间标记文件（如 `.pain_flag`, `.verdict.json` 等）。
+- 娓呯悊鎵€鏈変腑闂存爣璁版枃浠讹紙濡?`.pain_flag`, `.verdict.json` 绛夛級銆?

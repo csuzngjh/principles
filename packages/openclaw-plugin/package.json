@@ -5,12 +5,13 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
   "openclaw": {
-    "id": "principles-disciple",
-    "name": "Principles Disciple",
-    "description": "Evolutionary programming agent framework",
-    "extensions": ["./src/index.ts"],
-    "skills": ["../../agents", "../../skills"]
+    "extensions": [
+      "./dist/index.js"
+    ]
   },
   "scripts": {
     "build": "tsc",
@@ -21,5 +22,12 @@
     "typescript": "^5.0.0",
     "vitest": "^1.0.0"
   },
-  "peerDependencies": {}
+  "peerDependencies": {
+    "openclaw": ">=1.0.0"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": true
+    }
+  }
 }

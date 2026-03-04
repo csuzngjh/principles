@@ -1,32 +1,31 @@
----
+﻿---
 name: evolution-framework-update
-description: 拉取原则信徒进化框架的最新更新（包含 Orchestrator 模式、异步队列及地图优先协议）。
-allowed-tools: Bash, Read, Glob
+description: 鎷夊彇鍘熷垯淇″緬杩涘寲妗嗘灦鐨勬渶鏂版洿鏂帮紙鍖呭惈 Orchestrator 妯″紡銆佸紓姝ラ槦鍒楀強鍦板浘浼樺厛鍗忚锛夈€?
 ---
 
-# /evolution-framework-update: 进化框架自更新
+# /evolution-framework-update: 杩涘寲妗嗘灦鑷洿鏂?
 
-**目标**: 同步上游框架的最新代码（Hooks, Skills, Agents, Daemon），保持系统进化能力。
+**鐩爣**: 鍚屾涓婃父妗嗘灦鐨勬渶鏂颁唬鐮侊紙Hooks, Skills, Agents, Daemon锛夛紝淇濇寔绯荤粺杩涘寲鑳藉姏銆?
 
-## 1. 执行更新
-运行以下脚本拉取最新代码：
+## 1. 鎵ц鏇存柊
+杩愯浠ヤ笅鑴氭湰鎷夊彇鏈€鏂颁唬鐮侊細
 
 ```bash
 bash scripts/update_agent_framework.sh
 ```
 
-## 2. 冲突处理 (Smart Merge)
-脚本运行后，请检查输出：
-- **无冲突**: 如果显示 "✅ Update complete"，则无需操作。
-- **有冲突**: 如果显示 "⚠️ Updates found with conflicts"：
-  1. 查找所有 `.update` 文件：
+## 2. 鍐茬獊澶勭悊 (Smart Merge)
+鑴氭湰杩愯鍚庯紝璇锋鏌ヨ緭鍑猴細
+- **鏃犲啿绐?*: 濡傛灉鏄剧ず "鉁?Update complete"锛屽垯鏃犻渶鎿嶄綔銆?
+- **鏈夊啿绐?*: 濡傛灉鏄剧ず "鈿狅笍 Updates found with conflicts"锛?
+  1. 鏌ユ壘鎵€鏈?`.update` 鏂囦欢锛?
      ```bash
      find .claude -name "*.update"
      ```
-  2. 对于每一个冲突文件（例如 `rules/00-kernel.md` vs `rules/00-kernel.md.update`）：
-     - **读取** 原文件和 `.update` 文件。
-     - **分析** 差异：合入上游的新功能，保留本地的个性化配置。
-     - **清理**：合并完成后删除 `.update` 文件。
+  2. 瀵逛簬姣忎竴涓啿绐佹枃浠讹紙渚嬪 `rules/00-kernel.md` vs `rules/00-kernel.md.update`锛夛細
+     - **璇诲彇** 鍘熸枃浠跺拰 `.update` 鏂囦欢銆?
+     - **鍒嗘瀽** 宸紓锛氬悎鍏ヤ笂娓哥殑鏂板姛鑳斤紝淇濈暀鏈湴鐨勪釜鎬у寲閰嶇疆銆?
+     - **娓呯悊**锛氬悎骞跺畬鎴愬悗鍒犻櫎 `.update` 鏂囦欢銆?
 
-## 3. 重启生效
-更新完成后，建议重启 Session 以加载最新的神经中枢逻辑。
+## 3. 閲嶅惎鐢熸晥
+鏇存柊瀹屾垚鍚庯紝寤鸿閲嶅惎 Session 浠ュ姞杞芥渶鏂扮殑绁炵粡涓灑閫昏緫銆

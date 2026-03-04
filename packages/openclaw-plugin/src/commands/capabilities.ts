@@ -1,44 +1,55 @@
 import { execSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
-import type { PluginCommandContext, PluginCommandResult } from '../types';
+import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
 
-export function scanEnvironment(workspaceDir: string): Record<string, any> {
-  const tools = [
-    { name: 'rg', cmd: 'rg --version' },
-    { name: 'sg', cmd: 'sg --version' },
-    { name: 'fd', cmd: 'fd --version' },
-    { name: 'npm', cmd: 'npm --version' },
-    { name: 'python3', cmd: 'python3 --version' },
-    { name: 'git', cmd: 'git --version' },
-    { name: 'gh', cmd: 'gh --version' },
-  ];
+const TOOLS_TO_SCAN = [
+  { name: 'rg', cmd: ['rg', '--version'] },
+  { name: 'sg', cmd: ['sg', '--version'] },
+  { name: 'fd', cmd: ['fd', '--version'] },
+  { name: 'npm', cmd: ['npm', '--version'] },
+  { name: 'python3', cmd: ['python3', '--version'] },
+  { name: 'git', cmd: ['git', '--version'] },
+  { name: 'gh', cmd: ['gh', '--version'] },
+];
 
-  const capabilities: Record<string, any> = {
+/** Cross-platform: `where` on Windows, `command -v` on POSIX */
+function whichCmd(toolName: string): string {
+  if (process.platform === 'win32') {
+    return `where ${toolName}`;
+  }
+  return `command -v ${toolName}`;
+}
+
+export function scanEnvironment(workspaceDir: string): Record<string, unknown> {
+  const capabilities: Record<string, unknown> = {
     timestamp: new Date().toISOString(),
-    tools: {} as Record<string, any>,
+    platform: process.platform,
+    tools: {} as Record<string, unknown>,
   };
 
-  for (const tool of tools) {
+  const tools = capabilities.tools as Record<string, unknown>;
+
+  for (const tool of TOOLS_TO_SCAN) {
     try {
-      const output = execSync(tool.cmd, { stdio: 'pipe' }).toString().split('\n')[0];
-      const pathStr = execSync(`command -v ${tool.name}`, { stdio: 'pipe' }).toString().trim();
-      capabilities.tools[tool.name] = {
-        available: true,
-        version: output,
-        path: pathStr,
-      };
-    } catch (e) {
-      capabilities.tools[tool.name] = {
-        available: false,
-      };
+      const versionOut = execSync(tool.cmd.join(' '), { stdio: 'pipe' })
+        .toString()
+        .split('\n')[0]
+        .trim();
+      const toolPath = execSync(whichCmd(tool.name), { stdio: 'pipe' })
+        .toString()
+        .trim()
+        .split('\n')[0]; // `where` may return multiple lines
+      tools[tool.name] = { available: true, version: versionOut, path: toolPath };
+    } catch (_e) {
+      tools[tool.name] = { available: false };
     }
   }
 
   const capsPath = path.join(workspaceDir, 'docs', 'SYSTEM_CAPABILITIES.json');
-  const dir = path.dirname(capsPath);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+  const docsDir = path.dirname(capsPath);
+  if (!fs.existsSync(docsDir)) {
+    fs.mkdirSync(docsDir, { recursive: true });
   }
   fs.writeFileSync(capsPath, JSON.stringify(capabilities, null, 2), 'utf8');
 
@@ -46,17 +57,27 @@ export function scanEnvironment(workspaceDir: string): Record<string, any> {
 }
 
 export function handleBootstrapTools(ctx: PluginCommandContext): PluginCommandResult {
-  if (!ctx.workspaceDir) {
-    return { text: "Error: No workspace directory provided." };
+  // workspaceDir is not in PluginCommandContext — we use the CWD as a fallback.
+  // Ideally this is run from the project root. If OpenClaw ever exposes workspaceDir
+  // in command context, switch to ctx.workspaceDir.
+  const workspaceDir = process.cwd();
+
+  try {
+    const caps = scanEnvironment(workspaceDir);
+    const toolsMap = caps.tools as Record<string, { available: boolean }>;
+    const available = Object.entries(toolsMap)
+      .filter(([, data]) => data.available)
+      .map(([name]) => `\`${name}\``)
+      .join(', ');
+
+    return {
+      text:
+        `🔍 Environment perception complete.\n` +
+        `**Detected tools:** ${available || '(none)'}\n` +
+        `**Platform:** ${process.platform}\n` +
+        `Capabilities saved to \`docs/SYSTEM_CAPABILITIES.json\`.`,
+    };
+  } catch (err) {
+    return { text: `❌ bootstrap-tools failed: ${err instanceof Error ? err.message : String(err)}` };
   }
-
-  const caps = scanEnvironment(ctx.workspaceDir);
-  const available = Object.entries(caps.tools)
-    .filter(([_, data]: [any, any]) => data.available)
-    .map(([name, _]) => `\`${name}\``)
-    .join(', ');
-
-  return {
-    text: `Environment perception complete. Detected tools: ${available}. Capabilities saved to \`docs/SYSTEM_CAPABILITIES.json\`.`,
-  };
 }

@@ -1,33 +1,33 @@
----
+﻿---
 name: root-cause
 description: Deep dive analysis into why a problem occurred. Uses the 5 Whys method and classifies the cause.
 disable-model-invocation: true
 ---
 
-# Root Cause Analysis (根因分析)
+# Root Cause Analysis (鏍瑰洜鍒嗘瀽)
 
-**目标**: 穿透现象看本质，防止重复犯错。
+**鐩爣**: 绌块€忕幇璞＄湅鏈川锛岄槻姝㈤噸澶嶇姱閿欍€?
 
-请按以下格式执行诊断：
+璇锋寜浠ヤ笅鏍煎紡鎵ц璇婃柇锛?
 
-## 1. Proximal Cause (直接原因)
-- **动词驱动**: 描述了什么具体操作或缺失导致了即时失败。
+## 1. Proximal Cause (鐩存帴鍘熷洜)
+- **鍔ㄨ瘝椹卞姩**: 鎻忚堪浜嗕粈涔堝叿浣撴搷浣滄垨缂哄け瀵艰嚧浜嗗嵆鏃跺け璐ャ€?
 
-## 2. 5 Whys (深度追问)
-1. 为什么直接原因会发生？
+## 2. 5 Whys (娣卞害杩介棶)
+1. 涓轰粈涔堢洿鎺ュ師鍥犱細鍙戠敓锛?
 2. ...
 3. ...
 4. ...
-5. 追问到系统性或认知性根源。
+5. 杩介棶鍒扮郴缁熸€ф垨璁ょ煡鎬ф牴婧愩€?
 
-## 3. Root Cause (根本原因)
-- **形容词/设计驱动**: 描述系统架构、流程缺陷或错误的假设。
-- **Guardrail Failure Analysis**: 为什么现有的门禁 (Hooks) 或 规则 (Rules) 没能拦截这个错误？是规则缺失、匹配不严还是逻辑漏洞？
+## 3. Root Cause (鏍规湰鍘熷洜)
+- **褰㈠璇?璁捐椹卞姩**: 鎻忚堪绯荤粺鏋舵瀯銆佹祦绋嬬己闄锋垨閿欒鐨勫亣璁俱€?
+- **Guardrail Failure Analysis**: 涓轰粈涔堢幇鏈夌殑闂ㄧ (Hooks) 鎴?瑙勫垯 (Rules) 娌¤兘鎷︽埅杩欎釜閿欒锛熸槸瑙勫垯缂哄け銆佸尮閰嶄笉涓ヨ繕鏄€昏緫婕忔礊锛?
 
-## 4. Category (分类)
-- [ ] **People**: 能力盲区、习惯问题。
-- [ ] **Design**: 流程/工具缺陷、门禁不足、架构漏洞。
-- [ ] **Assumption**: 对环境、版本或依赖的错误前提假设。
+## 4. Category (鍒嗙被)
+- [ ] **People**: 鑳藉姏鐩插尯銆佷範鎯棶棰樸€?
+- [ ] **Design**: 娴佺▼/宸ュ叿缂洪櫡銆侀棬绂佷笉瓒炽€佹灦鏋勬紡娲炪€?
+- [ ] **Assumption**: 瀵圭幆澧冦€佺増鏈垨渚濊禆鐨勯敊璇墠鎻愬亣璁俱€?
 
-## 5. Principle Candidate (原则提炼)
-- 如果我们修复了这个问题，应该增加什么原则防止它再次发生？
+## 5. Principle Candidate (鍘熷垯鎻愮偧)
+- 濡傛灉鎴戜滑淇浜嗚繖涓棶棰橈紝搴旇澧炲姞浠€涔堝師鍒欓槻姝㈠畠鍐嶆鍙戠敓锛?

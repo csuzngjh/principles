@@ -15,3 +15,15 @@ docs/SYSTEM.log
 docs/PHASE2_SUMMARY.md
 docs/PHASE3_SUMMARY.md
 docs/REFACTORING_COMPLETE.md
+
+# Node.js packages
+packages/*/node_modules/
+packages/*/dist/
+node_modules/
+dist/
+
+# Temp review files
+pr.txt
+pr.diff
+pr_diff.txt
+pr_files.txt

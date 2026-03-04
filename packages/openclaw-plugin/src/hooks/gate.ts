@@ -1,12 +1,14 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { isRisky, normalizePath } from '../utils/io';
-import { normalizeProfile } from '../core/profile';
+import { isRisky, normalizePath } from '../utils/io.js';
+import { normalizeProfile } from '../core/profile.js';
+import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult } from '../openclaw-sdk.js';
 
 export function handleBeforeToolCall(
-  event: { toolName: string; params: Record<string, unknown> },
-  ctx: { workspaceDir?: string }
-): { block?: boolean; blockReason?: string } | void {
+  event: PluginHookBeforeToolCallEvent,
+  ctx: PluginHookToolContext & { workspaceDir?: string; pluginConfig?: Record<string, unknown> }
+): PluginHookBeforeToolCallResult | void {
+  // OpenClaw tool names for file writes
   if (!ctx.workspaceDir || !['fs_write', 'fs_replace', 'fs_delete'].includes(event.toolName)) {
     return;
   }
@@ -23,9 +25,15 @@ export function handleBeforeToolCall(
     try {
       const rawProfile = JSON.parse(fs.readFileSync(profilePath, 'utf8'));
       profile = normalizeProfile(rawProfile);
-    } catch (e) {
+    } catch (_e) {
       // Use defaults if parse fails
     }
+  }
+
+  // Merge config-level riskPaths if set
+  const configRiskPaths = (ctx.pluginConfig?.riskPaths as string[] | undefined) ?? [];
+  if (configRiskPaths.length > 0) {
+    profile.risk_paths = [...new Set([...profile.risk_paths, ...configRiskPaths])];
   }
 
   const relPath = normalizePath(filePath, ctx.workspaceDir);
@@ -38,17 +46,14 @@ export function handleBeforeToolCall(
     if (fs.existsSync(planPath)) {
       try {
         const planContent = fs.readFileSync(planPath, 'utf8');
-        const lines = planContent.split('\n');
-        for (const line of lines) {
+        for (const line of planContent.split('\n')) {
           if (line.startsWith('STATUS:')) {
             const status = line.split(':')[1].trim().split(/\s+/)[0];
-            if (status === 'READY') {
-              planReady = true;
-            }
+            if (status === 'READY') planReady = true;
             break;
           }
         }
-      } catch (e) {
+      } catch (_e) {
         // Ignore read errors
       }
     }
@@ -56,7 +61,10 @@ export function handleBeforeToolCall(
     if (!planReady) {
       return {
         block: true,
-        blockReason: `[PRINCIPLES_GATE] Write blocked for risk path '${relPath}'. \nREASON: No READY plan found in docs/PLAN.md. \nACTION: You MUST update docs/PLAN.md to STATUS: READY and describe the intended changes before you can modify this file.`,
+        blockReason:
+          `[PRINCIPLES_GATE] Write blocked for risk path '${relPath}'.\n` +
+          `REASON: No READY plan found in docs/PLAN.md.\n` +
+          `ACTION: You MUST update docs/PLAN.md to STATUS: READY and describe the intended changes before you can modify this file.`,
       };
     }
   }
