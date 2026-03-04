@@ -30,7 +30,7 @@
 - [x] Task: Implement Post-Write Checks & Pain (`after_tool_call`) [0e70dda]
     - [ ] Write Tests (Red Phase): Test that tool failures trigger pain records.
     - [ ] Implement (Green Phase): Implement tests-on-change and daily log integration.
-- [ ] Task: Conductor - User Manual Verification 'Phase 3: OpenClaw Hook Integration (TDD)' (Protocol in workflow.md)
+- [~] Task: Conductor - User Manual Verification 'Phase 3: OpenClaw Hook Integration (TDD)' (Protocol in workflow.md)
 
 ## Phase 4: Commands & Evolver Synergy (TDD)
 - [ ] Task: Register Native Slash Commands
