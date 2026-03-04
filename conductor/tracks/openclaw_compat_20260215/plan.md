@@ -12,7 +12,7 @@
 - [x] Task: Conductor - User Manual Verification 'Phase 1: Native Plugin Scaffolding' (Protocol in workflow.md) [checkpoint: 5f1d6a3]
 
 ## Phase 2: Core Logic Porting (TDD)
-- [ ] Task: Port I/O, Path, and Parsing Utilities to TS
+- [x] Task: Port I/O, Path, and Parsing Utilities to TS [01bf68d]
     - [ ] Write Tests (Red Phase): Write `vitest` suites for path normalization and JSON/KV parsing.
     - [ ] Implement (Green Phase): Implement `src/utils/io.ts`.
 - [ ] Task: Port Profile and Pain Signal Logic
