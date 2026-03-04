@@ -1,0 +1,1 @@
+Task: Port Profile and Pain Signal Logic. Implemented src/core/profile.ts and src/core/pain.ts with vitest coverage.
