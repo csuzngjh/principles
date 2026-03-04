@@ -116,6 +116,13 @@ if command -v openclaw > /dev/null 2>&1; then
       --message "Review docs/ISSUE_LOG.md and docs/.pain_flag. Identify recurring pain points and append new principles to docs/PRINCIPLES.md." \
       2>/dev/null && echo "  ✅ Daily Reflection cron registered." \
       || echo "  ⚠️ Failed to add daily cron (may already exist)."
+
+    openclaw cron add \
+      --name "PD Capability Research" \
+      --cron "0 0 1 * *" \
+      --message "Research the web for the latest and most efficient CLI tools related to our current tech stack (see docs/SYSTEM_CAPABILITIES.json). If better alternatives exist, suggest an upgrade path." \
+      2>/dev/null && echo "  ✅ Capability Research cron registered." \
+      || echo "  ⚠️ Failed to add monthly research cron (may already exist)."
 else
     echo "  ⚠️ 'openclaw' not found. Skipping cron registration."
     echo "  💡 Run this script again after installing OpenClaw to register cron jobs."
