@@ -21,7 +21,7 @@
 - [x] Task: Conductor - User Manual Verification 'Phase 2: Core Logic Porting (TDD)' (Protocol in workflow.md) [checkpoint: 36b0ae7]
 
 ## Phase 3: OpenClaw Hook Integration (TDD)
-- [ ] Task: Implement Prompt Context Injection (`before_prompt_build`)
+- [x] Task: Implement Prompt Context Injection (`before_prompt_build`) [4578d91]
     - [ ] Write Tests (Red Phase): Test that the hook appends `USER_CONTEXT` to the prompt.
     - [ ] Implement (Green Phase): Register the hook in `src/index.ts`.
 - [ ] Task: Implement Pre-Write Gate (`before_tool_call`)
