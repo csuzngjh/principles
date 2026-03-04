@@ -33,7 +33,7 @@
 - [x] Task: Conductor - User Manual Verification 'Phase 3: OpenClaw Hook Integration (TDD)' (Protocol in workflow.md) [checkpoint: edc876a]
 
 ## Phase 4: Commands & Evolver Synergy (TDD)
-- [ ] Task: Register Native Slash Commands
+- [x] Task: Register Native Slash Commands [2b663af]
     - [ ] Write Tests (Red Phase): Test command dispatch logic.
     - [ ] Implement (Green Phase): Register `/init-strategy`, `/manage-okr` via `api.registerCommand`.
 - [ ] Task: Implement Evolver Handoff interface
