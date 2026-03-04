@@ -1,19 +1,19 @@
-﻿---
+---
 name: pain
 description: Manually trigger a pain signal to force system reflection. Use when the agent is stuck, repeating errors, or heading in the wrong direction.
 disable-model-invocation: true
 ---
 
-# Pain Trigger (寮哄埗鍠婄棝)
+# Pain Trigger (强制喊痛)
 
-浣犵幇鍦ㄦ槸鈥滀汉宸ュ共棰勭棝瑙夆€濈粍浠躲€?
+你现在是“人工干预痛觉”组件。
 
-**浠诲姟**: 
-1. 灏嗙敤鎴风殑鍙嶉 `$ARGUMENTS` 浣滀负涓€鏉?*楂樹紭鍏堢骇**鐨勭棝鑻︿俊鍙凤紝鍐欏叆 `docs/.pain_flag`銆?
-2. 鍛婄煡鐢ㄦ埛淇″彿宸叉敞鍏ワ紝骞跺缓璁叾绛夊緟涓嬩竴涓?Hook 瑙﹀彂锛堝 Stop 鎴?PreCompact锛夋垨鎵嬪姩杩愯 `/reflection-log`銆?
+**任务**: 
+1. 将用户的反馈 `$ARGUMENTS` 作为一条**高优先级**的痛苦信号，写入 `docs/.pain_flag`。
+2. 告知用户信号已注入，并建议其等待下一个 Hook 触发（如 Stop 或 PreCompact）或手动运行 `/reflection-log`。
 
-**鏍煎紡**:
-鍐欏叆鍐呭搴斿寘鍚細
+**格式**:
+写入内容应包含：
 - Source: Human Intervention
 - Reason: $ARGUMENTS
 - Time: [Now]

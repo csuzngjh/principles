@@ -1,6 +1,6 @@
-﻿---
+---
 name: claude-code-master
-description: Use when working with Claude Code/claude code for plugins (鎻掍欢/鎻掍欢寮€鍙?marketplace), hooks (hook/閽╁瓙), settings/configuration (閰嶇疆/璁剧疆), model or output styles, terminal/statusline, skills or sub-agents (鏅鸿兘浣?, MCP, memory, headless mode, IAM/enterprise, troubleshooting, or any how-to questions about configuring or extending Claude Code.
+description: Use when working with Claude Code/claude code for plugins (插件/插件开发/marketplace), hooks (hook/钩子), settings/configuration (配置/设置), model or output styles, terminal/statusline, skills or sub-agents (智能体), MCP, memory, headless mode, IAM/enterprise, troubleshooting, or any how-to questions about configuring or extending Claude Code.
 ---
 
 # Claude Code Master

@@ -1,55 +1,83 @@
-﻿---
+---
 name: evolve-task
-description: Run the full evolution loop (triage 鈫?diagnosis 鈫?audit 鈫?plan 鈫?execute 鈫?review 鈫?log)
+description: Run the full evolution loop (triage → diagnosis → audit → plan → execute → review → log)
 disable-model-invocation: true
-user-invocable: true
-metadata: '{"openclaw": {"category": "evolution", "priority": 8}}'
 ---
 
-浣犲繀椤绘寜椤哄簭鎵ц浠ヤ笅姝ラ锛堜笉寰楄烦姝ワ級銆侫RGUMENTS: $ARGUMENTS
+你必须按顺序执行以下步骤（不得跳步）。ARGUMENTS: $ARGUMENTS
 
-## Step 0: 鎭㈠涓婁笅鏂囷紙寮哄埗锛?
-- 璇诲彇 docs/CHECKPOINT.md 鐨勬渶鍚庝竴鏉?
-- 璇诲彇 docs/ISSUE_LOG.md 鐨勬渶杩?3 鏉?
-- 璇诲彇 docs/DECISIONS.md 鐨勬渶杩戝喅绛?
-- 濡傛灉瀛樺湪 docs/.pain_flag锛屽厛澶勭悊鏂偣鎭㈠
+## Step 0: 恢复上下文（强制）
+- 读取 docs/CHECKPOINT.md 的最后一条
+- 读取 docs/ISSUE_LOG.md 的最近 3 条
+- 读取 docs/DECISIONS.md 的最近决策
+- 如果存在 docs/.pain_flag，先处理断点恢复
 
-## Step 1: 璇诲彇杩愯鍙傛暟涓庤兘鍔涜嚜妫€
-- 璇诲彇 docs/PROFILE.json锛岀悊瑙?risk_paths銆乬ate銆乼ests.commands銆?
-- **鑳藉姏鑷**: 蹇€熸壂鎻忔彃浠剁洰褰曚笅鐨?`skills/` 鍜?`agents/`銆?
+## Step 1: 读取运行参数与能力自检
+- 读取 docs/PROFILE.json，理解 risk_paths、gate、tests.commands。
+- **能力自检**: 快速扫描插件目录下的 `skills/` 和 `agents/`。如果有针对当前任务的专门 Skill (如 `/deep-search`) 或 Agent (如 `security-expert`)，请在后续步骤中优先使用。
 
-## Step 1.5: 鍏ㄧ淮鐜鎰熺煡 (Full-Spectrum Awareness)
-- **鏈湴**: 杩愯 `git status` 鍜?`git log -n 5` 浜嗚В浠ｇ爜鐜扮姸銆?
-- **杩滅▼**: 濡傛灉鍙敤 `gh`锛屽繀椤昏繍琛?`gh issue list --limit 5` 鍜?`gh pr list --limit 5`銆?
+## Step 1.5: 全维环境感知 (Full-Spectrum Awareness)
+- **本地**: 运行 `git status` 和 `git log -n 5` 了解代码现状。
+- **远程**: 如果可用 `gh`，必须运行 `gh issue list --limit 5` 和 `gh pr list --limit 5`。
+- **关联**: 如果发现相关 Issue，必须将其 ID 记录在本次任务的上下文中。
 
-## Step 2: TRIAGE锛堣ˉ榻愪俊鎭級
-- **鍦板浘浼樺厛**: 蹇呴』鍏堥槄璇?`codemaps/` 涓嬫灦鏋勫浘鎴?`docs/SYSTEM_PANORAMA.md`銆?
-杈撳嚭锛欸oal, Problem, Evidence, Risk level.
+## Step 2: TRIAGE（补齐信息）
+- **地图优先**: 必须先阅读 `codemaps/` 下的架构图或 `docs/SYSTEM_PANORAMA.md`，准确评估修改风险。
+输出：
+- Goal（一句话）
+- Problem（可复现描述）
+- Evidence（文件/命令/日志）
+- Risk level（low/medium/high）
 
-## Step 3: 濮旀淳 Explorer锛堣瘉鎹敹闆嗭級
-- 浣跨敤 `agent_send --agent explorer` 杩涜璇佹嵁鏀堕泦銆?
-- **缁╂晥璇勪及**: 鍐欏叆 `docs/.verdict.json`銆?
+## Step 3: 委派 Explorer（证据收集）
+- 让 Explorer 子智能体输出：Evidence list / Repro / Hypotheses(<=3)
+- **绩效评估**: 任务完成后，评估 Explorer 表现并写入 `docs/.verdict.json`。格式必须严格遵守 `@docs/schemas/agent_verdict_schema.json`。
 
-## Step 4: 濮旀淳 Diagnostician锛堟牴鍥狅級
-- 浣跨敤 `agent_send --agent diagnostician` 杩涜鏍瑰洜鍒嗘瀽銆?
+## Step 4: 委派 Diagnostician（根因）
+- 让 Diagnostician 输出：Proximal cause / Root cause / 5 Whys / Category
+- **绩效评估**: 任务完成后，写入 `docs/.verdict.json`。格式遵循 `@docs/schemas/agent_verdict_schema.json`。
 
-## Step 5: 濮旀淳 Auditor锛堟紨缁庡璁★級
-- 浣跨敤 `agent_send --agent auditor` 杩涜瀹¤銆?
-- 缁撴灉鍐欏叆 `docs/AUDIT.md`銆?
+## Step 5: 委派 Auditor（演绎审计）
+- 让 Auditor 输出：Axiom/System/Via negativa / RESULT: PASS/FAIL
+- 将审计结果写入 docs/AUDIT.md（RESULT 行必须存在）。
+- **绩效评估**: 任务完成后，写入 `docs/.verdict.json`。格式遵循 `@docs/schemas/agent_verdict_schema.json`。
 
-## Step 6: 濮旀淳 Planner锛堣鍒掞級
-- 浣跨敤 `agent_send --agent planner` 鐢熸垚璁″垝銆?
-- 璁″垝鍐欏叆 `docs/PLAN.md`銆?
+### 分支处理（必须遵守）
+- 若 RESULT = FAIL：
+  1. 将 Must-fix 列表写入 docs/AUDIT.md
+  2. 回到 Step 4 重新委派 Diagnostician，要求补充根因
+  3. 最多重试 2 次，若仍 FAIL 则写入 docs/DECISIONS.md并请求用户介入
+- 若 RESULT = PASS：继续 Step 6
 
-## Step 7: 濮旀淳 Implementer锛堟墽琛岋級
-- 浣跨敤 `agent_send --agent implementer` 鎸夎鍒掓墽琛屻€?
+## Step 6: 委派 Planner（电影剧本计划）
+- Planner 输出 Plan（步骤/命令/指标/回滚）。
+- 将计划写入 docs/PLAN.md（STATUS 行必须存在）。
+- **任务同步 (Task Sync)**: 
+  - 如果 `CLAUDE_CODE_TASK_LIST_ID` 已设置，你必须将上述 Plan 的核心步骤直接转化为 Native Tasks（通过自然语言指令"Add task..."或相关工具）。
+  - 如果未设置且为交互模式，提示用户："建议运行 `export CLAUDE_CODE_TASK_LIST_ID=task-$(date +%s)` 以启用持久化任务追踪。"
+  - 如果是后台/无头模式，跳过提示。
+- **绩效评估**: 任务完成后，写入 `docs/.verdict.json`。格式遵循 `@docs/schemas/agent_verdict_schema.json`。
 
-## Step 8: 濮旀淳 Reviewer锛堝鏌ワ級
-- 浣跨敤 `agent_send --agent reviewer` 瀹℃煡缁撴灉銆?
+## Step 7: 委派 Implementer（执行）
+- Implementer 只能按 PLAN 执行。任何偏离必须先更新 PLAN。
+- **绩效评估**: 任务完成后，根据验证结果写入 `docs/.verdict.json`。格式遵循 `@docs/schemas/agent_verdict_schema.json`。
 
-## Step 9: 鍙嶆€濅笌钀界洏
-1. **绯荤粺杩涘寲**: 灏?Pain/Root cause 杩藉姞鍒?`docs/ISSUE_LOG.md`銆?
-2. **鐢ㄦ埛鐢诲儚鏇存柊**: 鍐欏叆 `docs/.user_verdict.json`銆?
+## Step 8: 委派 Reviewer（审查）
+- Reviewer 输出：Critical/Warning/Suggestion。
+- **绩效评估**: 任务完成后，写入 `docs/.verdict.json`。格式遵循 `@docs/schemas/agent_verdict_schema.json`。
 
-## Step 10: 鏈€缁堟眹鎶?(Final Briefing)
-- 浣跨敤 `agent_send --agent reporter` 杩涜缁撻」闄堣堪銆?
+### 分支处理
+- 若有 Critical：回到 Step 6 修订计划，最多重试 2 次
+- 若无 Critical：继续 Step 9
+
+## Step 9: 反思与落盘
+1. **系统进化**: 将 Pain/Root cause/新原则候选/门禁建议追加到 docs/ISSUE_LOG.md，并更新 docs/DECISIONS.md。
+2. **用户画像更新 (强制)**:
+   - 回顾用户在本任务中的表现（指令质量、领域知识、偏好）以及系统的高光时刻。
+   - **必须**写入 `docs/.user_verdict.json` (增量更新)。格式必须严格遵守 `@docs/schemas/user_verdict_schema.json`。
+   - 注意：如果用户没有表现出明显特征或偏好，对应字段可为空。
+
+## Step 10: 最终汇报 (Final Briefing)
+- **动作**: 委派 `Task(reporter)` 进行结项陈述。
+- **要求**: 将 Implementer 和 Reviewer 的最终产出作为输入传给它。让它根据 `USER_CONTEXT.md` 决定汇报的深度和风格。
+- **目标**: 确保老板（用户）在不产生认知负荷的前提下，清楚了解任务成果与潜在风险。

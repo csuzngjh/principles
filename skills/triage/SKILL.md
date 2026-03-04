@@ -1,29 +1,29 @@
-﻿---
+---
 name: triage
 description: Initial problem definition and risk assessment. Use to collect environment info, reproduction steps, and logs.
 disable-model-invocation: true
 ---
 
-# Triage (闂鍒嗚瘖)
+# Triage (问题分诊)
 
-**鐩爣**: 鏀堕泦瓒冲鐨勮瘉鎹潵瀹氫箟闂锛屽苟璇勪及鍙樻洿椋庨櫓銆?
+**目标**: 收集足够的证据来定义问题，并评估变更风险。
 
-璇锋寜浠ヤ笅缁撴瀯杈撳嚭锛?
+请按以下结构输出：
 
-## 1. Goal (鐩爣)
-- 涓€鍙ヨ瘽鎻忚堪鏈浠诲姟鐨勬渶缁堟垚鍔熸爣鍑嗐€?
+## 1. Goal (目标)
+- 一句话描述本次任务的最终成功标准。
 
-## 2. Problem (闂鎻忚堪)
-- 褰撳墠鍙戠敓浜嗕粈涔堬紵棰勬湡鐨勮涓烘槸浠€涔堬紵
-- **Evidence**: 鍒楀嚭鐩稿叧鐨勬棩蹇楃墖娈点€侀敊璇唬鐮佹垨瑙傚療鍒扮殑寮傚父鐜拌薄銆?
+## 2. Problem (问题描述)
+- 当前发生了什么？预期的行为是什么？
+- **Evidence**: 列出相关的日志片段、错误代码或观察到的异常现象。
 
-## 3. Reproduction (澶嶇幇姝ラ)
-- 鎻愪緵鏄庣‘鐨勫鐜板懡浠ゆ垨鎿嶄綔搴忓垪銆?
-- 鏍囨敞褰撳墠鐜鐨勫叧閿彉閲忋€?
+## 3. Reproduction (复现步骤)
+- 提供明确的复现命令或操作序列。
+- 标注当前环境的关键变量。
 
-## 4. Scope (鑼冨洿)
-- 娑夊強鐨勬枃浠舵垨妯″潡棰勮銆?
-- **Risk Level**: Low / Medium / High (鍩轰簬 `docs/PROFILE.json` 瀹氫箟)銆?
+## 4. Scope (范围)
+- 涉及的文件或模块预览。
+- **Risk Level**: Low / Medium / High (基于 `docs/PROFILE.json` 定义)。
 
 ## 5. Next Step
-- 寤鸿濮旀淳鍝釜瀛愭櫤鑳戒綋 (閫氬父鏄?Explorer) 杩涗竴姝ユ敹闆嗚瘉鎹€?
+- 建议委派哪个子智能体 (通常是 Explorer) 进一步收集证据。
