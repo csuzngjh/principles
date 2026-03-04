@@ -18,7 +18,7 @@
 - [x] Task: Port Profile and Pain Signal Logic [8cce990]
     - [ ] Write Tests (Red Phase): Write tests for risk path matching and pain score calculation.
     - [ ] Implement (Green Phase): Implement `src/core/profile.ts` and `src/core/pain.ts`.
-- [~] Task: Conductor - User Manual Verification 'Phase 2: Core Logic Porting (TDD)' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 2: Core Logic Porting (TDD)' (Protocol in workflow.md) [checkpoint: 36b0ae7]
 
 ## Phase 3: OpenClaw Hook Integration (TDD)
 - [ ] Task: Implement Prompt Context Injection (`before_prompt_build`)
