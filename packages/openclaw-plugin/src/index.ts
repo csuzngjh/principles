@@ -2,6 +2,7 @@ import { handleBeforePromptBuild } from './hooks/prompt';
 import { handleBeforeToolCall } from './hooks/gate';
 import { handleAfterToolCall } from './hooks/pain';
 import { handleInitStrategy, handleManageOkr } from './commands/strategy';
+import { handleEvolveTask } from './commands/evolver';
 
 export function register(api: any): void {
   api.logger.info("Principles Disciple Plugin registered.");
@@ -20,5 +21,11 @@ export function register(api: any): void {
     name: "manage-okr",
     description: "Manage project OKRs and focus",
     handler: (ctx: any) => handleManageOkr(ctx)
+  });
+
+  api.registerCommand({
+    name: "evolve-task",
+    description: "Trigger the Evolver agent for deep code repair",
+    handler: (ctx: any) => handleEvolveTask(ctx)
   });
 }
