@@ -1,0 +1,1 @@
+Task: Register Native Slash Commands. Implemented /init-strategy and /manage-okr in src/commands/strategy.ts.
