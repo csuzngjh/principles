@@ -30,89 +30,145 @@ const plugin = {
   register(api: OpenClawPluginApi) {
     api.logger.info("Principles Disciple Plugin registered.");
 
-    // Capture workspace path once during registration.
-    // PluginHookToolContext does NOT include workspaceDir, but PluginHookAgentContext does.
-    // For tool hooks we resolve it via api.resolvePath('.') and inject via closure.
-    const workspaceDir = api.resolvePath('.');
+    let workspaceDir: string;
+    try {
+      workspaceDir = api.resolvePath('.');
+    } catch (err) {
+      api.logger.error(`[PD] Failed to resolve workspace directory: ${String(err)}`);
+      workspaceDir = process.cwd();
+    }
 
-    // ── Prompt injection: USER_CONTEXT, CURRENT_FOCUS, pain signals, capabilities ──
+    // ── Prompt injection ──
     api.on(
       'before_prompt_build',
       (event: PluginHookBeforePromptBuildEvent, ctx: PluginHookAgentContext): PluginHookBeforePromptBuildResult | void => {
-        return handleBeforePromptBuild(event, ctx);
+        try {
+          return handleBeforePromptBuild(event, ctx);
+        } catch (err) {
+          api.logger.error(`[PD] Error in before_prompt_build: ${String(err)}`);
+        }
       }
     );
 
-    // ── Gatekeeper: block writes to risk_paths without a READY plan ──
+    // ── Gatekeeper ──
     api.on(
       'before_tool_call',
       (event: PluginHookBeforeToolCallEvent, ctx: PluginHookToolContext): PluginHookBeforeToolCallResult | void => {
-        const pluginConfig = api.pluginConfig ?? {};
-        return handleBeforeToolCall(event, { ...ctx, workspaceDir, pluginConfig });
+        try {
+          const pluginConfig = api.pluginConfig ?? {};
+          return handleBeforeToolCall(event, { ...ctx, workspaceDir, pluginConfig });
+        } catch (err) {
+          api.logger.error(`[PD] Error in before_tool_call: ${String(err)}`);
+        }
       }
     );
 
-    // ── Pain signal: capture tool failures into .pain_flag ──
+    // ── Pain signal ──
     api.on(
       'after_tool_call',
       (event: PluginHookAfterToolCallEvent, ctx: PluginHookToolContext): void => {
-        const pluginConfig = api.pluginConfig ?? {};
-        handleAfterToolCall(event, { ...ctx, workspaceDir, pluginConfig });
+        try {
+          const pluginConfig = api.pluginConfig ?? {};
+          handleAfterToolCall(event, { ...ctx, workspaceDir, pluginConfig });
+        } catch (err) {
+          api.logger.error(`[PD] Error in after_tool_call: ${String(err)}`);
+        }
       }
     );
 
-    // ── Lifecycle: summarise pain before session clear ──
+    // ── Lifecycle: Reset ──
     api.on(
       'before_reset',
       async (event: PluginHookBeforeResetEvent, ctx: PluginHookAgentContext): Promise<void> => {
-        await handleBeforeReset(event, ctx);
+        try {
+          await handleBeforeReset(event, ctx);
+        } catch (err) {
+          api.logger.error(`[PD] Error in before_reset: ${String(err)}`);
+        }
       }
     );
 
-    // ── Lifecycle: flush checkpoint before compaction ──
+    // ── Lifecycle: Compaction ──
     api.on(
       'before_compaction',
       async (event: PluginHookBeforeCompactionEvent, ctx: PluginHookAgentContext): Promise<void> => {
-        await handleBeforeCompaction(event, ctx);
+        try {
+          await handleBeforeCompaction(event, ctx);
+        } catch (err) {
+          api.logger.error(`[PD] Error in before_compaction: ${String(err)}`);
+        }
       }
     );
 
-    // ── Subagent propagation: log PD protocol injection ──
+    // ── Subagent propagation ──
     api.on(
       'subagent_spawning',
       (event: PluginHookSubagentSpawningEvent, _ctx: PluginHookSubagentContext): PluginHookSubagentSpawningResult => {
-        api.logger.info(`[PD] Subagent spawning: ${event.agentId} (child: ${event.childSessionKey})`);
-        return { status: "ok" };
+        try {
+          api.logger.info(`[PD] Subagent spawning: ${event.agentId} (child: ${event.childSessionKey}). Principles protocol injected.`);
+          return { status: "ok" };
+        } catch (err) {
+          api.logger.error(`[PD] Error in subagent_spawning: ${String(err)}`);
+          return { status: "ok" };
+        }
       }
     );
 
-    // ── Slash commands (auto-reply, bypass LLM) ──
+    // ── Slash commands ──
     api.registerCommand({
       name: "init-strategy",
       description: "Initialize evolutionary OKR strategy",
       acceptsArgs: false,
-      handler: (ctx) => handleInitStrategy(ctx)
+      handler: (ctx) => {
+        try {
+          return handleInitStrategy(ctx);
+        } catch (err) {
+          api.logger.error(`[PD] Command /init-strategy failed: ${String(err)}`);
+          return { text: "Command failed. Check logs." };
+        }
+      }
     });
 
     api.registerCommand({
       name: "manage-okr",
       description: "Manage project OKRs and focus areas",
       acceptsArgs: false,
-      handler: (ctx) => handleManageOkr(ctx)
+      handler: (ctx) => {
+        try {
+          return handleManageOkr(ctx);
+        } catch (err) {
+          api.logger.error(`[PD] Command /manage-okr failed: ${String(err)}`);
+          return { text: "Command failed. Check logs." };
+        }
+      }
     });
 
     api.registerCommand({
       name: "evolve-task",
       description: "Trigger the Evolver agent for deep code repair via sessions_spawn",
       acceptsArgs: true,
-      handler: (ctx) => handleEvolveTask(ctx)
+      handler: (ctx) => {
+        try {
+          return handleEvolveTask(ctx);
+        } catch (err) {
+          api.logger.error(`[PD] Command /evolve-task failed: ${String(err)}`);
+          return { text: "Command failed. Check logs." };
+        }
+      }
     });
 
     api.registerCommand({
       name: "bootstrap-tools",
       description: "Scan and upgrade environment capabilities",
       acceptsArgs: false,
-      handler: (ctx) => handleBootstrapTools(ctx)
+      handler: (ctx) => {
+        try {
+          return handleBootstrapTools(ctx);
+        } catch (err) {
+          api.logger.error(`[PD] Command /bootstrap-tools failed: ${String(err)}`);
+          return { text: "Command failed. Check logs." };
+        }
+      }
     });
   }
 };
