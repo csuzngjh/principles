@@ -1,8 +1,5 @@
-export declare function handleAfterToolCall(event: {
-    toolName: string;
-    params: Record<string, unknown>;
-    error?: string;
-    result?: any;
-}, ctx: {
+import type { PluginHookAfterToolCallEvent, PluginHookToolContext } from '../openclaw-sdk.js';
+export declare function handleAfterToolCall(event: PluginHookAfterToolCallEvent, ctx: PluginHookToolContext & {
     workspaceDir?: string;
+    pluginConfig?: Record<string, unknown>;
 }): void;

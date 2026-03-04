@@ -20,7 +20,7 @@ import { handleAfterToolCall } from './hooks/pain.js';
 import { handleBeforeReset, handleBeforeCompaction } from './hooks/lifecycle.js';
 import { handleInitStrategy, handleManageOkr } from './commands/strategy.js';
 import { handleEvolveTask } from './commands/evolver.js';
-import { handleBootstrapTools } from './commands/capabilities.js';
+import { handleBootstrapTools, handleResearchTools } from './commands/capabilities.js';
 
 const plugin = {
   id: "principles-disciple",
@@ -166,6 +166,20 @@ const plugin = {
           return handleBootstrapTools(ctx);
         } catch (err) {
           api.logger.error(`[PD] Command /bootstrap-tools failed: ${String(err)}`);
+          return { text: "Command failed. Check logs." };
+        }
+      }
+    });
+
+    api.registerCommand({
+      name: "research-tools",
+      description: "Ask the agent to research front-edge CLI tools online",
+      acceptsArgs: true,
+      handler: (ctx) => {
+        try {
+          return handleResearchTools(ctx);
+        } catch (err) {
+          api.logger.error(`[PD] Command /research-tools failed: ${String(err)}`);
           return { text: "Command failed. Check logs." };
         }
       }

@@ -1,9 +1,5 @@
-export declare function handleBeforeToolCall(event: {
-    toolName: string;
-    params: Record<string, unknown>;
-}, ctx: {
+import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult } from '../openclaw-sdk.js';
+export declare function handleBeforeToolCall(event: PluginHookBeforeToolCallEvent, ctx: PluginHookToolContext & {
     workspaceDir?: string;
-}): {
-    block?: boolean;
-    blockReason?: string;
-} | void;
+    pluginConfig?: Record<string, unknown>;
+}): PluginHookBeforeToolCallResult | void;

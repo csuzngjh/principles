@@ -7,6 +7,10 @@ const TOOLS_TO_SCAN = [
   { name: 'rg', cmd: ['rg', '--version'] },
   { name: 'sg', cmd: ['sg', '--version'] },
   { name: 'fd', cmd: ['fd', '--version'] },
+  { name: 'qmd', cmd: ['qmd', '--version'] },
+  { name: 'claude', cmd: ['claude', '--version'] },
+  { name: 'gemini', cmd: ['gemini', '--version'] },
+  { name: 'agent-browser', cmd: ['agent-browser', '--version'] },
   { name: 'npm', cmd: ['npm', '--version'] },
   { name: 'python3', cmd: ['python3', '--version'] },
   { name: 'git', cmd: ['git', '--version'] },
@@ -80,4 +84,18 @@ export function handleBootstrapTools(ctx: PluginCommandContext): PluginCommandRe
   } catch (err) {
     return { text: `❌ bootstrap-tools failed: ${err instanceof Error ? err.message : String(err)}` };
   }
+}
+
+export function handleResearchTools(ctx: PluginCommandContext): PluginCommandResult {
+  const category = ctx.args?.trim() || "modern high-performance CLI tools for coding and architecture";
+  
+  return {
+    text:
+      `🚀 **Tool Evolution Research Initiated**\n\n` +
+      `**Instructions for Agent:**\n` +
+      `1. Use \`google_web_search\` or \`web_search_exa\` to find the latest tools in the category: "${category}".\n` +
+      `2. Compare findings with current capabilities in \`docs/SYSTEM_CAPABILITIES.json\`.\n` +
+      `3. Focus on tools that improve speed (like \`rg\`, \`sg\`), documentation (like \`qmd\`), or automation.\n` +
+      `4. Output a "Tool Upgrade Proposal" with installation commands and justification.`,
+  };
 }

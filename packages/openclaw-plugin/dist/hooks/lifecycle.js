@@ -4,19 +4,23 @@ export async function handleBeforeReset(event, ctx) {
     if (!ctx.workspaceDir || !event.messages || event.messages.length === 0) {
         return;
     }
-    // Auto-summarize pain points before the session is cleared
-    const painPoints = event.messages.filter(msg => msg.role === 'assistant' &&
-        (msg.content.includes('error') || msg.content.includes('fail') || msg.content.includes('blocked')));
+    // Auto-summarise pain points before the session is cleared
+    const painPoints = event.messages.filter((msg) => {
+        const m = msg;
+        return (m.role === 'assistant' &&
+            typeof m.content === 'string' &&
+            (m.content.includes('error') || m.content.includes('fail') || m.content.includes('blocked')));
+    });
     if (painPoints.length > 0) {
         const memoryPath = path.join(ctx.workspaceDir, 'docs', 'MEMORY.md');
-        const summary = `\n## [${new Date().toISOString()}] Session Reset Summary (Reason: ${event.reason || 'Manual'})\n` +
-            `- Encountered ${painPoints.length} potential pain points during this session.\n` +
+        const summary = `\n## [${new Date().toISOString()}] Session Reset Summary (Reason: ${event.reason ?? 'Manual'})\n` +
+            `- Encountered ${painPoints.length} potential pain point(s) during this session.\n` +
             `- Action: Consider running /reflection to solidify these into principles.\n`;
         try {
             fs.appendFileSync(memoryPath, summary, 'utf8');
         }
-        catch (e) {
-            // Ignore write errors
+        catch (_e) {
+            // Non-critical — workspace may not have docs/ yet
         }
     }
 }
@@ -30,7 +34,7 @@ export async function handleBeforeCompaction(event, ctx) {
     try {
         fs.appendFileSync(checkpointPath, log, 'utf8');
     }
-    catch (e) {
-        // Ignore write errors
+    catch (_e) {
+        // Non-critical — skip silently
     }
 }

@@ -1,12 +1,16 @@
 import * as fs from 'fs';
 import * as path from 'path';
-export function handleBeforePromptBuild(event, ctx) {
+export function handleBeforePromptBuild(_event, ctx) {
     if (!ctx.workspaceDir) {
         return;
     }
-    const userContextPath = path.join(ctx.workspaceDir, 'docs', 'USER_CONTEXT.md');
-    const focusPath = path.join(ctx.workspaceDir, 'docs', 'okr', 'CURRENT_FOCUS.md');
+    const { workspaceDir, trigger } = ctx;
+    const userContextPath = path.join(workspaceDir, 'docs', 'USER_CONTEXT.md');
+    const focusPath = path.join(workspaceDir, 'docs', 'okr', 'CURRENT_FOCUS.md');
+    const painFlagPath = path.join(workspaceDir, 'docs', '.pain_flag');
+    const capsPath = path.join(workspaceDir, 'docs', 'SYSTEM_CAPABILITIES.json');
     let prependContext = '';
+    // 1. User profile context
     if (fs.existsSync(userContextPath)) {
         try {
             const userContext = fs.readFileSync(userContextPath, 'utf8');
@@ -15,9 +19,10 @@ export function handleBeforePromptBuild(event, ctx) {
             }
         }
         catch (e) {
-            // Ignore read errors
+            // Non-critical — skip silently
         }
     }
+    // 2. Strategic focus
     if (fs.existsSync(focusPath)) {
         try {
             const currentFocus = fs.readFileSync(focusPath, 'utf8');
@@ -26,30 +31,38 @@ export function handleBeforePromptBuild(event, ctx) {
             }
         }
         catch (e) {
-            // Ignore read errors
+            // Non-critical — skip silently
         }
     }
-    // 3. Proactive Evolution (Heartbeat specialized logic)
-    const painFlagPath = path.join(ctx.workspaceDir, 'docs', '.pain_flag');
+    // 3. Proactive Evolution — pain flag (heightened urgency during heartbeat)
     if (fs.existsSync(painFlagPath)) {
         try {
             const painData = fs.readFileSync(painFlagPath, 'utf8');
             if (painData.trim()) {
-                const isHeartbeat = ctx.trigger === 'heartbeat';
-                const warning = `\n⚠️ CRITICAL PAIN SIGNAL DETECTED:\n${painData}\n${isHeartbeat ? "You are currently in a HEARTBEAT turn. You MUST assess if an immediate /reflection or /evolve-task is required based on this pain." : ""}\n`;
+                const isHeartbeat = trigger === 'heartbeat';
+                const warning = `\n⚠️ CRITICAL PAIN SIGNAL DETECTED:\n${painData}\n` +
+                    (isHeartbeat
+                        ? 'You are currently in a HEARTBEAT turn. You MUST assess if an immediate /reflection or /evolve-task is required based on this pain.'
+                        : '');
                 prependContext += `\n<evolution_context>${warning}</evolution_context>\n`;
             }
         }
-        catch (e) { }
+        catch (e) {
+            // Non-critical — skip silently
+        }
     }
-    // 4. Environment Capabilities
-    const capsPath = path.join(ctx.workspaceDir, 'docs', 'SYSTEM_CAPABILITIES.json');
+    // 4. Environment capabilities
     if (fs.existsSync(capsPath)) {
         try {
             const capsData = fs.readFileSync(capsPath, 'utf8');
             prependContext += `\n<system_capabilities>\n${capsData}\n</system_capabilities>\n`;
         }
-        catch (e) { }
+        catch (e) {
+            // Non-critical — skip silently
+        }
     }
-    return { prependContext: prependContext.trim() };
+    const trimmed = prependContext.trim();
+    if (!trimmed)
+        return;
+    return { prependContext: trimmed };
 }

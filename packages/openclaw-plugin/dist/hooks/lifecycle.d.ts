@@ -1,13 +1,3 @@
-export declare function handleBeforeReset(event: {
-    sessionFile?: string;
-    messages?: any[];
-    reason?: string;
-}, ctx: {
-    workspaceDir?: string;
-}): Promise<void>;
-export declare function handleBeforeCompaction(event: {
-    messageCount: number;
-    messages?: any[];
-}, ctx: {
-    workspaceDir?: string;
-}): Promise<void>;
+import type { PluginHookBeforeResetEvent, PluginHookBeforeCompactionEvent, PluginHookAgentContext } from '../openclaw-sdk.js';
+export declare function handleBeforeReset(event: PluginHookBeforeResetEvent, ctx: PluginHookAgentContext): Promise<void>;
+export declare function handleBeforeCompaction(event: PluginHookBeforeCompactionEvent, ctx: PluginHookAgentContext): Promise<void>;

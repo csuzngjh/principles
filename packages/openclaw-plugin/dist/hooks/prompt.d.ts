@@ -1,9 +1,2 @@
-export declare function handleBeforePromptBuild(event: {
-    prompt: string;
-    messages?: unknown[];
-}, ctx: {
-    workspaceDir?: string;
-    agentId?: string;
-}): {
-    prependContext?: string;
-} | void;
+import type { PluginHookBeforePromptBuildEvent, PluginHookAgentContext, PluginHookBeforePromptBuildResult } from '../openclaw-sdk.js';
+export declare function handleBeforePromptBuild(_event: PluginHookBeforePromptBuildEvent, ctx: PluginHookAgentContext): PluginHookBeforePromptBuildResult | void;

@@ -1,3 +1,3 @@
-import type { PluginCommandContext, PluginCommandResult } from '../types';
-export declare function handleInitStrategy(ctx: PluginCommandContext): PluginCommandResult;
-export declare function handleManageOkr(ctx: PluginCommandContext): PluginCommandResult;
+import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
+export declare function handleInitStrategy(_ctx: PluginCommandContext): PluginCommandResult;
+export declare function handleManageOkr(_ctx: PluginCommandContext): PluginCommandResult;
