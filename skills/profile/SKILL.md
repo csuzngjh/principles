@@ -2,7 +2,6 @@
 name: profile
 description: Manually correct or update the user's expertise profile. Use to tell the system "I am an expert in X" or "I am a novice in Y".
 disable-model-invocation: true
-allowed-tools: Write, Read
 ---
 
 # Profile Corrector (画像修正)

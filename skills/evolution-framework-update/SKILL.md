@@ -1,7 +1,6 @@
 ---
 name: evolution-framework-update
 description: 拉取原则信徒进化框架的最新更新（包含 Orchestrator 模式、异步队列及地图优先协议）。
-allowed-tools: Bash, Read, Glob
 ---
 
 # /evolution-framework-update: 进化框架自更新

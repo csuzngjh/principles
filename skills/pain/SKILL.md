@@ -2,7 +2,6 @@
 name: pain
 description: Manually trigger a pain signal to force system reflection. Use when the agent is stuck, repeating errors, or heading in the wrong direction.
 disable-model-invocation: true
-allowed-tools: Write, Read
 ---
 
 # Pain Trigger (强制喊痛)

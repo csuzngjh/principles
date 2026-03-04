@@ -2,7 +2,6 @@
 name: feedback
 description: Standardized bug reporting and feedback mechanism. Collects system logs and profile data to generate a structured issue report for the Principles Disciple engineering team.
 disable-model-invocation: true
-allowed-tools: Read, Write, Bash, AskUserQuestion
 ---
 
 # /feedback: 提交系统反馈

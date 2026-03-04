@@ -2,7 +2,6 @@
 name: reflection
 description: Perform a deep metacognitive reflection on the current task status, user sentiment, and systemic issues. Use this before context compaction or when stuck.
 disable-model-invocation: false
-allowed-tools: Read, Grep, Bash, Write
 ---
 
 # 痛定思痛 (Metacognitive Reflection)

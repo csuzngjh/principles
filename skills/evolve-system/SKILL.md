@@ -2,7 +2,6 @@
 name: evolve-system
 description: Second-order observation and system-level evolution. Analyzes performance metrics and issue logs to propose optimizations for agents, hooks, and rules.
 disable-model-invocation: true
-allowed-tools: Read, Glob, AskUserQuestion, Write
 ---
 
 # /evolve-system: 数字架构师 (二阶观察)

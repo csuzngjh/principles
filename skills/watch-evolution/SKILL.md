@@ -1,7 +1,6 @@
 ---
 name: watch-evolution
 description: Start the background evolution daemon to process queued tasks from EVOLUTION_QUEUE.json.
-allowed-tools: Bash
 ---
 
 # /watch-evolution: 后台进化守护者

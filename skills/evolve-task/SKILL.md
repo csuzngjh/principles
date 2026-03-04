@@ -2,7 +2,6 @@
 name: evolve-task
 description: Run the full evolution loop (triage → diagnosis → audit → plan → execute → review → log)
 disable-model-invocation: true
-allowed-tools: Read, Grep, Glob, Bash, Write, Edit
 ---
 
 你必须按顺序执行以下步骤（不得跳步）。ARGUMENTS: $ARGUMENTS

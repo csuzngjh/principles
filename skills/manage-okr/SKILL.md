@@ -2,7 +2,6 @@
 name: manage-okr
 description: Full-lifecycle OKR management. Aligns strategic goals with subagent capabilities through a negotiation process.
 disable-model-invocation: true
-allowed-tools: AskUserQuestion, Read, Write, Glob, Task
 ---
 
 # /manage-okr: 目标与关键结果管理

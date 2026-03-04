@@ -2,7 +2,6 @@
 name: init-strategy
 description: Initialize project-level strategy and vision. Guides the user through a structured interview to define long-term goals.
 disable-model-invocation: true
-allowed-tools: AskUserQuestion, Read, Write
 ---
 
 # /init-strategy: 战略锚点初始化

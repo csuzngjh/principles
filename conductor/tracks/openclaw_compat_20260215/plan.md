@@ -1,0 +1,42 @@
+# Implementation Plan: 实现对openclaw框架的兼容 (TypeScript Rewrite)
+
+## Phase 0: Deep Technical Research & Architecture Design
+- [x] Task: Analyze OpenClaw Plugin API (`src/plugins/types.ts`) to map Claude hooks to OpenClaw native hooks (`before_prompt_build`, `before_tool_call`, `after_tool_call`).
+- [x] Task: Analyze Evolver architecture (`src/gep/solidify.js`, `bridge.js`) to design the handoff mechanism for deep code repair.
+- [ ] Task: Conductor - User Manual Verification 'Phase 0: Deep Technical Research & Architecture Design' (Protocol in workflow.md)
+
+## Phase 1: Native Plugin Scaffolding
+- [x] Task: Scaffold OpenClaw plugin directory structure and TS configuration (`packages/openclaw-plugin`) [c44b9f0]
+    - [ ] Write Tests (Red Phase): Test that the build process and `vitest` are configured correctly.
+    - [ ] Implement (Green Phase): Initialize `package.json`, `tsconfig.json`, `vitest.config.ts`, and core plugin file `src/index.ts`.
+- [x] Task: Conductor - User Manual Verification 'Phase 1: Native Plugin Scaffolding' (Protocol in workflow.md) [checkpoint: 5f1d6a3]
+
+## Phase 2: Core Logic Porting (TDD)
+- [x] Task: Port I/O, Path, and Parsing Utilities to TS [01bf68d]
+    - [ ] Write Tests (Red Phase): Write `vitest` suites for path normalization and JSON/KV parsing.
+    - [ ] Implement (Green Phase): Implement `src/utils/io.ts`.
+- [x] Task: Port Profile and Pain Signal Logic [8cce990]
+    - [ ] Write Tests (Red Phase): Write tests for risk path matching and pain score calculation.
+    - [ ] Implement (Green Phase): Implement `src/core/profile.ts` and `src/core/pain.ts`.
+- [x] Task: Conductor - User Manual Verification 'Phase 2: Core Logic Porting (TDD)' (Protocol in workflow.md) [checkpoint: 36b0ae7]
+
+## Phase 3: OpenClaw Hook Integration (TDD)
+- [x] Task: Implement Prompt Context Injection (`before_prompt_build`) [4578d91]
+    - [ ] Write Tests (Red Phase): Test that the hook appends `USER_CONTEXT` to the prompt.
+    - [ ] Implement (Green Phase): Register the hook in `src/index.ts`.
+- [x] Task: Implement Pre-Write Gate (`before_tool_call`) [5faf2f8]
+    - [ ] Write Tests (Red Phase): Test that risky un-planned tool calls return `{ block: true }`.
+    - [ ] Implement (Green Phase): Implement the gating logic mapping to OpenClaw's tool context.
+- [x] Task: Implement Post-Write Checks & Pain (`after_tool_call`) [0e70dda]
+    - [ ] Write Tests (Red Phase): Test that tool failures trigger pain records.
+    - [ ] Implement (Green Phase): Implement tests-on-change and daily log integration.
+- [x] Task: Conductor - User Manual Verification 'Phase 3: OpenClaw Hook Integration (TDD)' (Protocol in workflow.md) [checkpoint: edc876a]
+
+## Phase 4: Commands & Evolver Synergy (TDD)
+- [x] Task: Register Native Slash Commands [2b663af]
+    - [ ] Write Tests (Red Phase): Test command dispatch logic.
+    - [ ] Implement (Green Phase): Register `/init-strategy`, `/manage-okr` via `api.registerCommand`.
+- [x] Task: Implement Evolver Handoff interface [9945847]
+    - [ ] Write Tests (Red Phase): Test payload generation for `sessions_spawn` or `solidify.js` invocation.
+    - [ ] Implement (Green Phase): Create the TS bridge to `evolver` for deep repairs.
+- [x] Task: Conductor - User Manual Verification 'Phase 4: Commands & Evolver Synergy (TDD)' (Protocol in workflow.md) [checkpoint: 9c6550e]

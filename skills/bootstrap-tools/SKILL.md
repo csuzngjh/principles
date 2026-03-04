@@ -2,7 +2,6 @@
 name: bootstrap-tools
 description: Scans project tech stack and searches the web for the latest, most effective CLI tools to augment agent capabilities. Suggests and installs tools upon user approval.
 disable-model-invocation: true
-allowed-tools: Read, GoogleSearch, Bash, AskUserQuestion, Write
 ---
 
 # /bootstrap-tools: 装备升级官

@@ -2,7 +2,6 @@
 name: report
 description: Manually request a formal status report from the Reporter agent.
 disable-model-invocation: true
-allowed-tools: Task
 ---
 
 # /report: 获取工作汇报
