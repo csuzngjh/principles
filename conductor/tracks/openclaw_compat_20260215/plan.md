@@ -36,7 +36,7 @@
 - [x] Task: Register Native Slash Commands [2b663af]
     - [ ] Write Tests (Red Phase): Test command dispatch logic.
     - [ ] Implement (Green Phase): Register `/init-strategy`, `/manage-okr` via `api.registerCommand`.
-- [ ] Task: Implement Evolver Handoff interface
+- [x] Task: Implement Evolver Handoff interface [9945847]
     - [ ] Write Tests (Red Phase): Test payload generation for `sessions_spawn` or `solidify.js` invocation.
     - [ ] Implement (Green Phase): Create the TS bridge to `evolver` for deep repairs.
 - [ ] Task: Conductor - User Manual Verification 'Phase 4: Commands & Evolver Synergy (TDD)' (Protocol in workflow.md)
