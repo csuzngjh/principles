@@ -1,0 +1,4 @@
+Phase 1: Native Plugin Scaffolding verified.
+Automated tests command: cd packages/openclaw-plugin && npm test
+Manual verification steps provided to user.
+User confirmed expectations.
