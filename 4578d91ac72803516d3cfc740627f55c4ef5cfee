@@ -1,0 +1,1 @@
+Task: Implement Prompt Context Injection. Implemented src/hooks/prompt.ts with vitest coverage.
