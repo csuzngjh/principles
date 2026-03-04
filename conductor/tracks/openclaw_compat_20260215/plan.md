@@ -27,7 +27,7 @@
 - [x] Task: Implement Pre-Write Gate (`before_tool_call`) [5faf2f8]
     - [ ] Write Tests (Red Phase): Test that risky un-planned tool calls return `{ block: true }`.
     - [ ] Implement (Green Phase): Implement the gating logic mapping to OpenClaw's tool context.
-- [ ] Task: Implement Post-Write Checks & Pain (`after_tool_call`)
+- [x] Task: Implement Post-Write Checks & Pain (`after_tool_call`) [0e70dda]
     - [ ] Write Tests (Red Phase): Test that tool failures trigger pain records.
     - [ ] Implement (Green Phase): Implement tests-on-change and daily log integration.
 - [ ] Task: Conductor - User Manual Verification 'Phase 3: OpenClaw Hook Integration (TDD)' (Protocol in workflow.md)
