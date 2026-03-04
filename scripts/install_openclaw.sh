@@ -85,7 +85,7 @@ echo ""
 echo "🧬 Installing OpenClaw workspace documents (safe mode)..."
 DOCS_SRC="$PLUGIN_SRC/templates/openclaw"
 
-for doc in SOUL.md AGENTS.md TOOLS.md USER.md HEARTBEAT.md; do
+for doc in SOUL.md AGENTS.md TOOLS.md USER.md HEARTBEAT.md IDENTITY.md; do
     DEST="$OPENCLAW_WORKSPACE/$doc"
     SRC="$DOCS_SRC/$doc"
     if [ ! -f "$SRC" ]; then
