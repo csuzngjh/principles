@@ -28,7 +28,7 @@ describe('Lifecycle Hooks', () => {
       const callArgs = vi.mocked(fs.appendFileSync).mock.calls[0];
       expect(callArgs[0]).toContain('docs/MEMORY.md');
       expect(callArgs[1]).toContain('Session Reset Summary');
-      expect(callArgs[1]).toContain('1 potential pain points');
+      expect(callArgs[1]).toContain('1 potential pain point(s)');
     });
 
     it('should not write if no pain points are found', async () => {

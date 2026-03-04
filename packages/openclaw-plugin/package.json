@@ -1,5 +1,5 @@
 {
-  "name": "@openclaw/extension-principles-disciple",
+  "name": "principles-disciple",
   "version": "1.0.0",
   "description": "Native OpenClaw plugin for Principles Disciple",
   "type": "module",

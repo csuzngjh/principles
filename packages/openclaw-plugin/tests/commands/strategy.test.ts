@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { handleInitStrategy, handleManageOkr } from '../../src/commands/strategy';
 
 describe('Slash Commands Hook', () => {
@@ -14,7 +14,7 @@ describe('Slash Commands Hook', () => {
     const result = handleInitStrategy(mockCtx as any);
 
     expect(result).toBeDefined();
-    expect(result.text).toContain('Strategy initialization started');
+    expect(result.text).toContain('Strategy Initialization');
   });
 
   it('should handle /manage-okr command', () => {
@@ -29,6 +29,6 @@ describe('Slash Commands Hook', () => {
     const result = handleManageOkr(mockCtx as any);
 
     expect(result).toBeDefined();
-    expect(result.text).toContain('OKR management started');
+    expect(result.text).toContain('OKR Management');
   });
 });

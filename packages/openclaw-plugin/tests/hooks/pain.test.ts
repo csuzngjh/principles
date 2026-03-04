@@ -16,7 +16,7 @@ describe('Post-Write Checks & Pain Hook', () => {
 
   it('should ignore non-write tools', () => {
     const mockCtx = { workspaceDir };
-    const mockEvent = { toolName: 'fs_read', params: {}, result: {}, error: undefined };
+    const mockEvent = { toolName: 'read', params: {}, result: {}, error: undefined };
     handleAfterToolCall(mockEvent as any, mockCtx as any);
     expect(fs.writeFileSync).not.toHaveBeenCalled();
   });
@@ -24,22 +24,19 @@ describe('Post-Write Checks & Pain Hook', () => {
   it('should capture pain on tool error', () => {
     const mockCtx = { workspaceDir };
     const mockEvent = { 
-        toolName: 'fs_write', 
+        toolName: 'write', 
         params: { file_path: 'src/main.ts' },
         error: 'Permission denied',
-        result: { exitCode: 1 } // Simulating a failed tool call
+        result: { exitCode: 1 } 
     };
 
     vi.mocked(ioUtils.normalizePath).mockReturnValue('src/main.ts');
     vi.mocked(ioUtils.isRisky).mockReturnValue(false);
-    vi.mocked(ioUtils.serializeKvLines).mockReturnValue('mock_serialized');
     
-    // Simulate pain flag writing
     vi.mocked(fs.existsSync).mockReturnValue(true);
 
     handleAfterToolCall(mockEvent as any, mockCtx as any);
 
-    // Should create or update .pain_flag
     expect(fs.writeFileSync).toHaveBeenCalled();
     const callArgs = vi.mocked(fs.writeFileSync).mock.calls[0];
     expect(callArgs[0]).toContain('.pain_flag');

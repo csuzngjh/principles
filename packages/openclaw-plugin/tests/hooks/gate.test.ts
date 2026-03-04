@@ -11,7 +11,7 @@ describe('Pre-Write Gate Hook', () => {
   it('should block risky write when plan is not READY', () => {
     const mockCtx = { workspaceDir };
     const mockEvent = { 
-        toolName: 'fs_write', 
+        toolName: 'write', 
         params: { file_path: 'src/db/user.ts' } 
     };
 
@@ -33,13 +33,13 @@ describe('Pre-Write Gate Hook', () => {
 
     expect(result).toBeDefined();
     expect(result?.block).toBe(true);
-    expect(result?.blockReason).toContain('risk path');
+    expect(result?.blockReason).toContain('Write blocked');
   });
 
   it('should allow risky write when plan is READY', () => {
     const mockCtx = { workspaceDir };
     const mockEvent = { 
-        toolName: 'fs_write', 
+        toolName: 'write', 
         params: { file_path: 'src/db/user.ts' } 
     };
 
@@ -59,13 +59,13 @@ describe('Pre-Write Gate Hook', () => {
 
     const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
 
-    expect(result).toBeUndefined(); // or an empty object, indicating no block
+    expect(result).toBeUndefined();
   });
 
   it('should allow non-risky write regardless of plan', () => {
      const mockCtx = { workspaceDir };
      const mockEvent = { 
-         toolName: 'fs_write', 
+         toolName: 'write', 
          params: { file_path: 'src/components/button.ts' } 
      };
  

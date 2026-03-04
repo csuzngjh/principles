@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from 'vitest';
-import { handleEvolveTask, triggerEvolverHandoff } from '../../src/commands/evolver';
+import { describe, it, expect } from 'vitest';
+import { handleEvolveTask } from '../../src/commands/evolver';
 
 describe('Evolver Synergy Module', () => {
   it('should handle /evolve-task command', () => {
@@ -8,19 +8,15 @@ describe('Evolver Synergy Module', () => {
         commandBody: '/evolve-task',
         channel: 'cli',
         isAuthorizedSender: true,
-        config: {} as any
+        config: {} as any,
+        args: 'Fix tests'
     };
 
     const result = handleEvolveTask(mockCtx as any);
 
     expect(result).toBeDefined();
-    expect(result.text).toContain('Evolver handoff initiated');
-  });
-
-  it('should generate sessions_spawn payload', () => {
-    const payload = triggerEvolverHandoff('/mock/workspace', 'Fix failing unit tests in core logic');
-    expect(payload).toContain('sessions_spawn');
-    expect(payload).toContain('Fix failing unit tests');
-    expect(payload).toContain('evolver');
+    expect(result.text).toContain('Evolver Handoff Requested');
+    expect(result.text).toContain('sessions_spawn');
+    expect(result.text).toContain('Fix tests');
   });
 });

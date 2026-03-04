@@ -27,3 +27,9 @@ pr.txt
 pr.diff
 pr_diff.txt
 pr_files.txt
+
+# OpenClaw Plugin Build & Links
+packages/openclaw-plugin/dist/
+packages/openclaw-plugin/node_modules/
+packages/openclaw-plugin/agents
+packages/openclaw-plugin/skills

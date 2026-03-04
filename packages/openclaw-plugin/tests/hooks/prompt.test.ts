@@ -37,11 +37,11 @@ describe('Prompt Context Injection Hook', () => {
     expect(result).toBeUndefined();
   });
 
-  it('should handle missing files gracefully', () => {
+  it('should return undefined if missing files', () => {
      const workspaceDir = '/mock/workspace';
      vi.mocked(fs.existsSync).mockReturnValue(false);
 
      const result = handleBeforePromptBuild({ prompt: 'test', messages: [] } as any, { workspaceDir } as any);
-     expect(result?.prependContext).toBe('');
+     expect(result).toBeUndefined();
   });
 });
