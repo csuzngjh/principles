@@ -30,6 +30,11 @@ const plugin = {
   register(api: OpenClawPluginApi) {
     api.logger.info("Principles Disciple Plugin registered.");
 
+    // Capture workspace path once during registration.
+    // PluginHookToolContext does NOT include workspaceDir, but PluginHookAgentContext does.
+    // For tool hooks we resolve it via api.resolvePath('.') and inject via closure.
+    const workspaceDir = api.resolvePath('.');
+
     // ── Prompt injection: USER_CONTEXT, CURRENT_FOCUS, pain signals, capabilities ──
     api.on(
       'before_prompt_build',
@@ -43,7 +48,7 @@ const plugin = {
       'before_tool_call',
       (event: PluginHookBeforeToolCallEvent, ctx: PluginHookToolContext): PluginHookBeforeToolCallResult | void => {
         const pluginConfig = api.pluginConfig ?? {};
-        return handleBeforeToolCall(event, { ...ctx, pluginConfig });
+        return handleBeforeToolCall(event, { ...ctx, workspaceDir, pluginConfig });
       }
     );
 
@@ -52,7 +57,7 @@ const plugin = {
       'after_tool_call',
       (event: PluginHookAfterToolCallEvent, ctx: PluginHookToolContext): void => {
         const pluginConfig = api.pluginConfig ?? {};
-        handleAfterToolCall(event, { ...ctx, pluginConfig });
+        handleAfterToolCall(event, { ...ctx, workspaceDir, pluginConfig });
       }
     );
 
