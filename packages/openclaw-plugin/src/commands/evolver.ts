@@ -17,9 +17,9 @@ export function handleEvolveTask(ctx: PluginCommandContext): PluginCommandResult
       `\`\`\`json\n` +
       JSON.stringify(
         {
-          agentId: "evolver",
+          agentId: "diagnostician",
           mode: "run",
-          message: task,
+          task: task,
           label: "Principles-Evolver-Synergy",
         },
         null,
@@ -27,7 +27,7 @@ export function handleEvolveTask(ctx: PluginCommandContext): PluginCommandResult
       ) +
       `\n\`\`\`\n\n` +
       `If you are the Agent reading this: please call \`sessions_spawn\` now with the parameters above ` +
-      `to delegate this task to the Evolver agent. Ensure \`tools.allow\` includes \`sessions_spawn\` ` +
-      `in the current agent config.`,
+      `to delegate this task. Be sure to reference the skill 'diagnostician' or 'implementer' in the task ` +
+      `so the subagent adopts the correct persona. Ensure \`tools.allow\` includes \`sessions_spawn\`.`,
   };
 }
