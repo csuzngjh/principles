@@ -1,0 +1,1 @@
+Task: Scaffold OpenClaw plugin directory structure and TS configuration. Initialized package.json, tsconfig.json, vitest.config.ts, and src/index.ts for the native OpenClaw plugin.
