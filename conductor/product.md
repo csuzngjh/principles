@@ -12,3 +12,4 @@ Principles Disciple is built for **Senior Orchestrators** managing complex multi
 
 ## Primary Use Case
 This project serves as a **Meta-Framework** for building and managing other intelligent agents, providing the foundational scaffolding required for leveraged evolution, rigorous safety gates, and principle-driven behavior.
+It now supports both the Claude Code Plugin API and natively integrates with the **OpenClaw** ecosystem via a dedicated TypeScript plugin, extending its capabilities to event-driven architectures and multi-channel environments.
