@@ -9,7 +9,7 @@
 - [x] Task: Scaffold OpenClaw plugin directory structure and TS configuration (`packages/openclaw-plugin`) [c44b9f0]
     - [ ] Write Tests (Red Phase): Test that the build process and `vitest` are configured correctly.
     - [ ] Implement (Green Phase): Initialize `package.json`, `tsconfig.json`, `vitest.config.ts`, and core plugin file `src/index.ts`.
-- [ ] Task: Conductor - User Manual Verification 'Phase 1: Native Plugin Scaffolding' (Protocol in workflow.md)
+- [~] Task: Conductor - User Manual Verification 'Phase 1: Native Plugin Scaffolding' (Protocol in workflow.md)
 
 ## Phase 2: Core Logic Porting (TDD)
 - [ ] Task: Port I/O, Path, and Parsing Utilities to TS
