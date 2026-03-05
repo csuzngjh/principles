@@ -3,7 +3,7 @@
 ## Phase 0: Deep Technical Research & Architecture Design
 - [x] Task: Analyze OpenClaw Plugin API (`src/plugins/types.ts`) to map Claude hooks to OpenClaw native hooks (`before_prompt_build`, `before_tool_call`, `after_tool_call`).
 - [x] Task: Analyze Evolver architecture (`src/gep/solidify.js`, `bridge.js`) to design the handoff mechanism for deep code repair.
-- [ ] Task: Conductor - User Manual Verification 'Phase 0: Deep Technical Research & Architecture Design' (Protocol in workflow.md)
+- [~] Task: Conductor - User Manual Verification 'Phase 0: Deep Technical Research & Architecture Design' (Protocol in workflow.md)
 
 ## Phase 1: Native Plugin Scaffolding
 - [x] Task: Scaffold OpenClaw plugin directory structure and TS configuration (`packages/openclaw-plugin`) [c44b9f0]
