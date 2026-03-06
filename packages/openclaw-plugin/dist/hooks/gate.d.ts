@@ -2,4 +2,5 @@ import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBe
 export declare function handleBeforeToolCall(event: PluginHookBeforeToolCallEvent, ctx: PluginHookToolContext & {
     workspaceDir?: string;
     pluginConfig?: Record<string, unknown>;
+    logger?: any;
 }): PluginHookBeforeToolCallResult | void;

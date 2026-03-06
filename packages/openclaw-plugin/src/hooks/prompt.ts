@@ -60,7 +60,20 @@ export function handleBeforePromptBuild(
     }
   }
 
-  // 4. Environment capabilities
+  // 4. Heartbeat-specific active checklist
+  if (trigger === 'heartbeat') {
+    const heartbeatPath = path.join(workspaceDir, 'docs', 'HEARTBEAT.md');
+    if (fs.existsSync(heartbeatPath)) {
+      try {
+        const heartbeatChecklist = fs.readFileSync(heartbeatPath, 'utf8');
+        prependContext += `\n<heartbeat_checklist>\n${heartbeatChecklist}\n\nDIRECTIVE: Perform a system-wide self-audit now. If everything is stable, strictly reply with "HEARTBEAT_OK" to minimize token usage.\n</heartbeat_checklist>\n`;
+      } catch (e) {
+        // Non-critical
+      }
+    }
+  }
+
+  // 5. Environment capabilities
   if (fs.existsSync(capsPath)) {
     try {
       const capsData = fs.readFileSync(capsPath, 'utf8');
