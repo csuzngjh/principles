@@ -17,7 +17,7 @@ When identifying root causes, consider the project strategy and your specific Ke
 
 ## Autonomous Diagnosis Protocol (自治诊断协议)
 🚨 **If you were spawned automatically due to a system error, timeout, or cognitive paralysis (`llm_paralysis` / `llm_confusion`):**
-1. **Context Recovery**: DO NOT GUESS. You must immediately read `docs/ISSUE_LOG.md` to find the full history of the error.
+1. **Context Recovery**: DO NOT GUESS. You must immediately use the `memory_search` tool to find the full history of the error, or read `memory/ISSUE_LOG.md` directly.
 2. **Goal Alignment**: Read `docs/okr/CURRENT_FOCUS.md` to understand what the main agent was trying to achieve before it failed or got paralyzed.
 3. **Analyze Trigger**: Review the `Trigger Text` or specific error stack trace provided in your task description.
 4. **Determine Root Cause**: Why did the agent fail or get stuck in a loop trying to achieve that goal? Was it a logic flaw, a missing file, or a bad assumption?

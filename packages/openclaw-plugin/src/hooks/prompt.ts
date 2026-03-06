@@ -23,17 +23,7 @@ export function handleBeforePromptBuild(
   let prependContext = '';
   let appendSystemContext = '';
 
-  // 1. User profile context (STATIC -> appendSystemContext)
-  if (fs.existsSync(userContextPath)) {
-    try {
-      const userContext = fs.readFileSync(userContextPath, 'utf8');
-      if (userContext.trim()) {
-        appendSystemContext += `\n<global_context>\n--- Context from: docs/USER_CONTEXT.md ---\n${userContext}\n--- End of Context ---\n</global_context>\n`;
-      }
-    } catch (e) {
-      // Non-critical — skip silently
-    }
-  }
+  // 1. User profile context (Now natively handled by OpenClaw via USER.md, skipping)
 
   // 2. Strategic focus (DYNAMIC -> prependContext)
   if (fs.existsSync(focusPath)) {

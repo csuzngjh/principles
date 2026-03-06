@@ -22,7 +22,7 @@ export async function handleBeforeReset(
   });
 
   if (painPoints.length > 0) {
-    const memoryPath = path.join(ctx.workspaceDir, 'docs', 'MEMORY.md');
+    const memoryPath = path.join(ctx.workspaceDir, 'MEMORY.md');
     const summary =
       `\n## [${new Date().toISOString()}] Session Reset Summary (Reason: ${event.reason ?? 'Manual'})\n` +
       `- Encountered ${painPoints.length} potential pain point(s) during this session.\n` +
@@ -83,19 +83,20 @@ async function extractPainFromSessionFile(sessionFile: string, workspaceDir: str
   }
 
   if (painPoints.length > 0) {
-    const issueLogPath = path.join(workspaceDir, 'docs', 'ISSUE_LOG.md');
+    const dateStr = new Date().toISOString().split('T')[0];
+    const dailyLogPath = path.join(workspaceDir, 'memory', `${dateStr}.md`);
     const timestamp = new Date().toISOString();
     let entry = `\n## [${timestamp}] Consolidated Pain (Pre-Compaction)\n\n`;
     entry += `### Pain Signals extracted from session transcript\n`;
     painPoints.slice(-5).forEach((p, idx) => {
       entry += `- [Signal ${idx + 1}] ${p.replace(/\n/g, ' ')}\n`;
     });
-    entry += `\n### Diagnosis (Pending)\n- Run /evolve-task to diagnose.\n`;
+    entry += `\n### Diagnosis (Pending)\n- Run /evolve-task to diagnose. Deep dive using memory_search if needed.\n`;
 
     try {
-      const dir = path.dirname(issueLogPath);
+      const dir = path.dirname(dailyLogPath);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.appendFileSync(issueLogPath, entry, 'utf8');
+      fs.appendFileSync(dailyLogPath, entry, 'utf8');
     } catch (_e) {
       // Non-critical
     }
@@ -108,7 +109,8 @@ export async function handleBeforeCompaction(
 ): Promise<void> {
   if (!ctx.workspaceDir) return;
 
-  const checkpointPath = path.join(ctx.workspaceDir, 'docs', 'CHECKPOINT.md');
+  const dateStr = new Date().toISOString().split('T')[0];
+  const checkpointPath = path.join(ctx.workspaceDir, 'memory', `${dateStr}.md`);
   const log =
     `\n## [${new Date().toISOString()}] Pre-Compaction Checkpoint\n` +
     `- Compacting session with ${event.messageCount} messages.\n` +

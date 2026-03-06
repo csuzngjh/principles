@@ -6,21 +6,19 @@ import * as path from 'path';
 vi.mock('fs');
 
 describe('Prompt Context Injection Hook', () => {
-  it('should append USER_CONTEXT and CURRENT_FOCUS if they exist', () => {
+  it('should append CURRENT_FOCUS if it exists', () => {
     const workspaceDir = '/mock/workspace';
-    const mockCtx = { workspaceDir };
+    const mockCtx = { workspaceDir, trigger: 'user' };
     const mockEvent = { prompt: 'original prompt', messages: [] };
 
-    const userContextPath = path.join(workspaceDir, 'docs', 'USER_CONTEXT.md');
     const focusPath = path.join(workspaceDir, 'docs', 'okr', 'CURRENT_FOCUS.md');
 
     vi.mocked(fs.existsSync).mockImplementation((p) => {
-      if (p === userContextPath || p === focusPath) return true;
+      if (p === focusPath) return true;
       return false;
     });
 
     vi.mocked(fs.readFileSync).mockImplementation((p: any) => {
-      if (p === userContextPath) return 'Mock User Context';
       if (p === focusPath) return 'Mock Current Focus';
       return '';
     });
@@ -28,7 +26,6 @@ describe('Prompt Context Injection Hook', () => {
     const result = handleBeforePromptBuild(mockEvent as any, mockCtx as any);
 
     expect(result).toBeDefined();
-    expect(result?.appendSystemContext).toContain('Mock User Context');
     expect(result?.prependContext).toContain('Mock Current Focus');
   });
 
