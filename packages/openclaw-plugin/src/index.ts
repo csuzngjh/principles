@@ -18,9 +18,12 @@ import { handleBeforePromptBuild } from './hooks/prompt.js';
 import { handleBeforeToolCall } from './hooks/gate.js';
 import { handleAfterToolCall } from './hooks/pain.js';
 import { handleBeforeReset, handleBeforeCompaction } from './hooks/lifecycle.js';
+import { handleLlmOutput } from './hooks/llm.js';
+import { handleSubagentEnded } from './hooks/subagent.js';
 import { handleInitStrategy, handleManageOkr } from './commands/strategy.js';
 import { handleEvolveTask } from './commands/evolver.js';
 import { handleBootstrapTools, handleResearchTools } from './commands/capabilities.js';
+import { EvolutionWorkerService } from './service/evolution-worker.js';
 
 const plugin = {
   id: "principles-disciple",
@@ -100,6 +103,18 @@ const plugin = {
       }
     );
 
+    // ── LLM Cognitive Tracking: Catch agent confusion ──
+    api.on(
+      'llm_output',
+      (event, ctx): void => {
+        try {
+          handleLlmOutput(event, { ...ctx, workspaceDir });
+        } catch (err) {
+          api.logger.error(`[PD] Error in llm_output: ${String(err)}`);
+        }
+      }
+    );
+
     // ── Subagent propagation ──
     api.on(
       'subagent_spawning',
@@ -113,6 +128,25 @@ const plugin = {
         }
       }
     );
+
+    // ── Subagent outcome: Catch subagent failures ──
+    api.on(
+      'subagent_ended',
+      (event, ctx): void => {
+        try {
+          handleSubagentEnded(event, { ...ctx, workspaceDir });
+        } catch (err) {
+          api.logger.error(`[PD] Error in subagent_ended: ${String(err)}`);
+        }
+      }
+    );
+
+    // ── Service: Autonomous Background Evolution Worker ──
+    try {
+      api.registerService(EvolutionWorkerService);
+    } catch (err) {
+      api.logger.error(`[PD] Failed to register EvolutionWorkerService: ${String(err)}`);
+    }
 
     // ── Slash commands ──
     api.registerCommand({
