@@ -85,6 +85,7 @@ export type PluginHookAgentContext = {
     sessionKey?: string;
     sessionId?: string;
     workspaceDir?: string;
+    stateDir?: string;
     messageProvider?: string;
     /** "user" | "heartbeat" | "cron" | "memory" */
     trigger?: string;
@@ -118,6 +119,7 @@ export type PluginHookBeforePromptBuildEvent = {
 export type PluginHookBeforePromptBuildResult = {
     systemPrompt?: string;
     prependContext?: string;
+    appendSystemContext?: string;
 };
 
 export type PluginHookBeforeToolCallEvent = {
@@ -170,6 +172,47 @@ export type PluginHookSubagentSpawningResult =
     | { status: 'ok'; threadBindingReady?: boolean }
     | { status: 'error'; error: string };
 
+export type PluginHookLlmOutputEvent = {
+    runId: string;
+    sessionId: string;
+    provider: string;
+    model: string;
+    assistantTexts: string[];
+    lastAssistant?: unknown;
+    usage?: {
+        input?: number;
+        output?: number;
+        cacheRead?: number;
+        cacheWrite?: number;
+        total?: number;
+    };
+};
+
+export type PluginHookSubagentEndedEvent = {
+    targetSessionKey: string;
+    targetKind: 'subagent' | 'acp';
+    reason: string;
+    sendFarewell?: boolean;
+    accountId?: string;
+    runId?: string;
+    endedAt?: number;
+    outcome?: 'ok' | 'error' | 'timeout' | 'killed' | 'reset' | 'deleted';
+    error?: string;
+};
+
+export type OpenClawPluginServiceContext = {
+    config: Record<string, unknown>;
+    workspaceDir?: string;
+    stateDir: string;
+    logger: PluginLogger;
+};
+
+export type OpenClawPluginService = {
+    id: string;
+    start: (ctx: OpenClawPluginServiceContext) => void | Promise<void>;
+    stop?: (ctx: OpenClawPluginServiceContext) => void | Promise<void>;
+};
+
 // ── Handler map (simplified — full map in openclaw/plugin-sdk/core) ──────────
 export type PluginHookHandlerMap = {
     before_prompt_build: (
@@ -194,6 +237,16 @@ export type PluginHookHandlerMap = {
 
     before_compaction: (
         event: PluginHookBeforeCompactionEvent,
+        ctx: PluginHookAgentContext
+    ) => void | Promise<void>;
+
+    llm_output: (
+        event: PluginHookLlmOutputEvent,
+        ctx: PluginHookAgentContext
+    ) => void | Promise<void>;
+
+    subagent_ended: (
+        event: PluginHookSubagentEndedEvent,
         ctx: PluginHookAgentContext
     ) => void | Promise<void>;
 

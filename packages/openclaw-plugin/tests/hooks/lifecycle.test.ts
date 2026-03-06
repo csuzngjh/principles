@@ -26,7 +26,7 @@ describe('Lifecycle Hooks', () => {
 
       expect(fs.appendFileSync).toHaveBeenCalled();
       const callArgs = vi.mocked(fs.appendFileSync).mock.calls[0];
-      expect(callArgs[0]).toContain('docs/MEMORY.md');
+      expect(callArgs[0]).toContain(path.join('docs', 'MEMORY.md'));
       expect(callArgs[1]).toContain('Session Reset Summary');
       expect(callArgs[1]).toContain('1 potential pain point(s)');
     });
@@ -46,7 +46,7 @@ describe('Lifecycle Hooks', () => {
       await handleBeforeCompaction(mockEvent, { workspaceDir });
       expect(fs.appendFileSync).toHaveBeenCalled();
       const callArgs = vi.mocked(fs.appendFileSync).mock.calls[0];
-      expect(callArgs[0]).toContain('docs/CHECKPOINT.md');
+      expect(callArgs[0]).toContain(path.join('docs', 'CHECKPOINT.md'));
       expect(callArgs[1]).toContain('Pre-Compaction Checkpoint');
     });
   });

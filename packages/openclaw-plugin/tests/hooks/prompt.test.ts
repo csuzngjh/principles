@@ -28,7 +28,7 @@ describe('Prompt Context Injection Hook', () => {
     const result = handleBeforePromptBuild(mockEvent as any, mockCtx as any);
 
     expect(result).toBeDefined();
-    expect(result?.prependContext).toContain('Mock User Context');
+    expect(result?.appendSystemContext).toContain('Mock User Context');
     expect(result?.prependContext).toContain('Mock Current Focus');
   });
 
@@ -38,10 +38,10 @@ describe('Prompt Context Injection Hook', () => {
   });
 
   it('should return undefined if missing files', () => {
-     const workspaceDir = '/mock/workspace';
-     vi.mocked(fs.existsSync).mockReturnValue(false);
+    const workspaceDir = '/mock/workspace';
+    vi.mocked(fs.existsSync).mockReturnValue(false);
 
-     const result = handleBeforePromptBuild({ prompt: 'test', messages: [] } as any, { workspaceDir } as any);
-     expect(result).toBeUndefined();
+    const result = handleBeforePromptBuild({ prompt: 'test', messages: [] } as any, { workspaceDir } as any);
+    expect(result).toBeUndefined();
   });
 });

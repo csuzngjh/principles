@@ -10,27 +10,32 @@ export function handleBeforePromptBuild(
     return;
   }
 
-  const { workspaceDir, trigger } = ctx;
+  const { workspaceDir, trigger, stateDir } = ctx;
   const userContextPath = path.join(workspaceDir, 'docs', 'USER_CONTEXT.md');
   const focusPath = path.join(workspaceDir, 'docs', 'okr', 'CURRENT_FOCUS.md');
   const painFlagPath = path.join(workspaceDir, 'docs', '.pain_flag');
   const capsPath = path.join(workspaceDir, 'docs', 'SYSTEM_CAPABILITIES.json');
 
-  let prependContext = '';
+  // Use stateDir if available, fallback to workspaceDir/docs/.state
+  const actualStateDir = stateDir || path.join(workspaceDir, 'docs', '.state');
+  const directivePath = path.join(actualStateDir, 'evolution_directive.json');
 
-  // 1. User profile context
+  let prependContext = '';
+  let appendSystemContext = '';
+
+  // 1. User profile context (STATIC -> appendSystemContext)
   if (fs.existsSync(userContextPath)) {
     try {
       const userContext = fs.readFileSync(userContextPath, 'utf8');
       if (userContext.trim()) {
-        prependContext += `\n<global_context>\n--- Context from: docs/USER_CONTEXT.md ---\n${userContext}\n--- End of Context ---\n</global_context>\n`;
+        appendSystemContext += `\n<global_context>\n--- Context from: docs/USER_CONTEXT.md ---\n${userContext}\n--- End of Context ---\n</global_context>\n`;
       }
     } catch (e) {
       // Non-critical — skip silently
     }
   }
 
-  // 2. Strategic focus
+  // 2. Strategic focus (DYNAMIC -> prependContext)
   if (fs.existsSync(focusPath)) {
     try {
       const currentFocus = fs.readFileSync(focusPath, 'utf8');
@@ -42,11 +47,34 @@ export function handleBeforePromptBuild(
     }
   }
 
-  // 3. Proactive Evolution — pain flag (heightened urgency during heartbeat)
-  if (fs.existsSync(painFlagPath)) {
+  // 3. Background Evolution Directives (DYNAMIC -> prependContext)
+  let handledDirective = false;
+  if (fs.existsSync(directivePath)) {
+    try {
+      const directive = JSON.parse(fs.readFileSync(directivePath, 'utf8'));
+      if (directive.active) {
+        handledDirective = true;
+        const directiveMsg =
+          `\n🚨 SYSTEM OVERRIDE: AUTONOMOUS EVOLUTION REQUIRED 🚨\n` +
+          `Task: ${directive.task}\n\n` +
+          `You MUST immediately invoke the \`sessions_spawn\` tool to delegate this diagnosis to the \`diagnostician\` subagent.\n` +
+          `Do not attempt to fix it yourself yet. Ask the diagnostician to investigate and report back.`;
+
+        prependContext += `\n<evolution_directive>${directiveMsg}</evolution_directive>\n`;
+
+        directive.active = false;
+        fs.writeFileSync(directivePath, JSON.stringify(directive, null, 2), 'utf8');
+      }
+    } catch (e) {
+      // Ignore
+    }
+  }
+
+  // 4. Proactive Evolution — pain flag (Heightened urgency during heartbeat)
+  if (!handledDirective && fs.existsSync(painFlagPath)) {
     try {
       const painData = fs.readFileSync(painFlagPath, 'utf8');
-      if (painData.trim()) {
+      if (painData.trim() && !painData.includes('status: queued')) {
         const isHeartbeat = trigger === 'heartbeat';
         const warning =
           `\n⚠️ CRITICAL PAIN SIGNAL DETECTED:\n${painData}\n` +
@@ -60,7 +88,7 @@ export function handleBeforePromptBuild(
     }
   }
 
-  // 4. Heartbeat-specific active checklist
+  // 5. Heartbeat-specific active checklist
   if (trigger === 'heartbeat') {
     const heartbeatPath = path.join(workspaceDir, 'docs', 'HEARTBEAT.md');
     if (fs.existsSync(heartbeatPath)) {
@@ -73,17 +101,19 @@ export function handleBeforePromptBuild(
     }
   }
 
-  // 5. Environment capabilities
+  // 6. Environment capabilities (STATIC -> appendSystemContext)
   if (fs.existsSync(capsPath)) {
     try {
       const capsData = fs.readFileSync(capsPath, 'utf8');
-      prependContext += `\n<system_capabilities>\n${capsData}\n</system_capabilities>\n`;
+      appendSystemContext += `\n<system_capabilities>\n${capsData}\n</system_capabilities>\n`;
     } catch (e) {
       // Non-critical — skip silently
     }
   }
 
-  const trimmed = prependContext.trim();
-  if (!trimmed) return;
-  return { prependContext: trimmed };
+  const result: PluginHookBeforePromptBuildResult = {};
+  if (prependContext.trim()) result.prependContext = prependContext.trim();
+  if (appendSystemContext.trim()) result.appendSystemContext = appendSystemContext.trim();
+
+  if (Object.keys(result).length > 0) return result;
 }
