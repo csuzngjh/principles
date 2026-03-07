@@ -1,0 +1,95 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "System Profile Schema",
+  "description": "Schema for the evolutionary agent framework configuration (The Interception Database)",
+  "type": "object",
+  "properties": {
+    "audit_level": {
+      "type": "string",
+      "enum": ["low", "medium", "high"],
+      "default": "medium"
+    },
+    "risk_paths": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "description": "Project-relative directory or file paths that require mandatory gating."
+      },
+      "default": []
+    },
+    "evolution_mode": {
+      "type": "string",
+      "enum": ["realtime", "async"],
+      "default": "realtime",
+      "description": "realtime blocks current flow on failures; async records/queues failures for background handling."
+    },
+    "gate": {
+      "type": "object",
+      "properties": {
+        "require_plan_for_risk_paths": { "type": "boolean", "default": true },
+        "require_audit_before_write": { "type": "boolean", "default": true },
+        "require_reviewer_after_write": { "type": "boolean", "default": true }
+      }
+    },
+    "tests": {
+      "type": "object",
+      "properties": {
+        "on_change": { "type": "string", "enum": ["smoke", "unit", "full"], "default": "smoke" },
+        "on_risk_change": { "type": "string", "enum": ["smoke", "unit", "full"], "default": "unit" },
+        "commands": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Key-value pairs mapping test levels to shell commands."
+        }
+      }
+    },
+    "pain": {
+      "type": "object",
+      "properties": {
+        "soft_capture_threshold": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "default": 30,
+          "description": "Minimum pain_score for capturing soft signals when no hard failure occurred."
+        },
+        "adaptive": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean", "default": true },
+            "min_threshold": { "type": "integer", "minimum": 0, "maximum": 100, "default": 15 },
+            "max_threshold": { "type": "integer", "minimum": 0, "maximum": 100, "default": 70 },
+            "backlog_trigger": { "type": "integer", "minimum": 1, "default": 6 },
+            "hard_failure_trigger": { "type": "integer", "minimum": 1, "default": 2 },
+            "stable_quality_threshold": { "type": "integer", "minimum": 1, "default": 5 }
+          }
+        }
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "properties": {
+        "deny_skip_tests": { "type": "boolean" },
+        "deny_unsafe_db_ops": { "type": "boolean" }
+      }
+    },
+    "custom_guards": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "pattern": { "type": "string", "description": "Regex pattern to match tool and path, e.g., 'Edit.*SYSTEM_CAPABILITIES'" },
+          "message": { "type": "string", "description": "Warning message to display when blocked." },
+          "severity": {
+            "type": "string",
+            "enum": ["error", "warning"],
+            "default": "error",
+            "description": "Block execution (error) or just display message (warning)."
+          }
+        },
+        "required": ["pattern", "message"]
+      }
+    }
+  },
+  "required": ["audit_level", "risk_paths", "gate"]
+}
