@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import type { OpenClawPluginApi } from '../openclaw-sdk.js';
+import type { OpenClawPluginApi, PluginLogger } from '../openclaw-sdk.js';
 
 /**
  * Ensures that the workspace has the necessary template files for Principles Disciple.
@@ -20,7 +20,12 @@ export function ensureWorkspaceTemplates(api: OpenClawPluginApi, workspaceDir: s
         }
 
         // 2. Copy language-specific templates (SOUL.md, HEARTBEAT.md, etc.)
-        const langTemplatesDir = path.resolve(__dirname, '..', '..', 'templates', 'langs', language);
+        let langTemplatesDir = path.resolve(__dirname, '..', '..', 'templates', 'langs', language);
+        if (!fs.existsSync(langTemplatesDir)) {
+            api.logger.warn(`[PD] Language pack '${language}' not found. Falling back to 'en'.`);
+            langTemplatesDir = path.resolve(__dirname, '..', '..', 'templates', 'langs', 'en');
+        }
+        
         if (fs.existsSync(langTemplatesDir)) {
             api.logger.info(`[PD] Initializing ${language} templates in ${workspaceDir}...`);
             copyMissingFiles(langTemplatesDir, workspaceDir, api);
@@ -33,7 +38,7 @@ export function ensureWorkspaceTemplates(api: OpenClawPluginApi, workspaceDir: s
 /**
  * Ensures that the state directory has the necessary files (like pain_dictionary.json).
  */
-export function ensureStateTemplates(ctx: { logger: { info: Function, warn: Function, error: Function } }, stateDir: string, language: string = 'en') {
+export function ensureStateTemplates(ctx: { logger: PluginLogger }, stateDir: string, language: string = 'en') {
     try {
         const __filename = fileURLToPath(import.meta.url);
         const __dirname = path.dirname(__filename);
@@ -54,18 +59,22 @@ export function ensureStateTemplates(ctx: { logger: { info: Function, warn: Func
         }
 
         // 2. Copy language-specific dictionary
-        const dictTemplate = path.resolve(__dirname, '..', '..', 'templates', 'langs', language, 'pain_dictionary.json');
+        let dictTemplate = path.resolve(__dirname, '..', '..', 'templates', 'langs', language, 'pain_dictionary.json');
+        if (!fs.existsSync(dictTemplate)) {
+            dictTemplate = path.resolve(__dirname, '..', '..', 'templates', 'langs', 'en', 'pain_dictionary.json');
+        }
+        
         const dictDest = path.join(stateDir, 'pain_dictionary.json');
         if (!fs.existsSync(dictDest) && fs.existsSync(dictTemplate)) {
             fs.copyFileSync(dictTemplate, dictDest);
-            ctx.logger.info(`[PD] Initialized ${language} pain dictionary in stateDir: ${dictDest}`);
+            ctx.logger.info(`[PD] Initialized pain dictionary in stateDir: ${dictDest} (Lang: ${language})`);
         }
     } catch (err) {
         ctx.logger.error(`[PD] Failed to initialize state templates: ${String(err)}`);
     }
 }
 
-function copyMissingFiles(srcDir: string, destDir: string, api: OpenClawPluginApi) {
+function copyMissingFiles(srcDir: string, destDir: string, api: OpenClawPluginApi | { logger: PluginLogger }) {
     const items = fs.readdirSync(srcDir);
 
     for (const item of items) {
@@ -83,9 +92,13 @@ function copyMissingFiles(srcDir: string, destDir: string, api: OpenClawPluginAp
             if (!fs.existsSync(destPath)) {
                 try {
                     fs.copyFileSync(srcPath, destPath);
-                    api.logger.info(`[PD] Initialized missing template: ${item}`);
+                    if ('logger' in api) {
+                        api.logger.info(`[PD] Initialized missing template: ${item}`);
+                    }
                 } catch (err) {
-                    api.logger.warn(`[PD] Failed to copy template ${item}: ${String(err)}`);
+                    if ('logger' in api) {
+                        api.logger.warn(`[PD] Failed to copy template ${item}: ${String(err)}`);
+                    }
                 }
             }
         }
