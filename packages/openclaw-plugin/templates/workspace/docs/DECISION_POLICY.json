@@ -1,0 +1,44 @@
+{
+  "enabled": true,
+  "autonomy": {
+    "block_micro_ask_user_question": true,
+    "high_impact_score_threshold": 70,
+    "medium_impact_score_threshold": 40,
+    "allow_force_ask_override": true,
+    "high_impact_keywords": [
+      "production",
+      "database migration",
+      "schema",
+      "security",
+      "compliance",
+      "breaking change",
+      "cost",
+      "budget",
+      "architecture",
+      "data loss",
+      "permission",
+      "privacy",
+      "delete",
+      "irreversible",
+      "rollout",
+      "rollback"
+    ],
+    "micro_keywords": [
+      "rename",
+      "variable",
+      "format",
+      "style",
+      "spacing",
+      "comment",
+      "minor",
+      "typo",
+      "wording",
+      "small refactor",
+      "which name"
+    ]
+  },
+  "user_profile": {
+    "domain_low_threshold": 0,
+    "ask_on_medium_for_low_expertise": true
+  }
+}
