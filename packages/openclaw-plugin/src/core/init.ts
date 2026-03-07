@@ -21,16 +21,42 @@ export function ensureWorkspaceTemplates(api: OpenClawPluginApi, workspaceDir: s
         }
 
         api.logger.info(`[PD] Checking workspace templates in ${workspaceDir}...`);
-        
-        // Safety check: Don't initialize in the raw home directory unless explicitly intended
-        if (workspaceDir === process.env.HOME || workspaceDir === '/') {
-            api.logger.warn(`[PD] Workspace resolved to ${workspaceDir}. Skipping auto-init to prevent polluting home dir.`);
-            return;
-        }
-
         copyMissingFiles(templatesDir, workspaceDir, api);
     } catch (err) {
         api.logger.error(`[PD] Failed to initialize workspace templates: ${String(err)}`);
+    }
+}
+
+/**
+ * Ensures that the state directory has the necessary files (like pain_dictionary.json).
+ */
+export function ensureStateTemplates(api: OpenClawPluginApi, stateDir: string) {
+    try {
+        const __filename = fileURLToPath(import.meta.url);
+        const __dirname = path.dirname(__filename);
+        
+        // Templates to initialize
+        const templates = ['pain_dictionary.json', 'pain_settings.json'];
+
+        if (!fs.existsSync(stateDir)) {
+            fs.mkdirSync(stateDir, { recursive: true });
+        }
+
+        for (const filename of templates) {
+            const templatePath = path.resolve(__dirname, '..', '..', 'templates', filename);
+            const destPath = path.join(stateDir, filename);
+
+            if (!fs.existsSync(destPath)) {
+                if (fs.existsSync(templatePath)) {
+                    fs.copyFileSync(templatePath, destPath);
+                    api.logger.info(`[PD] Initialized ${filename} in stateDir: ${destPath}`);
+                } else {
+                    api.logger.warn(`[PD] Template not found at: ${templatePath}`);
+                }
+            }
+        }
+    } catch (err) {
+        api.logger.error(`[PD] Failed to initialize state templates: ${String(err)}`);
     }
 }
 
