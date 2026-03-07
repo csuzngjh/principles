@@ -1,5 +1,6 @@
 import { PluginHookLlmOutputEvent } from '../openclaw-sdk.js';
 import * as path from 'path';
+import { PainConfig } from './config.js';
 
 export interface TokenUsage {
     input?: number;
@@ -51,7 +52,7 @@ export function trackToolRead(sessionId: string, filePath: string): SessionState
     return state;
 }
 
-export function trackLlmOutput(sessionId: string, usage: TokenUsage | undefined): SessionState {
+export function trackLlmOutput(sessionId: string, usage: TokenUsage | undefined, config?: PainConfig): SessionState {
     const state = getOrCreateSession(sessionId);
     state.llmTurns += 1;
     state.lastActivityAt = Date.now();
@@ -61,10 +62,15 @@ export function trackLlmOutput(sessionId: string, usage: TokenUsage | undefined)
         state.totalOutputTokens += usage.output || 0;
         state.cacheHits += usage.cacheRead || 0;
 
+        // Use thresholds from config or defaults
+        const minTurns = 3;
+        const outputThreshold = 50;
+        const inputThreshold = config ? config.get('thresholds.cognitive_paralysis_input') : 4000;
+
         // Very rough heuristic for empty/paralysis loops: high input context, tiny output, multiple turns
-        if (state.llmTurns > 3) {
-            const isTinyOutput = (usage.output || 0) < 50;
-            const isLargeInput = (usage.input || 0) > 4000;
+        if (state.llmTurns > minTurns) {
+            const isTinyOutput = (usage.output || 0) < outputThreshold;
+            const isLargeInput = (usage.input || 0) > inputThreshold;
             if (isTinyOutput && isLargeInput) {
                 state.stuckLoops += 1;
             } else {

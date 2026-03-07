@@ -1,6 +1,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { OpenClawPluginServiceContext } from '../openclaw-sdk.js';
+import { DictionaryService } from '../core/dictionary-service.js';
+import { ConfigService } from '../core/config-service.js';
+import { ensureStateTemplates } from '../core/init.js';
 
 let intervalId: NodeJS.Timeout | null = null;
 
@@ -113,22 +116,36 @@ export const EvolutionWorkerService = {
     id: 'principles-evolution-worker',
 
     start(ctx: OpenClawPluginServiceContext): void {
-        ctx.logger.info(`[PD:EvolutionWorker] Starting background autonomous evolution service...`);
+        const { workspaceDir, stateDir, logger } = ctx;
+        logger.info(`[PD:EvolutionWorker] Starting background autonomous evolution service...`);
 
-        // Then poll every 15 minutes
+        // Initialize state templates (like pain_dictionary.json) if missing
+        ensureStateTemplates({ logger } as any, stateDir);
+
+        // Pre-load the config and dictionary
+        const config = ConfigService.get(stateDir);
+        const dictionary = DictionaryService.get(stateDir);
+
+        const pollInterval = config.get('intervals.worker_poll_ms') || (15 * 60 * 1000);
+        const initialDelay = config.get('intervals.initial_delay_ms') || 5000;
+
+        // Then poll
         intervalId = setInterval(() => {
-            if (!ctx.workspaceDir) return;
-            checkPainFlag(ctx.workspaceDir, ctx.logger);
-            processEvolutionQueue(ctx.workspaceDir, ctx.stateDir, ctx.logger);
-        }, 15 * 60 * 1000);
-
-        // Do a gentle initial check after 5 seconds
-        setTimeout(() => {
-            if (ctx.workspaceDir) {
-                checkPainFlag(ctx.workspaceDir, ctx.logger);
-                processEvolutionQueue(ctx.workspaceDir, ctx.stateDir, ctx.logger);
+            if (workspaceDir) {
+                checkPainFlag(workspaceDir, logger);
+                processEvolutionQueue(workspaceDir, stateDir, logger);
             }
-        }, 5000);
+            // Flush dictionary hits to disk
+            dictionary.flush();
+        }, pollInterval);
+
+        // Do a gentle initial check
+        setTimeout(() => {
+            if (workspaceDir) {
+                checkPainFlag(workspaceDir, logger);
+                processEvolutionQueue(workspaceDir, stateDir, logger);
+            }
+        }, initialDelay);
     },
 
     stop(ctx: OpenClawPluginServiceContext): void {
@@ -136,6 +153,11 @@ export const EvolutionWorkerService = {
         if (intervalId) {
             clearInterval(intervalId);
             intervalId = null;
+        }
+
+        // Final flush on stop
+        if (ctx.stateDir) {
+            DictionaryService.get(ctx.stateDir).flush();
         }
     }
 };
