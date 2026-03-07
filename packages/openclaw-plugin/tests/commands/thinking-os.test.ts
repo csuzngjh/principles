@@ -19,16 +19,24 @@ describe('Thinking OS Command', () => {
     });
 
     it('should format usage report on status', () => {
-        const usageLogPath = path.join(workspaceDir, 'docs', '.thinking_os_usage.json');
+        const usageLogPath = path.join(workspaceDir, 'memory', '.state', 'thinking_os_usage.json');
+        const thinkingOsPath = path.join(workspaceDir, 'docs', 'THINKING_OS.md');
 
-        vi.mocked(fs.existsSync).mockImplementation((p: fs.PathOrFileDescriptor) => p.toString() === usageLogPath);
+        vi.mocked(fs.existsSync).mockImplementation((p: fs.PathOrFileDescriptor) => {
+            const pStr = p.toString();
+            return pStr === usageLogPath || pStr === thinkingOsPath;
+        });
         vi.mocked(fs.readFileSync).mockImplementation((p: fs.PathOrFileDescriptor) => {
-            if (p.toString() === usageLogPath) {
+            const pStr = p.toString();
+            if (pStr === usageLogPath) {
                 return JSON.stringify({
                     '_total_turns': 100,
                     'T-01': 10,
                     'T-06': 3
                 });
+            }
+            if (pStr === thinkingOsPath) {
+                return '### T-01: Map Before Territory (地图先于领土)\n### T-06: Occam\'s Razor (奥卡姆剃刀)';
             }
             return '';
         });
@@ -39,7 +47,7 @@ describe('Thinking OS Command', () => {
     });
 
     it('should handle propose subcommand', () => {
-        const result = handleThinkingOs({ config: { workspaceDir }, args: 'propose newly proposed test model' } as any);
+        const result = handleThinkingOs({ config: { workspaceDir }, args: 'propose newly proposed test model with a signal section' } as any);
 
         expect(fs.appendFileSync).toHaveBeenCalled();
         expect(result.text).toContain('recorded in `THINKING_OS_CANDIDATES.md`');
@@ -52,7 +60,7 @@ describe('Thinking OS Command', () => {
     });
 
     it('should run audit and warn about overused models', () => {
-        const usageLogPath = path.join(workspaceDir, 'docs', '.thinking_os_usage.json');
+        const usageLogPath = path.join(workspaceDir, 'memory', '.state', 'thinking_os_usage.json');
         const thinkingOsPath = path.join(workspaceDir, 'docs', 'THINKING_OS.md');
 
         vi.mocked(fs.existsSync).mockImplementation(() => true);
@@ -66,7 +74,7 @@ describe('Thinking OS Command', () => {
                 });
             }
             if (pStr === thinkingOsPath) {
-                return '### T-01 Map\n### T-02 Constraints';
+                return '### T-01: Map\n### T-02: Constraints';
             }
             return '';
         });

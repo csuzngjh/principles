@@ -107,11 +107,11 @@ describe('LLM Cognitive Distress Hook', () => {
             assistantTexts: ["According to Occam's Razor, the simplest approach is best."],
         };
 
-        const usageLogPath = path.join(workspaceDir, 'docs', '.thinking_os_usage.json');
+        const usageLogPath = path.join(workspaceDir, 'memory', '.state', 'thinking_os_usage.json');
 
         let writeCount = 0;
         vi.mocked(fs.existsSync).mockImplementation((p: fs.PathOrFileDescriptor) => {
-            if (p.toString().includes('.thinking_os_usage.json') && writeCount > 0) return true;
+            if (p.toString().includes('thinking_os_usage.json') && writeCount > 0) return true;
             return false;
         });
 
