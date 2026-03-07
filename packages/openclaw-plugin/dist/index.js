@@ -29,9 +29,9 @@ const plugin = {
         const language = api.pluginConfig?.language || 'en';
         ensureWorkspaceTemplates(api, workspaceDir, language);
         // ── Prompt injection ──
-        api.on('before_prompt_build', (event, ctx) => {
+        api.on('before_prompt_build', async (event, ctx) => {
             try {
-                return handleBeforePromptBuild(event, ctx);
+                return await handleBeforePromptBuild(event, { ...ctx, api });
             }
             catch (err) {
                 api.logger.error(`[PD] Error in before_prompt_build: ${String(err)}`);
@@ -106,6 +106,7 @@ const plugin = {
         });
         // ── Service: Autonomous Background Evolution Worker ──
         try {
+            EvolutionWorkerService.api = api;
             api.registerService(EvolutionWorkerService);
         }
         catch (err) {
