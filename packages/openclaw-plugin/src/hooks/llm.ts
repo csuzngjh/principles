@@ -116,7 +116,8 @@ export function handleLlmOutput(
     // ═══ Thinking OS: Mental Model Usage Tracking ═══
     // Track which mental models the agent is actively using
     // This data feeds into /thinking-os audit and the archival mechanism
-    trackThinkingModelUsage(text, ctx.workspaceDir);
+    const actualStateDir = ctx.stateDir || path.join(ctx.workspaceDir, 'memory', '.state');
+    trackThinkingModelUsage(text, actualStateDir);
 }
 
 // ── Thinking OS Usage Tracking ──────────────────────────────────────────────
@@ -131,7 +132,7 @@ const THINKING_MODEL_SIGNALS: Record<string, RegExp[]> = {
     'T-02': [ // Constraints as Lighthouses
         /(type|test|contract|schema|interface) (constraint|requirement|check|validation)/i,
         /we (must|need to) (respect|follow|adhere to) the/i,
-        /(必须|需要)(遵守|符合|满足)(类型|测试|契约|接口|规范)/,
+        /(必须|需要).*?(遵守|符合|满足).*?(类型|测试|契约|接口|规范)/,
     ],
     'T-03': [ // Evidence Over Intuition
         /based on (the |this )?(evidence|logs?|output|error|stack trace|test result)/i,
@@ -171,15 +172,16 @@ const THINKING_MODEL_SIGNALS: Record<string, RegExp[]> = {
     ],
 };
 
-function trackThinkingModelUsage(text: string, workspaceDir: string): void {
-    const logPath = path.join(workspaceDir, 'memory', '.thinking_os_usage.json');
+function trackThinkingModelUsage(text: string, stateDir: string): void {
+    if (!fs.existsSync(stateDir)) fs.mkdirSync(stateDir, { recursive: true });
+    const logPath = path.join(stateDir, 'thinking_os_usage.json');
     let usageLog: Record<string, number> = {};
 
     if (fs.existsSync(logPath)) {
         try {
             usageLog = JSON.parse(fs.readFileSync(logPath, 'utf8'));
-        } catch (_e) {
-            // Fresh start if corrupted
+        } catch (e) {
+            console.debug('[PD] Failed to read model usage:', e);
         }
     }
 
@@ -200,8 +202,8 @@ function trackThinkingModelUsage(text: string, workspaceDir: string): void {
     if (anyMatch) {
         try {
             fs.writeFileSync(logPath, JSON.stringify(usageLog, null, 2), 'utf8');
-        } catch (_e) {
-            // Non-critical
+        } catch (e) {
+            console.debug('[PD] Failed to write model usage:', e);
         }
     }
 }
