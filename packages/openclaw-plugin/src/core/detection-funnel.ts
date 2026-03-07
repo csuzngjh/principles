@@ -90,7 +90,9 @@ export class DetectionFunnel {
     }
 
     private enqueueAsync(text: string): void {
-        this.asyncQueue.push(text);
+        if (this.asyncQueue.length < 1000) {
+            this.asyncQueue.push(text);
+        }
         // Worker will pick this up and perform semantic search via createMemorySearchTool
     }
 
