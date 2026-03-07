@@ -1,14 +1,23 @@
 import { DictionaryService } from '../core/dictionary-service.js';
-import { getSession } from '../core/session-tracker.js';
+import { getSession, resetFriction } from '../core/session-tracker.js';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
 import * as path from 'path';
 
 /**
- * Handles the /pain status command to report the current state of the Digital Nerve System.
+ * Handles the /pain status or /pain reset command to report or manage the current state of the Digital Nerve System.
  */
 export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResult {
     const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
     const stateDir = (ctx.config?.stateDir as string) || path.join(workspaceDir, 'memory', '.state');
+    const args = (ctx.args || '').trim();
+
+    if (args === 'reset') {
+        if (ctx.sessionId) {
+            resetFriction(ctx.sessionId);
+            return { text: `✅ GFI for current session reset to 0.` };
+        }
+        return { text: `⚠️ No active session to reset.` };
+    }
     
     const dictionary = DictionaryService.get(stateDir);
     const session = ctx.sessionId ? getSession(ctx.sessionId) : undefined;

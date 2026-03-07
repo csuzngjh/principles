@@ -5,6 +5,7 @@ import { normalizeProfile } from '../core/profile.js';
 import { computePainScore, writePainFlag } from '../core/pain.js';
 import { trackFriction, resetFriction } from '../core/session-tracker.js';
 import { denoiseError, computeHash } from '../utils/hashing.js';
+import { ConfigService } from '../core/config-service.js';
 import type { PluginHookAfterToolCallEvent, PluginHookToolContext } from '../openclaw-sdk.js';
 
 export function handleAfterToolCall(
@@ -14,6 +15,9 @@ export function handleAfterToolCall(
   if (!ctx.workspaceDir || !ctx.sessionId) {
     return;
   }
+
+  const stateDir = ctx.stateDir || path.join(ctx.workspaceDir, 'memory', '.state');
+  const config = ConfigService.get(stateDir);
 
   // ── Track A: Empirical Friction (GFI) ──
   
@@ -26,8 +30,9 @@ export function handleAfterToolCall(
     const denoised = denoiseError(errorText);
     const hash = computeHash(denoised);
     
-    // Default deltaF for tool errors is 30
-    trackFriction(ctx.sessionId, 30, hash);
+    // Default deltaF for tool errors from config
+    const deltaF = config.get('scores.tool_failure_friction') || 30;
+    trackFriction(ctx.sessionId, deltaF, hash);
   } else {
     // Success! Reset friction
     resetFriction(ctx.sessionId);

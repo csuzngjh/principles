@@ -11,6 +11,7 @@ export interface PainSettings {
         paralysis: number;
         default_confusion: number;
         default_loop: number;
+        tool_failure_friction: number;
     };
     intervals: {
         worker_poll_ms: number;
@@ -27,7 +28,8 @@ const DEFAULT_SETTINGS: PainSettings = {
     scores: {
         paralysis: 40,
         default_confusion: 35,
-        default_loop: 45
+        default_loop: 45,
+        tool_failure_friction: 30
     },
     intervals: {
         worker_poll_ms: 15 * 60 * 1000,
