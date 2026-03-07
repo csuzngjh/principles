@@ -1,28 +1,27 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { handleBeforePromptBuild } from '../../src/hooks/prompt';
-import * as fs from 'fs';
-import * as path from 'path';
+import fs from 'fs';
+import path from 'path';
+
+vi.mock('fs');
 
 describe('Prompt Context Injection Hook', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('should append CURRENT_FOCUS if it exists', () => {
     const workspaceDir = '/mock/workspace';
     const mockCtx = { workspaceDir, trigger: 'user' };
     const mockEvent = { prompt: 'original prompt', messages: [] };
 
-    const focusPath = path.join(workspaceDir, 'docs', 'okr', 'CURRENT_FOCUS.md');
-    const thinkingOsPath = path.join(workspaceDir, 'docs', 'THINKING_OS.md');
-
-    vi.spyOn(fs, 'existsSync').mockImplementation((p: fs.PathOrFileDescriptor) => {
-      const pStr = p.toString();
-      if (pStr === focusPath) return true;
-      if (pStr === thinkingOsPath) return false;
-      return false;
+    vi.mocked(fs.existsSync).mockImplementation((p: fs.PathOrFileDescriptor) => {
+      return p.toString().includes('CURRENT_FOCUS.md');
     });
 
-    vi.spyOn(fs, 'readFileSync').mockImplementation((p: fs.PathOrFileDescriptor, options?: any) => {
-      const pStr = p.toString();
-      if (pStr === focusPath) return 'Mock Current Focus';
-      return '';
+    vi.mocked(fs.readFileSync).mockImplementation((p: fs.PathOrFileDescriptor, options?: any) => {
+      if (p.toString().includes('CURRENT_FOCUS.md')) return 'Mock Current Focus';
+      return '' as any;
     });
 
     const result = handleBeforePromptBuild(mockEvent as any, mockCtx as any);
@@ -36,18 +35,13 @@ describe('Prompt Context Injection Hook', () => {
     const mockCtx = { workspaceDir, trigger: 'user' };
     const mockEvent = { prompt: 'original prompt', messages: [] };
 
-    const thinkingOsPath = path.join(workspaceDir, 'docs', 'THINKING_OS.md');
-
-    vi.spyOn(fs, 'existsSync').mockImplementation((p: fs.PathOrFileDescriptor) => {
-      const pStr = p.toString();
-      if (pStr === thinkingOsPath) return true;
-      return false;
+    vi.mocked(fs.existsSync).mockImplementation((p: fs.PathOrFileDescriptor) => {
+      return p.toString().includes('THINKING_OS.md');
     });
 
-    vi.spyOn(fs, 'readFileSync').mockImplementation((p: fs.PathOrFileDescriptor, options?: any) => {
-      const pStr = p.toString();
-      if (pStr === thinkingOsPath) return 'MOCK THINKING OS CONTENT';
-      return '';
+    vi.mocked(fs.readFileSync).mockImplementation((p: fs.PathOrFileDescriptor, options?: any) => {
+      if (p.toString().includes('THINKING_OS.md')) return 'MOCK THINKING OS CONTENT';
+      return '' as any;
     });
 
     const result = handleBeforePromptBuild(mockEvent as any, mockCtx as any);
@@ -64,7 +58,7 @@ describe('Prompt Context Injection Hook', () => {
 
   it('should return undefined if missing files', () => {
     const workspaceDir = '/mock/workspace';
-    vi.spyOn(fs, 'existsSync').mockReturnValue(false);
+    vi.mocked(fs.existsSync).mockReturnValue(false);
 
     const result = handleBeforePromptBuild({ prompt: 'test', messages: [] } as any, { workspaceDir } as any);
     expect(result).toBeUndefined();

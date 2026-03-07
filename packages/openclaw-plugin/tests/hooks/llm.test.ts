@@ -2,9 +2,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { handleLlmOutput } from '../../src/hooks/llm';
 import * as painFlags from '../../src/core/pain';
 import * as sessionTracker from '../../src/core/session-tracker';
-import * as fs from 'fs';
-import * as path from 'path';
+import fs from 'fs';
+import path from 'path';
 
+vi.mock('fs');
 vi.mock('../../src/core/pain', () => ({
     writePainFlag: vi.fn(),
 }));
@@ -109,13 +110,13 @@ describe('LLM Cognitive Distress Hook', () => {
         const usageLogPath = path.join(workspaceDir, 'docs', '.thinking_os_usage.json');
 
         let writeCount = 0;
-        vi.spyOn(fs, 'existsSync').mockImplementation((p: fs.PathOrFileDescriptor) => {
-            if (p.toString() === usageLogPath && writeCount > 0) return true;
+        vi.mocked(fs.existsSync).mockImplementation((p: fs.PathOrFileDescriptor) => {
+            if (p.toString().includes('.thinking_os_usage.json') && writeCount > 0) return true;
             return false;
         });
 
         const mockWrite = vi.fn();
-        vi.spyOn(fs, 'writeFileSync').mockImplementation(mockWrite);
+        vi.mocked(fs.writeFileSync).mockImplementation(mockWrite);
 
         handleLlmOutput(mockEvent as any, { workspaceDir, sessionId } as any);
         console.log(JSON.stringify(mockWrite.mock.calls, null, 2));
