@@ -6,6 +6,8 @@
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-Plugin-5865F2)](https://code.claude.com)
 [![OpenClaw Plugin](https://img.shields.io/badge/OpenClaw-Native%20Plugin-FF6B35)](https://github.com/nicepkg/openclaw)
 
+[English](README_EN.md) | [中文](README.md)
+
 Principles Disciple 是一个**跨平台的可进化智能体框架**，同时支持 **Claude Code** 和 **OpenClaw**。它将你的 AI 助手转化为一个具备**自我防御、自我反思、自我进化**能力的数字生命体。通过门禁、画像、OKR 和痛觉机制，防止 AI 盲目执行错误指令，并从每次失败中学习。
 
 ### 支持平台
