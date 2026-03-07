@@ -8,6 +8,12 @@
     "type": "object",
     "additionalProperties": false,
     "properties": {
+      "language": {
+        "type": "string",
+        "enum": ["en", "zh"],
+        "default": "en",
+        "description": "The language for the generated templates and directives."
+      },
       "auditLevel": {
         "type": "string",
         "enum": ["low", "medium", "high"],

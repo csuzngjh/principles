@@ -248,6 +248,29 @@ fi
 # 6.6. OpenClaw 插件安装
 echo ""
 echo "🔌 OpenClaw plugin installation..."
+
+# 检测并清理旧的冗余安装 (防止 Duplicate ID 冲突)
+GLOBAL_EXT_DIR="$HOME/.openclaw/extensions/principles-disciple"
+WORKSPACE_EXT_DIR="$TARGET_DIR/.openclaw/extensions/principles-disciple"
+
+if [ -d "$GLOBAL_EXT_DIR" ] || [ -d "$WORKSPACE_EXT_DIR" ]; then
+    echo "  ⚠️  Detected old plugin copies in OpenClaw extension directories."
+    echo "     (This causes 'duplicate plugin id' warnings)"
+    if [ "$FORCE_MODE" = true ]; then
+        echo "     [--force] Auto-removing old copies..."
+        rm -rf "$GLOBAL_EXT_DIR" "$WORKSPACE_EXT_DIR"
+    else
+        read -p "     Remove old copies to prevent conflicts? [Y/n] " -n 1 -r
+        echo ""
+        if [[ $REPLY =~ ^[Yy]$ ]] || [[ -z $REPLY ]]; then
+            rm -rf "$GLOBAL_EXT_DIR" "$WORKSPACE_EXT_DIR"
+            echo "     ✅ Old copies removed."
+        else
+            echo "     ⏭️  Skipped. You may see warnings in OpenClaw logs."
+        fi
+    fi
+fi
+
 PLUGIN_DIR="$SOURCE_DIR/packages/openclaw-plugin"
 OPENCLAW_CONFIG="$OPENCLAW_STATE_DIR/openclaw.json"
 
@@ -298,9 +321,11 @@ if 'entries' not in cfg['plugins']:
     cfg['plugins']['entries'] = {}
 if 'principles-disciple' not in cfg['plugins']['entries']:
     cfg['plugins']['entries']['principles-disciple'] = {}
+if 'config' not in cfg['plugins']['entries']['principles-disciple']:
+    cfg['plugins']['entries']['principles-disciple']['config'] = {}
 
 cfg['plugins']['entries']['principles-disciple']['enabled'] = True
-cfg['plugins']['entries']['principles-disciple']['language'] = '$SELECTED_LANG'
+cfg['plugins']['entries']['principles-disciple']['config']['language'] = '$SELECTED_LANG'
 print('  - Configured plugin language: $SELECTED_LANG')
 
 # 注入 plugins.load.paths
@@ -426,3 +451,23 @@ EOF
 echo "✅ Smart Installation Complete!"
 echo "👉 If you saw ⚠️  warnings, check .update files and merge manually."
 echo "⚠️  CRITICAL: Do not delete files listed in docs/.memory-index.md"
+
+# 7. 重启 OpenClaw 建议
+if command -v openclaw &>/dev/null; then
+    echo ""
+    if [ "$FORCE_MODE" = true ]; then
+        echo "🔄 [--force] Restarting OpenClaw Gateway..."
+        openclaw gateway --force &>/dev/null &
+        echo "   ✅ Gateway restart initiated in background."
+    else
+        read -p "🔄 Do you want to restart OpenClaw Gateway now to apply changes? [Y/n] " -n 1 -r
+        echo ""
+        if [[ $REPLY =~ ^[Yy]$ ]] || [[ -z $REPLY ]]; then
+            echo "   Restarting..."
+            openclaw gateway --force &>/dev/null &
+            echo "   ✅ Gateway restart initiated in background."
+        else
+            echo "   ⏭️  Skipped. Remember to restart OpenClaw manually."
+        fi
+    fi
+fi
