@@ -1,6 +1,25 @@
-# Principles Disciple
+<p align="center">
+  <img src="assets/banner.png" width="100%" alt="Principles Disciple Banner">
+</p>
+
+<h1 align="center">Principles Disciple</h1>
+
+<p align="center">
+  <strong>The Evolutionary Meta-Cognitive Framework for AI Agents.</strong>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/github/v/release/csuzngjh/principles?style=flat-square&color=5865F2" alt="Release">
+  <img src="https://img.shields.io/github/license/csuzngjh/principles?style=flat-square&color=green" alt="License">
+  <img src="https://img.shields.io/github/stars/csuzngjh/principles?style=flat-square&color=gold" alt="Stars">
+</p>
+
+---
+
+# Principles Disciple: Evolutionary Agent Framework (v1.1.0)
 
 > **Evolutionary Programming Agent Framework**
+
 > *Beyond algorithms—we are coding cognition. Join the collective to distill human wisdom into an OS for artificial minds.*
 > Inspired by Ray Dalio's *Principles*.
 
