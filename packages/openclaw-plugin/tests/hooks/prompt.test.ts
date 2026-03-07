@@ -13,7 +13,7 @@ describe('Prompt Context Injection Hook', () => {
     vi.mocked(sessionTracker.getSession).mockReturnValue(undefined);
   });
 
-  it('should append CURRENT_FOCUS if it exists', () => {
+  it('should append CURRENT_FOCUS if it exists', async () => {
     const workspaceDir = '/mock/workspace';
     const mockCtx = { workspaceDir, trigger: 'user' };
     const mockEvent = { prompt: 'original prompt', messages: [] };
@@ -27,23 +27,24 @@ describe('Prompt Context Injection Hook', () => {
       return '' as any;
     });
 
-    const result = handleBeforePromptBuild(mockEvent as any, mockCtx as any);
+    const result = await handleBeforePromptBuild(mockEvent as any, mockCtx as any);
 
     expect(result).toBeDefined();
     expect(result?.prependContext).toContain('Mock Current Focus');
   });
 
-  it('should inject system override if GFI exceeds threshold', () => {
+  it('should inject system override if GFI exceeds threshold', async () => {
     const workspaceDir = '/mock/workspace';
     const sessionId = 's1';
     const mockCtx = { workspaceDir, sessionId, trigger: 'user' };
     const mockEvent = { prompt: 'original prompt', messages: [] };
 
     vi.mocked(sessionTracker.getSession).mockReturnValue({
-        currentGfi: 120
+        currentGfi: 120,
+        consecutiveErrors: 3
     } as any);
 
-    const result = handleBeforePromptBuild(mockEvent as any, mockCtx as any);
+    const result = await handleBeforePromptBuild(mockEvent as any, mockCtx as any);
 
     expect(result).toBeDefined();
     expect(result?.prependContext).toContain('[🚨 CRITICAL SYSTEM OVERRIDE 🚨]');
@@ -51,7 +52,7 @@ describe('Prompt Context Injection Hook', () => {
     expect(sessionTracker.resetFriction).toHaveBeenCalledWith(sessionId);
   });
 
-  it('should prependSystemContext with THINKING_OS.md if it exists', () => {
+  it('should prependSystemContext with THINKING_OS.md if it exists', async () => {
     const workspaceDir = '/mock/workspace';
     const mockCtx = { workspaceDir, trigger: 'user' };
     const mockEvent = { prompt: 'original prompt', messages: [] };
@@ -65,15 +66,15 @@ describe('Prompt Context Injection Hook', () => {
       return '' as any;
     });
 
-    const result = handleBeforePromptBuild(mockEvent as any, mockCtx as any);
+    const result = await handleBeforePromptBuild(mockEvent as any, mockCtx as any);
 
     expect(result).toBeDefined();
     expect(result?.prependSystemContext).toContain('MOCK THINKING OS CONTENT');
     expect(result?.prependSystemContext).toContain('<thinking_os>');
   });
 
-  it('should return undefined if workspaceDir is not provided', () => {
-    const result = handleBeforePromptBuild({ prompt: '', messages: [] } as any, {} as any);
+  it('should return undefined if workspaceDir is not provided', async () => {
+    const result = await handleBeforePromptBuild({ prompt: '', messages: [] } as any, {} as any);
     expect(result).toBeUndefined();
   });
 });

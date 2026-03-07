@@ -87,6 +87,20 @@ export class PainDictionary {
         return this.data.rules;
     }
 
+    /**
+     * Adds a new rule or updates an existing one.
+     */
+    addRule(id: string, rule: Omit<PainRule, 'hits'>): void {
+        this.data.rules[id] = {
+            ...rule,
+            hits: this.data.rules[id]?.hits || 0
+        };
+        // Re-compile if it's a regex rule
+        if (rule.type === 'regex' && rule.pattern) {
+            this.compiledRegex.set(id, new RegExp(rule.pattern, 'i'));
+        }
+    }
+
     match(text: string): { ruleId: string; severity: number } | undefined {
         let bestMatch: { ruleId: string; severity: number } | undefined = undefined;
 
@@ -96,7 +110,10 @@ export class PainDictionary {
             let matched = false;
             if (rule.type === 'regex') {
                 const re = this.compiledRegex.get(id);
-                if (re?.test(text)) matched = true;
+                if (re) {
+                    re.lastIndex = 0;
+                    if (re.test(text)) matched = true;
+                }
             } else if (rule.type === 'exact_match' && rule.phrases) {
                 const lowerText = text.toLowerCase();
                 if (rule.phrases.some(p => lowerText.includes(p.toLowerCase()))) {

@@ -5,9 +5,7 @@ import { trackLlmOutput, getSession } from '../core/session-tracker.js';
 import { writePainFlag } from '../core/pain.js';
 import { DictionaryService } from '../core/dictionary-service.js';
 import { ConfigService } from '../core/config-service.js';
-
-// **Enhanced Bilingual Cognitive Distress Patterns**
-// Moved to stateDir/pain_dictionary.json for V1.2.0
+import { DetectionService } from '../core/detection-service.js';
 
 export function handleLlmOutput(
     event: PluginHookLlmOutputEvent,
@@ -26,13 +24,17 @@ export function handleLlmOutput(
 
     const text = event.assistantTexts.join('\n');
 
-    // ── Track B: Semantic Pain Detection ──
-    const dictionary = DictionaryService.get(stateDir);
-    const match = dictionary.match(text);
+    // ── Track B: Semantic Pain Detection (V1.3.0 Funnel) ──
+    const detectionService = DetectionService.get(stateDir);
+    const detection = detectionService.detect(text);
 
-    let painScore = match?.severity || 0;
-    let source = match ? `llm_${match.ruleId.toLowerCase()}` : '';
-    let matchedReason = match ? `Agent triggered pain rule: ${match.ruleId}` : '';
+    let painScore = detection.detected ? (detection.severity || 0) : 0;
+    let source = detection.detected 
+        ? (detection.ruleId ? `llm_${detection.ruleId.toLowerCase()}` : `llm_${detection.source}`)
+        : '';
+    let matchedReason = detection.detected 
+        ? `Agent triggered pain detection (Source: ${detection.source}${detection.ruleId ? `, Rule: ${detection.ruleId}` : ''})` 
+        : '';
 
     // 3. Paralysis Check (from session state tracker)
     const stuckThreshold = config.get('thresholds.stuck_loops_trigger') || 3;
@@ -56,53 +58,47 @@ export function handleLlmOutput(
             score: String(painScore),
             time: new Date().toISOString(),
             reason: matchedReason,
-            is_risky: 'false', // This is cognitive, not a risky file write
+            is_risky: 'false',
             trigger_text_preview: snippet
         });
     }
 
     // ═══ Thinking OS: Mental Model Usage Tracking ═══
-    // Track which mental models the agent is actively using
-    // This data feeds into /thinking-os audit and the archival mechanism
     const actualStateDir = ctx.stateDir || path.join(ctx.workspaceDir, 'memory', '.state');
     trackThinkingModelUsage(text, actualStateDir);
 }
 
-// ── Thinking OS Usage Tracking ──────────────────────────────────────────────
-// Detects behavioral signals indicating the agent is following specific mental models.
-// Bilingual patterns (EN/CN) to match agent output in either language.
-
 const THINKING_MODEL_SIGNALS: Record<string, RegExp[]> = {
-    'T-01': [ // Map Before Territory
+    'T-01': [
         /let me (first )?(understand|map|outline|survey|review the (structure|architecture|dependencies))/i,
         /让我先(梳理|了解|画出|理解|查看)(一下)?(结构|架构|依赖|全貌)/,
     ],
-    'T-02': [ // Constraints as Lighthouses
+    'T-02': [
         /(type|test|contract|schema|interface) (constraint|requirement|check|validation)/i,
         /we (must|need to) (respect|follow|adhere to) the/i,
         /(必须|需要).*?(遵守|符合|满足).*?(类型|测试|契约|接口|规范)/,
     ],
-    'T-03': [ // Evidence Over Intuition
+    'T-03': [
         /based on (the |this )?(evidence|logs?|output|error|stack trace|test result)/i,
         /let me (check|verify|confirm|read|look at) (the |)(actual|source|code|file|log)/i,
         /根据(日志|证据|输出|报错|堆栈|测试结果)/,
     ],
-    'T-04': [ // Reversibility Governs Speed
+    'T-04': [
         /this (is|would be) (irreversible|destructive|permanent|not easily undone)/i,
         /(reversible|can be undone|safely roll back)/i,
         /(不可逆|破坏性|永久的|无法回滚|可以回滚|安全地撤销)/,
     ],
-    'T-05': [ // Via Negativa
+    'T-05': [
         /we (must|should) (not|never|avoid|prevent|ensure we don't)/i,
         /(critical|important) (not to|that we don't|to avoid)/i,
         /(绝不能|必须避免|不可以|禁止|确保不会)/,
     ],
-    'T-06': [ // Occam's Razor
+    'T-06': [
         /(simpl(er|est|ify)|minimal|straightforward|lean) (approach|solution|fix|implementation)/i,
         /(simple is better|keep it simple|no need to over)/i,
         /(最简(单|洁)|精简|没有必要(过度|额外))/,
     ],
-    'T-07': [ // Minimum Viable Change
+    'T-07': [
         /(minimal|smallest|narrowest|least) (change|diff|modification|impact)/i,
         /only (change|modify|touch|edit) (the |what)/i,
         /(最小(改动|变更|修改)|只(改|动|修))/,
@@ -128,9 +124,7 @@ function trackThinkingModelUsage(text: string, stateDir: string): void {
     if (fs.existsSync(logPath)) {
         try {
             usageLog = JSON.parse(fs.readFileSync(logPath, 'utf8'));
-        } catch (e) {
-            console.debug('[PD] Failed to read model usage:', e);
-        }
+        } catch (e) {}
     }
 
     let anyMatch = false;
@@ -144,14 +138,11 @@ function trackThinkingModelUsage(text: string, stateDir: string): void {
         }
     }
 
-    // Track total turns for calculating usage rates
     usageLog['_total_turns'] = (usageLog['_total_turns'] || 0) + 1;
 
     if (anyMatch) {
         try {
             fs.writeFileSync(logPath, JSON.stringify(usageLog, null, 2), 'utf8');
-        } catch (e) {
-            console.debug('[PD] Failed to write model usage:', e);
-        }
+        } catch (e) {}
     }
 }

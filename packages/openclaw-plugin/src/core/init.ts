@@ -30,6 +30,24 @@ export function ensureWorkspaceTemplates(api: OpenClawPluginApi, workspaceDir: s
             api.logger.info(`[PD] Initializing ${language} templates in ${workspaceDir}...`);
             copyMissingFiles(langTemplatesDir, workspaceDir, api);
         }
+
+        // 3. Copy pain memory seed files (V1.3.0) - Language Aware
+        const painTemplatesDir = path.resolve(__dirname, '..', '..', 'templates', 'langs', language, 'pain');
+        const painDestDir = path.join(workspaceDir, 'memory', 'pain');
+        
+        // Fallback to 'en' if the specific language pain templates don't exist
+        let finalPainSrc = painTemplatesDir;
+        if (!fs.existsSync(finalPainSrc)) {
+            finalPainSrc = path.resolve(__dirname, '..', '..', 'templates', 'langs', 'en', 'pain');
+        }
+
+        if (fs.existsSync(finalPainSrc)) {
+            if (!fs.existsSync(painDestDir)) {
+                fs.mkdirSync(painDestDir, { recursive: true });
+            }
+            api.logger.info(`[PD] Initializing pain memory templates in ${painDestDir} (Lang: ${language})...`);
+            copyMissingFiles(finalPainSrc, painDestDir, api);
+        }
     } catch (err) {
         api.logger.error(`[PD] Failed to initialize workspace templates: ${String(err)}`);
     }

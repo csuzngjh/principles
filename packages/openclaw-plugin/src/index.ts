@@ -51,9 +51,9 @@ const plugin = {
     // ── Prompt injection ──
     api.on(
       'before_prompt_build',
-      (event: PluginHookBeforePromptBuildEvent, ctx: PluginHookAgentContext): PluginHookBeforePromptBuildResult | void => {
+      async (event: PluginHookBeforePromptBuildEvent, ctx: PluginHookAgentContext): Promise<PluginHookBeforePromptBuildResult | void> => {
         try {
-          return handleBeforePromptBuild(event, ctx);
+          return await handleBeforePromptBuild(event, { ...ctx, api });
         } catch (err) {
           api.logger.error(`[PD] Error in before_prompt_build: ${String(err)}`);
         }
@@ -150,6 +150,7 @@ const plugin = {
 
     // ── Service: Autonomous Background Evolution Worker ──
     try {
+      EvolutionWorkerService.api = api;
       api.registerService(EvolutionWorkerService);
     } catch (err) {
       api.logger.error(`[PD] Failed to register EvolutionWorkerService: ${String(err)}`);
