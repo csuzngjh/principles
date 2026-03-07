@@ -102,32 +102,47 @@ safe_copy() {
 # 4. 复制核心组件 (使用 Smart Copy)
 echo "📦 Copying components..."
 
+# 定义语言目录
+LANG_DIR="$SOURCE_DIR/packages/openclaw-plugin/templates/langs/$SELECTED_LANG/claude"
+if [ ! -d "$LANG_DIR" ]; then
+    # 回退到 en
+    LANG_DIR="$SOURCE_DIR/packages/openclaw-plugin/templates/langs/en/claude"
+fi
+
 # Agents
-for f in "$SOURCE_DIR/agents/"*.md; do
+AGENT_SRC="${LANG_DIR}/agents"
+if [ ! -d "$AGENT_SRC" ]; then AGENT_SRC="$SOURCE_DIR/agents"; fi
+
+for f in "$AGENT_SRC/"*.md; do
     fname=$(basename "$f")
     smart_copy "$f" "$TARGET_DIR/.claude/agents/$fname"
 done
 
 # Skills (递归处理所有 SKILL.md)
-cd "$SOURCE_DIR/skills"
+SKILL_SRC="${LANG_DIR}/skills"
+if [ ! -d "$SKILL_SRC" ]; then SKILL_SRC="$SOURCE_DIR/skills"; fi
+
+cd "$SKILL_SRC"
 find . -type f -name "*" | while read f; do
-    smart_copy "$SOURCE_DIR/skills/$f" "$TARGET_DIR/.claude/skills/$f"
+    smart_copy "$SKILL_SRC/$f" "$TARGET_DIR/.claude/skills/$f"
 done
 cd "$SOURCE_DIR"
 
 # Hooks (Python Runner 总是更新，因为它是系统逻辑)
 cp "$SOURCE_DIR/hooks/"*.py "$TARGET_DIR/.claude/hooks/"
 cp "$SOURCE_DIR/hooks/hooks.json" "$TARGET_DIR/.claude/hooks/"
-# 原本这里的 sed 替换被移除，以保持路径的原始性和可预测性
 
 # Rules
-for f in "$SOURCE_DIR/templates/rules/"*.md; do
+RULE_SRC="${LANG_DIR}/rules"
+if [ ! -d "$RULE_SRC" ]; then RULE_SRC="$SOURCE_DIR/templates/rules"; fi
+
+for f in "$RULE_SRC/"*.md; do
     fname=$(basename "$f")
     smart_copy "$f" "$TARGET_DIR/.claude/rules/$fname"
 done
 
 # Templates (始终同步最新模板)
-cp "$SOURCE_DIR/templates/rules/00-kernel.md" "$TARGET_DIR/.claude/templates/"
+cp "$RULE_SRC/00-kernel.md" "$TARGET_DIR/.claude/templates/"
 cp "$SOURCE_DIR/docs/PROFILE.json" "$TARGET_DIR/.claude/templates/"
 cp "$SOURCE_DIR/docs/PROFILE.schema.json" "$TARGET_DIR/.claude/templates/"
 cp "$SOURCE_DIR/docs/DECISION_POLICY.json" "$TARGET_DIR/.claude/templates/"
