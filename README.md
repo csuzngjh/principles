@@ -30,7 +30,15 @@
 
 > [!WARNING]
 > **Early Experimental Status**
-> This is currently a personal experimental project in its very early stages. It explores radical concepts in AI cognition and self-evolution. Expect bugs, rough edges, and frequent breaking changes. We highly encourage you to test it, break it, and join us in improving it together!
+> This is currently a personal experimental project in its very early stages. It explores radical concepts in AI cognition and self-evolution. Expect bugs and frequent breaking changes.
+>
+> [!CAUTION]
+> **Understanding "Evolutionary Latency"**
+> This system is **NOT** a plug-and-play "magic tool." Its power comes from the **accumulation of pain**.
+> - **Initial Phase**: The agent will still make mistakes and may even seem rigid (as hit counters are at zero).
+> - **Growth Phase**: As you use it, the system accumulates failure hashes and dictionary hits in the `stateDir`, enabling the `Evolver` to generate precise new principles.
+> - **Expectation**: Be patient. Let it run in your real-world projects for at least **3-5 days**. Its "muscles" (principles) only grow through the resistance of real work.
+
 
 Principles Disciple is a **cross-platform evolutionary agent framework** that supports both **Claude Code** and **OpenClaw**. It transforms your AI assistant into a digital lifeform capable of **self-defense, self-reflection, and self-evolution**. Through Gatekeeping, Profiling, OKRs, and Pain signals, it prevents the AI from blindly executing harmful prompts and learns from every failure.
 
