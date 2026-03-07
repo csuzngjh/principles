@@ -12,20 +12,29 @@ export function handleBeforePromptBuild(_event, ctx) {
     // Use stateDir if available, fallback to workspaceDir/docs/.state
     const actualStateDir = stateDir || path.join(workspaceDir, 'docs', '.state');
     const directivePath = path.join(actualStateDir, 'evolution_directive.json');
+    let prependSystemContext = '';
     let prependContext = '';
     let appendSystemContext = '';
-    // 1. User profile context (STATIC -> appendSystemContext)
-    if (fs.existsSync(userContextPath)) {
+    // ═══ LAYER 3 (道): Thinking OS → prependSystemContext (最高优先级认知注入) ═══
+    // The Thinking OS is the agent's meta-cognitive framework.
+    // Using prependSystemContext ensures:
+    //  1. It is prepended to the system prompt (highest cognitive priority)
+    //  2. Providers like Claude can CACHE it (prompt caching), so the ~450 tokens
+    //     incur cost only on the first turn, then are essentially free thereafter.
+    //  3. It does NOT override OpenClaw's native system prompt (unlike systemPrompt).
+    const thinkingOsPath = path.join(workspaceDir, 'docs', 'THINKING_OS.md');
+    if (fs.existsSync(thinkingOsPath)) {
         try {
-            const userContext = fs.readFileSync(userContextPath, 'utf8');
-            if (userContext.trim()) {
-                appendSystemContext += `\n<global_context>\n--- Context from: docs/USER_CONTEXT.md ---\n${userContext}\n--- End of Context ---\n</global_context>\n`;
+            const thinkingOs = fs.readFileSync(thinkingOsPath, 'utf8');
+            if (thinkingOs.trim()) {
+                prependSystemContext = `<thinking_os>\n${thinkingOs.trim()}\n</thinking_os>`;
             }
         }
-        catch (e) {
-            // Non-critical — skip silently
+        catch (_e) {
+            // Non-critical — Thinking OS not yet initialized
         }
     }
+    // 1. User profile context (Now natively handled by OpenClaw via USER.md, skipping)
     // 2. Strategic focus (DYNAMIC -> prependContext)
     if (fs.existsSync(focusPath)) {
         try {
@@ -99,6 +108,8 @@ export function handleBeforePromptBuild(_event, ctx) {
         }
     }
     const result = {};
+    if (prependSystemContext.trim())
+        result.prependSystemContext = prependSystemContext.trim();
     if (prependContext.trim())
         result.prependContext = prependContext.trim();
     if (appendSystemContext.trim())

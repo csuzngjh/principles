@@ -115,12 +115,12 @@ export const EvolutionWorkerService = {
     start(ctx: OpenClawPluginServiceContext): void {
         ctx.logger.info(`[PD:EvolutionWorker] Starting background autonomous evolution service...`);
 
-        // Run loop every 90 seconds
+        // Then poll every 15 minutes
         intervalId = setInterval(() => {
             if (!ctx.workspaceDir) return;
             checkPainFlag(ctx.workspaceDir, ctx.logger);
             processEvolutionQueue(ctx.workspaceDir, ctx.stateDir, ctx.logger);
-        }, 90 * 1000);
+        }, 15 * 60 * 1000);
 
         // Do a gentle initial check after 5 seconds
         setTimeout(() => {

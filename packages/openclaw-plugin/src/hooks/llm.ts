@@ -172,7 +172,7 @@ const THINKING_MODEL_SIGNALS: Record<string, RegExp[]> = {
 };
 
 function trackThinkingModelUsage(text: string, workspaceDir: string): void {
-    const logPath = path.join(workspaceDir, 'docs', '.thinking_os_usage.json');
+    const logPath = path.join(workspaceDir, 'memory', '.thinking_os_usage.json');
     let usageLog: Record<string, number> = {};
 
     if (fs.existsSync(logPath)) {

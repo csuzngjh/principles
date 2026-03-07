@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { serializeKvLines, parseKvLines } from '../utils/io';
+import { serializeKvLines, parseKvLines } from '../utils/io.js';
 export function computePainScore(rc, isSpiral, missingTestCommand, softScore) {
     let score = Math.max(0, softScore || 0);
     if (rc !== 0) {

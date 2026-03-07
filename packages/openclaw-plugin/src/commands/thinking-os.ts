@@ -19,7 +19,7 @@ function getWorkspaceDir(ctx: PluginCommandContext): string {
 }
 
 function formatUsageReport(workspaceDir: string): string {
-    const logPath = path.join(workspaceDir, 'docs', '.thinking_os_usage.json');
+    const logPath = path.join(workspaceDir, 'memory', '.thinking_os_usage.json');
     if (!fs.existsSync(logPath)) {
         return '📊 No usage data yet. The Thinking OS has not been active long enough to collect statistics.';
     }
@@ -73,7 +73,7 @@ function handlePropose(workspaceDir: string, proposal: string): string {
 }
 
 function formatAuditReport(workspaceDir: string): string {
-    const logPath = path.join(workspaceDir, 'docs', '.thinking_os_usage.json');
+    const logPath = path.join(workspaceDir, 'memory', '.thinking_os_usage.json');
     const thinkingOsPath = path.join(workspaceDir, 'docs', 'THINKING_OS.md');
 
     let report = `# 🔍 Thinking OS — Audit Report\n\n`;
