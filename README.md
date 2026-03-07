@@ -67,7 +67,7 @@ npm install && npm run build
 
 # 2. Register the plugin in ~/.openclaw/openclaw.json
 # Add to the "plugins" section:
-# { "loadPaths": ["./packages/openclaw-plugin"] }
+# { "load": { "paths": ["/absolute/path/to/packages/openclaw-plugin"] } }
 ```
 > Once enabled, the plugin automatically takes over: Prompt injection, Gatekeeper interception, Pain signals, Context compression protection, and Thinking OS cognitive injection.
 
@@ -76,6 +76,13 @@ npm install && npm run build
 > ```json
 > { "agents": { "defaults": { "memorySearch": { "extraPaths": ["docs"] } } } }
 > ```
+
+> [!TIP]
+> **One-command install**: If OpenClaw is already installed, simply run:
+> ```bash
+> bash install.sh /path/to/your/project
+> ```
+> The script auto-detects OpenClaw, builds the plugin, and injects both `plugins.load.paths` and `memorySearch.extraPaths` into `~/.openclaw/openclaw.json`.
 
 ### Universal: Set Strategy (Recommended)
 ```bash

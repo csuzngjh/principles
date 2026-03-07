@@ -2,7 +2,7 @@
 set -e
 
 # Principles Disciple Installer (Smart Version)
-# 将进化智能体架构部署到当前项目，保护已进化的 Prompt 和配置。
+# 同时支持 Claude Code 和 OpenClaw 的一键安装脚本。
 
 # 1. 确定目标目录 (默认为当前目录)
 TARGET_DIR="${1:-$(pwd)}"
@@ -229,19 +229,96 @@ if [ -d "$OPENCLAW_WORKSPACE" ]; then
     else
         create_link_or_copy "$DOCS_SOURCE" "$LINK_TARGET"
     fi
-
-    # 提示用户配置 extraPaths
-    OPENCLAW_CONFIG="$OPENCLAW_STATE_DIR/openclaw.json"
-    if [ -f "$OPENCLAW_CONFIG" ]; then
-        if ! grep -q '"extraPaths"' "$OPENCLAW_CONFIG" 2>/dev/null; then
-            echo ""
-            echo "  📌 To enable memory search on docs/, add to $OPENCLAW_CONFIG:"
-            echo '     "agents": { "defaults": { "memorySearch": { "extraPaths": ["docs"] } } }'
-        fi
-    fi
 else
-    echo "  ℹ️  OpenClaw workspace not detected. Skipping."
+    echo "  ℹ️  OpenClaw workspace not detected. Skipping workspace docs integration."
     echo "     (Normal for Claude Code-only installations.)"
+fi
+
+# 6.6. OpenClaw 插件安装
+echo ""
+echo "🔌 OpenClaw plugin installation..."
+PLUGIN_DIR="$SOURCE_DIR/packages/openclaw-plugin"
+OPENCLAW_CONFIG="$OPENCLAW_STATE_DIR/openclaw.json"
+
+if ! command -v openclaw &>/dev/null && ! command -v clawd &>/dev/null; then
+    echo "  ℹ️  OpenClaw not detected. Skipping plugin installation."
+    echo "     (Normal for Claude Code-only installations.)"
+else
+    echo "  ✅ OpenClaw detected."
+
+    # 步骤 1: 构建插件
+    if command -v node &>/dev/null && [ -f "$PLUGIN_DIR/package.json" ]; then
+        echo "  📦 Building OpenClaw plugin..."
+        (
+            cd "$PLUGIN_DIR"
+            if npm install --silent 2>/dev/null && npm run build --silent 2>/dev/null; then
+                echo "  ✅ Plugin built successfully."
+            else
+                echo "  ⚠️  Plugin build failed. Please run manually:"
+                echo "       cd $PLUGIN_DIR && npm install && npm run build"
+            fi
+        )
+    else
+        echo "  ⚠️  Node.js not found or plugin dir missing. Skipping build."
+        echo "     Install Node.js ≥18, then run: cd $PLUGIN_DIR && npm install && npm run build"
+    fi
+
+    # 步骤 2: 注册插件路径到 openclaw.json
+    echo "  ⚙️  Registering plugin in $OPENCLAW_CONFIG..."
+    PLUGIN_DIST="$PLUGIN_DIR"
+    python3 -c "
+import json, os, sys
+
+config_path = '$OPENCLAW_CONFIG'
+plugin_path = '$PLUGIN_DIST'
+extra_paths_entry = 'docs'
+
+# 读取或初始化配置
+try:
+    with open(config_path, 'r', encoding='utf-8') as f:
+        cfg = json.load(f)
+except FileNotFoundError:
+    cfg = {}
+
+# 注入 plugins.load.paths
+if 'plugins' not in cfg:
+    cfg['plugins'] = {}
+if 'load' not in cfg['plugins']:
+    cfg['plugins']['load'] = {}
+if 'paths' not in cfg['plugins']['load']:
+    cfg['plugins']['load']['paths'] = []
+
+paths = cfg['plugins']['load']['paths']
+if plugin_path not in paths:
+    paths.append(plugin_path)
+    print('  - Added plugin path: ' + plugin_path)
+else:
+    print('  - Plugin path already registered.')
+
+# 注入 agents.defaults.memorySearch.extraPaths
+if 'agents' not in cfg:
+    cfg['agents'] = {}
+if 'defaults' not in cfg['agents']:
+    cfg['agents']['defaults'] = {}
+if 'memorySearch' not in cfg['agents']['defaults']:
+    cfg['agents']['defaults']['memorySearch'] = {}
+if 'extraPaths' not in cfg['agents']['defaults']['memorySearch']:
+    cfg['agents']['defaults']['memorySearch']['extraPaths'] = []
+
+extra = cfg['agents']['defaults']['memorySearch']['extraPaths']
+if extra_paths_entry not in extra:
+    extra.append(extra_paths_entry)
+    print('  - Added memorySearch.extraPaths: docs')
+else:
+    print('  - memorySearch.extraPaths already configured.')
+
+# 写回文件
+os.makedirs(os.path.dirname(config_path), exist_ok=True)
+with open(config_path, 'w', encoding='utf-8') as f:
+    json.dump(cfg, f, indent=2)
+print('  ✅ openclaw.json updated: ' + config_path)
+" 2>&1 | sed 's/^/  /'
+
 fi
 
 # 7. 路径绝对化 (已移除，优先使用相对路径保证可移植性)

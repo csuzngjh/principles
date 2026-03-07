@@ -67,7 +67,7 @@ npm install && npm run build
 
 # 2. 在 ~/.openclaw/openclaw.json 中注册插件
 # 在 "plugins" 部分添加：
-# { "loadPaths": ["./packages/openclaw-plugin"] }
+# { "load": { "paths": ["/absolute/path/to/packages/openclaw-plugin"] } }
 ```
 > 插件启用后自动接管：Prompt 注入、门禁拦截、痛觉信号、上下文压缩保护、Thinking OS 认知注入等全部能力。
 
@@ -76,6 +76,13 @@ npm install && npm run build
 > ```json
 > { "agents": { "defaults": { "memorySearch": { "extraPaths": ["docs"] } } } }
 > ```
+
+> [!TIP]
+> **一键安装**：如果你已安装 OpenClaw，只需运行：
+> ```bash
+> bash install.sh /path/to/your/project
+> ```
+> 脚本会自动检测 OpenClaw 环境、构建插件，并将 `plugins.load.paths` 和 `memorySearch.extraPaths` 写入 `~/.openclaw/openclaw.json`。
 
 ### 通用：设定战略（推荐）
 ```bash
