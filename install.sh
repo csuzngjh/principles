@@ -4,18 +4,26 @@ set -e
 # Principles Disciple Installer (Smart Version)
 # 同时支持 Claude Code 和 OpenClaw 的一键安装脚本。
 
-# 1. 确定目标目录 (默认为当前目录)
-# 支持 --global 参数，自动指向 Claude Code 的全局配置目录 ~/.claude
-TARGET_DIR="$1"
+# 1. 确定参数
+# 支持 --global, --force, --lang en|zh
+TARGET_DIR=""
 FORCE_MODE=false
+SELECTED_LANG="en"
 
-if [[ "$1" == "--global" ]]; then
-    TARGET_DIR="$HOME/.claude"
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        --global) TARGET_DIR="$HOME/.claude"; shift ;;
+        --force) FORCE_MODE=true; shift ;;
+        --lang) SELECTED_LANG="$2"; shift 2 ;;
+        *) if [ -z "$TARGET_DIR" ]; then TARGET_DIR="$1"; fi; shift ;;
+    esac
+done
+
+if [[ "$TARGET_DIR" == "$HOME/.claude" ]]; then
     echo "🌍 GLOBAL INSTALLATION: Targeting ~/.claude for Claude Code."
-    if [[ "$2" == "--force" ]]; then FORCE_MODE=true; fi
-elif [[ "$2" == "--force" ]]; then
-    FORCE_MODE=true
 fi
+
+echo "🌐 Language set to: $SELECTED_LANG"
 
 TARGET_DIR="${TARGET_DIR:-$(pwd)}"
 TARGET_DIR="${TARGET_DIR%/}" # 去掉末尾的斜杠
@@ -268,9 +276,19 @@ try:
 except FileNotFoundError:
     cfg = {}
 
-# 注入 plugins.load.paths
+# 注入 plugins.entries
 if 'plugins' not in cfg:
     cfg['plugins'] = {}
+if 'entries' not in cfg['plugins']:
+    cfg['plugins']['entries'] = {}
+if 'principles-disciple' not in cfg['plugins']['entries']:
+    cfg['plugins']['entries']['principles-disciple'] = {}
+
+cfg['plugins']['entries']['principles-disciple']['enabled'] = True
+cfg['plugins']['entries']['principles-disciple']['language'] = '$SELECTED_LANG'
+print('  - Configured plugin language: $SELECTED_LANG')
+
+# 注入 plugins.load.paths
 if 'load' not in cfg['plugins']:
     cfg['plugins']['load'] = {}
 if 'paths' not in cfg['plugins']['load']:

@@ -45,7 +45,8 @@ const plugin = {
     }
 
     // ── Auto-initialize workspace ──
-    ensureWorkspaceTemplates(api, workspaceDir);
+    const language = (api.pluginConfig?.language as string) || 'en';
+    ensureWorkspaceTemplates(api, workspaceDir, language);
 
     // ── Prompt injection ──
     api.on(
