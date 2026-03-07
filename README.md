@@ -1,7 +1,7 @@
 # Principles Disciple
 
 > **Evolutionary Programming Agent Framework**
-> *Let's evolve our artificial minds together! 🧠✨*
+> *Beyond algorithms—we are coding cognition. Join the collective to distill human wisdom into an OS for artificial minds.*
 > Inspired by Ray Dalio's *Principles*.
 
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-Plugin-5865F2)](https://code.claude.com)

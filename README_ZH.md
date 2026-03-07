@@ -1,7 +1,7 @@
 # Principles Disciple (原则信徒)
 
 > **可进化编程智能体框架 (Evolutionary Programming Agent Framework)**
-> *让我们一起思维进化吧！🧠✨*
+> *凝练人类智慧，编织智能体认知。我们要的不只是工具，而是同路人。加入我们，共建数字心智的巴别塔。*
 > Inspired by Ray Dalio's *Principles*.
 
 [![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-Plugin-5865F2)](https://code.claude.com)
