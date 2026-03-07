@@ -1,20 +1,41 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { ConfigService } from '../core/config-service.js';
+import { getSession, resetFriction } from '../core/session-tracker.js';
 export function handleBeforePromptBuild(_event, ctx) {
     if (!ctx.workspaceDir) {
         return;
     }
-    const { workspaceDir, trigger, stateDir } = ctx;
-    const userContextPath = path.join(workspaceDir, 'docs', 'USER_CONTEXT.md');
+    const { workspaceDir, trigger, stateDir, sessionId } = ctx;
     const focusPath = path.join(workspaceDir, 'docs', 'okr', 'CURRENT_FOCUS.md');
     const painFlagPath = path.join(workspaceDir, 'docs', '.pain_flag');
     const capsPath = path.join(workspaceDir, 'docs', 'SYSTEM_CAPABILITIES.json');
-    // Use stateDir if available, fallback to workspaceDir/docs/.state
-    const actualStateDir = stateDir || path.join(workspaceDir, 'docs', '.state');
+    // Use stateDir if available, fallback to workspaceDir/memory/.state (V1.1.0+ standard)
+    const actualStateDir = stateDir || path.join(workspaceDir, 'memory', '.state');
     const directivePath = path.join(actualStateDir, 'evolution_directive.json');
+    const config = ConfigService.get(actualStateDir);
+    const session = sessionId ? getSession(sessionId) : undefined;
     let prependSystemContext = '';
     let prependContext = '';
     let appendSystemContext = '';
+    // ── Track A: GFI Physical Override ──
+    const gfiThreshold = config.get('thresholds.gfi_override') || 100;
+    if (session && session.currentGfi >= gfiThreshold && sessionId) {
+        const overrideMsg = `
+[🚨 CRITICAL SYSTEM OVERRIDE 🚨]
+Your Generalized Friction Index (GFI) has exceeded the safety threshold (**${session.currentGfi.toFixed(1)}**).
+This indicates you are trapped in a failure loop or facing extreme environment resistance.
+
+**Mandate**: 
+1. STOP all current tool executions.
+2. Enter a <reflection> state immediately.
+3. Analyze the root cause of the last ${session.consecutiveErrors} failures.
+4. PIVOT your strategy. Do not repeat the same failing command.
+`;
+        prependContext += `\n<system_override>\n${overrideMsg.trim()}\n</system_override>\n`;
+        // Reset after injecting to allow progress if they actually pivot
+        resetFriction(sessionId);
+    }
     // ═══ LAYER 3 (道): Thinking OS → prependSystemContext (最高优先级认知注入) ═══
     // The Thinking OS is the agent's meta-cognitive framework.
     // Using prependSystemContext ensures:

@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 export interface PainSettings {
+    language: 'en' | 'zh';
     thresholds: {
         pain_trigger: number;
         cognitive_paralysis_input: number;
@@ -20,6 +21,7 @@ export interface PainSettings {
 }
 
 const DEFAULT_SETTINGS: PainSettings = {
+    language: 'en',
     thresholds: {
         pain_trigger: 30,
         cognitive_paralysis_input: 4000,
@@ -51,6 +53,7 @@ export class PainConfig {
                 const loaded = JSON.parse(fs.readFileSync(this.filePath, 'utf8'));
                 // Merge loaded settings with defaults
                 this.settings = {
+                    language: loaded.language || DEFAULT_SETTINGS.language,
                     thresholds: { ...DEFAULT_SETTINGS.thresholds, ...loaded.thresholds },
                     scores: { ...DEFAULT_SETTINGS.scores, ...loaded.scores },
                     intervals: { ...DEFAULT_SETTINGS.intervals, ...loaded.intervals }
