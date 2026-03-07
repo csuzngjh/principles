@@ -5,14 +5,20 @@ set -e
 # 同时支持 Claude Code 和 OpenClaw 的一键安装脚本。
 
 # 1. 确定目标目录 (默认为当前目录)
-TARGET_DIR="${1:-$(pwd)}"
-TARGET_DIR="${TARGET_DIR%/}" # 去掉末尾的斜杠，防止双斜杠输出
+# 支持 --global 参数，自动指向 Claude Code 的全局配置目录 ~/.claude
+TARGET_DIR="$1"
 FORCE_MODE=false
 
-if [[ "$2" == "--force" ]]; then
+if [[ "$1" == "--global" ]]; then
+    TARGET_DIR="$HOME/.claude"
+    echo "🌍 GLOBAL INSTALLATION: Targeting ~/.claude for Claude Code."
+    if [[ "$2" == "--force" ]]; then FORCE_MODE=true; fi
+elif [[ "$2" == "--force" ]]; then
     FORCE_MODE=true
-    echo "🔥 FORCE MODE ENABLED: Overwriting all components."
 fi
+
+TARGET_DIR="${TARGET_DIR:-$(pwd)}"
+TARGET_DIR="${TARGET_DIR%/}" # 去掉末尾的斜杠
 
 SOURCE_DIR="$(cd "$(dirname "$0")" && pwd)"
 

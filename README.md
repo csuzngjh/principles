@@ -50,11 +50,11 @@ Principles Disciple is a **cross-platform evolutionary agent framework** that su
 ### Method A: Claude Code
 
 ```bash
-# 1. Install to target project
+# 💡 Project-level (Recommended for teams)
 bash install.sh /path/to/your/project
 
-# 2. Initialize core files (inside Claude Code)
-/admin init
+# 🌍 Global-level (Available across all your projects)
+bash install.sh --global
 ```
 *`install.sh` merges smartly: it keeps your existing custom rules, and system updates are saved as `*.update` files.*
 
@@ -84,7 +84,25 @@ npm install && npm run build
 > ```
 > The script auto-detects OpenClaw, builds the plugin, and injects both `plugins.load.paths` and `memorySearch.extraPaths` into `~/.openclaw/openclaw.json`.
 
-### Universal: Set Strategy (Recommended)
+## 📁 System Directory Structure
+
+Understanding where files live helps you manage your agent's "brain" across different frameworks.
+
+### Claude Code Locations
+- **Project**: `your-project/.claude/` (agents, hooks, settings)
+- **Global**: `~/.claude/` (global agents, global settings)
+
+### OpenClaw Locations
+OpenClaw uses a centralized state directory at `~/.openclaw/`:
+- **Config**: `~/.openclaw/openclaw.json` (Main settings & plugin paths)
+- **Workspace**: `~/.openclaw/workspace/` (The agent's active environment)
+  - `AGENTS.md`, `SOUL.md`: Core personality and instructions.
+  - `memory/`: Short-term/Episodic memory storage.
+  - `docs/`: 🔗 Symlinked to our project's `docs/` for long-term principle search.
+
+---
+
+## 🛠️ Universal Setup (Recommended)
 ```bash
 /init-strategy
 ```
