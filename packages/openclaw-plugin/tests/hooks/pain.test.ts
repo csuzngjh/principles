@@ -15,14 +15,14 @@ describe('Post-Write Checks & Pain Hook', () => {
   });
 
   it('should ignore non-write tools', () => {
-    const mockCtx = { workspaceDir };
-    const mockEvent = { toolName: 'read', params: {}, result: {}, error: undefined };
+    const mockCtx = { workspaceDir, sessionId: 's1' };
+    const mockEvent = { toolName: 'read', params: {}, result: { exitCode: 0 }, error: undefined };
     handleAfterToolCall(mockEvent as any, mockCtx as any);
     expect(fs.writeFileSync).not.toHaveBeenCalled();
   });
 
   it('should capture pain on tool error', () => {
-    const mockCtx = { workspaceDir };
+    const mockCtx = { workspaceDir, sessionId: 's1' };
     const mockEvent = { 
         toolName: 'write', 
         params: { file_path: 'src/main.ts' },
