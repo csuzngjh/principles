@@ -85,10 +85,12 @@ export type PluginHookAgentContext = {
     sessionKey?: string;
     sessionId?: string;
     workspaceDir?: string;
+    /** Plugin-scoped state directory for persistent data. */
     stateDir?: string;
     messageProvider?: string;
-    /** "user" | "heartbeat" | "cron" | "memory" */
+    /** What initiated this agent run: "user" | "heartbeat" | "cron" | "memory" */
     trigger?: string;
+    /** Channel identifier (e.g. "telegram", "discord", "whatsapp"). */
     channelId?: string;
 };
 
@@ -119,6 +121,15 @@ export type PluginHookBeforePromptBuildEvent = {
 export type PluginHookBeforePromptBuildResult = {
     systemPrompt?: string;
     prependContext?: string;
+    /**
+     * Prepended to the agent system prompt so providers can cache it (e.g. prompt caching).
+     * Use for STATIC plugin guidance instead of prependContext to avoid per-turn token cost.
+     */
+    prependSystemContext?: string;
+    /**
+     * Appended to the agent system prompt so providers can cache it (e.g. prompt caching).
+     * Use for STATIC plugin guidance instead of prependContext to avoid per-turn token cost.
+     */
     appendSystemContext?: string;
 };
 

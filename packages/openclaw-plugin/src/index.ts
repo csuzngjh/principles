@@ -23,6 +23,7 @@ import { handleSubagentEnded } from './hooks/subagent.js';
 import { handleInitStrategy, handleManageOkr } from './commands/strategy.js';
 import { handleEvolveTask } from './commands/evolver.js';
 import { handleBootstrapTools, handleResearchTools } from './commands/capabilities.js';
+import { handleThinkingOs } from './commands/thinking-os.js';
 import { EvolutionWorkerService } from './service/evolution-worker.js';
 
 const plugin = {
@@ -214,6 +215,20 @@ const plugin = {
           return handleResearchTools(ctx);
         } catch (err) {
           api.logger.error(`[PD] Command /research-tools failed: ${String(err)}`);
+          return { text: "Command failed. Check logs." };
+        }
+      }
+    });
+
+    api.registerCommand({
+      name: "thinking-os",
+      description: "Manage the Thinking OS cognitive layer (status/propose/audit)",
+      acceptsArgs: true,
+      handler: (ctx) => {
+        try {
+          return handleThinkingOs({ ...ctx, config: { workspaceDir } });
+        } catch (err) {
+          api.logger.error(`[PD] Command /thinking-os failed: ${String(err)}`);
           return { text: "Command failed. Check logs." };
         }
       }

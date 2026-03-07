@@ -20,8 +20,28 @@ export function handleBeforePromptBuild(
   const actualStateDir = stateDir || path.join(workspaceDir, 'docs', '.state');
   const directivePath = path.join(actualStateDir, 'evolution_directive.json');
 
+  let prependSystemContext = '';
   let prependContext = '';
   let appendSystemContext = '';
+
+  // ═══ LAYER 3 (道): Thinking OS → prependSystemContext (最高优先级认知注入) ═══
+  // The Thinking OS is the agent's meta-cognitive framework.
+  // Using prependSystemContext ensures:
+  //  1. It is prepended to the system prompt (highest cognitive priority)
+  //  2. Providers like Claude can CACHE it (prompt caching), so the ~450 tokens
+  //     incur cost only on the first turn, then are essentially free thereafter.
+  //  3. It does NOT override OpenClaw's native system prompt (unlike systemPrompt).
+  const thinkingOsPath = path.join(workspaceDir, 'docs', 'THINKING_OS.md');
+  if (fs.existsSync(thinkingOsPath)) {
+    try {
+      const thinkingOs = fs.readFileSync(thinkingOsPath, 'utf8');
+      if (thinkingOs.trim()) {
+        prependSystemContext = `<thinking_os>\n${thinkingOs.trim()}\n</thinking_os>`;
+      }
+    } catch (_e) {
+      // Non-critical — Thinking OS not yet initialized
+    }
+  }
 
   // 1. User profile context (Now natively handled by OpenClaw via USER.md, skipping)
 
@@ -102,6 +122,7 @@ export function handleBeforePromptBuild(
   }
 
   const result: PluginHookBeforePromptBuildResult = {};
+  if (prependSystemContext.trim()) result.prependSystemContext = prependSystemContext.trim();
   if (prependContext.trim()) result.prependContext = prependContext.trim();
   if (appendSystemContext.trim()) result.appendSystemContext = appendSystemContext.trim();
 
