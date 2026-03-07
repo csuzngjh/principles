@@ -110,7 +110,10 @@ export class PainDictionary {
             let matched = false;
             if (rule.type === 'regex') {
                 const re = this.compiledRegex.get(id);
-                if (re?.test(text)) matched = true;
+                if (re) {
+                    re.lastIndex = 0;
+                    if (re.test(text)) matched = true;
+                }
             } else if (rule.type === 'exact_match' && rule.phrases) {
                 const lowerText = text.toLowerCase();
                 if (rule.phrases.some(p => lowerText.includes(p.toLowerCase()))) {
