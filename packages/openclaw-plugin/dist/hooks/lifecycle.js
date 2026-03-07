@@ -80,6 +80,13 @@ async function extractPainFromSessionFile(sessionFile, workspaceDir) {
             if (!fs.existsSync(dir))
                 fs.mkdirSync(dir, { recursive: true });
             fs.appendFileSync(dailyLogPath, entry, 'utf8');
+            // V1.3.0: Also write to semantic pain memory for L3 retrieval
+            const semanticPath = path.join(workspaceDir, 'memory', 'pain', 'confusion_samples.md');
+            const semanticDir = path.dirname(semanticPath);
+            if (!fs.existsSync(semanticDir))
+                fs.mkdirSync(semanticDir, { recursive: true });
+            let semanticEntry = `\n### Sample ${timestamp}\n- Source: compaction\n\n\`\`\`\n${painPoints.join('\n---\n')}\n\`\`\`\n`;
+            fs.appendFileSync(semanticPath, semanticEntry, 'utf8');
         }
         catch (_e) {
             // Non-critical

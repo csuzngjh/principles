@@ -87,6 +87,20 @@ export class PainDictionary {
         return this.data.rules;
     }
 
+    /**
+     * Adds a new rule or updates an existing one.
+     */
+    addRule(id: string, rule: Omit<PainRule, 'hits'>): void {
+        this.data.rules[id] = {
+            ...rule,
+            hits: this.data.rules[id]?.hits || 0
+        };
+        // Re-compile if it's a regex rule
+        if (rule.type === 'regex' && rule.pattern) {
+            this.compiledRegex.set(id, new RegExp(rule.pattern, 'i'));
+        }
+    }
+
     match(text: string): { ruleId: string; severity: number } | undefined {
         let bestMatch: { ruleId: string; severity: number } | undefined = undefined;
 
