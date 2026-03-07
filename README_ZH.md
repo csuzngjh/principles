@@ -1,6 +1,25 @@
-# Principles Disciple (原则信徒)
+<p align="center">
+  <img src="assets/banner.png" width="100%" alt="Principles Disciple Banner">
+</p>
+
+<h1 align="center">Principles Disciple (原则门徒)</h1>
+
+<p align="center">
+  <strong>赋予 AI 智能体“元认知进化”能力的架构框架。</strong>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/github/v/release/csuzngjh/principles?style=flat-square&color=5865F2" alt="Release">
+  <img src="https://img.shields.io/github/license/csuzngjh/principles?style=flat-square&color=green" alt="License">
+  <img src="https://img.shields.io/github/stars/csuzngjh/principles?style=flat-square&color=gold" alt="Stars">
+</p>
+
+---
+
+# Principles Disciple: 进化智能体框架 (v1.1.0)
 
 > **可进化编程智能体框架 (Evolutionary Programming Agent Framework)**
+
 > *凝练人类智慧，编织智能体认知。我们要的不只是工具，而是同路人。加入我们，共建数字心智的巴别塔。*
 > Inspired by Ray Dalio's *Principles*.
 
