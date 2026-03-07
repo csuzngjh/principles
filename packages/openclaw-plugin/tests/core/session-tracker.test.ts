@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { trackToolRead, trackLlmOutput, getSession, clearSession } from '../../src/core/session-tracker';
+import { trackToolRead, trackLlmOutput, getSession, clearSession, trackFriction, resetFriction } from '../../src/core/session-tracker.js';
 
 describe('Session Tracker', () => {
     const sessionId = 'test-session-1';
@@ -44,5 +44,42 @@ describe('Session Tracker', () => {
         trackLlmOutput(sessionId, { input: 5200, output: 300 });
         state = getSession(sessionId);
         expect(state?.stuckLoops).toBe(1); // decrements
+    });
+
+    it('should accumulate friction and reset on success', () => {
+        const errorHash = 'abc-123';
+        
+        // 1st error
+        trackFriction(sessionId, 30, errorHash);
+        let state = getSession(sessionId);
+        expect(state?.currentGfi).toBe(30);
+        expect(state?.consecutiveErrors).toBe(1);
+
+        // 2nd identical error (multiplier 1.5^1 = 1.5)
+        trackFriction(sessionId, 30, errorHash);
+        state = getSession(sessionId);
+        expect(state?.currentGfi).toBe(30 + (30 * 1.5)); // 75
+        expect(state?.consecutiveErrors).toBe(2);
+
+        // 3rd identical error (multiplier 1.5^2 = 2.25)
+        trackFriction(sessionId, 30, errorHash);
+        state = getSession(sessionId);
+        expect(state?.currentGfi).toBe(75 + (30 * 2.25)); // 75 + 67.5 = 142.5
+        expect(state?.consecutiveErrors).toBe(3);
+
+        // Success should reset GFI
+        resetFriction(sessionId);
+        state = getSession(sessionId);
+        expect(state?.currentGfi).toBe(0);
+        expect(state?.consecutiveErrors).toBe(0);
+    });
+
+    it('should reset multiplier on different error hash', () => {
+        trackFriction(sessionId, 30, 'hash-1');
+        trackFriction(sessionId, 30, 'hash-2');
+        
+        let state = getSession(sessionId);
+        expect(state?.currentGfi).toBe(60); // 30 + 30
+        expect(state?.consecutiveErrors).toBe(1); // reset to 1 for new hash
     });
 });

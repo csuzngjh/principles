@@ -21,6 +21,11 @@ export interface SessionState {
     cacheHits: number;
     // Track consecutive loops of similar lengths/ratios (paralysis)
     stuckLoops: number;
+    
+    // GFI - Track A: Empirical Friction
+    currentGfi: number;
+    lastErrorHash: string;
+    consecutiveErrors: number;
 }
 
 const sessions = new Map<string, SessionState>();
@@ -38,6 +43,9 @@ function getOrCreateSession(sessionId: string): SessionState {
             totalOutputTokens: 0,
             cacheHits: 0,
             stuckLoops: 0,
+            currentGfi: 0,
+            lastErrorHash: '',
+            consecutiveErrors: 0,
         };
         sessions.set(sessionId, state);
     }
@@ -80,6 +88,37 @@ export function trackLlmOutput(sessionId: string, usage: TokenUsage | undefined,
         }
     }
 
+    return state;
+}
+
+/**
+ * Tracks physical friction based on tool execution failures.
+ */
+export function trackFriction(sessionId: string, deltaF: number, hash: string): SessionState {
+    const state = getOrCreateSession(sessionId);
+    
+    if (hash && hash === state.lastErrorHash) {
+        state.consecutiveErrors++;
+    } else {
+        state.lastErrorHash = hash;
+        state.consecutiveErrors = 1;
+    }
+
+    // GFI formula with multiplier: GFI = GFI + (Delta_F * 1.5^(n-1))
+    const multiplier = Math.pow(1.5, state.consecutiveErrors - 1);
+    state.currentGfi = (state.currentGfi || 0) + (deltaF * multiplier);
+    state.lastActivityAt = Date.now();
+    return state;
+}
+
+/**
+ * Resets the friction index upon successful action.
+ */
+export function resetFriction(sessionId: string): SessionState {
+    const state = getOrCreateSession(sessionId);
+    state.currentGfi = 0;
+    state.consecutiveErrors = 0;
+    state.lastErrorHash = '';
     return state;
 }
 
