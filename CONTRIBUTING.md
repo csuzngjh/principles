@@ -1,51 +1,51 @@
-# 参与贡献 (Contributing)
+# Contributing
 
-[English](CONTRIBUTING_EN.md) | [中文](CONTRIBUTING.md)
+[English](CONTRIBUTING.md) | [中文](CONTRIBUTING_ZH.md)
 
-感谢你对 **Principles Disciple** 框架感兴趣！这是一个致力于通过“元认知”与“痛觉反射”来引导 AI 智能体进化的开源项目。
+Thank you for your interest in the **Principles Disciple** framework! This is an open-source project dedicated to guiding AI agent evolution through "meta-cognition" and "pain reflexes."
 
-我们非常欢迎来自社区的贡献。你可以通过提交 Bug 报告、完善代码，或者**最重要的是——提交新的思维模型 (Thinking OS Models)** 来参与进来。
+We highly welcome community contributions. You can participate by submitting bug reports, improving code, or **most importantly—proposing new Mental Models for the Thinking OS**.
 
-## 🧠 核心贡献：提议新的思维模型
+## 🧠 Core Contribution: Proposing Mental Models
 
-本项目最具有价值的共创部分在于 `THINKING_OS.md` 中的思维模型库。如果你在实际重度使用 Claude Code 或 OpenClaw 时，总结出了一些极其有效的“人机协作心法”或能有效避免 AI 盲目犯错的“元反馈机制”，请向我们提议。
+The most valuable co-creative aspect of this project lies in the mental model library within `THINKING_OS.md`. If, during your heavy use of Claude Code or OpenClaw, you have summarized highly effective "human-AI collaboration methodologies" or "meta-feedback mechanisms" that prevent AI failures, please propose them to us.
 
-### 提议原则 (Proposal Criteria)
+### Proposal Criteria
 
-所有进入 `THINKING_OS_CANDIDATES.md` 甚至最终晋升到 `THINKING_OS.md` 的思维模型，必须满足以下严苛条件：
+Any mental model entering `THINKING_OS_CANDIDATES.md` (and eventually promoted to `THINKING_OS.md`) MUST meet these strict conditions:
 
-1. **普适性 (Generality)**: 它不能是针对某个特定语言（如“不要用 Python 2”）或特定项目库的规则，它应当是一种底层的思考方式（如“否定优于肯定”、“最小必要干预”）。
-2. **可观测信号 (Observable Signals)**: 它能在对话中产生可被检测的痕迹，无论是用户输入的 prompt，还是 AI 回复的文本规律（Regex 可被匹配）。
-3. **极简表达 (Minimal Token Cost)**: 一句话说明理念，一句话说明要避免的灾难。整个描述必须高度压缩。
+1. **Generality**: It cannot be a specific rule for a specific language (e.g., "Don't use Python 2") or library. It must be a fundamental way of thinking (e.g., "Via Negativa", "Minimum Viable Change").
+2. **Observable Signals**: It must leave detectable traces in the conversation, either through user prompts or AI text generation patterns (matchable by Regex).
+3. **Minimal Token Cost**: One sentence to explain the philosophy, one sentence to explain the disaster it avoids. The entire description must be highly compressed.
 
-### 如何提交新模型
+### How to Submit a New Model
 
-1. 在你的项目里通过 `/thinking-os propose "模型名称：核心理念和防灾底线"` 试运行你的模型。
-2. 收集它成功防范 AI 犯错的截图或日志。
-3. Fork 本仓库。
-4. 将你的提议添加到 `docs/THINKING_OS_CANDIDATES.md` 文件中。
-5. 提交 Pull Request，并在 PR 描述中详细说明：
-   * 这个模型解决的核心痛点是什么？
-   * 它的可观测 Regex 信号是什么？
-   * 它是否与现有的 9 个基础模型重叠？
+1. Test your model in your project via `/thinking-os propose "Model Name: Core philosophy and disaster prevention baseline"`.
+2. Collect screenshots or logs demonstrating how it successfully prevented an AI mistake.
+3. Fork this repository.
+4. Add your proposal to the `docs/THINKING_OS_CANDIDATES.md` file.
+5. Create a Pull Request, detailing in the PR description:
+   * What core pain point does this model solve?
+   * What are its observable Regex signals?
+   * Does it overlap with the existing 9 base models?
 
-## 💻 代码与架构贡献
+## 💻 Code & Architecture Contributions
 
-如果你想为本框架（Hooks、门禁逻辑、记忆扫描器等）贡献代码：
+If you want to contribute code to the framework itself (Hooks, Gatekeeper logic, Memory Scanners, etc.):
 
-1. **环境准备**:
-   * 如果修改 OpenClaw 插件：进入 `packages/openclaw-plugin` 目录，运行 `npm install`。
-2. **规范化**:
-   * 运行 `npm run build` 和 `npm run test` 确保无构建错误和回归。
-3. **提交规范**:
-   * 我们的 commit message 遵循 [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) 规范（例如 `feat:`, `fix:`, `docs:`）。
-   * Pull Request 请尽可能说明修改的背景与前因后果。
+1. **Environment Setup**:
+   * If modifying the OpenClaw plugin: Navigate to `packages/openclaw-plugin` and run `npm install`.
+2. **Formatting & Testing**:
+   * Run `npm run build` and `npm run test` to ensure no build errors or regressions.
+3. **Commit Standards**:
+   * Our commit messages follow the [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) specification (e.g., `feat:`, `fix:`, `docs:`).
+   * In Pull Requests, please provide the context and reasoning behind modifications as clearly as possible.
 
-## 🐛 报告问题 (Bug Reports)
+## 🐛 Bug Reports
 
-在提 Issue 前，请：
-1. 先检查仓库中是否已有类似 Issue。
-2. 请附上 `docs/SYSTEM.log` （如果有相关报错）。
-3. 说明当前的运行环境是 Claude Code 原生配置还是 OpenClaw SDK 插件。
+Before submitting an Issue, please:
+1. Search the repository to check if a similar Issue already exists.
+2. If applicable, attach excerpts from `docs/SYSTEM.log`.
+3. Specify whether your runtime environment is native Claude Code config or the OpenClaw SDK plugin.
 
-每一次提交与反馈，都是这个系统“进化”的一次循环。感谢你的同行！
+Every PR and issue is another cycle of "evolution" for the system. Thank you for walking this path with us!
