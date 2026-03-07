@@ -88,6 +88,8 @@ export class PainDictionary {
     }
 
     match(text: string): { ruleId: string; severity: number } | undefined {
+        let bestMatch: { ruleId: string; severity: number } | undefined = undefined;
+
         for (const [id, rule] of Object.entries(this.data.rules)) {
             if (rule.status !== 'active') continue;
 
@@ -104,10 +106,12 @@ export class PainDictionary {
 
             if (matched) {
                 rule.hits++;
-                return { ruleId: id, severity: rule.severity };
+                if (!bestMatch || rule.severity > bestMatch.severity) {
+                    bestMatch = { ruleId: id, severity: rule.severity };
+                }
             }
         }
-        return undefined;
+        return bestMatch;
     }
 
     flush(): void {

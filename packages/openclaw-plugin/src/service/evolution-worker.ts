@@ -120,7 +120,7 @@ export const EvolutionWorkerService = {
         logger.info(`[PD:EvolutionWorker] Starting background autonomous evolution service...`);
 
         // Initialize state templates (like pain_dictionary.json) if missing
-        ensureStateTemplates({ logger } as any, stateDir);
+        ensureStateTemplates({ logger }, stateDir);
 
         // Pre-load the config and dictionary
         const config = ConfigService.get(stateDir);

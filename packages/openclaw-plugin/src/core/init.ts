@@ -30,7 +30,7 @@ export function ensureWorkspaceTemplates(api: OpenClawPluginApi, workspaceDir: s
 /**
  * Ensures that the state directory has the necessary files (like pain_dictionary.json).
  */
-export function ensureStateTemplates(api: OpenClawPluginApi, stateDir: string) {
+export function ensureStateTemplates(ctx: { logger: { info: Function, warn: Function, error: Function } }, stateDir: string) {
     try {
         const __filename = fileURLToPath(import.meta.url);
         const __dirname = path.dirname(__filename);
@@ -49,14 +49,14 @@ export function ensureStateTemplates(api: OpenClawPluginApi, stateDir: string) {
             if (!fs.existsSync(destPath)) {
                 if (fs.existsSync(templatePath)) {
                     fs.copyFileSync(templatePath, destPath);
-                    api.logger.info(`[PD] Initialized ${filename} in stateDir: ${destPath}`);
+                    ctx.logger.info(`[PD] Initialized ${filename} in stateDir: ${destPath}`);
                 } else {
-                    api.logger.warn(`[PD] Template not found at: ${templatePath}`);
+                    ctx.logger.warn(`[PD] Template not found at: ${templatePath}`);
                 }
             }
         }
     } catch (err) {
-        api.logger.error(`[PD] Failed to initialize state templates: ${String(err)}`);
+        ctx.logger.error(`[PD] Failed to initialize state templates: ${String(err)}`);
     }
 }
 
