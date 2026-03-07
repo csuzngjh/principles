@@ -26,13 +26,34 @@ Principles Disciple is a **cross-platform evolutionary agent framework** that su
 
 ## 🚀 Quick Start
 
+### Prerequisites
+
+| Requirement | Version | Notes |
+|---|---|---|
+| **Node.js** | ≥ 18 | Required for OpenClaw plugin |
+| **Python 3** | ≥ 3.8 | Required for Claude Code hooks |
+| **Bash** | any | macOS/Linux native; Windows via **Git Bash** or **WSL** |
+
+### Supported Platforms
+
+| Platform | Claude Code (`install.sh`) | OpenClaw (Plugin) |
+|---|---|---|
+| **macOS** | ✅ Native | ✅ Native |
+| **Linux** | ✅ Native | ✅ Native |
+| **Windows (WSL)** | ✅ Recommended | ✅ Native |
+| **Windows (Git Bash)** | ✅ Works | ✅ Native |
+| **Windows (PowerShell)** | ❌ Use WSL/Git Bash | ✅ Native |
+
+> [!TIP]
+> **Windows users**: `install.sh` is a Bash script. Run it in **Git Bash** (bundled with [Git for Windows](https://git-scm.com/download/win)) or **WSL**. The OpenClaw plugin is pure Node.js and works everywhere.
+
 ### Method A: Claude Code
 
 ```bash
 # 1. Install to target project
 bash install.sh /path/to/your/project
 
-# 2. Initialize core files
+# 2. Initialize core files (inside Claude Code)
 /admin init
 ```
 *`install.sh` merges smartly: it keeps your existing custom rules, and system updates are saved as `*.update` files.*
@@ -44,11 +65,17 @@ bash install.sh /path/to/your/project
 cd packages/openclaw-plugin
 npm install && npm run build
 
-# 2. Enable in openclaw.yaml
-# plugins:
-#   - ./packages/openclaw-plugin
+# 2. Register the plugin in ~/.openclaw/openclaw.json
+# Add to the "plugins" section:
+# { "loadPaths": ["./packages/openclaw-plugin"] }
 ```
 > Once enabled, the plugin automatically takes over: Prompt injection, Gatekeeper interception, Pain signals, Context compression protection, and Thinking OS cognitive injection.
+
+> [!NOTE]
+> **Memory integration**: To let OpenClaw's search engine index `docs/` (where PLAN, OKR, and Principles live), add to `~/.openclaw/openclaw.json`:
+> ```json
+> { "agents": { "defaults": { "memorySearch": { "extraPaths": ["docs"] } } } }
+> ```
 
 ### Universal: Set Strategy (Recommended)
 ```bash

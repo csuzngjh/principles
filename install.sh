@@ -189,9 +189,9 @@ with open(target, 'w', encoding='utf-8') as f:
     json.dump(t_data, f, indent=2)
 "
 
-# 6.5. OpenClaw Workspace 集成（自动链接 docs/ 到 workspace）
+# 6.5. OpenClaw Workspace 集成（链接或拷贝 docs/ 到 workspace）
 # OpenClaw 的记忆系统只索引 workspaceDir/memory/ 下的文件。
-# 我们通过在 workspace 目录中创建符号链接，让 docs/ 也能被 extraPaths 发现。
+# 我们在 workspace 目录中创建链接（或拷贝），让 docs/ 能被 extraPaths 发现。
 echo "🔗 Detecting OpenClaw workspace..."
 
 OPENCLAW_STATE_DIR="${OPENCLAW_STATE_DIR:-$HOME/.openclaw}"
@@ -200,44 +200,48 @@ OPENCLAW_WORKSPACE="${OPENCLAW_WORKSPACE:-$OPENCLAW_STATE_DIR/workspace}"
 if [ -d "$OPENCLAW_WORKSPACE" ]; then
     echo "  ✅ OpenClaw workspace found: $OPENCLAW_WORKSPACE"
 
-    # 在 workspace 中创建指向项目 docs/ 的符号链接
     LINK_TARGET="$OPENCLAW_WORKSPACE/docs"
     DOCS_SOURCE="$TARGET_DIR/docs"
 
-    if [ -L "$LINK_TARGET" ]; then
-        echo "  - Symlink already exists: $LINK_TARGET → $(readlink "$LINK_TARGET")"
-        # 如果指向的源不同，更新链接
-        if [ "$(readlink "$LINK_TARGET")" != "$DOCS_SOURCE" ]; then
-            rm "$LINK_TARGET"
-            ln -s "$DOCS_SOURCE" "$LINK_TARGET"
-            echo "  - Updated symlink: $LINK_TARGET → $DOCS_SOURCE"
+    # 跨平台链接函数：优先符号链接，Windows 下回退为目录拷贝
+    create_link_or_copy() {
+        local src="$1"
+        local dest="$2"
+        # 尝试创建符号链接（Linux/macOS 总是成功，Windows 需要开发者模式）
+        if ln -s "$src" "$dest" 2>/dev/null; then
+            echo "  - Created symlink: $dest → $src"
+        else
+            # Windows 回退：直接拷贝目录
+            echo "  ⚠️  Symlink failed (Windows without Developer Mode?)."
+            echo "     Falling back to directory copy..."
+            cp -r "$src" "$dest"
+            echo "  - Copied: $src → $dest"
+            echo "  📌 NOTE: Changes to project docs/ will NOT auto-sync."
+            echo "     Re-run install.sh to update OpenClaw workspace docs."
         fi
+    }
+
+    if [ -L "$LINK_TARGET" ] 2>/dev/null; then
+        CURRENT=$(readlink "$LINK_TARGET" 2>/dev/null || echo "unknown")
+        echo "  - Link already exists: $LINK_TARGET → $CURRENT"
     elif [ -d "$LINK_TARGET" ]; then
-        echo "  ⚠️  $LINK_TARGET is a real directory (not a symlink). Skipping to avoid data loss."
-        echo "     To enable OpenClaw memory integration, manually add to ~/.openclaw/openclaw.json:"
-        echo '     "agents": { "defaults": { "memorySearch": { "extraPaths": ["docs"] } } }'
+        echo "  - docs/ directory already exists in workspace. Skipping."
     else
-        ln -s "$DOCS_SOURCE" "$LINK_TARGET"
-        echo "  - Created symlink: $LINK_TARGET → $DOCS_SOURCE"
+        create_link_or_copy "$DOCS_SOURCE" "$LINK_TARGET"
     fi
 
-    # 提示用户配置 extraPaths（如果尚未配置）
+    # 提示用户配置 extraPaths
     OPENCLAW_CONFIG="$OPENCLAW_STATE_DIR/openclaw.json"
     if [ -f "$OPENCLAW_CONFIG" ]; then
         if ! grep -q '"extraPaths"' "$OPENCLAW_CONFIG" 2>/dev/null; then
             echo ""
-            echo "  📌 IMPORTANT: To enable memory search on docs/, add to $OPENCLAW_CONFIG:"
+            echo "  📌 To enable memory search on docs/, add to $OPENCLAW_CONFIG:"
             echo '     "agents": { "defaults": { "memorySearch": { "extraPaths": ["docs"] } } }'
-        else
-            echo "  - extraPaths already configured in $OPENCLAW_CONFIG"
         fi
-    else
-        echo "  ℹ️  OpenClaw config not found at $OPENCLAW_CONFIG."
-        echo "     After first run, add memorySearch.extraPaths: [\"docs\"] to enable docs indexing."
     fi
 else
-    echo "  ℹ️  OpenClaw workspace not detected. Skipping workspace integration."
-    echo "     (This is normal for Claude Code-only installations.)"
+    echo "  ℹ️  OpenClaw workspace not detected. Skipping."
+    echo "     (Normal for Claude Code-only installations.)"
 fi
 
 # 7. 路径绝对化 (已移除，优先使用相对路径保证可移植性)
