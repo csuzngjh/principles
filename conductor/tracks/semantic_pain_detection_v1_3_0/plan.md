@@ -27,3 +27,6 @@
     - [x] **Write Tests**: Verify warning injection based on memory search hits.
     - [x] **Implement**: Update `src/hooks/prompt.ts` to perform a quick semantic search on intent and inject warnings.
 - [x] Task: Conductor - User Manual Verification 'Phase 3: Compaction & Pre-emptive Hooks' (Protocol in workflow.md)
+
+## Phase: Review Fixes
+- [x] Task: Apply review suggestions a7a71e2
