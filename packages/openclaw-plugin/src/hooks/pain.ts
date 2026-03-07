@@ -16,7 +16,7 @@ export function handleAfterToolCall(
     return;
   }
 
-  const stateDir = ctx.stateDir || path.join(ctx.workspaceDir, 'memory', '.state');
+  const stateDir = (ctx as any).stateDir || path.join(ctx.workspaceDir, 'memory', '.state');
   const config = ConfigService.get(stateDir);
 
   // ── Track A: Empirical Friction (GFI) ──

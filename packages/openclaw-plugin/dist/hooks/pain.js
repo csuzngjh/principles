@@ -3,16 +3,40 @@ import * as path from 'path';
 import { isRisky, normalizePath } from '../utils/io.js';
 import { normalizeProfile } from '../core/profile.js';
 import { computePainScore, writePainFlag } from '../core/pain.js';
+import { trackFriction, resetFriction } from '../core/session-tracker.js';
+import { denoiseError, computeHash } from '../utils/hashing.js';
+import { ConfigService } from '../core/config-service.js';
 export function handleAfterToolCall(event, ctx) {
+    if (!ctx.workspaceDir || !ctx.sessionId) {
+        return;
+    }
+    const stateDir = ctx.stateDir || path.join(ctx.workspaceDir, 'memory', '.state');
+    const config = ConfigService.get(stateDir);
+    // ── Track A: Empirical Friction (GFI) ──
+    // 1. Determine if this was a failure
+    const exitCode = (event.result && typeof event.result === 'object') ? event.result.exitCode : 0;
+    const isFailure = !!event.error || (exitCode !== 0 && exitCode !== undefined);
+    if (isFailure) {
+        const errorText = event.error || (typeof event.result === 'string' ? event.result : JSON.stringify(event.result));
+        const denoised = denoiseError(errorText);
+        const hash = computeHash(denoised);
+        // Default deltaF for tool errors from config
+        const deltaF = config.get('scores.tool_failure_friction') || 30;
+        trackFriction(ctx.sessionId, deltaF, hash);
+    }
+    else {
+        // Success! Reset friction
+        resetFriction(ctx.sessionId);
+    }
+    // ── Legacy/Risky Write Pain Logic ──
     // OpenClaw core tool names for file mutations (from tool-catalog.ts)
     const WRITE_TOOLS = ['write', 'edit', 'apply_patch'];
-    if (!ctx.workspaceDir || !WRITE_TOOLS.includes(event.toolName)) {
+    if (!WRITE_TOOLS.includes(event.toolName)) {
         return;
     }
-    // Only record pain on failure
-    if (!event.error && !(event.result && typeof event.result === 'object' && event.result.exitCode !== 0)) {
+    // Only record explicit pain flag on failure for write tools
+    if (!isFailure)
         return;
-    }
     const filePath = event.params.file_path || event.params.path || event.params.file;
     const relPath = typeof filePath === 'string' ? normalizePath(filePath, ctx.workspaceDir) : 'unknown';
     const profilePath = path.join(ctx.workspaceDir, 'docs', 'PROFILE.json');

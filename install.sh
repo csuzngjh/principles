@@ -4,18 +4,26 @@ set -e
 # Principles Disciple Installer (Smart Version)
 # 同时支持 Claude Code 和 OpenClaw 的一键安装脚本。
 
-# 1. 确定目标目录 (默认为当前目录)
-# 支持 --global 参数，自动指向 Claude Code 的全局配置目录 ~/.claude
-TARGET_DIR="$1"
+# 1. 确定参数
+# 支持 --global, --force, --lang en|zh
+TARGET_DIR=""
 FORCE_MODE=false
+SELECTED_LANG="en"
 
-if [[ "$1" == "--global" ]]; then
-    TARGET_DIR="$HOME/.claude"
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        --global) TARGET_DIR="$HOME/.claude"; shift ;;
+        --force) FORCE_MODE=true; shift ;;
+        --lang) SELECTED_LANG="$2"; shift 2 ;;
+        *) if [ -z "$TARGET_DIR" ]; then TARGET_DIR="$1"; fi; shift ;;
+    esac
+done
+
+if [[ "$TARGET_DIR" == "$HOME/.claude" ]]; then
     echo "🌍 GLOBAL INSTALLATION: Targeting ~/.claude for Claude Code."
-    if [[ "$2" == "--force" ]]; then FORCE_MODE=true; fi
-elif [[ "$2" == "--force" ]]; then
-    FORCE_MODE=true
 fi
+
+echo "🌐 Language set to: $SELECTED_LANG"
 
 TARGET_DIR="${TARGET_DIR:-$(pwd)}"
 TARGET_DIR="${TARGET_DIR%/}" # 去掉末尾的斜杠
@@ -94,32 +102,47 @@ safe_copy() {
 # 4. 复制核心组件 (使用 Smart Copy)
 echo "📦 Copying components..."
 
+# 定义语言目录
+LANG_DIR="$SOURCE_DIR/packages/openclaw-plugin/templates/langs/$SELECTED_LANG/claude"
+if [ ! -d "$LANG_DIR" ]; then
+    # 回退到 en
+    LANG_DIR="$SOURCE_DIR/packages/openclaw-plugin/templates/langs/en/claude"
+fi
+
 # Agents
-for f in "$SOURCE_DIR/agents/"*.md; do
+AGENT_SRC="${LANG_DIR}/agents"
+if [ ! -d "$AGENT_SRC" ]; then AGENT_SRC="$SOURCE_DIR/agents"; fi
+
+for f in "$AGENT_SRC/"*.md; do
     fname=$(basename "$f")
     smart_copy "$f" "$TARGET_DIR/.claude/agents/$fname"
 done
 
 # Skills (递归处理所有 SKILL.md)
-cd "$SOURCE_DIR/skills"
+SKILL_SRC="${LANG_DIR}/skills"
+if [ ! -d "$SKILL_SRC" ]; then SKILL_SRC="$SOURCE_DIR/skills"; fi
+
+cd "$SKILL_SRC"
 find . -type f -name "*" | while read f; do
-    smart_copy "$SOURCE_DIR/skills/$f" "$TARGET_DIR/.claude/skills/$f"
+    smart_copy "$SKILL_SRC/$f" "$TARGET_DIR/.claude/skills/$f"
 done
 cd "$SOURCE_DIR"
 
 # Hooks (Python Runner 总是更新，因为它是系统逻辑)
 cp "$SOURCE_DIR/hooks/"*.py "$TARGET_DIR/.claude/hooks/"
 cp "$SOURCE_DIR/hooks/hooks.json" "$TARGET_DIR/.claude/hooks/"
-# 原本这里的 sed 替换被移除，以保持路径的原始性和可预测性
 
 # Rules
-for f in "$SOURCE_DIR/templates/rules/"*.md; do
+RULE_SRC="${LANG_DIR}/rules"
+if [ ! -d "$RULE_SRC" ]; then RULE_SRC="$SOURCE_DIR/templates/rules"; fi
+
+for f in "$RULE_SRC/"*.md; do
     fname=$(basename "$f")
     smart_copy "$f" "$TARGET_DIR/.claude/rules/$fname"
 done
 
 # Templates (始终同步最新模板)
-cp "$SOURCE_DIR/templates/rules/00-kernel.md" "$TARGET_DIR/.claude/templates/"
+cp "$RULE_SRC/00-kernel.md" "$TARGET_DIR/.claude/templates/"
 cp "$SOURCE_DIR/docs/PROFILE.json" "$TARGET_DIR/.claude/templates/"
 cp "$SOURCE_DIR/docs/PROFILE.schema.json" "$TARGET_DIR/.claude/templates/"
 cp "$SOURCE_DIR/docs/DECISION_POLICY.json" "$TARGET_DIR/.claude/templates/"
@@ -268,9 +291,19 @@ try:
 except FileNotFoundError:
     cfg = {}
 
-# 注入 plugins.load.paths
+# 注入 plugins.entries
 if 'plugins' not in cfg:
     cfg['plugins'] = {}
+if 'entries' not in cfg['plugins']:
+    cfg['plugins']['entries'] = {}
+if 'principles-disciple' not in cfg['plugins']['entries']:
+    cfg['plugins']['entries']['principles-disciple'] = {}
+
+cfg['plugins']['entries']['principles-disciple']['enabled'] = True
+cfg['plugins']['entries']['principles-disciple']['language'] = '$SELECTED_LANG'
+print('  - Configured plugin language: $SELECTED_LANG')
+
+# 注入 plugins.load.paths
 if 'load' not in cfg['plugins']:
     cfg['plugins']['load'] = {}
 if 'paths' not in cfg['plugins']['load']:

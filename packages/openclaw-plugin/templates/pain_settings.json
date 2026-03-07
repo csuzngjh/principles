@@ -1,4 +1,5 @@
 {
+  "language": "en",
   "thresholds": {
     "pain_trigger": 30,
     "cognitive_paralysis_input": 4000,

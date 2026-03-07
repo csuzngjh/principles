@@ -119,11 +119,13 @@ export const EvolutionWorkerService = {
         const { workspaceDir, stateDir, logger } = ctx;
         logger.info(`[PD:EvolutionWorker] Starting background autonomous evolution service...`);
 
-        // Initialize state templates (like pain_dictionary.json) if missing
-        ensureStateTemplates({ logger }, stateDir);
-
         // Pre-load the config and dictionary
         const config = ConfigService.get(stateDir);
+        const language = config.get('language') || 'en';
+
+        // Initialize state templates (like pain_dictionary.json) if missing
+        ensureStateTemplates({ logger }, stateDir, language);
+        
         const dictionary = DictionaryService.get(stateDir);
 
         const pollInterval = config.get('intervals.worker_poll_ms') || (15 * 60 * 1000);

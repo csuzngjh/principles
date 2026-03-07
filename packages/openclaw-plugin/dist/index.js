@@ -8,6 +8,7 @@ import { handleInitStrategy, handleManageOkr } from './commands/strategy.js';
 import { handleEvolveTask } from './commands/evolver.js';
 import { handleBootstrapTools, handleResearchTools } from './commands/capabilities.js';
 import { handleThinkingOs } from './commands/thinking-os.js';
+import { handlePainCommand } from './commands/pain.js';
 import { EvolutionWorkerService } from './service/evolution-worker.js';
 import { ensureWorkspaceTemplates } from './core/init.js';
 const plugin = {
@@ -25,7 +26,8 @@ const plugin = {
             workspaceDir = process.cwd();
         }
         // ── Auto-initialize workspace ──
-        ensureWorkspaceTemplates(api, workspaceDir);
+        const language = api.pluginConfig?.language || 'en';
+        ensureWorkspaceTemplates(api, workspaceDir, language);
         // ── Prompt injection ──
         api.on('before_prompt_build', (event, ctx) => {
             try {
@@ -190,6 +192,20 @@ const plugin = {
                 }
                 catch (err) {
                     api.logger.error(`[PD] Command /thinking-os failed: ${String(err)}`);
+                    return { text: "Command failed. Check logs." };
+                }
+            }
+        });
+        api.registerCommand({
+            name: "pain",
+            description: "View Digital Nerve System status (GFI and Pain Dictionary)",
+            acceptsArgs: true,
+            handler: (ctx) => {
+                try {
+                    return handlePainCommand(ctx);
+                }
+                catch (err) {
+                    api.logger.error(`[PD] Command /pain failed: ${String(err)}`);
                     return { text: "Command failed. Check logs." };
                 }
             }

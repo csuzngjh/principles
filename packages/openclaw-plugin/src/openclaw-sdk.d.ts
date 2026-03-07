@@ -49,6 +49,7 @@ export type PluginCommandContext = {
     senderId?: string;
     channel: string;
     channelId?: string;
+    sessionId?: string;
     isAuthorizedSender: boolean;
     args?: string;
     commandBody: string;
@@ -99,6 +100,9 @@ export type PluginHookToolContext = {
     agentId?: string;
     sessionKey?: string;
     sessionId?: string;
+    /** Plugin-scoped state directory for persistent data. */
+    stateDir?: string;
+    workspaceDir?: string;
     runId?: string;
     toolName: string;
     toolCallId?: string;
