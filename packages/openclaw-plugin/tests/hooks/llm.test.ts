@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { handleLlmOutput } from '../../src/hooks/llm';
 import * as painFlags from '../../src/core/pain';
 import * as sessionTracker from '../../src/core/session-tracker';
-import { DictionaryService } from '../../src/core/dictionary-service';
+import { DetectionService } from '../../src/core/detection-service';
 import { ConfigService } from '../../src/core/config-service';
 import fs from 'fs';
 import path from 'path';
@@ -11,7 +11,7 @@ vi.mock('fs');
 vi.mock('../../src/core/pain', () => ({
     writePainFlag: vi.fn(),
 }));
-vi.mock('../../src/core/dictionary-service');
+vi.mock('../../src/core/detection-service');
 vi.mock('../../src/core/config-service');
 
 describe('LLM Cognitive Distress Hook', () => {
@@ -29,17 +29,23 @@ describe('LLM Cognitive Distress Hook', () => {
                 if (key === 'thresholds.cognitive_paralysis_input') return 4000;
                 if (key === 'scores.paralysis') return 40;
                 if (key === 'thresholds.pain_trigger') return 30;
+                if (key === 'scores.default_confusion') return 35;
                 return undefined;
             })
         };
         vi.mocked(ConfigService.get).mockReturnValue(mockConfig as any);
     });
 
-    it('should detect confusion patterns via dictionary', () => {
-        const mockDict = {
-            match: vi.fn().mockReturnValue({ ruleId: 'P_CONFUSION_EN', severity: 35 })
+    it('should detect confusion patterns via detection funnel (L1)', () => {
+        const mockFunnel = {
+            detect: vi.fn().mockReturnValue({ 
+                detected: true, 
+                severity: 35, 
+                ruleId: 'P_CONFUSION_EN',
+                source: 'l1_exact' 
+            })
         };
-        vi.mocked(DictionaryService.get).mockReturnValue(mockDict as any);
+        vi.mocked(DetectionService.get).mockReturnValue(mockFunnel as any);
 
         const mockEvent = {
             runId: 'r1',
@@ -55,16 +61,21 @@ describe('LLM Cognitive Distress Hook', () => {
             expect.objectContaining({ 
                 source: 'llm_p_confusion_en', 
                 score: '35',
-                reason: 'Agent triggered pain rule: P_CONFUSION_EN'
+                reason: expect.stringContaining('P_CONFUSION_EN')
             })
         );
     });
 
-    it('should detect loop patterns via dictionary', () => {
-        const mockDict = {
-            match: vi.fn().mockReturnValue({ ruleId: 'P_LOOP_ZH', severity: 45 })
+    it('should detect loop patterns via detection funnel (L1)', () => {
+        const mockFunnel = {
+            detect: vi.fn().mockReturnValue({ 
+                detected: true, 
+                severity: 45, 
+                ruleId: 'P_LOOP_ZH',
+                source: 'l1_exact' 
+            })
         };
-        vi.mocked(DictionaryService.get).mockReturnValue(mockDict as any);
+        vi.mocked(DetectionService.get).mockReturnValue(mockFunnel as any);
 
         const mockEvent = {
             runId: 'r1',
@@ -82,13 +93,12 @@ describe('LLM Cognitive Distress Hook', () => {
     });
 
     it('should detect cognitive paralysis even without dictionary match', () => {
-        const mockDict = {
-            match: vi.fn().mockReturnValue(undefined)
+        const mockFunnel = {
+            detect: vi.fn().mockReturnValue({ detected: false, source: 'l3_async_queued' })
         };
-        vi.mocked(DictionaryService.get).mockReturnValue(mockDict as any);
+        vi.mocked(DetectionService.get).mockReturnValue(mockFunnel as any);
 
         // Simulate paralysis in session tracker
-        // Needs > 3 turns to start counting stuckLoops, and then 3 consecutive stuck turns
         sessionTracker.trackLlmOutput(sessionId, { input: 5000, output: 10 }); // turn 1
         sessionTracker.trackLlmOutput(sessionId, { input: 5000, output: 10 }); // turn 2
         sessionTracker.trackLlmOutput(sessionId, { input: 5000, output: 10 }); // turn 3
@@ -112,11 +122,11 @@ describe('LLM Cognitive Distress Hook', () => {
         );
     });
 
-    it('should not produce pain flag on confident output', () => {
-        const mockDict = {
-            match: vi.fn().mockReturnValue(undefined)
+    it('should not produce pain flag on confident output (async queued)', () => {
+        const mockFunnel = {
+            detect: vi.fn().mockReturnValue({ detected: false, source: 'l3_async_queued' })
         };
-        vi.mocked(DictionaryService.get).mockReturnValue(mockDict as any);
+        vi.mocked(DetectionService.get).mockReturnValue(mockFunnel as any);
 
         const mockEvent = {
             runId: 'r1',
@@ -132,10 +142,10 @@ describe('LLM Cognitive Distress Hook', () => {
     });
 
     it('should track Thinking OS mental model usage when signal is detected', () => {
-        const mockDict = {
-            match: vi.fn().mockReturnValue(undefined)
+        const mockFunnel = {
+            detect: vi.fn().mockReturnValue({ detected: false, source: 'l3_async_queued' })
         };
-        vi.mocked(DictionaryService.get).mockReturnValue(mockDict as any);
+        vi.mocked(DetectionService.get).mockReturnValue(mockFunnel as any);
 
         const mockEvent = {
             runId: 'r1',

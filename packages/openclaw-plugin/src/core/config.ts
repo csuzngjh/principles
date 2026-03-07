@@ -7,6 +7,9 @@ export interface PainSettings {
         pain_trigger: number;
         cognitive_paralysis_input: number;
         stuck_loops_trigger: number;
+        semantic_min_score: number;
+        promotion_count_threshold: number;
+        promotion_similarity_threshold: number;
     };
     scores: {
         paralysis: number;
@@ -25,7 +28,10 @@ const DEFAULT_SETTINGS: PainSettings = {
     thresholds: {
         pain_trigger: 30,
         cognitive_paralysis_input: 4000,
-        stuck_loops_trigger: 3
+        stuck_loops_trigger: 3,
+        semantic_min_score: 0.7,
+        promotion_count_threshold: 3,
+        promotion_similarity_threshold: 0.8
     },
     scores: {
         paralysis: 40,

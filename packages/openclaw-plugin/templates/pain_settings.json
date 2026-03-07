@@ -3,7 +3,10 @@
   "thresholds": {
     "pain_trigger": 30,
     "cognitive_paralysis_input": 4000,
-    "stuck_loops_trigger": 3
+    "stuck_loops_trigger": 3,
+    "semantic_min_score": 0.7,
+    "promotion_count_threshold": 3,
+    "promotion_similarity_threshold": 0.8
   },
   "scores": {
     "paralysis": 40,

@@ -40,6 +40,9 @@ packages/openclaw-plugin/skills
 docs/AUDIT_TRAIL.log
 pr_description.txt
 
+# Spec files (internal design documents, not for public release)
+spec/
+
 # Runtime State and Development logs
 docs/.pain_flag
 docs/*.bak
