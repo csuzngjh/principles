@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { handleLlmOutput } from '../../src/hooks/llm';
 import * as painFlags from '../../src/core/pain';
 import * as sessionTracker from '../../src/core/session-tracker';
+import * as fs from 'fs';
+import * as path from 'path';
 
 vi.mock('../../src/core/pain', () => ({
     writePainFlag: vi.fn(),
@@ -93,5 +95,40 @@ describe('LLM Cognitive Distress Hook', () => {
         handleLlmOutput(mockEvent as any, { workspaceDir, sessionId } as any);
 
         expect(painFlags.writePainFlag).not.toHaveBeenCalled();
+    });
+
+    it('should track Thinking OS mental model usage when signal is detected', () => {
+        const mockEvent = {
+            runId: 'r1',
+            sessionId,
+            provider: 'test',
+            model: 'test',
+            assistantTexts: ["According to Occam's Razor, the simplest approach is best."],
+        };
+
+        const usageLogPath = path.join(workspaceDir, 'docs', '.thinking_os_usage.json');
+
+        let writeCount = 0;
+        vi.spyOn(fs, 'existsSync').mockImplementation((p: fs.PathOrFileDescriptor) => {
+            if (p.toString() === usageLogPath && writeCount > 0) return true;
+            return false;
+        });
+
+        const mockWrite = vi.fn();
+        vi.spyOn(fs, 'writeFileSync').mockImplementation(mockWrite);
+
+        handleLlmOutput(mockEvent as any, { workspaceDir, sessionId } as any);
+        console.log(JSON.stringify(mockWrite.mock.calls, null, 2));
+
+        expect(mockWrite).toHaveBeenCalledWith(
+            usageLogPath,
+            expect.stringContaining('"T-06": 1'),
+            'utf8'
+        );
+        expect(mockWrite).toHaveBeenCalledWith(
+            usageLogPath,
+            expect.stringContaining('"_total_turns": 1'),
+            'utf8'
+        );
     });
 });
