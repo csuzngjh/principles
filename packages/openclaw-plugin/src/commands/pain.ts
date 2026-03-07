@@ -10,17 +10,18 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
     const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
     const stateDir = (ctx.config?.stateDir as string) || path.join(workspaceDir, 'memory', '.state');
     const args = (ctx.args || '').trim();
+    const sessionId = (ctx as any).sessionId;
 
     if (args === 'reset') {
-        if (ctx.sessionId) {
-            resetFriction(ctx.sessionId);
+        if (sessionId) {
+            resetFriction(sessionId);
             return { text: `✅ GFI for current session reset to 0.` };
         }
         return { text: `⚠️ No active session to reset.` };
     }
     
     const dictionary = DictionaryService.get(stateDir);
-    const session = ctx.sessionId ? getSession(ctx.sessionId) : undefined;
+    const session = sessionId ? getSession(sessionId) : undefined;
     
     let report = `# 🦷 Principles Disciple — Digital Nerve System Status\n\n`;
     
