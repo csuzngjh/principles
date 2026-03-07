@@ -95,7 +95,7 @@ DEBUG: PROJECT_DIR=/mnt/d/code/principles
 DEBUG: is_risky=false
 DEBUG: require_plan=true
 DEBUG: PLAN=/mnt/d/code/principles/docs/PLAN.md
--rwxrwxrwx 1 csuzngjh csuzngjh 90 Jan 22 11:54 /mnt/d/code/principles/docs/PLAN.md
+-rwxrwxrwx 1 username username 90 Jan 22 11:54 /mnt/d/code/principles/docs/PLAN.md
 ```
 
 ---
