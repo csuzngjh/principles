@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as readline from 'readline';
-import type { PluginHookBeforeResetEvent, PluginHookBeforeCompactionEvent, PluginHookAgentContext } from '../openclaw-sdk.js';
+import type { PluginHookBeforeResetEvent, PluginHookBeforeCompactionEvent, PluginHookAfterCompactionEvent, PluginHookAgentContext } from '../openclaw-sdk.js';
 
 export async function handleBeforeReset(
   event: PluginHookBeforeResetEvent,
@@ -102,7 +102,7 @@ async function extractPainFromSessionFile(sessionFile: string, workspaceDir: str
       const semanticPath = path.join(workspaceDir, 'memory', 'pain', 'confusion_samples.md');
       const semanticDir = path.dirname(semanticPath);
       if (!fs.existsSync(semanticDir)) fs.mkdirSync(semanticDir, { recursive: true });
-      
+
       let semanticEntry = `\n### Sample ${timestamp}\n- Source: compaction\n\n\`\`\`\n${painPoints.join('\n---\n')}\n\`\`\`\n`;
       fs.appendFileSync(semanticPath, semanticEntry, 'utf8');
     } catch (_e) {
@@ -136,3 +136,20 @@ export async function handleBeforeCompaction(
   }
 }
 
+export async function handleAfterCompaction(
+  event: PluginHookAfterCompactionEvent,
+  ctx: PluginHookAgentContext
+): Promise<void> {
+  if (!ctx.workspaceDir) return;
+
+  const dateStr = new Date().toISOString().split('T')[0];
+  const checkpointPath = path.join(ctx.workspaceDir, 'memory', `${dateStr}.md`);
+  const log =
+    `- Post-Compaction Complete. Reduced active context to ${event.messageCount} messages.\n`;
+
+  try {
+    fs.appendFileSync(checkpointPath, log, 'utf8');
+  } catch (_e) {
+    // Non-critical — skip silently
+  }
+}

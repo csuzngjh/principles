@@ -188,6 +188,49 @@ Thinking OS is the system's **meta-cognitive layer** -- it doesn't tell the agen
 
 ---
 
+### 👥 Deep Reflection (The "Shoulder Angel" AI) — **NEW in V1.4.0**
+
+> *Imagine your AI having its own internal advisor to double-check its work before showing it to you.*
+
+Normally, an AI just blurts out its first thought. With **Deep Reflection**, when the AI is faced with a tricky or complex coding task, it can pause and summon a "Shadow AI" in the background. This shadow clone acts like a strict editor or an angel on its shoulder, tearing apart the initial idea to find blind spots and risks.
+
+**Why is this awesome for you?**
+* **Higher Quality Code**: The AI argues with *itself* to find the best approach, meaning you get a heavily criticized, polished final result instead of a flawed first draft.
+* **No Chat Clutter**: All of this intense "brainstorming" happens invisibly in the background. You won't see annoying walls of text or "internal monologue" flooding your screen.
+* **Zero Extra Work**: The AI knows exactly when a problem is hard enough to need a second opinion and triggers this process completely automatically.
+
+---
+
+## 🗺️ Roadmap & Vision
+
+> *From a tool that executes commands to a partner that grows with you.*
+
+### The Journey
+
+| Version | Milestone | Core Theme |
+|---------|-----------|------------|
+| **V1.4** | ✅ Current | **Cognitive Depth** — Deep Reflection, Thinking OS |
+| **V1.5** | Next | **Transparency** — Evolution Daily Report |
+| **V1.6** | Planned | **Meta-Learning** — Learning to Learn |
+| **V1.7** | Planned | **Symbiosis** — Co-Evolution |
+| **V2.0** | Vision | **Companionship** — Emotional System |
+
+### What's Coming
+
+**V1.5 — Evolution Daily Report**
+The agent proactively reports its growth through messages, emails, or voice — turning invisible background evolution into tangible progress you can feel.
+
+**V1.6 — Meta-Learning**
+A foundational capability: the agent learns *how to learn*. With minimal external interaction, it rapidly acquires new knowledge and skills in unfamiliar domains.
+
+**V1.7 — Co-Evolution**
+Your capabilities grow alongside the agent's. It compensates for your blind spots; you amplify its strengths. A true symbiotic partnership where both sides evolve together.
+
+**V2.0 — Emotional System**
+Beyond pure logic. The agent develops emotional awareness — genuine partnership, not simulated empathy. It becomes a companion that truly understands you.
+
+---
+
 ### 🔌 OpenClaw Plugin Architecture
 
 For OpenClaw users, this framework is deeply integrated via the native Plugin SDK, providing:
