@@ -47,10 +47,11 @@ describe('init', () => {
             
             vi.mocked(fs.existsSync).mockImplementation((p) => {
                 const pathStr = p.toString();
+                const normalizedPath = pathStr.replace(/\\/g, '/');
                 // Template exists, but destination does not
-                if (pathStr.includes('templates/pain_settings.json')) return true;
-                if (pathStr.endsWith('pain_settings.json')) return false;
-                if (pathStr.endsWith('stateDir')) return false;
+                if (normalizedPath.includes('templates/pain_settings.json')) return true;
+                if (normalizedPath.endsWith('pain_settings.json')) return false;
+                if (normalizedPath.endsWith('stateDir')) return false;
                 return existsPaths.has(pathStr);
             });
 
@@ -85,15 +86,16 @@ describe('init', () => {
             
             vi.mocked(fs.existsSync).mockImplementation((p) => {
                 const pathStr = p.toString();
+                const normalizedPath = pathStr.replace(/\\/g, '/');
                 // State dir exists
-                if (pathStr === stateDir) return true;
+                if (normalizedPath === stateDir) return true;
                 // pain_settings.json template exists
-                if (pathStr.includes('templates/pain_settings.json')) return true;
+                if (normalizedPath.includes('templates/pain_settings.json')) return true;
                 // zh-CN dictionary template exists
-                if (pathStr.includes('templates/langs/zh-CN/pain_dictionary.json')) return true;
+                if (normalizedPath.includes('templates/langs/zh-CN/pain_dictionary.json')) return true;
                 // Destination files don't exist
-                if (pathStr.endsWith('pain_settings.json')) return false;
-                if (pathStr.endsWith('pain_dictionary.json')) return false;
+                if (normalizedPath.endsWith('pain_settings.json')) return false;
+                if (normalizedPath.endsWith('pain_dictionary.json')) return false;
                 return false;
             });
 
@@ -102,7 +104,8 @@ describe('init', () => {
             const copyCalls = vi.mocked(fs.copyFileSync).mock.calls;
             const dictCall = copyCalls.find(c => c[1].toString().endsWith('pain_dictionary.json'));
             expect(dictCall).toBeDefined();
-            expect(dictCall?.[0].toString()).toContain('zh-CN');
+            const dictSrcPath = dictCall?.[0].toString().replace(/\\/g, '/');
+            expect(dictSrcPath).toContain('zh-CN');
         });
 
         it('should copy en dictionary as fallback when language-specific not found', () => {
@@ -111,10 +114,11 @@ describe('init', () => {
             // Return true for most template checks, but destination files don't exist
             vi.mocked(fs.existsSync).mockImplementation((p) => {
                 const pathStr = p.toString();
+                const normalizedPath = pathStr.replace(/\\/g, '/');
                 // stateDir exists
-                if (pathStr === stateDir) return true;
+                if (normalizedPath === stateDir) return true;
                 // Template files exist
-                if (pathStr.includes('templates')) return true;
+                if (normalizedPath.includes('templates')) return true;
                 // Destination files don't exist (force copy)
                 return false;
             });
