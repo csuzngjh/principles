@@ -11,6 +11,7 @@ import { handleThinkingOs } from './commands/thinking-os.js';
 import { handlePainCommand } from './commands/pain.js';
 import { EvolutionWorkerService } from './service/evolution-worker.js';
 import { ensureWorkspaceTemplates } from './core/init.js';
+import { SystemLogger } from './core/system-logger.js';
 // Track initialization to avoid repeated calls
 let workspaceInitialized = false;
 const plugin = {
@@ -29,6 +30,7 @@ const plugin = {
                 // Initialize workspace templates once (uses correct workspaceDir from context)
                 if (!workspaceInitialized && ctx.workspaceDir) {
                     ensureWorkspaceTemplates(api, ctx.workspaceDir, language);
+                    SystemLogger.log(ctx.workspaceDir, 'SYSTEM_BOOT', `Principles Disciple online. Language: ${language}`);
                     workspaceInitialized = true;
                 }
                 return await handleBeforePromptBuild(event, { ...ctx, api });
@@ -88,7 +90,7 @@ const plugin = {
             }
         });
         // ── Subagent propagation ──
-        api.on('subagent_spawning', (event, _ctx) => {
+        api.on('subagent_spawning', (event, ctx) => {
             try {
                 api.logger.info(`[PD] Subagent spawning: ${event.agentId} (child: ${event.childSessionKey}). Principles protocol injected.`);
                 return { status: "ok" };

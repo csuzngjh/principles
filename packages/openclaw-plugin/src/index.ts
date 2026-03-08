@@ -134,7 +134,6 @@ const plugin = {
       (event: PluginHookSubagentSpawningEvent, ctx: PluginHookSubagentContext): PluginHookSubagentSpawningResult => {
         try {
           api.logger.info(`[PD] Subagent spawning: ${event.agentId} (child: ${event.childSessionKey}). Principles protocol injected.`);
-          SystemLogger.log(ctx.workspaceDir, 'SUBAGENT_SPAWN', `Spawning ${event.agentId} (child: ${event.childSessionKey}). Executing cognitive alignment.`);
           return { status: "ok" };
         } catch (err) {
           api.logger.error(`[PD] Error in subagent_spawning: ${String(err)}`);
