@@ -94,12 +94,15 @@ Use cron tool:
 }
 ```
 
-### Step 5: Report Generation (Scheduled or Manual Trigger)
+### Step 5: Report Generation (Triggered via cron or manually)
 
-1. Read data sources
-2. Calculate evolution metrics
-3. Generate Markdown based on user style
-4. Send report
+1. **Read Quantitative Data**: Fetch metrics from `daily-stats.json` and `pain_dictionary.json`.
+2. **Extract Qualitative Memory (Critical Anti-Forgetting Step)**: Because your context window may have rolled over, you **MUST use file reading tools** to scan the following core evolution files for today's entries:
+   - `docs/ISSUE_LOG.md`: Find specific errors and reflections recorded today.
+   - `docs/DECISIONS.md`: Find new architectural rules established today.
+   - `docs/SYSTEM.log`: Find gatekeeper blocks or subagent spawn events from today.
+3. **Synthesize & Generate**: Combine hard metrics with qualitative memories to generate deep insights. Never hallucinate insights.
+4. **Send Report**: Dispatch via OpenClaw channel or print to screen.
 
 ---
 
@@ -107,10 +110,12 @@ Use cron tool:
 
 | Data | Path | Description |
 |------|------|-------------|
-| Daily stats | `{stateDir}/logs/daily-stats.json` | Aggregated data |
-| Raw events | `{stateDir}/logs/events.jsonl` | Detailed audit |
-| Pain rules | `{stateDir}/pain_dictionary.json` | Rule count |
-| User config | `{stateDir}/daily-report.md` | Preferences |
+| Daily Stats | `{stateDir}/logs/daily-stats.json` | Aggregated data (Success rate/GFI) |
+| System Events | `docs/SYSTEM.log` | Audit trail for gatekeeper and subagents |
+| Core Reflections | `docs/ISSUE_LOG.md` | **(Critical)** Specific pitfalls and lessons learned today |
+| Decisions | `docs/DECISIONS.md` | **(Critical)** Systemic principles solidified today |
+| Pain Rules | `{stateDir}/pain_dictionary.json` | Total active rules |
+| User Config | `{stateDir}/daily-report.md` | Formatting preferences |
 
 ---
 

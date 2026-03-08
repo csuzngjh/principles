@@ -96,10 +96,13 @@ disable-model-invocation: true
 
 ### Step 5: 日报生成（定时触发或手动触发）
 
-1. 读取数据源
-2. 计算进化指标
-3. 按用户风格生成 Markdown
-4. 发送日报
+1. **读取定量数据**：获取 `daily-stats.json` 和 `pain_dictionary.json` 中的指标。
+2. **提取定性记忆（关键防遗忘步骤）**：因为你可能经历了漫长的上下文，**必须使用文件读取工具**去扫描以下核心进化文件，提取“今天”新增的内容：
+   - `docs/ISSUE_LOG.md`：寻找今天发生的具体错误与复盘。
+   - `docs/DECISIONS.md`：寻找今天定下的新架构规则。
+   - `docs/SYSTEM.log`：寻找今天触发的门禁拦截或子代理孵化事件。
+3. **合成与生成**：结合定量指标和定性记忆，生成深度洞察，按用户风格生成 Markdown。绝不要凭空捏造洞察。
+4. **发送日报**：通过 OpenClaw 渠道或打印到屏幕。
 
 ---
 
@@ -107,8 +110,10 @@ disable-model-invocation: true
 
 | 数据 | 路径 | 说明 |
 |------|------|------|
-| 每日统计 | `{stateDir}/logs/daily-stats.json` | 聚合数据 |
-| 原始事件 | `{stateDir}/logs/events.jsonl` | 详细审计 |
+| 每日统计 | `{stateDir}/logs/daily-stats.json` | 聚合数据 (成功率/GFI) |
+| 系统事件 | `docs/SYSTEM.log` | 门禁拦截/子代理活动的审计日志 |
+| 核心复盘 | `docs/ISSUE_LOG.md` | **(重要)** 记录了今天踩过的坑和具体教训 |
+| 架构决策 | `docs/DECISIONS.md` | **(重要)** 记录了今天固化的系统级原则 |
 | Pain 规则 | `{stateDir}/pain_dictionary.json` | 规则数量 |
 | 用户配置 | `{stateDir}/daily-report.md` | 偏好设置 |
 
