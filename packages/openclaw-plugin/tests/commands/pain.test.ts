@@ -20,12 +20,12 @@ describe('Pain Command', () => {
             consecutiveErrors: 2
         } as any);
 
-        const result = handlePainCommand({ sessionId: 's1', config: {} } as any);
+        const result = handlePainCommand({ sessionId: 's1', config: {} } as any, 'zh');
         
         expect(result.text).toContain('Principles Disciple — Digital Nerve System Status');
         expect(result.text).toContain('经验摩擦指数');
         expect(result.text).toContain('45.5');
-        expect(result.text).toContain('Cognitive Confusion (En)');
+        expect(result.text).toContain('认知困惑 (英)');
         expect(result.text).toContain('5');
         expect(result.text).toContain('🟡');
     });

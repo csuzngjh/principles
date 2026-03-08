@@ -99,19 +99,21 @@ describe('LLM Cognitive Distress Hook', () => {
         vi.mocked(DetectionService.get).mockReturnValue(mockFunnel as any);
 
         // Simulate paralysis in session tracker
-        sessionTracker.trackLlmOutput(sessionId, { input: 5000, output: 10 }); // turn 1
-        sessionTracker.trackLlmOutput(sessionId, { input: 5000, output: 10 }); // turn 2
-        sessionTracker.trackLlmOutput(sessionId, { input: 5000, output: 10 }); // turn 3
-        sessionTracker.trackLlmOutput(sessionId, { input: 5000, output: 10 }); // turn 4 (stuckLoops = 1)
-        sessionTracker.trackLlmOutput(sessionId, { input: 5000, output: 10 }); // turn 5 (stuckLoops = 2)
-        sessionTracker.trackLlmOutput(sessionId, { input: 5000, output: 10 }); // turn 6 (stuckLoops = 3)
+        sessionTracker.trackLlmOutput(sessionId, { input: 9000, output: 10 }); // turn 1
+        sessionTracker.trackLlmOutput(sessionId, { input: 9000, output: 10 }); // turn 2
+        sessionTracker.trackLlmOutput(sessionId, { input: 9000, output: 10 }); // turn 3
+        sessionTracker.trackLlmOutput(sessionId, { input: 9000, output: 10 }); // turn 4
+        sessionTracker.trackLlmOutput(sessionId, { input: 9000, output: 10 }); // turn 5
+        sessionTracker.trackLlmOutput(sessionId, { input: 9000, output: 10 }); // turn 6 (stuckLoops = 1)
+        sessionTracker.trackLlmOutput(sessionId, { input: 9000, output: 10 }); // turn 7 (stuckLoops = 2)
+        sessionTracker.trackLlmOutput(sessionId, { input: 9000, output: 10 }); // turn 8 (stuckLoops = 3)
 
         const mockEvent = {
             runId: 'r1',
             sessionId,
             provider: 'test',
             assistantTexts: ["..."],
-            usage: { input: 5000, output: 10 }
+            usage: { input: 9000, output: 10 }
         };
 
         handleLlmOutput(mockEvent as any, { workspaceDir, sessionId } as any);

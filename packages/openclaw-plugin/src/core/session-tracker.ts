@@ -189,9 +189,9 @@ export function trackLlmOutput(sessionId: string, usage: TokenUsage | undefined,
         state.cacheHits += usage.cacheRead || 0;
 
         // Use thresholds from config or defaults
-        const minTurns = 3;
-        const outputThreshold = 50;
-        const inputThreshold = config ? config.get('thresholds.cognitive_paralysis_input') : 4000;
+        const minTurns = 5; // Increased from 3 to 5 to prevent false positives on short tasks
+        const outputThreshold = 30; // Decreased from 50. Only penalize truly stunted outputs.
+        const inputThreshold = config ? config.get('thresholds.cognitive_paralysis_input') : 8000; // Increased base to 8k
 
         // Very rough heuristic for empty/paralysis loops: high input context, tiny output, multiple turns
         if (state.llmTurns > minTurns) {
