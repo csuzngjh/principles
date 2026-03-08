@@ -23,7 +23,6 @@
 > *Beyond algorithms—we are coding cognition. Join the collective to distill human wisdom into an OS for artificial minds.*
 > Inspired by Ray Dalio's *Principles*.
 
-[![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-Plugin-5865F2)](https://code.claude.com)
 [![OpenClaw Plugin](https://img.shields.io/badge/OpenClaw-Native%20Plugin-FF6B35)](https://github.com/nicepkg/openclaw)
 
 [English](README.md) | [中文](README_ZH.md)
@@ -40,13 +39,12 @@
 > - **Expectation**: Be patient. Let it run in your real-world projects for at least **3-5 days**. Its "muscles" (principles) only grow through the resistance of real work.
 
 
-Principles Disciple is a **cross-platform evolutionary agent framework** that supports both **Claude Code** and **OpenClaw**. It transforms your AI assistant into a digital lifeform capable of **self-defense, self-reflection, and self-evolution**. Through Gatekeeping, Profiling, OKRs, and Pain signals, it prevents the AI from blindly executing harmful prompts and learns from every failure.
+Principles Disciple is an **evolutionary agent framework** for OpenClaw. It transforms your AI assistant into a digital lifeform capable of **self-defense, self-reflection, and self-evolution**. Through Gatekeeping, Profiling, OKRs, and Pain signals, it prevents the AI from blindly executing harmful prompts and learns from every failure.
 
-### Supported Platforms
+### Supported Platform
 
 | Platform | Installation | Features |
 |---|---|---|
-| **Claude Code** | `install.sh` scaffold | Driven by Rules + Hooks (Shell) |
 | **OpenClaw** | Native Plugin (`packages/openclaw-plugin`) | Leverages Plugin SDK full-lifecycle hooks |
 
 ---
@@ -58,66 +56,37 @@ Principles Disciple is a **cross-platform evolutionary agent framework** that su
 | Requirement | Version | Notes |
 |---|---|---|
 | **Node.js** | ≥ 18 | Required for OpenClaw plugin |
-| **Python 3** | ≥ 3.8 | Required for Claude Code hooks |
-| **Bash** | any | macOS/Linux native; Windows via **Git Bash** or **WSL** |
 
 ### Supported Platforms
 
-| Platform | Claude Code (`install.sh`) | OpenClaw (Plugin) |
+| Platform | OpenClaw (Plugin) |
 |---|---|---|
-| **macOS** | ✅ Native | ✅ Native |
-| **Linux** | ✅ Native | ✅ Native |
-| **Windows (WSL)** | ✅ Recommended | ✅ Native |
-| **Windows (Git Bash)** | ✅ Works | ✅ Native |
-| **Windows (PowerShell)** | ❌ Use WSL/Git Bash | ✅ Native |
+| **macOS** | ✅ Native |
+| **Linux** | ✅ Native |
+| **Windows** | ✅ Native |
 
 > [!TIP]
-> **Windows users**: `install.sh` is a Bash script. Run it in **Git Bash** (bundled with [Git for Windows](https://git-scm.com/download/win)) or **WSL**. The OpenClaw plugin is pure Node.js and works everywhere.
+> The OpenClaw plugin is pure Node.js and works everywhere.
 
-### Method A: Claude Code
-
-```bash
-# 💡 Project-level (Recommended for teams)
-bash install.sh /path/to/your/project
-
-# 🌍 Global-level (Available across all your projects)
-bash install.sh --global
-```
-*`install.sh` merges smartly: it keeps your existing custom rules, and system updates are saved as `*.update` files.*
-
-### Method B: OpenClaw
+### Installation
 
 ```bash
-# 1. Build the plugin
-cd packages/openclaw-plugin
-npm install && npm run build
+# 一键安装 OpenClaw 插件
+bash install-openclaw.sh --lang zh
 
-# 2. Register the plugin in ~/.openclaw/openclaw.json
-# Add to the "plugins" section:
-# { "load": { "paths": ["/absolute/path/to/packages/openclaw-plugin"] } }
+# 支持的参数
+# --lang zh|en  选择语言 (默认: zh)
+# --force       强制覆盖已有配置
 ```
-> Once enabled, the plugin automatically takes over: Prompt injection, Gatekeeper interception, Pain signals, Context compression protection, and Thinking OS cognitive injection.
 
-> [!NOTE]
-> **Memory integration**: To let OpenClaw's search engine index `docs/` (where PLAN, OKR, and Principles live), add to `~/.openclaw/openclaw.json`:
-> ```json
-> { "agents": { "defaults": { "memorySearch": { "extraPaths": ["docs"] } } } }
-> ```
-
-> [!TIP]
-> **One-command install**: If OpenClaw is already installed, simply run:
-> ```bash
-> bash install.sh /path/to/your/project
-> ```
-> The script auto-detects OpenClaw, builds the plugin, and injects both `plugins.load.paths` and `memorySearch.extraPaths` into `~/.openclaw/openclaw.json`.
+安装完成后重启 OpenClaw Gateway：
+```bash
+openclaw gateway --force
+```
 
 ## 📁 System Directory Structure
 
-Understanding where files live helps you manage your agent's "brain" across different frameworks.
-
-### Claude Code Locations
-- **Project**: `your-project/.claude/` (agents, hooks, settings)
-- **Global**: `~/.claude/` (global agents, global settings)
+Understanding where files live helps you manage your agent's "brain".
 
 ### OpenClaw Locations
 OpenClaw uses a centralized state directory at `~/.openclaw/`:
@@ -171,17 +140,6 @@ When the AI veers off track, you are the pilot with the highest authority.
 * **`/profile "Frontend: Expert"`**: Tell the AI you are an expert to reduce verbosity and increase adherence.
 * **`/inject-rule "No Python"`**: Immediately inject a temporary rule.
 * **`/admin repair`**: System files corrupted? One-click repair.
-
-### ⚡ Parallel Mode
-Leverage Claude Code's `Tasks` feature to "play two roles."
-
-1. **Set Task ID**:
-   ```bash
-   export CLAUDE_CODE_TASK_LIST_ID=my-feature
-   ```
-2. **Open Main Window**: Run `claude`, responsible for writing code.
-3. **Open Sub Window**: Set the same ID and run `claude`, responsible for Review or writing tests.
-4. **Effect**: Both windows share the task status and sync in real-time!
 
 ---
 
@@ -328,6 +286,20 @@ If you encounter plugin errors (e.g., Hook crashes), please check the system log
 cat docs/SYSTEM.log
 ```
 Submit the log contents to the developers.
+
+> [!TIP]
+> **OpenClaw Plugin Logs**: The OpenClaw plugin maintains its own log files in `{stateDir}/logs/`:
+> - `events.jsonl` — Structured event log (tool calls, pain signals, gate blocks, evolution tasks)
+> - `daily-stats.json` — Aggregated daily statistics
+> - `plugin.log` — Plugin runtime logs
+>
+> **Default location**: `~/.openclaw/workspace/memory/.state/logs/`
+> - If you configured a custom `stateDir` in `~/.openclaw/openclaw.json`, replace the path accordingly.
+>
+> Check logs:
+> ```bash
+> cat ~/.openclaw/workspace/memory/.state/logs/plugin.log
+> ```
 
 ---
 

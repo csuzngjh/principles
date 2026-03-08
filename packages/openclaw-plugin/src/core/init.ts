@@ -19,16 +19,17 @@ export function ensureWorkspaceTemplates(api: OpenClawPluginApi, workspaceDir: s
             copyMissingFiles(commonTemplatesDir, workspaceDir, api);
         }
 
-        // 2. Copy language-specific templates (SOUL.md, HEARTBEAT.md, etc.)
-        let langTemplatesDir = path.resolve(__dirname, '..', '..', 'templates', 'langs', language);
-        if (!fs.existsSync(langTemplatesDir)) {
-            api.logger.warn(`[PD] Language pack '${language}' not found. Falling back to 'en'.`);
-            langTemplatesDir = path.resolve(__dirname, '..', '..', 'templates', 'langs', 'en');
+        // 2. Copy language-specific core templates (SOUL.md, HEARTBEAT.md, etc.) to workspace root
+        let coreTemplatesDir = path.resolve(__dirname, '..', '..', 'templates', 'langs', language, 'core');
+        if (!fs.existsSync(coreTemplatesDir)) {
+            api.logger.warn(`[PD] Language pack '${language}' core templates not found. Falling back to 'zh'.`);
+            coreTemplatesDir = path.resolve(__dirname, '..', '..', 'templates', 'langs', 'zh', 'core');
         }
         
-        if (fs.existsSync(langTemplatesDir)) {
-            api.logger.info(`[PD] Initializing ${language} templates in ${workspaceDir}...`);
-            copyMissingFiles(langTemplatesDir, workspaceDir, api);
+        if (fs.existsSync(coreTemplatesDir)) {
+            api.logger.info(`[PD] Initializing ${language} core templates in ${workspaceDir}...`);
+            // Copy core files directly to workspace root (not in a subdirectory)
+            copyMissingFiles(coreTemplatesDir, workspaceDir, api);
         }
 
         // 3. Copy pain memory seed files (V1.3.0) - Language Aware

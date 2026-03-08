@@ -23,25 +23,29 @@ describe('Session Tracker', () => {
         // 1st turn
         trackLlmOutput(sessionId, { input: 100, output: 500 });
         // 2nd turn
-        trackLlmOutput(sessionId, { input: 4500, output: 20 });
+        trackLlmOutput(sessionId, { input: 8500, output: 20 });
         // 3rd turn
-        trackLlmOutput(sessionId, { input: 4800, output: 15 });
+        trackLlmOutput(sessionId, { input: 8800, output: 15 });
+        // 4th turn
+        trackLlmOutput(sessionId, { input: 9000, output: 10 });
+        // 5th turn
+        trackLlmOutput(sessionId, { input: 9100, output: 8 });
 
         let state = getSession(sessionId);
-        expect(state?.stuckLoops).toBe(0); // Needs > 3 turns total
+        expect(state?.stuckLoops).toBe(0); // Needs > 5 turns total
 
-        // 4th turn (should trigger loop detection)
-        trackLlmOutput(sessionId, { input: 5000, output: 10 });
+        // 6th turn (should trigger loop detection)
+        trackLlmOutput(sessionId, { input: 9200, output: 10 });
         state = getSession(sessionId);
         expect(state?.stuckLoops).toBe(1);
 
-        // 5th turn (continues loop)
-        trackLlmOutput(sessionId, { input: 5200, output: 5 });
+        // 7th turn (continues loop)
+        trackLlmOutput(sessionId, { input: 9300, output: 5 });
         state = getSession(sessionId);
         expect(state?.stuckLoops).toBe(2);
 
-        // 6th turn (breaks out, high output)
-        trackLlmOutput(sessionId, { input: 5200, output: 300 });
+        // 8th turn (breaks out, high output)
+        trackLlmOutput(sessionId, { input: 9400, output: 300 });
         state = getSession(sessionId);
         expect(state?.stuckLoops).toBe(1); // decrements
     });

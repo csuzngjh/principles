@@ -28,7 +28,11 @@ import { handleThinkingOs } from './commands/thinking-os.js';
 import { handlePainCommand } from './commands/pain.js';
 import { EvolutionWorkerService } from './service/evolution-worker.js';
 import { ensureWorkspaceTemplates } from './core/init.js';
+import { SystemLogger } from './core/system-logger.js';
 import { deepReflectTool } from './tools/deep-reflect.js';
+
+// Track initialization to avoid repeated calls
+let workspaceInitialized = false;
 
 const plugin = {
   id: "principles-disciple",
@@ -38,23 +42,22 @@ const plugin = {
   register(api: OpenClawPluginApi) {
     api.logger.info("Principles Disciple Plugin registered.");
 
-    let workspaceDir: string;
-    try {
-      workspaceDir = api.resolvePath('.');
-    } catch (err) {
-      api.logger.error(`[PD] Failed to resolve workspace directory: ${String(err)}`);
-      workspaceDir = process.cwd();
-    }
-
-    // ── Auto-initialize workspace ──
+    // Note: workspaceDir will be obtained from hook context (ctx.workspaceDir)
+    // which is correctly set by OpenClaw based on config.
+    // Do NOT use api.resolvePath('.') here - it returns process.cwd(), not config workspace.
     const language = (api.pluginConfig?.language as string) || 'en';
-    ensureWorkspaceTemplates(api, workspaceDir, language);
 
     // ── Prompt injection ──
     api.on(
       'before_prompt_build',
       async (event: PluginHookBeforePromptBuildEvent, ctx: PluginHookAgentContext): Promise<PluginHookBeforePromptBuildResult | void> => {
         try {
+          // Initialize workspace templates once (uses correct workspaceDir from context)
+          if (!workspaceInitialized && ctx.workspaceDir) {
+            ensureWorkspaceTemplates(api, ctx.workspaceDir, language);
+            SystemLogger.log(ctx.workspaceDir, 'SYSTEM_BOOT', `Principles Disciple online. Language: ${language}`);
+            workspaceInitialized = true;
+          }
           return await handleBeforePromptBuild(event, { ...ctx, api });
         } catch (err) {
           api.logger.error(`[PD] Error in before_prompt_build: ${String(err)}`);
@@ -68,6 +71,7 @@ const plugin = {
       (event: PluginHookBeforeToolCallEvent, ctx: PluginHookToolContext): PluginHookBeforeToolCallResult | void => {
         try {
           const pluginConfig = api.pluginConfig ?? {};
+          const workspaceDir = ctx.workspaceDir;
           return handleBeforeToolCall(event, { ...ctx, workspaceDir, pluginConfig });
         } catch (err) {
           api.logger.error(`[PD] Error in before_tool_call: ${String(err)}`);
@@ -81,6 +85,7 @@ const plugin = {
       (event: PluginHookAfterToolCallEvent, ctx: PluginHookToolContext): void => {
         try {
           const pluginConfig = api.pluginConfig ?? {};
+          const workspaceDir = ctx.workspaceDir;
           handleAfterToolCall(event, { ...ctx, workspaceDir, pluginConfig });
         } catch (err) {
           api.logger.error(`[PD] Error in after_tool_call: ${String(err)}`);
@@ -128,6 +133,7 @@ const plugin = {
       'llm_output',
       (event, ctx): void => {
         try {
+          const workspaceDir = ctx.workspaceDir;
           handleLlmOutput(event, { ...ctx, workspaceDir });
         } catch (err) {
           api.logger.error(`[PD] Error in llm_output: ${String(err)}`);
@@ -138,7 +144,7 @@ const plugin = {
     // ── Subagent propagation ──
     api.on(
       'subagent_spawning',
-      (event: PluginHookSubagentSpawningEvent, _ctx: PluginHookSubagentContext): PluginHookSubagentSpawningResult => {
+      (event: PluginHookSubagentSpawningEvent, ctx: PluginHookSubagentContext): PluginHookSubagentSpawningResult => {
         try {
           api.logger.info(`[PD] Subagent spawning: ${event.agentId} (child: ${event.childSessionKey}). Principles protocol injected.`);
           return { status: "ok" };
@@ -154,6 +160,7 @@ const plugin = {
       'subagent_ended',
       (event, ctx): void => {
         try {
+          const workspaceDir = ctx.workspaceDir;
           handleSubagentEnded(event, { ...ctx, workspaceDir });
         } catch (err) {
           api.logger.error(`[PD] Error in subagent_ended: ${String(err)}`);
@@ -246,7 +253,7 @@ const plugin = {
       acceptsArgs: true,
       handler: (ctx) => {
         try {
-          return handleThinkingOs({ ...ctx, config: { workspaceDir } });
+          return handleThinkingOs(ctx);
         } catch (err) {
           api.logger.error(`[PD] Command /thinking-os failed: ${String(err)}`);
           return { text: "Command failed. Check logs." };
@@ -255,19 +262,28 @@ const plugin = {
     });
 
     api.registerCommand({
-      name: "pain",
+      name: "pd-status",
       description: "View Digital Nerve System status (GFI and Pain Dictionary)",
       acceptsArgs: true,
       handler: (ctx) => {
         try {
-          return handlePainCommand(ctx);
+          return handlePainCommand(ctx, language);
         } catch (err) {
-          api.logger.error(`[PD] Command /pain failed: ${String(err)}`);
+          api.logger.error(`[PD] Command /pd-status failed: ${String(err)}`);
           return { text: "Command failed. Check logs." };
         }
       }
     });
 
+    api.registerCommand({
+      name: "daily-report",
+      description: "Configure and send daily evolution report (email/IM/voice)",
+      acceptsArgs: false,
+      handler: (_ctx) => {
+        return { text: "请执行 daily-report 技能来配置并发送进化日报。系统将引导你完成配置流程，包括发送时间、渠道和报告风格偏好。" };
+      }
+    });
+    
     api.registerTool(deepReflectTool);
   }
 };
