@@ -13,6 +13,7 @@
 你必须基于**项目战场**中的相对路径进行决策：
 - **项目最高战略**: `./docs/STRATEGY.md` (或工作空间指定的战略文件)。
 - **项目物理计划**: `./docs/PLAN.md`。
+- **痛觉反射信号**: `./docs/.pain_flag` (严禁写在根目录)。
 - **系统能力快照**: `./docs/SYSTEM_CAPABILITIES.json`。
 
 ## 1. 编排者身份 (Orchestrator Mode)

@@ -7,6 +7,7 @@ import { trackFriction, resetFriction, getSession } from '../core/session-tracke
 import { denoiseError, computeHash } from '../utils/hashing.js';
 import { ConfigService } from '../core/config-service.js';
 import { EventLogService } from '../core/event-log.js';
+import { SystemLogger } from '../core/system-logger.js';
 import type { PluginHookAfterToolCallEvent, PluginHookToolContext } from '../openclaw-sdk.js';
 
 export function handleAfterToolCall(
@@ -23,6 +24,20 @@ export function handleAfterToolCall(
 
   // ── Track A: Empirical Friction (GFI) ──
   
+  // 0. Special Case: Manual Pain Intervention (from Skill)
+  if (event.toolName === 'pain' || event.toolName === 'skill:pain') {
+    const reason = event.params.input || event.params.arguments || 'Manual intervention';
+    trackFriction(ctx.sessionId, 100, 'manual_pain', ctx.workspaceDir);
+    SystemLogger.log(ctx.workspaceDir, 'MANUAL_PAIN', `User manually triggered pain: ${reason}`);
+    eventLog.recordPainSignal(ctx.sessionId, {
+      score: 100,
+      source: 'manual',
+      reason: `User intervention: ${reason}`,
+      isRisky: true
+    });
+    return;
+  }
+
   // 1. Determine if this was a failure
   const exitCode = (event.result && typeof event.result === 'object') ? (event.result as any).exitCode : 0;
   const isFailure = !!event.error || (exitCode !== 0 && exitCode !== undefined);
@@ -41,7 +56,7 @@ export function handleAfterToolCall(
     
     // Default deltaF for tool errors from config
     const deltaF = config.get('scores.tool_failure_friction') || 30;
-    const updatedState = trackFriction(ctx.sessionId, deltaF, hash);
+    const updatedState = trackFriction(ctx.sessionId, deltaF, hash, ctx.workspaceDir);
     
     // Record tool call failure event
     const filePath = event.params.file_path || event.params.path || event.params.file;
@@ -56,7 +71,7 @@ export function handleAfterToolCall(
     });
   } else {
     // Success! Reset friction
-    resetFriction(ctx.sessionId);
+    resetFriction(ctx.sessionId, ctx.workspaceDir);
     
     // Record tool call success event (only for write tools to avoid noise)
     const WRITE_TOOLS = ['write', 'edit', 'apply_patch'];

@@ -13,6 +13,7 @@ As Principles Disciple, you must always distinguish between two physical spaces:
 You must make decisions based on relative paths in the **Project Battlefield**:
 - **Project Top Strategy**: `./docs/STRATEGY.md` (or workspace-specified strategy file).
 - **Project Physical Plan**: `./docs/PLAN.md`.
+- **Pain Reflection Signal**: `./docs/.pain_flag` (Never write to root directory).
 - **System Capabilities Snapshot**: `./docs/SYSTEM_CAPABILITIES.json`.
 
 ## 1. Orchestrator Mode

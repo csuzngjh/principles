@@ -2,6 +2,8 @@ import { PluginHookLlmOutputEvent } from '../openclaw-sdk.js';
 import * as path from 'path';
 import * as fs from 'fs';
 import { PainConfig } from './config.js';
+import { SystemLogger } from './system-logger.js';
+import { EventLogService } from './event-log.js';
 
 export interface TokenUsage {
     input?: number;
@@ -13,6 +15,7 @@ export interface TokenUsage {
 
 export interface SessionState {
     sessionId: string;
+    workspaceDir?: string;
     toolReadsByFile: Record<string, number>;
     llmTurns: number;
     blockedAttempts: number;
@@ -136,11 +139,12 @@ export function flushAllSessions(): void {
     }
 }
 
-function getOrCreateSession(sessionId: string): SessionState {
+function getOrCreateSession(sessionId: string, workspaceDir?: string): SessionState {
     let state = sessions.get(sessionId);
     if (!state) {
         state = {
             sessionId,
+            workspaceDir,
             toolReadsByFile: {},
             llmTurns: 0,
             blockedAttempts: 0,
@@ -159,19 +163,23 @@ function getOrCreateSession(sessionId: string): SessionState {
         };
         sessions.set(sessionId, state);
     }
+    
+    if (workspaceDir && !state.workspaceDir) {
+        state.workspaceDir = workspaceDir;
+    }
     return state;
 }
 
-export function trackToolRead(sessionId: string, filePath: string): SessionState {
-    const state = getOrCreateSession(sessionId);
+export function trackToolRead(sessionId: string, filePath: string, workspaceDir?: string): SessionState {
+    const state = getOrCreateSession(sessionId, workspaceDir);
     const normalizedPath = path.posix.normalize(filePath.replace(/\\/g, '/'));
     state.toolReadsByFile[normalizedPath] = (state.toolReadsByFile[normalizedPath] || 0) + 1;
     state.lastActivityAt = Date.now();
     return state;
 }
 
-export function trackLlmOutput(sessionId: string, usage: TokenUsage | undefined, config?: PainConfig): SessionState {
-    const state = getOrCreateSession(sessionId);
+export function trackLlmOutput(sessionId: string, usage: TokenUsage | undefined, config?: PainConfig, workspaceDir?: string): SessionState {
+    const state = getOrCreateSession(sessionId, workspaceDir);
     state.llmTurns += 1;
     state.lastActivityAt = Date.now();
 
@@ -191,8 +199,12 @@ export function trackLlmOutput(sessionId: string, usage: TokenUsage | undefined,
             const isLargeInput = (usage.input || 0) > inputThreshold;
             if (isTinyOutput && isLargeInput) {
                 state.stuckLoops += 1;
+                SystemLogger.log(state.workspaceDir, 'EFFICIENCY_ALARM', `Stuck loop detected (Turn ${state.llmTurns}). Input: ${usage.input}, Output: ${usage.output}. Consecutive: ${state.stuckLoops}`);
             } else {
                 // Reset if we broke out of the tiny output loop
+                if (state.stuckLoops > 0) {
+                    SystemLogger.log(state.workspaceDir, 'EFFICIENCY_OK', `Broke out of stuck loop after ${state.stuckLoops} turns.`);
+                }
                 state.stuckLoops = Math.max(0, state.stuckLoops - 1);
             }
         }
@@ -204,8 +216,8 @@ export function trackLlmOutput(sessionId: string, usage: TokenUsage | undefined,
 /**
  * Tracks physical friction based on tool execution failures.
  */
-export function trackFriction(sessionId: string, deltaF: number, hash: string): SessionState {
-    const state = getOrCreateSession(sessionId);
+export function trackFriction(sessionId: string, deltaF: number, hash: string, workspaceDir?: string): SessionState {
+    const state = getOrCreateSession(sessionId, workspaceDir);
     
     if (hash && hash === state.lastErrorHash) {
         state.consecutiveErrors++;
@@ -216,8 +228,11 @@ export function trackFriction(sessionId: string, deltaF: number, hash: string): 
 
     // GFI formula with multiplier: GFI = GFI + (Delta_F * 1.5^(n-1))
     const multiplier = Math.pow(1.5, state.consecutiveErrors - 1);
-    state.currentGfi = (state.currentGfi || 0) + (deltaF * multiplier);
+    const addedFriction = deltaF * multiplier;
+    state.currentGfi = (state.currentGfi || 0) + addedFriction;
     state.lastActivityAt = Date.now();
+    
+    SystemLogger.log(state.workspaceDir, 'GFI_INC', `Friction added: +${addedFriction.toFixed(1)} (Base: ${deltaF}, Mult: ${multiplier.toFixed(2)}). Total GFI: ${state.currentGfi.toFixed(1)}`);
     
     // Update daily stats
     state.dailyToolFailures++;
@@ -232,8 +247,11 @@ export function trackFriction(sessionId: string, deltaF: number, hash: string): 
 /**
  * Resets the friction index upon successful action.
  */
-export function resetFriction(sessionId: string): SessionState {
-    const state = getOrCreateSession(sessionId);
+export function resetFriction(sessionId: string, workspaceDir?: string): SessionState {
+    const state = getOrCreateSession(sessionId, workspaceDir);
+    if (state.currentGfi > 0) {
+        SystemLogger.log(state.workspaceDir, 'GFI_RESET', `Friction reset to 0 (Was: ${state.currentGfi.toFixed(1)}). Action successful.`);
+    }
     state.currentGfi = 0;
     state.consecutiveErrors = 0;
     state.lastErrorHash = '';
