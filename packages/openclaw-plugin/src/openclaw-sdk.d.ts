@@ -11,6 +11,50 @@ export interface PluginLogger {
     error: (message: string) => void;
 }
 
+export interface SubagentRunParams {
+    sessionKey: string;
+    message: string;
+    extraSystemPrompt?: string;
+    deliver?: boolean;
+    agentId?: string;
+}
+
+export interface SubagentRunResult {
+    runId: string;
+}
+
+export interface SubagentWaitParams {
+    runId: string;
+    timeoutMs?: number;
+}
+
+export interface SubagentWaitResult {
+    status: 'ok' | 'timeout' | 'error';
+    error?: string;
+}
+
+export interface SubagentGetSessionMessagesParams {
+    sessionKey: string;
+}
+
+export interface SubagentGetSessionMessagesResult {
+    messages: unknown[];
+    assistantTexts: string[];
+}
+
+export interface SubagentDeleteSessionParams {
+    sessionKey: string;
+}
+
+export interface PluginRuntime {
+    subagent: {
+        run: (params: SubagentRunParams) => Promise<SubagentRunResult>;
+        waitForRun: (params: SubagentWaitParams) => Promise<SubagentWaitResult>;
+        getSessionMessages: (params: SubagentGetSessionMessagesParams) => Promise<SubagentGetSessionMessagesResult>;
+        deleteSession: (params: SubagentDeleteSessionParams) => Promise<void>;
+    };
+}
+
 export interface OpenClawPluginApi {
     id: string;
     name: string;
@@ -18,7 +62,7 @@ export interface OpenClawPluginApi {
     source: string;
     config: Record<string, unknown>;
     pluginConfig?: Record<string, unknown>;
-    runtime: unknown;
+    runtime: PluginRuntime;
     logger: PluginLogger;
     registerTool: (tool: unknown, opts?: unknown) => void;
     registerHook: (events: string | string[], handler: unknown, opts?: unknown) => void;
