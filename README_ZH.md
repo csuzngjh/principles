@@ -286,6 +286,20 @@ cat docs/SYSTEM.log
 ```
 将日志内容提交给开发者。
 
+> [!TIP]
+> **OpenClaw 插件日志**: OpenClaw 插件在 `{stateDir}/logs/` 目录下维护独立的日志文件：
+> - `events.jsonl` — 结构化事件日志（工具调用、Pain 信号、Gate 拦截、进化任务）
+> - `daily-stats.json` — 每日统计汇总
+> - `plugin.log` — 插件运行日志
+>
+> **默认位置**: `~/.openclaw/workspace/memory/.state/logs/`
+> - 如果你在 `~/.openclaw/openclaw.json` 中配置了自定义 `stateDir`，请相应替换路径。
+>
+> 查看日志：
+> ```bash
+> cat ~/.openclaw/workspace/memory/.state/logs/plugin.log
+> ```
+
 ---
 
 > *"Pain + Reflection = Progress"*

@@ -292,7 +292,10 @@ Submit the log contents to the developers.
 > - `daily-stats.json` — Aggregated daily statistics
 > - `plugin.log` — Plugin runtime logs
 >
-> Default `stateDir` is `~/.openclaw/workspace/memory/.state`. Check with:
+> **Default location**: `~/.openclaw/workspace/memory/.state/logs/`
+> - If you configured a custom `stateDir` in `~/.openclaw/openclaw.json`, replace the path accordingly.
+>
+> Check logs:
 > ```bash
 > cat ~/.openclaw/workspace/memory/.state/logs/plugin.log
 > ```
