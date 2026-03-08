@@ -1,5 +1,6 @@
 import { PluginHookLlmOutputEvent } from '../openclaw-sdk.js';
 import * as path from 'path';
+import * as fs from 'fs';
 import { PainConfig } from './config.js';
 
 export interface TokenUsage {
@@ -26,9 +27,114 @@ export interface SessionState {
     currentGfi: number;
     lastErrorHash: string;
     consecutiveErrors: number;
+    
+    // Daily statistics (persisted)
+    dailyToolCalls: number;
+    dailyToolFailures: number;
+    dailyPainSignals: number;
+    dailyGfiPeak: number;
 }
 
 const sessions = new Map<string, SessionState>();
+
+/** Directory for persisting session state */
+let persistDir: string | null = null;
+
+/** Debounce timer for persistence */
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Initialize persistence for session state.
+ * Call this once during plugin startup.
+ */
+export function initPersistence(stateDir: string): void {
+    persistDir = path.join(stateDir, 'sessions');
+    if (!fs.existsSync(persistDir)) {
+        fs.mkdirSync(persistDir, { recursive: true });
+    }
+    
+    // Load all existing sessions
+    loadAllSessions();
+}
+
+/**
+ * Get the file path for a session's persisted state.
+ */
+function getSessionPath(sessionId: string): string {
+    if (!persistDir) return '';
+    // Sanitize sessionId for filesystem
+    const safeId = sessionId.replace(/[/\\:]/g, '_');
+    return path.join(persistDir, `${safeId}.json`);
+}
+
+/**
+ * Load all persisted sessions from disk.
+ */
+function loadAllSessions(): void {
+    if (!persistDir || !fs.existsSync(persistDir)) return;
+    
+    try {
+        const files = fs.readdirSync(persistDir).filter(f => f.endsWith('.json'));
+        const now = Date.now();
+        const twoHoursAgo = now - 2 * 60 * 60 * 1000;
+        
+        for (const file of files) {
+            try {
+                const content = fs.readFileSync(path.join(persistDir, file), 'utf-8');
+                const state = JSON.parse(content) as SessionState;
+                
+                // Skip abandoned sessions
+                if (state.lastActivityAt < twoHoursAgo) {
+                    continue;
+                }
+                
+                sessions.set(state.sessionId, state);
+            } catch {
+                // Ignore corrupted files
+            }
+        }
+    } catch (err) {
+        // Ignore errors during load
+    }
+}
+
+/**
+ * Persist a single session to disk.
+ */
+function persistSession(state: SessionState): void {
+    if (!persistDir) return;
+    
+    const sessionPath = getSessionPath(state.sessionId);
+    if (!sessionPath) return;
+    
+    try {
+        fs.writeFileSync(sessionPath, JSON.stringify(state, null, 2), 'utf-8');
+    } catch {
+        // Ignore persistence errors
+    }
+}
+
+/**
+ * Schedule persistence with debounce.
+ */
+function schedulePersistence(state: SessionState): void {
+    if (persistTimer) {
+        clearTimeout(persistTimer);
+    }
+    persistTimer = setTimeout(() => {
+        persistSession(state);
+        persistTimer = null;
+    }, 1000);  // 1 second debounce
+}
+
+/**
+ * Force persist all sessions immediately.
+ */
+export function flushAllSessions(): void {
+    for (const state of sessions.values()) {
+        persistSession(state);
+    }
+}
 
 function getOrCreateSession(sessionId: string): SessionState {
     let state = sessions.get(sessionId);
@@ -46,6 +152,10 @@ function getOrCreateSession(sessionId: string): SessionState {
             currentGfi: 0,
             lastErrorHash: '',
             consecutiveErrors: 0,
+            dailyToolCalls: 0,
+            dailyToolFailures: 0,
+            dailyPainSignals: 0,
+            dailyGfiPeak: 0,
         };
         sessions.set(sessionId, state);
     }
@@ -108,6 +218,14 @@ export function trackFriction(sessionId: string, deltaF: number, hash: string): 
     const multiplier = Math.pow(1.5, state.consecutiveErrors - 1);
     state.currentGfi = (state.currentGfi || 0) + (deltaF * multiplier);
     state.lastActivityAt = Date.now();
+    
+    // Update daily stats
+    state.dailyToolFailures++;
+    state.dailyGfiPeak = Math.max(state.dailyGfiPeak, state.currentGfi);
+    
+    // Schedule persistence
+    schedulePersistence(state);
+    
     return state;
 }
 
@@ -119,6 +237,10 @@ export function resetFriction(sessionId: string): SessionState {
     state.currentGfi = 0;
     state.consecutiveErrors = 0;
     state.lastErrorHash = '';
+    
+    // Schedule persistence
+    schedulePersistence(state);
+    
     return state;
 }
 
@@ -143,6 +265,52 @@ export function garbageCollectSessions(): void {
     for (const [id, state] of sessions.entries()) {
         if (state.lastActivityAt < twoHoursAgo) {
             sessions.delete(id);
+            
+            // Also delete persisted file
+            if (persistDir) {
+                const sessionPath = getSessionPath(id);
+                if (sessionPath && fs.existsSync(sessionPath)) {
+                    try {
+                        fs.unlinkSync(sessionPath);
+                    } catch {
+                        // Ignore deletion errors
+                    }
+                }
+            }
         }
+    }
+}
+
+/**
+ * Get daily statistics summary for a session.
+ */
+export function getDailySummary(sessionId: string): {
+    toolCalls: number;
+    toolFailures: number;
+    painSignals: number;
+    gfiPeak: number;
+} | null {
+    const state = sessions.get(sessionId);
+    if (!state) return null;
+    
+    return {
+        toolCalls: state.dailyToolCalls,
+        toolFailures: state.dailyToolFailures,
+        painSignals: state.dailyPainSignals,
+        gfiPeak: state.dailyGfiPeak,
+    };
+}
+
+/**
+ * Reset daily statistics (call at midnight or on new day).
+ */
+export function resetDailyStats(sessionId: string): void {
+    const state = sessions.get(sessionId);
+    if (state) {
+        state.dailyToolCalls = 0;
+        state.dailyToolFailures = 0;
+        state.dailyPainSignals = 0;
+        state.dailyGfiPeak = 0;
+        schedulePersistence(state);
     }
 }
