@@ -337,6 +337,12 @@ export class EventLog {
 }
 
 // ============== Singleton Service ==============
+//
+// DESIGN NOTE: This singleton is per-process. In OpenClaw, each session runs in the same
+// process, so stateDir should be consistent. If stateDir changes (rare), a new instance
+// is created. For multi-process scenarios, each process has its own instance, which is
+// acceptable since event logs are persisted to disk and can be merged later.
+//
 
 let instance: EventLog | null = null;
 let lastStateDir: string | null = null;
