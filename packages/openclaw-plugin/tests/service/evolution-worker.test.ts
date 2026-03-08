@@ -1,8 +1,23 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EvolutionWorkerService } from '../../src/service/evolution-worker.js';
 import { DictionaryService } from '../../src/core/dictionary-service.js';
+import * as sessionTracker from '../../src/core/session-tracker.js';
+import * as eventLog from '../../src/core/event-log.js';
 
 vi.mock('../../src/core/dictionary-service');
+vi.mock('../../src/core/session-tracker', () => ({
+    initPersistence: vi.fn(),
+    flushAllSessions: vi.fn(),
+}));
+vi.mock('../../src/core/event-log', () => ({
+    EventLogService: {
+        get: vi.fn(() => ({
+            recordEvolutionTask: vi.fn(),
+            recordRulePromotion: vi.fn(),
+            flush: vi.fn(),
+        })),
+    },
+}));
 // Mocking checkPainFlag and processEvolutionQueue to avoid complex setup
 vi.mock('../../src/service/evolution-worker', async () => {
     const actual = await vi.importActual('../../src/service/evolution-worker') as any;
@@ -39,6 +54,8 @@ describe('EvolutionWorkerService', () => {
         vi.advanceTimersByTime(15 * 60 * 1000);
 
         expect(mockDict.flush).toHaveBeenCalled();
+        expect(sessionTracker.initPersistence).toHaveBeenCalledWith('/mock/state');
+        expect(sessionTracker.flushAllSessions).toHaveBeenCalled();
         
         EvolutionWorkerService.stop(ctx as any);
     });
