@@ -259,6 +259,15 @@ const plugin = {
         }
       }
     });
+
+    api.registerCommand({
+      name: "daily-report",
+      description: "Configure and send daily evolution report (email/IM/voice)",
+      acceptsArgs: false,
+      handler: (_ctx) => {
+        return { text: "请执行 daily-report 技能来配置并发送进化日报。系统将引导你完成配置流程，包括发送时间、渠道和报告风格偏好。" };
+      }
+    });
   }
 };
 
