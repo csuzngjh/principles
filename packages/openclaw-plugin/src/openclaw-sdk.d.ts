@@ -218,6 +218,12 @@ export type PluginHookBeforeCompactionEvent = {
     sessionFile?: string;
 };
 
+export type PluginHookAfterCompactionEvent = {
+    messageCount: number;
+    tokenCount?: number;
+    sessionFile?: string;
+};
+
 export type PluginHookSubagentSpawningEvent = {
     childSessionKey: string;
     agentId: string;
@@ -296,6 +302,11 @@ export type PluginHookHandlerMap = {
 
     before_compaction: (
         event: PluginHookBeforeCompactionEvent,
+        ctx: PluginHookAgentContext
+    ) => void | Promise<void>;
+
+    after_compaction: (
+        event: PluginHookAfterCompactionEvent,
         ctx: PluginHookAgentContext
     ) => void | Promise<void>;
 
