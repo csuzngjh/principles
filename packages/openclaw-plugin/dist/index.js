@@ -1,7 +1,7 @@
 import { handleBeforePromptBuild } from './hooks/prompt.js';
 import { handleBeforeToolCall } from './hooks/gate.js';
 import { handleAfterToolCall } from './hooks/pain.js';
-import { handleBeforeReset, handleBeforeCompaction } from './hooks/lifecycle.js';
+import { handleBeforeReset, handleBeforeCompaction, handleAfterCompaction } from './hooks/lifecycle.js';
 import { handleLlmOutput } from './hooks/llm.js';
 import { handleSubagentEnded } from './hooks/subagent.js';
 import { handleInitStrategy, handleManageOkr } from './commands/strategy.js';
@@ -11,6 +11,7 @@ import { handleThinkingOs } from './commands/thinking-os.js';
 import { handlePainCommand } from './commands/pain.js';
 import { EvolutionWorkerService } from './service/evolution-worker.js';
 import { ensureWorkspaceTemplates } from './core/init.js';
+import { deepReflectTool } from './tools/deep-reflect.js';
 const plugin = {
     id: "principles-disciple",
     name: "Principles Disciple",
@@ -73,6 +74,14 @@ const plugin = {
             }
             catch (err) {
                 api.logger.error(`[PD] Error in before_compaction: ${String(err)}`);
+            }
+        });
+        api.on('after_compaction', async (event, ctx) => {
+            try {
+                await handleAfterCompaction(event, ctx);
+            }
+            catch (err) {
+                api.logger.error(`[PD] Error in after_compaction: ${String(err)}`);
             }
         });
         // ── LLM Cognitive Tracking: Catch agent confusion ──
@@ -211,6 +220,7 @@ const plugin = {
                 }
             }
         });
+        api.registerTool(deepReflectTool);
     }
 };
 export default plugin;
