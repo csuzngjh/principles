@@ -112,3 +112,16 @@ export async function handleBeforeCompaction(event, ctx) {
         await extractPainFromSessionFile(event.sessionFile, ctx.workspaceDir);
     }
 }
+export async function handleAfterCompaction(event, ctx) {
+    if (!ctx.workspaceDir)
+        return;
+    const dateStr = new Date().toISOString().split('T')[0];
+    const checkpointPath = path.join(ctx.workspaceDir, 'memory', `${dateStr}.md`);
+    const log = `- Post-Compaction Complete. Reduced active context to ${event.messageCount} messages.\n`;
+    try {
+        fs.appendFileSync(checkpointPath, log, 'utf8');
+    }
+    catch (_e) {
+        // Non-critical — skip silently
+    }
+}
