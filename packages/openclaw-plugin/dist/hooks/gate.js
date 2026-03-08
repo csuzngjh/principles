@@ -2,6 +2,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { isRisky, normalizePath } from '../utils/io.js';
 import { normalizeProfile } from '../core/profile.js';
+import { EventLogService } from '../core/event-log.js';
+import { trackBlock } from '../core/session-tracker.js';
 export function handleBeforeToolCall(event, ctx) {
     const logger = ctx.logger;
     // 1. Identify if this is a file-mutation tool
@@ -57,13 +59,14 @@ export function handleBeforeToolCall(event, ctx) {
         if (profile.gate.require_plan_for_risk_paths) {
             const planPath = path.join(ctx.workspaceDir, 'docs', 'PLAN.md');
             let planReady = false;
+            let planStatus = 'UNKNOWN';
             if (fs.existsSync(planPath)) {
                 try {
                     const planContent = fs.readFileSync(planPath, 'utf8');
                     for (const line of planContent.split('\n')) {
                         if (line.trim().startsWith('STATUS:')) {
-                            const status = line.split(':')[1].trim().split(/\s+/)[0];
-                            if (status === 'READY') {
+                            planStatus = line.split(':')[1].trim().split(/\s+/)[0];
+                            if (planStatus === 'READY') {
                                 planReady = true;
                                 break;
                             }
@@ -76,6 +79,19 @@ export function handleBeforeToolCall(event, ctx) {
             }
             if (!planReady) {
                 logger?.warn?.(`[PD_GATE] BLOCKED: No READY plan for ${relPath}`);
+                // Track block in session state
+                if (ctx.sessionId) {
+                    trackBlock(ctx.sessionId);
+                }
+                // Record gate block event
+                const stateDir = ctx.stateDir || path.join(ctx.workspaceDir, 'memory', '.state');
+                const eventLog = EventLogService.get(stateDir);
+                eventLog.recordGateBlock(ctx.sessionId, {
+                    toolName: event.toolName,
+                    filePath: relPath,
+                    reason: 'No READY plan found',
+                    planStatus,
+                });
                 return {
                     block: true,
                     blockReason: `[PRINCIPLES_GATE] Write blocked for risk path '${relPath}'.\n` +

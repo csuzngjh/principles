@@ -7,6 +7,9 @@ import { ConfigService } from '../core/config-service.js';
 import { DetectionService } from '../core/detection-service.js';
 import { ensureStateTemplates } from '../core/init.js';
 import { extractCommonSubstring } from '../utils/nlp.js';
+import { SystemLogger } from '../core/system-logger.js';
+import { EventLogService } from '../core/event-log.js';
+import { initPersistence, flushAllSessions } from '../core/session-tracker.js';
 
 let intervalId: NodeJS.Timeout | null = null;
 
@@ -73,7 +76,7 @@ function checkPainFlag(workspaceDir: string, logger: any) {
     }
 }
 
-function processEvolutionQueue(workspaceDir: string, stateDir: string, logger: any) {
+function processEvolutionQueue(workspaceDir: string, stateDir: string, logger: any, eventLog: any) {
     const queuePath = path.join(workspaceDir, 'docs', 'evolution_queue.json');
     if (!fs.existsSync(queuePath)) return;
 
@@ -94,11 +97,18 @@ function processEvolutionQueue(workspaceDir: string, stateDir: string, logger: a
 
             if (!fs.existsSync(stateDir)) fs.mkdirSync(stateDir, { recursive: true });
             fs.writeFileSync(directivePath, JSON.stringify(directive, null, 2), 'utf8');
+            
+            // Record evolution task event
+            eventLog.recordEvolutionTask({
+                taskId: highestScoreTask.id,
+                taskType: highestScoreTask.source,
+                reason: highestScoreTask.reason,
+            });
         }
     } catch (err) {}
 }
 
-async function processDetectionQueue(stateDir: string, api: any) {
+async function processDetectionQueue(stateDir: string, api: any, eventLog: any) {
     const funnel = DetectionService.get(stateDir);
     const queue = funnel.flushQueue();
     if (queue.length === 0) return;
@@ -179,7 +189,7 @@ function recordCandidate(stateDir: string, text: string, match: any) {
     fs.writeFileSync(candidatePath, JSON.stringify(data, null, 2), 'utf8');
 }
 
-function processPromotion(stateDir: string, logger: any) {
+function processPromotion(stateDir: string, logger: any, eventLog: any) {
     const candidatePath = path.join(stateDir, 'pain_candidates.json');
     if (!fs.existsSync(candidatePath)) return;
 
@@ -202,6 +212,7 @@ function processPromotion(stateDir: string, logger: any) {
                     const ruleId = `P_PROMOTED_${fingerprint.toUpperCase()}`;
                     
                     logger.info(`[PD:EvolutionWorker] Promoting candidate ${fingerprint} to formal rule: ${ruleId} (Phrase: "${phrase}")`);
+                    SystemLogger.log(stateDir.replace(/\/memory\/\.state$/, ''), 'RULE_PROMOTED', `Candidate ${fingerprint} promoted to formal rule ${ruleId} based on ${cand.count} hits.`);
                     
                     dictionary.addRule(ruleId, {
                         type: 'exact_match',
@@ -213,6 +224,15 @@ function processPromotion(stateDir: string, logger: any) {
                     cand.status = 'promoted';
                     cand.promotedTo = ruleId;
                     promotedCount++;
+                    
+                    // Record rule promotion event
+                    eventLog.recordRulePromotion({
+                        ruleId,
+                        phrase,
+                        count: cand.count,
+                        avgSimilarity: cand.avgSimilarity,
+                        fingerprint,
+                    });
                 }
             }
         }
@@ -241,6 +261,15 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
         const api = this.api;
         logger.info(`[PD:EvolutionWorker] Starting background autonomous evolution service...`);
 
+        // Initialize persistence and event logging
+        initPersistence(stateDir);
+        const eventLog = EventLogService.get(stateDir, { 
+            info: (msg) => logger.info(msg), 
+            warn: (msg) => logger.warn(msg), 
+            error: (msg) => logger.error(msg),
+            debug: (msg) => logger.debug?.(msg)
+        });
+
         const config = ConfigService.get(stateDir);
         const language = config.get('language') || 'en';
 
@@ -253,26 +282,30 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
         intervalId = setInterval(() => {
             if (workspaceDir) {
                 checkPainFlag(workspaceDir, logger);
-                processEvolutionQueue(workspaceDir, stateDir, logger);
+                processEvolutionQueue(workspaceDir, stateDir, logger, eventLog);
             }
             if (api) {
-                processDetectionQueue(stateDir, api).catch(err => {
+                processDetectionQueue(stateDir, api, eventLog).catch(err => {
                     logger.error(`[PD:EvolutionWorker] Error in detection queue: ${String(err)}`);
                 });
             }
-            processPromotion(stateDir, logger);
+            processPromotion(stateDir, logger, eventLog);
             dictionary.flush();
+            
+            // Periodically flush event log
+            eventLog.flush();
+            flushAllSessions();
         }, pollInterval);
 
         setTimeout(() => {
             if (workspaceDir) {
                 checkPainFlag(workspaceDir, logger);
-                processEvolutionQueue(workspaceDir, stateDir, logger);
+                processEvolutionQueue(workspaceDir, stateDir, logger, eventLog);
             }
             if (api) {
-                processDetectionQueue(stateDir, api).catch(() => {});
+                processDetectionQueue(stateDir, api, eventLog).catch(() => {});
             }
-            processPromotion(stateDir, logger);
+            processPromotion(stateDir, logger, eventLog);
         }, initialDelay);
     },
 
@@ -285,6 +318,10 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
 
         if (ctx.stateDir) {
             DictionaryService.get(ctx.stateDir).flush();
+            
+            // Flush event log and sessions
+            EventLogService.get(ctx.stateDir).flush();
+            flushAllSessions();
         }
     }
 };
