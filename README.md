@@ -16,7 +16,7 @@
 
 ---
 
-# Principles Disciple: Evolutionary Agent Framework (v1.1.0)
+# Principles Disciple: Evolutionary Agent Framework (v1.4.0)
 
 > **Evolutionary Programming Agent Framework**
 
