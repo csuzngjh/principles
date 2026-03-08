@@ -11,6 +11,7 @@ import { handleThinkingOs } from './commands/thinking-os.js';
 import { handlePainCommand } from './commands/pain.js';
 import { EvolutionWorkerService } from './service/evolution-worker.js';
 import { ensureWorkspaceTemplates } from './core/init.js';
+import { deepReflectTool } from './tools/deep-reflect.js';
 const plugin = {
     id: "principles-disciple",
     name: "Principles Disciple",
@@ -211,6 +212,7 @@ const plugin = {
                 }
             }
         });
+        api.registerTool(deepReflectTool);
     }
 };
 export default plugin;
