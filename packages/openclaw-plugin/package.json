@@ -34,5 +34,8 @@
     "openclaw": {
       "optional": true
     }
+  },
+  "dependencies": {
+    "@sinclair/typebox": "^0.34.48"
   }
 }

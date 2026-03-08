@@ -33,6 +33,7 @@ describe('Plugin Integration', () => {
       registerCommand: vi.fn((command: any) => {
         registeredCommands.push(command);
       }),
+      registerTool: vi.fn(),
     };
 
     vi.mocked(fs.existsSync).mockReturnValue(false);
