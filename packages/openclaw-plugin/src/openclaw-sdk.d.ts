@@ -221,6 +221,7 @@ export type PluginHookBeforeCompactionEvent = {
 export type PluginHookAfterCompactionEvent = {
     messageCount: number;
     tokenCount?: number;
+    compactedCount: number;
     sessionFile?: string;
 };
 
