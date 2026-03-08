@@ -4,7 +4,7 @@ import * as path from 'path';
 /**
  * System Logger for Principles Disciple
  * Writes critical evolutionary events to workspaceDir/docs/SYSTEM.log
- * This provides undeniable proof of the framework's operation.
+ * Uses asynchronous writing to avoid blocking the Node.js event loop.
  */
 export const SystemLogger = {
     log(workspaceDir: string | undefined, eventType: string, message: string): void {
@@ -22,9 +22,12 @@ export const SystemLogger = {
             // Format: [YYYY-MM-DDTHH:mm:ss.sssZ] [EVENT_TYPE] Message
             const logEntry = `[${timestamp}] [${eventType.padEnd(15)}] ${message}\n`;
             
-            fs.appendFileSync(logFile, logEntry, 'utf8');
+            // Use fire-and-forget async append to prevent blocking
+            fs.appendFile(logFile, logEntry, 'utf8', (err) => {
+                // Silently drop errors (e.g. disk full) to not crash the gateway
+            });
         } catch (e) {
-            // Silently fail if we can't write to the workspace log
+            // Silently fail if we can't setup the log
         }
     }
 };
