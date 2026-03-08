@@ -53,7 +53,7 @@ const plugin = {
           // Initialize workspace templates once (uses correct workspaceDir from context)
           if (!workspaceInitialized && ctx.workspaceDir) {
             ensureWorkspaceTemplates(api, ctx.workspaceDir, language);
-            SystemLogger.log(ctx.workspaceDir, 'SYSTEM_BOOT', `Principles Disciple (v1.3.0) online. Language: ${language}`);
+            SystemLogger.log(ctx.workspaceDir, 'SYSTEM_BOOT', `Principles Disciple online. Language: ${language}`);
             workspaceInitialized = true;
           }
           return await handleBeforePromptBuild(event, { ...ctx, api });
