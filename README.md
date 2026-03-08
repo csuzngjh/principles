@@ -243,6 +243,36 @@ Normally, an AI just blurts out its first thought. With **Deep Reflection**, whe
 
 ---
 
+## 🗺️ Roadmap & Vision
+
+> *From a tool that executes commands to a partner that grows with you.*
+
+### The Journey
+
+| Version | Milestone | Core Theme |
+|---------|-----------|------------|
+| **V1.4** | ✅ Current | **Cognitive Depth** — Deep Reflection, Thinking OS |
+| **V1.5** | Next | **Transparency** — Evolution Daily Report |
+| **V1.6** | Planned | **Meta-Learning** — Learning to Learn |
+| **V1.7** | Planned | **Symbiosis** — Co-Evolution |
+| **V2.0** | Vision | **Companionship** — Emotional System |
+
+### What's Coming
+
+**V1.5 — Evolution Daily Report**
+The agent proactively reports its growth through messages, emails, or voice — turning invisible background evolution into tangible progress you can feel.
+
+**V1.6 — Meta-Learning**
+A foundational capability: the agent learns *how to learn*. With minimal external interaction, it rapidly acquires new knowledge and skills in unfamiliar domains.
+
+**V1.7 — Co-Evolution**
+Your capabilities grow alongside the agent's. It compensates for your blind spots; you amplify its strengths. A true symbiotic partnership where both sides evolve together.
+
+**V2.0 — Emotional System**
+Beyond pure logic. The agent develops emotional awareness — genuine partnership, not simulated empathy. It becomes a companion that truly understands you.
+
+---
+
 ### 🔌 OpenClaw Plugin Architecture
 
 For OpenClaw users, this framework is deeply integrated via the native Plugin SDK, providing:
