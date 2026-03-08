@@ -11,26 +11,26 @@ import { handleThinkingOs } from './commands/thinking-os.js';
 import { handlePainCommand } from './commands/pain.js';
 import { EvolutionWorkerService } from './service/evolution-worker.js';
 import { ensureWorkspaceTemplates } from './core/init.js';
+// Track initialization to avoid repeated calls
+let workspaceInitialized = false;
 const plugin = {
     id: "principles-disciple",
     name: "Principles Disciple",
     description: "Evolutionary programming agent framework with strategic guardrails and reflection loops.",
     register(api) {
         api.logger.info("Principles Disciple Plugin registered.");
-        let workspaceDir;
-        try {
-            workspaceDir = api.resolvePath('.');
-        }
-        catch (err) {
-            api.logger.error(`[PD] Failed to resolve workspace directory: ${String(err)}`);
-            workspaceDir = process.cwd();
-        }
-        // ── Auto-initialize workspace ──
+        // Note: workspaceDir will be obtained from hook context (ctx.workspaceDir)
+        // which is correctly set by OpenClaw based on config.
+        // Do NOT use api.resolvePath('.') here - it returns process.cwd(), not config workspace.
         const language = api.pluginConfig?.language || 'en';
-        ensureWorkspaceTemplates(api, workspaceDir, language);
         // ── Prompt injection ──
         api.on('before_prompt_build', async (event, ctx) => {
             try {
+                // Initialize workspace templates once (uses correct workspaceDir from context)
+                if (!workspaceInitialized && ctx.workspaceDir) {
+                    ensureWorkspaceTemplates(api, ctx.workspaceDir, language);
+                    workspaceInitialized = true;
+                }
                 return await handleBeforePromptBuild(event, { ...ctx, api });
             }
             catch (err) {
@@ -41,6 +41,7 @@ const plugin = {
         api.on('before_tool_call', (event, ctx) => {
             try {
                 const pluginConfig = api.pluginConfig ?? {};
+                const workspaceDir = ctx.workspaceDir;
                 return handleBeforeToolCall(event, { ...ctx, workspaceDir, pluginConfig });
             }
             catch (err) {
@@ -51,6 +52,7 @@ const plugin = {
         api.on('after_tool_call', (event, ctx) => {
             try {
                 const pluginConfig = api.pluginConfig ?? {};
+                const workspaceDir = ctx.workspaceDir;
                 handleAfterToolCall(event, { ...ctx, workspaceDir, pluginConfig });
             }
             catch (err) {
@@ -78,6 +80,7 @@ const plugin = {
         // ── LLM Cognitive Tracking: Catch agent confusion ──
         api.on('llm_output', (event, ctx) => {
             try {
+                const workspaceDir = ctx.workspaceDir;
                 handleLlmOutput(event, { ...ctx, workspaceDir });
             }
             catch (err) {
@@ -98,6 +101,7 @@ const plugin = {
         // ── Subagent outcome: Catch subagent failures ──
         api.on('subagent_ended', (event, ctx) => {
             try {
+                const workspaceDir = ctx.workspaceDir;
                 handleSubagentEnded(event, { ...ctx, workspaceDir });
             }
             catch (err) {
@@ -189,7 +193,7 @@ const plugin = {
             acceptsArgs: true,
             handler: (ctx) => {
                 try {
-                    return handleThinkingOs({ ...ctx, config: { workspaceDir } });
+                    return handleThinkingOs(ctx);
                 }
                 catch (err) {
                     api.logger.error(`[PD] Command /thinking-os failed: ${String(err)}`);
@@ -209,6 +213,14 @@ const plugin = {
                     api.logger.error(`[PD] Command /pain failed: ${String(err)}`);
                     return { text: "Command failed. Check logs." };
                 }
+            }
+        });
+        api.registerCommand({
+            name: "daily-report",
+            description: "Configure and send daily evolution report (email/IM/voice)",
+            acceptsArgs: false,
+            handler: (_ctx) => {
+                return { text: "请执行 daily-report 技能来配置并发送进化日报。系统将引导你完成配置流程，包括发送时间、渠道和报告风格偏好。" };
             }
         });
     }
