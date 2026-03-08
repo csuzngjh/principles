@@ -286,6 +286,17 @@ cat docs/SYSTEM.log
 ```
 Submit the log contents to the developers.
 
+> [!TIP]
+> **OpenClaw Plugin Logs**: The OpenClaw plugin maintains its own log files in `{stateDir}/logs/`:
+> - `events.jsonl` — Structured event log (tool calls, pain signals, gate blocks, evolution tasks)
+> - `daily-stats.json` — Aggregated daily statistics
+> - `plugin.log` — Plugin runtime logs
+>
+> Default `stateDir` is `~/.openclaw/workspace/memory/.state`. Check with:
+> ```bash
+> cat ~/.openclaw/workspace/memory/.state/logs/plugin.log
+> ```
+
 ---
 
 > *"Pain + Reflection = Progress"*
