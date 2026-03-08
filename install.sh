@@ -297,6 +297,26 @@ else
         echo "     Install Node.js ≥18, then run: cd $PLUGIN_DIR && npm install && npm run build"
     fi
 
+    # 步骤 1.5: 根据语言复制 skills 到插件目录
+    echo "  📚 Copying skills for language: $SELECTED_LANG ..."
+    SKILLS_SRC="$PLUGIN_DIR/templates/langs/$SELECTED_LANG/claude/skills"
+    SKILLS_DEST="$PLUGIN_DIR/skills"
+    
+    # 如果语言目录不存在，回退到英文
+    if [ ! -d "$SKILLS_SRC" ]; then
+        echo "  ⚠️  Language pack '$SELECTED_LANG' skills not found. Falling back to 'zh'."
+        SKILLS_SRC="$PLUGIN_DIR/templates/langs/zh/claude/skills"
+    fi
+    
+    # 清空目标目录并复制
+    rm -rf "$SKILLS_DEST"/*
+    if [ -d "$SKILLS_SRC" ]; then
+        cp -r "$SKILLS_SRC"/* "$SKILLS_DEST/"
+        echo "  ✅ Skills copied: $(ls "$SKILLS_DEST" | wc -l) skills installed."
+    else
+        echo "  ⚠️  No skills templates found. Skipping skills installation."
+    fi
+
     # 步骤 2: 注册插件路径到 openclaw.json
     echo "  ⚙️  Registering plugin in $OPENCLAW_CONFIG..."
     PLUGIN_DIST="$PLUGIN_DIR"
