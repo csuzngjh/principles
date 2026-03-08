@@ -7,6 +7,7 @@ import { ConfigService } from '../core/config-service.js';
 import { DetectionService } from '../core/detection-service.js';
 import { ensureStateTemplates } from '../core/init.js';
 import { extractCommonSubstring } from '../utils/nlp.js';
+import { SystemLogger } from '../core/system-logger.js';
 import { EventLogService } from '../core/event-log.js';
 import { initPersistence, flushAllSessions } from '../core/session-tracker.js';
 
@@ -211,6 +212,7 @@ function processPromotion(stateDir: string, logger: any, eventLog: any) {
                     const ruleId = `P_PROMOTED_${fingerprint.toUpperCase()}`;
                     
                     logger.info(`[PD:EvolutionWorker] Promoting candidate ${fingerprint} to formal rule: ${ruleId} (Phrase: "${phrase}")`);
+                    SystemLogger.log(stateDir.replace(/\/memory\/\.state$/, ''), 'RULE_PROMOTED', `Candidate ${fingerprint} promoted to formal rule ${ruleId} based on ${cand.count} hits.`);
                     
                     dictionary.addRule(ruleId, {
                         type: 'exact_match',
