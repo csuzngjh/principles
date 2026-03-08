@@ -18,7 +18,7 @@ export function handleLlmOutput(
     const config = ConfigService.get(stateDir);
 
     // Track this turn in the core session memory
-    const state = trackLlmOutput(ctx.sessionId, event.usage, config);
+    const state = trackLlmOutput(ctx.sessionId, event.usage, config, ctx.workspaceDir);
 
     // We need actual assistant text to analyze
     if (!event.assistantTexts || event.assistantTexts.length === 0) return;

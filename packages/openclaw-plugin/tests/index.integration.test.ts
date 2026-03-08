@@ -110,9 +110,9 @@ describe('Plugin Integration', () => {
         'bootstrap-tools',
         'research-tools',
         'thinking-os',
-        'pain',
+        'pd-status',
+        'daily-report'
       ];
-
       for (const cmd of expectedCommands) {
         expect(commandNames).toContain(cmd);
       }

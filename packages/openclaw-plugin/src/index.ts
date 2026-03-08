@@ -249,14 +249,14 @@ const plugin = {
     });
 
     api.registerCommand({
-      name: "pain",
+      name: "pd-status",
       description: "View Digital Nerve System status (GFI and Pain Dictionary)",
       acceptsArgs: true,
       handler: (ctx) => {
         try {
           return handlePainCommand(ctx);
         } catch (err) {
-          api.logger.error(`[PD] Command /pain failed: ${String(err)}`);
+          api.logger.error(`[PD] Command /pd-status failed: ${String(err)}`);
           return { text: "Command failed. Check logs." };
         }
       }
