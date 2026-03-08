@@ -230,6 +230,19 @@ Thinking OS is the system's **meta-cognitive layer** -- it doesn't tell the agen
 
 ---
 
+### 👥 Deep Reflection (The "Shoulder Angel" AI) — **NEW in V1.4.0**
+
+> *Imagine your AI having its own internal advisor to double-check its work before showing it to you.*
+
+Normally, an AI just blurts out its first thought. With **Deep Reflection**, when the AI is faced with a tricky or complex coding task, it can pause and summon a "Shadow AI" in the background. This shadow clone acts like a strict editor or an angel on its shoulder, tearing apart the initial idea to find blind spots and risks.
+
+**Why is this awesome for you?**
+* **Higher Quality Code**: The AI argues with *itself* to find the best approach, meaning you get a heavily criticized, polished final result instead of a flawed first draft.
+* **No Chat Clutter**: All of this intense "brainstorming" happens invisibly in the background. You won't see annoying walls of text or "internal monologue" flooding your screen.
+* **Zero Extra Work**: The AI knows exactly when a problem is hard enough to need a second opinion and triggers this process completely automatically.
+
+---
+
 ### 🔌 OpenClaw Plugin Architecture
 
 For OpenClaw users, this framework is deeply integrated via the native Plugin SDK, providing:
