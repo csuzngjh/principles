@@ -6,6 +6,7 @@ import { writePainFlag } from '../core/pain.js';
 import { DictionaryService } from '../core/dictionary-service.js';
 import { ConfigService } from '../core/config-service.js';
 import { DetectionService } from '../core/detection-service.js';
+import { EventLogService } from '../core/event-log.js';
 
 export function handleLlmOutput(
     event: PluginHookLlmOutputEvent,
@@ -27,6 +28,16 @@ export function handleLlmOutput(
     // ── Track B: Semantic Pain Detection (V1.3.0 Funnel) ──
     const detectionService = DetectionService.get(stateDir);
     const detection = detectionService.detect(text);
+    const eventLog = EventLogService.get(stateDir);
+
+    if (detection.detected) {
+        eventLog.recordRuleMatch(ctx.sessionId, {
+            ruleId: detection.ruleId || detection.source,
+            layer: detection.source === 'l1_exact' ? 'L1' : (detection.source === 'l2_cache' ? 'L2' : 'L3'),
+            severity: detection.severity || 0,
+            textPreview: text.substring(0, 100)
+        });
+    }
 
     let painScore = detection.detected ? (detection.severity || 0) : 0;
     let source = detection.detected 
@@ -60,6 +71,13 @@ export function handleLlmOutput(
             reason: matchedReason,
             is_risky: 'false',
             trigger_text_preview: snippet
+        });
+
+        eventLog.recordPainSignal(ctx.sessionId, {
+            score: painScore,
+            source: source,
+            reason: matchedReason,
+            isRisky: false
         });
     }
 
