@@ -49,19 +49,21 @@ printf "${RED}╔═════════════════════
 printf "${RED}║     🦞 Principles Disciple - OpenClaw Plugin Uninstaller    ║${NC}\n"
 printf "${RED}╚══════════════════════════════════════════════════════════════╝${NC}\n"
 printf "\n"
-printf "📁 插件目录: ${YELLOW}%s${NC}\n" "$PLUGIN_DIR"
-printf "📁 OpenClaw 配置: ${YELLOW}%s${NC}\n" "$OPENCLAW_CONFIG"
+printf "${YELLOW}⚠️  警告：此脚本将执行以下高危操作：${NC}\n"
+printf "1. 修改 ${CYAN}%s${NC} (注销插件)\n" "$OPENCLAW_CONFIG"
+printf "2. 删除 ${CYAN}%s/dist${NC} (编译产物)\n" "$PLUGIN_DIR"
+printf "3. 清空 ${CYAN}%s/skills/*${NC} (本地技能模板)\n" "$PLUGIN_DIR"
+printf "4. 删除 ${CYAN}%s${NC} 目录 (残留扩展数据)\n" "$HOME/.openclaw/extensions/principles-disciple"
 printf "\n"
 
 # ============================================================================
 # 1. 确认卸载
 # ============================================================================
 if [ "$FORCE_UNINSTALL" = false ]; then
-    printf "${YELLOW}确认要卸载 Principles Disciple 插件吗？${NC}\n"
-    printf "这将会从 OpenClaw 配置中移除该插件，并清理本地构建文件。\n"
-    read -p "请输入 [y/N]: " -n 1 -r
+    printf "${RED}确认要继续卸载吗？此操作不可撤销。${NC}\n"
+    read -p "请输入 'yes' 以确认卸载: " confirm
     printf "\n"
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    if [[ "$confirm" != "yes" ]]; then
         info "卸载已取消。"
         exit 0
     fi
@@ -125,9 +127,12 @@ printf "${YELLOW}🧹 步骤 2/3: 清理本地构建产物...${NC}\n"
 
 if [ -d "$PLUGIN_DIR" ]; then
     printf "  清理 %s...\n" "$PLUGIN_DIR"
-    rm -rf "$PLUGIN_DIR/dist"
-    rm -rf "$PLUGIN_DIR/node_modules"
-    rm -rf "$PLUGIN_DIR/skills"/*
+    [ -d "$PLUGIN_DIR/dist" ] && rm -rf "$PLUGIN_DIR/dist" && printf "  - 已删除 dist/\n"
+    [ -d "$PLUGIN_DIR/node_modules" ] && rm -rf "$PLUGIN_DIR/node_modules" && printf "  - 已删除 node_modules/\n"
+    if [ -d "$PLUGIN_DIR/skills" ]; then
+        rm -rf "$PLUGIN_DIR/skills"/*
+        printf "  - 已清空 skills/\n"
+    fi
     printf "  ${GREEN}✅ 清理完成${NC}\n"
 else
     warn "插件目录不存在，跳过文件清理。"
@@ -144,7 +149,7 @@ WORKSPACE_EXT_DIR="$SCRIPT_DIR/.openclaw/extensions/principles-disciple"
 
 for old_dir in "$GLOBAL_EXT_DIR" "$WORKSPACE_EXT_DIR"; do
     if [ -d "$old_dir" ]; then
-        printf "  删除 %s...\n" "$old_dir"
+        printf "  正在删除残留目录: %s...\n" "$old_dir"
         rm -rf "$old_dir"
         printf "  ${GREEN}✅ 已删除${NC}\n"
     fi
@@ -164,10 +169,10 @@ printf "下一步操作:\n"
 printf "  1. 重启 OpenClaw Gateway 使变更生效:\n"
 printf "     ${CYAN}openclaw gateway --force${NC}\n"
 printf "\n"
-printf "  2. (可选) 如果你想删除项目中的 Principles 核心文件，请手动删除:\n"
+printf "  2. (可选) 如果你想删除项目中的 Principles 核心文件，请${RED}手动删除${NC}:\n"
 printf "     - docs/PLAN.md\n"
 printf "     - docs/PRINCIPLES.md\n"
 printf "     - docs/PROFILE.json\n"
 printf "     - memory/.state/\n"
 printf "\n"
-printf "感谢使用 Principles Disciple，欢迎下次再来进化！🦞👋\n"
+printf "感谢使用 Principles Disciple！🦞👋\n"
