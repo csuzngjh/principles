@@ -33,7 +33,7 @@ describe('Pre-Write Gate Hook', () => {
 
     expect(result).toBeDefined();
     expect(result?.block).toBe(true);
-    expect(result?.blockReason).toContain('Write blocked');
+    expect(result?.blockReason).toContain('Modification blocked');
   });
 
   it('should allow risky write when plan is READY', () => {
@@ -86,5 +86,62 @@ describe('Pre-Write Gate Hook', () => {
      const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
  
      expect(result).toBeUndefined();
+  });
+
+  describe('Path & Tool Regression Tests', () => {
+    it('should intercept "exec" command creating a file in protected path', () => {
+      const mockCtx = { workspaceDir };
+      const mockEvent = { 
+          toolName: 'exec', 
+          params: { command: 'mkdir -p src/new_dir && echo "// test" >> src/new_dir/test.ts' } 
+      };
+
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockImplementation(() => {
+        return JSON.stringify({ risk_paths: ['src/'], gate: { require_plan_for_risk_paths: true } });
+      });
+
+      const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
+
+      expect(result).toBeDefined();
+      expect(result?.block).toBe(true);
+      expect(result?.blockReason).toContain('Modification blocked');
+    });
+
+    it('should NOT intercept "bash" read-only commands even with risky keywords', () => {
+      const mockCtx = { workspaceDir };
+      const mockEvent = { 
+          toolName: 'bash', 
+          params: { command: 'ls -R src/secret_logic' } 
+      };
+
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockImplementation(() => {
+        return JSON.stringify({ risk_paths: ['src/'], gate: { require_plan_for_risk_paths: true } });
+      });
+
+      const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
+
+      // Read-only commands should be allowed
+      expect(result).toBeUndefined();
+    });
+
+    it('should intercept improved regex with multiple flags', () => {
+      const mockCtx = { workspaceDir };
+      const mockEvent = { 
+          toolName: 'exec', 
+          params: { command: 'mkdir -v -p src/test' } 
+      };
+
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockImplementation(() => {
+        return JSON.stringify({ risk_paths: ['src/'], gate: { require_plan_for_risk_paths: true } });
+      });
+
+      const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
+
+      expect(result).toBeDefined();
+      expect(result?.block).toBe(true);
+    });
   });
 });
