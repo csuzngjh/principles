@@ -47,7 +47,11 @@ export class EventLog {
   private eventBuffer: EventLogEntry[] = [];
   
   /** Max buffer size before auto-flush */
-  private readonly maxBufferSize = 100;
+  private readonly maxBufferSize = 20;
+  
+  /** Flush interval in ms */
+  private readonly flushIntervalMs = 30000; // 30 seconds
+  private flushTimer?: ReturnType<typeof setInterval>;
   
   constructor(stateDir: string, logger?: PluginLogger) {
     const logsDir = path.join(stateDir, 'logs');
@@ -61,6 +65,9 @@ export class EventLog {
     
     // Load existing stats
     this.loadStats();
+    
+    // Start periodic flush timer
+    this.startFlushTimer();
   }
   
   // ============== Public Recording Methods ==============
@@ -280,6 +287,32 @@ export class EventLog {
   flush(): void {
     this.flushEvents();
     this.flushStats();
+  }
+  
+  /**
+   * Force flush and stop timer (call on shutdown)
+   */
+  shutdown(): void {
+    this.stopFlushTimer();
+    this.flush();
+  }
+  
+  private startFlushTimer(): void {
+    if (this.flushTimer) return;
+    this.flushTimer = setInterval(() => {
+      this.flush();
+    }, this.flushIntervalMs);
+    // Don't prevent process exit
+    if (this.flushTimer.unref) {
+      this.flushTimer.unref();
+    }
+  }
+  
+  private stopFlushTimer(): void {
+    if (this.flushTimer) {
+      clearInterval(this.flushTimer);
+      this.flushTimer = undefined;
+    }
   }
   
   private flushEvents(): void {
