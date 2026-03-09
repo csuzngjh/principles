@@ -13,6 +13,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # 打印带颜色的函数
@@ -60,7 +61,7 @@ printf "${RED}╔═════════════════════
 printf "${RED}║     🦞 Principles Disciple - Claude Code Uninstaller       ║${NC}\n"
 printf "${RED}╚══════════════════════════════════════════════════════════════╝${NC}\n"
 printf "\n"
-printf "${YELLOW}⚠️  警告：此脚本将从 ${CYAN}%s${NC} 中执行以下删除操作：${NC}\n" "$TARGET_DIR"
+printf "${YELLOW}⚠️  警告：此脚本将从 ${CYAN}%s${NC} 中执行以下删除操作：\n" "$TARGET_DIR"
 printf "1. 删除 ${CYAN}.claude/agents/${NC} 下的所有原则代理 (.md)\n"
 printf "2. 删除 ${CYAN}.claude/hooks/${NC} 整个目录 (包含 Python 逻辑)\n"
 printf "3. 删除 ${CYAN}.claude/rules/00-kernel.md${NC}\n"
@@ -99,7 +100,9 @@ rm -f "$TARGET_DIR/.claude/agents/reviewer.md"
 
 # 移除 Hooks
 printf "  - 正在移除 Hooks 目录...\n"
-rm -rf "$TARGET_DIR/.claude/hooks/"
+if [ -d "$TARGET_DIR/.claude/hooks/" ]; then
+    rm -rf "$TARGET_DIR/.claude/hooks/"
+fi
 
 # 移除 Rules
 printf "  - 正在移除规则文件...\n"
