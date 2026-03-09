@@ -63,10 +63,13 @@ export async function extractPainFromSessionFile(sessionFile: string, ctx: Plugi
   });
 
   // Extract all AI responses that indicate pain/looping before they get compressed away
-  for await (const line of rl) {
-    try {
-      const msg: JsonlMessage = JSON.parse(line);
-      if (msg.role === 'assistant') {
+  try {
+    for await (const line of rl) {
+      try {
+        if (!line.trim()) continue;
+        const msg: JsonlMessage = JSON.parse(line);
+        if (msg.role !== 'assistant') continue;
+
         let text = '';
         if (typeof msg.content === 'string') {
           text = msg.content;
@@ -89,8 +92,8 @@ export async function extractPainFromSessionFile(sessionFile: string, ctx: Plugi
         }
 
         if (msg.__openclaw?.truncated && msg.__openclaw?.reason === 'oversized') {
-          if (ctx.logger) ctx.logger.info(`[Pain Extractor] Detected oversized data truncation placeholder.`);
-          painPoints.push(`[COGNITIVE OVERLOAD] 尝试读取或输出了远超认知窗口承载极限的巨量垃圾数据（可能为海量日志或全量构建物），被系统底层折叠。请反思文件读取策略。`);
+          if (ctx.logger) ctx.logger.info(`[Pain Extractor] Detected oversized data truncation placeholder`);
+          painPoints.push(`[COGNITIVE OVERLOAD] 大模型尝试读取极大体积的输入，已被底层守护程序抹除/折叠防爆。请反思是否读取了不当的文件或日志: ${text.substring(0, 150)}...`);
           continue;
         }
 
@@ -104,17 +107,17 @@ export async function extractPainFromSessionFile(sessionFile: string, ctx: Plugi
           if (ctx.logger?.debug) ctx.logger.debug(`[Pain Extractor] Detected semantic confusion string.`);
           painPoints.push(`[SEMANTIC CONFUSION] ${text.substring(0, 150)}...`);
         }
+      } catch (e) {
+        // Ignore JSON parse errors for corrupted lines
       }
-    } catch (e) {
-      // Ignore JSON parse errors for corrupted lines
     }
+  } finally {
+    // Ensure file handle does not leak if the stream iteration is broken arbitrarily (e.g. fs error)
+    try {
+      rl.close();
+      fileStream.destroy();
+    } catch (_e) { }
   }
-
-  // Ensure file handle does not leak if the stream iteration is broken arbitrarily
-  try {
-    rl.close();
-    fileStream.destroy();
-  } catch (_e) { }
 
   if (painPoints.length > 0) {
     const dateStr = new Date().toISOString().split('T')[0];
