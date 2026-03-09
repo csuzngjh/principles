@@ -14,22 +14,23 @@ export function handleAfterToolCall(
   event: PluginHookAfterToolCallEvent,
   ctx: PluginHookToolContext & { workspaceDir?: string; pluginConfig?: Record<string, unknown> }
 ): void {
-  if (!ctx.workspaceDir || !ctx.sessionId) {
+  if (!ctx.workspaceDir) {
     return;
   }
 
   const stateDir = (ctx as any).stateDir || path.join(ctx.workspaceDir, 'memory', '.state');
   const config = ConfigService.get(stateDir);
   const eventLog = EventLogService.get(stateDir);
+  const sessionId = ctx.sessionId || 'unknown';
 
   // ── Track A: Empirical Friction (GFI) ──
   
   // 0. Special Case: Manual Pain Intervention (from Skill)
   if (event.toolName === 'pain' || event.toolName === 'skill:pain') {
     const reason = event.params.input || event.params.arguments || 'Manual intervention';
-    trackFriction(ctx.sessionId, 100, 'manual_pain', ctx.workspaceDir);
+    trackFriction(sessionId, 100, 'manual_pain', ctx.workspaceDir);
     SystemLogger.log(ctx.workspaceDir, 'MANUAL_PAIN', `User manually triggered pain: ${reason}`);
-    eventLog.recordPainSignal(ctx.sessionId, {
+    eventLog.recordPainSignal(sessionId, {
       score: 100,
       source: 'manual',
       reason: `User intervention: ${reason}`,
@@ -44,7 +45,7 @@ export function handleAfterToolCall(
 
   // Get current GFI before tracking
   let previousGfi = 0;
-  const session = getSession(ctx.sessionId);
+  const session = getSession(sessionId);
   if (session) {
     previousGfi = session.currentGfi;
   }
@@ -56,11 +57,11 @@ export function handleAfterToolCall(
     
     // Default deltaF for tool errors from config
     const deltaF = config.get('scores.tool_failure_friction') || 30;
-    const updatedState = trackFriction(ctx.sessionId, deltaF, hash, ctx.workspaceDir);
+    const updatedState = trackFriction(sessionId, deltaF, hash, ctx.workspaceDir);
     
     // Record tool call failure event
     const filePath = event.params.file_path || event.params.path || event.params.file;
-    eventLog.recordToolCall(ctx.sessionId, {
+    eventLog.recordToolCall(sessionId, {
       toolName: event.toolName,
       filePath: typeof filePath === 'string' ? filePath : undefined,
       error: event.error ? String(event.error).substring(0, 200) : undefined,
@@ -71,13 +72,13 @@ export function handleAfterToolCall(
     });
   } else {
     // Success! Reset friction
-    resetFriction(ctx.sessionId, ctx.workspaceDir);
+    resetFriction(sessionId, ctx.workspaceDir);
     
     // Record tool call success event (only for write tools to avoid noise)
     const WRITE_TOOLS = ['write', 'edit', 'apply_patch'];
     if (WRITE_TOOLS.includes(event.toolName)) {
       const filePath = event.params.file_path || event.params.path || event.params.file;
-      eventLog.recordToolCall(ctx.sessionId, {
+      eventLog.recordToolCall(sessionId, {
         toolName: event.toolName,
         filePath: typeof filePath === 'string' ? filePath : undefined,
         gfi: 0,
@@ -121,7 +122,7 @@ export function handleAfterToolCall(
   writePainFlag(ctx.workspaceDir, painData);
   
   // Record pain signal event
-  eventLog.recordPainSignal(ctx.sessionId, {
+  eventLog.recordPainSignal(sessionId, {
     score: painScore,
     source: 'tool_failure',
     reason: `Tool ${event.toolName} failed on ${relPath}`,
