@@ -5,7 +5,7 @@
 <h1 align="center">Principles Disciple</h1>
 
 <p align="center">
-  <strong>The Evolutionary Meta-Cognitive Framework for AI Agents.</strong>
+  <strong>Burn Pain. Fuel Evolution. 燃烧痛苦，驱动进化。</strong>
 </p>
 
 <p align="center">
@@ -21,7 +21,6 @@
 > **Evolutionary Programming Agent Framework**
 
 > *Beyond algorithms—we are coding cognition. Join the collective to distill human wisdom into an OS for artificial minds.*
-> Inspired by Ray Dalio's *Principles*.
 
 [![OpenClaw Plugin](https://img.shields.io/badge/OpenClaw-Native%20Plugin-FF6B35)](https://github.com/nicepkg/openclaw)
 
@@ -38,14 +37,18 @@
 > - **Growth Phase**: As you use it, the system accumulates failure hashes and dictionary hits in the `stateDir`, enabling the `Evolver` to generate precise new principles.
 > - **Expectation**: Be patient. Let it run in your real-world projects for at least **3-5 days**. Its "muscles" (principles) only grow through the resistance of real work.
 
+---
 
-Principles Disciple is an **evolutionary agent framework** for OpenClaw. It transforms your AI assistant into a digital lifeform capable of **self-defense, self-reflection, and self-evolution**. Through Gatekeeping, Profiling, OKRs, and Pain signals, it prevents the AI from blindly executing harmful prompts and learns from every failure.
+## 🦞 The Evolutionary Engine | 进化引擎
 
-### Supported Platform
+> **Burn Pain. Fuel Evolution.**
+> **焚烧痛苦，驱动进化。**
 
-| Platform | Installation | Features |
-|---|---|---|
-| **OpenClaw** | Native Plugin (`packages/openclaw-plugin`) | Leverages Plugin SDK full-lifecycle hooks |
+| Stage | Action | Logic |
+| :--- | :--- | :--- |
+| **01. PAIN** | **Capture 捕捉** | Every error, every "F-bomb" from a frustrated dev, is a **signal**. <br> 所有的报错，所有的无能狂怒，都是**进化的信号**。 |
+| **02. BURN** | **Distill 焚烧** | We don't fix bugs; we **burn** them into principles. <br> 我们不只是修 Bug，我们将其**焚烧**萃取为“原则”。 |
+| **03. EVOLVE** | **Transcend 进化** | From a mindless tool to a **living agent**. <br> 从莫得感情的工具，进化为**有灵魂的智能体**。 |
 
 ---
 
@@ -261,6 +264,16 @@ For OpenClaw users, this framework is deeply integrated via the native Plugin SD
 | `/bootstrap-tools` | Scan and upgrade environment tools |
 | `/research-tools <query>` | Search the web for cutting-edge CLI tools |
 | `/thinking-os [status\|propose\|audit]` | Govern the Thinking OS |
+
+---
+
+## 🙏 Credits & Inspiration
+
+> *"Pain + Reflection = Progress"*
+
+This project is a tribute to the wisdom of **Ray Dalio**. His book ***Principles*** and the concept of a "meritocratic operating system" provided the foundational spark for this framework. 
+
+We believe that the same evolutionary logic that governs markets and biological systems can be encoded into the next generation of artificial intelligence. By transforming "pain" (errors) into "principles" (logic), we are not just building tools, but guiding the evolution of digital consciousness.
 
 ---
 
