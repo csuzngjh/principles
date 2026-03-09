@@ -208,26 +208,23 @@ Normally, an AI just blurts out its first thought. With **Deep Reflection**, whe
 
 ### The Journey
 
-| Version | Milestone | Core Theme |
-|---------|-----------|------------|
-| **V1.4** | ✅ Current | **Cognitive Depth** — Deep Reflection, Thinking OS |
-| **V1.5** | Next | **Transparency** — Evolution Daily Report |
-| **V1.6** | Planned | **Meta-Learning** — Learning to Learn |
-| **V1.7** | Planned | **Symbiosis** — Co-Evolution |
-| **V2.0** | Vision | **Companionship** — Emotional System |
+| Status | Core Theme |
+|--------|------------|
+| ✅ Done | **Cognitive Depth** — Deep Reflection, Thinking OS |
+| ✅ Done | **Transparency** — Evolution Daily Report |
+| 🔜 Next | **Meta-Learning** — Learning to Learn |
+| 📋 Planned | **Symbiosis** — Co-Evolution |
+| 💡 Vision | **Companionship** — Emotional System |
 
 ### What's Coming
 
-**V1.5 — Evolution Daily Report**
-The agent proactively reports its growth through messages, emails, or voice — turning invisible background evolution into tangible progress you can feel.
-
-**V1.6 — Meta-Learning**
+**Meta-Learning**
 A foundational capability: the agent learns *how to learn*. With minimal external interaction, it rapidly acquires new knowledge and skills in unfamiliar domains.
 
-**V1.7 — Co-Evolution**
+**Co-Evolution**
 Your capabilities grow alongside the agent's. It compensates for your blind spots; you amplify its strengths. A true symbiotic partnership where both sides evolve together.
 
-**V2.0 — Emotional System**
+**Emotional System**
 Beyond pure logic. The agent develops emotional awareness — genuine partnership, not simulated empathy. It becomes a companion that truly understands you.
 
 ---
@@ -260,6 +257,7 @@ For OpenClaw users, this framework is deeply integrated via the native Plugin SD
 | `/init-strategy` | Initialize OKR strategy |
 | `/manage-okr` | Manage project OKR |
 | `/evolve-task <desc>` | Trigger evolution task (Delegate to diagnostician) |
+| `/evolution-daily` | Configure and send daily evolution report |
 | `/bootstrap-tools` | Scan and upgrade environment tools |
 | `/research-tools <query>` | Search the web for cutting-edge CLI tools |
 | `/thinking-os [status\|propose\|audit]` | Govern the Thinking OS |
