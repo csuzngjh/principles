@@ -53,7 +53,7 @@ function checkPainFlag(workspaceDir: string, logger: any) {
         if (fs.existsSync(queuePath)) {
             try {
                 queue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
-            } catch (e) {}
+            } catch (e) { }
         }
 
         const newTask: EvolutionQueueItem = {
@@ -71,6 +71,8 @@ function checkPainFlag(workspaceDir: string, logger: any) {
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
         fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
         fs.appendFileSync(painFlagPath, '\nstatus: queued\n', 'utf8');
+
+        logger.info(`[PD:EvolutionWorker] Task ${newTask.id} successfully enqueued to ${queuePath}.`);
     } catch (err) {
         logger.warn(`[PD:EvolutionWorker] Error processing pain flag: ${String(err)}`);
     }
@@ -97,7 +99,9 @@ function processEvolutionQueue(workspaceDir: string, stateDir: string, logger: a
 
             if (!fs.existsSync(stateDir)) fs.mkdirSync(stateDir, { recursive: true });
             fs.writeFileSync(directivePath, JSON.stringify(directive, null, 2), 'utf8');
-            
+
+            logger.info(`[PD:EvolutionWorker] Evolution directive generated in ${directivePath}. Model will pick this up for next task.`);
+
             // Record evolution task event
             eventLog.recordEvolutionTask({
                 taskId: highestScoreTask.id,
@@ -105,7 +109,7 @@ function processEvolutionQueue(workspaceDir: string, stateDir: string, logger: a
                 reason: highestScoreTask.reason,
             });
         }
-    } catch (err) {}
+    } catch (err) { }
 }
 
 async function processDetectionQueue(stateDir: string, api: any, eventLog: any) {
@@ -140,10 +144,10 @@ async function processDetectionQueue(stateDir: string, api: any, eventLog: any) 
             if (results.length > 0) {
                 const bestMatch = results[0];
                 logger.info(`[PD:EvolutionWorker] Semantic hit! Score: ${bestMatch.score}. Text: "${text.substring(0, 50)}..."`);
-                
-                funnel.updateCache(text, { 
-                    detected: true, 
-                    severity: config.get('scores.default_confusion') || 35 
+
+                funnel.updateCache(text, {
+                    detected: true,
+                    severity: config.get('scores.default_confusion') || 35
                 });
 
                 recordCandidate(stateDir, text, bestMatch);
@@ -162,11 +166,11 @@ function recordCandidate(stateDir: string, text: string, match: any) {
     if (fs.existsSync(candidatePath)) {
         try {
             data = JSON.parse(fs.readFileSync(candidatePath, 'utf8'));
-        } catch (e) {}
+        } catch (e) { }
     }
 
     const fingerprint = createHash('sha256').update(text.trim()).digest('hex').substring(0, 12);
-    
+
     if (!data.candidates[fingerprint]) {
         data.candidates[fingerprint] = {
             samples: [],
@@ -206,14 +210,14 @@ function processPromotion(stateDir: string, logger: any, eventLog: any) {
             if (cand.status === 'pending' && cand.count >= countThreshold && cand.avgSimilarity >= simThreshold) {
                 // Perform N-gram extraction
                 const commonPhrases = extractCommonSubstring(cand.samples);
-                
+
                 if (commonPhrases.length > 0) {
                     const phrase = commonPhrases[0];
                     const ruleId = `P_PROMOTED_${fingerprint.toUpperCase()}`;
-                    
+
                     logger.info(`[PD:EvolutionWorker] Promoting candidate ${fingerprint} to formal rule: ${ruleId} (Phrase: "${phrase}")`);
                     SystemLogger.log(stateDir.replace(/\/memory\/\.state$/, ''), 'RULE_PROMOTED', `Candidate ${fingerprint} promoted to formal rule ${ruleId} based on ${cand.count} hits.`);
-                    
+
                     dictionary.addRule(ruleId, {
                         type: 'exact_match',
                         phrases: [phrase],
@@ -224,7 +228,7 @@ function processPromotion(stateDir: string, logger: any, eventLog: any) {
                     cand.status = 'promoted';
                     cand.promotedTo = ruleId;
                     promotedCount++;
-                    
+
                     // Record rule promotion event
                     eventLog.recordRulePromotion({
                         ruleId,
@@ -259,20 +263,20 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
     start(ctx: OpenClawPluginServiceContext): void {
         const { workspaceDir, logger } = ctx;
         const api = this.api;
-        
+
         // Use workspace-specific state directory, not global ~/.openclaw/
         // This ensures Service and Hooks use the same stateDir
-        const stateDir = workspaceDir 
+        const stateDir = workspaceDir
             ? path.join(workspaceDir, 'memory', '.state')
             : ctx.stateDir;
-        
+
         logger.info(`[PD:EvolutionWorker] Starting with workspaceDir=${workspaceDir}, stateDir=${stateDir}`);
 
         // Initialize persistence and event logging
         initPersistence(stateDir);
-        const eventLog = EventLogService.get(stateDir, { 
-            info: (msg) => logger.info(msg), 
-            warn: (msg) => logger.warn(msg), 
+        const eventLog = EventLogService.get(stateDir, {
+            info: (msg) => logger.info(msg),
+            warn: (msg) => logger.warn(msg),
             error: (msg) => logger.error(msg),
             debug: (msg) => logger.debug?.(msg)
         });
@@ -298,7 +302,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
             }
             processPromotion(stateDir, logger, eventLog);
             dictionary.flush();
-            
+
             // Periodically flush event log
             eventLog.flush();
             flushAllSessions();
@@ -310,7 +314,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                 processEvolutionQueue(workspaceDir, stateDir, logger, eventLog);
             }
             if (api) {
-                processDetectionQueue(stateDir, api, eventLog).catch(() => {});
+                processDetectionQueue(stateDir, api, eventLog).catch(() => { });
             }
             processPromotion(stateDir, logger, eventLog);
         }, initialDelay);
@@ -325,7 +329,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
 
         if (ctx.stateDir) {
             DictionaryService.get(ctx.stateDir).flush();
-            
+
             // Flush event log and sessions
             EventLogService.get(ctx.stateDir).flush();
             flushAllSessions();

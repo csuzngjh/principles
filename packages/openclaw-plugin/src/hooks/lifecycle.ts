@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as readline from 'readline';
+import { computePainScore, writePainFlag } from '../core/pain.js';
 import type { PluginHookBeforeResetEvent, PluginHookBeforeCompactionEvent, PluginHookAfterCompactionEvent, PluginHookAgentContext } from '../openclaw-sdk.js';
 
 export async function handleBeforeReset(
@@ -39,12 +40,22 @@ interface JsonlMessage {
   role?: string;
   content?: string | { type?: string; text?: string }[];
   usage?: { outputText?: string }; // Occasionally in some outputs
+  openclawAbort?: { aborted: boolean; origin: string; runId: string };
+  __openclaw?: { truncated: boolean; reason: string };
 }
 
-async function extractPainFromSessionFile(sessionFile: string, workspaceDir: string): Promise<void> {
+export async function extractPainFromSessionFile(sessionFile: string, ctx: PluginHookAgentContext): Promise<void> {
   const painPoints: string[] = [];
+  const workspaceDir = ctx.workspaceDir;
 
-  if (!fs.existsSync(sessionFile)) return;
+  if (!workspaceDir) return;
+
+  if (!fs.existsSync(sessionFile)) {
+    if (ctx.logger?.debug) ctx.logger.debug(`[Pain Extractor] Session file not found: ${sessionFile}`);
+    return;
+  }
+
+  if (ctx.logger) ctx.logger.info(`[Pain Extractor] Scanning session transcript for pain signals: ${sessionFile}`);
 
   const fileStream = fs.createReadStream(sessionFile);
   const rl = readline.createInterface({
@@ -53,20 +64,40 @@ async function extractPainFromSessionFile(sessionFile: string, workspaceDir: str
   });
 
   // Extract all AI responses that indicate pain/looping before they get compressed away
-  for await (const line of rl) {
-    try {
-      const msg: JsonlMessage = JSON.parse(line);
-      if (msg.role === 'assistant') {
+  try {
+    for await (const line of rl) {
+      try {
+        if (!line.trim()) continue;
+        const msg: JsonlMessage = JSON.parse(line);
+        if (msg.role !== 'assistant') continue;
+
         let text = '';
         if (typeof msg.content === 'string') {
           text = msg.content;
         } else if (Array.isArray(msg.content)) {
-          text = msg.content.filter(c => c.type === 'text').map(c => c.text).join('\n');
+          text = msg.content
+            .filter(c => c && c.type === 'text' && typeof c.text === 'string')
+            .map(c => c.text)
+            .join('\n');
         } else if (msg.usage && msg.usage.outputText) {
           text = msg.usage.outputText;
         }
 
         if (!text) continue;
+
+        if (msg.openclawAbort?.aborted) {
+          const runIdSafe = msg.openclawAbort?.runId || 'unknown';
+          if (ctx.logger) ctx.logger.info(`[Pain Extractor] Detected hard-abort snapshot (runId: ${runIdSafe})`);
+          painPoints.push(`[FATAL INTERCEPT] 动作被沙箱防御机制强制击落。大模型被击落前的思考流 (未遂动机): ${text.substring(0, 250)}...`);
+          continue;
+        }
+
+        if (msg.__openclaw?.truncated && msg.__openclaw?.reason === 'oversized') {
+          if (ctx.logger) ctx.logger.info(`[Pain Extractor] Detected oversized data truncation placeholder`);
+          painPoints.push(`[COGNITIVE OVERLOAD] 大模型尝试读取极大体积的输入，已被底层守护程序抹除/折叠防爆。请反思是否读取了不当的文件或日志: ${text.substring(0, 150)}...`);
+          continue;
+        }
+
         const lower = text.toLowerCase();
 
         // Simple heuristic for consolidated pain extraction
@@ -74,12 +105,19 @@ async function extractPainFromSessionFile(sessionFile: string, workspaceDir: str
           lower.includes('i apologize for the confusion') ||
           lower.includes('this is taking longer than expected') ||
           lower.includes('it seems i cannot')) {
-          painPoints.push(text.substring(0, 150) + '...');
+          if (ctx.logger?.debug) ctx.logger.debug(`[Pain Extractor] Detected semantic confusion string.`);
+          painPoints.push(`[SEMANTIC CONFUSION] ${text.substring(0, 150)}...`);
         }
+      } catch (e) {
+        // Ignore JSON parse errors for corrupted lines
       }
-    } catch (e) {
-      // Ignore JSON parse errors for corrupted lines
     }
+  } finally {
+    // Ensure file handle does not leak if the stream iteration is broken arbitrarily (e.g. fs error)
+    try {
+      rl.close();
+      fileStream.destroy();
+    } catch (_e) { }
   }
 
   if (painPoints.length > 0) {
@@ -105,8 +143,24 @@ async function extractPainFromSessionFile(sessionFile: string, workspaceDir: str
 
       let semanticEntry = `\n### Sample ${timestamp}\n- Source: compaction\n\n\`\`\`\n${painPoints.join('\n---\n')}\n\`\`\`\n`;
       fs.appendFileSync(semanticPath, semanticEntry, 'utf8');
-    } catch (_e) {
-      // Non-critical
+
+      if (ctx.logger) ctx.logger.info(`[Pain Extractor] Successfully persisted ${painPoints.length} signals to memory logs.`);
+
+      // Check for extremely high severity signals to trigger proactive evolution
+      const hasFatal = painPoints.some(p => p.includes('[FATAL INTERCEPT]'));
+      if (hasFatal) {
+        if (ctx.logger) ctx.logger.warn(`[Pain Extractor] Critical intercept detected. Triggering immediate pain flag for evolution.`);
+        writePainFlag(workspaceDir, {
+          source: 'intercept_extraction',
+          score: '100',
+          time: new Date().toISOString(),
+          reason: 'Hard intercept detected in session history compaction.',
+          is_risky: 'true',
+          trigger_text_preview: painPoints.find(p => p.includes('[FATAL INTERCEPT]'))?.substring(0, 150) || 'Fatal intercept'
+        });
+      }
+    } catch (err) {
+      if (ctx.logger) ctx.logger.error(`[Pain Extractor] Error writing memory files: ${String(err)}`);
     }
   }
 }
@@ -132,7 +186,7 @@ export async function handleBeforeCompaction(
 
   // New: Extract pain from session transcript before memory loss
   if (event.sessionFile) {
-    await extractPainFromSessionFile(event.sessionFile, ctx.workspaceDir);
+    await extractPainFromSessionFile(event.sessionFile, ctx);
   }
 }
 
