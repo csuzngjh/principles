@@ -289,3 +289,4 @@ const plugin = {
 };
 
 export default plugin;
+// SECURITY_PATCH_2026

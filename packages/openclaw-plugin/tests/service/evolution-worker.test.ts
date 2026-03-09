@@ -54,7 +54,8 @@ describe('EvolutionWorkerService', () => {
         vi.advanceTimersByTime(15 * 60 * 1000);
 
         expect(mockDict.flush).toHaveBeenCalled();
-        expect(sessionTracker.initPersistence).toHaveBeenCalledWith('/mock/state');
+        // Service now uses workspace-specific stateDir, not ctx.stateDir
+        expect(sessionTracker.initPersistence).toHaveBeenCalledWith('/mock/workspace/memory/.state');
         expect(sessionTracker.flushAllSessions).toHaveBeenCalled();
         
         EvolutionWorkerService.stop(ctx as any);
