@@ -112,7 +112,7 @@ describe('Plugin Integration', () => {
         'research-tools',
         'thinking-os',
         'pd-status',
-        'daily-report'
+        'evolution-daily'
       ];
       for (const cmd of expectedCommands) {
         expect(commandNames).toContain(cmd);
