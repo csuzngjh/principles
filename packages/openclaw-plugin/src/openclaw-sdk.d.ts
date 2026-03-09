@@ -137,6 +137,8 @@ export type PluginHookAgentContext = {
     trigger?: string;
     /** Channel identifier (e.g. "telegram", "discord", "whatsapp"). */
     channelId?: string;
+    /** Injected logger for the plugin. */
+    logger?: PluginLogger;
 };
 
 // ── Tool context ─────────────────────────────────────────────────────────────

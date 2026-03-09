@@ -99,7 +99,9 @@ const plugin = {
       'before_reset',
       async (event: PluginHookBeforeResetEvent, ctx: PluginHookAgentContext): Promise<void> => {
         try {
-          await handleBeforeReset(event, ctx);
+          const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
+          api.logger.info(`[PD] Session reset triggered. Running handleBeforeReset...`);
+          await handleBeforeReset(event, { ...ctx, workspaceDir, logger: api.logger } as any);
         } catch (err) {
           api.logger.error(`[PD] Error in before_reset: ${String(err)}`);
         }
@@ -111,7 +113,9 @@ const plugin = {
       'before_compaction',
       async (event: PluginHookBeforeCompactionEvent, ctx: PluginHookAgentContext): Promise<void> => {
         try {
-          await handleBeforeCompaction(event, ctx);
+          const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
+          api.logger.info(`[PD] Session compaction starting. Running handleBeforeCompaction...`);
+          await handleBeforeCompaction(event, { ...ctx, workspaceDir, logger: api.logger } as any);
         } catch (err) {
           api.logger.error(`[PD] Error in before_compaction: ${String(err)}`);
         }
@@ -122,7 +126,8 @@ const plugin = {
       'after_compaction',
       async (event: PluginHookAfterCompactionEvent, ctx: PluginHookAgentContext): Promise<void> => {
         try {
-          await handleAfterCompaction(event, ctx);
+          const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
+          await handleAfterCompaction(event, { ...ctx, workspaceDir, logger: api.logger } as any);
         } catch (err) {
           api.logger.error(`[PD] Error in after_compaction: ${String(err)}`);
         }
@@ -147,7 +152,7 @@ const plugin = {
       'subagent_spawning',
       (event: PluginHookSubagentSpawningEvent, ctx: PluginHookSubagentContext): PluginHookSubagentSpawningResult => {
         try {
-          const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
+          const workspaceDir = (ctx as unknown as { workspaceDir?: string }).workspaceDir || api.resolvePath('.');
           api.logger.info(`[PD] Subagent spawning in ${workspaceDir}: ${event.agentId}. Principles protocol injected.`);
           return { status: "ok" };
         } catch (err) {
@@ -285,7 +290,7 @@ const plugin = {
         return { text: "请执行 evolution-daily 技能来配置并发送进化日报。系统将引导你完成配置流程，包括发送时间、渠道和报告风格偏好。" };
       }
     });
-    
+
     api.registerTool(deepReflectTool);
   }
 };
