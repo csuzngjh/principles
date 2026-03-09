@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="claude/assets/banner.png" width="100%" alt="Principles Disciple Banner">
+  <img src="assets/banner.png" width="100%" alt="Principles Disciple Banner">
 </p>
 
 <h1 align="center">Principles Disciple (原则门徒)</h1>
