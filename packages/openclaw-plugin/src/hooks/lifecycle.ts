@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as readline from 'readline';
+import { computePainScore, writePainFlag } from '../core/pain.js';
 import type { PluginHookBeforeResetEvent, PluginHookBeforeCompactionEvent, PluginHookAfterCompactionEvent, PluginHookAgentContext } from '../openclaw-sdk.js';
 
 export async function handleBeforeReset(
@@ -142,8 +143,24 @@ export async function extractPainFromSessionFile(sessionFile: string, ctx: Plugi
 
       let semanticEntry = `\n### Sample ${timestamp}\n- Source: compaction\n\n\`\`\`\n${painPoints.join('\n---\n')}\n\`\`\`\n`;
       fs.appendFileSync(semanticPath, semanticEntry, 'utf8');
-    } catch (_e) {
-      // Non-critical
+
+      if (ctx.logger) ctx.logger.info(`[Pain Extractor] Successfully persisted ${painPoints.length} signals to memory logs.`);
+
+      // Check for extremely high severity signals to trigger proactive evolution
+      const hasFatal = painPoints.some(p => p.includes('[FATAL INTERCEPT]'));
+      if (hasFatal) {
+        if (ctx.logger) ctx.logger.warn(`[Pain Extractor] Critical intercept detected. Triggering immediate pain flag for evolution.`);
+        writePainFlag(workspaceDir, {
+          source: 'intercept_extraction',
+          score: '100',
+          time: new Date().toISOString(),
+          reason: 'Hard intercept detected in session history compaction.',
+          is_risky: 'true',
+          trigger_text_preview: painPoints.find(p => p.includes('[FATAL INTERCEPT]'))?.substring(0, 150) || 'Fatal intercept'
+        });
+      }
+    } catch (err) {
+      if (ctx.logger) ctx.logger.error(`[Pain Extractor] Error writing memory files: ${String(err)}`);
     }
   }
 }

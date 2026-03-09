@@ -100,6 +100,7 @@ const plugin = {
       async (event: PluginHookBeforeResetEvent, ctx: PluginHookAgentContext): Promise<void> => {
         try {
           const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
+          api.logger.info(`[PD] Session reset triggered. Running handleBeforeReset...`);
           await handleBeforeReset(event, { ...ctx, workspaceDir, logger: api.logger } as any);
         } catch (err) {
           api.logger.error(`[PD] Error in before_reset: ${String(err)}`);
@@ -113,6 +114,7 @@ const plugin = {
       async (event: PluginHookBeforeCompactionEvent, ctx: PluginHookAgentContext): Promise<void> => {
         try {
           const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
+          api.logger.info(`[PD] Session compaction starting. Running handleBeforeCompaction...`);
           await handleBeforeCompaction(event, { ...ctx, workspaceDir, logger: api.logger } as any);
         } catch (err) {
           api.logger.error(`[PD] Error in before_compaction: ${String(err)}`);
