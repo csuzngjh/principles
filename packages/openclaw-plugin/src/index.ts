@@ -71,8 +71,9 @@ const plugin = {
       (event: PluginHookBeforeToolCallEvent, ctx: PluginHookToolContext): PluginHookBeforeToolCallResult | void => {
         try {
           const pluginConfig = api.pluginConfig ?? {};
-          const workspaceDir = ctx.workspaceDir;
-          return handleBeforeToolCall(event, { ...ctx, workspaceDir, pluginConfig });
+          const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
+          const logger = api.logger;
+          return handleBeforeToolCall(event, { ...ctx, workspaceDir, pluginConfig, logger });
         } catch (err) {
           api.logger.error(`[PD] Error in before_tool_call: ${String(err)}`);
         }
@@ -85,7 +86,7 @@ const plugin = {
       (event: PluginHookAfterToolCallEvent, ctx: PluginHookToolContext): void => {
         try {
           const pluginConfig = api.pluginConfig ?? {};
-          const workspaceDir = ctx.workspaceDir;
+          const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
           handleAfterToolCall(event, { ...ctx, workspaceDir, pluginConfig });
         } catch (err) {
           api.logger.error(`[PD] Error in after_tool_call: ${String(err)}`);
@@ -133,7 +134,7 @@ const plugin = {
       'llm_output',
       (event, ctx): void => {
         try {
-          const workspaceDir = ctx.workspaceDir;
+          const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
           handleLlmOutput(event, { ...ctx, workspaceDir });
         } catch (err) {
           api.logger.error(`[PD] Error in llm_output: ${String(err)}`);
@@ -146,7 +147,8 @@ const plugin = {
       'subagent_spawning',
       (event: PluginHookSubagentSpawningEvent, ctx: PluginHookSubagentContext): PluginHookSubagentSpawningResult => {
         try {
-          api.logger.info(`[PD] Subagent spawning: ${event.agentId} (child: ${event.childSessionKey}). Principles protocol injected.`);
+          const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
+          api.logger.info(`[PD] Subagent spawning in ${workspaceDir}: ${event.agentId}. Principles protocol injected.`);
           return { status: "ok" };
         } catch (err) {
           api.logger.error(`[PD] Error in subagent_spawning: ${String(err)}`);
@@ -160,7 +162,7 @@ const plugin = {
       'subagent_ended',
       (event, ctx): void => {
         try {
-          const workspaceDir = ctx.workspaceDir;
+          const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
           handleSubagentEnded(event, { ...ctx, workspaceDir });
         } catch (err) {
           api.logger.error(`[PD] Error in subagent_ended: ${String(err)}`);
