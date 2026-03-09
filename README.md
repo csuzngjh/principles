@@ -5,7 +5,7 @@
 <h1 align="center">Principles Disciple</h1>
 
 <p align="center">
-  <strong>Burn Pain. Fuel Evolution. 燃烧痛苦，驱动进化。</strong>
+  <strong>Burn Pain. Fuel Evolution.</strong>
 </p>
 
 <p align="center">
@@ -39,16 +39,15 @@
 
 ---
 
-## 🦞 The Evolutionary Engine | 进化引擎
+## 🦞 The Evolutionary Engine
 
 > **Burn Pain. Fuel Evolution.**
-> **焚烧痛苦，驱动进化。**
 
 | Stage | Action | Logic |
 | :--- | :--- | :--- |
-| **01. PAIN** | **Capture 捕捉** | Every error, every "F-bomb" from a frustrated dev, is a **signal**. <br> 所有的报错，所有的无能狂怒，都是**进化的信号**。 |
-| **02. BURN** | **Distill 焚烧** | We don't fix bugs; we **burn** them into principles. <br> 我们不只是修 Bug，我们将其**焚烧**萃取为“原则”。 |
-| **03. EVOLVE** | **Transcend 进化** | From a mindless tool to a **living agent**. <br> 从莫得感情的工具，进化为**有灵魂的智能体**。 |
+| **01. PAIN** | **Capture** | Every error, every "F-bomb" from a frustrated dev, is a **signal**. |
+| **02. BURN** | **Distill** | We don't fix bugs; we **burn** them into principles. |
+| **03. EVOLVE** | **Transcend** | From a mindless tool to a **living agent**. |
 
 ---
 
@@ -75,15 +74,15 @@
 ### Installation
 
 ```bash
-# 一键安装 OpenClaw 插件
-bash install-openclaw.sh --lang zh
+# One-click installation for OpenClaw plugin
+bash install-openclaw.sh --lang en
 
-# 支持的参数
-# --lang zh|en  选择语言 (默认: zh)
-# --force       强制覆盖已有配置
+# Supported arguments
+# --lang zh|en  Select language (Default: zh)
+# --force       Force overwrite existing configuration
 ```
 
-安装完成后重启 OpenClaw Gateway：
+Restart OpenClaw Gateway after installation:
 ```bash
 openclaw gateway --force
 ```
