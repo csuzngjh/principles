@@ -1,5 +1,5 @@
 ---
-name: daily-report
+name: evolution-daily
 description: Configure and send daily evolution reports (supports email/IM/voice notifications)
 disable-model-invocation: true
 ---
@@ -196,4 +196,4 @@ Ask user preference during requirement collection:
 
 ## Manual Trigger
 
-Users can run `/daily-report` anytime to manually generate and send today's report.
+Users can run `/evolution-daily` anytime to manually generate and send today's report.

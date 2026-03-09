@@ -1,5 +1,5 @@
 ---
-name: daily-report
+name: evolution-daily
 description: 配置并发送每日进化日报（支持邮件/即时通讯/语音通知）
 disable-model-invocation: true
 ---
@@ -196,4 +196,4 @@ disable-model-invocation: true
 
 ## 手动触发
 
-用户可随时运行 `/daily-report` 手动生成并发送当日日报。
+用户可随时运行 `/evolution-daily` 手动生成并发送当日日报。
