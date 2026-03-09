@@ -54,12 +54,13 @@ Principles Disciple is an **evolutionary agent framework** for OpenClaw. It tran
 ### Prerequisites
 
 | Requirement | Version | Notes |
-|---|---|---|
+| :--- | :--- | :--- |
 | **Node.js** | ≥ 18 | Required for OpenClaw plugin |
 
 ### Supported Platforms
 
 | Platform | OpenClaw (Plugin) |
+| :--- | :--- |
 |---|---|---|
 | **macOS** | ✅ Native |
 | **Linux** | ✅ Native |
