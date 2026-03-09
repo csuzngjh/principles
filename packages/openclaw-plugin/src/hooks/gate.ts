@@ -10,13 +10,22 @@ export function handleBeforeToolCall(
   event: PluginHookBeforeToolCallEvent,
   ctx: PluginHookToolContext & { workspaceDir?: string; pluginConfig?: Record<string, unknown>; logger?: any }
 ): PluginHookBeforeToolCallResult | void {
-  const logger = ctx.logger;
+  const logger = ctx.logger || console;
+
+  // Add highly visible debug logging for ALL tool calls to help trace interception issues
+  if (event.toolName) {
+    logger.info(`[PD_GATE_DEBUG] Received tool call: ${event.toolName}`);
+    if (['bash', 'exec', 'run_shell_command', 'shell', 'cmd'].includes(event.toolName)) {
+       logger.info(`[PD_GATE_DEBUG] Bash-like tool args: ${JSON.stringify(event.params)}`);
+    }
+  }
 
   // 1. Identify if this is a file-mutation tool
   // Includes core file tools and common bash-based mutation patterns
   const WRITE_TOOLS = ['write', 'edit', 'apply_patch', 'write_file', 'replace', 'insert', 'patch', 'edit_file', 'delete_file', 'move_file'];
-  const isBash = event.toolName === 'bash' || event.toolName === 'run_shell_command';
+  const BASH_TOOLS = ['bash', 'run_shell_command', 'exec', 'execute', 'shell', 'cmd'];
   
+  const isBash = BASH_TOOLS.includes(event.toolName);
   const isWriteTool = WRITE_TOOLS.includes(event.toolName);
   
   if (!ctx.workspaceDir || (!isWriteTool && !isBash)) {
@@ -29,12 +38,17 @@ export function handleBeforeToolCall(
   // Special handling for bash: heuristic check for file mutations
   if (isBash && !filePath) {
     const command = String(event.params.command || event.params.args || "");
-    // Regex to find potential file writes/deletes in shell commands
-    // Matches: > file, >> file, sed -i, rm file
-    const mutationMatch = command.match(/(?:>|>>|sed\s+-i|rm|mv)\s+([^\s;&|<>]+)/);
+    // Regex to find potential file writes/deletes/creates in shell commands
+    // Matches: > file, >> file, sed -i, rm file, mv file, mkdir path, touch file, cp file target
+    const mutationMatch = command.match(/(?:>|>>|sed\s+-i|rm|mv|mkdir|touch|cp)\s+(?:-p\s+)?([^\s;&|<>]+)/);
+    
     if (mutationMatch) {
       filePath = mutationMatch[1];
       logger?.info?.(`[PD_GATE] Bash mutation detected. Extracted path: ${filePath}`);
+    } else if (command.includes('src/') || command.includes('infra/') || command.includes('db/')) {
+      // Fallback: If command contains known risk keywords, treat it as a potential risk
+      filePath = command;
+      logger?.info?.(`[PD_GATE] Fallback risk detection triggered for command containing risk keywords: ${command}`);
     } else {
       // Not a clear mutation command, skip
       return;
@@ -66,7 +80,14 @@ export function handleBeforeToolCall(
 
   // 4. Check Risk
   const relPath = normalizePath(filePath, ctx.workspaceDir);
-  const risky = isRisky(relPath, profile.risk_paths);
+  // Robust check: if filePath was derived from a fallback (contains full command), 
+  // check if ANY risk path is contained in it. Otherwise use strict prefix check.
+  let risky = false;
+  if (isBash && filePath.includes(' ')) {
+    risky = profile.risk_paths.some(rp => filePath.includes(rp));
+  } else {
+    risky = isRisky(relPath, profile.risk_paths);
+  }
 
   if (risky) {
     logger?.info?.(`[PD_GATE] Auditing write to risk path: ${relPath}`);

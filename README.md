@@ -110,11 +110,22 @@ OpenClaw uses a centralized state directory at `~/.openclaw/`:
 
 ## 💡 Core Features Guide
 
-### 🛡️ The Gatekeeper
-You don't need to do anything. The system automatically blocks unauthorized modifications to **high-risk directories** (e.g., `src/db/`).
-* **What to do when blocked?**
-  - The AI will automatically prompt you to draft a plan first.
-  - Simply agree to let it run `/evolve-task`.
+### 🛡️ The Gatekeeper (Defense)
+The system automatically blocks unauthorized modifications to **high-risk directories** (e.g., `src/`). This prevents agents from making messy changes to core code without thinking.
+
+> [!IMPORTANT]
+> **Workspace Boundary Principle**
+> - **Protected**: Only files within the current **Workspace** (Project Root).
+> - **Unprotected**: System-level directories, `/tmp`, or files outside the current project are NOT intercepted by default to ensure basic system flexibility.
+> - **Mechanism**: The plugin uses `api.resolvePath('.')` to anchor the current territory.
+
+* **What to do when blocked? (The Unlock Flow)**
+  1. **Don't brute force**: The block is "physical" at the gateway level. Repeating the same command will still fail.
+  2. **Update the Plan**: Manually or instruct the agent to modify the project's `docs/PLAN.md`.
+  3. **Set to READY**: Change the file header from `STATUS: DRAFT` to **`STATUS: READY`** and briefly describe your intended steps.
+  4. **Execute Again**: Once the plan is `READY`, the gate will automatically recognize it and "allow" your modification command.
+
+---
 
 ### 🧠 Reflection Loop (Pain Loop)
 When a task stagnates or throws too many errors, the system triggers a **Red Alert** before context compression.
