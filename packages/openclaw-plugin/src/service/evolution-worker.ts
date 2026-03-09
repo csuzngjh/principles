@@ -257,9 +257,16 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
     id: 'principles-evolution-worker',
 
     start(ctx: OpenClawPluginServiceContext): void {
-        const { workspaceDir, stateDir, logger } = ctx;
+        const { workspaceDir, logger } = ctx;
         const api = this.api;
-        logger.info(`[PD:EvolutionWorker] Starting background autonomous evolution service...`);
+        
+        // Use workspace-specific state directory, not global ~/.openclaw/
+        // This ensures Service and Hooks use the same stateDir
+        const stateDir = workspaceDir 
+            ? path.join(workspaceDir, 'memory', '.state')
+            : ctx.stateDir;
+        
+        logger.info(`[PD:EvolutionWorker] Starting with workspaceDir=${workspaceDir}, stateDir=${stateDir}`);
 
         // Initialize persistence and event logging
         initPersistence(stateDir);
