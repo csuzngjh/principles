@@ -150,7 +150,7 @@ const plugin = {
       'subagent_spawning',
       (event: PluginHookSubagentSpawningEvent, ctx: PluginHookSubagentContext): PluginHookSubagentSpawningResult => {
         try {
-          const workspaceDir = (ctx as any).workspaceDir || api.resolvePath('.');
+          const workspaceDir = (ctx as unknown as { workspaceDir?: string }).workspaceDir || api.resolvePath('.');
           api.logger.info(`[PD] Subagent spawning in ${workspaceDir}: ${event.agentId}. Principles protocol injected.`);
           return { status: "ok" };
         } catch (err) {

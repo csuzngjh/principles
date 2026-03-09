@@ -154,5 +154,95 @@ describe('Lifecycle Hooks', () => {
       expect(memoryWrite).toBeDefined();
       expect(memoryWrite![1]).toContain('I\'m sorry, but I\'m still getting');
     });
+
+    it('should ignore openclawAbort when aborted is false', async () => {
+      const loggerMock = { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
+      const jsonlContent = [
+        JSON.stringify({
+          role: 'assistant',
+          content: 'Normal message',
+          openclawAbort: { aborted: false, origin: 'rpc', runId: 'test-run-456' }
+        })
+      ].join('\n') + '\n';
+
+      vi.mocked(fs.existsSync).mockImplementation((p: any) => p === tempSessionFile || String(p).includes('memory'));
+      vi.spyOn(fs, 'createReadStream').mockImplementation((...args: any[]) => {
+        return Readable.from([jsonlContent]) as any;
+      });
+
+      await extractPainFromSessionFile(tempSessionFile, { workspaceDir, logger: loggerMock } as any);
+
+      const calls = vi.mocked(fs.appendFileSync).mock.calls;
+      const memoryWrite = calls.find((call: any) => String(call[0]).endsWith('.md') && !String(call[0]).includes('confusion_samples'));
+      expect(memoryWrite).toBeUndefined();
+    });
+
+    it('should ignore __openclaw when truncated is false or reason is not oversized', async () => {
+      const loggerMock = { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
+      const jsonlContent = [
+        JSON.stringify({
+          role: 'assistant',
+          content: 'Normal message',
+          __openclaw: { truncated: false, reason: 'oversized' }
+        }),
+        JSON.stringify({
+          role: 'assistant',
+          content: 'Normal message 2',
+          __openclaw: { truncated: true, reason: 'other_reason' }
+        })
+      ].join('\n') + '\n';
+
+      vi.mocked(fs.existsSync).mockImplementation((p: any) => p === tempSessionFile || String(p).includes('memory'));
+      vi.spyOn(fs, 'createReadStream').mockImplementation((...args: any[]) => {
+        return Readable.from([jsonlContent]) as any;
+      });
+
+      await extractPainFromSessionFile(tempSessionFile, { workspaceDir, logger: loggerMock } as any);
+
+      const calls = vi.mocked(fs.appendFileSync).mock.calls;
+      const memoryWrite = calls.find((call: any) => String(call[0]).endsWith('.md') && !String(call[0]).includes('confusion_samples'));
+      expect(memoryWrite).toBeUndefined();
+    });
+
+    it('should return early if workspaceDir is not available', async () => {
+      const loggerMock = { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
+      vi.spyOn(fs, 'createReadStream');
+
+      await extractPainFromSessionFile(tempSessionFile, { logger: loggerMock } as any);
+
+      expect(fs.createReadStream).not.toHaveBeenCalled();
+    });
+
+    it('should log debug and return early if sessionFile does not exist', async () => {
+      const loggerMock = { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      vi.spyOn(fs, 'createReadStream');
+
+      await extractPainFromSessionFile('fake_file.jsonl', { workspaceDir, logger: loggerMock } as any);
+
+      expect(loggerMock.debug).toHaveBeenCalledWith(expect.stringContaining('Session file not found: fake_file.jsonl'));
+      expect(fs.createReadStream).not.toHaveBeenCalled();
+    });
+
+    it('should handle corrupted jsonl lines gracefully without throwing', async () => {
+      const loggerMock = { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
+      const jsonlContent = [
+        '{ invalid json ',
+        JSON.stringify({ role: 'user', content: 'Normal' }),
+        'also invalid json'
+      ].join('\n') + '\n';
+
+      vi.mocked(fs.existsSync).mockImplementation((p: any) => p === tempSessionFile || String(p).includes('memory'));
+      vi.spyOn(fs, 'createReadStream').mockImplementation((...args: any[]) => {
+        return Readable.from([jsonlContent]) as any;
+      });
+
+      // Execute without throwing
+      await extractPainFromSessionFile(tempSessionFile, { workspaceDir, logger: loggerMock } as any);
+
+      const calls = vi.mocked(fs.appendFileSync).mock.calls;
+      const memoryWrite = calls.find((call: any) => String(call[0]).endsWith('.md') && !String(call[0]).includes('confusion_samples'));
+      expect(memoryWrite).toBeUndefined();
+    });
   });
 });
