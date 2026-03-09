@@ -39,12 +39,22 @@ interface JsonlMessage {
   role?: string;
   content?: string | { type?: string; text?: string }[];
   usage?: { outputText?: string }; // Occasionally in some outputs
+  openclawAbort?: { aborted: boolean; origin: string; runId: string };
+  __openclaw?: { truncated: boolean; reason: string };
 }
 
-async function extractPainFromSessionFile(sessionFile: string, workspaceDir: string): Promise<void> {
+export async function extractPainFromSessionFile(sessionFile: string, ctx: PluginHookAgentContext): Promise<void> {
   const painPoints: string[] = [];
+  const workspaceDir = ctx.workspaceDir;
 
-  if (!fs.existsSync(sessionFile)) return;
+  if (!workspaceDir) return;
+
+  if (!fs.existsSync(sessionFile)) {
+    if (ctx.logger?.debug) ctx.logger.debug(`[Pain Extractor] Session file not found: ${sessionFile}`);
+    return;
+  }
+
+  if (ctx.logger) ctx.logger.info(`[Pain Extractor] Scanning session transcript for pain signals: ${sessionFile}`);
 
   const fileStream = fs.createReadStream(sessionFile);
   const rl = readline.createInterface({
@@ -61,12 +71,29 @@ async function extractPainFromSessionFile(sessionFile: string, workspaceDir: str
         if (typeof msg.content === 'string') {
           text = msg.content;
         } else if (Array.isArray(msg.content)) {
-          text = msg.content.filter(c => c.type === 'text').map(c => c.text).join('\n');
+          text = msg.content
+            .filter(c => c && c.type === 'text' && typeof c.text === 'string')
+            .map(c => c.text)
+            .join('\n');
         } else if (msg.usage && msg.usage.outputText) {
           text = msg.usage.outputText;
         }
 
         if (!text) continue;
+
+        if (msg.openclawAbort?.aborted) {
+          const runIdSafe = msg.openclawAbort?.runId || 'unknown';
+          if (ctx.logger) ctx.logger.info(`[Pain Extractor] Detected hard-abort snapshot (runId: ${runIdSafe})`);
+          painPoints.push(`[FATAL INTERCEPT] 动作被沙箱防御机制强制击落。大模型被击落前的思考流 (未遂动机): ${text.substring(0, 250)}...`);
+          continue;
+        }
+
+        if (msg.__openclaw?.truncated && msg.__openclaw?.reason === 'oversized') {
+          if (ctx.logger) ctx.logger.info(`[Pain Extractor] Detected oversized data truncation placeholder.`);
+          painPoints.push(`[COGNITIVE OVERLOAD] 尝试读取或输出了远超认知窗口承载极限的巨量垃圾数据（可能为海量日志或全量构建物），被系统底层折叠。请反思文件读取策略。`);
+          continue;
+        }
+
         const lower = text.toLowerCase();
 
         // Simple heuristic for consolidated pain extraction
@@ -74,13 +101,20 @@ async function extractPainFromSessionFile(sessionFile: string, workspaceDir: str
           lower.includes('i apologize for the confusion') ||
           lower.includes('this is taking longer than expected') ||
           lower.includes('it seems i cannot')) {
-          painPoints.push(text.substring(0, 150) + '...');
+          if (ctx.logger?.debug) ctx.logger.debug(`[Pain Extractor] Detected semantic confusion string.`);
+          painPoints.push(`[SEMANTIC CONFUSION] ${text.substring(0, 150)}...`);
         }
       }
     } catch (e) {
       // Ignore JSON parse errors for corrupted lines
     }
   }
+
+  // Ensure file handle does not leak if the stream iteration is broken arbitrarily
+  try {
+    rl.close();
+    fileStream.destroy();
+  } catch (_e) { }
 
   if (painPoints.length > 0) {
     const dateStr = new Date().toISOString().split('T')[0];
@@ -132,7 +166,7 @@ export async function handleBeforeCompaction(
 
   // New: Extract pain from session transcript before memory loss
   if (event.sessionFile) {
-    await extractPainFromSessionFile(event.sessionFile, ctx.workspaceDir);
+    await extractPainFromSessionFile(event.sessionFile, ctx);
   }
 }
 
