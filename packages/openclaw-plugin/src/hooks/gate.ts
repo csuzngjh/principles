@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { isRisky, normalizePath, planStatus as getPlanStatus } from '../utils/io.js';
+import { matchesAnyPattern } from '../utils/glob-match.js';
 import { normalizeProfile } from '../core/profile.js';
 import { EventLogService } from '../core/event-log.js';
 import { trackBlock } from '../core/session-tracker.js';
@@ -27,10 +28,18 @@ export function handleBeforeToolCall(
 
   // 2. Load Profile
   const profilePath = path.join(ctx.workspaceDir, 'docs', 'PROFILE.json');
-  let profile = { 
-    risk_paths: [] as string[], 
+  let profile = {
+    risk_paths: [] as string[],
     gate: { require_plan_for_risk_paths: true },
-    progressive_gate: { enabled: true } // Default to enabled for now
+    progressive_gate: {
+      enabled: true,
+      plan_approvals: {
+        enabled: false,
+        max_lines_override: -1,
+        allowed_patterns: [] as string[],
+        allowed_operations: [] as string[],
+      }
+    }
   };
 
   if (fs.existsSync(profilePath)) {
@@ -97,6 +106,37 @@ export function handleBeforeToolCall(
     // Stage 1 (Bankruptcy): Block ALL writes to risk paths, and all medium+ writes
     if (stage === 1) {
         if (risky || riskLevel !== 'LOW') {
+            // Check if PLAN whitelist is enabled
+            if (profile.progressive_gate?.plan_approvals?.enabled) {
+                const planApprovals = profile.progressive_gate.plan_approvals;
+                const planStatus = getPlanStatus(ctx.workspaceDir);
+
+                // Must have READY plan
+                if (planStatus === 'READY') {
+                    // Check operation type
+                    if (planApprovals.allowed_operations?.includes(event.toolName)) {
+                        // Check path pattern
+                        if (matchesAnyPattern(relPath, planApprovals.allowed_patterns || [])) {
+                            // Check line limit (if configured)
+                            const maxLines = planApprovals.max_lines_override ?? -1;
+                            if (maxLines === -1 || lineChanges <= maxLines) {
+                                // Record PLAN approval event
+                                const stateDir = ctx.stateDir || path.join(ctx.workspaceDir, 'memory', '.state');
+                                EventLogService.get(stateDir).recordPlanApproval(ctx.sessionId, {
+                                    toolName: event.toolName,
+                                    filePath: relPath,
+                                    pattern: relPath,
+                                    planStatus
+                                });
+                                logger.info(`[PD_GATE] Stage 1 PLAN approval: ${relPath}`);
+                                return; // Allow the operation
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Block if not approved by whitelist
             return block(relPath, `Trust score too low (${trustScore}). Stage 1 agents cannot modify risk paths or perform non-trivial edits.`, ctx, event.toolName);
         }
     }
