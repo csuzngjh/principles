@@ -21,7 +21,7 @@ describe('Post-Write Checks & Pain Hook', () => {
     expect(fs.writeFileSync).not.toHaveBeenCalled();
   });
 
-  it('should capture pain on tool error', () => {
+  it('should capture pain on tool error with correct source', () => {
     const mockCtx = { workspaceDir, sessionId: 's1' };
     const mockEvent = { 
         toolName: 'write', 
@@ -40,5 +40,7 @@ describe('Post-Write Checks & Pain Hook', () => {
     expect(fs.writeFileSync).toHaveBeenCalled();
     const callArgs = vi.mocked(fs.writeFileSync).mock.calls[0];
     expect(callArgs[0]).toContain('.pain_flag');
+    // Ensure the output contains 'source: tool_failure'
+    expect(callArgs[1]).toContain('source: tool_failure');
   });
 });
