@@ -291,7 +291,15 @@ const plugin = {
       }
     });
 
-    api.registerTool(deepReflectTool);
+    // Register deep_reflect tool with workspaceDir context
+    api.registerTool({
+      ...deepReflectTool,
+      handler: async (params: { model_id: string; context: string; depth?: number }, api: OpenClawPluginApi) => {
+        // Try to get workspaceDir from api.resolvePath or plugin config
+        const workspaceDir = api.resolvePath('.');
+        return deepReflectTool.handler(params, api, workspaceDir);
+      }
+    });
   }
 };
 

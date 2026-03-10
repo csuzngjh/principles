@@ -111,12 +111,12 @@ OpenClaw uses a centralized state directory at `~/.openclaw/`:
 ## 💡 Core Features Guide
 
 ### 🛡️ The Gatekeeper (Defense)
-The system automatically blocks unauthorized modifications to **high-risk directories** (e.g., `src/`). This prevents agents from making messy changes to core code without thinking.
+The system automatically blocks unauthorized modifications to **core framework files** (e.g., `AGENTS.md`, `docs/PROFILE.json`). This prevents agents from accidentally tampering with their own "soul" or "rules" without a deliberate plan.
 
 > [!IMPORTANT]
 > **Workspace Boundary Principle**
-> - **Protected**: Only files within the current **Workspace** (Project Root).
-> - **Unprotected**: System-level directories, `/tmp`, or files outside the current project are NOT intercepted by default to ensure basic system flexibility.
+> - **Protected by Default**: Files critical to the project's identity and governance (`AGENTS.md`, `SOUL.md`, `docs/PRINCIPLES.md`, etc.).
+> - **Business Directories**: Directories like `src/` or `infra/` are NOT locked by default. We believe these should be added to `risk_paths` dynamically as the agent "learns" the importance of stability through real-world work.
 > - **Mechanism**: The plugin uses `api.resolvePath('.')` to anchor the current territory.
 
 * **What to do when blocked? (The Unlock Flow)**

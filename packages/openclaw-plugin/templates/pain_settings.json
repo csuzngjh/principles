@@ -17,5 +17,17 @@
   "intervals": {
     "worker_poll_ms": 900000,
     "initial_delay_ms": 5000
+  },
+  "deep_reflection": {
+    "enabled": true,
+    "mode": "auto",
+    "auto_trigger_conditions": {
+      "min_tool_calls": 5,
+      "error_rate_threshold": 0.3,
+      "complexity_keywords": ["refactor", "architecture", "design", "optimize", "security", "critical"]
+    },
+    "default_model": "T-01",
+    "default_depth": 2,
+    "timeout_ms": 60000
   }
 }

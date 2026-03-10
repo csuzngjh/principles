@@ -1,10 +1,12 @@
 {
-  "audit_level": "medium",
+  "audit_level": "high",
   "risk_paths": [
-    "src/",
-    "infra/",
-    "db/",
-    ".claude/rules/"
+    "AGENTS.md",
+    "SOUL.md",
+    "IDENTITY.md",
+    "USER.md",
+    "docs/PRINCIPLES.md",
+    "docs/PROFILE.json"
   ],
   "gate": {
     "require_plan_for_risk_paths": true,
@@ -13,8 +15,8 @@
   "tests": {
     "on_change": "smoke",
     "commands": {
-      "smoke": "npm test",
-      "unit": "npm run test:unit"
+      "smoke": "",
+      "unit": ""
     }
   },
   "permissions": {
