@@ -26,6 +26,7 @@ import { handleEvolveTask } from './commands/evolver.js';
 import { handleBootstrapTools, handleResearchTools } from './commands/capabilities.js';
 import { handleThinkingOs } from './commands/thinking-os.js';
 import { handlePainCommand } from './commands/pain.js';
+import { handleTrustCommand } from './commands/trust.js';
 import { EvolutionWorkerService } from './service/evolution-worker.js';
 import { ensureWorkspaceTemplates } from './core/init.js';
 import { SystemLogger } from './core/system-logger.js';
@@ -277,6 +278,20 @@ const plugin = {
           return handlePainCommand(ctx, language);
         } catch (err) {
           api.logger.error(`[PD] Command /pd-status failed: ${String(err)}`);
+          return { text: "Command failed. Check logs." };
+        }
+      }
+    });
+
+    api.registerCommand({
+      name: "trust",
+      description: "View Agent Trust Scorecard and Stage permissions",
+      acceptsArgs: false,
+      handler: (ctx) => {
+        try {
+          return { text: handleTrustCommand(ctx as any) };
+        } catch (err) {
+          api.logger.error(`[PD] Command /trust failed: ${String(err)}`);
           return { text: "Command failed. Check logs." };
         }
       }
