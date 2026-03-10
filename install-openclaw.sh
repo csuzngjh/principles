@@ -153,11 +153,11 @@ if [ -f "$PLUGIN_DIR/package.json" ]; then
         exit 1
     fi
     
-    printf "  构建插件...\n"
-    if npm run build --silent 2>/dev/null; then
+    printf "  构建插件 (TypeScript 编译)...\n"
+    if npm run build 2>&1; then
         printf "  ${GREEN}✅ 插件构建完成${NC}\n"
     else
-        printf "  ${RED}❌ 插件构建失败${NC}\n"
+        printf "  ${RED}❌ 插件构建失败 - 请检查 TypeScript 编译错误${NC}\n"
         exit 1
     fi
     

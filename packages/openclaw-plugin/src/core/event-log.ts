@@ -190,6 +190,30 @@ export class EventLog {
       if (this.logger) this.logger.error(`[PD] Failed to flush daily-stats.json: ${String(e)}`);
     }
   }
+
+  /**
+   * Get daily statistics for a specific date.
+   * Returns empty stats if no events recorded for that date.
+   */
+  getDailyStats(date: string): DailyStats {
+    let stats = this.statsCache.get(date);
+    if (!stats) {
+      stats = createEmptyDailyStats(date);
+      this.statsCache.set(date, stats);
+    }
+    return stats;
+  }
+
+  /**
+   * Dispose of the EventLog, flushing pending data and clearing timer.
+   */
+  dispose(): void {
+    if (this.flushTimer) {
+      clearInterval(this.flushTimer);
+      this.flushTimer = undefined;
+    }
+    this.flush();
+  }
 }
 
 /**
