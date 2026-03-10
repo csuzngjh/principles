@@ -12,6 +12,7 @@ import type {
   HookExecutionEventData,
   GateBlockEventData,
   EvolutionTaskEventData,
+  DeepReflectionEventData,
 } from '../types/event-types.js';
 import { createEmptyDailyStats } from '../types/event-types.js';
 import type { PluginLogger } from '../openclaw-sdk.js';
@@ -102,6 +103,11 @@ export class EventLog {
     this.record('evolution_task', 'enqueued', undefined, data);
   }
   
+  recordDeepReflection(sessionId: string | undefined, data: DeepReflectionEventData): void {
+    const category = data.passed ? 'passed' : data.timeout ? 'failure' : 'completed';
+    this.record('deep_reflection', category, sessionId, data);
+  }
+  
   recordError(sessionId: string | undefined, message: string, context?: Record<string, unknown>): void {
     this.record('error', 'failure', sessionId, { message, ...context });
   }
@@ -168,6 +174,9 @@ export class EventLog {
         break;
       case 'hook_execution':
         this.updateHookStats(stats, entry);
+        break;
+      case 'deep_reflection':
+        this.updateDeepReflectionStats(stats, entry);
         break;
     }
     
@@ -264,6 +273,59 @@ export class EventLog {
     }
     if (data.error) {
       stats.hooks.errors++;
+    }
+  }
+  
+  private updateDeepReflectionStats(stats: DailyStats, entry: EventLogEntry): void {
+    const data = entry.data as unknown as DeepReflectionEventData;
+    stats.deepReflection.totalCalls++;
+    
+    // 按状态统计
+    if (data.passed) {
+      stats.deepReflection.passedCount++;
+    } else if (data.timeout) {
+      stats.deepReflection.timeoutCount++;
+    } else if (data.error) {
+      stats.deepReflection.errorCount++;
+    } else {
+      stats.deepReflection.issuesFoundCount++;
+    }
+    
+    // 按模型统计
+    if (data.modelId) {
+      if (!stats.deepReflection.byModel[data.modelId]) {
+        stats.deepReflection.byModel[data.modelId] = { 
+          count: 0, 
+          avgDurationMs: 0,
+          passedCount: 0 
+        };
+      }
+      const modelStats = stats.deepReflection.byModel[data.modelId];
+      modelStats.count++;
+      modelStats.avgDurationMs = (modelStats.avgDurationMs * (modelStats.count - 1) + data.durationMs) / modelStats.count;
+      if (data.passed) modelStats.passedCount++;
+    }
+    
+    // 按深度统计
+    if (data.depth) {
+      stats.deepReflection.byDepth[data.depth] = (stats.deepReflection.byDepth[data.depth] || 0) + 1;
+    }
+    
+    // 耗时统计
+    stats.deepReflection.totalDurationMs += data.durationMs;
+    stats.deepReflection.avgDurationMs = stats.deepReflection.totalDurationMs / stats.deepReflection.totalCalls;
+    
+    // 盲点和风险统计
+    if (data.blindSpotsCount) {
+      stats.deepReflection.totalBlindSpots += data.blindSpotsCount;
+    }
+    if (data.risksCount) {
+      stats.deepReflection.totalRisks += data.risksCount;
+    }
+    
+    // 置信度分布
+    if (data.confidence) {
+      stats.deepReflection.confidenceDistribution[data.confidence]++;
     }
   }
   
