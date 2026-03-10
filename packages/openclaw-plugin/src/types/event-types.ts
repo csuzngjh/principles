@@ -13,6 +13,7 @@ export type EventType =
   | 'gate_block'
   | 'evolution_task'
   | 'deep_reflection'
+  | 'trust_change'
   | 'error'
   | 'warn';
 
@@ -24,7 +25,8 @@ export type EventCategory =
   | 'enqueued'
   | 'completed'
   | 'promoted'
-  | 'passed';
+  | 'passed'
+  | 'changed';
 
 /**
  * Base event structure for JSONL logging.
@@ -47,6 +49,13 @@ export interface EventLogEntry {
 }
 
 // ============== Specific Event Data ==============
+
+export interface TrustChangeEventData {
+  previousScore: number;
+  newScore: number;
+  delta: number;
+  reason: string;
+}
 
 export interface ToolCallEventData {
   toolName: string;
@@ -100,8 +109,10 @@ export interface EvolutionTaskEventData {
 }
 
 export interface DeepReflectionEventData {
-  /** 思维模型 ID (T-01 到 T-09) */
+  /** 思维模型 ID (T-01 到 T-09)，向后兼容 */
   modelId: string;
+  /** 模型选择模式：'manual' = 用户指定 model_id，'auto' = 子智能体自动选择 */
+  modelSelectionMode: 'manual' | 'auto';
   /** 反思深度 (1-3) */
   depth: number;
   /** 上下文摘要（前 200 字符） */
@@ -181,7 +192,12 @@ export interface DeepReflectionStats {
   timeoutCount: number;
   /** 错误次数 */
   errorCount: number;
-  /** 按模型统计 */
+  /** 按模型选择模式统计 */
+  bySelectionMode: {
+    manual: { count: number; avgDurationMs: number; passedCount: number };
+    auto: { count: number; avgDurationMs: number; passedCount: number };
+  };
+  /** 按模型统计（向后兼容，仅记录手动指定的 model_id） */
   byModel: Record<string, { 
     count: number; 
     avgDurationMs: number;
@@ -278,6 +294,10 @@ export function createEmptyDailyStats(date: string): DailyStats {
       issuesFoundCount: 0,
       timeoutCount: 0,
       errorCount: 0,
+      bySelectionMode: {
+        manual: { count: 0, avgDurationMs: 0, passedCount: 0 },
+        auto: { count: 0, avgDurationMs: 0, passedCount: 0 },
+      },
       byModel: {},
       byDepth: {},
       totalDurationMs: 0,
