@@ -100,6 +100,10 @@ function processEvolutionQueue(workspaceDir: string, stateDir: string, logger: a
             if (!fs.existsSync(stateDir)) fs.mkdirSync(stateDir, { recursive: true });
             fs.writeFileSync(directivePath, JSON.stringify(directive, null, 2), 'utf8');
 
+            // CRITICAL: Mark as in_progress to prevent infinite loop
+            highestScoreTask.status = 'in_progress';
+            fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+
             logger.info(`[PD:EvolutionWorker] Evolution directive generated in ${directivePath}. Model will pick this up for next task.`);
 
             // Record evolution task event

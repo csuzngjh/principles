@@ -1,5 +1,7 @@
 import { PluginHookSubagentEndedEvent, PluginHookAgentContext } from '../openclaw-sdk.js';
 import { writePainFlag } from '../core/pain.js';
+import * as fs from 'fs';
+import * as path from 'path';
 
 // Map of termination outcomes to autonomous pain scores
 const OUTCOME_SCORES: Record<string, number> = {
@@ -24,7 +26,7 @@ export function handleSubagentEnded(
 
     const score = OUTCOME_SCORES[outcome] || 0;
 
-    // If the subagent failed/timed-out, this is a strong symptom of systemic pain
+    // 1. If the subagent failed/timed-out, this is a strong symptom of systemic pain
     if (score > 30) {
         writePainFlag(workspaceDir, {
             source: 'subagent_crash',
@@ -33,5 +35,38 @@ export function handleSubagentEnded(
             reason: `Subagent session '${event.targetSessionKey}' terminated with outcome: ${outcome}. Reason: ${event.reason || 'Unknown'}`,
             is_risky: 'false',
         });
+    }
+
+    // 2. Loop Closure: Clean up evolution queue if diagnostician finished successfully
+    if (outcome === 'ok' || outcome === 'deleted') {
+        if (event.targetSessionKey && event.targetSessionKey.includes('diagnostician')) {
+            const queuePath = path.join(workspaceDir, 'docs', 'evolution_queue.json');
+            if (fs.existsSync(queuePath)) {
+                try {
+                    const queue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
+                    let changed = false;
+                    for (const task of queue) {
+                        if (task.status === 'in_progress') {
+                            task.status = 'completed';
+                            changed = true;
+                        }
+                    }
+                    if (changed) {
+                        fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+                    }
+                } catch (e) {}
+            }
+
+            // Clean up the .pain_flag if it was queued, to reset the environment
+            const painFlagPath = path.join(workspaceDir, 'docs', '.pain_flag');
+            if (fs.existsSync(painFlagPath)) {
+                try {
+                    const painData = fs.readFileSync(painFlagPath, 'utf8');
+                    if (painData.includes('status: queued')) {
+                        fs.unlinkSync(painFlagPath);
+                    }
+                } catch (e) {}
+            }
+        }
     }
 }
