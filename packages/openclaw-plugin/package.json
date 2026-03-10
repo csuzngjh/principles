@@ -22,11 +22,15 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "vitest run"
+    "build:bundle": "node esbuild.config.js",
+    "build:production": "tsc && node esbuild.config.js --production",
+    "test": "vitest run",
+    "postinstall": "node scripts/install-dependencies.js"
   },
   "devDependencies": {
     "@types/micromatch": "^4.0.10",
     "@types/node": "^20.0.0",
+    "esbuild": "^0.20.0",
     "typescript": "^5.0.0",
     "vitest": "^4.0.18"
   },

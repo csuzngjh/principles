@@ -1,0 +1,34 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "User Verdict Schema",
+  "description": "Schema for updating user expertise and capturing preferences after a task.",
+  "type": "object",
+  "properties": {
+    "updates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "domain": { "type": "string", "enum": ["frontend", "backend", "infra", "security"] },
+          "delta": { "type": "integer", "description": "Score increment or decrement." },
+          "reason": { "type": "string" }
+        },
+        "required": ["domain", "delta", "reason"]
+      }
+    },
+    "preferences": {
+      "type": "object",
+      "properties": {
+        "language": { "type": "string" },
+        "verbosity": { "type": "string", "enum": ["concise", "balanced", "detailed"] },
+        "code_style": { "type": "string" }
+      },
+      "additionalProperties": { "type": "string" }
+    },
+    "achievement": {
+      "type": "string",
+      "description": "Description of a successful behavior pattern (Positive Reinforcement)."
+    }
+  },
+  "required": ["updates"]
+}

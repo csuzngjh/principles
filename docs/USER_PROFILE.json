@@ -1,0 +1,14 @@
+{
+  "domains": {
+    "frontend": 7
+  },
+  "preferences": {
+    "lang": "en"
+  },
+  "history": [
+    {
+      "domain": "frontend",
+      "delta": 2
+    }
+  ]
+}
