@@ -77,6 +77,11 @@ This indicates you are trapped in a failure loop or facing extreme environment r
           `\n🚨 SYSTEM OVERRIDE: AUTONOMOUS EVOLUTION REQUIRED 🚨\n` +
           `Task: ${directive.task}\n\n` +
           `You MUST immediately invoke the \`sessions_spawn\` tool to delegate this diagnosis to the \`diagnostician\` subagent.\n` +
+          `IMPORTANT: You MUST acknowledge this directive by responding with the exact text:\n` +
+          `[EVOLUTION_ACKNOWLEDGED]\n\n` +
+          `Then you MUST call the \`sessions_spawn\` tool with:\n` +
+          `- agentId: "diagnostician"\n` +
+          `- task: "${directive.task}"\n\n` +
           `Do not attempt to fix it yourself yet. Ask the diagnostician to investigate and report back.`;
 
         prependContext += `\n<evolution_directive>${directiveMsg}</evolution_directive>\n`;
