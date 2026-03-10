@@ -21,7 +21,11 @@ Please generate plan in the following structure:
 ## 3. Metrics (Verification Metrics)
 - How to quantitatively prove this plan succeeded? (e.g., tests pass, command returns 0, specific string appears in logs).
 
-## 4. Rollback (Rollback Strategy)
+## 4. Active Mental Models
+- Select exactly **2** meta-cognitive models from `docs/THINKING_OS.md` that are most relevant to the current task.
+- Format: `- [T-0X] Model Name: Why is it needed for this specific task?`
+
+## 5. Rollback (Rollback Strategy)
 - If step 2 fails, how to one-click restore to safe state?
 
 ---
