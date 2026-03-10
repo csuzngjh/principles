@@ -228,6 +228,12 @@ export interface DailyStats {
   /** Timestamp when stats were last updated */
   updatedAt: string;
   /** Tool call statistics */
+  tools: {
+    total: number;
+    success: number;
+    failure: number;
+  };
+  /** Tool call statistics */
   toolCalls: ToolCallStats;
   /** Error statistics */
   errors: ErrorStats;
@@ -252,6 +258,11 @@ export function createEmptyDailyStats(date: string): DailyStats {
     date,
     createdAt: now,
     updatedAt: now,
+    tools: {
+      total: 0,
+      success: 0,
+      failure: 0,
+    },
     toolCalls: {
       total: 0,
       success: 0,
