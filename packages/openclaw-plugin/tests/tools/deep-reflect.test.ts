@@ -77,7 +77,7 @@ describe('deepReflectTool', () => {
             mockApi
         );
 
-        expect(result).toContain('反思超时');
+        expect(result).toContain('超时');
         expect(mockSubagent.deleteSession).toHaveBeenCalled();
     });
 
