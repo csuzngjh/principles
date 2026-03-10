@@ -202,16 +202,51 @@ Thinking OS is the system's **meta-cognitive layer** -- it doesn't tell the agen
 
 ---
 
-### 👥 Deep Reflection (The "Shoulder Angel" AI) — **NEW in V1.4.0**
+### 👥 Deep Reflection (Cognitive Analysis) — **NEW in V1.4.0**
 
-> *Imagine your AI having its own internal advisor to double-check its work before showing it to you.*
+> *A cognitive analysis tool that helps the AI think deeply before acting on complex tasks.*
 
-Normally, an AI just blurts out its first thought. With **Deep Reflection**, when the AI is faced with a tricky or complex coding task, it can pause and summon a "Shadow AI" in the background. This shadow clone acts like a strict editor or an angel on its shoulder, tearing apart the initial idea to find blind spots and risks.
+The `deep_reflect` tool performs critical analysis before executing complex operations to identify blind spots, risks, and alternatives.
 
-**Why is this awesome for you?**
-* **Higher Quality Code**: The AI argues with *itself* to find the best approach, meaning you get a heavily criticized, polished final result instead of a flawed first draft.
-* **No Chat Clutter**: All of this intense "brainstorming" happens invisibly in the background. You won't see annoying walls of text or "internal monologue" flooding your screen.
-* **Zero Extra Work**: The AI knows exactly when a problem is hard enough to need a second opinion and triggers this process completely automatically.
+**When the AI should call it:**
+- Complex tasks: planning, design, decision-making, analysis
+- Insufficient information: vague requirements, unclear constraints
+- High-stakes decisions: important decisions, irreversible actions
+- Uncertainty: unsure about the best approach
+
+**Benefits:**
+- Identifies blind spots and missing information
+- Surfaces potential risks and failure modes
+- Provides alternative approaches with trade-off analysis
+- Applies structured thinking models (T-01 to T-09) for deeper insight
+
+#### ⚙️ Configuration
+
+Deep Reflection can be configured in `{stateDir}/pain_settings.json`:
+
+```json
+{
+  "deep_reflection": {
+    "enabled": true,           // Enable/disable the feature
+    "mode": "auto",            // "auto" | "forced" | "disabled"
+    "force_checkpoint": true,  // Inject self-check prompt every turn
+    "checkpoint_message": "...", // Custom self-check message
+    "default_model": "T-01",   // Default thinking model (T-01 to T-09)
+    "default_depth": 2,        // Analysis depth: 1=quick, 2=balanced, 3=exhaustive
+    "timeout_ms": 60000        // Timeout for analysis (ms)
+  }
+}
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `enabled` | boolean | `true` | Master switch for Deep Reflection |
+| `mode` | string | `"auto"` | `auto`: AI decides, `forced`: always prompt, `disabled`: off |
+| `force_checkpoint` | boolean | `true` | Inject `<reflection_checkpoint>` every turn to remind AI to self-evaluate |
+| `checkpoint_message` | string | (see above) | Custom message for the checkpoint prompt |
+| `default_model` | string | `"T-01"` | Default Thinking OS model for analysis |
+| `default_depth` | number | `2` | Analysis depth (1-3) |
+| `timeout_ms` | number | `60000` | Timeout for background analysis |
 
 ---
 
