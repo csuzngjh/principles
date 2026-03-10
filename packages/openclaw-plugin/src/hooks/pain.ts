@@ -114,6 +114,7 @@ export function handleAfterToolCall(
 
   const painData = {
     score: String(painScore),
+    source: 'tool_failure',
     time: new Date().toISOString(),
     reason: `Tool ${event.toolName} failed on ${relPath}. Error: ${event.error ?? 'Non-zero exit code'}`,
     is_risky: String(isRisk),
