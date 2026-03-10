@@ -68,4 +68,4 @@ docs/USER_GUIDE_*.md
 docs/SHELLCHECK_GUIDE.md
 docs/STATUSLINE_IMPROVEMENTS.md
 _scratchpad/
-packages/openclaw-plugin/vitest.json
+packages/openclaw-plugin/vitest.jsondocs/
