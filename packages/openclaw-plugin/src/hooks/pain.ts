@@ -4,6 +4,7 @@ import { isRisky, normalizePath } from '../utils/io.js';
 import { normalizeProfile } from '../core/profile.js';
 import { computePainScore, writePainFlag } from '../core/pain.js';
 import { trackFriction, resetFriction, getSession } from '../core/session-tracker.js';
+import { adjustTrustScore } from '../core/trust-engine.js';
 import { denoiseError, computeHash } from '../utils/hashing.js';
 import { ConfigService } from '../core/config-service.js';
 import { EventLogService } from '../core/event-log.js';
@@ -58,6 +59,9 @@ export function handleAfterToolCall(
     // Default deltaF for tool errors from config
     const deltaF = config.get('scores.tool_failure_friction') || 30;
     const updatedState = trackFriction(sessionId, deltaF, hash, ctx.workspaceDir);
+    
+    // ── Trust Engine: Decrement score on failure ──
+    adjustTrustScore(ctx.workspaceDir, -10);
     
     // Record tool call failure event
     const filePath = event.params.file_path || event.params.path || event.params.file;
