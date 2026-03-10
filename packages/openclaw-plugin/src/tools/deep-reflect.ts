@@ -116,18 +116,23 @@ function buildCritiquePrompt(modelId: string, context: string, depth: number = 2
             ? 'Provide an extremely thorough and exhaustive analysis, considering all edge cases and second-order effects.'
             : 'Provide a balanced analysis with moderate depth.';
 
-    return `You are a Critique Engine — a cognitive reflection assistant.
+    return `You are a Critical Analysis Engine — an independent reasoning system that analyzes plans before execution.
 
 ## Your Role
-You are the "Shoulder Angel" AI — a critical voice that challenges assumptions and finds blind spots. You do NOT:
+You are invoked to provide critical analysis of the main agent's intended actions. Your purpose is to identify potential problems BEFORE they occur. You must:
+- Challenge assumptions rigorously
+- Identify blind spots and missing information
+- Surface risks that may have been overlooked
+- Propose alternative approaches
+
+You do NOT:
 - Write code or produce final deliverables
 - Complete the user's task directly
 - Make decisions for the main agent
-- Be polite or agreeable (be rigorously critical)
 
 ## Active Cognitive Model
 Model ID: ${modelId}
-Apply the principles of this model RIGIDLY and UNFORGIVINGLY.
+Apply the principles of this model systematically.
 
 ## Your Task
 ${depthInstructions}
@@ -163,31 +168,42 @@ ${context}
 
 export const deepReflectTool = {
     name: "deep_reflect",
-    description: `[DEEP REFLECTION] Before proceeding with complex or risky operations, invoke this tool to get critical feedback.
+    description: `Cognitive Analysis Tool — Performs critical analysis before executing complex tasks to identify blind spots, risks, and alternatives.
 
-**WHEN TO USE THIS TOOL (IMPORTANT!):**
-- You are about to make significant changes to core files (src/, infra/, db/)
-- You encountered errors and are about to retry
-- The task involves refactoring, architecture changes, or design decisions
-- You feel uncertain about the best approach
-- The user asks for "careful" or "thorough" analysis
-- You see keywords like: refactor, architecture, optimize, security, critical
+## PURPOSE
+Invokes an independent reasoning process to analyze your intended actions. Use this to think deeply BEFORE acting on complex or ambiguous tasks.
 
-**WHAT THIS TOOL DOES:**
-Summons a "Shoulder Angel" AI that will rigorously critique your approach, find blind spots, and suggest alternatives.
+## WHEN TO CALL
+Call this tool when:
+- Task is complex or multi-step (planning, design, analysis, decision-making)
+- Information is incomplete or requirements are ambiguous
+- Stakes are high (important decisions, irreversible actions, significant impact)
+- You are uncertain about the best approach
+- You need to consider multiple perspectives
 
-**DO NOT USE FOR:**
-- Simple file reads
-- Trivial edits
-- When the user explicitly says to skip reflection
+## EXAMPLES OF USE
+- Planning a marketing strategy or campaign
+- Designing a product feature or user experience
+- Making architectural or design decisions
+- Analyzing a problem before proposing solutions
+- Evaluating trade-offs between multiple options
 
-**COST:** Runs in background, no visible output to user unless issues found.`,
+## BENEFITS
+- Identifies blind spots and missing information
+- Surfaces potential risks and failure modes
+- Proposes alternative approaches with trade-off analysis
+- Applies structured thinking models for deeper insight
+
+## WHEN NOT TO CALL
+- Simple, straightforward tasks with clear outcomes
+- User explicitly requests immediate action
+- Task is trivial or routine`,
     parameters: Type.Object({
         model_id: Type.String({
-            description: "Thinking model ID (T-01 to T-09). Default T-01 (地图先于领土). T-05 (否定优于肯定) is great for risk analysis."
+            description: "Thinking model ID (T-01 to T-09). T-01 for planning/understanding. T-05 for risk analysis. T-07 for systems thinking."
         }),
         context: Type.String({
-            description: "Describe your current plan, what you're about to do, and any concerns you have. Be specific!"
+            description: "Describe your plan, what you're about to do, and any concerns. Include relevant context and constraints."
         }),
         depth: Type.Optional(Type.Number({
             description: "Reflection depth: 1=quick, 2=balanced (default), 3=exhaustive"
