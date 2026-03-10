@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import * as path from 'node:path';
 import { EventLogService } from '../core/event-log.js';
 import type { DeepReflectionEventData } from '../types/event-types.js';
+import { buildCritiquePromptV2 } from './critique-prompt.js';
 
 // Deep Reflection 配置类型
 interface DeepReflectionConfig {
@@ -35,9 +36,9 @@ const DEFAULT_CONFIG: DeepReflectionConfig = {
 };
 
 // 安全日志函数
-function safeLog(api: OpenClawPluginApi, level: 'info' | 'debug' | 'warn' | 'error', message: string): void {
+function safeLog(api: OpenClawPluginApi | undefined, level: 'info' | 'debug' | 'warn' | 'error', message: string): void {
     try {
-        if (api.logger && typeof api.logger[level] === 'function') {
+        if (api?.logger && typeof api.logger[level] === 'function') {
             api.logger[level](message);
         }
     } catch {
@@ -109,63 +110,6 @@ function loadConfig(workspaceDir: string | undefined, api: OpenClawPluginApi): D
     return DEFAULT_CONFIG;
 }
 
-function buildCritiquePrompt(modelId: string, context: string, depth: number = 2): string {
-    const depthInstructions = depth === 1 
-        ? 'Provide a quick surface-level analysis.' 
-        : depth === 3 
-            ? 'Provide an extremely thorough and exhaustive analysis, considering all edge cases and second-order effects.'
-            : 'Provide a balanced analysis with moderate depth.';
-
-    return `You are a Critical Analysis Engine — an independent reasoning system that analyzes plans before execution.
-
-## Your Role
-You are invoked to provide critical analysis of the main agent's intended actions. Your purpose is to identify potential problems BEFORE they occur. You must:
-- Challenge assumptions rigorously
-- Identify blind spots and missing information
-- Surface risks that may have been overlooked
-- Propose alternative approaches
-
-You do NOT:
-- Write code or produce final deliverables
-- Complete the user's task directly
-- Make decisions for the main agent
-
-## Active Cognitive Model
-Model ID: ${modelId}
-Apply the principles of this model systematically.
-
-## Your Task
-${depthInstructions}
-
-Analyze the following context:
----
-${context}
----
-
-## Required Output Structure
-
-### 🎯 Blind Spots (What might the main agent be missing?)
-- List at least 2-3 potential blind spots
-- Be specific about what information or perspectives are lacking
-
-### ⚠️ Risk Warnings (What could go wrong?)
-- Identify potential failure modes
-- Consider edge cases and error handling
-- Think about security, performance, and maintainability
-
-### 💡 Alternative Approaches (Is there a better way?)
-- Propose at least 2 different approaches
-- Compare trade-offs
-
-### 📊 Recommendations (Not decisions, but suggestions)
-- Prioritize by impact and effort
-- Be actionable and specific
-
-### 🔮 Confidence Level
-- State your confidence: LOW / MEDIUM / HIGH
-- Explain why you chose this level`;
-}
-
 export const deepReflectTool = {
     name: "deep_reflect",
     description: `Cognitive Analysis Tool — Performs critical analysis before executing complex tasks to identify blind spots, risks, and alternatives.
@@ -193,15 +137,23 @@ Call this tool when:
 - Surfaces potential risks and failure modes
 - Proposes alternative approaches with trade-off analysis
 - Applies structured thinking models for deeper insight
+- Can use domain-specific models (marketing, strategy, etc.)
+
+## HOW IT WORKS
+The sub-agent will:
+1. Analyze your task context
+2. Select appropriate thinking models (meta-cognitive or domain-specific)
+3. Apply rigorous analysis
+4. Return structured critical feedback
 
 ## WHEN NOT TO CALL
 - Simple, straightforward tasks with clear outcomes
 - User explicitly requests immediate action
 - Task is trivial or routine`,
     parameters: Type.Object({
-        model_id: Type.String({
-            description: "Thinking model ID (T-01 to T-09). T-01 for planning/understanding. T-05 for risk analysis. T-07 for systems thinking."
-        }),
+        model_id: Type.Optional(Type.String({
+            description: "[DEPRECATED] Thinking model ID. The sub-agent will now select models automatically. This parameter is kept for backward compatibility."
+        })),
         context: Type.String({
             description: "Describe your plan, what you're about to do, and any concerns. Include relevant context and constraints."
         }),
@@ -210,14 +162,25 @@ Call this tool when:
         }))
     }),
     handler: async (
-        params: { model_id: string; context: string; depth?: number },
+        params: { model_id?: string; context: string; depth?: number },
         api: OpenClawPluginApi,
         workspaceDir?: string
     ): Promise<string> => {
         const { model_id, context, depth } = params;
         
+        // 向后兼容警告
+        const modelSelectionMode = model_id ? 'manual' : 'auto';
+        if (model_id) {
+            safeLog(api, 'warn', '[DeepReflect] model_id parameter is deprecated. The sub-agent will select models automatically.');
+        }
+        
         // 加载配置
         const config = loadConfig(workspaceDir, api);
+        
+        // 配置迁移警告
+        if (config.default_model) {
+            safeLog(api, 'warn', '[DeepReflect] default_model in config is deprecated. Sub-agent will now select models automatically.');
+        }
         
         // 检查是否启用
         if (!config.enabled || config.mode === 'disabled') {
@@ -235,13 +198,16 @@ Call this tool when:
         const stateDir = workspaceDir ? path.join(workspaceDir, 'memory', '.state') : undefined;
         const eventLog = stateDir ? EventLogService.get(stateDir, api.logger) : null;
 
+        // 用于日志显示的模型标识
+        const modelIdForLog = model_id || 'auto-select';
+
         // 详细日志：开始
         safeLog(api, 'info', 
             `\n` +
             `╔══════════════════════════════════════════════════════════════╗\n` +
             `║  [DEEP REFLECTION] STARTING                                   ║\n` +
             `╠══════════════════════════════════════════════════════════════╣\n` +
-            `║  Model: ${model_id.padEnd(52)}║\n` +
+            `║  Model: ${modelIdForLog.padEnd(52)}║\n` +
             `║  Depth: ${actualDepth.toString().padEnd(52)}║\n` +
             `║  Session: ${sessionKey.substring(0, 50).padEnd(52)}║\n` +
             `║  Timeout: ${(timeoutMs / 1000 + 's').padEnd(52)}║\n` +
@@ -255,7 +221,8 @@ Call this tool when:
 
         const startTime = Date.now();
         let eventData: DeepReflectionEventData = {
-            modelId: model_id,
+            modelId: model_id || 'auto-select',
+            modelSelectionMode,
             depth: actualDepth,
             contextPreview,
             durationMs: 0,
@@ -264,18 +231,24 @@ Call this tool when:
         };
 
         try {
-            const extraSystemPrompt = buildCritiquePrompt(model_id, context, actualDepth);
+            // 使用新的提示词构建函数（同步）
+            const extraSystemPrompt = buildCritiquePromptV2({
+                context,
+                workspaceDir,
+                depth: actualDepth,
+                api,
+            });
 
             // 1. Spawning Subagent
             safeLog(api, 'info', `[DeepReflect] Step 1: Spawning critique subagent...`);
             
             const { runId } = await api.runtime.subagent.run({
                 sessionKey,
-                message: `请基于思维模型 ${model_id} 对以下计划进行批判性分析：
+                message: `Please perform a critical analysis of the following plan:
 
 ${context}
 
-请严格按照批判引擎的要求输出：盲点、风险、替代方案、建议和置信度。`,
+Follow the Critical Analysis Engine output structure: Blind Spots, Risk Warnings, Alternative Approaches, Recommendations, and Confidence Level.`,
                 extraSystemPrompt,
                 deliver: false  // 对用户不可见
             });
@@ -316,7 +289,6 @@ ${context}
                 return `❌ [Deep Reflection] 执行失败: ${waitResult.error || 'Unknown error'}
 
 **建议：**
-- 检查 model_id 是否正确 (T-01 到 T-09)
 - 检查 OpenClaw Gateway 日志`;
             }
 
@@ -351,12 +323,12 @@ ${context}
                     `╔══════════════════════════════════════════════════════════════╗\n` +
                     `║  [DEEP REFLECTION] PASSED ✓                                   ║\n` +
                     `╠══════════════════════════════════════════════════════════════╣\n` +
-                    `║  Model: ${model_id.padEnd(52)}║\n` +
+                    `║  Model: ${modelIdForLog.padEnd(52)}║\n` +
                     `║  Duration: ${(elapsed + 'ms').padEnd(52)}║\n` +
                     `║  Result: No significant issues found                          ║\n` +
                     `╚══════════════════════════════════════════════════════════════╝`
                 );
-                return `✅ [Deep Reflection ${model_id}] 方案通过审查
+                return `✅ [Deep Reflection] 方案通过审查
 
 **分析耗时:** ${elapsed}ms
 **结果:** 未发现显著问题，可以继续执行。`;
@@ -374,7 +346,7 @@ ${context}
                 `╔══════════════════════════════════════════════════════════════╗\n` +
                 `║  [DEEP REFLECTION] COMPLETE 🎯                                ║\n` +
                 `╠══════════════════════════════════════════════════════════════╣\n` +
-                `║  Model: ${model_id.padEnd(52)}║\n` +
+                `║  Model: ${modelIdForLog.padEnd(52)}║\n` +
                 `║  Duration: ${(elapsed + 'ms').padEnd(52)}║\n` +
                 `║  Output: ${reflectionText.length} chars                                          ║\n` +
                 `║  Blind Spots: ${String(stats.blindSpotsCount).padEnd(46)}║\n` +
@@ -386,7 +358,7 @@ ${context}
             // 日志：完整输出（用于调试）
             safeLog(api, 'debug', `[DeepReflect] Full critique output:\n${reflectionText}`);
 
-            return `🎯 [Deep Reflection ${model_id}] 批判性分析结果
+            return `🎯 [Deep Reflection] 批判性分析结果
 
 **分析耗时:** ${elapsed}ms
 **置信度:** ${stats.confidence || 'N/A'}
