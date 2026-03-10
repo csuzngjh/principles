@@ -171,13 +171,27 @@ fi
 # 5. 正确安装插件到 OpenClaw
 # ============================================================================
 printf "\n"
-printf "${YELLOW}🔌 步骤 4/5: 安装插件到 OpenClaw${NC}\n"
+printf "${YELLOW}🔌 步骤 4/6: 安装插件到 OpenClaw${NC}\n"
 
 if command -v openclaw &>/dev/null; then
+    printf "  清理旧的插件配置...\n"
+
+    # 清理 OpenClaw 配置中的旧插件条目（如果存在）
+    OPENCLAW_CONFIG="$HOME/.openclaw/openclaw.json"
+    if [ -f "$OPENCLAW_CONFIG" ]; then
+        # 使用 jq 清理配置中的旧条目
+        if command -v jq &>/dev/null; then
+            jq 'del(.plugins.allow[] | select(. == "principles-disciple"))' "$OPENCLAW_CONFIG" > /tmp/openclaw-clean.json 2>/dev/null && \
+            jq 'del(.plugins.entries["principles-disciple"])' /tmp/openclaw-clean.json > /tmp/openclaw-clean2.json 2>/dev/null && \
+            jq 'del(.plugins.installs["principles-disciple"])' /tmp/openclaw-clean2.json > "$OPENCLAW_CONFIG" 2>/dev/null && \
+            printf "  ${GREEN}✅ 已清理旧配置${NC}\n" || true
+        fi
+    fi
+
     printf "  使用 openclaw plugins install 安装插件...\n"
-    
+
     openclaw plugins uninstall principles-disciple 2>/dev/null || true
-    
+
     if openclaw plugins install "$PLUGIN_DIR"; then
         printf "  ${GREEN}✅ 插件安装成功${NC}\n"
     else
@@ -190,10 +204,40 @@ else
 fi
 
 # ============================================================================
+# 安装插件依赖
+# ============================================================================
+printf "\n"
+printf "${YELLOW}📦 步骤 5/6: 安装插件依赖${NC}"
+
+PLUGIN_EXT_DIR="$HOME/.openclaw/extensions/principles-disciple"
+
+if [ -d "$PLUGIN_EXT_DIR" ]; then
+    printf "  检查插件依赖...\n"
+
+    # 检查 node_modules 是否存在
+    if [ ! -d "$PLUGIN_EXT_DIR/node_modules" ]; then
+        printf "  安装插件依赖 (micromatch, @sinclair/typebox)...\n"
+        cd "$PLUGIN_EXT_DIR"
+        if npm install --silent micromatch@^4.0.8 @sinclair/typebox@^0.34.48 2>&1; then
+            printf "  ${GREEN}✅ 插件依赖安装完成${NC}\n"
+        else
+            printf "  ${RED}❌ 插件依赖安装失败${NC}\n"
+            printf "  请手动运行: cd %s && npm install micromatch@^4.0.8 @sinclair/typebox@^0.34.48${NC}\n" "$PLUGIN_EXT_DIR"
+            exit 1
+        fi
+        cd "$SCRIPT_DIR"
+    else
+        printf "  ${GREEN}✅ 插件依赖已存在${NC}\n"
+    fi
+else
+    printf "  ${YELLOW}⚠️  插件目录不存在，跳过依赖安装${NC}\n"
+fi
+
+# ============================================================================
 # 复制 Skills
 # ============================================================================
 printf "\n"
-printf "${YELLOW}📚 步骤 5/5: 复制 Skills${NC}\n"
+printf "${YELLOW}📚 步骤 6/6: 复制 Skills${NC}\n"
 
 SKILLS_SRC="$PLUGIN_DIR/templates/langs/$SELECTED_LANG/skills"
 SKILLS_DEST="$PLUGIN_DIR/skills"
