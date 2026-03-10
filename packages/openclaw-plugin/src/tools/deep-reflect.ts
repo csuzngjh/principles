@@ -3,6 +3,8 @@ import { Type } from '@sinclair/typebox';
 import { randomUUID } from 'node:crypto';
 import * as fs from 'fs';
 import * as path from 'node:path';
+import { EventLogService } from '../core/event-log.js';
+import type { DeepReflectionEventData } from '../types/event-types.js';
 
 // Deep Reflection 配置类型
 interface DeepReflectionConfig {
@@ -41,6 +43,43 @@ function safeLog(api: OpenClawPluginApi, level: 'info' | 'debug' | 'warn' | 'err
     } catch {
         // Ignore logging errors
     }
+}
+
+/**
+ * 从反思输出中提取统计信息
+ */
+function extractStatsFromOutput(output: string): { 
+    confidence?: 'LOW' | 'MEDIUM' | 'HIGH';
+    blindSpotsCount: number;
+    risksCount: number;
+} {
+    const result = {
+        confidence: undefined as 'LOW' | 'MEDIUM' | 'HIGH' | undefined,
+        blindSpotsCount: 0,
+        risksCount: 0
+    };
+    
+    // 提取置信度
+    const confidenceMatch = output.match(/Confidence.*?(LOW|MEDIUM|HIGH)/i);
+    if (confidenceMatch) {
+        result.confidence = confidenceMatch[1].toUpperCase() as 'LOW' | 'MEDIUM' | 'HIGH';
+    }
+    
+    // 统计盲点数量（bullet points under 🎯 Blind Spots）
+    const blindSpotsMatch = output.match(/🎯\s*Blind Spots[\s\S]*?(?=###|---|$)/i);
+    if (blindSpotsMatch) {
+        const bullets = blindSpotsMatch[0].match(/^- /gm);
+        result.blindSpotsCount = bullets ? bullets.length : 0;
+    }
+    
+    // 统计风险数量
+    const risksMatch = output.match(/⚠️\s*Risk Warnings[\s\S]*?(?=###|---|$)/i);
+    if (risksMatch) {
+        const bullets = risksMatch[0].match(/^- /gm);
+        result.risksCount = bullets ? bullets.length : 0;
+    }
+    
+    return result;
 }
 
 /**
@@ -174,6 +213,11 @@ Summons a "Shoulder Angel" AI that will rigorously critique your approach, find 
         const timeoutMs = config.timeout_ms ?? 60000;
         const agentId = 'main';
         const sessionKey = `agent:${agentId}:reflection:${randomUUID()}`;
+        const sessionId = sessionKey.split(':').pop(); // Extract UUID as sessionId
+
+        // 初始化事件日志
+        const stateDir = workspaceDir ? path.join(workspaceDir, 'memory', '.state') : undefined;
+        const eventLog = stateDir ? EventLogService.get(stateDir, api.logger) : null;
 
         // 详细日志：开始
         safeLog(api, 'info', 
@@ -194,6 +238,14 @@ Summons a "Shoulder Angel" AI that will rigorously critique your approach, find 
         safeLog(api, 'debug', `[DeepReflect] Context preview: ${contextPreview}`);
 
         const startTime = Date.now();
+        let eventData: DeepReflectionEventData = {
+            modelId: model_id,
+            depth: actualDepth,
+            contextPreview,
+            durationMs: 0,
+            passed: false,
+            timeout: false,
+        };
 
         try {
             const extraSystemPrompt = buildCritiquePrompt(model_id, context, actualDepth);
@@ -203,7 +255,11 @@ Summons a "Shoulder Angel" AI that will rigorously critique your approach, find 
             
             const { runId } = await api.runtime.subagent.run({
                 sessionKey,
-                message: `请基于思维模型 ${model_id} 对以下计划进行批判性分析：\n\n${context}\n\n请严格按照批判引擎的要求输出：盲点、风险、替代方案、建议和置信度。`,
+                message: `请基于思维模型 ${model_id} 对以下计划进行批判性分析：
+
+${context}
+
+请严格按照批判引擎的要求输出：盲点、风险、替代方案、建议和置信度。`,
                 extraSystemPrompt,
                 deliver: false  // 对用户不可见
             });
@@ -215,13 +271,37 @@ Summons a "Shoulder Angel" AI that will rigorously critique your approach, find 
 
             if (waitResult.status === 'timeout') {
                 const elapsed = Date.now() - startTime;
+                eventData.durationMs = elapsed;
+                eventData.timeout = true;
+                
+                // 记录事件日志
+                eventLog?.recordDeepReflection(sessionId, eventData);
+                eventLog?.flush();
+                
                 safeLog(api, 'warn', `[DeepReflect] TIMEOUT after ${elapsed}ms`);
-                return `⚠️ [Deep Reflection] 分析超时 (${elapsed}ms)\n\n**建议：**\n- 尝试使用 depth=1 进行轻量分析\n- 简化问题描述\n- 检查网络连接`;
+                return `⚠️ [Deep Reflection] 分析超时 (${elapsed}ms)
+
+**建议：**
+- 尝试使用 depth=1 进行轻量分析
+- 简化问题描述
+- 检查网络连接`;
             }
 
             if (waitResult.status === 'error') {
+                const elapsed = Date.now() - startTime;
+                eventData.durationMs = elapsed;
+                eventData.error = waitResult.error || 'Unknown error';
+                
+                // 记录事件日志
+                eventLog?.recordDeepReflection(sessionId, eventData);
+                eventLog?.flush();
+                
                 safeLog(api, 'error', `[DeepReflect] ERROR: ${waitResult.error}`);
-                return `❌ [Deep Reflection] 执行失败: ${waitResult.error || 'Unknown error'}\n\n**建议：**\n- 检查 model_id 是否正确 (T-01 到 T-09)\n- 检查 OpenClaw Gateway 日志`;
+                return `❌ [Deep Reflection] 执行失败: ${waitResult.error || 'Unknown error'}
+
+**建议：**
+- 检查 model_id 是否正确 (T-01 到 T-09)
+- 检查 OpenClaw Gateway 日志`;
             }
 
             // 3. Extract Messages
@@ -234,7 +314,23 @@ Summons a "Shoulder Angel" AI that will rigorously critique your approach, find 
             // 日志：原始输出
             safeLog(api, 'debug', `[DeepReflect] Raw output length: ${reflectionText.length} chars`);
             
+            // 提取统计信息
+            const stats = extractStatsFromOutput(reflectionText);
+            
+            // 更新事件数据
+            eventData.durationMs = elapsed;
+            eventData.outputLength = reflectionText.length;
+            eventData.confidence = stats.confidence;
+            eventData.blindSpotsCount = stats.blindSpotsCount;
+            eventData.risksCount = stats.risksCount;
+            
             if (reflectionText.includes('REFLECTION_OK') || reflectionText.trim() === '') {
+                eventData.passed = true;
+                
+                // 记录事件日志
+                eventLog?.recordDeepReflection(sessionId, eventData);
+                eventLog?.flush();
+                
                 safeLog(api, 'info',
                     `╔══════════════════════════════════════════════════════════════╗\n` +
                     `║  [DEEP REFLECTION] PASSED ✓                                   ║\n` +
@@ -244,8 +340,18 @@ Summons a "Shoulder Angel" AI that will rigorously critique your approach, find 
                     `║  Result: No significant issues found                          ║\n` +
                     `╚══════════════════════════════════════════════════════════════╝`
                 );
-                return `✅ [Deep Reflection ${model_id}] 方案通过审查\n\n**分析耗时:** ${elapsed}ms\n**结果:** 未发现显著问题，可以继续执行。`;
+                return `✅ [Deep Reflection ${model_id}] 方案通过审查
+
+**分析耗时:** ${elapsed}ms
+**结果:** 未发现显著问题，可以继续执行。`;
             }
+
+            // 更新事件数据（发现问题）
+            eventData.resultPreview = reflectionText.length > 200 ? reflectionText.substring(0, 200) + '...' : reflectionText;
+            
+            // 记录事件日志
+            eventLog?.recordDeepReflection(sessionId, eventData);
+            eventLog?.flush();
 
             // 详细日志：完成
             safeLog(api, 'info',
@@ -255,15 +361,36 @@ Summons a "Shoulder Angel" AI that will rigorously critique your approach, find 
                 `║  Model: ${model_id.padEnd(52)}║\n` +
                 `║  Duration: ${(elapsed + 'ms').padEnd(52)}║\n` +
                 `║  Output: ${reflectionText.length} chars                                          ║\n` +
+                `║  Blind Spots: ${String(stats.blindSpotsCount).padEnd(46)}║\n` +
+                `║  Risks: ${String(stats.risksCount).padEnd(54)}║\n` +
+                `║  Confidence: ${(stats.confidence || 'N/A').padEnd(50)}║\n` +
                 `╚══════════════════════════════════════════════════════════════╝`
             );
 
             // 日志：完整输出（用于调试）
             safeLog(api, 'debug', `[DeepReflect] Full critique output:\n${reflectionText}`);
 
-            return `🎯 [Deep Reflection ${model_id}] 批判性分析结果\n\n**分析耗时:** ${elapsed}ms\n**置信度:** 见下方报告\n\n---\n\n${reflectionText}\n\n---\n*这是来自"肩上小人"的批判性反馈。请认真考虑上述建议，但最终决策权在你。*`;
+            return `🎯 [Deep Reflection ${model_id}] 批判性分析结果
+
+**分析耗时:** ${elapsed}ms
+**置信度:** ${stats.confidence || 'N/A'}
+**盲点:** ${stats.blindSpotsCount} | **风险:** ${stats.risksCount}
+
+---
+
+${reflectionText}
+
+---
+*这是来自"肩上小人"的批判性反馈。请认真考虑上述建议，但最终决策权在你。*`;
         } catch (err) {
             const elapsed = Date.now() - startTime;
+            eventData.durationMs = elapsed;
+            eventData.error = String(err);
+            
+            // 记录事件日志
+            eventLog?.recordDeepReflection(sessionId, eventData);
+            eventLog?.flush();
+            
             safeLog(api, 'error',
                 `[DeepReflect] EXCEPTION after ${elapsed}ms: ${String(err)}\n` +
                 `Stack: ${(err as Error).stack || 'N/A'}`
