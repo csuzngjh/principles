@@ -1,10 +1,10 @@
 # Implementation Plan: Progressive Gatekeeper
 
 ## Phase 1: Core Storage & Utility Functions
-- [ ] Task: Create or update `docs/AGENT_SCORECARD.json` initialization logic to ensure `trust_score` exists with a default of 50.
-- [ ] Task: Create `src/core/trust-engine.ts` with basic calculate, increment, and decrement logic for `trust_score`.
-- [ ] Task: Create `src/core/risk-calculator.ts` to compute risk (LOW, MEDIUM, HIGH, CRITICAL) based on file path (`isRisky`) and estimated modification size.
-- [ ] Task: Write tests for `trust-engine.ts` and `risk-calculator.ts`.
+- [x] Task: Create or update `docs/AGENT_SCORECARD.json` initialization logic to ensure `trust_score` exists with a default of 50. [fe506a3]
+- [x] Task: Create `src/core/trust-engine.ts` with basic calculate, increment, and decrement logic for `trust_score`. [fe506a3]
+- [x] Task: Create `src/core/risk-calculator.ts` to compute risk (LOW, MEDIUM, HIGH, CRITICAL) based on file path (`isRisky`) and estimated modification size. [fe506a3]
+- [x] Task: Write tests for `trust-engine.ts` and `risk-calculator.ts`. [fe506a3]
 - [ ] Task: Conductor - User Manual Verification 'Phase 1: Core Storage & Utility Functions' (Protocol in workflow.md)
 
 ## Phase 2: Hook Integration (Pain & Subagent)
