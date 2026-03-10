@@ -15,8 +15,9 @@ export interface SubagentRunParams {
     sessionKey: string;
     message: string;
     extraSystemPrompt?: string;
+    lane?: string;
     deliver?: boolean;
-    agentId?: string;
+    idempotencyKey?: string;
 }
 
 export interface SubagentRunResult {
