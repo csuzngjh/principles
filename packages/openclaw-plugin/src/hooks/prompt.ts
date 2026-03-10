@@ -74,15 +74,10 @@ This indicates you are trapped in a failure loop or facing extreme environment r
       if (directive.active) {
         handledDirective = true;
         const directiveMsg =
-          `\n🚨 SYSTEM OVERRIDE: AUTONOMOUS EVOLUTION REQUIRED 🚨\n` +
-          `Task: ${directive.task}\n\n` +
-          `You MUST immediately invoke the \`sessions_spawn\` tool to delegate this diagnosis to the \`diagnostician\` subagent.\n` +
-          `IMPORTANT: You MUST acknowledge this directive by responding with the exact text:\n` +
-          `[EVOLUTION_ACKNOWLEDGED]\n\n` +
-          `Then you MUST call the \`sessions_spawn\` tool with:\n` +
-          `- agentId: "diagnostician"\n` +
-          `- task: "${directive.task}"\n\n` +
-          `Do not attempt to fix it yourself yet. Ask the diagnostician to investigate and report back.`;
+          `🚨 [SYSTEM OVERRIDE] 🚨\n` +
+          `EVOLUTION_TASK_PENDING: "${directive.task}"\n\n` +
+          `ACTION REQUIRED:\n` +
+          `Reply ONLY with "[EVOLUTION_ACK]". Then immediately invoke the \`sessions_spawn\` tool targeting \`diagnostician\` with the task above. NO OTHER ACTIONS PERMITTED.`;
 
         prependContext += `\n<evolution_directive>${directiveMsg}</evolution_directive>\n`;
 
