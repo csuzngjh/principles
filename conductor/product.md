@@ -9,7 +9,7 @@ To transform AI assistants from simple task-executors into self-evolving digital
 - **Power Users**: Who want to automate large-scale projects with minimal supervision and high reliability.
 
 ## 3. Core Features
-- **The Gatekeeper (Safety)**: Prevents the AI from blindly executing harmful or unverified commands through strictly enforced risk gates.
+- **Progressive Gatekeeper (Safety)**: A dynamic, trust-based security system that automatically adjusts modification permissions (4-stages) based on historical performance and modification risk.
 - **Thinking OS (Meta-Cognition)**: A layered cognitive framework (Thinking OS, Principles, Procedures) that ensures architectural consistency.
 - **Pain Signals & Evolution**: A biological-inspired feedback loop that captures failures ("pain") and triggers autonomous reflection or evolution.
 - **Strategic Alignment (OKR)**: Synchronizes agent actions with high-level user objectives through a formal OKR system.
