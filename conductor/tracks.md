@@ -9,3 +9,9 @@ This file tracks all major tracks for the project. Each track has its own detail
 
 - [x] **Track: Implement Semantic Pain Detection (v1.3.0)**
   *Link: [./tracks/semantic_pain_detection_v1_3_0/](./tracks/semantic_pain_detection_v1_3_0/)*
+
+---
+
+- [ ] **Track: Implement a simplified MVP 4-stage progressive trust currency system for the Gatekeeper**
+*Link: [./tracks/progressive_gatekeeper_20260310/](./tracks/progressive_gatekeeper_20260310/)*
+
