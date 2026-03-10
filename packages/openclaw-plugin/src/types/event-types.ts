@@ -4,24 +4,26 @@
 
 // ============== Event Types ==============
 
-export type EventType = 
+export type EventType =
   | 'tool_call'
   | 'pain_signal'
   | 'rule_match'
   | 'rule_promotion'
   | 'hook_execution'
   | 'gate_block'
+  | 'plan_approval'
   | 'evolution_task'
   | 'deep_reflection'
   | 'trust_change'
   | 'error'
   | 'warn';
 
-export type EventCategory = 
+export type EventCategory =
   | 'success'
   | 'failure'
   | 'detected'
   | 'blocked'
+  | 'approved'
   | 'enqueued'
   | 'completed'
   | 'promoted'
@@ -100,6 +102,13 @@ export interface GateBlockEventData {
   filePath: string;
   reason: string;
   planStatus?: string;
+}
+
+export interface PlanApprovalEventData {
+  toolName: string;
+  filePath: string;
+  pattern: string;
+  planStatus: string;
 }
 
 export interface EvolutionTaskEventData {

@@ -35,6 +35,12 @@ export const PROFILE_DEFAULTS = {
   },
   progressive_gate: {
     enabled: true,
+    plan_approvals: {
+      enabled: false,
+      max_lines_override: -1,
+      allowed_patterns: [] as string[],
+      allowed_operations: [] as string[],
+    },
   },
   custom_guards: [] as Array<{ pattern: string; message: string; severity: string }>,
 };
@@ -85,9 +91,47 @@ export function normalizeProfile(rawProfile: any): any {
     if (rawProfile.progressive_gate && typeof rawProfile.progressive_gate === 'object') {
       const pg = rawProfile.progressive_gate;
       normalized.progressive_gate.enabled = pg.enabled ?? pg.enabled ?? defaults.progressive_gate.enabled;
+
+      // Plan approvals configuration
+      if (pg.plan_approvals && typeof pg.plan_approvals === 'object') {
+        const pa = pg.plan_approvals;
+        normalized.progressive_gate.plan_approvals.enabled = pa.enabled ?? pa.planApprovals ?? defaults.progressive_gate.plan_approvals.enabled;
+
+        const maxLines = pa.max_lines_override ?? pa.maxLinesOverride;
+        if (typeof maxLines === 'number' && maxLines >= -1) {
+          normalized.progressive_gate.plan_approvals.max_lines_override = maxLines;
+        }
+
+        if (Array.isArray(pa.allowed_patterns)) {
+          normalized.progressive_gate.plan_approvals.allowed_patterns = pa.allowed_patterns.filter((p: any) => typeof p === 'string');
+        }
+
+        if (Array.isArray(pa.allowed_operations)) {
+          normalized.progressive_gate.plan_approvals.allowed_operations = pa.allowed_operations.filter((o: any) => typeof o === 'string');
+        }
+      }
     } else if (rawProfile.progressiveGate && typeof rawProfile.progressiveGate === 'object') {
       const pg = rawProfile.progressiveGate;
       normalized.progressive_gate.enabled = pg.enabled ?? defaults.progressive_gate.enabled;
+
+      // Plan approvals configuration (camelCase)
+      if (pg.planApprovals && typeof pg.planApprovals === 'object') {
+        const pa = pg.planApprovals;
+        normalized.progressive_gate.plan_approvals.enabled = pa.enabled ?? defaults.progressive_gate.plan_approvals.enabled;
+
+        const maxLines = pa.maxLinesOverride;
+        if (typeof maxLines === 'number' && maxLines >= -1) {
+          normalized.progressive_gate.plan_approvals.max_lines_override = maxLines;
+        }
+
+        if (Array.isArray(pa.allowedPatterns)) {
+          normalized.progressive_gate.plan_approvals.allowed_patterns = pa.allowedPatterns.filter((p: any) => typeof p === 'string');
+        }
+
+        if (Array.isArray(pa.allowedOperations)) {
+          normalized.progressive_gate.plan_approvals.allowed_operations = pa.allowedOperations.filter((o: any) => typeof o === 'string');
+        }
+      }
     }
 
     // Test settings

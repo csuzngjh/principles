@@ -104,6 +104,217 @@ describe('Progressive Gate Hook', () => {
     expect(result).toBeUndefined(); // Allowed
   });
 
+  describe('Stage 1 PLAN Approvals', () => {
+    it('should allow operation when PLAN is READY and matches whitelist', () => {
+      const mockCtx = { workspaceDir };
+      const mockEvent = {
+        toolName: 'write',
+        params: { file_path: 'skills/my-skill.md' }
+      };
+
+      // Trust < 30 => Stage 1
+      vi.mocked(trustEngine.getAgentScorecard).mockReturnValue({ trust_score: 25 });
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockImplementation((p: any) => {
+        if (p.includes('PROFILE.json')) {
+          return JSON.stringify({
+            risk_paths: ['src/'],
+            progressive_gate: {
+              enabled: true,
+              plan_approvals: {
+                enabled: true,
+                max_lines_override: -1,
+                allowed_patterns: ['skills/**'],
+                allowed_operations: ['write']
+              }
+            }
+          });
+        }
+        if (p.includes('PLAN.md')) return 'STATUS: READY\n';
+        return '';
+      });
+
+      const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
+
+      expect(result).toBeUndefined(); // Should be allowed
+    });
+
+    it('should block operation when PLAN is not READY', () => {
+      const mockCtx = { workspaceDir };
+      const mockEvent = {
+        toolName: 'write',
+        params: { file_path: 'skills/my-skill.md' }
+      };
+
+      vi.mocked(trustEngine.getAgentScorecard).mockReturnValue({ trust_score: 25 });
+      vi.mocked(riskCalculator.assessRiskLevel).mockReturnValue('MEDIUM'); // Make it risky
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockImplementation((p: any) => {
+        if (p.includes('PROFILE.json')) {
+          return JSON.stringify({
+            risk_paths: ['src/'],
+            progressive_gate: {
+              enabled: true,
+              plan_approvals: {
+                enabled: true,
+                max_lines_override: -1,
+                allowed_patterns: ['skills/**'],
+                allowed_operations: ['write']
+              }
+            }
+          });
+        }
+        if (p.includes('PLAN.md')) return 'STATUS: DRAFT\n';
+        return '';
+      });
+
+      const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
+
+      expect(result).toBeDefined();
+      expect(result?.block).toBe(true);
+      expect(result?.blockReason).toContain('Trust score too low');
+    });
+
+    it('should block operation when path does not match patterns', () => {
+      const mockCtx = { workspaceDir };
+      const mockEvent = {
+        toolName: 'write',
+        params: { file_path: 'src/other.ts' }
+      };
+
+      vi.mocked(trustEngine.getAgentScorecard).mockReturnValue({ trust_score: 25 });
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockImplementation((p: any) => {
+        if (p.includes('PROFILE.json')) {
+          return JSON.stringify({
+            risk_paths: ['src/'],
+            progressive_gate: {
+              enabled: true,
+              plan_approvals: {
+                enabled: true,
+                max_lines_override: -1,
+                allowed_patterns: ['skills/**'],
+                allowed_operations: ['write']
+              }
+            }
+          });
+        }
+        if (p.includes('PLAN.md')) return 'STATUS: READY\n';
+        return '';
+      });
+
+      const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
+
+      expect(result).toBeDefined();
+      expect(result?.block).toBe(true);
+      expect(result?.blockReason).toContain('Trust score too low');
+    });
+
+    it('should block operation when tool is not in allowed_operations', () => {
+      const mockCtx = { workspaceDir };
+      const mockEvent = {
+        toolName: 'edit', // Not in allowed_operations
+        params: { file_path: 'skills/my-skill.md' }
+      };
+
+      vi.mocked(trustEngine.getAgentScorecard).mockReturnValue({ trust_score: 25 });
+      vi.mocked(riskCalculator.assessRiskLevel).mockReturnValue('MEDIUM'); // Make it risky
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockImplementation((p: any) => {
+        if (p.includes('PROFILE.json')) {
+          return JSON.stringify({
+            risk_paths: ['src/'],
+            progressive_gate: {
+              enabled: true,
+              plan_approvals: {
+                enabled: true,
+                max_lines_override: -1,
+                allowed_patterns: ['**'],
+                allowed_operations: ['write'] // edit not included
+              }
+            }
+          });
+        }
+        if (p.includes('PLAN.md')) return 'STATUS: READY\n';
+        return '';
+      });
+
+      const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
+
+      expect(result).toBeDefined();
+      expect(result?.block).toBe(true);
+      expect(result?.blockReason).toContain('Trust score too low');
+    });
+
+    it('should respect max_lines_override when set', () => {
+      const mockCtx = { workspaceDir };
+      const mockEvent = {
+        toolName: 'write',
+        params: { file_path: 'skills/my-skill.md', content: 'a\n'.repeat(20) }
+      };
+
+      vi.mocked(trustEngine.getAgentScorecard).mockReturnValue({ trust_score: 25 });
+      vi.mocked(riskCalculator.assessRiskLevel).mockReturnValue('MEDIUM'); // Make it risky
+      vi.mocked(riskCalculator.estimateLineChanges).mockReturnValue(20);
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockImplementation((p: any) => {
+        if (p.includes('PROFILE.json')) {
+          return JSON.stringify({
+            risk_paths: ['src/'],
+            progressive_gate: {
+              enabled: true,
+              plan_approvals: {
+                enabled: true,
+                max_lines_override: 10, // Max 10 lines
+                allowed_patterns: ['skills/**'],
+                allowed_operations: ['write']
+              }
+            }
+          });
+        }
+        if (p.includes('PLAN.md')) return 'STATUS: READY\n';
+        return '';
+      });
+
+      const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
+
+      expect(result).toBeDefined();
+      expect(result?.block).toBe(true);
+      expect(result?.blockReason).toContain('Trust score too low');
+    });
+
+    it('should block when plan_approvals is not enabled', () => {
+      const mockCtx = { workspaceDir };
+      const mockEvent = {
+        toolName: 'write',
+        params: { file_path: 'src/main.ts' }
+      };
+
+      vi.mocked(trustEngine.getAgentScorecard).mockReturnValue({ trust_score: 25 });
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockImplementation((p: any) => {
+        if (p.includes('PROFILE.json')) {
+          return JSON.stringify({
+            risk_paths: ['src/'],
+            progressive_gate: {
+              enabled: true,
+              plan_approvals: {
+                enabled: false // Not enabled
+              }
+            }
+          });
+        }
+        return '';
+      });
+
+      const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
+
+      expect(result).toBeDefined();
+      expect(result?.block).toBe(true);
+      expect(result?.blockReason).toContain('Trust score too low');
+    });
+  });
+
   it('should fall back to original logic if progressive gate is disabled', () => {
     const mockCtx = { workspaceDir };
     const mockEvent = { 

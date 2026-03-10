@@ -1,8 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import type { 
-  EventLogEntry, 
-  EventType, 
+import type {
+  EventLogEntry,
+  EventType,
   EventCategory,
   DailyStats,
   ToolCallEventData,
@@ -11,6 +11,7 @@ import type {
   RulePromotionEventData,
   HookExecutionEventData,
   GateBlockEventData,
+  PlanApprovalEventData,
   EvolutionTaskEventData,
   DeepReflectionEventData,
   TrustChangeEventData,
@@ -70,6 +71,10 @@ export class EventLog {
   
   recordGateBlock(sessionId: string | undefined, data: GateBlockEventData): void {
     this.record('gate_block', 'blocked', sessionId, data);
+  }
+
+  recordPlanApproval(sessionId: string | undefined, data: PlanApprovalEventData): void {
+    this.record('plan_approval', 'approved', sessionId, data);
   }
   
   recordEvolutionTask(data: EvolutionTaskEventData): void {
