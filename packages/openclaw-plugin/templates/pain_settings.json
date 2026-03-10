@@ -21,10 +21,11 @@
   "deep_reflection": {
     "enabled": true,
     "mode": "auto",
+    "force_checkpoint": false,
+    "checkpoint_message": "在响应前快速自检：1. 任务复杂度（简单/中等/复杂）2. 信息充分性（充分/需要更多信息）3. 如果复杂或信息不足，调用 deep_reflect 工具",
     "auto_trigger_conditions": {
       "min_tool_calls": 5,
-      "error_rate_threshold": 0.3,
-      "complexity_keywords": ["refactor", "architecture", "design", "optimize", "security", "critical"]
+      "error_rate_threshold": 0.3
     },
     "default_model": "T-01",
     "default_depth": 2,
