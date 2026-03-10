@@ -25,7 +25,7 @@
     "build:bundle": "node esbuild.config.js",
     "build:production": "tsc && node esbuild.config.js --production",
     "test": "vitest run",
-    "postinstall": "node scripts/install-dependencies.js"
+    "postinstall": "node scripts/install-dependencies.cjs"
   },
   "devDependencies": {
     "@types/micromatch": "^4.0.10",
