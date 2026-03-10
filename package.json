@@ -1,0 +1,18 @@
+{
+  "name": "principles-disciple-monorepo",
+  "version": "1.4.0",
+  "description": "Principles Disciple - OpenClaw Plugin Monorepo",
+  "private": true,
+  "scripts": {
+    "release": "semantic-release",
+    "release:dry-run": "semantic-release --dry-run",
+    "version:patch": "cd packages/openclaw-plugin && npm version patch",
+    "version:minor": "cd packages/openclaw-plugin && npm version minor",
+    "version:major": "cd packages/openclaw-plugin && npm version major"
+  },
+  "devDependencies": {
+    "@semantic-release/changelog": "^6.0.3",
+    "@semantic-release/git": "^10.0.1",
+    "semantic-release": "^24.0.0"
+  }
+}

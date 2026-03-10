@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "week_id": "2026-W07",
+  "stage": "DRAFT",
+  "owner_approved": false,
+  "owner_decision": "",
+  "owner_note": "",
+  "goal": "完成进化框架 v3.0 的落地与团队协作机制增强",
+  "proposer_agent": "",
+  "proposal_summary": "",
+  "challenger_agent": "",
+  "challenge_summary": "",
+  "lock": {
+    "locked": false,
+    "locked_at": ""
+  },
+  "execution": {
+    "started_at": "",
+    "last_heartbeat_at": "",
+    "heartbeat_count": 0,
+    "completed_events": 0,
+    "blocked_events": 0
+  },
+  "interruption": {
+    "active": false,
+    "detected_at": "",
+    "reason": ""
+  },
+  "updated_at": "2026-02-09T19:50:46.190842"
+}
