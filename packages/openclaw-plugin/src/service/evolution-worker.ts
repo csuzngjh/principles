@@ -84,6 +84,22 @@ function processEvolutionQueue(workspaceDir: string, stateDir: string, logger: a
 
     try {
         const queue: EvolutionQueueItem[] = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
+        let queueChanged = false;
+
+        // 1. Handle Timeouts (tasks stuck in progress for > 30 mins)
+        const maxDurationMs = 30 * 60 * 1000;
+        const now = Date.now();
+        for (const task of queue) {
+            if (task.status === 'in_progress' && task.timestamp) {
+                const age = now - new Date(task.timestamp).getTime();
+                if (age > maxDurationMs) {
+                    task.status = 'pending'; // Re-queue it, or we could mark it 'timeout'
+                    logger.warn(`[PD:EvolutionWorker] Task ${task.id} timed out. Reverting to pending.`);
+                    queueChanged = true;
+                }
+            }
+        }
+
         const pendingTasks = queue.filter(t => t.status === 'pending');
 
         if (pendingTasks.length > 0) {
@@ -102,7 +118,9 @@ function processEvolutionQueue(workspaceDir: string, stateDir: string, logger: a
 
             // CRITICAL: Mark as in_progress to prevent infinite loop
             highestScoreTask.status = 'in_progress';
-            fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+            // Update timestamp to now so the timeout counts from when it was dispatched
+            highestScoreTask.timestamp = new Date().toISOString();
+            queueChanged = true;
 
             logger.info(`[PD:EvolutionWorker] Evolution directive generated in ${directivePath}. Model will pick this up for next task.`);
 
@@ -113,6 +131,14 @@ function processEvolutionQueue(workspaceDir: string, stateDir: string, logger: a
                 reason: highestScoreTask.reason,
             });
         }
+
+        if (queueChanged) {
+            // Atomic write to prevent race conditions
+            const tmpPath = `${queuePath}.tmp.${Date.now()}`;
+            fs.writeFileSync(tmpPath, JSON.stringify(queue, null, 2), 'utf8');
+            fs.renameSync(tmpPath, queuePath);
+        }
+
     } catch (err) { }
 }
 
