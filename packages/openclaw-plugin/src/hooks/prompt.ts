@@ -152,6 +152,23 @@ Your current intent matches historical failure patterns or expressions of confus
     } catch (err) {}
   }
 
+  // 8. V1.4.0: Deep Reflection Checkpoint
+  const deepReflectionConfig = config.get('deep_reflection');
+  if (deepReflectionConfig?.enabled && deepReflectionConfig?.force_checkpoint && trigger !== 'heartbeat') {
+    const checkpointMessage = deepReflectionConfig.checkpoint_message || 
+      '在响应前快速自检：1. 任务复杂度（简单/中等/复杂）2. 信息充分性（充分/需要更多信息）3. 如果复杂或信息不足，调用 deep_reflect 工具';
+    
+    prependContext += `\n<reflection_checkpoint>
+⚠️ MANDATORY SELF-CHECK before responding:
+${checkpointMessage}
+
+如果判断需要深度反思，必须调用 deep_reflect 工具：
+- model_id: 推荐使用 T-01（地图先于领土）或 T-05（否定优于肯定）
+- context: 描述你的计划和担忧
+- depth: 1=快速, 2=平衡（默认）, 3=详尽
+</reflection_checkpoint>\n`;
+  }
+
   const result: PluginHookBeforePromptBuildResult = {};
   if (prependSystemContext.trim()) result.prependSystemContext = prependSystemContext.trim();
   if (prependContext.trim()) result.prependContext = prependContext.trim();
