@@ -32,7 +32,8 @@ describe('Post-Write Checks & Pain Hook', () => {
 
     vi.mocked(ioUtils.normalizePath).mockReturnValue('src/main.ts');
     vi.mocked(ioUtils.isRisky).mockReturnValue(false);
-    
+    vi.mocked(ioUtils.serializeKvLines).mockReturnValue('mocked-pain-flag-content');
+
     vi.mocked(fs.existsSync).mockReturnValue(true);
 
     handleAfterToolCall(mockEvent as any, mockCtx as any);
@@ -40,7 +41,10 @@ describe('Post-Write Checks & Pain Hook', () => {
     expect(fs.writeFileSync).toHaveBeenCalled();
     const callArgs = vi.mocked(fs.writeFileSync).mock.calls[0];
     expect(callArgs[0]).toContain('.pain_flag');
-    // Ensure the output contains 'source: tool_failure'
-    expect(callArgs[1]).toContain('source: tool_failure');
+
+    // Ensure the output was serialized with 'source: tool_failure'
+    expect(ioUtils.serializeKvLines).toHaveBeenCalled();
+    const serializeArgs = vi.mocked(ioUtils.serializeKvLines).mock.calls[0];
+    expect(serializeArgs[0]).toHaveProperty('source', 'tool_failure');
   });
 });
