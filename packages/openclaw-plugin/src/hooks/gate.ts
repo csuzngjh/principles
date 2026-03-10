@@ -1,9 +1,11 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { isRisky, normalizePath } from '../utils/io.js';
+import { isRisky, normalizePath, planStatus as getPlanStatus } from '../utils/io.js';
 import { normalizeProfile } from '../core/profile.js';
 import { EventLogService } from '../core/event-log.js';
 import { trackBlock } from '../core/session-tracker.js';
+import { getAgentScorecard } from '../core/trust-engine.js';
+import { assessRiskLevel, estimateLineChanges } from '../core/risk-calculator.js';
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult } from '../openclaw-sdk.js';
 
 export function handleBeforeToolCall(
@@ -23,12 +25,13 @@ export function handleBeforeToolCall(
     return;
   }
 
-  // Debug logging only for relevant tools
-  logger.info(`[PD_GATE_DEBUG] Received potential mutation tool: ${event.toolName}`);
-
-  // 2. Load and Normalize Profile (Moved up to use risk_paths dynamically)
+  // 2. Load Profile
   const profilePath = path.join(ctx.workspaceDir, 'docs', 'PROFILE.json');
-  let profile = { risk_paths: [] as string[], gate: { require_plan_for_risk_paths: true } };
+  let profile = { 
+    risk_paths: [] as string[], 
+    gate: { require_plan_for_risk_paths: true },
+    progressive_gate: { enabled: true } // Default to enabled for now
+  };
 
   if (fs.existsSync(profilePath)) {
     try {
@@ -48,101 +51,109 @@ export function handleBeforeToolCall(
   // 3. Resolve the target file path
   let filePath = event.params.file_path || event.params.path || event.params.file || event.params.target;
   
-  // Special handling for bash: heuristic check for file mutations
+  // Heuristic for bash mutation detection
   if (isBash && !filePath) {
     const command = String(event.params.command || event.params.args || "");
-    
-    // Improved Regex: Find potential file writes/deletes/creates in shell commands
-    // We look for patterns like: > file, >> file, rm file, mkdir path, touch file, etc.
-    // We try to skip common flags like -p, -rf, -v
     const mutationMatch = command.match(/(?:>|>>|sed\s+-i|rm|mv|mkdir|touch|cp)\s+(?:-[a-zA-Z]+\s+)*([^\s;&|<>]+)/);
     
     if (mutationMatch) {
       filePath = mutationMatch[1];
-      logger?.info?.(`[PD_GATE] Bash mutation detected. Extracted path: ${filePath}`);
     } else {
-      // Check if command contains any risk path and looks like a write operation
       const hasRiskPath = profile.risk_paths.some(rp => command.includes(rp));
       const isMutation = /(?:>|>>|sed|rm|mv|mkdir|touch|cp|npm|yarn|pnpm|pip|cargo)/.test(command);
       
       if (hasRiskPath && isMutation) {
-        filePath = command; // Fallback to full command for risk auditing
-        logger?.info?.(`[PD_GATE] Dynamic fallback risk detection for command: ${command}`);
+        filePath = command; 
       } else {
-        // Not a clear mutation command or doesn't target risk paths, skip
         return;
       }
     }
   }
 
-  if (typeof filePath !== 'string') {
-    return;
-  }
+  if (typeof filePath !== 'string') return;
 
-  // 4. Check Risk
   const relPath = normalizePath(filePath, ctx.workspaceDir);
-  
-  // If filePath is a full command (fallback case), we check if any risk path is contained in it
-  let risky = false;
-  if (isBash && filePath.includes(' ')) {
-    risky = profile.risk_paths.some(rp => filePath.includes(rp));
-  } else {
-    risky = isRisky(relPath, profile.risk_paths);
-  }
+  const risky = (isBash && filePath.includes(' ')) 
+    ? profile.risk_paths.some(rp => filePath.includes(rp))
+    : isRisky(relPath, profile.risk_paths);
 
-  if (risky) {
-    logger?.info?.(`[PD_GATE] Auditing modification to risk path: ${relPath}`);
+  // ── PROGRESSIVE GATE LOGIC ──
+  if (profile.progressive_gate?.enabled) {
+    const scorecard = getAgentScorecard(ctx.workspaceDir);
+    const trustScore = scorecard.trust_score ?? 50;
     
-    if (profile.gate.require_plan_for_risk_paths) {
-      const planPath = path.join(ctx.workspaceDir, 'docs', 'PLAN.md');
-      let planReady = false;
-      let planStatus = 'UNKNOWN';
+    // Determine Stage
+    let stage = 2;
+    if (trustScore < 30) stage = 1;
+    else if (trustScore < 60) stage = 2;
+    else if (trustScore < 80) stage = 3;
+    else stage = 4;
 
-      if (fs.existsSync(planPath)) {
-        try {
-          const planContent = fs.readFileSync(planPath, 'utf8');
-          for (const line of planContent.split('\n')) {
-            if (line.trim().startsWith('STATUS:')) {
-              planStatus = line.split(':')[1].trim().split(/\s+/)[0];
-              if (planStatus === 'READY') {
-                planReady = true;
-                break;
-              }
+    const riskLevel = assessRiskLevel(relPath, { toolName: event.toolName, params: event.params }, profile.risk_paths);
+    const lineChanges = estimateLineChanges({ toolName: event.toolName, params: event.params });
+
+    logger.info(`[PD_GATE] Trust: ${trustScore} (Stage ${stage}), Risk: ${riskLevel}, Path: ${relPath}`);
+
+    // Stage 1 (Bankruptcy): Block ALL writes to risk paths, and all medium+ writes
+    if (stage === 1) {
+        if (risky || riskLevel !== 'LOW') {
+            return block(relPath, `Trust score too low (${trustScore}). Stage 1 agents cannot modify risk paths or perform non-trivial edits.`, ctx, event.toolName);
+        }
+    }
+
+    // Stage 2 (Editor): Block writes to risk paths. Block large changes (>10 lines).
+    if (stage === 2) {
+        if (risky) {
+            return block(relPath, `Stage 2 agents are not authorized to modify risk paths.`, ctx, event.toolName);
+        }
+        if (lineChanges > 10) {
+            return block(relPath, `Modification too large (${lineChanges} lines) for Stage 2. Max allowed is 10.`, ctx, event.toolName);
+        }
+    }
+
+    // Stage 3 (Developer): Normal rules (requires PLAN for risk_paths). Limit extra-large changes?
+    if (stage === 3) {
+        if (risky) {
+            const status = getPlanStatus(ctx.workspaceDir);
+            if (status !== 'READY') {
+                return block(relPath, `No READY plan found. Stage 3 requires a plan for risk path modifications.`, ctx, event.toolName, status);
             }
-          }
-        } catch (e) {
-          logger?.error?.(`[PD_GATE] Failed to read PLAN.md: ${String(e)}`);
         }
-      }
+        // Optional: Block massive changes (>500 lines) even for Stage 3? No, let's keep it simple.
+    }
 
-      if (!planReady) {
-        logger?.warn?.(`[PD_GATE] BLOCKED: No READY plan for ${relPath}`);
-        
-        // Track block in session state
-        if (ctx.sessionId) {
-          trackBlock(ctx.sessionId);
-        }
-        
-        // Record gate block event
-        const stateDir = (ctx as any).stateDir || path.join(ctx.workspaceDir, 'memory', '.state');
-        const eventLog = EventLogService.get(stateDir);
-        eventLog.recordGateBlock(ctx.sessionId, {
-          toolName: event.toolName,
-          filePath: relPath,
-          reason: 'No READY plan found',
-          planStatus,
-        });
-        
-        return {
-          block: true,
-          blockReason:
-            `[PRINCIPLES_GATE] Modification blocked for risk path '${relPath}'.\n` +
-            `REASON: No READY plan found in docs/PLAN.md.\n` +
-            `ACTION: You MUST update docs/PLAN.md to STATUS: READY and describe the intended changes before you can modify this file.`,
-        };
-      } else {
-        logger?.info?.(`[PD_GATE] ALLOWED: Plan is READY for ${relPath}`);
-      }
+    // Stage 4 (Architect): All allowed.
+    if (stage === 4) {
+        logger.info(`[PD_GATE] Trusted Architect bypass for ${relPath}`);
+        return;
     }
   }
+
+  // 4. Original/Fallback Gate Logic
+  if (risky && profile.gate.require_plan_for_risk_paths) {
+    const status = getPlanStatus(ctx.workspaceDir);
+    if (status !== 'READY') {
+      return block(relPath, 'No READY plan found in docs/PLAN.md.', ctx, event.toolName, status);
+    }
+  }
+}
+
+function block(relPath: string, reason: string, ctx: any, toolName: string, planStatus?: string): PluginHookBeforeToolCallResult {
+    const logger = ctx.logger || console;
+    logger.warn(`[PD_GATE] BLOCKED: ${relPath}. Reason: ${reason}`);
+    
+    if (ctx.sessionId) trackBlock(ctx.sessionId);
+    
+    const stateDir = ctx.stateDir || path.join(ctx.workspaceDir, 'memory', '.state');
+    EventLogService.get(stateDir).recordGateBlock(ctx.sessionId, {
+        toolName,
+        filePath: relPath,
+        reason,
+        planStatus,
+    });
+
+    return {
+        block: true,
+        blockReason: `[PRINCIPLES_GATE] Blocked: ${relPath}\nREASON: ${reason}\nACTION: Improve your trust score or provide a READY plan if allowed.`,
+    };
 }

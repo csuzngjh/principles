@@ -33,6 +33,9 @@ export const PROFILE_DEFAULTS = {
     enabled: true,
     heartbeat_stale_hours: 72,
   },
+  progressive_gate: {
+    enabled: true,
+  },
   custom_guards: [] as Array<{ pattern: string; message: string; severity: string }>,
 };
 
@@ -76,6 +79,15 @@ export function normalizeProfile(rawProfile: any): any {
       normalized.gate.require_plan_for_risk_paths = g.require_plan_for_risk_paths ?? g.requirePlanForRiskPaths ?? defaults.gate.require_plan_for_risk_paths;
       normalized.gate.require_audit_before_write = g.require_audit_before_write ?? g.requireAuditBeforeWrite ?? defaults.gate.require_audit_before_write;
       normalized.gate.require_reviewer_after_write = g.require_reviewer_after_write ?? g.requireReviewerAfterWrite ?? defaults.gate.require_reviewer_after_write;
+    }
+
+    // Progressive Gate
+    if (rawProfile.progressive_gate && typeof rawProfile.progressive_gate === 'object') {
+      const pg = rawProfile.progressive_gate;
+      normalized.progressive_gate.enabled = pg.enabled ?? pg.enabled ?? defaults.progressive_gate.enabled;
+    } else if (rawProfile.progressiveGate && typeof rawProfile.progressiveGate === 'object') {
+      const pg = rawProfile.progressiveGate;
+      normalized.progressive_gate.enabled = pg.enabled ?? defaults.progressive_gate.enabled;
     }
 
     // Test settings
