@@ -168,10 +168,32 @@ else
 fi
 
 # ============================================================================
-# 5. 复制 Skills (始终覆盖，因为是静态模板)
+# 5. 正确安装插件到 OpenClaw
 # ============================================================================
 printf "\n"
-printf "${YELLOW}📚 步骤 4/5: 复制 Skills${NC}\n"
+printf "${YELLOW}🔌 步骤 4/5: 安装插件到 OpenClaw${NC}\n"
+
+if command -v openclaw &>/dev/null; then
+    printf "  使用 openclaw plugins install 安装插件...\n"
+    
+    openclaw plugins uninstall principles-disciple 2>/dev/null || true
+    
+    if openclaw plugins install "$PLUGIN_DIR"; then
+        printf "  ${GREEN}✅ 插件安装成功${NC}\n"
+    else
+        printf "  ${RED}❌ 插件安装失败${NC}\n"
+        exit 1
+    fi
+else
+    printf "  ${YELLOW}⚠️  openclaw 命令未找到，跳过插件安装${NC}\n"
+    printf "     请手动运行: openclaw plugins install %s --link${NC}\n" "$PLUGIN_DIR"
+fi
+
+# ============================================================================
+# 复制 Skills
+# ============================================================================
+printf "\n"
+printf "${YELLOW}📚 步骤 5/5: 复制 Skills${NC}\n"
 
 SKILLS_SRC="$PLUGIN_DIR/templates/langs/$SELECTED_LANG/skills"
 SKILLS_DEST="$PLUGIN_DIR/skills"
@@ -194,98 +216,6 @@ else
 fi
 
 # ============================================================================
-# 5.1 复制扩展思维模型文件
-# ============================================================================
-printf "\n"
-printf "${YELLOW}🧠 步骤 4.1/5: 复制扩展思维模型${NC}\n"
-
-MODELS_SRC="$PLUGIN_DIR/templates/workspace/docs/models"
-MODELS_DEST="$PLUGIN_DIR/templates/workspace/docs/models"
-
-if [ -d "$MODELS_SRC" ]; then
-    MODEL_COUNT=$(ls "$MODELS_SRC"/*.md 2>/dev/null | wc -l)
-    if [ "$MODEL_COUNT" -gt 0 ]; then
-        printf "  ${GREEN}✅ 已部署 %s 个思维模型${NC}\n" "$MODEL_COUNT"
-        printf "     模型文件位置: %s${NC}\n" "$MODELS_SRC"
-    else
-        printf "  ${YELLOW}⚠️  模型目录为空，跳过${NC}\n"
-    fi
-else
-    printf "  ${YELLOW}⚠️  模型目录不存在，跳过${NC}\n"
-fi
-
-# ============================================================================
-# 6. 注册插件
-# ============================================================================
-printf "\n"
-printf "${YELLOW}⚙️  步骤 5/5: 注册插件${NC}\n"
-
-python3 -c "
-import json
-import os
-
-config_path = '$OPENCLAW_CONFIG'
-plugin_path = '$PLUGIN_DIR'
-language = '$SELECTED_LANG'
-
-# 读取或初始化配置
-try:
-    with open(config_path, 'r', encoding='utf-8') as f:
-        cfg = json.load(f)
-except FileNotFoundError:
-    cfg = {}
-
-# 确保 plugins 结构存在
-if 'plugins' not in cfg:
-    cfg['plugins'] = {}
-if 'entries' not in cfg['plugins']:
-    cfg['plugins']['entries'] = {}
-if 'principles-disciple' not in cfg['plugins']['entries']:
-    cfg['plugins']['entries']['principles-disciple'] = {}
-if 'config' not in cfg['plugins']['entries']['principles-disciple']:
-    cfg['plugins']['entries']['principles-disciple']['config'] = {}
-
-# 启用插件
-cfg['plugins']['entries']['principles-disciple']['enabled'] = True
-cfg['plugins']['entries']['principles-disciple']['config']['language'] = language
-print(f'  ✅ 插件已启用，语言: {language}')
-
-# 添加插件路径
-if 'load' not in cfg['plugins']:
-    cfg['plugins']['load'] = {}
-if 'paths' not in cfg['plugins']['load']:
-    cfg['plugins']['load']['paths'] = []
-
-paths = cfg['plugins']['load']['paths']
-if plugin_path not in paths:
-    paths.append(plugin_path)
-    print(f'  ✅ 添加插件路径: {plugin_path}')
-else:
-    print(f'  ℹ️  插件路径已存在')
-
-# 配置记忆搜索
-if 'agents' not in cfg:
-    cfg['agents'] = {}
-if 'defaults' not in cfg['agents']:
-    cfg['agents']['defaults'] = {}
-if 'memorySearch' not in cfg['agents']['defaults']:
-    cfg['agents']['defaults']['memorySearch'] = {}
-if 'extraPaths' not in cfg['agents']['defaults']['memorySearch']:
-    cfg['agents']['defaults']['memorySearch']['extraPaths'] = []
-
-extra = cfg['agents']['defaults']['memorySearch']['extraPaths']
-if 'docs' not in extra:
-    extra.append('docs')
-    print('  ✅ 添加 memorySearch.extraPaths: docs')
-
-# 保存配置
-os.makedirs(os.path.dirname(config_path), exist_ok=True)
-with open(config_path, 'w', encoding='utf-8') as f:
-    json.dump(cfg, f, indent=2)
-print(f'  ✅ 配置已保存: {config_path}')
-"
-
-# ============================================================================
 # 完成
 # ============================================================================
 printf "\n"
@@ -296,13 +226,9 @@ printf "\n"
 printf "安装信息:\n"
 printf "  - 语言: %s\n" "$SELECTED_LANG"
 printf "  - 模式: %s\n" "$INSTALL_MODE"
-printf "  - Skills: %s 个\n" "$(ls "$PLUGIN_DIR/skills" | wc -l)"
+printf "  - Skills: %s 个\n" "$(ls "$PLUGIN_DIR/skills" 2>/dev/null | wc -l)"
 printf "  - 思维模型: %s 个\n" "$(ls "$PLUGIN_DIR/templates/workspace/docs/models"/*.md 2>/dev/null | wc -l)"
-printf "\n"
-printf "扩展思维模型配置:\n"
-printf "  - 默认位置: docs/models/_INDEX.md\n"
-printf "  - 自定义配置: 在 pain_settings.json 中设置 deep_reflection.modelsDir\n"
-printf "    例如: {\"deep_reflection\": {\"modelsDir\": \"custom/models\"}}\n"
+printf "  - 插件安装: %s${NC}\n" "$HOME/.openclaw/extensions/principles-disciple"
 printf "\n"
 printf "下一步操作:\n"
 printf "  1. 重启 OpenClaw Gateway 使插件生效:\n"
