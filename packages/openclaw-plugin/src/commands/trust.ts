@@ -1,4 +1,4 @@
-import { getAgentScorecard } from '../core/trust-engine.js';
+import { getAgentScorecard, TRUST_CONFIG } from '../core/trust-engine.js';
 import type { PluginHookAgentContext } from '../openclaw-sdk.js';
 
 export function handleTrustCommand(ctx: PluginHookAgentContext & { workspaceDir?: string }): string {
@@ -10,25 +10,25 @@ export function handleTrustCommand(ctx: PluginHookAgentContext & { workspaceDir?
     
     let stage = 2;
     let title = 'Editor';
-    let permissions = '- Small scale modifications (< 10 lines)\n- Modifications to non-risk paths allowed';
-    let nextLevel = 'Trust Score >= 60';
+    let permissions = `- Small modifications (< ${TRUST_CONFIG.LIMITS.STAGE_2_MAX_LINES} lines)\n- Non-risk paths only`;
+    let nextLevel = `Trust Score >= ${TRUST_CONFIG.STAGES.STAGE_2_EDITOR}`;
 
-    if (trustScore < 30) {
+    if (trustScore < TRUST_CONFIG.STAGES.STAGE_1_OBSERVER) {
         stage = 1;
         title = 'Observer (Bankruptcy)';
         permissions = '- Read-only access\n- Diagnosis tools only';
-        nextLevel = 'Trust Score >= 30';
-    } else if (trustScore < 60) {
+        nextLevel = `Trust Score >= ${TRUST_CONFIG.STAGES.STAGE_1_OBSERVER}`;
+    } else if (trustScore < TRUST_CONFIG.STAGES.STAGE_2_EDITOR) {
         // Default stage 2
-    } else if (trustScore < 80) {
+    } else if (trustScore < TRUST_CONFIG.STAGES.STAGE_3_DEVELOPER) {
         stage = 3;
         title = 'Developer';
-        permissions = '- Full modifications allowed\n- Modification to risk paths requires READY plan';
-        nextLevel = 'Trust Score >= 80';
+        permissions = `- Medium modifications (< ${TRUST_CONFIG.LIMITS.STAGE_3_MAX_LINES} lines)\n- Risk paths require READY plan`;
+        nextLevel = `Trust Score >= ${TRUST_CONFIG.STAGES.STAGE_3_DEVELOPER}`;
     } else {
         stage = 4;
         title = 'Architect';
-        permissions = '- UNRESTRICTED access\n- Plan and Audit are optional but recommended';
+        permissions = '- UNRESTRICTED access\n- Plan and Audit are optional';
         nextLevel = 'MAX LEVEL REACHED';
     }
 
@@ -43,6 +43,6 @@ ${permissions}
 
 **Next Promotion**: ${nextLevel}
 ──────────────────────────────
-*Trust is earned through successful tasks and lost through critical failures.*
+*Trust is earned through successful tasks (+${TRUST_CONFIG.REWARDS.SUBAGENT_SUCCESS}) and lost through failures (${TRUST_CONFIG.PENALTIES.TOOL_FAILURE}).*
 `.trim();
 }

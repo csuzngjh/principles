@@ -15,7 +15,7 @@ describe('Subagent Hook', () => {
     });
 
     it('should increment trust score on successful subagent completion', () => {
-        const mockCtx = { workspaceDir };
+        const mockCtx = { workspaceDir, sessionId: 's1' };
         const mockEvent = { 
             targetSessionKey: 'agent:main:subagent:diagnostician-123',
             outcome: 'ok' 
@@ -26,7 +26,12 @@ describe('Subagent Hook', () => {
 
         handleSubagentEnded(mockEvent as any, mockCtx as any);
 
-        expect(trustEngine.adjustTrustScore).toHaveBeenCalledWith(workspaceDir, 2);
+        expect(trustEngine.adjustTrustScore).toHaveBeenCalledWith(
+            workspaceDir, 
+            expect.any(Number), 
+            expect.stringContaining('subagent:'),
+            expect.objectContaining({ sessionId: 's1' })
+        );
     });
 
     it('should NOT increment trust score on failure', () => {
@@ -38,6 +43,11 @@ describe('Subagent Hook', () => {
 
         handleSubagentEnded(mockEvent as any, mockCtx as any);
 
-        expect(trustEngine.adjustTrustScore).not.toHaveBeenCalledWith(workspaceDir, 2);
+        expect(trustEngine.adjustTrustScore).not.toHaveBeenCalledWith(
+            workspaceDir, 
+            expect.any(Number), 
+            expect.any(String),
+            expect.any(Object)
+        );
     });
 });

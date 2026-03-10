@@ -1,6 +1,6 @@
 import { PluginHookSubagentEndedEvent, PluginHookAgentContext } from '../openclaw-sdk.js';
 import { writePainFlag } from '../core/pain.js';
-import { adjustTrustScore } from '../core/trust-engine.js';
+import { adjustTrustScore, TRUST_CONFIG } from '../core/trust-engine.js';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -43,7 +43,11 @@ export function handleSubagentEnded(
     // we clear the oldest in_progress task assuming it was the one being worked on.
     if (outcome === 'ok' || outcome === 'deleted') {
         // ── Trust Engine: Increment score on success ──
-        adjustTrustScore(workspaceDir, 2);
+        adjustTrustScore(workspaceDir, TRUST_CONFIG.REWARDS.SUBAGENT_SUCCESS, `subagent:${event.targetSessionKey}`, {
+            sessionId: ctx.sessionId,
+            stateDir: (ctx as any).stateDir,
+            api: (ctx as any).api
+        });
 
         const queuePath = path.join(workspaceDir, 'docs', 'evolution_queue.json');
         if (fs.existsSync(queuePath)) {

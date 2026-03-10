@@ -4,7 +4,7 @@ import { isRisky, normalizePath, planStatus as getPlanStatus } from '../utils/io
 import { normalizeProfile } from '../core/profile.js';
 import { EventLogService } from '../core/event-log.js';
 import { trackBlock } from '../core/session-tracker.js';
-import { getAgentScorecard } from '../core/trust-engine.js';
+import { getAgentScorecard, TRUST_CONFIG } from '../core/trust-engine.js';
 import { assessRiskLevel, estimateLineChanges } from '../core/risk-calculator.js';
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult } from '../openclaw-sdk.js';
 
@@ -84,9 +84,9 @@ export function handleBeforeToolCall(
     
     // Determine Stage
     let stage = 2;
-    if (trustScore < 30) stage = 1;
-    else if (trustScore < 60) stage = 2;
-    else if (trustScore < 80) stage = 3;
+    if (trustScore < TRUST_CONFIG.STAGES.STAGE_1_OBSERVER) stage = 1;
+    else if (trustScore < TRUST_CONFIG.STAGES.STAGE_2_EDITOR) stage = 2;
+    else if (trustScore < TRUST_CONFIG.STAGES.STAGE_3_DEVELOPER) stage = 3;
     else stage = 4;
 
     const riskLevel = assessRiskLevel(relPath, { toolName: event.toolName, params: event.params }, profile.risk_paths);
@@ -101,25 +101,28 @@ export function handleBeforeToolCall(
         }
     }
 
-    // Stage 2 (Editor): Block writes to risk paths. Block large changes (>10 lines).
+    // Stage 2 (Editor): Block writes to risk paths. Block large changes.
     if (stage === 2) {
         if (risky) {
             return block(relPath, `Stage 2 agents are not authorized to modify risk paths.`, ctx, event.toolName);
         }
-        if (lineChanges > 10) {
-            return block(relPath, `Modification too large (${lineChanges} lines) for Stage 2. Max allowed is 10.`, ctx, event.toolName);
+        if (lineChanges > TRUST_CONFIG.LIMITS.STAGE_2_MAX_LINES) {
+            return block(relPath, `Modification too large (${lineChanges} lines) for Stage 2. Max allowed is ${TRUST_CONFIG.LIMITS.STAGE_2_MAX_LINES}.`, ctx, event.toolName);
         }
     }
 
-    // Stage 3 (Developer): Normal rules (requires PLAN for risk_paths). Limit extra-large changes?
+    // Stage 3 (Developer): Normal rules (requires PLAN for risk_paths). Limit extra-large changes.
     if (stage === 3) {
+        if (lineChanges > TRUST_CONFIG.LIMITS.STAGE_3_MAX_LINES) {
+            return block(relPath, `Modification too large (${lineChanges} lines) for Stage 3. Max allowed is ${TRUST_CONFIG.LIMITS.STAGE_3_MAX_LINES}.`, ctx, event.toolName);
+        }
+        
         if (risky) {
             const status = getPlanStatus(ctx.workspaceDir);
             if (status !== 'READY') {
                 return block(relPath, `No READY plan found. Stage 3 requires a plan for risk path modifications.`, ctx, event.toolName, status);
             }
         }
-        // Optional: Block massive changes (>500 lines) even for Stage 3? No, let's keep it simple.
     }
 
     // Stage 4 (Architect): All allowed.

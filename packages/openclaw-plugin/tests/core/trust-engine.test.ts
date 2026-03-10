@@ -2,14 +2,20 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getAgentScorecard, saveAgentScorecard, adjustTrustScore } from '../../src/core/trust-engine.js';
+import { EventLogService } from '../../src/core/event-log.js';
 
 vi.mock('fs');
+vi.mock('../../src/core/event-log.js');
 
 describe('Trust Engine', () => {
     const workspaceDir = '/mock/workspace';
+    const mockEventLog = {
+        recordTrustChange: vi.fn()
+    };
 
     beforeEach(() => {
         vi.clearAllMocks();
+        vi.mocked(EventLogService.get).mockReturnValue(mockEventLog as any);
     });
 
     afterEach(() => {
@@ -47,12 +53,20 @@ describe('Trust Engine', () => {
         expect(writtenData2.trust_score).toBe(0);
     });
 
-    it('should correctly adjust trust score', () => {
+    it('should correctly adjust trust score and record event', () => {
         vi.mocked(fs.existsSync).mockReturnValue(true);
         vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ trust_score: 50 }));
 
-        const newScore = adjustTrustScore(workspaceDir, 20);
+        const ctx = { sessionId: 's1', api: { logger: {} } as any };
+        const newScore = adjustTrustScore(workspaceDir, 20, 'test_reason', ctx);
+        
         expect(newScore).toBe(70);
+        expect(mockEventLog.recordTrustChange).toHaveBeenCalledWith('s1', {
+            previousScore: 50,
+            newScore: 70,
+            delta: 20,
+            reason: 'test_reason'
+        });
 
         const writeCall = vi.mocked(fs.writeFileSync).mock.calls[0];
         const writtenData = JSON.parse(writeCall[1] as string);

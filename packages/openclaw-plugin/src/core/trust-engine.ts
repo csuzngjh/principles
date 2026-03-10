@@ -1,5 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import type { OpenClawPluginApi } from '../openclaw-sdk.js';
+import { EventLogService } from './event-log.js';
 
 export interface AgentScorecard {
     trust_score: number;
@@ -7,6 +9,30 @@ export interface AgentScorecard {
     losses?: number;
     [key: string]: any;
 }
+
+/**
+ * Stage thresholds and limits
+ */
+export const TRUST_CONFIG = {
+    STAGES: {
+        STAGE_1_OBSERVER: 30,
+        STAGE_2_EDITOR: 60,
+        STAGE_3_DEVELOPER: 80,
+    },
+    PENALTIES: {
+        TOOL_FAILURE: -10,
+        RISKY_FAILURE: -20,
+        GATE_BYPASS_ATTEMPT: -5,
+    },
+    REWARDS: {
+        SUBAGENT_SUCCESS: 2,
+        STREAK_BONUS: 5,
+    },
+    LIMITS: {
+        STAGE_2_MAX_LINES: 10,
+        STAGE_3_MAX_LINES: 100,
+    }
+};
 
 export function getAgentScorecard(workspaceDir: string): AgentScorecard {
     const scorecardPath = path.join(workspaceDir, 'docs', 'AGENT_SCORECARD.json');
@@ -36,11 +62,33 @@ export function saveAgentScorecard(workspaceDir: string, scorecard: AgentScoreca
     fs.writeFileSync(scorecardPath, JSON.stringify(scorecard, null, 2), 'utf8');
 }
 
-export function adjustTrustScore(workspaceDir: string, delta: number): number {
+/**
+ * Adjusts the trust score and records the event.
+ */
+export function adjustTrustScore(
+    workspaceDir: string, 
+    delta: number, 
+    reason: string,
+    ctx?: { sessionId?: string; stateDir?: string; api?: OpenClawPluginApi }
+): number {
     const scorecard = getAgentScorecard(workspaceDir);
-    const currentScore = scorecard.trust_score ?? 50;
-    const newScore = Math.max(0, Math.min(100, currentScore + delta));
+    const previousScore = scorecard.trust_score ?? 50;
+    const newScore = Math.max(0, Math.min(100, previousScore + delta));
+    
     scorecard.trust_score = newScore;
     saveAgentScorecard(workspaceDir, scorecard);
+
+    // Record the change in the event log
+    if (ctx) {
+        const stateDir = ctx.stateDir || path.join(workspaceDir, 'memory', '.state');
+        const eventLog = EventLogService.get(stateDir, ctx.api?.logger);
+        eventLog.recordTrustChange(ctx.sessionId, {
+            previousScore,
+            newScore,
+            delta,
+            reason
+        });
+    }
+
     return newScore;
 }

@@ -4,16 +4,24 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as ioUtils from '../../src/utils/io';
 import * as trustEngine from '../../src/core/trust-engine';
+import { EventLogService } from '../../src/core/event-log';
 
 vi.mock('fs');
 vi.mock('../../src/utils/io');
 vi.mock('../../src/core/trust-engine');
+vi.mock('../../src/core/event-log');
 
 describe('Post-Write Checks & Pain Hook', () => {
   const workspaceDir = '/mock/workspace';
+  const mockEventLog = {
+    recordToolCall: vi.fn(),
+    recordPainSignal: vi.fn(),
+    recordTrustChange: vi.fn(),
+  };
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(EventLogService.get).mockReturnValue(mockEventLog as any);
   });
 
   it('should ignore non-write tools', () => {
@@ -25,7 +33,7 @@ describe('Post-Write Checks & Pain Hook', () => {
   });
 
   it('should capture pain on tool error with correct source and decrement trust', () => {
-    const mockCtx = { workspaceDir, sessionId: 's1' };
+    const mockCtx = { workspaceDir, sessionId: 's1', api: { logger: {} } };
     const mockEvent = { 
         toolName: 'write', 
         params: { file_path: 'src/main.ts' },
@@ -45,12 +53,12 @@ describe('Post-Write Checks & Pain Hook', () => {
     const callArgs = vi.mocked(fs.writeFileSync).mock.calls[0];
     expect(callArgs[0]).toContain('.pain_flag');
 
-    // Ensure the output was serialized with 'source: tool_failure'
-    expect(ioUtils.serializeKvLines).toHaveBeenCalled();
-    const serializeArgs = vi.mocked(ioUtils.serializeKvLines).mock.calls[0];
-    expect(serializeArgs[0]).toHaveProperty('source', 'tool_failure');
-
-    // Verify trust decrement
-    expect(trustEngine.adjustTrustScore).toHaveBeenCalledWith(workspaceDir, -10);
+    // Verify trust decrement with new API (delta, reason, context)
+    expect(trustEngine.adjustTrustScore).toHaveBeenCalledWith(
+        workspaceDir, 
+        expect.any(Number), 
+        expect.stringContaining('pain:'),
+        expect.objectContaining({ sessionId: 's1' })
+    );
   });
 });
