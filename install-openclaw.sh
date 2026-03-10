@@ -194,6 +194,27 @@ else
 fi
 
 # ============================================================================
+# 5.1 复制扩展思维模型文件
+# ============================================================================
+printf "\n"
+printf "${YELLOW}🧠 步骤 4.1/5: 复制扩展思维模型${NC}\n"
+
+MODELS_SRC="$PLUGIN_DIR/templates/workspace/docs/models"
+MODELS_DEST="$PLUGIN_DIR/templates/workspace/docs/models"
+
+if [ -d "$MODELS_SRC" ]; then
+    MODEL_COUNT=$(ls "$MODELS_SRC"/*.md 2>/dev/null | wc -l)
+    if [ "$MODEL_COUNT" -gt 0 ]; then
+        printf "  ${GREEN}✅ 已部署 %s 个思维模型${NC}\n" "$MODEL_COUNT"
+        printf "     模型文件位置: %s${NC}\n" "$MODELS_SRC"
+    else
+        printf "  ${YELLOW}⚠️  模型目录为空，跳过${NC}\n"
+    fi
+else
+    printf "  ${YELLOW}⚠️  模型目录不存在，跳过${NC}\n"
+fi
+
+# ============================================================================
 # 6. 注册插件
 # ============================================================================
 printf "\n"
@@ -276,6 +297,12 @@ printf "安装信息:\n"
 printf "  - 语言: %s\n" "$SELECTED_LANG"
 printf "  - 模式: %s\n" "$INSTALL_MODE"
 printf "  - Skills: %s 个\n" "$(ls "$PLUGIN_DIR/skills" | wc -l)"
+printf "  - 思维模型: %s 个\n" "$(ls "$PLUGIN_DIR/templates/workspace/docs/models"/*.md 2>/dev/null | wc -l)"
+printf "\n"
+printf "扩展思维模型配置:\n"
+printf "  - 默认位置: docs/models/_INDEX.md\n"
+printf "  - 自定义配置: 在 pain_settings.json 中设置 deep_reflection.modelsDir\n"
+printf "    例如: {\"deep_reflection\": {\"modelsDir\": \"custom/models\"}}\n"
 printf "\n"
 printf "下一步操作:\n"
 printf "  1. 重启 OpenClaw Gateway 使插件生效:\n"
