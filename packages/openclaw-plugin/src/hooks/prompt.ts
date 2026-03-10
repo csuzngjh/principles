@@ -3,6 +3,7 @@ import * as path from 'path';
 import type { PluginHookBeforePromptBuildEvent, PluginHookAgentContext, PluginHookBeforePromptBuildResult } from '../openclaw-sdk.js';
 import { ConfigService } from '../core/config-service.js';
 import { getSession, resetFriction } from '../core/session-tracker.js';
+import { getAgentScorecard } from '../core/trust-engine.js';
 
 export async function handleBeforePromptBuild(
   event: PluginHookBeforePromptBuildEvent,
@@ -164,6 +165,17 @@ Your current intent matches historical failure patterns or expressions of confus
       }
     } catch (err) {}
   }
+
+  // 8. Trust Score Awareness
+  const scorecard = getAgentScorecard(workspaceDir);
+  const trustScore = scorecard.trust_score ?? 50;
+  let stage = 2;
+  if (trustScore < 30) stage = 1;
+  else if (trustScore < 60) stage = 2;
+  else if (trustScore < 80) stage = 3;
+  else stage = 4;
+
+  prependContext += `\n[CURRENT TRUST SCORE: ${trustScore}/100 (Stage ${stage})]\n`;
 
   const result: PluginHookBeforePromptBuildResult = {};
   if (prependSystemContext.trim()) result.prependSystemContext = prependSystemContext.trim();

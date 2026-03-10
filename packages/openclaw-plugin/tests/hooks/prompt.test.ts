@@ -1,16 +1,32 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { handleBeforePromptBuild } from '../../src/hooks/prompt';
 import * as sessionTracker from '../../src/core/session-tracker';
+import * as trustEngine from '../../src/core/trust-engine';
 import fs from 'fs';
 import path from 'path';
 
 vi.mock('fs');
 vi.mock('../../src/core/session-tracker');
+vi.mock('../../src/core/trust-engine');
 
 describe('Prompt Context Injection Hook', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.mocked(sessionTracker.getSession).mockReturnValue(undefined);
+    vi.mocked(trustEngine.getAgentScorecard).mockReturnValue({ trust_score: 50 });
+  });
+
+  it('should inject current trust score and stage', async () => {
+    const workspaceDir = '/mock/workspace';
+    const mockCtx = { workspaceDir, trigger: 'user' };
+    const mockEvent = { prompt: 'original prompt', messages: [] };
+
+    vi.mocked(trustEngine.getAgentScorecard).mockReturnValue({ trust_score: 75 });
+
+    const result = await handleBeforePromptBuild(mockEvent as any, mockCtx as any);
+
+    expect(result).toBeDefined();
+    expect(result?.prependContext).toContain('[CURRENT TRUST SCORE: 75/100 (Stage 3)]');
   });
 
   it('should append CURRENT_FOCUS if it exists', async () => {
