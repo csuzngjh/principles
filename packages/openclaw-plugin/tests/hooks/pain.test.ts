@@ -3,9 +3,11 @@ import { handleAfterToolCall } from '../../src/hooks/pain';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as ioUtils from '../../src/utils/io';
+import * as trustEngine from '../../src/core/trust-engine';
 
 vi.mock('fs');
 vi.mock('../../src/utils/io');
+vi.mock('../../src/core/trust-engine');
 
 describe('Post-Write Checks & Pain Hook', () => {
   const workspaceDir = '/mock/workspace';
@@ -19,9 +21,10 @@ describe('Post-Write Checks & Pain Hook', () => {
     const mockEvent = { toolName: 'read', params: {}, result: { exitCode: 0 }, error: undefined };
     handleAfterToolCall(mockEvent as any, mockCtx as any);
     expect(fs.writeFileSync).not.toHaveBeenCalled();
+    expect(trustEngine.adjustTrustScore).not.toHaveBeenCalled();
   });
 
-  it('should capture pain on tool error with correct source', () => {
+  it('should capture pain on tool error with correct source and decrement trust', () => {
     const mockCtx = { workspaceDir, sessionId: 's1' };
     const mockEvent = { 
         toolName: 'write', 
@@ -46,5 +49,8 @@ describe('Post-Write Checks & Pain Hook', () => {
     expect(ioUtils.serializeKvLines).toHaveBeenCalled();
     const serializeArgs = vi.mocked(ioUtils.serializeKvLines).mock.calls[0];
     expect(serializeArgs[0]).toHaveProperty('source', 'tool_failure');
+
+    // Verify trust decrement
+    expect(trustEngine.adjustTrustScore).toHaveBeenCalledWith(workspaceDir, -10);
   });
 });
