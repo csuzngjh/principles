@@ -100,8 +100,7 @@ export async function handleBeforePromptBuild(
   }
 
   // 6. Security Layer: Trust & Permission Awareness
-  const scorecard = wctx.trust.getScorecard();
-  const trustScore = scorecard.trust_score;
+  const trustScore = wctx.trust.getScore();
   const stage = wctx.trust.getStage();
   
   prependSystemContext += `\n[CURRENT TRUST SCORE: ${trustScore}/100 (Stage ${stage})]\n`;

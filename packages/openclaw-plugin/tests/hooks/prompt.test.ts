@@ -11,10 +11,10 @@ vi.mock('../../src/core/workspace-context.js');
 
 describe('Prompt Context Injection Hook', () => {
   const workspaceDir = '/mock/workspace';
-  const sessionId = 'test-session';
-
+  
   const mockTrust = {
     getScorecard: vi.fn().mockReturnValue({ trust_score: 85 }),
+    getScore: vi.fn().mockReturnValue(85),
     getStage: vi.fn().mockReturnValue(4),
   };
 

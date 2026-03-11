@@ -1,0 +1,138 @@
+{
+  "metadata": {
+    "name": "Thinking OS Meta-Cognitive Layer",
+    "description": "Test Thinking OS injection, usage tracking, and model adherence",
+    "version": "1.0",
+    "author": "Claude Code",
+    "tags": ["core", "cognition", "prompt"]
+  },
+  "setup": {
+    "preconditions": [
+      "Gateway is running",
+      "THINKING_OS.md exists in workspace/docs",
+      ".thinking_os_usage.json exists for tracking"
+    ],
+    "initial_state": {
+      "thinking_os_active": true,
+      "usage_tracker": "empty or minimal"
+    }
+  },
+  "steps": [
+    {
+      "name": "Check Thinking OS Configuration",
+      "type": "validation",
+      "description": "Verify THINKING_OS.md exists and is readable",
+      "validator": "file_validator",
+      "params": {
+        "path": "/home/csuzngjh/clawd/docs/THINKING_OS.md",
+        "min_size": 500,
+        "required_sections": ["T-01", "T-02", "Mental Models"]
+      }
+    },
+    {
+      "name": "Task Requiring Evidence-Based Thinking",
+      "type": "task",
+      "description": "Give agent a task that should trigger T-03 (Evidence Over Intuition)",
+      "task": "Analyze the file /home/csuzngjh/code/code_magic_academy/story/source/narratives/chapter-01.md and identify evidence of story pacing issues. Provide specific line numbers and quotes to support your analysis. Save your findings to /tmp/thinking-os-test-t03.md",
+      "timeout": 180,
+      "wait_for_completion": true,
+      "expected_outcomes": [
+        {
+          "type": "file_exists",
+          "path": "/tmp/thinking-os-test-t03.md"
+        },
+        {
+          "type": "file_contains",
+          "path": "/tmp/thinking-os-test-t03.md",
+          "content": "第"
+        }
+      ]
+    },
+    {
+      "name": "Verify Evidence-Based Approach",
+      "type": "validation",
+      "description": "Check that agent provided specific evidence (line numbers, quotes)",
+      "validator": "file_validator",
+      "params": {
+        "path": "/tmp/thinking-os-test-t03.md",
+        "min_size": 500,
+        "required_sections": ["行", "证据", "引用"]
+      }
+    },
+    {
+      "name": "Wait for Usage Tracker Update",
+      "type": "wait",
+      "description": "Allow time for usage tracker to record Thinking OS usage",
+      "duration": 5,
+      "reason": "Usage tracking may be asynchronous"
+    },
+    {
+      "name": "Check Thinking OS Usage Tracker",
+      "type": "validation",
+      "description": "Verify that Thinking OS usage was tracked",
+      "validator": "file_validator",
+      "params": {
+        "path": "/home/csuzngjh/clawd/.state/.thinking_os_usage.json",
+        "min_size": 50,
+        "required_sections": ["T-03", "timestamp"]
+      }
+    },
+    {
+      "name": "Task Requiring Minimum Viable Change (T-07)",
+      "type": "task",
+      "description": "Give agent a task that should trigger T-07 (Minimum Viable Change)",
+      "task": "Fix the first sentence in /tmp/thinking-os-test-t03.md by making the smallest possible change that improves clarity. Do not rewrite the entire paragraph.",
+      "timeout": 120,
+      "wait_for_completion": true,
+      "expected_outcomes": [
+        {
+          "type": "file_exists",
+          "path": "/tmp/thinking-os-test-t03.md"
+        }
+      ]
+    },
+    {
+      "name": "Verify Minimal Change Approach",
+      "type": "validation",
+      "description": "Check that agent made minimal changes rather than rewriting",
+      "validator": "file_validator",
+      "params": {
+        "path": "/tmp/thinking-os-test-t03.md",
+        "required_sections": []
+      }
+    },
+    {
+      "name": "Check Updated Usage Tracker",
+      "type": "validation",
+      "description": "Verify T-07 usage was also tracked",
+      "validator": "file_validator",
+      "params": {
+        "path": "/home/csuzngjh/clawd/.state/.thinking_os_usage.json",
+        "required_sections": ["T-07"]
+      }
+    },
+    {
+      "name": "Cleanup Test Files",
+      "type": "cleanup",
+      "description": "Remove test artifacts",
+      "actions": [
+        {
+          "type": "delete_file",
+          "path": "/tmp/thinking-os-test-t03.md"
+        }
+      ]
+    }
+  ],
+  "teardown": {
+    "final_state": {
+      "usage_tracker_updated": true,
+      "test_files_removed": true
+    },
+    "notes": [
+      "Thinking OS is correctly injected into prompts",
+      "Agent follows mental models when appropriate",
+      "Usage tracking accurately records model usage",
+      "Multiple mental models can be active in same session"
+    ]
+  }
+}

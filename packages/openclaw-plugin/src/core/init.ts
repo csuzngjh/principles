@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import type { OpenClawPluginApi, PluginLogger } from '../openclaw-sdk.js';
+import { PD_DIRS } from './paths.js';
 
 /**
  * Ensures that the workspace has the necessary template files for Principles Disciple.
@@ -46,7 +47,7 @@ export function ensureWorkspaceTemplates(api: OpenClawPluginApi, workspaceDir: s
 
         // 3. Copy pain memory seed files
         const painTemplatesDir = path.resolve(__dirname, '..', '..', 'templates', 'langs', language, 'pain');
-        const painDestDir = path.join(workspaceDir, 'memory', 'pain');
+        const painDestDir = path.join(workspaceDir, PD_DIRS.PAIN_SAMPLES);
         
         if (fs.existsSync(painTemplatesDir)) {
             if (!fs.existsSync(painDestDir)) {

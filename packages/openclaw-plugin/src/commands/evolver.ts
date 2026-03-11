@@ -1,4 +1,5 @@
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
+import { WorkspaceContext } from '../core/workspace-context.js';
 
 /**
  * /evolve-task [task description]
@@ -8,7 +9,13 @@ import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.
  * Gateway tools — only the AI agent can do that via sessions_spawn.
  */
 export function handleEvolveTask(ctx: PluginCommandContext): PluginCommandResult {
-  const task = ctx.args?.trim() || "Diagnose and fix the latest pain signals in .state/.pain_flag.";
+  const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
+  const wctx = WorkspaceContext.fromHookContext({ workspaceDir, ...ctx.config });
+  
+  const painFlagPath = wctx.resolve('PAIN_FLAG');
+  const relPainFlag = painFlagPath.replace(workspaceDir, '').replace(/^\/+/, '');
+  
+  const task = ctx.args?.trim() || `Diagnose and fix the latest pain signals in ${relPainFlag}.`;
 
   return {
     text:

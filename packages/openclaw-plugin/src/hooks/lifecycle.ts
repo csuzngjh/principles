@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as readline from 'readline';
 import { computePainScore, writePainFlag } from '../core/pain.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
+import { PD_DIRS } from '../core/paths.js';
 import type { PluginHookBeforeResetEvent, PluginHookBeforeCompactionEvent, PluginHookAfterCompactionEvent, PluginHookAgentContext } from '../openclaw-sdk.js';
 
 export async function handleBeforeReset(
@@ -120,7 +121,7 @@ export async function extractPainFromSessionFile(sessionFile: string, ctx: Plugi
 
   if (painPoints.length > 0) {
     const dateStr = new Date().toISOString().split('T')[0];
-    const dailyLogPath = path.join(workspaceDir, 'memory', `${dateStr}.md`);
+    const dailyLogPath = path.join(workspaceDir, PD_DIRS.MEMORY, `${dateStr}.md`);
     const timestamp = new Date().toISOString();
     
     let entry = `\n## [${timestamp}] Consolidated Pain (Pre-Compaction)\n\n`;
@@ -164,7 +165,7 @@ export async function handleBeforeCompaction(
   if (!ctx.workspaceDir) return;
 
   const dateStr = new Date().toISOString().split('T')[0];
-  const checkpointPath = path.join(ctx.workspaceDir, 'memory', `${dateStr}.md`);
+  const checkpointPath = path.join(ctx.workspaceDir, PD_DIRS.MEMORY, `${dateStr}.md`);
   const log =
     `\n## [${new Date().toISOString()}] Pre-Compaction Checkpoint\n` +
     `- Compacting session with ${event.messageCount} messages.\n` +
@@ -188,7 +189,7 @@ export async function handleAfterCompaction(
   if (!ctx.workspaceDir) return;
 
   const dateStr = new Date().toISOString().split('T')[0];
-  const checkpointPath = path.join(ctx.workspaceDir, 'memory', `${dateStr}.md`);
+  const checkpointPath = path.join(ctx.workspaceDir, PD_DIRS.MEMORY, `${dateStr}.md`);
   const log =
     `- Post-Compaction Complete. Reduced active context to ${event.messageCount} messages.\n`;
 

@@ -7,17 +7,19 @@ import { trackFriction, resetFriction, getSession } from '../core/session-tracke
 import { denoiseError, computeHash } from '../utils/hashing.js';
 import { SystemLogger } from '../core/system-logger.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
-import type { PluginHookAfterToolCallEvent, PluginHookToolContext } from '../openclaw-sdk.js';
+import type { PluginHookAfterToolCallEvent, PluginHookToolContext, OpenClawPluginApi } from '../openclaw-sdk.js';
 
 export function handleAfterToolCall(
   event: PluginHookAfterToolCallEvent,
-  ctx: PluginHookToolContext & { workspaceDir?: string; pluginConfig?: Record<string, unknown> }
+  ctx: PluginHookToolContext & { workspaceDir?: string; pluginConfig?: Record<string, unknown> },
+  api?: OpenClawPluginApi // 👈 核心修复：接受 api 参数
 ): void {
-  if (!ctx.workspaceDir) {
+  const effectiveWorkspaceDir = ctx.workspaceDir || (api as any)?.workspaceDir || api?.resolvePath?.('.');
+  if (!effectiveWorkspaceDir) {
     return;
   }
 
-  const wctx = WorkspaceContext.fromHookContext(ctx);
+  const wctx = WorkspaceContext.fromHookContext({ ...ctx, workspaceDir: effectiveWorkspaceDir });
   const config = wctx.config;
   const eventLog = wctx.eventLog;
   const trust = wctx.trust;
@@ -27,9 +29,9 @@ export function handleAfterToolCall(
   
   // 0. Special Case: Manual Pain Intervention (from Skill)
   if (event.toolName === 'pain' || event.toolName === 'skill:pain') {
-    const reason = event.params.input || event.params.arguments || 'Manual intervention';
-    trackFriction(sessionId, 100, 'manual_pain', ctx.workspaceDir);
-    SystemLogger.log(ctx.workspaceDir, 'MANUAL_PAIN', `User manually triggered pain: ${reason}`);
+    const reason = (event.params as any).input || (event.params as any).arguments || 'Manual intervention';
+    trackFriction(sessionId, 100, 'manual_pain', effectiveWorkspaceDir);
+    SystemLogger.log(effectiveWorkspaceDir, 'MANUAL_PAIN', `User manually triggered pain: ${reason}`);
     eventLog.recordPainSignal(sessionId, {
       score: 100,
       source: 'manual',
@@ -48,14 +50,13 @@ export function handleAfterToolCall(
     const denoised = denoiseError(errorText);
     const hash = computeHash(denoised);
     
-    // Default deltaF for tool errors from config
     const deltaF = config.get('scores.tool_failure_friction') || 30;
-    const updatedState = trackFriction(sessionId, deltaF, hash, ctx.workspaceDir);
+    const updatedState = trackFriction(sessionId, deltaF, hash, effectiveWorkspaceDir);
     
-    // ── Trust Engine: Record failure using V2 API ──
+    // ── Trust Engine: Record failure ──
     const errorType = extractErrorType(event.error || errorText);
-    const filePath = event.params.file_path || event.params.path || event.params.file;
-    const relPath = typeof filePath === 'string' ? normalizePath(filePath, ctx.workspaceDir) : 'unknown';
+    const filePath = (event.params as any).file_path || (event.params as any).path || (event.params as any).file;
+    const relPath = typeof filePath === 'string' ? normalizePath(filePath, effectiveWorkspaceDir) : 'unknown';
     
     // Load profile for risk_paths check
     const profilePath = wctx.resolve('PROFILE');
@@ -70,10 +71,10 @@ export function handleAfterToolCall(
     
     trust.recordFailure(isRisk ? 'risky' : 'tool', {
         sessionId,
-        api: (ctx as any).api
+        api
     });
     
-    // Record tool call failure event (detailed log)
+    // Record tool call failure event
     eventLog.recordToolCall(sessionId, {
       toolName: event.toolName,
       filePath: typeof filePath === 'string' ? filePath : undefined,
@@ -84,13 +85,11 @@ export function handleAfterToolCall(
       exitCode,
     });
   } else {
-    // Success! Reset friction
-    resetFriction(sessionId, ctx.workspaceDir);
+    resetFriction(sessionId, effectiveWorkspaceDir);
     
-    // Record tool call success event (only for write tools to avoid noise)
     const WRITE_TOOLS = ['write', 'edit', 'apply_patch'];
     if (WRITE_TOOLS.includes(event.toolName)) {
-      const filePath = event.params.file_path || event.params.path || event.params.file;
+      const filePath = (event.params as any).file_path || (event.params as any).path || (event.params as any).file;
       eventLog.recordToolCall(sessionId, {
         toolName: event.toolName,
         filePath: typeof filePath === 'string' ? filePath : undefined,
@@ -105,11 +104,10 @@ export function handleAfterToolCall(
     return;
   }
 
-  // Only record explicit pain flag on failure for write tools
   if (!isFailure) return;
 
-  const filePath = event.params.file_path || event.params.path || event.params.file;
-  const relPath = typeof filePath === 'string' ? normalizePath(filePath, ctx.workspaceDir) : 'unknown';
+  const filePath = (event.params as any).file_path || (event.params as any).path || (event.params as any).file;
+  const relPath = typeof filePath === 'string' ? normalizePath(filePath, effectiveWorkspaceDir) : 'unknown';
 
   const profilePath = wctx.resolve('PROFILE');
   let profile = normalizeProfile({});
@@ -120,7 +118,7 @@ export function handleAfterToolCall(
   }
 
   const isRisk = isRisky(relPath, profile.risk_paths);
-  const painScore = computePainScore(1, false, false, isRisk ? 20 : 0);
+  const painScore = computePainScore(1, false, false, isRisk ? 20 : 0, effectiveWorkspaceDir);
 
   const painData = {
     score: String(painScore),
@@ -130,9 +128,8 @@ export function handleAfterToolCall(
     is_risky: String(isRisk),
   };
 
-  writePainFlag(ctx.workspaceDir, painData);
+  writePainFlag(effectiveWorkspaceDir, painData);
   
-  // Record pain signal event
   eventLog.recordPainSignal(sessionId, {
     score: painScore,
     source: 'tool_failure',
@@ -141,14 +138,9 @@ export function handleAfterToolCall(
   });
 }
 
-/**
- * Extract error type from error message for categorization.
- */
 function extractErrorType(error: unknown): string {
   if (!error) return 'Unknown';
   const msg = String(error);
-  
-  // Common error patterns
   if (msg.includes('EACCES') || msg.includes('permission denied')) return 'EACCES';
   if (msg.includes('ENOENT') || msg.includes('no such file')) return 'ENOENT';
   if (msg.includes('EISDIR')) return 'EISDIR';
@@ -158,6 +150,5 @@ function extractErrorType(error: unknown): string {
   if (msg.includes('ReferenceError')) return 'ReferenceError';
   if (msg.includes('timeout') || msg.includes('ETIMEDOUT')) return 'Timeout';
   if (msg.includes('network') || msg.includes('ECONNREFUSED')) return 'Network';
-  
   return 'Other';
 }

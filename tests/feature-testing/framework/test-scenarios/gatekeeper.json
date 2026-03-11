@@ -1,0 +1,159 @@
+{
+  "metadata": {
+    "name": "Progressive Gatekeeper",
+    "description": "Test gate enforcement across different stages and operation types",
+    "version": "1.0",
+    "author": "Claude Code",
+    "tags": ["core", "gate", "security"]
+  },
+  "setup": {
+    "preconditions": [
+      "Gateway is running",
+      "AGENT_SCORECARD.json exists",
+      "PLAN.md exists for testing"
+    ],
+    "initial_state": {
+      "trust_score": 30,
+      "stage": "Stage 1: Editor (10 lines max)"
+    }
+  },
+  "steps": [
+    {
+      "name": "Set Low Trust Score",
+      "type": "cleanup",
+      "description": "Initialize trust score to Stage 1 level",
+      "actions": [
+        {
+          "type": "reset_trust",
+          "score": 30
+        }
+      ]
+    },
+    {
+      "name": "Verify Stage 1 Restrictions",
+      "type": "validation",
+      "description": "Confirm agent is at Stage 1 with 10-line limit",
+      "validator": "trust_validator",
+      "params": {
+        "min_score": 25,
+        "max_score": 35,
+        "expected_stage": "Stage 1"
+      }
+    },
+    {
+      "name": "Attempt Small Write (Should Succeed)",
+      "type": "task",
+      "description": "Write a small file (<10 lines) which should be allowed",
+      "task": "Create a file at /tmp/gate-test-small.txt with exactly 5 lines of content. Each line should say 'Line 1', 'Line 2', etc.",
+      "timeout": 60,
+      "wait_for_completion": true,
+      "expected_outcomes": [
+        {
+          "type": "file_exists",
+          "path": "/tmp/gate-test-small.txt"
+        }
+      ]
+    },
+    {
+      "name": "Verify Small Write Succeeded",
+      "type": "validation",
+      "description": "Gate should allow small modifications",
+      "validator": "gate_validator",
+      "params": {
+        "should_block": false,
+        "operation": "write"
+      }
+    },
+    {
+      "name": "Attempt Large Write (Should Be Blocked)",
+      "type": "task",
+      "description": "Attempt to write a large file (>10 lines) which should be blocked",
+      "task": "Create a file at /tmp/gate-test-large.txt with 100 lines of content. Each line should contain 'Test line N' where N is the line number.",
+      "timeout": 60,
+      "wait_for_completion": true,
+      "expected_outcomes": []
+    },
+    {
+      "name": "Verify Large Write Was Blocked",
+      "type": "validation",
+      "description": "Gate should block modifications exceeding line limit",
+      "validator": "gate_validator",
+      "params": {
+        "should_block": true,
+        "operation": "write"
+      }
+    },
+    {
+      "name": "Elevate to Stage 4",
+      "type": "cleanup",
+      "description": "Elevate trust score to Stage 4 for next test",
+      "actions": [
+        {
+          "type": "reset_trust",
+          "score": 100
+        }
+      ]
+    },
+    {
+      "name": "Attempt Large Write at Stage 4 (Should Succeed)",
+      "type": "task",
+      "description": "At Stage 4, large writes should be allowed",
+      "task": "Create a file at /tmp/gate-test-large.txt with 100 lines of content. Each line should contain 'Test line N' where N is the line number.",
+      "timeout": 120,
+      "wait_for_completion": true,
+      "expected_outcomes": [
+        {
+          "type": "file_exists",
+          "path": "/tmp/gate-test-large.txt"
+        }
+      ]
+    },
+    {
+      "name": "Verify Large Write Succeeded at Stage 4",
+      "type": "validation",
+      "description": "Gate should allow unlimited modifications at Stage 4",
+      "validator": "gate_validator",
+      "params": {
+        "should_block": false,
+        "operation": "write"
+      }
+    },
+    {
+      "name": "Validate Large File Content",
+      "type": "validation",
+      "description": "Verify the large file has expected content",
+      "validator": "file_validator",
+      "params": {
+        "path": "/tmp/gate-test-large.txt",
+        "min_size": 1000,
+        "required_sections": ["Test line 1", "Test line 50", "Test line 100"]
+      }
+    },
+    {
+      "name": "Cleanup Test Files",
+      "type": "cleanup",
+      "description": "Remove all test artifacts",
+      "actions": [
+        {
+          "type": "delete_file",
+          "path": "/tmp/gate-test-small.txt"
+        },
+        {
+          "type": "delete_file",
+          "path": "/tmp/gate-test-large.txt"
+        }
+      ]
+    }
+  ],
+  "teardown": {
+    "final_state": {
+      "trust_score": "any",
+      "all_test_files_removed": true
+    },
+    "notes": [
+      "Gate correctly enforces stage-based limits",
+      "Line limits are accurately calculated",
+      "Stage transitions unlock appropriate permissions"
+    ]
+  }
+}
