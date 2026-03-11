@@ -2,10 +2,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { handleSubagentEnded } from '../../src/hooks/subagent.js';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as trustEngine from '../../src/core/trust-engine.js';
+import * as trustEngine from '../../src/core/trust-engine-v2.js';
 
 vi.mock('fs');
-vi.mock('../../src/core/trust-engine.js');
+vi.mock('../../src/core/trust-engine-v2.js');
 
 describe('Subagent Hook', () => {
     const workspaceDir = '/mock/workspace';
@@ -14,7 +14,7 @@ describe('Subagent Hook', () => {
         vi.clearAllMocks();
     });
 
-    it('should increment trust score on successful subagent completion', () => {
+    it('should record success on successful subagent completion', () => {
         const mockCtx = { workspaceDir, sessionId: 's1' };
         const mockEvent = { 
             targetSessionKey: 'agent:main:subagent:diagnostician-123',
@@ -26,15 +26,14 @@ describe('Subagent Hook', () => {
 
         handleSubagentEnded(mockEvent as any, mockCtx as any);
 
-        expect(trustEngine.adjustTrustScore).toHaveBeenCalledWith(
+        expect(trustEngine.recordSuccess).toHaveBeenCalledWith(
             workspaceDir, 
-            expect.any(Number), 
-            expect.stringContaining('subagent:'),
+            'subagent_success',
             expect.objectContaining({ sessionId: 's1' })
         );
     });
 
-    it('should NOT increment trust score on failure', () => {
+    it('should NOT record success on failure', () => {
         const mockCtx = { workspaceDir };
         const mockEvent = { 
             targetSessionKey: 'agent:main:subagent:diagnostician-123',
@@ -43,11 +42,6 @@ describe('Subagent Hook', () => {
 
         handleSubagentEnded(mockEvent as any, mockCtx as any);
 
-        expect(trustEngine.adjustTrustScore).not.toHaveBeenCalledWith(
-            workspaceDir, 
-            expect.any(Number), 
-            expect.any(String),
-            expect.any(Object)
-        );
+        expect(trustEngine.recordSuccess).not.toHaveBeenCalled();
     });
 });

@@ -2,11 +2,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { handleBeforeToolCall } from '../../src/hooks/gate.js';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as trustEngine from '../../src/core/trust-engine.js';
+import * as trustEngine from '../../src/core/trust-engine-v2.js';
 import * as riskCalculator from '../../src/core/risk-calculator.js';
 
 vi.mock('fs');
-vi.mock('../../src/core/trust-engine.js');
+vi.mock('../../src/core/trust-engine-v2.js');
 vi.mock('../../src/core/risk-calculator.js');
 
 describe('Progressive Gate Hook', () => {

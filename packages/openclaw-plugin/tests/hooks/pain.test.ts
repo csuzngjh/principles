@@ -3,13 +3,13 @@ import { handleAfterToolCall } from '../../src/hooks/pain';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as ioUtils from '../../src/utils/io';
-import * as trustEngine from '../../src/core/trust-engine';
-import { EventLogService } from '../../src/core/event-log';
+import * as trustEngine from '../../src/core/trust-engine-v2.js';
+import { EventLogService } from '../../src/core/event-log.js';
 
 vi.mock('fs');
-vi.mock('../../src/utils/io');
-vi.mock('../../src/core/trust-engine');
-vi.mock('../../src/core/event-log');
+vi.mock('../../src/utils/io.js');
+vi.mock('../../src/core/trust-engine-v2.js');
+vi.mock('../../src/core/event-log.js');
 
 describe('Post-Write Checks & Pain Hook', () => {
   const workspaceDir = '/mock/workspace';
@@ -29,10 +29,10 @@ describe('Post-Write Checks & Pain Hook', () => {
     const mockEvent = { toolName: 'read', params: {}, result: { exitCode: 0 }, error: undefined };
     handleAfterToolCall(mockEvent as any, mockCtx as any);
     expect(fs.writeFileSync).not.toHaveBeenCalled();
-    expect(trustEngine.adjustTrustScore).not.toHaveBeenCalled();
+    expect(trustEngine.recordFailure).not.toHaveBeenCalled();
   });
 
-  it('should capture pain on tool error with correct source and decrement trust', () => {
+  it('should capture pain on tool error with correct source and record failure', () => {
     const mockCtx = { workspaceDir, sessionId: 's1', api: { logger: {} } };
     const mockEvent = { 
         toolName: 'write', 
@@ -53,11 +53,10 @@ describe('Post-Write Checks & Pain Hook', () => {
     const callArgs = vi.mocked(fs.writeFileSync).mock.calls[0];
     expect(callArgs[0]).toContain('.pain_flag');
 
-    // Verify trust decrement with new API (delta, reason, context)
-    expect(trustEngine.adjustTrustScore).toHaveBeenCalledWith(
+    // Verify recordFailure call
+    expect(trustEngine.recordFailure).toHaveBeenCalledWith(
         workspaceDir, 
-        expect.any(Number), 
-        expect.stringContaining('pain:'),
+        'tool',
         expect.objectContaining({ sessionId: 's1' })
     );
   });
