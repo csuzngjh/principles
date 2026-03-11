@@ -307,37 +307,8 @@ check_outcome() {
 }
 
 # 执行验证步骤
-execute_validation_step() {
-    local step="$1"
 
-    local validator=$(echo "$step" | jq -r '.validator')
-    local params=$(echo "$step" | jq -r '.params // {}')
-
-    log_info "Running validator: $validator"
-
-    case "$validator" in
-        file_validator)
-            validate_file "$params"
-            ;;
-        trust_validator)
-            validate_trust "$params"
-            ;;
-        gate_validator)
-            validate_gate "$params"
-            ;;
-        custom_validator)
-            validate_custom "$params"
-            ;;
-        *)
-            log_error "Unknown validator: $validator"
-            return 1
-            ;;
-    esac
-}
-
-# 文件验证器
-validate_file() {
-# 自定义验证器 - 深度测试专用
+# Custom validators (must be defined before execute_validation_step)
 validate_custom() {
     local params="$1"
     local validation_type=$(echo "$params" | jq -r '.validation_type')
@@ -739,6 +710,42 @@ validate_custom() {
     esac
 }
 
+
+
+
+execute_validation_step() {
+    local step="$1"
+
+    local validator=$(echo "$step" | jq -r '.validator')
+    local params=$(echo "$step" | jq -r '.params // {}')
+
+    log_info "Running validator: $validator"
+
+    case "$validator" in
+        file_validator)
+            validate_file "$params"
+            ;;
+        trust_validator)
+            validate_trust "$params"
+            ;;
+        gate_validator)
+            validate_gate "$params"
+            ;;
+        custom_validator)
+            validate_custom "$params"
+            ;;
+        *)
+            log_error "Unknown validator: $validator"
+            return 1
+            ;;
+    esac
+}
+
+# 文件验证器
+
+# Custom validators (must be defined before execute_validation_step)
+validate_file() {
+# 自定义验证器 - 深度测试专用
     local params="$1"
 
     local path=$(echo "$params" | jq -r '.path')
@@ -772,6 +779,7 @@ validate_custom() {
 
     return 0
 }
+
 
 # 自定义验证器 - 深度测试专用
 
