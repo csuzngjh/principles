@@ -22,6 +22,6 @@
 - [x] Task: Conductor - User Manual Verification 'Phase 3: Auto-Migration & Loop Closure' (Protocol in workflow.md) [dc70664]
 
 ## Phase 4: Integration Testing & Purification
-- [~] Task: Perform a full build and run integration tests to ensure no regressions in the evolution loop.
-- [ ] Task: Update documentation (`README.md`, `README_ZH.md`) to explain the new directory structure.
+- [x] Task: Perform a full build and run integration tests to ensure no regressions in the evolution loop. [56fb5dd]
+- [x] Task: Update documentation (`README.md`, `README_ZH.md`) to explain the new directory structure. [562ba4b]
 - [ ] Task: Conductor - User Manual Verification 'Phase 4: Integration Testing & Purification' (Protocol in workflow.md)
