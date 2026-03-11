@@ -10,8 +10,8 @@
 ## Phase 2: Service Integration & Compatibility Layer
 - [x] Task: Integrate `ConfigService` and `EventLogService` as lazy getters in `WorkspaceContext`. [249b1e7]
 - [x] Task: Integrate `TrustEngine` and `DictionaryService` as lazy getters in `WorkspaceContext`. [249b1e7]
-- [ ] Task: Refactor `src/core/trust-engine.ts` and `src/core/dictionary.ts` to expose methods compatible with the context while maintaining legacy function exports as wrappers.
-- [ ] Task: Write unit tests to verify service encapsulation, lazy loading, and backward compatibility of functional APIs.
+- [x] Task: Refactor `src/core/trust-engine.ts` and `src/core/dictionary.ts` to expose methods compatible with the context while maintaining legacy function exports as wrappers. [ad6f240]
+- [x] Task: Write unit tests to verify service encapsulation, lazy loading, and backward compatibility of functional APIs. [ad6f240]
 - [ ] Task: Conductor - User Manual Verification 'Phase 2: Service Integration & Compatibility' (Protocol in workflow.md)
 
 ## Phase 3: Incremental Hook & Command Migration (Strangler Fig)
