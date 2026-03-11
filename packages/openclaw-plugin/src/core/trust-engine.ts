@@ -201,11 +201,10 @@ export class TrustEngine {
         if (context?.sessionId) {
             const eventLog = EventLogService.get(this.stateDir);
             eventLog.recordTrustChange(context.sessionId, {
-                oldScore,
+                previousScore: oldScore,
                 newScore,
                 delta,
-                reason,
-                stage: this.getStage()
+                reason
             });
         }
 
