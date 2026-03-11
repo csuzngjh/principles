@@ -1,11 +1,11 @@
 # Implementation Plan: WorkspaceContext Refactor (Governance Skeleton)
 
-## Phase 1: Core Context Infrastructure
+## Phase 1: Core Context Infrastructure [checkpoint: 69e51f0]
 - [x] Task: Create `src/core/workspace-context.ts` with basic metadata extraction, `WeakMap` based cached singleton management, and `invalidate()` logic. [85635b8]
 - [x] Task: Implement `resolve(key)` in `WorkspaceContext` using `PD_FILES` mappings. [e8ea878]
 - [x] Task: Implement `createTestContext()` factory in `tests/test-utils.ts` for consistent testing. [98c7a90]
 - [x] Task: Write unit tests for `WorkspaceContext` factory, path resolution, and cache eviction. [ac51d5c]
-- [ ] Task: Conductor - User Manual Verification 'Phase 1: Core Context Infrastructure' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 1: Core Context Infrastructure' (Protocol in workflow.md) [69e51f0]
 
 ## Phase 2: Service Integration & Compatibility Layer
 - [ ] Task: Integrate `ConfigService` and `EventLogService` as lazy getters in `WorkspaceContext`.
