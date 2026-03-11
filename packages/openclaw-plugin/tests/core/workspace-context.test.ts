@@ -93,6 +93,7 @@ describe('WorkspaceContext', () => {
         
         const trust = wctx.trust;
         expect(trust).toBeDefined();
+        expect(trust.recordSuccess).toBeDefined();
         expect(wctx.trust).toBe(trust);
     });
 
@@ -103,5 +104,17 @@ describe('WorkspaceContext', () => {
         const dictionary = wctx.dictionary;
         expect(dictionary).toBeDefined();
         expect(wctx.dictionary).toBe(dictionary);
+    });
+
+    it('should maintain backward compatibility for legacy trust APIs', async () => {
+        const { getAgentScorecard, recordSuccess } = await import('../../src/core/trust-engine.js');
+        
+        // This should not throw and return a valid scorecard
+        const scorecard = getAgentScorecard(workspaceDir);
+        expect(scorecard).toBeDefined();
+        expect(scorecard.trust_score).toBe(59); // COLD_START.INITIAL_TRUST
+
+        const score = recordSuccess(workspaceDir, 'success');
+        expect(score).toBeGreaterThan(59);
     });
 });
