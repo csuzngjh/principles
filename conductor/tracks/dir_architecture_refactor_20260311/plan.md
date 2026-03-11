@@ -25,3 +25,6 @@
 - [x] Task: Perform a full build and run integration tests to ensure no regressions in the evolution loop. [56fb5dd]
 - [x] Task: Update documentation (`README.md`, `README_ZH.md`) to explain the new directory structure. [562ba4b]
 - [x] Task: Conductor - User Manual Verification 'Phase 4: Integration Testing & Purification' (Protocol in workflow.md) [53574b8]
+
+## Phase: Review Fixes
+- [x] Task: Apply review suggestions 189010c
