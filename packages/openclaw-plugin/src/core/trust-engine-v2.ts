@@ -13,6 +13,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { OpenClawPluginApi } from '../openclaw-sdk.js';
 import { EventLogService } from './event-log.js';
+import { resolvePdPath } from './paths.js';
 
 export interface AgentScorecard {
     /** Current trust score (0-100) */
@@ -221,7 +222,7 @@ function updateRecentHistory(scorecard: AgentScorecard, result: 'success' | 'fai
  * Get or create agent scorecard with smart defaults
  */
 export function getAgentScorecard(workspaceDir: string): AgentScorecard {
-    const scorecardPath = path.join(workspaceDir, 'docs', 'AGENT_SCORECARD.json');
+    const scorecardPath = resolvePdPath(workspaceDir, 'AGENT_SCORECARD');
     if (!fs.existsSync(scorecardPath)) {
         // New agent - initialize with cold start benefits
         return {
@@ -272,7 +273,7 @@ export function getAgentScorecard(workspaceDir: string): AgentScorecard {
  * Save agent scorecard with validation
  */
 export function saveAgentScorecard(workspaceDir: string, scorecard: AgentScorecard): void {
-    const scorecardPath = path.join(workspaceDir, 'docs', 'AGENT_SCORECARD.json');
+    const scorecardPath = resolvePdPath(workspaceDir, 'AGENT_SCORECARD');
     const dir = path.dirname(scorecardPath);
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
