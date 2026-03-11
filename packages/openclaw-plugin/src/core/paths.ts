@@ -45,6 +45,7 @@ export const PD_FILES = {
     // State Layer
     STATE_DIR: PD_DIRS.STATE,
     EVOLUTION_QUEUE: path.join(PD_DIRS.STATE, 'evolution_queue.json'),
+    EVOLUTION_DIRECTIVE: path.join(PD_DIRS.STATE, 'evolution_directive.json'),
     WORKBOARD: path.join(PD_DIRS.STATE, 'WORKBOARD.json'),
     AGENT_SCORECARD: path.join(PD_DIRS.STATE, 'AGENT_SCORECARD.json'),
     PAIN_FLAG: path.join(PD_DIRS.STATE, '.pain_flag'),
@@ -62,6 +63,7 @@ export const PD_FILES = {
     
     // Memory Layer
     SYSTEM_LOG: path.join(PD_DIRS.LOGS, 'SYSTEM.log'),
+    REFLECTION_LOG: path.join(PD_DIRS.MEMORY, 'reflection-log.md'),
     USER_CONTEXT: path.join(PD_DIRS.MEMORY, 'USER_CONTEXT.md'),
     OKR_DIR: PD_DIRS.OKR,
     CURRENT_FOCUS: path.join(PD_DIRS.OKR, 'CURRENT_FOCUS.md'),
