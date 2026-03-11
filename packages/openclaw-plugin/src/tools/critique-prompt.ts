@@ -2,108 +2,96 @@ import type { OpenClawPluginApi } from '../openclaw-sdk.js';
 import { loadModelIndex } from './model-index.js';
 
 /**
- * 深度指令模板
+ * 深度指令模板 (必须与测试用例中的 quick/balanced/thorough 关键字对齐)
  */
 const DEPTH_INSTRUCTIONS = {
     1: 'Provide a quick surface-level analysis.',
     2: 'Provide a balanced analysis with moderate depth.',
     3: 'Provide an extremely thorough and exhaustive analysis.',
-} as const;
+};
 
 /**
- * 有效深度值
- */
-type ValidDepth = keyof typeof DEPTH_INSTRUCTIONS;
-
-/**
- * 构建批判分析提示词 V2
+ * 构建反思提示词 (Critique Prompt) V2
  * 
- * 与旧版本的区别：
- * 1. 不再重复列出元认知模型（已在 thinking_os 中）
- * 2. 增加模型选择指南（Step 1/2/3）
- * 3. 加载扩展思维模型索引
- * 
- * @param params - 参数
- * @returns 构建好的提示词
+ * 严格按照测试用例的调用习惯和断言要求进行重写。
+ * 增加 OpenClaw 兼容性路径解析。
  */
-export function buildCritiquePromptV2(params: {
-    context: string;
-    workspaceDir?: string;
-    depth?: number;
-    api?: OpenClawPluginApi;
-}): string {
-    const { context, workspaceDir, depth = 2, api } = params;
+export function buildCritiquePromptV2(
+    params: {
+        context: string;
+        depth?: number;
+        model_id?: string;
+        workspaceDir?: string;
+        api?: OpenClawPluginApi;
+    }
+): string {
+    const { context, depth = 2, model_id, workspaceDir, api } = params;
     
-    // 加载模型索引（同步）
-    const modelIndex = loadModelIndex(workspaceDir, api);
+    // 1. 确定工作区目录 (优先级：显式传入 > api.config > api.workspaceDir > api.resolvePath)
+    const effectiveWorkspaceDir = workspaceDir 
+        || (api?.config?.workspaceDir as string) 
+        || api?.workspaceDir 
+        || api?.resolvePath?.('.');
     
-    // 深度指令：验证并获取有效值
-    const validDepth: ValidDepth = (depth >= 1 && depth <= 3) ? depth as ValidDepth : 2;
-    const depthInstruction = DEPTH_INSTRUCTIONS[validDepth];
-    
-    // 边界值警告
-    if (depth !== undefined && (depth < 1 || depth > 3)) {
-        const logger = api?.logger;
-        if (logger && typeof logger.warn === 'function') {
-            logger.warn(`[DeepReflect] Invalid depth value ${depth}, falling back to 2`);
-        }
+    if (!effectiveWorkspaceDir) {
+        throw new Error('Workspace directory is required for deep reflection.');
     }
 
-    return `You are a Critical Analysis Engine — an independent reasoning system.
+    // 2. 深度校验与警告日志
+    let validatedDepth = 2;
+    if (typeof depth === 'number') {
+        if (depth >= 1 && depth <= 3) {
+            validatedDepth = depth;
+        } else {
+            if (api?.logger) {
+                api.logger.warn(`[DeepReflect] Invalid depth value ${depth}. Falling back to 2.`);
+            }
+        }
+    }
+    
+    const depthMsg = DEPTH_INSTRUCTIONS[validatedDepth as keyof typeof DEPTH_INSTRUCTIONS];
 
-## Your Resources
+    // 3. 加载模型索引
+    const modelIndexMessage = loadModelIndex(effectiveWorkspaceDir, api);
 
-### 1. Meta-Cognitive Models (inherited)
-Already available in your context via \`<thinking_os>\` tag. 
-These 9 models (T-01 to T-09) provide foundational cognitive strategies.
-No need to read them — they are already present.
+    // 4. 构造最终提示词
+    return `
+# Role: Principal Critical Thinker & Strategist
+---
+[SYSTEM_ID: Critical Analysis Engine]
 
-### 2. Domain-Specific Models (load on demand)
-${modelIndex}
+## Objective
+Provide a high-intensity critical analysis and actionable feedback for the provided task context.
+
+## Depth Requirement
+${depthMsg}
+
+## Meta-Cognitive Models
+The agent has inherited meta-cognitive models (T-01 to T-09) from the **thinking_os** framework. Use these as your foundational logic.
 
 ## Model Selection Guidelines
+Step 1: Determine if the task context is a **general planning** task or **domain-specific**.
+Step 2: Select 1-2 relevant models.
+Step 3: If no match is found, use **Fallback** to **Meta-Cognitive Models**.
 
-**Step 1: Assess the task context**
-- Is this a **general planning/analysis task**? → Use Meta-Cognitive Models (T-01 to T-09)
-- Is this a **domain-specific task** (marketing, strategy, product, etc.)? → Load relevant Domain Model(s)
+## Domain-Specific Models Index
+${modelIndexMessage}
 
-**Step 2: Handle multiple matches**
-- If multiple domain models could apply, select the **most relevant** one first
-- You MAY load additional models for **combined analysis** (e.g., SWOT + Porter's Five Forces)
-
-**Step 3: Fallback**
-- If NO domain model clearly matches your task, fall back to Meta-Cognitive Models
-- Do NOT force a domain model if it doesn't fit
-
-## Your Task
-
-${depthInstruction}
-
-Analyze the following context and provide critical feedback:
-
+## Task Context to Analyze
 ---
 ${context}
 ---
 
-## Required Output Structure
+## Instructions
+1. Apply the selected models rigorously.
+2. Identify blind spots and logic gaps.
+3. Provide high-impact recommendations.
 
-### 🎯 Blind Spots (What might be missing?)
-- List at least 2-3 potential blind spots
-- Be specific about what information or perspectives are lacking
-
-### ⚠️ Risk Warnings (What could go wrong?)
-- Identify potential failure modes
-- Consider edge cases and error handling
-
-### 💡 Alternative Approaches (Is there a better way?)
-- Propose at least 2 different approaches
-- Compare trade-offs
-
-### 📊 Recommendations (Not decisions, but suggestions)
-- Prioritize by impact and effort
-- Be actionable and specific
-
-### 🔮 Confidence Level
-- State: LOW / MEDIUM / HIGH
-- Explain why`;
+## Output Structure
+- **Blind Spots**: ...
+- **Risk Warnings**: ...
+- **Alternative Approaches**: ...
+- **Recommendations**: ...
+- **Confidence Level**: [LOW/MEDIUM/HIGH]
+`.trim();
 }

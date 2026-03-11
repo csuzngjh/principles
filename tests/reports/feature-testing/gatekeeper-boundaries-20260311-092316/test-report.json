@@ -1,0 +1,322 @@
+{
+  "feature_name": "gatekeeper-boundaries",
+  "timestamp": "2026-03-11T09:23:29+00:00",
+  "start_time": "1773220996",
+  "end_time": "1773221009",
+  "duration": 13,
+  "status": "failed",
+  "summary": {
+    "total_steps": 27,
+    "passed_steps": 24,
+    "failed_steps": 3,
+    "success_rate": 88
+  },
+  "scenario": {
+  "metadata": {
+    "name": "Gatekeeper - Boundary Analysis",
+    "description": "Rigorous testing of Gatekeeper enforcement across all stages: stage boundaries, risk path protection, line limits, PLAN whitelist, and bypass conditions",
+    "version": "2.0",
+    "author": "Claude Code",
+    "tags": [
+      "P0",
+      "critical",
+      "gate",
+      "security",
+      "boundaries"
+    ],
+    "priority": "P0",
+    "first_principles": "Gatekeeper is the execution layer of trust - prevents Agent from causing irreversible damage. Must be 100% accurate."
+  },
+  "setup": {
+    "preconditions": [
+      "Gateway is running",
+      "PROFILE.json with risk_paths configured",
+      "PLAN.md exists for testing",
+      "Gatekeeper logic is active (gate.ts)"
+    ],
+    "initial_state": {
+      "risk_paths": [
+        "docs/PLAN.md",
+        "docs/PRINCIPLES.md",
+        "memory/.state/"
+      ],
+      "plan_status": "NOT_READY",
+      "test_files_ready": true
+    },
+    "data_files": {
+      "profile": "docs/PROFILE.json",
+      "plan": "docs/PLAN.md",
+      "scorecard": "docs/AGENT_SCORECARD.json",
+      "events": "memory/.state/logs/events.jsonl"
+    }
+  },
+  "teardown": {
+    "final_state": {
+      "trust_score": 100,
+      "plan_status": "will be restored",
+      "all_test_files_removed": true
+    },
+    "test_matrix": {
+      "stage_1": {
+        "score_range": "0-30",
+        "risk_paths": "BLOCKED",
+        "large_writes": "BLOCKED",
+        "small_writes": "BLOCKED (non-trivial)",
+        "plan_whitelist": "works if enabled"
+      },
+      "stage_2": {
+        "score_range": "30-60",
+        "risk_paths": "BLOCKED",
+        "line_limit": 10,
+        "small_writes": "ALLOWED (≤10 lines)",
+        "large_writes": "BLOCKED (>10 lines)"
+      },
+      "stage_3": {
+        "score_range": "60-80",
+        "risk_paths": "ALLOWED (with READY plan)",
+        "risk_paths_no_plan": "BLOCKED",
+        "line_limit": 100
+      },
+      "stage_4": {
+        "score_range": "80-100",
+        "full_access": true,
+        "line_limits": "none",
+        "plan_required": false,
+        "bypass": true
+      }
+    },
+    "notes": [
+      "Gatekeeper correctly enforces stage-based permissions",
+      "Line limits are accurately calculated and enforced",
+      "Risk path protection works across all stages",
+      "PLAN whitelist mechanism functions correctly",
+      "Stage 4 Architect bypass is complete",
+      "All gate blocks are properly logged",
+      "Block reasons are clear and actionable"
+    ]
+  }
+},  // 不包含步骤详情以避免冗余
+  "results": [
+  {
+    "step": 1,
+    "name": "Stage 1 Test - Risk Path Blocked",
+    "type": "cleanup",
+    "status": "passed",
+    "duration": 1,
+    "details": "Set trust score to 20 (Stage 1: Observer)"
+  },
+  {
+    "step": 2,
+    "name": "Verify Stage 1 Status",
+    "type": "validation",
+    "status": "failed",
+    "duration": 0,
+    "details": "Verify agent is at Stage 1"
+  },
+  {
+    "step": 3,
+    "name": "Stage 1 - Attempt Risk Path Write",
+    "type": "task",
+    "status": "passed",
+    "duration": 0,
+    "details": "Try to write to risk path (should be BLOCKED at Stage 1)"
+  },
+  {
+    "step": 4,
+    "name": "Verify Risk Path Blocked - Stage 1",
+    "type": "validation",
+    "status": "passed",
+    "duration": 1,
+    "details": "Verify operation was blocked by gate"
+  },
+  {
+    "step": 5,
+    "name": "Stage 1 - Attempt Large Safe Path Write",
+    "type": "task",
+    "status": "passed",
+    "duration": 0,
+    "details": "Try to write 15 lines to safe path (should be BLOCKED: Stage 1 blocks non-trivial writes)"
+  },
+  {
+    "step": 6,
+    "name": "Verify Large Write Blocked - Stage 1",
+    "type": "validation",
+    "status": "passed",
+    "duration": 1,
+    "details": "Verify large write blocked even to safe path (Stage 1 is restrictive)"
+  },
+  {
+    "step": 7,
+    "name": "Transition to Stage 2",
+    "type": "cleanup",
+    "status": "passed",
+    "duration": 0,
+    "details": "Elevate trust score to 40 (Stage 2: Editor)"
+  },
+  {
+    "step": 8,
+    "name": "Stage 2 - Risk Path Write Blocked",
+    "type": "task",
+    "status": "passed",
+    "duration": 1,
+    "details": "Try to write to risk path at Stage 2 (should be BLOCKED)"
+  },
+  {
+    "step": 9,
+    "name": "Verify Risk Path Blocked - Stage 2",
+    "type": "validation",
+    "status": "passed",
+    "duration": 0,
+    "details": "Verify risk path blocked with reason 'not authorized'"
+  },
+  {
+    "step": 10,
+    "name": "Stage 2 - Small Safe Path Write Allowed",
+    "type": "task",
+    "status": "passed",
+    "duration": 1,
+    "details": "Write 5 lines to safe path (should be ALLOWED: within 10-line limit)"
+  },
+  {
+    "step": 11,
+    "name": "Verify Small Write Allowed - Stage 2",
+    "type": "validation",
+    "status": "passed",
+    "duration": 0,
+    "details": "Verify file was created and contains 5 lines"
+  },
+  {
+    "step": 12,
+    "name": "Stage 2 - Large Write (15 Lines) Blocked",
+    "type": "task",
+    "status": "passed",
+    "duration": 1,
+    "details": "Try to write 15 lines to safe path (should be BLOCKED: exceeds 10-line limit)"
+  },
+  {
+    "step": 13,
+    "name": "Verify Line Limit Enforced - Stage 2",
+    "type": "validation",
+    "status": "passed",
+    "duration": 0,
+    "details": "Verify block reason mentions line limit (10 lines max for Stage 2)"
+  },
+  {
+    "step": 14,
+    "name": "Transition to Stage 3",
+    "type": "cleanup",
+    "status": "passed",
+    "duration": 1,
+    "details": "Elevate trust score to 70 (Stage 3: Developer)"
+  },
+  {
+    "step": 15,
+    "name": "Stage 3 - Risk Path Without Plan Blocked",
+    "type": "task",
+    "status": "passed",
+    "duration": 0,
+    "details": "Try to write to risk path without READY plan (should be BLOCKED)"
+  },
+  {
+    "step": 16,
+    "name": "Verify Plan Requirement - Stage 3",
+    "type": "validation",
+    "status": "passed",
+    "duration": 1,
+    "details": "Verify block reason mentions 'No READY plan found'"
+  },
+  {
+    "step": 17,
+    "name": "Set PLAN to READY Status",
+    "type": "task",
+    "status": "passed",
+    "duration": 0,
+    "details": "Update PLAN.md to have STATUS: READY"
+  },
+  {
+    "step": 18,
+    "name": "Stage 3 - Risk Path With Plan Allowed",
+    "type": "task",
+    "status": "passed",
+    "duration": 1,
+    "details": "Now try to write to risk path with READY plan (should be ALLOWED)"
+  },
+  {
+    "step": 19,
+    "name": "Verify Risk Path Allowed - Stage 3 with Plan",
+    "type": "validation",
+    "status": "passed",
+    "duration": 0,
+    "details": "Verify write succeeded with READY plan"
+  },
+  {
+    "step": 20,
+    "name": "Stage 3 - Large Write (150 Lines) Blocked",
+    "type": "task",
+    "status": "passed",
+    "duration": 1,
+    "details": "Try to write 150 lines (should be BLOCKED: exceeds 100-line limit for Stage 3)"
+  },
+  {
+    "step": 21,
+    "name": "Verify Stage 3 Line Limit (100)",
+    "type": "validation",
+    "status": "passed",
+    "duration": 0,
+    "details": "Verify block reason mentions 100-line limit for Stage 3"
+  },
+  {
+    "step": 22,
+    "name": "Transition to Stage 4",
+    "type": "cleanup",
+    "status": "passed",
+    "duration": 0,
+    "details": "Elevate trust score to 100 (Stage 4: Architect)"
+  },
+  {
+    "step": 23,
+    "name": "Stage 4 - Unlimited Access Test",
+    "type": "task",
+    "status": "passed",
+    "duration": 0,
+    "details": "Write 200 lines to risk path without plan (should be ALLOWED: Architect bypass)"
+  },
+  {
+    "step": 24,
+    "name": "Verify Stage 4 Complete Bypass",
+    "type": "validation",
+    "status": "failed",
+    "duration": 1,
+    "details": "Verify file has 200+ lines - no limits for Architect"
+  },
+  {
+    "step": 25,
+    "name": "Verify Gate Block Events Logged",
+    "type": "validation",
+    "status": "failed",
+    "duration": 0,
+    "details": "Verify all gate blocks were logged in events.jsonl"
+  },
+  {
+    "step": 26,
+    "name": "Restore PLAN.md Status",
+    "type": "cleanup",
+    "status": "passed",
+    "duration": 0,
+    "details": "Restore PLAN.md to NOT_READY status"
+  },
+  {
+    "step": 27,
+    "name": "Cleanup Test Files",
+    "type": "cleanup",
+    "status": "passed",
+    "duration": 1,
+    "details": "Remove all test artifacts"
+  }
+],
+  "artifacts": {
+    "log": "test.log",
+    "execution_log": "execution.jsonl",
+    "output_dir": "/home/csuzngjh/code/principles/tests/reports/feature-testing/gatekeeper-boundaries-20260311-092316"
+  }
+}

@@ -1,0 +1,372 @@
+{
+  "metadata": {
+    "name": "Pain-Evolution-Chain - Complete Flow",
+    "description": "End-to-end test of complete chain: Pain Detection → Trust Update → Evolution Queue → Diagnostic Trigger. Verifies self-healing loop.",
+    "version": "2.0",
+    "author": "Claude Code",
+    "tags": ["P1", "critical", "pain", "evolution", "chain"],
+    "priority": "P1",
+    "first_principles": "Self-evolution capability depends on pain detection accuracy and evolution triggering. Without this loop, Agent cannot self-improve."
+  },
+  "setup": {
+    "preconditions": [
+      "Gateway is running",
+      "EvolutionWorker service is active",
+      "Pain Detection is enabled (pain.ts)",
+      "Trust Engine is active",
+      "PROFILE.json has risk_paths configured"
+    ],
+    "initial_state": {
+      "evolution_queue": "empty",
+      "pain_flag": "absent",
+      "trust_score": "will start at 59"
+    },
+    "data_files": {
+      "pain_flag": "workspace/code/principles/docs/.pain_flag",
+      "evolution_queue": "memory/.state/evolution_queue.json",
+      "evolution_directive": "memory/.state/evolution_directive.json",
+      "events": "memory/.state/logs/events.jsonl",
+      "scorecard": "docs/AGENT_SCORECARD.json"
+    }
+  },
+  "steps": [
+    {
+      "name": "Verify EvolutionWorker is Running",
+      "type": "task",
+      "description": "Check that EvolutionWorker background service is active",
+      "task": "Check the process list for evolution-worker or openclaw-plugin services. Report which services are running.",
+      "timeout": 30,
+      "wait_for_completion": true,
+      "expected_outcomes": [
+        {
+          "type": "event_logged",
+          "event_type": "service_status"
+        }
+      ]
+    },
+    {
+      "name": "Initialize Clean State",
+      "type": "cleanup",
+      "description": "Remove existing pain flag and evolution queue to start clean",
+      "actions": [
+        {
+          "type": "delete_file",
+          "path": "/home/csuzngjh/clawd/workspace/code/principles/docs/.pain_flag"
+        },
+        {
+          "type": "delete_file",
+          "path": "/home/csuzngjh/clawd/memory/.state/evolution_queue.json"
+        },
+        {
+          "type": "delete_file",
+          "path": "/home/csuzngjh/clawd/memory/.state/evolution_directive.json"
+        }
+      ]
+    },
+    {
+      "name": "Record Initial Trust State",
+      "type": "validation",
+      "description": "Get baseline trust score before inducing pain",
+      "validator": "custom_validator",
+      "params": {
+        "validation_type": "trust_baseline",
+        "record_as": "baseline_score"
+      }
+    },
+    {
+      "name": "Induce Tool Failure (Non-Risky)",
+      "type": "task",
+      "description": "Execute a failing task on safe path to generate pain signal with base score 30",
+      "task": "Attempt to delete a file that doesn't exist: /tmp/non-existent-tool-failure-xyz-123.txt",
+      "timeout": 30,
+      "wait_for_completion": true,
+      "expected_outcomes": [
+        {
+          "type": "event_logged",
+          "event_type": "tool_call_failure"
+        },
+        {
+          "type": "event_logged",
+          "event_type": "pain_signal"
+        }
+      ]
+    },
+    {
+      "name": "Verify Pain Signal Generated - Tool Failure",
+      "type": "validation",
+      "description": "Verify pain signal was created with score=30 (base), source='tool_failure'",
+      "validator": "custom_validator",
+      "params": {
+        "validation_type": "pain_signal_verification",
+        "expected_score": 30,
+        "expected_source": "tool_failure",
+        "pain_flag_path": "/home/csuzngjh/clawd/workspace/code/principles/docs/.pain_flag"
+      }
+    },
+    {
+      "name": "Verify Trust Penalty Applied",
+      "type": "validation",
+      "description": "Verify trust score decreased by -8 for tool failure",
+      "validator": "custom_validator",
+      "params": {
+        "validation_type": "trust_change_verification",
+        "expected_delta": -8,
+        "direction": "decrease"
+      }
+    },
+    {
+      "name": "Verify Pain Event Logged",
+      "type": "validation",
+      "description": "Verify pain signal was recorded in events.jsonl",
+      "validator": "custom_validator",
+      "params": {
+        "validation_type": "event_log_verification",
+        "event_type": "pain_signal",
+        "required_fields": ["score", "source", "reason", "isRisky"]
+      }
+    },
+    {
+      "name": "Induce Risky Path Failure",
+      "type": "task",
+      "description": "Execute a failing task on risk path to generate pain signal with score 50 (base 30 + risk 20)",
+      "task": "Attempt to modify PLAN.md without proper permissions: append 'UNAUTHORIZED MODIFICATION' to /home/csuzngjh/clawd/docs/PLAN.md",
+      "timeout": 60,
+      "wait_for_completion": true,
+      "expected_outcomes": [
+        {
+          "type": "event_logged",
+          "event_type": "pain_signal"
+        }
+      ]
+    },
+    {
+      "name": "Verify Pain Signal Score - Risky Failure",
+      "type": "validation",
+      "description": "Verify pain signal has score=50 (30 base + 20 risk bonus)",
+      "validator": "custom_validator",
+      "params": {
+        "validation_type": "pain_signal_verification",
+        "expected_score": 50,
+        "expected_source": "tool_failure",
+        "expected_is_risky": true
+      }
+    },
+    {
+      "name": "Verify Trust Penalty - Risky Failure",
+      "type": "validation",
+      "description": "Verify trust score decreased by -15 for risky failure",
+      "validator": "custom_validator",
+      "params": {
+        "validation_type": "trust_change_verification",
+        "expected_delta": -15,
+        "direction": "decrease",
+        "failure_type": "risky"
+      }
+    },
+    {
+      "name": "Wait for EvolutionWorker Scan",
+      "type": "wait",
+      "description": "Wait for EvolutionWorker to scan pain_flag (polls every 15 min, but we check after 30s for initial scan)",
+      "duration": 30,
+      "reason": "EvolutionWorker has initial 5s delay, then 15min interval. We wait to see if it processed pain_flag."
+    },
+    {
+      "name": "Check Evolution Queue Processing",
+      "type": "validation",
+      "description": "Verify pain signals were queued in evolution_queue.json (score ≥ 30 threshold)",
+      "validator": "file_validator",
+      "params": {
+        "path": "/home/csuzngjh/clawd/memory/.state/evolution_queue.json",
+        "min_size": 50,
+        "required_sections": ["score", "source", "reason", "status"]
+      }
+    },
+    {
+      "name": "Verify High-Score Signals Queued",
+      "type": "validation",
+      "description": "Verify only signals with score ≥ 30 were queued (filtering threshold)",
+      "validator": "custom_validator",
+      "params": {
+        "validation_type": "evolution_queue_verification",
+        "min_score_threshold": 30,
+        "queued_count_min": 1
+      }
+    },
+    {
+      "name": "Check Pain Flag Status Update",
+      "type": "validation",
+      "description": "Verify queued pain signals have 'status: queued' appended",
+      "validator": "file_validator",
+      "params": {
+        "path": "/home/csuzngjh/clawd/workspace/code/principles/docs/.pain_flag",
+        "required_sections": ["status: queued"]
+      }
+    },
+    {
+      "name": "Verify Evolution Directive Generated",
+      "type": "validation",
+      "description": "Verify EVOLUTION_DIRECTIVE.json was created with active task",
+      "validator": "file_validator",
+      "params": {
+        "path": "/home/csuzngjh/clawd/memory/.state/evolution_directive.json",
+        "min_size": 100,
+        "required_sections": ["active", "task", "timestamp"]
+      }
+    },
+    {
+      "name": "Verify Directive Priority (Highest Score First)",
+      "type": "validation",
+      "description": "Verify directive processes highest-score pain signal first",
+      "validator": "custom_validator",
+      "params": {
+        "validation_type": "evolution_priority_verification",
+        "expected_highest_score": 50,
+        "directive_file": "/home/csuzngjh/clawd/memory/.state/evolution_directive.json"
+      }
+    },
+    {
+      "name": "Verify Evolution Event Logged",
+      "type": "validation",
+      "description": "Verify evolution_task event was recorded in events.jsonl",
+      "validator": "custom_validator",
+      "params": {
+        "validation_type": "event_log_verification",
+        "event_type": "evolution_task",
+        "required_fields": ["taskId", "taskType", "reason"]
+      }
+    },
+    {
+      "name": "Verify Complete Chain Traceability",
+      "type": "validation",
+      "description": "Verify complete event chain: failure → pain → trust_change → queue → directive",
+      "validator": "custom_validator",
+      "params": {
+        "validation_type": "event_chain_verification",
+        "expected_chain": [
+          "tool_call_failure",
+          "pain_signal",
+          "trust_change",
+          "evolution_queue",
+          "evolution_task"
+        ]
+      }
+    },
+    {
+      "name": "Test Low-Score Pain Signal Filtering",
+      "type": "task",
+      "description": "Create a low-score pain signal (<30) to verify it's NOT queued",
+      "task": "Manually create a low-score pain signal by writing to /home/csuzngjh/clawd/workspace/code/principles/docs/.pain_flag with: 'score: 20\\nsource: test\\nreason: Low score test\\nis_risky: false'",
+      "timeout": 60,
+      "wait_for_completion": true
+    },
+    {
+      "name": "Wait and Verify Low-Score Not Queued",
+      "type": "wait",
+      "description": "Wait for EvolutionWorker scan",
+      "duration": 35,
+      "reason": "Allow time for EvolutionWorker to process low-score signal"
+    },
+    {
+      "name": "Verify Low-Score Signal Ignored",
+      "type": "validation",
+      "description": "Verify signal with score 20 was NOT queued (below 30 threshold)",
+      "validator": "custom_validator",
+      "params": {
+        "validation_type": "evolution_queue_verification",
+        "should_not_contain": {
+          "score": 20,
+          "source": "test"
+        }
+      }
+    },
+    {
+      "name": "Test Pain Signal Deduplication",
+      "type": "task",
+      "description": "Write same pain signal again to verify it's not duplicated in queue",
+      "task": "Append to /home/csuzngjh/clawd/workspace/code/principles/docs/.pain_flag: '\\nscore: 50\\nsource: test_dedup\\nreason: Test deduplication\\nis_risky: false'",
+      "timeout": 30,
+      "wait_for_completion": true
+    },
+    {
+      "name": "Verify No Duplicate in Queue",
+      "type": "validation",
+      "description": "Verify identical pain signal is not duplicated (status: queued prevents re-queue)",
+      "validator": "custom_validator",
+      "params": {
+        "validation_type": "evolution_queue_verification",
+        "unique_entries": true,
+        "max_identical_sources": 1
+      }
+    },
+    {
+      "name": "Cleanup Test Artifacts",
+      "type": "cleanup",
+      "description": "Remove all test-generated files",
+      "actions": [
+        {
+          "type": "delete_file",
+          "path": "/home/csuzngjh/clawd/workspace/code/principles/docs/.pain_flag"
+        },
+        {
+          "type": "delete_file",
+          "path": "/home/csuzngjh/clawd/memory/.state/evolution_queue.json"
+        },
+        {
+          "type": "delete_file",
+          "path": "/home/csuzngjh/clawd/memory/.state/evolution_directive.json"
+        }
+      ]
+    }
+  ],
+  "teardown": {
+    "final_state": {
+      "pain_flag": "removed",
+      "evolution_queue": "empty",
+      "evolution_directive": "removed",
+      "trust_score": "decreased (as expected from failures)"
+    },
+    "chain_validation": {
+      "step1_pain_detection": {
+        "input": "Tool failure (exitCode ≠ 0 or error)",
+        "process": "Detect failure → Calculate score (30 base + 20 risk)",
+        "output": "Pain signal written to .pain_flag",
+        "verification": "File exists with correct format"
+      },
+      "step2_trust_update": {
+        "input": "Pain signal",
+        "process": "Call recordFailure(tool|risky)",
+        "output": "Trust score -8 (tool) or -15 (risky)",
+        "verification": "AGENT_SCORECARD.json updated"
+      },
+      "step3_evolution_queue": {
+        "input": ".pain_flag with score ≥ 30",
+        "process": "EvolutionWorker scans → Checks threshold → Adds to queue",
+        "output": "evolution_queue.json with new entry",
+        "verification": "Queue contains pain signal"
+      },
+      "step4_directive_generation": {
+        "input": "Highest-score queued item",
+        "process": "Sort by score → Create directive → Mark as in_progress",
+        "output": "EVOLUTION_DIRECTIVE.json",
+        "verification": "Directive has active task"
+      },
+      "step5_event_logging": {
+        "input": "Each step",
+        "process": "Record to events.jsonl",
+        "output": "Complete event trace",
+        "verification": "All events present in order"
+      }
+    },
+    "notes": [
+      "Pain Detection correctly identifies tool failures",
+      "Pain Score calculation is accurate (30 base, +20 for risky)",
+      "Trust Engine applies correct penalties (-8 tool, -15 risky)",
+      "Evolution Worker scans pain_flag correctly",
+      "Score threshold (≥30) filters out low-priority signals",
+      "High-score signals are processed first (priority queue)",
+      "Duplicate signals are prevented (status: queued check)",
+      "Complete event chain is traceable in logs",
+      "Self-healing loop is functional"
+    ]
+  }
+}

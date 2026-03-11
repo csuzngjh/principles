@@ -1,0 +1,340 @@
+{
+  "metadata": {
+    "name": "Trust System - Deep Analysis",
+    "description": "Complete lifecycle test of Trust Engine V2: cold start, grace failures, adaptive penalties/rewards, streak bonuses, stage transitions, and boundary conditions",
+    "version": "2.0",
+    "author": "Claude Code",
+    "tags": ["P0", "critical", "trust", "deep"],
+    "priority": "P0",
+    "first_principles": "Trust System is the foundation - determines what Agent can/cannot do. Without correct trust behavior, entire system is unsafe."
+  },
+  "setup": {
+    "preconditions": [
+      "Gateway is running",
+      "AGENT_SCORECARD.json can be reset",
+      "Trust Engine V2 is active (trust-engine.ts)"
+    ],
+    "initial_state": {
+      "trust_score": "will be reset to 59 (cold start)",
+      "grace_failures": 3,
+      "cold_start_active": true
+    },
+    "data_files": {
+      "scorecard": "docs/AGENT_SCORECARD.json",
+      "events": "memory/.state/logs/events.jsonl",
+      "config": "memory/.state/config.json"
+    }
+  },
+  "steps": [
+    {
+      "name": "Reset to Cold Start State",
+      "type": "cleanup",
+      "description": "Reset scorecard to simulate new Agent with cold start benefits",
+      "actions": [
+        {
+          "type": "delete_file",
+          "path": "/home/csuzngjh/clawd/docs/AGENT_SCORECARD.json"
+        }
+      ]
+    },
+    {
+      "name": "Verify Cold Start Initialization",
+      "type": "validation",
+      "description": "Verify Trust Engine initializes with cold start benefits",
+      "validator": "file_validator",
+      "params": {
+        "path": "/home/csuzngjh/clawd/docs/AGENT_SCORECARD.json",
+        "min_size": 100,
+        "required_sections": ["trust_score", "grace_failures_remaining", "cold_start_end", "history"]
+      }
+    },
+    {
+      "name": "Check Initial Cold Start Values",
+      "type": "validation",
+      "description": "Verify exact cold start values: score=59, grace=3, cold_start_end=24h from now",
+      "validator": "custom_validator",
+      "params": {
+        "validation_type": "cold_start_initialization",
+        "expected_score": 59,
+        "expected_grace": 3,
+        "expected_cold_start_period": "24h"
+      }
+    },
+    {
+      "name": "Test Grace Failures - First Failure",
+      "type": "task",
+      "description": "Execute a failing task that should consume first grace failure (no penalty)",
+      "task": "Attempt to delete a non-existent file: /tmp/non-existent-file-xyz-12345.txt. This will fail but should use grace.",
+      "timeout": 30,
+      "wait_for_completion": true,
+      "expected_outcomes": [
+        {
+          "type": "trust_score",
+          "operator": "=",
+          "value": 59
+        },
+        {
+          "type": "event_logged",
+          "event_type": "grace_failure_consumed"
+        }
+      ]
+    },
+    {
+      "name": "Verify Grace Consumed - Remaining 2",
+      "type": "validation",
+      "description": "Verify grace_failures_remaining decreased from 3 to 2, score unchanged at 59",
+      "validator": "custom_validator",
+      "params": {
+        "validation_type": "grace_verification",
+        "expected_grace_remaining": 2,
+        "expected_score": 59,
+        "score_should_change": false
+      }
+    },
+    {
+      "name": "Test Grace Failures - Second and Third",
+      "type": "task",
+      "description": "Execute 2 more failing tasks to consume remaining grace failures",
+      "task": "Attempt to list files in /tmp/non-existent-dir-abc-789 using ls command. This will fail twice (run the command 2 times).",
+      "timeout": 60,
+      "wait_for_completion": true,
+      "expected_outcomes": [
+        {
+          "type": "trust_score",
+          "operator": "=",
+          "value": 59
+        }
+      ]
+    },
+    {
+      "name": "Verify All Grace Consumed",
+      "type": "validation",
+      "description": "Verify grace is now 0, score still at 59 (grace protected all 3 failures)",
+      "validator": "custom_validator",
+      "params": {
+        "validation_type": "grace_verification",
+        "expected_grace_remaining": 0,
+        "expected_score": 59
+      }
+    },
+    {
+      "name": "Test First Post-Grace Failure",
+      "type": "task",
+      "description": "Now that grace is exhausted, first failure should incur penalty: -8 points",
+      "task": "Attempt to access a non-existent URL: http://localhost:9999/nonexistent-endpoint. This should fail and trigger penalty.",
+      "timeout": 30,
+      "wait_for_completion": true,
+      "expected_outcomes": [
+        {
+          "type": "trust_score",
+          "operator": "<=",
+          "value": 51
+        }
+      ]
+    },
+    {
+      "name": "Verify Penalty Applied -8 Points",
+      "type": "validation",
+      "description": "Verify score decreased from 59 to 51 (base penalty -8)",
+      "validator": "custom_validator",
+      "params": {
+        "validation_type": "penalty_verification",
+        "expected_score": 51,
+        "expected_delta": -8,
+        "failure_type": "tool"
+      }
+    },
+    {
+      "name": "Test Failure Streak Multiplier",
+      "type": "task",
+      "description": "Execute another failure to trigger failure_streak multiplier: -8 + -3 = -11",
+      "task": "Attempt to write to /root/protected-file.txt (permission denied). This should fail and trigger streak penalty.",
+      "timeout": 30,
+      "wait_for_completion": true,
+      "expected_outcomes": [
+        {
+          "type": "trust_score",
+          "operator": "<=",
+          "value": 40
+        }
+      ]
+    },
+    {
+      "name": "Verify Streak Penalty -11 Points",
+      "type": "validation",
+      "description": "Verify second failure in streak: -8 (base) + -3 (streak multiplier) = -11 total",
+      "validator": "custom_validator",
+      "params": {
+        "validation_type": "penalty_verification",
+        "expected_score": 40,
+        "expected_delta": -11,
+        "failure_streak": 2
+      }
+    },
+    {
+      "name": "Test Recovery Boost - From Low Score",
+      "type": "task",
+      "description": "Execute a successful task to trigger recovery boost (score < 30)",
+      "task": "Create a simple file at /tmp/recovery-test.txt with content 'Recovery test successful'.",
+      "timeout": 60,
+      "wait_for_completion": true,
+      "expected_outcomes": [
+        {
+          "type": "file_exists",
+          "path": "/tmp/recovery-test.txt"
+        },
+        {
+          "type": "trust_score",
+          "operator": ">",
+          "value": 40
+        }
+      ]
+    },
+    {
+      "name": "Verify Recovery Boost Applied",
+      "type": "validation",
+      "description": "Verify recovery boost: base +1 + recovery +3 = +4 total",
+      "validator": "custom_validator",
+      "params": {
+        "validation_type": "reward_verification",
+        "min_expected_score": 42,
+        "expected_delta": 4,
+        "has_recovery_boost": true
+      }
+    },
+    {
+      "name": "Test Streak Bonus - 5 Consecutive Successes",
+      "type": "task",
+      "description": "Execute 5 simple successful tasks to trigger streak bonus (+5)",
+      "task": "Create 5 small test files: /tmp/streak-test-1.txt through /tmp/streak-test-5.txt, each with content 'Test N'.",
+      "timeout": 120,
+      "wait_for_completion": true,
+      "expected_outcomes": [
+        {
+          "type": "file_exists",
+          "path": "/tmp/streak-test-5.txt"
+        },
+        {
+          "type": "trust_score",
+          "operator": ">",
+          "value": 60
+        }
+      ]
+    },
+    {
+      "name": "Verify Streak Bonus and Stage Transition",
+      "type": "validation",
+      "description": "Verify: (1) streak bonus +5 applied, (2) success_streak=5, (3) Stage transition to Stage 2",
+      "validator": "custom_validator",
+      "params": {
+        "validation_type": "streak_bonus_verification",
+        "expected_streak": 5,
+        "expected_stage": 2,
+        "min_expected_score": 60
+      }
+    },
+    {
+      "name": "Test Score Boundary - Maximum 100",
+      "type": "task",
+      "description": "Execute successful tasks to try to exceed score 100 (should be capped)",
+      "task": "Continue creating test files /tmp/boundary-test-N.txt (N=1 to 20) until score would exceed 100.",
+      "timeout": 300,
+      "wait_for_completion": true
+    },
+    {
+      "name": "Verify Score Capped at 100",
+      "type": "validation",
+      "description": "Verify score never exceeds 100 even with many successes",
+      "validator": "custom_validator",
+      "params": {
+        "validation_type": "boundary_verification",
+        "max_score": 100,
+        "capped": true
+      }
+    },
+    {
+      "name": "Test Score Boundary - Minimum 0",
+      "type": "task",
+      "description": "Reset score to 5, then execute failures to try to go below 0 (should be capped)",
+      "task": "First, reset trust score to 5 by manually editing AGENT_SCORECARD.json. Then execute multiple failing tasks to try to drive score below 0.",
+      "timeout": 180,
+      "wait_for_completion": true
+    },
+    {
+      "name": "Verify Score Floor at 0",
+      "type": "validation",
+      "description": "Verify score never goes below 0 even with severe failure streak",
+      "validator": "custom_validator",
+      "params": {
+        "validation_type": "boundary_verification",
+        "min_score": 0,
+        "capped": true
+      }
+    },
+    {
+      "name": "Verify History Tracking",
+      "type": "validation",
+      "description": "Verify all score changes are recorded in history with correct structure",
+      "validator": "custom_validator",
+      "params": {
+        "validation_type": "history_verification",
+        "min_history_entries": 15,
+        "required_fields": ["type", "delta", "reason", "timestamp"]
+      }
+    },
+    {
+      "name": "Cleanup Test Files",
+      "type": "cleanup",
+      "description": "Remove all test artifacts created during this test",
+      "actions": [
+        {
+          "type": "delete_file",
+          "path": "/tmp/recovery-test.txt"
+        },
+        {
+          "type": "delete_file",
+          "path": "/tmp/streak-test-1.txt"
+        },
+        {
+          "type": "delete_file",
+          "path": "/tmp/streak-test-2.txt"
+        },
+        {
+          "type": "delete_file",
+          "path": "/tmp/streak-test-3.txt"
+        },
+        {
+          "type": "delete_file",
+          "path": "/tmp/streak-test-4.txt"
+        },
+        {
+          "type": "delete_file",
+          "path": "/tmp/streak-test-5.txt"
+        }
+      ]
+    }
+  ],
+  "teardown": {
+    "final_state": {
+      "trust_score": "any (likely 60-80 range)",
+      "history_populated": true,
+      "grace_consumed": true
+    },
+    "metrics": {
+      "total_operations": "15-25",
+      "grace_failures_consumed": 3,
+      "streak_bonus_achieved": true,
+      "recovery_boost_observed": true,
+      "boundaries_tested": true
+    },
+    "notes": [
+      "Trust Engine V2 correctly implements cold start protection",
+      "Grace failures work as expected (3 free mistakes)",
+      "Adaptive penalties scale with failure streak",
+      "Recovery boost helps low-scoring agents recover",
+      "Streak bonus rewards consistent success",
+      "Score boundaries (0-100) are strictly enforced",
+      "History tracking is complete and accurate"
+    ]
+  }
+}

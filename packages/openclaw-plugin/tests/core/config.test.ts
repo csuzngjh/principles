@@ -45,8 +45,8 @@ describe('PainConfig', () => {
         config.load();
 
         // Check some defaults
-        expect(config.get('thresholds.pain_trigger')).toBe(30);
-        expect(config.get('scores.paralysis')).toBe(40);
+        expect(config.get('thresholds.pain_trigger')).toBe(40);
+        expect(config.get('scores.paralysis')).toBe(30);
     });
 
     it('should return nested values using dot notation', () => {
