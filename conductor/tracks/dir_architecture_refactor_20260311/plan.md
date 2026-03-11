@@ -1,10 +1,10 @@
 # Implementation Plan: Directory Architecture Refactor (Phase 4)
 
-## Phase 1: Foundation & Template Update
+## Phase 1: Foundation & Template Update [checkpoint: ceffdd2]
 - [x] Task: Reorganize `packages/openclaw-plugin/templates/workspace` to follow the new hierarchy: `.principles/`, `.state/`, and root `PLAN.md`. [bd2ef73]
 - [x] Task: Update `install-openclaw.sh` to correctly copy files from the new template structure. [1269a0d]
 - [x] Task: Write failing tests to verify that the installer handles the new paths correctly. [0e66a59]
-- [ ] Task: Conductor - User Manual Verification 'Phase 1: Foundation & Template Update' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 1: Foundation & Template Update' (Protocol in workflow.md) [ceffdd2]
 
 ## Phase 2: Core Logic Refactor (Path Anchoring)
 - [ ] Task: Update `src/utils/io.ts` and `src/core/config.ts` to reflect the new directory constants.
