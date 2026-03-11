@@ -14,20 +14,12 @@ export function handleEvolveTask(ctx: PluginCommandContext): PluginCommandResult
     text:
       `🔧 **Evolver Handoff Requested**\n\n` +
       `To spin up the Evolver sub-agent, the Agent should call the \`sessions_spawn\` tool with:\n\n` +
-      `\`\`\`json\n` +
-      JSON.stringify(
-        {
-          agentId: "diagnostician",
-          mode: "run",
-          task: task,
-          label: "Principles-Evolver-Synergy",
-        },
-        null,
-        2
-      ) +
-      `\n\`\`\`\n\n` +
-      `If you are the Agent reading this: please call \`sessions_spawn\` now with the parameters above ` +
-      `to delegate this task. Be sure to reference the skill 'diagnostician' or 'implementer' in the task ` +
-      `so the subagent adopts the correct persona. Ensure \`tools.allow\` includes \`sessions_spawn\`.`,
+      `**spawnId**: \`evolver\`\n` +
+      `**task**: "${task}"\n\n` +
+      `**Instructions for Agent:**\n` +
+      `1. Use \`sessions_spawn\` now.\n` +
+      `2. Target \`evolver\`.\n` +
+      `3. Pass the task above.\n` +
+      `4. No other tools needed until the sub-agent returns.`,
   };
 }

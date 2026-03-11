@@ -1,7 +1,6 @@
 import { PluginHookSubagentEndedEvent, PluginHookAgentContext } from '../openclaw-sdk.js';
 import { writePainFlag } from '../core/pain.js';
-import { recordSuccess, TRUST_CONFIG } from '../core/trust-engine.js';
-import { resolvePdPath } from '../core/paths.js';
+import { WorkspaceContext } from '../core/workspace-context.js';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -9,33 +8,29 @@ import * as path from 'path';
 const OUTCOME_SCORES: Record<string, number> = {
     'error': 80,   // Subagent crashed
     'timeout': 65,   // Subagent timed out
-    'killed': 70,   // Subagent forcefully killed by supervisor/gateway
-    'reset': 40,   // Reset usually means it took a wrong path and needed restarting
-    'ok': 0,   // Subagent completed normally
-    'deleted': 0,   // Normal cleanup
 };
 
-export function handleSubagentEnded(
+export async function handleSubagentEnded(
     event: PluginHookSubagentEndedEvent,
-    ctx: PluginHookAgentContext & { workspaceDir?: string }
-): void {
-    const { workspaceDir } = ctx;
+    ctx: PluginHookAgentContext
+): Promise<void> {
+    const { outcome, targetSessionKey } = event;
+    const workspaceDir = ctx.workspaceDir;
+
     if (!workspaceDir) return;
 
-    // Extract outcome
-    const outcome = event.outcome;
-    if (!outcome) return;
+    const wctx = WorkspaceContext.fromHookContext(ctx);
 
-    const score = OUTCOME_SCORES[outcome] || 0;
-
-    // 1. If the subagent failed/timed-out, this is a strong symptom of systemic pain
-    if (score > 30) {
+    // 1. Autonomous Pain Capture: If subagent failed, record pain
+    if (outcome === 'error' || outcome === 'timeout') {
+        const score = OUTCOME_SCORES[outcome] || 50;
+        
         writePainFlag(workspaceDir, {
-            source: 'subagent_crash',
+            source: `subagent_${outcome}`,
             score: String(score),
             time: new Date().toISOString(),
-            reason: `Subagent session '${event.targetSessionKey}' terminated with outcome: ${outcome}. Reason: ${event.reason || 'Unknown'}`,
-            is_risky: 'false',
+            reason: `Subagent session ${targetSessionKey} ended with outcome: ${outcome}`,
+            is_risky: 'true'
         });
     }
 
@@ -44,35 +39,41 @@ export function handleSubagentEnded(
     // we clear the oldest in_progress task assuming it was the one being worked on.
     if (outcome === 'ok' || outcome === 'deleted') {
         // ── Trust Engine: Record success using V2 API ──
-        recordSuccess(workspaceDir, 'subagent_success', {
+        wctx.trust.recordSuccess('subagent_success', {
             sessionId: ctx.sessionId,
-            stateDir: (ctx as any).stateDir || resolvePdPath(workspaceDir, 'STATE_DIR'),
             api: (ctx as any).api
         });
 
-        const queuePath = resolvePdPath(workspaceDir, 'EVOLUTION_QUEUE');
+        const queuePath = wctx.resolve('EVOLUTION_QUEUE');
         if (fs.existsSync(queuePath)) {
             try {
                 const queue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
                 let changed = false;
                 
-                // Find the oldest in_progress task and mark it completed
+                // Find in_progress tasks
                 const inProgressTasks = queue.filter((t: any) => t.status === 'in_progress');
                 if (inProgressTasks.length > 0) {
-                    const oldestTask = inProgressTasks.sort((a: any, b: any) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())[0];
-                    oldestTask.status = 'completed';
-                    changed = true;
-                    
-                    // Clean up the .pain_flag if it was queued, to reset the environment
-                    const painFlagPath = resolvePdPath(workspaceDir, 'PAIN_FLAG');
-                    if (fs.existsSync(painFlagPath)) {
-                        try {
-                            const painData = fs.readFileSync(painFlagPath, 'utf8');
-                            if (painData.includes('status: queued')) {
-                                fs.unlinkSync(painFlagPath);
-                            }
-                        } catch (e) {
-                             console.warn('[PD] Failed to clean pain_flag:', e);
+                    // Sort by timestamp to find the oldest one
+                    const oldestTask = inProgressTasks.sort((a: any, b: any) => 
+                        new Date(a.enqueued_at).getTime() - new Date(b.enqueued_at).getTime()
+                    )[0];
+
+                    // Mark as completed
+                    const taskIndex = queue.findIndex((t: any) => t.id === oldestTask.id);
+                    if (taskIndex !== -1) {
+                        queue[taskIndex].status = 'completed';
+                        queue[taskIndex].completed_at = new Date().toISOString();
+                        changed = true;
+
+                        // Clean up the .pain_flag if it was queued, to reset the environment
+                        const painFlagPath = wctx.resolve('PAIN_FLAG');
+                        if (fs.existsSync(painFlagPath)) {
+                            try {
+                                const painData = fs.readFileSync(painFlagPath, 'utf8');
+                                if (painData.includes('status: queued')) {
+                                    fs.unlinkSync(painFlagPath);
+                                }
+                            } catch (e) {}
                         }
                     }
                 }

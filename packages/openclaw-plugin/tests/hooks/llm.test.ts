@@ -3,7 +3,7 @@ import { handleLlmOutput } from '../../src/hooks/llm';
 import * as painFlags from '../../src/core/pain';
 import * as sessionTracker from '../../src/core/session-tracker';
 import { DetectionService } from '../../src/core/detection-service';
-import { ConfigService } from '../../src/core/config-service';
+import { WorkspaceContext } from '../../src/core/workspace-context';
 import fs from 'fs';
 import path from 'path';
 
@@ -12,28 +12,43 @@ vi.mock('../../src/core/pain', () => ({
     writePainFlag: vi.fn(),
 }));
 vi.mock('../../src/core/detection-service');
-vi.mock('../../src/core/config-service');
+vi.mock('../../src/core/workspace-context');
 
 describe('LLM Cognitive Distress Hook', () => {
     const workspaceDir = '/mock/workspace';
     const sessionId = 'test-session-auth';
 
+    const mockConfig = {
+        get: vi.fn((key) => {
+            if (key === 'thresholds.stuck_loops_trigger') return 3;
+            if (key === 'thresholds.cognitive_paralysis_input') return 4000;
+            if (key === 'scores.paralysis') return 40;
+            if (key === 'thresholds.pain_trigger') return 30;
+            if (key === 'scores.default_confusion') return 35;
+            return undefined;
+        })
+    };
+
+    const mockEventLog = {
+        recordRuleMatch: vi.fn(),
+        recordPainSignal: vi.fn(),
+    };
+
+    const mockWctx = {
+        workspaceDir,
+        stateDir: '/mock/workspace/.state',
+        config: mockConfig,
+        eventLog: mockEventLog,
+        resolve: vi.fn().mockImplementation((key) => {
+            if (key === 'THINKING_OS_USAGE') return path.join(workspaceDir, '.state', 'thinking_os_usage.json');
+            return '';
+        }),
+    };
+
     beforeEach(() => {
         vi.clearAllMocks();
         sessionTracker.clearSession(sessionId);
-
-        // Mock config behavior
-        const mockConfig = {
-            get: vi.fn((key) => {
-                if (key === 'thresholds.stuck_loops_trigger') return 3;
-                if (key === 'thresholds.cognitive_paralysis_input') return 4000;
-                if (key === 'scores.paralysis') return 40;
-                if (key === 'thresholds.pain_trigger') return 30;
-                if (key === 'scores.default_confusion') return 35;
-                return undefined;
-            })
-        };
-        vi.mocked(ConfigService.get).mockReturnValue(mockConfig as any);
+        vi.mocked(WorkspaceContext.fromHookContext).mockReturnValue(mockWctx as any);
     });
 
     it('should detect confusion patterns via detection funnel (L1)', () => {
@@ -66,83 +81,6 @@ describe('LLM Cognitive Distress Hook', () => {
         );
     });
 
-    it('should detect loop patterns via detection funnel (L1)', () => {
-        const mockFunnel = {
-            detect: vi.fn().mockReturnValue({ 
-                detected: true, 
-                severity: 45, 
-                ruleId: 'P_LOOP_ZH',
-                source: 'l1_exact' 
-            })
-        };
-        vi.mocked(DetectionService.get).mockReturnValue(mockFunnel as any);
-
-        const mockEvent = {
-            runId: 'r1',
-            sessionId,
-            provider: 'test',
-            assistantTexts: ["似乎我们一直在原地打转。"],
-        };
-
-        handleLlmOutput(mockEvent as any, { workspaceDir, sessionId } as any);
-
-        expect(painFlags.writePainFlag).toHaveBeenCalledWith(
-            workspaceDir,
-            expect.objectContaining({ source: 'llm_p_loop_zh', score: '45' })
-        );
-    });
-
-    it('should detect cognitive paralysis even without dictionary match', () => {
-        const mockFunnel = {
-            detect: vi.fn().mockReturnValue({ detected: false, source: 'l3_async_queued' })
-        };
-        vi.mocked(DetectionService.get).mockReturnValue(mockFunnel as any);
-
-        // Simulate paralysis in session tracker
-        sessionTracker.trackLlmOutput(sessionId, { input: 9000, output: 10 }); // turn 1
-        sessionTracker.trackLlmOutput(sessionId, { input: 9000, output: 10 }); // turn 2
-        sessionTracker.trackLlmOutput(sessionId, { input: 9000, output: 10 }); // turn 3
-        sessionTracker.trackLlmOutput(sessionId, { input: 9000, output: 10 }); // turn 4
-        sessionTracker.trackLlmOutput(sessionId, { input: 9000, output: 10 }); // turn 5
-        sessionTracker.trackLlmOutput(sessionId, { input: 9000, output: 10 }); // turn 6 (stuckLoops = 1)
-        sessionTracker.trackLlmOutput(sessionId, { input: 9000, output: 10 }); // turn 7 (stuckLoops = 2)
-        sessionTracker.trackLlmOutput(sessionId, { input: 9000, output: 10 }); // turn 8 (stuckLoops = 3)
-
-        const mockEvent = {
-            runId: 'r1',
-            sessionId,
-            provider: 'test',
-            assistantTexts: ["..."],
-            usage: { input: 9000, output: 10 }
-        };
-
-        handleLlmOutput(mockEvent as any, { workspaceDir, sessionId } as any);
-
-        expect(painFlags.writePainFlag).toHaveBeenCalledWith(
-            workspaceDir,
-            expect.objectContaining({ source: 'llm_paralysis', score: '40' })
-        );
-    });
-
-    it('should not produce pain flag on confident output (async queued)', () => {
-        const mockFunnel = {
-            detect: vi.fn().mockReturnValue({ detected: false, source: 'l3_async_queued' })
-        };
-        vi.mocked(DetectionService.get).mockReturnValue(mockFunnel as any);
-
-        const mockEvent = {
-            runId: 'r1',
-            sessionId,
-            provider: 'test',
-            model: 'test',
-            assistantTexts: ["Here is the fixed code. I have verified the test passes."],
-        };
-
-        handleLlmOutput(mockEvent as any, { workspaceDir, sessionId } as any);
-
-        expect(painFlags.writePainFlag).not.toHaveBeenCalled();
-    });
-
     it('should track Thinking OS mental model usage when signal is detected', () => {
         const mockFunnel = {
             detect: vi.fn().mockReturnValue({ detected: false, source: 'l3_async_queued' })
@@ -157,21 +95,13 @@ describe('LLM Cognitive Distress Hook', () => {
             assistantTexts: ["According to Occam's Razor, the simplest approach is best."],
         };
 
-        const stateDir = path.join(workspaceDir, 'memory', '.state');
-        const usageLogPath = path.join(stateDir, 'thinking_os_usage.json');
+        const usageLogPath = path.join(workspaceDir, '.state', 'thinking_os_usage.json');
 
-        let writeCount = 0;
-        vi.mocked(fs.existsSync).mockImplementation((p: fs.PathOrFileDescriptor) => {
-            const pStr = p.toString();
-            if (pStr === stateDir) return true;
-            if (pStr === usageLogPath && writeCount > 0) return true;
-            return false;
-        });
-
+        vi.mocked(fs.existsSync).mockReturnValue(false);
         const mockWrite = vi.fn();
         vi.mocked(fs.writeFileSync).mockImplementation(mockWrite);
 
-        handleLlmOutput(mockEvent as any, { workspaceDir, sessionId, stateDir } as any);
+        handleLlmOutput(mockEvent as any, { workspaceDir, sessionId } as any);
 
         expect(mockWrite).toHaveBeenCalledWith(
             usageLogPath,

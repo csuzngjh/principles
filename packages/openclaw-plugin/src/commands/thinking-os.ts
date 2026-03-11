@@ -1,18 +1,14 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
-import { resolvePdPath } from '../core/paths.js';
+import { WorkspaceContext } from '../core/workspace-context.js';
 
 function getWorkspaceDir(ctx: PluginCommandContext): string {
     return (ctx.config?.workspaceDir as string) || process.cwd();
 }
 
-function getStateDir(ctx: PluginCommandContext, workspaceDir: string): string {
-    return (ctx.config?.stateDir as string) || resolvePdPath(workspaceDir, 'STATE_DIR');
-}
-
-function getModels(workspaceDir: string): Record<string, string> {
-    const modelsPath = resolvePdPath(workspaceDir, 'THINKING_OS');
+function getModels(wctx: WorkspaceContext): Record<string, string> {
+    const modelsPath = wctx.resolve('THINKING_OS');
     const models: Record<string, string> = {};
     if (!fs.existsSync(modelsPath)) return models;
 
@@ -31,11 +27,8 @@ function getModels(workspaceDir: string): Record<string, string> {
     return models;
 }
 
-function formatUsageReport(workspaceDir: string, stateDir: string): string {
-    // If stateDir is default, use resolvePdPath. If override exists, join manually.
-    const logPath = stateDir.endsWith('.state') 
-        ? resolvePdPath(workspaceDir, 'THINKING_OS_USAGE')
-        : path.join(stateDir, 'thinking_os_usage.json');
+function formatUsageReport(wctx: WorkspaceContext): string {
+    const logPath = wctx.resolve('THINKING_OS_USAGE');
 
     if (!fs.existsSync(logPath)) {
         return '📊 No usage data yet. The Thinking OS has not been active long enough to collect statistics.';
@@ -44,7 +37,7 @@ function formatUsageReport(workspaceDir: string, stateDir: string): string {
     try {
         const usage: Record<string, number> = JSON.parse(fs.readFileSync(logPath, 'utf8'));
         const totalTurns = usage['_total_turns'] || 1;
-        const models = getModels(workspaceDir);
+        const models = getModels(wctx);
 
         let report = `# 🧠 Thinking OS — Usage Report\n\n`;
         report += `Total turns tracked: **${totalTurns}**\n\n`;
@@ -72,7 +65,7 @@ function formatUsageReport(workspaceDir: string, stateDir: string): string {
     }
 }
 
-function handlePropose(workspaceDir: string, proposal: string): string {
+function handlePropose(wctx: WorkspaceContext, proposal: string): string {
     if (!proposal.trim()) {
         return '❌ Usage: `/thinking-os propose <description of your proposed mental model>`';
     }
@@ -81,7 +74,7 @@ function handlePropose(workspaceDir: string, proposal: string): string {
         return '❌ Invalid proposal: A mental model must include a "Signal detection / 信号检测" section explaining how to detect its usage via regex.';
     }
 
-    const candidatesPath = resolvePdPath(workspaceDir, 'THINKING_OS_CANDIDATES');
+    const candidatesPath = wctx.resolve('THINKING_OS_CANDIDATES');
     
     if (fs.existsSync(candidatesPath)) {
         try {
@@ -100,17 +93,15 @@ function handlePropose(workspaceDir: string, proposal: string): string {
 
     try {
         fs.appendFileSync(candidatesPath, entry, 'utf8');
-        return `✅ Mental model proposal recorded in \`${candidatesPath.replace(workspaceDir, '')}\`.\nIt needs validation in ≥3 different task types and human approval before promotion.`;
+        return `✅ Mental model proposal recorded in \`${candidatesPath.replace(wctx.workspaceDir, '')}\`.\nIt needs validation in ≥3 different task types and human approval before promotion.`;
     } catch (e) {
         return `❌ Failed to write proposal: ${String(e)}`;
     }
 }
 
-function formatAuditReport(workspaceDir: string, stateDir: string): string {
-    const logPath = stateDir.endsWith('.state') 
-        ? resolvePdPath(workspaceDir, 'THINKING_OS_USAGE')
-        : path.join(stateDir, 'thinking_os_usage.json');
-    const thinkingOsPath = resolvePdPath(workspaceDir, 'THINKING_OS');
+function formatAuditReport(wctx: WorkspaceContext): string {
+    const logPath = wctx.resolve('THINKING_OS_USAGE');
+    const thinkingOsPath = wctx.resolve('THINKING_OS');
 
     let report = `# 🔍 Thinking OS — Audit Report\n\n`;
 
@@ -119,7 +110,7 @@ function formatAuditReport(workspaceDir: string, stateDir: string): string {
         return report;
     }
 
-    const models = getModels(workspaceDir);
+    const models = getModels(wctx);
     const modelCount = Object.keys(models).length;
     report += `**Active models**: ${modelCount}\n\n`;
 
@@ -152,7 +143,7 @@ function formatAuditReport(workspaceDir: string, stateDir: string): string {
             report += `> 💡 Suggestion: Review these models. If they are obsolete, move them to the archive.\n\n`;
         }
 
-        const candidatesPath = resolvePdPath(workspaceDir, 'THINKING_OS_CANDIDATES');
+        const candidatesPath = wctx.resolve('THINKING_OS_CANDIDATES');
         if (fs.existsSync(candidatesPath)) {
             const candidates = fs.readFileSync(candidatesPath, 'utf8');
             const pendingCount = (candidates.match(/Status: PENDING/g) || []).length;
@@ -169,18 +160,18 @@ function formatAuditReport(workspaceDir: string, stateDir: string): string {
 
 export function handleThinkingOs(ctx: PluginCommandContext): PluginCommandResult {
     const workspaceDir = getWorkspaceDir(ctx);
-    const stateDir = getStateDir(ctx, workspaceDir);
+    const wctx = WorkspaceContext.fromHookContext({ workspaceDir, ...ctx.config });
     const args = (ctx.args || '').trim();
     const subCommand = args.split(/\s+/)[0]?.toLowerCase();
     const rest = args.slice(subCommand?.length || 0).trim();
 
     switch (subCommand) {
         case 'status':
-            return { text: formatUsageReport(workspaceDir, stateDir) };
+            return { text: formatUsageReport(wctx) };
         case 'propose':
-            return { text: handlePropose(workspaceDir, rest) };
+            return { text: handlePropose(wctx, rest) };
         case 'audit':
-            return { text: formatAuditReport(workspaceDir, stateDir) };
+            return { text: formatAuditReport(wctx) };
         default:
             return {
                 text:

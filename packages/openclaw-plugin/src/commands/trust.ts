@@ -1,12 +1,14 @@
-import { getAgentScorecard, TRUST_CONFIG } from '../core/trust-engine.js';
+import { TRUST_CONFIG } from '../core/trust-engine.js';
+import { WorkspaceContext } from '../core/workspace-context.js';
 import type { PluginHookAgentContext } from '../openclaw-sdk.js';
 
 export function handleTrustCommand(ctx: PluginHookAgentContext & { workspaceDir?: string }): string {
     const { workspaceDir } = ctx;
     if (!workspaceDir) return 'Error: Workspace directory not found.';
 
-    const scorecard = getAgentScorecard(workspaceDir);
-    const trustScore = scorecard.trust_score ?? 50;
+    const wctx = WorkspaceContext.fromHookContext(ctx);
+    const scorecard = wctx.trust.getScorecard();
+    const trustScore = scorecard.trust_score;
     
     let stage = 2;
     let title = 'Editor';

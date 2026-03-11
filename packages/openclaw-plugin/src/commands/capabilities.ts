@@ -2,56 +2,41 @@ import { execSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
-import { resolvePdPath } from '../core/paths.js';
+import { WorkspaceContext } from '../core/workspace-context.js';
 
 const TOOLS_TO_SCAN = [
   { name: 'rg', cmd: ['rg', '--version'] },
   { name: 'sg', cmd: ['sg', '--version'] },
   { name: 'fd', cmd: ['fd', '--version'] },
   { name: 'qmd', cmd: ['qmd', '--version'] },
-  { name: 'claude', cmd: ['claude', '--version'] },
-  { name: 'gemini', cmd: ['gemini', '--version'] },
-  { name: 'agent-browser', cmd: ['agent-browser', '--version'] },
-  { name: 'npm', cmd: ['npm', '--version'] },
-  { name: 'python3', cmd: ['python3', '--version'] },
-  { name: 'git', cmd: ['git', '--version'] },
-  { name: 'gh', cmd: ['gh', '--version'] },
+  { name: 'ast-grep', cmd: ['ast-grep', '--version'] },
+  { name: 'shellcheck', cmd: ['shellcheck', '--version'] },
 ];
 
-/** Cross-platform: `where` on Windows, `command -v` on POSIX */
-function whichCmd(toolName: string): string {
-  if (process.platform === 'win32') {
-    return `where ${toolName}`;
-  }
-  return `command -v ${toolName}`;
-}
-
-export function scanEnvironment(workspaceDir: string): Record<string, unknown> {
-  const capabilities: Record<string, unknown> = {
-    timestamp: new Date().toISOString(),
-    platform: process.platform,
-    tools: {} as Record<string, unknown>,
-  };
-
-  const tools = capabilities.tools as Record<string, unknown>;
+function scanEnvironment(wctx: WorkspaceContext): any {
+  const tools: Record<string, { available: boolean; version?: string }> = {};
 
   for (const tool of TOOLS_TO_SCAN) {
     try {
-      const versionOut = execSync(tool.cmd.join(' '), { stdio: 'pipe' })
-        .toString()
-        .split('\n')[0]
-        .trim();
-      const toolPath = execSync(whichCmd(tool.name), { stdio: 'pipe' })
-        .toString()
-        .trim()
-        .split('\n')[0]; // `where` may return multiple lines
-      tools[tool.name] = { available: true, version: versionOut, path: toolPath };
+      const output = execSync(tool.cmd.join(' '), { stdio: ['ignore', 'pipe', 'ignore'] }).toString();
+      tools[tool.name] = {
+        available: true,
+        version: output.split('\n')[0].trim(),
+      };
     } catch (_e) {
       tools[tool.name] = { available: false };
     }
   }
 
-  const capsPath = resolvePdPath(workspaceDir, 'SYSTEM_CAPABILITIES');
+  const capabilities = {
+    platform: process.platform,
+    arch: process.arch,
+    node: process.version,
+    tools,
+    timestamp: new Date().toISOString(),
+  };
+
+  const capsPath = wctx.resolve('SYSTEM_CAPABILITIES');
   const capsDir = path.dirname(capsPath);
   if (!fs.existsSync(capsDir)) {
     fs.mkdirSync(capsDir, { recursive: true });
@@ -62,13 +47,11 @@ export function scanEnvironment(workspaceDir: string): Record<string, unknown> {
 }
 
 export function handleBootstrapTools(ctx: PluginCommandContext): PluginCommandResult {
-  // workspaceDir is not in PluginCommandContext — we use the CWD as a fallback.
-  // Ideally this is run from the project root. If OpenClaw ever exposes workspaceDir
-  // in command context, switch to ctx.workspaceDir.
-  const workspaceDir = process.cwd();
+  const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
+  const wctx = WorkspaceContext.fromHookContext({ workspaceDir, ...ctx.config });
 
   try {
-    const caps = scanEnvironment(workspaceDir);
+    const caps = scanEnvironment(wctx);
     const toolsMap = caps.tools as Record<string, { available: boolean }>;
     const available = Object.entries(toolsMap)
       .filter(([, data]) => data.available)

@@ -183,6 +183,14 @@ export class TrustEngine {
         return scorecard.trust_score;
     }
 
+    public getStage(): number {
+        return getTrustStage(this.getScorecard());
+    }
+
+    public getStats(): any {
+        return getTrustStats(this.getScorecard());
+    }
+
     private isColdStart(scorecard: AgentScorecard): boolean {
         if (!scorecard.first_activity_at) return true;
         const firstActivity = new Date(scorecard.first_activity_at).getTime();

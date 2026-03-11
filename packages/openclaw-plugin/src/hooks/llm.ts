@@ -1,13 +1,10 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { PluginHookLlmOutputEvent, PluginHookAgentContext } from '../openclaw-sdk.js';
-import { trackLlmOutput, getSession } from '../core/session-tracker.js';
+import { trackLlmOutput } from '../core/session-tracker.js';
 import { writePainFlag } from '../core/pain.js';
-import { DictionaryService } from '../core/dictionary-service.js';
-import { ConfigService } from '../core/config-service.js';
 import { DetectionService } from '../core/detection-service.js';
-import { EventLogService } from '../core/event-log.js';
-import { resolvePdPath } from '../core/paths.js';
+import { WorkspaceContext } from '../core/workspace-context.js';
 
 export function handleLlmOutput(
     event: PluginHookLlmOutputEvent,
@@ -15,8 +12,9 @@ export function handleLlmOutput(
 ): void {
     if (!ctx.workspaceDir || !ctx.sessionId) return;
 
-    const stateDir = ctx.stateDir || resolvePdPath(ctx.workspaceDir, 'STATE_DIR');
-    const config = ConfigService.get(stateDir);
+    const wctx = WorkspaceContext.fromHookContext(ctx);
+    const config = wctx.config;
+    const eventLog = wctx.eventLog;
 
     // Track this turn in the core session memory
     const state = trackLlmOutput(ctx.sessionId, event.usage, config, ctx.workspaceDir);
@@ -27,9 +25,8 @@ export function handleLlmOutput(
     const text = event.assistantTexts.join('\n');
 
     // ── Track B: Semantic Pain Detection (V1.3.0 Funnel) ──
-    const detectionService = DetectionService.get(stateDir);
+    const detectionService = DetectionService.get(wctx.stateDir);
     const detection = detectionService.detect(text);
-    const eventLog = EventLogService.get(stateDir);
 
     if (detection.detected) {
         eventLog.recordRuleMatch(ctx.sessionId, {
@@ -83,8 +80,7 @@ export function handleLlmOutput(
     }
 
     // ═══ Thinking OS: Mental Model Usage Tracking ═══
-    const actualStateDir = ctx.stateDir || resolvePdPath(ctx.workspaceDir, 'STATE_DIR');
-    trackThinkingModelUsage(text, actualStateDir);
+    trackThinkingModelUsage(text, wctx);
 }
 
 const THINKING_MODEL_SIGNALS: Record<string, RegExp[]> = {
@@ -135,9 +131,11 @@ const THINKING_MODEL_SIGNALS: Record<string, RegExp[]> = {
     ],
 };
 
-function trackThinkingModelUsage(text: string, stateDir: string): void {
-    if (!fs.existsSync(stateDir)) fs.mkdirSync(stateDir, { recursive: true });
-    const logPath = path.join(stateDir, 'thinking_os_usage.json');
+function trackThinkingModelUsage(text: string, wctx: WorkspaceContext): void {
+    const logPath = wctx.resolve('THINKING_OS_USAGE');
+    const logDir = path.dirname(logPath);
+    if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+    
     let usageLog: Record<string, number> = {};
 
     if (fs.existsSync(logPath)) {

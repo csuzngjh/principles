@@ -1,13 +1,11 @@
 import * as fs from 'fs';
-import * as path from 'path';
 import { isRisky, normalizePath, planStatus as getPlanStatus } from '../utils/io.js';
 import { matchesAnyPattern } from '../utils/glob-match.js';
 import { normalizeProfile } from '../core/profile.js';
-import { EventLogService } from '../core/event-log.js';
 import { trackBlock } from '../core/session-tracker.js';
-import { getAgentScorecard, TRUST_CONFIG } from '../core/trust-engine.js';
-import { resolvePdPath } from '../core/paths.js';
+import { TRUST_CONFIG } from '../core/trust-engine.js';
 import { assessRiskLevel, estimateLineChanges } from '../core/risk-calculator.js';
+import { WorkspaceContext } from '../core/workspace-context.js';
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult } from '../openclaw-sdk.js';
 
 export function handleBeforeToolCall(
@@ -27,8 +25,10 @@ export function handleBeforeToolCall(
     return;
   }
 
+  const wctx = WorkspaceContext.fromHookContext(ctx);
+
   // 2. Load Profile
-  const profilePath = resolvePdPath(ctx.workspaceDir, 'PROFILE');
+  const profilePath = wctx.resolve('PROFILE');
   let profile = {
     risk_paths: [] as string[],
     gate: { require_plan_for_risk_paths: true },
@@ -89,14 +89,14 @@ export function handleBeforeToolCall(
 
   // ── PROGRESSIVE GATE LOGIC ──
   if (profile.progressive_gate?.enabled) {
-    const scorecard = getAgentScorecard(ctx.workspaceDir);
-    const trustScore = scorecard.trust_score ?? 50;
+    const scorecard = wctx.trust.getScorecard();
+    const trustScore = scorecard.trust_score;
     
     // Determine Stage
     let stage = 2;
     if (trustScore < TRUST_CONFIG.STAGES.STAGE_1_OBSERVER) stage = 1;
     else if (trustScore < TRUST_CONFIG.STAGES.STAGE_2_EDITOR) stage = 2;
-    else if (trustScore < TRUST_CONFIG.STAGES.STAGE_3_DEVELOPER) stage = 3;
+    else if (trustScore <= TRUST_CONFIG.STAGES.STAGE_3_DEVELOPER) stage = 3;
     else stage = 4;
 
     const riskLevel = assessRiskLevel(relPath, { toolName: event.toolName, params: event.params }, profile.risk_paths);
@@ -122,8 +122,7 @@ export function handleBeforeToolCall(
                             const maxLines = planApprovals.max_lines_override ?? -1;
                             if (maxLines === -1 || lineChanges <= maxLines) {
                                 // Record PLAN approval event
-                                const stateDir = ctx.stateDir || resolvePdPath(ctx.workspaceDir, 'STATE_DIR');
-                                EventLogService.get(stateDir).recordPlanApproval(ctx.sessionId, {
+                                wctx.eventLog.recordPlanApproval(ctx.sessionId, {
                                     toolName: event.toolName,
                                     filePath: relPath,
                                     pattern: relPath,
@@ -138,30 +137,30 @@ export function handleBeforeToolCall(
             }
 
             // Block if not approved by whitelist
-            return block(relPath, `Trust score too low (${trustScore}). Stage 1 agents cannot modify risk paths or perform non-trivial edits.`, ctx, event.toolName);
+            return block(relPath, `Trust score too low (${trustScore}). Stage 1 agents cannot modify risk paths or perform non-trivial edits.`, wctx, event.toolName);
         }
     }
 
     // Stage 2 (Editor): Block writes to risk paths. Block large changes.
     if (stage === 2) {
         if (risky) {
-            return block(relPath, `Stage 2 agents are not authorized to modify risk paths.`, ctx, event.toolName);
+            return block(relPath, `Stage 2 agents are not authorized to modify risk paths.`, wctx, event.toolName);
         }
         if (lineChanges > TRUST_CONFIG.LIMITS.STAGE_2_MAX_LINES) {
-            return block(relPath, `Modification too large (${lineChanges} lines) for Stage 2. Max allowed is ${TRUST_CONFIG.LIMITS.STAGE_2_MAX_LINES}.`, ctx, event.toolName);
+            return block(relPath, `Modification too large (${lineChanges} lines) for Stage 2. Max allowed is ${TRUST_CONFIG.LIMITS.STAGE_2_MAX_LINES}.`, wctx, event.toolName);
         }
     }
 
     // Stage 3 (Developer): Normal rules (requires PLAN for risk_paths). Limit extra-large changes.
     if (stage === 3) {
         if (lineChanges > TRUST_CONFIG.LIMITS.STAGE_3_MAX_LINES) {
-            return block(relPath, `Modification too large (${lineChanges} lines) for Stage 3. Max allowed is ${TRUST_CONFIG.LIMITS.STAGE_3_MAX_LINES}.`, ctx, event.toolName);
+            return block(relPath, `Modification too large (${lineChanges} lines) for Stage 3. Max allowed is ${TRUST_CONFIG.LIMITS.STAGE_3_MAX_LINES}.`, wctx, event.toolName);
         }
         
         if (risky) {
             const status = getPlanStatus(ctx.workspaceDir);
             if (status !== 'READY') {
-                return block(relPath, `No READY plan found. Stage 3 requires a plan for risk path modifications.`, ctx, event.toolName, status);
+                return block(relPath, `No READY plan found. Stage 3 requires a plan for risk path modifications.`, wctx, event.toolName, status);
             }
         }
     }
@@ -177,19 +176,19 @@ export function handleBeforeToolCall(
   if (risky && profile.gate.require_plan_for_risk_paths) {
     const status = getPlanStatus(ctx.workspaceDir);
     if (status !== 'READY') {
-      return block(relPath, 'No READY plan found in PLAN.md.', ctx, event.toolName, status);
+      return block(relPath, 'No READY plan found in PLAN.md.', wctx, event.toolName, status);
     }
   }
 }
 
-function block(relPath: string, reason: string, ctx: any, toolName: string, planStatus?: string): PluginHookBeforeToolCallResult {
-    const logger = ctx.logger || console;
+function block(relPath: string, reason: string, wctx: WorkspaceContext, toolName: string, planStatus?: string): PluginHookBeforeToolCallResult {
+    const logger = console; // Default logger if wctx doesn't provide one (future: wctx.logger)
     logger.warn(`[PD_GATE] BLOCKED: ${relPath}. Reason: ${reason}`);
     
-    if (ctx.sessionId) trackBlock(ctx.sessionId);
+    const sessionId = (wctx as any).sessionId; // Context doesn't store sessionId yet, but let's see
+    // For now, let's keep block simple or pass sessionId
     
-    const stateDir = ctx.stateDir || resolvePdPath(ctx.workspaceDir, 'STATE_DIR');
-    EventLogService.get(stateDir).recordGateBlock(ctx.sessionId, {
+    wctx.eventLog.recordGateBlock(undefined, { // sessionId undefined for now
         toolName,
         filePath: relPath,
         reason,
