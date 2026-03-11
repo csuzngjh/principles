@@ -95,9 +95,11 @@ Understanding where files live helps you manage your agent's "brain".
 OpenClaw uses a centralized state directory at `~/.openclaw/`:
 - **Config**: `~/.openclaw/openclaw.json` (Main settings & plugin paths)
 - **Workspace**: `~/.openclaw/workspace/` (The agent's active environment)
-  - `AGENTS.md`, `SOUL.md`: Core personality and instructions.
-  - `memory/`: Short-term/Episodic memory storage.
-  - `docs/`: 🔗 Symlinked to our project's `docs/` for long-term principle search.
+  - `AGENTS.md`, `SOUL.md`: Core bootstrap files (Required at root).
+  - `.principles/`: 🧬 Hidden directory for core PD governance (PROFILE, PRINCIPLES).
+  - `.state/`: ⚡ Hidden directory for active execution data (Queue, Scorecard).
+  - `PLAN.md`: Active task plan (Visible at root for transparency).
+  - `docs/`: 📂 Reserved for your actual project documentation.
 
 ---
 
@@ -111,17 +113,17 @@ OpenClaw uses a centralized state directory at `~/.openclaw/`:
 ## 💡 Core Features Guide
 
 ### 🛡️ The Gatekeeper (Defense)
-The system automatically blocks unauthorized modifications to **core framework files** (e.g., `AGENTS.md`, `docs/PROFILE.json`). This prevents agents from accidentally tampering with their own "soul" or "rules" without a deliberate plan.
+The system automatically blocks unauthorized modifications to **core framework files** (e.g., `AGENTS.md`, `.principles/PROFILE.json`). This prevents agents from accidentally tampering with their own "soul" or "rules" without a deliberate plan.
 
 > [!IMPORTANT]
 > **Workspace Boundary Principle**
-> - **Protected by Default**: Files critical to the project's identity and governance (`AGENTS.md`, `SOUL.md`, `docs/PRINCIPLES.md`, etc.).
-> - **Business Directories**: Directories like `src/` or `infra/` are NOT locked by default. We believe these should be added to `risk_paths` dynamically as the agent "learns" the importance of stability through real-world work.
+> - **Protected by Default**: Files critical to the project's identity and governance (`AGENTS.md`, `SOUL.md`, `.principles/PRINCIPLES.md`, etc.).
+> - **Business Directories**: Directories like `src/` or `infra/` are NOT locked by default.
 > - **Mechanism**: The plugin uses `api.resolvePath('.')` to anchor the current territory.
 
 * **What to do when blocked? (The Unlock Flow)**
   1. **Don't brute force**: The block is "physical" at the gateway level. Repeating the same command will still fail.
-  2. **Update the Plan**: Manually or instruct the agent to modify the project's `docs/PLAN.md`.
+  2. **Update the Plan**: Manually or instruct the agent to modify the project's `PLAN.md`.
   3. **Set to READY**: Change the file header from `STATUS: DRAFT` to **`STATUS: READY`** and briefly describe your intended steps.
   4. **Execute Again**: Once the plan is `READY`, the gate will automatically recognize it and "allow" your modification command.
 
