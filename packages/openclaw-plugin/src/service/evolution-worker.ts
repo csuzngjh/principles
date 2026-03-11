@@ -104,7 +104,7 @@ function processEvolutionQueue(workspaceDir: string, stateDir: string, logger: a
         const pendingTasks = queue.filter(t => t.status === 'pending');
 
         if (pendingTasks.length > 0) {
-            const directivePath = path.join(stateDir, 'evolution_directive.json');
+            const directivePath = resolvePdPath(workspaceDir, 'EVOLUTION_DIRECTIVE');
             const highestScoreTask = pendingTasks.sort((a, b) => b.score - a.score)[0];
 
             const directive = {
@@ -225,7 +225,7 @@ function recordCandidate(stateDir: string, text: string, match: any) {
 }
 
 function processPromotion(workspaceDir: string, stateDir: string, logger: any, eventLog: any) {
-    const candidatePath = path.join(stateDir, 'pain_candidates.json');
+    const candidatePath = resolvePdPath(workspaceDir, 'PAIN_CANDIDATES');
     if (!fs.existsSync(candidatePath)) return;
 
     try {

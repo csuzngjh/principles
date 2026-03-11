@@ -42,7 +42,7 @@ export async function handleBeforePromptBuild(
   }
 
   // 1. Critical Reflection Logic (High Priority - Prompt Injection)
-  const reflectionLogPath = path.join(workspaceDir, 'memory', 'reflection-log.md');
+  const reflectionLogPath = wctx.resolve('REFLECTION_LOG');
   if (fs.existsSync(reflectionLogPath)) {
     try {
       const reflectionLog = fs.readFileSync(reflectionLogPath, 'utf8');

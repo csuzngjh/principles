@@ -23,7 +23,7 @@
 - [x] Task: Conductor - User Manual Verification 'Phase 3: Incremental Migration' (Protocol in workflow.md) [fb0da0b]
 
 ## Phase 4: Final Cleanup & Performance Validation
-- [ ] Task: Remove all legacy `workspaceDir` and `stateDir` manual calculations from business logic.
+- [~] Task: Remove all legacy `workspaceDir` and `stateDir` manual calculations from business logic.
 - [ ] Task: Perform a "Path Vacuum Audit" to ensure zero hardcoded strings remain.
 - [ ] Task: Run benchmark tests to verify < 0.01ms cache hit latency.
 - [ ] Task: Conductor - User Manual Verification 'Phase 4: Final Cleanup & Validation' (Protocol in workflow.md)
