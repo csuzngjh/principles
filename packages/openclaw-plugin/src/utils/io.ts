@@ -1,5 +1,6 @@
 import * as path from 'path';
 import * as fs from 'fs';
+import { PD_FILES, resolvePdPath } from '../core/paths.js';
 
 export function normalizePath(filePath: string, projectDir: string): string {
   if (!filePath) return '';
@@ -89,7 +90,7 @@ export function serializeKvLines(data: Record<string, any>): string {
 }
 
 export function planStatus(projectDir: string): string {
-  const planPath = path.join(projectDir, 'docs', 'PLAN.md');
+  const planPath = resolvePdPath(projectDir, 'PLAN');
   try {
     if (!fs.existsSync(planPath)) return '';
     const content = fs.readFileSync(planPath, 'utf8');
