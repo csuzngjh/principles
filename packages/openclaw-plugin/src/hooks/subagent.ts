@@ -46,7 +46,7 @@ export function handleSubagentEnded(
         // ── Trust Engine: Record success using V2 API ──
         recordSuccess(workspaceDir, 'subagent_success', {
             sessionId: ctx.sessionId,
-            stateDir: (ctx as any).stateDir,
+            stateDir: (ctx as any).stateDir || resolvePdPath(workspaceDir, 'STATE_DIR'),
             api: (ctx as any).api
         });
 

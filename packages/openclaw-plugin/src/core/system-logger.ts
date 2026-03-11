@@ -1,9 +1,10 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { resolvePdPath } from './paths.js';
 
 /**
  * System Logger for Principles Disciple
- * Writes critical evolutionary events to workspaceDir/docs/SYSTEM.log
+ * Writes critical evolutionary events to the project's memory/logs/SYSTEM.log
  * Uses asynchronous writing to avoid blocking the Node.js event loop.
  */
 export const SystemLogger = {
@@ -11,12 +12,13 @@ export const SystemLogger = {
         if (!workspaceDir) return;
         
         try {
-            const docsDir = path.join(workspaceDir, 'docs');
-            if (!fs.existsSync(docsDir)) {
-                fs.mkdirSync(docsDir, { recursive: true });
+            const logFile = resolvePdPath(workspaceDir, 'SYSTEM_LOG');
+            const logDir = path.dirname(logFile);
+            
+            if (!fs.existsSync(logDir)) {
+                fs.mkdirSync(logDir, { recursive: true });
             }
             
-            const logFile = path.join(docsDir, 'SYSTEM.log');
             const timestamp = new Date().toISOString();
             
             // Format: [YYYY-MM-DDTHH:mm:ss.sssZ] [EVENT_TYPE] Message

@@ -7,6 +7,7 @@ import { DictionaryService } from '../core/dictionary-service.js';
 import { ConfigService } from '../core/config-service.js';
 import { DetectionService } from '../core/detection-service.js';
 import { EventLogService } from '../core/event-log.js';
+import { resolvePdPath } from '../core/paths.js';
 
 export function handleLlmOutput(
     event: PluginHookLlmOutputEvent,
@@ -14,7 +15,7 @@ export function handleLlmOutput(
 ): void {
     if (!ctx.workspaceDir || !ctx.sessionId) return;
 
-    const stateDir = ctx.stateDir || path.join(ctx.workspaceDir, 'memory', '.state');
+    const stateDir = ctx.stateDir || resolvePdPath(ctx.workspaceDir, 'STATE_DIR');
     const config = ConfigService.get(stateDir);
 
     // Track this turn in the core session memory
@@ -82,7 +83,7 @@ export function handleLlmOutput(
     }
 
     // ═══ Thinking OS: Mental Model Usage Tracking ═══
-    const actualStateDir = ctx.stateDir || path.join(ctx.workspaceDir, 'memory', '.state');
+    const actualStateDir = ctx.stateDir || resolvePdPath(ctx.workspaceDir, 'STATE_DIR');
     trackThinkingModelUsage(text, actualStateDir);
 }
 

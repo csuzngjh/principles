@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
+import { resolvePdPath } from '../core/paths.js';
 
 function getWorkspaceDir(ctx: PluginCommandContext): string {
     return (ctx.config?.workspaceDir as string) || process.cwd();
@@ -8,12 +9,12 @@ function getWorkspaceDir(ctx: PluginCommandContext): string {
 
 function getStateDir(ctx: PluginCommandContext, workspaceDir: string): string {
     // Note: OpenClaw CLI commands might not inject stateDir directly in ctx.config, but they should.
-    // If not, we fall back to the workspace memory/.state directory to match llm.ts
-    return (ctx.config?.stateDir as string) || path.join(workspaceDir, 'memory', '.state');
+    // If not, we fall back to the project hidden .state directory
+    return (ctx.config?.stateDir as string) || resolvePdPath(workspaceDir, 'STATE_DIR');
 }
 
 function getModels(workspaceDir: string): Record<string, string> {
-    const modelsPath = path.join(workspaceDir, 'docs', 'THINKING_OS.md');
+    const modelsPath = resolvePdPath(workspaceDir, 'THINKING_OS');
     const models: Record<string, string> = {};
     if (!fs.existsSync(modelsPath)) return models;
 

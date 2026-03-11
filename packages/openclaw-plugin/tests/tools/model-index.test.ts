@@ -62,7 +62,7 @@ describe('loadModelIndex', () => {
 
     describe('索引文件存在', () => {
         it('应返回索引文件内容', () => {
-            const modelsDir = path.join(tempDir, 'docs', 'models');
+            const modelsDir = path.join(tempDir, '.principles', 'models');
             fs.mkdirSync(modelsDir, { recursive: true });
             
             const indexContent = `# 扩展思维模型索引
@@ -89,7 +89,7 @@ describe('loadModelIndex', () => {
         });
 
         it('当 models 目录存在但索引文件不存在时，应返回默认消息并输出警告日志', () => {
-            const modelsDir = path.join(tempDir, 'docs', 'models');
+            const modelsDir = path.join(tempDir, '.principles', 'models');
             fs.mkdirSync(modelsDir, { recursive: true });
             
             // 创建一个模型文件，但不创建索引文件
@@ -106,7 +106,7 @@ describe('loadModelIndex', () => {
 
     describe('文件大小限制', () => {
         it('当索引文件超过 50KB 时，应返回默认消息并输出警告日志', () => {
-            const modelsDir = path.join(tempDir, 'docs', 'models');
+            const modelsDir = path.join(tempDir, '.principles', 'models');
             fs.mkdirSync(modelsDir, { recursive: true });
             
             // 创建一个超过 50KB 的文件
@@ -122,7 +122,7 @@ describe('loadModelIndex', () => {
         });
 
         it('当索引文件刚好 50KB 时，应正常返回内容', () => {
-            const modelsDir = path.join(tempDir, 'docs', 'models');
+            const modelsDir = path.join(tempDir, '.principles', 'models');
             fs.mkdirSync(modelsDir, { recursive: true });
             
             // 创建一个刚好 50KB 的文件
@@ -137,7 +137,7 @@ describe('loadModelIndex', () => {
 
     describe('错误处理', () => {
         it('当读取文件失败时，应返回默认消息并记录错误日志', () => {
-            const modelsDir = path.join(tempDir, 'docs', 'models');
+            const modelsDir = path.join(tempDir, '.principles', 'models');
             fs.mkdirSync(modelsDir, { recursive: true });
             
             const indexPath = path.join(modelsDir, '_INDEX.md');

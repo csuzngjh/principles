@@ -5,6 +5,7 @@ import { normalizeProfile } from '../core/profile.js';
 import { computePainScore, writePainFlag } from '../core/pain.js';
 import { trackFriction, resetFriction, getSession } from '../core/session-tracker.js';
 import { recordFailure, TRUST_CONFIG } from '../core/trust-engine.js';
+import { resolvePdPath } from '../core/paths.js';
 import { denoiseError, computeHash } from '../utils/hashing.js';
 import { ConfigService } from '../core/config-service.js';
 import { EventLogService } from '../core/event-log.js';
