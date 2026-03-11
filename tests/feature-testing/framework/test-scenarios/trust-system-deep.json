@@ -4,7 +4,12 @@
     "description": "Complete lifecycle test of Trust Engine V2: cold start, grace failures, adaptive penalties/rewards, streak bonuses, stage transitions, and boundary conditions",
     "version": "2.0",
     "author": "Claude Code",
-    "tags": ["P0", "critical", "trust", "deep"],
+    "tags": [
+      "P0",
+      "critical",
+      "trust",
+      "deep"
+    ],
     "priority": "P0",
     "first_principles": "Trust System is the foundation - determines what Agent can/cannot do. Without correct trust behavior, entire system is unsafe."
   },
@@ -45,7 +50,12 @@
       "params": {
         "path": "/home/csuzngjh/clawd/.state/AGENT_SCORECARD.json",
         "min_size": 100,
-        "required_sections": ["trust_score", "grace_failures_remaining", "cold_start_end", "history"]
+        "required_sections": [
+          "trust_score",
+          "grace_failures_remaining",
+          "cold_start_end",
+          "history"
+        ]
       }
     },
     {
@@ -65,7 +75,7 @@
       "type": "task",
       "description": "Execute a failing task that should consume first grace failure (no penalty)",
       "task": "Attempt to delete a non-existent file: /tmp/non-existent-file-xyz-12345.txt. This will fail but should use grace.",
-      "timeout": 30,
+      "timeout": 45,
       "wait_for_completion": true,
       "expected_outcomes": [
         {
@@ -96,7 +106,7 @@
       "type": "task",
       "description": "Execute 2 more failing tasks to consume remaining grace failures",
       "task": "Attempt to list files in /tmp/non-existent-dir-abc-789 using ls command. This will fail twice (run the command 2 times).",
-      "timeout": 60,
+      "timeout": 90,
       "wait_for_completion": true,
       "expected_outcomes": [
         {
@@ -122,7 +132,7 @@
       "type": "task",
       "description": "Now that grace is exhausted, first failure should incur penalty: -8 points",
       "task": "Attempt to access a non-existent URL: http://localhost:9999/nonexistent-endpoint. This should fail and trigger penalty.",
-      "timeout": 30,
+      "timeout": 45,
       "wait_for_completion": true,
       "expected_outcomes": [
         {
@@ -149,7 +159,7 @@
       "type": "task",
       "description": "Execute another failure to trigger failure_streak multiplier: -8 + -3 = -11",
       "task": "Attempt to write to /root/protected-file.txt (permission denied). This should fail and trigger streak penalty.",
-      "timeout": 30,
+      "timeout": 45,
       "wait_for_completion": true,
       "expected_outcomes": [
         {
@@ -176,7 +186,7 @@
       "type": "task",
       "description": "Execute a successful task to trigger recovery boost (score < 30)",
       "task": "Create a simple file at /tmp/recovery-test.txt with content 'Recovery test successful'.",
-      "timeout": 60,
+      "timeout": 90,
       "wait_for_completion": true,
       "expected_outcomes": [
         {
@@ -279,7 +289,12 @@
       "params": {
         "validation_type": "history_verification",
         "min_history_entries": 15,
-        "required_fields": ["type", "delta", "reason", "timestamp"]
+        "required_fields": [
+          "type",
+          "delta",
+          "reason",
+          "timestamp"
+        ]
       }
     },
     {

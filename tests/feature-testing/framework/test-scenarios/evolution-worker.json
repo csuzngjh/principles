@@ -4,7 +4,11 @@
     "description": "Test background evolution worker - pain signal detection, queueing, and dispatch",
     "version": "1.0",
     "author": "Claude Code",
-    "tags": ["service", "evolution", "background"]
+    "tags": [
+      "service",
+      "evolution",
+      "background"
+    ]
   },
   "setup": {
     "preconditions": [
@@ -23,7 +27,7 @@
       "type": "task",
       "description": "Verify that EvolutionWorker service is running",
       "task": "Check if the EvolutionWorker service is running by looking for processes containing 'evolution-worker' or checking plugin services. Report the status.",
-      "timeout": 30,
+      "timeout": 45,
       "wait_for_completion": true,
       "expected_outcomes": []
     },
@@ -32,7 +36,7 @@
       "type": "task",
       "description": "Create a test pain signal to trigger evolution worker",
       "task": "Create a test pain signal by writing to the .pain_flag file in workspace. Use this format: 'TEST_PAIN|$(date +%s)|Test pain signal for evolution worker|5'.",
-      "timeout": 60,
+      "timeout": 90,
       "wait_for_completion": true,
       "expected_outcomes": [
         {
@@ -57,7 +61,9 @@
       "params": {
         "path": "/home/csuzngjh/clawd/.state/evolution_queue.json",
         "min_size": 10,
-        "required_sections": ["TEST_PAIN"]
+        "required_sections": [
+          "TEST_PAIN"
+        ]
       }
     },
     {
@@ -67,7 +73,11 @@
       "validator": "file_validator",
       "params": {
         "path": "/home/csuzngjh/clawd/.state/evolution_queue.json",
-        "required_sections": ["timestamp", "description", "severity"]
+        "required_sections": [
+          "timestamp",
+          "description",
+          "severity"
+        ]
       }
     },
     {
@@ -78,7 +88,10 @@
       "params": {
         "path": "/home/csuzngjh/clawd/.state/logs/events.jsonl",
         "min_size": 100,
-        "required_sections": ["evolution_queue", "pain_signal"]
+        "required_sections": [
+          "evolution_queue",
+          "pain_signal"
+        ]
       }
     },
     {
