@@ -68,4 +68,40 @@ describe('WorkspaceContext', () => {
         
         expect(() => wctx.invalidate()).not.toThrow();
     });
+
+    it('should lazy load ConfigService', () => {
+        const mockCtx = { workspaceDir };
+        const wctx = WorkspaceContext.fromHookContext(mockCtx);
+        
+        const config = wctx.config;
+        expect(config).toBeDefined();
+        expect(wctx.config).toBe(config); // Should be cached
+    });
+
+    it('should lazy load EventLog', () => {
+        const mockCtx = { workspaceDir };
+        const wctx = WorkspaceContext.fromHookContext(mockCtx);
+        
+        const eventLog = wctx.eventLog;
+        expect(eventLog).toBeDefined();
+        expect(wctx.eventLog).toBe(eventLog); // Should be cached
+    });
+
+    it('should lazy load Trust service', () => {
+        const mockCtx = { workspaceDir };
+        const wctx = WorkspaceContext.fromHookContext(mockCtx);
+        
+        const trust = wctx.trust;
+        expect(trust).toBeDefined();
+        expect(wctx.trust).toBe(trust);
+    });
+
+    it('should lazy load Dictionary service', () => {
+        const mockCtx = { workspaceDir };
+        const wctx = WorkspaceContext.fromHookContext(mockCtx);
+        
+        const dictionary = wctx.dictionary;
+        expect(dictionary).toBeDefined();
+        expect(wctx.dictionary).toBe(dictionary);
+    });
 });
