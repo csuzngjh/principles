@@ -29,6 +29,7 @@ import { handlePainCommand } from './commands/pain.js';
 import { handleTrustCommand } from './commands/trust.js';
 import { EvolutionWorkerService } from './service/evolution-worker.js';
 import { ensureWorkspaceTemplates } from './core/init.js';
+import { migrateDirectoryStructure } from './core/migration.js';
 import { SystemLogger } from './core/system-logger.js';
 import { deepReflectTool } from './tools/deep-reflect.js';
 
@@ -55,6 +56,9 @@ const plugin = {
         try {
           // Initialize workspace templates once (uses correct workspaceDir from context)
           if (!workspaceInitialized && ctx.workspaceDir) {
+            // First, migrate legacy files if they exist
+            migrateDirectoryStructure(api, ctx.workspaceDir);
+            
             ensureWorkspaceTemplates(api, ctx.workspaceDir, language);
             SystemLogger.log(ctx.workspaceDir, 'SYSTEM_BOOT', `Principles Disciple online. Language: ${language}`);
             workspaceInitialized = true;
