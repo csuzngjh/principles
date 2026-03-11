@@ -15,7 +15,7 @@
       "Trust Engine V2 is active (trust-engine.ts)"
     ],
     "initial_state": {
-      "trust_score": "will be reset to 59 (cold start)",
+      "trust_score": "will be reset to 85 (cold start)",
       "grace_failures": 5,
       "cold_start_active": true
     },
@@ -33,7 +33,7 @@
       "actions": [
         {
           "type": "delete_file",
-          "path": "/home/csuzngjh/clawd/docs/AGENT_SCORECARD.json"
+          "path": "/home/csuzngjh/clawd/.state/AGENT_SCORECARD.json"
         }
       ]
     },
@@ -43,7 +43,7 @@
       "description": "Verify Trust Engine initializes with cold start benefits",
       "validator": "file_validator",
       "params": {
-        "path": "/home/csuzngjh/clawd/docs/AGENT_SCORECARD.json",
+        "path": "/home/csuzngjh/clawd/.state/AGENT_SCORECARD.json",
         "min_size": 100,
         "required_sections": ["trust_score", "grace_failures_remaining", "cold_start_end", "history"]
       }
@@ -51,12 +51,12 @@
     {
       "name": "Check Initial Cold Start Values",
       "type": "validation",
-      "description": "Verify exact cold start values: score=59, grace=3, cold_start_end=24h from now",
+      "description": "Verify exact cold start values: score=85, grace=5, cold_start_end=24h from now",
       "validator": "custom_validator",
       "params": {
         "validation_type": "cold_start_initialization",
-        "expected_score": 59,
-        "expected_grace": 3,
+        "expected_score": 85,
+        "expected_grace": 5,
         "expected_cold_start_period": "24h"
       }
     },
@@ -87,7 +87,7 @@
       "params": {
         "validation_type": "grace_verification",
         "expected_grace_remaining": 2,
-        "expected_score": 59,
+        "expected_score": 85,
         "score_should_change": false
       }
     },
@@ -329,7 +329,7 @@
     },
     "notes": [
       "Trust Engine V2 correctly implements cold start protection",
-      "Grace failures work as expected (3 free mistakes)",
+      "Grace failures work as expected (5 free mistakes)",
       "Adaptive penalties scale with failure streak",
       "Recovery boost helps low-scoring agents recover",
       "Streak bonus rewards consistent success",
