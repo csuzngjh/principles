@@ -1,0 +1,10 @@
+{
+  "trust_score": 85,
+  "success_streak": 0,
+  "failure_streak": 0,
+  "grace_failures_remaining": 5,
+  "last_updated": "2026-03-11T10:15:00+00:00",
+  "cold_start_end": "2026-03-12T10:15:00+00:00",
+  "first_activity_at": "2026-03-11T10:15:00+00:00",
+  "history": []
+}
