@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { resolvePdPath } from './paths.js';
+import { resolvePdPath, PD_FILES } from './paths.js';
 
 /**
  * WorkspaceContext - Centralized management of workspace-specific paths and services.
@@ -33,6 +33,13 @@ export class WorkspaceContext {
         const instance = new WorkspaceContext(workspaceDir, stateDir);
         this.instances.set(workspaceDir, instance);
         return instance;
+    }
+
+    /**
+     * Resolves a PD file path within the workspace.
+     */
+    resolve(fileKey: keyof typeof PD_FILES): string {
+        return resolvePdPath(this.workspaceDir, fileKey);
     }
 
     /**

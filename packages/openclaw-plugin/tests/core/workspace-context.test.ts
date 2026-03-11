@@ -45,4 +45,12 @@ describe('WorkspaceContext', () => {
         // For now, let's just check if the method exists.
         expect(typeof wctx1.invalidate).toBe('function');
     });
+
+    it('should resolve paths using PD_FILES keys', () => {
+        const mockCtx = { workspaceDir, stateDir };
+        const wctx = WorkspaceContext.fromHookContext(mockCtx);
+        
+        expect(wctx.resolve('PROFILE')).toBe(`${workspaceDir}/.principles/PROFILE.json`);
+        expect(wctx.resolve('PLAN')).toBe(`${workspaceDir}/PLAN.md`);
+    });
 });
