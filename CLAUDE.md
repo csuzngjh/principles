@@ -2,6 +2,58 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 🧠 Memory System (Critical - Read First!)
+
+**Location**: `/home/csuzngjh/.claude/projects/-home-csuzngjh/code-principles/memory/`
+
+**⚠️ IMPORTANT: Always review memory at the start of new conversations!**
+
+### Memory Files
+
+1. **INDEX.md** - Navigation and quick reference for all memory files
+2. **MEMORY.md** - Main project memory (issues, solutions, architecture)
+3. **trust-system.md** - Complete Trust Engine V2 reference
+4. **installation-guide.md** - Installation procedures and troubleshooting
+
+### How to Access Memory
+
+```bash
+# Read the index first
+cat /home/csuzngjh/.claude/projects/-home-csuzngjh-code-principles/memory/INDEX.md
+
+# Read main memory for project context
+cat /home/csuzngjh/.claude/projects/-home-csuzngjh-code-principles/memory/MEMORY.md
+
+# Read trust system details when working with trust-related code
+cat /home/csuzngjh/.claude/projects/-home-csuzngjh-code-principles/memory/trust-system.md
+```
+
+### What's Stored in Memory
+
+- **Trust System Migration (2026-03-11)**: Root cause analysis, solution, v1.4.3 release
+- **V1 vs V2 Differences**: Cold start, grace failures, adaptive penalties/rewards
+- **Installation Process**: 6-step script, verification, common issues
+- **Key Paths**: Plugin locations, workspace structure, state files
+- **Development Workflow**: Build, test, release procedures
+- **Common Issues**: 5 known problems with solutions
+
+### When to Update Memory
+
+Update memory files when:
+- Resolving critical issues
+- Making major architectural decisions
+- Discovering new patterns/conventions
+- Documenting new workflows
+- After version releases
+
+### Memory System Rules
+
+- ✅ Memory files are for Claude Code use only
+- ✅ Stored in `.claude/projects/` (not in git repository)
+- ✅ Update regularly to preserve context
+- ❌ Never commit memory files to GitHub
+- ❌ Don't duplicate memory in project directory
+
 ## Project Overview
 
 **Principles Disciple** is an evolutionary agent framework that transforms AI assistants from simple task-executors into self-evolving digital lifeforms. It consists of:
