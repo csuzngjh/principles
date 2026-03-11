@@ -14,3 +14,9 @@ This file tracks all major tracks for the project. Each track has its own detail
 
 - [x] **Track: Implement a simplified MVP 4-stage progressive trust currency system for the Gatekeeper**
 *Link: [./tracks/progressive_gatekeeper_20260310/](./tracks/progressive_gatekeeper_20260310/)*
+
+---
+
+- [ ] **Track: Implement WorkspaceContext for centralized path and state management.**
+*Link: [./tracks/workspace_context_refactor_20260311/](./tracks/workspace_context_refactor_20260311/)*
+
