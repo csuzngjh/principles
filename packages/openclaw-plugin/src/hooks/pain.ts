@@ -67,7 +67,7 @@ export function handleAfterToolCall(
     const relPath = typeof filePath === 'string' ? normalizePath(filePath, ctx.workspaceDir) : 'unknown';
     
     // Load profile for risk_paths check
-    const profilePath = path.join(ctx.workspaceDir, 'docs', 'PROFILE.json');
+    const profilePath = resolvePdPath(ctx.workspaceDir, 'PROFILE');
     let profile = normalizeProfile({});
     if (fs.existsSync(profilePath)) {
       try {
@@ -122,7 +122,7 @@ export function handleAfterToolCall(
   const filePath = event.params.file_path || event.params.path || event.params.file;
   const relPath = typeof filePath === 'string' ? normalizePath(filePath, ctx.workspaceDir) : 'unknown';
 
-  const profilePath = path.join(ctx.workspaceDir, 'docs', 'PROFILE.json');
+  const profilePath = resolvePdPath(ctx.workspaceDir, 'PROFILE');
   let profile = normalizeProfile({});
   if (fs.existsSync(profilePath)) {
     try {

@@ -15,9 +15,9 @@ export async function handleBeforePromptBuild(
   }
 
   const { workspaceDir, trigger, stateDir, sessionId, api } = ctx;
-  const focusPath = path.join(workspaceDir, 'docs', 'okr', 'CURRENT_FOCUS.md');
-  const painFlagPath = path.join(workspaceDir, 'docs', '.pain_flag');
-  const capsPath = path.join(workspaceDir, 'docs', 'SYSTEM_CAPABILITIES.json');
+  const focusPath = resolvePdPath(workspaceDir, 'CURRENT_FOCUS');
+  const painFlagPath = resolvePdPath(workspaceDir, 'PAIN_FLAG');
+  const capsPath = resolvePdPath(workspaceDir, 'SYSTEM_CAPABILITIES');
 
   const actualStateDir = stateDir || resolvePdPath(workspaceDir, 'STATE_DIR');
   const directivePath = path.join(actualStateDir, 'evolution_directive.json');
@@ -81,7 +81,7 @@ ${checkpointMessage}
     try {
       const currentFocus = fs.readFileSync(focusPath, 'utf8');
       if (currentFocus.trim()) {
-        prependContext += `\n<project_context>\n--- Context from: docs/okr/CURRENT_FOCUS.md ---\n${currentFocus}\n--- End of Context ---\n</project_context>\n`;
+        prependContext += `\n<project_context>\n--- Strategic Focus ---\n${currentFocus.trim()}\n--- End of Strategic Focus ---\n</project_context>\n`;
       }
     } catch (e) {}
   }
@@ -125,7 +125,7 @@ ${checkpointMessage}
 
   // 5. Heartbeat-specific active checklist
   if (trigger === 'heartbeat') {
-    const heartbeatPath = path.join(workspaceDir, 'docs', 'HEARTBEAT.md');
+    const heartbeatPath = resolvePdPath(workspaceDir, 'HEARTBEAT');
     if (fs.existsSync(heartbeatPath)) {
       try {
         const heartbeatChecklist = fs.readFileSync(heartbeatPath, 'utf8');

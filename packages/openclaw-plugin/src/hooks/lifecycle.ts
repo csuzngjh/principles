@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as readline from 'readline';
 import { computePainScore, writePainFlag } from '../core/pain.js';
+import { resolvePdPath, PD_DIRS } from '../core/paths.js';
 import type { PluginHookBeforeResetEvent, PluginHookBeforeCompactionEvent, PluginHookAfterCompactionEvent, PluginHookAgentContext } from '../openclaw-sdk.js';
 
 export async function handleBeforeReset(
@@ -23,7 +24,7 @@ export async function handleBeforeReset(
   });
 
   if (painPoints.length > 0) {
-    const memoryPath = path.join(ctx.workspaceDir, 'MEMORY.md');
+    const memoryPath = resolvePdPath(ctx.workspaceDir, 'MEMORY_MD');
     const summary =
       `\n## [${new Date().toISOString()}] Session Reset Summary (Reason: ${event.reason ?? 'Manual'})\n` +
       `- Encountered ${painPoints.length} potential pain point(s) during this session.\n` +
@@ -31,7 +32,7 @@ export async function handleBeforeReset(
     try {
       fs.appendFileSync(memoryPath, summary, 'utf8');
     } catch (_e) {
-      // Non-critical — workspace may not have docs/ yet
+      // Non-critical
     }
   }
 }
@@ -39,7 +40,7 @@ export async function handleBeforeReset(
 interface JsonlMessage {
   role?: string;
   content?: string | { type?: string; text?: string }[];
-  usage?: { outputText?: string }; // Occasionally in some outputs
+  usage?: { outputText?: string }; 
   openclawAbort?: { aborted: boolean; origin: string; runId: string };
   __openclaw?: { truncated: boolean; reason: string };
 }
@@ -63,7 +64,6 @@ export async function extractPainFromSessionFile(sessionFile: string, ctx: Plugi
     crlfDelay: Infinity
   });
 
-  // Extract all AI responses that indicate pain/looping before they get compressed away
   try {
     for await (const line of rl) {
       try {
@@ -99,21 +99,15 @@ export async function extractPainFromSessionFile(sessionFile: string, ctx: Plugi
         }
 
         const lower = text.toLowerCase();
-
-        // Simple heuristic for consolidated pain extraction
         if (lower.includes('i\'m sorry, but i\'m still getting') ||
           lower.includes('i apologize for the confusion') ||
-          lower.includes('this is taking longer than expected') ||
-          lower.includes('it seems i cannot')) {
+          lower.includes('this is taking longer than expected')) {
           if (ctx.logger?.debug) ctx.logger.debug(`[Pain Extractor] Detected semantic confusion string.`);
           painPoints.push(`[SEMANTIC CONFUSION] ${text.substring(0, 150)}...`);
         }
-      } catch (e) {
-        // Ignore JSON parse errors for corrupted lines
-      }
+      } catch (e) { }
     }
   } finally {
-    // Ensure file handle does not leak if the stream iteration is broken arbitrarily (e.g. fs error)
     try {
       rl.close();
       fileStream.destroy();
@@ -122,8 +116,9 @@ export async function extractPainFromSessionFile(sessionFile: string, ctx: Plugi
 
   if (painPoints.length > 0) {
     const dateStr = new Date().toISOString().split('T')[0];
-    const dailyLogPath = path.join(workspaceDir, 'memory', `${dateStr}.md`);
+    const dailyLogPath = path.join(workspaceDir, PD_DIRS.MEMORY, `${dateStr}.md`);
     const timestamp = new Date().toISOString();
+    
     let entry = `\n## [${timestamp}] Consolidated Pain (Pre-Compaction)\n\n`;
     entry += `### Pain Signals extracted from session transcript\n`;
     painPoints.slice(-5).forEach((p, idx) => {
@@ -136,20 +131,15 @@ export async function extractPainFromSessionFile(sessionFile: string, ctx: Plugi
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       fs.appendFileSync(dailyLogPath, entry, 'utf8');
 
-      // V1.3.0: Also write to semantic pain memory for L3 retrieval
-      const semanticPath = path.join(workspaceDir, 'memory', 'pain', 'confusion_samples.md');
+      const semanticPath = resolvePdPath(workspaceDir, 'SEMANTIC_PAIN');
       const semanticDir = path.dirname(semanticPath);
       if (!fs.existsSync(semanticDir)) fs.mkdirSync(semanticDir, { recursive: true });
 
       let semanticEntry = `\n### Sample ${timestamp}\n- Source: compaction\n\n\`\`\`\n${painPoints.join('\n---\n')}\n\`\`\`\n`;
       fs.appendFileSync(semanticPath, semanticEntry, 'utf8');
 
-      if (ctx.logger) ctx.logger.info(`[Pain Extractor] Successfully persisted ${painPoints.length} signals to memory logs.`);
-
-      // Check for extremely high severity signals to trigger proactive evolution
       const hasFatal = painPoints.some(p => p.includes('[FATAL INTERCEPT]'));
       if (hasFatal) {
-        if (ctx.logger) ctx.logger.warn(`[Pain Extractor] Critical intercept detected. Triggering immediate pain flag for evolution.`);
         writePainFlag(workspaceDir, {
           source: 'intercept_extraction',
           score: '100',
@@ -159,9 +149,7 @@ export async function extractPainFromSessionFile(sessionFile: string, ctx: Plugi
           trigger_text_preview: painPoints.find(p => p.includes('[FATAL INTERCEPT]'))?.substring(0, 150) || 'Fatal intercept'
         });
       }
-    } catch (err) {
-      if (ctx.logger) ctx.logger.error(`[Pain Extractor] Error writing memory files: ${String(err)}`);
-    }
+    } catch (err) { }
   }
 }
 
@@ -172,19 +160,18 @@ export async function handleBeforeCompaction(
   if (!ctx.workspaceDir) return;
 
   const dateStr = new Date().toISOString().split('T')[0];
-  const checkpointPath = path.join(ctx.workspaceDir, 'memory', `${dateStr}.md`);
+  const checkpointPath = path.join(ctx.workspaceDir, PD_DIRS.MEMORY, `${dateStr}.md`);
   const log =
     `\n## [${new Date().toISOString()}] Pre-Compaction Checkpoint\n` +
     `- Compacting session with ${event.messageCount} messages.\n` +
     `- Ensuring critical state is flushed to disk.\n`;
 
   try {
+    const dir = path.dirname(checkpointPath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.appendFileSync(checkpointPath, log, 'utf8');
-  } catch (_e) {
-    // Non-critical — skip silently
-  }
+  } catch (_e) { }
 
-  // New: Extract pain from session transcript before memory loss
   if (event.sessionFile) {
     await extractPainFromSessionFile(event.sessionFile, ctx);
   }
@@ -197,13 +184,11 @@ export async function handleAfterCompaction(
   if (!ctx.workspaceDir) return;
 
   const dateStr = new Date().toISOString().split('T')[0];
-  const checkpointPath = path.join(ctx.workspaceDir, 'memory', `${dateStr}.md`);
+  const checkpointPath = path.join(ctx.workspaceDir, PD_DIRS.MEMORY, `${dateStr}.md`);
   const log =
     `- Post-Compaction Complete. Reduced active context to ${event.messageCount} messages.\n`;
 
   try {
     fs.appendFileSync(checkpointPath, log, 'utf8');
-  } catch (_e) {
-    // Non-critical — skip silently
-  }
+  } catch (_e) { }
 }

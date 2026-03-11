@@ -6,6 +6,7 @@ import * as path from 'node:path';
 import { EventLogService } from '../core/event-log.js';
 import type { DeepReflectionEventData } from '../types/event-types.js';
 import { buildCritiquePromptV2 } from './critique-prompt.js';
+import { resolvePdPath } from '../core/paths.js';
 
 // Deep Reflection 配置类型
 interface DeepReflectionConfig {
@@ -92,8 +93,7 @@ function loadConfig(workspaceDir: string | undefined, api: OpenClawPluginApi): D
         return DEFAULT_CONFIG;
     }
 
-    const stateDir = path.join(workspaceDir, 'memory', '.state');
-    const configPath = path.join(stateDir, 'pain_settings.json');
+    const configPath = resolvePdPath(workspaceDir, 'PAIN_SETTINGS');
 
     try {
         if (fs.existsSync(configPath)) {
@@ -195,7 +195,7 @@ The sub-agent will:
         const sessionId = sessionKey.split(':').pop(); // Extract UUID as sessionId
 
         // 初始化事件日志
-        const stateDir = workspaceDir ? path.join(workspaceDir, 'memory', '.state') : undefined;
+        const stateDir = workspaceDir ? resolvePdPath(workspaceDir, 'STATE_DIR') : undefined;
         const eventLog = stateDir ? EventLogService.get(stateDir, api.logger) : null;
 
         // 用于日志显示的模型标识

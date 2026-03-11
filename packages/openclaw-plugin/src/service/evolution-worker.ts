@@ -224,7 +224,7 @@ function recordCandidate(stateDir: string, text: string, match: any) {
     fs.writeFileSync(candidatePath, JSON.stringify(data, null, 2), 'utf8');
 }
 
-function processPromotion(stateDir: string, logger: any, eventLog: any) {
+function processPromotion(workspaceDir: string, stateDir: string, logger: any, eventLog: any) {
     const candidatePath = path.join(stateDir, 'pain_candidates.json');
     if (!fs.existsSync(candidatePath)) return;
 
@@ -247,7 +247,7 @@ function processPromotion(stateDir: string, logger: any, eventLog: any) {
                     const ruleId = `P_PROMOTED_${fingerprint.toUpperCase()}`;
 
                     logger.info(`[PD:EvolutionWorker] Promoting candidate ${fingerprint} to formal rule: ${ruleId} (Phrase: "${phrase}")`);
-                    SystemLogger.log(stateDir.replace(/\/memory\/\.state$/, ''), 'RULE_PROMOTED', `Candidate ${fingerprint} promoted to formal rule ${ruleId} based on ${cand.count} hits.`);
+                    SystemLogger.log(workspaceDir, 'RULE_PROMOTED', `Candidate ${fingerprint} promoted to formal rule ${ruleId} based on ${cand.count} hits.`);
 
                     dictionary.addRule(ruleId, {
                         type: 'exact_match',
@@ -298,7 +298,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
         // Use workspace-specific state directory, not global ~/.openclaw/
         // This ensures Service and Hooks use the same stateDir
         const stateDir = workspaceDir
-            ? path.join(workspaceDir, 'memory', '.state')
+            ? resolvePdPath(workspaceDir, 'STATE_DIR')
             : ctx.stateDir;
 
         logger.info(`[PD:EvolutionWorker] Starting with workspaceDir=${workspaceDir}, stateDir=${stateDir}`);
@@ -331,7 +331,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                     logger.error(`[PD:EvolutionWorker] Error in detection queue: ${String(err)}`);
                 });
             }
-            processPromotion(stateDir, logger, eventLog);
+            processPromotion(workspaceDir || '', stateDir, logger, eventLog);
             dictionary.flush();
 
             // Periodically flush event log
@@ -347,7 +347,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
             if (api) {
                 processDetectionQueue(stateDir, api, eventLog).catch(() => { });
             }
-            processPromotion(stateDir, logger, eventLog);
+            processPromotion(workspaceDir || '', stateDir, logger, eventLog);
         }, initialDelay);
     },
 

@@ -8,8 +8,6 @@ function getWorkspaceDir(ctx: PluginCommandContext): string {
 }
 
 function getStateDir(ctx: PluginCommandContext, workspaceDir: string): string {
-    // Note: OpenClaw CLI commands might not inject stateDir directly in ctx.config, but they should.
-    // If not, we fall back to the project hidden .state directory
     return (ctx.config?.stateDir as string) || resolvePdPath(workspaceDir, 'STATE_DIR');
 }
 
@@ -34,7 +32,11 @@ function getModels(workspaceDir: string): Record<string, string> {
 }
 
 function formatUsageReport(workspaceDir: string, stateDir: string): string {
-    const logPath = path.join(stateDir, 'thinking_os_usage.json');
+    // If stateDir is default, use resolvePdPath. If override exists, join manually.
+    const logPath = stateDir.endsWith('.state') 
+        ? resolvePdPath(workspaceDir, 'THINKING_OS_USAGE')
+        : path.join(stateDir, 'thinking_os_usage.json');
+
     if (!fs.existsSync(logPath)) {
         return '📊 No usage data yet. The Thinking OS has not been active long enough to collect statistics.';
     }
@@ -55,7 +57,6 @@ function formatUsageReport(workspaceDir: string, stateDir: string): string {
             report += `| ${id} | ${name} | ${hits} | ${status} ${rate}% |\n`;
         }
 
-        // Identify dormant models
         const dormant = Object.entries(models)
             .filter(([id]) => (usage[id] || 0) === 0)
             .map(([id, name]) => `- ${id}: ${name}`);
@@ -76,21 +77,18 @@ function handlePropose(workspaceDir: string, proposal: string): string {
         return '❌ Usage: `/thinking-os propose <description of your proposed mental model>`';
     }
     
-    // Suggestion from PR review: Check for signal detection section
     if (!proposal.toLowerCase().includes('signal') && !proposal.includes('信号')) {
         return '❌ Invalid proposal: A mental model must include a "Signal detection / 信号检测" section explaining how to detect its usage via regex.';
     }
 
-    const candidatesPath = path.join(workspaceDir, 'docs', 'THINKING_OS_CANDIDATES.md');
+    const candidatesPath = resolvePdPath(workspaceDir, 'THINKING_OS_CANDIDATES');
     
-    // Check for duplicates
     if (fs.existsSync(candidatesPath)) {
         try {
             const content = fs.readFileSync(candidatesPath, 'utf8');
-            // A simple heuristic for duplicates - checking if a substantial part of the proposal is already there
             const snippet = proposal.substring(0, 30);
             if (content.includes(snippet)) {
-                return '❌ Duplicate proposal detected. A similar candidate already exists in `THINKING_OS_CANDIDATES.md`.';
+                return '❌ Duplicate proposal detected. A similar candidate already exists.';
             }
         } catch (e) {
             console.debug('[PD] Error reading candidates file:', e);
@@ -102,19 +100,20 @@ function handlePropose(workspaceDir: string, proposal: string): string {
 
     try {
         fs.appendFileSync(candidatesPath, entry, 'utf8');
-        return `✅ Mental model proposal recorded in \`THINKING_OS_CANDIDATES.md\`.\nIt needs validation in ≥3 different task types and human approval before promotion.`;
+        return `✅ Mental model proposal recorded in \`${candidatesPath.replace(workspaceDir, '')}\`.\nIt needs validation in ≥3 different task types and human approval before promotion.`;
     } catch (e) {
         return `❌ Failed to write proposal: ${String(e)}`;
     }
 }
 
 function formatAuditReport(workspaceDir: string, stateDir: string): string {
-    const logPath = path.join(stateDir, 'thinking_os_usage.json');
-    const thinkingOsPath = path.join(workspaceDir, 'docs', 'THINKING_OS.md');
+    const logPath = stateDir.endsWith('.state') 
+        ? resolvePdPath(workspaceDir, 'THINKING_OS_USAGE')
+        : path.join(stateDir, 'thinking_os_usage.json');
+    const thinkingOsPath = resolvePdPath(workspaceDir, 'THINKING_OS');
 
     let report = `# 🔍 Thinking OS — Audit Report\n\n`;
 
-    // Check if Thinking OS exists
     if (!fs.existsSync(thinkingOsPath)) {
         report += `⚠️ **THINKING_OS.md not found.** The cognitive layer is not active.\n`;
         return report;
@@ -133,7 +132,6 @@ function formatAuditReport(workspaceDir: string, stateDir: string): string {
         const usage: Record<string, number> = JSON.parse(fs.readFileSync(logPath, 'utf8'));
         const totalTurns = usage['_total_turns'] || 1;
 
-        // Identify overused and underused models
         const overused: string[] = [];
         const underused: string[] = [];
         const healthy: string[] = [];
@@ -151,16 +149,15 @@ function formatAuditReport(workspaceDir: string, stateDir: string): string {
         if (overused.length > 0) report += `### 🔸 Possibly Over-triggered\n${overused.join('\n')}\n\n`;
         if (underused.length > 0) {
             report += `### ⚠️ Candidate for Archival\n${underused.join('\n')}\n`;
-            report += `> 💡 Suggestion: Review these models. If they are obsolete, move them to \`THINKING_OS_ARCHIVE.md\`.\n\n`;
+            report += `> 💡 Suggestion: Review these models. If they are obsolete, move them to the archive.\n\n`;
         }
 
-        // Check candidates pool
-        const candidatesPath = path.join(workspaceDir, 'docs', 'THINKING_OS_CANDIDATES.md');
+        const candidatesPath = resolvePdPath(workspaceDir, 'THINKING_OS_CANDIDATES');
         if (fs.existsSync(candidatesPath)) {
             const candidates = fs.readFileSync(candidatesPath, 'utf8');
             const pendingCount = (candidates.match(/Status: PENDING/g) || []).length;
             if (pendingCount > 0) {
-                report += `### 📝 Pending Candidates: ${pendingCount}\nReview \`THINKING_OS_CANDIDATES.md\` for proposed new models.\n`;
+                report += `### 📝 Pending Candidates: ${pendingCount}\nReview candidates to fill gaps.\n`;
             }
         }
 

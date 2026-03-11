@@ -5,29 +5,37 @@ Implement a centralized `WorkspaceContext` class to encapsulate all workspace-re
 
 ## 2. Functional Requirements
 - **Context Factory**: Provide a static `fromHookContext(ctx)` method that can handle various OpenClaw hook and command context shapes, extracting and validating `workspaceDir` and `stateDir`.
-- **Cached Singleton Management**: Implement an internal cache to reuse `WorkspaceContext` instances per `workspaceDir`, ensuring performance in high-frequency hooks like `before_tool_call`.
+- **Cached Lifecycle Management**: 
+    - Implement an internal cache to reuse `WorkspaceContext` instances per `workspaceDir`.
+    - Use a strategy (e.g., `WeakMap` or explicit `dispose()`) to prevent memory leaks in long-running processes.
+    - Provide an `invalidate()` method to refresh configuration and paths if on-disk settings change.
 - **Strict Validation**: Throw explicit errors if a `WorkspaceContext` is requested without a valid `workspaceDir`.
 - **Key-based Path Resolver**: Implement a `resolve(fileKey)` method that uses strictly typed keys (from `PD_FILES`) to return absolute paths.
-- **Service Encapsulation (Lazy Load)**: Expose the following services via lazy-loading getters:
-    - `config`: Scoped to the workspace's governance settings.
-    - `eventLog`: Scoped to the workspace's internal event logs.
-    - `trust`: Access to the workspace's trust engine and scorecard.
-    - `dictionary`: Access to the workspace's pain dictionary.
-- **Identity Awareness**: The context should distinguish between the Project Root (OpenClaw files) and the Governance Root (`.principles/`).
+- **Service Encapsulation (Lazy Load)**: Expose services via lazy-loading getters (first access initializes the service):
+    - `config`: Scoped governance settings.
+    - `eventLog`: Workspace internal event logs.
+    - `trust`: Trust engine and scorecard.
+    - `dictionary`: Pain dictionary.
+- **Backward Compatibility Layer**: Maintain existing functional APIs (e.g., `recordFailure`, `getAgentScorecard`) as thin wrappers around the `WorkspaceContext` to allow for incremental migration and prevent breaking existing tests.
+- **Identity Awareness**: Distinguish between Project Root (OpenClaw bootstrap files) and Governance Root (`.principles/`).
 
 ## 3. Technical Requirements
 - Create `src/core/workspace-context.ts`.
+- Implement `createTestContext()` factory for unit testing without physical disk reliance.
 - Refactor `src/core/paths.ts` to support the context's resolver.
-- Gradually refactor all hooks and commands to use `WorkspaceContext` as their primary interface for data and services.
-- Update unit tests to use a `MockWorkspaceContext` where applicable.
+- Performance Targets:
+    - Context creation (no service load): < 0.1ms
+    - Cache hit: < 0.01ms
+    - Initial service load: < 10ms
 
 ## 4. Acceptance Criteria
-- [ ] `WorkspaceContext` can be successfully instantiated from any OpenClaw hook context.
+- [x] WorkspaceContext can be successfully instantiated from any OpenClaw hook context.
 - [ ] No manual `path.join` for system files remains in the refactored modules.
-- [ ] `recordFailure` and `recordSuccess` are called through the context's trust service.
-- [ ] All 203+ existing tests pass after the refactor.
-- [ ] Performance overhead of context creation is negligible (< 1ms).
+- [ ] `WorkspaceContext` cache clears correctly when a workspace is disposed or changed.
+- [ ] Existing functional APIs remain operational (verified by 203+ existing tests).
+- [ ] `invalidate()` successfully reloads `pain_settings.json` changes.
+- [ ] Performance targets are met under load.
 
 ## 5. Out of Scope
-- Changing the actual file locations (handled in the previous track).
-- Refactoring external dependencies outside the `packages/openclaw-plugin/src` directory.
+- Changing actual file locations (handled in previous track).
+- Modifying OpenClaw core engine internal state.

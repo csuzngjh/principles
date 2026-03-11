@@ -279,7 +279,7 @@ const plugin = {
       acceptsArgs: true,
       handler: (ctx) => {
         try {
-          return handlePainCommand(ctx, language);
+          return handlePainCommand(ctx);
         } catch (err) {
           api.logger.error(`[PD] Command /pd-status failed: ${String(err)}`);
           return { text: "Command failed. Check logs." };

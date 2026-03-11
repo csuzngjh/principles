@@ -19,13 +19,22 @@ export const PD_DIRS = {
     
     /** 🎯 Strategic objectives and focus areas */
     OKR: path.join('memory', 'okr'),
+
+    /** 📁 Internal logs directory */
+    LOGS: path.join('memory', 'logs'),
+
+    /** 🧠 Session persistence directory */
+    SESSIONS: path.join('.state', 'sessions'),
+
+    /** 🩹 Semantic pain samples for L3 retrieval */
+    PAIN_SAMPLES: path.join('memory', 'pain'),
 };
 
 /**
  * Standard File Path Mappings
  */
 export const PD_FILES = {
-    // Identity Layer (Rooted in IDENTITY dir)
+    // Identity Layer
     PROFILE: path.join(PD_DIRS.IDENTITY, 'PROFILE.json'),
     PRINCIPLES: path.join(PD_DIRS.IDENTITY, 'PRINCIPLES.md'),
     THINKING_OS: path.join(PD_DIRS.IDENTITY, 'THINKING_OS.md'),
@@ -33,23 +42,32 @@ export const PD_FILES = {
     DECISION_POLICY: path.join(PD_DIRS.IDENTITY, 'DECISION_POLICY.json'),
     MODELS_DIR: PD_DIRS.MODELS,
 
-    // State Layer (Rooted in STATE dir)
+    // State Layer
     STATE_DIR: PD_DIRS.STATE,
     EVOLUTION_QUEUE: path.join(PD_DIRS.STATE, 'evolution_queue.json'),
     WORKBOARD: path.join(PD_DIRS.STATE, 'WORKBOARD.json'),
     AGENT_SCORECARD: path.join(PD_DIRS.STATE, 'AGENT_SCORECARD.json'),
     PAIN_FLAG: path.join(PD_DIRS.STATE, '.pain_flag'),
     SYSTEM_CAPABILITIES: path.join(PD_DIRS.STATE, 'SYSTEM_CAPABILITIES.json'),
+    PAIN_SETTINGS: path.join(PD_DIRS.STATE, 'pain_settings.json'),
+    PAIN_CANDIDATES: path.join(PD_DIRS.STATE, 'pain_candidates.json'),
+    THINKING_OS_USAGE: path.join(PD_DIRS.STATE, 'thinking_os_usage.json'),
+    SESSION_DIR: PD_DIRS.SESSIONS,
+    DICTIONARY: path.join(PD_DIRS.STATE, 'pain_dictionary.json'),
     
-    // Workflow Layer (Project Root for visibility)
+    // Workflow Layer (Project Root)
     PLAN: 'PLAN.md',
+    MEMORY_MD: 'MEMORY.md',
+    HEARTBEAT: 'HEARTBEAT.md',
     
     // Memory Layer
-    SYSTEM_LOG: path.join(PD_DIRS.MEMORY, 'logs', 'SYSTEM.log'),
+    SYSTEM_LOG: path.join(PD_DIRS.LOGS, 'SYSTEM.log'),
     USER_CONTEXT: path.join(PD_DIRS.MEMORY, 'USER_CONTEXT.md'),
     OKR_DIR: PD_DIRS.OKR,
     CURRENT_FOCUS: path.join(PD_DIRS.OKR, 'CURRENT_FOCUS.md'),
     WEEK_STATE: path.join(PD_DIRS.OKR, 'WEEK_STATE.json'),
+    THINKING_OS_CANDIDATES: path.join(PD_DIRS.MEMORY, 'THINKING_OS_CANDIDATES.md'),
+    SEMANTIC_PAIN: path.join(PD_DIRS.PAIN_SAMPLES, 'confusion_samples.md'),
 };
 
 /**
