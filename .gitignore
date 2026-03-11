@@ -36,7 +36,6 @@ packages/openclaw-plugin/skills
 
 # Local environment and logs
 .agent/
-.claude/
 docs/AUDIT_TRAIL.log
 pr_description.txt
 
@@ -69,5 +68,4 @@ docs/SHELLCHECK_GUIDE.md
 docs/STATUSLINE_IMPROVEMENTS.md
 _scratchpad/
 packages/openclaw-plugin/vitest.jsondocs/
-.claude/
 memory/
