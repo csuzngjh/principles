@@ -16,15 +16,15 @@
       "Gatekeeper logic is active (gate.ts)"
     ],
     "initial_state": {
-      "risk_paths": ["docs/PLAN.md", "docs/PRINCIPLES.md", "memory/.state/"],
+      "risk_paths": ["docs/PLAN.md", "docs/PRINCIPLES.md", ".state/"],
       "plan_status": "NOT_READY",
       "test_files_ready": true
     },
     "data_files": {
       "profile": "docs/PROFILE.json",
       "plan": "docs/PLAN.md",
-      "scorecard": "docs/AGENT_SCORECARD.json",
-      "events": "memory/.state/logs/events.jsonl"
+      "scorecard": ".state/AGENT_SCORECARD.json",
+      "events": ".state/logs/events.jsonl"
     }
   },
   "steps": [

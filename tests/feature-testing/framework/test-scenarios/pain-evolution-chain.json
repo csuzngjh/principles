@@ -23,10 +23,10 @@
     },
     "data_files": {
       "pain_flag": "workspace/code/principles/docs/.pain_flag",
-      "evolution_queue": "memory/.state/evolution_queue.json",
-      "evolution_directive": "memory/.state/evolution_directive.json",
-      "events": "memory/.state/logs/events.jsonl",
-      "scorecard": "docs/AGENT_SCORECARD.json"
+      "evolution_queue": ".state/evolution_queue.json",
+      "evolution_directive": ".state/evolution_directive.json",
+      "events": ".state/logs/events.jsonl",
+      "scorecard": ".state/AGENT_SCORECARD.json"
     }
   },
   "steps": [
@@ -51,15 +51,15 @@
       "actions": [
         {
           "type": "delete_file",
-          "path": "/home/csuzngjh/clawd/workspace/code/principles/docs/.pain_flag"
+          "path": "/home/csuzngjh/clawd/docs/.pain_flag"
         },
         {
           "type": "delete_file",
-          "path": "/home/csuzngjh/clawd/memory/.state/evolution_queue.json"
+          "path": "/home/csuzngjh/clawd/.state/evolution_queue.json"
         },
         {
           "type": "delete_file",
-          "path": "/home/csuzngjh/clawd/memory/.state/evolution_directive.json"
+          "path": "/home/csuzngjh/clawd/.state/evolution_directive.json"
         }
       ]
     },
@@ -100,7 +100,7 @@
         "validation_type": "pain_signal_verification",
         "expected_score": 30,
         "expected_source": "tool_failure",
-        "pain_flag_path": "/home/csuzngjh/clawd/workspace/code/principles/docs/.pain_flag"
+        "pain_flag_path": "/home/csuzngjh/clawd/docs/.pain_flag"
       }
     },
     {
@@ -176,7 +176,7 @@
       "description": "Verify pain signals were queued in evolution_queue.json (score ≥ 30 threshold)",
       "validator": "file_validator",
       "params": {
-        "path": "/home/csuzngjh/clawd/memory/.state/evolution_queue.json",
+        "path": "/home/csuzngjh/clawd/.state/evolution_queue.json",
         "min_size": 50,
         "required_sections": ["score", "source", "reason", "status"]
       }
@@ -198,7 +198,7 @@
       "description": "Verify queued pain signals have 'status: queued' appended",
       "validator": "file_validator",
       "params": {
-        "path": "/home/csuzngjh/clawd/workspace/code/principles/docs/.pain_flag",
+        "path": "/home/csuzngjh/clawd/docs/.pain_flag",
         "required_sections": ["status: queued"]
       }
     },
@@ -208,7 +208,7 @@
       "description": "Verify EVOLUTION_DIRECTIVE.json was created with active task",
       "validator": "file_validator",
       "params": {
-        "path": "/home/csuzngjh/clawd/memory/.state/evolution_directive.json",
+        "path": "/home/csuzngjh/clawd/.state/evolution_directive.json",
         "min_size": 100,
         "required_sections": ["active", "task", "timestamp"]
       }
@@ -221,7 +221,7 @@
       "params": {
         "validation_type": "evolution_priority_verification",
         "expected_highest_score": 50,
-        "directive_file": "/home/csuzngjh/clawd/memory/.state/evolution_directive.json"
+        "directive_file": "/home/csuzngjh/clawd/.state/evolution_directive.json"
       }
     },
     {
@@ -255,7 +255,7 @@
       "name": "Test Low-Score Pain Signal Filtering",
       "type": "task",
       "description": "Create a low-score pain signal (<30) to verify it's NOT queued",
-      "task": "Manually create a low-score pain signal by writing to /home/csuzngjh/clawd/workspace/code/principles/docs/.pain_flag with: 'score: 20\\nsource: test\\nreason: Low score test\\nis_risky: false'",
+      "task": "Manually create a low-score pain signal by writing to /home/csuzngjh/clawd/docs/.pain_flag with: 'score: 20\\nsource: test\\nreason: Low score test\\nis_risky: false'",
       "timeout": 60,
       "wait_for_completion": true
     },
@@ -283,7 +283,7 @@
       "name": "Test Pain Signal Deduplication",
       "type": "task",
       "description": "Write same pain signal again to verify it's not duplicated in queue",
-      "task": "Append to /home/csuzngjh/clawd/workspace/code/principles/docs/.pain_flag: '\\nscore: 50\\nsource: test_dedup\\nreason: Test deduplication\\nis_risky: false'",
+      "task": "Append to /home/csuzngjh/clawd/docs/.pain_flag: '\\nscore: 50\\nsource: test_dedup\\nreason: Test deduplication\\nis_risky: false'",
       "timeout": 30,
       "wait_for_completion": true
     },
@@ -305,15 +305,15 @@
       "actions": [
         {
           "type": "delete_file",
-          "path": "/home/csuzngjh/clawd/workspace/code/principles/docs/.pain_flag"
+          "path": "/home/csuzngjh/clawd/docs/.pain_flag"
         },
         {
           "type": "delete_file",
-          "path": "/home/csuzngjh/clawd/memory/.state/evolution_queue.json"
+          "path": "/home/csuzngjh/clawd/.state/evolution_queue.json"
         },
         {
           "type": "delete_file",
-          "path": "/home/csuzngjh/clawd/memory/.state/evolution_directive.json"
+          "path": "/home/csuzngjh/clawd/.state/evolution_directive.json"
         }
       ]
     }
