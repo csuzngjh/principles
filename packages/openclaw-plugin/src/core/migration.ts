@@ -57,7 +57,7 @@ export function migrateDirectoryStructure(api: OpenClawPluginApi, workspaceDir: 
         // Cleanup empty legacy models directory if it was moved to templates but exists in docs
         const legacyModelsDir = path.join(legacyDocsDir, 'models');
         if (fs.existsSync(legacyModelsDir)) {
-             api.logger.info(`[PD:Migration] Note: Legacy docs/models still exists. You may want to move custom models to .principles/models/ if applicable.`);
+             api.logger.info(`[PD:Migration] Note: Legacy docs/models detected. Please migrate custom models to .principles/models/ for better RAG performance.`);
         }
 
     } catch (err) {

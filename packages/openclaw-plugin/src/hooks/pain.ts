@@ -19,7 +19,7 @@ export function handleAfterToolCall(
     return;
   }
 
-  const stateDir = (ctx as any).stateDir || path.join(ctx.workspaceDir, 'memory', '.state');
+  const stateDir = (ctx as any).stateDir || resolvePdPath(ctx.workspaceDir, 'STATE_DIR');
   const config = ConfigService.get(stateDir);
   const eventLog = EventLogService.get(stateDir);
   const sessionId = ctx.sessionId || 'unknown';

@@ -11,9 +11,6 @@ export const PD_DIRS = {
     /** ⚡ Volatile operational data, queues, and task status (hidden) */
     STATE: '.state',
     
-    /** 📂 Legacy/Public documentation directory */
-    DOCS: 'docs',
-    
     /** 💾 Historical records, logs, and long-term memory */
     MEMORY: 'memory',
 };
@@ -30,6 +27,7 @@ export const PD_FILES = {
     DECISION_POLICY: path.join(PD_DIRS.IDENTITY, 'DECISION_POLICY.json'),
 
     // State Layer (Rooted in STATE dir)
+    STATE_DIR: PD_DIRS.STATE,
     EVOLUTION_QUEUE: path.join(PD_DIRS.STATE, 'evolution_queue.json'),
     WORKBOARD: path.join(PD_DIRS.STATE, 'WORKBOARD.json'),
     AGENT_SCORECARD: path.join(PD_DIRS.STATE, 'AGENT_SCORECARD.json'),
