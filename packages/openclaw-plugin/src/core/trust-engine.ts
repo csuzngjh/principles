@@ -92,7 +92,17 @@ export class TrustEngine {
             if (scorecard.recent_history === undefined) scorecard.recent_history = [];
             return scorecard;
         } catch (e) {
-            return this.getScorecard(); // Fallback to default
+            return {
+                trust_score: TRUST_CONFIG.COLD_START.INITIAL_TRUST,
+                wins: 0,
+                losses: 0,
+                success_streak: 0,
+                failure_streak: 0,
+                grace_failures_remaining: TRUST_CONFIG.COLD_START.GRACE_FAILURES,
+                recent_history: [],
+                first_activity_at: new Date().toISOString(),
+                last_activity_at: new Date().toISOString(),
+            };
         }
     }
 
@@ -120,7 +130,7 @@ export class TrustEngine {
         scorecard.wins = (scorecard.wins || 0) + 1;
         scorecard.success_streak = (scorecard.success_streak || 0) + 1;
         scorecard.failure_streak = 0;
-        this.updateRecentHistory(scorecard, 'success');
+        updateRecentHistory(scorecard, 'success');
 
         this.saveScorecard(scorecard);
 
@@ -158,7 +168,7 @@ export class TrustEngine {
             scorecard.success_streak = 0;
         }
 
-        this.updateRecentHistory(scorecard, 'failure');
+        updateRecentHistory(scorecard, 'failure');
         this.saveScorecard(scorecard);
 
         if (ctx) {
@@ -220,12 +230,24 @@ export class TrustEngine {
 
         return { reward: Math.min(reward, TRUST_CONFIG.REWARDS.MAX_REWARD), reason: 'base_success' };
     }
+}
 
-    private updateRecentHistory(scorecard: AgentScorecard, result: 'success' | 'failure'): void {
-        if (!scorecard.recent_history) scorecard.recent_history = [];
-        scorecard.recent_history.push(result);
-        if (scorecard.recent_history.length > TRUST_CONFIG.LIMITS.RECENT_HISTORY_SIZE) scorecard.recent_history.shift();
-    }
+/**
+ * Internal helper to check cold start period
+ */
+function checkColdStart(scorecard: AgentScorecard): boolean {
+    if (!scorecard.first_activity_at) return true;
+    const firstActivity = new Date(scorecard.first_activity_at).getTime();
+    return (Date.now() - firstActivity) < TRUST_CONFIG.COLD_START.COLD_START_PERIOD;
+}
+
+/**
+ * Update recent history (maintains fixed size)
+ */
+function updateRecentHistory(scorecard: AgentScorecard, result: 'success' | 'failure'): void {
+    if (!scorecard.recent_history) scorecard.recent_history = [];
+    scorecard.recent_history.push(result);
+    if (scorecard.recent_history.length > TRUST_CONFIG.LIMITS.RECENT_HISTORY_SIZE) scorecard.recent_history.shift();
 }
 
 // ── Legacy Functional Wrappers (Backward Compatibility) ──────────────────────
@@ -247,16 +269,49 @@ export function recordSuccess(workspaceDir: string, opType: 'success' | 'subagen
 
 export function recordFailure(workspaceDir: string, failType: 'tool' | 'risky' | 'bypass', ctx?: any): number {
     const stateDir = ctx?.stateDir || resolvePdPath(workspaceDir, 'STATE_DIR');
-    return new TrustEngine(workspaceDir, failType === 'bypass' ? 'bypass' : failType as any, ctx); // Wait, fix arguments
-}
-
-// Fix recordFailure wrapper
-export function recordFailureLegacy(workspaceDir: string, failType: 'tool' | 'risky' | 'bypass', ctx?: any): number {
-    const stateDir = ctx?.stateDir || resolvePdPath(workspaceDir, 'STATE_DIR');
     return new TrustEngine(workspaceDir, stateDir).recordFailure(failType, ctx);
 }
 
-// Re-export stage helpers
+export function adjustTrustScore(
+    workspaceDir: string,
+    delta: number,
+    reason: string,
+    ctx?: { sessionId?: string; stateDir?: string; api?: OpenClawPluginApi }
+): number {
+    const scorecard = getAgentScorecard(workspaceDir);
+    const previousScore = scorecard.trust_score ?? 50;
+    const newScore = Math.max(0, Math.min(100, previousScore + delta));
+
+    scorecard.trust_score = newScore;
+
+    if (delta > 0) {
+        scorecard.wins = (scorecard.wins || 0) + 1;
+        scorecard.success_streak = (scorecard.success_streak || 0) + 1;
+        scorecard.failure_streak = 0;
+        updateRecentHistory(scorecard, 'success');
+    } else if (delta < 0) {
+        scorecard.losses = (scorecard.losses || 0) + 1;
+        scorecard.failure_streak = (scorecard.failure_streak || 0) + 1;
+        scorecard.success_streak = 0;
+        updateRecentHistory(scorecard, 'failure');
+    }
+
+    saveAgentScorecard(workspaceDir, scorecard);
+
+    if (ctx) {
+        const stateDir = ctx.stateDir || resolvePdPath(workspaceDir, 'STATE_DIR');
+        const eventLog = EventLogService.get(stateDir, ctx.api?.logger);
+        eventLog.recordTrustChange(ctx.sessionId, {
+            previousScore,
+            newScore,
+            delta,
+            reason
+        });
+    }
+
+    return newScore;
+}
+
 export function getTrustStage(scorecard: AgentScorecard): number {
     const trustScore = scorecard.trust_score ?? 50;
     if (trustScore < TRUST_CONFIG.STAGES.STAGE_1_OBSERVER) return 1;
@@ -266,9 +321,20 @@ export function getTrustStage(scorecard: AgentScorecard): number {
 }
 
 export function getTrustStats(scorecard: AgentScorecard): any {
-    // Logic from earlier version
+    const recentHistory = scorecard.recent_history || [];
+    const successCount = recentHistory.filter(r => r === 'success').length;
+    const successRate = recentHistory.length > 0 ? Math.round((successCount / recentHistory.length) * 100) : 0;
+    const successStreak = scorecard.success_streak || 0;
+    const failureStreak = scorecard.failure_streak || 0;
+
     return {
         stage: getTrustStage(scorecard),
-        // ...
+        successRate,
+        isInColdStart: checkColdStart(scorecard),
+        graceRemaining: scorecard.grace_failures_remaining ?? 0,
+        currentStreak: {
+            type: successStreak > failureStreak ? 'success' : 'failure',
+            count: Math.max(successStreak, failureStreak)
+        }
     };
 }
