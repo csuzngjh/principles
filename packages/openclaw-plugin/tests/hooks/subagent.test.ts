@@ -13,11 +13,23 @@ describe('Subagent Hook', () => {
         recordSuccess: vi.fn(),
     };
 
+    const mockConfig = {
+        get: vi.fn().mockImplementation((key) => {
+            if (key === 'scores') return {
+                subagent_error_penalty: 80,
+                subagent_timeout_penalty: 65
+            };
+            return {};
+        })
+    };
+
     const mockWctx = {
         workspaceDir,
         trust: mockTrust,
+        config: mockConfig,
         resolve: vi.fn().mockImplementation((key) => {
             if (key === 'EVOLUTION_QUEUE') return '/mock/workspace/.state/evolution_queue.json';
+            if (key === 'PAIN_FLAG') return '/mock/workspace/.state/.pain_flag';
             return '';
         }),
     };
@@ -34,14 +46,14 @@ describe('Subagent Hook', () => {
             outcome: 'ok' 
         };
 
-        // Mock queue cleanup to avoid errors
         vi.mocked(fs.existsSync).mockReturnValue(false);
 
         await handleSubagentEnded(mockEvent as any, mockCtx as any);
 
         expect(mockTrust.recordSuccess).toHaveBeenCalledWith(
             'subagent_success',
-            expect.objectContaining({ sessionId: 's1' })
+            expect.objectContaining({ sessionId: 's1' }),
+            true
         );
     });
 

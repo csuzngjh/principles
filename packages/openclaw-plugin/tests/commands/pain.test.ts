@@ -33,9 +33,10 @@ describe('Pain Command', () => {
             sessionId 
         } as any);
 
-        expect(result.text).toContain('GFI Index**: 45/100');
-        expect(result.text).toContain('Rules**: 10');
-        expect(result.text).toContain('Hits**: 5');
+        expect(result.text).toContain('Friction (GFI)**: [');
+        expect(result.text).toContain('] 45/100');
+        expect(result.text).toContain('Dictionary**: 10');
+        expect(result.text).toContain('blocked 5');
     });
 
     it('should show 🟢 status for low GFI', () => {

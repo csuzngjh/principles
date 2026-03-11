@@ -2,33 +2,52 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { serializeKvLines, parseKvLines } from '../utils/io.js';
 import { resolvePdPath } from './paths.js';
+import { ConfigService } from './config-service.js';
 
-export function computePainScore(rc: number, isSpiral: boolean, missingTestCommand: boolean, softScore: number): number {
+export function computePainScore(rc: number, isSpiral: boolean, missingTestCommand: boolean, softScore: number, projectDir?: string): number {
   let score = Math.max(0, softScore || 0);
+  
+  const stateDir = projectDir ? resolvePdPath(projectDir, 'STATE_DIR') : undefined;
+  const config = stateDir ? ConfigService.get(stateDir) : null;
+  const scoreSettings = config ? config.get('scores') : {
+    exit_code_penalty: 70,
+    spiral_penalty: 40,
+    missing_test_command_penalty: 30
+  };
 
   if (rc !== 0) {
-    score += 70;
+    score += scoreSettings.exit_code_penalty;
   }
 
   if (isSpiral) {
-    score += 40;
+    score += scoreSettings.spiral_penalty;
   }
 
   if (missingTestCommand) {
-    score += 30;
+    score += scoreSettings.missing_test_command_penalty;
   }
 
   return Math.min(100, score);
 }
 
-export function painSeverityLabel(painScore: number, isSpiral: boolean = false): string {
+export function painSeverityLabel(painScore: number, isSpiral: boolean = false, projectDir?: string): string {
   if (isSpiral) {
     return "critical";
-  } else if (painScore >= 70) {
+  }
+
+  const stateDir = projectDir ? resolvePdPath(projectDir, 'STATE_DIR') : undefined;
+  const config = stateDir ? ConfigService.get(stateDir) : null;
+  const thresholds = config ? config.get('severity_thresholds') : {
+    high: 70,
+    medium: 40,
+    low: 20
+  };
+
+  if (painScore >= thresholds.high) {
     return "high";
-  } else if (painScore >= 40) {
+  } else if (painScore >= thresholds.medium) {
     return "medium";
-  } else if (painScore >= 20) {
+  } else if (painScore >= thresholds.low) {
     return "low";
   } else {
     return "info";

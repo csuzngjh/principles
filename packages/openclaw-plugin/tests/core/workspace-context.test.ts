@@ -109,12 +109,23 @@ describe('WorkspaceContext', () => {
     it('should maintain backward compatibility for legacy trust APIs', async () => {
         const { getAgentScorecard, recordSuccess } = await import('../../src/core/trust-engine.js');
         
+        let exists = false;
+        let data = '';
+        
+        vi.mocked(fs.existsSync).mockImplementation(() => exists);
+        vi.mocked(fs.readFileSync).mockImplementation(() => data);
+        vi.mocked(fs.writeFileSync).mockImplementation((_p, d) => {
+            exists = true;
+            data = d as string;
+        });
+
         // This should not throw and return a valid scorecard
         const scorecard = getAgentScorecard(workspaceDir);
         expect(scorecard).toBeDefined();
-        expect(scorecard.trust_score).toBe(59); // COLD_START.INITIAL_TRUST
+        expect(scorecard.trust_score).toBe(85); 
 
-        const score = recordSuccess(workspaceDir, 'success');
-        expect(score).toBeGreaterThan(59);
+        recordSuccess(workspaceDir, 'success');
+        const updatedScorecard = getAgentScorecard(workspaceDir);
+        expect(updatedScorecard.trust_score).toBeGreaterThan(85);
     });
 });

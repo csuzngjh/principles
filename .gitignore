@@ -11,10 +11,6 @@ test_log_*.txt
 full_test_report*.txt
 temp/
 tmp/
-docs/SYSTEM.log
-docs/PHASE2_SUMMARY.md
-docs/PHASE3_SUMMARY.md
-docs/REFACTORING_COMPLETE.md
 
 # Node.js packages
 packages/*/node_modules/
@@ -34,40 +30,19 @@ packages/openclaw-plugin/node_modules/
 packages/openclaw-plugin/agents
 packages/openclaw-plugin/skills
 
-# Local environment and logs
+# Local environment and state (DO NOT COMMIT)
+.claude/
+conductor/
+.principles/
+.state/
+memory/
 .agent/
-docs/AUDIT_TRAIL.log
-pr_description.txt
-
-# Spec files (internal design documents, not for public release)
 spec/
-
-# Runtime State and Development logs
-docs/.pain_flag
-docs/*.bak
-docs/*.backup
-docs/*_REPORT.md
-docs/*_TEST.md
-docs/*_REVIEW.md
-docs/ISSUE_*.md
-docs/REFACTORING_*.md
-docs/DEBUG_*.md
-docs/HANDOVER_*.md
-docs/SYSTEM_PANORAMA.md
-docs/AGENT_CONTEXT.md
-docs/USER_CONTEXT.md
-docs/AGENT_SCORECARD.json
-docs/EVOLUTION_QUEUE.json
-docs/DECISIONS.md
-docs/CHECKPOINT.md
-docs/OBSERVABILITY_DESIGN.md
-docs/DECISION_POLICY.json
-docs/QUICK_START_*.md
-docs/USER_GUIDE_*.md
-docs/SHELLCHECK_GUIDE.md
-docs/STATUSLINE_IMPROVEMENTS.md
 _scratchpad/
-packages/openclaw-plugin/vitest.jsondocs/
+
+# Docs (Project documentation should be tracked)
+# The docs/ directory itself is NOT ignored, but old state files within it were moved out.
+# We now track actual project documents in docs/
 
 # Interactive Conversation Test Output
 packages/openclaw-plugin/tests/interactive-conversation/output/

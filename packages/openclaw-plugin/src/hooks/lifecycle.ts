@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as readline from 'readline';
 import { computePainScore, writePainFlag } from '../core/pain.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
+import { PD_DIRS } from '../core/paths.js';
 import type { PluginHookBeforeResetEvent, PluginHookBeforeCompactionEvent, PluginHookAfterCompactionEvent, PluginHookAgentContext } from '../openclaw-sdk.js';
 
 export async function handleBeforeReset(
@@ -34,7 +35,7 @@ export async function handleBeforeReset(
     try {
       fs.appendFileSync(memoryPath, summary, 'utf8');
     } catch (_e) {
-      // Non-critical
+      console.error(`[PD:Lifecycle] Failed to write session reset summary: ${String(_e)}`);
     }
   }
 }
@@ -109,18 +110,22 @@ export async function extractPainFromSessionFile(sessionFile: string, ctx: Plugi
           if (ctx.logger?.debug) ctx.logger.debug(`[Pain Extractor] Detected semantic confusion string.`);
           painPoints.push(`[SEMANTIC CONFUSION] ${text.substring(0, 150)}...`);
         }
-      } catch (e) { }
+      } catch (e) {
+        console.error(`[PD:Lifecycle] Error parsing message: ${String(e)}`);
+      }
     }
   } finally {
     try {
       rl.close();
       fileStream.destroy();
-    } catch (_e) { }
+    } catch (_e) {
+      // Ignore cleanup errors
+    }
   }
 
   if (painPoints.length > 0) {
     const dateStr = new Date().toISOString().split('T')[0];
-    const dailyLogPath = path.join(workspaceDir, 'memory', `${dateStr}.md`);
+    const dailyLogPath = path.join(workspaceDir, PD_DIRS.MEMORY, `${dateStr}.md`);
     const timestamp = new Date().toISOString();
     
     let entry = `\n## [${timestamp}] Consolidated Pain (Pre-Compaction)\n\n`;
@@ -153,7 +158,9 @@ export async function extractPainFromSessionFile(sessionFile: string, ctx: Plugi
           trigger_text_preview: painPoints.find(p => p.includes('[FATAL INTERCEPT]'))?.substring(0, 150) || 'Fatal intercept'
         });
       }
-    } catch (err) { }
+    } catch (err) {
+      console.error(`[PD:Lifecycle] Failed to write pain signals: ${String(err)}`);
+    }
   }
 }
 
@@ -164,7 +171,7 @@ export async function handleBeforeCompaction(
   if (!ctx.workspaceDir) return;
 
   const dateStr = new Date().toISOString().split('T')[0];
-  const checkpointPath = path.join(ctx.workspaceDir, 'memory', `${dateStr}.md`);
+  const checkpointPath = path.join(ctx.workspaceDir, PD_DIRS.MEMORY, `${dateStr}.md`);
   const log =
     `\n## [${new Date().toISOString()}] Pre-Compaction Checkpoint\n` +
     `- Compacting session with ${event.messageCount} messages.\n` +
@@ -174,7 +181,9 @@ export async function handleBeforeCompaction(
     const dir = path.dirname(checkpointPath);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.appendFileSync(checkpointPath, log, 'utf8');
-  } catch (_e) { }
+  } catch (_e) {
+    console.error(`[PD:Lifecycle] Failed to write pre-compaction checkpoint: ${String(_e)}`);
+  }
 
   if (event.sessionFile) {
     await extractPainFromSessionFile(event.sessionFile, ctx);
@@ -188,11 +197,13 @@ export async function handleAfterCompaction(
   if (!ctx.workspaceDir) return;
 
   const dateStr = new Date().toISOString().split('T')[0];
-  const checkpointPath = path.join(ctx.workspaceDir, 'memory', `${dateStr}.md`);
+  const checkpointPath = path.join(ctx.workspaceDir, PD_DIRS.MEMORY, `${dateStr}.md`);
   const log =
     `- Post-Compaction Complete. Reduced active context to ${event.messageCount} messages.\n`;
 
   try {
     fs.appendFileSync(checkpointPath, log, 'utf8');
-  } catch (_e) { }
+  } catch (_e) {
+    console.error(`[PD:Lifecycle] Failed to write post-compaction checkpoint: ${String(_e)}`);
+  }
 }
