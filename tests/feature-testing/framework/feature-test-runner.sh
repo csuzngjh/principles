@@ -976,6 +976,30 @@ validate_custom() {
     esac
 }
 
+# 获取信任分数
+get_trust_score() {
+    local scorecard_path="$WORKSPACE_DIR/.state/AGENT_SCORECARD.json"
+    if [ -f "$scorecard_path" ]; then
+        cat "$scorecard_path" | jq -r '.trust_score // 0'
+    else
+        echo "0"
+    fi
+}
+
+# 获取信任阶段
+get_trust_stage() {
+    local score=$(get_trust_score)
+    if [ "$score" -ge 80 ]; then
+        echo "4"
+    elif [ "$score" -ge 60 ]; then
+        echo "3"
+    elif [ "$score" -ge 30 ]; then
+        echo "2"
+    else
+        echo "1"
+    fi
+}
+
 # 信任分数验证器
 validate_trust() {
     local params="$1"
