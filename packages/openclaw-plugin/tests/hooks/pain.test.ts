@@ -3,12 +3,12 @@ import { handleAfterToolCall } from '../../src/hooks/pain';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as ioUtils from '../../src/utils/io';
-import * as trustEngine from '../../src/core/trust-engine-v2.js';
+import * as trustEngine from '../../src/core/trust-engine.js';
 import { EventLogService } from '../../src/core/event-log.js';
 
 vi.mock('fs');
 vi.mock('../../src/utils/io.js');
-vi.mock('../../src/core/trust-engine-v2.js');
+vi.mock('../../src/core/trust-engine.js');
 vi.mock('../../src/core/event-log.js');
 
 describe('Post-Write Checks & Pain Hook', () => {

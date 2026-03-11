@@ -1,6 +1,6 @@
 import { PluginHookSubagentEndedEvent, PluginHookAgentContext } from '../openclaw-sdk.js';
 import { writePainFlag } from '../core/pain.js';
-import { recordSuccess, TRUST_CONFIG } from '../core/trust-engine-v2.js';
+import { recordSuccess, TRUST_CONFIG } from '../core/trust-engine.js';
 import { resolvePdPath } from '../core/paths.js';
 import * as fs from 'fs';
 import * as path from 'path';

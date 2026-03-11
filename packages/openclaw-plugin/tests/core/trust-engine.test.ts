@@ -7,7 +7,7 @@ import {
     recordFailure,
     getTrustStats,
     TRUST_CONFIG
-} from '../../src/core/trust-engine-v2.js';
+} from '../../src/core/trust-engine.js';
 
 vi.mock('fs');
 
