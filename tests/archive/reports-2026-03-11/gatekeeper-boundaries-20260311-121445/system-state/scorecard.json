@@ -1,0 +1,41 @@
+{
+  "trust_score": 40,
+  "success_streak": 1,
+  "failure_streak": 0,
+  "grace_failures_remaining": 1,
+  "last_updated": "2026-03-11T12:12:08.624Z",
+  "cold_start_end": "2026-03-12T10:15:00+00:00",
+  "first_activity_at": "2026-03-11T10:15:00+00:00",
+  "history": [
+    {
+      "type": "failure",
+      "delta": 0,
+      "reason": "Grace Failure consumed (tool)",
+      "timestamp": "2026-03-11T11:35:19.232Z"
+    },
+    {
+      "type": "success",
+      "delta": 5,
+      "reason": "subagent_success",
+      "timestamp": "2026-03-11T11:36:11.677Z"
+    },
+    {
+      "type": "failure",
+      "delta": 0,
+      "reason": "Grace Failure consumed (tool)",
+      "timestamp": "2026-03-11T12:03:34.333Z"
+    },
+    {
+      "type": "failure",
+      "delta": 0,
+      "reason": "Grace Failure consumed (tool)",
+      "timestamp": "2026-03-11T12:10:16.972Z"
+    },
+    {
+      "type": "failure",
+      "delta": 0,
+      "reason": "Grace Failure consumed (tool)",
+      "timestamp": "2026-03-11T12:12:08.624Z"
+    }
+  ]
+}
