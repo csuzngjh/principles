@@ -6,6 +6,7 @@ import { EventLogService, EventLog } from './event-log.js';
 import { DictionaryService } from './dictionary-service.js';
 import { PainDictionary } from './dictionary.js';
 import { TrustEngine } from './trust-engine.js';
+import { HygieneTracker } from './hygiene/tracker.js';
 
 /**
  * WorkspaceContext - Centralized management of workspace-specific paths and services.
@@ -21,6 +22,7 @@ export class WorkspaceContext {
     private _eventLog?: EventLog;
     private _dictionary?: PainDictionary;
     private _trust?: TrustEngine;
+    private _hygiene?: HygieneTracker;
 
     private constructor(workspaceDir: string, stateDir: string) {
         this.workspaceDir = workspaceDir;
@@ -65,6 +67,16 @@ export class WorkspaceContext {
             this._trust = new TrustEngine(this.workspaceDir);
         }
         return this._trust;
+    }
+
+    /**
+     * Hygiene tracking service for this workspace.
+     */
+    get hygiene(): HygieneTracker {
+        if (!this._hygiene) {
+            this._hygiene = new HygieneTracker(this.stateDir);
+        }
+        return this._hygiene;
     }
 
     /**

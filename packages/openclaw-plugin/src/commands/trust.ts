@@ -50,34 +50,49 @@ export function handleTrustCommand(ctx: PluginHookAgentContext & { workspaceDir?
     }
 
     const progressBar = createProgressBar(trustScore, 100, 15);
+    const hygiene = wctx.hygiene.getStats();
+    const persistenceScore = Math.min(100, hygiene.persistenceCount * 10); // 10 points per persistence
+    const hygieneBar = createProgressBar(persistenceScore, 100, 15);
 
     if (isZh) {
         return `
-📊 **Principles Disciple - 安全信任仪表盘**
+📊 **Principles Disciple - 系统状态看板**
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 🛡️ **安全阶级**: Stage ${stage} (${title})
 💰 **信任积分**: ${progressBar} ${trustScore}/100
+🧠 **认知卫生**: ${hygieneBar} ${hygiene.persistenceCount} 次落盘 (今日)
 
 **当前操作权限**:
 ${permissions}
 
+**今日知识沉淀**:
+- 物理落盘: ${hygiene.persistenceCount} 次
+- 累计字符: ${hygiene.totalCharsPersisted} chars
+- 空间整理: ${hygiene.groomingExecutedCount > 0 ? '🟢 良好' : '🟡 待整理'}
+
 **下一次晋升条件**: ${nextLevel}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-*💡 提示：成功完成任务即可涨分，频繁执行导致报错的命令将快速掉分并被降级。*
+*💡 提示：勤记笔记 (PLAN.md/memory) 有助于对抗上下文遗忘，提升系统稳定性。*
 `.trim();
     } else {
         return `
-📊 **Principles Disciple - Trust Dashboard**
+📊 **Principles Disciple - System Dashboard**
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 🛡️ **Security Stage**: Stage ${stage} (${title})
 💰 **Trust Score**: ${progressBar} ${trustScore}/100
+🧠 **Cognitive Hygiene**: ${hygieneBar} ${hygiene.persistenceCount} actions (Today)
 
 **Current Permissions**:
 ${permissions}
 
+**Knowledge Assets Today**:
+- Physical Persists: ${hygiene.persistenceCount} actions
+- Total Chars: ${hygiene.totalCharsPersisted} chars
+- Workspace Grooming: ${hygiene.groomingExecutedCount > 0 ? '🟢 Good' : '🟡 Pending'}
+
 **Next Promotion Requirement**: ${nextLevel}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-*💡 Hint: Trust is earned through successful tasks and lost through repetitive tool failures.*
+*💡 Hint: Frequent notes (PLAN.md/memory) prevent amnesia and ensure task continuity.*
 `.trim();
     }
 }
