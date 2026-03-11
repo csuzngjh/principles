@@ -50,6 +50,17 @@ export class WorkspaceContext {
     }
 
     /**
+     * Removes a workspace from the cache.
+     */
+    static dispose(workspaceDir: string): void {
+        const instance = this.instances.get(workspaceDir);
+        if (instance) {
+            instance.invalidate();
+            this.instances.delete(workspaceDir);
+        }
+    }
+
+    /**
      * Clears the instance cache (primarily for testing).
      */
     static clearCache(): void {
