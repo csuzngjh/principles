@@ -164,7 +164,7 @@ describe('loadModelIndex', () => {
 
     describe('自定义路径支持', () => {
         it('应从配置文件读取自定义 modelsDir', () => {
-            const stateDir = path.join(tempDir, 'memory', '.state');
+            const stateDir = path.join(tempDir, '.state');
             fs.mkdirSync(stateDir, { recursive: true });
             
             const config = {
@@ -189,7 +189,7 @@ describe('loadModelIndex', () => {
         });
 
         it('支持绝对路径的自定义 modelsDir', () => {
-            const stateDir = path.join(tempDir, 'memory', '.state');
+            const stateDir = path.join(tempDir, '.state');
             fs.mkdirSync(stateDir, { recursive: true });
             
             const absCustomDir = fs.mkdtempSync(path.join(os.tmpdir(), 'abs-models-'));
@@ -212,7 +212,7 @@ describe('loadModelIndex', () => {
         });
 
         it('当配置无效时应回退到默认路径', () => {
-            const stateDir = path.join(tempDir, 'memory', '.state');
+            const stateDir = path.join(tempDir, '.state');
             fs.mkdirSync(stateDir, { recursive: true });
             
             const config = {
@@ -228,7 +228,7 @@ describe('loadModelIndex', () => {
         });
 
         it('当自定义路径不存在时应返回默认消息', () => {
-            const stateDir = path.join(tempDir, 'memory', '.state');
+            const stateDir = path.join(tempDir, '.state');
             fs.mkdirSync(stateDir, { recursive: true });
             
             const config = {

@@ -20,7 +20,7 @@ describe('Pain Command', () => {
             consecutiveErrors: 2
         } as any);
 
-        const result = handlePainCommand({ sessionId: 's1', config: {} } as any, 'zh');
+        const result = handlePainCommand({ sessionId: 's1', config: { language: 'zh' } } as any);
         
         expect(result.text).toContain('Principles Disciple — Digital Nerve System Status');
         expect(result.text).toContain('经验摩擦指数');
@@ -40,7 +40,7 @@ describe('Pain Command', () => {
             consecutiveErrors: 0
         } as any);
 
-        const result = handlePainCommand({ sessionId: 's1', config: {} } as any);
+        const result = handlePainCommand({ sessionId: 's1', config: { language: 'en' } } as any);
         expect(result.text).toContain('🟢');
     });
 
@@ -50,7 +50,7 @@ describe('Pain Command', () => {
             consecutiveErrors: 3
         } as any);
 
-        const result = handlePainCommand({ sessionId: 's1', config: {} } as any);
+        const result = handlePainCommand({ sessionId: 's1', config: { language: 'en' } } as any);
         expect(result.text).toContain('🔴');
     });
 });

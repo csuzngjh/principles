@@ -34,7 +34,7 @@ const MAX_INDEX_SIZE = 50 * 1024; // 50KB
 function loadCustomConfig(workspaceDir?: string): { modelsDir?: string } | undefined {
     if (!workspaceDir) return undefined;
 
-    const configPath = path.join(workspaceDir, 'memory', '.state', 'pain_settings.json');
+    const configPath = resolvePdPath(workspaceDir, 'PAIN_SETTINGS');
     try {
         if (fs.existsSync(configPath)) {
             const raw = fs.readFileSync(configPath, 'utf-8');

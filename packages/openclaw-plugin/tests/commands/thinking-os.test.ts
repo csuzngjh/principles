@@ -50,7 +50,7 @@ describe('Thinking OS Command', () => {
         const result = handleThinkingOs({ config: { workspaceDir }, args: 'propose newly proposed test model with a signal section' } as any);
 
         expect(fs.appendFileSync).toHaveBeenCalled();
-        expect(result.text).toContain('recorded in `THINKING_OS_CANDIDATES.md`');
+        expect(result.text).toContain('recorded in `/memory/THINKING_OS_CANDIDATES.md`');
     });
 
     it('should return validation error if propose is empty', () => {

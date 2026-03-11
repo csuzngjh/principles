@@ -6,13 +6,15 @@ import * as path from 'path';
 /**
  * Handles the /pain status or /pain reset command to report or manage the current state of the Digital Nerve System.
  */
-export function handlePainCommand(ctx: PluginCommandContext, lang: string = 'en'): PluginCommandResult {
-    const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
-    const stateDir = (ctx.config?.stateDir as string) || path.join(workspaceDir, 'memory', '.state');
-    const args = (ctx.args || '').trim();
-    const sessionId = (ctx as any).sessionId;
+import { resolvePdPath } from '../core/paths.js';
 
+export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResult {
+    const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
+    const stateDir = (ctx.config?.stateDir as string) || resolvePdPath(workspaceDir, 'STATE_DIR');
+    const args = (ctx.args || '').trim();
+    const lang = (ctx.config?.language as string) || 'en';
     const isZh = lang === 'zh';
+    const sessionId = (ctx as any).sessionId;
 
     if (args === 'reset') {
         if (sessionId) {

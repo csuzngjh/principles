@@ -315,7 +315,7 @@ export function recordSuccess(
 
     // Record the change in the event log
     if (ctx) {
-        const stateDir = ctx.stateDir || path.join(workspaceDir, 'memory', '.state');
+        const stateDir = ctx.stateDir || resolvePdPath(workspaceDir, 'STATE_DIR');
         const eventLog = EventLogService.get(stateDir, ctx.api?.logger);
         eventLog.recordTrustChange(ctx.sessionId, {
             previousScore,
@@ -366,7 +366,7 @@ export function recordFailure(
 
     // Record the change in the event log
     if (ctx) {
-        const stateDir = ctx.stateDir || path.join(workspaceDir, 'memory', '.state');
+        const stateDir = ctx.stateDir || resolvePdPath(workspaceDir, 'STATE_DIR');
         const eventLog = EventLogService.get(stateDir, ctx.api?.logger);
         eventLog.recordTrustChange(ctx.sessionId, {
             previousScore,
@@ -410,7 +410,7 @@ export function adjustTrustScore(
     saveAgentScorecard(workspaceDir, scorecard);
 
     if (ctx) {
-        const stateDir = ctx.stateDir || path.join(workspaceDir, 'memory', '.state');
+        const stateDir = ctx.stateDir || resolvePdPath(workspaceDir, 'STATE_DIR');
         const eventLog = EventLogService.get(stateDir, ctx.api?.logger);
         eventLog.recordTrustChange(ctx.sessionId, {
             previousScore,
