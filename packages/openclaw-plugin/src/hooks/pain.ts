@@ -3,16 +3,33 @@ import * as path from 'path';
 import { isRisky, normalizePath } from '../utils/io.js';
 import { normalizeProfile } from '../core/profile.js';
 import { computePainScore, writePainFlag } from '../core/pain.js';
-import { trackFriction, resetFriction, getSession } from '../core/session-tracker.js';
+import { trackFriction, resetFriction } from '../core/session-tracker.js';
 import { denoiseError, computeHash } from '../utils/hashing.js';
 import { SystemLogger } from '../core/system-logger.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import type { PluginHookAfterToolCallEvent, PluginHookToolContext, OpenClawPluginApi } from '../openclaw-sdk.js';
 
+/**
+ * Interface for tool parameters to avoid 'any'
+ */
+interface ToolParams {
+  file_path?: string;
+  path?: string;
+  file?: string;
+  content?: string;
+  new_string?: string;
+  text?: string;
+  query?: string;
+  input?: string;
+  arguments?: string;
+}
+
+const WRITE_TOOLS = ['write', 'edit', 'apply_patch', 'write_file', 'edit_file', 'replace'];
+
 export function handleAfterToolCall(
   event: PluginHookAfterToolCallEvent,
   ctx: PluginHookToolContext & { workspaceDir?: string; pluginConfig?: Record<string, unknown> },
-  api?: OpenClawPluginApi // 👈 核心修复：接受 api 参数
+  api?: OpenClawPluginApi
 ): void {
   const effectiveWorkspaceDir = ctx.workspaceDir || (api as any)?.workspaceDir || api?.resolvePath?.('.');
   if (!effectiveWorkspaceDir) {
@@ -24,12 +41,13 @@ export function handleAfterToolCall(
   const eventLog = wctx.eventLog;
   const trust = wctx.trust;
   const sessionId = ctx.sessionId || 'unknown';
+  const params = event.params as ToolParams;
 
   // ── Track A: Empirical Friction (GFI) ──
   
-  // 0. Special Case: Manual Pain Intervention (from Skill)
+  // 0. Special Case: Manual Pain Intervention
   if (event.toolName === 'pain' || event.toolName === 'skill:pain') {
-    const reason = (event.params as any).input || (event.params as any).arguments || 'Manual intervention';
+    const reason = params.input || params.arguments || 'Manual intervention';
     trackFriction(sessionId, 100, 'manual_pain', effectiveWorkspaceDir);
     SystemLogger.log(effectiveWorkspaceDir, 'MANUAL_PAIN', `User manually triggered pain: ${reason}`);
     eventLog.recordPainSignal(sessionId, {
@@ -55,7 +73,7 @@ export function handleAfterToolCall(
     
     // ── Trust Engine: Record failure ──
     const errorType = extractErrorType(event.error || errorText);
-    const filePath = (event.params as any).file_path || (event.params as any).path || (event.params as any).file;
+    const filePath = params.file_path || params.path || params.file;
     const relPath = typeof filePath === 'string' ? normalizePath(filePath, effectiveWorkspaceDir) : 'unknown';
     
     // Load profile for risk_paths check
@@ -85,11 +103,11 @@ export function handleAfterToolCall(
       exitCode,
     });
   } else {
+    // ── SUCCESS BRANCH ──
     resetFriction(sessionId, effectiveWorkspaceDir);
     
-    const WRITE_TOOLS = ['write', 'edit', 'apply_patch', 'write_file', 'edit_file', 'replace'];
     if (WRITE_TOOLS.includes(event.toolName)) {
-      const filePath = (event.params as any).file_path || (event.params as any).path || (event.params as any).file;
+      const filePath = params.file_path || params.path || params.file;
       eventLog.recordToolCall(sessionId, {
         toolName: event.toolName,
         filePath: typeof filePath === 'string' ? filePath : undefined,
@@ -98,11 +116,12 @@ export function handleAfterToolCall(
 
       // ── Hygiene Tracking: Record persistence actions ──
       if (typeof filePath === 'string') {
-        const isMemory = filePath.includes('memory/') || filePath === 'MEMORY.md';
-        const isPlan = filePath === 'PLAN.md' || filePath.endsWith('/PLAN.md');
+        const normalized = filePath.replace(/\\/g, '/');
+        const isMemory = /(?:^|\/)memory\//.test(normalized) || normalized.endsWith('/MEMORY.md') || normalized === 'MEMORY.md';
+        const isPlan = normalized === 'PLAN.md' || normalized.endsWith('/PLAN.md');
         
         if (isMemory || isPlan) {
-          const content = (event.params as any).content || (event.params as any).new_string || '';
+          const content = params.content || params.new_string || '';
           wctx.hygiene.recordPersistence({
             ts: new Date().toISOString(),
             tool: event.toolName,
@@ -114,9 +133,9 @@ export function handleAfterToolCall(
       }
     }
 
-    // Special case for memory_store tool
-    if (event.toolName === 'memory_store' || event.toolName === 'memory_recall') {
-       const text = (event.params as any).text || (event.params as any).query || '';
+    // Special case for memory_store tool (Success only)
+    if (event.toolName === 'memory_store') {
+       const text = params.text || '';
        wctx.hygiene.recordPersistence({
          ts: new Date().toISOString(),
          tool: event.toolName,
@@ -127,15 +146,12 @@ export function handleAfterToolCall(
     }
   }
 
-  // ── Legacy/Risky Write Pain Logic ──
-  const WRITE_TOOLS = ['write', 'edit', 'apply_patch'];
-  if (!WRITE_TOOLS.includes(event.toolName)) {
+  // ── Legacy/Risky Write Pain Logic (Unified WRITE_TOOLS) ──
+  if (!WRITE_TOOLS.includes(event.toolName) || !isFailure) {
     return;
   }
 
-  if (!isFailure) return;
-
-  const filePath = (event.params as any).file_path || (event.params as any).path || (event.params as any).file;
+  const filePath = params.file_path || params.path || params.file;
   const relPath = typeof filePath === 'string' ? normalizePath(filePath, effectiveWorkspaceDir) : 'unknown';
 
   const profilePath = wctx.resolve('PROFILE');

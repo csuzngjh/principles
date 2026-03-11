@@ -14,6 +14,16 @@ export class HygieneTracker {
   constructor(stateDir: string, logger?: PluginLogger) {
     this.statsFile = path.join(stateDir, 'hygiene-stats.json');
     this.logger = logger;
+    
+    // Ensure state directory exists
+    if (!fs.existsSync(stateDir)) {
+      try {
+        fs.mkdirSync(stateDir, { recursive: true });
+      } catch (e) {
+        this.logger?.error(`[PD] Failed to create state directory ${stateDir}: ${String(e)}`);
+      }
+    }
+    
     this.currentStats = this.loadStats();
   }
 
@@ -21,12 +31,21 @@ export class HygieneTracker {
     const today = new Date().toISOString().split('T')[0];
     if (fs.existsSync(this.statsFile)) {
       try {
-        const allStats = JSON.parse(fs.readFileSync(this.statsFile, 'utf-8'));
-        if (allStats[today]) {
-          return allStats[today];
+        const content = fs.readFileSync(this.statsFile, 'utf-8');
+        if (content.trim()) {
+          const allStats = JSON.parse(content);
+          if (allStats[today]) {
+            return allStats[today];
+          }
         }
       } catch (e) {
-        this.logger?.error(`[PD] Failed to load hygiene-stats.json: ${String(e)}`);
+        this.logger?.error(`[PD] Failed to load/parse hygiene-stats.json: ${String(e)}`);
+        // If file is corrupted, we might want to back it up and start fresh
+        try {
+          const backupPath = `${this.statsFile}.bak`;
+          fs.renameSync(this.statsFile, backupPath);
+          this.logger?.warn(`[PD] Corrupted hygiene stats backed up to ${backupPath}`);
+        } catch (_renameErr) {}
       }
     }
     return createEmptyHygieneStats(today);
@@ -34,15 +53,28 @@ export class HygieneTracker {
 
   private saveStats(): void {
     let allStats: Record<string, HygieneStats> = {};
+    
+    // Check if we need to rotate date (reset currentStats if date changed)
+    const today = new Date().toISOString().split('T')[0];
+    if (this.currentStats.date !== today) {
+      this.currentStats = createEmptyHygieneStats(today);
+    }
+
     if (fs.existsSync(this.statsFile)) {
       try {
-        allStats = JSON.parse(fs.readFileSync(this.statsFile, 'utf-8'));
+        const content = fs.readFileSync(this.statsFile, 'utf-8');
+        if (content.trim()) {
+          allStats = JSON.parse(content);
+        }
       } catch (e) {
         this.logger?.error(`[PD] Failed to parse hygiene-stats.json for saving: ${String(e)}`);
       }
     }
+    
     allStats[this.currentStats.date] = this.currentStats;
+    
     try {
+      // Use a temporary file for atomic write if possible, or simple write
       fs.writeFileSync(this.statsFile, JSON.stringify(allStats, null, 2), 'utf-8');
     } catch (e) {
       this.logger?.error(`[PD] Failed to write hygiene-stats.json: ${String(e)}`);
@@ -75,6 +107,11 @@ export class HygieneTracker {
   }
 
   getStats(): HygieneStats {
+    // Check for date change on every get
+    const today = new Date().toISOString().split('T')[0];
+    if (this.currentStats.date !== today) {
+      this.currentStats = createEmptyHygieneStats(today);
+    }
     return this.currentStats;
   }
 }
