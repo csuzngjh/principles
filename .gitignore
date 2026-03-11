@@ -68,3 +68,6 @@ docs/SHELLCHECK_GUIDE.md
 docs/STATUSLINE_IMPROVEMENTS.md
 _scratchpad/
 packages/openclaw-plugin/vitest.jsondocs/
+
+# Interactive Conversation Test Output
+packages/openclaw-plugin/tests/interactive-conversation/output/

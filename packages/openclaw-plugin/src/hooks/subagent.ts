@@ -1,6 +1,6 @@
 import { PluginHookSubagentEndedEvent, PluginHookAgentContext } from '../openclaw-sdk.js';
 import { writePainFlag } from '../core/pain.js';
-import { adjustTrustScore, TRUST_CONFIG } from '../core/trust-engine-v2.js';
+import { recordSuccess, TRUST_CONFIG } from '../core/trust-engine-v2.js';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -42,8 +42,8 @@ export function handleSubagentEnded(
     // Since we can't reliably detect the agentId from targetSessionKey,
     // we clear the oldest in_progress task assuming it was the one being worked on.
     if (outcome === 'ok' || outcome === 'deleted') {
-        // ── Trust Engine: Increment score on success ──
-        adjustTrustScore(workspaceDir, TRUST_CONFIG.REWARDS.SUBAGENT_SUCCESS, `subagent:${event.targetSessionKey}`, {
+        // ── Trust Engine: Record success using V2 API ──
+        recordSuccess(workspaceDir, 'subagent_success', {
             sessionId: ctx.sessionId,
             stateDir: (ctx as any).stateDir,
             api: (ctx as any).api
