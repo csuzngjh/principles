@@ -13,3 +13,5 @@
 | 11:58:47 | [test-execution-20260311](../reports-2026-03-11/test-execution-20260311-20260311-115847/SUMMARY.md) | completed | [查看](../reports-2026-03-11/test-execution-20260311-20260311-115847/) |
 | 12:05:31 | [trust-system-deep-round2](../reports-2026-03-11/trust-system-deep-round2-20260311-120531/SUMMARY.md) | completed | [查看](../reports-2026-03-11/trust-system-deep-round2-20260311-120531/) |
 | 12:14:45 | [gatekeeper-boundaries](../reports-2026-03-11/gatekeeper-boundaries-20260311-121445/SUMMARY.md) | partial | [查看](../reports-2026-03-11/gatekeeper-boundaries-20260311-121445/) |
+| 12:35:41 | [pain-evolution-chain](../reports-2026-03-11/pain-evolution-chain-20260311-123541/SUMMARY.md) | failed | [查看](../reports-2026-03-11/pain-evolution-chain-20260311-123541/) |
+| 13:12:50 | [gatekeeper-retest](../reports-2026-03-11/gatekeeper-retest-20260311-131250/SUMMARY.md) | partial | [查看](../reports-2026-03-11/gatekeeper-retest-20260311-131250/) |
