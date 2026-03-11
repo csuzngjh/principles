@@ -1,13 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { handleBeforePromptBuild } from '../../src/hooks/prompt';
 import * as sessionTracker from '../../src/core/session-tracker';
-import * as trustEngine from '../../src/core/trust-engine';
+import * as trustEngine from '../../src/core/trust-engine-v2.js';
 import fs from 'fs';
 import path from 'path';
 
 vi.mock('fs');
 vi.mock('../../src/core/session-tracker');
-vi.mock('../../src/core/trust-engine');
+vi.mock('../../src/core/trust-engine-v2.js');
 
 describe('Prompt Context Injection Hook', () => {
   beforeEach(() => {
