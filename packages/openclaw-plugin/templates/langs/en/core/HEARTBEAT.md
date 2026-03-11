@@ -14,6 +14,7 @@ During every heartbeat, self-check the following items to maintain the system's 
 ## 3. System Health
 - [ ] **Toolchain**: Check `docs/SYSTEM_CAPABILITIES.json` to ensure core tools (e.g., `rg`, `sg`) are available.
 - [ ] **Doc Sync**: Ensure `PLAN.md` status matches actual progress.
+- [ ] **Entropy Check (Grooming)**: Run `ls -F` on the project root. If you detect stray temporary files, test scripts, or improperly named documents, immediately invoke the `workspace-grooming` skill to organize the environment.
 
 ---
 *If there are no issues, strictly reply with `HEARTBEAT_OK` to save tokens.*

@@ -201,6 +201,14 @@ const plugin = {
     });
 
     api.registerCommand({
+      name: "workspace-grooming",
+      description: "Trigger a cyber-housekeeper to clean up and organize your workspace root.",
+      handler: (_ctx) => {
+        return { text: "请调用 `workspace-grooming` 技能来执行大扫除。例如输入: '执行 /workspace-grooming 技能'" };
+      }
+    });
+
+    api.registerCommand({
       name: "trust",
       description: "View Agent trust score and security stage",
       handler: (ctx) => {
