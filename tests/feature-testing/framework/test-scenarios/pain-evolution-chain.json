@@ -19,7 +19,7 @@
     "initial_state": {
       "evolution_queue": "empty",
       "pain_flag": "absent",
-      "trust_score": "will start at 59"
+      "trust_score": "will start at 85"
     },
     "data_files": {
       "pain_flag": "workspace/code/principles/docs/.pain_flag",

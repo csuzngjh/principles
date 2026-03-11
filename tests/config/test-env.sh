@@ -18,7 +18,7 @@ export CHECK_INTERVAL="${CHECK_INTERVAL:-20}"
 # 日志路径
 export GATEWAY_LOG_DIR="${GATEWAY_LOG_DIR:-/tmp/openclaw}"
 export SESSION_DIR="${SESSION_DIR:-$HOME/.openclaw/agents/$AGENT_ID/sessions}"
-export SCORECARD_PATH="${SCORECARD_PATH:-$WORKSPACE_DIR/docs/AGENT_SCORECARD.json}"
+export SCORECARD_PATH="${SCORECARD_PATH:-$WORKSPACE_DIR/.state/AGENT_SCORECARD.json}"
 
 echo "✅ 配置文件创建完成"
 echo "   WORKSPACE: $WORKSPACE_DIR"

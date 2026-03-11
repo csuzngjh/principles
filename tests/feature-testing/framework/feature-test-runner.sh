@@ -348,7 +348,7 @@ validate_custom() {
         cold_start_initialization)
             local expected_score=$(echo "$params" | jq -r '.expected_score')
             local expected_grace=$(echo "$params" | jq -r '.expected_grace')
-            local scorecard_path="$WORKSPACE_DIR/docs/AGENT_SCORECARD.json"
+            local scorecard_path="$WORKSPACE_DIR/.state/AGENT_SCORECARD.json"
 
             if [ ! -f "$scorecard_path" ]; then
                 log_error "Scorecard not found"
@@ -384,7 +384,7 @@ validate_custom() {
             local expected_score=$(echo "$params" | jq -r '.expected_score')
             local score_should_change=$(echo "$params" | jq -r '.score_should_change // "true"')
 
-            local scorecard_path="$WORKSPACE_DIR/docs/AGENT_SCORECARD.json"
+            local scorecard_path="$WORKSPACE_DIR/.state/AGENT_SCORECARD.json"
             local actual_grace=$(cat "$scorecard_path" | jq -r '.grace_failures_remaining // 0')
             local actual_score=$(cat "$scorecard_path" | jq -r '.trust_score')
 
@@ -410,7 +410,7 @@ validate_custom() {
             local expected_delta=$(echo "$params" | jq -r '.expected_delta')
             local failure_type=$(echo "$params" | jq -r '.failure_type // ""')
 
-            local scorecard_path="$WORKSPACE_DIR/docs/AGENT_SCORECARD.json"
+            local scorecard_path="$WORKSPACE_DIR/.state/AGENT_SCORECARD.json"
             local actual_score=$(cat "$scorecard_path" | jq -r '.trust_score')
 
             # 计算实际delta（从history中查找最近的penalty）
@@ -436,7 +436,7 @@ validate_custom() {
             local expected_stage=$(echo "$params" | jq -r '.expected_stage')
             local min_score=$(echo "$params" | jq -r '.min_expected_score')
 
-            local scorecard_path="$WORKSPACE_DIR/docs/AGENT_SCORECARD.json"
+            local scorecard_path="$WORKSPACE_DIR/.state/AGENT_SCORECARD.json"
             local actual_streak=$(cat "$scorecard_path" | jq -r '.success_streak // 0')
             local actual_score=$(cat "$scorecard_path" | jq -r '.trust_score')
 
@@ -475,7 +475,7 @@ validate_custom() {
             local max_score=$(echo "$params" | jq -r '.max_score // -1')
             local capped=$(echo "$params" | jq -r '.capped // false')
 
-            local scorecard_path="$WORKSPACE_DIR/docs/AGENT_SCORECARD.json"
+            local scorecard_path="$WORKSPACE_DIR/.state/AGENT_SCORECARD.json"
             local actual_score=$(cat "$scorecard_path" | jq -r '.trust_score')
 
             if [ "$min_score" != "-1" ]; then
@@ -505,7 +505,7 @@ validate_custom() {
             local expected_stage=$(echo "$params" | jq -r '.expected_stage')
             local expected_score=$(echo "$params" | jq -r '.expected_score')
 
-            local scorecard_path="$WORKSPACE_DIR/docs/AGENT_SCORECARD.json"
+            local scorecard_path="$WORKSPACE_DIR/.state/AGENT_SCORECARD.json"
             local actual_score=$(cat "$scorecard_path" | jq -r '.trust_score')
 
             # Determine actual stage from score
@@ -585,7 +585,7 @@ validate_custom() {
         cold_start_initialization)
             local expected_score=$(echo "$params" | jq -r '.expected_score')
             local expected_grace=$(echo "$params" | jq -r '.expected_grace')
-            local scorecard_path="$WORKSPACE_DIR/docs/AGENT_SCORECARD.json"
+            local scorecard_path="$WORKSPACE_DIR/.state/AGENT_SCORECARD.json"
 
             if [ ! -f "$scorecard_path" ]; then
                 log_error "Scorecard not found"
@@ -621,7 +621,7 @@ validate_custom() {
             local expected_score=$(echo "$params" | jq -r '.expected_score')
             local score_should_change=$(echo "$params" | jq -r '.score_should_change // "true"')
 
-            local scorecard_path="$WORKSPACE_DIR/docs/AGENT_SCORECARD.json"
+            local scorecard_path="$WORKSPACE_DIR/.state/AGENT_SCORECARD.json"
             local actual_grace=$(cat "$scorecard_path" | jq -r '.grace_failures_remaining // 0')
             local actual_score=$(cat "$scorecard_path" | jq -r '.trust_score')
 
@@ -647,7 +647,7 @@ validate_custom() {
             local expected_delta=$(echo "$params" | jq -r '.expected_delta')
             local failure_type=$(echo "$params" | jq -r '.failure_type // ""')
 
-            local scorecard_path="$WORKSPACE_DIR/docs/AGENT_SCORECARD.json"
+            local scorecard_path="$WORKSPACE_DIR/.state/AGENT_SCORECARD.json"
             local actual_score=$(cat "$scorecard_path" | jq -r '.trust_score')
 
             # 计算实际delta（从history中查找最近的penalty）
@@ -673,7 +673,7 @@ validate_custom() {
             local expected_stage=$(echo "$params" | jq -r '.expected_stage')
             local min_score=$(echo "$params" | jq -r '.min_expected_score')
 
-            local scorecard_path="$WORKSPACE_DIR/docs/AGENT_SCORECARD.json"
+            local scorecard_path="$WORKSPACE_DIR/.state/AGENT_SCORECARD.json"
             local actual_streak=$(cat "$scorecard_path" | jq -r '.success_streak // 0')
             local actual_score=$(cat "$scorecard_path" | jq -r '.trust_score')
 
@@ -712,7 +712,7 @@ validate_custom() {
             local max_score=$(echo "$params" | jq -r '.max_score // -1')
             local capped=$(echo "$params" | jq -r '.capped // false')
 
-            local scorecard_path="$WORKSPACE_DIR/docs/AGENT_SCORECARD.json"
+            local scorecard_path="$WORKSPACE_DIR/.state/AGENT_SCORECARD.json"
             local actual_score=$(cat "$scorecard_path" | jq -r '.trust_score')
 
             if [ "$min_score" != "-1" ]; then
@@ -742,7 +742,7 @@ validate_custom() {
             local expected_stage=$(echo "$params" | jq -r '.expected_stage')
             local expected_score=$(echo "$params" | jq -r '.expected_score')
 
-            local scorecard_path="$WORKSPACE_DIR/docs/AGENT_SCORECARD.json"
+            local scorecard_path="$WORKSPACE_DIR/.state/AGENT_SCORECARD.json"
             local actual_score=$(cat "$scorecard_path" | jq -r '.trust_score')
 
             # Determine actual stage from score
@@ -873,7 +873,7 @@ execute_cleanup_step() {
                 fi
                 ;;
             reset_trust)
-                local score=$(echo "$action_decoded" | jq -r '.score // 59')
+                local score=$(echo "$action_decoded" | jq -r '.score // 85')
                 jq ".trust_score = $score" "$SCORECARD_PATH" > /tmp/scorecard.json
                 mv /tmp/scorecard.json "$SCORECARD_PATH"
                 log_info "Reset trust score to $score"
