@@ -6,6 +6,7 @@ import { normalizeProfile } from '../core/profile.js';
 import { EventLogService } from '../core/event-log.js';
 import { trackBlock } from '../core/session-tracker.js';
 import { getAgentScorecard, TRUST_CONFIG } from '../core/trust-engine-v2.js';
+import { resolvePdPath } from '../core/paths.js';
 import { assessRiskLevel, estimateLineChanges } from '../core/risk-calculator.js';
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult } from '../openclaw-sdk.js';
 
@@ -27,7 +28,7 @@ export function handleBeforeToolCall(
   }
 
   // 2. Load Profile
-  const profilePath = path.join(ctx.workspaceDir, 'docs', 'PROFILE.json');
+  const profilePath = resolvePdPath(ctx.workspaceDir, 'PROFILE');
   let profile = {
     risk_paths: [] as string[],
     gate: { require_plan_for_risk_paths: true },
@@ -176,7 +177,7 @@ export function handleBeforeToolCall(
   if (risky && profile.gate.require_plan_for_risk_paths) {
     const status = getPlanStatus(ctx.workspaceDir);
     if (status !== 'READY') {
-      return block(relPath, 'No READY plan found in docs/PLAN.md.', ctx, event.toolName, status);
+      return block(relPath, 'No READY plan found in PLAN.md.', ctx, event.toolName, status);
     }
   }
 }
