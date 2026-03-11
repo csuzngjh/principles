@@ -3,13 +3,13 @@ import { handleAfterToolCall } from '../../src/hooks/pain';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as ioUtils from '../../src/utils/io';
-import * as trustEngine from '../../src/core/trust-engine.js';
-import { EventLogService } from '../../src/core/event-log.js';
+import { WorkspaceContext } from '../../src/core/workspace-context';
+import { EventLogService } from '../../src/core/event-log';
 
 vi.mock('fs');
 vi.mock('../../src/utils/io.js');
-vi.mock('../../src/core/trust-engine.js');
-vi.mock('../../src/core/event-log.js');
+vi.mock('../../src/core/workspace-context');
+vi.mock('../../src/core/event-log');
 
 describe('Post-Write Checks & Pain Hook', () => {
   const workspaceDir = '/mock/workspace';
@@ -18,9 +18,29 @@ describe('Post-Write Checks & Pain Hook', () => {
     recordPainSignal: vi.fn(),
     recordTrustChange: vi.fn(),
   };
+  const mockTrust = {
+    recordFailure: vi.fn(),
+    recordSuccess: vi.fn(),
+  };
+  const mockConfig = {
+    get: vi.fn().mockReturnValue(30),
+  };
+
+  const mockWctx = {
+    workspaceDir,
+    stateDir: '/mock/state',
+    config: mockConfig,
+    eventLog: mockEventLog,
+    trust: mockTrust,
+    resolve: vi.fn().mockImplementation((key) => {
+        if (key === 'PROFILE') return path.join(workspaceDir, '.principles', 'PROFILE.json');
+        return '';
+    }),
+  };
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(WorkspaceContext.fromHookContext).mockReturnValue(mockWctx as any);
     vi.mocked(EventLogService.get).mockReturnValue(mockEventLog as any);
   });
 
@@ -28,8 +48,11 @@ describe('Post-Write Checks & Pain Hook', () => {
     const mockCtx = { workspaceDir, sessionId: 's1' };
     const mockEvent = { toolName: 'read', params: {}, result: { exitCode: 0 }, error: undefined };
     handleAfterToolCall(mockEvent as any, mockCtx as any);
+    
+    // Should still create context
+    expect(WorkspaceContext.fromHookContext).toHaveBeenCalled();
     expect(fs.writeFileSync).not.toHaveBeenCalled();
-    expect(trustEngine.recordFailure).not.toHaveBeenCalled();
+    expect(mockTrust.recordFailure).not.toHaveBeenCalled();
   });
 
   it('should capture pain on tool error with correct source and record failure', () => {
@@ -53,9 +76,8 @@ describe('Post-Write Checks & Pain Hook', () => {
     const callArgs = vi.mocked(fs.writeFileSync).mock.calls[0];
     expect(callArgs[0]).toContain('.pain_flag');
 
-    // Verify recordFailure call
-    expect(trustEngine.recordFailure).toHaveBeenCalledWith(
-        workspaceDir, 
+    // Verify recordFailure call through context
+    expect(mockTrust.recordFailure).toHaveBeenCalledWith(
         'tool',
         expect.objectContaining({ sessionId: 's1' })
     );

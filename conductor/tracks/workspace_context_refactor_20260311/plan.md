@@ -15,10 +15,10 @@
 - [x] Task: Conductor - User Manual Verification 'Phase 2: Service Integration & Compatibility' (Protocol in workflow.md) [8d81226]
 
 ## Phase 3: Incremental Hook & Command Migration (Strangler Fig)
-- [ ] Task: Phase 3.1: Refactor `src/hooks/pain.ts` and `src/hooks/llm.ts` (High frequency, simple state dependency).
-- [ ] Task: Phase 3.2: Refactor `src/hooks/gate.ts` (Complexity high, critical for security).
-- [ ] Task: Phase 3.3: Refactor `src/hooks/prompt.ts`, `src/hooks/subagent.ts`, and `src/hooks/lifecycle.ts`.
-- [ ] Task: Phase 3.4: Refactor all slash commands in `src/commands/*.ts`.
+- [x] Task: Phase 3.1: Refactor `src/hooks/pain.ts` and `src/hooks/llm.ts` (High frequency, simple state dependency). [95c7b90]
+- [x] Task: Phase 3.2: Refactor `src/hooks/gate.ts` (Complexity high, critical for security). [85635b8]
+- [x] Task: Phase 3.3: Refactor `src/hooks/prompt.ts`, `src/hooks/subagent.ts`, and `src/hooks/lifecycle.ts`. [ad6f240]
+- [~] Task: Phase 3.4: Refactor all slash commands in `src/commands/*.ts`.
 - [ ] Task: Write failing tests for each sub-phase to ensure they correctly consume the context and meet performance targets.
 - [ ] Task: Conductor - User Manual Verification 'Phase 3: Incremental Migration' (Protocol in workflow.md)
 

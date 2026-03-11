@@ -141,4 +141,15 @@ export class PainDictionary {
             console.error('[PD] Failed to flush pain_dictionary.json:', e);
         }
     }
+
+    getStats(): { totalRules: number; totalHits: number } {
+        let totalHits = 0;
+        for (const rule of Object.values(this.data.rules)) {
+            totalHits += rule.hits || 0;
+        }
+        return {
+            totalRules: Object.keys(this.data.rules).length,
+            totalHits
+        };
+    }
 }

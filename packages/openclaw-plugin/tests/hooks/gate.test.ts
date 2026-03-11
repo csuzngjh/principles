@@ -2,18 +2,40 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { handleBeforeToolCall } from '../../src/hooks/gate.js';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as trustEngine from '../../src/core/trust-engine.js';
+import { WorkspaceContext } from '../../src/core/workspace-context.js';
 import * as riskCalculator from '../../src/core/risk-calculator.js';
 
 vi.mock('fs');
-vi.mock('../../src/core/trust-engine.js');
+vi.mock('../../src/core/workspace-context.js');
 vi.mock('../../src/core/risk-calculator.js');
 
 describe('Progressive Gate Hook', () => {
   const workspaceDir = '/mock/workspace';
   
+  const mockTrust = {
+    getScorecard: vi.fn(),
+  };
+
+  const mockEventLog = {
+    recordGateBlock: vi.fn(),
+    recordPlanApproval: vi.fn(),
+  };
+
+  const mockWctx = {
+    workspaceDir,
+    stateDir: '/mock/state',
+    trust: mockTrust,
+    eventLog: mockEventLog,
+    resolve: vi.fn().mockImplementation((key) => {
+        if (key === 'PROFILE') return path.join(workspaceDir, '.principles', 'PROFILE.json');
+        if (key === 'PLAN') return path.join(workspaceDir, 'PLAN.md');
+        return '';
+    }),
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(WorkspaceContext.fromHookContext).mockReturnValue(mockWctx as any);
     // Default mock implementation for risk calculator
     vi.mocked(riskCalculator.assessRiskLevel).mockReturnValue('LOW');
     vi.mocked(riskCalculator.estimateLineChanges).mockReturnValue(1);
@@ -27,7 +49,7 @@ describe('Progressive Gate Hook', () => {
     };
 
     // Trust < 30 => Stage 1
-    vi.mocked(trustEngine.getAgentScorecard).mockReturnValue({ trust_score: 25 });
+    mockTrust.getScorecard.mockReturnValue({ trust_score: 25 });
     vi.mocked(fs.existsSync).mockReturnValue(true);
     vi.mocked(fs.readFileSync).mockImplementation((p: any) => {
         return JSON.stringify({ risk_paths: ['src/'], progressive_gate: { enabled: true } });
@@ -48,7 +70,7 @@ describe('Progressive Gate Hook', () => {
     };
 
     // Trust 50 => Stage 2
-    vi.mocked(trustEngine.getAgentScorecard).mockReturnValue({ trust_score: 50 });
+    mockTrust.getScorecard.mockReturnValue({ trust_score: 50 });
     vi.mocked(riskCalculator.estimateLineChanges).mockReturnValue(15);
     vi.mocked(fs.existsSync).mockReturnValue(true);
     vi.mocked(fs.readFileSync).mockImplementation((p: any) => {
@@ -70,7 +92,7 @@ describe('Progressive Gate Hook', () => {
     };
 
     // Trust 70 => Stage 3
-    vi.mocked(trustEngine.getAgentScorecard).mockReturnValue({ trust_score: 70 });
+    mockTrust.getScorecard.mockReturnValue({ trust_score: 70 });
     vi.mocked(fs.existsSync).mockReturnValue(true);
     vi.mocked(fs.readFileSync).mockImplementation((p: any) => {
         if (p.includes('PROFILE.json')) return JSON.stringify({ risk_paths: ['src/'], progressive_gate: { enabled: true } });
@@ -93,7 +115,7 @@ describe('Progressive Gate Hook', () => {
     };
 
     // Trust 90 => Stage 4
-    vi.mocked(trustEngine.getAgentScorecard).mockReturnValue({ trust_score: 90 });
+    mockTrust.getScorecard.mockReturnValue({ trust_score: 90 });
     vi.mocked(fs.existsSync).mockReturnValue(true);
     vi.mocked(fs.readFileSync).mockImplementation((p: any) => {
         return JSON.stringify({ risk_paths: ['src/'], progressive_gate: { enabled: true } });
@@ -113,7 +135,7 @@ describe('Progressive Gate Hook', () => {
       };
 
       // Trust < 30 => Stage 1
-      vi.mocked(trustEngine.getAgentScorecard).mockReturnValue({ trust_score: 25 });
+      mockTrust.getScorecard.mockReturnValue({ trust_score: 25 });
       vi.mocked(fs.existsSync).mockReturnValue(true);
       vi.mocked(fs.readFileSync).mockImplementation((p: any) => {
         if (p.includes('PROFILE.json')) {
@@ -146,7 +168,7 @@ describe('Progressive Gate Hook', () => {
         params: { file_path: 'skills/my-skill.md' }
       };
 
-      vi.mocked(trustEngine.getAgentScorecard).mockReturnValue({ trust_score: 25 });
+      mockTrust.getScorecard.mockReturnValue({ trust_score: 25 });
       vi.mocked(riskCalculator.assessRiskLevel).mockReturnValue('MEDIUM'); // Make it risky
       vi.mocked(fs.existsSync).mockReturnValue(true);
       vi.mocked(fs.readFileSync).mockImplementation((p: any) => {
@@ -182,7 +204,7 @@ describe('Progressive Gate Hook', () => {
         params: { file_path: 'src/other.ts' }
       };
 
-      vi.mocked(trustEngine.getAgentScorecard).mockReturnValue({ trust_score: 25 });
+      mockTrust.getScorecard.mockReturnValue({ trust_score: 25 });
       vi.mocked(fs.existsSync).mockReturnValue(true);
       vi.mocked(fs.readFileSync).mockImplementation((p: any) => {
         if (p.includes('PROFILE.json')) {
@@ -217,7 +239,7 @@ describe('Progressive Gate Hook', () => {
         params: { file_path: 'skills/my-skill.md' }
       };
 
-      vi.mocked(trustEngine.getAgentScorecard).mockReturnValue({ trust_score: 25 });
+      mockTrust.getScorecard.mockReturnValue({ trust_score: 25 });
       vi.mocked(riskCalculator.assessRiskLevel).mockReturnValue('MEDIUM'); // Make it risky
       vi.mocked(fs.existsSync).mockReturnValue(true);
       vi.mocked(fs.readFileSync).mockImplementation((p: any) => {
@@ -253,7 +275,7 @@ describe('Progressive Gate Hook', () => {
         params: { file_path: 'skills/my-skill.md', content: 'a\n'.repeat(20) }
       };
 
-      vi.mocked(trustEngine.getAgentScorecard).mockReturnValue({ trust_score: 25 });
+      mockTrust.getScorecard.mockReturnValue({ trust_score: 25 });
       vi.mocked(riskCalculator.assessRiskLevel).mockReturnValue('MEDIUM'); // Make it risky
       vi.mocked(riskCalculator.estimateLineChanges).mockReturnValue(20);
       vi.mocked(fs.existsSync).mockReturnValue(true);
@@ -290,7 +312,7 @@ describe('Progressive Gate Hook', () => {
         params: { file_path: 'src/main.ts' }
       };
 
-      vi.mocked(trustEngine.getAgentScorecard).mockReturnValue({ trust_score: 25 });
+      mockTrust.getScorecard.mockReturnValue({ trust_score: 25 });
       vi.mocked(fs.existsSync).mockReturnValue(true);
       vi.mocked(fs.readFileSync).mockImplementation((p: any) => {
         if (p.includes('PROFILE.json')) {

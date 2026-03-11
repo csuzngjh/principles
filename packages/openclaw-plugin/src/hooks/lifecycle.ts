@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as readline from 'readline';
 import { computePainScore, writePainFlag } from '../core/pain.js';
-import { resolvePdPath, PD_DIRS } from '../core/paths.js';
+import { WorkspaceContext } from '../core/workspace-context.js';
 import type { PluginHookBeforeResetEvent, PluginHookBeforeCompactionEvent, PluginHookAfterCompactionEvent, PluginHookAgentContext } from '../openclaw-sdk.js';
 
 export async function handleBeforeReset(
@@ -12,6 +12,8 @@ export async function handleBeforeReset(
   if (!ctx.workspaceDir || !event.messages || event.messages.length === 0) {
     return;
   }
+
+  const wctx = WorkspaceContext.fromHookContext(ctx);
 
   // Auto-summarise pain points before the session is cleared
   const painPoints = event.messages.filter((msg) => {
@@ -24,7 +26,7 @@ export async function handleBeforeReset(
   });
 
   if (painPoints.length > 0) {
-    const memoryPath = resolvePdPath(ctx.workspaceDir, 'MEMORY_MD');
+    const memoryPath = wctx.resolve('MEMORY_MD');
     const summary =
       `\n## [${new Date().toISOString()}] Session Reset Summary (Reason: ${event.reason ?? 'Manual'})\n` +
       `- Encountered ${painPoints.length} potential pain point(s) during this session.\n` +
@@ -50,6 +52,8 @@ export async function extractPainFromSessionFile(sessionFile: string, ctx: Plugi
   const workspaceDir = ctx.workspaceDir;
 
   if (!workspaceDir) return;
+
+  const wctx = WorkspaceContext.fromHookContext(ctx);
 
   if (!fs.existsSync(sessionFile)) {
     if (ctx.logger?.debug) ctx.logger.debug(`[Pain Extractor] Session file not found: ${sessionFile}`);
@@ -116,7 +120,7 @@ export async function extractPainFromSessionFile(sessionFile: string, ctx: Plugi
 
   if (painPoints.length > 0) {
     const dateStr = new Date().toISOString().split('T')[0];
-    const dailyLogPath = path.join(workspaceDir, PD_DIRS.MEMORY, `${dateStr}.md`);
+    const dailyLogPath = path.join(workspaceDir, 'memory', `${dateStr}.md`);
     const timestamp = new Date().toISOString();
     
     let entry = `\n## [${timestamp}] Consolidated Pain (Pre-Compaction)\n\n`;
@@ -131,7 +135,7 @@ export async function extractPainFromSessionFile(sessionFile: string, ctx: Plugi
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       fs.appendFileSync(dailyLogPath, entry, 'utf8');
 
-      const semanticPath = resolvePdPath(workspaceDir, 'SEMANTIC_PAIN');
+      const semanticPath = wctx.resolve('SEMANTIC_PAIN');
       const semanticDir = path.dirname(semanticPath);
       if (!fs.existsSync(semanticDir)) fs.mkdirSync(semanticDir, { recursive: true });
 
@@ -160,7 +164,7 @@ export async function handleBeforeCompaction(
   if (!ctx.workspaceDir) return;
 
   const dateStr = new Date().toISOString().split('T')[0];
-  const checkpointPath = path.join(ctx.workspaceDir, PD_DIRS.MEMORY, `${dateStr}.md`);
+  const checkpointPath = path.join(ctx.workspaceDir, 'memory', `${dateStr}.md`);
   const log =
     `\n## [${new Date().toISOString()}] Pre-Compaction Checkpoint\n` +
     `- Compacting session with ${event.messageCount} messages.\n` +
@@ -184,7 +188,7 @@ export async function handleAfterCompaction(
   if (!ctx.workspaceDir) return;
 
   const dateStr = new Date().toISOString().split('T')[0];
-  const checkpointPath = path.join(ctx.workspaceDir, PD_DIRS.MEMORY, `${dateStr}.md`);
+  const checkpointPath = path.join(ctx.workspaceDir, 'memory', `${dateStr}.md`);
   const log =
     `- Post-Compaction Complete. Reduced active context to ${event.messageCount} messages.\n`;
 

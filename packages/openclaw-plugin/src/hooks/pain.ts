@@ -4,12 +4,9 @@ import { isRisky, normalizePath } from '../utils/io.js';
 import { normalizeProfile } from '../core/profile.js';
 import { computePainScore, writePainFlag } from '../core/pain.js';
 import { trackFriction, resetFriction, getSession } from '../core/session-tracker.js';
-import { recordFailure, TRUST_CONFIG } from '../core/trust-engine.js';
-import { resolvePdPath } from '../core/paths.js';
 import { denoiseError, computeHash } from '../utils/hashing.js';
-import { ConfigService } from '../core/config-service.js';
-import { EventLogService } from '../core/event-log.js';
 import { SystemLogger } from '../core/system-logger.js';
+import { WorkspaceContext } from '../core/workspace-context.js';
 import type { PluginHookAfterToolCallEvent, PluginHookToolContext } from '../openclaw-sdk.js';
 
 export function handleAfterToolCall(
@@ -20,9 +17,10 @@ export function handleAfterToolCall(
     return;
   }
 
-  const stateDir = (ctx as any).stateDir || resolvePdPath(ctx.workspaceDir, 'STATE_DIR');
-  const config = ConfigService.get(stateDir);
-  const eventLog = EventLogService.get(stateDir);
+  const wctx = WorkspaceContext.fromHookContext(ctx);
+  const config = wctx.config;
+  const eventLog = wctx.eventLog;
+  const trust = wctx.trust;
   const sessionId = ctx.sessionId || 'unknown';
 
   // ── Track A: Empirical Friction (GFI) ──
@@ -45,13 +43,6 @@ export function handleAfterToolCall(
   const exitCode = (event.result && typeof event.result === 'object') ? (event.result as any).exitCode : 0;
   const isFailure = !!event.error || (exitCode !== 0 && exitCode !== undefined);
 
-  // Get current GFI before tracking
-  let previousGfi = 0;
-  const session = getSession(sessionId);
-  if (session) {
-    previousGfi = session.currentGfi;
-  }
-
   if (isFailure) {
     const errorText = event.error || (typeof event.result === 'string' ? event.result : JSON.stringify(event.result));
     const denoised = denoiseError(errorText);
@@ -61,13 +52,13 @@ export function handleAfterToolCall(
     const deltaF = config.get('scores.tool_failure_friction') || 30;
     const updatedState = trackFriction(sessionId, deltaF, hash, ctx.workspaceDir);
     
-    // ── Trust Engine: Record failure using V2 API (Enables Grace/Adaptive) ──
+    // ── Trust Engine: Record failure using V2 API ──
     const errorType = extractErrorType(event.error || errorText);
     const filePath = event.params.file_path || event.params.path || event.params.file;
     const relPath = typeof filePath === 'string' ? normalizePath(filePath, ctx.workspaceDir) : 'unknown';
     
     // Load profile for risk_paths check
-    const profilePath = resolvePdPath(ctx.workspaceDir, 'PROFILE');
+    const profilePath = wctx.resolve('PROFILE');
     let profile = normalizeProfile({});
     if (fs.existsSync(profilePath)) {
       try {
@@ -77,9 +68,8 @@ export function handleAfterToolCall(
     
     const isRisk = isRisky(relPath, profile.risk_paths);
     
-    recordFailure(ctx.workspaceDir, isRisk ? 'risky' : 'tool', {
+    trust.recordFailure(isRisk ? 'risky' : 'tool', {
         sessionId,
-        stateDir,
         api: (ctx as any).api
     });
     
@@ -110,7 +100,6 @@ export function handleAfterToolCall(
   }
 
   // ── Legacy/Risky Write Pain Logic ──
-  // OpenClaw core tool names for file mutations (from tool-catalog.ts)
   const WRITE_TOOLS = ['write', 'edit', 'apply_patch'];
   if (!WRITE_TOOLS.includes(event.toolName)) {
     return;
@@ -122,14 +111,12 @@ export function handleAfterToolCall(
   const filePath = event.params.file_path || event.params.path || event.params.file;
   const relPath = typeof filePath === 'string' ? normalizePath(filePath, ctx.workspaceDir) : 'unknown';
 
-  const profilePath = resolvePdPath(ctx.workspaceDir, 'PROFILE');
+  const profilePath = wctx.resolve('PROFILE');
   let profile = normalizeProfile({});
   if (fs.existsSync(profilePath)) {
     try {
       profile = normalizeProfile(JSON.parse(fs.readFileSync(profilePath, 'utf8')));
-    } catch (_e) {
-      // Use defaults
-    }
+    } catch (_e) {}
   }
 
   const isRisk = isRisky(relPath, profile.risk_paths);
