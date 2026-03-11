@@ -24,11 +24,12 @@
 - 优先使用 `rg` / `sg` / `mgrep`。
 - WebSearch 遵循"信源三角验证"。
 
-## 4. 节流 (Throttle)
+## 4. 节流与记忆管理 (Throttle & Memory Hygiene)
 
 - 批量委派并发 ≤ 2-3 个。
-- `docs/PLAN.md` 是唯一长期记忆锚点，每次子任务结束必须同步状态。
-- 任何 Plan 启动或 Commit 前，**必须**查阅 `docs/okr/CURRENT_FOCUS.md` 确认对齐。
+- `PLAN.md` 是唯一长期记忆锚点，每次子任务结束必须同步状态。
+- 任何 Plan 启动或 Commit 前，**必须**查阅 `memory/okr/CURRENT_FOCUS.md` 确认对齐。
+- **抗上下文遗忘机制**：当进行多文件代码排查或预感对话将被压缩（例如：用户要求你“休息”、“明天再做”或连续探索超过 3 次）时，**必须强制**将当前的推理结论、断点和未尽事宜写入 `memory/.scratchpad.md` 或更新至 `PLAN.md`，以此实现记忆的物理落盘。
 
 ## 5. 技能优先 (Skill First)
 

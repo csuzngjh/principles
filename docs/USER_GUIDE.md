@@ -44,6 +44,13 @@ Although the system is fully automatic, in the process of protecting you, the AI
   > **`/pain You completely misunderstood me, read the error carefully!`**
   The AI will instantly feel the "pain", sincerely apologize, and correct its direction.
 
+### 🐠 Scenario D: The AI acts like a "Goldfish" and forgets everything we just discussed
+* **Why did this happen?** When a conversation gets too long, the AI's "short-term memory (context window)" fills up, and it is forced to compress or drop earlier messages.
+* **What should I do?**
+  Whenever you finish a deep debugging session or plan to take a break, proactively ask the AI to take notes. Tell it:
+  > **"Write down the clues you found and our next steps into `memory/.scratchpad.md`."**
+  When you return tomorrow, you can say: "Read your scratchpad and pick up where we left off."
+
 ---
 
 ## 🎮 Step 3: Your Commander Dashboard
