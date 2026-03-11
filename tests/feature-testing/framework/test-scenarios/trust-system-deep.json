@@ -21,8 +21,8 @@
     },
     "data_files": {
       "scorecard": ".state/AGENT_SCORECARD.json",
-      "events": "memory/.state/logs/events.jsonl",
-      "config": "memory/.state/config.json"
+      "events": ".state/logs/events.jsonl",
+      "config": ".state/config.json"
     }
   },
   "steps": [

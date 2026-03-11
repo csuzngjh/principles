@@ -76,7 +76,7 @@
       "description": "Verify evolution events were logged",
       "validator": "file_validator",
       "params": {
-        "path": "/home/csuzngjh/clawd/memory/.state/logs/events.jsonl",
+        "path": "/home/csuzngjh/clawd/.state/logs/events.jsonl",
         "min_size": 100,
         "required_sections": ["evolution_queue", "pain_signal"]
       }
