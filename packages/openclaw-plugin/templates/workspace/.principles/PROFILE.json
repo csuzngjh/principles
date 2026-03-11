@@ -12,6 +12,26 @@
     "require_plan_for_risk_paths": true,
     "require_audit_before_write": true
   },
+  "progressive_gate": {
+    "enabled": true,
+    "plan_approvals": {
+      "enabled": true,
+      "allowed_patterns": [
+        "AGENTS.md",
+        "SOUL.md",
+        "IDENTITY.md",
+        "USER.md",
+        "docs/PRINCIPLES.md",
+        "docs/PROFILE.json",
+        "docs/okr/**"
+      ],
+      "allowed_operations": [
+        "write",
+        "edit",
+        "replace"
+      ]
+    }
+  },
   "tests": {
     "on_change": "smoke",
     "commands": {
