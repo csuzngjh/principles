@@ -1,6 +1,7 @@
 import { PluginHookSubagentEndedEvent, PluginHookAgentContext } from '../openclaw-sdk.js';
 import { writePainFlag } from '../core/pain.js';
 import { recordSuccess, TRUST_CONFIG } from '../core/trust-engine-v2.js';
+import { resolvePdPath } from '../core/paths.js';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -49,7 +50,7 @@ export function handleSubagentEnded(
             api: (ctx as any).api
         });
 
-        const queuePath = path.join(workspaceDir, 'docs', 'evolution_queue.json');
+        const queuePath = resolvePdPath(workspaceDir, 'EVOLUTION_QUEUE');
         if (fs.existsSync(queuePath)) {
             try {
                 const queue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
@@ -63,7 +64,7 @@ export function handleSubagentEnded(
                     changed = true;
                     
                     // Clean up the .pain_flag if it was queued, to reset the environment
-                    const painFlagPath = path.join(workspaceDir, 'docs', '.pain_flag');
+                    const painFlagPath = resolvePdPath(workspaceDir, 'PAIN_FLAG');
                     if (fs.existsSync(painFlagPath)) {
                         try {
                             const painData = fs.readFileSync(painFlagPath, 'utf8');

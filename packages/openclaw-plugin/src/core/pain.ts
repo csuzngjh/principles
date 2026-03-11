@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { serializeKvLines, parseKvLines } from '../utils/io.js';
+import { resolvePdPath } from './paths.js';
 
 export function computePainScore(rc: number, isSpiral: boolean, missingTestCommand: boolean, softScore: number): number {
   let score = Math.max(0, softScore || 0);
@@ -35,7 +36,7 @@ export function painSeverityLabel(painScore: number, isSpiral: boolean = false):
 }
 
 export function writePainFlag(projectDir: string, painData: Record<string, string>): void {
-  const painFlagPath = path.join(projectDir, "docs", ".pain_flag");
+  const painFlagPath = resolvePdPath(projectDir, 'PAIN_FLAG');
   const dir = path.dirname(painFlagPath);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
@@ -44,7 +45,7 @@ export function writePainFlag(projectDir: string, painData: Record<string, strin
 }
 
 export function readPainFlagData(projectDir: string): Record<string, string> {
-  const painFlagPath = path.join(projectDir, "docs", ".pain_flag");
+  const painFlagPath = resolvePdPath(projectDir, 'PAIN_FLAG');
   try {
     if (!fs.existsSync(painFlagPath)) {
       return {};
