@@ -2,7 +2,7 @@
 set -e
 
 # ============================================================================
-# Principles Disciple - Claude Code Installer (v1.5.0)
+# Principles Disciple - Claude Code Installer (v1.5.1)
 # ============================================================================
 # 专为 Claude Code 设计的独立安装脚本
 # 用法: ./install-claude.sh [--global] [--force] [--lang zh|en] [TARGET_DIR]
@@ -13,6 +13,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # 默认参数
@@ -56,11 +57,7 @@ TARGET_DIR="${TARGET_DIR%/}"
 
 # 获取脚本所在目录
 SOURCE_DIR="$(cd "$(dirname "$0")" && pwd)"
-
-# 全局安装提示
-if [[ "$TARGET_DIR" == "$HOME/.claude" ]]; then
-    echo -e "${BLUE}🌍 全局安装模式: 目标 ~/.claude${NC}"
-fi
+TEMPLATE_WORKSPACE="$SOURCE_DIR/packages/openclaw-plugin/templates/workspace"
 
 # 路径标准化
 if [[ "$TARGET_DIR" == *"/"* ]] && [[ ! -d "$TARGET_DIR" ]]; then
@@ -85,7 +82,7 @@ echo ""
 # ============================================================================
 # 1. 环境检测
 # ============================================================================
-echo -e "${YELLOW}🔍 步骤 1/6: 环境检测${NC}"
+echo -e "${YELLOW}🔍 步骤 1/7: 环境检测${NC}"
 
 if ! command -v python3 &>/dev/null; then
     echo -e "  ${RED}❌ Python3 未安装${NC}"
@@ -94,10 +91,71 @@ fi
 echo -e "  ${GREEN}✅ Python3 $(python3 --version | cut -d' ' -f2)${NC}"
 
 # ============================================================================
-# 2. 创建目录结构 (v1.5.0 隐藏目录规范)
+# 2. 自动迁移旧数据 (新功能：照顾历史客户)
 # ============================================================================
 echo ""
-echo -e "${YELLOW}📁 步骤 2/6: 创建目录结构${NC}"
+echo -e "${YELLOW}🔄 步骤 2/7: 检测并迁移旧数据${NC}"
+
+migrate_file() {
+    local old="$1"
+    local new="$2"
+    if [ -f "$old" ] && [ ! -f "$new" ]; then
+        mkdir -p "$(dirname "$new")"
+        mv "$old" "$new"
+        echo -e "  ${CYAN}📦 迁移: $(basename "$old") -> $(echo "$new" | sed "s|$TARGET_DIR/||")${NC}"
+    fi
+}
+
+migrate_dir() {
+    local old="$1"
+    local new="$2"
+    if [ -d "$old" ] && [ ! -d "$new" ]; then
+        mkdir -p "$(dirname "$new")"
+        mv "$old" "$new"
+        echo -e "  ${CYAN}📦 迁移目录: $(basename "$old") -> $(echo "$new" | sed "s|$TARGET_DIR/||")${NC}"
+    fi
+}
+
+if [ -d "$TARGET_DIR/docs" ] || [ -d "$TARGET_DIR/memory/.state" ]; then
+    echo "  发现旧版目录结构，正在搬家..."
+    
+    # 迁移核心配置 (docs -> .principles)
+    migrate_file "$TARGET_DIR/docs/PROFILE.json" "$TARGET_DIR/.principles/PROFILE.json"
+    migrate_file "$TARGET_DIR/docs/PRINCIPLES.md" "$TARGET_DIR/.principles/PRINCIPLES.md"
+    migrate_file "$TARGET_DIR/docs/THINKING_OS.md" "$TARGET_DIR/.principles/THINKING_OS.md"
+    migrate_file "$TARGET_DIR/docs/00-kernel.md" "$TARGET_DIR/.principles/00-kernel.md"
+    migrate_file "$TARGET_DIR/docs/DECISION_POLICY.json" "$TARGET_DIR/.principles/DECISION_POLICY.json"
+    migrate_dir "$TARGET_DIR/docs/models" "$TARGET_DIR/.principles/models"
+    
+    # 迁移状态数据 (docs/memory -> .state)
+    migrate_file "$TARGET_DIR/docs/AGENT_SCORECARD.json" "$TARGET_DIR/.state/AGENT_SCORECARD.json"
+    migrate_file "$TARGET_DIR/docs/EVOLUTION_QUEUE.json" "$TARGET_DIR/.state/evolution_queue.json"
+    migrate_file "$TARGET_DIR/docs/.pain_flag" "$TARGET_DIR/.state/.pain_flag"
+    migrate_file "$TARGET_DIR/docs/SYSTEM_CAPABILITIES.json" "$TARGET_DIR/.state/SYSTEM_CAPABILITIES.json"
+    
+    # 迁移隐藏状态 (memory/.state -> .state)
+    migrate_file "$TARGET_DIR/memory/.state/pain_dictionary.json" "$TARGET_DIR/.state/pain_dictionary.json"
+    migrate_file "$TARGET_DIR/memory/.state/pain_settings.json" "$TARGET_DIR/.state/pain_settings.json"
+    migrate_dir "$TARGET_DIR/memory/.state/sessions" "$TARGET_DIR/.state/sessions"
+    
+    # 迁移日志与记忆
+    migrate_file "$TARGET_DIR/docs/SYSTEM.log" "$TARGET_DIR/memory/logs/SYSTEM.log"
+    migrate_dir "$TARGET_DIR/docs/okr" "$TARGET_DIR/memory/okr"
+    migrate_file "$TARGET_DIR/docs/USER_CONTEXT.md" "$TARGET_DIR/memory/USER_CONTEXT.md"
+    
+    # 计划书外置
+    migrate_file "$TARGET_DIR/docs/PLAN.md" "$TARGET_DIR/PLAN.md"
+    
+    echo -e "  ${GREEN}✅ 迁移完成${NC}"
+else
+    echo "  未检测到需要迁移的旧数据。"
+fi
+
+# ============================================================================
+# 3. 创建目录结构
+# ============================================================================
+echo ""
+echo -e "${YELLOW}📁 步骤 3/7: 确保目录结构完整${NC}"
 
 mkdir -p "$TARGET_DIR/.claude/agents"
 mkdir -p "$TARGET_DIR/.claude/skills"
@@ -111,18 +169,20 @@ mkdir -p "$TARGET_DIR/memory/logs"
 mkdir -p "$TARGET_DIR/memory/okr"
 mkdir -p "$TARGET_DIR/scripts"
 
-echo -e "  ${GREEN}✅ 目录结构已创建 (隐藏治理架构)${NC}"
+echo -e "  ${GREEN}✅ 目录结构已就绪${NC}"
 
 # ============================================================================
-# 3. 复制核心组件
+# 4. 复制核心组件
 # ============================================================================
 echo ""
-echo -e "${YELLOW}📦 步骤 3/6: 复制核心组件${NC}"
+echo -e "${YELLOW}📦 步骤 4/7: 部署核心组件${NC}"
 
 smart_copy() {
     local src="$1"
     local dest="$2"
     
+    [ ! -f "$src" ] && return
+
     if [ "$FORCE_MODE" = true ]; then
         mkdir -p "$(dirname "$dest")"
         cp "$src" "$dest"
@@ -146,6 +206,8 @@ safe_copy() {
     local src="$1"
     local dest="$2"
     
+    if [ ! -f "$src" ]; then return; fi
+
     if [ ! -f "$dest" ]; then
         mkdir -p "$(dirname "$dest")"
         cp "$src" "$dest"
@@ -158,11 +220,9 @@ safe_copy() {
 LANG_DIR="$SOURCE_DIR/packages/openclaw-plugin/templates/langs/$SELECTED_LANG"
 if [ ! -d "$LANG_DIR" ]; then
     LANG_DIR="$SOURCE_DIR/packages/openclaw-plugin/templates/langs/zh"
-    echo -e "  ${YELLOW}⚠️  语言包 '$SELECTED_LANG' 不存在，回退到 'zh'${NC}"
 fi
 
 # 复制 Agents
-echo ""
 echo "  📋 Agents..."
 AGENT_SRC="$SOURCE_DIR/claude/agents"
 if [ ! -d "$AGENT_SRC" ]; then AGENT_SRC="$SOURCE_DIR/agents"; fi
@@ -171,7 +231,6 @@ for f in "$AGENT_SRC/"*.md; do
 done
 
 # 复制 Skills
-echo ""
 echo "  📚 Skills..."
 SKILL_SRC="$LANG_DIR/skills"
 if [ -d "$SKILL_SRC" ]; then
@@ -182,21 +241,16 @@ if [ -d "$SKILL_SRC" ]; then
         cp "$SKILL_SRC/$f" "$TARGET_DIR/.claude/skills/$f"
     done
     cd "$SOURCE_DIR"
-    SKILL_COUNT=$(find "$TARGET_DIR/.claude/skills" -name "SKILL.md" | wc -l)
-    echo -e "  ${GREEN}✅ 已复制 $SKILL_COUNT 个 skills${NC}"
 fi
 
 # 复制 Hooks
-echo ""
 echo "  🪝 Hooks..."
 HOOK_SRC="$SOURCE_DIR/claude/hooks"
 if [ ! -d "$HOOK_SRC" ]; then HOOK_SRC="$SOURCE_DIR/hooks"; fi
 cp "$HOOK_SRC/"*.py "$TARGET_DIR/.claude/hooks/" 2>/dev/null || true
 cp "$HOOK_SRC/hooks.json" "$TARGET_DIR/.claude/hooks/" 2>/dev/null || true
-echo -e "  ${GREEN}✅ Hooks 已复制${NC}"
 
 # 复制 Rules
-echo ""
 echo "  📜 Rules..."
 RULE_SRC="$SOURCE_DIR/claude/rules"
 if [ ! -d "$RULE_SRC" ]; then RULE_SRC="$SOURCE_DIR/templates/rules"; fi
@@ -205,102 +259,71 @@ for f in "$RULE_SRC/"*.md; do
 done
 
 # ============================================================================
-# 4. 初始化文档 (v1.5.0 隐藏目录分布)
+# 5. 初始化文档
 # ============================================================================
 echo ""
-echo -e "${YELLOW}📄 步骤 4/6: 初始化配置与原则${NC}"
+echo -e "${YELLOW}📄 步骤 5/7: 初始化配置与原则${NC}"
 
-# 新架构路径
-safe_copy "$SOURCE_DIR/docs/PROFILE.json" "$TARGET_DIR/.principles/PROFILE.json"
-safe_copy "$SOURCE_DIR/docs/PROFILE.schema.json" "$TARGET_DIR/.principles/PROFILE.schema.json"
-safe_copy "$SOURCE_DIR/docs/PRINCIPLES.md" "$TARGET_DIR/.principles/PRINCIPLES.md"
-safe_copy "$SOURCE_DIR/docs/THINKING_OS.md" "$TARGET_DIR/.principles/THINKING_OS.md"
+safe_copy "$TEMPLATE_WORKSPACE/.principles/PROFILE.json" "$TARGET_DIR/.principles/PROFILE.json"
+safe_copy "$TEMPLATE_WORKSPACE/.principles/PROFILE.schema.json" "$TARGET_DIR/.principles/PROFILE.schema.json"
+safe_copy "$TEMPLATE_WORKSPACE/.principles/PRINCIPLES.md" "$TARGET_DIR/.principles/PRINCIPLES.md"
+safe_copy "$TEMPLATE_WORKSPACE/.principles/THINKING_OS.md" "$TARGET_DIR/.principles/THINKING_OS.md"
 safe_copy "$SOURCE_DIR/packages/openclaw-plugin/templates/pain_settings.json" "$TARGET_DIR/.state/pain_settings.json"
 
-# 长期记忆
-safe_copy "$SOURCE_DIR/docs/USER_PROFILE.json" "$TARGET_DIR/memory/USER_PROFILE.json"
-safe_copy "$SOURCE_DIR/docs/okr/CURRENT_FOCUS.md" "$TARGET_DIR/memory/okr/CURRENT_FOCUS.md"
-
-# 工作区可见文件
-safe_copy "$SOURCE_DIR/docs/PLAN.md" "$TARGET_DIR/PLAN.md"
+if [ -d "$TEMPLATE_WORKSPACE/.principles/models" ]; then
+    cp -r "$TEMPLATE_WORKSPACE/.principles/models"/* "$TARGET_DIR/.principles/models/" 2>/dev/null || true
+fi
+safe_copy "$TEMPLATE_WORKSPACE/PLAN.md" "$TARGET_DIR/PLAN.md"
 
 # ============================================================================
-# 5. 配置 Settings
+# 6. 配置 Settings
 # ============================================================================
 echo ""
-echo -e "${YELLOW}⚙️  步骤 5/6: 配置 Settings${NC}"
+echo -e "${YELLOW}⚙️  步骤 6/7: 配置 Settings${NC}"
 
 SETTINGS_FILE="$TARGET_DIR/.claude/settings.json"
-if [ ! -f "$SETTINGS_FILE" ]; then
-    echo '{ "hooks": {} }' > "$SETTINGS_FILE"
-fi
+if [ ! -f "$SETTINGS_FILE" ]; then echo '{ "hooks": {} }' > "$SETTINGS_FILE"; fi
 
 python3 -c "
 import json
-
-target = '$SETTINGS_FILE'
-source = '$TARGET_DIR/.claude/hooks/hooks.json'
-
-with open(target, 'r', encoding='utf-8') as f:
-    t_data = json.load(f)
-with open(source, 'r', encoding='utf-8') as f:
-    s_data = json.load(f)
-
-# 清除旧配置
-t_data.pop('hooks', None)
-t_data.pop('statusLine', None)
-
-# 注入新配置
+import os
+target, source = '$SETTINGS_FILE', '$TARGET_DIR/.claude/hooks/hooks.json'
+if not os.path.exists(source): exit(0)
+with open(target, 'r') as f: t_data = json.load(f)
+with open(source, 'r') as f: s_data = json.load(f)
+t_data.pop('hooks', None); t_data.pop('statusLine', None)
 t_data['hooks'] = {}
-for key, value in s_data.items():
-    if key == 'statusLine':
-        t_data[key] = value
-    else:
-        t_data['hooks'][key] = value
-
-with open(target, 'w', encoding='utf-8') as f:
-    json.dump(t_data, f, indent=2)
-
-print('  ✅ Settings 已配置')
+for k, v in s_data.items():
+    if k == 'statusLine': t_data[k] = v
+    else: t_data['hooks'][k] = v
+with open(target, 'w') as f: json.dump(t_data, f, indent=2)
 "
+echo -e "  ${GREEN}✅ Settings 已配置${NC}"
 
 # ============================================================================
-# 6. 部署辅助脚本
+# 7. 部署辅助脚本
 # ============================================================================
 echo ""
-echo -e "${YELLOW}🛠️  步骤 6/6: 部署辅助脚本${NC}"
+echo -e "${YELLOW}🛠️  步骤 7/7: 部署辅助脚本${NC}"
 
 cp "$SOURCE_DIR/scripts/update_agent_framework.sh" "$TARGET_DIR/scripts/" 2>/dev/null || true
 cp "$SOURCE_DIR/scripts/evolution_daemon.py" "$TARGET_DIR/scripts/" 2>/dev/null || true
 
-# 注入源仓库路径
-if [ -f "$TARGET_DIR/scripts/update_agent_framework.sh" ]; then
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        sed -i '' "s|SOURCE_REPO=.*|SOURCE_REPO=\"$SOURCE_DIR\"|g" "$TARGET_DIR/scripts/update_agent_framework.sh"
-    else
-        sed -i "s|SOURCE_REPO=.*|SOURCE_REPO=\"$SOURCE_DIR\"|g" "$TARGET_DIR/scripts/update_agent_framework.sh"
-    fi
-    chmod +x "$TARGET_DIR/scripts/update_agent_framework.sh"
-fi
-
-echo -e "  ${GREEN}✅ 辅助脚本已部署${NC}"
+echo -e "  ${GREEN}✅ 脚本已部署${NC}"
 
 # ============================================================================
 # 完成
 # ============================================================================
 echo ""
 echo -e "${GREEN}╔══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║                   ✅ 安装完成！(v1.5.0)                      ║${NC}"
+echo -e "${GREEN}║                   ✅ 安装完成！(v1.5.1)                      ║${NC}"
 echo -e "${GREEN}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 echo "安装位置: $TARGET_DIR"
 echo ""
 echo "新架构概览:"
-echo -e "  - 🛡️ 治理配置: ${CYAN}.principles/${NC}"
-echo -e "  - 💾 运行状态: ${CYAN}.state/${NC}"
-echo -e "  - 🧠 长期记忆: ${CYAN}memory/${NC}"
+echo -e "  - 🛡️ 治理层: ${CYAN}.principles/${NC} (PROFILE, PRINCIPLES)"
+echo -e "  - 💾 状态层: ${CYAN}.state/${NC} (Scorecard, Queue)"
+echo -e "  - 🧠 存储层: ${CYAN}memory/${NC} (Logs, OKR)"
 echo -e "  - 📝 活动计划: ${CYAN}PLAN.md${NC}"
 echo ""
-if [ "$FORCE_MODE" = false ]; then
-    echo -e "${YELLOW}⚠️  如果看到冲突警告，请检查 .update 文件并手动合并${NC}"
-fi
