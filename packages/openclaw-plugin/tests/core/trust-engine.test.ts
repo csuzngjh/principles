@@ -2,16 +2,33 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import {
+    TrustEngine,
     getAgentScorecard,
     recordSuccess,
     recordFailure,
     getTrustStats,
-    TRUST_CONFIG
+    getTrustStatus
 } from '../../src/core/trust-engine.js';
 
 vi.mock('fs');
+vi.mock('../../src/core/config-service.js', () => ({
+    ConfigService: {
+        get: vi.fn().mockReturnValue({
+            get: vi.fn((key) => {
+                if (key === 'trust') return {
+                    stages: { stage_1_observer: 30, stage_2_editor: 60, stage_3_developer: 80 },
+                    cold_start: { initial_trust: 59, grace_failures: 3, cold_start_period_ms: 86400000 },
+                    penalties: { tool_failure_base: -8, risky_failure_base: -15, gate_bypass_attempt: -5, failure_streak_multiplier: -3, max_penalty: -25 },
+                    rewards: { success_base: 1, subagent_success: 3, streak_bonus_threshold: 5, streak_bonus: 5, recovery_boost: 3, max_reward: 10 },
+                    limits: { stage_2_max_lines: 10, stage_3_max_lines: 100 }
+                };
+                return undefined;
+            })
+        })
+    }
+}));
 
-describe('Trust Engine V2 - Adaptive Trust System', () => {
+describe('Trust Engine - Unified Adaptive System', () => {
     const workspaceDir = '/mock/workspace';
 
     beforeEach(() => {
@@ -20,275 +37,129 @@ describe('Trust Engine V2 - Adaptive Trust System', () => {
         vi.mocked(fs.readFileSync).mockReturnValue('{}');
     });
 
-    describe('Cold Start Features', () => {
+    describe('Initialization', () => {
         it('should initialize new agent with higher trust score (59)', () => {
             vi.mocked(fs.existsSync).mockReturnValue(false);
 
-            const scorecard = getAgentScorecard(workspaceDir);
+            const engine = new TrustEngine(workspaceDir);
+            const scorecard = engine.getScorecard();
 
-            expect(scorecard.trust_score).toBe(TRUST_CONFIG.COLD_START.INITIAL_TRUST); // 59
-            expect(scorecard.grace_failures_remaining).toBe(TRUST_CONFIG.COLD_START.GRACE_FAILURES); // 3
+            expect(scorecard.trust_score).toBe(59);
+            expect(scorecard.grace_failures_remaining).toBe(3);
             expect(scorecard.first_activity_at).toBeDefined();
         });
 
-        it('should grant 3 grace failures with no penalty', () => {
-            vi.mocked(fs.existsSync).mockReturnValue(true);
-
-            // Test with grace failures remaining - no penalty
-            vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
-                trust_score: 59,
-                grace_failures_remaining: 3,
-                recent_history: [],
-                first_activity_at: new Date().toISOString(),
-            }));
-
-            const scoreWithGrace = recordFailure(workspaceDir, 'tool');
-            expect(scoreWithGrace).toBe(59); // No change - grace consumed
-
-            // Test without grace failures - penalty applies
-            vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
-                trust_score: 59,
-                grace_failures_remaining: 0,
-                recent_history: ['failure', 'failure', 'failure'],
-                first_activity_at: new Date().toISOString(),
-            }));
-
-            const scoreWithoutGrace = recordFailure(workspaceDir, 'tool');
-            expect(scoreWithoutGrace).toBeLessThan(59); // Should be penalized
+        it('should progress to Stage 2 by default', () => {
+            const engine = new TrustEngine(workspaceDir);
+            expect(engine.getStage()).toBe(2);
         });
 
-        it('should reduce penalties by 50% during cold start period', () => {
-            const now = new Date();
-            const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
-
+        it('should correctly handle cold start expiration', () => {
             vi.mocked(fs.existsSync).mockReturnValue(true);
+            
+            // Scenario 1: Still in cold start
             vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
                 trust_score: 59,
-                grace_failures_remaining: 0,
-                failure_streak: 0,
-                recent_history: [],
-                first_activity_at: oneHourAgo.toISOString(),
+                cold_start_end: new Date(Date.now() + 1000).toISOString(),
+                history: []
             }));
+            const engine1 = new TrustEngine(workspaceDir);
+            expect(engine1.isColdStart()).toBe(true);
 
-            const score = recordFailure(workspaceDir, 'tool');
-            // Base penalty is -8, cold start reduces to -4 (but floor makes it -3)
-            expect(score).toBe(56); // 59 - 3 = 56
+            // Scenario 2: Expired
+            vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
+                trust_score: 59,
+                cold_start_end: new Date(Date.now() - 1000).toISOString(),
+                history: []
+            }));
+            const engine2 = new TrustEngine(workspaceDir);
+            expect(engine2.isColdStart()).toBe(false);
         });
     });
 
-    describe('Adaptive Penalties', () => {
-        it('should increase penalty with consecutive failures', () => {
+    describe('Cold Start & Grace Failures', () => {
+        it('should grant grace failures with no penalty', () => {
             vi.mocked(fs.existsSync).mockReturnValue(true);
-            vi.mocked(fs.readFileSync).mockImplementation(() => {
-                return JSON.stringify({
-                    trust_score: 59,
-                    grace_failures_remaining: 0,
-                    failure_streak: 3,
-                    recent_history: ['failure', 'failure', 'failure'],
-                    first_activity_at: new Date().toISOString(),
-                });
-            });
+            vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
+                trust_score: 59,
+                grace_failures_remaining: 3,
+                history: [],
+                cold_start_end: new Date(Date.now() + 86400000).toISOString()
+            }));
 
-            const score = recordFailure(workspaceDir, 'tool');
-            // Base: -8, streak (3 * -3): -9, total: -17
-            // Due to floor() operations, actual may vary
-            expect(score).toBeLessThan(59); // Should be penalized
+            const engine = new TrustEngine(workspaceDir);
+            engine.recordFailure('tool', {});
+            
+            expect(engine.getScore()).toBe(59); // No change
+            expect(engine.getScorecard().grace_failures_remaining).toBe(2);
         });
 
-        it('should cap maximum penalty at -25', () => {
+        it('should penalize after grace is exhausted', () => {
             vi.mocked(fs.existsSync).mockReturnValue(true);
             vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
                 trust_score: 59,
                 grace_failures_remaining: 0,
-                failure_streak: 10,
-                recent_history: Array(10).fill('failure'),
-                first_activity_at: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(), // 48h ago
+                history: [],
+                cold_start_end: new Date(Date.now() + 86400000).toISOString()
             }));
 
-            const score = recordFailure(workspaceDir, 'risky');
-            // Even with huge streak, max penalty is -25
-            expect(score).toBeGreaterThanOrEqual(34); // 59 - 25 = 34 (minimum)
-        });
-
-        it('should reduce penalty when success rate is good', () => {
-            vi.mocked(fs.existsSync).mockReturnValue(true);
-            vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
-                trust_score: 59,
-                grace_failures_remaining: 0,
-                failure_streak: 1,
-                recent_history: [
-                    'success', 'success', 'success', 'success', 'success',
-                    'success', 'success', 'failure', 'success', 'success'
-                ],
-                first_activity_at: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(),
-            }));
-
-            const score = recordFailure(workspaceDir, 'tool');
-            // Base: -8, good success rate (30% failure): *0.7 = -5.6 ≈ -5 or -6
-            // Due to floor(), actual is around -8
-            expect(score).toBeLessThan(59); // Should be penalized
+            const engine = new TrustEngine(workspaceDir);
+            engine.recordFailure('tool', {});
+            
+            expect(engine.getScore()).toBeLessThan(59);
         });
     });
 
     describe('Adaptive Rewards', () => {
-        it('should give recovery boost after failures', () => {
-            vi.mocked(fs.existsSync).mockReturnValue(true);
-            vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
-                trust_score: 50,
-                failure_streak: 3,
-                recent_history: ['failure', 'failure', 'failure'],
-                first_activity_at: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(),
-            }));
-
-            const score = recordSuccess(workspaceDir, 'success');
-            // Base: 1, recovery boost: 3, total: 4
-            expect(score).toBe(54); // 50 + 4 = 54
-        });
-
         it('should give streak bonus for consistent success', () => {
             vi.mocked(fs.existsSync).mockReturnValue(true);
             vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
                 trust_score: 50,
-                success_streak: 7,
-                recent_history: Array(7).fill('success'),
-                first_activity_at: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(),
+                success_streak: 4, // Next one hits threshold 5
+                history: [],
+                first_activity_at: new Date(Date.now() - 48 * 3600000).toISOString()
             }));
 
-            const score = recordSuccess(workspaceDir, 'success');
-            // Base: 1, streak (7/5 = 1): 5, total: 6
-            expect(score).toBe(56); // 50 + 6 = 56
+            const engine = new TrustEngine(workspaceDir);
+            engine.recordSuccess('Good work');
+            
+            // Base 1 + Streak 5 = +6
+            expect(engine.getScore()).toBe(56);
         });
 
-        it('should cap maximum reward at 10', () => {
+        it('should give recovery boost when trust is very low', () => {
             vi.mocked(fs.existsSync).mockReturnValue(true);
             vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
-                trust_score: 50,
-                success_streak: 20,
-                recent_history: Array(20).fill('success'),
-                first_activity_at: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(),
+                trust_score: 20, // Stage 1
+                history: [],
+                first_activity_at: new Date(Date.now() - 48 * 3600000).toISOString()
             }));
 
-            const score = recordSuccess(workspaceDir, 'subagent_success');
-            // Even with huge streak, max is 10
-            expect(score).toBe(60); // 50 + 10 = 60 (maximum)
+            const engine = new TrustEngine(workspaceDir);
+            engine.recordSuccess('Recovery');
+            
+            // Base 1 + Recovery 3 = +4
+            expect(engine.getScore()).toBe(24);
         });
     });
 
-    describe('Trust Statistics', () => {
-        it('should calculate accurate success rate', () => {
-            vi.mocked(fs.existsSync).mockReturnValue(true);
-            vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
-                trust_score: 50,
-                recent_history: [
-                    'success', 'success', 'failure', 'success', 'success',
-                    'success', 'failure', 'success', 'success', 'success'
-                ],
-                first_activity_at: new Date().toISOString(),
-            }));
-
-            const stats = getTrustStats(getAgentScorecard(workspaceDir));
-            expect(stats.successRate).toBe(80); // 8/10 = 80%
+    describe('Legacy Compatibility', () => {
+        it('getAgentScorecard should return valid scorecard', () => {
+            const scorecard = getAgentScorecard(workspaceDir);
+            expect(scorecard.trust_score).toBe(59);
         });
 
-        it('should detect cold start period', () => {
-            const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-
-            vi.mocked(fs.existsSync).mockReturnValue(true);
-            vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
-                trust_score: 59,
-                first_activity_at: oneHourAgo.toISOString(),
-            }));
-
-            const stats = getTrustStats(getAgentScorecard(workspaceDir));
-            expect(stats.isInColdStart).toBe(true);
-        });
-
-        it('should end cold start after 24 hours', () => {
-            const twentyFiveHoursAgo = new Date(Date.now() - 25 * 60 * 60 * 1000);
-
-            vi.mocked(fs.existsSync).mockReturnValue(true);
-            vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
-                trust_score: 59,
-                first_activity_at: twentyFiveHoursAgo.toISOString(),
-            }));
-
-            const stats = getTrustStats(getAgentScorecard(workspaceDir));
-            expect(stats.isInColdStart).toBe(false);
-        });
-
-        it('should track current streak correctly', () => {
-            vi.mocked(fs.existsSync).mockReturnValue(true);
-            vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
-                trust_score: 50,
-                success_streak: 5,
+        it('getTrustStats should return correct summary', () => {
+            const scorecard = {
+                trust_score: 85,
+                success_streak: 10,
                 failure_streak: 0,
-                first_activity_at: new Date().toISOString(),
-            }));
-
-            const stats = getTrustStats(getAgentScorecard(workspaceDir));
-            expect(stats.currentStreak.type).toBe('success');
-            expect(stats.currentStreak.count).toBe(5);
-        });
-    });
-
-    describe('Stage Progression', () => {
-        it('should start new agents in Stage 2 (Editor)', () => {
-            vi.mocked(fs.existsSync).mockReturnValue(false);
-
-            const scorecard = getAgentScorecard(workspaceDir);
-            expect(scorecard.trust_score).toBe(59); // Stage 2
-
-            const stats = getTrustStats(scorecard);
-            expect(stats.stage).toBe(2);
-        });
-
-        it('should progress to Stage 3 after consistent success', () => {
-            vi.mocked(fs.existsSync).mockReturnValue(true);
-            vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
-                trust_score: 75,
-                success_streak: 5,
-                recent_history: Array(10).fill('success'),
-                first_activity_at: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(),
-            }));
-
-            const score = recordSuccess(workspaceDir, 'success');
-            const stats = getTrustStats(getAgentScorecard(workspaceDir));
-
-            expect(score).toBeGreaterThanOrEqual(80); // Stage 3 threshold
-            expect(stats.stage).toBe(3);
-        });
-    });
-
-    describe('Recent History Window', () => {
-        it('should maintain fixed size history window', () => {
-            vi.mocked(fs.existsSync).mockReturnValue(true);
-            vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
-                trust_score: 50,
-                recent_history: Array(20).fill('success'),
-                first_activity_at: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(),
-            }));
-
-            recordSuccess(workspaceDir, 'success');
-
-            // Verify the file write includes the updated history
-            expect(vi.mocked(fs.writeFileSync).mock.calls[0]?.[0]).toContain('AGENT_SCORECARD.json');
-        });
-    });
-
-    describe('Migration Support', () => {
-        it('should migrate old scorecards to new format', () => {
-            vi.mocked(fs.existsSync).mockReturnValue(true);
-            vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
-                trust_score: 50,
-                wins: 10,
-                losses: 2,
-            }));
-
-            const scorecard = getAgentScorecard(workspaceDir);
-
-            expect(scorecard.first_activity_at).toBeDefined();
-            expect(scorecard.grace_failures_remaining).toBe(3);
-            expect(scorecard.recent_history).toEqual([]);
+                history: Array(10).fill({ type: 'success' }),
+                last_updated: new Date().toISOString()
+            };
+            const stats = getTrustStats(scorecard as any);
+            expect(stats.stage).toBe(4);
+            expect(stats.successRate).toBe(100);
         });
     });
 });

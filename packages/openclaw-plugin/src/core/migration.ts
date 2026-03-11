@@ -25,14 +25,17 @@ export function migrateDirectoryStructure(api: OpenClawPluginApi, workspaceDir: 
             { legacy: path.join(legacyDocsDir, 'AGENT_SCORECARD.json'), newKey: 'AGENT_SCORECARD' },
             { legacy: path.join(legacyDocsDir, '.pain_flag'), newKey: 'PAIN_FLAG' },
             { legacy: path.join(legacyDocsDir, 'SYSTEM_CAPABILITIES.json'), newKey: 'SYSTEM_CAPABILITIES' },
+            { legacy: path.join(legacyDocsDir, 'SYSTEM.log'), newKey: 'SYSTEM_LOG' },
+            { legacy: path.join(legacyDocsDir, 'THINKING_OS_CANDIDATES.md'), newKey: 'THINKING_OS_CANDIDATES' },
 
             // From memory/.state/ (The hidden legacy state)
             { legacy: path.join(legacyStateDir, 'pain_dictionary.json'), newKey: 'DICTIONARY' },
             { legacy: path.join(legacyStateDir, 'pain_settings.json'), newKey: 'PAIN_SETTINGS' },
             { legacy: path.join(legacyStateDir, 'thinking_os_usage.json'), newKey: 'THINKING_OS_USAGE' },
             { legacy: path.join(legacyStateDir, 'pain_candidates.json'), newKey: 'PAIN_CANDIDATES' },
-            { legacy: path.join(legacyStateDir, 'evolution_directive.json'), newKey: 'EVOLUTION_QUEUE' }, // Note: was occasionally there
+            { legacy: path.join(legacyStateDir, 'evolution_directive.json'), newKey: 'EVOLUTION_QUEUE' },
             { legacy: path.join(legacyStateDir, 'sessions'), newKey: 'SESSION_DIR' },
+            { legacy: path.join(legacyStateDir, 'logs', 'events.jsonl'), newKey: 'SYSTEM_LOG' }, // Backup plan for logs
         ];
 
         let migratedCount = 0;
@@ -56,7 +59,9 @@ export function migrateDirectoryStructure(api: OpenClawPluginApi, workspaceDir: 
                         api.logger.error(`[PD:Migration] Failed to rename ${entry.legacy}: ${String(renameErr)}`);
                     }
                 } else {
-                    api.logger.warn(`[PD:Migration] Skipping ${path.basename(entry.legacy)}: already exists at destination.`);
+                    // Special case: Log append instead of overwrite if it's SYSTEM_LOG? 
+                    // For now, keep it simple and skip if exists to avoid data corruption.
+                    api.logger?.warn?.(`[PD:Migration] Skipping ${path.basename(entry.legacy)}: already exists at destination.`);
                 }
             }
         }
@@ -68,12 +73,22 @@ export function migrateDirectoryStructure(api: OpenClawPluginApi, workspaceDir: 
         // Final cleanup: Try to remove legacy state dir if empty
         if (fs.existsSync(legacyStateDir)) {
             try {
+                // Check if dir is empty (recursive check not needed here as we moved main subdirs)
                 const items = fs.readdirSync(legacyStateDir);
-                if (items.length === 0) {
-                    fs.rmdirSync(legacyStateDir);
-                    api.logger.info(`[PD:Migration] Cleaned up empty legacy state directory: ${legacyStateDir.replace(workspaceDir, '')}`);
+                if (items.length === 0 || (items.length === 1 && items[0] === 'logs')) {
+                    // Try to clean up logs dir if empty too
+                    const logsDir = path.join(legacyStateDir, 'logs');
+                    if (fs.existsSync(logsDir) && fs.readdirSync(logsDir).length === 0) {
+                        fs.rmdirSync(logsDir);
+                    }
+                    if (fs.readdirSync(legacyStateDir).length === 0) {
+                        fs.rmdirSync(legacyStateDir);
+                        api.logger.info(`[PD:Migration] Cleaned up empty legacy state directory.`);
+                    }
                 }
-            } catch (_e) {}
+            } catch (_e) {
+                api.logger.debug?.(`[PD:Migration] Failed to cleanup legacy state dir: ${String(_e)}`);
+            }
         }
 
     } catch (err) {

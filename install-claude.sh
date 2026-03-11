@@ -2,7 +2,7 @@
 set -e
 
 # ============================================================================
-# Principles Disciple - Claude Code Installer
+# Principles Disciple - Claude Code Installer (v1.5.0)
 # ============================================================================
 # 专为 Claude Code 设计的独立安装脚本
 # 用法: ./install-claude.sh [--global] [--force] [--lang zh|en] [TARGET_DIR]
@@ -94,7 +94,7 @@ fi
 echo -e "  ${GREEN}✅ Python3 $(python3 --version | cut -d' ' -f2)${NC}"
 
 # ============================================================================
-# 2. 创建目录结构
+# 2. 创建目录结构 (v1.5.0 隐藏目录规范)
 # ============================================================================
 echo ""
 echo -e "${YELLOW}📁 步骤 2/6: 创建目录结构${NC}"
@@ -104,10 +104,14 @@ mkdir -p "$TARGET_DIR/.claude/skills"
 mkdir -p "$TARGET_DIR/.claude/hooks"
 mkdir -p "$TARGET_DIR/.claude/rules"
 mkdir -p "$TARGET_DIR/.claude/templates"
-mkdir -p "$TARGET_DIR/docs/okr"
+mkdir -p "$TARGET_DIR/.principles/models"
+mkdir -p "$TARGET_DIR/.state/logs"
+mkdir -p "$TARGET_DIR/.state/sessions"
+mkdir -p "$TARGET_DIR/memory/logs"
+mkdir -p "$TARGET_DIR/memory/okr"
 mkdir -p "$TARGET_DIR/scripts"
 
-echo -e "  ${GREEN}✅ 目录结构已创建${NC}"
+echo -e "  ${GREEN}✅ 目录结构已创建 (隐藏治理架构)${NC}"
 
 # ============================================================================
 # 3. 复制核心组件
@@ -115,7 +119,6 @@ echo -e "  ${GREEN}✅ 目录结构已创建${NC}"
 echo ""
 echo -e "${YELLOW}📦 步骤 3/6: 复制核心组件${NC}"
 
-# 智能拷贝函数
 smart_copy() {
     local src="$1"
     local dest="$2"
@@ -139,7 +142,6 @@ smart_copy() {
     fi
 }
 
-# 安全拷贝函数 (用于用户数据)
 safe_copy() {
     local src="$1"
     local dest="$2"
@@ -153,7 +155,6 @@ safe_copy() {
     fi
 }
 
-# 语言目录
 LANG_DIR="$SOURCE_DIR/packages/openclaw-plugin/templates/langs/$SELECTED_LANG"
 if [ ! -d "$LANG_DIR" ]; then
     LANG_DIR="$SOURCE_DIR/packages/openclaw-plugin/templates/langs/zh"
@@ -163,7 +164,8 @@ fi
 # 复制 Agents
 echo ""
 echo "  📋 Agents..."
-AGENT_SRC="$SOURCE_DIR/agents"
+AGENT_SRC="$SOURCE_DIR/claude/agents"
+if [ ! -d "$AGENT_SRC" ]; then AGENT_SRC="$SOURCE_DIR/agents"; fi
 for f in "$AGENT_SRC/"*.md; do
     [ -f "$f" ] && smart_copy "$f" "$TARGET_DIR/.claude/agents/$(basename "$f")"
 done
@@ -187,31 +189,40 @@ fi
 # 复制 Hooks
 echo ""
 echo "  🪝 Hooks..."
-cp "$SOURCE_DIR/hooks/"*.py "$TARGET_DIR/.claude/hooks/" 2>/dev/null || true
-cp "$SOURCE_DIR/hooks/hooks.json" "$TARGET_DIR/.claude/hooks/" 2>/dev/null || true
+HOOK_SRC="$SOURCE_DIR/claude/hooks"
+if [ ! -d "$HOOK_SRC" ]; then HOOK_SRC="$SOURCE_DIR/hooks"; fi
+cp "$HOOK_SRC/"*.py "$TARGET_DIR/.claude/hooks/" 2>/dev/null || true
+cp "$HOOK_SRC/hooks.json" "$TARGET_DIR/.claude/hooks/" 2>/dev/null || true
 echo -e "  ${GREEN}✅ Hooks 已复制${NC}"
 
 # 复制 Rules
 echo ""
 echo "  📜 Rules..."
-RULE_SRC="$SOURCE_DIR/templates/rules"
+RULE_SRC="$SOURCE_DIR/claude/rules"
+if [ ! -d "$RULE_SRC" ]; then RULE_SRC="$SOURCE_DIR/templates/rules"; fi
 for f in "$RULE_SRC/"*.md; do
     [ -f "$f" ] && smart_copy "$f" "$TARGET_DIR/.claude/rules/$(basename "$f")"
 done
 
 # ============================================================================
-# 4. 初始化文档
+# 4. 初始化文档 (v1.5.0 隐藏目录分布)
 # ============================================================================
 echo ""
-echo -e "${YELLOW}📄 步骤 4/6: 初始化文档${NC}"
+echo -e "${YELLOW}📄 步骤 4/6: 初始化配置与原则${NC}"
 
-safe_copy "$SOURCE_DIR/docs/PROFILE.json" "$TARGET_DIR/docs/PROFILE.json"
-safe_copy "$SOURCE_DIR/docs/PROFILE.schema.json" "$TARGET_DIR/docs/PROFILE.schema.json"
-safe_copy "$SOURCE_DIR/docs/USER_PROFILE.json" "$TARGET_DIR/docs/USER_PROFILE.json"
-safe_copy "$SOURCE_DIR/docs/WORKBOARD.json" "$TARGET_DIR/docs/WORKBOARD.json"
-safe_copy "$SOURCE_DIR/docs/PLAN.md" "$TARGET_DIR/docs/PLAN.md"
-safe_copy "$SOURCE_DIR/docs/AUDIT.md" "$TARGET_DIR/docs/AUDIT.md"
-safe_copy "$SOURCE_DIR/docs/okr/CURRENT_FOCUS.md" "$TARGET_DIR/docs/okr/CURRENT_FOCUS.md"
+# 新架构路径
+safe_copy "$SOURCE_DIR/docs/PROFILE.json" "$TARGET_DIR/.principles/PROFILE.json"
+safe_copy "$SOURCE_DIR/docs/PROFILE.schema.json" "$TARGET_DIR/.principles/PROFILE.schema.json"
+safe_copy "$SOURCE_DIR/docs/PRINCIPLES.md" "$TARGET_DIR/.principles/PRINCIPLES.md"
+safe_copy "$SOURCE_DIR/docs/THINKING_OS.md" "$TARGET_DIR/.principles/THINKING_OS.md"
+safe_copy "$SOURCE_DIR/packages/openclaw-plugin/templates/pain_settings.json" "$TARGET_DIR/.state/pain_settings.json"
+
+# 长期记忆
+safe_copy "$SOURCE_DIR/docs/USER_PROFILE.json" "$TARGET_DIR/memory/USER_PROFILE.json"
+safe_copy "$SOURCE_DIR/docs/okr/CURRENT_FOCUS.md" "$TARGET_DIR/memory/okr/CURRENT_FOCUS.md"
+
+# 工作区可见文件
+safe_copy "$SOURCE_DIR/docs/PLAN.md" "$TARGET_DIR/PLAN.md"
 
 # ============================================================================
 # 5. 配置 Settings
@@ -274,24 +285,21 @@ fi
 
 echo -e "  ${GREEN}✅ 辅助脚本已部署${NC}"
 
-# 生成动态文件
-export CLAUDE_PROJECT_DIR="$TARGET_DIR"
-echo '{}' | python3 "$TARGET_DIR/.claude/hooks/hook_runner.py" --hook sync_user_context > /dev/null 2>&1 || true
-echo '{}' | python3 "$TARGET_DIR/.claude/hooks/hook_runner.py" --hook sync_agent_context > /dev/null 2>&1 || true
-
 # ============================================================================
 # 完成
 # ============================================================================
 echo ""
 echo -e "${GREEN}╔══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║                   ✅ 安装完成！                              ║${NC}"
+echo -e "${GREEN}║                   ✅ 安装完成！(v1.5.0)                      ║${NC}"
 echo -e "${GREEN}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 echo "安装位置: $TARGET_DIR"
 echo ""
-echo "下一步操作:"
-echo "  1. 在 Claude Code 中打开项目目录"
-echo "  2. 开始使用 Principles Disciple 进行开发"
+echo "新架构概览:"
+echo -e "  - 🛡️ 治理配置: ${CYAN}.principles/${NC}"
+echo -e "  - 💾 运行状态: ${CYAN}.state/${NC}"
+echo -e "  - 🧠 长期记忆: ${CYAN}memory/${NC}"
+echo -e "  - 📝 活动计划: ${CYAN}PLAN.md${NC}"
 echo ""
 if [ "$FORCE_MODE" = false ]; then
     echo -e "${YELLOW}⚠️  如果看到冲突警告，请检查 .update 文件并手动合并${NC}"

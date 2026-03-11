@@ -62,7 +62,7 @@ export class WorkspaceContext {
      */
     get trust(): TrustEngine {
         if (!this._trust) {
-            this._trust = new TrustEngine(this.workspaceDir, this.stateDir);
+            this._trust = new TrustEngine(this.workspaceDir);
         }
         return this._trust;
     }

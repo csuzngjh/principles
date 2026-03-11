@@ -141,7 +141,9 @@ function trackThinkingModelUsage(text: string, wctx: WorkspaceContext): void {
     if (fs.existsSync(logPath)) {
         try {
             usageLog = JSON.parse(fs.readFileSync(logPath, 'utf8'));
-        } catch (e) {}
+        } catch (e) {
+            console.error(`[PD:LLM] Failed to parse thinking OS usage log: ${String(e)}`);
+        }
     }
 
     let anyMatch = false;
@@ -160,6 +162,8 @@ function trackThinkingModelUsage(text: string, wctx: WorkspaceContext): void {
     if (anyMatch) {
         try {
             fs.writeFileSync(logPath, JSON.stringify(usageLog, null, 2), 'utf8');
-        } catch (e) {}
+        } catch (e) {
+            console.error(`[PD:LLM] Failed to write thinking OS usage log: ${String(e)}`);
+        }
     }
 }

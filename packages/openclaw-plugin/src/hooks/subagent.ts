@@ -4,12 +4,6 @@ import { WorkspaceContext } from '../core/workspace-context.js';
 import * as fs from 'fs';
 import * as path from 'path';
 
-// Map of termination outcomes to autonomous pain scores
-const OUTCOME_SCORES: Record<string, number> = {
-    'error': 80,   // Subagent crashed
-    'timeout': 65,   // Subagent timed out
-};
-
 export async function handleSubagentEnded(
     event: PluginHookSubagentEndedEvent,
     ctx: PluginHookAgentContext
@@ -20,10 +14,12 @@ export async function handleSubagentEnded(
     if (!workspaceDir) return;
 
     const wctx = WorkspaceContext.fromHookContext(ctx);
+    const config = wctx.config;
 
     // 1. Autonomous Pain Capture: If subagent failed, record pain
     if (outcome === 'error' || outcome === 'timeout') {
-        const score = OUTCOME_SCORES[outcome] || 50;
+        const scoreSettings = config.get('scores');
+        const score = outcome === 'error' ? scoreSettings.subagent_error_penalty : scoreSettings.subagent_timeout_penalty;
         
         writePainFlag(workspaceDir, {
             source: `subagent_${outcome}`,
@@ -35,14 +31,12 @@ export async function handleSubagentEnded(
     }
 
     // 2. Loop Closure: Clean up evolution queue if any subagent finished successfully
-    // Since we can't reliably detect the agentId from targetSessionKey,
-    // we clear the oldest in_progress task assuming it was the one being worked on.
     if (outcome === 'ok' || outcome === 'deleted') {
         // ── Trust Engine: Record success using V2 API ──
         wctx.trust.recordSuccess('subagent_success', {
             sessionId: ctx.sessionId,
             api: (ctx as any).api
-        });
+        }, true);
 
         const queuePath = wctx.resolve('EVOLUTION_QUEUE');
         if (fs.existsSync(queuePath)) {
@@ -73,7 +67,9 @@ export async function handleSubagentEnded(
                                 if (painData.includes('status: queued')) {
                                     fs.unlinkSync(painFlagPath);
                                 }
-                            } catch (e) {}
+                            } catch (e) {
+                                console.error(`[PD:Subagent] Failed to cleanup pain flag: ${String(e)}`);
+                            }
                         }
                     }
                 }
@@ -81,7 +77,9 @@ export async function handleSubagentEnded(
                 if (changed) {
                     fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
                 }
-            } catch (e) {}
+            } catch (e) {
+                console.error(`[PD:Subagent] Failed to update evolution queue: ${String(e)}`);
+            }
         }
     }
 }

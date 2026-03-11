@@ -1,31 +1,74 @@
 {
-  "language": "en",
+  "language": "zh",
   "thresholds": {
-    "pain_trigger": 30,
+    "pain_trigger": 40,
     "cognitive_paralysis_input": 4000,
-    "stuck_loops_trigger": 3,
+    "stuck_loops_trigger": 4,
     "semantic_min_score": 0.7,
     "promotion_count_threshold": 3,
     "promotion_similarity_threshold": 0.8
   },
   "scores": {
-    "paralysis": 40,
-    "default_confusion": 35,
-    "default_loop": 45,
-    "tool_failure_friction": 30
+    "paralysis": 30,
+    "default_confusion": 30,
+    "default_loop": 40,
+    "tool_failure_friction": 15,
+    "exit_code_penalty": 50,
+    "spiral_penalty": 30,
+    "missing_test_command_penalty": 20,
+    "subagent_error_penalty": 60,
+    "subagent_timeout_penalty": 50
+  },
+  "severity_thresholds": {
+    "high": 70,
+    "medium": 40,
+    "low": 20
   },
   "intervals": {
     "worker_poll_ms": 900000,
-    "initial_delay_ms": 5000
+    "initial_delay_ms": 5000,
+    "task_timeout_ms": 1800000
+  },
+  "trust": {
+    "stages": {
+      "stage_1_observer": 30,
+      "stage_2_editor": 60,
+      "stage_3_developer": 80
+    },
+    "cold_start": {
+      "initial_trust": 85,
+      "grace_failures": 5,
+      "cold_start_period_ms": 86400000
+    },
+    "penalties": {
+      "tool_failure_base": -2,
+      "risky_failure_base": -10,
+      "gate_bypass_attempt": -5,
+      "failure_streak_multiplier": -2,
+      "max_penalty": -20
+    },
+    "rewards": {
+      "success_base": 2,
+      "subagent_success": 5,
+      "streak_bonus_threshold": 3,
+      "streak_bonus": 5,
+      "recovery_boost": 5,
+      "max_reward": 15
+    },
+    "limits": {
+      "stage_2_max_lines": 50,
+      "stage_3_max_lines": 300
+    }
   },
   "deep_reflection": {
     "enabled": true,
     "mode": "auto",
     "force_checkpoint": true,
-    "checkpoint_message": "在响应前快速自检：1. 任务复杂度（简单/中等/复杂）2. 信息充分性（充分/需要更多信息）3. 如果复杂或信息不足，调用 deep_reflect 工具",
+    "checkpoint_message": "Before responding, quick self-check: 1. Task complexity (simple/medium/complex) 2. Information sufficiency (sufficient/need more) 3. If complex or insufficient info, call deep_reflect tool",
     "auto_trigger_conditions": {
       "min_tool_calls": 5,
-      "error_rate_threshold": 0.3
+      "error_rate_threshold": 0.3,
+      "complexity_keywords": ["refactor", "architecture", "design", "optimize", "security", "critical"]
     },
     "default_model": "T-01",
     "default_depth": 2,

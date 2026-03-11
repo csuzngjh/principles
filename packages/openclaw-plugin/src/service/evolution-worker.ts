@@ -3,39 +3,38 @@ import * as path from 'path';
 import { createHash } from 'crypto';
 import type { OpenClawPluginServiceContext, OpenClawPluginApi } from '../openclaw-sdk.js';
 import { DictionaryService } from '../core/dictionary-service.js';
-import { ConfigService } from '../core/config-service.js';
 import { DetectionService } from '../core/detection-service.js';
 import { ensureStateTemplates } from '../core/init.js';
 import { extractCommonSubstring } from '../utils/nlp.js';
 import { SystemLogger } from '../core/system-logger.js';
-import { EventLogService } from '../core/event-log.js';
-import { resolvePdPath } from '../core/paths.js';
+import { WorkspaceContext } from '../core/workspace-context.js';
 import { initPersistence, flushAllSessions } from '../core/session-tracker.js';
 
 let intervalId: NodeJS.Timeout | null = null;
 
-interface EvolutionQueueItem {
+export interface EvolutionQueueItem {
     id: string;
-    source: string;
     score: number;
+    source: string;
     reason: string;
     timestamp: string;
     trigger_text_preview?: string;
     status: 'pending' | 'in_progress' | 'completed';
 }
 
-function checkPainFlag(workspaceDir: string, logger: any) {
-    const painFlagPath = resolvePdPath(workspaceDir, 'PAIN_FLAG');
-    if (!fs.existsSync(painFlagPath)) return;
-
+function checkPainFlag(wctx: WorkspaceContext, logger: any) {
     try {
+        const painFlagPath = wctx.resolve('PAIN_FLAG');
+        if (!fs.existsSync(painFlagPath)) return;
+
         const rawPain = fs.readFileSync(painFlagPath, 'utf8');
         const lines = rawPain.split('\n');
+        
         let score = 0;
         let source = 'unknown';
-        let reason = '';
-        let isQueued = false;
+        let reason = 'Systemic pain detected';
         let preview = '';
+        let isQueued = false;
 
         for (const line of lines) {
             if (line.startsWith('score:')) score = parseInt(line.split(':', 2)[1].trim(), 10) || 0;
@@ -47,55 +46,54 @@ function checkPainFlag(workspaceDir: string, logger: any) {
 
         if (isQueued || score < 30) return;
 
-        logger.info(`[PD:EvolutionWorker] Detected pain flag (score: ${score}, source: ${source}). Enqueueing evolution task.`);
+        if (logger) logger.info(`[PD:EvolutionWorker] Detected pain flag (score: ${score}, source: ${source}). Enqueueing evolution task.`);
 
-        const queuePath = resolvePdPath(workspaceDir, 'EVOLUTION_QUEUE');
+        const queuePath = wctx.resolve('EVOLUTION_QUEUE');
         let queue: EvolutionQueueItem[] = [];
         if (fs.existsSync(queuePath)) {
             try {
                 queue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
-            } catch (e) { }
+            } catch (e) {
+                if (logger) logger.error(`[PD:EvolutionWorker] Failed to parse evolution queue: ${String(e)}`);
+            }
         }
 
-        const newTask: EvolutionQueueItem = {
-            id: `evt-${Date.now()}`,
-            source,
+        const taskId = createHash('md5').update(`${source}:${score}:${new Date().toISOString()}`).digest('hex').substring(0, 8);
+        queue.push({
+            id: taskId,
             score,
+            source,
             reason,
-            timestamp: new Date().toISOString(),
             trigger_text_preview: preview,
+            timestamp: new Date().toISOString(),
             status: 'pending'
-        };
+        });
 
-        queue.push(newTask);
-        const dir = path.dirname(queuePath);
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
         fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
         fs.appendFileSync(painFlagPath, '\nstatus: queued\n', 'utf8');
 
-        logger.info(`[PD:EvolutionWorker] Task ${newTask.id} successfully enqueued to ${queuePath}.`);
     } catch (err) {
-        logger.warn(`[PD:EvolutionWorker] Error processing pain flag: ${String(err)}`);
+        if (logger) logger.warn(`[PD:EvolutionWorker] Error processing pain flag: ${String(err)}`);
     }
 }
 
-function processEvolutionQueue(workspaceDir: string, stateDir: string, logger: any, eventLog: any) {
-    const queuePath = resolvePdPath(workspaceDir, 'EVOLUTION_QUEUE');
-    if (!fs.existsSync(queuePath)) return;
-
+function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventLog: any) {
     try {
+        const queuePath = wctx.resolve('EVOLUTION_QUEUE');
+        if (!fs.existsSync(queuePath)) return;
+
         const queue: EvolutionQueueItem[] = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
         let queueChanged = false;
 
-        // 1. Handle Timeouts (tasks stuck in progress for > 30 mins)
-        const maxDurationMs = 30 * 60 * 1000;
-        const now = Date.now();
+        const config = wctx.config;
+        const timeout = config.get('intervals.task_timeout_ms') || (30 * 60 * 1000);
+
         for (const task of queue) {
             if (task.status === 'in_progress' && task.timestamp) {
-                const age = now - new Date(task.timestamp).getTime();
-                if (age > maxDurationMs) {
-                    task.status = 'pending'; // Re-queue it, or we could mark it 'timeout'
-                    logger.warn(`[PD:EvolutionWorker] Task ${task.id} timed out. Reverting to pending.`);
+                const age = Date.now() - new Date(task.timestamp).getTime();
+                if (age > timeout) {
+                    if (logger) logger.info(`[PD:EvolutionWorker] Resetting timed-out task: ${task.id}`);
+                    task.status = 'pending';
                     queueChanged = true;
                 }
             }
@@ -104,150 +102,141 @@ function processEvolutionQueue(workspaceDir: string, stateDir: string, logger: a
         const pendingTasks = queue.filter(t => t.status === 'pending');
 
         if (pendingTasks.length > 0) {
-            const directivePath = resolvePdPath(workspaceDir, 'EVOLUTION_DIRECTIVE');
+            const directivePath = wctx.resolve('EVOLUTION_DIRECTIVE');
             const highestScoreTask = pendingTasks.sort((a, b) => b.score - a.score)[0];
 
             const directive = {
                 active: true,
                 task: `Diagnose systemic pain [ID: ${highestScoreTask.id}]. Source: ${highestScoreTask.source}. Reason: ${highestScoreTask.reason}. ` +
-                    (highestScoreTask.trigger_text_preview ? `Trigger Text: "${highestScoreTask.trigger_text_preview}"` : ''),
-                enqueuedAt: highestScoreTask.timestamp,
+                      `Trigger text: "${highestScoreTask.trigger_text_preview || 'N/A'}"`,
+                timestamp: new Date().toISOString()
             };
 
-            if (!fs.existsSync(stateDir)) fs.mkdirSync(stateDir, { recursive: true });
             fs.writeFileSync(directivePath, JSON.stringify(directive, null, 2), 'utf8');
-
-            // CRITICAL: Mark as in_progress to prevent infinite loop
             highestScoreTask.status = 'in_progress';
-            // Update timestamp to now so the timeout counts from when it was dispatched
-            highestScoreTask.timestamp = new Date().toISOString();
             queueChanged = true;
-
-            logger.info(`[PD:EvolutionWorker] Evolution directive generated in ${directivePath}. Model will pick this up for next task.`);
-
-            // Record evolution task event
-            eventLog.recordEvolutionTask({
-                taskId: highestScoreTask.id,
-                taskType: highestScoreTask.source,
-                reason: highestScoreTask.reason,
-            });
+            
+            if (eventLog) {
+                eventLog.recordEvolutionTask({
+                    taskId: highestScoreTask.id,
+                    taskType: highestScoreTask.source,
+                    reason: highestScoreTask.reason
+                });
+            }
         }
 
         if (queueChanged) {
-            // Atomic write to prevent race conditions
-            const tmpPath = `${queuePath}.tmp.${Date.now()}`;
-            fs.writeFileSync(tmpPath, JSON.stringify(queue, null, 2), 'utf8');
-            fs.renameSync(tmpPath, queuePath);
+            fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
         }
-
-    } catch (err) { }
+    } catch (err) {
+        if (logger) logger.warn(`[PD:EvolutionWorker] Error processing evolution queue: ${String(err)}`);
+    }
 }
 
-async function processDetectionQueue(stateDir: string, api: any, eventLog: any) {
-    const funnel = DetectionService.get(stateDir);
-    const queue = funnel.flushQueue();
-    if (queue.length === 0) return;
-
+async function processDetectionQueue(wctx: WorkspaceContext, api: OpenClawPluginApi, eventLog: any) {
     const logger = api.logger;
-    logger.info(`[PD:EvolutionWorker] Processing ${queue.length} items in semantic detection queue...`);
+    try {
+        const funnel = DetectionService.get(wctx.stateDir);
+        const queue = funnel.flushQueue();
+        if (queue.length === 0) return;
 
-    const searchTool = api.runtime?.tools?.createMemorySearchTool?.({
-        config: api.config,
-    });
+        if (logger) logger.info(`[PD:EvolutionWorker] Processing ${queue.length} items from detection funnel.`);
 
-    if (!searchTool) {
-        logger.warn('[PD:EvolutionWorker] memory_search tool not available. Semantic detection skipped.');
-        return;
-    }
+        const dictionary = DictionaryService.get(wctx.stateDir);
 
-    for (const text of queue) {
-        try {
-            const config = ConfigService.get(stateDir);
-            const minScore = config.get('thresholds.semantic_min_score') || 0.7;
-
-            const result = await searchTool.execute('internal-l3-check', {
-                query: text,
-                minScore,
-                maxResults: 3
-            });
-
-            const results = (result as any)?.results || [];
-            if (results.length > 0) {
-                const bestMatch = results[0];
-                logger.info(`[PD:EvolutionWorker] Semantic hit! Score: ${bestMatch.score}. Text: "${text.substring(0, 50)}..."`);
-
-                funnel.updateCache(text, {
-                    detected: true,
-                    severity: config.get('scores.default_confusion') || 35
-                });
-
-                recordCandidate(stateDir, text, bestMatch);
+        for (const text of queue) {
+            const match = dictionary.match(text);
+            if (match) {
+                if (eventLog) {
+                    eventLog.recordRuleMatch(undefined, {
+                        ruleId: match.ruleId,
+                        layer: 'L2',
+                        severity: match.severity,
+                        textPreview: text.substring(0, 100)
+                    });
+                }
             } else {
-                funnel.updateCache(text, { detected: false });
+                try {
+                    const searchTool = api.runtime.tools?.createMemorySearchTool?.({ config: api.config });
+                    if (searchTool) {
+                        const searchResult = await searchTool.execute('pre-emptive-pain-check', {
+                            query: text,
+                            limit: 1,
+                            threshold: 0.85
+                        });
+
+                        if (searchResult && searchResult.results?.length > 0) {
+                            const hit = searchResult.results[0];
+                            if (logger) logger.info?.(`[PD:EvolutionWorker] L3 Semantic Hit: ${hit.id} (Score: ${hit.score})`);
+                            
+                            funnel.updateCache(text, { detected: true, severity: 40 });
+                            if (eventLog) {
+                                eventLog.recordRuleMatch(undefined, {
+                                    ruleId: 'SEMANTIC_HIT',
+                                    layer: 'L3',
+                                    severity: 40,
+                                    textPreview: text.substring(0, 100)
+                                });
+                            }
+                        }
+                    }
+                } catch (e) {
+                    if (logger) logger.debug?.(`[PD:EvolutionWorker] L3 Semantic search failed: ${String(e)}`);
+                }
+                trackPainCandidate(text, wctx);
             }
-        } catch (err) {
-            logger.warn(`[PD:EvolutionWorker] Error in semantic search for text: ${String(err)}`);
         }
+    } catch (err) {
+        if (logger) logger.warn(`[PD:EvolutionWorker] Detection queue failed: ${String(err)}`);
     }
 }
 
-function recordCandidate(stateDir: string, text: string, match: any) {
-    const candidatePath = path.join(stateDir, 'pain_candidates.json');
-    let data: any = { candidates: {} };
+function trackPainCandidate(text: string, wctx: WorkspaceContext) {
+    const candidatePath = wctx.resolve('PAIN_CANDIDATES');
+    let data = { candidates: {} as any };
     if (fs.existsSync(candidatePath)) {
         try {
             data = JSON.parse(fs.readFileSync(candidatePath, 'utf8'));
-        } catch (e) { }
+        } catch (e) {
+            // Keep going with empty data if parse fails, but log it
+            console.error(`[PD:EvolutionWorker] Failed to parse pain candidates: ${String(e)}`);
+        }
     }
 
-    const fingerprint = createHash('sha256').update(text.trim()).digest('hex').substring(0, 12);
-
+    const fingerprint = createHash('md5').update(text.substring(0, 50)).digest('hex').substring(0, 8);
     if (!data.candidates[fingerprint]) {
-        data.candidates[fingerprint] = {
-            samples: [],
-            count: 0,
-            firstSeen: new Date().toISOString(),
-            lastSeen: new Date().toISOString(),
-            avgSimilarity: 0,
-            status: 'pending'
-        };
+        data.candidates[fingerprint] = { count: 0, firstSeen: new Date().toISOString(), samples: [] };
     }
 
     const cand = data.candidates[fingerprint];
-    if (!cand.samples.includes(text) && cand.samples.length < 5) {
-        cand.samples.push(text);
-    }
     cand.count++;
-    cand.lastSeen = new Date().toISOString();
-    cand.avgSimilarity = (cand.avgSimilarity * (cand.count - 1) + match.score) / cand.count;
-
+    if (cand.samples.length < 5) cand.samples.push(text.substring(0, 200));
+    
     fs.writeFileSync(candidatePath, JSON.stringify(data, null, 2), 'utf8');
 }
 
-function processPromotion(workspaceDir: string, stateDir: string, logger: any, eventLog: any) {
-    const candidatePath = resolvePdPath(workspaceDir, 'PAIN_CANDIDATES');
+function processPromotion(wctx: WorkspaceContext, logger: any, eventLog: any) {
+    const candidatePath = wctx.resolve('PAIN_CANDIDATES');
     if (!fs.existsSync(candidatePath)) return;
 
     try {
-        const config = ConfigService.get(stateDir);
-        const dictionary = DictionaryService.get(stateDir);
+        const config = wctx.config;
+        const dictionary = wctx.dictionary;
         const data = JSON.parse(fs.readFileSync(candidatePath, 'utf8'));
         const countThreshold = config.get('thresholds.promotion_count_threshold') || 3;
-        const simThreshold = config.get('thresholds.promotion_similarity_threshold') || 0.8;
 
         let promotedCount = 0;
 
         for (const [fingerprint, cand] of Object.entries(data.candidates) as any) {
-            if (cand.status === 'pending' && cand.count >= countThreshold && cand.avgSimilarity >= simThreshold) {
-                // Perform N-gram extraction
+            if (cand.status === 'pending' && cand.count >= countThreshold) {
                 const commonPhrases = extractCommonSubstring(cand.samples);
 
                 if (commonPhrases.length > 0) {
                     const phrase = commonPhrases[0];
                     const ruleId = `P_PROMOTED_${fingerprint.toUpperCase()}`;
 
-                    logger.info(`[PD:EvolutionWorker] Promoting candidate ${fingerprint} to formal rule: ${ruleId} (Phrase: "${phrase}")`);
-                    SystemLogger.log(workspaceDir, 'RULE_PROMOTED', `Candidate ${fingerprint} promoted to formal rule ${ruleId} based on ${cand.count} hits.`);
+                    if (logger) logger.info(`[PD:EvolutionWorker] Promoting candidate ${fingerprint} to formal rule: ${ruleId}`);
+                    SystemLogger.log(wctx.workspaceDir, 'RULE_PROMOTED', `Candidate ${fingerprint} promoted to rule ${ruleId}`);
 
                     dictionary.addRule(ruleId, {
                         type: 'exact_match',
@@ -257,113 +246,81 @@ function processPromotion(workspaceDir: string, stateDir: string, logger: any, e
                     });
 
                     cand.status = 'promoted';
-                    cand.promotedTo = ruleId;
                     promotedCount++;
-
-                    // Record rule promotion event
-                    eventLog.recordRulePromotion({
-                        ruleId,
-                        phrase,
-                        count: cand.count,
-                        avgSimilarity: cand.avgSimilarity,
-                        fingerprint,
-                    });
                 }
             }
         }
 
         if (promotedCount > 0) {
             fs.writeFileSync(candidatePath, JSON.stringify(data, null, 2), 'utf8');
-            dictionary.flush();
         }
     } catch (err) {
-        logger.warn(`[PD:EvolutionWorker] Error during rule promotion: ${String(err)}`);
+        if (logger) logger.warn(`[PD:EvolutionWorker] Error during rule promotion: ${String(err)}`);
     }
 }
 
 export interface ExtendedEvolutionWorkerService {
     id: string;
-    api?: OpenClawPluginApi;
-    start: (ctx: OpenClawPluginServiceContext) => void;
-    stop: (ctx: OpenClawPluginServiceContext) => void;
+    api: OpenClawPluginApi | null;
+    start: (ctx: OpenClawPluginServiceContext) => void | Promise<void>;
+    stop?: (ctx: OpenClawPluginServiceContext) => void | Promise<void>;
 }
 
 export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
     id: 'principles-evolution-worker',
+    api: null,
 
     start(ctx: OpenClawPluginServiceContext): void {
-        const { workspaceDir, logger } = ctx;
+        const logger = ctx?.logger || console;
         const api = this.api;
+        const workspaceDir = ctx?.workspaceDir;
 
-        // Use workspace-specific state directory, not global ~/.openclaw/
-        // This ensures Service and Hooks use the same stateDir
-        const stateDir = workspaceDir
-            ? resolvePdPath(workspaceDir, 'STATE_DIR')
-            : ctx.stateDir;
+        if (!workspaceDir) {
+            if (logger) logger.warn('[PD:EvolutionWorker] workspaceDir not found in service config. Evolution cycle disabled.');
+            return;
+        }
 
-        logger.info(`[PD:EvolutionWorker] Starting with workspaceDir=${workspaceDir}, stateDir=${stateDir}`);
+        const wctx = WorkspaceContext.fromHookContext({ workspaceDir, ...ctx.config });
+        if (logger) logger.info(`[PD:EvolutionWorker] Starting with workspaceDir=${wctx.workspaceDir}, stateDir=${wctx.stateDir}`);
 
-        // Initialize persistence and event logging
-        initPersistence(stateDir);
-        const eventLog = EventLogService.get(stateDir, {
-            info: (msg) => logger.info(msg),
-            warn: (msg) => logger.warn(msg),
-            error: (msg) => logger.error(msg),
-            debug: (msg) => logger.debug?.(msg)
-        });
+        initPersistence(wctx.stateDir);
+        const eventLog = wctx.eventLog;
 
-        const config = ConfigService.get(stateDir);
+        const config = wctx.config;
         const language = config.get('language') || 'en';
+        ensureStateTemplates({ logger }, wctx.stateDir, language);
 
-        ensureStateTemplates({ logger }, stateDir, language);
-        const dictionary = DictionaryService.get(stateDir);
-
-        const pollInterval = config.get('intervals.worker_poll_ms') || (15 * 60 * 1000);
-        const initialDelay = config.get('intervals.initial_delay_ms') || 5000;
+        const initialDelay = 5000;
+        const interval = config.get('intervals.worker_poll_ms') || (15 * 60 * 1000);
 
         intervalId = setInterval(() => {
-            if (workspaceDir) {
-                checkPainFlag(workspaceDir, logger);
-                processEvolutionQueue(workspaceDir, stateDir, logger, eventLog);
-            }
+            checkPainFlag(wctx, logger);
+            processEvolutionQueue(wctx, logger, eventLog);
             if (api) {
-                processDetectionQueue(stateDir, api, eventLog).catch(err => {
-                    logger.error(`[PD:EvolutionWorker] Error in detection queue: ${String(err)}`);
+                processDetectionQueue(wctx, api, eventLog).catch(err => {
+                    if (logger) logger.error(`[PD:EvolutionWorker] Error in detection queue: ${String(err)}`);
                 });
             }
-            processPromotion(workspaceDir || '', stateDir, logger, eventLog);
-            dictionary.flush();
-
-            // Periodically flush event log
-            eventLog.flush();
+            processPromotion(wctx, logger, eventLog);
+            wctx.dictionary.flush();
             flushAllSessions();
-        }, pollInterval);
+        }, interval);
 
         setTimeout(() => {
-            if (workspaceDir) {
-                checkPainFlag(workspaceDir, logger);
-                processEvolutionQueue(workspaceDir, stateDir, logger, eventLog);
-            }
+            checkPainFlag(wctx, logger);
+            processEvolutionQueue(wctx, logger, eventLog);
             if (api) {
-                processDetectionQueue(stateDir, api, eventLog).catch(() => { });
+                processDetectionQueue(wctx, api, eventLog).catch(err => {
+                    if (logger) logger.error(`[PD:EvolutionWorker] Startup detection queue failed: ${String(err)}`);
+                });
             }
-            processPromotion(workspaceDir || '', stateDir, logger, eventLog);
+            processPromotion(wctx, logger, eventLog);
         }, initialDelay);
     },
 
     stop(ctx: OpenClawPluginServiceContext): void {
-        ctx.logger.info(`[PD:EvolutionWorker] Stopping background service...`);
-        if (intervalId) {
-            clearInterval(intervalId);
-            intervalId = null;
-        }
-
-        if (ctx.stateDir) {
-            DictionaryService.get(ctx.stateDir).flush();
-
-            // Flush event log and sessions
-            EventLogService.get(ctx.stateDir).flush();
-            flushAllSessions();
-        }
+        if (ctx?.logger) ctx.logger.info('[PD:EvolutionWorker] Stopping background service...');
+        if (intervalId) clearInterval(intervalId);
+        flushAllSessions();
     }
 };

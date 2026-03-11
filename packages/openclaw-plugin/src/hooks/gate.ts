@@ -3,7 +3,6 @@ import { isRisky, normalizePath, planStatus as getPlanStatus } from '../utils/io
 import { matchesAnyPattern } from '../utils/glob-match.js';
 import { normalizeProfile } from '../core/profile.js';
 import { trackBlock } from '../core/session-tracker.js';
-import { TRUST_CONFIG } from '../core/trust-engine.js';
 import { assessRiskLevel, estimateLineChanges } from '../core/risk-calculator.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult } from '../openclaw-sdk.js';
@@ -89,15 +88,12 @@ export function handleBeforeToolCall(
 
   // ── PROGRESSIVE GATE LOGIC ──
   if (profile.progressive_gate?.enabled) {
-    const scorecard = wctx.trust.getScorecard();
-    const trustScore = scorecard.trust_score;
-    
-    // Determine Stage
-    let stage = 2;
-    if (trustScore < TRUST_CONFIG.STAGES.STAGE_1_OBSERVER) stage = 1;
-    else if (trustScore < TRUST_CONFIG.STAGES.STAGE_2_EDITOR) stage = 2;
-    else if (trustScore <= TRUST_CONFIG.STAGES.STAGE_3_DEVELOPER) stage = 3;
-    else stage = 4;
+    const trustEngine = wctx.trust;
+    const trustScore = trustEngine.getScore();
+    const stage = trustEngine.getStage();
+    const trustSettings = wctx.config.get('trust') || {
+        limits: { stage_2_max_lines: 50, stage_3_max_lines: 300 }
+    };
 
     const riskLevel = assessRiskLevel(relPath, { toolName: event.toolName, params: event.params }, profile.risk_paths);
     const lineChanges = estimateLineChanges({ toolName: event.toolName, params: event.params });
@@ -146,57 +142,50 @@ export function handleBeforeToolCall(
         if (risky) {
             return block(relPath, `Stage 2 agents are not authorized to modify risk paths.`, wctx, event.toolName);
         }
-        if (lineChanges > TRUST_CONFIG.LIMITS.STAGE_2_MAX_LINES) {
-            return block(relPath, `Modification too large (${lineChanges} lines) for Stage 2. Max allowed is ${TRUST_CONFIG.LIMITS.STAGE_2_MAX_LINES}.`, wctx, event.toolName);
+        const stage2Limit = trustSettings.limits?.stage_2_max_lines ?? 50;
+        if (lineChanges > stage2Limit) {
+            return block(relPath, `Modification too large (${lineChanges} lines) for Stage 2. Max allowed is ${stage2Limit}.`, wctx, event.toolName);
         }
     }
 
-    // Stage 3 (Developer): Normal rules (requires PLAN for risk_paths). Limit extra-large changes.
+    // Stage 3 (Developer): Allow normal writes. Require READY plan for risk paths.
     if (stage === 3) {
-        if (lineChanges > TRUST_CONFIG.LIMITS.STAGE_3_MAX_LINES) {
-            return block(relPath, `Modification too large (${lineChanges} lines) for Stage 3. Max allowed is ${TRUST_CONFIG.LIMITS.STAGE_3_MAX_LINES}.`, wctx, event.toolName);
-        }
-        
         if (risky) {
-            const status = getPlanStatus(ctx.workspaceDir);
-            if (status !== 'READY') {
-                return block(relPath, `No READY plan found. Stage 3 requires a plan for risk path modifications.`, wctx, event.toolName, status);
+            const planStatus = getPlanStatus(ctx.workspaceDir);
+            if (planStatus !== 'READY') {
+                return block(relPath, `No READY plan found. Stage 3 requires a plan for risk path modifications.`, wctx, event.toolName);
             }
         }
+        const stage3Limit = trustSettings.limits?.stage_3_max_lines ?? 300;
+        if (lineChanges > stage3Limit) {
+            return block(relPath, `Modification too large (${lineChanges} lines) for Stage 3. Max allowed is ${stage3Limit}.`, wctx, event.toolName);
+        }
     }
 
-    // Stage 4 (Architect): All allowed.
+    // Stage 4 (Architect): Full bypass
     if (stage === 4) {
         logger.info(`[PD_GATE] Trusted Architect bypass for ${relPath}`);
         return;
     }
-  }
-
-  // 4. Original/Fallback Gate Logic
-  if (risky && profile.gate.require_plan_for_risk_paths) {
-    const status = getPlanStatus(ctx.workspaceDir);
-    if (status !== 'READY') {
-      return block(relPath, 'No READY plan found in PLAN.md.', wctx, event.toolName, status);
+  } else {
+    // FALLBACK: Legacy Gate Logic
+    if (risky && profile.gate?.require_plan_for_risk_paths) {
+      const planStatus = getPlanStatus(ctx.workspaceDir);
+      if (planStatus !== 'READY') {
+        return block(relPath, `No READY plan found in PLAN.md.`, wctx, event.toolName);
+      }
     }
   }
 }
 
-function block(relPath: string, reason: string, wctx: WorkspaceContext, toolName: string, planStatus?: string): PluginHookBeforeToolCallResult {
-    const logger = console; // Default logger if wctx doesn't provide one (future: wctx.logger)
-    logger.warn(`[PD_GATE] BLOCKED: ${relPath}. Reason: ${reason}`);
-    
-    const sessionId = (wctx as any).sessionId; // Context doesn't store sessionId yet, but let's see
-    // For now, let's keep block simple or pass sessionId
-    
-    wctx.eventLog.recordGateBlock(undefined, { // sessionId undefined for now
-        toolName,
-        filePath: relPath,
-        reason,
-        planStatus,
-    });
-
-    return {
-        block: true,
-        blockReason: `[PRINCIPLES_GATE] Blocked: ${relPath}\nREASON: ${reason}\nACTION: Improve your trust score or provide a READY plan if allowed.`,
-    };
+function block(filePath: string, reason: string, wctx: WorkspaceContext, toolName: string): PluginHookBeforeToolCallResult {
+  const logger = console;
+  logger.error(`[PD_GATE] BLOCKED: ${filePath}. Reason: ${reason}`);
+  
+  trackBlock(wctx.workspaceDir);
+  
+  return {
+    block: true,
+    blockReason: `[Principles Disciple] Security Gate Blocked this action.\nFile: ${filePath}\nReason: ${reason}\n\nHint: You may need a READY plan or a higher trust score to perform this action.`,
+  };
 }

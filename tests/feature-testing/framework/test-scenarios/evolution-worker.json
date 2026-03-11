@@ -1,0 +1,108 @@
+{
+  "metadata": {
+    "name": "Evolution Worker Service",
+    "description": "Test background evolution worker - pain signal detection, queueing, and dispatch",
+    "version": "1.0",
+    "author": "Claude Code",
+    "tags": ["service", "evolution", "background"]
+  },
+  "setup": {
+    "preconditions": [
+      "Gateway is running",
+      "EvolutionWorker service is active",
+      "Workspace has .state/.pain_flag file"
+    ],
+    "initial_state": {
+      "evolution_queue": "empty or minimal",
+      "pain_signals": "may exist"
+    }
+  },
+  "steps": [
+    {
+      "name": "Check Evolution Worker Status",
+      "type": "task",
+      "description": "Verify that EvolutionWorker service is running",
+      "task": "Check if the EvolutionWorker service is running by looking for processes containing 'evolution-worker' or checking plugin services. Report the status.",
+      "timeout": 30,
+      "wait_for_completion": true,
+      "expected_outcomes": []
+    },
+    {
+      "name": "Create Test Pain Signal",
+      "type": "task",
+      "description": "Create a test pain signal to trigger evolution worker",
+      "task": "Create a test pain signal by writing to the .pain_flag file in workspace. Use this format: 'TEST_PAIN|$(date +%s)|Test pain signal for evolution worker|5'.",
+      "timeout": 60,
+      "wait_for_completion": true,
+      "expected_outcomes": [
+        {
+          "type": "file_contains",
+          "path": "/home/csuzngjh/clawd/workspace/code/principles/docs/.pain_flag",
+          "content": "TEST_PAIN"
+        }
+      ]
+    },
+    {
+      "name": "Wait for Evolution Worker Processing",
+      "type": "wait",
+      "description": "Allow time for evolution worker to scan and process pain signal",
+      "duration": 95,
+      "reason": "EvolutionWorker scans every 90 seconds"
+    },
+    {
+      "name": "Check Evolution Queue",
+      "type": "validation",
+      "description": "Verify pain signal was queued in evolution_queue.json",
+      "validator": "file_validator",
+      "params": {
+        "path": "/home/csuzngjh/clawd/.state/evolution_queue.json",
+        "min_size": 10,
+        "required_sections": ["TEST_PAIN"]
+      }
+    },
+    {
+      "name": "Verify Pain Signal Format",
+      "type": "validation",
+      "description": "Check that queued pain signal has correct structure",
+      "validator": "file_validator",
+      "params": {
+        "path": "/home/csuzngjh/clawd/.state/evolution_queue.json",
+        "required_sections": ["timestamp", "description", "severity"]
+      }
+    },
+    {
+      "name": "Check Event Log for Evolution Events",
+      "type": "validation",
+      "description": "Verify evolution events were logged",
+      "validator": "file_validator",
+      "params": {
+        "path": "/home/csuzngjh/clawd/memory/.state/logs/events.jsonl",
+        "min_size": 100,
+        "required_sections": ["evolution_queue", "pain_signal"]
+      }
+    },
+    {
+      "name": "Cleanup Test Pain Signal",
+      "type": "cleanup",
+      "description": "Remove test pain signal from .pain_flag",
+      "actions": [
+        {
+          "type": "delete_file",
+          "path": "/home/csuzngjh/clawd/workspace/code/principles/docs/.pain_flag"
+        }
+      ]
+    }
+  ],
+  "teardown": {
+    "final_state": {
+      "evolution_queue": "may contain test signal",
+      "pain_flag_removed": true
+    },
+    "notes": [
+      "Evolution worker successfully detects pain signals",
+      "Pain signals are correctly queued",
+      "Events are properly logged",
+      "Cleanup required to remove test signals"
+    ]
+  }
+}

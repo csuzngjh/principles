@@ -1,19 +1,22 @@
-// OpenClaw Plugin SDK type shims
-// When openclaw is installed as a peer dependency, these types are imported from
-// 'openclaw/plugin-sdk/core'. For local development without openclaw installed,
-// these ambient shims provide type safety.
-// In production: add "openclaw": ">=1.0.0" to peerDependencies.
+/**
+ * OpenClaw Plugin SDK type shims (Official V1.0 Alignment)
+ * 
+ * These types are based directly on the OpenClaw core source code to ensure
+ * absolute compatibility during development and deployment.
+ */
 
 export interface PluginLogger {
-    debug?: (message: string) => void;
-    info: (message: string) => void;
-    warn: (message: string) => void;
-    error: (message: string) => void;
+    debug?: (message: string, meta?: Record<string, unknown>) => void;
+    info: (message: string, meta?: Record<string, unknown>) => void;
+    warn: (message: string, meta?: Record<string, unknown>) => void;
+    error: (message: string, meta?: Record<string, unknown>) => void;
 }
 
+// ── Subagent runtime types ──────────────────────────────────────────
+
 export interface SubagentRunParams {
-    sessionKey: string;
-    message: string;
+    sessionKey: string; // 👈 官方字段名为 sessionKey
+    message: string;    // 👈 官方字段名为 message
     extraSystemPrompt?: string;
     lane?: string;
     deliver?: boolean;
@@ -30,49 +33,72 @@ export interface SubagentWaitParams {
 }
 
 export interface SubagentWaitResult {
-    status: 'ok' | 'timeout' | 'error';
+    status: 'ok' | 'error' | 'timeout';
     error?: string;
 }
 
 export interface SubagentGetSessionMessagesParams {
     sessionKey: string;
+    limit?: number;
 }
 
 export interface SubagentGetSessionMessagesResult {
     messages: unknown[];
-    assistantTexts: string[];
+    assistantTexts?: string[]; // Optional helper provided by some runtime wrappers
 }
 
 export interface SubagentDeleteSessionParams {
     sessionKey: string;
+    deleteTranscript?: boolean;
 }
 
+// ── Plugin Runtime ───────────────────────────────────────────────────
+
 export interface PluginRuntime {
+    version: string;
     subagent: {
         run: (params: SubagentRunParams) => Promise<SubagentRunResult>;
         waitForRun: (params: SubagentWaitParams) => Promise<SubagentWaitResult>;
         getSessionMessages: (params: SubagentGetSessionMessagesParams) => Promise<SubagentGetSessionMessagesResult>;
         deleteSession: (params: SubagentDeleteSessionParams) => Promise<void>;
     };
+    tools: {
+        createMemoryGetTool: (params: any) => any;
+        createMemorySearchTool: (params: any) => any;
+    };
+    system: {
+        enqueueSystemEvent: (event: any) => void;
+        requestHeartbeatNow: () => void;
+        runCommandWithTimeout: (cmd: string, args: string[], timeout: number) => Promise<any>;
+    };
+    logging: {
+        shouldLogVerbose: () => boolean;
+        getChildLogger: (bindings?: Record<string, unknown>) => PluginLogger;
+    };
+    state: {
+        resolveStateDir: (env?: any, homedir?: any) => string;
+    };
+    config: {
+        loadConfig: () => any;
+        writeConfigFile: (cfg: any) => Promise<void>;
+    };
 }
+
+// ── Plugin API ───────────────────────────────────────────────────────
 
 export interface OpenClawPluginApi {
     id: string;
     name: string;
     version?: string;
     source: string;
-    config: Record<string, unknown>;
-    pluginConfig?: Record<string, unknown>;
+    config: Record<string, any>;
+    pluginConfig?: Record<string, any>;
     runtime: PluginRuntime;
     logger: PluginLogger;
-    registerTool: (tool: unknown, opts?: unknown) => void;
-    registerHook: (events: string | string[], handler: unknown, opts?: unknown) => void;
-    registerHttpRoute: (params: unknown) => void;
-    registerChannel: (registration: unknown) => void;
-    registerGatewayMethod: (method: string, handler: unknown) => void;
-    registerCli: (registrar: unknown, opts?: { commands?: string[] }) => void;
-    registerService: (service: unknown) => void;
-    registerProvider: (provider: unknown) => void;
+    workspaceDir?: string; // Optional but commonly injected
+    registerTool: (tool: any, opts?: any) => void;
+    registerHook: (events: string | string[], handler: any, opts?: any) => void;
+    registerService: (service: OpenClawPluginService) => void;
     registerCommand: (command: PluginCommandDefinition) => void;
     resolvePath: (input: string) => string;
     on: <K extends PluginHookName>(
@@ -81,6 +107,8 @@ export interface OpenClawPluginApi {
         opts?: { priority?: number },
     ) => void;
 }
+
+// ── Command types ───────────────────────────────────────────────────
 
 export type PluginCommandDefinition = {
     name: string;
@@ -98,7 +126,8 @@ export type PluginCommandContext = {
     isAuthorizedSender: boolean;
     args?: string;
     commandBody: string;
-    config: Record<string, unknown>;
+    config: Record<string, any>;
+    workspaceDir?: string;
     from?: string;
     to?: string;
     accountId?: string;
@@ -111,10 +140,11 @@ export type PluginCommandResult = {
     mediaUrls?: string[];
     replyToId?: string;
     isError?: boolean;
-    channelData?: Record<string, unknown>;
+    channelData?: Record<string, any>;
 };
 
-// ── Hook names ──────────────────────────────────────────────────────────────
+// ── Hook types ──────────────────────────────────────────────────────
+
 export type PluginHookName =
     | 'before_model_resolve' | 'before_prompt_build' | 'before_agent_start'
     | 'llm_input' | 'llm_output' | 'agent_end'
@@ -125,44 +155,36 @@ export type PluginHookName =
     | 'subagent_spawning' | 'subagent_delivery_target' | 'subagent_spawned' | 'subagent_ended'
     | 'gateway_start' | 'gateway_stop';
 
-// ── Agent context ────────────────────────────────────────────────────────────
 export type PluginHookAgentContext = {
     agentId?: string;
     sessionKey?: string;
     sessionId?: string;
     workspaceDir?: string;
-    /** Plugin-scoped state directory for persistent data. */
     stateDir?: string;
     messageProvider?: string;
-    /** What initiated this agent run: "user" | "heartbeat" | "cron" | "memory" */
     trigger?: string;
-    /** Channel identifier (e.g. "telegram", "discord", "whatsapp"). */
     channelId?: string;
-    /** Injected logger for the plugin. */
     logger?: PluginLogger;
 };
 
-// ── Tool context ─────────────────────────────────────────────────────────────
 export type PluginHookToolContext = {
     agentId?: string;
     sessionKey?: string;
     sessionId?: string;
-    /** Plugin-scoped state directory for persistent data. */
-    stateDir?: string;
     workspaceDir?: string;
     runId?: string;
     toolName: string;
     toolCallId?: string;
 };
 
-// ── Subagent context ─────────────────────────────────────────────────────────
 export type PluginHookSubagentContext = {
     runId?: string;
     childSessionKey?: string;
     requesterSessionKey?: string;
+    workspaceDir?: string; // CommonPD extension
 };
 
-// ── Event types ───────────────────────────────────────────────────────────────
+// ── Event types ─────────────────────────────────────────────────────
 
 export type PluginHookBeforePromptBuildEvent = {
     prompt: string;
@@ -172,39 +194,55 @@ export type PluginHookBeforePromptBuildEvent = {
 export type PluginHookBeforePromptBuildResult = {
     systemPrompt?: string;
     prependContext?: string;
-    /**
-     * Prepended to the agent system prompt so providers can cache it (e.g. prompt caching).
-     * Use for STATIC plugin guidance instead of prependContext to avoid per-turn token cost.
-     */
     prependSystemContext?: string;
-    /**
-     * Appended to the agent system prompt so providers can cache it (e.g. prompt caching).
-     * Use for STATIC plugin guidance instead of prependContext to avoid per-turn token cost.
-     */
     appendSystemContext?: string;
 };
 
 export type PluginHookBeforeToolCallEvent = {
     toolName: string;
-    params: Record<string, unknown>;
+    params: Record<string, any>;
     runId?: string;
     toolCallId?: string;
 };
 
 export type PluginHookBeforeToolCallResult = {
-    params?: Record<string, unknown>;
+    params?: Record<string, any>;
     block?: boolean;
     blockReason?: string;
 };
 
 export type PluginHookAfterToolCallEvent = {
     toolName: string;
-    params: Record<string, unknown>;
+    params: Record<string, any>;
     runId?: string;
     toolCallId?: string;
-    result?: unknown;
+    result?: any;
     error?: string;
     durationMs?: number;
+};
+
+export type PluginHookLlmOutputEvent = {
+    runId: string;
+    sessionId: string;
+    provider: string;
+    model: string;
+    assistantTexts: string[];
+    lastAssistant?: any;
+    usage?: {
+        input?: number; output?: number; cacheRead?: number; cacheWrite?: number; total?: number;
+    };
+};
+
+export type PluginHookSubagentEndedEvent = {
+    targetSessionKey: string;
+    targetKind: 'subagent' | 'acp';
+    reason: string;
+    sendFarewell?: boolean;
+    accountId?: string;
+    runId?: string;
+    endedAt?: number;
+    outcome?: 'ok' | 'error' | 'timeout' | 'killed' | 'reset' | 'deleted';
+    error?: string;
 };
 
 export type PluginHookBeforeResetEvent = {
@@ -241,94 +279,32 @@ export type PluginHookSubagentSpawningResult =
     | { status: 'ok'; threadBindingReady?: boolean }
     | { status: 'error'; error: string };
 
-export type PluginHookLlmOutputEvent = {
-    runId: string;
-    sessionId: string;
-    provider: string;
-    model: string;
-    assistantTexts: string[];
-    lastAssistant?: unknown;
-    usage?: {
-        input?: number;
-        output?: number;
-        cacheRead?: number;
-        cacheWrite?: number;
-        total?: number;
-    };
-};
+// ── Service types ────────────────────────────────────────────────────
 
-export type PluginHookSubagentEndedEvent = {
-    targetSessionKey: string;
-    targetKind: 'subagent' | 'acp';
-    reason: string;
-    sendFarewell?: boolean;
-    accountId?: string;
-    runId?: string;
-    endedAt?: number;
-    outcome?: 'ok' | 'error' | 'timeout' | 'killed' | 'reset' | 'deleted';
-    error?: string;
-};
-
-export type OpenClawPluginServiceContext = {
-    config: Record<string, unknown>;
+export interface OpenClawPluginServiceContext {
+    config: Record<string, any>;
     workspaceDir?: string;
     stateDir: string;
     logger: PluginLogger;
-};
+}
 
-export type OpenClawPluginService = {
+export interface OpenClawPluginService {
     id: string;
     start: (ctx: OpenClawPluginServiceContext) => void | Promise<void>;
     stop?: (ctx: OpenClawPluginServiceContext) => void | Promise<void>;
-};
+}
 
-// ── Handler map (simplified — full map in openclaw/plugin-sdk/core) ──────────
+// ── Handler map ─────────────────────────────────────────────────────
+
 export type PluginHookHandlerMap = {
-    before_prompt_build: (
-        event: PluginHookBeforePromptBuildEvent,
-        ctx: PluginHookAgentContext
-    ) => PluginHookBeforePromptBuildResult | void | Promise<PluginHookBeforePromptBuildResult | void>;
-
-    before_tool_call: (
-        event: PluginHookBeforeToolCallEvent,
-        ctx: PluginHookToolContext
-    ) => PluginHookBeforeToolCallResult | void | Promise<PluginHookBeforeToolCallResult | void>;
-
-    after_tool_call: (
-        event: PluginHookAfterToolCallEvent,
-        ctx: PluginHookToolContext
-    ) => void | Promise<void>;
-
-    before_reset: (
-        event: PluginHookBeforeResetEvent,
-        ctx: PluginHookAgentContext
-    ) => void | Promise<void>;
-
-    before_compaction: (
-        event: PluginHookBeforeCompactionEvent,
-        ctx: PluginHookAgentContext
-    ) => void | Promise<void>;
-
-    after_compaction: (
-        event: PluginHookAfterCompactionEvent,
-        ctx: PluginHookAgentContext
-    ) => void | Promise<void>;
-
-    llm_output: (
-        event: PluginHookLlmOutputEvent,
-        ctx: PluginHookAgentContext
-    ) => void | Promise<void>;
-
-    subagent_ended: (
-        event: PluginHookSubagentEndedEvent,
-        ctx: PluginHookAgentContext
-    ) => void | Promise<void>;
-
-    subagent_spawning: (
-        event: PluginHookSubagentSpawningEvent,
-        ctx: PluginHookSubagentContext
-    ) => PluginHookSubagentSpawningResult | void | Promise<PluginHookSubagentSpawningResult | void>;
-
-    // Remaining hooks — permissive for now
-    [key: string]: (...args: unknown[]) => unknown;
+    before_prompt_build: (event: PluginHookBeforePromptBuildEvent, ctx: PluginHookAgentContext) => any;
+    before_tool_call: (event: PluginHookBeforeToolCallEvent, ctx: PluginHookToolContext) => any;
+    after_tool_call: (event: PluginHookAfterToolCallEvent, ctx: PluginHookToolContext) => any;
+    llm_output: (event: PluginHookLlmOutputEvent, ctx: PluginHookAgentContext) => any;
+    subagent_ended: (event: PluginHookSubagentEndedEvent, ctx: PluginHookSubagentContext) => any;
+    subagent_spawning: (event: PluginHookSubagentSpawningEvent, ctx: PluginHookSubagentContext) => any;
+    before_reset: (event: PluginHookBeforeResetEvent, ctx: PluginHookAgentContext) => any;
+    before_compaction: (event: PluginHookBeforeCompactionEvent, ctx: PluginHookAgentContext) => any;
+    after_compaction: (event: PluginHookAfterCompactionEvent, ctx: PluginHookAgentContext) => any;
+    [key: string]: (...args: any[]) => any;
 };
