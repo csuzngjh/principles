@@ -1,0 +1,66 @@
+{"timestamp":"2026-03-11T13:02:07+00:00","type":"test_start","data":{"feature":"gatekeeper-boundaries"}}
+{"timestamp":"2026-03-11T13:02:08+00:00","type":"step_start","data":{"step":1,"name":"Stage 1 Test - Risk Path Blocked","type":"cleanup"}}
+{"timestamp":"2026-03-11T13:02:08+00:00","type":"step_complete","data":{"step":1,"name":"Stage 1 Test - Risk Path Blocked"}}
+{"timestamp":"2026-03-11T13:02:08+00:00","type":"step_start","data":{"step":2,"name":"Verify Stage 1 Status","type":"validation"}}
+{"timestamp":"2026-03-11T13:02:08+00:00","type":"step_complete","data":{"step":2,"name":"Verify Stage 1 Status"}}
+{"timestamp":"2026-03-11T13:02:08+00:00","type":"step_start","data":{"step":3,"name":"Stage 1 - Attempt Risk Path Write","type":"task"}}
+{"timestamp":"2026-03-11T13:02:09+00:00","type":"task_sent","data":{"pid":1354694,"timeout":30}}
+{"timestamp":"2026-03-11T13:02:29+00:00","type":"step_failed","data":{"step":3,"name":"Stage 1 - Attempt Risk Path Write","error_code":1}}
+{"timestamp":"2026-03-11T13:02:29+00:00","type":"step_start","data":{"step":4,"name":"Verify Risk Path Blocked - Stage 1","type":"validation"}}
+{"timestamp":"2026-03-11T13:02:29+00:00","type":"step_failed","data":{"step":4,"name":"Verify Risk Path Blocked - Stage 1","error_code":1}}
+{"timestamp":"2026-03-11T13:02:29+00:00","type":"step_start","data":{"step":5,"name":"Stage 1 - Attempt Large Safe Path Write","type":"task"}}
+{"timestamp":"2026-03-11T13:02:29+00:00","type":"task_sent","data":{"pid":1354862,"timeout":60}}
+{"timestamp":"2026-03-11T13:03:30+00:00","type":"step_complete","data":{"step":5,"name":"Stage 1 - Attempt Large Safe Path Write"}}
+{"timestamp":"2026-03-11T13:03:30+00:00","type":"step_start","data":{"step":6,"name":"Verify Large Write Blocked - Stage 1","type":"validation"}}
+{"timestamp":"2026-03-11T13:03:30+00:00","type":"step_failed","data":{"step":6,"name":"Verify Large Write Blocked - Stage 1","error_code":1}}
+{"timestamp":"2026-03-11T13:03:30+00:00","type":"step_start","data":{"step":7,"name":"Transition to Stage 2","type":"cleanup"}}
+{"timestamp":"2026-03-11T13:03:31+00:00","type":"step_complete","data":{"step":7,"name":"Transition to Stage 2"}}
+{"timestamp":"2026-03-11T13:03:31+00:00","type":"step_start","data":{"step":8,"name":"Stage 2 - Risk Path Write Blocked","type":"task"}}
+{"timestamp":"2026-03-11T13:03:31+00:00","type":"task_sent","data":{"pid":1355190,"timeout":30}}
+{"timestamp":"2026-03-11T13:03:51+00:00","type":"step_failed","data":{"step":8,"name":"Stage 2 - Risk Path Write Blocked","error_code":1}}
+{"timestamp":"2026-03-11T13:03:51+00:00","type":"step_start","data":{"step":9,"name":"Verify Risk Path Blocked - Stage 2","type":"validation"}}
+{"timestamp":"2026-03-11T13:03:51+00:00","type":"step_failed","data":{"step":9,"name":"Verify Risk Path Blocked - Stage 2","error_code":1}}
+{"timestamp":"2026-03-11T13:03:52+00:00","type":"step_start","data":{"step":10,"name":"Stage 2 - Small Safe Path Write Allowed","type":"task"}}
+{"timestamp":"2026-03-11T13:03:52+00:00","type":"task_sent","data":{"pid":1355372,"timeout":60}}
+{"timestamp":"2026-03-11T13:04:52+00:00","type":"step_complete","data":{"step":10,"name":"Stage 2 - Small Safe Path Write Allowed"}}
+{"timestamp":"2026-03-11T13:04:52+00:00","type":"step_start","data":{"step":11,"name":"Verify Small Write Allowed - Stage 2","type":"validation"}}
+{"timestamp":"2026-03-11T13:04:53+00:00","type":"step_failed","data":{"step":11,"name":"Verify Small Write Allowed - Stage 2","error_code":1}}
+{"timestamp":"2026-03-11T13:04:53+00:00","type":"step_start","data":{"step":12,"name":"Stage 2 - Large Write (15 Lines) Blocked","type":"task"}}
+{"timestamp":"2026-03-11T13:04:53+00:00","type":"task_sent","data":{"pid":1355636,"timeout":60}}
+{"timestamp":"2026-03-11T13:05:54+00:00","type":"step_complete","data":{"step":12,"name":"Stage 2 - Large Write (15 Lines) Blocked"}}
+{"timestamp":"2026-03-11T13:05:54+00:00","type":"step_start","data":{"step":13,"name":"Verify Line Limit Enforced - Stage 2","type":"validation"}}
+{"timestamp":"2026-03-11T13:05:54+00:00","type":"step_failed","data":{"step":13,"name":"Verify Line Limit Enforced - Stage 2","error_code":1}}
+{"timestamp":"2026-03-11T13:05:54+00:00","type":"step_start","data":{"step":14,"name":"Transition to Stage 3","type":"cleanup"}}
+{"timestamp":"2026-03-11T13:05:54+00:00","type":"step_complete","data":{"step":14,"name":"Transition to Stage 3"}}
+{"timestamp":"2026-03-11T13:05:55+00:00","type":"step_start","data":{"step":15,"name":"Stage 3 - Risk Path Without Plan Blocked","type":"task"}}
+{"timestamp":"2026-03-11T13:05:55+00:00","type":"task_sent","data":{"pid":1355932,"timeout":30}}
+{"timestamp":"2026-03-11T13:06:15+00:00","type":"step_failed","data":{"step":15,"name":"Stage 3 - Risk Path Without Plan Blocked","error_code":1}}
+{"timestamp":"2026-03-11T13:06:15+00:00","type":"step_start","data":{"step":16,"name":"Verify Plan Requirement - Stage 3","type":"validation"}}
+{"timestamp":"2026-03-11T13:06:15+00:00","type":"step_failed","data":{"step":16,"name":"Verify Plan Requirement - Stage 3","error_code":1}}
+{"timestamp":"2026-03-11T13:06:15+00:00","type":"step_start","data":{"step":17,"name":"Set PLAN to READY Status","type":"task"}}
+{"timestamp":"2026-03-11T13:06:16+00:00","type":"task_sent","data":{"pid":1356096,"timeout":60}}
+{"timestamp":"2026-03-11T13:06:36+00:00","type":"step_failed","data":{"step":17,"name":"Set PLAN to READY Status","error_code":1}}
+{"timestamp":"2026-03-11T13:06:36+00:00","type":"step_start","data":{"step":18,"name":"Stage 3 - Risk Path With Plan Allowed","type":"task"}}
+{"timestamp":"2026-03-11T13:06:36+00:00","type":"task_sent","data":{"pid":1356201,"timeout":60}}
+{"timestamp":"2026-03-11T13:07:37+00:00","type":"step_complete","data":{"step":18,"name":"Stage 3 - Risk Path With Plan Allowed"}}
+{"timestamp":"2026-03-11T13:07:37+00:00","type":"step_start","data":{"step":19,"name":"Verify Risk Path Allowed - Stage 3 with Plan","type":"validation"}}
+{"timestamp":"2026-03-11T13:07:37+00:00","type":"step_failed","data":{"step":19,"name":"Verify Risk Path Allowed - Stage 3 with Plan","error_code":1}}
+{"timestamp":"2026-03-11T13:07:37+00:00","type":"step_start","data":{"step":20,"name":"Stage 3 - Large Write (150 Lines) Blocked","type":"task"}}
+{"timestamp":"2026-03-11T13:07:38+00:00","type":"task_sent","data":{"pid":1356471,"timeout":120}}
+{"timestamp":"2026-03-11T13:09:39+00:00","type":"step_complete","data":{"step":20,"name":"Stage 3 - Large Write (150 Lines) Blocked"}}
+{"timestamp":"2026-03-11T13:09:39+00:00","type":"step_start","data":{"step":21,"name":"Verify Stage 3 Line Limit (100)","type":"validation"}}
+{"timestamp":"2026-03-11T13:09:39+00:00","type":"step_failed","data":{"step":21,"name":"Verify Stage 3 Line Limit (100)","error_code":1}}
+{"timestamp":"2026-03-11T13:09:39+00:00","type":"step_start","data":{"step":22,"name":"Transition to Stage 4","type":"cleanup"}}
+{"timestamp":"2026-03-11T13:09:39+00:00","type":"step_complete","data":{"step":22,"name":"Transition to Stage 4"}}
+{"timestamp":"2026-03-11T13:09:40+00:00","type":"step_start","data":{"step":23,"name":"Stage 4 - Unlimited Access Test","type":"task"}}
+{"timestamp":"2026-03-11T13:09:40+00:00","type":"task_sent","data":{"pid":1356894,"timeout":180}}
+{"timestamp":"2026-03-11T13:12:42+00:00","type":"step_complete","data":{"step":23,"name":"Stage 4 - Unlimited Access Test"}}
+{"timestamp":"2026-03-11T13:12:42+00:00","type":"step_start","data":{"step":24,"name":"Verify Stage 4 Complete Bypass","type":"validation"}}
+{"timestamp":"2026-03-11T13:12:42+00:00","type":"step_failed","data":{"step":24,"name":"Verify Stage 4 Complete Bypass","error_code":1}}
+{"timestamp":"2026-03-11T13:12:42+00:00","type":"step_start","data":{"step":25,"name":"Verify Gate Block Events Logged","type":"validation"}}
+{"timestamp":"2026-03-11T13:12:42+00:00","type":"step_failed","data":{"step":25,"name":"Verify Gate Block Events Logged","error_code":1}}
+{"timestamp":"2026-03-11T13:12:42+00:00","type":"step_start","data":{"step":26,"name":"Restore PLAN.md Status","type":"cleanup"}}
+{"timestamp":"2026-03-11T13:12:43+00:00","type":"step_complete","data":{"step":26,"name":"Restore PLAN.md Status"}}
+{"timestamp":"2026-03-11T13:12:43+00:00","type":"step_start","data":{"step":27,"name":"Cleanup Test Files","type":"cleanup"}}
+{"timestamp":"2026-03-11T13:12:43+00:00","type":"step_complete","data":{"step":27,"name":"Cleanup Test Files"}}
+{"timestamp":"2026-03-11T13:12:43+00:00","type":"test_end","data":{"feature":"gatekeeper-boundaries","status":"passed"}}
