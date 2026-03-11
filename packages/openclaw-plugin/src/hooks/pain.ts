@@ -87,7 +87,7 @@ export function handleAfterToolCall(
   } else {
     resetFriction(sessionId, effectiveWorkspaceDir);
     
-    const WRITE_TOOLS = ['write', 'edit', 'apply_patch'];
+    const WRITE_TOOLS = ['write', 'edit', 'apply_patch', 'write_file', 'edit_file', 'replace'];
     if (WRITE_TOOLS.includes(event.toolName)) {
       const filePath = (event.params as any).file_path || (event.params as any).path || (event.params as any).file;
       eventLog.recordToolCall(sessionId, {
@@ -95,6 +95,35 @@ export function handleAfterToolCall(
         filePath: typeof filePath === 'string' ? filePath : undefined,
         gfi: 0,
       });
+
+      // ── Hygiene Tracking: Record persistence actions ──
+      if (typeof filePath === 'string') {
+        const isMemory = filePath.includes('memory/') || filePath === 'MEMORY.md';
+        const isPlan = filePath === 'PLAN.md' || filePath.endsWith('/PLAN.md');
+        
+        if (isMemory || isPlan) {
+          const content = (event.params as any).content || (event.params as any).new_string || '';
+          wctx.hygiene.recordPersistence({
+            ts: new Date().toISOString(),
+            tool: event.toolName,
+            path: filePath,
+            type: isMemory ? 'memory' : 'plan',
+            contentLength: content.length,
+          });
+        }
+      }
+    }
+
+    // Special case for memory_store tool
+    if (event.toolName === 'memory_store' || event.toolName === 'memory_recall') {
+       const text = (event.params as any).text || (event.params as any).query || '';
+       wctx.hygiene.recordPersistence({
+         ts: new Date().toISOString(),
+         tool: event.toolName,
+         path: 'DATABASE',
+         type: 'memory',
+         contentLength: text.length,
+       });
     }
   }
 

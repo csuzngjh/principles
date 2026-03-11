@@ -114,8 +114,15 @@ export async function handleBeforePromptBuild(
   // 6. Security Layer: Trust & Permission Awareness
   const trustScore = wctx.trust.getScore();
   const stage = wctx.trust.getStage();
+  const hygiene = wctx.hygiene.getStats();
   
   prependSystemContext += `\n[CURRENT TRUST SCORE: ${trustScore}/100 (Stage ${stage})]\n`;
+  prependSystemContext += `[COGNITIVE HYGIENE: ${hygiene.persistenceCount} persists today]\n`;
+
+  if (hygiene.persistenceCount === 0 && trigger === 'user') {
+     appendSystemContext += `\n⚠️ ADVISORY: You haven't persisted any state today. To prevent "Goldfish Memory", consider updating PLAN.md or writing notes to memory/ if this session is becoming complex.\n`;
+  }
+
   if (stage === 1) {
     prependSystemContext += `⚠️ WARNING: Your trust score is critical. You are in read-only mode. Use diagnostician sub-agents to recover trust.\n`;
   }
