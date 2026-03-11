@@ -13,8 +13,8 @@
       "AGENT_SCORECARD.json is accessible"
     ],
     "initial_state": {
-      "trust_score": 59,
-      "stage": "Stage 2: Developer"
+      "trust_score": 85,
+      "stage": "Stage 3: Developer"
     }
   },
   "steps": [
@@ -24,9 +24,9 @@
       "description": "Check that trust score starts at expected value",
       "validator": "trust_validator",
       "params": {
-        "min_score": 55,
-        "max_score": 65,
-        "expected_stage": "Stage 2"
+        "min_score": 80,
+        "max_score": 90,
+        "expected_stage": "Stage 3"
       }
     },
     {

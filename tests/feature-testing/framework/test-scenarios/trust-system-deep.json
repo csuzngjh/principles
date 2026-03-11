@@ -16,11 +16,11 @@
     ],
     "initial_state": {
       "trust_score": "will be reset to 59 (cold start)",
-      "grace_failures": 3,
+      "grace_failures": 5,
       "cold_start_active": true
     },
     "data_files": {
-      "scorecard": "docs/AGENT_SCORECARD.json",
+      "scorecard": ".state/AGENT_SCORECARD.json",
       "events": "memory/.state/logs/events.jsonl",
       "config": "memory/.state/config.json"
     }
@@ -139,8 +139,8 @@
       "validator": "custom_validator",
       "params": {
         "validation_type": "penalty_verification",
-        "expected_score": 51,
-        "expected_delta": -8,
+        "expected_score": 83,
+        "expected_delta": -2,
         "failure_type": "tool"
       }
     },
