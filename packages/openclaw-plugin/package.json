@@ -1,6 +1,6 @@
 {
   "name": "principles-disciple",
-  "version": "1.4.1",
+  "version": "1.4.3",
   "description": "Native OpenClaw plugin for Principles Disciple",
   "type": "module",
   "main": "./dist/index.js",
