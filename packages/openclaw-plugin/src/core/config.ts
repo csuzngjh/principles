@@ -1,6 +1,22 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
+export interface DeepReflectionSettings {
+    enabled: boolean;
+    mode: 'auto' | 'forced' | 'disabled';
+    force_checkpoint?: boolean;
+    checkpoint_message?: string;
+    auto_trigger_conditions?: {
+        min_tool_calls?: number;
+        error_rate_threshold?: number;
+        complexity_keywords?: string[];
+    };
+    default_model?: string;
+    default_depth?: number;
+    timeout_ms?: number;
+    modelsDir?: string;
+}
+
 export interface PainSettings {
     language: 'en' | 'zh';
     thresholds: {
@@ -21,6 +37,7 @@ export interface PainSettings {
         worker_poll_ms: number;
         initial_delay_ms: number;
     };
+    deep_reflection?: DeepReflectionSettings;
 }
 
 const DEFAULT_SETTINGS: PainSettings = {
@@ -42,6 +59,20 @@ const DEFAULT_SETTINGS: PainSettings = {
     intervals: {
         worker_poll_ms: 15 * 60 * 1000,
         initial_delay_ms: 5000
+    },
+    deep_reflection: {
+        enabled: true,
+        mode: 'auto',
+        force_checkpoint: true,
+        checkpoint_message: 'Before responding, quick self-check: 1. Task complexity (simple/medium/complex) 2. Information sufficiency (sufficient/need more) 3. If complex or insufficient info, call deep_reflect tool',
+        auto_trigger_conditions: {
+            min_tool_calls: 5,
+            error_rate_threshold: 0.3,
+            complexity_keywords: ['refactor', 'architecture', 'design', 'optimize', 'security', 'critical']
+        },
+        default_model: 'T-01',
+        default_depth: 2,
+        timeout_ms: 60000
     }
 };
 
@@ -62,7 +93,8 @@ export class PainConfig {
                     language: loaded.language || DEFAULT_SETTINGS.language,
                     thresholds: { ...DEFAULT_SETTINGS.thresholds, ...loaded.thresholds },
                     scores: { ...DEFAULT_SETTINGS.scores, ...loaded.scores },
-                    intervals: { ...DEFAULT_SETTINGS.intervals, ...loaded.intervals }
+                    intervals: { ...DEFAULT_SETTINGS.intervals, ...loaded.intervals },
+                    deep_reflection: { ...DEFAULT_SETTINGS.deep_reflection, ...loaded.deep_reflection }
                 };
             } catch (e) {
                 console.error('[PD] Failed to parse pain_settings.json, using defaults.');
