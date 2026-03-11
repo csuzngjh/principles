@@ -35,7 +35,7 @@ export async function handleBeforeReset(
     try {
       fs.appendFileSync(memoryPath, summary, 'utf8');
     } catch (_e) {
-      // Non-critical
+      console.error(`[PD:Lifecycle] Failed to write session reset summary: ${String(_e)}`);
     }
   }
 }
@@ -110,13 +110,17 @@ export async function extractPainFromSessionFile(sessionFile: string, ctx: Plugi
           if (ctx.logger?.debug) ctx.logger.debug(`[Pain Extractor] Detected semantic confusion string.`);
           painPoints.push(`[SEMANTIC CONFUSION] ${text.substring(0, 150)}...`);
         }
-      } catch (e) { }
+      } catch (e) {
+        console.error(`[PD:Lifecycle] Error parsing message: ${String(e)}`);
+      }
     }
   } finally {
     try {
       rl.close();
       fileStream.destroy();
-    } catch (_e) { }
+    } catch (_e) {
+      // Ignore cleanup errors
+    }
   }
 
   if (painPoints.length > 0) {
@@ -154,7 +158,9 @@ export async function extractPainFromSessionFile(sessionFile: string, ctx: Plugi
           trigger_text_preview: painPoints.find(p => p.includes('[FATAL INTERCEPT]'))?.substring(0, 150) || 'Fatal intercept'
         });
       }
-    } catch (err) { }
+    } catch (err) {
+      console.error(`[PD:Lifecycle] Failed to write pain signals: ${String(err)}`);
+    }
   }
 }
 
@@ -175,7 +181,9 @@ export async function handleBeforeCompaction(
     const dir = path.dirname(checkpointPath);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.appendFileSync(checkpointPath, log, 'utf8');
-  } catch (_e) { }
+  } catch (_e) {
+    console.error(`[PD:Lifecycle] Failed to write pre-compaction checkpoint: ${String(_e)}`);
+  }
 
   if (event.sessionFile) {
     await extractPainFromSessionFile(event.sessionFile, ctx);
@@ -195,5 +203,7 @@ export async function handleAfterCompaction(
 
   try {
     fs.appendFileSync(checkpointPath, log, 'utf8');
-  } catch (_e) { }
+  } catch (_e) {
+    console.error(`[PD:Lifecycle] Failed to write post-compaction checkpoint: ${String(_e)}`);
+  }
 }

@@ -55,4 +55,42 @@ describe('PainConfig', () => {
         config.load();
         expect(config.get('intervals.worker_poll_ms')).toBe(15 * 60 * 1000);
     });
+
+    it('should skip undefined values during merge', () => {
+        const mockConfig = {
+            thresholds: {
+                pain_trigger: undefined // Should NOT overwrite default
+            }
+        };
+
+        vi.mocked(fs.existsSync).mockReturnValue(true);
+        vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(mockConfig));
+
+        const config = new PainConfig(stateDir);
+        config.load();
+
+        expect(config.get('thresholds.pain_trigger')).toBe(40); // Default remains
+    });
+
+    it('should validate and correct out-of-range values', () => {
+        const mockConfig = {
+            trust: {
+                stages: {
+                    stage_1_observer: 999 // Invalid
+                }
+            },
+            intervals: {
+                worker_poll_ms: 500 // Too fast, should be corrected
+            }
+        };
+
+        vi.mocked(fs.existsSync).mockReturnValue(true);
+        vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(mockConfig));
+
+        const config = new PainConfig(stateDir);
+        config.load();
+
+        expect(config.get('trust.stages.stage_1_observer')).toBe(30); // Reset to default
+        expect(config.get('intervals.worker_poll_ms')).toBe(15 * 60 * 1000); // Reset to default
+    });
 });

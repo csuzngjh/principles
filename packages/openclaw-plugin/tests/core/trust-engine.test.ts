@@ -53,6 +53,28 @@ describe('Trust Engine - Unified Adaptive System', () => {
             const engine = new TrustEngine(workspaceDir);
             expect(engine.getStage()).toBe(2);
         });
+
+        it('should correctly handle cold start expiration', () => {
+            vi.mocked(fs.existsSync).mockReturnValue(true);
+            
+            // Scenario 1: Still in cold start
+            vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
+                trust_score: 59,
+                cold_start_end: new Date(Date.now() + 1000).toISOString(),
+                history: []
+            }));
+            const engine1 = new TrustEngine(workspaceDir);
+            expect(engine1.isColdStart()).toBe(true);
+
+            // Scenario 2: Expired
+            vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
+                trust_score: 59,
+                cold_start_end: new Date(Date.now() - 1000).toISOString(),
+                history: []
+            }));
+            const engine2 = new TrustEngine(workspaceDir);
+            expect(engine2.isColdStart()).toBe(false);
+        });
     });
 
     describe('Cold Start & Grace Failures', () => {

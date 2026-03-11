@@ -86,7 +86,9 @@ export function migrateDirectoryStructure(api: OpenClawPluginApi, workspaceDir: 
                         api.logger.info(`[PD:Migration] Cleaned up empty legacy state directory.`);
                     }
                 }
-            } catch (_e) {}
+            } catch (_e) {
+                api.logger.debug?.(`[PD:Migration] Failed to cleanup legacy state dir: ${String(_e)}`);
+            }
         }
 
     } catch (err) {

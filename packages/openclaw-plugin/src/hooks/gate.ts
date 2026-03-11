@@ -91,7 +91,9 @@ export function handleBeforeToolCall(
     const trustEngine = wctx.trust;
     const trustScore = trustEngine.getScore();
     const stage = trustEngine.getStage();
-    const trustSettings = wctx.config.get('trust');
+    const trustSettings = wctx.config.get('trust') || {
+        limits: { stage_2_max_lines: 50, stage_3_max_lines: 300 }
+    };
 
     const riskLevel = assessRiskLevel(relPath, { toolName: event.toolName, params: event.params }, profile.risk_paths);
     const lineChanges = estimateLineChanges({ toolName: event.toolName, params: event.params });
@@ -140,7 +142,7 @@ export function handleBeforeToolCall(
         if (risky) {
             return block(relPath, `Stage 2 agents are not authorized to modify risk paths.`, wctx, event.toolName);
         }
-        const stage2Limit = trustSettings.limits.stage_2_max_lines;
+        const stage2Limit = trustSettings.limits?.stage_2_max_lines ?? 50;
         if (lineChanges > stage2Limit) {
             return block(relPath, `Modification too large (${lineChanges} lines) for Stage 2. Max allowed is ${stage2Limit}.`, wctx, event.toolName);
         }
@@ -154,7 +156,7 @@ export function handleBeforeToolCall(
                 return block(relPath, `No READY plan found. Stage 3 requires a plan for risk path modifications.`, wctx, event.toolName);
             }
         }
-        const stage3Limit = trustSettings.limits.stage_3_max_lines;
+        const stage3Limit = trustSettings.limits?.stage_3_max_lines ?? 300;
         if (lineChanges > stage3Limit) {
             return block(relPath, `Modification too large (${lineChanges} lines) for Stage 3. Max allowed is ${stage3Limit}.`, wctx, event.toolName);
         }

@@ -59,14 +59,21 @@ export class TrustEngine {
 
         if (fs.existsSync(scorecardPath)) {
             try {
-                const data = JSON.parse(fs.readFileSync(scorecardPath, 'utf8'));
+                const raw = fs.readFileSync(scorecardPath, 'utf8');
+                const data = JSON.parse(raw);
+                
+                // Compatibility: handle migration from 'score' to 'trust_score' if needed
                 if (data.score !== undefined && data.trust_score === undefined) {
                     data.trust_score = data.score;
                 }
+                
+                // Ensure history exists
                 if (!data.history) data.history = [];
                 return data;
             } catch (e) {
-                console.error(`[PD:TrustEngine] Failed to parse scorecard, resetting.`);
+                console.error(`[PD:TrustEngine] FATAL: Failed to parse scorecard at ${scorecardPath}. Data may be corrupted. Error: ${String(e)}`);
+                // Note: We return default below, effectively resetting. 
+                // In a production app, we might want to backup the corrupt file first.
             }
         }
 
@@ -137,16 +144,19 @@ export class TrustEngine {
             delta += rewards.recovery_boost;
         }
 
-        this.updateScore(delta, reason, 'success');
+        this.updateScore(delta, reason, 'success', context);
     }
 
     public recordFailure(type: 'tool' | 'risky' | 'bypass', context: { sessionId?: string; api?: any }): void {
         const settings = this.trustSettings;
         const penalties = settings.penalties;
         
+        // Cold start grace
         if (this.isColdStart() && (this.scorecard.grace_failures_remaining || 0) > 0) {
             this.scorecard.grace_failures_remaining = (this.scorecard.grace_failures_remaining || 0) - 1;
-            this.saveScorecard();
+            
+            // 👈 FIX: Still record to history for auditability even if score doesn't change
+            this.updateScore(0, `Grace Failure consumed (${type})`, 'failure', context);
             return;
         }
 
@@ -166,14 +176,18 @@ export class TrustEngine {
 
         if (delta < penalties.max_penalty) delta = penalties.max_penalty;
 
-        this.updateScore(delta, `Failure: ${type}`, 'failure');
+        this.updateScore(delta, `Failure: ${type}`, 'failure', context);
     }
 
-    private updateScore(delta: number, reason: string, type: 'success' | 'failure' | 'penalty'): void {
+    private updateScore(delta: number, reason: string, type: 'success' | 'failure' | 'penalty', context?: { sessionId?: string; api?: any }): void {
+        const oldScore = this.scorecard.trust_score;
         this.scorecard.trust_score += delta;
+        
+        // Clamp score 0-100
         if (this.scorecard.trust_score < 0) this.scorecard.trust_score = 0;
         if (this.scorecard.trust_score > 100) this.scorecard.trust_score = 100;
 
+        const newScore = this.scorecard.trust_score;
         this.scorecard.last_updated = new Date().toISOString();
         if (!this.scorecard.history) this.scorecard.history = [];
         this.scorecard.history.push({
@@ -183,7 +197,21 @@ export class TrustEngine {
             timestamp: new Date().toISOString()
         });
 
-        if (this.scorecard.history.length > 50) {
+        // 👈 FIX: Record trust change event
+        if (context?.sessionId) {
+            const eventLog = EventLogService.get(this.stateDir);
+            eventLog.recordTrustChange(context.sessionId, {
+                oldScore,
+                newScore,
+                delta,
+                reason,
+                stage: this.getStage()
+            });
+        }
+
+        // 👈 FIX: Use configurable history limit
+        const limit = this.trustSettings.history_limit || 50;
+        if (this.scorecard.history.length > limit) {
             this.scorecard.history.shift();
         }
 

@@ -40,7 +40,9 @@ function safeLog(
         if (api?.logger && typeof api.logger[level] === 'function') {
             api.logger[level](message);
         }
-    } catch { }
+    } catch (e) {
+        console.error(`[PD:DeepReflect] Logging failed: ${String(e)}`);
+    }
 }
 
 function loadConfig(workspaceDir: string | undefined, api: OpenClawPluginApi): DeepReflectionConfig {
