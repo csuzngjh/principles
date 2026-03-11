@@ -55,13 +55,15 @@ Although the system is fully automatic, in the process of protecting you, the AI
 
 ## 🎮 Step 3: Your Commander Dashboard
 
-If you want to see what state the AI is currently in, you can type these three magic commands in the chat at any time:
+If you want to see what state the AI is currently in, or give it specific directives, you can type these magic commands in the chat at any time:
 
 1. **`/pd-status`** —— **Check Health**
    * See if the AI is currently "Critically Fatigued". It will also tell you how many invalid operations the system has blocked for you.
 2. **`/trust`** —— **Check Permissions**
    * The AI starts with high permissions. If it does well, its permissions grow; if it keeps making errors, it gets demoted and can only make minor tweaks. This dashboard shows its current score and rank.
-3. **`/init-strategy`** —— **Set the Vision**
+3. **`/workspace-grooming`** —— **Summon the Cyber-Housekeeper (Cleanup)**
+   * When your project root gets messy with temporary files, run this command. The AI will act as a housekeeper with "digital cleanliness", helping you clean up, rename, and archive useless garbage files (rest assured, it will never touch your core code).
+4. **`/init-strategy`** —— **Set the Vision**
    * If you want the AI to work towards a long-term goal every day (e.g., "Always write extremely concise code"), run this command. The AI will conduct a "soul-searching interview" with you and strictly remember your rules.
 
 ---

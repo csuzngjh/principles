@@ -14,6 +14,7 @@
 ## 3. 环境健康 (System Health)
 - [ ] **工具链**: 检查 `docs/SYSTEM_CAPABILITIES.json`，确保核心工具（如 `rg`, `sg`）处于可用状态。
 - [ ] **文档同步**: 确保 `PLAN.md` 状态与实际进度一致。
+- [ ] **熵减巡检 (Grooming)**: 运行 `ls -F` 检查项目根目录。如果发现非标准的临时文件、散落的测试脚本或命名不规范的文档，请立刻调用 `workspace-grooming` 技能发起内务整理。
 
 ---
 *如果没有上述问题，请回复 `HEARTBEAT_OK` 以节省 Token。*
