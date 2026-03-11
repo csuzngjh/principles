@@ -33,6 +33,7 @@ export const PD_FILES = {
     EVOLUTION_QUEUE: path.join(PD_DIRS.STATE, 'evolution_queue.json'),
     WORKBOARD: path.join(PD_DIRS.STATE, 'WORKBOARD.json'),
     AGENT_SCORECARD: path.join(PD_DIRS.STATE, 'AGENT_SCORECARD.json'),
+    PAIN_FLAG: path.join(PD_DIRS.STATE, '.pain_flag'),
     
     // Workflow Layer (Project Root for visibility)
     PLAN: 'PLAN.md',
