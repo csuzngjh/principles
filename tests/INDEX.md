@@ -44,6 +44,16 @@
 |------|------|
 | [`config/test-env.sh`](config/test-env.sh) | 统一环境配置 |
 
+### 测试结果归档
+
+| 脚本 | 用途 | 快速使用 |
+|------|------|----------|
+| [`save-test-results.sh`](save-test-results.sh) | 保存和归档测试结果 | `./save-test-results.sh test-name completed --commit` |
+
+**重要文档**:
+- **归档指南**: [`TEST_RESULTS_GUIDE.md`](TEST_RESULTS_GUIDE.md) - 如何使用归档系统
+- **归档目录**: `archive/` - 所有测试历史结果按日期组织
+
 ---
 
 ## 🎯 测试场景
