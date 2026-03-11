@@ -4,7 +4,7 @@ import { isRisky, normalizePath } from '../utils/io.js';
 import { normalizeProfile } from '../core/profile.js';
 import { computePainScore, writePainFlag } from '../core/pain.js';
 import { trackFriction, resetFriction, getSession } from '../core/session-tracker.js';
-import { adjustTrustScore, TRUST_CONFIG } from '../core/trust-engine-v2.js';
+import { recordFailure, TRUST_CONFIG } from '../core/trust-engine-v2.js';
 import { denoiseError, computeHash } from '../utils/hashing.js';
 import { ConfigService } from '../core/config-service.js';
 import { EventLogService } from '../core/event-log.js';
@@ -60,7 +60,7 @@ export function handleAfterToolCall(
     const deltaF = config.get('scores.tool_failure_friction') || 30;
     const updatedState = trackFriction(sessionId, deltaF, hash, ctx.workspaceDir);
     
-    // ── Trust Engine: Decrement score on failure (Refined) ──
+    // ── Trust Engine: Record failure using V2 API (Enables Grace/Adaptive) ──
     const errorType = extractErrorType(event.error || errorText);
     const filePath = event.params.file_path || event.params.path || event.params.file;
     const relPath = typeof filePath === 'string' ? normalizePath(filePath, ctx.workspaceDir) : 'unknown';
@@ -75,15 +75,14 @@ export function handleAfterToolCall(
     }
     
     const isRisk = isRisky(relPath, profile.risk_paths);
-    const penalty = isRisk ? TRUST_CONFIG.PENALTIES.RISKY_FAILURE_BASE : TRUST_CONFIG.PENALTIES.TOOL_FAILURE_BASE;
     
-    adjustTrustScore(ctx.workspaceDir, penalty, `pain:${errorType}`, {
+    recordFailure(ctx.workspaceDir, isRisk ? 'risky' : 'tool', {
         sessionId,
         stateDir,
         api: (ctx as any).api
     });
     
-    // Record tool call failure event
+    // Record tool call failure event (detailed log)
     eventLog.recordToolCall(sessionId, {
       toolName: event.toolName,
       filePath: typeof filePath === 'string' ? filePath : undefined,
