@@ -1,75 +1,73 @@
-# 🧬 Principles Disciple User Guide (v1.5.1)
+# 🧬 Principles Disciple Beginner's Survival Guide (v1.5.1)
 
-> **Empower your AI Assistant with a "Soul" and "Memory"**
->
-> Principles Disciple is an operating system layer that gives your AI assistant perception, a sense of principles, and self-evolution capabilities. It makes your AI feel "pain" when it makes mistakes, accumulate "experience" upon success, and evolve continuously according to your vision.
-
----
-
-## 🌟 Chapter 1: What can it do for you?
-
-1.  **Automatic Safety Gates**: AI trying to modify core code recklessly? The system forces a plan first, intercepting unauthorized changes.
-2.  **Intelligent Pain Perception**: When the AI encounters errors, gets stuck in loops, or receives negative feedback, its "Friction Index (GFI)" spikes, forcing it to stop and reflect.
-3.  **Always-on Evolution**: It extracts patterns from failures and automatically updates `.principles/PRINCIPLES.md`, making the AI understand your preferences over time.
+> **In one sentence for non-technical users:**
+> This is a plugin that gives your AI assistant a "brain" and a sense of "pain". When it makes a mistake in your code or writing, it feels "pain" and remembers the lesson so it won't happen again. More importantly, it hits the brakes when the AI tries to make massive changes, protecting your hard work from being ruined.
 
 ---
 
-## 🚀 Chapter 2: Quick Start (3 Easy Steps)
+## 🐣 Step 1: Do nothing, just use it!
 
-### 1. Wake up the System (Initialize)
-After installation, enter the following command in the chat box:
-```bash
-/init-strategy
-```
-**Effect**: This starts a "Vision Interview". The AI will ask about your long-term goals. Once set, all AI evolutions will align with your vision.
+If you just want the AI to do its job, **you don't even need to know this plugin exists.**
 
-### 2. Define your "Master" Profile
-```bash
-/profile "Senior Architect | Prefers clean code | Hates verbosity"
-```
-**Effect**: Tell the AI who you are. If you are an expert, it will explain less and execute more; if you prefer simplicity, it will prioritize code minimization during evolution.
+Once installed in OpenClaw, it runs silently in the background. You just need to:
+1. **Chat with your AI as usual.**
+2. **Ask your AI to code or write as usual.**
 
-### 3. Start Working
-Code and ask questions as usual. **You don't need to manage it actively**. Principles Disciple acts as an invisible butler, guarding and learning behind every turn of the conversation.
+It will help you invisibly by:
+* 🛡️ **Guarding**: If the AI tries to delete or modify hundreds of lines of code at once, the system will automatically intercept it.
+* 🎓 **Learning**: If the AI writes bad code that fails to run, the system will write this error in its "little notebook" so the AI avoids it next time.
 
 ---
 
-## 🎮 Chapter 3: Magic Commands for Interaction
+## 🚑 Step 2: When you encounter these 3 "frustrating" situations...
 
-When you feel the AI is underperforming or want to check its status, use these commands:
+Although the system is fully automatic, in the process of protecting you, the AI might sometimes appear "dumb" or "timid". If you encounter the following three scenarios, here is how to solve them:
 
-| Command | Scenario | What you will see |
-| :--- | :--- | :--- |
-| **`/pd-status`** | **Check Health** | A visual dashboard showing the current "Friction Index (GFI)" and diagnostics. |
-| **`/trust`** | **Check Permissions** | View the AI's Trust Score, Security Stage (1-4), and current edit permissions. |
-| **`/pain [complaint]`** | **When Frustrated** | Inject a "Pain Signal" directly, forcing the AI to apologize and reconsider its approach. |
-| **`/evolve-task`** | **Stuck on a task** | Summon a high-level "Evolver" sub-agent to perform a specialized diagnosis. |
-| **`/thinking-os`** | **Change Mindset** | View and adjust the 9 core mental models (e.g., "Occam's Razor") inside the AI's brain. |
+### 🚨 Scenario A: AI tells you "I am blocked, I need to write a PLAN.md"
+* **Why did this happen?** The AI tried to modify a protected core directory. The system stopped it to prevent unauthorized changes.
+* **What should I do?** 
+  Simply tell the AI in the chat:
+  > **"Please write a plan first, set STATUS to READY, and wait for my approval before proceeding."**
+  Once the AI writes the plan, the block is automatically lifted.
 
----
+### 🌀 Scenario B: AI is "Spinning in circles" on the same error
+* **Why did this happen?** The AI is stuck in an infinite loop, trying the same wrong approach. Its "fatigue level" is maxed out.
+* **What should I do?**
+  Type this command in the chat to clear its head:
+  > **`/pd-status reset`**
+  The system will instantly calm the AI down and force it to re-evaluate your request.
 
-## 🛠️ Chapter 4: Handling Common Scenarios
-
-### Scenario A: AI says it was "Intercepted"
-*   **Symptom**: AI tells you: "I'm sorry, I've been blocked by Principles Disciple. I need to write a PLAN.md first."
-*   **Solution**: The system is protecting your core code! Simply reply: **"Write the plan first, I'll approve it before you proceed."** Once the plan is ready, the gate will automatically release the block.
-
-### Scenario B: AI is "Stuck in a loop"
-*   **Symptom**: AI tries the same thing several times without success, constantly reading the same file.
-*   **Solution**: You can simply type **`/pd-status reset`**. The system will clear the friction, allowing the AI to re-examine the task with a fresh mind.
-
-### Scenario C: Want to see if the AI is getting smarter
-*   **Symptom**: Want to know what wealth of knowledge has been accumulated after a week of usage.
-*   **Solution**: Check the **`.principles/PRINCIPLES.md`** file in your project. It records all "lessons learned" and newly evolved rules.
+### 😡 Scenario C: The AI is talking nonsense, and I am angry
+* **Why did this happen?** The AI has completely misunderstood your intent.
+* **What should I do?**
+  Give it a direct "pain injection" to force reflection. Type:
+  > **`/pain You completely misunderstood me, read the error carefully!`**
+  The AI will instantly feel the "pain", sincerely apologize, and correct its direction.
 
 ---
 
-## 🛡️ Chapter 5: System Maintenance
+## 🎮 Step 3: Your Commander Dashboard
 
-1.  **Advanced Config**: If you want to adjust penalty weights or polling intervals, modify `.state/pain_settings.json`.
-2.  **View Logs**: Want to see the AI's "thought process" for every second? Open `memory/logs/SYSTEM.log`.
-3.  **Reset State**: If you want to return the AI to factory defaults, simply delete the `.state/` directory.
+If you want to see what state the AI is currently in, you can type these three magic commands in the chat at any time:
+
+1. **`/pd-status`** —— **Check Health**
+   * See if the AI is currently "Critically Fatigued". It will also tell you how many invalid operations the system has blocked for you.
+2. **`/trust`** —— **Check Permissions**
+   * The AI starts with high permissions. If it does well, its permissions grow; if it keeps making errors, it gets demoted and can only make minor tweaks. This dashboard shows its current score and rank.
+3. **`/init-strategy`** —— **Set the Vision**
+   * If you want the AI to work towards a long-term goal every day (e.g., "Always write extremely concise code"), run this command. The AI will conduct a "soul-searching interview" with you and strictly remember your rules.
 
 ---
 
-> 💡 **Core Philosophy**: Don't fear AI errors. In the world of Principles Disciple, **errors are the fuel for evolution, and pain is the price of growth.** Every new principle brings you one step closer to a "Perfect Digital Lifeform".
+## 🤓 For the Geeks (Advanced Zone)
+
+* **I want to see what lessons the AI has remembered.**
+  Open `.principles/PRINCIPLES.md` in your project root. It contains the AI's entire "history of blood and tears".
+* **I want to see what the AI is thinking.**
+  Check `memory/logs/SYSTEM.log`.
+* **I want to adjust penalty scores or security levels.**
+  Please read our exclusive guide: 👉 **[Advanced Configuration Guide (Geek Mode)](./packages/openclaw-plugin/ADVANCED_CONFIG_ZH.md)** (Currently available in Chinese).
+
+---
+> **❤️ Final advice: Be patient.**
+> A newly installed AI is like a fresh intern. It might make mistakes at first. Give it two or three days to hit some walls in your project, and it will evolve into the most understanding personal assistant in the world.
