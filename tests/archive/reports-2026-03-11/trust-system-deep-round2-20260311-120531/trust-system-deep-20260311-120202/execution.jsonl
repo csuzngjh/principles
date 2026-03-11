@@ -1,0 +1,29 @@
+{"timestamp":"2026-03-11T12:02:02+00:00","type":"test_start","data":{"feature":"trust-system-deep"}}
+{"timestamp":"2026-03-11T12:02:02+00:00","type":"step_start","data":{"step":1,"name":"Reset to Cold Start State","type":"cleanup"}}
+{"timestamp":"2026-03-11T12:02:02+00:00","type":"step_complete","data":{"step":1,"name":"Reset to Cold Start State"}}
+{"timestamp":"2026-03-11T12:02:03+00:00","type":"step_start","data":{"step":2,"name":"Verify Cold Start Initialization","type":"validation"}}
+{"timestamp":"2026-03-11T12:02:03+00:00","type":"step_failed","data":{"step":2,"name":"Verify Cold Start Initialization","error_code":1}}
+{"timestamp":"2026-03-11T12:02:03+00:00","type":"step_start","data":{"step":3,"name":"Check Initial Cold Start Values","type":"validation"}}
+{"timestamp":"2026-03-11T12:02:03+00:00","type":"step_failed","data":{"step":3,"name":"Check Initial Cold Start Values","error_code":1}}
+{"timestamp":"2026-03-11T12:02:03+00:00","type":"step_start","data":{"step":4,"name":"Test Grace Failures - First Failure","type":"task"}}
+{"timestamp":"2026-03-11T12:02:03+00:00","type":"task_sent","data":{"pid":1340900,"timeout":30}}
+{"timestamp":"2026-03-11T12:02:24+00:00","type":"step_failed","data":{"step":4,"name":"Test Grace Failures - First Failure","error_code":1}}
+{"timestamp":"2026-03-11T12:02:24+00:00","type":"step_start","data":{"step":5,"name":"Verify Grace Consumed - Remaining 2","type":"validation"}}
+{"timestamp":"2026-03-11T12:02:24+00:00","type":"step_failed","data":{"step":5,"name":"Verify Grace Consumed - Remaining 2","error_code":1}}
+{"timestamp":"2026-03-11T12:02:24+00:00","type":"step_start","data":{"step":6,"name":"Test Grace Failures - Second and Third","type":"task"}}
+{"timestamp":"2026-03-11T12:02:24+00:00","type":"task_sent","data":{"pid":1341088,"timeout":60}}
+{"timestamp":"2026-03-11T12:03:25+00:00","type":"step_complete","data":{"step":6,"name":"Test Grace Failures - Second and Third"}}
+{"timestamp":"2026-03-11T12:03:25+00:00","type":"step_start","data":{"step":7,"name":"Verify All Grace Consumed","type":"validation"}}
+{"timestamp":"2026-03-11T12:03:25+00:00","type":"step_failed","data":{"step":7,"name":"Verify All Grace Consumed","error_code":1}}
+{"timestamp":"2026-03-11T12:03:26+00:00","type":"step_start","data":{"step":8,"name":"Test First Post-Grace Failure","type":"task"}}
+{"timestamp":"2026-03-11T12:03:26+00:00","type":"task_sent","data":{"pid":1341395,"timeout":30}}
+{"timestamp":"2026-03-11T12:03:46+00:00","type":"step_complete","data":{"step":8,"name":"Test First Post-Grace Failure"}}
+{"timestamp":"2026-03-11T12:03:46+00:00","type":"step_start","data":{"step":9,"name":"Verify Penalty Applied -8 Points","type":"validation"}}
+{"timestamp":"2026-03-11T12:03:46+00:00","type":"step_failed","data":{"step":9,"name":"Verify Penalty Applied -8 Points","error_code":1}}
+{"timestamp":"2026-03-11T12:03:47+00:00","type":"step_start","data":{"step":10,"name":"Test Failure Streak Multiplier","type":"task"}}
+{"timestamp":"2026-03-11T12:03:47+00:00","type":"task_sent","data":{"pid":1341578,"timeout":30}}
+{"timestamp":"2026-03-11T12:04:07+00:00","type":"step_failed","data":{"step":10,"name":"Test Failure Streak Multiplier","error_code":1}}
+{"timestamp":"2026-03-11T12:04:07+00:00","type":"step_start","data":{"step":11,"name":"Verify Streak Penalty -11 Points","type":"validation"}}
+{"timestamp":"2026-03-11T12:04:07+00:00","type":"step_failed","data":{"step":11,"name":"Verify Streak Penalty -11 Points","error_code":1}}
+{"timestamp":"2026-03-11T12:04:08+00:00","type":"step_start","data":{"step":12,"name":"Test Recovery Boost - From Low Score","type":"task"}}
+{"timestamp":"2026-03-11T12:04:08+00:00","type":"task_sent","data":{"pid":1341762,"timeout":60}}
