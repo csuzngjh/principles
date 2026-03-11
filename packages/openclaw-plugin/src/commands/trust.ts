@@ -1,4 +1,4 @@
-import { getAgentScorecard, TRUST_CONFIG } from '../core/trust-engine-v2.js';
+import { getAgentScorecard, TRUST_CONFIG } from '../core/trust-engine.js';
 import type { PluginHookAgentContext } from '../openclaw-sdk.js';
 
 export function handleTrustCommand(ctx: PluginHookAgentContext & { workspaceDir?: string }): string {

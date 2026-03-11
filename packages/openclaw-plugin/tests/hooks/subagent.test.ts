@@ -2,10 +2,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { handleSubagentEnded } from '../../src/hooks/subagent.js';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as trustEngine from '../../src/core/trust-engine-v2.js';
+import * as trustEngine from '../../src/core/trust-engine.js';
 
 vi.mock('fs');
-vi.mock('../../src/core/trust-engine-v2.js');
+vi.mock('../../src/core/trust-engine.js');
 
 describe('Subagent Hook', () => {
     const workspaceDir = '/mock/workspace';
