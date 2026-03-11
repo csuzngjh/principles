@@ -9,6 +9,7 @@ import { ensureStateTemplates } from '../core/init.js';
 import { extractCommonSubstring } from '../utils/nlp.js';
 import { SystemLogger } from '../core/system-logger.js';
 import { EventLogService } from '../core/event-log.js';
+import { resolvePdPath } from '../core/paths.js';
 import { initPersistence, flushAllSessions } from '../core/session-tracker.js';
 
 let intervalId: NodeJS.Timeout | null = null;
@@ -48,7 +49,7 @@ function checkPainFlag(workspaceDir: string, logger: any) {
 
         logger.info(`[PD:EvolutionWorker] Detected pain flag (score: ${score}, source: ${source}). Enqueueing evolution task.`);
 
-        const queuePath = path.join(workspaceDir, 'docs', 'evolution_queue.json');
+        const queuePath = resolvePdPath(workspaceDir, 'EVOLUTION_QUEUE');
         let queue: EvolutionQueueItem[] = [];
         if (fs.existsSync(queuePath)) {
             try {
@@ -79,7 +80,7 @@ function checkPainFlag(workspaceDir: string, logger: any) {
 }
 
 function processEvolutionQueue(workspaceDir: string, stateDir: string, logger: any, eventLog: any) {
-    const queuePath = path.join(workspaceDir, 'docs', 'evolution_queue.json');
+    const queuePath = resolvePdPath(workspaceDir, 'EVOLUTION_QUEUE');
     if (!fs.existsSync(queuePath)) return;
 
     try {
