@@ -18,6 +18,6 @@ This file tracks all major tracks for the project. Each track has its own detail
 
 ---
 
-- [~] **Track: Re-plan core evolution information storage directories to move away from docs/ while respecting OpenClaw's hardcoded root files.**
+- [x] **Track: Re-plan core evolution information storage directories to move away from docs/ while respecting OpenClaw's hardcoded root files.**
 *Link: [./tracks/dir_architecture_refactor_20260311/](./tracks/dir_architecture_refactor_20260311/)*
 
