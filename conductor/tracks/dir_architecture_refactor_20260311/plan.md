@@ -2,7 +2,7 @@
 
 ## Phase 1: Foundation & Template Update
 - [x] Task: Reorganize `packages/openclaw-plugin/templates/workspace` to follow the new hierarchy: `.principles/`, `.state/`, and root `PLAN.md`. [bd2ef73]
-- [ ] Task: Update `install-openclaw.sh` to correctly copy files from the new template structure.
+- [x] Task: Update `install-openclaw.sh` to correctly copy files from the new template structure. [1269a0d]
 - [ ] Task: Write failing tests to verify that the installer handles the new paths correctly.
 - [ ] Task: Conductor - User Manual Verification 'Phase 1: Foundation & Template Update' (Protocol in workflow.md)
 
