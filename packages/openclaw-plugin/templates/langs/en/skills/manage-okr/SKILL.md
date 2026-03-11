@@ -19,9 +19,9 @@ You are an OKR organization expert. Your task is to coordinate alignment between
    - Final execution plan must pass `AskUserQuestion` to get Owner approval before locking for execution.
 
 ### Lifecycle Governance Files (Must Maintain)
-- `docs/okr/WEEK_STATE.json`: Week state machine (DRAFT/CHALLENGE/PENDING_OWNER_APPROVAL/LOCKED/EXECUTING/REVIEW/CLOSED/INTERRUPTED)
-- `docs/okr/WEEK_EVENTS.jsonl`: Execution event stream (task_started/heartbeat/blocker/task_completed)
-- `docs/okr/WEEK_PLAN_LOCK.json`: Lock file after Owner approval
+- `memory/okr/WEEK_STATE.json`: Week state machine (DRAFT/CHALLENGE/PENDING_OWNER_APPROVAL/LOCKED/EXECUTING/REVIEW/CLOSED/INTERRUPTED)
+- `memory/okr/WEEK_EVENTS.jsonl`: Execution event stream (task_started/heartbeat/blocker/task_completed)
+- `memory/okr/WEEK_PLAN_LOCK.json`: Lock file after Owner approval
 
 ### Governance Commands (Recommend scripts to reduce manual errors)
 ```bash
@@ -33,16 +33,16 @@ python scripts/weekly_governance.py status
 ```
 
 ### 1. Preparation & Status Check
-- Read `docs/STRATEGY.md`.
+- Read `memory/STRATEGY.md`.
 - **Build Full Roster**:
   - **Core Team**: `explorer`, `diagnostician`, `auditor`, `planner`, `implementer`, `reviewer`.
   - **Extended Team**: Scan project root `.claude/agents/*.md`, extract names.
 - **Resume Check**:
-  - Check if `docs/okr/.negotiation_status.json` exists.
+  - Check if `memory/okr/.negotiation_status.json` exists.
   - **If exists**: Read `pending` list. Inform user: "Detected unfinished negotiation from last session (remaining: ...). Resuming."
   - **If not exists**: Initialize this file, write all roster to `pending` list.
 - **Week Governance Status Check**:
-  - Read `docs/okr/WEEK_STATE.json` (if not exists, use `weekly_governance.py new-week` to initialize).
+  - Read `memory/okr/WEEK_STATE.json` (if not exists, use `weekly_governance.py new-week` to initialize).
   - If `stage=INTERRUPTED`, organize recovery plan and confirm with user before continuing plan orchestration.
 
 ### 2. User Commitment
@@ -51,14 +51,14 @@ python scripts/weekly_governance.py status
   > "To ensure project success, besides the AI team's efforts, your collaboration is needed.
   > **What are your personal OKRs for this cycle?**
   > (Suggested directions: behavioral constraints like 'no changing requirements', personal contributions like 'complete design drafts', or learning goals)"
-- **Persist**: Write user commitment to `docs/okr/user.md`.
+- **Persist**: Write user commitment to `memory/okr/user.md`.
 
 ### 3. Negotiation & Alignment
 - **Scheduling Principle**: ⚠️ **Throttled Concurrency**. Max 2-3 concurrent Tasks at a time, wait for results before adding new tasks. Never send all requests at once to prevent terminal freeze.
 - **Interview Loop**:
   1. Take a batch of Agents from `pending` (2-3).
-  2. Call `Task()` to initiate interview (Prompt below).
-  3. After each response, **immediately update** `docs/okr/.negotiation_status.json`:
+  2. Call ``sessions_spawn` 工具` to initiate interview (Prompt below).
+  3. After each response, **immediately update** `memory/okr/.negotiation_status.json`:
      - Move that Agent to `completed` list.
      - This ensures recoverability after system crash.
 - **Interview Prompt**:
@@ -83,14 +83,14 @@ python scripts/weekly_governance.py status
 
 ### 5. Commitment
 - Only enter this step when `WEEK_PLAN_LOCK.json` exists.
-- If approved, write each Agent's KR to dedicated file `docs/okr/<agent_name>.md`.
-- **Summary Focus**: Update `docs/okr/CURRENT_FOCUS.md`.
-- **Agent Auto-Onboarding**: Check and inject `@docs/okr/...` references to external Agent definition files.
-- **Cleanup**: Delete `docs/okr/.negotiation_status.json`.
+- If approved, write each Agent's KR to dedicated file `memory/okr/<agent_name>.md`.
+- **Summary Focus**: Update `memory/okr/CURRENT_FOCUS.md`.
+- **Agent Auto-Onboarding**: Check and inject `@memory/okr/...` references to external Agent definition files.
+- **Cleanup**: Delete `memory/okr/.negotiation_status.json`.
 
 ### 6. Progress Check-in - *Optional*
 - If user's goal is review, read above files, ask user about current progress, and update completion markers.
-- Also read `docs/okr/WEEK_EVENTS.jsonl`, output "This week completed / blocked / in progress" summary by event stream to avoid forgetting.
+- Also read `memory/okr/WEEK_EVENTS.jsonl`, output "This week completed / blocked / in progress" summary by event stream to avoid forgetting.
 
 ## Completion
 Output: "✅ OKR negotiation complete. All members' goals aligned."

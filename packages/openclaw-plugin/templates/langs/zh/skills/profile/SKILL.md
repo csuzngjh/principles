@@ -10,7 +10,7 @@ disable-model-invocation: true
 
 **任务**:
 1. 解析用户输入的 `$ARGUMENTS` (格式如 "Frontend: Expert")。
-2. 生成一个**增量评价**文件 `docs/.user_verdict.json`，强制将该领域的权重设为极高（或极低，视用户描述而定）。
+2. 生成一个**增量评价**文件 `.state/.user_verdict.json`，强制将该领域的权重设为极高（或极低，视用户描述而定）。
 3. 提示用户：变更将在任务结束 (Stop) 后生效。
 
 **JSON 模板**:

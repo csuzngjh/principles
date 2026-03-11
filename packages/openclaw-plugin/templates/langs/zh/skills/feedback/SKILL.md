@@ -11,8 +11,8 @@ disable-model-invocation: true
 ## 执行流程
 
 ### 1. 收集证据 (Evidence Collection)
-- **Log Analysis**: 读取 `docs/ISSUE_LOG.md` (最近 20 行) 和 `docs/SYSTEM.log` (如果有报错堆栈)。
-- **Config Check**: 读取 `docs/PROFILE.json` 确认当前配置。
+- **Log Analysis**: 读取 `memory/ISSUE_LOG.md` (最近 20 行) 和 `memory/logs/SYSTEM.log` (如果有报错堆栈)。
+- **Config Check**: 读取 `.principles/PROFILE.json` 确认当前配置。
 - **Version Check**: 尝试获取当前版本信息（如有）。
 
 ### 2. 生成报告 (Report Generation)

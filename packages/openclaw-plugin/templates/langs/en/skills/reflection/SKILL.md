@@ -12,7 +12,7 @@ disable-model-invocation: false
 Please execute the following reflection steps:
 
 ## 1. Status Scan
-- **Goal**: What was our original objective? (Check `docs/PLAN.md` or early conversation)
+- **Goal**: What was our original objective? (Check `PLAN.md` or early conversation)
 - **Status**: How much is completed now? Where are we stuck?
 - **Cost**: We've consumed significant tokens. Is the output matching the cost?
 
@@ -31,10 +31,10 @@ If any of above is Yes, must perform deep attribution:
 
 ## 4. Evolution Logging
 If pain detected, must execute:
-1. **Record**: Write analysis results to `docs/ISSUE_LOG.md`.
+1. **Record**: Write analysis results to `memory/ISSUE_LOG.md`.
 2. **Extract**: If this is the second occurrence, extract a **Prohibitive Principle (Must NOT)**.
 3. **Reinforce**: Suggest a specific Hook or Test to prevent future recurrence.
 
 ## 5. Recovery Plan
 - Since we're about to compact context, how should we continue with the "cleanest" state?
-- Update `docs/PLAN.md`, mark current progress, ensure seamless continuation after compaction.
+- Update `PLAN.md`, mark current progress, ensure seamless continuation after compaction.

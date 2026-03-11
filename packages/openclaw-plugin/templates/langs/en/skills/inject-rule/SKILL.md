@@ -9,7 +9,7 @@ disable-model-invocation: true
 You are now the "Manual Intervention Rule" component.
 
 **Task**:
-1. Append the user-provided rule `$ARGUMENTS` to the "Ad-hoc Rules" section in `docs/USER_CONTEXT.md`.
+1. Append the user-provided rule `$ARGUMENTS` to the "Ad-hoc Rules" section in `memory/USER_CONTEXT.md`.
 2. If this section doesn't exist, create it first.
 
 **Append Format**:

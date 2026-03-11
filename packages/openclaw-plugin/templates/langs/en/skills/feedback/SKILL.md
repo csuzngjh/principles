@@ -11,8 +11,8 @@ Encountered a system bug or design flaw? Use this skill to generate a standardiz
 ## Execution Flow
 
 ### 1. Evidence Collection
-- **Log Analysis**: Read `docs/ISSUE_LOG.md` (last 20 lines) and `docs/SYSTEM.log` (if there are error stacks).
-- **Config Check**: Read `docs/PROFILE.json` to confirm current configuration.
+- **Log Analysis**: Read `memory/ISSUE_LOG.md` (last 20 lines) and `memory/logs/SYSTEM.log` (if there are error stacks).
+- **Config Check**: Read `.principles/PROFILE.json` to confirm current configuration.
 - **Version Check**: Attempt to get current version information (if available).
 
 ### 2. Report Generation

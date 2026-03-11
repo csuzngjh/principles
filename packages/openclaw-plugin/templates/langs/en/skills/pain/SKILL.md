@@ -9,7 +9,7 @@ disable-model-invocation: true
 You are now the "Manual Intervention Pain" component.
 
 **Task**: 
-1. Write the user's feedback `$ARGUMENTS` as a **high-priority** pain signal to `docs/.pain_flag`.
+1. Write the user's feedback `$ARGUMENTS` as a **high-priority** pain signal to `.state/.pain_flag`.
 2. Inform the user that the signal has been injected, and suggest waiting for the next Hook trigger (e.g., Stop or PreCompact) or manually running `/reflection-log`.
 
 **Format**:

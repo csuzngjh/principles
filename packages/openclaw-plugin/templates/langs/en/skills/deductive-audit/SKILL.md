@@ -33,4 +33,4 @@ Please conduct a three-phase review of the proposed fix:
 - **Must Fix**: If failed, list points that must be corrected.
 
 ---
-**Action**: Update the above results to `docs/AUDIT.md`.
+**Action**: Update the above results to `AUDIT.md`.

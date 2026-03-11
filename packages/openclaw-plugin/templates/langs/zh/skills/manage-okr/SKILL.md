@@ -21,9 +21,9 @@ disable-model-invocation: true
    - 最终执行计划必须通过 `AskUserQuestion` 获得 Owner 批准后才能锁定执行。
 
 ### 生命周期治理文件（必须维护）
-- `docs/okr/WEEK_STATE.json`: 周状态机（DRAFT/CHALLENGE/PENDING_OWNER_APPROVAL/LOCKED/EXECUTING/REVIEW/CLOSED/INTERRUPTED）
-- `docs/okr/WEEK_EVENTS.jsonl`: 执行事件流（task_started/heartbeat/blocker/task_completed）
-- `docs/okr/WEEK_PLAN_LOCK.json`: Owner 批准后的锁文件
+- `memory/okr/WEEK_STATE.json`: 周状态机（DRAFT/CHALLENGE/PENDING_OWNER_APPROVAL/LOCKED/EXECUTING/REVIEW/CLOSED/INTERRUPTED）
+- `memory/okr/WEEK_EVENTS.jsonl`: 执行事件流（task_started/heartbeat/blocker/task_completed）
+- `memory/okr/WEEK_PLAN_LOCK.json`: Owner 批准后的锁文件
 
 ### 治理命令（推荐用脚本，减少手写错误）
 ```bash
@@ -35,16 +35,16 @@ python scripts/weekly_governance.py status
 ```
 
 ### 1. 准备与状态检查 (Preparation & Resume)
-- 读取 `docs/STRATEGY.md`。
+- 读取 `memory/STRATEGY.md`。
 - **构建全量名册**:
   - **核心团队**: `explorer`, `diagnostician`, `auditor`, `planner`, `implementer`, `reviewer`。
   - **扩展团队**: 扫描项目根目录 `.claude/agents/*.md`，提取名称。
 - **断点续传检查**:
-  - 检查是否存在 `docs/okr/.negotiation_status.json`。
+  - 检查是否存在 `memory/okr/.negotiation_status.json`。
   - **若存在**: 读取 `pending` 列表。告知用户：“检测到上次未完成的协商（剩余: ...）。正在恢复进度。”
   - **若不存在**: 初始化该文件，将所有名册写入 `pending` 列表。
 - **周治理状态检查（新增）**:
-  - 读取 `docs/okr/WEEK_STATE.json`（如果不存在，使用 `weekly_governance.py new-week` 初始化）。
+  - 读取 `memory/okr/WEEK_STATE.json`（如果不存在，使用 `weekly_governance.py new-week` 初始化）。
   - 若 `stage=INTERRUPTED`，先组织恢复方案并与用户确认，再继续计划编排。
 
 ### 2. 用户承诺 (User Commitment) - *New*
@@ -53,14 +53,14 @@ python scripts/weekly_governance.py status
   > "为了确保项目成功，除了 AI 团队的努力，也需要您的协同。
   > **您在本周期的个人 OKR 是什么？**
   > (建议方向：行为约束如'不改需求'、个人贡献如'完成设计稿'、或学习目标)"
-- **落盘**: 将用户承诺写入 `docs/okr/user.md`。
+- **落盘**: 将用户承诺写入 `memory/okr/user.md`。
 
 ### 3. 协商与对齐 (Negotiation & Alignment)
 - **调度原则**: ⚠️ **受控并发 (Throttled Concurrency)**。每次最多并发委派 **2-3 个** Task，等待结果返回后再补充新的任务。严禁一次性发出所有请求以防终端卡死。
 - **面试循环**:
   1. 从 `pending` 中取出一批 Agent (2-3个)。
- 2. 调用 `Task()` 发起面试（Prompt 见下文）。
-  3. 每获取一个回复后，**立即更新** `docs/okr/.negotiation_status.json`：
+ 2. 调用 ``sessions_spawn` 工具` 发起面试（Prompt 见下文）。
+  3. 每获取一个回复后，**立即更新** `memory/okr/.negotiation_status.json`：
      - 将该 Agent 移入 `completed` 列表。
      - 这一步确保了系统崩溃后可恢复。
 - **面试 Prompt**:
@@ -85,10 +85,10 @@ python scripts/weekly_governance.py status
 
 ### 4. 落盘 (Commitment)
 - 仅在 `WEEK_PLAN_LOCK.json` 存在时进入本步骤。
-- 如果批准，将每个 Agent 的 KR 写入专属文件 `docs/okr/<agent_name>.md`。
-- **汇总重点**: 更新 `docs/okr/CURRENT_FOCUS.md`。
-- **Agent 自动纳管 (Onboarding)**: 检查并注入 `@docs/okr/...` 引用到外置 Agent 定义文件。
-- **清理**: 删除 `docs/okr/.negotiation_status.json`。
+- 如果批准，将每个 Agent 的 KR 写入专属文件 `memory/okr/<agent_name>.md`。
+- **汇总重点**: 更新 `memory/okr/CURRENT_FOCUS.md`。
+- **Agent 自动纳管 (Onboarding)**: 检查并注入 `@memory/okr/...` 引用到外置 Agent 定义文件。
+- **清理**: 删除 `memory/okr/.negotiation_status.json`。
   ```markdown
   # OKR: <agent_name>
   > Status: Active | Last Updated: [Date]
@@ -103,7 +103,7 @@ python scripts/weekly_governance.py status
 
 ### 5. 进度复盘 (Check-in) - *Optional*
 - 如果用户目的是复盘，则读取上述文件，询问用户当前进度，并更新文件中的完成度标记。
-- 同步读取 `docs/okr/WEEK_EVENTS.jsonl`，按事件流输出“本周完成 / 阻塞 / 进行中”摘要，避免遗忘。
+- 同步读取 `memory/okr/WEEK_EVENTS.jsonl`，按事件流输出“本周完成 / 阻塞 / 进行中”摘要，避免遗忘。
 
 ## 结项
 输出：“✅ OKR 协商已完成。全员目标已对齐。”

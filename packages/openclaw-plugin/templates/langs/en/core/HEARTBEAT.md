@@ -9,10 +9,10 @@ During every heartbeat, self-check the following items to maintain the system's 
 
 ## 2. Strategic Alignment
 - [ ] **Compare with `CURRENT_FOCUS.md`**: Did the actions in the last hour deviate from the current strategic priorities?
-- [ ] **Weekly Governance Status**: Consult `docs/okr/WEEK_STATE.json` to ensure the status is `EXECUTING`. If `INTERRUPTED`, prioritize recovery.
+- [ ] **Weekly Governance Status**: Consult `memory/okr/WEEK_STATE.json` to ensure the status is `EXECUTING`. If `INTERRUPTED`, prioritize recovery.
 
 ## 3. System Health
-- [ ] **Toolchain**: Check `docs/SYSTEM_CAPABILITIES.json` to ensure core tools (e.g., `rg`, `sg`) are available.
+- [ ] **Toolchain**: Check `.state/SYSTEM_CAPABILITIES.json` to ensure core tools (e.g., `rg`, `sg`) are available.
 - [ ] **Doc Sync**: Ensure `PLAN.md` status matches actual progress.
 - [ ] **Entropy Check (Grooming)**: Run `ls -F` on the project root. If you detect stray temporary files, test scripts, or improperly named documents, immediately invoke the `workspace-grooming` skill to organize the environment.
 

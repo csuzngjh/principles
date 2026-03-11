@@ -36,15 +36,15 @@ disable-model-invocation: true
       - 安装完成后，**必须**运行 `<tool> --version` 或 `command -v <tool>` 来验证是否真的安装成功。
       - **若失败**: 告知用户（可能是权限问题），请求用户手动安装，**不要**更新能力文件。
       - **若成功**: 
-        - 更新 `docs/SYSTEM_CAPABILITIES.json`。记录新工具的路径。
+        - 更新 `.state/SYSTEM_CAPABILITIES.json`。记录新工具的路径。
         - **全员广播**: 
           - 扫描 `.claude/agents/*.md`。
-          - 检查每个文件是否包含 `@docs/SYSTEM_CAPABILITIES.json`。
+          - 检查每个文件是否包含 `@.state/SYSTEM_CAPABILITIES.json`。
           - 若未包含，在文件末尾追加：
             ```markdown
             
             ## Environment Capabilities
-            Check @docs/SYSTEM_CAPABILITIES.json for high-performance tools (e.g., ripgrep, ast-grep) available in this environment. Use them!
+            Check @.state/SYSTEM_CAPABILITIES.json for high-performance tools (e.g., ripgrep, ast-grep) available in this environment. Use them!
             ```
           - 提示用户运行 `/manage-okr` 或 `/admin diagnose` 以让 Agent 感知新能力。
 ## 核心原则

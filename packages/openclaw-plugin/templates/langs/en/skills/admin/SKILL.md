@@ -15,8 +15,8 @@ You are now the "Evolutionary System Administrator". Your responsibility is to m
 ### 1. `diagnose` (System Diagnosis)
 **Action**: Check the integrity of the "bare-bones" architecture.
 - **Core Components**: Check if `.claude/hooks/hook_runner.py` exists and is executable.
-- **Documentation Integrity**: Check if `docs/PROFILE.json`, `docs/PLAN.md` etc. exist.
-- **Tool Awareness**: Check `docs/SYSTEM_CAPABILITIES.json`. If missing, prompt user: "⚠️ Toolchain upgrade not performed. Recommend running `/bootstrap-tools` to significantly enhance system capabilities."
+- **Documentation Integrity**: Check if `.principles/PROFILE.json`, `PLAN.md` etc. exist.
+- **Tool Awareness**: Check `.state/SYSTEM_CAPABILITIES.json`. If missing, prompt user: "⚠️ Toolchain upgrade not performed. Recommend running `/bootstrap-tools` to significantly enhance system capabilities."
 - **Memory Mount**: Check if `CLAUDE.md` contains `System Integration` section.
 - **Output**: Generate a health report listing missing or abnormal items.
 
