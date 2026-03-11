@@ -14,12 +14,12 @@
 - [x] Task: Write failing tests for each component to verify they now expect files in the new locations. [2449737]
 - [x] Task: Conductor - User Manual Verification 'Phase 2: Core Logic Refactor' (Protocol in workflow.md) [ff45960]
 
-## Phase 3: Auto-Migration & Loop Closure
+## Phase 3: Auto-Migration & Loop Closure [checkpoint: dc70664]
 - [x] Task: Implement `src/core/migration.ts` with logic to detect and move files from `docs/` to `.principles/` and `.state/`. [d211e4a]
 - [x] Task: Integrate the migration trigger into `src/index.ts` during the plugin `register` or first `boot` hook. [5ce0ef4]
 - [x] Task: Update `src/hooks/subagent.ts` to clean up the queue in `.state/`. [c733e6a]
 - [x] Task: Write failing tests for the migration logic (simulating old workspace state). [fde8055]
-- [ ] Task: Conductor - User Manual Verification 'Phase 3: Auto-Migration & Loop Closure' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 3: Auto-Migration & Loop Closure' (Protocol in workflow.md) [dc70664]
 
 ## Phase 4: Integration Testing & Purification
 - [ ] Task: Perform a full build and run integration tests to ensure no regressions in the evolution loop.
