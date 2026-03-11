@@ -2,6 +2,7 @@ import { execSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
+import { resolvePdPath } from '../core/paths.js';
 
 const TOOLS_TO_SCAN = [
   { name: 'rg', cmd: ['rg', '--version'] },
@@ -50,10 +51,10 @@ export function scanEnvironment(workspaceDir: string): Record<string, unknown> {
     }
   }
 
-  const capsPath = path.join(workspaceDir, 'docs', 'SYSTEM_CAPABILITIES.json');
-  const docsDir = path.dirname(capsPath);
-  if (!fs.existsSync(docsDir)) {
-    fs.mkdirSync(docsDir, { recursive: true });
+  const capsPath = resolvePdPath(workspaceDir, 'SYSTEM_CAPABILITIES');
+  const capsDir = path.dirname(capsPath);
+  if (!fs.existsSync(capsDir)) {
+    fs.mkdirSync(capsDir, { recursive: true });
   }
   fs.writeFileSync(capsPath, JSON.stringify(capabilities, null, 2), 'utf8');
 
@@ -79,7 +80,7 @@ export function handleBootstrapTools(ctx: PluginCommandContext): PluginCommandRe
         `🔍 Environment perception complete.\n` +
         `**Detected tools:** ${available || '(none)'}\n` +
         `**Platform:** ${process.platform}\n` +
-        `Capabilities saved to \`docs/SYSTEM_CAPABILITIES.json\`.`,
+        `Capabilities saved to \`.state/SYSTEM_CAPABILITIES.json\`.`,
     };
   } catch (err) {
     return { text: `❌ bootstrap-tools failed: ${err instanceof Error ? err.message : String(err)}` };
@@ -94,7 +95,7 @@ export function handleResearchTools(ctx: PluginCommandContext): PluginCommandRes
       `🚀 **Tool Evolution Research Initiated**\n\n` +
       `**Instructions for Agent:**\n` +
       `1. Use \`google_web_search\` or \`web_search_exa\` to find the latest tools in the category: "${category}".\n` +
-      `2. Compare findings with current capabilities in \`docs/SYSTEM_CAPABILITIES.json\`.\n` +
+      `2. Compare findings with current capabilities in \`.state/SYSTEM_CAPABILITIES.json\`.\n` +
       `3. Focus on tools that improve speed (like \`rg\`, \`sg\`), documentation (like \`qmd\`), or automation.\n` +
       `4. Output a "Tool Upgrade Proposal" with installation commands and justification.`,
   };

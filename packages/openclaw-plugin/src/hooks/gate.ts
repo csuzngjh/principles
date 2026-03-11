@@ -122,7 +122,7 @@ export function handleBeforeToolCall(
                             const maxLines = planApprovals.max_lines_override ?? -1;
                             if (maxLines === -1 || lineChanges <= maxLines) {
                                 // Record PLAN approval event
-                                const stateDir = ctx.stateDir || path.join(ctx.workspaceDir, 'memory', '.state');
+                                const stateDir = ctx.stateDir || resolvePdPath(ctx.workspaceDir, 'STATE_DIR');
                                 EventLogService.get(stateDir).recordPlanApproval(ctx.sessionId, {
                                     toolName: event.toolName,
                                     filePath: relPath,
@@ -188,7 +188,7 @@ function block(relPath: string, reason: string, ctx: any, toolName: string, plan
     
     if (ctx.sessionId) trackBlock(ctx.sessionId);
     
-    const stateDir = ctx.stateDir || path.join(ctx.workspaceDir, 'memory', '.state');
+    const stateDir = ctx.stateDir || resolvePdPath(ctx.workspaceDir, 'STATE_DIR');
     EventLogService.get(stateDir).recordGateBlock(ctx.sessionId, {
         toolName,
         filePath: relPath,

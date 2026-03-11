@@ -25,7 +25,7 @@ interface EvolutionQueueItem {
 }
 
 function checkPainFlag(workspaceDir: string, logger: any) {
-    const painFlagPath = path.join(workspaceDir, 'docs', '.pain_flag');
+    const painFlagPath = resolvePdPath(workspaceDir, 'PAIN_FLAG');
     if (!fs.existsSync(painFlagPath)) return;
 
     try {

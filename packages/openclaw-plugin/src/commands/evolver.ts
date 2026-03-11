@@ -8,7 +8,7 @@ import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.
  * Gateway tools — only the AI agent can do that via sessions_spawn.
  */
 export function handleEvolveTask(ctx: PluginCommandContext): PluginCommandResult {
-  const task = ctx.args?.trim() || "Diagnose and fix the latest pain signals in docs/.pain_flag.";
+  const task = ctx.args?.trim() || "Diagnose and fix the latest pain signals in .state/.pain_flag.";
 
   return {
     text:

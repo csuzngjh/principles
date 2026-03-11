@@ -177,7 +177,7 @@ describe('deepReflectTool', () => {
         });
 
         it('当有模型索引时，应注入索引内容', async () => {
-            const modelsDir = path.join(tempDir, 'docs', 'models');
+            const modelsDir = path.join(tempDir, '.principles', 'models');
             fs.mkdirSync(modelsDir, { recursive: true });
             
             const indexContent = `# 扩展思维模型索引

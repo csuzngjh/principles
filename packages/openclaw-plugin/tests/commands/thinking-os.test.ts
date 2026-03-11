@@ -19,8 +19,8 @@ describe('Thinking OS Command', () => {
     });
 
     it('should format usage report on status', () => {
-        const usageLogPath = path.join(workspaceDir, 'memory', '.state', 'thinking_os_usage.json');
-        const thinkingOsPath = path.join(workspaceDir, 'docs', 'THINKING_OS.md');
+        const usageLogPath = path.join(workspaceDir, '.state', 'thinking_os_usage.json');
+        const thinkingOsPath = path.join(workspaceDir, '.principles', 'THINKING_OS.md');
 
         vi.mocked(fs.existsSync).mockImplementation((p: fs.PathOrFileDescriptor) => {
             const pStr = p.toString();
@@ -60,8 +60,8 @@ describe('Thinking OS Command', () => {
     });
 
     it('should run audit and warn about overused models', () => {
-        const usageLogPath = path.join(workspaceDir, 'memory', '.state', 'thinking_os_usage.json');
-        const thinkingOsPath = path.join(workspaceDir, 'docs', 'THINKING_OS.md');
+        const usageLogPath = path.join(workspaceDir, '.state', 'thinking_os_usage.json');
+        const thinkingOsPath = path.join(workspaceDir, '.principles', 'THINKING_OS.md');
 
         vi.mocked(fs.existsSync).mockImplementation(() => true);
 

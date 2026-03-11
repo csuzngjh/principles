@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { OpenClawPluginApi } from '../openclaw-sdk.js';
+import { resolvePdPath } from '../core/paths.js';
 
 // 安全日志函数
 function safeLog(
@@ -71,7 +72,7 @@ export function loadModelIndex(
         ? path.isAbsolute(customConfig.modelsDir) 
             ? customConfig.modelsDir 
             : path.join(workspaceDir, customConfig.modelsDir)
-        : path.join(workspaceDir, 'docs', 'models');
+        : resolvePdPath(workspaceDir, 'MODELS_DIR');
     const indexPath = path.join(modelsDir, '_INDEX.md');
 
     if (customConfig?.modelsDir) {
@@ -95,7 +96,7 @@ export function loadModelIndex(
             safeLog(
                 api,
                 'warn',
-                '[DeepReflect] _INDEX.md not found but docs/models/ exists. Please create an index file.'
+                `[DeepReflect] _INDEX.md not found but ${modelsDir.replace(workspaceDir, '')} exists. Please create an index file.`
             );
         }
     } catch (err) {

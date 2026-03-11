@@ -8,11 +8,17 @@ export const PD_DIRS = {
     /** 🧬 Core configuration, identity, and kernel rules (hidden) */
     IDENTITY: '.principles',
     
+    /** 🧠 Deep Reflection mental models */
+    MODELS: path.join('.principles', 'models'),
+    
     /** ⚡ Volatile operational data, queues, and task status (hidden) */
     STATE: '.state',
     
     /** 💾 Historical records, logs, and long-term memory */
     MEMORY: 'memory',
+    
+    /** 🎯 Strategic objectives and focus areas */
+    OKR: path.join('memory', 'okr'),
 };
 
 /**
@@ -25,6 +31,7 @@ export const PD_FILES = {
     THINKING_OS: path.join(PD_DIRS.IDENTITY, 'THINKING_OS.md'),
     KERNEL: path.join(PD_DIRS.IDENTITY, '00-kernel.md'),
     DECISION_POLICY: path.join(PD_DIRS.IDENTITY, 'DECISION_POLICY.json'),
+    MODELS_DIR: PD_DIRS.MODELS,
 
     // State Layer (Rooted in STATE dir)
     STATE_DIR: PD_DIRS.STATE,
@@ -32,12 +39,17 @@ export const PD_FILES = {
     WORKBOARD: path.join(PD_DIRS.STATE, 'WORKBOARD.json'),
     AGENT_SCORECARD: path.join(PD_DIRS.STATE, 'AGENT_SCORECARD.json'),
     PAIN_FLAG: path.join(PD_DIRS.STATE, '.pain_flag'),
+    SYSTEM_CAPABILITIES: path.join(PD_DIRS.STATE, 'SYSTEM_CAPABILITIES.json'),
     
     // Workflow Layer (Project Root for visibility)
     PLAN: 'PLAN.md',
     
     // Memory Layer
     SYSTEM_LOG: path.join(PD_DIRS.MEMORY, 'logs', 'SYSTEM.log'),
+    USER_CONTEXT: path.join(PD_DIRS.MEMORY, 'USER_CONTEXT.md'),
+    OKR_DIR: PD_DIRS.OKR,
+    CURRENT_FOCUS: path.join(PD_DIRS.OKR, 'CURRENT_FOCUS.md'),
+    WEEK_STATE: path.join(PD_DIRS.OKR, 'WEEK_STATE.json'),
 };
 
 /**

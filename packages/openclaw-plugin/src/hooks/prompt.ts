@@ -19,7 +19,7 @@ export async function handleBeforePromptBuild(
   const painFlagPath = path.join(workspaceDir, 'docs', '.pain_flag');
   const capsPath = path.join(workspaceDir, 'docs', 'SYSTEM_CAPABILITIES.json');
 
-  const actualStateDir = stateDir || path.join(workspaceDir, 'memory', '.state');
+  const actualStateDir = stateDir || resolvePdPath(workspaceDir, 'STATE_DIR');
   const directivePath = path.join(actualStateDir, 'evolution_directive.json');
 
   const config = ConfigService.get(actualStateDir);

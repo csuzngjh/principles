@@ -119,7 +119,7 @@ describe('buildCritiquePromptV2', () => {
 
     describe('模型索引注入', () => {
         it('当有索引文件时，应注入索引内容', () => {
-            const modelsDir = path.join(tempDir, 'docs', 'models');
+            const modelsDir = path.join(tempDir, '.principles', 'models');
             fs.mkdirSync(modelsDir, { recursive: true });
             
             const indexContent = `# 扩展思维模型索引
