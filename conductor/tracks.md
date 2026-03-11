@@ -15,3 +15,9 @@ This file tracks all major tracks for the project. Each track has its own detail
 - [x] **Track: Implement a simplified MVP 4-stage progressive trust currency system for the Gatekeeper**
 *Link: [./tracks/progressive_gatekeeper_20260310/](./tracks/progressive_gatekeeper_20260310/)*
 
+
+---
+
+- [ ] **Track: Re-plan core evolution information storage directories to move away from docs/ while respecting OpenClaw's hardcoded root files.**
+*Link: [./tracks/dir_architecture_refactor_20260311/](./tracks/dir_architecture_refactor_20260311/)*
+
