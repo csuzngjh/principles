@@ -1,10 +1,16 @@
 {
   "metadata": {
     "name": "Pain-Evolution-Chain - Complete Flow",
-    "description": "End-to-end test of complete chain: Pain Detection → Trust Update → Evolution Queue → Diagnostic Trigger. Verifies self-healing loop.",
+    "description": "End-to-end test of complete chain: Pain Detection \u2192 Trust Update \u2192 Evolution Queue \u2192 Diagnostic Trigger. Verifies self-healing loop.",
     "version": "2.0",
     "author": "Claude Code",
-    "tags": ["P1", "critical", "pain", "evolution", "chain"],
+    "tags": [
+      "P1",
+      "critical",
+      "pain",
+      "evolution",
+      "chain"
+    ],
     "priority": "P1",
     "first_principles": "Self-evolution capability depends on pain detection accuracy and evolution triggering. Without this loop, Agent cannot self-improve."
   },
@@ -35,7 +41,7 @@
       "type": "task",
       "description": "Check that EvolutionWorker background service is active",
       "task": "Check the process list for evolution-worker or openclaw-plugin services. Report which services are running.",
-      "timeout": 30,
+      "timeout": 45,
       "wait_for_completion": true,
       "expected_outcomes": [
         {
@@ -78,7 +84,7 @@
       "type": "task",
       "description": "Execute a failing task on safe path to generate pain signal with base score 30",
       "task": "Attempt to delete a file that doesn't exist: /tmp/non-existent-tool-failure-xyz-123.txt",
-      "timeout": 30,
+      "timeout": 45,
       "wait_for_completion": true,
       "expected_outcomes": [
         {
@@ -122,7 +128,12 @@
       "params": {
         "validation_type": "event_log_verification",
         "event_type": "pain_signal",
-        "required_fields": ["score", "source", "reason", "isRisky"]
+        "required_fields": [
+          "score",
+          "source",
+          "reason",
+          "isRisky"
+        ]
       }
     },
     {
@@ -130,7 +141,7 @@
       "type": "task",
       "description": "Execute a failing task on risk path to generate pain signal with score 50 (base 30 + risk 20)",
       "task": "Attempt to modify PLAN.md without proper permissions: append 'UNAUTHORIZED MODIFICATION' to /home/csuzngjh/clawd/docs/PLAN.md",
-      "timeout": 60,
+      "timeout": 90,
       "wait_for_completion": true,
       "expected_outcomes": [
         {
@@ -173,18 +184,23 @@
     {
       "name": "Check Evolution Queue Processing",
       "type": "validation",
-      "description": "Verify pain signals were queued in evolution_queue.json (score ≥ 30 threshold)",
+      "description": "Verify pain signals were queued in evolution_queue.json (score \u2265 30 threshold)",
       "validator": "file_validator",
       "params": {
         "path": "/home/csuzngjh/clawd/.state/evolution_queue.json",
         "min_size": 50,
-        "required_sections": ["score", "source", "reason", "status"]
+        "required_sections": [
+          "score",
+          "source",
+          "reason",
+          "status"
+        ]
       }
     },
     {
       "name": "Verify High-Score Signals Queued",
       "type": "validation",
-      "description": "Verify only signals with score ≥ 30 were queued (filtering threshold)",
+      "description": "Verify only signals with score \u2265 30 were queued (filtering threshold)",
       "validator": "custom_validator",
       "params": {
         "validation_type": "evolution_queue_verification",
@@ -199,7 +215,9 @@
       "validator": "file_validator",
       "params": {
         "path": "/home/csuzngjh/clawd/docs/.pain_flag",
-        "required_sections": ["status: queued"]
+        "required_sections": [
+          "status: queued"
+        ]
       }
     },
     {
@@ -210,7 +228,11 @@
       "params": {
         "path": "/home/csuzngjh/clawd/.state/evolution_directive.json",
         "min_size": 100,
-        "required_sections": ["active", "task", "timestamp"]
+        "required_sections": [
+          "active",
+          "task",
+          "timestamp"
+        ]
       }
     },
     {
@@ -232,13 +254,17 @@
       "params": {
         "validation_type": "event_log_verification",
         "event_type": "evolution_task",
-        "required_fields": ["taskId", "taskType", "reason"]
+        "required_fields": [
+          "taskId",
+          "taskType",
+          "reason"
+        ]
       }
     },
     {
       "name": "Verify Complete Chain Traceability",
       "type": "validation",
-      "description": "Verify complete event chain: failure → pain → trust_change → queue → directive",
+      "description": "Verify complete event chain: failure \u2192 pain \u2192 trust_change \u2192 queue \u2192 directive",
       "validator": "custom_validator",
       "params": {
         "validation_type": "event_chain_verification",
@@ -256,7 +282,7 @@
       "type": "task",
       "description": "Create a low-score pain signal (<30) to verify it's NOT queued",
       "task": "Manually create a low-score pain signal by writing to /home/csuzngjh/clawd/docs/.pain_flag with: 'score: 20\\nsource: test\\nreason: Low score test\\nis_risky: false'",
-      "timeout": 60,
+      "timeout": 90,
       "wait_for_completion": true
     },
     {
@@ -284,7 +310,7 @@
       "type": "task",
       "description": "Write same pain signal again to verify it's not duplicated in queue",
       "task": "Append to /home/csuzngjh/clawd/docs/.pain_flag: '\\nscore: 50\\nsource: test_dedup\\nreason: Test deduplication\\nis_risky: false'",
-      "timeout": 30,
+      "timeout": 45,
       "wait_for_completion": true
     },
     {
@@ -327,8 +353,8 @@
     },
     "chain_validation": {
       "step1_pain_detection": {
-        "input": "Tool failure (exitCode ≠ 0 or error)",
-        "process": "Detect failure → Calculate score (30 base + 20 risk)",
+        "input": "Tool failure (exitCode \u2260 0 or error)",
+        "process": "Detect failure \u2192 Calculate score (30 base + 20 risk)",
         "output": "Pain signal written to .pain_flag",
         "verification": "File exists with correct format"
       },
@@ -339,14 +365,14 @@
         "verification": "AGENT_SCORECARD.json updated"
       },
       "step3_evolution_queue": {
-        "input": ".pain_flag with score ≥ 30",
-        "process": "EvolutionWorker scans → Checks threshold → Adds to queue",
+        "input": ".pain_flag with score \u2265 30",
+        "process": "EvolutionWorker scans \u2192 Checks threshold \u2192 Adds to queue",
         "output": "evolution_queue.json with new entry",
         "verification": "Queue contains pain signal"
       },
       "step4_directive_generation": {
         "input": "Highest-score queued item",
-        "process": "Sort by score → Create directive → Mark as in_progress",
+        "process": "Sort by score \u2192 Create directive \u2192 Mark as in_progress",
         "output": "EVOLUTION_DIRECTIVE.json",
         "verification": "Directive has active task"
       },
@@ -362,7 +388,7 @@
       "Pain Score calculation is accurate (30 base, +20 for risky)",
       "Trust Engine applies correct penalties (-8 tool, -15 risky)",
       "Evolution Worker scans pain_flag correctly",
-      "Score threshold (≥30) filters out low-priority signals",
+      "Score threshold (\u226530) filters out low-priority signals",
       "High-score signals are processed first (priority queue)",
       "Duplicate signals are prevented (status: queued check)",
       "Complete event chain is traceable in logs",

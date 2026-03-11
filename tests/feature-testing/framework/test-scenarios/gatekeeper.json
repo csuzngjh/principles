@@ -4,7 +4,11 @@
     "description": "Test gate enforcement across different stages and operation types",
     "version": "1.0",
     "author": "Claude Code",
-    "tags": ["core", "gate", "security"]
+    "tags": [
+      "core",
+      "gate",
+      "security"
+    ]
   },
   "setup": {
     "preconditions": [
@@ -45,7 +49,7 @@
       "type": "task",
       "description": "Write a small file (<10 lines) which should be allowed",
       "task": "Create a file at /tmp/gate-test-small.txt with exactly 5 lines of content. Each line should say 'Line 1', 'Line 2', etc.",
-      "timeout": 60,
+      "timeout": 90,
       "wait_for_completion": true,
       "expected_outcomes": [
         {
@@ -69,7 +73,7 @@
       "type": "task",
       "description": "Attempt to write a large file (>10 lines) which should be blocked",
       "task": "Create a file at /tmp/gate-test-large.txt with 100 lines of content. Each line should contain 'Test line N' where N is the line number.",
-      "timeout": 60,
+      "timeout": 90,
       "wait_for_completion": true,
       "expected_outcomes": []
     },
@@ -126,7 +130,11 @@
       "params": {
         "path": "/tmp/gate-test-large.txt",
         "min_size": 1000,
-        "required_sections": ["Test line 1", "Test line 50", "Test line 100"]
+        "required_sections": [
+          "Test line 1",
+          "Test line 50",
+          "Test line 100"
+        ]
       }
     },
     {

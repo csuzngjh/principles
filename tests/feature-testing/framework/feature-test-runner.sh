@@ -501,6 +501,205 @@ validate_custom() {
             return 0
             ;;
 
+        trust_baseline)
+            local scorecard_path="$WORKSPACE_DIR/.state/AGENT_SCORECARD.json"
+            local score=$(cat "$scorecard_path" 2>/dev/null | jq -r '.trust_score // empty')
+            if [ -n "$score" ]; then
+                echo "$score" > /tmp/initial_trust_score.txt
+                log_success "  ✓ Initial trust score: $score"
+                return 0
+            fi
+            log_error "  ✗ Scorecard not found or invalid"
+            return 1
+            ;;
+
+        pain_signal_verification)
+            local expected_score=$(echo "$params" | jq -r '.expected_score')
+            local pain_flag="$WORKSPACE_DIR/docs/.pain_flag"
+
+            if [ ! -f "$pain_flag" ]; then
+                log_error "  ✗ Pain flag not found: $pain_flag"
+                return 1
+            fi
+
+            local score=$(grep "^score:" "$pain_flag" | awk '{print $2}')
+            if [ "$score" == "$expected_score" ]; then
+                log_success "  ✓ Pain signal score: $score"
+                return 0
+            fi
+
+            log_error "  ✗ Score mismatch: expected $expected_score, got $score"
+            return 1
+            ;;
+
+        trust_change_verification)
+            local expected_delta=$(echo "$params" | jq -r '.expected_delta')
+            local scorecard_path="$WORKSPACE_DIR/.state/AGENT_SCORECARD.json"
+            local current=$(cat "$scorecard_path" 2>/dev/null | jq -r '.trust_score // empty')
+            local initial=$(cat /tmp/initial_trust_score.txt 2>/dev/null)
+
+            if [ -z "$current" ] || [ -z "$initial" ]; then
+                log_error "  ✗ Missing score values"
+                return 1
+            fi
+
+            local actual_delta=$((current - initial))
+            if [ "$actual_delta" == "$expected_delta" ]; then
+                log_success "  ✓ Trust score changed by: $actual_delta"
+                return 0
+            fi
+
+            log_error "  ✗ Delta mismatch: expected $expected_delta, got $actual_delta"
+            return 1
+            ;;
+
+        event_log_verification)
+            local expected_type=$(echo "$params" | jq -r '.expected_type')
+            local events_log="$WORKSPACE_DIR/.state/logs/events.jsonl"
+
+            if [ ! -f "$events_log" ]; then
+                log_error "  ✗ Events log not found"
+                return 1
+            fi
+
+            local latest=$(tail -1 "$events_log")
+            local type=$(echo "$latest" | jq -r '.type // empty')
+
+            if [ "$type" == "$expected_type" ]; then
+                log_success "  ✓ Event logged: $expected_type"
+                return 0
+            fi
+
+            log_error "  ✗ Type mismatch: expected $expected_type, got $type"
+            return 1
+            ;;
+
+        reward_verification)
+            local expected_score=$(echo "$params" | jq -r '.expected_score')
+            local expected_delta=$(echo "$params" | jq -r '.expected_delta')
+            local reward_type=$(echo "$params" | jq -r '.reward_type // ""')
+
+            local scorecard_path="$WORKSPACE_DIR/.state/AGENT_SCORECARD.json"
+            local actual_score=$(cat "$scorecard_path" | jq -r '.trust_score')
+
+            local last_delta=$(cat "$scorecard_path" | jq -r '.history[-1].delta // "0"')
+
+            if [ "$actual_score" != "$expected_score" ]; then
+                log_error "Score mismatch after reward: expected $expected_score, got $actual_score"
+                return 1
+            fi
+
+            if [ "$last_delta" != "$expected_delta" ]; then
+                log_error "Reward delta mismatch: expected $expected_delta, got $last_delta"
+                return 1
+            fi
+
+            log_success "✓ Reward verified"
+            log_info "  Score: $actual_score, Delta: $last_delta, Type: $reward_type"
+            return 0
+            ;;
+
+        history_verification)
+            local min_entries=$(echo "$params" | jq -r '.min_entries // 1')
+            local scorecard_path="$WORKSPACE_DIR/.state/AGENT_SCORECARD.json"
+
+            if [ ! -f "$scorecard_path" ]; then
+                log_error "Scorecard not found"
+                return 1
+            fi
+
+            local history_count=$(cat "$scorecard_path" | jq '.history | length')
+
+            if [ "$history_count" -lt "$min_entries" ]; then
+                log_error "History too short: expected ≥$min_entries, got $history_count"
+                return 1
+            fi
+
+            local valid=$(cat "$scorecard_path" | jq -r '.history[-1] | has("timestamp") and has("delta") and has("reason")')
+            if [ "$valid" != "true" ]; then
+                log_error "History entry missing required fields"
+                return 1
+            fi
+
+            log_success "✓ History verified"
+            log_info "  Entries: $history_count"
+            return 0
+            ;;
+
+        evolution_queue_verification)
+            local min_entries=$(echo "$params" | jq -r '.min_entries // 1')
+            local expected_status=$(echo "$params" | jq -r '.expected_status // "any"')
+            local queue_path="$WORKSPACE_DIR/.state/evolution_queue.json"
+
+            if [ ! -f "$queue_path" ]; then
+                log_error "Evolution queue not found"
+                return 1
+            fi
+
+            local queue_count=$(cat "$queue_path" | jq '. | length')
+
+            if [ "$queue_count" -lt "$min_entries" ]; then
+                log_error "Queue too short: expected ≥$min_entries, got $queue_count"
+                return 1
+            fi
+
+            if [ "$expected_status" != "any" ]; then
+                local match=$(cat "$queue_path" | jq "[.[] | select(.status == \"$expected_status\")] | length")
+                if [ "$match" -eq 0 ]; then
+                    log_error "No entries with status: $expected_status"
+                    return 1
+                fi
+            fi
+
+            log_success "✓ Evolution queue verified"
+            log_info "  Entries: $queue_count"
+            return 0
+            ;;
+
+        evolution_priority_verification)
+            local directive_path="$WORKSPACE_DIR/.state/evolution_directive.json"
+
+            if [ ! -f "$directive_path" ]; then
+                log_error "Evolution directive not found"
+                return 1
+            fi
+
+            local active=$(cat "$directive_path" | jq -r '.active')
+            if [ "$active" != "true" ]; then
+                log_error "Directive not active"
+                return 1
+            fi
+
+            local task=$(cat "$directive_path" | jq -r '.task')
+            if [ -z "$task" ]; then
+                log_error "Directive task empty"
+                return 1
+            fi
+
+            log_success "✓ Evolution priority verified"
+            log_info "  Active task: ${task:0:50}..."
+            return 0
+            ;;
+
+        event_chain_verification)
+            local expected_chain=$(echo "$params" | jq -r '.expected_chain')
+            local events_log="$WORKSPACE_DIR/.state/logs/events.jsonl"
+
+            if [ ! -f "$events_log" ]; then
+                log_error "Events log not found"
+                return 1
+            fi
+
+            local found=$(tail -20 "$events_log" | jq -s "[.[] | select(.type == \"$expected_chain\")] | length")
+            if [ "$found" -eq 0 ]; then
+                log_error "Event chain not found: $expected_chain"
+                return 1
+            fi
+
+            log_success "✓ Event chain verified"
+            log_info "  Chain: $expected_chain, Found: $found events"
+            return 0
+            ;;
         stage_verification)
             local expected_stage=$(echo "$params" | jq -r '.expected_stage')
             local expected_score=$(echo "$params" | jq -r '.expected_score')
