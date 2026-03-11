@@ -23,7 +23,7 @@ Please output in the following structure:
 
 ## 4. Scope
 - Preview of involved files or modules.
-- **Risk Level**: Low / Medium / High (based on `docs/PROFILE.json` definition).
+- **Risk Level**: Low / Medium / High (based on `.principles/PROFILE.json` definition).
 
 ## 5. Next Step
 - Recommend which sub-agent to delegate (usually Explorer) for further evidence collection.

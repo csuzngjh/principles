@@ -23,7 +23,7 @@ disable-model-invocation: true
 
 ## 4. Scope (范围)
 - 涉及的文件或模块预览。
-- **Risk Level**: Low / Medium / High (基于 `docs/PROFILE.json` 定义)。
+- **Risk Level**: Low / Medium / High (基于 `.principles/PROFILE.json` 定义)。
 
 ## 5. Next Step
 - 建议委派哪个子智能体 (通常是 Explorer) 进一步收集证据。

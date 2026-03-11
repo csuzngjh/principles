@@ -10,8 +10,8 @@ disable-model-invocation: true
 
 ## 1. 现状度量 (Metrics Analysis)
 - **读取数据**:
-  - `docs/AGENT_SCORECARD.json`: 计算每个 Agent 的胜率 (wins / (wins + losses))。
-  - `docs/ISSUE_LOG.md`: 识别最近 10 条记录中的重复模式（Pain Patterns）。
+  - `.state/AGENT_SCORECARD.json`: 计算每个 Agent 的胜率 (wins / (wins + losses))。
+  - `memory/ISSUE_LOG.md`: 识别最近 10 条记录中的重复模式（Pain Patterns）。
 - **识别异常**:
   - **低效 Agent**: 胜率低于 50% 且样本量 >= 3 的 Agent。
   - **系统顽疾**: 在 Issue Log 中出现超过 2 次的同类系统性错误。
@@ -27,7 +27,7 @@ disable-model-invocation: true
 **如果根因不明确**，需进行实证：
 - **征询**: 使用 `AskUserQuestion` 询问：“为确诊问题，我需要对 [Agent] 进行一次自动诊断任务，这可能会消耗一些 Token，是否继续？”
 - **静默执行**:
-  - 若用户同意，直接调用 `Task()` 发起测试。
+  - 若用户同意，直接调用 ``sessions_spawn` 工具` 发起测试。
   - **指令**: "你正在被进行诊断测试。请执行以下任务：[Test Scenario]。请保持输出极其精简，只返回最终结果或错误信息。"
   - **观察**: 检查其工具调用链是否符合预期（例如：是否使用了正确的 Search 工具）。
 - **确诊**: 基于测试表现，锁定病灶。

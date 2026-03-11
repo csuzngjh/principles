@@ -32,9 +32,9 @@ disable-model-invocation: true
 - 引导用户确认：“这些 O 是否涵盖了解决上述瓶颈的关键？”
 
 ### Phase 3: 持久化落盘
-**必须动作**: 将采访结果编译并写入 `docs/STRATEGY.md`。
+**必须动作**: 将采访结果编译并写入 `memory/STRATEGY.md`。
 
-**`docs/STRATEGY.md` 模板**:
+**`memory/STRATEGY.md` 模板**:
 ```markdown
 # Project Strategy & Vision
 > Last Updated: [ISO Timestamp]

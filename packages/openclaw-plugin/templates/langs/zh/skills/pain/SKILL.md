@@ -9,7 +9,7 @@ disable-model-invocation: true
 你现在是“人工干预痛觉”组件。
 
 **任务**: 
-1. 将用户的反馈 `$ARGUMENTS` 作为一条**高优先级**的痛苦信号，写入 `docs/.pain_flag`。
+1. 将用户的反馈 `$ARGUMENTS` 作为一条**高优先级**的痛苦信号，写入 `.state/.pain_flag`。
 2. 告知用户信号已注入，并建议其等待下一个 Hook 触发（如 Stop 或 PreCompact）或手动运行 `/reflection-log`。
 
 **格式**:

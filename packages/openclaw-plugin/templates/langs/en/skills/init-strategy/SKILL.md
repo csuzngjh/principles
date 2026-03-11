@@ -32,9 +32,9 @@ Based on user's responses, extract 1-3 macro **Objectives (O)**.
 - Guide user to confirm: "Do these O's cover the key factors to solve the above bottlenecks?"
 
 ### Phase 3: Persistence
-**Mandatory Action**: Compile interview results and write to `docs/STRATEGY.md`.
+**Mandatory Action**: Compile interview results and write to `memory/STRATEGY.md`.
 
-**`docs/STRATEGY.md` Template**:
+**`memory/STRATEGY.md` Template**:
 ```markdown
 # Project Strategy & Vision
 > Last Updated: [ISO Timestamp]

@@ -22,11 +22,11 @@ Please generate plan in the following structure:
 - How to quantitatively prove this plan succeeded? (e.g., tests pass, command returns 0, specific string appears in logs).
 
 ## 4. Active Mental Models
-- Select exactly **2** meta-cognitive models from `docs/THINKING_OS.md` that are most relevant to the current task.
+- Select exactly **2** meta-cognitive models from `.principles/THINKING_OS.md` that are most relevant to the current task.
 - Format: `- [T-0X] Model Name: Why is it needed for this specific task?`
 
 ## 5. Rollback (Rollback Strategy)
 - If step 2 fails, how to one-click restore to safe state?
 
 ---
-**Action**: Update above content to `docs/PLAN.md` and set `STATUS: READY`.
+**Action**: Update above content to `PLAN.md` and set `STATUS: READY`.

@@ -33,4 +33,4 @@ disable-model-invocation: true
 - **Must Fix**: 如果失败，列出必须修正的点。
 
 ---
-**动作**: 请将以上结果更新至 `docs/AUDIT.md`。
+**动作**: 请将以上结果更新至 `AUDIT.md`。

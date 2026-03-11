@@ -36,15 +36,15 @@ Your goal is to equip the agent team with the most advanced weapons. By analyzin
       - After installation, **must** run `<tool> --version` or `command -v <tool>` to verify successful installation.
       - **If Failed**: Inform user (possibly permission issue), request manual installation, **do not** update capabilities file.
       - **If Successful**: 
-        - Update `docs/SYSTEM_CAPABILITIES.json`. Record the new tool's path.
+        - Update `.state/SYSTEM_CAPABILITIES.json`. Record the new tool's path.
         - **Broadcast to All Agents**: 
           - Scan `.claude/agents/*.md`.
-          - Check if each file contains `@docs/SYSTEM_CAPABILITIES.json`.
+          - Check if each file contains `@.state/SYSTEM_CAPABILITIES.json`.
           - If not, append to end of file:
             ```markdown
             
             ## Environment Capabilities
-            Check @docs/SYSTEM_CAPABILITIES.json for high-performance tools (e.g., ripgrep, ast-grep) available in this environment. Use them!
+            Check @.state/SYSTEM_CAPABILITIES.json for high-performance tools (e.g., ripgrep, ast-grep) available in this environment. Use them!
             ```
           - Prompt user to run `/manage-okr` or `/admin diagnose` to let Agent perceive new capabilities.
 

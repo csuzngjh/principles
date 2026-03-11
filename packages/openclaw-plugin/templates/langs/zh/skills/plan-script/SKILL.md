@@ -22,11 +22,11 @@ disable-model-invocation: true
 - 如何量化证明本计划成功了？(如：测试通过、命令返回 0、日志出现特定字符串)。
 
 ## 4. Active Mental Models (激活的思维模型)
-- 从 `docs/THINKING_OS.md` 中挑选 **2 个** 最适合当前任务的元认知模型。
+- 从 `.principles/THINKING_OS.md` 中挑选 **2 个** 最适合当前任务的元认知模型。
 - 格式：`- [T-0X] 模型名称：为什么在这个任务中需要它？`
 
 ## 5. Rollback (回滚方案)
 - 如果步骤 2 失败，如何一键恢复到安全状态？
 
 ---
-**动作**: 请将以上内容更新至 `docs/PLAN.md`，并设置 `STATUS: READY`。
+**动作**: 请将以上内容更新至 `PLAN.md`，并设置 `STATUS: READY`。

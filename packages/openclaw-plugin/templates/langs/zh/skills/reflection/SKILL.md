@@ -12,7 +12,7 @@ disable-model-invocation: false
 请执行以下反思步骤：
 
 ## 1. 现状扫描 (Status Scan)
-- **Goal**: 我们最初的目标是什么？(Check `docs/PLAN.md` or early conversation)
+- **Goal**: 我们最初的目标是什么？(Check `PLAN.md` or early conversation)
 - **Status**: 现在完成了多少？卡在哪里？
 - **Cost**: 我们消耗了大量 Token，产出是否匹配？
 
@@ -31,10 +31,10 @@ disable-model-invocation: false
 
 ## 4. 进化落盘 (Evolution)
 如果检测到痛苦，必须执行：
-1. **记录**: 将分析结果写入 `docs/ISSUE_LOG.md`。
+1. **记录**: 将分析结果写入 `memory/ISSUE_LOG.md`。
 2. **提炼**: 如果这是第二次发生，提炼一条 **禁止性原则 (Must NOT)**。
 3. **加固**: 建议一个具体的 Hook 或 Test 来防止未来重犯。
 
 ## 5. 恢复计划 (Recovery)
 - 既然要压缩上下文，我们下一步该如何以“最干净”的状态继续？
-- 更新 `docs/PLAN.md`，标记当前进度，确保压缩后能无缝衔接。
+- 更新 `PLAN.md`，标记当前进度，确保压缩后能无缝衔接。
