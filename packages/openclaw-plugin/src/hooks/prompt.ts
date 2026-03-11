@@ -3,7 +3,7 @@ import * as path from 'path';
 import type { PluginHookBeforePromptBuildEvent, PluginHookAgentContext, PluginHookBeforePromptBuildResult } from '../openclaw-sdk.js';
 import { ConfigService } from '../core/config-service.js';
 import { getSession, resetFriction } from '../core/session-tracker.js';
-import { getAgentScorecard } from '../core/trust-engine.js';
+import { getAgentScorecard } from '../core/trust-engine-v2.js';
 
 export async function handleBeforePromptBuild(
   event: PluginHookBeforePromptBuildEvent,

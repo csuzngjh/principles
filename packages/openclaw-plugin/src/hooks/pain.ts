@@ -4,7 +4,7 @@ import { isRisky, normalizePath } from '../utils/io.js';
 import { normalizeProfile } from '../core/profile.js';
 import { computePainScore, writePainFlag } from '../core/pain.js';
 import { trackFriction, resetFriction, getSession } from '../core/session-tracker.js';
-import { adjustTrustScore, TRUST_CONFIG } from '../core/trust-engine.js';
+import { adjustTrustScore, TRUST_CONFIG } from '../core/trust-engine-v2.js';
 import { denoiseError, computeHash } from '../utils/hashing.js';
 import { ConfigService } from '../core/config-service.js';
 import { EventLogService } from '../core/event-log.js';
@@ -75,7 +75,7 @@ export function handleAfterToolCall(
     }
     
     const isRisk = isRisky(relPath, profile.risk_paths);
-    const penalty = isRisk ? TRUST_CONFIG.PENALTIES.RISKY_FAILURE : TRUST_CONFIG.PENALTIES.TOOL_FAILURE;
+    const penalty = isRisk ? TRUST_CONFIG.PENALTIES.RISKY_FAILURE_BASE : TRUST_CONFIG.PENALTIES.TOOL_FAILURE_BASE;
     
     adjustTrustScore(ctx.workspaceDir, penalty, `pain:${errorType}`, {
         sessionId,

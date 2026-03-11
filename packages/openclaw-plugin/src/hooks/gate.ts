@@ -5,7 +5,7 @@ import { matchesAnyPattern } from '../utils/glob-match.js';
 import { normalizeProfile } from '../core/profile.js';
 import { EventLogService } from '../core/event-log.js';
 import { trackBlock } from '../core/session-tracker.js';
-import { getAgentScorecard, TRUST_CONFIG } from '../core/trust-engine.js';
+import { getAgentScorecard, TRUST_CONFIG } from '../core/trust-engine-v2.js';
 import { assessRiskLevel, estimateLineChanges } from '../core/risk-calculator.js';
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult } from '../openclaw-sdk.js';
 

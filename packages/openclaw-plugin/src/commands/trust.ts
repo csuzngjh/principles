@@ -1,4 +1,4 @@
-import { getAgentScorecard, TRUST_CONFIG } from '../core/trust-engine.js';
+import { getAgentScorecard, TRUST_CONFIG } from '../core/trust-engine-v2.js';
 import type { PluginHookAgentContext } from '../openclaw-sdk.js';
 
 export function handleTrustCommand(ctx: PluginHookAgentContext & { workspaceDir?: string }): string {
@@ -43,6 +43,6 @@ ${permissions}
 
 **Next Promotion**: ${nextLevel}
 ──────────────────────────────
-*Trust is earned through successful tasks (+${TRUST_CONFIG.REWARDS.SUBAGENT_SUCCESS}) and lost through failures (${TRUST_CONFIG.PENALTIES.TOOL_FAILURE}).*
+*Trust is earned through successful tasks (+${TRUST_CONFIG.REWARDS.SUBAGENT_SUCCESS}) and lost through failures (${TRUST_CONFIG.PENALTIES.TOOL_FAILURE_BASE}).*
 `.trim();
 }
