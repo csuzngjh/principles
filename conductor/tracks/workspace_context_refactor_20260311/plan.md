@@ -8,8 +8,8 @@
 - [x] Task: Conductor - User Manual Verification 'Phase 1: Core Context Infrastructure' (Protocol in workflow.md) [69e51f0]
 
 ## Phase 2: Service Integration & Compatibility Layer
-- [ ] Task: Integrate `ConfigService` and `EventLogService` as lazy getters in `WorkspaceContext`.
-- [ ] Task: Integrate `TrustEngine` and `DictionaryService` as lazy getters in `WorkspaceContext`.
+- [x] Task: Integrate `ConfigService` and `EventLogService` as lazy getters in `WorkspaceContext`. [249b1e7]
+- [x] Task: Integrate `TrustEngine` and `DictionaryService` as lazy getters in `WorkspaceContext`. [249b1e7]
 - [ ] Task: Refactor `src/core/trust-engine.ts` and `src/core/dictionary.ts` to expose methods compatible with the context while maintaining legacy function exports as wrappers.
 - [ ] Task: Write unit tests to verify service encapsulation, lazy loading, and backward compatibility of functional APIs.
 - [ ] Task: Conductor - User Manual Verification 'Phase 2: Service Integration & Compatibility' (Protocol in workflow.md)
