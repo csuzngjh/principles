@@ -6,13 +6,13 @@
 - [x] Task: Write failing tests to verify that the installer handles the new paths correctly. [0e66a59]
 - [x] Task: Conductor - User Manual Verification 'Phase 1: Foundation & Template Update' (Protocol in workflow.md) [ceffdd2]
 
-## Phase 2: Core Logic Refactor (Path Anchoring)
+## Phase 2: Core Logic Refactor (Path Anchoring) [checkpoint: ff45960]
 - [x] Task: Update `src/utils/io.ts` and `src/core/config.ts` to reflect the new directory constants. [b9a608c]
 - [x] Task: Update `src/hooks/gate.ts` to point to `.principles/PROFILE.json` and root `PLAN.md`. [ccc5d94]
 - [x] Task: Update `src/hooks/prompt.ts` to point to `.principles/THINKING_OS.md`. [2b0e087]
 - [x] Task: Update `src/service/evolution-worker.ts` to point to `.state/evolution_queue.json`. [bf82896]
 - [x] Task: Write failing tests for each component to verify they now expect files in the new locations. [2449737]
-- [ ] Task: Conductor - User Manual Verification 'Phase 2: Core Logic Refactor' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 2: Core Logic Refactor' (Protocol in workflow.md) [ff45960]
 
 ## Phase 3: Auto-Migration & Loop Closure
 - [ ] Task: Implement `src/core/migration.ts` with logic to detect and move files from `docs/` to `.principles/` and `.state/`.
