@@ -5,8 +5,7 @@ import { PainConfig } from './config.js';
 import { EventLogService, EventLog } from './event-log.js';
 import { DictionaryService } from './dictionary-service.js';
 import { PainDictionary } from './dictionary.js';
-import * as trustEngine from './trust-engine.js';
-import type { AgentScorecard } from './trust-engine.js';
+import { TrustEngine } from './trust-engine.js';
 
 /**
  * WorkspaceContext - Centralized management of workspace-specific paths and services.
@@ -21,7 +20,7 @@ export class WorkspaceContext {
     private _config?: PainConfig;
     private _eventLog?: EventLog;
     private _dictionary?: PainDictionary;
-    private _trust?: any;
+    private _trust?: TrustEngine;
 
     private constructor(workspaceDir: string, stateDir: string) {
         this.workspaceDir = workspaceDir;
@@ -61,18 +60,9 @@ export class WorkspaceContext {
     /**
      * Trust engine service bound to this workspace.
      */
-    get trust() {
+    get trust(): TrustEngine {
         if (!this._trust) {
-            this._trust = {
-                getScorecard: () => trustEngine.getAgentScorecard(this.workspaceDir),
-                saveScorecard: (scorecard: AgentScorecard) => trustEngine.saveAgentScorecard(this.workspaceDir, scorecard),
-                recordSuccess: (opType: 'success' | 'subagent_success', ctx?: any) => 
-                    trustEngine.recordSuccess(this.workspaceDir, opType, { ...ctx, stateDir: this.stateDir }),
-                recordFailure: (failType: 'tool' | 'risky' | 'bypass', ctx?: any) => 
-                    trustEngine.recordFailure(this.workspaceDir, failType, { ...ctx, stateDir: this.stateDir }),
-                getStage: () => trustEngine.getTrustStage(trustEngine.getAgentScorecard(this.workspaceDir)),
-                getStats: () => trustEngine.getTrustStats(trustEngine.getAgentScorecard(this.workspaceDir)),
-            };
+            this._trust = new TrustEngine(this.workspaceDir, this.stateDir);
         }
         return this._trust;
     }
