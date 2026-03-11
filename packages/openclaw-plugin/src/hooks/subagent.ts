@@ -67,7 +67,9 @@ export async function handleSubagentEnded(
                                 if (painData.includes('status: queued')) {
                                     fs.unlinkSync(painFlagPath);
                                 }
-                            } catch (e) {}
+                            } catch (e) {
+                                console.error(`[PD:Subagent] Failed to cleanup pain flag: ${String(e)}`);
+                            }
                         }
                     }
                 }
@@ -75,7 +77,9 @@ export async function handleSubagentEnded(
                 if (changed) {
                     fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
                 }
-            } catch (e) {}
+            } catch (e) {
+                console.error(`[PD:Subagent] Failed to update evolution queue: ${String(e)}`);
+            }
         }
     }
 }

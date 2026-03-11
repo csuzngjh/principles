@@ -53,7 +53,9 @@ function checkPainFlag(wctx: WorkspaceContext, logger: any) {
         if (fs.existsSync(queuePath)) {
             try {
                 queue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
-            } catch (e) { }
+            } catch (e) {
+                if (logger) logger.error(`[PD:EvolutionWorker] Failed to parse evolution queue: ${String(e)}`);
+            }
         }
 
         const taskId = createHash('md5').update(`${source}:${score}:${new Date().toISOString()}`).digest('hex').substring(0, 8);
@@ -193,7 +195,12 @@ function trackPainCandidate(text: string, wctx: WorkspaceContext) {
     const candidatePath = wctx.resolve('PAIN_CANDIDATES');
     let data = { candidates: {} as any };
     if (fs.existsSync(candidatePath)) {
-        try { data = JSON.parse(fs.readFileSync(candidatePath, 'utf8')); } catch (e) { }
+        try {
+            data = JSON.parse(fs.readFileSync(candidatePath, 'utf8'));
+        } catch (e) {
+            // Keep going with empty data if parse fails, but log it
+            console.error(`[PD:EvolutionWorker] Failed to parse pain candidates: ${String(e)}`);
+        }
     }
 
     const fingerprint = createHash('md5').update(text.substring(0, 50)).digest('hex').substring(0, 8);
@@ -303,7 +310,9 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
             checkPainFlag(wctx, logger);
             processEvolutionQueue(wctx, logger, eventLog);
             if (api) {
-                processDetectionQueue(wctx, api, eventLog).catch(() => { });
+                processDetectionQueue(wctx, api, eventLog).catch(err => {
+                    if (logger) logger.error(`[PD:EvolutionWorker] Startup detection queue failed: ${String(err)}`);
+                });
             }
             processPromotion(wctx, logger, eventLog);
         }, initialDelay);

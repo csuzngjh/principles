@@ -38,7 +38,9 @@ export async function handleBeforePromptBuild(
       if (thinkingOs.trim()) {
         prependSystemContext = `<thinking_os>\n${thinkingOs.trim()}\n</thinking_os>`;
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error(`[PD:Prompt] Failed to read THINKING_OS: ${String(e)}`);
+    }
   }
 
   // 1. Critical Reflection Logic (High Priority - Prompt Injection)
@@ -49,7 +51,9 @@ export async function handleBeforePromptBuild(
       if (reflectionLog.trim()) {
         prependContext += `\n<reflection_log>\n${reflectionLog.trim()}\n</reflection_log>\n`;
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error(`[PD:Prompt] Failed to read REFLECTION_LOG: ${String(e)}`);
+    }
   }
 
   // 2. Strategic focus
@@ -59,7 +63,9 @@ export async function handleBeforePromptBuild(
       if (currentFocus.trim()) {
         prependContext += `\n<project_context>\n--- Strategic Focus ---\n${currentFocus.trim()}\n--- End of Strategic Focus ---\n</project_context>\n`;
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error(`[PD:Prompt] Failed to read CURRENT_FOCUS: ${String(e)}`);
+    }
   }
 
   // 3. Background Evolution Directives
@@ -77,7 +83,9 @@ export async function handleBeforePromptBuild(
           `ACTION REQUIRED:\n` +
           `Reply ONLY with "[EVOLUTION_ACK]". Then immediately invoke the \`sessions_spawn\` tool targeting \`diagnostician\` with the task above. NO OTHER ACTIONS PERMITTED.`;
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error(`[PD:Prompt] Failed to parse EVOLUTION_QUEUE: ${String(e)}`);
+    }
   }
 
   // 4. Perceptive awareness: System Capabilities
@@ -85,7 +93,9 @@ export async function handleBeforePromptBuild(
     try {
       const caps = fs.readFileSync(capsPath, 'utf8');
       prependContext += `\n<system_capabilities>\n${caps}\n</system_capabilities>\n`;
-    } catch (e) {}
+    } catch (e) {
+      console.error(`[PD:Prompt] Failed to read SYSTEM_CAPABILITIES: ${String(e)}`);
+    }
   }
 
   // 5. Heartbeat-specific active checklist
@@ -95,7 +105,9 @@ export async function handleBeforePromptBuild(
       try {
         const heartbeatChecklist = fs.readFileSync(heartbeatPath, 'utf8');
         prependContext += `\n<heartbeat_checklist>\n${heartbeatChecklist}\n\nDIRECTIVE: Perform a system-wide self-audit now. If everything is stable, strictly reply with "HEARTBEAT_OK" to minimize token usage.\n</heartbeat_checklist>\n`;
-      } catch (e) {}
+      } catch (e) {
+        console.error(`[PD:Prompt] Failed to read HEARTBEAT: ${String(e)}`);
+      }
     }
   }
 

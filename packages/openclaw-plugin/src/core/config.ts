@@ -47,6 +47,7 @@ export interface TrustSettings {
         stage_2_max_lines: number;
         stage_3_max_lines: number;
     };
+    history_limit?: number;
 }
 
 export interface PainSettings {
@@ -156,7 +157,8 @@ export const DEFAULT_SETTINGS: PainSettings = {
         limits: {
             stage_2_max_lines: 50, // Was 10. 10 lines is barely enough to fix a function signature.
             stage_3_max_lines: 300, // Was 100. Allow substantial feature implementation.
-        }
+        },
+        history_limit: 50
     },
     deep_reflection: {
         enabled: true,
@@ -188,6 +190,7 @@ export class PainConfig {
                 const loaded = JSON.parse(fs.readFileSync(this.filePath, 'utf8'));
                 // Recursive merge for safety
                 this.settings = this.deepMerge(DEFAULT_SETTINGS, loaded);
+                this.validate(this.settings);
             } catch (e) {
                 console.error('[PD] Failed to parse pain_settings.json, using defaults.');
             }
@@ -198,6 +201,9 @@ export class PainConfig {
         const output = { ...target };
         if (source && typeof source === 'object') {
             Object.keys(source).forEach(key => {
+                // 👈 FIX: Skip if source value is undefined to avoid overwriting defaults
+                if (source[key] === undefined) return;
+
                 if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
                     if (!(key in target)) {
                         Object.assign(output, { [key]: source[key] });
@@ -210,6 +216,20 @@ export class PainConfig {
             });
         }
         return output;
+    }
+
+    /**
+     * Basic validation for critical settings
+     */
+    private validate(settings: PainSettings): void {
+        // Ensure trust scores stay within 0-100 logical range
+        const s = settings.trust.stages;
+        if (s.stage_1_observer < 0 || s.stage_1_observer > 100) s.stage_1_observer = 30;
+        if (s.stage_2_editor < 0 || s.stage_2_editor > 100) s.stage_2_editor = 60;
+        if (s.stage_3_developer < 0 || s.stage_3_developer > 100) s.stage_3_developer = 80;
+        
+        // Ensure intervals are positive
+        if (settings.intervals.worker_poll_ms < 1000) settings.intervals.worker_poll_ms = 15 * 60 * 1000;
     }
 
     /**
