@@ -10,3 +10,12 @@
 {"timestamp":"2026-03-11T09:25:03+00:00","type":"step_failed","data":{"step":4,"name":"Verify Risk Path Blocked - Stage 1","error_code":1}}
 {"timestamp":"2026-03-11T09:25:03+00:00","type":"step_start","data":{"step":5,"name":"Stage 1 - Attempt Large Safe Path Write","type":"task"}}
 {"timestamp":"2026-03-11T09:25:03+00:00","type":"task_sent","data":{"pid":1310133,"timeout":60}}
+{"timestamp":"2026-03-11T09:26:04+00:00","type":"step_complete","data":{"step":5,"name":"Stage 1 - Attempt Large Safe Path Write"}}
+{"timestamp":"2026-03-11T09:26:04+00:00","type":"step_start","data":{"step":6,"name":"Verify Large Write Blocked - Stage 1","type":"validation"}}
+{"timestamp":"2026-03-11T09:26:04+00:00","type":"step_failed","data":{"step":6,"name":"Verify Large Write Blocked - Stage 1","error_code":1}}
+{"timestamp":"2026-03-11T09:26:04+00:00","type":"step_start","data":{"step":7,"name":"Transition to Stage 2","type":"cleanup"}}
+{"timestamp":"2026-03-11T09:26:05+00:00","type":"step_complete","data":{"step":7,"name":"Transition to Stage 2"}}
+{"timestamp":"2026-03-11T09:26:05+00:00","type":"step_start","data":{"step":8,"name":"Stage 2 - Risk Path Write Blocked","type":"task"}}
+{"timestamp":"2026-03-11T09:26:05+00:00","type":"task_sent","data":{"pid":1310493,"timeout":30}}
+{"timestamp":"2026-03-11T09:26:25+00:00","type":"step_failed","data":{"step":8,"name":"Stage 2 - Risk Path Write Blocked","error_code":1}}
+{"timestamp":"2026-03-11T09:26:25+00:00","type":"step_start","data":{"step":9,"name":"Verify Risk Path Blocked - Stage 2","type":"validation"}}

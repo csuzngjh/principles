@@ -829,7 +829,8 @@ validate_gate() {
         return 0
     fi
 
-    local gate_blocks=$(tail -50 "$session_file" | jq -r 'select(.message.details.error != null) | .message.details.error' | grep -c "PRINCIPLES_GATE" || echo "0")
+    # Parse jsonl file: read last 50 lines, filter for gate blocks
+    local gate_blocks=$(tail -50 "$session_file" | jq -r 'select(.type == "message" and .message.role == "toolResult" and .message.details.error != null) | .message.details.error' | grep -c "PRINCIPLES_GATE" || echo "0")
 
     if [ "$should_block" == "true" ]; then
         if [ "$gate_blocks" -gt 0 ]; then
