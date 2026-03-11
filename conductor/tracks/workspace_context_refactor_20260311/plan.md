@@ -3,7 +3,7 @@
 ## Phase 1: Core Context Infrastructure
 - [x] Task: Create `src/core/workspace-context.ts` with basic metadata extraction, `WeakMap` based cached singleton management, and `invalidate()` logic. [85635b8]
 - [x] Task: Implement `resolve(key)` in `WorkspaceContext` using `PD_FILES` mappings. [e8ea878]
-- [ ] Task: Implement `createTestContext()` factory in `tests/test-utils.ts` for consistent testing.
+- [x] Task: Implement `createTestContext()` factory in `tests/test-utils.ts` for consistent testing. [98c7a90]
 - [ ] Task: Write unit tests for `WorkspaceContext` factory, path resolution, and cache eviction.
 - [ ] Task: Conductor - User Manual Verification 'Phase 1: Core Context Infrastructure' (Protocol in workflow.md)
 
