@@ -1,13 +1,21 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
+import * as fs from 'fs';
+import * as path from 'path';
+
+vi.mock('fs');
 
 describe('WorkspaceContext', () => {
     const workspaceDir = '/mock/workspace';
     const stateDir = '/mock/state';
 
     beforeEach(() => {
-        // Clear static cache if possible (will need to implement this)
-        (WorkspaceContext as any).clearCache?.();
+        vi.clearAllMocks();
+        WorkspaceContext.clearCache();
+    });
+
+    afterEach(() => {
+        vi.resetAllMocks();
     });
 
     it('should create an instance from hook context', () => {
@@ -26,7 +34,7 @@ describe('WorkspaceContext', () => {
         const wctx2 = WorkspaceContext.fromHookContext(mockCtx2);
         
         expect(wctx1).toBe(wctx2);
-        expect(wctx1.stateDir).toBe('/state1'); // First one wins or handles fallback
+        expect(wctx1.stateDir).toBe('/state1');
     });
 
     it('should throw error if workspaceDir is missing', () => {
@@ -34,23 +42,30 @@ describe('WorkspaceContext', () => {
         expect(() => WorkspaceContext.fromHookContext(mockCtx)).toThrow('workspaceDir is required');
     });
 
-    it('should invalidate cache when requested', () => {
-        const mockCtx = { workspaceDir, stateDir };
-        const wctx1 = WorkspaceContext.fromHookContext(mockCtx);
-        
-        wctx1.invalidate();
-        
-        // This is tricky if it's a singleton cache. 
-        // Invalidate usually refers to services/paths, but let's test if it resets internal state.
-        // For now, let's just check if the method exists.
-        expect(typeof wctx1.invalidate).toBe('function');
-    });
-
     it('should resolve paths using PD_FILES keys', () => {
-        const mockCtx = { workspaceDir, stateDir };
+        const mockCtx = { workspaceDir };
         const wctx = WorkspaceContext.fromHookContext(mockCtx);
         
-        expect(wctx.resolve('PROFILE')).toBe(`${workspaceDir}/.principles/PROFILE.json`);
-        expect(wctx.resolve('PLAN')).toBe(`${workspaceDir}/PLAN.md`);
+        // PROFILE is at .principles/PROFILE.json
+        expect(wctx.resolve('PROFILE')).toBe(path.join(workspaceDir, '.principles', 'PROFILE.json'));
+        // PLAN is at root
+        expect(wctx.resolve('PLAN')).toBe(path.join(workspaceDir, 'PLAN.md'));
+    });
+
+    it('should support explicit disposal from cache', () => {
+        const mockCtx = { workspaceDir };
+        const wctx1 = WorkspaceContext.fromHookContext(mockCtx);
+        
+        WorkspaceContext.dispose(workspaceDir);
+        
+        const wctx2 = WorkspaceContext.fromHookContext(mockCtx);
+        expect(wctx1).not.toBe(wctx2);
+    });
+
+    it('should allow invalidation of internal state', () => {
+        const mockCtx = { workspaceDir };
+        const wctx = WorkspaceContext.fromHookContext(mockCtx);
+        
+        expect(() => wctx.invalidate()).not.toThrow();
     });
 });
