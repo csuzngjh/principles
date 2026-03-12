@@ -34,6 +34,7 @@ import { ensureWorkspaceTemplates } from './core/init.js';
 import { migrateDirectoryStructure } from './core/migration.js';
 import { SystemLogger } from './core/system-logger.js';
 import { deepReflectTool } from './tools/deep-reflect.js';
+import { agentSpawnTool } from './tools/agent-spawn.js';
 
 // Track initialization to avoid repeated calls
 let workspaceInitialized = false;
@@ -251,6 +252,7 @@ const plugin = {
 
     // ── Tools ──
     api.registerTool(deepReflectTool);
+    api.registerTool(agentSpawnTool);
   }
 };
 
