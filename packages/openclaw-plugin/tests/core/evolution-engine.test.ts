@@ -8,6 +8,7 @@ import * as path from 'path';
 import * as os from 'os';
 import {
   EvolutionEngine,
+  getEvolutionEngine,
 } from '../../src/core/evolution-engine.js';
 import {
   EvolutionTier,
@@ -302,6 +303,65 @@ describe('EvolutionEngine', () => {
       
       const summary = engine.getStatusSummary();
       expect(summary.nextTier).toBeNull();
+    });
+  });
+
+  // ===== P0 修复验证：多 Workspace 隔离 =====
+
+  describe('Multi-Workspace Isolation (P0 fix)', () => {
+    test('getEvolutionEngine should return different instances for different workspaces', () => {
+      const workspace1 = createTempWorkspace();
+      const workspace2 = createTempWorkspace();
+
+      const engine1 = getEvolutionEngine(workspace1);
+      const engine2 = getEvolutionEngine(workspace2);
+
+      // 不同 workspace 应该有不同的引擎实例
+      expect(engine1).not.toBe(engine2);
+
+      // 各自独立计分
+      engine1.recordSuccess('write', { difficulty: 'hard' });
+      expect(engine1.getPoints()).toBe(TASK_DIFFICULTY_CONFIG.hard.basePoints);
+      expect(engine2.getPoints()).toBe(0);
+
+      cleanupWorkspace(workspace1);
+      cleanupWorkspace(workspace2);
+    });
+
+    test('getEvolutionEngine should return same instance for same workspace', () => {
+      const ws = createTempWorkspace();
+      const e1 = getEvolutionEngine(ws);
+      const e2 = getEvolutionEngine(ws);
+      expect(e1).toBe(e2);
+      cleanupWorkspace(ws);
+    });
+  });
+
+  // ===== P0 修复验证：并发写入 =====
+
+  describe('Concurrent Write Safety (P0 fix)', () => {
+    test('should handle rapid sequential writes without corruption', () => {
+      const iterations = 50;
+      for (let i = 0; i < iterations; i++) {
+        engine.recordSuccess('write', { difficulty: 'normal' });
+      }
+
+      // 验证数据完整性
+      expect(engine.getPoints()).toBe(iterations * TASK_DIFFICULTY_CONFIG.normal.basePoints);
+      expect(engine.getStats().totalSuccesses).toBe(iterations);
+    });
+
+    test('should persist correctly after rapid writes', () => {
+      const iterations = 30;
+      for (let i = 0; i < iterations; i++) {
+        engine.recordSuccess('write', { difficulty: 'hard' });
+      }
+
+      const expectedPoints = engine.getPoints();
+
+      // 重新加载验证持久化
+      const engine2 = new EvolutionEngine(workspace);
+      expect(engine2.getPoints()).toBe(expectedPoints);
     });
   });
 });
