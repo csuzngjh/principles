@@ -37,9 +37,11 @@ describe('WorkspaceContext', () => {
         expect(wctx1.stateDir).toBe('/state1');
     });
 
-    it('should throw error if workspaceDir is missing', () => {
+    it('should use fallback workspace when workspaceDir is missing', () => {
         const mockCtx = { stateDir };
-        expect(() => WorkspaceContext.fromHookContext(mockCtx)).toThrow('workspaceDir is required');
+        const wctx = WorkspaceContext.fromHookContext(mockCtx);
+        expect(wctx).toBeDefined();
+        expect(wctx.workspaceDir).toBeDefined();
     });
 
     it('should resolve paths using PD_FILES keys', () => {
