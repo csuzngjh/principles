@@ -135,4 +135,32 @@ describe('Prompt Context Injection Hook', () => {
     
     consoleSpy.mockRestore();
   });
+
+  it('should inject both PRINCIPLES and THINKING_OS without overwriting', async () => {
+    vi.mocked(fs.existsSync).mockImplementation((p) => 
+      p.toString().includes('PRINCIPLES.md') || p.toString().includes('THINKING_OS.md')
+    );
+    vi.mocked(fs.readFileSync).mockImplementation((p) => {
+      if (p.toString().includes('PRINCIPLES.md')) {
+        return '# Core Principles\n\nPrinciple 1';
+      }
+      if (p.toString().includes('THINKING_OS.md')) {
+        return '# Thinking OS\n\nModel 1';
+      }
+      return '';
+    });
+
+    const result = await handleBeforePromptBuild({} as any, { workspaceDir, trigger: 'user' } as any);
+
+    // Both should be present - THINKING_OS should NOT overwrite PRINCIPLES
+    expect(result?.prependSystemContext).toContain('<core_principles>');
+    expect(result?.prependSystemContext).toContain('Principle 1');
+    expect(result?.prependSystemContext).toContain('<thinking_os>');
+    expect(result?.prependSystemContext).toContain('Model 1');
+    
+    // Verify order: PRINCIPLES should come before THINKING_OS
+    const principlesIndex = result?.prependSystemContext?.indexOf('<core_principles>') ?? -1;
+    const thinkingOsIndex = result?.prependSystemContext?.indexOf('<thinking_os>') ?? -1;
+    expect(principlesIndex).toBeLessThan(thinkingOsIndex);
+  });
 });

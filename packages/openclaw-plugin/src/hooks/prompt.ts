@@ -49,7 +49,7 @@ export async function handleBeforePromptBuild(
     try {
       const thinkingOs = fs.readFileSync(thinkingOsPath, 'utf8');
       if (thinkingOs.trim()) {
-        prependSystemContext = `<thinking_os>\n${thinkingOs.trim()}\n</thinking_os>`;
+        prependSystemContext += `\n<thinking_os>\n${thinkingOs.trim()}\n</thinking_os>`;
       }
     } catch (e) {
       console.error(`[PD:Prompt] Failed to read THINKING_OS: ${String(e)}`);
