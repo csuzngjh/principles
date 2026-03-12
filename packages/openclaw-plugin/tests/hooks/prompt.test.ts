@@ -163,4 +163,37 @@ describe('Prompt Context Injection Hook', () => {
     const thinkingOsIndex = result?.prependSystemContext?.indexOf('<thinking_os>') ?? -1;
     expect(principlesIndex).toBeLessThan(thinkingOsIndex);
   });
+
+  it('FULL INJECTION: should preserve ALL prependSystemContext content', async () => {
+    // This test catches the "=" vs "+=" bug for ANY future additions
+    // 模拟所有文件都存在的真实场景
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockImplementation((p) => {
+      const pathStr = p.toString();
+      if (pathStr.includes('PRINCIPLES.md')) return '[PRINCIPLES_CONTENT]';
+      if (pathStr.includes('THINKING_OS.md')) return '[THINKING_OS_CONTENT]';
+      if (pathStr.includes('evolution_queue.json')) return '[]';
+      if (pathStr.includes('SYSTEM_CAPABILITIES.json')) return '{}';
+      return '';
+    });
+
+    const result = await handleBeforePromptBuild({} as any, { workspaceDir, trigger: 'user' } as any);
+
+    const context = result?.prependSystemContext ?? '';
+    
+    // 所有注入内容必须同时存在 - 任何 "=" 误用都会导致前一个丢失
+    expect(context).toContain('<core_principles>');
+    expect(context).toContain('[PRINCIPLES_CONTENT]');
+    expect(context).toContain('<thinking_os>');
+    expect(context).toContain('[THINKING_OS_CONTENT]');
+    expect(context).toContain('CURRENT TRUST SCORE');
+    
+    // 验证顺序正确（防止未来有人用 prepend 破坏顺序）
+    const order = [
+      context.indexOf('<core_principles>'),
+      context.indexOf('<thinking_os>'),
+      context.indexOf('CURRENT TRUST SCORE'),
+    ];
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+  });
 });
