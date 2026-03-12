@@ -90,9 +90,9 @@ export const agentSpawnTool = {
   }),
 
   /**
-   * Handler for the agent spawn tool
+   * Execution logic for the agent spawn tool
    */
-  async handler(
+  async execute(
     params: { agentType: string; task: string },
     api: OpenClawPluginApi,
     _workspaceDir?: string
@@ -200,7 +200,7 @@ export async function spawnAgentSequence(
   const results = new Map<string, string>();
 
   for (const { type, task } of agents) {
-    const result = await agentSpawnTool.handler({ agentType: type, task }, api);
+    const result = await agentSpawnTool.execute({ agentType: type, task }, api);
     results.set(type, result);
     onProgress?.(type, result);
   }

@@ -70,10 +70,10 @@ export const deepReflectTool = {
     }),
 
     /**
-     * 万能兼容 Handler
-     * @param workspaceDir 第三参数，专为单元测试设计
+     * Tool execution logic
+     * @param workspaceDir Optional parameter for unit testing
      */
-    async handler(
+    async execute(
         params: { context: string; depth?: number; model_id?: string },
         api: OpenClawPluginApi,
         workspaceDir?: string

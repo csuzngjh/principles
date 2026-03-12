@@ -61,7 +61,7 @@ describe('agentSpawnTool', () => {
     it('should return error for unknown agent type', async () => {
       const { agentSpawnTool } = await import('../../src/tools/agent-spawn.js');
       
-      const result = await agentSpawnTool.handler(
+      const result = await agentSpawnTool.execute(
         { agentType: 'unknown', task: 'Do something' },
         mockApi as OpenClawPluginApi
       );
@@ -78,7 +78,7 @@ describe('agentSpawnTool', () => {
         runtime: undefined,
       } as unknown as OpenClawPluginApi;
 
-      const result = await agentSpawnTool.handler(
+      const result = await agentSpawnTool.execute(
         { agentType: 'explorer', task: 'Find files' },
         apiWithoutRuntime
       );
@@ -90,7 +90,7 @@ describe('agentSpawnTool', () => {
     it('should spawn subagent with correct parameters', async () => {
       const { agentSpawnTool } = await import('../../src/tools/agent-spawn.js');
       
-      await agentSpawnTool.handler(
+      await agentSpawnTool.execute(
         { agentType: 'explorer', task: 'Search for configuration files' },
         mockApi as OpenClawPluginApi
       );
@@ -112,7 +112,7 @@ describe('agentSpawnTool', () => {
         assistantTexts: ['Found 5 configuration files'],
       });
 
-      const result = await agentSpawnTool.handler(
+      const result = await agentSpawnTool.execute(
         { agentType: 'explorer', task: 'Find config files' },
         mockApi as OpenClawPluginApi
       );
@@ -127,7 +127,7 @@ describe('agentSpawnTool', () => {
       
       mockSubagentRuntime.waitForRun.mockResolvedValue({ status: 'timeout' });
 
-      const result = await agentSpawnTool.handler(
+      const result = await agentSpawnTool.execute(
         { agentType: 'explorer', task: 'Complex task' },
         mockApi as OpenClawPluginApi
       );
@@ -144,7 +144,7 @@ describe('agentSpawnTool', () => {
         error: 'Something went wrong',
       });
 
-      const result = await agentSpawnTool.handler(
+      const result = await agentSpawnTool.execute(
         { agentType: 'explorer', task: 'Task that fails' },
         mockApi as OpenClawPluginApi
       );
@@ -162,7 +162,7 @@ describe('agentSpawnTool', () => {
         assistantTexts: [],
       });
 
-      const result = await agentSpawnTool.handler(
+      const result = await agentSpawnTool.execute(
         { agentType: 'explorer', task: 'Task with no output' },
         mockApi as OpenClawPluginApi
       );
@@ -174,7 +174,7 @@ describe('agentSpawnTool', () => {
     it('should cleanup session after completion', async () => {
       const { agentSpawnTool } = await import('../../src/tools/agent-spawn.js');
       
-      await agentSpawnTool.handler(
+      await agentSpawnTool.execute(
         { agentType: 'explorer', task: 'Task' },
         mockApi as OpenClawPluginApi
       );

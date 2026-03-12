@@ -1,8 +1,17 @@
 /**
  * 卸载器模块
+ * 
+ * ⚠️ 安全原则：
+ * 1. 只删除插件系统文件（~/.openclaw/extensions/principles-disciple）
+ * 2. 只删除插件配置文件（~/.openclaw/principles-disciple.json）
+ * 3. 绝对不删除用户工作区的任何文件：
+ *    - MD 文件（AGENTS.md, SOUL.md 等）
+ *    - 记忆文件（.principles/ 目录）
+ *    - 状态文件（.state/ 目录）
+ *    - 任何用户数据
  */
 import { existsSync } from 'fs';
-import * as fse from 'fs-extra';
+import fse from 'fs-extra';
 import * as path from 'path';
 import * as os from 'os';
 import { confirm } from '@inquirer/prompts';
@@ -13,39 +22,8 @@ export interface UninstallResult {
   success: boolean;
   removedDirs: string[];
   removedFiles: string[];
+  preservedPaths: string[];  // 保留的路径（供用户确认）
   error?: string;
-}
-
-/**
- * 获取所有相关路径
- */
-function getRelatedPaths(workspaceDir?: string): {
-  dirs: { path: string; name: string }[];
-  files: { path: string; name: string }[];
-} {
-  const configDir = getOpenClawConfigDir();
-  const homeDir = os.homedir();
-  
-  const dirs: { path: string; name: string }[] = [
-    { path: getPluginExtDir(), name: '插件扩展目录' },
-  ];
-  
-  const files: { path: string; name: string }[] = [
-    { path: path.join(configDir, 'principles-disciple.json'), name: '配置文件' },
-  ];
-  
-  // 如果提供了工作区，添加工作区相关路径
-  if (workspaceDir) {
-    // 检查工作区是否存在
-    if (existsSync(workspaceDir)) {
-      dirs.push({ 
-        path: path.join(workspaceDir, '.state'), 
-        name: '状态目录' 
-      });
-    }
-  }
-  
-  return { dirs, files };
 }
 
 /**
@@ -80,12 +58,30 @@ export function checkInstallStatus(): {
 }
 
 /**
+ * 获取用户工作区路径（用于显示保护提醒）
+ */
+function getWorkspacePath(): string | null {
+  const configDir = getOpenClawConfigDir();
+  const configPath = path.join(configDir, 'principles-disciple.json');
+  
+  if (existsSync(configPath)) {
+    try {
+      const config = require(configPath);
+      return config.workspace || null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+/**
  * 执行卸载
+ * 
+ * @param options.force 跳过确认提示（危险，仅用于脚本）
  */
 export async function uninstall(
   options: {
-    workspaceDir?: string;
-    keepWorkspace?: boolean;
     force?: boolean;
   } = {}
 ): Promise<UninstallResult> {
@@ -93,6 +89,7 @@ export async function uninstall(
     success: false,
     removedDirs: [],
     removedFiles: [],
+    preservedPaths: [],
   };
   
   try {
@@ -105,19 +102,37 @@ export async function uninstall(
       return result;
     }
     
-    // 2. 显示将要删除的内容
-    logger.info('以下内容将被删除：');
+    // 2. 获取工作区路径并显示保护提醒
+    const workspaceDir = getWorkspacePath();
+    
+    console.log('');
+    logger.warn('⚠️  重要提醒：');
+    console.log('   卸载操作仅移除插件系统文件，不会删除您的个人数据。');
+    console.log('');
+    
+    if (workspaceDir && existsSync(workspaceDir)) {
+      logger.info('以下工作区文件将被保留：');
+      console.log(`   📁 工作区目录: ${workspaceDir}`);
+      console.log('   📄 MD 文件 (AGENTS.md, SOUL.md, PRINCIPLES.md 等)');
+      console.log('   📁 .principles/ 目录（身份层配置）');
+      console.log('   📁 .state/ 目录（进化状态和记忆）');
+      console.log('');
+    }
+    
+    // 3. 显示将要删除的内容
+    logger.info('以下插件文件将被删除：');
     for (const p of status.paths) {
       if (p.exists) {
         const icon = p.type === 'dir' ? '📁' : '📄';
         console.log(`  ${icon} ${p.name}: ${p.path}`);
       }
     }
+    console.log('');
     
-    // 3. 确认卸载（除非 --force）
+    // 4. 确认卸载（除非 --force）
     if (!options.force) {
       const confirmed = await confirm({
-        message: '确认卸载？',
+        message: '确认卸载插件？（您的个人数据将保留）',
         default: false,
       });
       
@@ -128,7 +143,7 @@ export async function uninstall(
       }
     }
     
-    // 4. 执行删除
+    // 5. 执行删除（仅限插件系统文件）
     for (const p of status.paths) {
       if (!p.exists) continue;
       
@@ -147,22 +162,29 @@ export async function uninstall(
       }
     }
     
-    // 5. 工作区文件处理
-    if (options.workspaceDir && !options.keepWorkspace) {
-      const workspaceStateDir = path.join(options.workspaceDir, '.state');
-      if (existsSync(workspaceStateDir)) {
-        try {
-          await fse.remove(workspaceStateDir);
-          result.removedDirs.push(workspaceStateDir);
-          logger.success('已删除: 工作区状态目录');
-        } catch (error) {
-          logger.warn(`状态目录删除失败: ${error instanceof Error ? error.message : String(error)}`);
-        }
+    // 6. 记录保留的路径
+    if (workspaceDir) {
+      result.preservedPaths.push(workspaceDir);
+      if (existsSync(path.join(workspaceDir, '.principles'))) {
+        result.preservedPaths.push(path.join(workspaceDir, '.principles'));
+      }
+      if (existsSync(path.join(workspaceDir, '.state'))) {
+        result.preservedPaths.push(path.join(workspaceDir, '.state'));
       }
     }
     
     result.success = true;
-    logger.success('卸载完成！');
+    
+    console.log('');
+    logger.success('✅ 卸载完成！');
+    console.log('');
+    
+    if (result.preservedPaths.length > 0) {
+      logger.info('💡 您的个人数据已保留在以下位置：');
+      result.preservedPaths.forEach(p => console.log(`   ${p}`));
+      console.log('');
+      logger.info('如需彻底清理，请手动删除上述目录。');
+    }
     
     return result;
   } catch (error) {

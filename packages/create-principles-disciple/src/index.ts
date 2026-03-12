@@ -49,10 +49,8 @@ program
   .command('uninstall')
   .alias('remove')
   .alias('rm')
-  .description('卸载 Principles Disciple 插件')
+  .description('卸载 Principles Disciple 插件（保留用户数据）')
   .option('-f, --force', 'Force uninstall without confirmation', false)
-  .option('-w, --workspace <path>', 'Workspace directory')
-  .option('--keep-workspace', 'Keep workspace state files', false)
   .action(async (options) => {
     await runUninstall(options);
   });
@@ -161,23 +159,10 @@ async function runUninstall(options: any): Promise<void> {
   logger.info('准备卸载 Principles Disciple...\n');
 
   const result = await uninstall({
-    workspaceDir: options.workspace,
-    keepWorkspace: options.keepWorkspace,
     force: options.force,
   });
 
-  if (result.success) {
-    console.log();
-    if (result.removedDirs.length > 0 || result.removedFiles.length > 0) {
-      logger.success('卸载完成！');
-      console.log();
-      console.log('🗑️ 已删除:');
-      result.removedDirs.forEach(d => console.log(`   📁 ${d}`));
-      result.removedFiles.forEach(f => console.log(`   📄 ${f}`));
-    } else {
-      logger.info('没有需要删除的内容');
-    }
-  } else {
+  if (!result.success) {
     logger.error(`卸载失败: ${result.error}`);
     process.exit(1);
   }
@@ -204,6 +189,7 @@ async function showStatus(): Promise<void> {
   console.log();
   if (status.isInstalled) {
     logger.success('Principles Disciple 已安装');
+    console.log('\n  💡 卸载时将保留您的个人数据（MD文件、记忆、状态等）');
   } else {
     logger.warn('Principles Disciple 未安装');
     console.log('\n  运行以下命令安装:');
