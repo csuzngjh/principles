@@ -41,6 +41,7 @@ describe('Prompt Context Injection Hook', () => {
         if (key === 'THINKING_OS') return path.join(workspaceDir, '.principles', 'THINKING_OS.md');
         if (key === 'HEARTBEAT') return path.join(workspaceDir, 'HEARTBEAT.md');
         if (key === 'EVOLUTION_QUEUE') return path.join(workspaceDir, '.state', 'evolution_queue.json');
+        if (key === 'PRINCIPLES') return path.join(workspaceDir, '.principles', 'PRINCIPLES.md');
         return '';
     }),
   };
@@ -96,5 +97,42 @@ describe('Prompt Context Injection Hook', () => {
 
     expect(result?.prependSystemContext).toContain('<thinking_os>');
     expect(result?.prependSystemContext).toContain('Apply First Principles');
+  });
+
+  it('should prependSystemContext with PRINCIPLES.md as highest priority', async () => {
+    vi.mocked(fs.existsSync).mockImplementation((p) => p.toString().includes('PRINCIPLES.md'));
+    vi.mocked(fs.readFileSync).mockReturnValue('# Core Principles\n\n1. Principle A\n2. Principle B');
+
+    const result = await handleBeforePromptBuild({} as any, { workspaceDir, trigger: 'user' } as any);
+
+    expect(result?.prependSystemContext).toContain('<core_principles>');
+    expect(result?.prependSystemContext).toContain('# Core Principles');
+    expect(result?.prependSystemContext).toContain('Principle A');
+  });
+
+  it('should handle missing PRINCIPLES.md gracefully', async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+
+    const result = await handleBeforePromptBuild({} as any, { workspaceDir, trigger: 'user' } as any);
+
+    expect(result?.prependSystemContext).not.toContain('<core_principles>');
+    // Should still have trust score
+    expect(result?.prependSystemContext).toContain('CURRENT TRUST SCORE');
+  });
+
+  it('should handle PRINCIPLES.md read error gracefully', async () => {
+    vi.mocked(fs.existsSync).mockImplementation((p) => p.toString().includes('PRINCIPLES.md'));
+    vi.mocked(fs.readFileSync).mockImplementation(() => {
+      throw new Error('Read error');
+    });
+    
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const result = await handleBeforePromptBuild({} as any, { workspaceDir, trigger: 'user' } as any);
+
+    expect(result).toBeDefined();
+    expect(result?.prependSystemContext).not.toContain('<core_principles>');
+    
+    consoleSpy.mockRestore();
   });
 });
