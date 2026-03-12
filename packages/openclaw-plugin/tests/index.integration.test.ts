@@ -105,14 +105,17 @@ describe('Plugin Integration', () => {
 
       const commandNames = registeredCommands.map(c => c.name);
       const expectedCommands = [
-        'init-strategy',
-        'manage-okr',
-        'evolve-task',
-        'bootstrap-tools',
-        'research-tools',
-        'thinking-os',
+        'pd-init',
+        'pd-okr',
+        'pd-evolve',
+        'pd-bootstrap',
+        'pd-research',
+        'pd-thinking',
         'pd-status',
-        'evolution-daily'
+        'pd-daily',
+        'pd-grooming',
+        'pd-trust',
+        'pd-help'
       ];
       for (const cmd of expectedCommands) {
         expect(commandNames).toContain(cmd);

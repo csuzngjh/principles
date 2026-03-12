@@ -1,4 +1,5 @@
 ---
+name: pd-grooming
 description: Perform a "Workspace Grooming" to archive or clean up scattered temporary files, maintaining digital cleanliness.
 ---
 

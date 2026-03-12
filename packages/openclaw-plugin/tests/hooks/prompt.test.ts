@@ -18,6 +18,12 @@ describe('Prompt Context Injection Hook', () => {
     getStage: vi.fn().mockReturnValue(4),
   };
 
+  const mockHygiene = {
+    getStats: vi.fn().mockReturnValue({ writes: 0, streak: 0, lastWrite: null }),
+    recordWrite: vi.fn(),
+    resetIfNeeded: vi.fn(),
+  };
+
   const mockConfig = {
     get: vi.fn(),
   };
@@ -26,6 +32,7 @@ describe('Prompt Context Injection Hook', () => {
     workspaceDir,
     stateDir: '/mock/state',
     trust: mockTrust,
+    hygiene: mockHygiene,
     config: mockConfig,
     resolve: vi.fn().mockImplementation((key) => {
         if (key === 'CURRENT_FOCUS') return path.join(workspaceDir, 'memory', 'okr', 'CURRENT_FOCUS.md');

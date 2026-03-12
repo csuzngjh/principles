@@ -1,5 +1,5 @@
 ---
-name: evolution-daily
+name: pd-daily
 description: 配置并发送每日进化日报（支持邮件/即时通讯/语音通知）
 disable-model-invocation: true
 ---
