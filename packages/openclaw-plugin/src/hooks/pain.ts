@@ -89,7 +89,8 @@ export function handleAfterToolCall(
     
     trust.recordFailure(isRisk ? 'risky' : 'tool', {
         sessionId,
-        api
+        api,
+        toolName: event.toolName // 👈 NEW: Pass toolName for classification
     });
     
     // Record tool call failure event
@@ -106,8 +107,12 @@ export function handleAfterToolCall(
     // ── SUCCESS BRANCH ──
     resetFriction(sessionId, effectiveWorkspaceDir);
     
-    // 👈 FIX: Record success to reset failure streak and earn minor trust
-    trust.recordSuccess('tool_success', { sessionId, api });
+    // 👈 Record success to reset failure streak and earn minor trust (if constructive)
+    trust.recordSuccess('tool_success', { 
+        sessionId, 
+        api,
+        toolName: event.toolName // 👈 NEW: Pass toolName for classification
+    });
     
     if (WRITE_TOOLS.includes(event.toolName)) {
       const filePath = params.file_path || params.path || params.file;

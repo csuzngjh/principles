@@ -34,7 +34,8 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
 
     if (args === 'trust-reset') {
         wctx.trust.resetTrust();
-        return { text: isZh ? `✅ 智能体信任分已重置为初始值 (${wctx.trust.getScore()})。` : `✅ Agent trust score has been reset to initial value (${wctx.trust.getScore()}).` };
+        const newScore = wctx.trust.getScore();
+        return { text: isZh ? `✅ 智能体信任分已重置为初始值 (${newScore})。` : `✅ Agent trust score has been reset to initial value (${newScore}).` };
     }
 
     // Default: Show status
@@ -42,9 +43,13 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
     const gfi = session ? session.currentGfi : 0;
     const dictionary = wctx.dictionary;
     const stats = dictionary.getStats();
+    
+    const trust = wctx.trust;
+    const trustScore = trust.getScore();
+    const trustStage = trust.getStage();
 
     const gfiBar = createProgressBar(gfi, 100, 15);
-    const trustStage = wctx.trust.getStage();
+    const trustBar = createProgressBar(trustScore, 100, 15);
     
     // Determine health status based on GFI
     let healthLabel = 'Healthy';
@@ -82,6 +87,7 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
         let text = `📊 **Principles Disciple - 系统健康度监控**\n`;
         text += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
         text += `💊 **当前疲劳指数 (GFI)**: ${gfiBar} ${gfi}/100\n`;
+        text += `💰 **当前信任积分 (Trust)**: ${trustBar} ${trustScore}/100 (Stage ${trustStage})\n`;
         text += `   ↳ 状态诊断: ${healthLabel}\n\n`;
         text += `🧠 **痛苦进化词典**: 已吸收 ${stats.totalRules} 条规则\n`;
         text += `   ↳ 累计帮您拦截了 ${stats.totalHits} 次无效操作\n`;
@@ -97,6 +103,7 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
         let text = `📊 **Principles Disciple - System Health Monitor**\n`;
         text += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
         text += `💊 **Current Friction (GFI)**: ${gfiBar} ${gfi}/100\n`;
+        text += `💰 **Current Trust Score**: ${trustBar} ${trustScore}/100 (Stage ${trustStage})\n`;
         text += `   ↳ Diagnosis: ${healthLabel}\n\n`;
         text += `🧠 **Evolution Dictionary**: ${stats.totalRules} active rules\n`;
         text += `   ↳ Successfully blocked ${stats.totalHits} invalid operations\n`;
