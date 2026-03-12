@@ -47,17 +47,17 @@ export class TrustEngine {
     private get config() {
         return ConfigService.get(this.stateDir);
     }
-
-    private get trustSettings() {
-        const settings = this.config.get('trust');
-        return settings || {
-            stages: { stage_1_observer: 30, stage_2_editor: 60, stage_3_developer: 80 },
-            cold_start: { initial_trust: 59, grace_failures: 3, cold_start_period_ms: 86400000 },
-            penalties: { tool_failure_base: -8, risky_failure_base: -15, gate_bypass_attempt: -5, failure_streak_multiplier: -3, max_penalty: -25 },
-            rewards: { success_base: 1, subagent_success: 3, streak_bonus_threshold: 5, streak_bonus: 5, recovery_boost: 3, max_reward: 10 },
-            limits: { stage_2_max_lines: 10, stage_3_max_lines: 100 }
-        };
-    }
+private get trustSettings() {
+    const settings = this.config.get('trust');
+    // Fallback for tests that might not have full config
+    return settings || {
+        stages: { stage_1_observer: 30, stage_2_editor: 60, stage_3_developer: 80 },
+        cold_start: { initial_trust: 59, grace_failures: 3, cold_start_period_ms: 86400000 },
+        penalties: { tool_failure_base: -2, risky_failure_base: -10, gate_bypass_attempt: -5, failure_streak_multiplier: -2, max_penalty: -20 },
+        rewards: { success_base: 2, subagent_success: 5, tool_success_reward: 0.2, streak_bonus_threshold: 3, streak_bonus: 5, recovery_boost: 5, max_reward: 15 },
+        limits: { stage_2_max_lines: 50, stage_3_max_lines: 300 }
+    };
+}
 
     private loadScorecard(): TrustScorecard {
         const scorecardPath = resolvePdPath(this.workspaceDir, 'AGENT_SCORECARD');
@@ -137,7 +137,11 @@ export class TrustEngine {
         const rewards = settings.rewards;
         
         let delta = rewards.success_base;
-        if (isSubagent) delta = rewards.subagent_success;
+        if (isSubagent) {
+            delta = rewards.subagent_success;
+        } else if (reason === 'tool_success') {
+            delta = rewards.tool_success_reward ?? 0.2;
+        }
 
         this.scorecard.success_streak++;
         this.scorecard.failure_streak = 0;
@@ -220,6 +224,22 @@ export class TrustEngine {
             this.scorecard.history.shift();
         }
 
+        this.saveScorecard();
+    }
+
+    public resetTrust(newScore?: number): void {
+        const settings = this.trustSettings;
+        this.scorecard.trust_score = newScore ?? settings.cold_start.initial_trust;
+        this.scorecard.success_streak = 0;
+        this.scorecard.failure_streak = 0;
+        this.scorecard.grace_failures_remaining = settings.cold_start.grace_failures;
+        this.scorecard.last_updated = new Date().toISOString();
+        this.scorecard.history.push({
+            type: 'success',
+            delta: 0,
+            reason: 'Manual trust reset',
+            timestamp: new Date().toISOString()
+        });
         this.saveScorecard();
     }
 
