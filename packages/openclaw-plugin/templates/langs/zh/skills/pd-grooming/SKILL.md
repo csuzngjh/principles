@@ -1,4 +1,5 @@
 ---
+name: pd-grooming
 description: 执行工作区“大扫除” (Workspace Grooming)，将散落的临时文件归档或清理，维持项目的数字洁癖。
 ---
 

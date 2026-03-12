@@ -16,6 +16,7 @@ import type {
   PluginHookSubagentSpawningResult,
   PluginHookSubagentContext,
 } from './openclaw-sdk.js';
+import { getCommandDescription } from './i18n/commands.js';
 import { handleBeforePromptBuild } from './hooks/prompt.js';
 import { handleBeforeToolCall } from './hooks/gate.js';
 import { handleAfterToolCall } from './hooks/pain.js';
@@ -155,62 +156,76 @@ const plugin = {
 
     // ── Slash Commands ──
     api.registerCommand({
-      name: "init-strategy",
-      description: "Initialize strategy interview and OKRs",
+      name: "pd-init",
+      description: getCommandDescription('pd-init', language),
       handler: (ctx) => handleInitStrategy(ctx)
     });
 
     api.registerCommand({
-      name: "manage-okr",
-      description: "Analyze progress and align OKRs",
+      name: "pd-okr",
+      description: getCommandDescription('pd-okr', language),
       handler: (ctx) => handleManageOkr(ctx)
     });
 
     api.registerCommand({
-      name: "bootstrap-tools",
-      description: "Auto-detect and save environment capabilities",
+      name: "pd-bootstrap",
+      description: getCommandDescription('pd-bootstrap', language),
       handler: (ctx) => handleBootstrapTools(ctx)
     });
 
     api.registerCommand({
-      name: "research-tools",
-      description: "Initiate research for tool upgrades",
+      name: "pd-research",
+      description: getCommandDescription('pd-research', language),
       handler: (ctx) => handleResearchTools(ctx)
     });
 
     api.registerCommand({
-      name: "thinking-os",
-      description: "Manage Thinking OS mental models and candidates",
+      name: "pd-thinking",
+      description: getCommandDescription('pd-thinking', language),
       acceptsArgs: true,
       handler: (ctx) => handleThinkingOs(ctx)
     });
 
     api.registerCommand({
-      name: "evolve-task",
-      description: "Diagnose systemic pain and evolve principles",
+      name: "pd-evolve",
+      description: getCommandDescription('pd-evolve', language),
       acceptsArgs: true,
       handler: (ctx) => handleEvolveTask(ctx)
     });
 
     api.registerCommand({
-      name: "evolution-daily",
-      description: "Send evolution daily report",
+      name: "pd-daily",
+      description: getCommandDescription('pd-daily', language),
       handler: (_ctx) => {
-        return { text: "请执行 evolution-daily 技能来配置并发送进化日报。系统将引导你完成配置流程，包括发送时间、渠道和报告风格偏好。" };
+        return { text: language === 'zh' 
+          ? "请执行 pd-daily 技能来配置并发送进化日报。系统将引导你完成配置流程，包括发送时间、渠道和报告风格偏好。"
+          : "Please execute the pd-daily skill to configure and send your daily evolution report. The system will guide you through the configuration process." };
       }
     });
 
     api.registerCommand({
-      name: "workspace-grooming",
-      description: "Trigger a cyber-housekeeper to clean up and organize your workspace root.",
+      name: "pd-grooming",
+      description: getCommandDescription('pd-grooming', language),
       handler: (_ctx) => {
-        return { text: "请调用 `workspace-grooming` 技能来执行大扫除。例如输入: '执行 /workspace-grooming 技能'" };
+        return { text: language === 'zh'
+          ? "请执行 pd-grooming 技能来执行大扫除。例如输入: '执行 pd-grooming 技能'"
+          : "Please execute the pd-grooming skill to clean up. For example: 'Execute pd-grooming skill'" };
       }
     });
 
     api.registerCommand({
-      name: "trust",
-      description: "View Agent trust score and security stage",
+      name: "pd-help",
+      description: getCommandDescription('pd-help', language),
+      handler: (_ctx) => {
+        return { text: language === 'zh'
+          ? "我是你的麻辣导师。你可以输入 '执行 pd-mentor 技能' 来获取手把手的流程引导，或者直接问我关于 DNS、Trust Engine 或进化循环的深度问题。记住：痛是进化的燃料，而我是点火的人。"
+          : "I'm your Spicy Mentor. You can execute the 'pd-mentor' skill for step-by-step guidance, or ask me directly about DNS, Trust Engine, or the evolution loop. Remember: Pain is the fuel of evolution, and I'm the one who lights the fire." };
+      }
+    });
+
+    api.registerCommand({
+      name: "pd-trust",
+      description: getCommandDescription('pd-trust', language),
       handler: (ctx) => {
         const workspaceDir = api.resolvePath('.');
         return { text: handleTrustCommand({ ...ctx, workspaceDir }) };
@@ -219,7 +234,7 @@ const plugin = {
 
     api.registerCommand({
       name: "pd-status",
-      description: "View Digital Nerve System status (GFI and Pain Dictionary)",
+      description: getCommandDescription('pd-status', language),
       acceptsArgs: true,
       handler: (ctx) => {
         try {
@@ -229,7 +244,7 @@ const plugin = {
           return handlePainCommand(ctx);
         } catch (err) {
           api.logger.error(`[PD] Command /pd-status failed: ${String(err)}`);
-          return { text: "Command failed. Check logs." };
+          return { text: language === 'zh' ? "命令执行失败，请检查日志。" : "Command failed. Check logs." };
         }
       }
     });

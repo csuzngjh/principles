@@ -1,5 +1,5 @@
 ---
-name: evolution-daily
+name: pd-daily
 description: Configure and send daily evolution reports (supports email/IM/voice notifications)
 disable-model-invocation: true
 ---

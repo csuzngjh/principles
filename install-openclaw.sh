@@ -188,6 +188,14 @@ if command -v openclaw &>/dev/null; then
         fi
     fi
 
+    # 在 force 模式下，确保删除旧的扩展目录
+    # openclaw plugins install 是增量安装，不会删除已存在的文件
+    EXT_DIR="$HOME/.openclaw/extensions/principles-disciple"
+    if [ -d "$EXT_DIR" ]; then
+        printf "  删除旧的扩展目录...\n"
+        rm -rf "$EXT_DIR"
+    fi
+
     printf "  使用 openclaw plugins install 安装插件...\n"
 
     openclaw plugins uninstall principles-disciple 2>/dev/null || true
@@ -236,11 +244,15 @@ fi
 # ============================================================================
 # 复制 Skills
 # ============================================================================
+# 说明：Skills 采用全局安装方式，安装到 ~/.openclaw/extensions/ 目录。
+# OpenClaw 通过 openclaw.plugin.json 的 "skills": ["./skills"] 配置加载。
+# 工作空间级 skills ({workspace}/skills/) 由用户自行管理，不在此脚本处理。
+# ============================================================================
 printf "\n"
 printf "${YELLOW}📚 步骤 6/6: 复制 Skills${NC}\n"
 
 SKILLS_SRC="$PLUGIN_DIR/templates/langs/$SELECTED_LANG/skills"
-SKILLS_DEST="$PLUGIN_DIR/skills"
+SKILLS_DEST="$HOME/.openclaw/extensions/principles-disciple/skills"
 
 # 语言回退
 if [ ! -d "$SKILLS_SRC" ]; then
@@ -250,6 +262,7 @@ if [ ! -d "$SKILLS_SRC" ]; then
 fi
 
 if [ -d "$SKILLS_SRC" ]; then
+    mkdir -p "$SKILLS_DEST"
     rm -rf "$SKILLS_DEST"/*
     cp -r "$SKILLS_SRC"/* "$SKILLS_DEST/"
     SKILL_COUNT=$(ls "$SKILLS_DEST" | wc -l)
@@ -270,7 +283,7 @@ printf "\n"
 printf "安装信息:\n"
 printf "  - 语言: %s\n" "$SELECTED_LANG"
 printf "  - 模式: %s\n" "$INSTALL_MODE"
-printf "  - Skills: %s 个\n" "$(ls "$PLUGIN_DIR/skills" 2>/dev/null | wc -l)"
+printf "  - Skills: %s 个\n" "$(ls "$HOME/.openclaw/extensions/principles-disciple/skills" 2>/dev/null | wc -l)"
 printf "  - 思维模型: %s 个\n" "$(ls "$PLUGIN_DIR/templates/workspace/.principles/models"/*.md 2>/dev/null | wc -l)"
 printf "  - 插件安装: %s${NC}\n" "$HOME/.openclaw/extensions/principles-disciple"
 printf "\n"
