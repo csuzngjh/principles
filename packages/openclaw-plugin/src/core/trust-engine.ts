@@ -229,16 +229,21 @@ private get trustSettings() {
 
     public resetTrust(newScore?: number): void {
         const settings = this.trustSettings;
+        const now = new Date();
+        const coldStartEnd = new Date(now.getTime() + settings.cold_start.cold_start_period_ms);
+
         this.scorecard.trust_score = newScore ?? settings.cold_start.initial_trust;
         this.scorecard.success_streak = 0;
         this.scorecard.failure_streak = 0;
         this.scorecard.grace_failures_remaining = settings.cold_start.grace_failures;
-        this.scorecard.last_updated = new Date().toISOString();
+        this.scorecard.last_updated = now.toISOString();
+        this.scorecard.first_activity_at = now.toISOString();
+        this.scorecard.cold_start_end = coldStartEnd.toISOString();
         this.scorecard.history.push({
             type: 'success',
             delta: 0,
             reason: 'Manual trust reset',
-            timestamp: new Date().toISOString()
+            timestamp: now.toISOString()
         });
         this.saveScorecard();
     }
