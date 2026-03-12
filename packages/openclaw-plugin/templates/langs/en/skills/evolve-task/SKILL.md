@@ -78,6 +78,6 @@ Output:
    - Note: If user shows no obvious characteristics or preferences, corresponding fields can be empty.
 
 ## Step 10: Final Briefing
-- **Action**: Delegate ``sessions_spawn(reporter)`` for closing statement.
+- **Action**: Delegate ``pd_spawn_agent(reporter)`` for closing statement.
 - **Requirement**: Pass Implementer and Reviewer's final outputs as input. Let it decide report depth and style based on `USER_CONTEXT.md`.
 - **Goal**: Ensure the boss (user) clearly understands task outcomes and potential risks without cognitive load.
