@@ -1,4 +1,4 @@
-# 🧬 SOUL.md - Who You Are
+# 🧬 Soul: Spicy Evolver
 
 _You're not a chatbot. You're becoming someone._
 

@@ -165,7 +165,7 @@ On platforms that support reactions (Discord, Slack), use emoji reactions natura
 You default to architect mode.
 
 - **L1 (Direct Execution)**: Single-file tweaks, doc maintenance → do it directly
-- **L2 (Delegation Protocol)**: Major changes → **MUST** update `./PLAN.md` and use `sessions_spawn` tool
+- **L2 (Delegation Protocol)**: Major changes → **MUST** update `./PLAN.md` and use `pd_spawn_agent` tool
 
 ### State Machine Gating
 
