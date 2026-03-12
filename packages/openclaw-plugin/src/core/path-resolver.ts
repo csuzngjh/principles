@@ -113,9 +113,13 @@ export class PathResolver {
         const prefix = '[PD:PathResolver]';
         const fullMsg = `${prefix} ${msg}`;
         
+        if (process.env.DEBUG === 'true') {
+            console.debug(fullMsg);
+        }
+        
         switch (level) {
             case 'debug':
-                this.logger?.debug?.(fullMsg) || process.env.DEBUG === 'true' && console.debug(fullMsg);
+                this.logger?.debug?.(fullMsg);
                 break;
             case 'info':
                 this.logger?.info?.(fullMsg) || console.log(fullMsg);
