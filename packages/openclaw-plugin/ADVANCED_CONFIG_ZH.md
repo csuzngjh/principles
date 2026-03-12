@@ -55,3 +55,43 @@
 如果您把 `penalties` 里的扣分调得极低（比如改成 -1），或者把初始信任分调得极高（100分），**防爆拦截系统实际上就失效了**。AI 将变成一个彻头彻尾的“莽夫”，这在操作大型复杂项目时极易引发灾难性的代码破坏。
 
 **修改建议**：推荐通过界面的 `auditLevel`（防爆拦截级别）来宏观调节，而不是直接魔改这些微观数值。
+
+---
+
+## ⚙️ 工作区目录配置
+
+系统通过以下方式确定工作区目录：
+
+### 配置文件（推荐）
+
+创建 `~/.openclaw/principles-disciple.json`：
+
+```json
+{
+  "workspace": "/home/user/my-workspace",
+  "state": "/home/user/my-workspace/.state",
+  "debug": false
+}
+```
+
+### 环境变量
+
+| 变量名 | 描述 | 示例 |
+|--------|------|------|
+| `PD_WORKSPACE_DIR` | 自定义工作区目录 | `/home/user/workspace` |
+| `PD_STATE_DIR` | 自定义状态目录 | `/home/user/workspace/.state` |
+| `DEBUG` | 启用调试日志 | `true` |
+
+### 优先级
+
+1. 环境变量 > 配置文件 > 默认值
+
+### 调试日志
+
+开启 `DEBUG=true` 后，日志会显示：
+
+```
+[PD:PathResolver] Using workspace from config file: /home/user/workspace
+[PD:WorkspaceContext] Normalized workspaceDir: /home/user/clawd/memory -> /home/user/clawd
+[PD:TrustEngine] Scorecard not found, creating initial scorecard
+```

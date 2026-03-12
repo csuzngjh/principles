@@ -66,6 +66,8 @@ export class PainDictionary {
             }
         } else {
             this.data = { rules: { ...DEFAULT_RULES } };
+            console.log(`[PD:Dictionary] Dictionary not found at ${this.filePath}, creating with default rules`);
+            this.flush();
         }
         this.compile();
     }

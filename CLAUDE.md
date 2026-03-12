@@ -251,7 +251,18 @@ Run with coverage: `npm test -- --coverage`
 
 ## Important Notes
 
-- **Path Resolution**: The plugin uses `ctx.workspaceDir` from hook context, NOT `api.resolvePath('.')` (which returns `process.cwd()`)
+### Path Resolution (v1.5.2+)
+
+The plugin now uses a centralized `PathResolver` module for all path operations:
+
+- **Configuration Priority**: Environment variables > Config file > OpenClaw defaults
+- **Config File**: `~/.openclaw/principles-disciple.json`
+- **Environment Variables**: `PD_WORKSPACE_DIR`, `PD_STATE_DIR`, `DEBUG`
+- **Auto-normalization**: Paths with `/memory`, `/docs`, `/workspace` suffixes are automatically normalized
+- **Backward Compatible**: Falls back to `ctx.workspaceDir` from hook context
+
+See `src/core/path-resolver.ts` for implementation.
+
 - **Multi-language**: Supports English (`en`) and Chinese (`zh`) - configured via plugin config or install script
 - **Backward Compatibility**: Installation script uses "smart merge" by default - existing user files get `.update` suffix instead of being overwritten
 - **Cold Start**: New installations start at Trust Stage 0 (Cold Start) with restricted permissions until trust is established
