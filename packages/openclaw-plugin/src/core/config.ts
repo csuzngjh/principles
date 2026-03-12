@@ -38,6 +38,7 @@ export interface TrustSettings {
     rewards: {
         success_base: number;
         subagent_success: number;
+        tool_success_reward: number;
         streak_bonus_threshold: number;
         streak_bonus: number;
         recovery_boost: number;
@@ -149,6 +150,7 @@ export const DEFAULT_SETTINGS: PainSettings = {
         rewards: {
             success_base: 2, // Was 1. Faster recovery
             subagent_success: 5, // Was 3.
+            tool_success_reward: 0.2, // 👈 Minor reward for tool success, but resets streak!
             streak_bonus_threshold: 3, // Was 5. Easier to get bonuses
             streak_bonus: 5,
             recovery_boost: 5, // Was 3. If trust drops low, it's easier to climb back up
