@@ -95,9 +95,19 @@ elif [ -f "$HOME/.openclaw/openclaw.json" ] && command -v jq &>/dev/null; then
     DETECTED_WORKSPACE=$(jq -r '.agents.defaults.workspace // ""' "$HOME/.openclaw/openclaw.json" 2>/dev/null || echo "")
 fi
 
+# 检测常见的 Principles 工作区目录
+if [ -z "$DETECTED_WORKSPACE" ]; then
+    for candidate in "$HOME/clawd" "$HOME/.openclaw/workspace" "$HOME/workspace"; do
+        if [ -d "$candidate" ] && [ -f "$candidate/.principles/PRINCIPLES.md" ]; then
+            DETECTED_WORKSPACE="$candidate"
+            break
+        fi
+    done
+fi
+
 # 如果没有检测到，使用默认目录
 if [ -z "$DETECTED_WORKSPACE" ]; then
-    DETECTED_WORKSPACE="$HOME/.openclaw/workspace"
+    DETECTED_WORKSPACE="$HOME/clawd"
 fi
 
 printf "检测到的 OpenClaw 工作区: ${GREEN}%s${NC}\n" "$DETECTED_WORKSPACE"
@@ -106,10 +116,16 @@ printf "请选择配置方式:\n"
 printf "\n"
 printf "  1) ${CYAN}使用检测到的目录${NC} - %s\n" "$DETECTED_WORKSPACE"
 printf "  2) ${CYAN}自定义目录${NC} - 输入你指定的工作区路径\n"
-printf "  3) ${CYAN}跳过${NC} - 稍后通过环境变量配置\n"
+printf "  3) ${CYAN}跳过${NC} - 稍后通过环境变量配置（核心模板不会被复制）\n"
 printf "\n"
-read -p "请选择 [1/2/3，默认1]: " -n 1 -r
-printf "\n"
+
+# 即使 --force 也要询问工作区目录
+if [ -t 0 ]; then
+    read -p "请选择 [1/2/3，默认1]: " -n 1 -r
+    printf "\n"
+else
+    REPLY="1"
+fi
 
 PD_WORKSPACE_DIR=""
 PD_CONFIG_DIR="$HOME/.openclaw"
@@ -332,7 +348,7 @@ fi
 # 工作空间级 skills ({workspace}/skills/) 由用户自行管理，不在此脚本处理。
 # ============================================================================
 printf "\n"
-printf "${YELLOW}📚 步骤 6/6: 复制 Skills${NC}\n"
+printf "${YELLOW}📚 复制 Skills${NC}\n"
 
 SKILLS_SRC="$PLUGIN_DIR/templates/langs/$SELECTED_LANG/skills"
 SKILLS_DEST="$HOME/.openclaw/extensions/principles-disciple/skills"
@@ -353,6 +369,142 @@ if [ -d "$SKILLS_SRC" ]; then
 else
     printf "  ${RED}❌ Skills 目录不存在: %s${NC}\n" "$SKILLS_SRC"
     exit 1
+fi
+
+# ============================================================================
+# 复制核心模板到工作区
+# ============================================================================
+# 将核心 MD 文件复制到用户的工作区目录
+# ============================================================================
+printf "\n"
+printf "${YELLOW}📄 复制核心模板到工作区${NC}\n"
+
+# 确定工作区目录（从配置读取或使用之前设置的）
+COPY_WORKSPACE_DIR="$PD_WORKSPACE_DIR"
+if [ -z "$COPY_WORKSPACE_DIR" ]; then
+    # 尝试从配置文件读取
+    PD_CONFIG_FILE="$HOME/.openclaw/principles-disciple.json"
+    if [ -f "$PD_CONFIG_FILE" ] && command -v jq &>/dev/null; then
+        COPY_WORKSPACE_DIR=$(jq -r '.workspace // ""' "$PD_CONFIG_FILE" 2>/dev/null || echo "")
+    fi
+fi
+
+if [ -z "$COPY_WORKSPACE_DIR" ]; then
+    # 最后尝试环境变量
+    COPY_WORKSPACE_DIR="${PD_WORKSPACE_DIR:-$HOME/clawd}"
+fi
+
+printf "  目标工作区: ${GREEN}%s${NC}\n" "$COPY_WORKSPACE_DIR"
+
+if [ ! -d "$COPY_WORKSPACE_DIR" ]; then
+    printf "  ${YELLOW}⚠️  工作区目录不存在，是否创建?${NC}\n"
+    read -p "  创建目录 $COPY_WORKSPACE_DIR? [Y/n]: " -n 1 -r
+    printf "\n"
+    if [[ $REPLY =~ ^[Nn]$ ]]; then
+        printf "  ${YELLOW}⏭️  跳过核心模板复制${NC}\n"
+    else
+        mkdir -p "$COPY_WORKSPACE_DIR"
+    fi
+fi
+
+if [ -d "$COPY_WORKSPACE_DIR" ]; then
+    # 定义需要复制的核心文件
+    CORE_FILES=(
+        "AGENTS.md"
+        "HEARTBEAT.md"
+        "SOUL.md"
+        "IDENTITY.md"
+        "TOOLS.md"
+        "USER.md"
+        "BOOT.md"
+        "BOOTSTRAP.md"
+    )
+    
+    IDENTITY_FILES=(
+        "PRINCIPLES.md"
+        "THINKING_OS.md"
+        "THINKING_OS_ARCHIVE.md"
+        "THINKING_OS_CANDIDATES.md"
+        "PROFILE.json"
+        "PROFILE.schema.json"
+        "00-kernel.md"
+        "DECISION_POLICY.json"
+    )
+    
+    COPIED_COUNT=0
+    SKIPPED_COUNT=0
+    
+    # 复制工作区根目录的 Core 文件
+    CORE_SRC="$PLUGIN_DIR/templates/langs/$SELECTED_LANG/core"
+    if [ -d "$CORE_SRC" ]; then
+        for file in "${CORE_FILES[@]}"; do
+            SRC_FILE="$CORE_SRC/$file"
+            DEST_FILE="$COPY_WORKSPACE_DIR/$file"
+            
+            if [ -f "$SRC_FILE" ]; then
+                if [ -f "$DEST_FILE" ]; then
+                    if [ "$INSTALL_MODE" = "force" ]; then
+                        cp "$SRC_FILE" "$DEST_FILE"
+                        printf "    ${GREEN}✓${NC} %s (已覆盖)\n" "$file"
+                        ((COPIED_COUNT++))
+                    else
+                        # 智能模式：生成 .update 文件
+                        cp "$SRC_FILE" "$DEST_FILE.update"
+                        printf "    ${CYAN}→${NC} %s (已生成 .update)\n" "$file"
+                        ((SKIPPED_COUNT++))
+                    fi
+                else
+                    cp "$SRC_FILE" "$DEST_FILE"
+                    printf "    ${GREEN}✓${NC} %s (新建)\n" "$file"
+                    ((COPIED_COUNT++))
+                fi
+            fi
+        done
+    fi
+    
+    # 复制身份层文件到 .principles 目录
+    IDENTITY_SRC="$PLUGIN_DIR/templates/workspace/.principles"
+    IDENTITY_DEST="$COPY_WORKSPACE_DIR/.principles"
+    
+    if [ -d "$IDENTITY_SRC" ]; then
+        mkdir -p "$IDENTITY_DEST"
+        
+        for file in "${IDENTITY_FILES[@]}"; do
+            SRC_FILE="$IDENTITY_SRC/$file"
+            DEST_FILE="$IDENTITY_DEST/$file"
+            
+            if [ -f "$SRC_FILE" ]; then
+                if [ -f "$DEST_FILE" ]; then
+                    if [ "$INSTALL_MODE" = "force" ]; then
+                        cp "$SRC_FILE" "$DEST_FILE"
+                        printf "    ${GREEN}✓${NC} .principles/%s (已覆盖)\n" "$file"
+                        ((COPIED_COUNT++))
+                    else
+                        cp "$SRC_FILE" "$DEST_FILE.update"
+                        printf "    ${CYAN}→${NC} .principles/%s (已生成 .update)\n" "$file"
+                        ((SKIPPED_COUNT++))
+                    fi
+                else
+                    cp "$SRC_FILE" "$DEST_FILE"
+                    printf "    ${GREEN}✓${NC} .principles/%s (新建)\n" "$file"
+                    ((COPIED_COUNT++))
+                fi
+            fi
+        done
+        
+        # 复制 models 目录
+        MODELS_SRC="$IDENTITY_SRC/models"
+        MODELS_DEST="$IDENTITY_DEST/models"
+        if [ -d "$MODELS_SRC" ]; then
+            mkdir -p "$MODELS_DEST"
+            cp -r "$MODELS_SRC"/* "$MODELS_DEST/" 2>/dev/null || true
+            MODEL_COUNT=$(ls "$MODELS_DEST"/*.md 2>/dev/null | wc -l)
+            printf "    ${GREEN}✓${NC} .principles/models/ (%s 个思维模型)\n" "$MODEL_COUNT"
+        fi
+    fi
+    
+    printf "\n"
+    printf "  ${GREEN}✅ 核心模板复制完成: %s 个文件复制, %s 个文件跳过${NC}\n" "$COPIED_COUNT" "$SKIPPED_COUNT"
 fi
 
 # ============================================================================
