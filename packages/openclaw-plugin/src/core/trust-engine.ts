@@ -36,6 +36,12 @@ export class TrustEngine {
         this.workspaceDir = workspaceDir;
         this.stateDir = resolvePdPath(workspaceDir, 'STATE_DIR');
         this.scorecard = this.loadScorecard();
+        
+        const scorecardPath = resolvePdPath(this.workspaceDir, 'AGENT_SCORECARD');
+        if (!fs.existsSync(scorecardPath)) {
+            console.log(`[PD:TrustEngine] Scorecard not found at ${scorecardPath}, creating initial scorecard`);
+            this.saveScorecard();
+        }
     }
 
     private get config() {

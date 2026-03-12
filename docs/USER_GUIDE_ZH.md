@@ -78,5 +78,43 @@
   请前往阅读我们的专享文档：👉 **[高阶参数调优指南 (Geek Mode)](./packages/openclaw-plugin/ADVANCED_CONFIG_ZH.md)**
 
 ---
+
+## ⚙️ 工作区配置（进阶）
+
+如果你需要自定义工作区目录，可以通过以下方式配置：
+
+### 方式一：配置文件（推荐）
+
+创建或编辑 `~/.openclaw/principles-disciple.json`：
+
+```json
+{
+  "workspace": "/path/to/your/workspace",
+  "state": "/path/to/your/workspace/.state",
+  "debug": false
+}
+```
+
+### 方式二：环境变量
+
+```bash
+# 在启动 OpenClaw 时设置
+PD_WORKSPACE_DIR=/custom/path openclaw-gateway start
+
+# 或在 shell 配置中持久化
+echo 'export PD_WORKSPACE_DIR=/custom/path' >> ~/.bashrc
+```
+
+### 调试模式
+
+如果遇到路径相关问题，可以开启调试日志：
+
+```bash
+DEBUG=true openclaw-gateway start
+```
+
+这会显示详细的路径解析日志，帮助排查问题。
+
+---
 > **❤️ 最后的建议：多点耐心。**
 > 新来的 AI 就像个实习生，刚开始可能会犯错。只要你给它两三天时间，让它在你的项目里多碰几次壁，它就会进化成全世界最懂你的私人助理。

@@ -57,7 +57,7 @@ python scripts/weekly_governance.py status
 - **Scheduling Principle**: ⚠️ **Throttled Concurrency**. Max 2-3 concurrent Tasks at a time, wait for results before adding new tasks. Never send all requests at once to prevent terminal freeze.
 - **Interview Loop**:
   1. Take a batch of Agents from `pending` (2-3).
-  2. Call ``sessions_spawn` 工具` to initiate interview (Prompt below).
+  2. Call ``pd_spawn_agent` 工具` to initiate interview (Prompt below).
   3. After each response, **immediately update** `memory/okr/.negotiation_status.json`:
      - Move that Agent to `completed` list.
      - This ensures recoverability after system crash.
