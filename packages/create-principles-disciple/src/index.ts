@@ -2,16 +2,19 @@
 /**
  * Principles Disciple - OpenClaw Plugin Installer
  * 
- * 交互式安装器，支持：
- * - npx create-principles-disciple
+ * 交互式安装/卸载器，支持：
+ * - npx create-principles-disciple [install]
+ * - npx create-principles-disciple uninstall
  * - npx create-principles-disciple --lang zh --force
  */
 import { Command } from 'commander';
 import * as path from 'path';
 import * as url from 'url';
+import * as os from 'os';
 import { banner, logger } from './utils/logger.js';
 import { runPrompts, type InstallOptions } from './prompts.js';
 import { install } from './installer.js';
+import { uninstall, checkInstallStatus } from './uninstaller.js';
 import { checkEnvironment } from './utils/env.js';
 
 // ESM 模块中获取 __dirname
@@ -25,18 +28,47 @@ const program = new Command();
 
 program
   .name('create-principles-disciple')
-  .description('Principles Disciple - OpenClaw Plugin Interactive Installer')
-  .version('1.0.0')
+  .description('Principles Disciple - OpenClaw Plugin Installer/Uninstaller')
+  .version('1.0.0');
+
+// 默认命令：安装
+program
+  .command('install', { isDefault: true, hidden: true })
+  .description('安装 Principles Disciple 插件')
   .option('-l, --lang <lang>', 'Language (zh/en)', 'zh')
   .option('-f, --force', 'Force overwrite mode', false)
   .option('-s, --smart', 'Smart merge mode (generate .update files)', false)
   .option('-w, --workspace <path>', 'Workspace directory')
   .option('--non-interactive', 'Skip interactive prompts', false)
-  .parse(process.argv);
+  .action(async (options) => {
+    await runInstall(options);
+  });
 
-const options = program.opts();
+// 卸载命令
+program
+  .command('uninstall')
+  .alias('remove')
+  .alias('rm')
+  .description('卸载 Principles Disciple 插件')
+  .option('-f, --force', 'Force uninstall without confirmation', false)
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--keep-workspace', 'Keep workspace state files', false)
+  .action(async (options) => {
+    await runUninstall(options);
+  });
 
-async function main(): Promise<void> {
+// 状态命令
+program
+  .command('status')
+  .description('检查安装状态')
+  .action(async () => {
+    await showStatus();
+  });
+
+/**
+ * 运行安装
+ */
+async function runInstall(options: any): Promise<void> {
   console.log(banner);
   console.log();
 
@@ -77,7 +109,7 @@ async function main(): Promise<void> {
     installOptions = {
       language: cliOptions.language || 'zh',
       mode: cliOptions.mode || 'smart',
-      workspaceDir: cliOptions.workspaceDir || path.join(process.env.HOME || '', 'clawd'),
+      workspaceDir: cliOptions.workspaceDir || path.join(os.homedir(), 'clawd'),
       features: ['evolution', 'trust', 'pain'],
       overwriteConfig: false,
     };
@@ -119,6 +151,66 @@ async function main(): Promise<void> {
   }
 }
 
+/**
+ * 运行卸载
+ */
+async function runUninstall(options: any): Promise<void> {
+  console.log(banner);
+  console.log();
+  
+  logger.info('准备卸载 Principles Disciple...\n');
+
+  const result = await uninstall({
+    workspaceDir: options.workspace,
+    keepWorkspace: options.keepWorkspace,
+    force: options.force,
+  });
+
+  if (result.success) {
+    console.log();
+    if (result.removedDirs.length > 0 || result.removedFiles.length > 0) {
+      logger.success('卸载完成！');
+      console.log();
+      console.log('🗑️ 已删除:');
+      result.removedDirs.forEach(d => console.log(`   📁 ${d}`));
+      result.removedFiles.forEach(f => console.log(`   📄 ${f}`));
+    } else {
+      logger.info('没有需要删除的内容');
+    }
+  } else {
+    logger.error(`卸载失败: ${result.error}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * 显示状态
+ */
+async function showStatus(): Promise<void> {
+  console.log(banner);
+  console.log();
+  
+  const status = checkInstallStatus();
+  
+  console.log('📊 安装状态:\n');
+  
+  for (const p of status.paths) {
+    const icon = p.type === 'dir' ? '📁' : '📄';
+    const statusIcon = p.exists ? '✅' : '❌';
+    console.log(`  ${statusIcon} ${icon} ${p.name}`);
+    console.log(`     ${p.path}`);
+  }
+  
+  console.log();
+  if (status.isInstalled) {
+    logger.success('Principles Disciple 已安装');
+  } else {
+    logger.warn('Principles Disciple 未安装');
+    console.log('\n  运行以下命令安装:');
+    console.log('  npx create-principles-disciple');
+  }
+}
+
 // 错误处理
 process.on('uncaughtException', (error) => {
   if (error instanceof Error && error.name === 'ExitPromptError') {
@@ -129,8 +221,5 @@ process.on('uncaughtException', (error) => {
   }
 });
 
-// 运行
-main().catch((error) => {
-  logger.error(error.message);
-  process.exit(1);
-});
+// 解析参数
+program.parse(process.argv);
