@@ -56,10 +56,35 @@ Every few days (or when memory files accumulate):
 
 ## 4. 🧹 Grooming Check
 
+⚠️ **Safety First**: Use two-phase deletion strategy to avoid accidentally deleting important files
+
+- [ ] **Phase 1 - Move to Trash** (execute immediately):
+  ```bash
+  # Create trash directories
+  mkdir -p .trash/{tmp,cache,logs,editor}
+
+  # Recursively move files to trash (don't delete!)
+  find /tmp -type f -mtime +7 -exec mv -t .trash/tmp/ {} +
+  find . -type d -name ".cache" -exec find {} -type f -mtime +7 -exec mv -t .trash/cache/ {} +
+  find . \( -name "*.swp" -o -name "*~" -o -name ".DS_Store" \) -exec mv -t .trash/editor/ {} +
+  ```
+
+- [ ] **Phase 2 - Empty Trash** (delay 7 days):
+  ```bash
+  # Only delete files in trash that are older than 7 days
+  find .trash/ -type f -mtime +7 -delete
+  find .trash/ -type d -empty -delete
+  ```
+
 - [ ] **Run `ls -F` on project root**
 - [ ] **Identify non-standard files**: Scattered temp files, test scripts, poorly named docs
 
 **Action**: If chaos found, invoke `pd-grooming` skill for cleanup.
+
+**⚠️ Strictly Forbidden**:
+- ❌ Using `rm -rf` to delete workspace files
+- ❌ Using `find ... -delete` to directly delete
+- ❌ Skipping trash and deleting directly
 
 ---
 

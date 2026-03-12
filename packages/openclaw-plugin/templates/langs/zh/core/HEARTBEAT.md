@@ -56,10 +56,35 @@
 
 ## 4. 🧹 熵减巡检 (Grooming)
 
-- [ ] **运行 `ls -F` 检查项目根目录**
+⚠️ **安全第一**: 使用两阶段删除策略，避免误删重要文件
+
+- [ ] **阶段1 - 移入垃圾箱** (立即执行):
+  ```bash
+  # 创建垃圾箱目录
+  mkdir -p .trash/{tmp,cache,logs,editor}
+
+  # 递归移动文件到垃圾箱（不删除！）
+  find /tmp -type f -mtime +7 -exec mv -t .trash/tmp/ {} +
+  find . -type d -name ".cache" -exec find {} -type f -mtime +7 -exec mv -t .trash/cache/ {} +
+  find . \( -name "*.swp" -o -name "*~" -o -name ".DS_Store" \) -exec mv -t .trash/editor/ {} +
+  ```
+
+- [ ] **阶段2 - 清空垃圾箱** (延迟7天):
+  ```bash
+  # 只删除垃圾箱中7天前的文件
+  find .trash/ -type f -mtime +7 -delete
+  find .trash/ -type d -empty -delete
+  ```
+
+- [ ] **检查项目根目录**: `ls -F`
 - [ ] **识别非标准文件**: 散落的临时文件、测试脚本、命名不规范的文档
 
 **行动**：如发现混乱，调用 `pd-grooming` 技能发起内务整理。
+
+**⚠️ 绝对禁止**:
+- ❌ 使用 `rm -rf` 删除工作空间文件
+- ❌ 使用 `find ... -delete` 直接删除
+- ❌ 跳过垃圾箱直接删除
 
 ---
 
