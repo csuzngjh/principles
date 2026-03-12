@@ -2,6 +2,48 @@ import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 
+/**
+ * ============================================================================
+ * Principles Disciple - 路径解析器
+ * ============================================================================
+ * 
+ * 【核心概念】
+ * 
+ * 1. 工作区 (Workspace): 智能体的"意识空间"，存放核心 MD 文件和配置
+ *    - 示例: ~/clawd 或 ~/.openclaw/workspace
+ *    - 包含: AGENTS.md, HEARTBEAT.md, .principles/, .state/ 等
+ * 
+ * 2. 状态目录 (State Dir): 运行时状态文件，自动管理
+ *    - 示例: ~/clawd/.state
+ *    - 包含: evolution_queue.json, trust_scorecard.json 等
+ * 
+ * 【路径解析优先级】（从高到低）
+ * 
+ * 1. 构造函数参数 workspaceDir（代码直接传入）
+ * 2. 环境变量 PD_WORKSPACE_DIR（用户手动设置）
+ * 3. 环境变量 OPENCLAW_WORKSPACE（OpenClaw 框架设置）
+ * 4. 配置文件 ~/.openclaw/principles-disciple.json（安装脚本创建）
+ * 5. 默认值 ~/.openclaw/workspace（最后兜底）
+ * 
+ * 【环境变量说明】
+ * 
+ * PD_WORKSPACE_DIR - 手动指定工作区目录
+ *   用法: export PD_WORKSPACE_DIR=~/my-custom-workspace
+ *   场景: 你想把智能体的"大脑"放在特定位置
+ * 
+ * PD_STATE_DIR - 手动指定状态目录
+ *   用法: export PD_STATE_DIR=~/my-custom-workspace/.state
+ *   场景: 通常不需要设置，会自动在 workspace 下创建 .state
+ * 
+ * OPENCLAW_WORKSPACE - OpenClaw 框架的工作区
+ *   用法: 由 OpenClaw 自动设置
+ *   场景: 当你使用 OpenClaw 时，它会告诉插件工作区在哪
+ * 
+ * DEBUG - 启用调试日志
+ *   用法: export DEBUG=true
+ *   场景: 排查路径问题时使用
+ */
+
 export interface PathResolverOptions {
     workspaceDir?: string;
     normalizeWorkspace?: boolean;
@@ -13,25 +55,42 @@ export interface PathResolverOptions {
     };
 }
 
+// 默认工作区路径: ~/.openclaw/workspace
 const DEFAULT_WORKSPACE_SUBPATH = '.openclaw/workspace';
 
+/**
+ * 环境变量名称定义
+ * 
+ * 这些环境变量可以在启动 OpenClaw 时设置，用于覆盖默认路径
+ */
 export const PD_ENV_VARS = {
+    // 手动指定工作区目录（最高优先级）
+    // 示例: PD_WORKSPACE_DIR=/home/user/my-workspace openclaw gateway
     WORKSPACE_DIR: 'PD_WORKSPACE_DIR',
+    
+    // 手动指定状态目录
+    // 示例: PD_STATE_DIR=/home/user/my-workspace/.state
     STATE_DIR: 'PD_STATE_DIR',
+    
+    // 启用调试模式
+    // 示例: DEBUG=true openclaw gateway
     DEBUG: 'DEBUG',
 } as const;
 
+/**
+ * 环境变量说明文档（用于帮助输出）
+ */
 export const PD_ENV_DESCRIPTIONS: Record<keyof typeof PD_ENV_VARS, { desc: string; example: string }> = {
     WORKSPACE_DIR: {
-        desc: 'Override the default workspace directory',
-        example: 'PD_WORKSPACE_DIR=/home/user/my-workspace',
+        desc: '指定智能体工作区目录（存放 MD 文件和配置）',
+        example: 'PD_WORKSPACE_DIR=/home/user/clawd',
     },
     STATE_DIR: {
-        desc: 'Override the default state directory (.state)',
-        example: 'PD_STATE_DIR=/home/user/my-workspace/.state',
+        desc: '指定状态文件目录（存放 JSON 运行时数据）',
+        example: 'PD_STATE_DIR=/home/user/clawd/.state',
     },
     DEBUG: {
-        desc: 'Enable debug logging for path resolution',
+        desc: '启用路径解析调试日志',
         example: 'DEBUG=true',
     },
 };

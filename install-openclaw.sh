@@ -81,6 +81,28 @@ fi
 # ============================================================================
 # 2. 配置工作区目录
 # ============================================================================
+# 【核心概念】
+# 
+# 工作区 (Workspace) = 智能体的"大脑"目录
+# - 存放核心 MD 文件: AGENTS.md, HEARTBEAT.md, SOUL.md 等
+# - 存放身份层文件: .principles/PRINCIPLES.md, THINKING_OS.md 等
+# - 存放运行时状态: .state/evolution_queue.json 等
+# 
+# 【路径解析优先级】（插件代码中的逻辑）
+# 
+# 1. 环境变量 PD_WORKSPACE_DIR     ← 用户手动设置，最高优先级
+# 2. 环境变量 OPENCLAW_WORKSPACE   ← OpenClaw 框架自动设置
+# 3. 配置文件 ~/.openclaw/principles-disciple.json  ← 本脚本创建
+# 4. 默认值 ~/.openclaw/workspace  ← 最后兜底
+# 
+# 【本脚本的检测顺序】
+# 
+# 1. 检查 OPENCLAW_WORKSPACE 环境变量
+# 2. 检查 ~/.openclaw/openclaw.json 中的 agents.defaults.workspace
+# 3. 检查常见目录: ~/clawd, ~/.openclaw/workspace, ~/workspace
+#    （通过检测 .principles/PRINCIPLES.md 判断是否是有效工作区）
+# 4. 默认使用 ~/clawd
+# ============================================================================
 printf "\n"
 printf "${YELLOW}📁 步骤 2/7: 配置工作区目录${NC}\n"
 printf "\n"
@@ -88,6 +110,8 @@ printf "Principles Disciple 需要知道你的智能体工作区目录。\n"
 printf "\n"
 
 # 检测 OpenClaw 的工作区目录
+# 优先级 1: OPENCLAW_WORKSPACE 环境变量（OpenClaw 框架设置）
+# 优先级 2: ~/.openclaw/openclaw.json 配置文件
 DETECTED_WORKSPACE=""
 if [ -n "$OPENCLAW_WORKSPACE" ]; then
     DETECTED_WORKSPACE="$OPENCLAW_WORKSPACE"
@@ -147,6 +171,25 @@ else
 fi
 
 # 创建配置文件
+# ============================================================================
+# 【配置文件说明】
+# 
+# 文件位置: ~/.openclaw/principles-disciple.json
+# 
+# 这个配置文件会被插件的 PathResolver 读取，用于确定工作区位置。
+# 即使不设置环境变量，插件也能通过这个文件找到正确的工作区。
+# 
+# 配置文件格式:
+# {
+#   "workspace": "/home/user/clawd",    // 工作区目录
+#   "state": "/home/user/clawd/.state", // 状态目录（自动在 workspace 下）
+#   "debug": false                      // 是否启用调试日志
+# }
+# 
+# 优先级说明:
+# - 环境变量 PD_WORKSPACE_DIR > 这个配置文件 > 默认值
+# - 如果设置了环境变量，配置文件会被忽略
+# ============================================================================
 if [ -n "$PD_WORKSPACE_DIR" ]; then
     printf "\n"
     printf "创建配置文件...\n"
