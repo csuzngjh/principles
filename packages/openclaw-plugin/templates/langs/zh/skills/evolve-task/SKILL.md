@@ -78,6 +78,6 @@ disable-model-invocation: true
    - 注意：如果用户没有表现出明显特征或偏好，对应字段可为空。
 
 ## Step 10: 最终汇报 (Final Briefing)
-- **动作**: 委派 ``sessions_spawn(reporter)`` 进行结项陈述。
+- **动作**: 委派 ``pd_spawn_agent(reporter)`` 进行结项陈述。
 - **要求**: 将 Implementer 和 Reviewer 的最终产出作为输入传给它。让它根据 `USER_CONTEXT.md` 决定汇报的深度和风格。
 - **目标**: 确保老板（用户）在不产生认知负荷的前提下，清楚了解任务成果与潜在风险。

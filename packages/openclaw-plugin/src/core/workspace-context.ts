@@ -1,5 +1,5 @@
-import * as path from 'path';
 import { resolvePdPath, PD_FILES } from './paths.js';
+import { PathResolver } from './path-resolver.js';
 import { ConfigService } from './config-service.js';
 import { PainConfig } from './config.js';
 import { EventLogService, EventLog } from './event-log.js';
@@ -14,6 +14,7 @@ import { HygieneTracker } from './hygiene/tracker.js';
  */
 export class WorkspaceContext {
     private static instances = new Map<string, WorkspaceContext>();
+    private static pathResolver = new PathResolver();
 
     public readonly workspaceDir: string;
     public readonly stateDir: string;
@@ -81,20 +82,38 @@ export class WorkspaceContext {
 
     /**
      * Creates or retrieves a WorkspaceContext instance from an OpenClaw hook context.
-     * @throws Error if workspaceDir is missing.
+     * Uses PathResolver to handle path normalization and fallback logic.
+     * @throws Error if workspaceDir is missing and no fallback available.
      */
     static fromHookContext(ctx: any): WorkspaceContext {
-        const workspaceDir = ctx.workspaceDir;
+        let workspaceDir = ctx.workspaceDir;
+        
         if (!workspaceDir) {
-            throw new Error('workspaceDir is required to create a WorkspaceContext.');
+            console.warn('[PD:WorkspaceContext] workspaceDir not provided in context, using PathResolver fallback');
+            workspaceDir = this.pathResolver.getWorkspaceDir();
+            console.log(`[PD:WorkspaceContext] Resolved workspaceDir to: ${workspaceDir}`);
+        } else {
+            const normalized = this.pathResolver.normalizeWorkspacePath(workspaceDir);
+            if (normalized !== workspaceDir) {
+                console.log(`[PD:WorkspaceContext] Normalized workspaceDir: ${workspaceDir} -> ${normalized}`);
+                workspaceDir = normalized;
+            }
         }
 
         const existing = this.instances.get(workspaceDir);
         if (existing) return existing;
 
-        const stateDir = ctx.stateDir || resolvePdPath(workspaceDir, 'STATE_DIR');
+        let stateDir = ctx.stateDir;
+        if (!stateDir) {
+            stateDir = resolvePdPath(workspaceDir, 'STATE_DIR');
+            console.log(`[PD:WorkspaceContext] Computed stateDir: ${stateDir}`);
+        }
+
         const instance = new WorkspaceContext(workspaceDir, stateDir);
         this.instances.set(workspaceDir, instance);
+        
+        console.log(`[PD:WorkspaceContext] Created new context for workspace: ${workspaceDir}`);
+        
         return instance;
     }
 

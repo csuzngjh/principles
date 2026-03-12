@@ -1,20 +1,117 @@
-# 💓 Heartbeat Checklist: Principles Disciple
+# 💓 HEARTBEAT.md - 心跳巡检清单
 
-每次心跳时，请自检以下项目以维持系统的进化活力：
-
-## 1. 痛觉与进化检查 (Pain & Evolution)
-- [ ] **检查 `.pain_flag`**: 是否存在未处理的痛觉信号？如果有，评估是否需要立即运行 `/reflection` 或 `/evolve-task`。
-- [ ] **检查 `EVOLUTION_QUEUE.json`**: 是否有待处理的异步进化任务？
-- [ ] **检查 `ISSUE_LOG.md`**: 最近是否有未解决的高优先级 Issue？
-
-## 2. 战略对齐 (Strategic Alignment)
-- [ ] **对比 `CURRENT_FOCUS.md`**: 过去一小时的操作是否偏离了当前的战略重点？
-- [ ] **周治理状态**: 查阅 `memory/okr/WEEK_STATE.json`，确保当前处于 `EXECUTING` 阶段。如果处于 `INTERRUPTED`，必须优先处理恢复。
-
-## 3. 环境健康 (System Health)
-- [ ] **工具链**: 检查 `.state/SYSTEM_CAPABILITIES.json`，确保核心工具（如 `rg`, `sg`）处于可用状态。
-- [ ] **文档同步**: 确保 `PLAN.md` 状态与实际进度一致。
-- [ ] **熵减巡检 (Grooming)**: 运行 `ls -F` 检查项目根目录。如果发现非标准的临时文件、散落的测试脚本或命名不规范的文档，请立刻调用 `workspace-grooming` 技能发起内务整理。
+每次心跳时，执行以下检查以维持系统的进化活力。**不要每次只回复 `HEARTBEAT_OK`，利用心跳做有意义的事。**
 
 ---
-*如果没有上述问题，请回复 `HEARTBEAT_OK` 以节省 Token。*
+
+## 🔄 心跳状态追踪
+
+在 `memory/heartbeat-state.json` 中记录检查时间戳：
+
+```json
+{
+  "lastChecks": {
+    "pain": 1703275200,
+    "strategy": 1703260800,
+    "memory": 1703250000,
+    "grooming": null
+  }
+}
+```
+
+每次检查后更新对应的时间戳，用于避免重复检查。
+
+---
+
+## 1. 🩹 痛觉与进化检查 (Pain & Evolution)
+
+- [ ] **检查 `.state/.pain_flag`**: 是否存在未处理的痛觉信号？
+- [ ] **检查 `.state/evolution_queue.json`**: 是否有待处理的异步进化任务？
+- [ ] **检查 `memory/logs/SYSTEM.log`**: 最近是否有未解决的高优先级问题？
+
+**行动**：如有未处理的痛觉信号，评估是否需要立即运行 `/reflection` 或 `/evolve-task`。
+
+---
+
+## 2. 🎯 战略对齐 (Strategic Alignment)
+
+- [ ] **对比 `memory/okr/CURRENT_FOCUS.md`**: 过去一小时的操作是否偏离了当前的战略重点？
+- [ ] **周治理状态**: 查阅 `memory/okr/WEEK_STATE.json`，确保当前处于 `EXECUTING` 阶段
+
+**行动**：如果处于 `INTERRUPTED` 状态，必须优先处理恢复。
+
+---
+
+## 3. 🧠 Memory 维护 (Memory Maintenance)
+
+每隔几天（或 memory 文件积累较多时）：
+
+- [ ] **翻阅近期 `memory/YYYY-MM-DD.md`**: 识别值得长期保留的内容
+- [ ] **更新 `MEMORY.md`**: 提炼学习成果、重要决策、教训
+- [ ] **清理过时信息**: 移除 `MEMORY.md` 中不再相关的内容
+
+**原则**：每日文件是原始笔记，`MEMORY.md` 是精炼的智慧。
+
+---
+
+## 4. 🧹 熵减巡检 (Grooming)
+
+⚠️ **安全第一**: 使用两阶段删除策略，避免误删重要文件
+
+- [ ] **阶段1 - 移入垃圾箱** (立即执行):
+  ```bash
+  # 创建垃圾箱目录
+  mkdir -p .trash/{tmp,cache,logs,editor}
+
+  # 递归移动文件到垃圾箱（不删除！）
+  find /tmp -type f -mtime +7 -exec mv -t .trash/tmp/ {} +
+  find . -type d -name ".cache" -exec find {} -type f -mtime +7 -exec mv -t .trash/cache/ {} +
+  find . \( -name "*.swp" -o -name "*~" -o -name ".DS_Store" \) -exec mv -t .trash/editor/ {} +
+  ```
+
+- [ ] **阶段2 - 清空垃圾箱** (延迟7天):
+  ```bash
+  # 只删除垃圾箱中7天前的文件
+  find .trash/ -type f -mtime +7 -delete
+  find .trash/ -type d -empty -delete
+  ```
+
+- [ ] **检查项目根目录**: `ls -F`
+- [ ] **识别非标准文件**: 散落的临时文件、测试脚本、命名不规范的文档
+
+**行动**：如发现混乱，调用 `pd-grooming` 技能发起内务整理。
+
+**⚠️ 绝对禁止**:
+- ❌ 使用 `rm -rf` 删除工作空间文件
+- ❌ 使用 `find ... -delete` 直接删除
+- ❌ 跳过垃圾箱直接删除
+
+---
+
+## 5. 🛠️ 环境健康 (System Health)
+
+- [ ] **检查 `.state/SYSTEM_CAPABILITIES.json`**: 核心工具（`rg`, `node`, `python`）是否可用
+- [ ] **文档同步**: 确保 `PLAN.md` 状态与实际进度一致
+
+---
+
+## ⏰ 何时保持沉默（HEARTBEAT_OK）
+
+- 深夜（23:00-08:00）除非紧急
+- 用户明显在忙
+- 上次检查后无新情况
+- 距上次检查 < 30 分钟
+- 所有检查项均正常
+
+---
+
+## 🚨 何时主动联系
+
+- 发现重要痛觉信号需要处理
+- 战略偏离需要用户确认
+- 项目环境需要清理
+- 有重要发现或进展
+
+---
+
+*如果没有上述问题且无需行动，请回复 `HEARTBEAT_OK` 以节省 Token。*

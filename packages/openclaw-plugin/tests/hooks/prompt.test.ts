@@ -41,6 +41,7 @@ describe('Prompt Context Injection Hook', () => {
         if (key === 'THINKING_OS') return path.join(workspaceDir, '.principles', 'THINKING_OS.md');
         if (key === 'HEARTBEAT') return path.join(workspaceDir, 'HEARTBEAT.md');
         if (key === 'EVOLUTION_QUEUE') return path.join(workspaceDir, '.state', 'evolution_queue.json');
+        if (key === 'PRINCIPLES') return path.join(workspaceDir, '.principles', 'PRINCIPLES.md');
         return '';
     }),
   };
@@ -96,5 +97,103 @@ describe('Prompt Context Injection Hook', () => {
 
     expect(result?.prependSystemContext).toContain('<thinking_os>');
     expect(result?.prependSystemContext).toContain('Apply First Principles');
+  });
+
+  it('should prependSystemContext with PRINCIPLES.md as highest priority', async () => {
+    vi.mocked(fs.existsSync).mockImplementation((p) => p.toString().includes('PRINCIPLES.md'));
+    vi.mocked(fs.readFileSync).mockReturnValue('# Core Principles\n\n1. Principle A\n2. Principle B');
+
+    const result = await handleBeforePromptBuild({} as any, { workspaceDir, trigger: 'user' } as any);
+
+    expect(result?.prependSystemContext).toContain('<core_principles>');
+    expect(result?.prependSystemContext).toContain('# Core Principles');
+    expect(result?.prependSystemContext).toContain('Principle A');
+  });
+
+  it('should handle missing PRINCIPLES.md gracefully', async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+
+    const result = await handleBeforePromptBuild({} as any, { workspaceDir, trigger: 'user' } as any);
+
+    expect(result?.prependSystemContext).not.toContain('<core_principles>');
+    // Should still have trust score
+    expect(result?.prependSystemContext).toContain('CURRENT TRUST SCORE');
+  });
+
+  it('should handle PRINCIPLES.md read error gracefully', async () => {
+    vi.mocked(fs.existsSync).mockImplementation((p) => p.toString().includes('PRINCIPLES.md'));
+    vi.mocked(fs.readFileSync).mockImplementation(() => {
+      throw new Error('Read error');
+    });
+    
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const result = await handleBeforePromptBuild({} as any, { workspaceDir, trigger: 'user' } as any);
+
+    expect(result).toBeDefined();
+    expect(result?.prependSystemContext).not.toContain('<core_principles>');
+    
+    consoleSpy.mockRestore();
+  });
+
+  it('should inject both PRINCIPLES and THINKING_OS without overwriting', async () => {
+    vi.mocked(fs.existsSync).mockImplementation((p) => 
+      p.toString().includes('PRINCIPLES.md') || p.toString().includes('THINKING_OS.md')
+    );
+    vi.mocked(fs.readFileSync).mockImplementation((p) => {
+      if (p.toString().includes('PRINCIPLES.md')) {
+        return '# Core Principles\n\nPrinciple 1';
+      }
+      if (p.toString().includes('THINKING_OS.md')) {
+        return '# Thinking OS\n\nModel 1';
+      }
+      return '';
+    });
+
+    const result = await handleBeforePromptBuild({} as any, { workspaceDir, trigger: 'user' } as any);
+
+    // Both should be present - THINKING_OS should NOT overwrite PRINCIPLES
+    expect(result?.prependSystemContext).toContain('<core_principles>');
+    expect(result?.prependSystemContext).toContain('Principle 1');
+    expect(result?.prependSystemContext).toContain('<thinking_os>');
+    expect(result?.prependSystemContext).toContain('Model 1');
+    
+    // Verify order: PRINCIPLES should come before THINKING_OS
+    const principlesIndex = result?.prependSystemContext?.indexOf('<core_principles>') ?? -1;
+    const thinkingOsIndex = result?.prependSystemContext?.indexOf('<thinking_os>') ?? -1;
+    expect(principlesIndex).toBeLessThan(thinkingOsIndex);
+  });
+
+  it('FULL INJECTION: should preserve ALL prependSystemContext content', async () => {
+    // This test catches the "=" vs "+=" bug for ANY future additions
+    // 模拟所有文件都存在的真实场景
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockImplementation((p) => {
+      const pathStr = p.toString();
+      if (pathStr.includes('PRINCIPLES.md')) return '[PRINCIPLES_CONTENT]';
+      if (pathStr.includes('THINKING_OS.md')) return '[THINKING_OS_CONTENT]';
+      if (pathStr.includes('evolution_queue.json')) return '[]';
+      if (pathStr.includes('SYSTEM_CAPABILITIES.json')) return '{}';
+      return '';
+    });
+
+    const result = await handleBeforePromptBuild({} as any, { workspaceDir, trigger: 'user' } as any);
+
+    const context = result?.prependSystemContext ?? '';
+    
+    // 所有注入内容必须同时存在 - 任何 "=" 误用都会导致前一个丢失
+    expect(context).toContain('<core_principles>');
+    expect(context).toContain('[PRINCIPLES_CONTENT]');
+    expect(context).toContain('<thinking_os>');
+    expect(context).toContain('[THINKING_OS_CONTENT]');
+    expect(context).toContain('CURRENT TRUST SCORE');
+    
+    // 验证顺序正确（防止未来有人用 prepend 破坏顺序）
+    const order = [
+      context.indexOf('<core_principles>'),
+      context.indexOf('<thinking_os>'),
+      context.indexOf('CURRENT TRUST SCORE'),
+    ];
+    expect(order).toEqual([...order].sort((a, b) => a - b));
   });
 });

@@ -59,7 +59,7 @@ python scripts/weekly_governance.py status
 - **调度原则**: ⚠️ **受控并发 (Throttled Concurrency)**。每次最多并发委派 **2-3 个** Task，等待结果返回后再补充新的任务。严禁一次性发出所有请求以防终端卡死。
 - **面试循环**:
   1. 从 `pending` 中取出一批 Agent (2-3个)。
- 2. 调用 ``sessions_spawn` 工具` 发起面试（Prompt 见下文）。
+ 2. 调用 ``pd_spawn_agent` 工具` 发起面试（Prompt 见下文）。
   3. 每获取一个回复后，**立即更新** `memory/okr/.negotiation_status.json`：
      - 将该 Agent 移入 `completed` 列表。
      - 这一步确保了系统崩溃后可恢复。

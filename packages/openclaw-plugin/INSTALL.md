@@ -95,6 +95,73 @@ This will automatically handle all dependencies.
 
 ---
 
+## 📁 Workspace Configuration
+
+Principles Disciple needs to know where your agent's workspace directory is located. This is configured during installation.
+
+### Automatic Configuration
+
+The installer will automatically detect your OpenClaw workspace directory. You can also specify a custom directory:
+
+```bash
+# Run installer with custom workspace
+./install-openclaw.sh
+# Select "Custom directory" when prompted
+```
+
+### Manual Configuration
+
+If you skipped configuration during installation, you can set it up manually:
+
+#### Option 1: Configuration File (Recommended)
+
+Create `~/.openclaw/principles-disciple.json`:
+
+```json
+{
+  "workspace": "/path/to/your/workspace",
+  "state": "/path/to/your/workspace/.state",
+  "debug": false
+}
+```
+
+#### Option 2: Environment Variables
+
+```bash
+# Add to your shell profile (~/.bashrc, ~/.zshrc)
+export PD_WORKSPACE_DIR=/path/to/your/workspace
+export PD_STATE_DIR=/path/to/your/workspace/.state
+
+# Or set when starting OpenClaw
+PD_WORKSPACE_DIR=/path/to/your/workspace openclaw-gateway start
+```
+
+#### Option 3: Debug Mode
+
+To enable debug logging for path resolution:
+
+```bash
+export DEBUG=true
+```
+
+This will show detailed logs like:
+
+```
+[PD:PathResolver] Using workspace from config file: /home/user/workspace
+[PD:WorkspaceContext] Normalized workspaceDir: /home/user/clawd/memory -> /home/user/clawd
+```
+
+### Configuration Priority
+
+Configuration is resolved in this order (highest to lowest):
+
+1. Environment variables (`PD_WORKSPACE_DIR`, `PD_STATE_DIR`)
+2. Configuration file (`~/.openclaw/principles-disciple.json`)
+3. OpenClaw environment (`OPENCLAW_WORKSPACE`)
+4. Default (`~/.openclaw/workspace`)
+
+---
+
 ## 🔍 Troubleshooting
 
 ### Plugin fails to load

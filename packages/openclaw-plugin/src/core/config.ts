@@ -188,12 +188,27 @@ export class PainConfig {
         if (fs.existsSync(this.filePath)) {
             try {
                 const loaded = JSON.parse(fs.readFileSync(this.filePath, 'utf8'));
-                // Recursive merge for safety
                 this.settings = this.deepMerge(DEFAULT_SETTINGS, loaded);
                 this.validate(this.settings);
             } catch (e) {
                 console.error('[PD] Failed to parse pain_settings.json, using defaults.');
             }
+        } else {
+            console.log(`[PD:Config] Settings not found at ${this.filePath}, creating with defaults`);
+            this.save();
+        }
+    }
+
+    save(): void {
+        try {
+            const dir = path.dirname(this.filePath);
+            if (!fs.existsSync(dir)) {
+                fs.mkdirSync(dir, { recursive: true });
+            }
+            fs.writeFileSync(this.filePath, JSON.stringify(this.settings, null, 2), 'utf8');
+            console.log(`[PD:Config] Settings saved to ${this.filePath}`);
+        } catch (e) {
+            console.error(`[PD:Config] Failed to save settings: ${String(e)}`);
         }
     }
 
