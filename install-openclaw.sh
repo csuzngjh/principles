@@ -319,14 +319,19 @@ if command -v openclaw &>/dev/null; then
 
     # 清理 OpenClaw 配置中的旧插件条目（如果存在）
     OPENCLAW_CONFIG="$HOME/.openclaw/openclaw.json"
-    if [ -f "$OPENCLAW_CONFIG" ]; then
-        # 使用 jq 清理配置中的旧条目
-        if command -v jq &>/dev/null; then
-            jq 'del(.plugins.allow[] | select(. == "principles-disciple"))' "$OPENCLAW_CONFIG" > /tmp/openclaw-clean.json 2>/dev/null && \
-            jq 'del(.plugins.entries["principles-disciple"])' /tmp/openclaw-clean.json > /tmp/openclaw-clean2.json 2>/dev/null && \
-            jq 'del(.plugins.installs["principles-disciple"])' /tmp/openclaw-clean2.json > "$OPENCLAW_CONFIG" 2>/dev/null && \
-            printf "  ${GREEN}✅ 已清理旧配置${NC}\n" || true
-        fi
+    if [ -f "$OPENCLAW_CONFIG" ] && command -v jq &>/dev/null; then
+        # 备份配置文件
+        cp "$OPENCLAW_CONFIG" "${OPENCLAW_CONFIG}.bak"
+        
+        # 使用 jq 清理配置中的旧条目（分步执行，避免复杂的链式命令）
+        TMP_FILE="/tmp/openclaw-clean-$$.json"
+        
+        jq 'del(.plugins.allow[] | select(. == "principles-disciple"))' "$OPENCLAW_CONFIG" > "$TMP_FILE" 2>/dev/null && mv "$TMP_FILE" "$OPENCLAW_CONFIG"
+        jq 'del(.plugins.entries["principles-disciple"])' "$OPENCLAW_CONFIG" > "$TMP_FILE" 2>/dev/null && mv "$TMP_FILE" "$OPENCLAW_CONFIG"
+        jq 'del(.plugins.installs["principles-disciple"])' "$OPENCLAW_CONFIG" > "$TMP_FILE" 2>/dev/null && mv "$TMP_FILE" "$OPENCLAW_CONFIG"
+        
+        rm -f "$TMP_FILE"
+        printf "  ${GREEN}✅ 已清理旧配置${NC}\n"
     fi
 
     # 在 force 模式下，确保删除旧的扩展目录
