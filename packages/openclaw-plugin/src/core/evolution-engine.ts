@@ -468,6 +468,37 @@ export class EvolutionEngine {
       recentFailureHashes: Array.from(this.scorecard.recentFailureHashes.entries()),
     };
 
+    // 文件锁：防止并发写入导致数据损坏
+    const lockPath = `${this.storagePath}.lock`;
+    const maxRetries = 10;
+    const retryDelayMs = 20;
+
+    // 获取锁
+    let acquired = false;
+    for (let i = 0; i < maxRetries; i++) {
+      try {
+        fs.writeFileSync(lockPath, String(process.pid), { flag: 'wx' });
+        acquired = true;
+        break;
+      } catch {
+        // 锁被占用，等待后重试
+        const start = Date.now();
+        while (Date.now() - start < retryDelayMs) { /* busy wait */ }
+      }
+    }
+
+    if (!acquired) {
+      console.error(`[Evolution] Failed to acquire lock after ${maxRetries} retries`);
+      // 强制清除过期锁（超过5秒视为过期）
+      try {
+        const lockStat = fs.statSync(lockPath);
+        if (Date.now() - lockStat.mtimeMs > 5000) {
+          fs.unlinkSync(lockPath);
+        }
+      } catch {}
+      return;
+    }
+
     // 原子写入：先写临时文件，再重命名
     const tempPath = `${this.storagePath}.tmp.${Date.now()}`;
     try {
@@ -475,8 +506,10 @@ export class EvolutionEngine {
       fs.renameSync(tempPath, this.storagePath);
     } catch (e) {
       console.error(`[Evolution] Failed to save scorecard: ${String(e)}`);
-      // 清理临时文件
       try { fs.unlinkSync(tempPath); } catch {}
+    } finally {
+      // 释放锁
+      try { fs.unlinkSync(lockPath); } catch {}
     }
   }
 
@@ -489,14 +522,16 @@ export class EvolutionEngine {
 
 // ===== 便捷函数 =====
 
-let _instance: EvolutionEngine | null = null;
+// 使用 Map 按 workspace 隔离实例，避免多 workspace 场景状态串扰
+const _instances = new Map<string, EvolutionEngine>();
 
-/** 获取单例实例 */
+/** 获取指定 workspace 的引擎实例 */
 export function getEvolutionEngine(workspaceDir: string): EvolutionEngine {
-  if (!_instance) {
-    _instance = new EvolutionEngine(workspaceDir);
+  const resolved = path.resolve(workspaceDir);
+  if (!_instances.has(resolved)) {
+    _instances.set(resolved, new EvolutionEngine(resolved));
   }
-  return _instance;
+  return _instances.get(resolved)!;
 }
 
 /** 记录成功（便捷函数） */
