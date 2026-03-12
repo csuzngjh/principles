@@ -61,7 +61,7 @@ describe('deepReflectTool', () => {
                 assistantTexts: ['Insight 1', 'Insight 2']
             });
 
-            const result = await deepReflectTool.handler(
+            const result = await deepReflectTool.execute(
                 { context: 'Need to improve caching.' },
                 mockApi,
                 tempDir
@@ -84,7 +84,7 @@ describe('deepReflectTool', () => {
             mockSubagent.run.mockResolvedValue({ runId: 'test-run-123' });
             mockSubagent.waitForRun.mockResolvedValue({ status: 'timeout' });
 
-            const result = await deepReflectTool.handler(
+            const result = await deepReflectTool.execute(
                 { context: 'Timeout testing.' },
                 mockApi,
                 tempDir
@@ -102,7 +102,7 @@ describe('deepReflectTool', () => {
                 assistantTexts: ['I have reviewed the plan. REFLECTION_OK.']
             });
 
-            const result = await deepReflectTool.handler(
+            const result = await deepReflectTool.execute(
                 { context: 'Testing OK.' },
                 mockApi,
                 tempDir
@@ -116,7 +116,7 @@ describe('deepReflectTool', () => {
             mockSubagent.run.mockResolvedValue({ runId: 'error-run' });
             mockSubagent.waitForRun.mockRejectedValue(new Error('API throw'));
 
-            await expect(deepReflectTool.handler(
+            await expect(deepReflectTool.execute(
                 { context: 'Testing failure.' },
                 mockApi,
                 tempDir
@@ -136,7 +136,7 @@ describe('deepReflectTool', () => {
                 assistantTexts: ['Analysis complete.']
             });
 
-            await deepReflectTool.handler(
+            await deepReflectTool.execute(
                 { context: 'Marketing plan for Q4.' },
                 mockApi,
                 tempDir
@@ -159,7 +159,7 @@ describe('deepReflectTool', () => {
                 assistantTexts: ['Analysis complete.']
             });
 
-            await deepReflectTool.handler(
+            await deepReflectTool.execute(
                 { context: 'Test context.' },
                 mockApi,
                 tempDir
@@ -194,7 +194,7 @@ describe('deepReflectTool', () => {
                 assistantTexts: ['Analysis complete.']
             });
 
-            await deepReflectTool.handler(
+            await deepReflectTool.execute(
                 { context: 'Marketing plan.' },
                 mockApi,
                 tempDir
@@ -215,7 +215,7 @@ describe('deepReflectTool', () => {
                 assistantTexts: ['Analysis complete.']
             });
 
-            await deepReflectTool.handler(
+            await deepReflectTool.execute(
                 { model_id: 'T-01', context: 'Test.' },
                 mockApi,
                 tempDir
@@ -234,7 +234,7 @@ describe('deepReflectTool', () => {
                 assistantTexts: ['Analysis complete.']
             });
 
-            await deepReflectTool.handler(
+            await deepReflectTool.execute(
                 { model_id: 'T-05', context: 'Test.' },
                 mockApi,
                 tempDir

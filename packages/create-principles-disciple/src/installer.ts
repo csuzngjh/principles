@@ -1,7 +1,8 @@
 /**
  * 安装器模块
  */
-import * as fs from 'fs-extra';
+import { existsSync, readdirSync, statSync, readFileSync, writeFileSync } from 'fs';
+import fse from 'fs-extra';
 import * as path from 'path';
 import * as os from 'os';
 import { execSync } from 'child_process';
@@ -32,8 +33,8 @@ function getTemplatesDir(pluginDir: string, language: string): string {
  */
 async function cleanOldVersion(): Promise<void> {
   const extDir = getPluginExtDir();
-  if (fs.existsSync(extDir)) {
-    await fs.remove(extDir);
+  if (existsSync(extDir)) {
+    await fse.remove(extDir);
     logger.info(`已删除旧版本: ${extDir}`);
   }
 }
@@ -60,19 +61,58 @@ async function installPlugin(pluginDir: string): Promise<void> {
   logger.step('安装插件到 OpenClaw');
   
   const extDir = getPluginExtDir();
+  const configDir = getOpenClawConfigDir();
+  const configPath = path.join(configDir, 'openclaw.json');
   
-  // 使用 openclaw plugins install
+  // 方案一：尝试使用 openclaw plugins install（静默模式）
   try {
-    execSync(`openclaw plugins uninstall principles-disciple 2>/dev/null || true`, { stdio: 'inherit' });
-    execSync(`openclaw plugins install "${pluginDir}"`, { stdio: 'inherit' });
-    logger.success('插件安装成功');
-  } catch (error) {
-    // 备用方案：直接复制
-    logger.warn('openclaw 命令不可用，使用备用安装方式...');
-    await fs.ensureDir(extDir);
-    await fs.copy(pluginDir, extDir, { overwrite: true });
-    logger.success('插件复制完成');
+    const result = execSync(
+      `openclaw plugins install "${pluginDir}" 2>&1`,
+      { encoding: 'utf-8', timeout: 60000 }
+    );
+    // 检查是否安装成功
+    if (existsSync(extDir) && existsSync(path.join(extDir, 'dist', 'index.js'))) {
+      logger.success('插件安装成功 (openclaw)');
+      return;
+    }
+  } catch {
+    // 继续使用备用方案
   }
+  
+  // 方案二：手动复制 + 更新配置
+  logger.info('使用手动安装方式...');
+  
+  // 1. 复制插件文件
+  await fse.ensureDir(extDir);
+  await fse.copy(pluginDir, extDir, { overwrite: true });
+  
+  // 2. 读取并更新 openclaw.json
+  if (existsSync(configPath)) {
+    const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+    
+    // 添加到 allow 列表
+    if (!config.plugins) config.plugins = {};
+    if (!config.plugins.allow) config.plugins.allow = [];
+    if (!config.plugins.allow.includes('principles-disciple')) {
+      config.plugins.allow.push('principles-disciple');
+    }
+    
+    // 添加到 entries
+    if (!config.plugins.entries) config.plugins.entries = {};
+    config.plugins.entries['principles-disciple'] = { enabled: true };
+    
+    // 添加到 installs（使用 OpenClaw 正确格式）
+    if (!config.plugins.installs) config.plugins.installs = {};
+    config.plugins.installs['principles-disciple'] = {
+      source: 'path',
+      installPath: extDir,
+      installedAt: new Date().toISOString(),
+    };
+    
+    writeFileSync(configPath, JSON.stringify(config, null, 2));
+  }
+  
+  logger.success('插件安装成功 (手动)');
 }
 
 /**
@@ -82,7 +122,7 @@ async function installPluginDependencies(): Promise<void> {
   const extDir = getPluginExtDir();
   const nodeModulesPath = path.join(extDir, 'node_modules');
   
-  if (!fs.existsSync(nodeModulesPath)) {
+  if (!existsSync(nodeModulesPath)) {
     logger.step('安装插件运行时依赖');
     execSync('npm install --silent micromatch@^4.0.8 @sinclair/typebox@^0.34.48', {
       cwd: extDir,
@@ -101,19 +141,19 @@ async function copySkills(pluginDir: string, language: string): Promise<number> 
   const skillsSrc = path.join(getTemplatesDir(pluginDir, language), 'skills');
   const skillsDest = path.join(getPluginExtDir(), 'skills');
   
-  if (!fs.existsSync(skillsSrc)) {
+  if (!existsSync(skillsSrc)) {
     // 回退到中文
     const fallbackSrc = path.join(getTemplatesDir(pluginDir, 'zh'), 'skills');
-    if (fs.existsSync(fallbackSrc)) {
-      await fs.ensureDir(skillsDest);
-      await fs.copy(fallbackSrc, skillsDest, { overwrite: true });
+    if (existsSync(fallbackSrc)) {
+      await fse.ensureDir(skillsDest);
+      await fse.copy(fallbackSrc, skillsDest, { overwrite: true });
     }
   } else {
-    await fs.ensureDir(skillsDest);
-    await fs.copy(skillsSrc, skillsDest, { overwrite: true });
+    await fse.ensureDir(skillsDest);
+    await fse.copy(skillsSrc, skillsDest, { overwrite: true });
   }
   
-  const count = fs.existsSync(skillsDest) ? fs.readdirSync(skillsDest).length : 0;
+  const count = existsSync(skillsDest) ? readdirSync(skillsDest).length : 0;
   logger.success(`已复制 ${count} 个 Skills`);
   return count;
 }
@@ -127,30 +167,30 @@ async function copyCoreTemplates(
   workspaceDir: string,
   mode: 'smart' | 'force'
 ): Promise<number> {
-  logger.step('复制核心模板...');
+  logger.step('复制核心模板');
   
   let count = 0;
   const coreSrc = path.join(getTemplatesDir(pluginDir, language), 'core');
   
-  if (!fs.existsSync(coreSrc)) {
+  if (!existsSync(coreSrc)) {
     logger.warn('核心模板目录不存在');
     return 0;
   }
   
-  const files = fs.readdirSync(coreSrc).filter(f => f.endsWith('.md'));
+  const files = readdirSync(coreSrc).filter(f => f.endsWith('.md'));
   
   for (const file of files) {
     const srcPath = path.join(coreSrc, file);
     const destPath = path.join(workspaceDir, file);
     
-    if (fs.existsSync(destPath) && mode === 'smart') {
+    if (existsSync(destPath) && mode === 'smart') {
       // 智能模式：生成 .update 文件
       const updatePath = `${destPath}.update`;
-      await fs.copy(srcPath, updatePath, { overwrite: true });
+      await fse.copy(srcPath, updatePath, { overwrite: true });
       logger.info(`${file} -> ${file}.update (智能模式)`);
     } else {
-      await fs.ensureDir(workspaceDir);
-      await fs.copy(srcPath, destPath, { overwrite: true });
+      await fse.ensureDir(workspaceDir);
+      await fse.copy(srcPath, destPath, { overwrite: true });
       logger.info(`${file} (已复制)`);
     }
     count++;
@@ -168,36 +208,36 @@ async function copyPrinciplesLayer(
   workspaceDir: string,
   mode: 'smart' | 'force'
 ): Promise<number> {
-  logger.step('复制身份层文件...');
+  logger.step('复制身份层文件');
   
   let count = 0;
   const principlesSrc = path.join(pluginDir, 'templates', 'workspace', '.principles');
   const principlesDest = path.join(workspaceDir, '.principles');
   
-  if (!fs.existsSync(principlesSrc)) {
+  if (!existsSync(principlesSrc)) {
     logger.warn('身份层模板目录不存在');
     return 0;
   }
   
   // 复制所有文件
-  const files = fs.readdirSync(principlesSrc);
+  const files = readdirSync(principlesSrc);
   
   for (const file of files) {
     const srcPath = path.join(principlesSrc, file);
     const destPath = path.join(principlesDest, file);
     
     // 跳过目录（models 目录单独处理）
-    if (fs.statSync(srcPath).isDirectory()) {
+    if (statSync(srcPath).isDirectory()) {
       continue;
     }
     
-    if (fs.existsSync(destPath) && mode === 'smart') {
+    if (existsSync(destPath) && mode === 'smart') {
       const updatePath = `${destPath}.update`;
-      await fs.copy(srcPath, updatePath, { overwrite: true });
+      await fse.copy(srcPath, updatePath, { overwrite: true });
       logger.info(`.principles/${file} -> .update (智能模式)`);
     } else {
-      await fs.ensureDir(principlesDest);
-      await fs.copy(srcPath, destPath, { overwrite: true });
+      await fse.ensureDir(principlesDest);
+      await fse.copy(srcPath, destPath, { overwrite: true });
       logger.info(`.principles/${file} (已复制)`);
     }
     count++;
@@ -207,10 +247,10 @@ async function copyPrinciplesLayer(
   const modelsSrc = path.join(principlesSrc, 'models');
   const modelsDest = path.join(principlesDest, 'models');
   
-  if (fs.existsSync(modelsSrc)) {
-    await fs.ensureDir(modelsDest);
-    await fs.copy(modelsSrc, modelsDest, { overwrite: true });
-    const modelCount = fs.readdirSync(modelsDest).length;
+  if (existsSync(modelsSrc)) {
+    await fse.ensureDir(modelsDest);
+    await fse.copy(modelsSrc, modelsDest, { overwrite: true });
+    const modelCount = readdirSync(modelsDest).length;
     logger.info(`.principles/models/ (${modelCount} 个思维模型)`);
     count += modelCount;
   }
@@ -233,8 +273,8 @@ async function createConfigFile(workspaceDir: string): Promise<void> {
     installedAt: new Date().toISOString(),
   };
   
-  await fs.ensureDir(configDir);
-  await fs.writeJson(configPath, config, { spaces: 2 });
+  await fse.ensureDir(configDir);
+  await fse.writeJson(configPath, config, { spaces: 2 });
   
   logger.success(`配置文件已创建: ${configPath}`);
 }

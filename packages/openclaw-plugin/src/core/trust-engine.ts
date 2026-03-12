@@ -5,7 +5,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import type { OpenClawPluginApi } from '../openclaw-sdk.js';
+import type { OpenClawPluginApi, SubagentWaitResult } from '../openclaw-sdk.js';
 import { EventLogService } from './event-log.js';
 import { resolvePdPath } from './paths.js';
 import { ConfigService } from './config-service.js';
@@ -30,8 +30,20 @@ export interface TrustScorecard {
 export type TrustStage = 1 | 2 | 3 | 4;
 
 export const EXPLORATORY_TOOLS = [
-    'read', 'read_file', 'grep_search', 'list_directory', 'ls', 'glob',
-    'web_fetch', 'ask_user', 'memory_recall', 'pd-status', 'trust', 'report'
+    // 文件读取
+    'read', 'read_file', 'read_many_files', 'image_read',
+    // 搜索和列表
+    'search_file_content', 'grep', 'grep_search', 'list_directory', 'ls', 'glob',
+    // Web
+    'web_fetch', 'web_search',
+    // 用户交互
+    'ask_user', 'ask_user_question',
+    // LSP
+    'lsp_hover', 'lsp_goto_definition', 'lsp_find_references',
+    // 内存和状态
+    'memory_recall', 'save_memory', 'todo_read', 'todo_write',
+    // 状态查询
+    'pd-status', 'trust', 'report',
 ];
 
 export const CONSTRUCTIVE_TOOLS = [
@@ -137,10 +149,15 @@ export class TrustEngine {
         const rewards = settings.rewards;
         const toolName = context?.toolName;
 
-        // 1. Filter out exploratory tool "successes" from rewards
-        if (reason === 'tool_success' && toolName && EXPLORATORY_TOOLS.includes(toolName)) {
-            // Exploratory tools don't grant trust, but they prove the agent isn't stuck.
-            // We don't increment success_streak or add delta.
+        // 1. Check if this is an exploratory tool success
+        const isExploratory = toolName && EXPLORATORY_TOOLS.includes(toolName);
+
+        if (reason === 'tool_success' && isExploratory) {
+            // Exploratory tools don't grant trust points, but they:
+            // 1. Reset the exploratory failure streak
+            // 2. Prove the agent isn't stuck (no delta, no success_streak increment)
+            this.scorecard.exploratory_failure_streak = 0;
+            this.updateScore(0, `Exploratory Success: ${toolName}`, 'info', context);
             return;
         }
 
@@ -201,8 +218,11 @@ export class TrustEngine {
         this.scorecard.failure_streak++;
         this.scorecard.success_streak = 0;
 
-        if (this.scorecard.failure_streak > 1) {
-            delta += (this.scorecard.failure_streak - 1) * penalties.failure_streak_multiplier;
+        // Safety cap: streak multiplier only applies up to 5 consecutive failures
+        // to prevent "death spiral" from cascading errors
+        const effectiveStreak = Math.min(this.scorecard.failure_streak, 5);
+        if (effectiveStreak > 1) {
+            delta += (effectiveStreak - 1) * penalties.failure_streak_multiplier;
         }
 
         if (delta < penalties.max_penalty) delta = penalties.max_penalty;
@@ -210,7 +230,7 @@ export class TrustEngine {
         this.updateScore(delta, `Failure: ${toolName || type}`, 'failure', context);
     }
 
-    private updateScore(delta: number, reason: string, type: 'success' | 'failure' | 'penalty', context?: { sessionId?: string; api?: any }): void {
+    private updateScore(delta: number, reason: string, type: 'success' | 'failure' | 'penalty' | 'info', context?: { sessionId?: string; api?: any }): void {
         const oldScore = this.scorecard.trust_score;
         this.scorecard.trust_score += delta;
         if (this.scorecard.trust_score < 0) this.scorecard.trust_score = 0;
@@ -226,7 +246,9 @@ export class TrustEngine {
         }
 
         const limit = this.trustSettings.history_limit || 50;
-        if (this.scorecard.history.length > limit) this.scorecard.history.shift();
+        if (this.scorecard.history.length > limit) {
+            this.scorecard.history.shift();
+        }
         this.saveScorecard();
     }
 
