@@ -163,7 +163,7 @@ export class PathResolver {
         let normalized = path.resolve(inputPath);
         
         if (this.normalizeWorkspace) {
-            const problematicSuffixes = ['/memory', '/docs', '/workspace'];
+            const problematicSuffixes = ['/memory', '/docs'];
             
             for (const suffix of problematicSuffixes) {
                 if (normalized.endsWith(suffix)) {
@@ -233,20 +233,36 @@ export class PathResolver {
     resolve(key: string): string {
         const workspace = this.getWorkspaceDir();
         const state = this.getStateDir();
+        const memory = path.join(workspace, 'memory');
         
         const pathMap: Record<string, string> = {
             'PROFILE': path.join(workspace, '.principles', 'PROFILE.json'),
             'PRINCIPLES': path.join(workspace, '.principles', 'PRINCIPLES.md'),
             'THINKING_OS': path.join(workspace, '.principles', 'THINKING_OS.md'),
+            'KERNEL': path.join(workspace, '.principles', '00-kernel.md'),
+            'DECISION_POLICY': path.join(workspace, '.principles', 'DECISION_POLICY.json'),
+            'MODELS_DIR': path.join(workspace, '.principles', 'models'),
             'PLAN': path.join(workspace, 'PLAN.md'),
             'AGENT_SCORECARD': path.join(state, 'AGENT_SCORECARD.json'),
             'PAIN_FLAG': path.join(state, '.pain_flag'),
             'EVOLUTION_QUEUE': path.join(state, 'evolution_queue.json'),
+            'EVOLUTION_DIRECTIVE': path.join(state, 'evolution_directive.json'),
+            'WORKBOARD': path.join(state, 'WORKBOARD.json'),
+            'SYSTEM_CAPABILITIES': path.join(state, 'SYSTEM_CAPABILITIES.json'),
             'PAIN_SETTINGS': path.join(state, 'pain_settings.json'),
+            'PAIN_CANDIDATES': path.join(state, 'pain_candidates.json'),
+            'THINKING_OS_USAGE': path.join(state, 'thinking_os_usage.json'),
             'DICTIONARY': path.join(state, 'pain_dictionary.json'),
             'STATE_DIR': state,
-            'LOGS': path.join(workspace, 'memory', 'logs'),
-            'MEMORY': path.join(workspace, 'memory'),
+            'LOGS': path.join(memory, 'logs'),
+            'SYSTEM_LOG': path.join(memory, 'logs', 'SYSTEM.log'),
+            'REFLECTION_LOG': path.join(memory, 'reflection-log.md'),
+            'USER_CONTEXT': path.join(memory, 'USER_CONTEXT.md'),
+            'OKR_DIR': path.join(memory, 'okr'),
+            'CURRENT_FOCUS': path.join(memory, 'okr', 'CURRENT_FOCUS.md'),
+            'WEEK_STATE': path.join(memory, 'okr', 'WEEK_STATE.json'),
+            'THINKING_OS_CANDIDATES': path.join(memory, 'THINKING_OS_CANDIDATES.md'),
+            'MEMORY': memory,
         };
 
         const resolved = pathMap[key];
