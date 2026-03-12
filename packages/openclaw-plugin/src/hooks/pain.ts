@@ -106,6 +106,9 @@ export function handleAfterToolCall(
     // ── SUCCESS BRANCH ──
     resetFriction(sessionId, effectiveWorkspaceDir);
     
+    // 👈 FIX: Record success to reset failure streak and earn minor trust
+    trust.recordSuccess('tool_success', { sessionId, api });
+    
     if (WRITE_TOOLS.includes(event.toolName)) {
       const filePath = params.file_path || params.path || params.file;
       eventLog.recordToolCall(sessionId, {
