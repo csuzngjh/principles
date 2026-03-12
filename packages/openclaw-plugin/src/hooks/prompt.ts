@@ -24,6 +24,19 @@ export async function handleBeforePromptBuild(
   let prependContext = '';
   let appendSystemContext = '';
 
+  // ═══ LAYER 0 (道之源): Core Principles - Highest Priority ═══
+  const principlesPath = wctx.resolve('PRINCIPLES');
+  if (fs.existsSync(principlesPath)) {
+    try {
+      const principles = fs.readFileSync(principlesPath, 'utf8');
+      if (principles.trim()) {
+        prependSystemContext = `<core_principles>\n${principles.trim()}\n</core_principles>`;
+      }
+    } catch (e) {
+      console.error(`[PD:Prompt] Failed to read PRINCIPLES: ${String(e)}`);
+    }
+  }
+
   // 0. Manual Pain Clearance
   if (trigger === 'user' && sessionId && session && session.currentGfi >= 100) {
     resetFriction(sessionId, workspaceDir);
