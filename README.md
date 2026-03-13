@@ -299,13 +299,33 @@ For OpenClaw users, this framework is deeply integrated via the native Plugin SD
 
 | Command | Description |
 |---|---|
-| `/init-strategy` | Initialize OKR strategy |
-| `/manage-okr` | Manage project OKR |
-| `/evolve-task <desc>` | Trigger evolution task (Delegate to diagnostician) |
-| `/evolution-daily` | Configure and send daily evolution report |
-| `/bootstrap-tools` | Scan and upgrade environment tools |
-| `/research-tools <query>` | Search the web for cutting-edge CLI tools |
-| `/thinking-os [status\|propose\|audit]` | Govern the Thinking OS |
+| **Strategy & Planning** ||
+| `/init-strategy` | Initialize project-level strategy and vision through structured interview |
+| `/manage-okr` | Full-lifecycle OKR management with subagent negotiation |
+| `/plan-script` | Create a step-by-step movie-script style execution plan |
+| **Evolution & Learning** ||
+| `/evolve-task` | Run the full evolution loop (triage → diagnosis → audit → plan → execute → review) |
+| `/evolve-system` | Second-order observation and system-level evolution proposals |
+| `/evolution-framework-update` | Pull the latest updates for the Principles Disciple framework |
+| `/watch-evolution` | Start the background evolution daemon to process queued tasks |
+| `/pd-daily` | Configure and send daily evolution reports |
+| **Reflection & Diagnosis** ||
+| `/pain` | Manually trigger a pain signal to force system reflection |
+| `/reflection` | Deep metacognitive reflection on task status and systemic issues |
+| `/reflection-log` | Final task reflection and evolution logging |
+| `/root-cause` | Deep dive analysis using the 5 Whys method |
+| `/triage` | Initial problem definition and risk assessment |
+| `/deductive-audit` | Rigorous safety and logic check of a proposed solution |
+| **Tools & Environment** ||
+| `/bootstrap-tools` | Scan project tech stack and search for latest CLI tools |
+| `/profile` | Manually correct or update user profile settings |
+| `/pd-grooming` | Workspace grooming to archive or clean up scattered files |
+| `/pd-mentor` | Interactive command guidance and scenario-based recommendations |
+| **System Admin** ||
+| `/admin` | System administration and recovery tool (init, repair, reset) |
+| `/inject-rule` | Inject a temporary ad-hoc rule for immediate course correction |
+| `/feedback` | Standardized bug reporting with system logs collection |
+| `/report` | Request a formal status report from the Reporter agent |
 
 ---
 
