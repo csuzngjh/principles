@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { PluginHookLlmOutputEvent, PluginHookAgentContext } from '../openclaw-sdk.js';
-import { trackLlmOutput } from '../core/session-tracker.js';
+import { trackLlmOutput, recordThinkingCheckpoint } from '../core/session-tracker.js';
 import { writePainFlag } from '../core/pain.js';
 import { DetectionService } from '../core/detection-service.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
@@ -80,7 +80,7 @@ export function handleLlmOutput(
     }
 
     // ═══ Thinking OS: Mental Model Usage Tracking ═══
-    trackThinkingModelUsage(text, wctx);
+    trackThinkingModelUsage(text, wctx, ctx.sessionId);
 }
 
 const THINKING_MODEL_SIGNALS: Record<string, RegExp[]> = {
@@ -131,7 +131,7 @@ const THINKING_MODEL_SIGNALS: Record<string, RegExp[]> = {
     ],
 };
 
-function trackThinkingModelUsage(text: string, wctx: WorkspaceContext): void {
+function trackThinkingModelUsage(text: string, wctx: WorkspaceContext, sessionId?: string): void {
     const logPath = wctx.resolve('THINKING_OS_USAGE');
     const logDir = path.dirname(logPath);
     if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
@@ -160,6 +160,10 @@ function trackThinkingModelUsage(text: string, wctx: WorkspaceContext): void {
     usageLog['_total_turns'] = (usageLog['_total_turns'] || 0) + 1;
 
     if (anyMatch) {
+        // Record thinking checkpoint for gate enforcement
+        if (sessionId) {
+            recordThinkingCheckpoint(sessionId, wctx.workspaceDir);
+        }
         try {
             fs.writeFileSync(logPath, JSON.stringify(usageLog, null, 2), 'utf8');
         } catch (e) {

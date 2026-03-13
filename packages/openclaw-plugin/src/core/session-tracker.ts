@@ -36,6 +36,9 @@ export interface SessionState {
     dailyToolFailures: number;
     dailyPainSignals: number;
     dailyGfiPeak: number;
+    
+    // Thinking OS checkpoint - tracks last deep thinking timestamp
+    lastThinkingTimestamp: number;
 }
 
 const sessions = new Map<string, SessionState>();
@@ -160,6 +163,7 @@ function getOrCreateSession(sessionId: string, workspaceDir?: string): SessionSt
             dailyToolFailures: 0,
             dailyPainSignals: 0,
             dailyGfiPeak: 0,
+            lastThinkingTimestamp: 0,
         };
         sessions.set(sessionId, state);
     }
@@ -260,6 +264,30 @@ export function resetFriction(sessionId: string, workspaceDir?: string): Session
     schedulePersistence(state);
     
     return state;
+}
+
+/**
+ * Records that deep thinking (Thinking OS) was performed in this session.
+ * Used by the Thinking OS checkpoint to allow high-risk operations.
+ */
+export function recordThinkingCheckpoint(sessionId: string, workspaceDir?: string): SessionState {
+    const state = getOrCreateSession(sessionId, workspaceDir);
+    state.lastThinkingTimestamp = Date.now();
+    SystemLogger.log(state.workspaceDir, 'THINKING_CHECKPOINT', `Deep thinking recorded at ${new Date(state.lastThinkingTimestamp).toISOString()}`);
+    schedulePersistence(state);
+    return state;
+}
+
+/**
+ * Checks if deep thinking was performed recently (within the given window).
+ * @param sessionId - The session to check
+ * @param windowMs - How recent the thinking must be (default: 5 minutes)
+ * @returns true if thinking was recorded within the window
+ */
+export function hasRecentThinking(sessionId: string, windowMs: number = 5 * 60 * 1000): boolean {
+    const state = sessions.get(sessionId);
+    if (!state || !state.lastThinkingTimestamp) return false;
+    return (Date.now() - state.lastThinkingTimestamp) < windowMs;
 }
 
 export function trackBlock(sessionId: string): SessionState {
