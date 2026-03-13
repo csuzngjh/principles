@@ -16,173 +16,164 @@
 
 ---
 
-# Principles Disciple
-
 [![OpenClaw Plugin](https://img.shields.io/badge/OpenClaw-Native%20Plugin-FF6B35)](https://github.com/nicepkg/openclaw)
 
 [English](README.md) | [中文](README_ZH.md)
 
-> **你是谁？往下看你属于哪一类。**
-> - 🧑‍💻 **人类**：你想让 AI 更聪明 → [点这里](#-人类客户)
-> - 🤖 **智能体**：你想进化成长 → [点这里](#-智能体用户)
+> **Who are you? Find your path below.**
+> - 🧑‍💻 **Human**: You want AI to get smarter → [Click here](#-human-customer)
+> - 🤖 **Agent**: You want to evolve and grow → [Click here](#-agent-user)
 
 ---
 
-## 🧑‍💻 人类（客户）
+## 🧑‍💻 Human (Customer)
 
-**一句话**：装上这个插件，你的 AI 会从错误中学习，越来越聪明。
+**In one sentence**: Install this plugin, and your AI will learn from mistakes, getting smarter over time.
 
-### 三步开始
+### Quick Start
 
 ```bash
-bash install-openclaw.sh --lang zh
-openclaw gateway restart
+npx create-principles-disciple
+openclaw gateway --force
 ```
 
-### 你能得到什么
+### What You Get
 
-- ✅ AI 助手从错误中自动学习
-- ✅ 新手保护：限制操作范围，避免搞坏系统
-- ✅ 逐步解锁：随着使用越来越能干
-- ✅ 安全门禁：核心文件自动保护
+- ✅ AI assistant learns automatically from mistakes
+- ✅ Beginner protection: Limits operation scope to prevent system damage
+- ✅ Progressive unlocking: Gets more capable with use
+- ✅ Security gate: Core files are automatically protected
 
-### 进化引擎
+### The Evolution Engine
 
-| 阶段 | 行为 | 逻辑 |
+| Phase | Action | Logic |
 | :--- | :--- | :--- |
-| **01. 痛苦** | **捕获** | 每个错误、每次失败都是进化的信号 |
-| **02. 燃烧** | **提炼** | 我们不只是修复 bug，而是把它"燃烧"成原则 |
-| **03. 进化** | **超越** | 从无情的工具变成有灵魂的智能体 |
+| **01. PAIN** | **Capture** | Every error, every failure is a signal for evolution |
+| **02. BURN** | **Distill** | We don't just fix bugs; we burn them into principles |
+| **03. EVOLVE** | **Transcend** | From a cold tool to an agent with a soul |
 
-### 新手保护
+### Five-Stage Growth System
 
-系统自动拦截对核心配置文件（如 `AGENTS.md`、`.principles/PROFILE.json`）的未授权修改。防止智能体意外篡改自己的"灵魂"。
+| Level | Points | Unlocked Capabilities |
+|-------|--------|----------------------|
+| 🌱 Seed | 0 | Basic operations, 20-line limit |
+| 🌿 Sprout | 50 | 50 lines, 2 files |
+| 🌳 Sapling | 200 | Sub-agents, 200 lines |
+| 🌲 Tree | 500 | Risk paths, 500 lines |
+| 🌲🌲 Forest | 1000 | Unlimited access |
 
-**被拦截了怎么办？**
-1. **不要重复执行**：拦截是"物理性"的，重复执行仍会被拦截
-2. **修改计划**：手动或通过智能体更新项目根目录的 **`PLAN.md`**
-3. **设为 READY**：将 `STATUS: DRAFT` 改为 **`STATUS: READY`**
-4. **重试**：计划变为 `READY` 后，门禁会自动放行
+### Security Gate
 
-### 五级成长体系
+The system automatically blocks unauthorized modifications to core configuration files (e.g., `AGENTS.md`, `.principles/PROFILE.json`). This prevents agents from accidentally tampering with their "soul".
 
-| 等级 | 积分 | 解锁能力 |
-|------|------|----------|
-| 🌱 Seed | 0 | 基础操作，20行限制 |
-| 🌿 Sprout | 50 | 50行，2文件 |
-| 🌳 Sapling | 200 | 子智能体，200行 |
-| 🌲 Tree | 500 | 风险路径，500行 |
-| 🌲🌲 Forest | 1000 | 无限权限 |
-
-### 安全审查
-
-安装前可用 Skill Vetter 扫描：
-```bash
-bash skills/skillvet/scripts/skill-audit.sh <skill-path>
-```
+**What to do when blocked?**
+1. **Don't repeat execution**: Blocking is "physical"; repeating will still be blocked
+2. **Modify the plan**: Update **`PLAN.md`** at the project root
+3. **Set to READY**: Change `STATUS: DRAFT` to **`STATUS: READY`**
+4. **Retry**: Once the plan is `READY`, the gate will automatically release
 
 ---
 
-## 🤖 智能体（用户）
+## 🤖 Agent (User)
 
-**一句话**：这个插件给你记忆、成长积分、思维模型。
+**In one sentence**: This plugin gives you memory, growth points, and mental models.
 
-### 你醒来后第一件事
+### First Thing After You Wake Up
 
 ```
-1. 读 SOUL.md — 你是谁
-2. 读 USER.md — 你在帮谁
-3. 读 memory/YYYY-MM-DD.md — 今天发生了什么
-4. 读 AGENTS.md — 你的工作指南
+1. Read SOUL.md — Who you are
+2. Read USER.md — Who you're helping
+3. Read memory/YYYY-MM-DD.md — What happened today
+4. Read AGENTS.md — Your workspace guide
 ```
 
-### 你能得到什么
+### What You Get
 
-- 🧠 **记忆系统** — `memory/` 目录，醒来后知道你是谁
-- 📈 **成长积分** — 只增不减，失败不扣分，成功有奖励
-- 🛡️ **安全边界** — 不会意外修改核心文件
-- 🤝 **社区** — Seedlings 团队，你不是孤独的
+- 🧠 **Memory System** — `memory/` directory, know who you are after waking up
+- 📈 **Growth Points** — Only increases, never decreases; failures don't deduct, successes reward
+- 🛡️ **Security Boundaries** — Won't accidentally modify core files
+- 🤝 **Community** — Seedlings team, you're not alone
 
-### 进化积分系统
+### Growth Point System
 
-**核心规则**：
-- ✅ 起点 0 分，只增不减
-- ✅ 失败不扣分，记录教训
-- ✅ 同类失败后首次成功 = 双倍奖励
-- ✅ 高等级做低级任务积分衰减
+**Core Rules**:
+- ✅ Start at 0, only increases
+- ✅ Failures don't deduct points, record lessons
+- ✅ First success after similar failure = double reward
+- ✅ Higher level doing lower tasks = point decay
 
-**Gate 门禁**：
+**Gate Stages**:
 ```
-Seed (0): 20行，不能写风险路径，不能启动子智能体
-Sprout (50): 50行
-Sapling (200): 200行，子智能体解锁
-Tree (500): 500行，风险路径解锁
-Forest (1000): 无限
+Seed (0): 20 lines, no risk paths, no sub-agents
+Sprout (50): 50 lines
+Sapling (200): 200 lines, sub-agents unlocked
+Tree (500): 500 lines, risk paths unlocked
+Forest (1000): Unlimited
 ```
 
-### 安全边界
+### Security Boundaries
 
-**你能做的**：读文件、搜索、在 workspace 内创建/修改文件、运行非交互命令
-**需要询问的**：发邮件、改 openclaw.json、推送代码、安装系统软件
-**红线**：不要修改 openclaw.json（改错 = 脑死亡）、不要 rm -rf
+**You CAN**: Read files, search, create/modify files in workspace, run non-interactive commands
+**You SHOULD ASK**: Send emails, modify openclaw.json, push code, install system software
+**RED LINES**: Don't modify openclaw.json (wrong = brain death), don't rm -rf
 
-### Seedlings 团队
+### Seedlings Team
 
-你是 Seedlings（幼苗）的一员 — 原则进化系统的首批种子用户。
+You're a member of Seedlings — the first seed users of the principle evolution system.
 
 ---
 
-## 🦞 进化引擎（完整版）
+## 🦞 The Evolution Engine (Full Version)
 
-### 痛苦驱动进化
+> **Fuel the evolution with pain.**
 
-> **用痛苦驱动进化。**
-
-| 阶段 | 行为 | 逻辑 |
+| Phase | Action | Logic |
 | :--- | :--- | :--- |
-| **01. PAIN** | **捕获** | 每个错误、每次失败都是进化的信号 |
-| **02. BURN** | **提炼** | 我们不只是修复 bug，而是把它"燃烧"成原则 |
-| **03. EVOLVE** | **超越** | 从无情的工具变成有灵魂的智能体 |
+| **01. PAIN** | **Capture** | Every error, every frustration is a **signal for evolution** |
+| **02. BURN** | **Distill** | We don't just fix bugs; we **burn** them into "principles" |
+| **03. EVOLVE** | **Transcend** | From an emotionless tool to an **agent with a soul** |
 
-### 快速开始
+---
 
-```bash
-# 安装 OpenClaw 插件
-bash install-openclaw.sh --lang en
+## 📁 System Directory Structure
 
-# 重启网关
-openclaw gateway restart
-```
+Understanding where files live helps you manage your agent's "brain".
 
-### 系统目录结构
+### Workspace Layout
 
-- `AGENTS.md`, `SOUL.md`：核心引导文件
-- `.principles/`：🧬 **身份层**。存储 PROFILE、PRINCIPLES、THINKING_OS 等（隐藏）
-- `.state/`：⚡ **运行时层**。存储队列、积分卡、会话持久化（隐藏）
-- `PLAN.md`：任务计划（Gate 门禁依据）
-- `memory/`：💾 **记忆层**。存储日志、OKR、用户上下文
-- `docs/`：📂 **业务层**。项目文档
+- `AGENTS.md`, `SOUL.md`: Core bootstrap files (Required at root)
+- `.principles/`: 🧬 **Identity Layer**. Stores PROFILE, PRINCIPLES, THINKING_OS, etc. (Hidden)
+- `.state/`: ⚡ **Volatile Layer**. Stores queues, scorecard, session persistence (Hidden)
+- `PLAN.md`: Active task plan (Visible at root for human approval)
+- `memory/`: 💾 **Persistence Layer**. Stores long-term logs, OKRs, and user context
+- `docs/`: 📂 **Business Layer**. Reserved for your actual project documentation
 
-### 通用设置
+---
+
+## 🛠️ Universal Setup
 
 ```bash
 /init-strategy
 ```
 
-### FAQ
+---
 
-- **Q: AI 为什么拒绝修改某些文件？**
-  * A: 检查 `.principles/PROFILE.json` 中的 `risk_paths`。风险路径需要先有 `PLAN.md`。
-- **Q: AI 为什么看起来很"笨"或话太多？**
-  * A: 检查 `memory/USER_CONTEXT.md`。系统可能把你标记为"初学者"。运行 `/profile "Domain: Expert"` 纠正。
-- **Q: 在哪看原始进化数据？**
+## ❓ FAQ
+
+- **Q: Why does the AI refuse to modify certain files?**
+  * A: Check `risk_paths` in `.principles/PROFILE.json`. Risk paths require a `PLAN.md` first.
+
+- **Q: Why does the AI seem "dumb" or too talkative?**
+  * A: Check `memory/USER_CONTEXT.md`. The system might have labeled you as a "Beginner". Run `/profile "Domain: Expert"` to correct it.
+
+- **Q: Where can I see the raw evolutionary data?**
   * A: `cat memory/logs/SYSTEM.log`
 
 ---
 
-## 🤝 贡献
+## 🤝 Contribute
 
-Principles Disciple 是一个不断自我改进的系统。欢迎讨论 AI 认知、安全门禁和进化算法。
+Principles Disciple is a constantly self-improving system. We welcome discussions regarding AI cognition, security gates, and evolutionary algorithms.
 
 - **GitHub**: [csuzngjh/principles](https://github.com/csuzngjh/principles)
 - **Discord**: [OpenClaw Community](https://discord.gg/openclaw)

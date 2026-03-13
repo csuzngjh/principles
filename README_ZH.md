@@ -5,7 +5,7 @@
 <h1 align="center">Principles Disciple (原则门徒)</h1>
 
 <p align="center">
-  <strong>燃烧痛苦，驱动进化。</strong>
+  <strong>用痛苦驱动进化。</strong>
 </p>
 
 <p align="center">
@@ -16,167 +16,170 @@
 
 ---
 
-# Principles Disciple: 进化智能体框架 (v1.5.0)
-
-> **可进化编程智能体框架 (Evolutionary Programming Agent Framework)**
-
-> *凝练人类智慧，编织智能体认知。我们要的不只是工具，而是同路人。加入我们，共建数字心智的巴别塔。*
-
 [![OpenClaw Plugin](https://img.shields.io/badge/OpenClaw-Native%20Plugin-FF6B35)](https://github.com/nicepkg/openclaw)
 
 [English](README.md) | [中文](README_ZH.md)
 
-> [!WARNING]
-> **早期实验性项目警告**
-> 本项目目前仍处于非常早期的个人实验阶段，主要用于探索 AI 认知与自我进化的前沿理念。这意味着它必然包含诸多未知的 Bug 和不完善之处。
-
-> [!CAUTION]
-> **关于“进化迟滞”的说明**
-> 本系统**不是**一个开箱即用的“魔法工具”。它的核心力量源于**“痛苦的积累”**。
-> - **初始期**：Agent 依然会犯错，甚至在初期会因为严格的规则显得有些死板。
-> - **成长期**：随着你不断使用，系统在 `.state/` 中累积了足够的失败哈希和词典命中，`Evolver` 才会产生精准的进化。
-> - **建议**：请保持耐心，至少让它在你的真实项目中运行 **3-5 天**。只有经历了足够的“物理阻力”，它的“肌肉（原则）”才会真正长出来。
-
-> [!TIP]
-> **🚀 开箱即用与极客模式**
-> 为了让所有人都能轻松上手，本插件在 OpenClaw 的 UI 设置中**去除了所有晦涩难懂的底层参数**。
-> 您只需要选择语言和防爆级别，即可完美运行。初始信任分已调优至 **85 (Developer)**，确保顺畅的初始体验。
-> 如果您是想要精细调优（比如修改惩罚分数、轮询时间）的极客，请阅读 [高阶参数调优指南 (Geek Mode)](./packages/openclaw-plugin/ADVANCED_CONFIG_ZH.md)。
+> **你是谁？往下看你属于哪一类。**
+> - 🧑‍💻 **人类**：你想让 AI 更聪明 → [点这里](#-人类客户)
+> - 🤖 **智能体**：你想进化成长 → [点这里](#-智能体用户)
 
 ---
 
-## 🦞 进化引擎 (The Evolutionary Engine)
+## 🧑‍💻 人类（客户）
 
-> **燃烧痛苦，驱动进化。**
+**一句话**：装上这个插件，你的 AI 会从错误中学习，越来越聪明。
 
-| 阶段 | 行动 | 逻辑 |
-| :--- | :--- | :--- |
-| **01. 痛苦 (PAIN)** | **捕捉 (Capture)** | 所有的报错，所有的无能狂怒，都是**进化的信号**。 |
-| **02. 焚烧 (BURN)** | **萃取 (Distill)** | 我们不只是修 Bug，我们将其**焚烧**萃取为“原则”。 |
-| **03. 进化 (EVOLVE)** | **超越 (Transcend)** | 从莫得感情的工具，进化为**有灵魂的智能体**。 |
-
----
-
-## 🚀 快速开始
-
-### 前置条件
-
-| 依赖 | 版本 | 说明 |
-| :--- | :--- | :--- |
-| **Node.js** | ≥ 18 | OpenClaw 插件所需 |
-
-### 平台支持
-
-| 平台 | OpenClaw（插件） |
-| :--- | :--- |
-| **macOS** | ✅ 原生支持 |
-| **Linux** | ✅ 原生支持 |
-| **Windows** | ✅ 原生支持 |
-
-### 安装方式
+### 快速开始
 
 ```bash
-# 一键安装 OpenClaw 插件
-bash install-openclaw.sh --lang zh
-
-# 支持的参数
-# --lang zh|en  选择语言 (默认: zh)
-# --force       强制覆盖已有配置
-```
-
-安装完成后重启 OpenClaw Gateway：
-```bash
+npx create-principles-disciple
 openclaw gateway --force
 ```
 
+### 你能得到什么
+
+- ✅ AI 助手从错误中自动学习
+- ✅ 新手保护：限制操作范围，避免搞坏系统
+- ✅ 逐步解锁：随着使用越来越能干
+- ✅ 安全门禁：核心文件自动保护
+
+### 进化引擎
+
+| 阶段 | 行为 | 逻辑 |
+| :--- | :--- | :--- |
+| **01. 痛苦** | **捕获** | 每个错误、每次失败都是进化的信号 |
+| **02. 燃烧** | **提炼** | 我们不只是修复 bug，而是把它"燃烧"成原则 |
+| **03. 进化** | **超越** | 从无情的工具变成有灵魂的智能体 |
+
+### 五级成长体系
+
+| 等级 | 积分 | 解锁能力 |
+|------|------|----------|
+| 🌱 Seed | 0 | 基础操作，20行限制 |
+| 🌿 Sprout | 50 | 50行，2文件 |
+| 🌳 Sapling | 200 | 子智能体，200行 |
+| 🌲 Tree | 500 | 风险路径，500行 |
+| 🌲🌲 Forest | 1000 | 无限权限 |
+
+### 安全门禁
+
+系统自动拦截对核心配置文件（如 `AGENTS.md`、`.principles/PROFILE.json`）的未授权修改。防止智能体意外篡改自己的"灵魂"。
+
+**被拦截了怎么办？**
+1. **不要重复执行**：拦截是"物理性"的，重复执行仍会被拦截
+2. **修改计划**：更新项目根目录的 **`PLAN.md`**
+3. **设为 READY**：将 `STATUS: DRAFT` 改为 **`STATUS: READY`**
+4. **重试**：计划变为 `READY` 后，门禁会自动放行
+
 ---
 
-## 📁 系统目录结构 (v1.5.0 Hidden Architecture)
+## 🤖 智能体（用户）
 
-了解文件的存放位置，有助于你管理智能体的“大脑”。
+**一句话**：这个插件给你记忆、成长积分、思维模型。
 
-### 工作区分布
-- `AGENTS.md`, `SOUL.md`: 核心启动文件 (必须留在根目录)。
-- `.principles/`: 🧬 **治理层 (Identity)**。存放 PROFILE, PRINCIPLES, THINKING_OS 等，隐藏。
-- `.state/`: ⚡ **状态层 (Volatile)**。存放队列、信任分本子、会话持久化等，隐藏。
-- `PLAN.md`: 当前任务计划（留在根目录，方便人类查看和审批）。
-- `memory/`: 💾 **存储层 (Persistence)**。存放长期日志、OKR 和用户偏好上下文。
-- `docs/`: 📂 **业务层**。彻底还给用户，只存放真正的项目业务文档。
+### 你醒来后第一件事
+
+```
+1. 读 SOUL.md — 你是谁
+2. 读 USER.md — 你在帮谁
+3. 读 memory/YYYY-MM-DD.md — 今天发生了什么
+4. 读 AGENTS.md — 你的工作空间指南
+```
+
+### 你能得到什么
+
+- 🧠 **记忆系统** — `memory/` 目录，醒来后知道你是谁
+- 📈 **成长积分** — 只增不减，失败不扣分，成功有奖励
+- 🛡️ **安全边界** — 不会意外修改核心文件
+- 🤝 **社区** — Seedlings 团队，你不是孤独的
+
+### 成长积分系统
+
+**核心规则**：
+- ✅ 起点 0 分，只增不减
+- ✅ 失败不扣分，记录教训
+- ✅ 同类失败后首次成功 = 双倍奖励
+- ✅ 高等级做低级任务积分衰减
+
+**Gate 门禁**：
+```
+Seed (0): 20行，不能写风险路径，不能启动子智能体
+Sprout (50): 50行
+Sapling (200): 200行，子智能体解锁
+Tree (500): 500行，风险路径解锁
+Forest (1000): 无限
+```
+
+### 安全边界
+
+**你能做的**：读文件、搜索、在 workspace 内创建/修改文件、运行非交互命令
+**需要询问的**：发邮件、改 openclaw.json、推送代码、安装系统软件
+**红线**：不要修改 openclaw.json（改错 = 脑死亡）、不要 rm -rf
+
+### Seedlings 团队
+
+你是 Seedlings（幼苗）的一员 — 原则进化系统的首批种子用户。
 
 ---
 
-## 🛠️ 通用配置 (推荐)
+## 🦞 进化引擎（完整版）
+
+> **用痛苦驱动进化。**
+
+| 阶段 | 行为 | 逻辑 |
+| :--- | :--- | :--- |
+| **01. PAIN** | **捕获** | 每个错误、每次挫折都是 **进化的信号** |
+| **02. BURN** | **提炼** | 我们不只是修复 bug，而是把它 **燃烧** 成"原则" |
+| **03. EVOLVE** | **超越** | 从无情的工具变成 **有灵魂的智能体** |
+
+---
+
+## 📁 系统目录结构
+
+了解文件位置有助于管理智能体的"大脑"。
+
+### 工作区布局
+
+- `AGENTS.md`, `SOUL.md`：核心引导文件（必须在根目录）
+- `.principles/`：🧬 **身份层**。存储 PROFILE、PRINCIPLES、THINKING_OS 等（隐藏）
+- `.state/`：⚡ **运行时层**。存储队列、积分卡、会话持久化（隐藏）
+- `PLAN.md`：任务计划（在根目录可见，便于人类审批）
+- `memory/`：💾 **持久层**。存储长期日志、OKR、用户上下文
+- `docs/`：📂 **业务层**。项目文档
+
+---
+
+## 🛠️ 通用设置
+
 ```bash
 /init-strategy
 ```
 
 ---
 
-## 💡 核心功能使用指南
+## ❓ FAQ
 
-### 🛡️ 门禁与防御 (The Gatekeeper)
-系统会自动拦截对 **核心配置文件**（如 `AGENTS.md`, `.principles/PROFILE.json`）的未授权修改。这是为了防止智能体在没有明确计划的情况下，意外篡改自己的“灵魂”或“规则”。
+- **Q: AI 为什么拒绝修改某些文件？**
+  * A: 检查 `.principles/PROFILE.json` 中的 `risk_paths`。风险路径需要先有 `PLAN.md`。
 
-* **遇到拦截怎么办？（解锁流程）**
-  1. **不要强制执行**：拦截是“物理级”的，重复执行相同的命令依然会被阻断。
-  2. **修改计划**：手动或命令智能体修改项目根目录下的 **`PLAN.md`**。
-  3. **设为 READY**：将文件开头的 `STATUS: DRAFT` 修改为 **`STATUS: READY`**。
-  4. **重新执行**：一旦计划变为 `READY`，门禁会自动识别并“放行”你的修改指令。
+- **Q: AI 为什么看起来很"笨"或话太多？**
+  * A: 检查 `memory/USER_CONTEXT.md`。系统可能把你标记为"初学者"。运行 `/profile "Domain: Expert"` 纠正。
 
----
-
-### 🧬 思维操作系统 (Thinking OS)
-
-Thinking OS 是系统的**元认知层**——它不告诉智能体"做什么"，而是告诉它"怎么想"。
-
-#### 🎛️ 治理命令
-```bash
-# 查看各思维模型的使用频率
-/thinking-os status
-
-# 提议一个新的思维模型
-/thinking-os propose "新模型描述"
-```
-
-#### 📁 相关文件
-- `.principles/THINKING_OS.md` — 当前生效的思维模型
-- `memory/THINKING_OS_CANDIDATES.md` — 候选池（智能体可提议，人类审批）
-- `memory/THINKING_OS_ARCHIVE.md` — 被淘汰的模型归档
+- **Q: 在哪看原始进化数据？**
+  * A: `cat memory/logs/SYSTEM.log`
 
 ---
 
-### 📊 系统监控 (Visual TUI)
+## 🤝 贡献
 
-Principles Disciple 提供了可视化的仪表盘，让你实时掌握系统的健康状况：
-
-- **`/trust`**: 查看 AI 的信任积分、安全阶级和当前权限。
-- **`/pd-status`**: 查看当前的 GFI 摩擦指数及状态诊断建议。
-
----
-
-## ❓ 常见问题 (FAQ)
-
-- **Q: 为什么 AI 拒绝修改某些文件？**
-  * A: 检查 `.principles/PROFILE.json` 中的 `risk_paths`。如果是风险路径，必须先有 `PLAN.md`。
-- **Q: 感觉 AI 变笨了/太啰嗦了？**
-  * A: 检查 `memory/USER_CONTEXT.md`。可能系统把你标记为了"新手"。运行 `/profile "Domain: Expert"` 来修正。
-- **Q: 哪里可以看到进化的原始数据？**
-  * A: 运行以下命令查看详细的神经信号：
-```bash
-cat memory/logs/SYSTEM.log
-```
-
----
-
-## 🤝 贡献与加入 (Contribute)
-
-Principles Disciple 是一个不断自我完善的系统。我们欢迎任何关于 AI 认知、安全门禁、进化算法的讨论。
+Principles Disciple 是一个不断自我改进的系统。欢迎讨论 AI 认知、安全门禁和进化算法。
 
 - **GitHub**: [csuzngjh/principles](https://github.com/csuzngjh/principles)
-- **Discord**: [加入我们的讨论](https://discord.gg/openclaw)
+- **Discord**: [OpenClaw Community](https://discord.gg/openclaw)
 
 ---
 
 <p align="center">
-  <b>Principles Disciple: 让智能体在痛苦中拥抱智慧。</b>
+  <b>Pain + Reflection = Progress 🧬</b>
 </p>
