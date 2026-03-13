@@ -198,6 +198,8 @@ smart_copy() {
         if ! cmp -s "$src" "$dest"; then
             cp "$src" "$dest.update"
             echo -e "  ${YELLOW}⚠️  冲突: $(basename "$dest") 已存在，新版本保存为 .update${NC}"
+        else
+            echo -e "  ${BLUE}ℹ️  文件相同，跳过: $(basename "$dest")${NC}"
         fi
     fi
 }
