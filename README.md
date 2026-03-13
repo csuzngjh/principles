@@ -295,37 +295,52 @@ For OpenClaw users, this framework is deeply integrated via the native Plugin SD
 
 * **Evolution Worker** (`EvolutionWorkerService`): A persistent background service that scans `.pain_flag` every 90s, queues high-score pain signals into `evolution_queue.json`, and dispatches diagnostic commands to the main agent during the next heartbeat via `evolution_directive.json`.
 
-#### Slash Command Reference
+#### Slash Commands
 
 | Command | Description |
 |---|---|
-| **Strategy & Planning** ||
-| `/init-strategy` | Initialize project-level strategy and vision through structured interview |
-| `/manage-okr` | Full-lifecycle OKR management with subagent negotiation |
-| `/plan-script` | Create a step-by-step movie-script style execution plan |
+| `/pd-init` | Initialize strategy interview and OKRs |
+| `/pd-okr` | Manage OKRs and align goals |
+| `/pd-bootstrap` | Scan and upgrade environment tools |
+| `/pd-research` | Research tool upgrades |
+| `/pd-thinking` | Manage Thinking OS mental models |
+| `/pd-evolve` | Run full evolution loop |
+| `/pd-daily` | Configure and send daily report |
+| `/pd-grooming` | Workspace cleanup and grooming |
+| `/pd-trust` | View trust score and security stage |
+| `/pd-help` | Get interactive command guidance |
+| `/pd-status` | View Digital Nerve System status |
+
+#### Skills (Execute via "run xxx skill")
+
+| Skill | Description |
+|---|---|
 | **Evolution & Learning** ||
-| `/evolve-task` | Run the full evolution loop (triage → diagnosis → audit → plan → execute → review) |
-| `/evolve-system` | Second-order observation and system-level evolution proposals |
-| `/evolution-framework-update` | Pull the latest updates for the Principles Disciple framework |
-| `/watch-evolution` | Start the background evolution daemon to process queued tasks |
-| `/pd-daily` | Configure and send daily evolution reports |
+| `evolve-task` | Run full evolution loop (triage → diagnosis → audit → plan → execute → review) |
+| `evolve-system` | Second-order observation and system-level evolution proposals |
+| `watch-evolution` | Start background evolution daemon |
+| `evolution-framework-update` | Pull latest framework updates |
 | **Reflection & Diagnosis** ||
-| `/pain` | Manually trigger a pain signal to force system reflection |
-| `/reflection` | Deep metacognitive reflection on task status and systemic issues |
-| `/reflection-log` | Final task reflection and evolution logging |
-| `/root-cause` | Deep dive analysis using the 5 Whys method |
-| `/triage` | Initial problem definition and risk assessment |
-| `/deductive-audit` | Rigorous safety and logic check of a proposed solution |
-| **Tools & Environment** ||
-| `/bootstrap-tools` | Scan project tech stack and search for latest CLI tools |
-| `/profile` | Manually correct or update user profile settings |
-| `/pd-grooming` | Workspace grooming to archive or clean up scattered files |
-| `/pd-mentor` | Interactive command guidance and scenario-based recommendations |
-| **System Admin** ||
-| `/admin` | System administration and recovery tool (init, repair, reset) |
-| `/inject-rule` | Inject a temporary ad-hoc rule for immediate course correction |
-| `/feedback` | Standardized bug reporting with system logs collection |
-| `/report` | Request a formal status report from the Reporter agent |
+| `pain` | Manually trigger a pain signal |
+| `reflection` | Deep metacognitive reflection |
+| `reflection-log` | Final task reflection and evolution logging |
+| `root-cause` | Deep dive analysis using 5 Whys |
+| `triage` | Initial problem definition and risk assessment |
+| `deductive-audit` | Rigorous safety and logic check |
+| **Strategy & Planning** ||
+| `init-strategy` | Initialize project-level strategy |
+| `manage-okr` | Full-lifecycle OKR management |
+| `plan-script` | Create movie-script style execution plan |
+| **Tools & Admin** ||
+| `bootstrap-tools` | Scan project tech stack for latest CLI tools |
+| `profile` | Update user profile settings |
+| `pd-mentor` | Interactive command guidance (Spicy Mentor) |
+| `pd-daily` | Daily evolution report configuration |
+| `pd-grooming` | Workspace cleanup |
+| `admin` | System administration (init, repair, reset) |
+| `inject-rule` | Inject temporary rule for course correction |
+| `feedback` | Standardized bug reporting |
+| `report` | Request formal status report |
 
 ---
 
