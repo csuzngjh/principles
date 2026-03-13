@@ -42,6 +42,13 @@ export const PROFILE_DEFAULTS = {
       allowed_operations: [] as string[],
     },
   },
+  edit_verification: {
+    enabled: true,
+    max_file_size_bytes: 10 * 1024 * 1024, // 10MB
+    fuzzy_match_enabled: true,
+    fuzzy_match_threshold: 0.8,
+    skip_large_file_action: "warn", // "warn" or "block"
+  },
   custom_guards: [] as Array<{ pattern: string; message: string; severity: string }>,
 };
 
@@ -131,6 +138,25 @@ export function normalizeProfile(rawProfile: any): any {
         if (Array.isArray(pa.allowedOperations)) {
           normalized.progressive_gate.plan_approvals.allowed_operations = pa.allowedOperations.filter((o: any) => typeof o === 'string');
         }
+      }
+    }
+
+    // Edit verification settings (P-03)
+    const evRaw = rawProfile.edit_verification ?? rawProfile.editVerification;
+    if (evRaw && typeof evRaw === 'object') {
+      normalized.edit_verification.enabled = evRaw.enabled ?? defaults.edit_verification.enabled;
+      const maxSize = evRaw.max_file_size_bytes ?? evRaw.maxFileSizeBytes;
+      if (typeof maxSize === 'number' && maxSize >= 0) {
+        normalized.edit_verification.max_file_size_bytes = maxSize;
+      }
+      normalized.edit_verification.fuzzy_match_enabled = evRaw.fuzzy_match_enabled ?? evRaw.fuzzyMatchEnabled ?? defaults.edit_verification.fuzzy_match_enabled;
+      const threshold = evRaw.fuzzy_match_threshold ?? evRaw.fuzzyMatchThreshold;
+      if (typeof threshold === 'number' && threshold > 0 && threshold <= 1) {
+        normalized.edit_verification.fuzzy_match_threshold = threshold;
+      }
+      const action = evRaw.skip_large_file_action ?? evRaw.skipLargeFileAction;
+      if (typeof action === 'string' && ['warn', 'block'].includes(action)) {
+        normalized.edit_verification.skip_large_file_action = action;
       }
     }
 

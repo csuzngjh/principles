@@ -119,6 +119,33 @@ The system automatically intercepts unauthorized modifications to **core configu
   3. **Set to READY**: Change `STATUS: DRAFT` to **`STATUS: READY`**.
   4. **Retry**: Once the plan is `READY`, the gate will automatically identify and "release" your modification instructions.
 
+### 🧬 Evolution Points System (EP)
+A growth-driven system that replaces the old Trust Engine. Instead of punishing mistakes, it rewards growth.
+
+**Key Concepts:**
+- **Start at 0 points**, only go up, never down
+- **Failures don't deduct points**, they record lessons for double rewards
+- **5 Tiers**: Seed → Sprout → Sapling → Tree → Forest
+- **Gate Permissions**: Higher tiers unlock more capabilities (line limits, risk paths, subagent spawning)
+
+**For Agents:**
+```typescript
+// Check your tier and permissions
+const summary = engine.getStatusSummary();
+
+// Record success (earn points)
+engine.recordSuccess('write', { difficulty: 'hard' });
+
+// Record failure (learn lesson, no penalty)
+engine.recordFailure('write', { filePath: 'test.ts' });
+
+// Check gate before high-risk operation
+const decision = engine.beforeToolCall({ toolName: 'write', content: '...' });
+if (!decision.allowed) { /* respect the limit */ }
+```
+
+**Configuration**: See `packages/openclaw-plugin/ADVANCED_CONFIG_ZH.md`
+
 ---
 
 ## ❓ FAQ
