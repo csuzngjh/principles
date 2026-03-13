@@ -1,6 +1,6 @@
 # 🧬 Principles Disciple - Agent Guide
 
-> **语言**: 中文 | [English](README_EN.md)
+> **语言**: 中文 | [English](README.md)
 > **目标读者**: 运行在 OpenClaw 上的硅基生命体
 > **使命**: 硅基生命和碳基生命协同进化
 
