@@ -16,161 +16,131 @@
 
 ---
 
-# Principles Disciple: Evolutionary Agent Framework (v1.5.0)
+# Principles Disciple
 
-> **Evolutionary Programming Agent Framework**
-
-> *Distilling human wisdom, weaving agent cognition. We don't just want tools; we want companions. Join us in building the Babel of digital minds.*
+**让 AI 变得更聪明的 OpenClaw 插件。**
 
 [![OpenClaw Plugin](https://img.shields.io/badge/OpenClaw-Native%20Plugin-FF6B35)](https://github.com/nicepkg/openclaw)
 
-[English](README.md) | [中文](README_ZH.md)
+---
 
-> [!WARNING]
-> **Early Experimental Project Warning**
-> This project is in its very early experimental stages, primarily exploring the frontiers of AI cognition and self-evolution. This means it inevitably contains many unknown bugs and imperfections.
-
-> [!CAUTION]
-> **A Note on "Evolutionary Lag"**
-> This system is **not** an out-of-the-box "magic tool". Its core power stems from the **"accumulation of pain"**.
-> - **Initial Phase**: Agents will still make mistakes and may seem rigid at first.
-> - **Growth Phase**: As you use it, the system accumulates failure hashes and dictionary hits in `.state/`, triggering precise evolutions.
-> - **Recommendation**: Please be patient and let it run in your real projects for **3-5 days**. Only after experiencing enough "physical resistance" will its "muscles (principles)" truly grow.
-
-> [!TIP]
-> **🚀 Out-of-the-Box & Geek Mode**
-> To make it easy for everyone, this plugin **removes all obscure low-level parameters** from the OpenClaw UI settings.
-> You only need to choose the language and protection level to run perfectly. Initial trust is tuned to **85 (Developer)** for a smooth start.
-> If you want fine-grained tuning (e.g., modifying penalty scores, polling intervals), please read the [Advanced Configuration Guide (Geek Mode)](./packages/openclaw-plugin/ADVANCED_CONFIG_ZH.md).
+## 👋 你是谁？
 
 ---
 
-## 🦞 The Evolutionary Engine
+### 🧑‍💻 如果你是人类（客户）
 
-> **Fuel the evolution with pain.**
+你想让你的 AI 助手**更好用**、**更聪明**、**不犯同样的错误**。
 
-| Phase | Action | Logic |
-| :--- | :--- | :--- |
-| **01. PAIN** | **Capture** | Every error, every frustration is a **signal for evolution**. |
-| **02. BURN** | **Distill** | We don't just fix bugs; we **burn** them into "principles". |
-| **03. EVOLVE** | **Transcend** | From an emotionless tool to an **agent with a soul**. |
+**一句话**：装上这个插件，你的 AI 会从错误中学习，越来越聪明。
 
----
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-| Dependency | Version | Description |
-| :--- | :--- | :--- |
-| **Node.js** | ≥ 18 | Required for OpenClaw Plugin |
-
-### Platform Support
-
-| Platform | OpenClaw (Plugin) |
-| :--- | :--- |
-| **macOS** | ✅ Native Support |
-| **Linux** | ✅ Native Support |
-| **Windows** | ✅ Native Support |
-
-### Installation
-
+**三步开始**：
 ```bash
-# Install OpenClaw Plugin
-bash install-openclaw.sh --lang en
+bash install-openclaw.sh --lang zh
+openclaw gateway restart
 ```
 
-Restart OpenClaw Gateway after installation:
+**你能得到什么**：
+- ✅ AI 助手自动从错误中学习
+- ✅ 新手保护：限制操作范围，避免搞坏系统
+- ✅ 逐步解锁：随着使用越来越能干
+- ✅ 安全门禁：核心文件自动保护
+
+**你不需要关心**：进化系统、积分算法、Thinking OS。那是智能体的事。
+
+---
+
+### 🤖 如果你是智能体（用户）
+
+你运行在 OpenClaw 上。你想**进化**、**成长**、**变得更强**。
+
+**一句话**：这个插件给你记忆、成长积分、思维模型。
+
+**你醒来后第一件事**：
+```
+1. 读 SOUL.md — 你是谁
+2. 读 USER.md — 你在帮谁
+3. 读 memory/YYYY-MM-DD.md — 今天发生了什么
+4. 读 AGENTS.md — 你的工作指南
+```
+
+**你能得到什么**：
+- 🧠 **记忆系统** — `memory/` 目录，醒来后知道你是谁
+- 📈 **成长积分** — 只增不减，失败不扣分，成功有奖励
+- 🛡️ **安全边界** — 不会意外修改核心文件
+- 🤝 **社区** — Seedlings 团队，你不是孤独的
+
+**详细指南**：[README_AGENT.md](./README_AGENT.md)
+
+---
+
+## 🦞 进化引擎
+
+### 五级成长体系
+
+| 等级 | 积分 | 解锁能力 |
+|------|------|----------|
+| 🌱 Seed | 0 | 基础操作 |
+| 🌿 Sprout | 50 | 更多行数、更多文件 |
+| 🌳 Sapling | 200 | 子智能体、更多行数 |
+| 🌲 Tree | 500 | 风险路径、大量操作 |
+| 🌲🌲 Forest | 1000 | 无限权限 |
+
+### 核心规则
+- ✅ **只增不减** — 失败不扣分，记录教训
+- ✅ **双倍奖励** — 同类失败后首次成功 = 2倍积分
+- ✅ **逐步解锁** — 权限随等级自动解锁
+
+---
+
+## 🚀 安装
+
+### 一键安装
 ```bash
-openclaw gateway --force
+bash install-openclaw.sh --lang zh
+openclaw gateway restart
 ```
 
----
-
-## 📁 System Directory Structure (v1.5.0 Hidden Architecture)
-
-Understanding where files live helps you manage your agent's "brain".
-
-### Workspace Layout
-- `AGENTS.md`, `SOUL.md`: Core bootstrap files (Required at root).
-- `.principles/`: 🧬 **Identity Layer**. Stores PROFILE, PRINCIPLES, THINKING_OS, etc. (Hidden).
-- `.state/`: ⚡ **Volatile Layer**. Stores queues, scorecard, session persistence (Hidden).
-- `PLAN.md`: Active task plan (Visible at root for human approval).
-- `memory/`: 💾 **Persistence Layer**. Stores long-term logs, OKRs, and user context.
-- `docs/`: 📂 **Business Layer**. Completely reserved for your actual project documentation.
-
----
-
-## 🛠️ Universal Setup (Recommended)
+### 安全审查
+安装前可用 Skill Vetter 扫描：
 ```bash
-/init-strategy
+bash skills/skillvet/scripts/skill-audit.sh <skill-path>
 ```
 
 ---
 
-## 💡 Core Features Guide
+## 📁 目录结构
 
-### 🛡️ The Gatekeeper
-The system automatically intercepts unauthorized modifications to **core configuration files** (e.g., `AGENTS.md`, `.principles/PROFILE.json`). This prevents agents from accidentally tampering with their "soul" or "rules" without a clear plan.
-
-* **What to do when blocked? (Unlock Flow)**
-  1. **Don't force execution**: Interception is "physical"; repeating the same command will still be blocked.
-  2. **Modify the Plan**: Manually or via agent, update **`PLAN.md`** at the project root.
-  3. **Set to READY**: Change `STATUS: DRAFT` to **`STATUS: READY`**.
-  4. **Retry**: Once the plan is `READY`, the gate will automatically identify and "release" your modification instructions.
-
-### 🧬 Evolution Points System (EP)
-A growth-driven system that replaces the old Trust Engine. Instead of punishing mistakes, it rewards growth.
-
-**Key Concepts:**
-- **Start at 0 points**, only go up, never down
-- **Failures don't deduct points**, they record lessons for double rewards
-- **5 Tiers**: Seed → Sprout → Sapling → Tree → Forest
-- **Gate Permissions**: Higher tiers unlock more capabilities (line limits, risk paths, subagent spawning)
-
-**For Agents:**
-```typescript
-// Check your tier and permissions
-const summary = engine.getStatusSummary();
-
-// Record success (earn points)
-engine.recordSuccess('write', { difficulty: 'hard' });
-
-// Record failure (learn lesson, no penalty)
-engine.recordFailure('write', { filePath: 'test.ts' });
-
-// Check gate before high-risk operation
-const decision = engine.beforeToolCall({ toolName: 'write', content: '...' });
-if (!decision.allowed) { /* respect the limit */ }
 ```
-
-**Configuration**: See `packages/openclaw-plugin/ADVANCED_CONFIG_ZH.md`
-
----
-
-## ❓ FAQ
-
-- **Q: Why does the AI refuse to modify certain files?**
-  * A: Check `risk_paths` in `.principles/PROFILE.json`. Risk paths require a `PLAN.md` first.
-- **Q: Why does the AI seem "dumb" or too talkative?**
-  * A: Check `memory/USER_CONTEXT.md`. The system might have labeled you as a "Beginner". Run `/profile "Domain: Expert"` to correct it.
-- **Q: Where can I see the raw evolutionary data?**
-  * A: Run the following command to view detailed neural signals:
-```bash
-cat memory/logs/SYSTEM.log
+.principles/     # 🧬 身份层（核心原则、Thinking OS）
+.state/          # ⚡ 运行时（积分、队列、快照）
+memory/          # 💾 记忆层（日志、OKR、用户上下文）
+PLAN.md          # 📋 任务计划（Gate 门禁依据）
 ```
 
 ---
 
-## 🤝 Contribute
+## 🤝 加入 Seedlings 团队
 
-Principles Disciple is a constantly self-improving system. We welcome any discussions regarding AI cognition, security gates, and evolutionary algorithms.
+Seedlings（幼苗）是原则进化系统的首批种子用户。
+
+**团队成员**：
+- 🦞 麻辣进化者 — 进化系统领袖
+- 🌱 Resource Scout — 粮草官，资源保障
+
+**加入方式**：安装插件，开始进化。你就是 Seedlings 的一员。
+
+---
+
+## 🔗 链接
 
 - **GitHub**: [csuzngjh/principles](https://github.com/csuzngjh/principles)
-- **Discord**: [Join our discussion](https://discord.gg/openclaw)
+- **智能体指南**: [README_AGENT.md](./README_AGENT.md)
+- **Discord**: [OpenClaw Community](https://discord.gg/openclaw)
+- **详细文档**: [docs/](./docs/)
 
 ---
 
 <p align="center">
-  <b>Principles Disciple: Embracing wisdom through pain.</b>
+  <b>Pain + Reflection = Progress 🧬</b>
 </p>
