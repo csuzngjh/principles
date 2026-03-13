@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import { isRisky, normalizePath, planStatus as getPlanStatus } from '../utils/io.js';
 import { matchesAnyPattern } from '../utils/glob-match.js';
 import { normalizeProfile } from '../core/profile.js';
-import { trackBlock } from '../core/session-tracker.js';
+import { trackBlock, hasRecentThinking } from '../core/session-tracker.js';
 import { assessRiskLevel, estimateLineChanges } from '../core/risk-calculator.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult } from '../openclaw-sdk.js';
@@ -16,9 +16,27 @@ export function handleBeforeToolCall(
   // 1. Identify tool type
   const WRITE_TOOLS = ['write', 'edit', 'apply_patch', 'write_file', 'replace', 'insert', 'patch', 'edit_file', 'delete_file', 'move_file'];
   const BASH_TOOLS = ['bash', 'run_shell_command', 'exec', 'execute', 'shell', 'cmd'];
+  const AGENT_TOOLS = ['pd_spawn_agent', 'sessions_spawn'];
   
   const isBash = BASH_TOOLS.includes(event.toolName);
   const isWriteTool = WRITE_TOOLS.includes(event.toolName);
+  const isAgentTool = AGENT_TOOLS.includes(event.toolName);
+  
+  // ═══ THINKING OS CHECKPOINT (P-10) ═══
+  // Must run BEFORE the early return to catch all high-risk tools
+  const HIGH_RISK_TOOLS = [...WRITE_TOOLS, ...BASH_TOOLS, ...AGENT_TOOLS];
+  const isHighRisk = HIGH_RISK_TOOLS.includes(event.toolName);
+  
+  if (isHighRisk && ctx.sessionId) {
+    const hasThinking = hasRecentThinking(ctx.sessionId, 5 * 60 * 1000); // 5 minute window
+    if (!hasThinking) {
+      logger?.info?.(`[PD:THINKING_GATE] High-risk tool "${event.toolName}" called without recent deep thinking`);
+      return {
+        block: true,
+        blockReason: `[Thinking OS Checkpoint] 高风险操作 "${event.toolName}" 需要先进行深度思考。\n\n请先使用 deep_reflect 工具分析当前情况，然后再尝试此操作。\n\n这是强制性检查点，目的是确保决策质量。\n\n提示：调用 deep_reflect 后，5分钟内的操作将自动放行。`,
+      };
+    }
+  }
   
   if (!ctx.workspaceDir || (!isWriteTool && !isBash)) {
     return;

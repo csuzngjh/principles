@@ -1,0 +1,151 @@
+/**
+ * Thinking OS Checkpoint Tests (P-10)
+ * 
+ * Tests the mandatory deep thinking checkpoint before high-risk operations.
+ */
+
+import { describe, it, expect, beforeEach } from 'vitest';
+import { handleBeforeToolCall } from '../../src/hooks/gate.js';
+import { recordThinkingCheckpoint, hasRecentThinking, clearSession } from '../../src/core/session-tracker.js';
+
+const MOCK_SESSION_ID = 'test-thinking-session-001';
+const MOCK_WORKSPACE = '/tmp/test-thinking-workspace';
+
+function createMockContext(overrides = {}) {
+  return {
+    sessionId: MOCK_SESSION_ID,
+    workspaceDir: MOCK_WORKSPACE,
+    pluginConfig: {},
+    logger: { info: () => {}, error: () => {}, warn: () => {} },
+    ...overrides,
+  };
+}
+
+function createMockEvent(toolName: string, params: Record<string, any> = {}) {
+  return {
+    toolName,
+    params,
+  };
+}
+
+describe('Thinking OS Checkpoint (P-10)', () => {
+  beforeEach(() => {
+    clearSession(MOCK_SESSION_ID);
+  });
+
+  describe('Blocking high-risk operations without thinking', () => {
+    it('should block write tool without recent thinking', () => {
+      const result = handleBeforeToolCall(
+        createMockEvent('write', { file_path: '/test/file.ts', content: 'test' }),
+        createMockContext()
+      );
+      
+      expect(result).toBeDefined();
+      expect(result?.block).toBe(true);
+      expect(result?.blockReason).toContain('deep_reflect');
+    });
+
+    it('should block exec tool without recent thinking', () => {
+      const result = handleBeforeToolCall(
+        createMockEvent('run_shell_command', { command: 'ls -la' }),
+        createMockContext()
+      );
+      
+      expect(result).toBeDefined();
+      expect(result?.block).toBe(true);
+    });
+
+    it('should block edit tool without recent thinking', () => {
+      const result = handleBeforeToolCall(
+        createMockEvent('edit', { file_path: '/test/file.ts', old_string: 'a', new_string: 'b' }),
+        createMockContext()
+      );
+      
+      expect(result).toBeDefined();
+      expect(result?.block).toBe(true);
+    });
+
+    it('should block pd_spawn_agent without recent thinking', () => {
+      const result = handleBeforeToolCall(
+        createMockEvent('pd_spawn_agent', { agentType: 'explorer' }),
+        createMockContext()
+      );
+      
+      expect(result).toBeDefined();
+      expect(result?.block).toBe(true);
+    });
+  });
+
+  describe('Allowing operations after thinking', () => {
+    it('should allow write tool after recording thinking checkpoint', () => {
+      // Record thinking
+      recordThinkingCheckpoint(MOCK_SESSION_ID, MOCK_WORKSPACE);
+      
+      const result = handleBeforeToolCall(
+        createMockEvent('write', { file_path: '/test/file.ts', content: 'test' }),
+        createMockContext()
+      );
+      
+      // Should not be blocked by thinking gate (may be blocked by other gates like risk path)
+      // If blocked, the reason should NOT be about thinking checkpoint
+      if (result?.block) {
+        expect(result.blockReason).not.toContain('Thinking OS');
+      }
+    });
+
+    it('should allow exec tool after recording thinking checkpoint', () => {
+      recordThinkingCheckpoint(MOCK_SESSION_ID, MOCK_WORKSPACE);
+      
+      const result = handleBeforeToolCall(
+        createMockEvent('run_shell_command', { command: 'echo hello' }),
+        createMockContext()
+      );
+      
+      if (result?.block) {
+        expect(result.blockReason).not.toContain('Thinking OS');
+      }
+    });
+  });
+
+  describe('Session state tracking', () => {
+    it('should initially have no recent thinking', () => {
+      expect(hasRecentThinking(MOCK_SESSION_ID)).toBe(false);
+    });
+
+    it('should have recent thinking after recording checkpoint', () => {
+      recordThinkingCheckpoint(MOCK_SESSION_ID, MOCK_WORKSPACE);
+      expect(hasRecentThinking(MOCK_SESSION_ID)).toBe(true);
+    });
+
+    it('should expire after time window passes', async () => {
+      recordThinkingCheckpoint(MOCK_SESSION_ID, MOCK_WORKSPACE);
+      // Initially should be true
+      expect(hasRecentThinking(MOCK_SESSION_ID, 1000)).toBe(true);
+      // Wait for window to expire
+      await new Promise(resolve => setTimeout(resolve, 150));
+      expect(hasRecentThinking(MOCK_SESSION_ID, 100)).toBe(false);
+    });
+  });
+
+  describe('Non-high-risk tools bypass', () => {
+    it('should not block read tool', () => {
+      // Read tool should pass through (not in WRITE_TOOLS or BASH_TOOLS)
+      const result = handleBeforeToolCall(
+        createMockEvent('read', { file_path: '/test/file.ts' }),
+        createMockContext()
+      );
+      
+      // Should return undefined (pass through)
+      expect(result).toBeUndefined();
+    });
+
+    it('should not block web_search tool', () => {
+      const result = handleBeforeToolCall(
+        createMockEvent('web_search', { query: 'test' }),
+        createMockContext()
+      );
+      
+      expect(result).toBeUndefined();
+    });
+  });
+});
