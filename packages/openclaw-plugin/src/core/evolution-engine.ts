@@ -56,9 +56,18 @@ const CONSTRUCTIVE_TOOLS = new Set([
   'pd_spawn_agent', 'sessions_spawn',
 ]);
 
+// 高风险工具：需要 allowRiskPath 权限
+// 注意：pd_spawn_agent 和 sessions_spawn 已从高风险中移出，它们由 allowSubagentSpawn 单独控制
 const HIGH_RISK_TOOLS = new Set([
   'run_shell_command', 'delete_file', 'move_file',
-  'pd_spawn_agent', 'sessions_spawn',
+]);
+
+// 内容行数限制仅适用于这些写操作工具
+const CONTENT_LIMITED_TOOLS = new Set([
+  'write', 'write_file',
+  'edit', 'edit_file',
+  'replace', 'apply_patch',
+  'insert', 'patch',
 ]);
 
 // ===== 主引擎 =====
@@ -231,24 +240,25 @@ export class EvolutionEngine {
     const tierDef = this.getTierDefinition();
     const perms = tierDef.permissions;
 
-    // 行数检查
-    if (context.content) {
-      const lineCount = context.content.split('\n').length;
-      if (lineCount > perms.maxLinesPerWrite) {
+    // 行数检查（仅针对写操作工具）
+    if (CONTENT_LIMITED_TOOLS.has(context.toolName)) {
+      if (context.content) {
+        const lineCount = context.content.split('\n').length;
+        if (lineCount > perms.maxLinesPerWrite) {
+          return {
+            allowed: false,
+            reason: `Tier ${this.scorecard.currentTier} (${tierDef.name}) 限制: 最多 ${perms.maxLinesPerWrite} 行，当前 ${lineCount} 行`,
+            currentTier: this.scorecard.currentTier,
+          };
+        }
+      }
+      if (context.lineCount && context.lineCount > perms.maxLinesPerWrite) {
         return {
           allowed: false,
-          reason: `Tier ${this.scorecard.currentTier} (${tierDef.name}) 限制: 最多 ${perms.maxLinesPerWrite} 行，当前 ${lineCount} 行`,
+          reason: `Tier ${this.scorecard.currentTier} (${tierDef.name}) 限制: 最多 ${perms.maxLinesPerWrite} 行`,
           currentTier: this.scorecard.currentTier,
         };
       }
-    }
-
-    if (context.lineCount && context.lineCount > perms.maxLinesPerWrite) {
-      return {
-        allowed: false,
-        reason: `Tier ${this.scorecard.currentTier} (${tierDef.name}) 限制: 最多 ${perms.maxLinesPerWrite} 行`,
-        currentTier: this.scorecard.currentTier,
-      };
     }
 
     // 风险路径检查
@@ -260,7 +270,7 @@ export class EvolutionEngine {
       };
     }
 
-    // 高风险工具检查
+    // 高风险工具检查（不包括子智能体，它们有单独控制）
     if (HIGH_RISK_TOOLS.has(context.toolName) && !perms.allowRiskPath) {
       return {
         allowed: false,
