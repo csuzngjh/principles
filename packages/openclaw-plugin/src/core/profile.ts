@@ -47,7 +47,7 @@ export const PROFILE_DEFAULTS = {
     max_file_size_bytes: 10 * 1024 * 1024, // 10MB
     fuzzy_match_enabled: true,
     fuzzy_match_threshold: 0.8,
-    skip_large_file_action: "warn", // "warn" or "block"
+    skip_large_file_action: "warn" as "warn" | "block", // "warn" or "block"
   },
   custom_guards: [] as Array<{ pattern: string; message: string; severity: string }>,
 };
@@ -156,7 +156,7 @@ export function normalizeProfile(rawProfile: any): any {
       }
       const action = evRaw.skip_large_file_action ?? evRaw.skipLargeFileAction;
       if (typeof action === 'string' && ['warn', 'block'].includes(action)) {
-        normalized.edit_verification.skip_large_file_action = action;
+        normalized.edit_verification.skip_large_file_action = action as "warn" | "block";
       }
     }
 
