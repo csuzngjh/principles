@@ -199,7 +199,46 @@ Thinking OS is the system's **meta-cognitive layer** -- it doesn't tell the agen
 
 ---
 
-### 👥 Deep Reflection (Cognitive Analysis) — **NEW in V1.4.0**
+### 📈 Evolution Points (Growth System) — **NEW in V1.5.0**
+
+> *Growth over punishment. Every action is an opportunity to learn.*
+
+The Evolution Points System replaces the punitive Trust Engine with a **growth-oriented gamification layer**.
+
+**Core Philosophy:**
+- ✅ Starts at 0 points, can only increase (no deductions)
+- ✅ Failures record lessons without point deductions
+- ✅ Success after same-task failure = double reward
+- ✅ Consecutive failures trigger "learning mode" instead of punishment
+
+**Point Rewards:**
+
+| Task Type | Base Points | Double Reward |
+|-----------|-------------|---------------|
+| Constructive Success | +10 | +20 |
+| Exploratory Success | +2 | +4 |
+| Risk Path Success | +15 | +30 |
+| Subagent Success | +5 | +10 |
+| Learning from Failure | +5 | First lesson |
+| Exit Learning Mode | +30 → +10 | Decreasing rewards |
+
+**Level Thresholds:**
+
+| Level | Name | Points | Unlocked Capabilities |
+|-------|------|--------|----------------------|
+| 1 | Seed | 0 | Basic operations, 20-line limit |
+| 2 | Sprout | 50 | 50 lines, 2 files |
+| 3 | Sapling | 200 | Sub-agents, 200 lines |
+| 4 | Tree | 500 | Risk paths, 500 lines |
+| 5 | Forest | 1000 | Unlimited access |
+
+**Key Difference from Trust Engine:**
+- Old: Low score = blocked (fear-driven)
+- New: High score = unlocked (growth-driven)
+
+---
+
+### 👥 Deep Reflection (Cognitive Analysis)
 
 > *A cognitive analysis tool that helps the AI think deeply before acting on complex tasks.*
 
@@ -227,23 +266,12 @@ Deep Reflection can be configured in `{stateDir}/pain_settings.json`:
     "enabled": true,           // Enable/disable the feature
     "mode": "auto",            // "auto" | "forced" | "disabled"
     "force_checkpoint": true,  // Inject self-check prompt every turn
-    "checkpoint_message": "...", // Custom self-check message
     "default_model": "T-01",   // Default thinking model (T-01 to T-10)
     "default_depth": 2,        // Analysis depth: 1=quick, 2=balanced, 3=exhaustive
     "timeout_ms": 60000        // Timeout for analysis (ms)
   }
 }
 ```
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `enabled` | boolean | `true` | Master switch for Deep Reflection |
-| `mode` | string | `"auto"` | `auto`: AI decides, `forced`: always prompt, `disabled`: off |
-| `force_checkpoint` | boolean | `true` | Inject `<reflection_checkpoint>` every turn to remind AI to self-evaluate |
-| `checkpoint_message` | string | (see above) | Custom message for the checkpoint prompt |
-| `default_model` | string | `"T-01"` | Default Thinking OS model for analysis |
-| `default_depth` | number | `2` | Analysis depth (1-3) |
-| `timeout_ms` | number | `60000` | Timeout for background analysis |
 
 ---
 
@@ -257,6 +285,7 @@ Deep Reflection can be configured in `{stateDir}/pain_settings.json`:
 |--------|------------|
 | ✅ Done | **Cognitive Depth** — Deep Reflection, Thinking OS |
 | ✅ Done | **Transparency** — Evolution Daily Report |
+| ✅ Done | **Growth System** — Evolution Points (V1.5.0) |
 | 🔜 Next | **Meta-Learning** — Learning to Learn |
 | 📋 Planned | **Symbiosis** — Co-Evolution |
 | 💡 Vision | **Companionship** — Emotional System |
