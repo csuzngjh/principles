@@ -159,7 +159,7 @@ When the AI veers off track, you are the pilot with the highest authority.
 
 Thinking OS is the system's **meta-cognitive layer** -- it doesn't tell the agent "what to do", but rather "how to think". Through 9 highly-compressed mental models (~450 tokens), it implants a fundamental cognitive framework into the agent with an extremely low context cost.
 
-#### 📖 9 Core Mental Models
+#### 📖 10 Core Mental Models
 
 | ID | Name | Core Philosophy |
 |---|---|---|
@@ -172,6 +172,7 @@ Thinking OS is the system's **meta-cognitive layer** -- it doesn't tell the agen
 | T-07 | Minimum Viable Change | Make minimal changes to reduce blast radius |
 | T-08 | Pain as Signal | Errors/stucks are signals for correction |
 | T-09 | Divide and Conquer | Complex tasks must be broken down |
+| T-10 | State Externalization | Externalize memory — use files to cache intermediate state |
 
 #### 🎛️ Governance Commands
 
@@ -214,7 +215,7 @@ The `deep_reflect` tool performs critical analysis before executing complex oper
 - Identifies blind spots and missing information
 - Surfaces potential risks and failure modes
 - Provides alternative approaches with trade-off analysis
-- Applies structured thinking models (T-01 to T-09) for deeper insight
+- Applies structured thinking models (T-01 to T-10) for deeper insight
 
 #### ⚙️ Configuration
 
@@ -227,7 +228,7 @@ Deep Reflection can be configured in `{stateDir}/pain_settings.json`:
     "mode": "auto",            // "auto" | "forced" | "disabled"
     "force_checkpoint": true,  // Inject self-check prompt every turn
     "checkpoint_message": "...", // Custom self-check message
-    "default_model": "T-01",   // Default thinking model (T-01 to T-09)
+    "default_model": "T-01",   // Default thinking model (T-01 to T-10)
     "default_depth": 2,        // Analysis depth: 1=quick, 2=balanced, 3=exhaustive
     "timeout_ms": 60000        // Timeout for analysis (ms)
   }
