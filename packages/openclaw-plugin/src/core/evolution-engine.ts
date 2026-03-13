@@ -14,7 +14,12 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { resolvePdPath } from './paths.js';
-import { EventLogService } from './event-log.js';
+
+// ===== 文件锁常量 =====
+const LOCK_SUFFIX = '.lock';
+const LOCK_MAX_RETRIES = 50;
+const LOCK_RETRY_DELAY_MS = 50;
+const LOCK_STALE_MS = 30_000; // 30秒视为死锁
 import {
   EvolutionTier,
   EvolutionEvent,
@@ -453,6 +458,80 @@ export class EvolutionEngine {
     };
   }
 
+  // ===== 文件锁与原子写入（P0 修复） =====
+
+  /** 获取文件锁，返回释放函数 */
+  private acquireFileLock(resourcePath: string): () => void {
+    const lockPath = resourcePath + LOCK_SUFFIX;
+    let retries = 0;
+
+    while (retries < LOCK_MAX_RETRIES) {
+      try {
+        // 'wx' = 写入+排他，文件已存在则抛 EEXIST
+        const fd = fs.openSync(lockPath, 'wx');
+        fs.writeSync(fd, `${process.pid}\n${Date.now()}`);
+        fs.closeSync(fd);
+
+        return () => {
+          try { fs.unlinkSync(lockPath); } catch { /* ignore */ }
+        };
+      } catch (err: any) {
+        if (err.code === 'EEXIST') {
+          // 检测死锁：锁文件过旧则强制清理
+          if (this.isLockStale(lockPath)) {
+            try {
+              fs.unlinkSync(lockPath);
+              continue; // 立即重试
+            } catch { /* 抢占失败，继续等待 */ }
+          }
+          retries++;
+          // busy wait（可改为指数退避）
+          const start = Date.now();
+          while (Date.now() - start < LOCK_RETRY_DELAY_MS) { /* spin */ }
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    throw new Error(`[Evolution] Lock acquisition failed after ${LOCK_MAX_RETRIES} retries: ${resourcePath}`);
+  }
+
+  /** 检查锁文件是否过期（死锁检测） */
+  private isLockStale(lockPath: string): boolean {
+    try {
+      const stat = fs.statSync(lockPath);
+      const mtimeMs = stat.mtimeMs;
+
+      // 读取 PID 检查进程是否存活
+      const content = fs.readFileSync(lockPath, 'utf8').trim();
+      const parts = content.split('\n');
+      const pid = parseInt(parts[0] || '0', 10);
+
+      // Unix: signal 0 仅检查进程存在性，Windows 也支持
+      if (pid > 0) {
+        try {
+          process.kill(pid, 0);
+          // 进程存活，检查时间
+          return Date.now() - mtimeMs > LOCK_STALE_MS;
+        } catch (e: any) {
+          if (e.code === 'ESRCH') {
+            // 进程不存在，锁已死
+            return true;
+          }
+          // 无法确定，按时间判断
+          return Date.now() - mtimeMs > LOCK_STALE_MS;
+        }
+      }
+
+      // 无有效 PID，按时间判断
+      return Date.now() - mtimeMs > LOCK_STALE_MS;
+    } catch {
+      return false;
+    }
+  }
+
+  /** 持久化评分卡（含锁保护） */
   private saveScorecard(): void {
     this.scorecard.lastUpdated = new Date().toISOString();
 
@@ -468,49 +547,83 @@ export class EvolutionEngine {
       recentFailureHashes: Array.from(this.scorecard.recentFailureHashes.entries()),
     };
 
-    // 文件锁：防止并发写入导致数据损坏
-    const lockPath = `${this.storagePath}.lock`;
-    const maxRetries = 10;
-    const retryDelayMs = 20;
+    const release = this.acquireFileLock(this.storagePath);
 
-    // 获取锁
-    let acquired = false;
-    for (let i = 0; i < maxRetries; i++) {
-      try {
-        fs.writeFileSync(lockPath, String(process.pid), { flag: 'wx' });
-        acquired = true;
-        break;
-      } catch {
-        // 锁被占用，等待后重试
-        const start = Date.now();
-        while (Date.now() - start < retryDelayMs) { /* busy wait */ }
-      }
-    }
-
-    if (!acquired) {
-      console.error(`[Evolution] Failed to acquire lock after ${maxRetries} retries`);
-      // 强制清除过期锁（超过5秒视为过期）
-      try {
-        const lockStat = fs.statSync(lockPath);
-        if (Date.now() - lockStat.mtimeMs > 5000) {
-          fs.unlinkSync(lockPath);
-        }
-      } catch {}
-      return;
-    }
-
-    // 原子写入：先写临时文件，再重命名
-    const tempPath = `${this.storagePath}.tmp.${Date.now()}`;
+    const tempPath = `${this.storagePath}.tmp.${Date.now()}.${process.pid}`;
     try {
       fs.writeFileSync(tempPath, JSON.stringify(serializable, null, 2), 'utf8');
+
+      // fsync 确保数据落盘
+      const fd = fs.openSync(tempPath, 'r+');
+      fs.fsyncSync(fd);
+      fs.closeSync(fd);
+
+      // 原子重命名
       fs.renameSync(tempPath, this.storagePath);
     } catch (e) {
       console.error(`[Evolution] Failed to save scorecard: ${String(e)}`);
       try { fs.unlinkSync(tempPath); } catch {}
+      throw e; // 重新抛出，让调用者知道保存失败
     } finally {
-      // 释放锁
-      try { fs.unlinkSync(lockPath); } catch {}
+      release();
     }
+  }
+
+  /** 保存失败后的重试队列 */
+  private static retryQueue: Array<{ engine: EvolutionEngine; data: Partial<EvolutionScorecard> }> = [];
+  private static retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** 调度重试保存 */
+  private static scheduleRetrySave(engine: EvolutionEngine): void {
+    // 每个引擎只保留最新数据
+    EvolutionEngine.retryQueue = EvolutionEngine.retryQueue.filter(item => item.engine !== engine);
+    EvolutionEngine.retryQueue.push({ engine, data: { ...engine.scorecard } });
+
+    // 启动重试定时器
+    if (!EvolutionEngine.retryTimer) {
+      EvolutionEngine.retryTimer = setTimeout(() => {
+        EvolutionEngine.processRetryQueue();
+      }, 1000);
+    }
+  }
+
+  /** 处理重试队列 */
+  private static processRetryQueue(): void {
+    EvolutionEngine.retryTimer = null;
+
+    const latestByEngine = new Map<EvolutionEngine, Partial<EvolutionScorecard>>();
+    for (const item of EvolutionEngine.retryQueue) {
+      latestByEngine.set(item.engine, item.data);
+    }
+    EvolutionEngine.retryQueue = [];
+
+    for (const [engine, data] of latestByEngine) {
+      try {
+        engine.saveScorecardImmediate(data);
+        console.log(`[Evolution] Retry save succeeded for ${engine.workspaceDir}`);
+      } catch (e) {
+        console.error(`[Evolution] Retry save failed: ${String(e)}`);
+        EvolutionEngine.scheduleRetrySave(engine);
+      }
+    }
+  }
+
+  /** 无锁快速保存（用于重试） */
+  private saveScorecardImmediate(data: Partial<EvolutionScorecard>): void {
+    const serializable = {
+      ...this.scorecard,
+      ...data,
+      recentFailureHashes: Array.from(this.scorecard.recentFailureHashes.entries()),
+    };
+
+    const tempPath = `${this.storagePath}.tmp.retry.${Date.now()}.${process.pid}`;
+    fs.writeFileSync(tempPath, JSON.stringify(serializable, null, 2), 'utf8');
+
+    const fd = fs.openSync(tempPath, 'r');
+    fs.fsyncSync(fd);
+    fs.closeSync(fd);
+
+    fs.renameSync(tempPath, this.storagePath);
   }
 
   // ===== 工具方法 =====

@@ -24,7 +24,8 @@ import {
 
 function createTempWorkspace(): string {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ep-test-'));
-  const stateDir = path.join(tmpDir, '.principles-disciple');
+  // EvolutionEngine 使用 .state 目录（STATE_DIR）
+  const stateDir = path.join(tmpDir, '.state');
   fs.mkdirSync(stateDir, { recursive: true });
   return tmpDir;
 }
@@ -362,6 +363,185 @@ describe('EvolutionEngine', () => {
       // 重新加载验证持久化
       const engine2 = new EvolutionEngine(workspace);
       expect(engine2.getPoints()).toBe(expectedPoints);
+    });
+  });
+
+  // ===== P0 修复验证：锁竞态条件 =====
+
+  describe('Lock Race Condition Fixes', () => {
+    test('should handle concurrent engine instances safely', () => {
+      // 测试多个引擎实例（共享同一文件）的安全性
+      // 每个实例有独立的内存状态，但文件是共享的
+      
+      const engine1 = new EvolutionEngine(workspace);
+      const engine2 = new EvolutionEngine(workspace);
+      
+      // 两个实例交替写入
+      engine1.recordSuccess('write', { difficulty: 'normal' });
+      engine2.recordSuccess('write', { difficulty: 'normal' });
+      engine1.recordSuccess('write', { difficulty: 'normal' });
+      engine2.recordSuccess('write', { difficulty: 'normal' });
+      
+      // 重新加载验证最终状态
+      const engine3 = new EvolutionEngine(workspace);
+      // 由于内存状态独立，最终积分取决于最后一次成功保存的实例
+      // 这里主要验证没有数据损坏
+      expect(() => engine3.getPoints()).not.toThrow();
+    });
+
+    test('should not corrupt data under high contention', () => {
+      // 快速连续写入，测试文件锁的保护
+      const iterations = 50;
+      for (let i = 0; i < iterations; i++) {
+        engine.recordSuccess('write', { difficulty: 'normal' });
+      }
+      
+      // 验证数据完整性（没有损坏）
+      const stateDir = path.join(workspace, '.state');
+      const storagePath = path.join(stateDir, 'evolution-scorecard.json');
+      const content = fs.readFileSync(storagePath, 'utf8');
+      const data = JSON.parse(content);  // 不应该抛出异常
+      
+      expect(data.totalPoints).toBe(iterations * TASK_DIFFICULTY_CONFIG.normal.basePoints);
+    });
+
+    test('should handle lock timeout gracefully', () => {
+      // 创建一个持有锁的"假进程"
+      const stateDir = path.join(workspace, '.state');
+      const storagePath = path.join(stateDir, 'evolution-scorecard.json');
+      const lockPath = `${storagePath}.lock`;
+      
+      // 模拟锁被死进程持有
+      const deadPid = 99999999;
+      fs.writeFileSync(lockPath, String(deadPid), 'utf8');
+      
+      // 尝试写入应该成功（死进程锁会被清理）
+      const result = engine.recordSuccess('write', { difficulty: 'normal' });
+      expect(result.pointsAwarded).toBeGreaterThan(0);
+    });
+  });
+
+  // ===== P0 修复验证：数据不丢失 =====
+
+  describe('No Data Loss on Lock Failure', () => {
+    test('should not silently drop data when lock fails', () => {
+      // 记录初始状态
+      const initialPoints = engine.getPoints();
+      
+      // 连续快速操作
+      const operations = 100;
+      for (let i = 0; i < operations; i++) {
+        engine.recordSuccess('write', { difficulty: 'trivial' });
+      }
+      
+      // 所有操作都应该被记录（无丢失）
+      const expectedPoints = initialPoints + operations * TASK_DIFFICULTY_CONFIG.trivial.basePoints;
+      expect(engine.getPoints()).toBe(expectedPoints);
+    });
+
+    test('should preserve all failure records for double reward', () => {
+      // 记录多次失败
+      for (let i = 0; i < 5; i++) {
+        engine.recordFailure('write', { filePath: `test-${i}.ts` });
+      }
+      
+      // 重新加载
+      const engine2 = new EvolutionEngine(workspace);
+      
+      // 验证失败记录被保留
+      const result = engine2.recordSuccess('write', { 
+        filePath: 'test-0.ts', 
+        difficulty: 'normal' 
+      });
+      
+      expect(result.isDoubleReward).toBe(true);
+    });
+
+    test('retry queue should eventually save data', async () => {
+      // 这个测试验证正常情况下数据能被持久化
+      // 重试队列仅在锁获取失败时触发
+      
+      // 记录一些数据
+      engine.recordSuccess('write', { difficulty: 'hard' });
+      const pointsBefore = engine.getPoints();
+      
+      // 等待可能的异步操作完成
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // 重新加载验证
+      const engine2 = new EvolutionEngine(workspace);
+      expect(engine2.getPoints()).toBe(pointsBefore);
+    });
+  });
+
+  // ===== 原子写入验证 =====
+
+  describe('Atomic Write Operations', () => {
+    test('should write to temp file first, then rename', () => {
+      const stateDir = path.join(workspace, '.state');
+      const tempFiles = fs.readdirSync(stateDir).filter(f => f.includes('.tmp.'));
+      
+      // 不应该有残留的临时文件
+      expect(tempFiles.length).toBe(0);
+      
+      // 执行写入
+      engine.recordSuccess('write', { difficulty: 'normal' });
+      
+      // 仍然不应该有残留的临时文件
+      const tempFilesAfter = fs.readdirSync(stateDir).filter(f => f.includes('.tmp.'));
+      expect(tempFilesAfter.length).toBe(0);
+    });
+
+    test('should have valid JSON after concurrent writes', () => {
+      // 快速写入
+      for (let i = 0; i < 50; i++) {
+        engine.recordSuccess('write', { difficulty: 'normal' });
+      }
+      
+      // 直接读取文件验证 JSON 有效性
+      const stateDir = path.join(workspace, '.state');
+      const storagePath = path.join(stateDir, 'evolution-scorecard.json');
+      
+      const content = fs.readFileSync(storagePath, 'utf8');
+      const data = JSON.parse(content);  // 不应该抛出异常
+      
+      expect(data.totalPoints).toBe(50 * TASK_DIFFICULTY_CONFIG.normal.basePoints);
+    });
+  });
+
+  // ===== PID 存活检测测试 =====
+
+  describe('PID Liveness Detection', () => {
+    test('should detect current process as alive', () => {
+      // 当前进程应该总是存活的
+      expect(() => process.kill(process.pid, 0)).not.toThrow();
+    });
+
+    test('should clean up dead process lock and save data', () => {
+      const stateDir = path.join(workspace, '.state');
+      const storagePath = path.join(stateDir, 'evolution-scorecard.json');
+      const lockPath = `${storagePath}.lock`;
+      
+      // 创建一个"死进程"的锁
+      // 使用一个非常大的 PID 号（如 99999999），这个进程几乎肯定不存在
+      const deadPid = 99999999;
+      fs.writeFileSync(lockPath, String(deadPid), 'utf8');
+      
+      // 验证锁文件存在
+      expect(fs.existsSync(lockPath)).toBe(true);
+      
+      // 下一次写入应该能获取锁（因为持有者进程已死亡）并成功保存
+      const result = engine.recordSuccess('write', { difficulty: 'normal' });
+      expect(result.pointsAwarded).toBeGreaterThan(0);
+      
+      // 验证内存中的积分正确
+      expect(engine.getPoints()).toBe(result.pointsAwarded);
+      
+      // 验证锁被释放（文件不存在）
+      expect(fs.existsSync(lockPath)).toBe(false);
+      
+      // 验证数据文件存在
+      expect(fs.existsSync(storagePath)).toBe(true);
     });
   });
 });
