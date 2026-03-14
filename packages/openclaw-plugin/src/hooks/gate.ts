@@ -22,22 +22,7 @@ export function handleBeforeToolCall(
   const isBash = BASH_TOOLS.includes(event.toolName);
   const isWriteTool = WRITE_TOOLS.includes(event.toolName);
   const isAgentTool = AGENT_TOOLS.includes(event.toolName);
-  
-  // ═══ THINKING OS CHECKPOINT (P-10) ═══
-  // Must run BEFORE the early return to catch all high-risk tools
-  const HIGH_RISK_TOOLS = [...WRITE_TOOLS, ...BASH_TOOLS, ...AGENT_TOOLS];
-  const isHighRisk = HIGH_RISK_TOOLS.includes(event.toolName);
-  
-  if (isHighRisk && ctx.sessionId) {
-    const hasThinking = hasRecentThinking(ctx.sessionId, 5 * 60 * 1000); // 5 minute window
-    if (!hasThinking) {
-      logger?.info?.(`[PD:THINKING_GATE] High-risk tool "${event.toolName}" called without recent deep thinking`);
-      return {
-        block: true,
-        blockReason: `[Thinking OS Checkpoint] 高风险操作 "${event.toolName}" 需要先进行深度思考。\n\n请先使用 deep_reflect 工具分析当前情况，然后再尝试此操作。\n\n这是强制性检查点，目的是确保决策质量。\n\n提示：调用 deep_reflect 后，5分钟内的操作将自动放行。`,
-      };
-    }
-  }
+  // Profile loaded first for config-driven behavior (see below)
   
   if (!ctx.workspaceDir || (!isWriteTool && !isBash)) {
     return;
@@ -65,6 +50,11 @@ export function handleBeforeToolCall(
       fuzzy_match_enabled: true,
       fuzzy_match_threshold: 0.8,
       skip_large_file_action: 'warn',
+    },
+    thinking_checkpoint: {
+      enabled: false,  // Default OFF
+      window_ms: 5 * 60 * 1000,
+      high_risk_tools: ['run_shell_command', 'delete_file', 'move_file', 'pd_spawn_agent'],
     }
   };
 
@@ -74,6 +64,20 @@ export function handleBeforeToolCall(
       profile = normalizeProfile(rawProfile);
     } catch (e) {
       logger?.error?.(`[PD_GATE] Failed to parse PROFILE.json: ${String(e)}`);
+    }
+  }
+
+  // ═══ THINKING OS CHECKPOINT (P-10) — Config-gated ═══
+  // Only enforced when thinking_checkpoint.enabled = true in PROFILE.json
+  if (profile.thinking_checkpoint?.enabled && isHighRisk && ctx.sessionId) {
+    const windowMs = profile.thinking_checkpoint.window_ms ?? 5 * 60 * 1000;
+    const hasThinking = hasRecentThinking(ctx.sessionId, windowMs);
+    if (!hasThinking) {
+      logger?.info?.(`[PD:THINKING_GATE] High-risk tool "${event.toolName}" called without recent deep thinking`);
+      return {
+        block: true,
+        blockReason: `[Thinking OS Checkpoint] 高风险操作 "${event.toolName}" 需要先进行深度思考。\n\n请先使用 deep_reflect 工具分析当前情况，然后再尝试此操作。\n\n这是强制性检查点，目的是确保决策质量。\n\n提示：调用 deep_reflect 后，${Math.round(windowMs/60000)}分钟内的操作将自动放行。\n\n可在PROFILE.json中设置 thinking_checkpoint.enabled: false 来禁用此检查。`,
+      };
     }
   }
 
@@ -247,6 +251,8 @@ function normalizeLine(line: string): string {
  * @returns Match index or -1 if not found
  */
 function findFuzzyMatch(lines: string[], oldLines: string[], threshold: number = 0.8): number {
+  if (oldLines.length === 0) return -1;  // P2 fix: empty array boundary check
+
   const normalizedLines = lines.map(normalizeLine);
   const normalizedOldLines = oldLines.map(normalizeLine);
 
