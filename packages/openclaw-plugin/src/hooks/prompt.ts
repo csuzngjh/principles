@@ -90,6 +90,7 @@ export function resolveModelFromConfig(modelConfig: unknown, logger?: PluginLogg
   
   // 格式 3: 数组格式（不支持，发出警告）
   if (Array.isArray(modelConfig)) {
+    console.warn(`[PD:Prompt] Array model config not supported. Expected "provider/model" string or { primary: "..." } object.`);
     logger?.warn(`[PD:Prompt] Array model config not supported. Expected "provider/model" string or { primary: "..." } object.`);
     return null;
   }
@@ -145,6 +146,7 @@ export async function handleBeforePromptBuild(
 
   const wctx = WorkspaceContext.fromHookContext(ctx);
   const { trigger, sessionId, api } = ctx;
+  const logger = api?.logger;  // 统一获取 logger
 
   // Minimal mode: heartbeat and subagents skip project context/system caps to reduce tokens
   // SessionId format: "agent:main:subagent:{type}-{id}" for subagents, "agent:main:..." for main
@@ -170,7 +172,7 @@ export async function handleBeforePromptBuild(
         prependSystemContext = `<core_principles>\n${principles.trim()}\n</core_principles>`;
       }
     } catch (e) {
-      console.error(`[PD:Prompt] Failed to read PRINCIPLES: ${String(e)}`);
+      logger?.error(`[PD:Prompt] Failed to read PRINCIPLES: ${String(e)}`);
     }
   }
 
@@ -189,7 +191,7 @@ export async function handleBeforePromptBuild(
         prependSystemContext += `\n<thinking_os>\n${thinkingOs.trim()}\n</thinking_os>`;
       }
     } catch (e) {
-      console.error(`[PD:Prompt] Failed to read THINKING_OS: ${String(e)}`);
+      logger?.error(`[PD:Prompt] Failed to read THINKING_OS: ${String(e)}`);
     }
   }
 
@@ -202,7 +204,7 @@ export async function handleBeforePromptBuild(
         prependContext += `\n<reflection_log>\n${reflectionLog.trim()}\n</reflection_log>\n`;
       }
     } catch (e) {
-      console.error(`[PD:Prompt] Failed to read REFLECTION_LOG: ${String(e)}`);
+      logger?.error(`[PD:Prompt] Failed to read REFLECTION_LOG: ${String(e)}`);
     }
   }
 
@@ -215,7 +217,7 @@ export async function handleBeforePromptBuild(
           prependContext += `\n<project_context>\n--- Strategic Focus ---\n${currentFocus.trim()}\n--- End of Strategic Focus ---\n</project_context>\n`;
         }
       } catch (e) {
-        console.error(`[PD:Prompt] Failed to read CURRENT_FOCUS: ${String(e)}`);
+        logger?.error(`[PD:Prompt] Failed to read CURRENT_FOCUS: ${String(e)}`);
       }
     }
   }
@@ -237,7 +239,7 @@ export async function handleBeforePromptBuild(
           }
         } catch (err) {
           // 模型配置缺失，记录错误但不 return，继续注入其他上下文
-          console.error(`[PD:Prompt] Failed to resolve diagnostician model: ${String(err)}`);
+          logger?.error(`[PD:Prompt] Failed to resolve diagnostician model: ${String(err)}`);
         }
         
         if (diagnosticianModel) {
@@ -250,7 +252,7 @@ export async function handleBeforePromptBuild(
             .replace(/"/g, '\\"')     // 转义双引号
             .replace(/\n/g, '\\n');   // 转义换行符
           
-          console.log(`[PD:Prompt] Injecting SYSTEM OVERRIDE for evolution task: ${inProgressTask.id}`);
+          logger?.info(`[PD:Prompt] Injecting SYSTEM OVERRIDE for evolution task: ${inProgressTask.id}`);
           
           evolutionDirective = `\n[🚨 SYSTEM OVERRIDE 🚨]\n` +
             `A critical evolution task is assigned to you. YOU MUST PRIORITIZE THIS TASK.\n` +
@@ -264,7 +266,7 @@ export async function handleBeforePromptBuild(
         }
       }
     } catch (e) {
-      console.error(`[PD:Prompt] Failed to parse EVOLUTION_QUEUE: ${String(e)}`);
+      logger?.error(`[PD:Prompt] Failed to parse EVOLUTION_QUEUE: ${String(e)}`);
     }
   }
 
@@ -275,7 +277,7 @@ export async function handleBeforePromptBuild(
         const caps = fs.readFileSync(capsPath, 'utf8');
         prependContext += `\n<system_capabilities>\n${caps}\n</system_capabilities>\n`;
       } catch (e) {
-        console.error(`[PD:Prompt] Failed to read SYSTEM_CAPABILITIES: ${String(e)}`);
+        logger?.error(`[PD:Prompt] Failed to read SYSTEM_CAPABILITIES: ${String(e)}`);
       }
     }
   }
@@ -288,7 +290,7 @@ export async function handleBeforePromptBuild(
         const heartbeatChecklist = fs.readFileSync(heartbeatPath, 'utf8');
         prependContext += `\n<heartbeat_checklist>\n${heartbeatChecklist}\n\nDIRECTIVE: Perform a system-wide self-audit now. If everything is stable, strictly reply with "HEARTBEAT_OK" to minimize token usage.\n</heartbeat_checklist>\n`;
       } catch (e) {
-        console.error(`[PD:Prompt] Failed to read HEARTBEAT: ${String(e)}`);
+        logger?.error(`[PD:Prompt] Failed to read HEARTBEAT: ${String(e)}`);
       }
     }
   }
@@ -347,7 +349,7 @@ export async function handleBeforePromptBuild(
     }
     
     const newSize = prependSystemContext.length + prependContext.length + appendSystemContext.length;
-    console.warn(`[PD:Prompt] Injection size exceeded: ${originalSize} chars (limit: ${MAX_SIZE}), truncated to ${newSize} chars (${newSize - originalSize} saved)`);
+    logger?.warn(`[PD:Prompt] Injection size exceeded: ${originalSize} chars (limit: ${MAX_SIZE}), truncated to ${newSize} chars (${newSize - originalSize} saved)`);
   }
 
   return {
