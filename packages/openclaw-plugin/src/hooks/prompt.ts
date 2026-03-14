@@ -13,6 +13,11 @@ export async function handleBeforePromptBuild(
 
   const wctx = WorkspaceContext.fromHookContext(ctx);
   const { trigger, sessionId, api } = ctx;
+
+  // Minimal mode: heartbeat and subagents skip project context/system caps to reduce tokens
+  // SessionId format: "agent:main:subagent:{type}-{id}" for subagents, "agent:main:..." for main
+  const isMinimalMode = trigger === "heartbeat" || sessionId?.includes(":subagent:") === true;
+
   const focusPath = wctx.resolve('CURRENT_FOCUS');
   const painFlagPath = wctx.resolve('PAIN_FLAG');
   const capsPath = wctx.resolve('SYSTEM_CAPABILITIES');
@@ -69,15 +74,17 @@ export async function handleBeforePromptBuild(
     }
   }
 
-  // 2. Strategic focus
-  if (fs.existsSync(focusPath)) {
-    try {
-      const currentFocus = fs.readFileSync(focusPath, 'utf8');
-      if (currentFocus.trim()) {
-        prependContext += `\n<project_context>\n--- Strategic Focus ---\n${currentFocus.trim()}\n--- End of Strategic Focus ---\n</project_context>\n`;
+  // 2. Strategic focus (skip in minimal mode)
+  if (!isMinimalMode) {
+    if (fs.existsSync(focusPath)) {
+      try {
+        const currentFocus = fs.readFileSync(focusPath, 'utf8');
+        if (currentFocus.trim()) {
+          prependContext += `\n<project_context>\n--- Strategic Focus ---\n${currentFocus.trim()}\n--- End of Strategic Focus ---\n</project_context>\n`;
+        }
+      } catch (e) {
+        console.error(`[PD:Prompt] Failed to read CURRENT_FOCUS: ${String(e)}`);
       }
-    } catch (e) {
-      console.error(`[PD:Prompt] Failed to read CURRENT_FOCUS: ${String(e)}`);
     }
   }
 
@@ -101,13 +108,15 @@ export async function handleBeforePromptBuild(
     }
   }
 
-  // 4. Perceptive awareness: System Capabilities
-  if (fs.existsSync(capsPath)) {
-    try {
-      const caps = fs.readFileSync(capsPath, 'utf8');
-      prependContext += `\n<system_capabilities>\n${caps}\n</system_capabilities>\n`;
-    } catch (e) {
-      console.error(`[PD:Prompt] Failed to read SYSTEM_CAPABILITIES: ${String(e)}`);
+  // 4. Perceptive awareness: System Capabilities (skip in minimal mode)
+  if (!isMinimalMode) {
+    if (fs.existsSync(capsPath)) {
+      try {
+        const caps = fs.readFileSync(capsPath, 'utf8');
+        prependContext += `\n<system_capabilities>\n${caps}\n</system_capabilities>\n`;
+      } catch (e) {
+        console.error(`[PD:Prompt] Failed to read SYSTEM_CAPABILITIES: ${String(e)}`);
+      }
     }
   }
 
@@ -151,6 +160,25 @@ export async function handleBeforePromptBuild(
   // 4. 使用命名空间前缀 (pd:internal_context)
   if (dynamicContext.trim()) {
     prependContext = `\n<pd:internal_context>\n${dynamicContext.trim()}\n</pd:internal_context>\n` + prependContext;
+  }
+
+  // ═══ SIZE GUARD: Prevent token explosion ═══
+  const totalSize = prependSystemContext.length + prependContext.length + appendSystemContext.length;
+  const MAX_SIZE = 10000;
+
+  if (totalSize > MAX_SIZE) {
+    console.warn(`[PD:Prompt] Injection size exceeded: ${totalSize} chars (limit: ${MAX_SIZE})`);
+
+    // Truncate <project_context> to first 50 lines
+    const projectContextMatch = prependContext.match(/(<project_context>[\s\S]*?<\/project_context>)/);
+    if (projectContextMatch) {
+      const originalBlock = projectContextMatch[1];
+      const lines = originalBlock.split('\n');
+      if (lines.length > 50) {
+        const truncatedBlock = lines.slice(0, 50).join('\n') + '\n...[truncated]';
+        prependContext = prependContext.replace(originalBlock, truncatedBlock);
+      }
+    }
   }
 
   return {
