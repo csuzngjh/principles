@@ -195,3 +195,13 @@
 这是起点。随着你了解什么有效，添加自己的约定、风格和规则。
 
 _This folder is home. Treat it that way._
+
+## ✅ 任务完成协议
+
+完成任何编程任务后（通过编程助手或直接执行）：
+
+1. **提交代码**：`git commit -m "type(scope): description"`
+2. **更新 track**：在 `conductor/tracks/*/plan.md` 中标记任务状态
+3. **输出报告**：修改文件列表 + commit hash + 测试结果
+
+**原因**：上下文压缩会丢失所有中间过程。没有文件证据，进度就会丢失。
