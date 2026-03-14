@@ -49,6 +49,11 @@ export const PROFILE_DEFAULTS = {
     fuzzy_match_threshold: 0.8,
     skip_large_file_action: "warn" as "warn" | "block", // "warn" or "block"
   },
+  thinking_checkpoint: {
+    enabled: false,  // Default OFF to avoid blocking new users
+    window_ms: 5 * 60 * 1000, // 5 minute window
+    high_risk_tools: ['run_shell_command', 'delete_file', 'move_file', 'pd_spawn_agent'],
+  },
   custom_guards: [] as Array<{ pattern: string; message: string; severity: string }>,
 };
 

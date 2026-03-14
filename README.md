@@ -199,7 +199,7 @@ Thinking OS is the system's **meta-cognitive layer** -- it doesn't tell the agen
 
 ---
 
-### 📈 Evolution Points (Growth System) — **NEW in V1.5.0**
+### 📈 Evolution Points (Growth System) — **NEW in V2.0**
 
 > *Growth over punishment. Every action is an opportunity to learn.*
 
@@ -208,19 +208,16 @@ The Evolution Points System replaces the punitive Trust Engine with a **growth-o
 **Core Philosophy:**
 - ✅ Starts at 0 points, can only increase (no deductions)
 - ✅ Failures record lessons without point deductions
-- ✅ Success after same-task failure = double reward
-- ✅ Consecutive failures trigger "learning mode" instead of punishment
+- ✅ Success after same-task failure = double reward (1-hour cooldown)
+- ✅ High-level agents get reduced points for trivial tasks (difficulty decay)
 
 **Point Rewards:**
 
-| Task Type | Base Points | Double Reward |
-|-----------|-------------|---------------|
-| Constructive Success | +10 | +20 |
-| Exploratory Success | +2 | +4 |
-| Risk Path Success | +15 | +30 |
-| Subagent Success | +5 | +10 |
-| Learning from Failure | +5 | First lesson |
-| Exit Learning Mode | +30 → +10 | Decreasing rewards |
+| Task Difficulty | Base Points | Double Reward |
+|---------------|-------------|---------------|
+| Trivial (简单) | +1 | +2 |
+| Normal (普通) | +3 | +6 |
+| Hard (困难) | +8 | +16 |
 
 **Level Thresholds:**
 
@@ -232,9 +229,12 @@ The Evolution Points System replaces the punitive Trust Engine with a **growth-o
 | 4 | Tree | 500 | Risk paths, 500 lines |
 | 5 | Forest | 1000 | Unlimited access |
 
-**Key Difference from Trust Engine:**
-- Old: Low score = blocked (fear-driven)
-- New: High score = unlocked (growth-driven)
+**Key Features:**
+- **Difficulty Decay**: High-level agents (Tree+) get reduced points for simple tasks
+- **Double Reward**: Re-trying a failed task within 1 hour triggers 2x points
+- **Growth-Driven**: High score unlocks capabilities (vs Trust Engine's fear-based blocking)
+
+**Documentation:** See [EP System Guide](docs/ep-guide.md) for detailed usage.
 
 ---
 
