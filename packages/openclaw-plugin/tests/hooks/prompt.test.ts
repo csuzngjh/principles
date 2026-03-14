@@ -57,14 +57,16 @@ describe('Prompt Context Injection Hook', () => {
     expect(result).toBeUndefined();
   });
 
-  it('should inject current trust score and stage', async () => {
+  it('should inject current trust score and stage in internal_context', async () => {
     vi.mocked(fs.existsSync).mockReturnValue(false);
     
     const result = await handleBeforePromptBuild({} as any, { workspaceDir, trigger: 'user' } as any);
     
     expect(result).toBeDefined();
-    expect(result?.prependSystemContext).toContain('CURRENT TRUST SCORE: 85/100');
-    expect(result?.prependSystemContext).toContain('Stage 4');
+    // Task 1.1: trustScore 移到 prependContext 的 <internal_context> 中
+    expect(result?.prependContext).toContain('<pd:internal_context>');
+    expect(result?.prependContext).toContain('CURRENT TRUST SCORE: 85/100');
+    expect(result?.prependContext).toContain('Stage 4');
   });
 
   it('should append CURRENT_FOCUS if it exists', async () => {
@@ -116,8 +118,8 @@ describe('Prompt Context Injection Hook', () => {
     const result = await handleBeforePromptBuild({} as any, { workspaceDir, trigger: 'user' } as any);
 
     expect(result?.prependSystemContext).not.toContain('<core_principles>');
-    // Should still have trust score
-    expect(result?.prependSystemContext).toContain('CURRENT TRUST SCORE');
+    // Task 1.1: trust score 现在在 prependContext 的 <pd:internal_context> 中
+    expect(result?.prependContext).toContain('CURRENT TRUST SCORE');
   });
 
   it('should handle PRINCIPLES.md read error gracefully', async () => {
@@ -164,7 +166,7 @@ describe('Prompt Context Injection Hook', () => {
     expect(principlesIndex).toBeLessThan(thinkingOsIndex);
   });
 
-  it('FULL INJECTION: should preserve ALL prependSystemContext content', async () => {
+  it('FULL INJECTION: should preserve ALL content with correct separation', async () => {
     // This test catches the "=" vs "+=" bug for ANY future additions
     // 模拟所有文件都存在的真实场景
     vi.mocked(fs.existsSync).mockReturnValue(true);
@@ -179,21 +181,28 @@ describe('Prompt Context Injection Hook', () => {
 
     const result = await handleBeforePromptBuild({} as any, { workspaceDir, trigger: 'user' } as any);
 
-    const context = result?.prependSystemContext ?? '';
+    // Task 1.1: prependSystemContext 只包含静态内容（用于 provider 缓存优化）
+    const staticContext = result?.prependSystemContext ?? '';
+    expect(staticContext).toContain('<core_principles>');
+    expect(staticContext).toContain('[PRINCIPLES_CONTENT]');
+    expect(staticContext).toContain('<thinking_os>');
+    expect(staticContext).toContain('[THINKING_OS_CONTENT]');
+    // 静态上下文不应包含动态内容
+    expect(staticContext).not.toContain('CURRENT TRUST SCORE');
     
-    // 所有注入内容必须同时存在 - 任何 "=" 误用都会导致前一个丢失
-    expect(context).toContain('<core_principles>');
-    expect(context).toContain('[PRINCIPLES_CONTENT]');
-    expect(context).toContain('<thinking_os>');
-    expect(context).toContain('[THINKING_OS_CONTENT]');
-    expect(context).toContain('CURRENT TRUST SCORE');
-    
-    // 验证顺序正确（防止未来有人用 prepend 破坏顺序）
-    const order = [
-      context.indexOf('<core_principles>'),
-      context.indexOf('<thinking_os>'),
-      context.indexOf('CURRENT TRUST SCORE'),
+    // 验证静态内容顺序正确
+    const staticOrder = [
+      staticContext.indexOf('<core_principles>'),
+      staticContext.indexOf('<thinking_os>'),
     ];
-    expect(order).toEqual([...order].sort((a, b) => a - b));
+    expect(staticOrder).toEqual([...staticOrder].sort((a, b) => a - b));
+    
+    // Task 1.1: 动态内容在 prependContext 的 <pd:internal_context> 中
+    const dynamicContext = result?.prependContext ?? '';
+    expect(dynamicContext).toContain('<pd:internal_context>');
+    expect(dynamicContext).toContain('CURRENT TRUST SCORE');
+    
+    // <pd:internal_context> 应该在 prependContext 开头
+    expect(dynamicContext.indexOf('<pd:internal_context>')).toBe(1); // 索引 1 因为开头是 \n
   });
 });

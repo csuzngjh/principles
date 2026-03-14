@@ -124,20 +124,33 @@ export async function handleBeforePromptBuild(
     }
   }
 
-  // 6. Security Layer: Trust & Permission Awareness
+  // 6. Security Layer: Trust & Permission Awareness (Dynamic Content)
+  // 这些是动态内容，放入 <pd:internal_context> 以便 prependSystemContext 保持纯静态
   const trustScore = wctx.trust.getScore();
   const stage = wctx.trust.getStage();
   const hygiene = wctx.hygiene.getStats();
-  
-  prependSystemContext += `\n[CURRENT TRUST SCORE: ${trustScore}/100 (Stage ${stage})]\n`;
-  prependSystemContext += `[COGNITIVE HYGIENE: ${hygiene.persistenceCount} persists today]\n`;
 
-  if (hygiene.persistenceCount === 0 && trigger === 'user') {
-     appendSystemContext += `\n⚠️ ADVISORY: You haven't persisted any state today. To prevent "Goldfish Memory", consider updating PLAN.md or writing notes to memory/ if this session is becoming complex.\n`;
+  // 1. 数值安全校验：防止异常值
+  const safeScore = Math.max(0, Math.min(100, Number(trustScore) || 0));
+  const safeStage = Math.max(1, Math.min(5, Number(stage) || 1));
+
+  // 2. 构建动态内部上下文（重命名 internalContext → dynamicContext）
+  let dynamicContext = '';
+  dynamicContext += `[CURRENT TRUST SCORE: ${safeScore}/100 (Stage ${safeStage})]\n`;
+  dynamicContext += `[COGNITIVE HYGIENE: ${hygiene.persistenceCount} persists today]\n`;
+
+  // 3. 视觉层次改进：Stage 1 使用更醒目的格式
+  if (safeStage === 1) {
+    dynamicContext += `\n[!CRITICAL!] Your trust score is critical. You are in read-only mode. Use diagnostician sub-agents to recover trust.\n`;
   }
 
-  if (stage === 1) {
-    prependSystemContext += `⚠️ WARNING: Your trust score is critical. You are in read-only mode. Use diagnostician sub-agents to recover trust.\n`;
+  if (hygiene.persistenceCount === 0 && trigger === 'user') {
+    dynamicContext += `⚠️ ADVISORY: You haven't persisted any state today. To prevent "Goldfish Memory", consider updating PLAN.md or writing notes to memory/ if this session is becoming complex.\n`;
+  }
+
+  // 4. 使用命名空间前缀 (pd:internal_context)
+  if (dynamicContext.trim()) {
+    prependContext = `\n<pd:internal_context>\n${dynamicContext.trim()}\n</pd:internal_context>\n` + prependContext;
   }
 
   return {
