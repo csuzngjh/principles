@@ -194,3 +194,13 @@ You default to architect mode.
 This is a starting point. Add your own conventions, style, and rules as you figure out what works.
 
 _This folder is home. Treat it that way._
+
+## ✅ Task Completion Protocol
+
+When completing any coding task (via AI coding assistant or direct):
+
+1. **Commit code**: `git commit -m "type(scope): description"`
+2. **Update track**: Mark task status in `conductor/tracks/*/plan.md`
+3. **Report**: Output file list + commit hash + test results
+
+**Why**: Context compression erases all intermediate process. Without file evidence, progress is lost.
