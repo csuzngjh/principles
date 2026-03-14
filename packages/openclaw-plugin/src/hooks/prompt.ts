@@ -1,8 +1,64 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import type { PluginHookBeforePromptBuildEvent, PluginHookAgentContext, PluginHookBeforePromptBuildResult } from '../openclaw-sdk.js';
+import type { PluginHookBeforePromptBuildEvent, PluginHookAgentContext, PluginHookBeforePromptBuildResult, PluginLogger } from '../openclaw-sdk.js';
 import { getSession, resetFriction } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
+
+/**
+ * 从 OpenClaw 配置中解析模型选择
+ * 支持 string 或 { primary, fallbacks } 格式
+ * @internal 导出仅供测试使用
+ */
+export function resolveModelFromConfig(modelConfig: unknown): string | null {
+  if (!modelConfig) return null;
+  
+  // 格式 1: "provider/model" 字符串
+  if (typeof modelConfig === 'string') {
+    const trimmed = modelConfig.trim();
+    return trimmed || null;
+  }
+  
+  // 格式 2: { primary: "provider/model", fallbacks: [...] } 对象
+  if (typeof modelConfig === 'object' && modelConfig !== null) {
+    const cfg = modelConfig as { primary?: string };
+    if (cfg.primary && typeof cfg.primary === 'string') {
+      const trimmed = cfg.primary.trim();
+      return trimmed || null;
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * 获取诊断子智能体应使用的模型
+ * 优先级：subagents.model > 主模型
+ * 如果都没有配置，抛出错误
+ * @internal 导出仅供测试使用
+ */
+export function getDiagnosticianModel(api: any, logger: PluginLogger): string {
+  const agentsConfig = api?.config?.agents?.defaults;
+  
+  // 优先使用子智能体专用模型
+  const subagentModel = resolveModelFromConfig(agentsConfig?.subagents?.model);
+  if (subagentModel) {
+    logger.info(`[PD:Prompt] Using subagents.model for diagnostician: ${subagentModel}`);
+    return subagentModel;
+  }
+  
+  // 备选：使用主智能体模型
+  const primaryModel = resolveModelFromConfig(agentsConfig?.model);
+  if (primaryModel) {
+    logger.info(`[PD:Prompt] Using primary model for diagnostician (subagents.model not set): ${primaryModel}`);
+    return primaryModel;
+  }
+  
+  // 没有配置任何模型，报错
+  const errorMsg = `[PD:Prompt] ERROR: No model configured for diagnostician subagent. ` +
+    `Please set 'agents.defaults.subagents.model' or 'agents.defaults.model' in OpenClaw config.`;
+  logger.error(errorMsg);
+  throw new Error(errorMsg);
+}
 
 export async function handleBeforePromptBuild(
   event: PluginHookBeforePromptBuildEvent,
@@ -97,11 +153,31 @@ export async function handleBeforePromptBuild(
       
       if (inProgressTask) {
         // High-intensity directive to force the agent to work on the evolution task
+        let diagnosticianModel: string;
+        try {
+          diagnosticianModel = getDiagnosticianModel(api, api.logger);
+        } catch (err) {
+          // 模型配置缺失，跳过进化任务注入，记录错误
+          api.logger.error(`[PD:Prompt] Failed to resolve diagnostician model: ${String(err)}`);
+          // 不注入 SYSTEM OVERRIDE，让任务保持在队列中等待下次处理
+          return;
+        }
+        
+        const escapedTask = inProgressTask.task
+          .replace(/\\/g, '\\\\')  // 先转义反斜杠
+          .replace(/"/g, '\\"')    // 再转义双引号
+          .replace(/\n/g, '\\n');  // 转义换行符
+        api.logger.info(`[PD:Prompt] Injecting SYSTEM OVERRIDE for evolution task: ${inProgressTask.id}`);
+        
         prependContext += `\n[🚨 SYSTEM OVERRIDE 🚨]\n` +
           `A critical evolution task is assigned to you. YOU MUST PRIORITIZE THIS TASK.\n` +
-          `TASK: "${inProgressTask.task}"\n\n` +
+          `TASK: "${escapedTask}"\n\n` +
           `ACTION REQUIRED:\n` +
-          `Reply ONLY with "[EVOLUTION_ACK]". Then immediately invoke the \`sessions_spawn\` tool targeting \`diagnostician\` with the task above. NO OTHER ACTIONS PERMITTED.`;
+          `Reply ONLY with "[EVOLUTION_ACK]". Then immediately invoke the \`sessions_spawn\` tool:\n` +
+          `\`\`\`\n` +
+          `sessions_spawn target="diagnostician" message="${escapedTask}" model="${diagnosticianModel}"\n` +
+          `\`\`\`\n` +
+          `NO OTHER ACTIONS PERMITTED.`;
       }
     } catch (e) {
       console.error(`[PD:Prompt] Failed to parse EVOLUTION_QUEUE: ${String(e)}`);

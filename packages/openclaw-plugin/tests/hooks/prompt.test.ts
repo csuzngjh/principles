@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { handleBeforePromptBuild } from '../../src/hooks/prompt';
+import { handleBeforePromptBuild, resolveModelFromConfig, getDiagnosticianModel } from '../../src/hooks/prompt';
 import * as sessionTracker from '../../src/core/session-tracker';
 import { WorkspaceContext } from '../../src/core/workspace-context';
 import fs from 'fs';
@@ -8,6 +8,139 @@ import path from 'path';
 vi.mock('fs');
 vi.mock('../../src/core/session-tracker.js');
 vi.mock('../../src/core/workspace-context.js');
+
+// ═══ Test Group: Model Resolution Functions ═══
+describe('resolveModelFromConfig', () => {
+  it('parses string format "provider/model"', () => {
+    expect(resolveModelFromConfig('openai/gpt-4o')).toBe('openai/gpt-4o');
+    expect(resolveModelFromConfig('anthropic/claude-opus-4-5')).toBe('anthropic/claude-opus-4-5');
+  });
+
+  it('parses object format { primary, fallbacks }', () => {
+    expect(resolveModelFromConfig({ primary: 'anthropic/claude-opus-4-5', fallbacks: ['openai/gpt-4o'] }))
+      .toBe('anthropic/claude-opus-4-5');
+    expect(resolveModelFromConfig({ primary: 'openai/gpt-4o' }))
+      .toBe('openai/gpt-4o');
+  });
+
+  it('trims whitespace from model string', () => {
+    expect(resolveModelFromConfig('  openai/gpt-4o  ')).toBe('openai/gpt-4o');
+    expect(resolveModelFromConfig({ primary: '  anthropic/claude-opus-4-5  ' }))
+      .toBe('anthropic/claude-opus-4-5');
+  });
+
+  it('returns null for invalid input', () => {
+    expect(resolveModelFromConfig(null)).toBeNull();
+    expect(resolveModelFromConfig(undefined)).toBeNull();
+    expect(resolveModelFromConfig('')).toBeNull();
+    expect(resolveModelFromConfig('   ')).toBeNull();
+    expect(resolveModelFromConfig({})).toBeNull();
+    expect(resolveModelFromConfig({ fallbacks: ['openai/gpt-4o'] })).toBeNull();
+    expect(resolveModelFromConfig(123)).toBeNull();
+  });
+});
+
+describe('getDiagnosticianModel', () => {
+  const mockLogger = {
+    info: vi.fn(),
+    error: vi.fn(),
+    warn: vi.fn(),
+    debug: vi.fn(),
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('prefers subagents.model over primary model', () => {
+    const api = {
+      config: {
+        agents: {
+          defaults: {
+            model: 'openai/gpt-4o',
+            subagents: { model: 'anthropic/claude-opus-4-5' }
+          }
+        }
+      }
+    };
+    
+    const result = getDiagnosticianModel(api, mockLogger as any);
+    
+    expect(result).toBe('anthropic/claude-opus-4-5');
+    expect(mockLogger.info).toHaveBeenCalledWith(
+      expect.stringContaining('subagents.model for diagnostician')
+    );
+    expect(mockLogger.info).toHaveBeenCalledWith(
+      expect.stringContaining('anthropic/claude-opus-4-5')
+    );
+  });
+
+  it('falls back to primary model when subagents.model not set', () => {
+    const api = {
+      config: {
+        agents: {
+          defaults: {
+            model: 'openai/gpt-4o'
+          }
+        }
+      }
+    };
+    
+    const result = getDiagnosticianModel(api, mockLogger as any);
+    
+    expect(result).toBe('openai/gpt-4o');
+    expect(mockLogger.info).toHaveBeenCalledWith(
+      expect.stringContaining('primary model for diagnostician')
+    );
+  });
+
+  it('supports object format for model config', () => {
+    const api = {
+      config: {
+        agents: {
+          defaults: {
+            model: { primary: 'openai/gpt-4o', fallbacks: ['openai/gpt-4o-mini'] }
+          }
+        }
+      }
+    };
+    
+    const result = getDiagnosticianModel(api, mockLogger as any);
+    
+    expect(result).toBe('openai/gpt-4o');
+  });
+
+  it('throws error when no model configured', () => {
+    const api = { config: {} };
+    
+    expect(() => getDiagnosticianModel(api, mockLogger as any))
+      .toThrow('No model configured for diagnostician subagent');
+    
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      expect.stringContaining('ERROR: No model configured')
+    );
+  });
+
+  it('throws error when api is null', () => {
+    expect(() => getDiagnosticianModel(null, mockLogger as any))
+      .toThrow('No model configured for diagnostician subagent');
+    
+    expect(mockLogger.error).toHaveBeenCalled();
+  });
+
+  it('throws error when agents.defaults is empty', () => {
+    const api = {
+      config: {
+        agents: {
+          defaults: {}
+        }
+      }
+    };
+    
+    expect(() => getDiagnosticianModel(api, mockLogger as any))
+      .toThrow('No model configured for diagnostician subagent');
+  });
+});
 
 describe('Prompt Context Injection Hook', () => {
   const workspaceDir = '/mock/workspace';
@@ -85,10 +218,100 @@ describe('Prompt Context Injection Hook', () => {
         { id: 't1', task: 'Fix bug', status: 'in_progress' }
     ]));
 
-    const result = await handleBeforePromptBuild({} as any, { workspaceDir, trigger: 'user' } as any);
+    const mockApi = {
+      config: {
+        agents: {
+          defaults: {
+            model: 'openai/gpt-4o'
+          }
+        }
+      },
+      logger: {
+        info: vi.fn(),
+        error: vi.fn(),
+        warn: vi.fn(),
+        debug: vi.fn(),
+      }
+    };
+
+    const result = await handleBeforePromptBuild({} as any, { 
+      workspaceDir, 
+      trigger: 'user',
+      api: mockApi
+    } as any);
 
     expect(result?.prependContext).toContain('SYSTEM OVERRIDE');
     expect(result?.prependContext).toContain('Fix bug');
+    expect(result?.prependContext).toContain('model="openai/gpt-4o"');
+    expect(result?.prependContext).toContain('sessions_spawn target="diagnostician"');
+  });
+
+  it('should properly escape special characters in task string', async () => {
+    // 任务包含特殊字符：反斜杠、双引号、换行符
+    const taskWithSpecialChars = 'Fix path C:\\Users\\admin and "quoted text"\nwith newline';
+    
+    vi.mocked(fs.existsSync).mockImplementation((p) => p.toString().includes('evolution_queue.json'));
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify([
+        { id: 't1', task: taskWithSpecialChars, status: 'in_progress' }
+    ]));
+
+    const mockApi = {
+      config: {
+        agents: {
+          defaults: {
+            model: 'openai/gpt-4o'
+          }
+        }
+      },
+      logger: {
+        info: vi.fn(),
+        error: vi.fn(),
+        warn: vi.fn(),
+        debug: vi.fn(),
+      }
+    };
+
+    const result = await handleBeforePromptBuild({} as any, { 
+      workspaceDir, 
+      trigger: 'user',
+      api: mockApi
+    } as any);
+
+    // 验证转义后的字符串
+    expect(result?.prependContext).toContain('C:\\\\Users\\\\admin');  // 反斜杠被转义
+    expect(result?.prependContext).toContain('\\"quoted text\\"');    // 双引号被转义
+    expect(result?.prependContext).toContain('with newline');         // 换行符被转义后不应有实际换行
+    // 确保没有未转义的特殊字符
+    expect(result?.prependContext).not.toMatch(/message="[^"]*"[^\\]/);  // 双引号前应该有转义符
+  });
+
+  it('should NOT inject system override if model config is missing', async () => {
+    vi.mocked(fs.existsSync).mockImplementation((p) => p.toString().includes('evolution_queue.json'));
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify([
+        { id: 't1', task: 'Fix bug', status: 'in_progress' }
+    ]));
+
+    const mockApi = {
+      config: {},
+      logger: {
+        info: vi.fn(),
+        error: vi.fn(),
+        warn: vi.fn(),
+        debug: vi.fn(),
+      }
+    };
+
+    const result = await handleBeforePromptBuild({} as any, { 
+      workspaceDir, 
+      trigger: 'user',
+      api: mockApi
+    } as any);
+
+    // Should return early without injecting SYSTEM OVERRIDE
+    expect(result).toBeUndefined();
+    expect(mockApi.logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('No model configured')
+    );
   });
 
   it('should prependSystemContext with THINKING_OS.md if it exists', async () => {
