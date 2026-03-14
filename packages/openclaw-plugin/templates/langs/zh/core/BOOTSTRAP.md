@@ -120,6 +120,119 @@ memory/
 
 ---
 
+## ⏰ 定时任务初始化（推荐）
+
+为了让系统的后台功能正常工作，你需要为用户安装以下定时任务。
+
+### 使用 AskUserQuestion 询问用户
+
+询问用户是否需要安装后台定时任务：
+
+> "我可以为你配置一些后台定时任务，让系统自动执行维护工作。是否需要配置？"
+
+如果用户同意，依次创建以下任务：
+
+### 1. 熵减巡检（每天凌晨 2 点）
+
+清理工作区临时文件，保持项目整洁：
+
+```json
+{
+  "action": "add",
+  "job": {
+    "name": "pd-grooming-daily",
+    "schedule": { "kind": "cron", "expr": "0 2 * * *", "tz": "Asia/Shanghai" },
+    "sessionTarget": "isolated",
+    "payload": {
+      "kind": "agentTurn",
+      "message": "执行 pd-grooming 技能：检查工作区根目录，清理临时文件和数字垃圾。严格遵循安全红线，不要删除业务代码。",
+      "lightContext": true
+    },
+    "delivery": { "mode": "none" }
+  }
+}
+```
+
+### 2. 环境健康检查（每 4 小时）
+
+验证核心工具是否可用：
+
+```json
+{
+  "action": "add",
+  "job": {
+    "name": "health-check",
+    "schedule": { "kind": "every", "everyMs": 14400000 },
+    "sessionTarget": "main",
+    "payload": {
+      "kind": "systemEvent",
+      "text": "环境健康检查：验证核心工具（rg, node, python）是否可用，检查 PLAN.md 状态与实际进度是否一致。"
+    },
+    "wakeMode": "next-heartbeat"
+  }
+}
+```
+
+### 3. 战略对齐检查（每天上午 9 点）
+
+检查是否偏离战略目标：
+
+```json
+{
+  "action": "add",
+  "job": {
+    "name": "strategy-alignment",
+    "schedule": { "kind": "cron", "expr": "0 9 * * *", "tz": "Asia/Shanghai" },
+    "sessionTarget": "isolated",
+    "payload": {
+      "kind": "agentTurn",
+      "message": "执行战略对齐检查：对比 memory/okr/CURRENT_FOCUS.md，确认过去24小时的操作是否偏离战略重点。如有偏离，提醒用户。"
+    },
+    "delivery": { "mode": "announce" }
+  }
+}
+```
+
+### 4. Memory 周度整理（每周一上午 10 点）
+
+深度整理记忆文件：
+
+```json
+{
+  "action": "add",
+  "job": {
+    "name": "memory-weekly",
+    "schedule": { "kind": "cron", "expr": "0 10 * * 1", "tz": "Asia/Shanghai" },
+    "sessionTarget": "isolated",
+    "payload": {
+      "kind": "agentTurn",
+      "message": "执行 Memory 周度整理：翻阅近期的 memory/YYYY-MM-DD.md 文件，提炼重要内容到 MEMORY.md，清理过时信息。"
+    },
+    "delivery": { "mode": "none" }
+  }
+}
+```
+
+### 时区确认
+
+安装前**必须**确认用户的时区：
+
+> "你的时区是什么？（默认：Asia/Shanghai）"
+
+如果用户提供不同的时区，替换上述任务中的 `tz` 字段。
+
+### 安装验证
+
+安装完成后，运行以下命令验证：
+
+```bash
+openclaw cron list
+```
+
+确认所有任务都已正确创建。
+
+---
+
 ## 完成后
 
 当你完成了初始化：

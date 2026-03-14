@@ -1,116 +1,60 @@
-# 💓 HEARTBEAT.md - Heartbeat Checklist
+# 💓 HEARTBEAT.md - Heartbeat Checklist (Minimal)
 
-On each heartbeat, run these checks to maintain system vitality. **Don't just reply `HEARTBEAT_OK` every time — use heartbeats productively.**
+On each heartbeat, run these core checks. **Don't just reply `HEARTBEAT_OK` every time — use heartbeats productively.**
 
----
-
-## 🔄 Heartbeat State Tracking
-
-Record check timestamps in `memory/heartbeat-state.json`:
-
-```json
-{
-  "lastChecks": {
-    "pain": 1703275200,
-    "strategy": 1703260800,
-    "memory": 1703250000,
-    "grooming": null
-  }
-}
-```
-
-Update the timestamp after each check to avoid redundant checks.
+> **Note**: Grooming, Strategic Alignment, and System Health checks have moved to Cron jobs. See BOOTSTRAP.md for installation guide.
 
 ---
 
-## 1. 🩹 Pain & Evolution Check
+## 🩹 Pain & Evolution Check
 
-- [ ] **Check `.state/.pain_flag`**: Any unprocessed pain signals?
-- [ ] **Check `.state/evolution_queue.json`**: Any pending async evolution tasks?
-- [ ] **Check `memory/logs/SYSTEM.log`**: Any unresolved high-priority issues?
+- [ ] **`.state/.pain_flag`** — Any unprocessed pain signals?
+- [ ] **`.state/evolution_queue.json`** — Any pending evolution tasks?
+- [ ] **`memory/logs/SYSTEM.log`** — Any unresolved high-priority issues?
 
-**Action**: If unprocessed pain signals exist, evaluate whether to immediately run `/reflection` or `/evolve-task`.
-
----
-
-## 2. 🎯 Strategic Alignment
-
-- [ ] **Compare against `memory/okr/CURRENT_FOCUS.md`**: Have recent operations drifted from strategic focus?
-- [ ] **Weekly governance state**: Check `memory/okr/WEEK_STATE.json`, ensure current state is `EXECUTING`
-
-**Action**: If state is `INTERRUPTED`, prioritize recovery.
+**Action**: If signals found, run `/reflection` or `/evolve-task`.
 
 ---
 
-## 3. 🧠 Memory Maintenance
+## 📋 CURRENT_FOCUS.md Maintenance (Every 3 heartbeats)
 
-Every few days (or when memory files accumulate):
+- [ ] **Check file size**: target < 50 lines
+- [ ] **If > 50 lines**: compress completed milestones to `MEMORY.md`
+- [ ] **Verify content**: no outdated dates or completed tasks
+- [ ] **Keep only**: current phase, active tasks, next steps
 
-- [ ] **Review recent `memory/YYYY-MM-DD.md`**: Identify content worth preserving long-term
-- [ ] **Update `MEMORY.md`**: Distill learnings, important decisions, lessons
+---
+
+## 🧠 Memory Maintenance (Anti-Forgetfulness Core)
+
+> **Why in heartbeat?** LLMs have severe memory issues. Heartbeat has main session context and can sense current work.
+
+### Every heartbeat:
+
+- [ ] **Review today's notes** `memory/YYYY-MM-DD.md` — What did we learn today? What decisions were made?
+- [ ] **Check key memory** `MEMORY.md` — Anything needs updating?
+
+### When memory files accumulate:
+
+- [ ] **Distill essence**: Extract important content from daily notes to `MEMORY.md`
 - [ ] **Clean outdated info**: Remove no-longer-relevant content from `MEMORY.md`
 
-**Principle**: Daily files are raw notes; `MEMORY.md` is curated wisdom.
+**Principles**:
+- Daily files are raw notes; `MEMORY.md` is curated wisdom
+- **Don't let important decisions and lessons be forgotten**
+- If user shares preferences or important info, record immediately
 
 ---
 
-## 4. 🧹 Grooming Check
+## ⏰ Stay Silent (HEARTBEAT_OK):
 
-⚠️ **Safety First**: Use two-phase deletion strategy to avoid accidentally deleting important files
-
-- [ ] **Phase 1 - Move to Trash** (execute immediately):
-  ```bash
-  # Create trash directories
-  mkdir -p .trash/{tmp,cache,logs,editor}
-
-  # Recursively move files to trash (don't delete!)
-  find /tmp -type f -mtime +7 -exec mv -t .trash/tmp/ {} +
-  find . -type d -name ".cache" -exec find {} -type f -mtime +7 -exec mv -t .trash/cache/ {} +
-  find . \( -name "*.swp" -o -name "*~" -o -name ".DS_Store" \) -exec mv -t .trash/editor/ {} +
-  ```
-
-- [ ] **Phase 2 - Empty Trash** (delay 7 days):
-  ```bash
-  # Only delete files in trash that are older than 7 days
-  find .trash/ -type f -mtime +7 -delete
-  find .trash/ -type d -empty -delete
-  ```
-
-- [ ] **Run `ls -F` on project root**
-- [ ] **Identify non-standard files**: Scattered temp files, test scripts, poorly named docs
-
-**Action**: If chaos found, invoke `pd-grooming` skill for cleanup.
-
-**⚠️ Strictly Forbidden**:
-- ❌ Using `rm -rf` to delete workspace files
-- ❌ Using `find ... -delete` to directly delete
-- ❌ Skipping trash and deleting directly
+- Late night (23:00-08:00) unless urgent / User busy / Nothing new / < 30 min / Normal
 
 ---
 
-## 5. 🛠️ System Health
+## 🚨 Reach Out:
 
-- [ ] **Check `.state/SYSTEM_CAPABILITIES.json`**: Are core tools (`rg`, `node`, `python`) available?
-- [ ] **Doc sync**: Ensure `PLAN.md` state matches actual progress
-
----
-
-## ⏰ When to Stay Silent (HEARTBEAT_OK)
-
-- Late night (23:00-08:00) unless urgent
-- Human is clearly busy
-- Nothing new since last check
-- Last check was < 30 minutes ago
-- All checks are normal
-
----
-
-## 🚨 When to Reach Out
-
-- Important pain signal needs handling
-- Strategic drift needs user confirmation
-- Project environment needs cleaning
-- Significant discovery or progress
+- Pain needs handling / Important discovery / Evolution task pending / Memory needs update
 
 ---
 
