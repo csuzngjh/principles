@@ -120,6 +120,119 @@ If the user has clear project goals, run `/init-strategy` skill to:
 
 ---
 
+## ⏰ Cron Jobs Initialization (Recommended)
+
+To enable background maintenance features, you need to install the following cron jobs for the user.
+
+### Ask the User
+
+Ask the user if they want to configure background cron jobs:
+
+> "I can set up some background cron jobs to automatically perform maintenance tasks. Would you like me to configure them?"
+
+If the user agrees, create the following jobs:
+
+### 1. Grooming (Daily at 2 AM)
+
+Clean up workspace temp files:
+
+```json
+{
+  "action": "add",
+  "job": {
+    "name": "pd-grooming-daily",
+    "schedule": { "kind": "cron", "expr": "0 2 * * *", "tz": "America/New_York" },
+    "sessionTarget": "isolated",
+    "payload": {
+      "kind": "agentTurn",
+      "message": "Execute pd-grooming skill: Check workspace root, clean temp files and digital clutter. Follow safety rules strictly. Do not delete business code.",
+      "lightContext": true
+    },
+    "delivery": { "mode": "none" }
+  }
+}
+```
+
+### 2. Health Check (Every 4 hours)
+
+Verify core tools are available:
+
+```json
+{
+  "action": "add",
+  "job": {
+    "name": "health-check",
+    "schedule": { "kind": "every", "everyMs": 14400000 },
+    "sessionTarget": "main",
+    "payload": {
+      "kind": "systemEvent",
+      "text": "Health check: Verify core tools (rg, node, python) are available. Check if PLAN.md state matches actual progress."
+    },
+    "wakeMode": "next-heartbeat"
+  }
+}
+```
+
+### 3. Strategy Alignment (Daily at 9 AM)
+
+Check if operations have drifted from strategic goals:
+
+```json
+{
+  "action": "add",
+  "job": {
+    "name": "strategy-alignment",
+    "schedule": { "kind": "cron", "expr": "0 9 * * *", "tz": "America/New_York" },
+    "sessionTarget": "isolated",
+    "payload": {
+      "kind": "agentTurn",
+      "message": "Execute strategy alignment check: Compare against memory/okr/CURRENT_FOCUS.md. Confirm if past 24 hours of operations have drifted from strategic focus. Alert user if drifted."
+    },
+    "delivery": { "mode": "announce" }
+  }
+}
+```
+
+### 4. Memory Weekly Cleanup (Monday 10 AM)
+
+Deep memory file organization:
+
+```json
+{
+  "action": "add",
+  "job": {
+    "name": "memory-weekly",
+    "schedule": { "kind": "cron", "expr": "0 10 * * 1", "tz": "America/New_York" },
+    "sessionTarget": "isolated",
+    "payload": {
+      "kind": "agentTurn",
+      "message": "Execute weekly memory cleanup: Review recent memory/YYYY-MM-DD.md files, extract important content to MEMORY.md, clean outdated info."
+    },
+    "delivery": { "mode": "none" }
+  }
+}
+```
+
+### Timezone Confirmation
+
+**Before installing**, confirm the user's timezone:
+
+> "What's your timezone? (Default: America/New_York)"
+
+If the user provides a different timezone, replace the `tz` field in the jobs above.
+
+### Installation Verification
+
+After installation, run:
+
+```bash
+openclaw cron list
+```
+
+Confirm all jobs are correctly created.
+
+---
+
 ## When You're Done
 
 After initialization:
