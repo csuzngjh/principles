@@ -40,7 +40,7 @@ export async function handleBeforePromptBuild(
 
   // ═══ LAYER 0.5 (道之动): Dynamic Context-Based Principle Injection ═══
   // Inject additional principles based on current operation context
-  const dynamicPrinciples = await handleContextInjection({ ...ctx, api });
+  const dynamicPrinciples = handleContextInjection({ ...ctx, api });
   if (dynamicPrinciples.trim()) {
     prependSystemContext += dynamicPrinciples;
   }
