@@ -3,6 +3,7 @@ import * as path from 'path';
 import type { PluginHookBeforePromptBuildEvent, PluginHookAgentContext, PluginHookBeforePromptBuildResult } from '../openclaw-sdk.js';
 import { getSession, resetFriction } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
+import { handleContextInjection } from './context-injection.js';
 
 export async function handleBeforePromptBuild(
   event: PluginHookBeforePromptBuildEvent,
@@ -35,6 +36,13 @@ export async function handleBeforePromptBuild(
     } catch (e) {
       console.error(`[PD:Prompt] Failed to read PRINCIPLES: ${String(e)}`);
     }
+  }
+
+  // ═══ LAYER 0.5 (道之动): Dynamic Context-Based Principle Injection ═══
+  // Inject additional principles based on current operation context
+  const dynamicPrinciples = await handleContextInjection({ ...ctx, api });
+  if (dynamicPrinciples.trim()) {
+    prependSystemContext += dynamicPrinciples;
   }
 
   // 0. Manual Pain Clearance
