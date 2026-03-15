@@ -13,6 +13,17 @@
   "exports": {
     ".": "./dist/index.js"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/csuzngjh/principles.git",
+    "directory": "packages/openclaw-plugin"
+  },
+  "author": "csuzngjh",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/csuzngjh/principles/issues"
+  },
+  "homepage": "https://github.com/csuzngjh/principles#readme",
   "openclaw": {
     "id": "principles-disciple",
     "name": "Principles Disciple",
