@@ -6,6 +6,7 @@ import { normalizeProfile } from '../core/profile.js';
 import { trackBlock, hasRecentThinking } from '../core/session-tracker.js';
 import { assessRiskLevel, estimateLineChanges } from '../core/risk-calculator.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
+import { checkEvolutionGate } from '../core/evolution-engine.js';
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult } from '../openclaw-sdk.js';
 
 export function handleBeforeToolCall(
@@ -197,6 +198,34 @@ export function handleBeforeToolCall(
     if (stage === 4) {
         logger.info(`[PD_GATE] Trusted Architect bypass for ${relPath}`);
         return;
+    }
+
+    // ── EP SIMULATION MODE (M6验证) ──
+    // 记录EP系统的模拟决策，但不生效（仅用于对比分析）
+    try {
+        const epDecision = checkEvolutionGate(ctx.workspaceDir!, {
+            toolName: event.toolName,
+            content: event.params?.content,
+            lineCount: lineChanges,
+            isRiskPath: risky,
+        });
+        
+        const epLogEntry = {
+            timestamp: new Date().toISOString(),
+            toolName: event.toolName,
+            filePath: relPath,
+            trustEngine: { score: trustScore, stage, decision: 'allow' },
+            epSystem: { tier: epDecision.currentTier, allowed: epDecision.allowed, reason: epDecision.reason },
+            conflict: epDecision.allowed === false && stage >= 3, // Trust允许但EP拒绝
+        };
+        
+        const epLogPath = path.join(ctx.workspaceDir!, '.state', 'ep_simulation.jsonl');
+        fs.mkdirSync(path.dirname(epLogPath), { recursive: true });
+        fs.appendFileSync(epLogPath, JSON.stringify(epLogEntry) + '\n');
+        
+        logger.info(`[PD_EP_SIM] Tier: ${epDecision.currentTier}, Allowed: ${epDecision.allowed}, Trust: ${trustScore} (Stage ${stage})`);
+    } catch (err) {
+        logger.warn(`[PD_EP_SIM] Simulation failed: ${err}`);
     }
   } else {
     // FALLBACK: Legacy Gate Logic
