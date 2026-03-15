@@ -52,11 +52,6 @@ jobs:
         working-directory: packages/openclaw-plugin
         run: npm install
 
-      - name: TypeScript Review
-        uses: reviewdog/action-tsc@v1
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          reporter: github-pr-review
-          filter_mode: nofilter
-          fail_on_error: false
-          workdir: packages/openclaw-plugin
+      - name: TypeScript Check
+        working-directory: packages/openclaw-plugin
+        run: npx tsc --noEmit
