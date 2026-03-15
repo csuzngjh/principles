@@ -116,7 +116,7 @@ In `.principles/PROFILE.json`:
 {
   "evolution": {
     "enabled": true,
-    "doubleRewardRewardCooldownMs": 3600000,
+    "doubleRewardCooldownMs": 3600000,
     "maxRecentEvents": 50
   }
 }
