@@ -34,7 +34,7 @@
     "@vitest/coverage-v8": "^4.0.18",
     "esbuild": "^0.20.0",
     "typescript": "^5.0.0",
-    "vitest": "^4.0.18",
+    "vitest": "^4.1.0",
     "ws": "^8.18.0"
   },
   "peerDependencies": {
