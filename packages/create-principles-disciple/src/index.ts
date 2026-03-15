@@ -39,7 +39,9 @@ program
   .option('-f, --force', 'Force overwrite mode', false)
   .option('-s, --smart', 'Smart merge mode (generate .update files)', false)
   .option('-w, --workspace <path>', 'Workspace directory')
+  .option('-y, --yes', 'Non-interactive mode with defaults (alias for --non-interactive)', false)
   .option('--non-interactive', 'Skip interactive prompts', false)
+  .option('--features <features>', 'Comma-separated features: evolution,trust,pain,reflection,okr,hygiene', 'evolution,trust,pain')
   .action(async (options) => {
     await runInstall(options);
   });
@@ -102,15 +104,24 @@ async function runInstall(options: any): Promise<void> {
   // 3. 运行交互式问答
   let installOptions: InstallOptions | null;
   
-  if (options.nonInteractive) {
-    // 非交互模式：使用默认值
+  // 检查是否是非交互模式
+  const nonInteractive = options.nonInteractive || options.yes;
+  
+  if (nonInteractive) {
+    // 非交互模式：使用 CLI 参数或默认值
+    const defaultFeatures = ['evolution', 'trust', 'pain'];
+    const features = options.features 
+      ? options.features.split(',').map((f: string) => f.trim()).filter(Boolean)
+      : defaultFeatures;
+    
     installOptions = {
       language: cliOptions.language || 'zh',
       mode: cliOptions.mode || 'smart',
       workspaceDir: cliOptions.workspaceDir || path.join(os.homedir(), 'clawd'),
-      features: ['evolution', 'trust', 'pain'],
+      features,
       overwriteConfig: false,
     };
+    logger.info('非交互模式：使用默认配置');
   } else {
     // 交互模式
     installOptions = await runPrompts(cliOptions);

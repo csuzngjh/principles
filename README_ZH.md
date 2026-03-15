@@ -77,6 +77,19 @@
 npx create-principles-disciple
 ```
 
+**AI 智能体安装（非交互模式）:**
+```bash
+# 一键安装（使用默认配置）
+npx create-principles-disciple --yes
+
+# 自定义配置
+npx create-principles-disciple \
+  --yes \
+  --lang zh \
+  --workspace /path/to/workspace \
+  --features evolution,trust,pain,reflection
+```
+
 安装完成后重启 OpenClaw Gateway：
 ```bash
 openclaw gateway --force
