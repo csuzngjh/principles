@@ -7,15 +7,16 @@ on:
       package:
         description: 'Package to publish'
         required: true
-        default: 'create-principles-disciple'
+        default: 'principles-disciple'
         type: choice
         options:
+          - principles-disciple
           - create-principles-disciple
-          - openclaw-plugin
   # 基于 tag 自动发布
   push:
     tags:
-      - 'v*'
+      - 'principles-disciple-v*'
+      - 'create-principles-disciple-v*'
 
 jobs:
   determine-package:
@@ -29,15 +30,15 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "package=${{ github.event.inputs.package }}" >> $GITHUB_OUTPUT
           else
-            # 从 tag 提取包名，格式: package@version 或 package-vversion
+            # 从 tag 提取包名，格式: package-vX.Y.Z
             TAG="${GITHUB_REF#refs/tags/}"
-            if [[ "$TAG" == create-principles-disciple* ]]; then
+            if [[ "$TAG" == principles-disciple-v* ]]; then
+              echo "package=principles-disciple" >> $GITHUB_OUTPUT
+            elif [[ "$TAG" == create-principles-disciple-v* ]]; then
               echo "package=create-principles-disciple" >> $GITHUB_OUTPUT
-            elif [[ "$TAG" == openclaw-plugin* ]]; then
-              echo "package=openclaw-plugin" >> $GITHUB_OUTPUT
             else
-              # 默认发布 create-principles-disciple
-              echo "package=create-principles-disciple" >> $GITHUB_OUTPUT
+              echo "::error::Unknown tag format: $TAG"
+              exit 1
             fi
           fi
 
@@ -45,7 +46,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: determine-package
     permissions:
-      contents: read
+      contents: write
       id-token: write
     steps:
       - name: Checkout
@@ -57,16 +58,36 @@ jobs:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Install dependencies
-        working-directory: packages/${{ needs.determine-package.outputs.package }}
+      - name: Install dependencies (principles-disciple)
+        if: needs.determine-package.outputs.package == 'principles-disciple'
+        working-directory: packages/openclaw-plugin
         run: npm ci
 
-      - name: Build
-        working-directory: packages/${{ needs.determine-package.outputs.package }}
+      - name: Build (principles-disciple)
+        if: needs.determine-package.outputs.package == 'principles-disciple'
+        working-directory: packages/openclaw-plugin
         run: npm run build
 
-      - name: Publish
-        working-directory: packages/${{ needs.determine-package.outputs.package }}
+      - name: Install dependencies (create-principles-disciple)
+        if: needs.determine-package.outputs.package == 'create-principles-disciple'
+        working-directory: packages/create-principles-disciple
+        run: npm ci
+
+      - name: Build (create-principles-disciple)
+        if: needs.determine-package.outputs.package == 'create-principles-disciple'
+        working-directory: packages/create-principles-disciple
+        run: npm run build
+
+      - name: Publish (principles-disciple)
+        if: needs.determine-package.outputs.package == 'principles-disciple'
+        working-directory: packages/openclaw-plugin
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish (create-principles-disciple)
+        if: needs.determine-package.outputs.package == 'create-principles-disciple'
+        working-directory: packages/create-principles-disciple
         run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
