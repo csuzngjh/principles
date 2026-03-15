@@ -1,0 +1,43 @@
+name: Publish to npm
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: 'Package to publish'
+        required: true
+        default: 'create-principles-disciple'
+        type: choice
+        options:
+          - create-principles-disciple
+          - openclaw-plugin
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        working-directory: packages/${{ github.event.inputs.package }}
+        run: npm ci
+
+      - name: Build
+        working-directory: packages/${{ github.event.inputs.package }}
+        run: npm run build
+
+      - name: Publish
+        working-directory: packages/${{ github.event.inputs.package }}
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
