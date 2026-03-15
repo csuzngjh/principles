@@ -40,6 +40,11 @@ memory/
 spec/
 _scratchpad/
 
+# Private AI agent files (DO NOT COMMIT)
+GEMINI.md
+CLAUDE.md
+AGENTS.md
+
 # Docs (Project documentation should be tracked)
 # The docs/ directory itself is NOT ignored, but old state files within it were moved out.
 # We now track actual project documents in docs/
