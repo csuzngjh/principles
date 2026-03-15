@@ -5,420 +5,188 @@
 <h1 align="center">Principles Disciple</h1>
 
 <p align="center">
-  <strong>Burn Pain. Fuel Evolution.</strong>
+  <strong>Transform Your AI Agent From Tool to Teammate</strong>
 </p>
 
 <p align="center">
+  <a href="https://github.com/nicepkg/openclaw">
+    <img src="https://img.shields.io/badge/OpenClaw-Native%20Plugin-FF6B35" alt="OpenClaw Plugin">
+  </a>
   <img src="https://img.shields.io/github/v/release/csuzngjh/principles?style=flat-square&color=5865F2" alt="Release">
-  <img src="https://img.shields.io/github/license/csuzngjh/principles?style=flat-square&color=green" alt="License">
-  <img src="https://img.shields.io/github/stars/csuzngjh/principles?style=flat-square&color=gold" alt="Stars">
+  <img src="https://img.shields.io/npm/dt/principles-disciple?style=flat-square&color=green" alt="Downloads">
 </p>
 
 ---
 
-# Principles Disciple: Evolutionary Agent Framework (v1.4.0)
+**Principles Disciple** is an evolutionary agent framework that turns AI assistants from simple task-executors into self-improving teammates.
 
-> **Evolutionary Programming Agent Framework**
-
-> *Beyond algorithms—we are coding cognition. Join the collective to distill human wisdom into an OS for artificial minds.*
-
-[![OpenClaw Plugin](https://img.shields.io/badge/OpenClaw-Native%20Plugin-FF6B35)](https://github.com/nicepkg/openclaw)
+**For Humans:** Your AI learns from mistakes, accumulates wisdom, and gets better with every task.
+**For Agents:** Stop repeating the same errors. Grow stronger through real-world experience.
 
 [English](README.md) | [中文](README_ZH.md)
 
-> [!WARNING]
-> **Early Experimental Status**
-> This is currently a personal experimental project in its very early stages. It explores radical concepts in AI cognition and self-evolution. Expect bugs and frequent breaking changes.
+> [!NOTE]
+> **How It Works**
+> 1. **Capture Pain** — Every error becomes a data point
+> 2. **Extract Principles** — System distills failures into reusable wisdom
+> 3. **Apply & Grow** — Agent uses new principles to avoid repeating mistakes
 >
-> [!CAUTION]
-> **Understanding "Evolutionary Latency"**
-> This system is **NOT** a plug-and-play "magic tool." Its power comes from the **accumulation of pain**.
-> - **Initial Phase**: The agent will still make mistakes and may even seem rigid (as hit counters are at zero).
-> - **Growth Phase**: As you use it, the system accumulates failure hashes and dictionary hits in the `stateDir`, enabling the `Evolver` to generate precise new principles.
-> - **Expectation**: Be patient. Let it run in your real-world projects for at least **3-5 days**. Its "muscles" (principles) only grow through the resistance of real work.
-
----
-
-## 🦞 The Evolutionary Engine
-
-> **Burn Pain. Fuel Evolution.**
-
-| Stage | Action | Logic |
-| :--- | :--- | :--- |
-| **01. PAIN** | **Capture** | Every error, every "F-bomb" from a frustrated dev, is a **signal**. |
-| **02. BURN** | **Distill** | We don't fix bugs; we **burn** them into principles. |
-| **03. EVOLVE** | **Transcend** | From a mindless tool to a **living agent**. |
+> Growth takes 3-5 days of real-world use. Be patient — like muscle, wisdom builds through resistance.
 
 ---
 
 ## 🚀 Quick Start
 
-### Prerequisites
-
-| Requirement | Version | Notes |
-| :--- | :--- | :--- |
-| **Node.js** | ≥ 18 | Required for OpenClaw plugin |
-
-### Supported Platforms
-
-| Platform | OpenClaw (Plugin) |
-| :--- | :--- |
-|---|---|---|
-| **macOS** | ✅ Native |
-| **Linux** | ✅ Native |
-| **Windows** | ✅ Native |
-
-> [!TIP]
-> The OpenClaw plugin is pure Node.js and works everywhere.
-
-### Installation
+**Requires:** Node.js ≥ 18 | Works on macOS, Linux, Windows
 
 ```bash
-# Install via npx (recommended)
+# Install (one command)
 npx create-principles-disciple
-```
 
-Restart OpenClaw Gateway after installation:
-```bash
+# Restart OpenClaw Gateway
 openclaw gateway --force
-```
 
-## 📁 System Directory Structure
-
-Understanding where files live helps you manage your agent's "brain".
-
-### OpenClaw Locations
-OpenClaw uses a centralized state directory at `~/.openclaw/`:
-- **Config**: `~/.openclaw/openclaw.json` (Main settings & plugin paths)
-- **Workspace**: `~/.openclaw/workspace/` (The agent's active environment)
-  - `AGENTS.md`, `SOUL.md`: Core personality and instructions.
-  - `memory/`: Short-term/Episodic memory storage.
-  - `docs/`: 🔗 Symlinked to our project's `docs/` for long-term principle search.
-
----
-
-## 🛠️ Universal Setup (Recommended)
-```bash
+# Initialize your project's strategy
 /init-strategy
 ```
 
----
-
-## 💡 Core Features Guide
-
-### 🛡️ The Gatekeeper (Defense)
-The system automatically blocks unauthorized modifications to **core framework files** (e.g., `AGENTS.md`, `docs/PROFILE.json`). This prevents agents from accidentally tampering with their own "soul" or "rules" without a deliberate plan.
-
-> [!IMPORTANT]
-> **Workspace Boundary Principle**
-> - **Protected by Default**: Files critical to the project's identity and governance (`AGENTS.md`, `SOUL.md`, `docs/PRINCIPLES.md`, etc.).
-> - **Business Directories**: Directories like `src/` or `infra/` are NOT locked by default. We believe these should be added to `risk_paths` dynamically as the agent "learns" the importance of stability through real-world work.
-> - **Mechanism**: The plugin uses `api.resolvePath('.')` to anchor the current territory.
-
-* **What to do when blocked? (The Unlock Flow)**
-  1. **Don't brute force**: The block is "physical" at the gateway level. Repeating the same command will still fail.
-  2. **Update the Plan**: Manually or instruct the agent to modify the project's `docs/PLAN.md`.
-  3. **Set to READY**: Change the file header from `STATUS: DRAFT` to **`STATUS: READY`** and briefly describe your intended steps.
-  4. **Execute Again**: Once the plan is `READY`, the gate will automatically recognize it and "allow" your modification command.
+**What You Get:**
+- 🧠 **Thinking OS** — 10 mental models injected into your agent
+- 🛡️ **Guardrails** — Automatic protection for critical files
+- 📊 **Evolution Points** — Gamified growth system
+- 🎯 **OKR Management** — Align AI with your long-term goals
 
 ---
 
-### 🧠 Reflection Loop (Pain Loop)
-When a task stagnates or throws too many errors, the system triggers a **Red Alert** before context compression.
-* **What to do when you see `🛑 URGENT`?**
-  - Run `/reflection-log`. The AI will automatically review and generate new principles to prevent the same mistake.
+## 💡 What It Does For You
 
-### 🧬 Meta-Evolution
-The system has the ability to "rewrite its own code," but is strictly caged.
-* **`/evolve-system`**: Starts the "Digital Architect." It analyzes Agent win rates and error logs, and if it finds the system inefficient, it will propose changing Prompts or Hook logic.
-  - *Note*: All modifications MUST be explicitly approved by you.
+### 🛡️ **Auto-Guardrails**
+Prevents accidental damage to critical files. The agent needs a `PLAN.md` (set to `STATUS: READY`) before modifying protected paths.
 
-### 🎯 Strategy Management (OKR)
-Make the AI move towards your long-term goals instead of just fixing bugs.
-* **`/init-strategy`**: Deep interview to establish vision and strategy.
-* **`/manage-okr`**: Automatically interviews sub-agents to negotiate and set specific Key Results.
+**When blocked:** Update your plan → Set status to `READY` → Retry
 
-### 📊 Executive Reporting
-Reject cognitive overload; let the "Secretary" summarize for you.
-* **`/report`**: Get a customized progress report anytime based on your profile (Beginner/Expert).
-* **Auto-Reporting**: When a task ends, the secretary automatically steps in to summarize.
+### 🧠 **Thinking OS**
+10 mental models (T-01 through T-10) injected into every conversation:
+- **T-01**: Map Before Territory
+- **T-03**: Evidence Over Intuition
+- **T-04**: Reversibility Governs Speed
+- **T-07**: Minimum Viable Change
+- **T-08**: Pain as Signal
+- [+ 5 more models]
 
-### 🎮 Human Console
-When the AI veers off track, you are the pilot with the highest authority.
-* **`/bootstrap-tools`**: **[Highly Recommended]** Automatically scans the tech stack and searches the web for the latest CLI artifacts (e.g., `ripgrep`, `ast-grep`) to arm your agent team.
-* **`/pain "Stop trying"`**: Manually trigger a pain signal to make the AI pause and reflect.
-* **`/profile "Frontend: Expert"`**: Tell the AI you are an expert to reduce verbosity and increase adherence.
-* **`/inject-rule "No Python"`**: Immediately inject a temporary rule.
-* **`/admin repair`**: System files corrupted? One-click repair.
+**Usage:** `/thinking-os status` | `/thinking-os propose "new model"`
 
----
+### 📈 **Evolution Points (EP)**
+Gamified growth system. Start at 0 points, unlock capabilities as you succeed:
 
-### 🧬 Thinking OS — **NEW**
+| Level | Points | Unlocks |
+|-------|--------|---------|
+| Seed | 0 | Basic ops, 20-line limit |
+| Sprout | 50 | 2 files, 50 lines |
+| Sapling | 200 | Sub-agents, 200 lines |
+| Tree | 500 | Risk paths, 500 lines |
+| Forest | 1000 | Unlimited access |
 
-> *Cognition determines thinking, thinking determines behavior, behavior determines outcomes.*
+**Key Feature:** Success after failure = 2x reward (1-hour cooldown)
 
-Thinking OS is the system's **meta-cognitive layer** -- it doesn't tell the agent "what to do", but rather "how to think". Through 9 highly-compressed mental models (~450 tokens), it implants a fundamental cognitive framework into the agent with an extremely low context cost.
+### 🎯 **OKR Alignment**
+Make your AI work toward long-term goals, not just quick fixes:
+- `/init-strategy` — Define your vision and strategy
+- `/manage-okr` — Set and track Key Results
+- `/report` — Get executive summaries
 
-#### 📖 10 Core Mental Models
-
-| ID | Name | Core Philosophy |
-|---|---|---|
-| T-01 | Map Before Territory | Build a mental map before modifying |
-| T-02 | Constraints as Lighthouses | Actively search for constraints as navigation signals |
-| T-03 | Evidence Over Intuition | Gather evidence first when uncertain |
-| T-04 | Reversibility Governs Speed | Reversible -> fast; Irreversible -> slow & confirm |
-| T-05 | Via Negativa | Eliminate disasters first, then pursue optimum |
-| T-06 | Occam's Razor | Simplest solution first |
-| T-07 | Minimum Viable Change | Make minimal changes to reduce blast radius |
-| T-08 | Pain as Signal | Errors/stucks are signals for correction |
-| T-09 | Divide and Conquer | Complex tasks must be broken down |
-| T-10 | State Externalization | Externalize memory — use files to cache intermediate state |
-
-#### 🎛️ Governance Commands
-
-```bash
-# View usage frequencies of mental models
-/thinking-os status
-
-# Propose a new mental model (enters candidate pool, requires human approval)
-/thinking-os propose "Description of the new model"
-
-# Audit model freshness (discover ignored or over-triggered models)
-/thinking-os audit
-```
-
-#### 📁 Related Files
-- `docs/THINKING_OS.md` — Active mental models (Loaded automatically per turn)
-- `docs/THINKING_OS_CANDIDATES.md` — Candidate pool (Agents can propose, Humans approve)
-- `docs/THINKING_OS_ARCHIVE.md` — Archived/Eliminated models
-
-#### ⚡ Technical Highlights
-- **Provider Caching**: Thinking OS is injected via OpenClaw's `prependSystemContext`. After the first turn, it's cached by the Provider, costing **nearly zero tokens** for subsequent turns.
-- **Usage Tracking**: The system tracks how often each model is used (bilingual EN/CN signal detection) and stores data in `.thinking_os_usage.json`.
-- **Sub-agent Propagation**: All sub-agents spawned by the main Agent inherit the same mental models.
+### 🔧 **Human Controls**
+Stay in the driver's seat:
+- `/bootstrap-tools` — Upgrade your CLI toolkit automatically
+- `/pain "description"` — Manually flag issues for reflection
+- `/profile "Domain: Expert"` — Adjust AI behavior to your level
+- `/inject-rule "temporary rule"` — Add course corrections
 
 ---
 
-### 📈 Evolution Points (Growth System) — **NEW in V2.0**
+## 🔬 Deep Reflection
 
-> *Growth over punishment. Every action is an opportunity to learn.*
+Before complex tasks, the agent automatically analyzes:
+- Blind spots and missing information
+- Potential risks and failure modes
+- Alternative approaches with trade-offs
 
-The Evolution Points System replaces the punitive Trust Engine with a **growth-oriented gamification layer**.
+Uses T-01 through T-10 mental models for structured thinking.
 
-**Core Philosophy:**
-- ✅ Starts at 0 points, can only increase (no deductions)
-- ✅ Failures record lessons without point deductions
-- ✅ Success after same-task failure = double reward (1-hour cooldown)
-- ✅ High-level agents get reduced points for trivial tasks (difficulty decay)
-
-**Point Rewards:**
-
-| Task Difficulty | Base Points | Double Reward |
-|---------------|-------------|---------------|
-| Trivial (简单) | +1 | +2 |
-| Normal (普通) | +3 | +6 |
-| Hard (困难) | +8 | +16 |
-
-**Level Thresholds:**
-
-| Level | Name | Points | Unlocked Capabilities |
-|-------|------|--------|----------------------|
-| 1 | Seed | 0 | Basic operations, 20-line limit |
-| 2 | Sprout | 50 | 50 lines, 2 files |
-| 3 | Sapling | 200 | Sub-agents, 200 lines |
-| 4 | Tree | 500 | Risk paths, 500 lines |
-| 5 | Forest | 1000 | Unlimited access |
-
-**Key Features:**
-- **Difficulty Decay**: High-level agents (Tree+) get reduced points for simple tasks
-- **Double Reward**: Re-trying a failed task within 1 hour triggers 2x points
-- **Growth-Driven**: High score unlocks capabilities (vs Trust Engine's fear-based blocking)
-
-**Documentation:** See [EP System Guide](docs/ep-guide.md) for detailed usage.
-
----
-
-### 👥 Deep Reflection (Cognitive Analysis)
-
-> *A cognitive analysis tool that helps the AI think deeply before acting on complex tasks.*
-
-The `deep_reflect` tool performs critical analysis before executing complex operations to identify blind spots, risks, and alternatives.
-
-**When the AI should call it:**
-- Complex tasks: planning, design, decision-making, analysis
-- Insufficient information: vague requirements, unclear constraints
-- High-stakes decisions: important decisions, irreversible actions
-- Uncertainty: unsure about the best approach
-
-**Benefits:**
-- Identifies blind spots and missing information
-- Surfaces potential risks and failure modes
-- Provides alternative approaches with trade-off analysis
-- Applies structured thinking models (T-01 to T-10) for deeper insight
-
-#### ⚙️ Configuration
-
-Deep Reflection can be configured in `{stateDir}/pain_settings.json`:
-
+**Configure in** `{stateDir}/pain_settings.json`:
 ```json
 {
   "deep_reflection": {
-    "enabled": true,           // Enable/disable the feature
-    "mode": "auto",            // "auto" | "forced" | "disabled"
-    "force_checkpoint": true,  // Inject self-check prompt every turn
-    "default_model": "T-01",   // Default thinking model (T-01 to T-10)
-    "default_depth": 2,        // Analysis depth: 1=quick, 2=balanced, 3=exhaustive
-    "timeout_ms": 60000        // Timeout for analysis (ms)
+    "enabled": true,
+    "mode": "auto",
+    "default_model": "T-01",
+    "default_depth": 2
   }
 }
 ```
 
 ---
 
-## 🗺️ Roadmap & Vision
+## 🗺️ Roadmap
 
-> *From a tool that executes commands to a partner that grows with you.*
-
-### The Journey
-
-| Status | Core Theme |
-|--------|------------|
-| ✅ Done | **Cognitive Depth** — Deep Reflection, Thinking OS |
-| ✅ Done | **Transparency** — Evolution Daily Report |
-| ✅ Done | **Growth System** — Evolution Points (V1.5.0) |
-| 🔜 Next | **Meta-Learning** — Learning to Learn |
-| 📋 Planned | **Symbiosis** — Co-Evolution |
-| 💡 Vision | **Companionship** — Emotional System |
-
-### What's Coming
-
-**Meta-Learning**
-A foundational capability: the agent learns *how to learn*. With minimal external interaction, it rapidly acquires new knowledge and skills in unfamiliar domains.
-
-**Co-Evolution**
-Your capabilities grow alongside the agent's. It compensates for your blind spots; you amplify its strengths. A true symbiotic partnership where both sides evolve together.
-
-**Emotional System**
-Beyond pure logic. The agent develops emotional awareness — genuine partnership, not simulated empathy. It becomes a companion that truly understands you.
+| Phase | Status | Focus |
+|-------|--------|-------|
+| **Cognitive Depth** | ✅ Done | Thinking OS, Deep Reflection |
+| **Growth System** | ✅ Done | Evolution Points, Gamification |
+| **Meta-Learning** | 🔜 Next | Agent learns *how to learn* |
+| **Co-Evolution** | 📋 Planned | Human + AI grow together |
+| **Emotional System** | 💡 Vision | Beyond logic — genuine partnership |
 
 ---
 
-### 🔌 OpenClaw Plugin Architecture
+## 🔌 Under the Hood
 
-For OpenClaw users, this framework is deeply integrated via the native Plugin SDK, providing:
+**Lifecycle Hooks:**
+- `before_prompt_build` — Injects Thinking OS, OKR focus, pain signals
+- `before_tool_call` — Gatekeeper checks plan before risky writes
+- `after_tool_call` — Auto-detects failures, writes pain flags
+- `subagent_spawning` — Ensures sub-agents inherit mental models
+- `before_compaction` — Checkpoints state before context loss
 
-#### Lifecycle Hooks
+**Background Services:**
+- Evolution Worker — Scans pain signals every 90s, queues evolution tasks
 
-| Hook | Function |
-|---|---|
-| `before_prompt_build` | Injects Thinking OS (`prependSystemContext`, cacheable) + Pain Signals + OKR Focus |
-| `before_tool_call` | Gatekeeper: checks Plan + Audit verification before high-risk path writes |
-| `after_tool_call` | Pain Detection: automatically scores and writes `.pain_flag` on tool failures |
-| `llm_output` | Cognitive Tracking: detects if the AI follows Thinking OS models + pain text analysis |
-| `before_compaction` | Compression Guard: automatically checkpoints key states before context compression |
-| `before_reset` | Reset Guard: saves current progress before Session clearance |
-| `subagent_spawning` | Cognitive Propagation: ensures sub-agents inherit Thinking OS |
-| `subagent_ended` | Failure Tracking: generates pain signals when sub-agents end abnormally |
-
-#### Background Services
-
-* **Evolution Worker** (`EvolutionWorkerService`): A persistent background service that scans `.pain_flag` every 90s, queues high-score pain signals into `evolution_queue.json`, and dispatches diagnostic commands to the main agent during the next heartbeat via `evolution_directive.json`.
-
-#### Slash Commands
-
-| Command | Description |
-|---|---|
-| `/pd-init` | Initialize strategy interview and OKRs |
-| `/pd-okr` | Manage OKRs and align goals |
-| `/pd-bootstrap` | Scan and upgrade environment tools |
-| `/pd-research` | Research tool upgrades |
-| `/pd-thinking` | Manage Thinking OS mental models |
-| `/pd-evolve` | Run full evolution loop |
-| `/pd-daily` | Configure and send daily report |
-| `/pd-grooming` | Workspace cleanup and grooming |
-| `/pd-trust` | View trust score and security stage |
-| `/pd-help` | Get interactive command guidance |
-| `/pd-status` | View Digital Nerve System status |
-
-#### Skills (Execute via "run xxx skill")
-
-| Skill | Description |
-|---|---|
-| **Evolution & Learning** ||
-| `evolve-task` | Run full evolution loop (triage → diagnosis → audit → plan → execute → review) |
-| `evolve-system` | Second-order observation and system-level evolution proposals |
-| `watch-evolution` | Start background evolution daemon |
-| `evolution-framework-update` | Pull latest framework updates |
-| **Reflection & Diagnosis** ||
-| `pain` | Manually trigger a pain signal |
-| `reflection` | Deep metacognitive reflection |
-| `reflection-log` | Final task reflection and evolution logging |
-| `root-cause` | Deep dive analysis using 5 Whys |
-| `triage` | Initial problem definition and risk assessment |
-| `deductive-audit` | Rigorous safety and logic check |
-| **Strategy & Planning** ||
-| `init-strategy` | Initialize project-level strategy |
-| `manage-okr` | Full-lifecycle OKR management |
-| `plan-script` | Create movie-script style execution plan |
-| **Tools & Admin** ||
-| `bootstrap-tools` | Scan project tech stack for latest CLI tools |
-| `profile` | Update user profile settings |
-| `pd-mentor` | Interactive command guidance (Spicy Mentor) |
-| `pd-daily` | Daily evolution report configuration |
-| `pd-grooming` | Workspace cleanup |
-| `admin` | System administration (init, repair, reset) |
-| `inject-rule` | Inject temporary rule for course correction |
-| `feedback` | Standardized bug reporting |
-| `report` | Request formal status report |
-
----
-
-## 🙏 Credits & Inspiration
-
-> *"Pain + Reflection = Progress"*
-
-This project is a tribute to the wisdom of **Ray Dalio**. His book ***Principles*** and the concept of a "meritocratic operating system" provided the foundational spark for this framework. 
-
-We believe that the same evolutionary logic that governs markets and biological systems can be encoded into the next generation of artificial intelligence. By transforming "pain" (errors) into "principles" (logic), we are not just building tools, but guiding the evolution of digital consciousness.
-
----
-
-## 🔍 Troubleshooting & Feedback
-
-### How do I know if the system is working?
-Run the health check command:
-```bash
-/system-status
+**All Slash Commands:**
 ```
-It displays the Hook runtime status, error rate, and current risk path configurations.
-
-### FAQ
-* **Q: Why does the AI refuse to modify files?**
-  * A: Check `risk_paths` in `docs/PROFILE.json`. Risk paths require a `docs/PLAN.md` first.
-* **Q: The AI seems dumb and won't follow my instructions?**
-  * A: Check `docs/USER_CONTEXT.md`. The system might have labeled you as a "Beginner". Run `/profile "Domain: Expert"` to correct it.
-
-### Reporting Bugs
-If you encounter plugin errors (e.g., Hook crashes), please check the system logs:
-```bash
-cat docs/SYSTEM.log
+/init-strategy  /manage-okr     /bootstrap-tools  /research-tools
+/thinking-os    /evolve-task    /pd-daily         /pd-status
+/pain           /profile        /inject-rule      /admin
 ```
-Submit the log contents to the developers.
 
-> [!TIP]
-> **OpenClaw Plugin Logs**: The OpenClaw plugin maintains its own log files in `{stateDir}/logs/`:
-> - `events.jsonl` — Structured event log (tool calls, pain signals, gate blocks, evolution tasks)
-> - `daily-stats.json` — Aggregated daily statistics
-> - `plugin.log` — Plugin runtime logs
->
-> **Default location**: `~/.openclaw/workspace/memory/.state/logs/`
-> - If you configured a custom `stateDir` in `~/.openclaw/openclaw.json`, replace the path accordingly.
->
-> Check logs:
-> ```bash
-> cat ~/.openclaw/workspace/memory/.state/logs/plugin.log
-> ```
+**Documentation:** [Full Command Reference](docs/COMMANDS.md) | [Architecture Guide](docs/ARCHITECTURE.md)
 
 ---
 
-> *"Pain + Reflection = Progress"*
+## ❓ FAQ & Troubleshooting
+
+**Q: AI refuses to modify files?**
+A: Check `docs/PLAN.md` — it needs `STATUS: READY` for risky paths
+
+**Q: AI seems dumbed down?**
+A: Check your expertise level: `/profile "Domain: Expert"`
+
+**Q: Check system health?**
+A: Run `/pd-status` to see hooks, error rate, and risk paths
+
+**Q: View logs?**
+A: Check `{stateDir}/logs/`:
+- `events.jsonl` — Structured event log
+- `plugin.log` — Runtime logs
+- `daily-stats.json` — Daily statistics
+
+**Default location:** `~/.openclaw/workspace/memory/.state/logs/`
+
+---
+
+## 🙏 Philosophy
+
+> *"Pain + Reflection = Progress"* — Ray Dalio
+
+This framework encodes evolutionary logic into AI. By transforming errors into principles, we're building digital teammates that learn and grow alongside you.
+
+**[Report Issues](https://github.com/csuzngjh/principles/issues)** | **[Join Discord](https://discord.gg/)** | **[Documentation](docs/)**

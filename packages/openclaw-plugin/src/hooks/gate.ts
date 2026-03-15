@@ -215,17 +215,29 @@ export function handleBeforeToolCall(
             toolName: event.toolName,
             filePath: relPath,
             trustEngine: { score: trustScore, stage, decision: 'allow' },
-            epSystem: { tier: epDecision.currentTier, allowed: epDecision.allowed, reason: epDecision.reason },
+            epSystem: { tier: epDecision.currentTier ?? 'UNKNOWN', allowed: epDecision.allowed, reason: epDecision.reason },
             conflict: epDecision.allowed === false && stage >= 3, // Trust允许但EP拒绝
         };
         
         const epLogPath = path.join(ctx.workspaceDir!, '.state', 'ep_simulation.jsonl');
-        fs.mkdirSync(path.dirname(epLogPath), { recursive: true });
+        
+        // 安全创建目录（如果失败则跳过日志写入）
+        try {
+            fs.mkdirSync(path.dirname(epLogPath), { recursive: true });
+        } catch (mkdirErr: any) {
+            if (mkdirErr && mkdirErr.code !== 'EEXIST') {
+                logger.warn(`[PD_EP_SIM] Failed to create log dir: ${mkdirErr.message}, skipping log`);
+                return;
+            }
+        }
+        
         fs.appendFileSync(epLogPath, JSON.stringify(epLogEntry) + '\n');
         
         logger.info(`[PD_EP_SIM] Tier: ${epDecision.currentTier}, Allowed: ${epDecision.allowed}, Trust: ${trustScore} (Stage ${stage})`);
     } catch (err) {
-        logger.warn(`[PD_EP_SIM] Simulation failed: ${err}`);
+        // EP 模拟失败不应该影响 Trust Engine 决策
+        const errMsg = err instanceof Error ? err.message : String(err);
+        logger.warn(`[PD_EP_SIM] Simulation failed: ${errMsg}, continuing with Trust Engine`);
     }
   } else {
     // FALLBACK: Legacy Gate Logic
