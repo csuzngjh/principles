@@ -58,4 +58,17 @@ On each heartbeat, run these core checks. **Don't just reply `HEARTBEAT_OK` ever
 
 ---
 
+## 📋 Task Queue Check (WEEK_TASKS.json)
+
+- [ ] **File exists?** `okr/WEEK_TASKS.json` — If missing, create from template
+- [ ] **Empty queue?** No `pending` or `in_progress` tasks → Check RECOVERY_PROTOCOL.md
+- [ ] **Stalled task?** `in_progress` task with `startedAt` > 2 hours ago → Verify with user
+- [ ] **Week rollover?** Check if `week` field is current week → Archive old tasks
+
+**Actions**:
+- Empty queue + no directive → Follow RECOVERY_PROTOCOL.md self-derivation
+- Stalled task → Ask user: "Task [id] seems stalled. Continue or archive?"
+
+---
+
 *If no issues and no action needed, reply `HEARTBEAT_OK` to save tokens.*
