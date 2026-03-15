@@ -4,12 +4,24 @@
  * Tests the mandatory deep thinking checkpoint before high-risk operations.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { handleBeforeToolCall } from '../../src/hooks/gate.js';
 import { recordThinkingCheckpoint, hasRecentThinking, clearSession } from '../../src/core/session-tracker.js';
+import * as fs from 'fs';
+import * as path from 'path';
 
 const MOCK_SESSION_ID = 'test-thinking-session-001';
 const MOCK_WORKSPACE = '/tmp/test-thinking-workspace';
+const PROFILE_PATH = path.join(MOCK_WORKSPACE, '.principles', 'PROFILE.json');
+
+// Profile with thinking checkpoint ENABLED for testing
+const TEST_PROFILE = {
+  thinking_checkpoint: {
+    enabled: true,
+    window_ms: 5 * 60 * 1000,
+    high_risk_tools: ['run_shell_command', 'delete_file', 'move_file', 'pd_spawn_agent', 'write', 'edit'],
+  },
+};
 
 function createMockContext(overrides = {}) {
   return {
@@ -31,6 +43,16 @@ function createMockEvent(toolName: string, params: Record<string, any> = {}) {
 describe('Thinking OS Checkpoint (P-10)', () => {
   beforeEach(() => {
     clearSession(MOCK_SESSION_ID);
+    // Create workspace directory and PROFILE.json with checkpoint enabled
+    fs.mkdirSync(path.dirname(PROFILE_PATH), { recursive: true });
+    fs.writeFileSync(PROFILE_PATH, JSON.stringify(TEST_PROFILE));
+  });
+
+  afterEach(() => {
+    // Clean up PROFILE.json
+    if (fs.existsSync(PROFILE_PATH)) {
+      fs.unlinkSync(PROFILE_PATH);
+    }
   });
 
   describe('Blocking high-risk operations without thinking', () => {
