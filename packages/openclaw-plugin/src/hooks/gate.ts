@@ -216,22 +216,25 @@ export function handleBeforeToolCall(
             filePath: relPath,
             trustEngine: { score: trustScore, stage, decision: 'allow' },
             epSystem: { tier: epDecision.currentTier ?? 'UNKNOWN', allowed: epDecision.allowed, reason: epDecision.reason },
-            conflict: epDecision.allowed === false && stage >= 3, // Trust允许但EP拒绝
+            conflict: epDecision.allowed === false, // Trust允许但EP拒绝（任何阶段）
         };
         
         const epLogPath = path.join(ctx.workspaceDir!, '.state', 'ep_simulation.jsonl');
         
-        // 安全创建目录（如果失败则跳过日志写入）
+        // 安全创建目录（如果失败则跳过日志写入，但不影响 Trust Engine 决策）
+        let canWriteEpLog = true;
         try {
             fs.mkdirSync(path.dirname(epLogPath), { recursive: true });
         } catch (mkdirErr: any) {
-            if (mkdirErr && mkdirErr.code !== 'EEXIST') {
-                logger.warn(`[PD_EP_SIM] Failed to create log dir: ${mkdirErr.message}, skipping log`);
-                return;
+            if (!mkdirErr || mkdirErr.code !== 'EEXIST') {
+                logger.warn(`[PD_EP_SIM] Failed to create log dir: ${mkdirErr?.message ?? String(mkdirErr)}, skipping log`);
+                canWriteEpLog = false;
             }
         }
         
-        fs.appendFileSync(epLogPath, JSON.stringify(epLogEntry) + '\n');
+        if (canWriteEpLog) {
+            fs.appendFileSync(epLogPath, JSON.stringify(epLogEntry) + '\n');
+        }
         
         logger.info(`[PD_EP_SIM] Tier: ${epDecision.currentTier}, Allowed: ${epDecision.allowed}, Trust: ${trustScore} (Stage ${stage})`);
     } catch (err) {
