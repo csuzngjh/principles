@@ -24,7 +24,7 @@ export function handleBeforeToolCall(
   const isAgentTool = AGENT_TOOLS.includes(event.toolName);
   // Profile loaded first for config-driven behavior (see below)
   
-  if (!ctx.workspaceDir || (!isWriteTool && !isBash)) {
+  if (!ctx.workspaceDir || (!isWriteTool && !isBash && !isAgentTool)) {
     return;
   }
 
@@ -49,7 +49,7 @@ export function handleBeforeToolCall(
       max_file_size_bytes: 10 * 1024 * 1024,
       fuzzy_match_enabled: true,
       fuzzy_match_threshold: 0.8,
-      skip_large_file_action: 'warn',
+      skip_large_file_action: 'warn' as 'warn' | 'block',
     },
     thinking_checkpoint: {
       enabled: false,  // Default OFF
