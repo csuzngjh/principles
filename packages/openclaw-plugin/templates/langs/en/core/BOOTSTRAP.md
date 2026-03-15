@@ -122,95 +122,69 @@ If the user has clear project goals, run `/init-strategy` skill to:
 
 ## ⏰ Cron Jobs Initialization (Recommended)
 
-To enable background maintenance features, you need to install the following cron jobs for the user.
+**Why you need this:** Your HEARTBEAT.md has been simplified to reduce token cost. But the tasks that were removed (grooming, health checks, strategy alignment, weekly governance) are still important — they just moved here. Without these cron jobs, your workspace will accumulate temp files, drift from strategy, and lose track of weekly progress.
+
+**How to install:** Ask the user for permission, then execute the CLI commands below. Each command creates a background task that runs automatically.
+
+**What you get:**
+- Clean workspace (no temp file buildup)
+- Early warning on tool failures
+- Automatic strategy alignment
+- Weekly governance with evidence-based task validation
+- Recovery protocol when task queue is empty
 
 ### Ask the User
 
-Ask the user if they want to configure background cron jobs:
+> "I can set up background cron jobs for automatic maintenance: cleanup, health checks, strategy alignment, and weekly governance. Should I configure them?"
 
-> "I can set up some background cron jobs to automatically perform maintenance tasks. Would you like me to configure them?"
-
-If the user agrees, create the following jobs:
+If the user agrees, **execute these commands:**
 
 ### 1. Grooming (Daily at 2 AM)
 
-Clean up workspace temp files:
+**What it does:** Cleans workspace temp files daily to prevent clutter buildup.
 
-```json
-{
-  "action": "add",
-  "job": {
-    "name": "pd-grooming-daily",
-    "schedule": { "kind": "cron", "expr": "0 2 * * *", "tz": "America/New_York" },
-    "sessionTarget": "isolated",
-    "payload": {
-      "kind": "agentTurn",
-      "message": "Execute pd-grooming skill: Check workspace root, clean temp files and digital clutter. Follow safety rules strictly. Do not delete business code.",
-      "lightContext": true
-    },
-    "delivery": { "mode": "none" }
-  }
-}
+```bash
+openclaw cron add --name "pd-grooming-daily" \
+  --cron "0 2 * * *" --tz "UTC" \
+  --session isolated \
+  --light-context \
+  --no-deliver \
+  --message 'Execute pd-grooming skill: Check workspace root, clean temp files and digital clutter. Follow safety rules strictly. Do not delete business code.'
 ```
 
 ### 2. Health Check (Every 4 hours)
 
-Verify core tools are available:
+**What it does:** Verifies core tools (rg, node, python) are available and alerts on failure.
 
-```json
-{
-  "action": "add",
-  "job": {
-    "name": "health-check",
-    "schedule": { "kind": "every", "everyMs": 14400000 },
-    "sessionTarget": "main",
-    "payload": {
-      "kind": "systemEvent",
-      "text": "Health check: Verify core tools (rg, node, python) are available. Check if PLAN.md state matches actual progress."
-    },
-    "wakeMode": "next-heartbeat"
-  }
-}
+```bash
+openclaw cron add --name "health-check" \
+  --every 4h \
+  --session main \
+  --system-event 'Health check: Verify core tools (rg, node, python) are available. Check if PLAN.md state matches actual progress.'
 ```
 
 ### 3. Strategy Alignment (Daily at 9 AM)
 
-Check if operations have drifted from strategic goals:
+**What it does:** Checks if daily operations have drifted from CURRENT_FOCUS.md strategic goals.
 
-```json
-{
-  "action": "add",
-  "job": {
-    "name": "strategy-alignment",
-    "schedule": { "kind": "cron", "expr": "0 9 * * *", "tz": "America/New_York" },
-    "sessionTarget": "isolated",
-    "payload": {
-      "kind": "agentTurn",
-      "message": "Execute strategy alignment check: Compare against memory/okr/CURRENT_FOCUS.md. Confirm if past 24 hours of operations have drifted from strategic focus. Alert user if drifted."
-    },
-    "delivery": { "mode": "announce" }
-  }
-}
+```bash
+openclaw cron add --name "strategy-alignment" \
+  --cron "0 9 * * *" --tz "UTC" \
+  --session isolated \
+  --announce \
+  --message 'Execute strategy alignment check: Compare against memory/okr/CURRENT_FOCUS.md. Confirm if past 24 hours of operations have drifted from strategic focus. Alert user if drifted.'
 ```
 
 ### 4. Memory Weekly Cleanup (Monday 10 AM)
 
-Deep memory file organization:
+**What it does:** Reviews daily memory files, extracts important content to MEMORY.md, cleans outdated info.
 
-```json
-{
-  "action": "add",
-  "job": {
-    "name": "memory-weekly",
-    "schedule": { "kind": "cron", "expr": "0 10 * * 1", "tz": "America/New_York" },
-    "sessionTarget": "isolated",
-    "payload": {
-      "kind": "agentTurn",
-      "message": "Execute weekly memory cleanup: Review recent memory/YYYY-MM-DD.md files, extract important content to MEMORY.md, clean outdated info."
-    },
-    "delivery": { "mode": "none" }
-  }
-}
+```bash
+openclaw cron add --name "memory-weekly" \
+  --cron "0 10 * * 1" --tz "UTC" \
+  --session isolated \
+  --no-deliver \
+  --message 'Execute weekly memory cleanup: Review recent memory/YYYY-MM-DD.md files, extract important content to MEMORY.md, clean outdated info.'
 ```
 
 ### 5. Weekly Governance (Sunday Midnight UTC)
