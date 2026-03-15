@@ -282,17 +282,17 @@ export function handleContextInjection(
     const relevantPrinciples = retrieveRelevantPrinciples(ctx);
 
     // Log principle usage for observability
-    if (relevantPrinciples.length > 0 && ctx.api?.logger) {
+    if (relevantPrinciples.length > 0 && ctx.logger) {
       relevantPrinciples.forEach(p => {
-        ctx.api.logger.info(`[context-injection] Activated principle ${p.code}: ${p.name}`);
+        ctx.logger.info(`[context-injection] Activated principle ${p.code}: ${p.name}`);
       });
     }
 
     // Generate context string for injection
     return generatePrincipleContext(relevantPrinciples);
   } catch (error) {
-    if (ctx.api?.logger) {
-      ctx.api.logger.error(`[context-injection] Error: ${String(error)}`);
+    if (ctx.logger) {
+      ctx.logger.error(`[context-injection] Error: ${String(error)}`);
     }
     return '';
   }
