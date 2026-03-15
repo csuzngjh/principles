@@ -32,6 +32,7 @@ packages/openclaw-plugin/skills
 
 # Local environment and state (DO NOT COMMIT)
 .claude/
+claude/
 conductor/
 .principles/
 .state/
