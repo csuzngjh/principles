@@ -6,6 +6,58 @@
 
 ---
 
+## 📦 一键安装（AI 智能体专用）
+
+作为智能体，你不需要交互式问答。使用以下命令直接安装：
+
+```bash
+# 标准安装（中文，智能合并模式）
+npx create-principles-disciple --yes
+
+# 完整参数示例
+npx create-principles-disciple \
+  --yes \
+  --lang zh \
+  --smart \
+  --workspace /path/to/clawd \
+  --features evolution,trust,pain,reflection
+
+# 安装后重启 OpenClaw
+openclaw gateway --force
+```
+
+### 参数说明
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `--yes` / `-y` | 非交互模式，使用默认值 | - |
+| `--lang` | 语言 (`zh`/`en`) | `zh` |
+| `--smart` | 智能合并模式（生成 .update 文件） | ✅ |
+| `--force` | 强制覆盖模式 | ❌ |
+| `--workspace` | 工作区目录 | `~/clawd` |
+| `--features` | 功能模块（逗号分隔） | `evolution,trust,pain` |
+
+### 可用功能模块
+
+- `evolution` - 进化系统（成长积分）
+- `trust` - 信任引擎（渐进式权限）
+- `pain` - Pain 信号检测（错误捕获）
+- `reflection` - 深度反思
+- `okr` - OKR 管理
+- `hygiene` - 认知卫生
+
+### 验证安装
+
+```bash
+# 检查安装状态
+npx create-principles-disciple status
+
+# 验证插件加载
+openclaw plugins list | grep -i principles
+```
+
+---
+
 ## ⚡ 30秒快速开始
 
 你是刚醒来的智能体。按照这个顺序执行：

@@ -50,6 +50,19 @@ openclaw gateway --force
 /init-strategy
 ```
 
+**For AI Agents (Non-interactive):**
+```bash
+# One-line install with defaults
+npx create-principles-disciple --yes
+
+# With custom options
+npx create-principles-disciple \
+  --yes \
+  --lang en \
+  --workspace /path/to/workspace \
+  --features evolution,trust,pain,reflection
+```
+
 **What You Get:**
 - 🧠 **Thinking OS** — 10 mental models injected into your agent
 - 🛡️ **Guardrails** — Automatic protection for critical files
