@@ -151,13 +151,10 @@ describe('Thinking OS Checkpoint (P-10)', () => {
 
   describe('Non-high-risk tools bypass', () => {
     it('should not block read tool', () => {
-      // Read tool should pass through (not in WRITE_TOOLS or BASH_TOOLS)
       const result = handleBeforeToolCall(
         createMockEvent('read', { file_path: '/test/file.ts' }),
         createMockContext()
       );
-      
-      // Should return undefined (pass through)
       expect(result).toBeUndefined();
     });
 
@@ -166,7 +163,99 @@ describe('Thinking OS Checkpoint (P-10)', () => {
         createMockEvent('web_search', { query: 'test' }),
         createMockContext()
       );
-      
+      expect(result).toBeUndefined();
+    });
+  });
+
+  describe('Boundary: thinking_checkpoint config variations', () => {
+    it('should not crash when PROFILE.json is missing', () => {
+      // Remove PROFILE.json
+      if (fs.existsSync(PROFILE_PATH)) {
+        fs.unlinkSync(PROFILE_PATH);
+      }
+      const result = handleBeforeToolCall(
+        createMockEvent('write', { file_path: '/test/file.ts', content: 'test' }),
+        createMockContext()
+      );
+      // Should not crash, should use defaults (checkpoint disabled)
+      expect(result).toBeUndefined();
+    });
+
+    it('should not crash when thinking_checkpoint is null', () => {
+      fs.writeFileSync(PROFILE_PATH, JSON.stringify({ thinking_checkpoint: null }));
+      const result = handleBeforeToolCall(
+        createMockEvent('write', { file_path: '/test/file.ts', content: 'test' }),
+        createMockContext()
+      );
+      expect(result).toBeUndefined();
+    });
+
+    it('should not crash when thinking_checkpoint.enabled is null', () => {
+      fs.writeFileSync(PROFILE_PATH, JSON.stringify({ thinking_checkpoint: { enabled: null } }));
+      const result = handleBeforeToolCall(
+        createMockEvent('write', { file_path: '/test/file.ts', content: 'test' }),
+        createMockContext()
+      );
+      expect(result).toBeUndefined();
+    });
+
+    it('should not crash when high_risk_tools is null', () => {
+      fs.writeFileSync(PROFILE_PATH, JSON.stringify({ thinking_checkpoint: { enabled: true, high_risk_tools: null } }));
+      const result = handleBeforeToolCall(
+        createMockEvent('write', { file_path: '/test/file.ts', content: 'test' }),
+        createMockContext()
+      );
+      // Should use default high_risk_tools list
+      expect(result).toBeUndefined();
+    });
+
+    it('should not block any tool when high_risk_tools is empty array', () => {
+      fs.writeFileSync(PROFILE_PATH, JSON.stringify({ thinking_checkpoint: { enabled: true, high_risk_tools: [] } }));
+      const result = handleBeforeToolCall(
+        createMockEvent('write', { file_path: '/test/file.ts', content: 'test' }),
+        createMockContext()
+      );
+      // Empty list = no tools are high risk
+      expect(result).toBeUndefined();
+    });
+
+    it('should not crash when thinking_checkpoint is invalid type (string)', () => {
+      fs.writeFileSync(PROFILE_PATH, JSON.stringify({ thinking_checkpoint: "invalid" }));
+      const result = handleBeforeToolCall(
+        createMockEvent('write', { file_path: '/test/file.ts', content: 'test' }),
+        createMockContext()
+      );
+      expect(result).toBeUndefined();
+    });
+
+    it('should not crash when PROFILE.json is malformed JSON', () => {
+      fs.writeFileSync(PROFILE_PATH, '{ invalid json }');
+      const result = handleBeforeToolCall(
+        createMockEvent('write', { file_path: '/test/file.ts', content: 'test' }),
+        createMockContext()
+      );
+      // Should fall back to defaults
+      expect(result).toBeUndefined();
+    });
+
+    it('should respect custom high_risk_tools list', () => {
+      fs.writeFileSync(PROFILE_PATH, JSON.stringify({ thinking_checkpoint: { enabled: true, high_risk_tools: ['write'] } }));
+      const result = handleBeforeToolCall(
+        createMockEvent('write', { file_path: '/test/file.ts', content: 'test' }),
+        createMockContext()
+      );
+      // write is in the list, should be blocked
+      expect(result).toBeDefined();
+      expect(result?.block).toBe(true);
+    });
+
+    it('should not block tool not in custom high_risk_tools list', () => {
+      fs.writeFileSync(PROFILE_PATH, JSON.stringify({ thinking_checkpoint: { enabled: true, high_risk_tools: ['delete_file'] } }));
+      const result = handleBeforeToolCall(
+        createMockEvent('write', { file_path: '/test/file.ts', content: 'test' }),
+        createMockContext()
+      );
+      // write is NOT in the list, should not be blocked
       expect(result).toBeUndefined();
     });
   });
