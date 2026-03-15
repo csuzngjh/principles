@@ -69,6 +69,7 @@ export function handleBeforeToolCall(
 
   // ═══ THINKING OS CHECKPOINT (P-10) — Config-gated ═══
   // Only enforced when thinking_checkpoint.enabled = true in PROFILE.json
+  const isHighRisk = profile.thinking_checkpoint?.high_risk_tools?.includes(event.toolName) ?? false;
   if (profile.thinking_checkpoint?.enabled && isHighRisk && ctx.sessionId) {
     const windowMs = profile.thinking_checkpoint.window_ms ?? 5 * 60 * 1000;
     const hasThinking = hasRecentThinking(ctx.sessionId, windowMs);
@@ -213,7 +214,13 @@ export function handleBeforeToolCall(
 
   // After all gate checks, verify edit operations (enforces P-03)
   if (event.toolName === 'edit' && profile.edit_verification?.enabled !== false) {
-    const verifyResult = handleEditVerification(event, wctx, ctx, profile.edit_verification);
+    const verifyResult = handleEditVerification(event, wctx, ctx, {
+      enabled: profile.edit_verification.enabled,
+      max_file_size_bytes: profile.edit_verification.max_file_size_bytes,
+      fuzzy_match_enabled: profile.edit_verification.fuzzy_match_enabled,
+      fuzzy_match_threshold: profile.edit_verification.fuzzy_match_threshold,
+      skip_large_file_action: profile.edit_verification.skip_large_file_action as 'warn' | 'block' | undefined,
+    });
     if (verifyResult) {
       return verifyResult; // Block or modify params
     }
@@ -348,7 +355,7 @@ function handleEditVerification(
   const maxSizeBytes = config.max_file_size_bytes ?? 10 * 1024 * 1024; // Default 10MB
   const fuzzyMatchEnabled = config.fuzzy_match_enabled !== false;
   const fuzzyMatchThreshold = config.fuzzy_match_threshold ?? 0.8;
-  const skipAction = config.skip_large_file_action ?? 'warn';
+  const skipAction: 'warn' | 'block' = config.skip_large_file_action ?? 'warn';
 
   // 1. Extract parameters (handle both parameter naming conventions)
   const filePath = event.params.file_path || event.params.path || event.params.file;
