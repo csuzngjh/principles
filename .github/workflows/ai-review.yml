@@ -5,7 +5,8 @@ on:
     types: [opened, synchronize, reopened]
 
 jobs:
-  review:
+  # ESLint 检查
+  eslint:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -13,28 +14,45 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Open Code Review
-        uses: reviewdog/action-staticcheck@v1
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: ESLint Review
+        uses: reviewdog/action-eslint@v1
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           reporter: github-pr-review
           filter_mode: nofilter
           fail_on_error: false
 
-  # 可选：使用免费的 Qodo (CodiumAI) PR-Agent
-  # 需要注册获取免费的 API Key: https://www.qodo.ai
-  qodo-review:
+  # TypeScript 类型检查
+  tsc:
     runs-on: ubuntu-latest
-    if: ${{ secrets.QODO_API_KEY != '' }}
     permissions:
       contents: read
       pull-requests: write
     steps:
-      - name: Qodo PR Review
-        uses: Codium-ai/pr-agent@main
-        env:
-          OPENAI_KEY: ${{ secrets.QODO_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: TypeScript Review
+        uses: reviewdog/action-tsc@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          reporter: github-pr-review
+          filter_mode: nofilter
+          fail_on_error: false
