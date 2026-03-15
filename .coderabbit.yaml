@@ -1,5 +1,5 @@
 # CodeRabbit 配置
-# 文档: https://docs.coderabbit.ai/configure-coderabbit/
+# 文档: https://docs.coderabbit.ai/guides/configure-coderabbit
 
 # 语言设置
 language: zh-CN
@@ -18,22 +18,6 @@ reviews:
   review_status: true
   # 自动生成 PR 标题
   collapse_walkthrough: false
-
-# 路径过滤
-path_filters:
-  - '!**/node_modules/**'
-  - '!**/dist/**'
-  - '!**/*.min.js'
-  - '!**/package-lock.json'
-
-# 代码质量检查
-tools:
-  # ESLint
-  eslint:
-    enabled: true
-  # TypeScript 检查
-  tsc:
-    enabled: true
 
 # 聊天功能
 chat:
