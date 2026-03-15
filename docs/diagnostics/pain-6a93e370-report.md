@@ -93,7 +93,8 @@ gh api repos/{owner}/{repo}/branches/{branch}/protection/enforce_admins
    ```
 
 2. **本地防御** (P1):
-   - 在 principles 项目添加 `.githooks/pre-push`
+   - 在 principles 项目提交 `.githooks/pre-push`
+   - 配置 `git config core.hooksPath .githooks`
    - 检查是否在 main 分支，若是则拒绝 push
 
 3. **文档约束** (P2):
