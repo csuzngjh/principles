@@ -1,0 +1,61 @@
+version: 2
+updates:
+  # 主项目依赖
+  - package-ecosystem: 'npm'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+      time: '09:00'
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: 'chore'
+      include: 'scope'
+    labels:
+      - 'dependencies'
+    reviewers:
+      - 'csuzngjh'
+
+  # create-principles-disciple 包
+  - package-ecosystem: 'npm'
+    directory: '/packages/create-principles-disciple'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+      time: '09:00'
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: 'chore'
+      include: 'scope'
+    labels:
+      - 'dependencies'
+    reviewers:
+      - 'csuzngjh'
+
+  # openclaw-plugin 包
+  - package-ecosystem: 'npm'
+    directory: '/packages/openclaw-plugin'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+      time: '09:00'
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: 'chore'
+      include: 'scope'
+    labels:
+      - 'dependencies'
+    reviewers:
+      - 'csuzngjh'
+
+  # GitHub Actions
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'monthly'
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: 'ci'
+    labels:
+      - 'github-actions'
+      - 'dependencies'

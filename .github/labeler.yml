@@ -1,0 +1,37 @@
+# PR 自动标签配置
+# 根据文件变更自动添加标签
+
+documentation:
+  - '**/*.md'
+  - 'docs/**/*'
+
+dependencies:
+  - '**/package.json'
+  - '**/package-lock.json'
+  - '**/yarn.lock'
+  - '**/pnpm-lock.yaml'
+
+typescript:
+  - '**/*.ts'
+  - '**/*.tsx'
+
+javascript:
+  - '**/*.js'
+  - '**/*.jsx'
+
+testing:
+  - '**/*.test.ts'
+  - '**/*.test.js'
+  - '**/*.spec.ts'
+  - '**/*.spec.js'
+  - 'tests/**/*'
+
+ci-cd:
+  - '.github/workflows/**/*'
+  - '.github/actions/**/*'
+
+plugin:
+  - 'packages/openclaw-plugin/**/*'
+
+installer:
+  - 'packages/create-principles-disciple/**/*'
