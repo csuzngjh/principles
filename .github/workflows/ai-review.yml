@@ -1,0 +1,40 @@
+name: AI Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Open Code Review
+        uses: reviewdog/action-staticcheck@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          reporter: github-pr-review
+          filter_mode: nofilter
+          fail_on_error: false
+
+  # 可选：使用免费的 Qodo (CodiumAI) PR-Agent
+  # 需要注册获取免费的 API Key: https://www.qodo.ai
+  qodo-review:
+    runs-on: ubuntu-latest
+    if: ${{ secrets.QODO_API_KEY != '' }}
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Qodo PR Review
+        uses: Codium-ai/pr-agent@main
+        env:
+          OPENAI_KEY: ${{ secrets.QODO_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
