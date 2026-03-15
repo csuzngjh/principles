@@ -190,6 +190,19 @@ export function normalizeProfile(rawProfile: any): any {
       }
     }
 
+    // Thinking OS Checkpoint settings (P-10)
+    const tcRaw = rawProfile.thinking_checkpoint ?? rawProfile.thinkingCheckpoint;
+    if (tcRaw && typeof tcRaw === 'object') {
+      normalized.thinking_checkpoint.enabled = tcRaw.enabled ?? defaults.thinking_checkpoint.enabled;
+      const windowMs = tcRaw.window_ms ?? tcRaw.windowMs;
+      if (typeof windowMs === 'number' && windowMs > 0) {
+        normalized.thinking_checkpoint.window_ms = windowMs;
+      }
+      if (Array.isArray(tcRaw.high_risk_tools ?? tcRaw.highRiskTools)) {
+        normalized.thinking_checkpoint.high_risk_tools = (tcRaw.high_risk_tools ?? tcRaw.highRiskTools).filter((t: any) => typeof t === 'string');
+      }
+    }
+
     if (Array.isArray(rawProfile.custom_guards)) {
       normalized.custom_guards = rawProfile.custom_guards.map((item: any) => {
         let severity = "error";
