@@ -1,0 +1,6 @@
+# Append-only task change log
+# Format: {"type": "add|status|remove", "taskId": "...", ...}
+# Example entries (uncomment to use):
+# {"type": "add", "taskId": "T1", "desc": "完成 PR #4", "by": "wesley", "at": "2026-03-12T09:00:00Z"}
+# {"type": "status", "taskId": "T1", "from": "pending", "to": "in_progress", "by": "agent", "at": "..."}
+# {"type": "status", "taskId": "T1", "from": "in_progress", "to": "done", "evidence": "...", "by": "agent", "at": "..."}
