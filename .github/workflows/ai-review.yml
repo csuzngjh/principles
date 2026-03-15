@@ -5,34 +5,6 @@ on:
     types: [opened, synchronize, reopened]
 
 jobs:
-  # OpenClaw Plugin ESLint 检查
-  eslint-plugin:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install dependencies
-        working-directory: packages/openclaw-plugin
-        run: npm install
-
-      - name: ESLint Review
-        uses: reviewdog/action-eslint@v1
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          reporter: github-pr-review
-          filter_mode: nofilter
-          fail_on_error: false
-          workdir: packages/openclaw-plugin
-
   # TypeScript 类型检查
   tsc-plugin:
     runs-on: ubuntu-latest

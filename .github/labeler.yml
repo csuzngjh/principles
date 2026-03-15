@@ -1,37 +1,53 @@
-# PR 自动标签配置
+# PR 自动标签配置 (labeler v6 格式)
 # 根据文件变更自动添加标签
 
 documentation:
-  - '**/*.md'
-  - 'docs/**/*'
+  - changed-files:
+      - any-glob-to-any-file:
+          - '**/*.md'
+          - 'docs/**/*'
 
 dependencies:
-  - '**/package.json'
-  - '**/package-lock.json'
-  - '**/yarn.lock'
-  - '**/pnpm-lock.yaml'
+  - changed-files:
+      - any-glob-to-any-file:
+          - '**/package.json'
+          - '**/package-lock.json'
+          - '**/yarn.lock'
+          - '**/pnpm-lock.yaml'
 
 typescript:
-  - '**/*.ts'
-  - '**/*.tsx'
+  - changed-files:
+      - any-glob-to-any-file:
+          - '**/*.ts'
+          - '**/*.tsx'
 
 javascript:
-  - '**/*.js'
-  - '**/*.jsx'
+  - changed-files:
+      - any-glob-to-any-file:
+          - '**/*.js'
+          - '**/*.jsx'
 
 testing:
-  - '**/*.test.ts'
-  - '**/*.test.js'
-  - '**/*.spec.ts'
-  - '**/*.spec.js'
-  - 'tests/**/*'
+  - changed-files:
+      - any-glob-to-any-file:
+          - '**/*.test.ts'
+          - '**/*.test.js'
+          - '**/*.spec.ts'
+          - '**/*.spec.js'
+          - 'tests/**/*'
 
 ci-cd:
-  - '.github/workflows/**/*'
-  - '.github/actions/**/*'
+  - changed-files:
+      - any-glob-to-any-file:
+          - '.github/workflows/**/*'
+          - '.github/actions/**/*'
 
 plugin:
-  - 'packages/openclaw-plugin/**/*'
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'packages/openclaw-plugin/**/*'
 
 installer:
-  - 'packages/create-principles-disciple/**/*'
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'packages/create-principles-disciple/**/*'
