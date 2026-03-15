@@ -58,4 +58,17 @@
 
 ---
 
+## 📋 任务队列检查（WEEK_TASKS.json）
+
+- [ ] **文件存在？** `okr/WEEK_TASKS.json` — 若不存在，从模板创建
+- [ ] **队列为空？** 无 `pending` 或 `in_progress` 任务 → 查看 RECOVERY_PROTOCOL.md
+- [ ] **任务卡住？** `in_progress` 任务的 `startedAt` > 2 小时 → 与用户确认
+- [ ] **周切换？** 检查 `week` 字段是否为当前周 → 归档旧任务
+
+**行动**：
+- 空队列 + 无指令 → 按 RECOVERY_PROTOCOL.md 自主推导
+- 任务卡住 → 询问用户："任务 [id] 似乎卡住了。继续还是归档？"
+
+---
+
 *无问题且无需行动，回复 `HEARTBEAT_OK` 节省 Token。*
