@@ -1,0 +1,40 @@
+# CodeRabbit 配置
+# 文档: https://docs.coderabbit.ai/configure-coderabbit/
+
+# 语言设置
+language: zh-CN
+
+# 自动审查设置
+reviews:
+  # 自动请求审查
+  request_on_open: true
+  # 审查请求变更
+  request_changes_workflow: true
+  # 高层级摘要
+  high_level_summary: true
+  # 诗歌风格（关闭）
+  poem: false
+  # 审查状态
+  review_status: true
+  # 自动生成 PR 标题
+  collapse_walkthrough: false
+
+# 路径过滤
+path_filters:
+  - '!**/node_modules/**'
+  - '!**/dist/**'
+  - '!**/*.min.js'
+  - '!**/package-lock.json'
+
+# 代码质量检查
+tools:
+  # ESLint
+  eslint:
+    enabled: true
+  # TypeScript 检查
+  tsc:
+    enabled: true
+
+# 聊天功能
+chat:
+  auto_reply: true
