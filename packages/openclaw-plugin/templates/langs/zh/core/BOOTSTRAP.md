@@ -213,6 +213,27 @@ memory/
 }
 ```
 
+### 5. 周治理（每周日 UTC 0 点）
+
+更新 WEEK_STATE.json 并验证 CURRENT_FOCUS.md：
+
+```json
+{
+  "action": "add",
+  "job": {
+    "name": "weekly-governance",
+    "schedule": { "kind": "cron", "expr": "0 0 * * 0", "tz": "UTC" },
+    "sessionTarget": "isolated",
+    "payload": {
+      "kind": "agentTurn",
+      "message": "执行周治理：\n\n## 1. 验证 CURRENT_FOCUS.md 声称\n对每个标记 ✅ 完成的任务：\n- PR 合并？检查：git log --oneline --all | grep 'Merge PR'\n- 文档存在？检查：ls -la <路径>\n- 测试通过？检查：npm test 2>&1 | grep 'passed'\n\n## 2. 更新 WEEK_STATE.json\n- 更新周次为当前 ISO 周\n- 根据证据更新进度字段\n- 更新指标（测试数、覆盖率）\n- 移除已完成的阻塞项\n\n## 3. 记录到 WEEK_EVENTS.jsonl\n- 追加：{\"type\": \"weekly_review\", \"timestamp\": \"...\", \"findings\": [...]}\n\n## 4. 输出摘要\n报告变更和发现的差异。",
+      "timeoutSeconds": 300
+    },
+    "delivery": { "mode": "announce" }
+  }
+}
+```
+
 ### 时区确认
 
 安装前**必须**确认用户的时区：

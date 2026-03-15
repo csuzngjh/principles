@@ -213,6 +213,27 @@ Deep memory file organization:
 }
 ```
 
+### 5. Weekly Governance (Sunday Midnight UTC)
+
+Update WEEK_STATE.json and validate CURRENT_FOCUS.md:
+
+```json
+{
+  "action": "add",
+  "job": {
+    "name": "weekly-governance",
+    "schedule": { "kind": "cron", "expr": "0 0 * * 0", "tz": "UTC" },
+    "sessionTarget": "isolated",
+    "payload": {
+      "kind": "agentTurn",
+      "message": "Execute weekly governance:\n\n## 1. Validate CURRENT_FOCUS.md Claims\nFor each task marked ✅ completed:\n- PR merged? Check: git log --oneline --all | grep 'Merge PR'\n- Document exists? Check: ls -la <path>\n- Tests passing? Check: npm test 2>&1 | grep 'passed'\n\n## 2. Update WEEK_STATE.json\n- Update week number to current ISO week\n- Update progress fields based on evidence\n- Update metrics (test count, coverage)\n- Remove completed blockers\n\n## 3. Record to WEEK_EVENTS.jsonl\n- Append: {\"type\": \"weekly_review\", \"timestamp\": \"...\", \"findings\": [...]}\n\n## 4. Output Summary\nReport what changed and any discrepancies found.",
+      "timeoutSeconds": 300
+    },
+    "delivery": { "mode": "announce" }
+  }
+}
+```
+
 ### Timezone Confirmation
 
 **Before installing**, confirm the user's timezone:
