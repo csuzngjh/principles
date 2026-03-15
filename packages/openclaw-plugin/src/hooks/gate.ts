@@ -49,7 +49,7 @@ export function handleBeforeToolCall(
       max_file_size_bytes: 10 * 1024 * 1024,
       fuzzy_match_enabled: true,
       fuzzy_match_threshold: 0.8,
-      skip_large_file_action: 'warn',
+      skip_large_file_action: 'warn' as 'warn' | 'block',
     },
     thinking_checkpoint: {
       enabled: false,  // Default OFF
@@ -69,6 +69,7 @@ export function handleBeforeToolCall(
 
   // ═══ THINKING OS CHECKPOINT (P-10) — Config-gated ═══
   // Only enforced when thinking_checkpoint.enabled = true in PROFILE.json
+  const isHighRisk = profile.thinking_checkpoint?.high_risk_tools?.includes(event.toolName) ?? false;
   if (profile.thinking_checkpoint?.enabled && isHighRisk && ctx.sessionId) {
     const windowMs = profile.thinking_checkpoint.window_ms ?? 5 * 60 * 1000;
     const hasThinking = hasRecentThinking(ctx.sessionId, windowMs);
