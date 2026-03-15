@@ -6,7 +6,7 @@
  * @version 1.0.0
  */
 
-import type { PluginHookAgentContext } from '../openclaw-sdk.js';
+import type { PluginHookAgentContext, PluginHookToolContext } from '../openclaw-sdk.js';
 
 /**
  * Principle-scenario mapping interface
@@ -32,6 +32,97 @@ interface RetrievedPrinciple {
   /** Applicable scenario description */
   scenarioDescription: string[];
 }
+
+/**
+ * Tool name to principle code mapping
+ * Maps common tool names to their relevant principle scenarios
+ */
+const TOOL_TO_PRINCIPLES: Record<string, string[]> = {
+  // File editing tools
+  'edit': ['T-01', 'P-03'],
+  'write': ['T-01', 'P-03'],
+  'create': ['T-01'],
+  'delete': ['T-01', 'T-03'],
+  'rename': ['T-01'],
+  'move': ['T-01'],
+
+  // Command execution tools
+  'bash': ['T-05', 'P-04'],
+  'exec': ['T-05', 'P-04'],
+  'run': ['T-05', 'P-04'],
+  'command': ['T-05', 'P-04'],
+  'shell': ['T-05', 'P-04'],
+
+  // Subagent tools
+  'pd_spawn_agent': ['T-09', 'P-10'],
+  'spawn_agent': ['T-09', 'P-10'],
+  'subagent': ['T-09', 'P-10'],
+
+  // Search and read tools
+  'read': ['T-01', 'T-04'],
+  'search': ['T-04'],
+  'grep': ['T-04'],
+  'find': ['T-04'],
+
+  // Test tools
+  'test': ['T-05', 'P-04'],
+  'pytest': ['T-05'],
+  'jest': ['T-05'],
+  'vitest': ['T-05'],
+
+  // Build tools
+  'build': ['T-05', 'P-04'],
+  'compile': ['T-05'],
+  'bundle': ['T-05'],
+
+  // Git tools
+  'git': ['T-01', 'T-03'],
+  'commit': ['T-01'],
+  'push': ['T-01'],
+  'pull': ['T-01'],
+  'merge': ['T-03'],
+
+  // Package management
+  'npm': ['T-05'],
+  'yarn': ['T-05'],
+  'pnpm': ['T-05'],
+  'pip': ['T-05'],
+  'install': ['T-05'],
+
+  // Network tools
+  'fetch': ['T-05', 'P-04'],
+  'curl': ['T-05'],
+  'wget': ['T-05'],
+  'http': ['T-05'],
+
+  // Database tools
+  'query': ['T-03', 'T-05'],
+  'database': ['T-03'],
+  'sql': ['T-03'],
+  'mongo': ['T-03'],
+
+  // Container tools
+  'docker': ['T-05', 'T-09'],
+  'container': ['T-05'],
+  'kubernetes': ['T-09'],
+  'k8s': ['T-09'],
+
+  // Configuration tools
+  'config': ['T-01', 'T-03'],
+  'env': ['T-01'],
+  'secret': ['T-03'],
+
+  // Deployment tools
+  'deploy': ['T-03', 'T-05'],
+  'release': ['T-03'],
+  'publish': ['T-03'],
+
+  // Monitoring tools
+  'log': ['T-05'],
+  'monitor': ['T-05'],
+  'trace': ['T-05'],
+  'debug': ['T-04', 'T-05']
+};
 
 /**
  * Principle mapping database
@@ -68,10 +159,16 @@ const PRINCIPLE_MAPPING: PrincipleTrigger[] = [
     scenario: ['tool call failures', 'test failures', 'API call failures', 'timeout errors', 'task execution failures']
   },
 
-  // T-08: Pain is Signal (duplicate in original, keeping for compatibility)
+  // T-06: Verify Before Trust
   {
-    principle: 'T-08',
-    scenario: ['tool call failures', 'test failures', 'API call failures', 'timeout errors', 'task execution failures']
+    principle: 'T-06',
+    scenario: ['receiving external data', 'parsing user input', 'processing API responses', 'validating configuration']
+  },
+
+  // T-07: Document as You Go
+  {
+    principle: 'T-07',
+    scenario: ['creating new modules', 'modifying complex logic', 'adding public APIs', 'refactoring code']
   },
 
   // T-09: Divide and Conquer (parallel tasks)
@@ -90,63 +187,69 @@ const PRINCIPLE_NAMES: Record<string, string> = {
   'T-03': 'Negative Over Positive',
   'T-04': "Occam's Razor",
   'T-05': 'Pain is Signal',
-  'T-08': 'Pain is Signal',
+  'T-06': 'Verify Before Trust',
+  'T-07': 'Document as You Go',
   'T-09': 'Divide and Conquer'
 };
 
 /**
- * Identify the current operation type from context
+ * Extract tool name from context
  */
-function identifyOperation(ctx: PluginHookAgentContext & { api?: any }): string {
-  const trigger = ctx.trigger || 'unknown';
-  
-  if (trigger === 'user') {
-    return 'user_request';
-  } else if (trigger === 'heartbeat') {
-    return 'heartbeat_check';
-  } else if (trigger === 'subagent') {
-    return 'subagent_task';
+function getToolName(ctx: PluginHookAgentContext | PluginHookToolContext): string | null {
+  // Check if context has toolName (PluginHookToolContext)
+  if ('toolName' in ctx && typeof ctx.toolName === 'string') {
+    return ctx.toolName;
   }
-  
-  return 'unknown';
+  return null;
 }
 
 /**
  * Retrieve relevant principles based on current context
  */
-export async function retrieveRelevantPrinciples(
-  ctx: PluginHookAgentContext & { api?: any }
-): Promise<RetrievedPrinciple[]> {
-  const operationType = identifyOperation(ctx);
+export function retrieveRelevantPrinciples(
+  ctx: PluginHookAgentContext | PluginHookToolContext
+): RetrievedPrinciple[] {
+  const toolName = getToolName(ctx);
+  const principleCodes = new Set<string>();
 
-  // Filter matching scenarios based on operation type
-  const relevantPrinciples = PRINCIPLE_MAPPING.filter(mapping => {
-    // Match based on operation type keywords
-    return mapping.scenario.some(scenario => {
-      const scenarioLower = scenario.toLowerCase();
-      const opLower = operationType.toLowerCase();
-      
-      // Direct keyword matching
-      if (opLower.includes('user') && scenarioLower.includes('task')) {
-        return true;
+  // If we have a tool name, look up principles from tool mapping
+  if (toolName) {
+    const toolNameLower = toolName.toLowerCase();
+
+    // Direct tool name match
+    if (TOOL_TO_PRINCIPLES[toolNameLower]) {
+      TOOL_TO_PRINCIPLES[toolNameLower].forEach(code => principleCodes.add(code));
+    }
+
+    // Partial match for tool names containing known patterns
+    for (const [pattern, codes] of Object.entries(TOOL_TO_PRINCIPLES)) {
+      if (toolNameLower.includes(pattern)) {
+        codes.forEach(code => principleCodes.add(code));
       }
-      if (opLower.includes('heartbeat') && scenarioLower.includes('check')) {
-        return true;
-      }
-      if (opLower.includes('subagent') && scenarioLower.includes('parallel')) {
-        return true;
-      }
-      
-      return false;
-    });
+    }
+  }
+
+  // Convert unique principle codes to full principle objects
+  const result: RetrievedPrinciple[] = [];
+  principleCodes.forEach(code => {
+    const mapping = PRINCIPLE_MAPPING.find(m => m.principle === code);
+    if (mapping) {
+      result.push({
+        code: mapping.principle,
+        name: PRINCIPLE_NAMES[mapping.principle] || 'Unknown Principle',
+        scenarioDescription: mapping.scenario
+      });
+    } else if (PRINCIPLE_NAMES[code]) {
+      // Handle P-xx principles that may not have scenario mappings yet
+      result.push({
+        code,
+        name: PRINCIPLE_NAMES[code] || 'Unknown Principle',
+        scenarioDescription: []
+      });
+    }
   });
 
-  // Map to full principle objects
-  return relevantPrinciples.map(mapping => ({
-    code: mapping.principle,
-    name: PRINCIPLE_NAMES[mapping.principle] || 'Unknown Principle',
-    scenarioDescription: mapping.scenario
-  }));
+  return result;
 }
 
 /**
@@ -167,24 +270,24 @@ export function generatePrincipleContext(principles: RetrievedPrinciple[]): stri
 
 /**
  * Context injection handler for before_prompt_build hook
- * 
+ *
  * This function retrieves relevant principles based on the current context
  * and returns them to be prepended to the system prompt.
  */
-export async function handleContextInjection(
-  ctx: PluginHookAgentContext & { api?: any }
-): Promise<string> {
+export function handleContextInjection(
+  ctx: (PluginHookAgentContext | PluginHookToolContext) & { api?: any }
+): string {
   try {
     // Retrieve relevant principles based on context
-    const relevantPrinciples = await retrieveRelevantPrinciples(ctx);
-    
+    const relevantPrinciples = retrieveRelevantPrinciples(ctx);
+
     // Log principle usage for observability
     if (relevantPrinciples.length > 0 && ctx.api?.logger) {
       relevantPrinciples.forEach(p => {
         ctx.api.logger.info(`[context-injection] Activated principle ${p.code}: ${p.name}`);
       });
     }
-    
+
     // Generate context string for injection
     return generatePrincipleContext(relevantPrinciples);
   } catch (error) {
