@@ -217,7 +217,16 @@ memory/
 
 更新 WEEK_STATE.json 并验证 CURRENT_FOCUS.md：
 
-```json
+**CLI 命令创建：**
+```bash
+openclaw cron add --name "weekly-governance" \
+  --cron "0 0 * * 0" --tz "UTC" \
+  --session isolated \
+  --timeout 300000 \
+  --message '执行周治理：1) 验证 CURRENT_FOCUS.md 声称（PR 合并？文档存在？测试通过？），2) 更新 WEEK_STATE.json 指标，3) 记录到 WEEK_EVENTS.jsonl，4) 如果任务队列为空，从 OKR 推导任务并通知用户'
+```
+
+**JSON 配置参考：**
 {
   "action": "add",
   "job": {

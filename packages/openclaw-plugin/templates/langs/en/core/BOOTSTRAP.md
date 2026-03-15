@@ -217,7 +217,16 @@ Deep memory file organization:
 
 Update WEEK_STATE.json and validate CURRENT_FOCUS.md:
 
-```json
+**CLI command to create:**
+```bash
+openclaw cron add --name "weekly-governance" \
+  --cron "0 0 * * 0" --tz "UTC" \
+  --session isolated \
+  --timeout 300000 \
+  --message 'Execute weekly governance: 1) Validate CURRENT_FOCUS.md claims (PR merged? docs exist? tests pass?), 2) Update WEEK_STATE.json metrics, 3) Record to WEEK_EVENTS.jsonl, 4) If task queue empty, derive tasks from OKR and notify user'
+```
+
+**JSON config reference:**
 {
   "action": "add",
   "job": {
