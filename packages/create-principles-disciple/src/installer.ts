@@ -12,6 +12,28 @@ import { logger } from './utils/logger.js';
 import { getOpenClawConfigDir, getPluginExtDir } from './utils/env.js';
 import type { InstallOptions } from './prompts.js';
 
+const ALWAYS_ON_SKILLS = new Set([
+  'admin',
+  'bootstrap-tools',
+  'deductive-audit',
+  'feedback',
+  'init-strategy',
+  'inject-rule',
+  'pd-mentor',
+  'plan-script',
+  'profile',
+  'triage',
+]);
+
+const FEATURE_SKILL_MAP: Record<string, string[]> = {
+  evolution: ['evolve-task', 'evolution-framework-update', 'evolve-system', 'watch-evolution', 'pd-daily', 'report'],
+  trust: [],
+  pain: ['pain', 'root-cause'],
+  reflection: ['reflection', 'reflection-log'],
+  okr: ['manage-okr'],
+  hygiene: ['pd-grooming'],
+};
+
 export interface InstallResult {
   success: boolean;
   pluginDir: string;
@@ -135,7 +157,7 @@ async function installPluginDependencies(): Promise<void> {
 /**
  * 复制 Skills
  */
-async function copySkills(pluginDir: string, language: string): Promise<number> {
+async function copySkills(pluginDir: string, language: string, features: string[]): Promise<number> {
   logger.step('复制 Skills');
   
   const skillsSrc = path.join(getTemplatesDir(pluginDir, language), 'skills');
@@ -153,7 +175,29 @@ async function copySkills(pluginDir: string, language: string): Promise<number> 
     await fse.copy(skillsSrc, skillsDest, { overwrite: true });
   }
   
-  const count = existsSync(skillsDest) ? readdirSync(skillsDest).length : 0;
+  const selectedFeatureSet = new Set(features);
+  const enabledSkills = new Set<string>(ALWAYS_ON_SKILLS);
+
+  for (const feature of selectedFeatureSet) {
+    const mappedSkills = FEATURE_SKILL_MAP[feature] || [];
+    for (const skill of mappedSkills) {
+      enabledSkills.add(skill);
+    }
+  }
+
+  if (existsSync(skillsDest)) {
+    const installedSkills = readdirSync(skillsDest).filter((entry) => statSync(path.join(skillsDest, entry)).isDirectory());
+
+    for (const skillDir of installedSkills) {
+      if (!enabledSkills.has(skillDir)) {
+        await fse.remove(path.join(skillsDest, skillDir));
+      }
+    }
+  }
+
+  const count = existsSync(skillsDest)
+    ? readdirSync(skillsDest).filter((entry) => statSync(path.join(skillsDest, entry)).isDirectory()).length
+    : 0;
   logger.success(`已复制 ${count} 个 Skills`);
   return count;
 }
@@ -262,13 +306,14 @@ async function copyPrinciplesLayer(
 /**
  * 创建配置文件
  */
-async function createConfigFile(workspaceDir: string): Promise<void> {
+async function createConfigFile(workspaceDir: string, features: string[]): Promise<void> {
   const configDir = getOpenClawConfigDir();
   const configPath = path.join(configDir, 'principles-disciple.json');
   
   const config = {
     workspace: workspaceDir,
     state: path.join(workspaceDir, '.state'),
+    features,
     debug: false,
     installedAt: new Date().toISOString(),
   };
@@ -304,7 +349,7 @@ export async function install(options: InstallOptions, pluginDir: string): Promi
     
     // 5. 复制 Skills
     spinner.text = '复制 Skills...';
-    const skillsCount = await copySkills(pluginDir, options.language);
+    const skillsCount = await copySkills(pluginDir, options.language, options.features);
     
     // 6. 复制核心模板
     spinner.text = '复制核心模板...';
@@ -325,7 +370,7 @@ export async function install(options: InstallOptions, pluginDir: string): Promi
     
     // 8. 创建配置文件
     spinner.text = '创建配置文件...';
-    await createConfigFile(options.workspaceDir);
+    await createConfigFile(options.workspaceDir, options.features);
     
     spinner.succeed('安装完成！');
     
