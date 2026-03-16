@@ -198,10 +198,9 @@ describe('Prompt Context Injection Hook', () => {
     
     expect(result).toBeDefined();
     // trustScore stays in prependContext's <runtime_state>
-    expect(result?.prependContext).toContain('<runtime_state>');
-    expect(result?.prependContext).toContain('Trust: 85/100');
-    expect(result?.prependContext).toContain('Stage: 4');
-  });
+    expect(result?.prependContext).toContain('<system_override:runtime_constraints>');
+    expect(result?.prependContext).toContain('Trust Score: 85/100');
+    expect(result?.prependContext).toContain('Stage 4');  });
 
   // ═══════════════════════════════════════════════════════════════════
   // IMPORTANT: project_context and reflection_log are now in appendSystemContext
@@ -340,8 +339,8 @@ describe('Prompt Context Injection Hook', () => {
 
     expect(result).toBeDefined();
     expect(result?.prependContext).not.toContain('<evolution_task');
-    expect(result?.prependContext).toContain('<runtime_state>');
-    expect(result?.prependContext).toContain('Trust:');
+    expect(result?.prependContext).toContain('<system_override:runtime_constraints>');
+    expect(result?.prependContext).toContain('Trust Score:');
   });
 
   it('should appendSystemContext with THINKING_OS.md if it exists and enabled', async () => {
@@ -378,7 +377,7 @@ describe('Prompt Context Injection Hook', () => {
 
     expect(result?.appendSystemContext).not.toContain('<core_principles>');
     // Trust score is now in prependContext's <runtime_state>
-    expect(result?.prependContext).toContain('Trust:');
+    expect(result?.prependContext).toContain('Trust Score:');
   });
 
   it('should handle PRINCIPLES.md read error gracefully', async () => {
@@ -483,8 +482,8 @@ describe('Prompt Context Injection Hook', () => {
     
     // prependContext: Only short dynamic directives
     const dynamicContext = result?.prependContext ?? '';
-    expect(dynamicContext).toContain('<runtime_state>');
-    expect(dynamicContext).toContain('Trust:');
+    expect(dynamicContext).toContain('<system_override:runtime_constraints>');
+    expect(dynamicContext).toContain('Trust Score:');
     // project_context and reflection_log should NOT be in prependContext
     expect(dynamicContext).not.toContain('<project_context>');
     expect(dynamicContext).not.toContain('<reflection_log>');
@@ -622,8 +621,8 @@ describe('Prompt Context Injection Hook', () => {
         sessionId: 'agent:main:123'
       } as any);
 
-      expect(result?.prependContext).toContain('<runtime_state>');
-      expect(result?.prependContext).toContain('Trust:');
+      expect(result?.prependContext).toContain('<system_override:runtime_constraints>');
+      expect(result?.prependContext).toContain('Trust Score:');
     });
   });
 
@@ -863,8 +862,8 @@ describe('Prompt Context Injection Hook', () => {
         sessionId: 'agent:main:123'
       } as any);
 
-      expect(result?.prependContext).toContain('<runtime_state>');
-      expect(result?.prependContext).toContain('Trust:');
+      expect(result?.prependContext).toContain('<system_override:runtime_constraints>');
+      expect(result?.prependContext).toContain('Trust Score:');
     });
 
     it('reflectionLog: false → 不注入反思日志', async () => {

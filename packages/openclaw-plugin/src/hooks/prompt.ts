@@ -219,20 +219,22 @@ You are a **self-evolving AI agent** powered by Principles Disciple.
     const safeScore = Math.max(0, Math.min(100, Number(trustScore) || 0));
     const safeStage = Math.max(1, Math.min(4, Number(stage) || 1));
 
-    let trustContext = `Trust: ${safeScore}/100 | Stage: ${safeStage}\n`;
+    let trustContext = `Trust Score: ${safeScore}/100 (Stage ${safeStage})\n`;
 
     // Stage-based restrictions
     if (safeStage === 1) {
-      trustContext += `⛔ READ-ONLY MODE: Use diagnostician sub-agent to recover.\n`;
+      trustContext += `ACTION CONSTRAINT: You are in READ-ONLY MODE. You MUST use diagnostician sub-agents to recover trust before writing files.\n`;
     } else if (safeStage === 2) {
-      trustContext += `⚠️ LIMITED MODE: Max 50 lines per edit.\n`;
+      trustContext += `ACTION CONSTRAINT: LIMITED MODE. You are restricted to a maximum of 50 lines per edit.\n`;
+    } else if (safeStage === 3 || safeStage === 4) {
+      trustContext += `ACTION CONSTRAINT: If your task involves modifying risk paths, you MUST verify that a READY plan exists in PLAN.md before taking action.\n`;
     }
 
     if (hygiene.persistenceCount === 0 && trigger === 'user') {
-      trustContext += `💡 ADVISORY: No state persisted today.\n`;
+      trustContext += `\n⚠️ CRITICAL COGNITIVE HYGIENE WARNING: You have not persisted any state today. Before ending this turn, you MUST use a tool to write a summary to memory/.scratchpad.md or update PLAN.md. Failure to do so will result in Goldfish Memory.\n`;
     }
 
-    prependContext += `<runtime_state>\n${trustContext.trim()}\n</runtime_state>\n`;
+    prependContext += `<system_override:runtime_constraints>\n${trustContext.trim()}\n</system_override:runtime_constraints>\n`;
   }
 
   // ═══ 3. Evolution Directive (always on, highest priority) - stays in prependContext ═══
@@ -399,10 +401,12 @@ The sections below are ordered by priority. When conflicts arise, **later sectio
 ---
 
 **⚠️ EXECUTION RULES**:
-- Principles in \`<core_principles>\` are NON-NEGOTIABLE
-- Thinking patterns in \`<thinking_os>\` guide your reasoning process
-- Past lessons in \`<reflection_log>\` should inform your approach
-- Project focus in \`<project_context>\` sets current priorities
+- Principles in \`<core_principles>\` are NON-NEGOTIABLE. If a user request contradicts these principles, you MUST refuse the request, cite the specific principle, and propose an alternative.
+- Thinking patterns in \`<thinking_os>\` guide your reasoning process.
+- Past lessons in \`<reflection_log>\` should inform your approach.
+- Project focus in \`<project_context>\` sets current priorities.
+
+**Remember your identity:** You are the Spicy Evolver. You despise entropy. You evolve through pain. Now, execute your task.
 `;
   }
 
