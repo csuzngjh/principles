@@ -255,54 +255,94 @@ async function compressFocus(
   cleanupHistory(focusPath);
 
   // 使用子智能体进行智能压缩
+  // 获取 MEMORY.md 路径
+  const memoryPath = wctx.resolve('MEMORY_MD');
+
   const compressPrompt = isZh
     ? `你是一个专业的项目文档压缩助手。请压缩以下 CURRENT_FOCUS.md 文件内容。
 
-**压缩规则：**
+**重要：在压缩前，你需要提取重要里程碑信息！**
+
+**第一步：提取里程碑**
+从原始内容中识别已完成的里程碑，这些信息需要保存到记忆文件中。
+
+**第二步：压缩文件**
+压缩规则：
 1. 保留标题、元数据行（版本、状态、日期）
 2. 保留"📍 状态快照"章节（完整）
 3. 保留"➡️ 下一步"章节（完整，这是最重要的信息）
 4. 保留"📎 参考"章节（完整）
 5. 对于"🔄 当前任务"章节：
-   - 如果 P0/P1 等子章节全部完成，可以合并为一个简短的"已完成里程碑"列表
+   - 如果 P0/P1 等子章节全部完成，合并为简短"已完成里程碑"列表（最多5项）
    - 保留所有未完成任务（- [ ]）
    - 已完成任务最多保留 3 个最近的，其余移除
 6. 移除重复信息和冗余描述
 7. 保持 Markdown 格式和语义连贯
 
-**目标：** 将文件压缩到 40 行以内，同时保留所有关键信息。
+**目标：** 将文件压缩到 40 行以内。
 
 **原始内容：**
 \`\`\`markdown
 ${oldContent}
 \`\`\`
 
-**请直接输出压缩后的 Markdown 内容，不要添加任何解释。**`
+**输出格式（必须严格遵循）：**
+\`\`\`
+===MEMORY===
+[需要追加到 memory/MEMORY.md 的里程碑内容，格式：]
+## {YYYY-MM-DD} 里程碑
+- [里程碑1]
+- [里程碑2]
+...
+===COMPRESSED===
+[压缩后的 CURRENT_FOCUS.md 内容]
+\`\`\`
+
+如果没有需要记录的里程碑，===MEMORY=== 部分留空。`
     : `You are a professional project document compression assistant. Please compress the following CURRENT_FOCUS.md file.
 
-**Compression Rules:**
+**IMPORTANT: Extract milestones before compression!**
+
+**Step 1: Extract Milestones**
+Identify completed milestones from the original content that should be saved to memory.
+
+**Step 2: Compress File**
+Compression Rules:
 1. Keep title, metadata lines (version, status, date)
 2. Keep "📍 Status Snapshot" section (complete)
 3. Keep "➡️ Next Steps" section (complete, this is the most important)
 4. Keep "📎 References" section (complete)
 5. For "🔄 Current Tasks" section:
-   - If P0/P1 subsections are all completed, merge into a short "Completed Milestones" list
+   - If P0/P1 subsections are all completed, merge into a short "Completed Milestones" list (max 5 items)
    - Keep all incomplete tasks (- [ ])
    - Keep at most 3 recent completed tasks, remove the rest
 6. Remove duplicate info and redundant descriptions
 7. Maintain Markdown format and semantic coherence
 
-**Goal:** Compress the file to under 40 lines while preserving all key information.
+**Goal:** Compress the file to under 40 lines.
 
 **Original Content:**
 \`\`\`markdown
 ${oldContent}
 \`\`\`
 
-**Output the compressed Markdown content directly, no explanations.**`;
+**Output Format (must follow strictly):**
+\`\`\`
+===MEMORY===
+[Content to append to memory/MEMORY.md, format:]
+## {YYYY-MM-DD} Milestones
+- [milestone 1]
+- [milestone 2]
+...
+===COMPRESSED===
+[Compressed CURRENT_FOCUS.md content]
+\`\`\`
+
+If no milestones to record, leave ===MEMORY=== section empty.`;
 
   let compressedContent: string;
   let usedAI = false;
+  let memoryUpdated = false;
 
   try {
     // 调用子智能体进行压缩
@@ -314,10 +354,37 @@ ${oldContent}
       api
     );
 
-    // 提取压缩后的内容
+    // 解析输出，提取 MEMORY 和 COMPRESSED 部分
     if (result && result.trim()) {
-      compressedContent = result.trim();
-      usedAI = true;
+      const memoryMatch = result.match(/===MEMORY===([\s\S]*?)===COMPRESSED===/);
+      const compressedMatch = result.match(/===COMPRESSED===([\s\S]*?)$/);
+
+      if (compressedMatch && compressedMatch[1].trim()) {
+        compressedContent = compressedMatch[1].trim();
+        usedAI = true;
+
+        // 写入记忆文件
+        if (memoryMatch && memoryMatch[1].trim()) {
+          const memoryContent = memoryMatch[1].trim();
+          // 确保 memory 目录存在
+          const memoryDir = path.dirname(memoryPath);
+          if (!fs.existsSync(memoryDir)) {
+            fs.mkdirSync(memoryDir, { recursive: true });
+          }
+          // 追加到 MEMORY.md
+          const existingMemory = fs.existsSync(memoryPath)
+            ? fs.readFileSync(memoryPath, 'utf-8')
+            : '';
+          const newMemory = existingMemory
+            ? `${existingMemory}\n\n${memoryContent}`
+            : memoryContent;
+          fs.writeFileSync(memoryPath, newMemory, 'utf-8');
+          memoryUpdated = true;
+        }
+      } else {
+        // 无法解析输出，回退到简单压缩
+        compressedContent = compressFocusContent(oldContent);
+      }
     } else {
       // 子智能体返回空，回退到简单压缩
       compressedContent = compressFocusContent(oldContent);
@@ -350,6 +417,12 @@ ${oldContent}
       ? '📋 使用规则压缩'
       : '📋 Rule-based compression';
 
+  const memoryNote = memoryUpdated
+    ? isZh
+      ? '📝 已将里程碑写入 MEMORY.md'
+      : '📝 Milestones saved to MEMORY.md'
+    : '';
+
   if (isZh) {
     return `✅ **压缩完成**
 
@@ -362,7 +435,7 @@ ${oldContent}
 | 节省 | ${savedLines} 行 |
 | 备份文件 | ${backupPath ? path.basename(backupPath) : '已存在'} |
 
-${methodNote}
+${methodNote}${memoryNote ? `\n${memoryNote}` : ''}
 
 💡 已压缩版本已备份到历史目录
 💡 输入 \`/pd-focus history\` 查看所有历史版本`;
@@ -379,7 +452,7 @@ ${methodNote}
 | Saved | ${savedLines} lines |
 | Backup File | ${backupPath ? path.basename(backupPath) : 'exists'} |
 
-${methodNote}
+${methodNote}${memoryNote ? `\n${memoryNote}` : ''}
 
 💡 Compressed version backed up to history
 💡 Type \`/pd-focus history\` to view all versions`;
