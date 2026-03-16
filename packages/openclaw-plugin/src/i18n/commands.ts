@@ -18,52 +18,52 @@ export function normalizeLanguage(lang: string): SupportedLanguage {
 
 export const commandDescriptions: Record<string, Record<SupportedLanguage, string>> = {
   'pd-init': {
-    zh: '初始化战略访谈和OKR',
-    en: 'Initialize strategy interview and OKRs'
+    zh: '初始化工作区（生成 PRINCIPLES.md、THINKING_OS.md 等）',
+    en: 'Initialize workspace (generate PRINCIPLES.md, THINKING_OS.md, etc.)'
   },
   'pd-okr': {
-    zh: '目标与关键结果管理',
-    en: 'Manage OKRs and align goals'
+    zh: '管理 OKR 目标与关键结果',
+    en: 'Manage OKR goals and key results'
   },
   'pd-bootstrap': {
-    zh: '环境工具扫描与升级',
-    en: 'Scan and upgrade environment tools'
+    zh: '扫描环境工具并建议升级',
+    en: 'Scan environment tools and suggest upgrades'
   },
   'pd-research': {
-    zh: '发起工具升级研究',
-    en: 'Research tool upgrades'
+    zh: '研究工具升级方案',
+    en: 'Research tool upgrade solutions'
   },
   'pd-thinking': {
-    zh: '管理思维模型与候选方案',
-    en: 'Manage Thinking OS mental models'
+    zh: '管理思维模型 [status|propose|audit]',
+    en: 'Manage Thinking OS [status|propose|audit]'
   },
   'pd-evolve': {
-    zh: '执行完整进化循环',
-    en: 'Run full evolution loop'
+    zh: '执行进化循环处理 Pain 信号',
+    en: 'Run evolution loop to process Pain signals'
   },
   'pd-daily': {
     zh: '配置并发送进化日报',
-    en: 'Configure and send daily report'
+    en: 'Configure and send daily evolution report'
   },
   'pd-grooming': {
-    zh: '工作区数字大扫除',
+    zh: '工作区清理与大扫除',
     en: 'Workspace cleanup and grooming'
   },
   'pd-trust': {
-    zh: '查看信任积分与安全等级',
-    en: 'View trust score and security stage'
+    zh: '查看信任分数和权限等级 (1-4)',
+    en: 'View trust score and permission stage (1-4)'
   },
   'pd-help': {
-    zh: '获取交互式命令引导',
-    en: 'Get interactive command guidance'
+    zh: '显示所有命令和使用指南',
+    en: 'Show all commands and usage guide'
   },
   'pd-status': {
-    zh: '查看数字神经系统状态（GFI和痛苦词典）',
-    en: 'View Digital Nerve System status (GFI and Pain Dictionary)'
+    zh: '查看系统状态（GFI、Pain 词典）',
+    en: 'View system status (GFI, Pain dictionary)'
   },
   'pd-context': {
-    zh: '控制上下文注入（原则、思维模型、项目焦点等）',
-    en: 'Control context injection (principles, thinking models, project focus, etc.)'
+    zh: '控制上下文注入 [status|thinking|trust|reflection|focus|preset] - 输入 /pd-context help 查看详情',
+    en: 'Control context injection [status|thinking|trust|reflection|focus|preset] - Type /pd-context help for details'
   }
 };
 
