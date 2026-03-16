@@ -20,10 +20,36 @@ describe('Pain Command', () => {
         resetTrust: vi.fn()
     };
 
+    const mockEventLog = {
+        getEmpathyStats: vi.fn().mockReturnValue({
+            totalEvents: 0,
+            dedupedCount: 0,
+            dedupeHitRate: 0,
+            totalPenaltyScore: 0,
+            rolledBackScore: 0,
+            rollbackCount: 0,
+            bySeverity: { mild: 0, moderate: 0, severe: 0 },
+            scoreBySeverity: { mild: 0, moderate: 0, severe: 0 },
+            byDetectionMode: { structured: 0, legacy_tag: 0 },
+            byOrigin: { assistant_self_report: 0, user_manual: 0, system_infer: 0 },
+            confidenceDistribution: { high: 0, medium: 0, low: 0 },
+            dailyTrend: [],
+        })
+    };
+
+    const mockConfig = {
+        get: vi.fn().mockImplementation((key: string) => {
+            if (key === 'language') return 'en';
+            return undefined;
+        })
+    };
+
     const mockWctx = {
         workspaceDir,
         dictionary: mockDictionary,
-        trust: mockTrust
+        trust: mockTrust,
+        eventLog: mockEventLog,
+        config: mockConfig
     };
 
     beforeEach(() => {

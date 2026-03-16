@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { PluginHookLlmOutputEvent, PluginHookAgentContext } from '../openclaw-sdk.js';
-import { trackFriction, trackLlmOutput, recordThinkingCheckpoint } from '../core/session-tracker.js';
+import { trackFriction, trackLlmOutput, recordThinkingCheckpoint, resetFriction } from '../core/session-tracker.js';
 import { writePainFlag } from '../core/pain.js';
 import { DetectionService } from '../core/detection-service.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
@@ -273,6 +273,8 @@ export function handleLlmOutput(
 
                 if (boundedScore > 0) {
                     trackFriction(ctx.sessionId, boundedScore, `user_empathy_${signal.severity}`, ctx.workspaceDir);
+                    // Generate unique event ID for rollback support
+                    const eventId = `emp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
                     eventLog.recordPainSignal(ctx.sessionId, {
                         score: boundedScore,
                         source: 'user_empathy',
@@ -285,8 +287,9 @@ export function handleLlmOutput(
                         deduped: false,
                         trigger_text_excerpt: text.substring(0, 120),
                         raw_score: weightedScore,
-                        calibrated_score: calibratedScore
-                    });
+                        calibrated_score: calibratedScore,
+                        eventId,
+                    } as any);
                 }
             } else {
                 eventLog.recordPainSignal(ctx.sessionId, {
@@ -303,6 +306,25 @@ export function handleLlmOutput(
                     raw_score: Math.round(mapSeverityToPenalty(signal.severity, config) * signal.confidence),
                     calibrated_score: Math.round(mapSeverityToPenalty(signal.severity, config) * signal.confidence * resolveCalibrationFactor(event, config))
                 });
+            }
+        }
+    }
+
+    // ═══ Natural Language Rollback Detection ═══
+    // Detect [EMPATHY_ROLLBACK_REQUEST] tag and trigger rollback
+    const rollbackMatch = text.match(/^\s*\[EMPATHY_ROLLBACK_REQUEST\]\s*$/m);
+    if (rollbackMatch) {
+        const eventId = eventLog.getLastEmpathyEventId(ctx.sessionId);
+        if (eventId) {
+            const rolledBackScore = eventLog.rollbackEmpathyEvent(
+                eventId,
+                ctx.sessionId,
+                'Natural language rollback request detected',
+                'natural_language'
+            );
+            if (rolledBackScore > 0) {
+                // Reset GFI after successful rollback
+                resetFriction(ctx.sessionId);
             }
         }
     }

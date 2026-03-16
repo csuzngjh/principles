@@ -1,4 +1,4 @@
-# Principles Disciple (v1.5.4+) 全量技术手册 (RAG Knowledge Base)
+# Principles Disciple (v1.5.5+) 全量技术手册 (RAG Knowledge Base)
 
 > **身份声明**: 本文档为 Principles Disciple 框架的底层参考指南，旨在为智能体提供深度的架构理解与配置详情。
 
@@ -18,7 +18,10 @@
 | `/pd-grooming` | 工作区数字大扫除 | `/workspace-grooming` |
 | `/pd-trust` | 查看信任积分与安全等级 | `/trust` |
 | `/pd-status` | 查看数字神经系统状态 | 新增 |
-| `/pd-context` | 控制上下文注入配置 | **新增 v1.5.4** |
+| `/pd-status empathy` | 查看情绪事件统计 | **新增 v1.5.5** |
+| `/pd-rollback` | 回滚情绪事件惩罚 | **新增 v1.5.5** |
+| `/pd-context` | 控制上下文注入配置 | 新增 v1.5.4 |
+| `/pd-focus` | 管理焦点文件 | 新增 v1.5.5 |
 | `/pd-help` | 获取交互式命令引导 | 保持 |
 
 ---
@@ -175,4 +178,122 @@ GFI 是衡量系统"痛苦程度"的核心指标，分值范围 0-100。
 - **写入方式**: 原子写入（temp file + rename）防止并发问题
 
 ---
-*版本: v1.5.4 | 维护者: Spicy Evolver*
+
+## 7. Empathy Engine 统计与回滚
+
+### 7.1 概述
+Empathy Engine 是 Principles Disciple 的情绪感知系统，能够检测 AI 自我报告的用户挫败/愤怒/指责等情绪信号，并触发相应的进化行为。v1.5.5 新增统计可视化和手动回滚功能。
+
+### 7.2 情绪事件统计 (`/pd-status empathy`)
+
+**命令格式**:
+```bash
+/pd-status empathy           # 今日统计
+/pd-status empathy --today   # 今日统计
+/pd-status empathy --week    # 近 7 天统计
+/pd-status empathy --session # 当前会话统计
+```
+
+**输出示例**:
+```
+🫀 **情绪事件统计** (今天)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📊 总事件: 3 次
+   ├─ 😟 mild: 1 次 (10分)
+   ├─ 😠 moderate: 1 次 (25分)
+   └─ 😡 severe: 1 次 (40分)
+
+🔄 去重命中率: 33% (1/3)
+   ↳ 避免了重复惩罚
+
+🔍 检测模式: 结构化 2 | 标签 1
+```
+
+**统计指标说明**:
+| 指标 | 说明 |
+|------|------|
+| `totalEvents` | 总事件数（去重后） |
+| `dedupedCount` | 被去重的事件数 |
+| `dedupeHitRate` | 去重命中率 |
+| `bySeverity` | 按严重程度分布 |
+| `byDetectionMode` | 检测模式分布（structured/legacy_tag） |
+| `dailyTrend` | 每日趋势（仅 --week 模式） |
+
+### 7.3 手动回滚 (`/pd-rollback`)
+
+**用途**: 当 AI 误判用户情绪时，用户可主动撤销惩罚。
+
+**命令格式**:
+```bash
+/pd-rollback last        # 回滚当前会话最近一次惩罚
+/pd-rollback <event-id>  # 回滚指定事件
+```
+
+**输出示例**:
+```
+✅ 已回滚情绪事件
+   📋 事件 ID: emp_1710567890123_abc123
+   💰 撤销分数: 25 分
+
+💡 提示: 已重置当前会话的疲劳指数。
+```
+
+### 7.4 自然语言回滚
+
+用户无需记忆命令，直接说人话即可触发回滚：
+
+**触发示例**:
+- "撤销刚才的惩罚"
+- "回滚上一次"
+- "取消刚才的情绪惩罚"
+
+系统会自动识别并执行回滚操作。
+
+### 7.5 `/pd-status` 状态页集成
+
+主状态页已集成会话级情绪事件统计：
+
+```
+📊 **Principles Disciple - 系统健康度监控**
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💊 **当前疲劳指数 (GFI)**: [██░░░░░░░░░░░░░] 12/100
+💰 **当前信任积分 (Trust)**: [██████████████░] 85/100
+🧠 **当前心智模式**: ⚡ 高效模式 (EFFICIENT)
+   ↳ 状态诊断: 运转良好 🟢
+
+🫀 **情绪事件 (当前会话)**: 2 次 (35分)
+
+🧠 **痛苦进化词典**: 已吸收 10 条规则
+   ↳ 累计帮您拦截了 5 次无效操作
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+### 7.6 配置支持
+
+在 `pain_settings.json` 中配置 Empathy Engine：
+
+```json
+{
+  "empathy_engine": {
+    "enabled": true,
+    "penalties": {
+      "mild": 10,
+      "moderate": 25,
+      "severe": 40
+    },
+    "rate_limit": {
+      "max_per_turn": 50,
+      "max_per_hour": 100
+    },
+    "dedupe_window_ms": 60000,
+    "model_calibration": {
+      "default": 1.0,
+      "gpt-4": 0.8,
+      "claude-3": 0.9
+    }
+  }
+}
+```
+
+---
+*版本: v1.5.5 | 维护者: Spicy Evolver*

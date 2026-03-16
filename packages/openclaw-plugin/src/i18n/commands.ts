@@ -68,6 +68,10 @@ export const commandDescriptions: Record<string, Record<SupportedLanguage, strin
   'pd-focus': {
     zh: '管理 CURRENT_FOCUS.md [status|history|compress|rollback] - 查看/压缩/回滚焦点文件',
     en: 'Manage CURRENT_FOCUS.md [status|history|compress|rollback] - View/compress/rollback focus file'
+  },
+  'pd-rollback': {
+    zh: '回滚情绪事件惩罚 <event-id>|last',
+    en: 'Rollback empathy event penalty <event-id>|last'
   }
 };
 
