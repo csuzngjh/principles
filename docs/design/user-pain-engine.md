@@ -221,4 +221,56 @@ OpenClaw 的 `llm_output` 事件可用字段（核心）：
 - 用户主动使用 `/pd-empathy status/config` 的比例上升（可解释性增强）。
 
 ---
+
+## 9. 多模型情绪分级校准（解决“不同 LLM 感受不同”）
+
+你的问题是关键：**不能只按次数，也不能只信任单模型主观判断**。建议采用“次数 + 强度 + 校准系数”的混合计分。
+
+### 9.1 计分思想：频次与强度分离
+- **频次（frequency）**：用户负面/正向情绪在时间窗内出现次数。
+- **强度（intensity）**：每次事件的 `severity`（mild/moderate/severe）和 `confidence`。
+- **校准系数（calibration）**：按模型/provider 对情绪判断偏差做归一化。
+
+建议最终惩罚分：
+`effective_score = base_penalty(severity) × confidence × model_calibration_factor × temporal_weight`
+
+其中：
+- `model_calibration_factor`：针对 `provider/model` 的标定系数（如 0.8~1.2）。
+- `temporal_weight`：短时间连续触发递减（防爆表）或递增（持续冲突加权）。
+
+### 9.2 不同 LLM 的分级对齐策略
+1. **标准标签层**：先把情绪判定统一映射到内部枚举：`mild/moderate/severe`，避免直接使用模型原生措辞。
+2. **模型标定表**：在配置中维护 `provider/model -> calibration_factor`。
+3. **离线评估集**：维护一组“情绪金标样本”，定期跑各模型并计算偏差。
+4. **在线温和校正**：根据误触发回滚率、二次投诉率自动微调系数（缓慢更新，避免震荡）。
+
+### 9.3 正向情绪（开心）同样分级
+建议新增 `delight_severity`（mild/moderate/high），但奖励力度应小于惩罚力度，避免被“刷赞”操控。
+
+### 9.4 建议配置扩展
+在 `.state/pain_settings.json` 增加：
+```json
+{
+  "model_calibration": {
+    "openai/gpt-4.1": 1.0,
+    "anthropic/claude-sonnet-4": 0.95,
+    "google/gemini-2.5-pro": 1.05
+  },
+  "emotion_scoring": {
+    "use_frequency": true,
+    "use_intensity": true,
+    "temporal_decay": 0.85,
+    "max_confidence_multiplier": 1.2
+  }
+}
+```
+
+### 9.5 面板展示建议（避免黑箱）
+Empathy Panel 增加两列：
+- 本次触发模型：`provider/model`
+- 校准后分值：`raw_score -> calibrated_score`
+
+让用户看到“为什么这次是 severe，而不是 moderate”。
+
+---
 *设计方案修订: 2026-03-16 | Spicy Evolver Architecture Team*

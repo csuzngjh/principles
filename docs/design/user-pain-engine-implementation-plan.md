@@ -27,7 +27,7 @@
 - **M1（基础链路可跑通）**：P0-1 ~ P0-4
 - **M2（风控完整）**：P0-5 ~ P0-8
 - **M3（体验与可观测）**：P1-1 ~ P1-7
-- **M4（稳定性与优化）**：P2-1 ~ P2-3
+- **M4（稳定性与优化）**：P2-1 ~ P2-4
 
 ---
 
@@ -329,12 +329,33 @@
 
 ### P2-1 检测质量评估脚本
 - 离线样本集评估 precision/recall，辅助调参。
+- 输出按 `provider/model` 分组的偏差报告（过严/过松）。
 
-### P2-2 A/B 试验开关
-- 固定分值 vs 分级分值。
+### P2-2 多模型校准与归一化
+**目标文件**
+- `packages/openclaw-plugin/src/hooks/llm.ts`
+- `packages/openclaw-plugin/src/core/config.ts`
+- `packages/openclaw-plugin/templates/pain_settings.json`
 
-### P2-3 正向奖励通道
+**实现内容**
+- 新增 `model_calibration` 配置：`provider/model -> factor`。
+- 统一评分公式：`base_penalty × confidence × calibration_factor × temporal_weight`。
+- 产出 `raw_score` 与 `calibrated_score` 审计字段。
+
+**验收标准**
+- 不同模型对同一金标样本的评分方差收敛。
+- 校准后误触发回滚率下降。
+
+**测试**
+- 单测：评分公式正确性。
+- 离线评估：多模型样本回放对比。
+
+### P2-3 A/B 试验开关
+- 固定分值 vs 分级分值 vs 校准分值。
+
+### P2-4 正向奖励通道
 - `USER_DELIGHT_DETECTED` 与 trust 修复联动。
+- 奖励上限小于惩罚上限，防止刷分。
 
 ---
 
