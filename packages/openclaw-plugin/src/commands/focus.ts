@@ -10,7 +10,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
+import type { PluginCommandContext, PluginCommandResult, OpenClawPluginApi } from '../openclaw-sdk.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import {
   getHistoryDir,
@@ -19,6 +19,7 @@ import {
   extractVersion,
   extractDate,
 } from '../core/focus-history.js';
+import { agentSpawnTool } from '../tools/agent-spawn.js';
 
 /**
  * 获取工作区目录
@@ -219,9 +220,13 @@ function showHistory(workspaceDir: string, isZh: boolean): string {
 }
 
 /**
- * 手动压缩 CURRENT_FOCUS.md
+ * 手动压缩 CURRENT_FOCUS.md（使用子智能体）
  */
-function compressFocus(workspaceDir: string, isZh: boolean): string {
+async function compressFocus(
+  workspaceDir: string,
+  isZh: boolean,
+  api: OpenClawPluginApi
+): Promise<string> {
   const wctx = WorkspaceContext.fromHookContext({ workspaceDir });
   const focusPath = wctx.resolve('CURRENT_FOCUS');
 
@@ -249,10 +254,81 @@ function compressFocus(workspaceDir: string, isZh: boolean): string {
   // 清理过期历史
   cleanupHistory(focusPath);
 
-  // 压缩内容：移除已完成的任务，保留关键章节
-  const compressedContent = compressFocusContent(oldContent);
+  // 使用子智能体进行智能压缩
+  const compressPrompt = isZh
+    ? `你是一个专业的项目文档压缩助手。请压缩以下 CURRENT_FOCUS.md 文件内容。
 
-  // 更新版本号和日期（支持小数版本）
+**压缩规则：**
+1. 保留标题、元数据行（版本、状态、日期）
+2. 保留"📍 状态快照"章节（完整）
+3. 保留"➡️ 下一步"章节（完整，这是最重要的信息）
+4. 保留"📎 参考"章节（完整）
+5. 对于"🔄 当前任务"章节：
+   - 如果 P0/P1 等子章节全部完成，可以合并为一个简短的"已完成里程碑"列表
+   - 保留所有未完成任务（- [ ]）
+   - 已完成任务最多保留 3 个最近的，其余移除
+6. 移除重复信息和冗余描述
+7. 保持 Markdown 格式和语义连贯
+
+**目标：** 将文件压缩到 40 行以内，同时保留所有关键信息。
+
+**原始内容：**
+\`\`\`markdown
+${oldContent}
+\`\`\`
+
+**请直接输出压缩后的 Markdown 内容，不要添加任何解释。**`
+    : `You are a professional project document compression assistant. Please compress the following CURRENT_FOCUS.md file.
+
+**Compression Rules:**
+1. Keep title, metadata lines (version, status, date)
+2. Keep "📍 Status Snapshot" section (complete)
+3. Keep "➡️ Next Steps" section (complete, this is the most important)
+4. Keep "📎 References" section (complete)
+5. For "🔄 Current Tasks" section:
+   - If P0/P1 subsections are all completed, merge into a short "Completed Milestones" list
+   - Keep all incomplete tasks (- [ ])
+   - Keep at most 3 recent completed tasks, remove the rest
+6. Remove duplicate info and redundant descriptions
+7. Maintain Markdown format and semantic coherence
+
+**Goal:** Compress the file to under 40 lines while preserving all key information.
+
+**Original Content:**
+\`\`\`markdown
+${oldContent}
+\`\`\`
+
+**Output the compressed Markdown content directly, no explanations.**`;
+
+  let compressedContent: string;
+  let usedAI = false;
+
+  try {
+    // 调用子智能体进行压缩
+    const result = await agentSpawnTool.execute(
+      {
+        agentType: 'reporter', // 使用 reporter 类型，适合总结和压缩
+        task: compressPrompt,
+      },
+      api
+    );
+
+    // 提取压缩后的内容
+    if (result && result.trim()) {
+      compressedContent = result.trim();
+      usedAI = true;
+    } else {
+      // 子智能体返回空，回退到简单压缩
+      compressedContent = compressFocusContent(oldContent);
+    }
+  } catch (error) {
+    // 子智能体失败，回退到简单压缩
+    console.error('[PD:Focus] AI compression failed, falling back to simple compression:', error);
+    compressedContent = compressFocusContent(oldContent);
+  }
+
+  // 更新版本号和日期
   const versionParts = oldVersion.split('.');
   const majorVersion = parseInt(versionParts[0], 10) || 1;
   const newVersion = `${majorVersion + 1}`;
@@ -266,6 +342,14 @@ function compressFocus(workspaceDir: string, isZh: boolean): string {
 
   fs.writeFileSync(focusPath, newContent, 'utf-8');
 
+  const methodNote = usedAI
+    ? isZh
+      ? '🤖 使用 AI 智能压缩'
+      : '🤖 AI-powered compression'
+    : isZh
+      ? '📋 使用规则压缩'
+      : '📋 Rule-based compression';
+
   if (isZh) {
     return `✅ **压缩完成**
 
@@ -277,6 +361,8 @@ function compressFocus(workspaceDir: string, isZh: boolean): string {
 | 压缩后 | ${newLines} 行 |
 | 节省 | ${savedLines} 行 |
 | 备份文件 | ${backupPath ? path.basename(backupPath) : '已存在'} |
+
+${methodNote}
 
 💡 已压缩版本已备份到历史目录
 💡 输入 \`/pd-focus history\` 查看所有历史版本`;
@@ -292,6 +378,8 @@ function compressFocus(workspaceDir: string, isZh: boolean): string {
 | After | ${newLines} lines |
 | Saved | ${savedLines} lines |
 | Backup File | ${backupPath ? path.basename(backupPath) : 'exists'} |
+
+${methodNote}
 
 💡 Compressed version backed up to history
 💡 Type \`/pd-focus history\` to view all versions`;
@@ -420,7 +508,10 @@ function showHelp(isZh: boolean): string {
 /**
  * 处理 /pd-focus 命令
  */
-export function handleFocusCommand(ctx: PluginCommandContext): PluginCommandResult {
+export async function handleFocusCommand(
+  ctx: PluginCommandContext,
+  api: OpenClawPluginApi
+): Promise<PluginCommandResult> {
   const workspaceDir = getWorkspaceDir(ctx);
   const args = ctx.args || [];
   const subCommand = args[0]?.toLowerCase() || 'status';
@@ -440,7 +531,7 @@ export function handleFocusCommand(ctx: PluginCommandContext): PluginCommandResu
       break;
     case 'compress':
     case 'cp':
-      result = compressFocus(workspaceDir, isZh);
+      result = await compressFocus(workspaceDir, isZh, api);
       break;
     case 'rollback':
     case 'rb':
