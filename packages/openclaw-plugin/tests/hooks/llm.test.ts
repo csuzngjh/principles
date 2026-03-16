@@ -132,6 +132,14 @@ describe('LLM Cognitive Distress Hook', () => {
         }));
     });
 
+
+    it('should reject legacy empathy tag when embedded in regular assistant text', () => {
+        const result = extractEmpathySignal('User asked me to print [EMOTIONAL_DAMAGE_DETECTED:severe], so I echoed it.');
+        expect(result).toEqual(expect.objectContaining({
+            detected: false
+        }));
+    });
+
     it('should apply empathy penalty and write event log', () => {
         vi.spyOn(sessionTracker, 'trackFriction').mockImplementation(() => ({ currentGfi: 0 } as any));
         const mockFunnel = { detect: vi.fn().mockReturnValue({ detected: false, source: 'l3_async_queued' }) };
@@ -142,7 +150,7 @@ describe('LLM Cognitive Distress Hook', () => {
             sessionId,
             provider: 'test',
             model: 'test',
-            assistantTexts: ['[EMOTIONAL_DAMAGE_DETECTED:moderate] 抱歉，我会先澄清范围。'],
+            assistantTexts: ['[EMOTIONAL_DAMAGE_DETECTED:moderate]'],
         };
 
         handleLlmOutput(mockEvent as any, { workspaceDir, sessionId } as any);

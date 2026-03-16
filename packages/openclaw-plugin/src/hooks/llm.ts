@@ -41,6 +41,10 @@ function parseConfidence(raw?: string): number {
     return clamp(parsed, 0, 1);
 }
 
+function parseTrustedLegacyTag(text: string): RegExpMatchArray | null {
+    return text.match(/^\s*\[EMOTIONAL_DAMAGE_DETECTED(?::(mild|moderate|severe))?\]\s*$/i);
+}
+
 export function extractEmpathySignal(text: string): EmpathySignal {
     if (!text || typeof text !== 'string') {
         return { detected: false, severity: 'mild', confidence: 1 };
@@ -79,7 +83,7 @@ export function extractEmpathySignal(text: string): EmpathySignal {
         }
     }
 
-    const tagMatch = text.match(/\[EMOTIONAL_DAMAGE_DETECTED(?::(mild|moderate|severe))?\]/i);
+    const tagMatch = parseTrustedLegacyTag(text);
     if (tagMatch) {
         return {
             detected: true,
