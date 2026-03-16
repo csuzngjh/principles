@@ -32,6 +32,7 @@ describe('LLM Cognitive Distress Hook', () => {
             if (key === 'empathy_engine.penalties.severe') return 40;
             if (key === 'empathy_engine.rate_limit.max_per_turn') return 40;
             if (key === 'empathy_engine.rate_limit.max_per_hour') return 120;
+            if (key === 'empathy_engine.model_calibration') return { 'test/test': 0.5 };
             return undefined;
         })
     };
@@ -148,7 +149,7 @@ describe('LLM Cognitive Distress Hook', () => {
 
         expect(sessionTracker.trackFriction).toHaveBeenCalledWith(
             sessionId,
-            25,
+            13,
             'user_empathy_moderate',
             workspaceDir
         );
@@ -157,9 +158,40 @@ describe('LLM Cognitive Distress Hook', () => {
             expect.objectContaining({
                 source: 'user_empathy',
                 severity: 'moderate',
-                detection_mode: 'legacy_tag'
+                detection_mode: 'legacy_tag',
+                raw_score: 25,
+                calibrated_score: 13
             })
         );
+    });
+
+
+    it('should enforce per-turn rate limit within same runId', () => {
+        vi.spyOn(sessionTracker, 'trackFriction').mockImplementation(() => ({ currentGfi: 0 } as any));
+        const mockFunnel = { detect: vi.fn().mockReturnValue({ detected: false, source: 'l3_async_queued' }) };
+        vi.mocked(DetectionService.get).mockReturnValue(mockFunnel as any);
+
+        const event1 = {
+            runId: 'same-run',
+            sessionId,
+            provider: 'test',
+            model: 'test',
+            assistantTexts: ['<empathy signal="damage" severity="severe" confidence="1" reason="reason-a"/>'],
+        };
+        const event2 = {
+            runId: 'same-run',
+            sessionId,
+            provider: 'test',
+            model: 'test',
+            assistantTexts: ['<empathy signal="damage" severity="severe" confidence="1" reason="reason-b"/>'],
+        };
+
+        handleLlmOutput(event1 as any, { workspaceDir, sessionId } as any);
+        handleLlmOutput(event2 as any, { workspaceDir, sessionId } as any);
+
+        const calls = (sessionTracker.trackFriction as any).mock.calls;
+        expect(calls[0][1]).toBe(20); // 40 severe * 0.5 calibration
+        expect(calls[1][1]).toBe(20); // capped by max_per_turn=40 across same run
     });
 
     it('should dedupe repeated empathy signal within window', () => {

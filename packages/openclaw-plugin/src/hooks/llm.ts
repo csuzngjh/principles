@@ -18,6 +18,7 @@ type EmpathyRateState = {
     turnScore: number;
     hourScore: number;
     hourWindowStart: number;
+    lastRunId?: string;
 };
 
 const empathyDedupState = new Map<string, number>();
@@ -116,7 +117,25 @@ function shouldDedupe(sessionId: string, signal: EmpathySignal, windowMs: number
     return false;
 }
 
-function applyRateLimit(sessionId: string, score: number, config: ReturnType<typeof WorkspaceContext.fromHookContext>['config']): number {
+function resolveCalibrationFactor(
+    event: PluginHookLlmOutputEvent,
+    config: ReturnType<typeof WorkspaceContext.fromHookContext>['config']
+): number {
+    const table = config.get('empathy_engine.model_calibration') as Record<string, number> | undefined;
+    if (!table || typeof table !== 'object') return 1;
+
+    const modelKey = `${event.provider}/${event.model}`;
+    const factor = Number(table[modelKey] ?? 1);
+    if (!Number.isFinite(factor)) return 1;
+    return clamp(factor, 0.1, 3);
+}
+
+function applyRateLimit(
+    sessionId: string,
+    runId: string,
+    score: number,
+    config: ReturnType<typeof WorkspaceContext.fromHookContext>['config']
+): number {
     const maxPerTurn = Number(config.get('empathy_engine.rate_limit.max_per_turn') ?? 40);
     const maxPerHour = Number(config.get('empathy_engine.rate_limit.max_per_hour') ?? 120);
     const now = Date.now();
@@ -125,14 +144,18 @@ function applyRateLimit(sessionId: string, score: number, config: ReturnType<typ
         turnScore: 0,
         hourScore: 0,
         hourWindowStart: now,
+        lastRunId: runId,
     };
+
+    if (prev.lastRunId !== runId) {
+        prev.turnScore = 0;
+        prev.lastRunId = runId;
+    }
 
     if (now - prev.hourWindowStart >= 60 * 60 * 1000) {
         prev.hourScore = 0;
         prev.hourWindowStart = now;
     }
-
-    prev.turnScore = 0;
 
     const byTurn = Math.max(0, maxPerTurn - prev.turnScore);
     const byHour = Math.max(0, maxPerHour - prev.hourScore);
@@ -144,6 +167,7 @@ function applyRateLimit(sessionId: string, score: number, config: ReturnType<typ
 
     return allowed;
 }
+
 
 export function handleLlmOutput(
     event: PluginHookLlmOutputEvent,
@@ -195,7 +219,9 @@ export function handleLlmOutput(
             if (!deduped) {
                 const baseScore = mapSeverityToPenalty(signal.severity, config);
                 const weightedScore = Math.round(baseScore * signal.confidence);
-                const boundedScore = applyRateLimit(ctx.sessionId, weightedScore, config);
+                const calibrationFactor = resolveCalibrationFactor(event, config);
+                const calibratedScore = Math.round(weightedScore * calibrationFactor);
+                const boundedScore = applyRateLimit(ctx.sessionId, event.runId, calibratedScore, config);
 
                 if (boundedScore > 0) {
                     trackFriction(ctx.sessionId, boundedScore, `user_empathy_${signal.severity}`, ctx.workspaceDir);
@@ -209,7 +235,9 @@ export function handleLlmOutput(
                         confidence: signal.confidence,
                         detection_mode: signal.mode,
                         deduped: false,
-                        trigger_text_excerpt: text.substring(0, 120)
+                        trigger_text_excerpt: text.substring(0, 120),
+                        raw_score: weightedScore,
+                        calibrated_score: calibratedScore
                     });
                 }
             } else {
@@ -223,7 +251,9 @@ export function handleLlmOutput(
                     confidence: signal.confidence,
                     detection_mode: signal.mode,
                     deduped: true,
-                    trigger_text_excerpt: text.substring(0, 120)
+                    trigger_text_excerpt: text.substring(0, 120),
+                    raw_score: Math.round(mapSeverityToPenalty(signal.severity, config) * signal.confidence),
+                    calibrated_score: Math.round(mapSeverityToPenalty(signal.severity, config) * signal.confidence * resolveCalibrationFactor(event, config))
                 });
             }
         }
