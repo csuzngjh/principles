@@ -32,6 +32,89 @@ function getWorkspaceDir(ctx: PluginCommandContext): string {
 }
 
 /**
+ * 压缩 CURRENT_FOCUS内容
+ *
+ * 规则：
+ * - 保留：标题、元数据、状态快照
+ * - 保留：下一步章节（完整）
+ * - 保留：当前任务中未完成的项（- [ ]）
+ * - 移除：当前任务中已完成的项（- [x]）超过 3 个时
+ * - 移除：P0 章节如果全部完成
+ * - 保留：参考章节
+ */
+function compressFocusContent(content: string): string {
+  const lines = content.split('\n');
+  const result: string[] = [];
+  let currentSection = '';
+  let inP0Section = false;
+  let p0AllCompleted = true;
+  let p0Lines: string[] = [];
+  let completedCount = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmedLine = line.trim();
+
+    // 识别章节
+    if (/^#{1,3}\s*.*状态快照|📍/.test(trimmedLine)) {
+      currentSection = 'snapshot';
+      inP0Section = false;
+    } else if (/^###\s*P0/i.test(trimmedLine)) {
+      currentSection = 'current_p0';
+      inP0Section = true;
+      p0AllCompleted = true;
+      p0Lines = [line];
+      continue;
+    } else if (/^###\s*P[1-9]/i.test(trimmedLine)) {
+      // 如果P0章节全部完成，跳过已收集的P0行
+      if (inP0Section && p0AllCompleted) {
+        // 不添加P0行
+      inP0Section = false;
+      currentSection = 'current';
+      result.push(line);
+      continue;
+      }
+      inP0Section = false;
+      currentSection = 'current';
+    } else if (/^#{1,3}\s*.*当前任务|🔄/.test(trimmedLine)) {
+      currentSection = 'current';
+      inP0Section = false;
+    } else if (/^#{1,3}\s*.*下一步|➡️/.test(trimmedLine)) {
+      currentSection = 'nextSteps';
+      inP0Section = false;
+    } else if (/^#{1,3}\s*.*参考|📎/.test(trimmedLine)) {
+      currentSection = 'reference';
+      inP0Section = false;
+    }
+
+    // 处理P0章节
+    if (inP0Section) {
+      p0Lines.push(line);
+      // 检查是否有未完成任务
+      if (/^-\s*\[\s*\]/.test(trimmedLine)) {
+        p0AllCompleted = false;
+      }
+      continue;
+    }
+
+    // 处理当前任务章节中已完成的项
+    if (currentSection === 'current') {
+      if (/^-\s*\[x\]/i.test(trimmedLine)) {
+        completedCount++;
+        // 如果已完成项超过 3 个，跳过
+        if (completedCount > 3) {
+          continue;
+        }
+      }
+    }
+
+    result.push(line);
+  }
+
+  return result.join('\n');
+}
+
+/**
  * 显示 CURRENT_FOCUS 状态
  */
 function showStatus(workspaceDir: string, isZh: boolean): string {
@@ -166,14 +249,20 @@ function compressFocus(workspaceDir: string, isZh: boolean): string {
   // 清理过期历史
   cleanupHistory(focusPath);
 
+  // 压缩内容：移除已完成的任务，保留关键章节
+  const compressedContent = compressFocusContent(oldContent);
+
   // 更新版本号和日期（支持小数版本）
   const versionParts = oldVersion.split('.');
   const majorVersion = parseInt(versionParts[0], 10) || 1;
   const newVersion = `${majorVersion + 1}`;
   const today = new Date().toISOString().split('T')[0];
-  const newContent = oldContent
+  const newContent = compressedContent
     .replace(/\*\*版本\*\*:\s*v[\d.]+/i, `**版本**: v${newVersion}`)
     .replace(/\*\*更新\*\*:\s*\d{4}-\d{2}-\d{2}/, `**更新**: ${today}`);
+
+  const newLines = newContent.split('\n').length;
+  const savedLines = oldLines - newLines;
 
   fs.writeFileSync(focusPath, newContent, 'utf-8');
 
@@ -184,6 +273,9 @@ function compressFocus(workspaceDir: string, isZh: boolean): string {
 |------|------|
 | 旧版本 | v${oldVersion} (${oldDate}) |
 | 新版本 | v${newVersion} (${today}) |
+| 压缩前 | ${oldLines} 行 |
+| 压缩后 | ${newLines} 行 |
+| 节省 | ${savedLines} 行 |
 | 备份文件 | ${backupPath ? path.basename(backupPath) : '已存在'} |
 
 💡 已压缩版本已备份到历史目录
@@ -196,6 +288,9 @@ function compressFocus(workspaceDir: string, isZh: boolean): string {
 |--------|---------|
 | Old Version | v${oldVersion} (${oldDate}) |
 | New Version | v${newVersion} (${today}) |
+| Before | ${oldLines} lines |
+| After | ${newLines} lines |
+| Saved | ${savedLines} lines |
 | Backup File | ${backupPath ? path.basename(backupPath) : 'exists'} |
 
 💡 Compressed version backed up to history
