@@ -27,7 +27,7 @@ const ALWAYS_ON_SKILLS = new Set([
 
 const FEATURE_SKILL_MAP: Record<string, string[]> = {
   evolution: ['evolve-task', 'evolution-framework-update', 'evolve-system', 'watch-evolution', 'pd-daily', 'report'],
-  trust: [],
+  trust: [], // Built-in feature (trust-engine.ts, gate.ts), no skills needed
   pain: ['pain', 'root-cause'],
   reflection: ['reflection', 'reflection-log'],
   okr: ['manage-okr'],
