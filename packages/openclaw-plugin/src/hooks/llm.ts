@@ -150,12 +150,12 @@ function mapSeverityToPenalty(severity: 'mild' | 'moderate' | 'severe', config: 
     return mild;
 }
 
-function dedupeKey(sessionId: string, signal: EmpathySignal): string {
-    return `${sessionId}:${signal.severity}:${(signal.reason || '').slice(0, 80)}`;
+function dedupeKey(sessionId: string, runId: string, signal: EmpathySignal): string {
+    return `${sessionId}:${runId}:${signal.severity}:${(signal.reason || '').slice(0, 80)}`;
 }
 
-function shouldDedupe(sessionId: string, signal: EmpathySignal, windowMs: number): boolean {
-    const key = dedupeKey(sessionId, signal);
+function shouldDedupe(sessionId: string, runId: string, signal: EmpathySignal, windowMs: number): boolean {
+    const key = dedupeKey(sessionId, runId, signal);
     const now = Date.now();
     const last = empathyDedupState.get(key);
     if (typeof last === 'number' && now - last <= windowMs) {
@@ -262,7 +262,7 @@ export function handleLlmOutput(
         const signal = extractEmpathySignal(text);
         if (signal.detected) {
             const dedupeWindow = Number(config.get('empathy_engine.dedupe_window_ms') ?? 60000);
-            const deduped = shouldDedupe(ctx.sessionId, signal, dedupeWindow);
+            const deduped = shouldDedupe(ctx.sessionId, event.runId, signal, dedupeWindow);
 
             if (!deduped) {
                 const baseScore = mapSeverityToPenalty(signal.severity, config);
