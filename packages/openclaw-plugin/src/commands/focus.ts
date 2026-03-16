@@ -69,11 +69,12 @@ function compressFocusContent(content: string): string {
     } else if (/^###\s*P[1-9]/i.test(trimmedLine)) {
       // 如果P0章节全部完成，跳过已收集的P0行
       if (inP0Section && p0AllCompleted) {
-        // 不添加P0行
-      inP0Section = false;
-      currentSection = 'current';
-      result.push(line);
-      continue;
+        // P0 全部完成，丢弃 p0Lines（不添加到 result）
+        // 然后添加当前 P1+ 标题行
+        inP0Section = false;
+        currentSection = 'current';
+        result.push(line);
+        continue;
       }
       inP0Section = false;
       currentSection = 'current';
@@ -363,14 +364,9 @@ If no milestones to record, leave ===MEMORY=== section empty.`;
         compressedContent = compressedMatch[1].trim();
         usedAI = true;
 
-        // 写入记忆文件
+        // 写入记忆文件（MEMORY.md 在根目录，无需创建目录）
         if (memoryMatch && memoryMatch[1].trim()) {
           const memoryContent = memoryMatch[1].trim();
-          // 确保 memory 目录存在
-          const memoryDir = path.dirname(memoryPath);
-          if (!fs.existsSync(memoryDir)) {
-            fs.mkdirSync(memoryDir, { recursive: true });
-          }
           // 追加到 MEMORY.md
           const existingMemory = fs.existsSync(memoryPath)
             ? fs.readFileSync(memoryPath, 'utf-8')
@@ -391,7 +387,7 @@ If no milestones to record, leave ===MEMORY=== section empty.`;
     }
   } catch (error) {
     // 子智能体失败，回退到简单压缩
-    console.error('[PD:Focus] AI compression failed, falling back to simple compression:', error);
+    api.logger?.error(`[PD:Focus] AI compression failed, falling back to simple compression: ${String(error)}`);
     compressedContent = compressFocusContent(oldContent);
   }
 
