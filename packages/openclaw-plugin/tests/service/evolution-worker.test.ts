@@ -3,6 +3,7 @@ import { EvolutionWorkerService } from '../../src/service/evolution-worker.js';
 import { DictionaryService } from '../../src/core/dictionary-service.js';
 import * as sessionTracker from '../../src/core/session-tracker.js';
 import * as eventLog from '../../src/core/event-log.js';
+import * as path from 'path';
 
 vi.mock('../../src/core/dictionary-service');
 vi.mock('../../src/core/session-tracker', () => ({
@@ -42,9 +43,13 @@ describe('EvolutionWorkerService', () => {
         };
         vi.mocked(DictionaryService.get).mockReturnValue(mockDict as any);
 
+        // Use path.resolve for cross-platform compatibility
+        const workspaceDir = path.resolve('/mock/workspace');
+        const expectedStateDir = path.join(workspaceDir, '.state');
+
         const ctx = {
-            workspaceDir: '/mock/workspace',
-            stateDir: '/mock/state',
+            workspaceDir,
+            stateDir: path.resolve('/mock/state'),
             logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
         };
 
@@ -55,7 +60,7 @@ describe('EvolutionWorkerService', () => {
 
         expect(mockDict.flush).toHaveBeenCalled();
         // Service now uses workspace-specific stateDir, not ctx.stateDir
-        expect(sessionTracker.initPersistence).toHaveBeenCalledWith('/mock/workspace/.state');
+        expect(sessionTracker.initPersistence).toHaveBeenCalledWith(expectedStateDir);
         expect(sessionTracker.flushAllSessions).toHaveBeenCalled();
         
         EvolutionWorkerService.stop(ctx as any);

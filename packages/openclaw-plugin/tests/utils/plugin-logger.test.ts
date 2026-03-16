@@ -149,7 +149,8 @@ describe('PluginLogger', () => {
     describe('getPluginLogPath', () => {
         it('should return correct log file path', () => {
             const result = getPluginLogPath('/state', 'my-plugin');
-            expect(result).toBe('/state/logs/my-plugin.log');
+            // Use path.join for cross-platform compatibility
+            expect(result).toBe(path.join('/state', 'logs', 'my-plugin.log'));
         });
     });
 });
