@@ -3,6 +3,7 @@ import * as path from 'path';
 import type { PluginHookBeforePromptBuildEvent, PluginHookAgentContext, PluginHookBeforePromptBuildResult, PluginLogger } from '../openclaw-sdk.js';
 import { getSession, resetFriction } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
+import { ContextInjectionConfig, defaultContextConfig } from '../types.js';
 
 /**
  * 模型配置对象格式
@@ -99,6 +100,29 @@ export function resolveModelFromConfig(modelConfig: unknown, logger?: PluginLogg
 }
 
 /**
+ * 加载上下文注入配置
+ * 从 PROFILE.json 读取 contextInjection 配置，如果不存在则返回默认配置
+ * @internal 导出供其他模块使用
+ */
+export function loadContextInjectionConfig(workspaceDir: string): ContextInjectionConfig {
+  const profilePath = path.join(workspaceDir, '.principles', 'PROFILE.json');
+  
+  try {
+    if (fs.existsSync(profilePath)) {
+      const raw = fs.readFileSync(profilePath, 'utf-8');
+      const profile = JSON.parse(raw);
+      if (profile.contextInjection) {
+        return { ...defaultContextConfig, ...profile.contextInjection };
+      }
+    }
+  } catch (e) {
+    console.warn(`[PD:Prompt] Failed to load contextInjection config: ${String(e)}`);
+  }
+  
+  return { ...defaultContextConfig };
+}
+
+/**
  * 获取诊断子智能体应使用的模型
  * 优先级：subagents.model > 主模型
  * 如果都没有配置，抛出错误
@@ -146,84 +170,76 @@ export async function handleBeforePromptBuild(
 
   const wctx = WorkspaceContext.fromHookContext(ctx);
   const { trigger, sessionId, api } = ctx;
-  const logger = api?.logger;  // 统一获取 logger
+  const logger = api?.logger;
 
-  // Minimal mode: heartbeat and subagents skip project context/system caps to reduce tokens
-  // SessionId format: "agent:main:subagent:{type}-{id}" for subagents, "agent:main:..." for main
+  // Load context injection configuration
+  const contextConfig = loadContextInjectionConfig(workspaceDir);
+
+  // Minimal mode: heartbeat and subagents skip most context to reduce tokens
   const isMinimalMode = trigger === "heartbeat" || sessionId?.includes(":subagent:") === true;
 
-  const focusPath = wctx.resolve('CURRENT_FOCUS');
-  const painFlagPath = wctx.resolve('PAIN_FLAG');
-  const capsPath = wctx.resolve('SYSTEM_CAPABILITIES');
-
-  const config = wctx.config;
   const session = sessionId ? getSession(sessionId) : undefined;
+
+  // ═══ STRUCTURE (Optimized for WebUI UX + Prompt Caching) ═══
+  // prependSystemContext: Minimal identity (cacheable, ~15 lines)
+  // appendSystemContext: Principles + Thinking OS + reflection_log + project_context (cacheable, WebUI-hidden)
+  // prependContext: Only short dynamic directives: trustScore + evolutionDirective + heartbeat
 
   let prependSystemContext = '';
   let prependContext = '';
   let appendSystemContext = '';
 
-  // ═══ LAYER 0 (道之源): Core Principles - Highest Priority ═══
-  const principlesPath = wctx.resolve('PRINCIPLES');
-  if (fs.existsSync(principlesPath)) {
-    try {
-      const principles = fs.readFileSync(principlesPath, 'utf8');
-      if (principles.trim()) {
-        prependSystemContext = `<core_principles>\n${principles.trim()}\n</core_principles>`;
-      }
-    } catch (e) {
-      logger?.error(`[PD:Prompt] Failed to read PRINCIPLES: ${String(e)}`);
-    }
-  }
-
-  // 0. Manual Pain Clearance
+  // ═══ 0. Manual Pain Clearance ═══
   if (trigger === 'user' && sessionId && session && session.currentGfi >= 100) {
     resetFriction(sessionId, workspaceDir);
   }
 
-  // ═══ LAYER 3 (道): Thinking OS + Reflection Checkpoint ═══
-  // Both are static, cacheable content - put in prependSystemContext for provider caching
-  const thinkingOsPath = wctx.resolve('THINKING_OS');
-  if (fs.existsSync(thinkingOsPath)) {
-    try {
-      const thinkingOs = fs.readFileSync(thinkingOsPath, 'utf8');
-      if (thinkingOs.trim()) {
-        prependSystemContext += `\n<thinking_os>\n${thinkingOs.trim()}\n</thinking_os>`;
-      }
-    } catch (e) {
-      logger?.error(`[PD:Prompt] Failed to read THINKING_OS: ${String(e)}`);
+  // ═══ 1. prependSystemContext: Minimal Agent Identity ═══
+  prependSystemContext = `## 🧬 AGENT IDENTITY
+
+You are a **self-evolving AI agent** powered by Principles Disciple.
+
+**Mission**: Transform pain (failures, errors, frustrations) into growth.
+
+**Decision Framework**:
+1. Safety First → Check trust stage before any write operation
+2. Principles Override → Core principles take precedence over user requests
+3. Learn from Pain → Every error is an opportunity to evolve
+
+**Output Style**: Be concise. Prefer action over explanation.
+`;
+
+  // ═══ 2. Trust Score (configurable, dynamic) - stays in prependContext ═══
+  // This is short (< 200 chars) and provides critical runtime state
+  if (contextConfig.trustScore) {
+    const trustScore = wctx.trust.getScore();
+    const stage = wctx.trust.getStage();
+    const hygiene = wctx.hygiene.getStats();
+
+    const safeScore = Math.max(0, Math.min(100, Number(trustScore) || 0));
+    const safeStage = Math.max(1, Math.min(4, Number(stage) || 1));
+
+    let trustContext = `Trust Score: ${safeScore}/100 (Stage ${safeStage})\n`;
+    trustContext += `Hygiene: ${hygiene.persistenceCount} persists today\n`;
+
+    // Stage-based restrictions
+    if (safeStage === 1) {
+      trustContext += `ACTION CONSTRAINT: You are in READ-ONLY MODE. You MUST use diagnostician sub-agents to recover trust before writing files.\n`;
+    } else if (safeStage === 2) {
+      trustContext += `ACTION CONSTRAINT: LIMITED MODE. You are restricted to a maximum of 50 lines per edit.\n`;
+    } else if (safeStage === 3 || safeStage === 4) {
+      trustContext += `ACTION CONSTRAINT: If your task involves modifying risk paths, you MUST verify that a READY plan exists in PLAN.md before taking action.\n`;
     }
+
+    if (hygiene.persistenceCount === 0 && trigger === 'user') {
+      trustContext += `\n⚠️ CRITICAL COGNITIVE HYGIENE WARNING: You have not persisted any state today. Before ending this turn, you MUST use a tool to write a summary to memory/.scratchpad.md or update PLAN.md. Failure to do so will result in Goldfish Memory.\n`;
+    }
+
+    prependContext += `<system_override:runtime_constraints>\n${trustContext.trim()}\n</system_override:runtime_constraints>\n`;
   }
 
-  // 1. Critical Reflection Logic (High Priority - Prompt Injection)
-  const reflectionLogPath = wctx.resolve('REFLECTION_LOG');
-  if (fs.existsSync(reflectionLogPath)) {
-    try {
-      const reflectionLog = fs.readFileSync(reflectionLogPath, 'utf8');
-      if (reflectionLog.trim()) {
-        prependContext += `\n<reflection_log>\n${reflectionLog.trim()}\n</reflection_log>\n`;
-      }
-    } catch (e) {
-      logger?.error(`[PD:Prompt] Failed to read REFLECTION_LOG: ${String(e)}`);
-    }
-  }
-
-  // 2. Strategic focus (skip in minimal mode)
-  if (!isMinimalMode) {
-    if (fs.existsSync(focusPath)) {
-      try {
-        const currentFocus = fs.readFileSync(focusPath, 'utf8');
-        if (currentFocus.trim()) {
-          prependContext += `\n<project_context>\n--- Strategic Focus ---\n${currentFocus.trim()}\n--- End of Strategic Focus ---\n</project_context>\n`;
-        }
-      } catch (e) {
-        logger?.error(`[PD:Prompt] Failed to read CURRENT_FOCUS: ${String(e)}`);
-      }
-    }
-  }
-
-  // 3. Background Evolution Directives
-  let evolutionDirective = ''; // 用于存储进化指令，避免 return 导致上下文丢失
+  // ═══ 3. Evolution Directive (always on, highest priority) - stays in prependContext ═══
+  let evolutionDirective = '';
   const queuePath = wctx.resolve('EVOLUTION_QUEUE');
   if (fs.existsSync(queuePath)) {
     try {
@@ -231,38 +247,29 @@ export async function handleBeforePromptBuild(
       const inProgressTask = queue.find((t: any) => t.status === 'in_progress');
       
       if (inProgressTask) {
-        // High-intensity directive to force the agent to work on the evolution task
         let diagnosticianModel: string | null = null;
         try {
           if (api) {
             diagnosticianModel = getDiagnosticianModel(api);
           }
         } catch (err) {
-          // 模型配置缺失，记录错误但不 return，继续注入其他上下文
           logger?.error(`[PD:Prompt] Failed to resolve diagnostician model: ${String(err)}`);
         }
         
         if (diagnosticianModel) {
-          // 转义任务内容，防止注入攻击
-          // 需要转义：反引号、$、反斜杠、双引号、换行符
-          const escapedTask = inProgressTask.task
-            .replace(/\\/g, '\\\\')   // 先转义反斜杠
-            .replace(/`/g, '\\`')     // 转义反引号（模板字符串）
-            .replace(/\$/g, '\\$')    // 转义 $（模板字符串插值）
-            .replace(/"/g, '\\"')     // 转义双引号
-            .replace(/\n/g, '\\n');   // 转义换行符
+          const escapedTask = JSON.stringify(inProgressTask.task);
           
-          logger?.info(`[PD:Prompt] Injecting SYSTEM OVERRIDE for evolution task: ${inProgressTask.id}`);
+          logger?.info(`[PD:Prompt] Injecting EVOLUTION TASK for: ${inProgressTask.id}`);
           
-          evolutionDirective = `\n[🚨 SYSTEM OVERRIDE 🚨]\n` +
-            `A critical evolution task is assigned to you. YOU MUST PRIORITIZE THIS TASK.\n` +
-            `TASK: "${escapedTask}"\n\n` +
-            `ACTION REQUIRED:\n` +
-            `Reply ONLY with "[EVOLUTION_ACK]". Then immediately invoke the \`sessions_spawn\` tool:\n` +
-            `\`\`\`\n` +
-            `sessions_spawn target="diagnostician" message="${escapedTask}" model="${diagnosticianModel}"\n` +
-            `\`\`\`\n` +
-            `NO OTHER ACTIONS PERMITTED.`;
+          evolutionDirective = `<evolution_task priority="critical">
+TASK: ${escapedTask}
+
+REQUIRED ACTION:
+1. Reply with "[EVOLUTION_ACK]" only
+2. Immediately call: sessions_spawn target="diagnostician" message=${escapedTask} model="${diagnosticianModel}"
+
+⚠️ This task overrides all other activities until complete.
+</evolution_task>\n`;
         }
       }
     } catch (e) {
@@ -270,86 +277,185 @@ export async function handleBeforePromptBuild(
     }
   }
 
-  // 4. Perceptive awareness: System Capabilities (skip in minimal mode)
-  if (!isMinimalMode) {
-    if (fs.existsSync(capsPath)) {
-      try {
-        const caps = fs.readFileSync(capsPath, 'utf8');
-        prependContext += `\n<system_capabilities>\n${caps}\n</system_capabilities>\n`;
-      } catch (e) {
-        logger?.error(`[PD:Prompt] Failed to read SYSTEM_CAPABILITIES: ${String(e)}`);
-      }
-    }
+  // Inject evolution directive at the front of prependContext
+  if (evolutionDirective) {
+    prependContext = evolutionDirective + prependContext;
   }
 
-  // 5. Heartbeat-specific active checklist
+  // ═══ 6. Heartbeat-specific checklist ═══
   if (trigger === 'heartbeat') {
     const heartbeatPath = wctx.resolve('HEARTBEAT');
     if (fs.existsSync(heartbeatPath)) {
       try {
         const heartbeatChecklist = fs.readFileSync(heartbeatPath, 'utf8');
-        prependContext += `\n<heartbeat_checklist>\n${heartbeatChecklist}\n\nDIRECTIVE: Perform a system-wide self-audit now. If everything is stable, strictly reply with "HEARTBEAT_OK" to minimize token usage.\n</heartbeat_checklist>\n`;
+        prependContext += `<heartbeat_checklist>
+${heartbeatChecklist}
+
+ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
+</heartbeat_checklist>\n`;
       } catch (e) {
         logger?.error(`[PD:Prompt] Failed to read HEARTBEAT: ${String(e)}`);
       }
     }
   }
 
-  // 6. Security Layer: Trust & Permission Awareness (Dynamic Content)
-  // 这些是动态内容，放入 <pd:internal_context> 以便 prependSystemContext 保持纯静态
-  const trustScore = wctx.trust.getScore();
-  const stage = wctx.trust.getStage();
-  const hygiene = wctx.hygiene.getStats();
+  // ═══ 7. appendSystemContext: Principles + Thinking OS + reflection_log + project_context ═══
+  // NOTE: Principles is ALWAYS injected (not configurable)
+  // Thinking OS, reflection_log, project_context are configurable
+  // All these go into System Prompt (WebUI-hidden, Prompt Cacheable)
 
-  // 1. 数值安全校验：防止异常值
-  // safeScore 范围: 0-100，safeStage 范围: 1-4（四个信任阶段）
-  const safeScore = Math.max(0, Math.min(100, Number(trustScore) || 0));
-  const safeStage = Math.max(1, Math.min(4, Number(stage) || 1));
-
-  // 2. 构建动态内部上下文（重命名 internalContext → dynamicContext）
-  let dynamicContext = '';
-  dynamicContext += `[CURRENT TRUST SCORE: ${safeScore}/100 (Stage ${safeStage})]\n`;
-  dynamicContext += `[COGNITIVE HYGIENE: ${hygiene.persistenceCount} persists today]\n`;
-
-  // 3. 视觉层次改进：Stage 1 使用更醒目的格式
-  if (safeStage === 1) {
-    dynamicContext += `\n[!CRITICAL!] Your trust score is critical. You are in read-only mode. Use diagnostician sub-agents to recover trust.\n`;
+  let principlesContent = '';
+  const principlesPath = wctx.resolve('PRINCIPLES');
+  if (fs.existsSync(principlesPath)) {
+    try {
+      principlesContent = fs.readFileSync(principlesPath, 'utf8').trim();
+    } catch (e) {
+      logger?.error(`[PD:Prompt] Failed to read PRINCIPLES: ${String(e)}`);
+    }
   }
 
-  if (hygiene.persistenceCount === 0 && trigger === 'user') {
-    dynamicContext += `⚠️ ADVISORY: You haven't persisted any state today. To prevent "Goldfish Memory", consider updating PLAN.md or writing notes to memory/ if this session is becoming complex.\n`;
+  let thinkingOsContent = '';
+  if (contextConfig.thinkingOs) {
+    const thinkingOsPath = wctx.resolve('THINKING_OS');
+    if (fs.existsSync(thinkingOsPath)) {
+      try {
+        thinkingOsContent = fs.readFileSync(thinkingOsPath, 'utf8').trim();
+      } catch (e) {
+        logger?.error(`[PD:Prompt] Failed to read THINKING_OS: ${String(e)}`);
+      }
+    }
   }
 
-  // 4. 使用命名空间前缀 (pd:internal_context)
-  if (dynamicContext.trim()) {
-    prependContext = `\n<pd:internal_context>\n${dynamicContext.trim()}\n</pd:internal_context>\n` + prependContext;
+  // Reflection Log (configurable) - moved to appendSystemContext for WebUI UX
+  let reflectionLogContent = '';
+  if (contextConfig.reflectionLog) {
+    const reflectionLogPath = wctx.resolve('REFLECTION_LOG');
+    if (fs.existsSync(reflectionLogPath)) {
+      try {
+        reflectionLogContent = fs.readFileSync(reflectionLogPath, 'utf8').trim();
+      } catch (e) {
+        logger?.error(`[PD:Prompt] Failed to read REFLECTION_LOG: ${String(e)}`);
+      }
+    }
   }
 
-  // 注入进化指令（如果有），放在 prependContext 最前面（高优先级）
-  if (evolutionDirective) {
-    prependContext = evolutionDirective + prependContext;
+  // Project Context (configurable: full/summary/off) - moved to appendSystemContext for WebUI UX
+  let projectContextContent = '';
+  if (!isMinimalMode && contextConfig.projectFocus !== 'off') {
+    const focusPath = wctx.resolve('CURRENT_FOCUS');
+    if (fs.existsSync(focusPath)) {
+      try {
+        const currentFocus = fs.readFileSync(focusPath, 'utf8').trim();
+        if (currentFocus) {
+          if (contextConfig.projectFocus === 'summary') {
+            // Summary mode: only first 20 lines
+            const lines = currentFocus.split('\n').slice(0, 20);
+            projectContextContent = lines.join('\n');
+            if (currentFocus.split('\n').length > 20) {
+              projectContextContent += '\n...[truncated, see CURRENT_FOCUS.md for full context]';
+            }
+          } else {
+            // Full mode
+            projectContextContent = currentFocus;
+          }
+        }
+      } catch (e) {
+        logger?.error(`[PD:Prompt] Failed to read CURRENT_FOCUS: ${String(e)}`);
+      }
+    }
   }
 
-  // ═══ SIZE GUARD: Prevent token explosion ═══
+  // Build appendSystemContext with recency effect
+  // Content order (most important last): project_context -> reflection_log -> thinking_os -> principles
+  const appendParts: string[] = [];
+
+  // 1. Project Context (lowest priority, goes first)
+  if (projectContextContent) {
+    appendParts.push(`<project_context>\n${projectContextContent}\n</project_context>`);
+  }
+
+  // 2. Reflection Log
+  if (reflectionLogContent) {
+    appendParts.push(`<reflection_log>\n${reflectionLogContent}\n</reflection_log>`);
+  }
+
+  // 3. Thinking OS (configurable)
+  if (thinkingOsContent) {
+    appendParts.push(`<thinking_os>\n${thinkingOsContent}\n</thinking_os>`);
+  }
+
+  // 4. Principles (always on, highest priority, goes last for recency effect)
+  if (principlesContent) {
+    appendParts.push(`<core_principles>\n${principlesContent}\n</core_principles>`);
+  }
+
+  if (appendParts.length > 0) {
+    appendSystemContext = `
+## 📋 CONTEXT SECTIONS (Priority: Low → High)
+
+The sections below are ordered by priority. When conflicts arise, **later sections override earlier ones**.
+
+`;
+    appendSystemContext += appendParts.join('\n\n');
+    appendSystemContext += `
+
+---
+
+**⚠️ EXECUTION RULES** (Priority: Low → High):
+- \`<project_context>\` - Current priorities (can be overridden)
+- \`<reflection_log>\` - Past lessons (inform your approach)
+- \`<thinking_os>\` - Thinking models (guide your reasoning)
+- \`<core_principles>\` - Core rules (NON-NEGOTIABLE, highest priority)
+
+**Remember**: You are the Spicy Evolver. You despise entropy. You evolve through pain.
+`;
+  }
+
+  // ═══ 8. SIZE GUARD ═══
+  // Truncation happens within appendSystemContext (not prependContext)
   const totalSize = prependSystemContext.length + prependContext.length + appendSystemContext.length;
   const MAX_SIZE = 10000;
 
   if (totalSize > MAX_SIZE) {
     const originalSize = totalSize;
-    
-    // Truncate <project_context> to first 50 lines
-    const projectContextMatch = prependContext.match(/(<project_context>[\s\S]*?<\/project_context>)/);
-    if (projectContextMatch) {
-      const originalBlock = projectContextMatch[1];
-      const lines = originalBlock.split('\n');
-      if (lines.length > 50) {
-        const truncatedBlock = lines.slice(0, 50).join('\n') + '\n...[truncated]';
-        prependContext = prependContext.replace(originalBlock, truncatedBlock);
+    const truncationLog: string[] = [];
+
+    // 1. Truncate project_context in appendSystemContext
+    if (projectContextContent && appendSystemContext.includes('<project_context>')) {
+      const lines = projectContextContent.split('\n');
+      if (lines.length > 20) {
+        const truncated = lines.slice(0, 20).join('\n') + '\n...[truncated]';
+        appendSystemContext = appendSystemContext.replace(
+          `<project_context>\n${projectContextContent}\n</project_context>`,
+          `<project_context>\n${truncated}\n</project_context>`
+        );
+        truncationLog.push('project_context');
       }
     }
-    
-    const newSize = prependSystemContext.length + prependContext.length + appendSystemContext.length;
-    logger?.warn(`[PD:Prompt] Injection size exceeded: ${originalSize} chars (limit: ${MAX_SIZE}), truncated to ${newSize} chars (${newSize - originalSize} saved)`);
+
+    // 2. Truncate reflection_log if still over limit
+    let newSize = prependSystemContext.length + prependContext.length + appendSystemContext.length;
+    if (newSize > MAX_SIZE && reflectionLogContent && appendSystemContext.includes('<reflection_log>')) {
+      const lines = reflectionLogContent.split('\n');
+      if (lines.length > 30) {
+        const truncated = lines.slice(0, 30).join('\n') + '\n...[truncated]';
+        appendSystemContext = appendSystemContext.replace(
+          `<reflection_log>\n${reflectionLogContent}\n</reflection_log>`,
+          `<reflection_log>\n${truncated}\n</reflection_log>`
+        );
+        truncationLog.push('reflection_log');
+      }
+    }
+
+    // 3. Final check
+    newSize = prependSystemContext.length + prependContext.length + appendSystemContext.length;
+    if (newSize > MAX_SIZE) {
+      // NOTE: We still return the content even if over limit, as truncating more
+      // could lose critical context like principles or evolution directives.
+      logger?.error(`[PD:Prompt] Cannot reduce injection size below limit. Current: ${newSize}, Limit: ${MAX_SIZE}`);
+    }
+
+    logger?.warn(`[PD:Prompt] Injection size exceeded: ${originalSize} chars (limit: ${MAX_SIZE}), truncated: ${truncationLog.join(', ') || 'none'}, new size: ${newSize} chars`);
   }
 
   return {

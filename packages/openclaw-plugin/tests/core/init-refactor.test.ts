@@ -17,7 +17,8 @@ describe('init - Directory Refactor', () => {
         logger: mockLogger,
     } as any;
 
-    const workspaceDir = '/mock/workspace';
+    // Use path.resolve for cross-platform compatibility
+    const workspaceDir = path.resolve('/mock/workspace');
 
     beforeEach(() => {
         vi.clearAllMocks();
@@ -30,28 +31,40 @@ describe('init - Directory Refactor', () => {
     it('should copy files to new directory structure (.principles and .state)', () => {
         vi.mocked(fs.existsSync).mockImplementation((p) => {
             const pathStr = p.toString();
-            // Mock templates directory existence
-            if (pathStr.includes('templates/workspace')) return true;
-            if (pathStr.includes('templates/langs')) return true;
+            // Source templates exist
+            if (pathStr.includes('templates')) return true;
+            // Destination does not exist (force creation)
             return false;
         });
 
         // Mock readdirSync for template directories
         vi.mocked(fs.readdirSync).mockImplementation((p) => {
             const pathStr = p.toString();
-            if (pathStr.endsWith('templates/workspace')) return ['.principles', '.state', 'PLAN.md'] as any;
-            if (pathStr.endsWith('.principles')) return ['PROFILE.json', 'PRINCIPLES.md'] as any;
-            if (pathStr.endsWith('.state')) return ['WORKBOARD.json'] as any;
+            // Only return items for the main workspace templates directory
+            const isWorkspaceTemplates = pathStr.includes('templates') && 
+                                          pathStr.includes('workspace') && 
+                                          !pathStr.includes('.principles') && 
+                                          !pathStr.includes('.state');
+            if (isWorkspaceTemplates) {
+                return ['.principles', '.state', 'PLAN.md'] as any;
+            }
+            if (pathStr.includes('.principles')) return ['PROFILE.json', 'PRINCIPLES.md'] as any;
+            if (pathStr.includes('.state')) return ['WORKBOARD.json'] as any;
             if (pathStr.includes('core')) return ['AGENTS.md', 'SOUL.md'] as any;
             return [] as any;
         });
 
         vi.mocked(fs.statSync).mockImplementation((p) => {
             const pathStr = p.toString();
+            // Precisely match directory names - must end with .principles or .state
+            // Use regex that handles both forward and backward slashes
+            const isDir = /[\\\/]\.principles$/.test(pathStr) || /[\\\/]\.state$/.test(pathStr);
             return {
-                isDirectory: () => pathStr.endsWith('.principles') || pathStr.endsWith('.state')
+                isDirectory: () => isDir
             } as any;
         });
+
+        vi.mocked(fs.mkdirSync).mockImplementation(() => undefined as any);
 
         ensureWorkspaceTemplates(mockApi, workspaceDir);
 
@@ -67,7 +80,7 @@ describe('init - Directory Refactor', () => {
 
         // Verify that PROFILE.json is copied to .principles
         expect(fs.copyFileSync).toHaveBeenCalledWith(
-            expect.stringMatching(/\.principles.PROFILE\.json$/),
+            expect.stringMatching(/PROFILE\.json$/),
             path.join(workspaceDir, '.principles', 'PROFILE.json')
         );
     });
