@@ -26,7 +26,7 @@
 
 - **M1（基础链路可跑通）**：P0-1 ~ P0-4
 - **M2（风控完整）**：P0-5 ~ P0-8
-- **M3（体验与可观测）**：P1-1 ~ P1-4
+- **M3（体验与可观测）**：P1-1 ~ P1-5
 - **M4（稳定性与优化）**：P2-1 ~ P2-3
 
 ---
@@ -43,13 +43,16 @@
 - 在 `before_prompt_build` 中新增/合并共情引擎指令。
 - 稳定规则注入 `prependSystemContext`；动态提醒放 `prependContext`。
 - 新增开关：`empathy_engine.enabled`（默认 true）。
+- 明确“安抚协议”模板：不是只道歉，而是“承认情绪 + 安抚短句 + 纠偏承诺 + 让用户选择”。
 
 **验收标准**
 - 当开关开启时，注入文本稳定存在且不破坏原有 prompt 结构。
+- 注入内容中包含“安抚协议”四要素，而非仅道歉。
 - 当开关关闭时，不注入任何共情相关指令。
 
 **测试**
 - 单测：`prompt` hook 输出快照测试（开/关两种配置）。
+- 单测：安抚协议文案存在性断言（四要素关键词）。
 - 回归：不影响已有 Evolution/Trust 注入逻辑。
 
 ---
@@ -246,7 +249,25 @@
 
 ---
 
-### P1-4 文档同步
+### P1-4 情绪安抚话术策略与配置化
+**目标文件**
+- `packages/openclaw-plugin/src/hooks/prompt.ts`
+- `packages/openclaw-plugin/templates/pain_settings.json`
+
+**实现内容**
+- 增加 `empathy_soothing_templates` 配置，按 `mild/moderate/severe` 选择响应模板。
+- 增加 anti-repetition 机制（最近 N 轮避免重复同一句安抚话术）。
+
+**验收标准**
+- 不同 severity 下能输出不同强度安抚语。
+- 连续 3 轮触发不出现完全相同安抚句。
+
+**测试**
+- 单测：模板选择逻辑与去重逻辑。
+
+---
+
+### P1-5 文档同步
 **目标文件**
 - `docs/design/user-pain-engine.md`
 - `packages/openclaw-plugin/docs/COMMAND_REFERENCE*.md`
@@ -280,7 +301,7 @@
 - **PR-3**: P0-5, P0-6（风控）
 - **PR-4**: P0-7, P0-8（审计与配置迁移）
 - **PR-5**: P1-1（消息净化）
-- **PR-6**: P1-2, P1-3, P1-4（可观测 + 回滚 + 文档）
+- **PR-6**: P1-2, P1-3, P1-4, P1-5（可观测 + 回滚 + 安抚配置 + 文档）
 
 每个 PR 要求：
 - 必须附带对应测试
