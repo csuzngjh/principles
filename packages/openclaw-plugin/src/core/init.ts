@@ -3,6 +3,16 @@ import * as path from 'path';
 import { fileURLToPath } from 'url';
 import type { OpenClawPluginApi, PluginLogger } from '../openclaw-sdk.js';
 import { PD_DIRS } from './paths.js';
+import { DEFAULT_CONTEXT_CONFIG } from '../types.js';
+
+/**
+ * Default PROFILE.json content
+ */
+const DEFAULT_PROFILE = {
+  name: "Principles Disciple Agent",
+  version: "1.0.0",
+  contextInjection: DEFAULT_CONTEXT_CONFIG
+};
 
 /**
  * Ensures that the workspace has the necessary template files for Principles Disciple.
@@ -54,6 +64,19 @@ export function ensureWorkspaceTemplates(api: OpenClawPluginApi, workspaceDir: s
                 fs.mkdirSync(painDestDir, { recursive: true });
             }
             copyRecursiveSync(painTemplatesDir, painDestDir, api);
+        }
+
+        // 4. Initialize PROFILE.json with default contextInjection config
+        const principlesDir = path.join(workspaceDir, PD_DIRS.IDENTITY);
+        const profilePath = path.join(principlesDir, 'PROFILE.json');
+        
+        if (!fs.existsSync(profilePath)) {
+            // Ensure .principles directory exists
+            if (!fs.existsSync(principlesDir)) {
+                fs.mkdirSync(principlesDir, { recursive: true });
+            }
+            fs.writeFileSync(profilePath, JSON.stringify(DEFAULT_PROFILE, null, 2), 'utf-8');
+            api.logger.info(`[PD] Initialized PROFILE.json with default contextInjection config`);
         }
     } catch (err) {
         api.logger.error(`[PD] Failed to initialize workspace templates: ${String(err)}`);

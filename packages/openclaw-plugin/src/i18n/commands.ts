@@ -60,6 +60,10 @@ export const commandDescriptions: Record<string, Record<SupportedLanguage, strin
   'pd-status': {
     zh: '查看数字神经系统状态（GFI和痛苦词典）',
     en: 'View Digital Nerve System status (GFI and Pain Dictionary)'
+  },
+  'pd-context': {
+    zh: '控制上下文注入（原则、思维模型、项目焦点等）',
+    en: 'Control context injection (principles, thinking models, project focus, etc.)'
   }
 };
 

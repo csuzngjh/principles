@@ -6,8 +6,9 @@ import * as path from 'path';
 vi.mock('fs');
 
 describe('WorkspaceContext', () => {
-    const workspaceDir = '/mock/workspace';
-    const stateDir = '/mock/state';
+    // Use path.resolve for cross-platform compatibility on Windows
+    const workspaceDir = path.resolve('/mock/workspace');
+    const stateDir = path.resolve('/mock/state');
 
     beforeEach(() => {
         vi.clearAllMocks();
@@ -27,14 +28,14 @@ describe('WorkspaceContext', () => {
     });
 
     it('should cache instances based on workspaceDir', () => {
-        const mockCtx1 = { workspaceDir, stateDir: '/state1' };
-        const mockCtx2 = { workspaceDir, stateDir: '/state2' };
+        const mockCtx1 = { workspaceDir, stateDir: path.resolve('/state1') };
+        const mockCtx2 = { workspaceDir, stateDir: path.resolve('/state2') };
         
         const wctx1 = WorkspaceContext.fromHookContext(mockCtx1);
         const wctx2 = WorkspaceContext.fromHookContext(mockCtx2);
         
         expect(wctx1).toBe(wctx2);
-        expect(wctx1.stateDir).toBe('/state1');
+        expect(wctx1.stateDir).toBe(path.resolve('/state1'));
     });
 
     it('should use fallback workspace when workspaceDir is missing', () => {
@@ -110,16 +111,30 @@ describe('WorkspaceContext', () => {
 
     it('should maintain backward compatibility for legacy trust APIs', async () => {
         const { getAgentScorecard, recordSuccess } = await import('../../src/core/trust-engine.js');
+        const { ConfigService } = await import('../../src/core/config-service.js');
         
-        let exists = false;
-        let data = '';
+        // Reset ConfigService singleton to ensure clean state
+        ConfigService.reset();
         
-        vi.mocked(fs.existsSync).mockImplementation(() => exists);
-        vi.mocked(fs.readFileSync).mockImplementation(() => data);
-        vi.mocked(fs.writeFileSync).mockImplementation((_p, d) => {
-            exists = true;
-            data = d as string;
+        // Track file system state
+        const files: Record<string, { exists: boolean; data: string }> = {};
+        
+        vi.mocked(fs.existsSync).mockImplementation((p) => {
+            const key = p.toString();
+            return files[key]?.exists ?? false;
         });
+        
+        vi.mocked(fs.readFileSync).mockImplementation((p) => {
+            const key = p.toString();
+            return files[key]?.data ?? '';
+        });
+        
+        vi.mocked(fs.writeFileSync).mockImplementation((p, d) => {
+            const key = p.toString();
+            files[key] = { exists: true, data: d as string };
+        });
+        
+        vi.mocked(fs.mkdirSync).mockImplementation(() => undefined);
 
         // This should not throw and return a valid scorecard
         const scorecard = getAgentScorecard(workspaceDir);

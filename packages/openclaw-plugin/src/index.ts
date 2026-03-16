@@ -29,6 +29,7 @@ import { handleThinkingOs } from './commands/thinking-os.js';
 import { handleEvolveTask } from './commands/evolver.js';
 import { handleTrustCommand } from './commands/trust.js';
 import { handlePainCommand } from './commands/pain.js';
+import { handleContextCommand } from './commands/context.js';
 import { EvolutionWorkerService } from './service/evolution-worker.js';
 import { ensureWorkspaceTemplates } from './core/init.js';
 import { migrateDirectoryStructure } from './core/migration.js';
@@ -245,6 +246,22 @@ const plugin = {
           return handlePainCommand(ctx);
         } catch (err) {
           api.logger.error(`[PD] Command /pd-status failed: ${String(err)}`);
+          return { text: language === 'zh' ? "命令执行失败，请检查日志。" : "Command failed. Check logs." };
+        }
+      }
+    });
+
+    api.registerCommand({
+      name: "pd-context",
+      description: getCommandDescription('pd-context', language),
+      acceptsArgs: true,
+      handler: (ctx) => {
+        try {
+          const workspaceDir = api.resolvePath('.');
+          if (ctx.config) ctx.config.workspaceDir = workspaceDir;
+          return handleContextCommand(ctx);
+        } catch (err) {
+          api.logger.error(`[PD] Command /pd-context failed: ${String(err)}`);
           return { text: language === 'zh' ? "命令执行失败，请检查日志。" : "Command failed. Check logs." };
         }
       }

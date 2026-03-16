@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createTestContext } from '../test-utils.js';
+import * as path from 'path';
 
 describe('WorkspaceContext Factory (Test Utils)', () => {
     it('should create a test context with a temporary directory', () => {
@@ -10,7 +11,8 @@ describe('WorkspaceContext Factory (Test Utils)', () => {
     });
 
     it('should allow overriding workspaceDir', () => {
-        const wctx = createTestContext({ workspaceDir: '/custom/test' });
-        expect(wctx.workspaceDir).toBe('/custom/test');
+        const customDir = path.resolve('/custom/test');
+        const wctx = createTestContext({ workspaceDir: customDir });
+        expect(wctx.workspaceDir).toBe(customDir);
     });
 });
