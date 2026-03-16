@@ -22,6 +22,19 @@ import {
 import { agentSpawnTool } from '../tools/agent-spawn.js';
 
 /**
+ * 清理 Markdown 代码块围栏
+ * 移除开头的 ```lang 和结尾的 ```
+ */
+function stripMarkdownFence(content: string): string {
+  let result = content.trim();
+  // 移除开头的代码块标记（如 ```markdown, ```text 等）
+  result = result.replace(/^```[\w]*\n?/, '');
+  // 移除结尾的代码块标记
+  result = result.replace(/\n?```$/, '');
+  return result.trim();
+}
+
+/**
  * 获取工作区目录
  */
 function getWorkspaceDir(ctx: PluginCommandContext): string {
@@ -52,14 +65,28 @@ function compressFocusContent(content: string): string {
   let p0Lines: string[] = [];
   let completedCount = 0;
 
+  // 辅助函数：刷新 P0 章节缓存
+  const flushP0Lines = (skipIfCompleted: boolean) => {
+    if (inP0Section && p0Lines.length > 0) {
+      if (!skipIfCompleted || !p0AllCompleted) {
+        // P0 有未完成任务，保留 P0 内容
+        result.push(...p0Lines);
+      }
+      // 重置状态
+      p0Lines = [];
+      inP0Section = false;
+      p0AllCompleted = true;
+    }
+  };
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const trimmedLine = line.trim();
 
     // 识别章节
     if (/^#{1,3}\s*.*状态快照|📍/.test(trimmedLine)) {
+      flushP0Lines(true); // P0 完成时跳过
       currentSection = 'snapshot';
-      inP0Section = false;
     } else if (/^###\s*P0/i.test(trimmedLine)) {
       currentSection = 'current_p0';
       inP0Section = true;
@@ -67,26 +94,20 @@ function compressFocusContent(content: string): string {
       p0Lines = [line];
       continue;
     } else if (/^###\s*P[1-9]/i.test(trimmedLine)) {
-      // 如果P0章节全部完成，跳过已收集的P0行
-      if (inP0Section && p0AllCompleted) {
-        // P0 全部完成，丢弃 p0Lines（不添加到 result）
-        // 然后添加当前 P1+ 标题行
-        inP0Section = false;
-        currentSection = 'current';
-        result.push(line);
-        continue;
-      }
-      inP0Section = false;
+      // 离开 P0 章节
+      flushP0Lines(true); // P0 完成时跳过，未完成时保留
       currentSection = 'current';
+      result.push(line);
+      continue;
     } else if (/^#{1,3}\s*.*当前任务|🔄/.test(trimmedLine)) {
+      flushP0Lines(true); // P0 完成时跳过
       currentSection = 'current';
-      inP0Section = false;
     } else if (/^#{1,3}\s*.*下一步|➡️/.test(trimmedLine)) {
+      flushP0Lines(false); // 保留未完成的 P0
       currentSection = 'nextSteps';
-      inP0Section = false;
     } else if (/^#{1,3}\s*.*参考|📎/.test(trimmedLine)) {
+      flushP0Lines(false); // 保留未完成的 P0
       currentSection = 'reference';
-      inP0Section = false;
     }
 
     // 处理P0章节
@@ -112,6 +133,9 @@ function compressFocusContent(content: string): string {
 
     result.push(line);
   }
+
+  // 循环结束后，刷新剩余的 P0 章节
+  flushP0Lines(false); // 保留未完成的 P0
 
   return result.join('\n');
 }
@@ -361,12 +385,14 @@ If no milestones to record, leave ===MEMORY=== section empty.`;
       const compressedMatch = result.match(/===COMPRESSED===([\s\S]*?)$/);
 
       if (compressedMatch && compressedMatch[1].trim()) {
-        compressedContent = compressedMatch[1].trim();
+        // 清理 Markdown 代码块围栏
+        compressedContent = stripMarkdownFence(compressedMatch[1]);
         usedAI = true;
 
         // 写入记忆文件（MEMORY.md 在根目录，无需创建目录）
         if (memoryMatch && memoryMatch[1].trim()) {
-          const memoryContent = memoryMatch[1].trim();
+          // 清理 Markdown 代码块围栏
+          const memoryContent = stripMarkdownFence(memoryMatch[1]);
           // 追加到 MEMORY.md
           const existingMemory = fs.existsSync(memoryPath)
             ? fs.readFileSync(memoryPath, 'utf-8')
