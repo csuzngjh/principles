@@ -1,4 +1,4 @@
-# Principles Disciple (v1.5.1+) 全量技术手册 (RAG Knowledge Base)
+# Principles Disciple (v1.5.4+) 全量技术手册 (RAG Knowledge Base)
 
 > **身份声明**: 本文档为 Principles Disciple 框架的底层参考指南，旨在为智能体提供深度的架构理解与配置详情。
 
@@ -18,6 +18,7 @@
 | `/pd-grooming` | 工作区数字大扫除 | `/workspace-grooming` |
 | `/pd-trust` | 查看信任积分与安全等级 | `/trust` |
 | `/pd-status` | 查看数字神经系统状态 | 新增 |
+| `/pd-context` | 控制上下文注入配置 | **新增 v1.5.4** |
 | `/pd-help` | 获取交互式命令引导 | 保持 |
 
 ---
@@ -101,4 +102,77 @@ GFI 是衡量系统"痛苦程度"的核心指标，分值范围 0-100。
 - **目标**: 清除根目录下的调试日志、临时备份和未归档的报告。
 
 ---
-*版本: v1.5.1 | 维护者: Spicy Evolver*
+
+## 6. 上下文注入控制 (`/pd-context`)
+
+### 6.1 概述
+`/pd-context` 命令用于动态控制 LLM 提示词中的上下文注入，帮助用户在 token 消耗和上下文丰富度之间取得平衡。
+
+### 6.2 上下文结构
+
+| 层级 | 字段 | 内容 | 特性 |
+|------|------|------|------|
+| `prependSystemContext` | Agent Identity | 极简身份定义 (~15行) | 可缓存 |
+| `appendSystemContext` | 原则 + 思维模型 | 核心行为规则 | 近因效应，可缓存 |
+| `prependContext` | 动态内容 | 信任分数、反思日志、项目上下文 | 不可缓存 |
+
+### 6.3 配置项说明
+
+| 配置项 | 默认值 | 说明 |
+|--------|--------|------|
+| `thinkingOs` | `true` | 思维模型注入开关 |
+| `trustScore` | `true` | 信任分数注入开关 |
+| `reflectionLog` | `true` | 反思日志注入开关（7天自动清理） |
+| `projectFocus` | `'off'` | 项目上下文模式：`'full'` / `'summary'` / `'off'` |
+
+**注意**: 核心原则 (PRINCIPLES.md) 始终注入，不可关闭。
+
+### 6.4 命令用法
+
+```bash
+# 查看当前状态
+/pd-context status
+
+# 单项控制
+/pd-context thinking on/off    # 思维模型
+/pd-context trust on/off       # 信任分数
+/pd-context reflection on/off  # 反思日志
+/pd-context focus full/summary/off  # 项目上下文
+
+# 预设模式
+/pd-context minimal   # 仅信任分数
+/pd-context standard  # 原则 + 思维模型 + 信任分数
+/pd-context full      # 全部开启
+```
+
+### 6.5 预设模式对照表
+
+| 预设 | thinkingOs | trustScore | reflectionLog | projectFocus |
+|------|------------|------------|---------------|--------------|
+| `minimal` | ❌ | ✅ | ❌ | off |
+| `standard` | ✅ | ✅ | ❌ | off |
+| `full` | ✅ | ✅ | ✅ | summary |
+
+### 6.6 配置存储
+配置保存在 `.principles/PROFILE.json` 的 `contextInjection` 字段：
+
+```json
+{
+  "name": "Principles Disciple Agent",
+  "contextInjection": {
+    "thinkingOs": true,
+    "trustScore": true,
+    "reflectionLog": true,
+    "projectFocus": "off"
+  }
+}
+```
+
+### 6.7 反思日志机制
+- **存储位置**: `memory/reflection-log.md`
+- **保留期限**: 7 天 (可在 `REFLECTION_LOG_RETENTION_DAYS` 配置)
+- **触发方式**: 深度反思工具 (`deep_reflect`) 自动写入
+- **写入方式**: 原子写入（temp file + rename）防止并发问题
+
+---
+*版本: v1.5.4 | 维护者: Spicy Evolver*

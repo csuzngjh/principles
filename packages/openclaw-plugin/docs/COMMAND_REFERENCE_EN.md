@@ -1,4 +1,4 @@
-# Principles Disciple (v1.5.1+) Technical Reference (RAG Knowledge Base)
+# Principles Disciple (v1.5.4+) Technical Reference (RAG Knowledge Base)
 
 > **Identity Statement**: This document is the底层 reference guide for the Principles Disciple framework, providing agents with deep architectural understanding and configuration details.
 
@@ -18,6 +18,7 @@
 | `/pd-grooming` | Workspace digital cleanup | `/workspace-grooming` |
 | `/pd-trust` | View trust score and security stage | `/trust` |
 | `/pd-status` | View Digital Nerve System status | New |
+| `/pd-context` | Control context injection config | **New v1.5.4** |
 | `/pd-help` | Get interactive command guidance | Unchanged |
 
 ---
@@ -132,4 +133,77 @@ Manage mental models and candidate solutions for:
 - Support hypothesis validation workflow
 
 ---
-*Version: v1.5.1 | Maintainer: Spicy Evolver*
+
+## 8. Context Injection Control (`/pd-context`)
+
+### 8.1 Overview
+The `/pd-context` command dynamically controls context injection in LLM prompts, helping users balance token consumption and context richness.
+
+### 8.2 Context Structure
+
+| Layer | Field | Content | Characteristics |
+|-------|-------|---------|-----------------|
+| `prependSystemContext` | Agent Identity | Minimal identity definition (~15 lines) | Cacheable |
+| `appendSystemContext` | Principles + Thinking OS | Core behavior rules | Recency effect, cacheable |
+| `prependContext` | Dynamic content | Trust score, reflection log, project context | Not cacheable |
+
+### 8.3 Configuration Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `thinkingOs` | `true` | Toggle Thinking OS injection |
+| `trustScore` | `true` | Toggle trust score injection |
+| `reflectionLog` | `true` | Toggle reflection log injection (7-day auto-cleanup) |
+| `projectFocus` | `'off'` | Project context mode: `'full'` / `'summary'` / `'off'` |
+
+**Note**: Core Principles (PRINCIPLES.md) are always injected and cannot be disabled.
+
+### 8.4 Command Usage
+
+```bash
+# View current status
+/pd-context status
+
+# Individual controls
+/pd-context thinking on/off    # Thinking OS
+/pd-context trust on/off       # Trust score
+/pd-context reflection on/off  # Reflection log
+/pd-context focus full/summary/off  # Project context
+
+# Preset modes
+/pd-context minimal   # Trust score only
+/pd-context standard  # Principles + Thinking + Trust
+/pd-context full      # All enabled
+```
+
+### 8.5 Preset Mode Comparison
+
+| Preset | thinkingOs | trustScore | reflectionLog | projectFocus |
+|--------|------------|------------|---------------|--------------|
+| `minimal` | ❌ | ✅ | ❌ | off |
+| `standard` | ✅ | ✅ | ❌ | off |
+| `full` | ✅ | ✅ | ✅ | summary |
+
+### 8.6 Configuration Storage
+Configuration is saved in `.principles/PROFILE.json` under `contextInjection` field:
+
+```json
+{
+  "name": "Principles Disciple Agent",
+  "contextInjection": {
+    "thinkingOs": true,
+    "trustScore": true,
+    "reflectionLog": true,
+    "projectFocus": "off"
+  }
+}
+```
+
+### 8.7 Reflection Log Mechanism
+- **Storage**: `memory/reflection-log.md`
+- **Retention**: 7 days (configurable via `REFLECTION_LOG_RETENTION_DAYS`)
+- **Trigger**: Automatic write via `deep_reflect` tool
+- **Write method**: Atomic write (temp file + rename) to prevent race conditions
+
+---
+*Version: v1.5.4 | Maintainer: Spicy Evolver*
