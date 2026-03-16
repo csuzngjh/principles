@@ -51,6 +51,18 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
     const gfiBar = createProgressBar(gfi, 100, 15);
     const trustBar = createProgressBar(trustScore, 100, 15);
     
+    // Determine Mental Mode (aligned with prompt.ts logic)
+    let mentalMode = '';
+    if (isZh) {
+        if (gfi >= 70) mentalMode = '🚑 救赎模式 (HUMBLE_RECOVERY)';
+        else if (gfi >= 40) mentalMode = '🤝 安抚模式 (CONCILIATORY)';
+        else mentalMode = '⚡ 高效模式 (EFFICIENT)';
+    } else {
+        if (gfi >= 70) mentalMode = '🚑 HUMBLE_RECOVERY';
+        else if (gfi >= 40) mentalMode = '🤝 CONCILIATORY';
+        else mentalMode = '⚡ EFFICIENT';
+    }
+    
     // Determine health status based on GFI
     let healthLabel = 'Healthy';
     let suggestionText = '';
@@ -88,6 +100,7 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
         text += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
         text += `💊 **当前疲劳指数 (GFI)**: ${gfiBar} ${gfi}/100\n`;
         text += `💰 **当前信任积分 (Trust)**: ${trustBar} ${trustScore}/100 (Stage ${trustStage})\n`;
+        text += `🧠 **当前心智模式**: ${mentalMode}\n`;
         text += `   ↳ 状态诊断: ${healthLabel}\n\n`;
         text += `🧠 **痛苦进化词典**: 已吸收 ${stats.totalRules} 条规则\n`;
         text += `   ↳ 累计帮您拦截了 ${stats.totalHits} 次无效操作\n`;
@@ -104,6 +117,7 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
         text += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
         text += `💊 **Current Friction (GFI)**: ${gfiBar} ${gfi}/100\n`;
         text += `💰 **Current Trust Score**: ${trustBar} ${trustScore}/100 (Stage ${trustStage})\n`;
+        text += `🧠 **Current Mental Mode**: ${mentalMode}\n`;
         text += `   ↳ Diagnosis: ${healthLabel}\n\n`;
         text += `🧠 **Evolution Dictionary**: ${stats.totalRules} active rules\n`;
         text += `   ↳ Successfully blocked ${stats.totalHits} invalid operations\n`;
