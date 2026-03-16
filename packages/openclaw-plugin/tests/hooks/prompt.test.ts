@@ -191,6 +191,29 @@ describe('Prompt Context Injection Hook', () => {
     expect(result).toBeUndefined();
   });
 
+
+  it('should inject empathy engine directive in prependSystemContext by default', async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+
+    const result = await handleBeforePromptBuild({} as any, { workspaceDir, trigger: 'user' } as any);
+
+    expect(result?.prependSystemContext).toContain('<system_override:empathy_engine>');
+    expect(result?.prependSystemContext).toContain('Never respond with apology-only behavior');
+    expect(result?.prependSystemContext).toContain('correction options (A/B)');
+  });
+
+  it('should NOT inject empathy engine directive when disabled by config', async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    mockConfig.get.mockImplementation((key: string) => {
+      if (key === 'empathy_engine.enabled') return false;
+      return undefined;
+    });
+
+    const result = await handleBeforePromptBuild({} as any, { workspaceDir, trigger: 'user' } as any);
+
+    expect(result?.prependSystemContext).not.toContain('<system_override:empathy_engine>');
+  });
+
   it('should inject current trust score and stage in runtime_state', async () => {
     vi.mocked(fs.existsSync).mockReturnValue(false);
     

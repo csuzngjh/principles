@@ -68,10 +68,31 @@
     "auto_trigger_conditions": {
       "min_tool_calls": 5,
       "error_rate_threshold": 0.3,
-      "complexity_keywords": ["refactor", "architecture", "design", "optimize", "security", "critical"]
+      "complexity_keywords": [
+        "refactor",
+        "architecture",
+        "design",
+        "optimize",
+        "security",
+        "critical"
+      ]
     },
     "default_model": "T-01",
     "default_depth": 2,
     "timeout_ms": 60000
+  },
+  "empathy_engine": {
+    "enabled": true,
+    "dedupe_window_ms": 60000,
+    "penalties": {
+      "mild": 10,
+      "moderate": 25,
+      "severe": 40
+    },
+    "rate_limit": {
+      "max_per_turn": 40,
+      "max_per_hour": 120
+    },
+    "model_calibration": {}
   }
 }
