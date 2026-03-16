@@ -35,7 +35,7 @@ function normalizeSeverity(input?: string): 'mild' | 'moderate' | 'severe' {
     return 'mild';
 }
 
-function parseConfidence(raw?: string): number {
+function parseConfidence(raw?: unknown): number {
     const parsed = Number(raw);
     if (!Number.isFinite(parsed)) return 1;
     return clamp(parsed, 0, 1);
@@ -69,7 +69,7 @@ export function extractEmpathySignal(text: string): EmpathySignal {
                 return {
                     detected: true,
                     severity: normalizeSeverity(parsed.empathy.severity),
-                    confidence: clamp(Number(parsed.empathy.confidence ?? 1), 0, 1),
+                    confidence: parseConfidence(parsed.empathy.confidence),
                     reason: parsed.empathy.reason,
                     mode: 'structured'
                 };

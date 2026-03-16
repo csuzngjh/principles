@@ -132,6 +132,18 @@ describe('LLM Cognitive Distress Hook', () => {
         }));
     });
 
+
+    it('should default invalid structured JSON confidence to 1', () => {
+        const result = extractEmpathySignal('{"empathy":{"damageDetected":true,"severity":"moderate","confidence":"unknown","reason":"json-invalid"}}');
+        expect(result).toEqual(expect.objectContaining({
+            detected: true,
+            severity: 'moderate',
+            confidence: 1,
+            reason: 'json-invalid',
+            mode: 'structured'
+        }));
+    });
+
     it('should apply empathy penalty and write event log', () => {
         vi.spyOn(sessionTracker, 'trackFriction').mockImplementation(() => ({ currentGfi: 0 } as any));
         const mockFunnel = { detect: vi.fn().mockReturnValue({ detected: false, source: 'l3_async_queued' }) };
