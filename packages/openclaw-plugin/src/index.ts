@@ -386,7 +386,7 @@ const plugin = {
         try {
           const workspaceDir = api.resolvePath('.');
           if (ctx.config) ctx.config.workspaceDir = workspaceDir;
-          return handleFocusCommand(ctx);
+          return handleFocusCommand(ctx, api);
         } catch (err) {
           api.logger.error(`[PD] Command /pd-focus failed: ${String(err)}`);
           return { text: language === 'zh' ? "命令执行失败，请检查日志。" : "Command failed. Check logs." };
