@@ -11,7 +11,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 const MOCK_SESSION_ID = 'test-thinking-session-001';
-const MOCK_WORKSPACE = '/tmp/test-thinking-workspace';
+// Use os.tmpdir() for cross-platform compatibility
+const MOCK_WORKSPACE = require('os').tmpdir() + '/pd-test-thinking-workspace';
 const PROFILE_PATH = path.join(MOCK_WORKSPACE, '.principles', 'PROFILE.json');
 
 // Profile with thinking checkpoint ENABLED for testing
