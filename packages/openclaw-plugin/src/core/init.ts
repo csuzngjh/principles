@@ -85,13 +85,16 @@ export function ensureWorkspaceTemplates(api: OpenClawPluginApi, workspaceDir: s
 
 /**
  * Standard recursive copy that preserves directory structure.
+ * Special handling: maps 'okr' directory to 'memory/okr' for runtime compatibility.
  */
 function copyRecursiveSync(srcDir: string, destDir: string, api: OpenClawPluginApi | { logger: PluginLogger }) {
     const items = fs.readdirSync(srcDir);
 
     for (const item of items) {
         const srcPath = path.join(srcDir, item);
-        const destPath = path.join(destDir, item);
+        // Special mapping: okr -> memory/okr (runtime path expects memory/okr/)
+        const destItemName = item === 'okr' ? path.join('memory', 'okr') : item;
+        const destPath = path.join(destDir, destItemName);
         const stat = fs.statSync(srcPath);
 
         if (stat.isDirectory()) {
@@ -101,11 +104,13 @@ function copyRecursiveSync(srcDir: string, destDir: string, api: OpenClawPluginA
             copyRecursiveSync(srcPath, destPath, api);
         } else {
             if (!fs.existsSync(destPath)) {
-                try {
-                    fs.copyFileSync(srcPath, destPath);
-                } catch (err) {
-                    if ('logger' in api) api.logger.warn(`[PD] Failed to copy ${item}: ${String(err)}`);
+                // Ensure parent directory exists
+                const destParent = path.dirname(destPath);
+                if (!fs.existsSync(destParent)) {
+                    fs.mkdirSync(destParent, { recursive: true });
                 }
+                fs.copyFileSync(srcPath, destPath);
+                api.logger.info(`[PD] Copied: ${destItemName}`);
             }
         }
     }

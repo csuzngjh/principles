@@ -4,6 +4,7 @@ import type { PluginHookBeforePromptBuildEvent, PluginHookAgentContext, PluginHo
 import { getSession, resetFriction } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { ContextInjectionConfig, defaultContextConfig } from '../types.js';
+import { extractSummary, getHistoryVersions } from '../core/focus-history.js';
 
 /**
  * 模型配置对象格式
@@ -348,15 +349,19 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
         const currentFocus = fs.readFileSync(focusPath, 'utf8').trim();
         if (currentFocus) {
           if (contextConfig.projectFocus === 'summary') {
-            // Summary mode: only first 20 lines
-            const lines = currentFocus.split('\n').slice(0, 20);
-            projectContextContent = lines.join('\n');
-            if (currentFocus.split('\n').length > 20) {
-              projectContextContent += '\n...[truncated, see CURRENT_FOCUS.md for full context]';
-            }
+            // Summary mode: intelligent extraction prioritizing key sections
+            projectContextContent = extractSummary(currentFocus, 30);
           } else {
-            // Full mode
-            projectContextContent = currentFocus;
+            // Full mode: current version + recent history (3 versions)
+            const historyVersions = getHistoryVersions(focusPath, 3);
+            if (historyVersions.length > 0) {
+              const historySections = historyVersions.map((v, i) =>
+                `\n---\n\n**历史版本 v${historyVersions.length - i}**\n\n${v}`
+              ).join('');
+              projectContextContent = `${currentFocus}${historySections}`;
+            } else {
+              projectContextContent = currentFocus;
+            }
           }
         }
       } catch (e) {

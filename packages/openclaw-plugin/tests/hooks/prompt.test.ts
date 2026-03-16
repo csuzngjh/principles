@@ -982,12 +982,49 @@ describe('Prompt Context Injection Hook', () => {
       expect(result?.appendSystemContext).not.toContain('Focus Content');
     });
 
-    it('projectFocus: summary → 注入截断版 project_context in appendSystemContext', async () => {
-      const longContent = Array.from({ length: 50 }, (_, i) => `Line ${i + 1}`).join('\n');
+    it('projectFocus: summary → 注入智能摘要 project_context in appendSystemContext', async () => {
+      // 使用结构化的 CURRENT_FOCUS 内容
+      const structuredContent = `# 🎯 CURRENT_FOCUS
+
+> **版本**: v1 | **状态**: EXECUTING | **更新**: 2026-03-16
+
+---
+
+## 📍 状态快照
+
+| 维度 | 值 |
+|------|-----|
+| 当前阶段 | Phase 2 |
+| 信任分数 | 85/100 |
+
+---
+
+## 🔄 当前任务
+
+### P0（阻塞/紧急）
+- [ ] 无
+
+### P1（进行中）
+- [x] 任务A
+- [ ] 任务B ← 当前
+
+---
+
+## ➡️ 下一步
+
+1. 完成任务B
+2. 开始任务C
+
+---
+
+## 📎 参考
+
+详细计划: memory/tasks/PLAN.md`;
 
       vi.mocked(fs.existsSync).mockImplementation((p) => {
         if (p.toString().includes('PROFILE.json')) return true;
         if (p.toString().includes('CURRENT_FOCUS.md')) return true;
+        if (p.toString().includes('.history')) return false; // 无历史版本
         return false;
       });
       vi.mocked(fs.readFileSync).mockImplementation((p) => {
@@ -995,7 +1032,7 @@ describe('Prompt Context Injection Hook', () => {
           return JSON.stringify({ contextInjection: { projectFocus: 'summary' } });
         }
         if (p.toString().includes('CURRENT_FOCUS.md')) {
-          return longContent;
+          return structuredContent;
         }
         return '';
       });
@@ -1006,28 +1043,73 @@ describe('Prompt Context Injection Hook', () => {
         sessionId: 'agent:main:123'
       } as any);
 
-      // summary mode truncates to 20 lines
+      // summary mode uses intelligent extraction
       expect(result?.appendSystemContext).toContain('<project_context>');
-      expect(result?.appendSystemContext).toContain('Line 20');
-      expect(result?.appendSystemContext).toContain('[truncated, see CURRENT_FOCUS.md');
+      // 智能摘要优先提取关键章节
+      expect(result?.appendSystemContext).toContain('下一步'); // 关键章节
     });
 
-    it('projectFocus: full → 注入完整 project_context in appendSystemContext', async () => {
-      const fullContent = 'Full project context content\nLine 2\nLine 3';
+    it('projectFocus: full → 注入完整 project_context + 历史版本 in appendSystemContext', async () => {
+      const currentContent = `# 🎯 CURRENT_FOCUS
+
+> **版本**: v2 | **状态**: EXECUTING | **更新**: 2026-03-16
+
+## 📍 状态快照
+
+| 维度 | 值 |
+|------|-----|
+| 当前阶段 | Phase 2 |
+
+## ➡️ 下一步
+
+1. 当前任务`;
+
+      const historyContent = `# 🎯 CURRENT_FOCUS
+
+> **版本**: v1 | **状态**: INIT | **更新**: 2026-03-15
+
+## 📍 状态快照
+
+| 维度 | 值 |
+|------|-----|
+| 当前阶段 | Phase 1 |
+
+## ➡️ 下一步
+
+1. 历史任务`;
 
       vi.mocked(fs.existsSync).mockImplementation((p) => {
-        if (p.toString().includes('PROFILE.json')) return true;
-        if (p.toString().includes('CURRENT_FOCUS.md')) return true;
+        const pathStr = p.toString();
+        if (pathStr.includes('PROFILE.json')) return true;
+        if (pathStr.includes('CURRENT_FOCUS.md')) return true;
+        if (pathStr.includes('.history')) return true;
         return false;
       });
       vi.mocked(fs.readFileSync).mockImplementation((p) => {
-        if (p.toString().includes('PROFILE.json')) {
+        const pathStr = p.toString();
+        if (pathStr.includes('PROFILE.json')) {
           return JSON.stringify({ contextInjection: { projectFocus: 'full' } });
         }
-        if (p.toString().includes('CURRENT_FOCUS.md')) {
-          return fullContent;
+        if (pathStr.includes('CURRENT_FOCUS.md') && !pathStr.includes('.history')) {
+          return currentContent;
+        }
+        if (pathStr.includes('.history')) {
+          return historyContent;
         }
         return '';
+      });
+
+      // Mock fs.readdirSync for history
+      vi.mocked(fs.readdirSync).mockImplementation((p) => {
+        if (p.toString().includes('.history')) {
+          return ['CURRENT_FOCUS.v1.2026-03-15.md'] as any;
+        }
+        return [];
+      });
+
+      // Mock fs.statSync for history files
+      vi.mocked(fs.statSync).mockImplementation((p) => {
+        return { mtime: new Date('2026-03-15') } as any;
       });
 
       const result = await handleBeforePromptBuild({} as any, {
@@ -1037,8 +1119,8 @@ describe('Prompt Context Injection Hook', () => {
       } as any);
 
       expect(result?.appendSystemContext).toContain('<project_context>');
-      expect(result?.appendSystemContext).toContain('Full project context content');
-      expect(result?.appendSystemContext).toContain('Line 3');
+      // Full mode includes current version
+      expect(result?.appendSystemContext).toContain('当前任务');
     });
   });
 
