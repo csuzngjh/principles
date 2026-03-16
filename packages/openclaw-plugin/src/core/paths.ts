@@ -58,11 +58,11 @@ export const PD_FILES = {
     
     // Workflow Layer (Project Root)
     PLAN: 'PLAN.md',
+    MEMORY_MD: 'MEMORY.md',
     HEARTBEAT: 'HEARTBEAT.md',
     
     // Memory Layer
     SYSTEM_LOG: path.join(PD_DIRS.LOGS, 'SYSTEM.log'),
-    MEMORY_MD: path.join(PD_DIRS.MEMORY, 'MEMORY.md'),
     REFLECTION_LOG: path.join(PD_DIRS.MEMORY, 'reflection-log.md'),
     USER_CONTEXT: path.join(PD_DIRS.MEMORY, 'USER_CONTEXT.md'),
     OKR_DIR: PD_DIRS.OKR,
