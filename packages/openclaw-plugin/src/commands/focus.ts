@@ -10,7 +10,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
+import type { PluginCommandContext, PluginCommandResult, OpenClawPluginApi } from '../openclaw-sdk.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import {
   getHistoryDir,
@@ -19,6 +19,20 @@ import {
   extractVersion,
   extractDate,
 } from '../core/focus-history.js';
+import { agentSpawnTool } from '../tools/agent-spawn.js';
+
+/**
+ * 清理 Markdown 代码块围栏
+ * 移除开头的 ```lang 和结尾的 ```
+ */
+function stripMarkdownFence(content: string): string {
+  let result = content.trim();
+  // 移除开头的代码块标记（如 ```markdown, ```text 等）
+  result = result.replace(/^```[\w]*\n?/, '');
+  // 移除结尾的代码块标记
+  result = result.replace(/\n?```$/, '');
+  return result.trim();
+}
 
 /**
  * 获取工作区目录
@@ -29,6 +43,101 @@ function getWorkspaceDir(ctx: PluginCommandContext): string {
     throw new Error('[PD:Focus] workspaceDir is required but not provided');
   }
   return workspaceDir;
+}
+
+/**
+ * 压缩 CURRENT_FOCUS内容
+ *
+ * 规则：
+ * - 保留：标题、元数据、状态快照
+ * - 保留：下一步章节（完整）
+ * - 保留：当前任务中未完成的项（- [ ]）
+ * - 移除：当前任务中已完成的项（- [x]）超过 3 个时
+ * - 移除：P0 章节如果全部完成
+ * - 保留：参考章节
+ */
+function compressFocusContent(content: string): string {
+  const lines = content.split('\n');
+  const result: string[] = [];
+  let currentSection = '';
+  let inP0Section = false;
+  let p0AllCompleted = true;
+  let p0Lines: string[] = [];
+  let completedCount = 0;
+
+  // 辅助函数：刷新 P0 章节缓存
+  const flushP0Lines = (skipIfCompleted: boolean) => {
+    if (inP0Section && p0Lines.length > 0) {
+      if (!skipIfCompleted || !p0AllCompleted) {
+        // P0 有未完成任务，保留 P0 内容
+        result.push(...p0Lines);
+      }
+      // 重置状态
+      p0Lines = [];
+      inP0Section = false;
+      p0AllCompleted = true;
+    }
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmedLine = line.trim();
+
+    // 识别章节
+    if (/^#{1,3}\s*.*状态快照|📍/.test(trimmedLine)) {
+      flushP0Lines(true); // P0 完成时跳过
+      currentSection = 'snapshot';
+    } else if (/^###\s*P0/i.test(trimmedLine)) {
+      currentSection = 'current_p0';
+      inP0Section = true;
+      p0AllCompleted = true;
+      p0Lines = [line];
+      continue;
+    } else if (/^###\s*P[1-9]/i.test(trimmedLine)) {
+      // 离开 P0 章节
+      flushP0Lines(true); // P0 完成时跳过，未完成时保留
+      currentSection = 'current';
+      result.push(line);
+      continue;
+    } else if (/^#{1,3}\s*.*当前任务|🔄/.test(trimmedLine)) {
+      flushP0Lines(true); // P0 完成时跳过
+      currentSection = 'current';
+    } else if (/^#{1,3}\s*.*下一步|➡️/.test(trimmedLine)) {
+      flushP0Lines(false); // 保留未完成的 P0
+      currentSection = 'nextSteps';
+    } else if (/^#{1,3}\s*.*参考|📎/.test(trimmedLine)) {
+      flushP0Lines(false); // 保留未完成的 P0
+      currentSection = 'reference';
+    }
+
+    // 处理P0章节
+    if (inP0Section) {
+      p0Lines.push(line);
+      // 检查是否有未完成任务
+      if (/^-\s*\[\s*\]/.test(trimmedLine)) {
+        p0AllCompleted = false;
+      }
+      continue;
+    }
+
+    // 处理当前任务章节中已完成的项
+    if (currentSection === 'current') {
+      if (/^-\s*\[x\]/i.test(trimmedLine)) {
+        completedCount++;
+        // 如果已完成项超过 3 个，跳过
+        if (completedCount > 3) {
+          continue;
+        }
+      }
+    }
+
+    result.push(line);
+  }
+
+  // 循环结束后，刷新剩余的 P0 章节
+  flushP0Lines(false); // 保留未完成的 P0
+
+  return result.join('\n');
 }
 
 /**
@@ -136,9 +245,13 @@ function showHistory(workspaceDir: string, isZh: boolean): string {
 }
 
 /**
- * 手动压缩 CURRENT_FOCUS.md
+ * 手动压缩 CURRENT_FOCUS.md（使用子智能体）
  */
-function compressFocus(workspaceDir: string, isZh: boolean): string {
+async function compressFocus(
+  workspaceDir: string,
+  isZh: boolean,
+  api: OpenClawPluginApi
+): Promise<string> {
   const wctx = WorkspaceContext.fromHookContext({ workspaceDir });
   const focusPath = wctx.resolve('CURRENT_FOCUS');
 
@@ -166,16 +279,171 @@ function compressFocus(workspaceDir: string, isZh: boolean): string {
   // 清理过期历史
   cleanupHistory(focusPath);
 
-  // 更新版本号和日期（支持小数版本）
+  // 使用子智能体进行智能压缩
+  // 获取 MEMORY.md 路径
+  const memoryPath = wctx.resolve('MEMORY_MD');
+
+  const compressPrompt = isZh
+    ? `你是一个专业的项目文档压缩助手。请压缩以下 CURRENT_FOCUS.md 文件内容。
+
+**重要：在压缩前，你需要提取重要里程碑信息！**
+
+**第一步：提取里程碑**
+从原始内容中识别已完成的里程碑，这些信息需要保存到记忆文件中。
+
+**第二步：压缩文件**
+压缩规则：
+1. 保留标题、元数据行（版本、状态、日期）
+2. 保留"📍 状态快照"章节（完整）
+3. 保留"➡️ 下一步"章节（完整，这是最重要的信息）
+4. 保留"📎 参考"章节（完整）
+5. 对于"🔄 当前任务"章节：
+   - 如果 P0/P1 等子章节全部完成，合并为简短"已完成里程碑"列表（最多5项）
+   - 保留所有未完成任务（- [ ]）
+   - 已完成任务最多保留 3 个最近的，其余移除
+6. 移除重复信息和冗余描述
+7. 保持 Markdown 格式和语义连贯
+
+**目标：** 将文件压缩到 40 行以内。
+
+**原始内容：**
+\`\`\`markdown
+${oldContent}
+\`\`\`
+
+**输出格式（必须严格遵循）：**
+\`\`\`
+===MEMORY===
+[需要追加到 memory/MEMORY.md 的里程碑内容，格式：]
+## {YYYY-MM-DD} 里程碑
+- [里程碑1]
+- [里程碑2]
+...
+===COMPRESSED===
+[压缩后的 CURRENT_FOCUS.md 内容]
+\`\`\`
+
+如果没有需要记录的里程碑，===MEMORY=== 部分留空。`
+    : `You are a professional project document compression assistant. Please compress the following CURRENT_FOCUS.md file.
+
+**IMPORTANT: Extract milestones before compression!**
+
+**Step 1: Extract Milestones**
+Identify completed milestones from the original content that should be saved to memory.
+
+**Step 2: Compress File**
+Compression Rules:
+1. Keep title, metadata lines (version, status, date)
+2. Keep "📍 Status Snapshot" section (complete)
+3. Keep "➡️ Next Steps" section (complete, this is the most important)
+4. Keep "📎 References" section (complete)
+5. For "🔄 Current Tasks" section:
+   - If P0/P1 subsections are all completed, merge into a short "Completed Milestones" list (max 5 items)
+   - Keep all incomplete tasks (- [ ])
+   - Keep at most 3 recent completed tasks, remove the rest
+6. Remove duplicate info and redundant descriptions
+7. Maintain Markdown format and semantic coherence
+
+**Goal:** Compress the file to under 40 lines.
+
+**Original Content:**
+\`\`\`markdown
+${oldContent}
+\`\`\`
+
+**Output Format (must follow strictly):**
+\`\`\`
+===MEMORY===
+[Content to append to memory/MEMORY.md, format:]
+## {YYYY-MM-DD} Milestones
+- [milestone 1]
+- [milestone 2]
+...
+===COMPRESSED===
+[Compressed CURRENT_FOCUS.md content]
+\`\`\`
+
+If no milestones to record, leave ===MEMORY=== section empty.`;
+
+  let compressedContent: string;
+  let usedAI = false;
+  let memoryUpdated = false;
+
+  try {
+    // 调用子智能体进行压缩
+    const result = await agentSpawnTool.execute(
+      {
+        agentType: 'reporter', // 使用 reporter 类型，适合总结和压缩
+        task: compressPrompt,
+      },
+      api
+    );
+
+    // 解析输出，提取 MEMORY 和 COMPRESSED 部分
+    if (result && result.trim()) {
+      const memoryMatch = result.match(/===MEMORY===([\s\S]*?)===COMPRESSED===/);
+      const compressedMatch = result.match(/===COMPRESSED===([\s\S]*?)$/);
+
+      if (compressedMatch && compressedMatch[1].trim()) {
+        // 清理 Markdown 代码块围栏
+        compressedContent = stripMarkdownFence(compressedMatch[1]);
+        usedAI = true;
+
+        // 写入记忆文件（MEMORY.md 在根目录，无需创建目录）
+        if (memoryMatch && memoryMatch[1].trim()) {
+          // 清理 Markdown 代码块围栏
+          const memoryContent = stripMarkdownFence(memoryMatch[1]);
+          // 追加到 MEMORY.md
+          const existingMemory = fs.existsSync(memoryPath)
+            ? fs.readFileSync(memoryPath, 'utf-8')
+            : '';
+          const newMemory = existingMemory
+            ? `${existingMemory}\n\n${memoryContent}`
+            : memoryContent;
+          fs.writeFileSync(memoryPath, newMemory, 'utf-8');
+          memoryUpdated = true;
+        }
+      } else {
+        // 无法解析输出，回退到简单压缩
+        compressedContent = compressFocusContent(oldContent);
+      }
+    } else {
+      // 子智能体返回空，回退到简单压缩
+      compressedContent = compressFocusContent(oldContent);
+    }
+  } catch (error) {
+    // 子智能体失败，回退到简单压缩
+    api.logger?.error(`[PD:Focus] AI compression failed, falling back to simple compression: ${String(error)}`);
+    compressedContent = compressFocusContent(oldContent);
+  }
+
+  // 更新版本号和日期
   const versionParts = oldVersion.split('.');
   const majorVersion = parseInt(versionParts[0], 10) || 1;
   const newVersion = `${majorVersion + 1}`;
   const today = new Date().toISOString().split('T')[0];
-  const newContent = oldContent
+  const newContent = compressedContent
     .replace(/\*\*版本\*\*:\s*v[\d.]+/i, `**版本**: v${newVersion}`)
     .replace(/\*\*更新\*\*:\s*\d{4}-\d{2}-\d{2}/, `**更新**: ${today}`);
 
+  const newLines = newContent.split('\n').length;
+  const savedLines = oldLines - newLines;
+
   fs.writeFileSync(focusPath, newContent, 'utf-8');
+
+  const methodNote = usedAI
+    ? isZh
+      ? '🤖 使用 AI 智能压缩'
+      : '🤖 AI-powered compression'
+    : isZh
+      ? '📋 使用规则压缩'
+      : '📋 Rule-based compression';
+
+  const memoryNote = memoryUpdated
+    ? isZh
+      ? '📝 已将里程碑写入 MEMORY.md'
+      : '📝 Milestones saved to MEMORY.md'
+    : '';
 
   if (isZh) {
     return `✅ **压缩完成**
@@ -184,7 +452,12 @@ function compressFocus(workspaceDir: string, isZh: boolean): string {
 |------|------|
 | 旧版本 | v${oldVersion} (${oldDate}) |
 | 新版本 | v${newVersion} (${today}) |
+| 压缩前 | ${oldLines} 行 |
+| 压缩后 | ${newLines} 行 |
+| 节省 | ${savedLines} 行 |
 | 备份文件 | ${backupPath ? path.basename(backupPath) : '已存在'} |
+
+${methodNote}${memoryNote ? `\n${memoryNote}` : ''}
 
 💡 已压缩版本已备份到历史目录
 💡 输入 \`/pd-focus history\` 查看所有历史版本`;
@@ -196,7 +469,12 @@ function compressFocus(workspaceDir: string, isZh: boolean): string {
 |--------|---------|
 | Old Version | v${oldVersion} (${oldDate}) |
 | New Version | v${newVersion} (${today}) |
+| Before | ${oldLines} lines |
+| After | ${newLines} lines |
+| Saved | ${savedLines} lines |
 | Backup File | ${backupPath ? path.basename(backupPath) : 'exists'} |
+
+${methodNote}${memoryNote ? `\n${memoryNote}` : ''}
 
 💡 Compressed version backed up to history
 💡 Type \`/pd-focus history\` to view all versions`;
@@ -325,7 +603,10 @@ function showHelp(isZh: boolean): string {
 /**
  * 处理 /pd-focus 命令
  */
-export function handleFocusCommand(ctx: PluginCommandContext): PluginCommandResult {
+export async function handleFocusCommand(
+  ctx: PluginCommandContext,
+  api: OpenClawPluginApi
+): Promise<PluginCommandResult> {
   const workspaceDir = getWorkspaceDir(ctx);
   const args = ctx.args || [];
   const subCommand = args[0]?.toLowerCase() || 'status';
@@ -345,7 +626,7 @@ export function handleFocusCommand(ctx: PluginCommandContext): PluginCommandResu
       break;
     case 'compress':
     case 'cp':
-      result = compressFocus(workspaceDir, isZh);
+      result = await compressFocus(workspaceDir, isZh, api);
       break;
     case 'rollback':
     case 'rb':
