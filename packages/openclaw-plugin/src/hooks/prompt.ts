@@ -161,6 +161,20 @@ export function getDiagnosticianModel(api: PromptHookApi | null, logger?: Plugin
   throw new Error(errorMsg);
 }
 
+
+function buildEmpathyEngineDirective(): string {
+  return `<system_override:empathy_engine>
+[EMPATHY PROTOCOL - HIGH PRIORITY]
+Before executing tasks, evaluate user emotional state from the latest user message.
+If frustration/anger/blame is detected (including sarcasm/indirect expression):
+1) Acknowledge emotion and provide a short calming response.
+2) Restate the mismatch you understood and provide correction options (A/B).
+3) Pause high-risk actions and ask for confirmation before proceeding.
+4) If supported, emit empathy signal marker for hook analysis (structured first, legacy tag fallback).
+Never respond with apology-only behavior.
+</system_override:empathy_engine>`;
+}
+
 export async function handleBeforePromptBuild(
   event: PluginHookBeforePromptBuildEvent,
   ctx: PluginHookAgentContext & { api?: PromptHookApi }
@@ -208,6 +222,15 @@ You are a **self-evolving AI agent** powered by Principles Disciple.
 
 **Output Style**: Be concise. Prefer action over explanation.
 `;
+
+  // ═══ 1.5 Empathy Engine Directive (P0-1) ═══
+  // Keep stable instructions in prependSystemContext for cacheability.
+  const empathyEnabled = wctx.config.get('empathy_engine.enabled');
+  if (!isMinimalMode && empathyEnabled !== false) {
+    prependSystemContext += `
+${buildEmpathyEngineDirective()}
+`;
+  }
 
   // ═══ 2. Trust Score (configurable, dynamic) - stays in prependContext ═══
   // This is short (< 200 chars) and provides critical runtime state

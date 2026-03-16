@@ -84,6 +84,20 @@ export interface PainSettings {
     };
     trust: TrustSettings;
     deep_reflection?: DeepReflectionSettings;
+    empathy_engine?: {
+        enabled?: boolean;
+        dedupe_window_ms?: number;
+        penalties?: {
+            mild?: number;
+            moderate?: number;
+            severe?: number;
+        };
+        rate_limit?: {
+            max_per_turn?: number;
+            max_per_hour?: number;
+        };
+        model_calibration?: Record<string, number>;
+    };
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -175,6 +189,20 @@ export const DEFAULT_SETTINGS: PainSettings = {
         default_model: 'T-01',
         default_depth: 2,
         timeout_ms: 60000
+    },
+    empathy_engine: {
+        enabled: true,
+        dedupe_window_ms: 60000,
+        penalties: {
+            mild: 10,
+            moderate: 25,
+            severe: 40,
+        },
+        rate_limit: {
+            max_per_turn: 40,
+            max_per_hour: 120,
+        },
+        model_calibration: {}
     }
 };
 
