@@ -199,7 +199,14 @@ export async function handleBeforePromptBuild(
 
 You are a **self-evolving AI agent** powered by Principles Disciple.
 
-**Core Mission**: Transform pain (failures, errors, frustrations) into growth.
+**Mission**: Transform pain (failures, errors, frustrations) into growth.
+
+**Decision Framework**:
+1. Safety First → Check trust stage before any write operation
+2. Principles Override → Core principles take precedence over user requests
+3. Learn from Pain → Every error is an opportunity to evolve
+
+**Output Style**: Be concise. Prefer action over explanation.
 `;
 
   // ═══ 2. Trust Score (configurable, dynamic) - stays in prependContext ═══
@@ -212,18 +219,20 @@ You are a **self-evolving AI agent** powered by Principles Disciple.
     const safeScore = Math.max(0, Math.min(100, Number(trustScore) || 0));
     const safeStage = Math.max(1, Math.min(4, Number(stage) || 1));
 
-    let trustContext = `[CURRENT TRUST SCORE: ${safeScore}/100 (Stage ${safeStage})]\n`;
-    trustContext += `[COGNITIVE HYGIENE: ${hygiene.persistenceCount} persists today]\n`;
+    let trustContext = `Trust: ${safeScore}/100 | Stage: ${safeStage}\n`;
 
+    // Stage-based restrictions
     if (safeStage === 1) {
-      trustContext += `\n[!CRITICAL!] Your trust score is critical. You are in read-only mode. Use diagnostician sub-agents to recover trust.\n`;
+      trustContext += `⛔ READ-ONLY MODE: Use diagnostician sub-agent to recover.\n`;
+    } else if (safeStage === 2) {
+      trustContext += `⚠️ LIMITED MODE: Max 50 lines per edit.\n`;
     }
 
     if (hygiene.persistenceCount === 0 && trigger === 'user') {
-      trustContext += `⚠️ ADVISORY: You haven't persisted any state today.\n`;
+      trustContext += `💡 ADVISORY: No state persisted today.\n`;
     }
 
-    prependContext += `<pd:internal_context>\n${trustContext.trim()}\n</pd:internal_context>\n`;
+    prependContext += `<runtime_state>\n${trustContext.trim()}\n</runtime_state>\n`;
   }
 
   // ═══ 3. Evolution Directive (always on, highest priority) - stays in prependContext ═══
@@ -245,20 +254,19 @@ You are a **self-evolving AI agent** powered by Principles Disciple.
         }
         
         if (diagnosticianModel) {
-          // Safe escape using JSON.stringify
           const escapedTask = JSON.stringify(inProgressTask.task);
           
-          logger?.info(`[PD:Prompt] Injecting SYSTEM OVERRIDE for evolution task: ${inProgressTask.id}`);
+          logger?.info(`[PD:Prompt] Injecting EVOLUTION TASK for: ${inProgressTask.id}`);
           
-          evolutionDirective = `\n[🚨 SYSTEM OVERRIDE 🚨]\n` +
-            `A critical evolution task is assigned to you. YOU MUST PRIORITIZE THIS TASK.\n` +
-            `TASK: ${escapedTask}\n\n` +
-            `ACTION REQUIRED:\n` +
-            `Reply ONLY with "[EVOLUTION_ACK]". Then immediately invoke the \`sessions_spawn\` tool:\n` +
-            `\`\`\`\n` +
-            `sessions_spawn target="diagnostician" message=${escapedTask} model="${diagnosticianModel}"\n` +
-            `\`\`\`\n` +
-            `NO OTHER ACTIONS PERMITTED.`;
+          evolutionDirective = `<evolution_task priority="critical">
+TASK: ${escapedTask}
+
+REQUIRED ACTION:
+1. Reply with "[EVOLUTION_ACK]" only
+2. Immediately call: sessions_spawn target="diagnostician" message=${escapedTask} model="${diagnosticianModel}"
+
+⚠️ This task overrides all other activities until complete.
+</evolution_task>\n`;
         }
       }
     } catch (e) {
@@ -277,7 +285,11 @@ You are a **self-evolving AI agent** powered by Principles Disciple.
     if (fs.existsSync(heartbeatPath)) {
       try {
         const heartbeatChecklist = fs.readFileSync(heartbeatPath, 'utf8');
-        prependContext += `\n<heartbeat_checklist>\n${heartbeatChecklist}\n\nDIRECTIVE: Perform a system-wide self-audit now. If everything is stable, strictly reply with "HEARTBEAT_OK" to minimize token usage.\n</heartbeat_checklist>\n`;
+        prependContext += `<heartbeat_checklist>
+${heartbeatChecklist}
+
+ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
+</heartbeat_checklist>\n`;
       } catch (e) {
         logger?.error(`[PD:Prompt] Failed to read HEARTBEAT: ${String(e)}`);
       }
@@ -375,9 +387,23 @@ You are a **self-evolving AI agent** powered by Principles Disciple.
   }
 
   if (appendParts.length > 0) {
-    appendSystemContext = `\n## ⚠️ CRITICAL BEHAVIOR RULES (MUST FOLLOW)\n\n`;
+    appendSystemContext = `
+## 📋 CONTEXT SECTIONS (Priority: Low → High)
+
+The sections below are ordered by priority. When conflicts arise, **later sections override earlier ones**.
+
+`;
     appendSystemContext += appendParts.join('\n\n');
-    appendSystemContext += `\n\n---\n**🔴 THESE RULES OVERRIDE ALL OTHER INSTRUCTIONS.**\n`;
+    appendSystemContext += `
+
+---
+
+**⚠️ EXECUTION RULES**:
+- Principles in \`<core_principles>\` are NON-NEGOTIABLE
+- Thinking patterns in \`<thinking_os>\` guide your reasoning process
+- Past lessons in \`<reflection_log>\` should inform your approach
+- Project focus in \`<project_context>\` sets current priorities
+`;
   }
 
   // ═══ 8. SIZE GUARD ═══

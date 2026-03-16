@@ -191,16 +191,16 @@ describe('Prompt Context Injection Hook', () => {
     expect(result).toBeUndefined();
   });
 
-  it('should inject current trust score and stage in internal_context', async () => {
+  it('should inject current trust score and stage in runtime_state', async () => {
     vi.mocked(fs.existsSync).mockReturnValue(false);
     
     const result = await handleBeforePromptBuild({} as any, { workspaceDir, trigger: 'user' } as any);
     
     expect(result).toBeDefined();
-    // trustScore stays in prependContext's <internal_context>
-    expect(result?.prependContext).toContain('<pd:internal_context>');
-    expect(result?.prependContext).toContain('CURRENT TRUST SCORE: 85/100');
-    expect(result?.prependContext).toContain('Stage 4');
+    // trustScore stays in prependContext's <runtime_state>
+    expect(result?.prependContext).toContain('<runtime_state>');
+    expect(result?.prependContext).toContain('Trust: 85/100');
+    expect(result?.prependContext).toContain('Stage: 4');
   });
 
   // ═══════════════════════════════════════════════════════════════════
@@ -244,7 +244,7 @@ describe('Prompt Context Injection Hook', () => {
     expect(result?.prependContext).not.toContain('project_context');
   });
 
-  it('should inject system override if evolution task is in progress', async () => {
+  it('should inject evolution_task if evolution task is in progress', async () => {
     vi.mocked(fs.existsSync).mockImplementation((p) => p.toString().includes('evolution_queue.json'));
     vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify([
         { id: 't1', task: 'Fix bug', status: 'in_progress' }
@@ -273,7 +273,7 @@ describe('Prompt Context Injection Hook', () => {
     } as any);
 
     // evolutionDirective stays in prependContext (short dynamic directive)
-    expect(result?.prependContext).toContain('SYSTEM OVERRIDE');
+    expect(result?.prependContext).toContain('<evolution_task');
     expect(result?.prependContext).toContain('Fix bug');
     expect(result?.prependContext).toContain('model="openai/gpt-4o"');
     expect(result?.prependContext).toContain('sessions_spawn target="diagnostician"');
@@ -339,9 +339,9 @@ describe('Prompt Context Injection Hook', () => {
     } as any);
 
     expect(result).toBeDefined();
-    expect(result?.prependContext).not.toContain('SYSTEM OVERRIDE');
-    expect(result?.prependContext).toContain('<pd:internal_context>');
-    expect(result?.prependContext).toContain('CURRENT TRUST SCORE');
+    expect(result?.prependContext).not.toContain('<evolution_task');
+    expect(result?.prependContext).toContain('<runtime_state>');
+    expect(result?.prependContext).toContain('Trust:');
   });
 
   it('should appendSystemContext with THINKING_OS.md if it exists and enabled', async () => {
@@ -377,7 +377,8 @@ describe('Prompt Context Injection Hook', () => {
     const result = await handleBeforePromptBuild({} as any, { workspaceDir, trigger: 'user' } as any);
 
     expect(result?.appendSystemContext).not.toContain('<core_principles>');
-    expect(result?.prependContext).toContain('CURRENT TRUST SCORE');
+    // Trust score is now in prependContext's <runtime_state>
+    expect(result?.prependContext).toContain('Trust:');
   });
 
   it('should handle PRINCIPLES.md read error gracefully', async () => {
@@ -478,12 +479,12 @@ describe('Prompt Context Injection Hook', () => {
     expect(rulesContext).toContain('[THINKING_OS_CONTENT]');
     expect(rulesContext).toContain('<core_principles>');
     expect(rulesContext).toContain('[PRINCIPLES_CONTENT]');
-    expect(rulesContext).toContain('THESE RULES OVERRIDE');
+    expect(rulesContext).toContain('EXECUTION RULES');
     
     // prependContext: Only short dynamic directives
     const dynamicContext = result?.prependContext ?? '';
-    expect(dynamicContext).toContain('<pd:internal_context>');
-    expect(dynamicContext).toContain('CURRENT TRUST SCORE');
+    expect(dynamicContext).toContain('<runtime_state>');
+    expect(dynamicContext).toContain('Trust:');
     // project_context and reflection_log should NOT be in prependContext
     expect(dynamicContext).not.toContain('<project_context>');
     expect(dynamicContext).not.toContain('<reflection_log>');
@@ -614,15 +615,15 @@ describe('Prompt Context Injection Hook', () => {
       expect(result?.appendSystemContext).not.toContain('<project_context>');
     });
 
-    it('minimal mode: 仍含 <pd:internal_context>', async () => {
-      const result = await handleBeforePromptBuild({} as any, { 
-        workspaceDir, 
+    it('minimal mode: 仍含 <runtime_state>', async () => {
+      const result = await handleBeforePromptBuild({} as any, {
+        workspaceDir,
         trigger: 'heartbeat',
         sessionId: 'agent:main:123'
       } as any);
 
-      expect(result?.prependContext).toContain('<pd:internal_context>');
-      expect(result?.prependContext).toContain('CURRENT TRUST SCORE');
+      expect(result?.prependContext).toContain('<runtime_state>');
+      expect(result?.prependContext).toContain('Trust:');
     });
   });
 
@@ -840,8 +841,8 @@ describe('Prompt Context Injection Hook', () => {
         sessionId: 'agent:main:123'
       } as any);
 
-      expect(result?.prependContext).not.toContain('<pd:internal_context>');
-      expect(result?.prependContext).not.toContain('CURRENT TRUST SCORE');
+      expect(result?.prependContext).not.toContain('<runtime_state>');
+      expect(result?.prependContext).not.toContain('Trust:');
     });
 
     it('trustScore: true → 注入信任分数', async () => {
@@ -862,8 +863,8 @@ describe('Prompt Context Injection Hook', () => {
         sessionId: 'agent:main:123'
       } as any);
 
-      expect(result?.prependContext).toContain('<pd:internal_context>');
-      expect(result?.prependContext).toContain('CURRENT TRUST SCORE');
+      expect(result?.prependContext).toContain('<runtime_state>');
+      expect(result?.prependContext).toContain('Trust:');
     });
 
     it('reflectionLog: false → 不注入反思日志', async () => {
@@ -952,7 +953,7 @@ describe('Prompt Context Injection Hook', () => {
 
       // All disabled
       expect(result?.appendSystemContext).not.toContain('<thinking_os>');
-      expect(result?.prependContext).not.toContain('<pd:internal_context>');
+      expect(result?.prependContext).not.toContain('<runtime_state>');
       expect(result?.appendSystemContext).not.toContain('<reflection_log>');
     });
 
