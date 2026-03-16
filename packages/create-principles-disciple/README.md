@@ -11,8 +11,11 @@ npx create-principles-disciple
 ## Options
 
 ```
---lang <en|zh>    Language preference (default: en)
---force           Force overwrite existing installation
+--lang <en|zh>        Language preference (default: zh)
+--force               Force overwrite existing installation
+--smart               Smart merge mode (generate .update files)
+--non-interactive     Skip prompts; if --force is not set, mode defaults to smart
+--features <list>     Comma-separated features: evolution,trust,pain,reflection,okr,hygiene
 ```
 
 ## Commands

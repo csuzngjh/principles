@@ -17,6 +17,9 @@ import { install } from './installer.js';
 import { uninstall, checkInstallStatus } from './uninstaller.js';
 import { checkEnvironment } from './utils/env.js';
 
+const SUPPORTED_FEATURES = ['evolution', 'trust', 'pain', 'reflection', 'okr', 'hygiene'] as const;
+const DEFAULT_FEATURES = ['evolution', 'trust', 'pain'] as const;
+
 // ESM 模块中获取 __dirname
 const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -37,7 +40,7 @@ program
   .description('安装 Principles Disciple 插件')
   .option('-l, --lang <lang>', 'Language (zh/en)', 'zh')
   .option('-f, --force', 'Force overwrite mode', false)
-  .option('-s, --smart', 'Smart merge mode (generate .update files)', false)
+  .option('-s, --smart', 'Smart merge mode (generate .update files; in --non-interactive mode this is default when --force is not set)', false)
   .option('-w, --workspace <path>', 'Workspace directory')
   .option('-y, --yes', 'Non-interactive mode with defaults (alias for --non-interactive)', false)
   .option('--non-interactive', 'Skip interactive prompts', false)
@@ -109,11 +112,21 @@ async function runInstall(options: any): Promise<void> {
   
   if (nonInteractive) {
     // 非交互模式：使用 CLI 参数或默认值
-    const defaultFeatures = ['evolution', 'trust', 'pain'];
-    const features = options.features 
-      ? options.features.split(',').map((f: string) => f.trim()).filter(Boolean)
-      : defaultFeatures;
-    
+    const parsedFeatures = options.features
+      ? options.features.split(',').map((f: string) => f.trim().toLowerCase()).filter(Boolean)
+      : [...DEFAULT_FEATURES];
+
+    const uniqueFeatures: string[] = Array.from(new Set(parsedFeatures));
+    const invalidFeatures = uniqueFeatures.filter((f) => !SUPPORTED_FEATURES.includes(f as any));
+    const validFeatures = uniqueFeatures.filter((f) => SUPPORTED_FEATURES.includes(f as any));
+
+    if (invalidFeatures.length > 0) {
+      logger.warn(`检测到无效 features，已忽略: ${invalidFeatures.join(', ')}`);
+      logger.info(`支持的 features: ${SUPPORTED_FEATURES.join(', ')}`);
+    }
+
+    const features = validFeatures.length > 0 ? validFeatures : [...DEFAULT_FEATURES];
+
     installOptions = {
       language: cliOptions.language || 'zh',
       mode: cliOptions.mode || 'smart',
@@ -121,7 +134,7 @@ async function runInstall(options: any): Promise<void> {
       features,
       overwriteConfig: false,
     };
-    logger.info('非交互模式：使用默认配置');
+    logger.info(`非交互模式：使用配置 features = ${features.join(', ')}`);
   } else {
     // 交互模式
     installOptions = await runPrompts(cliOptions);
