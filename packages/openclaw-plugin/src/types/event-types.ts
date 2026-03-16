@@ -74,6 +74,14 @@ export interface PainSignalEventData {
   source: string;
   reason?: string;
   isRisky?: boolean;
+  origin?: 'assistant_self_report' | 'user_manual' | 'system_infer';
+  severity?: 'mild' | 'moderate' | 'severe';
+  confidence?: number;
+  detection_mode?: 'structured' | 'legacy_tag';
+  deduped?: boolean;
+  trigger_text_excerpt?: string;
+  raw_score?: number;
+  calibrated_score?: number;
 }
 
 export interface RuleMatchEventData {

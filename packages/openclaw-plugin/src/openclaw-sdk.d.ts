@@ -233,6 +233,17 @@ export type PluginHookLlmOutputEvent = {
     };
 };
 
+export type PluginHookBeforeMessageWriteEvent = {
+    message: any;
+    sessionKey?: string;
+    agentId?: string;
+};
+
+export type PluginHookBeforeMessageWriteResult = {
+    block?: boolean;
+    message?: any;
+};
+
 export type PluginHookSubagentEndedEvent = {
     targetSessionKey: string;
     targetKind: 'subagent' | 'acp';
@@ -306,5 +317,6 @@ export type PluginHookHandlerMap = {
     before_reset: (event: PluginHookBeforeResetEvent, ctx: PluginHookAgentContext) => any;
     before_compaction: (event: PluginHookBeforeCompactionEvent, ctx: PluginHookAgentContext) => any;
     after_compaction: (event: PluginHookAfterCompactionEvent, ctx: PluginHookAgentContext) => any;
+    before_message_write: (event: PluginHookBeforeMessageWriteEvent, ctx: PluginHookAgentContext) => any;
     [key: string]: (...args: any[]) => any;
 };

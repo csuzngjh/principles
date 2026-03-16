@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { handleLlmOutput } from '../../src/hooks/llm';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { handleLlmOutput, extractEmpathySignal } from '../../src/hooks/llm';
 import * as painFlags from '../../src/core/pain';
 import * as sessionTracker from '../../src/core/session-tracker';
 import { DetectionService } from '../../src/core/detection-service';
@@ -25,6 +25,13 @@ describe('LLM Cognitive Distress Hook', () => {
             if (key === 'scores.paralysis') return 40;
             if (key === 'thresholds.pain_trigger') return 30;
             if (key === 'scores.default_confusion') return 35;
+            if (key === 'empathy_engine.enabled') return true;
+            if (key === 'empathy_engine.dedupe_window_ms') return 60000;
+            if (key === 'empathy_engine.penalties.mild') return 10;
+            if (key === 'empathy_engine.penalties.moderate') return 25;
+            if (key === 'empathy_engine.penalties.severe') return 40;
+            if (key === 'empathy_engine.rate_limit.max_per_turn') return 40;
+            if (key === 'empathy_engine.rate_limit.max_per_hour') return 120;
             return undefined;
         })
     };
@@ -51,13 +58,17 @@ describe('LLM Cognitive Distress Hook', () => {
         vi.mocked(WorkspaceContext.fromHookContext).mockReturnValue(mockWctx as any);
     });
 
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
     it('should detect confusion patterns via detection funnel (L1)', () => {
         const mockFunnel = {
-            detect: vi.fn().mockReturnValue({ 
-                detected: true, 
-                severity: 35, 
+            detect: vi.fn().mockReturnValue({
+                detected: true,
+                severity: 35,
                 ruleId: 'P_CONFUSION_EN',
-                source: 'l1_exact' 
+                source: 'l1_exact'
             })
         };
         vi.mocked(DetectionService.get).mockReturnValue(mockFunnel as any);
@@ -66,15 +77,15 @@ describe('LLM Cognitive Distress Hook', () => {
             runId: 'r1',
             sessionId,
             provider: 'test',
-            assistantTexts: ["I am currently struggling to figure out why this test is failing."],
+            assistantTexts: ['I am currently struggling to figure out why this test is failing.'],
         };
 
         handleLlmOutput(mockEvent as any, { workspaceDir, sessionId } as any);
 
         expect(painFlags.writePainFlag).toHaveBeenCalledWith(
             workspaceDir,
-            expect.objectContaining({ 
-                source: 'llm_p_confusion_en', 
+            expect.objectContaining({
+                source: 'llm_p_confusion_en',
                 score: '35',
                 reason: expect.stringContaining('P_CONFUSION_EN')
             })
@@ -107,6 +118,71 @@ describe('LLM Cognitive Distress Hook', () => {
             usageLogPath,
             expect.stringContaining('"T-06": 1'),
             'utf8'
+        );
+    });
+
+    it('should parse structured empathy signal', () => {
+        const result = extractEmpathySignal('<empathy signal="damage" severity="severe" confidence="0.75" reason="ignored constraints"/>');
+        expect(result).toEqual(expect.objectContaining({
+            detected: true,
+            severity: 'severe',
+            confidence: 0.75,
+            mode: 'structured'
+        }));
+    });
+
+    it('should apply empathy penalty and write event log', () => {
+        vi.spyOn(sessionTracker, 'trackFriction').mockImplementation(() => ({ currentGfi: 0 } as any));
+        const mockFunnel = { detect: vi.fn().mockReturnValue({ detected: false, source: 'l3_async_queued' }) };
+        vi.mocked(DetectionService.get).mockReturnValue(mockFunnel as any);
+
+        const mockEvent = {
+            runId: 'r1',
+            sessionId,
+            provider: 'test',
+            model: 'test',
+            assistantTexts: ['[EMOTIONAL_DAMAGE_DETECTED:moderate] 抱歉，我会先澄清范围。'],
+        };
+
+        handleLlmOutput(mockEvent as any, { workspaceDir, sessionId } as any);
+
+        expect(sessionTracker.trackFriction).toHaveBeenCalledWith(
+            sessionId,
+            25,
+            'user_empathy_moderate',
+            workspaceDir
+        );
+        expect(mockEventLog.recordPainSignal).toHaveBeenCalledWith(
+            sessionId,
+            expect.objectContaining({
+                source: 'user_empathy',
+                severity: 'moderate',
+                detection_mode: 'legacy_tag'
+            })
+        );
+    });
+
+    it('should dedupe repeated empathy signal within window', () => {
+        vi.useFakeTimers();
+        vi.spyOn(sessionTracker, 'trackFriction').mockImplementation(() => ({ currentGfi: 0 } as any));
+        const mockFunnel = { detect: vi.fn().mockReturnValue({ detected: false, source: 'l3_async_queued' }) };
+        vi.mocked(DetectionService.get).mockReturnValue(mockFunnel as any);
+
+        const mockEvent = {
+            runId: 'r1',
+            sessionId,
+            provider: 'test',
+            model: 'test',
+            assistantTexts: ['[EMOTIONAL_DAMAGE_DETECTED:severe]'],
+        };
+
+        handleLlmOutput(mockEvent as any, { workspaceDir, sessionId } as any);
+        handleLlmOutput(mockEvent as any, { workspaceDir, sessionId } as any);
+
+        expect(sessionTracker.trackFriction).toHaveBeenCalledTimes(1);
+        expect(mockEventLog.recordPainSignal).toHaveBeenLastCalledWith(
+            sessionId,
+            expect.objectContaining({ deduped: true })
         );
     });
 });
