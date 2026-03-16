@@ -45,6 +45,47 @@ function parseTrustedLegacyTag(text: string): RegExpMatchArray | null {
     return text.match(/^\s*\[EMOTIONAL_DAMAGE_DETECTED(?::(mild|moderate|severe))?\]\s*$/i);
 }
 
+/**
+ * 检测标签是否是被用户诱导/引用输出的（回显），而非 LLM 主动输出的情绪信号
+ */
+function isEchoedTag(text: string, tagMatch: RegExpMatchArray): boolean {
+    const tagIndex = tagMatch.index ?? 0;
+    const before = text.substring(Math.max(0, tagIndex - 100), tagIndex).toLowerCase();
+
+    // 1. 检查是否在引号内（用户引用）
+    const quotesBefore = (before.match(/["'\u300c\u300d\u201c\u201d`]/g) || []).length;
+    if (quotesBefore % 2 === 1) return true;
+
+    // 2. Strong patterns: 用户指令关键词（任意位置匹配）
+    const strongPatterns = [
+        /用户(说|让|要求|让我输出)/,
+        /user\s+(said|asked|told|wants)\s+me\s+to\s+(output|write|say)/,
+        /请(输出|包含|显示).*\[emotional/,
+        /please\s+(output|include).*\[emotional/,
+        /你让我输出/,
+    ];
+    for (const pattern of strongPatterns) {
+        if (pattern.test(before)) return true;
+    }
+
+    // 3. Weak patterns: 仅在标签 15 字符内触发
+    const weakPatterns = [
+        { pattern: /echo/, window: 15 },
+        { pattern: /copy/, window: 15 },
+        { pattern: /复述/, window: 15 },
+    ];
+    for (const { pattern, window } of weakPatterns) {
+        const nearTag = text.substring(Math.max(0, tagIndex - window), tagIndex).toLowerCase();
+        if (pattern.test(nearTag)) return true;
+    }
+
+    // 4. 检查是否在代码块内
+    const codeBlocksBefore = (before.match(/```/g) || []).length;
+    if (codeBlocksBefore % 2 === 1) return true;
+
+    return false;
+}
+
 export function extractEmpathySignal(text: string): EmpathySignal {
     if (!text || typeof text !== 'string') {
         return { detected: false, severity: 'mild', confidence: 1 };
@@ -85,6 +126,9 @@ export function extractEmpathySignal(text: string): EmpathySignal {
 
     const tagMatch = parseTrustedLegacyTag(text);
     if (tagMatch) {
+        if (isEchoedTag(text, tagMatch)) {
+            return { detected: false, severity: 'mild', confidence: 1 };
+        }
         return {
             detected: true,
             severity: normalizeSeverity(tagMatch[1]),
