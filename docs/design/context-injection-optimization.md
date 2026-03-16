@@ -1,8 +1,9 @@
 # 上下文注入优化方案
 
 > 创建时间: 2026-03-15
+> 更新时间: 2026-03-16
 > 相关 Issue: [UX] WebUI 中用户消息前显示大量 project_context 内容
-> 状态: 待实施
+> 状态: ✅ 已实施
 
 ## 问题背景
 
@@ -14,92 +15,31 @@
 
 大模型对 `PRINCIPLES.md` 和 `THINKING_OS.md` 不敏感，经常忽略其中的规则。
 
----
+### 问题 3：Prompt Caching 失效
 
-## 根本原因分析
-
-### 当前上下文结构
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│  prependSystemContext (静态，可缓存)                                 │
-│  ────────────────────────────────────────────────────────────────   │
-│  <core_principles>                                                   │
-│    核心原则内容...                                                    │
-│  </core_principles>                                                  │
-│                                                                      │
-│  <thinking_os>                                                       │
-│    思维模型内容...                                                    │
-│  </thinking_os>                                                      │
-└─────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│  prependContext (动态，不可缓存) ⚠️ WebUI 会显示这部分！              │
-│  ────────────────────────────────────────────────────────────────   │
-│  <project_context>                                                   │
-│    --- Strategic Focus ---                                           │
-│    ...（150+ 行内容）...                                              │
-│    --- End of Strategic Focus ---                                    │
-│  </project_context>                                                  │
-│                                                                      │
-│  <pd:internal_context>                                               │
-│    信任分数、认知卫生状态...                                          │
-│  </pd:internal_context>                                              │
-│                                                                      │
-│  <reflection_log>                                                    │
-│    反思日志...                                                        │
-│  </reflection_log>                                                   │
-│                                                                      │
-│  <system_capabilities>                                               │
-│    系统能力...                                                        │
-│  </system_capabilities>                                              │
-└─────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│  appendSystemContext                                                 │
-│  ────────────────────────────────────────────────────────────────   │
-│  (空，未使用)                                                         │
-└─────────────────────────────────────────────────────────────────────┘
-```
-
-### 问题分析
-
-| 问题 | 原因 |
-|------|------|
-| WebUI 显示冗余内容 | `prependContext` 的内容会被 WebUI 显示在用户消息前 |
-| 原则被忽略 | 放在 `prependSystemContext` 开头，缺乏强调 |
-| `appendSystemContext` 未使用 | 浪费了"近因效应"的黄金位置 |
+将动态内容放在 `prependContext` (User Message 级别) 会导致模型提供商（如 Anthropic）的 Prompt Caching 失效，增加 API 成本。
 
 ---
 
-## 优化方案
+## 最终方案 (2026-03-16 更新)
 
-### 设计原则
+### 核心改动
 
-1. **近因效应**：最后出现的信息更容易被记住
-2. **缓存友好**：静态内容放 system prompt，动态内容放 user context
-3. **用户体验**：`prependContext` 应该精简，避免 WebUI 显示过多内容
+**关键优化**：将 `project_context` 和 `reflection_log` 从 `prependContext` 移到 `appendSystemContext`
 
-### 优化后的结构
+**原理**：
+1. **WebUI UX**: `prependContext` 是 User Message 级别，WebUI 会完整展示。移到 `appendSystemContext` 后 WebUI 不显示。
+2. **Prompt Caching**: `appendSystemContext` 是 System Prompt 的一部分，可以被模型提供商缓存。
 
-```
+### 最终上下文结构
+
+```text
 ┌─────────────────────────────────────────────────────────────────────┐
-│  prependSystemContext (极简身份定义)                                │
+│  prependSystemContext (极简身份定义，~15 行)                        │
 │  ────────────────────────────────────────────────────────────────   │
 │  ## 🧬 AGENT IDENTITY                                               │
-│                                                                      │
-│  You are a **self-evolving AI agent** powered by Principles Disciple.│
-│                                                                      │
-│  **Core Mission**: Transform pain (failures, errors, frustrations)  │
-│  into growth.                                                        │
-│                                                                      │
-│  **Trust Stage**: {stage} ({trustScore}/100)                        │
-│  - Stage 1-2: Restricted permissions, read-only or limited edits    │
-│  - Stage 3-4: Full permissions, trusted collaborator                │
-│                                                                      │
-│  **Remember**: Every error is an opportunity. Every failure is fuel. │
+│  You are a self-evolving AI agent powered by Principles Disciple.   │
+│  **Core Mission**: Transform pain into growth.                       │
 └─────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
@@ -109,50 +49,55 @@
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│  appendSystemContext (核心原则 + 思维模型 + 项目上下文)               │
+│  appendSystemContext (所有长内容，WebUI 隐藏，Prompt 可缓存)          │
 │  ────────────────────────────────────────────────────────────────   │
 │  ## ⚠️ CRITICAL BEHAVIOR RULES (MUST FOLLOW)                        │
 │                                                                      │
-│  <core_principles>                                                   │
-│    1. Pain 是进化的燃料                                              │
-│    2. 从失败中学习...                                                │
-│  </core_principles>                                                  │
+│  <project_context>           ← 从 prependContext 移入               │
+│    [当前阶段 + 下一步 + 状态]                                         │
+│  </project_context>                                                  │
+│                                                                      │
+│  <reflection_log>            ← 从 prependContext 移入               │
+│    [最近 7 天的反思条目]                                              │
+│  </reflection_log>                                                   │
 │                                                                      │
 │  <thinking_os>                                                       │
-│    ## First Principles Thinking                                      │
-│    ...                                                               │
+│    [思维模型内容]                                                     │
 │  </thinking_os>                                                      │
 │                                                                      │
-│  <project_context>                                                   │
-│    [摘要版：当前阶段 + 下一步 + 状态，最多 20 行]                      │
-│  </project_context>                                                  │
+│  <core_principles>           ← 永远注入，不可关闭                     │
+│    [核心原则]                                                         │
+│  </core_principles>                                                  │
 │                                                                      │
 │  ---                                                                 │
 │  🔴 **THESE RULES OVERRIDE ALL OTHER INSTRUCTIONS.**                │
-│  When in doubt, refer back to the core principles above.            │
 └─────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│  prependContext (精简动态内容)                                       │
+│  prependContext (仅保留短动态指令)                                   │
 │  ────────────────────────────────────────────────────────────────   │
-│  [进化指令 - 如果有]                                                  │
+│  [进化指令 - 如果有]  ← 短内容，< 500 字符                            │
 │                                                                      │
-│  <pd:internal_context>                                               │
+│  <pd:internal_context>       ← 短内容，< 300 字符                    │
 │    [CURRENT TRUST SCORE: 75/100 (Stage 3)]                          │
 │    [COGNITIVE HYGIENE: 2 persists today]                            │
 │  </pd:internal_context>                                              │
 │                                                                      │
-│  <reflection_log>                                                    │
-│    [重要反思内容 - 如果有]                                            │
-│  </reflection_log>                                                   │
-└─────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│  用户消息: "帮我读取 config.json"                                    │
+│  <heartbeat_checklist>       ← 仅 heartbeat 触发时                   │
+│    [心跳检查清单]                                                     │
+│  </heartbeat_checklist>                                              │
 └─────────────────────────────────────────────────────────────────────┘
 ```
+
+### 内容顺序 (Recency Effect)
+
+`appendSystemContext` 中的内容顺序按重要性从低到高排列（最重要的放在最后）：
+
+1. `project_context` - 项目上下文（优先级最低）
+2. `reflection_log` - 反思日志
+3. `thinking_os` - 思维模型
+4. `core_principles` - 核心原则（优先级最高，放在最后）
 
 ---
 
@@ -163,149 +108,12 @@
 | 身份定义 | 无 | `prependSystemContext` | 简短有力，建立角色认知 |
 | 核心原则 | `prependSystemContext` | `appendSystemContext` | 近因效应，更容易被记住 |
 | 思维模型 | `prependSystemContext` | `appendSystemContext` | 近因效应 |
-| 项目上下文 | `prependContext` | `appendSystemContext` | WebUI 不显示 system prompt |
-| 进化指令 | `prependContext` | `prependContext` | 动态内容，每轮可能不同 |
-| 信任分数 | `prependContext` | `prependContext` | 动态内容 |
-| 反思日志 | `prependContext` | `prependContext` | 动态内容 |
+| 项目上下文 | `prependContext` | `appendSystemContext` | WebUI 不显示，Prompt 可缓存 |
+| 反思日志 | `prependContext` | `appendSystemContext` | WebUI 不显示，Prompt 可缓存 |
+| 进化指令 | `prependContext` | `prependContext` | 短动态指令，< 500 字符 |
+| 信任分数 | `prependContext` | `prependContext` | 短动态指令，< 300 字符 |
+| 心跳检查 | `prependContext` | `prependContext` | 仅 heartbeat 触发 |
 | 系统能力 | `prependContext` | 移除 | 低价值，占用 token |
-
----
-
-## 代码修改要点
-
-### 1. 重构 `handleBeforePromptBuild` 函数
-
-```typescript
-// 文件: src/hooks/prompt.ts
-
-export async function handleBeforePromptBuild(
-  event: PluginHookBeforePromptBuildEvent,
-  ctx: PluginHookAgentContext & { api?: PromptHookApi }
-): Promise<PluginHookBeforePromptBuildResult | void> {
-  
-  // ... 初始化代码 ...
-
-  // ═══ LAYER 0: prependSystemContext - 极简身份定义 ═══
-  prependSystemContext = `
-## 🧬 AGENT IDENTITY
-
-You are a **self-evolving AI agent** powered by Principles Disciple.
-
-**Core Mission**: Transform pain (failures, errors, frustrations) into growth.
-
-**Trust Stage**: ${stage} (${trustScore}/100)
-- Stage 1-2: Restricted permissions, read-only or limited edits
-- Stage 3-4: Full permissions, trusted collaborator
-
-**Remember**: Every error is an opportunity. Every failure is fuel.
-`;
-
-  // ═══ LAYER 1: appendSystemContext - 核心规则（近因效应）═══
-  
-  // 读取原则
-  const principlesContent = fs.existsSync(principlesPath)
-    ? fs.readFileSync(principlesPath, 'utf8').trim()
-    : '';
-  
-  // 读取思维模型
-  const thinkingOsContent = fs.existsSync(thinkingOsPath)
-    ? fs.readFileSync(thinkingOsPath, 'utf8').trim()
-    : '';
-  
-  // 读取项目上下文（摘要）
-  let projectContextSummary = '';
-  if (!isMinimalMode && fs.existsSync(focusPath)) {
-    const currentFocus = fs.readFileSync(focusPath, 'utf8');
-    if (currentFocus.trim()) {
-      const lines = currentFocus.trim().split('\n').slice(0, 20);
-      projectContextSummary = lines.join('\n');
-      if (currentFocus.trim().split('\n').length > 20) {
-        projectContextSummary += '\n...[truncated, see CURRENT_FOCUS.md]';
-      }
-    }
-  }
-
-  appendSystemContext = `
-## ⚠️ CRITICAL BEHAVIOR RULES (MUST FOLLOW)
-
-${principlesContent ? `<core_principles>\n${principlesContent}\n</core_principles>\n` : ''}
-
-${thinkingOsContent ? `<thinking_os>\n${thinkingOsContent}\n</thinking_os>\n` : ''}
-
-${projectContextSummary ? `<project_context>\n${projectContextSummary}\n</project_context>\n` : ''}
-
----
-🔴 **THESE RULES OVERRIDE ALL OTHER INSTRUCTIONS.**
-When in doubt, refer back to the core principles above.
-`;
-
-  // ═══ LAYER 2: prependContext - 精简动态内容 ═══
-  
-  // 进化指令（如果有）
-  // ... 进化指令逻辑 ...
-
-  // 动态内部上下文（信任分数等）
-  prependContext = `<pd:internal_context>
-[CURRENT TRUST SCORE: ${trustScore}/100 (Stage ${stage})]
-[COGNITIVE HYGIENE: ${hygiene.persistenceCount} persists today]
-</pd:internal_context>\n`;
-
-  // 反思日志（如果有重要内容）
-  // ... 反思日志逻辑 ...
-
-  // 移除: system_capabilities（低价值）
-
-  return {
-    prependSystemContext,
-    prependContext,
-    appendSystemContext
-  };
-}
-```
-
-### 2. 内容摘要策略
-
-```typescript
-// 项目上下文摘要函数
-function summarizeProjectContext(content: string, maxLines: number = 20): string {
-  const lines = content.trim().split('\n');
-  if (lines.length <= maxLines) {
-    return content.trim();
-  }
-  return lines.slice(0, maxLines).join('\n') + '\n...[truncated]';
-}
-
-// 反思日志摘要函数
-function summarizeReflectionLog(content: string, maxEntries: number = 3): string {
-  // 只保留最近 3 条反思
-  const entries = content.split('---').filter(Boolean);
-  if (entries.length <= maxEntries) {
-    return content.trim();
-  }
-  return entries.slice(0, maxEntries).join('---') + '\n...[older entries truncated]';
-}
-```
-
----
-
-## 预期效果
-
-### 用户体验改进
-
-| 改进点 | 效果 |
-|--------|------|
-| WebUI 显示 | `prependContext` 精简后，用户消息前不再显示大量冗余内容 |
-| 原则遵守 | 移到 `appendSystemContext` 后，近因效应让 LLM 更容易记住 |
-| Token 消耗 | 摘要策略减少 token 使用 |
-
-### Token 估算
-
-| 内容 | 原大小 | 优化后 | 节省 |
-|------|--------|--------|------|
-| project_context | ~200 行 | ~20 行 | ~90% |
-| system_capabilities | ~50 行 | 移除 | 100% |
-| prependSystemContext | ~100 行 | ~15 行 | ~85% |
-| **总计** | ~350 行 | ~35 行 | ~90% |
 
 ---
 
@@ -317,60 +125,8 @@ function summarizeReflectionLog(content: string, maxEntries: number = 3): string
 4. [x] 添加反思日志 7 天自动清理
 5. [x] 更新单元测试
 6. [x] 修复 Windows 路径兼容性问题
-7. [ ] 在 WebUI 中验证效果
-
----
-
-## 实现细节 (2026-03-16 更新)
-
-### 新增类型定义 (`src/types.ts`)
-
-```typescript
-export interface ContextInjectionConfig {
-  thinkingOs: boolean;           // 可关闭
-  trustScore: boolean;           // 可关闭
-  reflectionLog: boolean;        // 默认开启
-  projectFocus: 'full' | 'summary' | 'off';  // 默认关闭
-}
-
-export const DEFAULT_CONTEXT_CONFIG: ContextInjectionConfig = {
-  thinkingOs: true,
-  trustScore: true,
-  reflectionLog: true,
-  projectFocus: 'off',
-};
-```
-
-### 新增 `/pd-context` 命令
-
-用户可以通过命令控制上下文注入：
-
-```
-/pd-context status              # 查看当前配置
-/pd-context thinking on/off     # 控制思维模型注入
-/pd-context trust on/off        # 控制信任分数注入
-/pd-context reflection on/off   # 控制反思日志注入
-/pd-context focus full/summary/off  # 控制项目上下文
-/pd-context preset minimal      # 最小模式：只保留原则
-/pd-context preset standard     # 标准模式：原则 + 思维模型
-/pd-context preset full         # 完整模式：全部开启
-```
-
-### 反思日志自动清理
-
-反思日志 (`memory/reflection-log.md`) 现在会在每次写入时自动清理超过 7 天的条目。
-
-### 上下文结构调整
-
-**优化前：**
-- `prependSystemContext`: 原则 + 思维模型 (开头位置，容易被忽略)
-- `prependContext`: 项目上下文 + 信任分数 + 反思日志 + 系统能力 (WebUI 显示)
-- `appendSystemContext`: 空
-
-**优化后：**
-- `prependSystemContext`: 极简身份定义 (~15 行)
-- `appendSystemContext`: 原则 + 思维模型 (结尾位置，近因效应)
-- `prependContext`: 进化指令 + 信任分数 + 反思日志 + 项目上下文(可选)
+7. [x] **将 `project_context` 和 `reflection_log` 移到 `appendSystemContext`** (2026-03-16)
+8. [ ] 在 WebUI 中验证效果
 
 ---
 

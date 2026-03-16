@@ -197,23 +197,28 @@ describe('Prompt Context Injection Hook', () => {
     const result = await handleBeforePromptBuild({} as any, { workspaceDir, trigger: 'user' } as any);
     
     expect(result).toBeDefined();
-    // Task 1.1: trustScore 移到 prependContext 的 <internal_context> 中
+    // trustScore stays in prependContext's <internal_context>
     expect(result?.prependContext).toContain('<pd:internal_context>');
     expect(result?.prependContext).toContain('CURRENT TRUST SCORE: 85/100');
     expect(result?.prependContext).toContain('Stage 4');
   });
 
-  it('should NOT append CURRENT_FOCUS by default (projectFocus: off)', async () => {
+  // ═══════════════════════════════════════════════════════════════════
+  // IMPORTANT: project_context and reflection_log are now in appendSystemContext
+  // This fixes WebUI UX issue (Issue #23) and enables Prompt Caching
+  // ═══════════════════════════════════════════════════════════════════
+
+  it('should NOT inject project_context by default (projectFocus: off)', async () => {
     vi.mocked(fs.existsSync).mockImplementation((p) => p.toString().includes('CURRENT_FOCUS.md'));
     vi.mocked(fs.readFileSync).mockReturnValue('Focus on testing');
 
     const result = await handleBeforePromptBuild({} as any, { workspaceDir, trigger: 'user' } as any);
 
     // Default config: projectFocus = 'off', so CURRENT_FOCUS should NOT be injected
-    expect(result?.prependContext).not.toContain('project_context');
+    expect(result?.appendSystemContext).not.toContain('project_context');
   });
 
-  it('should append CURRENT_FOCUS when config enables it', async () => {
+  it('should inject project_context in appendSystemContext when config enables it', async () => {
     // Mock PROFILE.json with projectFocus enabled
     vi.mocked(fs.existsSync).mockImplementation((p) => {
       if (p.toString().includes('PROFILE.json')) return true;
@@ -232,8 +237,11 @@ describe('Prompt Context Injection Hook', () => {
 
     const result = await handleBeforePromptBuild({} as any, { workspaceDir, trigger: 'user' } as any);
 
-    expect(result?.prependContext).toContain('project_context');
-    expect(result?.prependContext).toContain('Focus on testing');
+    // project_context is now in appendSystemContext (WebUI-hidden, Prompt Cacheable)
+    expect(result?.appendSystemContext).toContain('project_context');
+    expect(result?.appendSystemContext).toContain('Focus on testing');
+    // Should NOT be in prependContext (which WebUI displays)
+    expect(result?.prependContext).not.toContain('project_context');
   });
 
   it('should inject system override if evolution task is in progress', async () => {
@@ -264,6 +272,7 @@ describe('Prompt Context Injection Hook', () => {
       api: mockApi
     } as any);
 
+    // evolutionDirective stays in prependContext (short dynamic directive)
     expect(result?.prependContext).toContain('SYSTEM OVERRIDE');
     expect(result?.prependContext).toContain('Fix bug');
     expect(result?.prependContext).toContain('model="openai/gpt-4o"');
@@ -302,12 +311,9 @@ describe('Prompt Context Injection Hook', () => {
     } as any);
 
     // 验证转义后的字符串
-    // 原始: Fix path C:\Users\admin and "quoted text"\nwith newline
-    // 转义后: Fix path C:\\Users\\admin and \"quoted text\"\nwith newline
-    // 在 prependContext 中会再次转义显示
-    expect(result?.prependContext).toContain('C:\\\\Users\\\\admin');  // 反斜杠被转义为双反斜杠
-    expect(result?.prependContext).toContain('\\\"quoted text\\\"');   // 双引号被转义
-    expect(result?.prependContext).toContain('\\nwith newline');      // 换行符被转义为字面 \n
+    expect(result?.prependContext).toContain('C:\\\\Users\\\\admin');
+    expect(result?.prependContext).toContain('\\"quoted text\\"');
+    expect(result?.prependContext).toContain('\\nwith newline');
   });
 
   it('should NOT inject system override if model config is missing', async () => {
@@ -332,16 +338,10 @@ describe('Prompt Context Injection Hook', () => {
       api: mockApi
     } as any);
 
-    // 修复问题2后：不再 return undefined，而是继续注入其他上下文
-    // 但不包含 SYSTEM OVERRIDE
     expect(result).toBeDefined();
     expect(result?.prependContext).not.toContain('SYSTEM OVERRIDE');
-    // 仍应包含内部上下文
     expect(result?.prependContext).toContain('<pd:internal_context>');
     expect(result?.prependContext).toContain('CURRENT TRUST SCORE');
-    // 错误日志被 console.error 记录
-    const consoleSpy = vi.spyOn(console, 'error');
-    // 注意：错误是通过 console.error 记录的，不是 mockApi.logger.error
   });
 
   it('should appendSystemContext with THINKING_OS.md if it exists and enabled', async () => {
@@ -353,7 +353,6 @@ describe('Prompt Context Injection Hook', () => {
 
     const result = await handleBeforePromptBuild({} as any, { workspaceDir, trigger: 'user' } as any);
 
-    // THINKING_OS is now in appendSystemContext (not prependSystemContext)
     expect(result?.appendSystemContext).toContain('<thinking_os>');
     expect(result?.appendSystemContext).toContain('Apply First Principles');
   });
@@ -367,7 +366,6 @@ describe('Prompt Context Injection Hook', () => {
 
     const result = await handleBeforePromptBuild({} as any, { workspaceDir, trigger: 'user' } as any);
 
-    // PRINCIPLES is now in appendSystemContext (not prependSystemContext)
     expect(result?.appendSystemContext).toContain('<core_principles>');
     expect(result?.appendSystemContext).toContain('# Core Principles');
     expect(result?.appendSystemContext).toContain('Principle A');
@@ -379,7 +377,6 @@ describe('Prompt Context Injection Hook', () => {
     const result = await handleBeforePromptBuild({} as any, { workspaceDir, trigger: 'user' } as any);
 
     expect(result?.appendSystemContext).not.toContain('<core_principles>');
-    // Task 1.1: trust score 现在在 prependContext 的 <pd:internal_context> 中
     expect(result?.prependContext).toContain('CURRENT TRUST SCORE');
   });
 
@@ -399,45 +396,68 @@ describe('Prompt Context Injection Hook', () => {
     consoleSpy.mockRestore();
   });
 
-  it('should inject both PRINCIPLES and THINKING_OS in appendSystemContext', async () => {
+  it('should inject PRINCIPLES, THINKING_OS, project_context, reflection_log in appendSystemContext', async () => {
     vi.mocked(fs.existsSync).mockImplementation((p) => 
-      p.toString().includes('PRINCIPLES.md') || p.toString().includes('THINKING_OS.md')
+      p.toString().includes('PRINCIPLES.md') || 
+      p.toString().includes('THINKING_OS.md') ||
+      p.toString().includes('CURRENT_FOCUS.md') ||
+      p.toString().includes('reflection-log.md') ||
+      p.toString().includes('PROFILE.json')
     );
     vi.mocked(fs.readFileSync).mockImplementation((p) => {
+      if (p.toString().includes('PROFILE.json')) {
+        return JSON.stringify({ contextInjection: { projectFocus: 'summary', reflectionLog: true } });
+      }
       if (p.toString().includes('PRINCIPLES.md')) {
         return '# Core Principles\n\nPrinciple 1';
       }
       if (p.toString().includes('THINKING_OS.md')) {
         return '# Thinking OS\n\nModel 1';
       }
+      if (p.toString().includes('CURRENT_FOCUS.md')) {
+        return '# Current Focus\n\nTask 1';
+      }
+      if (p.toString().includes('reflection-log.md')) {
+        return '# Reflection Log\n\nDay 1';
+      }
       return '';
     });
 
     const result = await handleBeforePromptBuild({} as any, { workspaceDir, trigger: 'user' } as any);
 
-    // Both should be present in appendSystemContext (recency effect)
+    // All should be in appendSystemContext (WebUI-hidden, Prompt Cacheable)
     expect(result?.appendSystemContext).toContain('<core_principles>');
     expect(result?.appendSystemContext).toContain('Principle 1');
     expect(result?.appendSystemContext).toContain('<thinking_os>');
     expect(result?.appendSystemContext).toContain('Model 1');
+    expect(result?.appendSystemContext).toContain('<project_context>');
+    expect(result?.appendSystemContext).toContain('Task 1');
+    expect(result?.appendSystemContext).toContain('<reflection_log>');
+    expect(result?.appendSystemContext).toContain('Day 1');
     
-    // Verify order: PRINCIPLES should come before THINKING_OS
-    const principlesIndex = result?.appendSystemContext?.indexOf('<core_principles>') ?? -1;
+    // Content order: project_context -> reflection_log -> thinking_os -> principles (recency effect)
+    const projectIndex = result?.appendSystemContext?.indexOf('<project_context>') ?? -1;
+    const reflectionIndex = result?.appendSystemContext?.indexOf('<reflection_log>') ?? -1;
     const thinkingOsIndex = result?.appendSystemContext?.indexOf('<thinking_os>') ?? -1;
-    expect(principlesIndex).toBeLessThan(thinkingOsIndex);
+    const principlesIndex = result?.appendSystemContext?.indexOf('<core_principles>') ?? -1;
+    
+    // Verify order: project_context first, principles last (for recency effect)
+    expect(projectIndex).toBeLessThan(reflectionIndex);
+    expect(reflectionIndex).toBeLessThan(thinkingOsIndex);
+    expect(thinkingOsIndex).toBeLessThan(principlesIndex);
   });
 
   it('FULL INJECTION: should preserve ALL content with correct separation', async () => {
     // This test catches the "=" vs "+=" bug for ANY future additions
-    // 模拟所有文件都存在的真实场景
     vi.mocked(fs.existsSync).mockReturnValue(true);
     vi.mocked(fs.readFileSync).mockImplementation((p) => {
       const pathStr = p.toString();
-      if (pathStr.includes('PROFILE.json')) return JSON.stringify({ contextInjection: { projectFocus: 'summary' } });
+      if (pathStr.includes('PROFILE.json')) return JSON.stringify({ contextInjection: { projectFocus: 'summary', reflectionLog: true } });
       if (pathStr.includes('PRINCIPLES.md')) return '[PRINCIPLES_CONTENT]';
       if (pathStr.includes('THINKING_OS.md')) return '[THINKING_OS_CONTENT]';
       if (pathStr.includes('evolution_queue.json')) return '[]';
       if (pathStr.includes('CURRENT_FOCUS.md')) return '[FOCUS_CONTENT]';
+      if (pathStr.includes('reflection-log.md')) return '[REFLECTION_CONTENT]';
       return '';
     });
 
@@ -448,20 +468,25 @@ describe('Prompt Context Injection Hook', () => {
     expect(identityContext).toContain('AGENT IDENTITY');
     expect(identityContext).toContain('self-evolving AI agent');
     
-    // appendSystemContext: Principles + Thinking OS (recency effect)
+    // appendSystemContext: All long context (WebUI-hidden, Prompt Cacheable)
     const rulesContext = result?.appendSystemContext ?? '';
-    expect(rulesContext).toContain('<core_principles>');
-    expect(rulesContext).toContain('[PRINCIPLES_CONTENT]');
+    expect(rulesContext).toContain('<project_context>');
+    expect(rulesContext).toContain('[FOCUS_CONTENT]');
+    expect(rulesContext).toContain('<reflection_log>');
+    expect(rulesContext).toContain('[REFLECTION_CONTENT]');
     expect(rulesContext).toContain('<thinking_os>');
     expect(rulesContext).toContain('[THINKING_OS_CONTENT]');
+    expect(rulesContext).toContain('<core_principles>');
+    expect(rulesContext).toContain('[PRINCIPLES_CONTENT]');
     expect(rulesContext).toContain('THESE RULES OVERRIDE');
     
-    // prependContext: Dynamic content
+    // prependContext: Only short dynamic directives
     const dynamicContext = result?.prependContext ?? '';
     expect(dynamicContext).toContain('<pd:internal_context>');
     expect(dynamicContext).toContain('CURRENT TRUST SCORE');
-    expect(dynamicContext).toContain('project_context');
-    expect(dynamicContext).toContain('[FOCUS_CONTENT]');
+    // project_context and reflection_log should NOT be in prependContext
+    expect(dynamicContext).not.toContain('<project_context>');
+    expect(dynamicContext).not.toContain('<reflection_log>');
   });
 
   // ═══ Test Group 1: isMinimalMode ═══
@@ -478,7 +503,7 @@ describe('Prompt Context Injection Hook', () => {
       } as any);
 
       // Minimal mode: should NOT contain project_context
-      expect(result?.prependContext).not.toContain('<project_context>');
+      expect(result?.appendSystemContext).not.toContain('<project_context>');
     });
 
     it('sessionId 含 :subagent: → isMinimalMode = true', async () => {
@@ -489,11 +514,10 @@ describe('Prompt Context Injection Hook', () => {
       } as any);
 
       // Minimal mode: should NOT contain project_context
-      expect(result?.prependContext).not.toContain('<project_context>');
+      expect(result?.appendSystemContext).not.toContain('<project_context>');
     });
 
     it('主会话 sessionId → isMinimalMode = false', async () => {
-      // Enable projectFocus via PROFILE.json
       vi.mocked(fs.existsSync).mockImplementation((p) => {
         if (p.toString().includes('PROFILE.json')) return true;
         if (p.toString().includes('CURRENT_FOCUS.md')) return true;
@@ -513,11 +537,10 @@ describe('Prompt Context Injection Hook', () => {
         sessionId: 'agent:main:12345'
       } as any);
 
-      expect(resultWithFile?.prependContext).toContain('<project_context>');
+      expect(resultWithFile?.appendSystemContext).toContain('<project_context>');
     });
 
     it('sessionId undefined → isMinimalMode = false', async () => {
-      // Enable projectFocus via PROFILE.json
       vi.mocked(fs.existsSync).mockImplementation((p) => {
         if (p.toString().includes('PROFILE.json')) return true;
         if (p.toString().includes('CURRENT_FOCUS.md')) return true;
@@ -537,11 +560,9 @@ describe('Prompt Context Injection Hook', () => {
         sessionId: undefined
       } as any);
 
-      // Normal mode: should contain project_context
-      expect(result?.prependContext).toContain('<project_context>');
+      expect(result?.appendSystemContext).toContain('<project_context>');
     });
 
-    // Task: Additional isMinimalMode test cases
     it('heartbeat=true, subagent sessionId → isMinimalMode = true', async () => {
       const result = await handleBeforePromptBuild({} as any, {
         workspaceDir,
@@ -549,12 +570,10 @@ describe('Prompt Context Injection Hook', () => {
         sessionId: 'agent:main:subagent:diagnostician-xyz'
       } as any);
 
-      // Minimal mode: should NOT contain project_context
-      expect(result?.prependContext).not.toContain('<project_context>');
+      expect(result?.appendSystemContext).not.toContain('<project_context>');
     });
 
     it('main session (no :subagent:) with trigger=user → isMinimalMode = false', async () => {
-      // Enable projectFocus via PROFILE.json
       vi.mocked(fs.existsSync).mockImplementation((p) => {
         if (p.toString().includes('PROFILE.json')) return true;
         if (p.toString().includes('CURRENT_FOCUS.md')) return true;
@@ -574,9 +593,8 @@ describe('Prompt Context Injection Hook', () => {
         sessionId: 'agent:main:session-001'
       } as any);
 
-      // Normal mode: should contain project_context
-      expect(result?.prependContext).toContain('<project_context>');
-      expect(result?.prependContext).toContain('Main session focus');
+      expect(result?.appendSystemContext).toContain('<project_context>');
+      expect(result?.appendSystemContext).toContain('Main session focus');
     });
   });
 
@@ -586,19 +604,17 @@ describe('Prompt Context Injection Hook', () => {
       vi.mocked(fs.existsSync).mockReturnValue(false);
     });
 
-    it('minimal mode: 不含 <project_context>', async () => {
-      // Trigger minimal mode via heartbeat
+    it('minimal mode: 不含 <project_context> in appendSystemContext', async () => {
       const result = await handleBeforePromptBuild({} as any, { 
         workspaceDir, 
         trigger: 'heartbeat',
         sessionId: 'agent:main:123'
       } as any);
 
-      expect(result?.prependContext).not.toContain('<project_context>');
+      expect(result?.appendSystemContext).not.toContain('<project_context>');
     });
 
     it('minimal mode: 仍含 <pd:internal_context>', async () => {
-      // Minimal mode should still include internal context with trust info
       const result = await handleBeforePromptBuild({} as any, { 
         workspaceDir, 
         trigger: 'heartbeat',
@@ -616,14 +632,11 @@ describe('Prompt Context Injection Hook', () => {
       vi.mocked(fs.existsSync).mockReturnValue(false);
     });
 
-    it('超过 10000 字符 → 触发截断', async () => {
-      // Create content large enough to exceed 10000 chars total
-      // Each line ~150 chars * 80 lines = ~12000 chars to exceed MAX_SIZE
+    it('超过 10000 字符 → 触发截断 in appendSystemContext', async () => {
       const largeContent = Array.from({ length: 80 }, (_, i) => 
         `Line ${i + 1}: This is a long line of content with enough data to exceed the 10000 character limit for testing size guard functionality`
       ).join('\n');
 
-      // Enable projectFocus and mock CURRENT_FOCUS.md
       vi.mocked(fs.existsSync).mockImplementation((p) => {
         if (p.toString().includes('PROFILE.json')) return true;
         if (p.toString().includes('CURRENT_FOCUS.md')) return true;
@@ -647,18 +660,16 @@ describe('Prompt Context Injection Hook', () => {
         sessionId: 'agent:main:123'
       } as any);
 
-      // Should contain truncation marker
-      expect(result?.prependContext).toContain('[truncated]');
-      expect(result?.prependContext).toContain('...[truncated]');
+      // Size guard truncates in appendSystemContext now
+      expect(result?.appendSystemContext).toContain('[truncated]');
+      expect(result?.appendSystemContext).toContain('...[truncated]');
 
       consoleSpy.mockRestore();
     });
 
     it('未超限 → 不截断', async () => {
-      // Small content that won't trigger truncation
       const smallContent = 'Small focus content';
 
-      // Enable projectFocus and mock CURRENT_FOCUS.md
       vi.mocked(fs.existsSync).mockImplementation((p) => {
         if (p.toString().includes('PROFILE.json')) return true;
         if (p.toString().includes('CURRENT_FOCUS.md')) return true;
@@ -680,23 +691,19 @@ describe('Prompt Context Injection Hook', () => {
         sessionId: 'agent:main:123'
       } as any);
 
-      // Should NOT contain truncation marker
-      expect(result?.prependContext).not.toContain('[truncated]');
-      expect(result?.prependContext).toContain('Small focus content');
+      expect(result?.appendSystemContext).not.toContain('[truncated]');
+      expect(result?.appendSystemContext).toContain('Small focus content');
     });
 
-    it('截断保留前 20 行 + [truncated]', async () => {
-      // Create 80 lines with ~200 chars each for project_context
+    it('截断保留前 20 行 + [truncated] in appendSystemContext', async () => {
       const longLines = Array.from({ length: 80 }, (_, i) =>
         `Line ${i + 1}: This is a very long line of content with lots of text to ensure we exceed the 10000 character limit for proper truncation testing - extra padding here`
       ).join('\n');
 
-      // Create large PRINCIPLES content to help exceed MAX_SIZE
       const largePrinciples = Array.from({ length: 30 }, (_, i) =>
         `Principle ${i + 1}: This is a very long principle description that adds to the total character count to ensure we exceed the limit for proper truncation testing purposes - additional padding here`
       ).join('\n');
 
-      // Enable projectFocus in FULL mode (not summary) so size guard can truncate
       vi.mocked(fs.existsSync).mockImplementation((p) => {
         if (p.toString().includes('PROFILE.json')) return true;
         if (p.toString().includes('CURRENT_FOCUS.md')) return true;
@@ -726,17 +733,15 @@ describe('Prompt Context Injection Hook', () => {
 
       consoleSpy.mockRestore();
 
-      // Size guard truncates <project_context> block to 20 lines when total exceeds MAX_SIZE
-      expect(result?.prependContext).toContain('[truncated]');
+      // Size guard truncates <project_context> block in appendSystemContext
+      expect(result?.appendSystemContext).toContain('[truncated]');
     });
 
     it('< 20 行不截断', async () => {
-      // Create 15 lines of content - should NOT trigger truncation
       const fifteenLines = Array.from({ length: 15 }, (_, i) =>
         `Line ${i + 1}: This is content line number ${i + 1} for testing no truncation when under 20 lines`
       ).join('\n');
 
-      // Enable projectFocus and mock CURRENT_FOCUS.md
       vi.mocked(fs.existsSync).mockImplementation((p) => {
         if (p.toString().includes('PROFILE.json')) return true;
         if (p.toString().includes('CURRENT_FOCUS.md')) return true;
@@ -758,10 +763,8 @@ describe('Prompt Context Injection Hook', () => {
         sessionId: 'agent:main:123'
       } as any);
 
-      // Should NOT contain truncation marker
-      expect(result?.prependContext).not.toContain('[truncated]');
-      // Should contain all lines including line 15
-      expect(result?.prependContext).toContain('Line 15');
+      expect(result?.appendSystemContext).not.toContain('[truncated]');
+      expect(result?.appendSystemContext).toContain('Line 15');
     });
   });
 
@@ -789,7 +792,6 @@ describe('Prompt Context Injection Hook', () => {
         sessionId: 'agent:main:123'
       } as any);
 
-      // thinkingOs: false, so THINKING_OS should NOT be injected
       expect(result?.appendSystemContext).not.toContain('<thinking_os>');
       expect(result?.appendSystemContext).not.toContain('Thinking OS Content');
     });
@@ -816,7 +818,6 @@ describe('Prompt Context Injection Hook', () => {
         sessionId: 'agent:main:123'
       } as any);
 
-      // thinkingOs: true, so THINKING_OS should be injected
       expect(result?.appendSystemContext).toContain('<thinking_os>');
       expect(result?.appendSystemContext).toContain('Thinking OS Content');
     });
@@ -839,7 +840,6 @@ describe('Prompt Context Injection Hook', () => {
         sessionId: 'agent:main:123'
       } as any);
 
-      // trustScore: false, so internal_context should NOT be injected
       expect(result?.prependContext).not.toContain('<pd:internal_context>');
       expect(result?.prependContext).not.toContain('CURRENT TRUST SCORE');
     });
@@ -862,7 +862,6 @@ describe('Prompt Context Injection Hook', () => {
         sessionId: 'agent:main:123'
       } as any);
 
-      // trustScore: true, so internal_context should be injected
       expect(result?.prependContext).toContain('<pd:internal_context>');
       expect(result?.prependContext).toContain('CURRENT TRUST SCORE');
     });
@@ -889,12 +888,12 @@ describe('Prompt Context Injection Hook', () => {
         sessionId: 'agent:main:123'
       } as any);
 
-      // reflectionLog: false, so reflection_log should NOT be injected
-      expect(result?.prependContext).not.toContain('<reflection_log>');
-      expect(result?.prependContext).not.toContain('Reflection Log Content');
+      // reflection_log is now in appendSystemContext
+      expect(result?.appendSystemContext).not.toContain('<reflection_log>');
+      expect(result?.appendSystemContext).not.toContain('Reflection Log Content');
     });
 
-    it('reflectionLog: true → 注入反思日志', async () => {
+    it('reflectionLog: true → 注入反思日志 in appendSystemContext', async () => {
       vi.mocked(fs.existsSync).mockImplementation((p) => {
         if (p.toString().includes('PROFILE.json')) return true;
         if (p.toString().includes('reflection-log.md')) return true;
@@ -916,9 +915,11 @@ describe('Prompt Context Injection Hook', () => {
         sessionId: 'agent:main:123'
       } as any);
 
-      // reflectionLog: true, so reflection_log should be injected
-      expect(result?.prependContext).toContain('<reflection_log>');
-      expect(result?.prependContext).toContain('Reflection Log Content');
+      // reflection_log is now in appendSystemContext (WebUI-hidden, Prompt Cacheable)
+      expect(result?.appendSystemContext).toContain('<reflection_log>');
+      expect(result?.appendSystemContext).toContain('Reflection Log Content');
+      // Should NOT be in prependContext
+      expect(result?.prependContext).not.toContain('<reflection_log>');
     });
 
     it('多项配置同时生效: thinkingOs=false, trustScore=false, reflectionLog=false', async () => {
@@ -952,7 +953,155 @@ describe('Prompt Context Injection Hook', () => {
       // All disabled
       expect(result?.appendSystemContext).not.toContain('<thinking_os>');
       expect(result?.prependContext).not.toContain('<pd:internal_context>');
-      expect(result?.prependContext).not.toContain('<reflection_log>');
+      expect(result?.appendSystemContext).not.toContain('<reflection_log>');
+    });
+
+    it('projectFocus: off → 不注入 project_context', async () => {
+      vi.mocked(fs.existsSync).mockImplementation((p) => {
+        if (p.toString().includes('PROFILE.json')) return true;
+        if (p.toString().includes('CURRENT_FOCUS.md')) return true;
+        return false;
+      });
+      vi.mocked(fs.readFileSync).mockImplementation((p) => {
+        if (p.toString().includes('PROFILE.json')) {
+          return JSON.stringify({ contextInjection: { projectFocus: 'off' } });
+        }
+        if (p.toString().includes('CURRENT_FOCUS.md')) {
+          return 'Focus Content';
+        }
+        return '';
+      });
+
+      const result = await handleBeforePromptBuild({} as any, {
+        workspaceDir,
+        trigger: 'user',
+        sessionId: 'agent:main:123'
+      } as any);
+
+      expect(result?.appendSystemContext).not.toContain('<project_context>');
+      expect(result?.appendSystemContext).not.toContain('Focus Content');
+    });
+
+    it('projectFocus: summary → 注入截断版 project_context in appendSystemContext', async () => {
+      const longContent = Array.from({ length: 50 }, (_, i) => `Line ${i + 1}`).join('\n');
+
+      vi.mocked(fs.existsSync).mockImplementation((p) => {
+        if (p.toString().includes('PROFILE.json')) return true;
+        if (p.toString().includes('CURRENT_FOCUS.md')) return true;
+        return false;
+      });
+      vi.mocked(fs.readFileSync).mockImplementation((p) => {
+        if (p.toString().includes('PROFILE.json')) {
+          return JSON.stringify({ contextInjection: { projectFocus: 'summary' } });
+        }
+        if (p.toString().includes('CURRENT_FOCUS.md')) {
+          return longContent;
+        }
+        return '';
+      });
+
+      const result = await handleBeforePromptBuild({} as any, {
+        workspaceDir,
+        trigger: 'user',
+        sessionId: 'agent:main:123'
+      } as any);
+
+      // summary mode truncates to 20 lines
+      expect(result?.appendSystemContext).toContain('<project_context>');
+      expect(result?.appendSystemContext).toContain('Line 20');
+      expect(result?.appendSystemContext).toContain('[truncated, see CURRENT_FOCUS.md');
+    });
+
+    it('projectFocus: full → 注入完整 project_context in appendSystemContext', async () => {
+      const fullContent = 'Full project context content\nLine 2\nLine 3';
+
+      vi.mocked(fs.existsSync).mockImplementation((p) => {
+        if (p.toString().includes('PROFILE.json')) return true;
+        if (p.toString().includes('CURRENT_FOCUS.md')) return true;
+        return false;
+      });
+      vi.mocked(fs.readFileSync).mockImplementation((p) => {
+        if (p.toString().includes('PROFILE.json')) {
+          return JSON.stringify({ contextInjection: { projectFocus: 'full' } });
+        }
+        if (p.toString().includes('CURRENT_FOCUS.md')) {
+          return fullContent;
+        }
+        return '';
+      });
+
+      const result = await handleBeforePromptBuild({} as any, {
+        workspaceDir,
+        trigger: 'user',
+        sessionId: 'agent:main:123'
+      } as any);
+
+      expect(result?.appendSystemContext).toContain('<project_context>');
+      expect(result?.appendSystemContext).toContain('Full project context content');
+      expect(result?.appendSystemContext).toContain('Line 3');
+    });
+  });
+
+  // ═══ Test Group 5: WebUI UX + Prompt Caching ═══
+  describe('WebUI UX and Prompt Caching optimization', () => {
+    it('prependContext should NOT contain long content (WebUI displays it)', async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockImplementation((p) => {
+        const pathStr = p.toString();
+        if (pathStr.includes('PROFILE.json')) {
+          return JSON.stringify({ contextInjection: { projectFocus: 'full', reflectionLog: true } });
+        }
+        if (pathStr.includes('PRINCIPLES.md')) return 'P'.repeat(5000);
+        if (pathStr.includes('THINKING_OS.md')) return 'T'.repeat(3000);
+        if (pathStr.includes('CURRENT_FOCUS.md')) return 'F'.repeat(2000);
+        if (pathStr.includes('reflection-log.md')) return 'R'.repeat(1000);
+        return '';
+      });
+
+      const result = await handleBeforePromptBuild({} as any, {
+        workspaceDir,
+        trigger: 'user',
+        sessionId: 'agent:main:123'
+      } as any);
+
+      // prependContext should only contain short dynamic content
+      const prependLength = result?.prependContext?.length ?? 0;
+      // trustScore is short (< 500 chars), evolutionDirective is also short
+      expect(prependLength).toBeLessThan(2000);
+      
+      // Long content should be in appendSystemContext
+      expect(result?.appendSystemContext).toContain('project_context');
+      expect(result?.appendSystemContext).toContain('reflection_log');
+      expect(result?.appendSystemContext).toContain('thinking_os');
+      expect(result?.appendSystemContext).toContain('core_principles');
+    });
+
+    it('appendSystemContext contains all long-form context (Prompt Cacheable)', async () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockImplementation((p) => {
+        const pathStr = p.toString();
+        if (pathStr.includes('PROFILE.json')) {
+          return JSON.stringify({ contextInjection: { projectFocus: 'full', reflectionLog: true, thinkingOs: true } });
+        }
+        if (pathStr.includes('PRINCIPLES.md')) return '[PRINCIPLES]';
+        if (pathStr.includes('THINKING_OS.md')) return '[THINKING_OS]';
+        if (pathStr.includes('CURRENT_FOCUS.md')) return '[CURRENT_FOCUS]';
+        if (pathStr.includes('reflection-log.md')) return '[REFLECTION_LOG]';
+        return '';
+      });
+
+      const result = await handleBeforePromptBuild({} as any, {
+        workspaceDir,
+        trigger: 'user',
+        sessionId: 'agent:main:123'
+      } as any);
+
+      // All long content in appendSystemContext (System Prompt level)
+      const append = result?.appendSystemContext ?? '';
+      expect(append).toContain('[PRINCIPLES]');
+      expect(append).toContain('[THINKING_OS]');
+      expect(append).toContain('[CURRENT_FOCUS]');
+      expect(append).toContain('[REFLECTION_LOG]');
     });
   });
 });

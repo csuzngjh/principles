@@ -180,10 +180,10 @@ export async function handleBeforePromptBuild(
 
   const session = sessionId ? getSession(sessionId) : undefined;
 
-  // ═══ STRUCTURE ═══
-  // prependSystemContext: Minimal identity (cacheable)
-  // appendSystemContext: Principles + Thinking OS (cacheable, recency effect)
-  // prependContext: Dynamic content (not cacheable)
+  // ═══ STRUCTURE (Optimized for WebUI UX + Prompt Caching) ═══
+  // prependSystemContext: Minimal identity (cacheable, ~15 lines)
+  // appendSystemContext: Principles + Thinking OS + reflection_log + project_context (cacheable, WebUI-hidden)
+  // prependContext: Only short dynamic directives: trustScore + evolutionDirective + heartbeat
 
   let prependSystemContext = '';
   let prependContext = '';
@@ -202,7 +202,8 @@ You are a **self-evolving AI agent** powered by Principles Disciple.
 **Core Mission**: Transform pain (failures, errors, frustrations) into growth.
 `;
 
-  // ═══ 2. Trust Score (configurable, dynamic) ═══
+  // ═══ 2. Trust Score (configurable, dynamic) - stays in prependContext ═══
+  // This is short (< 200 chars) and provides critical runtime state
   if (contextConfig.trustScore) {
     const trustScore = wctx.trust.getScore();
     const stage = wctx.trust.getStage();
@@ -225,48 +226,7 @@ You are a **self-evolving AI agent** powered by Principles Disciple.
     prependContext += `<pd:internal_context>\n${trustContext.trim()}\n</pd:internal_context>\n`;
   }
 
-  // ═══ 3. Reflection Log (configurable) ═══
-  if (contextConfig.reflectionLog) {
-    const reflectionLogPath = wctx.resolve('REFLECTION_LOG');
-    if (fs.existsSync(reflectionLogPath)) {
-      try {
-        const reflectionLog = fs.readFileSync(reflectionLogPath, 'utf8');
-        if (reflectionLog.trim()) {
-          prependContext += `\n<reflection_log>\n${reflectionLog.trim()}\n</reflection_log>\n`;
-        }
-      } catch (e) {
-        logger?.error(`[PD:Prompt] Failed to read REFLECTION_LOG: ${String(e)}`);
-      }
-    }
-  }
-
-  // ═══ 4. Project Context (configurable: full/summary/off) ═══
-  if (!isMinimalMode && contextConfig.projectFocus !== 'off') {
-    const focusPath = wctx.resolve('CURRENT_FOCUS');
-    if (fs.existsSync(focusPath)) {
-      try {
-        const currentFocus = fs.readFileSync(focusPath, 'utf8');
-        if (currentFocus.trim()) {
-          if (contextConfig.projectFocus === 'summary') {
-            // Summary mode: only first 20 lines
-            const lines = currentFocus.trim().split('\n').slice(0, 20);
-            let summary = lines.join('\n');
-            if (currentFocus.trim().split('\n').length > 20) {
-              summary += '\n...[truncated, see CURRENT_FOCUS.md for full context]';
-            }
-            prependContext += `\n<project_context>\n${summary}\n</project_context>\n`;
-          } else {
-            // Full mode
-            prependContext += `\n<project_context>\n${currentFocus.trim()}\n</project_context>\n`;
-          }
-        }
-      } catch (e) {
-        logger?.error(`[PD:Prompt] Failed to read CURRENT_FOCUS: ${String(e)}`);
-      }
-    }
-  }
-
-  // ═══ 5. Evolution Directive (always on, highest priority) ═══
+  // ═══ 3. Evolution Directive (always on, highest priority) - stays in prependContext ═══
   let evolutionDirective = '';
   const queuePath = wctx.resolve('EVOLUTION_QUEUE');
   if (fs.existsSync(queuePath)) {
@@ -324,9 +284,11 @@ You are a **self-evolving AI agent** powered by Principles Disciple.
     }
   }
 
-  // ═══ 7. appendSystemContext: Principles + Thinking OS (Recency Effect) ═══
+  // ═══ 7. appendSystemContext: Principles + Thinking OS + reflection_log + project_context ═══
   // NOTE: Principles is ALWAYS injected (not configurable)
-  // Thinking OS is configurable
+  // Thinking OS, reflection_log, project_context are configurable
+  // All these go into System Prompt (WebUI-hidden, Prompt Cacheable)
+
   let principlesContent = '';
   const principlesPath = wctx.resolve('PRINCIPLES');
   if (fs.existsSync(principlesPath)) {
@@ -349,63 +311,119 @@ You are a **self-evolving AI agent** powered by Principles Disciple.
     }
   }
 
+  // Reflection Log (configurable) - moved to appendSystemContext for WebUI UX
+  let reflectionLogContent = '';
+  if (contextConfig.reflectionLog) {
+    const reflectionLogPath = wctx.resolve('REFLECTION_LOG');
+    if (fs.existsSync(reflectionLogPath)) {
+      try {
+        reflectionLogContent = fs.readFileSync(reflectionLogPath, 'utf8').trim();
+      } catch (e) {
+        logger?.error(`[PD:Prompt] Failed to read REFLECTION_LOG: ${String(e)}`);
+      }
+    }
+  }
+
+  // Project Context (configurable: full/summary/off) - moved to appendSystemContext for WebUI UX
+  let projectContextContent = '';
+  if (!isMinimalMode && contextConfig.projectFocus !== 'off') {
+    const focusPath = wctx.resolve('CURRENT_FOCUS');
+    if (fs.existsSync(focusPath)) {
+      try {
+        const currentFocus = fs.readFileSync(focusPath, 'utf8').trim();
+        if (currentFocus) {
+          if (contextConfig.projectFocus === 'summary') {
+            // Summary mode: only first 20 lines
+            const lines = currentFocus.split('\n').slice(0, 20);
+            projectContextContent = lines.join('\n');
+            if (currentFocus.split('\n').length > 20) {
+              projectContextContent += '\n...[truncated, see CURRENT_FOCUS.md for full context]';
+            }
+          } else {
+            // Full mode
+            projectContextContent = currentFocus;
+          }
+        }
+      } catch (e) {
+        logger?.error(`[PD:Prompt] Failed to read CURRENT_FOCUS: ${String(e)}`);
+      }
+    }
+  }
+
   // Build appendSystemContext with recency effect
-  // Only inject if there's actual content
-  if (principlesContent || thinkingOsContent) {
-    appendSystemContext = `\n## ⚠️ CRITICAL BEHAVIOR RULES (MUST FOLLOW)\n`;
-    
-    if (principlesContent) {
-      appendSystemContext += `\n<core_principles>\n${principlesContent}\n</core_principles>\n`;
-    }
-    
-    if (thinkingOsContent) {
-      appendSystemContext += `\n<thinking_os>\n${thinkingOsContent}\n</thinking_os>\n`;
-    }
-    
-    appendSystemContext += `\n---\n**🔴 THESE RULES OVERRIDE ALL OTHER INSTRUCTIONS.**\n`;
+  // Content order (most important last): project_context -> reflection_log -> thinking_os -> principles
+  const appendParts: string[] = [];
+
+  // 1. Project Context (lowest priority, goes first)
+  if (projectContextContent) {
+    appendParts.push(`<project_context>\n${projectContextContent}\n</project_context>`);
+  }
+
+  // 2. Reflection Log
+  if (reflectionLogContent) {
+    appendParts.push(`<reflection_log>\n${reflectionLogContent}\n</reflection_log>`);
+  }
+
+  // 3. Thinking OS (configurable)
+  if (thinkingOsContent) {
+    appendParts.push(`<thinking_os>\n${thinkingOsContent}\n</thinking_os>`);
+  }
+
+  // 4. Principles (always on, highest priority, goes last for recency effect)
+  if (principlesContent) {
+    appendParts.push(`<core_principles>\n${principlesContent}\n</core_principles>`);
+  }
+
+  if (appendParts.length > 0) {
+    appendSystemContext = `\n## ⚠️ CRITICAL BEHAVIOR RULES (MUST FOLLOW)\n\n`;
+    appendSystemContext += appendParts.join('\n\n');
+    appendSystemContext += `\n\n---\n**🔴 THESE RULES OVERRIDE ALL OTHER INSTRUCTIONS.**\n`;
   }
 
   // ═══ 8. SIZE GUARD ═══
+  // Truncation happens within appendSystemContext (not prependContext)
   const totalSize = prependSystemContext.length + prependContext.length + appendSystemContext.length;
   const MAX_SIZE = 10000;
 
   if (totalSize > MAX_SIZE) {
     const originalSize = totalSize;
     const truncationLog: string[] = [];
-    
-    // 1. Truncate project_context if present
-    const projectContextMatch = prependContext.match(/(<project_context>[\s\S]*?<\/project_context>)/);
-    if (projectContextMatch) {
-      const originalBlock = projectContextMatch[1];
-      const lines = originalBlock.split('\n');
+
+    // 1. Truncate project_context in appendSystemContext
+    if (projectContextContent && appendSystemContext.includes('<project_context>')) {
+      const lines = projectContextContent.split('\n');
       if (lines.length > 20) {
-        const truncatedBlock = lines.slice(0, 20).join('\n') + '\n...[truncated]';
-        prependContext = prependContext.replace(originalBlock, truncatedBlock);
+        const truncated = lines.slice(0, 20).join('\n') + '\n...[truncated]';
+        appendSystemContext = appendSystemContext.replace(
+          `<project_context>\n${projectContextContent}\n</project_context>`,
+          `<project_context>\n${truncated}\n</project_context>`
+        );
         truncationLog.push('project_context');
       }
     }
-    
+
     // 2. Truncate reflection_log if still over limit
     let newSize = prependSystemContext.length + prependContext.length + appendSystemContext.length;
-    if (newSize > MAX_SIZE) {
-      const reflectionMatch = prependContext.match(/(<reflection_log>[\s\S]*?<\/reflection_log>)/);
-      if (reflectionMatch) {
-        const originalBlock = reflectionMatch[1];
-        const lines = originalBlock.split('\n');
-        if (lines.length > 30) {
-          const truncatedBlock = lines.slice(0, 30).join('\n') + '\n...[truncated]';
-          prependContext = prependContext.replace(originalBlock, truncatedBlock);
-          truncationLog.push('reflection_log');
-        }
+    if (newSize > MAX_SIZE && reflectionLogContent && appendSystemContext.includes('<reflection_log>')) {
+      const lines = reflectionLogContent.split('\n');
+      if (lines.length > 30) {
+        const truncated = lines.slice(0, 30).join('\n') + '\n...[truncated]';
+        appendSystemContext = appendSystemContext.replace(
+          `<reflection_log>\n${reflectionLogContent}\n</reflection_log>`,
+          `<reflection_log>\n${truncated}\n</reflection_log>`
+        );
+        truncationLog.push('reflection_log');
       }
     }
-    
+
     // 3. Final check
     newSize = prependSystemContext.length + prependContext.length + appendSystemContext.length;
     if (newSize > MAX_SIZE) {
+      // NOTE: We still return the content even if over limit, as truncating more
+      // could lose critical context like principles or evolution directives.
       logger?.error(`[PD:Prompt] Cannot reduce injection size below limit. Current: ${newSize}, Limit: ${MAX_SIZE}`);
     }
-    
+
     logger?.warn(`[PD:Prompt] Injection size exceeded: ${originalSize} chars (limit: ${MAX_SIZE}), truncated: ${truncationLog.join(', ') || 'none'}, new size: ${newSize} chars`);
   }
 
