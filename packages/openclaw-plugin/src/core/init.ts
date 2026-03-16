@@ -3,7 +3,7 @@ import * as path from 'path';
 import { fileURLToPath } from 'url';
 import type { OpenClawPluginApi, PluginLogger } from '../openclaw-sdk.js';
 import { PD_DIRS } from './paths.js';
-import { DEFAULT_CONTEXT_CONFIG } from '../types.js';
+import { defaultContextConfig } from '../types.js';
 
 /**
  * Default PROFILE.json content
@@ -11,7 +11,7 @@ import { DEFAULT_CONTEXT_CONFIG } from '../types.js';
 const DEFAULT_PROFILE = {
   name: "Principles Disciple Agent",
   version: "1.0.0",
-  contextInjection: DEFAULT_CONTEXT_CONFIG
+  contextInjection: defaultContextConfig
 };
 
 /**

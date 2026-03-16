@@ -3,7 +3,7 @@ import * as path from 'path';
 import type { PluginHookBeforePromptBuildEvent, PluginHookAgentContext, PluginHookBeforePromptBuildResult, PluginLogger } from '../openclaw-sdk.js';
 import { getSession, resetFriction } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
-import { ContextInjectionConfig, DEFAULT_CONTEXT_CONFIG } from '../types.js';
+import { ContextInjectionConfig, defaultContextConfig } from '../types.js';
 
 /**
  * 模型配置对象格式
@@ -112,14 +112,14 @@ export function loadContextInjectionConfig(workspaceDir: string): ContextInjecti
       const raw = fs.readFileSync(profilePath, 'utf-8');
       const profile = JSON.parse(raw);
       if (profile.contextInjection) {
-        return { ...DEFAULT_CONTEXT_CONFIG, ...profile.contextInjection };
+        return { ...defaultContextConfig, ...profile.contextInjection };
       }
     }
   } catch (e) {
     console.warn(`[PD:Prompt] Failed to load contextInjection config: ${String(e)}`);
   }
   
-  return { ...DEFAULT_CONTEXT_CONFIG };
+  return { ...defaultContextConfig };
 }
 
 /**

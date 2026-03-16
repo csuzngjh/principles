@@ -36,7 +36,7 @@ export interface ContextInjectionConfig {
  * - reflectionLog: true (default on)
  * - trustScore: true (can be turned off)
  */
-export const DEFAULT_CONTEXT_CONFIG: ContextInjectionConfig = {
+export const defaultContextConfig: ContextInjectionConfig = {
   thinkingOs: true,
   projectFocus: 'off',
   reflectionLog: true,
@@ -57,4 +57,4 @@ export interface ReflectionLogEntry {
 /**
  * Reflection log retention configuration
  */
-export const REFLECTION_LOG_RETENTION_DAYS = 7;
+export const reflectionLogRetentionDays = 7;
