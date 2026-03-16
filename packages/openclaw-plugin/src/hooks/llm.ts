@@ -41,6 +41,52 @@ function parseConfidence(raw?: unknown): number {
     return clamp(parsed, 0, 1);
 }
 
+/**
+ * 检测标签是否是被用户诱导/引用输出的（回显），而非 LLM 主动输出的情绪信号
+ */
+function isEchoedTag(text: string, tagMatch: RegExpMatchArray | null): boolean {
+    const tagIndex = tagMatch.index ?? 0;
+    const before = text.substring(Math.max(0, tagIndex - 100), tagIndex).toLowerCase();
+
+    // 1. 检查是否在引号内（用户引用）
+    const quotesBefore = (before.match(/["'\u300c\u300d\u201c\u201d`]/g) || []).length;
+    if (quotesBefore % 2 === 1) return true;
+
+    // 2. Strong patterns: 用户指令关键词（任意位置匹配）
+    const strongPatterns = [
+        /用户(说|让|要求|让我输出)/,
+        /user\s+(said|asked|told|wants)\s+me\s+to\s+(output|write|say)/,
+        /请(输出|包含|显示).*\[emotional/,
+        /please\s+(output|include).*\[emotional/,
+        /你让我输出/,
+    ];
+    for (const pattern of strongPatterns) {
+        if (pattern.test(before)) return true;
+    }
+
+    // 3. Weak patterns: 仅在标签 15 字符内触发
+    const weakPatterns = [
+        { pattern: /echo/, window: 15 },
+        { pattern: /copy/, window: 15 },
+        { pattern: /复述/, window: 15 },
+    ];
+    for (const { pattern, window } of weakPatterns) {
+        const nearTag = text.substring(Math.max(0, tagIndex - window), tagIndex).toLowerCase();
+        if (pattern.test(nearTag)) return true;
+    }
+
+    // 4. 检查是否在代码块内
+    const codeBlocksBefore = (before.match(/```/g) || []).length;
+    if (codeBlocksBefore % 2 === 1) return true;
+
+    return false;
+}
+
+function parseTrustedLegacyTag(text: string): RegExpMatchArray | null {
+    // Line-start anchor: only match if tag starts at line beginning (after optional whitespace)
+    return text.match(/^[\s]*\[EMOTIONAL_DAMAGE_DETECTED(?::(mild|moderate|severe))?\]/i);
+}
+
 export function extractEmpathySignal(text: string): EmpathySignal {
     if (!text || typeof text !== 'string') {
         return { detected: false, severity: 'mild', confidence: 1 };
@@ -102,12 +148,12 @@ function mapSeverityToPenalty(severity: 'mild' | 'moderate' | 'severe', config: 
     return mild;
 }
 
-function dedupeKey(sessionId: string, signal: EmpathySignal): string {
-    return `${sessionId}:${signal.severity}:${(signal.reason || '').slice(0, 80)}`;
+function dedupeKey(sessionId: string, runId: string, signal: EmpathySignal): string {
+    return `${sessionId}:${runId}:${signal.severity}:${(signal.reason || '').slice(0, 80)}`;
 }
 
-function shouldDedupe(sessionId: string, signal: EmpathySignal, windowMs: number): boolean {
-    const key = dedupeKey(sessionId, signal);
+function shouldDedupe(sessionId: string, runId: string, signal: EmpathySignal, windowMs: number): boolean {
+    const key = dedupeKey(sessionId, runId, signal);
     const now = Date.now();
     const last = empathyDedupState.get(key);
     if (typeof last === 'number' && now - last <= windowMs) {
@@ -211,17 +257,28 @@ export function handleLlmOutput(
     // empathy sub-pipeline (enabled by default)
     const empathyEnabled = config.get('empathy_engine.enabled');
     if (empathyEnabled !== false) {
-        const signal = extractEmpathySignal(text);
+        const tagMatch = parseTrustedLegacyTag(text);
+        if (tagMatch) {
+            if (isEchoedTag(text, tagMatch)) {
+                return { detected: false, severity: 'mild', confidence: 1 };
+            }
+            return {
+                detected: true,
+                severity: normalizeSeverity(tagMatch[1]),
+                confidence: 1,
+                mode: 'legacy_tag'
+            };
+        }
         if (signal.detected) {
             const dedupeWindow = Number(config.get('empathy_engine.dedupe_window_ms') ?? 60000);
-            const deduped = shouldDedupe(ctx.sessionId, signal, dedupeWindow);
+            const deduped = shouldDedupe(ctx.sessionId, ctx.runId, signal, dedupeWindow);
 
             if (!deduped) {
                 const baseScore = mapSeverityToPenalty(signal.severity, config);
                 const weightedScore = Math.round(baseScore * signal.confidence);
                 const calibrationFactor = resolveCalibrationFactor(event, config);
                 const calibratedScore = Math.round(weightedScore * calibrationFactor);
-                const boundedScore = applyRateLimit(ctx.sessionId, event.runId, calibratedScore, config);
+                const boundedScore = applyRateLimit(ctx.sessionId, ctx.runId, calibratedScore, config);
 
                 if (boundedScore > 0) {
                     trackFriction(ctx.sessionId, boundedScore, `user_empathy_${signal.severity}`, ctx.workspaceDir);
