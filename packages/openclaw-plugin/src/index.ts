@@ -219,9 +219,117 @@ const plugin = {
       name: "pd-help",
       description: getCommandDescription('pd-help', language),
       handler: (_ctx) => {
-        return { text: language === 'zh'
-          ? "我是你的麻辣导师。你可以输入 '执行 pd-mentor 技能' 来获取手把手的流程引导，或者直接问我关于 DNS、Trust Engine 或进化循环的深度问题。记住：痛是进化的燃料，而我是点火的人。"
-          : "I'm your Spicy Mentor. You can execute the 'pd-mentor' skill for step-by-step guidance, or ask me directly about DNS, Trust Engine, or the evolution loop. Remember: Pain is the fuel of evolution, and I'm the one who lights the fire." };
+        if (language === 'zh') {
+          return { text: `
+📖 **Principles Disciple 命令大全**
+
+## 🚀 快速开始
+| 命令 | 用途 | 使用时机 |
+|------|------|----------|
+| \`/pd-init\` | 初始化工作区 | 新项目开始时 |
+| \`/pd-bootstrap\` | 环境工具扫描 | 缺少开发工具时 |
+
+## 📊 状态查询
+| 命令 | 用途 | 使用时机 |
+|------|------|----------|
+| \`/pd-status\` | 查看进化状态 | 想了解当前 GFI 和 Pain 情况 |
+| \`/pd-trust\` | 查看信任分数 | 想知道自己的权限等级 |
+
+## ⚙️ 配置管理
+| 命令 | 用途 | 使用时机 |
+|------|------|----------|
+| \`/pd-context\` | 控制上下文注入 | 想减少/增加注入内容 |
+| \`/pd-okr\` | OKR 目标管理 | 设置战略目标 |
+
+## 🧠 进化相关
+| 命令 | 用途 | 使用时机 |
+|------|------|----------|
+| \`/pd-evolve\` | 执行进化循环 | 有 Pain 需要处理时 |
+| \`/pd-thinking\` | 思维模型管理 | 更新 Thinking OS |
+| \`/pd-daily\` | 进化日报 | 每日回顾时 |
+| \`/pd-grooming\` | 工作区大扫除 | 定期清理 |
+
+## 💡 常用命令示例
+
+**减少 token 消耗：**
+\`\`\`
+/pd-context minimal
+\`\`\`
+
+**恢复完整上下文：**
+\`\`\`
+/pd-context full
+\`\`\`
+
+**查看当前配置：**
+\`\`\`
+/pd-context status
+\`\`\`
+
+**查看信任分数：**
+\`\`\`
+/pd-trust
+\`\`\`
+
+---
+🔍 输入任意命令后加 \`help\` 可查看详细帮助，如 \`/pd-context help\`
+`.trim() };
+        } else {
+          return { text: `
+📖 **Principles Disciple Command Reference**
+
+## 🚀 Quick Start
+| Command | Purpose | When to Use |
+|---------|---------|-------------|
+| \`/pd-init\` | Initialize workspace | Starting a new project |
+| \`/pd-bootstrap\` | Scan environment tools | Missing dev tools |
+
+## 📊 Status Query
+| Command | Purpose | When to Use |
+|---------|---------|-------------|
+| \`/pd-status\` | View evolution status | Check GFI and Pain status |
+| \`/pd-trust\` | View trust score | Check your permission level |
+
+## ⚙️ Configuration
+| Command | Purpose | When to Use |
+|---------|---------|-------------|
+| \`/pd-context\` | Control context injection | Reduce/increase injected content |
+| \`/pd-okr\` | OKR goal management | Set strategic goals |
+
+## 🧠 Evolution
+| Command | Purpose | When to Use |
+|---------|---------|-------------|
+| \`/pd-evolve\` | Run evolution loop | Process Pain signals |
+| \`/pd-thinking\` | Mental model management | Update Thinking OS |
+| \`/pd-daily\` | Evolution report | Daily review |
+| \`/pd-grooming\` | Workspace cleanup | Periodic cleanup |
+
+## 💡 Common Examples
+
+**Reduce token usage:**
+\`\`\`
+/pd-context minimal
+\`\`\`
+
+**Restore full context:**
+\`\`\`
+/pd-context full
+\`\`\`
+
+**View current config:**
+\`\`\`
+/pd-context status
+\`\`\`
+
+**Check trust score:**
+\`\`\`
+/pd-trust
+\`\`\`
+
+---
+🔍 Add \`help\` after any command for details, e.g., \`/pd-context help\`
+`.trim() };
+        }
       }
     });
 
