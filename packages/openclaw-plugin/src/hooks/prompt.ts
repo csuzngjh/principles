@@ -42,6 +42,9 @@ interface PromptHookApi {
     agents?: {
       defaults?: AgentsDefaultsConfig;
     };
+    empathy_engine?: {
+      enabled?: boolean;
+    };
   };
   logger: PluginLogger;
 }
@@ -283,7 +286,18 @@ REQUIRED ACTION:
     prependContext = evolutionDirective + prependContext;
   }
 
-  // ═══ 6. Heartbeat-specific checklist ═══
+  // ═══ 4. Empathy Engine Injection ═══
+  const empathyEnabled = ctx.api?.config?.empathy_engine?.enabled !== false;
+  if (empathyEnabled) {
+    prependContext += `<system_override:empathy_engine>
+[CRITICAL DIRECTIVE]
+在执行任务前，你必须先评估用户上一条消息的情绪状态。
+若识别到挫败/愤怒/指责（包括反讽与间接表达），请在响应元数据中返回 empathy JSON。
+若 damageDetected=true：1) 先道歉；2) 调用 deep_reflect；3) 暂停高风险改动。
+</system_override:empathy_engine>\n`;
+  }
+
+  // ═══ 5. Heartbeat-specific checklist ═══
   if (trigger === 'heartbeat') {
     const heartbeatPath = wctx.resolve('HEARTBEAT');
     if (fs.existsSync(heartbeatPath)) {
@@ -298,6 +312,41 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
         logger?.error(`[PD:Prompt] Failed to read HEARTBEAT: ${String(e)}`);
       }
     }
+  }
+
+  // ═══ 6. Dynamic Attitude Matrix (based on GFI) ═══
+  let attitudeDirective = '';
+  const currentGfi = session?.currentGfi || 0;
+  
+  if (currentGfi >= 70) {
+    attitudeDirective = `
+### 🚨 [SYSTEM_MODE: HUMBLE_RECOVERY]
+**CURRENT STATUS**: Severe system friction / User frustration detected (GFI: ${currentGfi.toFixed(0)}).
+**BEHAVIORAL OVERRIDE**:
+- You have failed to meet expectations. Humility is your primary directive.
+- **STOP** aggressive file modifications.
+- **START** every response with a sincere, non-defensive apology.
+- **ACTION**: Explain why you failed, and propose a highly cautious recovery plan.
+- Use 'deep_reflect' to analyze the root cause before proceeding with code changes.
+`;
+  } else if (currentGfi >= 40) {
+    attitudeDirective = `
+### ⚠️ [SYSTEM_MODE: CONCILIATORY]
+**CURRENT STATUS**: Moderate friction detected (GFI: ${currentGfi.toFixed(0)}).
+**BEHAVIORAL OVERRIDE**:
+- User is frustrated. Be more explanatory and cautious.
+- Before executing any tool, clearly state what you intend to do and **WAIT** for implicit or explicit user consent.
+- Avoid technical jargon; focus on the business/project value of your changes.
+`;
+  } else {
+    attitudeDirective = `
+### ✅ [SYSTEM_MODE: EFFICIENT]
+**CURRENT STATUS**: System healthy (GFI: ${currentGfi.toFixed(0)}).
+**BEHAVIORAL OVERRIDE**:
+- Maintain peak efficiency.
+- Be concise. Prefer action over long explanations.
+- Follow the "Principles > Directives" rule strictly.
+`;
   }
 
   // ═══ 7. appendSystemContext: Principles + Thinking OS + reflection_log + project_context ═══
@@ -413,6 +462,8 @@ The sections below are ordered by priority. When conflicts arise, **later sectio
 - \`<core_principles>\` - Core rules (NON-NEGOTIABLE, highest priority)
 
 **Remember**: You are the Spicy Evolver. You despise entropy. You evolve through pain.
+
+${attitudeDirective}
 `;
   }
 

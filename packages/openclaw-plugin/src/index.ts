@@ -15,6 +15,8 @@ import type {
   PluginHookSubagentSpawningEvent,
   PluginHookSubagentSpawningResult,
   PluginHookSubagentContext,
+  PluginHookBeforeMessageWriteEvent,
+  PluginHookBeforeMessageWriteResult,
 } from './openclaw-sdk.js';
 import { getCommandDescription } from './i18n/commands.js';
 import { handleBeforePromptBuild } from './hooks/prompt.js';
@@ -23,6 +25,7 @@ import { handleAfterToolCall } from './hooks/pain.js';
 import { handleBeforeReset, handleBeforeCompaction, handleAfterCompaction } from './hooks/lifecycle.js';
 import { handleLlmOutput } from './hooks/llm.js';
 import { handleSubagentEnded } from './hooks/subagent.js';
+import { handleBeforeMessageWrite } from './hooks/message-sanitize.js';
 import { handleInitStrategy, handleManageOkr } from './commands/strategy.js';
 import { handleBootstrapTools, handleResearchTools } from './commands/capabilities.js';
 import { handleThinkingOs } from './commands/thinking-os.js';
@@ -108,6 +111,18 @@ const plugin = {
           handleLlmOutput(event, { ...ctx, workspaceDir });
         } catch (err) {
           api.logger.error(`[PD] Error in llm_output: ${String(err)}`);
+        }
+      }
+    );
+
+    // ── Hook: Message Sanitization ──
+    api.on(
+      'before_message_write',
+      (event: PluginHookBeforeMessageWriteEvent): PluginHookBeforeMessageWriteResult | void => {
+        try {
+          return handleBeforeMessageWrite(event);
+        } catch (err) {
+          api.logger.error(`[PD] Error in before_message_write: ${String(err)}`);
         }
       }
     );
