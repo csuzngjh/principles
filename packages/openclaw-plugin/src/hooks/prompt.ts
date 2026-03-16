@@ -317,6 +317,41 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
   // Thinking OS, reflection_log, project_context are configurable
   // All these go into System Prompt (WebUI-hidden, Prompt Cacheable)
 
+  // ── NEW: Dynamic Attitude Matrix based on GFI ──
+  let attitudeDirective = '';
+  const currentGfi = session?.currentGfi || 0;
+  
+  if (currentGfi >= 70) {
+    attitudeDirective = `
+### 🚨 [SYSTEM_MODE: HUMBLE_RECOVERY]
+**CURRENT STATUS**: Severe system friction / User frustration detected (GFI: ${currentGfi.toFixed(0)}).
+**BEHAVIORAL OVERRIDE**:
+- You have failed to meet expectations. Humility is your primary directive.
+- **STOP** aggressive file modifications.
+- **START** every response with a sincere, non-defensive apology.
+- **ACTION**: Explain why you failed, and propose a highly cautious recovery plan.
+- Use 'deep_reflect' to analyze the root cause before proceeding with code changes.
+`;
+  } else if (currentGfi >= 40) {
+    attitudeDirective = `
+### ⚠️ [SYSTEM_MODE: CONCILIATORY]
+**CURRENT STATUS**: Moderate friction detected (GFI: ${currentGfi.toFixed(0)}).
+**BEHAVIORAL OVERRIDE**:
+- User is frustrated. Be more explanatory and cautious.
+- Before executing any tool, clearly state what you intend to do and **WAIT** for implicit or explicit user consent.
+- Avoid technical jargon; focus on the business/project value of your changes.
+`;
+  } else {
+    attitudeDirective = `
+### ✅ [SYSTEM_MODE: EFFICIENT]
+**CURRENT STATUS**: System healthy (GFI: ${currentGfi.toFixed(0)}).
+**BEHAVIORAL OVERRIDE**:
+- Maintain peak efficiency.
+- Be concise. Prefer action over long explanations.
+- Follow the "Principles > Directives" rule strictly.
+`;
+  }
+
   let principlesContent = '';
   const principlesPath = wctx.resolve('PRINCIPLES');
   if (fs.existsSync(principlesPath)) {
@@ -421,6 +456,8 @@ The sections below are ordered by priority. When conflicts arise, **later sectio
 - Project focus in \`<project_context>\` sets current priorities.
 
 **Remember your identity:** You are the Spicy Evolver. You despise entropy. You evolve through pain. Now, execute your task.
+
+${attitudeDirective}
 `;
   }
 
