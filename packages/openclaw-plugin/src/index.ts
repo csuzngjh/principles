@@ -34,6 +34,7 @@ import { handleTrustCommand } from './commands/trust.js';
 import { handlePainCommand } from './commands/pain.js';
 import { handleContextCommand } from './commands/context.js';
 import { handleFocusCommand } from './commands/focus.js';
+import { handleRollbackCommand } from './commands/rollback.js';
 import { EvolutionWorkerService } from './service/evolution-worker.js';
 import { ensureWorkspaceTemplates } from './core/init.js';
 import { migrateDirectoryStructure } from './core/migration.js';
@@ -404,6 +405,22 @@ const plugin = {
           return handleFocusCommand(ctx, api);
         } catch (err) {
           api.logger.error(`[PD] Command /pd-focus failed: ${String(err)}`);
+          return { text: language === 'zh' ? "命令执行失败，请检查日志。" : "Command failed. Check logs." };
+        }
+      }
+    });
+
+    api.registerCommand({
+      name: "pd-rollback",
+      description: getCommandDescription('pd-rollback', language),
+      acceptsArgs: true,
+      handler: (ctx) => {
+        try {
+          const workspaceDir = api.resolvePath('.');
+          if (ctx.config) ctx.config.workspaceDir = workspaceDir;
+          return handleRollbackCommand(ctx);
+        } catch (err) {
+          api.logger.error(`[PD] Command /pd-rollback failed: ${String(err)}`);
           return { text: language === 'zh' ? "命令执行失败，请检查日志。" : "Command failed. Check logs." };
         }
       }

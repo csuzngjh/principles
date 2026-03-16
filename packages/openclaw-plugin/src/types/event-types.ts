@@ -15,6 +15,7 @@ export type EventType =
   | 'evolution_task'
   | 'deep_reflection'
   | 'trust_change'
+  | 'empathy_rollback'
   | 'error'
   | 'warn';
 
@@ -28,7 +29,8 @@ export type EventCategory =
   | 'completed'
   | 'promoted'
   | 'passed'
-  | 'changed';
+  | 'changed'
+  | 'rolled_back';
 
 /**
  * Base event structure for JSONL logging.
@@ -154,6 +156,19 @@ export interface DeepReflectionEventData {
   risksCount?: number;
 }
 
+export interface EmpathyRollbackEventData {
+  /** Event ID being rolled back */
+  eventId: string;
+  /** Original penalty score that was applied */
+  originalScore: number;
+  /** Session ID where the original event occurred */
+  originalSessionId?: string;
+  /** Reason for rollback (manual, false_positive, etc.) */
+  reason: string;
+  /** Who initiated the rollback */
+  triggeredBy: 'user_command' | 'natural_language' | 'system';
+}
+
 // ============== Daily Statistics ==============
 
 export interface ToolCallStats {
@@ -176,6 +191,60 @@ export interface PainStats {
   candidatesPromoted: number;
   avgScore: number;
   maxScore: number;
+}
+
+/**
+ * Empathy Engine event statistics for tracking emotional signals.
+ * Used for /pd-status empathy card and effectiveness metrics.
+ */
+export interface EmpathyEventStats {
+  /** Total empathy events detected (excluding deduped) */
+  totalEvents: number;
+  /** Events that were deduped (not counted in totalEvents) */
+  dedupedCount: number;
+  /** Dedupe hit rate (dedupedCount / (totalEvents + dedupedCount)) */
+  dedupeHitRate: number;
+  /** Total penalty score applied */
+  totalPenaltyScore: number;
+  /** Score rolled back via manual rollback */
+  rolledBackScore: number;
+  /** Number of rollback operations */
+  rollbackCount: number;
+  /** Events by severity level */
+  bySeverity: {
+    mild: number;
+    moderate: number;
+    severe: number;
+  };
+  /** Score by severity level */
+  scoreBySeverity: {
+    mild: number;
+    moderate: number;
+    severe: number;
+  };
+  /** Events by detection mode */
+  byDetectionMode: {
+    structured: number;
+    legacy_tag: number;
+  };
+  /** Events by origin */
+  byOrigin: {
+    assistant_self_report: number;
+    user_manual: number;
+    system_infer: number;
+  };
+  /** Confidence distribution */
+  confidenceDistribution: {
+    high: number;  // confidence >= 0.8
+    medium: number; // 0.5 <= confidence < 0.8
+    low: number;   // confidence < 0.5
+  };
+  /** Daily trend (last 7 days) */
+  dailyTrend: Array<{
+    date: string;
+    count: number;
+    score: number;
+  }>;
 }
 
 export interface GfiStats {
@@ -256,6 +325,8 @@ export interface DailyStats {
   errors: ErrorStats;
   /** Pain signal statistics */
   pain: PainStats;
+  /** Empathy Engine event statistics */
+  empathy: EmpathyEventStats;
   /** GFI statistics */
   gfi: GfiStats;
   /** Evolution statistics */
@@ -298,6 +369,39 @@ export function createEmptyDailyStats(date: string): DailyStats {
       candidatesPromoted: 0,
       avgScore: 0,
       maxScore: 0,
+    },
+    empathy: {
+      totalEvents: 0,
+      dedupedCount: 0,
+      dedupeHitRate: 0,
+      totalPenaltyScore: 0,
+      rolledBackScore: 0,
+      rollbackCount: 0,
+      bySeverity: {
+        mild: 0,
+        moderate: 0,
+        severe: 0,
+      },
+      scoreBySeverity: {
+        mild: 0,
+        moderate: 0,
+        severe: 0,
+      },
+      byDetectionMode: {
+        structured: 0,
+        legacy_tag: 0,
+      },
+      byOrigin: {
+        assistant_self_report: 0,
+        user_manual: 0,
+        system_infer: 0,
+      },
+      confidenceDistribution: {
+        high: 0,
+        medium: 0,
+        low: 0,
+      },
+      dailyTrend: [],
     },
     gfi: {
       peak: 0,

@@ -1,4 +1,4 @@
-# 🧬 Principles Disciple Beginner's Survival Guide (v1.5.1)
+# 🧬 Principles Disciple Beginner's Survival Guide (v1.5.5)
 
 > **In one sentence for non-technical users:**
 > This is a plugin that gives your AI assistant a "brain" and a sense of "pain". When it makes a mistake in your code or writing, it feels "pain" and remembers the lesson so it won't happen again. More importantly, it hits the brakes when the AI tries to make massive changes, protecting your hard work from being ruined.
@@ -19,9 +19,9 @@ It will help you invisibly by:
 
 ---
 
-## 🚑 Step 2: When you encounter these 3 "frustrating" situations...
+## 🚑 Step 2: When you encounter these "frustrating" situations...
 
-Although the system is fully automatic, in the process of protecting you, the AI might sometimes appear "dumb" or "timid". If you encounter the following three scenarios, here is how to solve them:
+Although the system is fully automatic, in the process of protecting you, the AI might sometimes appear "dumb" or "timid". If you encounter the following scenarios, here is how to solve them:
 
 ### 🚨 Scenario A: AI tells you "I am blocked, I need to write a PLAN.md"
 * **Why did this happen?** The AI tried to modify a protected core directory. The system stopped it to prevent unauthorized changes.
@@ -51,6 +51,19 @@ Although the system is fully automatic, in the process of protecting you, the AI
   > **"Write down the clues you found and our next steps into `memory/.scratchpad.md`."**
   When you return tomorrow, you can say: "Read your scratchpad and pick up where we left off."
 
+### 🫀 Scenario E: The AI misjudged my emotions and penalized me
+* **Why did this happen?** Sometimes the AI interprets your jokes or sarcasm as "frustration" and automatically deducts fatigue points.
+* **What should I do?**
+  Just tell the AI directly:
+  > **"Undo the last penalty"** or **"Rollback the last one"**
+  The AI will automatically reverse the misjudged penalty and restore your fatigue index.
+
+  Or use the command:
+  > **`/pd-rollback last`**
+
+  If you want to see exactly how many points were deducted and why:
+  > **`/pd-status empathy`** —— View emotion event statistics
+
 ---
 
 ## 🎮 Step 3: Your Commander Dashboard
@@ -59,11 +72,17 @@ If you want to see what state the AI is currently in, or give it specific direct
 
 1. **`/pd-status`** —— **Check Health**
    * See if the AI is currently "Critically Fatigued". It will also tell you how many invalid operations the system has blocked for you.
-2. **`/trust`** —— **Check Permissions**
+2. **`/pd-status empathy`** —— **View Emotion Events** ✨ New
+   * View emotion event statistics: points deducted today, dedupe hit rate, severity distribution.
+   * Use `--week` for 7-day trends, `--session` for current session stats.
+3. **`/pd-rollback`** —— **Undo Emotion Penalty** ✨ New
+   * When the AI misjudges your emotions, use this command to undo the penalty.
+   * Use `last` to undo the most recent one, or specify an event ID.
+4. **`/trust`** —— **Check Permissions**
    * The AI starts with high permissions. If it does well, its permissions grow; if it keeps making errors, it gets demoted and can only make minor tweaks. This dashboard shows its current score and rank.
-3. **`/workspace-grooming`** —— **Summon the Cyber-Housekeeper (Cleanup)**
+5. **`/workspace-grooming`** —— **Summon the Cyber-Housekeeper (Cleanup)**
    * When your project root gets messy with temporary files, run this command. The AI will act as a housekeeper with "digital cleanliness", helping you clean up, rename, and archive useless garbage files (rest assured, it will never touch your core code).
-4. **`/init-strategy`** —— **Set the Vision**
+6. **`/init-strategy`** —— **Set the Vision**
    * If you want the AI to work towards a long-term goal every day (e.g., "Always write extremely concise code"), run this command. The AI will conduct a "soul-searching interview" with you and strictly remember your rules.
 
 ---

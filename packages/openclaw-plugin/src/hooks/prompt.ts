@@ -292,8 +292,15 @@ REQUIRED ACTION:
     prependContext += `<system_override:empathy_engine>
 [CRITICAL DIRECTIVE]
 在执行任务前，你必须先评估用户上一条消息的情绪状态。
+
+**情绪检测**：
 若识别到挫败/愤怒/指责（包括反讽与间接表达），请在响应元数据中返回 empathy JSON。
 若 damageDetected=true：1) 先道歉；2) 调用 deep_reflect；3) 暂停高风险改动。
+
+**回滚请求识别**：
+若用户请求撤销/回滚情绪惩罚（如"撤销刚才的惩罚"、"回滚上一次"等），请在响应末尾单独一行输出：
+[EMPATHY_ROLLBACK_REQUEST]
+然后立即执行 /pd-rollback last 命令或告知用户可使用此命令回滚。
 </system_override:empathy_engine>\n`;
   }
 

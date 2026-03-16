@@ -2,6 +2,7 @@ import type { PluginHookBeforeMessageWriteEvent, PluginHookBeforeMessageWriteRes
 
 const INTERNAL_TAG_PATTERNS = [
   /\[EMOTIONAL_DAMAGE_DETECTED(?::(?:mild|moderate|severe))?\]/gi,
+  /\[EMPATHY_ROLLBACK_REQUEST\]/gi,
   /<empathy\s+[^>]*\/?>(?:<\/empathy>)?/gi,
 ];
 
