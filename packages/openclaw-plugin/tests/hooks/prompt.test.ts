@@ -172,6 +172,7 @@ describe('Prompt Context Injection Hook', () => {
         if (key === 'PAIN_FLAG') return path.join(workspaceDir, '.state', '.pain_flag');
         if (key === 'SYSTEM_CAPABILITIES') return path.join(workspaceDir, '.state', 'SYSTEM_CAPABILITIES.json');
         if (key === 'THINKING_OS') return path.join(workspaceDir, '.principles', 'THINKING_OS.md');
+        if (key === 'REFLECTION_LOG') return path.join(workspaceDir, 'memory', 'reflection-log.md');
         if (key === 'HEARTBEAT') return path.join(workspaceDir, 'HEARTBEAT.md');
         if (key === 'EVOLUTION_QUEUE') return path.join(workspaceDir, '.state', 'evolution_queue.json');
         if (key === 'PRINCIPLES') return path.join(workspaceDir, '.principles', 'PRINCIPLES.md');
@@ -761,6 +762,197 @@ describe('Prompt Context Injection Hook', () => {
       expect(result?.prependContext).not.toContain('[truncated]');
       // Should contain all lines including line 15
       expect(result?.prependContext).toContain('Line 15');
+    });
+  });
+
+  // ═══ Test Group 4: ContextInjectionConfig 配置测试 ═══
+  describe('ContextInjectionConfig settings', () => {
+    it('thinkingOs: false → 不注入 THINKING_OS', async () => {
+      vi.mocked(fs.existsSync).mockImplementation((p) => {
+        if (p.toString().includes('PROFILE.json')) return true;
+        if (p.toString().includes('THINKING_OS.md')) return true;
+        return false;
+      });
+      vi.mocked(fs.readFileSync).mockImplementation((p) => {
+        if (p.toString().includes('PROFILE.json')) {
+          return JSON.stringify({ contextInjection: { thinkingOs: false } });
+        }
+        if (p.toString().includes('THINKING_OS.md')) {
+          return 'Thinking OS Content';
+        }
+        return '';
+      });
+
+      const result = await handleBeforePromptBuild({} as any, {
+        workspaceDir,
+        trigger: 'user',
+        sessionId: 'agent:main:123'
+      } as any);
+
+      // thinkingOs: false, so THINKING_OS should NOT be injected
+      expect(result?.appendSystemContext).not.toContain('<thinking_os>');
+      expect(result?.appendSystemContext).not.toContain('Thinking OS Content');
+    });
+
+    it('thinkingOs: true → 注入 THINKING_OS', async () => {
+      vi.mocked(fs.existsSync).mockImplementation((p) => {
+        if (p.toString().includes('PROFILE.json')) return true;
+        if (p.toString().includes('THINKING_OS.md')) return true;
+        return false;
+      });
+      vi.mocked(fs.readFileSync).mockImplementation((p) => {
+        if (p.toString().includes('PROFILE.json')) {
+          return JSON.stringify({ contextInjection: { thinkingOs: true } });
+        }
+        if (p.toString().includes('THINKING_OS.md')) {
+          return 'Thinking OS Content';
+        }
+        return '';
+      });
+
+      const result = await handleBeforePromptBuild({} as any, {
+        workspaceDir,
+        trigger: 'user',
+        sessionId: 'agent:main:123'
+      } as any);
+
+      // thinkingOs: true, so THINKING_OS should be injected
+      expect(result?.appendSystemContext).toContain('<thinking_os>');
+      expect(result?.appendSystemContext).toContain('Thinking OS Content');
+    });
+
+    it('trustScore: false → 不注入信任分数', async () => {
+      vi.mocked(fs.existsSync).mockImplementation((p) => {
+        if (p.toString().includes('PROFILE.json')) return true;
+        return false;
+      });
+      vi.mocked(fs.readFileSync).mockImplementation((p) => {
+        if (p.toString().includes('PROFILE.json')) {
+          return JSON.stringify({ contextInjection: { trustScore: false } });
+        }
+        return '';
+      });
+
+      const result = await handleBeforePromptBuild({} as any, {
+        workspaceDir,
+        trigger: 'user',
+        sessionId: 'agent:main:123'
+      } as any);
+
+      // trustScore: false, so internal_context should NOT be injected
+      expect(result?.prependContext).not.toContain('<pd:internal_context>');
+      expect(result?.prependContext).not.toContain('CURRENT TRUST SCORE');
+    });
+
+    it('trustScore: true → 注入信任分数', async () => {
+      vi.mocked(fs.existsSync).mockImplementation((p) => {
+        if (p.toString().includes('PROFILE.json')) return true;
+        return false;
+      });
+      vi.mocked(fs.readFileSync).mockImplementation((p) => {
+        if (p.toString().includes('PROFILE.json')) {
+          return JSON.stringify({ contextInjection: { trustScore: true } });
+        }
+        return '';
+      });
+
+      const result = await handleBeforePromptBuild({} as any, {
+        workspaceDir,
+        trigger: 'user',
+        sessionId: 'agent:main:123'
+      } as any);
+
+      // trustScore: true, so internal_context should be injected
+      expect(result?.prependContext).toContain('<pd:internal_context>');
+      expect(result?.prependContext).toContain('CURRENT TRUST SCORE');
+    });
+
+    it('reflectionLog: false → 不注入反思日志', async () => {
+      vi.mocked(fs.existsSync).mockImplementation((p) => {
+        if (p.toString().includes('PROFILE.json')) return true;
+        if (p.toString().includes('reflection-log.md')) return true;
+        return false;
+      });
+      vi.mocked(fs.readFileSync).mockImplementation((p) => {
+        if (p.toString().includes('PROFILE.json')) {
+          return JSON.stringify({ contextInjection: { reflectionLog: false } });
+        }
+        if (p.toString().includes('reflection-log.md')) {
+          return 'Reflection Log Content';
+        }
+        return '';
+      });
+
+      const result = await handleBeforePromptBuild({} as any, {
+        workspaceDir,
+        trigger: 'user',
+        sessionId: 'agent:main:123'
+      } as any);
+
+      // reflectionLog: false, so reflection_log should NOT be injected
+      expect(result?.prependContext).not.toContain('<reflection_log>');
+      expect(result?.prependContext).not.toContain('Reflection Log Content');
+    });
+
+    it('reflectionLog: true → 注入反思日志', async () => {
+      vi.mocked(fs.existsSync).mockImplementation((p) => {
+        if (p.toString().includes('PROFILE.json')) return true;
+        if (p.toString().includes('reflection-log.md')) return true;
+        return false;
+      });
+      vi.mocked(fs.readFileSync).mockImplementation((p) => {
+        if (p.toString().includes('PROFILE.json')) {
+          return JSON.stringify({ contextInjection: { reflectionLog: true } });
+        }
+        if (p.toString().includes('reflection-log.md')) {
+          return 'Reflection Log Content';
+        }
+        return '';
+      });
+
+      const result = await handleBeforePromptBuild({} as any, {
+        workspaceDir,
+        trigger: 'user',
+        sessionId: 'agent:main:123'
+      } as any);
+
+      // reflectionLog: true, so reflection_log should be injected
+      expect(result?.prependContext).toContain('<reflection_log>');
+      expect(result?.prependContext).toContain('Reflection Log Content');
+    });
+
+    it('多项配置同时生效: thinkingOs=false, trustScore=false, reflectionLog=false', async () => {
+      vi.mocked(fs.existsSync).mockImplementation((p) => {
+        if (p.toString().includes('PROFILE.json')) return true;
+        if (p.toString().includes('THINKING_OS.md')) return true;
+        if (p.toString().includes('reflection-log.md')) return true;
+        return false;
+      });
+      vi.mocked(fs.readFileSync).mockImplementation((p) => {
+        if (p.toString().includes('PROFILE.json')) {
+          return JSON.stringify({ 
+            contextInjection: { 
+              thinkingOs: false, 
+              trustScore: false, 
+              reflectionLog: false 
+            } 
+          });
+        }
+        if (p.toString().includes('THINKING_OS.md')) return 'Thinking OS';
+        if (p.toString().includes('reflection-log.md')) return 'Reflection';
+        return '';
+      });
+
+      const result = await handleBeforePromptBuild({} as any, {
+        workspaceDir,
+        trigger: 'user',
+        sessionId: 'agent:main:123'
+      } as any);
+
+      // All disabled
+      expect(result?.appendSystemContext).not.toContain('<thinking_os>');
+      expect(result?.prependContext).not.toContain('<pd:internal_context>');
+      expect(result?.prependContext).not.toContain('<reflection_log>');
     });
   });
 });

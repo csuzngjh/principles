@@ -106,6 +106,7 @@ function toggleSetting(
     isZh: boolean
 ): string {
     const config = loadContextInjectionConfig(workspaceDir);
+    const oldValue = config[key];
     
     if (value === 'on') {
         config[key] = true;
@@ -117,13 +118,36 @@ function toggleSetting(
             : `❌ Invalid value: "${value}". Use "on" or "off".`;
     }
     
-    if (saveConfig(workspaceDir, config)) {
-        const keyName = isZh 
-            ? { thinkingOs: '思维模型', trustScore: '信任分数', reflectionLog: '反思日志' }[key]
-            : key;
+    const newValue = config[key];
+    const keyName = isZh 
+        ? { thinkingOs: '思维模型', trustScore: '信任分数', reflectionLog: '反思日志' }[key]
+        : key;
+    
+    // No change needed
+    if (oldValue === newValue) {
         return isZh
-            ? `✅ ${keyName} 已${config[key] ? '开启' : '关闭'}`
-            : `✅ ${keyName} is now ${config[key] ? 'ON' : 'OFF'}`;
+            ? `ℹ️ ${keyName} 已经是 ${newValue ? '开启' : '关闭'} 状态`
+            : `ℹ️ ${keyName} is already ${newValue ? 'ON' : 'OFF'}`;
+    }
+    
+    if (saveConfig(workspaceDir, config)) {
+        // Verify the save by re-reading
+        const verifyConfig = loadContextInjectionConfig(workspaceDir);
+        const verifyValue = verifyConfig[key];
+        
+        if (verifyValue !== newValue) {
+            return isZh
+                ? `⚠️ ${keyName} 保存后验证失败，请重试`
+                : `⚠️ ${keyName} verification failed after save, please retry`;
+        }
+        
+        const arrow = isZh ? '→' : '→';
+        const oldLabel = oldValue ? (isZh ? '开启' : 'ON') : (isZh ? '关闭' : 'OFF');
+        const newLabel = newValue ? (isZh ? '开启' : 'ON') : (isZh ? '关闭' : 'OFF');
+        
+        return isZh
+            ? `✅ ${keyName} 已更新: ${oldLabel} ${arrow} ${newLabel}\n\n💡 下次对话时生效`
+            : `✅ ${keyName} updated: ${oldLabel} ${arrow} ${newLabel}\n\n💡 Takes effect on next turn`;
     } else {
         return isZh
             ? `❌ 保存配置失败`
@@ -140,19 +164,40 @@ function setProjectFocus(
     isZh: boolean
 ): string {
     const config = loadContextInjectionConfig(workspaceDir);
+    const oldValue = config.projectFocus;
+    const validModes = ['full', 'summary', 'off'] as const;
+    type FocusMode = typeof validModes[number];
     
-    if (value !== 'full' && value !== 'summary' && value !== 'off') {
+    if (!validModes.includes(value as FocusMode)) {
         return isZh
             ? `❌ 无效值: "${value}"。使用 "full"、"summary" 或 "off"。`
             : `❌ Invalid value: "${value}". Use "full", "summary", or "off".`;
     }
     
-    config.projectFocus = value;
+    const newValue = value as FocusMode;
+    config.projectFocus = newValue;
+    
+    // No change needed
+    if (oldValue === newValue) {
+        return isZh
+            ? `ℹ️ 项目上下文已经是 ${formatProjectFocus(newValue, isZh)} 状态`
+            : `ℹ️ Project context is already ${formatProjectFocus(newValue, isZh)}`;
+    }
     
     if (saveConfig(workspaceDir, config)) {
+        // Verify the save by re-reading
+        const verifyConfig = loadContextInjectionConfig(workspaceDir);
+        if (verifyConfig.projectFocus !== newValue) {
+            return isZh
+                ? `⚠️ 项目上下文保存后验证失败，请重试`
+                : `⚠️ Project context verification failed after save, please retry`;
+        }
+        
+        const arrow = '→';
+        
         return isZh
-            ? `✅ 项目上下文已设置为: ${formatProjectFocus(value, isZh)}`
-            : `✅ Project context set to: ${formatProjectFocus(value, isZh)}`;
+            ? `✅ 项目上下文已更新: ${formatProjectFocus(oldValue as FocusMode, isZh)} ${arrow} ${formatProjectFocus(newValue, isZh)}\n\n💡 下次对话时生效`
+            : `✅ Project context updated: ${formatProjectFocus(oldValue as FocusMode, isZh)} ${arrow} ${formatProjectFocus(newValue, isZh)}\n\n💡 Takes effect on next turn`;
     } else {
         return isZh
             ? `❌ 保存配置失败`
