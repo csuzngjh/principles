@@ -184,6 +184,13 @@ export type PluginHookSubagentContext = {
     workspaceDir?: string; // CommonPD extension
 };
 
+
+export type PluginHookSessionContext = {
+    agentId?: string;
+    sessionId: string;
+    sessionKey?: string;
+};
+
 // ── Event types ─────────────────────────────────────────────────────
 
 export type PluginHookBeforePromptBuildEvent = {
@@ -231,6 +238,17 @@ export type PluginHookLlmOutputEvent = {
     usage?: {
         input?: number; output?: number; cacheRead?: number; cacheWrite?: number; total?: number;
     };
+};
+
+export type PluginHookBeforeMessageWriteEvent = {
+    message: any;
+    sessionKey?: string;
+    agentId?: string;
+};
+
+export type PluginHookBeforeMessageWriteResult = {
+    block?: boolean;
+    message?: any;
 };
 
 export type PluginHookSubagentEndedEvent = {
@@ -306,5 +324,6 @@ export type PluginHookHandlerMap = {
     before_reset: (event: PluginHookBeforeResetEvent, ctx: PluginHookAgentContext) => any;
     before_compaction: (event: PluginHookBeforeCompactionEvent, ctx: PluginHookAgentContext) => any;
     after_compaction: (event: PluginHookAfterCompactionEvent, ctx: PluginHookAgentContext) => any;
+    before_message_write: (event: PluginHookBeforeMessageWriteEvent, ctx: PluginHookSessionContext) => any;
     [key: string]: (...args: any[]) => any;
 };
