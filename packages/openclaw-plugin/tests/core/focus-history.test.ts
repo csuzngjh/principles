@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
-import * as path from 'path';
 import {
   extractVersion,
   extractDate,
@@ -23,7 +22,6 @@ vi.mock('fs', () => ({
 
 describe('focus-history', () => {
   const mockFocusPath = '/workspace/memory/okr/CURRENT_FOCUS.md';
-  const mockHistoryDir = '/workspace/memory/okr/.history';
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -63,20 +61,26 @@ describe('focus-history', () => {
       vi.mocked(fs.existsSync).mockReturnValue(false);
 
       const content = `# 🎯 CURRENT_FOCUS\n\n> **版本**: v1 | **更新**: 2026-03-16`;
-      const result = backupToHistory(mockFocusPath, content);
+      backupToHistory(mockFocusPath, content);
 
       expect(fs.mkdirSync).toHaveBeenCalled();
       // 检查路径包含 .history 目录名
       const calledPath = (fs.mkdirSync as any).mock.calls[0][0];
       expect(calledPath).toContain('.history');
       expect(fs.writeFileSync).toHaveBeenCalled();
+
+      // 验证写入的实际内容
+      const writeCalls = (fs.writeFileSync as any).mock.calls;
+      expect(writeCalls.length).toBe(1);
+      expect(writeCalls[0][1]).toBe(content); // 验证写入的内容与原内容一致
+      expect(writeCalls[0][0]).toContain('CURRENT_FOCUS.v1.2026-03-16.md'); // 验证文件名
     });
 
     it('should skip if backup already exists', () => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
 
       const content = `# 🎯 CURRENT_FOCUS\n\n> **版本**: v1 | **更新**: 2026-03-16`;
-      const result = backupToHistory(mockFocusPath, content);
+      backupToHistory(mockFocusPath, content);
 
       expect(fs.writeFileSync).not.toHaveBeenCalled();
     });
@@ -91,18 +95,58 @@ describe('focus-history', () => {
       expect(fs.readdirSync).not.toHaveBeenCalled();
     });
 
-    it('should delete files exceeding max count', () => {
+    it('should delete oldest files when exceeding max count', () => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
+
+      // 创建3个文件，按修改时间排序
+      const oldDate = new Date('2026-03-10');
+      const middleDate = new Date('2026-03-11');
+      const newDate = new Date('2026-03-12');
+
       vi.mocked(fs.readdirSync).mockReturnValue([
         'CURRENT_FOCUS.v1.2026-03-10.md',
         'CURRENT_FOCUS.v2.2026-03-11.md',
         'CURRENT_FOCUS.v3.2026-03-12.md',
       ] as any);
-      vi.mocked(fs.statSync).mockReturnValue({ mtime: new Date() } as any);
+
+      // 模拟 statSync 返回不同的修改时间
+      vi.mocked(fs.statSync)
+        .mockReturnValueOnce({ mtime: oldDate } as any)
+        .mockReturnValueOnce({ mtime: middleDate } as any)
+        .mockReturnValueOnce({ mtime: newDate } as any);
 
       cleanupHistory(mockFocusPath, 2);
 
+      // 应该删除1个文件（最旧的）
       expect(fs.unlinkSync).toHaveBeenCalledTimes(1);
+
+      // 验证删除的是最旧的文件（v1）
+      const deletedPath = (fs.unlinkSync as any).mock.calls[0][0];
+      expect(deletedPath).toContain('CURRENT_FOCUS.v1.2026-03-10.md');
+    });
+
+    it('should handle deletion failures gracefully', () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readdirSync).mockReturnValue([
+        'CURRENT_FOCUS.v1.2026-03-10.md',
+        'CURRENT_FOCUS.v2.2026-03-11.md',
+        'CURRENT_FOCUS.v3.2026-03-12.md',
+        'CURRENT_FOCUS.v4.2026-03-13.md',
+      ] as any);
+
+      // statSync 调用用于排序
+      vi.mocked(fs.statSync).mockReturnValue({ mtime: new Date() } as any);
+
+      // 模拟第一个文件删除失败
+      vi.mocked(fs.unlinkSync).mockImplementationOnce(() => {
+        throw new Error('Permission denied');
+      });
+
+      // 不应该抛出异常
+      expect(() => cleanupHistory(mockFocusPath, 2)).not.toThrow();
+
+      // 应该尝试删除2个文件（4个文件，maxFiles=2，所以删除2个）
+      expect(fs.unlinkSync).toHaveBeenCalledTimes(2);
     });
   });
 

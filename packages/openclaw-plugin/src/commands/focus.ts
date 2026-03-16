@@ -16,7 +16,6 @@ import {
   getHistoryDir,
   backupToHistory,
   cleanupHistory,
-  getHistoryVersions,
   extractVersion,
   extractDate,
 } from '../core/focus-history.js';
@@ -243,11 +242,27 @@ function rollbackFocus(workspaceDir: string, index: number, isZh: boolean): stri
   const restoredVersion = extractVersion(historyContent);
   const restoredDate = extractDate(historyContent);
   const today = new Date().toISOString().split('T')[0];
-  const newVersion = restoredVersion + 100; // 标记为回滚版本
 
+  // 获取最大版本号（从当前文件或历史文件中）
+  let maxVersion = restoredVersion;
+  if (currentContent) {
+    const currentVersion = extractVersion(currentContent);
+    if (currentVersion > maxVersion) {
+      maxVersion = currentVersion;
+    }
+  }
+
+  // 正常递增版本号
+  const newVersion = maxVersion + 1;
+
+  // 添加回滚标记到状态字段
   const restoredContent = historyContent
     .replace(/\*\*版本\*\*:\s*v\d+/i, `**版本**: v${newVersion}`)
-    .replace(/\*\*更新\*\*:\s*\d{4}-\d{2}-\d{2}/, `**更新**: ${today}`);
+    .replace(/\*\*更新\*\*:\s*\d{4}-\d{2}-\d{2}/, `**更新**: ${today}`)
+    .replace(
+      /\*\*状态\*\*:\s*[A-Z]+/i,
+      `**状态**: ROLLBACK (from v${restoredVersion})`
+    );
 
   fs.writeFileSync(focusPath, restoredContent, 'utf-8');
 

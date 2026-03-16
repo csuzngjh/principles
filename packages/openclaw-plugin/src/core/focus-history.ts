@@ -10,6 +10,15 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
+/**
+ * 简单的日志记录器
+ */
+function logError(message: string, error?: unknown): void {
+  const timestamp = new Date().toISOString();
+  const errorStr = error instanceof Error ? error.message : String(error);
+  console.error(`[focus-history] ${timestamp} ERROR: ${message}${errorStr ? ' - ' + errorStr : ''}`);
+}
+
 /** 历史版本保留数量 */
 const MAX_HISTORY_FILES = 10;
 
@@ -44,28 +53,43 @@ export function extractDate(content: string): string {
  *
  * @param focusPath CURRENT_FOCUS.md 的完整路径
  * @param content 当前内容
- * @returns 备份文件路径
+ * @returns 备份文件路径，失败返回 null
  */
 export function backupToHistory(focusPath: string, content: string): string | null {
-  const historyDir = getHistoryDir(focusPath);
+  try {
+    const historyDir = getHistoryDir(focusPath);
 
-  // 确保历史目录存在
-  if (!fs.existsSync(historyDir)) {
-    fs.mkdirSync(historyDir, { recursive: true });
-  }
+    // 确保历史目录存在
+    if (!fs.existsSync(historyDir)) {
+      try {
+        fs.mkdirSync(historyDir, { recursive: true });
+      } catch (error) {
+        logError(`Failed to create history directory: ${historyDir}`, error);
+        return null;
+      }
+    }
 
-  const version = extractVersion(content);
-  const date = extractDate(content);
-  const backupName = `CURRENT_FOCUS.v${version}.${date}.md`;
-  const backupPath = path.join(historyDir, backupName);
+    const version = extractVersion(content);
+    const date = extractDate(content);
+    const backupName = `CURRENT_FOCUS.v${version}.${date}.md`;
+    const backupPath = path.join(historyDir, backupName);
 
-  // 如果备份已存在，跳过
-  if (fs.existsSync(backupPath)) {
+    // 如果备份已存在，跳过
+    if (fs.existsSync(backupPath)) {
+      return null;
+    }
+
+    try {
+      fs.writeFileSync(backupPath, content, 'utf-8');
+      return backupPath;
+    } catch (error) {
+      logError(`Failed to write backup file: ${backupPath}`, error);
+      return null;
+    }
+  } catch (error) {
+    logError('Unexpected error in backupToHistory', error);
     return null;
   }
-
-  fs.writeFileSync(backupPath, content, 'utf-8');
-  return backupPath;
 }
 
 /**
@@ -75,26 +99,35 @@ export function backupToHistory(focusPath: string, content: string): string | nu
  * @param maxFiles 最大保留数量
  */
 export function cleanupHistory(focusPath: string, maxFiles: number = MAX_HISTORY_FILES): void {
-  const historyDir = getHistoryDir(focusPath);
+  try {
+    const historyDir = getHistoryDir(focusPath);
 
-  if (!fs.existsSync(historyDir)) {
-    return;
-  }
+    if (!fs.existsSync(historyDir)) {
+      return;
+    }
 
-  // 获取所有历史文件并按修改时间排序（最新的在前）
-  const files = fs.readdirSync(historyDir)
-    .filter(f => f.startsWith('CURRENT_FOCUS.v') && f.endsWith('.md'))
-    .map(f => ({
-      name: f,
-      path: path.join(historyDir, f),
-      mtime: fs.statSync(path.join(historyDir, f)).mtime.getTime()
-    }))
-    .sort((a, b) => b.mtime - a.mtime);
+    // 获取所有历史文件并按修改时间排序（最新的在前）
+    const files = fs.readdirSync(historyDir)
+      .filter(f => f.startsWith('CURRENT_FOCUS.v') && f.endsWith('.md'))
+      .map(f => ({
+        name: f,
+        path: path.join(historyDir, f),
+        mtime: fs.statSync(path.join(historyDir, f)).mtime.getTime()
+      }))
+      .sort((a, b) => b.mtime - a.mtime);
 
-  // 删除超出数量的文件
-  const toDelete = files.slice(maxFiles);
-  for (const file of toDelete) {
-    fs.unlinkSync(file.path);
+    // 删除超出数量的文件
+    const toDelete = files.slice(maxFiles);
+    for (const file of toDelete) {
+      try {
+        fs.unlinkSync(file.path);
+      } catch (error) {
+        // 单个文件删除失败不应中断整个清理过程
+        logError(`Failed to delete history file: ${file.path}`, error);
+      }
+    }
+  } catch (error) {
+    logError('Unexpected error in cleanupHistory', error);
   }
 }
 
