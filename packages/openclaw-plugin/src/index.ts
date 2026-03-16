@@ -30,6 +30,7 @@ import { handleEvolveTask } from './commands/evolver.js';
 import { handleTrustCommand } from './commands/trust.js';
 import { handlePainCommand } from './commands/pain.js';
 import { handleContextCommand } from './commands/context.js';
+import { handleFocusCommand } from './commands/focus.js';
 import { EvolutionWorkerService } from './service/evolution-worker.js';
 import { ensureWorkspaceTemplates } from './core/init.js';
 import { migrateDirectoryStructure } from './core/migration.js';
@@ -234,6 +235,7 @@ const plugin = {
 |------|------|----------|
 | \`/pd-status\` | 查看进化状态 | 想了解当前 GFI 和 Pain 情况 |
 | \`/pd-trust\` | 查看信任分数 | 想知道自己的权限等级 |
+| \`/pd-focus\` | 焦点文件管理 | 查看/压缩/回滚历史版本 |
 
 ## ⚙️ 配置管理
 | 命令 | 用途 | 使用时机 |
@@ -289,6 +291,7 @@ const plugin = {
 |---------|---------|-------------|
 | \`/pd-status\` | View evolution status | Check GFI and Pain status |
 | \`/pd-trust\` | View trust score | Check your permission level |
+| \`/pd-focus\` | Focus file management | View/compress/rollback history |
 
 ## ⚙️ Configuration
 | Command | Purpose | When to Use |
@@ -370,6 +373,22 @@ const plugin = {
           return handleContextCommand(ctx);
         } catch (err) {
           api.logger.error(`[PD] Command /pd-context failed: ${String(err)}`);
+          return { text: language === 'zh' ? "命令执行失败，请检查日志。" : "Command failed. Check logs." };
+        }
+      }
+    });
+
+    api.registerCommand({
+      name: "pd-focus",
+      description: getCommandDescription('pd-focus', language),
+      acceptsArgs: true,
+      handler: (ctx) => {
+        try {
+          const workspaceDir = api.resolvePath('.');
+          if (ctx.config) ctx.config.workspaceDir = workspaceDir;
+          return handleFocusCommand(ctx);
+        } catch (err) {
+          api.logger.error(`[PD] Command /pd-focus failed: ${String(err)}`);
           return { text: language === 'zh' ? "命令执行失败，请检查日志。" : "Command failed. Check logs." };
         }
       }

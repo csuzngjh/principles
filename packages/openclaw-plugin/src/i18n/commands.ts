@@ -64,6 +64,10 @@ export const commandDescriptions: Record<string, Record<SupportedLanguage, strin
   'pd-context': {
     zh: '控制上下文注入 [status|thinking|trust|reflection|focus|preset] - 输入 /pd-context help 查看详情',
     en: 'Control context injection [status|thinking|trust|reflection|focus|preset] - Type /pd-context help for details'
+  },
+  'pd-focus': {
+    zh: '管理 CURRENT_FOCUS.md [status|history|compress|rollback] - 查看/压缩/回滚焦点文件',
+    en: 'Manage CURRENT_FOCUS.md [status|history|compress|rollback] - View/compress/rollback focus file'
   }
 };
 
