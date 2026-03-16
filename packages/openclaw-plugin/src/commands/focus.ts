@@ -166,11 +166,13 @@ function compressFocus(workspaceDir: string, isZh: boolean): string {
   // 清理过期历史
   cleanupHistory(focusPath);
 
-  // 更新版本号和日期
-  const newVersion = oldVersion + 1;
+  // 更新版本号和日期（支持小数版本）
+  const versionParts = oldVersion.split('.');
+  const majorVersion = parseInt(versionParts[0], 10) || 1;
+  const newVersion = `${majorVersion + 1}`;
   const today = new Date().toISOString().split('T')[0];
   const newContent = oldContent
-    .replace(/\*\*版本\*\*:\s*v\d+/i, `**版本**: v${newVersion}`)
+    .replace(/\*\*版本\*\*:\s*v[\d.]+/i, `**版本**: v${newVersion}`)
     .replace(/\*\*更新\*\*:\s*\d{4}-\d{2}-\d{2}/, `**更新**: ${today}`);
 
   fs.writeFileSync(focusPath, newContent, 'utf-8');
@@ -244,20 +246,20 @@ function rollbackFocus(workspaceDir: string, index: number, isZh: boolean): stri
   const today = new Date().toISOString().split('T')[0];
 
   // 获取最大版本号（从当前文件或历史文件中）
-  let maxVersion = restoredVersion;
+  let maxVersion = parseFloat(restoredVersion) || 1;
   if (currentContent) {
-    const currentVersion = extractVersion(currentContent);
+    const currentVersion = parseFloat(extractVersion(currentContent)) || 1;
     if (currentVersion > maxVersion) {
       maxVersion = currentVersion;
     }
   }
 
   // 正常递增版本号
-  const newVersion = maxVersion + 1;
+  const newVersion = `${maxVersion + 1}`;
 
   // 添加回滚标记到状态字段
   const restoredContent = historyContent
-    .replace(/\*\*版本\*\*:\s*v\d+/i, `**版本**: v${newVersion}`)
+    .replace(/\*\*版本\*\*:\s*v[\d.]+/i, `**版本**: v${newVersion}`)
     .replace(/\*\*更新\*\*:\s*\d{4}-\d{2}-\d{2}/, `**更新**: ${today}`)
     .replace(
       /\*\*状态\*\*:\s*[A-Z]+/i,
@@ -328,9 +330,8 @@ export function handleFocusCommand(ctx: PluginCommandContext): PluginCommandResu
   const args = ctx.args || [];
   const subCommand = args[0]?.toLowerCase() || 'status';
 
-  // 检测语言
-  const isZh = (ctx.config?.language === 'zh') ||
-    (ctx.config?.workspaceDir?.includes('中文') ?? false);
+  // 检测语言（与 context.ts 保持一致）
+  const isZh = (ctx.config?.language as string) === 'zh';
 
   let result: string;
 

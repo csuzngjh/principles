@@ -34,10 +34,11 @@ export function getHistoryDir(focusPath: string): string {
 
 /**
  * 从 CURRENT_FOCUS.md 提取版本号
+ * 支持整数和小数版本（如 v1, v1.1, v1.2）
  */
-export function extractVersion(content: string): number {
-  const match = content.match(/\*\*版本\*\*:\s*v(\d+)/i);
-  return match ? parseInt(match[1], 10) : 1;
+export function extractVersion(content: string): string {
+  const match = content.match(/\*\*版本\*\*:\s*v([\d.]+)/i);
+  return match ? match[1] : '1';
 }
 
 /**
@@ -71,7 +72,9 @@ export function backupToHistory(focusPath: string, content: string): string | nu
 
     const version = extractVersion(content);
     const date = extractDate(content);
-    const backupName = `CURRENT_FOCUS.v${version}.${date}.md`;
+    // 使用时间戳作为唯一标识，避免同名冲突
+    const timestamp = Date.now();
+    const backupName = `CURRENT_FOCUS.v${version}.${date}.${timestamp}.md`;
     const backupPath = path.join(historyDir, backupName);
 
     // 如果备份已存在，跳过
@@ -178,14 +181,17 @@ export function compressFocus(focusPath: string, newContent: string): {
   // 备份当前版本
   const backupPath = oldContent ? backupToHistory(focusPath, oldContent) : null;
 
-  // 递增版本号
+  // 递增版本号（支持小数版本）
   const oldVersion = extractVersion(oldContent);
-  const newVersion = oldVersion + 1;
+  // 解析版本号并递增
+  const versionParts = oldVersion.split('.');
+  const majorVersion = parseInt(versionParts[0], 10) || 1;
+  const newVersion = `${majorVersion + 1}`;
   const today = new Date().toISOString().split('T')[0];
 
   // 更新版本号和日期
   const updatedContent = newContent
-    .replace(/\*\*版本\*\*:\s*v\d+/i, `**版本**: v${newVersion}`)
+    .replace(/\*\*版本\*\*:\s*v[\d.]+/i, `**版本**: v${newVersion}`)
     .replace(/\*\*更新\*\*:\s*\d{4}-\d{2}-\d{2}/, `**更新**: ${today}`);
 
   // 写入新内容
@@ -232,20 +238,23 @@ export function extractSummary(content: string, maxLines: number = 30): string {
   let hasStructuredSections = false;
 
   for (const line of lines) {
-    // 识别章节
-    if (line.startsWith('## 📍 状态快照') || line.startsWith('## 📍')) {
+    // 识别章节（使用更宽松的匹配，支持不同格式）
+    const trimmedLine = line.trim();
+    
+    // 使用正则匹配，支持 h1-h3 和多种格式
+    if (/^#{1,3}\s*.*状态快照|📍/.test(trimmedLine)) {
       currentSection = 'snapshot';
       hasStructuredSections = true;
-    } else if (line.startsWith('## 🔄 当前任务') || line.startsWith('## 🔄')) {
+    } else if (/^#{1,3}\s*.*当前任务|🔄/.test(trimmedLine)) {
       currentSection = 'current';
       hasStructuredSections = true;
-    } else if (line.startsWith('## ➡️ 下一步') || line.startsWith('## ➡️')) {
+    } else if (/^#{1,3}\s*.*下一步|➡️/.test(trimmedLine)) {
       currentSection = 'nextSteps';
       hasStructuredSections = true;
-    } else if (line.startsWith('## 📎 参考') || line.startsWith('## 📎')) {
+    } else if (/^#{1,3}\s*.*参考|📎/.test(trimmedLine)) {
       currentSection = 'reference';
       hasStructuredSections = true;
-    } else if (line.startsWith('---')) {
+    } else if (trimmedLine === '---') {
       continue; // 跳过分隔线
     } else if (line.startsWith('<!--')) {
       continue; // 跳过注释

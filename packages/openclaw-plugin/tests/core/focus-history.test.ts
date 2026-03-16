@@ -34,12 +34,17 @@ describe('focus-history', () => {
   describe('extractVersion', () => {
     it('should extract version number from content', () => {
       const content = `# 🎯 CURRENT_FOCUS\n\n> **版本**: v3 | **状态**: EXECUTING`;
-      expect(extractVersion(content)).toBe(3);
+      expect(extractVersion(content)).toBe('3');
     });
 
-    it('should return 1 if no version found', () => {
+    it('should extract decimal version from content', () => {
+      const content = `# 🎯 CURRENT_FOCUS\n\n> **版本**: v1.42 | **状态**: EXECUTING`;
+      expect(extractVersion(content)).toBe('1.42');
+    });
+
+    it('should return "1" if no version found', () => {
       const content = '# 🎯 CURRENT_FOCUS\n\nNo version here';
-      expect(extractVersion(content)).toBe(1);
+      expect(extractVersion(content)).toBe('1');
     });
   });
 
@@ -73,7 +78,8 @@ describe('focus-history', () => {
       const writeCalls = (fs.writeFileSync as any).mock.calls;
       expect(writeCalls.length).toBe(1);
       expect(writeCalls[0][1]).toBe(content); // 验证写入的内容与原内容一致
-      expect(writeCalls[0][0]).toContain('CURRENT_FOCUS.v1.2026-03-16.md'); // 验证文件名
+      // 验证文件名包含版本和日期，以及时间戳
+      expect(writeCalls[0][0]).toMatch(/CURRENT_FOCUS\.v1\.2026-03-16\.\d+\.md/);
     });
 
     it('should skip if backup already exists', () => {
