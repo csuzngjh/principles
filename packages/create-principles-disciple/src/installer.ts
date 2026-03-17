@@ -142,15 +142,21 @@ async function installPlugin(pluginDir: string): Promise<void> {
  */
 async function installPluginDependencies(): Promise<void> {
   const extDir = getPluginExtDir();
-  const nodeModulesPath = path.join(extDir, 'node_modules');
+  const micromatchPath = path.join(extDir, 'node_modules', 'micromatch');
   
-  if (!existsSync(nodeModulesPath)) {
+  // 检查关键依赖是否存在
+  if (!existsSync(micromatchPath)) {
     logger.step('安装插件运行时依赖');
-    execSync('npm install --silent micromatch@^4.0.8 @sinclair/typebox@^0.34.48', {
-      cwd: extDir,
-      stdio: 'inherit',
-    });
-    logger.success('插件依赖安装完成');
+    try {
+      execSync('npm install --silent micromatch@^4.0.8 @sinclair/typebox@^0.34.48', {
+        cwd: extDir,
+        stdio: 'inherit',
+      });
+      logger.success('插件依赖安装完成');
+    } catch (error) {
+      logger.warn('依赖安装失败，插件可能无法正常工作');
+      logger.info('手动修复: cd ~/.openclaw/extensions/principles-disciple && npm install micromatch @sinclair/typebox');
+    }
   }
 }
 
