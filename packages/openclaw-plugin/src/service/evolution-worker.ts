@@ -14,6 +14,7 @@ let intervalId: NodeJS.Timeout | null = null;
 
 export interface EvolutionQueueItem {
     id: string;
+    task?: string;
     score: number;
     source: string;
     reason: string;
@@ -105,14 +106,17 @@ function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventLog: an
             const directivePath = wctx.resolve('EVOLUTION_DIRECTIVE');
             const highestScoreTask = pendingTasks.sort((a, b) => b.score - a.score)[0];
 
+            const taskDescription = `Diagnose systemic pain [ID: ${highestScoreTask.id}]. Source: ${highestScoreTask.source}. Reason: ${highestScoreTask.reason}. ` +
+                  `Trigger text: "${highestScoreTask.trigger_text_preview || 'N/A'}"`;
+
             const directive = {
                 active: true,
-                task: `Diagnose systemic pain [ID: ${highestScoreTask.id}]. Source: ${highestScoreTask.source}. Reason: ${highestScoreTask.reason}. ` +
-                      `Trigger text: "${highestScoreTask.trigger_text_preview || 'N/A'}"`,
+                task: taskDescription,
                 timestamp: new Date().toISOString()
             };
 
             fs.writeFileSync(directivePath, JSON.stringify(directive, null, 2), 'utf8');
+            highestScoreTask.task = taskDescription;
             highestScoreTask.status = 'in_progress';
             queueChanged = true;
             
