@@ -120,21 +120,31 @@ if (subagentOutcome === 'error') {
 ## 4.1 Principle Schema（建议）
 
 ```ts
-interface Principle {
-  id: string; // P_001, P_002...
+export type PrincipleStatus = 'candidate' | 'probation' | 'active' | 'deprecated';
+
+export interface Principle {
+  id: string;               // 唯一ID: P_001, P_002...
+  version: number;          // 原则版本号（允许迭代更新）
+  text: string;             // 原则正文（用于注入 prompt）
   source: {
     painId: string;
     painType: 'tool_failure' | 'subagent_error' | 'user_frustration';
     timestamp: string;
   };
-  trigger: string;
-  action: string;
-  guardrails?: string[];
+  trigger: string;          // 触发条件（用于匹配场景）
+  action: string;           // 行为约束
+  guardrails?: string[];    // 安全边界
+  contextTags: string[];    // 上下文标签（用于按需注入，如 ['typescript', 'edit']）
   validation: {
     successCount: number;
     conflictCount: number;
   };
-  status: 'candidate' | 'probation' | 'active' | 'deprecated';
+  status: PrincipleStatus;  // 生命周期状态
+  feedbackScore: number;    // 0-100，根据 GFI 反馈计算
+  usageCount: number;       // 被注入并应用的次数
+  createdAt: string;
+  activatedAt?: string;     // 转为 active 的时间
+  deprecatedAt?: string;    // 转为 deprecated 的时间
 }
 ```
 
@@ -148,6 +158,7 @@ type EvolutionEventType =
   | 'candidate_created'
   | 'principle_promoted'
   | 'principle_deprecated'
+  | 'principle_rolled_back'
   | 'circuit_breaker_opened';
 
 interface EvolutionEvent {
@@ -190,6 +201,14 @@ interface PrincipleDeprecatedData {
   triggeredBy: 'auto' | 'manual';
 }
 
+interface PrincipleRolledBackData {
+  principleId: string;
+  reason: string;
+  triggeredBy: 'user_command' | 'auto_conflict';
+  blacklistPattern?: string;  // 拉黑的诊断模式（防止重复进化）
+  relatedPainId?: string;     // 关联的原始 pain ID
+}
+
 interface CircuitBreakerOpenedData {
   taskId: string;
   painId: string;
@@ -229,6 +248,168 @@ interface EvolutionReducer {
   };
 }
 ```
+
+## 4.4 Reducer 并发隔离设计
+
+**问题**：多个 hook/子智能体并发运行时，直接操作 PRINCIPLES 文件会导致冲突。
+
+**解决方案**：内存镜像 + 原子刷新。
+
+```ts
+// Reducer 内部架构
+class EvolutionReducerImpl {
+  private principles: Map<string, Principle>;  // 内存镜像
+  private eventLog: AppendOnlyLog;             // evolution.jsonl
+  
+  // 所有变更只追加到 eventLog（天然支持并发）
+  emit(event: EvolutionEvent): void {
+    this.eventLog.append(event);  // O_APPEND 模式
+    this.applyToMemory(event);     // 更新内存镜像
+  }
+  
+  // 只有 probation -> active 时才物理刷新 PRINCIPLES.md
+  private flushPrinciples(): void {
+    const activePrinciples = [...this.principles.values()]
+      .filter(p => p.status === 'active');
+    // 写临时文件 + 原子 rename
+    atomicWrite(this.principlesPath, serializePrinciples(activePrinciples));
+  }
+}
+```
+
+**关键点**：
+- `evolution.jsonl` 是唯一真实数据源（append-only，无并发冲突）。
+- PRINCIPLES.md 只是"派生视图"，仅当原则激活时才刷新。
+- 进程重启时从 `evolution.jsonl` 重建内存镜像。
+
+## 4.5 反馈归因机制
+
+**问题**：如何确定 GFI 下降是因为某条"试用期原则"生效？
+
+**解决方案**：Session 状态追踪（不依赖模型行为）。
+
+```ts
+// hooks/prompt.ts 注入 probation 原则时
+const probationIds = probationPrinciples.map(p => p.id);
+sessionState.set('injected_probation_ids', probationIds);
+
+// hooks/pain.ts 成功时（after_tool_call 无错误且非高风险路径）
+if (isSuccess && !isRiskyPath) {
+  const injectedIds = sessionState.get('injected_probation_ids') || [];
+  for (const id of injectedIds) {
+    reducer.incrementFeedbackScore(id, 10);  // 成功反馈 +10
+  }
+}
+
+// hooks/pain.ts 失败时（同类错误复发）
+if (isFailure && matchedProbationPrinciple) {
+  reducer.incrementConflictCount(matchedProbationPrinciple.id);
+}
+```
+
+**归因规则**：
+- 成功：该 session 注入的所有 probation 原则都获得 feedbackScore。
+- 失败：如果错误与某 probation 原则的 trigger 匹配，则增加 conflictCount。
+- 阈值：`feedbackScore >= 50` 且 `conflictCount < 2` 时自动转 active。
+
+## 4.6 上下文感知注入
+
+**问题**：盲目注入所有原则会污染 Context 窗口，导致模型混淆。
+
+**解决方案**：基于 contextTags 的按需注入。
+
+```ts
+// hooks/prompt.ts 注入逻辑
+function selectPrinciplesForContext(
+  principles: Principle[],
+  context: { toolName?: string; filePath?: string; userMessage?: string; }
+): Principle[] {
+  const activePrinciples = principles.filter(p => p.status === 'active');
+  const probationPrinciples = principles.filter(p => p.status === 'probation');
+  
+  // 提取上下文标签
+  const contextSignals = extractContextSignals(context);
+  // 例：filePath='src/utils.ts' -> ['typescript', 'utils']
+  // 例：toolName='edit' -> ['edit']
+  
+  // 匹配原则
+  const matched = [...activePrinciples, ...probationPrinciples].filter(p => 
+    p.contextTags.some(tag => contextSignals.includes(tag))
+  );
+  
+  // 即使无匹配也注入全局原则（contextTags 为空）
+  const global = principles.filter(p => p.contextTags.length === 0);
+  
+  return [...global, ...matched];
+}
+
+function extractContextSignals(context: any): string[] {
+  const signals: string[] = [];
+  if (context.filePath?.endsWith('.ts')) signals.push('typescript');
+  if (context.filePath?.endsWith('.md')) signals.push('markdown');
+  if (['edit', 'replace', 'write'].includes(context.toolName)) signals.push('edit');
+  if (['run_shell_command', 'bash'].includes(context.toolName)) signals.push('shell');
+  return signals;
+}
+```
+
+**注入优先级**：
+1. 全局原则（无 contextTags）→ 始终注入
+2. 精确匹配原则 → 按需注入
+3. 试用期原则 → 仅在匹配时注入，并标记 `<principle status="probation">`
+
+## 4.7 回滚机制的原子性
+
+**问题**：回滚不只是删除原则，还需防止系统再次"进化"出相同的错误规则。
+
+**解决方案**：ROLLBACK 事件 + 拉黑机制。
+
+```ts
+// 回滚命令处理
+async function handleRollback(principleId: string, reason: string): Promise<void> {
+  const principle = reducer.getPrincipleById(principleId);
+  if (!principle) throw new Error(`Principle ${principleId} not found`);
+  
+  // 1. 记录 ROLLBACK 事件
+  reducer.emit({
+    type: 'principle_rolled_back',
+    data: {
+      principleId,
+      reason,
+      triggeredBy: 'user_command',
+      blacklistPattern: extractPattern(principle.trigger),
+      relatedPainId: principle.source.painId,
+    }
+  });
+  
+  // 2. 更新原则状态
+  principle.status = 'deprecated';
+  principle.deprecatedAt = new Date().toISOString();
+  
+  // 3. 拉黑诊断模式（写入黑名单）
+  if (principle.source.painId) {
+    addToBlacklist(principle.source.painId, {
+      reason: 'user_rollback',
+      pattern: extractPattern(principle.trigger),
+      rolledBackAt: new Date().toISOString(),
+    });
+  }
+}
+
+// 黑名单检查（在 candidate 创建前）
+function shouldBlockCandidate(painId: string, trigger: string): boolean {
+  const blacklist = loadBlacklist();
+  return blacklist.some(entry => 
+    entry.painId === painId || 
+    isSimilarPattern(entry.pattern, trigger)
+  );
+}
+```
+
+**黑名单持久化**：
+- 存储位置：`.state/principle_blacklist.json`
+- 字段：`painId`、`pattern`、`reason`、`rolledBackAt`
+- 用途：在 `candidate_created` 事件发出前检查，避免重复进化
 
 ---
 
