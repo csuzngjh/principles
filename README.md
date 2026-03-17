@@ -50,6 +50,12 @@ openclaw gateway --force
 /init-strategy
 ```
 
+> [!TIP]
+> **For AI Agents:** See [Agent Installation Guide](packages/openclaw-plugin/AGENT_INSTALL_EN.md) for step-by-step instructions on first install and updates.
+
+---
+```
+
 **For AI Agents (Non-interactive):**
 ```bash
 # One-line install with defaults
