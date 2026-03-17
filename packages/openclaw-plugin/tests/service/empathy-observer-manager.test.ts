@@ -62,6 +62,31 @@ describe('EmpathyObserverManager', () => {
     expect(run).toHaveBeenCalledTimes(1);
   });
 
+
+
+  it('applies friction on valid observer JSON payload', async () => {
+    getSessionMessages.mockResolvedValue({
+      messages: [{ role: 'assistant', content: '{"damageDetected":true,"severity":"severe","confidence":0.9,"reason":"frustration"}' }],
+      assistantTexts: ['{"damageDetected":true,"severity":"severe","confidence":0.9,"reason":"frustration"}'],
+    });
+
+    await manager.reap(api, 'empathy_obs:session-C:123', '/workspace/principles');
+
+    expect(sessionTracker.trackFriction).toHaveBeenCalledWith(
+      'session-C',
+      40,
+      'observer_empathy_severe',
+      '/workspace/principles'
+    );
+  });
+
+  it('returns null and does not spawn when user message is empty', async () => {
+    const result = await manager.spawn(api, 'session-D', '   ');
+
+    expect(result).toBeNull();
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it('gracefully degrades when observer JSON parse fails', async () => {
     getSessionMessages.mockResolvedValue({
       messages: [{ role: 'assistant', content: 'not-json-response' }],

@@ -59,7 +59,8 @@ export class EmpathyObserverManager {
         if (!userMessage?.trim()) return null;
 
 
-        const sessionKey = `${OBSERVER_SESSION_PREFIX}${sessionId}:${Date.now()}`;
+        const timestamp = Date.now();
+        const sessionKey = `${OBSERVER_SESSION_PREFIX}${sessionId}:${timestamp}`;
         this.sessionLocks.set(sessionId, sessionKey);
 
         const prompt = [
@@ -75,7 +76,7 @@ export class EmpathyObserverManager {
                 message: prompt,
                 lane: 'subagent',
                 deliver: false,
-                idempotencyKey: `${sessionId}:${Date.now()}`,
+                idempotencyKey: `${sessionId}:${timestamp}`,
             });
             api.logger.info(`[PD:EmpathyObserver] Spawned observer ${sessionKey}`);
             return sessionKey;

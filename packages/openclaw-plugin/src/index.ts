@@ -142,7 +142,7 @@ const plugin = {
       (event: PluginHookSubagentEndedEvent, ctx: PluginHookSubagentContext): void => {
         try {
           const workspaceDir = api.resolvePath('.');
-          handleSubagentEnded(event, { ...ctx, workspaceDir, api } as any);
+          handleSubagentEnded(event, { ...ctx, workspaceDir, api });
         } catch (err) {
           api.logger.error(`[PD] Error in subagent_ended: ${String(err)}`);
         }

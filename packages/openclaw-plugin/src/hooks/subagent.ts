@@ -1,13 +1,19 @@
-import { PluginHookSubagentEndedEvent, PluginHookAgentContext } from '../openclaw-sdk.js';
+import type { PluginHookSubagentEndedEvent, PluginHookSubagentContext } from '../openclaw-sdk.js';
 import { writePainFlag } from '../core/pain.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { empathyObserverManager, type EmpathyObserverApi } from '../service/empathy-observer-manager.js';
 import * as fs from 'fs';
 import * as path from 'path';
 
+type SubagentEndedHookContext = PluginHookSubagentContext & {
+    api?: EmpathyObserverApi;
+    workspaceDir?: string;
+    sessionId?: string;
+};
+
 export async function handleSubagentEnded(
     event: PluginHookSubagentEndedEvent,
-    ctx: PluginHookAgentContext & { api?: EmpathyObserverApi }
+    ctx: SubagentEndedHookContext
 ): Promise<void> {
     const { outcome, targetSessionKey } = event;
     const workspaceDir = ctx.workspaceDir;
@@ -42,7 +48,7 @@ export async function handleSubagentEnded(
         // ── Trust Engine: Record success using V2 API ──
         wctx.trust.recordSuccess('subagent_success', {
             sessionId: ctx.sessionId,
-            api: (ctx as any).api
+            api: ctx.api
         }, true);
 
         const queuePath = wctx.resolve('EVOLUTION_QUEUE');

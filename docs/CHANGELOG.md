@@ -43,15 +43,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `README.md` - Updated with links to new documentation
 
+## [1.5.6] - 2026-03-17
+
 ### Changed
 - Refactored empathy pipeline from prompt-level strong coupling to async observer sidecar mode (v3.0):
-  - Added `empathy_engine.observer_model` configuration (default `null`).
   - Added `EmpathyObserverManager` singleton service for spawn/reap/lock lifecycle.
   - Prompt hook now triggers observer subagent spawn instead of injecting `<system_override:empathy_engine>` directives.
   - Subagent ended hook now intercepts observer sessions and reaps JSON result to update GFI.
-
-### Removed
-- None (old Trust Engine files are archived, not deleted)
 
 ---
 
