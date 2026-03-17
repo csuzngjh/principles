@@ -491,13 +491,13 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
       if (active.length > 0) {
         lines.push('Active principles:');
         for (const p of active) {
-          lines.push(`- [${p.id}] ${p.text}`);
+          lines.push(`- [${escapeXml(p.id)}] ${escapeXml(p.text)}`);
         }
       }
       if (probation.length > 0) {
         lines.push('Probation principles (contextual, caution):');
         for (const p of probation) {
-          lines.push(`- <principle status="probation" id="${p.id}">${p.text}</principle>`);
+          lines.push(`- <principle status="probation" id="${escapeXml(p.id)}">${escapeXml(p.text)}</principle>`);
         }
       }
       evolutionPrinciplesContent = lines.join('\n');
