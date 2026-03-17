@@ -1,10 +1,16 @@
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { withLock } from '../utils/file-lock.js';
 import { PathResolver } from './path-resolver.js';
 import type {
+  CandidateCreatedData,
   EvolutionLoopEvent,
+  PainDetectedData,
   Principle,
+  PrincipleDeprecatedData,
+  PrinciplePromotedData,
+  PrincipleRolledBackData,
   PrincipleStatus,
 } from './evolution-types.js';
 
@@ -19,6 +25,7 @@ export interface EvolutionReducer {
   promote(principleId: string, reason?: string): void;
   deprecate(principleId: string, reason: string): void;
   rollbackPrinciple(principleId: string, reason: string): void;
+  recordProbationFeedback(principleId: string, success: boolean): void;
   getStats(): {
     candidateCount: number;
     probationCount: number;
@@ -30,6 +37,7 @@ export interface EvolutionReducer {
 
 const PROBATION_SUCCESS_THRESHOLD = 3;
 const CIRCUIT_BREAKER_THRESHOLD = 3;
+const PROBATION_MAX_AGE_DAYS = 30;
 
 export class EvolutionReducerImpl implements EvolutionReducer {
   private readonly streamPath: string;
@@ -48,6 +56,7 @@ export class EvolutionReducerImpl implements EvolutionReducer {
     this.blacklistPath = resolver.resolve('PRINCIPLE_BLACKLIST');
     this.ensureDirs();
     this.loadFromStream();
+    this.sweepExpiredProbation();
   }
 
   emit(event: EvolutionLoopEvent): void {
@@ -59,6 +68,7 @@ export class EvolutionReducerImpl implements EvolutionReducer {
       fs.appendFileSync(this.streamPath, `${JSON.stringify(event)}\n`, 'utf8');
     });
     this.applyEvent(event);
+    this.sweepExpiredProbation();
   }
 
   getEventLog(): EvolutionLoopEvent[] {
@@ -177,13 +187,14 @@ export class EvolutionReducerImpl implements EvolutionReducer {
     if (!fs.existsSync(this.streamPath)) return;
     const raw = fs.readFileSync(this.streamPath, 'utf8').trim();
     if (!raw) return;
+
     this.isReplaying = true;
     for (const line of raw.split('\n')) {
       try {
         const event = JSON.parse(line) as EvolutionLoopEvent;
         this.applyEvent(event);
-      } catch {
-        // skip malformed legacy lines
+      } catch (e) {
+        console.warn(`[PD:EvolutionReducer] skip malformed event line: ${String(e)}`);
       }
     }
     this.isReplaying = false;
@@ -192,87 +203,97 @@ export class EvolutionReducerImpl implements EvolutionReducer {
   private applyEvent(event: EvolutionLoopEvent): void {
     this.memoryEvents.push(event);
 
-    if (event.type === 'pain_detected') {
-      this.updateFailureStreakFromPain(event);
-      if (!this.isReplaying) {
-        this.onPainDetected(event);
-      }
-      return;
-    }
-
-    if (event.type === 'candidate_created') {
-      const data = event.data as any;
-      const existing = this.principles.get(data.principleId);
-      if (existing) {
-        existing.status = 'candidate';
+    switch (event.type) {
+      case 'pain_detected':
+        this.updateFailureStreakFromPain(event.data);
+        if (!this.isReplaying) {
+          this.onPainDetected(event.data, event.ts);
+        }
         return;
-      }
-
-      const principle: Principle = {
-        id: String(data.principleId),
-        version: 1,
-        text: `When ${String(data.trigger ?? 'unknown')}, then ${String(data.action ?? 'act cautiously')}.`,
-        source: {
-          painId: String(data.painId ?? `pain_${Date.now()}`),
-          painType: 'tool_failure',
-          timestamp: event.ts,
-        },
-        trigger: String(data.trigger ?? 'unknown'),
-        action: String(data.action ?? 'act cautiously'),
-        contextTags: [String(data.source ?? 'general')],
-        validation: { successCount: 0, conflictCount: 0 },
-        status: 'candidate',
-        feedbackScore: 0,
-        usageCount: 0,
-        createdAt: event.ts,
-      };
-      this.principles.set(principle.id, principle);
-      return;
-    }
-
-    if (event.type === 'principle_promoted') {
-      const data = event.data as any;
-      const p = this.principles.get(data.principleId);
-      if (!p) return;
-      p.status = data.to;
-      if (data.to === 'active') {
-        p.activatedAt = event.ts;
-      }
-      this.lastPromotedAt = event.ts;
-      return;
-    }
-
-    if (event.type === 'principle_deprecated') {
-      const data = event.data as any;
-      const p = this.principles.get(data.principleId);
-      if (!p) return;
-      p.status = 'deprecated';
-      p.deprecatedAt = event.ts;
-      return;
-    }
-
-    if (event.type === 'principle_rolled_back') {
-      const data = event.data as any;
-      const p = this.principles.get(data.principleId);
-      if (p) {
-        p.status = 'deprecated';
-        p.deprecatedAt = event.ts;
-      }
-      this.persistBlacklist({
-        painId: data.relatedPainId,
-        pattern: data.blacklistPattern,
-        reason: data.reason,
-        rolledBackAt: event.ts,
-      });
+      case 'candidate_created':
+        this.onCandidateCreated(event.data, event.ts);
+        return;
+      case 'principle_promoted':
+        this.onPrinciplePromoted(event.data, event.ts);
+        return;
+      case 'principle_deprecated':
+        this.onPrincipleDeprecated(event.data, event.ts);
+        return;
+      case 'principle_rolled_back':
+        this.onPrincipleRolledBack(event.data, event.ts);
+        return;
+      case 'circuit_breaker_opened':
+      case 'legacy_import':
+        return;
+      default:
+        return;
     }
   }
 
-  private onPainDetected(event: EvolutionLoopEvent): void {
-    const data = event.data as any;
+  private onCandidateCreated(data: CandidateCreatedData, ts: string): void {
+    const existing = this.principles.get(data.principleId);
+    if (existing) {
+      existing.status = 'candidate';
+      return;
+    }
+
+    const principle: Principle = {
+      id: data.principleId,
+      version: 1,
+      text: `When ${data.trigger}, then ${data.action}.`,
+      source: {
+        painId: data.painId,
+        painType: 'tool_failure',
+        timestamp: ts,
+      },
+      trigger: data.trigger,
+      action: data.action,
+      contextTags: [],
+      validation: { successCount: 0, conflictCount: 0 },
+      status: 'candidate',
+      feedbackScore: 0,
+      usageCount: 0,
+      createdAt: ts,
+    };
+    this.principles.set(principle.id, principle);
+  }
+
+  private onPrinciplePromoted(data: PrinciplePromotedData, ts: string): void {
+    const p = this.principles.get(data.principleId);
+    if (!p) return;
+    p.status = data.to;
+    if (data.to === 'active') {
+      p.activatedAt = ts;
+    }
+    this.lastPromotedAt = ts;
+  }
+
+  private onPrincipleDeprecated(data: PrincipleDeprecatedData, ts: string): void {
+    const p = this.principles.get(data.principleId);
+    if (!p) return;
+    p.status = 'deprecated';
+    p.deprecatedAt = ts;
+  }
+
+  private onPrincipleRolledBack(data: PrincipleRolledBackData, ts: string): void {
+    const p = this.principles.get(data.principleId);
+    if (p) {
+      p.status = 'deprecated';
+      p.deprecatedAt = ts;
+    }
+    this.persistBlacklist({
+      painId: data.relatedPainId,
+      pattern: data.blacklistPattern,
+      reason: data.reason,
+      rolledBackAt: ts,
+    });
+  }
+
+  private onPainDetected(data: PainDetectedData, eventTs: string): void {
     const trigger = String(data.reason ?? data.source ?? 'unknown trigger');
     const action = `Prevent recurrence for: ${String(data.source ?? 'unknown')}`;
 
-    if (this.isBlacklisted(String(data.painId ?? ''), trigger)) {
+    if (this.isBlacklisted(data.painId, trigger)) {
       return;
     }
 
@@ -282,18 +303,18 @@ export class EvolutionReducerImpl implements EvolutionReducer {
       version: 1,
       text: `When ${trigger}, then ${action}.`,
       source: {
-        painId: String(data.painId ?? `pain_${Date.now()}`),
-        painType: (data.painType ?? 'tool_failure'),
-        timestamp: event.ts,
+        painId: data.painId,
+        painType: data.painType,
+        timestamp: eventTs,
       },
       trigger,
       action,
-      contextTags: [String(data.source ?? 'general')],
+      contextTags: [data.source],
       validation: { successCount: 0, conflictCount: 0 },
       status: 'candidate',
       feedbackScore: 0,
       usageCount: 0,
-      createdAt: event.ts,
+      createdAt: eventTs,
     };
 
     this.principles.set(principleId, principle);
@@ -316,6 +337,7 @@ export class EvolutionReducerImpl implements EvolutionReducer {
       const key = String(data.taskId ?? data.source ?? 'subagent');
       const next = this.failureStreak.get(key) ?? 0;
       if (next >= CIRCUIT_BREAKER_THRESHOLD) {
+        const nextRetryAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
         this.emitSync({
           ts: new Date().toISOString(),
           type: 'circuit_breaker_opened',
@@ -325,14 +347,14 @@ export class EvolutionReducerImpl implements EvolutionReducer {
             failCount: next,
             reason: 'Max retries exceeded',
             requireHuman: true,
+            nextRetryAt,
           },
         });
       }
     }
   }
 
-  private updateFailureStreakFromPain(event: EvolutionLoopEvent): void {
-    const data = event.data as any;
+  private updateFailureStreakFromPain(data: PainDetectedData): void {
     if (data.painType !== 'subagent_error') return;
 
     const key = String(data.taskId ?? data.source ?? 'subagent');
@@ -352,6 +374,17 @@ export class EvolutionReducerImpl implements EvolutionReducer {
     return [...this.principles.values()].filter((p) => p.status === status);
   }
 
+  private sweepExpiredProbation(): void {
+    const now = Date.now();
+    const maxAgeMs = PROBATION_MAX_AGE_DAYS * 24 * 60 * 60 * 1000;
+    for (const p of this.getProbationPrinciples()) {
+      const age = now - new Date(p.createdAt).getTime();
+      if (age > maxAgeMs) {
+        this.deprecate(p.id, 'probation_expired');
+      }
+    }
+  }
+
   private persistBlacklist(entry: { painId?: string; pattern?: string; reason: string; rolledBackAt: string }): void {
     const list = this.loadBlacklist();
     list.push(entry);
@@ -361,8 +394,14 @@ export class EvolutionReducerImpl implements EvolutionReducer {
   private loadBlacklist(): Array<{ painId?: string; pattern?: string; reason: string; rolledBackAt: string }> {
     if (!fs.existsSync(this.blacklistPath)) return [];
     try {
-      return JSON.parse(fs.readFileSync(this.blacklistPath, 'utf8'));
-    } catch {
+      return JSON.parse(fs.readFileSync(this.blacklistPath, 'utf8')) as Array<{
+        painId?: string;
+        pattern?: string;
+        reason: string;
+        rolledBackAt: string;
+      }>;
+    } catch (e) {
+      console.warn(`[PD:EvolutionReducer] failed to parse blacklist: ${String(e)}`);
       return [];
     }
   }
@@ -373,4 +412,8 @@ export class EvolutionReducerImpl implements EvolutionReducer {
       (entry.pattern && trigger.includes(entry.pattern))
     );
   }
+}
+
+export function stableContentHash(input: string): string {
+  return crypto.createHash('sha1').update(input).digest('hex');
 }

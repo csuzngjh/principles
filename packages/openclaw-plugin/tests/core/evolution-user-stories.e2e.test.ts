@@ -19,6 +19,7 @@ vi.mock('../../src/service/empathy-observer-manager.js', () => ({
 }));
 
 const tempDirs: string[] = [];
+const reducerCache = new Map<string, EvolutionReducerImpl>();
 
 function makeWorkspace(): string {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-user-stories-'));
@@ -71,6 +72,11 @@ function buildWctx(workspaceDir: string) {
       recordPersistence: vi.fn(),
       getStats: vi.fn().mockReturnValue({ planWrites: 0, memoryWrites: 0, sessionMemoryStores: 0 }),
     },
+    evolutionReducer: reducerCache.get(workspaceDir) || (() => {
+      const r = new EvolutionReducerImpl({ workspaceDir });
+      reducerCache.set(workspaceDir, r);
+      return r;
+    })(),
     resolve: (key: string) => {
       const map: Record<string, string> = {
         PROFILE: path.join(workspaceDir, '.principles', 'PROFILE.json'),
@@ -95,6 +101,7 @@ afterEach(() => {
   for (const dir of tempDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+  reducerCache.clear();
 });
 
 describe('Evolution loop user stories e2e', () => {

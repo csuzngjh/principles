@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { handleBeforePromptBuild, resolveModelFromConfig, getDiagnosticianModel } from '../../src/hooks/prompt';
 import * as sessionTracker from '../../src/core/session-tracker';
 import { WorkspaceContext } from '../../src/core/workspace-context';
-import { EvolutionReducerImpl } from '../../src/core/evolution-reducer';
 import fs from 'fs';
 import path from 'path';
 
@@ -168,6 +167,10 @@ describe('Prompt Context Injection Hook', () => {
     trust: mockTrust,
     hygiene: mockHygiene,
     config: mockConfig,
+    evolutionReducer: {
+      getActivePrinciples: vi.fn().mockReturnValue([]),
+      getProbationPrinciples: vi.fn().mockReturnValue([]),
+    },
     resolve: vi.fn().mockImplementation((key) => {
         if (key === 'CURRENT_FOCUS') return path.join(workspaceDir, 'memory', 'okr', 'CURRENT_FOCUS.md');
         if (key === 'PAIN_FLAG') return path.join(workspaceDir, '.state', '.pain_flag');
@@ -528,7 +531,7 @@ describe('Prompt Context Injection Hook', () => {
 
 
   it('should inject evolution_principles section when reducer has active/probation principles', async () => {
-    const activeSpy = vi.spyOn(EvolutionReducerImpl.prototype, 'getActivePrinciples').mockReturnValue([
+    const activeSpy = vi.mocked(mockWctx.evolutionReducer.getActivePrinciples).mockReturnValue([
       {
         id: 'P_101',
         version: 1,
@@ -544,7 +547,7 @@ describe('Prompt Context Injection Hook', () => {
         createdAt: new Date().toISOString(),
       } as any,
     ]);
-    const probationSpy = vi.spyOn(EvolutionReducerImpl.prototype, 'getProbationPrinciples').mockReturnValue([
+    const probationSpy = vi.mocked(mockWctx.evolutionReducer.getProbationPrinciples).mockReturnValue([
       {
         id: 'P_102',
         version: 1,
@@ -574,8 +577,8 @@ describe('Prompt Context Injection Hook', () => {
     expect(result?.appendSystemContext).toContain('status="probation"');
     expect(result?.appendSystemContext).toContain('<evolution_principles>');
 
-    activeSpy.mockRestore();
-    probationSpy.mockRestore();
+    activeSpy.mockReturnValue([]);
+    probationSpy.mockReturnValue([]);
   });
 
   it('FULL INJECTION: should preserve ALL content with correct separation', async () => {

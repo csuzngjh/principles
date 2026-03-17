@@ -3,11 +3,10 @@ import * as path from 'path';
 import { isRisky, normalizePath } from '../utils/io.js';
 import { normalizeProfile } from '../core/profile.js';
 import { computePainScore, writePainFlag } from '../core/pain.js';
-import { trackFriction, resetFriction } from '../core/session-tracker.js';
+import { trackFriction, resetFriction, getInjectedProbationIds, clearInjectedProbationIds } from '../core/session-tracker.js';
 import { denoiseError, computeHash } from '../utils/hashing.js';
 import { SystemLogger } from '../core/system-logger.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
-import { EvolutionReducerImpl } from '../core/evolution-reducer.js';
 import type { EvolutionLoopEvent } from '../core/evolution-types.js';
 import type { PluginHookAfterToolCallEvent, PluginHookToolContext, OpenClawPluginApi } from '../openclaw-sdk.js';
 
@@ -29,12 +28,11 @@ interface ToolParams {
 const WRITE_TOOLS = ['write', 'edit', 'apply_patch', 'write_file', 'edit_file', 'replace'];
 
 
-function emitPainDetectedEvent(workspaceDir: string, event: EvolutionLoopEvent): void {
+function emitPainDetectedEvent(wctx: WorkspaceContext, event: EvolutionLoopEvent): void {
   try {
-    const reducer = new EvolutionReducerImpl({ workspaceDir });
-    reducer.emitSync(event);
-  } catch {
-    // Keep hook behavior resilient; pain telemetry should not block primary flow.
+    wctx.evolutionReducer.emitSync(event);
+  } catch (e) {
+    SystemLogger.log(wctx.workspaceDir, 'EVOLUTION_EMIT_WARN', `Failed to emit evolution event: ${String(e)}`);
   }
 }
 
@@ -72,7 +70,7 @@ export function handleAfterToolCall(
       reason: `User intervention: ${reason}`,
       isRisky: true
     });
-    emitPainDetectedEvent(effectiveWorkspaceDir, {
+    emitPainDetectedEvent(wctx, {
       ts: new Date().toISOString(),
       type: 'pain_detected',
       data: {
@@ -110,7 +108,9 @@ export function handleAfterToolCall(
     if (fs.existsSync(profilePath)) {
       try {
         profile = normalizeProfile(JSON.parse(fs.readFileSync(profilePath, 'utf8')));
-      } catch (_e) {}
+      } catch (e) {
+        SystemLogger.log(effectiveWorkspaceDir, 'PROFILE_PARSE_WARN', `Failed to parse PROFILE.json: ${String(e)}`);
+      }
     }
     
     const isRisk = isRisky(relPath, profile.risk_paths);
@@ -131,6 +131,19 @@ export function handleAfterToolCall(
       consecutiveErrors: updatedState.consecutiveErrors,
       exitCode,
     });
+
+    const injectedProbationIds = getInjectedProbationIds(sessionId, effectiveWorkspaceDir);
+    for (const id of injectedProbationIds) {
+      const principle = wctx.evolutionReducer.getPrincipleById(id);
+      const shouldAttribute = !!principle && (
+        principle.contextTags.includes(event.toolName) ||
+        principle.trigger.includes(event.toolName)
+      );
+      if (shouldAttribute) {
+        wctx.evolutionReducer.recordProbationFeedback(id, false);
+      }
+    }
+    clearInjectedProbationIds(sessionId, effectiveWorkspaceDir);
   } else {
     // ── SUCCESS BRANCH ──
     resetFriction(sessionId, effectiveWorkspaceDir);
@@ -141,6 +154,12 @@ export function handleAfterToolCall(
         api,
         toolName: event.toolName // 👈 NEW: Pass toolName for classification
     });
+
+    const injectedProbationIds = getInjectedProbationIds(sessionId, effectiveWorkspaceDir);
+    for (const id of injectedProbationIds) {
+      wctx.evolutionReducer.recordProbationFeedback(id, true);
+    }
+    clearInjectedProbationIds(sessionId, effectiveWorkspaceDir);
     
     if (WRITE_TOOLS.includes(event.toolName)) {
       const filePath = params.file_path || params.path || params.file;
@@ -218,7 +237,7 @@ export function handleAfterToolCall(
     isRisky: isRisk,
   });
 
-  emitPainDetectedEvent(effectiveWorkspaceDir, {
+  emitPainDetectedEvent(wctx, {
     ts: new Date().toISOString(),
     type: 'pain_detected',
     data: {

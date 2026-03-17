@@ -39,7 +39,11 @@ export interface SessionState {
     
     // Thinking OS checkpoint - tracks last deep thinking timestamp
     lastThinkingTimestamp: number;
+
+    // Evolution loop feedback attribution
+    injectedProbationIds?: string[];
 }
+
 
 const sessions = new Map<string, SessionState>();
 
@@ -164,6 +168,7 @@ function getOrCreateSession(sessionId: string, workspaceDir?: string): SessionSt
             dailyPainSignals: 0,
             dailyGfiPeak: 0,
             lastThinkingTimestamp: 0,
+            injectedProbationIds: [],
         };
         sessions.set(sessionId, state);
     }
@@ -295,6 +300,24 @@ export function trackBlock(sessionId: string): SessionState {
     state.blockedAttempts += 1;
     state.lastActivityAt = Date.now();
     return state;
+}
+
+
+export function setInjectedProbationIds(sessionId: string, ids: string[], workspaceDir?: string): SessionState {
+    const state = getOrCreateSession(sessionId, workspaceDir);
+    state.injectedProbationIds = [...ids];
+    state.lastActivityAt = Date.now();
+    schedulePersistence(state);
+    return state;
+}
+
+export function getInjectedProbationIds(sessionId: string, workspaceDir?: string): string[] {
+    const state = getOrCreateSession(sessionId, workspaceDir);
+    return [...(state.injectedProbationIds || [])];
+}
+
+export function clearInjectedProbationIds(sessionId: string, workspaceDir?: string): SessionState {
+    return setInjectedProbationIds(sessionId, [], workspaceDir);
 }
 
 export function getSession(sessionId: string): SessionState | undefined {

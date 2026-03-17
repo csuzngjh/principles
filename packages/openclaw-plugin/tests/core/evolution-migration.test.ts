@@ -34,4 +34,17 @@ describe('migrateLegacyEvolutionData', () => {
     expect(events).toHaveLength(2);
     expect(events.every(event => event.type === 'legacy_import')).toBe(true);
   });
+
+  it('is idempotent when migration runs multiple times', () => {
+    const workspace = makeTempDir();
+    fs.mkdirSync(path.join(workspace, '.principles'), { recursive: true });
+    fs.mkdirSync(path.join(workspace, 'memory'), { recursive: true });
+    fs.writeFileSync(path.join(workspace, 'memory', 'ISSUE_LOG.md'), 'Issue A\n');
+
+    const first = migrateLegacyEvolutionData(workspace);
+    const second = migrateLegacyEvolutionData(workspace);
+
+    expect(first.importedEvents).toBe(1);
+    expect(second.importedEvents).toBe(0);
+  });
 });
