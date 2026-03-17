@@ -47,9 +47,15 @@ export async function handleSubagentEnded(
                 // Find in_progress tasks
                 const inProgressTasks = queue.filter((t: any) => t.status === 'in_progress');
                 if (inProgressTasks.length > 0) {
-                    // Sort by timestamp to find the oldest one
+                    const resolveTaskTime = (task: any): number => {
+                        const raw = task?.enqueued_at || task?.timestamp;
+                        const ts = new Date(raw).getTime();
+                        return Number.isFinite(ts) ? ts : Number.MAX_SAFE_INTEGER;
+                    };
+
+                    // Sort by enqueue timestamp (fallback to legacy timestamp) to find the oldest task
                     const oldestTask = inProgressTasks.sort((a: any, b: any) => 
-                        new Date(a.enqueued_at).getTime() - new Date(b.enqueued_at).getTime()
+                        resolveTaskTime(a) - resolveTaskTime(b)
                     )[0];
 
                     // Mark as completed
