@@ -70,6 +70,13 @@ flowchart LR
 - 连续 N 次成功后转 active。
 - 任意一次高冲突可直接回滚至 deprecated。
 
+**默认阈值**：
+```ts
+const PROBATION_SUCCESS_THRESHOLD = 3;  // 连续 3 次成功转 active
+const PROBATION_CONFLICT_THRESHOLD = 1; // 1 次冲突即可回滚
+const PROBATION_MAX_AGE_DAYS = 30;      // 试用期最长 30 天，超时自动 deprecated
+```
+
 ---
 
 ### 3.2 并发写入冲突风险
@@ -134,11 +141,94 @@ interface Principle {
 ## 4.2 Evolution Event Schema（建议）
 
 `memory/evolution.jsonl` 每行一个事件：
-- `pain_detected`
-- `candidate_created`
-- `principle_promoted`
-- `principle_deprecated`
-- `circuit_breaker_opened`
+
+```ts
+type EvolutionEventType = 
+  | 'pain_detected'
+  | 'candidate_created'
+  | 'principle_promoted'
+  | 'principle_deprecated'
+  | 'circuit_breaker_opened';
+
+interface EvolutionEvent {
+  ts: string;           // ISO timestamp
+  type: EvolutionEventType;
+  data: Record<string, unknown>;
+}
+
+// 各事件 data 字段定义：
+interface PainDetectedData {
+  painId: string;
+  painType: 'tool_failure' | 'subagent_error' | 'user_frustration';
+  source: string;       // 触发来源
+  reason: string;
+  score: number;
+  sessionId?: string;
+}
+
+interface CandidateCreatedData {
+  painId: string;
+  principleId: string;  // P_001, P_002...
+  trigger: string;
+  action: string;
+  guardrails?: string[];
+  status: 'candidate';
+}
+
+interface PrinciplePromotedData {
+  principleId: string;
+  from: 'candidate' | 'probation';
+  to: 'probation' | 'active';
+  reason: string;       // 'auto_threshold' | 'manual'
+  successCount?: number;
+}
+
+interface PrincipleDeprecatedData {
+  principleId: string;
+  reason: string;
+  conflictWith?: string;  // 冲突的活跃原则 ID
+  triggeredBy: 'auto' | 'manual';
+}
+
+interface CircuitBreakerOpenedData {
+  taskId: string;
+  painId: string;
+  failCount: number;
+  reason: string;
+  requireHuman: boolean;
+  nextRetryAt?: string;  // 指数退避后的下次重试时间
+}
+```
+
+## 4.3 Evolution Reducer 接口
+
+```ts
+// evolution-reducer.ts 导出接口
+interface EvolutionReducer {
+  // 事件投递（hook 调用）
+  emit(event: EvolutionEvent): void;           // 异步投递（不阻塞，写入 buffer）
+  emitSync(event: EvolutionEvent): void;       // 同步写入（阻塞，立即 flush）
+  
+  // 查询接口
+  getCandidatePrinciples(): Principle[];       // 获取候选原则
+  getProbationPrinciples(): Principle[];       // 获取试用期原则
+  getActivePrinciples(): Principle[];          // 获取激活原则
+  getPrincipleById(id: string): Principle | null;
+  
+  // 状态转换
+  promote(principleId: string, reason?: string): void;   // 手动晋升
+  deprecate(principleId: string, reason: string): void;  // 手动回滚
+  
+  // 统计
+  getStats(): {
+    candidateCount: number;
+    probationCount: number;
+    activeCount: number;
+    deprecatedCount: number;
+    lastPromotedAt: string | null;
+  };
+}
+```
 
 ---
 
@@ -168,18 +258,25 @@ interface Principle {
 4. 编写 one-off 迁移脚本（存量数据 -> 新格式）。
 
 ### Phase 2：核心闭环（2-3 天）
-5. `hooks/pain.ts` -> 投递 pain event 给 reducer。
-6. `hooks/subagent.ts` -> 成功/失败都调用 reducer。
+5. `hooks/pain.ts` -> 投递 pain event 给 reducer（写工具失败 + 手动 /pain）。
+6. `hooks/subagent.ts` -> 投递 pain event 给 reducer（子智能体失败/超时）。
+
+> **Pain 触发完整路径**：
+> | 触发点 | 代码位置 | 说明 |
+> |---|---|---|
+> | 写工具失败 | `hooks/pain.ts` | WRITE_TOOLS 失败时触发 |
+> | 手动 `/pain` | `hooks/pain.ts` | 用户主动干预 |
+> | 子智能体失败/超时 | `hooks/subagent.ts` | outcome === 'error' \|\| 'timeout' |
 7. reducer 实现 `pain -> candidate -> probation` 转换。
 8. 增加失败升级策略（熔断 + 退避 + 人工介入）。
 
 ### Phase 3：验证与反馈（1-2 天）
-9. 新增 `/pd-evolution-status` 命令。
-10. prompt 注入“最近新增原则摘要 + probation 标记”。
-11. 编写 3 组测试（自动入库、失败熔断、注入生效）。
-12. 文档更新 + 运维手册（迁移/归档/回滚）。
+9. 新增 `/pd-evolution-status` 命令（显示：候选数、试用期数、激活数、最近晋升时间）。
+10. 新增 `/pd-principle-rollback <principleId> [reason]` 命令（用户手动回滚）。
+11. prompt 注入"最近新增原则摘要 + probation 标记"。
+12. 编写 3 组测试（自动入库、失败熔断、注入生效）。
+13. 文档更新 + 运维手册（迁移/归档/回滚）。
 
----
 
 ## 七、验收指标（唯一判断标准落地化）
 
