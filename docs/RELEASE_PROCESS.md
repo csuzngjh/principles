@@ -2,109 +2,77 @@
 
 [English](RELEASE_PROCESS.md) | [中文](RELEASE_PROCESS_ZH.md)
 
-This document describes the automated release process for Principles Disciple packages.
+---
 
-## Packages
+## For AI Agents (Quick Start)
 
-| Package | Path | npm Name |
-|---------|------|----------|
-| OpenClaw Plugin | `packages/openclaw-plugin` | `principles-disciple` |
-| Installer | `packages/create-principles-disciple` | `create-principles-disciple` |
-
-## Automated Release Flow
+### One-Line Release
 
 ```
-Code Change → Pull Request → Merge to main → GitHub Actions → npm publish → Version Sync → Tag Created
+PR merged to main → Auto publish ✅
 ```
 
-### Trigger Conditions
+### Commit Format Cheat Sheet
 
-The release workflow automatically runs when:
+| Commit | Version Change | Example |
+|--------|---------------|---------|
+| `feat:` | +0.1.0 | New feature |
+| `fix:` | +0.0.1 | Bug fix |
+| `feat!:` | +1.0.0 | Breaking change |
 
-1. **PR Merged to main** - Any PR merged to `main` that modifies files in:
-   - `packages/openclaw-plugin/**`
-   - `packages/create-principles-disciple/**`
+### Steps
 
-2. **Manual Trigger** - Workflow dispatch with options:
-   - Package selection
-   - Version bump type (`auto`/`patch`/`minor`/`major`)
+1. Create PR with correct commit format
+2. Merge to main
+3. Wait for auto-publish (~2 min)
 
-3. **Tag Push** - Push tags matching `v*`
+---
 
-## Smart Version Management
+## For Developers
 
-### Automatic Version Bump
+### Auto Release Flow
 
-The system analyzes commits in the PR to determine version type:
+```
+PR → main → GitHub Actions → npm publish → 5-file sync → Git tag
+```
 
-| Commit Type | Version Bump |
-|-------------|--------------|
-| `feat!:` or `feat(...)!:` | **MAJOR** (breaking change) |
-| `feat:` or `feature:` | **MINOR** (new feature) |
-| `fix:`, `docs:`, `chore:`, etc. | **PATCH** (default) |
+### Triggers
 
-### Version Synchronization
+| Trigger | Description |
+|---------|-------------|
+| PR merged to main | Auto-trigger on `packages/**` changes |
+| Manual dispatch | Actions → Publish to npm → Run |
+| Tag push | `git push origin v1.5.6` |
 
-Each release automatically syncs version across 5 files:
+### Smart Version Bump
+
+Analyzes PR commits to determine version type:
+
+| Commit Type | Bump | Scenario |
+|------------|------|----------|
+| `feat!:` / `feat(...)!:` | MAJOR | Breaking change |
+| `feat:` / `feature:` | MINOR | New feature |
+| Others (`fix:`, `docs:`, `chore:`) | PATCH | Default |
+
+### Version Sync (5 Files)
 
 | File | Description |
 |------|-------------|
-| `packages/openclaw-plugin/package.json` | npm package version |
-| `packages/openclaw-plugin/openclaw.plugin.json` | Plugin manifest version |
+| `packages/openclaw-plugin/package.json` | npm package |
+| `packages/openclaw-plugin/openclaw.plugin.json` | Plugin manifest |
 | `package.json` (root) | Monorepo version |
-| `README.md` | Documentation version badge |
-| `README_ZH.md` | Documentation version badge |
+| `README.md` | Documentation |
+| `README_ZH.md` | Documentation |
 
-### Version Format
+---
 
-```
-{MAJOR}.{MINOR}.{PATCH}
-```
+## Local Operations
 
-- **MAJOR**: Breaking changes
-- **MINOR**: New features (backward compatible)
-- **PATCH**: Bug fixes
-
-## Automatic Changelog Generation
-
-Releases automatically generate categorized changelogs:
-
-- 🚀 **Features** - New features
-- 🐛 **Bug Fixes** - Bug fixes
-- 🔧 **Other Changes** - Other changes
-
-## Setup Required
-
-### 1. npm Token
-
-1. Go to [npmjs.com → Access Tokens](https://www.npmjs.com/settings/tokens)
-2. Create "Automation" token (bypasses 2FA for CI)
-3. Add to GitHub:
-
-```
-Repository → Settings → Secrets → Actions
-Name: NPM_TOKEN
-Value: your-npm-automation-token
-```
-
-### 2. Trusted Publishing (Recommended)
-
-1. npm: Package Settings → Publishing → Add CI
-2. Add your GitHub repository
-3. The workflow uses `id-token: write` for provenance
-
-## Local Development
-
-### Manual Version Sync
-
-Use the `sync-version.sh` script:
+### Sync Version
 
 ```bash
-# Sync from latest Git Tag
-./scripts/sync-version.sh
-
-# Specify version
-./scripts/sync-version.sh 1.5.6
+./scripts/sync-version.sh           # From Git tag
+./scripts/sync-version.sh 1.5.6    # Specify version
 ```
 
 ### Manual Publish
@@ -118,92 +86,26 @@ npm publish --access public
 ### Check Version
 
 ```bash
-cat packages/openclaw-plugin/package.json | grep version
 npm view principles-disciple version
+/pd-version  # In OpenClaw
 ```
 
-### Plugin Version Check
-
-After installation, run in OpenClaw:
-
-```
-/pd-version
-```
-
-## Best Practices
-
-1. **Always test locally first**:
-   ```bash
-   npm run build
-   npm run test
-   ```
-
-2. **Use conventional commits**:
-   - `feat:` - New feature → minor version
-   - `fix:` - Bug fix → patch version
-   - `feat!:` - Breaking change → major version
-   - `docs:`, `chore:` - Other → patch version
-
-3. **Test the plugin**:
-   ```bash
-   npm install -g principles-disciple@latest
-   openclaw gateway restart
-   /pd-version
-   ```
-
-## Release Process Details
-
-### Automatic Release (Recommended)
-
-1. Create PR with proper commit format
-2. Merge PR to main
-3. GitHub Actions automatically:
-   - Analyzes commits to determine version type
-   - Bumps version number
-   - Syncs all files
-   - Publishes to npm
-   - Creates Git tag
-   - Generates GitHub Release
-
-### Manual Trigger
-
-1. Go to Actions → Publish to npm
-2. Select "Run workflow"
-3. Choose package and version bump type
-4. Click "Run workflow"
+---
 
 ## Troubleshooting
 
-### Build Fails
+| Issue | Solution |
+|-------|----------|
+| Version mismatch | `./scripts/sync-version.sh` |
+| Publish failed | Check `NPM_TOKEN` validity |
+| Build failed | `git diff --check` for conflicts |
 
-Check for merge conflicts in source files:
+---
 
-```bash
-git diff --check
-```
+## Setup Required
 
-### Publish Fails
+### npm Token
 
-1. Verify npm token: `npm whoami`
-2. Check package name in `package.json`
-3. Ensure version is unique: `npm view principles-disciple versions`
-
-### Version Out of Sync
-
-Run the sync script:
-
-```bash
-./scripts/sync-version.sh
-git add -A && git commit -m 'chore: sync version'
-```
-
-## Rollback
-
-If a release fails:
-
-```bash
-git revert HEAD
-git push
-```
-
-npm does not support deleting versions. If critical, publish a patch fix.
+1. [npmjs.com → Access Tokens](https://www.npmjs.com/settings/tokens)
+2. Create "Automation" token
+3. GitHub → Settings → Secrets → `NPM_TOKEN`
