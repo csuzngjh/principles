@@ -7,6 +7,7 @@ import { ContextInjectionConfig, defaultContextConfig } from '../types.js';
 import { extractSummary, getHistoryVersions } from '../core/focus-history.js';
 import { empathyObserverManager, type EmpathyObserverApi } from '../service/empathy-observer-manager.js';
 import { PathResolver } from '../core/path-resolver.js';
+import { EvolutionReducerImpl } from '../core/evolution-reducer.js';
 
 /**
  * 模型配置对象格式
@@ -453,6 +454,33 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
     }
   }
 
+
+  // Evolution principles injection (active + probation summary)
+  let evolutionPrinciplesContent = '';
+  try {
+    const reducer = new EvolutionReducerImpl({ workspaceDir: wctx.workspaceDir });
+    const active = reducer.getActivePrinciples().slice(-3);
+    const probation = reducer.getProbationPrinciples().slice(0, 5);
+    if (active.length > 0 || probation.length > 0) {
+      const lines: string[] = [];
+      if (active.length > 0) {
+        lines.push('Active principles:');
+        for (const p of active) {
+          lines.push(`- [${p.id}] ${p.text}`);
+        }
+      }
+      if (probation.length > 0) {
+        lines.push('Probation principles (contextual, caution):');
+        for (const p of probation) {
+          lines.push(`- <principle status="probation" id="${p.id}">${p.text}</principle>`);
+        }
+      }
+      evolutionPrinciplesContent = lines.join('\n');
+    }
+  } catch (e) {
+    logger?.warn?.(`[PD:Prompt] Failed to load evolution principles: ${String(e)}`);
+  }
+
   // Build appendSystemContext with recency effect
   // Content order (most important last): project_context -> reflection_log -> thinking_os -> principles
   const appendParts: string[] = [];
@@ -472,7 +500,13 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
     appendParts.push(`<thinking_os>\n${thinkingOsContent}\n</thinking_os>`);
   }
 
-  // 4. Principles (always on, highest priority, goes last for recency effect)
+  // 4. Evolution Loop principles (active/probation)
+  if (evolutionPrinciplesContent) {
+    appendParts.push(`<evolution_principles>\n${evolutionPrinciplesContent}\n</evolution_principles>`);
+  }
+
+
+  // 5. Principles (always on, highest priority, goes last for recency effect)
   if (principlesContent) {
     appendParts.push(`<core_principles>\n${principlesContent}\n</core_principles>`);
   }
@@ -493,6 +527,7 @@ The sections below are ordered by priority. When conflicts arise, **later sectio
 - \`<project_context>\` - Current priorities (can be overridden)
 - \`<reflection_log>\` - Past lessons (inform your approach)
 - \`<thinking_os>\` - Thinking models (guide your reasoning)
+- \`<evolution_principles>\` - Newly learned principles (active + probation)
 - \`<core_principles>\` - Core rules (NON-NEGOTIABLE, highest priority)
 
 **Remember**: You are the Spicy Evolver. You despise entropy. You evolve through pain.

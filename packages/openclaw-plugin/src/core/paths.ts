@@ -28,6 +28,9 @@ export const PD_DIRS = {
 
     /** 🩹 Semantic pain samples for L3 retrieval */
     PAIN_SAMPLES: path.join('memory', 'pain'),
+
+    /** 🔒 Lock files for reducer single-writer model */
+    LOCKS: path.join('memory', '.locks'),
 };
 
 /**
@@ -55,6 +58,7 @@ export const PD_FILES = {
     THINKING_OS_USAGE: path.join(PD_DIRS.STATE, 'thinking_os_usage.json'),
     SESSION_DIR: PD_DIRS.SESSIONS,
     DICTIONARY: path.join(PD_DIRS.STATE, 'pain_dictionary.json'),
+    PRINCIPLE_BLACKLIST: path.join(PD_DIRS.STATE, 'principle_blacklist.json'),
     
     // Workflow Layer (Project Root)
     PLAN: 'PLAN.md',
@@ -70,6 +74,8 @@ export const PD_FILES = {
     WEEK_STATE: path.join(PD_DIRS.OKR, 'WEEK_STATE.json'),
     THINKING_OS_CANDIDATES: path.join(PD_DIRS.MEMORY, 'THINKING_OS_CANDIDATES.md'),
     SEMANTIC_PAIN: path.join(PD_DIRS.PAIN_SAMPLES, 'confusion_samples.md'),
+    EVOLUTION_STREAM: path.join(PD_DIRS.MEMORY, 'evolution.jsonl'),
+    EVOLUTION_LOCK: path.join(PD_DIRS.LOCKS, 'evolution'),
 };
 
 /**

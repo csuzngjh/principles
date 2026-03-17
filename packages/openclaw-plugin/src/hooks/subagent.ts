@@ -1,9 +1,40 @@
 import type { PluginHookSubagentEndedEvent, PluginHookSubagentContext } from '../openclaw-sdk.js';
 import { writePainFlag } from '../core/pain.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
+import { EvolutionReducerImpl } from '../core/evolution-reducer.js';
 import { empathyObserverManager, type EmpathyObserverApi } from '../service/empathy-observer-manager.js';
 import * as fs from 'fs';
 import * as path from 'path';
+
+
+
+function emitSubagentPainEvent(
+    workspaceDir: string,
+    payload: {
+        source: string;
+        reason: string;
+        score: number;
+        sessionId?: string;
+    }
+): void {
+    try {
+        const reducer = new EvolutionReducerImpl({ workspaceDir });
+        reducer.emitSync({
+            ts: new Date().toISOString(),
+            type: 'pain_detected',
+            data: {
+                painId: `pain_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+                painType: 'subagent_error',
+                source: payload.source,
+                reason: payload.reason,
+                score: payload.score,
+                sessionId: payload.sessionId,
+            },
+        });
+    } catch {
+        // Non-blocking telemetry path.
+    }
+}
 
 type SubagentEndedHookContext = PluginHookSubagentContext & {
     api?: EmpathyObserverApi;
@@ -33,13 +64,21 @@ export async function handleSubagentEnded(
     if (outcome === 'error' || outcome === 'timeout') {
         const scoreSettings = config.get('scores');
         const score = outcome === 'error' ? scoreSettings.subagent_error_penalty : scoreSettings.subagent_timeout_penalty;
-        
+        const reason = `Subagent session ${targetSessionKey} ended with outcome: ${outcome}`;
+
         writePainFlag(workspaceDir, {
             source: `subagent_${outcome}`,
             score: String(score),
             time: new Date().toISOString(),
-            reason: `Subagent session ${targetSessionKey} ended with outcome: ${outcome}`,
+            reason,
             is_risky: 'true'
+        });
+
+        emitSubagentPainEvent(workspaceDir, {
+            source: `subagent_${outcome}`,
+            reason,
+            score,
+            sessionId: ctx.sessionId,
         });
     }
 

@@ -119,6 +119,7 @@ export class PathResolver {
         
         if (options.workspaceDir) {
             this.workspaceDir = options.workspaceDir;
+            this.initialized = true;
         }
     }
 
@@ -285,6 +286,9 @@ export class PathResolver {
             'CURRENT_FOCUS': path.join(memory, 'okr', 'CURRENT_FOCUS.md'),
             'WEEK_STATE': path.join(memory, 'okr', 'WEEK_STATE.json'),
             'THINKING_OS_CANDIDATES': path.join(memory, 'THINKING_OS_CANDIDATES.md'),
+            'EVOLUTION_STREAM': path.join(memory, 'evolution.jsonl'),
+            'EVOLUTION_LOCK': path.join(memory, '.locks', 'evolution'),
+            'PRINCIPLE_BLACKLIST': path.join(state, 'principle_blacklist.json'),
             'MEMORY': memory,
         };
 

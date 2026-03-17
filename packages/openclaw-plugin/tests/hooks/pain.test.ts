@@ -11,6 +11,13 @@ vi.mock('../../src/utils/io.js');
 vi.mock('../../src/core/workspace-context');
 vi.mock('../../src/core/event-log');
 
+const mockEmitSync = vi.fn();
+vi.mock('../../src/core/evolution-reducer.js', () => ({
+  EvolutionReducerImpl: class {
+    emitSync = mockEmitSync;
+  },
+}));
+
 describe('Post-Write Checks & Pain Hook', () => {
   const workspaceDir = '/mock/workspace';
   const mockEventLog = {
@@ -40,6 +47,7 @@ describe('Post-Write Checks & Pain Hook', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockEmitSync.mockReset();
     vi.mocked(WorkspaceContext.fromHookContext).mockReturnValue(mockWctx as any);
     vi.mocked(EventLogService.get).mockReturnValue(mockEventLog as any);
   });
@@ -53,6 +61,7 @@ describe('Post-Write Checks & Pain Hook', () => {
     expect(WorkspaceContext.fromHookContext).toHaveBeenCalled();
     expect(fs.writeFileSync).not.toHaveBeenCalled();
     expect(mockTrust.recordFailure).not.toHaveBeenCalled();
+    expect(mockEmitSync).not.toHaveBeenCalled();
   });
 
   it('should capture pain on tool error with correct source and record failure', () => {
@@ -81,5 +90,33 @@ describe('Post-Write Checks & Pain Hook', () => {
         'tool',
         expect.objectContaining({ sessionId: 's1' })
     );
+    expect(mockEmitSync).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'pain_detected',
+      data: expect.objectContaining({
+        painType: 'tool_failure',
+        source: 'write',
+      }),
+    }));
   });
+
+  it('should emit evolution pain event for manual pain command', () => {
+    const mockCtx = { workspaceDir, sessionId: 's2', api: { logger: {} } };
+    const mockEvent = {
+      toolName: 'pain',
+      params: { input: 'Need help' },
+      result: { exitCode: 0 },
+      error: undefined,
+    };
+
+    handleAfterToolCall(mockEvent as any, mockCtx as any);
+
+    expect(mockEmitSync).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'pain_detected',
+      data: expect.objectContaining({
+        painType: 'user_frustration',
+        source: 'pain',
+      }),
+    }));
+  });
+
 });
