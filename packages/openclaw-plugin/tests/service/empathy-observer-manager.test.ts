@@ -23,7 +23,6 @@ describe('EmpathyObserverManager', () => {
     config: {
       empathy_engine: {
         enabled: true,
-        observer_model: 'openai/gpt-4o-mini',
       },
     },
     runtime: {

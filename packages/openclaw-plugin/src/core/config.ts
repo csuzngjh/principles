@@ -104,7 +104,6 @@ export interface PainSettings {
     deep_reflection?: DeepReflectionSettings;
     empathy_engine?: {
         enabled?: boolean;
-        observer_model?: string | null;
         dedupe_window_ms?: number;
         penalties?: {
             mild?: number;
@@ -212,7 +211,6 @@ export const DEFAULT_SETTINGS: PainSettings = {
     },
     empathy_engine: {
         enabled: true,
-        observer_model: null,
         dedupe_window_ms: 60000,
         penalties: {
             mild: 10,

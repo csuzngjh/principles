@@ -45,7 +45,6 @@ interface PromptHookApi {
     };
     empathy_engine?: {
       enabled?: boolean;
-      observer_model?: string | null;
     };
   };
   runtime: EmpathyObserverApi['runtime'];
@@ -336,7 +335,7 @@ REQUIRED ACTION:
   // ═══ 4. Empathy Observer Spawn (async sidecar) ═══
   if (trigger === 'user' && sessionId && api) {
     const latestUserMessage = extractLatestUserMessage(event.messages);
-    await empathyObserverManager.spawn(api, sessionId, latestUserMessage);
+    empathyObserverManager.spawn(api, sessionId, latestUserMessage).catch((err) => api.logger.warn(String(err)));
   }
 
   // ═══ 5. Heartbeat-specific checklist ═══

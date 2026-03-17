@@ -9,7 +9,6 @@ export interface EmpathyObserverApi {
     config?: {
         empathy_engine?: {
             enabled?: boolean;
-            observer_model?: string | null;
         };
     };
     runtime: {
@@ -50,8 +49,7 @@ export class EmpathyObserverManager {
     shouldTrigger(api: EmpathyObserverApi | null | undefined, sessionId: string): boolean {
         if (!api || !sessionId) return false;
         const enabled = api.config?.empathy_engine?.enabled !== false;
-        const observerModel = api.config?.empathy_engine?.observer_model;
-        if (!enabled || !observerModel) return false;
+        if (!enabled) return false;
 
         return !this.sessionLocks.has(sessionId);
     }
@@ -60,8 +58,6 @@ export class EmpathyObserverManager {
         if (!this.shouldTrigger(api, sessionId)) return null;
         if (!userMessage?.trim()) return null;
 
-        const observerModel = api?.config?.empathy_engine?.observer_model;
-        if (!observerModel) return null;
 
         const sessionKey = `${OBSERVER_SESSION_PREFIX}${sessionId}:${Date.now()}`;
         this.sessionLocks.set(sessionId, sessionKey);
@@ -77,7 +73,7 @@ export class EmpathyObserverManager {
             await api.runtime.subagent.run({
                 sessionKey,
                 message: prompt,
-                lane: 'observer',
+                lane: 'subagent',
                 deliver: false,
                 idempotencyKey: `${sessionId}:${Date.now()}`,
             });
