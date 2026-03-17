@@ -22,10 +22,11 @@ const READ_ONLY_TOOLS = new Set([
 ]);
 
 // TIER 1: 低风险修改 - GFI >= low_risk_block 时拦截
+// 注意：pd_spawn_agent、sessions_spawn、task 是 Agent 派生工具，不应被 GFI Gate 拦截
+// 它们属于 AGENT_TOOLS，在早期过滤后直接放行
 const LOW_RISK_WRITE_TOOLS = new Set([
   'write', 'write_file',
   'edit', 'edit_file', 'replace', 'apply_patch', 'insert', 'patch',
-  'pd_spawn_agent', 'sessions_spawn', 'task',
 ]);
 
 // TIER 2: 高风险操作 - GFI >= high_risk_block 时拦截
@@ -175,17 +176,14 @@ export function handleBeforeToolCall(
 
   // ═══ GFI GATE - Hard Intercept ═══
   // 根据 GFI (疲劳指数) 精细化拦截工具调用
+  // 注意：TIER 0 (只读工具) 已在早期过滤中放行，此处不检查
   const gfiGateConfig = wctx.config.get('gfi_gate');
   if (gfiGateConfig?.enabled !== false && ctx.sessionId) {
     const session = getSession(ctx.sessionId);
     const currentGfi = session?.currentGfi || 0;
     
-    // TIER 0: 只读工具 - 永不拦截
-    if (READ_ONLY_TOOLS.has(event.toolName)) {
-      // 继续执行，不做 GFI 检查
-    }
     // TIER 3: Bash 命令 - 根据内容判断
-    else if (BASH_TOOLS_SET.has(event.toolName)) {
+    if (BASH_TOOLS_SET.has(event.toolName)) {
       const command = String(event.params.command || event.params.args || '');
       const bashRisk = analyzeBashCommand(
         command,

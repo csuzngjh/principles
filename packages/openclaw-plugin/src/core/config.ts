@@ -241,7 +241,9 @@ export const DEFAULT_SETTINGS: PainSettings = {
             '^(ls|dir|pwd|which|where|echo|env|cat|type|head|tail|less|more)\\b',
             '^git\\s+(status|log|diff|branch|show|remote)\\b',
             '^npm\\s+(run|test|build|start)\\b',
-            '^(make|gradle|mvn)\\b',
+            '^make\\s*$',  // 只允许纯 make 命令
+            '^make\\s+(-j\\d+|--jobs\\s*\\d+)$',  // 允许 make -j4 等
+            '^(gradle|mvn)\\s+(clean|build|test|compile)\\b',  // 只允许安全参数
         ],
         bash_dangerous_patterns: [
             'rm\\s+(-[a-z]*r[a-z]*f|-rf)',

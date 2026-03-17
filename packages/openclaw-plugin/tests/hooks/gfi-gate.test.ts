@@ -43,7 +43,9 @@ describe('GFI Gate - Hard Intercept', () => {
                 '^(ls|dir|pwd|which|where|echo|env|cat|type|head|tail|less|more)\\b',
                 '^git\\s+(status|log|diff|branch|show|remote)\\b',
                 '^npm\\s+(run|test|build|start)\\b',
-                '^(make|gradle|mvn)\\b'
+                '^make\\s*$',
+                '^make\\s+(-j\\d+|--jobs\\s*\\d+)$',
+                '^(gradle|mvn)\\s+(clean|build|test|compile)\\b'
             ],
             bash_dangerous_patterns: [
                 'rm\\s+(-[a-z]*r[a-z]*f|-rf)',
