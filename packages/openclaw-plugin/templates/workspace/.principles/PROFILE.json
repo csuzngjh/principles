@@ -6,6 +6,7 @@
     "IDENTITY.md",
     "USER.md",
     "docs/PRINCIPLES.md",
+    ".principles/PROFILE.json",
     "docs/PROFILE.json"
   ],
   "gate": {
@@ -22,6 +23,7 @@
         "IDENTITY.md",
         "USER.md",
         "docs/PRINCIPLES.md",
+        ".principles/PROFILE.json",
         "docs/PROFILE.json",
         "docs/okr/**"
       ],
