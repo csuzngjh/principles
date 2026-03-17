@@ -315,6 +315,83 @@ describe('Prompt Context Injection Hook', () => {
     expect(result?.prependContext).toContain('\\nwith newline');
   });
 
+  it('should reconstruct evolution task when queue item task is missing', async () => {
+    vi.mocked(fs.existsSync).mockImplementation((p) => p.toString().includes('evolution_queue.json'));
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify([
+        {
+          id: 'abc12345',
+          source: 'hook_failure',
+          reason: 'Hook execution failed',
+          trigger_text_preview: 'trace preview',
+          status: 'in_progress'
+        }
+    ]));
+
+    const mockApi = {
+      config: {
+        agents: {
+          defaults: {
+            model: 'openai/gpt-4o'
+          }
+        }
+      },
+      logger: {
+        info: vi.fn(),
+        error: vi.fn(),
+        warn: vi.fn(),
+        debug: vi.fn(),
+      }
+    };
+
+    const result = await handleBeforePromptBuild({} as any, {
+      workspaceDir,
+      trigger: 'user',
+      api: mockApi
+    } as any);
+
+    expect(result?.prependContext).toContain('Diagnose systemic pain [ID: abc12345]');
+    expect(result?.prependContext).toContain('Source: hook_failure. Reason: Hook execution failed.');
+    expect(result?.prependContext).toContain('Trigger text: \\"trace preview\\"');
+  });
+
+  it('should skip evolution task injection when task is literal undefined and metadata is invalid', async () => {
+    vi.mocked(fs.existsSync).mockImplementation((p) => p.toString().includes('evolution_queue.json'));
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify([
+        {
+          task: 'undefined',
+          status: 'in_progress'
+        }
+    ]));
+
+    const mockWarn = vi.fn();
+    const mockApi = {
+      config: {
+        agents: {
+          defaults: {
+            model: 'openai/gpt-4o'
+          }
+        }
+      },
+      logger: {
+        info: vi.fn(),
+        error: vi.fn(),
+        warn: mockWarn,
+        debug: vi.fn(),
+      }
+    };
+
+    const result = await handleBeforePromptBuild({} as any, {
+      workspaceDir,
+      trigger: 'user',
+      api: mockApi
+    } as any);
+
+    expect(result).toBeDefined();
+    expect(result?.prependContext).not.toContain('<evolution_task');
+    expect(result?.prependContext).toContain('<system_override:runtime_constraints>');
+    expect(mockWarn).toHaveBeenCalledWith('[PD:Prompt] Skipping evolution task injection because task payload is invalid.');
+  });
+
   it('should NOT inject system override if model config is missing', async () => {
     vi.mocked(fs.existsSync).mockImplementation((p) => p.toString().includes('evolution_queue.json'));
     vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify([
