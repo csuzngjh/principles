@@ -91,6 +91,7 @@ export interface OpenClawPluginApi {
     name: string;
     version?: string;
     source: string;
+    rootDir: string;
     config: Record<string, any>;
     pluginConfig?: Record<string, any>;
     runtime: PluginRuntime;

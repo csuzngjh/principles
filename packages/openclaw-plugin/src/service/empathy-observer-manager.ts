@@ -55,6 +55,7 @@ export class EmpathyObserverManager {
     }
 
     async spawn(api: EmpathyObserverApi | null | undefined, sessionId: string, userMessage: string): Promise<string | null> {
+        if (!api) return null;
         if (!this.shouldTrigger(api, sessionId)) return null;
         if (!userMessage?.trim()) return null;
 

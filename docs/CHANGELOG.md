@@ -46,10 +46,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.5.6] - 2026-03-17
 
 ### Changed
-- Refactored empathy pipeline from prompt-level strong coupling to async observer sidecar mode (v3.0):
-  - Added `EmpathyObserverManager` singleton service for spawn/reap/lock lifecycle.
-  - Prompt hook now triggers observer subagent spawn instead of injecting `<system_override:empathy_engine>` directives.
-  - Subagent ended hook now intercepts observer sessions and reaps JSON result to update GFI.
+- Path normalization hardening for extension-aware resolution:
+  - `OpenClawPluginApi` now includes `rootDir` contract alignment.
+  - `PathResolver` now captures extension root and provides `EXTENSION_ROOT`, `EXTENSION_SRC`, `EXTENSION_DIST`, and `EVOLUTION_WORKER` anchors.
+  - plugin register now persists extension root via `PathResolver.setExtensionRoot(api.rootDir)`.
+  - prompt system context now documents internal extension layout and points self-inspection to `EVOLUTION_WORKER`.
 
 ---
 

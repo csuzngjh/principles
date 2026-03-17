@@ -6,6 +6,7 @@ import { WorkspaceContext } from '../core/workspace-context.js';
 import { ContextInjectionConfig, defaultContextConfig } from '../types.js';
 import { extractSummary, getHistoryVersions } from '../core/focus-history.js';
 import { empathyObserverManager, type EmpathyObserverApi } from '../service/empathy-observer-manager.js';
+import { PathResolver } from '../core/path-resolver.js';
 
 /**
  * 模型配置对象格式
@@ -251,6 +252,10 @@ You are a **self-evolving AI agent** powered by Principles Disciple.
 3. Learn from Pain → Every error is an opportunity to evolve
 
 **Output Style**: Be concise. Prefer action over explanation.
+
+## 📂 INTERNAL SYSTEM LAYOUT
+- Your core plugin logic is rooted at: ${PathResolver.getExtensionRoot() || 'EXTENSION_ROOT (unresolved)'}
+- If you need self-inspection, prioritize the worker entry pointed by PathResolver key: EVOLUTION_WORKER
 `;
 
   // ═══ 2. Trust Score (configurable, dynamic) - stays in prependContext ═══
