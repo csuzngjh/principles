@@ -274,8 +274,7 @@ describe('Prompt Context Injection Hook', () => {
     // evolutionDirective stays in prependContext (short dynamic directive)
     expect(result?.prependContext).toContain('<evolution_task');
     expect(result?.prependContext).toContain('Fix bug');
-    expect(result?.prependContext).toContain('model="openai/gpt-4o"');
-    expect(result?.prependContext).toContain('sessions_spawn target="diagnostician"');
+    expect(result?.prependContext).toContain('pd_spawn_agent agentType="diagnostician"');
   });
 
   it('should properly escape special characters in task string', async () => {
@@ -392,7 +391,7 @@ describe('Prompt Context Injection Hook', () => {
     expect(mockWarn).toHaveBeenCalledWith('[PD:Prompt] Skipping evolution task injection because task payload is invalid.');
   });
 
-  it('should NOT inject system override if model config is missing', async () => {
+  it('should still inject evolution_task when model config is missing', async () => {
     vi.mocked(fs.existsSync).mockImplementation((p) => p.toString().includes('evolution_queue.json'));
     vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify([
         { id: 't1', task: 'Fix bug', status: 'in_progress' }
@@ -415,7 +414,8 @@ describe('Prompt Context Injection Hook', () => {
     } as any);
 
     expect(result).toBeDefined();
-    expect(result?.prependContext).not.toContain('<evolution_task');
+    expect(result?.prependContext).toContain('<evolution_task');
+    expect(result?.prependContext).toContain('pd_spawn_agent agentType="diagnostician"');
     expect(result?.prependContext).toContain('<system_override:runtime_constraints>');
     expect(result?.prependContext).toContain('Trust Score:');
   });
