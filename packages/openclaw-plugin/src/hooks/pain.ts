@@ -27,6 +27,9 @@ interface ToolParams {
 
 const WRITE_TOOLS = ['write', 'edit', 'apply_patch', 'write_file', 'edit_file', 'replace'];
 
+function shouldAttributePrincipleToTool(principle: { contextTags: string[]; trigger: string; }, toolName: string): boolean {
+  return principle.contextTags.includes(toolName) || principle.trigger.includes(toolName);
+}
 
 function emitPainDetectedEvent(wctx: WorkspaceContext, event: EvolutionLoopEvent): void {
   try {
@@ -135,10 +138,7 @@ export function handleAfterToolCall(
     const injectedProbationIds = getInjectedProbationIds(sessionId, effectiveWorkspaceDir);
     for (const id of injectedProbationIds) {
       const principle = wctx.evolutionReducer.getPrincipleById(id);
-      const shouldAttribute = !!principle && (
-        principle.contextTags.includes(event.toolName) ||
-        principle.trigger.includes(event.toolName)
-      );
+      const shouldAttribute = !!principle && shouldAttributePrincipleToTool(principle, event.toolName);
       if (shouldAttribute) {
         wctx.evolutionReducer.recordProbationFeedback(id, false);
       }
@@ -157,7 +157,11 @@ export function handleAfterToolCall(
 
     const injectedProbationIds = getInjectedProbationIds(sessionId, effectiveWorkspaceDir);
     for (const id of injectedProbationIds) {
-      wctx.evolutionReducer.recordProbationFeedback(id, true);
+      const principle = wctx.evolutionReducer.getPrincipleById(id);
+      const shouldAttribute = !!principle && shouldAttributePrincipleToTool(principle, event.toolName);
+      if (shouldAttribute) {
+        wctx.evolutionReducer.recordProbationFeedback(id, true);
+      }
     }
     clearInjectedProbationIds(sessionId, effectiveWorkspaceDir);
     
@@ -214,7 +218,9 @@ export function handleAfterToolCall(
   if (fs.existsSync(profilePath)) {
     try {
       profile = normalizeProfile(JSON.parse(fs.readFileSync(profilePath, 'utf8')));
-    } catch (_e) {}
+    } catch (e) {
+      SystemLogger.log(effectiveWorkspaceDir, 'PROFILE_PARSE_WARN', `Failed to parse PROFILE.json: ${String(e)}`);
+    }
   }
 
   const isRisk = isRisky(relPath, profile.risk_paths);
