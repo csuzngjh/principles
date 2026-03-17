@@ -1,7 +1,6 @@
 name: Publish to npm
 
 on:
-  # 手动触发
   workflow_dispatch:
     inputs:
       package:
@@ -12,39 +11,32 @@ on:
         options:
           - principles-disciple
           - create-principles-disciple
-  # 基于 tag 自动发布
+      version_bump:
+        description: 'Version bump type'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
   push:
     tags:
       - 'principles-disciple-v*'
       - 'create-principles-disciple-v*'
+  pull_request:
+    branches:
+      - main
+    types:
+      - closed
+    paths:
+      - 'packages/openclaw-plugin/**'
+      - 'packages/create-principles-disciple/**'
 
 jobs:
-  determine-package:
+  release:
+    if: (github.event_name == 'pull_request' && github.event.pull_request.merged == true) || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    outputs:
-      package: ${{ steps.set-package.outputs.package }}
-    steps:
-      - name: Determine package from tag
-        id: set-package
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "package=${{ github.event.inputs.package }}" >> $GITHUB_OUTPUT
-          else
-            # 从 tag 提取包名，格式: package-vX.Y.Z
-            TAG="${GITHUB_REF#refs/tags/}"
-            if [[ "$TAG" == principles-disciple-v* ]]; then
-              echo "package=principles-disciple" >> $GITHUB_OUTPUT
-            elif [[ "$TAG" == create-principles-disciple-v* ]]; then
-              echo "package=create-principles-disciple" >> $GITHUB_OUTPUT
-            else
-              echo "::error::Unknown tag format: $TAG"
-              exit 1
-            fi
-          fi
-
-  publish:
-    runs-on: ubuntu-latest
-    needs: determine-package
     permissions:
       contents: write
       id-token: write
@@ -52,50 +44,47 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Determine package
+        id: package
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "pkg=${{ github.event.inputs.package }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "pkg=principles-disciple" >> $GITHUB_OUTPUT
+          fi
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Install dependencies (principles-disciple)
-        if: needs.determine-package.outputs.package == 'principles-disciple'
-        working-directory: packages/openclaw-plugin
+      - name: Install dependencies
+        working-directory: packages/${{ steps.package.outputs.pkg }}
         run: npm ci
 
-      - name: Build (principles-disciple)
-        if: needs.determine-package.outputs.package == 'principles-disciple'
-        working-directory: packages/openclaw-plugin
+      - name: Build
+        working-directory: packages/${{ steps.package.outputs.pkg }}
         run: npm run build
 
-      - name: Install dependencies (create-principles-disciple)
-        if: needs.determine-package.outputs.package == 'create-principles-disciple'
-        working-directory: packages/create-principles-disciple
-        run: npm ci
+      - name: Bump version
+        id: version
+        working-directory: packages/${{ steps.package.outputs.pkg }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            BUMP=${{ github.event.inputs.version_bump }}
+          else
+            BUMP=patch
+          fi
+          npm version $BUMP -m "chore(release): %s [skip ci]"
+          echo "version=$(node -p \"require('./package.json').version\")" >> $GITHUB_OUTPUT
 
-      - name: Build (create-principles-disciple)
-        if: needs.determine-package.outputs.package == 'create-principles-disciple'
-        working-directory: packages/create-principles-disciple
-        run: npm run build
-
-      - name: Publish (principles-disciple)
-        if: needs.determine-package.outputs.package == 'principles-disciple'
-        working-directory: packages/openclaw-plugin
+      - name: Publish to npm
+        working-directory: packages/${{ steps.package.outputs.pkg }}
         run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Publish (create-principles-disciple)
-        if: needs.determine-package.outputs.package == 'create-principles-disciple'
-        working-directory: packages/create-principles-disciple
-        run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Create GitHub Release
-        if: github.event_name == 'push'
-        uses: softprops/action-gh-release@v1
-        with:
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push tag
+        run: |
+          git push origin ${{ steps.version.outputs.version }}
