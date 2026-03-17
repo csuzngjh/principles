@@ -68,4 +68,44 @@ describe('Subagent Hook', () => {
 
         expect(mockTrust.recordSuccess).not.toHaveBeenCalled();
     });
+
+    it('should complete the oldest in-progress queue task using timestamp fallback', async () => {
+        const mockCtx = { workspaceDir, sessionId: 's1' };
+        const mockEvent = {
+            targetSessionKey: 'agent:main:subagent:diagnostician-123',
+            outcome: 'ok'
+        };
+
+        vi.mocked(fs.existsSync).mockImplementation((p) => {
+            const pathStr = p.toString();
+            return pathStr.includes('evolution_queue.json') || pathStr.includes('.pain_flag');
+        });
+
+        vi.mocked(fs.readFileSync).mockImplementation((p) => {
+            const pathStr = p.toString();
+            if (pathStr.includes('evolution_queue.json')) {
+                return JSON.stringify([
+                    { id: 'newer', status: 'in_progress', timestamp: '2026-03-17T02:00:00.000Z' },
+                    { id: 'older', status: 'in_progress', timestamp: '2026-03-17T01:00:00.000Z' }
+                ]);
+            }
+            if (pathStr.includes('.pain_flag')) {
+                return 'score: 80\nstatus: queued\n';
+            }
+            return '';
+        });
+
+        const writeSpy = vi.mocked(fs.writeFileSync);
+        const unlinkSpy = vi.mocked(fs.unlinkSync);
+
+        await handleSubagentEnded(mockEvent as any, mockCtx as any);
+
+        expect(writeSpy).toHaveBeenCalled();
+        const [, queuePayload] = writeSpy.mock.calls.find((args) => args[0].toString().includes('evolution_queue.json'))!;
+        const savedQueue = JSON.parse(queuePayload as string);
+        expect(savedQueue.find((t: any) => t.id === 'older').status).toBe('completed');
+        expect(savedQueue.find((t: any) => t.id === 'newer').status).toBe('in_progress');
+        expect(unlinkSpy).toHaveBeenCalled();
+    });
+
 });

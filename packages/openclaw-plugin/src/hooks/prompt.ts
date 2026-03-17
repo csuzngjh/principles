@@ -49,6 +49,23 @@ interface PromptHookApi {
   logger: PluginLogger;
 }
 
+function resolveEvolutionTask(inProgressTask: any): string | null {
+  if (!inProgressTask || typeof inProgressTask !== 'object') return null;
+
+  const rawTask = typeof inProgressTask.task === 'string' ? inProgressTask.task.trim() : '';
+  if (rawTask && rawTask.toLowerCase() !== 'undefined') return rawTask;
+
+  const source = typeof inProgressTask.source === 'string' ? inProgressTask.source.trim() : 'unknown';
+  const reason = typeof inProgressTask.reason === 'string' ? inProgressTask.reason.trim() : 'Systemic pain detected';
+  const preview = typeof inProgressTask.trigger_text_preview === 'string' && inProgressTask.trigger_text_preview.trim()
+    ? inProgressTask.trigger_text_preview.trim()
+    : 'N/A';
+
+  if (typeof inProgressTask.id !== 'string' || !inProgressTask.id.trim()) return null;
+
+  return `Diagnose systemic pain [ID: ${inProgressTask.id}]. Source: ${source}. Reason: ${reason}. Trigger text: "${preview}"`;
+}
+
 /**
  * 验证模型字符串格式是否为 "provider/model"
  */
@@ -261,11 +278,15 @@ You are a **self-evolving AI agent** powered by Principles Disciple.
         }
         
         if (diagnosticianModel) {
-          const escapedTask = JSON.stringify(inProgressTask.task);
+          const resolvedTask = resolveEvolutionTask(inProgressTask);
+          if (!resolvedTask) {
+            logger?.warn('[PD:Prompt] Skipping evolution task injection because task payload is invalid.');
+          } else {
+            const escapedTask = JSON.stringify(resolvedTask);
           
-          logger?.info(`[PD:Prompt] Injecting EVOLUTION TASK for: ${inProgressTask.id}`);
+            logger?.info(`[PD:Prompt] Injecting EVOLUTION TASK for: ${inProgressTask.id}`);
           
-          evolutionDirective = `<evolution_task priority="critical">
+            evolutionDirective = `<evolution_task priority="critical">
 TASK: ${escapedTask}
 
 REQUIRED ACTION:
@@ -274,6 +295,8 @@ REQUIRED ACTION:
 
 ⚠️ This task overrides all other activities until complete.
 </evolution_task>\n`;
+          }
+          
         }
       }
     } catch (e) {
