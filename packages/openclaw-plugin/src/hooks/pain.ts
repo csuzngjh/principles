@@ -7,6 +7,8 @@ import { trackFriction, resetFriction } from '../core/session-tracker.js';
 import { denoiseError, computeHash } from '../utils/hashing.js';
 import { SystemLogger } from '../core/system-logger.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
+import { EvolutionReducerImpl } from '../core/evolution-reducer.js';
+import type { EvolutionLoopEvent } from '../core/evolution-types.js';
 import type { PluginHookAfterToolCallEvent, PluginHookToolContext, OpenClawPluginApi } from '../openclaw-sdk.js';
 
 /**
@@ -25,6 +27,20 @@ interface ToolParams {
 }
 
 const WRITE_TOOLS = ['write', 'edit', 'apply_patch', 'write_file', 'edit_file', 'replace'];
+
+
+function emitPainDetectedEvent(workspaceDir: string, event: EvolutionLoopEvent): void {
+  try {
+    const reducer = new EvolutionReducerImpl({ workspaceDir });
+    reducer.emitSync(event);
+  } catch {
+    // Keep hook behavior resilient; pain telemetry should not block primary flow.
+  }
+}
+
+function createPainId(sessionId: string): string {
+  return `pain_${Date.now()}_${computeHash(sessionId).slice(0, 8)}`;
+}
 
 export function handleAfterToolCall(
   event: PluginHookAfterToolCallEvent,
@@ -55,6 +71,18 @@ export function handleAfterToolCall(
       source: 'manual',
       reason: `User intervention: ${reason}`,
       isRisky: true
+    });
+    emitPainDetectedEvent(effectiveWorkspaceDir, {
+      ts: new Date().toISOString(),
+      type: 'pain_detected',
+      data: {
+        painId: createPainId(sessionId),
+        painType: 'user_frustration',
+        source: event.toolName,
+        reason: `User intervention: ${reason}`,
+        score: 100,
+        sessionId,
+      },
     });
     return;
   }
@@ -188,6 +216,19 @@ export function handleAfterToolCall(
     source: 'tool_failure',
     reason: `Tool ${event.toolName} failed on ${relPath}`,
     isRisky: isRisk,
+  });
+
+  emitPainDetectedEvent(effectiveWorkspaceDir, {
+    ts: new Date().toISOString(),
+    type: 'pain_detected',
+    data: {
+      painId: createPainId(sessionId),
+      painType: 'tool_failure',
+      source: event.toolName,
+      reason: `Tool ${event.toolName} failed on ${relPath}`,
+      score: painScore,
+      sessionId,
+    },
   });
 }
 

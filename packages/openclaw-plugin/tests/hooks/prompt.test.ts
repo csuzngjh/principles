@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { handleBeforePromptBuild, resolveModelFromConfig, getDiagnosticianModel } from '../../src/hooks/prompt';
 import * as sessionTracker from '../../src/core/session-tracker';
 import { WorkspaceContext } from '../../src/core/workspace-context';
+import { EvolutionReducerImpl } from '../../src/core/evolution-reducer';
 import fs from 'fs';
 import path from 'path';
 
@@ -522,6 +523,59 @@ describe('Prompt Context Injection Hook', () => {
     expect(projectIndex).toBeLessThan(reflectionIndex);
     expect(reflectionIndex).toBeLessThan(thinkingOsIndex);
     expect(thinkingOsIndex).toBeLessThan(principlesIndex);
+  });
+
+
+
+  it('should inject evolution_principles section when reducer has active/probation principles', async () => {
+    const activeSpy = vi.spyOn(EvolutionReducerImpl.prototype, 'getActivePrinciples').mockReturnValue([
+      {
+        id: 'P_101',
+        version: 1,
+        text: 'Active principle text',
+        source: { painId: 'pain-1', painType: 'tool_failure', timestamp: new Date().toISOString() },
+        trigger: 'trigger',
+        action: 'action',
+        contextTags: [],
+        validation: { successCount: 3, conflictCount: 0 },
+        status: 'active',
+        feedbackScore: 60,
+        usageCount: 2,
+        createdAt: new Date().toISOString(),
+      } as any,
+    ]);
+    const probationSpy = vi.spyOn(EvolutionReducerImpl.prototype, 'getProbationPrinciples').mockReturnValue([
+      {
+        id: 'P_102',
+        version: 1,
+        text: 'Probation principle text',
+        source: { painId: 'pain-2', painType: 'tool_failure', timestamp: new Date().toISOString() },
+        trigger: 'trigger2',
+        action: 'action2',
+        contextTags: [],
+        validation: { successCount: 1, conflictCount: 0 },
+        status: 'probation',
+        feedbackScore: 20,
+        usageCount: 1,
+        createdAt: new Date().toISOString(),
+      } as any,
+    ]);
+
+    vi.mocked(fs.existsSync).mockImplementation((p) => p.toString().includes('PRINCIPLES.md'));
+    vi.mocked(fs.readFileSync).mockImplementation((p) => {
+      if (p.toString().includes('PRINCIPLES.md')) return '# Core Principles';
+      return '';
+    });
+
+    const result = await handleBeforePromptBuild({} as any, { workspaceDir, trigger: 'user' } as any);
+
+    expect(result?.appendSystemContext).toContain('<evolution_principles>');
+    expect(result?.appendSystemContext).toContain('Active principle text');
+    expect(result?.appendSystemContext).toContain('status="probation"');
+    expect(result?.appendSystemContext).toContain('<evolution_principles>');
+
+    activeSpy.mockRestore();
+    probationSpy.mockRestore();
   });
 
   it('FULL INJECTION: should preserve ALL content with correct separation', async () => {
