@@ -10,7 +10,7 @@ const { execFileSync } = require('child_process');
 const { existsSync } = require('fs');
 const { join } = require('path');
 
-const PLUGIN_DIR = __dirname;
+const PLUGIN_DIR = join(__dirname, '..');
 const DEPENDENCIES = [
   'micromatch@^4.0.8',
   '@sinclair/typebox@^0.34.48'
