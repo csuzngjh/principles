@@ -14,7 +14,7 @@ This document describes the automated release process for Principles Disciple pa
 ## Automated Release Flow
 
 ```
-Code Change → Pull Request → Merge to main → GitHub Actions → npm publish → Tag Created
+Code Change → Pull Request → Merge to main → GitHub Actions → npm publish → Version Sync → Tag Created
 ```
 
 ### Trigger Conditions
@@ -27,20 +27,33 @@ The release workflow automatically runs when:
 
 2. **Manual Trigger** - Workflow dispatch with options:
    - Package selection
-   - Version bump type (patch/minor/major)
+   - Version bump type (`auto`/`patch`/`minor`/`major`)
 
-3. **Tag Push** - Push tags matching:
-   - `principles-disciple-v*`
-   - `create-principles-disciple-v*`
+3. **Tag Push** - Push tags matching `v*`
 
-## Version Management
+## Smart Version Management
 
-### Version Bump Rules
+### Automatic Version Bump
 
-| Trigger | Bump Type |
-|---------|-----------|
-| PR merged to main | `patch` (default) |
-| Manual workflow dispatch | User selected |
+The system analyzes commits in the PR to determine version type:
+
+| Commit Type | Version Bump |
+|-------------|--------------|
+| `feat!:` or `feat(...)!:` | **MAJOR** (breaking change) |
+| `feat:` or `feature:` | **MINOR** (new feature) |
+| `fix:`, `docs:`, `chore:`, etc. | **PATCH** (default) |
+
+### Version Synchronization
+
+Each release automatically syncs version across 5 files:
+
+| File | Description |
+|------|-------------|
+| `packages/openclaw-plugin/package.json` | npm package version |
+| `packages/openclaw-plugin/openclaw.plugin.json` | Plugin manifest version |
+| `package.json` (root) | Monorepo version |
+| `README.md` | Documentation version badge |
+| `README_ZH.md` | Documentation version badge |
 
 ### Version Format
 
@@ -51,6 +64,14 @@ The release workflow automatically runs when:
 - **MAJOR**: Breaking changes
 - **MINOR**: New features (backward compatible)
 - **PATCH**: Bug fixes
+
+## Automatic Changelog Generation
+
+Releases automatically generate categorized changelogs:
+
+- 🚀 **Features** - New features
+- 🐛 **Bug Fixes** - Bug fixes
+- 🔧 **Other Changes** - Other changes
 
 ## Setup Required
 
@@ -73,6 +94,18 @@ Value: your-npm-automation-token
 3. The workflow uses `id-token: write` for provenance
 
 ## Local Development
+
+### Manual Version Sync
+
+Use the `sync-version.sh` script:
+
+```bash
+# Sync from latest Git Tag
+./scripts/sync-version.sh
+
+# Specify version
+./scripts/sync-version.sh 1.5.6
+```
 
 ### Manual Publish
 
@@ -106,10 +139,10 @@ After installation, run in OpenClaw:
    ```
 
 2. **Use conventional commits**:
-   - `feat:` - New feature
-   - `fix:` - Bug fix
-   - `docs:` - Documentation
-   - `chore:` - Maintenance
+   - `feat:` - New feature → minor version
+   - `fix:` - Bug fix → patch version
+   - `feat!:` - Breaking change → major version
+   - `docs:`, `chore:` - Other → patch version
 
 3. **Test the plugin**:
    ```bash
@@ -117,6 +150,27 @@ After installation, run in OpenClaw:
    openclaw gateway restart
    /pd-version
    ```
+
+## Release Process Details
+
+### Automatic Release (Recommended)
+
+1. Create PR with proper commit format
+2. Merge PR to main
+3. GitHub Actions automatically:
+   - Analyzes commits to determine version type
+   - Bumps version number
+   - Syncs all files
+   - Publishes to npm
+   - Creates Git tag
+   - Generates GitHub Release
+
+### Manual Trigger
+
+1. Go to Actions → Publish to npm
+2. Select "Run workflow"
+3. Choose package and version bump type
+4. Click "Run workflow"
 
 ## Troubleshooting
 
@@ -133,6 +187,15 @@ git diff --check
 1. Verify npm token: `npm whoami`
 2. Check package name in `package.json`
 3. Ensure version is unique: `npm view principles-disciple versions`
+
+### Version Out of Sync
+
+Run the sync script:
+
+```bash
+./scripts/sync-version.sh
+git add -A && git commit -m 'chore: sync version'
+```
 
 ## Rollback
 
