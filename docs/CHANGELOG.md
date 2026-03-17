@@ -43,12 +43,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `README.md` - Updated with links to new documentation
 
-### Changed
-- README.md now references Evolution Points v2.0 documentation
-- Migration strategy clarified as conservative and non-destructive
+## [1.5.6] - 2026-03-17
 
-### Removed
-- None (old Trust Engine files are archived, not deleted)
+### Changed
+- Path normalization hardening for extension-aware resolution:
+  - `OpenClawPluginApi` now includes `rootDir` contract alignment.
+  - `PathResolver` now captures extension root and provides `EXTENSION_ROOT`, `EXTENSION_SRC`, `EXTENSION_DIST`, and `EVOLUTION_WORKER` anchors.
+  - plugin register now persists extension root via `PathResolver.setExtensionRoot(api.rootDir)`.
+  - prompt system context now documents internal extension layout and points self-inspection to `EVOLUTION_WORKER`.
 
 ---
 

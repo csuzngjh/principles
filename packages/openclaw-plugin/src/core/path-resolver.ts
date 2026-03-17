@@ -94,11 +94,24 @@ function loadConfigFromFile(): PDConfig | null {
 }
 
 export class PathResolver {
+    private static extensionRoot: string | null = null;
     private workspaceDir: string | null = null;
     private stateDir: string | null = null;
     private readonly logger?: PathResolverOptions['logger'];
     private readonly normalizeWorkspace: boolean;
     private initialized = false;
+
+
+    static setExtensionRoot(extensionRootPath: string): void {
+        if (!extensionRootPath || !extensionRootPath.trim()) {
+            return;
+        }
+        PathResolver.extensionRoot = path.resolve(extensionRootPath.trim());
+    }
+
+    static getExtensionRoot(): string | null {
+        return PathResolver.extensionRoot;
+    }
 
     constructor(options: PathResolverOptions = {}) {
         this.logger = options.logger;
@@ -234,7 +247,13 @@ export class PathResolver {
         const workspace = this.getWorkspaceDir();
         const state = this.getStateDir();
         const memory = path.join(workspace, 'memory');
-        
+        const extensionRoot = PathResolver.extensionRoot || path.resolve(process.cwd(), 'packages', 'openclaw-plugin');
+        const extensionSrc = path.join(extensionRoot, 'src');
+        const extensionDist = path.join(extensionRoot, 'dist');
+        const evolutionWorker = fs.existsSync(extensionSrc)
+            ? path.join(extensionSrc, 'service', 'evolution-worker.ts')
+            : path.join(extensionDist, 'service', 'evolution-worker.js');
+
         const pathMap: Record<string, string> = {
             'PROFILE': path.join(workspace, '.principles', 'PROFILE.json'),
             'PRINCIPLES': path.join(workspace, '.principles', 'PRINCIPLES.md'),
@@ -254,6 +273,10 @@ export class PathResolver {
             'THINKING_OS_USAGE': path.join(state, 'thinking_os_usage.json'),
             'DICTIONARY': path.join(state, 'pain_dictionary.json'),
             'STATE_DIR': state,
+            'EXTENSION_ROOT': extensionRoot,
+            'EXTENSION_SRC': extensionSrc,
+            'EXTENSION_DIST': extensionDist,
+            'EVOLUTION_WORKER': evolutionWorker,
             'LOGS': path.join(memory, 'logs'),
             'SYSTEM_LOG': path.join(memory, 'logs', 'SYSTEM.log'),
             'REFLECTION_LOG': path.join(memory, 'reflection-log.md'),

@@ -35,3 +35,15 @@ describe('Persistence Fix - Placeholder', () => {
         expect(typeof config.save).toBe('function');
     });
 });
+
+
+it('should resolve extension anchors and worker path', async () => {
+    const { PathResolver } = await import('../../src/core/path-resolver.js');
+    PathResolver.setExtensionRoot('/tmp/ext-root');
+    const resolver = new PathResolver({ workspaceDir: '/test/workspace' });
+
+    expect(resolver.resolve('EXTENSION_ROOT')).toBe('/tmp/ext-root');
+    expect(resolver.resolve('EXTENSION_SRC')).toBe('/tmp/ext-root/src');
+    expect(resolver.resolve('EXTENSION_DIST')).toBe('/tmp/ext-root/dist');
+    expect(resolver.resolve('EVOLUTION_WORKER')).toMatch(/\/tmp\/ext-root\/(src|dist)\/service\/evolution-worker\.(ts|js)$/);
+});

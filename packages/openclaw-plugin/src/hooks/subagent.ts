@@ -1,12 +1,19 @@
-import { PluginHookSubagentEndedEvent, PluginHookAgentContext } from '../openclaw-sdk.js';
+import type { PluginHookSubagentEndedEvent, PluginHookSubagentContext } from '../openclaw-sdk.js';
 import { writePainFlag } from '../core/pain.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
+import { empathyObserverManager, type EmpathyObserverApi } from '../service/empathy-observer-manager.js';
 import * as fs from 'fs';
 import * as path from 'path';
 
+type SubagentEndedHookContext = PluginHookSubagentContext & {
+    api?: EmpathyObserverApi;
+    workspaceDir?: string;
+    sessionId?: string;
+};
+
 export async function handleSubagentEnded(
     event: PluginHookSubagentEndedEvent,
-    ctx: PluginHookAgentContext
+    ctx: SubagentEndedHookContext
 ): Promise<void> {
     const { outcome, targetSessionKey } = event;
     const workspaceDir = ctx.workspaceDir;
@@ -14,6 +21,12 @@ export async function handleSubagentEnded(
     if (!workspaceDir) return;
 
     const wctx = WorkspaceContext.fromHookContext(ctx);
+    // Empathy observer subagent session is handled by sidecar manager
+    if (targetSessionKey?.startsWith('empathy_obs:')) {
+        await empathyObserverManager.reap(ctx.api, targetSessionKey, workspaceDir);
+        return;
+    }
+
     const config = wctx.config;
 
     // 1. Autonomous Pain Capture: If subagent failed, record pain
@@ -35,7 +48,7 @@ export async function handleSubagentEnded(
         // ── Trust Engine: Record success using V2 API ──
         wctx.trust.recordSuccess('subagent_success', {
             sessionId: ctx.sessionId,
-            api: (ctx as any).api
+            api: ctx.api
         }, true);
 
         const queuePath = wctx.resolve('EVOLUTION_QUEUE');

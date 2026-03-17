@@ -41,6 +41,7 @@ import { migrateDirectoryStructure } from './core/migration.js';
 import { SystemLogger } from './core/system-logger.js';
 import { deepReflectTool } from './tools/deep-reflect.js';
 import { agentSpawnTool } from './tools/agent-spawn.js';
+import { PathResolver } from './core/path-resolver.js';
 
 // Track initialization to avoid repeated calls
 let workspaceInitialized = false;
@@ -51,6 +52,7 @@ const plugin = {
 
   register(api: OpenClawPluginApi) {
     api.logger.info("Principles Disciple Plugin registered.");
+    PathResolver.setExtensionRoot(api.rootDir);
 
     const language = (api.pluginConfig?.language as string) || 'en';
 
@@ -142,7 +144,7 @@ const plugin = {
       (event: PluginHookSubagentEndedEvent, ctx: PluginHookSubagentContext): void => {
         try {
           const workspaceDir = api.resolvePath('.');
-          handleSubagentEnded(event, { ...ctx, workspaceDir });
+          handleSubagentEnded(event, { ...ctx, workspaceDir, api });
         } catch (err) {
           api.logger.error(`[PD] Error in subagent_ended: ${String(err)}`);
         }
