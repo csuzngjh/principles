@@ -1,0 +1,3259 @@
+{
+  "rules": {
+    "P_CONFUSION_ZH": {
+      "type": "regex",
+      "pattern": "我(似乎|好像)(不确定|不太确定|不清楚|困惑)",
+      "severity": 35,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_LOOP_ZH": {
+      "type": "regex",
+      "pattern": "似乎(陷入了?循环|回到了?原点|原地打转)",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SHAME_001": {
+      "type": "regex",
+      "pattern": "(真|太|好|很)(丢脸|没脸|羞愧|惭愧)",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SHAME_002": {
+      "type": "regex",
+      "pattern": "(我想|真想)找个(地缝|洞)(钻|躲)",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SHAME_003": {
+      "type": "regex",
+      "pattern": "(简直|真的|太)(丢人|丢脸现眼|抬不起头)",
+      "severity": 65,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SHAME_004": {
+      "type": "regex",
+      "pattern": "没脸(见人|活下去|面对)",
+      "severity": 70,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SHAME_005": {
+      "type": "regex",
+      "pattern": "(怎么|这么)(笨|蠢|傻)(啊|呢|呀)",
+      "severity": 40,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SHAME_006": {
+      "type": "regex",
+      "pattern": "(居然|竟然|真的)犯这种(低级|弱智)(错误|问题)",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SHAME_007": {
+      "type": "regex",
+      "pattern": "(太|真|好)(失败|无能)(啊|呢|呀)",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SHAME_008": {
+      "type": "regex",
+      "pattern": "(实在|真的)(对不起|抱歉)(啊|呢)",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_GUILT_001": {
+      "type": "regex",
+      "pattern": "(都是|全|怪)(我|我的)(错|问题|原因)",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_GUILT_002": {
+      "type": "regex",
+      "pattern": "我应该(早点|及时|更好地)(做|处理|解决)",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_GUILT_003": {
+      "type": "regex",
+      "pattern": "是我(没|没能够|没能)(做好|完成|做到)",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_GUILT_004": {
+      "type": "regex",
+      "pattern": "(要是|早知道|如果)(我|我就)(应该|早点|别)",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_GUILT_005": {
+      "type": "regex",
+      "pattern": "(我|真的)(很|太)(内疚|自责|后悔)",
+      "severity": 65,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_GUILT_006": {
+      "type": "regex",
+      "pattern": "我对不起(他|她|你|大家|所有人)",
+      "severity": 70,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_GUILT_007": {
+      "type": "regex",
+      "pattern": "(都是|怪)我(没|没能够|没能)(阻止|避免|预防)",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_GUILT_008": {
+      "type": "regex",
+      "pattern": "我(本|应|本应)该(更好|更努力|更仔细)(做|处理)(的)",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_PANIC_001": {
+      "type": "regex",
+      "pattern": "(天哪|天啊|我的天|妈呀)(怎么办|完了|糟了)",
+      "severity": 70,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_PANIC_002": {
+      "type": "regex",
+      "pattern": "(糟了|完了|坏了|救命)(啊|！)",
+      "severity": 75,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_PANIC_003": {
+      "type": "regex",
+      "pattern": "快(来不及了|要崩了|崩溃了)(啊|！)",
+      "severity": 80,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_PANIC_004": {
+      "type": "regex",
+      "pattern": "(救命|救命啊|谁来帮我)(啊|！)",
+      "severity": 80,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_PANIC_005": {
+      "type": "regex",
+      "pattern": "(彻底|完全|真的)(完了|凉凉|没救)(了)",
+      "severity": 75,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_PANIC_006": {
+      "type": "regex",
+      "pattern": "(马上|立刻|现在)就要(爆炸|崩溃|挂)(了)",
+      "severity": 80,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_PANIC_007": {
+      "type": "regex",
+      "pattern": "(真的|简直|太)(恐怖|吓人)(了)(啊|！)",
+      "severity": 65,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_PANIC_008": {
+      "type": "regex",
+      "pattern": "(我|真的)(快要)(疯了|崩溃了|炸了)",
+      "severity": 75,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_EXHAUSTION_001": {
+      "type": "regex",
+      "pattern": "(真的|简直|太)(累|疲惫|累垮)(了)(啊|呢)",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_EXHAUSTION_002": {
+      "type": "regex",
+      "pattern": "(实在|真的)(撑不住了|受不了了|扛不住了)",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_EXHAUSTION_003": {
+      "type": "regex",
+      "pattern": "(我|真的)(快)(累死|累垮|累爆)(了)",
+      "severity": 65,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_EXHAUSTION_004": {
+      "type": "regex",
+      "pattern": "(身体|精神)都(透支|垮掉)(了)",
+      "severity": 70,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_EXHAUSTION_005": {
+      "type": "regex",
+      "pattern": "(一点|完全|丝毫)(没有)力气(了)",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_EXHAUSTION_006": {
+      "type": "regex",
+      "pattern": "(连续|一直|整天)(熬夜|加班)(累)(得)(要死|要命)",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_EXHAUSTION_007": {
+      "type": "regex",
+      "pattern": "(我|真的)(需要)(休息|睡觉|放假)(一下)(了)",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_EXHAUSTION_008": {
+      "type": "regex",
+      "pattern": "(真的|实在)(动不了|不想动)(了)",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SARCASM_001": {
+      "type": "regex",
+      "pattern": "(哈|呵呵|哈哈)(真好|太棒了|完美)(呢|啊)",
+      "severity": 35,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SARCASM_002": {
+      "type": "regex",
+      "pattern": "(真是|太)(厉害|聪明|牛)(了)(呢|啊)",
+      "severity": 40,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SARCASM_003": {
+      "type": "regex",
+      "pattern": "(居然|竟然)(这么|这么)(厉害|聪明)(啊|呢)",
+      "severity": 35,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SARCASM_004": {
+      "type": "regex",
+      "pattern": "(可真|真)(行|可以)(啊|呢)",
+      "severity": 40,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SARCASM_005": {
+      "type": "regex",
+      "pattern": "(太|真)(棒|好)(了)(吧|呢)",
+      "severity": 35,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SARCASM_006": {
+      "type": "regex",
+      "pattern": "(哇|喔)(真)(不错|可以)(啊)",
+      "severity": 30,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SARCASM_007": {
+      "type": "regex",
+      "pattern": "(这|那)(也|太)(行)(了)(吧)",
+      "severity": 40,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SARCASM_008": {
+      "type": "regex",
+      "pattern": "(厉害|牛)(死)(了)(呢|啊)",
+      "severity": 35,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_IMPATIENCE_001": {
+      "type": "regex",
+      "pattern": "(快点|赶紧|赶快)(啊|吧|呢)",
+      "severity": 40,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_IMPATIENCE_002": {
+      "type": "regex",
+      "pattern": "(等|等了)(半天|好久|好久了)(啊|呢)",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_IMPATIENCE_003": {
+      "type": "regex",
+      "pattern": "(怎么|怎么)(这么|这么)(慢)(啊|呢)",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_IMPATIENCE_004": {
+      "type": "regex",
+      "pattern": "(别|别再)(墨迹|磨蹭|拖延)(了)(啊|吧)",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_IMPATIENCE_005": {
+      "type": "regex",
+      "pattern": "(我|真的)(快)(等不了|等不及)(了)",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_IMPATIENCE_006": {
+      "type": "regex",
+      "pattern": "(没时间|来不及)(了)(啊|吧)",
+      "severity": 65,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_IMPATIENCE_007": {
+      "type": "regex",
+      "pattern": "(快点|赶快|赶紧)(结束)(吧)",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_IMPATIENCE_008": {
+      "type": "regex",
+      "pattern": "(受不了了|忍不了)(太慢)(了)",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_DISBELIEF_001": {
+      "type": "regex",
+      "pattern": "(真的|假的|不会)(吧|啊|呢)",
+      "severity": 30,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_DISBELIEF_002": {
+      "type": "regex",
+      "pattern": "(怎么可能|不会吧|怎么会)(啊|呢)",
+      "severity": 35,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_DISBELIEF_003": {
+      "type": "regex",
+      "pattern": "(你在|这是)(开玩笑|开玩笑的)(吧|吗)",
+      "severity": 30,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_DISBELIEF_004": {
+      "type": "regex",
+      "pattern": "(简直|真的)(难以置信|不敢相信)(啊|呢)",
+      "severity": 35,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_DISBELIEF_005": {
+      "type": "regex",
+      "pattern": "(这|这)(也)(太|太)(离谱|夸张)(了)(吧)",
+      "severity": 40,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_DISBELIEF_006": {
+      "type": "regex",
+      "pattern": "(我不|我)(相信|敢相信)(啊|呢)",
+      "severity": 35,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_DISBELIEF_007": {
+      "type": "regex",
+      "pattern": "(真的|居然)(这样)(啊|呢)",
+      "severity": 30,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_DISBELIEF_008": {
+      "type": "regex",
+      "pattern": "(不是|不会)(吧)(啊|呢)",
+      "severity": 35,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_DESPAIR_001": {
+      "type": "regex",
+      "pattern": "(没希望|没救|没希望)(了)(啊|呢)",
+      "severity": 70,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_DESPAIR_002": {
+      "type": "regex",
+      "pattern": "(彻底|完全)(完了|失败)(了)",
+      "severity": 75,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_DESPAIR_003": {
+      "type": "regex",
+      "pattern": "(我|真的)(放弃)(了)(啊|呢)",
+      "severity": 80,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_DESPAIR_004": {
+      "type": "regex",
+      "pattern": "(不想|再也)(继续)(下去了)(啊)",
+      "severity": 75,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_DESPAIR_005": {
+      "type": "regex",
+      "pattern": "(真的|实在)(没办法)(了)(啊|呢)",
+      "severity": 70,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_DESPAIR_006": {
+      "type": "regex",
+      "pattern": "(绝望|崩溃)(了)(啊|呢)",
+      "severity": 80,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_DESPAIR_007": {
+      "type": "regex",
+      "pattern": "(什么都|一切)(都)(完了)(了)",
+      "severity": 75,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_DESPAIR_008": {
+      "type": "regex",
+      "pattern": "(活不下|没脸活)(去了)(啊)",
+      "severity": 80,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_OVERWHELM_001": {
+      "type": "regex",
+      "pattern": "(太多|太多)(事情|工作)(了)(啊)",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_OVERWHELM_002": {
+      "type": "regex",
+      "pattern": "(根本|完全)(处理不过来|做不完)(啊)",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_OVERWHELM_003": {
+      "type": "regex",
+      "pattern": "(忙不过来|应付不过来)(啊|呢)",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_OVERWHELM_004": {
+      "type": "regex",
+      "pattern": "(事情|任务)都(堆起来了)(啊|呢)",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_OVERWHELM_005": {
+      "type": "regex",
+      "pattern": "(根本|完全)(不知道)(从哪开始)(啊)",
+      "severity": 65,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_OVERWHELM_006": {
+      "type": "regex",
+      "pattern": "(太多)(要求|需求)(了)(啊)",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_OVERWHELM_007": {
+      "type": "regex",
+      "pattern": "(被)(压垮|淹没)(了)(啊)",
+      "severity": 70,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_OVERWHELM_008": {
+      "type": "regex",
+      "pattern": "(实在)(应付不了)(啊|呢)",
+      "severity": 65,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FAILURE_001": {
+      "type": "regex",
+      "pattern": "(又)(失败)(了)(啊|呢)",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FAILURE_002": {
+      "type": "regex",
+      "pattern": "(又)(搞砸)(了)(啊|呢)",
+      "severity": 65,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FAILURE_003": {
+      "type": "regex",
+      "pattern": "(又)(出错)(了)(啊|呢)",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FAILURE_004": {
+      "type": "regex",
+      "pattern": "(怎么)(总是)(失败)(啊)",
+      "severity": 65,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FAILURE_005": {
+      "type": "regex",
+      "pattern": "(怎么)(什么都)(做不好)(啊)",
+      "severity": 70,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FAILURE_006": {
+      "type": "regex",
+      "pattern": "(真)(失败)(啊|呢)",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FAILURE_007": {
+      "type": "regex",
+      "pattern": "(又)(白费)(了)(啊)",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FAILURE_008": {
+      "type": "regex",
+      "pattern": "(所有)(努力)(都白费)(了)",
+      "severity": 75,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_HELPLESS_001": {
+      "type": "regex",
+      "pattern": "(真的)(没办法)(了)(啊)",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_HELPLESS_002": {
+      "type": "regex",
+      "pattern": "(完全)(无能为力)(了)(啊)",
+      "severity": 65,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_HELPLESS_003": {
+      "type": "regex",
+      "pattern": "(根本)(不知道)(怎么办)(啊)",
+      "severity": 65,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_HELPLESS_004": {
+      "type": "regex",
+      "pattern": "(只能)(看着)(发生)(啊)",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_HELPLESS_005": {
+      "type": "regex",
+      "pattern": "(我)(真的)(帮不了)(啊)",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_HELPLESS_006": {
+      "type": "regex",
+      "pattern": "(什么都)(做不了)(啊)",
+      "severity": 65,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_HELPLESS_007": {
+      "type": "regex",
+      "pattern": "(只能)(放弃)(了)(啊)",
+      "severity": 70,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_HELPLESS_008": {
+      "type": "regex",
+      "pattern": "(真的)(束手无策)(了)(啊)",
+      "severity": 65,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_ANGER_001": {
+      "type": "regex",
+      "pattern": "发怒|愤怒|火大|气炸|暴躁|抓狂|恼火|气愤",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_ANGER_002": {
+      "type": "regex",
+      "pattern": "发怒|愤怒|火大|气炸|暴躁|抓狂|恼火|气愤",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_ANGER_003": {
+      "type": "regex",
+      "pattern": "发怒|愤怒|火大|气炸|暴躁|抓狂|恼火|气愤",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_ANGER_004": {
+      "type": "regex",
+      "pattern": "发怒|愤怒|火大|气炸|暴躁|抓狂|恼火|气愤",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_ANGER_005": {
+      "type": "regex",
+      "pattern": "发怒|愤怒|火大|气炸|暴躁|抓狂|恼火|气愤",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_ANGER_006": {
+      "type": "regex",
+      "pattern": "发怒|愤怒|火大|气炸|暴躁|抓狂|恼火|气愤",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_ANGER_007": {
+      "type": "regex",
+      "pattern": "发怒|愤怒|火大|气炸|暴躁|抓狂|恼火|气愤",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_ANGER_008": {
+      "type": "regex",
+      "pattern": "发怒|愤怒|火大|气炸|暴躁|抓狂|恼火|气愤",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_ANGER_009": {
+      "type": "regex",
+      "pattern": "发怒|愤怒|火大|气炸|暴躁|抓狂|恼火|气愤",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_ANGER_010": {
+      "type": "regex",
+      "pattern": "发怒|愤怒|火大|气炸|暴躁|抓狂|恼火|气愤",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_ANGER_011": {
+      "type": "regex",
+      "pattern": "发怒|愤怒|火大|气炸|暴躁|抓狂|恼火|气愤",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_ANGER_012": {
+      "type": "regex",
+      "pattern": "发怒|愤怒|火大|气炸|暴躁|抓狂|恼火|气愤",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_ANGER_013": {
+      "type": "regex",
+      "pattern": "发怒|愤怒|火大|气炸|暴躁|抓狂|恼火|气愤",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_ANGER_014": {
+      "type": "regex",
+      "pattern": "发怒|愤怒|火大|气炸|暴躁|抓狂|恼火|气愤",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_ANGER_015": {
+      "type": "regex",
+      "pattern": "发怒|愤怒|火大|气炸|暴躁|抓狂|恼火|气愤",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_ANGER_016": {
+      "type": "regex",
+      "pattern": "发怒|愤怒|火大|气炸|暴躁|抓狂|恼火|气愤",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_ANGER_017": {
+      "type": "regex",
+      "pattern": "发怒|愤怒|火大|气炸|暴躁|抓狂|恼火|气愤",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_ANGER_018": {
+      "type": "regex",
+      "pattern": "发怒|愤怒|火大|气炸|暴躁|抓狂|恼火|气愤",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_ANGER_019": {
+      "type": "regex",
+      "pattern": "发怒|愤怒|火大|气炸|暴躁|抓狂|恼火|气愤",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_ANGER_020": {
+      "type": "regex",
+      "pattern": "发怒|愤怒|火大|气炸|暴躁|抓狂|恼火|气愤",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FRUSTRATION_021": {
+      "type": "regex",
+      "pattern": "挫败|失败|受挫|无奈|无语|受够了|疲惫不堪",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FRUSTRATION_022": {
+      "type": "regex",
+      "pattern": "挫败|失败|受挫|无奈|无语|受够了|疲惫不堪",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FRUSTRATION_023": {
+      "type": "regex",
+      "pattern": "挫败|失败|受挫|无奈|无语|受够了|疲惫不堪",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FRUSTRATION_024": {
+      "type": "regex",
+      "pattern": "挫败|失败|受挫|无奈|无语|受够了|疲惫不堪",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FRUSTRATION_025": {
+      "type": "regex",
+      "pattern": "挫败|失败|受挫|无奈|无语|受够了|疲惫不堪",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FRUSTRATION_026": {
+      "type": "regex",
+      "pattern": "挫败|失败|受挫|无奈|无语|受够了|疲惫不堪",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FRUSTRATION_027": {
+      "type": "regex",
+      "pattern": "挫败|失败|受挫|无奈|无语|受够了|疲惫不堪",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FRUSTRATION_028": {
+      "type": "regex",
+      "pattern": "挫败|失败|受挫|无奈|无语|受够了|疲惫不堪",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FRUSTRATION_029": {
+      "type": "regex",
+      "pattern": "挫败|失败|受挫|无奈|无语|受够了|疲惫不堪",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FRUSTRATION_030": {
+      "type": "regex",
+      "pattern": "挫败|失败|受挫|无奈|无语|受够了|疲惫不堪",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FRUSTRATION_031": {
+      "type": "regex",
+      "pattern": "挫败|失败|受挫|无奈|无语|受够了|疲惫不堪",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FRUSTRATION_032": {
+      "type": "regex",
+      "pattern": "挫败|失败|受挫|无奈|无语|受够了|疲惫不堪",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FRUSTRATION_033": {
+      "type": "regex",
+      "pattern": "挫败|失败|受挫|无奈|无语|受够了|疲惫不堪",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FRUSTRATION_034": {
+      "type": "regex",
+      "pattern": "挫败|失败|受挫|无奈|无语|受够了|疲惫不堪",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FRUSTRATION_035": {
+      "type": "regex",
+      "pattern": "挫败|失败|受挫|无奈|无语|受够了|疲惫不堪",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FRUSTRATION_036": {
+      "type": "regex",
+      "pattern": "挫败|失败|受挫|无奈|无语|受够了|疲惫不堪",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FRUSTRATION_037": {
+      "type": "regex",
+      "pattern": "挫败|失败|受挫|无奈|无语|受够了|疲惫不堪",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FRUSTRATION_038": {
+      "type": "regex",
+      "pattern": "挫败|失败|受挫|无奈|无语|受够了|疲惫不堪",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FRUSTRATION_039": {
+      "type": "regex",
+      "pattern": "挫败|失败|受挫|无奈|无语|受够了|疲惫不堪",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FRUSTRATION_040": {
+      "type": "regex",
+      "pattern": "挫败|失败|受挫|无奈|无语|受够了|疲惫不堪",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_URGENT_041": {
+      "type": "regex",
+      "pattern": "紧急|立刻|马上|快|急|救急|危机",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_URGENT_042": {
+      "type": "regex",
+      "pattern": "紧急|立刻|马上|快|急|救急|危机",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_URGENT_043": {
+      "type": "regex",
+      "pattern": "紧急|立刻|马上|快|急|救急|危机",
+      "severity": 65,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_URGENT_044": {
+      "type": "regex",
+      "pattern": "紧急|立刻|马上|快|急|救急|危机",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_URGENT_045": {
+      "type": "regex",
+      "pattern": "紧急|立刻|马上|快|急|救急|危机",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_URGENT_046": {
+      "type": "regex",
+      "pattern": "紧急|立刻|马上|快|急|救急|危机",
+      "severity": 65,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_URGENT_047": {
+      "type": "regex",
+      "pattern": "紧急|立刻|马上|快|急|救急|危机",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_URGENT_048": {
+      "type": "regex",
+      "pattern": "紧急|立刻|马上|快|急|救急|危机",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_URGENT_049": {
+      "type": "regex",
+      "pattern": "紧急|立刻|马上|快|急|救急|危机",
+      "severity": 65,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_URGENT_050": {
+      "type": "regex",
+      "pattern": "紧急|立刻|马上|快|急|救急|危机",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_URGENT_051": {
+      "type": "regex",
+      "pattern": "紧急|立刻|马上|快|急|救急|危机",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_URGENT_052": {
+      "type": "regex",
+      "pattern": "紧急|立刻|马上|快|急|救急|危机",
+      "severity": 65,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_URGENT_053": {
+      "type": "regex",
+      "pattern": "紧急|立刻|马上|快|急|救急|危机",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_URGENT_054": {
+      "type": "regex",
+      "pattern": "紧急|立刻|马上|快|急|救急|危机",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_URGENT_055": {
+      "type": "regex",
+      "pattern": "紧急|立刻|马上|快|急|救急|危机",
+      "severity": 65,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_ANXIETY_056": {
+      "type": "regex",
+      "pattern": "焦虑|担心|忧虑|不安|紧张|惶恐|忧心",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_ANXIETY_057": {
+      "type": "regex",
+      "pattern": "焦虑|担心|忧虑|不安|紧张|惶恐|忧心",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_ANXIETY_058": {
+      "type": "regex",
+      "pattern": "焦虑|担心|忧虑|不安|紧张|惶恐|忧心",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_ANXIETY_059": {
+      "type": "regex",
+      "pattern": "焦虑|担心|忧虑|不安|紧张|惶恐|忧心",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_ANXIETY_060": {
+      "type": "regex",
+      "pattern": "焦虑|担心|忧虑|不安|紧张|惶恐|忧心",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_ANXIETY_061": {
+      "type": "regex",
+      "pattern": "焦虑|担心|忧虑|不安|紧张|惶恐|忧心",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_ANXIETY_062": {
+      "type": "regex",
+      "pattern": "焦虑|担心|忧虑|不安|紧张|惶恐|忧心",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_ANXIETY_063": {
+      "type": "regex",
+      "pattern": "焦虑|担心|忧虑|不安|紧张|惶恐|忧心",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_ANXIETY_064": {
+      "type": "regex",
+      "pattern": "焦虑|担心|忧虑|不安|紧张|惶恐|忧心",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_ANXIETY_065": {
+      "type": "regex",
+      "pattern": "焦虑|担心|忧虑|不安|紧张|惶恐|忧心",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_ANXIETY_066": {
+      "type": "regex",
+      "pattern": "焦虑|担心|忧虑|不安|紧张|惶恐|忧心",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_ANXIETY_067": {
+      "type": "regex",
+      "pattern": "焦虑|担心|忧虑|不安|紧张|惶恐|忧心",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_ANXIETY_068": {
+      "type": "regex",
+      "pattern": "焦虑|担心|忧虑|不安|紧张|惶恐|忧心",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_ANXIETY_069": {
+      "type": "regex",
+      "pattern": "焦虑|担心|忧虑|不安|紧张|惶恐|忧心",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_ANXIETY_070": {
+      "type": "regex",
+      "pattern": "焦虑|担心|忧虑|不安|紧张|惶恐|忧心",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_ANXIETY_071": {
+      "type": "regex",
+      "pattern": "焦虑|担心|忧虑|不安|紧张|惶恐|忧心",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_ANXIETY_072": {
+      "type": "regex",
+      "pattern": "焦虑|担心|忧虑|不安|紧张|惶恐|忧心",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_ANXIETY_073": {
+      "type": "regex",
+      "pattern": "焦虑|担心|忧虑|不安|紧张|惶恐|忧心",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_ANXIETY_074": {
+      "type": "regex",
+      "pattern": "焦虑|担心|忧虑|不安|紧张|惶恐|忧心",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_ANXIETY_075": {
+      "type": "regex",
+      "pattern": "焦虑|担心|忧虑|不安|紧张|惶恐|忧心",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SADNESS_076": {
+      "type": "regex",
+      "pattern": "悲伤|难过|伤心|哭泣|抑郁|沮丧|失落",
+      "severity": 40,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SADNESS_077": {
+      "type": "regex",
+      "pattern": "悲伤|难过|伤心|哭泣|抑郁|沮丧|失落",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SADNESS_078": {
+      "type": "regex",
+      "pattern": "悲伤|难过|伤心|哭泣|抑郁|沮丧|失落",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SADNESS_079": {
+      "type": "regex",
+      "pattern": "悲伤|难过|伤心|哭泣|抑郁|沮丧|失落",
+      "severity": 40,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SADNESS_080": {
+      "type": "regex",
+      "pattern": "悲伤|难过|伤心|哭泣|抑郁|沮丧|失落",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SADNESS_081": {
+      "type": "regex",
+      "pattern": "悲伤|难过|伤心|哭泣|抑郁|沮丧|失落",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SADNESS_082": {
+      "type": "regex",
+      "pattern": "悲伤|难过|伤心|哭泣|抑郁|沮丧|失落",
+      "severity": 40,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SADNESS_083": {
+      "type": "regex",
+      "pattern": "悲伤|难过|伤心|哭泣|抑郁|沮丧|失落",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SADNESS_084": {
+      "type": "regex",
+      "pattern": "悲伤|难过|伤心|哭泣|抑郁|沮丧|失落",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SADNESS_085": {
+      "type": "regex",
+      "pattern": "悲伤|难过|伤心|哭泣|抑郁|沮丧|失落",
+      "severity": 40,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SADNESS_086": {
+      "type": "regex",
+      "pattern": "悲伤|难过|伤心|哭泣|抑郁|沮丧|失落",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SADNESS_087": {
+      "type": "regex",
+      "pattern": "悲伤|难过|伤心|哭泣|抑郁|沮丧|失落",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SADNESS_088": {
+      "type": "regex",
+      "pattern": "悲伤|难过|伤心|哭泣|抑郁|沮丧|失落",
+      "severity": 40,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SADNESS_089": {
+      "type": "regex",
+      "pattern": "悲伤|难过|伤心|哭泣|抑郁|沮丧|失落",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SADNESS_090": {
+      "type": "regex",
+      "pattern": "悲伤|难过|伤心|哭泣|抑郁|沮丧|失落",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SADNESS_091": {
+      "type": "regex",
+      "pattern": "悲伤|难过|伤心|哭泣|抑郁|沮丧|失落",
+      "severity": 40,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SADNESS_092": {
+      "type": "regex",
+      "pattern": "悲伤|难过|伤心|哭泣|抑郁|沮丧|失落",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SADNESS_093": {
+      "type": "regex",
+      "pattern": "悲伤|难过|伤心|哭泣|抑郁|沮丧|失落",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SADNESS_094": {
+      "type": "regex",
+      "pattern": "悲伤|难过|伤心|哭泣|抑郁|沮丧|失落",
+      "severity": 40,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SADNESS_095": {
+      "type": "regex",
+      "pattern": "悲伤|难过|伤心|哭泣|抑郁|沮丧|失落",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_DISAPPOINTMENT_096": {
+      "type": "regex",
+      "pattern": "失望|绝望|灰心|绝望|痛心|憾事",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_DISAPPOINTMENT_097": {
+      "type": "regex",
+      "pattern": "失望|绝望|灰心|绝望|痛心|憾事",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_DISAPPOINTMENT_098": {
+      "type": "regex",
+      "pattern": "失望|绝望|灰心|绝望|痛心|憾事",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_DISAPPOINTMENT_099": {
+      "type": "regex",
+      "pattern": "失望|绝望|灰心|绝望|痛心|憾事",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_DISAPPOINTMENT_100": {
+      "type": "regex",
+      "pattern": "失望|绝望|灰心|绝望|痛心|憾事",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_DISAPPOINTMENT_101": {
+      "type": "regex",
+      "pattern": "失望|绝望|灰心|绝望|痛心|憾事",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_DISAPPOINTMENT_102": {
+      "type": "regex",
+      "pattern": "失望|绝望|灰心|绝望|痛心|憾事",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_DISAPPOINTMENT_103": {
+      "type": "regex",
+      "pattern": "失望|绝望|灰心|绝望|痛心|憾事",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_DISAPPOINTMENT_104": {
+      "type": "regex",
+      "pattern": "失望|绝望|灰心|绝望|痛心|憾事",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_DISAPPOINTMENT_105": {
+      "type": "regex",
+      "pattern": "失望|绝望|灰心|绝望|痛心|憾事",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_DISAPPOINTMENT_106": {
+      "type": "regex",
+      "pattern": "失望|绝望|灰心|绝望|痛心|憾事",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_DISAPPOINTMENT_107": {
+      "type": "regex",
+      "pattern": "失望|绝望|灰心|绝望|痛心|憾事",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_DISAPPOINTMENT_108": {
+      "type": "regex",
+      "pattern": "失望|绝望|灰心|绝望|痛心|憾事",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_DISAPPOINTMENT_109": {
+      "type": "regex",
+      "pattern": "失望|绝望|灰心|绝望|痛心|憾事",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_DISAPPOINTMENT_110": {
+      "type": "regex",
+      "pattern": "失望|绝望|灰心|绝望|痛心|憾事",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_DISAPPOINTMENT_111": {
+      "type": "regex",
+      "pattern": "失望|绝望|灰心|绝望|痛心|憾事",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_DISAPPOINTMENT_112": {
+      "type": "regex",
+      "pattern": "失望|绝望|灰心|绝望|痛心|憾事",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_DISAPPOINTMENT_113": {
+      "type": "regex",
+      "pattern": "失望|绝望|灰心|绝望|痛心|憾事",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_DISAPPOINTMENT_114": {
+      "type": "regex",
+      "pattern": "失望|绝望|灰心|绝望|痛心|憾事",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_DISAPPOINTMENT_115": {
+      "type": "regex",
+      "pattern": "失望|绝望|灰心|绝望|痛心|憾事",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FATIGUE_116": {
+      "type": "regex",
+      "pattern": "疲劳|累|疲惫|筋疲力尽|困|耗尽|无力",
+      "severity": 30,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FATIGUE_117": {
+      "type": "regex",
+      "pattern": "疲劳|累|疲惫|筋疲力尽|困|耗尽|无力",
+      "severity": 35,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FATIGUE_118": {
+      "type": "regex",
+      "pattern": "疲劳|累|疲惫|筋疲力尽|困|耗尽|无力",
+      "severity": 40,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FATIGUE_119": {
+      "type": "regex",
+      "pattern": "疲劳|累|疲惫|筋疲力尽|困|耗尽|无力",
+      "severity": 30,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FATIGUE_120": {
+      "type": "regex",
+      "pattern": "疲劳|累|疲惫|筋疲力尽|困|耗尽|无力",
+      "severity": 35,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FATIGUE_121": {
+      "type": "regex",
+      "pattern": "疲劳|累|疲惫|筋疲力尽|困|耗尽|无力",
+      "severity": 40,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FATIGUE_122": {
+      "type": "regex",
+      "pattern": "疲劳|累|疲惫|筋疲力尽|困|耗尽|无力",
+      "severity": 30,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FATIGUE_123": {
+      "type": "regex",
+      "pattern": "疲劳|累|疲惫|筋疲力尽|困|耗尽|无力",
+      "severity": 35,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FATIGUE_124": {
+      "type": "regex",
+      "pattern": "疲劳|累|疲惫|筋疲力尽|困|耗尽|无力",
+      "severity": 40,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FATIGUE_125": {
+      "type": "regex",
+      "pattern": "疲劳|累|疲惫|筋疲力尽|困|耗尽|无力",
+      "severity": 30,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FATIGUE_126": {
+      "type": "regex",
+      "pattern": "疲劳|累|疲惫|筋疲力尽|困|耗尽|无力",
+      "severity": 35,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FATIGUE_127": {
+      "type": "regex",
+      "pattern": "疲劳|累|疲惫|筋疲力尽|困|耗尽|无力",
+      "severity": 40,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FATIGUE_128": {
+      "type": "regex",
+      "pattern": "疲劳|累|疲惫|筋疲力尽|困|耗尽|无力",
+      "severity": 30,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FATIGUE_129": {
+      "type": "regex",
+      "pattern": "疲劳|累|疲惫|筋疲力尽|困|耗尽|无力",
+      "severity": 35,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_FATIGUE_130": {
+      "type": "regex",
+      "pattern": "疲劳|累|疲惫|筋疲力尽|困|耗尽|无力",
+      "severity": 40,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_LONELINESS_131": {
+      "type": "regex",
+      "pattern": "孤独|寂寞|孤单|独处|孤身一人|无人陪伴",
+      "severity": 40,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_LONELINESS_132": {
+      "type": "regex",
+      "pattern": "孤独|寂寞|孤单|独处|孤身一人|无人陪伴",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_LONELINESS_133": {
+      "type": "regex",
+      "pattern": "孤独|寂寞|孤单|独处|孤身一人|无人陪伴",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_LONELINESS_134": {
+      "type": "regex",
+      "pattern": "孤独|寂寞|孤单|独处|孤身一人|无人陪伴",
+      "severity": 40,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_LONELINESS_135": {
+      "type": "regex",
+      "pattern": "孤独|寂寞|孤单|独处|孤身一人|无人陪伴",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_LONELINESS_136": {
+      "type": "regex",
+      "pattern": "孤独|寂寞|孤单|独处|孤身一人|无人陪伴",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_LONELINESS_137": {
+      "type": "regex",
+      "pattern": "孤独|寂寞|孤单|独处|孤身一人|无人陪伴",
+      "severity": 40,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_LONELINESS_138": {
+      "type": "regex",
+      "pattern": "孤独|寂寞|孤单|独处|孤身一人|无人陪伴",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_LONELINESS_139": {
+      "type": "regex",
+      "pattern": "孤独|寂寞|孤单|独处|孤身一人|无人陪伴",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_LONELINESS_140": {
+      "type": "regex",
+      "pattern": "孤独|寂寞|孤单|独处|孤身一人|无人陪伴",
+      "severity": 40,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_LONELINESS_141": {
+      "type": "regex",
+      "pattern": "孤独|寂寞|孤单|独处|孤身一人|无人陪伴",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_LONELINESS_142": {
+      "type": "regex",
+      "pattern": "孤独|寂寞|孤单|独处|孤身一人|无人陪伴",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_LONELINESS_143": {
+      "type": "regex",
+      "pattern": "孤独|寂寞|孤单|独处|孤身一人|无人陪伴",
+      "severity": 40,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_LONELINESS_144": {
+      "type": "regex",
+      "pattern": "孤独|寂寞|孤单|独处|孤身一人|无人陪伴",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_LONELINESS_145": {
+      "type": "regex",
+      "pattern": "孤独|寂寞|孤单|独处|孤身一人|无人陪伴",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_REGRET_146": {
+      "type": "regex",
+      "pattern": "后悔|悔恨|憾事|遗憾|早知如此|痛心疾首",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_REGRET_147": {
+      "type": "regex",
+      "pattern": "后悔|悔恨|憾事|遗憾|早知如此|痛心疾首",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_REGRET_148": {
+      "type": "regex",
+      "pattern": "后悔|悔恨|憾事|遗憾|早知如此|痛心疾首",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_REGRET_149": {
+      "type": "regex",
+      "pattern": "后悔|悔恨|憾事|遗憾|早知如此|痛心疾首",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_REGRET_150": {
+      "type": "regex",
+      "pattern": "后悔|悔恨|憾事|遗憾|早知如此|痛心疾首",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_REGRET_151": {
+      "type": "regex",
+      "pattern": "后悔|悔恨|憾事|遗憾|早知如此|痛心疾首",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_REGRET_152": {
+      "type": "regex",
+      "pattern": "后悔|悔恨|憾事|遗憾|早知如此|痛心疾首",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_REGRET_153": {
+      "type": "regex",
+      "pattern": "后悔|悔恨|憾事|遗憾|早知如此|痛心疾首",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_REGRET_154": {
+      "type": "regex",
+      "pattern": "后悔|悔恨|憾事|遗憾|早知如此|痛心疾首",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_REGRET_155": {
+      "type": "regex",
+      "pattern": "后悔|悔恨|憾事|遗憾|早知如此|痛心疾首",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_REGRET_156": {
+      "type": "regex",
+      "pattern": "后悔|悔恨|憾事|遗憾|早知如此|痛心疾首",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_REGRET_157": {
+      "type": "regex",
+      "pattern": "后悔|悔恨|憾事|遗憾|早知如此|痛心疾首",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_REGRET_158": {
+      "type": "regex",
+      "pattern": "后悔|悔恨|憾事|遗憾|早知如此|痛心疾首",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_REGRET_159": {
+      "type": "regex",
+      "pattern": "后悔|悔恨|憾事|遗憾|早知如此|痛心疾首",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_REGRET_160": {
+      "type": "regex",
+      "pattern": "后悔|悔恨|憾事|遗憾|早知如此|痛心疾首",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_EMBARRASSMENT_161": {
+      "type": "regex",
+      "pattern": "尴尬|羞耻|丢脸|难堪|不好意思|脸红",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_EMBARRASSMENT_162": {
+      "type": "regex",
+      "pattern": "尴尬|羞耻|丢脸|难堪|不好意思|脸红",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_EMBARRASSMENT_163": {
+      "type": "regex",
+      "pattern": "尴尬|羞耻|丢脸|难堪|不好意思|脸红",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_EMBARRASSMENT_164": {
+      "type": "regex",
+      "pattern": "尴尬|羞耻|丢脸|难堪|不好意思|脸红",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_EMBARRASSMENT_165": {
+      "type": "regex",
+      "pattern": "尴尬|羞耻|丢脸|难堪|不好意思|脸红",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_EMBARRASSMENT_166": {
+      "type": "regex",
+      "pattern": "尴尬|羞耻|丢脸|难堪|不好意思|脸红",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_EMBARRASSMENT_167": {
+      "type": "regex",
+      "pattern": "尴尬|羞耻|丢脸|难堪|不好意思|脸红",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_EMBARRASSMENT_168": {
+      "type": "regex",
+      "pattern": "尴尬|羞耻|丢脸|难堪|不好意思|脸红",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_EMBARRASSMENT_169": {
+      "type": "regex",
+      "pattern": "尴尬|羞耻|丢脸|难堪|不好意思|脸红",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_EMBARRASSMENT_170": {
+      "type": "regex",
+      "pattern": "尴尬|羞耻|丢脸|难堪|不好意思|脸红",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_EMBARRASSMENT_171": {
+      "type": "regex",
+      "pattern": "尴尬|羞耻|丢脸|难堪|不好意思|脸红",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_EMBARRASSMENT_172": {
+      "type": "regex",
+      "pattern": "尴尬|羞耻|丢脸|难堪|不好意思|脸红",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_EMBARRASSMENT_173": {
+      "type": "regex",
+      "pattern": "尴尬|羞耻|丢脸|难堪|不好意思|脸红",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_EMBARRASSMENT_174": {
+      "type": "regex",
+      "pattern": "尴尬|羞耻|丢脸|难堪|不好意思|脸红",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_EMBARRASSMENT_175": {
+      "type": "regex",
+      "pattern": "尴尬|羞耻|丢脸|难堪|不好意思|脸红",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_JEALOUSY_176": {
+      "type": "regex",
+      "pattern": "嫉妒|羡慕|忌妒|红眼|眼红|醋意",
+      "severity": 40,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_JEALOUSY_177": {
+      "type": "regex",
+      "pattern": "嫉妒|羡慕|忌妒|红眼|眼红|醋意",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_JEALOUSY_178": {
+      "type": "regex",
+      "pattern": "嫉妒|羡慕|忌妒|红眼|眼红|醋意",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_JEALOUSY_179": {
+      "type": "regex",
+      "pattern": "嫉妒|羡慕|忌妒|红眼|眼红|醋意",
+      "severity": 40,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_JEALOUSY_180": {
+      "type": "regex",
+      "pattern": "嫉妒|羡慕|忌妒|红眼|眼红|醋意",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_JEALOUSY_181": {
+      "type": "regex",
+      "pattern": "嫉妒|羡慕|忌妒|红眼|眼红|醋意",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_JEALOUSY_182": {
+      "type": "regex",
+      "pattern": "嫉妒|羡慕|忌妒|红眼|眼红|醋意",
+      "severity": 40,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_JEALOUSY_183": {
+      "type": "regex",
+      "pattern": "嫉妒|羡慕|忌妒|红眼|眼红|醋意",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_JEALOUSY_184": {
+      "type": "regex",
+      "pattern": "嫉妒|羡慕|忌妒|红眼|眼红|醋意",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_JEALOUSY_185": {
+      "type": "regex",
+      "pattern": "嫉妒|羡慕|忌妒|红眼|眼红|醋意",
+      "severity": 40,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_HURT_186": {
+      "type": "regex",
+      "pattern": "受伤|疼痛|痛苦|心痛|创伤|心碎",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_HURT_187": {
+      "type": "regex",
+      "pattern": "受伤|疼痛|痛苦|心痛|创伤|心碎",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_HURT_188": {
+      "type": "regex",
+      "pattern": "受伤|疼痛|痛苦|心痛|创伤|心碎",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_HURT_189": {
+      "type": "regex",
+      "pattern": "受伤|疼痛|痛苦|心痛|创伤|心碎",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_HURT_190": {
+      "type": "regex",
+      "pattern": "受伤|疼痛|痛苦|心痛|创伤|心碎",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_HURT_191": {
+      "type": "regex",
+      "pattern": "受伤|疼痛|痛苦|心痛|创伤|心碎",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_HURT_192": {
+      "type": "regex",
+      "pattern": "受伤|疼痛|痛苦|心痛|创伤|心碎",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_HURT_193": {
+      "type": "regex",
+      "pattern": "受伤|疼痛|痛苦|心痛|创伤|心碎",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_HURT_194": {
+      "type": "regex",
+      "pattern": "受伤|疼痛|痛苦|心痛|创伤|心碎",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_HURT_195": {
+      "type": "regex",
+      "pattern": "受伤|疼痛|痛苦|心痛|创伤|心碎",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_IRRITATION_196": {
+      "type": "regex",
+      "pattern": "烦躁|厌烦|不爽|恶心|烦人|恼人",
+      "severity": 35,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_IRRITATION_197": {
+      "type": "regex",
+      "pattern": "烦躁|厌烦|不爽|恶心|烦人|恼人",
+      "severity": 40,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_IRRITATION_198": {
+      "type": "regex",
+      "pattern": "烦躁|厌烦|不爽|恶心|烦人|恼人",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_IRRITATION_199": {
+      "type": "regex",
+      "pattern": "烦躁|厌烦|不爽|恶心|烦人|恼人",
+      "severity": 35,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_IRRITATION_200": {
+      "type": "regex",
+      "pattern": "烦躁|厌烦|不爽|恶心|烦人|恼人",
+      "severity": 40,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_IRRITATION_201": {
+      "type": "regex",
+      "pattern": "烦躁|厌烦|不爽|恶心|烦人|恼人",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_IRRITATION_202": {
+      "type": "regex",
+      "pattern": "烦躁|厌烦|不爽|恶心|烦人|恼人",
+      "severity": 35,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_IRRITATION_203": {
+      "type": "regex",
+      "pattern": "烦躁|厌烦|不爽|恶心|烦人|恼人",
+      "severity": 40,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_IRRITATION_204": {
+      "type": "regex",
+      "pattern": "烦躁|厌烦|不爽|恶心|烦人|恼人",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_IRRITATION_205": {
+      "type": "regex",
+      "pattern": "烦躁|厌烦|不爽|恶心|烦人|恼人",
+      "severity": 35,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_INSECURITY_206": {
+      "type": "regex",
+      "pattern": "不安全|不安|疑虑|担心|恐惧|害怕",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_INSECURITY_207": {
+      "type": "regex",
+      "pattern": "不安全|不安|疑虑|担心|恐惧|害怕",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_INSECURITY_208": {
+      "type": "regex",
+      "pattern": "不安全|不安|疑虑|担心|恐惧|害怕",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_INSECURITY_209": {
+      "type": "regex",
+      "pattern": "不安全|不安|疑虑|担心|恐惧|害怕",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_INSECURITY_210": {
+      "type": "regex",
+      "pattern": "不安全|不安|疑虑|担心|恐惧|害怕",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_INSECURITY_211": {
+      "type": "regex",
+      "pattern": "不安全|不安|疑虑|担心|恐惧|害怕",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_INSECURITY_212": {
+      "type": "regex",
+      "pattern": "不安全|不安|疑虑|担心|恐惧|害怕",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_INSECURITY_213": {
+      "type": "regex",
+      "pattern": "不安全|不安|疑虑|担心|恐惧|害怕",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_INSECURITY_214": {
+      "type": "regex",
+      "pattern": "不安全|不安|疑虑|担心|恐惧|害怕",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_INSECURITY_215": {
+      "type": "regex",
+      "pattern": "不安全|不安|疑虑|担心|恐惧|害怕",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_RESENTMENT_216": {
+      "type": "regex",
+      "pattern": "怨恨|愤恨|仇恨|不满|愤愤不平|怒不可遏",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_RESENTMENT_217": {
+      "type": "regex",
+      "pattern": "怨恨|愤恨|仇恨|不满|愤愤不平|怒不可遏",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_RESENTMENT_218": {
+      "type": "regex",
+      "pattern": "怨恨|愤恨|仇恨|不满|愤愤不平|怒不可遏",
+      "severity": 65,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_RESENTMENT_219": {
+      "type": "regex",
+      "pattern": "怨恨|愤恨|仇恨|不满|愤愤不平|怒不可遏",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_RESENTMENT_220": {
+      "type": "regex",
+      "pattern": "怨恨|愤恨|仇恨|不满|愤愤不平|怒不可遏",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_RESENTMENT_221": {
+      "type": "regex",
+      "pattern": "怨恨|愤恨|仇恨|不满|愤愤不平|怒不可遏",
+      "severity": 65,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_RESENTMENT_222": {
+      "type": "regex",
+      "pattern": "怨恨|愤恨|仇恨|不满|愤愤不平|怒不可遏",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_RESENTMENT_223": {
+      "type": "regex",
+      "pattern": "怨恨|愤恨|仇恨|不满|愤愤不平|怒不可遏",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_RESENTMENT_224": {
+      "type": "regex",
+      "pattern": "怨恨|愤恨|仇恨|不满|愤愤不平|怒不可遏",
+      "severity": 65,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_RESENTMENT_225": {
+      "type": "regex",
+      "pattern": "怨恨|愤恨|仇恨|不满|愤愤不平|怒不可遏",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_NERVOUSNESS_226": {
+      "type": "regex",
+      "pattern": "紧张| nervous|局促|不安|焦虑不安",
+      "severity": 40,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_NERVOUSNESS_227": {
+      "type": "regex",
+      "pattern": "紧张| nervous|局促|不安|焦虑不安",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_NERVOUSNESS_228": {
+      "type": "regex",
+      "pattern": "紧张| nervous|局促|不安|焦虑不安",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_NERVOUSNESS_229": {
+      "type": "regex",
+      "pattern": "紧张| nervous|局促|不安|焦虑不安",
+      "severity": 40,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_NERVOUSNESS_230": {
+      "type": "regex",
+      "pattern": "紧张| nervous|局促|不安|焦虑不安",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_NERVOUSNESS_231": {
+      "type": "regex",
+      "pattern": "紧张| nervous|局促|不安|焦虑不安",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_NERVOUSNESS_232": {
+      "type": "regex",
+      "pattern": "紧张| nervous|局促|不安|焦虑不安",
+      "severity": 40,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_NERVOUSNESS_233": {
+      "type": "regex",
+      "pattern": "紧张| nervous|局促|不安|焦虑不安",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_NERVOUSNESS_234": {
+      "type": "regex",
+      "pattern": "紧张| nervous|局促|不安|焦虑不安",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_NERVOUSNESS_235": {
+      "type": "regex",
+      "pattern": "紧张| nervous|局促|不安|焦虑不安",
+      "severity": 40,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_HOPELESS_236": {
+      "type": "regex",
+      "pattern": "无望|绝望|没希望|放弃|绝望透顶",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_HOPELESS_237": {
+      "type": "regex",
+      "pattern": "无望|绝望|没希望|放弃|绝望透顶",
+      "severity": 65,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_HOPELESS_238": {
+      "type": "regex",
+      "pattern": "无望|绝望|没希望|放弃|绝望透顶",
+      "severity": 70,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_HOPELESS_239": {
+      "type": "regex",
+      "pattern": "无望|绝望|没希望|放弃|绝望透顶",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_HOPELESS_240": {
+      "type": "regex",
+      "pattern": "无望|绝望|没希望|放弃|绝望透顶",
+      "severity": 65,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_HOPELESS_241": {
+      "type": "regex",
+      "pattern": "无望|绝望|没希望|放弃|绝望透顶",
+      "severity": 70,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_HOPELESS_242": {
+      "type": "regex",
+      "pattern": "无望|绝望|没希望|放弃|绝望透顶",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_HOPELESS_243": {
+      "type": "regex",
+      "pattern": "无望|绝望|没希望|放弃|绝望透顶",
+      "severity": 65,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_HOPELESS_244": {
+      "type": "regex",
+      "pattern": "无望|绝望|没希望|放弃|绝望透顶",
+      "severity": 70,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_HOPELESS_245": {
+      "type": "regex",
+      "pattern": "无望|绝望|没希望|放弃|绝望透顶",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SHAME_246": {
+      "type": "regex",
+      "pattern": "羞耻|丢脸|惭愧|内疚|辱没|耻辱",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SHAME_247": {
+      "type": "regex",
+      "pattern": "羞耻|丢脸|惭愧|内疚|辱没|耻辱",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SHAME_248": {
+      "type": "regex",
+      "pattern": "羞耻|丢脸|惭愧|内疚|辱没|耻辱",
+      "severity": 65,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SHAME_249": {
+      "type": "regex",
+      "pattern": "羞耻|丢脸|惭愧|内疚|辱没|耻辱",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SHAME_250": {
+      "type": "regex",
+      "pattern": "羞耻|丢脸|惭愧|内疚|辱没|耻辱",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SHAME_251": {
+      "type": "regex",
+      "pattern": "羞耻|丢脸|惭愧|内疚|辱没|耻辱",
+      "severity": 65,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SHAME_252": {
+      "type": "regex",
+      "pattern": "羞耻|丢脸|惭愧|内疚|辱没|耻辱",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SHAME_253": {
+      "type": "regex",
+      "pattern": "羞耻|丢脸|惭愧|内疚|辱没|耻辱",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SHAME_254": {
+      "type": "regex",
+      "pattern": "羞耻|丢脸|惭愧|内疚|辱没|耻辱",
+      "severity": 65,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_SHAME_255": {
+      "type": "regex",
+      "pattern": "羞耻|丢脸|惭愧|内疚|辱没|耻辱",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_GUILT_256": {
+      "type": "regex",
+      "pattern": "内疚|自责|愧疚|抱歉|对不起|罪过",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_GUILT_257": {
+      "type": "regex",
+      "pattern": "内疚|自责|愧疚|抱歉|对不起|罪过",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_GUILT_258": {
+      "type": "regex",
+      "pattern": "内疚|自责|愧疚|抱歉|对不起|罪过",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_GUILT_259": {
+      "type": "regex",
+      "pattern": "内疚|自责|愧疚|抱歉|对不起|罪过",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_GUILT_260": {
+      "type": "regex",
+      "pattern": "内疚|自责|愧疚|抱歉|对不起|罪过",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_GUILT_261": {
+      "type": "regex",
+      "pattern": "内疚|自责|愧疚|抱歉|对不起|罪过",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_GUILT_262": {
+      "type": "regex",
+      "pattern": "内疚|自责|愧疚|抱歉|对不起|罪过",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_GUILT_263": {
+      "type": "regex",
+      "pattern": "内疚|自责|愧疚|抱歉|对不起|罪过",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_GUILT_264": {
+      "type": "regex",
+      "pattern": "内疚|自责|愧疚|抱歉|对不起|罪过",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_GUILT_265": {
+      "type": "regex",
+      "pattern": "内疚|自责|愧疚|抱歉|对不起|罪过",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_PANIC_266": {
+      "type": "regex",
+      "pattern": "恐慌|惊慌|慌乱|大乱|失控|恐惧",
+      "severity": 65,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_PANIC_267": {
+      "type": "regex",
+      "pattern": "恐慌|惊慌|慌乱|大乱|失控|恐惧",
+      "severity": 70,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_PANIC_268": {
+      "type": "regex",
+      "pattern": "恐慌|惊慌|慌乱|大乱|失控|恐惧",
+      "severity": 75,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_PANIC_269": {
+      "type": "regex",
+      "pattern": "恐慌|惊慌|慌乱|大乱|失控|恐惧",
+      "severity": 65,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_PANIC_270": {
+      "type": "regex",
+      "pattern": "恐慌|惊慌|慌乱|大乱|失控|恐惧",
+      "severity": 70,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_PANIC_271": {
+      "type": "regex",
+      "pattern": "恐慌|惊慌|慌乱|大乱|失控|恐惧",
+      "severity": 75,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_PANIC_272": {
+      "type": "regex",
+      "pattern": "恐慌|惊慌|慌乱|大乱|失控|恐惧",
+      "severity": 65,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_PANIC_273": {
+      "type": "regex",
+      "pattern": "恐慌|惊慌|慌乱|大乱|失控|恐惧",
+      "severity": 70,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_PANIC_274": {
+      "type": "regex",
+      "pattern": "恐慌|惊慌|慌乱|大乱|失控|恐惧",
+      "severity": 75,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_PANIC_275": {
+      "type": "regex",
+      "pattern": "恐慌|惊慌|慌乱|大乱|失控|恐惧",
+      "severity": 65,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_HOPE_001": {
+      "type": "regex",
+      "pattern": "看到(了)?(一丝)?希望",
+      "severity": 15,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_HOPE_002": {
+      "type": "regex",
+      "pattern": "对.*充满期待",
+      "severity": 10,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_HOPE_003": {
+      "type": "regex",
+      "pattern": "看到.*曙光",
+      "severity": 15,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_HOPE_004": {
+      "type": "regex",
+      "pattern": "生活.*有了盼头",
+      "severity": 20,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_HOPE_005": {
+      "type": "regex",
+      "pattern": "期待(着)?美好.*未来",
+      "severity": 10,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_HOPE_006": {
+      "type": "regex",
+      "pattern": "(相信)?一定会好起来",
+      "severity": 20,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_HOPE_007": {
+      "type": "regex",
+      "pattern": "重新燃起.*希望",
+      "severity": 15,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_HOPE_008": {
+      "type": "regex",
+      "pattern": "(一定会)?变得更好",
+      "severity": 10,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_HOPE_009": {
+      "type": "regex",
+      "pattern": "(一切)?越来越好",
+      "severity": 10,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_HOPE_010": {
+      "type": "regex",
+      "pattern": "憧憬(着)?明天",
+      "severity": 10,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_TRUST_001": {
+      "type": "regex",
+      "pattern": "(完全|十分|非常)?相信你",
+      "severity": 10,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_TRUST_002": {
+      "type": "regex",
+      "pattern": "交给你(我)?.*放心",
+      "severity": 15,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_TRUST_003": {
+      "type": "regex",
+      "pattern": "绝对(的)?信任",
+      "severity": 15,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_TRUST_004": {
+      "type": "regex",
+      "pattern": "(非常|很|太)?靠谱",
+      "severity": 10,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_TRUST_005": {
+      "type": "regex",
+      "pattern": "值得托付",
+      "severity": 15,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_TRUST_006": {
+      "type": "regex",
+      "pattern": "没有任何疑虑",
+      "severity": 10,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_TRUST_007": {
+      "type": "regex",
+      "pattern": "坚信不疑",
+      "severity": 20,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_TRUST_008": {
+      "type": "regex",
+      "pattern": "(深深)?信赖",
+      "severity": 15,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_TRUST_009": {
+      "type": "regex",
+      "pattern": "毫无保留(地)?相信",
+      "severity": 25,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_TRUST_010": {
+      "type": "regex",
+      "pattern": "把.*全权托付",
+      "severity": 20,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_CURIOSITY_001": {
+      "type": "regex",
+      "pattern": "(特别|非常|有些)?好奇",
+      "severity": 10,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_CURIOSITY_002": {
+      "type": "regex",
+      "pattern": "想知道.*原因",
+      "severity": 10,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_CURIOSITY_003": {
+      "type": "regex",
+      "pattern": "探索.*奥秘",
+      "severity": 15,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_CURIOSITY_004": {
+      "type": "regex",
+      "pattern": "究竟是(怎么回事|为什么)",
+      "severity": 15,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_CURIOSITY_005": {
+      "type": "regex",
+      "pattern": "到底是怎么回事",
+      "severity": 10,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_CURIOSITY_006": {
+      "type": "regex",
+      "pattern": "引起(了)?.*兴趣",
+      "severity": 10,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_CURIOSITY_007": {
+      "type": "regex",
+      "pattern": "忍不住想了解",
+      "severity": 15,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_CURIOSITY_008": {
+      "type": "regex",
+      "pattern": "(太神奇了)?.*怎么做到",
+      "severity": 20,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_CURIOSITY_009": {
+      "type": "regex",
+      "pattern": "想一探究竟",
+      "severity": 15,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_CURIOSITY_010": {
+      "type": "regex",
+      "pattern": "产生(了)?浓厚.*好奇",
+      "severity": 20,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_INSPIRATION_001": {
+      "type": "regex",
+      "pattern": "突然想到(了)?",
+      "severity": 10,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_INSPIRATION_002": {
+      "type": "regex",
+      "pattern": "灵光一闪",
+      "severity": 15,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_INSPIRATION_003": {
+      "type": "regex",
+      "pattern": "茅塞顿开",
+      "severity": 20,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_INSPIRATION_004": {
+      "type": "regex",
+      "pattern": "受到(了)?.*启发",
+      "severity": 15,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_INSPIRATION_005": {
+      "type": "regex",
+      "pattern": "突然有了灵感",
+      "severity": 15,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_INSPIRATION_006": {
+      "type": "regex",
+      "pattern": "脑洞大开",
+      "severity": 10,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_INSPIRATION_007": {
+      "type": "regex",
+      "pattern": "醍醐灌顶",
+      "severity": 25,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_INSPIRATION_008": {
+      "type": "regex",
+      "pattern": "豁然开朗",
+      "severity": 20,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_INSPIRATION_009": {
+      "type": "regex",
+      "pattern": "激发(出)?.*想法",
+      "severity": 15,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_INSPIRATION_010": {
+      "type": "regex",
+      "pattern": "想到一个新点子",
+      "severity": 10,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_CALM_001": {
+      "type": "regex",
+      "pattern": "内心(十分|非常)?平静",
+      "severity": 10,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_CALM_002": {
+      "type": "regex",
+      "pattern": "心如止水",
+      "severity": 15,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_CALM_003": {
+      "type": "regex",
+      "pattern": "波澜不惊",
+      "severity": 15,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_CALM_004": {
+      "type": "regex",
+      "pattern": "感到(前所未有.*)?安宁",
+      "severity": 20,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_CALM_005": {
+      "type": "regex",
+      "pattern": "感到(很)?踏实",
+      "severity": 15,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_CALM_006": {
+      "type": "regex",
+      "pattern": "静下心来",
+      "severity": 10,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_CALM_007": {
+      "type": "regex",
+      "pattern": "没有任何波澜",
+      "severity": 15,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_CALM_008": {
+      "type": "regex",
+      "pattern": "(内心)?平和",
+      "severity": 10,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_CALM_009": {
+      "type": "regex",
+      "pattern": "泰然处之",
+      "severity": 20,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_CALM_010": {
+      "type": "regex",
+      "pattern": "岁月静好",
+      "severity": 10,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_GRATITUDE_001": {
+      "type": "regex",
+      "pattern": "太感谢(了|你)",
+      "severity": 15,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_GRATITUDE_002": {
+      "type": "regex",
+      "pattern": "感激不尽",
+      "severity": 20,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_GRATITUDE_003": {
+      "type": "regex",
+      "pattern": "多亏了你",
+      "severity": 15,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_GRATITUDE_004": {
+      "type": "regex",
+      "pattern": "(心里)?充满感恩",
+      "severity": 20,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_GRATITUDE_005": {
+      "type": "regex",
+      "pattern": "铭记在心",
+      "severity": 25,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_GRATITUDE_006": {
+      "type": "regex",
+      "pattern": "帮了大忙",
+      "severity": 15,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_GRATITUDE_007": {
+      "type": "regex",
+      "pattern": "无以言表.*感谢",
+      "severity": 30,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_GRATITUDE_008": {
+      "type": "regex",
+      "pattern": "雪中送炭",
+      "severity": 35,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_GRATITUDE_009": {
+      "type": "regex",
+      "pattern": "衷心(地)?谢谢",
+      "severity": 20,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_GRATITUDE_010": {
+      "type": "regex",
+      "pattern": "感谢.*付出",
+      "severity": 15,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_AWE_001": {
+      "type": "regex",
+      "pattern": "肃然起敬",
+      "severity": 25,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_AWE_002": {
+      "type": "regex",
+      "pattern": "(太|简直)?震撼了",
+      "severity": 20,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_AWE_003": {
+      "type": "regex",
+      "pattern": "心生敬畏",
+      "severity": 30,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_AWE_004": {
+      "type": "regex",
+      "pattern": "叹为观止",
+      "severity": 25,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_AWE_005": {
+      "type": "regex",
+      "pattern": "感到(自己.*)?渺小",
+      "severity": 30,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_AWE_006": {
+      "type": "regex",
+      "pattern": "不可思议.*力量",
+      "severity": 25,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_AWE_007": {
+      "type": "regex",
+      "pattern": "震撼人心",
+      "severity": 20,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_AWE_008": {
+      "type": "regex",
+      "pattern": "心怀敬畏",
+      "severity": 30,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_AWE_009": {
+      "type": "regex",
+      "pattern": "五体投地",
+      "severity": 35,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_AWE_010": {
+      "type": "regex",
+      "pattern": "高山仰止",
+      "severity": 40,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_OPTIMISM_001": {
+      "type": "regex",
+      "pattern": "总会(好起来|过去的)",
+      "severity": 15,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_OPTIMISM_002": {
+      "type": "regex",
+      "pattern": "(凡事)?往好处想",
+      "severity": 10,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_OPTIMISM_003": {
+      "type": "regex",
+      "pattern": "塞翁失马",
+      "severity": 15,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_OPTIMISM_004": {
+      "type": "regex",
+      "pattern": "没什么大不了",
+      "severity": 10,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_OPTIMISM_005": {
+      "type": "regex",
+      "pattern": "天塌下来(有高个顶着)?",
+      "severity": 20,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_OPTIMISM_006": {
+      "type": "regex",
+      "pattern": "充满信心",
+      "severity": 10,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_OPTIMISM_007": {
+      "type": "regex",
+      "pattern": "兵来将挡.*水来土掩",
+      "severity": 25,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_OPTIMISM_008": {
+      "type": "regex",
+      "pattern": "车到山前必有路",
+      "severity": 15,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_OPTIMISM_009": {
+      "type": "regex",
+      "pattern": "一切都是最好.*安排",
+      "severity": 20,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_OPTIMISM_010": {
+      "type": "regex",
+      "pattern": "积极面对(一切)?",
+      "severity": 10,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_INFERIORITY_001": {
+      "type": "regex",
+      "pattern": "我太差劲了",
+      "severity": 65,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_INFERIORITY_002": {
+      "type": "regex",
+      "pattern": "(处处|永远)?不如别人",
+      "severity": 70,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_INFERIORITY_003": {
+      "type": "regex",
+      "pattern": "(觉得自己)?一无是处",
+      "severity": 75,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_INFERIORITY_004": {
+      "type": "regex",
+      "pattern": "感觉自己.*配不上",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_INFERIORITY_005": {
+      "type": "regex",
+      "pattern": "自惭形秽",
+      "severity": 65,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_INFERIORITY_006": {
+      "type": "regex",
+      "pattern": "(感觉)?低人一等",
+      "severity": 70,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_INFERIORITY_007": {
+      "type": "regex",
+      "pattern": "怎么努力都比不上",
+      "severity": 75,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_INFERIORITY_008": {
+      "type": "regex",
+      "pattern": "(是不是)?只有我.*最差",
+      "severity": 70,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_INFERIORITY_009": {
+      "type": "regex",
+      "pattern": "我这种人",
+      "severity": 65,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_INFERIORITY_010": {
+      "type": "regex",
+      "pattern": "完全没有底气",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_JEALOUSY_001": {
+      "type": "regex",
+      "pattern": "凭什么.*他",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_JEALOUSY_002": {
+      "type": "regex",
+      "pattern": "真是让人眼红",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_JEALOUSY_003": {
+      "type": "regex",
+      "pattern": "(我)?酸了",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_JEALOUSY_004": {
+      "type": "regex",
+      "pattern": "羡慕嫉妒恨",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_JEALOUSY_005": {
+      "type": "regex",
+      "pattern": "心里(很|太)?不平衡",
+      "severity": 65,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_JEALOUSY_006": {
+      "type": "regex",
+      "pattern": "见不得别人好",
+      "severity": 70,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_JEALOUSY_007": {
+      "type": "regex",
+      "pattern": "为什么不是我",
+      "severity": 55,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_JEALOUSY_008": {
+      "type": "regex",
+      "pattern": "别人都有.*就我没有",
+      "severity": 60,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_JEALOUSY_009": {
+      "type": "regex",
+      "pattern": "有点嫉妒",
+      "severity": 50,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_JEALOUSY_010": {
+      "type": "regex",
+      "pattern": "(这|太)?不公平了",
+      "severity": 65,
+      "hits": 0,
+      "status": "active"
+    }
+  }
+}
