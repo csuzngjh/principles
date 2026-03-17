@@ -1,7 +1,7 @@
 ---
 name: principles-disciple
 description: Evolutionary programming agent framework. Provides strategic guardrails, pain-reflection loops, and Evolver synergy.
-version: 1.5.0
+version: 1.6.0
 author: Principles Disciple Team
 tags: [core, safety, evolution, strategic]
 ---

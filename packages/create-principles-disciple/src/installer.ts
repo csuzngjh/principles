@@ -331,6 +331,94 @@ async function createConfigFile(workspaceDir: string, features: string[]): Promi
 }
 
 /**
+ * 生成更新摘要
+ */
+async function generateUpdateSummary(
+  workspaceDir: string,
+  mode: 'smart' | 'force'
+): Promise<number> {
+  // 只在智能模式（更新）时生成
+  if (mode !== 'smart') return 0;
+  
+  const updateFiles: string[] = [];
+  
+  // 查找所有 .update 文件
+  const findUpdateFiles = (dir: string): void => {
+    if (!existsSync(dir)) return;
+    const entries = readdirSync(dir);
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry);
+      if (statSync(fullPath).isDirectory()) {
+        // 跳过隐藏目录和 node_modules
+        if (entry.startsWith('.') || entry === 'node_modules') continue;
+        findUpdateFiles(fullPath);
+      } else if (entry.endsWith('.update')) {
+        updateFiles.push(fullPath);
+      }
+    }
+  };
+  
+  findUpdateFiles(workspaceDir);
+  
+  if (updateFiles.length === 0) return 0;
+  
+  // 生成更新摘要
+  const summaryPath = path.join(workspaceDir, '.principles', 'UPDATE_SUMMARY.md');
+  const timestamp = new Date().toISOString().split('T')[0];
+  
+  let content = `# 更新摘要 (${timestamp})
+
+## ⚠️ 待合并的更新文件
+
+以下文件有新版本可用，**必须手动合并**：
+
+| 文件 | 状态 |
+|------|------|
+`;
+  
+  for (const file of updateFiles) {
+    const relativePath = path.relative(workspaceDir, file);
+    content += `| \`${relativePath}\` | 待合并 |\n`;
+  }
+  
+  content += `
+## 合并步骤
+
+1. 逐个打开 .update 文件
+2. 对比原文件，识别新增/修改内容
+3. 将有价值的更新合并到原文件
+4. 删除 .update 文件
+
+## 查看完整变更日志
+
+\`\`\`bash
+cat ~/clawd/docs/CHANGELOG.md | head -100
+\`\`\`
+
+---
+*此文件在每次更新时自动生成，合并完成后可删除*
+`;
+  
+  await fse.ensureDir(path.dirname(summaryPath));
+  await fse.writeFile(summaryPath, content);
+  
+  logger.info(`更新摘要已生成: ${summaryPath}`);
+  logger.warn(`发现 ${updateFiles.length} 个待合并的更新文件`);
+  
+  return updateFiles.length;
+}
+
+export interface InstallResult {
+  success: boolean;
+  pluginDir: string;
+  workspaceDir: string;
+  skillsCount: number;
+  templatesCount: number;
+  updateFilesCount?: number;
+  error?: string;
+}
+
+/**
  * 主安装流程
  */
 export async function install(options: InstallOptions, pluginDir: string): Promise<InstallResult> {
@@ -378,6 +466,10 @@ export async function install(options: InstallOptions, pluginDir: string): Promi
     spinner.text = '创建配置文件...';
     await createConfigFile(options.workspaceDir, options.features);
     
+    // 9. 生成更新摘要（如果是更新模式）
+    spinner.text = '生成更新摘要...';
+    const updateFilesCount = await generateUpdateSummary(options.workspaceDir, options.mode);
+    
     spinner.succeed('安装完成！');
     
     return {
@@ -386,6 +478,7 @@ export async function install(options: InstallOptions, pluginDir: string): Promi
       workspaceDir: options.workspaceDir,
       skillsCount,
       templatesCount: templatesCount + principlesCount,
+      updateFilesCount,
     };
   } catch (error) {
     spinner.fail('安装失败');

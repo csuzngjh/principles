@@ -188,12 +188,24 @@ async function runInstall(options: any): Promise<void> {
     
     // 如果是更新模式且有 .update 文件，给出提示
     if (installOptions.mode === 'smart') {
-      console.log();
-      console.log('⚠️  更新提示:');
-      console.log('   已生成 .update 文件，请手动合并您的修改：');
-      console.log('   - 检查工作区目录下的 *.update 文件');
-      console.log('   - 将需要的更新合并到原有文件中');
-      console.log('   - 删除 .update 文件');
+      if (result.updateFilesCount && result.updateFilesCount > 0) {
+        console.log();
+        console.log('⚠️  更新提示:');
+        console.log(`   发现 ${result.updateFilesCount} 个待合并的更新文件`);
+        console.log('   请查看: ~/.principles/UPDATE_SUMMARY.md');
+        console.log();
+        console.log('   合并步骤:');
+        console.log('   1. 打开 *.update 文件');
+        console.log('   2. 对比原文件，识别新增/修改内容');
+        console.log('   3. 将有价值的更新合并到原文件');
+        console.log('   4. 删除 .update 文件');
+        console.log();
+        console.log('   查看完整变更日志:');
+        console.log('   cat ~/clawd/docs/CHANGELOG.md | head -100');
+      } else {
+        console.log();
+        console.log('✅ 本次更新无需合并文件');
+      }
     }
     
     console.log();

@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.6.0] - 2026-03-17
+
+### Added
+
+#### Smart Update System
+- Auto-detect first install vs update
+- Generate `.update` files for existing user files (smart mode)
+- Generate `UPDATE_SUMMARY.md` with pending updates list
+- Clear merge instructions for agents
+
+#### Agent Installation Guide
+- `packages/openclaw-plugin/AGENT_INSTALL.md` - Step-by-step guide for AI agents
+- Covers: install, update, merge updates, verify
+
+#### Installer Improvements
+- `create-principles-disciple` package with npx support
+- Non-interactive mode for CI/CD
+- Clear first-time vs update distinction
+
+### Fixed
+- Plugin dependency installation (micromatch, typebox)
+- `install-dependencies.cjs` path resolution bug
+- Duplicate plugin detection (cleanup .bak-* directories)
+
+---
+
 ## [Unreleased]
 
 ### Added (PR #4: Configuration Migration + Documentation)
