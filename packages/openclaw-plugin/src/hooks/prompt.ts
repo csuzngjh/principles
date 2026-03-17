@@ -5,6 +5,7 @@ import { getSession, resetFriction } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { ContextInjectionConfig, defaultContextConfig } from '../types.js';
 import { extractSummary, getHistoryVersions } from '../core/focus-history.js';
+import { empathyObserverManager, type EmpathyObserverApi } from '../service/empathy-observer-manager.js';
 
 /**
  * 模型配置对象格式
@@ -44,8 +45,10 @@ interface PromptHookApi {
     };
     empathy_engine?: {
       enabled?: boolean;
+      observer_model?: string | null;
     };
   };
+  runtime: EmpathyObserverApi['runtime'];
   logger: PluginLogger;
 }
 
@@ -182,6 +185,27 @@ export function getDiagnosticianModel(api: PromptHookApi | null, logger?: Plugin
   throw new Error(errorMsg);
 }
 
+function extractLatestUserMessage(messages: unknown[] | undefined): string {
+  if (!Array.isArray(messages)) return '';
+
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i] as { role?: string; content?: unknown };
+    if (msg?.role !== 'user') continue;
+
+    if (typeof msg.content === 'string') return msg.content;
+    if (Array.isArray(msg.content)) {
+      const text = msg.content
+        .filter((part: any) => part && part.type === 'text' && typeof part.text === 'string')
+        .map((part: any) => part.text)
+        .join('\n')
+        .trim();
+      if (text) return text;
+    }
+  }
+
+  return '';
+}
+
 export async function handleBeforePromptBuild(
   event: PluginHookBeforePromptBuildEvent,
   ctx: PluginHookAgentContext & { api?: PromptHookApi }
@@ -309,22 +333,10 @@ REQUIRED ACTION:
     prependContext = evolutionDirective + prependContext;
   }
 
-  // ═══ 4. Empathy Engine Injection ═══
-  const empathyEnabled = ctx.api?.config?.empathy_engine?.enabled !== false;
-  if (empathyEnabled) {
-    prependContext += `<system_override:empathy_engine>
-[CRITICAL DIRECTIVE]
-在执行任务前，你必须先评估用户上一条消息的情绪状态。
-
-**情绪检测**：
-若识别到挫败/愤怒/指责（包括反讽与间接表达），请在响应元数据中返回 empathy JSON。
-若 damageDetected=true：1) 先道歉；2) 调用 deep_reflect；3) 暂停高风险改动。
-
-**回滚请求识别**：
-若用户请求撤销/回滚情绪惩罚（如"撤销刚才的惩罚"、"回滚上一次"等），请在响应末尾单独一行输出：
-[EMPATHY_ROLLBACK_REQUEST]
-然后立即执行 /pd-rollback last 命令或告知用户可使用此命令回滚。
-</system_override:empathy_engine>\n`;
+  // ═══ 4. Empathy Observer Spawn (async sidecar) ═══
+  if (trigger === 'user' && sessionId && api) {
+    const latestUserMessage = extractLatestUserMessage(event.messages);
+    await empathyObserverManager.spawn(api, sessionId, latestUserMessage);
   }
 
   // ═══ 5. Heartbeat-specific checklist ═══
