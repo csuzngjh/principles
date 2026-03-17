@@ -17,6 +17,24 @@ export interface DeepReflectionSettings {
     modelsDir?: string;
 }
 
+export interface GfiGateSettings {
+    enabled: boolean;
+    thresholds: {
+        low_risk_block: number;      // TIER 1 工具拦截阈值
+        high_risk_block: number;     // TIER 2 工具拦截阈值
+        large_change_block: number;  // 大规模修改警告阈值
+    };
+    large_change_lines: number;      // 触发规模衰减的行数
+    trust_stage_multipliers: {
+        '1': number;  // Observer
+        '2': number;  // Editor
+        '3': number;  // Developer
+        '4': number;  // Architect
+    };
+    bash_safe_patterns: string[];      // 安全命令正则模式
+    bash_dangerous_patterns: string[]; // 危险命令正则模式
+}
+
 export interface TrustSettings {
     stages: {
         stage_1_observer: number;
@@ -98,6 +116,7 @@ export interface PainSettings {
         };
         model_calibration?: Record<string, number>;
     };
+    gfi_gate?: GfiGateSettings;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -203,6 +222,37 @@ export const DEFAULT_SETTINGS: PainSettings = {
             max_per_hour: 120,
         },
         model_calibration: {}
+    },
+    gfi_gate: {
+        enabled: true,
+        thresholds: {
+            low_risk_block: 70,      // TIER 1: write, edit, spawn_agent
+            high_risk_block: 40,     // TIER 2: delete_file, move_file
+            large_change_block: 50,  // 大规模修改警告阈值
+        },
+        large_change_lines: 50,
+        trust_stage_multipliers: {
+            '1': 0.5,   // Observer: 更严格，阈值减半
+            '2': 0.75,  // Editor: 阈值降低 25%
+            '3': 1.0,   // Developer: 标准阈值
+            '4': 1.5,   // Architect: 更宽松，阈值提高 50%
+        },
+        bash_safe_patterns: [
+            '^(ls|dir|pwd|which|where|echo|env|cat|type|head|tail|less|more)\\b',
+            '^git\\s+(status|log|diff|branch|show|remote)\\b',
+            '^npm\\s+(run|test|build|start)\\b',
+            '^(make|gradle|mvn)\\b',
+        ],
+        bash_dangerous_patterns: [
+            'rm\\s+(-[a-z]*r[a-z]*f|-rf)',
+            'del\\s+/s',
+            'rmdir\\s+/s',
+            'git\\s+(push\\s+.*--force|reset\\s+--hard|clean\\s+-fd)',
+            'npm\\s+publish',
+            'pip\\s+upload',
+            'docker\\s+push',
+            '(curl|wget).*\\|\\s*(ba)?sh',
+        ],
     }
 };
 

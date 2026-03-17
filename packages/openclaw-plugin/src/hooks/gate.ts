@@ -3,11 +3,101 @@ import * as path from 'path';
 import { isRisky, normalizePath, planStatus as getPlanStatus } from '../utils/io.js';
 import { matchesAnyPattern } from '../utils/glob-match.js';
 import { normalizeProfile } from '../core/profile.js';
-import { trackBlock, hasRecentThinking } from '../core/session-tracker.js';
+import { trackBlock, hasRecentThinking, getSession } from '../core/session-tracker.js';
 import { assessRiskLevel, estimateLineChanges } from '../core/risk-calculator.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { checkEvolutionGate } from '../core/evolution-engine.js';
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult } from '../openclaw-sdk.js';
+
+// ═══ GFI Gate Tool Tiers ═══
+// TIER 0: 只读工具 - 永不拦截
+const READ_ONLY_TOOLS = new Set([
+  'read', 'read_file', 'read_many_files', 'image_read',
+  'search_file_content', 'grep', 'grep_search', 'list_directory', 'ls', 'glob',
+  'lsp_hover', 'lsp_goto_definition', 'lsp_find_references',
+  'web_fetch', 'web_search', 'ref_search_documentation', 'ref_read_url',
+  'resolve-library-id', 'get-library-docs',
+  'todo_read', 'save_memory',
+  'deep_reflect',
+]);
+
+// TIER 1: 低风险修改 - GFI >= low_risk_block 时拦截
+const LOW_RISK_WRITE_TOOLS = new Set([
+  'write', 'write_file',
+  'edit', 'edit_file', 'replace', 'apply_patch', 'insert', 'patch',
+  'pd_spawn_agent', 'sessions_spawn', 'task',
+]);
+
+// TIER 2: 高风险操作 - GFI >= high_risk_block 时拦截
+const HIGH_RISK_TOOLS = new Set([
+  'delete_file', 'move_file',
+]);
+
+// TIER 3: Bash 命令 - 根据内容判断
+const BASH_TOOLS_SET = new Set([
+  'bash', 'run_shell_command', 'exec', 'execute', 'shell', 'cmd',
+]);
+
+/**
+ * 分析 Bash 命令风险等级
+ */
+function analyzeBashCommand(
+  command: string,
+  safePatterns: string[],
+  dangerousPatterns: string[]
+): 'safe' | 'dangerous' | 'normal' {
+  const normalizedCmd = command.trim().toLowerCase();
+  
+  // 1. 优先检查危险命令
+  for (const pattern of dangerousPatterns) {
+    try {
+      if (new RegExp(pattern, 'i').test(normalizedCmd)) {
+        return 'dangerous';
+      }
+    } catch {
+      // 忽略无效正则
+    }
+  }
+  
+  // 2. 检查安全命令
+  for (const pattern of safePatterns) {
+    try {
+      if (new RegExp(pattern, 'i').test(normalizedCmd)) {
+        return 'safe';
+      }
+    } catch {
+      // 忽略无效正则
+    }
+  }
+  
+  // 3. 默认为普通命令
+  return 'normal';
+}
+
+/**
+ * 计算动态 GFI 阈值
+ */
+function calculateDynamicThreshold(
+  baseThreshold: number,
+  trustStage: number,
+  lineChanges: number,
+  config: {
+    large_change_lines: number;
+    trust_stage_multipliers: Record<string, number>;
+  }
+): number {
+  // 1. Trust Stage 乘数
+  const stageMultiplier = config.trust_stage_multipliers[trustStage.toString()] || 1.0;
+  let threshold = baseThreshold * stageMultiplier;
+  
+  // 2. 大规模修改降低阈值
+  if (lineChanges > config.large_change_lines) {
+    const ratio = Math.min(lineChanges / 200, 0.5); // 最多降低 50%
+    threshold = threshold * (1 - ratio);
+  }
+  
+  return Math.round(Math.max(threshold, 0));
+}
 
 export function handleBeforeToolCall(
   event: PluginHookBeforeToolCallEvent,
@@ -80,6 +170,165 @@ export function handleBeforeToolCall(
         block: true,
         blockReason: `[Thinking OS Checkpoint] 高风险操作 "${event.toolName}" 需要先进行深度思考。\n\n请先使用 deep_reflect 工具分析当前情况，然后再尝试此操作。\n\n这是强制性检查点，目的是确保决策质量。\n\n提示：调用 deep_reflect 后，${Math.round(windowMs/60000)}分钟内的操作将自动放行。\n\n可在PROFILE.json中设置 thinking_checkpoint.enabled: false 来禁用此检查。`,
       };
+    }
+  }
+
+  // ═══ GFI GATE - Hard Intercept ═══
+  // 根据 GFI (疲劳指数) 精细化拦截工具调用
+  const gfiGateConfig = wctx.config.get('gfi_gate');
+  if (gfiGateConfig?.enabled !== false && ctx.sessionId) {
+    const session = getSession(ctx.sessionId);
+    const currentGfi = session?.currentGfi || 0;
+    
+    // TIER 0: 只读工具 - 永不拦截
+    if (READ_ONLY_TOOLS.has(event.toolName)) {
+      // 继续执行，不做 GFI 检查
+    }
+    // TIER 3: Bash 命令 - 根据内容判断
+    else if (BASH_TOOLS_SET.has(event.toolName)) {
+      const command = String(event.params.command || event.params.args || '');
+      const bashRisk = analyzeBashCommand(
+        command,
+        gfiGateConfig?.bash_safe_patterns || [],
+        gfiGateConfig?.bash_dangerous_patterns || []
+      );
+      
+      if (bashRisk === 'dangerous') {
+        // 危险命令 - 直接拦截
+        logger?.warn?.(`[PD:GFI_GATE] Dangerous bash command blocked: ${command.substring(0, 50)}...`);
+        return {
+          block: true,
+          blockReason: `[GFI Gate] 危险命令被拦截。
+
+命令: ${command.substring(0, 100)}${command.length > 100 ? '...' : ''}
+
+原因: 检测到危险命令模式，需要确认执行意图。
+
+解决方案:
+1. 如果确实需要执行，请确认操作意图后重试
+2. 使用更安全的方式（如手动操作）
+3. 咨询用户确认是否继续
+
+注意: 危险命令需要更严格的审批流程。`,
+        };
+      }
+      // safe 命令 - 放行
+      else if (bashRisk === 'safe') {
+        // 继续执行
+      }
+      // normal 命令 - 按 GFI 阈值判断
+      else {
+        const trustEngine = wctx.trust;
+        const stage = trustEngine.getStage();
+        const baseThreshold = gfiGateConfig?.thresholds?.low_risk_block || 70;
+        const dynamicThreshold = calculateDynamicThreshold(
+          baseThreshold,
+          stage,
+          0, // bash 命令没有行数概念
+          {
+            large_change_lines: gfiGateConfig?.large_change_lines || 50,
+            trust_stage_multipliers: gfiGateConfig?.trust_stage_multipliers || { '1': 0.5, '2': 0.75, '3': 1.0, '4': 1.5 },
+          }
+        );
+        
+        if (currentGfi >= dynamicThreshold) {
+          logger?.warn?.(`[PD:GFI_GATE] Bash blocked by GFI: ${currentGfi} >= ${dynamicThreshold}`);
+          return {
+            block: true,
+            blockReason: `[GFI Gate] 疲劳指数过高，操作被拦截。
+
+命令: ${command.substring(0, 100)}${command.length > 100 ? '...' : ''}
+GFI: ${currentGfi}/100
+动态阈值: ${dynamicThreshold} (Stage ${stage})
+
+原因: 当前疲劳指数超过阈值，系统进入保护模式。
+
+解决方案:
+1. 执行 /pd-status reset 清零疲劳值
+2. 检查是否存在理解偏差或死循环
+3. 等待问题自然解决后再尝试
+
+注意: 这是系统级硬性拦截，AI 无法绕过。`,
+          };
+        }
+      }
+    }
+    // TIER 2: 高风险操作 - GFI >= high_risk_block 时拦截
+    else if (HIGH_RISK_TOOLS.has(event.toolName)) {
+      const trustEngine = wctx.trust;
+      const stage = trustEngine.getStage();
+      const baseThreshold = gfiGateConfig?.thresholds?.high_risk_block || 40;
+      const dynamicThreshold = calculateDynamicThreshold(
+        baseThreshold,
+        stage,
+        0,
+        {
+          large_change_lines: gfiGateConfig?.large_change_lines || 50,
+          trust_stage_multipliers: gfiGateConfig?.trust_stage_multipliers || { '1': 0.5, '2': 0.75, '3': 1.0, '4': 1.5 },
+        }
+      );
+      
+      if (currentGfi >= dynamicThreshold) {
+        const filePath = event.params.file_path || event.params.path || event.params.file || event.params.target || 'unknown';
+        logger?.warn?.(`[PD:GFI_GATE] High-risk tool "${event.toolName}" blocked by GFI: ${currentGfi} >= ${dynamicThreshold}`);
+        return {
+          block: true,
+          blockReason: `[GFI Gate] 高风险操作被拦截。
+
+工具: ${event.toolName}
+文件: ${filePath}
+GFI: ${currentGfi}/100
+动态阈值: ${dynamicThreshold} (Stage ${stage})
+
+原因: 高风险工具需要更低的 GFI 阈值才能执行。
+
+解决方案:
+1. 执行 /pd-status reset 清零疲劳值
+2. 检查是否存在理解偏差或死循环
+3. 等待 GFI 自然衰减后重试
+
+注意: 这是系统级硬性拦截，AI 无法绕过。`,
+        };
+      }
+    }
+    // TIER 1: 低风险修改 - GFI >= low_risk_block 时拦截
+    else if (LOW_RISK_WRITE_TOOLS.has(event.toolName)) {
+      const trustEngine = wctx.trust;
+      const stage = trustEngine.getStage();
+      const lineChanges = estimateLineChanges({ toolName: event.toolName, params: event.params });
+      const baseThreshold = gfiGateConfig?.thresholds?.low_risk_block || 70;
+      const dynamicThreshold = calculateDynamicThreshold(
+        baseThreshold,
+        stage,
+        lineChanges,
+        {
+          large_change_lines: gfiGateConfig?.large_change_lines || 50,
+          trust_stage_multipliers: gfiGateConfig?.trust_stage_multipliers || { '1': 0.5, '2': 0.75, '3': 1.0, '4': 1.5 },
+        }
+      );
+      
+      if (currentGfi >= dynamicThreshold) {
+        const filePath = event.params.file_path || event.params.path || event.params.file || event.params.target || 'unknown';
+        logger?.warn?.(`[PD:GFI_GATE] Low-risk tool "${event.toolName}" blocked by GFI: ${currentGfi} >= ${dynamicThreshold}`);
+        return {
+          block: true,
+          blockReason: `[GFI Gate] 疲劳指数过高，操作被拦截。
+
+工具: ${event.toolName}
+文件: ${filePath}
+GFI: ${currentGfi}/100
+动态阈值: ${dynamicThreshold} (Stage ${stage}${lineChanges > 50 ? `, ${lineChanges}行修改` : ''})
+
+原因: 当前疲劳指数超过阈值，系统进入保护模式。
+
+解决方案:
+1. 执行 /pd-status reset 清零疲劳值
+2. 检查是否存在理解偏差或死循环
+3. 等待问题自然解决后再尝试
+
+注意: 这是系统级硬性拦截，AI 无法绕过。`,
+        };
+      }
     }
   }
 
