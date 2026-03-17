@@ -61,20 +61,30 @@ jobs:
             echo "pkg=openclaw-plugin" >> $GITHUB_OUTPUT
           fi
 
+      - name: Get npm latest version
+        id: npm-version
+        run: |
+          # 从 npm 获取最新版本（这是真正的"已发布"版本）
+          NPM_VERSION=$(npm view principles-disciple version 2>/dev/null || echo "0.0.0")
+          echo "npm_version=$NPM_VERSION" >> $GITHUB_OUTPUT
+          echo "📦 Latest npm version: $NPM_VERSION"
+
       - name: Analyze commits for version bump
         id: analyze
         if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.event.inputs.version_bump == 'auto')
         run: |
-          # 获取上一个 tag
-          LAST_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
+          # 获取 npm 最新版本对应的 tag
+          NPM_VERSION="${{ steps.npm-version.outputs.npm_version }}"
+          LAST_TAG="v$NPM_VERSION"
           
-          if [ -n "$LAST_TAG" ]; then
+          # 检查 tag 是否存在
+          if git rev-parse "$LAST_TAG" >/dev/null 2>&1; then
             COMMITS=$(git log $LAST_TAG..HEAD --oneline)
           else
             COMMITS=$(git log -10 --oneline)
           fi
           
-          echo "Commits since last tag:"
+          echo "Commits since npm v$NPM_VERSION:"
           echo "$COMMITS"
           
           # 分析 commit 类型
@@ -129,16 +139,28 @@ jobs:
         working-directory: packages/${{ steps.package.outputs.pkg }}
         run: |
           BUMP="${{ steps.bump.outputs.type }}"
-          OLD_VERSION=$(node -p "require('./package.json').version")
+          NPM_VERSION="${{ steps.npm-version.outputs.npm_version }}"
+          LOCAL_VERSION=$(node -p "require('./package.json').version")
           
-          # Bump version in package.json
+          echo "📊 Version check:"
+          echo "  - npm latest: $NPM_VERSION"
+          echo "  - local: $LOCAL_VERSION"
+          
+          # 如果本地版本比 npm 新，说明有未发布的版本，警告但继续
+          if [ "$LOCAL_VERSION" != "$NPM_VERSION" ]; then
+            echo "⚠️  Local version ($LOCAL_VERSION) differs from npm ($NPM_VERSION)"
+            echo "   Will bump from npm version: $NPM_VERSION"
+          fi
+          
+          # 先同步到 npm 版本，再 bump
+          npm version $NPM_VERSION --no-git-tag-version
           npm version $BUMP -m "chore(release): %s [skip ci]"
           
           NEW_VERSION=$(node -p "require('./package.json').version")
           echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
-          echo "old_version=$OLD_VERSION" >> $GITHUB_OUTPUT
+          echo "old_version=$NPM_VERSION" >> $GITHUB_OUTPUT
           
-          echo "Bumped: $OLD_VERSION → $NEW_VERSION"
+          echo "✅ Bumped: $NPM_VERSION → $NEW_VERSION"
 
       - name: Sync version to all files
         if: steps.bump.outputs.type != 'none'
@@ -180,10 +202,11 @@ jobs:
         id: changelog
         if: github.event_name == 'pull_request'
         run: |
-          # 获取上一个 tag
-          LAST_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
+          # 使用 npm 最新版本的 tag
+          NPM_VERSION="${{ steps.npm-version.outputs.npm_version }}"
+          LAST_TAG="v$NPM_VERSION"
           
-          if [ -n "$LAST_TAG" ]; then
+          if git rev-parse "$LAST_TAG" >/dev/null 2>&1; then
             COMMITS=$(git log $LAST_TAG..HEAD --pretty=format:"- %s (%h)" --no-merges)
           else
             COMMITS=$(git log -20 --pretty=format:"- %s (%h)" --no-merges)
@@ -224,6 +247,8 @@ jobs:
         if: steps.bump.outputs.type != 'none'
         run: |
           VERSION="${{ steps.version.outputs.version }}"
+          OLD_VERSION="${{ steps.version.outputs.old_version }}"
+          
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A
@@ -231,7 +256,7 @@ jobs:
           git tag -a "v$VERSION" -m "Release v$VERSION"
           git push origin HEAD:main --force-with-lease
           git push origin "v$VERSION"
-          echo "✅ Created and pushed tag: v$VERSION"
+          echo "✅ Created and pushed tag: v$VERSION (from npm v$OLD_VERSION)"
 
       - name: Create GitHub Release
         if: steps.bump.outputs.type != 'none'
