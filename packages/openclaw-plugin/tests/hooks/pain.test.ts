@@ -5,6 +5,7 @@ import * as path from 'path';
 import * as ioUtils from '../../src/utils/io';
 import { WorkspaceContext } from '../../src/core/workspace-context';
 import { EventLogService } from '../../src/core/event-log';
+import { setInjectedProbationIds, clearSession } from '../../src/core/session-tracker';
 
 vi.mock('fs');
 vi.mock('../../src/utils/io.js');
@@ -38,7 +39,7 @@ describe('Post-Write Checks & Pain Hook', () => {
     evolutionReducer: {
       emitSync: mockEmitSync,
       recordProbationFeedback: mockRecordProbationFeedback,
-      getPrincipleById: vi.fn().mockReturnValue({ contextTags: ['write'], trigger: 'write' }),
+      getPrincipleById: vi.fn().mockImplementation((id: string) => id === 'p-match' ? ({ contextTags: ['write'], trigger: 'write' }) : ({ contextTags: ['bash'], trigger: 'bash' })),
     },
     resolve: vi.fn().mockImplementation((key) => {
         if (key === 'PROFILE') return path.join(workspaceDir, '.principles', 'PROFILE.json');
@@ -52,6 +53,7 @@ describe('Post-Write Checks & Pain Hook', () => {
     mockRecordProbationFeedback.mockReset();
     vi.mocked(WorkspaceContext.fromHookContext).mockReturnValue(mockWctx as any);
     vi.mocked(EventLogService.get).mockReturnValue(mockEventLog as any);
+    clearSession('s-success');
   });
 
   it('should ignore non-write tools', () => {
@@ -99,6 +101,24 @@ describe('Post-Write Checks & Pain Hook', () => {
         source: 'write',
       }),
     }));
+  });
+
+
+  it('should only attribute success feedback to matching probation principles', () => {
+    const mockCtx = { workspaceDir, sessionId: 's-success', api: { logger: {} } };
+    const mockEvent = {
+      toolName: 'write',
+      params: { file_path: 'src/main.ts' },
+      result: { exitCode: 0 },
+      error: undefined,
+    };
+
+    setInjectedProbationIds('s-success', ['p-match', 'p-other'], workspaceDir);
+
+    handleAfterToolCall(mockEvent as any, mockCtx as any);
+
+    expect(mockRecordProbationFeedback).toHaveBeenCalledWith('p-match', true);
+    expect(mockRecordProbationFeedback).not.toHaveBeenCalledWith('p-other', true);
   });
 
   it('should emit evolution pain event for manual pain command', () => {
