@@ -66,7 +66,7 @@ export class EvolutionReducerImpl implements EvolutionReducer {
   emitSync(event: EvolutionLoopEvent): void {
     withLock(this.lockTargetPath, () => {
       fs.appendFileSync(this.streamPath, `${JSON.stringify(event)}\n`, 'utf8');
-    });
+    }, { lockStaleMs: 15000 });
     this.applyEvent(event);
     this.sweepExpiredProbation();
   }

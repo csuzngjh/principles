@@ -32,7 +32,23 @@ describe('evolution commands', () => {
 
     const result = handleEvolutionStatusCommand({ config: { workspaceDir: workspace, language: 'en' } } as any);
     expect(result.text).toContain('Evolution Status');
-    expect(result.text).toContain('probation: 1');
+    expect(result.text).toContain('probation principles: 1');
+  });
+
+
+
+  it('returns localized evolution status summary in zh', () => {
+    const workspace = makeTempDir();
+    const reducer = new EvolutionReducerImpl({ workspaceDir: workspace });
+    reducer.emitSync({
+      ts: new Date().toISOString(),
+      type: 'pain_detected',
+      data: { painId: 'pain-zh', painType: 'tool_failure', source: 'write', reason: 'write failed' },
+    });
+
+    const result = handleEvolutionStatusCommand({ config: { workspaceDir: workspace, language: 'zh-CN' } } as any);
+    expect(result.text).toContain('Evolution 状态');
+    expect(result.text).toContain('观察期原则: 1');
   });
 
   it('rolls back principle through command', () => {

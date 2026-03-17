@@ -118,7 +118,12 @@ export class PathResolver {
         this.normalizeWorkspace = options.normalizeWorkspace ?? true;
         
         if (options.workspaceDir) {
-            this.workspaceDir = options.workspaceDir;
+            const original = options.workspaceDir;
+            const normalized = this.normalizeWorkspace ? this.normalizePath(original) : original;
+            if (original !== normalized) {
+                this.log('info', `Workspace path normalized: ${original} -> ${normalized}`);
+            }
+            this.workspaceDir = normalized;
             this.initialized = true;
         }
     }
