@@ -27,7 +27,8 @@ pr_files.txt
 # OpenClaw Plugin Build & Links
 packages/openclaw-plugin/dist/
 packages/openclaw-plugin/node_modules/
-packages/openclaw-plugin/agents
+# Agent definitions should be committed (static files, not generated)
+# packages/openclaw-plugin/agents
 packages/openclaw-plugin/skills
 
 # Local environment and state (DO NOT COMMIT)
