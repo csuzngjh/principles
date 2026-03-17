@@ -296,35 +296,23 @@ You are a **self-evolving AI agent** powered by Principles Disciple.
       const inProgressTask = queue.find((t: any) => t.status === 'in_progress');
       
       if (inProgressTask) {
-        let diagnosticianModel: string | null = null;
-        try {
-          if (api) {
-            diagnosticianModel = getDiagnosticianModel(api);
-          }
-        } catch (err) {
-          logger?.error(`[PD:Prompt] Failed to resolve diagnostician model: ${String(err)}`);
-        }
-        
-        if (diagnosticianModel) {
-          const resolvedTask = resolveEvolutionTask(inProgressTask);
-          if (!resolvedTask) {
-            logger?.warn('[PD:Prompt] Skipping evolution task injection because task payload is invalid.');
-          } else {
-            const escapedTask = JSON.stringify(resolvedTask);
-          
-            logger?.info(`[PD:Prompt] Injecting EVOLUTION TASK for: ${inProgressTask.id}`);
-          
-            evolutionDirective = `<evolution_task priority="critical">
+        const resolvedTask = resolveEvolutionTask(inProgressTask);
+        if (!resolvedTask) {
+          logger?.warn('[PD:Prompt] Skipping evolution task injection because task payload is invalid.');
+        } else {
+          const escapedTask = JSON.stringify(resolvedTask);
+
+          logger?.info(`[PD:Prompt] Injecting EVOLUTION TASK for: ${inProgressTask.id}`);
+
+          evolutionDirective = `<evolution_task priority="critical">
 TASK: ${escapedTask}
 
 REQUIRED ACTION:
 1. Reply with "[EVOLUTION_ACK]" only
-2. Immediately call: sessions_spawn target="diagnostician" message=${escapedTask} model="${diagnosticianModel}"
+2. Immediately call: pd_spawn_agent agentType="diagnostician" task=${escapedTask}
 
 ⚠️ This task overrides all other activities until complete.
 </evolution_task>\n`;
-          }
-          
         }
       }
     } catch (e) {
