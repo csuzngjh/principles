@@ -31,22 +31,22 @@ async function promptLanguage(): Promise<'zh' | 'en'> {
 /**
  * 安装模式选择
  */
-async function promptInstallMode(): Promise<'smart' | 'force'> {
+async function promptInstallMode(defaultMode: 'smart' | 'force' = 'smart'): Promise<'smart' | 'force'> {
   return await select({
     message: '选择安装模式',
     choices: [
       {
         name: '智能合并 - 已存在的文件会生成 .update 副本，保护用户修改',
         value: 'smart' as const,
-        description: '推荐：保护你的自定义修改'
+        description: '推荐更新时使用：保护你的自定义修改'
       },
       {
         name: '强制覆盖 - 直接覆盖所有文件，保持与模板同步',
         value: 'force' as const,
-        description: '注意：会覆盖所有已有文件'
+        description: '首次安装或重置时使用：会覆盖所有已有文件'
       },
     ],
-    default: 'smart',
+    default: defaultMode,
   });
 }
 
@@ -134,19 +134,32 @@ async function promptConfirm(options: Partial<InstallOptions>): Promise<boolean>
  * 运行所有交互式问答
  */
 export async function runPrompts(
-  cliOptions: Partial<InstallOptions> = {}
+  cliOptions: Partial<InstallOptions> = {},
+  workspaceInfo?: WorkspaceInfo
 ): Promise<InstallOptions | null> {
   // 检测工作区
-  const workspaceInfo = detectWorkspace();
+  const wsInfo = workspaceInfo || detectWorkspace();
 
   // 1. 语言选择（如果 CLI 未指定）
   const language = cliOptions.language ?? await promptLanguage();
 
   // 2. 安装模式选择（如果 CLI 未指定）
-  const mode = cliOptions.mode ?? await promptInstallMode();
+  // 如果已检测到安装类型，提示用户
+  let mode = cliOptions.mode;
+  if (!mode) {
+    // 显示自动检测结果，让用户确认或修改
+    const defaultMode = wsInfo.isFirstInstall ? 'force' : 'smart';
+    
+    if (!wsInfo.isFirstInstall && wsInfo.coreFiles && wsInfo.coreFiles.length > 0) {
+      console.log(`\n📋 检测到已有核心文件: ${wsInfo.coreFiles.join(', ')}`);
+      console.log('   推荐使用"智能合并"模式保护您的修改\n');
+    }
+    
+    mode = await promptInstallMode(defaultMode);
+  }
 
   // 3. 工作区路径配置（始终询问）
-  const workspaceDir = cliOptions.workspaceDir ?? await promptWorkspace(workspaceInfo);
+  const workspaceDir = cliOptions.workspaceDir ?? await promptWorkspace(wsInfo);
 
   // 4. 功能选择
   const features = cliOptions.features ?? await promptFeatures();

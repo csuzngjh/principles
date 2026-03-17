@@ -15,7 +15,7 @@ import { banner, logger } from './utils/logger.js';
 import { runPrompts, type InstallOptions } from './prompts.js';
 import { install } from './installer.js';
 import { uninstall, checkInstallStatus } from './uninstaller.js';
-import { checkEnvironment } from './utils/env.js';
+import { checkEnvironment, detectWorkspace, type WorkspaceInfo } from './utils/env.js';
 
 const SUPPORTED_FEATURES = ['evolution', 'trust', 'pain', 'reflection', 'okr', 'hygiene'] as const;
 const DEFAULT_FEATURES = ['evolution', 'trust', 'pain'] as const;
@@ -91,20 +91,40 @@ async function runInstall(options: any): Promise<void> {
     logger.success(`OpenClaw ${env.openclawVersion}`);
   }
 
-  // 2. 解析 CLI 选项
+  // 2. 检测工作区状态
+  const workspaceInfo = detectWorkspace();
+
+  // 3. 解析 CLI 选项
   const cliOptions: Partial<InstallOptions> = {
     language: options.lang as 'zh' | 'en',
     workspaceDir: options.workspace,
   };
   
   // 确定安装模式
+  // 优先级：--force > --smart > 自动检测
   if (options.force) {
     cliOptions.mode = 'force';
   } else if (options.smart) {
     cliOptions.mode = 'smart';
+  } else {
+    // 自动检测：首次安装用 force，更新用 smart
+    cliOptions.mode = workspaceInfo.isFirstInstall ? 'force' : 'smart';
   }
 
-  // 3. 运行交互式问答
+  // 4. 显示安装类型提示
+  if (!options.nonInteractive && !options.yes) {
+    if (workspaceInfo.isFirstInstall) {
+      logger.info('🎉 检测到首次安装，将直接复制所有文件');
+    } else {
+      logger.info('🔄 检测到已有安装，将生成 .update 文件保护您的修改');
+      if (workspaceInfo.coreFiles.length > 0) {
+        logger.info(`   已存在的核心文件: ${workspaceInfo.coreFiles.join(', ')}`);
+      }
+    }
+    console.log();
+  }
+
+  // 5. 运行交互式问答
   let installOptions: InstallOptions | null;
   
   // 检查是否是非交互模式
@@ -129,15 +149,20 @@ async function runInstall(options: any): Promise<void> {
 
     installOptions = {
       language: cliOptions.language || 'zh',
-      mode: cliOptions.mode || 'smart',
-      workspaceDir: cliOptions.workspaceDir || path.join(os.homedir(), 'clawd'),
+      mode: cliOptions.mode || (workspaceInfo.isFirstInstall ? 'force' : 'smart'),
+      workspaceDir: cliOptions.workspaceDir || workspaceInfo.detectedPath,
       features,
       overwriteConfig: false,
     };
+    
+    // 显示自动检测的安装模式
+    if (!options.force && !options.smart) {
+      logger.info(`自动检测安装模式: ${installOptions.mode === 'force' ? '首次安装' : '更新（智能合并）'}`);
+    }
     logger.info(`非交互模式：使用配置 features = ${features.join(', ')}`);
   } else {
     // 交互模式
-    installOptions = await runPrompts(cliOptions);
+    installOptions = await runPrompts(cliOptions, workspaceInfo);
   }
 
   // 用户取消
@@ -146,10 +171,10 @@ async function runInstall(options: any): Promise<void> {
     process.exit(0);
   }
 
-  // 4. 执行安装
+  // 6. 执行安装
   const result = await install(installOptions, PLUGIN_DIR);
 
-  // 5. 显示结果
+  // 7. 显示结果
   if (result.success) {
     console.log();
     logger.success('安装完成！');
@@ -160,6 +185,17 @@ async function runInstall(options: any): Promise<void> {
     console.log(`   Skills: ${result.skillsCount} 个`);
     console.log(`   模板: ${result.templatesCount} 个`);
     console.log(`   工作区: ${result.workspaceDir}`);
+    
+    // 如果是更新模式且有 .update 文件，给出提示
+    if (installOptions.mode === 'smart') {
+      console.log();
+      console.log('⚠️  更新提示:');
+      console.log('   已生成 .update 文件，请手动合并您的修改：');
+      console.log('   - 检查工作区目录下的 *.update 文件');
+      console.log('   - 将需要的更新合并到原有文件中');
+      console.log('   - 删除 .update 文件');
+    }
+    
     console.log();
     console.log('🚀 下一步操作:');
     console.log('   1. 重启 OpenClaw Gateway:');

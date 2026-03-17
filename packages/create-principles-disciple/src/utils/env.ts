@@ -20,6 +20,8 @@ export interface WorkspaceInfo {
   detectedPath: string;
   exists: boolean;
   hasPrinciples: boolean;
+  isFirstInstall: boolean;  // 是否首次安装
+  coreFiles: string[];      // 已存在的核心文件列表
 }
 
 /**
@@ -91,23 +93,48 @@ export function detectWorkspace(): WorkspaceInfo {
   candidates.push(path.join(homeDir, 'clawd'));
   candidates.push(path.join(homeDir, '.openclaw', 'workspace'));
 
+  // 核心文件列表（用于检测是否已安装）
+  const CORE_FILES = [
+    'AGENTS.md',
+    'SOUL.md',
+    'USER.md',
+    'PLAN.md',
+  ];
+
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) {
       const principlesPath = path.join(candidate, '.principles', 'PRINCIPLES.md');
+      const hasPrinciples = fs.existsSync(principlesPath);
+      
+      // 检测已存在的核心文件
+      const coreFiles: string[] = [];
+      for (const file of CORE_FILES) {
+        if (fs.existsSync(path.join(candidate, file))) {
+          coreFiles.push(file);
+        }
+      }
+      
+      // 判断是否首次安装：没有 PRINCIPLES.md 且没有核心文件
+      const isFirstInstall = !hasPrinciples && coreFiles.length === 0;
+      
       return {
         detectedPath: candidate,
         exists: true,
-        hasPrinciples: fs.existsSync(principlesPath),
+        hasPrinciples,
+        isFirstInstall,
+        coreFiles,
       };
     }
   }
 
-  // 默认返回 ~/clawd
+  // 默认返回 ~/clawd（首次安装）
   const defaultPath = path.join(homeDir, 'clawd');
   return {
     detectedPath: defaultPath,
     exists: false,
     hasPrinciples: false,
+    isFirstInstall: true,
+    coreFiles: [],
   };
 }
 
