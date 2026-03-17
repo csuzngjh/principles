@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { migrateDirectoryStructure } from '../../src/core/migration.js';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -18,32 +18,22 @@ describe('Directory Structure Migration', () => {
         vi.clearAllMocks();
     });
 
-    it('should move files from docs/ to new locations', () => {
-        const legacyProfile = path.join(workspaceDir, 'docs', 'PROFILE.json');
-        const newProfile = path.join(workspaceDir, '.principles', 'PROFILE.json');
+    it('should move non-security files from docs/ to new locations', () => {
         const legacyPlan = path.join(workspaceDir, 'docs', 'PLAN.md');
         const newPlan = path.join(workspaceDir, 'PLAN.md');
 
         vi.mocked(fs.existsSync).mockImplementation((p) => {
             const pathStr = p.toString();
             if (pathStr === path.join(workspaceDir, 'docs')) return true;
-            if (pathStr === legacyProfile) return true;
             if (pathStr === legacyPlan) return true;
             // Destination directories don't exist yet
             if (pathStr === path.join(workspaceDir, '.principles')) return false;
             // Destination files don't exist yet
-            if (pathStr === newProfile) return false;
             if (pathStr === newPlan) return false;
             return false;
         });
 
         migrateDirectoryStructure(mockApi, workspaceDir);
-
-        // Verify it tried to create .principles/
-        expect(fs.mkdirSync).toHaveBeenCalledWith(path.join(workspaceDir, '.principles'), expect.anything());
-
-        // Verify it moved PROFILE.json
-        expect(fs.renameSync).toHaveBeenCalledWith(legacyProfile, newProfile);
 
         // Verify it moved PLAN.md to root
         expect(fs.renameSync).toHaveBeenCalledWith(legacyPlan, newPlan);
@@ -51,21 +41,25 @@ describe('Directory Structure Migration', () => {
         expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('Successfully migrated'));
     });
 
-    it('should not overwrite existing files at destination', () => {
+    it('should not migrate security-sensitive docs files', () => {
         const legacyProfile = path.join(workspaceDir, 'docs', 'PROFILE.json');
+        const legacyScorecard = path.join(workspaceDir, 'docs', 'AGENT_SCORECARD.json');
         const newProfile = path.join(workspaceDir, '.principles', 'PROFILE.json');
+        const newScorecard = path.join(workspaceDir, '.principles', '.state', 'AGENT_SCORECARD.json');
 
         vi.mocked(fs.existsSync).mockImplementation((p) => {
             const pathStr = p.toString();
             if (pathStr === path.join(workspaceDir, 'docs')) return true;
             if (pathStr === legacyProfile) return true;
-            if (pathStr === newProfile) return true; // DESTINATION EXISTS
+            if (pathStr === legacyScorecard) return true;
+            if (pathStr === newProfile) return false;
+            if (pathStr === newScorecard) return false;
             return false;
         });
 
         migrateDirectoryStructure(mockApi, workspaceDir);
 
         expect(fs.renameSync).not.toHaveBeenCalledWith(legacyProfile, newProfile);
-        expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('already exists at destination'));
+        expect(fs.renameSync).not.toHaveBeenCalledWith(legacyScorecard, newScorecard);
     });
 });
