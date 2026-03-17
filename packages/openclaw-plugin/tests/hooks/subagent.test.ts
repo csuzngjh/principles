@@ -7,11 +7,6 @@ vi.mock('fs');
 vi.mock('../../src/core/workspace-context.js');
 
 const mockEmitSync = vi.fn();
-vi.mock('../../src/core/evolution-reducer.js', () => ({
-  EvolutionReducerImpl: class {
-    emitSync = mockEmitSync;
-  },
-}));
 
 describe('Subagent Hook', () => {
     const workspaceDir = '/mock/workspace';
@@ -34,6 +29,7 @@ describe('Subagent Hook', () => {
         workspaceDir,
         trust: mockTrust,
         config: mockConfig,
+        evolutionReducer: { emitSync: mockEmitSync },
         resolve: vi.fn().mockImplementation((key) => {
             if (key === 'EVOLUTION_QUEUE') return '/mock/workspace/.state/evolution_queue.json';
             if (key === 'PAIN_FLAG') return '/mock/workspace/.state/.pain_flag';

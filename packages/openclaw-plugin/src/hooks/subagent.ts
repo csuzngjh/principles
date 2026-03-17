@@ -1,7 +1,6 @@
 import type { PluginHookSubagentEndedEvent, PluginHookSubagentContext } from '../openclaw-sdk.js';
 import { writePainFlag } from '../core/pain.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
-import { EvolutionReducerImpl } from '../core/evolution-reducer.js';
 import { empathyObserverManager, type EmpathyObserverApi } from '../service/empathy-observer-manager.js';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -9,7 +8,7 @@ import * as path from 'path';
 
 
 function emitSubagentPainEvent(
-    workspaceDir: string,
+    wctx: WorkspaceContext,
     payload: {
         source: string;
         reason: string;
@@ -18,8 +17,7 @@ function emitSubagentPainEvent(
     }
 ): void {
     try {
-        const reducer = new EvolutionReducerImpl({ workspaceDir });
-        reducer.emitSync({
+        wctx.evolutionReducer.emitSync({
             ts: new Date().toISOString(),
             type: 'pain_detected',
             data: {
@@ -31,8 +29,8 @@ function emitSubagentPainEvent(
                 sessionId: payload.sessionId,
             },
         });
-    } catch {
-        // Non-blocking telemetry path.
+    } catch (e) {
+        console.warn(`[PD:Subagent] failed to emit evolution event: ${String(e)}`);
     }
 }
 
@@ -74,7 +72,7 @@ export async function handleSubagentEnded(
             is_risky: 'true'
         });
 
-        emitSubagentPainEvent(workspaceDir, {
+        emitSubagentPainEvent(wctx, {
             source: `subagent_${outcome}`,
             reason,
             score,

@@ -12,11 +12,7 @@ vi.mock('../../src/core/workspace-context');
 vi.mock('../../src/core/event-log');
 
 const mockEmitSync = vi.fn();
-vi.mock('../../src/core/evolution-reducer.js', () => ({
-  EvolutionReducerImpl: class {
-    emitSync = mockEmitSync;
-  },
-}));
+const mockRecordProbationFeedback = vi.fn();
 
 describe('Post-Write Checks & Pain Hook', () => {
   const workspaceDir = '/mock/workspace';
@@ -39,6 +35,11 @@ describe('Post-Write Checks & Pain Hook', () => {
     config: mockConfig,
     eventLog: mockEventLog,
     trust: mockTrust,
+    evolutionReducer: {
+      emitSync: mockEmitSync,
+      recordProbationFeedback: mockRecordProbationFeedback,
+      getPrincipleById: vi.fn().mockReturnValue({ contextTags: ['write'], trigger: 'write' }),
+    },
     resolve: vi.fn().mockImplementation((key) => {
         if (key === 'PROFILE') return path.join(workspaceDir, '.principles', 'PROFILE.json');
         return '';
@@ -48,6 +49,7 @@ describe('Post-Write Checks & Pain Hook', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockEmitSync.mockReset();
+    mockRecordProbationFeedback.mockReset();
     vi.mocked(WorkspaceContext.fromHookContext).mockReturnValue(mockWctx as any);
     vi.mocked(EventLogService.get).mockReturnValue(mockEventLog as any);
   });

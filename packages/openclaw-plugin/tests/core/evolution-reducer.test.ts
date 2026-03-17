@@ -24,7 +24,7 @@ describe('EvolutionReducerImpl', () => {
     const reducer = new EvolutionReducerImpl({ workspaceDir: workspace });
 
     reducer.emitSync({
-      ts: '2026-01-01T00:00:00.000Z',
+      ts: new Date().toISOString(),
       type: 'pain_detected',
       data: { painId: 'pain-1', painType: 'tool_failure', source: 'write', reason: 'write failed' },
     });
@@ -41,7 +41,7 @@ describe('EvolutionReducerImpl', () => {
     const reducer = new EvolutionReducerImpl({ workspaceDir: workspace });
 
     reducer.emitSync({
-      ts: '2026-01-01T00:00:00.000Z',
+      ts: new Date().toISOString(),
       type: 'pain_detected',
       data: {
         painId: 'pain-1',
@@ -80,12 +80,47 @@ describe('EvolutionReducerImpl', () => {
     expect((breakerEvents[0].data as any).taskId).toBe('task-1');
   });
 
+
+
+  it('promotes probation to active after feedback threshold', () => {
+    const workspace = makeTempDir();
+    const reducer = new EvolutionReducerImpl({ workspaceDir: workspace });
+
+    reducer.emitSync({
+      ts: new Date().toISOString(),
+      type: 'pain_detected',
+      data: { painId: 'pain-1', painType: 'tool_failure', source: 'write', reason: 'write failed' },
+    });
+
+    const principle = reducer.getProbationPrinciples()[0];
+    reducer.recordProbationFeedback(principle.id, true);
+    reducer.recordProbationFeedback(principle.id, true);
+    reducer.recordProbationFeedback(principle.id, true);
+
+    expect(reducer.getPrincipleById(principle.id)?.status).toBe('active');
+  });
+
+  it('rebuildState skips malformed lines without crashing', () => {
+    const workspace = makeTempDir();
+    const streamPath = path.join(workspace, 'memory', 'evolution.jsonl');
+    fs.mkdirSync(path.dirname(streamPath), { recursive: true });
+    fs.writeFileSync(streamPath, '{bad json}\n' + JSON.stringify({
+      ts: new Date().toISOString(),
+      type: 'pain_detected',
+      data: { painId: 'p1', painType: 'tool_failure', source: 'write', reason: 'oops' },
+    }) + '\n');
+
+    const reducer = new EvolutionReducerImpl({ workspaceDir: workspace });
+    expect(reducer.getProbationPrinciples()).toHaveLength(0);
+    expect(reducer.getEventLog().length).toBeGreaterThan(0);
+  });
+
   it('rolls back principle and persists blacklist', () => {
     const workspace = makeTempDir();
     const reducer = new EvolutionReducerImpl({ workspaceDir: workspace });
 
     reducer.emitSync({
-      ts: '2026-01-01T00:00:00.000Z',
+      ts: new Date().toISOString(),
       type: 'pain_detected',
       data: { painId: 'pain-1', painType: 'tool_failure', source: 'write', reason: 'write failed' },
     });

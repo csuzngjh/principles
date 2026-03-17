@@ -1,13 +1,12 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { PluginHookBeforePromptBuildEvent, PluginHookAgentContext, PluginHookBeforePromptBuildResult, PluginLogger } from '../openclaw-sdk.js';
-import { getSession, resetFriction } from '../core/session-tracker.js';
+import { getSession, resetFriction, setInjectedProbationIds } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { ContextInjectionConfig, defaultContextConfig } from '../types.js';
 import { extractSummary, getHistoryVersions } from '../core/focus-history.js';
 import { empathyObserverManager, type EmpathyObserverApi } from '../service/empathy-observer-manager.js';
 import { PathResolver } from '../core/path-resolver.js';
-import { EvolutionReducerImpl } from '../core/evolution-reducer.js';
 
 /**
  * 模型配置对象格式
@@ -40,6 +39,32 @@ interface AgentsDefaultsConfig {
 /**
  * OpenClaw API 接口定义（Prompt Hook 所需部分）
  */
+
+
+function escapeXml(input: string): string {
+  return input
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function extractContextSignals(context: { toolName?: string; filePath?: string; userMessage?: string; }): string[] {
+  const signals: string[] = [];
+  if (context.filePath?.endsWith('.ts')) signals.push('typescript');
+  if (context.filePath?.endsWith('.md')) signals.push('markdown');
+  if (context.toolName && ['edit', 'replace', 'write', 'write_file', 'apply_patch'].includes(context.toolName)) signals.push('edit');
+  if (context.toolName && ['run_shell_command', 'bash'].includes(context.toolName)) signals.push('shell');
+  if (context.toolName) signals.push(context.toolName);
+  const msg = (context.userMessage || '').toLowerCase();
+  if (msg.includes('.ts') || msg.includes('typescript')) signals.push('typescript');
+  if (msg.includes('.md') || msg.includes('markdown')) signals.push('markdown');
+  if (msg.includes('edit') || msg.includes('write') || msg.includes('patch')) signals.push('edit');
+  if (msg.includes('shell') || msg.includes('bash')) signals.push('shell');
+  return signals;
+}
+
 interface PromptHookApi {
   config?: {
     agents?: {
@@ -458,7 +483,7 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
   // Evolution principles injection (active + probation summary)
   let evolutionPrinciplesContent = '';
   try {
-    const reducer = new EvolutionReducerImpl({ workspaceDir: wctx.workspaceDir });
+    const reducer = wctx.evolutionReducer;
     const active = reducer.getActivePrinciples().slice(-3);
     const probation = reducer.getProbationPrinciples().slice(0, 5);
     if (active.length > 0 || probation.length > 0) {
