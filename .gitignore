@@ -45,6 +45,8 @@ _scratchpad/
 GEMINI.md
 CLAUDE.md
 AGENTS.md
+.iflow/
+code-concise/
 
 # Docs (Project documentation should be tracked)
 # The docs/ directory itself is NOT ignored, but old state files within it were moved out.
