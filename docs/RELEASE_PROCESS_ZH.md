@@ -4,7 +4,7 @@
 
 ---
 
-## 智能体小白
+## 🌟 普通用户看这里
 
 ### 一句话发版
 
@@ -14,98 +14,81 @@ PR 合并到 main → 自动发布 ✅
 
 ### Commit 格式速查
 
-| Commit | 版本变化 | 示例 |
-|--------|---------|------|
-| `feat:` | +0.1.0 | 新功能 |
-| `fix:` | +0.0.1 | Bug 修复 |
-| `feat!:` | +1.0.0 | 不兼容变更 |
+| 你写的 | 版本变化 |
+|--------|---------|
+| `feat: 新功能` | +0.1.0 |
+| `fix: 修 bug` | +0.0.1 |
+| `feat!: 大改动` | +1.0.0 |
 
-### 操作步骤
+### 怎么发版？
 
-1. 创建 PR，commit 格式正确
+1. 创建 PR，commit 格式写对
 2. 合并到 main
-3. 等待自动发布（约 2 分钟）
+3. 等 2 分钟，自动发布到 npm
 
 ---
 
-## 程序员
+## 🤖 为 AI 准备的发布摘要
 
-### 自动发布流程
+### 自动化流程
 
 ```
-PR → main → GitHub Actions → npm publish → 5文件版本同步 → Git tag
+PR → main → Actions → npm → 5文件同步 → tag
 ```
 
 ### 触发条件
 
-| 触发方式 | 说明 |
-|---------|------|
-| PR 合并到 main | 修改 `packages/**` 自动触发 |
-| 手动触发 | Actions → Publish to npm → Run |
-| Tag 推送 | `git push origin v1.5.6` |
+- **自动**: PR 合并到 main，修改了 `packages/**`
+- **手动**: Actions → Publish to npm → Run
+- **Tag**: `git push origin v1.5.6`
 
 ### 智能版本判断
 
-系统分析 PR commits 自动决定版本类型：
+分析 PR commits 自动决定：
 
-| Commit 类型 | 版本递增 | 场景 |
-|------------|---------|------|
-| `feat!:` / `feat(...)!:` | MAJOR | 不兼容变更 |
-| `feat:` / `feature:` | MINOR | 新功能 |
-| 其他 (`fix:`, `docs:`, `chore:`) | PATCH | 默认 |
+| Commit | Bump |
+|--------|------|
+| `feat!:` / `feat(...)!:` | MAJOR |
+| `feat:` / `feature:` | MINOR |
+| 其他 | PATCH |
 
-### 版本号同步（5 文件）
+### 版本同步范围
 
-| 文件 | 说明 |
-|------|------|
-| `packages/openclaw-plugin/package.json` | npm 包版本 |
-| `packages/openclaw-plugin/openclaw.plugin.json` | 插件清单 |
-| `package.json` (根目录) | Monorepo 版本 |
-| `README.md` | 文档标识 |
-| `README_ZH.md` | 文档标识 |
+- `packages/openclaw-plugin/package.json`
+- `packages/openclaw-plugin/openclaw.plugin.json`
+- `package.json` (根目录)
+- `README.md` / `README_ZH.md`
 
 ---
 
-## 本地操作
+## 🛠️ 极客与开发者日志
 
-### 同步版本号
-
-```bash
-./scripts/sync-version.sh           # 从 Git tag 同步
-./scripts/sync-version.sh 1.5.6    # 指定版本号
-```
-
-### 手动发布
+### 本地操作
 
 ```bash
+# 同步版本号
+./scripts/sync-version.sh           # 从 tag
+./scripts/sync-version.sh 1.5.6    # 指定
+
+# 手动发布
 cd packages/openclaw-plugin
 npm run build:production
 npm publish --access public
-```
 
-### 检查版本
-
-```bash
+# 检查
 npm view principles-disciple version
-/pd-version  # OpenClaw 内
 ```
 
----
+### 故障排除
 
-## 故障排除
+| 问题 | 解决 |
+|------|------|
+| 版本不同步 | `./scripts/sync-version.sh` |
+| 发布失败 | 检查 `NPM_TOKEN` |
+| 构建失败 | `git diff --check` |
 
-| 问题 | 解决方案 |
-|------|---------|
-| 版本号不同步 | `./scripts/sync-version.sh` |
-| 发布失败 | 检查 `NPM_TOKEN` 是否有效 |
-| 构建失败 | `git diff --check` 检查冲突 |
-
----
-
-## 必要设置
-
-### npm Token
+### 必要配置
 
 1. [npmjs.com → Access Tokens](https://www.npmjs.com/settings/tokens)
 2. 创建 "Automation" token
-3. GitHub → Settings → Secrets → `NPM_TOKEN`
+3. GitHub → Secrets → `NPM_TOKEN`
