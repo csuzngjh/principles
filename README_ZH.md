@@ -81,6 +81,10 @@ npx create-principles-disciple
 ```bash
 # 一键安装（使用默认配置）
 npx create-principles-disciple --yes
+```
+
+> [!TIP]
+> **智能体安装指引:** 详见 [智能体安装指南](packages/openclaw-plugin/AGENT_INSTALL.md)，包含首次安装、更新流程、高危文件保护说明。
 
 # 自定义配置
 npx create-principles-disciple \
