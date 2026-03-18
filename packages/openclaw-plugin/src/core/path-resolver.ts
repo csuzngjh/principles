@@ -236,6 +236,14 @@ export class PathResolver {
             return this.stateDir;
         }
 
+        // If workspaceDir was explicitly provided via constructor, use workspace-based state dir
+        // This ensures tests and programmatic usage don't get polluted by global config
+        if (this.initialized && this.workspaceDir) {
+            this.stateDir = path.join(this.workspaceDir, '.state');
+            this.log('debug', `Using workspace-based state directory: ${this.stateDir}`);
+            return this.stateDir;
+        }
+
         const fileConfig = loadConfigFromFile();
         if (fileConfig?.state) {
             this.stateDir = fileConfig.state;
@@ -245,7 +253,7 @@ export class PathResolver {
 
         this.stateDir = path.join(this.getWorkspaceDir(), '.state');
         this.log('debug', `Computed state directory: ${this.stateDir}`);
-        
+
         return this.stateDir;
     }
 

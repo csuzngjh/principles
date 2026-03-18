@@ -103,10 +103,12 @@ export const agentSpawnTool = {
     const task = typeof params?.task === 'string' ? params.task.trim() : '';
 
     if (!agentType) {
+      api.logger?.warn?.(`[PD:AgentSpawn] Invalid agentType: ${JSON.stringify(params?.agentType)}`);
       return `❌ agentType 参数无效: ${JSON.stringify(params?.agentType)}`;
     }
 
     if (!task) {
+      api.logger?.warn?.(`[PD:AgentSpawn] Invalid task: ${JSON.stringify(params?.task)}`);
       return `❌ task 参数无效: ${JSON.stringify(params?.task)}`;
     }
 
