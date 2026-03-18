@@ -57,6 +57,26 @@ describe('EvolutionReducerImpl', () => {
     expect(stats.probationCount).toBe(1);
   });
 
+  it('ignores protocol-token pain before creating principles', () => {
+    const workspace = makeTempDir();
+    const reducer = new EvolutionReducerImpl({ workspaceDir: workspace });
+
+    reducer.emitSync({
+      ts: new Date().toISOString(),
+      type: 'pain_detected',
+      data: {
+        painId: 'pain-protocol-1',
+        painType: 'tool_failure',
+        source: 'llm_p_frustration_023',
+        reason: '[EVOLUTION_ACK] previous failure context',
+      },
+    });
+
+    expect(reducer.getCandidatePrinciples()).toHaveLength(0);
+    expect(reducer.getProbationPrinciples()).toHaveLength(0);
+    expect(reducer.getActivePrinciples()).toHaveLength(0);
+  });
+
   it('opens circuit breaker after 3 subagent errors on same task', () => {
     const workspace = makeTempDir();
     const reducer = new EvolutionReducerImpl({ workspaceDir: workspace });
