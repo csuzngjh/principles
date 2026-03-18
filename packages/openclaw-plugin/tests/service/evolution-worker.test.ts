@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { EvolutionWorkerService } from '../../src/service/evolution-worker.js';
+import { EvolutionWorkerService, hasRecentDuplicateTask, hasEquivalentPromotedRule } from '../../src/service/evolution-worker.js';
 import { DictionaryService } from '../../src/core/dictionary-service.js';
 import * as sessionTracker from '../../src/core/session-tracker.js';
 import * as eventLog from '../../src/core/event-log.js';
@@ -19,13 +19,6 @@ vi.mock('../../src/core/event-log', () => ({
         })),
     },
 }));
-// Mocking checkPainFlag and processEvolutionQueue to avoid complex setup
-vi.mock('../../src/service/evolution-worker', async () => {
-    const actual = await vi.importActual('../../src/service/evolution-worker') as any;
-    return {
-        ...actual
-    };
-});
 
 describe('EvolutionWorkerService', () => {
     beforeEach(() => {
@@ -35,6 +28,40 @@ describe('EvolutionWorkerService', () => {
     afterEach(() => {
         vi.useRealTimers();
         vi.clearAllMocks();
+    });
+
+
+    it('should detect recent duplicate tasks by source and preview', () => {
+        const now = new Date('2026-03-18T00:30:00.000Z').getTime();
+        const queue = [
+            {
+                id: 'a1',
+                score: 50,
+                source: 'llm_p_frustration_023',
+                reason: 'pain',
+                trigger_text_preview: '[EVOLUTION_ACK] 有失败记录',
+                timestamp: '2026-03-18T00:10:00.000Z',
+                status: 'pending',
+            },
+        ];
+
+        expect(hasRecentDuplicateTask(queue as any, 'llm_p_frustration_023', '[EVOLUTION_ACK] 有失败记录', now)).toBe(true);
+        expect(hasRecentDuplicateTask(queue as any, 'llm_p_frustration_023', 'different preview', now)).toBe(false);
+    });
+
+    it('should skip promoting duplicate exact-match rules', () => {
+        const dictionary = {
+            getAllRules: () => ({
+                EXISTING: {
+                    type: 'exact_match',
+                    phrases: ['Need more evidence'],
+                    status: 'active',
+                },
+            }),
+        };
+
+        expect(hasEquivalentPromotedRule(dictionary as any, 'Need more evidence')).toBe(true);
+        expect(hasEquivalentPromotedRule(dictionary as any, 'Another phrase')).toBe(false);
     });
 
     it('should flush the dictionary on its interval', () => {

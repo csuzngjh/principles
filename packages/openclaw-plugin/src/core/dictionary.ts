@@ -16,6 +16,19 @@ export interface PainDictionaryData {
     rules: Record<string, PainRule>;
 }
 
+
+export const PAIN_PROTOCOL_TOKENS = [
+    '[EVOLUTION_ACK]',
+    'HEARTBEAT_OK',
+    'HEARTBEAT_CHECK',
+] as const;
+
+export function shouldIgnorePainProtocolText(text: string): boolean {
+    const normalized = text.trim();
+    if (!normalized) return false;
+    return PAIN_PROTOCOL_TOKENS.some((token) => normalized === token || normalized.startsWith(`${token} `) || normalized.includes(token));
+}
+
 const DEFAULT_RULES: Record<string, PainRule> = {
     'P_CONFUSION_ZH': {
         type: 'regex',
@@ -104,6 +117,8 @@ export class PainDictionary {
     }
 
     match(text: string): { ruleId: string; severity: number } | undefined {
+        if (shouldIgnorePainProtocolText(text)) return undefined;
+
         let bestMatch: { ruleId: string; severity: number } | undefined = undefined;
 
         for (const [id, rule] of Object.entries(this.data.rules)) {
