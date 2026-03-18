@@ -114,7 +114,7 @@ describe('Evolution loop user stories e2e', () => {
     );
 
     const status = handleEvolutionStatusCommand({ config: { workspaceDir: workspace, language: 'en' } } as any);
-    expect(status.text).toContain('probation: 1');
+    expect(status.text).toContain('probation principles: 1');
   });
 
   it('story 2: write failure should emit pain, create pain_flag, and inject probation principles into prompt', async () => {
