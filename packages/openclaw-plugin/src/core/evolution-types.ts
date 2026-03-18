@@ -209,3 +209,106 @@ export interface TierPromotionEvent {
   timestamp: string;
   newPermissions: TierPermissions;
 }
+
+
+// ===== Evolution Loop Schema =====
+
+export type PrincipleStatus = 'candidate' | 'probation' | 'active' | 'deprecated';
+
+export interface Principle {
+  id: string;
+  version: number;
+  text: string;
+  source: {
+    painId: string;
+    painType: 'tool_failure' | 'subagent_error' | 'user_frustration';
+    timestamp: string;
+  };
+  trigger: string;
+  action: string;
+  guardrails?: string[];
+  contextTags: string[];
+  validation: {
+    successCount: number;
+    conflictCount: number;
+  };
+  status: PrincipleStatus;
+  feedbackScore: number;
+  usageCount: number;
+  createdAt: string;
+  activatedAt?: string;
+  deprecatedAt?: string;
+}
+
+export type EvolutionLoopEventType =
+  | 'pain_detected'
+  | 'candidate_created'
+  | 'principle_promoted'
+  | 'principle_deprecated'
+  | 'principle_rolled_back'
+  | 'circuit_breaker_opened'
+  | 'legacy_import';
+
+export interface PainDetectedData {
+  painId: string;
+  painType: 'tool_failure' | 'subagent_error' | 'user_frustration';
+  source: string;
+  reason: string;
+  score?: number;
+  sessionId?: string;
+  taskId?: string;
+}
+
+export interface CandidateCreatedData {
+  painId: string;
+  principleId: string;
+  trigger: string;
+  action: string;
+  status: 'candidate';
+}
+
+export interface PrinciplePromotedData {
+  principleId: string;
+  from: 'candidate' | 'probation';
+  to: 'probation' | 'active';
+  reason: string;
+  successCount?: number;
+}
+
+export interface PrincipleDeprecatedData {
+  principleId: string;
+  reason: string;
+  triggeredBy: 'auto' | 'manual';
+}
+
+export interface PrincipleRolledBackData {
+  principleId: string;
+  reason: string;
+  triggeredBy: 'user_command' | 'auto_conflict';
+  blacklistPattern?: string;
+  relatedPainId?: string;
+}
+
+export interface CircuitBreakerOpenedData {
+  taskId: string;
+  painId: string;
+  failCount: number;
+  reason: string;
+  requireHuman: boolean;
+  nextRetryAt?: string;
+}
+
+export interface LegacyImportData {
+  sourceFile: string;
+  content: string;
+  contentHash?: string;
+}
+
+export type EvolutionLoopEvent =
+  | { ts: string; type: 'pain_detected'; data: PainDetectedData }
+  | { ts: string; type: 'candidate_created'; data: CandidateCreatedData }
+  | { ts: string; type: 'principle_promoted'; data: PrinciplePromotedData }
+  | { ts: string; type: 'principle_deprecated'; data: PrincipleDeprecatedData }
+  | { ts: string; type: 'principle_rolled_back'; data: PrincipleRolledBackData }
+  | { ts: string; type: 'circuit_breaker_opened'; data: CircuitBreakerOpenedData }
+  | { ts: string; type: 'legacy_import'; data: LegacyImportData };

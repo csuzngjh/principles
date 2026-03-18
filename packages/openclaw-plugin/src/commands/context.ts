@@ -221,7 +221,8 @@ function applyPreset(
                 thinkingOs: false,
                 trustScore: true,
                 reflectionLog: false,
-                projectFocus: 'off'
+                projectFocus: 'off',
+                evolutionContext: { ...defaultContextConfig.evolutionContext }
             };
             break;
         case 'standard':
@@ -229,7 +230,8 @@ function applyPreset(
                 thinkingOs: true,
                 trustScore: true,
                 reflectionLog: false,
-                projectFocus: 'off'
+                projectFocus: 'off',
+                evolutionContext: { ...defaultContextConfig.evolutionContext }
             };
             break;
         case 'full':
@@ -237,7 +239,8 @@ function applyPreset(
                 thinkingOs: true,
                 trustScore: true,
                 reflectionLog: true,
-                projectFocus: 'summary'
+                projectFocus: 'summary',
+                evolutionContext: { ...defaultContextConfig.evolutionContext }
             };
             break;
     }

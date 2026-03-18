@@ -118,7 +118,13 @@ export class PathResolver {
         this.normalizeWorkspace = options.normalizeWorkspace ?? true;
         
         if (options.workspaceDir) {
-            this.workspaceDir = options.workspaceDir;
+            const original = options.workspaceDir;
+            const normalized = this.normalizeWorkspace ? this.normalizePath(original) : original;
+            if (original !== normalized) {
+                this.log('info', `Workspace path normalized: ${original} -> ${normalized}`);
+            }
+            this.workspaceDir = normalized;
+            this.initialized = true;
         }
     }
 
@@ -230,6 +236,14 @@ export class PathResolver {
             return this.stateDir;
         }
 
+        // If workspaceDir was explicitly provided via constructor, use workspace-based state dir
+        // This ensures tests and programmatic usage don't get polluted by global config
+        if (this.initialized && this.workspaceDir) {
+            this.stateDir = path.join(this.workspaceDir, '.state');
+            this.log('debug', `Using workspace-based state directory: ${this.stateDir}`);
+            return this.stateDir;
+        }
+
         const fileConfig = loadConfigFromFile();
         if (fileConfig?.state) {
             this.stateDir = fileConfig.state;
@@ -239,7 +253,7 @@ export class PathResolver {
 
         this.stateDir = path.join(this.getWorkspaceDir(), '.state');
         this.log('debug', `Computed state directory: ${this.stateDir}`);
-        
+
         return this.stateDir;
     }
 
@@ -285,6 +299,9 @@ export class PathResolver {
             'CURRENT_FOCUS': path.join(memory, 'okr', 'CURRENT_FOCUS.md'),
             'WEEK_STATE': path.join(memory, 'okr', 'WEEK_STATE.json'),
             'THINKING_OS_CANDIDATES': path.join(memory, 'THINKING_OS_CANDIDATES.md'),
+            'EVOLUTION_STREAM': path.join(memory, 'evolution.jsonl'),
+            'EVOLUTION_LOCK': path.join(memory, '.locks', 'evolution'),
+            'PRINCIPLE_BLACKLIST': path.join(state, 'principle_blacklist.json'),
             'MEMORY': memory,
         };
 

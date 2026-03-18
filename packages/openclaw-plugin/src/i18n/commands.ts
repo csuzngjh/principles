@@ -69,6 +69,14 @@ export const commandDescriptions: Record<string, Record<SupportedLanguage, strin
     zh: '管理 CURRENT_FOCUS.md [status|history|compress|rollback] - 查看/压缩/回滚焦点文件',
     en: 'Manage CURRENT_FOCUS.md [status|history|compress|rollback] - View/compress/rollback focus file'
   },
+  'pd-evolution-status': {
+    zh: '查看 evolution 闭环状态（candidate/probation/active）',
+    en: 'Show evolution loop status (candidate/probation/active)'
+  },
+  'pd-principle-rollback': {
+    zh: '回滚原则并加入黑名单 <principle-id> [reason]',
+    en: 'Rollback principle and blacklist pattern <principle-id> [reason]'
+  },
   'pd-rollback': {
     zh: '回滚情绪事件惩罚 <event-id>|last',
     en: 'Rollback empathy event penalty <event-id>|last'

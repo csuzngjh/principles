@@ -7,6 +7,7 @@ import { DictionaryService } from './dictionary-service.js';
 import { PainDictionary } from './dictionary.js';
 import { TrustEngine } from './trust-engine.js';
 import { HygieneTracker } from './hygiene/tracker.js';
+import { EvolutionReducerImpl } from './evolution-reducer.js';
 
 /**
  * WorkspaceContext - Centralized management of workspace-specific paths and services.
@@ -24,6 +25,7 @@ export class WorkspaceContext {
     private _dictionary?: PainDictionary;
     private _trust?: TrustEngine;
     private _hygiene?: HygieneTracker;
+    private _evolutionReducer?: EvolutionReducerImpl;
 
     private constructor(workspaceDir: string, stateDir: string) {
         this.workspaceDir = workspaceDir;
@@ -80,6 +82,17 @@ export class WorkspaceContext {
         return this._hygiene;
     }
 
+
+    /**
+     * Evolution reducer singleton for this workspace.
+     */
+    get evolutionReducer(): EvolutionReducerImpl {
+        if (!this._evolutionReducer) {
+            this._evolutionReducer = new EvolutionReducerImpl({ workspaceDir: this.workspaceDir });
+        }
+        return this._evolutionReducer;
+    }
+
     /**
      * Creates or retrieves a WorkspaceContext instance from an OpenClaw hook context.
      * Uses PathResolver to handle path normalization and fallback logic.
@@ -132,6 +145,7 @@ export class WorkspaceContext {
         this._eventLog = undefined;
         this._dictionary = undefined;
         this._trust = undefined;
+        this._evolutionReducer = undefined;
     }
 
     /**
