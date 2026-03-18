@@ -49,6 +49,36 @@ AGENTS.md
 .iflow/
 code-concise/
 
+# myagents templates: track stable top-level role files, ignore runtime state
+myagents/*/memory/
+myagents/*/.state/
+myagents/*/.principles/
+myagents/*/temp/
+myagents/*/core/
+myagents/*/docs/
+myagents/*/scripts/
+myagents/*/skills/
+myagents/*/principles/
+myagents/*/multi-agent-dialogue/
+myagents/*/CURRENT_FOCUS.md
+myagents/*/PLAN.md
+myagents/*/AUDIT.md
+myagents/*/BOOT.md
+myagents/*/EVOLUTION_QUEUE.json
+myagents/*/TOOLS_CAPABILITIES.md
+myagents/*/resource-status.md
+myagents/*/skills-lock.json
+myagents/*/.pain_flag
+!myagents/*/AGENTS.md
+!myagents/*/BOOTSTRAP.md
+!myagents/*/HEARTBEAT.md
+!myagents/*/IDENTITY.md
+!myagents/*/PRINCIPLES.md
+!myagents/*/SOUL.md
+!myagents/*/TEAM_ROLE.md
+!myagents/*/TOOLS.md
+!myagents/*/USER.md
+
 # Docs (Project documentation should be tracked)
 # The docs/ directory itself is NOT ignored, but old state files within it were moved out.
 # We now track actual project documents in docs/
