@@ -13,6 +13,17 @@ export type { PluginCommandContext, PluginCommandResult } from './openclaw-sdk.j
  */
 export type ProjectFocusMode = 'full' | 'summary' | 'off';
 
+export interface EvolutionContextConfig {
+  /** Enable conversation context in evolution task (default: true) */
+  enabled: boolean;
+
+  /** Max recent messages included in evolution task (default: 4) */
+  maxMessages: number;
+
+  /** Max chars per message snippet (default: 200) */
+  maxCharsPerMessage: number;
+}
+
 export interface ContextInjectionConfig {
   /** Thinking OS (mental models) - can be toggled */
   thinkingOs: boolean;
@@ -25,6 +36,9 @@ export interface ContextInjectionConfig {
   
   /** Trust score awareness - can be toggled */
   trustScore: boolean;
+
+  /** Evolution task context injection settings */
+  evolutionContext: EvolutionContextConfig;
 }
 
 /**
@@ -41,6 +55,11 @@ export const defaultContextConfig: ContextInjectionConfig = {
   projectFocus: 'off',
   reflectionLog: true,
   trustScore: true,
+  evolutionContext: {
+    enabled: true,
+    maxMessages: 4,
+    maxCharsPerMessage: 200,
+  },
 };
 
 /**

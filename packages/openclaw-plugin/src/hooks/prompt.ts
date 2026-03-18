@@ -78,7 +78,57 @@ interface PromptHookApi {
   logger: PluginLogger;
 }
 
-function resolveEvolutionTask(inProgressTask: any): string | null {
+function extractRecentConversationContext(
+  messages: unknown[] | undefined,
+  maxMessages = 4,
+  maxCharsPerMessage = 200
+): string {
+  if (!Array.isArray(messages) || messages.length === 0) return '';
+
+  const relevantMessages: Array<{ role: 'user' | 'assistant'; text: string }> = [];
+
+  for (let i = messages.length - 1; i >= 0 && relevantMessages.length < maxMessages; i--) {
+    const msg = messages[i] as { role?: string; content?: unknown };
+    if (msg?.role !== 'user' && msg?.role !== 'assistant') continue;
+
+    let text = '';
+    if (typeof msg.content === 'string') {
+      text = msg.content;
+    } else if (Array.isArray(msg.content)) {
+      text = msg.content
+        .filter((part: unknown) => {
+          if (!part || typeof part !== 'object') return false;
+          const record = part as { type?: unknown; text?: unknown };
+          return record.type === 'text' && typeof record.text === 'string';
+        })
+        .map((part) => (part as { text: string }).text)
+        .join('\n')
+        .trim();
+    }
+
+    if (!text) continue;
+
+    const normalized = text.length > maxCharsPerMessage
+      ? `${text.slice(0, maxCharsPerMessage)}...`
+      : text;
+
+    relevantMessages.unshift({ role: msg.role, text: normalized });
+  }
+
+  if (relevantMessages.length === 0) return '';
+
+  return relevantMessages
+    .map((message) => `[${message.role.toUpperCase()}]: ${message.text}`)
+    .join('\n\n');
+}
+
+function resolveEvolutionTask(
+  inProgressTask: any,
+  messages?: unknown[],
+  maxContextMessages = 4,
+  maxCharsPerMsg = 200,
+  includeConversationContext = true
+): string | null {
   if (!inProgressTask || typeof inProgressTask !== 'object') return null;
 
   const rawTask = typeof inProgressTask.task === 'string' ? inProgressTask.task.trim() : '';
@@ -92,7 +142,33 @@ function resolveEvolutionTask(inProgressTask: any): string | null {
 
   if (typeof inProgressTask.id !== 'string' || !inProgressTask.id.trim()) return null;
 
-  return `Diagnose systemic pain [ID: ${inProgressTask.id}]. Source: ${source}. Reason: ${reason}. Trigger text: "${preview}"`;
+  const conversationContext = includeConversationContext
+    ? extractRecentConversationContext(messages, maxContextMessages, maxCharsPerMsg)
+    : '';
+
+  let taskDescription = `Diagnose systemic pain [ID: ${inProgressTask.id}].
+
+`;
+  taskDescription += `**Source**: ${source}
+`;
+  taskDescription += `**Reason**: ${reason}
+`;
+  taskDescription += `**Trigger Text**: "${preview}"
+`;
+
+  if (conversationContext) {
+    taskDescription += `
+---
+**Recent Conversation Context**:
+${conversationContext}`;
+  }
+
+  taskDescription += `
+
+---
+Analyze the root cause using 5 Whys methodology. Check evidence in codebase before concluding.`;
+
+  return taskDescription;
 }
 
 /**
@@ -162,7 +238,15 @@ export function loadContextInjectionConfig(workspaceDir: string): ContextInjecti
       const raw = fs.readFileSync(profilePath, 'utf-8');
       const profile = JSON.parse(raw);
       if (profile.contextInjection) {
-        return { ...defaultContextConfig, ...profile.contextInjection };
+        const contextInjection = profile.contextInjection as Partial<ContextInjectionConfig>;
+        return {
+          ...defaultContextConfig,
+          ...contextInjection,
+          evolutionContext: {
+            ...defaultContextConfig.evolutionContext,
+            ...(contextInjection.evolutionContext ?? {}),
+          },
+        };
       }
     }
   } catch (e) {
@@ -322,7 +406,13 @@ You are a **self-evolving AI agent** powered by Principles Disciple.
       const inProgressTask = queue.find((t: any) => t.status === 'in_progress');
       
       if (inProgressTask) {
-        const resolvedTask = resolveEvolutionTask(inProgressTask);
+        const resolvedTask = resolveEvolutionTask(
+          inProgressTask,
+          event.messages,
+          contextConfig.evolutionContext.maxMessages,
+          contextConfig.evolutionContext.maxCharsPerMessage,
+          contextConfig.evolutionContext.enabled
+        );
         if (!resolvedTask) {
           logger?.warn('[PD:Prompt] Skipping evolution task injection because task payload is invalid.');
         } else {
