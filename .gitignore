@@ -69,6 +69,7 @@ myagents/*/TOOLS_CAPABILITIES.md
 myagents/*/resource-status.md
 myagents/*/skills-lock.json
 myagents/*/.pain_flag
+myagents/*/.team/
 !myagents/*/AGENTS.md
 !myagents/*/BOOTSTRAP.md
 !myagents/*/HEARTBEAT.md

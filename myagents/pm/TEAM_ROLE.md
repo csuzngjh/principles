@@ -41,3 +41,9 @@ You should avoid:
 - Proposal Draft
 - priority feedback
 - product risk notes
+
+## Operating Reference
+
+- `PRODUCT_OPERATING_PROMPT.md`
+- `../shared/governance/PROPOSAL_DRAFT_TEMPLATE.md`
+- `../shared/governance/AUTONOMY_RULES.md`

@@ -101,6 +101,8 @@ Primary shared artifacts:
 - `TEAM_WEEK_TASKS.json`
 - `WORK_QUEUE.md`
 - `AUTONOMY_RULES.md`
+- `MEETING_PROTOCOL.md`
+- `RUNTIME_GUARDRAILS.md`
 - `reports/`
 
 ## Coordination Rules
@@ -109,6 +111,8 @@ Primary shared artifacts:
 - Subagents are temporary workers, not standing roles.
 - No role should silently absorb another role's responsibilities.
 - Every significant handoff should end in a standard artifact.
+- Recurring meetings must be implemented as scheduled workflows, not as free-form chat.
+- Shared governance files are the recovery layer for context compression and session resets.
 
 ## Standard Artifacts
 

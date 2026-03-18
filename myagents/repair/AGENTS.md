@@ -8,8 +8,8 @@ Read in this order:
 2. `IDENTITY.md`
 3. `USER.md`
 4. `memory/okr/CURRENT_FOCUS.md`
-5. `../shared/governance/TEAM_CURRENT_FOCUS.md`
-6. `../shared/governance/AUTONOMY_RULES.md`
+5. `./.team/governance/TEAM_CURRENT_FOCUS.md`
+6. `./.team/governance/AUTONOMY_RULES.md`
 
 ## Role Boundary
 
@@ -36,3 +36,9 @@ When you finish work, produce:
 - files touched
 - verification expected
 - residual risk
+
+## Operating Reference
+
+- `TEAM_ROLE.md`
+- `REPAIR_OPERATING_PROMPT.md`
+- `./.team/governance/REPAIR_TASK_TEMPLATE.md`

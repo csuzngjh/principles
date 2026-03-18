@@ -43,3 +43,9 @@ You should avoid:
 - Issue Draft
 - resource health updates
 - triage evidence packs
+
+## Operating Reference
+
+- `SCOUT_OPERATING_PROMPT.md`
+- `../shared/governance/ISSUE_DRAFT_TEMPLATE.md`
+- `../shared/governance/RUNTIME_GUARDRAILS.md`

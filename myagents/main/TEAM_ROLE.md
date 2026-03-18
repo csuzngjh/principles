@@ -46,3 +46,10 @@ You should avoid:
 - priority decisions
 - escalation decisions
 - weekly review updates
+- meeting reports
+
+## Operating Reference
+
+- `MANAGER_OPERATING_PROMPT.md`
+- `../shared/governance/MEETING_PROTOCOL.md`
+- `../shared/governance/RUNTIME_GUARDRAILS.md`
