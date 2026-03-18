@@ -8,6 +8,14 @@ describe('PathResolver', () => {
         expect(PD_ENV_DESCRIPTIONS).toBeDefined();
     });
 
+
+
+    it('normalizes workspaceDir passed via constructor', async () => {
+        const { PathResolver } = await import('../../src/core/path-resolver.js');
+        const resolver = new PathResolver({ workspaceDir: '/tmp/../tmp/workspace' });
+        expect(resolver.getWorkspaceDir()).toBe('/tmp/workspace');
+    });
+
     it('should have all required path keys', async () => {
         const { PathResolver } = await import('../../src/core/path-resolver.js');
         const resolver = new PathResolver({ workspaceDir: '/test/workspace' });

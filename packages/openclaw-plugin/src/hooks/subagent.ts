@@ -5,6 +5,35 @@ import { empathyObserverManager, type EmpathyObserverApi } from '../service/empa
 import * as fs from 'fs';
 import * as path from 'path';
 
+
+
+function emitSubagentPainEvent(
+    wctx: WorkspaceContext,
+    payload: {
+        source: string;
+        reason: string;
+        score: number;
+        sessionId?: string;
+    }
+): void {
+    try {
+        wctx.evolutionReducer.emitSync({
+            ts: new Date().toISOString(),
+            type: 'pain_detected',
+            data: {
+                painId: `pain_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+                painType: 'subagent_error',
+                source: payload.source,
+                reason: payload.reason,
+                score: payload.score,
+                sessionId: payload.sessionId,
+            },
+        });
+    } catch (e) {
+        console.warn(`[PD:Subagent] failed to emit evolution event: ${String(e)}`);
+    }
+}
+
 type SubagentEndedHookContext = PluginHookSubagentContext & {
     api?: EmpathyObserverApi;
     workspaceDir?: string;
@@ -33,13 +62,21 @@ export async function handleSubagentEnded(
     if (outcome === 'error' || outcome === 'timeout') {
         const scoreSettings = config.get('scores');
         const score = outcome === 'error' ? scoreSettings.subagent_error_penalty : scoreSettings.subagent_timeout_penalty;
-        
+        const reason = `Subagent session ${targetSessionKey} ended with outcome: ${outcome}`;
+
         writePainFlag(workspaceDir, {
             source: `subagent_${outcome}`,
             score: String(score),
             time: new Date().toISOString(),
-            reason: `Subagent session ${targetSessionKey} ended with outcome: ${outcome}`,
+            reason,
             is_risky: 'true'
+        });
+
+        emitSubagentPainEvent(wctx, {
+            source: `subagent_${outcome}`,
+            reason,
+            score,
+            sessionId: ctx.sessionId,
         });
     }
 

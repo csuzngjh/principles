@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { PluginHookBeforePromptBuildEvent, PluginHookAgentContext, PluginHookBeforePromptBuildResult, PluginLogger } from '../openclaw-sdk.js';
-import { getSession, resetFriction } from '../core/session-tracker.js';
+import { getSession, resetFriction, setInjectedProbationIds } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { ContextInjectionConfig, defaultContextConfig } from '../types.js';
 import { extractSummary, getHistoryVersions } from '../core/focus-history.js';
@@ -39,6 +39,32 @@ interface AgentsDefaultsConfig {
 /**
  * OpenClaw API 接口定义（Prompt Hook 所需部分）
  */
+
+
+function escapeXml(input: string): string {
+  return input
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function extractContextSignals(context: { toolName?: string; filePath?: string; userMessage?: string; }): string[] {
+  const signals: string[] = [];
+  if (context.filePath?.endsWith('.ts')) signals.push('typescript');
+  if (context.filePath?.endsWith('.md')) signals.push('markdown');
+  if (context.toolName && ['edit', 'replace', 'write', 'write_file', 'apply_patch'].includes(context.toolName)) signals.push('edit');
+  if (context.toolName && ['run_shell_command', 'bash'].includes(context.toolName)) signals.push('shell');
+  if (context.toolName) signals.push(context.toolName);
+  const msg = (context.userMessage || '').toLowerCase();
+  if (msg.includes('.ts') || msg.includes('typescript')) signals.push('typescript');
+  if (msg.includes('.md') || msg.includes('markdown')) signals.push('markdown');
+  if (msg.includes('edit') || msg.includes('write') || msg.includes('patch')) signals.push('edit');
+  if (msg.includes('shell') || msg.includes('bash')) signals.push('shell');
+  return signals;
+}
+
 interface PromptHookApi {
   config?: {
     agents?: {
@@ -52,7 +78,57 @@ interface PromptHookApi {
   logger: PluginLogger;
 }
 
-function resolveEvolutionTask(inProgressTask: any): string | null {
+function extractRecentConversationContext(
+  messages: unknown[] | undefined,
+  maxMessages = 4,
+  maxCharsPerMessage = 200
+): string {
+  if (!Array.isArray(messages) || messages.length === 0) return '';
+
+  const relevantMessages: Array<{ role: 'user' | 'assistant'; text: string }> = [];
+
+  for (let i = messages.length - 1; i >= 0 && relevantMessages.length < maxMessages; i--) {
+    const msg = messages[i] as { role?: string; content?: unknown };
+    if (msg?.role !== 'user' && msg?.role !== 'assistant') continue;
+
+    let text = '';
+    if (typeof msg.content === 'string') {
+      text = msg.content;
+    } else if (Array.isArray(msg.content)) {
+      text = msg.content
+        .filter((part: unknown) => {
+          if (!part || typeof part !== 'object') return false;
+          const record = part as { type?: unknown; text?: unknown };
+          return record.type === 'text' && typeof record.text === 'string';
+        })
+        .map((part) => (part as { text: string }).text)
+        .join('\n')
+        .trim();
+    }
+
+    if (!text) continue;
+
+    const normalized = text.length > maxCharsPerMessage
+      ? `${text.slice(0, maxCharsPerMessage)}...`
+      : text;
+
+    relevantMessages.unshift({ role: msg.role, text: normalized });
+  }
+
+  if (relevantMessages.length === 0) return '';
+
+  return relevantMessages
+    .map((message) => `[${message.role.toUpperCase()}]: ${message.text}`)
+    .join('\n\n');
+}
+
+function resolveEvolutionTask(
+  inProgressTask: any,
+  messages?: unknown[],
+  maxContextMessages = 4,
+  maxCharsPerMsg = 200,
+  includeConversationContext = true
+): string | null {
   if (!inProgressTask || typeof inProgressTask !== 'object') return null;
 
   const rawTask = typeof inProgressTask.task === 'string' ? inProgressTask.task.trim() : '';
@@ -66,7 +142,33 @@ function resolveEvolutionTask(inProgressTask: any): string | null {
 
   if (typeof inProgressTask.id !== 'string' || !inProgressTask.id.trim()) return null;
 
-  return `Diagnose systemic pain [ID: ${inProgressTask.id}]. Source: ${source}. Reason: ${reason}. Trigger text: "${preview}"`;
+  const conversationContext = includeConversationContext
+    ? extractRecentConversationContext(messages, maxContextMessages, maxCharsPerMsg)
+    : '';
+
+  let taskDescription = `Diagnose systemic pain [ID: ${inProgressTask.id}].
+
+`;
+  taskDescription += `**Source**: ${source}
+`;
+  taskDescription += `**Reason**: ${reason}
+`;
+  taskDescription += `**Trigger Text**: "${preview}"
+`;
+
+  if (conversationContext) {
+    taskDescription += `
+---
+**Recent Conversation Context**:
+${conversationContext}`;
+  }
+
+  taskDescription += `
+
+---
+Analyze the root cause using 5 Whys methodology. Check evidence in codebase before concluding.`;
+
+  return taskDescription;
 }
 
 /**
@@ -136,7 +238,15 @@ export function loadContextInjectionConfig(workspaceDir: string): ContextInjecti
       const raw = fs.readFileSync(profilePath, 'utf-8');
       const profile = JSON.parse(raw);
       if (profile.contextInjection) {
-        return { ...defaultContextConfig, ...profile.contextInjection };
+        const contextInjection = profile.contextInjection as Partial<ContextInjectionConfig>;
+        return {
+          ...defaultContextConfig,
+          ...contextInjection,
+          evolutionContext: {
+            ...defaultContextConfig.evolutionContext,
+            ...(contextInjection.evolutionContext ?? {}),
+          },
+        };
       }
     }
   } catch (e) {
@@ -296,7 +406,13 @@ You are a **self-evolving AI agent** powered by Principles Disciple.
       const inProgressTask = queue.find((t: any) => t.status === 'in_progress');
       
       if (inProgressTask) {
-        const resolvedTask = resolveEvolutionTask(inProgressTask);
+        const resolvedTask = resolveEvolutionTask(
+          inProgressTask,
+          event.messages,
+          contextConfig.evolutionContext.maxMessages,
+          contextConfig.evolutionContext.maxCharsPerMessage,
+          contextConfig.evolutionContext.enabled
+        );
         if (!resolvedTask) {
           logger?.warn('[PD:Prompt] Skipping evolution task injection because task payload is invalid.');
         } else {
@@ -453,6 +569,33 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
     }
   }
 
+
+  // Evolution principles injection (active + probation summary)
+  let evolutionPrinciplesContent = '';
+  try {
+    const reducer = wctx.evolutionReducer;
+    const active = reducer.getActivePrinciples().slice(-3);
+    const probation = reducer.getProbationPrinciples().slice(0, 5);
+    if (active.length > 0 || probation.length > 0) {
+      const lines: string[] = [];
+      if (active.length > 0) {
+        lines.push('Active principles:');
+        for (const p of active) {
+          lines.push(`- [${escapeXml(p.id)}] ${escapeXml(p.text)}`);
+        }
+      }
+      if (probation.length > 0) {
+        lines.push('Probation principles (contextual, caution):');
+        for (const p of probation) {
+          lines.push(`- <principle status="probation" id="${escapeXml(p.id)}">${escapeXml(p.text)}</principle>`);
+        }
+      }
+      evolutionPrinciplesContent = lines.join('\n');
+    }
+  } catch (e) {
+    logger?.warn?.(`[PD:Prompt] Failed to load evolution principles: ${String(e)}`);
+  }
+
   // Build appendSystemContext with recency effect
   // Content order (most important last): project_context -> reflection_log -> thinking_os -> principles
   const appendParts: string[] = [];
@@ -472,7 +615,13 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
     appendParts.push(`<thinking_os>\n${thinkingOsContent}\n</thinking_os>`);
   }
 
-  // 4. Principles (always on, highest priority, goes last for recency effect)
+  // 4. Evolution Loop principles (active/probation)
+  if (evolutionPrinciplesContent) {
+    appendParts.push(`<evolution_principles>\n${evolutionPrinciplesContent}\n</evolution_principles>`);
+  }
+
+
+  // 5. Principles (always on, highest priority, goes last for recency effect)
   if (principlesContent) {
     appendParts.push(`<core_principles>\n${principlesContent}\n</core_principles>`);
   }
@@ -493,6 +642,7 @@ The sections below are ordered by priority. When conflicts arise, **later sectio
 - \`<project_context>\` - Current priorities (can be overridden)
 - \`<reflection_log>\` - Past lessons (inform your approach)
 - \`<thinking_os>\` - Thinking models (guide your reasoning)
+- \`<evolution_principles>\` - Newly learned principles (active + probation)
 - \`<core_principles>\` - Core rules (NON-NEGOTIABLE, highest priority)
 
 **Remember**: You are the Spicy Evolver. You despise entropy. You evolve through pain.

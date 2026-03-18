@@ -6,6 +6,8 @@ import { WorkspaceContext } from '../../src/core/workspace-context.js';
 vi.mock('fs');
 vi.mock('../../src/core/workspace-context.js');
 
+const mockEmitSync = vi.fn();
+
 describe('Subagent Hook', () => {
     const workspaceDir = '/mock/workspace';
 
@@ -27,6 +29,7 @@ describe('Subagent Hook', () => {
         workspaceDir,
         trust: mockTrust,
         config: mockConfig,
+        evolutionReducer: { emitSync: mockEmitSync },
         resolve: vi.fn().mockImplementation((key) => {
             if (key === 'EVOLUTION_QUEUE') return '/mock/workspace/.state/evolution_queue.json';
             if (key === 'PAIN_FLAG') return '/mock/workspace/.state/.pain_flag';
@@ -36,6 +39,7 @@ describe('Subagent Hook', () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
+        mockEmitSync.mockReset();
         vi.mocked(WorkspaceContext.fromHookContext).mockReturnValue(mockWctx as any);
     });
 
@@ -67,6 +71,47 @@ describe('Subagent Hook', () => {
         await handleSubagentEnded(mockEvent as any, mockCtx as any);
 
         expect(mockTrust.recordSuccess).not.toHaveBeenCalled();
+        expect(mockEmitSync).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'pain_detected',
+            data: expect.objectContaining({
+                painType: 'subagent_error',
+            }),
+        }));
+    });
+
+
+
+    it('should emit pain_detected for timeout outcome', async () => {
+        const mockCtx = { workspaceDir, sessionId: 's3' };
+        const mockEvent = {
+            targetSessionKey: 'agent:main:subagent:diagnostician-123',
+            outcome: 'timeout'
+        };
+
+        await handleSubagentEnded(mockEvent as any, mockCtx as any);
+
+        expect(mockEmitSync).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'pain_detected',
+            data: expect.objectContaining({
+                painType: 'subagent_error',
+                source: 'subagent_timeout',
+                sessionId: 's3',
+            }),
+        }));
+    });
+
+    it('should not emit pain_detected for successful subagent completion', async () => {
+        const mockCtx = { workspaceDir, sessionId: 's1' };
+        const mockEvent = {
+            targetSessionKey: 'agent:main:subagent:diagnostician-123',
+            outcome: 'ok'
+        };
+
+        vi.mocked(fs.existsSync).mockReturnValue(false);
+
+        await handleSubagentEnded(mockEvent as any, mockCtx as any);
+
+        expect(mockEmitSync).not.toHaveBeenCalled();
     });
 
     it('should complete the oldest in-progress queue task using timestamp fallback', async () => {
