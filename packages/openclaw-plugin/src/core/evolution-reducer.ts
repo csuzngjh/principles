@@ -4,6 +4,7 @@ import * as path from 'path';
 import { withLock } from '../utils/file-lock.js';
 import { PathResolver } from './path-resolver.js';
 import { SystemLogger } from './system-logger.js';
+import { shouldIgnorePainProtocolText } from './dictionary.js';
 import type {
   CandidateCreatedData,
   EvolutionLoopEvent,
@@ -297,6 +298,12 @@ export class EvolutionReducerImpl implements EvolutionReducer {
   private onPainDetected(data: PainDetectedData, eventTs: string): void {
     const trigger = String(data.reason ?? data.source ?? 'unknown trigger');
     const action = `Prevent recurrence for: ${String(data.source ?? 'unknown')}`;
+
+    // Defense in depth: protocol/system tokens must never become principles,
+    // even if a pain_detected event is emitted from a new callsite in the future.
+    if (shouldIgnorePainProtocolText(trigger)) {
+      return;
+    }
 
     if (this.isBlacklisted(data.painId, trigger)) {
       return;
