@@ -23,6 +23,36 @@ export interface EvolutionQueueItem {
     status: 'pending' | 'in_progress' | 'completed';
 }
 
+const PAIN_QUEUE_DEDUP_WINDOW_MS = 30 * 60 * 1000;
+
+function normalizePainDedupKey(source: string, preview: string): string {
+    return `${source.trim().toLowerCase()}::${preview.trim().toLowerCase()}`;
+}
+
+export function hasRecentDuplicateTask(queue: EvolutionQueueItem[], source: string, preview: string, now: number): boolean {
+    const key = normalizePainDedupKey(source, preview);
+    return queue.some((task) => {
+        if (task.status === 'completed') return false;
+        const taskTime = new Date(task.timestamp).getTime();
+        if (!Number.isFinite(taskTime) || (now - taskTime) > PAIN_QUEUE_DEDUP_WINDOW_MS) return false;
+        return normalizePainDedupKey(task.source, task.trigger_text_preview || '') === key;
+    });
+}
+
+export function hasEquivalentPromotedRule(dictionary: { getAllRules(): Record<string, { type: string; phrases?: string[]; pattern?: string; status: string; }> }, phrase: string): boolean {
+    const normalizedPhrase = phrase.trim().toLowerCase();
+    return Object.values(dictionary.getAllRules()).some((rule) => {
+        if (rule.status !== 'active') return false;
+        if (rule.type === 'exact_match' && Array.isArray(rule.phrases)) {
+            return rule.phrases.some((candidate) => candidate.trim().toLowerCase() === normalizedPhrase);
+        }
+        if (rule.type === 'regex' && typeof rule.pattern === 'string') {
+            return rule.pattern.trim().toLowerCase() === normalizedPhrase;
+        }
+        return false;
+    });
+}
+
 function checkPainFlag(wctx: WorkspaceContext, logger: any) {
     try {
         const painFlagPath = wctx.resolve('PAIN_FLAG');
@@ -59,14 +89,21 @@ function checkPainFlag(wctx: WorkspaceContext, logger: any) {
             }
         }
 
-        const taskId = createHash('md5').update(`${source}:${score}:${new Date().toISOString()}`).digest('hex').substring(0, 8);
+        const now = Date.now();
+        if (hasRecentDuplicateTask(queue, source, preview, now)) {
+            logger?.info?.(`[PD:EvolutionWorker] Duplicate pain task skipped for source=${source} preview=${preview || 'N/A'}`);
+            fs.appendFileSync(painFlagPath, `\nstatus: queued\n`, 'utf8');
+            return;
+        }
+
+        const taskId = createHash('md5').update(`${source}:${score}:${preview}`).digest('hex').substring(0, 8);
         queue.push({
             id: taskId,
             score,
             source,
             reason,
             trigger_text_preview: preview,
-            timestamp: new Date().toISOString(),
+            timestamp: new Date(now).toISOString(),
             status: 'pending'
         });
 
@@ -238,6 +275,12 @@ function processPromotion(wctx: WorkspaceContext, logger: any, eventLog: any) {
                 if (commonPhrases.length > 0) {
                     const phrase = commonPhrases[0];
                     const ruleId = `P_PROMOTED_${fingerprint.toUpperCase()}`;
+
+                    if (hasEquivalentPromotedRule(dictionary as any, phrase)) {
+                        cand.status = 'duplicate';
+                        logger?.info?.(`[PD:EvolutionWorker] Skipping duplicate promoted rule for candidate ${fingerprint}: ${phrase}`);
+                        continue;
+                    }
 
                     if (logger) logger.info(`[PD:EvolutionWorker] Promoting candidate ${fingerprint} to formal rule: ${ruleId}`);
                     SystemLogger.log(wctx.workspaceDir, 'RULE_PROMOTED', `Candidate ${fingerprint} promoted to rule ${ruleId}`);

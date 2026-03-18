@@ -93,12 +93,24 @@ export const agentSpawnTool = {
    * Execution logic for the agent spawn tool
    */
   async execute(
-    params: { agentType: string; task: string },
+    params: { agentType?: string; task?: string },
     api: OpenClawPluginApi,
     _workspaceDir?: string
   ): Promise<string> {
-    const { agentType, task } = params;
+    api.logger?.info?.(`[PD:AgentSpawn] Received params: ${JSON.stringify(params)}`);
 
+    const agentType = typeof params?.agentType === 'string' ? params.agentType.trim() : '';
+    const task = typeof params?.task === 'string' ? params.task.trim() : '';
+
+    if (!agentType) {
+      return `❌ agentType 参数无效: ${JSON.stringify(params?.agentType)}`;
+    }
+
+    if (!task) {
+      return `❌ task 参数无效: ${JSON.stringify(params?.task)}`;
+    }
+
+    // 1. Validate agent type
     // 1. Validate agent type
     const availableAgents = listAvailableAgents();
     if (!availableAgents.includes(agentType)) {
