@@ -1,0 +1,37 @@
+{
+  "week": "2026-W11",
+  "createdAt": "2026-03-18T00:00:00Z",
+  "createdBy": "codex",
+  "tasks": [
+    {
+      "id": "TEAM-1",
+      "desc": "Define and document the 5-role team structure",
+      "status": "done",
+      "owner": "main"
+    },
+    {
+      "id": "TEAM-2",
+      "desc": "Establish a shared governance layer that reuses existing OKR/weekly assets",
+      "status": "done",
+      "owner": "main"
+    },
+    {
+      "id": "TEAM-3",
+      "desc": "Create repair agent workspace skeleton",
+      "status": "done",
+      "owner": "repair"
+    },
+    {
+      "id": "TEAM-4",
+      "desc": "Create verification agent workspace skeleton",
+      "status": "done",
+      "owner": "verification"
+    },
+    {
+      "id": "TEAM-5",
+      "desc": "Start using standard artifacts for issue/proposal/repair/verification handoffs",
+      "status": "pending",
+      "owner": "main"
+    }
+  ]
+}

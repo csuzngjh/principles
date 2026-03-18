@@ -6,23 +6,25 @@
 
 | Dimension | Value |
 | --- | --- |
-| Current Phase | Architecture understanding |
+| Current Phase | Team skeleton implementation |
 | User Goal | Turn Principles Disciple into a usable product |
-| Current Output | Panorama architecture doc in `docs/maps/` |
+| Current Output | Shared governance layer + repair/verification role skeletons |
 
 ## Current Tasks
 
 - [x] Produce a non-technical panorama of the framework's philosophy, architecture, and product value
-- [ ] Translate the panorama into a productization roadmap
+- [x] Map OpenClaw's peer-agent vs subagent model into a product-usable team architecture
+- [x] Lock the first product defaults: team skeleton first, semi-autonomous boundary
+- [x] Turn the multi-agent architecture into concrete role files, workflows, and skills
 - [ ] Identify the biggest gaps between philosophy and implementation
 
 ## Next
 
-1. Review `docs/maps/principles-disciple-panorama-zh.md`
-2. Convert the strongest findings into a product strategy and MVP scope
-3. Prioritize engineering fixes that most affect product credibility
+1. Connect shared governance docs to live heartbeat / cron routines
+2. Start using Issue Draft / Proposal Draft / Repair Task / Verification Report in real flows
+3. Tighten manager-vs-executor boundaries in the existing agent prompts and habits
 
 ## References
 
 - Main doc: `docs/maps/principles-disciple-panorama-zh.md`
-- Supporting area: `docs/reviews/`
+- Supporting doc: `docs/maps/openclaw-multi-agent-team-architecture-zh.md`

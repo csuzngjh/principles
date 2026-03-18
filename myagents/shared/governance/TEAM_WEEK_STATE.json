@@ -1,0 +1,19 @@
+{
+  "week": "2026-W11",
+  "stage": "EXECUTING",
+  "goal": "Build the Principles Disciple V1 semi-autonomous team skeleton",
+  "updatedAt": "2026-03-18T00:00:00Z",
+  "metrics": {
+    "rolesDefined": 5,
+    "sharedGovernanceReady": true,
+    "newRolesAdded": 2,
+    "standardArtifactsDefined": 4
+  },
+  "focus": [
+    "manager/product/scout roles clarified",
+    "repair and verification roles added",
+    "shared governance files established",
+    "existing OKR and weekly governance assets preserved"
+  ],
+  "blockers": []
+}
