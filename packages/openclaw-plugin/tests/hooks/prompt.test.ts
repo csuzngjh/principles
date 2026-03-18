@@ -353,8 +353,63 @@ describe('Prompt Context Injection Hook', () => {
     } as any);
 
     expect(result?.prependContext).toContain('Diagnose systemic pain [ID: abc12345]');
-    expect(result?.prependContext).toContain('Source: hook_failure. Reason: Hook execution failed.');
-    expect(result?.prependContext).toContain('Trigger text: \\"trace preview\\"');
+    expect(result?.prependContext).toContain('**Source**: hook_failure');
+    expect(result?.prependContext).toContain('**Reason**: Hook execution failed');
+    expect(result?.prependContext).toContain('**Trigger Text**: \\\"trace preview\\\"');
+    expect(result?.prependContext).toContain('Analyze the root cause using 5 Whys methodology');
+  });
+
+
+  it('should append recent conversation context to reconstructed evolution task', async () => {
+    vi.mocked(fs.existsSync).mockImplementation((p) => p.toString().includes('evolution_queue.json'));
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify([
+      {
+        id: 'ctx123',
+        source: 'pain_detection',
+        reason: 'Repeated failures',
+        trigger_text_preview: 'null pointer',
+        status: 'in_progress'
+      }
+    ]));
+
+    const result = await handleBeforePromptBuild({
+      messages: [
+        { role: 'user', content: 'Earlier message should be truncated because of max window' },
+        { role: 'assistant', content: 'I reviewed the code and found likely null access.' },
+        { role: 'tool', content: 'tool output should be ignored' },
+        { role: 'user', content: [{ type: 'text', text: 'Please focus on null handling in parser.ts' }, { type: 'image', url: 'x' }] },
+      ] as any,
+    } as any, { workspaceDir, trigger: 'user' } as any);
+
+    expect(result?.prependContext).toContain('**Recent Conversation Context**:');
+    expect(result?.prependContext).toContain('[ASSISTANT]: I reviewed the code and found likely null access.');
+    expect(result?.prependContext).toContain('[USER]: Please focus on null handling in parser.ts');
+    expect(result?.prependContext).not.toContain('tool output should be ignored');
+  });
+
+  it('should not append conversation context when evolutionContext is disabled', async () => {
+    vi.mocked(fs.existsSync).mockImplementation((p) => p.toString().includes('evolution_queue.json') || p.toString().includes('PROFILE.json'));
+    vi.mocked(fs.readFileSync).mockImplementation((p) => {
+      const target = p.toString();
+      if (target.includes('PROFILE.json')) return JSON.stringify({ contextInjection: { evolutionContext: { enabled: false } } });
+      if (target.includes('evolution_queue.json')) return JSON.stringify([{
+        id: 'ctx-off',
+        source: 'pain_detection',
+        reason: 'Repeated failures',
+        trigger_text_preview: 'null pointer',
+        status: 'in_progress'
+      }]);
+      return '';
+    });
+
+    const result = await handleBeforePromptBuild({
+      messages: [
+        { role: 'user', content: 'This context should not be included' },
+      ] as any,
+    } as any, { workspaceDir, trigger: 'user' } as any);
+
+    expect(result?.prependContext).toContain('Diagnose systemic pain [ID: ctx-off]');
+    expect(result?.prependContext).not.toContain('Recent Conversation Context');
   });
 
   it('should skip evolution task injection when task is literal undefined and metadata is invalid', async () => {
