@@ -8,7 +8,7 @@
 | --- | --- |
 | Current Phase | Production rollout preparation for the internal team |
 | User Goal | Turn Principles Disciple into a usable product |
-| Current Output | Shared governance layer + runtime integration assets + all standing-role operating prompts + production rollout guide for OpenClaw deployment |
+| Current Output | Shared governance layer + runtime integration assets + all standing-role operating prompts + production rollout guide + cloud handoff checklist |
 
 ## Current Tasks
 
@@ -28,13 +28,14 @@
 - [x] Re-check the internal team design against real OpenClaw runtime constraints: heartbeat fallback, agent-to-agent allowlist, cron concurrency, and per-workspace path layout
 - [x] Switch the deployment model to global managed skills plus per-workspace shared governance
 - [x] Produce a step-by-step production rollout guide for a non-technical operator
+- [x] Produce a cloud handoff checklist so a server-side AI coding assistant can verify, patch, and complete deployment
 - [ ] Identify the biggest gaps between philosophy and implementation inside the shipped templates
 - [ ] Turn meeting, patrol, triage, repair, and verification into live scheduled flows
 
 ## Next
 
-1. Apply the rollout guide in the real OpenClaw server and complete smoke tests for all 5 roles
-2. Add `repair` and `verification` into the real OpenClaw agent config and widen the peer messaging allowlist
+1. Let the cloud AI assistant apply the handoff checklist against the real `~/.openclaw` deployment
+2. Complete smoke tests for all 5 roles and verify peer messaging prerequisites
 3. Create the first real cron jobs with staggered schedules and verify one end-to-end internal flow
 
 ## References
