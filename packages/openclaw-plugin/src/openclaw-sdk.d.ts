@@ -1,3 +1,5 @@
+import type { IncomingMessage, ServerResponse } from 'node:http';
+
 /**
  * OpenClaw Plugin SDK type shims (Official V1.0 Alignment)
  * 
@@ -99,6 +101,7 @@ export interface OpenClawPluginApi {
     workspaceDir?: string; // Optional but commonly injected
     registerTool: (tool: any, opts?: any) => void;
     registerHook: (events: string | string[], handler: any, opts?: any) => void;
+    registerHttpRoute: (params: OpenClawPluginHttpRouteParams) => void;
     registerService: (service: OpenClawPluginService) => void;
     registerCommand: (command: PluginCommandDefinition) => void;
     resolvePath: (input: string) => string;
@@ -312,6 +315,22 @@ export interface OpenClawPluginService {
     start: (ctx: OpenClawPluginServiceContext) => void | Promise<void>;
     stop?: (ctx: OpenClawPluginServiceContext) => void | Promise<void>;
 }
+
+export type OpenClawPluginHttpRouteAuth = 'gateway' | 'plugin';
+export type OpenClawPluginHttpRouteMatch = 'exact' | 'prefix';
+
+export type OpenClawPluginHttpRouteHandler = (
+    req: IncomingMessage,
+    res: ServerResponse,
+) => Promise<boolean | void> | boolean | void;
+
+export type OpenClawPluginHttpRouteParams = {
+    path: string;
+    handler: OpenClawPluginHttpRouteHandler;
+    auth: OpenClawPluginHttpRouteAuth;
+    match?: OpenClawPluginHttpRouteMatch;
+    replaceExisting?: boolean;
+};
 
 // ── Handler map ─────────────────────────────────────────────────────
 

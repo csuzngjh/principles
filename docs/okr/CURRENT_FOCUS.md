@@ -6,9 +6,9 @@
 
 | Dimension | Value |
 | --- | --- |
-| Current Phase | Productization foundation |
+| Current Phase | Principles Console P2 delivery |
 | User Goal | Turn Principles Disciple into a usable product |
-| Current Output | Unified trajectory DB, exports, correction sample review flow, review-driven data-layer upgrades, and a documented plugin-owned OpenClaw UI plan |
+| Current Output | Plugin-owned React SPA at `/plugins/principles/`, gateway route hosting, Thinking Model event persistence, overview/samples/thinking APIs, and validated build-test coverage |
 
 ## Current Tasks
 
@@ -18,14 +18,17 @@
 - [x] Harden merge blockers around command safety, metrics accuracy, trajectory fault isolation, and install/runtime stability
 - [x] Adopt low-risk architecture review improvements: busy timeout, extra indexes, legacy import coverage, safe blob maintenance
 - [x] Document the no-upstream-change OpenClaw UI strategy and Thinking OS productization plan
-- [ ] Turn SQL views into manager-facing health and principle dashboards
+- [x] Turn SQL views into manager-facing health and principle dashboards through the plugin-owned web console
+- [x] Remove blocking evolution-task UX by deferring user-turn diagnostics and adding async subagent execution
+- [x] Clarify pd_run_worker as an internal worker tool and steer peer/session orchestration back to sessions_* tools
 - [ ] Expand sample quality rules and labeling for downstream LoRA/SFT work
+- [ ] Harden P2 console UX with richer filters, review notes, and operational empty/error states
 
 ## Next
 
-1. Build `/pd-health` on top of `v_daily_metrics`, `v_error_clusters`, and `v_principle_effectiveness`
-2. Add richer sample review metadata and export filters for training pipelines
-3. Evaluate centralized sync or warehouse export after local data quality is stable
+1. Add richer sample review metadata, filters, and bulk actions for training pipelines
+2. Expand Thinking Model analysis with stronger scenario tags and clearer outcome framing
+3. Follow up on any remaining background-task UX polish without reintroducing blocking prompt behavior
 
 ## References
 
