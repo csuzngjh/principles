@@ -1,0 +1,247 @@
+:root {
+  color-scheme: light;
+  --bg: #f4efe7;
+  --panel: rgba(255, 252, 247, 0.88);
+  --panel-strong: #fff9f1;
+  --text: #1d1c1a;
+  --muted: #6f685d;
+  --line: rgba(85, 67, 34, 0.16);
+  --accent: #176b5e;
+  --accent-soft: #dff3ef;
+  --warning: #8c4f1a;
+  --error: #8a2f2f;
+
+  font-family: "Segoe UI", "PingFang SC", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.9), transparent 38%),
+    linear-gradient(135deg, #efe6d8, #f6f1ea 52%, #e6f2ef);
+  color: var(--text);
+}
+
+a {
+  color: inherit;
+}
+
+button,
+select {
+  font: inherit;
+}
+
+.app-shell {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.sidebar {
+  padding: 28px 22px;
+  border-right: 1px solid var(--line);
+  background: rgba(255, 250, 243, 0.84);
+  backdrop-filter: blur(16px);
+}
+
+.brand h1,
+.page-header h2 {
+  margin: 8px 0;
+}
+
+.brand p,
+.muted,
+.row-card span,
+.table-row span,
+.meta,
+pre {
+  color: var(--muted);
+}
+
+.eyebrow {
+  display: inline-block;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.nav {
+  display: grid;
+  gap: 10px;
+  margin: 28px 0;
+}
+
+.nav a,
+.export-link {
+  padding: 12px 14px;
+  border-radius: 14px;
+  text-decoration: none;
+  background: transparent;
+  border: 1px solid transparent;
+}
+
+.nav a.active,
+.nav a:hover,
+.export-link:hover {
+  background: var(--accent-soft);
+  border-color: rgba(23, 107, 94, 0.22);
+}
+
+.content {
+  padding: 28px;
+}
+
+.page {
+  display: grid;
+  gap: 22px;
+}
+
+.page-header,
+.detail-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.grid {
+  display: grid;
+  gap: 18px;
+}
+
+.two-columns {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.wide-right {
+  grid-template-columns: minmax(320px, 1.1fr) minmax(360px, 1.3fr);
+}
+
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  padding: 18px;
+  box-shadow: 0 18px 40px rgba(98, 76, 38, 0.08);
+}
+
+.panel strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 28px;
+}
+
+.panel.error {
+  color: var(--error);
+}
+
+.trend-list,
+.stack,
+.detail-stack,
+.list-table {
+  display: grid;
+  gap: 12px;
+}
+
+.trend-row,
+.row-card,
+.table-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel-strong);
+}
+
+.row-card.vertical {
+  display: grid;
+}
+
+.table-row {
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+}
+
+.table-row.active {
+  border-color: rgba(23, 107, 94, 0.35);
+  background: var(--accent-soft);
+}
+
+.align-right {
+  text-align: right;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(23, 107, 94, 0.1);
+  color: var(--accent);
+}
+
+.pill-row,
+.button-row,
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+}
+
+select,
+button {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+button {
+  cursor: pointer;
+}
+
+button.ghost {
+  background: transparent;
+}
+
+pre {
+  white-space: pre-wrap;
+  margin: 0;
+  font-family: "Cascadia Code", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+@media (max-width: 1100px) {
+  .app-shell,
+  .two-columns,
+  .wide-right,
+  .kpi-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+}

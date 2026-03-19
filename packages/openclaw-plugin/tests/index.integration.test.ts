@@ -9,11 +9,13 @@ describe('Plugin Integration', () => {
   let registeredHooks: Map<string, Function>;
   let registeredServices: any[];
   let registeredCommands: any[];
+  let registeredRoutes: any[];
 
   beforeEach(() => {
     registeredHooks = new Map();
     registeredServices = [];
     registeredCommands = [];
+    registeredRoutes = [];
 
     mockApi = {
       logger: {
@@ -32,6 +34,9 @@ describe('Plugin Integration', () => {
       }),
       registerCommand: vi.fn((command: any) => {
         registeredCommands.push(command);
+      }),
+      registerHttpRoute: vi.fn((route: any) => {
+        registeredRoutes.push(route);
       }),
       registerTool: vi.fn(),
     };
@@ -71,6 +76,18 @@ describe('Plugin Integration', () => {
       for (const hook of expectedHooks) {
         expect(registeredHooks.has(hook)).toBe(true);
       }
+    });
+
+    it('registers the Principles Console HTTP route', () => {
+      plugin.register(mockApi);
+
+      expect(registeredRoutes).toHaveLength(1);
+      expect(registeredRoutes[0]).toEqual(expect.objectContaining({
+        path: '/plugins/principles',
+        auth: 'gateway',
+        match: 'prefix',
+        handler: expect.any(Function),
+      }));
     });
 
     it('should use ctx.workspaceDir from hook context, not from register', async () => {

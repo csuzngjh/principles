@@ -50,7 +50,7 @@ export const EXPLORATORY_TOOLS = [
 export const CONSTRUCTIVE_TOOLS = [
     'write', 'write_file', 'edit', 'edit_file', 'replace', 'apply_patch',
     'insert', 'patch', 'delete_file', 'move_file', 'run_shell_command',
-    'pd_spawn_agent', 'sessions_spawn', 'evolve-task', 'init-strategy'
+  'pd_run_worker', 'sessions_spawn', 'evolve-task', 'init-strategy'
 ];
 
 export class TrustEngine {

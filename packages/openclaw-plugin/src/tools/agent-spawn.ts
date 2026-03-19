@@ -63,11 +63,65 @@ function buildSubagentSystemPrompt(
   return agentDef.systemPrompt;
 }
 
+const INTERNAL_AGENT_USAGE_GUIDANCE =
+  'pd_run_worker is only for Principles Disciple internal workers. ' +
+  'Use agents_list / sessions_list / sessions_spawn / sessions_send for peer agents or cross-session communication.';
+
+function buildInternalAgentUsageMessage(availableAgents: string[]): string {
+  return [
+    'pd_run_worker is reserved for Principles Disciple internal workers.',
+    `Allowed internal roles: ${availableAgents.join(', ')}`,
+    'Use `agents_list` to discover peer agent ids.',
+    'Use `sessions_spawn` to create or orchestrate another session.',
+    'Use `sessions_list` to inspect running sessions.',
+    'Use `sessions_send` to talk to another existing session.',
+  ].join('\n');
+}
+
+function looksLikeSessionOrPeerCoordinationTask(task: string): boolean {
+  const normalized = task.trim().toLowerCase();
+  if (!normalized) return false;
+
+  const explicitMarkers = [
+    'sessions_send',
+    'sessions_spawn',
+    'sessions_list',
+    'agents_list',
+    'sessionkey',
+    'session key',
+    'sessionid',
+    'session id',
+    'agentid',
+    'agent id',
+    'other session',
+    'another session',
+    'peer agent',
+    'other agent',
+    'another agent',
+    'same-level agent',
+    'same level agent',
+    'cross-session',
+    'cross session',
+    'send a message to',
+    'message another session',
+    'talk to another session',
+    '同级智能体',
+    '另一个智能体',
+    '其他智能体',
+    '另一个会话',
+    '其他会话',
+    '跨会话',
+    '给另一个会话发消息',
+  ];
+
+  return explicitMarkers.some((marker) => normalized.includes(marker));
+}
+
 /**
  * Agent Spawn Tool definition
  */
 export const agentSpawnTool = {
-  name: 'pd_spawn_agent',
+  name: 'pd_run_worker',
   description: `启动指定类型的子智能体执行任务。
 
 可用的智能体类型:
@@ -82,18 +136,21 @@ export const agentSpawnTool = {
   parameters: Type.Object({
     agentType: Type.String({
       description:
-        '智能体类型: explorer, diagnostician, auditor, planner, implementer, reviewer, reporter',
+        'Internal worker role only: explorer, diagnostician, auditor, planner, implementer, reviewer, reporter',
     }),
     task: Type.String({
-      description: '任务描述，详细说明子智能体需要完成的工作',
+      description: 'Task for the internal worker. Not for sending messages to peer sessions or orchestrating same-level agents.',
     }),
+    async: Type.Optional(Type.Boolean({
+      description: 'Whether to run in background mode. true = return immediately, false = wait for completion.',
+    })),
   }),
 
   /**
    * Execution logic for the agent spawn tool
    */
   async execute(
-    params: { agentType?: string; task?: string },
+    params: { agentType?: string; task?: string; async?: boolean },
     api: OpenClawPluginApi,
     _workspaceDir?: string
   ): Promise<string> {
@@ -101,24 +158,26 @@ export const agentSpawnTool = {
 
     const agentType = typeof params?.agentType === 'string' ? params.agentType.trim() : '';
     const task = typeof params?.task === 'string' ? params.task.trim() : '';
+    const runAsync = params?.async === true;
+    const availableInternalAgents = listAvailableAgents();
 
     if (!agentType) {
       api.logger?.warn?.(`[PD:AgentSpawn] Invalid agentType: ${JSON.stringify(params?.agentType)}`);
-      return `❌ agentType 参数无效: ${JSON.stringify(params?.agentType)}`;
+      return `Invalid agentType: ${JSON.stringify(params?.agentType)}\n${buildInternalAgentUsageMessage(availableInternalAgents)}`;
     }
 
     if (!task) {
       api.logger?.warn?.(`[PD:AgentSpawn] Invalid task: ${JSON.stringify(params?.task)}`);
-      return `❌ task 参数无效: ${JSON.stringify(params?.task)}`;
+      return `Invalid task: ${JSON.stringify(params?.task)}\n${INTERNAL_AGENT_USAGE_GUIDANCE}`;
     }
 
-    // 1. Validate agent type
-    // 1. Validate agent type
-    const availableAgents = listAvailableAgents();
-    if (!availableAgents.includes(agentType)) {
-      return `❌ 未找到智能体定义: "${agentType}"。
+    if (looksLikeSessionOrPeerCoordinationTask(task)) {
+      api.logger?.warn?.(`[PD:AgentSpawn] Rejected likely peer/session misuse for task: ${task}`);
+      return buildInternalAgentUsageMessage(availableInternalAgents);
+    }
 
-可用的智能体: ${availableAgents.join(', ')}`;
+    if (!availableInternalAgents.includes(agentType)) {
+      return `Unknown internal worker role: "${agentType}"\n${buildInternalAgentUsageMessage(availableInternalAgents)}`;
     }
 
     // 2. Load agent definition
@@ -151,6 +210,11 @@ export const agentSpawnTool = {
         deliver: false, // Critical: don't send directly to external channels
         idempotencyKey: randomUUID(),
       });
+
+      if (runAsync) {
+        const duration = Date.now() - startTime;
+        return `✅ 已在后台启动 **${agentDef.name}** (${(duration / 1000).toFixed(1)}s)。它不会阻塞当前对话。`;
+      }
 
       // 7. Wait for completion (with configurable timeout to prevent indefinite block)
       const timeoutMs = (api as any).config?.get?.('intervals.task_timeout_ms') || (30 * 60 * 1000);
@@ -195,15 +259,32 @@ ${output}`;
       return `❌ 智能体 **${agentDef.name}** 执行异常: ${errorMsg}`;
     } finally {
       // 12. Cleanup session (P1 fix: log failures instead of silent swallow)
-      try {
-        await subagentRuntime.deleteSession({ sessionKey });
-      } catch (cleanupErr) {
-        const cleanupErrMsg = cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr);
-        api.logger?.error?.(`[PD:AgentSpawn] Failed to cleanup session ${sessionKey}: ${cleanupErrMsg}`);
+      if (!runAsync) {
+        try {
+          await subagentRuntime.deleteSession({ sessionKey });
+        } catch (cleanupErr) {
+          const cleanupErrMsg = cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr);
+          api.logger?.error?.(`[PD:AgentSpawn] Failed to cleanup session ${sessionKey}: ${cleanupErrMsg}`);
+        }
       }
     }
   },
 };
+
+agentSpawnTool.description = [
+  'Spawn a Principles Disciple internal worker for built-in diagnostics and evolution tasks.',
+  'Do not use this tool for peer-agent communication or general session orchestration.',
+  'For that, use agents_list / sessions_list / sessions_spawn / sessions_send.',
+  '',
+  'Internal worker roles:',
+  '- explorer: collect evidence from files, logs, and repro steps',
+  '- diagnostician: run root-cause analysis',
+  '- auditor: review system behavior and risks',
+  '- planner: draft an execution plan',
+  '- implementer: carry out a scoped implementation task',
+  '- reviewer: review correctness, safety, and maintainability',
+  '- reporter: summarize findings into a final report',
+].join('\n');
 
 /**
  * Batch spawn multiple agents in sequence
