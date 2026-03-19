@@ -25,6 +25,63 @@ export interface EvolutionQueueItem {
 
 const PAIN_QUEUE_DEDUP_WINDOW_MS = 30 * 60 * 1000;
 
+// P0 fix: File lock constants and helper for queue operations (prevents TOCTOU race)
+const EVOLUTION_QUEUE_LOCK_SUFFIX = '.lock';
+const LOCK_MAX_RETRIES = 50;
+const LOCK_RETRY_DELAY_MS = 50;
+const LOCK_STALE_MS = 30_000;
+
+/**
+ * Acquire an exclusive file lock for the given resource.
+ * Returns a release function. Uses 'wx' flag for atomic exclusive create.
+ * Detects stale locks by checking PID and mtime.
+ */
+function acquireQueueLock(lockPath: string, logger: any): (() => void) | null {
+    let retries = 0;
+    while (retries < LOCK_MAX_RETRIES) {
+        try {
+            const fd = fs.openSync(lockPath, 'wx');
+            fs.writeSync(fd, `${process.pid}\n${Date.now()}`);
+            fs.closeSync(fd);
+            return () => {
+                try { fs.unlinkSync(lockPath); } catch { /* ignore */ }
+            };
+        } catch (err: any) {
+            if (err.code === 'EEXIST') {
+                // Check if lock is stale
+                try {
+                    const stat = fs.statSync(lockPath);
+                    const content = fs.readFileSync(lockPath, 'utf8').trim();
+                    const pid = parseInt(content.split('\n')[0] || '0', 10);
+                    let isStale = false;
+                    if (pid > 0) {
+                        try { process.kill(pid, 0); } catch (e: any) {
+                            if (e.code === 'ESRCH') isStale = true;
+                        }
+                        if (!isStale && Date.now() - stat.mtimeMs > LOCK_STALE_MS) isStale = true;
+                    } else if (Date.now() - stat.mtimeMs > LOCK_STALE_MS) {
+                        isStale = true;
+                    }
+                    if (isStale) {
+                        fs.unlinkSync(lockPath);
+                        retries++;
+                        const start = Date.now();
+                        while (Date.now() - start < LOCK_RETRY_DELAY_MS) { /* spin */ }
+                        continue;
+                    }
+                } catch { /* stat/read failed, treat as busy */ }
+                retries++;
+                const start = Date.now();
+                while (Date.now() - start < LOCK_RETRY_DELAY_MS) { /* spin */ }
+                continue;
+            }
+            throw err;
+        }
+    }
+    logger?.warn?.(`[PD:EvolutionWorker] Failed to acquire lock after ${LOCK_MAX_RETRIES} retries: ${lockPath}`);
+    return null;
+}
+
 function normalizePainDedupKey(source: string, preview: string): string {
     return `${source.trim().toLowerCase()}::${preview.trim().toLowerCase()}`;
 }
@@ -80,35 +137,43 @@ function checkPainFlag(wctx: WorkspaceContext, logger: any) {
         if (logger) logger.info(`[PD:EvolutionWorker] Detected pain flag (score: ${score}, source: ${source}). Enqueueing evolution task.`);
 
         const queuePath = wctx.resolve('EVOLUTION_QUEUE');
-        let queue: EvolutionQueueItem[] = [];
-        if (fs.existsSync(queuePath)) {
-            try {
-                queue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
-            } catch (e) {
-                if (logger) logger.error(`[PD:EvolutionWorker] Failed to parse evolution queue: ${String(e)}`);
+        const lockPath = queuePath + EVOLUTION_QUEUE_LOCK_SUFFIX;
+        const releaseLock = acquireQueueLock(lockPath, logger);
+        if (!releaseLock) return; // Could not acquire lock
+
+        try {
+            let queue: EvolutionQueueItem[] = [];
+            if (fs.existsSync(queuePath)) {
+                try {
+                    queue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
+                } catch (e) {
+                    if (logger) logger.error(`[PD:EvolutionWorker] Failed to parse evolution queue: ${String(e)}`);
+                }
             }
+
+            const now = Date.now();
+            if (hasRecentDuplicateTask(queue, source, preview, now)) {
+                logger?.info?.(`[PD:EvolutionWorker] Duplicate pain task skipped for source=${source} preview=${preview || 'N/A'}`);
+                fs.appendFileSync(painFlagPath, `\nstatus: queued\n`, 'utf8');
+                return;
+            }
+
+            const taskId = createHash('md5').update(`${source}:${score}:${preview}`).digest('hex').substring(0, 8);
+            queue.push({
+                id: taskId,
+                score,
+                source,
+                reason,
+                trigger_text_preview: preview,
+                timestamp: new Date(now).toISOString(),
+                status: 'pending'
+            });
+
+            fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+            fs.appendFileSync(painFlagPath, '\nstatus: queued\n', 'utf8');
+        } finally {
+            releaseLock();
         }
-
-        const now = Date.now();
-        if (hasRecentDuplicateTask(queue, source, preview, now)) {
-            logger?.info?.(`[PD:EvolutionWorker] Duplicate pain task skipped for source=${source} preview=${preview || 'N/A'}`);
-            fs.appendFileSync(painFlagPath, `\nstatus: queued\n`, 'utf8');
-            return;
-        }
-
-        const taskId = createHash('md5').update(`${source}:${score}:${preview}`).digest('hex').substring(0, 8);
-        queue.push({
-            id: taskId,
-            score,
-            source,
-            reason,
-            trigger_text_preview: preview,
-            timestamp: new Date(now).toISOString(),
-            status: 'pending'
-        });
-
-        fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
-        fs.appendFileSync(painFlagPath, '\nstatus: queued\n', 'utf8');
 
     } catch (err) {
         if (logger) logger.warn(`[PD:EvolutionWorker] Error processing pain flag: ${String(err)}`);
@@ -116,11 +181,22 @@ function checkPainFlag(wctx: WorkspaceContext, logger: any) {
 }
 
 function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventLog: any) {
-    try {
-        const queuePath = wctx.resolve('EVOLUTION_QUEUE');
-        if (!fs.existsSync(queuePath)) return;
+    const queuePath = wctx.resolve('EVOLUTION_QUEUE');
+    if (!fs.existsSync(queuePath)) return;
 
-        const queue: EvolutionQueueItem[] = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
+    const lockPath = queuePath + EVOLUTION_QUEUE_LOCK_SUFFIX;
+    const releaseLock = acquireQueueLock(lockPath, logger);
+    if (!releaseLock) return; // Could not acquire lock
+
+    try {
+        let queue: EvolutionQueueItem[] = [];
+        try {
+            queue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
+        } catch (e) {
+            if (logger) logger.error(`[PD:EvolutionWorker] Failed to parse evolution queue: ${String(e)}`);
+            return;
+        }
+
         let queueChanged = false;
 
         const config = wctx.config;
@@ -171,6 +247,8 @@ function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventLog: an
         }
     } catch (err) {
         if (logger) logger.warn(`[PD:EvolutionWorker] Error processing evolution queue: ${String(err)}`);
+    } finally {
+        releaseLock();
     }
 }
 
