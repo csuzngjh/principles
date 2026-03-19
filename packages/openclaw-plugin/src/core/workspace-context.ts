@@ -123,16 +123,20 @@ export class WorkspaceContext {
      * @throws Error if workspaceDir is missing and no fallback available.
      */
     static fromHookContext(ctx: any): WorkspaceContext {
+        const logger = ctx.logger;
+        const log = (msg: string) => logger?.info?.(msg) ?? console.log(msg);
+        const logWarn = (msg: string) => logger?.warn?.(msg) ?? console.warn(msg);
+
         let workspaceDir = ctx.workspaceDir;
         
         if (!workspaceDir) {
-            console.warn('[PD:WorkspaceContext] workspaceDir not provided in context, using PathResolver fallback');
+            logWarn('[PD:WorkspaceContext] workspaceDir not provided in context, using PathResolver fallback');
             workspaceDir = this.pathResolver.getWorkspaceDir();
-            console.log(`[PD:WorkspaceContext] Resolved workspaceDir to: ${workspaceDir}`);
+            log(`[PD:WorkspaceContext] Resolved workspaceDir to: ${workspaceDir}`);
         } else {
             const normalized = this.pathResolver.normalizeWorkspacePath(workspaceDir);
             if (normalized !== workspaceDir) {
-                console.log(`[PD:WorkspaceContext] Normalized workspaceDir: ${workspaceDir} -> ${normalized}`);
+                log(`[PD:WorkspaceContext] Normalized workspaceDir: ${workspaceDir} -> ${normalized}`);
                 workspaceDir = normalized;
             }
         }
@@ -143,13 +147,13 @@ export class WorkspaceContext {
         let stateDir = ctx.stateDir;
         if (!stateDir) {
             stateDir = resolvePdPath(workspaceDir, 'STATE_DIR');
-            console.log(`[PD:WorkspaceContext] Computed stateDir: ${stateDir}`);
+            log(`[PD:WorkspaceContext] Computed stateDir: ${stateDir}`);
         }
 
         const instance = new WorkspaceContext(workspaceDir, stateDir);
         this.instances.set(workspaceDir, instance);
         
-        console.log(`[PD:WorkspaceContext] Created new context for workspace: ${workspaceDir}`);
+        log(`[PD:WorkspaceContext] Created new context for workspace: ${workspaceDir}`);
         
         return instance;
     }
