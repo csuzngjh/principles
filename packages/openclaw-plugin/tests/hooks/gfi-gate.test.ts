@@ -103,9 +103,9 @@ describe('GFI Gate - Hard Intercept', () => {
     } as any);
   });
 
-  // ═══════════════════════════════════════════════════════════════
+  // ════════════════════════════════════════════════
   // TIER 0: 只读工具 - 永不拦截
-  // ═══════════════════════════════════════════════════════════════
+  // ════════════════════════════════════════════════
   describe('TIER 0: Read-only tools', () => {
     it('should NEVER block read_file regardless of GFI', () => {
       const mockCtx = { workspaceDir, sessionId: 'test-session' };
@@ -176,9 +176,9 @@ describe('GFI Gate - Hard Intercept', () => {
     });
   });
 
-  // ═══════════════════════════════════════════════════════════════
+  // ════════════════════════════════════════════════
   // TIER 1: 低风险修改 - GFI >= 70 时拦截
-  // ═══════════════════════════════════════════════════════════════
+  // ════════════════════════════════════════════════
   describe('TIER 1: Low-risk write tools', () => {
     it('should block write when GFI >= 70 (threshold)', () => {
       const mockCtx = { workspaceDir, sessionId: 'test-session' };
@@ -229,9 +229,9 @@ describe('GFI Gate - Hard Intercept', () => {
       expect(result?.blockReason).toContain('GFI');
     });
 
-    it('should NOT block pd_spawn_agent (low risk) when GFI < 70', () => {
+    it('should NOT block pd_run_worker (low risk) when GFI < 70', () => {
       const mockCtx = { workspaceDir, sessionId: 'test-session' };
-      const mockEvent = { toolName: 'pd_spawn_agent', params: { task: 'Analyze code' } };
+      const mockEvent = { toolName: 'pd_run_worker', params: { task: 'Analyze code' } };
 
       vi.mocked(sessionTracker.getSession).mockReturnValue({ currentGfi: 50 } as any);
       mockTrust.getScore.mockReturnValue(70);
@@ -241,15 +241,15 @@ describe('GFI Gate - Hard Intercept', () => {
 
       const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
 
-      // pd_spawn_agent 不在 WRITE_TOOLS 中，应该直接返回（不被 gate 处理）
+      // pd_run_worker 不在 WRITE_TOOLS 中，应该直接返回（不被 gate 处理）
       // 但如果它被当作 AGENT_TOOLS 处理，也应该不被 GFI gate 拦截
       expect(result).toBeUndefined();
     });
   });
 
-  // ═══════════════════════════════════════════════════════════════
+  // ════════════════════════════════════════════════
   // TIER 2: 高风险操作 - GFI >= 40 时拦截
-  // ═══════════════════════════════════════════════════════════════
+  // ════════════════════════════════════════════════
   describe('TIER 2: High-risk tools', () => {
     it('should block delete_file when GFI >= 40', () => {
       const mockCtx = { workspaceDir, sessionId: 'test-session' };
@@ -301,9 +301,9 @@ describe('GFI Gate - Hard Intercept', () => {
     });
   });
 
-  // ═══════════════════════════════════════════════════════════════
+  // ════════════════════════════════════════════════
   // TIER 3: Bash 命令 - 根据内容判断
-  // ═══════════════════════════════════════════════════════════════
+  // ════════════════════════════════════════════════
   describe('TIER 3: Bash commands', () => {
     describe('Safe commands (always allowed)', () => {
       it('should allow "git status" regardless of GFI', () => {
@@ -462,16 +462,16 @@ describe('GFI Gate - Hard Intercept', () => {
     });
   });
 
-  // ═══════════════════════════════════════════════════════════════
+  // ════════════════════════════════════════════════
   // Trust Stage 联动
-  // ═══════════════════════════════════════════════════════════════
+  // ════════════════════════════════════════════════
   describe('Trust Stage multipliers', () => {
     it('should use lower threshold for Stage 1 (×0.5)', () => {
       const mockCtx = { workspaceDir, sessionId: 'test-session' };
       const mockEvent = { toolName: 'write', params: { file_path: 'test.txt', content: 'test' } };
 
       // 基础阈值 70 × 0.5 = 35
-      // GFI = 40 应该被拦截
+      // GFI = 40 应该被拦截 
       vi.mocked(sessionTracker.getSession).mockReturnValue({ currentGfi: 40 } as any);
       mockTrust.getScore.mockReturnValue(25);
       mockTrust.getStage.mockReturnValue(1);
@@ -516,20 +516,20 @@ describe('GFI Gate - Hard Intercept', () => {
 
       const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
 
-      expect(result).toBeUndefined(); // 放行 (Architect bypass 或阈值更高)
+      expect(result).toBeUndefined(); // 放行 (Architect bypass 或阈值更高
     });
   });
 
-  // ═══════════════════════════════════════════════════════════════
+  // ════════════════════════════════════════════════
   // 大规模修改 - 按比例降低阈值
-  // ═══════════════════════════════════════════════════════════════
+  // ════════════════════════════════════════════════
   describe('Large change threshold reduction', () => {
     it('should lower threshold for large modifications (100+ lines)', () => {
       const mockCtx = { workspaceDir, sessionId: 'test-session' };
       const mockEvent = { toolName: 'write', params: { file_path: 'large.ts', content: 'x\n'.repeat(120) } };
 
       // 基础阈值 70 × (1 - 120/200 * 0.5) = 70 × 0.7 = 49
-      // GFI = 55 应该被拦截
+      // GFI = 55 应该被拦截 
       vi.mocked(riskCalculator.estimateLineChanges).mockReturnValue(120);
       vi.mocked(sessionTracker.getSession).mockReturnValue({ currentGfi: 55 } as any);
       mockTrust.getScore.mockReturnValue(70);
@@ -548,7 +548,7 @@ describe('GFI Gate - Hard Intercept', () => {
       const mockCtx = { workspaceDir, sessionId: 'test-session' };
       const mockEvent = { toolName: 'write', params: { file_path: 'small.ts', content: 'test' } };
 
-      // 小修改，基础阈值 70
+      // 小修改癸紝基础阈值 70
       // GFI = 55 应该放行
       vi.mocked(riskCalculator.estimateLineChanges).mockReturnValue(5);
       vi.mocked(sessionTracker.getSession).mockReturnValue({ currentGfi: 55 } as any);
@@ -563,9 +563,9 @@ describe('GFI Gate - Hard Intercept', () => {
     });
   });
 
-  // ═══════════════════════════════════════════════════════════════
+  // ════════════════════════════════════════════════
   // 配置禁用
-  // ═══════════════════════════════════════════════════════════════
+  // ════════════════════════════════════════════════
   describe('Configuration', () => {
     it('should skip GFI gate when disabled', () => {
       const mockCtx = { workspaceDir, sessionId: 'test-session' };
@@ -591,3 +591,4 @@ describe('GFI Gate - Hard Intercept', () => {
     });
   });
 });
+

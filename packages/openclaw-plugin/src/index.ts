@@ -47,6 +47,7 @@ import { SystemLogger } from './core/system-logger.js';
 import { deepReflectTool } from './tools/deep-reflect.js';
 import { agentSpawnTool } from './tools/agent-spawn.js';
 import { PathResolver } from './core/path-resolver.js';
+import { createPrinciplesConsoleRoute } from './http/principles-console-route.js';
 
 // Track initialization to avoid repeated calls
 let workspaceInitialized = false;
@@ -58,6 +59,7 @@ const plugin = {
   register(api: OpenClawPluginApi) {
     api.logger.info("Principles Disciple Plugin registered.");
     PathResolver.setExtensionRoot(api.rootDir);
+    api.registerHttpRoute(createPrinciplesConsoleRoute(api));
 
     const language = (api.pluginConfig?.language as string) || 'en';
 

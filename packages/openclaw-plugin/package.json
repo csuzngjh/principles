@@ -33,18 +33,23 @@
   },
   "scripts": {
     "build": "tsc",
-    "build:bundle": "node esbuild.config.js",
-    "build:production": "tsc && node esbuild.config.js --production",
+    "build:web": "node scripts/build-web.mjs",
+    "build:bundle": "node esbuild.config.js && node scripts/build-web.mjs",
+    "build:production": "tsc && node esbuild.config.js --production && node scripts/build-web.mjs --production",
     "test": "vitest run",
     "postinstall": "node scripts/install-dependencies.cjs"
   },
   "devDependencies": {
+    "@testing-library/react": "^16.3.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/micromatch": "^4.0.10",
     "@types/node": "^25.5.0",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
     "@types/ws": "^8.5.13",
     "@vitest/coverage-v8": "^4.1.0",
     "esbuild": "^0.27.4",
+    "jsdom": "^26.1.0",
     "typescript": "^5.0.0",
     "vitest": "^4.1.0",
     "ws": "^8.18.0"
@@ -60,6 +65,9 @@
   "dependencies": {
     "@sinclair/typebox": "^0.34.48",
     "better-sqlite3": "^11.10.0",
-    "micromatch": "^4.0.8"
+    "micromatch": "^4.0.8",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-router-dom": "^7.9.4"
   }
 }

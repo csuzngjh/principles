@@ -53,11 +53,11 @@ const EXPLORATORY_TOOLS = new Set([
 const CONSTRUCTIVE_TOOLS = new Set([
   'write', 'write_file', 'edit', 'edit_file', 'replace', 'apply_patch',
   'insert', 'patch', 'delete_file', 'move_file', 'run_shell_command',
-  'pd_spawn_agent', 'sessions_spawn',
+  'pd_run_worker', 'sessions_spawn',
 ]);
 
 // 高风险工具：需要 allowRiskPath 权限
-// 注意：pd_spawn_agent 和 sessions_spawn 已从高风险中移出，它们由 allowSubagentSpawn 单独控制
+// 注意：pd_run_worker 和 sessions_spawn 已从高风险中移出，它们由 allowSubagentSpawn 单独控制
 const HIGH_RISK_TOOLS = new Set([
   'run_shell_command', 'delete_file', 'move_file',
 ]);
@@ -280,7 +280,7 @@ export class EvolutionEngine {
     }
 
     // 子智能体检查
-    if ((context.toolName === 'pd_spawn_agent' || context.toolName === 'sessions_spawn') && !perms.allowSubagentSpawn) {
+    if ((context.toolName === 'pd_run_worker' || context.toolName === 'sessions_spawn') && !perms.allowSubagentSpawn) {
       return {
         allowed: false,
         reason: `Tier ${this.scorecard.currentTier} (${tierDef.name}) 未解锁子智能体权限`,
