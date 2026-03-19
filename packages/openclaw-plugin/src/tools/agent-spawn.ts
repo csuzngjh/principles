@@ -180,25 +180,6 @@ export const agentSpawnTool = {
       return `Unknown internal worker role: "${agentType}"\n${buildInternalAgentUsageMessage(availableInternalAgents)}`;
     }
 
-    if (!agentType) {
-      api.logger?.warn?.(`[PD:AgentSpawn] Invalid agentType: ${JSON.stringify(params?.agentType)}`);
-      return `❌ agentType 参数无效: ${JSON.stringify(params?.agentType)}`;
-    }
-
-    if (!task) {
-      api.logger?.warn?.(`[PD:AgentSpawn] Invalid task: ${JSON.stringify(params?.task)}`);
-      return `❌ task 参数无效: ${JSON.stringify(params?.task)}`;
-    }
-
-    // 1. Validate agent type
-    // 1. Validate agent type
-    const availableAgents = listAvailableAgents();
-    if (!availableAgents.includes(agentType)) {
-      return `❌ 未找到智能体定义: "${agentType}"。
-
-可用的智能体: ${availableAgents.join(', ')}`;
-    }
-
     // 2. Load agent definition
     const agentDef = loadAgentDefinition(agentType);
     if (!agentDef) {
