@@ -177,13 +177,18 @@ function SamplesPage() {
 
   async function review(decision: 'approved' | 'rejected') {
     if (!selected) return;
-    await api.reviewSample(selected.sampleId, decision);
-    const [samples, detail] = await Promise.all([
-      api.listSamples(search),
-      api.getSampleDetail(selected.sampleId),
-    ]);
-    setData(samples);
-    setSelected(detail);
+    try {
+      await api.reviewSample(selected.sampleId, decision);
+      const [samples, detail] = await Promise.all([
+        api.listSamples(search),
+        api.getSampleDetail(selected.sampleId),
+      ]);
+      setData(samples);
+      setSelected(detail);
+    } catch (err) {
+      console.error('[App] Review failed:', err);
+      setError(err instanceof Error ? err.message : 'Review operation failed');
+    }
   }
 
   if (error) return <ErrorState error={error} />;

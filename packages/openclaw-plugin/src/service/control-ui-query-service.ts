@@ -2,6 +2,9 @@ import { ControlUiDatabase } from '../core/control-ui-db.js';
 import { getThinkingModel, listThinkingModels } from '../core/thinking-models.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 
+/** Time window (in minutes) for querying principle events related to a sample */
+const PRINCIPLE_EVENT_WINDOW_MINUTES = 10;
+
 export interface OverviewResponse {
   workspaceDir: string;
   generatedAt: string;
@@ -575,10 +578,10 @@ export class ControlUiQueryService {
       SELECT principle_id, event_type, created_at
       FROM principle_events
       WHERE created_at >= ?
-        AND created_at <= datetime(?, '+10 minutes')
+        AND created_at <= datetime(?, '+' || ? || ' minutes')
       ORDER BY created_at DESC
       LIMIT 20
-    `, row.bad_created_at, row.user_created_at);
+    `, row.bad_created_at, row.user_created_at, PRINCIPLE_EVENT_WINDOW_MINUTES);
     const seededPrincipleIds = parseJson<string[]>(row.principle_ids_json, []).map((principleId) => ({
       principleId,
       eventType: 'seeded_from_sample',
