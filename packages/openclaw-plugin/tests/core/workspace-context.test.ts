@@ -4,6 +4,16 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 vi.mock('fs');
+vi.mock('../../src/core/trajectory.js', () => ({
+    TrajectoryRegistry: {
+        get: vi.fn(() => ({
+            dispose: vi.fn(),
+        })),
+        use: vi.fn(),
+        dispose: vi.fn(),
+        clear: vi.fn(),
+    }
+}));
 
 describe('WorkspaceContext', () => {
     // Use path.resolve for cross-platform compatibility on Windows
@@ -98,6 +108,29 @@ describe('WorkspaceContext', () => {
         expect(trust).toBeDefined();
         expect(trust.recordSuccess).toBeDefined();
         expect(wctx.trust).toBe(trust);
+    });
+
+    it('should pass trajectory settings from config into the registry', async () => {
+        const { TrajectoryRegistry } = await import('../../src/core/trajectory.js');
+        const mockCtx = { workspaceDir };
+        const wctx = WorkspaceContext.fromHookContext(mockCtx);
+
+        (wctx as any)._config = {
+            get: vi.fn((key: string) => {
+                if (key === 'trajectory.blob_inline_threshold_bytes') return 2048;
+                if (key === 'trajectory.busy_timeout_ms') return 1500;
+                if (key === 'trajectory.orphan_blob_grace_days') return 2;
+                return undefined;
+            }),
+        };
+
+        const trajectory = wctx.trajectory;
+        expect(trajectory).toBeDefined();
+        expect(TrajectoryRegistry.get).toHaveBeenCalledWith(workspaceDir, {
+            blobInlineThresholdBytes: 2048,
+            busyTimeoutMs: 1500,
+            orphanBlobGraceDays: 2,
+        });
     });
 
     it('should lazy load Dictionary service', () => {

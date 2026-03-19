@@ -5,6 +5,7 @@ import { withLock } from '../utils/file-lock.js';
 import { PathResolver } from './path-resolver.js';
 import { SystemLogger } from './system-logger.js';
 import { shouldIgnorePainProtocolText } from './dictionary.js';
+import { TrajectoryRegistry } from './trajectory.js';
 import type {
   CandidateCreatedData,
   EvolutionLoopEvent,
@@ -72,6 +73,20 @@ export class EvolutionReducerImpl implements EvolutionReducer {
       fs.appendFileSync(this.streamPath, `${JSON.stringify(event)}\n`, 'utf8');
     }, { lockStaleMs: 15000 });
     this.applyEvent(event);
+    if (event.type !== 'pain_detected') {
+      try {
+        TrajectoryRegistry.use(this.workspaceDir, (trajectory) => {
+          trajectory.recordPrincipleEvent({
+            principleId: 'principleId' in event.data && typeof event.data.principleId === 'string' ? event.data.principleId : null,
+            eventType: event.type,
+            payload: event.data,
+            createdAt: event.ts,
+          });
+        });
+      } catch {
+        // Keep evolution loop resilient if trajectory storage is unavailable.
+      }
+    }
     // Performance: sweepExpiredProbation() moved to getProbationPrinciples() for lazy cleanup
   }
 

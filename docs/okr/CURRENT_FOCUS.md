@@ -1,28 +1,34 @@
 # CURRENT_FOCUS
 
-> Version: v1 | Status: EXECUTING | Updated: 2026-03-18
+> Version: v1 | Status: EXECUTING | Updated: 2026-03-19
 
 ## Status Snapshot
 
 | Dimension | Value |
 | --- | --- |
-| Current Phase | Architecture understanding |
+| Current Phase | Productization foundation |
 | User Goal | Turn Principles Disciple into a usable product |
-| Current Output | Panorama architecture doc in `docs/maps/` |
+| Current Output | Unified trajectory DB, exports, correction sample review flow, review-driven data-layer upgrades, and a documented plugin-owned OpenClaw UI plan |
 
 ## Current Tasks
 
-- [x] Produce a non-technical panorama of the framework's philosophy, architecture, and product value
-- [ ] Translate the panorama into a productization roadmap
-- [ ] Identify the biggest gaps between philosophy and implementation
+- [x] Build a workspace-local SQLite trajectory store with blob support and legacy import
+- [x] Wire prompt/llm/pain/gate/trust/evolution signals into the unified data layer
+- [x] Add `/pd-status data`, `/pd-export`, and `/pd-samples review`
+- [x] Harden merge blockers around command safety, metrics accuracy, trajectory fault isolation, and install/runtime stability
+- [x] Adopt low-risk architecture review improvements: busy timeout, extra indexes, legacy import coverage, safe blob maintenance
+- [x] Document the no-upstream-change OpenClaw UI strategy and Thinking OS productization plan
+- [ ] Turn SQL views into manager-facing health and principle dashboards
+- [ ] Expand sample quality rules and labeling for downstream LoRA/SFT work
 
 ## Next
 
-1. Review `docs/maps/principles-disciple-panorama-zh.md`
-2. Convert the strongest findings into a product strategy and MVP scope
-3. Prioritize engineering fixes that most affect product credibility
+1. Build `/pd-health` on top of `v_daily_metrics`, `v_error_clusters`, and `v_principle_effectiveness`
+2. Add richer sample review metadata and export filters for training pipelines
+3. Evaluate centralized sync or warehouse export after local data quality is stable
 
 ## References
 
-- Main doc: `docs/maps/principles-disciple-panorama-zh.md`
-- Supporting area: `docs/reviews/`
+- Core data layer: `packages/openclaw-plugin/src/core/trajectory.ts`
+- Commands: `packages/openclaw-plugin/src/commands/export.ts`, `packages/openclaw-plugin/src/commands/samples.ts`
+- Product roadmap context: `docs/maps/` and `docs/reviews/`

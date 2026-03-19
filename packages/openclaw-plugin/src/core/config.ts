@@ -71,6 +71,11 @@ export interface TrustSettings {
 
 export interface PainSettings {
     language: 'en' | 'zh';
+    trajectory?: {
+        blob_inline_threshold_bytes?: number;
+        busy_timeout_ms?: number;
+        orphan_blob_grace_days?: number;
+    };
     thresholds: {
         pain_trigger: number;
         cognitive_paralysis_input: number;

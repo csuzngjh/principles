@@ -11,6 +11,13 @@ import {
 } from '../../src/core/trust-engine.js';
 
 vi.mock('fs');
+vi.mock('../../src/core/trajectory.js', () => ({
+    TrajectoryRegistry: {
+        get: vi.fn().mockReturnValue({
+            recordTrustChange: vi.fn()
+        })
+    }
+}));
 vi.mock('../../src/core/config-service.js', () => ({
     ConfigService: {
         get: vi.fn().mockReturnValue({

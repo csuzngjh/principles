@@ -112,6 +112,15 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
         return { text: isZh ? `✅ 智能体信任分已重置为初始值 (${newScore})。` : `✅ Agent trust score has been reset to initial value (${newScore}).` };
     }
 
+    if (args === 'data') {
+        const stats = wctx.trajectory.getDataStats();
+        return {
+            text: isZh
+                ? `轨迹数据状态\n- 数据库: ${stats.dbPath}\n- 助手轮次: ${stats.assistantTurns}\n- 用户轮次: ${stats.userTurns}\n- 工具调用: ${stats.toolCalls}\n- 痛感事件: ${stats.painEvents}\n- 待审核样本: ${stats.pendingSamples}\n- 已通过样本: ${stats.approvedSamples}\n- Blob 字节数: ${stats.blobBytes}\n- 最近写入: ${stats.lastIngestAt ?? 'none'}`
+                : `Trajectory Data Status\n- DB: ${stats.dbPath}\n- assistant turns: ${stats.assistantTurns}\n- user turns: ${stats.userTurns}\n- tool calls: ${stats.toolCalls}\n- pain events: ${stats.painEvents}\n- pending samples: ${stats.pendingSamples}\n- approved samples: ${stats.approvedSamples}\n- blob bytes: ${stats.blobBytes}\n- last ingest: ${stats.lastIngestAt ?? 'none'}`
+        };
+    }
+
     // Default: Show status
     const session = sessionId ? getSession(sessionId) : undefined;
     const gfi = session ? session.currentGfi : 0;
