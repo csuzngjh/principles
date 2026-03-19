@@ -122,6 +122,25 @@ function extractRecentConversationContext(
     .join('\n\n');
 }
 
+function getTextContent(message: unknown): string {
+  if (!message || typeof message !== 'object') return '';
+  const record = message as { content?: unknown };
+  if (typeof record.content === 'string') return record.content;
+  if (Array.isArray(record.content)) {
+    return record.content
+      .filter((part: unknown) => part && typeof part === 'object' && (part as { type?: unknown }).type === 'text')
+      .map((part) => String((part as { text?: unknown }).text ?? ''))
+      .join('\n')
+      .trim();
+  }
+  return '';
+}
+
+function detectCorrectionCue(text: string): string | null {
+  const cues = ['你错了', '不是这个', '重新来', '重来', 'you are wrong', 'wrong file', 'not this'];
+  return cues.find((cue) => text.toLowerCase().includes(cue.toLowerCase())) ?? null;
+}
+
 function resolveEvolutionTask(
   inProgressTask: any,
   messages?: unknown[],
@@ -326,6 +345,42 @@ export async function handleBeforePromptBuild(
   const wctx = WorkspaceContext.fromHookContext(ctx);
   const { trigger, sessionId, api } = ctx;
   const logger = api?.logger;
+  if (sessionId) {
+    wctx.trajectory?.recordSession?.({ sessionId });
+  }
+
+  if (sessionId && trigger === 'user' && Array.isArray(event.messages) && event.messages.length > 0) {
+    const latestUserIndex = [...event.messages]
+      .map((message, index) => ({ message, index }))
+      .reverse()
+      .find((entry) => (entry.message as { role?: unknown })?.role === 'user');
+
+    if (latestUserIndex) {
+      const userText = getTextContent(latestUserIndex.message);
+      const correctionCue = detectCorrectionCue(userText);
+      let referencesAssistantTurnId: number | null = null;
+
+      for (let i = latestUserIndex.index - 1; i >= 0; i--) {
+        const candidate = event.messages[i] as { role?: unknown };
+        if (candidate?.role === 'assistant') {
+          const turns = wctx.trajectory?.listAssistantTurns?.(sessionId) ?? [];
+          const lastAssistant = turns[turns.length - 1];
+          referencesAssistantTurnId = lastAssistant?.id ?? null;
+          break;
+        }
+      }
+
+      const userTurnCount = event.messages.filter((message) => (message as { role?: unknown })?.role === 'user').length;
+      wctx.trajectory?.recordUserTurn?.({
+        sessionId,
+        turnIndex: userTurnCount,
+        rawText: userText,
+        correctionDetected: Boolean(correctionCue),
+        correctionCue,
+        referencesAssistantTurnId,
+      });
+    }
+  }
 
   // Load context injection configuration
   const contextConfig = loadContextInjectionConfig(workspaceDir);

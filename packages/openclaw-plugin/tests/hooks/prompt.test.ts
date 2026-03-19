@@ -167,6 +167,11 @@ describe('Prompt Context Injection Hook', () => {
     trust: mockTrust,
     hygiene: mockHygiene,
     config: mockConfig,
+    trajectory: {
+      recordSession: vi.fn(),
+      recordUserTurn: vi.fn(),
+      listAssistantTurns: vi.fn().mockReturnValue([{ id: 42 }]),
+    },
     evolutionReducer: {
       getActivePrinciples: vi.fn().mockReturnValue([]),
       getProbationPrinciples: vi.fn().mockReturnValue([]),
@@ -205,6 +210,26 @@ describe('Prompt Context Injection Hook', () => {
     expect(result?.prependContext).toContain('<system_override:runtime_constraints>');
     expect(result?.prependContext).toContain('Trust Score: 85/100');
     expect(result?.prependContext).toContain('Stage 4');  });
+
+  it('records latest user turn and flags explicit corrections', async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+
+    await handleBeforePromptBuild({
+      messages: [
+        { role: 'assistant', content: 'I edited the wrong file.' },
+        { role: 'user', content: '你错了，不是这个文件，重新来。' },
+      ],
+    } as any, { workspaceDir, trigger: 'user', sessionId: 'session-1' } as any);
+
+    expect(mockWctx.trajectory.recordSession).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 'session-1',
+    }));
+    expect(mockWctx.trajectory.recordUserTurn).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 'session-1',
+      correctionDetected: true,
+      correctionCue: '你错了',
+    }));
+  });
 
   // ═══════════════════════════════════════════════════════════════════
   // IMPORTANT: project_context and reflection_log are now in appendSystemContext

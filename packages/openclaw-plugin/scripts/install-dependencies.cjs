@@ -13,7 +13,8 @@ const { join } = require('path');
 const PLUGIN_DIR = join(__dirname, '..');
 const DEPENDENCIES = [
   'micromatch@^4.0.8',
-  '@sinclair/typebox@^0.34.48'
+  '@sinclair/typebox@^0.34.48',
+  'better-sqlite3@^11.10.0'
 ];
 
 console.log('🔧 Setting up Principles Disciple plugin dependencies...');

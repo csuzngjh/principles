@@ -3,26 +3,37 @@
   "name": "Principles Disciple",
   "description": "Evolutionary programming agent framework with strategic guardrails and reflection loops.",
   "version": "1.6.0",
-  "skills": ["./skills"],
+  "skills": [
+    "./skills"
+  ],
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
     "properties": {
       "language": {
         "type": "string",
-        "enum": ["en", "zh"],
+        "enum": [
+          "en",
+          "zh"
+        ],
         "default": "zh",
         "description": "系统提示词和交互语言 (默认推荐: zh)"
       },
       "auditLevel": {
         "type": "string",
-        "enum": ["low", "medium", "high"],
+        "enum": [
+          "low",
+          "medium",
+          "high"
+        ],
         "default": "medium",
         "description": "安全防爆级别：\n- low: 极客模式，几乎不拦截，AI 可以自由飞翔。\n- medium (推荐): 平衡模式，允许 AI 大胆尝试，但拦截毁灭性操作。\n- high: 严格模式，所有大范围修改都需要你明确授权。"
       },
       "riskPaths": {
         "type": "array",
-        "items": { "type": "string" },
+        "items": {
+          "type": "string"
+        },
         "default": [],
         "description": "自定义高危目录（例如 .git/, prod_db/）。AI 试图修改这些目录前，将被强制拦截并要求出具安全计划。"
       },
@@ -31,16 +42,40 @@
         "additionalProperties": false,
         "description": "当 AI 遇到复杂问题或连续报错时，是否允许它停下来进行深度自我反思？",
         "properties": {
-          "enabled": { "type": "boolean", "default": true, "description": "开启 AI 深度反思功能" },
-          "mode": { "type": "string", "enum": ["auto", "forced"], "default": "auto", "description": "auto: 遇到困难自动触发; forced: 每次回答前都强制反思(极耗时间，不推荐)" }
+          "enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "开启 AI 深度反思功能"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "forced"
+            ],
+            "default": "auto",
+            "description": "auto: 遇到困难自动触发; forced: 每次回答前都强制反思(极耗时间，不推荐)"
+          }
         }
       }
     }
   },
   "uiHints": {
-    "language": { "label": "交互语言" },
-    "auditLevel": { "label": "防爆拦截级别", "placeholder": "medium" },
-    "riskPaths": { "label": "☠️ 绝对高危目录 (空表示不设限)" },
-    "deep_reflection": { "label": "💡 AI 深度反思功能" }
-  }
+    "language": {
+      "label": "交互语言"
+    },
+    "auditLevel": {
+      "label": "防爆拦截级别",
+      "placeholder": "medium"
+    },
+    "riskPaths": {
+      "label": "☠️ 绝对高危目录 (空表示不设限)"
+    },
+    "deep_reflection": {
+      "label": "💡 AI 深度反思功能"
+    }
+  },
+  "extensions": [
+    "./dist/bundle.js"
+  ]
 }

@@ -9,6 +9,7 @@ import type { OpenClawPluginApi, SubagentWaitResult } from '../openclaw-sdk.js';
 import { EventLogService } from './event-log.js';
 import { resolvePdPath } from './paths.js';
 import { ConfigService } from './config-service.js';
+import { TrajectoryRegistry } from './trajectory.js';
 
 export interface TrustScorecard {
     trust_score: number;
@@ -243,6 +244,19 @@ export class TrustEngine {
         if (context?.sessionId) {
             const eventLog = EventLogService.get(this.stateDir);
             eventLog.recordTrustChange(context.sessionId, { previousScore: oldScore, newScore: this.scorecard.trust_score, delta, reason });
+        }
+        try {
+            TrajectoryRegistry.use(this.workspaceDir, (trajectory) => {
+                trajectory.recordTrustChange({
+                    sessionId: context?.sessionId,
+                    previousScore: oldScore,
+                    newScore: this.scorecard.trust_score,
+                    delta,
+                    reason,
+                });
+            });
+        } catch {
+            // Do not block trust updates if trajectory storage is unavailable.
         }
 
         const limit = this.trustSettings.history_limit || 50;

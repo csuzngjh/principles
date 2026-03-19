@@ -8,6 +8,7 @@ import { PainDictionary } from './dictionary.js';
 import { TrustEngine } from './trust-engine.js';
 import { HygieneTracker } from './hygiene/tracker.js';
 import { EvolutionReducerImpl } from './evolution-reducer.js';
+import { TrajectoryDatabase, TrajectoryRegistry } from './trajectory.js';
 
 /**
  * WorkspaceContext - Centralized management of workspace-specific paths and services.
@@ -26,6 +27,7 @@ export class WorkspaceContext {
     private _trust?: TrustEngine;
     private _hygiene?: HygieneTracker;
     private _evolutionReducer?: EvolutionReducerImpl;
+    private _trajectory?: TrajectoryDatabase;
 
     private constructor(workspaceDir: string, stateDir: string) {
         this.workspaceDir = workspaceDir;
@@ -94,6 +96,16 @@ export class WorkspaceContext {
     }
 
     /**
+     * Trajectory database for analytics and sample curation.
+     */
+    get trajectory(): TrajectoryDatabase {
+        if (!this._trajectory) {
+            this._trajectory = TrajectoryRegistry.get(this.workspaceDir);
+        }
+        return this._trajectory;
+    }
+
+    /**
      * Creates or retrieves a WorkspaceContext instance from an OpenClaw hook context.
      * Uses PathResolver to handle path normalization and fallback logic.
      * @throws Error if workspaceDir is missing and no fallback available.
@@ -146,6 +158,7 @@ export class WorkspaceContext {
         this._dictionary = undefined;
         this._trust = undefined;
         this._evolutionReducer = undefined;
+        this._trajectory = undefined;
     }
 
     /**
@@ -157,6 +170,7 @@ export class WorkspaceContext {
             instance.invalidate();
             this.instances.delete(workspaceDir);
         }
+        TrajectoryRegistry.dispose(workspaceDir);
     }
 
     /**
@@ -164,5 +178,6 @@ export class WorkspaceContext {
      */
     static clearCache(): void {
         this.instances.clear();
+        TrajectoryRegistry.clear();
     }
 }

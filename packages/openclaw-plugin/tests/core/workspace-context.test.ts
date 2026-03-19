@@ -4,6 +4,16 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 vi.mock('fs');
+vi.mock('../../src/core/trajectory.js', () => ({
+    TrajectoryRegistry: {
+        get: vi.fn(() => ({
+            dispose: vi.fn(),
+        })),
+        use: vi.fn(),
+        dispose: vi.fn(),
+        clear: vi.fn(),
+    }
+}));
 
 describe('WorkspaceContext', () => {
     // Use path.resolve for cross-platform compatibility on Windows

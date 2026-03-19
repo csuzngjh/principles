@@ -37,7 +37,10 @@ import { handleFocusCommand } from './commands/focus.js';
 import { handleRollbackCommand } from './commands/rollback.js';
 import { handleEvolutionStatusCommand } from './commands/evolution-status.js';
 import { handlePrincipleRollbackCommand } from './commands/principle-rollback.js';
+import { handleExportCommand } from './commands/export.js';
+import { handleSamplesCommand } from './commands/samples.js';
 import { EvolutionWorkerService } from './service/evolution-worker.js';
+import { TrajectoryService } from './service/trajectory-service.js';
 import { ensureWorkspaceTemplates } from './core/init.js';
 import { migrateDirectoryStructure } from './core/migration.js';
 import { SystemLogger } from './core/system-logger.js';
@@ -173,6 +176,7 @@ const plugin = {
     try {
       EvolutionWorkerService.api = api;
       api.registerService(EvolutionWorkerService);
+      api.registerService(TrajectoryService);
     } catch (err) {
       api.logger.error(`[PD] Failed to register EvolutionWorkerService: ${String(err)}`);
     }
@@ -463,6 +467,38 @@ const plugin = {
     });
 
     // ── Tools ──
+    api.registerCommand({
+      name: "pd-export",
+      description: getCommandDescription('pd-export', language),
+      acceptsArgs: true,
+      handler: (ctx) => {
+        try {
+          const workspaceDir = api.resolvePath('.');
+          if (ctx.config) ctx.config.workspaceDir = workspaceDir;
+          return handleExportCommand(ctx);
+        } catch (err) {
+          api.logger.error(`[PD] Command /pd-export failed: ${String(err)}`);
+          return { text: language === 'zh' ? "导出失败，请检查日志。" : "Export failed. Check logs." };
+        }
+      }
+    });
+
+    api.registerCommand({
+      name: "pd-samples",
+      description: getCommandDescription('pd-samples', language),
+      acceptsArgs: true,
+      handler: (ctx) => {
+        try {
+          const workspaceDir = api.resolvePath('.');
+          if (ctx.config) ctx.config.workspaceDir = workspaceDir;
+          return handleSamplesCommand(ctx);
+        } catch (err) {
+          api.logger.error(`[PD] Command /pd-samples failed: ${String(err)}`);
+          return { text: language === 'zh' ? "样本命令执行失败，请检查日志。" : "Samples command failed. Check logs." };
+        }
+      }
+    });
+
     api.registerTool(deepReflectTool);
     api.registerTool(agentSpawnTool);
   }

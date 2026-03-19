@@ -47,6 +47,10 @@ describe('LLM Cognitive Distress Hook', () => {
         stateDir: '/mock/workspace/.state',
         config: mockConfig,
         eventLog: mockEventLog,
+        trajectory: {
+            recordAssistantTurn: vi.fn(),
+            recordPainEvent: vi.fn(),
+        },
         resolve: vi.fn().mockImplementation((key) => {
             if (key === 'THINKING_OS_USAGE') return path.join(workspaceDir, '.state', 'thinking_os_usage.json');
             return '';
@@ -169,6 +173,14 @@ describe('LLM Cognitive Distress Hook', () => {
                 detection_mode: 'legacy_tag',
                 raw_score: 25,
                 calibrated_score: 13
+            })
+        );
+        expect(mockWctx.trajectory.recordAssistantTurn).toHaveBeenCalledWith(
+            expect.objectContaining({
+                sessionId,
+                runId: 'r1',
+                rawText: '[EMOTIONAL_DAMAGE_DETECTED:moderate]',
+                sanitizedText: '',
             })
         );
     });
