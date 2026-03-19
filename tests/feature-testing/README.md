@@ -1,4 +1,4 @@
-# 特性测试框架 - 完整指南
+﻿# 特性测试框架 - 完整指南
 
 ## 🎯 概述
 
@@ -513,5 +513,5 @@ tail -50 "$SESSION" | jq 'select(.message.details.error != null)'
 
 **版本**: v1.0
 **最后更新**: 2026-03-11
-**维护者**: Claude Code
+**维护者**: iFlow CLI
 **许可**: MIT
