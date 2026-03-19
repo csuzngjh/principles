@@ -11,6 +11,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### Principles Console (Web UI)
+- Built-in web dashboard accessible at `http://localhost:3000/plugins/principles/`
+- **Overview page**: Workspace health, daily trends, regression alerts, thinking model coverage
+- **Samples page**: Correction sample queue management (view, filter, approve/reject)
+- **Thinking Models page**: Usage statistics, scenario analysis, health audit
+- Real-time data from local SQLite trajectory database
+
+#### Thinking Models Tracking
+- Automatic detection of thinking model usage in agent responses
+- 10 core mental models (T-01 to T-10) with bilingual pattern matching
+- Scenario-based baseline triggers (exploration, after-tool-failure, etc.)
+- Usage statistics stored in trajectory database
+
+#### Correction Sample Management
+- Auto-collect user correction scenarios (bad attempt → user fix)
+- Quality scoring based on edit distance and context
+- Review queue with approve/reject workflow
+- Export approved samples for training (with optional redaction)
+
+#### New Slash Commands
+- `/pd-samples` - Manage correction samples (list, review, approve/reject)
+- `/pd-export` - Export analytics snapshot or correction samples
+- `/pd-rollback` - Undo incorrectly flagged emotion penalties
+
 #### Smart Update System
 - Auto-detect first install vs update
 - Generate `.update` files for existing user files (smart mode)
