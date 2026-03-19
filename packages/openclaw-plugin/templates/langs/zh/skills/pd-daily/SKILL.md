@@ -1,6 +1,6 @@
 ---
 name: pd-daily
-description: 配置并发送每日进化日报（支持邮件/即时通讯/语音通知）
+description: 配置并发送每日进化日报（支持邮件/即时通讯/飞书/语音通知）
 disable-model-invocation: true
 ---
 
@@ -30,9 +30,10 @@ disable-model-invocation: true
 通过会话对话依次询问：
 
 1. **是否启用进化日报？**
-2. **发送时间？**（默认每天 9:00）
-3. **时区？**（默认 Asia/Shanghai）
+2. **发送时间？**（默认每天 23:00 UTC）
+3. **时区？**（默认 UTC）
 4. **发送渠道？**
+   - 📱 **飞书** → 需用户 open_id（推荐，格式：ou_xxx）
    - 邮件 → 需邮箱地址
    - WhatsApp/Telegram → 需手机号/用户ID
    - Discord/Slack → 需频道ID
@@ -52,13 +53,13 @@ disable-model-invocation: true
 - 创建时间: {date}
 
 ## 发送设置
-- 发送时间: 09:00
-- 时区: Asia/Shanghai
-- Cron 表达式: 0 9 * * *
+- 发送时间: 23:00
+- 时区: UTC
+- Cron 表达式: 0 23 * * *
 
 ## 发送渠道
-- 渠道: whatsapp
-- 目标: +8613800138000
+- 渠道: feishu
+- 目标: ou_cf5c98aada743ab12c65c7c6764b5a49
 
 ## 报告风格
 - 风格: standard
@@ -83,13 +84,13 @@ disable-model-invocation: true
   "action": "add",
   "job": {
     "name": "evolution-daily-report",
-    "schedule": { "kind": "cron", "expr": "0 9 * * *", "tz": "Asia/Shanghai" },
+    "schedule": { "kind": "cron", "expr": "0 23 * * *", "tz": "UTC" },
     "sessionTarget": "isolated",
     "payload": {
       "kind": "agentTurn",
       "message": "执行进化日报技能：读取日志数据，生成日报并发送"
     },
-    "delivery": { "mode": "announce", "channel": "whatsapp", "to": "+8613800138000" }
+    "delivery": { "mode": "announce", "channel": "feishu", "to": "ou_cf5c98aada743ab12c65c7c6764b5a49" }
   }
 }
 ```
@@ -97,12 +98,73 @@ disable-model-invocation: true
 ### Step 5: 日报生成（定时触发或手动触发）
 
 1. **读取定量数据**：获取 `daily-stats.json` 和 `pain_dictionary.json` 中的指标。
-2. **提取定性记忆（关键防遗忘步骤）**：因为你可能经历了漫长的上下文，**必须使用文件读取工具**去扫描以下核心进化文件，提取“今天”新增的内容：
+2. **提取定性记忆（关键防遗忘步骤）**：因为你可能经历了漫长的上下文，**必须使用文件读取工具**去扫描以下核心进化文件，提取"今天"新增的内容：
    - `memory/ISSUE_LOG.md`：寻找今天发生的具体错误与复盘。
    - `memory/DECISIONS.md`：寻找今天定下的新架构规则。
    - `memory/logs/SYSTEM.log`：寻找今天触发的门禁拦截或子代理孵化事件。
 3. **合成与生成**：结合定量指标和定性记忆，生成深度洞察，按用户风格生成 Markdown。绝不要凭空捏造洞察。
-4. **发送日报**：通过 OpenClaw 渠道或打印到屏幕。
+4. **发送飞书推送**：调用飞书 API 发送（见下方"飞书推送实施规范"）。
+
+---
+
+## 飞书消息格式
+
+当发送渠道为飞书时，使用以下格式发送消息：
+
+```json
+{
+  "action": "send",
+  "channel": "feishu",
+  "target": "user:ou_cf5c98aada743ab12c65c7c6764b5a49",
+  "message": "📊 Principles 进化日报 - {date}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n🛡️ Trust Score: {trust_score}/100 (Stage {trust_stage})\n😴 GFI: {gfi_peak}\n⚡ Pain: {pain_count} pts\n\n📈 7 日趋势：\n{7day_trend}\n\n📋 进化队列：待处理 {pending} 项\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n详情: 输入 /pd-evolution-status"
+}
+```
+
+## 飞书推送实施规范
+
+### 推送流程
+
+1. **组装消息**：根据上方"飞书消息格式"生成完整消息内容
+2. **执行推送**：使用 `message` 工具发送到飞书
+3. **记录状态**：将推送结果写入 `memory/logs/daily-push-log.md`
+
+### 重试机制
+
+推送失败时自动重试，最多 3 次：
+
+```
+尝试 1 → 失败 → 等待 30 秒 → 尝试 2 → 失败 → 等待 60 秒 → 尝试 3
+```
+
+- 每次尝试都要记录到日志
+- 3 次全失败后，降级为控制台输出（print 到会话）
+
+### 状态日志格式
+
+每次推送（成功或失败）都追加到 `memory/logs/daily-push-log.md`：
+
+```markdown
+## {date} 推送记录
+
+- **时间**: {timestamp} UTC
+- **接收人**: ou_cf5c98aada743ab12c65c7c6764b5a49
+- **尝试次数**: {attempts}
+- **状态**: success / failed
+- **失败原因**（如有）: {error_message}
+```
+
+### 幂等检查
+
+推送前先检查当日是否已推送成功（读取日志文件）：
+- **已推送成功** → 跳过本次推送，记录"已存在，跳过"
+- **未推送或失败** → 执行推送
+
+### 错误处理
+
+- **API 错误**：记录错误信息到日志，继续重试
+- **token 过期**：返回明确错误提示，停止重试
+- **数据读取失败**：使用默认值，继续生成日报
+```
 
 ---
 
@@ -116,6 +178,8 @@ disable-model-invocation: true
 | 架构决策 | `memory/DECISIONS.md` | **(重要)** 记录了今天固化的系统级原则 |
 | Pain 规则 | `{stateDir}/pain_dictionary.json` | 规则数量 |
 | 用户配置 | `{stateDir}/daily-report.md` | 偏好设置 |
+| Trust Score | `{stateDir}/AGENT_SCORECARD` | Trust Engine 数据 |
+| Evolution Queue | `{stateDir}/evolution_queue.json` | 进化队列状态 |
 
 ---
 
@@ -196,4 +260,24 @@ disable-model-invocation: true
 
 ## 手动触发
 
-用户可随时运行 `/evolution-daily` 手动生成并发送当日日报。
+用户可随时运行 `/pd-evolution-status` 查看当前进化状态。
+
+---
+
+## 故障处理
+
+### 飞书推送失败
+1. 记录错误到 `memory/logs/daily-push-log.md`
+2. 执行重试（最多 3 次，间隔 30s/60s）
+3. 3 次全失败后降级为控制台输出
+4. 下次执行时自动检查幂等（不重复推送）
+
+### 数据读取失败
+1. 使用默认值（0 或 "无"）
+2. 继续生成日报，不阻塞
+3. 在日报中标注"部分数据不可用"
+
+### 数据读取失败
+1. 使用默认值（0 或 "无"）
+2. 继续生成日报，不阻塞
+3. 在日报中标注"部分数据不可用"
