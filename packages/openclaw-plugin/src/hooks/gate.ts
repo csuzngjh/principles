@@ -7,6 +7,7 @@ import { trackBlock, hasRecentThinking, getSession } from '../core/session-track
 import { assessRiskLevel, estimateLineChanges } from '../core/risk-calculator.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { checkEvolutionGate } from '../core/evolution-engine.js';
+import { EventLogService } from '../core/event-log.js';
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult } from '../openclaw-sdk.js';
 
 // ═══ GFI Gate Tool Tiers ═══
@@ -22,7 +23,7 @@ const READ_ONLY_TOOLS = new Set([
 ]);
 
 // TIER 1: 低风险修改 - GFI >= low_risk_block 时拦截
-// 注意：pd_spawn_agent、sessions_spawn、task 是 Agent 派生工具，不应被 GFI Gate 拦截
+// 注意：pd_run_worker、sessions_spawn、task 是 Agent 派生工具，不应被 GFI Gate 拦截
 // 它们属于 AGENT_TOOLS，在早期过滤后直接放行
 const LOW_RISK_WRITE_TOOLS = new Set([
   'write', 'write_file',
@@ -148,7 +149,7 @@ export function handleBeforeToolCall(
   // 1. Identify tool type
   const WRITE_TOOLS = ['write', 'edit', 'apply_patch', 'write_file', 'replace', 'insert', 'patch', 'edit_file', 'delete_file', 'move_file'];
   const BASH_TOOLS = ['bash', 'run_shell_command', 'exec', 'execute', 'shell', 'cmd'];
-  const AGENT_TOOLS = ['pd_spawn_agent', 'sessions_spawn'];
+  const AGENT_TOOLS = ['pd_run_worker', 'sessions_spawn'];
   
   const isBash = BASH_TOOLS.includes(event.toolName);
   const isWriteTool = WRITE_TOOLS.includes(event.toolName);
@@ -185,7 +186,7 @@ export function handleBeforeToolCall(
     thinking_checkpoint: {
       enabled: false,  // Default OFF
       window_ms: 5 * 60 * 1000,
-      high_risk_tools: ['run_shell_command', 'delete_file', 'move_file', 'pd_spawn_agent'],
+      high_risk_tools: ['run_shell_command', 'delete_file', 'move_file', 'pd_run_worker'],
     }
   };
 
@@ -502,6 +503,20 @@ GFI: ${currentGfi}/100
     // Stage 4 (Architect): Full bypass
     if (stage === 4) {
         logger.info(`[PD_GATE] Trusted Architect bypass for ${relPath}`);
+        // Audit log for Stage 4 bypass (security traceability)
+        try {
+          const stateDir = wctx.resolve('STATE_DIR');
+          const eventLog = EventLogService.get(stateDir);
+          eventLog.recordGateBypass(ctx.sessionId, {
+            toolName: event.toolName,
+            filePath: relPath,
+            bypassType: 'stage4_architect',
+            trustScore,
+            trustStage: stage,
+          });
+        } catch (auditErr) {
+          logger?.warn?.(`[PD_GATE] Failed to record Stage 4 bypass audit: ${String(auditErr)}`);
+        }
         return;
     }
 
