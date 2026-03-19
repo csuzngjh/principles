@@ -67,8 +67,8 @@ describe('agentSpawnTool', () => {
         mockApi as OpenClawPluginApi
       );
 
-      expect(result).toContain('Invalid agentType');
-      expect(result).toContain('sessions_spawn');
+      expect(result).toContain('缺少 agentType');
+      expect(result).toContain('diagnostician');
       expect(mockSubagentRuntime.run).not.toHaveBeenCalled();
     });
 
@@ -80,8 +80,8 @@ describe('agentSpawnTool', () => {
         mockApi as OpenClawPluginApi
       );
 
-      expect(result).toContain('Unknown internal worker role');
-      expect(result).toContain('sessions_send');
+      expect(result).toContain('未知的智能体类型');
+      expect(result).toContain('diagnostician');
     });
 
     it('should reject tasks that look like peer-session communication misuse', async () => {
