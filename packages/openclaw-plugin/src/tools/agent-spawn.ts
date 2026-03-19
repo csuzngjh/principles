@@ -136,13 +136,13 @@ export const agentSpawnTool = {
   parameters: Type.Object({
     agentType: Type.String({
       description:
-        '智能体类型: explorer, diagnostician, auditor, planner, implementer, reviewer, reporter',
+        'Internal worker role only: explorer, diagnostician, auditor, planner, implementer, reviewer, reporter',
     }),
     task: Type.String({
-      description: '任务描述，详细说明子智能体需要完成的工作',
+      description: 'Task for the internal worker. Not for sending messages to peer sessions or orchestrating same-level agents.',
     }),
     async: Type.Optional(Type.Boolean({
-      description: '是否启用后台非阻塞模式。true = 立即返回，false = 等待子智能体完成',
+      description: 'Whether to run in background mode. true = return immediately, false = wait for completion.',
     })),
   }),
 
@@ -282,25 +282,6 @@ agentSpawnTool.description = [
   '- reviewer: review correctness, safety, and maintainability',
   '- reporter: summarize findings into a final report',
 ].join('\n');
-
-const agentSpawnSchema = agentSpawnTool.parameters as {
-  properties?: Record<string, { description?: string }>;
-};
-
-if (agentSpawnSchema.properties) {
-  if (agentSpawnSchema.properties.agentType) {
-    agentSpawnSchema.properties.agentType.description =
-      'Internal worker role only: explorer, diagnostician, auditor, planner, implementer, reviewer, reporter';
-  }
-  if (agentSpawnSchema.properties.task) {
-    agentSpawnSchema.properties.task.description =
-      'Task for the internal worker. Not for sending messages to peer sessions or orchestrating same-level agents.';
-  }
-  if (agentSpawnSchema.properties.async) {
-    agentSpawnSchema.properties.async.description =
-      'Whether to run in background mode. true = return immediately, false = wait for completion.';
-  }
-}
 
 /**
  * Batch spawn multiple agents in sequence

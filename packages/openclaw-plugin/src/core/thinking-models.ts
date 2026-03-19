@@ -174,7 +174,11 @@ export function deriveThinkingScenarios(
   if ((context.recentToolCalls ?? []).some((call) => call.outcome === 'failure')) {
     scenarios.add('after-tool-failure');
   }
-  if ((context.recentToolCalls ?? []).some((call) => call.outcome === 'success')) {
+  // after-recovery: success that follows a failure (not just any success)
+  const calls = context.recentToolCalls ?? [];
+  const hasFailure = calls.some((call) => call.outcome === 'failure');
+  const hasSuccess = calls.some((call) => call.outcome === 'success');
+  if (hasFailure && hasSuccess) {
     scenarios.add('after-recovery');
   }
   if ((context.recentToolCalls ?? []).some((call) => call.outcome === 'blocked')) {

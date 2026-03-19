@@ -74,7 +74,12 @@ function serveFile(res: ServerResponse, filePath: string): boolean {
   }
   res.statusCode = 200;
   res.setHeader('Content-Type', contentTypeFor(filePath));
-  res.end(fs.readFileSync(filePath));
+  const stream = fs.createReadStream(filePath);
+  stream.on('error', () => {
+    res.statusCode = 500;
+    res.end('Internal Server Error');
+  });
+  stream.pipe(res);
   return true;
 }
 
@@ -209,7 +214,12 @@ function handleApiRoute(
       res.statusCode = 200;
       res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="${path.basename(result.filePath)}"`);
-      res.end(fs.readFileSync(result.filePath));
+      const stream = fs.createReadStream(result.filePath);
+      stream.on('error', () => {
+        res.statusCode = 500;
+        res.end('Internal Server Error');
+      });
+      stream.pipe(res);
       return true;
     } catch (error) {
       api.logger.warn(`[PD:ControlUI] Export request failed for ${pathname}: ${String(error)}`);
