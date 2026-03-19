@@ -579,33 +579,33 @@ export class EvolutionEngine {
     }
   }
 
-  /** 保存失败后的重试队列 */
-  private static retryQueue: Array<{ engine: EvolutionEngine; data: Partial<EvolutionScorecard> }> = [];
-  private static retryTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Per-instance retry queue (P0 fix: was static, causing cross-instance race) */
+  private retryQueue: Array<{ engine: EvolutionEngine; data: Partial<EvolutionScorecard> }> = [];
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** 调度重试保存 */
-  private static scheduleRetrySave(engine: EvolutionEngine): void {
+  private scheduleRetrySave(): void {
     // 每个引擎只保留最新数据
-    EvolutionEngine.retryQueue = EvolutionEngine.retryQueue.filter(item => item.engine !== engine);
-    EvolutionEngine.retryQueue.push({ engine, data: { ...engine.scorecard } });
+    this.retryQueue = this.retryQueue.filter(item => item.engine !== this);
+    this.retryQueue.push({ engine: this, data: { ...this.scorecard } });
 
-    // 启动重试定时器
-    if (!EvolutionEngine.retryTimer) {
-      EvolutionEngine.retryTimer = setTimeout(() => {
-        EvolutionEngine.processRetryQueue();
+    // 启动重试定时器（每个实例独立）
+    if (!this.retryTimer) {
+      this.retryTimer = setTimeout(() => {
+        this.processRetryQueue();
       }, 1000);
     }
   }
 
   /** 处理重试队列 */
-  private static processRetryQueue(): void {
-    EvolutionEngine.retryTimer = null;
+  private processRetryQueue(): void {
+    this.retryTimer = null;
 
     const latestByEngine = new Map<EvolutionEngine, Partial<EvolutionScorecard>>();
-    for (const item of EvolutionEngine.retryQueue) {
+    for (const item of this.retryQueue) {
       latestByEngine.set(item.engine, item.data);
     }
-    EvolutionEngine.retryQueue = [];
+    this.retryQueue = [];
 
     for (const [engine, data] of latestByEngine) {
       try {
@@ -613,7 +613,7 @@ export class EvolutionEngine {
         console.log(`[Evolution] Retry save succeeded for ${engine.workspaceDir}`);
       } catch (e) {
         console.error(`[Evolution] Retry save failed: ${String(e)}`);
-        EvolutionEngine.scheduleRetrySave(engine);
+        engine.scheduleRetrySave(); // 每个引擎独立重试
       }
     }
   }
