@@ -305,7 +305,10 @@ describe('Prompt Context Injection Hook', () => {
     // evolutionDirective stays in prependContext (short dynamic directive)
     expect(result?.prependContext).toContain('<evolution_task');
     expect(result?.prependContext).toContain('Fix bug');
-    expect(result?.prependContext).toContain('pd_spawn_agent agentType="diagnostician"');
+    expect(result?.prependContext).toContain('pd_run_worker agentType="diagnostician" task=');
+    expect(result?.prependContext).toContain('async=true');
+    expect(result?.prependContext).toContain("First respond to the user's current request normally.");
+    expect(result?.prependContext).not.toContain('Reply with "[EVOLUTION_ACK]" only');
   });
 
   it('should properly escape special characters in task string', async () => {
@@ -501,7 +504,9 @@ describe('Prompt Context Injection Hook', () => {
 
     expect(result).toBeDefined();
     expect(result?.prependContext).toContain('<evolution_task');
-    expect(result?.prependContext).toContain('pd_spawn_agent agentType="diagnostician"');
+    expect(result?.prependContext).toContain('pd_run_worker agentType="diagnostician" task=');
+    expect(result?.prependContext).toContain('async=true');
+    expect(result?.prependContext).not.toContain('Reply with "[EVOLUTION_ACK]" only');
     expect(result?.prependContext).toContain('<system_override:runtime_constraints>');
     expect(result?.prependContext).toContain('Trust Score:');
   });
@@ -684,6 +689,8 @@ describe('Prompt Context Injection Hook', () => {
     const identityContext = result?.prependSystemContext ?? '';
     expect(identityContext).toContain('AGENT IDENTITY');
     expect(identityContext).toContain('self-evolving AI agent');
+    expect(identityContext).toContain('sessions_send');
+    expect(identityContext).toContain('pd_run_worker only for Principles Disciple internal workers');
     
     // appendSystemContext: All long context (WebUI-hidden, Prompt Cacheable)
     const rulesContext = result?.appendSystemContext ?? '';

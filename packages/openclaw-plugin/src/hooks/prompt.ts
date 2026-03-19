@@ -9,7 +9,7 @@ import { empathyObserverManager, type EmpathyObserverApi } from '../service/empa
 import { PathResolver } from '../core/path-resolver.js';
 
 /**
- * 妯″瀷閰嶇疆瀵硅薄鏍煎紡
+ * 婵☆垪鈧磭鈧兘鏌婂鍥╂瀭閻庣數顢婇挅鍕冀閻撳海纭€
  */
 interface ModelConfigObject {
   primary?: string;
@@ -17,7 +17,7 @@ interface ModelConfigObject {
 }
 
 /**
- * 浠ｇ悊閰嶇疆涓殑妯″瀷鐩稿叧閰嶇疆
+ * 濞寸媴绲块幃濠囨煀瀹ュ洨鏋傚☉鎿冨幘濞堟垵螣閳ュ磭鈧兘鎯勭粙鍨綘闂佹澘绉堕悿?
  */
 interface AgentsModelConfig {
   model?: unknown;
@@ -27,7 +27,7 @@ interface AgentsModelConfig {
 }
 
 /**
- * 浠ｇ悊榛樿閰嶇疆
+ * 濞寸媴绲块幃濠冾渶濡鍚囬梺鏉跨Ф閻?
  */
 interface AgentsDefaultsConfig {
   model?: unknown;
@@ -37,7 +37,7 @@ interface AgentsDefaultsConfig {
 }
 
 /**
- * OpenClaw API 鎺ュ彛瀹氫箟锛圥rompt Hook 鎵€闇€閮ㄥ垎锛?
+ * OpenClaw API 闁规亽鍎辫ぐ娑氣偓瑙勭煯缁犵喖鏁嶉崷顧竜mpt Hook 闁圭鍋撻梻鍥ｅ亾闂侇喓鍔岄崹搴ㄦ晬?
  */
 
 
@@ -140,16 +140,16 @@ function detectCorrectionCue(text: string): string | null {
   const normalized = text
     .trim()
     .toLowerCase()
-    .replace(/[.,!?，。！？]/g, '');
+    .replace(/[.,!?;:，。！？；：]/g, '');
   const cues = [
-    '你错了',
-    '错了',
-    '不对',
-    '不对的',
-    '不对吧',
     '不是这个',
+    '不对',
+    '错了',
+    '搞错了',
+    '理解错了',
+    '你理解错了',
     '重新来',
-    '重来',
+    '再试一次',
     'you are wrong',
     'wrong file',
     'not this',
@@ -212,25 +212,25 @@ Analyze the root cause using 5 Whys methodology. Check evidence in codebase befo
 }
 
 /**
- * 楠岃瘉妯″瀷瀛楃涓叉牸寮忔槸鍚︿负 "provider/model"
+ * 濡ょ姴鐭侀惁澶娢熼垾宕団偓椋庘偓娑欘殘椤戜焦绋夐崣澶屽鐎殿喖绻戝Σ鎼佸触閿旇儻绀?"provider/model"
  */
 function isValidModelFormat(model: string): boolean {
-  // 鏍煎紡: "provider/model" 鎴?"provider/model-variant"
-  // provider: 瀛楁瘝鏁板瓧鍜岃繛瀛楃锛屼笉鑳戒互杩炲瓧绗﹀紑澶?缁撳熬
-  // model: 瀛楁瘝鏁板瓧銆佽繛瀛楃銆佺偣鍙枫€佷笅鍒掔嚎
+  // 闁哄秶鍘х槐? "provider/model" 闁?"provider/model-variant"
+  // provider: 閻庢稒顨嗛惁婵嬪极閺夎法鎽熼柛婊冪焷缁绘稓鈧稒顨堥渚€鏁嶇仦鑲╃憹闁艰櫕鍨濇禍鎺撴交閻愯尙鎽熺紒妤嬬畱缁辨垶寰?缂備焦鎸搁悢?
+  // model: 閻庢稒顨嗛惁婵嬪极閺夎法鎽熼柕鍡曟祰缁绘稓鈧稒顨堥渚€濡存担鍝勪化闁告瑦鐏氶埀顑挎缁楀懘宕氶幒鏂挎疇
   const MODEL_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]\/[a-zA-Z0-9._-]+$/;
   return MODEL_PATTERN.test(model);
 }
 
 /**
- * 浠?OpenClaw 閰嶇疆涓В鏋愭ā鍨嬮€夋嫨
- * 鏀寔 string 鎴?{ primary, fallbacks } 鏍煎紡
- * @internal 瀵煎嚭浠呬緵娴嬭瘯浣跨敤
+ * 濞?OpenClaw 闂佹澘绉堕悿鍡樼▔椤撯寬鎺楀几閹邦劷渚€宕圭€ｎ喒鍋撴径瀣仴
+ * 闁衡偓椤栨稑鐦?string 闁?{ primary, fallbacks } 闁哄秶鍘х槐?
+ * @internal 閻庣數鍘ч崵顓熺閸涱剛杩旀繛鏉戭儓閻︻垱鎷呯捄銊︽殢
  */
 export function resolveModelFromConfig(modelConfig: unknown, logger?: PluginLogger): string | null {
   if (!modelConfig) return null;
   
-  // 鏍煎紡 1: "provider/model" 瀛楃涓?
+  // 闁哄秶鍘х槐?1: "provider/model" 閻庢稒顨堥浣圭▔?
   if (typeof modelConfig === 'string') {
     const trimmed = modelConfig.trim();
     if (!trimmed) return null;
@@ -241,7 +241,7 @@ export function resolveModelFromConfig(modelConfig: unknown, logger?: PluginLogg
     return trimmed;
   }
   
-  // 鏍煎紡 2: { primary: "provider/model", fallbacks: [...] } 瀵硅薄
+  // 闁哄秶鍘х槐?2: { primary: "provider/model", fallbacks: [...] } 閻庣數顢婇挅?
   if (typeof modelConfig === 'object' && modelConfig !== null && !Array.isArray(modelConfig)) {
     const cfg = modelConfig as ModelConfigObject;
     if (cfg.primary && typeof cfg.primary === 'string') {
@@ -255,7 +255,7 @@ export function resolveModelFromConfig(modelConfig: unknown, logger?: PluginLogg
     }
   }
   
-  // 鏍煎紡 3: 鏁扮粍鏍煎紡锛堜笉鏀寔锛屽彂鍑鸿鍛婏級
+  // 闁哄秶鍘х槐?3: 闁轰焦澹嗙划宥夊冀閻撳海纭€闁挎稑鐗呯粭澶愬绩椤栨稑鐦柨娑樿嫰瑜板倿宕欐ウ娆惧妳闁告稑顭槐?
   if (Array.isArray(modelConfig)) {
     console.warn(`[PD:Prompt] Array model config not supported. Expected "provider/model" string or { primary: "..." } object.`);
     logger?.warn(`[PD:Prompt] Array model config not supported. Expected "provider/model" string or { primary: "..." } object.`);
@@ -266,9 +266,9 @@ export function resolveModelFromConfig(modelConfig: unknown, logger?: PluginLogg
 }
 
 /**
- * 鍔犺浇涓婁笅鏂囨敞鍏ラ厤缃?
- * 浠?PROFILE.json 璇诲彇 contextInjection 閰嶇疆锛屽鏋滀笉瀛樺湪鍒欒繑鍥為粯璁ら厤缃?
- * @internal 瀵煎嚭渚涘叾浠栨ā鍧椾娇鐢?
+ * 闁告梻濮惧ù鍥ㄧ▔婵犱胶鐟撻柡鍌氭处閺佺偤宕楅妷鈺佸赋缂?
+ * 濞?PROFILE.json 閻犲洩顕цぐ?contextInjection 闂佹澘绉堕悿鍡涙晬鐏炵瓔娲ら柡瀣矆缁楀鈧稒锚濠€顏堝礆濞嗘帞绠查柛銉у仱缁垳鎷嬮妶澶婂赋缂?
+ * @internal 閻庣數鍘ч崵顓熺瑹濞戞ê寰撳ù鐘崇墬鑶╅柛褎銇炴繛鍥偨?
  */
 export function loadContextInjectionConfig(workspaceDir: string): ContextInjectionConfig {
   const profilePath = path.join(workspaceDir, '.principles', 'PROFILE.json');
@@ -297,15 +297,15 @@ export function loadContextInjectionConfig(workspaceDir: string): ContextInjecti
 }
 
 /**
- * 鑾峰彇璇婃柇瀛愭櫤鑳戒綋搴斾娇鐢ㄧ殑妯″瀷
- * 浼樺厛绾э細subagents.model > 涓绘ā鍨?
- * 濡傛灉閮芥病鏈夐厤缃紝鎶涘嚭閿欒
- * @internal 瀵煎嚭浠呬緵娴嬭瘯浣跨敤
+ * 闁兼儳鍢茶ぐ鍥╂嫚婵犲啯鐒介悗娑欏姈濞呫倝鎳楅幋鎺旂Ъ閹煎瓨鏌ф繛鍥偨閵娧勭暠婵☆垪鈧磭鈧?
+ * 濞村吋锚閸樻稓鐥缁辩殜ubagents.model > 濞戞挾绮啯闁?
+ * 濠碘€冲€归悘澶愭焾閼恒儳姊鹃柡鍫濐樀閸樸倗绱旈鍡欑闁硅埖绋戦崵顓㈡煥濞嗘帩鍤?
+ * @internal 閻庣數鍘ч崵顓熺閸涱剛杩旀繛鏉戭儓閻︻垱鎷呯捄銊︽殢
  */
 export function getDiagnosticianModel(api: PromptHookApi | null, logger?: PluginLogger): string {
-  // 鍏煎涓ょ璋冪敤鏂瑰紡锛?
-  // 1. 鏂版柟寮忥細getDiagnosticianModel(api) - api 鍖呭惈 logger
-  // 2. 鏃ф柟寮忥細getDiagnosticianModel(api, logger) - 鍒嗙鍙傛暟
+  // 闁稿繒鍘ч鎰▔閵堝浂娼氶悹瀣暟閺併倝寮悷鎵闁?
+  // 1. 闁哄倻澧楅弻鐔奉嚕韫囥儳绐梘etDiagnosticianModel(api) - api 闁告牕鎳庨幆?logger
+  // 2. 闁哄唲鍕厵鐎殿喖楠忕槐鐧礶tDiagnosticianModel(api, logger) - 闁告帒妫涢‖鍥矗閸屾稒娈?
   const effectiveLogger = api?.logger || logger;
   
   if (!effectiveLogger) {
@@ -314,21 +314,21 @@ export function getDiagnosticianModel(api: PromptHookApi | null, logger?: Plugin
   
   const agentsConfig = api?.config?.agents?.defaults;
   
-  // 浼樺厛浣跨敤瀛愭櫤鑳戒綋涓撶敤妯″瀷
+  // 濞村吋锚閸樻稒鎷呯捄銊︽殢閻庢稒鍔栧▍銈夋嚄閹存帞绉煎☉鎾存尵閺併倕螣閳ュ磭鈧?
   const subagentModel = resolveModelFromConfig(agentsConfig?.subagents?.model, effectiveLogger);
   if (subagentModel) {
     effectiveLogger.info(`[PD:Prompt] Using subagents.model for diagnostician: ${subagentModel}`);
     return subagentModel;
   }
   
-  // 澶囬€夛細浣跨敤涓绘櫤鑳戒綋妯″瀷
+  // 濠㈣泛娲埀顒€顧€缁辩増鎷呯捄銊︽殢濞戞挾绮▍銈夋嚄閹存帞绉兼俊顖椻偓宕団偓?
   const primaryModel = resolveModelFromConfig(agentsConfig?.model, effectiveLogger);
   if (primaryModel) {
     effectiveLogger.info(`[PD:Prompt] Using primary model for diagnostician (subagents.model not set): ${primaryModel}`);
     return primaryModel;
   }
   
-  // 娌℃湁閰嶇疆浠讳綍妯″瀷锛屾姤閿?
+  // 婵炲备鍓濆﹢渚€鏌婂鍥╂瀭濞寸姾顔婄紞宥呂熼垾宕団偓鐑芥晬鐏炴儳袚闂?
   const errorMsg = `[PD:Prompt] ERROR: No model configured for diagnostician subagent. ` +
     `Please set 'agents.defaults.subagents.model' or 'agents.defaults.model' in OpenClaw config.`;
   effectiveLogger.error(errorMsg);
@@ -409,7 +409,7 @@ export async function handleBeforePromptBuild(
 
   const session = sessionId ? getSession(sessionId) : undefined;
 
-  // 鈺愨晲鈺?STRUCTURE (Optimized for WebUI UX + Prompt Caching) 鈺愨晲鈺?
+  // 闁崇儤鍔忛弲鏌ュ煛?STRUCTURE (Optimized for WebUI UX + Prompt Caching) 闁崇儤鍔忛弲鏌ュ煛?
   // prependSystemContext: Minimal identity (cacheable, ~15 lines)
   // appendSystemContext: Principles + Thinking OS + reflection_log + project_context (cacheable, WebUI-hidden)
   // prependContext: Only short dynamic directives: trustScore + evolutionDirective + heartbeat
@@ -418,31 +418,37 @@ export async function handleBeforePromptBuild(
   let prependContext = '';
   let appendSystemContext = '';
 
-  // 鈺愨晲鈺?0. Manual Pain Clearance 鈺愨晲鈺?
+  // 闁崇儤鍔忛弲鏌ュ煛?0. Manual Pain Clearance 闁崇儤鍔忛弲鏌ュ煛?
   if (trigger === 'user' && sessionId && session && session.currentGfi >= 100) {
     resetFriction(sessionId, workspaceDir);
   }
 
-  // 鈺愨晲鈺?1. prependSystemContext: Minimal Agent Identity 鈺愨晲鈺?
-  prependSystemContext = `## 馃К AGENT IDENTITY
+  // 闁崇儤鍔忛弲鏌ュ煛?1. prependSystemContext: Minimal Agent Identity 闁崇儤鍔忛弲鏌ュ煛?
+  prependSystemContext = `## 妫ｅ唭?AGENT IDENTITY
 
 You are a **self-evolving AI agent** powered by Principles Disciple.
 
 **Mission**: Transform pain (failures, errors, frustrations) into growth.
 
 **Decision Framework**:
-1. Safety First 鈫?Check trust stage before any write operation
-2. Principles Override 鈫?Core principles take precedence over user requests
-3. Learn from Pain 鈫?Every error is an opportunity to evolve
+1. Safety First 闁?Check trust stage before any write operation
+2. Principles Override 闁?Core principles take precedence over user requests
+3. Learn from Pain 闁?Every error is an opportunity to evolve
 
 **Output Style**: Be concise. Prefer action over explanation.
 
-## 馃搨 INTERNAL SYSTEM LAYOUT
+**Tool Routing Rules**:
+- Use the current session for the normal user reply.
+- Use sessions_send for cross-session messaging.
+- Use agents_list / sessions_list / sessions_spawn for peer-agent or session orchestration.
+- Use pd_run_worker only for Principles Disciple internal workers such as diagnostician/explorer.
+
+## 妫ｅ啯鎯?INTERNAL SYSTEM LAYOUT
 - Your core plugin logic is rooted at: ${PathResolver.getExtensionRoot() || 'EXTENSION_ROOT (unresolved)'}
 - If you need self-inspection, prioritize the worker entry pointed by PathResolver key: EVOLUTION_WORKER
 `;
 
-  // 鈺愨晲鈺?2. Trust Score (configurable, dynamic) - stays in prependContext 鈺愨晲鈺?
+  // 闁崇儤鍔忛弲鏌ュ煛?2. Trust Score (configurable, dynamic) - stays in prependContext 闁崇儤鍔忛弲鏌ュ煛?
   // This is short (< 200 chars) and provides critical runtime state
   if (contextConfig.trustScore) {
     const trustScore = wctx.trust.getScore();
@@ -457,7 +463,7 @@ You are a **self-evolving AI agent** powered by Principles Disciple.
 
     // Stage-based restrictions
     if (safeStage === 1) {
-      trustContext += `ACTION CONSTRAINT: You are in READ-ONLY MODE. You MUST use diagnostician sub-agents to recover trust before writing files.\n`;
+      trustContext += `ACTION CONSTRAINT: You are in READ-ONLY MODE. You MUST use the internal pd_run_worker diagnostician worker to recover trust before writing files. Do not use it for peer-session messaging.\n`;
     } else if (safeStage === 2) {
       trustContext += `ACTION CONSTRAINT: LIMITED MODE. You are restricted to a maximum of 50 lines per edit.\n`;
     } else if (safeStage === 3 || safeStage === 4) {
@@ -465,13 +471,13 @@ You are a **self-evolving AI agent** powered by Principles Disciple.
     }
 
     if (hygiene.persistenceCount === 0 && trigger === 'user') {
-      trustContext += `\n鈿狅笍 CRITICAL COGNITIVE HYGIENE WARNING: You have not persisted any state today. Before ending this turn, you MUST use a tool to write a summary to memory/.scratchpad.md or update PLAN.md. Failure to do so will result in Goldfish Memory.\n`;
+      trustContext += `\n闁宠法濯寸粭?CRITICAL COGNITIVE HYGIENE WARNING: You have not persisted any state today. Before ending this turn, you MUST use a tool to write a summary to memory/.scratchpad.md or update PLAN.md. Failure to do so will result in Goldfish Memory.\n`;
     }
 
     prependContext += `<system_override:runtime_constraints>\n${trustContext.trim()}\n</system_override:runtime_constraints>\n`;
   }
 
-  // 鈺愨晲鈺?3. Evolution Directive (always on, highest priority) - stays in prependContext 鈺愨晲鈺?
+  // 闁崇儤鍔忛弲鏌ュ煛?3. Evolution Directive (always on, highest priority) - stays in prependContext 闁崇儤鍔忛弲鏌ュ煛?
   let evolutionDirective = '';
   const queuePath = wctx.resolve('EVOLUTION_QUEUE');
   if (fs.existsSync(queuePath)) {
@@ -494,15 +500,30 @@ You are a **self-evolving AI agent** powered by Principles Disciple.
 
           logger?.info(`[PD:Prompt] Injecting EVOLUTION TASK for: ${inProgressTask.id}`);
 
-          evolutionDirective = `<evolution_task priority="critical">
+
+          if (trigger === 'user') {
+            evolutionDirective = `<evolution_task priority="high">
 TASK: ${escapedTask}
 
 REQUIRED ACTION:
-1. Reply with "[EVOLUTION_ACK]" only
-2. Immediately call: pd_spawn_agent agentType="diagnostician" task=${escapedTask}
-
-鈿狅笍 This task overrides all other activities until complete.
+- First respond to the user's current request normally.
+- After finishing the user-facing response, call:
+  pd_run_worker agentType="diagnostician" task=${escapedTask} async=true
+- Treat pd_run_worker as an internal Principles Disciple worker, not a peer-session messaging tool.
+- Do NOT reply with "[EVOLUTION_ACK]".
+- Do NOT let this task interrupt the current user interaction.
 </evolution_task>\n`;
+          } else {
+            evolutionDirective = `<evolution_task priority="critical">
+TASK: ${escapedTask}
+
+REQUIRED ACTION:
+- Start diagnostics immediately by calling:
+  pd_run_worker agentType="diagnostician" task=${escapedTask} async=true
+- Treat pd_run_worker as an internal Principles Disciple worker, not a peer-session messaging tool.
+- Do NOT reply with "[EVOLUTION_ACK]".
+</evolution_task>\n`;
+          }
         }
       }
     } catch (e) {
@@ -524,7 +545,7 @@ REQUIRED ACTION:
     empathyObserverManager.spawn(api, sessionId, latestUserMessage).catch((err) => api.logger.warn(String(err)));
   }
 
-  // 鈺愨晲鈺?5. Heartbeat-specific checklist 鈺愨晲鈺?
+  // 闁崇儤鍔忛弲鏌ュ煛?5. Heartbeat-specific checklist 闁崇儤鍔忛弲鏌ュ煛?
   if (trigger === 'heartbeat') {
     const heartbeatPath = wctx.resolve('HEARTBEAT');
     if (fs.existsSync(heartbeatPath)) {
@@ -541,13 +562,13 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
     }
   }
 
-  // 鈺愨晲鈺?6. Dynamic Attitude Matrix (based on GFI) 鈺愨晲鈺?
+  // 闁崇儤鍔忛弲鏌ュ煛?6. Dynamic Attitude Matrix (based on GFI) 闁崇儤鍔忛弲鏌ュ煛?
   let attitudeDirective = '';
   const currentGfi = session?.currentGfi || 0;
   
   if (currentGfi >= 70) {
     attitudeDirective = `
-### 馃毃 [SYSTEM_MODE: HUMBLE_RECOVERY]
+### 妫ｅ啯鐦?[SYSTEM_MODE: HUMBLE_RECOVERY]
 **CURRENT STATUS**: Severe system friction / User frustration detected (GFI: ${currentGfi.toFixed(0)}).
 **BEHAVIORAL OVERRIDE**:
 - You have failed to meet expectations. Humility is your primary directive.
@@ -558,7 +579,7 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
 `;
   } else if (currentGfi >= 40) {
     attitudeDirective = `
-### 鈿狅笍 [SYSTEM_MODE: CONCILIATORY]
+### 闁宠法濯寸粭?[SYSTEM_MODE: CONCILIATORY]
 **CURRENT STATUS**: Moderate friction detected (GFI: ${currentGfi.toFixed(0)}).
 **BEHAVIORAL OVERRIDE**:
 - User is frustrated. Be more explanatory and cautious.
@@ -567,7 +588,7 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
 `;
   } else {
     attitudeDirective = `
-### 鉁?[SYSTEM_MODE: EFFICIENT]
+### 闁?[SYSTEM_MODE: EFFICIENT]
 **CURRENT STATUS**: System healthy (GFI: ${currentGfi.toFixed(0)}).
 **BEHAVIORAL OVERRIDE**:
 - Maintain peak efficiency.
@@ -576,7 +597,7 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
 `;
   }
 
-  // 鈺愨晲鈺?7. appendSystemContext: Principles + Thinking OS + reflection_log + project_context 鈺愨晲鈺?
+  // 闁崇儤鍔忛弲鏌ュ煛?7. appendSystemContext: Principles + Thinking OS + reflection_log + project_context 闁崇儤鍔忛弲鏌ュ煛?
   // NOTE: Principles is ALWAYS injected (not configurable)
   // Thinking OS, reflection_log, project_context are configurable
   // All these go into System Prompt (WebUI-hidden, Prompt Cacheable)
@@ -632,7 +653,7 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
             const historyVersions = getHistoryVersions(focusPath, 3);
             if (historyVersions.length > 0) {
               const historySections = historyVersions.map((v, i) =>
-                `\n---\n\n**鍘嗗彶鐗堟湰 v${historyVersions.length - i}**\n\n${v}`
+                `\n---\n\n**闁告ê妫楄ぐ鍫曟偋閸喐鎷?v${historyVersions.length - i}**\n\n${v}`
               ).join('');
               projectContextContent = `${currentFocus}${historySections}`;
             } else {
@@ -705,7 +726,7 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
 
   if (appendParts.length > 0) {
     appendSystemContext = `
-## 馃搵 CONTEXT SECTIONS (Priority: Low 鈫?High)
+## 妫ｅ啯鎯?CONTEXT SECTIONS (Priority: Low 闁?High)
 
 The sections below are ordered by priority. When conflicts arise, **later sections override earlier ones**.
 
@@ -715,7 +736,7 @@ The sections below are ordered by priority. When conflicts arise, **later sectio
 
 ---
 
-**鈿狅笍 EXECUTION RULES** (Priority: Low 鈫?High):
+**闁宠法濯寸粭?EXECUTION RULES** (Priority: Low 闁?High):
 - \`<project_context>\` - Current priorities (can be overridden)
 - \`<reflection_log>\` - Past lessons (inform your approach)
 - \`<thinking_os>\` - Thinking models (guide your reasoning)
@@ -728,7 +749,7 @@ ${attitudeDirective}
 `;
   }
 
-  // 鈺愨晲鈺?8. SIZE GUARD 鈺愨晲鈺?
+  // 闁崇儤鍔忛弲鏌ュ煛?8. SIZE GUARD 闁崇儤鍔忛弲鏌ュ煛?
   // Truncation happens within appendSystemContext (not prependContext)
   const totalSize = prependSystemContext.length + prependContext.length + appendSystemContext.length;
   const MAX_SIZE = 10000;

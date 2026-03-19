@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { handleLlmOutput, extractEmpathySignal } from '../../src/hooks/llm';
 import * as painFlags from '../../src/core/pain';
 import * as sessionTracker from '../../src/core/session-tracker';
+import { ControlUiDatabase } from '../../src/core/control-ui-db';
 import { DetectionService } from '../../src/core/detection-service';
 import { WorkspaceContext } from '../../src/core/workspace-context';
 import fs from 'fs';
@@ -11,6 +12,7 @@ vi.mock('fs');
 vi.mock('../../src/core/pain', () => ({
     writePainFlag: vi.fn(),
 }));
+vi.mock('../../src/core/control-ui-db');
 vi.mock('../../src/core/detection-service');
 vi.mock('../../src/core/workspace-context');
 
@@ -41,6 +43,17 @@ describe('LLM Cognitive Distress Hook', () => {
         recordRuleMatch: vi.fn(),
         recordPainSignal: vi.fn(),
     };
+    const mockControlUiDb = {
+        getRecentThinkingContext: vi.fn().mockReturnValue({
+            toolCalls: [{ toolName: 'edit', outcome: 'failure', errorType: 'EACCES' }],
+            painEvents: [{ source: 'user_empathy', score: 13 }],
+            gateBlocks: [],
+            userCorrections: [],
+            principleEvents: [],
+        }),
+        recordThinkingModelEvent: vi.fn(),
+        dispose: vi.fn(),
+    };
 
     const mockWctx = {
         workspaceDir,
@@ -48,7 +61,7 @@ describe('LLM Cognitive Distress Hook', () => {
         config: mockConfig,
         eventLog: mockEventLog,
         trajectory: {
-            recordAssistantTurn: vi.fn(),
+            recordAssistantTurn: vi.fn().mockReturnValue(101),
             recordPainEvent: vi.fn(),
         },
         resolve: vi.fn().mockImplementation((key) => {
@@ -61,6 +74,9 @@ describe('LLM Cognitive Distress Hook', () => {
         vi.clearAllMocks();
         sessionTracker.clearSession(sessionId);
         vi.mocked(WorkspaceContext.fromHookContext).mockReturnValue(mockWctx as any);
+        vi.mocked(ControlUiDatabase).mockImplementation(function MockControlUiDatabase() {
+            return mockControlUiDb as any;
+        } as any);
     });
 
     afterEach(() => {
@@ -123,6 +139,12 @@ describe('LLM Cognitive Distress Hook', () => {
             usageLogPath,
             expect.stringContaining('"T-06": 1'),
             'utf8'
+        );
+        expect(mockControlUiDb.recordThinkingModelEvent).toHaveBeenCalledWith(
+            expect.objectContaining({
+                modelId: 'T-06',
+                assistantTurnId: expect.any(Number),
+            })
         );
     });
 

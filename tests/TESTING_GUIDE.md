@@ -1,4 +1,4 @@
-# Principles Disciple - 端到端测试指南
+﻿# Principles Disciple - 端到端测试指南
 
 > **Last Updated**: 2026-03-11
 > **Purpose**: 记录进化框架测试的最佳实践、关键发现和标准化流程
@@ -626,5 +626,5 @@ diff -u "$REPORT1" "$REPORT2" | head -50
 
 **文档版本**: v1.0
 **最后验证**: 2026-03-11 (Phase 1测试成功)
-**维护者**: Claude Code
+**维护者**: iFlow CLI
 **反馈**: 请将测试经验更新到此文档

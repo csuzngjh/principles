@@ -1,4 +1,4 @@
-#!/bin/bash
+﻿#!/bin/bash
 # ============================================================================
 # 场景生成器 - 交互式创建测试场景
 # ============================================================================
@@ -17,8 +17,8 @@ read -p "Feature name (e.g., trust-system): " feature_name
 read -p "Description: " description
 read -p "Version (default: 1.0): " version
 version=${version:-1.0}
-read -p "Author (default: Claude Code): " author
-author=${author:-Claude Code}
+read -p "Author (default: iFlow CLI): " author
+author=${author:-iFlow CLI}
 
 read -p "Tags (comma-separated, e.g., core,critical): " tags
 tags_array=$(echo "$tags" | jq -R 'split(",") | map(select(length > 0))')

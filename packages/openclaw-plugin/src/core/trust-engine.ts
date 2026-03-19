@@ -50,7 +50,7 @@ export const EXPLORATORY_TOOLS = [
 export const CONSTRUCTIVE_TOOLS = [
     'write', 'write_file', 'edit', 'edit_file', 'replace', 'apply_patch',
     'insert', 'patch', 'delete_file', 'move_file', 'run_shell_command',
-    'pd_spawn_agent', 'sessions_spawn', 'evolve-task', 'init-strategy'
+  'pd_run_worker', 'sessions_spawn', 'evolve-task', 'init-strategy'
 ];
 
 export class TrustEngine {
@@ -211,7 +211,8 @@ export class TrustEngine {
 
         // BUGFIX #84: sessions_send timeout should not be penalized
         // Communication timeouts are not agent failures - the message may have been delivered
-        if (toolName === 'sessions_send' && (context as any)?.api?.error?.type === 'timeout') {
+        const errorStr = String((context as any)?.error || '');
+        if (toolName === 'sessions_send' && (errorStr.includes('timeout') || errorStr === 'timeout')) {
             this.updateScore(0, `Communication timeout (sessions_send): ignored`, 'info', context);
             return;
         }

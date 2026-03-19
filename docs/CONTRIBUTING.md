@@ -8,7 +8,7 @@ We highly welcome community contributions. You can participate by submitting bug
 
 ## 🧠 Core Contribution: Proposing Mental Models
 
-The most valuable co-creative aspect of this project lies in the mental model library within `THINKING_OS.md`. If, during your heavy use of Claude Code or OpenClaw, you have summarized highly effective "human-AI collaboration methodologies" or "meta-feedback mechanisms" that prevent AI failures, please propose them to us.
+The most valuable co-creative aspect of this project lies in the mental model library within `THINKING_OS.md`. If, during your heavy use of OpenClaw, you have summarized highly effective "human-AI collaboration methodologies" or "meta-feedback mechanisms" that prevent AI failures, please propose them to us.
 
 ### Proposal Criteria
 
@@ -46,6 +46,6 @@ If you want to contribute code to the framework itself (Hooks, Gatekeeper logic,
 Before submitting an Issue, please:
 1. Search the repository to check if a similar Issue already exists.
 2. If applicable, attach excerpts from `docs/SYSTEM.log`.
-3. Specify whether your runtime environment is native Claude Code config or the OpenClaw SDK plugin.
+3. Specify your runtime environment details (OpenClaw version, plugin version, etc.).
 
 Every PR and issue is another cycle of "evolution" for the system. Thank you for walking this path with us!

@@ -3,7 +3,9 @@ import * as path from 'path';
 import { PluginHookLlmOutputEvent, PluginHookAgentContext } from '../openclaw-sdk.js';
 import { trackFriction, trackLlmOutput, recordThinkingCheckpoint, resetFriction } from '../core/session-tracker.js';
 import { writePainFlag } from '../core/pain.js';
+import { ControlUiDatabase } from '../core/control-ui-db.js';
 import { DetectionService } from '../core/detection-service.js';
+import { detectThinkingModelMatches, deriveThinkingScenarios } from '../core/thinking-models.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { sanitizeAssistantText } from './message-sanitize.js';
 
@@ -236,8 +238,10 @@ export function handleLlmOutput(
 
     const text = event.assistantTexts.join('\n');
     const signal = extractEmpathySignal(text);
+    const createdAt = new Date().toISOString();
+    let assistantTurnId: number | null = null;
     try {
-        wctx.trajectory?.recordAssistantTurn?.({
+        assistantTurnId = wctx.trajectory?.recordAssistantTurn?.({
             sessionId: ctx.sessionId,
             runId: event.runId,
             provider: event.provider,
@@ -246,6 +250,7 @@ export function handleLlmOutput(
             sanitizedText: sanitizeAssistantText(text),
             usageJson: event.usage || {},
             empathySignalJson: signal,
+            createdAt,
         });
     } catch (error) {
         ctx.logger?.warn?.(`[PD:LLM] Failed to persist assistant turn to trajectory: ${String(error)}`);
@@ -392,58 +397,27 @@ export function handleLlmOutput(
     }
 
     // ═══ Thinking OS: Mental Model Usage Tracking ═══
-    trackThinkingModelUsage(text, wctx, ctx.sessionId);
+    trackThinkingModelUsage({
+        text,
+        wctx,
+        sessionId: ctx.sessionId,
+        runId: event.runId,
+        assistantTurnId,
+        createdAt,
+        logger: ctx.logger,
+    });
 }
 
-const THINKING_MODEL_SIGNALS: Record<string, RegExp[]> = {
-    'T-01': [
-        /let me (first )?(understand|map|outline|survey|review the (structure|architecture|dependencies))/i,
-        /让我先(梳理|了解|画出|理解|查看)(一下)?(结构|架构|依赖|全貌)/,
-    ],
-    'T-02': [
-        /(type|test|contract|schema|interface) (constraint|requirement|check|validation)/i,
-        /we (must|need to) (respect|follow|adhere to) the/i,
-        /(必须|需要).*?(遵守|符合|满足).*?(类型|测试|契约|接口|规范)/,
-    ],
-    'T-03': [
-        /based on (the |this )?(evidence|logs?|output|error|stack trace|test result)/i,
-        /let me (check|verify|confirm|read|look at) (the |)(actual|source|code|file|log)/i,
-        /根据(日志|证据|输出|报错|堆栈|测试结果)/,
-    ],
-    'T-04': [
-        /this (is|would be) (irreversible|destructive|permanent|not easily undone)/i,
-        /(reversible|can be undone|safely roll back)/i,
-        /(不可逆|破坏性|永久的|无法回滚|可以回滚|安全地撤销)/,
-    ],
-    'T-05': [
-        /we (must|should) (not|never|avoid|prevent|ensure we don't)/i,
-        /(critical|important) (not to|that we don't|to avoid)/i,
-        /(绝不能|必须避免|不可以|禁止|确保不会)/,
-    ],
-    'T-06': [
-        /(simpl(er|est|ify)|minimal|straightforward|lean) (approach|solution|fix|implementation)/i,
-        /(simple is better|keep it simple|no need to over)/i,
-        /(最简(单|洁)|精简|没有必要(过度|额外))/,
-    ],
-    'T-07': [
-        /(minimal|smallest|narrowest|least) (change|diff|modification|impact)/i,
-        /only (change|modify|touch|edit) (the |what)/i,
-        /(最小(改动|变更|修改)|只(改|动|修))/,
-    ],
-    'T-08': [ // Pain as Signal
-        /this (error|failure|issue) (tells us|indicates|signals|suggests|means)/i,
-        /let me (stop|pause|step back|reconsider|rethink)/i,
-        /这个(错误|失败|问题)(告诉我们|表明|说明|意味)/,
-        /让我(停下|暂停|退一步|重新(考虑|思考|审视))/,
-    ],
-    'T-09': [ // Divide and Conquer
-        /(break|split|decompose|divide) (this |the task |it )?(into|down)/i,
-        /(step 1|first,? (we|i|let's)|phase 1)/i,
-        /(拆分|分解|分步|分阶段|第一步)/,
-    ],
-};
-
-function trackThinkingModelUsage(text: string, wctx: WorkspaceContext, sessionId?: string): void {
+function trackThinkingModelUsage(args: {
+    text: string;
+    wctx: WorkspaceContext;
+    sessionId?: string;
+    runId: string;
+    assistantTurnId: number | null;
+    createdAt: string;
+    logger?: PluginHookAgentContext['logger'];
+}): void {
+    const { text, wctx, sessionId, runId, assistantTurnId, createdAt, logger } = args;
     const logPath = wctx.resolve('THINKING_OS_USAGE');
     const logDir = path.dirname(logPath);
     if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
@@ -458,28 +432,80 @@ function trackThinkingModelUsage(text: string, wctx: WorkspaceContext, sessionId
         }
     }
 
-    let anyMatch = false;
-    for (const [modelId, patterns] of Object.entries(THINKING_MODEL_SIGNALS)) {
-        for (const pattern of patterns) {
-            if (pattern.test(text)) {
-                usageLog[modelId] = (usageLog[modelId] || 0) + 1;
-                anyMatch = true;
-                break;
-            }
-        }
+    const matches = detectThinkingModelMatches(text);
+    for (const match of matches) {
+        usageLog[match.modelId] = (usageLog[match.modelId] || 0) + 1;
     }
 
     usageLog['_total_turns'] = (usageLog['_total_turns'] || 0) + 1;
 
-    if (anyMatch) {
-        // Record thinking checkpoint for gate enforcement
-        if (sessionId) {
-            recordThinkingCheckpoint(sessionId, wctx.workspaceDir);
+    try {
+        fs.writeFileSync(logPath, JSON.stringify(usageLog, null, 2), 'utf8');
+    } catch (e) {
+        console.error(`[PD:LLM] Failed to write thinking OS usage log: ${String(e)}`);
+    }
+
+    if (matches.length === 0) {
+        return;
+    }
+
+    if (sessionId) {
+        recordThinkingCheckpoint(sessionId, wctx.workspaceDir);
+    }
+
+    if (!sessionId || !assistantTurnId) {
+        return;
+    }
+
+    const uiDb = new ControlUiDatabase({ workspaceDir: wctx.workspaceDir });
+    try {
+        const recentContext = uiDb.getRecentThinkingContext(sessionId, createdAt);
+        const toolContext = recentContext.toolCalls.map((call) => ({
+            toolName: call.toolName,
+            outcome: call.outcome,
+            errorType: call.errorType,
+        }));
+        const painContext = recentContext.painEvents.map((event) => ({
+            source: event.source,
+            score: event.score,
+        }));
+        const principleContext = recentContext.principleEvents.map((event) => ({
+            principleId: event.principleId,
+            eventType: event.eventType,
+        }));
+        const triggerExcerpt = text.length > 280 ? `${text.slice(0, 277)}...` : text;
+
+        for (const match of matches) {
+            const scenarios = deriveThinkingScenarios(match.modelId, {
+                recentToolCalls: toolContext,
+                recentPainEvents: painContext,
+                recentGateBlocks: recentContext.gateBlocks.map((block) => ({
+                    toolName: block.toolName,
+                    reason: block.reason,
+                })),
+                recentUserCorrections: recentContext.userCorrections.map((correction) => ({
+                    correctionCue: correction.correctionCue,
+                })),
+                recentPrincipleEvents: principleContext,
+            });
+
+            uiDb.recordThinkingModelEvent({
+                sessionId,
+                runId,
+                assistantTurnId,
+                modelId: match.modelId,
+                matchedPattern: match.matchedPattern,
+                scenarioJson: scenarios,
+                toolContextJson: toolContext,
+                painContextJson: painContext,
+                principleContextJson: principleContext,
+                triggerExcerpt,
+                createdAt,
+            });
         }
-        try {
-            fs.writeFileSync(logPath, JSON.stringify(usageLog, null, 2), 'utf8');
-        } catch (e) {
-            console.error(`[PD:LLM] Failed to write thinking OS usage log: ${String(e)}`);
-        }
+    } catch (error) {
+        logger?.warn?.(`[PD:LLM] Failed to persist thinking model events: ${String(error)}`);
+    } finally {
+        uiDb.dispose();
     }
 }

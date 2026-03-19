@@ -63,37 +63,96 @@ function buildSubagentSystemPrompt(
   return agentDef.systemPrompt;
 }
 
+const INTERNAL_AGENT_USAGE_GUIDANCE =
+  'pd_run_worker is only for Principles Disciple internal workers. ' +
+  'Use agents_list / sessions_list / sessions_spawn / sessions_send for peer agents or cross-session communication.';
+
+function buildInternalAgentUsageMessage(availableAgents: string[]): string {
+  return [
+    'pd_run_worker is reserved for Principles Disciple internal workers.',
+    `Allowed internal roles: ${availableAgents.join(', ')}`,
+    'Use `agents_list` to discover peer agent ids.',
+    'Use `sessions_spawn` to create or orchestrate another session.',
+    'Use `sessions_list` to inspect running sessions.',
+    'Use `sessions_send` to talk to another existing session.',
+  ].join('\n');
+}
+
+function looksLikeSessionOrPeerCoordinationTask(task: string): boolean {
+  const normalized = task.trim().toLowerCase();
+  if (!normalized) return false;
+
+  const explicitMarkers = [
+    'sessions_send',
+    'sessions_spawn',
+    'sessions_list',
+    'agents_list',
+    'sessionkey',
+    'session key',
+    'sessionid',
+    'session id',
+    'agentid',
+    'agent id',
+    'other session',
+    'another session',
+    'peer agent',
+    'other agent',
+    'another agent',
+    'same-level agent',
+    'same level agent',
+    'cross-session',
+    'cross session',
+    'send a message to',
+    'message another session',
+    'talk to another session',
+    '同级智能体',
+    '另一个智能体',
+    '其他智能体',
+    '另一个会话',
+    '其他会话',
+    '跨会话',
+    '给另一个会话发消息',
+  ];
+
+  return explicitMarkers.some((marker) => normalized.includes(marker));
+}
+
 /**
  * Agent Spawn Tool definition
  */
 export const agentSpawnTool = {
-  name: 'pd_spawn_agent',
+  name: 'pd_run_worker',
   description: `启动指定类型的子智能体执行任务。
 
 可用的智能体类型:
 - explorer: 快速收集证据（文件、日志、复现步骤）
 - diagnostician: 根因分析（verb/adjective + 5Whys）
-- auditor: 演绎审计（axiom/system/via-negativa）
+- auditor: 演演审计（axiom/system/via-negativa）
 - planner: 制定电影剧本计划
 - implementer: 按计划执行代码修改
 - reviewer: 代码审查（正确性、安全性、可维护性）
-- reporter: 最终汇报（技术细节转管理报告）`,
+- reporter: 最终汇报（技术细节转管理报告）
+
+示例调用: pd_run_worker(agentType="diagnostician", task="分析 Pain 7386ccfb 的根因")`,
 
   parameters: Type.Object({
     agentType: Type.String({
       description:
-        '智能体类型: explorer, diagnostician, auditor, planner, implementer, reviewer, reporter',
+        '【必填】智能体类型，必须是以下之一: explorer, diagnostician, auditor, planner, implementer, reviewer, reporter',
     }),
     task: Type.String({
-      description: '任务描述，详细说明子智能体需要完成的工作',
+      description: '【必填】任务描述，告诉智能体要做什么',
     }),
+    runInBackground: Type.Optional(Type.Boolean({
+      description: '【可选】是否后台运行。true=立即返回不等待结果，false=等待执行完成。默认 false',
+    })),
   }),
 
   /**
    * Execution logic for the agent spawn tool
    */
   async execute(
-    params: { agentType?: string; task?: string },
+    params: { agentType?: string; task?: string; runInBackground?: boolean },
     api: OpenClawPluginApi,
     _workspaceDir?: string
   ): Promise<string> {
@@ -101,24 +160,42 @@ export const agentSpawnTool = {
 
     const agentType = typeof params?.agentType === 'string' ? params.agentType.trim() : '';
     const task = typeof params?.task === 'string' ? params.task.trim() : '';
+    const runAsync = params?.runInBackground === true;
+    const availableInternalAgents = listAvailableAgents();
 
     if (!agentType) {
-      api.logger?.warn?.(`[PD:AgentSpawn] Invalid agentType: ${JSON.stringify(params?.agentType)}`);
-      return `❌ agentType 参数无效: ${JSON.stringify(params?.agentType)}`;
+      api.logger?.warn?.(`[PD:AgentSpawn] Missing or invalid agentType: ${JSON.stringify(params)}`);
+      return `❌ 缺少 agentType 参数。请按以下格式调用:
+
+pd_run_worker(
+  agentType="diagnostician",  // 必填: explorer, diagnostician, auditor, planner, implementer, reviewer, reporter
+  task="分析问题的根因"        // 必填: 任务描述
+)
+
+可用的智能体类型: ${availableInternalAgents.join(', ')}`;
     }
 
     if (!task) {
-      api.logger?.warn?.(`[PD:AgentSpawn] Invalid task: ${JSON.stringify(params?.task)}`);
-      return `❌ task 参数无效: ${JSON.stringify(params?.task)}`;
+      api.logger?.warn?.(`[PD:AgentSpawn] Missing task parameter: ${JSON.stringify(params)}`);
+      return `❌ 缺少 task 参数。请提供任务描述，例如:
+
+pd_run_worker(
+  agentType="${agentType || 'diagnostician'}",
+  task="分析 Pain xxx 的根因"
+)`;
     }
 
-    // 1. Validate agent type
-    // 1. Validate agent type
-    const availableAgents = listAvailableAgents();
-    if (!availableAgents.includes(agentType)) {
-      return `❌ 未找到智能体定义: "${agentType}"。
+    if (looksLikeSessionOrPeerCoordinationTask(task)) {
+      api.logger?.warn?.(`[PD:AgentSpawn] Rejected likely peer/session misuse for task: ${task}`);
+      return buildInternalAgentUsageMessage(availableInternalAgents);
+    }
 
-可用的智能体: ${availableAgents.join(', ')}`;
+    if (!availableInternalAgents.includes(agentType)) {
+      return `❌ 未知的智能体类型: "${agentType}"
+
+可用的智能体类型: ${availableInternalAgents.join(', ')}
+
+示例: pd_run_worker(agentType="diagnostician", task="分析问题根因")`;
     }
 
     // 2. Load agent definition
@@ -152,17 +229,28 @@ export const agentSpawnTool = {
         idempotencyKey: randomUUID(),
       });
 
-      // 7. Wait for completion (with configurable timeout to prevent indefinite block)
-      const timeoutMs = (api as any).config?.get?.('intervals.task_timeout_ms') || (30 * 60 * 1000);
-      const result: SubagentWaitResult = await subagentRuntime.waitForRun({
-        runId: sessionKey,
-        timeoutMs,
-      });
+      // 7. Wait for completion (skip if runInBackground mode)
+      // BUGFIX: Restore runAsync check lost during merge conflict resolution
+      const result: SubagentWaitResult | null = runAsync
+        ? null
+        : await subagentRuntime.waitForRun({
+            runId: sessionKey,
+            timeoutMs: (api as any).config?.get?.('intervals.task_timeout_ms') || (30 * 60 * 1000),
+          });
+
+      // 8. Handle async mode (runInBackground: return immediately)
+      if (runAsync) {
+        return `🚀 **${agentDef.name}** 已启动 (后台模式)
+
+sessionKey: \`${sessionKey}\`
+
+请稍后使用 session 查询结果。`;
+      }
 
       const duration = Date.now() - startTime;
 
-      // 8. Handle timeout
-      if (result.status === 'timeout') {
+      // 9. Handle timeout (result is guaranteed non-null here)
+      if (result!.status === 'timeout') {
         return `⚠️ 智能体 **${agentDef.name}** 执行超时 (${(duration / 1000).toFixed(1)}s)。
 
 建议：
@@ -171,12 +259,12 @@ export const agentSpawnTool = {
 - 检查任务是否需要更多上下文`;
       }
 
-      // 9. Handle error
-      if (result.status === 'error') {
-        return `❌ 智能体 **${agentDef.name}** 执行失败: ${result.error || '未知错误'}`;
+      // 10. Handle error
+      if (result!.status === 'error') {
+        return `❌ 智能体 **${agentDef.name}** 执行失败: ${result!.error || '未知错误'}`;
       }
 
-      // 10. Get results
+      // 11. Get results
       const messages = await subagentRuntime.getSessionMessages({ sessionKey });
       const output = extractAssistantText(messages);
 
@@ -194,16 +282,21 @@ ${output}`;
       const errorMsg = err instanceof Error ? err.message : String(err);
       return `❌ 智能体 **${agentDef.name}** 执行异常: ${errorMsg}`;
     } finally {
-      // 12. Cleanup session (P1 fix: log failures instead of silent swallow)
-      try {
-        await subagentRuntime.deleteSession({ sessionKey });
-      } catch (cleanupErr) {
-        const cleanupErrMsg = cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr);
-        api.logger?.error?.(`[PD:AgentSpawn] Failed to cleanup session ${sessionKey}: ${cleanupErrMsg}`);
+      // 12. Cleanup session (skip for background mode - session is still running)
+      if (!runAsync) {
+        try {
+          await subagentRuntime.deleteSession({ sessionKey });
+        } catch (cleanupErr) {
+          const cleanupErrMsg = cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr);
+          api.logger?.error?.(`[PD:AgentSpawn] Failed to cleanup session ${sessionKey}: ${cleanupErrMsg}`);
+        }
       }
     }
   },
 };
+
+// Note: Description is already set in the object definition above.
+// Do NOT override it here to preserve the Chinese description.
 
 /**
  * Batch spawn multiple agents in sequence
