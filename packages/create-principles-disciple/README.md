@@ -27,7 +27,7 @@ npx create-principles-disciple
 ## Requirements
 
 - Node.js >= 18.0.0
-- Claude Code CLI
+- OpenClaw Gateway
 
 ## License
 

@@ -1,7 +1,7 @@
-# Evolution Points 系统交叉评审报告
+﻿# Evolution Points 系统交叉评审报告
 
 > **评审日期**: 2026-03-12
-> **评审模型**: Gemini (架构评审) + Claude Code (实现评审)
+> **评审模型**: Gemini (架构评审) + iFlow CLI (实现评审)
 > **设计版本**: Evolution Points System v1.0
 > **状态**: 🟡 条件可行 - 需要重大修正
 

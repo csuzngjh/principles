@@ -1,4 +1,4 @@
-# 参与贡献 (Contributing)
+﻿# 参与贡献 (Contributing)
 
 [English](CONTRIBUTING.md) | [中文](CONTRIBUTING_ZH.md)
 
@@ -8,7 +8,7 @@
 
 ## 🧠 核心贡献：提议新的思维模型
 
-本项目最具有价值的共创部分在于 `THINKING_OS.md` 中的思维模型库。如果你在实际重度使用 Claude Code 或 OpenClaw 时，总结出了一些极其有效的“人机协作心法”或能有效避免 AI 盲目犯错的“元反馈机制”，请向我们提议。
+本项目最具有价值的共创部分在于 `THINKING_OS.md` 中的思维模型库。如果你在实际重度使用 OpenClaw 时，总结出了一些极其有效的“人机协作心法”或能有效避免 AI 盲目犯错的“元反馈机制”，请向我们提议。
 
 ### 提议原则 (Proposal Criteria)
 
@@ -46,6 +46,6 @@
 在提 Issue 前，请：
 1. 先检查仓库中是否已有类似 Issue。
 2. 请附上 `docs/SYSTEM.log` （如果有相关报错）。
-3. 说明当前的运行环境是 Claude Code 原生配置还是 OpenClaw SDK 插件。
+3. 说明当前的运行环境详情（OpenClaw 版本、插件版本等）。
 
 每一次提交与反馈，都是这个系统“进化”的一次循环。感谢你的同行！
