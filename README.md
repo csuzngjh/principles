@@ -133,7 +133,7 @@ Principles Console is a built-in web interface that provides graphical system mo
 
 ```bash
 # After starting OpenClaw Gateway, open in browser:
-http://localhost:3000/plugins/principles/
+http://localhost:18789/plugins/principles/
 ```
 
 ### Features

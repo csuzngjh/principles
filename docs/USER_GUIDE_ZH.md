@@ -103,7 +103,7 @@
 ### 如何打开？
 
 1. 确保 OpenClaw Gateway 正在运行
-2. 在浏览器中访问：`http://localhost:3000/plugins/principles/`
+2. 在浏览器中访问：`http://localhost:18789/plugins/principles/`
 3. 你会看到一个三栏布局的控制台界面
 
 ### 控制台功能

@@ -103,7 +103,7 @@ If you prefer a graphical interface, you can access **Principles Console** in yo
 ### How to Open?
 
 1. Make sure OpenClaw Gateway is running
-2. Open in your browser: `http://localhost:3000/plugins/principles/`
+2. Open in your browser: `http://localhost:18789/plugins/principles/`
 3. You'll see a three-panel console interface
 
 ### Console Features
