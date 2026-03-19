@@ -36,6 +36,10 @@ describe('Post-Write Checks & Pain Hook', () => {
     config: mockConfig,
     eventLog: mockEventLog,
     trust: mockTrust,
+    trajectory: {
+      recordToolCall: vi.fn(),
+      recordPainEvent: vi.fn(),
+    },
     evolutionReducer: {
       emitSync: mockEmitSync,
       recordProbationFeedback: mockRecordProbationFeedback,
@@ -100,6 +104,11 @@ describe('Post-Write Checks & Pain Hook', () => {
         painType: 'tool_failure',
         source: 'write',
       }),
+    }));
+    expect(mockWctx.trajectory.recordToolCall).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 's1',
+      toolName: 'write',
+      outcome: 'failure',
     }));
   });
 

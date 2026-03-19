@@ -67,6 +67,24 @@ const PD_CONFIG_LOCATIONS = [
     path.join(os.homedir(), '.principles', PD_CONFIG_FILE),
 ];
 
+function isWindowsPath(inputPath: string): boolean {
+    return /^[A-Za-z]:[\\/]/.test(inputPath) || inputPath.startsWith('\\\\');
+}
+
+function isPosixAbsolutePath(inputPath: string): boolean {
+    return inputPath.startsWith('/');
+}
+
+function getPathApi(inputPath: string): typeof path.posix | typeof path.win32 | typeof path {
+    if (isWindowsPath(inputPath)) {
+        return path.win32;
+    }
+    if (isPosixAbsolutePath(inputPath)) {
+        return path.posix;
+    }
+    return path;
+}
+
 function findConfigFile(): string | null {
     for (const loc of PD_CONFIG_LOCATIONS) {
         if (fs.existsSync(loc)) {
@@ -106,7 +124,9 @@ export class PathResolver {
         if (!extensionRootPath || !extensionRootPath.trim()) {
             return;
         }
-        PathResolver.extensionRoot = path.resolve(extensionRootPath.trim());
+        const trimmed = extensionRootPath.trim();
+        const pathApi = getPathApi(trimmed);
+        PathResolver.extensionRoot = pathApi.normalize(trimmed);
     }
 
     static getExtensionRoot(): string | null {
@@ -179,14 +199,15 @@ export class PathResolver {
     }
 
     private normalizePath(inputPath: string): string {
-        let normalized = path.resolve(inputPath);
+        const pathApi = getPathApi(inputPath);
+        let normalized = pathApi === path ? path.resolve(inputPath) : pathApi.normalize(inputPath);
         
         if (this.normalizeWorkspace) {
-            const problematicSuffixes = ['/memory', '/docs'];
+            const problematicSuffixes = ['/memory', '/docs', '\\memory', '\\docs'];
             
             for (const suffix of problematicSuffixes) {
                 if (normalized.endsWith(suffix)) {
-                    const parent = path.dirname(normalized);
+                    const parent = pathApi.dirname(normalized);
                     this.log('warn', `Detected subdirectory suffix '${suffix}' in path. Normalized to parent: ${parent}`);
                     normalized = parent;
                     break;
@@ -239,7 +260,8 @@ export class PathResolver {
         // If workspaceDir was explicitly provided via constructor, use workspace-based state dir
         // This ensures tests and programmatic usage don't get polluted by global config
         if (this.initialized && this.workspaceDir) {
-            this.stateDir = path.join(this.workspaceDir, '.state');
+            const pathApi = getPathApi(this.workspaceDir);
+            this.stateDir = pathApi.join(this.workspaceDir, '.state');
             this.log('debug', `Using workspace-based state directory: ${this.stateDir}`);
             return this.stateDir;
         }
@@ -251,7 +273,9 @@ export class PathResolver {
             return this.stateDir;
         }
 
-        this.stateDir = path.join(this.getWorkspaceDir(), '.state');
+        const workspaceDir = this.getWorkspaceDir();
+        const pathApi = getPathApi(workspaceDir);
+        this.stateDir = pathApi.join(workspaceDir, '.state');
         this.log('debug', `Computed state directory: ${this.stateDir}`);
 
         return this.stateDir;
@@ -260,48 +284,50 @@ export class PathResolver {
     resolve(key: string): string {
         const workspace = this.getWorkspaceDir();
         const state = this.getStateDir();
-        const memory = path.join(workspace, 'memory');
+        const workspacePath = getPathApi(workspace);
         const extensionRoot = PathResolver.extensionRoot || path.resolve(process.cwd(), 'packages', 'openclaw-plugin');
-        const extensionSrc = path.join(extensionRoot, 'src');
-        const extensionDist = path.join(extensionRoot, 'dist');
+        const extensionPath = getPathApi(extensionRoot);
+        const memory = workspacePath.join(workspace, 'memory');
+        const extensionSrc = extensionPath.join(extensionRoot, 'src');
+        const extensionDist = extensionPath.join(extensionRoot, 'dist');
         const evolutionWorker = fs.existsSync(extensionSrc)
-            ? path.join(extensionSrc, 'service', 'evolution-worker.ts')
-            : path.join(extensionDist, 'service', 'evolution-worker.js');
+            ? extensionPath.join(extensionSrc, 'service', 'evolution-worker.ts')
+            : extensionPath.join(extensionDist, 'service', 'evolution-worker.js');
 
         const pathMap: Record<string, string> = {
-            'PROFILE': path.join(workspace, '.principles', 'PROFILE.json'),
-            'PRINCIPLES': path.join(workspace, '.principles', 'PRINCIPLES.md'),
-            'THINKING_OS': path.join(workspace, '.principles', 'THINKING_OS.md'),
-            'KERNEL': path.join(workspace, '.principles', '00-kernel.md'),
-            'DECISION_POLICY': path.join(workspace, '.principles', 'DECISION_POLICY.json'),
-            'MODELS_DIR': path.join(workspace, '.principles', 'models'),
-            'PLAN': path.join(workspace, 'PLAN.md'),
-            'AGENT_SCORECARD': path.join(state, 'AGENT_SCORECARD.json'),
-            'PAIN_FLAG': path.join(state, '.pain_flag'),
-            'EVOLUTION_QUEUE': path.join(state, 'evolution_queue.json'),
-            'EVOLUTION_DIRECTIVE': path.join(state, 'evolution_directive.json'),
-            'WORKBOARD': path.join(state, 'WORKBOARD.json'),
-            'SYSTEM_CAPABILITIES': path.join(state, 'SYSTEM_CAPABILITIES.json'),
-            'PAIN_SETTINGS': path.join(state, 'pain_settings.json'),
-            'PAIN_CANDIDATES': path.join(state, 'pain_candidates.json'),
-            'THINKING_OS_USAGE': path.join(state, 'thinking_os_usage.json'),
-            'DICTIONARY': path.join(state, 'pain_dictionary.json'),
+            'PROFILE': workspacePath.join(workspace, '.principles', 'PROFILE.json'),
+            'PRINCIPLES': workspacePath.join(workspace, '.principles', 'PRINCIPLES.md'),
+            'THINKING_OS': workspacePath.join(workspace, '.principles', 'THINKING_OS.md'),
+            'KERNEL': workspacePath.join(workspace, '.principles', '00-kernel.md'),
+            'DECISION_POLICY': workspacePath.join(workspace, '.principles', 'DECISION_POLICY.json'),
+            'MODELS_DIR': workspacePath.join(workspace, '.principles', 'models'),
+            'PLAN': workspacePath.join(workspace, 'PLAN.md'),
+            'AGENT_SCORECARD': workspacePath.join(state, 'AGENT_SCORECARD.json'),
+            'PAIN_FLAG': workspacePath.join(state, '.pain_flag'),
+            'EVOLUTION_QUEUE': workspacePath.join(state, 'evolution_queue.json'),
+            'EVOLUTION_DIRECTIVE': workspacePath.join(state, 'evolution_directive.json'),
+            'WORKBOARD': workspacePath.join(state, 'WORKBOARD.json'),
+            'SYSTEM_CAPABILITIES': workspacePath.join(state, 'SYSTEM_CAPABILITIES.json'),
+            'PAIN_SETTINGS': workspacePath.join(state, 'pain_settings.json'),
+            'PAIN_CANDIDATES': workspacePath.join(state, 'pain_candidates.json'),
+            'THINKING_OS_USAGE': workspacePath.join(state, 'thinking_os_usage.json'),
+            'DICTIONARY': workspacePath.join(state, 'pain_dictionary.json'),
             'STATE_DIR': state,
             'EXTENSION_ROOT': extensionRoot,
             'EXTENSION_SRC': extensionSrc,
             'EXTENSION_DIST': extensionDist,
             'EVOLUTION_WORKER': evolutionWorker,
-            'LOGS': path.join(memory, 'logs'),
-            'SYSTEM_LOG': path.join(memory, 'logs', 'SYSTEM.log'),
-            'REFLECTION_LOG': path.join(memory, 'reflection-log.md'),
-            'USER_CONTEXT': path.join(memory, 'USER_CONTEXT.md'),
-            'OKR_DIR': path.join(memory, 'okr'),
-            'CURRENT_FOCUS': path.join(memory, 'okr', 'CURRENT_FOCUS.md'),
-            'WEEK_STATE': path.join(memory, 'okr', 'WEEK_STATE.json'),
-            'THINKING_OS_CANDIDATES': path.join(memory, 'THINKING_OS_CANDIDATES.md'),
-            'EVOLUTION_STREAM': path.join(memory, 'evolution.jsonl'),
-            'EVOLUTION_LOCK': path.join(memory, '.locks', 'evolution'),
-            'PRINCIPLE_BLACKLIST': path.join(state, 'principle_blacklist.json'),
+            'LOGS': workspacePath.join(memory, 'logs'),
+            'SYSTEM_LOG': workspacePath.join(memory, 'logs', 'SYSTEM.log'),
+            'REFLECTION_LOG': workspacePath.join(memory, 'reflection-log.md'),
+            'USER_CONTEXT': workspacePath.join(memory, 'USER_CONTEXT.md'),
+            'OKR_DIR': workspacePath.join(memory, 'okr'),
+            'CURRENT_FOCUS': workspacePath.join(memory, 'okr', 'CURRENT_FOCUS.md'),
+            'WEEK_STATE': workspacePath.join(memory, 'okr', 'WEEK_STATE.json'),
+            'THINKING_OS_CANDIDATES': workspacePath.join(memory, 'THINKING_OS_CANDIDATES.md'),
+            'EVOLUTION_STREAM': workspacePath.join(memory, 'evolution.jsonl'),
+            'EVOLUTION_LOCK': workspacePath.join(memory, '.locks', 'evolution'),
+            'PRINCIPLE_BLACKLIST': workspacePath.join(state, 'principle_blacklist.json'),
             'MEMORY': memory,
         };
 

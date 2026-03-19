@@ -80,6 +80,14 @@ export const commandDescriptions: Record<string, Record<SupportedLanguage, strin
   'pd-rollback': {
     zh: '回滚情绪事件惩罚 <event-id>|last',
     en: 'Rollback empathy event penalty <event-id>|last'
+  },
+  'pd-export': {
+    zh: '导出 analytics 或纠错样本 [analytics|corrections --redacted]',
+    en: 'Export analytics or correction samples [analytics|corrections --redacted]'
+  },
+  'pd-samples': {
+    zh: '查看或审核纠错样本 [review approve|reject <sample-id> [note]]',
+    en: 'List or review correction samples [review approve|reject <sample-id> [note]]'
   }
 };
 

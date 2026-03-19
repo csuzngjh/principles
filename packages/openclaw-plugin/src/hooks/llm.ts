@@ -5,6 +5,7 @@ import { trackFriction, trackLlmOutput, recordThinkingCheckpoint, resetFriction 
 import { writePainFlag } from '../core/pain.js';
 import { DetectionService } from '../core/detection-service.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
+import { sanitizeAssistantText } from './message-sanitize.js';
 
 export interface EmpathySignal {
     detected: boolean;
@@ -234,6 +235,21 @@ export function handleLlmOutput(
     if (!event.assistantTexts || event.assistantTexts.length === 0) return;
 
     const text = event.assistantTexts.join('\n');
+    const signal = extractEmpathySignal(text);
+    try {
+        wctx.trajectory?.recordAssistantTurn?.({
+            sessionId: ctx.sessionId,
+            runId: event.runId,
+            provider: event.provider,
+            model: event.model,
+            rawText: text,
+            sanitizedText: sanitizeAssistantText(text),
+            usageJson: event.usage || {},
+            empathySignalJson: signal,
+        });
+    } catch (error) {
+        ctx.logger?.warn?.(`[PD:LLM] Failed to persist assistant turn to trajectory: ${String(error)}`);
+    }
 
     // ── Track B: Semantic Pain Detection (V1.3.0 Funnel) ──
     const detectionService = DetectionService.get(wctx.stateDir);
@@ -259,7 +275,6 @@ export function handleLlmOutput(
     // empathy sub-pipeline (enabled by default)
     const empathyEnabled = config.get('empathy_engine.enabled');
     if (empathyEnabled !== false) {
-        const signal = extractEmpathySignal(text);
         if (signal.detected) {
             const dedupeWindow = Number(config.get('empathy_engine.dedupe_window_ms') ?? 60000);
             const deduped = shouldDedupe(ctx.sessionId, event.runId, signal, dedupeWindow);
@@ -273,6 +288,19 @@ export function handleLlmOutput(
 
                 if (boundedScore > 0) {
                     trackFriction(ctx.sessionId, boundedScore, `user_empathy_${signal.severity}`, ctx.workspaceDir);
+                    try {
+                        wctx.trajectory?.recordPainEvent?.({
+                            sessionId: ctx.sessionId,
+                            source: 'user_empathy',
+                            score: boundedScore,
+                            reason: signal.reason || 'Assistant self-reported user emotional distress.',
+                            severity: signal.severity,
+                            origin: 'assistant_self_report',
+                            confidence: signal.confidence,
+                        });
+                    } catch (error) {
+                        ctx.logger?.warn?.(`[PD:LLM] Failed to persist empathy pain event to trajectory: ${String(error)}`);
+                    }
                     // Generate unique event ID for rollback support
                     const eventId = `emp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
                     eventLog.recordPainSignal(ctx.sessionId, {

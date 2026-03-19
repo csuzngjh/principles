@@ -376,41 +376,40 @@ GFI: ${currentGfi}/100
 
     const riskLevel = assessRiskLevel(relPath, { toolName: event.toolName, params: event.params }, profile.risk_paths);
     const lineChanges = estimateLineChanges({ toolName: event.toolName, params: event.params });
+    const planApprovals = profile.progressive_gate?.plan_approvals;
+    const canUsePlanApproval = Boolean(
+      stage === 1 &&
+      planApprovals?.enabled &&
+      getPlanStatus(ctx.workspaceDir) === 'READY' &&
+      planApprovals.allowed_operations?.includes(event.toolName) &&
+      matchesAnyPattern(relPath, planApprovals.allowed_patterns || []) &&
+      ((planApprovals.max_lines_override ?? -1) === -1 || lineChanges <= (planApprovals.max_lines_override ?? -1))
+    );
 
     logger.info(`[PD_GATE] Trust: ${trustScore} (Stage ${stage}), Risk: ${riskLevel}, Path: ${relPath}`);
 
     // Stage 1 (Bankruptcy): Block ALL writes to risk paths, and all medium+ writes
     if (stage === 1) {
+        if (canUsePlanApproval) {
+            const planStatus = 'READY';
+            wctx.eventLog.recordPlanApproval(ctx.sessionId, {
+                toolName: event.toolName,
+                filePath: relPath,
+                pattern: relPath,
+                planStatus
+            });
+            wctx.trajectory?.recordGateBlock?.({
+                sessionId: ctx.sessionId,
+                toolName: event.toolName,
+                filePath: relPath,
+                reason: 'plan_approval',
+                planStatus,
+            });
+            logger.info(`[PD_GATE] Stage 1 PLAN approval: ${relPath}`);
+            return;
+        }
+
         if (risky || riskLevel !== 'LOW') {
-            // Check if PLAN whitelist is enabled
-            if (profile.progressive_gate?.plan_approvals?.enabled) {
-                const planApprovals = profile.progressive_gate.plan_approvals;
-                const planStatus = getPlanStatus(ctx.workspaceDir);
-
-                // Must have READY plan
-                if (planStatus === 'READY') {
-                    // Check operation type
-                    if (planApprovals.allowed_operations?.includes(event.toolName)) {
-                        // Check path pattern
-                        if (matchesAnyPattern(relPath, planApprovals.allowed_patterns || [])) {
-                            // Check line limit (if configured)
-                            const maxLines = planApprovals.max_lines_override ?? -1;
-                            if (maxLines === -1 || lineChanges <= maxLines) {
-                                // Record PLAN approval event
-                                wctx.eventLog.recordPlanApproval(ctx.sessionId, {
-                                    toolName: event.toolName,
-                                    filePath: relPath,
-                                    pattern: relPath,
-                                    planStatus
-                                });
-                                logger.info(`[PD_GATE] Stage 1 PLAN approval: ${relPath}`);
-                                return; // Allow the operation
-                            }
-                        }
-                    }
-                }
-            }
-
             // Block if not approved by whitelist
             return block(relPath, `Trust score too low (${trustScore}). Stage 1 agents cannot modify risk paths or perform non-trivial edits.`, wctx, event.toolName);
         }

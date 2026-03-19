@@ -49,7 +49,21 @@ describe('Pain Command', () => {
         dictionary: mockDictionary,
         trust: mockTrust,
         eventLog: mockEventLog,
-        config: mockConfig
+        config: mockConfig,
+        trajectory: {
+            getDataStats: vi.fn().mockReturnValue({
+                dbPath: '/mock/workspace/.state/trajectory.db',
+                dbSizeBytes: 2048,
+                assistantTurns: 2,
+                userTurns: 3,
+                toolCalls: 4,
+                painEvents: 1,
+                pendingSamples: 1,
+                approvedSamples: 2,
+                blobBytes: 1024,
+                lastIngestAt: '2026-03-19T10:00:00.000Z',
+            })
+        }
     };
 
     beforeEach(() => {
@@ -95,5 +109,20 @@ describe('Pain Command', () => {
         
         expect(mockTrust.resetTrust).toHaveBeenCalled();
         expect(result.text).toContain('Agent trust score has been reset');
+    });
+
+    it('shows trajectory data stats for the data subcommand', () => {
+        const result = handlePainCommand({
+            args: 'data',
+            config: { workspaceDir, language: 'en' },
+            sessionId
+        } as any);
+
+        expect(result.text).toContain('trajectory.db');
+        expect(result.text).toContain('assistant turns: 2');
+        expect(result.text).toContain('blob bytes: 1024');
+        expect(result.text).toContain('last ingest: 2026-03-19T10:00:00.000Z');
+        expect(result.text).toContain('pending samples');
+        expect(result.text).toContain('approved samples');
     });
 });

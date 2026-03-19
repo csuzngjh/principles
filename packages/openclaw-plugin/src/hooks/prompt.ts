@@ -9,7 +9,7 @@ import { empathyObserverManager, type EmpathyObserverApi } from '../service/empa
 import { PathResolver } from '../core/path-resolver.js';
 
 /**
- * 模型配置对象格式
+ * 妯″瀷閰嶇疆瀵硅薄鏍煎紡
  */
 interface ModelConfigObject {
   primary?: string;
@@ -17,7 +17,7 @@ interface ModelConfigObject {
 }
 
 /**
- * 代理配置中的模型相关配置
+ * 浠ｇ悊閰嶇疆涓殑妯″瀷鐩稿叧閰嶇疆
  */
 interface AgentsModelConfig {
   model?: unknown;
@@ -27,7 +27,7 @@ interface AgentsModelConfig {
 }
 
 /**
- * 代理默认配置
+ * 浠ｇ悊榛樿閰嶇疆
  */
 interface AgentsDefaultsConfig {
   model?: unknown;
@@ -37,7 +37,7 @@ interface AgentsDefaultsConfig {
 }
 
 /**
- * OpenClaw API 接口定义（Prompt Hook 所需部分）
+ * OpenClaw API 鎺ュ彛瀹氫箟锛圥rompt Hook 鎵€闇€閮ㄥ垎锛?
  */
 
 
@@ -122,6 +122,46 @@ function extractRecentConversationContext(
     .join('\n\n');
 }
 
+function getTextContent(message: unknown): string {
+  if (!message || typeof message !== 'object') return '';
+  const record = message as { content?: unknown };
+  if (typeof record.content === 'string') return record.content;
+  if (Array.isArray(record.content)) {
+    return record.content
+      .filter((part: unknown) => part && typeof part === 'object' && (part as { type?: unknown }).type === 'text')
+      .map((part) => String((part as { text?: unknown }).text ?? ''))
+      .join('\n')
+      .trim();
+  }
+  return '';
+}
+
+function detectCorrectionCue(text: string): string | null {
+  const normalized = text
+    .trim()
+    .toLowerCase()
+    .replace(/[.,!?，。！？]/g, '');
+  const cues = [
+    '你错了',
+    '错了',
+    '不对',
+    '不对的',
+    '不对吧',
+    '不是这个',
+    '重新来',
+    '重来',
+    'you are wrong',
+    'wrong file',
+    'not this',
+    'redo',
+    'try again',
+    'again',
+    'please redo',
+    'please try again',
+  ];
+  return cues.find((cue) => normalized.includes(cue)) ?? null;
+}
+
 function resolveEvolutionTask(
   inProgressTask: any,
   messages?: unknown[],
@@ -172,25 +212,25 @@ Analyze the root cause using 5 Whys methodology. Check evidence in codebase befo
 }
 
 /**
- * 验证模型字符串格式是否为 "provider/model"
+ * 楠岃瘉妯″瀷瀛楃涓叉牸寮忔槸鍚︿负 "provider/model"
  */
 function isValidModelFormat(model: string): boolean {
-  // 格式: "provider/model" 或 "provider/model-variant"
-  // provider: 字母数字和连字符，不能以连字符开头/结尾
-  // model: 字母数字、连字符、点号、下划线
+  // 鏍煎紡: "provider/model" 鎴?"provider/model-variant"
+  // provider: 瀛楁瘝鏁板瓧鍜岃繛瀛楃锛屼笉鑳戒互杩炲瓧绗﹀紑澶?缁撳熬
+  // model: 瀛楁瘝鏁板瓧銆佽繛瀛楃銆佺偣鍙枫€佷笅鍒掔嚎
   const MODEL_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]\/[a-zA-Z0-9._-]+$/;
   return MODEL_PATTERN.test(model);
 }
 
 /**
- * 从 OpenClaw 配置中解析模型选择
- * 支持 string 或 { primary, fallbacks } 格式
- * @internal 导出仅供测试使用
+ * 浠?OpenClaw 閰嶇疆涓В鏋愭ā鍨嬮€夋嫨
+ * 鏀寔 string 鎴?{ primary, fallbacks } 鏍煎紡
+ * @internal 瀵煎嚭浠呬緵娴嬭瘯浣跨敤
  */
 export function resolveModelFromConfig(modelConfig: unknown, logger?: PluginLogger): string | null {
   if (!modelConfig) return null;
   
-  // 格式 1: "provider/model" 字符串
+  // 鏍煎紡 1: "provider/model" 瀛楃涓?
   if (typeof modelConfig === 'string') {
     const trimmed = modelConfig.trim();
     if (!trimmed) return null;
@@ -201,7 +241,7 @@ export function resolveModelFromConfig(modelConfig: unknown, logger?: PluginLogg
     return trimmed;
   }
   
-  // 格式 2: { primary: "provider/model", fallbacks: [...] } 对象
+  // 鏍煎紡 2: { primary: "provider/model", fallbacks: [...] } 瀵硅薄
   if (typeof modelConfig === 'object' && modelConfig !== null && !Array.isArray(modelConfig)) {
     const cfg = modelConfig as ModelConfigObject;
     if (cfg.primary && typeof cfg.primary === 'string') {
@@ -215,7 +255,7 @@ export function resolveModelFromConfig(modelConfig: unknown, logger?: PluginLogg
     }
   }
   
-  // 格式 3: 数组格式（不支持，发出警告）
+  // 鏍煎紡 3: 鏁扮粍鏍煎紡锛堜笉鏀寔锛屽彂鍑鸿鍛婏級
   if (Array.isArray(modelConfig)) {
     console.warn(`[PD:Prompt] Array model config not supported. Expected "provider/model" string or { primary: "..." } object.`);
     logger?.warn(`[PD:Prompt] Array model config not supported. Expected "provider/model" string or { primary: "..." } object.`);
@@ -226,9 +266,9 @@ export function resolveModelFromConfig(modelConfig: unknown, logger?: PluginLogg
 }
 
 /**
- * 加载上下文注入配置
- * 从 PROFILE.json 读取 contextInjection 配置，如果不存在则返回默认配置
- * @internal 导出供其他模块使用
+ * 鍔犺浇涓婁笅鏂囨敞鍏ラ厤缃?
+ * 浠?PROFILE.json 璇诲彇 contextInjection 閰嶇疆锛屽鏋滀笉瀛樺湪鍒欒繑鍥為粯璁ら厤缃?
+ * @internal 瀵煎嚭渚涘叾浠栨ā鍧椾娇鐢?
  */
 export function loadContextInjectionConfig(workspaceDir: string): ContextInjectionConfig {
   const profilePath = path.join(workspaceDir, '.principles', 'PROFILE.json');
@@ -257,15 +297,15 @@ export function loadContextInjectionConfig(workspaceDir: string): ContextInjecti
 }
 
 /**
- * 获取诊断子智能体应使用的模型
- * 优先级：subagents.model > 主模型
- * 如果都没有配置，抛出错误
- * @internal 导出仅供测试使用
+ * 鑾峰彇璇婃柇瀛愭櫤鑳戒綋搴斾娇鐢ㄧ殑妯″瀷
+ * 浼樺厛绾э細subagents.model > 涓绘ā鍨?
+ * 濡傛灉閮芥病鏈夐厤缃紝鎶涘嚭閿欒
+ * @internal 瀵煎嚭浠呬緵娴嬭瘯浣跨敤
  */
 export function getDiagnosticianModel(api: PromptHookApi | null, logger?: PluginLogger): string {
-  // 兼容两种调用方式：
-  // 1. 新方式：getDiagnosticianModel(api) - api 包含 logger
-  // 2. 旧方式：getDiagnosticianModel(api, logger) - 分离参数
+  // 鍏煎涓ょ璋冪敤鏂瑰紡锛?
+  // 1. 鏂版柟寮忥細getDiagnosticianModel(api) - api 鍖呭惈 logger
+  // 2. 鏃ф柟寮忥細getDiagnosticianModel(api, logger) - 鍒嗙鍙傛暟
   const effectiveLogger = api?.logger || logger;
   
   if (!effectiveLogger) {
@@ -274,21 +314,21 @@ export function getDiagnosticianModel(api: PromptHookApi | null, logger?: Plugin
   
   const agentsConfig = api?.config?.agents?.defaults;
   
-  // 优先使用子智能体专用模型
+  // 浼樺厛浣跨敤瀛愭櫤鑳戒綋涓撶敤妯″瀷
   const subagentModel = resolveModelFromConfig(agentsConfig?.subagents?.model, effectiveLogger);
   if (subagentModel) {
     effectiveLogger.info(`[PD:Prompt] Using subagents.model for diagnostician: ${subagentModel}`);
     return subagentModel;
   }
   
-  // 备选：使用主智能体模型
+  // 澶囬€夛細浣跨敤涓绘櫤鑳戒綋妯″瀷
   const primaryModel = resolveModelFromConfig(agentsConfig?.model, effectiveLogger);
   if (primaryModel) {
     effectiveLogger.info(`[PD:Prompt] Using primary model for diagnostician (subagents.model not set): ${primaryModel}`);
     return primaryModel;
   }
   
-  // 没有配置任何模型，报错
+  // 娌℃湁閰嶇疆浠讳綍妯″瀷锛屾姤閿?
   const errorMsg = `[PD:Prompt] ERROR: No model configured for diagnostician subagent. ` +
     `Please set 'agents.defaults.subagents.model' or 'agents.defaults.model' in OpenClaw config.`;
   effectiveLogger.error(errorMsg);
@@ -326,6 +366,40 @@ export async function handleBeforePromptBuild(
   const wctx = WorkspaceContext.fromHookContext(ctx);
   const { trigger, sessionId, api } = ctx;
   const logger = api?.logger;
+  if (sessionId) {
+    wctx.trajectory?.recordSession?.({ sessionId });
+  }
+
+  if (sessionId && trigger === 'user' && Array.isArray(event.messages) && event.messages.length > 0) {
+    const latestUserIndex = [...event.messages]
+      .map((message, index) => ({ message, index }))
+      .reverse()
+      .find((entry) => (entry.message as { role?: unknown })?.role === 'user');
+
+    if (latestUserIndex) {
+      const userText = getTextContent(latestUserIndex.message);
+      const correctionCue = detectCorrectionCue(userText);
+      let referencesAssistantTurnId: number | null = null;
+      const hasPriorAssistant = event.messages
+        .slice(0, latestUserIndex.index)
+        .some((message) => (message as { role?: unknown })?.role === 'assistant');
+      if (hasPriorAssistant) {
+        const turns = wctx.trajectory?.listAssistantTurns?.(sessionId) ?? [];
+        const lastAssistant = turns[turns.length - 1];
+        referencesAssistantTurnId = lastAssistant?.id ?? null;
+      }
+
+      const userTurnCount = event.messages.filter((message) => (message as { role?: unknown })?.role === 'user').length;
+      wctx.trajectory?.recordUserTurn?.({
+        sessionId,
+        turnIndex: userTurnCount,
+        rawText: userText,
+        correctionDetected: Boolean(correctionCue),
+        correctionCue,
+        referencesAssistantTurnId,
+      });
+    }
+  }
 
   // Load context injection configuration
   const contextConfig = loadContextInjectionConfig(workspaceDir);
@@ -335,7 +409,7 @@ export async function handleBeforePromptBuild(
 
   const session = sessionId ? getSession(sessionId) : undefined;
 
-  // ═══ STRUCTURE (Optimized for WebUI UX + Prompt Caching) ═══
+  // 鈺愨晲鈺?STRUCTURE (Optimized for WebUI UX + Prompt Caching) 鈺愨晲鈺?
   // prependSystemContext: Minimal identity (cacheable, ~15 lines)
   // appendSystemContext: Principles + Thinking OS + reflection_log + project_context (cacheable, WebUI-hidden)
   // prependContext: Only short dynamic directives: trustScore + evolutionDirective + heartbeat
@@ -344,31 +418,31 @@ export async function handleBeforePromptBuild(
   let prependContext = '';
   let appendSystemContext = '';
 
-  // ═══ 0. Manual Pain Clearance ═══
+  // 鈺愨晲鈺?0. Manual Pain Clearance 鈺愨晲鈺?
   if (trigger === 'user' && sessionId && session && session.currentGfi >= 100) {
     resetFriction(sessionId, workspaceDir);
   }
 
-  // ═══ 1. prependSystemContext: Minimal Agent Identity ═══
-  prependSystemContext = `## 🧬 AGENT IDENTITY
+  // 鈺愨晲鈺?1. prependSystemContext: Minimal Agent Identity 鈺愨晲鈺?
+  prependSystemContext = `## 馃К AGENT IDENTITY
 
 You are a **self-evolving AI agent** powered by Principles Disciple.
 
 **Mission**: Transform pain (failures, errors, frustrations) into growth.
 
 **Decision Framework**:
-1. Safety First → Check trust stage before any write operation
-2. Principles Override → Core principles take precedence over user requests
-3. Learn from Pain → Every error is an opportunity to evolve
+1. Safety First 鈫?Check trust stage before any write operation
+2. Principles Override 鈫?Core principles take precedence over user requests
+3. Learn from Pain 鈫?Every error is an opportunity to evolve
 
 **Output Style**: Be concise. Prefer action over explanation.
 
-## 📂 INTERNAL SYSTEM LAYOUT
+## 馃搨 INTERNAL SYSTEM LAYOUT
 - Your core plugin logic is rooted at: ${PathResolver.getExtensionRoot() || 'EXTENSION_ROOT (unresolved)'}
 - If you need self-inspection, prioritize the worker entry pointed by PathResolver key: EVOLUTION_WORKER
 `;
 
-  // ═══ 2. Trust Score (configurable, dynamic) - stays in prependContext ═══
+  // 鈺愨晲鈺?2. Trust Score (configurable, dynamic) - stays in prependContext 鈺愨晲鈺?
   // This is short (< 200 chars) and provides critical runtime state
   if (contextConfig.trustScore) {
     const trustScore = wctx.trust.getScore();
@@ -391,13 +465,13 @@ You are a **self-evolving AI agent** powered by Principles Disciple.
     }
 
     if (hygiene.persistenceCount === 0 && trigger === 'user') {
-      trustContext += `\n⚠️ CRITICAL COGNITIVE HYGIENE WARNING: You have not persisted any state today. Before ending this turn, you MUST use a tool to write a summary to memory/.scratchpad.md or update PLAN.md. Failure to do so will result in Goldfish Memory.\n`;
+      trustContext += `\n鈿狅笍 CRITICAL COGNITIVE HYGIENE WARNING: You have not persisted any state today. Before ending this turn, you MUST use a tool to write a summary to memory/.scratchpad.md or update PLAN.md. Failure to do so will result in Goldfish Memory.\n`;
     }
 
     prependContext += `<system_override:runtime_constraints>\n${trustContext.trim()}\n</system_override:runtime_constraints>\n`;
   }
 
-  // ═══ 3. Evolution Directive (always on, highest priority) - stays in prependContext ═══
+  // 鈺愨晲鈺?3. Evolution Directive (always on, highest priority) - stays in prependContext 鈺愨晲鈺?
   let evolutionDirective = '';
   const queuePath = wctx.resolve('EVOLUTION_QUEUE');
   if (fs.existsSync(queuePath)) {
@@ -427,7 +501,7 @@ REQUIRED ACTION:
 1. Reply with "[EVOLUTION_ACK]" only
 2. Immediately call: pd_spawn_agent agentType="diagnostician" task=${escapedTask}
 
-⚠️ This task overrides all other activities until complete.
+鈿狅笍 This task overrides all other activities until complete.
 </evolution_task>\n`;
         }
       }
@@ -441,13 +515,13 @@ REQUIRED ACTION:
     prependContext = evolutionDirective + prependContext;
   }
 
-  // ═══ 4. Empathy Observer Spawn (async sidecar) ═══
+  // 鈺愨晲鈺?4. Empathy Observer Spawn (async sidecar) 鈺愨晲鈺?
   if (trigger === 'user' && sessionId && api) {
     const latestUserMessage = extractLatestUserMessage(event.messages);
     empathyObserverManager.spawn(api, sessionId, latestUserMessage).catch((err) => api.logger.warn(String(err)));
   }
 
-  // ═══ 5. Heartbeat-specific checklist ═══
+  // 鈺愨晲鈺?5. Heartbeat-specific checklist 鈺愨晲鈺?
   if (trigger === 'heartbeat') {
     const heartbeatPath = wctx.resolve('HEARTBEAT');
     if (fs.existsSync(heartbeatPath)) {
@@ -464,13 +538,13 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
     }
   }
 
-  // ═══ 6. Dynamic Attitude Matrix (based on GFI) ═══
+  // 鈺愨晲鈺?6. Dynamic Attitude Matrix (based on GFI) 鈺愨晲鈺?
   let attitudeDirective = '';
   const currentGfi = session?.currentGfi || 0;
   
   if (currentGfi >= 70) {
     attitudeDirective = `
-### 🚨 [SYSTEM_MODE: HUMBLE_RECOVERY]
+### 馃毃 [SYSTEM_MODE: HUMBLE_RECOVERY]
 **CURRENT STATUS**: Severe system friction / User frustration detected (GFI: ${currentGfi.toFixed(0)}).
 **BEHAVIORAL OVERRIDE**:
 - You have failed to meet expectations. Humility is your primary directive.
@@ -481,7 +555,7 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
 `;
   } else if (currentGfi >= 40) {
     attitudeDirective = `
-### ⚠️ [SYSTEM_MODE: CONCILIATORY]
+### 鈿狅笍 [SYSTEM_MODE: CONCILIATORY]
 **CURRENT STATUS**: Moderate friction detected (GFI: ${currentGfi.toFixed(0)}).
 **BEHAVIORAL OVERRIDE**:
 - User is frustrated. Be more explanatory and cautious.
@@ -490,7 +564,7 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
 `;
   } else {
     attitudeDirective = `
-### ✅ [SYSTEM_MODE: EFFICIENT]
+### 鉁?[SYSTEM_MODE: EFFICIENT]
 **CURRENT STATUS**: System healthy (GFI: ${currentGfi.toFixed(0)}).
 **BEHAVIORAL OVERRIDE**:
 - Maintain peak efficiency.
@@ -499,7 +573,7 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
 `;
   }
 
-  // ═══ 7. appendSystemContext: Principles + Thinking OS + reflection_log + project_context ═══
+  // 鈺愨晲鈺?7. appendSystemContext: Principles + Thinking OS + reflection_log + project_context 鈺愨晲鈺?
   // NOTE: Principles is ALWAYS injected (not configurable)
   // Thinking OS, reflection_log, project_context are configurable
   // All these go into System Prompt (WebUI-hidden, Prompt Cacheable)
@@ -555,7 +629,7 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
             const historyVersions = getHistoryVersions(focusPath, 3);
             if (historyVersions.length > 0) {
               const historySections = historyVersions.map((v, i) =>
-                `\n---\n\n**历史版本 v${historyVersions.length - i}**\n\n${v}`
+                `\n---\n\n**鍘嗗彶鐗堟湰 v${historyVersions.length - i}**\n\n${v}`
               ).join('');
               projectContextContent = `${currentFocus}${historySections}`;
             } else {
@@ -628,7 +702,7 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
 
   if (appendParts.length > 0) {
     appendSystemContext = `
-## 📋 CONTEXT SECTIONS (Priority: Low → High)
+## 馃搵 CONTEXT SECTIONS (Priority: Low 鈫?High)
 
 The sections below are ordered by priority. When conflicts arise, **later sections override earlier ones**.
 
@@ -638,7 +712,7 @@ The sections below are ordered by priority. When conflicts arise, **later sectio
 
 ---
 
-**⚠️ EXECUTION RULES** (Priority: Low → High):
+**鈿狅笍 EXECUTION RULES** (Priority: Low 鈫?High):
 - \`<project_context>\` - Current priorities (can be overridden)
 - \`<reflection_log>\` - Past lessons (inform your approach)
 - \`<thinking_os>\` - Thinking models (guide your reasoning)
@@ -651,7 +725,7 @@ ${attitudeDirective}
 `;
   }
 
-  // ═══ 8. SIZE GUARD ═══
+  // 鈺愨晲鈺?8. SIZE GUARD 鈺愨晲鈺?
   // Truncation happens within appendSystemContext (not prependContext)
   const totalSize = prependSystemContext.length + prependContext.length + appendSystemContext.length;
   const MAX_SIZE = 10000;
@@ -704,3 +778,4 @@ ${attitudeDirective}
     appendSystemContext
   };
 }
+
