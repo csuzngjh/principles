@@ -216,9 +216,11 @@ export const agentSpawnTool = {
         return `✅ 已在后台启动 **${agentDef.name}** (${(duration / 1000).toFixed(1)}s)。它不会阻塞当前对话。`;
       }
 
-      // 7. Wait for completion
+      // 7. Wait for completion (with configurable timeout to prevent indefinite block)
+      const timeoutMs = (api as any).config?.get?.('intervals.task_timeout_ms') || (30 * 60 * 1000);
       const result: SubagentWaitResult = await subagentRuntime.waitForRun({
         runId: sessionKey,
+        timeoutMs,
       });
 
       const duration = Date.now() - startTime;
@@ -256,12 +258,13 @@ ${output}`;
       const errorMsg = err instanceof Error ? err.message : String(err);
       return `❌ 智能体 **${agentDef.name}** 执行异常: ${errorMsg}`;
     } finally {
-      // 12. Cleanup session
+      // 12. Cleanup session (P1 fix: log failures instead of silent swallow)
       if (!runAsync) {
         try {
           await subagentRuntime.deleteSession({ sessionKey });
-        } catch {
-          // Ignore cleanup errors
+        } catch (cleanupErr) {
+          const cleanupErrMsg = cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr);
+          api.logger?.error?.(`[PD:AgentSpawn] Failed to cleanup session ${sessionKey}: ${cleanupErrMsg}`);
         }
       }
     }

@@ -7,6 +7,7 @@ import { trackBlock, hasRecentThinking, getSession } from '../core/session-track
 import { assessRiskLevel, estimateLineChanges } from '../core/risk-calculator.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { checkEvolutionGate } from '../core/evolution-engine.js';
+import { EventLogService } from '../core/event-log.js';
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult } from '../openclaw-sdk.js';
 
 // ═══ GFI Gate Tool Tiers ═══
@@ -47,32 +48,71 @@ function analyzeBashCommand(
   safePatterns: string[],
   dangerousPatterns: string[]
 ): 'safe' | 'dangerous' | 'normal' {
-  const normalizedCmd = command.trim().toLowerCase();
-  
-  // 1. 优先检查危险命令
-  for (const pattern of dangerousPatterns) {
-    try {
-      if (new RegExp(pattern, 'i').test(normalizedCmd)) {
-        return 'dangerous';
+  let normalizedCmd = command.trim().toLowerCase();
+
+  // P2 fix: Unicode de-obfuscation — convert Cyrillic/Unicode lookalikes to ASCII equivalents
+  // Common Cyrillic lookalikes that could bypass detection: аеорсух (Cyrillic) → aeopcyx (Latin)
+  const CYRILLIC_TO_LATIN: Record<string, string> = {
+    'а': 'a', 'е': 'e', 'о': 'o', 'р': 'p', 'с': 'c', 'у': 'y', 'х': 'x',
+    'А': 'a', 'Е': 'e', 'О': 'o', 'Р': 'p', 'С': 'c', 'У': 'y', 'Х': 'x',
+    // Additional confusable chars
+    'і': 'i', 'ј': 'j', 'ѕ': 's', 'ԁ': 'd', 'ɡ': 'g', 'һ': 'h', 'ⅰ': 'i',
+    'ƚ': 'l', 'м': 'm', 'п': 'n', 'ѵ': 'v', 'ѡ': 'w', 'ᴦ': 'r', 'ꜱ': 's',
+  };
+  normalizedCmd = normalizedCmd.replace(/[а-яА-Яіјѕԁɡһⅰƚмпеꜱѵѡᴦꜱ]/g, m => CYRILLIC_TO_LATIN[m] ?? m);
+
+  // P2 fix: Tokenize command chain before pattern matching to catch `cmd1 && cmd2` bypasses
+  // Only split on statement separators (; && ||), NOT on pipe (|) which is part of the command
+  const tokens = normalizedCmd
+    .split(/\s*(?:;|&&|\|\|)\s*/)
+    .map(t => t.trim())
+    .filter(t => t.length > 0);
+
+  // If no tokens (e.g., pure pipe-only), use the original
+  const segments = tokens.length > 0 ? tokens : [normalizedCmd];
+
+  // P2 fix: Also strip outer $() and backticks from each segment
+  const cleanSegments = segments.map(seg => {
+    let s = seg;
+    // Strip leading $() or ${} or backtick-wrapped commands
+    s = s.replace(/^\$\([^)]+\)$/, '').replace(/^\$\{[^}]+\}$/, '').replace(/^`([^`]+)`$/, '$1');
+    return s.trim();
+  }).filter(s => s.length > 0);
+
+  // 1. Check dangerous patterns against each segment
+  for (const seg of cleanSegments) {
+    for (const pattern of dangerousPatterns) {
+      try {
+        if (new RegExp(pattern, 'i').test(seg)) {
+          return 'dangerous';
+        }
+      } catch {
+        // 忽略无效正则
       }
-    } catch {
-      // 忽略无效正则
     }
   }
-  
-  // 2. 检查安全命令
-  for (const pattern of safePatterns) {
-    try {
-      if (new RegExp(pattern, 'i').test(normalizedCmd)) {
-        return 'safe';
+
+  // 2. Check safe patterns (only if ALL segments are safe)
+  for (const seg of cleanSegments) {
+    let isSafe = false;
+    for (const pattern of safePatterns) {
+      try {
+        if (new RegExp(pattern, 'i').test(seg)) {
+          isSafe = true;
+          break;
+        }
+      } catch {
+        // ignore
       }
-    } catch {
-      // 忽略无效正则
+    }
+    if (!isSafe) {
+      // Not all segments are safe → treat as normal
+      return 'normal';
     }
   }
-  
-  // 3. 默认为普通命令
-  return 'normal';
+
+  // All segments are safe
+  return 'safe';
 }
 
 /**
@@ -109,7 +149,7 @@ export function handleBeforeToolCall(
   // 1. Identify tool type
   const WRITE_TOOLS = ['write', 'edit', 'apply_patch', 'write_file', 'replace', 'insert', 'patch', 'edit_file', 'delete_file', 'move_file'];
   const BASH_TOOLS = ['bash', 'run_shell_command', 'exec', 'execute', 'shell', 'cmd'];
-const AGENT_TOOLS = ['pd_run_worker', 'sessions_spawn'];
+  const AGENT_TOOLS = ['pd_run_worker', 'sessions_spawn'];
   
   const isBash = BASH_TOOLS.includes(event.toolName);
   const isWriteTool = WRITE_TOOLS.includes(event.toolName);
@@ -146,7 +186,7 @@ const AGENT_TOOLS = ['pd_run_worker', 'sessions_spawn'];
     thinking_checkpoint: {
       enabled: false,  // Default OFF
       window_ms: 5 * 60 * 1000,
-  high_risk_tools: ['run_shell_command', 'delete_file', 'move_file', 'pd_run_worker'],
+      high_risk_tools: ['run_shell_command', 'delete_file', 'move_file', 'pd_run_worker'],
     }
   };
 
@@ -328,6 +368,26 @@ GFI: ${currentGfi}/100
         };
       }
     }
+    // AGENT_TOOLS: Block subagent spawn when GFI is critically high (P0 fix: prevent privilege escalation via spawned subagents)
+    if (isAgentTool) {
+      const AGENT_SPAWN_GFI_THRESHOLD = 90;
+      if (currentGfi >= AGENT_SPAWN_GFI_THRESHOLD) {
+        logger?.warn?.(`[PD:GFI_GATE] Agent tool "${event.toolName}" blocked by GFI: ${currentGfi} >= ${AGENT_SPAWN_GFI_THRESHOLD}`);
+        return {
+          block: true,
+          blockReason: `[GFI Gate] 疲劳指数过高，禁止派生子智能体。
+
+GFI: ${currentGfi}/100
+阈值: ${AGENT_SPAWN_GFI_THRESHOLD} (Stage ${wctx.trust.getStage()})
+
+原因: 高疲劳状态下派生子智能体会放大错误风险。
+
+解决方案:
+1. 执行 /pd-status reset 清零疲劳值
+2. 简化任务后重试`,
+        };
+      }
+    }
   }
 
   // Merge pluginConfig (OpenClaw UI settings)
@@ -443,6 +503,20 @@ GFI: ${currentGfi}/100
     // Stage 4 (Architect): Full bypass
     if (stage === 4) {
         logger.info(`[PD_GATE] Trusted Architect bypass for ${relPath}`);
+        // Audit log for Stage 4 bypass (security traceability)
+        try {
+          const stateDir = wctx.resolve('STATE_DIR');
+          const eventLog = EventLogService.get(stateDir);
+          eventLog.recordGateBypass(ctx.sessionId, {
+            toolName: event.toolName,
+            filePath: relPath,
+            bypassType: 'stage4_architect',
+            trustScore,
+            trustStage: stage,
+          });
+        } catch (auditErr) {
+          logger?.warn?.(`[PD_GATE] Failed to record Stage 4 bypass audit: ${String(auditErr)}`);
+        }
         return;
     }
 

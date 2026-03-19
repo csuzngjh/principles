@@ -12,6 +12,7 @@ import type {
   RulePromotionEventData,
   HookExecutionEventData,
   GateBlockEventData,
+  GateBypassEventData,
   PlanApprovalEventData,
   EvolutionTaskEventData,
   DeepReflectionEventData,
@@ -73,6 +74,10 @@ export class EventLog {
   
   recordGateBlock(sessionId: string | undefined, data: GateBlockEventData): void {
     this.record('gate_block', 'blocked', sessionId, data);
+  }
+
+  recordGateBypass(sessionId: string | undefined, data: GateBypassEventData): void {
+    this.record('gate_bypass', 'bypassed', sessionId, data);
   }
 
   recordPlanApproval(sessionId: string | undefined, data: PlanApprovalEventData): void {
