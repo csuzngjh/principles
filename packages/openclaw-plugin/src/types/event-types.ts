@@ -11,6 +11,7 @@ export type EventType =
   | 'rule_promotion'
   | 'hook_execution'
   | 'gate_block'
+  | 'gate_bypass'
   | 'plan_approval'
   | 'evolution_task'
   | 'deep_reflection'
@@ -24,6 +25,7 @@ export type EventCategory =
   | 'failure'
   | 'detected'
   | 'blocked'
+  | 'bypassed'
   | 'approved'
   | 'enqueued'
   | 'completed'
@@ -112,6 +114,14 @@ export interface GateBlockEventData {
   filePath: string;
   reason: string;
   planStatus?: string;
+}
+
+export interface GateBypassEventData {
+  toolName: string;
+  filePath: string;
+  bypassType: 'stage4_architect' | 'plan_approved' | 'whitelisted';
+  trustScore: number;
+  trustStage: number;
 }
 
 export interface PlanApprovalEventData {
