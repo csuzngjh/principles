@@ -8,7 +8,7 @@
 | --- | --- |
 | Current Phase | Productization foundation |
 | User Goal | Turn Principles Disciple into a usable product |
-| Current Output | Unified trajectory DB, exports, correction sample review flow, merge-blocker hardening, and review-driven data-layer upgrades |
+| Current Output | Unified trajectory DB, exports, correction sample review flow, review-driven data-layer upgrades, and a documented plugin-owned OpenClaw UI plan |
 
 ## Current Tasks
 
@@ -17,6 +17,7 @@
 - [x] Add `/pd-status data`, `/pd-export`, and `/pd-samples review`
 - [x] Harden merge blockers around command safety, metrics accuracy, trajectory fault isolation, and install/runtime stability
 - [x] Adopt low-risk architecture review improvements: busy timeout, extra indexes, legacy import coverage, safe blob maintenance
+- [x] Document the no-upstream-change OpenClaw UI strategy and Thinking OS productization plan
 - [ ] Turn SQL views into manager-facing health and principle dashboards
 - [ ] Expand sample quality rules and labeling for downstream LoRA/SFT work
 
