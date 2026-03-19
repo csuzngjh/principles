@@ -20,7 +20,7 @@ const TEST_PROFILE = {
   thinking_checkpoint: {
     enabled: true,
     window_ms: 5 * 60 * 1000,
-    high_risk_tools: ['run_shell_command', 'delete_file', 'move_file', 'pd_spawn_agent', 'write', 'edit'],
+  high_risk_tools: ['run_shell_command', 'delete_file', 'move_file', 'pd_run_worker', 'write', 'edit'],
   },
 };
 
@@ -88,9 +88,9 @@ describe('Thinking OS Checkpoint (P-10)', () => {
       expect(result?.block).toBe(true);
     });
 
-    it('should block pd_spawn_agent without recent thinking', () => {
+  it('should block pd_run_worker without recent thinking', () => {
       const result = handleBeforeToolCall(
-        createMockEvent('pd_spawn_agent', { agentType: 'explorer' }),
+      createMockEvent('pd_run_worker', { agentType: 'explorer' }),
         createMockContext()
       );
       

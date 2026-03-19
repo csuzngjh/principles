@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+﻿import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { handleBeforeToolCall } from '../../src/hooks/gate.js';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -103,15 +103,15 @@ describe('GFI Gate - Hard Intercept', () => {
     } as any);
   });
 
-  // ═══════════════════════════════════════════════════════════════
-  // TIER 0: 只读工具 - 永不拦截
-  // ═══════════════════════════════════════════════════════════════
+  // 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+  // TIER 0: 鍙宸ュ叿 - 姘镐笉鎷︽埅
+  // 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
   describe('TIER 0: Read-only tools', () => {
     it('should NEVER block read_file regardless of GFI', () => {
       const mockCtx = { workspaceDir, sessionId: 'test-session' };
       const mockEvent = { toolName: 'read_file', params: { file_path: 'src/main.ts' } };
 
-      // 设置高 GFI
+      // 璁剧疆楂?GFI
       vi.mocked(sessionTracker.getSession).mockReturnValue({
           ...mockWctx,
           currentGfi: 95,
@@ -126,7 +126,7 @@ describe('GFI Gate - Hard Intercept', () => {
 
       const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
 
-      expect(result).toBeUndefined(); // 放行
+      expect(result).toBeUndefined(); // 鏀捐
     });
 
     it('should NEVER block glob regardless of GFI', () => {
@@ -144,7 +144,7 @@ describe('GFI Gate - Hard Intercept', () => {
 
       const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
 
-      expect(result).toBeUndefined(); // 放行
+      expect(result).toBeUndefined(); // 鏀捐
     });
 
     it('should NEVER block lsp_hover regardless of GFI', () => {
@@ -158,7 +158,7 @@ describe('GFI Gate - Hard Intercept', () => {
 
       const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
 
-      expect(result).toBeUndefined(); // 放行
+      expect(result).toBeUndefined(); // 鏀捐
     });
 
     it('should NEVER block deep_reflect regardless of GFI', () => {
@@ -172,13 +172,13 @@ describe('GFI Gate - Hard Intercept', () => {
 
       const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
 
-      expect(result).toBeUndefined(); // 放行
+      expect(result).toBeUndefined(); // 鏀捐
     });
   });
 
-  // ═══════════════════════════════════════════════════════════════
-  // TIER 1: 低风险修改 - GFI >= 70 时拦截
-  // ═══════════════════════════════════════════════════════════════
+  // 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+  // TIER 1: 浣庨闄╀慨鏀?- GFI >= 70 鏃舵嫤鎴?
+  // 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
   describe('TIER 1: Low-risk write tools', () => {
     it('should block write when GFI >= 70 (threshold)', () => {
       const mockCtx = { workspaceDir, sessionId: 'test-session' };
@@ -209,7 +209,7 @@ describe('GFI Gate - Hard Intercept', () => {
 
       const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
 
-      expect(result).toBeUndefined(); // 放行
+      expect(result).toBeUndefined(); // 鏀捐
     });
 
     it('should block edit when GFI >= 70', () => {
@@ -229,9 +229,9 @@ describe('GFI Gate - Hard Intercept', () => {
       expect(result?.blockReason).toContain('GFI');
     });
 
-    it('should NOT block pd_spawn_agent (low risk) when GFI < 70', () => {
+    it('should NOT block pd_run_worker (low risk) when GFI < 70', () => {
       const mockCtx = { workspaceDir, sessionId: 'test-session' };
-      const mockEvent = { toolName: 'pd_spawn_agent', params: { task: 'Analyze code' } };
+      const mockEvent = { toolName: 'pd_run_worker', params: { task: 'Analyze code' } };
 
       vi.mocked(sessionTracker.getSession).mockReturnValue({ currentGfi: 50 } as any);
       mockTrust.getScore.mockReturnValue(70);
@@ -241,15 +241,15 @@ describe('GFI Gate - Hard Intercept', () => {
 
       const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
 
-      // pd_spawn_agent 不在 WRITE_TOOLS 中，应该直接返回（不被 gate 处理）
-      // 但如果它被当作 AGENT_TOOLS 处理，也应该不被 GFI gate 拦截
+      // pd_run_worker 涓嶅湪 WRITE_TOOLS 涓紝搴旇鐩存帴杩斿洖锛堜笉琚?gate 澶勭悊锛?
+      // 浣嗗鏋滃畠琚綋浣?AGENT_TOOLS 澶勭悊锛屼篃搴旇涓嶈 GFI gate 鎷︽埅
       expect(result).toBeUndefined();
     });
   });
 
-  // ═══════════════════════════════════════════════════════════════
-  // TIER 2: 高风险操作 - GFI >= 40 时拦截
-  // ═══════════════════════════════════════════════════════════════
+  // 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+  // TIER 2: 楂橀闄╂搷浣?- GFI >= 40 鏃舵嫤鎴?
+  // 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
   describe('TIER 2: High-risk tools', () => {
     it('should block delete_file when GFI >= 40', () => {
       const mockCtx = { workspaceDir, sessionId: 'test-session' };
@@ -280,7 +280,7 @@ describe('GFI Gate - Hard Intercept', () => {
 
       const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
 
-      expect(result).toBeUndefined(); // 放行
+      expect(result).toBeUndefined(); // 鏀捐
     });
 
     it('should block move_file when GFI >= 40', () => {
@@ -301,9 +301,9 @@ describe('GFI Gate - Hard Intercept', () => {
     });
   });
 
-  // ═══════════════════════════════════════════════════════════════
-  // TIER 3: Bash 命令 - 根据内容判断
-  // ═══════════════════════════════════════════════════════════════
+  // 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+  // TIER 3: Bash 鍛戒护 - 鏍规嵁鍐呭鍒ゆ柇
+  // 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
   describe('TIER 3: Bash commands', () => {
     describe('Safe commands (always allowed)', () => {
       it('should allow "git status" regardless of GFI', () => {
@@ -317,7 +317,7 @@ describe('GFI Gate - Hard Intercept', () => {
 
         const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
 
-        expect(result).toBeUndefined(); // 放行
+        expect(result).toBeUndefined(); // 鏀捐
       });
 
       it('should allow "ls -la" regardless of GFI', () => {
@@ -331,7 +331,7 @@ describe('GFI Gate - Hard Intercept', () => {
 
         const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
 
-        expect(result).toBeUndefined(); // 放行
+        expect(result).toBeUndefined(); // 鏀捐
       });
 
       it('should allow "npm test" regardless of GFI', () => {
@@ -345,7 +345,7 @@ describe('GFI Gate - Hard Intercept', () => {
 
         const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
 
-        expect(result).toBeUndefined(); // 放行
+        expect(result).toBeUndefined(); // 鏀捐
       });
 
       it('should allow "cat file.txt" regardless of GFI', () => {
@@ -359,7 +359,7 @@ describe('GFI Gate - Hard Intercept', () => {
 
         const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
 
-        expect(result).toBeUndefined(); // 放行
+        expect(result).toBeUndefined(); // 鏀捐
       });
     });
 
@@ -441,7 +441,7 @@ describe('GFI Gate - Hard Intercept', () => {
 
         const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
 
-        expect(result).toBeUndefined(); // 放行
+        expect(result).toBeUndefined(); // 鏀捐
       });
 
       it('should block "npm install" when GFI is high', () => {
@@ -462,16 +462,16 @@ describe('GFI Gate - Hard Intercept', () => {
     });
   });
 
-  // ═══════════════════════════════════════════════════════════════
-  // Trust Stage 联动
-  // ═══════════════════════════════════════════════════════════════
+  // 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+  // Trust Stage 鑱斿姩
+  // 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
   describe('Trust Stage multipliers', () => {
-    it('should use lower threshold for Stage 1 (×0.5)', () => {
+    it('should use lower threshold for Stage 1 (脳0.5)', () => {
       const mockCtx = { workspaceDir, sessionId: 'test-session' };
       const mockEvent = { toolName: 'write', params: { file_path: 'test.txt', content: 'test' } };
 
-      // 基础阈值 70 × 0.5 = 35
-      // GFI = 40 应该被拦截
+      // 鍩虹闃堝€?70 脳 0.5 = 35
+      // GFI = 40 搴旇琚嫤鎴?
       vi.mocked(sessionTracker.getSession).mockReturnValue({ currentGfi: 40 } as any);
       mockTrust.getScore.mockReturnValue(25);
       mockTrust.getStage.mockReturnValue(1);
@@ -485,12 +485,12 @@ describe('GFI Gate - Hard Intercept', () => {
       expect(result?.blockReason).toContain('GFI');
     });
 
-    it('should use standard threshold for Stage 3 (×1.0)', () => {
+    it('should use standard threshold for Stage 3 (脳1.0)', () => {
       const mockCtx = { workspaceDir, sessionId: 'test-session' };
       const mockEvent = { toolName: 'write', params: { file_path: 'test.txt', content: 'test' } };
 
-      // 基础阈值 70 × 1.0 = 70
-      // GFI = 65 应该放行
+      // 鍩虹闃堝€?70 脳 1.0 = 70
+      // GFI = 65 搴旇鏀捐
       vi.mocked(sessionTracker.getSession).mockReturnValue({ currentGfi: 65 } as any);
       mockTrust.getScore.mockReturnValue(70);
       mockTrust.getStage.mockReturnValue(3);
@@ -499,15 +499,15 @@ describe('GFI Gate - Hard Intercept', () => {
 
       const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
 
-      expect(result).toBeUndefined(); // 放行
+      expect(result).toBeUndefined(); // 鏀捐
     });
 
-    it('should use higher threshold for Stage 4 (×1.5)', () => {
+    it('should use higher threshold for Stage 4 (脳1.5)', () => {
       const mockCtx = { workspaceDir, sessionId: 'test-session' };
       const mockEvent = { toolName: 'write', params: { file_path: 'test.txt', content: 'test' } };
 
-      // 基础阈值 70 × 1.5 = 105
-      // GFI = 80 应该放行
+      // 鍩虹闃堝€?70 脳 1.5 = 105
+      // GFI = 80 搴旇鏀捐
       vi.mocked(sessionTracker.getSession).mockReturnValue({ currentGfi: 80 } as any);
       mockTrust.getScore.mockReturnValue(90);
       mockTrust.getStage.mockReturnValue(4);
@@ -516,20 +516,20 @@ describe('GFI Gate - Hard Intercept', () => {
 
       const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
 
-      expect(result).toBeUndefined(); // 放行 (Architect bypass 或阈值更高)
+      expect(result).toBeUndefined(); // 鏀捐 (Architect bypass 鎴栭槇鍊兼洿楂?
     });
   });
 
-  // ═══════════════════════════════════════════════════════════════
-  // 大规模修改 - 按比例降低阈值
-  // ═══════════════════════════════════════════════════════════════
+  // 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+  // 澶ц妯′慨鏀?- 鎸夋瘮渚嬮檷浣庨槇鍊?
+  // 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
   describe('Large change threshold reduction', () => {
     it('should lower threshold for large modifications (100+ lines)', () => {
       const mockCtx = { workspaceDir, sessionId: 'test-session' };
       const mockEvent = { toolName: 'write', params: { file_path: 'large.ts', content: 'x\n'.repeat(120) } };
 
-      // 基础阈值 70 × (1 - 120/200 * 0.5) = 70 × 0.7 = 49
-      // GFI = 55 应该被拦截
+      // 鍩虹闃堝€?70 脳 (1 - 120/200 * 0.5) = 70 脳 0.7 = 49
+      // GFI = 55 搴旇琚嫤鎴?
       vi.mocked(riskCalculator.estimateLineChanges).mockReturnValue(120);
       vi.mocked(sessionTracker.getSession).mockReturnValue({ currentGfi: 55 } as any);
       mockTrust.getScore.mockReturnValue(70);
@@ -548,8 +548,8 @@ describe('GFI Gate - Hard Intercept', () => {
       const mockCtx = { workspaceDir, sessionId: 'test-session' };
       const mockEvent = { toolName: 'write', params: { file_path: 'small.ts', content: 'test' } };
 
-      // 小修改，基础阈值 70
-      // GFI = 55 应该放行
+      // 灏忎慨鏀癸紝鍩虹闃堝€?70
+      // GFI = 55 搴旇鏀捐
       vi.mocked(riskCalculator.estimateLineChanges).mockReturnValue(5);
       vi.mocked(sessionTracker.getSession).mockReturnValue({ currentGfi: 55 } as any);
       mockTrust.getScore.mockReturnValue(70);
@@ -559,13 +559,13 @@ describe('GFI Gate - Hard Intercept', () => {
 
       const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
 
-      expect(result).toBeUndefined(); // 放行
+      expect(result).toBeUndefined(); // 鏀捐
     });
   });
 
-  // ═══════════════════════════════════════════════════════════════
-  // 配置禁用
-  // ═══════════════════════════════════════════════════════════════
+  // 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+  // 閰嶇疆绂佺敤
+  // 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
   describe('Configuration', () => {
     it('should skip GFI gate when disabled', () => {
       const mockCtx = { workspaceDir, sessionId: 'test-session' };
@@ -577,7 +577,7 @@ describe('GFI Gate - Hard Intercept', () => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
       vi.mocked(fs.readFileSync).mockImplementation(() => JSON.stringify({ progressive_gate: { enabled: true } }));
 
-      // 禁用 GFI gate
+      // 绂佺敤 GFI gate
       mockConfig.get.mockImplementation((key) => {
           if (key === 'trust') return { limits: { stage_2_max_lines: 10, stage_3_max_lines: 100 } };
           if (key === 'gfi_gate') return { enabled: false };
@@ -586,8 +586,9 @@ describe('GFI Gate - Hard Intercept', () => {
 
       const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
 
-      // GFI gate 禁用后不应该拦截
+      // GFI gate 绂佺敤鍚庝笉搴旇鎷︽埅
       expect(result).toBeUndefined();
     });
   });
 });
+
