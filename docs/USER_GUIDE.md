@@ -72,17 +72,26 @@ If you want to see what state the AI is currently in, or give it specific direct
 
 1. **`/pd-status`** —— **Check Health**
    * See if the AI is currently "Critically Fatigued". It will also tell you how many invalid operations the system has blocked for you.
-2. **`/pd-status empathy`** —— **View Emotion Events** ✨ New
+2. **`/pd-status empathy`** —— **View Emotion Events** ✨
    * View emotion event statistics: points deducted today, dedupe hit rate, severity distribution.
    * Use `--week` for 7-day trends, `--session` for current session stats.
-3. **`/pd-rollback`** —— **Undo Emotion Penalty** ✨ New
+3. **`/pd-status data`** —— **View Trajectory Data** ✨ New
+   * View trajectory database stats: sessions, tool calls, pain events, pending correction samples, etc.
+4. **`/pd-rollback`** —— **Undo Emotion Penalty** ✨
    * When the AI misjudges your emotions, use this command to undo the penalty.
    * Use `last` to undo the most recent one, or specify an event ID.
-4. **`/trust`** —— **Check Permissions**
+5. **`/pd-export`** —— **Export Data** ✨ New
+   * `/pd-export analytics` exports analytics snapshot (GFI trends, error clusters, principle effectiveness).
+   * `/pd-export corrections` exports correction samples, add `--redacted` to sanitize paths and keys.
+6. **`/pd-samples`** —— **Manage Correction Samples** ✨ New
+   * List pending correction samples for review.
+   * `/pd-samples review approve <id>` approves a sample.
+   * `/pd-samples review reject <id>` rejects a sample.
+7. **`/trust`** —— **Check Permissions**
    * The AI starts with high permissions. If it does well, its permissions grow; if it keeps making errors, it gets demoted and can only make minor tweaks. This dashboard shows its current score and rank.
-5. **`/workspace-grooming`** —— **Summon the Cyber-Housekeeper (Cleanup)**
+8. **`/workspace-grooming`** —— **Summon the Cyber-Housekeeper (Cleanup)**
    * When your project root gets messy with temporary files, run this command. The AI will act as a housekeeper with "digital cleanliness", helping you clean up, rename, and archive useless garbage files (rest assured, it will never touch your core code).
-6. **`/init-strategy`** —— **Set the Vision**
+9. **`/init-strategy`** —— **Set the Vision**
    * If you want the AI to work towards a long-term goal every day (e.g., "Always write extremely concise code"), run this command. The AI will conduct a "soul-searching interview" with you and strictly remember your rules.
 
 ---

@@ -38,6 +38,9 @@ describe('Progressive Gate Hook', () => {
     trust: mockTrust,
     config: mockConfig,
     eventLog: mockEventLog,
+    trajectory: {
+      recordGateBlock: vi.fn(),
+    },
     resolve: vi.fn().mockImplementation((key) => {
         if (key === 'PROFILE') return path.join(workspaceDir, '.principles', 'PROFILE.json');
         if (key === 'PLAN') return path.join(workspaceDir, 'PLAN.md');
@@ -170,6 +173,10 @@ describe('Progressive Gate Hook', () => {
       const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
 
       expect(result).toBeUndefined(); 
+      expect(mockWctx.trajectory.recordGateBlock).toHaveBeenCalledWith(expect.objectContaining({
+        toolName: 'write',
+        reason: 'plan_approval',
+      }));
     });
   });
 

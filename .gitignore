@@ -38,6 +38,7 @@ conductor/
 .principles/
 .state/
 memory/
+MEMORY.md
 .agent/
 spec/
 _scratchpad/

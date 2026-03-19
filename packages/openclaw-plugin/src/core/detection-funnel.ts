@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import type { PainDictionary } from './dictionary.js';
+import { shouldIgnorePainProtocolText, type PainDictionary } from './dictionary.js';
 
 export interface DetectionResult {
     detected: boolean;
@@ -54,6 +54,10 @@ export class DetectionFunnel {
      * Detects pain in the given text using L1 (Exact), L2 (Cache), and L3 (Async).
      */
     detect(text: string): DetectionResult {
+        if (shouldIgnorePainProtocolText(text)) {
+            return { detected: false, source: 'l1_exact' };
+        }
+
         // --- Layer 1: Exact Match (Sync) ---
         const exactMatch = this.dictionary.match(text);
         if (exactMatch) {

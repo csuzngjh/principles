@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { EvolutionLoopEvent } from './evolution-types.js';
 import { stableContentHash } from './evolution-reducer.js';
+import { SystemLogger } from './system-logger.js';
 
 export interface MigrationResult {
   importedEvents: number;
@@ -12,7 +13,7 @@ function appendEvent(streamPath: string, event: EvolutionLoopEvent): void {
   fs.appendFileSync(streamPath, `${JSON.stringify(event)}\n`, 'utf8');
 }
 
-function loadImportedHashes(streamPath: string): Set<string> {
+function loadImportedHashes(streamPath: string, workspaceDir: string): Set<string> {
   if (!fs.existsSync(streamPath)) return new Set();
   const raw = fs.readFileSync(streamPath, 'utf8').trim();
   if (!raw) return new Set();
@@ -25,7 +26,7 @@ function loadImportedHashes(streamPath: string): Set<string> {
       const hash = event.data.contentHash;
       if (typeof hash === 'string') hashes.add(hash);
     } catch (e) {
-      console.warn(`[PD:Migration] skip malformed line: ${String(e)}`);
+      SystemLogger.log(workspaceDir, 'MIGRATION_WARN', `skip malformed line: ${String(e)}`);
     }
   }
   return hashes;
@@ -41,7 +42,7 @@ export function migrateLegacyEvolutionData(workspaceDir: string): MigrationResul
     path.join(workspaceDir, '.principles', 'PRINCIPLES.md'),
   ];
 
-  const existingHashes = loadImportedHashes(streamPath);
+  const existingHashes = loadImportedHashes(streamPath, workspaceDir);
   let importedEvents = 0;
 
   for (const sourceFile of candidates) {

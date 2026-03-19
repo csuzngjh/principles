@@ -1,49 +1,47 @@
 #!/usr/bin/env node
 
-/**
- * Post-install script to handle plugin dependencies.
- * This ensures that when the plugin is installed, all required
- * dependencies are available in the plugin's directory.
- */
-
 const { execFileSync } = require('child_process');
-const { existsSync } = require('fs');
+const { existsSync, readFileSync } = require('fs');
 const { join } = require('path');
 
 const PLUGIN_DIR = join(__dirname, '..');
-const DEPENDENCIES = [
-  'micromatch@^4.0.8',
-  '@sinclair/typebox@^0.34.48'
-];
 
-console.log('🔧 Setting up Principles Disciple plugin dependencies...');
+console.log('Setting up Principles Disciple plugin dependencies...');
 
-// Check if we're in the plugin directory (has package.json)
 const packageJsonPath = join(PLUGIN_DIR, 'package.json');
 if (!existsSync(packageJsonPath)) {
-  console.log('ℹ️  Not in plugin directory, skipping dependency setup');
+  console.log('Not in plugin directory, skipping dependency setup');
   process.exit(0);
 }
 
-// Check if node_modules exists
+const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf8'));
+const dependencyNames = ['micromatch', '@sinclair/typebox', 'better-sqlite3'];
+const DEPENDENCIES = dependencyNames.map((name) => {
+  const version = packageJson.dependencies?.[name] || packageJson.devDependencies?.[name];
+  if (!version) {
+    throw new Error(`Missing dependency version in package.json for ${name}`);
+  }
+  return `${name}@${version}`;
+});
+
 const nodeModulesDir = join(PLUGIN_DIR, 'node_modules');
-if (existsSync(nodeModulesDir)) {
-  console.log('✅ Dependencies already installed');
+const betterSqliteDir = join(nodeModulesDir, 'better-sqlite3');
+if (existsSync(nodeModulesDir) && existsSync(betterSqliteDir)) {
+  console.log('Dependencies already installed');
   process.exit(0);
 }
 
-// Install dependencies
-console.log('📦 Installing plugin dependencies...');
+console.log('Installing plugin dependencies...');
 try {
   execFileSync('npm', ['install', ...DEPENDENCIES], {
     cwd: PLUGIN_DIR,
-    stdio: 'inherit'
+    stdio: 'inherit',
   });
-  console.log('✅ Plugin dependencies installed successfully');
+  console.log('Plugin dependencies installed successfully');
 } catch (error) {
-  console.error('❌ Failed to install plugin dependencies:', error.message);
-  console.log('\n💡 Manual fix:');
-  console.log('   cd', PLUGIN_DIR);
-  console.log('   npm install', DEPENDENCIES.join(' '));
+  console.error('Failed to install plugin dependencies:', error.message);
+  console.log('\nManual fix:');
+  console.log('  cd', PLUGIN_DIR);
+  console.log('  npm install', DEPENDENCIES.join(' '));
   process.exit(1);
 }

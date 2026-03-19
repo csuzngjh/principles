@@ -10,6 +10,18 @@ describe('DetectionFunnel', () => {
         vi.clearAllMocks();
     });
 
+
+    it('should skip protocol text before dictionary and queue checks', () => {
+        const funnel = new DetectionFunnel(mockDictionary as any);
+        const enqueueSpy = vi.spyOn(funnel as any, 'enqueueAsync');
+
+        const result = funnel.detect('[EVOLUTION_ACK]');
+
+        expect(result).toEqual({ detected: false, source: 'l1_exact' });
+        expect(mockDictionary.match).not.toHaveBeenCalled();
+        expect(enqueueSpy).not.toHaveBeenCalled();
+    });
+
     it('L1: should return true immediately if dictionary matches', async () => {
         mockDictionary.match.mockReturnValue({ ruleId: 'P_CONFUSION', severity: 35 });
         const funnel = new DetectionFunnel(mockDictionary as any);

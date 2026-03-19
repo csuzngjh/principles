@@ -106,6 +106,30 @@ describe('PainDictionary', () => {
         expect(dict.getRule('LOOP')?.hits).toBe(1);
     });
 
+
+    it('should ignore protocol tokens during pain matching', () => {
+        const mockData = {
+            rules: {
+                'FRUSTRATION': {
+                    type: 'regex',
+                    pattern: '失败',
+                    severity: 50,
+                    hits: 0,
+                    status: 'active'
+                }
+            }
+        };
+
+        vi.mocked(fs.existsSync).mockReturnValue(true);
+        vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(mockData));
+
+        const dict = new PainDictionary(stateDir);
+        dict.load();
+
+        expect(dict.match('[EVOLUTION_ACK] 之前有失败记录')).toBeUndefined();
+        expect(dict.getRule('FRUSTRATION')?.hits).toBe(0);
+    });
+
     it('should not write to disk on every match', () => {
         const mockData = {
             rules: {

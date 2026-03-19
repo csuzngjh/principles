@@ -20,7 +20,7 @@ describe('Directory Structure Migration', () => {
 
     it('should move non-security files from docs/ to new locations', () => {
         const legacyPlan = path.join(workspaceDir, 'docs', 'PLAN.md');
-        const newPlan = path.join(workspaceDir, 'PLAN.md');
+        const newPlan = '/mock/workspace/PLAN.md';
 
         vi.mocked(fs.existsSync).mockImplementation((p) => {
             const pathStr = p.toString();
@@ -44,8 +44,8 @@ describe('Directory Structure Migration', () => {
     it('should not migrate security-sensitive docs files', () => {
         const legacyProfile = path.join(workspaceDir, 'docs', 'PROFILE.json');
         const legacyScorecard = path.join(workspaceDir, 'docs', 'AGENT_SCORECARD.json');
-        const newProfile = path.join(workspaceDir, '.principles', 'PROFILE.json');
-        const newScorecard = path.join(workspaceDir, '.principles', '.state', 'AGENT_SCORECARD.json');
+        const newProfile = '/mock/workspace/.principles/PROFILE.json';
+        const newScorecard = '/mock/workspace/.principles/.state/AGENT_SCORECARD.json';
 
         vi.mocked(fs.existsSync).mockImplementation((p) => {
             const pathStr = p.toString();

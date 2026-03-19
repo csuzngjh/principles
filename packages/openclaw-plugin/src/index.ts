@@ -37,7 +37,10 @@ import { handleFocusCommand } from './commands/focus.js';
 import { handleRollbackCommand } from './commands/rollback.js';
 import { handleEvolutionStatusCommand } from './commands/evolution-status.js';
 import { handlePrincipleRollbackCommand } from './commands/principle-rollback.js';
+import { handleExportCommand } from './commands/export.js';
+import { handleSamplesCommand } from './commands/samples.js';
 import { EvolutionWorkerService } from './service/evolution-worker.js';
+import { TrajectoryService } from './service/trajectory-service.js';
 import { ensureWorkspaceTemplates } from './core/init.js';
 import { migrateDirectoryStructure } from './core/migration.js';
 import { SystemLogger } from './core/system-logger.js';
@@ -173,6 +176,7 @@ const plugin = {
     try {
       EvolutionWorkerService.api = api;
       api.registerService(EvolutionWorkerService);
+      api.registerService(TrajectoryService);
     } catch (err) {
       api.logger.error(`[PD] Failed to register EvolutionWorkerService: ${String(err)}`);
     }
@@ -256,6 +260,8 @@ const plugin = {
 | \`/pd-status\` | 查看进化状态 | 想了解当前 GFI 和 Pain 情况 |
 | \`/pd-trust\` | 查看信任分数 | 想知道自己的权限等级 |
 | \`/pd-focus\` | 焦点文件管理 | 查看/压缩/回滚历史版本 |
+| \`/pd-export\` | 导出分析/样本 | 导出 analytics 或纠错样本 |
+| \`/pd-samples\` | 审核纠错样本 | 查看待审核样本并批准/拒绝 |
 
 ## ⚙️ 配置管理
 | 命令 | 用途 | 使用时机 |
@@ -312,6 +318,8 @@ const plugin = {
 | \`/pd-status\` | View evolution status | Check GFI and Pain status |
 | \`/pd-trust\` | View trust score | Check your permission level |
 | \`/pd-focus\` | Focus file management | View/compress/rollback history |
+| \`/pd-export\` | Export analytics/samples | Export analytics or correction samples |
+| \`/pd-samples\` | Review correction samples | Review pending correction samples |
 
 ## ⚙️ Configuration
 | Command | Purpose | When to Use |
@@ -463,6 +471,38 @@ const plugin = {
     });
 
     // ── Tools ──
+    api.registerCommand({
+      name: "pd-export",
+      description: getCommandDescription('pd-export', language),
+      acceptsArgs: true,
+      handler: (ctx) => {
+        try {
+          const workspaceDir = api.resolvePath('.');
+          if (ctx.config) ctx.config.workspaceDir = workspaceDir;
+          return handleExportCommand(ctx);
+        } catch (err) {
+          api.logger.error(`[PD] Command /pd-export failed: ${String(err)}`);
+          return { text: language === 'zh' ? "导出失败，请检查日志。" : "Export failed. Check logs." };
+        }
+      }
+    });
+
+    api.registerCommand({
+      name: "pd-samples",
+      description: getCommandDescription('pd-samples', language),
+      acceptsArgs: true,
+      handler: (ctx) => {
+        try {
+          const workspaceDir = api.resolvePath('.');
+          if (ctx.config) ctx.config.workspaceDir = workspaceDir;
+          return handleSamplesCommand(ctx);
+        } catch (err) {
+          api.logger.error(`[PD] Command /pd-samples failed: ${String(err)}`);
+          return { text: language === 'zh' ? "样本命令执行失败，请检查日志。" : "Samples command failed. Check logs." };
+        }
+      }
+    });
+
     api.registerTool(deepReflectTool);
     api.registerTool(agentSpawnTool);
   }
