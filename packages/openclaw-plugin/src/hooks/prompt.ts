@@ -516,8 +516,11 @@ REQUIRED ACTION:
   }
 
   // 鈺愨晲鈺?4. Empathy Observer Spawn (async sidecar) 鈺愨晲鈺?
-  if (trigger === 'user' && sessionId && api) {
-    const latestUserMessage = extractLatestUserMessage(event.messages);
+  // Skip if this is a subagent session or if the message indicates agent-to-agent communication
+  const latestUserMessage = extractLatestUserMessage(event.messages);
+  const isAgentToAgent = latestUserMessage.includes('sourceSession=agent:') || sessionId?.includes(':subagent:') === true;
+
+  if (trigger === 'user' && sessionId && api && !isAgentToAgent) {
     empathyObserverManager.spawn(api, sessionId, latestUserMessage).catch((err) => api.logger.warn(String(err)));
   }
 
