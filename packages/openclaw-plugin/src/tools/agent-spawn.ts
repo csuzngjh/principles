@@ -127,22 +127,24 @@ export const agentSpawnTool = {
 可用的智能体类型:
 - explorer: 快速收集证据（文件、日志、复现步骤）
 - diagnostician: 根因分析（verb/adjective + 5Whys）
-- auditor: 演绎审计（axiom/system/via-negativa）
+- auditor: 演演审计（axiom/system/via-negativa）
 - planner: 制定电影剧本计划
 - implementer: 按计划执行代码修改
 - reviewer: 代码审查（正确性、安全性、可维护性）
-- reporter: 最终汇报（技术细节转管理报告）`,
+- reporter: 最终汇报（技术细节转管理报告）
+
+示例调用: pd_run_worker(agentType="diagnostician", task="分析 Pain 7386ccfb 的根因")`,
 
   parameters: Type.Object({
     agentType: Type.String({
       description:
-        'Required. Internal worker role: explorer, diagnostician, auditor, planner, implementer, reviewer, reporter',
+        '【必填】智能体类型，必须是以下之一: explorer, diagnostician, auditor, planner, implementer, reviewer, reporter',
     }),
     task: Type.String({
-      description: 'Required. The task description for the worker to execute.',
+      description: '【必填】任务描述，告诉智能体要做什么',
     }),
     runInBackground: Type.Optional(Type.Boolean({
-      description: 'Optional. Set true to run in background (non-blocking). Default: false (wait for completion).',
+      description: '【可选】是否后台运行。true=立即返回不等待结果，false=等待执行完成。默认 false',
     })),
   }),
 
@@ -162,13 +164,25 @@ export const agentSpawnTool = {
     const availableInternalAgents = listAvailableAgents();
 
     if (!agentType) {
-      api.logger?.warn?.(`[PD:AgentSpawn] Invalid agentType: ${JSON.stringify(params?.agentType)}`);
-      return `Invalid agentType: ${JSON.stringify(params?.agentType)}\n${buildInternalAgentUsageMessage(availableInternalAgents)}`;
+      api.logger?.warn?.(`[PD:AgentSpawn] Missing or invalid agentType: ${JSON.stringify(params)}`);
+      return `❌ 缺少 agentType 参数。请按以下格式调用:
+
+pd_run_worker(
+  agentType="diagnostician",  // 必填: explorer, diagnostician, auditor, planner, implementer, reviewer, reporter
+  task="分析问题的根因"        // 必填: 任务描述
+)
+
+可用的智能体类型: ${availableInternalAgents.join(', ')}`;
     }
 
     if (!task) {
-      api.logger?.warn?.(`[PD:AgentSpawn] Invalid task: ${JSON.stringify(params?.task)}`);
-      return `Invalid task: ${JSON.stringify(params?.task)}\n${INTERNAL_AGENT_USAGE_GUIDANCE}`;
+      api.logger?.warn?.(`[PD:AgentSpawn] Missing task parameter: ${JSON.stringify(params)}`);
+      return `❌ 缺少 task 参数。请提供任务描述，例如:
+
+pd_run_worker(
+  agentType="${agentType || 'diagnostician'}",
+  task="分析 Pain xxx 的根因"
+)`;
     }
 
     if (looksLikeSessionOrPeerCoordinationTask(task)) {
@@ -177,7 +191,11 @@ export const agentSpawnTool = {
     }
 
     if (!availableInternalAgents.includes(agentType)) {
-      return `Unknown internal worker role: "${agentType}"\n${buildInternalAgentUsageMessage(availableInternalAgents)}`;
+      return `❌ 未知的智能体类型: "${agentType}"
+
+可用的智能体类型: ${availableInternalAgents.join(', ')}
+
+示例: pd_run_worker(agentType="diagnostician", task="分析问题根因")`;
     }
 
     // 2. Load agent definition
