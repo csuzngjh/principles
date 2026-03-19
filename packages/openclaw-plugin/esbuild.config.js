@@ -1,5 +1,5 @@
 import { build } from 'esbuild';
-import { copyFileSync, mkdirSync, existsSync, readFileSync, writeFileSync, statSync, readdirSync } from 'fs';
+import { copyFileSync, mkdirSync, existsSync, statSync, readdirSync } from 'fs';
 import { join } from 'path';
 
 const isProduction = process.argv.includes('--production');
@@ -40,21 +40,13 @@ async function bundlePlugin() {
 
     console.log('Bundle created: dist/bundle.js');
 
-    const pluginJsonPath = 'openclaw.plugin.json';
-    if (existsSync(pluginJsonPath)) {
-      const pluginJson = JSON.parse(readFileSync(pluginJsonPath, 'utf8'));
-      pluginJson.extensions = ['./dist/bundle.js'];
-      writeFileSync(pluginJsonPath, JSON.stringify(pluginJson, null, 2));
-      console.log('Updated openclaw.plugin.json to use bundle');
-    }
-
     const staticFiles = ['templates', 'openclaw.plugin.json'];
     const distDir = 'dist';
 
     for (const file of staticFiles) {
       const src = file;
       const dest = join(distDir, file);
-      if (!existsSync(src) || existsSync(dest)) {
+      if (!existsSync(src)) {
         continue;
       }
 

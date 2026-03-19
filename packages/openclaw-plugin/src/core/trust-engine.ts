@@ -245,18 +245,20 @@ export class TrustEngine {
             const eventLog = EventLogService.get(this.stateDir);
             eventLog.recordTrustChange(context.sessionId, { previousScore: oldScore, newScore: this.scorecard.trust_score, delta, reason });
         }
-        try {
-            TrajectoryRegistry.use(this.workspaceDir, (trajectory) => {
-                trajectory.recordTrustChange({
-                    sessionId: context?.sessionId,
-                    previousScore: oldScore,
-                    newScore: this.scorecard.trust_score,
-                    delta,
-                    reason,
+        if (context?.sessionId) {
+            try {
+                TrajectoryRegistry.use(this.workspaceDir, (trajectory) => {
+                    trajectory.recordTrustChange({
+                        sessionId: context.sessionId,
+                        previousScore: oldScore,
+                        newScore: this.scorecard.trust_score,
+                        delta,
+                        reason,
+                    });
                 });
-            });
-        } catch {
-            // Do not block trust updates if trajectory storage is unavailable.
+            } catch {
+                // Do not block trust updates if trajectory storage is unavailable.
+            }
         }
 
         const limit = this.trustSettings.history_limit || 50;

@@ -119,6 +119,9 @@ describe('Pain Command', () => {
         } as any);
 
         expect(result.text).toContain('trajectory.db');
+        expect(result.text).toContain('assistant turns: 2');
+        expect(result.text).toContain('blob bytes: 1024');
+        expect(result.text).toContain('last ingest: 2026-03-19T10:00:00.000Z');
         expect(result.text).toContain('pending samples');
         expect(result.text).toContain('approved samples');
     });

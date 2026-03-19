@@ -165,18 +165,22 @@ export class WorkspaceContext {
      * Removes a workspace from the cache.
      */
     static dispose(workspaceDir: string): void {
-        const instance = this.instances.get(workspaceDir);
+        const normalized = this.pathResolver.normalizeWorkspacePath(workspaceDir);
+        const instance = this.instances.get(normalized);
         if (instance) {
             instance.invalidate();
-            this.instances.delete(workspaceDir);
+            this.instances.delete(normalized);
         }
-        TrajectoryRegistry.dispose(workspaceDir);
+        TrajectoryRegistry.dispose(normalized);
     }
 
     /**
      * Clears the instance cache (primarily for testing).
      */
     static clearCache(): void {
+        for (const instance of this.instances.values()) {
+            instance.invalidate();
+        }
         this.instances.clear();
         TrajectoryRegistry.clear();
     }

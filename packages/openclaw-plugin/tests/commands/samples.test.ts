@@ -39,4 +39,27 @@ describe('Samples Command', () => {
     expect(result.text).toContain('sample-1');
     expect(result.text).toContain('approved');
   });
+
+  it('rejects invalid review decisions before writing', () => {
+    const result = handleSamplesCommand({
+      args: 'review maybe sample-1',
+      config: { workspaceDir: '/mock/workspace', language: 'en' },
+    } as any);
+
+    expect(mockTrajectory.reviewCorrectionSample).not.toHaveBeenCalled();
+    expect(result.text).toContain('Invalid review action');
+  });
+
+  it('returns a user-facing error when the sample is missing', () => {
+    mockTrajectory.reviewCorrectionSample.mockImplementation(() => {
+      throw new Error('not found');
+    });
+
+    const result = handleSamplesCommand({
+      args: 'review reject sample-404',
+      config: { workspaceDir: '/mock/workspace', language: 'en' },
+    } as any);
+
+    expect(result.text).toContain('Failed to review sample');
+  });
 });

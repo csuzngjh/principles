@@ -74,8 +74,5 @@
     "deep_reflection": {
       "label": "💡 AI 深度反思功能"
     }
-  },
-  "extensions": [
-    "./dist/bundle.js"
-  ]
+  }
 }

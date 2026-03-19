@@ -80,6 +80,13 @@ export interface TrajectoryGateBlockInput {
   createdAt?: string;
 }
 
+type DailyMetricRow = {
+  day: string;
+  tool_calls: number;
+  failures: number;
+  user_corrections: number;
+};
+
 export interface TrajectoryTrustChangeInput {
   sessionId?: string | null;
   previousScore: number;
@@ -171,7 +178,7 @@ function summarizeForDiff(text: string): string {
 function redactText(text: string): string {
   return text
     .replace(/[A-Za-z]:\\[^\s"'`]+/g, '<WINDOWS_PATH>')
-    .replace(/\/[A-Za-z0-9._/-]+/g, '<PATH>')
+    .replace(/\/(?:[A-Za-z0-9._-]+\/){1,}[A-Za-z0-9._-]+(?:\.[A-Za-z0-9._-]+)?/g, '<PATH>')
     .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '<EMAIL>')
     .replace(/\b(sk|rk|pk)_[A-Za-z0-9]+\b/g, '<TOKEN>');
 }
@@ -435,17 +442,24 @@ export class TrajectoryDatabase {
 
   reviewCorrectionSample(sampleId: string, status: Exclude<CorrectionSampleReviewStatus, 'pending'>, note?: string): CorrectionSampleRecord {
     const updatedAt = nowIso();
-    this.withWrite(() => {
-      this.db.prepare(`
+    const updated = this.withWrite(() => {
+      const updateResult = this.db.prepare(`
         UPDATE correction_samples
         SET review_status = ?, updated_at = ?
         WHERE sample_id = ?
       `).run(status, updatedAt, sampleId);
+      if (updateResult.changes === 0) {
+        return false;
+      }
       this.db.prepare(`
         INSERT INTO sample_reviews (sample_id, review_status, note, created_at)
         VALUES (?, ?, ?, ?)
       `).run(sampleId, status, note ?? null, updatedAt);
+      return true;
     });
+    if (!updated) {
+      throw new Error(`Correction sample not found: ${sampleId}`);
+    }
 
     const record = this.db.prepare(`
       SELECT sample_id, session_id, bad_assistant_turn_id, user_correction_turn_id,
@@ -454,6 +468,9 @@ export class TrajectoryDatabase {
       FROM correction_samples
       WHERE sample_id = ?
     `).get(sampleId) as Record<string, unknown>;
+    if (!record) {
+      throw new Error(`Correction sample not found after review update: ${sampleId}`);
+    }
 
     return {
       sampleId: String(record.sample_id),
@@ -516,7 +533,7 @@ export class TrajectoryDatabase {
     const payload = {
       generatedAt: nowIso(),
       stats: this.getDataStats(),
-      dailyMetrics: this.db.prepare('SELECT * FROM v_daily_metrics').all(),
+      dailyMetrics: this.dailyMetrics(),
       errorClusters: this.db.prepare('SELECT * FROM v_error_clusters').all(),
       principleEffectiveness: this.db.prepare('SELECT * FROM v_principle_effectiveness').all(),
       sampleQueue: this.db.prepare('SELECT * FROM v_sample_queue').all(),
@@ -681,15 +698,6 @@ export class TrajectoryDatabase {
         row_count INTEGER NOT NULL,
         created_at TEXT NOT NULL
       );
-      CREATE VIEW IF NOT EXISTS v_daily_metrics AS
-      SELECT
-        substr(tc.created_at, 1, 10) AS day,
-        COUNT(*) AS tool_calls,
-        SUM(CASE WHEN tc.outcome = 'failure' THEN 1 ELSE 0 END) AS failures,
-        SUM(CASE WHEN ut.correction_detected = 1 THEN 1 ELSE 0 END) AS user_corrections
-      FROM tool_calls tc
-      LEFT JOIN user_turns ut ON substr(ut.created_at, 1, 10) = substr(tc.created_at, 1, 10)
-      GROUP BY substr(tc.created_at, 1, 10);
       CREATE VIEW IF NOT EXISTS v_error_clusters AS
       SELECT tool_name, COALESCE(error_type, 'unknown') AS error_type, COUNT(*) AS occurrences
       FROM tool_calls
@@ -705,9 +713,15 @@ export class TrajectoryDatabase {
       SELECT review_status, COUNT(*) AS total
       FROM correction_samples
       GROUP BY review_status;
+      CREATE INDEX IF NOT EXISTS idx_assistant_turns_session_id ON assistant_turns(session_id);
+      CREATE INDEX IF NOT EXISTS idx_user_turns_session_id ON user_turns(session_id);
+      CREATE INDEX IF NOT EXISTS idx_tool_calls_session_id ON tool_calls(session_id);
+      CREATE INDEX IF NOT EXISTS idx_pain_events_session_id ON pain_events(session_id);
+      CREATE INDEX IF NOT EXISTS idx_correction_samples_review_status ON correction_samples(review_status);
     `);
 
     const row = this.db.prepare('SELECT version FROM schema_version LIMIT 1').get() as { version?: number } | undefined;
+    this.migrateSchema(row?.version);
     if (!row) {
       this.db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(SCHEMA_VERSION);
     } else if (row.version !== SCHEMA_VERSION) {
@@ -719,6 +733,39 @@ export class TrajectoryDatabase {
     this.importLegacySessions();
     this.importLegacyEvents();
     this.importLegacyEvolution();
+  }
+
+  private migrateSchema(_fromVersion?: number): void {
+    this.db.exec(`
+      DROP VIEW IF EXISTS v_daily_metrics;
+      CREATE VIEW IF NOT EXISTS v_daily_metrics AS
+      WITH tool_daily AS (
+        SELECT
+          substr(created_at, 1, 10) AS day,
+          COUNT(*) AS tool_calls,
+          SUM(CASE WHEN outcome = 'failure' THEN 1 ELSE 0 END) AS failures
+        FROM tool_calls
+        GROUP BY substr(created_at, 1, 10)
+      ),
+      correction_daily AS (
+        SELECT
+          substr(created_at, 1, 10) AS day,
+          SUM(CASE WHEN correction_detected = 1 THEN 1 ELSE 0 END) AS user_corrections
+        FROM user_turns
+        GROUP BY substr(created_at, 1, 10)
+      )
+      SELECT
+        tool_daily.day AS day,
+        tool_daily.tool_calls AS tool_calls,
+        tool_daily.failures AS failures,
+        COALESCE(correction_daily.user_corrections, 0) AS user_corrections
+      FROM tool_daily
+      LEFT JOIN correction_daily ON correction_daily.day = tool_daily.day;
+    `);
+  }
+
+  private dailyMetrics(): DailyMetricRow[] {
+    return this.db.prepare('SELECT * FROM v_daily_metrics ORDER BY day ASC').all() as DailyMetricRow[];
   }
 
   private importLegacySessions(): void {

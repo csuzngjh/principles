@@ -237,4 +237,50 @@ describe('LLM Cognitive Distress Hook', () => {
             expect.objectContaining({ deduped: true })
         );
     });
+
+    it('should continue pain processing when trajectory persistence fails', () => {
+        const mockFunnel = {
+            detect: vi.fn().mockReturnValue({
+                detected: true,
+                severity: 35,
+                ruleId: 'P_CONFUSION_EN',
+                source: 'l1_exact'
+            })
+        };
+        vi.mocked(DetectionService.get).mockReturnValue(mockFunnel as any);
+        mockWctx.trajectory.recordAssistantTurn.mockImplementation(() => {
+            throw new Error('db offline');
+        });
+
+        const logger = {
+            warn: vi.fn(),
+            info: vi.fn(),
+            error: vi.fn(),
+            debug: vi.fn(),
+        };
+
+        handleLlmOutput({
+            runId: 'r-fail',
+            sessionId,
+            provider: 'test',
+            model: 'test',
+            assistantTexts: ['I am currently struggling to figure out why this test is failing.'],
+        } as any, { workspaceDir, sessionId, logger } as any);
+
+        expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Failed to persist assistant turn'));
+        expect(painFlags.writePainFlag).toHaveBeenCalledWith(
+            workspaceDir,
+            expect.objectContaining({
+                source: 'llm_p_confusion_en',
+                score: '35',
+            })
+        );
+        expect(mockEventLog.recordPainSignal).toHaveBeenCalledWith(
+            sessionId,
+            expect.objectContaining({
+                source: 'llm_p_confusion_en',
+                score: 35,
+            })
+        );
+    });
 });

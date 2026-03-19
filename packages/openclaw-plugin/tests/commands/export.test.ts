@@ -51,4 +51,28 @@ describe('Export Command', () => {
     expect(mockTrajectory.exportAnalytics).toHaveBeenCalled();
     expect(result.text).toContain('/tmp/analytics.json');
   });
+
+  it('rejects invalid export targets', () => {
+    const result = handleExportCommand({
+      args: 'unknown',
+      config: { workspaceDir: '/mock/workspace', language: 'en' },
+    } as any);
+
+    expect(mockTrajectory.exportAnalytics).not.toHaveBeenCalled();
+    expect(mockTrajectory.exportCorrections).not.toHaveBeenCalled();
+    expect(result.text).toContain('Invalid export target');
+  });
+
+  it('returns a user-facing error when export throws', () => {
+    mockTrajectory.exportCorrections.mockImplementation(() => {
+      throw new Error('disk full');
+    });
+
+    const result = handleExportCommand({
+      args: 'corrections',
+      config: { workspaceDir: '/mock/workspace', language: 'en' },
+    } as any);
+
+    expect(result.text).toContain('Export failed');
+  });
 });

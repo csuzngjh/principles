@@ -99,4 +99,82 @@ describe('TrajectoryDatabase', () => {
     expect(samples[0].qualityScore).toBeGreaterThan(0);
     db.dispose();
   });
+
+  it('does not create a correction sample when prerequisites are missing', () => {
+    workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
+    const db = new TrajectoryDatabase({ workspaceDir });
+
+    db.recordToolCall({
+      sessionId: 's1',
+      toolName: 'edit',
+      outcome: 'failure',
+      errorType: 'EACCES',
+    });
+    db.recordUserTurn({
+      sessionId: 's1',
+      turnIndex: 1,
+      rawText: 'redo',
+      correctionDetected: false,
+      referencesAssistantTurnId: null,
+    });
+    db.recordToolCall({
+      sessionId: 's1',
+      toolName: 'edit',
+      outcome: 'success',
+    });
+
+    expect(db.listCorrectionSamples('pending')).toHaveLength(0);
+    db.dispose();
+  });
+
+  it('raises when reviewing a missing correction sample', () => {
+    workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
+    const db = new TrajectoryDatabase({ workspaceDir });
+
+    expect(() => db.reviewCorrectionSample('missing', 'approved')).toThrow('Correction sample not found');
+    db.dispose();
+  });
+
+  it('aggregates daily metrics without multiplying user corrections', () => {
+    workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
+    const db = new TrajectoryDatabase({ workspaceDir });
+
+    db.recordToolCall({
+      sessionId: 's1',
+      toolName: 'edit',
+      outcome: 'failure',
+      createdAt: '2026-03-19T10:00:00.000Z',
+    });
+    db.recordToolCall({
+      sessionId: 's1',
+      toolName: 'write',
+      outcome: 'success',
+      createdAt: '2026-03-19T11:00:00.000Z',
+    });
+    db.recordUserTurn({
+      sessionId: 's1',
+      turnIndex: 1,
+      rawText: 'redo',
+      correctionDetected: true,
+      correctionCue: 'redo',
+      createdAt: '2026-03-19T12:00:00.000Z',
+    });
+    db.recordUserTurn({
+      sessionId: 's1',
+      turnIndex: 2,
+      rawText: 'again',
+      correctionDetected: true,
+      correctionCue: 'again',
+      createdAt: '2026-03-19T13:00:00.000Z',
+    });
+
+    const result = db.exportAnalytics();
+    const payload = JSON.parse(fs.readFileSync(result.filePath, 'utf8')) as {
+      dailyMetrics: Array<{ day: string; tool_calls: number; failures: number; user_corrections: number }>;
+    };
+    expect(payload.dailyMetrics).toEqual([
+      { day: '2026-03-19', tool_calls: 2, failures: 1, user_corrections: 2 },
+    ]);
+    db.dispose();
+  });
 });

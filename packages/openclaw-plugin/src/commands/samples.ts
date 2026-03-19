@@ -13,9 +13,32 @@ export function handleSamplesCommand(ctx: PluginCommandContext): PluginCommandRe
 
   if (args.startsWith('review ')) {
     const [, decision = '', sampleId = '', ...noteParts] = args.split(/\s+/);
+    if (decision !== 'approve' && decision !== 'reject') {
+      return {
+        text: zh
+          ? '无效的审核动作。请使用 `review approve <sample-id> [note]` 或 `review reject <sample-id> [note]`。'
+          : 'Invalid review action. Use `review approve <sample-id> [note]` or `review reject <sample-id> [note]`.',
+      };
+    }
+    if (!sampleId) {
+      return {
+        text: zh
+          ? '缺少 sample-id。'
+          : 'Missing sample-id.',
+      };
+    }
     const normalizedDecision = decision === 'approve' ? 'approved' : 'rejected';
     const note = noteParts.join(' ').trim();
-    const record = wctx.trajectory.reviewCorrectionSample(sampleId, normalizedDecision, note);
+    let record;
+    try {
+      record = wctx.trajectory.reviewCorrectionSample(sampleId, normalizedDecision, note);
+    } catch (error) {
+      return {
+        text: zh
+          ? `审核样本失败：${sampleId}`
+          : `Failed to review sample: ${sampleId}`,
+      };
+    }
     return {
       text: zh
         ? `样本 ${record.sampleId} 已标记为 ${record.reviewStatus}。`

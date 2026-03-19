@@ -8,13 +8,14 @@
 | --- | --- |
 | Current Phase | Productization foundation |
 | User Goal | Turn Principles Disciple into a usable product |
-| Current Output | Unified trajectory DB, exports, and correction sample review flow |
+| Current Output | Unified trajectory DB, exports, correction sample review flow, and merge-blocker hardening |
 
 ## Current Tasks
 
 - [x] Build a workspace-local SQLite trajectory store with blob support and legacy import
 - [x] Wire prompt/llm/pain/gate/trust/evolution signals into the unified data layer
 - [x] Add `/pd-status data`, `/pd-export`, and `/pd-samples review`
+- [x] Harden merge blockers around command safety, metrics accuracy, trajectory fault isolation, and install/runtime stability
 - [ ] Turn SQL views into manager-facing health and principle dashboards
 - [ ] Expand sample quality rules and labeling for downstream LoRA/SFT work
 
