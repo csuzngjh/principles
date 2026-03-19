@@ -1,4 +1,4 @@
-# 🧬 Principles Disciple Beginner's Survival Guide (v1.5.5)
+# 🧬 Principles Disciple Beginner's Survival Guide (v1.6.0)
 
 > **In one sentence for non-technical users:**
 > This is a plugin that gives your AI assistant a "brain" and a sense of "pain". When it makes a mistake in your code or writing, it feels "pain" and remembers the lesson so it won't happen again. More importantly, it hits the brakes when the AI tries to make massive changes, protecting your hard work from being ruined.
@@ -93,6 +93,43 @@ If you want to see what state the AI is currently in, or give it specific direct
    * When your project root gets messy with temporary files, run this command. The AI will act as a housekeeper with "digital cleanliness", helping you clean up, rename, and archive useless garbage files (rest assured, it will never touch your core code).
 9. **`/init-strategy`** —— **Set the Vision**
    * If you want the AI to work towards a long-term goal every day (e.g., "Always write extremely concise code"), run this command. The AI will conduct a "soul-searching interview" with you and strictly remember your rules.
+
+---
+
+## 🖥️ Step 4: Visual Console (Principles Console) — **NEW**
+
+If you prefer a graphical interface, you can access **Principles Console** in your browser:
+
+### How to Open?
+
+1. Make sure OpenClaw Gateway is running
+2. Open in your browser: `http://localhost:3000/plugins/principles/`
+3. You'll see a three-panel console interface
+
+### Console Features
+
+#### 📊 Overview
+- **Health Metrics**: Repeat error rate, user correction rate, pending samples
+- **Daily Trends**: 7-day charts for tool calls, failures, user corrections
+- **Regression Alerts**: Discover most frequently failing tools and error types
+- **Thinking Coverage**: Shows how often AI uses thinking models
+
+#### 📋 Samples (Correction Samples)
+- **Sample Queue**: View all auto-collected user correction scenarios
+- **Review Actions**: Approve or reject samples (determines if used for training)
+- **Detail View**: Expand to see full "bad attempt → user correction" comparison
+- **Filters**: Filter by status, quality score, date, failure mode
+
+#### 🧠 Thinking Models
+- **Model List**: View 10 core thinking models and their usage frequency
+- **Scenario Analysis**: Understand what triggers each model
+- **Health Audit**: Find ignored or over-triggered models
+
+### Why Use the Console?
+
+- **Visualization**: See system status at a glance, more intuitive than CLI
+- **Batch Review**: Process multiple correction samples at once
+- **Trend Analysis**: Observe AI's evolution trajectory, find improvement opportunities
 
 ---
 

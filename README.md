@@ -123,6 +123,48 @@ Stay in the driver's seat:
 
 ---
 
+## 🖥️ Principles Console (Web UI) — **NEW in v1.6.0**
+
+> *Visual dashboard for monitoring and managing your AI agent.*
+
+Principles Console is a built-in web interface that provides graphical system monitoring and management.
+
+### Access
+
+```bash
+# After starting OpenClaw Gateway, open in browser:
+http://localhost:3000/plugins/principles/
+```
+
+### Features
+
+| Page | What It Shows |
+|------|---------------|
+| **Overview** | Workspace health, daily trends, regression alerts, thinking model coverage |
+| **Samples** | Correction sample queue: view, filter, approve/reject samples |
+| **Thinking Models** | Usage stats: trigger frequency, scenario analysis, health audit |
+
+### Use Cases
+
+- **Visual Monitoring** — See AI health and evolution at a glance
+- **Batch Review** — Process multiple user correction samples at once
+- **Trend Analysis** — Track tool calls, failure rates, corrections over 7 days
+- **Thinking Traces** — Understand which mental models your AI is using
+
+### Architecture
+
+```
+Browser ←→ OpenClaw Gateway ←→ Plugin HTTP Routes ←→ Query Service
+                                                    ↓
+                                              SQLite Trajectory DB
+```
+
+- **Self-Contained** — No separate deployment needed
+- **Local Data** — All data stored in local SQLite, never leaves your machine
+- **Real-time** — Fresh data on every page refresh
+
+---
+
 ## 🔬 Deep Reflection
 
 Before complex tasks, the agent automatically analyzes:
@@ -174,6 +216,7 @@ Uses T-01 through T-10 mental models for structured thinking.
 ```
 /init-strategy  /manage-okr     /bootstrap-tools  /research-tools
 /thinking-os    /evolve-task    /pd-daily         /pd-status
+/pd-samples     /pd-export      /pd-rollback      /pd-help
 /pain           /profile        /inject-rule      /admin
 ```
 
