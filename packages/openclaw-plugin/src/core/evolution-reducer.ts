@@ -3,6 +3,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { withLock } from '../utils/file-lock.js';
 import { PathResolver } from './path-resolver.js';
+import { SystemLogger } from './system-logger.js';
+import { shouldIgnorePainProtocolText } from './dictionary.js';
+import { TrajectoryRegistry } from './trajectory.js';
 import type {
   CandidateCreatedData,
   EvolutionLoopEvent,
@@ -43,6 +46,7 @@ export class EvolutionReducerImpl implements EvolutionReducer {
   private readonly streamPath: string;
   private readonly lockTargetPath: string;
   private readonly blacklistPath: string;
+  private readonly workspaceDir: string;
   private readonly memoryEvents: EvolutionLoopEvent[] = [];
   private readonly principles = new Map<string, Principle>();
   private readonly failureStreak = new Map<string, number>();
@@ -50,6 +54,7 @@ export class EvolutionReducerImpl implements EvolutionReducer {
   private isReplaying = false;
 
   constructor(opts: { workspaceDir: string }) {
+    this.workspaceDir = opts.workspaceDir;
     const resolver = new PathResolver({ workspaceDir: opts.workspaceDir });
     this.streamPath = resolver.resolve('EVOLUTION_STREAM');
     this.lockTargetPath = resolver.resolve('EVOLUTION_LOCK');
@@ -68,7 +73,21 @@ export class EvolutionReducerImpl implements EvolutionReducer {
       fs.appendFileSync(this.streamPath, `${JSON.stringify(event)}\n`, 'utf8');
     }, { lockStaleMs: 15000 });
     this.applyEvent(event);
-    this.sweepExpiredProbation();
+    if (event.type !== 'pain_detected') {
+      try {
+        TrajectoryRegistry.use(this.workspaceDir, (trajectory) => {
+          trajectory.recordPrincipleEvent({
+            principleId: 'principleId' in event.data && typeof event.data.principleId === 'string' ? event.data.principleId : null,
+            eventType: event.type,
+            payload: event.data,
+            createdAt: event.ts,
+          });
+        });
+      } catch {
+        // Keep evolution loop resilient if trajectory storage is unavailable.
+      }
+    }
+    // Performance: sweepExpiredProbation() moved to getProbationPrinciples() for lazy cleanup
   }
 
   getEventLog(): EvolutionLoopEvent[] {
@@ -80,6 +99,8 @@ export class EvolutionReducerImpl implements EvolutionReducer {
   }
 
   getProbationPrinciples(): Principle[] {
+    // Lazy cleanup: sweep expired probation principles on access
+    this.sweepExpiredProbation();
     return this.getByStatus('probation');
   }
 
@@ -194,7 +215,7 @@ export class EvolutionReducerImpl implements EvolutionReducer {
         const event = JSON.parse(line) as EvolutionLoopEvent;
         this.applyEvent(event);
       } catch (e) {
-        console.warn(`[PD:EvolutionReducer] skip malformed event line: ${String(e)}`);
+        SystemLogger.log(this.workspaceDir, 'EVOLUTION_WARN', `skip malformed event line: ${String(e)}`);
       }
     }
     this.isReplaying = false;
@@ -293,6 +314,12 @@ export class EvolutionReducerImpl implements EvolutionReducer {
     const trigger = String(data.reason ?? data.source ?? 'unknown trigger');
     const action = `Prevent recurrence for: ${String(data.source ?? 'unknown')}`;
 
+    // Defense in depth: protocol/system tokens must never become principles,
+    // even if a pain_detected event is emitted from a new callsite in the future.
+    if (shouldIgnorePainProtocolText(trigger)) {
+      return;
+    }
+
     if (this.isBlacklisted(data.painId, trigger)) {
       return;
     }
@@ -377,7 +404,8 @@ export class EvolutionReducerImpl implements EvolutionReducer {
   private sweepExpiredProbation(): void {
     const now = Date.now();
     const maxAgeMs = PROBATION_MAX_AGE_DAYS * 24 * 60 * 60 * 1000;
-    for (const p of this.getProbationPrinciples()) {
+    // Use getByStatus directly to avoid infinite recursion with getProbationPrinciples()
+    for (const p of this.getByStatus('probation')) {
       const age = now - new Date(p.createdAt).getTime();
       if (age > maxAgeMs) {
         this.deprecate(p.id, 'probation_expired');
@@ -401,7 +429,7 @@ export class EvolutionReducerImpl implements EvolutionReducer {
         rolledBackAt: string;
       }>;
     } catch (e) {
-      console.warn(`[PD:EvolutionReducer] failed to parse blacklist: ${String(e)}`);
+      SystemLogger.log(this.workspaceDir, 'EVOLUTION_WARN', `failed to parse blacklist: ${String(e)}`);
       return [];
     }
   }

@@ -3,7 +3,7 @@ import * as path from 'path';
 import { isRisky, normalizePath } from '../utils/io.js';
 import { normalizeProfile } from '../core/profile.js';
 import { computePainScore, writePainFlag } from '../core/pain.js';
-import { trackFriction, resetFriction, getInjectedProbationIds, clearInjectedProbationIds } from '../core/session-tracker.js';
+import { getSession, trackFriction, resetFriction, getInjectedProbationIds, clearInjectedProbationIds } from '../core/session-tracker.js';
 import { denoiseError, computeHash } from '../utils/hashing.js';
 import { SystemLogger } from '../core/system-logger.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
@@ -58,6 +58,8 @@ export function handleAfterToolCall(
   const eventLog = wctx.eventLog;
   const trust = wctx.trust;
   const sessionId = ctx.sessionId || 'unknown';
+  const sessionState = ctx.sessionId ? getSession(ctx.sessionId) : undefined;
+  const gfiBefore = sessionState?.currentGfi ?? 0;
   const params = event.params as ToolParams;
 
   // ── Track A: Empirical Friction (GFI) ──
@@ -72,6 +74,13 @@ export function handleAfterToolCall(
       source: 'manual',
       reason: `User intervention: ${reason}`,
       isRisky: true
+    });
+    wctx.trajectory?.recordPainEvent?.({
+      sessionId,
+      source: 'manual',
+      score: 100,
+      reason: `User intervention: ${reason}`,
+      origin: 'user_manual',
     });
     emitPainDetectedEvent(wctx, {
       ts: new Date().toISOString(),
@@ -134,6 +143,18 @@ export function handleAfterToolCall(
       consecutiveErrors: updatedState.consecutiveErrors,
       exitCode,
     });
+    wctx.trajectory?.recordToolCall?.({
+      sessionId,
+      toolName: event.toolName,
+      outcome: 'failure',
+      durationMs: event.durationMs,
+      exitCode,
+      errorType,
+      errorMessage: event.error ? String(event.error) : undefined,
+      gfiBefore,
+      gfiAfter: updatedState.currentGfi,
+      paramsJson: event.params,
+    });
 
     const injectedProbationIds = getInjectedProbationIds(sessionId, effectiveWorkspaceDir);
     for (const id of injectedProbationIds) {
@@ -146,7 +167,7 @@ export function handleAfterToolCall(
     clearInjectedProbationIds(sessionId, effectiveWorkspaceDir);
   } else {
     // ── SUCCESS BRANCH ──
-    resetFriction(sessionId, effectiveWorkspaceDir);
+    const resetState = resetFriction(sessionId, effectiveWorkspaceDir);
     
     // 👈 Record success to reset failure streak and earn minor trust (if constructive)
     trust.recordSuccess('tool_success', { 
@@ -164,6 +185,16 @@ export function handleAfterToolCall(
       }
     }
     clearInjectedProbationIds(sessionId, effectiveWorkspaceDir);
+    wctx.trajectory?.recordToolCall?.({
+      sessionId,
+      toolName: event.toolName,
+      outcome: 'success',
+      durationMs: event.durationMs,
+      exitCode,
+      gfiBefore,
+      gfiAfter: resetState.currentGfi,
+      paramsJson: event.params,
+    });
     
     if (WRITE_TOOLS.includes(event.toolName)) {
       const filePath = params.file_path || params.path || params.file;
@@ -241,6 +272,14 @@ export function handleAfterToolCall(
     source: 'tool_failure',
     reason: `Tool ${event.toolName} failed on ${relPath}`,
     isRisky: isRisk,
+  });
+  wctx.trajectory?.recordPainEvent?.({
+    sessionId,
+    source: 'tool_failure',
+    score: painScore,
+    reason: `Tool ${event.toolName} failed on ${relPath}`,
+    severity: painScore >= 70 ? 'severe' : painScore >= 40 ? 'moderate' : 'mild',
+    origin: 'system_infer',
   });
 
   emitPainDetectedEvent(wctx, {

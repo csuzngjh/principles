@@ -9,7 +9,7 @@ vi.mock('fs');
 vi.mock('../../src/core/session-tracker.js');
 vi.mock('../../src/core/workspace-context.js');
 
-// ═══ Test Group: Model Resolution Functions ═══
+// 鈺愨晲鈺?Test Group: Model Resolution Functions 鈺愨晲鈺?
 describe('resolveModelFromConfig', () => {
   it('parses string format "provider/model"', () => {
     expect(resolveModelFromConfig('openai/gpt-4o')).toBe('openai/gpt-4o');
@@ -167,6 +167,11 @@ describe('Prompt Context Injection Hook', () => {
     trust: mockTrust,
     hygiene: mockHygiene,
     config: mockConfig,
+    trajectory: {
+      recordSession: vi.fn(),
+      recordUserTurn: vi.fn(),
+      listAssistantTurns: vi.fn().mockReturnValue([{ id: 42 }]),
+    },
     evolutionReducer: {
       getActivePrinciples: vi.fn().mockReturnValue([]),
       getProbationPrinciples: vi.fn().mockReturnValue([]),
@@ -206,10 +211,32 @@ describe('Prompt Context Injection Hook', () => {
     expect(result?.prependContext).toContain('Trust Score: 85/100');
     expect(result?.prependContext).toContain('Stage 4');  });
 
-  // ═══════════════════════════════════════════════════════════════════
+  it('records latest user turn and flags explicit corrections', async () => {
+  vi.mocked(fs.existsSync).mockReturnValue(false);
+
+  await handleBeforePromptBuild({
+    messages: [
+      { role: 'assistant', content: 'I edited the wrong file.' },
+      { role: 'user', content: 'You are wrong, not this file, try again.' },
+    ],
+  } as any, { workspaceDir, trigger: 'user', sessionId: 'session-1' } as any);
+
+  expect(mockWctx.trajectory.recordSession).toHaveBeenCalledWith(expect.objectContaining({
+    sessionId: 'session-1',
+  }));
+  expect(mockWctx.trajectory.recordUserTurn).toHaveBeenCalledWith(expect.objectContaining({
+    sessionId: 'session-1',
+    correctionDetected: true,
+    correctionCue: 'you are wrong',
+    referencesAssistantTurnId: 42,
+  }));
+  expect(mockWctx.trajectory.listAssistantTurns).toHaveBeenCalledWith('session-1');
+});
+
+  // 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
   // IMPORTANT: project_context and reflection_log are now in appendSystemContext
   // This fixes WebUI UX issue (Issue #23) and enables Prompt Caching
-  // ═══════════════════════════════════════════════════════════════════
+  // 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
 
   it('should NOT inject project_context by default (projectFocus: off)', async () => {
     vi.mocked(fs.existsSync).mockImplementation((p) => p.toString().includes('CURRENT_FOCUS.md'));
@@ -282,7 +309,7 @@ describe('Prompt Context Injection Hook', () => {
   });
 
   it('should properly escape special characters in task string', async () => {
-    // 任务包含特殊字符：反斜杠、双引号、换行符
+    // 浠诲姟鍖呭惈鐗规畩瀛楃锛氬弽鏂滄潬銆佸弻寮曞彿銆佹崲琛岀
     const taskWithSpecialChars = 'Fix path C:\\Users\\admin and "quoted text"\nwith newline';
     
     vi.mocked(fs.existsSync).mockImplementation((p) => p.toString().includes('evolution_queue.json'));
@@ -312,7 +339,7 @@ describe('Prompt Context Injection Hook', () => {
       api: mockApi
     } as any);
 
-    // 验证转义后的字符串
+    // 楠岃瘉杞箟鍚庣殑瀛楃涓?
     expect(result?.prependContext).toContain('C:\\\\Users\\\\admin');
     expect(result?.prependContext).toContain('\\"quoted text\\"');
     expect(result?.prependContext).toContain('\\nwith newline');
@@ -353,8 +380,63 @@ describe('Prompt Context Injection Hook', () => {
     } as any);
 
     expect(result?.prependContext).toContain('Diagnose systemic pain [ID: abc12345]');
-    expect(result?.prependContext).toContain('Source: hook_failure. Reason: Hook execution failed.');
-    expect(result?.prependContext).toContain('Trigger text: \\"trace preview\\"');
+    expect(result?.prependContext).toContain('**Source**: hook_failure');
+    expect(result?.prependContext).toContain('**Reason**: Hook execution failed');
+    expect(result?.prependContext).toContain('**Trigger Text**: \\\"trace preview\\\"');
+    expect(result?.prependContext).toContain('Analyze the root cause using 5 Whys methodology');
+  });
+
+
+  it('should append recent conversation context to reconstructed evolution task', async () => {
+    vi.mocked(fs.existsSync).mockImplementation((p) => p.toString().includes('evolution_queue.json'));
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify([
+      {
+        id: 'ctx123',
+        source: 'pain_detection',
+        reason: 'Repeated failures',
+        trigger_text_preview: 'null pointer',
+        status: 'in_progress'
+      }
+    ]));
+
+    const result = await handleBeforePromptBuild({
+      messages: [
+        { role: 'user', content: 'Earlier message should be truncated because of max window' },
+        { role: 'assistant', content: 'I reviewed the code and found likely null access.' },
+        { role: 'tool', content: 'tool output should be ignored' },
+        { role: 'user', content: [{ type: 'text', text: 'Please focus on null handling in parser.ts' }, { type: 'image', url: 'x' }] },
+      ] as any,
+    } as any, { workspaceDir, trigger: 'user' } as any);
+
+    expect(result?.prependContext).toContain('**Recent Conversation Context**:');
+    expect(result?.prependContext).toContain('[ASSISTANT]: I reviewed the code and found likely null access.');
+    expect(result?.prependContext).toContain('[USER]: Please focus on null handling in parser.ts');
+    expect(result?.prependContext).not.toContain('tool output should be ignored');
+  });
+
+  it('should not append conversation context when evolutionContext is disabled', async () => {
+    vi.mocked(fs.existsSync).mockImplementation((p) => p.toString().includes('evolution_queue.json') || p.toString().includes('PROFILE.json'));
+    vi.mocked(fs.readFileSync).mockImplementation((p) => {
+      const target = p.toString();
+      if (target.includes('PROFILE.json')) return JSON.stringify({ contextInjection: { evolutionContext: { enabled: false } } });
+      if (target.includes('evolution_queue.json')) return JSON.stringify([{
+        id: 'ctx-off',
+        source: 'pain_detection',
+        reason: 'Repeated failures',
+        trigger_text_preview: 'null pointer',
+        status: 'in_progress'
+      }]);
+      return '';
+    });
+
+    const result = await handleBeforePromptBuild({
+      messages: [
+        { role: 'user', content: 'This context should not be included' },
+      ] as any,
+    } as any, { workspaceDir, trigger: 'user' } as any);
+
+    expect(result?.prependContext).toContain('Diagnose systemic pain [ID: ctx-off]');
+    expect(result?.prependContext).not.toContain('Recent Conversation Context');
   });
 
   it('should skip evolution task injection when task is literal undefined and metadata is invalid', async () => {
@@ -624,13 +706,13 @@ describe('Prompt Context Injection Hook', () => {
     expect(dynamicContext).not.toContain('<reflection_log>');
   });
 
-  // ═══ Test Group 1: isMinimalMode ═══
+  // 鈺愨晲鈺?Test Group 1: isMinimalMode 鈺愨晲鈺?
   describe('isMinimalMode detection', () => {
     beforeEach(() => {
       vi.mocked(fs.existsSync).mockReturnValue(false);
     });
 
-    it('heartbeat trigger → isMinimalMode = true', async () => {
+    it('heartbeat trigger 鈫?isMinimalMode = true', async () => {
       const result = await handleBeforePromptBuild({} as any, {
         workspaceDir,
         trigger: 'heartbeat',
@@ -641,7 +723,7 @@ describe('Prompt Context Injection Hook', () => {
       expect(result?.appendSystemContext).not.toContain('<project_context>');
     });
 
-    it('sessionId 含 :subagent: → isMinimalMode = true', async () => {
+    it('sessionId 鍚?:subagent: 鈫?isMinimalMode = true', async () => {
       const result = await handleBeforePromptBuild({} as any, {
         workspaceDir,
         trigger: 'user',
@@ -652,7 +734,7 @@ describe('Prompt Context Injection Hook', () => {
       expect(result?.appendSystemContext).not.toContain('<project_context>');
     });
 
-    it('主会话 sessionId → isMinimalMode = false', async () => {
+    it('涓讳細璇?sessionId 鈫?isMinimalMode = false', async () => {
       vi.mocked(fs.existsSync).mockImplementation((p) => {
         if (p.toString().includes('PROFILE.json')) return true;
         if (p.toString().includes('CURRENT_FOCUS.md')) return true;
@@ -675,7 +757,7 @@ describe('Prompt Context Injection Hook', () => {
       expect(resultWithFile?.appendSystemContext).toContain('<project_context>');
     });
 
-    it('sessionId undefined → isMinimalMode = false', async () => {
+    it('sessionId undefined 鈫?isMinimalMode = false', async () => {
       vi.mocked(fs.existsSync).mockImplementation((p) => {
         if (p.toString().includes('PROFILE.json')) return true;
         if (p.toString().includes('CURRENT_FOCUS.md')) return true;
@@ -698,7 +780,7 @@ describe('Prompt Context Injection Hook', () => {
       expect(result?.appendSystemContext).toContain('<project_context>');
     });
 
-    it('heartbeat=true, subagent sessionId → isMinimalMode = true', async () => {
+    it('heartbeat=true, subagent sessionId 鈫?isMinimalMode = true', async () => {
       const result = await handleBeforePromptBuild({} as any, {
         workspaceDir,
         trigger: 'heartbeat',
@@ -708,7 +790,7 @@ describe('Prompt Context Injection Hook', () => {
       expect(result?.appendSystemContext).not.toContain('<project_context>');
     });
 
-    it('main session (no :subagent:) with trigger=user → isMinimalMode = false', async () => {
+    it('main session (no :subagent:) with trigger=user 鈫?isMinimalMode = false', async () => {
       vi.mocked(fs.existsSync).mockImplementation((p) => {
         if (p.toString().includes('PROFILE.json')) return true;
         if (p.toString().includes('CURRENT_FOCUS.md')) return true;
@@ -733,13 +815,13 @@ describe('Prompt Context Injection Hook', () => {
     });
   });
 
-  // ═══ Test Group 2: Minimal Mode 注入行为 ═══
+  // 鈺愨晲鈺?Test Group 2: Minimal Mode 娉ㄥ叆琛屼负 鈺愨晲鈺?
   describe('Minimal Mode injection behavior', () => {
     beforeEach(() => {
       vi.mocked(fs.existsSync).mockReturnValue(false);
     });
 
-    it('minimal mode: 不含 <project_context> in appendSystemContext', async () => {
+    it('minimal mode: 涓嶅惈 <project_context> in appendSystemContext', async () => {
       const result = await handleBeforePromptBuild({} as any, { 
         workspaceDir, 
         trigger: 'heartbeat',
@@ -749,7 +831,7 @@ describe('Prompt Context Injection Hook', () => {
       expect(result?.appendSystemContext).not.toContain('<project_context>');
     });
 
-    it('minimal mode: 仍含 <runtime_state>', async () => {
+    it('minimal mode: 浠嶅惈 <runtime_state>', async () => {
       const result = await handleBeforePromptBuild({} as any, {
         workspaceDir,
         trigger: 'heartbeat',
@@ -761,13 +843,13 @@ describe('Prompt Context Injection Hook', () => {
     });
   });
 
-  // ═══ Test Group 3: Size Guard ═══
+  // 鈺愨晲鈺?Test Group 3: Size Guard 鈺愨晲鈺?
   describe('Size Guard', () => {
     beforeEach(() => {
       vi.mocked(fs.existsSync).mockReturnValue(false);
     });
 
-    it('超过 10000 字符 → 触发截断 in appendSystemContext', async () => {
+    it('瓒呰繃 10000 瀛楃 鈫?瑙﹀彂鎴柇 in appendSystemContext', async () => {
       const largeContent = Array.from({ length: 80 }, (_, i) => 
         `Line ${i + 1}: This is a long line of content with enough data to exceed the 10000 character limit for testing size guard functionality`
       ).join('\n');
@@ -802,7 +884,7 @@ describe('Prompt Context Injection Hook', () => {
       consoleSpy.mockRestore();
     });
 
-    it('未超限 → 不截断', async () => {
+    it('does not truncate short project context in appendSystemContext', async () => {
       const smallContent = 'Small focus content';
 
       vi.mocked(fs.existsSync).mockImplementation((p) => {
@@ -830,7 +912,7 @@ describe('Prompt Context Injection Hook', () => {
       expect(result?.appendSystemContext).toContain('Small focus content');
     });
 
-    it('截断保留前 20 行 + [truncated] in appendSystemContext', async () => {
+    it('truncates appendSystemContext and preserves leading lines', async () => {
       const longLines = Array.from({ length: 80 }, (_, i) =>
         `Line ${i + 1}: This is a very long line of content with lots of text to ensure we exceed the 10000 character limit for proper truncation testing - extra padding here`
       ).join('\n');
@@ -872,7 +954,7 @@ describe('Prompt Context Injection Hook', () => {
       expect(result?.appendSystemContext).toContain('[truncated]');
     });
 
-    it('< 20 行不截断', async () => {
+    it('< 20 琛屼笉鎴柇', async () => {
       const fifteenLines = Array.from({ length: 15 }, (_, i) =>
         `Line ${i + 1}: This is content line number ${i + 1} for testing no truncation when under 20 lines`
       ).join('\n');
@@ -903,9 +985,9 @@ describe('Prompt Context Injection Hook', () => {
     });
   });
 
-  // ═══ Test Group 4: ContextInjectionConfig 配置测试 ═══
+  // 鈺愨晲鈺?Test Group 4: ContextInjectionConfig 閰嶇疆娴嬭瘯 鈺愨晲鈺?
   describe('ContextInjectionConfig settings', () => {
-    it('thinkingOs: false → 不注入 THINKING_OS', async () => {
+    it('thinkingOs: false 鈫?涓嶆敞鍏?THINKING_OS', async () => {
       vi.mocked(fs.existsSync).mockImplementation((p) => {
         if (p.toString().includes('PROFILE.json')) return true;
         if (p.toString().includes('THINKING_OS.md')) return true;
@@ -931,7 +1013,7 @@ describe('Prompt Context Injection Hook', () => {
       expect(result?.appendSystemContext).not.toContain('Thinking OS Content');
     });
 
-    it('thinkingOs: true → 注入 THINKING_OS', async () => {
+    it('thinkingOs: true 鈫?娉ㄥ叆 THINKING_OS', async () => {
       vi.mocked(fs.existsSync).mockImplementation((p) => {
         if (p.toString().includes('PROFILE.json')) return true;
         if (p.toString().includes('THINKING_OS.md')) return true;
@@ -957,7 +1039,7 @@ describe('Prompt Context Injection Hook', () => {
       expect(result?.appendSystemContext).toContain('Thinking OS Content');
     });
 
-    it('trustScore: false → 不注入信任分数', async () => {
+    it('omits trust score when trustScore is disabled', async () => {
       vi.mocked(fs.existsSync).mockImplementation((p) => {
         if (p.toString().includes('PROFILE.json')) return true;
         return false;
@@ -979,7 +1061,7 @@ describe('Prompt Context Injection Hook', () => {
       expect(result?.prependContext).not.toContain('Trust:');
     });
 
-    it('trustScore: true → 注入信任分数', async () => {
+    it('trustScore: true 鈫?娉ㄥ叆淇′换鍒嗘暟', async () => {
       vi.mocked(fs.existsSync).mockImplementation((p) => {
         if (p.toString().includes('PROFILE.json')) return true;
         return false;
@@ -1001,7 +1083,7 @@ describe('Prompt Context Injection Hook', () => {
       expect(result?.prependContext).toContain('Trust Score:');
     });
 
-    it('reflectionLog: false → 不注入反思日志', async () => {
+    it('omits reflection log when reflectionLog is disabled', async () => {
       vi.mocked(fs.existsSync).mockImplementation((p) => {
         if (p.toString().includes('PROFILE.json')) return true;
         if (p.toString().includes('reflection-log.md')) return true;
@@ -1028,7 +1110,7 @@ describe('Prompt Context Injection Hook', () => {
       expect(result?.appendSystemContext).not.toContain('Reflection Log Content');
     });
 
-    it('reflectionLog: true → 注入反思日志 in appendSystemContext', async () => {
+    it('reflectionLog: true 鈫?娉ㄥ叆鍙嶆€濇棩蹇?in appendSystemContext', async () => {
       vi.mocked(fs.existsSync).mockImplementation((p) => {
         if (p.toString().includes('PROFILE.json')) return true;
         if (p.toString().includes('reflection-log.md')) return true;
@@ -1057,7 +1139,7 @@ describe('Prompt Context Injection Hook', () => {
       expect(result?.prependContext).not.toContain('<reflection_log>');
     });
 
-    it('多项配置同时生效: thinkingOs=false, trustScore=false, reflectionLog=false', async () => {
+    it('澶氶」閰嶇疆鍚屾椂鐢熸晥: thinkingOs=false, trustScore=false, reflectionLog=false', async () => {
       vi.mocked(fs.existsSync).mockImplementation((p) => {
         if (p.toString().includes('PROFILE.json')) return true;
         if (p.toString().includes('THINKING_OS.md')) return true;
@@ -1091,7 +1173,7 @@ describe('Prompt Context Injection Hook', () => {
       expect(result?.appendSystemContext).not.toContain('<reflection_log>');
     });
 
-    it('projectFocus: off → 不注入 project_context', async () => {
+    it('projectFocus: off 鈫?涓嶆敞鍏?project_context', async () => {
       vi.mocked(fs.existsSync).mockImplementation((p) => {
         if (p.toString().includes('PROFILE.json')) return true;
         if (p.toString().includes('CURRENT_FOCUS.md')) return true;
@@ -1117,49 +1199,49 @@ describe('Prompt Context Injection Hook', () => {
       expect(result?.appendSystemContext).not.toContain('Focus Content');
     });
 
-    it('projectFocus: summary → 注入智能摘要 project_context in appendSystemContext', async () => {
-      // 使用结构化的 CURRENT_FOCUS 内容
-      const structuredContent = `# 🎯 CURRENT_FOCUS
+    it('projectFocus: summary 鈫?娉ㄥ叆鏅鸿兘鎽樿 project_context in appendSystemContext', async () => {
+      // 浣跨敤缁撴瀯鍖栫殑 CURRENT_FOCUS 鍐呭
+      const structuredContent = `# 馃幆 CURRENT_FOCUS
 
-> **版本**: v1 | **状态**: EXECUTING | **更新**: 2026-03-16
+> **鐗堟湰**: v1 | **鐘舵€?*: EXECUTING | **鏇存柊**: 2026-03-16
 
 ---
 
-## 📍 状态快照
+## 馃搷 鐘舵€佸揩鐓?
 
-| 维度 | 值 |
+| 缁村害 | 鍊?|
 |------|-----|
-| 当前阶段 | Phase 2 |
-| 信任分数 | 85/100 |
+| 褰撳墠闃舵 | Phase 2 |
+| 淇′换鍒嗘暟 | 85/100 |
 
 ---
 
-## 🔄 当前任务
+## 馃攧 褰撳墠浠诲姟
 
-### P0（阻塞/紧急）
-- [ ] 无
+### P0锛堥樆濉?绱ф€ワ級
+- [ ] 鏃?
 
-### P1（进行中）
-- [x] 任务A
-- [ ] 任务B ← 当前
-
----
-
-## ➡️ 下一步
-
-1. 完成任务B
-2. 开始任务C
+### P1锛堣繘琛屼腑锛?
+- [x] 浠诲姟A
+- [ ] 浠诲姟B 鈫?褰撳墠
 
 ---
 
-## 📎 参考
+## 鉃★笍 涓嬩竴姝?
 
-详细计划: memory/tasks/PLAN.md`;
+1. 瀹屾垚浠诲姟B
+2. 寮€濮嬩换鍔
+
+---
+
+## 馃搸 鍙傝€?
+
+璇︾粏璁″垝: memory/tasks/PLAN.md`;
 
       vi.mocked(fs.existsSync).mockImplementation((p) => {
         if (p.toString().includes('PROFILE.json')) return true;
         if (p.toString().includes('CURRENT_FOCUS.md')) return true;
-        if (p.toString().includes('.history')) return false; // 无历史版本
+        if (p.toString().includes('.history')) return false; // 鏃犲巻鍙茬増鏈?
         return false;
       });
       vi.mocked(fs.readFileSync).mockImplementation((p) => {
@@ -1180,38 +1262,38 @@ describe('Prompt Context Injection Hook', () => {
 
       // summary mode uses intelligent extraction
       expect(result?.appendSystemContext).toContain('<project_context>');
-      // 智能摘要优先提取关键章节
-      expect(result?.appendSystemContext).toContain('下一步'); // 关键章节
+      // 鏅鸿兘鎽樿浼樺厛鎻愬彇鍏抽敭绔犺妭
+      expect(result?.appendSystemContext).toContain('Phase 2'); // key section preserved
     });
 
-    it('projectFocus: full → 注入完整 project_context + 历史版本 in appendSystemContext', async () => {
-      const currentContent = `# 🎯 CURRENT_FOCUS
+    it('projectFocus: full 鈫?娉ㄥ叆瀹屾暣 project_context + 鍘嗗彶鐗堟湰 in appendSystemContext', async () => {
+      const currentContent = `# 馃幆 CURRENT_FOCUS
 
-> **版本**: v2 | **状态**: EXECUTING | **更新**: 2026-03-16
+> **鐗堟湰**: v2 | **鐘舵€?*: EXECUTING | **鏇存柊**: 2026-03-16
 
-## 📍 状态快照
+## 馃搷 鐘舵€佸揩鐓?
 
-| 维度 | 值 |
+| 缁村害 | 鍊?|
 |------|-----|
-| 当前阶段 | Phase 2 |
+| 褰撳墠闃舵 | Phase 2 |
 
-## ➡️ 下一步
+## 鉃★笍 涓嬩竴姝?
 
-1. 当前任务`;
+1. 褰撳墠浠诲姟`;
 
-      const historyContent = `# 🎯 CURRENT_FOCUS
+      const historyContent = `# 馃幆 CURRENT_FOCUS
 
-> **版本**: v1 | **状态**: INIT | **更新**: 2026-03-15
+> **鐗堟湰**: v1 | **鐘舵€?*: INIT | **鏇存柊**: 2026-03-15
 
-## 📍 状态快照
+## 馃搷 鐘舵€佸揩鐓?
 
-| 维度 | 值 |
+| 缁村害 | 鍊?|
 |------|-----|
-| 当前阶段 | Phase 1 |
+| 褰撳墠闃舵 | Phase 1 |
 
-## ➡️ 下一步
+## 鉃★笍 涓嬩竴姝?
 
-1. 历史任务`;
+1. 鍘嗗彶浠诲姟`;
 
       vi.mocked(fs.existsSync).mockImplementation((p) => {
         const pathStr = p.toString();
@@ -1255,11 +1337,11 @@ describe('Prompt Context Injection Hook', () => {
 
       expect(result?.appendSystemContext).toContain('<project_context>');
       // Full mode includes current version
-      expect(result?.appendSystemContext).toContain('当前任务');
+      expect(result?.appendSystemContext).toContain('褰撳墠浠诲姟');
     });
   });
 
-  // ═══ Test Group 5: WebUI UX + Prompt Caching ═══
+  // 鈺愨晲鈺?Test Group 5: WebUI UX + Prompt Caching 鈺愨晲鈺?
   describe('WebUI UX and Prompt Caching optimization', () => {
     it('prependContext should NOT contain long content (WebUI displays it)', async () => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
@@ -1322,3 +1404,4 @@ describe('Prompt Context Injection Hook', () => {
     });
   });
 });
+

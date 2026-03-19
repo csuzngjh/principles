@@ -96,8 +96,9 @@ describe('Plugin Integration', () => {
     it('should register EvolutionWorker service', () => {
       plugin.register(mockApi);
 
-      expect(registeredServices.length).toBe(1);
-      expect(registeredServices[0].id).toBe('principles-evolution-worker');
+      const serviceIds = registeredServices.map((service) => service.id);
+      expect(serviceIds).toContain('principles-evolution-worker');
+      expect(serviceIds).toContain('principles-disciple-trajectory');
     });
 
     it('should register all slash commands', () => {

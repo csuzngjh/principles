@@ -58,6 +58,19 @@ describe('agentSpawnTool', () => {
   });
 
   describe('handler', () => {
+
+    it('should return a clear error when agentType is missing', async () => {
+      const { agentSpawnTool } = await import('../../src/tools/agent-spawn.js');
+
+      const result = await agentSpawnTool.execute(
+        { task: 'Do something' } as any,
+        mockApi as OpenClawPluginApi
+      );
+
+      expect(result).toContain('agentType 参数无效');
+      expect(mockSubagentRuntime.run).not.toHaveBeenCalled();
+    });
+
     it('should return error for unknown agent type', async () => {
       const { agentSpawnTool } = await import('../../src/tools/agent-spawn.js');
       

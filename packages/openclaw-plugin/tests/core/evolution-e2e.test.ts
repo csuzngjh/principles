@@ -38,11 +38,11 @@ describe('evolution loop e2e', () => {
     expect(p).toBeDefined();
 
     const statusBefore = handleEvolutionStatusCommand({ config: { workspaceDir: workspace, language: 'en' } } as any);
-    expect(statusBefore.text).toContain('probation: 1');
+    expect(statusBefore.text).toContain('probation principles: 1');
 
     reducer.rollbackPrinciple(p.id, 'manual validation failed');
 
     const statusAfter = handleEvolutionStatusCommand({ config: { workspaceDir: workspace, language: 'en' } } as any);
-    expect(statusAfter.text).toContain('deprecated: 1');
+    expect(statusAfter.text).toContain('deprecated principles: 1');
   });
 });
