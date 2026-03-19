@@ -6,6 +6,8 @@ import { withLock } from '../utils/file-lock.js';
 import { resolvePdPath } from './paths.js';
 
 const DEFAULT_INLINE_THRESHOLD = 16 * 1024;
+const DEFAULT_BUSY_TIMEOUT_MS = 5000;
+const DEFAULT_ORPHAN_BLOB_GRACE_DAYS = 7;
 const SCHEMA_VERSION = 1;
 
 export type CorrectionSampleReviewStatus = 'pending' | 'approved' | 'rejected';
@@ -153,6 +155,8 @@ export interface TrajectoryExportResult {
 export interface TrajectoryDatabaseOptions {
   workspaceDir: string;
   blobInlineThresholdBytes?: number;
+  busyTimeoutMs?: number;
+  orphanBlobGraceDays?: number;
 }
 
 function nowIso(): string {
@@ -190,6 +194,7 @@ export class TrajectoryDatabase {
   private readonly blobDir: string;
   private readonly exportDir: string;
   private readonly blobInlineThresholdBytes: number;
+  private readonly orphanBlobGraceMs: number;
   private readonly db: Database.Database;
 
   constructor(opts: TrajectoryDatabaseOptions) {
@@ -199,6 +204,7 @@ export class TrajectoryDatabase {
     this.blobDir = resolvePdPath(this.workspaceDir, 'TRAJECTORY_BLOBS_DIR');
     this.exportDir = resolvePdPath(this.workspaceDir, 'EXPORTS_DIR');
     this.blobInlineThresholdBytes = opts.blobInlineThresholdBytes ?? DEFAULT_INLINE_THRESHOLD;
+    this.orphanBlobGraceMs = Math.max(0, (opts.orphanBlobGraceDays ?? DEFAULT_ORPHAN_BLOB_GRACE_DAYS) * 24 * 60 * 60 * 1000);
 
     fs.mkdirSync(this.stateDir, { recursive: true });
     fs.mkdirSync(this.blobDir, { recursive: true });
@@ -208,8 +214,10 @@ export class TrajectoryDatabase {
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('foreign_keys = ON');
     this.db.pragma('synchronous = NORMAL');
+    this.db.pragma(`busy_timeout = ${Math.max(0, opts.busyTimeoutMs ?? DEFAULT_BUSY_TIMEOUT_MS)}`);
     this.initSchema();
     this.importLegacyArtifacts();
+    this.pruneUnreferencedBlobs();
   }
 
   dispose(): void {
@@ -571,6 +579,10 @@ export class TrajectoryDatabase {
     };
   }
 
+  cleanupBlobStorage(): { removedFiles: number; reclaimedBytes: number } {
+    return this.pruneUnreferencedBlobs();
+  }
+
   private initSchema(): void {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
@@ -714,8 +726,11 @@ export class TrajectoryDatabase {
       FROM correction_samples
       GROUP BY review_status;
       CREATE INDEX IF NOT EXISTS idx_assistant_turns_session_id ON assistant_turns(session_id);
+      CREATE INDEX IF NOT EXISTS idx_assistant_turns_created_at ON assistant_turns(created_at);
+      CREATE INDEX IF NOT EXISTS idx_assistant_turns_provider_model ON assistant_turns(provider, model);
       CREATE INDEX IF NOT EXISTS idx_user_turns_session_id ON user_turns(session_id);
       CREATE INDEX IF NOT EXISTS idx_tool_calls_session_id ON tool_calls(session_id);
+      CREATE INDEX IF NOT EXISTS idx_tool_calls_created_at ON tool_calls(created_at);
       CREATE INDEX IF NOT EXISTS idx_pain_events_session_id ON pain_events(session_id);
       CREATE INDEX IF NOT EXISTS idx_correction_samples_review_status ON correction_samples(review_status);
     `);
@@ -991,6 +1006,44 @@ export class TrajectoryDatabase {
     return fs.readdirSync(this.blobDir).reduce((sum, file) => sum + fileSizeIfExists(path.join(this.blobDir, file)), 0);
   }
 
+  private pruneUnreferencedBlobs(): { removedFiles: number; reclaimedBytes: number } {
+    if (!fs.existsSync(this.blobDir)) {
+      return { removedFiles: 0, reclaimedBytes: 0 };
+    }
+
+    const referenced = new Set<string>();
+    const rows = this.db.prepare(`
+      SELECT blob_ref FROM assistant_turns WHERE blob_ref IS NOT NULL
+      UNION
+      SELECT blob_ref FROM user_turns WHERE blob_ref IS NOT NULL
+    `).all() as Array<{ blob_ref?: string | null }>;
+    for (const row of rows) {
+      if (row.blob_ref) referenced.add(String(row.blob_ref));
+    }
+
+    const now = Date.now();
+    let removedFiles = 0;
+    let reclaimedBytes = 0;
+
+    for (const entry of fs.readdirSync(this.blobDir)) {
+      if (referenced.has(entry)) continue;
+      const fullPath = path.join(this.blobDir, entry);
+      let stat: fs.Stats;
+      try {
+        stat = fs.statSync(fullPath);
+      } catch {
+        continue;
+      }
+      if (!stat.isFile()) continue;
+      if (this.orphanBlobGraceMs > 0 && now - stat.mtimeMs < this.orphanBlobGraceMs) continue;
+      reclaimedBytes += stat.size;
+      removedFiles += 1;
+      fs.rmSync(fullPath, { force: true });
+    }
+
+    return { removedFiles, reclaimedBytes };
+  }
+
   private withWrite<T>(fn: () => T): T {
     return withLock(this.dbPath, fn, { lockSuffix: '.trajectory.lock', lockStaleMs: 30000 });
   }
@@ -999,11 +1052,11 @@ export class TrajectoryDatabase {
 export class TrajectoryRegistry {
   private static instances = new Map<string, TrajectoryDatabase>();
 
-  static get(workspaceDir: string): TrajectoryDatabase {
+  static get(workspaceDir: string, opts: Omit<TrajectoryDatabaseOptions, 'workspaceDir'> = {}): TrajectoryDatabase {
     const normalized = path.resolve(workspaceDir);
     const existing = this.instances.get(normalized);
     if (existing) return existing;
-    const created = new TrajectoryDatabase({ workspaceDir: normalized });
+    const created = new TrajectoryDatabase({ workspaceDir: normalized, ...opts });
     this.instances.set(normalized, created);
     return created;
   }
@@ -1024,14 +1077,14 @@ export class TrajectoryRegistry {
     this.instances.clear();
   }
 
-  static use<T>(workspaceDir: string, fn: (db: TrajectoryDatabase) => T): T {
+  static use<T>(workspaceDir: string, fn: (db: TrajectoryDatabase) => T, opts: Omit<TrajectoryDatabaseOptions, 'workspaceDir'> = {}): T {
     const normalized = path.resolve(workspaceDir);
     const existing = this.instances.get(normalized);
     if (existing) {
       return fn(existing);
     }
 
-    const transient = new TrajectoryDatabase({ workspaceDir: normalized });
+    const transient = new TrajectoryDatabase({ workspaceDir: normalized, ...opts });
     try {
       return fn(transient);
     } finally {

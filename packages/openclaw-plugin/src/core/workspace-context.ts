@@ -8,7 +8,7 @@ import { PainDictionary } from './dictionary.js';
 import { TrustEngine } from './trust-engine.js';
 import { HygieneTracker } from './hygiene/tracker.js';
 import { EvolutionReducerImpl } from './evolution-reducer.js';
-import { TrajectoryDatabase, TrajectoryRegistry } from './trajectory.js';
+import { TrajectoryDatabase, TrajectoryRegistry, TrajectoryDatabaseOptions } from './trajectory.js';
 
 /**
  * WorkspaceContext - Centralized management of workspace-specific paths and services.
@@ -100,9 +100,21 @@ export class WorkspaceContext {
      */
     get trajectory(): TrajectoryDatabase {
         if (!this._trajectory) {
-            this._trajectory = TrajectoryRegistry.get(this.workspaceDir);
+            this._trajectory = TrajectoryRegistry.get(this.workspaceDir, this.getTrajectoryOptions());
         }
         return this._trajectory;
+    }
+
+    private getTrajectoryOptions(): Omit<TrajectoryDatabaseOptions, 'workspaceDir'> {
+        const inlineThreshold = Number(this.config.get('trajectory.blob_inline_threshold_bytes'));
+        const busyTimeoutMs = Number(this.config.get('trajectory.busy_timeout_ms'));
+        const orphanBlobGraceDays = Number(this.config.get('trajectory.orphan_blob_grace_days'));
+
+        return {
+            blobInlineThresholdBytes: Number.isFinite(inlineThreshold) && inlineThreshold > 0 ? inlineThreshold : undefined,
+            busyTimeoutMs: Number.isFinite(busyTimeoutMs) && busyTimeoutMs >= 0 ? busyTimeoutMs : undefined,
+            orphanBlobGraceDays: Number.isFinite(orphanBlobGraceDays) && orphanBlobGraceDays >= 0 ? orphanBlobGraceDays : undefined,
+        };
     }
 
     /**

@@ -177,4 +177,89 @@ describe('TrajectoryDatabase', () => {
     ]);
     db.dispose();
   });
+
+  it('applies busy_timeout and prunes orphaned blobs on startup', () => {
+    workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
+    const blobDir = path.join(workspaceDir, '.state', 'blobs');
+    fs.mkdirSync(blobDir, { recursive: true });
+    const orphanBlob = path.join(blobDir, 'assistant-orphan.txt');
+    fs.writeFileSync(orphanBlob, 'stale blob', 'utf8');
+    const oldTime = new Date('2026-01-01T00:00:00.000Z');
+    fs.utimesSync(orphanBlob, oldTime, oldTime);
+
+    const db = new TrajectoryDatabase({
+      workspaceDir,
+      busyTimeoutMs: 2500,
+      orphanBlobGraceDays: 0,
+    });
+
+    expect((db as any).db.pragma('busy_timeout', { simple: true })).toBe(2500);
+    expect(fs.existsSync(orphanBlob)).toBe(false);
+    db.dispose();
+  });
+
+  it('imports legacy sessions, events, and evolution artifacts idempotently', () => {
+    workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-trajectory-'));
+    const sessionDir = path.join(workspaceDir, '.state', 'sessions');
+    const logsDir = path.join(workspaceDir, '.state', 'logs');
+    const memoryDir = path.join(workspaceDir, 'memory');
+    fs.mkdirSync(sessionDir, { recursive: true });
+    fs.mkdirSync(logsDir, { recursive: true });
+    fs.mkdirSync(memoryDir, { recursive: true });
+
+    fs.writeFileSync(
+      path.join(sessionDir, 'session-a.json'),
+      JSON.stringify({ sessionId: 'legacy-session', lastActivityAt: Date.parse('2026-03-18T10:00:00.000Z') }),
+      'utf8',
+    );
+    fs.writeFileSync(
+      path.join(logsDir, 'events.jsonl'),
+      [
+        JSON.stringify({
+          type: 'pain_signal',
+          sessionId: 'legacy-session',
+          ts: '2026-03-18T10:01:00.000Z',
+          data: { source: 'legacy_pain', score: 12, reason: 'legacy reason' },
+        }),
+        JSON.stringify({
+          type: 'trust_change',
+          sessionId: 'legacy-session',
+          ts: '2026-03-18T10:02:00.000Z',
+          data: { previousScore: 80, newScore: 82, delta: 2, reason: 'legacy trust' },
+        }),
+      ].join('\n'),
+      'utf8',
+    );
+    fs.writeFileSync(
+      path.join(memoryDir, 'evolution.jsonl'),
+      `${JSON.stringify({
+        type: 'principle_promoted',
+        ts: '2026-03-18T10:03:00.000Z',
+        data: { principleId: 'p-1', summary: 'legacy principle' },
+      })}\n`,
+      'utf8',
+    );
+
+    const db = new TrajectoryDatabase({ workspaceDir });
+    const firstStats = db.getDataStats();
+    expect(firstStats.painEvents).toBe(1);
+    expect(firstStats.assistantTurns).toBe(0);
+
+    const analytics = JSON.parse(fs.readFileSync(db.exportAnalytics().filePath, 'utf8')) as {
+      stats: { painEvents: number };
+      principleEffectiveness: Array<{ event_type: string; total: number }>;
+    };
+    expect(analytics.stats.painEvents).toBe(1);
+    expect(analytics.principleEffectiveness).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ event_type: 'principle_promoted', total: 1 }),
+      ]),
+    );
+    db.dispose();
+
+    const reopened = new TrajectoryDatabase({ workspaceDir });
+    const secondStats = reopened.getDataStats();
+    expect(secondStats.painEvents).toBe(1);
+    reopened.dispose();
+  });
 });
