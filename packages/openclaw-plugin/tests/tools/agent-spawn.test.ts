@@ -151,7 +151,7 @@ describe('agentSpawnTool', () => {
       const { agentSpawnTool } = await import('../../src/tools/agent-spawn.js');
 
       const result = await agentSpawnTool.execute(
-        { agentType: 'diagnostician', task: 'Analyze root cause', async: true },
+        { agentType: 'diagnostician', task: 'Analyze root cause', runInBackground: true },
         mockApi as OpenClawPluginApi
       );
 

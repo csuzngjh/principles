@@ -136,13 +136,13 @@ export const agentSpawnTool = {
   parameters: Type.Object({
     agentType: Type.String({
       description:
-        'Internal worker role only: explorer, diagnostician, auditor, planner, implementer, reviewer, reporter',
+        'Required. Internal worker role: explorer, diagnostician, auditor, planner, implementer, reviewer, reporter',
     }),
     task: Type.String({
-      description: 'Task for the internal worker. Not for sending messages to peer sessions or orchestrating same-level agents.',
+      description: 'Required. The task description for the worker to execute.',
     }),
-    async: Type.Optional(Type.Boolean({
-      description: 'Whether to run in background mode. true = return immediately, false = wait for completion.',
+    runInBackground: Type.Optional(Type.Boolean({
+      description: 'Optional. Set true to run in background (non-blocking). Default: false (wait for completion).',
     })),
   }),
 
@@ -150,7 +150,7 @@ export const agentSpawnTool = {
    * Execution logic for the agent spawn tool
    */
   async execute(
-    params: { agentType?: string; task?: string; async?: boolean },
+    params: { agentType?: string; task?: string; runInBackground?: boolean },
     api: OpenClawPluginApi,
     _workspaceDir?: string
   ): Promise<string> {
@@ -158,7 +158,7 @@ export const agentSpawnTool = {
 
     const agentType = typeof params?.agentType === 'string' ? params.agentType.trim() : '';
     const task = typeof params?.task === 'string' ? params.task.trim() : '';
-    const runAsync = params?.async === true;
+    const runAsync = params?.runInBackground === true;
     const availableInternalAgents = listAvailableAgents();
 
     if (!agentType) {
@@ -271,20 +271,8 @@ ${output}`;
   },
 };
 
-agentSpawnTool.description = [
-  'Spawn a Principles Disciple internal worker for built-in diagnostics and evolution tasks.',
-  'Do not use this tool for peer-agent communication or general session orchestration.',
-  'For that, use agents_list / sessions_list / sessions_spawn / sessions_send.',
-  '',
-  'Internal worker roles:',
-  '- explorer: collect evidence from files, logs, and repro steps',
-  '- diagnostician: run root-cause analysis',
-  '- auditor: review system behavior and risks',
-  '- planner: draft an execution plan',
-  '- implementer: carry out a scoped implementation task',
-  '- reviewer: review correctness, safety, and maintainability',
-  '- reporter: summarize findings into a final report',
-].join('\n');
+// Note: Description is already set in the object definition above.
+// Do NOT override it here to preserve the Chinese description.
 
 /**
  * Batch spawn multiple agents in sequence
