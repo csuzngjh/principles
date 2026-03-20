@@ -245,6 +245,47 @@ describe('GFI Gate - Hard Intercept', () => {
       // 但如果它被当作 AGENT_TOOLS 处理，也应该不被 GFI gate 拦截
       expect(result).toBeUndefined();
     });
+
+    it('should fail closed when dangerous bash regex is invalid', () => {
+      const mockCtx = { workspaceDir, sessionId: 'test-session' };
+      const mockEvent = { toolName: 'bash', params: { command: 'echo safe' } };
+      const originalGet = mockConfig.get.getMockImplementation();
+
+      mockConfig.get.mockImplementation((key) => {
+        if (key === 'trust') return {
+          limits: { stage_2_max_lines: 10, stage_3_max_lines: 100 }
+        };
+        if (key === 'gfi_gate') return {
+          enabled: true,
+          thresholds: {
+            low_risk_block: 70,
+            high_risk_block: 40,
+            large_change_block: 50
+          },
+          large_change_lines: 50,
+          trust_stage_multipliers: {
+            '1': 0.5,
+            '2': 0.75,
+            '3': 1.0,
+            '4': 1.5
+          },
+          bash_safe_patterns: ['^echo\\b'],
+          bash_dangerous_patterns: ['(']
+        };
+        return undefined;
+      });
+
+      vi.mocked(sessionTracker.getSession).mockReturnValue({ currentGfi: 0 } as any);
+      mockTrust.getScore.mockReturnValue(70);
+      mockTrust.getStage.mockReturnValue(3);
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockImplementation(() => JSON.stringify({ progressive_gate: { enabled: true } }));
+
+      const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
+      mockConfig.get.mockImplementation(originalGet ?? ((key) => undefined));
+
+      expect(result?.block).toBe(true);
+    });
   });
 
   // ════════════════════════════════════════════════

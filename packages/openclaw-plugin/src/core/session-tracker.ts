@@ -55,6 +55,12 @@ let persistDir: string | null = null;
 /** Debounce timer for persistence */
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
 
+function logSessionTrackerWarning(message: string, error?: unknown): void {
+    const detail = error instanceof Error ? error.message : error ? String(error) : '';
+    const suffix = detail ? `: ${detail}` : '';
+    console.warn(`[PD:SessionTracker] ${message}${suffix}`);
+}
+
 /**
  * Initialize persistence for session state.
  * Call this once during plugin startup.
@@ -101,12 +107,12 @@ function loadAllSessions(): void {
                 }
                 
                 sessions.set(state.sessionId, state);
-            } catch {
-                // Ignore corrupted files
+            } catch (error) {
+                logSessionTrackerWarning(`Failed to load session snapshot ${file}`, error);
             }
         }
     } catch (err) {
-        // Ignore errors during load
+        logSessionTrackerWarning('Failed to load persisted sessions', err);
     }
 }
 
@@ -121,8 +127,8 @@ function persistSession(state: SessionState): void {
     
     try {
         fs.writeFileSync(sessionPath, JSON.stringify(state, null, 2), 'utf-8');
-    } catch {
-        // Ignore persistence errors
+    } catch (error) {
+        logSessionTrackerWarning(`Failed to persist session ${state.sessionId}`, error);
     }
 }
 
@@ -249,20 +255,20 @@ export function trackFriction(
     if (hash && hash === state.lastErrorHash) {
         state.consecutiveErrors++;
     } else {
-        state.lastErrorSource = options?.source || hash || 'unknown';
+        state.lastErrorSource = options?.source || (hash ? `unattributed:${hash}` : 'unattributed:unknown');
         state.lastErrorHash = hash;
         state.consecutiveErrors = 1;
     }
 
     if (hash && hash === state.lastErrorHash && !state.lastErrorSource) {
-        state.lastErrorSource = options?.source || hash || 'unknown';
+        state.lastErrorSource = options?.source || `unattributed:${hash}`;
     }
 
     // GFI formula with multiplier: GFI = GFI + (Delta_F * 1.5^(n-1))
     const multiplier = Math.pow(1.5, state.consecutiveErrors - 1);
     const addedFriction = deltaF * multiplier;
     state.currentGfi = (state.currentGfi || 0) + addedFriction;
-    const sourceKey = options?.source || hash || 'unknown';
+    const sourceKey = options?.source || (hash ? `unattributed:${hash}` : 'unattributed:unknown');
     ledger[sourceKey] = (ledger[sourceKey] || 0) + addedFriction;
     state.lastActivityAt = Date.now();
     
@@ -413,8 +419,8 @@ export function garbageCollectSessions(): void {
                 if (sessionPath && fs.existsSync(sessionPath)) {
                     try {
                         fs.unlinkSync(sessionPath);
-                    } catch {
-                        // Ignore deletion errors
+                    } catch (error) {
+                        logSessionTrackerWarning(`Failed to delete session snapshot for ${id}`, error);
                     }
                 }
             }

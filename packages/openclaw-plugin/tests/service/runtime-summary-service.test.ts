@@ -259,5 +259,32 @@ describe('RuntimeSummaryService', () => {
         origin: 'assistant_self_report',
       }),
     ]);
+    expect(summary.metadata.warnings.join('\n')).not.toContain('Live event buffer is unavailable');
+  });
+
+  it('warns when malformed event lines are skipped', () => {
+    const workspace = makeWorkspace();
+    writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+      trust_score: 59,
+      last_updated: '2026-03-20T10:00:00Z',
+    });
+    fs.writeFileSync(
+      path.join(workspace, '.state', 'logs', 'events.jsonl'),
+      [
+        JSON.stringify({
+          ts: '2026-03-20T10:00:01Z',
+          type: 'pain_signal',
+          category: 'detected',
+          sessionId: 's1',
+          data: { source: 'tool_failure', score: 10, reason: 'write failed' },
+        }),
+        '{not-json}',
+      ].join('\n'),
+      'utf8'
+    );
+
+    const summary = RuntimeSummaryService.getSummary(workspace);
+
+    expect(summary.metadata.warnings.join('\n')).toContain('Skipped 1 malformed event line');
   });
 });

@@ -95,7 +95,7 @@ describe('Session Tracker', () => {
         let state = getSession(sessionId);
         expect(state?.currentGfi).toBe(50);
         expect(state?.gfiBySource).toEqual({
-            tool_failure_hash: 30,
+            'unattributed:tool_failure_hash': 30,
             user_empathy: 20,
         });
 
@@ -104,10 +104,39 @@ describe('Session Tracker', () => {
         state = getSession(sessionId);
         expect(state?.currentGfi).toBe(30);
         expect(state?.gfiBySource).toEqual({
-            tool_failure_hash: 30,
+            'unattributed:tool_failure_hash': 30,
         });
         expect(state?.consecutiveErrors).toBe(0);
         expect(state?.lastErrorHash).toBe('');
         expect(state?.lastErrorSource).toBe('');
+    });
+
+    it('should clamp slice rollback amount and preserve other source ledger entries', () => {
+        trackFriction(sessionId, 10, 'tool_failure_hash');
+        trackFriction(sessionId, 15, 'user_empathy_mild', undefined, { source: 'user_empathy' });
+        trackFriction(sessionId, 5, 'system_empathy_warn', undefined, { source: 'system_infer' });
+
+        resetFriction(sessionId, undefined, { source: 'user_empathy', amount: 999 });
+
+        const state = getSession(sessionId);
+        expect(state?.currentGfi).toBe(15);
+        expect(state?.gfiBySource).toEqual({
+            'unattributed:tool_failure_hash': 10,
+            system_infer: 5,
+        });
+    });
+
+    it('should ignore slice rollback for a source that does not exist', () => {
+        trackFriction(sessionId, 12, 'tool_failure_hash');
+
+        resetFriction(sessionId, undefined, { source: 'user_empathy', amount: 7 });
+
+        const state = getSession(sessionId);
+        expect(state?.currentGfi).toBe(12);
+        expect(state?.gfiBySource).toEqual({
+            'unattributed:tool_failure_hash': 12,
+        });
+        expect(state?.consecutiveErrors).toBe(1);
+        expect(state?.lastErrorHash).toBe('tool_failure_hash');
     });
 });

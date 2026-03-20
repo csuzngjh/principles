@@ -108,10 +108,14 @@ const GFI_PARTIAL_WARNING =
   'GFI source attribution remains partial in Phase 2b because only the empathy slice is source-attributed; most non-empathy friction still lacks full per-source attribution.';
 const DAILY_GFI_WARNING =
   'daily-stats.gfi is not authoritative in Phase 1 and is used only as a fallback reference.';
-const SESSION_DAILY_WARNING =
-  'session dailyToolCalls and dailyPainSignals are not authoritative in Phase 1.';
 const EVENT_BUFFER_WARNING =
-  'events.jsonl may lag in-memory buffers until the next flush interval.';
+  'Live event buffer is unavailable in this context, so status may lag until events.jsonl flushes.';
+
+function pushWarning(warnings: string[], message: string): void {
+  if (!warnings.includes(message)) {
+    warnings.push(message);
+  }
+}
 
 export class RuntimeSummaryService {
   static getSummary(
@@ -130,10 +134,11 @@ export class RuntimeSummaryService {
     const selectedSessionId = selectedSession.session?.sessionId ?? null;
 
     const persistedEvents = this.readEvents(path.join(wctx.stateDir, 'logs', 'events.jsonl'), warnings);
-    const bufferedEvents =
-      typeof (wctx.eventLog as { getBufferedEvents?: () => EventLogEntry[] }).getBufferedEvents === 'function'
-        ? (wctx.eventLog as { getBufferedEvents: () => EventLogEntry[] }).getBufferedEvents()
-        : [];
+    const hasBufferedEventAccess =
+      typeof (wctx.eventLog as { getBufferedEvents?: () => EventLogEntry[] }).getBufferedEvents === 'function';
+    const bufferedEvents = hasBufferedEventAccess
+      ? (wctx.eventLog as { getBufferedEvents: () => EventLogEntry[] }).getBufferedEvents()
+      : [];
     const events = [...persistedEvents, ...bufferedEvents];
     const dailyStats = this.readJsonFile<Record<string, { gfi?: { peak?: number } }>>(
       path.join(wctx.stateDir, 'logs', 'daily-stats.json'),
@@ -142,19 +147,6 @@ export class RuntimeSummaryService {
     );
     const today = generatedAt.slice(0, 10);
     const dailyGfiPeak = dailyStats?.[today]?.gfi?.peak;
-
-    if (!warnings.includes(GFI_PARTIAL_WARNING)) {
-      warnings.push(GFI_PARTIAL_WARNING);
-    }
-    if (!warnings.includes(DAILY_GFI_WARNING)) {
-      warnings.push(DAILY_GFI_WARNING);
-    }
-    if (!warnings.includes(SESSION_DAILY_WARNING)) {
-      warnings.push(SESSION_DAILY_WARNING);
-    }
-    if (bufferedEvents.length === 0 && !warnings.includes(EVENT_BUFFER_WARNING)) {
-      warnings.push(EVENT_BUFFER_WARNING);
-    }
 
     const gfiCurrent =
       selectedSession.session && Number.isFinite(selectedSession.session.currentGfi)
@@ -168,8 +160,16 @@ export class RuntimeSummaryService {
     const gfiPeak =
       sessionPeak ?? (Number.isFinite(dailyGfiPeak) ? Number(dailyGfiPeak) : null);
 
+    pushWarning(warnings, GFI_PARTIAL_WARNING);
+    if (sessionPeak === null && Number.isFinite(dailyGfiPeak)) {
+      pushWarning(warnings, DAILY_GFI_WARNING);
+    }
+    if (!hasBufferedEventAccess) {
+      pushWarning(warnings, EVENT_BUFFER_WARNING);
+    }
+
     if (!selectedSession.session) {
-      warnings.push('No persisted session state was found; current session GFI is unavailable.');
+      pushWarning(warnings, 'No persisted session state was found; current session GFI is unavailable.');
     }
 
     const queue = this.readJsonFile<QueueItem[]>(wctx.resolve('EVOLUTION_QUEUE'), warnings, false);
@@ -229,7 +229,7 @@ export class RuntimeSummaryService {
 
   private static readSessions(sessionDir: string, warnings: string[]): PersistedSessionState[] {
     if (!fs.existsSync(sessionDir)) {
-      warnings.push('No persisted session directory exists yet; session-scoped runtime state is unavailable.');
+      pushWarning(warnings, 'No persisted session directory exists yet; session-scoped runtime state is unavailable.');
       return [];
     }
 
@@ -243,7 +243,7 @@ export class RuntimeSummaryService {
           sessions.push(parsed);
         }
       } catch {
-        warnings.push(`Failed to parse session snapshot: ${file}`);
+        pushWarning(warnings, `Failed to parse session snapshot: ${file}`);
       }
     }
 
@@ -400,18 +400,27 @@ export class RuntimeSummaryService {
     try {
       const raw = fs.readFileSync(eventsPath, 'utf8').trim();
       if (!raw) return [];
-      return raw
+      let parseFailures = 0;
+      const entries = raw
         .split('\n')
         .map((line) => {
           try {
             return JSON.parse(line) as EventLogEntry;
           } catch {
+            parseFailures += 1;
             return null;
           }
         })
         .filter((entry): entry is EventLogEntry => entry !== null);
+      if (parseFailures > 0) {
+        pushWarning(
+          warnings,
+          `Skipped ${parseFailures} malformed event line${parseFailures === 1 ? '' : 's'} while reading events.jsonl.`
+        );
+      }
+      return entries;
     } catch {
-      warnings.push('Failed to read events.jsonl; recent pain and gate summaries are partial.');
+      pushWarning(warnings, 'Failed to read events.jsonl; recent pain and gate summaries are partial.');
       return [];
     }
   }
@@ -476,7 +485,7 @@ export class RuntimeSummaryService {
     });
 
     if (scoped.length === 0) {
-      warnings.push('Gate block counts before Phase 1 may be incomplete because older block events were not recorded to event-log.');
+      pushWarning(warnings, 'Gate block counts before Phase 1 may be incomplete because older block events were not recorded to event-log.');
     }
 
     return {
@@ -493,7 +502,7 @@ export class RuntimeSummaryService {
   ): T | null {
     if (!fs.existsSync(filePath)) {
       if (warnOnMissing) {
-        warnings.push(`Missing expected file: ${path.basename(filePath)}`);
+        pushWarning(warnings, `Missing expected file: ${path.basename(filePath)}`);
       }
       return null;
     }
@@ -501,7 +510,7 @@ export class RuntimeSummaryService {
     try {
       return JSON.parse(fs.readFileSync(filePath, 'utf8')) as T;
     } catch {
-      warnings.push(`Failed to parse ${path.basename(filePath)}.`);
+      pushWarning(warnings, `Failed to parse ${path.basename(filePath)}.`);
       return null;
     }
   }

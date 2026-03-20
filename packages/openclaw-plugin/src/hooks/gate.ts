@@ -46,7 +46,8 @@ const BASH_TOOLS_SET = new Set([
 function analyzeBashCommand(
   command: string,
   safePatterns: string[],
-  dangerousPatterns: string[]
+  dangerousPatterns: string[],
+  logger?: { warn?: (message: string) => void }
 ): 'safe' | 'dangerous' | 'normal' {
   let normalizedCmd = command.trim().toLowerCase();
 
@@ -86,7 +87,9 @@ function analyzeBashCommand(
         if (new RegExp(pattern, 'i').test(seg)) {
           return 'dangerous';
         }
-      } catch {
+      } catch (error) {
+        logger?.warn?.(`[PD_GATE] Invalid dangerous bash regex "${pattern}": ${String(error)}. Failing closed.`);
+        return 'dangerous';
         // 忽略无效正则
       }
     }
@@ -101,8 +104,8 @@ function analyzeBashCommand(
           isSafe = true;
           break;
         }
-      } catch {
-        // ignore
+      } catch (error) {
+        logger?.warn?.(`[PD_GATE] Invalid safe bash regex "${pattern}": ${String(error)}. Ignoring safe override.`);
       }
     }
     if (!isSafe) {
@@ -228,7 +231,8 @@ export function handleBeforeToolCall(
       const bashRisk = analyzeBashCommand(
         command,
         gfiGateConfig?.bash_safe_patterns || [],
-        gfiGateConfig?.bash_dangerous_patterns || []
+        gfiGateConfig?.bash_dangerous_patterns || [],
+        logger
       );
       
       if (bashRisk === 'dangerous') {
@@ -601,11 +605,15 @@ function block(filePath: string, reason: string, wctx: WorkspaceContext, toolNam
     trackBlock(sessionId);
   }
 
-  wctx.eventLog.recordGateBlock(sessionId, {
-    toolName,
-    filePath,
-    reason,
-  });
+  try {
+    wctx.eventLog.recordGateBlock(sessionId, {
+      toolName,
+      filePath,
+      reason,
+    });
+  } catch (error) {
+    logger.warn(`[PD_GATE] Failed to record gate block event: ${String(error)}`);
+  }
 
   return {
     block: true,

@@ -98,7 +98,7 @@ describe('evolution commands', () => {
       config: { workspaceDir: workspace, language: 'zh-CN' },
     } as any);
 
-    expect(result.text).toContain('Evolution 状态');
+    expect(result.text).toContain('进化状态');
     expect(result.text).toContain('观察期原则: 1');
     expect(result.text).toContain('Legacy Trust');
   });
