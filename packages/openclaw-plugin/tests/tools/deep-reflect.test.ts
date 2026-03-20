@@ -2,10 +2,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { deepReflectTool } from '../../src/tools/deep-reflect.js';
+import { createDeepReflectTool, deepReflectTool } from '../../src/tools/deep-reflect.js';
 import type { OpenClawPluginApi, PluginRuntime } from '../../src/openclaw-sdk.js';
 
-describe('deepReflectTool', () => {
+describe('createDeepReflectTool', () => {
     let mockApi: OpenClawPluginApi;
     let mockSubagent: any;
     let tempDir: string;
@@ -24,7 +24,7 @@ describe('deepReflectTool', () => {
             id: "test-plugin",
             name: "Test Plugin",
             source: "local",
-            config: {},
+            config: { workspaceDir: tempDir },
             runtime: {
                 subagent: mockSubagent,
             } as unknown as PluginRuntime,
@@ -43,7 +43,7 @@ describe('deepReflectTool', () => {
             registerService: vi.fn(),
             registerProvider: vi.fn(),
             registerCommand: vi.fn(),
-            resolvePath: vi.fn(),
+            resolvePath: vi.fn((p: string) => path.join(tempDir, p)),
             on: vi.fn(),
         };
     });
@@ -51,6 +51,13 @@ describe('deepReflectTool', () => {
     afterEach(() => {
         fs.rmSync(tempDir, { recursive: true, force: true });
     });
+
+    // Helper to create tool and extract text result
+    const executeTool = async (rawParams: Record<string, unknown>) => {
+        const tool = createDeepReflectTool(mockApi);
+        const result = await tool.execute('test-call-id', rawParams);
+        return result.content[0]?.text || '';
+    };
 
     describe('基本功能', () => {
         it('should execute reflection and return insights', async () => {
@@ -61,11 +68,7 @@ describe('deepReflectTool', () => {
                 assistantTexts: ['Insight 1', 'Insight 2']
             });
 
-            const result = await deepReflectTool.execute(
-                { context: 'Need to improve caching.' },
-                mockApi,
-                tempDir
-            );
+            const result = await executeTool({ context: 'Need to improve caching.' });
 
             expect(mockSubagent.run).toHaveBeenCalledWith(expect.objectContaining({
                 extraSystemPrompt: expect.stringContaining('Critical Analysis Engine'),
@@ -84,11 +87,7 @@ describe('deepReflectTool', () => {
             mockSubagent.run.mockResolvedValue({ runId: 'test-run-123' });
             mockSubagent.waitForRun.mockResolvedValue({ status: 'timeout' });
 
-            const result = await deepReflectTool.execute(
-                { context: 'Timeout testing.' },
-                mockApi,
-                tempDir
-            );
+            const result = await executeTool({ context: 'Timeout testing.' });
 
             expect(result).toContain('超时');
             expect(mockSubagent.deleteSession).toHaveBeenCalled();
@@ -102,11 +101,7 @@ describe('deepReflectTool', () => {
                 assistantTexts: ['I have reviewed the plan. REFLECTION_OK.']
             });
 
-            const result = await deepReflectTool.execute(
-                { context: 'Testing OK.' },
-                mockApi,
-                tempDir
-            );
+            const result = await executeTool({ context: 'Testing OK.' });
 
             expect(result).toContain('未发现显著问题');
             expect(mockSubagent.deleteSession).toHaveBeenCalled();
@@ -116,11 +111,9 @@ describe('deepReflectTool', () => {
             mockSubagent.run.mockResolvedValue({ runId: 'error-run' });
             mockSubagent.waitForRun.mockRejectedValue(new Error('API throw'));
 
-            await expect(deepReflectTool.execute(
-                { context: 'Testing failure.' },
-                mockApi,
-                tempDir
-            )).rejects.toThrow('API throw');
+            const tool = createDeepReflectTool(mockApi);
+            await expect(tool.execute('test-call-id', { context: 'Testing failure.' }))
+                .rejects.toThrow('API throw');
 
             // Expected to be called in the finally block
             expect(mockSubagent.deleteSession).toHaveBeenCalled();
@@ -136,11 +129,7 @@ describe('deepReflectTool', () => {
                 assistantTexts: ['Analysis complete.']
             });
 
-            await deepReflectTool.execute(
-                { context: 'Marketing plan for Q4.' },
-                mockApi,
-                tempDir
-            );
+            await executeTool({ context: 'Marketing plan for Q4.' });
 
             const callArgs = mockSubagent.run.mock.calls[0][0];
             
@@ -159,11 +148,7 @@ describe('deepReflectTool', () => {
                 assistantTexts: ['Analysis complete.']
             });
 
-            await deepReflectTool.execute(
-                { context: 'Test context.' },
-                mockApi,
-                tempDir
-            );
+            await executeTool({ context: 'Test context.' });
 
             const callArgs = mockSubagent.run.mock.calls[0][0];
             
@@ -194,11 +179,7 @@ describe('deepReflectTool', () => {
                 assistantTexts: ['Analysis complete.']
             });
 
-            await deepReflectTool.execute(
-                { context: 'Marketing plan.' },
-                mockApi,
-                tempDir
-            );
+            await executeTool({ context: 'Marketing plan.' });
 
             const callArgs = mockSubagent.run.mock.calls[0][0];
             
@@ -215,11 +196,7 @@ describe('deepReflectTool', () => {
                 assistantTexts: ['Analysis complete.']
             });
 
-            await deepReflectTool.execute(
-                { model_id: 'T-01', context: 'Test.' },
-                mockApi,
-                tempDir
-            );
+            await executeTool({ model_id: 'T-01', context: 'Test.' });
 
             expect(mockApi.logger!.warn).toHaveBeenCalledWith(
                 expect.stringContaining('deprecated')
@@ -234,11 +211,7 @@ describe('deepReflectTool', () => {
                 assistantTexts: ['Analysis complete.']
             });
 
-            await deepReflectTool.execute(
-                { model_id: 'T-05', context: 'Test.' },
-                mockApi,
-                tempDir
-            );
+            await executeTool({ model_id: 'T-05', context: 'Test.' });
 
             const callArgs = mockSubagent.run.mock.calls[0][0];
             

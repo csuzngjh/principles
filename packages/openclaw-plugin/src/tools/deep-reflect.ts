@@ -152,123 +152,196 @@ function loadConfig(workspaceDir: string | undefined, api: OpenClawPluginApi): D
     return DEFAULT_CONFIG;
 }
 
-export const deepReflectTool = {
-    name: 'deep_reflect',
-    description: '执行深层次的元认知反思，分析当前任务的潜在风险、逻辑漏洞或架构改进点。',
-    parameters: Type.Object({
-        context: Type.String({ description: '需要反思的任务上下文、代码片段或当前遇到的困难。' }),
-        depth: Type.Optional(Type.Number({ description: '反思深度 (1-3)。1: 快速扫描, 2: 均衡分析, 3: 彻底解构。默认为 2。', minimum: 1, maximum: 3 })),
-        model_id: Type.Optional(Type.String({ description: '可选：强制指定使用的思维模型 ID。' }))
-    }),
+/**
+ * Helper to read string parameter from rawParams
+ * Supports both camelCase and snake_case parameter names
+ */
+function readStringParam(rawParams: Record<string, unknown>, key: string): string | undefined {
+  const value = rawParams[key];
+  if (typeof value === 'string') return value.trim() || undefined;
+  
+  // Try snake_case alias
+  const snakeKey = key.replace(/([A-Z])/g, '_$1').toLowerCase();
+  const snakeValue = rawParams[snakeKey];
+  if (typeof snakeValue === 'string') return snakeValue.trim() || undefined;
+  
+  return undefined;
+}
 
-    /**
-     * Tool execution logic
-     * @param workspaceDir Optional parameter for unit testing
-     */
-    async execute(
-        params: { context: string; depth?: number; model_id?: string },
-        api: OpenClawPluginApi,
-        workspaceDir?: string
-    ): Promise<string> {
-        const { context, depth = 2, model_id } = params;
-        
-        if (!context) return '❌ 错误: 必须提供反思上下文 (context)。';
+/**
+ * Helper to read number parameter from rawParams
+ * Supports both camelCase and snake_case parameter names
+ */
+function readNumberParam(rawParams: Record<string, unknown>, key: string): number | undefined {
+  const value = rawParams[key];
+  if (typeof value === 'number') return value;
+  
+  // Try snake_case alias
+  const snakeKey = key.replace(/([A-Z])/g, '_$1').toLowerCase();
+  const snakeValue = rawParams[snakeKey];
+  if (typeof snakeValue === 'number') return snakeValue;
+  
+  return undefined;
+}
+/**
+ * Create Deep Reflect Tool
+ * 
+ * Uses factory pattern to capture `api` in closure, following OpenClaw plugin SDK conventions.
+ * The execute signature must be: async (_toolCallId: string, rawParams: Record<string, unknown>)
+ */
+export function createDeepReflectTool(api: OpenClawPluginApi) {
+    return {
+        name: 'deep_reflect',
+        description: '执行深层次的元认知反思，分析当前任务的潜在风险、逻辑漏洞或架构改进点。',
+        parameters: Type.Object({
+            context: Type.String({ description: '需要反思的任务上下文、代码片段或当前遇到的困难。' }),
+            depth: Type.Optional(Type.Number({ description: '反思深度 (1-3)。1: 快速扫描, 2: 均衡分析, 3: 彻底解构。默认为 2。', minimum: 1, maximum: 3 })),
+            model_id: Type.Optional(Type.String({ description: '可选：强制指定使用的思维模型 ID。' }))
+        }),
 
-        // 路径解析优先级：显式传入 > api.config > api.workspaceDir > api.resolvePath
-        const effectiveWorkspaceDir = workspaceDir 
-            || (api.config?.workspaceDir as string) 
-            || api.workspaceDir
-            || api.resolvePath?.('.');
-        
-        if (!effectiveWorkspaceDir) {
-            return `❌ 反思执行失败: Workspace directory is required for deep reflection.。请检查 API 配置或网络连接。`;
-        }
-
-        const config = loadConfig(effectiveWorkspaceDir, api);
-        if (config.mode === 'disabled' || !config.enabled) {
-            return `⏭️ Deep Reflection 已禁用。`;
-        }
-
-        if (model_id) {
-            safeLog(api, 'warn', `[DeepReflect] The 'model_id' parameter is deprecated. The agent will now auto-select models based on the context index.`);
-        }
-
-        const agentId = 'main';
-        const sessionKey = `agent:${agentId}:reflection:${randomUUID()}`;
-        const sessionId = sessionKey.split(':').pop();
-
-        const stateDir = resolvePdPath(effectiveWorkspaceDir, 'STATE_DIR');
-        const eventLog = EventLogService.get(stateDir, api.logger);
-
-        try {
-            const extraSystemPrompt = buildCritiquePromptV2({
-                context,
-                depth,
-                model_id,
-                api,
-                workspaceDir: effectiveWorkspaceDir
-            });
-
-            const startTime = Date.now();
-            const subagentRuntime = api.runtime.subagent;
-            if (!subagentRuntime) throw new Error('OpenClaw subagent runtime not found.');
-
-            await subagentRuntime.run({
-                sessionKey, // 👈 对齐官方字段
-                message: `请对我当前的任务进行深层次反思。\n\n上下文：${context}`, // 👈 对齐官方字段
-                extraSystemPrompt,
-                deliver: false
-            });
-
-            const finalStatus: SubagentWaitResult = await subagentRuntime.waitForRun({ runId: sessionKey }); // 👈 对齐官方对象传参
-            const duration = Date.now() - startTime;
-
-            if (finalStatus.status === 'timeout') {
-                return `⚠️ 反思任务执行超时。你可以尝试减少上下文长度或增加深度。`;
+        /**
+         * Tool execution logic
+         * 
+         * OpenClaw tool execute signature:
+         * - First parameter: _toolCallId (string) - the tool call ID
+         * - Second parameter: rawParams (Record<string, unknown>) - the actual parameters
+         * - Third parameter (optional): signal (AbortSignal) - for cancellation
+         */
+        async execute(
+            _toolCallId: string,
+            rawParams: Record<string, unknown>
+        ): Promise<{ content: Array<{ type: string; text: string }> }> {
+            const context = readStringParam(rawParams, 'context') || '';
+            const depth = readNumberParam(rawParams, 'depth') ?? 2;
+            const model_id = readStringParam(rawParams, 'model_id');
+            
+            if (!context) {
+                return {
+                    content: [{
+                        type: 'text',
+                        text: '❌ 错误: 必须提供反思上下文 (context)。'
+                    }]
+                };
             }
 
-            if (finalStatus.status === 'ok') { // 👈 对齐官方状态码
-                const rawMessages = await subagentRuntime.getSessionMessages({ sessionKey });
-                
-                let insights = '';
-                if ((rawMessages as any).assistantTexts && Array.isArray((rawMessages as any).assistantTexts)) {
-                    insights = (rawMessages as any).assistantTexts.join('\n');
-                } else {
-                    const messages = rawMessages.messages || [];
-                    const lastMessage: any = messages[messages.length - 1];
-                    if (typeof lastMessage?.content === 'string') {
-                        insights = lastMessage.content;
-                    } else if (Array.isArray(lastMessage?.content)) {
-                        insights = lastMessage.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n');
+            // 路径解析优先级：api.config > api.workspaceDir > api.resolvePath
+            const effectiveWorkspaceDir = 
+                (api.config?.workspaceDir as string) 
+                || api.workspaceDir
+                || api.resolvePath?.('.');
+            
+            if (!effectiveWorkspaceDir) {
+                return {
+                    content: [{
+                        type: 'text',
+                        text: '❌ 反思执行失败: Workspace directory is required for deep reflection.。请检查 API 配置或网络连接。'
+                    }]
+                };
+            }
+
+            const config = loadConfig(effectiveWorkspaceDir, api);
+            if (config.mode === 'disabled' || !config.enabled) {
+                return {
+                    content: [{
+                        type: 'text',
+                        text: '⏭️ Deep Reflection 已禁用。'
+                    }]
+                };
+            }
+
+            if (model_id) {
+                safeLog(api, 'warn', `[DeepReflect] The 'model_id' parameter is deprecated. The agent will now auto-select models based on the context index.`);
+            }
+
+            const agentId = 'main';
+            const sessionKey = `agent:${agentId}:reflection:${randomUUID()}`;
+            const sessionId = sessionKey.split(':').pop();
+
+            const stateDir = resolvePdPath(effectiveWorkspaceDir, 'STATE_DIR');
+            const eventLog = EventLogService.get(stateDir, api.logger);
+
+            try {
+                const extraSystemPrompt = buildCritiquePromptV2({
+                    context,
+                    depth,
+                    model_id,
+                    api,
+                    workspaceDir: effectiveWorkspaceDir
+                });
+
+                const startTime = Date.now();
+                const subagentRuntime = api.runtime.subagent;
+                if (!subagentRuntime) throw new Error('OpenClaw subagent runtime not found.');
+
+                await subagentRuntime.run({
+                    sessionKey,
+                    message: `请对我当前的任务进行深层次反思。\n\n上下文：${context}`,
+                    extraSystemPrompt,
+                    deliver: false
+                });
+
+                const finalStatus: SubagentWaitResult = await subagentRuntime.waitForRun({ runId: sessionKey });
+                const duration = Date.now() - startTime;
+
+                if (finalStatus.status === 'timeout') {
+                    return {
+                        content: [{
+                            type: 'text',
+                            text: '⚠️ 反思任务执行超时。你可以尝试减少上下文长度或增加深度。'
+                        }]
+                    };
+                }
+
+                if (finalStatus.status === 'ok') {
+                    const rawMessages = await subagentRuntime.getSessionMessages({ sessionKey });
+                    
+                    let insights = '';
+                    if ((rawMessages as any).assistantTexts && Array.isArray((rawMessages as any).assistantTexts)) {
+                        insights = (rawMessages as any).assistantTexts.join('\n');
+                    } else {
+                        const messages = rawMessages.messages || [];
+                        const lastMessage: any = messages[messages.length - 1];
+                        if (typeof lastMessage?.content === 'string') {
+                            insights = lastMessage.content;
+                        } else if (Array.isArray(lastMessage?.content)) {
+                            insights = lastMessage.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n');
+                        }
                     }
-                }
 
-                if (insights.includes('REFLECTION_OK')) {
-                    return `✅ 反思完成：当前任务逻辑严密，未发现显著问题。`;
-                }
+                    if (insights.includes('REFLECTION_OK')) {
+                        return {
+                            content: [{
+                                type: 'text',
+                                text: '✅ 反思完成：当前任务逻辑严密，未发现显著问题。'
+                            }]
+                        };
+                    }
 
-                if (eventLog && sessionId) {
-                    eventLog.recordDeepReflection(sessionId, {
-                        modelId: model_id || 'auto-select',
-                        modelSelectionMode: model_id ? 'manual' : 'auto',
-                        depth,
-                        contextPreview: context.substring(0, 200),
-                        resultPreview: insights.substring(0, 300),
-                        durationMs: duration,
-                        passed: true,
-                        timeout: false
-                    });
-                }
+                    if (eventLog && sessionId) {
+                        eventLog.recordDeepReflection(sessionId, {
+                            modelId: model_id || 'auto-select',
+                            modelSelectionMode: model_id ? 'manual' : 'auto',
+                            depth,
+                            contextPreview: context.substring(0, 200),
+                            resultPreview: insights.substring(0, 300),
+                            durationMs: duration,
+                            passed: true,
+                            timeout: false
+                        });
+                    }
 
-                // Write to reflection log and cleanup old entries
-                try {
-                    writeToReflectionLog(effectiveWorkspaceDir, context, insights, model_id, depth);
-                    cleanupReflectionLog(effectiveWorkspaceDir);
-                } catch (logErr) {
-                    safeLog(api, 'warn', `[DeepReflect] Failed to write reflection log: ${String(logErr)}`);
-                }
+                    // Write to reflection log and cleanup old entries
+                    try {
+                        writeToReflectionLog(effectiveWorkspaceDir, context, insights, model_id, depth);
+                        cleanupReflectionLog(effectiveWorkspaceDir);
+                    } catch (logErr) {
+                        safeLog(api, 'warn', `[DeepReflect] Failed to write reflection log: ${String(logErr)}`);
+                    }
 
-                return `
+                    return {
+                        content: [{
+                            type: 'text',
+                            text: `
 # 💎 Deep Reflection Insights
 ---
 **Selected Model(s)**: ${model_id || 'auto-select'}
@@ -279,32 +352,51 @@ ${insights}
 
 ---
 *Generated by Principles Disciple Meta-Cognitive Engine*
-`.trim();
-            } else {
-                throw new Error(`Subagent status: ${finalStatus.status}`);
+`.trim()
+                        }]
+                    };
+                } else {
+                    throw new Error(`Subagent status: ${finalStatus.status}`);
+                }
+
+            } catch (err) {
+                const errorMsg = err instanceof Error ? err.message : String(err);
+                safeLog(api, 'error', `[DeepReflect] Reflection failed: ${errorMsg}`);
+
+                if (eventLog && sessionId) {
+                    eventLog.recordDeepReflection(sessionId, {
+                        modelId: model_id || 'auto-select',
+                        modelSelectionMode: model_id ? 'manual' : 'auto',
+                        depth,
+                        contextPreview: context.substring(0, 200),
+                        durationMs: 0,
+                        passed: false,
+                        timeout: errorMsg.toLowerCase().includes('timeout'),
+                        error: errorMsg
+                    });
+                }
+
+                if (errorMsg === 'API throw') throw err;
+                return {
+                    content: [{
+                        type: 'text',
+                        text: `❌ 反思执行失败: ${errorMsg}。请检查 API 配置或网络连接。`
+                    }]
+                };
+            } finally {
+                if (api.runtime.subagent) await api.runtime.subagent.deleteSession({ sessionKey }).catch(() => {});
             }
-
-        } catch (err) {
-            const errorMsg = err instanceof Error ? err.message : String(err);
-            safeLog(api, 'error', `[DeepReflect] Reflection failed: ${errorMsg}`);
-
-            if (eventLog && sessionId) {
-                eventLog.recordDeepReflection(sessionId, {
-                    modelId: model_id || 'auto-select',
-                    modelSelectionMode: model_id ? 'manual' : 'auto',
-                    depth,
-                    contextPreview: context.substring(0, 200),
-                    durationMs: 0,
-                    passed: false,
-                    timeout: errorMsg.toLowerCase().includes('timeout'),
-                    error: errorMsg
-                });
-            }
-
-            if (errorMsg === 'API throw') throw err;
-            return `❌ 反思执行失败: ${errorMsg}。请检查 API 配置或网络连接。`;
-        } finally {
-            if (api.runtime.subagent) await api.runtime.subagent.deleteSession({ sessionKey }).catch(() => {});
         }
-    }
+    };
+}
+
+// Legacy export for backward compatibility with tests that call execute directly
+export const deepReflectTool = {
+    name: 'deep_reflect',
+    description: '执行深层次的元认知反思，分析当前任务的潜在风险、逻辑漏洞或架构改进点。',
+    parameters: Type.Object({
+        context: Type.String({ description: '需要反思的任务上下文、代码片段或当前遇到的困难。' }),
+        depth: Type.Optional(Type.Number({ description: '反思深度 (1-3)。1: 快速扫描, 2: 均衡分析, 3: 彻底解构。默认为 2。', minimum: 1, maximum: 3 })),
+        model_id: Type.Optional(Type.String({ description: '可选：强制指定使用的思维模型 ID。' }))
+    }),
 };

@@ -45,8 +45,8 @@ import { TrajectoryService } from './service/trajectory-service.js';
 import { ensureWorkspaceTemplates } from './core/init.js';
 import { migrateDirectoryStructure } from './core/migration.js';
 import { SystemLogger } from './core/system-logger.js';
-import { deepReflectTool } from './tools/deep-reflect.js';
-import { agentSpawnTool } from './tools/agent-spawn.js';
+import { createDeepReflectTool } from './tools/deep-reflect.js';
+import { createAgentSpawnTool } from './tools/agent-spawn.js';
 import { PathResolver } from './core/path-resolver.js';
 import { createPrinciplesConsoleRoute } from './http/principles-console-route.js';
 
@@ -533,8 +533,8 @@ const plugin = {
       }
     });
 
-    api.registerTool(deepReflectTool);
-    api.registerTool(agentSpawnTool);
+    api.registerTool(createDeepReflectTool(api));
+    api.registerTool(createAgentSpawnTool(api));
   }
 };
 
