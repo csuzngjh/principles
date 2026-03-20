@@ -448,6 +448,50 @@ GFI: ${currentGfi}/100
 
     logger.info(`[PD_GATE] Trust: ${trustScore} (Stage ${stage}), Risk: ${riskLevel}, Path: ${relPath}`);
 
+    // ── EP SIMULATION MODE (M6验证) ──
+    // 记录EP系统的模拟决策，但不生效（仅用于对比分析）
+    // BUGFIX #90: 移到所有Stage检查之前，确保所有Stage都触发EP simulation记录
+    try {
+        const epDecision = checkEvolutionGate(ctx.workspaceDir!, {
+            toolName: event.toolName,
+            content: event.params?.content,
+            lineCount: lineChanges,
+            isRiskPath: risky,
+        });
+        
+        const epLogEntry = {
+            timestamp: new Date().toISOString(),
+            toolName: event.toolName,
+            filePath: relPath,
+            trustEngine: { score: trustScore, stage, decision: 'allow' },
+            epSystem: { tier: epDecision.currentTier ?? 'UNKNOWN', allowed: epDecision.allowed, reason: epDecision.reason },
+            conflict: epDecision.allowed === false, // Trust允许但EP拒绝（任何阶段）
+        };
+        
+        const epLogPath = path.join(ctx.workspaceDir!, '.state', 'ep_simulation.jsonl');
+        
+        // 安全创建目录（如果失败则跳过日志写入，但不影响 Trust Engine 决策）
+        let canWriteEpLog = true;
+        try {
+            fs.mkdirSync(path.dirname(epLogPath), { recursive: true });
+        } catch (mkdirErr: any) {
+            if (!mkdirErr || mkdirErr.code !== 'EEXIST') {
+                logger.warn(`[PD_EP_SIM] Failed to create log dir: ${mkdirErr?.message ?? String(mkdirErr)}, skipping log`);
+                canWriteEpLog = false;
+            }
+        }
+        
+        if (canWriteEpLog) {
+            fs.appendFileSync(epLogPath, JSON.stringify(epLogEntry) + '\n');
+        }
+        
+        logger.info(`[PD_EP_SIM] Tier: ${epDecision.currentTier}, Allowed: ${epDecision.allowed}, Trust: ${trustScore} (Stage ${stage})`);
+    } catch (err) {
+        // EP 模拟失败不应该影响 Trust Engine 决策
+        const errMsg = err instanceof Error ? err.message : String(err);
+        logger.warn(`[PD_EP_SIM] Simulation failed: ${errMsg}, continuing with Trust Engine`);
+    }
+
     // Stage 1 (Bankruptcy): Block ALL writes to risk paths, and all medium+ writes
     if (stage === 1) {
         if (canUsePlanApproval) {
@@ -520,48 +564,6 @@ GFI: ${currentGfi}/100
         return;
     }
 
-    // ── EP SIMULATION MODE (M6验证) ──
-    // 记录EP系统的模拟决策，但不生效（仅用于对比分析）
-    try {
-        const epDecision = checkEvolutionGate(ctx.workspaceDir!, {
-            toolName: event.toolName,
-            content: event.params?.content,
-            lineCount: lineChanges,
-            isRiskPath: risky,
-        });
-        
-        const epLogEntry = {
-            timestamp: new Date().toISOString(),
-            toolName: event.toolName,
-            filePath: relPath,
-            trustEngine: { score: trustScore, stage, decision: 'allow' },
-            epSystem: { tier: epDecision.currentTier ?? 'UNKNOWN', allowed: epDecision.allowed, reason: epDecision.reason },
-            conflict: epDecision.allowed === false, // Trust允许但EP拒绝（任何阶段）
-        };
-        
-        const epLogPath = path.join(ctx.workspaceDir!, '.state', 'ep_simulation.jsonl');
-        
-        // 安全创建目录（如果失败则跳过日志写入，但不影响 Trust Engine 决策）
-        let canWriteEpLog = true;
-        try {
-            fs.mkdirSync(path.dirname(epLogPath), { recursive: true });
-        } catch (mkdirErr: any) {
-            if (!mkdirErr || mkdirErr.code !== 'EEXIST') {
-                logger.warn(`[PD_EP_SIM] Failed to create log dir: ${mkdirErr?.message ?? String(mkdirErr)}, skipping log`);
-                canWriteEpLog = false;
-            }
-        }
-        
-        if (canWriteEpLog) {
-            fs.appendFileSync(epLogPath, JSON.stringify(epLogEntry) + '\n');
-        }
-        
-        logger.info(`[PD_EP_SIM] Tier: ${epDecision.currentTier}, Allowed: ${epDecision.allowed}, Trust: ${trustScore} (Stage ${stage})`);
-    } catch (err) {
-        // EP 模拟失败不应该影响 Trust Engine 决策
-        const errMsg = err instanceof Error ? err.message : String(err);
-        logger.warn(`[PD_EP_SIM] Simulation failed: ${errMsg}, continuing with Trust Engine`);
-    }
   } else {
     // FALLBACK: Legacy Gate Logic
     if (risky && profile.gate?.require_plan_for_risk_paths) {
