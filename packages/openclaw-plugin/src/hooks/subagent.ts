@@ -93,39 +93,41 @@ export async function handleSubagentEnded(
             try {
                 const queue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
                 let changed = false;
-                
-                // Find in_progress tasks
-                const inProgressTasks = queue.filter((t: any) => t.status === 'in_progress');
-                if (inProgressTasks.length > 0) {
-                    const resolveTaskTime = (task: any): number => {
-                        const raw = task?.enqueued_at || task?.timestamp;
-                        const ts = new Date(raw).getTime();
-                        return Number.isFinite(ts) ? ts : Number.MAX_SAFE_INTEGER;
-                    };
 
-                    // Sort by enqueue timestamp (fallback to legacy timestamp) to find the oldest task
-                    const oldestTask = inProgressTasks.sort((a: any, b: any) => 
-                        resolveTaskTime(a) - resolveTaskTime(b)
-                    )[0];
+                const resolveTaskTime = (task: any): number => {
+                    const raw = task?.enqueued_at || task?.timestamp;
+                    const ts = new Date(raw).getTime();
+                    return Number.isFinite(ts) ? ts : Number.MAX_SAFE_INTEGER;
+                };
 
-                    // Mark as completed
-                    const taskIndex = queue.findIndex((t: any) => t.id === oldestTask.id);
-                    if (taskIndex !== -1) {
-                        queue[taskIndex].status = 'completed';
-                        queue[taskIndex].completed_at = new Date().toISOString();
-                        changed = true;
+                // Resolve the queue entry by its position, not by id. Historical pain
+                // records may legitimately share the same id in legacy data.
+                let oldestTaskIndex = -1;
+                let oldestTaskTime = Number.MAX_SAFE_INTEGER;
+                queue.forEach((task: any, index: number) => {
+                    if (task?.status !== 'in_progress') return;
+                    const taskTime = resolveTaskTime(task);
+                    if (taskTime < oldestTaskTime) {
+                        oldestTaskTime = taskTime;
+                        oldestTaskIndex = index;
+                    }
+                });
 
-                        // Clean up the .pain_flag if it was queued, to reset the environment
-                        const painFlagPath = wctx.resolve('PAIN_FLAG');
-                        if (fs.existsSync(painFlagPath)) {
-                            try {
-                                const painData = fs.readFileSync(painFlagPath, 'utf8');
-                                if (painData.includes('status: queued')) {
-                                    fs.unlinkSync(painFlagPath);
-                                }
-                            } catch (e) {
-                                console.error(`[PD:Subagent] Failed to cleanup pain flag: ${String(e)}`);
+                if (oldestTaskIndex !== -1) {
+                    queue[oldestTaskIndex].status = 'completed';
+                    queue[oldestTaskIndex].completed_at = new Date().toISOString();
+                    changed = true;
+
+                    // Clean up the .pain_flag if it was queued, to reset the environment
+                    const painFlagPath = wctx.resolve('PAIN_FLAG');
+                    if (fs.existsSync(painFlagPath)) {
+                        try {
+                            const painData = fs.readFileSync(painFlagPath, 'utf8');
+                            if (painData.includes('status: queued')) {
+                                fs.unlinkSync(painFlagPath);
                             }
+                        } catch (e) {
+                            console.error(`[PD:Subagent] Failed to cleanup pain flag: ${String(e)}`);
                         }
                     }
                 }
