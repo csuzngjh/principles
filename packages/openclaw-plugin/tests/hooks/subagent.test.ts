@@ -153,4 +153,45 @@ describe('Subagent Hook', () => {
         expect(unlinkSpy).toHaveBeenCalled();
     });
 
+    it('should complete the correct in-progress entry even when legacy tasks share the same id', async () => {
+        const mockCtx = { workspaceDir, sessionId: 's1' };
+        const mockEvent = {
+            targetSessionKey: 'agent:main:subagent:diagnostician-123',
+            outcome: 'ok'
+        };
+
+        vi.mocked(fs.existsSync).mockImplementation((p) => {
+            const pathStr = p.toString();
+            return pathStr.includes('evolution_queue.json')
+                || pathStr.includes('evolution_directive.json')
+                || pathStr.includes('.pain_flag');
+        });
+
+        vi.mocked(fs.readFileSync).mockImplementation((p) => {
+            const pathStr = p.toString();
+            if (pathStr.includes('evolution_queue.json')) {
+                return JSON.stringify([
+                    { id: '7386ccfb', status: 'completed', timestamp: '2026-03-19T07:00:25.735Z' },
+                    { id: '7386ccfb', status: 'in_progress', timestamp: '2026-03-20T06:38:32.222Z' },
+                    { id: '7386ccfb', status: 'pending', timestamp: '2026-03-20T06:53:32.222Z' }
+                ]);
+            }
+            if (pathStr.includes('.pain_flag')) {
+                return 'score: 80\nstatus: queued\n';
+            }
+            return '';
+        });
+
+        const writeSpy = vi.mocked(fs.writeFileSync);
+
+        await handleSubagentEnded(mockEvent as any, mockCtx as any);
+
+        const [, queuePayload] = writeSpy.mock.calls.find((args) => args[0].toString().includes('evolution_queue.json'))!;
+        const savedQueue = JSON.parse(queuePayload as string);
+
+        expect(savedQueue[0].status).toBe('completed');
+        expect(savedQueue[1].status).toBe('completed');
+        expect(savedQueue[2].status).toBe('pending');
+    });
+
 });
