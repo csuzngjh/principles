@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { EvolutionWorkerService, hasRecentDuplicateTask, hasEquivalentPromotedRule } from '../../src/service/evolution-worker.js';
+import {
+    EvolutionWorkerService,
+    createEvolutionTaskId,
+    hasRecentDuplicateTask,
+    hasEquivalentPromotedRule,
+} from '../../src/service/evolution-worker.js';
 import { DictionaryService } from '../../src/core/dictionary-service.js';
 import * as sessionTracker from '../../src/core/session-tracker.js';
 import * as eventLog from '../../src/core/event-log.js';
@@ -62,6 +67,27 @@ describe('EvolutionWorkerService', () => {
 
         expect(hasEquivalentPromotedRule(dictionary as any, 'Need more evidence')).toBe(true);
         expect(hasEquivalentPromotedRule(dictionary as any, 'Another phrase')).toBe(false);
+    });
+
+    it('should generate distinct ids for different pain reasons with the same preview', () => {
+        const now = new Date('2026-03-20T06:38:32.222Z').getTime();
+
+        const idA = createEvolutionTaskId(
+            'tool_failure',
+            50,
+            '',
+            'Tool edit failed on memory/.scratchpad.md',
+            now
+        );
+        const idB = createEvolutionTaskId(
+            'tool_failure',
+            50,
+            '',
+            'Tool edit failed on MEMORY.md',
+            now
+        );
+
+        expect(idA).not.toBe(idB);
     });
 
     it('should flush the dictionary on its interval', () => {

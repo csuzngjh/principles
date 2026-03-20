@@ -31,6 +31,21 @@ const LOCK_MAX_RETRIES = 50;
 const LOCK_RETRY_DELAY_MS = 50;
 const LOCK_STALE_MS = 30_000;
 
+export function createEvolutionTaskId(
+    source: string,
+    score: number,
+    preview: string,
+    reason: string,
+    now: number
+): string {
+    // Keep ids short for prompt injection, but include enough entropy to avoid
+    // collisions between different pain events that share the same source/score/preview.
+    return createHash('md5')
+        .update(`${source}:${score}:${preview}:${reason}:${now}`)
+        .digest('hex')
+        .substring(0, 8);
+}
+
 /**
  * Acquire an exclusive file lock for the given resource.
  * Returns a release function. Uses 'wx' flag for atomic exclusive create.
@@ -158,7 +173,7 @@ function checkPainFlag(wctx: WorkspaceContext, logger: any) {
                 return;
             }
 
-            const taskId = createHash('md5').update(`${source}:${score}:${preview}`).digest('hex').substring(0, 8);
+            const taskId = createEvolutionTaskId(source, score, preview, reason, now);
             queue.push({
                 id: taskId,
                 score,
