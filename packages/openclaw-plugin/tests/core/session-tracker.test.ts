@@ -76,6 +76,7 @@ describe('Session Tracker', () => {
         state = getSession(sessionId);
         expect(state?.currentGfi).toBe(0);
         expect(state?.consecutiveErrors).toBe(0);
+        expect(state?.gfiBySource).toEqual({});
     });
 
     it('should reset multiplier on different error hash', () => {
@@ -85,5 +86,28 @@ describe('Session Tracker', () => {
         let state = getSession(sessionId);
         expect(state?.currentGfi).toBe(60); // 30 + 30
         expect(state?.consecutiveErrors).toBe(1); // reset to 1 for new hash
+    });
+
+    it('should rollback only the empathy source slice instead of wiping total gfi', () => {
+        trackFriction(sessionId, 30, 'tool_failure_hash');
+        trackFriction(sessionId, 20, 'user_empathy_moderate', undefined, { source: 'user_empathy' });
+
+        let state = getSession(sessionId);
+        expect(state?.currentGfi).toBe(50);
+        expect(state?.gfiBySource).toEqual({
+            tool_failure_hash: 30,
+            user_empathy: 20,
+        });
+
+        resetFriction(sessionId, undefined, { source: 'user_empathy', amount: 20 });
+
+        state = getSession(sessionId);
+        expect(state?.currentGfi).toBe(30);
+        expect(state?.gfiBySource).toEqual({
+            tool_failure_hash: 30,
+        });
+        expect(state?.consecutiveErrors).toBe(0);
+        expect(state?.lastErrorHash).toBe('');
+        expect(state?.lastErrorSource).toBe('');
     });
 });

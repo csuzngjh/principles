@@ -515,18 +515,18 @@ GFI: ${currentGfi}/100
 
         if (risky || riskLevel !== 'LOW') {
             // Block if not approved by whitelist
-            return block(relPath, `Trust score too low (${trustScore}). Stage 1 agents cannot modify risk paths or perform non-trivial edits.`, wctx, event.toolName);
+            return block(relPath, `Trust score too low (${trustScore}). Stage 1 agents cannot modify risk paths or perform non-trivial edits.`, wctx, event.toolName, ctx.sessionId);
         }
     }
 
     // Stage 2 (Editor): Block writes to risk paths. Block large changes.
     if (stage === 2) {
         if (risky) {
-            return block(relPath, `Stage 2 agents are not authorized to modify risk paths.`, wctx, event.toolName);
+            return block(relPath, `Stage 2 agents are not authorized to modify risk paths.`, wctx, event.toolName, ctx.sessionId);
         }
         const stage2Limit = trustSettings.limits?.stage_2_max_lines ?? 50;
         if (lineChanges > stage2Limit) {
-            return block(relPath, `Modification too large (${lineChanges} lines) for Stage 2. Max allowed is ${stage2Limit}.`, wctx, event.toolName);
+            return block(relPath, `Modification too large (${lineChanges} lines) for Stage 2. Max allowed is ${stage2Limit}.`, wctx, event.toolName, ctx.sessionId);
         }
     }
 
@@ -535,12 +535,12 @@ GFI: ${currentGfi}/100
         if (risky) {
             const planStatus = getPlanStatus(ctx.workspaceDir);
             if (planStatus !== 'READY') {
-                return block(relPath, `No READY plan found. Stage 3 requires a plan for risk path modifications.`, wctx, event.toolName);
+                return block(relPath, `No READY plan found. Stage 3 requires a plan for risk path modifications.`, wctx, event.toolName, ctx.sessionId);
             }
         }
         const stage3Limit = trustSettings.limits?.stage_3_max_lines ?? 300;
         if (lineChanges > stage3Limit) {
-            return block(relPath, `Modification too large (${lineChanges} lines) for Stage 3. Max allowed is ${stage3Limit}.`, wctx, event.toolName);
+            return block(relPath, `Modification too large (${lineChanges} lines) for Stage 3. Max allowed is ${stage3Limit}.`, wctx, event.toolName, ctx.sessionId);
         }
     }
 
@@ -569,7 +569,7 @@ GFI: ${currentGfi}/100
     if (risky && profile.gate?.require_plan_for_risk_paths) {
       const planStatus = getPlanStatus(ctx.workspaceDir);
       if (planStatus !== 'READY') {
-        return block(relPath, `No READY plan found in PLAN.md.`, wctx, event.toolName);
+        return block(relPath, `No READY plan found in PLAN.md.`, wctx, event.toolName, ctx.sessionId);
       }
     }
   }
@@ -593,11 +593,19 @@ GFI: ${currentGfi}/100
   }
 }
 
-function block(filePath: string, reason: string, wctx: WorkspaceContext, toolName: string): PluginHookBeforeToolCallResult {
+function block(filePath: string, reason: string, wctx: WorkspaceContext, toolName: string, sessionId?: string): PluginHookBeforeToolCallResult {
   const logger = console;
   logger.error(`[PD_GATE] BLOCKED: ${filePath}. Reason: ${reason}`);
 
-  trackBlock(wctx.workspaceDir);
+  if (sessionId) {
+    trackBlock(sessionId);
+  }
+
+  wctx.eventLog.recordGateBlock(sessionId, {
+    toolName,
+    filePath,
+    reason,
+  });
 
   return {
     block: true,

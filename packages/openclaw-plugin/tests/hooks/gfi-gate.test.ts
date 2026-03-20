@@ -590,5 +590,36 @@ describe('GFI Gate - Hard Intercept', () => {
       expect(result).toBeUndefined();
     });
   });
+
+  describe('Gate block accounting', () => {
+    it('records stage-based blocks to both session tracker and event log with the real session id', () => {
+      const mockCtx = { workspaceDir, sessionId: 'test-session' };
+      const mockEvent = {
+        toolName: 'write',
+        params: { file_path: 'src/large-change.ts', content: 'test' },
+      };
+
+      vi.mocked(sessionTracker.getSession).mockReturnValue({ currentGfi: 0 } as any);
+      mockTrust.getScore.mockReturnValue(50);
+      mockTrust.getStage.mockReturnValue(2);
+      vi.mocked(riskCalculator.estimateLineChanges).mockReturnValue(20);
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockImplementation(() =>
+        JSON.stringify({
+          progressive_gate: { enabled: true },
+        })
+      );
+
+      const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
+
+      expect(result?.block).toBe(true);
+      expect(vi.mocked(sessionTracker.trackBlock)).toHaveBeenCalledWith('test-session');
+      expect(mockEventLog.recordGateBlock).toHaveBeenCalledWith('test-session', {
+        toolName: 'write',
+        filePath: 'src/large-change.ts',
+        reason: 'Modification too large (20 lines) for Stage 2. Max allowed is 10.',
+      });
+    });
+  });
 });
 
