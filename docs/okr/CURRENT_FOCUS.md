@@ -23,6 +23,7 @@
 - [x] Clarify pd_run_worker as an internal worker tool and steer peer/session orchestration back to sessions_* tools
 - [x] Harden pd_run_worker background compatibility so legacy async prompts still work while new guidance uses runInBackground
 - [x] Fix legacy evolution queue bookkeeping so duplicate task ids cannot keep the latest in-progress pain stuck forever
+- [x] Harden pain candidate promotion by defaulting legacy candidates to pending, reducing fingerprint collisions, and filtering obvious noise
 - [ ] Expand sample quality rules and labeling for downstream LoRA/SFT work
 - [ ] Harden P2 console UX with richer filters, review notes, and operational empty/error states
 
@@ -30,7 +31,7 @@
 
 1. Add richer sample review metadata, filters, and bulk actions for training pipelines
 2. Expand Thinking Model analysis with stronger scenario tags and clearer outcome framing
-3. Verify the next production `.state` snapshot clears in-progress pain tasks cleanly after subagent success
+3. Verify the next production `.state` snapshot shows cleaner candidate promotion and fewer observer/no-reply noise samples
 
 ## References
 
