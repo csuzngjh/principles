@@ -19,7 +19,7 @@ import {
   extractVersion,
   extractDate,
 } from '../core/focus-history.js';
-import { agentSpawnTool } from '../tools/agent-spawn.js';
+import { createAgentSpawnTool } from '../tools/agent-spawn.js';
 
 /**
  * 清理 Markdown 代码块围栏
@@ -371,18 +371,17 @@ If no milestones to record, leave ===MEMORY=== section empty.`;
 
   try {
     // 调用子智能体进行压缩
-    const result = await agentSpawnTool.execute(
-      {
-        agentType: 'reporter', // 使用 reporter 类型，适合总结和压缩
-        task: compressPrompt,
-      },
-      api
-    );
+    const tool = createAgentSpawnTool(api);
+    const result = await tool.execute('focus-compress', {
+      agentType: 'reporter', // 使用 reporter 类型，适合总结和压缩
+      task: compressPrompt,
+    });
 
     // 解析输出，提取 MEMORY 和 COMPRESSED 部分
-    if (result && result.trim()) {
-      const memoryMatch = result.match(/===MEMORY===([\s\S]*?)===COMPRESSED===/);
-      const compressedMatch = result.match(/===COMPRESSED===([\s\S]*?)$/);
+    const resultText = result?.content?.[0]?.text || '';
+    if (resultText.trim()) {
+      const memoryMatch = resultText.match(/===MEMORY===([\s\S]*?)===COMPRESSED===/);
+      const compressedMatch = resultText.match(/===COMPRESSED===([\s\S]*?)$/);
 
       if (compressedMatch && compressedMatch[1].trim()) {
         // 清理 Markdown 代码块围栏

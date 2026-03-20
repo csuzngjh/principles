@@ -11,7 +11,7 @@ vi.mock('../../src/core/agent-loader.js', () => ({
   listAvailableAgents: vi.fn(() => ['explorer', 'diagnostician', 'auditor']),
 }));
 
-describe('agentSpawnTool', () => {
+describe('createAgentSpawnTool', () => {
   let mockApi: Partial<OpenClawPluginApi>;
   let mockSubagentRuntime: {
     run: ReturnType<typeof vi.fn>;
@@ -25,7 +25,7 @@ describe('agentSpawnTool', () => {
 
     mockSubagentRuntime = {
       run: vi.fn().mockResolvedValue(undefined),
-      waitForRun: vi.fn().mockResolvedValue({ status: 'completed' }),
+      waitForRun: vi.fn().mockResolvedValue({ status: 'ok' }),
       getSessionMessages: vi.fn().mockResolvedValue({
         assistantTexts: ['Task completed successfully'],
       }),
@@ -57,15 +57,17 @@ describe('agentSpawnTool', () => {
     vi.resetAllMocks();
   });
 
-  describe('handler', () => {
+  describe('execute', () => {
+    // Helper to create tool and extract text result
+    const executeTool = async (rawParams: Record<string, unknown>) => {
+      const { createAgentSpawnTool } = await import('../../src/tools/agent-spawn.js');
+      const tool = createAgentSpawnTool(mockApi as OpenClawPluginApi);
+      const result = await tool.execute('test-call-id', rawParams);
+      return result.content[0]?.text || '';
+    };
 
     it('should return a clear error when agentType is missing', async () => {
-      const { agentSpawnTool } = await import('../../src/tools/agent-spawn.js');
-
-      const result = await agentSpawnTool.execute(
-        { task: 'Do something' } as any,
-        mockApi as OpenClawPluginApi
-      );
+      const result = await executeTool({ task: 'Do something' });
 
       expect(result).toContain('缺少 agentType');
       expect(result).toContain('diagnostician');
@@ -73,53 +75,39 @@ describe('agentSpawnTool', () => {
     });
 
     it('should return error for unknown agent type', async () => {
-      const { agentSpawnTool } = await import('../../src/tools/agent-spawn.js');
-      
-      const result = await agentSpawnTool.execute(
-        { agentType: 'unknown', task: 'Do something' },
-        mockApi as OpenClawPluginApi
-      );
+      const result = await executeTool({ agentType: 'unknown', task: 'Do something' });
 
       expect(result).toContain('未知的智能体类型');
       expect(result).toContain('diagnostician');
     });
 
     it('should reject tasks that look like peer-session communication misuse', async () => {
-      const { agentSpawnTool } = await import('../../src/tools/agent-spawn.js');
-
-      const result = await agentSpawnTool.execute(
-        { agentType: 'explorer', task: 'Send a message to another session using sessionKey abc-123' },
-        mockApi as OpenClawPluginApi
-      );
+      const result = await executeTool({
+        agentType: 'explorer',
+        task: 'Send a message to another session using sessionKey abc-123'
+      });
 
       expect(result).toContain('reserved for Principles Disciple internal workers');
       expect(result).toContain('sessions_send');
       expect(result).toContain('sessions_spawn');
       expect(mockSubagentRuntime.run).not.toHaveBeenCalled();
     });
+
     it('should return error when subagent runtime is not available', async () => {
-      const { agentSpawnTool } = await import('../../src/tools/agent-spawn.js');
-      
       const apiWithoutRuntime = {
         ...mockApi,
         runtime: undefined,
       } as unknown as OpenClawPluginApi;
 
-      const result = await agentSpawnTool.execute(
-        { agentType: 'explorer', task: 'Find files' },
-        apiWithoutRuntime
-      );
+      const { createAgentSpawnTool } = await import('../../src/tools/agent-spawn.js');
+      const tool = createAgentSpawnTool(apiWithoutRuntime);
+      const result = await tool.execute('test-call-id', { agentType: 'explorer', task: 'Find files' });
 
-      expect(result).toContain('Subagent runtime');
+      expect(result.content[0]?.text).toContain('Subagent runtime');
     });
 
     it('should spawn subagent with correct parameters', async () => {
-      const { agentSpawnTool } = await import('../../src/tools/agent-spawn.js');
-      
-      await agentSpawnTool.execute(
-        { agentType: 'explorer', task: 'Search for configuration files' },
-        mockApi as OpenClawPluginApi
-      );
+      await executeTool({ agentType: 'explorer', task: 'Search for configuration files' });
 
       expect(mockSubagentRuntime.run).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -131,29 +119,23 @@ describe('agentSpawnTool', () => {
     });
 
     it('should return success message on completion', async () => {
-      const { agentSpawnTool } = await import('../../src/tools/agent-spawn.js');
-      
-      mockSubagentRuntime.waitForRun.mockResolvedValue({ status: 'completed' });
+      mockSubagentRuntime.waitForRun.mockResolvedValue({ status: 'ok' });
       mockSubagentRuntime.getSessionMessages.mockResolvedValue({
         assistantTexts: ['Found 5 configuration files'],
       });
 
-      const result = await agentSpawnTool.execute(
-        { agentType: 'explorer', task: 'Find config files' },
-        mockApi as OpenClawPluginApi
-      );
+      const result = await executeTool({ agentType: 'explorer', task: 'Find config files' });
 
       expect(result).toContain('Explorer');
       expect(result).toContain('Found 5 configuration files');
     });
 
     it('should support async background mode without waiting for completion', async () => {
-      const { agentSpawnTool } = await import('../../src/tools/agent-spawn.js');
-
-      const result = await agentSpawnTool.execute(
-        { agentType: 'diagnostician', task: 'Analyze root cause', runInBackground: true },
-        mockApi as OpenClawPluginApi
-      );
+      const result = await executeTool({
+        agentType: 'diagnostician',
+        task: 'Analyze root cause',
+        runInBackground: true
+      });
 
       expect(mockSubagentRuntime.run).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -167,60 +149,52 @@ describe('agentSpawnTool', () => {
     });
 
     it('should handle timeout', async () => {
-      const { agentSpawnTool } = await import('../../src/tools/agent-spawn.js');
-      
       mockSubagentRuntime.waitForRun.mockResolvedValue({ status: 'timeout' });
 
-      const result = await agentSpawnTool.execute(
-        { agentType: 'explorer', task: 'Complex task' },
-        mockApi as OpenClawPluginApi
-      );
+      const result = await executeTool({ agentType: 'explorer', task: 'Complex task' });
 
       expect(result).toContain('Explorer');
     });
 
     it('should handle error status', async () => {
-      const { agentSpawnTool } = await import('../../src/tools/agent-spawn.js');
-      
       mockSubagentRuntime.waitForRun.mockResolvedValue({
         status: 'error',
         error: 'Something went wrong',
       });
 
-      const result = await agentSpawnTool.execute(
-        { agentType: 'explorer', task: 'Task that fails' },
-        mockApi as OpenClawPluginApi
-      );
+      const result = await executeTool({ agentType: 'explorer', task: 'Task that fails' });
 
       expect(result).toContain('Explorer');
       expect(result).toContain('Something went wrong');
     });
 
     it('should handle empty output', async () => {
-      const { agentSpawnTool } = await import('../../src/tools/agent-spawn.js');
-      
-      mockSubagentRuntime.waitForRun.mockResolvedValue({ status: 'completed' });
+      mockSubagentRuntime.waitForRun.mockResolvedValue({ status: 'ok' });
       mockSubagentRuntime.getSessionMessages.mockResolvedValue({
         assistantTexts: [],
       });
 
-      const result = await agentSpawnTool.execute(
-        { agentType: 'explorer', task: 'Task with no output' },
-        mockApi as OpenClawPluginApi
-      );
+      const result = await executeTool({ agentType: 'explorer', task: 'Task with no output' });
 
       expect(result).toContain('Explorer');
     });
 
     it('should cleanup session after completion', async () => {
-      const { agentSpawnTool } = await import('../../src/tools/agent-spawn.js');
-      
-      await agentSpawnTool.execute(
-        { agentType: 'explorer', task: 'Task' },
-        mockApi as OpenClawPluginApi
-      );
+      await executeTool({ agentType: 'explorer', task: 'Task' });
 
       expect(mockSubagentRuntime.deleteSession).toHaveBeenCalled();
+    });
+
+    it('should support snake_case parameter names (agent_type, run_in_background)', async () => {
+      // Test that snake_case parameters work as aliases
+      const result = await executeTool({
+        agent_type: 'diagnostician',  // snake_case instead of camelCase
+        task: 'Analyze root cause',
+        run_in_background: true
+      });
+
+      expect(mockSubagentRuntime.run).toHaveBeenCalled();
+      expect(result).toContain('Diagnostician');
     });
   });
 
