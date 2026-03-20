@@ -229,22 +229,28 @@ pd_run_worker(
         idempotencyKey: randomUUID(),
       });
 
-      if (runAsync) {
-        const duration = Date.now() - startTime;
-        return `✅ 已在后台启动 **${agentDef.name}** (${(duration / 1000).toFixed(1)}s)。它不会阻塞当前对话。`;
-      }
+      // 7. Wait for completion (skip if runInBackground mode)
+      // BUGFIX: Restore runAsync check lost during merge conflict resolution
+      const result: SubagentWaitResult | null = runAsync
+        ? null
+        : await subagentRuntime.waitForRun({
+            runId: sessionKey,
+            timeoutMs: (api as any).config?.get?.('intervals.task_timeout_ms') || (30 * 60 * 1000),
+          });
 
-      // 7. Wait for completion (with configurable timeout to prevent indefinite block)
-      const timeoutMs = (api as any).config?.get?.('intervals.task_timeout_ms') || (30 * 60 * 1000);
-      const result: SubagentWaitResult = await subagentRuntime.waitForRun({
-        runId: sessionKey,
-        timeoutMs,
-      });
+      // 8. Handle async mode (runInBackground: return immediately)
+      if (runAsync) {
+        return `🚀 **${agentDef.name}** 已启动 (后台模式)
+
+sessionKey: \`${sessionKey}\`
+
+请稍后使用 session 查询结果。`;
+      }
 
       const duration = Date.now() - startTime;
 
-      // 8. Handle timeout
-      if (result.status === 'timeout') {
+      // 9. Handle timeout (result is guaranteed non-null here)
+      if (result!.status === 'timeout') {
         return `⚠️ 智能体 **${agentDef.name}** 执行超时 (${(duration / 1000).toFixed(1)}s)。
 
 建议：
@@ -253,12 +259,12 @@ pd_run_worker(
 - 检查任务是否需要更多上下文`;
       }
 
-      // 9. Handle error
-      if (result.status === 'error') {
-        return `❌ 智能体 **${agentDef.name}** 执行失败: ${result.error || '未知错误'}`;
+      // 10. Handle error
+      if (result!.status === 'error') {
+        return `❌ 智能体 **${agentDef.name}** 执行失败: ${result!.error || '未知错误'}`;
       }
 
-      // 10. Get results
+      // 11. Get results
       const messages = await subagentRuntime.getSessionMessages({ sessionKey });
       const output = extractAssistantText(messages);
 
@@ -276,7 +282,7 @@ ${output}`;
       const errorMsg = err instanceof Error ? err.message : String(err);
       return `❌ 智能体 **${agentDef.name}** 执行异常: ${errorMsg}`;
     } finally {
-      // 12. Cleanup session (P1 fix: log failures instead of silent swallow)
+      // 12. Cleanup session (skip for background mode - session is still running)
       if (!runAsync) {
         try {
           await subagentRuntime.deleteSession({ sessionKey });
