@@ -187,7 +187,7 @@ export class TrustEngine {
         this.updateScore(delta, reason, 'success', context);
     }
 
-    public recordFailure(type: 'tool' | 'risky' | 'bypass', context: { sessionId?: string; api?: any; toolName?: string }): void {
+    public recordFailure(type: 'tool' | 'risky' | 'bypass', context: { sessionId?: string; api?: any; toolName?: string; error?: string }): void {
         const settings = this.trustSettings;
         const penalties = settings.penalties;
         const toolName = context?.toolName;
@@ -322,7 +322,7 @@ export function recordSuccess(workspaceDir: string, reason: string, context?: { 
     new TrustEngine(workspaceDir).recordSuccess(reason, context, isSubagent);
 }
 
-export function recordFailure(type: 'tool' | 'risky' | 'bypass', workspaceDir: string, ctx: { sessionId?: string; api?: any; toolName?: string }): void {
+export function recordFailure(type: 'tool' | 'risky' | 'bypass', workspaceDir: string, ctx: { sessionId?: string; api?: any; toolName?: string; error?: string }): void {
     new TrustEngine(workspaceDir).recordFailure(type, ctx);
 }
 
