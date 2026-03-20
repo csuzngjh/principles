@@ -508,7 +508,7 @@ TASK: ${escapedTask}
 REQUIRED ACTION:
 - First respond to the user's current request normally.
 - After finishing the user-facing response, call:
-  pd_run_worker agentType="diagnostician" task=${escapedTask} async=true
+  pd_run_worker agentType="diagnostician" task=${escapedTask} runInBackground=true
 - Treat pd_run_worker as an internal Principles Disciple worker, not a peer-session messaging tool.
 - Do NOT reply with "[EVOLUTION_ACK]".
 - Do NOT let this task interrupt the current user interaction.
@@ -519,7 +519,7 @@ TASK: ${escapedTask}
 
 REQUIRED ACTION:
 - Start diagnostics immediately by calling:
-  pd_run_worker agentType="diagnostician" task=${escapedTask} async=true
+  pd_run_worker agentType="diagnostician" task=${escapedTask} runInBackground=true
 - Treat pd_run_worker as an internal Principles Disciple worker, not a peer-session messaging tool.
 - Do NOT reply with "[EVOLUTION_ACK]".
 </evolution_task>\n`;
