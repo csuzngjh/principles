@@ -491,7 +491,7 @@ export class RuntimeSummaryService {
     return {
       recentBlocks: scoped.filter((entry) => entry.type === 'gate_block').length,
       recentBypasses: scoped.filter((entry) => entry.type === 'gate_bypass').length,
-      dataQuality: events.length > 0 ? 'authoritative' : 'partial',
+      dataQuality: scoped.length > 0 ? 'authoritative' : 'partial',
     };
   }
 

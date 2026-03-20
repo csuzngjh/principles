@@ -90,7 +90,7 @@ function analyzeBashCommand(
       } catch (error) {
         logger?.warn?.(`[PD_GATE] Invalid dangerous bash regex "${pattern}": ${String(error)}. Failing closed.`);
         return 'dangerous';
-        // 忽略无效正则
+        // Fail-closed: 无效的危险模式正则视为匹配危险命令
       }
     }
   }

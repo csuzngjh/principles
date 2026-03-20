@@ -138,7 +138,7 @@ function buildChineseOutput(
   ];
 
   if (warnings.length > 0) {
-    lines.push('', 'Warnings');
+    lines.push('', '警告');
     for (const warning of warnings) {
       lines.push(`- ${warning}`);
     }

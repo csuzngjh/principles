@@ -260,10 +260,6 @@ export function trackFriction(
         state.consecutiveErrors = 1;
     }
 
-    if (hash && hash === state.lastErrorHash && !state.lastErrorSource) {
-        state.lastErrorSource = options?.source || `unattributed:${hash}`;
-    }
-
     // GFI formula with multiplier: GFI = GFI + (Delta_F * 1.5^(n-1))
     const multiplier = Math.pow(1.5, state.consecutiveErrors - 1);
     const addedFriction = deltaF * multiplier;
