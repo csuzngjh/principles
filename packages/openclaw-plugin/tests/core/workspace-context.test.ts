@@ -173,9 +173,13 @@ describe('WorkspaceContext', () => {
         const scorecard = getAgentScorecard(workspaceDir);
         expect(scorecard).toBeDefined();
         expect(scorecard.trust_score).toBe(85); 
+        expect(scorecard.frozen).toBe(true);
+        expect(scorecard.reward_policy).toBe('frozen_all_positive');
 
         recordSuccess(workspaceDir, 'success');
         const updatedScorecard = getAgentScorecard(workspaceDir);
-        expect(updatedScorecard.trust_score).toBeGreaterThan(85);
+        expect(updatedScorecard.trust_score).toBe(85);
+        expect(updatedScorecard.frozen).toBe(true);
+        expect(updatedScorecard.reward_policy).toBe('frozen_all_positive');
     });
 });

@@ -1,209 +1,91 @@
-# Principles Disciple (v1.5.4+) Technical Reference (RAG Knowledge Base)
+# Principles Disciple Command Reference
 
-> **Identity Statement**: This document is the底层 reference guide for the Principles Disciple framework, providing agents with deep architectural understanding and configuration details.
-
----
-
-## Command Quick Reference
-
-| Command | Purpose | Replaces |
-|---------|---------|----------|
-| `/pd-init` | Initialize strategy and OKRs | `/init-strategy` |
-| `/pd-okr` | Objectives and Key Results management | `/manage-okr` |
-| `/pd-bootstrap` | Environment tool scan and upgrade | `/bootstrap-tools` |
-| `/pd-research` | Initiate tool upgrade research | `/research-tools` |
-| `/pd-thinking` | Manage mental models and candidates | `/thinking-os` |
-| `/pd-evolve` | Execute full evolution loop | `/evolve-task` |
-| `/pd-daily` | Configure and send evolution daily report | `/evolution-daily` |
-| `/pd-grooming` | Workspace digital cleanup | `/workspace-grooming` |
-| `/pd-trust` | View trust score and security stage | `/trust` |
-| `/pd-status` | View Digital Nerve System status | New |
-| `/pd-context` | Control context injection config | **New v1.5.4** |
-| `/pd-help` | Get interactive command guidance | Unchanged |
+> Current state: the control plane is in the observation window after `Phase 1 + Phase 2a + Phase 2b`.  
+> That means `legacy trust` is frozen, empathy rollback only subtracts the `user_empathy` slice, and `/pd-evolution-status` reads the runtime summary.
 
 ---
 
-## 1. Digital Nerve System (DNS)
+## Core Commands
 
-### 1.1 GFI (Global Friction Index) Calculation
-GFI is the core metric measuring system "pain level", range 0-100.
-- **Exit Code Penalty**: If recent command exit code is non-zero, +70.
-- **Spiral Penalty**: Detect logic loops or repeated operations, +40.
-- **Missing Tests**: Missing required `tests.commands`, +30.
-- **Severity Levels**:
-    - **High (>=70)**: System in crisis state, force evolution mode.
-    - **Medium (>=40)**: Obvious architectural friction.
-    - **Low (>=20)**: Minor discomfort, suggest optimization.
-
-### 1.2 Pain Dictionary
-Stored in `.state/pain_dictionary.json`, records all failure events with hash deduplication.
-- **Noise Reduction**: Automatically merges similar paths and error messages.
-- **Evolution Trigger**: Accumulated pain samples are input source for `/pd-evolve`.
+| Command | Purpose | Current interpretation |
+|---|---|---|
+| `/pd-evolution-status` | View control-plane and evolution-plane state | Reads canonical state through `RuntimeSummaryService` |
+| `/pd-trust` | View the legacy trust compatibility model | `legacy/frozen`; no automatic increase from `tool_success` or `subagent_success` |
+| `/pd-status empathy` | Inspect empathy/frustration event statistics | Used to verify `user_empathy` and `system_infer` eventing |
+| `/pd-rollback last` | Roll back the latest empathy penalty | Removes only the `user_empathy` GFI slice |
+| `/pd-evolve` | Run an evolution task | Belongs to the learning plane, not the current authoritative control plane |
 
 ---
 
-## 2. Trust Engine
+## `/pd-evolution-status`
 
-### 2.1 Security Stages
-- **Stage 1: Observer (0-29)**: Observe only. Code modification severely restricted.
-- **Stage 2: Editor (30-59)**: Limited editing. Single modification cap 50 lines, force block Risk Paths.
-- **Stage 3: Developer (60-79)**: Free development. Supports Risk Paths but requires `PLAN.md` filing.
-- **Stage 4: Master (80-100)**: Senior developer. Full autonomy including sub-agent scheduling.
+### What it shows now
 
-### 2.2 Reward/Penalty Algorithm (Delta Table)
-- **Rewards**:
-    - Task success: +1
-    - Successful sub-agent delegation: +3
-    - 5-win streak bonus: +5
-- **Penalties**:
-    - Tool call failure: -8
-    - Risk path modification failure: -15
-    - Attempt to bypass Gatekeeper: -5
-    - Losing streak multiplier: `(failure_streak - 1) * -3`
+- `Legacy Trust`: frozen legacy trust score and stage
+- `Session GFI`: current session GFI and peak
+- `GFI Sources`: currently attributable friction sources
+- `Pain Flag`: whether a pain flag is active
+- `Gate Events`: recent block / bypass counts
+- `Queue / Directive`: evolution queue and directive state
+
+### Important notes
+
+- This is the main operator entry point into the current control-plane read model.
+- It reads canonical `.state` and tries to merge live session state and buffered events when available.
+- When data is incomplete, it surfaces `partial` or warnings instead of silently printing `0`.
 
 ---
 
-## 3. Evolution Loop (`/pd-evolve`)
+## `/pd-trust`
 
-### 3.1 Nine-Step SOP
-1. **Context Recovery**: Read `CHECKPOINT.md` and `ISSUE_LOG.md`.
-2. **Environment Sensing**: `git status`, `gh issue list`.
-3. **TRIAGE**: Assess risk level and impact scope.
-4. **Explorer**: Collect evidence, establish hypotheses.
-5. **Diagnostician**: 5 Whys root cause analysis.
-6. **Auditor**: Deductive validation of solution, must produce `RESULT: PASS`.
-7. **Planner**: Write movie-script level `PLAN.md`.
-8. **Implementer**: Strictly follow plan to operate.
-9. **Reviewer**: Quality assurance.
-10. **Log**: Update `PRINCIPLES.md`.
+### What it means now
 
----
+- It shows `legacy trust`
+- Its current status is `legacy/frozen`
+- It is kept mainly for compatibility with older gate and status behavior
 
-## 4. Strategy & OKR Management
+### What it no longer means
 
-### 4.1 Strategic Anchor (`/pd-init`)
-- **Vision Statement**: Define project's successful form in one year.
-- **CSF (Critical Success Factors)**: Lock in core strategy.
-
-### 4.2 OKR Governance (`/pd-okr`)
-- **Controlled Concurrency**: Only delegate 2-3 sub-tasks at a time.
-- **User Commitment**: Record user's OKRs in `memory/okr/user.md` for AI-Human collaboration.
-- **State Machine**: DRAFT -> CHALLENGE -> LOCKED -> EXECUTING.
+- It no longer means ordinary success steadily upgrades authority
+- It no longer means `tool_success` or `subagent_success` automatically raise permissions
+- It should not be treated as the future capability model
 
 ---
 
-## 5. Cognitive Hygiene & Entropy Reduction
+## `/pd-rollback`
 
-### 5.1 T-10 State Externalization
-- **Principle**: When context approaches limit or task switches, force export current memory state (Mental Model) to `memory/.scratchpad.md` or `PLAN.md`, preventing "goldfish memory".
+### Current behavior
 
-### 5.2 Space Organization (`/pd-grooming`)
-- **Red Line**: Never touch `src/`, `lib/`, `tests/`.
-- **Goal**: Clean up debug logs, temporary backups, and unarchived reports in root directory.
+- `/pd-rollback last`
+- `/pd-rollback <event-id>`
 
----
+It rolls back the latest or specified `user_empathy` event.
 
-## 6. Tool Research (`/pd-research`)
+### Important change
 
-### 6.1 Purpose
-Initiate deep research for specific tool upgrades when:
-- New version available with breaking changes
-- Security vulnerabilities in current version
-- Performance improvements needed
-
-### 6.2 Process
-1. Identify target tool and version
-2. Research changelog and migration guide
-3. Assess impact on current codebase
-4. Generate upgrade plan with rollback strategy
+- It now subtracts only the `user_empathy` GFI slice
+- It no longer wipes the whole session GFI
+- If the event is missing or the source does not match, unrelated friction should remain untouched
 
 ---
 
-## 7. Thinking OS (`/pd-thinking`)
+## Observation Window Checklist
 
-### 7.1 Purpose
-Manage mental models and candidate solutions for:
-- Complex decision making
-- Architecture design trade-offs
-- Problem-solving strategies
+Before entering `Phase 3 capability shadow`, check daily:
 
-### 7.2 Features
-- Store and retrieve mental models from `.principles/THINKING_OS.md`
-- Track candidate solutions for active decisions
-- Support hypothesis validation workflow
+1. legacy trust stays frozen
+2. `user_empathy` and `system_infer` appear in `events.jsonl`
+3. rollback affects only the empathy slice
+4. `evolution_queue.json`, `evolution_directive.json`, and status stay aligned
+5. summary warnings still accurately explain partial data quality
 
 ---
 
-## 8. Context Injection Control (`/pd-context`)
+## Current Non-Goals
 
-### 8.1 Overview
-The `/pd-context` command dynamically controls context injection in LLM prompts, helping users balance token consumption and context richness.
+The following are intentionally not part of the current observation window:
 
-### 8.2 Context Structure
-
-| Layer | Field | Content | Characteristics |
-|-------|-------|---------|-----------------|
-| `prependSystemContext` | Agent Identity | Minimal identity definition (~15 lines) | Cacheable |
-| `appendSystemContext` | Principles + Thinking OS | Core behavior rules | Recency effect, cacheable |
-| `prependContext` | Dynamic content | Trust score, reflection log, project context | Not cacheable |
-
-### 8.3 Configuration Options
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `thinkingOs` | `true` | Toggle Thinking OS injection |
-| `trustScore` | `true` | Toggle trust score injection |
-| `reflectionLog` | `true` | Toggle reflection log injection (7-day auto-cleanup) |
-| `projectFocus` | `'off'` | Project context mode: `'full'` / `'summary'` / `'off'` |
-
-**Note**: Core Principles (PRINCIPLES.md) are always injected and cannot be disabled.
-
-### 8.4 Command Usage
-
-```bash
-# View current status
-/pd-context status
-
-# Individual controls
-/pd-context thinking on/off    # Thinking OS
-/pd-context trust on/off       # Trust score
-/pd-context reflection on/off  # Reflection log
-/pd-context focus full/summary/off  # Project context
-
-# Preset modes
-/pd-context minimal   # Trust score only
-/pd-context standard  # Principles + Thinking + Trust
-/pd-context full      # All enabled
-```
-
-### 8.5 Preset Mode Comparison
-
-| Preset | thinkingOs | trustScore | reflectionLog | projectFocus |
-|--------|------------|------------|---------------|--------------|
-| `minimal` | ❌ | ✅ | ❌ | off |
-| `standard` | ✅ | ✅ | ❌ | off |
-| `full` | ✅ | ✅ | ✅ | summary |
-
-### 8.6 Configuration Storage
-Configuration is saved in `.principles/PROFILE.json` under `contextInjection` field:
-
-```json
-{
-  "name": "Principles Disciple Agent",
-  "contextInjection": {
-    "thinkingOs": true,
-    "trustScore": true,
-    "reflectionLog": true,
-    "projectFocus": "off"
-  }
-}
-```
-
-### 8.7 Reflection Log Mechanism
-- **Storage**: `memory/reflection-log.md`
-- **Retention**: 7 days (configurable via `REFLECTION_LOG_RETENTION_DAYS`)
-- **Trigger**: Automatic write via `deep_reflect` tool
-- **Write method**: Atomic write (temp file + rename) to prevent race conditions
-
----
-*Version: v1.5.4 | Maintainer: Spicy Evolver*
+- no Gate authority switch to Capability
+- no deletion of legacy trust
+- no full GFI decay redesign
+- no reintroduction of Evolution tier as a second control authority

@@ -1,60 +1,67 @@
 ---
 name: principles-disciple
-description: Evolutionary programming agent framework. Provides strategic guardrails, pain-reflection loops, and Evolver synergy.
-version: 1.6.0
+description: Evolutionary programming agent framework with control-plane observability, pain-driven learning, and guarded execution.
+version: 1.7.0
 author: Principles Disciple Team
-tags: [core, safety, evolution, strategic]
+tags: [core, safety, evolution, control-plane]
 ---
 
-# 🧬 Principles Disciple
+# Principles Disciple
 
-An evolutionary agent framework inspired by Ray Dalio's *Principles*.
+An evolutionary agent framework built around pain signals, guarded execution, and a separable control plane.
 
-## Features
-- **before_prompt_build**: Injects strategic context (USER_CONTEXT.md).
-- **before_tool_call**: Implements safety gates for risky file writes.
-- **after_tool_call**: Captures failure signals and updates the pain loop.
-- **Commands**: `/pd-init`, `/pd-okr`, `/pd-evolve`, `/pd-daily`, `/pd-evolution-status`, `/pd-help`.
+## Current Model
 
-## Commands
+- `Pain` captures failure and frustration signals
+- `GFI` is the short-term friction brake
+- `Gate` is the execution intercept layer
+- `legacy trust` is still present for compatibility, but currently `frozen`
+- `Evolution` remains the learning plane and is not the authoritative control plane
+
+## Key Commands
 
 | Command | Description |
-|---------|-------------|
-| `/pd-evolution-status` | 显示进化状态（Trust Score、GFI、Pain、进化队列） |
-| `/pd-init` | 初始化项目 |
-| `/pd-okr` | 查看/设置 OKR |
-| `/pd-evolve` | 触发进化流程 |
-| `/pd-daily` | 生成每日进化日报 |
-| `/pd-help` | 显示帮助 |
+|---|---|
+| `/pd-evolution-status` | Show the current control-plane and evolution summary |
+| `/pd-trust` | Show the frozen legacy trust compatibility view |
+| `/pd-evolve` | Run an evolution task |
+| `/pd-rollback` | Roll back the latest or specified empathy penalty |
+| `/pd-help` | Show help |
 
-### `/pd-evolution-status` 输出示例
+## `/pd-evolution-status` Example
 
+```text
+Evolution Status
+================
+
+Control Plane
+- Legacy Trust: 85/100 (stage 4, legacy/frozen, frozen_all_positive)
+- Session GFI: current 18, peak 25 (partial)
+- GFI Sources: user_empathy(18)
+- Pain Flag: inactive
+- Last Pain Signal: user_empathy - buffered empathy event
+- Gate Events: blocks 1, bypasses 0 (authoritative)
+
+Evolution
+- Queue: pending 1, in_progress 0, completed 0 (authoritative)
+- Directive: present, active yes, age 5m
+- Directive Task: fix something important
 ```
-📈 Evolution Status
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-🛡️ Trust Score: 100/100 (Stage 4)
-😴 GFI Peak: 0.0
-⚡ Current Pain: 0 pts (none)
-📈 Pain Signals Today: 0
+## Important Behavior Notes
 
-📊 Evolution Rules
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-- candidate principles: 0
-- probation principles: 0
-- active principles: 0
-- deprecated principles: 0
-- last promoted: none
-
-📋 Evolution Queue
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-- Pending: 0
-- In Progress: 0
-- Completed: 0
-```
+- `/pd-trust` does not imply ongoing automatic promotion anymore.
+- `tool_success` and `subagent_success` no longer inflate trust.
+- `/pd-rollback` now removes only the `user_empathy` GFI slice; it does not wipe the full session GFI.
+- Before Phase 3, operators should validate production observation snapshots instead of cutting over Gate authority.
 
 ## Usage
-This skill is automatically activated. It monitors your tool calls and ensures alignment with `PLAN.md`.
 
----
-*Powered by Principles Disciple*
+Use Principles Disciple to:
+
+- observe runtime control-plane state
+- capture pain signals and empathy signals
+- guard risky actions through Gate
+- feed lessons into the evolution pipeline without turning evolution into a second authority system
+
+This skill is designed to support the current observation window before any `Capability shadow` rollout.

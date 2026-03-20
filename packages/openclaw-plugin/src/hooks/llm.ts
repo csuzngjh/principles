@@ -292,7 +292,13 @@ export function handleLlmOutput(
                 const boundedScore = applyRateLimit(ctx.sessionId, event.runId, calibratedScore, config);
 
                 if (boundedScore > 0) {
-                    trackFriction(ctx.sessionId, boundedScore, `user_empathy_${signal.severity}`, ctx.workspaceDir);
+                    trackFriction(
+                        ctx.sessionId,
+                        boundedScore,
+                        `user_empathy_${signal.severity}`,
+                        ctx.workspaceDir,
+                        { source: 'user_empathy' }
+                    );
                     try {
                         wctx.trajectory?.recordPainEvent?.({
                             sessionId: ctx.sessionId,
@@ -357,7 +363,10 @@ export function handleLlmOutput(
             );
             if (rolledBackScore > 0) {
                 // Reset GFI after successful rollback
-                resetFriction(ctx.sessionId);
+                resetFriction(ctx.sessionId, ctx.workspaceDir, {
+                    source: 'user_empathy',
+                    amount: rolledBackScore,
+                });
             }
         }
     }

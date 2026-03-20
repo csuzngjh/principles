@@ -1,160 +1,169 @@
 import { EvolutionReducerImpl } from '../core/evolution-reducer.js';
 import { normalizeLanguage } from '../i18n/commands.js';
+import { RuntimeSummaryService } from '../service/runtime-summary-service.js';
 import type { PluginCommandContext } from '../openclaw-sdk.js';
-import { getAgentScorecard } from '../core/trust-engine.js';
-import { EventLogService } from '../core/event-log.js';
-import * as fs from 'fs';
-import * as path from 'path';
 
-interface EvolutionQueueItem {
-  id: string;
-  status: string;
-  task?: string;
-  score?: number;
-  source?: string;
-  timestamp?: string;
-  completed_at?: string;
+function formatAge(ageSeconds: number | null, lang: 'en' | 'zh'): string {
+  if (ageSeconds === null) {
+    return '--';
+  }
+
+  if (ageSeconds < 60) {
+    return lang === 'zh' ? `${ageSeconds} \u79d2` : `${ageSeconds}s`;
+  }
+
+  const minutes = Math.floor(ageSeconds / 60);
+  if (minutes < 60) {
+    return lang === 'zh' ? `${minutes} \u5206\u949f` : `${minutes}m`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return lang === 'zh' ? `${hours} \u5c0f\u65f6` : `${hours}h`;
+  }
+
+  const days = Math.floor(hours / 24);
+  return lang === 'zh' ? `${days} \u5929` : `${days}d`;
 }
 
-function getQueueStats(workspaceDir: string): { pending: number; completed: number; inProgress: number } {
-  const stateDir = path.join(workspaceDir, '.state', 'principles');
-  const queuePath = path.join(stateDir, 'evolution_queue.json');
-  
-  let pending = 0;
-  let completed = 0;
-  let inProgress = 0;
-  
-  try {
-    if (fs.existsSync(queuePath)) {
-      const queue: EvolutionQueueItem[] = JSON.parse(fs.readFileSync(queuePath, 'utf-8'));
-      for (const item of queue) {
-        if (item.status === 'completed') {
-          completed++;
-        } else if (item.status === 'in_progress') {
-          inProgress++;
-        } else {
-          pending++;
-        }
-      }
-    }
-  } catch {
-    // Ignore errors, return zeros
+function formatNumber(value: number | null): string {
+  if (value === null || Number.isNaN(value)) {
+    return '--';
   }
-  
-  return { pending, completed, inProgress };
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
-function getCurrentPain(workspaceDir: string): { painScore: number; painSource: string } {
-  const stateDir = path.join(workspaceDir, '.state', 'principles');
-  const painFlagPath = path.join(stateDir, '.pain_flag');
-  
-  try {
-    if (fs.existsSync(painFlagPath)) {
-      const data = JSON.parse(fs.readFileSync(painFlagPath, 'utf-8'));
-      return {
-        painScore: data.score || 0,
-        painSource: data.source || 'none'
-      };
-    }
-  } catch {
-    // Ignore errors
-  }
-  
-  return { painScore: 0, painSource: 'none' };
+function formatStage(value: number | null): string {
+  return value === null ? '--' : String(value);
 }
 
-export function handleEvolutionStatusCommand(ctx: PluginCommandContext): { text: string } {
-  const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
-  const reducer = new EvolutionReducerImpl({ workspaceDir });
-  const stats = reducer.getStats();
-  
-  // Get Trust Score
-  let trustScore = 0;
-  let trustStage = 1;
-  try {
-    const scorecard = getAgentScorecard(workspaceDir);
-    trustScore = scorecard.trust_score ?? 0;
-    trustStage = trustScore >= 80 ? 4 : trustScore >= 60 ? 3 : trustScore >= 30 ? 2 : 1;
-  } catch {
-    // Ignore errors, use defaults
+function formatSources(
+  sources: Array<{ source: string; score?: number }>
+): string {
+  if (sources.length === 0) {
+    return '--';
   }
-  
-  // Get EventLog for GFI and Pain stats
-  let gfiPeak = 0;
-  let painSignals = 0;
-  try {
-    const stateDir = path.join(workspaceDir, '.state', 'principles');
-    const eventLog = EventLogService.get(stateDir);
-    const today = new Date().toISOString().split('T')[0];
-    const dailyStats = eventLog.getDailyStats(today);
-    gfiPeak = dailyStats.gfi?.peak ?? 0;
-    painSignals = dailyStats.pain?.signalsDetected ?? 0;
-  } catch {
-    // Ignore errors, use defaults
-  }
-  
-  // Get Queue Stats
-  const queueStats = getQueueStats(workspaceDir);
-  
-  // Get Current Pain
-  const currentPain = getCurrentPain(workspaceDir);
-  
-  // Determine language - handle both 'zh' and 'zh-CN' formats
-  const rawLang = (ctx.config?.language as string) || 'en';
-  const lang = normalizeLanguage(rawLang);
-  
-  if (lang === 'zh') {
-    const lines: string[] = [
-      '📈 Evolution 状态',
-      '━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
-      '',
-      `🛡️ Trust Score: ${trustScore}/100 (Stage ${trustStage})`,
-      `😴 GFI Peak: ${gfiPeak.toFixed(1)}`,
-      `⚡ Current Pain: ${currentPain.painScore} pts (${currentPain.painSource})`,
-      `📈 Pain Signals Today: ${painSignals}`,
-      '',
-      '📊 Evolution Rules',
-      '━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
-      `- 候选原则: ${stats.candidateCount}`,
-      `- 观察期原则: ${stats.probationCount}`,
-      `- 生效原则: ${stats.activeCount}`,
-      `- 已废弃原则: ${stats.deprecatedCount}`,
-      `- 最近晋升时间: ${stats.lastPromotedAt ?? '无'}`,
-      '',
-      '📋 Evolution Queue',
-      '━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
-      `- 待处理: ${queueStats.pending} 项`,
-      `- 进行中: ${queueStats.inProgress} 项`,
-      `- 已完成: ${queueStats.completed} 项`,
-    ];
-    
-    return { text: lines.join('\n') };
-  }
-  
-  // English
+
+  return sources
+    .map((source) =>
+      source.score === undefined
+        ? source.source
+        : `${source.source}(${formatNumber(source.score)})`
+    )
+    .join(', ');
+}
+
+function buildEnglishOutput(
+  workspaceDir: string,
+  sessionId: string | null,
+  warnings: string[],
+  stats: ReturnType<EvolutionReducerImpl['getStats']>,
+  summary: ReturnType<typeof RuntimeSummaryService.getSummary>
+): string {
   const lines: string[] = [
-    '📈 Evolution Status',
-    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    'Evolution Status',
+    '================',
     '',
-    `🛡️ Trust Score: ${trustScore}/100 (Stage ${trustStage})`,
-    `😴 GFI Peak: ${gfiPeak.toFixed(1)}`,
-    `⚡ Current Pain: ${currentPain.painScore} pts (${currentPain.painSource})`,
-    `📈 Pain Signals Today: ${painSignals}`,
+    'Control Plane',
+    `- Legacy Trust: ${formatNumber(summary.legacyTrust.score)}/100 (stage ${formatStage(summary.legacyTrust.stage)}, legacy/frozen, ${summary.legacyTrust.rewardPolicy})`,
+    `- Session GFI: current ${formatNumber(summary.gfi.current)}, peak ${formatNumber(summary.gfi.peak)} (${summary.gfi.dataQuality})`,
+    `- GFI Sources: ${formatSources(summary.gfi.sources)}`,
+    `- Pain Flag: ${summary.pain.activeFlag ? 'active' : 'inactive'}${summary.pain.activeFlagSource ? ` (${summary.pain.activeFlagSource})` : ''}`,
+    `- Last Pain Signal: ${summary.pain.lastSignal ? `${summary.pain.lastSignal.source}${summary.pain.lastSignal.reason ? ` - ${summary.pain.lastSignal.reason}` : ''}` : '--'}`,
+    `- Gate Events: blocks ${formatNumber(summary.gate.recentBlocks)}, bypasses ${formatNumber(summary.gate.recentBypasses)} (${summary.gate.dataQuality})`,
     '',
-    '📊 Evolution Rules',
-    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    'Evolution',
+    `- Queue: pending ${summary.evolution.queue.pending}, in_progress ${summary.evolution.queue.inProgress}, completed ${summary.evolution.queue.completed} (${summary.evolution.dataQuality})`,
+    `- Directive: ${summary.evolution.directive.exists ? 'present' : 'missing'}, active ${summary.evolution.directive.active === null ? '--' : summary.evolution.directive.active ? 'yes' : 'no'}, age ${formatAge(summary.evolution.directive.ageSeconds, 'en')}`,
+    `- Directive Task: ${summary.evolution.directive.taskPreview ?? '--'}`,
+    '',
+    'Principles',
     `- candidate principles: ${stats.candidateCount}`,
     `- probation principles: ${stats.probationCount}`,
     `- active principles: ${stats.activeCount}`,
     `- deprecated principles: ${stats.deprecatedCount}`,
     `- last promoted: ${stats.lastPromotedAt ?? 'none'}`,
     '',
-    '📋 Evolution Queue',
-    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
-    `- Pending: ${queueStats.pending}`,
-    `- In Progress: ${queueStats.inProgress}`,
-    `- Completed: ${queueStats.completed}`,
+    'Metadata',
+    `- workspace: ${workspaceDir}`,
+    `- session: ${sessionId ?? '--'} (${summary.metadata.selectedSessionReason})`,
+    `- generatedAt: ${summary.metadata.generatedAt}`,
   ];
-  
-  return { text: lines.join('\n') };
+
+  if (warnings.length > 0) {
+    lines.push('', 'Warnings');
+    for (const warning of warnings) {
+      lines.push(`- ${warning}`);
+    }
+  }
+
+  return lines.join('\n');
+}
+
+function buildChineseOutput(
+  workspaceDir: string,
+  sessionId: string | null,
+  warnings: string[],
+  stats: ReturnType<EvolutionReducerImpl['getStats']>,
+  summary: ReturnType<typeof RuntimeSummaryService.getSummary>
+): string {
+  const lines: string[] = [
+    '\u8fdb\u5316\u72b6\u6001',
+    '================',
+    '',
+    '\u63a7\u5236\u9762',
+    `- Legacy Trust: ${formatNumber(summary.legacyTrust.score)}/100\uff08\u9636\u6bb5 ${formatStage(summary.legacyTrust.stage)}\uff0clegacy/frozen\uff0c${summary.legacyTrust.rewardPolicy}\uff09`,
+    `- \u4f1a\u8bdd GFI: \u5f53\u524d ${formatNumber(summary.gfi.current)}\uff0c\u5cf0\u503c ${formatNumber(summary.gfi.peak)}\uff08${summary.gfi.dataQuality}\uff09`,
+    `- GFI \u6765\u6e90: ${formatSources(summary.gfi.sources)}`,
+    `- Pain Flag: ${summary.pain.activeFlag ? 'active' : 'inactive'}${summary.pain.activeFlagSource ? `\uff08${summary.pain.activeFlagSource}\uff09` : ''}`,
+    `- \u6700\u8fd1 Pain \u4fe1\u53f7: ${summary.pain.lastSignal ? `${summary.pain.lastSignal.source}${summary.pain.lastSignal.reason ? ` - ${summary.pain.lastSignal.reason}` : ''}` : '--'}`,
+    `- Gate \u4e8b\u4ef6: block ${formatNumber(summary.gate.recentBlocks)}\uff0cbypass ${formatNumber(summary.gate.recentBypasses)}\uff08${summary.gate.dataQuality}\uff09`,
+    '',
+    '\u8fdb\u5316',
+    `- \u961f\u5217: pending ${summary.evolution.queue.pending}\uff0cin_progress ${summary.evolution.queue.inProgress}\uff0ccompleted ${summary.evolution.queue.completed}\uff08${summary.evolution.dataQuality}\uff09`,
+    `- Directive: ${summary.evolution.directive.exists ? 'present' : 'missing'}\uff0cactive ${summary.evolution.directive.active === null ? '--' : summary.evolution.directive.active ? 'yes' : 'no'}\uff0cage ${formatAge(summary.evolution.directive.ageSeconds, 'zh')}`,
+    `- Directive \u4efb\u52a1: ${summary.evolution.directive.taskPreview ?? '--'}`,
+    '',
+    '\u539f\u5219\u7edf\u8ba1',
+    `- \u5019\u9009\u539f\u5219: ${stats.candidateCount}`,
+    `- \u89c2\u5bdf\u671f\u539f\u5219: ${stats.probationCount}`,
+    `- \u751f\u6548\u539f\u5219: ${stats.activeCount}`,
+    `- \u5df2\u5e9f\u5f03\u539f\u5219: ${stats.deprecatedCount}`,
+    `- \u6700\u8fd1\u664b\u5347: ${stats.lastPromotedAt ?? '\u65e0'}`,
+    '',
+    '\u5143\u6570\u636e',
+    `- \u5de5\u4f5c\u533a: ${workspaceDir}`,
+    `- Session: ${sessionId ?? '--'}\uff08${summary.metadata.selectedSessionReason}\uff09`,
+    `- \u751f\u6210\u65f6\u95f4: ${summary.metadata.generatedAt}`,
+  ];
+
+  if (warnings.length > 0) {
+    lines.push('', '警告');
+    for (const warning of warnings) {
+      lines.push(`- ${warning}`);
+    }
+  }
+
+  return lines.join('\n');
+}
+
+export function handleEvolutionStatusCommand(ctx: PluginCommandContext): { text: string } {
+  const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
+  const sessionId = (ctx as { sessionId?: string | null }).sessionId ?? null;
+  const reducer = new EvolutionReducerImpl({ workspaceDir });
+  const stats = reducer.getStats();
+  const summary = RuntimeSummaryService.getSummary(workspaceDir, { sessionId });
+  const rawLang = (ctx.config?.language as string) || 'en';
+  const lang = normalizeLanguage(rawLang);
+  const warnings = summary.metadata.warnings.slice(0, 12);
+
+  if (lang === 'zh') {
+    return {
+      text: buildChineseOutput(workspaceDir, summary.metadata.sessionId, warnings, stats, summary),
+    };
+  }
+
+  return {
+    text: buildEnglishOutput(workspaceDir, summary.metadata.sessionId, warnings, stats, summary),
+  };
 }

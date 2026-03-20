@@ -28,6 +28,8 @@ export interface SessionState {
     
     // GFI - Track A: Empirical Friction
     currentGfi: number;
+    gfiBySource?: Record<string, number>;
+    lastErrorSource?: string;
     lastErrorHash: string;
     consecutiveErrors: number;
     
@@ -52,6 +54,12 @@ let persistDir: string | null = null;
 
 /** Debounce timer for persistence */
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
+
+function logSessionTrackerWarning(message: string, error?: unknown): void {
+    const detail = error instanceof Error ? error.message : error ? String(error) : '';
+    const suffix = detail ? `: ${detail}` : '';
+    console.warn(`[PD:SessionTracker] ${message}${suffix}`);
+}
 
 /**
  * Initialize persistence for session state.
@@ -99,12 +107,12 @@ function loadAllSessions(): void {
                 }
                 
                 sessions.set(state.sessionId, state);
-            } catch {
-                // Ignore corrupted files
+            } catch (error) {
+                logSessionTrackerWarning(`Failed to load session snapshot ${file}`, error);
             }
         }
     } catch (err) {
-        // Ignore errors during load
+        logSessionTrackerWarning('Failed to load persisted sessions', err);
     }
 }
 
@@ -119,8 +127,8 @@ function persistSession(state: SessionState): void {
     
     try {
         fs.writeFileSync(sessionPath, JSON.stringify(state, null, 2), 'utf-8');
-    } catch {
-        // Ignore persistence errors
+    } catch (error) {
+        logSessionTrackerWarning(`Failed to persist session ${state.sessionId}`, error);
     }
 }
 
@@ -161,6 +169,8 @@ function getOrCreateSession(sessionId: string, workspaceDir?: string): SessionSt
             cacheHits: 0,
             stuckLoops: 0,
             currentGfi: 0,
+            gfiBySource: {},
+            lastErrorSource: '',
             lastErrorHash: '',
             consecutiveErrors: 0,
             dailyToolCalls: 0,
@@ -177,6 +187,13 @@ function getOrCreateSession(sessionId: string, workspaceDir?: string): SessionSt
         state.workspaceDir = workspaceDir;
     }
     return state;
+}
+
+function ensureGfiLedger(state: SessionState): Record<string, number> {
+    if (!state.gfiBySource || typeof state.gfiBySource !== 'object') {
+        state.gfiBySource = {};
+    }
+    return state.gfiBySource;
 }
 
 export function trackToolRead(sessionId: string, filePath: string, workspaceDir?: string): SessionState {
@@ -225,12 +242,20 @@ export function trackLlmOutput(sessionId: string, usage: TokenUsage | undefined,
 /**
  * Tracks physical friction based on tool execution failures.
  */
-export function trackFriction(sessionId: string, deltaF: number, hash: string, workspaceDir?: string): SessionState {
+export function trackFriction(
+    sessionId: string,
+    deltaF: number,
+    hash: string,
+    workspaceDir?: string,
+    options?: { source?: string }
+): SessionState {
     const state = getOrCreateSession(sessionId, workspaceDir);
+    const ledger = ensureGfiLedger(state);
     
     if (hash && hash === state.lastErrorHash) {
         state.consecutiveErrors++;
     } else {
+        state.lastErrorSource = options?.source || (hash ? `unattributed:${hash}` : 'unattributed:unknown');
         state.lastErrorHash = hash;
         state.consecutiveErrors = 1;
     }
@@ -239,6 +264,8 @@ export function trackFriction(sessionId: string, deltaF: number, hash: string, w
     const multiplier = Math.pow(1.5, state.consecutiveErrors - 1);
     const addedFriction = deltaF * multiplier;
     state.currentGfi = (state.currentGfi || 0) + addedFriction;
+    const sourceKey = options?.source || (hash ? `unattributed:${hash}` : 'unattributed:unknown');
+    ledger[sourceKey] = (ledger[sourceKey] || 0) + addedFriction;
     state.lastActivityAt = Date.now();
     
     SystemLogger.log(state.workspaceDir, 'GFI_INC', `Friction added: +${addedFriction.toFixed(1)} (Base: ${deltaF}, Mult: ${multiplier.toFixed(2)}). Total GFI: ${state.currentGfi.toFixed(1)}`);
@@ -256,12 +283,48 @@ export function trackFriction(sessionId: string, deltaF: number, hash: string, w
 /**
  * Resets the friction index upon successful action.
  */
-export function resetFriction(sessionId: string, workspaceDir?: string): SessionState {
+export function resetFriction(
+    sessionId: string,
+    workspaceDir?: string,
+    options?: { source?: string; amount?: number }
+): SessionState {
     const state = getOrCreateSession(sessionId, workspaceDir);
+    const ledger = ensureGfiLedger(state);
+
+    if (options?.source) {
+        const sourceKey = options.source;
+        const currentSource = ledger[sourceKey] || 0;
+        const requestedAmount = Number.isFinite(options.amount) ? Number(options.amount) : currentSource;
+        const amountToRemove = Math.max(0, Math.min(currentSource, requestedAmount));
+
+        if (amountToRemove > 0) {
+            ledger[sourceKey] = Math.max(0, currentSource - amountToRemove);
+            if (ledger[sourceKey] === 0) {
+                delete ledger[sourceKey];
+            }
+            state.currentGfi = Math.max(0, (state.currentGfi || 0) - amountToRemove);
+            SystemLogger.log(
+                state.workspaceDir,
+                'GFI_SLICE_RESET',
+                `Friction slice reset for ${sourceKey}: -${amountToRemove.toFixed(1)}. Total GFI: ${state.currentGfi.toFixed(1)}`
+            );
+
+            if (state.lastErrorSource === sourceKey) {
+                state.consecutiveErrors = 0;
+                state.lastErrorHash = '';
+                state.lastErrorSource = '';
+            }
+        }
+        schedulePersistence(state);
+        return state;
+    }
+
     if (state.currentGfi > 0) {
         SystemLogger.log(state.workspaceDir, 'GFI_RESET', `Friction reset to 0 (Was: ${state.currentGfi.toFixed(1)}). Action successful.`);
     }
     state.currentGfi = 0;
+    state.gfiBySource = {};
+    state.lastErrorSource = '';
     state.consecutiveErrors = 0;
     state.lastErrorHash = '';
     
@@ -324,6 +387,17 @@ export function getSession(sessionId: string): SessionState | undefined {
     return sessions.get(sessionId);
 }
 
+export function listSessions(workspaceDir?: string): SessionState[] {
+    return [...sessions.values()]
+        .filter((state) => !workspaceDir || !state.workspaceDir || state.workspaceDir === workspaceDir)
+        .map((state) => ({
+            ...state,
+            toolReadsByFile: { ...state.toolReadsByFile },
+            gfiBySource: state.gfiBySource ? { ...state.gfiBySource } : undefined,
+            injectedProbationIds: state.injectedProbationIds ? [...state.injectedProbationIds] : undefined,
+        }));
+}
+
 export function clearSession(sessionId: string): void {
     sessions.delete(sessionId);
 }
@@ -341,8 +415,8 @@ export function garbageCollectSessions(): void {
                 if (sessionPath && fs.existsSync(sessionPath)) {
                     try {
                         fs.unlinkSync(sessionPath);
-                    } catch {
-                        // Ignore deletion errors
+                    } catch (error) {
+                        logSessionTrackerWarning(`Failed to delete session snapshot for ${id}`, error);
                     }
                 }
             }
