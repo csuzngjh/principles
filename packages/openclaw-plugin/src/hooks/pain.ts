@@ -130,7 +130,8 @@ export function handleAfterToolCall(
     trust.recordFailure(isRisk ? 'risky' : 'tool', {
         sessionId,
         api,
-        toolName: event.toolName // 👈 NEW: Pass toolName for classification
+        toolName: event.toolName,
+        error: event.error // Pass error for timeout detection
     });
     
     // Record tool call failure event
