@@ -56,8 +56,10 @@ describe('EvolutionWorkerService', () => {
             },
         ];
 
-        expect(hasRecentDuplicateTask(queue as any, 'llm_p_frustration_023', '[EVOLUTION_ACK] 有失败记录', now)).toBe(true);
-        expect(hasRecentDuplicateTask(queue as any, 'llm_p_frustration_023', 'different preview', now)).toBe(false);
+        expect(hasRecentDuplicateTask(queue as any, 'llm_p_frustration_023', '[EVOLUTION_ACK] 有失败记录', now, 'pain')).toBe(true);
+        expect(hasRecentDuplicateTask(queue as any, 'llm_p_frustration_023', 'different preview', now, 'pain')).toBe(false);
+        // Different reason should not be considered duplicate
+        expect(hasRecentDuplicateTask(queue as any, 'llm_p_frustration_023', '[EVOLUTION_ACK] 有失败记录', now, 'different_reason')).toBe(false);
     });
 
     it('should skip promoting duplicate exact-match rules', () => {

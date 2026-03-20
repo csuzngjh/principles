@@ -26,10 +26,11 @@ export interface EvolutionQueueItem {
 const PAIN_QUEUE_DEDUP_WINDOW_MS = 30 * 60 * 1000;
 
 // P0 fix: File lock constants and helper for queue operations (prevents TOCTOU race)
-const EVOLUTION_QUEUE_LOCK_SUFFIX = '.lock';
-const LOCK_MAX_RETRIES = 50;
-const LOCK_RETRY_DELAY_MS = 50;
-const LOCK_STALE_MS = 30_000;
+export const EVOLUTION_QUEUE_LOCK_SUFFIX = '.lock';
+export const PAIN_CANDIDATES_LOCK_SUFFIX = '.candidates.lock';
+export const LOCK_MAX_RETRIES = 50;
+export const LOCK_RETRY_DELAY_MS = 50;
+export const LOCK_STALE_MS = 30_000;
 const PAIN_CANDIDATE_MAX_SAMPLES = 5;
 const PAIN_CANDIDATE_SAMPLE_LEN = 1000;
 const PAIN_CANDIDATE_FINGERPRINT_HEAD_LEN = 160;
@@ -97,7 +98,7 @@ function isPendingPainCandidate(status: string | undefined): boolean {
  * Returns a release function. Uses 'wx' flag for atomic exclusive create.
  * Detects stale locks by checking PID and mtime.
  */
-function acquireQueueLock(lockPath: string, logger: any): (() => void) | null {
+export function acquireQueueLock(lockPath: string, logger: any): (() => void) | null {
     let retries = 0;
     while (retries < LOCK_MAX_RETRIES) {
         try {
@@ -143,17 +144,20 @@ function acquireQueueLock(lockPath: string, logger: any): (() => void) | null {
     return null;
 }
 
-function normalizePainDedupKey(source: string, preview: string): string {
-    return `${source.trim().toLowerCase()}::${preview.trim().toLowerCase()}`;
+function normalizePainDedupKey(source: string, preview: string, reason?: string): string {
+    // Include reason in dedup key to match createEvolutionTaskId() behavior
+    // Different reasons for the same source/preview should create different tasks
+    const normalizedReason = (reason || '').trim().toLowerCase();
+    return `${source.trim().toLowerCase()}::${preview.trim().toLowerCase()}::${normalizedReason}`;
 }
 
-export function hasRecentDuplicateTask(queue: EvolutionQueueItem[], source: string, preview: string, now: number): boolean {
-    const key = normalizePainDedupKey(source, preview);
+export function hasRecentDuplicateTask(queue: EvolutionQueueItem[], source: string, preview: string, now: number, reason?: string): boolean {
+    const key = normalizePainDedupKey(source, preview, reason);
     return queue.some((task) => {
         if (task.status === 'completed') return false;
         const taskTime = new Date(task.timestamp).getTime();
         if (!Number.isFinite(taskTime) || (now - taskTime) > PAIN_QUEUE_DEDUP_WINDOW_MS) return false;
-        return normalizePainDedupKey(task.source, task.trigger_text_preview || '') === key;
+        return normalizePainDedupKey(task.source, task.trigger_text_preview || '', task.reason) === key;
     });
 }
 
@@ -213,7 +217,7 @@ function checkPainFlag(wctx: WorkspaceContext, logger: any) {
             }
 
             const now = Date.now();
-            if (hasRecentDuplicateTask(queue, source, preview, now)) {
+            if (hasRecentDuplicateTask(queue, source, preview, now, reason)) {
                 logger?.info?.(`[PD:EvolutionWorker] Duplicate pain task skipped for source=${source} preview=${preview || 'N/A'}`);
                 fs.appendFileSync(painFlagPath, `\nstatus: queued\n`, 'utf8');
                 return;
@@ -375,38 +379,56 @@ export function trackPainCandidate(text: string, wctx: WorkspaceContext) {
     if (!shouldTrackPainCandidate(text)) return;
 
     const candidatePath = wctx.resolve('PAIN_CANDIDATES');
-    let data = { candidates: {} as any };
-    if (fs.existsSync(candidatePath)) {
-        try {
-            data = JSON.parse(fs.readFileSync(candidatePath, 'utf8'));
-        } catch (e) {
-            // Keep going with empty data if parse fails, but log it
-            console.error(`[PD:EvolutionWorker] Failed to parse pain candidates: ${String(e)}`);
+    const lockPath = candidatePath + PAIN_CANDIDATES_LOCK_SUFFIX;
+    const releaseLock = acquireQueueLock(lockPath, console);
+    if (!releaseLock) {
+        console.warn('[PD:EvolutionWorker] Failed to acquire pain candidates lock, skipping track');
+        return;
+    }
+
+    try {
+        let data = { candidates: {} as any };
+        if (fs.existsSync(candidatePath)) {
+            try {
+                data = JSON.parse(fs.readFileSync(candidatePath, 'utf8'));
+            } catch (e) {
+                // Keep going with empty data if parse fails, but log it
+                console.error(`[PD:EvolutionWorker] Failed to parse pain candidates: ${String(e)}`);
+            }
         }
-    }
 
-    const fingerprint = createPainCandidateFingerprint(text);
-    const now = new Date().toISOString();
-    if (!data.candidates[fingerprint]) {
-        data.candidates[fingerprint] = { count: 0, status: 'pending', firstSeen: now, lastSeen: now, samples: [] };
-    }
+        const fingerprint = createPainCandidateFingerprint(text);
+        const now = new Date().toISOString();
+        if (!data.candidates[fingerprint]) {
+            data.candidates[fingerprint] = { count: 0, status: 'pending', firstSeen: now, lastSeen: now, samples: [] };
+        }
 
-    const cand = data.candidates[fingerprint];
-    cand.status = cand.status || 'pending';
-    cand.count++;
-    cand.lastSeen = now;
+        const cand = data.candidates[fingerprint];
+        cand.status = cand.status || 'pending';
+        cand.count++;
+        cand.lastSeen = now;
 
-    const sample = summarizePainCandidateSample(text);
-    if (cand.samples.length < PAIN_CANDIDATE_MAX_SAMPLES && !cand.samples.includes(sample)) {
-        cand.samples.push(sample);
+        const sample = summarizePainCandidateSample(text);
+        if (cand.samples.length < PAIN_CANDIDATE_MAX_SAMPLES && !cand.samples.includes(sample)) {
+            cand.samples.push(sample);
+        }
+        
+        fs.writeFileSync(candidatePath, JSON.stringify(data, null, 2), 'utf8');
+    } finally {
+        releaseLock();
     }
-    
-    fs.writeFileSync(candidatePath, JSON.stringify(data, null, 2), 'utf8');
 }
 
 export function processPromotion(wctx: WorkspaceContext, logger: any, eventLog: any) {
     const candidatePath = wctx.resolve('PAIN_CANDIDATES');
     if (!fs.existsSync(candidatePath)) return;
+
+    const lockPath = candidatePath + PAIN_CANDIDATES_LOCK_SUFFIX;
+    const releaseLock = acquireQueueLock(lockPath, logger);
+    if (!releaseLock) {
+        logger?.warn?.('[PD:EvolutionWorker] Failed to acquire pain candidates lock, skipping promotion');
+        return;
+    }
 
     try {
         const config = wctx.config;
@@ -415,10 +437,15 @@ export function processPromotion(wctx: WorkspaceContext, logger: any, eventLog: 
         const countThreshold = config.get('thresholds.promotion_count_threshold') || 3;
 
         let promotedCount = 0;
+        let changed = false;
 
         for (const [fingerprint, cand] of Object.entries(data.candidates) as any) {
             if (isPendingPainCandidate(cand.status) && cand.count >= countThreshold) {
-                cand.status = 'pending';
+                // Normalize undefined status to 'pending'
+                if (cand.status !== 'pending') {
+                    cand.status = 'pending';
+                    changed = true;
+                }
                 const commonPhrases = extractCommonSubstring(cand.samples);
 
                 if (commonPhrases.length > 0) {
@@ -427,6 +454,7 @@ export function processPromotion(wctx: WorkspaceContext, logger: any, eventLog: 
 
                     if (hasEquivalentPromotedRule(dictionary as any, phrase)) {
                         cand.status = 'duplicate';
+                        changed = true;
                         logger?.info?.(`[PD:EvolutionWorker] Skipping duplicate promoted rule for candidate ${fingerprint}: ${phrase}`);
                         continue;
                     }
@@ -443,15 +471,18 @@ export function processPromotion(wctx: WorkspaceContext, logger: any, eventLog: 
 
                     cand.status = 'promoted';
                     promotedCount++;
+                    changed = true;
                 }
             }
         }
 
-        if (promotedCount > 0) {
+        if (changed) {
             fs.writeFileSync(candidatePath, JSON.stringify(data, null, 2), 'utf8');
         }
     } catch (err) {
         if (logger) logger.warn(`[PD:EvolutionWorker] Error during rule promotion: ${String(err)}`);
+    } finally {
+        releaseLock();
     }
 }
 
