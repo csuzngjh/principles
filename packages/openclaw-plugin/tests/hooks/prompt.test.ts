@@ -306,7 +306,7 @@ describe('Prompt Context Injection Hook', () => {
     expect(result?.prependContext).toContain('<evolution_task');
     expect(result?.prependContext).toContain('Fix bug');
     expect(result?.prependContext).toContain('pd_run_worker agentType="diagnostician" task=');
-    expect(result?.prependContext).toContain('async=true');
+    expect(result?.prependContext).toContain('runInBackground=true');
     expect(result?.prependContext).toContain("First respond to the user's current request normally.");
     expect(result?.prependContext).not.toContain('Reply with "[EVOLUTION_ACK]" only');
   });
@@ -505,7 +505,7 @@ describe('Prompt Context Injection Hook', () => {
     expect(result).toBeDefined();
     expect(result?.prependContext).toContain('<evolution_task');
     expect(result?.prependContext).toContain('pd_run_worker agentType="diagnostician" task=');
-    expect(result?.prependContext).toContain('async=true');
+    expect(result?.prependContext).toContain('runInBackground=true');
     expect(result?.prependContext).not.toContain('Reply with "[EVOLUTION_ACK]" only');
     expect(result?.prependContext).toContain('<system_override:runtime_constraints>');
     expect(result?.prependContext).toContain('Trust Score:');

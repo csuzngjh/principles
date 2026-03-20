@@ -7,6 +7,73 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
  * absolute compatibility during development and deployment.
  */
 
+import type { TSchema, Static } from '@sinclair/typebox';
+
+// ── Agent Tool Types (Strict Signature Enforcement) ───────────────────
+
+/**
+ * Standard tool result format returned to OpenClaw.
+ * 
+ * CRITICAL: Tools MUST return this format, not plain strings.
+ */
+export interface AgentToolResult<T = unknown> {
+    content: Array<{
+        type: string;  // 'text', 'image', etc.
+        text?: string;
+        data?: string;
+        mimeType?: string;
+    }>;
+    meta?: T;
+}
+
+/**
+ * Update callback for streaming tool results.
+ */
+export type AgentToolUpdateCallback<T = unknown> = (update: AgentToolResult<T>) => void;
+
+/**
+ * Strict tool definition interface.
+ * 
+ * CRITICAL: The execute signature MUST match exactly:
+ * - First parameter: toolCallId (string) - the unique tool call identifier
+ * - Second parameter: rawParams (Record<string, unknown>) - the actual parameters
+ * - Third parameter: signal (AbortSignal | undefined) - for cancellation
+ * - Fourth parameter: onUpdate (callback | undefined) - for streaming updates
+ * 
+ * Common mistake: Using (params, api, workspaceDir) will cause params to receive
+ * the toolCallId string, making all parameter access return undefined.
+ */
+export interface AgentTool<TSchema extends TSchema = TSchema, TMeta = unknown> {
+    name: string;
+    description?: string;
+    parameters: TSchema;
+    label?: string;
+    execute: (
+        toolCallId: string,
+        rawParams: Static<TSchema> & Record<string, unknown>,
+        signal?: AbortSignal,
+        onUpdate?: AgentToolUpdateCallback<TMeta>
+    ) => Promise<AgentToolResult<TMeta>>;
+}
+
+/**
+ * Factory function type for creating tools with injected dependencies.
+ * 
+ * RECOMMENDED: Use factory pattern to capture `api` in closure:
+ * 
+ * @example
+ * export function createMyTool(api: OpenClawPluginApi): AgentTool {
+ *   return {
+ *     name: 'my_tool',
+ *     parameters: Type.Object({ ... }),
+ *     async execute(toolCallId, rawParams, signal) {
+ *       // Use `api` from closure
+ *     },
+ *   };
+ * }
+ */
+export type AgentToolFactory = (api: OpenClawPluginApi) => AgentTool;
+
 export interface PluginLogger {
     debug?: (message: string, meta?: Record<string, unknown>) => void;
     info: (message: string, meta?: Record<string, unknown>) => void;
@@ -99,7 +166,15 @@ export interface OpenClawPluginApi {
     runtime: PluginRuntime;
     logger: PluginLogger;
     workspaceDir?: string; // Optional but commonly injected
-    registerTool: (tool: any, opts?: any) => void;
+    /**
+     * Register a custom tool with OpenClaw.
+     * 
+     * CRITICAL: The tool MUST conform to AgentTool interface with correct execute signature:
+     * - execute(toolCallId: string, rawParams: Record<string, unknown>, signal?: AbortSignal)
+     * 
+     * Common mistake: Using execute(params, api, workspaceDir) will cause runtime failures.
+     */
+    registerTool: (tool: AgentTool, opts?: { lane?: string }) => void;
     registerHook: (events: string | string[], handler: any, opts?: any) => void;
     registerHttpRoute: (params: OpenClawPluginHttpRouteParams) => void;
     registerService: (service: OpenClawPluginService) => void;
