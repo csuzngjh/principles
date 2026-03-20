@@ -196,6 +196,18 @@ describe('createAgentSpawnTool', () => {
       expect(mockSubagentRuntime.run).toHaveBeenCalled();
       expect(result).toContain('Diagnostician');
     });
+
+    it('should support legacy async parameter as alias for runInBackground', async () => {
+      const result = await executeTool({
+        agentType: 'diagnostician',
+        task: 'Analyze root cause',
+        async: true,
+      });
+
+      expect(mockSubagentRuntime.run).toHaveBeenCalled();
+      expect(mockSubagentRuntime.waitForRun).not.toHaveBeenCalled();
+      expect(result).toContain('Diagnostician');
+    });
   });
 
   describe('spawnAgentSequence', () => {

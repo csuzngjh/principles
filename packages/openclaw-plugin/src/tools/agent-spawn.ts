@@ -145,6 +145,11 @@ function readBooleanParam(rawParams: Record<string, unknown>, key: string): bool
   const snakeKey = key.replace(/([A-Z])/g, '_$1').toLowerCase();
   const snakeValue = rawParams[snakeKey];
   if (typeof snakeValue === 'boolean') return snakeValue;
+
+  // Backward compatibility for legacy prompt guidance / callers.
+  if (key === 'runInBackground' && typeof rawParams.async === 'boolean') {
+    return rawParams.async;
+  }
   
   return undefined;
 }
