@@ -26,6 +26,7 @@ import { handleBeforeReset, handleBeforeCompaction, handleAfterCompaction } from
 import { handleLlmOutput } from './hooks/llm.js';
 import { handleSubagentEnded } from './hooks/subagent.js';
 import { handleBeforeMessageWrite } from './hooks/message-sanitize.js';
+import * as TrajectoryCollector from './hooks/trajectory-collector.js';
 import { handleInitStrategy, handleManageOkr } from './commands/strategy.js';
 import { handleBootstrapTools, handleResearchTools } from './commands/capabilities.js';
 import { handleThinkingOs } from './commands/thinking-os.js';
@@ -133,6 +134,33 @@ const plugin = {
           return handleBeforeMessageWrite(event);
         } catch (err) {
           api.logger.error(`[PD] Error in before_message_write: ${String(err)}`);
+        }
+      }
+    );
+
+    // ── Hook: Trajectory Collection (Behavior Evolution Phase 0) ──
+    // Note: after_tool_call and llm_output are safe to collect
+    // before_message_write conflicts with message-sanitize, skipping for now
+    api.on(
+      'after_tool_call',
+      (event: PluginHookAfterToolCallEvent, ctx: PluginHookToolContext): void => {
+        try {
+          const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
+          TrajectoryCollector.handleAfterToolCall(event, { ...ctx, workspaceDir });
+        } catch (err) {
+          // Non-critical: don't log, just skip
+        }
+      }
+    );
+
+    api.on(
+      'llm_output',
+      (event: PluginHookLlmOutputEvent, ctx: PluginHookAgentContext): void => {
+        try {
+          const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
+          TrajectoryCollector.handleLlmOutput(event, { ...ctx, workspaceDir });
+        } catch (err) {
+          // Non-critical: don't log, just skip
         }
       }
     );
