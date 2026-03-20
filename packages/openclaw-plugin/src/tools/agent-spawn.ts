@@ -118,6 +118,24 @@ function looksLikeSessionOrPeerCoordinationTask(task: string): boolean {
 }
 
 /**
+ * Sanitize params for debug logging (remove sensitive values)
+ */
+function sanitizeParamsForLogging(params: Record<string, unknown>): Record<string, unknown> {
+  const SENSITIVE_PATTERNS = /password|token|api[_-]?key|secret|credential|authorization|cookie|session/i;
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(params)) {
+    if (SENSITIVE_PATTERNS.test(key)) {
+      sanitized[key] = '[REDACTED]';
+    } else if (typeof value === 'string' && value.length > 200) {
+      sanitized[key] = value.slice(0, 200) + '...[truncated]';
+    } else {
+      sanitized[key] = value;
+    }
+  }
+  return sanitized;
+}
+
+/**
  * Helper to read string parameter from rawParams
  * Supports both camelCase and snake_case parameter names
  */
@@ -206,10 +224,12 @@ export function createAgentSpawnTool(api: OpenClawPluginApi) {
       const runAsync = readBooleanParam(rawParams, 'runInBackground') === true;
       const availableInternalAgents = listAvailableAgents();
 
-      api.logger?.info?.(`[PD:AgentSpawn] Received rawParams: ${JSON.stringify(rawParams)}`);
+      // Log summary at info level, full params at debug level
+      api.logger?.info?.(`[PD:AgentSpawn] toolCallId=${_toolCallId}, agentType=${agentType || 'MISSING'}, hasTask=${!!task}, taskLength=${task.length}, runInBackground=${runAsync}`);
+      api.logger?.debug?.(`[PD:AgentSpawn] Full rawParams: ${JSON.stringify(sanitizeParamsForLogging(rawParams))}`);
 
       if (!agentType) {
-        api.logger?.warn?.(`[PD:AgentSpawn] Missing or invalid agentType: ${JSON.stringify(rawParams)}`);
+        api.logger?.warn?.(`[PD:AgentSpawn] Missing agentType, hasTask=${!!task}`);
         return {
           content: [{
             type: 'text',
@@ -226,7 +246,7 @@ pd_run_worker(
       }
 
       if (!task) {
-        api.logger?.warn?.(`[PD:AgentSpawn] Missing task parameter: ${JSON.stringify(rawParams)}`);
+        api.logger?.warn?.(`[PD:AgentSpawn] Missing task for agentType=${agentType}`);
         return {
           content: [{
             type: 'text',
@@ -423,6 +443,13 @@ export const agentSpawnTool = {
       description: '【可选】是否后台运行。true=立即返回不等待结果，false=等待执行完成。默认 false',
     })),
   }),
+  // This execute method throws to prevent accidental usage of the unconfigured tool
+  execute: (): never => {
+    throw new Error(
+      'agentSpawnTool is a metadata-only export. ' +
+      'Use createAgentSpawnTool(api) to get an executable instance.'
+    );
+  },
 };
 
 /**
@@ -438,7 +465,8 @@ export async function spawnAgentSequence(
   const tool = createAgentSpawnTool(api);
 
   for (const { type, task } of agents) {
-    const result = await tool.execute('', { agentType: type, task });
+    const toolCallId = `spawn-sequence-${type}-${randomUUID()}`;
+    const result = await tool.execute(toolCallId, { agentType: type, task });
     const text = result.content[0]?.text || '';
     results.set(type, text);
     onProgress?.(type, text);

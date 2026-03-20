@@ -10,6 +10,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { randomUUID } from 'node:crypto';
 import type { PluginCommandContext, PluginCommandResult, OpenClawPluginApi } from '../openclaw-sdk.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import {
@@ -372,7 +373,7 @@ If no milestones to record, leave ===MEMORY=== section empty.`;
   try {
     // 调用子智能体进行压缩
     const tool = createAgentSpawnTool(api);
-    const result = await tool.execute('focus-compress', {
+    const result = await tool.execute(`focus-compress-${randomUUID()}`, {
       agentType: 'reporter', // 使用 reporter 类型，适合总结和压缩
       task: compressPrompt,
     });
