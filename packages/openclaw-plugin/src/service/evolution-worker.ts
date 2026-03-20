@@ -30,6 +30,10 @@ const EVOLUTION_QUEUE_LOCK_SUFFIX = '.lock';
 const LOCK_MAX_RETRIES = 50;
 const LOCK_RETRY_DELAY_MS = 50;
 const LOCK_STALE_MS = 30_000;
+const PAIN_CANDIDATE_MAX_SAMPLES = 5;
+const PAIN_CANDIDATE_SAMPLE_LEN = 1000;
+const PAIN_CANDIDATE_FINGERPRINT_HEAD_LEN = 160;
+const PAIN_CANDIDATE_FINGERPRINT_TAIL_LEN = 80;
 
 export function createEvolutionTaskId(
     source: string,
@@ -44,6 +48,48 @@ export function createEvolutionTaskId(
         .update(`${source}:${score}:${preview}:${reason}:${now}`)
         .digest('hex')
         .substring(0, 8);
+}
+
+function normalizePainCandidateText(text: string): string {
+    return text.replace(/\s+/g, ' ').trim();
+}
+
+export function shouldTrackPainCandidate(text: string): boolean {
+    const normalized = normalizePainCandidateText(text);
+    if (!normalized) return false;
+    if (normalized === 'NO_REPLY') return false;
+
+    // Skip empathy observer payloads: they are classifier telemetry, not user/system pain patterns.
+    if (
+        normalized.startsWith('{')
+        && normalized.endsWith('}')
+        && normalized.includes('"damageDetected"')
+        && normalized.includes('"severity"')
+        && normalized.includes('"confidence"')
+    ) {
+        return false;
+    }
+
+    return true;
+}
+
+export function createPainCandidateFingerprint(text: string): string {
+    const normalized = normalizePainCandidateText(text);
+    const head = normalized.substring(0, PAIN_CANDIDATE_FINGERPRINT_HEAD_LEN);
+    const tail = normalized.slice(-PAIN_CANDIDATE_FINGERPRINT_TAIL_LEN);
+
+    return createHash('md5')
+        .update(`${normalized.length}:${head}:${tail}`)
+        .digest('hex')
+        .substring(0, 8);
+}
+
+export function summarizePainCandidateSample(text: string): string {
+    return normalizePainCandidateText(text).substring(0, PAIN_CANDIDATE_SAMPLE_LEN);
+}
+
+function isPendingPainCandidate(status: string | undefined): boolean {
+    return status === undefined || status === 'pending';
 }
 
 /**
@@ -325,7 +371,9 @@ async function processDetectionQueue(wctx: WorkspaceContext, api: OpenClawPlugin
     }
 }
 
-function trackPainCandidate(text: string, wctx: WorkspaceContext) {
+export function trackPainCandidate(text: string, wctx: WorkspaceContext) {
+    if (!shouldTrackPainCandidate(text)) return;
+
     const candidatePath = wctx.resolve('PAIN_CANDIDATES');
     let data = { candidates: {} as any };
     if (fs.existsSync(candidatePath)) {
@@ -337,19 +385,26 @@ function trackPainCandidate(text: string, wctx: WorkspaceContext) {
         }
     }
 
-    const fingerprint = createHash('md5').update(text.substring(0, 50)).digest('hex').substring(0, 8);
+    const fingerprint = createPainCandidateFingerprint(text);
+    const now = new Date().toISOString();
     if (!data.candidates[fingerprint]) {
-        data.candidates[fingerprint] = { count: 0, firstSeen: new Date().toISOString(), samples: [] };
+        data.candidates[fingerprint] = { count: 0, status: 'pending', firstSeen: now, lastSeen: now, samples: [] };
     }
 
     const cand = data.candidates[fingerprint];
+    cand.status = cand.status || 'pending';
     cand.count++;
-    if (cand.samples.length < 5) cand.samples.push(text.substring(0, 200));
+    cand.lastSeen = now;
+
+    const sample = summarizePainCandidateSample(text);
+    if (cand.samples.length < PAIN_CANDIDATE_MAX_SAMPLES && !cand.samples.includes(sample)) {
+        cand.samples.push(sample);
+    }
     
     fs.writeFileSync(candidatePath, JSON.stringify(data, null, 2), 'utf8');
 }
 
-function processPromotion(wctx: WorkspaceContext, logger: any, eventLog: any) {
+export function processPromotion(wctx: WorkspaceContext, logger: any, eventLog: any) {
     const candidatePath = wctx.resolve('PAIN_CANDIDATES');
     if (!fs.existsSync(candidatePath)) return;
 
@@ -362,7 +417,8 @@ function processPromotion(wctx: WorkspaceContext, logger: any, eventLog: any) {
         let promotedCount = 0;
 
         for (const [fingerprint, cand] of Object.entries(data.candidates) as any) {
-            if (cand.status === 'pending' && cand.count >= countThreshold) {
+            if (isPendingPainCandidate(cand.status) && cand.count >= countThreshold) {
+                cand.status = 'pending';
                 const commonPhrases = extractCommonSubstring(cand.samples);
 
                 if (commonPhrases.length > 0) {
