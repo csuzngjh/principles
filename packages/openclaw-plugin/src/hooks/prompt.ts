@@ -536,9 +536,12 @@ REQUIRED ACTION:
     prependContext = evolutionDirective + prependContext;
   }
 
-  // 闁崇儤鍔忛弲鏌ュ煛?4. Empathy Observer Spawn (async sidecar) 闁崇儤鍔忛弲鏌ュ煛?
-  if (trigger === 'user' && sessionId && api) {
-    const latestUserMessage = extractLatestUserMessage(event.messages);
+  // 鈺愨晲鈺?4. Empathy Observer Spawn (async sidecar) 鈺愨晲鈺?
+  // Skip if this is a subagent session or if the message indicates agent-to-agent communication
+  const latestUserMessage = extractLatestUserMessage(event.messages);
+  const isAgentToAgent = latestUserMessage.includes('sourceSession=agent:') || sessionId?.includes(':subagent:') === true;
+
+  if (trigger === 'user' && sessionId && api && !isAgentToAgent) {
     empathyObserverManager.spawn(api, sessionId, latestUserMessage).catch((err) => api.logger.warn(String(err)));
   }
 

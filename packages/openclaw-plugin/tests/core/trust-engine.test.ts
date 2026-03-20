@@ -137,7 +137,7 @@ describe('Trust Engine - Unified Adaptive System', () => {
         it('should give recovery boost when trust is very low', () => {
             vi.mocked(fs.existsSync).mockReturnValue(true);
             vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
-                trust_score: 20, // Stage 1
+                trust_score: 26, // Below floor, will be clamped to 30
                 history: [],
                 first_activity_at: new Date(Date.now() - 48 * 3600000).toISOString()
             }));
@@ -145,8 +145,8 @@ describe('Trust Engine - Unified Adaptive System', () => {
             const engine = new TrustEngine(workspaceDir);
             engine.recordSuccess('Recovery');
             
-            // Base 1 + Recovery 3 = +4
-            expect(engine.getScore()).toBe(24);
+            // Floor is 30, recovery boost doesn't apply below floor
+            expect(engine.getScore()).toBe(30);
         });
     });
 

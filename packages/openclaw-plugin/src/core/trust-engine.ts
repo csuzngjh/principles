@@ -78,7 +78,8 @@ export class TrustEngine {
         return settings || {
             stages: { stage_1_observer: 30, stage_2_editor: 60, stage_3_developer: 80 },
             cold_start: { initial_trust: 85, grace_failures: 5, cold_start_period_ms: 86400000 },
-            penalties: { tool_failure_base: -2, risky_failure_base: -10, gate_bypass_attempt: -5, failure_streak_multiplier: -2, max_penalty: -20 },
+            // BUGFIX #84: Reduced penalties to prevent Trust collapse
+            penalties: { tool_failure_base: -1, risky_failure_base: -5, gate_bypass_attempt: -3, failure_streak_multiplier: -1, max_penalty: -10 },
             rewards: { success_base: 2, subagent_success: 5, tool_success_reward: 0.2, streak_bonus_threshold: 3, streak_bonus: 5, recovery_boost: 5, max_reward: 15 },
             limits: { stage_2_max_lines: 50, stage_3_max_lines: 300 }
         };
@@ -186,7 +187,7 @@ export class TrustEngine {
         this.updateScore(delta, reason, 'success', context);
     }
 
-    public recordFailure(type: 'tool' | 'risky' | 'bypass', context: { sessionId?: string; api?: any; toolName?: string }): void {
+    public recordFailure(type: 'tool' | 'risky' | 'bypass', context: { sessionId?: string; api?: any; toolName?: string; error?: string }): void {
         const settings = this.trustSettings;
         const penalties = settings.penalties;
         const toolName = context?.toolName;
@@ -205,6 +206,14 @@ export class TrustEngine {
             // Exploratory failures are minor and don't trigger streak multipliers
             this.scorecard.exploratory_failure_streak++;
             this.updateScore(-1, `Exploratory Failure: ${toolName}`, 'failure', context);
+            return;
+        }
+
+        // BUGFIX #84: sessions_send timeout should not be penalized
+        // Communication timeouts are not agent failures - the message may have been delivered
+        const errorStr = String((context as any)?.error || '');
+        if (toolName === 'sessions_send' && (errorStr.includes('timeout') || errorStr === 'timeout')) {
+            this.updateScore(0, `Communication timeout (sessions_send): ignored`, 'info', context);
             return;
         }
 
@@ -234,7 +243,8 @@ export class TrustEngine {
     private updateScore(delta: number, reason: string, type: 'success' | 'failure' | 'penalty' | 'info', context?: { sessionId?: string; api?: any }): void {
         const oldScore = this.scorecard.trust_score;
         this.scorecard.trust_score += delta;
-        if (this.scorecard.trust_score < 0) this.scorecard.trust_score = 0;
+        // Floor score: never drop below 30 (prevents Trust collapse from cascades)
+        if (this.scorecard.trust_score < 30) this.scorecard.trust_score = 30;
         if (this.scorecard.trust_score > 100) this.scorecard.trust_score = 100;
 
         this.scorecard.last_updated = new Date().toISOString();
@@ -312,7 +322,7 @@ export function recordSuccess(workspaceDir: string, reason: string, context?: { 
     new TrustEngine(workspaceDir).recordSuccess(reason, context, isSubagent);
 }
 
-export function recordFailure(type: 'tool' | 'risky' | 'bypass', workspaceDir: string, ctx: { sessionId?: string; api?: any; toolName?: string }): void {
+export function recordFailure(type: 'tool' | 'risky' | 'bypass', workspaceDir: string, ctx: { sessionId?: string; api?: any; toolName?: string; error?: string }): void {
     new TrustEngine(workspaceDir).recordFailure(type, ctx);
 }
 
