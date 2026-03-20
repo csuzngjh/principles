@@ -68,10 +68,20 @@ async function buildPlugin(pluginDir: string): Promise<void> {
   logger.step('构建插件');
   
   // 安装依赖
-  execSync('npm install --silent', { cwd: pluginDir, stdio: 'inherit' });
+  execSync('npm install --silent', { 
+    cwd: pluginDir, 
+    stdio: 'inherit',
+    shell: true,
+    env: process.env
+  });
   
   // 构建
-  execSync('npm run build', { cwd: pluginDir, stdio: 'inherit' });
+  execSync('npm run build', { 
+    cwd: pluginDir, 
+    stdio: 'inherit',
+    shell: true,
+    env: process.env
+  });
   
   logger.success('插件构建完成');
 }
@@ -90,7 +100,12 @@ async function installPlugin(pluginDir: string): Promise<void> {
   try {
     const result = execSync(
       `openclaw plugins install "${pluginDir}" 2>&1`,
-      { encoding: 'utf-8', timeout: 60000 }
+      { 
+        encoding: 'utf-8', 
+        timeout: 60000, 
+        shell: true,
+        env: process.env
+      }
     );
     // 检查是否安装成功
     if (existsSync(extDir) && existsSync(path.join(extDir, 'dist', 'index.js'))) {
@@ -151,6 +166,8 @@ async function installPluginDependencies(): Promise<void> {
       execSync('npm install --silent micromatch@^4.0.8 @sinclair/typebox@^0.34.48', {
         cwd: extDir,
         stdio: 'inherit',
+        shell: true,
+        env: process.env
       });
       logger.success('插件依赖安装完成');
     } catch (error) {
