@@ -17,14 +17,106 @@ import type {
 
 const TRAJECTORY_DIR = 'memory/trajectories/';
 
+// 敏感字段匹配正则
+const SENSITIVE_KEY_PATTERN = /password|token|authorization|secret|api[_-]?key|credential|cookie|session/i;
+
+// 最大字符串长度
+const MAX_STRING_LENGTH = 1000;
+const MAX_RESULT_LENGTH = 500;
+
 /**
- * 确保轨迹目录存在
+ * 递归脱敏处理：遍历对象/数组，移除敏感字段值
  */
-function ensureTrajectoryDir(workspaceDir: string): string {
-  const dir = path.join(workspaceDir, TRAJECTORY_DIR);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+function scrubSensitive(obj: unknown, depth = 0): unknown {
+  // 防止无限递归
+  if (depth > 10) return '[MAX_DEPTH]';
+  
+  // 处理 null/undefined
+  if (obj == null) return obj;
+  
+  // 处理基本类型
+  if (typeof obj !== 'object') {
+    if (typeof obj === 'string' && obj.length > MAX_STRING_LENGTH) {
+      return obj.slice(0, MAX_STRING_LENGTH) + '...[truncated]';
+    }
+    return obj;
   }
+  
+  // 处理数组
+  if (Array.isArray(obj)) {
+    return obj.map(item => scrubSensitive(item, depth + 1));
+  }
+  
+  // 处理对象
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+    if (SENSITIVE_KEY_PATTERN.test(key)) {
+      result[key] = '[REDACTED]';
+    } else {
+      result[key] = scrubSensitive(value, depth + 1);
+    }
+  }
+  return result;
+}
+
+/**
+ * 异步写入队列 - 确保有序、非阻塞写入
+ */
+class AsyncWriteQueue {
+  private queue: Array<() => Promise<void>> = [];
+  private processing = false;
+  
+  async enqueue(task: () => Promise<void>): Promise<void> {
+    this.queue.push(task);
+    if (!this.processing) {
+      this.processNext();
+    }
+  }
+  
+  private async processNext(): Promise<void> {
+    if (this.queue.length === 0) {
+      this.processing = false;
+      return;
+    }
+    
+    this.processing = true;
+    const task = this.queue.shift();
+    
+    try {
+      await task!();
+    } catch {
+      // Silently fail - trajectory collection should not block main functionality
+    }
+    
+    // 处理下一个任务
+    this.processNext();
+  }
+}
+
+// 全局写入队列实例
+const writeQueue = new AsyncWriteQueue();
+
+// 目录缓存（避免重复检查）
+const dirCache = new Map<string, boolean>();
+
+/**
+ * 确保轨迹目录存在（异步）
+ */
+async function ensureTrajectoryDirAsync(workspaceDir: string): Promise<string> {
+  const dir = path.join(workspaceDir, TRAJECTORY_DIR);
+  
+  if (dirCache.get(dir)) {
+    return dir;
+  }
+  
+  try {
+    await fs.promises.mkdir(dir, { recursive: true });
+    dirCache.set(dir, true);
+  } catch {
+    // 目录可能已存在，忽略错误
+    dirCache.set(dir, true);
+  }
+  
   return dir;
 }
 
@@ -39,17 +131,16 @@ function getTodayFilename(): string {
 }
 
 /**
- * 写入轨迹记录（JSON Lines 格式）
+ * 写入轨迹记录（JSON Lines 格式）- 异步版本
  */
 function writeTrajectoryRecord(workspaceDir: string, record: object): void {
-  const dir = ensureTrajectoryDir(workspaceDir);
-  const filepath = path.join(dir, getTodayFilename());
   const line = JSON.stringify(record) + '\n';
-  try {
-    fs.appendFileSync(filepath, line, 'utf8');
-  } catch (err) {
-    // Silently fail - trajectory collection should not block main functionality
-  }
+  
+  writeQueue.enqueue(async () => {
+    const dir = await ensureTrajectoryDirAsync(workspaceDir);
+    const filepath = path.join(dir, getTodayFilename());
+    await fs.promises.appendFile(filepath, line, 'utf8');
+  });
 }
 
 /**
@@ -63,8 +154,14 @@ export function handleAfterToolCall(
   const workspaceDir = ctx.workspaceDir;
   if (!workspaceDir) return;
 
-  // 脱敏处理：移除敏感参数
-  const sanitizedParams = sanitizeParams(event.params);
+  // 递归脱敏处理所有字段
+  const sanitizedParams = scrubSensitive(event.params);
+  const sanitizedResult = event.result == null 
+    ? null 
+    : String(scrubSensitive(event.result)).slice(0, MAX_RESULT_LENGTH);
+  const sanitizedError = event.error == null 
+    ? null 
+    : String(scrubSensitive(event.error));
 
   writeTrajectoryRecord(workspaceDir, {
     type: 'tool_call',
@@ -72,8 +169,8 @@ export function handleAfterToolCall(
     sessionId: ctx.sessionId || 'unknown',
     toolName: event.toolName,
     params: sanitizedParams,
-    result: event.result ? String(event.result).slice(0, 500) : null,
-    error: event.error || null,
+    result: sanitizedResult,
+    error: sanitizedError,
     durationMs: event.durationMs,
     success: !event.error,
     runId: event.runId || null,
@@ -102,7 +199,7 @@ export function handleLlmOutput(
     model: event.model,
     textLength: totalTextLength,
     outputCount: event.assistantTexts?.length || 0,
-    usage: event.usage || null
+    usage: event.usage ? scrubSensitive(event.usage) : null
   });
 }
 
@@ -134,47 +231,33 @@ export function handleBeforeMessageWrite(
       .join('\n');
   }
 
+  // 脱敏处理内容预览
+  const sanitizedPreview = scrubSensitive(content.slice(0, 200));
+
   writeTrajectoryRecord(workspaceDir, {
     type: 'message',
     timestamp: new Date().toISOString(),
     sessionId: event.sessionKey || 'unknown',
     role: msg.role,
     contentLength: content.length,
-    contentPreview: content.slice(0, 200),
+    contentPreview: typeof sanitizedPreview === 'string' ? sanitizedPreview : '[sanitized]',
     agentId: event.agentId || null
   });
 }
 
 /**
- * 脱敏处理：移除敏感参数
+ * 脱敏处理：移除敏感参数（保留旧函数签名以兼容）
+ * @deprecated 使用 scrubSensitive 替代
  */
 function sanitizeParams(params: Record<string, any>): Record<string, any> {
-  if (!params) return {};
-  
-  const sensitiveKeys = [
-    'password', 'token', 'api_key', 'secret', 'credential',
-    'authorization', 'cookie', 'session', 'key'
-  ];
-  
-  const sanitized: Record<string, any> = {};
-  for (const [key, value] of Object.entries(params)) {
-    const lowerKey = key.toLowerCase();
-    if (sensitiveKeys.some(sk => lowerKey.includes(sk))) {
-      sanitized[key] = '[REDACTED]';
-    } else if (typeof value === 'string' && value.length > 1000) {
-      sanitized[key] = value.slice(0, 1000) + '...[truncated]';
-    } else {
-      sanitized[key] = value;
-    }
-  }
-  return sanitized;
+  return scrubSensitive(params) as Record<string, any>;
 }
 
 /**
  * 轨迹汇总统计（供 cron 任务调用）
  */
 export function computeTrajectoryStats(workspaceDir: string): object {
-  const dir = ensureTrajectoryDir(workspaceDir);
+  const dir = path.join(workspaceDir, TRAJECTORY_DIR);
   const todayFile = path.join(dir, getTodayFilename());
   
   if (!fs.existsSync(todayFile)) {
