@@ -26,6 +26,8 @@ export interface TrustScorecard {
         reason: string;
         timestamp: string;
     }>;
+    frozen?: boolean;
+    reward_policy?: 'frozen_all_positive' | 'frozen_atomic_positive_keep_plan_ready';
 }
 
 export type TrustStage = 1 | 2 | 3 | 4;
@@ -52,6 +54,8 @@ export const CONSTRUCTIVE_TOOLS = [
     'insert', 'patch', 'delete_file', 'move_file', 'run_shell_command',
   'pd_run_worker', 'sessions_spawn', 'evolve-task', 'init-strategy'
 ];
+
+const LEGACY_TRUST_REWARD_POLICY = 'frozen_all_positive' as const;
 
 export class TrustEngine {
     private scorecard: TrustScorecard;
@@ -96,6 +100,7 @@ export class TrustEngine {
                 if (data.score !== undefined && data.trust_score === undefined) data.trust_score = data.score;
                 if (!data.history) data.history = [];
                 if (data.exploratory_failure_streak === undefined) data.exploratory_failure_streak = 0;
+                this.applyLegacyFreezeMetadata(data);
                 return data;
             } catch (e) {
                 console.error(`[PD:TrustEngine] FATAL: Failed to parse scorecard at ${scorecardPath}. Resetting.`);
@@ -105,7 +110,7 @@ export class TrustEngine {
         const now = new Date();
         const coldStartEnd = new Date(now.getTime() + settings.cold_start.cold_start_period_ms);
 
-        return {
+        const scorecard: TrustScorecard = {
             trust_score: settings.cold_start.initial_trust,
             success_streak: 0,
             failure_streak: 0,
@@ -116,6 +121,13 @@ export class TrustEngine {
             first_activity_at: now.toISOString(),
             history: []
         };
+        this.applyLegacyFreezeMetadata(scorecard);
+        return scorecard;
+    }
+
+    private applyLegacyFreezeMetadata(scorecard: TrustScorecard): void {
+        scorecard.frozen = true;
+        scorecard.reward_policy = LEGACY_TRUST_REWARD_POLICY;
     }
 
     private saveScorecard(): void {
@@ -147,44 +159,22 @@ export class TrustEngine {
     }
 
     public recordSuccess(reason: string, context?: { sessionId?: string; api?: any; toolName?: string }, isSubagent: boolean = false): void {
-        const settings = this.trustSettings;
-        const rewards = settings.rewards;
         const toolName = context?.toolName;
 
         // 1. Check if this is an exploratory tool success
         const isExploratory = toolName && EXPLORATORY_TOOLS.includes(toolName);
 
         if (reason === 'tool_success' && isExploratory) {
-            // Exploratory tools don't grant trust points, but they:
-            // 1. Reset the exploratory failure streak
-            // 2. Prove the agent isn't stuck (no delta, no success_streak increment)
             this.scorecard.exploratory_failure_streak = 0;
-            this.updateScore(0, `Exploratory Success: ${toolName}`, 'info', context);
+            this.touchScorecard();
             return;
         }
 
-        let delta = rewards.success_base;
-        if (isSubagent) {
-            delta = rewards.subagent_success;
-        } else if (reason === 'tool_success') {
-            delta = rewards.tool_success_reward ?? 0.2;
-        } else if (reason === 'plan_ready') {
-            delta = 5; // Strategic reward
-        }
-
-        this.scorecard.success_streak++;
+        // Phase 1 freeze: do not let atomic successes inflate legacy trust.
+        this.scorecard.success_streak = 0;
         this.scorecard.failure_streak = 0; // Reset failure streak on constructive success
         this.scorecard.exploratory_failure_streak = 0;
-        
-        if (this.scorecard.success_streak >= rewards.streak_bonus_threshold) {
-            delta += rewards.streak_bonus;
-        }
-
-        if (this.scorecard.trust_score < settings.stages.stage_1_observer) {
-            delta += rewards.recovery_boost;
-        }
-
-        this.updateScore(delta, reason, 'success', context);
+        this.touchScorecard();
     }
 
     public recordFailure(type: 'tool' | 'risky' | 'bypass', context: { sessionId?: string; api?: any; toolName?: string; error?: string }): void {
@@ -240,8 +230,15 @@ export class TrustEngine {
         this.updateScore(delta, `Failure: ${toolName || type}`, 'failure', context);
     }
 
+    private touchScorecard(): void {
+        this.applyLegacyFreezeMetadata(this.scorecard);
+        this.scorecard.last_updated = new Date().toISOString();
+        this.saveScorecard();
+    }
+
     private updateScore(delta: number, reason: string, type: 'success' | 'failure' | 'penalty' | 'info', context?: { sessionId?: string; api?: any }): void {
         const oldScore = this.scorecard.trust_score;
+        this.applyLegacyFreezeMetadata(this.scorecard);
         this.scorecard.trust_score += delta;
         // Floor score: never drop below 30 (prevents Trust collapse from cascades)
         if (this.scorecard.trust_score < 30) this.scorecard.trust_score = 30;
@@ -292,6 +289,7 @@ export class TrustEngine {
         this.scorecard.first_activity_at = now.toISOString();
         this.scorecard.cold_start_end = coldStartEnd.toISOString();
         this.scorecard.history.push({ type: 'success', delta: 0, reason: 'Manual trust reset (Spiritual Cleanse)', timestamp: now.toISOString() });
+        this.applyLegacyFreezeMetadata(this.scorecard);
         this.saveScorecard();
     }
 

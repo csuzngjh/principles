@@ -185,7 +185,8 @@ describe('LLM Cognitive Distress Hook', () => {
             sessionId,
             13,
             'user_empathy_moderate',
-            workspaceDir
+            workspaceDir,
+            { source: 'user_empathy' }
         );
         expect(mockEventLog.recordPainSignal).toHaveBeenCalledWith(
             sessionId,
@@ -304,5 +305,33 @@ describe('LLM Cognitive Distress Hook', () => {
                 score: 35,
             })
         );
+    });
+
+    it('should rollback only the empathy slice when rollback tag is emitted', () => {
+        vi.spyOn(sessionTracker, 'resetFriction').mockImplementation(() => ({ currentGfi: 10 } as any));
+        const mockFunnel = { detect: vi.fn().mockReturnValue({ detected: false, source: 'l3_async_queued' }) };
+        vi.mocked(DetectionService.get).mockReturnValue(mockFunnel as any);
+        (mockEventLog as any).getLastEmpathyEventId = vi.fn().mockReturnValue('emp_rollback_1');
+        (mockEventLog as any).rollbackEmpathyEvent = vi.fn().mockReturnValue(13);
+
+        handleLlmOutput({
+            runId: 'r-rollback',
+            sessionId,
+            provider: 'test',
+            model: 'test',
+            assistantTexts: ['[EMPATHY_ROLLBACK_REQUEST]'],
+        } as any, { workspaceDir, sessionId } as any);
+
+        expect(mockEventLog.getLastEmpathyEventId).toHaveBeenCalledWith(sessionId);
+        expect(mockEventLog.rollbackEmpathyEvent).toHaveBeenCalledWith(
+            'emp_rollback_1',
+            sessionId,
+            'Natural language rollback request detected',
+            'natural_language'
+        );
+        expect(sessionTracker.resetFriction).toHaveBeenCalledWith(sessionId, workspaceDir, {
+            source: 'user_empathy',
+            amount: 13,
+        });
     });
 });

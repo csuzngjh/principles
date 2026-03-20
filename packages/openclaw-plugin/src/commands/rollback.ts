@@ -78,7 +78,10 @@ Usage:
     }
 
     // Reduce the GFI by the rolled back score
-    resetFriction(sessionId);
+    resetFriction(sessionId, workspaceDir, {
+        source: 'user_empathy',
+        amount: rolledBackScore,
+    });
 
     return {
         text: isZh
@@ -138,8 +141,11 @@ export function handleNaturalLanguageRollback(
         };
     }
 
-    // Reduce the GFI
-    resetFriction(sessionId);
+    // Reduce only the empathy slice instead of wiping the whole session GFI.
+    resetFriction(sessionId, wctx.workspaceDir, {
+        source: 'user_empathy',
+        amount: rolledBackScore,
+    });
 
     return {
         success: true,

@@ -48,6 +48,12 @@ describe('EmpathyObserverManager', () => {
           return undefined;
         }),
       },
+      eventLog: {
+        recordPainSignal: vi.fn(),
+      },
+      trajectory: {
+        recordPainEvent: vi.fn(),
+      },
     } as any);
   });
 
@@ -76,7 +82,29 @@ describe('EmpathyObserverManager', () => {
       'session-C',
       40,
       'observer_empathy_severe',
-      '/workspace/principles'
+      '/workspace/principles',
+      { source: 'user_empathy' }
+    );
+    const wctx = vi.mocked(WorkspaceContext.fromHookContext).mock.results[0]?.value as any;
+    expect(wctx.eventLog.recordPainSignal).toHaveBeenCalledWith(
+      'session-C',
+      expect.objectContaining({
+        score: 40,
+        source: 'user_empathy',
+        origin: 'system_infer',
+        severity: 'severe',
+        confidence: 0.9,
+        detection_mode: 'structured',
+        deduped: false,
+      })
+    );
+    expect(wctx.trajectory.recordPainEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'session-C',
+        source: 'user_empathy',
+        score: 40,
+        origin: 'system_infer',
+      })
     );
   });
 

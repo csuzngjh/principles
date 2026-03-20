@@ -1,98 +1,84 @@
 import { WorkspaceContext } from '../core/workspace-context.js';
 import type { PluginHookAgentContext } from '../openclaw-sdk.js';
 
-/**
- * Creates a visual progress bar (e.g., [██████░░░░])
- */
-function createProgressBar(value: number, max: number, length: number = 10): string {
-    const filledLength = Math.round((value / max) * length);
-    const emptyLength = length - filledLength;
-    return `[${'█'.repeat(filledLength)}${'░'.repeat(emptyLength)}]`;
+function createProgressBar(value: number, max: number, length: number = 12): string {
+  const safeValue = Math.max(0, Math.min(max, value));
+  const filledLength = Math.round((safeValue / max) * length);
+  const emptyLength = Math.max(0, length - filledLength);
+  return `[${'#'.repeat(filledLength)}${'-'.repeat(emptyLength)}]`;
+}
+
+function formatStageTitle(stage: number, isZh: boolean): string {
+  const titles = isZh
+    ? ['Observer', 'Editor', 'Developer', 'Architect']
+    : ['Observer', 'Editor', 'Developer', 'Architect'];
+  return titles[Math.max(0, Math.min(3, stage - 1))] ?? 'Unknown';
 }
 
 export function handleTrustCommand(ctx: PluginHookAgentContext & { workspaceDir?: string }): string {
-    const { workspaceDir } = ctx;
-    if (!workspaceDir) return 'Error: Workspace directory not found.';
+  const { workspaceDir } = ctx;
+  if (!workspaceDir) return 'Error: Workspace directory not found.';
 
-    const wctx = WorkspaceContext.fromHookContext(ctx);
-    const trustEngine = wctx.trust;
-    const trustScore = trustEngine.getScore();
-    const trustSettings = wctx.config.get('trust');
-    const isZh = wctx.config.get('language') === 'zh';
-    
-    let stage = 2;
-    let title = isZh ? '编辑者' : 'Editor';
-    let permissions = isZh 
-        ? `- 允许小范围修改 (< ${trustSettings.limits.stage_2_max_lines} 行)\n- 禁止修改风险目录`
-        : `- Small modifications (< ${trustSettings.limits.stage_2_max_lines} lines)\n- Non-risk paths only`;
-    let nextLevel = `Trust Score >= ${trustSettings.stages.stage_3_developer}`;
+  const wctx = WorkspaceContext.fromHookContext(ctx);
+  const trustEngine = wctx.trust;
+  const trustScore = trustEngine.getScore();
+  const stage = trustEngine.getStage();
+  const isZh = wctx.config.get('language') === 'zh';
+  const scorecard = trustEngine.getScorecard();
+  const hygiene = wctx.hygiene.getStats();
+  const trustBar = createProgressBar(trustScore, 100);
+  const hygieneScore = Math.min(100, hygiene.persistenceCount * 10);
+  const hygieneBar = createProgressBar(hygieneScore, 100);
+  const rewardPolicy = scorecard.reward_policy ?? 'frozen_all_positive';
+  const lastUpdated = scorecard.last_updated ?? '--';
 
-    if (trustScore < trustSettings.stages.stage_1_observer) {
-        stage = 1;
-        title = isZh ? '观察者 (只读模式)' : 'Observer (Read-only)';
-        permissions = isZh ? '- 仅限只读访问\n- 仅限诊断工具' : '- Read-only access\n- Diagnosis tools only';
-        nextLevel = `Trust Score >= ${trustSettings.stages.stage_1_observer}`;
-    } else if (trustScore < trustSettings.stages.stage_2_editor) {
-        // Default stage 2
-        nextLevel = `Trust Score >= ${trustSettings.stages.stage_2_editor}`;
-    } else if (trustScore < trustSettings.stages.stage_3_developer) {
-        stage = 3;
-        title = isZh ? '开发者' : 'Developer';
-        permissions = isZh 
-            ? `- 允许中等范围修改 (< ${trustSettings.limits.stage_3_max_lines} 行)\n- 风险目录修改需要有 PLAN (计划)`
-            : `- Medium modifications (< ${trustSettings.limits.stage_3_max_lines} lines)\n- Risk paths require READY plan`;
-        nextLevel = `Trust Score >= ${trustSettings.stages.stage_3_developer}`;
-    } else {
-        stage = 4;
-        title = isZh ? '架构师' : 'Architect';
-        permissions = isZh ? '- 🚨 **无限制访问**\n- 计划和审计非强制要求' : '- 🚨 **UNRESTRICTED access**\n- Plan and Audit are optional';
-        nextLevel = isZh ? '已达最高级' : 'MAX LEVEL REACHED';
-    }
+  if (isZh) {
+    return [
+      'Principles Disciple - Legacy Trust',
+      '=================================',
+      '',
+      `- Legacy Trust: ${trustBar} ${trustScore}/100`,
+      `- Stage: ${stage} (${formatStageTitle(stage, true)})`,
+      `- Status: legacy/frozen`,
+      `- Reward Policy: ${rewardPolicy}`,
+      `- Last Updated: ${lastUpdated}`,
+      '',
+      '说明',
+      '- 这是兼容旧控制面的 legacy trust 视图，不再代表新的长期能力模型。',
+      '- `tool_success` 与 `subagent_success` 不再自动提升 trust。',
+      '- 当前观察窗口内，trust 主要保留为兼容读数与 gate 兼容输入。',
+      '',
+      '认知卫生',
+      `- Persistence: ${hygieneBar} ${hygiene.persistenceCount} actions today`,
+      `- Total Chars Persisted: ${hygiene.totalCharsPersisted}`,
+      `- Workspace Grooming: ${hygiene.groomingExecutedCount > 0 ? 'done' : 'pending'}`,
+      '',
+      '下一步',
+      '- 在进入 Phase 3 capability shadow 之前，先看 production observation 数据是否稳定。',
+    ].join('\n');
+  }
 
-    const progressBar = createProgressBar(trustScore, 100, 15);
-    const hygiene = wctx.hygiene.getStats();
-    const persistenceScore = Math.min(100, hygiene.persistenceCount * 10); // 10 points per persistence
-    const hygieneBar = createProgressBar(persistenceScore, 100, 15);
-
-    if (isZh) {
-        return `
-📊 **Principles Disciple - 系统状态看板**
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🛡️ **安全阶级**: Stage ${stage} (${title})
-💰 **信任积分**: ${progressBar} ${trustScore}/100
-🧠 **认知卫生**: ${hygieneBar} ${hygiene.persistenceCount} 次落盘 (今日)
-
-**当前操作权限**:
-${permissions}
-
-**今日知识沉淀**:
-- 物理落盘: ${hygiene.persistenceCount} 次
-- 累计字符: ${hygiene.totalCharsPersisted} chars
-- 空间整理: ${hygiene.groomingExecutedCount > 0 ? '🟢 良好' : '🟡 待整理'}
-
-**下一次晋升条件**: ${nextLevel}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-*💡 提示：勤记笔记 (PLAN.md/memory) 有助于对抗上下文遗忘，提升系统稳定性。*
-`.trim();
-    } else {
-        return `
-📊 **Principles Disciple - System Dashboard**
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🛡️ **Security Stage**: Stage ${stage} (${title})
-💰 **Trust Score**: ${progressBar} ${trustScore}/100
-🧠 **Cognitive Hygiene**: ${hygieneBar} ${hygiene.persistenceCount} actions (Today)
-
-**Current Permissions**:
-${permissions}
-
-**Knowledge Assets Today**:
-- Physical Persists: ${hygiene.persistenceCount} actions
-- Total Chars: ${hygiene.totalCharsPersisted} chars
-- Workspace Grooming: ${hygiene.groomingExecutedCount > 0 ? '🟢 Good' : '🟡 Pending'}
-
-**Next Promotion Requirement**: ${nextLevel}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-*💡 Hint: Frequent notes (PLAN.md/memory) prevent amnesia and ensure task continuity.*
-`.trim();
-    }
+  return [
+    'Principles Disciple - Legacy Trust',
+    '=================================',
+    '',
+    `- Legacy Trust: ${trustBar} ${trustScore}/100`,
+    `- Stage: ${stage} (${formatStageTitle(stage, false)})`,
+    '- Status: legacy/frozen',
+    `- Reward Policy: ${rewardPolicy}`,
+    `- Last Updated: ${lastUpdated}`,
+    '',
+    'Notes',
+    '- This is a compatibility view of legacy trust, not the future long-term capability model.',
+    '- `tool_success` and `subagent_success` no longer raise trust automatically.',
+    '- During the current observation window, trust remains mainly for compatibility reads and gate compatibility.',
+    '',
+    'Cognitive Hygiene',
+    `- Persistence: ${hygieneBar} ${hygiene.persistenceCount} actions today`,
+    `- Total Chars Persisted: ${hygiene.totalCharsPersisted}`,
+    `- Workspace Grooming: ${hygiene.groomingExecutedCount > 0 ? 'done' : 'pending'}`,
+    '',
+    'Next',
+    '- Do not move into Phase 3 capability shadow until production observation data is stable.',
+  ].join('\n');
 }

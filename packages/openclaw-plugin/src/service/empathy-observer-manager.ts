@@ -110,7 +110,42 @@ export class EmpathyObserverManager {
             if (parsed?.damageDetected && sessionId) {
                 const wctx = WorkspaceContext.fromHookContext({ workspaceDir });
                 const score = this.scoreFromSeverity(parsed.severity, wctx.config);
-                trackFriction(sessionId, score, `observer_empathy_${parsed.severity || 'mild'}`, workspaceDir);
+                trackFriction(
+                    sessionId,
+                    score,
+                    `observer_empathy_${parsed.severity || 'mild'}`,
+                    workspaceDir,
+                    { source: 'user_empathy' }
+                );
+                const eventId = `emp_obs_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+                wctx.eventLog.recordPainSignal(sessionId, {
+                    score,
+                    source: 'user_empathy',
+                    reason: parsed.reason || 'Empathy observer detected likely user frustration.',
+                    isRisky: false,
+                    origin: 'system_infer',
+                    severity: this.normalizeSeverity(parsed.severity),
+                    confidence: this.normalizeConfidence(parsed.confidence),
+                    detection_mode: 'structured',
+                    deduped: false,
+                    trigger_text_excerpt: rawText.substring(0, 120),
+                    raw_score: score,
+                    calibrated_score: score,
+                    eventId,
+                });
+                try {
+                    wctx.trajectory?.recordPainEvent?.({
+                        sessionId,
+                        source: 'user_empathy',
+                        score,
+                        reason: parsed.reason || 'Empathy observer detected likely user frustration.',
+                        severity: this.normalizeSeverity(parsed.severity),
+                        origin: 'system_infer',
+                        confidence: this.normalizeConfidence(parsed.confidence),
+                    });
+                } catch (error) {
+                    api.logger.warn(`[PD:EmpathyObserver] Failed to persist observer pain event for ${sessionId}: ${String(error)}`);
+                }
                 api.logger.info(`[PD:EmpathyObserver] Applied GFI +${score} for ${sessionId}`);
             }
         } catch (error) {
@@ -177,6 +212,17 @@ export class EmpathyObserverManager {
         if (severity === 'severe') return Number(config.get('empathy_engine.penalties.severe') ?? 40);
         if (severity === 'moderate') return Number(config.get('empathy_engine.penalties.moderate') ?? 25);
         return Number(config.get('empathy_engine.penalties.mild') ?? 10);
+    }
+
+    private normalizeSeverity(severity: string | undefined): 'mild' | 'moderate' | 'severe' {
+        if (severity === 'severe') return 'severe';
+        if (severity === 'moderate') return 'moderate';
+        return 'mild';
+    }
+
+    private normalizeConfidence(value: number | undefined): number {
+        if (!Number.isFinite(value)) return 1;
+        return Math.max(0, Math.min(1, Number(value)));
     }
 }
 

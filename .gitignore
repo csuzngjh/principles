@@ -58,3 +58,8 @@ code-concise/
 packages/openclaw-plugin/tests/interactive-conversation/output/
 tests/reports/feature-testing/
 tests/archive/reports-2026-03-11/
+
+# Local agent scratch and review memory
+.learnings/
+myagents/
+docs/design/gfi-trust-capability-simplification-2026-03-20.md

@@ -220,6 +220,14 @@ export class EventLog {
     this.flushStats();
   }
 
+  /**
+   * Return in-memory buffered events that have not been flushed yet.
+   * Intended for live runtime summaries that should not lag behind disk snapshots.
+   */
+  getBufferedEvents(): EventLogEntry[] {
+    return this.eventBuffer.map((entry) => ({ ...entry, data: { ...entry.data } }));
+  }
+
   private flushEvents(): void {
     if (this.eventBuffer.length === 0) return;
     

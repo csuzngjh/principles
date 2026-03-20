@@ -76,6 +76,7 @@ export interface ToolCallEventData {
 export interface PainSignalEventData {
   score: number;
   source: string;
+  eventId?: string;
   reason?: string;
   isRisky?: boolean;
   origin?: 'assistant_self_report' | 'user_manual' | 'system_infer';
