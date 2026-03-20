@@ -5,12 +5,26 @@ import { existsSync, readdirSync, statSync, readFileSync, writeFileSync } from '
 import fse from 'fs-extra';
 import * as path from 'path';
 import * as os from 'os';
-import { execSync } from 'child_process';
+import { execSync, ExecSyncOptions } from 'child_process';
 import ora from 'ora';
 import pc from 'picocolors';
 import { logger } from './utils/logger.js';
 import { getOpenClawConfigDir, getPluginExtDir } from './utils/env.js';
 import type { InstallOptions } from './prompts.js';
+
+// 跨平台 execSync 选项：Windows 需要 shell，Unix 可以直接执行
+const getExecOptions = (cwd: string): ExecSyncOptions => {
+  const options: ExecSyncOptions = {
+    cwd,
+    stdio: 'inherit' as const,
+    env: process.env,
+  };
+  // Windows 需要 shell 来正确执行 npm 命令
+  if (process.platform === 'win32') {
+    options.shell = process.env.ComSpec || 'cmd.exe';
+  }
+  return options;
+};
 
 const ALWAYS_ON_SKILLS = new Set([
   'admin',
@@ -67,21 +81,13 @@ async function cleanOldVersion(): Promise<void> {
 async function buildPlugin(pluginDir: string): Promise<void> {
   logger.step('构建插件');
   
+  const execOpts = getExecOptions(pluginDir);
+  
   // 安装依赖
-  execSync('npm install --silent', { 
-    cwd: pluginDir, 
-    stdio: 'inherit',
-    shell: true,
-    env: process.env
-  });
+  execSync('npm install --silent', execOpts);
   
   // 构建
-  execSync('npm run build', { 
-    cwd: pluginDir, 
-    stdio: 'inherit',
-    shell: true,
-    env: process.env
-  });
+  execSync('npm run build', execOpts);
   
   logger.success('插件构建完成');
 }
@@ -98,15 +104,15 @@ async function installPlugin(pluginDir: string): Promise<void> {
   
   // 方案一：尝试使用 openclaw plugins install（静默模式）
   try {
-    const result = execSync(
-      `openclaw plugins install "${pluginDir}" 2>&1`,
-      { 
-        encoding: 'utf-8', 
-        timeout: 60000, 
-        shell: true,
-        env: process.env
-      }
-    );
+    const execOpts: ExecSyncOptions = {
+      encoding: 'utf-8',
+      timeout: 60000,
+      env: process.env,
+    };
+    if (process.platform === 'win32') {
+      execOpts.shell = process.env.ComSpec || 'cmd.exe';
+    }
+    execSync(`openclaw plugins install "${pluginDir}" 2>&1`, execOpts);
     // 检查是否安装成功
     if (existsSync(extDir) && existsSync(path.join(extDir, 'dist', 'index.js'))) {
       logger.success('插件安装成功 (openclaw)');
@@ -163,12 +169,8 @@ async function installPluginDependencies(): Promise<void> {
   if (!existsSync(micromatchPath)) {
     logger.step('安装插件运行时依赖');
     try {
-      execSync('npm install --silent micromatch@^4.0.8 @sinclair/typebox@^0.34.48', {
-        cwd: extDir,
-        stdio: 'inherit',
-        shell: true,
-        env: process.env
-      });
+      const execOpts = getExecOptions(extDir);
+      execSync('npm install --silent micromatch@^4.0.8 @sinclair/typebox@^0.34.48', execOpts);
       logger.success('插件依赖安装完成');
     } catch (error) {
       logger.warn('依赖安装失败，插件可能无法正常工作');
