@@ -9,6 +9,7 @@ import { extractCommonSubstring } from '../utils/nlp.js';
 import { SystemLogger } from '../core/system-logger.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { initPersistence, flushAllSessions } from '../core/session-tracker.js';
+import { acquireLockAsync, releaseLock, type LockContext } from '../utils/file-lock.js';
 
 let intervalId: NodeJS.Timeout | null = null;
 
@@ -97,63 +98,27 @@ function isPendingPainCandidate(status: string | undefined): boolean {
     return status === undefined || status === 'pending';
 }
 
-/**
- * Acquire an exclusive file lock for the given resource.
- * Returns a release function. Uses 'wx' flag for atomic exclusive create.
- * Detects stale locks by checking PID and mtime.
- */
-export function acquireQueueLock(lockPath: string, logger: any): (() => void) | null {
-    let retries = 0;
-    while (retries < LOCK_MAX_RETRIES) {
-        try {
-            const fd = fs.openSync(lockPath, 'wx');
-            fs.writeSync(fd, `${process.pid}\n${Date.now()}`);
-            fs.closeSync(fd);
-            return () => {
-                try { fs.unlinkSync(lockPath); } catch { /* ignore */ }
-            };
-        } catch (err: any) {
-            if (err.code === 'EEXIST') {
-                // Check if lock is stale
-                try {
-                    const stat = fs.statSync(lockPath);
-                    const content = fs.readFileSync(lockPath, 'utf8').trim();
-                    const pid = parseInt(content.split('\n')[0] || '0', 10);
-                    let isStale = false;
-                    if (pid > 0) {
-                        try { process.kill(pid, 0); } catch (e: any) {
-                            if (e.code === 'ESRCH') isStale = true;
-                        }
-                        if (!isStale && Date.now() - stat.mtimeMs > LOCK_STALE_MS) isStale = true;
-                    } else if (Date.now() - stat.mtimeMs > LOCK_STALE_MS) {
-                        isStale = true;
-                    }
-                    if (isStale) {
-                        fs.unlinkSync(lockPath);
-                        retries++;
-                        const start = Date.now();
-                        while (Date.now() - start < LOCK_RETRY_DELAY_MS) { /* spin */ }
-                        continue;
-                    }
-                } catch { /* stat/read failed, treat as busy */ }
-                retries++;
-                const start = Date.now();
-                while (Date.now() - start < LOCK_RETRY_DELAY_MS) { /* spin */ }
-                continue;
-            }
-            throw err;
-        }
+export async function acquireQueueLock(resourcePath: string, logger: any, lockSuffix: string = EVOLUTION_QUEUE_LOCK_SUFFIX): Promise<() => void> {
+    try {
+        const ctx: LockContext = await acquireLockAsync(resourcePath, {
+            lockSuffix,
+            maxRetries: LOCK_MAX_RETRIES,
+            baseRetryDelayMs: LOCK_RETRY_DELAY_MS,
+            lockStaleMs: LOCK_STALE_MS,
+        });
+        return () => releaseLock(ctx);
+    } catch (error) {
+        logger?.warn?.(`[PD:EvolutionWorker] Failed to acquire lock for ${resourcePath}: ${String(error)}`);
+        throw error;
     }
-    logger?.warn?.(`[PD:EvolutionWorker] Failed to acquire lock after ${LOCK_MAX_RETRIES} retries: ${lockPath}`);
-    return null;
 }
 
-function requireQueueLock(lockPath: string, logger: any, scope: string): () => void {
-    const releaseLock = acquireQueueLock(lockPath, logger);
-    if (!releaseLock) {
-        throw new Error(`[PD:EvolutionWorker] ${scope}: queue lock unavailable for ${lockPath}`);
+async function requireQueueLock(resourcePath: string, logger: any, scope: string, lockSuffix: string = EVOLUTION_QUEUE_LOCK_SUFFIX): Promise<() => void> {
+    try {
+        return await acquireQueueLock(resourcePath, logger, lockSuffix);
+    } catch {
+        throw new Error(`[PD:EvolutionWorker] ${scope}: queue lock unavailable for ${resourcePath}`);
     }
-    return releaseLock;
 }
 
 export function extractEvolutionTaskId(task: string): string | null {
@@ -203,7 +168,7 @@ export function hasEquivalentPromotedRule(dictionary: { getAllRules(): Record<st
     });
 }
 
-function checkPainFlag(wctx: WorkspaceContext, logger: any) {
+async function checkPainFlag(wctx: WorkspaceContext, logger: any) {
     try {
         const painFlagPath = wctx.resolve('PAIN_FLAG');
         if (!fs.existsSync(painFlagPath)) return;
@@ -230,8 +195,7 @@ function checkPainFlag(wctx: WorkspaceContext, logger: any) {
         if (logger) logger.info(`[PD:EvolutionWorker] Detected pain flag (score: ${score}, source: ${source}). Enqueueing evolution task.`);
 
         const queuePath = wctx.resolve('EVOLUTION_QUEUE');
-        const lockPath = queuePath + EVOLUTION_QUEUE_LOCK_SUFFIX;
-        const releaseLock = requireQueueLock(lockPath, logger, 'checkPainFlag');
+        const releaseLock = await requireQueueLock(queuePath, logger, 'checkPainFlag');
 
         try {
             let queue: EvolutionQueueItem[] = [];
@@ -278,13 +242,12 @@ function checkPainFlag(wctx: WorkspaceContext, logger: any) {
     }
 }
 
-function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventLog: any) {
+async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventLog: any) {
     const queuePath = wctx.resolve('EVOLUTION_QUEUE');
     if (!fs.existsSync(queuePath)) return;
     const directivePath = wctx.resolve('EVOLUTION_DIRECTIVE');
 
-    const lockPath = queuePath + EVOLUTION_QUEUE_LOCK_SUFFIX;
-    const releaseLock = requireQueueLock(lockPath, logger, 'processEvolutionQueue');
+    const releaseLock = await requireQueueLock(queuePath, logger, 'processEvolutionQueue');
 
     try {
         let queue: EvolutionQueueItem[] = [];
@@ -426,7 +389,7 @@ async function processDetectionQueue(wctx: WorkspaceContext, api: OpenClawPlugin
                 } catch (e) {
                     if (logger) logger.debug?.(`[PD:EvolutionWorker] L3 Semantic search failed: ${String(e)}`);
                 }
-                trackPainCandidate(text, wctx);
+                await trackPainCandidate(text, wctx);
             }
         }
     } catch (err) {
@@ -434,12 +397,11 @@ async function processDetectionQueue(wctx: WorkspaceContext, api: OpenClawPlugin
     }
 }
 
-export function trackPainCandidate(text: string, wctx: WorkspaceContext) {
+export async function trackPainCandidate(text: string, wctx: WorkspaceContext) {
     if (!shouldTrackPainCandidate(text)) return;
 
     const candidatePath = wctx.resolve('PAIN_CANDIDATES');
-    const lockPath = candidatePath + PAIN_CANDIDATES_LOCK_SUFFIX;
-    const releaseLock = requireQueueLock(lockPath, console, 'trackPainCandidate');
+    const releaseLock = await requireQueueLock(candidatePath, console, 'trackPainCandidate', PAIN_CANDIDATES_LOCK_SUFFIX);
 
     try {
         let data = { candidates: {} as any };
@@ -474,12 +436,11 @@ export function trackPainCandidate(text: string, wctx: WorkspaceContext) {
     }
 }
 
-export function processPromotion(wctx: WorkspaceContext, logger: any, eventLog: any) {
+export async function processPromotion(wctx: WorkspaceContext, logger: any, eventLog: any) {
     const candidatePath = wctx.resolve('PAIN_CANDIDATES');
     if (!fs.existsSync(candidatePath)) return;
 
-    const lockPath = candidatePath + PAIN_CANDIDATES_LOCK_SUFFIX;
-    const releaseLock = requireQueueLock(lockPath, logger, 'processPromotion');
+    const releaseLock = await requireQueueLock(candidatePath, logger, 'processPromotion', PAIN_CANDIDATES_LOCK_SUFFIX);
 
     try {
         const config = wctx.config;
@@ -537,17 +498,16 @@ export function processPromotion(wctx: WorkspaceContext, logger: any, eventLog: 
     }
 }
 
-export function registerEvolutionTaskSession(
+export async function registerEvolutionTaskSession(
     workspaceResolve: (key: string) => string,
     taskId: string,
     sessionKey: string,
     logger?: { warn?: (message: string) => void; info?: (message: string) => void }
-): boolean {
+): Promise<boolean> {
     const queuePath = workspaceResolve('EVOLUTION_QUEUE');
     if (!fs.existsSync(queuePath)) return false;
 
-    const lockPath = queuePath + EVOLUTION_QUEUE_LOCK_SUFFIX;
-    const releaseLock = requireQueueLock(lockPath, logger, 'registerEvolutionTaskSession');
+    const releaseLock = await requireQueueLock(queuePath, logger, 'registerEvolutionTaskSession');
 
     try {
         const queue = JSON.parse(fs.readFileSync(queuePath, 'utf8')) as EvolutionQueueItem[];
@@ -603,27 +563,31 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
         const interval = config.get('intervals.worker_poll_ms') || (15 * 60 * 1000);
 
         intervalId = setInterval(() => {
-            checkPainFlag(wctx, logger);
-            processEvolutionQueue(wctx, logger, eventLog);
-            if (api) {
-                processDetectionQueue(wctx, api, eventLog).catch(err => {
-                    if (logger) logger.error(`[PD:EvolutionWorker] Error in detection queue: ${String(err)}`);
-                });
-            }
-            processPromotion(wctx, logger, eventLog);
-            wctx.dictionary.flush();
-            flushAllSessions();
+            void (async () => {
+                await checkPainFlag(wctx, logger);
+                await processEvolutionQueue(wctx, logger, eventLog);
+                if (api) {
+                    await processDetectionQueue(wctx, api, eventLog);
+                }
+                await processPromotion(wctx, logger, eventLog);
+                wctx.dictionary.flush();
+                flushAllSessions();
+            })().catch((err) => {
+                if (logger) logger.error(`[PD:EvolutionWorker] Error in worker interval: ${String(err)}`);
+            });
         }, interval);
 
         setTimeout(() => {
-            checkPainFlag(wctx, logger);
-            processEvolutionQueue(wctx, logger, eventLog);
-            if (api) {
-                processDetectionQueue(wctx, api, eventLog).catch(err => {
-                    if (logger) logger.error(`[PD:EvolutionWorker] Startup detection queue failed: ${String(err)}`);
-                });
-            }
-            processPromotion(wctx, logger, eventLog);
+            void (async () => {
+                await checkPainFlag(wctx, logger);
+                await processEvolutionQueue(wctx, logger, eventLog);
+                if (api) {
+                    await processDetectionQueue(wctx, api, eventLog);
+                }
+                await processPromotion(wctx, logger, eventLog);
+            })().catch((err) => {
+                if (logger) logger.error(`[PD:EvolutionWorker] Startup worker cycle failed: ${String(err)}`);
+            });
         }, initialDelay);
     },
 

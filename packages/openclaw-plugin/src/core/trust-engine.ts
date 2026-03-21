@@ -10,6 +10,7 @@ import { EventLogService } from './event-log.js';
 import { resolvePdPath } from './paths.js';
 import { ConfigService } from './config-service.js';
 import { TrajectoryRegistry } from './trajectory.js';
+import { EXPLORATORY_TOOLS as SHARED_EXPLORATORY_TOOLS } from '../constants/tools.js';
 
 export interface TrustScorecard {
     trust_score: number;
@@ -32,28 +33,7 @@ export interface TrustScorecard {
 
 export type TrustStage = 1 | 2 | 3 | 4;
 
-export const EXPLORATORY_TOOLS = [
-    // 文件读取
-    'read', 'read_file', 'read_many_files', 'image_read',
-    // 搜索和列表
-    'search_file_content', 'grep', 'grep_search', 'list_directory', 'ls', 'glob',
-    // Web
-    'web_fetch', 'web_search',
-    // 用户交互
-    'ask_user', 'ask_user_question',
-    // LSP
-    'lsp_hover', 'lsp_goto_definition', 'lsp_find_references',
-    // 内存和状态
-    'memory_recall', 'save_memory', 'todo_read', 'todo_write',
-    // 状态查询
-    'pd-status', 'trust', 'report',
-];
-
-export const CONSTRUCTIVE_TOOLS = [
-    'write', 'write_file', 'edit', 'edit_file', 'replace', 'apply_patch',
-    'insert', 'patch', 'delete_file', 'move_file', 'run_shell_command',
-  'pd_run_worker', 'sessions_spawn', 'evolve-task', 'init-strategy'
-];
+export const EXPLORATORY_TOOLS = new Set<string>(SHARED_EXPLORATORY_TOOLS);
 
 const LEGACY_TRUST_REWARD_POLICY = 'frozen_all_positive' as const;
 
@@ -162,7 +142,7 @@ export class TrustEngine {
         const toolName = context?.toolName;
 
         // 1. Check if this is an exploratory tool success
-        const isExploratory = toolName && EXPLORATORY_TOOLS.includes(toolName);
+        const isExploratory = toolName ? EXPLORATORY_TOOLS.has(toolName) : false;
 
         if (reason === 'tool_success' && isExploratory) {
             this.scorecard.exploratory_failure_streak = 0;
@@ -183,7 +163,7 @@ export class TrustEngine {
         const toolName = context?.toolName;
 
         // 1. Classification: Is this an exploratory failure?
-        const isExploratory = toolName && EXPLORATORY_TOOLS.includes(toolName);
+        const isExploratory = toolName ? EXPLORATORY_TOOLS.has(toolName) : false;
 
         // 2. Cold start grace (only for non-risky actions)
         if (type !== 'risky' && this.isColdStart() && (this.scorecard.grace_failures_remaining || 0) > 0) {

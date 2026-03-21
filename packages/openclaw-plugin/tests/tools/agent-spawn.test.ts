@@ -19,7 +19,7 @@ vi.mock('../../src/service/evolution-worker.js', async () => {
   const actual = await vi.importActual<typeof import('../../src/service/evolution-worker.js')>('../../src/service/evolution-worker.js');
   return {
     ...actual,
-    registerEvolutionTaskSession: vi.fn(() => true),
+    registerEvolutionTaskSession: vi.fn(async () => true),
   };
 });
 

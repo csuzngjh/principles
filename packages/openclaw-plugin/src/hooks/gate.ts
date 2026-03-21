@@ -9,37 +9,22 @@ import { WorkspaceContext } from '../core/workspace-context.js';
 import { checkEvolutionGate } from '../core/evolution-engine.js';
 import { EventLogService } from '../core/event-log.js';
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult } from '../openclaw-sdk.js';
+import {
+  AGENT_TOOLS,
+  BASH_TOOL_NAMES,
+  BASH_TOOLS_SET,
+  HIGH_RISK_TOOLS,
+  LOW_RISK_WRITE_TOOLS,
+  WRITE_TOOLS,
+} from '../constants/tools.js';
 
 // ═══ GFI Gate Tool Tiers ═══
 // TIER 0: 只读工具 - 永不拦截
-const READ_ONLY_TOOLS = new Set([
-  'read', 'read_file', 'read_many_files', 'image_read',
-  'search_file_content', 'grep', 'grep_search', 'list_directory', 'ls', 'glob',
-  'lsp_hover', 'lsp_goto_definition', 'lsp_find_references',
-  'web_fetch', 'web_search', 'ref_search_documentation', 'ref_read_url',
-  'resolve-library-id', 'get-library-docs',
-  'todo_read', 'save_memory',
-  'deep_reflect',
-]);
-
 // TIER 1: 低风险修改 - GFI >= low_risk_block 时拦截
 // 注意：pd_run_worker、sessions_spawn、task 是 Agent 派生工具，不应被 GFI Gate 拦截
 // 它们属于 AGENT_TOOLS，在早期过滤后直接放行
-const LOW_RISK_WRITE_TOOLS = new Set([
-  'write', 'write_file',
-  'edit', 'edit_file', 'replace', 'apply_patch', 'insert', 'patch',
-]);
-
 // TIER 2: 高风险操作 - GFI >= high_risk_block 时拦截
-const HIGH_RISK_TOOLS = new Set([
-  'delete_file', 'move_file',
-]);
-
 // TIER 3: Bash 命令 - 根据内容判断
-const BASH_TOOLS_SET = new Set([
-  'bash', 'run_shell_command', 'exec', 'execute', 'shell', 'cmd',
-]);
-
 /**
  * 分析 Bash 命令风险等级
  */
@@ -150,13 +135,9 @@ export function handleBeforeToolCall(
   const logger = ctx.logger || console;
 
   // 1. Identify tool type
-  const WRITE_TOOLS = ['write', 'edit', 'apply_patch', 'write_file', 'replace', 'insert', 'patch', 'edit_file', 'delete_file', 'move_file'];
-  const BASH_TOOLS = ['bash', 'run_shell_command', 'exec', 'execute', 'shell', 'cmd'];
-  const AGENT_TOOLS = ['pd_run_worker', 'sessions_spawn'];
-  
-  const isBash = BASH_TOOLS.includes(event.toolName);
-  const isWriteTool = WRITE_TOOLS.includes(event.toolName);
-  const isAgentTool = AGENT_TOOLS.includes(event.toolName);
+  const isBash = BASH_TOOLS_SET.has(event.toolName);
+  const isWriteTool = WRITE_TOOLS.has(event.toolName);
+  const isAgentTool = AGENT_TOOLS.has(event.toolName);
   // Profile loaded first for config-driven behavior (see below)
   
   if (!ctx.workspaceDir || (!isWriteTool && !isBash && !isAgentTool)) {

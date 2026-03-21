@@ -116,13 +116,13 @@ describe('EvolutionWorkerService', () => {
         expect(shouldTrackPainCandidate('Tool edit failed on MEMORY.md')).toBe(true);
     });
 
-    it('should initialize candidates as pending and keep longer samples', () => {
+    it('should initialize candidates as pending and keep longer samples', async () => {
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pain-candidate-'));
         const candidatePath = path.join(dir, 'pain_candidates.json');
         const longText = `Tool edit failed on MEMORY.md: ${'x'.repeat(1200)}`;
 
         try {
-            trackPainCandidate(longText, {
+            await trackPainCandidate(longText, {
                 resolve: () => candidatePath,
             } as any);
 
@@ -142,7 +142,7 @@ describe('EvolutionWorkerService', () => {
         expect(extractEvolutionTaskId('plain task without id')).toBeNull();
     });
 
-    it('should register assigned diagnostician session on the matching in-progress task', () => {
+    it('should register assigned diagnostician session on the matching in-progress task', async () => {
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-evolution-session-'));
         const queuePath = path.join(dir, 'evolution_queue.json');
 
@@ -152,7 +152,7 @@ describe('EvolutionWorkerService', () => {
         ], null, 2), 'utf8');
 
         try {
-            const registered = registerEvolutionTaskSession(
+            const registered = await registerEvolutionTaskSession(
                 () => queuePath,
                 'task-b',
                 'agent:diagnostician:session-1',
@@ -168,7 +168,7 @@ describe('EvolutionWorkerService', () => {
         }
     });
 
-    it('should promote legacy candidates even when status is missing', () => {
+    it('should promote legacy candidates even when status is missing', async () => {
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-promotion-'));
         const candidatePath = path.join(dir, 'pain_candidates.json');
         const addRule = vi.fn();
@@ -188,7 +188,7 @@ describe('EvolutionWorkerService', () => {
         }, null, 2), 'utf8');
 
         try {
-            processPromotion({
+            await processPromotion({
                 workspaceDir: dir,
                 resolve: () => candidatePath,
                 config: {
@@ -212,7 +212,7 @@ describe('EvolutionWorkerService', () => {
         }
     });
 
-    it('should flush the dictionary on its interval', () => {
+    it('should flush the dictionary on its interval', async () => {
         const mockDict = {
             flush: vi.fn()
         };
@@ -231,7 +231,7 @@ describe('EvolutionWorkerService', () => {
         EvolutionWorkerService.start(ctx as any);
 
         // Advance by 15 minutes
-        vi.advanceTimersByTime(15 * 60 * 1000);
+        await vi.advanceTimersByTimeAsync(15 * 60 * 1000);
 
         expect(mockDict.flush).toHaveBeenCalled();
         // Service now uses workspace-specific stateDir, not ctx.stateDir

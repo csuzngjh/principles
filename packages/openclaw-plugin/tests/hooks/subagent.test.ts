@@ -5,6 +5,9 @@ import { WorkspaceContext } from '../../src/core/workspace-context.js';
 
 vi.mock('fs');
 vi.mock('../../src/core/workspace-context.js');
+vi.mock('../../src/service/evolution-worker.js', () => ({
+    acquireQueueLock: vi.fn(async () => () => undefined),
+}));
 
 const mockEmitSync = vi.fn();
 

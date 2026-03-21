@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import { writePainFlag } from '../core/pain.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { empathyObserverManager, type EmpathyObserverApi } from '../service/empathy-observer-manager.js';
-import { acquireQueueLock, EVOLUTION_QUEUE_LOCK_SUFFIX } from '../service/evolution-worker.js';
+import { acquireQueueLock } from '../service/evolution-worker.js';
 
 function emitSubagentPainEvent(
     wctx: WorkspaceContext,
@@ -125,16 +125,11 @@ export async function handleSubagentEnded(
     const queuePath = wctx.resolve('EVOLUTION_QUEUE');
     if (!fs.existsSync(queuePath)) return;
 
-    const lockPath = queuePath + EVOLUTION_QUEUE_LOCK_SUFFIX;
-    const releaseLock = acquireQueueLock(lockPath, console);
-    if (!releaseLock) {
-        console.error('[PD:Subagent] Failed to acquire queue lock while completing evolution task');
-        return;
-    }
+    const releaseLock = await acquireQueueLock(queuePath, console);
 
     try {
         const queue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
-        let changed = false;
+        let completedTaskId: string | null = null;
 
         const matchedTask = queue.find((task: any) =>
             task?.status === 'in_progress'
@@ -146,14 +141,14 @@ export async function handleSubagentEnded(
             matchedTask.status = 'completed';
             matchedTask.completed_at = new Date().toISOString();
             delete matchedTask.assigned_session_key;
-            changed = true;
-            cleanupPainFlagForTask(wctx, matchedTask.id, queue);
+            completedTaskId = matchedTask.id;
         } else {
             console.warn(`[PD:Subagent] No in-progress evolution task matched subagent session ${targetSessionKey}`);
         }
 
-        if (changed) {
+        if (completedTaskId) {
             fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+            cleanupPainFlagForTask(wctx, completedTaskId, queue);
         }
     } catch (e) {
         console.error(`[PD:Subagent] Failed to update evolution queue: ${String(e)}`);
