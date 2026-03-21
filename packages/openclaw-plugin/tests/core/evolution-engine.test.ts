@@ -8,6 +8,8 @@ import * as path from 'path';
 import * as os from 'os';
 import {
   EvolutionEngine,
+  disposeAllEvolutionEngines,
+  disposeEvolutionEngine,
   getEvolutionEngine,
 } from '../../src/core/evolution-engine.js';
 import {
@@ -48,6 +50,7 @@ describe('EvolutionEngine', () => {
   });
 
   afterEach(() => {
+    disposeAllEvolutionEngines();
     cleanupWorkspace(workspace);
   });
 
@@ -334,6 +337,17 @@ describe('EvolutionEngine', () => {
       const e1 = getEvolutionEngine(ws);
       const e2 = getEvolutionEngine(ws);
       expect(e1).toBe(e2);
+      disposeEvolutionEngine(ws);
+      cleanupWorkspace(ws);
+    });
+
+    test('disposeEvolutionEngine should remove cached instance', () => {
+      const ws = createTempWorkspace();
+      const e1 = getEvolutionEngine(ws);
+      disposeEvolutionEngine(ws);
+      const e2 = getEvolutionEngine(ws);
+      expect(e2).not.toBe(e1);
+      disposeEvolutionEngine(ws);
       cleanupWorkspace(ws);
     });
   });

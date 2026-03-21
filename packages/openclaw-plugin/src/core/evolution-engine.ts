@@ -558,6 +558,14 @@ export class EvolutionEngine {
   private generateId(): string {
     return `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
   }
+
+  dispose(): void {
+    if (this.retryTimer) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = null;
+    }
+    this.retryQueue = [];
+  }
 }
 
 // ===== 便捷函数 =====
@@ -572,6 +580,21 @@ export function getEvolutionEngine(workspaceDir: string): EvolutionEngine {
     _instances.set(resolved, new EvolutionEngine(resolved));
   }
   return _instances.get(resolved)!;
+}
+
+export function disposeEvolutionEngine(workspaceDir: string): void {
+  const resolved = path.resolve(workspaceDir);
+  const instance = _instances.get(resolved);
+  if (!instance) return;
+  instance.dispose();
+  _instances.delete(resolved);
+}
+
+export function disposeAllEvolutionEngines(): void {
+  for (const instance of _instances.values()) {
+    instance.dispose();
+  }
+  _instances.clear();
 }
 
 /** 记录成功（便捷函数） */

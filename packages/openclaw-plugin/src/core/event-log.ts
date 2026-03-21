@@ -525,4 +525,11 @@ export class EventLogService {
       instance.flush();
     }
   }
+
+  static disposeAll(): void {
+    for (const instance of this.instances.values()) {
+      instance.dispose();
+    }
+    this.instances.clear();
+  }
 }

@@ -310,7 +310,22 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
                 timestamp: nowIso
             };
 
-            fs.writeFileSync(directivePath, JSON.stringify(directive, null, 2), 'utf8');
+            try {
+                fs.writeFileSync(directivePath, JSON.stringify(directive, null, 2), 'utf8');
+            } catch (directiveError) {
+                highestScoreTask.status = 'pending';
+                delete highestScoreTask.started_at;
+                delete highestScoreTask.task;
+                delete highestScoreTask.assigned_session_key;
+                try {
+                    fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+                } catch (rollbackError) {
+                    throw new Error(
+                        `[PD:EvolutionWorker] Failed to persist directive and failed to roll back queue: ${String(directiveError)}; rollback=${String(rollbackError)}`
+                    );
+                }
+                throw directiveError;
+            }
         } else {
             const hasInProgressTask = queue.some((task) => task.status === 'in_progress');
             if (!hasInProgressTask && fs.existsSync(directivePath)) {

@@ -5,6 +5,22 @@ import { WorkspaceContext } from '../core/workspace-context.js';
 import { empathyObserverManager, type EmpathyObserverApi } from '../service/empathy-observer-manager.js';
 import { acquireQueueLock } from '../service/evolution-worker.js';
 
+const COMPLETION_RETRY_DELAY_MS = 250;
+const COMPLETION_MAX_RETRIES = 3;
+const COMPLETION_RETRY_TTL_MS = 60 * 60 * 1000; // 1 hour TTL for retry entries
+const DIAGNOSTICIAN_SESSION_PREFIX = 'agent:diagnostician:';
+const completionRetryCounts = new Map<string, { count: number; expires: number }>();
+
+// Cleanup expired retry entries periodically
+function cleanupExpiredRetryEntries(): void {
+    const now = Date.now();
+    for (const [key, value] of completionRetryCounts.entries()) {
+        if (now > value.expires) {
+            completionRetryCounts.delete(key);
+        }
+    }
+}
+
 function emitSubagentPainEvent(
     wctx: WorkspaceContext,
     payload: {
@@ -33,12 +49,11 @@ function emitSubagentPainEvent(
 }
 
 function isDiagnosticianSession(targetSessionKey: string | undefined): boolean {
-    return typeof targetSessionKey === 'string' && targetSessionKey.startsWith('agent:diagnostician:');
+    return typeof targetSessionKey === 'string' && targetSessionKey.startsWith(DIAGNOSTICIAN_SESSION_PREFIX);
 }
 
 function cleanupPainFlagForTask(wctx: WorkspaceContext, completedTaskId: string, queue: any[]): void {
     const painFlagPath = wctx.resolve('PAIN_FLAG');
-    if (!fs.existsSync(painFlagPath)) return;
 
     try {
         const painData = fs.readFileSync(painFlagPath, 'utf8');
@@ -62,9 +77,36 @@ function cleanupPainFlagForTask(wctx: WorkspaceContext, completedTaskId: string,
         if (!hasRemainingActiveTasks) {
             fs.unlinkSync(painFlagPath);
         }
-    } catch (e) {
+    } catch (e: any) {
+        if (e.code === 'ENOENT') return; // File doesn't exist, nothing to clean up
         console.error(`[PD:Subagent] Failed to cleanup pain flag: ${String(e)}`);
     }
+}
+
+function getCompletionRetryKey(workspaceDir: string, targetSessionKey: string): string {
+    return `${workspaceDir}::${targetSessionKey}`;
+}
+
+function scheduleCompletionRetry(
+    event: PluginHookSubagentEndedEvent,
+    ctx: SubagentEndedHookContext,
+    attempt: number,
+): void {
+    const workspaceDir = ctx.workspaceDir;
+    const targetSessionKey = event.targetSessionKey;
+    if (!workspaceDir || !targetSessionKey || attempt >= COMPLETION_MAX_RETRIES) {
+        return;
+    }
+
+    const retryKey = getCompletionRetryKey(workspaceDir, targetSessionKey);
+    completionRetryCounts.set(retryKey, attempt + 1);
+    setTimeout(() => {
+        void handleSubagentEnded(event, ctx).finally(() => {
+            if ((completionRetryCounts.get(retryKey) || 0) <= attempt + 1) {
+                completionRetryCounts.delete(retryKey);
+            }
+        });
+    }, COMPLETION_RETRY_DELAY_MS);
 }
 
 type SubagentEndedHookContext = PluginHookSubagentContext & {
@@ -125,9 +167,12 @@ export async function handleSubagentEnded(
     const queuePath = wctx.resolve('EVOLUTION_QUEUE');
     if (!fs.existsSync(queuePath)) return;
 
-    const releaseLock = await acquireQueueLock(queuePath, console);
+    const retryKey = getCompletionRetryKey(workspaceDir, targetSessionKey);
+    const attempt = completionRetryCounts.get(retryKey) || 0;
+    let releaseLock: (() => void) | null = null;
 
     try {
+        releaseLock = await acquireQueueLock(queuePath, console);
         const queue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
         let completedTaskId: string | null = null;
 
@@ -152,7 +197,8 @@ export async function handleSubagentEnded(
         }
     } catch (e) {
         console.error(`[PD:Subagent] Failed to update evolution queue: ${String(e)}`);
+        scheduleCompletionRetry(event, ctx, attempt);
     } finally {
-        releaseLock();
+        releaseLock?.();
     }
 }

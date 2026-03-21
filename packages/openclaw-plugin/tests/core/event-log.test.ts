@@ -146,6 +146,29 @@ describe('EventLog', () => {
       
       logger1.dispose();
     });
+
+    it('should dispose and clear all cached instances', () => {
+      const dirA = fs.mkdtempSync(path.join(os.tmpdir(), 'event-log-service-a-'));
+      const dirB = fs.mkdtempSync(path.join(os.tmpdir(), 'event-log-service-b-'));
+
+      try {
+        const loggerA = EventLogService.get(dirA);
+        const loggerB = EventLogService.get(dirB);
+
+        const disposeSpyA = vi.spyOn(loggerA, 'dispose');
+        const disposeSpyB = vi.spyOn(loggerB, 'dispose');
+
+        EventLogService.disposeAll();
+
+        expect(disposeSpyA).toHaveBeenCalled();
+        expect(disposeSpyB).toHaveBeenCalled();
+        expect(EventLogService.get(dirA)).not.toBe(loggerA);
+      } finally {
+        EventLogService.disposeAll();
+        fs.rmSync(dirA, { recursive: true, force: true });
+        fs.rmSync(dirB, { recursive: true, force: true });
+      }
+    });
   });
 
   describe('session empathy aggregation', () => {

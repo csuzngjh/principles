@@ -1,7 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { handleSubagentEnded } from '../../src/hooks/subagent.js';
 import * as fs from 'fs';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
+import * as evolutionWorker from '../../src/service/evolution-worker.js';
 
 vi.mock('fs');
 vi.mock('../../src/core/workspace-context.js');
@@ -42,8 +43,13 @@ describe('Subagent Hook', () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
+        vi.useFakeTimers();
         mockEmitSync.mockReset();
         vi.mocked(WorkspaceContext.fromHookContext).mockReturnValue(mockWctx as any);
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
     });
 
     it('should record success on successful subagent completion', async () => {
@@ -189,6 +195,42 @@ describe('Subagent Hook', () => {
 
         expect(writeSpy.mock.calls.some((args) => args[0].toString().includes('evolution_queue.json'))).toBe(false);
         expect(unlinkSpy.mock.calls.some((args) => args[0].toString().includes('.pain_flag'))).toBe(false);
+    });
+
+    it('should retry diagnostician completion after transient queue lock failure', async () => {
+        const mockCtx = { workspaceDir, sessionId: 's1' };
+        const mockEvent = {
+            targetSessionKey: 'agent:diagnostician:session-123',
+            outcome: 'ok'
+        };
+
+        vi.mocked(fs.existsSync).mockImplementation((p) => {
+            const pathStr = p.toString();
+            return pathStr.includes('evolution_queue.json') || pathStr.includes('.pain_flag');
+        });
+
+        vi.mocked(fs.readFileSync).mockImplementation((p) => {
+            const pathStr = p.toString();
+            if (pathStr.includes('evolution_queue.json')) {
+                return JSON.stringify([
+                    { id: 'task-b', status: 'in_progress', assigned_session_key: 'agent:diagnostician:session-123' }
+                ]);
+            }
+            if (pathStr.includes('.pain_flag')) {
+                return 'score: 80\nstatus: queued\ntask_id: task-b\n';
+            }
+            return '';
+        });
+
+        vi.mocked(evolutionWorker.acquireQueueLock)
+            .mockRejectedValueOnce(new Error('lock busy'))
+            .mockResolvedValue(async () => () => undefined as any);
+
+        await handleSubagentEnded(mockEvent as any, mockCtx as any);
+        await vi.advanceTimersByTimeAsync(300);
+
+        const writeSpy = vi.mocked(fs.writeFileSync);
+        expect(writeSpy.mock.calls.some((args) => args[0].toString().includes('evolution_queue.json'))).toBe(true);
     });
 
 });
