@@ -98,11 +98,16 @@ function scheduleCompletionRetry(
         return;
     }
 
+    cleanupExpiredRetryEntries();
     const retryKey = getCompletionRetryKey(workspaceDir, targetSessionKey);
-    completionRetryCounts.set(retryKey, attempt + 1);
+    completionRetryCounts.set(retryKey, {
+        count: attempt + 1,
+        expires: Date.now() + COMPLETION_RETRY_TTL_MS
+    });
     setTimeout(() => {
         void handleSubagentEnded(event, ctx).finally(() => {
-            if ((completionRetryCounts.get(retryKey) || 0) <= attempt + 1) {
+            const entry = completionRetryCounts.get(retryKey);
+            if (!entry || entry.count <= attempt + 1) {
                 completionRetryCounts.delete(retryKey);
             }
         });
@@ -168,7 +173,8 @@ export async function handleSubagentEnded(
     if (!fs.existsSync(queuePath)) return;
 
     const retryKey = getCompletionRetryKey(workspaceDir, targetSessionKey);
-    const attempt = completionRetryCounts.get(retryKey) || 0;
+    const retryEntry = completionRetryCounts.get(retryKey);
+    const attempt = retryEntry?.count || 0;
     let releaseLock: (() => void) | null = null;
 
     try {
