@@ -338,6 +338,191 @@ Then verify locally:
 
 ---
 
+## OpenClaw Hook System Reference
+
+### Complete Hook Names (26 hooks)
+
+**Source**: `D:\Code\openclaw\src\plugins\types.ts` (Lines 1370-1395)
+
+```typescript
+export type PluginHookName =
+  | "before_model_resolve"      // Override provider/model before resolution
+  | "before_prompt_build"       // Inject context & system prompt before submission
+  | "before_agent_start"        // Legacy: combines model resolve + prompt build
+  | "llm_input"                // Observe exact LLM input payload
+  | "llm_output"               // Observe exact LLM output payload
+  | "agent_end"                // Analyze completed conversations
+  | "before_compaction"         // Before session context compaction
+  | "after_compaction"         // After session context compaction
+  | "before_reset"             // When /new or /reset clears session
+  | "inbound_claim"            // Claim inbound event before commands/agent
+  | "message_received"          // After message received
+  | "message_sending"           // Modify or cancel outgoing messages
+  | "message_sent"             // After message sent
+  | "before_tool_call"         // Modify or block tool calls
+  | "after_tool_call"          // After tool execution
+  | "tool_result_persist"      // Modify tool result before transcript write (SYNC)
+  | "before_message_write"     // Before message written to session JSONL (SYNC)
+  | "session_start"            // Session started
+  | "session_end"              // Session ended
+  | "subagent_spawning"        // Subagent spawning
+  | "subagent_delivery_target" // Subagent delivery routing
+  | "subagent_spawned"        // Subagent spawned
+  | "subagent_ended"          // Subagent ended
+  | "gateway_start"           // Gateway starting
+  | "gateway_stop";            // Gateway stopping
+```
+
+### Hook Execution Patterns
+
+| Pattern | Execution | Use Case |
+|---------|----------|----------|
+| **Void Hook** | Parallel (`Promise.all`) | Fire-and-forget: `llm_input`, `llm_output`, `agent_end`, `message_received`, `message_sent`, `session_start`, `session_end`, `gateway_start`, `gateway_stop` |
+| **Modifying Hook** | Sequential (priority order) | Results merged: `before_model_resolve`, `before_prompt_build`, `message_sending`, `before_tool_call` |
+| **Claiming Hook** | Sequential, first wins | `inbound_claim` |
+| **Sync Hook** | Sequential, blocking | `tool_result_persist`, `before_message_write` |
+
+### Principles Disciple 使用的钩子
+
+| 钩子 | 文件 | 用途 |
+|------|------|------|
+| `before_prompt_build` | `src/hooks/prompt.ts` | 注入多层上下文 |
+| `before_tool_call` | `src/hooks/gate.ts` | 安全门禁检查 |
+| `after_tool_call` | `src/hooks/pain.ts` | 痛苦检测和信任更新 |
+| `llm_output` | `src/hooks/llm.ts` | 共情信号检测 |
+| `before_message_write` | `src/hooks/message-sanitize.ts` | 敏感数据清理 |
+| `before_compaction` | `src/hooks/lifecycle.ts` | 上下文压缩前检查点 |
+| `after_compaction` | `src/hooks/lifecycle.ts` | 上下文压缩后恢复 |
+| `before_reset` | `src/hooks/lifecycle.ts` | 会话重置处理 |
+| `subagent_ended` | `src/hooks/subagent.ts` | 子智能体生命周期闭合 |
+| `subagent_spawning` | `src/index.ts` | 子智能体生成（暂时无操作） |
+
+---
+
+## OpenClaw Plugin API Reference
+
+**Source**: `D:\Code\openclaw\src\plugins\types.ts` (Lines 1286-1351)
+
+```typescript
+export type OpenClawPluginApi = {
+  id: string;
+  name: string;
+  version?: string;
+  description?: string;
+  source: string;
+  rootDir?: string;
+  registrationMode: PluginRegistrationMode;
+  config: OpenClawConfig;
+  pluginConfig?: Record<string, unknown>;
+  runtime: PluginRuntime;
+  logger: PluginLogger;
+
+  // 工具注册
+  registerTool: (
+    tool: AnyAgentTool | OpenClawPluginToolFactory,
+    opts?: OpenClawPluginToolOptions,
+  ) => void;
+
+  // 钩子注册
+  registerHook: (
+    events: string | string[],
+    handler: InternalHookHandler,
+    opts?: OpenClawPluginHookOptions,
+  ) => void;
+  on: <K extends PluginHookName>(
+    hookName: K,
+    handler: PluginHookHandlerMap[K],
+    opts?: { priority?: number },
+  ) => void;
+
+  // HTTP 路由
+  registerHttpRoute: (params: OpenClawPluginHttpRouteParams) => void;
+
+  // 频道集成
+  registerChannel: (registration: OpenClawPluginChannelRegistration | ChannelPlugin) => void;
+
+  // 网关方法
+  registerGatewayMethod: (method: string, handler: GatewayRequestHandler) => void;
+
+  // CLI 集成
+  registerCli: (registrar: OpenClawPluginCliRegistrar, opts?: { commands?: string[] }) => void;
+
+  // 后台服务
+  registerService: (service: OpenClawPluginService) => void;
+
+  // 提供者注册
+  registerProvider: (provider: ProviderPlugin) => void;
+  registerSpeechProvider: (provider: SpeechProviderPlugin) => void;
+  registerMediaUnderstandingProvider: (provider: MediaUnderstandingProviderPlugin) => void;
+  registerImageGenerationProvider: (provider: ImageGenerationProviderPlugin) => void;
+  registerWebSearchProvider: (provider: WebSearchProviderPlugin) => void;
+
+  // 交互处理器
+  registerInteractiveHandler: (registration: PluginInteractiveHandlerRegistration) => void;
+  onConversationBindingResolved: (
+    handler: (event: PluginConversationBindingResolvedEvent) => void | Promise<void>,
+  ) => void;
+
+  // 命令
+  registerCommand: (command: OpenClawPluginCommandDefinition) => void;
+
+  // 上下文引擎
+  registerContextEngine: (
+    id: string,
+    factory: ContextEngineFactory,
+  ) => void;
+
+  // 工具方法
+  resolvePath: (input: string) => string;
+};
+```
+
+### Hook Context 类型
+
+```typescript
+// Agent 上下文（在 agent 钩子中共享）
+export type PluginHookAgentContext = {
+  agentId?: string;
+  sessionKey?: string;
+  sessionId?: string;
+  workspaceDir?: string;
+  messageProvider?: string;
+  trigger?: string;        // "user", "heartbeat", "cron", "memory"
+  channelId?: string;
+};
+
+// 工具上下文
+export type PluginHookToolContext = {
+  agentId?: string;
+  sessionKey?: string;
+  sessionId?: string;
+  runId?: string;
+  toolName: string;
+  toolCallId?: string;
+};
+
+// 消息上下文
+export type PluginHookMessageContext = {
+  channelId: string;
+  accountId?: string;
+  conversationId?: string;
+};
+
+// 会话上下文
+export type PluginHookSessionContext = {
+  agentId?: string;
+  sessionId: string;
+  sessionKey?: string;
+};
+
+// 网关上下文
+export type PluginHookGatewayContext = {
+  port?: number;
+};
+```
+
+---
+
 ## What This Means For Product Development
 
 For Principles Disciple, compatibility work with OpenClaw is not background maintenance. It is part of the product surface.

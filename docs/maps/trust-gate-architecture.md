@@ -1,14 +1,19 @@
-# 信任门禁核心架构地图
+# 双轨权限门禁架构地图 (Dual-Track Gate Architecture)
 
 > **创建日期**: 2026-03-12
-> **创建者**: Explorer Agent
-> **版本**: v1.0
+> **最后更新**: 2026-03-21
+> **版本**: v2.0 (EP Integration)
 
 ---
 
 ## 📊 架构概览
 
-Principles 项目的核心信任系统由 5 个关键组件构成：
+Principles 项目采用**双轨并行**的权限系统：
+
+| 系统 | 理念 | 当前状态 |
+|------|------|----------|
+| **Trust Engine V2.1** | 惩罚驱动（扣分制） | ✅ **生效中**（gate.ts 主决策） |
+| **Evolution Engine V2.0** | 成长驱动（只增不减） | ✅ **生效中**（gate.ts GFI TIER 检查） |
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -19,23 +24,26 @@ Principles 项目的核心信任系统由 5 个关键组件构成：
                        ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                    gate.ts (门禁)                          │
+│  • Trust Stage 权限验证 (V2.1)                           │
+│  • EP Tier 权限检查 (V2.0 GFI)                           │
 │  • 风险路径检测                                          │
-│  • 行数限制检查                                          │
-│  • Stage 权限验证                                        │
-│  • PLAN 白名单检查                                        │
+│  • Bash 安全 (Unicode 反混淆, 命令分词)                  │
+│  • Edit Verification (P-03 精确/模糊匹配)                │
+│  • Thinking Checkpoint Gate                              │
 └────┬──────────────┬──────────────┬──────────────┬────────┘
      │              │              │              │
      ▼              ▼              ▼              ▼
 ┌─────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐
-│Trust    │   │Config    │   │Event     │   │Risk      │
-│Engine   │   │Service   │   │Log       │   │Calculator│
+│Trust    │   │Evolution │   │Config    │   │Risk      │
+│Engine   │   │Engine    │   │Service   │   │Calculator│
 └────┬────┘   └────┬─────┘   └────┬─────┘   └──────────┘
      │              │              │
      ▼              ▼              ▼
 ┌─────────┐   ┌──────────┐   ┌──────────┐
-│Scorecard│   │Settings  │   │events    │
-│.json    │   │.json     │   │.jsonl    │
-└─────────┘   └──────────┘   └──────────┘
+│Scorecard│   │Evolution │   │Settings  │
+│.json    │   │Scorecard │   │.json     │
+└─────────┘   │.json     │   └──────────┘
+              └──────────┘
 
 后台进程：
 ┌─────────────────────────────────────────────────────────────┐
@@ -58,31 +66,42 @@ Principles 项目的核心信任系统由 5 个关键组件构成：
 
 ## 🗺️ 核心调用链
 
-### 1. 主流程：gate.ts → TrustEngine → ConfigService → EventLog
+### 1. 双轨门禁流程：gate.ts → TrustEngine + EvolutionEngine
 
 ```typescript
-// OpenClaw Plugin Hook 调用
+// OpenClaw Plugin Hook 调用 (before_tool_call)
 handleBeforeToolCall(event, ctx)
   │
   ├─> WorkspaceContext.fromHookContext(ctx)
-  │     └─> wctx.trust (TrustEngine 实例)
-  │     └─> wctx.config (ConfigService 实例)
+  │     ├─> wctx.trust (TrustEngine 实例)
+  │     ├─> wctx.evolution (EvolutionEngine 实例)
+  │     ├─> wctx.config (ConfigService 实例)
   │     └─> wctx.eventLog (EventLog 实例)
   │
-  ├─> trustEngine.getScore() → number
-  │     └─> 读取 AGENT_SCORECARD.json
+  ├─> [阶段 1: Trust Engine 检查] (生效中)
+  │     ├─> trustEngine.getScore() → number
+  │     ├─> trustEngine.getStage() → 1 | 2 | 3 | 4
+  │     ├─> config.get('trust') → TrustSettings
+  │     ├─> estimateLineChanges(modification) → number
+  │     └─> riskLevel = assessRiskLevel(...) → 'LOW' | 'MEDIUM' | 'HIGH'
   │
-  ├─> trustEngine.getStage() → 1 | 2 | 3 | 4
-  │     └─> 基于 score 计算 stage
+  ├─> [阶段 2: Evolution Engine 检查] (生效中)
+  │     ├─> evolution.getTier() → 1 | 2 | 3 | 4 | 5
+  │     ├─> evolution.getTierDefinition() → TierPermissions
+  │     ├─> GFI TIER 1-3 检查 (根据 token 消耗)
+  │     └─> Agent 工具子智能体 GFI 检查 (90 阈值)
   │
-  ├─> config.get('trust') → TrustSettings
-  │     └─> 读取 settings.json
-  │     └─> 返回 limits (stage_2_max_lines, stage_3_max_lines)
+  ├─> [阶段 3: Bash 安全检查]
+  │     ├─> Unicode 反混淆
+  │     ├─> 命令分词
+  │     └─> 危险命令检测
   │
-  ├─> estimateLineChanges(modification) → number
-  │     └─> 按工具类型估算行数
+  ├─> [阶段 4: Edit Verification] (P-03)
+  │     ├─> 精确匹配
+  │     └─> 模糊匹配
   │
-  ├─> riskLevel = assessRiskLevel(...) → 'LOW' | 'MEDIUM' | 'HIGH'
+  ├─> [阶段 5: Thinking Checkpoint Gate]
+  │     └─> 思维检查点验证
   │
   └─> [如果阻止]
         └─> eventLog.recordGateBlock(sessionId, { toolName, filePath, reason })
@@ -495,39 +514,47 @@ const dynamicLimit = baseLimit * dynamicMultiplier;
 ## 📁 关键文件清单
 
 ### 核心代码文件
-- `packages/openclaw-plugin/src/hooks/gate.ts` (191 行) - 核心门禁逻辑
-- `packages/openclaw-plugin/src/core/trust-engine.ts` (300+ 行) - 信任引擎
-- `packages/openclaw-plugin/src/core/config-service.ts` (271 行) - 配置服务
-- `packages/openclaw-plugin/src/core/event-log.ts` (240+ 行) - 事件日志
-- `packages/openclaw-plugin/src/service/evolution-worker.ts` (280+ 行) - 进化工作器
-- `packages/openclaw-plugin/src/core/risk-calculator.ts` (54 行) - 风险计算器
+- `packages/openclaw-plugin/src/hooks/gate.ts` — 核心门禁逻辑（5阶段检查）
+- `packages/openclaw-plugin/src/core/trust-engine.ts` — 信任引擎 V2.1（4阶段模型）
+- `packages/openclaw-plugin/src/core/evolution-engine.ts` — 进化引擎 V2.0（5级积分系统）
+- `packages/openclaw-plugin/src/core/evolution-types.ts` — 进化类型定义
+- `packages/openclaw-plugin/src/core/evolution-reducer.ts` — 事件溯源（原则生命周期）
+- `packages/openclaw-plugin/src/core/config-service.ts` — 配置服务
+- `packages/openclaw-plugin/src/core/event-log.ts` — 事件日志（JSONL 缓冲）
+- `packages/openclaw-plugin/src/service/evolution-worker.ts` — 进化工作器（15分钟轮询）
+- `packages/openclaw-plugin/src/core/risk-calculator.ts` — 风险计算器
+- `packages/openclaw-plugin/src/core/session-tracker.ts` — 会话状态（GFI 追踪）
+- `packages/openclaw-plugin/src/constants/tools.ts` — 工具分类常量
 
 ### 数据文件
-- `.state/AGENT_SCORECARD.json` - 信任分数卡
-- `.state/settings.json` - 配置文件
-- `.state/logs/events.jsonl` - 事件日志
-- `.state/logs/daily-stats.json` - 每日统计
-- `.state/EVOLUTION_QUEUE.json` - 进化队列
-- `.state/EVOLUTION_DIRECTIVE.json` - 进化指令
-- `.state/PAIN_CANDIDATES.json` - 痛觉候选
-- `.pain_flag` - 痛觉标志
+- `.state/AGENT_SCORECARD.json` — 信任分数卡（Trust Engine）
+- `.state/evolution-scorecard.json` — 进化积分卡（Evolution Engine）
+- `.state/settings.json` — 配置文件
+- `.state/logs/events.jsonl` — 事件日志
+- `.state/logs/daily-stats.json` — 每日统计
+- `.state/evolution.jsonl` — 进化事件流（事件溯源）
+- `.state/trajectory.sqlite` — 轨迹数据库（SQLite）
+- `.state/EVOLUTION_QUEUE.json` — 进化队列
+- `.state/EVOLUTION_DIRECTIVE.json` — 进化指令
+- `.state/PAIN_CANDIDATES.json` — 痛觉候选
+- `.pain_flag` — 痛觉标志
 
 ### 类型定义
-- `packages/openclaw-plugin/src/types/event-types.ts` - 事件类型定义
-- `packages/openclaw-plugin/src/core/workspace-context.ts` - 工作区上下文
-- `packages/openclaw-plugin/src/openclaw-sdk.ts` - OpenClaw SDK 接口
+- `packages/openclaw-plugin/src/core/evolution-types.ts` — EvolutionTier, TierDefinition, EvolutionScorecard
+- `packages/openclaw-plugin/src/core/workspace-context.ts` — 工作区上下文（单例门面）
+- `packages/openclaw-plugin/src/types/event-types.ts` — 事件类型定义
 
 ---
 
 ## 🔗 相关文档
 
-- **Issue #20 证据**: `docs/evidence/ISSUE-20-evidence.md`
-- **Issue #19 证据**: `docs/evidence/ISSUE-19-evidence.md` (待创建)
-- **Issue #18 证据**: `docs/evidence/ISSUE-18-evidence.md` (待创建)
-- **EvolutionWorker 分析**: `docs/evidence/evolution-worker-analysis.md`
+- **Evolution Points 用户指南**: `docs/EVOLUTION_POINTS_GUIDE.md`
+- **Evolution Points 中文指南**: `docs/ep-guide.md`
+- **高级配置**: `docs/ADVANCED_EVOLUTION_CONFIG.md`
+- **架构全景图**: `docs/maps/principles-disciple-panorama-zh.md`
 
 ---
 
-**文档版本**: v1.0
-**创建时间**: 2026-03-12 17:30 UTC
-**下一步**: KR3 - 系统风险发现
+**文档版本**: v2.0 (EP Integration)
+**最后更新**: 2026-03-21
+**状态**: ✅ 双轨系统已集成，Trust + Evolution 并行运行
