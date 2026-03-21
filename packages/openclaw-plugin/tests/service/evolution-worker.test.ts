@@ -3,9 +3,11 @@ import {
     EvolutionWorkerService,
     createEvolutionTaskId,
     createPainCandidateFingerprint,
+    extractEvolutionTaskId,
     hasRecentDuplicateTask,
     hasEquivalentPromotedRule,
     processPromotion,
+    registerEvolutionTaskSession,
     shouldTrackPainCandidate,
     trackPainCandidate,
 } from '../../src/service/evolution-worker.js';
@@ -130,6 +132,37 @@ describe('EvolutionWorkerService', () => {
             expect(candidate.status).toBe('pending');
             expect(candidate.samples[0].length).toBeGreaterThan(200);
             expect(candidate.samples[0].length).toBeLessThanOrEqual(1000);
+        } finally {
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    it('should extract evolution task ids from diagnostician payloads', () => {
+        expect(extractEvolutionTaskId('Diagnose systemic pain [ID: ab12cd34]. Source: tool_failure.')).toBe('ab12cd34');
+        expect(extractEvolutionTaskId('plain task without id')).toBeNull();
+    });
+
+    it('should register assigned diagnostician session on the matching in-progress task', () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-evolution-session-'));
+        const queuePath = path.join(dir, 'evolution_queue.json');
+
+        fs.writeFileSync(queuePath, JSON.stringify([
+            { id: 'task-a', status: 'pending', score: 40, source: 'pain', reason: 'a', timestamp: '2026-03-20T00:00:00.000Z' },
+            { id: 'task-b', status: 'in_progress', score: 80, source: 'pain', reason: 'b', timestamp: '2026-03-20T00:00:00.000Z' }
+        ], null, 2), 'utf8');
+
+        try {
+            const registered = registerEvolutionTaskSession(
+                () => queuePath,
+                'task-b',
+                'agent:diagnostician:session-1',
+                { warn: vi.fn() }
+            );
+
+            expect(registered).toBe(true);
+            const saved = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
+            expect(saved[1].assigned_session_key).toBe('agent:diagnostician:session-1');
+            expect(saved[1].started_at).toBeDefined();
         } finally {
             fs.rmSync(dir, { recursive: true, force: true });
         }

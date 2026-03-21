@@ -147,4 +147,38 @@ describe('EventLog', () => {
       logger1.dispose();
     });
   });
+
+  describe('session empathy aggregation', () => {
+    it('should deduplicate the same empathy event across file and buffer using eventId', () => {
+      eventLog.recordPainSignal('session-1', {
+        source: 'user_empathy',
+        score: 12,
+        reason: 'duplicate check',
+        origin: 'assistant_self_report',
+        severity: 'mild',
+        confidence: 1,
+        detection_mode: 'structured',
+        deduped: false,
+        eventId: 'evt-1',
+      });
+      eventLog.flush();
+
+      eventLog.recordPainSignal('session-1', {
+        source: 'user_empathy',
+        score: 12,
+        reason: 'duplicate check',
+        origin: 'assistant_self_report',
+        severity: 'mild',
+        confidence: 1,
+        detection_mode: 'structured',
+        deduped: false,
+        eventId: 'evt-1',
+      });
+
+      const stats = eventLog.getEmpathyStats('session', 'session-1');
+
+      expect(stats.totalEvents).toBe(1);
+      expect(stats.totalPenaltyScore).toBe(12);
+    });
+  });
 });

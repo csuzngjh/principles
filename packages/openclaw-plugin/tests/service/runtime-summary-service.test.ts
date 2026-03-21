@@ -164,6 +164,31 @@ describe('RuntimeSummaryService', () => {
     expect(summary.gfi.peak).toBe(12);
   });
 
+  it('prefers the session with the newest control activity timestamp over plain activity', () => {
+    const workspace = makeWorkspace();
+    writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+      trust_score: 42,
+      last_updated: '2026-03-20T10:00:00Z',
+    });
+    writeSession(workspace, 's1', {
+      currentGfi: 11,
+      dailyGfiPeak: 20,
+      lastActivityAt: 50,
+      lastControlActivityAt: 200,
+    });
+    writeSession(workspace, 's2', {
+      currentGfi: 99,
+      dailyGfiPeak: 99,
+      lastActivityAt: 100,
+      lastControlActivityAt: 100,
+    });
+
+    const summary = RuntimeSummaryService.getSummary(workspace);
+
+    expect(summary.metadata.sessionId).toBe('s1');
+    expect(summary.gfi.current).toBe(11);
+  });
+
   it('warns when a directive is stale relative to an empty queue', () => {
     const workspace = makeWorkspace();
     writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
@@ -180,8 +205,26 @@ describe('RuntimeSummaryService', () => {
 
     expect(summary.evolution.directive.exists).toBe(true);
     expect(summary.evolution.directive.active).toBe(true);
+    expect(summary.evolution.dataQuality).toBe('partial');
     expect(summary.evolution.directive.ageSeconds).not.toBeNull();
     expect(summary.metadata.warnings.join('\n')).toContain('worker state may be stale');
+  });
+
+  it('downgrades evolution data quality when an in-progress queue task has no active directive', () => {
+    const workspace = makeWorkspace();
+    writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+      trust_score: 55,
+      last_updated: '2026-03-20T10:00:00Z',
+    });
+    writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+      { id: 'task-1', status: 'in_progress', score: 60, task: 'Diagnose systemic pain [ID: task-1]' },
+    ]);
+
+    const summary = RuntimeSummaryService.getSummary(workspace);
+
+    expect(summary.evolution.queue.inProgress).toBe(1);
+    expect(summary.evolution.directive.exists).toBe(false);
+    expect(summary.evolution.dataQuality).toBe('partial');
   });
 
   it('surfaces observer empathy events as authoritative gfi sources', () => {
@@ -260,6 +303,55 @@ describe('RuntimeSummaryService', () => {
       }),
     ]);
     expect(summary.metadata.warnings.join('\n')).not.toContain('Live event buffer is unavailable');
+  });
+
+  it('deduplicates persisted and buffered copies of the same event by eventId', () => {
+    const workspace = makeWorkspace();
+    writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+      trust_score: 59,
+      last_updated: '2026-03-20T10:00:00Z',
+    });
+    writeSession(workspace, 's-dedupe', {
+      currentGfi: 18,
+      dailyGfiPeak: 18,
+      lastActivityAt: 5,
+      lastControlActivityAt: 5,
+    });
+    writeEvents(workspace, [
+      {
+        ts: '2026-03-20T10:00:03Z',
+        type: 'pain_signal',
+        category: 'detected',
+        sessionId: 's-dedupe',
+        data: {
+          source: 'user_empathy',
+          origin: 'assistant_self_report',
+          severity: 'mild',
+          confidence: 1,
+          score: 18,
+          reason: 'same event',
+          eventId: 'dup-1',
+        },
+      },
+    ]);
+
+    const eventLog = EventLogService.get(path.join(workspace, '.state'));
+    eventLog.recordPainSignal('s-dedupe', {
+      source: 'user_empathy',
+      origin: 'assistant_self_report',
+      severity: 'mild',
+      confidence: 1,
+      score: 18,
+      reason: 'same event',
+      eventId: 'dup-1',
+      detection_mode: 'structured',
+      deduped: false,
+    });
+
+    const summary = RuntimeSummaryService.getSummary(workspace, { sessionId: 's-dedupe' });
+
+    expect(summary.gfi.sources).toHaveLength(1);
+    expect(summary.pain.lastSignal?.reason).toBe('same event');
   });
 
   it('warns when malformed event lines are skipped', () => {

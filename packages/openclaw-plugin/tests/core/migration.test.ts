@@ -62,4 +62,23 @@ describe('Directory Structure Migration', () => {
         expect(fs.renameSync).not.toHaveBeenCalledWith(legacyProfile, newProfile);
         expect(fs.renameSync).not.toHaveBeenCalledWith(legacyScorecard, newScorecard);
     });
+
+    it('should migrate legacy evolution_directive.json to EVOLUTION_DIRECTIVE instead of queue', () => {
+        const legacyDirective = path.join(workspaceDir, 'memory', '.state', 'evolution_directive.json');
+        const newDirective = '/mock/workspace/.state/evolution_directive.json';
+        const wrongQueuePath = '/mock/workspace/.state/evolution_queue.json';
+
+        vi.mocked(fs.existsSync).mockImplementation((p) => {
+            const pathStr = p.toString();
+            if (pathStr === legacyDirective) return true;
+            if (pathStr === newDirective) return false;
+            if (pathStr === wrongQueuePath) return false;
+            return false;
+        });
+
+        migrateDirectoryStructure(mockApi, workspaceDir);
+
+        expect(fs.renameSync).toHaveBeenCalledWith(legacyDirective, newDirective);
+        expect(fs.renameSync).not.toHaveBeenCalledWith(legacyDirective, wrongQueuePath);
+    });
 });

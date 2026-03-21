@@ -19,6 +19,10 @@ export interface EvolutionQueueItem {
     source: string;
     reason: string;
     timestamp: string;
+    enqueued_at?: string;
+    started_at?: string;
+    completed_at?: string;
+    assigned_session_key?: string;
     trigger_text_preview?: string;
     status: 'pending' | 'in_progress' | 'completed';
 }
@@ -144,6 +148,36 @@ export function acquireQueueLock(lockPath: string, logger: any): (() => void) | 
     return null;
 }
 
+function requireQueueLock(lockPath: string, logger: any, scope: string): () => void {
+    const releaseLock = acquireQueueLock(lockPath, logger);
+    if (!releaseLock) {
+        throw new Error(`[PD:EvolutionWorker] ${scope}: queue lock unavailable for ${lockPath}`);
+    }
+    return releaseLock;
+}
+
+export function extractEvolutionTaskId(task: string): string | null {
+    if (!task) return null;
+    const match = task.match(/\[ID:\s*([A-Za-z0-9_-]+)\]/);
+    return match?.[1] || null;
+}
+
+function findRecentDuplicateTask(
+    queue: EvolutionQueueItem[],
+    source: string,
+    preview: string,
+    now: number,
+    reason?: string
+): EvolutionQueueItem | undefined {
+    const key = normalizePainDedupKey(source, preview, reason);
+    return queue.find((task) => {
+        if (task.status === 'completed') return false;
+        const taskTime = new Date(task.enqueued_at || task.timestamp).getTime();
+        if (!Number.isFinite(taskTime) || (now - taskTime) > PAIN_QUEUE_DEDUP_WINDOW_MS) return false;
+        return normalizePainDedupKey(task.source, task.trigger_text_preview || '', task.reason) === key;
+    });
+}
+
 function normalizePainDedupKey(source: string, preview: string, reason?: string): string {
     // Include reason in dedup key to match createEvolutionTaskId() behavior
     // Different reasons for the same source/preview should create different tasks
@@ -152,13 +186,7 @@ function normalizePainDedupKey(source: string, preview: string, reason?: string)
 }
 
 export function hasRecentDuplicateTask(queue: EvolutionQueueItem[], source: string, preview: string, now: number, reason?: string): boolean {
-    const key = normalizePainDedupKey(source, preview, reason);
-    return queue.some((task) => {
-        if (task.status === 'completed') return false;
-        const taskTime = new Date(task.timestamp).getTime();
-        if (!Number.isFinite(taskTime) || (now - taskTime) > PAIN_QUEUE_DEDUP_WINDOW_MS) return false;
-        return normalizePainDedupKey(task.source, task.trigger_text_preview || '', task.reason) === key;
-    });
+    return !!findRecentDuplicateTask(queue, source, preview, now, reason);
 }
 
 export function hasEquivalentPromotedRule(dictionary: { getAllRules(): Record<string, { type: string; phrases?: string[]; pattern?: string; status: string; }> }, phrase: string): boolean {
@@ -203,8 +231,7 @@ function checkPainFlag(wctx: WorkspaceContext, logger: any) {
 
         const queuePath = wctx.resolve('EVOLUTION_QUEUE');
         const lockPath = queuePath + EVOLUTION_QUEUE_LOCK_SUFFIX;
-        const releaseLock = acquireQueueLock(lockPath, logger);
-        if (!releaseLock) return; // Could not acquire lock
+        const releaseLock = requireQueueLock(lockPath, logger, 'checkPainFlag');
 
         try {
             let queue: EvolutionQueueItem[] = [];
@@ -217,9 +244,14 @@ function checkPainFlag(wctx: WorkspaceContext, logger: any) {
             }
 
             const now = Date.now();
-            if (hasRecentDuplicateTask(queue, source, preview, now, reason)) {
+            const duplicateTask = findRecentDuplicateTask(queue, source, preview, now, reason);
+            if (duplicateTask) {
                 logger?.info?.(`[PD:EvolutionWorker] Duplicate pain task skipped for source=${source} preview=${preview || 'N/A'}`);
-                fs.appendFileSync(painFlagPath, `\nstatus: queued\n`, 'utf8');
+                fs.appendFileSync(
+                    painFlagPath,
+                    `\nstatus: queued\ntask_id: ${duplicateTask.id}\n`,
+                    'utf8'
+                );
                 return;
             }
 
@@ -231,11 +263,12 @@ function checkPainFlag(wctx: WorkspaceContext, logger: any) {
                 reason,
                 trigger_text_preview: preview,
                 timestamp: new Date(now).toISOString(),
+                enqueued_at: new Date(now).toISOString(),
                 status: 'pending'
             });
 
             fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
-            fs.appendFileSync(painFlagPath, '\nstatus: queued\n', 'utf8');
+            fs.appendFileSync(painFlagPath, `\nstatus: queued\ntask_id: ${taskId}\n`, 'utf8');
         } finally {
             releaseLock();
         }
@@ -248,10 +281,10 @@ function checkPainFlag(wctx: WorkspaceContext, logger: any) {
 function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventLog: any) {
     const queuePath = wctx.resolve('EVOLUTION_QUEUE');
     if (!fs.existsSync(queuePath)) return;
+    const directivePath = wctx.resolve('EVOLUTION_DIRECTIVE');
 
     const lockPath = queuePath + EVOLUTION_QUEUE_LOCK_SUFFIX;
-    const releaseLock = acquireQueueLock(lockPath, logger);
-    if (!releaseLock) return; // Could not acquire lock
+    const releaseLock = requireQueueLock(lockPath, logger, 'processEvolutionQueue');
 
     try {
         let queue: EvolutionQueueItem[] = [];
@@ -269,10 +302,13 @@ function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventLog: an
 
         for (const task of queue) {
             if (task.status === 'in_progress' && task.timestamp) {
-                const age = Date.now() - new Date(task.timestamp).getTime();
+                const startedAt = task.started_at || task.timestamp;
+                const age = Date.now() - new Date(startedAt).getTime();
                 if (age > timeout) {
                     if (logger) logger.info(`[PD:EvolutionWorker] Resetting timed-out task: ${task.id}`);
                     task.status = 'pending';
+                    delete task.started_at;
+                    delete task.assigned_session_key;
                     queueChanged = true;
                 }
             }
@@ -281,29 +317,52 @@ function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventLog: an
         const pendingTasks = queue.filter(t => t.status === 'pending');
 
         if (pendingTasks.length > 0) {
-            const directivePath = wctx.resolve('EVOLUTION_DIRECTIVE');
             const highestScoreTask = pendingTasks.sort((a, b) => b.score - a.score)[0];
+            const nowIso = new Date().toISOString();
 
             const taskDescription = `Diagnose systemic pain [ID: ${highestScoreTask.id}]. Source: ${highestScoreTask.source}. Reason: ${highestScoreTask.reason}. ` +
                   `Trigger text: "${highestScoreTask.trigger_text_preview || 'N/A'}"`;
-
-            const directive = {
-                active: true,
-                task: taskDescription,
-                timestamp: new Date().toISOString()
-            };
-
-            fs.writeFileSync(directivePath, JSON.stringify(directive, null, 2), 'utf8');
             highestScoreTask.task = taskDescription;
             highestScoreTask.status = 'in_progress';
+            highestScoreTask.started_at = nowIso;
+            delete highestScoreTask.completed_at;
+            delete highestScoreTask.assigned_session_key;
             queueChanged = true;
-            
+
             if (eventLog) {
                 eventLog.recordEvolutionTask({
                     taskId: highestScoreTask.id,
                     taskType: highestScoreTask.source,
                     reason: highestScoreTask.reason
                 });
+            }
+
+            fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+            queueChanged = false;
+
+            const directive = {
+                active: true,
+                taskId: highestScoreTask.id,
+                task: taskDescription,
+                timestamp: nowIso
+            };
+
+            fs.writeFileSync(directivePath, JSON.stringify(directive, null, 2), 'utf8');
+        } else {
+            const hasInProgressTask = queue.some((task) => task.status === 'in_progress');
+            if (!hasInProgressTask && fs.existsSync(directivePath)) {
+                const clearedAt = new Date().toISOString();
+                fs.writeFileSync(
+                    directivePath,
+                    JSON.stringify({
+                        active: false,
+                        task: null,
+                        taskId: null,
+                        timestamp: clearedAt,
+                        clearedAt,
+                    }, null, 2),
+                    'utf8'
+                );
             }
         }
 
@@ -380,11 +439,7 @@ export function trackPainCandidate(text: string, wctx: WorkspaceContext) {
 
     const candidatePath = wctx.resolve('PAIN_CANDIDATES');
     const lockPath = candidatePath + PAIN_CANDIDATES_LOCK_SUFFIX;
-    const releaseLock = acquireQueueLock(lockPath, console);
-    if (!releaseLock) {
-        console.warn('[PD:EvolutionWorker] Failed to acquire pain candidates lock, skipping track');
-        return;
-    }
+    const releaseLock = requireQueueLock(lockPath, console, 'trackPainCandidate');
 
     try {
         let data = { candidates: {} as any };
@@ -424,11 +479,7 @@ export function processPromotion(wctx: WorkspaceContext, logger: any, eventLog: 
     if (!fs.existsSync(candidatePath)) return;
 
     const lockPath = candidatePath + PAIN_CANDIDATES_LOCK_SUFFIX;
-    const releaseLock = acquireQueueLock(lockPath, logger);
-    if (!releaseLock) {
-        logger?.warn?.('[PD:EvolutionWorker] Failed to acquire pain candidates lock, skipping promotion');
-        return;
-    }
+    const releaseLock = requireQueueLock(lockPath, logger, 'processPromotion');
 
     try {
         const config = wctx.config;
@@ -481,6 +532,37 @@ export function processPromotion(wctx: WorkspaceContext, logger: any, eventLog: 
         }
     } catch (err) {
         if (logger) logger.warn(`[PD:EvolutionWorker] Error during rule promotion: ${String(err)}`);
+    } finally {
+        releaseLock();
+    }
+}
+
+export function registerEvolutionTaskSession(
+    workspaceResolve: (key: string) => string,
+    taskId: string,
+    sessionKey: string,
+    logger?: { warn?: (message: string) => void; info?: (message: string) => void }
+): boolean {
+    const queuePath = workspaceResolve('EVOLUTION_QUEUE');
+    if (!fs.existsSync(queuePath)) return false;
+
+    const lockPath = queuePath + EVOLUTION_QUEUE_LOCK_SUFFIX;
+    const releaseLock = requireQueueLock(lockPath, logger, 'registerEvolutionTaskSession');
+
+    try {
+        const queue = JSON.parse(fs.readFileSync(queuePath, 'utf8')) as EvolutionQueueItem[];
+        const task = queue.find((item) => item.id === taskId && item.status === 'in_progress');
+        if (!task) {
+            logger?.warn?.(`[PD:EvolutionWorker] Could not find in-progress evolution task ${taskId} for session assignment`);
+            return false;
+        }
+
+        task.assigned_session_key = sessionKey;
+        if (!task.started_at) {
+            task.started_at = new Date().toISOString();
+        }
+        fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+        return true;
     } finally {
         releaseLock();
     }

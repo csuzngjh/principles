@@ -1,11 +1,35 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import { trackToolRead, trackLlmOutput, getSession, clearSession, trackFriction, resetFriction } from '../../src/core/session-tracker.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import {
+    trackToolRead,
+    trackLlmOutput,
+    getSession,
+    clearSession,
+    trackFriction,
+    resetFriction,
+    initPersistence,
+    trackBlock,
+    recordThinkingCheckpoint,
+} from '../../src/core/session-tracker.js';
 
 describe('Session Tracker', () => {
     const sessionId = 'test-session-1';
+    let tempDir: string | null = null;
 
     beforeEach(() => {
         clearSession(sessionId);
+    });
+
+    afterEach(() => {
+        if (tempDir) {
+            fs.rmSync(tempDir, { recursive: true, force: true });
+            tempDir = null;
+        }
+        vi.useRealTimers();
+        clearSession('session-a');
+        clearSession('session-b');
     });
 
     it('should track tool reads per file', () => {
@@ -138,5 +162,30 @@ describe('Session Tracker', () => {
         });
         expect(state?.consecutiveErrors).toBe(1);
         expect(state?.lastErrorHash).toBe('tool_failure_hash');
+    });
+
+    it('should persist multiple sessions independently instead of overwriting the previous debounce timer', () => {
+        vi.useFakeTimers();
+        tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-session-persist-'));
+        initPersistence(tempDir);
+
+        trackFriction('session-a', 10, 'hash-a', tempDir);
+        trackFriction('session-b', 15, 'hash-b', tempDir);
+
+        vi.advanceTimersByTime(1000);
+
+        expect(fs.existsSync(path.join(tempDir, 'sessions', 'session-a.json'))).toBe(true);
+        expect(fs.existsSync(path.join(tempDir, 'sessions', 'session-b.json'))).toBe(true);
+    });
+
+    it('should refresh control activity timestamps for block and thinking updates', () => {
+        trackBlock(sessionId);
+        let state = getSession(sessionId);
+        const blockTs = state?.lastControlActivityAt ?? 0;
+        expect(blockTs).toBeGreaterThan(0);
+
+        recordThinkingCheckpoint(sessionId);
+        state = getSession(sessionId);
+        expect((state?.lastControlActivityAt ?? 0) >= blockTs).toBe(true);
     });
 });

@@ -1,12 +1,9 @@
 import type { PluginHookSubagentEndedEvent, PluginHookSubagentContext } from '../openclaw-sdk.js';
+import * as fs from 'fs';
 import { writePainFlag } from '../core/pain.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { empathyObserverManager, type EmpathyObserverApi } from '../service/empathy-observer-manager.js';
 import { acquireQueueLock, EVOLUTION_QUEUE_LOCK_SUFFIX } from '../service/evolution-worker.js';
-import * as fs from 'fs';
-import * as path from 'path';
-
-
 
 function emitSubagentPainEvent(
     wctx: WorkspaceContext,
@@ -35,6 +32,41 @@ function emitSubagentPainEvent(
     }
 }
 
+function isDiagnosticianSession(targetSessionKey: string | undefined): boolean {
+    return typeof targetSessionKey === 'string' && targetSessionKey.startsWith('agent:diagnostician:');
+}
+
+function cleanupPainFlagForTask(wctx: WorkspaceContext, completedTaskId: string, queue: any[]): void {
+    const painFlagPath = wctx.resolve('PAIN_FLAG');
+    if (!fs.existsSync(painFlagPath)) return;
+
+    try {
+        const painData = fs.readFileSync(painFlagPath, 'utf8');
+        const taskIdMatch = painData.match(/^task_id:\s*(.+)$/m);
+        const painTaskId = taskIdMatch?.[1]?.trim();
+        const hasQueuedStatus = painData.includes('status: queued');
+        const hasRemainingActiveTasks = queue.some((task: any) => task?.status === 'pending' || task?.status === 'in_progress');
+
+        if (!hasQueuedStatus) return;
+
+        if (painTaskId) {
+            if (painTaskId === completedTaskId) {
+                fs.unlinkSync(painFlagPath);
+            }
+            return;
+        }
+
+        // Legacy fallback: only clear an untagged queued pain flag when there are
+        // no active queue entries left. This avoids unrelated diagnostician runs
+        // from deleting a queued flag that belongs to another task.
+        if (!hasRemainingActiveTasks) {
+            fs.unlinkSync(painFlagPath);
+        }
+    } catch (e) {
+        console.error(`[PD:Subagent] Failed to cleanup pain flag: ${String(e)}`);
+    }
+}
+
 type SubagentEndedHookContext = PluginHookSubagentContext & {
     api?: EmpathyObserverApi;
     workspaceDir?: string;
@@ -51,7 +83,6 @@ export async function handleSubagentEnded(
     if (!workspaceDir) return;
 
     const wctx = WorkspaceContext.fromHookContext(ctx);
-    // Empathy observer subagent session is handled by sidecar manager
     if (targetSessionKey?.startsWith('empathy_obs:')) {
         await empathyObserverManager.reap(ctx.api, targetSessionKey, workspaceDir);
         return;
@@ -59,7 +90,6 @@ export async function handleSubagentEnded(
 
     const config = wctx.config;
 
-    // 1. Autonomous Pain Capture: If subagent failed, record pain
     if (outcome === 'error' || outcome === 'timeout') {
         const scoreSettings = config.get('scores');
         const score = outcome === 'error' ? scoreSettings.subagent_error_penalty : scoreSettings.subagent_timeout_penalty;
@@ -81,73 +111,53 @@ export async function handleSubagentEnded(
         });
     }
 
-    // 2. Loop Closure: Clean up evolution queue if any subagent finished successfully
     if (outcome === 'ok' || outcome === 'deleted') {
-        // ── Trust Engine: Record success using V2 API ──
         wctx.trust.recordSuccess('subagent_success', {
             sessionId: ctx.sessionId,
             api: ctx.api
         }, true);
+    }
 
-        const queuePath = wctx.resolve('EVOLUTION_QUEUE');
-        if (fs.existsSync(queuePath)) {
-            const lockPath = queuePath + EVOLUTION_QUEUE_LOCK_SUFFIX;
-            const releaseLock = acquireQueueLock(lockPath, console);
-            if (!releaseLock) {
-                console.warn('[PD:Subagent] Failed to acquire queue lock, skipping queue update');
-                return;
-            }
-            
-            try {
-                const queue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
-                let changed = false;
+    if ((outcome !== 'ok' && outcome !== 'deleted') || !isDiagnosticianSession(targetSessionKey)) {
+        return;
+    }
 
-                const resolveTaskTime = (task: any): number => {
-                    const raw = task?.enqueued_at || task?.timestamp;
-                    const ts = new Date(raw).getTime();
-                    return Number.isFinite(ts) ? ts : Number.MAX_SAFE_INTEGER;
-                };
+    const queuePath = wctx.resolve('EVOLUTION_QUEUE');
+    if (!fs.existsSync(queuePath)) return;
 
-                // Resolve the queue entry by its position, not by id. Historical pain
-                // records may legitimately share the same id in legacy data.
-                let oldestTaskIndex = -1;
-                let oldestTaskTime = Number.MAX_SAFE_INTEGER;
-                queue.forEach((task: any, index: number) => {
-                    if (task?.status !== 'in_progress') return;
-                    const taskTime = resolveTaskTime(task);
-                    if (taskTime < oldestTaskTime) {
-                        oldestTaskTime = taskTime;
-                        oldestTaskIndex = index;
-                    }
-                });
+    const lockPath = queuePath + EVOLUTION_QUEUE_LOCK_SUFFIX;
+    const releaseLock = acquireQueueLock(lockPath, console);
+    if (!releaseLock) {
+        console.error('[PD:Subagent] Failed to acquire queue lock while completing evolution task');
+        return;
+    }
 
-                if (oldestTaskIndex !== -1) {
-                    queue[oldestTaskIndex].status = 'completed';
-                    queue[oldestTaskIndex].completed_at = new Date().toISOString();
-                    changed = true;
+    try {
+        const queue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
+        let changed = false;
 
-                    // Clean up the .pain_flag if it was queued, to reset the environment
-                    const painFlagPath = wctx.resolve('PAIN_FLAG');
-                    if (fs.existsSync(painFlagPath)) {
-                        try {
-                            const painData = fs.readFileSync(painFlagPath, 'utf8');
-                            if (painData.includes('status: queued')) {
-                                fs.unlinkSync(painFlagPath);
-                            }
-                        } catch (e) {
-                            console.error(`[PD:Subagent] Failed to cleanup pain flag: ${String(e)}`);
-                        }
-                    }
-                }
-                
-                if (changed) {
-                    fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
-                }
-            } catch (e) {
-                console.error(`[PD:Subagent] Failed to update evolution queue: ${String(e)}`);
-            } finally {
-                releaseLock();
-            }
+        const matchedTask = queue.find((task: any) =>
+            task?.status === 'in_progress'
+            && typeof task?.assigned_session_key === 'string'
+            && task.assigned_session_key === targetSessionKey
+        );
+
+        if (matchedTask) {
+            matchedTask.status = 'completed';
+            matchedTask.completed_at = new Date().toISOString();
+            delete matchedTask.assigned_session_key;
+            changed = true;
+            cleanupPainFlagForTask(wctx, matchedTask.id, queue);
+        } else {
+            console.warn(`[PD:Subagent] No in-progress evolution task matched subagent session ${targetSessionKey}`);
         }
+
+        if (changed) {
+            fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+        }
+    } catch (e) {
+        console.error(`[PD:Subagent] Failed to update evolution queue: ${String(e)}`);
+    } finally {
+        releaseLock();
     }
 }

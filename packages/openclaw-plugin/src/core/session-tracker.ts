@@ -20,6 +20,7 @@ export interface SessionState {
     llmTurns: number;
     blockedAttempts: number;
     lastActivityAt: number;
+    lastControlActivityAt: number;
     totalInputTokens: number;
     totalOutputTokens: number;
     cacheHits: number;
@@ -52,13 +53,21 @@ const sessions = new Map<string, SessionState>();
 /** Directory for persisting session state */
 let persistDir: string | null = null;
 
-/** Debounce timer for persistence */
-let persistTimer: ReturnType<typeof setTimeout> | null = null;
+/** Debounce timers for persistence, one per session */
+const persistTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 function logSessionTrackerWarning(message: string, error?: unknown): void {
     const detail = error instanceof Error ? error.message : error ? String(error) : '';
     const suffix = detail ? `: ${detail}` : '';
     console.warn(`[PD:SessionTracker] ${message}${suffix}`);
+}
+
+function touchActivity(state: SessionState, kind: 'general' | 'control' = 'general'): void {
+    const now = Date.now();
+    state.lastActivityAt = now;
+    if (kind === 'control') {
+        state.lastControlActivityAt = now;
+    }
 }
 
 /**
@@ -136,19 +145,25 @@ function persistSession(state: SessionState): void {
  * Schedule persistence with debounce.
  */
 function schedulePersistence(state: SessionState): void {
-    if (persistTimer) {
-        clearTimeout(persistTimer);
+    const existing = persistTimers.get(state.sessionId);
+    if (existing) {
+        clearTimeout(existing);
     }
-    persistTimer = setTimeout(() => {
+    const timer = setTimeout(() => {
         persistSession(state);
-        persistTimer = null;
+        persistTimers.delete(state.sessionId);
     }, 1000);  // 1 second debounce
+    persistTimers.set(state.sessionId, timer);
 }
 
 /**
  * Force persist all sessions immediately.
  */
 export function flushAllSessions(): void {
+    for (const timer of persistTimers.values()) {
+        clearTimeout(timer);
+    }
+    persistTimers.clear();
     for (const state of sessions.values()) {
         persistSession(state);
     }
@@ -164,6 +179,7 @@ function getOrCreateSession(sessionId: string, workspaceDir?: string): SessionSt
             llmTurns: 0,
             blockedAttempts: 0,
             lastActivityAt: Date.now(),
+            lastControlActivityAt: Date.now(),
             totalInputTokens: 0,
             totalOutputTokens: 0,
             cacheHits: 0,
@@ -200,14 +216,14 @@ export function trackToolRead(sessionId: string, filePath: string, workspaceDir?
     const state = getOrCreateSession(sessionId, workspaceDir);
     const normalizedPath = path.posix.normalize(filePath.replace(/\\/g, '/'));
     state.toolReadsByFile[normalizedPath] = (state.toolReadsByFile[normalizedPath] || 0) + 1;
-    state.lastActivityAt = Date.now();
+    touchActivity(state);
     return state;
 }
 
 export function trackLlmOutput(sessionId: string, usage: TokenUsage | undefined, config?: PainConfig, workspaceDir?: string): SessionState {
     const state = getOrCreateSession(sessionId, workspaceDir);
     state.llmTurns += 1;
-    state.lastActivityAt = Date.now();
+    touchActivity(state);
 
     if (usage) {
         state.totalInputTokens += usage.input || 0;
@@ -266,7 +282,7 @@ export function trackFriction(
     state.currentGfi = (state.currentGfi || 0) + addedFriction;
     const sourceKey = options?.source || (hash ? `unattributed:${hash}` : 'unattributed:unknown');
     ledger[sourceKey] = (ledger[sourceKey] || 0) + addedFriction;
-    state.lastActivityAt = Date.now();
+    touchActivity(state, 'control');
     
     SystemLogger.log(state.workspaceDir, 'GFI_INC', `Friction added: +${addedFriction.toFixed(1)} (Base: ${deltaF}, Mult: ${multiplier.toFixed(2)}). Total GFI: ${state.currentGfi.toFixed(1)}`);
     
@@ -315,6 +331,7 @@ export function resetFriction(
                 state.lastErrorSource = '';
             }
         }
+        touchActivity(state, 'control');
         schedulePersistence(state);
         return state;
     }
@@ -327,6 +344,7 @@ export function resetFriction(
     state.lastErrorSource = '';
     state.consecutiveErrors = 0;
     state.lastErrorHash = '';
+    touchActivity(state, 'control');
     
     // Schedule persistence
     schedulePersistence(state);
@@ -341,6 +359,7 @@ export function resetFriction(
 export function recordThinkingCheckpoint(sessionId: string, workspaceDir?: string): SessionState {
     const state = getOrCreateSession(sessionId, workspaceDir);
     state.lastThinkingTimestamp = Date.now();
+    touchActivity(state, 'control');
     SystemLogger.log(state.workspaceDir, 'THINKING_CHECKPOINT', `Deep thinking recorded at ${new Date(state.lastThinkingTimestamp).toISOString()}`);
     schedulePersistence(state);
     return state;
@@ -361,7 +380,8 @@ export function hasRecentThinking(sessionId: string, windowMs: number = 5 * 60 *
 export function trackBlock(sessionId: string): SessionState {
     const state = getOrCreateSession(sessionId);
     state.blockedAttempts += 1;
-    state.lastActivityAt = Date.now();
+    touchActivity(state, 'control');
+    schedulePersistence(state);
     return state;
 }
 
@@ -369,7 +389,7 @@ export function trackBlock(sessionId: string): SessionState {
 export function setInjectedProbationIds(sessionId: string, ids: string[], workspaceDir?: string): SessionState {
     const state = getOrCreateSession(sessionId, workspaceDir);
     state.injectedProbationIds = [...ids];
-    state.lastActivityAt = Date.now();
+    touchActivity(state, 'control');
     schedulePersistence(state);
     return state;
 }
@@ -399,6 +419,11 @@ export function listSessions(workspaceDir?: string): SessionState[] {
 }
 
 export function clearSession(sessionId: string): void {
+    const timer = persistTimers.get(sessionId);
+    if (timer) {
+        clearTimeout(timer);
+        persistTimers.delete(sessionId);
+    }
     sessions.delete(sessionId);
 }
 
@@ -407,6 +432,11 @@ export function garbageCollectSessions(): void {
     const twoHoursAgo = Date.now() - 2 * 60 * 60 * 1000;
     for (const [id, state] of sessions.entries()) {
         if (state.lastActivityAt < twoHoursAgo) {
+            const timer = persistTimers.get(id);
+            if (timer) {
+                clearTimeout(timer);
+                persistTimers.delete(id);
+            }
             sessions.delete(id);
             
             // Also delete persisted file
