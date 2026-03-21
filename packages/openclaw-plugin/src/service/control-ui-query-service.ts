@@ -9,6 +9,8 @@ export interface OverviewResponse {
   workspaceDir: string;
   generatedAt: string;
   dataFreshness: string | null;
+  dataSource: 'trajectory_db_analytics';
+  runtimeControlPlaneSource: 'pd_evolution_status';
   summary: {
     repeatErrorRate: number;
     userCorrectionRate: number;
@@ -335,6 +337,8 @@ export class ControlUiQueryService {
       workspaceDir: this.workspaceDir,
       generatedAt: new Date().toISOString(),
       dataFreshness: stats.lastIngestAt,
+      dataSource: 'trajectory_db_analytics',
+      runtimeControlPlaneSource: 'pd_evolution_status',
       summary: {
         repeatErrorRate: roundRate(Number(failureStats.repeated_failures), Number(failureStats.total_failures)),
         userCorrectionRate: roundRate(correctionTotal, stats.userTurns),

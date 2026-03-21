@@ -9,6 +9,7 @@ import { extractCommonSubstring } from '../utils/nlp.js';
 import { SystemLogger } from '../core/system-logger.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { initPersistence, flushAllSessions } from '../core/session-tracker.js';
+import { acquireLockAsync, releaseLock, type LockContext } from '../utils/file-lock.js';
 
 let intervalId: NodeJS.Timeout | null = null;
 
@@ -19,6 +20,10 @@ export interface EvolutionQueueItem {
     source: string;
     reason: string;
     timestamp: string;
+    enqueued_at?: string;
+    started_at?: string;
+    completed_at?: string;
+    assigned_session_key?: string;
     trigger_text_preview?: string;
     status: 'pending' | 'in_progress' | 'completed';
 }
@@ -93,55 +98,49 @@ function isPendingPainCandidate(status: string | undefined): boolean {
     return status === undefined || status === 'pending';
 }
 
-/**
- * Acquire an exclusive file lock for the given resource.
- * Returns a release function. Uses 'wx' flag for atomic exclusive create.
- * Detects stale locks by checking PID and mtime.
- */
-export function acquireQueueLock(lockPath: string, logger: any): (() => void) | null {
-    let retries = 0;
-    while (retries < LOCK_MAX_RETRIES) {
-        try {
-            const fd = fs.openSync(lockPath, 'wx');
-            fs.writeSync(fd, `${process.pid}\n${Date.now()}`);
-            fs.closeSync(fd);
-            return () => {
-                try { fs.unlinkSync(lockPath); } catch { /* ignore */ }
-            };
-        } catch (err: any) {
-            if (err.code === 'EEXIST') {
-                // Check if lock is stale
-                try {
-                    const stat = fs.statSync(lockPath);
-                    const content = fs.readFileSync(lockPath, 'utf8').trim();
-                    const pid = parseInt(content.split('\n')[0] || '0', 10);
-                    let isStale = false;
-                    if (pid > 0) {
-                        try { process.kill(pid, 0); } catch (e: any) {
-                            if (e.code === 'ESRCH') isStale = true;
-                        }
-                        if (!isStale && Date.now() - stat.mtimeMs > LOCK_STALE_MS) isStale = true;
-                    } else if (Date.now() - stat.mtimeMs > LOCK_STALE_MS) {
-                        isStale = true;
-                    }
-                    if (isStale) {
-                        fs.unlinkSync(lockPath);
-                        retries++;
-                        const start = Date.now();
-                        while (Date.now() - start < LOCK_RETRY_DELAY_MS) { /* spin */ }
-                        continue;
-                    }
-                } catch { /* stat/read failed, treat as busy */ }
-                retries++;
-                const start = Date.now();
-                while (Date.now() - start < LOCK_RETRY_DELAY_MS) { /* spin */ }
-                continue;
-            }
-            throw err;
-        }
+export async function acquireQueueLock(resourcePath: string, logger: any, lockSuffix: string = EVOLUTION_QUEUE_LOCK_SUFFIX): Promise<() => void> {
+    try {
+        const ctx: LockContext = await acquireLockAsync(resourcePath, {
+            lockSuffix,
+            maxRetries: LOCK_MAX_RETRIES,
+            baseRetryDelayMs: LOCK_RETRY_DELAY_MS,
+            lockStaleMs: LOCK_STALE_MS,
+        });
+        return () => releaseLock(ctx);
+    } catch (error) {
+        logger?.warn?.(`[PD:EvolutionWorker] Failed to acquire lock for ${resourcePath}: ${String(error)}`);
+        throw error;
     }
-    logger?.warn?.(`[PD:EvolutionWorker] Failed to acquire lock after ${LOCK_MAX_RETRIES} retries: ${lockPath}`);
-    return null;
+}
+
+async function requireQueueLock(resourcePath: string, logger: any, scope: string, lockSuffix: string = EVOLUTION_QUEUE_LOCK_SUFFIX): Promise<() => void> {
+    try {
+        return await acquireQueueLock(resourcePath, logger, lockSuffix);
+    } catch {
+        throw new Error(`[PD:EvolutionWorker] ${scope}: queue lock unavailable for ${resourcePath}`);
+    }
+}
+
+export function extractEvolutionTaskId(task: string): string | null {
+    if (!task) return null;
+    const match = task.match(/\[ID:\s*([A-Za-z0-9_-]+)\]/);
+    return match?.[1] || null;
+}
+
+function findRecentDuplicateTask(
+    queue: EvolutionQueueItem[],
+    source: string,
+    preview: string,
+    now: number,
+    reason?: string
+): EvolutionQueueItem | undefined {
+    const key = normalizePainDedupKey(source, preview, reason);
+    return queue.find((task) => {
+        if (task.status === 'completed') return false;
+        const taskTime = new Date(task.enqueued_at || task.timestamp).getTime();
+        if (!Number.isFinite(taskTime) || (now - taskTime) > PAIN_QUEUE_DEDUP_WINDOW_MS) return false;
+        return normalizePainDedupKey(task.source, task.trigger_text_preview || '', task.reason) === key;
+    });
 }
 
 function normalizePainDedupKey(source: string, preview: string, reason?: string): string {
@@ -152,13 +151,7 @@ function normalizePainDedupKey(source: string, preview: string, reason?: string)
 }
 
 export function hasRecentDuplicateTask(queue: EvolutionQueueItem[], source: string, preview: string, now: number, reason?: string): boolean {
-    const key = normalizePainDedupKey(source, preview, reason);
-    return queue.some((task) => {
-        if (task.status === 'completed') return false;
-        const taskTime = new Date(task.timestamp).getTime();
-        if (!Number.isFinite(taskTime) || (now - taskTime) > PAIN_QUEUE_DEDUP_WINDOW_MS) return false;
-        return normalizePainDedupKey(task.source, task.trigger_text_preview || '', task.reason) === key;
-    });
+    return !!findRecentDuplicateTask(queue, source, preview, now, reason);
 }
 
 export function hasEquivalentPromotedRule(dictionary: { getAllRules(): Record<string, { type: string; phrases?: string[]; pattern?: string; status: string; }> }, phrase: string): boolean {
@@ -175,7 +168,7 @@ export function hasEquivalentPromotedRule(dictionary: { getAllRules(): Record<st
     });
 }
 
-function checkPainFlag(wctx: WorkspaceContext, logger: any) {
+async function checkPainFlag(wctx: WorkspaceContext, logger: any) {
     try {
         const painFlagPath = wctx.resolve('PAIN_FLAG');
         if (!fs.existsSync(painFlagPath)) return;
@@ -202,9 +195,7 @@ function checkPainFlag(wctx: WorkspaceContext, logger: any) {
         if (logger) logger.info(`[PD:EvolutionWorker] Detected pain flag (score: ${score}, source: ${source}). Enqueueing evolution task.`);
 
         const queuePath = wctx.resolve('EVOLUTION_QUEUE');
-        const lockPath = queuePath + EVOLUTION_QUEUE_LOCK_SUFFIX;
-        const releaseLock = acquireQueueLock(lockPath, logger);
-        if (!releaseLock) return; // Could not acquire lock
+        const releaseLock = await requireQueueLock(queuePath, logger, 'checkPainFlag');
 
         try {
             let queue: EvolutionQueueItem[] = [];
@@ -217,9 +208,14 @@ function checkPainFlag(wctx: WorkspaceContext, logger: any) {
             }
 
             const now = Date.now();
-            if (hasRecentDuplicateTask(queue, source, preview, now, reason)) {
+            const duplicateTask = findRecentDuplicateTask(queue, source, preview, now, reason);
+            if (duplicateTask) {
                 logger?.info?.(`[PD:EvolutionWorker] Duplicate pain task skipped for source=${source} preview=${preview || 'N/A'}`);
-                fs.appendFileSync(painFlagPath, `\nstatus: queued\n`, 'utf8');
+                fs.appendFileSync(
+                    painFlagPath,
+                    `\nstatus: queued\ntask_id: ${duplicateTask.id}\n`,
+                    'utf8'
+                );
                 return;
             }
 
@@ -231,11 +227,12 @@ function checkPainFlag(wctx: WorkspaceContext, logger: any) {
                 reason,
                 trigger_text_preview: preview,
                 timestamp: new Date(now).toISOString(),
+                enqueued_at: new Date(now).toISOString(),
                 status: 'pending'
             });
 
             fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
-            fs.appendFileSync(painFlagPath, '\nstatus: queued\n', 'utf8');
+            fs.appendFileSync(painFlagPath, `\nstatus: queued\ntask_id: ${taskId}\n`, 'utf8');
         } finally {
             releaseLock();
         }
@@ -245,13 +242,12 @@ function checkPainFlag(wctx: WorkspaceContext, logger: any) {
     }
 }
 
-function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventLog: any) {
+async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventLog: any) {
     const queuePath = wctx.resolve('EVOLUTION_QUEUE');
     if (!fs.existsSync(queuePath)) return;
+    const directivePath = wctx.resolve('EVOLUTION_DIRECTIVE');
 
-    const lockPath = queuePath + EVOLUTION_QUEUE_LOCK_SUFFIX;
-    const releaseLock = acquireQueueLock(lockPath, logger);
-    if (!releaseLock) return; // Could not acquire lock
+    const releaseLock = await requireQueueLock(queuePath, logger, 'processEvolutionQueue');
 
     try {
         let queue: EvolutionQueueItem[] = [];
@@ -269,10 +265,13 @@ function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventLog: an
 
         for (const task of queue) {
             if (task.status === 'in_progress' && task.timestamp) {
-                const age = Date.now() - new Date(task.timestamp).getTime();
+                const startedAt = task.started_at || task.timestamp;
+                const age = Date.now() - new Date(startedAt).getTime();
                 if (age > timeout) {
                     if (logger) logger.info(`[PD:EvolutionWorker] Resetting timed-out task: ${task.id}`);
                     task.status = 'pending';
+                    delete task.started_at;
+                    delete task.assigned_session_key;
                     queueChanged = true;
                 }
             }
@@ -281,29 +280,67 @@ function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventLog: an
         const pendingTasks = queue.filter(t => t.status === 'pending');
 
         if (pendingTasks.length > 0) {
-            const directivePath = wctx.resolve('EVOLUTION_DIRECTIVE');
             const highestScoreTask = pendingTasks.sort((a, b) => b.score - a.score)[0];
+            const nowIso = new Date().toISOString();
 
             const taskDescription = `Diagnose systemic pain [ID: ${highestScoreTask.id}]. Source: ${highestScoreTask.source}. Reason: ${highestScoreTask.reason}. ` +
                   `Trigger text: "${highestScoreTask.trigger_text_preview || 'N/A'}"`;
-
-            const directive = {
-                active: true,
-                task: taskDescription,
-                timestamp: new Date().toISOString()
-            };
-
-            fs.writeFileSync(directivePath, JSON.stringify(directive, null, 2), 'utf8');
             highestScoreTask.task = taskDescription;
             highestScoreTask.status = 'in_progress';
+            highestScoreTask.started_at = nowIso;
+            delete highestScoreTask.completed_at;
+            delete highestScoreTask.assigned_session_key;
             queueChanged = true;
-            
+
             if (eventLog) {
                 eventLog.recordEvolutionTask({
                     taskId: highestScoreTask.id,
                     taskType: highestScoreTask.source,
                     reason: highestScoreTask.reason
                 });
+            }
+
+            fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+            queueChanged = false;
+
+            const directive = {
+                active: true,
+                taskId: highestScoreTask.id,
+                task: taskDescription,
+                timestamp: nowIso
+            };
+
+            try {
+                fs.writeFileSync(directivePath, JSON.stringify(directive, null, 2), 'utf8');
+            } catch (directiveError) {
+                highestScoreTask.status = 'pending';
+                delete highestScoreTask.started_at;
+                delete highestScoreTask.task;
+                delete highestScoreTask.assigned_session_key;
+                try {
+                    fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+                } catch (rollbackError) {
+                    throw new Error(
+                        `[PD:EvolutionWorker] Failed to persist directive and failed to roll back queue: ${String(directiveError)}; rollback=${String(rollbackError)}`
+                    );
+                }
+                throw directiveError;
+            }
+        } else {
+            const hasInProgressTask = queue.some((task) => task.status === 'in_progress');
+            if (!hasInProgressTask && fs.existsSync(directivePath)) {
+                const clearedAt = new Date().toISOString();
+                fs.writeFileSync(
+                    directivePath,
+                    JSON.stringify({
+                        active: false,
+                        task: null,
+                        taskId: null,
+                        timestamp: clearedAt,
+                        clearedAt,
+                    }, null, 2),
+                    'utf8'
+                );
             }
         }
 
@@ -367,7 +404,7 @@ async function processDetectionQueue(wctx: WorkspaceContext, api: OpenClawPlugin
                 } catch (e) {
                     if (logger) logger.debug?.(`[PD:EvolutionWorker] L3 Semantic search failed: ${String(e)}`);
                 }
-                trackPainCandidate(text, wctx);
+                await trackPainCandidate(text, wctx);
             }
         }
     } catch (err) {
@@ -375,16 +412,11 @@ async function processDetectionQueue(wctx: WorkspaceContext, api: OpenClawPlugin
     }
 }
 
-export function trackPainCandidate(text: string, wctx: WorkspaceContext) {
+export async function trackPainCandidate(text: string, wctx: WorkspaceContext) {
     if (!shouldTrackPainCandidate(text)) return;
 
     const candidatePath = wctx.resolve('PAIN_CANDIDATES');
-    const lockPath = candidatePath + PAIN_CANDIDATES_LOCK_SUFFIX;
-    const releaseLock = acquireQueueLock(lockPath, console);
-    if (!releaseLock) {
-        console.warn('[PD:EvolutionWorker] Failed to acquire pain candidates lock, skipping track');
-        return;
-    }
+    const releaseLock = await requireQueueLock(candidatePath, console, 'trackPainCandidate', PAIN_CANDIDATES_LOCK_SUFFIX);
 
     try {
         let data = { candidates: {} as any };
@@ -419,16 +451,11 @@ export function trackPainCandidate(text: string, wctx: WorkspaceContext) {
     }
 }
 
-export function processPromotion(wctx: WorkspaceContext, logger: any, eventLog: any) {
+export async function processPromotion(wctx: WorkspaceContext, logger: any, eventLog: any) {
     const candidatePath = wctx.resolve('PAIN_CANDIDATES');
     if (!fs.existsSync(candidatePath)) return;
 
-    const lockPath = candidatePath + PAIN_CANDIDATES_LOCK_SUFFIX;
-    const releaseLock = acquireQueueLock(lockPath, logger);
-    if (!releaseLock) {
-        logger?.warn?.('[PD:EvolutionWorker] Failed to acquire pain candidates lock, skipping promotion');
-        return;
-    }
+    const releaseLock = await requireQueueLock(candidatePath, logger, 'processPromotion', PAIN_CANDIDATES_LOCK_SUFFIX);
 
     try {
         const config = wctx.config;
@@ -486,6 +513,42 @@ export function processPromotion(wctx: WorkspaceContext, logger: any, eventLog: 
     }
 }
 
+export async function registerEvolutionTaskSession(
+    workspaceResolve: (key: string) => string,
+    taskId: string,
+    sessionKey: string,
+    logger?: { warn?: (message: string) => void; info?: (message: string) => void }
+): Promise<boolean> {
+    const queuePath = workspaceResolve('EVOLUTION_QUEUE');
+    if (!fs.existsSync(queuePath)) return false;
+
+    const releaseLock = await requireQueueLock(queuePath, logger, 'registerEvolutionTaskSession');
+
+    try {
+        let queue: EvolutionQueueItem[];
+        try {
+            queue = JSON.parse(fs.readFileSync(queuePath, 'utf8')) as EvolutionQueueItem[];
+        } catch (parseErr) {
+            logger?.warn?.(`[PD:EvolutionWorker] Failed to parse EVOLUTION_QUEUE for session registration: ${queuePath} - ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`);
+            return false;
+        }
+        const task = queue.find((item) => item.id === taskId && item.status === 'in_progress');
+        if (!task) {
+            logger?.warn?.(`[PD:EvolutionWorker] Could not find in-progress evolution task ${taskId} for session assignment`);
+            return false;
+        }
+
+        task.assigned_session_key = sessionKey;
+        if (!task.started_at) {
+            task.started_at = new Date().toISOString();
+        }
+        fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+        return true;
+    } finally {
+        releaseLock();
+    }
+}
+
 export interface ExtendedEvolutionWorkerService {
     id: string;
     api: OpenClawPluginApi | null;
@@ -521,27 +584,31 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
         const interval = config.get('intervals.worker_poll_ms') || (15 * 60 * 1000);
 
         intervalId = setInterval(() => {
-            checkPainFlag(wctx, logger);
-            processEvolutionQueue(wctx, logger, eventLog);
-            if (api) {
-                processDetectionQueue(wctx, api, eventLog).catch(err => {
-                    if (logger) logger.error(`[PD:EvolutionWorker] Error in detection queue: ${String(err)}`);
-                });
-            }
-            processPromotion(wctx, logger, eventLog);
-            wctx.dictionary.flush();
-            flushAllSessions();
+            void (async () => {
+                await checkPainFlag(wctx, logger);
+                await processEvolutionQueue(wctx, logger, eventLog);
+                if (api) {
+                    await processDetectionQueue(wctx, api, eventLog);
+                }
+                await processPromotion(wctx, logger, eventLog);
+                wctx.dictionary.flush();
+                flushAllSessions();
+            })().catch((err) => {
+                if (logger) logger.error(`[PD:EvolutionWorker] Error in worker interval: ${String(err)}`);
+            });
         }, interval);
 
         setTimeout(() => {
-            checkPainFlag(wctx, logger);
-            processEvolutionQueue(wctx, logger, eventLog);
-            if (api) {
-                processDetectionQueue(wctx, api, eventLog).catch(err => {
-                    if (logger) logger.error(`[PD:EvolutionWorker] Startup detection queue failed: ${String(err)}`);
-                });
-            }
-            processPromotion(wctx, logger, eventLog);
+            void (async () => {
+                await checkPainFlag(wctx, logger);
+                await processEvolutionQueue(wctx, logger, eventLog);
+                if (api) {
+                    await processDetectionQueue(wctx, api, eventLog);
+                }
+                await processPromotion(wctx, logger, eventLog);
+            })().catch((err) => {
+                if (logger) logger.error(`[PD:EvolutionWorker] Startup worker cycle failed: ${String(err)}`);
+            });
         }, initialDelay);
     },
 

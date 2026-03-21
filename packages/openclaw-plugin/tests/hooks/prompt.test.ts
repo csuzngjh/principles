@@ -192,6 +192,8 @@ describe('Prompt Context Injection Hook', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(sessionTracker.getSession).mockReturnValue(undefined);
+    mockWctx.evolutionReducer.getActivePrinciples.mockReturnValue([]);
+    mockWctx.evolutionReducer.getProbationPrinciples.mockReturnValue([]);
     vi.mocked(WorkspaceContext.fromHookContext).mockReturnValue(mockWctx as any);
   });
 
@@ -309,6 +311,27 @@ describe('Prompt Context Injection Hook', () => {
     expect(result?.prependContext).toContain('runInBackground=true');
     expect(result?.prependContext).toContain("First respond to the user's current request normally.");
     expect(result?.prependContext).not.toContain('Reply with "[EVOLUTION_ACK]" only');
+  });
+
+  it('should track injected probation principle ids for later tool attribution', async () => {
+    mockWctx.evolutionReducer.getProbationPrinciples.mockReturnValue([
+      { id: 'prob-1', text: 'Verify assumptions before editing' },
+      { id: 'prob-2', text: 'Check scope before changing plans' },
+    ]);
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+
+    const result = await handleBeforePromptBuild({} as any, {
+      workspaceDir,
+      trigger: 'user',
+      sessionId: 'session-probation'
+    } as any);
+
+    expect(result?.appendSystemContext).toContain('probation');
+    expect(sessionTracker.setInjectedProbationIds).toHaveBeenCalledWith(
+      'session-probation',
+      ['prob-1', 'prob-2'],
+      workspaceDir
+    );
   });
 
   it('should properly escape special characters in task string', async () => {

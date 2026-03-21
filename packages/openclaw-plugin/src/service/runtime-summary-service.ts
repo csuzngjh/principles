@@ -77,10 +77,15 @@ interface PersistedSessionState {
   currentGfi?: number;
   dailyGfiPeak?: number;
   lastActivityAt?: number;
+  lastControlActivityAt?: number;
 }
 
 interface QueueItem {
+  id?: string;
   status?: string;
+  task?: string;
+  taskId?: string;
+  assigned_session_key?: string;
 }
 
 interface DirectiveFile {
@@ -139,7 +144,7 @@ export class RuntimeSummaryService {
     const bufferedEvents = hasBufferedEventAccess
       ? (wctx.eventLog as { getBufferedEvents: () => EventLogEntry[] }).getBufferedEvents()
       : [];
-    const events = [...persistedEvents, ...bufferedEvents];
+    const events = this.mergeEvents(persistedEvents, bufferedEvents);
     const dailyStats = this.readJsonFile<Record<string, { gfi?: { peak?: number } }>>(
       path.join(wctx.stateDir, 'logs', 'daily-stats.json'),
       warnings,
@@ -205,7 +210,7 @@ export class RuntimeSummaryService {
       evolution: {
         queue: queueStats,
         directive: directiveSummary,
-        dataQuality: queue ? 'authoritative' : 'partial',
+        dataQuality: this.resolveEvolutionDataQuality(queue, queueStats, directiveSummary),
       },
       pain: {
         activeFlag: Object.keys(painFlag).length > 0,
@@ -247,7 +252,7 @@ export class RuntimeSummaryService {
       }
     }
 
-    return sessions.sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0));
+    return sessions.sort((a, b) => this.resolveSessionSortTime(b) - this.resolveSessionSortTime(a));
   }
 
   private static selectSession(
@@ -289,10 +294,14 @@ export class RuntimeSummaryService {
           Number.isFinite(live.dailyGfiPeak) ? Number(live.dailyGfiPeak) : persisted?.dailyGfiPeak,
         lastActivityAt:
           Number.isFinite(live.lastActivityAt) ? Number(live.lastActivityAt) : persisted?.lastActivityAt,
+        lastControlActivityAt:
+          Number.isFinite(live.lastControlActivityAt)
+            ? Number(live.lastControlActivityAt)
+            : persisted?.lastControlActivityAt,
       });
     }
 
-    return [...merged.values()].sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0));
+    return [...merged.values()].sort((a, b) => this.resolveSessionSortTime(b) - this.resolveSessionSortTime(a));
   }
 
   private static buildQueueStats(queue: QueueItem[] | null): {
@@ -493,6 +502,50 @@ export class RuntimeSummaryService {
       recentBypasses: scoped.filter((entry) => entry.type === 'gate_bypass').length,
       dataQuality: scoped.length > 0 ? 'authoritative' : 'partial',
     };
+  }
+
+  private static resolveSessionSortTime(session: PersistedSessionState): number {
+    return session.lastControlActivityAt ?? session.lastActivityAt ?? 0;
+  }
+
+  private static mergeEvents(persistedEvents: EventLogEntry[], bufferedEvents: EventLogEntry[]): EventLogEntry[] {
+    const merged = new Map<string, EventLogEntry>();
+    for (const entry of [...persistedEvents, ...bufferedEvents]) {
+      merged.set(this.getEventDedupKey(entry), entry);
+    }
+    return [...merged.values()].sort((a, b) => (a.ts || '').localeCompare(b.ts || ''));
+  }
+
+  private static getEventDedupKey(entry: EventLogEntry): string {
+    const eventId = typeof entry.data?.eventId === 'string' ? entry.data.eventId : null;
+    if (eventId) {
+      return `${entry.type}:${entry.sessionId ?? 'none'}:${eventId}`;
+    }
+
+    return [
+      entry.ts ?? 'no-ts',
+      entry.type ?? 'no-type',
+      entry.category ?? 'no-category',
+      entry.sessionId ?? 'no-session',
+      typeof entry.data?.source === 'string' ? entry.data.source : 'no-source',
+      typeof entry.data?.toolName === 'string' ? entry.data.toolName : 'no-tool',
+      typeof entry.data?.reason === 'string' ? entry.data.reason : 'no-reason',
+    ].join('::');
+  }
+
+  private static resolveEvolutionDataQuality(
+    queue: QueueItem[] | null,
+    queueStats: { pending: number; inProgress: number; completed: number },
+    directive: RuntimeSummary['evolution']['directive']
+  ): RuntimeDataQuality {
+    if (!queue) return 'partial';
+    if (queueStats.inProgress > 0 && (!directive.exists || directive.active !== true)) {
+      return 'partial';
+    }
+    if (directive.active && queueStats.inProgress === 0 && queueStats.pending === 0) {
+      return 'partial';
+    }
+    return 'authoritative';
   }
 
   private static readJsonFile<T>(
