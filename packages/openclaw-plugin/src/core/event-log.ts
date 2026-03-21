@@ -238,13 +238,13 @@ export class EventLog {
 
     const data = entry.data ?? {};
     return [
-      entry.ts,
-      entry.type,
-      entry.category,
-      entry.sessionId ?? 'none',
+      entry.ts ?? 'no-ts',
+      entry.type ?? 'no-type',
+      entry.category ?? 'no-category',
+      entry.sessionId ?? 'no-session',
       typeof data.source === 'string' ? data.source : 'no-source',
-      typeof data.reason === 'string' ? data.reason : 'no-reason',
       typeof data.toolName === 'string' ? data.toolName : 'no-tool',
+      typeof data.reason === 'string' ? data.reason : 'no-reason',
     ].join('::');
   }
 
