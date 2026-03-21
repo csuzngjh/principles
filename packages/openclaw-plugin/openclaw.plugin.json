@@ -1,4 +1,4 @@
-﻿{
+{
   "id": "principles-disciple",
   "name": "Principles Disciple",
   "description": "Evolutionary programming agent framework with strategic guardrails and reflection loops.",
@@ -17,7 +17,7 @@
           "zh"
         ],
         "default": "zh",
-        "description": "绯荤粺鎻愮ず璇嶅拰浜や簰璇█ (榛樿鎺ㄨ崘: zh)"
+        "description": "系统提示词和交互语言 (默认推荐: zh)"
       },
       "auditLevel": {
         "type": "string",
@@ -27,7 +27,7 @@
           "high"
         ],
         "default": "medium",
-        "description": "瀹夊叏闃茬垎绾у埆锛歕n- low: 鏋佸妯″紡锛屽嚑涔庝笉鎷︽埅锛孉I 鍙互鑷敱椋炵繑銆俓n- medium (鎺ㄨ崘): 骞宠　妯″紡锛屽厑璁?AI 澶ц儐灏濊瘯锛屼絾鎷︽埅姣佺伃鎬ф搷浣溿€俓n- high: 涓ユ牸妯″紡锛屾墍鏈夊ぇ鑼冨洿淇敼閮介渶瑕佷綘鏄庣‘鎺堟潈銆?
+        "description": "安全防爆级别：\n- low: 极客模式，几乎不拦截，AI 可以自由飞翔。\n- medium (推荐): 平衡模式，允许 AI 大胆尝试，但拦截毁灭性操作。\n- high: 严格模式，所有大范围修改都需要你明确授权。"
       },
       "riskPaths": {
         "type": "array",
@@ -35,17 +35,17 @@
           "type": "string"
         },
         "default": [],
-        "description": "鑷畾涔夐珮鍗辩洰褰曪紙渚嬪 .git/, prod_db/锛夈€侫I 璇曞浘淇敼杩欎簺鐩綍鍓嶏紝灏嗚寮哄埗鎷︽埅骞惰姹傚嚭鍏峰畨鍏ㄨ鍒掋€?
+        "description": "自定义高危目录（例如 .git/, prod_db/）。AI 试图修改这些目录前，将被强制拦截并要求出具安全计划。"
       },
       "deep_reflection": {
         "type": "object",
         "additionalProperties": false,
-        "description": "褰?AI 閬囧埌澶嶆潅闂鎴栬繛缁姤閿欐椂锛屾槸鍚﹀厑璁稿畠鍋滀笅鏉ヨ繘琛屾繁搴﹁嚜鎴戝弽鎬濓紵",
+        "description": "当 AI 遇到复杂问题或连续报错时，是否允许它停下来进行深度自我反思？",
         "properties": {
           "enabled": {
             "type": "boolean",
             "default": true,
-            "description": "寮€鍚?AI 娣卞害鍙嶆€濆姛鑳?
+            "description": "开启 AI 深度反思功能"
           },
           "mode": {
             "type": "string",
@@ -54,7 +54,7 @@
               "forced"
             ],
             "default": "auto",
-            "description": "auto: 閬囧埌鍥伴毦鑷姩瑙﹀彂; forced: 姣忔鍥炵瓟鍓嶉兘寮哄埗鍙嶆€?鏋佽€楁椂闂达紝涓嶆帹鑽?"
+            "description": "auto: 遇到困难自动触发; forced: 每次回答前都强制反思 (极耗时间，不推荐)"
           }
         }
       }
@@ -62,18 +62,17 @@
   },
   "uiHints": {
     "language": {
-      "label": "浜や簰璇█"
+      "label": "交互语言"
     },
     "auditLevel": {
-      "label": "闃茬垎鎷︽埅绾у埆",
+      "label": "防爆拦截级别",
       "placeholder": "medium"
     },
     "riskPaths": {
-      "label": "鈽狅笍 缁濆楂樺嵄鐩綍 (绌鸿〃绀轰笉璁鹃檺)"
+      "label": "⚠️ 绝对高危目录 (空表示不设限)"
     },
     "deep_reflection": {
-      "label": "馃挕 AI 娣卞害鍙嶆€濆姛鑳?
+      "label": "💡 AI 深度反思功能"
     }
   }
 }
-
