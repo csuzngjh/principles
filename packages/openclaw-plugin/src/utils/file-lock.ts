@@ -185,6 +185,13 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function sleepSync(ms: number): void {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    // busy wait for synchronous retry
+  }
+}
+
 function buildLockError(filePath: string, lockPath: string): LockAcquisitionError {
   const holderPid = readLockPid(lockPath);
   const holderStatus = holderPid !== null
@@ -232,9 +239,16 @@ export function acquireLock(filePath: string, options: LockOptions = {}): LockCo
   const opts = { ...DEFAULT_OPTIONS, ...options };
   const pid = process.pid;
 
-  const ctx = tryAcquireWithStaleCleanup(filePath, opts, pid);
-  if (ctx) {
-    return ctx;
+  for (let attempt = 0; attempt < opts.maxRetries; attempt++) {
+    const ctx = tryAcquireWithStaleCleanup(filePath, opts, pid);
+    if (ctx) {
+      return ctx;
+    }
+
+    if (attempt < opts.maxRetries - 1) {
+      const delay = calculateBackoff(attempt, opts.baseRetryDelayMs, opts.maxRetryDelayMs);
+      sleepSync(delay);
+    }
   }
 
   throw buildLockError(filePath, filePath + opts.lockSuffix);

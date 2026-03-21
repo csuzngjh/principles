@@ -15,12 +15,15 @@ export const LOW_RISK_WRITE_TOOL_NAMES = [
   'edit', 'edit_file', 'replace', 'apply_patch', 'insert', 'patch',
 ] as const;
 
-export const HIGH_RISK_TOOL_NAMES = [
-  'delete_file', 'move_file', 'run_shell_command',
-] as const;
-
+// BASH aliases must be defined before HIGH_RISK_TOOL_NAMES
 export const BASH_TOOL_NAMES = [
   'bash', 'run_shell_command', 'exec', 'execute', 'shell', 'cmd',
+] as const;
+
+export const HIGH_RISK_TOOL_NAMES = [
+  'delete_file', 'move_file',
+  // Include all BASH aliases for consistent high-risk classification
+  ...BASH_TOOL_NAMES,
 ] as const;
 
 export const AGENT_TOOL_NAMES = [
@@ -33,7 +36,9 @@ export const CONTENT_LIMITED_TOOL_NAMES = [
 
 export const CONSTRUCTIVE_TOOL_NAMES = [
   ...LOW_RISK_WRITE_TOOL_NAMES,
-  'delete_file', 'move_file', 'run_shell_command',
+  'delete_file', 'move_file',
+  // Include all BASH aliases for consistent constructive classification
+  ...BASH_TOOL_NAMES,
   ...AGENT_TOOL_NAMES,
   'evolve-task', 'init-strategy',
 ] as const;

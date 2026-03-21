@@ -65,7 +65,7 @@ async function registerDiagnosticianRun(api: OpenClawPluginApi, task: string, se
       return;
     }
 
-    await registerEvolutionTaskSession((key) => resolvePdPath(workspaceDir, key as any), taskId, sessionKey, api.logger);
+    await registerEvolutionTaskSession((key) => resolvePdPath(workspaceDir, key as keyof typeof import('../core/paths.js').PD_FILES), taskId, sessionKey, api.logger);
   } catch (error) {
     api.logger?.warn?.(`[PD:AgentSpawn] Failed to register evolution task session: ${String(error)}`);
   }

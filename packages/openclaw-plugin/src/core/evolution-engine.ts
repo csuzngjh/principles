@@ -528,13 +528,25 @@ export class EvolutionEngine {
 
     const tempPath = `${this.storagePath}.tmp.retry.${Date.now()}.${process.pid}`;
     withLock(this.storagePath, () => {
-      fs.writeFileSync(tempPath, JSON.stringify(serializable, null, 2), 'utf8');
+      try {
+        fs.writeFileSync(tempPath, JSON.stringify(serializable, null, 2), 'utf8');
 
-      const fd = fs.openSync(tempPath, 'r');
-      fs.fsyncSync(fd);
-      fs.closeSync(fd);
+        const fd = fs.openSync(tempPath, 'r');
+        fs.fsyncSync(fd);
+        fs.closeSync(fd);
 
-      fs.renameSync(tempPath, this.storagePath);
+        fs.renameSync(tempPath, this.storagePath);
+      } catch (error) {
+        // Clean up temp file on failure
+        try {
+          if (fs.existsSync(tempPath)) {
+            fs.unlinkSync(tempPath);
+          }
+        } catch {
+          // Ignore cleanup errors
+        }
+        throw error;
+      }
     }, {
       lockSuffix: '.lock',
       lockStaleMs: 30_000,
