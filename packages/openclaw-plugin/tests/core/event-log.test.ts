@@ -146,5 +146,62 @@ describe('EventLog', () => {
       
       logger1.dispose();
     });
+
+    it('should dispose and clear all cached instances', () => {
+      const dirA = fs.mkdtempSync(path.join(os.tmpdir(), 'event-log-service-a-'));
+      const dirB = fs.mkdtempSync(path.join(os.tmpdir(), 'event-log-service-b-'));
+
+      try {
+        const loggerA = EventLogService.get(dirA);
+        const loggerB = EventLogService.get(dirB);
+
+        const disposeSpyA = vi.spyOn(loggerA, 'dispose');
+        const disposeSpyB = vi.spyOn(loggerB, 'dispose');
+
+        EventLogService.disposeAll();
+
+        expect(disposeSpyA).toHaveBeenCalled();
+        expect(disposeSpyB).toHaveBeenCalled();
+        expect(EventLogService.get(dirA)).not.toBe(loggerA);
+      } finally {
+        EventLogService.disposeAll();
+        fs.rmSync(dirA, { recursive: true, force: true });
+        fs.rmSync(dirB, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe('session empathy aggregation', () => {
+    it('should deduplicate the same empathy event across file and buffer using eventId', () => {
+      eventLog.recordPainSignal('session-1', {
+        source: 'user_empathy',
+        score: 12,
+        reason: 'duplicate check',
+        origin: 'assistant_self_report',
+        severity: 'mild',
+        confidence: 1,
+        detection_mode: 'structured',
+        deduped: false,
+        eventId: 'evt-1',
+      });
+      eventLog.flush();
+
+      eventLog.recordPainSignal('session-1', {
+        source: 'user_empathy',
+        score: 12,
+        reason: 'duplicate check',
+        origin: 'assistant_self_report',
+        severity: 'mild',
+        confidence: 1,
+        detection_mode: 'structured',
+        deduped: false,
+        eventId: 'evt-1',
+      });
+
+      const stats = eventLog.getEmpathyStats('session', 'session-1');
+
+      expect(stats.totalEvents).toBe(1);
+      expect(stats.totalPenaltyScore).toBe(12);
+    });
   });
 });

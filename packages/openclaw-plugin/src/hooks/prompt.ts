@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { PluginHookBeforePromptBuildEvent, PluginHookAgentContext, PluginHookBeforePromptBuildResult, PluginLogger } from '../openclaw-sdk.js';
-import { getSession, resetFriction, setInjectedProbationIds } from '../core/session-tracker.js';
+import { clearInjectedProbationIds, getSession, resetFriction, setInjectedProbationIds } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { ContextInjectionConfig, defaultContextConfig } from '../types.js';
 import { extractSummary, getHistoryVersions } from '../core/focus-history.js';
@@ -674,6 +674,13 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
     const reducer = wctx.evolutionReducer;
     const active = reducer.getActivePrinciples().slice(-3);
     const probation = reducer.getProbationPrinciples().slice(0, 5);
+    if (ctx.sessionId) {
+      if (probation.length > 0) {
+        setInjectedProbationIds(ctx.sessionId, probation.map((p) => p.id), workspaceDir);
+      } else {
+        clearInjectedProbationIds(ctx.sessionId, workspaceDir);
+      }
+    }
     if (active.length > 0 || probation.length > 0) {
       const lines: string[] = [];
       if (active.length > 0) {
@@ -691,6 +698,9 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
       evolutionPrinciplesContent = lines.join('\n');
     }
   } catch (e) {
+    if (ctx.sessionId) {
+      clearInjectedProbationIds(ctx.sessionId, workspaceDir);
+    }
     logger?.warn?.(`[PD:Prompt] Failed to load evolution principles: ${String(e)}`);
   }
 

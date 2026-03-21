@@ -201,17 +201,22 @@ describe('Evolution loop user stories e2e', () => {
     expect(stats.probationCount).toBe(0);
   });
 
-  it('story 5: existing queue-completion behavior should still work with new evolution events', async () => {
+  it('story 5: diagnostician completion should close only the linked evolution task', async () => {
     const workspace = makeWorkspace();
     const queuePath = path.join(workspace, '.state', 'evolution_queue.json');
     const painFlagPath = path.join(workspace, '.state', '.pain_flag');
 
-    fs.writeFileSync(queuePath, JSON.stringify([{ id: 't1', status: 'in_progress', timestamp: new Date().toISOString() }]));
-    fs.writeFileSync(painFlagPath, 'status: queued\n');
+    fs.writeFileSync(queuePath, JSON.stringify([{
+      id: 't1',
+      status: 'in_progress',
+      timestamp: new Date().toISOString(),
+      assigned_session_key: 'agent:diagnostician:diag-ok',
+    }]));
+    fs.writeFileSync(painFlagPath, 'status: queued\ntask_id: t1\n');
 
     await handleSubagentEnded(
       {
-        targetSessionKey: 'agent:main:subagent:diag-ok',
+        targetSessionKey: 'agent:diagnostician:diag-ok',
         targetKind: 'subagent',
         reason: 'done',
         outcome: 'ok',

@@ -11,7 +11,6 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 
 export interface LockOptions {
   /** 最大重试次数，默认 50 */
@@ -33,6 +32,18 @@ export interface LockContext {
   pid: number;
   /** 获取锁的时间 */
   acquiredAt: number;
+}
+
+export class LockAcquisitionError extends Error {
+  public readonly filePath: string;
+  public readonly lockPath: string;
+
+  constructor(message: string, filePath: string, lockPath: string) {
+    super(message);
+    this.name = 'LockAcquisitionError';
+    this.filePath = filePath;
+    this.lockPath = lockPath;
+  }
 }
 
 /** 默认锁选项 */
@@ -170,14 +181,50 @@ function calculateBackoff(attempt: number, baseMs: number, maxMs: number): numbe
   return Math.floor(exponentialDelay + jitter);
 }
 
-/**
- * 同步 sleep
- */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function sleepSync(ms: number): void {
   const end = Date.now() + ms;
   while (Date.now() < end) {
-    // busy wait（同步函数无法使用 setTimeout）
+    // busy wait for synchronous retry
   }
+}
+
+function buildLockError(filePath: string, lockPath: string): LockAcquisitionError {
+  const holderPid = readLockPid(lockPath);
+  const holderStatus = holderPid !== null
+    ? (isProcessAlive(holderPid) ? `alive (PID ${holderPid})` : `dead (PID ${holderPid})`)
+    : 'unknown';
+
+  return new LockAcquisitionError(
+    `Failed to acquire lock for ${filePath}. Lock holder: ${holderStatus}.`,
+    filePath,
+    lockPath,
+  );
+}
+
+function tryAcquireWithStaleCleanup(filePath: string, opts: Required<LockOptions>, pid: number): LockContext | null {
+  const lockPath = filePath + opts.lockSuffix;
+
+  if (tryAcquireLock(lockPath, pid)) {
+    const actualPid = readLockPid(lockPath);
+    if (actualPid === pid) {
+      return { lockPath, pid, acquiredAt: Date.now() };
+    }
+  }
+
+  cleanupStaleLock(lockPath, opts.lockStaleMs);
+
+  if (tryAcquireLock(lockPath, pid)) {
+    const actualPid = readLockPid(lockPath);
+    if (actualPid === pid) {
+      return { lockPath, pid, acquiredAt: Date.now() };
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -190,44 +237,40 @@ function sleepSync(ms: number): void {
  */
 export function acquireLock(filePath: string, options: LockOptions = {}): LockContext {
   const opts = { ...DEFAULT_OPTIONS, ...options };
-  const lockPath = filePath + opts.lockSuffix;
   const pid = process.pid;
-  
+
   for (let attempt = 0; attempt < opts.maxRetries; attempt++) {
-    // 1. 尝试原子获取锁
-    if (tryAcquireLock(lockPath, pid)) {
-      // 2. 二次验证：确保我们真的持有锁
-      const actualPid = readLockPid(lockPath);
-      if (actualPid === pid) {
-        return {
-          lockPath,
-          pid,
-          acquiredAt: Date.now(),
-        };
-      }
-      // PID 不匹配，说明被其他进程抢占，继续重试
+    const ctx = tryAcquireWithStaleCleanup(filePath, opts, pid);
+    if (ctx) {
+      return ctx;
     }
-    
-    // 3. 获取失败，检查是否需要清理过期锁
-    cleanupStaleLock(lockPath, opts.lockStaleMs);
-    
-    // 4. 计算退避时间并等待
+
     if (attempt < opts.maxRetries - 1) {
       const delay = calculateBackoff(attempt, opts.baseRetryDelayMs, opts.maxRetryDelayMs);
       sleepSync(delay);
     }
   }
-  
-  // 5. 所有重试都失败，抛出异常（不静默丢弃！）
-  const holderPid = readLockPid(lockPath);
-  const holderStatus = holderPid !== null 
-    ? (isProcessAlive(holderPid) ? `alive (PID ${holderPid})` : `dead (PID ${holderPid})`)
-    : 'unknown';
-  
-  throw new Error(
-    `Failed to acquire lock for ${filePath} after ${opts.maxRetries} attempts. ` +
-    `Lock holder: ${holderStatus}. Consider increasing maxRetries or checking for zombie processes.`
-  );
+
+  throw buildLockError(filePath, filePath + opts.lockSuffix);
+}
+
+export async function acquireLockAsync(filePath: string, options: LockOptions = {}): Promise<LockContext> {
+  const opts = { ...DEFAULT_OPTIONS, ...options };
+  const pid = process.pid;
+
+  for (let attempt = 0; attempt < opts.maxRetries; attempt++) {
+    const ctx = tryAcquireWithStaleCleanup(filePath, opts, pid);
+    if (ctx) {
+      return ctx;
+    }
+
+    if (attempt < opts.maxRetries - 1) {
+      const delay = calculateBackoff(attempt, opts.baseRetryDelayMs, opts.maxRetryDelayMs);
+      await sleep(delay);
+    }
+  }
+
+  throw buildLockError(filePath, filePath + opts.lockSuffix);
 }
 
 /**
@@ -255,6 +298,19 @@ export function withLock<T>(
   const ctx = acquireLock(filePath, options);
   try {
     return fn();
+  } finally {
+    releaseLock(ctx);
+  }
+}
+
+export async function withLockAsync<T>(
+  filePath: string,
+  fn: () => Promise<T>,
+  options: LockOptions = {}
+): Promise<T> {
+  const ctx = await acquireLockAsync(filePath, options);
+  try {
+    return await fn();
   } finally {
     releaseLock(ctx);
   }

@@ -6,9 +6,12 @@
  */
 
 import { Type } from '@sinclair/typebox';
+import * as fs from 'fs';
 import { randomUUID } from 'node:crypto';
 import type { OpenClawPluginApi, SubagentWaitResult } from '../openclaw-sdk.js';
 import { loadAgentDefinition, listAvailableAgents } from '../core/agent-loader.js';
+import { resolvePdPath } from '../core/paths.js';
+import { extractEvolutionTaskId, registerEvolutionTaskSession } from '../service/evolution-worker.js';
 
 /**
  * Extract assistant text from session messages
@@ -48,6 +51,24 @@ function extractAssistantText(messages: unknown): string {
   }
 
   return '';
+}
+
+async function registerDiagnosticianRun(api: OpenClawPluginApi, task: string, sessionKey: string): Promise<void> {
+  const taskId = extractEvolutionTaskId(task);
+  if (!taskId) return;
+
+  try {
+    const workspaceDir = api.resolvePath('.');
+    const queuePath = resolvePdPath(workspaceDir, 'EVOLUTION_QUEUE');
+    if (!fs.existsSync(queuePath)) {
+      api.logger?.warn?.(`[PD:AgentSpawn] Evolution task ${taskId} not registered because queue file is missing`);
+      return;
+    }
+
+    await registerEvolutionTaskSession((key) => resolvePdPath(workspaceDir, key as keyof typeof import('../core/paths.js').PD_FILES), taskId, sessionKey, api.logger);
+  } catch (error) {
+    api.logger?.warn?.(`[PD:AgentSpawn] Failed to register evolution task session: ${String(error)}`);
+  }
 }
 
 /**
@@ -323,6 +344,10 @@ pd_run_worker(
           deliver: false, // Critical: don't send directly to external channels
           idempotencyKey: randomUUID(),
         });
+
+        if (agentType === 'diagnostician') {
+          await registerDiagnosticianRun(api, task, sessionKey);
+        }
 
         if (runAsync) {
           const duration = Date.now() - startTime;

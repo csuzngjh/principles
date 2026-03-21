@@ -15,8 +15,10 @@ import * as path from 'path';
 import * as os from 'os';
 import {
   acquireLock,
+  acquireLockAsync,
   releaseLock,
   withLock,
+  withLockAsync,
   withAsyncLock,
   getLockStatus,
 } from '../../src/utils/file-lock.js';
@@ -204,6 +206,40 @@ describe('File Lock', () => {
   // ===== 异步锁测试 =====
 
   describe('withAsyncLock', () => {
+    test('should retry asynchronously until lock becomes available', async () => {
+      const ctx = acquireLock(filePath);
+      const promise = acquireLockAsync(filePath, {
+        maxRetries: 5,
+        baseRetryDelayMs: 5,
+        maxRetryDelayMs: 5,
+      });
+
+      setTimeout(() => releaseLock(ctx), 10);
+
+      const asyncCtx = await promise;
+      expect(asyncCtx.pid).toBe(process.pid);
+      releaseLock(asyncCtx);
+    });
+
+    test('should run async critical section under process lock', async () => {
+      const result = await withLockAsync(filePath, async () => {
+        // Lock should exist at the start
+        expect(fs.existsSync(getLockPath(filePath))).toBe(true);
+        
+        // Perform actual async operation - lock should still exist during await
+        await new Promise(resolve => setTimeout(resolve, 10));
+        
+        // Lock should still exist after async pause
+        expect(fs.existsSync(getLockPath(filePath))).toBe(true);
+        
+        return 'locked';
+      });
+
+      expect(result).toBe('locked');
+      // Lock should be released after withLockAsync completes
+      expect(fs.existsSync(getLockPath(filePath))).toBe(false);
+    });
+
     test('should serialize async operations', async () => {
       const results: number[] = [];
       

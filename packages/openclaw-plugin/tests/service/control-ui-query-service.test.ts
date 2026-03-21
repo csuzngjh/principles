@@ -26,4 +26,17 @@ describe('ControlUiQueryService', () => {
     expect(service.getThinkingModelDetail('UNKNOWN')).toBeNull();
     service.dispose();
   });
+
+  it('labels overview responses as trajectory analytics rather than runtime control state', () => {
+    workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-query-service-overview-'));
+    const trajectory = new TrajectoryDatabase({ workspaceDir });
+    trajectory.dispose();
+
+    const service = new ControlUiQueryService(workspaceDir);
+    const overview = service.getOverview();
+
+    expect(overview.dataSource).toBe('trajectory_db_analytics');
+    expect(overview.runtimeControlPlaneSource).toBe('pd_evolution_status');
+    service.dispose();
+  });
 });

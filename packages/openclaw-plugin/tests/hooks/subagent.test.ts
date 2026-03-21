@@ -1,10 +1,14 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { handleSubagentEnded } from '../../src/hooks/subagent.js';
 import * as fs from 'fs';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
+import * as evolutionWorker from '../../src/service/evolution-worker.js';
 
 vi.mock('fs');
 vi.mock('../../src/core/workspace-context.js');
+vi.mock('../../src/service/evolution-worker.js', () => ({
+    acquireQueueLock: vi.fn(async () => () => undefined),
+}));
 
 const mockEmitSync = vi.fn();
 
@@ -39,8 +43,13 @@ describe('Subagent Hook', () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
+        vi.useFakeTimers();
         mockEmitSync.mockReset();
         vi.mocked(WorkspaceContext.fromHookContext).mockReturnValue(mockWctx as any);
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
     });
 
     it('should record success on successful subagent completion', async () => {
@@ -114,10 +123,10 @@ describe('Subagent Hook', () => {
         expect(mockEmitSync).not.toHaveBeenCalled();
     });
 
-    it('should complete the oldest in-progress queue task using timestamp fallback', async () => {
+    it('should complete only the matching assigned diagnostician task and clean the linked pain flag', async () => {
         const mockCtx = { workspaceDir, sessionId: 's1' };
         const mockEvent = {
-            targetSessionKey: 'agent:main:subagent:diagnostician-123',
+            targetSessionKey: 'agent:diagnostician:session-123',
             outcome: 'ok'
         };
 
@@ -130,12 +139,12 @@ describe('Subagent Hook', () => {
             const pathStr = p.toString();
             if (pathStr.includes('evolution_queue.json')) {
                 return JSON.stringify([
-                    { id: 'newer', status: 'in_progress', timestamp: '2026-03-17T02:00:00.000Z' },
-                    { id: 'older', status: 'in_progress', timestamp: '2026-03-17T01:00:00.000Z' }
+                    { id: 'task-a', status: 'in_progress', assigned_session_key: 'agent:diagnostician:other' },
+                    { id: 'task-b', status: 'in_progress', assigned_session_key: 'agent:diagnostician:session-123' }
                 ]);
             }
             if (pathStr.includes('.pain_flag')) {
-                return 'score: 80\nstatus: queued\n';
+                return 'score: 80\nstatus: queued\ntask_id: task-b\n';
             }
             return '';
         });
@@ -148,50 +157,80 @@ describe('Subagent Hook', () => {
         expect(writeSpy).toHaveBeenCalled();
         const [, queuePayload] = writeSpy.mock.calls.find((args) => args[0].toString().includes('evolution_queue.json'))!;
         const savedQueue = JSON.parse(queuePayload as string);
-        expect(savedQueue.find((t: any) => t.id === 'older').status).toBe('completed');
-        expect(savedQueue.find((t: any) => t.id === 'newer').status).toBe('in_progress');
+        expect(savedQueue.find((t: any) => t.id === 'task-b').status).toBe('completed');
+        expect(savedQueue.find((t: any) => t.id === 'task-a').status).toBe('in_progress');
         expect(unlinkSpy).toHaveBeenCalled();
     });
 
-    it('should complete the correct in-progress entry even when legacy tasks share the same id', async () => {
+    it('should not complete an unrelated in-progress task without a matching assigned session key', async () => {
         const mockCtx = { workspaceDir, sessionId: 's1' };
         const mockEvent = {
-            targetSessionKey: 'agent:main:subagent:diagnostician-123',
+            targetSessionKey: 'agent:diagnostician:session-123',
             outcome: 'ok'
         };
 
         vi.mocked(fs.existsSync).mockImplementation((p) => {
             const pathStr = p.toString();
-            return pathStr.includes('evolution_queue.json')
-                || pathStr.includes('evolution_directive.json')
-                || pathStr.includes('.pain_flag');
+            return pathStr.includes('evolution_queue.json') || pathStr.includes('.pain_flag');
         });
 
         vi.mocked(fs.readFileSync).mockImplementation((p) => {
             const pathStr = p.toString();
             if (pathStr.includes('evolution_queue.json')) {
                 return JSON.stringify([
-                    { id: '7386ccfb', status: 'completed', timestamp: '2026-03-19T07:00:25.735Z' },
-                    { id: '7386ccfb', status: 'in_progress', timestamp: '2026-03-20T06:38:32.222Z' },
-                    { id: '7386ccfb', status: 'pending', timestamp: '2026-03-20T06:53:32.222Z' }
+                    { id: 'task-a', status: 'in_progress', assigned_session_key: 'agent:diagnostician:other' },
+                    { id: 'task-b', status: 'pending' }
                 ]);
             }
             if (pathStr.includes('.pain_flag')) {
-                return 'score: 80\nstatus: queued\n';
+                return 'score: 80\nstatus: queued\ntask_id: task-a\n';
             }
             return '';
         });
 
         const writeSpy = vi.mocked(fs.writeFileSync);
+        const unlinkSpy = vi.mocked(fs.unlinkSync);
 
         await handleSubagentEnded(mockEvent as any, mockCtx as any);
 
-        const [, queuePayload] = writeSpy.mock.calls.find((args) => args[0].toString().includes('evolution_queue.json'))!;
-        const savedQueue = JSON.parse(queuePayload as string);
+        expect(writeSpy.mock.calls.some((args) => args[0].toString().includes('evolution_queue.json'))).toBe(false);
+        expect(unlinkSpy.mock.calls.some((args) => args[0].toString().includes('.pain_flag'))).toBe(false);
+    });
 
-        expect(savedQueue[0].status).toBe('completed');
-        expect(savedQueue[1].status).toBe('completed');
-        expect(savedQueue[2].status).toBe('pending');
+    it('should retry diagnostician completion after transient queue lock failure', async () => {
+        const mockCtx = { workspaceDir, sessionId: 's1' };
+        const mockEvent = {
+            targetSessionKey: 'agent:diagnostician:session-123',
+            outcome: 'ok'
+        };
+
+        vi.mocked(fs.existsSync).mockImplementation((p) => {
+            const pathStr = p.toString();
+            return pathStr.includes('evolution_queue.json') || pathStr.includes('.pain_flag');
+        });
+
+        vi.mocked(fs.readFileSync).mockImplementation((p) => {
+            const pathStr = p.toString();
+            if (pathStr.includes('evolution_queue.json')) {
+                return JSON.stringify([
+                    { id: 'task-b', status: 'in_progress', assigned_session_key: 'agent:diagnostician:session-123' }
+                ]);
+            }
+            if (pathStr.includes('.pain_flag')) {
+                return 'score: 80\nstatus: queued\ntask_id: task-b\n';
+            }
+            return '';
+        });
+
+        vi.mocked(evolutionWorker.acquireQueueLock)
+            .mockRejectedValueOnce(new Error('lock busy'))
+            .mockResolvedValue(async () => () => undefined as any);
+
+        await handleSubagentEnded(mockEvent as any, mockCtx as any);
+        await vi.advanceTimersByTimeAsync(300);
+
+        const writeSpy = vi.mocked(fs.writeFileSync);
+        expect(writeSpy.mock.calls.some((args) => args[0].toString().includes('evolution_queue.json'))).toBe(true);
     });
 
 });

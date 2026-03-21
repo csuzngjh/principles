@@ -11,6 +11,18 @@ vi.mock('../../src/core/agent-loader.js', () => ({
   listAvailableAgents: vi.fn(() => ['explorer', 'diagnostician', 'auditor']),
 }));
 
+vi.mock('fs', () => ({
+  existsSync: vi.fn(() => true),
+}));
+
+vi.mock('../../src/service/evolution-worker.js', async () => {
+  const actual = await vi.importActual<typeof import('../../src/service/evolution-worker.js')>('../../src/service/evolution-worker.js');
+  return {
+    ...actual,
+    registerEvolutionTaskSession: vi.fn(async () => true),
+  };
+});
+
 describe('createAgentSpawnTool', () => {
   let mockApi: Partial<OpenClawPluginApi>;
   let mockSubagentRuntime: {
@@ -33,6 +45,7 @@ describe('createAgentSpawnTool', () => {
     };
 
     mockApi = {
+      resolvePath: vi.fn().mockReturnValue('/mock/workspace'),
       runtime: {
         subagent: mockSubagentRuntime,
       } as OpenClawPluginApi['runtime'],
@@ -146,6 +159,23 @@ describe('createAgentSpawnTool', () => {
       expect(mockSubagentRuntime.waitForRun).not.toHaveBeenCalled();
       expect(mockSubagentRuntime.deleteSession).not.toHaveBeenCalled();
       expect(result).toContain('Diagnostician');
+    });
+
+    it('should register diagnostician runs against the matching evolution task id', async () => {
+      const { registerEvolutionTaskSession } = await import('../../src/service/evolution-worker.js');
+
+      await executeTool({
+        agentType: 'diagnostician',
+        task: 'Diagnose systemic pain [ID: ab12cd34]. Source: tool_failure.',
+        runInBackground: true
+      });
+
+      expect(registerEvolutionTaskSession).toHaveBeenCalledWith(
+        expect.any(Function),
+        'ab12cd34',
+        expect.stringMatching(/^agent:diagnostician:/),
+        mockApi.logger
+      );
     });
 
     it('should handle timeout', async () => {

@@ -3,9 +3,11 @@ import {
     EvolutionWorkerService,
     createEvolutionTaskId,
     createPainCandidateFingerprint,
+    extractEvolutionTaskId,
     hasRecentDuplicateTask,
     hasEquivalentPromotedRule,
     processPromotion,
+    registerEvolutionTaskSession,
     shouldTrackPainCandidate,
     trackPainCandidate,
 } from '../../src/service/evolution-worker.js';
@@ -114,13 +116,13 @@ describe('EvolutionWorkerService', () => {
         expect(shouldTrackPainCandidate('Tool edit failed on MEMORY.md')).toBe(true);
     });
 
-    it('should initialize candidates as pending and keep longer samples', () => {
+    it('should initialize candidates as pending and keep longer samples', async () => {
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pain-candidate-'));
         const candidatePath = path.join(dir, 'pain_candidates.json');
         const longText = `Tool edit failed on MEMORY.md: ${'x'.repeat(1200)}`;
 
         try {
-            trackPainCandidate(longText, {
+            await trackPainCandidate(longText, {
                 resolve: () => candidatePath,
             } as any);
 
@@ -135,7 +137,38 @@ describe('EvolutionWorkerService', () => {
         }
     });
 
-    it('should promote legacy candidates even when status is missing', () => {
+    it('should extract evolution task ids from diagnostician payloads', () => {
+        expect(extractEvolutionTaskId('Diagnose systemic pain [ID: ab12cd34]. Source: tool_failure.')).toBe('ab12cd34');
+        expect(extractEvolutionTaskId('plain task without id')).toBeNull();
+    });
+
+    it('should register assigned diagnostician session on the matching in-progress task', async () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-evolution-session-'));
+        const queuePath = path.join(dir, 'evolution_queue.json');
+
+        fs.writeFileSync(queuePath, JSON.stringify([
+            { id: 'task-a', status: 'pending', score: 40, source: 'pain', reason: 'a', timestamp: '2026-03-20T00:00:00.000Z' },
+            { id: 'task-b', status: 'in_progress', score: 80, source: 'pain', reason: 'b', timestamp: '2026-03-20T00:00:00.000Z' }
+        ], null, 2), 'utf8');
+
+        try {
+            const registered = await registerEvolutionTaskSession(
+                () => queuePath,
+                'task-b',
+                'agent:diagnostician:session-1',
+                { warn: vi.fn() }
+            );
+
+            expect(registered).toBe(true);
+            const saved = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
+            expect(saved[1].assigned_session_key).toBe('agent:diagnostician:session-1');
+            expect(saved[1].started_at).toBeDefined();
+        } finally {
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    it('should promote legacy candidates even when status is missing', async () => {
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-promotion-'));
         const candidatePath = path.join(dir, 'pain_candidates.json');
         const addRule = vi.fn();
@@ -155,7 +188,7 @@ describe('EvolutionWorkerService', () => {
         }, null, 2), 'utf8');
 
         try {
-            processPromotion({
+            await processPromotion({
                 workspaceDir: dir,
                 resolve: () => candidatePath,
                 config: {
@@ -179,7 +212,7 @@ describe('EvolutionWorkerService', () => {
         }
     });
 
-    it('should flush the dictionary on its interval', () => {
+    it('should flush the dictionary on its interval', async () => {
         const mockDict = {
             flush: vi.fn()
         };
@@ -198,7 +231,7 @@ describe('EvolutionWorkerService', () => {
         EvolutionWorkerService.start(ctx as any);
 
         // Advance by 15 minutes
-        vi.advanceTimersByTime(15 * 60 * 1000);
+        await vi.advanceTimersByTimeAsync(15 * 60 * 1000);
 
         expect(mockDict.flush).toHaveBeenCalled();
         // Service now uses workspace-specific stateDir, not ctx.stateDir

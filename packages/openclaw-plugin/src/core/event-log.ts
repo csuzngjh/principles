@@ -228,6 +228,57 @@ export class EventLog {
     return this.eventBuffer.map((entry) => ({ ...entry, data: { ...entry.data } }));
   }
 
+  private getEventDedupKey(entry: EventLogEntry): string {
+    const eventId = typeof (entry.data as { eventId?: unknown } | undefined)?.eventId === 'string'
+      ? String((entry.data as { eventId?: string }).eventId)
+      : null;
+    if (eventId) {
+      return `${entry.type}:${entry.sessionId ?? 'none'}:${eventId}`;
+    }
+
+    const data = entry.data ?? {};
+    return [
+      entry.ts ?? 'no-ts',
+      entry.type ?? 'no-type',
+      entry.category ?? 'no-category',
+      entry.sessionId ?? 'no-session',
+      typeof data.source === 'string' ? data.source : 'no-source',
+      typeof data.toolName === 'string' ? data.toolName : 'no-tool',
+      typeof data.reason === 'string' ? data.reason : 'no-reason',
+    ].join('::');
+  }
+
+  private readPersistedEvents(): EventLogEntry[] {
+    if (!fs.existsSync(this.eventsFile)) return [];
+
+    try {
+      const content = fs.readFileSync(this.eventsFile, 'utf-8');
+      return content
+        .trim()
+        .split('\n')
+        .filter((line) => line.trim().length > 0)
+        .map((line) => {
+          try {
+            return JSON.parse(line) as EventLogEntry;
+          } catch {
+            return null;
+          }
+        })
+        .filter((entry): entry is EventLogEntry => entry !== null);
+    } catch (e) {
+      if (this.logger) this.logger.error(`[PD] Failed to read events.jsonl: ${String(e)}`);
+      return [];
+    }
+  }
+
+  private getMergedEvents(): EventLogEntry[] {
+    const merged = new Map<string, EventLogEntry>();
+    for (const entry of [...this.readPersistedEvents(), ...this.getBufferedEvents()]) {
+      merged.set(this.getEventDedupKey(entry), entry);
+    }
+    return [...merged.values()].sort((a, b) => a.ts.localeCompare(b.ts));
+  }
+
   private flushEvents(): void {
     if (this.eventBuffer.length === 0) return;
     
@@ -358,8 +409,7 @@ export class EventLog {
    * Aggregate empathy stats for a specific session.
    */
   private aggregateSessionEmpathy(sessionId: string, result: EmpathyEventStats): void {
-    // Check event buffer first
-    for (const entry of this.eventBuffer) {
+    for (const entry of this.getMergedEvents()) {
       if (entry.sessionId === sessionId && entry.type === 'pain_signal') {
         const data = entry.data as unknown as PainSignalEventData;
         if (data.source === 'user_empathy') {
@@ -387,50 +437,6 @@ export class EventLog {
       }
     }
 
-    // Also check events file for persisted events
-    if (fs.existsSync(this.eventsFile)) {
-      try {
-        const content = fs.readFileSync(this.eventsFile, 'utf-8');
-        const lines = content.trim().split('\n');
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          try {
-            const entry = JSON.parse(line) as EventLogEntry;
-            if (entry.sessionId === sessionId) {
-              if (entry.type === 'pain_signal') {
-                const data = entry.data as unknown as PainSignalEventData;
-                if (data.source === 'user_empathy') {
-                  if (data.deduped) {
-                    result.dedupedCount++;
-                  } else {
-                    result.totalEvents++;
-                    result.totalPenaltyScore += data.score || 0;
-                    if (data.severity) {
-                      result.bySeverity[data.severity]++;
-                      result.scoreBySeverity[data.severity] += data.score || 0;
-                    }
-                    if (data.detection_mode) result.byDetectionMode[data.detection_mode]++;
-                    if (data.origin) result.byOrigin[data.origin]++;
-                    const conf = data.confidence ?? 1;
-                    if (conf >= 0.8) result.confidenceDistribution.high++;
-                    else if (conf >= 0.5) result.confidenceDistribution.medium++;
-                    else result.confidenceDistribution.low++;
-                  }
-                }
-              } else if (entry.type === 'empathy_rollback') {
-                const data = entry.data as unknown as EmpathyRollbackEventData;
-                result.rollbackCount++;
-                result.rolledBackScore += data.originalScore || 0;
-              }
-            }
-          } catch {
-            // Skip malformed lines
-          }
-        }
-      } catch (e) {
-        if (this.logger) this.logger.error(`[PD] Failed to read events.jsonl: ${String(e)}`);
-      }
-    }
   }
 
   /**
@@ -438,42 +444,16 @@ export class EventLog {
    * Returns the rolled back score, or 0 if event not found.
    */
   rollbackEmpathyEvent(eventId: string, sessionId: string | undefined, reason: string, triggeredBy: 'user_command' | 'natural_language' | 'system'): number {
-    // Search for the event in buffer and file
+    const allEvents = this.getMergedEvents();
     let foundEvent: { entry: EventLogEntry; data: PainSignalEventData } | null = null;
 
-    // Check buffer first
-    for (const entry of this.eventBuffer) {
+    for (const entry of allEvents) {
       if (entry.type === 'pain_signal') {
         const data = entry.data as unknown as PainSignalEventData;
         if ((entry.data as any).eventId === eventId && data.source === 'user_empathy') {
           foundEvent = { entry, data };
           break;
         }
-      }
-    }
-
-    // If not in buffer, check file
-    if (!foundEvent && fs.existsSync(this.eventsFile)) {
-      try {
-        const content = fs.readFileSync(this.eventsFile, 'utf-8');
-        const lines = content.trim().split('\n');
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          try {
-            const entry = JSON.parse(line) as EventLogEntry;
-            if (entry.type === 'pain_signal') {
-              const data = entry.data as unknown as PainSignalEventData;
-              if ((entry.data as any).eventId === eventId && data.source === 'user_empathy') {
-                foundEvent = { entry, data };
-                break;
-              }
-            }
-          } catch {
-            // Skip malformed lines
-          }
-        }
-      } catch (e) {
-        if (this.logger) this.logger.error(`[PD] Failed to read events.jsonl: ${String(e)}`);
       }
     }
 
@@ -499,38 +479,14 @@ export class EventLog {
    * Get the last empathy event ID for a session (for rollback).
    */
   getLastEmpathyEventId(sessionId: string): string | null {
-    // Check buffer in reverse
-    for (let i = this.eventBuffer.length - 1; i >= 0; i--) {
-      const entry = this.eventBuffer[i];
+    const allEvents = this.getMergedEvents();
+    for (let i = allEvents.length - 1; i >= 0; i--) {
+      const entry = allEvents[i];
       if (entry.sessionId === sessionId && entry.type === 'pain_signal') {
         const data = entry.data as unknown as PainSignalEventData;
         if (data.source === 'user_empathy' && !data.deduped) {
           return (entry.data as any).eventId || null;
         }
-      }
-    }
-
-    // Check file
-    if (fs.existsSync(this.eventsFile)) {
-      try {
-        const content = fs.readFileSync(this.eventsFile, 'utf-8');
-        const lines = content.trim().split('\n');
-        for (let i = lines.length - 1; i >= 0; i--) {
-          if (!lines[i].trim()) continue;
-          try {
-            const entry = JSON.parse(lines[i]) as EventLogEntry;
-            if (entry.sessionId === sessionId && entry.type === 'pain_signal') {
-              const data = entry.data as unknown as PainSignalEventData;
-              if (data.source === 'user_empathy' && !data.deduped) {
-                return (entry.data as any).eventId || null;
-              }
-            }
-          } catch {
-            // Skip malformed lines
-          }
-        }
-      } catch (e) {
-        if (this.logger) this.logger.error(`[PD] Failed to read events.jsonl: ${String(e)}`);
       }
     }
 
@@ -568,5 +524,12 @@ export class EventLogService {
     for (const instance of this.instances.values()) {
       instance.flush();
     }
+  }
+
+  static disposeAll(): void {
+    for (const instance of this.instances.values()) {
+      instance.dispose();
+    }
+    this.instances.clear();
   }
 }

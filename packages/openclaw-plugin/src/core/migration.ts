@@ -31,7 +31,7 @@ export function migrateDirectoryStructure(api: OpenClawPluginApi, workspaceDir: 
             { legacy: path.join(legacyStateDir, 'pain_settings.json'), newKey: 'PAIN_SETTINGS' },
             { legacy: path.join(legacyStateDir, 'thinking_os_usage.json'), newKey: 'THINKING_OS_USAGE' },
             { legacy: path.join(legacyStateDir, 'pain_candidates.json'), newKey: 'PAIN_CANDIDATES' },
-            { legacy: path.join(legacyStateDir, 'evolution_directive.json'), newKey: 'EVOLUTION_QUEUE' },
+            { legacy: path.join(legacyStateDir, 'evolution_directive.json'), newKey: 'EVOLUTION_DIRECTIVE' },
             { legacy: path.join(legacyStateDir, 'sessions'), newKey: 'SESSION_DIR' },
             { legacy: path.join(legacyStateDir, 'logs', 'events.jsonl'), newKey: 'SYSTEM_LOG' }, // Backup plan for logs
         ];
