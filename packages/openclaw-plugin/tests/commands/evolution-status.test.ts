@@ -76,6 +76,9 @@ describe('evolution commands', () => {
     expect(result.text).toContain('legacy/frozen');
     expect(result.text).toContain('Session GFI: current 45, peak 78');
     expect(result.text).toContain('Queue: pending 1, in_progress 0, completed 0');
+    expect(result.text).toContain('Directive (derived from queue, compatibility only)');
+    expect(result.text).toContain('Phase 3: ready');
+    expect(result.text).toContain('queueTruthReady');
     expect(result.text).toContain('probation principles: 1');
     expect(result.text).not.toContain('.state/principles');
   });

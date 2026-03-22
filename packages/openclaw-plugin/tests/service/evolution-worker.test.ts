@@ -240,4 +240,42 @@ describe('EvolutionWorkerService', () => {
         
         EvolutionWorkerService.stop(ctx as any);
     });
+
+    it('should process queue work without persisting a legacy directive file', async () => {
+        const mockDict = {
+            flush: vi.fn()
+        };
+        vi.mocked(DictionaryService.get).mockReturnValue(mockDict as any);
+
+        const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-evolution-worker-'));
+        const stateDir = path.join(workspaceDir, '.state');
+        fs.mkdirSync(path.join(stateDir, 'sessions'), { recursive: true });
+        fs.mkdirSync(path.join(stateDir, 'logs'), { recursive: true });
+        fs.writeFileSync(
+            path.join(stateDir, 'evolution_queue.json'),
+            JSON.stringify([
+                { id: 'task-1', score: 90, source: 'tool_failure', reason: 'write failed', timestamp: '2026-03-20T00:00:00.000Z', status: 'pending' },
+            ], null, 2),
+            'utf8'
+        );
+
+        const ctx = {
+            workspaceDir,
+            stateDir,
+            logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+        };
+
+        try {
+            EvolutionWorkerService.start(ctx as any);
+
+            await vi.advanceTimersByTimeAsync(5000);
+
+            const queue = JSON.parse(fs.readFileSync(path.join(stateDir, 'evolution_queue.json'), 'utf8'));
+            expect(queue[0].status).toBe('in_progress');
+            expect(fs.existsSync(path.join(stateDir, 'evolution_directive.json'))).toBe(false);
+        } finally {
+            EvolutionWorkerService.stop(ctx as any);
+            fs.rmSync(workspaceDir, { recursive: true, force: true });
+        }
+    });
 });

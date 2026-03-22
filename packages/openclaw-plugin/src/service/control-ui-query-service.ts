@@ -19,6 +19,8 @@ export interface OverviewResponse {
     thinkingCoverageRate: number;
     painEvents: number;
     principleEventCount: number;
+    gateBlocks: number;
+    taskOutcomes: number;
   };
   dailyTrend: Array<{
     day: string;
@@ -270,6 +272,12 @@ export class ControlUiQueryService {
     const principleEventCount = this.uiDb.get<{ count: number }>(
       'SELECT COUNT(*) AS count FROM principle_events',
     )?.count ?? 0;
+    const gateBlockCount = this.uiDb.get<{ count: number }>(
+      'SELECT COUNT(*) AS count FROM gate_blocks',
+    )?.count ?? 0;
+    const taskOutcomeCount = this.uiDb.get<{ count: number }>(
+      'SELECT COUNT(*) AS count FROM task_outcomes',
+    )?.count ?? 0;
     const sampleCounters = this.uiDb.all<{ review_status: string; total: number }>(
       'SELECT review_status, total FROM v_sample_queue',
     );
@@ -347,6 +355,8 @@ export class ControlUiQueryService {
         thinkingCoverageRate: roundRate(coverageRow.thinking_turns, coverageRow.assistant_turns),
         painEvents: stats.painEvents,
         principleEventCount,
+        gateBlocks: Number(gateBlockCount),
+        taskOutcomes: Number(taskOutcomeCount),
       },
       dailyTrend: dailyTrend.map((row) => ({
         day: row.day,
