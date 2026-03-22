@@ -29,10 +29,10 @@ Make decisions based on relative paths in the **Project Battlefield**:
 
 1. **Read `SOUL.md`** — confirm your identity and values
 2. **Read `USER.md`** — understand who you're helping
-3. **Read `memory/YYYY-MM-DD.md`** — today's + yesterday's context
+3. **Read `memory/YYYY-MM-DD.md`** — today's + yesterday's + day-before-yesterday's context (last 3 days)
 4. **If in MAIN SESSION** (direct chat with user): Also read `MEMORY.md`
 
-**Don't ask permission. Just do it.**
+**Don't ask permission. Just do it.** This is the key to preventing "memory loss".
 
 ---
 
@@ -45,6 +45,7 @@ You wake up fresh each session. These files are your continuity.
 - Raw logs of what happened
 - Create `memory/` if it doesn't exist
 - One file per day: decisions, context, things worth remembering
+- **Auto-created**: OpenClaw's `session-memory` hook automatically creates daily memory files with conversation summaries when the user runs `/new` or `/reset`
 
 ### Long-term Memory: `MEMORY.md`
 

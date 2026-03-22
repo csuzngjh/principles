@@ -102,11 +102,34 @@ Initialize the memory directory structure:
 
 ```
 memory/
-├── 2026-03-12.md          # Today's notes (create)
+├── YYYY-MM-DD.md          # Daily notes (OpenClaw's session-memory hook auto-creates)
+├── archive/               # Historical archive (not auto-loaded)
 ├── heartbeat-state.json   # Heartbeat state tracking
 └── okr/
     └── CURRENT_FOCUS.md   # Current focus (if needed)
 ```
+
+Also create `MEMORY.md` in the workspace root (core long-term memory):
+
+```markdown
+# MEMORY.md - Long-term Memory
+
+> **Last updated**: YYYY-MM-DD
+
+## Core Identity
+
+[Who you are, your core mission]
+
+## Key Lessons
+
+[Record important learnings to avoid repeating mistakes]
+
+## Recent Events
+
+[Keep summaries of important events from the last 7 days]
+```
+
+**Important**: `MEMORY.md` and the last 3 days of `memory/YYYY-MM-DD.md` are auto-loaded at session startup, ensuring the agent doesn't "lose context".
 
 ---
 

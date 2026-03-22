@@ -29,10 +29,10 @@
 
 1. **Read `SOUL.md`** — 确认身份和价值观
 2. **Read `USER.md`** — 了解你在帮助谁
-3. **Read `memory/YYYY-MM-DD.md`** — 今日 + 昨日的上下文
+3. **Read `memory/YYYY-MM-DD.md`** — 今日 + 昨日 + 前日的上下文（最近 3 天）
 4. **If in MAIN SESSION** (与用户的直接对话): 同时读取 `MEMORY.md`
 
-**不要请求许可，直接执行。**
+**不要请求许可，直接执行。** 这是防止"断片"的关键。
 
 ---
 
@@ -45,6 +45,7 @@
 - 原始日志，记录发生了什么
 - 如果目录不存在，创建 `memory/`
 - 每天一个文件，记录决策、上下文、值得记住的事
+- **自动创建**：OpenClaw 的 `session-memory` hook 会在用户执行 `/new` 或 `/reset` 时自动创建当日记忆文件并生成对话摘要
 
 ### 长期记忆：`MEMORY.md`
 
