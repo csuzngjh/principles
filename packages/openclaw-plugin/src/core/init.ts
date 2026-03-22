@@ -14,6 +14,22 @@ const DEFAULT_PROFILE = {
   contextInjection: defaultContextConfig
 };
 
+const CORE_GUIDANCE_VERSION = 'pd-core-guidance-v2';
+const CORE_GUIDANCE_FILES = new Set(['AGENTS.md', 'TOOLS.md']);
+
+function getCoreGuidanceVersionMarker(): string {
+    return `pd-core-guidance-version: ${CORE_GUIDANCE_VERSION}`;
+}
+
+function hasOutdatedCoreGuidance(file: string, content: string): boolean {
+    if (!CORE_GUIDANCE_FILES.has(file)) return false;
+    if (content.includes(getCoreGuidanceVersionMarker())) return false;
+    if (content.includes('pd_spawn_agent')) return true;
+    if (!content.includes('subagents')) return true;
+    if (file === 'AGENTS.md' && !content.includes('pd_run_worker')) return true;
+    return false;
+}
+
 /**
  * Ensures that the workspace has the necessary template files for Principles Disciple.
  * This function flattens 'core' templates to the root so OpenClaw can find them.
@@ -51,6 +67,11 @@ export function ensureWorkspaceTemplates(api: OpenClawPluginApi, workspaceDir: s
                 if (!fs.existsSync(destPath)) {
                     fs.copyFileSync(srcPath, destPath);
                     api.logger.info(`[PD] Initialized core file: ${file}`);
+                } else if (CORE_GUIDANCE_FILES.has(file)) {
+                    const existingContent = fs.readFileSync(destPath, 'utf8');
+                    if (hasOutdatedCoreGuidance(file, existingContent)) {
+                        api.logger.warn(`[PD] Outdated core guidance detected in ${file}. Review the latest template guidance for peer sessions, subagents, and pd_run_worker routing.`);
+                    }
                 }
             }
         }

@@ -783,6 +783,8 @@ describe('Prompt Context Injection Hook', () => {
     expect(identityContext).toContain('AGENT IDENTITY');
     expect(identityContext).toContain('self-evolving AI agent');
     expect(identityContext).toContain('sessions_send');
+    expect(identityContext).toContain('subagents');
+    expect(identityContext).toContain('sessions_list');
     expect(identityContext).toContain('pd_run_worker only for Principles Disciple internal workers');
     
     // appendSystemContext: All long context (WebUI-hidden, Prompt Cacheable)
