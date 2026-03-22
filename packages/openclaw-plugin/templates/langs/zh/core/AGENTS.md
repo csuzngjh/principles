@@ -29,10 +29,10 @@
 
 1. **Read `SOUL.md`** — 确认身份和价值观
 2. **Read `USER.md`** — 了解你在帮助谁
-3. **Read `memory/YYYY-MM-DD.md`** — 今日 + 昨日的上下文
+3. **Read `memory/YYYY-MM-DD.md`** — 今日 + 昨日 + 前日的上下文（最近 3 天）
 4. **If in MAIN SESSION** (与用户的直接对话): 同时读取 `MEMORY.md`
 
-**不要请求许可，直接执行。**
+**不要请求许可，直接执行。** 这是防止"断片"的关键。
 
 ---
 
@@ -45,6 +45,7 @@
 - 原始日志，记录发生了什么
 - 如果目录不存在，创建 `memory/`
 - 每天一个文件，记录决策、上下文、值得记住的事
+- **自动创建**：OpenClaw 的 `session-memory` hook 会在用户执行 `/new` 或 `/reset` 时自动创建当日记忆文件并生成对话摘要
 
 ### 长期记忆：`MEMORY.md`
 
@@ -205,3 +206,14 @@ _This folder is home. Treat it that way._
 3. **输出报告**：修改文件列表 + commit hash + 测试结果
 
 **原因**：上下文压缩会丢失所有中间过程。没有文件证据，进度就会丢失。
+
+---
+
+## 🔧 工具路由补充说明
+
+用下面这几条避免把同级代理和 Principles 内部 worker 混淆：
+
+- **同级代理 / 同级会话**：`agents_list`、`sessions_list`、`sessions_send`、`sessions_spawn`
+- **内部 worker**（例如 `diagnostician`、`explorer`）：使用 `pd_run_worker` 启动
+- **查询内部 worker**：使用 `subagents`
+- **不要**把 `diagnostician` 或 `explorer` 当成同级 peer session 目标

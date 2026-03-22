@@ -51,3 +51,12 @@ deep_reflect(
 工具返回：盲点分析 → 风险警告 → 替代方案 → 建议 → 置信度
 
 **注意**：这是批判性反馈，最终决策权在你。认真考虑建议，但不必盲目遵循。
+
+---
+
+## 4. 智能体路由澄清
+
+- `agents_list`、`sessions_list`、`sessions_send`、`sessions_spawn` 用于同级代理和同级会话
+- `pd_run_worker` 用于启动 Principles 内部 worker，例如 `diagnostician`、`explorer`
+- `subagents` 用于查看已启动内部 worker 的状态和输出
+- 不要用同级会话工具把内部 worker 伪装成同级代理

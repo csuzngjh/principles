@@ -102,11 +102,34 @@ tree -L 2  # 查看目录树（如果可用）
 
 ```
 memory/
-├── 2026-03-12.md          # 今日笔记（创建）
+├── YYYY-MM-DD.md          # 每日笔记（OpenClaw 的 session-memory hook 会自动创建）
+├── archive/               # 历史归档（不自动加载）
 ├── heartbeat-state.json   # 心跳状态追踪
 └── okr/
     └── CURRENT_FOCUS.md   # 当前焦点（如果需要）
 ```
+
+同时在 workspace 根目录创建 `MEMORY.md`（核心长期记忆）：
+
+```markdown
+# MEMORY.md - 长期记忆
+
+> **最后更新**: YYYY-MM-DD
+
+## 核心定位
+
+[你是谁，你的核心使命]
+
+## 关键教训
+
+[记录重要的学习成果，避免重复犯错]
+
+## 近期事件
+
+[保留最近 7 天的重要事件摘要]
+```
+
+**重要**：`MEMORY.md` 和最近 3 天的 `memory/YYYY-MM-DD.md` 会在每次会话启动时自动加载，确保智能体不会"断片"。
 
 ---
 

@@ -51,3 +51,12 @@ Tool returns: Blind Spots → Risk Warnings → Alternative Approaches → Recom
 - Surfaces potential risks and failure modes
 - Provides alternative approaches with trade-off analysis
 - Applies structured thinking models for deeper insight
+
+---
+
+## 4. Agent Routing Clarification
+
+- `agents_list`, `sessions_list`, `sessions_send`, and `sessions_spawn` are for peer agents and peer sessions
+- `pd_run_worker` starts Principles internal workers such as `diagnostician` and `explorer`
+- `subagents` inspects already-started internal workers and their outputs
+- Do not use peer-session tools to pretend an internal worker is a peer agent
