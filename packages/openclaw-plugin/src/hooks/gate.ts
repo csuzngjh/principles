@@ -503,18 +503,18 @@ GFI: ${currentGfi}/100
 
         if (risky || riskLevel !== 'LOW') {
             // Block if not approved by whitelist
-            return block(relPath, `Trust score too low (${trustScore}). Stage 1 agents cannot modify risk paths or perform non-trivial edits.`, wctx, event.toolName, ctx.sessionId);
+            return block(relPath, `Trust score too low (${trustScore}). Stage 1 agents cannot modify risk paths or perform non-trivial edits.`, wctx, event.toolName, logger, ctx.sessionId);
         }
     }
 
     // Stage 2 (Editor): Block writes to risk paths. Block large changes.
     if (stage === 2) {
         if (risky) {
-            return block(relPath, `Stage 2 agents are not authorized to modify risk paths.`, wctx, event.toolName, ctx.sessionId);
+            return block(relPath, `Stage 2 agents are not authorized to modify risk paths.`, wctx, event.toolName, logger, ctx.sessionId);
         }
         const stage2Limit = trustSettings.limits?.stage_2_max_lines ?? 50;
         if (lineChanges > stage2Limit) {
-            return block(relPath, `Modification too large (${lineChanges} lines) for Stage 2. Max allowed is ${stage2Limit}.`, wctx, event.toolName, ctx.sessionId);
+            return block(relPath, `Modification too large (${lineChanges} lines) for Stage 2. Max allowed is ${stage2Limit}.`, wctx, event.toolName, logger, ctx.sessionId);
         }
     }
 
@@ -523,12 +523,12 @@ GFI: ${currentGfi}/100
         if (risky) {
             const planStatus = getPlanStatus(ctx.workspaceDir);
             if (planStatus !== 'READY') {
-                return block(relPath, `No READY plan found. Stage 3 requires a plan for risk path modifications.`, wctx, event.toolName, ctx.sessionId);
+                return block(relPath, `No READY plan found. Stage 3 requires a plan for risk path modifications.`, wctx, event.toolName, logger, ctx.sessionId);
             }
         }
         const stage3Limit = trustSettings.limits?.stage_3_max_lines ?? 300;
         if (lineChanges > stage3Limit) {
-            return block(relPath, `Modification too large (${lineChanges} lines) for Stage 3. Max allowed is ${stage3Limit}.`, wctx, event.toolName, ctx.sessionId);
+            return block(relPath, `Modification too large (${lineChanges} lines) for Stage 3. Max allowed is ${stage3Limit}.`, wctx, event.toolName, logger, ctx.sessionId);
         }
     }
 
@@ -557,7 +557,7 @@ GFI: ${currentGfi}/100
     if (risky && profile.gate?.require_plan_for_risk_paths) {
       const planStatus = getPlanStatus(ctx.workspaceDir);
       if (planStatus !== 'READY') {
-        return block(relPath, `No READY plan found in PLAN.md.`, wctx, event.toolName, ctx.sessionId);
+        return block(relPath, `No READY plan found in PLAN.md.`, wctx, event.toolName, logger, ctx.sessionId);
       }
     }
   }
@@ -581,9 +581,15 @@ GFI: ${currentGfi}/100
   }
 }
 
-function block(filePath: string, reason: string, wctx: WorkspaceContext, toolName: string, sessionId?: string): PluginHookBeforeToolCallResult {
-  const logger = console;
-  logger.error(`[PD_GATE] BLOCKED: ${filePath}. Reason: ${reason}`);
+function block(
+  filePath: string,
+  reason: string,
+  wctx: WorkspaceContext,
+  toolName: string,
+  logger: { warn?: (message: string) => void; error?: (message: string) => void },
+  sessionId?: string
+): PluginHookBeforeToolCallResult {
+  logger.error?.(`[PD_GATE] BLOCKED: ${filePath}. Reason: ${reason}`);
 
   if (sessionId) {
     trackBlock(sessionId);
@@ -603,14 +609,17 @@ function block(filePath: string, reason: string, wctx: WorkspaceContext, toolNam
       reason,
     });
   } catch (error) {
-    logger.warn(`[PD_GATE] Failed to record gate block event: ${String(error)}`);
+    logger.warn?.(`[PD_GATE] Failed to record gate block event: ${String(error)}`);
   }
 
   try {
     wctx.trajectory?.recordGateBlock?.(trajectoryPayload);
   } catch (error) {
-    logger.warn(`[PD_GATE] Failed to record trajectory gate block: ${String(error)}`);
-    scheduleTrajectoryGateBlockRetry(wctx, trajectoryPayload, 1, logger);
+    logger.warn?.(`[PD_GATE] Failed to record trajectory gate block: ${String(error)}`);
+    scheduleTrajectoryGateBlockRetry(wctx, trajectoryPayload, 1, {
+      warn: (message) => logger.warn?.(message),
+      error: (message) => logger.error?.(message),
+    });
   }
 
   return {

@@ -123,6 +123,17 @@ interface EventLogEntry {
 interface ScorecardLike {
   trust_score?: number;
   last_updated?: string;
+  frozen?: boolean;
+  reward_policy?: RuntimeRewardPolicy;
+}
+
+interface LegacyTrustReadResult {
+  summary: RuntimeSummary['legacyTrust'];
+  phase3Input: {
+    score: number | null;
+    frozen: boolean | null;
+    lastUpdated: string | null;
+  };
 }
 
 const MAX_SOURCE_EVENTS = 5;
@@ -212,11 +223,7 @@ export class RuntimeSummaryService {
       wctx,
       warnings
     );
-    const phase3Inputs = evaluatePhase3Inputs(queue ?? [], {
-      score: legacyTrust.score,
-      frozen: legacyTrust.frozen,
-      lastUpdated: legacyTrust.lastUpdated,
-    });
+    const phase3Inputs = evaluatePhase3Inputs(queue ?? [], legacyTrust.phase3Input);
 
     const lastPainSignal = this.findLastPainSignal(events, selectedSessionId);
     const gfiSources = this.buildGfiSources(events, selectedSessionId);
@@ -229,7 +236,7 @@ export class RuntimeSummaryService {
         sources: gfiSources,
         dataQuality: 'partial',
       },
-      legacyTrust,
+      legacyTrust: legacyTrust.summary,
       evolution: {
         queue: queueStats,
         directive: directiveSummary,
@@ -407,9 +414,10 @@ export class RuntimeSummaryService {
     scorecardPath: string,
     wctx: WorkspaceContext,
     warnings: string[]
-  ): RuntimeSummary['legacyTrust'] {
+  ): LegacyTrustReadResult {
     const scorecard = this.readJsonFile<ScorecardLike>(scorecardPath, warnings, false);
     const score = Number.isFinite(scorecard?.trust_score) ? Number(scorecard?.trust_score) : null;
+    const rawFrozen = scorecard?.frozen === true ? true : false;
     const settings = wctx.config.get('trust') as
       | { stages?: { stage_1_observer?: number; stage_2_editor?: number; stage_3_developer?: number } }
       | undefined;
@@ -433,11 +441,18 @@ export class RuntimeSummaryService {
     }
 
     return {
-      score,
-      stage,
-      frozen: true,
-      lastUpdated: scorecard?.last_updated ?? null,
-      rewardPolicy: LEGACY_TRUST_REWARD_POLICY,
+      summary: {
+        score,
+        stage,
+        frozen: true,
+        lastUpdated: scorecard?.last_updated ?? null,
+        rewardPolicy: LEGACY_TRUST_REWARD_POLICY,
+      },
+      phase3Input: {
+        score,
+        frozen: rawFrozen,
+        lastUpdated: scorecard?.last_updated ?? null,
+      },
     };
   }
 
@@ -615,7 +630,7 @@ export class RuntimeSummaryService {
 
   private static buildDirectiveTaskPreview(item: QueueItem): string {
     const task = typeof item.task === 'string' ? item.task.trim() : '';
-    if (task) {
+    if (task && task.toLowerCase() !== 'undefined') {
       return task.slice(0, 160);
     }
 

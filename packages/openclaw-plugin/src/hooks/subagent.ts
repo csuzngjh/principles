@@ -1,4 +1,4 @@
-import type { PluginHookSubagentEndedEvent, PluginHookSubagentContext } from '../openclaw-sdk.js';
+import type { PluginHookSubagentEndedEvent, PluginHookSubagentContext, PluginLogger } from '../openclaw-sdk.js';
 import * as fs from 'fs';
 import { writePainFlag } from '../core/pain.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
@@ -12,6 +12,7 @@ const TASK_OUTCOME_RETRY_DELAY_MS = 250;
 const TASK_OUTCOME_MAX_RETRIES = 3;
 const DIAGNOSTICIAN_SESSION_PREFIX = 'agent:diagnostician:';
 const completionRetryCounts = new Map<string, { count: number; expires: number }>();
+type HookLogger = Pick<PluginLogger, 'warn' | 'error'>;
 
 // Cleanup expired retry entries periodically
 function cleanupExpiredRetryEntries(): void {
@@ -30,7 +31,8 @@ function emitSubagentPainEvent(
         reason: string;
         score: number;
         sessionId?: string;
-    }
+    },
+    logger: HookLogger
 ): void {
     try {
         wctx.evolutionReducer.emitSync({
@@ -46,7 +48,7 @@ function emitSubagentPainEvent(
             },
         });
     } catch (e) {
-        console.warn(`[PD:Subagent] failed to emit evolution event: ${String(e)}`);
+        logger.warn(`[PD:Subagent] failed to emit evolution event: ${String(e)}`);
     }
 }
 
@@ -54,7 +56,7 @@ function isDiagnosticianSession(targetSessionKey: string | undefined): boolean {
     return typeof targetSessionKey === 'string' && targetSessionKey.startsWith(DIAGNOSTICIAN_SESSION_PREFIX);
 }
 
-function cleanupPainFlagForTask(wctx: WorkspaceContext, completedTaskId: string, queue: any[]): void {
+function cleanupPainFlagForTask(wctx: WorkspaceContext, completedTaskId: string, queue: any[], logger: HookLogger): void {
     const painFlagPath = wctx.resolve('PAIN_FLAG');
 
     try {
@@ -81,7 +83,7 @@ function cleanupPainFlagForTask(wctx: WorkspaceContext, completedTaskId: string,
         }
     } catch (e: any) {
         if (e.code === 'ENOENT') return; // File doesn't exist, nothing to clean up
-        console.error(`[PD:Subagent] Failed to cleanup pain flag: ${String(e)}`);
+        logger.error(`[PD:Subagent] Failed to cleanup pain flag: ${String(e)}`);
     }
 }
 
@@ -125,9 +127,10 @@ function scheduleTaskOutcomeRetry(
         summary: string;
     },
     attempt: number,
+    logger: HookLogger,
 ): void {
-    if (attempt >= TASK_OUTCOME_MAX_RETRIES) {
-        console.error(`[PD:Subagent] Failed to persist task outcome after ${TASK_OUTCOME_MAX_RETRIES} attempts: ${payload.taskId}`);
+    if (attempt > TASK_OUTCOME_MAX_RETRIES) {
+        logger.error(`[PD:Subagent] Failed to persist task outcome after ${TASK_OUTCOME_MAX_RETRIES} retries: ${payload.taskId}`);
         return;
     }
 
@@ -135,8 +138,8 @@ function scheduleTaskOutcomeRetry(
         try {
             wctx.trajectory?.recordTaskOutcome?.(payload);
         } catch (error) {
-            console.warn(`[PD:Subagent] Retrying task outcome persistence for ${payload.taskId}: ${String(error)}`);
-            scheduleTaskOutcomeRetry(wctx, payload, attempt + 1);
+            logger.warn(`[PD:Subagent] Retrying task outcome persistence for ${payload.taskId}: ${String(error)}`);
+            scheduleTaskOutcomeRetry(wctx, payload, attempt + 1, logger);
         }
     }, TASK_OUTCOME_RETRY_DELAY_MS);
 }
@@ -157,6 +160,7 @@ export async function handleSubagentEnded(
     if (!workspaceDir) return;
 
     const wctx = WorkspaceContext.fromHookContext(ctx);
+    const logger: HookLogger = ctx.api?.logger ?? console;
     if (targetSessionKey?.startsWith('empathy_obs:')) {
         await empathyObserverManager.reap(ctx.api, targetSessionKey, workspaceDir);
         return;
@@ -182,7 +186,7 @@ export async function handleSubagentEnded(
             reason,
             score,
             sessionId: ctx.sessionId,
-        });
+        }, logger);
     }
 
     if (outcome === 'ok' || outcome === 'deleted') {
@@ -205,7 +209,7 @@ export async function handleSubagentEnded(
     let releaseLock: (() => void) | null = null;
 
     try {
-        releaseLock = await acquireQueueLock(queuePath, console);
+        releaseLock = await acquireQueueLock(queuePath, logger);
         const queue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
         let completedTaskId: string | null = null;
 
@@ -221,7 +225,7 @@ export async function handleSubagentEnded(
             delete matchedTask.assigned_session_key;
             completedTaskId = matchedTask.id;
         } else {
-            console.warn(`[PD:Subagent] No in-progress evolution task matched subagent session ${targetSessionKey}`);
+            logger.warn(`[PD:Subagent] No in-progress evolution task matched subagent session ${targetSessionKey}`);
         }
 
         let taskOutcomePayload:
@@ -235,7 +239,7 @@ export async function handleSubagentEnded(
 
         if (completedTaskId) {
             fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
-            cleanupPainFlagForTask(wctx, completedTaskId, queue);
+            cleanupPainFlagForTask(wctx, completedTaskId, queue, logger);
             taskOutcomePayload = {
                 sessionId: targetSessionKey,
                 taskId: completedTaskId,
@@ -248,12 +252,12 @@ export async function handleSubagentEnded(
             try {
                 wctx.trajectory?.recordTaskOutcome?.(taskOutcomePayload);
             } catch (error) {
-                console.warn(`[PD:Subagent] Failed to persist task outcome for ${taskOutcomePayload.taskId}: ${String(error)}`);
-                scheduleTaskOutcomeRetry(wctx, taskOutcomePayload, 1);
+                logger.warn(`[PD:Subagent] Failed to persist task outcome for ${taskOutcomePayload.taskId}: ${String(error)}`);
+                scheduleTaskOutcomeRetry(wctx, taskOutcomePayload, 1, logger);
             }
         }
     } catch (e) {
-        console.error(`[PD:Subagent] Failed to update evolution queue: ${String(e)}`);
+        logger.error(`[PD:Subagent] Failed to update evolution queue: ${String(e)}`);
         scheduleCompletionRetry(event, ctx, attempt);
     } finally {
         releaseLock?.();

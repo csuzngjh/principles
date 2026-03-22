@@ -156,7 +156,7 @@ describe('RuntimeSummaryService', () => {
     const summary = RuntimeSummaryService.getSummary(workspace);
 
     expect(summary.phase3.queueTruthReady).toBe(false);
-    expect(summary.phase3.trustInputReady).toBe(true);
+    expect(summary.phase3.trustInputReady).toBe(false);
     expect(summary.phase3.phase3ShadowEligible).toBe(false);
     expect(summary.phase3.evolutionRejectedReasons).toEqual(
       expect.arrayContaining([
@@ -165,6 +165,28 @@ describe('RuntimeSummaryService', () => {
         'missing_completed_at',
       ])
     );
+    expect(summary.phase3.trustRejectedReasons).toContain('legacy_or_unfrozen_trust_schema');
+  });
+
+  it('keeps legacy trust display frozen while conservatively rejecting unfrozen scorecards for phase3 input', () => {
+    const workspace = makeWorkspace();
+    writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+      trust_score: 85,
+      last_updated: '2026-03-20T10:00:00Z',
+    });
+    writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+      { id: 'task-1', status: 'pending' },
+      { id: 'task-2', status: 'in_progress', started_at: '2026-03-20T10:00:00Z' },
+      { id: 'task-3', status: 'completed', completed_at: '2026-03-20T10:01:00Z' },
+    ]);
+
+    const summary = RuntimeSummaryService.getSummary(workspace);
+
+    expect(summary.legacyTrust.frozen).toBe(true);
+    expect(summary.phase3.queueTruthReady).toBe(true);
+    expect(summary.phase3.trustInputReady).toBe(false);
+    expect(summary.phase3.phase3ShadowEligible).toBe(false);
+    expect(summary.phase3.trustRejectedReasons).toContain('legacy_or_unfrozen_trust_schema');
   });
 
   it('prefers the explicit session when provided', () => {

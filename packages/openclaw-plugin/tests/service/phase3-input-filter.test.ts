@@ -2,6 +2,20 @@ import { describe, expect, it } from 'vitest';
 import { evaluatePhase3Inputs } from '../../src/service/phase3-input-filter.js';
 
 describe('evaluatePhase3Inputs', () => {
+  it('rejects an empty queue even when trust input is otherwise ready', () => {
+    const result = evaluatePhase3Inputs([], {
+      score: 85,
+      frozen: true,
+      lastUpdated: '2026-03-20T10:00:00Z',
+    });
+
+    expect(result.queueTruthReady).toBe(false);
+    expect(result.trustInputReady).toBe(true);
+    expect(result.phase3ShadowEligible).toBe(false);
+    expect(result.evolution.eligible).toHaveLength(0);
+    expect(result.evolution.rejected).toHaveLength(0);
+  });
+
   it('marks clean queue and frozen trust inputs as phase-3 eligible', () => {
     const result = evaluatePhase3Inputs(
       [
