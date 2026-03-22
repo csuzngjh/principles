@@ -86,16 +86,18 @@ function buildSubagentSystemPrompt(
 
 const INTERNAL_AGENT_USAGE_GUIDANCE =
   'pd_run_worker is only for Principles Disciple internal workers. ' +
-  'Use agents_list / sessions_list / sessions_spawn / sessions_send for peer agents or cross-session communication.';
+  'Use agents_list / sessions_list / sessions_spawn / sessions_send for peer agents or cross-session communication. ' +
+  'Use subagents to inspect already-dispatched internal workers.';
 
 function buildInternalAgentUsageMessage(availableAgents: string[]): string {
   return [
     'pd_run_worker is reserved for Principles Disciple internal workers.',
     `Allowed internal roles: ${availableAgents.join(', ')}`,
     'Use `agents_list` to discover peer agent ids.',
-    'Use `sessions_spawn` to create or orchestrate another session.',
-    'Use `sessions_list` to inspect running sessions.',
+    'Use `sessions_spawn` to create or orchestrate another peer session.',
+    'Use `sessions_list` to inspect running peer sessions.',
     'Use `sessions_send` to talk to another existing session.',
+    'Use `subagents` to inspect already-dispatched internal workers such as diagnostician or explorer.',
   ].join('\n');
 }
 
@@ -126,6 +128,12 @@ function looksLikeSessionOrPeerCoordinationTask(task: string): boolean {
     'send a message to',
     'message another session',
     'talk to another session',
+    'subagent',
+    'worker status',
+    'running status',
+    'still running',
+    'inspect status',
+    'check status',
     '同级智能体',
     '另一个智能体',
     '其他智能体',

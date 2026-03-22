@@ -153,5 +153,38 @@ describe('init', () => {
                 expect.stringContaining('Failed to initialize workspace templates')
             );
         });
+
+        it('should warn when existing core guidance files contain legacy agent routing terms', () => {
+            const workspaceDir = '/mock/workspace';
+
+            vi.mocked(fs.existsSync).mockImplementation((p) => {
+                const normalizedPath = p.toString().replace(/\\/g, '/');
+                if (normalizedPath.includes('templates/workspace')) return false;
+                if (normalizedPath.includes('templates/langs/en/core')) return true;
+                if (normalizedPath.endsWith('/mock/workspace/AGENTS.md')) return true;
+                if (normalizedPath.endsWith('/mock/workspace/TOOLS.md')) return true;
+                if (normalizedPath.includes('pain')) return false;
+                if (normalizedPath.endsWith('/mock/workspace/.principles/PROFILE.json')) return false;
+                return false;
+            });
+
+            vi.mocked(fs.readdirSync).mockReturnValue(['AGENTS.md', 'TOOLS.md'] as any);
+            vi.mocked(fs.readFileSync).mockImplementation((p) => {
+                const normalizedPath = p.toString().replace(/\\/g, '/');
+                if (normalizedPath.endsWith('/mock/workspace/AGENTS.md')) {
+                    return 'Use pd_spawn_agent for sub-agents';
+                }
+                if (normalizedPath.endsWith('/mock/workspace/TOOLS.md')) {
+                    return 'Use sessions_list for all agent checks';
+                }
+                return '';
+            });
+
+            ensureWorkspaceTemplates(mockApi as any, workspaceDir, 'en');
+
+            expect(mockLogger.warn).toHaveBeenCalledWith(
+                expect.stringContaining('Outdated core guidance detected')
+            );
+        });
     });
 });

@@ -101,8 +101,20 @@ describe('createAgentSpawnTool', () => {
       });
 
       expect(result).toContain('reserved for Principles Disciple internal workers');
+      expect(result).toContain('subagents');
       expect(result).toContain('sessions_send');
       expect(result).toContain('sessions_spawn');
+      expect(mockSubagentRuntime.run).not.toHaveBeenCalled();
+    });
+
+    it('should point status-check tasks to subagents instead of sessions_list', async () => {
+      const result = await executeTool({
+        agentType: 'diagnostician',
+        task: 'Check whether the diagnostician subagent is still running and inspect its status'
+      });
+
+      expect(result).toContain('subagents');
+      expect(result).toContain('sessions_list');
       expect(mockSubagentRuntime.run).not.toHaveBeenCalled();
     });
 
