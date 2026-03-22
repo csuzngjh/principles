@@ -8,6 +8,7 @@
   "files": [
     "dist",
     "templates",
+    "agents",
     "openclaw.plugin.json"
   ],
   "exports": {
@@ -35,7 +36,7 @@
     "build": "tsc",
     "build:web": "node scripts/build-web.mjs",
     "build:bundle": "node esbuild.config.js && node scripts/build-web.mjs",
-    "build:production": "tsc && node esbuild.config.js --production && node scripts/build-web.mjs --production",
+    "build:production": "tsc && node esbuild.config.js --production && node scripts/build-web.mjs --production && node scripts/verify-build.mjs",
     "test": "vitest run",
     "postinstall": "node scripts/install-dependencies.cjs"
   },

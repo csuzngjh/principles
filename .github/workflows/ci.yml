@@ -69,6 +69,10 @@ jobs:
         working-directory: packages/openclaw-plugin
         run: npx tsc --noEmit
 
+      - name: Production Build & Verify
+        working-directory: packages/openclaw-plugin
+        run: npm run build:production
+
   test-openclaw-plugin:
     name: Test OpenClaw Plugin
     runs-on: ubuntu-latest
