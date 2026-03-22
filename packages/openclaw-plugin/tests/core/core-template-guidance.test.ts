@@ -15,6 +15,7 @@ describe('core template guidance', () => {
     expect(enAgents).toContain('subagents');
     expect(enTools).toContain('subagents');
     expect(enAgents).toContain('pd_run_worker');
-    expect(enAgents).not.toContain('pd_spawn_agent');
+    expect(enAgents).toContain('Tool Routing Addendum');
+    expect(enTools).toContain('Agent Routing Clarification');
   });
 });
