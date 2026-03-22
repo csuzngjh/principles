@@ -276,10 +276,11 @@ describe('Prompt Context Injection Hook', () => {
     expect(result?.prependContext).not.toContain('project_context');
   });
 
-  it('should inject evolution_task if evolution task is in progress', async () => {
+  it('should inject the highest-priority in-progress evolution task from the queue', async () => {
     vi.mocked(fs.existsSync).mockImplementation((p) => p.toString().includes('evolution_queue.json'));
     vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify([
-        { id: 't1', task: 'Fix bug', status: 'in_progress' }
+        { id: 't1', task: 'Fix bug', score: 20, status: 'in_progress' },
+        { id: 't2', task: 'Fix urgent bug', score: 90, status: 'in_progress' }
     ]));
 
     const mockApi = {
@@ -306,11 +307,80 @@ describe('Prompt Context Injection Hook', () => {
 
     // evolutionDirective stays in prependContext (short dynamic directive)
     expect(result?.prependContext).toContain('<evolution_task');
-    expect(result?.prependContext).toContain('Fix bug');
+    expect(result?.prependContext).toContain('Fix urgent bug');
+    expect(result?.prependContext).not.toContain('Fix bug');
     expect(result?.prependContext).toContain('pd_run_worker agentType="diagnostician" task=');
     expect(result?.prependContext).toContain('runInBackground=true');
     expect(result?.prependContext).toContain("First respond to the user's current request normally.");
     expect(result?.prependContext).not.toContain('Reply with "[EVOLUTION_ACK]" only');
+  });
+
+  it('should inject a legacy manual queue entry with a valid task string even when id is missing', async () => {
+    vi.mocked(fs.existsSync).mockImplementation((p) => p.toString().includes('evolution_queue.json'));
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify([
+        { task: 'Manual queue task', score: 80, status: 'in_progress' }
+    ]));
+
+    const mockApi = {
+      config: {
+        agents: {
+          defaults: {
+            model: 'openai/gpt-4o'
+          }
+        }
+      },
+      logger: {
+        info: vi.fn(),
+        error: vi.fn(),
+        warn: vi.fn(),
+        debug: vi.fn(),
+      }
+    };
+
+    const result = await handleBeforePromptBuild({} as any, {
+      workspaceDir,
+      trigger: 'user',
+      api: mockApi
+    } as any);
+
+    expect(result?.prependContext).toContain('<evolution_task');
+    expect(result?.prependContext).toContain('Manual queue task');
+    expect(result?.prependContext).toContain('pd_run_worker agentType="diagnostician" task=');
+  });
+
+  it('should skip a malformed highest-score evolution task and inject the next valid one', async () => {
+    vi.mocked(fs.existsSync).mockImplementation((p) => p.toString().includes('evolution_queue.json'));
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify([
+        { task: 'undefined', score: 100, status: 'in_progress' },
+        { id: 't2', task: 'Fix lower bug', score: 20, status: 'in_progress' }
+    ]));
+
+    const mockApi = {
+      config: {
+        agents: {
+          defaults: {
+            model: 'openai/gpt-4o'
+          }
+        }
+      },
+      logger: {
+        info: vi.fn(),
+        error: vi.fn(),
+        warn: vi.fn(),
+        debug: vi.fn(),
+      }
+    };
+
+    const result = await handleBeforePromptBuild({} as any, {
+      workspaceDir,
+      trigger: 'user',
+      api: mockApi
+    } as any);
+
+    expect(result?.prependContext).toContain('<evolution_task');
+    expect(result?.prependContext).toContain('Fix lower bug');
+    expect(result?.prependContext).not.toContain('TASK: "undefined"');
+    expect(result?.prependContext).toContain('pd_run_worker agentType="diagnostician" task=');
   });
 
   it('should track injected probation principle ids for later tool attribution', async () => {

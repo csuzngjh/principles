@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { handleBeforeToolCall } from '../../src/hooks/gate.js';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -64,12 +64,18 @@ describe('GFI Gate - Hard Intercept', () => {
     recordGfiGateBlock: vi.fn(),
   };
 
+  const mockTrajectory = {
+    recordGateBlock: vi.fn(),
+    recordTaskOutcome: vi.fn(),
+  };
+
   const mockWctx = {
     workspaceDir,
     stateDir: '/mock/state',
     trust: mockTrust,
     config: mockConfig,
     eventLog: mockEventLog,
+    trajectory: mockTrajectory,
     resolve: vi.fn().mockImplementation((key) => {
         if (key === 'PROFILE') return path.join(workspaceDir, '.principles', 'PROFILE.json');
         if (key === 'PLAN') return path.join(workspaceDir, 'PLAN.md');
@@ -79,6 +85,7 @@ describe('GFI Gate - Hard Intercept', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.useFakeTimers();
     vi.mocked(WorkspaceContext.fromHookContext).mockReturnValue(mockWctx as any);
     vi.mocked(riskCalculator.assessRiskLevel).mockReturnValue('LOW');
     vi.mocked(riskCalculator.estimateLineChanges).mockReturnValue(1);
@@ -101,6 +108,10 @@ describe('GFI Gate - Hard Intercept', () => {
         dailyGfiPeak: 0,
         lastThinkingTimestamp: 0,
     } as any);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   // ════════════════════════════════════════════════
@@ -660,6 +671,48 @@ describe('GFI Gate - Hard Intercept', () => {
         filePath: 'src/large-change.ts',
         reason: 'Modification too large (20 lines) for Stage 2. Max allowed is 10.',
       });
+      expect(mockTrajectory.recordGateBlock).toHaveBeenCalledWith({
+        sessionId: 'test-session',
+        toolName: 'write',
+        filePath: 'src/large-change.ts',
+        reason: 'Modification too large (20 lines) for Stage 2. Max allowed is 10.',
+      });
+    });
+
+    it('retries trajectory gate block persistence without losing the runtime block record', async () => {
+      const mockCtx = { workspaceDir, sessionId: 'test-session' };
+      const mockEvent = {
+        toolName: 'write',
+        params: { file_path: 'src/large-change.ts', content: 'test' },
+      };
+
+      mockTrajectory.recordGateBlock
+        .mockImplementationOnce(() => {
+          throw new Error('trajectory busy');
+        })
+        .mockImplementation(() => undefined);
+
+      vi.mocked(sessionTracker.getSession).mockReturnValue({ currentGfi: 0 } as any);
+      mockTrust.getScore.mockReturnValue(50);
+      mockTrust.getStage.mockReturnValue(2);
+      vi.mocked(riskCalculator.estimateLineChanges).mockReturnValue(20);
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.readFileSync).mockImplementation(() =>
+        JSON.stringify({
+          progressive_gate: { enabled: true },
+        })
+      );
+
+      const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
+      await vi.advanceTimersByTimeAsync(300);
+
+      expect(result?.block).toBe(true);
+      expect(mockEventLog.recordGateBlock).toHaveBeenCalledWith('test-session', {
+        toolName: 'write',
+        filePath: 'src/large-change.ts',
+        reason: 'Modification too large (20 lines) for Stage 2. Max allowed is 10.',
+      });
+      expect(mockTrajectory.recordGateBlock).toHaveBeenCalledTimes(2);
     });
   });
 });

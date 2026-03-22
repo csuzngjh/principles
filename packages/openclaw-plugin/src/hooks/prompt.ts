@@ -174,13 +174,13 @@ function resolveEvolutionTask(
   const rawTask = typeof inProgressTask.task === 'string' ? inProgressTask.task.trim() : '';
   if (rawTask && rawTask.toLowerCase() !== 'undefined') return rawTask;
 
+  if (typeof inProgressTask.id !== 'string' || !inProgressTask.id.trim()) return null;
+
   const source = typeof inProgressTask.source === 'string' ? inProgressTask.source.trim() : 'unknown';
   const reason = typeof inProgressTask.reason === 'string' ? inProgressTask.reason.trim() : 'Systemic pain detected';
   const preview = typeof inProgressTask.trigger_text_preview === 'string' && inProgressTask.trigger_text_preview.trim()
     ? inProgressTask.trigger_text_preview.trim()
     : 'N/A';
-
-  if (typeof inProgressTask.id !== 'string' || !inProgressTask.id.trim()) return null;
 
   const conversationContext = includeConversationContext
     ? extractRecentConversationContext(messages, maxContextMessages, maxCharsPerMsg)
@@ -483,9 +483,15 @@ You are a **self-evolving AI agent** powered by Principles Disciple.
   if (fs.existsSync(queuePath)) {
     try {
       const queue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
-      const inProgressTask = queue.find((t: any) => t.status === 'in_progress');
-      
-      if (inProgressTask) {
+      const inProgressTasks = [...queue]
+        .filter((t: any) => t.status === 'in_progress')
+        .sort((a: any, b: any) => {
+          const scoreA = Number.isFinite(a?.score) ? Number(a.score) : 0;
+          const scoreB = Number.isFinite(b?.score) ? Number(b.score) : 0;
+          return scoreB - scoreA;
+        });
+
+      for (const inProgressTask of inProgressTasks) {
         const resolvedTask = resolveEvolutionTask(
           inProgressTask,
           event.messages,
@@ -494,15 +500,15 @@ You are a **self-evolving AI agent** powered by Principles Disciple.
           contextConfig.evolutionContext.enabled
         );
         if (!resolvedTask) {
-          logger?.warn('[PD:Prompt] Skipping evolution task injection because task payload is invalid.');
-        } else {
-          const escapedTask = JSON.stringify(resolvedTask);
+          continue;
+        }
 
-          logger?.info(`[PD:Prompt] Injecting EVOLUTION TASK for: ${inProgressTask.id}`);
+        const escapedTask = JSON.stringify(resolvedTask);
 
+        logger?.info(`[PD:Prompt] Injecting EVOLUTION TASK for: ${inProgressTask.id}`);
 
-          if (trigger === 'user') {
-            evolutionDirective = `<evolution_task priority="high">
+        if (trigger === 'user') {
+          evolutionDirective = `<evolution_task priority="high">
 TASK: ${escapedTask}
 
 REQUIRED ACTION:
@@ -513,8 +519,8 @@ REQUIRED ACTION:
 - Do NOT reply with "[EVOLUTION_ACK]".
 - Do NOT let this task interrupt the current user interaction.
 </evolution_task>\n`;
-          } else {
-            evolutionDirective = `<evolution_task priority="critical">
+        } else {
+          evolutionDirective = `<evolution_task priority="critical">
 TASK: ${escapedTask}
 
 REQUIRED ACTION:
@@ -523,15 +529,20 @@ REQUIRED ACTION:
 - Treat pd_run_worker as an internal Principles Disciple worker, not a peer-session messaging tool.
 - Do NOT reply with "[EVOLUTION_ACK]".
 </evolution_task>\n`;
-          }
         }
+
+        break;
+      }
+
+      if (!evolutionDirective && inProgressTasks.length > 0) {
+        logger?.warn('[PD:Prompt] Skipping evolution task injection because task payload is invalid.');
       }
     } catch (e) {
       logger?.error(`[PD:Prompt] Failed to parse EVOLUTION_QUEUE: ${String(e)}`);
     }
   }
 
-  // Inject evolution directive at the front of prependContext
+  // Inject queue-derived evolution task at the front of prependContext
   if (evolutionDirective) {
     prependContext = evolutionDirective + prependContext;
   }

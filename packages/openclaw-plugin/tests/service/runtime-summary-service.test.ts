@@ -113,7 +113,9 @@ describe('RuntimeSummaryService', () => {
     expect(summary.legacyTrust.frozen).toBe(true);
     expect(summary.evolution.queue.pending).toBe(1);
     expect(summary.evolution.queue.completed).toBe(1);
-    expect(summary.evolution.directive.exists).toBe(true);
+    expect(summary.evolution.directive.exists).toBe(false);
+    expect(summary.evolution.directive.active).toBeNull();
+    expect(summary.evolution.dataQuality).toBe('authoritative');
     expect(summary.pain.activeFlag).toBe(true);
     expect(summary.pain.activeFlagSource).toBe('tool_failure');
     expect(summary.pain.candidates).toBe(2);
@@ -137,6 +139,54 @@ describe('RuntimeSummaryService', () => {
     expect(summary.pain.candidates).toBeNull();
     expect(summary.metadata.warnings.join('\n')).toContain('No persisted session state was found');
     expect(summary.metadata.warnings.join('\n')).toContain('partial');
+  });
+
+  it('derives compact phase3 readiness flags from queue and trust inputs', () => {
+    const workspace = makeWorkspace();
+    writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+      trust_score: 85,
+      last_updated: '2026-03-20T10:00:00Z',
+    });
+    writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+      { id: 'task-1', status: 'in_progress' },
+      { id: 'task-1', status: 'completed', completed_at: '2026-03-20T10:01:00Z' },
+      { id: 'task-2', status: 'completed' },
+    ]);
+
+    const summary = RuntimeSummaryService.getSummary(workspace);
+
+    expect(summary.phase3.queueTruthReady).toBe(false);
+    expect(summary.phase3.trustInputReady).toBe(false);
+    expect(summary.phase3.phase3ShadowEligible).toBe(false);
+    expect(summary.phase3.evolutionRejectedReasons).toEqual(
+      expect.arrayContaining([
+        'reused_task_id',
+        'missing_started_at',
+        'missing_completed_at',
+      ])
+    );
+    expect(summary.phase3.trustRejectedReasons).toContain('legacy_or_unfrozen_trust_schema');
+  });
+
+  it('keeps legacy trust display frozen while conservatively rejecting unfrozen scorecards for phase3 input', () => {
+    const workspace = makeWorkspace();
+    writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+      trust_score: 85,
+      last_updated: '2026-03-20T10:00:00Z',
+    });
+    writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+      { id: 'task-1', status: 'pending' },
+      { id: 'task-2', status: 'in_progress', started_at: '2026-03-20T10:00:00Z' },
+      { id: 'task-3', status: 'completed', completed_at: '2026-03-20T10:01:00Z' },
+    ]);
+
+    const summary = RuntimeSummaryService.getSummary(workspace);
+
+    expect(summary.legacyTrust.frozen).toBe(true);
+    expect(summary.phase3.queueTruthReady).toBe(true);
+    expect(summary.phase3.trustInputReady).toBe(false);
+    expect(summary.phase3.phase3ShadowEligible).toBe(false);
+    expect(summary.phase3.trustRejectedReasons).toContain('legacy_or_unfrozen_trust_schema');
   });
 
   it('prefers the explicit session when provided', () => {
@@ -189,7 +239,7 @@ describe('RuntimeSummaryService', () => {
     expect(summary.gfi.current).toBe(11);
   });
 
-  it('warns when a directive is stale relative to an empty queue', () => {
+  it('warns when a legacy directive is stale relative to an empty queue', () => {
     const workspace = makeWorkspace();
     writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
       trust_score: 100,
@@ -203,14 +253,14 @@ describe('RuntimeSummaryService', () => {
 
     const summary = RuntimeSummaryService.getSummary(workspace);
 
-    expect(summary.evolution.directive.exists).toBe(true);
-    expect(summary.evolution.directive.active).toBe(true);
-    expect(summary.evolution.dataQuality).toBe('partial');
-    expect(summary.evolution.directive.ageSeconds).not.toBeNull();
-    expect(summary.metadata.warnings.join('\n')).toContain('worker state may be stale');
+    expect(summary.evolution.directive.exists).toBe(false);
+    expect(summary.evolution.directive.active).toBeNull();
+    expect(summary.evolution.dataQuality).toBe('authoritative');
+    expect(summary.evolution.directive.ageSeconds).toBeNull();
+    expect(summary.metadata.warnings.join('\n')).toContain('Legacy directive file disagrees with queue-derived evolution state');
   });
 
-  it('downgrades evolution data quality when an in-progress queue task has no active directive', () => {
+  it('derives directive view from queue-only in-progress work and treats it as authoritative without a directive file', () => {
     const workspace = makeWorkspace();
     writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
       trust_score: 55,
@@ -223,8 +273,85 @@ describe('RuntimeSummaryService', () => {
     const summary = RuntimeSummaryService.getSummary(workspace);
 
     expect(summary.evolution.queue.inProgress).toBe(1);
-    expect(summary.evolution.directive.exists).toBe(false);
-    expect(summary.evolution.dataQuality).toBe('partial');
+    expect(summary.evolution.directive.exists).toBe(true);
+    expect(summary.evolution.directive.active).toBe(true);
+    expect(summary.evolution.directive.taskPreview).toContain('Diagnose systemic pain [ID: task-1]');
+    expect(summary.evolution.dataQuality).toBe('authoritative');
+  });
+
+  it('uses trigger_text_preview when an in-progress queue item is missing task text', () => {
+    const workspace = makeWorkspace();
+    writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+      trust_score: 55,
+      last_updated: '2026-03-20T10:00:00Z',
+    });
+    writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+      {
+        id: 'task-2',
+        status: 'in_progress',
+        score: 80,
+        source: 'tool_failure',
+        reason: 'write failed',
+        trigger_text_preview: 'Could not find the file to patch',
+      },
+    ]);
+
+    const summary = RuntimeSummaryService.getSummary(workspace);
+
+    expect(summary.evolution.directive.exists).toBe(true);
+    expect(summary.evolution.directive.active).toBe(true);
+    expect(summary.evolution.directive.taskPreview).toContain('Could not find the file to patch');
+    expect(summary.evolution.directive.taskPreview).toContain('Diagnose systemic pain [ID: task-2]');
+  });
+
+  it('skips a malformed top-ranked in-progress task and falls back to the next resolvable task', () => {
+    const workspace = makeWorkspace();
+    writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+      trust_score: 55,
+      last_updated: '2026-03-20T10:00:00Z',
+    });
+    writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+      {
+        status: 'in_progress',
+        score: 100,
+        task: 'undefined',
+      },
+      {
+        id: 'task-3',
+        status: 'in_progress',
+        score: 20,
+        task: 'Diagnose systemic pain [ID: task-3]',
+      },
+    ]);
+
+    const summary = RuntimeSummaryService.getSummary(workspace);
+
+    expect(summary.evolution.directive.exists).toBe(true);
+    expect(summary.evolution.directive.taskPreview).toContain('Diagnose systemic pain [ID: task-3]');
+    expect(summary.evolution.directive.taskPreview).not.toContain('undefined');
+  });
+
+  it('warns when a legacy directive disagrees with queue in-progress state', () => {
+    const workspace = makeWorkspace();
+    writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+      trust_score: 55,
+      last_updated: '2026-03-20T10:00:00Z',
+    });
+    writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+      { id: 'task-1', status: 'in_progress', score: 60, task: 'Diagnose systemic pain [ID: task-1]' },
+    ]);
+    writeJson(path.join(workspace, '.state', 'evolution_directive.json'), {
+      active: false,
+      task: 'legacy mismatch task',
+      timestamp: '2026-03-20T10:00:00Z',
+    });
+
+    const summary = RuntimeSummaryService.getSummary(workspace);
+
+    expect(summary.evolution.directive.exists).toBe(true);
+    expect(summary.evolution.directive.active).toBe(true);
+    expect(summary.metadata.warnings.join('\n')).toContain('Legacy directive file disagrees');
+    expect(summary.evolution.dataQuality).toBe('authoritative');
   });
 
   it('surfaces observer empathy events as authoritative gfi sources', () => {

@@ -245,7 +245,6 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: any) {
 async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventLog: any) {
     const queuePath = wctx.resolve('EVOLUTION_QUEUE');
     if (!fs.existsSync(queuePath)) return;
-    const directivePath = wctx.resolve('EVOLUTION_DIRECTIVE');
 
     const releaseLock = await requireQueueLock(queuePath, logger, 'processEvolutionQueue');
 
@@ -302,46 +301,6 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
 
             fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
             queueChanged = false;
-
-            const directive = {
-                active: true,
-                taskId: highestScoreTask.id,
-                task: taskDescription,
-                timestamp: nowIso
-            };
-
-            try {
-                fs.writeFileSync(directivePath, JSON.stringify(directive, null, 2), 'utf8');
-            } catch (directiveError) {
-                highestScoreTask.status = 'pending';
-                delete highestScoreTask.started_at;
-                delete highestScoreTask.task;
-                delete highestScoreTask.assigned_session_key;
-                try {
-                    fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
-                } catch (rollbackError) {
-                    throw new Error(
-                        `[PD:EvolutionWorker] Failed to persist directive and failed to roll back queue: ${String(directiveError)}; rollback=${String(rollbackError)}`
-                    );
-                }
-                throw directiveError;
-            }
-        } else {
-            const hasInProgressTask = queue.some((task) => task.status === 'in_progress');
-            if (!hasInProgressTask && fs.existsSync(directivePath)) {
-                const clearedAt = new Date().toISOString();
-                fs.writeFileSync(
-                    directivePath,
-                    JSON.stringify({
-                        active: false,
-                        task: null,
-                        taskId: null,
-                        timestamp: clearedAt,
-                        clearedAt,
-                    }, null, 2),
-                    'utf8'
-                );
-            }
         }
 
         if (queueChanged) {
