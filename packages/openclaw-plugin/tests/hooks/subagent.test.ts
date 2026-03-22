@@ -15,9 +15,13 @@ const mockEmitSync = vi.fn();
 describe('Subagent Hook', () => {
     const workspaceDir = '/mock/workspace';
 
-    const mockTrust = {
-        recordSuccess: vi.fn(),
-    };
+const mockTrust = {
+    recordSuccess: vi.fn(),
+};
+
+const mockTrajectory = {
+    recordTaskOutcome: vi.fn(),
+};
 
     const mockConfig = {
         get: vi.fn().mockImplementation((key) => {
@@ -34,6 +38,7 @@ describe('Subagent Hook', () => {
         trust: mockTrust,
         config: mockConfig,
         evolutionReducer: { emitSync: mockEmitSync },
+        trajectory: mockTrajectory,
         resolve: vi.fn().mockImplementation((key) => {
             if (key === 'EVOLUTION_QUEUE') return '/mock/workspace/.state/evolution_queue.json';
             if (key === 'PAIN_FLAG') return '/mock/workspace/.state/.pain_flag';
@@ -55,7 +60,7 @@ describe('Subagent Hook', () => {
     it('should record success on successful subagent completion', async () => {
         const mockCtx = { workspaceDir, sessionId: 's1' };
         const mockEvent = { 
-            targetSessionKey: 'agent:main:subagent:diagnostician-123',
+            targetSessionKey: 'agent:main:subagent:worker-123',
             outcome: 'ok' 
         };
 
@@ -68,6 +73,7 @@ describe('Subagent Hook', () => {
             expect.objectContaining({ sessionId: 's1' }),
             true
         );
+        expect(mockTrajectory.recordTaskOutcome).not.toHaveBeenCalled();
     });
 
     it('should NOT record success on failure', async () => {
@@ -160,6 +166,24 @@ describe('Subagent Hook', () => {
         expect(savedQueue.find((t: any) => t.id === 'task-b').status).toBe('completed');
         expect(savedQueue.find((t: any) => t.id === 'task-a').status).toBe('in_progress');
         expect(unlinkSpy).toHaveBeenCalled();
+        expect(mockTrajectory.recordTaskOutcome).toHaveBeenCalledWith({
+            sessionId: 'agent:diagnostician:session-123',
+            taskId: 'task-b',
+            outcome: 'ok',
+            summary: 'Diagnostician session agent:diagnostician:session-123 completed evolution task task-b.',
+        });
+    });
+
+    it('should not record a task outcome for unrelated subagent completions', async () => {
+        const mockCtx = { workspaceDir, sessionId: 's1' };
+        const mockEvent = {
+            targetSessionKey: 'agent:main:subagent:worker-123',
+            outcome: 'ok'
+        };
+
+        await handleSubagentEnded(mockEvent as any, mockCtx as any);
+
+        expect(mockTrajectory.recordTaskOutcome).not.toHaveBeenCalled();
     });
 
     it('should not complete an unrelated in-progress task without a matching assigned session key', async () => {
@@ -231,6 +255,51 @@ describe('Subagent Hook', () => {
 
         const writeSpy = vi.mocked(fs.writeFileSync);
         expect(writeSpy.mock.calls.some((args) => args[0].toString().includes('evolution_queue.json'))).toBe(true);
+    });
+
+    it('should retry task outcome persistence independently after queue completion succeeds', async () => {
+        const mockCtx = { workspaceDir, sessionId: 's1' };
+        const mockEvent = {
+            targetSessionKey: 'agent:diagnostician:session-123',
+            outcome: 'ok'
+        };
+
+        vi.mocked(fs.existsSync).mockImplementation((p) => {
+            const pathStr = p.toString();
+            return pathStr.includes('evolution_queue.json') || pathStr.includes('.pain_flag');
+        });
+
+        vi.mocked(fs.readFileSync).mockImplementation((p) => {
+            const pathStr = p.toString();
+            if (pathStr.includes('evolution_queue.json')) {
+                return JSON.stringify([
+                    { id: 'task-b', status: 'in_progress', assigned_session_key: 'agent:diagnostician:session-123' }
+                ]);
+            }
+            if (pathStr.includes('.pain_flag')) {
+                return 'score: 80\nstatus: queued\ntask_id: task-b\n';
+            }
+            return '';
+        });
+
+        mockTrajectory.recordTaskOutcome
+            .mockImplementationOnce(() => {
+                throw new Error('trajectory busy');
+            })
+            .mockImplementation(() => undefined);
+
+        await handleSubagentEnded(mockEvent as any, mockCtx as any);
+        await vi.advanceTimersByTimeAsync(300);
+
+        const writeSpy = vi.mocked(fs.writeFileSync);
+        expect(writeSpy.mock.calls.some((args) => args[0].toString().includes('evolution_queue.json'))).toBe(true);
+        expect(mockTrajectory.recordTaskOutcome).toHaveBeenCalledTimes(2);
+        expect(mockTrajectory.recordTaskOutcome).toHaveBeenLastCalledWith({
+            sessionId: 'agent:diagnostician:session-123',
+            taskId: 'task-b',
+            outcome: 'ok',
+            summary: 'Diagnostician session agent:diagnostician:session-123 completed evolution task task-b.',
+        });
     });
 
 });

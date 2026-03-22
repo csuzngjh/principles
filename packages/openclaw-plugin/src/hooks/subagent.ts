@@ -8,6 +8,8 @@ import { acquireQueueLock } from '../service/evolution-worker.js';
 const COMPLETION_RETRY_DELAY_MS = 250;
 const COMPLETION_MAX_RETRIES = 3;
 const COMPLETION_RETRY_TTL_MS = 60 * 60 * 1000; // 1 hour TTL for retry entries
+const TASK_OUTCOME_RETRY_DELAY_MS = 250;
+const TASK_OUTCOME_MAX_RETRIES = 3;
 const DIAGNOSTICIAN_SESSION_PREFIX = 'agent:diagnostician:';
 const completionRetryCounts = new Map<string, { count: number; expires: number }>();
 
@@ -114,6 +116,31 @@ function scheduleCompletionRetry(
     }, COMPLETION_RETRY_DELAY_MS);
 }
 
+function scheduleTaskOutcomeRetry(
+    wctx: WorkspaceContext,
+    payload: {
+        sessionId: string;
+        taskId: string;
+        outcome: string;
+        summary: string;
+    },
+    attempt: number,
+): void {
+    if (attempt >= TASK_OUTCOME_MAX_RETRIES) {
+        console.error(`[PD:Subagent] Failed to persist task outcome after ${TASK_OUTCOME_MAX_RETRIES} attempts: ${payload.taskId}`);
+        return;
+    }
+
+    setTimeout(() => {
+        try {
+            wctx.trajectory?.recordTaskOutcome?.(payload);
+        } catch (error) {
+            console.warn(`[PD:Subagent] Retrying task outcome persistence for ${payload.taskId}: ${String(error)}`);
+            scheduleTaskOutcomeRetry(wctx, payload, attempt + 1);
+        }
+    }, TASK_OUTCOME_RETRY_DELAY_MS);
+}
+
 type SubagentEndedHookContext = PluginHookSubagentContext & {
     api?: EmpathyObserverApi;
     workspaceDir?: string;
@@ -197,9 +224,33 @@ export async function handleSubagentEnded(
             console.warn(`[PD:Subagent] No in-progress evolution task matched subagent session ${targetSessionKey}`);
         }
 
+        let taskOutcomePayload:
+            | {
+                sessionId: string;
+                taskId: string;
+                outcome: string;
+                summary: string;
+            }
+            | null = null;
+
         if (completedTaskId) {
             fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
             cleanupPainFlagForTask(wctx, completedTaskId, queue);
+            taskOutcomePayload = {
+                sessionId: targetSessionKey,
+                taskId: completedTaskId,
+                outcome,
+                summary: `Diagnostician session ${targetSessionKey} completed evolution task ${completedTaskId}.`,
+            };
+        }
+
+        if (taskOutcomePayload) {
+            try {
+                wctx.trajectory?.recordTaskOutcome?.(taskOutcomePayload);
+            } catch (error) {
+                console.warn(`[PD:Subagent] Failed to persist task outcome for ${taskOutcomePayload.taskId}: ${String(error)}`);
+                scheduleTaskOutcomeRetry(wctx, taskOutcomePayload, 1);
+            }
         }
     } catch (e) {
         console.error(`[PD:Subagent] Failed to update evolution queue: ${String(e)}`);

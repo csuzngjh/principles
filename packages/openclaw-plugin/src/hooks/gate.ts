@@ -18,6 +18,9 @@ import {
   WRITE_TOOLS,
 } from '../constants/tools.js';
 
+const TRAJECTORY_GATE_BLOCK_RETRY_DELAY_MS = 250;
+const TRAJECTORY_GATE_BLOCK_MAX_RETRIES = 3;
+
 // ═══ GFI Gate Tool Tiers ═══
 // TIER 0: 只读工具 - 永不拦截
 // TIER 1: 低风险修改 - GFI >= low_risk_block 时拦截
@@ -586,6 +589,13 @@ function block(filePath: string, reason: string, wctx: WorkspaceContext, toolNam
     trackBlock(sessionId);
   }
 
+  const trajectoryPayload = {
+    sessionId: sessionId ?? null,
+    toolName,
+    filePath,
+    reason,
+  };
+
   try {
     wctx.eventLog.recordGateBlock(sessionId, {
       toolName,
@@ -596,10 +606,43 @@ function block(filePath: string, reason: string, wctx: WorkspaceContext, toolNam
     logger.warn(`[PD_GATE] Failed to record gate block event: ${String(error)}`);
   }
 
+  try {
+    wctx.trajectory?.recordGateBlock?.(trajectoryPayload);
+  } catch (error) {
+    logger.warn(`[PD_GATE] Failed to record trajectory gate block: ${String(error)}`);
+    scheduleTrajectoryGateBlockRetry(wctx, trajectoryPayload, 1, logger);
+  }
+
   return {
     block: true,
     blockReason: `[Principles Disciple] Security Gate Blocked this action.\nFile: ${filePath}\nReason: ${reason}\n\nHint: You may need a READY plan or a higher trust score to perform this action.`,
   };
+}
+
+function scheduleTrajectoryGateBlockRetry(
+  wctx: WorkspaceContext,
+  payload: {
+    sessionId: string | null;
+    toolName: string;
+    filePath: string;
+    reason: string;
+  },
+  attempt: number,
+  logger: { warn: (message: string) => void; error?: (message: string) => void }
+): void {
+  if (attempt > TRAJECTORY_GATE_BLOCK_MAX_RETRIES) {
+    logger.error?.(`[PD_GATE] Failed to persist trajectory gate block after ${TRAJECTORY_GATE_BLOCK_MAX_RETRIES} retries: ${payload.toolName} ${payload.filePath}`);
+    return;
+  }
+
+  setTimeout(() => {
+    try {
+      wctx.trajectory?.recordGateBlock?.(payload);
+    } catch (error) {
+      logger.warn(`[PD_GATE] Retrying trajectory gate block persistence: ${String(error)}`);
+      scheduleTrajectoryGateBlockRetry(wctx, payload, attempt + 1, logger);
+    }
+  }, TRAJECTORY_GATE_BLOCK_RETRY_DELAY_MS);
 }
 
 // ═══════════════════════════════════════════════════════════════

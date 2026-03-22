@@ -4,6 +4,7 @@ import { readPainFlagData } from '../core/pain.js';
 import { resolvePdPath } from '../core/paths.js';
 import { listSessions } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
+import { evaluatePhase3Inputs } from './phase3-input-filter.js';
 
 export type RuntimeDataQuality = 'authoritative' | 'partial';
 export type RuntimeRewardPolicy =
@@ -52,6 +53,15 @@ export interface RuntimeSummary {
     };
     dataQuality: RuntimeDataQuality;
   };
+  phase3: {
+    queueTruthReady: boolean;
+    trustInputReady: boolean;
+    phase3ShadowEligible: boolean;
+    evolutionEligible: number;
+    evolutionRejected: number;
+    evolutionRejectedReasons: string[];
+    trustRejectedReasons: string[];
+  };
   pain: {
     activeFlag: boolean;
     activeFlagSource: string | null;
@@ -84,13 +94,21 @@ interface QueueItem {
   id?: string;
   status?: string;
   task?: string;
+  trigger_text_preview?: string;
   taskId?: string;
+  score?: number;
+  source?: string;
+  reason?: string;
+  timestamp?: string;
+  enqueued_at?: string;
+  started_at?: string;
   assigned_session_key?: string;
 }
 
 interface DirectiveFile {
   active?: boolean;
   task?: string;
+  taskId?: string;
   timestamp?: string;
 }
 
@@ -180,7 +198,7 @@ export class RuntimeSummaryService {
     const queue = this.readJsonFile<QueueItem[]>(wctx.resolve('EVOLUTION_QUEUE'), warnings, false);
     const directive = this.readJsonFile<DirectiveFile>(wctx.resolve('EVOLUTION_DIRECTIVE'), warnings, false);
     const queueStats = this.buildQueueStats(queue);
-    const directiveSummary = this.buildDirectiveSummary(directive, generatedAt, warnings, queueStats);
+    const directiveSummary = this.buildDirectiveSummary(queue, directive, generatedAt, warnings);
 
     const painFlag = readPainFlagData(workspaceDir);
     const painCandidates = this.readJsonFile<{ candidates?: Record<string, unknown> }>(
@@ -194,6 +212,11 @@ export class RuntimeSummaryService {
       wctx,
       warnings
     );
+    const phase3Inputs = evaluatePhase3Inputs(queue ?? [], {
+      score: legacyTrust.score,
+      frozen: legacyTrust.frozen,
+      lastUpdated: legacyTrust.lastUpdated,
+    });
 
     const lastPainSignal = this.findLastPainSignal(events, selectedSessionId);
     const gfiSources = this.buildGfiSources(events, selectedSessionId);
@@ -210,7 +233,16 @@ export class RuntimeSummaryService {
       evolution: {
         queue: queueStats,
         directive: directiveSummary,
-        dataQuality: this.resolveEvolutionDataQuality(queue, queueStats, directiveSummary),
+        dataQuality: this.resolveEvolutionDataQuality(queue),
+      },
+      phase3: {
+        queueTruthReady: phase3Inputs.queueTruthReady,
+        trustInputReady: phase3Inputs.trustInputReady,
+        phase3ShadowEligible: phase3Inputs.phase3ShadowEligible,
+        evolutionEligible: phase3Inputs.evolution.eligible.length,
+        evolutionRejected: phase3Inputs.evolution.rejected.length,
+        evolutionRejectedReasons: phase3Inputs.evolution.rejected.flatMap((entry) => entry.reasons),
+        trustRejectedReasons: phase3Inputs.trust.rejectedReasons,
       },
       pain: {
         activeFlag: Object.keys(painFlag).length > 0,
@@ -326,17 +358,21 @@ export class RuntimeSummaryService {
   }
 
   private static buildDirectiveSummary(
+    queue: QueueItem[] | null,
     directive: DirectiveFile | null,
     generatedAt: string,
-    warnings: string[],
-    queueStats: { pending: number; inProgress: number; completed: number }
+    warnings: string[]
   ): {
     exists: boolean;
     active: boolean | null;
     ageSeconds: number | null;
     taskPreview: string | null;
   } {
-    if (!directive) {
+    const inProgressTask = this.selectInProgressTask(queue);
+    if (!inProgressTask) {
+      if (directive) {
+        this.warnOnLegacyDirectiveMismatch(directive, null, warnings);
+      }
       return {
         exists: false,
         active: null,
@@ -345,20 +381,25 @@ export class RuntimeSummaryService {
       };
     }
 
-    const timestampMs = directive.timestamp ? new Date(directive.timestamp).getTime() : NaN;
+    const derivedTaskPreview = this.buildDirectiveTaskPreview(inProgressTask);
+    const timestampMs = this.resolveDirectiveTimestamp(inProgressTask);
     const ageSeconds = Number.isFinite(timestampMs)
       ? Math.max(0, Math.floor((new Date(generatedAt).getTime() - timestampMs) / 1000))
       : null;
 
-    if (directive.active && queueStats.pending === 0 && queueStats.inProgress === 0) {
-      warnings.push('Directive is active while the queue has no pending or in-progress task; worker state may be stale.');
+    if (directive) {
+      this.warnOnLegacyDirectiveMismatch(directive, {
+        active: true,
+        taskPreview: derivedTaskPreview,
+        taskId: inProgressTask.taskId ?? inProgressTask.id ?? null,
+      }, warnings);
     }
 
     return {
       exists: true,
-      active: typeof directive.active === 'boolean' ? directive.active : null,
+      active: true,
       ageSeconds,
-      taskPreview: directive.task ? directive.task.slice(0, 160) : null,
+      taskPreview: derivedTaskPreview,
     };
   }
 
@@ -534,18 +575,95 @@ export class RuntimeSummaryService {
   }
 
   private static resolveEvolutionDataQuality(
-    queue: QueueItem[] | null,
-    queueStats: { pending: number; inProgress: number; completed: number },
-    directive: RuntimeSummary['evolution']['directive']
+    queue: QueueItem[] | null
   ): RuntimeDataQuality {
-    if (!queue) return 'partial';
-    if (queueStats.inProgress > 0 && (!directive.exists || directive.active !== true)) {
-      return 'partial';
+    return queue ? 'authoritative' : 'partial';
+  }
+
+  private static selectInProgressTask(queue: QueueItem[] | null): QueueItem | null {
+    if (!queue || queue.length === 0) return null;
+
+    const inProgress = queue.filter((item) => item?.status === 'in_progress');
+    if (inProgress.length === 0) return null;
+
+    for (const item of [...inProgress].sort((a, b) => this.getQueuePriority(b) - this.getQueuePriority(a))) {
+      if (this.isResolvableEvolutionTask(item)) {
+        return item;
+      }
     }
-    if (directive.active && queueStats.inProgress === 0 && queueStats.pending === 0) {
-      return 'partial';
+
+    return null;
+  }
+
+  private static getQueuePriority(item: QueueItem): number {
+    return Number.isFinite(item.score) ? Number(item.score) : 0;
+  }
+
+  private static isResolvableEvolutionTask(item: QueueItem): boolean {
+    const rawTask = typeof item.task === 'string' ? item.task.trim() : '';
+    if (rawTask && rawTask.toLowerCase() !== 'undefined') {
+      return true;
     }
-    return 'authoritative';
+
+    return typeof item.id === 'string' && item.id.trim().length > 0;
+  }
+
+  private static resolveDirectiveTimestamp(item: QueueItem): number {
+    const candidate = item.started_at || item.enqueued_at || item.timestamp || null;
+    return candidate ? new Date(candidate).getTime() : NaN;
+  }
+
+  private static buildDirectiveTaskPreview(item: QueueItem): string {
+    const task = typeof item.task === 'string' ? item.task.trim() : '';
+    if (task) {
+      return task.slice(0, 160);
+    }
+
+    const triggerTextPreview = typeof item.trigger_text_preview === 'string' ? item.trigger_text_preview.trim() : '';
+
+    const taskId = typeof item.taskId === 'string' && item.taskId.trim()
+      ? item.taskId.trim()
+      : typeof item.id === 'string' && item.id.trim()
+        ? item.id.trim()
+        : 'unknown';
+    const source = typeof item.source === 'string' && item.source.trim() ? item.source.trim() : 'unknown';
+    const reason = typeof item.reason === 'string' && item.reason.trim() ? item.reason.trim() : 'Systemic pain detected';
+    const preview = triggerTextPreview || 'N/A';
+    return `Diagnose systemic pain [ID: ${taskId}]. Source: ${source}. Reason: ${reason}. Trigger text: "${preview}"`.slice(0, 160);
+  }
+
+  private static warnOnLegacyDirectiveMismatch(
+    directive: DirectiveFile,
+    derived: { active: boolean; taskPreview: string | null; taskId: string | null } | null,
+    warnings: string[]
+  ): void {
+    const legacyActive = typeof directive.active === 'boolean' ? directive.active : null;
+    const legacyTask = typeof directive.task === 'string' && directive.task.trim() ? directive.task.trim().slice(0, 160) : null;
+    const legacyTaskId = typeof directive.taskId === 'string' && directive.taskId.trim() ? directive.taskId.trim() : null;
+
+    const mismatchDetails: string[] = [];
+    if (derived === null) {
+      if (legacyActive === true || legacyTask || legacyTaskId) {
+        mismatchDetails.push('legacy directive exists but queue has no in_progress task');
+      }
+    } else {
+      if (legacyActive !== null && legacyActive !== derived.active) {
+        mismatchDetails.push(`active=${String(legacyActive)} vs queue=${String(derived.active)}`);
+      }
+      if (legacyTask && derived.taskPreview && legacyTask !== derived.taskPreview) {
+        mismatchDetails.push('task text differs');
+      }
+      if (legacyTaskId && derived.taskId && legacyTaskId !== derived.taskId) {
+        mismatchDetails.push('task id differs');
+      }
+    }
+
+    if (mismatchDetails.length > 0) {
+      pushWarning(
+        warnings,
+        `Legacy directive file disagrees with queue-derived evolution state; queue is authoritative (${mismatchDetails.join(', ')}).`
+      );
+    }
   }
 
   private static readJsonFile<T>(
