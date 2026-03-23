@@ -323,13 +323,27 @@ pd_run_worker(
         };
       }
 
-      // Check subagent runtime availability
+      // Check subagent runtime availability.
+      // api.runtime.subagent is always a Proxy object (truthy), even in embedded mode.
+      // In embedded mode, the unavailable runtime's methods are plain sync functions that throw.
+      // In gateway mode, they are async functions (AsyncFunction constructor).
+      // We detect this without making a real call by inspecting the constructor name.
       const subagentRuntime = api.runtime?.subagent;
-      if (!subagentRuntime) {
+      const isSubagentAvailable = (() => {
+        if (!subagentRuntime) return false;
+        try {
+          const runFn = subagentRuntime.run;
+          return typeof runFn === 'function' && runFn.constructor?.name === 'AsyncFunction';
+        } catch {
+          return false;
+        }
+      })();
+
+      if (!isSubagentAvailable) {
         return {
           content: [{
             type: 'text',
-            text: `❌ Subagent runtime 不可用。请确保 OpenClaw Gateway 正在运行。`
+            text: `❌ Subagent runtime 不可用。\n\n当前运行在 embedded 模式（openclaw agent CLI），该模式不支持派生子智能体。\n\n请通过 Gateway 模式运行（openclaw gateway），然后再调用 pd_run_worker。`
           }]
         };
       }

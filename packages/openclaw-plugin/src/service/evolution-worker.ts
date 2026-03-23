@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { createHash } from 'crypto';
 import type { OpenClawPluginServiceContext, OpenClawPluginApi } from '../openclaw-sdk.js';
+import { loadAgentDefinition } from '../core/agent-loader.js';
 import { DictionaryService } from '../core/dictionary-service.js';
 import { DetectionService } from '../core/detection-service.js';
 import { ensureStateTemplates } from '../core/init.js';
@@ -301,6 +302,35 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
 
             fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
             queueChanged = false;
+
+            // Write diagnostician SOP + task into HEARTBEAT.md so the next
+            // heartbeat cycle picks it up and executes the reflection via LLM.
+            try {
+                const agentDef = loadAgentDefinition('diagnostician');
+                const heartbeatPath = wctx.resolve('HEARTBEAT');
+                const heartbeatContent = [
+                    `## Evolution Task [ID: ${highestScoreTask.id}]`,
+                    ``,
+                    `**Pain Score**: ${highestScoreTask.score}`,
+                    `**Source**: ${highestScoreTask.source}`,
+                    `**Reason**: ${highestScoreTask.reason}`,
+                    `**Trigger**: "${highestScoreTask.trigger_text_preview || 'N/A'}"`,
+                    `**Queued At**: ${highestScoreTask.enqueued_at || nowIso}`,
+                    ``,
+                    `---`,
+                    ``,
+                    agentDef ? agentDef.systemPrompt : `Use 5 Whys methodology to diagnose the root cause of the pain signal above.`,
+                    ``,
+                    `---`,
+                    ``,
+                    `After completing the analysis, write the resulting principle(s) to PRINCIPLES.md`,
+                    `and mark the task complete by replacing this file content with "HEARTBEAT_OK".`,
+                ].join('\n');
+                fs.writeFileSync(heartbeatPath, heartbeatContent, 'utf8');
+                if (logger) logger.info(`[PD:EvolutionWorker] Wrote diagnostician task to HEARTBEAT.md for task ${highestScoreTask.id}`);
+            } catch (heartbeatErr) {
+                if (logger) logger.warn(`[PD:EvolutionWorker] Failed to write HEARTBEAT.md: ${String(heartbeatErr)}`);
+            }
         }
 
         if (queueChanged) {
