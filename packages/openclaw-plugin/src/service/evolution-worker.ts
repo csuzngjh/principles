@@ -31,6 +31,7 @@ export interface EvolutionQueueItem {
     resolution?: 'marker_detected' | 'auto_completed_timeout';
     session_id?: string;
     agent_id?: string;
+    traceId?: string; // Trace ID for linking events across the evolution lifecycle
 }
 
 const PAIN_QUEUE_DEDUP_WINDOW_MS = 30 * 60 * 1000;
@@ -232,6 +233,7 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: any) {
 
             const taskId = createEvolutionTaskId(source, score, preview, reason, now);
             const nowIso = new Date(now).toISOString();
+            const effectiveTraceId = traceId || taskId;
             queue.push({
                 id: taskId,
                 score,
@@ -243,6 +245,7 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: any) {
                 status: 'pending',
                 session_id: sessionId || undefined,
                 agent_id: agentId || undefined,
+                traceId: effectiveTraceId,
             });
 
             fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
@@ -333,7 +336,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
                     ? Date.now() - new Date(task.started_at).getTime()
                     : undefined;
                 evoLogger.logCompleted({
-                    traceId: task.id,
+                    traceId: task.traceId || task.id,
                     taskId: task.id,
                     resolution: 'marker_detected',
                     durationMs,
@@ -367,7 +370,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
 
                 // Log to EvolutionLogger
                 evoLogger.logCompleted({
-                    traceId: task.id,
+                    traceId: task.traceId || task.id,
                     taskId: task.id,
                     resolution: 'auto_completed_timeout',
                     durationMs: age,
@@ -444,7 +447,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
 
                 // Log to EvolutionLogger
                 evoLogger.logStarted({
-                    traceId: highestScoreTask.id,
+                    traceId: highestScoreTask.traceId || highestScoreTask.id,
                     taskId: highestScoreTask.id,
                 });
 

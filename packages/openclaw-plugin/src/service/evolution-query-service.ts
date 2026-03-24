@@ -151,6 +151,15 @@ export class EvolutionQueryService {
   }
 
   /**
+   * 释放资源
+   * 注意：不关闭 trajectory，因为它是单例由 TrajectoryRegistry 管理
+   */
+  dispose(): void {
+    // EvolutionQueryService 不拥有 trajectory，所以不关闭它
+    // trajectory 是由 TrajectoryRegistry 管理的单例
+  }
+
+  /**
    * 获取任务列表（带分页、筛选）
    */
   getTasks(filters: TaskListFilters = {}): TasksResponse {
@@ -218,13 +227,22 @@ export class EvolutionQueryService {
     const limit = filters.limit ?? 100;
     const offset = filters.offset ?? 0;
 
+    // 获取更多事件以支持 stage 过滤
+    const fetchLimit = filters.stage ? 500 : limit + 1;
     const events = this.trajectory.listEvolutionEvents(filters.traceId, {
-      limit: limit + 1,
-      offset,
+      limit: fetchLimit,
+      offset: 0, // 从头获取，后续再过滤和分页
     });
 
-    const hasMore = events.length > limit;
-    const items = events.slice(0, limit).map((event) => ({
+    // 应用 stage 过滤
+    let filteredEvents = events;
+    if (filters.stage) {
+      filteredEvents = events.filter(event => event.stage === filters.stage);
+    }
+
+    // 应用分页
+    const hasMore = filteredEvents.length > offset + limit;
+    const items = filteredEvents.slice(offset, offset + limit).map((event) => ({
       id: event.id,
       traceId: event.traceId,
       taskId: event.taskId,
