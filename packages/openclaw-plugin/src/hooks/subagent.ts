@@ -264,8 +264,14 @@ export async function handleSubagentEnded(
                     return true;
                 }
                 // Backward compatibility: match tasks with no assigned_session_key (legacy behavior)
+                // Only match tasks started within 2 hours to avoid stale task matching
                 if (taskSessionKey === undefined || taskSessionKey === null) {
-                    return true;
+                    const taskStartedAt = task?.started_at ? new Date(task.started_at).getTime() : 0;
+                    const taskAge = taskStartedAt > 0 ? Date.now() - taskStartedAt : Infinity;
+                    const LEGACY_FALLBACK_MAX_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours
+                    if (taskAge < LEGACY_FALLBACK_MAX_AGE_MS) {
+                        return true;
+                    }
                 }
             }
             
