@@ -10,14 +10,70 @@ import type {
   EvolutionStatsResponse,
 } from './types';
 
+const GATEWAY_TOKEN_KEY = 'pd_gateway_token';
+
+/**
+ * 初始化 Gateway Token
+ * 1. 优先从 URL 参数 ?token=xxx 获取
+ * 2. 其次从 localStorage 获取
+ */
+export function initGatewayToken(): string | null {
+  // 1. 尝试从 URL 参数获取
+  const urlParams = new URLSearchParams(window.location.search);
+  const urlToken = urlParams.get('token');
+  if (urlToken) {
+    localStorage.setItem(GATEWAY_TOKEN_KEY, urlToken);
+    // 清理 URL 中的 token 参数（安全考虑）
+    urlParams.delete('token');
+    const newUrl = urlParams.toString()
+      ? `${window.location.pathname}?${urlParams.toString()}`
+      : window.location.pathname;
+    window.history.replaceState({}, '', newUrl);
+    return urlToken;
+  }
+
+  // 2. 从 localStorage 获取
+  return localStorage.getItem(GATEWAY_TOKEN_KEY);
+}
+
+/**
+ * 获取当前 Gateway Token
+ */
+export function getGatewayToken(): string | null {
+  return localStorage.getItem(GATEWAY_TOKEN_KEY);
+}
+
+/**
+ * 设置 Gateway Token
+ */
+export function setGatewayToken(token: string): void {
+  localStorage.setItem(GATEWAY_TOKEN_KEY, token);
+}
+
+/**
+ * 清除 Gateway Token
+ */
+export function clearGatewayToken(): void {
+  localStorage.removeItem(GATEWAY_TOKEN_KEY);
+}
+
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const hasBody = init?.body !== undefined;
+  const token = getGatewayToken();
+
+  const headers: Record<string, string> = {
+    ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
+    ...(init?.headers as Record<string, string> ?? {}),
+  };
+
+  // 添加 Authorization header
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
   const response = await fetch(path, {
     credentials: 'same-origin',
-    headers: {
-      ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
-      ...(init?.headers ?? {}),
-    },
+    headers,
     ...init,
   });
 

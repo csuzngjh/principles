@@ -232,6 +232,337 @@ pre {
   line-height: 1.5;
 }
 
+/* === Auth & Login === */
+.auth-checking {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.9), transparent 38%),
+    linear-gradient(135deg, #efe6d8, #f6f1ea 52%, #e6f2ef);
+}
+
+.auth-checking-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  color: var(--muted);
+}
+
+.spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--line);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.spinner-small {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  display: inline-block;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(23, 107, 94, 0.08), transparent 50%),
+    radial-gradient(circle at 80% 80%, rgba(140, 79, 26, 0.08), transparent 50%),
+    linear-gradient(135deg, #efe6d8, #f6f1ea 52%, #e6f2ef);
+  padding: 20px;
+}
+
+.login-container {
+  width: 100%;
+  max-width: 420px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  padding: 40px;
+  box-shadow: 0 24px 64px rgba(98, 76, 38, 0.12);
+}
+
+.login-header {
+  text-align: center;
+  margin-bottom: 32px;
+}
+
+.login-logo {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.logo-icon {
+  font-size: 48px;
+  color: var(--accent);
+  line-height: 1;
+}
+
+.login-header h1 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.login-subtitle {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.login-form {
+  display: grid;
+  gap: 20px;
+}
+
+.form-group {
+  display: grid;
+  gap: 8px;
+}
+
+.form-group label {
+  font-weight: 500;
+  font-size: 14px;
+}
+
+.form-group input {
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  font-size: 15px;
+  background: #fff;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.form-group input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(23, 107, 94, 0.15);
+}
+
+.form-group input::placeholder {
+  color: #b5ada0;
+}
+
+.form-hint {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.form-hint code {
+  background: rgba(23, 107, 94, 0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: "Cascadia Code", monospace;
+  font-size: 11px;
+}
+
+.form-error {
+  padding: 12px 16px;
+  background: rgba(138, 47, 47, 0.1);
+  border: 1px solid rgba(138, 47, 47, 0.2);
+  border-radius: 10px;
+  color: var(--error);
+  font-size: 14px;
+}
+
+.login-button {
+  padding: 14px 24px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.1s;
+}
+
+.login-button:hover:not(:disabled) {
+  background: #145c51;
+  transform: translateY(-1px);
+}
+
+.login-button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.login-footer {
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+
+.login-footer h4 {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.login-footer ol {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.8;
+}
+
+.login-footer code {
+  background: rgba(23, 107, 94, 0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: "Cascadia Code", monospace;
+  font-size: 11px;
+}
+
+/* === Sidebar Enhancements === */
+.brand-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+
+.brand-logo .logo-icon {
+  font-size: 36px;
+}
+
+.sidebar-footer {
+  margin-top: auto;
+  padding-top: 20px;
+  display: grid;
+  gap: 10px;
+}
+
+.logout-button {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid transparent;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.logout-button:hover {
+  background: rgba(138, 47, 47, 0.08);
+  border-color: rgba(138, 47, 47, 0.2);
+}
+
+.nav-icon {
+  font-size: 16px;
+}
+
+.nav a,
+.export-link,
+.logout-button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* === Timeline === */
+.timeline {
+  position: relative;
+  padding-left: 24px;
+}
+
+.timeline::before {
+  content: '';
+  position: absolute;
+  left: 7px;
+  top: 12px;
+  bottom: 12px;
+  width: 2px;
+  background: var(--line);
+  border-radius: 1px;
+}
+
+.timeline-item {
+  position: relative;
+  padding: 12px 0;
+  display: grid;
+  gap: 4px;
+}
+
+.timeline-marker {
+  position: absolute;
+  left: -24px;
+  top: 16px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 3px solid #fff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  z-index: 1;
+}
+
+.timeline-time {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.timeline-stage {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.timeline-summary {
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+/* === Detail & Cards === */
+.detail-header {
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.detail-header h3 {
+  margin: 0 0 4px;
+}
+
+.detail-header p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+article h4 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* === Responsive === */
 @media (max-width: 1100px) {
   .app-shell,
   .two-columns,
@@ -243,5 +574,19 @@ pre {
   .sidebar {
     border-right: 0;
     border-bottom: 1px solid var(--line);
+  }
+
+  .login-container {
+    padding: 24px;
+  }
+}
+
+@media (max-width: 600px) {
+  .kpi-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .page-header {
+    flex-direction: column;
   }
 }
