@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { EvolutionLogger, createTraceId, STAGE_LABELS, STAGE_COLORS } from '../../src/core/evolution-logger.js';
+import { EvolutionLogger, createTraceId, STAGE_LABELS, STAGE_COLORS, disposeAllEvolutionLoggers } from '../../src/core/evolution-logger.js';
 import { TrajectoryDatabase } from '../../src/core/trajectory.js';
 
 describe('EvolutionLogger', () => {
@@ -16,6 +16,7 @@ describe('EvolutionLogger', () => {
 
   afterEach(() => {
     trajectory.dispose();
+    disposeAllEvolutionLoggers();  // Clear logger cache to prevent memory leaks
     try {
       fs.rmSync(tempDir, { recursive: true, force: true });
     } catch {

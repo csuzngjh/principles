@@ -10,7 +10,7 @@
  * 2. evolution_events 表 (SQLite) - 结构化查询
  */
 
-import { createHash } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import type { TrajectoryDatabase } from './trajectory.js';
 import { SystemLogger } from './system-logger.js';
 
@@ -73,13 +73,11 @@ export const STAGE_COLORS: Record<EvolutionStage, string> = {
 /**
  * 创建新的 trace_id
  * 格式: ev_{timestamp}_{random}
+ * 使用 crypto.randomBytes 确保不可预测性
  */
 export function createTraceId(): string {
   const timestamp = Date.now().toString(36);
-  const random = createHash('md5')
-    .update(Math.random().toString())
-    .digest('hex')
-    .substring(0, 6);
+  const random = randomBytes(3).toString('hex');
   return `ev_${timestamp}_${random}`;
 }
 
@@ -330,4 +328,18 @@ export function getEvolutionLogger(
   const logger = new EvolutionLogger(workspaceDir, trajectory);
   loggerCache.set(workspaceDir, logger);
   return logger;
+}
+
+/**
+ * 清理指定 workspace 的 logger 缓存
+ */
+export function disposeEvolutionLogger(workspaceDir: string): boolean {
+  return loggerCache.delete(workspaceDir);
+}
+
+/**
+ * 清理所有 logger 缓存（用于测试或进程退出）
+ */
+export function disposeAllEvolutionLoggers(): void {
+  loggerCache.clear();
 }
