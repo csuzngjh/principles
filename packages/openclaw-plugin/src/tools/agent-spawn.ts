@@ -12,7 +12,7 @@ import type { OpenClawPluginApi, SubagentWaitResult } from '../openclaw-sdk.js';
 import { loadAgentDefinition, listAvailableAgents } from '../core/agent-loader.js';
 import { resolvePdPath } from '../core/paths.js';
 import { extractEvolutionTaskId, registerEvolutionTaskSession } from '../service/evolution-worker.js';
-import { isSubagentRuntimeAvailable } from '../utils/subagent-probe.js';
+import { isSubagentRuntimeAvailable, getAvailableSubagentRuntime } from '../utils/subagent-probe.js';
 
 /**
  * Extract assistant text from session messages
@@ -327,8 +327,9 @@ pd_run_worker(
       // Check subagent runtime availability.
       // api.runtime.subagent is always a Proxy object (truthy), even in embedded mode.
       // Use the shared probe utility to detect which mode we're in.
-      const subagentRuntime = api.runtime?.subagent;
-      if (!isSubagentRuntimeAvailable(subagentRuntime)) {
+      // Also try to get the global gateway subagent as a fallback.
+      const subagentRuntime = getAvailableSubagentRuntime(api.runtime?.subagent);
+      if (!subagentRuntime) {
         return {
           content: [{
             type: 'text',
