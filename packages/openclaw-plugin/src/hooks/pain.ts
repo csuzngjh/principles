@@ -7,6 +7,7 @@ import { getSession, trackFriction, resetFriction, getInjectedProbationIds, clea
 import { denoiseError, computeHash } from '../utils/hashing.js';
 import { SystemLogger } from '../core/system-logger.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
+import { getEvolutionLogger, createTraceId } from '../core/evolution-logger.js';
 import type { EvolutionLoopEvent } from '../core/evolution-types.js';
 import type { PluginHookAfterToolCallEvent, PluginHookToolContext, OpenClawPluginApi } from '../openclaw-sdk.js';
 
@@ -67,6 +68,7 @@ export function handleAfterToolCall(
   // 0. Special Case: Manual Pain Intervention
   if (event.toolName === 'pain' || event.toolName === 'skill:pain') {
     const reason = params.input || params.arguments || 'Manual intervention';
+    const traceId = createTraceId();
     trackFriction(sessionId, 100, 'manual_pain', effectiveWorkspaceDir);
     SystemLogger.log(effectiveWorkspaceDir, 'MANUAL_PAIN', `User manually triggered pain: ${reason}`);
     eventLog.recordPainSignal(sessionId, {
@@ -82,6 +84,18 @@ export function handleAfterToolCall(
       reason: `User intervention: ${reason}`,
       origin: 'user_manual',
     });
+
+    // Log to EvolutionLogger
+    const evoLogger = getEvolutionLogger(effectiveWorkspaceDir, wctx.trajectory);
+    evoLogger.logPainDetected({
+      traceId,
+      source: 'manual',
+      reason: `User intervention: ${reason}`,
+      score: 100,
+      toolName: event.toolName,
+      sessionId,
+    });
+
     emitPainDetectedEvent(wctx, {
       ts: new Date().toISOString(),
       type: 'pain_detected',
@@ -92,6 +106,8 @@ export function handleAfterToolCall(
         reason: `User intervention: ${reason}`,
         score: 100,
         sessionId,
+        traceId,
+        agentId: ctx.agentId,
       },
     });
     return;
@@ -257,6 +273,7 @@ export function handleAfterToolCall(
 
   const isRisk = isRisky(relPath, profile.risk_paths);
   const painScore = computePainScore(1, false, false, isRisk ? 20 : 0, effectiveWorkspaceDir);
+  const traceId = createTraceId();
 
   const painData = {
     score: String(painScore),
@@ -264,10 +281,13 @@ export function handleAfterToolCall(
     time: new Date().toISOString(),
     reason: `Tool ${event.toolName} failed on ${relPath}. Error: ${event.error ?? 'Non-zero exit code'}`,
     is_risky: String(isRisk),
+    trace_id: traceId,
+    session_id: sessionId,
+    agent_id: ctx.agentId || '',
   };
 
   writePainFlag(effectiveWorkspaceDir, painData);
-  
+
   eventLog.recordPainSignal(sessionId, {
     score: painScore,
     source: 'tool_failure',
@@ -283,6 +303,18 @@ export function handleAfterToolCall(
     origin: 'system_infer',
   });
 
+  // Log to EvolutionLogger
+  const evoLogger = getEvolutionLogger(effectiveWorkspaceDir, wctx.trajectory);
+  evoLogger.logPainDetected({
+    traceId,
+    source: 'tool_failure',
+    reason: `Tool ${event.toolName} failed on ${relPath}`,
+    score: painScore,
+    toolName: event.toolName,
+    filePath: relPath,
+    sessionId,
+  });
+
   emitPainDetectedEvent(wctx, {
     ts: new Date().toISOString(),
     type: 'pain_detected',
@@ -293,6 +325,8 @@ export function handleAfterToolCall(
       reason: `Tool ${event.toolName} failed on ${relPath}`,
       score: painScore,
       sessionId,
+      traceId,
+      agentId: ctx.agentId,
     },
   });
 }

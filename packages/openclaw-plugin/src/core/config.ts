@@ -65,8 +65,19 @@ export interface TrustSettings {
     limits: {
         stage_2_max_lines: number;
         stage_3_max_lines: number;
+        stage_2_max_percentage: number;
+        stage_3_max_percentage: number;
+        min_lines_fallback: number;
     };
     history_limit?: number;
+}
+
+export interface DiagnosticianSettings {
+    context: {
+        time_window_minutes: number;   // 时间窗口（分钟），pain_timestamp 前后各多少分钟
+        max_message_length: number;    // 每条消息最大长度（字符）
+        max_summary_length: number;    // 对话摘要最大长度（字符）
+    };
 }
 
 export interface PainSettings {
@@ -76,6 +87,7 @@ export interface PainSettings {
         busy_timeout_ms?: number;
         orphan_blob_grace_days?: number;
     };
+    diagnostician?: DiagnosticianSettings;
     thresholds: {
         pain_trigger: number;
         cognitive_paralysis_input: number;
@@ -134,6 +146,13 @@ export interface PainSettings {
 // ─────────────────────────────────────────────────────────────
 export const DEFAULT_SETTINGS: PainSettings = {
     language: 'zh', // Optimized for the primary user base
+    diagnostician: {
+        context: {
+            time_window_minutes: 5,    // pain_timestamp 前后各 5 分钟
+            max_message_length: 500,   // 每条消息截断到 500 字符
+            max_summary_length: 3000,  // 对话摘要最大 3000 字符
+        }
+    },
     thresholds: {
         pain_trigger: 40, // Increased tolerance before forcing a stop
         cognitive_paralysis_input: 4000,
@@ -161,7 +180,7 @@ export const DEFAULT_SETTINGS: PainSettings = {
     intervals: {
         worker_poll_ms: 15 * 60 * 1000,
         initial_delay_ms: 5000,
-        task_timeout_ms: 30 * 60 * 1000
+        task_timeout_ms: 60 * 60 * 1000  // 1 hour, matching evolution-worker.ts default
     },
     trust: {
         stages: {
@@ -197,6 +216,9 @@ export const DEFAULT_SETTINGS: PainSettings = {
         limits: {
             stage_2_max_lines: 50, // Was 10. 10 lines is barely enough to fix a function signature.
             stage_3_max_lines: 300, // Was 100. Allow substantial feature implementation.
+            stage_2_max_percentage: 10, // Percentage-based threshold for Stage 2
+            stage_3_max_percentage: 15, // Percentage-based threshold for Stage 3
+            min_lines_fallback: 20, // Minimum threshold even for small files
         },
         history_limit: 50
     },
@@ -332,6 +354,12 @@ export class PainConfig {
         
         // Ensure intervals are positive
         if (settings.intervals.worker_poll_ms < 1000) settings.intervals.worker_poll_ms = 15 * 60 * 1000;
+        
+        // Ensure percentage limits are in valid range [0, 100]
+        const l = settings.trust.limits;
+        if (l.stage_2_max_percentage < 0 || l.stage_2_max_percentage > 100) l.stage_2_max_percentage = 10;
+        if (l.stage_3_max_percentage < 0 || l.stage_3_max_percentage > 100) l.stage_3_max_percentage = 15;
+        if (l.min_lines_fallback < 1) l.min_lines_fallback = 20;
     }
 
     /**

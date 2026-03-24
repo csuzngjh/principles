@@ -183,3 +183,99 @@ export interface ThinkingModelDetailResponse {
     principleContext: Array<{ principleId: string | null; eventType: string }>;
   }>;
 }
+
+// Evolution Types
+export interface EvolutionTaskItem {
+  taskId: string;
+  traceId: string;
+  source: string;
+  reason: string | null;
+  score: number;
+  status: string;
+  enqueuedAt: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  duration: number | null;
+  resolution: string | null;
+  eventCount: number;
+  createdAt: string;
+}
+
+export interface EvolutionTasksResponse {
+  items: EvolutionTaskItem[];
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
+export interface EvolutionEventItem {
+  id: number;
+  traceId: string;
+  taskId: string | null;
+  stage: string;
+  stageLabel: string;
+  stageColor: string;
+  level: string;
+  message: string;
+  summary: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface EvolutionEventsResponse {
+  items: EvolutionEventItem[];
+  pagination: {
+    limit: number;
+    offset: number;
+    hasMore: boolean;
+  };
+}
+
+export interface EvolutionTraceResponse {
+  traceId: string;
+  task: {
+    taskId: string;
+    traceId: string;
+    source: string;
+    reason: string | null;
+    score: number;
+    status: string;
+    enqueuedAt: string | null;
+    startedAt: string | null;
+    completedAt: string | null;
+    duration: number | null;
+    resolution: string | null;
+    createdAt: string;
+    updatedAt: string;
+  };
+  events: EvolutionEventItem[];
+  timeline: Array<{
+    stage: string;
+    stageLabel: string;
+    stageColor: string;
+    timestamp: string;
+    message: string;
+    summary: string | null;
+  }>;
+}
+
+export interface EvolutionStatsResponse {
+  total: number;
+  pending: number;
+  inProgress: number;
+  completed: number;
+  failed: number;
+  recentActivity: Array<{
+    day: string;
+    created: number;
+    completed: number;
+  }>;
+  stageDistribution: Array<{
+    stage: string;
+    stageLabel: string;
+    count: number;
+  }>;
+}

@@ -376,6 +376,44 @@ export type PluginHookSubagentSpawningResult =
     | { status: 'ok'; threadBindingReady?: boolean }
     | { status: 'error'; error: string };
 
+// Subagent target kind (synced from OpenClaw v2026.3.23)
+export type PluginHookSubagentTargetKind = 'subagent' | 'acp';
+
+// subagent_delivery_target hook (synced from OpenClaw v2026.3.23)
+export type PluginHookSubagentDeliveryTargetEvent = {
+    childSessionKey: string;
+    requesterSessionKey: string;
+    requesterOrigin?: {
+        channel?: string;
+        accountId?: string;
+        to?: string;
+        threadId?: string | number;
+    };
+    childRunId?: string;
+    spawnMode?: 'run' | 'session';
+    expectsCompletionMessage: boolean;
+};
+
+export type PluginHookSubagentDeliveryTargetResult = {
+    origin?: {
+        channel?: string;
+        accountId?: string;
+        to?: string;
+        threadId?: string | number;
+    };
+};
+
+// subagent_spawned hook (synced from OpenClaw v2026.3.23)
+export type PluginHookSubagentSpawnedEvent = {
+    childSessionKey: string;
+    agentId: string;
+    label?: string;
+    mode: 'run' | 'session';
+    requester?: { channel?: string; accountId?: string; to?: string; threadId?: string | number };
+    threadRequested: boolean;
+    runId: string;
+};
+
 // ── Service types ────────────────────────────────────────────────────
 
 export interface OpenClawPluginServiceContext {
@@ -416,6 +454,8 @@ export type PluginHookHandlerMap = {
     llm_output: (event: PluginHookLlmOutputEvent, ctx: PluginHookAgentContext) => any;
     subagent_ended: (event: PluginHookSubagentEndedEvent, ctx: PluginHookSubagentContext) => any;
     subagent_spawning: (event: PluginHookSubagentSpawningEvent, ctx: PluginHookSubagentContext) => any;
+    subagent_delivery_target: (event: PluginHookSubagentDeliveryTargetEvent, ctx: PluginHookSubagentContext) => PluginHookSubagentDeliveryTargetResult | void | Promise<PluginHookSubagentDeliveryTargetResult | void>;
+    subagent_spawned: (event: PluginHookSubagentSpawnedEvent, ctx: PluginHookSubagentContext) => void | Promise<void>;
     before_reset: (event: PluginHookBeforeResetEvent, ctx: PluginHookAgentContext) => any;
     before_compaction: (event: PluginHookBeforeCompactionEvent, ctx: PluginHookAgentContext) => any;
     after_compaction: (event: PluginHookAfterCompactionEvent, ctx: PluginHookAgentContext) => any;

@@ -119,6 +119,68 @@ export interface TrajectorySessionInput {
   startedAt?: string;
 }
 
+export interface EvolutionTaskInput {
+  taskId: string;
+  traceId: string;
+  source: string;
+  reason?: string | null;
+  score?: number;
+  status?: string;
+  enqueuedAt?: string | null;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  resolution?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface EvolutionEventInput {
+  traceId: string;
+  taskId?: string | null;
+  stage: string;
+  level?: string;
+  message: string;
+  summary?: string | null;
+  metadata?: unknown;
+  createdAt?: string;
+}
+
+export interface EvolutionTaskRecord {
+  id: number;
+  taskId: string;
+  traceId: string;
+  source: string;
+  reason: string | null;
+  score: number;
+  status: string;
+  enqueuedAt: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  resolution: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EvolutionEventRecord {
+  id: number;
+  traceId: string;
+  taskId: string | null;
+  stage: string;
+  level: string;
+  message: string;
+  summary: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface EvolutionTaskFilters {
+  status?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  limit?: number;
+  offset?: number;
+}
+
 export interface AssistantTurnRecord {
   id: number;
   sessionId: string;
@@ -399,6 +461,215 @@ export class TrajectoryDatabase {
         input.createdAt ?? nowIso(),
       );
     });
+  }
+
+  recordEvolutionTask(input: EvolutionTaskInput): void {
+    const now = nowIso();
+    this.withWrite(() => {
+      this.db.prepare(`
+        INSERT INTO evolution_tasks (
+          task_id, trace_id, source, reason, score, status,
+          enqueued_at, started_at, completed_at, resolution, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(task_id) DO UPDATE SET
+          status = excluded.status,
+          started_at = excluded.started_at,
+          completed_at = excluded.completed_at,
+          resolution = excluded.resolution,
+          updated_at = excluded.updated_at
+      `).run(
+        input.taskId,
+        input.traceId,
+        input.source,
+        input.reason ?? null,
+        input.score ?? 0,
+        input.status ?? 'pending',
+        input.enqueuedAt ?? null,
+        input.startedAt ?? null,
+        input.completedAt ?? null,
+        input.resolution ?? null,
+        input.createdAt ?? now,
+        input.updatedAt ?? now,
+      );
+    });
+  }
+
+  updateEvolutionTask(taskId: string, updates: Partial<Omit<EvolutionTaskInput, 'taskId' | 'traceId' | 'source'>>): void {
+    const now = nowIso();
+    this.withWrite(() => {
+      const setClauses: string[] = ['updated_at = ?'];
+      const values: unknown[] = [now];
+
+      if (updates.status !== undefined) {
+        setClauses.push('status = ?');
+        values.push(updates.status);
+      }
+      if (updates.startedAt !== undefined) {
+        setClauses.push('started_at = ?');
+        values.push(updates.startedAt);
+      }
+      if (updates.completedAt !== undefined) {
+        setClauses.push('completed_at = ?');
+        values.push(updates.completedAt);
+      }
+      if (updates.resolution !== undefined) {
+        setClauses.push('resolution = ?');
+        values.push(updates.resolution);
+      }
+      if (updates.score !== undefined) {
+        setClauses.push('score = ?');
+        values.push(updates.score);
+      }
+
+      values.push(taskId);
+      this.db.prepare(`
+        UPDATE evolution_tasks SET ${setClauses.join(', ')} WHERE task_id = ?
+      `).run(...values);
+    });
+  }
+
+  recordEvolutionEvent(input: EvolutionEventInput): void {
+    this.withWrite(() => {
+      this.db.prepare(`
+        INSERT INTO evolution_events (trace_id, task_id, stage, level, message, summary, metadata_json, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        input.traceId,
+        input.taskId ?? null,
+        input.stage,
+        input.level ?? 'info',
+        input.message,
+        input.summary ?? null,
+        safeJson(input.metadata),
+        input.createdAt ?? nowIso(),
+      );
+    });
+  }
+
+  listEvolutionTasks(filters: EvolutionTaskFilters = {}): EvolutionTaskRecord[] {
+    const conditions: string[] = [];
+    const values: unknown[] = [];
+
+    if (filters.status) {
+      conditions.push('status = ?');
+      values.push(filters.status);
+    }
+    if (filters.dateFrom) {
+      conditions.push('created_at >= ?');
+      values.push(filters.dateFrom);
+    }
+    if (filters.dateTo) {
+      conditions.push('created_at <= ?');
+      values.push(filters.dateTo);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const limit = filters.limit ?? 50;
+    const offset = filters.offset ?? 0;
+
+    const rows = this.db.prepare(`
+      SELECT id, task_id, trace_id, source, reason, score, status,
+             enqueued_at, started_at, completed_at, resolution, created_at, updated_at
+      FROM evolution_tasks
+      ${whereClause}
+      ORDER BY created_at DESC
+      LIMIT ? OFFSET ?
+    `).all(...values, limit, offset) as Array<Record<string, unknown>>;
+
+    return rows.map((row) => ({
+      id: Number(row.id),
+      taskId: String(row.task_id),
+      traceId: String(row.trace_id),
+      source: String(row.source),
+      reason: row.reason ? String(row.reason) : null,
+      score: Number(row.score ?? 0),
+      status: String(row.status),
+      enqueuedAt: row.enqueued_at ? String(row.enqueued_at) : null,
+      startedAt: row.started_at ? String(row.started_at) : null,
+      completedAt: row.completed_at ? String(row.completed_at) : null,
+      resolution: row.resolution ? String(row.resolution) : null,
+      createdAt: String(row.created_at),
+      updatedAt: String(row.updated_at),
+    }));
+  }
+
+  listEvolutionEvents(traceId?: string, filters: { limit?: number; offset?: number } = {}): EvolutionEventRecord[] {
+    const limit = filters.limit ?? 100;
+    const offset = filters.offset ?? 0;
+
+    let rows: Array<Record<string, unknown>>;
+    if (traceId) {
+      rows = this.db.prepare(`
+        SELECT id, trace_id, task_id, stage, level, message, summary, metadata_json, created_at
+        FROM evolution_events
+        WHERE trace_id = ?
+        ORDER BY created_at ASC
+        LIMIT ? OFFSET ?
+      `).all(traceId, limit, offset) as Array<Record<string, unknown>>;
+    } else {
+      rows = this.db.prepare(`
+        SELECT id, trace_id, task_id, stage, level, message, summary, metadata_json, created_at
+        FROM evolution_events
+        ORDER BY created_at DESC
+        LIMIT ? OFFSET ?
+      `).all(limit, offset) as Array<Record<string, unknown>>;
+    }
+
+    return rows.map((row) => ({
+      id: Number(row.id),
+      traceId: String(row.trace_id),
+      taskId: row.task_id ? String(row.task_id) : null,
+      stage: String(row.stage),
+      level: String(row.level ?? 'info'),
+      message: String(row.message),
+      summary: row.summary ? String(row.summary) : null,
+      metadata: JSON.parse(String(row.metadata_json ?? '{}')),
+      createdAt: String(row.created_at),
+    }));
+  }
+
+  getEvolutionTaskByTraceId(traceId: string): EvolutionTaskRecord | null {
+    const row = this.db.prepare(`
+      SELECT id, task_id, trace_id, source, reason, score, status,
+             enqueued_at, started_at, completed_at, resolution, created_at, updated_at
+      FROM evolution_tasks
+      WHERE trace_id = ?
+      LIMIT 1
+    `).get(traceId) as Record<string, unknown> | undefined;
+
+    if (!row) return null;
+
+    return {
+      id: Number(row.id),
+      taskId: String(row.task_id),
+      traceId: String(row.trace_id),
+      source: String(row.source),
+      reason: row.reason ? String(row.reason) : null,
+      score: Number(row.score ?? 0),
+      status: String(row.status),
+      enqueuedAt: row.enqueued_at ? String(row.enqueued_at) : null,
+      startedAt: row.started_at ? String(row.started_at) : null,
+      completedAt: row.completed_at ? String(row.completed_at) : null,
+      resolution: row.resolution ? String(row.resolution) : null,
+      createdAt: String(row.created_at),
+      updatedAt: String(row.updated_at),
+    };
+  }
+
+  getEvolutionStats(): { total: number; pending: number; inProgress: number; completed: number; failed: number } {
+    const rows = this.db.prepare(`
+      SELECT status, COUNT(*) as count FROM evolution_tasks GROUP BY status
+    `).all() as Array<{ status: string; count: number }>;
+
+    const stats = { total: 0, pending: 0, inProgress: 0, completed: 0, failed: 0 };
+    for (const row of rows) {
+      stats.total += row.count;
+      if (row.status === 'pending') stats.pending = row.count;
+      else if (row.status === 'in_progress') stats.inProgress = row.count;
+      else if (row.status === 'completed') stats.completed = row.count;
+      else if (row.status === 'failed') stats.failed = row.count;
+    }
+    return stats;
   }
 
   listAssistantTurns(sessionId: string): AssistantTurnRecord[] {
@@ -710,6 +981,32 @@ export class TrajectoryDatabase {
         row_count INTEGER NOT NULL,
         created_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS evolution_tasks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id TEXT UNIQUE NOT NULL,
+        trace_id TEXT NOT NULL,
+        source TEXT NOT NULL,
+        reason TEXT,
+        score INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'pending',
+        enqueued_at TEXT,
+        started_at TEXT,
+        completed_at TEXT,
+        resolution TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS evolution_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        trace_id TEXT NOT NULL,
+        task_id TEXT,
+        stage TEXT NOT NULL,
+        level TEXT DEFAULT 'info',
+        message TEXT NOT NULL,
+        summary TEXT,
+        metadata_json TEXT,
+        created_at TEXT NOT NULL
+      );
       CREATE VIEW IF NOT EXISTS v_error_clusters AS
       SELECT tool_name, COALESCE(error_type, 'unknown') AS error_type, COUNT(*) AS occurrences
       FROM tool_calls
@@ -733,6 +1030,11 @@ export class TrajectoryDatabase {
       CREATE INDEX IF NOT EXISTS idx_tool_calls_created_at ON tool_calls(created_at);
       CREATE INDEX IF NOT EXISTS idx_pain_events_session_id ON pain_events(session_id);
       CREATE INDEX IF NOT EXISTS idx_correction_samples_review_status ON correction_samples(review_status);
+      CREATE INDEX IF NOT EXISTS idx_evolution_tasks_trace_id ON evolution_tasks(trace_id);
+      CREATE INDEX IF NOT EXISTS idx_evolution_tasks_status ON evolution_tasks(status);
+      CREATE INDEX IF NOT EXISTS idx_evolution_tasks_created_at ON evolution_tasks(created_at);
+      CREATE INDEX IF NOT EXISTS idx_evolution_events_trace_id ON evolution_events(trace_id);
+      CREATE INDEX IF NOT EXISTS idx_evolution_events_created_at ON evolution_events(created_at);
     `);
 
     const row = this.db.prepare('SELECT version FROM schema_version LIMIT 1').get() as { version?: number } | undefined;

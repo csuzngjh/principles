@@ -4,6 +4,11 @@ import * as readline from 'readline';
 import { computePainScore, writePainFlag } from '../core/pain.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { PD_DIRS } from '../core/paths.js';
+import { 
+  extractWorkingMemory, 
+  mergeWorkingMemory, 
+  type WorkingMemorySnapshot 
+} from '../core/focus-history.js';
 import type { PluginHookBeforeResetEvent, PluginHookBeforeCompactionEvent, PluginHookAfterCompactionEvent, PluginHookAgentContext } from '../openclaw-sdk.js';
 
 export async function handleBeforeReset(
@@ -170,6 +175,7 @@ export async function handleBeforeCompaction(
 ): Promise<void> {
   if (!ctx.workspaceDir) return;
 
+  const wctx = WorkspaceContext.fromHookContext(ctx);
   const dateStr = new Date().toISOString().split('T')[0];
   const checkpointPath = path.join(ctx.workspaceDir, PD_DIRS.MEMORY, `${dateStr}.md`);
   const log =
@@ -185,8 +191,119 @@ export async function handleBeforeCompaction(
     console.error(`[PD:Lifecycle] Failed to write pre-compaction checkpoint: ${String(_e)}`);
   }
 
+  // 提取工作记忆（从 sessionFile）
   if (event.sessionFile) {
     await extractPainFromSessionFile(event.sessionFile, ctx);
+    
+    // 新增：提取并保存工作记忆
+    await extractAndSaveWorkingMemory(event.sessionFile, ctx, wctx);
+  }
+}
+
+/**
+ * 从会话文件提取工作记忆并保存到 CURRENT_FOCUS.md
+ */
+async function extractAndSaveWorkingMemory(
+  sessionFile: string,
+  ctx: PluginHookAgentContext,
+  wctx: WorkspaceContext
+): Promise<void> {
+  if (!fs.existsSync(sessionFile)) {
+    if (ctx.logger?.debug) ctx.logger.debug(`[WorkingMemory] Session file not found: ${sessionFile}`);
+    return;
+  }
+
+  const messages: JsonlMessage[] = [];
+  let lineCount = 0;
+  const MAX_LINES = 1000; // 限制处理的行数，避免内存问题
+  
+  // 读取会话文件
+  const fileStream = fs.createReadStream(sessionFile);
+  const rl = readline.createInterface({
+    input: fileStream,
+    crlfDelay: Infinity
+  });
+
+  try {
+    for await (const line of rl) {
+      if (lineCount >= MAX_LINES) break;
+      if (!line.trim()) continue;
+      lineCount++;
+      try {
+        const msg: JsonlMessage = JSON.parse(line);
+        messages.push(msg);
+      } catch {
+        // 忽略解析错误
+      }
+    }
+  } finally {
+    try {
+      rl.close();
+      fileStream.destroy();
+    } catch {
+      // 忽略清理错误
+    }
+  }
+
+  if (messages.length === 0) {
+    if (ctx.logger?.debug) ctx.logger.debug(`[WorkingMemory] No messages found in session file`);
+    return;
+  }
+
+  // 提取工作记忆
+  const snapshot = extractWorkingMemory(messages, ctx.workspaceDir);
+  
+  // 检查是否有有效内容
+  if (snapshot.artifacts.length === 0 && 
+      snapshot.activeProblems.length === 0 && 
+      snapshot.nextActions.length === 0) {
+    if (ctx.logger?.debug) ctx.logger.debug(`[WorkingMemory] No working memory to preserve`);
+    return;
+  }
+
+  // 读取并更新 CURRENT_FOCUS.md
+  const focusPath = wctx.resolve('CURRENT_FOCUS');
+  
+  try {
+    let content = '';
+    if (fs.existsSync(focusPath)) {
+      content = fs.readFileSync(focusPath, 'utf-8');
+      
+      // 备份原文件（防止损坏）
+      const backupPath = `${focusPath}.wm-backup`;
+      fs.copyFileSync(focusPath, backupPath);
+    }
+    
+    // 合并工作记忆
+    const updatedContent = mergeWorkingMemory(content, snapshot);
+    
+    // 确保目录存在
+    const focusDir = path.dirname(focusPath);
+    if (!fs.existsSync(focusDir)) {
+      fs.mkdirSync(focusDir, { recursive: true });
+    }
+    
+    // 写入文件
+    fs.writeFileSync(focusPath, updatedContent, 'utf-8');
+    
+    if (ctx.logger) {
+      ctx.logger.info(`[WorkingMemory] Preserved ${snapshot.artifacts.length} artifacts, ` +
+        `${snapshot.activeProblems.length} problems, ` +
+        `${snapshot.nextActions.length} next actions to CURRENT_FOCUS.md`);
+    }
+  } catch (err) {
+    console.error(`[PD:Lifecycle] Failed to save working memory: ${String(err)}`);
+    
+    // 尝试恢复备份
+    const backupPath = `${focusPath}.wm-backup`;
+    if (fs.existsSync(backupPath)) {
+      try {
+        fs.copyFileSync(backupPath, focusPath);
+        if (ctx.logger) ctx.logger.warn(`[WorkingMemory] Restored from backup after failure`);
+      } catch {
+        // 忽略恢复错误
+      }
+    }
   }
 }
 

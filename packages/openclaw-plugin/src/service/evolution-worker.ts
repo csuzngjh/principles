@@ -11,6 +11,7 @@ import { SystemLogger } from '../core/system-logger.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { initPersistence, flushAllSessions } from '../core/session-tracker.js';
 import { acquireLockAsync, releaseLock, type LockContext } from '../utils/file-lock.js';
+import { getEvolutionLogger, type EvolutionStage } from '../core/evolution-logger.js';
 
 let intervalId: NodeJS.Timeout | null = null;
 
@@ -28,6 +29,9 @@ export interface EvolutionQueueItem {
     trigger_text_preview?: string;
     status: 'pending' | 'in_progress' | 'completed';
     resolution?: 'marker_detected' | 'auto_completed_timeout';
+    session_id?: string;
+    agent_id?: string;
+    traceId?: string; // Trace ID for linking events across the evolution lifecycle
 }
 
 const PAIN_QUEUE_DEDUP_WINDOW_MS = 30 * 60 * 1000;
@@ -177,12 +181,15 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: any) {
 
         const rawPain = fs.readFileSync(painFlagPath, 'utf8');
         const lines = rawPain.split('\n');
-        
+
         let score = 0;
         let source = 'unknown';
         let reason = 'Systemic pain detected';
         let preview = '';
         let isQueued = false;
+        let traceId = '';
+        let sessionId = '';
+        let agentId = '';
 
         for (const line of lines) {
             if (line.startsWith('score:')) score = parseInt(line.split(':', 2)[1].trim(), 10) || 0;
@@ -190,6 +197,9 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: any) {
             if (line.startsWith('reason:')) reason = line.slice('reason:'.length).trim();
             if (line.startsWith('trigger_text_preview:')) preview = line.slice('trigger_text_preview:'.length).trim();
             if (line.startsWith('status: queued')) isQueued = true;
+            if (line.startsWith('trace_id:')) traceId = line.split(':', 2)[1].trim();
+            if (line.startsWith('session_id:')) sessionId = line.slice('session_id:'.length).trim();
+            if (line.startsWith('agent_id:')) agentId = line.slice('agent_id:'.length).trim();
         }
 
         if (isQueued || score < 30) return;
@@ -222,19 +232,46 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: any) {
             }
 
             const taskId = createEvolutionTaskId(source, score, preview, reason, now);
+            const nowIso = new Date(now).toISOString();
+            const effectiveTraceId = traceId || taskId;
             queue.push({
                 id: taskId,
                 score,
                 source,
                 reason,
                 trigger_text_preview: preview,
-                timestamp: new Date(now).toISOString(),
-                enqueued_at: new Date(now).toISOString(),
-                status: 'pending'
+                timestamp: nowIso,
+                enqueued_at: nowIso,
+                status: 'pending',
+                session_id: sessionId || undefined,
+                agent_id: agentId || undefined,
+                traceId: effectiveTraceId,
             });
 
             fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
             fs.appendFileSync(painFlagPath, `\nstatus: queued\ntask_id: ${taskId}\n`, 'utf8');
+
+            // Log to EvolutionLogger
+            const evoLogger = getEvolutionLogger(wctx.workspaceDir, wctx.trajectory);
+            evoLogger.logQueued({
+                traceId: traceId || taskId,
+                taskId,
+                score,
+                source,
+                reason,
+            });
+
+            // Record to evolution_tasks table
+            wctx.trajectory?.recordEvolutionTask?.({
+                taskId,
+                traceId: traceId || taskId,
+                source,
+                reason,
+                score,
+                status: 'pending',
+                enqueuedAt: nowIso,
+            });
+
         } finally {
             releaseLock();
         }
@@ -249,13 +286,26 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
     if (!fs.existsSync(queuePath)) return;
 
     const releaseLock = await requireQueueLock(queuePath, logger, 'processEvolutionQueue');
+    const evoLogger = getEvolutionLogger(wctx.workspaceDir, wctx.trajectory);
 
     try {
         let queue: EvolutionQueueItem[] = [];
         try {
             queue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
         } catch (e) {
-            if (logger) logger.error(`[PD:EvolutionWorker] Failed to parse evolution queue: ${String(e)}`);
+            // Backup corrupted file instead of silently discarding
+            const backupPath = `${queuePath}.corrupted.${Date.now()}`;
+            try {
+                fs.renameSync(queuePath, backupPath);
+                if (logger) {
+                    logger.error(`[PD:EvolutionWorker] Evolution queue corrupted and backed up to ${backupPath}. All pending tasks have been preserved in the backup file. Parse error: ${String(e)}`);
+                }
+                SystemLogger.log(wctx.workspaceDir, 'QUEUE_CORRUPTED', `Queue file backed up to ${backupPath}. Error: ${String(e)}`);
+            } catch (backupErr) {
+                if (logger) {
+                    logger.error(`[PD:EvolutionWorker] Failed to backup corrupted queue: ${String(backupErr)}`);
+                }
+            }
             return;
         }
 
@@ -267,7 +317,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
         // Check in_progress tasks for completion
         for (const task of queue.filter(t => t.status === 'in_progress')) {
             const startedAt = new Date(task.started_at || task.timestamp);
-            
+
             // Condition 1: Check for marker file (created by diagnostician on completion)
             const completeMarker = path.join(wctx.stateDir, `.evolution_complete_${task.id}`);
             if (fs.existsSync(completeMarker)) {
@@ -280,7 +330,25 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
                 } catch {
                     // Best effort cleanup
                 }
-                
+
+                // Log to EvolutionLogger
+                const durationMs = task.started_at
+                    ? Date.now() - new Date(task.started_at).getTime()
+                    : undefined;
+                evoLogger.logCompleted({
+                    traceId: task.traceId || task.id,
+                    taskId: task.id,
+                    resolution: 'marker_detected',
+                    durationMs,
+                });
+
+                // Update evolution_tasks table
+                wctx.trajectory?.updateEvolutionTask?.(task.id, {
+                    status: 'completed',
+                    completedAt: task.completed_at,
+                    resolution: 'marker_detected',
+                });
+
                 wctx.trajectory?.recordTaskOutcome({
                     sessionId: task.assigned_session_key || 'heartbeat:diagnostician',
                     taskId: task.id,
@@ -290,7 +358,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
                 queueChanged = true;
                 continue;
             }
-            
+
             // Condition 2: Timeout auto-complete
             const age = Date.now() - startedAt.getTime();
             if (age > timeout) {
@@ -299,7 +367,22 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
                 task.status = 'completed';
                 task.completed_at = new Date().toISOString();
                 task.resolution = 'auto_completed_timeout';
-                
+
+                // Log to EvolutionLogger
+                evoLogger.logCompleted({
+                    traceId: task.traceId || task.id,
+                    taskId: task.id,
+                    resolution: 'auto_completed_timeout',
+                    durationMs: age,
+                });
+
+                // Update evolution_tasks table
+                wctx.trajectory?.updateEvolutionTask?.(task.id, {
+                    status: 'completed',
+                    completedAt: task.completed_at,
+                    resolution: 'auto_completed_timeout',
+                });
+
                 wctx.trajectory?.recordTaskOutcome({
                     sessionId: task.assigned_session_key || 'heartbeat:diagnostician',
                     taskId: task.id,
@@ -318,54 +401,73 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
 
             const taskDescription = `Diagnose systemic pain [ID: ${highestScoreTask.id}]. Source: ${highestScoreTask.source}. Reason: ${highestScoreTask.reason}. ` +
                   `Trigger text: "${highestScoreTask.trigger_text_preview || 'N/A'}"`;
-            highestScoreTask.task = taskDescription;
-            highestScoreTask.status = 'in_progress';
-            highestScoreTask.started_at = nowIso;
-            delete highestScoreTask.completed_at;
-            delete highestScoreTask.assigned_session_key;
-            queueChanged = true;
 
-            if (eventLog) {
-                eventLog.recordEvolutionTask({
-                    taskId: highestScoreTask.id,
-                    taskType: highestScoreTask.source,
-                    reason: highestScoreTask.reason
-                });
-            }
+            // Prepare HEARTBEAT content first
+            const agentDef = loadAgentDefinition('diagnostician');
+            const heartbeatPath = wctx.resolve('HEARTBEAT');
+            const markerFilePath = path.join(wctx.stateDir, `.evolution_complete_${highestScoreTask.id}`);
+            const heartbeatContent = [
+                `## Evolution Task [ID: ${highestScoreTask.id}]`,
+                ``,
+                `**Pain Score**: ${highestScoreTask.score}`,
+                `**Source**: ${highestScoreTask.source}`,
+                `**Reason**: ${highestScoreTask.reason}`,
+                `**Trigger**: "${highestScoreTask.trigger_text_preview || 'N/A'}"`,
+                `**Queued At**: ${highestScoreTask.enqueued_at || nowIso}`,
+                `**Session ID**: ${highestScoreTask.session_id || 'N/A'}`,
+                `**Agent ID**: ${highestScoreTask.agent_id || 'main'}`,
+                ``,
+                `---`,
+                ``,
+                agentDef ? agentDef.systemPrompt : `Use 5 Whys methodology to diagnose the root cause of the pain signal above.`,
+                ``,
+                `---`,
+                ``,
+                `After completing the analysis:`,
+                `1. Write the resulting principle(s) to PRINCIPLES.md`,
+                `2. Mark the task complete by creating an empty file: ${markerFilePath}`,
+                `3. Replace this HEARTBEAT.md content with "HEARTBEAT_OK"`,
+            ].join('\n');
 
-            fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
-            queueChanged = false;
-
-            // Write diagnostician SOP + task into HEARTBEAT.md so the next
-            // heartbeat cycle picks it up and executes the reflection via LLM.
+            // Try to write HEARTBEAT.md FIRST
+            // Only mark task as in_progress after successful write to avoid stuck tasks
             try {
-                const agentDef = loadAgentDefinition('diagnostician');
-                const heartbeatPath = wctx.resolve('HEARTBEAT');
-                const markerFilePath = path.join(wctx.stateDir, `.evolution_complete_${highestScoreTask.id}`);
-                const heartbeatContent = [
-                    `## Evolution Task [ID: ${highestScoreTask.id}]`,
-                    ``,
-                    `**Pain Score**: ${highestScoreTask.score}`,
-                    `**Source**: ${highestScoreTask.source}`,
-                    `**Reason**: ${highestScoreTask.reason}`,
-                    `**Trigger**: "${highestScoreTask.trigger_text_preview || 'N/A'}"`,
-                    `**Queued At**: ${highestScoreTask.enqueued_at || nowIso}`,
-                    ``,
-                    `---`,
-                    ``,
-                    agentDef ? agentDef.systemPrompt : `Use 5 Whys methodology to diagnose the root cause of the pain signal above.`,
-                    ``,
-                    `---`,
-                    ``,
-                    `After completing the analysis:`,
-                    `1. Write the resulting principle(s) to PRINCIPLES.md`,
-                    `2. Mark the task complete by creating an empty file: ${markerFilePath}`,
-                    `3. Replace this HEARTBEAT.md content with "HEARTBEAT_OK"`,
-                ].join('\n');
                 fs.writeFileSync(heartbeatPath, heartbeatContent, 'utf8');
                 if (logger) logger.info(`[PD:EvolutionWorker] Wrote diagnostician task to HEARTBEAT.md for task ${highestScoreTask.id}`);
+
+                // HEARTBEAT write succeeded, now mark task as in_progress
+                highestScoreTask.task = taskDescription;
+                highestScoreTask.status = 'in_progress';
+                highestScoreTask.started_at = nowIso;
+                delete highestScoreTask.completed_at;
+                // Use placeholder instead of deleting - allows subagent_ended hook to match
+                // This fixes task_outcomes being empty for HEARTBEAT-triggered diagnostician runs
+                highestScoreTask.assigned_session_key = `heartbeat:diagnostician:${highestScoreTask.id}`;
+                queueChanged = true;
+
+                // Log to EvolutionLogger
+                evoLogger.logStarted({
+                    traceId: highestScoreTask.traceId || highestScoreTask.id,
+                    taskId: highestScoreTask.id,
+                });
+
+                // Update evolution_tasks table
+                wctx.trajectory?.updateEvolutionTask?.(highestScoreTask.id, {
+                    status: 'in_progress',
+                    startedAt: nowIso,
+                });
+
+                if (eventLog) {
+                    eventLog.recordEvolutionTask({
+                        taskId: highestScoreTask.id,
+                        taskType: highestScoreTask.source,
+                        reason: highestScoreTask.reason
+                    });
+                }
             } catch (heartbeatErr) {
-                if (logger) logger.warn(`[PD:EvolutionWorker] Failed to write HEARTBEAT.md: ${String(heartbeatErr)}`);
+                // HEARTBEAT write failed - keep task as pending for next cycle retry
+                if (logger) logger.error(`[PD:EvolutionWorker] Failed to write HEARTBEAT.md for task ${highestScoreTask.id}: ${String(heartbeatErr)}. Task will remain pending for next cycle.`);
+                SystemLogger.log(wctx.workspaceDir, 'HEARTBEAT_WRITE_FAILED', `Task ${highestScoreTask.id} HEARTBEAT write failed: ${String(heartbeatErr)}`);
             }
         }
 

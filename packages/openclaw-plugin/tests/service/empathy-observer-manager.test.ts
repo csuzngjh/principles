@@ -11,33 +11,55 @@ vi.mock('../../src/core/session-tracker.js', () => ({
 describe('EmpathyObserverManager', () => {
   let manager: EmpathyObserverManager;
 
-  const run = vi.fn();
-  const getSessionMessages = vi.fn();
+  let run: ReturnType<typeof vi.fn>;
+  let getSessionMessages: ReturnType<typeof vi.fn>;
   const logger = {
     info: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),
   };
 
-  const api: any = {
-    config: {
-      empathy_engine: {
-        enabled: true,
-      },
-    },
-    runtime: {
-      subagent: {
-        run,
-        getSessionMessages,
-      },
-    },
-    logger,
+  let api: any;
+
+  // Helper to create mock functions that pass the AsyncFunction check
+  const mockAsyncFn = <T extends (...args: any[]) => Promise<any>>(
+    impl: ReturnType<typeof vi.fn>
+  ) => {
+    const fn = vi.fn() as unknown as impl;
+    Object.defineProperty(fn, 'constructor', {
+      value: function AsyncFunction() {},
+      writable: true,
+      configurable: true,
+    });
+    return fn;
   };
 
   beforeEach(() => {
     vi.clearAllMocks();
     manager = EmpathyObserverManager.getInstance();
     (manager as any).sessionLocks.clear();
+
+    // Create mock functions that pass the AsyncFunction check
+    run = mockAsyncFn().mockResolvedValue({ runId: 'r1' });
+    getSessionMessages = mockAsyncFn().mockResolvedValue({
+      messages: [],
+      assistantTexts: [],
+    });
+
+    api = {
+      config: {
+        empathy_engine: {
+          enabled: true,
+        },
+      },
+      runtime: {
+        subagent: {
+          run,
+          getSessionMessages,
+        },
+      },
+      logger,
+    };
 
     vi.mocked(WorkspaceContext.fromHookContext).mockReturnValue({
       config: {

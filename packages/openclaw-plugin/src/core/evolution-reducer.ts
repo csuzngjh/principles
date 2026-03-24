@@ -29,6 +29,17 @@ export interface EvolutionReducer {
   deprecate(principleId: string, reason: string): void;
   rollbackPrinciple(principleId: string, reason: string): void;
   recordProbationFeedback(principleId: string, success: boolean): void;
+  /**
+   * Creates a new principle with generalized trigger/action from diagnostician.
+   * Called after diagnostician analysis to create principle directly.
+   */
+  createPrincipleFromDiagnosis(params: {
+    painId: string;
+    painType: 'tool_failure' | 'subagent_error' | 'user_frustration';
+    triggerPattern: string;
+    action: string;
+    source: string;
+  }): string | null;
   getStats(): {
     candidateCount: number;
     probationCount: number;
@@ -182,6 +193,95 @@ export class EvolutionReducerImpl implements EvolutionReducer {
     }
   }
 
+  /**
+   * Creates a new principle with generalized trigger/action from diagnostician.
+   * Called after diagnostician analysis to create principle directly (no intermediate overfitted principle).
+   * @returns the new principle ID, or null if creation failed
+   */
+  createPrincipleFromDiagnosis(params: {
+    painId: string;
+    painType: 'tool_failure' | 'subagent_error' | 'user_frustration';
+    triggerPattern: string;
+    action: string;
+    source: string;
+  }): string | null {
+    // Check blacklist first
+    if (this.isBlacklisted(params.painId, params.triggerPattern)) {
+      SystemLogger.log(
+        this.workspaceDir,
+        'PRINCIPLE_BLACKLISTED',
+        `Principle creation blocked by blacklist for trigger: "${params.triggerPattern.slice(0, 50)}..."`
+      );
+      return null;
+    }
+
+    // Check if a principle already exists for this painId
+    const existingPrinciple = [...this.principles.values()].find(
+      p => p.source.painId === params.painId
+    );
+
+    if (existingPrinciple) {
+      // Update existing principle instead of creating new one
+      existingPrinciple.trigger = params.triggerPattern;
+      existingPrinciple.action = params.action;
+      existingPrinciple.text = `When ${params.triggerPattern}, then ${params.action}.`;
+      existingPrinciple.version += 1;
+      SystemLogger.log(
+        this.workspaceDir,
+        'PRINCIPLE_UPDATED',
+        `Principle ${existingPrinciple.id} updated from diagnostician: "${params.triggerPattern.slice(0, 50)}..."`
+      );
+      return existingPrinciple.id;
+    }
+
+    // Create new principle with generalized content
+    const principleId = this.nextPrincipleId();
+    const now = new Date().toISOString();
+    const principle: Principle = {
+      id: principleId,
+      version: 1,
+      text: `When ${params.triggerPattern}, then ${params.action}.`,
+      source: {
+        painId: params.painId,
+        painType: params.painType,
+        timestamp: now,
+      },
+      trigger: params.triggerPattern,
+      action: params.action,
+      contextTags: [params.source],
+      validation: { successCount: 0, conflictCount: 0 },
+      status: 'candidate',
+      feedbackScore: 0,
+      usageCount: 0,
+      createdAt: now,
+    };
+
+    this.principles.set(principleId, principle);
+
+    this.emitSync({
+      ts: now,
+      type: 'candidate_created',
+      data: {
+        painId: principle.source.painId,
+        principleId,
+        trigger: params.triggerPattern,
+        action: params.action,
+        status: 'candidate',
+      },
+    });
+
+    // Auto-promote since it's already generalized
+    this.promote(principleId, 'diagnostician_generalized');
+
+    SystemLogger.log(
+      this.workspaceDir,
+      'PRINCIPLE_CREATED',
+      `Principle ${principleId} created from diagnostician: "${params.triggerPattern.slice(0, 50)}..."`
+    );
+
+    return principleId;
+  }
+
   getStats(): {
     candidateCount: number;
     probationCount: number;
@@ -312,7 +412,6 @@ export class EvolutionReducerImpl implements EvolutionReducer {
 
   private onPainDetected(data: PainDetectedData, eventTs: string): void {
     const trigger = String(data.reason ?? data.source ?? 'unknown trigger');
-    const action = `Prevent recurrence for: ${String(data.source ?? 'unknown')}`;
 
     // Defense in depth: protocol/system tokens must never become principles,
     // even if a pain_detected event is emitted from a new callsite in the future.
@@ -324,42 +423,25 @@ export class EvolutionReducerImpl implements EvolutionReducer {
       return;
     }
 
-    const principleId = this.nextPrincipleId();
-    const principle: Principle = {
-      id: principleId,
-      version: 1,
-      text: `When ${trigger}, then ${action}.`,
-      source: {
-        painId: data.painId,
-        painType: data.painType,
-        timestamp: eventTs,
-      },
-      trigger,
-      action,
-      contextTags: [data.source],
-      validation: { successCount: 0, conflictCount: 0 },
-      status: 'candidate',
-      feedbackScore: 0,
-      usageCount: 0,
-      createdAt: eventTs,
-    };
+    // NOTE: Principle creation is now deferred to diagnostician analysis.
+    // The diagnostician will read conversation context, generalize the trigger pattern,
+    // and create a principle via createPrincipleFromDiagnosis() after analysis.
 
-    this.principles.set(principleId, principle);
-
+    // Record pain for tracking purposes (but don't create principle yet)
     this.emitSync({
       ts: new Date().toISOString(),
-      type: 'candidate_created',
+      type: 'pain_recorded',
       data: {
-        painId: principle.source.painId,
-        principleId,
-        trigger,
-        action,
-        status: 'candidate',
+        painId: data.painId,
+        painType: data.painType,
+        source: data.source,
+        reason: data.reason,
+        sessionId: data.sessionId,
+        agentId: data.agentId,
       },
     });
 
-    this.promote(principleId, 'auto_from_pain');
-
+    // Circuit breaker logic remains for subagent errors
     if (data.painType === 'subagent_error') {
       const key = String(data.taskId ?? data.source ?? 'subagent');
       const next = this.failureStreak.get(key) ?? 0;
@@ -370,7 +452,7 @@ export class EvolutionReducerImpl implements EvolutionReducer {
           type: 'circuit_breaker_opened',
           data: {
             taskId: key,
-            painId: principle.source.painId,
+            painId: data.painId,
             failCount: next,
             reason: 'Max retries exceeded',
             requireHuman: true,

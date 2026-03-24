@@ -19,10 +19,11 @@ afterEach(() => {
 });
 
 describe('evolution loop e2e', () => {
-  it('runs pain -> probation -> status query -> rollback flow', () => {
+  it('runs pain -> create principle -> status query -> rollback flow', () => {
     const workspace = makeTempDir();
     const reducer = new EvolutionReducerImpl({ workspaceDir: workspace });
 
+    // Emit pain (no longer creates principle automatically)
     reducer.emitSync({
       ts: new Date().toISOString(),
       type: 'pain_detected',
@@ -32,6 +33,15 @@ describe('evolution loop e2e', () => {
         source: 'write',
         reason: 'write failed on risky file',
       },
+    });
+
+    // Create principle from diagnosis
+    const principleId = reducer.createPrincipleFromDiagnosis({
+      painId: 'pain-e2e-1',
+      painType: 'tool_failure',
+      triggerPattern: 'file write operation fails on risky files',
+      action: 'verify file permissions before writing',
+      source: 'write',
     });
 
     const p = reducer.getProbationPrinciples()[0];

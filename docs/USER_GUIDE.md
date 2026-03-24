@@ -104,7 +104,26 @@ If you prefer a graphical interface, you can access **Principles Console** in yo
 
 1. Make sure OpenClaw Gateway is running
 2. Open in your browser: `http://localhost:18789/plugins/principles/`
-3. You'll see a three-panel console interface
+3. Enter your Gateway Token to login
+
+### How to Get Your Token?
+
+**Method 1: Check configuration file**
+```bash
+# SSH into the server running OpenClaw Gateway
+cat ~/.openclaw/openclaw.json
+# Copy the value of gateway.auth.token
+```
+
+**Method 2: Use command line**
+```bash
+openclaw config get gateway.auth.token
+```
+
+**Method 3: Pass via URL parameter**
+```
+http://localhost:18789/plugins/principles/?token=your_token_here
+```
 
 ### Console Features
 
@@ -120,6 +139,12 @@ If you prefer a graphical interface, you can access **Principles Console** in yo
 - **Detail View**: Expand to see full "bad attempt → user correction" comparison
 - **Filters**: Filter by status, quality score, date, failure mode
 
+#### 🔄 Evolution Tracking — **NEW**
+- **Timeline View**: See the complete evolution flow from pain detection to principle generation
+- **Task Status**: View pending, in-progress, completed, and failed evolution tasks
+- **Detailed Events**: Chinese summaries and technical logs for each evolution stage
+- **Statistics Overview**: Evolution success rate and efficiency metrics
+
 #### 🧠 Thinking Models
 - **Model List**: View 10 core thinking models and their usage frequency
 - **Scenario Analysis**: Understand what triggers each model
@@ -130,6 +155,7 @@ If you prefer a graphical interface, you can access **Principles Console** in yo
 - **Visualization**: See system status at a glance, more intuitive than CLI
 - **Batch Review**: Process multiple correction samples at once
 - **Trend Analysis**: Observe AI's evolution trajectory, find improvement opportunities
+- **Evolution Tracking**: Real-time visibility into whether AI is actually evolving - complete pipeline from pain signal to principle generation
 
 ---
 

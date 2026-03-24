@@ -1,13 +1,184 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { BrowserRouter, NavLink, Navigate, Route, Routes } from 'react-router-dom';
-import { api } from './api';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { BrowserRouter, NavLink, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
+import { api, getGatewayToken, setGatewayToken, clearGatewayToken } from './api';
 import type {
   OverviewResponse,
   SampleDetailResponse,
   SamplesResponse,
   ThinkingModelDetailResponse,
   ThinkingOverviewResponse,
+  EvolutionTasksResponse,
+  EvolutionTraceResponse,
+  EvolutionStatsResponse,
 } from './types';
+
+// Auth Context
+interface AuthContextType {
+  isAuthenticated: boolean;
+  token: string | null;
+  login: (token: string) => Promise<boolean>;
+  logout: () => void;
+}
+
+const AuthContext = createContext<AuthContextType | null>(null);
+
+function useAuth() {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within AuthProvider');
+  }
+  return context;
+}
+
+function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [token, setTokenState] = useState<string | null>(() => getGatewayToken());
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isChecking, setIsChecking] = useState(true);
+
+  useEffect(() => {
+    // Check if token is valid
+    const checkAuth = async () => {
+      const savedToken = getGatewayToken();
+      if (savedToken) {
+        try {
+          // Try to fetch overview to validate token
+          await api.getOverview();
+          setIsAuthenticated(true);
+        } catch {
+          setIsAuthenticated(false);
+        }
+      }
+      setIsChecking(false);
+    };
+    checkAuth();
+  }, []);
+
+  const login = useCallback(async (newToken: string): Promise<boolean> => {
+    setGatewayToken(newToken);
+    setTokenState(newToken);
+    try {
+      await api.getOverview();
+      setIsAuthenticated(true);
+      return true;
+    } catch {
+      clearGatewayToken();
+      setTokenState(null);
+      setIsAuthenticated(false);
+      return false;
+    }
+  }, []);
+
+  const logout = useCallback(() => {
+    clearGatewayToken();
+    setTokenState(null);
+    setIsAuthenticated(false);
+  }, []);
+
+  if (isChecking) {
+    return (
+      <div className="auth-checking">
+        <div className="auth-checking-content">
+          <div className="spinner"></div>
+          <span>正在验证身份...</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <AuthContext.Provider value={{ isAuthenticated, token, login, logout }}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+// Login Page
+function LoginPage() {
+  const [token, setToken] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const { login } = useAuth();
+  const navigate = useNavigate();
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!token.trim()) {
+      setError('请输入 Gateway Token');
+      return;
+    }
+    setLoading(true);
+    setError('');
+    const success = await login(token.trim());
+    setLoading(false);
+    if (success) {
+      navigate('/overview');
+    } else {
+      setError('Token 无效或已过期，请检查后重试');
+    }
+  };
+
+  return (
+    <div className="login-page">
+      <div className="login-container">
+        <div className="login-header">
+          <div className="login-logo">
+            <span className="logo-icon">◈</span>
+            <h1>Principles Console</h1>
+          </div>
+          <p className="login-subtitle">AI Agent 进化流程监控平台</p>
+        </div>
+
+        <form className="login-form" onSubmit={handleSubmit}>
+          <div className="form-group">
+            <label htmlFor="token">Gateway Token</label>
+            <input
+              id="token"
+              type="password"
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              placeholder="请输入您的 Gateway Token"
+              autoComplete="off"
+            />
+            <span className="form-hint">
+              在服务器上运行 <code>openclaw config get gateway.auth.token</code> 获取 Token
+            </span>
+          </div>
+
+          {error && <div className="form-error">{error}</div>}
+
+          <button type="submit" className="login-button" disabled={loading}>
+            {loading ? (
+              <>
+                <span className="spinner-small"></span>
+                正在验证...
+              </>
+            ) : (
+              '登 录'
+            )}
+          </button>
+        </form>
+
+        <div className="login-footer">
+          <h4>如何获取 Token？</h4>
+          <ol>
+            <li>SSH 登录到运行 OpenClaw Gateway 的服务器</li>
+            <li>运行命令查看配置：<code>cat ~/.openclaw/openclaw.json</code></li>
+            <li>复制 <code>gateway.auth.token</code> 的值</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Protected Route
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const { isAuthenticated } = useAuth();
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+  return <>{children}</>;
+}
 
 function formatPercent(value: number): string {
   return `${(value * 100).toFixed(1)}%`;
@@ -19,22 +190,47 @@ function formatDate(value: string | null): string {
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
+  const { logout, token } = useAuth();
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
+          <div className="brand-logo">
+            <span className="logo-icon">◈</span>
+          </div>
           <span className="eyebrow">Principles Console</span>
-          <h1>P2</h1>
-          <p>Plugin-owned control UI running inside OpenClaw Gateway.</p>
+          <h1>进化控制台</h1>
+          <p>AI Agent 自主进化监控平台</p>
         </div>
         <nav className="nav">
-          <NavLink to="/overview">Overview</NavLink>
-          <NavLink to="/samples">Samples</NavLink>
-          <NavLink to="/thinking-models">Thinking Models</NavLink>
+          <NavLink to="/overview">
+            <span className="nav-icon">📊</span>
+            <span>概览</span>
+          </NavLink>
+          <NavLink to="/evolution">
+            <span className="nav-icon">🔄</span>
+            <span>进化追踪</span>
+          </NavLink>
+          <NavLink to="/samples">
+            <span className="nav-icon">📝</span>
+            <span>样本审核</span>
+          </NavLink>
+          <NavLink to="/thinking-models">
+            <span className="nav-icon">🧠</span>
+            <span>思维模型</span>
+          </NavLink>
         </nav>
-        <a className="export-link" href={api.exportCorrections('redacted')}>
-          Export Approved Corrections
-        </a>
+        <div className="sidebar-footer">
+          <a className="export-link" href={api.exportCorrections('redacted')}>
+            <span className="nav-icon">📥</span>
+            <span>导出样本</span>
+          </a>
+          <button className="logout-button" onClick={logout}>
+            <span className="nav-icon">🚪</span>
+            <span>退出登录</span>
+          </button>
+        </div>
       </aside>
       <main className="content">{children}</main>
     </div>
@@ -418,17 +614,225 @@ function ThinkingModelsPage() {
   );
 }
 
+function formatDuration(ms: number | null): string {
+  if (ms === null) return 'N/A';
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${(ms / 60000).toFixed(1)}min`;
+}
+
+const STAGE_COLORS: Record<string, string> = {
+  pain_detected: '#ef4444',
+  queued: '#f59e0b',
+  started: '#3b82f6',
+  analyzing: '#8b5cf6',
+  principle_generated: '#22c55e',
+  completed: '#22c55e',
+};
+
+const STAGE_LABELS: Record<string, string> = {
+  pain_detected: '痛点检测',
+  queued: '已入队',
+  started: '开始处理',
+  analyzing: '分析中',
+  principle_generated: '原则生成',
+  completed: '已完成',
+};
+
+function EvolutionPage() {
+  const [tasks, setTasks] = useState<EvolutionTasksResponse | null>(null);
+  const [stats, setStats] = useState<EvolutionStatsResponse | null>(null);
+  const [trace, setTrace] = useState<EvolutionTraceResponse | null>(null);
+  const [selectedId, setSelectedId] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [error, setError] = useState('');
+
+  const search = useMemo(() => {
+    const next = new URLSearchParams();
+    if (statusFilter !== 'all') next.set('status', statusFilter);
+    next.set('page', '1');
+    next.set('pageSize', '20');
+    return next;
+  }, [statusFilter]);
+
+  useEffect(() => {
+    Promise.all([
+      api.getEvolutionTasks(search),
+      api.getEvolutionStats(),
+    ]).then(([tasksData, statsData]) => {
+      setTasks(tasksData);
+      setStats(statsData);
+      setError('');
+    }).catch((err) => setError(String(err)));
+  }, [search]);
+
+  useEffect(() => {
+    if (!selectedId) {
+      setTrace(null);
+      return;
+    }
+    api.getEvolutionTrace(selectedId).then(setTrace).catch((err) => setError(String(err)));
+  }, [selectedId]);
+
+  if (error) return <ErrorState error={error} />;
+  if (!tasks || !stats) return <Loading />;
+
+  return (
+    <div className="page">
+      <header className="page-header">
+        <div>
+          <span className="eyebrow">Evolution</span>
+          <h2>进化流程追踪 - 从痛点到原则生成</h2>
+        </div>
+        <div className="pill-row">
+          <span className="badge" style={{ background: '#f59e0b' }}>待处理 {stats.pending}</span>
+          <span className="badge" style={{ background: '#3b82f6' }}>处理中 {stats.inProgress}</span>
+          <span className="badge" style={{ background: '#22c55e' }}>已完成 {stats.completed}</span>
+          <span className="badge" style={{ background: '#ef4444' }}>失败 {stats.failed}</span>
+        </div>
+      </header>
+
+      <div className="grid two-columns wide-right">
+        <section className="panel">
+          <div className="filters">
+            <label>
+              状态筛选
+              <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+                <option value="all">全部</option>
+                <option value="pending">待处理</option>
+                <option value="in_progress">处理中</option>
+                <option value="completed">已完成</option>
+              </select>
+            </label>
+          </div>
+
+          <div className="list-table">
+            {tasks.items.map((task) => (
+              <button
+                className={`table-row ${selectedId === task.traceId ? 'active' : ''}`}
+                key={task.taskId}
+                onClick={() => setSelectedId(task.traceId)}
+              >
+                <div>
+                  <strong style={{ color: STAGE_COLORS[task.status] || '#6b7280' }}>{task.taskId}</strong>
+                  <span>{task.source}</span>
+                </div>
+                <div>
+                  <span className="badge" style={{ background: STAGE_COLORS[task.status] || '#6b7280' }}>
+                    {task.status}
+                  </span>
+                  <span>分数: {task.score}</span>
+                </div>
+                <div className="align-right">
+                  <strong>{formatDuration(task.duration)}</strong>
+                  <span>{task.eventCount} 事件</span>
+                </div>
+              </button>
+            ))}
+          </div>
+
+          <div className="pagination">
+            共 {tasks.pagination.total} 条
+          </div>
+        </section>
+
+        <section className="panel">
+          {!selectedId && (
+            <div className="muted">选择一个任务查看进化时间线详情</div>
+          )}
+          {trace && (
+            <div className="detail-stack">
+              <div className="detail-header">
+                <div>
+                  <h3>任务 {trace.task.taskId}</h3>
+                  <p>来源: {trace.task.source} | 分数: {trace.task.score}</p>
+                  <p style={{ fontSize: '0.85em', color: '#6b7280' }}>{trace.task.reason}</p>
+                </div>
+                <span className="badge" style={{ background: STAGE_COLORS[trace.task.status] || '#6b7280' }}>
+                  {trace.task.status}
+                </span>
+              </div>
+
+              <article>
+                <h4>进化时间线</h4>
+                <div className="timeline">
+                  {trace.timeline.map((item, index) => (
+                    <div className="timeline-item" key={`${item.stage}-${index}`}>
+                      <div
+                        className="timeline-marker"
+                        style={{ background: item.stageColor }}
+                      />
+                      <div className="timeline-content">
+                        <div className="timeline-time">{formatDate(item.timestamp)}</div>
+                        <div className="timeline-stage" style={{ color: item.stageColor }}>
+                          {item.stageLabel}
+                        </div>
+                        <div className="timeline-summary">{item.summary || item.message}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </article>
+
+              {trace.events.length > 0 && (
+                <article>
+                  <h4>详细事件 ({trace.events.length})</h4>
+                  <div className="stack">
+                    {trace.events.slice(0, 10).map((event) => (
+                      <div className="row-card vertical" key={event.id}>
+                        <div>
+                          <strong style={{ color: event.stageColor }}>{event.stageLabel}</strong>
+                          <span>{formatDate(event.createdAt)}</span>
+                        </div>
+                        <div style={{ fontSize: '0.9em', color: '#374151' }}>
+                          {event.summary || event.message}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </article>
+              )}
+            </div>
+          )}
+        </section>
+      </div>
+    </div>
+  );
+}
+
+// Main App Component
+function AppContent() {
+  const { isAuthenticated } = useAuth();
+
+  if (!isAuthenticated) {
+    return (
+      <Routes>
+        <Route path="*" element={<Navigate to="/login" replace />} />
+        <Route path="/login" element={<LoginPage />} />
+      </Routes>
+    );
+  }
+
+  return (
+    <Shell>
+      <Routes>
+        <Route path="/" element={<Navigate to="/overview" replace />} />
+        <Route path="/login" element={<Navigate to="/overview" replace />} />
+        <Route path="/overview" element={<OverviewPage />} />
+        <Route path="/evolution" element={<EvolutionPage />} />
+        <Route path="/samples" element={<SamplesPage />} />
+        <Route path="/thinking-models" element={<ThinkingModelsPage />} />
+      </Routes>
+    </Shell>
+  );
+}
+
 export function App() {
   return (
     <BrowserRouter basename="/plugins/principles">
-      <Shell>
-        <Routes>
-          <Route path="/" element={<Navigate to="/overview" replace />} />
-          <Route path="/overview" element={<OverviewPage />} />
-          <Route path="/samples" element={<SamplesPage />} />
-          <Route path="/thinking-models" element={<ThinkingModelsPage />} />
-        </Routes>
-      </Shell>
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
     </BrowserRouter>
   );
 }
