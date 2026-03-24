@@ -65,6 +65,9 @@ export interface TrustSettings {
     limits: {
         stage_2_max_lines: number;
         stage_3_max_lines: number;
+        stage_2_max_percentage: number;
+        stage_3_max_percentage: number;
+        min_lines_fallback: number;
     };
     history_limit?: number;
 }
@@ -213,6 +216,9 @@ export const DEFAULT_SETTINGS: PainSettings = {
         limits: {
             stage_2_max_lines: 50, // Was 10. 10 lines is barely enough to fix a function signature.
             stage_3_max_lines: 300, // Was 100. Allow substantial feature implementation.
+            stage_2_max_percentage: 10, // Percentage-based threshold for Stage 2
+            stage_3_max_percentage: 15, // Percentage-based threshold for Stage 3
+            min_lines_fallback: 20, // Minimum threshold even for small files
         },
         history_limit: 50
     },

@@ -4,7 +4,7 @@ import { isRisky, normalizePath, planStatus as getPlanStatus } from '../utils/io
 import { matchesAnyPattern } from '../utils/glob-match.js';
 import { normalizeProfile } from '../core/profile.js';
 import { trackBlock, hasRecentThinking, getSession } from '../core/session-tracker.js';
-import { assessRiskLevel, estimateLineChanges } from '../core/risk-calculator.js';
+import { assessRiskLevel, estimateLineChanges, getTargetFileLineCount, calculatePercentageThreshold } from '../core/risk-calculator.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { checkEvolutionGate } from '../core/evolution-engine.js';
 import { EventLogService } from '../core/event-log.js';
@@ -419,7 +419,13 @@ GFI: ${currentGfi}/100
     const trustScore = trustEngine.getScore();
     const stage = trustEngine.getStage();
     const trustSettings = wctx.config.get('trust') || {
-        limits: { stage_2_max_lines: 50, stage_3_max_lines: 300 }
+        limits: { 
+            stage_2_max_lines: 50, 
+            stage_3_max_lines: 300,
+            stage_2_max_percentage: 10,
+            stage_3_max_percentage: 15,
+            min_lines_fallback: 20,
+        }
     };
 
     const riskLevel = assessRiskLevel(relPath, { toolName: event.toolName, params: event.params }, profile.risk_paths);
@@ -512,9 +518,29 @@ GFI: ${currentGfi}/100
         if (risky) {
             return block(relPath, `Stage 2 agents are not authorized to modify risk paths.`, wctx, event.toolName, logger, ctx.sessionId);
         }
-        const stage2Limit = trustSettings.limits?.stage_2_max_lines ?? 50;
-        if (lineChanges > stage2Limit) {
-            return block(relPath, `Modification too large (${lineChanges} lines) for Stage 2. Max allowed is ${stage2Limit}.`, wctx, event.toolName, logger, ctx.sessionId);
+        
+        // Percentage-based threshold calculation
+        const targetAbsolutePath = typeof filePath === 'string' ? path.join(ctx.workspaceDir, filePath) : null;
+        const targetLineCount = targetAbsolutePath ? getTargetFileLineCount(targetAbsolutePath) : null;
+        const minLinesFallback = trustSettings.limits?.min_lines_fallback ?? 20;
+        const stage2MaxPercentage = trustSettings.limits?.stage_2_max_percentage ?? 10;
+        const stage2FixedLimit = trustSettings.limits?.stage_2_max_lines ?? 50;
+        
+        let effectiveLimit: number;
+        let limitType: 'percentage' | 'fixed';
+        let actualPercentage: number | null = null;
+        
+        if (targetLineCount !== null && targetLineCount > 0) {
+            effectiveLimit = calculatePercentageThreshold(targetLineCount, stage2MaxPercentage, minLinesFallback);
+            actualPercentage = Math.round((lineChanges / targetLineCount) * 100);
+            limitType = 'percentage';
+        } else {
+            effectiveLimit = stage2FixedLimit;
+            limitType = 'fixed';
+        }
+        
+        if (lineChanges > effectiveLimit) {
+            return block(relPath, buildLineLimitReason(lineChanges, effectiveLimit, limitType, targetLineCount, actualPercentage, 2), wctx, event.toolName, logger, ctx.sessionId);
         }
     }
 
@@ -526,9 +552,29 @@ GFI: ${currentGfi}/100
                 return block(relPath, `No READY plan found. Stage 3 requires a plan for risk path modifications.`, wctx, event.toolName, logger, ctx.sessionId);
             }
         }
-        const stage3Limit = trustSettings.limits?.stage_3_max_lines ?? 300;
-        if (lineChanges > stage3Limit) {
-            return block(relPath, `Modification too large (${lineChanges} lines) for Stage 3. Max allowed is ${stage3Limit}.`, wctx, event.toolName, logger, ctx.sessionId);
+        
+        // Percentage-based threshold calculation
+        const targetAbsolutePath = typeof filePath === 'string' ? path.join(ctx.workspaceDir, filePath) : null;
+        const targetLineCount = targetAbsolutePath ? getTargetFileLineCount(targetAbsolutePath) : null;
+        const minLinesFallback = trustSettings.limits?.min_lines_fallback ?? 20;
+        const stage3MaxPercentage = trustSettings.limits?.stage_3_max_percentage ?? 15;
+        const stage3FixedLimit = trustSettings.limits?.stage_3_max_lines ?? 300;
+        
+        let effectiveLimit: number;
+        let limitType: 'percentage' | 'fixed';
+        let actualPercentage: number | null = null;
+        
+        if (targetLineCount !== null && targetLineCount > 0) {
+            effectiveLimit = calculatePercentageThreshold(targetLineCount, stage3MaxPercentage, minLinesFallback);
+            actualPercentage = Math.round((lineChanges / targetLineCount) * 100);
+            limitType = 'percentage';
+        } else {
+            effectiveLimit = stage3FixedLimit;
+            limitType = 'fixed';
+        }
+        
+        if (lineChanges > effectiveLimit) {
+            return block(relPath, buildLineLimitReason(lineChanges, effectiveLimit, limitType, targetLineCount, actualPercentage, 3), wctx, event.toolName, logger, ctx.sessionId);
         }
     }
 
@@ -581,6 +627,27 @@ GFI: ${currentGfi}/100
   }
 }
 
+/**
+ * Build a detailed reason message for line limit blocks.
+ */
+function buildLineLimitReason(
+  lineChanges: number,
+  effectiveLimit: number,
+  limitType: 'percentage' | 'fixed',
+  targetLineCount: number | null,
+  actualPercentage: number | null,
+  stage: number
+): string {
+  if (limitType === 'percentage' && targetLineCount !== null && actualPercentage !== null) {
+    return `Modification too large: ${lineChanges} lines (${actualPercentage}% of ${targetLineCount} lines). ` +
+           `Stage ${stage} limit is ${effectiveLimit} lines (${limitType}). ` +
+           `Threshold calculation: min(${targetLineCount} × ${actualPercentage}%, ${effectiveLimit} lines).`;
+  } else {
+    return `Modification too large: ${lineChanges} lines. ` +
+           `Stage ${stage} limit is ${effectiveLimit} lines (fixed threshold, target file not found).`;
+  }
+}
+
 function block(
   filePath: string,
   reason: string,
@@ -624,7 +691,30 @@ function block(
 
   return {
     block: true,
-    blockReason: `[Principles Disciple] Security Gate Blocked this action.\nFile: ${filePath}\nReason: ${reason}\n\nHint: You may need a READY plan or a higher trust score to perform this action.`,
+    blockReason: `[Principles Disciple] Security Gate Blocked this action.
+File: ${filePath}
+Reason: ${reason}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 How to unblock this operation:
+
+1. Use the plan-script skill to create a PLAN.md:
+   → Invoke: skill:plan-script
+
+2. Fill in the plan with:
+   - Target Files: ${filePath}
+   - Steps: What you want to do (be specific)
+   - Metrics: How to verify success
+   - Active Mental Models: Select 2 relevant models from .principles/THINKING_OS.md
+   - Rollback: How to restore if it fails
+
+3. After completing the plan, set STATUS: READY in PLAN.md
+
+4. Retry the operation
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+This is a mandatory security gate. The operation was blocked because the modification exceeds the allowed threshold for your current trust stage.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
   };
 }
 
