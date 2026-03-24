@@ -13,7 +13,7 @@ const TASK_OUTCOME_RETRY_DELAY_MS = 250;
 const TASK_OUTCOME_MAX_RETRIES = 3;
 const DIAGNOSTICIAN_SESSION_PREFIX = 'agent:diagnostician:';
 const completionRetryCounts = new Map<string, { count: number; expires: number }>();
-type HookLogger = Pick<PluginLogger, 'warn' | 'error'>;
+type HookLogger = Pick<PluginLogger, 'info' | 'warn' | 'error'>;
 
 // Cleanup expired retry entries periodically
 function cleanupExpiredRetryEntries(): void {
@@ -179,13 +179,18 @@ export async function handleSubagentEnded(
 
     const config = wctx.config;
 
-    if (outcome === 'error' || outcome === 'timeout') {
+    // ── Outcome-based Trust Score and Pain Signal handling ──
+    // OpenClaw v2026.3.23 fixes: timeout may be false positive (fast-finishing workers)
+    // Only penalize actual errors, not timeout/killed/reset
+    
+    if (outcome === 'error') {
+        // Only actual errors trigger penalty
         const scoreSettings = config.get('scores');
-        const score = outcome === 'error' ? scoreSettings.subagent_error_penalty : scoreSettings.subagent_timeout_penalty;
-        const reason = `Subagent session ${targetSessionKey} ended with outcome: ${outcome}`;
+        const score = scoreSettings.subagent_error_penalty;
+        const reason = `Subagent session ${targetSessionKey} ended with error`;
 
         writePainFlag(workspaceDir, {
-            source: `subagent_${outcome}`,
+            source: `subagent_error`,
             score: String(score),
             time: new Date().toISOString(),
             reason,
@@ -195,12 +200,24 @@ export async function handleSubagentEnded(
         });
 
         emitSubagentPainEvent(wctx, {
-            source: `subagent_${outcome}`,
+            source: `subagent_error`,
             reason,
             score,
             sessionId: ctx.sessionId,
             agentId: ctx.agentId || extractAgentIdFromSessionKey(targetSessionKey),
         }, logger);
+    }
+
+    if (outcome === 'timeout') {
+        // OpenClaw v2026.3.23 fix: timeout may be false positive
+        // Fast-finishing workers are no longer incorrectly reported as timed out
+        // Do not penalize - the task may have actually succeeded
+        logger.warn(`[PD:Subagent] Session ${targetSessionKey} timed out - not penalizing (OpenClaw fix applied)`);
+    }
+
+    if (outcome === 'killed' || outcome === 'reset') {
+        // User-initiated termination or system reset - not an agent failure
+        logger.info(`[PD:Subagent] Session ${targetSessionKey} ended with ${outcome} - no penalty (user/system action)`);
     }
 
     if (outcome === 'ok' || outcome === 'deleted') {
@@ -227,13 +244,43 @@ export async function handleSubagentEnded(
         const queue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
         let completedTaskId: string | null = null;
 
-        const matchedTask = queue.find((task: any) =>
-            task?.status === 'in_progress'
-            && typeof task?.assigned_session_key === 'string'
-            && task.assigned_session_key === targetSessionKey
-        );
+        // Improved matching logic: support both direct session key match and HEARTBEAT placeholder match
+        // This fixes task_outcomes being empty for HEARTBEAT-triggered diagnostician runs
+        const matchedTask = queue.find((task: any) => {
+            if (task?.status !== 'in_progress') return false;
+            
+            const taskSessionKey = task?.assigned_session_key;
+            
+            // 1. Exact match: direct session key assignment
+            if (typeof taskSessionKey === 'string' && taskSessionKey === targetSessionKey) {
+                return true;
+            }
+            
+            // 2. HEARTBEAT placeholder match: for diagnostician sessions
+            // Tasks started via HEARTBEAT have placeholder like "heartbeat:diagnostician:{taskId}"
+            if (isDiagnosticianSession(targetSessionKey)) {
+                // Match tasks with HEARTBEAT placeholder
+                if (typeof taskSessionKey === 'string' && taskSessionKey.startsWith('heartbeat:diagnostician')) {
+                    return true;
+                }
+                // Backward compatibility: match tasks with no assigned_session_key (legacy behavior)
+                if (taskSessionKey === undefined || taskSessionKey === null) {
+                    return true;
+                }
+            }
+            
+            return false;
+        });
 
         if (matchedTask) {
+            // Enhanced observability: log match type for debugging
+            const matchType = matchedTask.assigned_session_key === targetSessionKey 
+                ? 'exact' 
+                : matchedTask.assigned_session_key?.startsWith('heartbeat:diagnostician')
+                    ? 'heartbeat_placeholder'
+                    : 'legacy_fallback';
+            logger.info(`[PD:Subagent] Matched session ${targetSessionKey} to task ${matchedTask.id} (match_type: ${matchType})`);
+            
             matchedTask.status = 'completed';
             matchedTask.completed_at = new Date().toISOString();
             delete matchedTask.assigned_session_key;
