@@ -6,7 +6,7 @@
  * to the actual plugin location where OpenClaw Gateway loads them.
  */
 
-import { copyFileSync, cpSync, existsSync, rmSync } from 'fs';
+import { copyFileSync, cpSync, existsSync, rmSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
@@ -27,6 +27,38 @@ const SYNC_ITEMS = [
     'openclaw.plugin.json',
     'package.json',
 ];
+
+/**
+ * Extract version from package.json
+ */
+function getVersion(dir) {
+    const pkgPath = join(dir, 'package.json');
+    if (!existsSync(pkgPath)) return null;
+    try {
+        const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+        return pkg.version;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Check if build is up-to-date
+ */
+function checkBuild() {
+    const distDir = join(SOURCE_DIR, 'dist');
+    if (!existsSync(distDir)) {
+        console.error('❌ dist/ directory not found. Run `npm run build` first.');
+        process.exit(1);
+    }
+    
+    // Check if dist/index.js exists
+    const indexJs = join(distDir, 'index.js');
+    if (!existsSync(indexJs)) {
+        console.error('❌ dist/index.js not found. Run `npm run build` first.');
+        process.exit(1);
+    }
+}
 
 function syncSkills() {
     // Determine language (default to zh)
@@ -76,12 +108,30 @@ function syncItem(item) {
 function main() {
     console.log('🔄 Syncing plugin to OpenClaw installation...');
 
-    if (!existsSync(INSTALL_DIR)) {
+    // Check build
+    checkBuild();
+
+    // Get source version
+    const sourceVersion = getVersion(SOURCE_DIR);
+    if (!sourceVersion) {
+        console.error('❌ Cannot determine source version. Check package.json.');
+        process.exit(1);
+    }
+    console.log(`📋 Source version: v${sourceVersion}`);
+
+    // Check installed version (if exists)
+    if (existsSync(INSTALL_DIR)) {
+        const installedVersion = getVersion(INSTALL_DIR);
+        if (installedVersion && installedVersion !== sourceVersion) {
+            console.log(`⚠️  Installed version: v${installedVersion} (will be updated)`);
+        }
+    } else {
         console.error(`❌ Install directory not found: ${INSTALL_DIR}`);
         console.error('💡 Make sure OpenClaw is installed and the plugin directory exists.');
         process.exit(1);
     }
 
+    console.log('');
     console.log('📦 Syncing items:');
 
     // Sync all items
@@ -106,10 +156,23 @@ function main() {
         console.error(`   cd ${INSTALL_DIR} && npm install --production`);
     }
 
+    // Verify installation
+    const installedVersion = getVersion(INSTALL_DIR);
+    if (installedVersion !== sourceVersion) {
+        console.error('');
+        console.error('❌ VERSION MISMATCH after sync!');
+        console.error(`   Expected: v${sourceVersion}`);
+        console.error(`   Got: v${installedVersion}`);
+        process.exit(1);
+    }
+
     console.log('');
     console.log('✅ Plugin synced successfully');
+    console.log(`   Version: v${sourceVersion}`);
     console.log(`   Source: ${SOURCE_DIR}`);
     console.log(`   Target: ${INSTALL_DIR}`);
+    console.log('');
+    console.log('💡 Restart OpenClaw Gateway to load the new version.');
 }
 
 main();
