@@ -11,11 +11,28 @@ import type {
 } from './types';
 
 const GATEWAY_TOKEN_KEY = 'pd_gateway_token';
+const OPENCLAW_SETTINGS_KEY = 'openclaw.control.settings.v1';
+
+/**
+ * 从 OpenClaw 主控面板的设置中读取 token
+ */
+function getOpenClawToken(): string | null {
+  try {
+    const raw = localStorage.getItem(OPENCLAW_SETTINGS_KEY);
+    if (!raw) return null;
+    const settings = JSON.parse(raw);
+    // OpenClaw 存储 token 在 settings.token 或 settings.gatewayUrl 的 hash 中
+    return settings?.token || null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * 初始化 Gateway Token
  * 1. 优先从 URL 参数 ?token=xxx 获取
- * 2. 其次从 localStorage 获取
+ * 2. 其次从 PD 自己的 localStorage 获取
+ * 3. 最后从 OpenClaw 主控面板的设置中获取（共享认证）
  */
 export function initGatewayToken(): string | null {
   // 1. 尝试从 URL 参数获取
@@ -32,15 +49,29 @@ export function initGatewayToken(): string | null {
     return urlToken;
   }
 
-  // 2. 从 localStorage 获取
-  return localStorage.getItem(GATEWAY_TOKEN_KEY);
+  // 2. 从 PD 自己的 localStorage 获取
+  const pdToken = localStorage.getItem(GATEWAY_TOKEN_KEY);
+  if (pdToken) return pdToken;
+
+  // 3. 尝试从 OpenClaw 主控面板共享
+  const openclawToken = getOpenClawToken();
+  if (openclawToken) {
+    // 缓存到 PD 的 localStorage
+    localStorage.setItem(GATEWAY_TOKEN_KEY, openclawToken);
+    return openclawToken;
+  }
+
+  return null;
 }
 
 /**
  * 获取当前 Gateway Token
+ * 优先从 PD localStorage，其次从 OpenClaw 共享
  */
 export function getGatewayToken(): string | null {
-  return localStorage.getItem(GATEWAY_TOKEN_KEY);
+  const pdToken = localStorage.getItem(GATEWAY_TOKEN_KEY);
+  if (pdToken) return pdToken;
+  return getOpenClawToken();
 }
 
 /**

@@ -96,6 +96,12 @@ function handleApiRoute(
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<boolean> | boolean {
+  // Check authentication for API routes
+  if (!validateGatewayAuth(req)) {
+    json(res, 401, { error: 'unauthorized', message: 'Valid Gateway token required.' });
+    return true;
+  }
+
   const service = createService(api);
   const url = new URL(req.url || pathname, 'http://127.0.0.1');
   const method = (req.method || 'GET').toUpperCase();
@@ -296,10 +302,100 @@ function handleApiRoute(
   return true;
 }
 
+function getGatewayToken(): string | null {
+  try {
+    const configPath = path.join(process.env.HOME || '', '.openclaw', 'openclaw.json');
+    if (!fs.existsSync(configPath)) return null;
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    return config?.gateway?.auth?.token || null;
+  } catch {
+    return null;
+  }
+}
+
+function validateGatewayAuth(req: IncomingMessage): boolean {
+  const gatewayToken = getGatewayToken();
+  if (!gatewayToken) {
+    // No token configured, allow all requests
+    return true;
+  }
+  const authHeader = req.headers['authorization'] || '';
+  const tokenMatch = authHeader.match(/^Bearer\s+(.+)$/i);
+  const providedToken = tokenMatch?.[1];
+  return providedToken === gatewayToken;
+}
+
+/**
+ * Create routes for Principles Console.
+ * Returns an array of routes:
+ * 1. Static files route (no auth required for HTML/CSS/JS)
+ * 2. API route (gateway auth required)
+ */
+export function createPrinciplesConsoleRoutes(api: OpenClawPluginApi): OpenClawPluginHttpRouteParams[] {
+  // Route 1: Static files (HTML, CSS, JS) - no auth check
+  const staticRoute: OpenClawPluginHttpRouteParams = {
+    path: ROUTE_PREFIX,
+    auth: 'plugin',
+    match: 'prefix',
+    async handler(req, res) {
+      const url = new URL(req.url || ROUTE_PREFIX, 'http://127.0.0.1');
+      const pathname = url.pathname;
+      const method = (req.method || 'GET').toUpperCase();
+
+      // Skip API routes - they'll be handled by the API route
+      if (pathname.startsWith(API_PREFIX)) {
+        return false; // Let the API route handle this
+      }
+
+      // Serve assets
+      if (pathname.startsWith(ASSETS_PREFIX)) {
+        if (method !== 'GET' && method !== 'HEAD') {
+          text(res, 405, 'Method Not Allowed');
+          return true;
+        }
+        const assetPath = safeStaticPath(api.rootDir, pathname);
+        if (!assetPath || !serveFile(res, assetPath)) {
+          text(res, 404, 'Asset Not Found');
+        }
+        return true;
+      }
+
+      // Serve index.html for the main route
+      if (method !== 'GET' && method !== 'HEAD') {
+        text(res, 405, 'Method Not Allowed');
+        return true;
+      }
+
+      const indexPath = path.join(api.rootDir, 'dist', 'web', 'index.html');
+      if (!serveFile(res, indexPath)) {
+        text(res, 503, 'Principles Console UI is not built yet.');
+      }
+      return true;
+    },
+  };
+
+  // Route 2: API endpoints - gateway auth required
+  const apiRoute: OpenClawPluginHttpRouteParams = {
+    path: API_PREFIX,
+    auth: 'gateway',
+    match: 'prefix',
+    async handler(req, res) {
+      const url = new URL(req.url || API_PREFIX, 'http://127.0.0.1');
+      const pathname = url.pathname;
+      return handleApiRoute(api, pathname, req, res);
+    },
+  };
+
+  return [staticRoute, apiRoute];
+}
+
+// Legacy export for backwards compatibility
 export function createPrinciplesConsoleRoute(api: OpenClawPluginApi): OpenClawPluginHttpRouteParams {
+  const routes = createPrinciplesConsoleRoutes(api);
+  // Return the combined behavior - this will be called from index.ts
   return {
     path: ROUTE_PREFIX,
-    auth: 'gateway',
+    auth: 'plugin',
     match: 'prefix',
     async handler(req, res) {
       const url = new URL(req.url || ROUTE_PREFIX, 'http://127.0.0.1');
@@ -310,10 +406,16 @@ export function createPrinciplesConsoleRoute(api: OpenClawPluginApi): OpenClawPl
         return false;
       }
 
+      // For API routes, check auth manually
       if (pathname.startsWith(API_PREFIX)) {
+        if (!validateGatewayAuth(req)) {
+          json(res, 401, { error: 'unauthorized', message: 'Valid Gateway token required.' });
+          return true;
+        }
         return handleApiRoute(api, pathname, req, res);
       }
 
+      // Static files - no auth required
       if (pathname.startsWith(ASSETS_PREFIX)) {
         if (method !== 'GET' && method !== 'HEAD') {
           text(res, 405, 'Method Not Allowed');
