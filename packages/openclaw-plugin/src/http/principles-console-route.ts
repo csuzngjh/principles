@@ -319,7 +319,7 @@ function validateGatewayAuth(req: IncomingMessage): boolean {
     // No token configured, allow all requests
     return true;
   }
-  const authHeader = req.headers['authorization'] || '';
+  const authHeader = (req.headers?.['authorization'] as string) || '';
   const tokenMatch = authHeader.match(/^Bearer\s+(.+)$/i);
   const providedToken = tokenMatch?.[1];
   return providedToken === gatewayToken;

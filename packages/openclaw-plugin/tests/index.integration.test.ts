@@ -84,7 +84,7 @@ describe('Plugin Integration', () => {
       expect(registeredRoutes).toHaveLength(1);
       expect(registeredRoutes[0]).toEqual(expect.objectContaining({
         path: '/plugins/principles',
-        auth: 'gateway',
+        auth: 'plugin',
         match: 'prefix',
         handler: expect.any(Function),
       }));
