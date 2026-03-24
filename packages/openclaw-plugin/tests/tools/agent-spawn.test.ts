@@ -35,13 +35,27 @@ describe('createAgentSpawnTool', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
 
+    // Create mock functions that pass the AsyncFunction check
+    const mockAsyncFn = <T extends (...args: any[]) => Promise<any>>(
+      impl: ReturnType<typeof vi.fn>
+    ) => {
+      const fn = vi.fn() as unknown as impl;
+      // Make constructor.name return 'AsyncFunction' to pass isSubagentAvailable check
+      Object.defineProperty(fn, 'constructor', {
+        value: function AsyncFunction() {},
+        writable: true,
+        configurable: true,
+      });
+      return fn;
+    };
+
     mockSubagentRuntime = {
-      run: vi.fn().mockResolvedValue(undefined),
-      waitForRun: vi.fn().mockResolvedValue({ status: 'ok' }),
-      getSessionMessages: vi.fn().mockResolvedValue({
+      run: mockAsyncFn().mockResolvedValue(undefined),
+      waitForRun: mockAsyncFn().mockResolvedValue({ status: 'ok' }),
+      getSessionMessages: mockAsyncFn().mockResolvedValue({
         assistantTexts: ['Task completed successfully'],
       }),
-      deleteSession: vi.fn().mockResolvedValue(undefined),
+      deleteSession: mockAsyncFn().mockResolvedValue(undefined),
     };
 
     mockApi = {
