@@ -4,7 +4,7 @@ import type { PluginHookBeforePromptBuildEvent, PluginHookAgentContext, PluginHo
 import { clearInjectedProbationIds, getSession, resetFriction, setInjectedProbationIds } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { ContextInjectionConfig, defaultContextConfig } from '../types.js';
-import { extractSummary, getHistoryVersions } from '../core/focus-history.js';
+import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection } from '../core/focus-history.js';
 import { empathyObserverManager, type EmpathyObserverApi } from '../service/empathy-observer-manager.js';
 import { PathResolver } from '../core/path-resolver.js';
 
@@ -679,12 +679,19 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
 
   // Project Context (configurable: full/summary/off) - moved to appendSystemContext for WebUI UX
   let projectContextContent = '';
+  let workingMemoryContent = '';
   if (!isMinimalMode && contextConfig.projectFocus !== 'off') {
     const focusPath = wctx.resolve('CURRENT_FOCUS');
     if (fs.existsSync(focusPath)) {
       try {
         const currentFocus = fs.readFileSync(focusPath, 'utf8').trim();
         if (currentFocus) {
+          // 解析工作记忆部分（用于独立注入）
+          const workingMemorySnapshot = parseWorkingMemorySection(currentFocus);
+          if (workingMemorySnapshot) {
+            workingMemoryContent = workingMemoryToInjection(workingMemorySnapshot);
+          }
+          
           if (contextConfig.projectFocus === 'summary') {
             // Summary mode: intelligent extraction prioritizing key sections
             projectContextContent = extractSummary(currentFocus, 30);
@@ -745,12 +752,17 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
   }
 
   // Build appendSystemContext with recency effect
-  // Content order (most important last): project_context -> reflection_log -> thinking_os -> principles
+  // Content order (most important last): project_context -> working_memory -> reflection_log -> thinking_os -> principles
   const appendParts: string[] = [];
 
   // 1. Project Context (lowest priority, goes first)
   if (projectContextContent) {
     appendParts.push(`<project_context>\n${projectContextContent}\n</project_context>`);
+  }
+
+  // 1.5. Working Memory (preserved from last compaction)
+  if (workingMemoryContent) {
+    appendParts.push(workingMemoryContent);
   }
 
   // 2. Reflection Log

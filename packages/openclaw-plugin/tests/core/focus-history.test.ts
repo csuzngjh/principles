@@ -7,6 +7,13 @@ import {
   cleanupHistory,
   getHistoryVersions,
   extractSummary,
+  // 工作记忆相关函数
+  extractWorkingMemory,
+  parseWorkingMemorySection,
+  mergeWorkingMemory,
+  workingMemoryToInjection,
+  type WorkingMemorySnapshot,
+  type FileArtifact,
 } from '../../src/core/focus-history.js';
 
 // Mock fs module
@@ -246,6 +253,430 @@ ${Array.from({ length: 40 }, (_, i) => `| Item ${i + 1} | Value ${i + 1} |`).joi
 
       // 检查是否包含关键内容
       expect(summary).toContain('状态快照');
+    });
+  });
+
+  // ============================================================================
+  // 工作记忆功能测试
+  // ============================================================================
+
+  describe('extractWorkingMemory', () => {
+    it('should extract file paths from tool_use messages', () => {
+      // 模拟包含 tool_use 的消息
+      const messages = [
+        {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: '我来帮你实现这个功能' },
+            {
+              type: 'tool_use',
+              name: 'write_file',
+              input: {
+                file_path: '/workspace/packages/openclaw-plugin/src/hooks/prompt.ts',
+                content: '// new code'
+              }
+            }
+          ]
+        },
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_use',
+              name: 'replace',
+              input: {
+                file_path: '/workspace/packages/openclaw-plugin/src/core/focus-history.ts',
+                old_string: 'old',
+                new_string: 'new'
+              }
+            }
+          ]
+        }
+      ];
+
+      const snapshot = extractWorkingMemory(messages, '/workspace');
+
+      // 应该提取出两个文件
+      expect(snapshot.artifacts.length).toBe(2);
+      
+      // 检查第一个文件（write_file = created）
+      expect(snapshot.artifacts[0].path).toBe('packages/openclaw-plugin/src/hooks/prompt.ts');
+      expect(snapshot.artifacts[0].action).toBe('created');
+      
+      // 检查第二个文件（replace = modified）
+      expect(snapshot.artifacts[1].path).toBe('packages/openclaw-plugin/src/core/focus-history.ts');
+      expect(snapshot.artifacts[1].action).toBe('modified');
+    });
+
+    it('should filter out node_modules and config files', () => {
+      const messages = [
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_use',
+              name: 'write_file',
+              input: {
+                file_path: '/workspace/node_modules/some-package/index.js'
+              }
+            },
+            {
+              type: 'tool_use',
+              name: 'write_file',
+              input: {
+                // .config. 格式的配置文件会被过滤
+                file_path: '/workspace/vite.config.js'
+              }
+            },
+            {
+              type: 'tool_use',
+              name: 'write_file',
+              input: {
+                file_path: '/workspace/src/valid-file.ts'
+              }
+            }
+          ]
+        }
+      ];
+
+      const snapshot = extractWorkingMemory(messages, '/workspace');
+
+      // 只应该保留 valid-file.ts（node_modules 和 .config. 被过滤）
+      expect(snapshot.artifacts.length).toBe(1);
+      expect(snapshot.artifacts[0].path).toBe('src/valid-file.ts');
+    });
+
+    it('should extract problems and solutions from text', () => {
+      const messages = [
+        {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: '问题：压缩后智能体失忆\n解决：用工作记忆保留上下文' }
+          ]
+        }
+      ];
+
+      const snapshot = extractWorkingMemory(messages);
+
+      expect(snapshot.activeProblems.length).toBeGreaterThan(0);
+      expect(snapshot.activeProblems[0].problem).toContain('压缩后智能体失忆');
+    });
+
+    it('should extract next actions from text', () => {
+      const messages = [
+        {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: '下一步：\n1. 完成测试用例\n2. 提交代码' }
+          ]
+        }
+      ];
+
+      const snapshot = extractWorkingMemory(messages);
+
+      expect(snapshot.nextActions.length).toBeGreaterThan(0);
+      expect(snapshot.nextActions.some(a => a.includes('测试用例'))).toBe(true);
+    });
+
+    it('should deduplicate file artifacts', () => {
+      const messages = [
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_use',
+              name: 'write_file',
+              input: { file_path: '/workspace/src/same-file.ts' }
+            }
+          ]
+        },
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_use',
+              name: 'replace',
+              input: { file_path: '/workspace/src/same-file.ts' }
+            }
+          ]
+        }
+      ];
+
+      const snapshot = extractWorkingMemory(messages, '/workspace');
+
+      // 同一文件应该去重
+      expect(snapshot.artifacts.length).toBe(1);
+    });
+
+    it('should limit artifacts to MAX_ARTIFACTS', () => {
+      const messages = [{
+        role: 'assistant',
+        content: Array.from({ length: 30 }, (_, i) => ({
+          type: 'tool_use',
+          name: 'write_file',
+          input: { file_path: `/workspace/src/file-${i}.ts` }
+        }))
+      }];
+
+      const snapshot = extractWorkingMemory(messages, '/workspace');
+
+      // 应该被限制在 MAX_ARTIFACTS (20)
+      expect(snapshot.artifacts.length).toBeLessThanOrEqual(20);
+    });
+  });
+
+  describe('mergeWorkingMemory', () => {
+    it('should append Working Memory section to content without existing section', () => {
+      const content = `# 🎯 CURRENT_FOCUS\n\n> **版本**: v1`;
+      const snapshot: WorkingMemorySnapshot = {
+        lastUpdated: '2026-03-24T12:00:00Z',
+        artifacts: [
+          { path: 'src/hooks/prompt.ts', action: 'modified', description: '添加工作记忆注入' }
+        ],
+        activeProblems: [],
+        nextActions: ['测试压缩恢复流程']
+      };
+
+      const result = mergeWorkingMemory(content, snapshot);
+
+      expect(result).toContain('## 🧠 Working Memory');
+      expect(result).toContain('src/hooks/prompt.ts');
+      expect(result).toContain('modified');
+      expect(result).toContain('添加工作记忆注入');
+      expect(result).toContain('测试压缩恢复流程');
+    });
+
+    it('should replace existing Working Memory section', () => {
+      const content = `# 🎯 CURRENT_FOCUS\n\n> **版本**: v1\n\n## 🧠 Working Memory\n\n旧的文件记录`;
+      const snapshot: WorkingMemorySnapshot = {
+        lastUpdated: '2026-03-24T12:00:00Z',
+        artifacts: [
+          { path: 'src/new-file.ts', action: 'created', description: '新文件' }
+        ],
+        activeProblems: [],
+        nextActions: []
+      };
+
+      const result = mergeWorkingMemory(content, snapshot);
+
+      expect(result).toContain('src/new-file.ts');
+      expect(result).not.toContain('旧的文件记录');
+    });
+
+    it('should generate proper markdown table for artifacts', () => {
+      const content = '# 🎯 CURRENT_FOCUS';
+      const snapshot: WorkingMemorySnapshot = {
+        lastUpdated: '2026-03-24T12:00:00Z',
+        artifacts: [
+          { path: 'src/a.ts', action: 'created', description: '文件A' },
+          { path: 'src/b.ts', action: 'modified', description: '文件B' }
+        ],
+        activeProblems: [],
+        nextActions: []
+      };
+
+      const result = mergeWorkingMemory(content, snapshot);
+
+      expect(result).toContain('| 文件路径 | 操作 | 描述 |');
+      expect(result).toContain('| `src/a.ts` | created | 文件A |');
+      expect(result).toContain('| `src/b.ts` | modified | 文件B |');
+    });
+  });
+
+  describe('parseWorkingMemorySection', () => {
+    it('should return null if no Working Memory section', () => {
+      const content = '# 🎯 CURRENT_FOCUS\n\nNo working memory here';
+      const result = parseWorkingMemorySection(content);
+      expect(result).toBeNull();
+    });
+
+    it('should parse artifacts from markdown table', () => {
+      const content = `# 🎯 CURRENT_FOCUS
+
+## 🧠 Working Memory
+> Last updated: 2026-03-24T12:00:00Z
+
+### 📁 文件输出记录
+
+| 文件路径 | 操作 | 描述 |
+|----------|------|------|
+| \`src/hooks/prompt.ts\` | modified | 添加工作记忆注入 |
+| \`src/core/focus-history.ts\` | created | 新增工作记忆函数 |
+
+### ➡️ 下一步行动
+1. 测试压缩恢复
+2. 提交代码
+`;
+
+      const snapshot = parseWorkingMemorySection(content);
+
+      expect(snapshot).not.toBeNull();
+      expect(snapshot!.artifacts.length).toBe(2);
+      expect(snapshot!.artifacts[0].path).toBe('src/hooks/prompt.ts');
+      expect(snapshot!.artifacts[0].action).toBe('modified');
+      expect(snapshot!.artifacts[0].description).toBe('添加工作记忆注入');
+      expect(snapshot!.nextActions.length).toBe(2);
+    });
+  });
+
+  describe('workingMemoryToInjection', () => {
+    it('should return empty string for empty snapshot', () => {
+      const snapshot: WorkingMemorySnapshot = {
+        lastUpdated: '2026-03-24T12:00:00Z',
+        artifacts: [],
+        activeProblems: [],
+        nextActions: []
+      };
+
+      const result = workingMemoryToInjection(snapshot);
+      expect(result).toBe('');
+    });
+
+    it('should generate proper injection string', () => {
+      const snapshot: WorkingMemorySnapshot = {
+        lastUpdated: '2026-03-24T12:00:00Z',
+        artifacts: [
+          { path: 'src/hooks/prompt.ts', action: 'modified', description: '添加工作记忆' }
+        ],
+        activeProblems: [],
+        nextActions: ['测试压缩恢复']
+      };
+
+      const result = workingMemoryToInjection(snapshot);
+
+      expect(result).toContain('<working_memory preserved="true">');
+      expect(result).toContain('已输出的文件');
+      expect(result).toContain('[MODIFIED] `src/hooks/prompt.ts`');
+      expect(result).toContain('测试压缩恢复');
+      expect(result).toContain('</working_memory>');
+    });
+
+    it('should include problem with approach', () => {
+      const snapshot: WorkingMemorySnapshot = {
+        lastUpdated: '2026-03-24T12:00:00Z',
+        artifacts: [],
+        activeProblems: [
+          { problem: '压缩后失忆', approach: '用工作记忆保留' }
+        ],
+        nextActions: []
+      };
+
+      const result = workingMemoryToInjection(snapshot);
+
+      expect(result).toContain('压缩后失忆');
+    });
+  });
+
+  // ============================================================================
+  // 端到端测试：压缩时文件路径落盘
+  // ============================================================================
+
+  describe('E2E: File path preservation during compaction', () => {
+    it('should preserve file paths from tool_use to CURRENT_FOCUS.md', () => {
+      // 模拟会话中的工具调用
+      const sessionMessages = [
+        {
+          role: 'user',
+          content: '帮我实现工作记忆功能'
+        },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: '好的，我来实现这个功能' },
+            {
+              type: 'tool_use',
+              name: 'write_file',
+              input: {
+                file_path: '/workspace/packages/openclaw-plugin/src/core/working-memory.ts',
+                content: '// WorkingMemoryManager class'
+              }
+            }
+          ]
+        },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: '文件已创建，现在修改现有文件' },
+            {
+              type: 'tool_use',
+              name: 'replace',
+              input: {
+                file_path: '/workspace/packages/openclaw-plugin/src/hooks/lifecycle.ts',
+                old_string: '// old',
+                new_string: '// new: extract working memory'
+              }
+            }
+          ]
+        },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: '下一步：\n1. 添加测试用例\n2. 提交代码' }
+          ]
+        }
+      ];
+
+      // 1. 提取工作记忆
+      const snapshot = extractWorkingMemory(sessionMessages, '/workspace');
+
+      // 2. 验证提取结果
+      expect(snapshot.artifacts.length).toBe(2);
+      expect(snapshot.artifacts[0].action).toBe('created'); // write_file
+      expect(snapshot.artifacts[1].action).toBe('modified'); // replace
+      expect(snapshot.nextActions.length).toBeGreaterThan(0);
+
+      // 3. 合并到 CURRENT_FOCUS.md
+      const originalFocus = `# 🎯 CURRENT_FOCUS
+
+> **版本**: v1 | **状态**: EXECUTING
+
+## 🔄 当前任务
+
+- [ ] 实现工作记忆功能
+`;
+
+      const updatedFocus = mergeWorkingMemory(originalFocus, snapshot);
+
+      // 4. 验证文件路径已落盘
+      expect(updatedFocus).toContain('## 🧠 Working Memory');
+      expect(updatedFocus).toContain('working-memory.ts');
+      expect(updatedFocus).toContain('lifecycle.ts');
+      expect(updatedFocus).toContain('created');
+      expect(updatedFocus).toContain('modified');
+
+      // 5. 验证可以从文件解析回来
+      const parsedSnapshot = parseWorkingMemorySection(updatedFocus);
+      expect(parsedSnapshot).not.toBeNull();
+      expect(parsedSnapshot!.artifacts.length).toBe(2);
+
+      // 6. 验证可以生成注入字符串
+      const injection = workingMemoryToInjection(parsedSnapshot!);
+      expect(injection).toContain('working-memory.ts');
+      expect(injection).toContain('lifecycle.ts');
+    });
+
+    it('should handle deleted files', () => {
+      const messages = [
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_use',
+              name: 'replace',
+              input: {
+                file_path: '/workspace/src/old-file.ts',
+                old_string: 'entire file content',
+                new_string: '' // 空字符串表示删除
+              }
+            }
+          ]
+        }
+      ];
+
+      const snapshot = extractWorkingMemory(messages, '/workspace');
+
+      // 应该能识别文件操作
+      expect(snapshot.artifacts.length).toBeGreaterThan(0);
     });
   });
 });
