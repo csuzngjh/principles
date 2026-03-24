@@ -112,6 +112,76 @@ const mockTrajectory = {
         expect(mockEmitSync).not.toHaveBeenCalled();
     });
 
+    it('should NOT emit pain_detected for killed outcome (user-initiated termination)', async () => {
+        // Killed outcome indicates user explicitly terminated the subagent
+        // This is not an agent failure - should not trigger pain penalties
+        const mockCtx = { workspaceDir, sessionId: 's4' };
+        const mockEvent = {
+            targetSessionKey: 'agent:main:subagent:diagnostician-123',
+            outcome: 'killed'
+        };
+
+        await handleSubagentEnded(mockEvent as any, mockCtx as any);
+
+        // Killed should NOT trigger pain_detected event
+        expect(mockEmitSync).not.toHaveBeenCalled();
+        // Should also NOT record success (it was terminated, not successful)
+        expect(mockTrust.recordSuccess).not.toHaveBeenCalled();
+    });
+
+    it('should NOT emit pain_detected for reset outcome (system reset)', async () => {
+        // Reset outcome indicates system-level session reset
+        // This is not an agent failure - should not trigger pain penalties
+        const mockCtx = { workspaceDir, sessionId: 's5' };
+        const mockEvent = {
+            targetSessionKey: 'agent:main:subagent:diagnostician-123',
+            outcome: 'reset'
+        };
+
+        await handleSubagentEnded(mockEvent as any, mockCtx as any);
+
+        // Reset should NOT trigger pain_detected event
+        expect(mockEmitSync).not.toHaveBeenCalled();
+        // Should also NOT record success (it was reset, not successful)
+        expect(mockTrust.recordSuccess).not.toHaveBeenCalled();
+    });
+
+    it('should match HEARTBEAT placeholder task for diagnostician session', async () => {
+        // HEARTBEAT-triggered tasks have placeholder assigned_session_key like "heartbeat:diagnostician:{taskId}"
+        const mockCtx = { workspaceDir, sessionId: 's1' };
+        const mockEvent = {
+            targetSessionKey: 'agent:diagnostician:session-123',
+            outcome: 'ok'
+        };
+
+        vi.mocked(fs.existsSync).mockImplementation((p) => {
+            const pathStr = p.toString();
+            return pathStr.includes('evolution_queue.json') || pathStr.includes('.pain_flag');
+        });
+
+        vi.mocked(fs.readFileSync).mockImplementation((p) => {
+            const pathStr = p.toString();
+            if (pathStr.includes('evolution_queue.json')) {
+                return JSON.stringify([
+                    { id: 'task-heartbeat', status: 'in_progress', assigned_session_key: 'heartbeat:diagnostician:task-heartbeat', started_at: new Date().toISOString() }
+                ]);
+            }
+            if (pathStr.includes('.pain_flag')) {
+                return 'score: 80\nstatus: queued\ntask_id: task-heartbeat\n';
+            }
+            return '';
+        });
+
+        const writeSpy = vi.mocked(fs.writeFileSync);
+
+        await handleSubagentEnded(mockEvent as any, mockCtx as any);
+
+        expect(writeSpy).toHaveBeenCalled();
+        const [, queuePayload] = writeSpy.mock.calls.find((args) => args[0].toString().includes('evolution_queue.json'))!;
+        const savedQueue = JSON.parse(queuePayload as string);
+        expect(savedQueue.find((t: any) => t.id === 'task-heartbeat').status).toBe('completed');
+    });
+
     it('should not emit pain_detected for successful subagent completion', async () => {
         const mockCtx = { workspaceDir, sessionId: 's1' };
         const mockEvent = {
