@@ -96,7 +96,10 @@ const mockTrajectory = {
 
 
 
-    it('should emit pain_detected for timeout outcome', async () => {
+    it('should NOT emit pain_detected for timeout outcome (OpenClaw fix applied)', async () => {
+        // OpenClaw v2026.3.23 fix: recheck timed-out worker waits against latest runtime snapshot
+        // Fast-finishing workers should not be incorrectly reported as timed out
+        // Therefore, timeout outcomes should NOT trigger pain penalties
         const mockCtx = { workspaceDir, sessionId: 's3' };
         const mockEvent = {
             targetSessionKey: 'agent:main:subagent:diagnostician-123',
@@ -105,14 +108,8 @@ const mockTrajectory = {
 
         await handleSubagentEnded(mockEvent as any, mockCtx as any);
 
-        expect(mockEmitSync).toHaveBeenCalledWith(expect.objectContaining({
-            type: 'pain_detected',
-            data: expect.objectContaining({
-                painType: 'subagent_error',
-                source: 'subagent_timeout',
-                sessionId: 's3',
-            }),
-        }));
+        // Timeout should NOT trigger pain_detected event
+        expect(mockEmitSync).not.toHaveBeenCalled();
     });
 
     it('should not emit pain_detected for successful subagent completion', async () => {

@@ -437,7 +437,9 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
                 highestScoreTask.status = 'in_progress';
                 highestScoreTask.started_at = nowIso;
                 delete highestScoreTask.completed_at;
-                delete highestScoreTask.assigned_session_key;
+                // Use placeholder instead of deleting - allows subagent_ended hook to match
+                // This fixes task_outcomes being empty for HEARTBEAT-triggered diagnostician runs
+                highestScoreTask.assigned_session_key = `heartbeat:diagnostician:${highestScoreTask.id}`;
                 queueChanged = true;
 
                 // Log to EvolutionLogger
