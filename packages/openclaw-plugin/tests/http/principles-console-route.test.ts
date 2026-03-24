@@ -1,10 +1,22 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'node:events';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createPrinciplesConsoleRoute } from '../../src/http/principles-console-route.js';
 import { ControlUiQueryService } from '../../src/service/control-ui-query-service.js';
 
 vi.mock('../../src/service/control-ui-query-service.js');
+
+// Store original env
+const originalHome = process.env.HOME;
+
+beforeEach(() => {
+  // Set HOME to a non-existent path to prevent reading real config
+  process.env.HOME = '/nonexistent-test-home';
+});
+
+afterEach(() => {
+  process.env.HOME = originalHome;
+});
 
 class MockResponse extends EventEmitter {
   statusCode = 200;
@@ -22,10 +34,11 @@ class MockResponse extends EventEmitter {
   }
 }
 
-function createRequest(method: string, url: string, body?: string): IncomingMessage {
+function createRequest(method: string, url: string, body?: string, headers?: Record<string, string>): IncomingMessage {
   const req = new EventEmitter() as IncomingMessage & AsyncIterable<Buffer>;
   (req as any).method = method;
   (req as any).url = url;
+  (req as any).headers = headers || {};
   req[Symbol.asyncIterator] = async function* () {
     if (body) {
       yield Buffer.from(body);
