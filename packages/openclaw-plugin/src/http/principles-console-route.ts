@@ -246,8 +246,8 @@ function handleApiRoute(
 
   const evolutionTraceMatch = pathname.match(/^\/plugins\/principles\/api\/evolution\/trace\/([^/]+)$/);
   if (evolutionTraceMatch && method === 'GET') {
+    const evoService = evolutionService();
     try {
-      const evoService = evolutionService();
       const trace = evoService.getTrace(decodeURIComponent(evolutionTraceMatch[1]));
       if (!trace) {
         json(res, 404, { error: 'not_found', message: 'Evolution trace not found.' });
@@ -259,6 +259,8 @@ function handleApiRoute(
       api.logger.warn(`[PD:ControlUI] Evolution trace request failed for ${pathname}: ${String(error)}`);
       json(res, 500, { error: 'internal_error', message: String(error) });
       return true;
+    } finally {
+      evoService.dispose();
     }
   }
 

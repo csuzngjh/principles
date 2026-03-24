@@ -311,22 +311,27 @@ export class EvolutionLogger {
   }
 }
 
-// 单例缓存
+// 单例缓存：键格式为 "workspaceDir" 或 "workspaceDir::with_trajectory"
 const loggerCache = new Map<string, EvolutionLogger>();
 
 /**
  * 获取 EvolutionLogger 实例（单例）
+ * 
+ * 注意：带 trajectory 和不带 trajectory 的请求会返回不同的实例，
+ * 因为 trajectory 影响事件持久化行为。
  */
 export function getEvolutionLogger(
   workspaceDir: string,
   trajectory?: TrajectoryDatabase
 ): EvolutionLogger {
-  const cached = loggerCache.get(workspaceDir);
+  // 缓存键区分是否带 trajectory，避免持久化行为不一致
+  const cacheKey = trajectory ? `${workspaceDir}::with_trajectory` : workspaceDir;
+  const cached = loggerCache.get(cacheKey);
   if (cached) {
     return cached;
   }
   const logger = new EvolutionLogger(workspaceDir, trajectory);
-  loggerCache.set(workspaceDir, logger);
+  loggerCache.set(cacheKey, logger);
   return logger;
 }
 
