@@ -105,7 +105,7 @@ afterEach(() => {
 });
 
 describe('Evolution loop user stories e2e', () => {
-  it('story 1: manual /pain intervention should enter evolution loop and appear in status', () => {
+  it('story 1: manual /pain intervention should emit pain signal', () => {
     const workspace = makeWorkspace();
 
     handleAfterToolCall(
@@ -113,11 +113,25 @@ describe('Evolution loop user stories e2e', () => {
       { workspaceDir: workspace, sessionId: 's-manual' } as any,
     );
 
+    // Pain signal is emitted but principle is NOT created automatically
+    // It requires diagnostician analysis to create a generalized principle
+    const reducer = new EvolutionReducerImpl({ workspaceDir: workspace });
+    expect(reducer.getProbationPrinciples()).toHaveLength(0);
+    
+    // After diagnostician analysis, principle is created
+    reducer.createPrincipleFromDiagnosis({
+      painId: 'pain-manual',
+      painType: 'user_frustration',
+      triggerPattern: 'user expresses frustration',
+      action: 'pause and clarify requirements',
+      source: 'pain',
+    });
+    
     const status = handleEvolutionStatusCommand({ config: { workspaceDir: workspace, language: 'en' } } as any);
     expect(status.text).toContain('probation principles: 1');
   });
 
-  it('story 2: write failure should emit pain, create pain_flag, and inject probation principles into prompt', async () => {
+  it('story 2: write failure should emit pain, create pain_flag', async () => {
     const workspace = makeWorkspace();
 
     handleAfterToolCall(
@@ -131,6 +145,20 @@ describe('Evolution loop user stories e2e', () => {
     );
 
     expect(fs.existsSync(path.join(workspace, '.state', '.pain_flag'))).toBe(true);
+
+    // Pain signal is emitted but principle is NOT created automatically
+    // Use buildWctx to get the cached reducer
+    const wctx = buildWctx(workspace);
+    expect(wctx.evolutionReducer.getProbationPrinciples()).toHaveLength(0);
+    
+    // After diagnostician analysis, principle is created
+    wctx.evolutionReducer.createPrincipleFromDiagnosis({
+      painId: 'pain-write',
+      painType: 'tool_failure',
+      triggerPattern: 'file write operation fails with permission denied',
+      action: 'check file permissions before writing',
+      source: 'write',
+    });
 
     const promptResult = await handleBeforePromptBuild({ prompt: '', messages: [] } as any, {
       workspaceDir: workspace,
@@ -166,15 +194,13 @@ describe('Evolution loop user stories e2e', () => {
     const workspace = makeWorkspace();
     const reducer = new EvolutionReducerImpl({ workspaceDir: workspace });
 
-    reducer.emitSync({
-      ts: new Date().toISOString(),
-      type: 'pain_detected',
-      data: {
-        painId: 'pain-black-1',
-        painType: 'tool_failure',
-        source: 'write',
-        reason: 'write failed on src/main.ts',
-      },
+    // Create principle from diagnosis
+    const principleId = reducer.createPrincipleFromDiagnosis({
+      painId: 'pain-black-1',
+      painType: 'tool_failure',
+      triggerPattern: 'file write operation fails',
+      action: 'check permissions before writing',
+      source: 'write',
     });
 
     const pid = reducer.getProbationPrinciples()[0].id;
@@ -185,15 +211,13 @@ describe('Evolution loop user stories e2e', () => {
 
     expect(rollbackText).toContain(`Rolled back principle ${pid}`);
 
-    reducer.emitSync({
-      ts: new Date().toISOString(),
-      type: 'pain_detected',
-      data: {
-        painId: 'pain-black-1',
-        painType: 'tool_failure',
-        source: 'write',
-        reason: 'write failed on src/main.ts',
-      },
+    // Attempt to create same principle again - should be blocked by blacklist
+    reducer.createPrincipleFromDiagnosis({
+      painId: 'pain-black-2',
+      painType: 'tool_failure',
+      triggerPattern: 'file write operation fails',
+      action: 'check permissions before writing',
+      source: 'write',
     });
 
     const stats = new EvolutionReducerImpl({ workspaceDir: workspace }).getStats();

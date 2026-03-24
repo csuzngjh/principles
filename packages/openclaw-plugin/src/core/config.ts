@@ -69,6 +69,14 @@ export interface TrustSettings {
     history_limit?: number;
 }
 
+export interface DiagnosticianSettings {
+    context: {
+        time_window_minutes: number;   // 时间窗口（分钟），pain_timestamp 前后各多少分钟
+        max_message_length: number;    // 每条消息最大长度（字符）
+        max_summary_length: number;    // 对话摘要最大长度（字符）
+    };
+}
+
 export interface PainSettings {
     language: 'en' | 'zh';
     trajectory?: {
@@ -76,6 +84,7 @@ export interface PainSettings {
         busy_timeout_ms?: number;
         orphan_blob_grace_days?: number;
     };
+    diagnostician?: DiagnosticianSettings;
     thresholds: {
         pain_trigger: number;
         cognitive_paralysis_input: number;
@@ -134,6 +143,13 @@ export interface PainSettings {
 // ─────────────────────────────────────────────────────────────
 export const DEFAULT_SETTINGS: PainSettings = {
     language: 'zh', // Optimized for the primary user base
+    diagnostician: {
+        context: {
+            time_window_minutes: 5,    // pain_timestamp 前后各 5 分钟
+            max_message_length: 500,   // 每条消息截断到 500 字符
+            max_summary_length: 3000,  // 对话摘要最大 3000 字符
+        }
+    },
     thresholds: {
         pain_trigger: 40, // Increased tolerance before forcing a stop
         cognitive_paralysis_input: 4000,

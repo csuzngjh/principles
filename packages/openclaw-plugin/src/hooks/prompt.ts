@@ -206,7 +206,35 @@ ${conversationContext}`;
   taskDescription += `
 
 ---
-Analyze the root cause using 5 Whys methodology. Check evidence in codebase before concluding.`;
+## 执行指令
+
+使用 5 Whys 方法进行根因分析，输出 JSON 格式结果。
+
+### 必执行步骤：
+1. **Phase 1 - 证据收集**: 读取日志、搜索代码，记录证据来源
+2. **Phase 2 - 因果链构建**: 每个 Why 必须有证据支撑，最多 5 层
+3. **Phase 3 - 根因分类**: 归类为 People/Design/Assumption/Tooling
+4. **Phase 4 - 原则提炼**: 提炼可复用的防护原则
+
+### 终止条件（满足任一即停止）:
+- 找到可修改代码直接解决的问题
+- 找到缺失的门禁规则或检查机制
+- 连续 2 个 Why 无法提出更深假设
+
+### 输出格式：
+\`\`\`json
+{
+  "diagnosis_report": {
+    "task_id": "...",
+    "summary": "一句话总结根因",
+    "causal_chain": [...],
+    "root_cause": { "category": "Design", "description": "..." },
+    "principle": { "trigger_pattern": "...", "action": "..." }
+  }
+}
+\`\`\`
+
+详细执行协议请参考你的系统提示词。`;
 
   return taskDescription;
 }

@@ -12,6 +12,7 @@ import type { OpenClawPluginApi, SubagentWaitResult } from '../openclaw-sdk.js';
 import { loadAgentDefinition, listAvailableAgents } from '../core/agent-loader.js';
 import { resolvePdPath } from '../core/paths.js';
 import { extractEvolutionTaskId, registerEvolutionTaskSession } from '../service/evolution-worker.js';
+import { isSubagentRuntimeAvailable } from '../utils/subagent-probe.js';
 
 /**
  * Extract assistant text from session messages
@@ -325,21 +326,9 @@ pd_run_worker(
 
       // Check subagent runtime availability.
       // api.runtime.subagent is always a Proxy object (truthy), even in embedded mode.
-      // In embedded mode, the unavailable runtime's methods are plain sync functions that throw.
-      // In gateway mode, they are async functions (AsyncFunction constructor).
-      // We detect this without making a real call by inspecting the constructor name.
+      // Use the shared probe utility to detect which mode we're in.
       const subagentRuntime = api.runtime?.subagent;
-      const isSubagentAvailable = (() => {
-        if (!subagentRuntime) return false;
-        try {
-          const runFn = subagentRuntime.run;
-          return typeof runFn === 'function' && runFn.constructor?.name === 'AsyncFunction';
-        } catch {
-          return false;
-        }
-      })();
-
-      if (!isSubagentAvailable) {
+      if (!isSubagentRuntimeAvailable(subagentRuntime)) {
         return {
           content: [{
             type: 'text',

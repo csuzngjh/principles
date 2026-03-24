@@ -29,6 +29,8 @@ export interface EvolutionQueueItem {
     trigger_text_preview?: string;
     status: 'pending' | 'in_progress' | 'completed';
     resolution?: 'marker_detected' | 'auto_completed_timeout';
+    session_id?: string;
+    agent_id?: string;
 }
 
 const PAIN_QUEUE_DEDUP_WINDOW_MS = 30 * 60 * 1000;
@@ -185,6 +187,8 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: any) {
         let preview = '';
         let isQueued = false;
         let traceId = '';
+        let sessionId = '';
+        let agentId = '';
 
         for (const line of lines) {
             if (line.startsWith('score:')) score = parseInt(line.split(':', 2)[1].trim(), 10) || 0;
@@ -193,6 +197,8 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: any) {
             if (line.startsWith('trigger_text_preview:')) preview = line.slice('trigger_text_preview:'.length).trim();
             if (line.startsWith('status: queued')) isQueued = true;
             if (line.startsWith('trace_id:')) traceId = line.split(':', 2)[1].trim();
+            if (line.startsWith('session_id:')) sessionId = line.slice('session_id:'.length).trim();
+            if (line.startsWith('agent_id:')) agentId = line.slice('agent_id:'.length).trim();
         }
 
         if (isQueued || score < 30) return;
@@ -234,7 +240,9 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: any) {
                 trigger_text_preview: preview,
                 timestamp: nowIso,
                 enqueued_at: nowIso,
-                status: 'pending'
+                status: 'pending',
+                session_id: sessionId || undefined,
+                agent_id: agentId || undefined,
             });
 
             fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
@@ -422,6 +430,8 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
                     `**Reason**: ${highestScoreTask.reason}`,
                     `**Trigger**: "${highestScoreTask.trigger_text_preview || 'N/A'}"`,
                     `**Queued At**: ${highestScoreTask.enqueued_at || nowIso}`,
+                    `**Session ID**: ${highestScoreTask.session_id || 'N/A'}`,
+                    `**Agent ID**: ${highestScoreTask.agent_id || 'main'}`,
                     ``,
                     `---`,
                     ``,

@@ -36,10 +36,11 @@ describe('EvolutionReducerImpl', () => {
     expect(lines.some(line => JSON.parse(line).type === 'pain_detected')).toBe(true);
   });
 
-  it('converts pain into candidate and probation principle', () => {
+  it('creates principle from diagnosis and auto-promotes to probation', () => {
     const workspace = makeTempDir();
     const reducer = new EvolutionReducerImpl({ workspaceDir: workspace });
 
+    // Pain detected no longer creates principle automatically
     reducer.emitSync({
       ts: new Date().toISOString(),
       type: 'pain_detected',
@@ -51,6 +52,20 @@ describe('EvolutionReducerImpl', () => {
       },
     });
 
+    // No principle created yet
+    expect(reducer.getCandidatePrinciples()).toHaveLength(0);
+    expect(reducer.getProbationPrinciples()).toHaveLength(0);
+
+    // Create principle from diagnostician analysis
+    const principleId = reducer.createPrincipleFromDiagnosis({
+      painId: 'pain-1',
+      painType: 'tool_failure',
+      triggerPattern: 'file write operation fails',
+      action: 'check file permissions and disk space',
+      source: 'write',
+    });
+
+    expect(principleId).not.toBeNull();
     expect(reducer.getCandidatePrinciples()).toHaveLength(0);
     expect(reducer.getProbationPrinciples()).toHaveLength(1);
     const stats = reducer.getStats();
@@ -106,10 +121,13 @@ describe('EvolutionReducerImpl', () => {
     const workspace = makeTempDir();
     const reducer = new EvolutionReducerImpl({ workspaceDir: workspace });
 
-    reducer.emitSync({
-      ts: new Date().toISOString(),
-      type: 'pain_detected',
-      data: { painId: 'pain-1', painType: 'tool_failure', source: 'write', reason: 'write failed' },
+    // Create principle from diagnosis
+    const principleId = reducer.createPrincipleFromDiagnosis({
+      painId: 'pain-1',
+      painType: 'tool_failure',
+      triggerPattern: 'file write operation fails',
+      action: 'check file permissions',
+      source: 'write',
     });
 
     const principle = reducer.getProbationPrinciples()[0];
@@ -139,10 +157,13 @@ describe('EvolutionReducerImpl', () => {
     const workspace = makeTempDir();
     const reducer = new EvolutionReducerImpl({ workspaceDir: workspace });
 
-    reducer.emitSync({
-      ts: new Date().toISOString(),
-      type: 'pain_detected',
-      data: { painId: 'pain-1', painType: 'tool_failure', source: 'write', reason: 'write failed' },
+    // Create principle from diagnosis
+    const principleId = reducer.createPrincipleFromDiagnosis({
+      painId: 'pain-1',
+      painType: 'tool_failure',
+      triggerPattern: 'file write operation fails',
+      action: 'check file permissions',
+      source: 'write',
     });
 
     const principle = reducer.getProbationPrinciples()[0];
@@ -154,6 +175,6 @@ describe('EvolutionReducerImpl', () => {
     const blacklistPath = path.join(workspace, '.state', 'principle_blacklist.json');
     const blacklist = JSON.parse(fs.readFileSync(blacklistPath, 'utf8'));
     expect(Array.isArray(blacklist)).toBe(true);
-    expect(blacklist[0].pattern).toContain('write failed');
+    expect(blacklist[0].pattern).toContain('file write operation fails');
   });
 });

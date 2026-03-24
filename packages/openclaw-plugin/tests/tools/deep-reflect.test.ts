@@ -10,14 +10,30 @@ describe('createDeepReflectTool', () => {
     let mockSubagent: any;
     let tempDir: string;
 
+    // Helper to create mock functions that pass the AsyncFunction check
+    const mockAsyncFn = <T extends (...args: any[]) => Promise<any>>(
+        impl: ReturnType<typeof vi.fn>
+    ) => {
+        const fn = vi.fn() as unknown as T;
+        Object.defineProperty(fn, 'constructor', {
+            value: function AsyncFunction() {},
+            writable: true,
+            configurable: true,
+        });
+        return fn;
+    };
+
     beforeEach(() => {
         tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'deep-reflect-test-'));
         
         mockSubagent = {
-            run: vi.fn(),
-            waitForRun: vi.fn(),
-            getSessionMessages: vi.fn(),
-            deleteSession: vi.fn().mockResolvedValue(undefined),
+            run: mockAsyncFn().mockResolvedValue({ runId: 'test-run-123' }),
+            waitForRun: mockAsyncFn().mockResolvedValue({ status: 'ok' }),
+            getSessionMessages: mockAsyncFn().mockResolvedValue({
+                messages: [],
+                assistantTexts: ['Insight 1', 'Insight 2']
+            }),
+            deleteSession: mockAsyncFn().mockResolvedValue(undefined),
         };
 
         mockApi = {
