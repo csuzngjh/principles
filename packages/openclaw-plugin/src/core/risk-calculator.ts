@@ -61,14 +61,27 @@ export function assessRiskLevel(
  */
 export function getTargetFileLineCount(absoluteFilePath: string): number | null {
     try {
-        if (fs.existsSync(absoluteFilePath)) {
-            const content = fs.readFileSync(absoluteFilePath, 'utf-8');
-            return content.split('\n').length;
+        if (!fs.existsSync(absoluteFilePath)) {
+            return null; // File genuinely doesn't exist
         }
+        
+        const stats = fs.statSync(absoluteFilePath);
+        if (!stats.isFile()) {
+            return null; // Not a regular file (directory, device, etc.)
+        }
+        
+        const content = fs.readFileSync(absoluteFilePath, 'utf-8');
+        return content.split('\n').length;
     } catch (e) {
-        // Ignore read errors
+        // Log error before falling back to null - this is intentional for security gates
+        const error = e instanceof Error ? e : new Error(String(e));
+        const errorCode = (e as NodeJS.ErrnoException).code;
+        console.error(`[PD:RISK_CALC] Failed to read file for line count: ${absoluteFilePath}`, {
+            code: errorCode,
+            message: error.message,
+        });
+        return null;
     }
-    return null;
 }
 
 /**
@@ -76,13 +89,25 @@ export function getTargetFileLineCount(absoluteFilePath: string): number | null 
  * @param targetLineCount - Total lines in target file
  * @param percentage - Allowed percentage (0-100)
  * @param minLines - Absolute minimum threshold
- * @returns Maximum allowed lines (at least minLines)
+ * @param maxLines - Optional upper bound to prevent misconfiguration
+ * @returns Maximum allowed lines (at least minLines, at most maxLines if provided)
  */
 export function calculatePercentageThreshold(
     targetLineCount: number,
     percentage: number,
-    minLines: number
+    minLines: number,
+    maxLines?: number
 ): number {
-    const calculated = Math.round(targetLineCount * (percentage / 100));
-    return Math.max(calculated, minLines);
+    // Clamp percentage to valid range [0, 100]
+    const clampedPercentage = Math.max(0, Math.min(100, percentage));
+    
+    const calculated = Math.round(targetLineCount * (clampedPercentage / 100));
+    let effectiveLimit = Math.max(calculated, minLines);
+    
+    // Apply optional upper bound
+    if (maxLines !== undefined && maxLines > 0) {
+        effectiveLimit = Math.min(effectiveLimit, maxLines);
+    }
+    
+    return effectiveLimit;
 }
