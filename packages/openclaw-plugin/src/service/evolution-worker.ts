@@ -11,6 +11,7 @@ import { SystemLogger } from '../core/system-logger.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { initPersistence, flushAllSessions } from '../core/session-tracker.js';
 import { acquireLockAsync, releaseLock, type LockContext } from '../utils/file-lock.js';
+import { getEvolutionLogger, type EvolutionStage } from '../core/evolution-logger.js';
 
 let intervalId: NodeJS.Timeout | null = null;
 
@@ -177,12 +178,13 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: any) {
 
         const rawPain = fs.readFileSync(painFlagPath, 'utf8');
         const lines = rawPain.split('\n');
-        
+
         let score = 0;
         let source = 'unknown';
         let reason = 'Systemic pain detected';
         let preview = '';
         let isQueued = false;
+        let traceId = '';
 
         for (const line of lines) {
             if (line.startsWith('score:')) score = parseInt(line.split(':', 2)[1].trim(), 10) || 0;
@@ -190,6 +192,7 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: any) {
             if (line.startsWith('reason:')) reason = line.slice('reason:'.length).trim();
             if (line.startsWith('trigger_text_preview:')) preview = line.slice('trigger_text_preview:'.length).trim();
             if (line.startsWith('status: queued')) isQueued = true;
+            if (line.startsWith('trace_id:')) traceId = line.split(':', 2)[1].trim();
         }
 
         if (isQueued || score < 30) return;
@@ -222,19 +225,42 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: any) {
             }
 
             const taskId = createEvolutionTaskId(source, score, preview, reason, now);
+            const nowIso = new Date(now).toISOString();
             queue.push({
                 id: taskId,
                 score,
                 source,
                 reason,
                 trigger_text_preview: preview,
-                timestamp: new Date(now).toISOString(),
-                enqueued_at: new Date(now).toISOString(),
+                timestamp: nowIso,
+                enqueued_at: nowIso,
                 status: 'pending'
             });
 
             fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
             fs.appendFileSync(painFlagPath, `\nstatus: queued\ntask_id: ${taskId}\n`, 'utf8');
+
+            // Log to EvolutionLogger
+            const evoLogger = getEvolutionLogger(wctx.workspaceDir, wctx.trajectory);
+            evoLogger.logQueued({
+                traceId: traceId || taskId,
+                taskId,
+                score,
+                source,
+                reason,
+            });
+
+            // Record to evolution_tasks table
+            wctx.trajectory?.recordEvolutionTask?.({
+                taskId,
+                traceId: traceId || taskId,
+                source,
+                reason,
+                score,
+                status: 'pending',
+                enqueuedAt: nowIso,
+            });
+
         } finally {
             releaseLock();
         }
@@ -249,6 +275,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
     if (!fs.existsSync(queuePath)) return;
 
     const releaseLock = await requireQueueLock(queuePath, logger, 'processEvolutionQueue');
+    const evoLogger = getEvolutionLogger(wctx.workspaceDir, wctx.trajectory);
 
     try {
         let queue: EvolutionQueueItem[] = [];
@@ -267,7 +294,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
         // Check in_progress tasks for completion
         for (const task of queue.filter(t => t.status === 'in_progress')) {
             const startedAt = new Date(task.started_at || task.timestamp);
-            
+
             // Condition 1: Check for marker file (created by diagnostician on completion)
             const completeMarker = path.join(wctx.stateDir, `.evolution_complete_${task.id}`);
             if (fs.existsSync(completeMarker)) {
@@ -280,7 +307,25 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
                 } catch {
                     // Best effort cleanup
                 }
-                
+
+                // Log to EvolutionLogger
+                const durationMs = task.started_at
+                    ? Date.now() - new Date(task.started_at).getTime()
+                    : undefined;
+                evoLogger.logCompleted({
+                    traceId: task.id,
+                    taskId: task.id,
+                    resolution: 'marker_detected',
+                    durationMs,
+                });
+
+                // Update evolution_tasks table
+                wctx.trajectory?.updateEvolutionTask?.(task.id, {
+                    status: 'completed',
+                    completedAt: task.completed_at,
+                    resolution: 'marker_detected',
+                });
+
                 wctx.trajectory?.recordTaskOutcome({
                     sessionId: task.assigned_session_key || 'heartbeat:diagnostician',
                     taskId: task.id,
@@ -290,7 +335,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
                 queueChanged = true;
                 continue;
             }
-            
+
             // Condition 2: Timeout auto-complete
             const age = Date.now() - startedAt.getTime();
             if (age > timeout) {
@@ -299,7 +344,22 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
                 task.status = 'completed';
                 task.completed_at = new Date().toISOString();
                 task.resolution = 'auto_completed_timeout';
-                
+
+                // Log to EvolutionLogger
+                evoLogger.logCompleted({
+                    traceId: task.id,
+                    taskId: task.id,
+                    resolution: 'auto_completed_timeout',
+                    durationMs: age,
+                });
+
+                // Update evolution_tasks table
+                wctx.trajectory?.updateEvolutionTask?.(task.id, {
+                    status: 'completed',
+                    completedAt: task.completed_at,
+                    resolution: 'auto_completed_timeout',
+                });
+
                 wctx.trajectory?.recordTaskOutcome({
                     sessionId: task.assigned_session_key || 'heartbeat:diagnostician',
                     taskId: task.id,
@@ -324,6 +384,18 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
             delete highestScoreTask.completed_at;
             delete highestScoreTask.assigned_session_key;
             queueChanged = true;
+
+            // Log to EvolutionLogger
+            evoLogger.logStarted({
+                traceId: highestScoreTask.id,
+                taskId: highestScoreTask.id,
+            });
+
+            // Update evolution_tasks table
+            wctx.trajectory?.updateEvolutionTask?.(highestScoreTask.id, {
+                status: 'in_progress',
+                startedAt: nowIso,
+            });
 
             if (eventLog) {
                 eventLog.recordEvolutionTask({

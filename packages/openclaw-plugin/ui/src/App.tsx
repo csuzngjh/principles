@@ -7,6 +7,9 @@ import type {
   SamplesResponse,
   ThinkingModelDetailResponse,
   ThinkingOverviewResponse,
+  EvolutionTasksResponse,
+  EvolutionTraceResponse,
+  EvolutionStatsResponse,
 } from './types';
 
 function formatPercent(value: number): string {
@@ -29,6 +32,7 @@ function Shell({ children }: { children: React.ReactNode }) {
         </div>
         <nav className="nav">
           <NavLink to="/overview">Overview</NavLink>
+          <NavLink to="/evolution">Evolution</NavLink>
           <NavLink to="/samples">Samples</NavLink>
           <NavLink to="/thinking-models">Thinking Models</NavLink>
         </nav>
@@ -418,6 +422,192 @@ function ThinkingModelsPage() {
   );
 }
 
+function formatDuration(ms: number | null): string {
+  if (ms === null) return 'N/A';
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${(ms / 60000).toFixed(1)}min`;
+}
+
+const STAGE_COLORS: Record<string, string> = {
+  pain_detected: '#ef4444',
+  queued: '#f59e0b',
+  started: '#3b82f6',
+  analyzing: '#8b5cf6',
+  principle_generated: '#22c55e',
+  completed: '#22c55e',
+};
+
+const STAGE_LABELS: Record<string, string> = {
+  pain_detected: '痛点检测',
+  queued: '已入队',
+  started: '开始处理',
+  analyzing: '分析中',
+  principle_generated: '原则生成',
+  completed: '已完成',
+};
+
+function EvolutionPage() {
+  const [tasks, setTasks] = useState<EvolutionTasksResponse | null>(null);
+  const [stats, setStats] = useState<EvolutionStatsResponse | null>(null);
+  const [trace, setTrace] = useState<EvolutionTraceResponse | null>(null);
+  const [selectedId, setSelectedId] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [error, setError] = useState('');
+
+  const search = useMemo(() => {
+    const next = new URLSearchParams();
+    if (statusFilter !== 'all') next.set('status', statusFilter);
+    next.set('page', '1');
+    next.set('pageSize', '20');
+    return next;
+  }, [statusFilter]);
+
+  useEffect(() => {
+    Promise.all([
+      api.getEvolutionTasks(search),
+      api.getEvolutionStats(),
+    ]).then(([tasksData, statsData]) => {
+      setTasks(tasksData);
+      setStats(statsData);
+      setError('');
+    }).catch((err) => setError(String(err)));
+  }, [search]);
+
+  useEffect(() => {
+    if (!selectedId) {
+      setTrace(null);
+      return;
+    }
+    api.getEvolutionTrace(selectedId).then(setTrace).catch((err) => setError(String(err)));
+  }, [selectedId]);
+
+  if (error) return <ErrorState error={error} />;
+  if (!tasks || !stats) return <Loading />;
+
+  return (
+    <div className="page">
+      <header className="page-header">
+        <div>
+          <span className="eyebrow">Evolution</span>
+          <h2>进化流程追踪 - 从痛点到原则生成</h2>
+        </div>
+        <div className="pill-row">
+          <span className="badge" style={{ background: '#f59e0b' }}>待处理 {stats.pending}</span>
+          <span className="badge" style={{ background: '#3b82f6' }}>处理中 {stats.inProgress}</span>
+          <span className="badge" style={{ background: '#22c55e' }}>已完成 {stats.completed}</span>
+          <span className="badge" style={{ background: '#ef4444' }}>失败 {stats.failed}</span>
+        </div>
+      </header>
+
+      <div className="grid two-columns wide-right">
+        <section className="panel">
+          <div className="filters">
+            <label>
+              状态筛选
+              <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+                <option value="all">全部</option>
+                <option value="pending">待处理</option>
+                <option value="in_progress">处理中</option>
+                <option value="completed">已完成</option>
+              </select>
+            </label>
+          </div>
+
+          <div className="list-table">
+            {tasks.items.map((task) => (
+              <button
+                className={`table-row ${selectedId === task.traceId ? 'active' : ''}`}
+                key={task.taskId}
+                onClick={() => setSelectedId(task.traceId)}
+              >
+                <div>
+                  <strong style={{ color: STAGE_COLORS[task.status] || '#6b7280' }}>{task.taskId}</strong>
+                  <span>{task.source}</span>
+                </div>
+                <div>
+                  <span className="badge" style={{ background: STAGE_COLORS[task.status] || '#6b7280' }}>
+                    {task.status}
+                  </span>
+                  <span>分数: {task.score}</span>
+                </div>
+                <div className="align-right">
+                  <strong>{formatDuration(task.duration)}</strong>
+                  <span>{task.eventCount} 事件</span>
+                </div>
+              </button>
+            ))}
+          </div>
+
+          <div className="pagination">
+            共 {tasks.pagination.total} 条
+          </div>
+        </section>
+
+        <section className="panel">
+          {!selectedId && (
+            <div className="muted">选择一个任务查看进化时间线详情</div>
+          )}
+          {trace && (
+            <div className="detail-stack">
+              <div className="detail-header">
+                <div>
+                  <h3>任务 {trace.task.taskId}</h3>
+                  <p>来源: {trace.task.source} | 分数: {trace.task.score}</p>
+                  <p style={{ fontSize: '0.85em', color: '#6b7280' }}>{trace.task.reason}</p>
+                </div>
+                <span className="badge" style={{ background: STAGE_COLORS[trace.task.status] || '#6b7280' }}>
+                  {trace.task.status}
+                </span>
+              </div>
+
+              <article>
+                <h4>进化时间线</h4>
+                <div className="timeline">
+                  {trace.timeline.map((item, index) => (
+                    <div className="timeline-item" key={`${item.stage}-${index}`}>
+                      <div
+                        className="timeline-marker"
+                        style={{ background: item.stageColor }}
+                      />
+                      <div className="timeline-content">
+                        <div className="timeline-time">{formatDate(item.timestamp)}</div>
+                        <div className="timeline-stage" style={{ color: item.stageColor }}>
+                          {item.stageLabel}
+                        </div>
+                        <div className="timeline-summary">{item.summary || item.message}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </article>
+
+              {trace.events.length > 0 && (
+                <article>
+                  <h4>详细事件 ({trace.events.length})</h4>
+                  <div className="stack">
+                    {trace.events.slice(0, 10).map((event) => (
+                      <div className="row-card vertical" key={event.id}>
+                        <div>
+                          <strong style={{ color: event.stageColor }}>{event.stageLabel}</strong>
+                          <span>{formatDate(event.createdAt)}</span>
+                        </div>
+                        <div style={{ fontSize: '0.9em', color: '#374151' }}>
+                          {event.summary || event.message}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </article>
+              )}
+            </div>
+          )}
+        </section>
+      </div>
+    </div>
+  );
+}
+
 export function App() {
   return (
     <BrowserRouter basename="/plugins/principles">
@@ -425,6 +615,7 @@ export function App() {
         <Routes>
           <Route path="/" element={<Navigate to="/overview" replace />} />
           <Route path="/overview" element={<OverviewPage />} />
+          <Route path="/evolution" element={<EvolutionPage />} />
           <Route path="/samples" element={<SamplesPage />} />
           <Route path="/thinking-models" element={<ThinkingModelsPage />} />
         </Routes>
