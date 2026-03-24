@@ -354,6 +354,12 @@ export class PainConfig {
         
         // Ensure intervals are positive
         if (settings.intervals.worker_poll_ms < 1000) settings.intervals.worker_poll_ms = 15 * 60 * 1000;
+        
+        // Ensure percentage limits are in valid range [0, 100]
+        const l = settings.trust.limits;
+        if (l.stage_2_max_percentage < 0 || l.stage_2_max_percentage > 100) l.stage_2_max_percentage = 10;
+        if (l.stage_3_max_percentage < 0 || l.stage_3_max_percentage > 100) l.stage_3_max_percentage = 15;
+        if (l.min_lines_fallback < 1) l.min_lines_fallback = 20;
     }
 
     /**

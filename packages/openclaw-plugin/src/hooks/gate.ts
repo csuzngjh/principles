@@ -644,7 +644,8 @@ function buildLineLimitReason(
            `Threshold calculation: min(${targetLineCount} × ${actualPercentage}%, ${effectiveLimit} lines).`;
   } else {
     return `Modification too large: ${lineChanges} lines. ` +
-           `Stage ${stage} limit is ${effectiveLimit} lines (fixed threshold, target file not found).`;
+           `Stage ${stage} limit is ${effectiveLimit} lines (fixed threshold). ` +
+           `Note: Could not read target file to calculate percentage-based limit. Check file permissions and encoding.`;
   }
 }
 
