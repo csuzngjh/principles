@@ -257,6 +257,7 @@ export interface PainDetectedData {
   score?: number;
   sessionId?: string;
   taskId?: string;
+  traceId?: string;
 }
 
 export interface CandidateCreatedData {

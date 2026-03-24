@@ -3,6 +3,8 @@ import path from 'path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { OpenClawPluginApi, OpenClawPluginHttpRouteParams } from '../openclaw-sdk.js';
 import { ControlUiQueryService } from '../service/control-ui-query-service.js';
+import { getEvolutionQueryService } from '../service/evolution-query-service.js';
+import { TrajectoryRegistry } from '../core/trajectory.js';
 
 const ROUTE_PREFIX = '/plugins/principles';
 const API_PREFIX = `${ROUTE_PREFIX}/api`;
@@ -200,6 +202,63 @@ function handleApiRoute(
       return true;
     } finally {
       service.dispose();
+    }
+  }
+
+  // === Evolution API ===
+  const evolutionService = () => {
+    const workspaceDir = api.resolvePath('.');
+    const trajectory = TrajectoryRegistry.get(workspaceDir);
+    return getEvolutionQueryService(trajectory);
+  };
+
+  if (pathname === `${API_PREFIX}/evolution/tasks` && method === 'GET') {
+    return done(() => {
+      const evoService = evolutionService();
+      return evoService.getTasks({
+        status: url.searchParams.get('status') ?? undefined,
+        dateFrom: url.searchParams.get('dateFrom') ?? undefined,
+        dateTo: url.searchParams.get('dateTo') ?? undefined,
+        page: url.searchParams.has('page') ? Number(url.searchParams.get('page')) : undefined,
+        pageSize: url.searchParams.has('pageSize') ? Number(url.searchParams.get('pageSize')) : undefined,
+      });
+    });
+  }
+
+  if (pathname === `${API_PREFIX}/evolution/events` && method === 'GET') {
+    return done(() => {
+      const evoService = evolutionService();
+      return evoService.getEvents({
+        traceId: url.searchParams.get('traceId') ?? undefined,
+        stage: url.searchParams.get('stage') ?? undefined,
+        limit: url.searchParams.has('limit') ? Number(url.searchParams.get('limit')) : undefined,
+        offset: url.searchParams.has('offset') ? Number(url.searchParams.get('offset')) : undefined,
+      });
+    });
+  }
+
+  if (pathname === `${API_PREFIX}/evolution/stats` && method === 'GET') {
+    return done(() => {
+      const evoService = evolutionService();
+      return evoService.getStats();
+    });
+  }
+
+  const evolutionTraceMatch = pathname.match(/^\/plugins\/principles\/api\/evolution\/trace\/([^/]+)$/);
+  if (evolutionTraceMatch && method === 'GET') {
+    try {
+      const evoService = evolutionService();
+      const trace = evoService.getTrace(decodeURIComponent(evolutionTraceMatch[1]));
+      if (!trace) {
+        json(res, 404, { error: 'not_found', message: 'Evolution trace not found.' });
+        return true;
+      }
+      json(res, 200, trace);
+      return true;
+    } catch (error) {
+      api.logger.warn(`[PD:ControlUI] Evolution trace request failed for ${pathname}: ${String(error)}`);
+      json(res, 500, { error: 'internal_error', message: String(error) });
+      return true;
     }
   }
 

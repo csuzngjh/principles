@@ -4,6 +4,10 @@ import type {
   SamplesResponse,
   ThinkingModelDetailResponse,
   ThinkingOverviewResponse,
+  EvolutionTasksResponse,
+  EvolutionEventsResponse,
+  EvolutionTraceResponse,
+  EvolutionStatsResponse,
 } from './types';
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -49,5 +53,18 @@ export const api = {
   },
   exportCorrections(mode: 'raw' | 'redacted'): string {
     return `/plugins/principles/api/export/corrections?mode=${mode}`;
+  },
+  // Evolution API
+  getEvolutionTasks(search: URLSearchParams): Promise<EvolutionTasksResponse> {
+    return requestJson(`/plugins/principles/api/evolution/tasks?${search.toString()}`);
+  },
+  getEvolutionEvents(search: URLSearchParams): Promise<EvolutionEventsResponse> {
+    return requestJson(`/plugins/principles/api/evolution/events?${search.toString()}`);
+  },
+  getEvolutionTrace(traceId: string): Promise<EvolutionTraceResponse> {
+    return requestJson(`/plugins/principles/api/evolution/trace/${encodeURIComponent(traceId)}`);
+  },
+  getEvolutionStats(): Promise<EvolutionStatsResponse> {
+    return requestJson('/plugins/principles/api/evolution/stats');
   },
 };
