@@ -4,7 +4,7 @@ import type { PluginHookBeforePromptBuildEvent, PluginHookAgentContext, PluginHo
 import { clearInjectedProbationIds, getSession, resetFriction, setInjectedProbationIds } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { ContextInjectionConfig, defaultContextConfig } from '../types.js';
-import { extractSummary, getHistoryVersions } from '../core/focus-history.js';
+import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection } from '../core/focus-history.js';
 import { empathyObserverManager, type EmpathyObserverApi } from '../service/empathy-observer-manager.js';
 import { PathResolver } from '../core/path-resolver.js';
 
@@ -206,7 +206,35 @@ ${conversationContext}`;
   taskDescription += `
 
 ---
-Analyze the root cause using 5 Whys methodology. Check evidence in codebase before concluding.`;
+## 执行指令
+
+使用 5 Whys 方法进行根因分析，输出 JSON 格式结果。
+
+### 必执行步骤：
+1. **Phase 1 - 证据收集**: 读取日志、搜索代码，记录证据来源
+2. **Phase 2 - 因果链构建**: 每个 Why 必须有证据支撑，最多 5 层
+3. **Phase 3 - 根因分类**: 归类为 People/Design/Assumption/Tooling
+4. **Phase 4 - 原则提炼**: 提炼可复用的防护原则
+
+### 终止条件（满足任一即停止）:
+- 找到可修改代码直接解决的问题
+- 找到缺失的门禁规则或检查机制
+- 连续 2 个 Why 无法提出更深假设
+
+### 输出格式：
+\`\`\`json
+{
+  "diagnosis_report": {
+    "task_id": "...",
+    "summary": "一句话总结根因",
+    "causal_chain": [...],
+    "root_cause": { "category": "Design", "description": "..." },
+    "principle": { "trigger_pattern": "...", "action": "..." }
+  }
+}
+\`\`\`
+
+详细执行协议请参考你的系统提示词。`;
 
   return taskDescription;
 }
@@ -651,12 +679,19 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
 
   // Project Context (configurable: full/summary/off) - moved to appendSystemContext for WebUI UX
   let projectContextContent = '';
+  let workingMemoryContent = '';
   if (!isMinimalMode && contextConfig.projectFocus !== 'off') {
     const focusPath = wctx.resolve('CURRENT_FOCUS');
     if (fs.existsSync(focusPath)) {
       try {
         const currentFocus = fs.readFileSync(focusPath, 'utf8').trim();
         if (currentFocus) {
+          // 解析工作记忆部分（用于独立注入）
+          const workingMemorySnapshot = parseWorkingMemorySection(currentFocus);
+          if (workingMemorySnapshot) {
+            workingMemoryContent = workingMemoryToInjection(workingMemorySnapshot);
+          }
+          
           if (contextConfig.projectFocus === 'summary') {
             // Summary mode: intelligent extraction prioritizing key sections
             projectContextContent = extractSummary(currentFocus, 30);
@@ -717,12 +752,17 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
   }
 
   // Build appendSystemContext with recency effect
-  // Content order (most important last): project_context -> reflection_log -> thinking_os -> principles
+  // Content order (most important last): project_context -> working_memory -> reflection_log -> thinking_os -> principles
   const appendParts: string[] = [];
 
   // 1. Project Context (lowest priority, goes first)
   if (projectContextContent) {
     appendParts.push(`<project_context>\n${projectContextContent}\n</project_context>`);
+  }
+
+  // 1.5. Working Memory (preserved from last compaction)
+  if (workingMemoryContent) {
+    appendParts.push(workingMemoryContent);
   }
 
   // 2. Reflection Log

@@ -669,13 +669,13 @@ describe('GFI Gate - Hard Intercept', () => {
       expect(mockEventLog.recordGateBlock).toHaveBeenCalledWith('test-session', {
         toolName: 'write',
         filePath: 'src/large-change.ts',
-        reason: 'Modification too large (20 lines) for Stage 2. Max allowed is 10.',
+        reason: 'Modification too large: 20 lines. Stage 2 limit is 10 lines (fixed threshold). Note: Could not read target file to calculate percentage-based limit. Check file permissions and encoding.',
       });
       expect(mockTrajectory.recordGateBlock).toHaveBeenCalledWith({
         sessionId: 'test-session',
         toolName: 'write',
         filePath: 'src/large-change.ts',
-        reason: 'Modification too large (20 lines) for Stage 2. Max allowed is 10.',
+        reason: 'Modification too large: 20 lines. Stage 2 limit is 10 lines (fixed threshold). Note: Could not read target file to calculate percentage-based limit. Check file permissions and encoding.',
       });
     });
 
@@ -710,7 +710,7 @@ describe('GFI Gate - Hard Intercept', () => {
       expect(mockEventLog.recordGateBlock).toHaveBeenCalledWith('test-session', {
         toolName: 'write',
         filePath: 'src/large-change.ts',
-        reason: 'Modification too large (20 lines) for Stage 2. Max allowed is 10.',
+        reason: 'Modification too large: 20 lines. Stage 2 limit is 10 lines (fixed threshold). Note: Could not read target file to calculate percentage-based limit. Check file permissions and encoding.',
       });
       expect(mockTrajectory.recordGateBlock).toHaveBeenCalledTimes(2);
     });

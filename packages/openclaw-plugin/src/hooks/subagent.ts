@@ -4,6 +4,7 @@ import { writePainFlag } from '../core/pain.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { empathyObserverManager, type EmpathyObserverApi } from '../service/empathy-observer-manager.js';
 import { acquireQueueLock } from '../service/evolution-worker.js';
+import { isSubagentRuntimeAvailable } from '../utils/subagent-probe.js';
 
 const COMPLETION_RETRY_DELAY_MS = 250;
 const COMPLETION_MAX_RETRIES = 3;
@@ -12,7 +13,7 @@ const TASK_OUTCOME_RETRY_DELAY_MS = 250;
 const TASK_OUTCOME_MAX_RETRIES = 3;
 const DIAGNOSTICIAN_SESSION_PREFIX = 'agent:diagnostician:';
 const completionRetryCounts = new Map<string, { count: number; expires: number }>();
-type HookLogger = Pick<PluginLogger, 'warn' | 'error'>;
+type HookLogger = Pick<PluginLogger, 'info' | 'warn' | 'error'>;
 
 // Cleanup expired retry entries periodically
 function cleanupExpiredRetryEntries(): void {
@@ -31,6 +32,7 @@ function emitSubagentPainEvent(
         reason: string;
         score: number;
         sessionId?: string;
+        agentId?: string;
     },
     logger: HookLogger
 ): void {
@@ -45,6 +47,7 @@ function emitSubagentPainEvent(
                 reason: payload.reason,
                 score: payload.score,
                 sessionId: payload.sessionId,
+                agentId: payload.agentId,
             },
         });
     } catch (e) {
@@ -54,6 +57,13 @@ function emitSubagentPainEvent(
 
 function isDiagnosticianSession(targetSessionKey: string | undefined): boolean {
     return typeof targetSessionKey === 'string' && targetSessionKey.startsWith(DIAGNOSTICIAN_SESSION_PREFIX);
+}
+
+function extractAgentIdFromSessionKey(sessionKey: string | undefined): string | undefined {
+    // sessionKey format: "agent:{agentId}:{type}:{uuid}" or "agent:{agentId}:{uuid}"
+    if (!sessionKey) return undefined;
+    const match = sessionKey.match(/^agent:([^:]+):/);
+    return match ? match[1] : undefined;
 }
 
 function cleanupPainFlagForTask(wctx: WorkspaceContext, completedTaskId: string, queue: any[], logger: HookLogger): void {
@@ -148,6 +158,7 @@ type SubagentEndedHookContext = PluginHookSubagentContext & {
     api?: EmpathyObserverApi;
     workspaceDir?: string;
     sessionId?: string;
+    agentId?: string;
 };
 
 export async function handleSubagentEnded(
@@ -168,25 +179,45 @@ export async function handleSubagentEnded(
 
     const config = wctx.config;
 
-    if (outcome === 'error' || outcome === 'timeout') {
+    // ── Outcome-based Trust Score and Pain Signal handling ──
+    // OpenClaw v2026.3.23 fixes: timeout may be false positive (fast-finishing workers)
+    // Only penalize actual errors, not timeout/killed/reset
+    
+    if (outcome === 'error') {
+        // Only actual errors trigger penalty
         const scoreSettings = config.get('scores');
-        const score = outcome === 'error' ? scoreSettings.subagent_error_penalty : scoreSettings.subagent_timeout_penalty;
-        const reason = `Subagent session ${targetSessionKey} ended with outcome: ${outcome}`;
+        const score = scoreSettings.subagent_error_penalty;
+        const reason = `Subagent session ${targetSessionKey} ended with error`;
 
         writePainFlag(workspaceDir, {
-            source: `subagent_${outcome}`,
+            source: `subagent_error`,
             score: String(score),
             time: new Date().toISOString(),
             reason,
-            is_risky: 'true'
+            is_risky: 'true',
+            session_id: ctx.sessionId || '',
+            agent_id: ctx.agentId || extractAgentIdFromSessionKey(targetSessionKey) || '',
         });
 
         emitSubagentPainEvent(wctx, {
-            source: `subagent_${outcome}`,
+            source: `subagent_error`,
             reason,
             score,
             sessionId: ctx.sessionId,
+            agentId: ctx.agentId || extractAgentIdFromSessionKey(targetSessionKey),
         }, logger);
+    }
+
+    if (outcome === 'timeout') {
+        // OpenClaw v2026.3.23 fix: timeout may be false positive
+        // Fast-finishing workers are no longer incorrectly reported as timed out
+        // Do not penalize - the task may have actually succeeded
+        logger.warn(`[PD:Subagent] Session ${targetSessionKey} timed out - not penalizing (OpenClaw fix applied)`);
+    }
+
+    if (outcome === 'killed' || outcome === 'reset') {
+        // User-initiated termination or system reset - not an agent failure
+        logger.info(`[PD:Subagent] Session ${targetSessionKey} ended with ${outcome} - no penalty (user/system action)`);
     }
 
     if (outcome === 'ok' || outcome === 'deleted') {
@@ -213,13 +244,49 @@ export async function handleSubagentEnded(
         const queue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
         let completedTaskId: string | null = null;
 
-        const matchedTask = queue.find((task: any) =>
-            task?.status === 'in_progress'
-            && typeof task?.assigned_session_key === 'string'
-            && task.assigned_session_key === targetSessionKey
-        );
+        // Improved matching logic: support both direct session key match and HEARTBEAT placeholder match
+        // This fixes task_outcomes being empty for HEARTBEAT-triggered diagnostician runs
+        const matchedTask = queue.find((task: any) => {
+            if (task?.status !== 'in_progress') return false;
+            
+            const taskSessionKey = task?.assigned_session_key;
+            
+            // 1. Exact match: direct session key assignment
+            if (typeof taskSessionKey === 'string' && taskSessionKey === targetSessionKey) {
+                return true;
+            }
+            
+            // 2. HEARTBEAT placeholder match: for diagnostician sessions
+            // Tasks started via HEARTBEAT have placeholder like "heartbeat:diagnostician:{taskId}"
+            if (isDiagnosticianSession(targetSessionKey)) {
+                // Match tasks with HEARTBEAT placeholder
+                if (typeof taskSessionKey === 'string' && taskSessionKey.startsWith('heartbeat:diagnostician')) {
+                    return true;
+                }
+                // Backward compatibility: match tasks with no assigned_session_key (legacy behavior)
+                // Only match tasks started within 2 hours to avoid stale task matching
+                if (taskSessionKey === undefined || taskSessionKey === null) {
+                    const taskStartedAt = task?.started_at ? new Date(task.started_at).getTime() : 0;
+                    const taskAge = taskStartedAt > 0 ? Date.now() - taskStartedAt : Infinity;
+                    const LEGACY_FALLBACK_MAX_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours
+                    if (taskAge < LEGACY_FALLBACK_MAX_AGE_MS) {
+                        return true;
+                    }
+                }
+            }
+            
+            return false;
+        });
 
         if (matchedTask) {
+            // Enhanced observability: log match type for debugging
+            const matchType = matchedTask.assigned_session_key === targetSessionKey 
+                ? 'exact' 
+                : matchedTask.assigned_session_key?.startsWith('heartbeat:diagnostician')
+                    ? 'heartbeat_placeholder'
+                    : 'legacy_fallback';
+            logger.info(`[PD:Subagent] Matched session ${targetSessionKey} to task ${matchedTask.id} (match_type: ${matchType})`);
+            
             matchedTask.status = 'completed';
             matchedTask.completed_at = new Date().toISOString();
             delete matchedTask.assigned_session_key;
@@ -256,10 +323,102 @@ export async function handleSubagentEnded(
                 scheduleTaskOutcomeRetry(wctx, taskOutcomePayload, 1, logger);
             }
         }
+
+        // Read diagnostician output and create principle with generalized pattern
+        if (completedTaskId && isSubagentRuntimeAvailable(ctx.api?.runtime?.subagent)) {
+            try {
+                const messages = await ctx.api?.runtime?.subagent?.getSessionMessages?.({
+                    sessionKey: targetSessionKey,
+                    limit: 50
+                });
+
+                const assistantText = extractAssistantText(messages);
+                const report = parseDiagnosticianReport(assistantText);
+
+                if (report?.principle) {
+                    const principleId = wctx.evolutionReducer.createPrincipleFromDiagnosis({
+                        painId: matchedTask?.id || completedTaskId,
+                        painType: 'tool_failure',  // Default, could be extracted from task
+                        triggerPattern: report.principle.trigger_pattern,
+                        action: report.principle.action,
+                        source: matchedTask?.source || 'diagnostician'
+                    });
+
+                    if (principleId) {
+                        logger.warn(`[PD:Subagent] Created principle ${principleId} from diagnostician analysis for task ${completedTaskId}`);
+                    }
+                }
+            } catch (e) {
+                logger.warn(`[PD:Subagent] Failed to read diagnostician output: ${String(e)}`);
+            }
+        }
     } catch (e) {
         logger.error(`[PD:Subagent] Failed to update evolution queue: ${String(e)}`);
         scheduleCompletionRetry(event, ctx, attempt);
     } finally {
         releaseLock?.();
     }
+}
+
+/**
+ * Extract text content from assistant messages
+ */
+function extractAssistantText(messages: unknown): string {
+    if (!messages || !Array.isArray(messages)) return '';
+
+    const texts: string[] = [];
+    for (const msg of messages) {
+        if (msg?.role !== 'assistant') continue;
+        const content = msg?.content;
+        if (Array.isArray(content)) {
+            for (const block of content) {
+                if (block?.type === 'text' && typeof block.text === 'string') {
+                    texts.push(block.text);
+                }
+            }
+        } else if (typeof content === 'string') {
+            texts.push(content);
+        }
+    }
+    return texts.join('\n');
+}
+
+/**
+ * Parse diagnostician JSON report from text
+ */
+function parseDiagnosticianReport(text: string): { principle?: { trigger_pattern: string; action: string } } | null {
+    // Try to find JSON in markdown code block
+    const jsonMatch = text.match(/```json\n([\s\S]*?)\n```/);
+    if (jsonMatch) {
+        try {
+            const parsed = JSON.parse(jsonMatch[1]);
+            // Support both direct principle and nested phases.principle_extraction structure
+            if (parsed?.principle) {
+                return { principle: parsed.principle };
+            }
+            if (parsed?.phases?.principle_extraction?.principle) {
+                return { principle: parsed.phases.principle_extraction.principle };
+            }
+        } catch {
+            // Fall through to return null
+        }
+    }
+
+    // Try to find raw JSON object
+    const objectMatch = text.match(/\{[\s\S]*"principle"[\s\S]*\}/);
+    if (objectMatch) {
+        try {
+            const parsed = JSON.parse(objectMatch[0]);
+            if (parsed?.principle) {
+                return { principle: parsed.principle };
+            }
+            if (parsed?.phases?.principle_extraction?.principle) {
+                return { principle: parsed.phases.principle_extraction.principle };
+            }
+        } catch {
+            // Fall through to return null
+        }
+    }
+
+    return null;
 }

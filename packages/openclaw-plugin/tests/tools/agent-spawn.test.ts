@@ -36,10 +36,8 @@ describe('createAgentSpawnTool', () => {
     vi.clearAllMocks();
 
     // Create mock functions that pass the AsyncFunction check
-    const mockAsyncFn = <T extends (...args: any[]) => Promise<any>>(
-      impl: ReturnType<typeof vi.fn>
-    ) => {
-      const fn = vi.fn() as unknown as impl;
+    const mockAsyncFn = () => {
+      const fn = vi.fn();
       // Make constructor.name return 'AsyncFunction' to pass isSubagentAvailable check
       Object.defineProperty(fn, 'constructor', {
         value: function AsyncFunction() {},

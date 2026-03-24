@@ -479,7 +479,9 @@ describe('Prompt Context Injection Hook', () => {
     expect(result?.prependContext).toContain('**Source**: hook_failure');
     expect(result?.prependContext).toContain('**Reason**: Hook execution failed');
     expect(result?.prependContext).toContain('**Trigger Text**: \\\"trace preview\\\"');
-    expect(result?.prependContext).toContain('Analyze the root cause using 5 Whys methodology');
+    expect(result?.prependContext).toContain('使用 5 Whys 方法进行根因分析');
+    expect(result?.prependContext).toContain('Phase 1 - 证据收集');
+    expect(result?.prependContext).toContain('diagnosis_report');
   });
 
 
