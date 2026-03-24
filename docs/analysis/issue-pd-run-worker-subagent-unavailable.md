@@ -700,3 +700,163 @@ if (!isSubagentAvailable) {
 | `src/service/evolution-worker.ts` | 功能新增 | `processEvolutionQueue` 在标记 `in_progress` 后写入 `HEARTBEAT.md` |
 | `src/service/empathy-observer-manager.ts` | Bug 修复 | 新增 `isSubagentAvailable()` 探测，避免 embedded 模式下的噪音日志 |
 | `src/tools/agent-spawn.ts` | Bug 修复 | 修复 subagent 可用性检测逻辑，提供清晰的错误提示 |
+
+---
+
+## 12. 生产环境验证结果（2026-03-24）
+
+### 12.1 运行模式确认
+
+**生产服务器**：谷歌云 Debian
+**运行模式**：✅ Gateway 模式
+
+```
+$ ps aux | grep openclaw
+csuzngjh 3591647  4.5  4.9 23648064 1638764 ?    Ssl  Mar23  35:53 openclaw-gateway
+
+$ netstat -tlnp | grep openclaw
+tcp        0      0 127.0.0.1:18789         0.0.0.0:*               LISTEN      3591647/openclaw-ga
+tcp        0      0 127.0.0.1:18791         0.0.0.0:*               LISTEN      3591647/openclaw-ga
+tcp        0      0 127.0.0.1:18792         0.0.0.0:*               LISTEN      3591647/openclaw-ga
+```
+
+### 12.2 关键发现
+
+**问题重新定位**：
+
+| 链路 | 状态 | 证据 |
+|------|------|------|
+| Pain 信号触发 | ✅ 工作 | `pain_events` 表有 5 条记录 |
+| Principle 自动生成 | ✅ 工作 | `principle_events` 表有 10 条记录 |
+| diagnostician 子智能体 | ❌ 从未运行 | `task_outcomes` 表是空的（0 行） |
+| pain_dictionary 更新 | ❌ 没有新规则 | 只有 4 条初始规则 |
+
+**核心结论**：
+1. Gateway 模式下 `api.runtime.subagent` 应该可用
+2. 但 diagnostician 子智能体从未成功运行
+3. Principle 是通过 `onPainDetected()` 自动生成的，不依赖 diagnostician
+4. **真正的问题**：为什么 Gateway 模式下 subagent 仍然不工作？
+
+### 12.3 待排查项
+
+需要在生产服务器上检查：
+
+1. subagent/diagnostician 相关日志
+2. evolution_queue.json 中 in_progress 任务状态
+3. HEARTBEAT.md 是否有 Evolution Task
+4. pd_run_worker 工具是否被调用
+
+### 12.4 生产数据备份位置
+
+本地备份：`D:\Code\spicy_evolver_souls`
+
+---
+
+## 13. 诊断深入分析（2026-03-24 下午）
+
+### 13.1 关键发现：diagnostician 确实在运行！
+
+通过分析生产环境同步的数据，发现之前的假设是错误的：
+
+| 指标 | workspace-main | workspace-diagnostician |
+|------|----------------|------------------------|
+| task_outcomes | **0** | **0** |
+| sessions | - | 78 |
+| tool_calls | - | 63 |
+| pain_events | 48 | 0 |
+| gate_blocks | 42 | 0 |
+
+**结论**：diagnostician 子智能体**确实在运行**（78 个会话，63 个工具调用），但 `task_outcomes` 表为空。
+
+### 13.2 evolution_queue.json 状态分析
+
+```
+=== Evolution Queue Analysis ===
+
+Task ID: 36f252fa
+  Status: in_progress
+  Assigned Session: agent:diagnostician:ad069408-1f9e-41c4-8a17-ba12b46833cf
+  Started At: 2026-03-24T01:56:48.031Z
+
+Task ID: e5da4f5c
+  Status: in_progress
+  Assigned Session: N/A  ← 问题！
+  Started At: 2026-03-24T02:11:48.049Z
+
+Task ID: 24e30221
+  Status: in_progress
+  Assigned Session: N/A  ← 问题！
+  Started At: 2026-03-24T02:26:41.883Z
+```
+
+**发现问题**：部分 `in_progress` 任务没有 `assigned_session_key`。
+
+### 13.3 根因分析
+
+`handleSubagentEnded()` 的匹配条件：
+
+```typescript
+const matchedTask = queue.find((task: any) =>
+    task?.status === 'in_progress'
+    && typeof task?.assigned_session_key === 'string'
+    && task.assigned_session_key === targetSessionKey
+);
+```
+
+**问题**：
+1. 如果任务没有 `assigned_session_key`，永远无法匹配
+2. `registerDiagnosticianRun()` 只在 `extractEvolutionTaskId(task)` 返回非空时工作
+3. HEARTBEAT 方式会**删除** `assigned_session_key`（evolution-worker.ts 第 297 行）
+
+### 13.4 两种启动路径的冲突
+
+| 启动方式 | assigned_session_key | handleSubagentEnded 匹配 |
+|----------|---------------------|------------------------|
+| pd_run_worker | ✅ 有（通过 registerDiagnosticianRun） | ✅ 可匹配 |
+| HEARTBEAT | ❌ 被删除 | ❌ 无法匹配 |
+
+**冲突**：HEARTBEAT 方式在标记任务为 `in_progress` 后删除了 `assigned_session_key`，导致后续任何 `pd_run_worker` 调用都无法正确关联。
+
+### 13.5 真正的问题
+
+**不是** "diagnostician 不工作"，而是：
+
+1. diagnostician 确实在运行（78 个会话）
+2. 但 `handleSubagentEnded()` 找不到匹配的任务
+3. 因为 `assigned_session_key` 要么没设置，要么被删除了
+4. 结果：任务状态无法更新，`task_outcomes` 无法记录
+
+### 13.6 修复建议
+
+**方案 1**：修改 `handleSubagentEnded()` 匹配逻辑
+
+不再依赖 `assigned_session_key`，而是使用 `extractEvolutionTaskId()` 从任务描述中提取 ID：
+
+```typescript
+// 当前逻辑
+const matchedTask = queue.find((task: any) =>
+    task?.status === 'in_progress'
+    && task?.assigned_session_key === targetSessionKey
+);
+
+// 建议改为
+const targetTaskId = extractEvolutionTaskId(/* 从 context 获取 */);
+const matchedTask = queue.find((task: any) =>
+    task?.status === 'in_progress'
+    && (task?.assigned_session_key === targetSessionKey || task?.id === targetTaskId)
+);
+```
+
+**方案 2**：统一启动路径
+
+废弃 HEARTBEAT 方式，全部使用 `pd_run_worker` 启动 diagnostician。
+
+**方案 3**：HEARTBEAT 完成后手动标记
+
+在 HEARTBEAT.md 中添加指令，让代理完成后调用一个新命令（如 `/pd-complete-task <id>`）来手动标记任务完成。
+
+### 13.7 下一步行动
+
+1. 在 `handleSubagentEnded()` 中添加更多调试日志
+2. 验证 `registerDiagnosticianRun()` 是否被正确调用
+3. 检查 HEARTBEAT 和 pd_run_worker 是否同时运行导致冲突

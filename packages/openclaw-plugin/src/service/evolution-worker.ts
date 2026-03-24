@@ -27,6 +27,7 @@ export interface EvolutionQueueItem {
     assigned_session_key?: string;
     trigger_text_preview?: string;
     status: 'pending' | 'in_progress' | 'completed';
+    resolution?: 'marker_detected' | 'auto_completed_timeout';
 }
 
 const PAIN_QUEUE_DEDUP_WINDOW_MS = 30 * 60 * 1000;
@@ -261,19 +262,51 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
         let queueChanged = false;
 
         const config = wctx.config;
-        const timeout = config.get('intervals.task_timeout_ms') || (30 * 60 * 1000);
+        const timeout = config.get('intervals.task_timeout_ms') || (60 * 60 * 1000); // Default 1 hour
 
-        for (const task of queue) {
-            if (task.status === 'in_progress' && task.timestamp) {
-                const startedAt = task.started_at || task.timestamp;
-                const age = Date.now() - new Date(startedAt).getTime();
-                if (age > timeout) {
-                    if (logger) logger.info(`[PD:EvolutionWorker] Resetting timed-out task: ${task.id}`);
-                    task.status = 'pending';
-                    delete task.started_at;
-                    delete task.assigned_session_key;
-                    queueChanged = true;
+        // Check in_progress tasks for completion
+        for (const task of queue.filter(t => t.status === 'in_progress')) {
+            const startedAt = new Date(task.started_at || task.timestamp);
+            
+            // Condition 1: Check for marker file (created by diagnostician on completion)
+            const completeMarker = path.join(wctx.stateDir, `.evolution_complete_${task.id}`);
+            if (fs.existsSync(completeMarker)) {
+                if (logger) logger.info(`[PD:EvolutionWorker] Task ${task.id} completed - marker file detected`);
+                task.status = 'completed';
+                task.completed_at = new Date().toISOString();
+                task.resolution = 'marker_detected';
+                try {
+                    fs.unlinkSync(completeMarker); // Clean up marker file
+                } catch {
+                    // Best effort cleanup
                 }
+                
+                wctx.trajectory?.recordTaskOutcome({
+                    sessionId: task.assigned_session_key || 'heartbeat:diagnostician',
+                    taskId: task.id,
+                    outcome: 'ok',
+                    summary: `Task ${task.id} completed - marker file detected.`
+                });
+                queueChanged = true;
+                continue;
+            }
+            
+            // Condition 2: Timeout auto-complete
+            const age = Date.now() - startedAt.getTime();
+            if (age > timeout) {
+                const timeoutMinutes = Math.round(timeout / 60000);
+                if (logger) logger.info(`[PD:EvolutionWorker] Task ${task.id} auto-completed after ${timeoutMinutes} minute timeout`);
+                task.status = 'completed';
+                task.completed_at = new Date().toISOString();
+                task.resolution = 'auto_completed_timeout';
+                
+                wctx.trajectory?.recordTaskOutcome({
+                    sessionId: task.assigned_session_key || 'heartbeat:diagnostician',
+                    taskId: task.id,
+                    outcome: 'timeout',
+                    summary: `Task ${task.id} auto-completed after ${timeoutMinutes} minute timeout.`
+                });
+                queueChanged = true;
             }
         }
 
@@ -308,6 +341,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
             try {
                 const agentDef = loadAgentDefinition('diagnostician');
                 const heartbeatPath = wctx.resolve('HEARTBEAT');
+                const markerFilePath = path.join(wctx.stateDir, `.evolution_complete_${highestScoreTask.id}`);
                 const heartbeatContent = [
                     `## Evolution Task [ID: ${highestScoreTask.id}]`,
                     ``,
@@ -323,8 +357,10 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
                     ``,
                     `---`,
                     ``,
-                    `After completing the analysis, write the resulting principle(s) to PRINCIPLES.md`,
-                    `and mark the task complete by replacing this file content with "HEARTBEAT_OK".`,
+                    `After completing the analysis:`,
+                    `1. Write the resulting principle(s) to PRINCIPLES.md`,
+                    `2. Mark the task complete by creating an empty file: ${markerFilePath}`,
+                    `3. Replace this HEARTBEAT.md content with "HEARTBEAT_OK"`,
                 ].join('\n');
                 fs.writeFileSync(heartbeatPath, heartbeatContent, 'utf8');
                 if (logger) logger.info(`[PD:EvolutionWorker] Wrote diagnostician task to HEARTBEAT.md for task ${highestScoreTask.id}`);
