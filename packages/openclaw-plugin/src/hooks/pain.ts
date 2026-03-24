@@ -107,6 +107,7 @@ export function handleAfterToolCall(
         score: 100,
         sessionId,
         traceId,
+        agentId: ctx.agentId,
       },
     });
     return;
@@ -281,6 +282,8 @@ export function handleAfterToolCall(
     reason: `Tool ${event.toolName} failed on ${relPath}. Error: ${event.error ?? 'Non-zero exit code'}`,
     is_risky: String(isRisk),
     trace_id: traceId,
+    session_id: sessionId,
+    agent_id: ctx.agentId || '',
   };
 
   writePainFlag(effectiveWorkspaceDir, painData);
@@ -323,6 +326,7 @@ export function handleAfterToolCall(
       score: painScore,
       sessionId,
       traceId,
+      agentId: ctx.agentId,
     },
   });
 }

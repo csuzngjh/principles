@@ -4,6 +4,7 @@ import { writePainFlag } from '../core/pain.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { empathyObserverManager, type EmpathyObserverApi } from '../service/empathy-observer-manager.js';
 import { acquireQueueLock } from '../service/evolution-worker.js';
+import { isSubagentRuntimeAvailable } from '../utils/subagent-probe.js';
 
 const COMPLETION_RETRY_DELAY_MS = 250;
 const COMPLETION_MAX_RETRIES = 3;
@@ -31,6 +32,7 @@ function emitSubagentPainEvent(
         reason: string;
         score: number;
         sessionId?: string;
+        agentId?: string;
     },
     logger: HookLogger
 ): void {
@@ -45,6 +47,7 @@ function emitSubagentPainEvent(
                 reason: payload.reason,
                 score: payload.score,
                 sessionId: payload.sessionId,
+                agentId: payload.agentId,
             },
         });
     } catch (e) {
@@ -54,6 +57,13 @@ function emitSubagentPainEvent(
 
 function isDiagnosticianSession(targetSessionKey: string | undefined): boolean {
     return typeof targetSessionKey === 'string' && targetSessionKey.startsWith(DIAGNOSTICIAN_SESSION_PREFIX);
+}
+
+function extractAgentIdFromSessionKey(sessionKey: string | undefined): string | undefined {
+    // sessionKey format: "agent:{agentId}:{type}:{uuid}" or "agent:{agentId}:{uuid}"
+    if (!sessionKey) return undefined;
+    const match = sessionKey.match(/^agent:([^:]+):/);
+    return match ? match[1] : undefined;
 }
 
 function cleanupPainFlagForTask(wctx: WorkspaceContext, completedTaskId: string, queue: any[], logger: HookLogger): void {
@@ -148,6 +158,7 @@ type SubagentEndedHookContext = PluginHookSubagentContext & {
     api?: EmpathyObserverApi;
     workspaceDir?: string;
     sessionId?: string;
+    agentId?: string;
 };
 
 export async function handleSubagentEnded(
@@ -178,7 +189,9 @@ export async function handleSubagentEnded(
             score: String(score),
             time: new Date().toISOString(),
             reason,
-            is_risky: 'true'
+            is_risky: 'true',
+            session_id: ctx.sessionId || '',
+            agent_id: ctx.agentId || extractAgentIdFromSessionKey(targetSessionKey) || '',
         });
 
         emitSubagentPainEvent(wctx, {
@@ -186,6 +199,7 @@ export async function handleSubagentEnded(
             reason,
             score,
             sessionId: ctx.sessionId,
+            agentId: ctx.agentId || extractAgentIdFromSessionKey(targetSessionKey),
         }, logger);
     }
 
@@ -256,10 +270,102 @@ export async function handleSubagentEnded(
                 scheduleTaskOutcomeRetry(wctx, taskOutcomePayload, 1, logger);
             }
         }
+
+        // Read diagnostician output and create principle with generalized pattern
+        if (completedTaskId && isSubagentRuntimeAvailable(ctx.api?.runtime?.subagent)) {
+            try {
+                const messages = await ctx.api?.runtime?.subagent?.getSessionMessages?.({
+                    sessionKey: targetSessionKey,
+                    limit: 50
+                });
+
+                const assistantText = extractAssistantText(messages);
+                const report = parseDiagnosticianReport(assistantText);
+
+                if (report?.principle) {
+                    const principleId = wctx.evolutionReducer.createPrincipleFromDiagnosis({
+                        painId: matchedTask?.id || completedTaskId,
+                        painType: 'tool_failure',  // Default, could be extracted from task
+                        triggerPattern: report.principle.trigger_pattern,
+                        action: report.principle.action,
+                        source: matchedTask?.source || 'diagnostician'
+                    });
+
+                    if (principleId) {
+                        logger.warn(`[PD:Subagent] Created principle ${principleId} from diagnostician analysis for task ${completedTaskId}`);
+                    }
+                }
+            } catch (e) {
+                logger.warn(`[PD:Subagent] Failed to read diagnostician output: ${String(e)}`);
+            }
+        }
     } catch (e) {
         logger.error(`[PD:Subagent] Failed to update evolution queue: ${String(e)}`);
         scheduleCompletionRetry(event, ctx, attempt);
     } finally {
         releaseLock?.();
     }
+}
+
+/**
+ * Extract text content from assistant messages
+ */
+function extractAssistantText(messages: unknown): string {
+    if (!messages || !Array.isArray(messages)) return '';
+
+    const texts: string[] = [];
+    for (const msg of messages) {
+        if (msg?.role !== 'assistant') continue;
+        const content = msg?.content;
+        if (Array.isArray(content)) {
+            for (const block of content) {
+                if (block?.type === 'text' && typeof block.text === 'string') {
+                    texts.push(block.text);
+                }
+            }
+        } else if (typeof content === 'string') {
+            texts.push(content);
+        }
+    }
+    return texts.join('\n');
+}
+
+/**
+ * Parse diagnostician JSON report from text
+ */
+function parseDiagnosticianReport(text: string): { principle?: { trigger_pattern: string; action: string } } | null {
+    // Try to find JSON in markdown code block
+    const jsonMatch = text.match(/```json\n([\s\S]*?)\n```/);
+    if (jsonMatch) {
+        try {
+            const parsed = JSON.parse(jsonMatch[1]);
+            // Support both direct principle and nested phases.principle_extraction structure
+            if (parsed?.principle) {
+                return { principle: parsed.principle };
+            }
+            if (parsed?.phases?.principle_extraction?.principle) {
+                return { principle: parsed.phases.principle_extraction.principle };
+            }
+        } catch {
+            // Fall through to return null
+        }
+    }
+
+    // Try to find raw JSON object
+    const objectMatch = text.match(/\{[\s\S]*"principle"[\s\S]*\}/);
+    if (objectMatch) {
+        try {
+            const parsed = JSON.parse(objectMatch[0]);
+            if (parsed?.principle) {
+                return { principle: parsed.principle };
+            }
+            if (parsed?.phases?.principle_extraction?.principle) {
+                return { principle: parsed.phases.principle_extraction.principle };
+            }
+        } catch {
+            // Fall through to return null
+        }
+    }
+
+    return null;
 }

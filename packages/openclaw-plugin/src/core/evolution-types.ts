@@ -256,6 +256,7 @@ export interface PainDetectedData {
   reason: string;
   score?: number;
   sessionId?: string;
+  agentId?: string;  // 用于定位 JSONL 路径: ~/.openclaw/agents/{agentId}/sessions/{sessionId}.jsonl
   taskId?: string;
   traceId?: string;
 }
@@ -307,6 +308,7 @@ export interface LegacyImportData {
 
 export type EvolutionLoopEvent =
   | { ts: string; type: 'pain_detected'; data: PainDetectedData }
+  | { ts: string; type: 'pain_recorded'; data: PainDetectedData }
   | { ts: string; type: 'candidate_created'; data: CandidateCreatedData }
   | { ts: string; type: 'principle_promoted'; data: PrinciplePromotedData }
   | { ts: string; type: 'principle_deprecated'; data: PrincipleDeprecatedData }

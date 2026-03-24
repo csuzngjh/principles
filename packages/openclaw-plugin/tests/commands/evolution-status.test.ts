@@ -31,10 +31,14 @@ describe('evolution commands', () => {
   it('returns evolution status from canonical runtime summary sources', () => {
     const workspace = makeTempDir();
     const reducer = new EvolutionReducerImpl({ workspaceDir: workspace });
-    reducer.emitSync({
-      ts: new Date().toISOString(),
-      type: 'pain_detected',
-      data: { painId: 'pain-1', painType: 'tool_failure', source: 'write', reason: 'write failed' },
+    
+    // Create principle from diagnosis
+    reducer.createPrincipleFromDiagnosis({
+      painId: 'pain-1',
+      painType: 'tool_failure',
+      triggerPattern: 'file write operation fails',
+      action: 'check file permissions',
+      source: 'write',
     });
 
     writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
@@ -86,10 +90,14 @@ describe('evolution commands', () => {
   it('returns localized evolution status summary in zh', () => {
     const workspace = makeTempDir();
     const reducer = new EvolutionReducerImpl({ workspaceDir: workspace });
-    reducer.emitSync({
-      ts: new Date().toISOString(),
-      type: 'pain_detected',
-      data: { painId: 'pain-zh', painType: 'tool_failure', source: 'write', reason: 'write failed' },
+    
+    // Create principle from diagnosis
+    reducer.createPrincipleFromDiagnosis({
+      painId: 'pain-zh',
+      painType: 'tool_failure',
+      triggerPattern: '文件写入操作失败',
+      action: '检查文件权限',
+      source: 'write',
     });
 
     writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
@@ -109,10 +117,14 @@ describe('evolution commands', () => {
   it('rolls back principle through command', () => {
     const workspace = makeTempDir();
     const reducer = new EvolutionReducerImpl({ workspaceDir: workspace });
-    reducer.emitSync({
-      ts: new Date().toISOString(),
-      type: 'pain_detected',
-      data: { painId: 'pain-1', painType: 'tool_failure', source: 'write', reason: 'write failed' },
+    
+    // Create principle from diagnosis
+    const principleId = reducer.createPrincipleFromDiagnosis({
+      painId: 'pain-1',
+      painType: 'tool_failure',
+      triggerPattern: 'file write operation fails',
+      action: 'check file permissions',
+      source: 'write',
     });
 
     const pid = reducer.getProbationPrinciples()[0].id;

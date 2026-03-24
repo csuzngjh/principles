@@ -7,6 +7,7 @@ import { EventLogService } from '../core/event-log.js';
 import { buildCritiquePromptV2 } from './critique-prompt.js';
 import { resolvePdPath } from '../core/paths.js';
 import { reflectionLogRetentionDays } from '../types.js';
+import { isSubagentRuntimeAvailable } from '../utils/subagent-probe.js';
 
 /**
  * Write reflection result to reflection-log.md
@@ -271,7 +272,14 @@ export function createDeepReflectTool(api: OpenClawPluginApi) {
 
                 const startTime = Date.now();
                 const subagentRuntime = api.runtime.subagent;
-                if (!subagentRuntime) throw new Error('OpenClaw subagent runtime not found.');
+                if (!isSubagentRuntimeAvailable(subagentRuntime)) {
+                    return {
+                        content: [{
+                            type: 'text',
+                            text: `❌ Subagent runtime 不可用。\n\n当前运行在 embedded 模式（openclaw agent CLI），该模式不支持深反思功能。\n\n请通过 Gateway 模式运行（openclaw gateway）。`
+                        }]
+                    };
+                }
 
                 await subagentRuntime.run({
                     sessionKey,
