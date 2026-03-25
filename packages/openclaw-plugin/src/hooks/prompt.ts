@@ -4,7 +4,7 @@ import type { PluginHookBeforePromptBuildEvent, PluginHookAgentContext, PluginHo
 import { clearInjectedProbationIds, getSession, resetFriction, setInjectedProbationIds } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { ContextInjectionConfig, defaultContextConfig } from '../types.js';
-import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection } from '../core/focus-history.js';
+import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection, autoCompressFocus } from '../core/focus-history.js';
 import { empathyObserverManager, type EmpathyObserverApi } from '../service/empathy-observer-manager.js';
 import { PathResolver } from '../core/path-resolver.js';
 
@@ -716,6 +716,12 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
     const focusPath = wctx.resolve('CURRENT_FOCUS');
     if (fs.existsSync(focusPath)) {
       try {
+        // 🚀 自动压缩门禁：检查文件大小，超过阈值自动压缩
+        const compressResult = autoCompressFocus(focusPath, workspaceDir);
+        if (compressResult.compressed) {
+          logger?.info?.(`[PD:Prompt] Auto-compressed CURRENT_FOCUS: ${compressResult.oldLines} → ${compressResult.newLines} lines. Milestones archived: ${compressResult.milestonesArchived}`);
+        }
+
         const currentFocus = fs.readFileSync(focusPath, 'utf8').trim();
         if (currentFocus) {
           // 解析工作记忆部分（用于独立注入）

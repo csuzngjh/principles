@@ -19,6 +19,9 @@ import {
   cleanupHistory,
   extractVersion,
   extractDate,
+  extractMilestones,
+  archiveMilestonesToDaily,
+  cleanupStaleInfo,
 } from '../core/focus-history.js';
 
 /**
@@ -55,10 +58,15 @@ function getWorkspaceDir(ctx: PluginCommandContext): string {
  * - 移除：当前任务中已完成的项（- [x]）超过 3 个时
  * - 移除：P0 章节如果全部完成
  * - 保留：参考章节
+ * - 清理：Working Memory 超过 10 条记录时保留最近 10 条
+ * - 验证：文件引用指向不存在的文件时移除
  */
-function compressFocusContent(content: string): string {
-  const lines = content.split('\n');
-  const result: string[] = [];
+function compressFocusContent(content: string, workspaceDir?: string): string {
+  // 首先使用 cleanupStaleInfo 进行基础清理
+  let result = cleanupStaleInfo(content, workspaceDir);
+
+  const lines = result.split('\n');
+  const output: string[] = [];
   let currentSection = '';
   let inP0Section = false;
   let p0AllCompleted = true;
@@ -70,7 +78,7 @@ function compressFocusContent(content: string): string {
     if (inP0Section && p0Lines.length > 0) {
       if (!skipIfCompleted || !p0AllCompleted) {
         // P0 有未完成任务，保留 P0 内容
-        result.push(...p0Lines);
+        output.push(...p0Lines);
       }
       // 重置状态
       p0Lines = [];
@@ -97,7 +105,7 @@ function compressFocusContent(content: string): string {
       // 离开 P0 章节
       flushP0Lines(true); // P0 完成时跳过，未完成时保留
       currentSection = 'current';
-      result.push(line);
+      output.push(line);
       continue;
     } else if (/^#{1,3}\s*.*当前任务|🔄/.test(trimmedLine)) {
       flushP0Lines(true); // P0 完成时跳过
@@ -131,13 +139,13 @@ function compressFocusContent(content: string): string {
       }
     }
 
-    result.push(line);
+    output.push(line);
   }
 
   // 循环结束后，刷新剩余的 P0 章节
   flushP0Lines(false); // 保留未完成的 P0
 
-  return result.join('\n');
+  return output.join('\n');
 }
 
 /**
@@ -273,115 +281,30 @@ async function compressFocus(
       : `✅ Current file has only ${oldLines} lines, no need to compress\n\n💡 Compression not recommended for files under 40 lines`;
   }
 
-  // 备份当前版本
+  // 1. 提取里程碑
+  const milestones = extractMilestones(oldContent);
+
+  // 2. 归档里程碑到 daily memory（而非 MEMORY.md）
+  const archivePath = archiveMilestonesToDaily(workspaceDir, milestones, oldVersion);
+  const milestonesArchived = archivePath !== null;
+
+  // 3. 备份当前版本
   const backupPath = backupToHistory(focusPath, oldContent);
 
-  // 清理过期历史
+  // 4. 清理过期历史
   cleanupHistory(focusPath);
 
-  // 使用子智能体进行智能压缩
-  // 获取 MEMORY.md 路径
-  const memoryPath = wctx.resolve('MEMORY_MD');
-
-  const compressPrompt = isZh
-    ? `你是一个专业的项目文档压缩助手。请压缩以下 CURRENT_FOCUS.md 文件内容。
-
-**重要：在压缩前，你需要提取重要里程碑信息！**
-
-**第一步：提取里程碑**
-从原始内容中识别已完成的里程碑，这些信息需要保存到记忆文件中。
-
-**第二步：压缩文件**
-压缩规则：
-1. 保留标题、元数据行（版本、状态、日期）
-2. 保留"📍 状态快照"章节（完整）
-3. 保留"➡️ 下一步"章节（完整，这是最重要的信息）
-4. 保留"📎 参考"章节（完整）
-5. 对于"🔄 当前任务"章节：
-   - 如果 P0/P1 等子章节全部完成，合并为简短"已完成里程碑"列表（最多5项）
-   - 保留所有未完成任务（- [ ]）
-   - 已完成任务最多保留 3 个最近的，其余移除
-6. 移除重复信息和冗余描述
-7. 保持 Markdown 格式和语义连贯
-
-**目标：** 将文件压缩到 40 行以内。
-
-**原始内容：**
-\`\`\`markdown
-${oldContent}
-\`\`\`
-
-**输出格式（必须严格遵循）：**
-\`\`\`
-===MEMORY===
-[需要追加到 memory/MEMORY.md 的里程碑内容，格式：]
-## {YYYY-MM-DD} 里程碑
-- [里程碑1]
-- [里程碑2]
-...
-===COMPRESSED===
-[压缩后的 CURRENT_FOCUS.md 内容]
-\`\`\`
-
-如果没有需要记录的里程碑，===MEMORY=== 部分留空。`
-    : `You are a professional project document compression assistant. Please compress the following CURRENT_FOCUS.md file.
-
-**IMPORTANT: Extract milestones before compression!**
-
-**Step 1: Extract Milestones**
-Identify completed milestones from the original content that should be saved to memory.
-
-**Step 2: Compress File**
-Compression Rules:
-1. Keep title, metadata lines (version, status, date)
-2. Keep "📍 Status Snapshot" section (complete)
-3. Keep "➡️ Next Steps" section (complete, this is the most important)
-4. Keep "📎 References" section (complete)
-5. For "🔄 Current Tasks" section:
-   - If P0/P1 subsections are all completed, merge into a short "Completed Milestones" list (max 5 items)
-   - Keep all incomplete tasks (- [ ])
-   - Keep at most 3 recent completed tasks, remove the rest
-6. Remove duplicate info and redundant descriptions
-7. Maintain Markdown format and semantic coherence
-
-**Goal:** Compress the file to under 40 lines.
-
-**Original Content:**
-\`\`\`markdown
-${oldContent}
-\`\`\`
-
-**Output Format (must follow strictly):**
-\`\`\`
-===MEMORY===
-[Content to append to memory/MEMORY.md, format:]
-## {YYYY-MM-DD} Milestones
-- [milestone 1]
-- [milestone 2]
-...
-===COMPRESSED===
-[Compressed CURRENT_FOCUS.md content]
-\`\`\`
-
-If no milestones to record, leave ===MEMORY=== section empty.`;
-
+  // 5. 压缩内容
   let compressedContent: string;
-  let usedAI = false;
-  let memoryUpdated = false;
-
   try {
-    // 尝试使用 AI 压缩（通过 sessions_spawn）
-    // 由于命令处理器不能直接调用 Gateway 工具，使用简单压缩作为后备
-    // 如果需要 AI 压缩，用户应该在主会话中调用 sessions_spawn
-    compressedContent = compressFocusContent(oldContent);
-    api.logger?.info?.(`[PD:Focus] Used simple compression (AI compression requires sessions_spawn in main session)`);
+    compressedContent = compressFocusContent(oldContent, workspaceDir);
+    api.logger?.info?.(`[PD:Focus] Compressed CURRENT_FOCUS from ${oldLines} lines`);
   } catch (error) {
-    // 压缩失败，使用原内容
     api.logger?.error?.(`[PD:Focus] Compression failed: ${String(error)}`);
     compressedContent = oldContent;
   }
 
-  // 更新版本号和日期
+  // 6. 更新版本号和日期
   const versionParts = oldVersion.split('.');
   const majorVersion = parseInt(versionParts[0], 10) || 1;
   const newVersion = `${majorVersion + 1}`;
@@ -395,18 +318,10 @@ If no milestones to record, leave ===MEMORY=== section empty.`;
 
   fs.writeFileSync(focusPath, newContent, 'utf-8');
 
-  const methodNote = usedAI
+  const milestoneNote = milestonesArchived
     ? isZh
-      ? '🤖 使用 AI 智能压缩'
-      : '🤖 AI-powered compression'
-    : isZh
-      ? '📋 使用规则压缩'
-      : '📋 Rule-based compression';
-
-  const memoryNote = memoryUpdated
-    ? isZh
-      ? '📝 已将里程碑写入 MEMORY.md'
-      : '📝 Milestones saved to MEMORY.md'
+      ? `📝 里程碑已归档到 memory/${today}.md`
+      : `📝 Milestones archived to memory/${today}.md`
     : '';
 
   if (isZh) {
@@ -421,8 +336,7 @@ If no milestones to record, leave ===MEMORY=== section empty.`;
 | 节省 | ${savedLines} 行 |
 | 备份文件 | ${backupPath ? path.basename(backupPath) : '已存在'} |
 
-${methodNote}${memoryNote ? `\n${memoryNote}` : ''}
-
+${milestoneNote ? `${milestoneNote}\n` : ''}
 💡 已压缩版本已备份到历史目录
 💡 输入 \`/pd-focus history\` 查看所有历史版本`;
   }
@@ -438,8 +352,7 @@ ${methodNote}${memoryNote ? `\n${memoryNote}` : ''}
 | Saved | ${savedLines} lines |
 | Backup File | ${backupPath ? path.basename(backupPath) : 'exists'} |
 
-${methodNote}${memoryNote ? `\n${memoryNote}` : ''}
-
+${milestoneNote ? `${milestoneNote}\n` : ''}
 💡 Compressed version backed up to history
 💡 Type \`/pd-focus history\` to view all versions`;
 }
