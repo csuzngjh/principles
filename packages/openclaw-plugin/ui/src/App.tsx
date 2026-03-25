@@ -295,12 +295,12 @@ function OverviewPage() {
       </header>
 
       <section className="kpi-grid">
-        <article className="panel"><span>Repeat Error Rate</span><strong>{formatPercent(data.summary.repeatErrorRate)}</strong></article>
-        <article className="panel"><span>User Correction Rate</span><strong>{formatPercent(data.summary.userCorrectionRate)}</strong></article>
-        <article className="panel"><span>Pending Samples</span><strong>{data.summary.pendingSamples}</strong></article>
-        <article className="panel"><span>Approved Samples</span><strong>{data.summary.approvedSamples}</strong></article>
-        <article className="panel"><span>Thinking Coverage</span><strong>{formatPercent(data.summary.thinkingCoverageRate)}</strong></article>
-        <article className="panel"><span>Pain Events</span><strong>{data.summary.painEvents}</strong></article>
+        <article className="panel kpi"><span className="label">Repeat Error Rate</span><span className="value">{formatPercent(data.summary.repeatErrorRate)}</span></article>
+        <article className="panel kpi"><span className="label">User Correction Rate</span><span className="value">{formatPercent(data.summary.userCorrectionRate)}</span></article>
+        <article className="panel kpi"><span className="label">Pending Samples</span><span className="value">{data.summary.pendingSamples}</span></article>
+        <article className="panel kpi"><span className="label">Approved Samples</span><span className="value">{data.summary.approvedSamples}</span></article>
+        <article className="panel kpi"><span className="label">Thinking Coverage</span><span className="value">{formatPercent(data.summary.thinkingCoverageRate)}</span></article>
+        <article className="panel kpi"><span className="label">Pain Events</span><span className="value">{data.summary.painEvents}</span></article>
       </section>
 
       <div className="grid two-columns">
