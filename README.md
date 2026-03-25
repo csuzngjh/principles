@@ -123,7 +123,7 @@ Stay in the driver's seat:
 
 ---
 
-## 🖥️ Principles Console (Web UI) — **NEW in v1.6.0**
+## 🖥️ Principles Console (Web UI)
 
 > *Visual dashboard for monitoring and managing your AI agent.*
 
@@ -141,8 +141,17 @@ http://localhost:18789/plugins/principles/
 | Page | What It Shows |
 |------|---------------|
 | **Overview** | Workspace health, daily trends, regression alerts, thinking model coverage |
+| **Evolution** | Evolution task tracking: pain → principle generation timeline |
 | **Samples** | Correction sample queue: view, filter, approve/reject samples |
 | **Thinking Models** | Usage stats: trigger frequency, scenario analysis, health audit |
+
+### Multi-Workspace Support
+
+Principles Console aggregates data from **all agent workspaces** into a central database:
+
+- **10 workspaces** supported out of the box (builder, diagnostician, explorer, hr, main, pm, repair, research, resource-scout, verification)
+- **Workspace Configuration** — Enable/disable workspaces, control sync settings
+- **Custom Workspaces** — Add arbitrary workspace paths for monitoring
 
 ### Use Cases
 
@@ -150,17 +159,21 @@ http://localhost:18789/plugins/principles/
 - **Batch Review** — Process multiple user correction samples at once
 - **Trend Analysis** — Track tool calls, failure rates, corrections over 7 days
 - **Thinking Traces** — Understand which mental models your AI is using
+- **Evolution Tracking** — Watch the full pipeline from pain detection to principle generation
 
 ### Architecture
 
 ```
-Browser ←→ OpenClaw Gateway ←→ Plugin HTTP Routes ←→ Query Service
-                                                    ↓
-                                              SQLite Trajectory DB
+Browser ←→ OpenClaw Gateway ←→ Plugin HTTP Routes ←→ Central Database
+                                                      ↓
+                              ┌───────────────────────┴───────────────────────┐
+                              ↓                                               ↓
+                        SQLite (workspace-1)                            SQLite (workspace-N)
 ```
 
 - **Self-Contained** — No separate deployment needed
 - **Local Data** — All data stored in local SQLite, never leaves your machine
+- **Central Aggregation** — Unified view across multiple workspaces
 - **Real-time** — Fresh data on every page refresh
 
 ---
