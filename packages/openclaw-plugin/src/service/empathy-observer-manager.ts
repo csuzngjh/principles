@@ -1,5 +1,6 @@
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { trackFriction } from '../core/session-tracker.js';
+import { isSubagentRuntimeAvailable } from '../utils/subagent-probe.js';
 import type { PluginLogger } from '../openclaw-sdk.js';
 
 const OBSERVER_SESSION_PREFIX = 'empathy_obs:';
@@ -87,9 +88,7 @@ export class EmpathyObserverManager {
         if (!api || !sessionId) return false;
         const enabled = api.config?.empathy_engine?.enabled !== false;
         if (!enabled) return false;
-        // Use isSubagentAvailable() instead of truthy check to properly detect
-        // unavailable runtime (Proxy that throws on method access in embedded mode)
-        if (!this.isSubagentAvailable(api)) return false;
+        if (!isSubagentRuntimeAvailable(api.runtime?.subagent)) return false;
 
         return !this.sessionLocks.has(sessionId);
     }
@@ -98,7 +97,6 @@ export class EmpathyObserverManager {
         if (!api) return null;
         if (!this.shouldTrigger(api, sessionId)) return null;
         if (!userMessage?.trim()) return null;
-
 
         const timestamp = Date.now();
         const sessionKey = `${OBSERVER_SESSION_PREFIX}${sessionId}:${timestamp}`;
