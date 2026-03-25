@@ -886,11 +886,11 @@ function loadCompressionConfig(stateDir?: string): CompressionConfig {
     const compression = config?.compression || {};
 
     return {
-      lineThreshold: compression.line_threshold || DEFAULT_COMPRESSION_CONFIG.lineThreshold,
-      sizeThreshold: (compression.size_threshold_kb || 15) * 1024,
-      intervalMs: (compression.interval_hours || 24) * 60 * 60 * 1000,
-      keepCompletedTasks: compression.keep_completed_tasks || DEFAULT_COMPRESSION_CONFIG.keepCompletedTasks,
-      maxWorkingMemoryArtifacts: compression.max_working_memory_artifacts || DEFAULT_COMPRESSION_CONFIG.maxWorkingMemoryArtifacts,
+      lineThreshold: compression.line_threshold ?? DEFAULT_COMPRESSION_CONFIG.lineThreshold,
+      sizeThreshold: (compression.size_threshold_kb ?? 15) * 1024,
+      intervalMs: (compression.interval_hours ?? 24) * 60 * 60 * 1000,
+      keepCompletedTasks: compression.keep_completed_tasks ?? DEFAULT_COMPRESSION_CONFIG.keepCompletedTasks,
+      maxWorkingMemoryArtifacts: compression.max_working_memory_artifacts ?? DEFAULT_COMPRESSION_CONFIG.maxWorkingMemoryArtifacts,
     };
   } catch {
     return DEFAULT_COMPRESSION_CONFIG;
