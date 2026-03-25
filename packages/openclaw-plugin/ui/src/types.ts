@@ -2,6 +2,8 @@ export interface OverviewResponse {
   workspaceDir: string;
   generatedAt: string;
   dataFreshness: string | null;
+  dataSource?: string;
+  runtimeControlPlaneSource?: string;
   summary: {
     repeatErrorRate: number;
     userCorrectionRate: number;
@@ -10,6 +12,8 @@ export interface OverviewResponse {
     thinkingCoverageRate: number;
     painEvents: number;
     principleEventCount: number;
+    gateBlocks?: number;
+    taskOutcomes?: number;
   };
   dailyTrend: Array<{
     day: string;
