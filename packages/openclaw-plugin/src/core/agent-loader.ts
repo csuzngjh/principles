@@ -7,6 +7,17 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
+
+// ESM-compatible __dirname with fallback for test environments
+let __dirname: string;
+try {
+  const __filename = fileURLToPath(import.meta.url);
+  __dirname = path.dirname(__filename);
+} catch {
+  // Fallback for test environments where import.meta.url may not work
+  __dirname = process.cwd();
+}
 
 /**
  * Parsed agent definition from markdown file
