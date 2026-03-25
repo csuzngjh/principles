@@ -1,6 +1,6 @@
 {
   "name": "principles-disciple-monorepo",
-  "version": "1.7.4",
+  "version": "1.7.5",
   "description": "Principles Disciple - OpenClaw Plugin Monorepo",
   "private": true,
   "scripts": {
