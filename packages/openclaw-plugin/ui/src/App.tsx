@@ -20,6 +20,7 @@ import type {
   EvolutionTraceResponse,
   EvolutionStatsResponse,
 } from './types';
+import { Sparkline, DonutChart, GroupedBarChart, TimeRangeSelector, CollapsiblePanel } from './charts';
 
 // Auth Context
 interface AuthContextType {
@@ -330,38 +331,38 @@ function WorkspaceConfig() {
   if (!wsData) return <div className="panel muted">Loading workspaces...</div>;
 
   return (
-    <section className="panel">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-4)' }}>
-        <h3>Workspace Configuration</h3>
-        <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'center' }}>
-          <span className="badge">{wsData.configs.filter(c => c.enabled && c.syncEnabled).length} / {wsData.workspaces.length} enabled</span>
-          <button className="button-secondary" onClick={() => setShowAddForm(!showAddForm)}>
-            {showAddForm ? '取消' : '+ 添加'}
-          </button>
-        </div>
+    <CollapsiblePanel
+      title="Workspace Configuration"
+      badge={<span className="badge">{wsData.configs.filter(c => c.enabled && c.syncEnabled).length} / {wsData.workspaces.length} enabled</span>}
+      defaultCollapsed={true}
+    >
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 'var(--space-4)' }}>
+        <button className="button-secondary" onClick={() => setShowAddForm(!showAddForm)}>
+          {showAddForm ? '取消' : '+ 添加'}
+        </button>
       </div>
 
       {showAddForm && (
-        <form className="add-workspace-form" onSubmit={handleAddWorkspace} style={{ marginBottom: 'var(--space-4)', padding: 'var(--space-3)', background: 'var(--color-surface)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}>
+        <form className="add-workspace-form" onSubmit={handleAddWorkspace} style={{ marginBottom: 'var(--space-4)', padding: 'var(--space-3)', background: 'var(--bg-sunken)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
           <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-end' }}>
             <div style={{ flex: 1 }}>
-              <label style={{ display: 'block', fontSize: '12px', marginBottom: '4px', color: 'var(--color-text-secondary)' }}>Workspace Name</label>
+              <label style={{ display: 'block', fontSize: '12px', marginBottom: '4px', color: 'var(--text-secondary)' }}>Workspace Name</label>
               <input
                 type="text"
                 value={newWsName}
                 onChange={(e) => setNewWsName(e.target.value)}
                 placeholder="workspace-custom"
-                style={{ width: '100%', padding: 'var(--space-2)', fontSize: '13px' }}
+                style={{ width: '100%', padding: 'var(--space-2)', fontSize: '13px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)' }}
               />
             </div>
             <div style={{ flex: 2 }}>
-              <label style={{ display: 'block', fontSize: '12px', marginBottom: '4px', color: 'var(--color-text-secondary)' }}>Path</label>
+              <label style={{ display: 'block', fontSize: '12px', marginBottom: '4px', color: 'var(--text-secondary)' }}>Path</label>
               <input
                 type="text"
                 value={newWsPath}
                 onChange={(e) => setNewWsPath(e.target.value)}
                 placeholder="/home/user/.openclaw/workspace-custom"
-                style={{ width: '100%', padding: 'var(--space-2)', fontSize: '13px' }}
+                style={{ width: '100%', padding: 'var(--space-2)', fontSize: '13px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)' }}
               />
             </div>
             <button type="submit" className="button-primary" disabled={adding || !newWsName.trim() || !newWsPath.trim()}>
@@ -405,7 +406,7 @@ function WorkspaceConfig() {
           );
         })}
       </div>
-    </section>
+    </CollapsiblePanel>
   );
 }
 
@@ -413,16 +414,17 @@ function OverviewPage() {
   const [data, setData] = useState<OverviewResponse | null>(null);
   const [error, setError] = useState('');
   const [syncing, setSyncing] = useState(false);
+  const [days, setDays] = useState(30);
 
   const loadCentralOverview = useCallback(async () => {
     try {
-      const result = await api.getCentralOverview();
+      const result = await api.getCentralOverview(days);
       setData(result);
       setError('');
     } catch (err) {
       setError(String(err));
     }
-  }, []);
+  }, [days]);
 
   useEffect(() => {
     loadCentralOverview();
@@ -446,6 +448,12 @@ function OverviewPage() {
   const centralInfo = (data as OverviewResponse & { centralInfo?: { workspaceCount: number; enabledWorkspaceCount: number; workspaces: string[]; enabledWorkspaces: string[] } }).centralInfo;
   const dailyTrend = data.dailyTrend ?? [];
 
+  // Prepare sparkline data
+  const toolCallsTrend = dailyTrend.map(d => d.toolCalls);
+  const failuresTrend = dailyTrend.map(d => d.failures);
+  const correctionsTrend = dailyTrend.map(d => d.userCorrections);
+  const thinkingTrend = dailyTrend.map(d => d.thinkingTurns);
+
   return (
     <div className="page">
       <header className="page-header">
@@ -454,6 +462,7 @@ function OverviewPage() {
           <h2>Workspace health and queue pressure</h2>
         </div>
         <div className="meta">
+          <TimeRangeSelector value={days} onChange={setDays} />
           {centralInfo && (
             <div>{centralInfo.enabledWorkspaceCount} / {centralInfo.workspaceCount} workspaces enabled</div>
           )}
@@ -467,19 +476,59 @@ function OverviewPage() {
       <WorkspaceConfig />
 
       <section className="kpi-grid">
-        <article className="panel kpi"><span className="label">Repeat Error Rate</span><span className="value">{formatPercent(data.summary.repeatErrorRate)}</span></article>
-        <article className="panel kpi"><span className="label">User Correction Rate</span><span className="value">{formatPercent(data.summary.userCorrectionRate)}</span></article>
-        <article className="panel kpi"><span className="label">Pending Samples</span><span className="value">{data.summary.pendingSamples}</span></article>
-        <article className="panel kpi"><span className="label">Approved Samples</span><span className="value">{data.summary.approvedSamples}</span></article>
-        <article className="panel kpi"><span className="label">Thinking Coverage</span><span className="value">{formatPercent(data.summary.thinkingCoverageRate)}</span></article>
-        <article className="panel kpi"><span className="label">Pain Events</span><span className="value">{data.summary.painEvents}</span></article>
+        <article className="panel kpi">
+          <span className="label">Repeat Error Rate</span>
+          <span className="value">{formatPercent(data.summary.repeatErrorRate)}</span>
+          {failuresTrend.length >= 2 && (
+            <div className="stat-sparkline"><Sparkline data={failuresTrend} width={50} height={16} color="var(--error)" /></div>
+          )}
+        </article>
+        <article className="panel kpi">
+          <span className="label">User Correction Rate</span>
+          <span className="value">{formatPercent(data.summary.userCorrectionRate)}</span>
+          {correctionsTrend.length >= 2 && (
+            <div className="stat-sparkline"><Sparkline data={correctionsTrend} width={50} height={16} color="var(--warning)" /></div>
+          )}
+        </article>
+        <article className="panel kpi">
+          <span className="label">Pending Samples</span>
+          <span className="value">{data.summary.pendingSamples}</span>
+        </article>
+        <article className="panel kpi">
+          <span className="label">Approved Samples</span>
+          <span className="value">{data.summary.approvedSamples}</span>
+        </article>
+        <article className="panel kpi">
+          <span className="label">Thinking Coverage</span>
+          <span className="value">{formatPercent(data.summary.thinkingCoverageRate)}</span>
+          {thinkingTrend.length >= 2 && (
+            <div className="stat-sparkline"><Sparkline data={thinkingTrend} width={50} height={16} color="var(--info)" /></div>
+          )}
+        </article>
+        <article className="panel kpi">
+          <span className="label">Pain Events</span>
+          <span className="value">{data.summary.painEvents}</span>
+        </article>
       </section>
 
       <div className="grid two-columns">
         <section className="panel">
           <h3>Recent Trend</h3>
+          {dailyTrend.length > 0 && (
+            <div style={{ marginBottom: 'var(--space-4)' }}>
+              <GroupedBarChart
+                data={dailyTrend.slice(-14).map((item) => ({
+                  label: item.day.slice(5),
+                  values: [item.toolCalls, item.failures],
+                }))}
+                colors={['var(--accent)', 'var(--error)']}
+                width={280}
+                height={80}
+              />
+            </div>
+          )}
           <div className="trend-list">
-            {dailyTrend.map((item) => (
+            {dailyTrend.slice(-7).reverse().map((item) => (
               <div className="trend-row" key={item.day}>
                 <div>
                   <strong>{item.day}</strong>
@@ -843,6 +892,7 @@ function EvolutionPage() {
   const [selectedId, setSelectedId] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [error, setError] = useState('');
+  const [days, setDays] = useState(30);
 
   const search = useMemo(() => {
     const next = new URLSearchParams();
@@ -855,13 +905,13 @@ function EvolutionPage() {
   useEffect(() => {
     Promise.all([
       api.getEvolutionTasks(search),
-      api.getEvolutionStats(),
+      api.getEvolutionStats(days),
     ]).then(([tasksData, statsData]) => {
       setTasks(tasksData);
       setStats(statsData);
       setError('');
     }).catch((err) => setError(String(err)));
-  }, [search]);
+  }, [search, days]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -874,6 +924,14 @@ function EvolutionPage() {
   if (error) return <ErrorState error={error} />;
   if (!tasks || !stats) return <Loading />;
 
+  // Prepare donut chart data
+  const statusSegments = [
+    { label: '待处理', value: stats.pending, color: '#f59e0b' },
+    { label: '处理中', value: stats.inProgress, color: '#3b82f6' },
+    { label: '已完成', value: stats.completed, color: '#22c55e' },
+    { label: '失败', value: stats.failed, color: '#ef4444' },
+  ].filter(s => s.value > 0);
+
   return (
     <div className="page">
       <header className="page-header">
@@ -881,13 +939,70 @@ function EvolutionPage() {
           <span className="eyebrow">Evolution</span>
           <h2>进化流程追踪 - 从痛点到原则生成</h2>
         </div>
-        <div className="pill-row">
-          <span className="badge" style={{ background: '#f59e0b' }}>待处理 {stats.pending}</span>
-          <span className="badge" style={{ background: '#3b82f6' }}>处理中 {stats.inProgress}</span>
-          <span className="badge" style={{ background: '#22c55e' }}>已完成 {stats.completed}</span>
-          <span className="badge" style={{ background: '#ef4444' }}>失败 {stats.failed}</span>
+        <div className="meta">
+          <TimeRangeSelector value={days} onChange={setDays} />
+          <div className="pill-row">
+            <span className="badge" style={{ background: '#f59e0b' }}>待处理 {stats.pending}</span>
+            <span className="badge" style={{ background: '#3b82f6' }}>处理中 {stats.inProgress}</span>
+            <span className="badge" style={{ background: '#22c55e' }}>已完成 {stats.completed}</span>
+            <span className="badge" style={{ background: '#ef4444' }}>失败 {stats.failed}</span>
+          </div>
         </div>
       </header>
+
+      {/* Status Distribution & Recent Activity */}
+      <div className="grid two-columns" style={{ marginBottom: 'var(--space-5)' }}>
+        <section className="panel">
+          <h3>状态分布</h3>
+          <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--space-4) 0' }}>
+            <DonutChart segments={statusSegments} size={100} strokeWidth={10} />
+          </div>
+        </section>
+        <section className="panel">
+          <h3>近期活动</h3>
+          {stats.recentActivity && stats.recentActivity.length > 0 && (
+            <>
+              <div style={{ marginBottom: 'var(--space-3)' }}>
+                <GroupedBarChart
+                  data={stats.recentActivity.slice(-14).map((item) => ({
+                    label: item.day.slice(5),
+                    values: [item.created, item.completed],
+                  }))}
+                  colors={['var(--accent)', 'var(--success)']}
+                  width={280}
+                  height={60}
+                />
+                <div style={{ display: 'flex', justifyContent: 'center', gap: 'var(--space-4)', marginTop: 'var(--space-2)', fontSize: '11px', color: 'var(--text-tertiary)' }}>
+                  <span><span style={{ display: 'inline-block', width: '10px', height: '10px', background: 'var(--accent)', borderRadius: '2px', marginRight: '4px' }}></span>新增</span>
+                  <span><span style={{ display: 'inline-block', width: '10px', height: '10px', background: 'var(--success)', borderRadius: '2px', marginRight: '4px' }}></span>完成</span>
+                </div>
+              </div>
+              <div className="stack">
+                {stats.recentActivity.slice(-7).reverse().map((item) => (
+                  <div className="row-card" key={item.day}>
+                    <strong>{item.day}</strong>
+                    <span>+{item.created} 完成 {item.completed}</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </section>
+      </div>
+
+      {/* Stage Distribution */}
+      {stats.stageDistribution && stats.stageDistribution.length > 0 && (
+        <section className="panel" style={{ marginBottom: 'var(--space-5)' }}>
+          <h3>阶段分布</h3>
+          <div className="stack" style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
+            {stats.stageDistribution.map((stage) => (
+              <span key={stage.stage} className="badge" style={{ background: STAGE_COLORS[stage.stage] || 'var(--accent-soft)', color: 'var(--text-primary)' }}>
+                {stage.stageLabel}: {stage.count}
+              </span>
+            ))}
+          </div>
+        </section>
+      )}
 
       <div className="grid two-columns wide-right">
         <section className="panel">
