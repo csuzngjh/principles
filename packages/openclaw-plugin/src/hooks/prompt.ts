@@ -302,7 +302,6 @@ export function resolveModelFromConfig(modelConfig: unknown, logger?: PluginLogg
   
   // 闁哄秶鍘х槐?3: 闁轰焦澹嗙划宥夊冀閻撳海纭€闁挎稑鐗呯粭澶愬绩椤栨稑鐦柨娑樿嫰瑜板倿宕欐ウ娆惧妳闁告稑顭槐?
   if (Array.isArray(modelConfig)) {
-    console.warn(`[PD:Prompt] Array model config not supported. Expected "provider/model" string or { primary: "..." } object.`);
     logger?.warn(`[PD:Prompt] Array model config not supported. Expected "provider/model" string or { primary: "..." } object.`);
     return null;
   }
