@@ -165,7 +165,7 @@ describe('Gate Integration - Blocking Recovery', () => {
   test('subagent spawn unlocks after promotion', () => {
     // Seed: subagent spawn blocked
     const blocked = engine.beforeToolCall({
-        toolName: 'pd_run_worker',
+        toolName: 'sessions_spawn',
     });
     expect(blocked.allowed).toBe(false);
     
@@ -175,7 +175,7 @@ describe('Gate Integration - Blocking Recovery', () => {
     }
     
     const allowed = engine.beforeToolCall({
-        toolName: 'pd_run_worker',
+        toolName: 'sessions_spawn',
     });
     expect(allowed.allowed).toBe(true);
   });
@@ -225,7 +225,7 @@ describe('Gate Integration - Multi-tool Consistency', () => {
   });
 
   test('high-risk tools blocked at Seed tier', () => {
-    const blockedTools = ['run_shell_command', 'delete_file', 'pd_run_worker'];
+    const blockedTools = ['run_shell_command', 'delete_file', 'sessions_spawn'];
     
     for (const tool of blockedTools) {
       const result = engine.beforeToolCall({ toolName: tool });
@@ -339,7 +339,7 @@ describe('Gate Integration - Persistence', () => {
     engine = new EvolutionEngine(workspace);
     expect(engine.getTier()).toBe(EvolutionTier.Seed);
     
-    let allowed = engine.beforeToolCall({ toolName: 'pd_run_worker' });
+    let allowed = engine.beforeToolCall({ toolName: 'sessions_spawn' });
     expect(allowed.allowed).toBe(false);
     
     // Earn points
@@ -349,7 +349,7 @@ describe('Gate Integration - Persistence', () => {
     
     // Now Sapling
     expect(engine.getTier()).toBeGreaterThanOrEqual(EvolutionTier.Sapling);
-    allowed = engine.beforeToolCall({ toolName: 'pd_run_worker' });
+    allowed = engine.beforeToolCall({ toolName: 'sessions_spawn' });
     expect(allowed.allowed).toBe(true);
     
     // Restart engine (simulating process restart)
@@ -357,7 +357,7 @@ describe('Gate Integration - Persistence', () => {
     
     // Should still be Sapling with same permissions
     expect(engine.getTier()).toBeGreaterThanOrEqual(EvolutionTier.Sapling);
-    allowed = engine.beforeToolCall({ toolName: 'pd_run_worker' });
+    allowed = engine.beforeToolCall({ toolName: 'sessions_spawn' });
     expect(allowed.allowed).toBe(true);
   });
 
@@ -436,7 +436,7 @@ describe('Gate Integration - Real World Scenarios', () => {
     
     // Attempt subagent spawn - blocked  
     decision = engine.beforeToolCall({
-      toolName: 'pd_run_worker',
+      toolName: 'sessions_spawn',
     });
     expect(decision.allowed).toBe(false);
     
@@ -453,7 +453,7 @@ describe('Gate Integration - Real World Scenarios', () => {
     expect(decision.allowed).toBe(true);
     
     decision = engine.beforeToolCall({
-      toolName: 'pd_run_worker',
+      toolName: 'sessions_spawn',
     });
     expect(decision.allowed).toBe(true);
     
@@ -513,11 +513,11 @@ describe('Gate Integration - Real World Scenarios', () => {
     }
     
     // Engine 1 has subagent permission
-    let decision1 = engine1.beforeToolCall({ toolName: 'pd_run_worker' });
+    let decision1 = engine1.beforeToolCall({ toolName: 'sessions_spawn' });
     expect(decision1.allowed).toBe(true);
     
     // Engine 2 is still Seed
-    let decision2 = engine2.beforeToolCall({ toolName: 'pd_run_worker' });
+    let decision2 = engine2.beforeToolCall({ toolName: 'sessions_spawn' });
     expect(decision2.allowed).toBe(false);
     
     cleanupWorkspace(workspace2);

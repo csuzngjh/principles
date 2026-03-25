@@ -93,9 +93,8 @@ packages/openclaw-plugin/
 │   │   ├── runtime-summary-service.ts   # 运行时摘要服务
 │   │   └── empathy-observer-manager.ts  # 共情观察者管理器
 │   │
-│   ├── tools/                            # 自定义工具（4个文件）
+│   ├── tools/                            # 自定义工具（3个文件）
 │   │   ├── deep-reflect.ts              # deep_reflect 工具（402行）
-│   │   ├── agent-spawn.ts               # pd_run_worker 工具（501行）
 │   │   ├── critique-prompt.ts           # 深度反思提示模板
 │   │   └── model-index.ts               # 思维模型索引构建器
 │   │
@@ -163,9 +162,8 @@ api.on('after_compaction', handleAfterCompaction);
 - `/pd-rollback`, `/pd-evolution-status`, `/pd-principle-rollback`
 - `/pd-export`, `/pd-samples`, `/pd-help`
 
-**注册的工具** (2个):
+**注册的工具** (1个):
 - `deep_reflect` - 深度反思工具
-- `pd_run_worker` - 智能体生成工具
 
 **注册的服务** (2个):
 - `EvolutionWorkerService` - 进化工作器
@@ -453,28 +451,6 @@ export function createDeepReflectTool(api: OpenClawPluginApi): AnyAgentTool;
 
 ---
 
-#### `agent-spawn.ts` - 智能体生成工具（501行）
-
-**工具名称**: `pd_run_worker`
-
-**参数**:
-- `agentType: string` - 智能体类型（explorer/diagnostician/auditor/planner/implementer/reviewer/reporter）
-- `task: string` - 任务描述
-- `runInBackground?: boolean` - 是否后台运行
-
-**导出**:
-```typescript
-export function createAgentSpawnTool(api: OpenClawPluginApi): AnyAgentTool;
-export async function spawnAgentSequence(
-  api: OpenClawPluginApi,
-  agentType: string,
-  task: string,
-  ctx: PluginHookToolContext
-): Promise<void>;
-```
-
----
-
 ### 6. 工具函数 `src/utils/`
 
 #### `file-lock.ts` - 文件锁（391行）
@@ -651,7 +627,7 @@ export const BASH_TOOLS_SET: Set<string> = new Set([
 ]);
 
 export const AGENT_TOOLS: Set<string> = new Set([
-  'pd_run_worker', 'sessions_spawn', 'task',
+  'sessions_spawn', 'task',
   // ... 更多
 ]);
 

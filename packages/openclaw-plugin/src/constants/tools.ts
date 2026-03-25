@@ -27,7 +27,7 @@ export const HIGH_RISK_TOOL_NAMES = [
 ] as const;
 
 export const AGENT_TOOL_NAMES = [
-  'pd_run_worker', 'sessions_spawn',
+  'sessions_spawn',
 ] as const;
 
 export const CONTENT_LIMITED_TOOL_NAMES = [

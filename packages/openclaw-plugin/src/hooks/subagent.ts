@@ -3,8 +3,7 @@ import * as fs from 'fs';
 import { writePainFlag } from '../core/pain.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { empathyObserverManager, type EmpathyObserverApi } from '../service/empathy-observer-manager.js';
-import { acquireQueueLock } from '../service/evolution-worker.js';
-import { isSubagentRuntimeAvailable } from '../utils/subagent-probe.js';
+import { acquireQueueLock, type EvolutionQueueItem } from '../service/evolution-worker.js';
 
 const COMPLETION_RETRY_DELAY_MS = 250;
 const COMPLETION_MAX_RETRIES = 3;
@@ -66,7 +65,7 @@ function extractAgentIdFromSessionKey(sessionKey: string | undefined): string | 
     return match ? match[1] : undefined;
 }
 
-function cleanupPainFlagForTask(wctx: WorkspaceContext, completedTaskId: string, queue: any[], logger: HookLogger): void {
+function cleanupPainFlagForTask(wctx: WorkspaceContext, completedTaskId: string, queue: EvolutionQueueItem[], logger: HookLogger): void {
     const painFlagPath = wctx.resolve('PAIN_FLAG');
 
     try {
@@ -74,7 +73,7 @@ function cleanupPainFlagForTask(wctx: WorkspaceContext, completedTaskId: string,
         const taskIdMatch = painData.match(/^task_id:\s*(.+)$/m);
         const painTaskId = taskIdMatch?.[1]?.trim();
         const hasQueuedStatus = painData.includes('status: queued');
-        const hasRemainingActiveTasks = queue.some((task: any) => task?.status === 'pending' || task?.status === 'in_progress');
+        const hasRemainingActiveTasks = queue.some((task) => task?.status === 'pending' || task?.status === 'in_progress');
 
         if (!hasQueuedStatus) return;
 
@@ -325,7 +324,7 @@ export async function handleSubagentEnded(
         }
 
         // Read diagnostician output and create principle with generalized pattern
-        if (completedTaskId && isSubagentRuntimeAvailable(ctx.api?.runtime?.subagent)) {
+        if (completedTaskId && ctx.api?.runtime?.subagent) {
             try {
                 const messages = await ctx.api?.runtime?.subagent?.getSessionMessages?.({
                     sessionKey: targetSessionKey,

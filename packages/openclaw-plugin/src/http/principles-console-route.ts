@@ -5,6 +5,7 @@ import type { OpenClawPluginApi, OpenClawPluginHttpRouteParams } from '../opencl
 import { ControlUiQueryService } from '../service/control-ui-query-service.js';
 import { getEvolutionQueryService } from '../service/evolution-query-service.js';
 import { TrajectoryRegistry } from '../core/trajectory.js';
+import { getCentralDatabase } from '../service/central-database.js';
 
 const ROUTE_PREFIX = '/plugins/principles';
 const API_PREFIX = `${ROUTE_PREFIX}/api`;
@@ -122,6 +123,158 @@ function handleApiRoute(
 
   if (pathname === `${API_PREFIX}/overview` && method === 'GET') {
     return done(() => service.getOverview());
+  }
+
+  if (pathname === `${API_PREFIX}/central/overview` && method === 'GET') {
+    return done(() => {
+      const centralDb = getCentralDatabase();
+      const stats = centralDb.getOverviewStats();
+      const trend = centralDb.getDailyTrend(14);
+      const regressions = centralDb.getTopRegressions(5);
+      const thinkingStats = centralDb.getThinkingModelStats();
+      const workspaces = centralDb.getWorkspaces();
+      
+      return {
+        workspaceDir: 'central',
+        generatedAt: new Date().toISOString(),
+        dataFreshness: workspaces.length > 0 ? (workspaces[0].lastSync ?? null) : null,
+        dataSource: 'central_aggregated_db',
+        runtimeControlPlaneSource: 'all_workspaces',
+        summary: {
+          repeatErrorRate: stats.totalToolCalls > 0 
+            ? stats.totalFailures / stats.totalToolCalls 
+            : 0,
+          userCorrectionRate: stats.totalToolCalls > 0 
+            ? stats.totalCorrections / stats.totalToolCalls 
+            : 0,
+          pendingSamples: stats.pendingSamples,
+          approvedSamples: stats.approvedSamples,
+          thinkingCoverageRate: stats.totalToolCalls > 0 
+            ? stats.totalThinkingEvents / stats.totalToolCalls 
+            : 0,
+          painEvents: stats.totalPainEvents,
+          principleEventCount: 0,
+          gateBlocks: 0,
+          taskOutcomes: 0,
+        },
+        dailyTrend: trend,
+        topRegressions: regressions,
+        sampleQueue: {
+          counters: {
+            pending: stats.pendingSamples,
+            approved: stats.approvedSamples,
+            rejected: stats.rejectedSamples,
+          },
+          preview: [],
+        },
+        thinkingSummary: {
+          activeModels: thinkingStats.activeModels,
+          dormantModels: thinkingStats.totalModels - thinkingStats.activeModels,
+          effectiveModels: thinkingStats.models.filter(m => m.coverageRate > 0.1).length,
+          coverageRate: stats.totalToolCalls > 0 
+            ? stats.totalThinkingEvents / stats.totalToolCalls 
+            : 0,
+        },
+        centralInfo: {
+          workspaceCount: stats.workspaceCount,
+          enabledWorkspaceCount: stats.enabledWorkspaceCount,
+          workspaces: stats.workspaceNames,
+          enabledWorkspaces: stats.enabledWorkspaceNames,
+        },
+      };
+    });
+  }
+
+  if (pathname === `${API_PREFIX}/central/sync` && method === 'POST') {
+    return done(() => {
+      const centralDb = getCentralDatabase();
+      const results = centralDb.syncEnabled();
+      const summary: Record<string, number> = {};
+      results.forEach((count, name) => {
+        summary[name] = count;
+      });
+      return { synced: summary, timestamp: new Date().toISOString() };
+    });
+  }
+
+  if (pathname === `${API_PREFIX}/central/workspaces` && method === 'GET') {
+    return done(() => {
+      const centralDb = getCentralDatabase();
+      const configs = centralDb.getWorkspaceConfigs();
+      const workspaces = centralDb.getWorkspaces();
+      return {
+        configs,
+        workspaces: workspaces.map(ws => ({
+          name: ws.name,
+          path: ws.path,
+          lastSync: ws.lastSync,
+          config: configs.find(c => c.workspaceName === ws.name) ?? null,
+        })),
+      };
+    });
+  }
+
+  const workspaceConfigMatch = pathname.match(/^\/plugins\/principles\/api\/central\/workspaces\/([^/]+)$/);
+  if (workspaceConfigMatch && method === 'GET') {
+    return done(() => {
+      const centralDb = getCentralDatabase();
+      const workspaceName = decodeURIComponent(workspaceConfigMatch[1]);
+      const configs = centralDb.getWorkspaceConfigs();
+      const config = configs.find(c => c.workspaceName === workspaceName);
+      return config ?? { workspaceName, enabled: true, displayName: workspaceName, syncEnabled: true };
+    });
+  }
+
+  if (workspaceConfigMatch && method === 'PATCH') {
+    return (async () => {
+      try {
+        const body = await readJsonBody(req) as Record<string, unknown>;
+        const centralDb = getCentralDatabase();
+        const workspaceName = decodeURIComponent(workspaceConfigMatch[1]);
+        centralDb.updateWorkspaceConfig(workspaceName, {
+          enabled: body.enabled as boolean | undefined,
+          displayName: body.displayName as string | null | undefined,
+          syncEnabled: body.syncEnabled as boolean | undefined,
+        });
+        const configs = centralDb.getWorkspaceConfigs();
+        json(res, 200, configs.find(c => c.workspaceName === workspaceName));
+        return true;
+      } catch (error) {
+        if (error instanceof Error && error.message === 'invalid_json') {
+          json(res, 400, { error: 'bad_request', message: 'Request body must be valid JSON.' });
+          return true;
+        }
+        api.logger.warn(`[PD:ControlUI] Workspace config update failed: ${String(error)}`);
+        json(res, 500, { error: 'internal_error', message: String(error) });
+        return true;
+      }
+    })();
+  }
+
+  if (pathname === `${API_PREFIX}/central/workspaces` && method === 'POST') {
+    return (async () => {
+      try {
+        const body = await readJsonBody(req) as Record<string, unknown>;
+        const name = typeof body.name === 'string' ? body.name : '';
+        const workspacePath = typeof body.path === 'string' ? body.path : '';
+        if (!name || !workspacePath) {
+          json(res, 400, { error: 'bad_request', message: 'name and path are required.' });
+          return true;
+        }
+        const centralDb = getCentralDatabase();
+        centralDb.addCustomWorkspace(name, workspacePath);
+        json(res, 201, { success: true, workspace: name });
+        return true;
+      } catch (error) {
+        if (error instanceof Error && error.message === 'invalid_json') {
+          json(res, 400, { error: 'bad_request', message: 'Request body must be valid JSON.' });
+          return true;
+        }
+        api.logger.warn(`[PD:ControlUI] Add workspace failed: ${String(error)}`);
+        json(res, 500, { error: 'internal_error', message: String(error) });
+        return true;
+      }
+    })();
   }
 
   if (pathname === `${API_PREFIX}/samples` && method === 'GET') {

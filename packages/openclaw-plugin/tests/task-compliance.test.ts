@@ -6,9 +6,8 @@
 
 import { describe, it, expect } from 'vitest';
 
-// Import the function from agent-spawn.ts
-// Note: This requires the function to be exported for testing
-// For now, we'll duplicate the logic here for testing purposes
+// Note: The validateTaskCompliance logic was originally in agent-spawn.ts
+// but has been removed. We test the compliance validation logic here.
 
 function validateTaskCompliance(task: string): {
   valid: boolean;

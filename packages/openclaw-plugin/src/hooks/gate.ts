@@ -24,8 +24,8 @@ const TRAJECTORY_GATE_BLOCK_MAX_RETRIES = 3;
 // ═══ GFI Gate Tool Tiers ═══
 // TIER 0: 只读工具 - 永不拦截
 // TIER 1: 低风险修改 - GFI >= low_risk_block 时拦截
-// 注意：pd_run_worker、sessions_spawn、task 是 Agent 派生工具，不应被 GFI Gate 拦截
-// 它们属于 AGENT_TOOLS，在早期过滤后直接放行
+// 注意：sessions_spawn、task 是 Agent 派生工具，常规阈值不拦截
+// 但极高 GFI (>=90) 时仍会拦截，防止极端情况下失控
 // TIER 2: 高风险操作 - GFI >= high_risk_block 时拦截
 // TIER 3: Bash 命令 - 根据内容判断
 /**
@@ -173,7 +173,7 @@ export function handleBeforeToolCall(
     thinking_checkpoint: {
       enabled: false,  // Default OFF
       window_ms: 5 * 60 * 1000,
-      high_risk_tools: ['run_shell_command', 'delete_file', 'move_file', 'pd_run_worker'],
+      high_risk_tools: ['run_shell_command', 'delete_file', 'move_file'],
     }
   };
 

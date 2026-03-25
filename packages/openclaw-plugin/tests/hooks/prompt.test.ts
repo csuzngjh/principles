@@ -309,9 +309,7 @@ describe('Prompt Context Injection Hook', () => {
     expect(result?.prependContext).toContain('<evolution_task');
     expect(result?.prependContext).toContain('Fix urgent bug');
     expect(result?.prependContext).not.toContain('Fix bug');
-    expect(result?.prependContext).toContain('pd_run_worker agentType="diagnostician" task=');
-    expect(result?.prependContext).toContain('runInBackground=true');
-    expect(result?.prependContext).toContain("First respond to the user's current request normally.");
+    expect(result?.prependContext).toContain('sessions_spawn(task="使用 pd-diagnostician skill');
     expect(result?.prependContext).not.toContain('Reply with "[EVOLUTION_ACK]" only');
   });
 
@@ -345,7 +343,7 @@ describe('Prompt Context Injection Hook', () => {
 
     expect(result?.prependContext).toContain('<evolution_task');
     expect(result?.prependContext).toContain('Manual queue task');
-    expect(result?.prependContext).toContain('pd_run_worker agentType="diagnostician" task=');
+    expect(result?.prependContext).toContain('sessions_spawn(task="使用 pd-diagnostician skill');
   });
 
   it('should skip a malformed highest-score evolution task and inject the next valid one', async () => {
@@ -380,7 +378,7 @@ describe('Prompt Context Injection Hook', () => {
     expect(result?.prependContext).toContain('<evolution_task');
     expect(result?.prependContext).toContain('Fix lower bug');
     expect(result?.prependContext).not.toContain('TASK: "undefined"');
-    expect(result?.prependContext).toContain('pd_run_worker agentType="diagnostician" task=');
+    expect(result?.prependContext).toContain('sessions_spawn(task="使用 pd-diagnostician skill');
   });
 
   it('should track injected probation principle ids for later tool attribution', async () => {
@@ -599,8 +597,7 @@ describe('Prompt Context Injection Hook', () => {
 
     expect(result).toBeDefined();
     expect(result?.prependContext).toContain('<evolution_task');
-    expect(result?.prependContext).toContain('pd_run_worker agentType="diagnostician" task=');
-    expect(result?.prependContext).toContain('runInBackground=true');
+    expect(result?.prependContext).toContain('sessions_spawn(task="使用 pd-diagnostician skill');
     expect(result?.prependContext).not.toContain('Reply with "[EVOLUTION_ACK]" only');
     expect(result?.prependContext).toContain('<system_override:runtime_constraints>');
     expect(result?.prependContext).toContain('Trust Score:');
@@ -785,9 +782,9 @@ describe('Prompt Context Injection Hook', () => {
     expect(identityContext).toContain('AGENT IDENTITY');
     expect(identityContext).toContain('self-evolving AI agent');
     expect(identityContext).toContain('sessions_send');
-    expect(identityContext).toContain('subagents');
+    expect(identityContext).toContain('sessions_spawn');
     expect(identityContext).toContain('sessions_list');
-    expect(identityContext).toContain('pd_run_worker only for Principles Disciple internal workers');
+    expect(identityContext).toContain('pd-diagnostician/pd-explorer');
     
     // appendSystemContext: All long context (WebUI-hidden, Prompt Cacheable)
     const rulesContext = result?.appendSystemContext ?? '';

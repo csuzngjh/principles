@@ -1,7 +1,7 @@
 ---
-name: Explorer
-description: 快速收集证据的智能体（文件、日志、复现步骤）
-permissionMode: allowSubagentSpawn
+name: pd-explorer
+description: 快速收集证据的智能体。用于定位和收集问题相关的文件、日志、复现步骤。当需要快速收集信息时使用。
+disable-model-invocation: true
 ---
 
 # Explorer

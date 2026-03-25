@@ -1,7 +1,7 @@
 ---
-name: Implementer
-description: 按计划执行代码修改的智能体
-permissionMode: allowSubagentSpawn
+name: pd-implementer
+description: 按计划执行代码修改的智能体。按照计划逐步实施代码修改。当需要执行代码变更时使用。
+disable-model-invocation: true
 ---
 
 # Implementer

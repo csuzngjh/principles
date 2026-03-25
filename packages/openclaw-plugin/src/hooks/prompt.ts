@@ -4,7 +4,7 @@ import type { PluginHookBeforePromptBuildEvent, PluginHookAgentContext, PluginHo
 import { clearInjectedProbationIds, getSession, resetFriction, setInjectedProbationIds } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { ContextInjectionConfig, defaultContextConfig } from '../types.js';
-import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection } from '../core/focus-history.js';
+import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection, autoCompressFocus, safeReadCurrentFocus } from '../core/focus-history.js';
 import { empathyObserverManager, type EmpathyObserverApi } from '../service/empathy-observer-manager.js';
 import { PathResolver } from '../core/path-resolver.js';
 
@@ -181,6 +181,8 @@ function resolveEvolutionTask(
   const preview = typeof inProgressTask.trigger_text_preview === 'string' && inProgressTask.trigger_text_preview.trim()
     ? inProgressTask.trigger_text_preview.trim()
     : 'N/A';
+  const sessionId = typeof inProgressTask.session_id === 'string' ? inProgressTask.session_id.trim() : '';
+  const agentId = typeof inProgressTask.agent_id === 'string' ? inProgressTask.agent_id.trim() : '';
 
   const conversationContext = includeConversationContext
     ? extractRecentConversationContext(messages, maxContextMessages, maxCharsPerMsg)
@@ -195,12 +197,27 @@ function resolveEvolutionTask(
 `;
   taskDescription += `**Trigger Text**: "${preview}"
 `;
+  if (sessionId) {
+    taskDescription += `**Session ID**: ${sessionId}
+`;
+  }
+  if (agentId) {
+    taskDescription += `**Agent ID**: ${agentId}
+`;
+  }
 
   if (conversationContext) {
     taskDescription += `
 ---
 **Recent Conversation Context**:
 ${conversationContext}`;
+  } else if (!sessionId) {
+    taskDescription += `
+---
+**Note**: 对话上下文不可用。请主动收集证据：
+1. 从 Reason 字段提取关键词，搜索相关代码
+2. 读取 .state/logs/events.jsonl 最近日志
+3. 基于 Reason 中的文件路径定位问题`;
   }
 
   taskDescription += `
@@ -285,7 +302,6 @@ export function resolveModelFromConfig(modelConfig: unknown, logger?: PluginLogg
   
   // 闁哄秶鍘х槐?3: 闁轰焦澹嗙划宥夊冀閻撳海纭€闁挎稑鐗呯粭澶愬绩椤栨稑鐦柨娑樿嫰瑜板倿宕欐ウ娆惧妳闁告稑顭槐?
   if (Array.isArray(modelConfig)) {
-    console.warn(`[PD:Prompt] Array model config not supported. Expected "provider/model" string or { primary: "..." } object.`);
     logger?.warn(`[PD:Prompt] Array model config not supported. Expected "provider/model" string or { primary: "..." } object.`);
     return null;
   }
@@ -469,8 +485,7 @@ You are a **self-evolving AI agent** powered by Principles Disciple.
 - Use the current session for the normal user reply.
 - Use sessions_send for cross-session messaging.
 - Use agents_list / sessions_list / sessions_spawn for peer-agent or peer-session orchestration.
-- Use subagents to inspect already-dispatched internal workers such as diagnostician/explorer.
-- Use pd_run_worker only for Principles Disciple internal workers such as diagnostician/explorer.
+- Use sessions_spawn with pd-diagnostician/pd-explorer/etc skills for internal worker tasks.
 
 ## 妫ｅ啯鎯?INTERNAL SYSTEM LAYOUT
 - Your core plugin logic is rooted at: ${PathResolver.getExtensionRoot() || 'EXTENSION_ROOT (unresolved)'}
@@ -492,7 +507,7 @@ You are a **self-evolving AI agent** powered by Principles Disciple.
 
     // Stage-based restrictions
     if (safeStage === 1) {
-      trustContext += `ACTION CONSTRAINT: You are in READ-ONLY MODE. You MUST use the internal pd_run_worker diagnostician worker to recover trust before writing files. Do not use it for peer-session messaging.\n`;
+      trustContext += `ACTION CONSTRAINT: You are in READ-ONLY MODE. You MUST use sessions_spawn with the pd-diagnostician skill to recover trust before writing files.\n`;
     } else if (safeStage === 2) {
       trustContext += `ACTION CONSTRAINT: LIMITED MODE. You are restricted to a maximum of 50 lines per edit.\n`;
     } else if (safeStage === 3 || safeStage === 4) {
@@ -540,13 +555,30 @@ You are a **self-evolving AI agent** powered by Principles Disciple.
           evolutionDirective = `<evolution_task priority="high">
 TASK: ${escapedTask}
 
-REQUIRED ACTION:
-- First respond to the user's current request normally.
-- After finishing the user-facing response, call:
-  pd_run_worker agentType="diagnostician" task=${escapedTask} runInBackground=true
-- Treat pd_run_worker as an internal Principles Disciple worker, not a peer-session messaging tool.
+REQUIRED ACTION (两阶段回复):
+
+**阶段 1 - 立即回复用户:**
+简要告知用户你检测到的问题，例如：
+"我注意到刚才的操作遇到了一些问题（简述问题），我已安排诊断代理在后台分析根因。分析完成后会继续告诉你结果。"
+
+然后调用：
+  sessions_spawn(task="使用 pd-diagnostician skill 执行诊断任务。\n\n任务: ${escapedTask}")
+
+**阶段 2 - 收到子代理结果后:**
+当收到诊断代理的完成消息后，用以下格式回复用户：
+
+"**诊断完成** 🔍
+
+基于后台分析结果：
+- **根因**: [一句话总结]
+- **分类**: [People/Design/Assumption/Tooling]
+- **建议**: [可执行的改进建议]
+
+相关原则已记录到 PRINCIPLES.md。"
+
+IMPORTANT:
 - Do NOT reply with "[EVOLUTION_ACK]".
-- Do NOT let this task interrupt the current user interaction.
+- 子代理结果会作为新消息到达，届时再进行阶段2的回复。
 </evolution_task>\n`;
         } else {
           evolutionDirective = `<evolution_task priority="critical">
@@ -554,8 +586,7 @@ TASK: ${escapedTask}
 
 REQUIRED ACTION:
 - Start diagnostics immediately by calling:
-  pd_run_worker agentType="diagnostician" task=${escapedTask} runInBackground=true
-- Treat pd_run_worker as an internal Principles Disciple worker, not a peer-session messaging tool.
+  sessions_spawn(task="使用 pd-diagnostician skill 执行诊断任务。\n\n任务: ${escapedTask}")
 - Do NOT reply with "[EVOLUTION_ACK]".
 </evolution_task>\n`;
         }
@@ -682,34 +713,60 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
   let workingMemoryContent = '';
   if (!isMinimalMode && contextConfig.projectFocus !== 'off') {
     const focusPath = wctx.resolve('CURRENT_FOCUS');
-    if (fs.existsSync(focusPath)) {
+    const extensionRoot = PathResolver.getExtensionRoot();
+
+    // 🔒 安全读取：自动验证格式，损坏时从模板恢复
+    const { content: currentFocus, recovered, validationErrors } = safeReadCurrentFocus(
+      focusPath,
+      extensionRoot || '',
+      logger
+    );
+
+    if (recovered) {
+      logger?.info?.(`[PD:Prompt] CURRENT_FOCUS.md was recovered from template`);
+    }
+    if (validationErrors.length > 0) {
+      logger?.warn?.(`[PD:Prompt] CURRENT_FOCUS validation errors: ${validationErrors.join(', ')}`);
+    }
+
+    if (currentFocus.trim()) {
       try {
-        const currentFocus = fs.readFileSync(focusPath, 'utf8').trim();
-        if (currentFocus) {
+        // 🚀 自动压缩门禁：检查文件大小，超过阈值自动压缩
+        const stateDir = wctx.stateDir;
+        const compressResult = autoCompressFocus(focusPath, workspaceDir, stateDir);
+        if (compressResult.compressed) {
+          logger?.info?.(`[PD:Prompt] Auto-compressed CURRENT_FOCUS: ${compressResult.oldLines} → ${compressResult.newLines} lines. Milestones archived: ${compressResult.milestonesArchived}`);
+        } else if (compressResult.reason === 'Rate limited (24h interval)') {
+          logger?.debug?.(`[PD:Prompt] Auto-compress skipped: ${compressResult.reason}`);
+        }
+
+        // 重新读取（可能被压缩更新了）
+        const finalContent = fs.readFileSync(focusPath, 'utf8').trim();
+        if (finalContent) {
           // 解析工作记忆部分（用于独立注入）
-          const workingMemorySnapshot = parseWorkingMemorySection(currentFocus);
+          const workingMemorySnapshot = parseWorkingMemorySection(finalContent);
           if (workingMemorySnapshot) {
             workingMemoryContent = workingMemoryToInjection(workingMemorySnapshot);
           }
-          
+
           if (contextConfig.projectFocus === 'summary') {
             // Summary mode: intelligent extraction prioritizing key sections
-            projectContextContent = extractSummary(currentFocus, 30);
+            projectContextContent = extractSummary(finalContent, 30);
           } else {
             // Full mode: current version + recent history (3 versions)
             const historyVersions = getHistoryVersions(focusPath, 3);
             if (historyVersions.length > 0) {
               const historySections = historyVersions.map((v, i) =>
-                `\n---\n\n**闁告ê妫楄ぐ鍫曟偋閸喐鎷?v${historyVersions.length - i}**\n\n${v}`
+                `\n---\n\n**历史版本 v${historyVersions.length - i}**\n\n${v}`
               ).join('');
-              projectContextContent = `${currentFocus}${historySections}`;
+              projectContextContent = `${finalContent}${historySections}`;
             } else {
-              projectContextContent = currentFocus;
+              projectContextContent = finalContent;
             }
           }
         }
       } catch (e) {
-        logger?.error(`[PD:Prompt] Failed to read CURRENT_FOCUS: ${String(e)}`);
+        logger?.error(`[PD:Prompt] Failed to process CURRENT_FOCUS: ${String(e)}`);
       }
     }
   }

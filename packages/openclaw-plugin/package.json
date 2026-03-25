@@ -66,6 +66,7 @@
   "dependencies": {
     "@sinclair/typebox": "^0.34.48",
     "better-sqlite3": "^12.8.0",
+    "lucide-react": "^0.468.0",
     "micromatch": "^4.0.8",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

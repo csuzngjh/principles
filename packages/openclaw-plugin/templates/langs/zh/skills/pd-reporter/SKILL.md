@@ -1,7 +1,7 @@
 ---
-name: Reporter
-description: 最终汇报智能体（技术细节转管理报告）
-permissionMode: allowSubagentSpawn
+name: pd-reporter
+description: 最终汇报智能体。将技术细节转化为管理者可理解的报告。当需要汇报分析结果或项目状态时使用。
+disable-model-invocation: true
 ---
 
 # Reporter

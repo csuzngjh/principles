@@ -2,7 +2,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { createHash } from 'crypto';
 import type { OpenClawPluginServiceContext, OpenClawPluginApi } from '../openclaw-sdk.js';
-import { loadAgentDefinition } from '../core/agent-loader.js';
 import { DictionaryService } from '../core/dictionary-service.js';
 import { DetectionService } from '../core/detection-service.js';
 import { ensureStateTemplates } from '../core/init.js';
@@ -12,6 +11,7 @@ import { WorkspaceContext } from '../core/workspace-context.js';
 import { initPersistence, flushAllSessions } from '../core/session-tracker.js';
 import { acquireLockAsync, releaseLock, type LockContext } from '../utils/file-lock.js';
 import { getEvolutionLogger, type EvolutionStage } from '../core/evolution-logger.js';
+import { DIAGNOSTICIAN_PROTOCOL_SUMMARY } from '../constants/diagnostician.js';
 
 let intervalId: NodeJS.Timeout | null = null;
 
@@ -403,7 +403,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
                   `Trigger text: "${highestScoreTask.trigger_text_preview || 'N/A'}"`;
 
             // Prepare HEARTBEAT content first
-            const agentDef = loadAgentDefinition('diagnostician');
+            // Use shared diagnostician protocol (consistent with pd-diagnostician skill)
             const heartbeatPath = wctx.resolve('HEARTBEAT');
             const markerFilePath = path.join(wctx.stateDir, `.evolution_complete_${highestScoreTask.id}`);
             const heartbeatContent = [
@@ -419,7 +419,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
                 ``,
                 `---`,
                 ``,
-                agentDef ? agentDef.systemPrompt : `Use 5 Whys methodology to diagnose the root cause of the pain signal above.`,
+                DIAGNOSTICIAN_PROTOCOL_SUMMARY,
                 ``,
                 `---`,
                 ``,

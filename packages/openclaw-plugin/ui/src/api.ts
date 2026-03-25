@@ -120,6 +120,30 @@ export const api = {
   getOverview(): Promise<OverviewResponse> {
     return requestJson('/plugins/principles/api/overview');
   },
+  getCentralOverview(): Promise<OverviewResponse & { centralInfo?: { workspaceCount: number; enabledWorkspaceCount: number; workspaces: string[]; enabledWorkspaces: string[] } }> {
+    return requestJson('/plugins/principles/api/central/overview');
+  },
+  syncCentral(): Promise<{ synced: Record<string, number>; timestamp: string }> {
+    return requestJson('/plugins/principles/api/central/sync', { method: 'POST' });
+  },
+  getWorkspaceConfigs(): Promise<{
+    configs: Array<{ workspaceName: string; enabled: boolean; displayName: string | null; syncEnabled: boolean }>;
+    workspaces: Array<{ name: string; path: string; lastSync: string | null; config: null | { workspaceName: string; enabled: boolean; displayName: string | null; syncEnabled: boolean } }>;
+  }> {
+    return requestJson('/plugins/principles/api/central/workspaces');
+  },
+  updateWorkspaceConfig(workspaceName: string, updates: { enabled?: boolean; displayName?: string | null; syncEnabled?: boolean }): Promise<unknown> {
+    return requestJson(`/plugins/principles/api/central/workspaces/${encodeURIComponent(workspaceName)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(updates),
+    });
+  },
+  addCustomWorkspace(name: string, path: string): Promise<{ success: boolean; workspace: string }> {
+    return requestJson('/plugins/principles/api/central/workspaces', {
+      method: 'POST',
+      body: JSON.stringify({ name, path }),
+    });
+  },
   listSamples(search: URLSearchParams): Promise<SamplesResponse> {
     return requestJson(`/plugins/principles/api/samples?${search.toString()}`);
   },
