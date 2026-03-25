@@ -3,3 +3,14 @@ node_modules/
 *.log
 .env
 coverage/
+
+# 编译产物 - 源码在 src/ 目录
+*.js
+!esbuild.config.js
+*.d.ts
+
+# 打包文件
+*.tgz
+
+# Web 编译产物
+web/assets/
