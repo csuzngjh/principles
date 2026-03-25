@@ -76,20 +76,22 @@ async function cleanOldVersion(): Promise<void> {
 }
 
 /**
- * 构建插件
+ * 检查内置插件是否存在
  */
-async function buildPlugin(pluginDir: string): Promise<void> {
-  logger.step('构建插件');
-  
-  const execOpts = getExecOptions(pluginDir);
-  
-  // 安装依赖
-  execSync('npm install --silent', execOpts);
-  
-  // 构建
-  execSync('npm run build', execOpts);
-  
-  logger.success('插件构建完成');
+async function checkBuiltPlugin(pluginDir: string): Promise<void> {
+  logger.step('检查内置插件');
+
+  const distDir = path.join(pluginDir, 'plugin', 'dist');
+  const pluginJson = path.join(pluginDir, 'plugin', 'openclaw.plugin.json');
+
+  if (!existsSync(distDir) || !existsSync(pluginJson)) {
+    logger.error('内置插件文件缺失');
+    logger.error(`期望位置: ${distDir}`);
+    logger.error('这可能是安装包损坏，请重新安装或联系开发者');
+    process.exit(1);
+  }
+
+  logger.success('内置插件检查通过');
 }
 
 /**
@@ -97,53 +99,32 @@ async function buildPlugin(pluginDir: string): Promise<void> {
  */
 async function installPlugin(pluginDir: string): Promise<void> {
   logger.step('安装插件到 OpenClaw');
-  
+
   const extDir = getPluginExtDir();
   const configDir = getOpenClawConfigDir();
   const configPath = path.join(configDir, 'openclaw.json');
-  
-  // 方案一：尝试使用 openclaw plugins install（静默模式）
-  try {
-    const execOpts: ExecSyncOptions = {
-      encoding: 'utf-8',
-      timeout: 60000,
-      env: process.env,
-    };
-    if (process.platform === 'win32') {
-      execOpts.shell = process.env.ComSpec || 'cmd.exe';
-    }
-    execSync(`openclaw plugins install "${pluginDir}" 2>&1`, execOpts);
-    // 检查是否安装成功
-    if (existsSync(extDir) && existsSync(path.join(extDir, 'dist', 'index.js'))) {
-      logger.success('插件安装成功 (openclaw)');
-      return;
-    }
-  } catch {
-    // 继续使用备用方案
-  }
-  
-  // 方案二：手动复制 + 更新配置
-  logger.info('使用手动安装方式...');
-  
-  // 1. 复制插件文件
+  const builtPluginDir = path.join(pluginDir, 'plugin');
+
+  // 复制内置插件文件
   await fse.ensureDir(extDir);
-  await fse.copy(pluginDir, extDir, { overwrite: true });
-  
-  // 2. 读取并更新 openclaw.json
+  await fse.copy(builtPluginDir, extDir, { overwrite: true });
+  logger.info('已复制插件文件');
+
+  // 更新 openclaw.json 配置
   if (existsSync(configPath)) {
     const config = JSON.parse(readFileSync(configPath, 'utf-8'));
-    
+
     // 添加到 allow 列表
     if (!config.plugins) config.plugins = {};
     if (!config.plugins.allow) config.plugins.allow = [];
     if (!config.plugins.allow.includes('principles-disciple')) {
       config.plugins.allow.push('principles-disciple');
     }
-    
+
     // 添加到 entries
     if (!config.plugins.entries) config.plugins.entries = {};
     config.plugins.entries['principles-disciple'] = { enabled: true };
-    
+
     // 添加到 installs（使用 OpenClaw 正确格式）
     if (!config.plugins.installs) config.plugins.installs = {};
     config.plugins.installs['principles-disciple'] = {
@@ -151,11 +132,11 @@ async function installPlugin(pluginDir: string): Promise<void> {
       installPath: extDir,
       installedAt: new Date().toISOString(),
     };
-    
+
     writeFileSync(configPath, JSON.stringify(config, null, 2));
   }
-  
-  logger.success('插件安装成功 (手动)');
+
+  logger.success('插件安装成功');
 }
 
 /**
@@ -442,28 +423,28 @@ export interface InstallResult {
  */
 export async function install(options: InstallOptions, pluginDir: string): Promise<InstallResult> {
   const spinner = ora('正在安装...').start();
-  
+
   try {
     // 1. 清理旧版本
     spinner.text = '清理旧版本...';
     await cleanOldVersion();
-    
-    // 2. 构建插件
-    spinner.text = '构建插件...';
-    await buildPlugin(pluginDir);
-    
+
+    // 2. 检查内置插件
+    spinner.text = '检查内置插件...';
+    await checkBuiltPlugin(pluginDir);
+
     // 3. 安装插件
     spinner.text = '安装插件...';
     await installPlugin(pluginDir);
-    
+
     // 4. 安装插件依赖
     spinner.text = '安装插件依赖...';
     await installPluginDependencies();
-    
+
     // 5. 复制 Skills
     spinner.text = '复制 Skills...';
     const skillsCount = await copySkills(pluginDir, options.language, options.features);
-    
+
     // 6. 复制核心模板
     spinner.text = '复制核心模板...';
     const templatesCount = await copyCoreTemplates(
@@ -472,7 +453,7 @@ export async function install(options: InstallOptions, pluginDir: string): Promi
       options.workspaceDir,
       options.mode
     );
-    
+
     // 7. 复制身份层
     spinner.text = '复制身份层...';
     const principlesCount = await copyPrinciplesLayer(
@@ -480,11 +461,11 @@ export async function install(options: InstallOptions, pluginDir: string): Promi
       options.workspaceDir,
       options.mode
     );
-    
+
     // 8. 创建配置文件
     spinner.text = '创建配置文件...';
     await createConfigFile(options.workspaceDir, options.features);
-    
+
     // 9. 生成更新摘要（如果是更新模式）
     spinner.text = '生成更新摘要...';
     const updateFilesCount = await generateUpdateSummary(options.workspaceDir, options.mode);

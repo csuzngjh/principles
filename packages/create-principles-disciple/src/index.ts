@@ -24,8 +24,8 @@ const DEFAULT_FEATURES = ['evolution', 'trust', 'pain'] as const;
 const __filename = url.fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// 插件目录（相对于此文件的上级上级）
-const PLUGIN_DIR = path.resolve(__dirname, '..', '..', 'openclaw-plugin');
+// 插件目录（打包后 templates 在 dist 上级）
+const PLUGIN_DIR = path.resolve(__dirname, '..');
 
 const program = new Command();
 

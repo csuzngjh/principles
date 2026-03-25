@@ -8,13 +8,17 @@
   },
   "files": [
     "dist",
+    "plugin",
+    "templates",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "prepublishOnly": "npm run build"
+    "bundle": "node scripts/bundle-plugin.mjs",
+    "prepack": "npm run build && npm run bundle",
+    "prepublishOnly": "npm run build && npm run bundle"
   },
   "keywords": [
     "openclaw",

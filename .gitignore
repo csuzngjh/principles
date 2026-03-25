@@ -31,6 +31,9 @@ packages/openclaw-plugin/node_modules/
 # packages/openclaw-plugin/agents
 packages/openclaw-plugin/skills
 
+# create-principles-disciple: bundled plugin (build artifact)
+packages/create-principles-disciple/plugin/
+
 # Local environment and state (DO NOT COMMIT)
 .claude/
 claude/

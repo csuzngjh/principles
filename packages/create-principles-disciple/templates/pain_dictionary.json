@@ -1,0 +1,36 @@
+{
+  "rules": {
+    "P_CONFUSION_ZH": {
+      "type": "regex",
+      "pattern": "我(似乎|好像)(不确定|不太确定|不清楚|困惑)",
+      "severity": 35,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_CONFUSION_EN": {
+      "type": "regex",
+      "pattern": "i am (not sure|unsure|confused|uncertain|struggling to)",
+      "severity": 35,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_LOOP_ZH": {
+      "type": "regex",
+      "pattern": "似乎(陷入了?循环|回到了?原点|原地打转)",
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_LOOP_EN": {
+      "type": "exact_match",
+      "phrases": [
+        "going in circles",
+        "back to square one",
+        "looping"
+      ],
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    }
+  }
+}
