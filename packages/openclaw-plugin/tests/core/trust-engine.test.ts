@@ -128,7 +128,7 @@ describe('Trust Engine - Phase 1 legacy freeze', () => {
     });
 
     const engine = new TrustEngine(workspaceDir);
-    engine.recordSuccess('subagent_success', { toolName: 'pd_run_worker' }, true);
+    engine.recordSuccess('subagent_success', { toolName: 'sessions_spawn' }, true);
 
     const scorecard = engine.getScorecard();
     expect(scorecard.trust_score).toBe(59);
