@@ -1,0 +1,22 @@
+{
+  "rules": {
+    "P_CONFUSION_EN": {
+      "type": "regex",
+      "pattern": "i am (not sure|unsure|confused|uncertain|struggling to)",
+      "severity": 35,
+      "hits": 0,
+      "status": "active"
+    },
+    "P_LOOP_EN": {
+      "type": "exact_match",
+      "phrases": [
+        "going in circles",
+        "back to square one",
+        "looping"
+      ],
+      "severity": 45,
+      "hits": 0,
+      "status": "active"
+    }
+  }
+}

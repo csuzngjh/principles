@@ -1,3 +1,33 @@
+# [1.7.5](https://github.com/csuzngjh/principles/compare/v1.7.4...v1.7.5) (2026-03-25)
+
+
+### Bug Fixes
+
+* address CodeRabbit review comments - use isSubagentAvailable() for runtime detection ([1870928](https://github.com/csuzngjh/principles/commit/1870928))
+* fix central-db to handle missing thinking_model_events table in older workspaces ([adec0a8](https://github.com/csuzngjh/principles/commit/adec0a8))
+* improve UI KPI cards and accessibility ([968400e](https://github.com/csuzngjh/principles/commit/968400e))
+* restore subagent-probe.ts for empathy observer module ([ff6f384](https://github.com/csuzngjh/principles/commit/ff6f384))
+
+
+### Features
+
+* **ui:** redesign Principles Console with warm natural design system ([b290de6](https://github.com/csuzngjh/principles/commit/b290de6))
+* **ui:** add central database aggregating all workspaces ([e9d3e64](https://github.com/csuzngjh/principles/commit/e9d3e64))
+* **ui:** add workspace configuration panel ([9a467e3](https://github.com/csuzngjh/principles/commit/9a467e3))
+* **ui:** add custom workspace form to WorkspaceConfig ([15dbad6](https://github.com/csuzngjh/principles/commit/15dbad6))
+* **focus:** add auto-compression with milestone archiving ([06992f2](https://github.com/csuzngjh/principles/commit/06992f2))
+* **focus:** add format validation and template recovery ([31f5325](https://github.com/csuzngjh/principles/commit/31f5325))
+
+
+### Code Refactoring
+
+* migrate from pd_run_worker to sessions_spawn for subagent spawning ([d1ea4f6](https://github.com/csuzngjh/principles/commit/d1ea4f6))
+* remove compiled artifacts from git tracking ([6076388](https://github.com/csuzngjh/principles/commit/6076388))
+* simplify focus validation to only check critical issues ([ef7e53a](https://github.com/csuzngjh/principles/commit/ef7e53a))
+* improve auto-compression with config and rate limiting ([eed54e6](https://github.com/csuzngjh/principles/commit/eed54e6))
+
+
+
 # [1.7.0](https://github.com/csuzngjh/principles/compare/v1.6.0...v1.7.0) (2026-03-19)
 
 
