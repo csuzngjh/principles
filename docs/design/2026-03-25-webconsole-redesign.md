@@ -544,19 +544,105 @@ SVG-based sparkline with `--accent` color.
 
 ---
 
+## Central Database Architecture
+
+### Overview
+
+The Principles Console now supports aggregating data from **all 10 agent workspaces** into a single central database. This enables cross-workspace analytics and unified monitoring.
+
+### Storage Location
+
+```
+~/.openclaw/.central/aggregated.db
+```
+
+**Important**: Binary database files are NOT stored in workspace `memory/` directories (which are for text embeddings). The central DB uses a dedicated `.central/` directory outside all workspaces.
+
+### Discovery Mechanism
+
+Workspaces are dynamically discovered by scanning for directories matching `workspace-*` pattern in `~/.openclaw/`:
+
+```
+~/.openclaw/
+├── workspace-builder/
+├── workspace-diagnostician/
+├── workspace-explorer/
+├── workspace-hr/
+├── workspace-main/
+├── workspace-pm/
+├── workspace-repair/
+├── workspace-research/
+├── workspace-resource-scout/
+└── workspace-verification/
+```
+
+### Schema
+
+The central database aggregates the following tables:
+
+| Table | Description |
+|-------|-------------|
+| `aggregated_sessions` | Session metadata from all workspaces |
+| `aggregated_tool_calls` | Tool execution outcomes (success/failure) |
+| `aggregated_pain_events` | Pain signals detected across workspaces |
+| `aggregated_user_corrections` | User corrections (where `correction_detected = 1`) |
+| `aggregated_principle_events` | Principle application events |
+| `aggregated_thinking_events` | Thinking model trigger events |
+| `aggregated_correction_samples` | Training samples for review |
+| `aggregated_task_outcomes` | Task completion outcomes |
+| `workspace_config` | Per-workspace settings (enabled/syncEnabled) |
+| `sync_log` | Sync operation audit trail |
+
+### Sync Behavior
+
+1. **Workspace Discovery**: On startup, scans for `workspace-*` directories
+2. **Config Check**: Only syncs workspaces where `sync_enabled = 1` in `workspace_config`
+3. **Table Skipping**: Gracefully handles missing tables (e.g., `thinking_model_events` not present in older workspace schemas)
+4. **Incremental**: Uses `INSERT OR REPLACE` for sessions/samples, `INSERT` for events
+
+### API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/central/overview` | GET | Aggregated overview stats |
+| `/api/central/sync` | POST | Trigger sync for all enabled workspaces |
+| `/api/central/workspaces` | GET | List all workspaces with configs |
+| `/api/central/workspaces/:name` | GET | Get single workspace config |
+| `/api/central/workspaces/:name` | PATCH | Update workspace config |
+| `/api/central/workspaces` | POST | Add custom workspace |
+
+### UI Components
+
+**WorkspaceConfig Component** (Overview Page):
+- Lists all discovered workspaces with Include/Sync toggles
+- Shows workspace name, path, and last sync time
+- "Add Custom Workspace" button to add non-standard workspace paths
+- Inline form for adding custom workspaces (name + path inputs)
+
+### Custom Workspace Support
+
+Users can add arbitrary workspace paths via the UI. This is useful for:
+- Development/testing workspaces
+- Custom-named workspaces outside the `workspace-*` pattern
+- Workspaces on external drives or alternate locations
+
+---
+
 ## Files to Modify
 
 ```
-packages/openclaw-plugin/ui/src/
-├── styles.css          # Complete redesign
-├── App.tsx             # Icon updates, component structure
-├── api.ts              # (no changes)
-├── types.ts            # (no changes)
-└── main.tsx             # (no changes)
-
-packages/openclaw-plugin/web/assets/
-├── app.css              # (keep for fallback, minor updates)
-└── app.js               # (keep for fallback)
+packages/openclaw-plugin/
+├── src/
+│   ├── service/
+│   │   ├── central-database.ts    # Central DB aggregation service
+│   │   └── control-ui-query-service.ts
+│   └── http/
+│       └── principles-console-route.ts  # API routes
+├── ui/src/
+│   ├── App.tsx             # WorkspaceConfig component + custom workspace form
+│   └── api.ts              # Central API methods
+└── docs/design/
+    └── 2026-03-25-webconsole-redesign.md  # This architecture doc
 ```
 
 ---
