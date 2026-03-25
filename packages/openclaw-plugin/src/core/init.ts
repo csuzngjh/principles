@@ -26,7 +26,7 @@ function hasOutdatedCoreGuidance(file: string, content: string): boolean {
     if (content.includes(getCoreGuidanceVersionMarker())) return false;
     if (content.includes('pd_spawn_agent')) return true;
     if (!content.includes('subagents')) return true;
-    if (file === 'AGENTS.md' && !content.includes('pd_run_worker')) return true;
+    if (!content.includes('sessions_spawn')) return true;
     return false;
 }
 
@@ -70,7 +70,7 @@ export function ensureWorkspaceTemplates(api: OpenClawPluginApi, workspaceDir: s
                 } else if (CORE_GUIDANCE_FILES.has(file)) {
                     const existingContent = fs.readFileSync(destPath, 'utf8');
                     if (hasOutdatedCoreGuidance(file, existingContent)) {
-                        api.logger.warn(`[PD] Outdated core guidance detected in ${file}. Review the latest template guidance for peer sessions, subagents, and pd_run_worker routing.`);
+                        api.logger.warn(`[PD] Outdated core guidance detected in ${file}. Review the latest template guidance for peer sessions, subagents, and sessions_spawn routing.`);
                     }
                 }
             }

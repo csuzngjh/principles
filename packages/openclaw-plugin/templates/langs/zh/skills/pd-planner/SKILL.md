@@ -1,7 +1,7 @@
 ---
-name: Planner
-description: 制定电影剧本式计划的智能体
-permissionMode: allowSubagentSpawn
+name: pd-planner
+description: 制定电影剧本式计划的智能体。将复杂任务分解为可执行的步骤。当需要制定实施计划时使用。
+disable-model-invocation: true
 ---
 
 # Planner

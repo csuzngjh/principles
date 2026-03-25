@@ -20,7 +20,6 @@ import {
   extractVersion,
   extractDate,
 } from '../core/focus-history.js';
-import { createAgentSpawnTool } from '../tools/agent-spawn.js';
 
 /**
  * 清理 Markdown 代码块围栏
@@ -371,50 +370,15 @@ If no milestones to record, leave ===MEMORY=== section empty.`;
   let memoryUpdated = false;
 
   try {
-    // 调用子智能体进行压缩
-    const tool = createAgentSpawnTool(api);
-    const result = await tool.execute(`focus-compress-${randomUUID()}`, {
-      agentType: 'reporter', // 使用 reporter 类型，适合总结和压缩
-      task: compressPrompt,
-    });
-
-    // 解析输出，提取 MEMORY 和 COMPRESSED 部分
-    const resultText = result?.content?.[0]?.text || '';
-    if (resultText.trim()) {
-      const memoryMatch = resultText.match(/===MEMORY===([\s\S]*?)===COMPRESSED===/);
-      const compressedMatch = resultText.match(/===COMPRESSED===([\s\S]*?)$/);
-
-      if (compressedMatch && compressedMatch[1].trim()) {
-        // 清理 Markdown 代码块围栏
-        compressedContent = stripMarkdownFence(compressedMatch[1]);
-        usedAI = true;
-
-        // 写入记忆文件（MEMORY.md 在根目录，无需创建目录）
-        if (memoryMatch && memoryMatch[1].trim()) {
-          // 清理 Markdown 代码块围栏
-          const memoryContent = stripMarkdownFence(memoryMatch[1]);
-          // 追加到 MEMORY.md
-          const existingMemory = fs.existsSync(memoryPath)
-            ? fs.readFileSync(memoryPath, 'utf-8')
-            : '';
-          const newMemory = existingMemory
-            ? `${existingMemory}\n\n${memoryContent}`
-            : memoryContent;
-          fs.writeFileSync(memoryPath, newMemory, 'utf-8');
-          memoryUpdated = true;
-        }
-      } else {
-        // 无法解析输出，回退到简单压缩
-        compressedContent = compressFocusContent(oldContent);
-      }
-    } else {
-      // 子智能体返回空，回退到简单压缩
-      compressedContent = compressFocusContent(oldContent);
-    }
-  } catch (error) {
-    // 子智能体失败，回退到简单压缩
-    api.logger?.error(`[PD:Focus] AI compression failed, falling back to simple compression: ${String(error)}`);
+    // 尝试使用 AI 压缩（通过 sessions_spawn）
+    // 由于命令处理器不能直接调用 Gateway 工具，使用简单压缩作为后备
+    // 如果需要 AI 压缩，用户应该在主会话中调用 sessions_spawn
     compressedContent = compressFocusContent(oldContent);
+    api.logger?.info?.(`[PD:Focus] Used simple compression (AI compression requires sessions_spawn in main session)`);
+  } catch (error) {
+    // 压缩失败，使用原内容
+    api.logger?.error?.(`[PD:Focus] Compression failed: ${String(error)}`);
+    compressedContent = oldContent;
   }
 
   // 更新版本号和日期

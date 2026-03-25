@@ -7,7 +7,6 @@ import { EventLogService } from '../core/event-log.js';
 import { buildCritiquePromptV2 } from './critique-prompt.js';
 import { resolvePdPath } from '../core/paths.js';
 import { reflectionLogRetentionDays } from '../types.js';
-import { isSubagentRuntimeAvailable } from '../utils/subagent-probe.js';
 
 /**
  * Write reflection result to reflection-log.md
@@ -272,7 +271,7 @@ export function createDeepReflectTool(api: OpenClawPluginApi) {
 
                 const startTime = Date.now();
                 const subagentRuntime = api.runtime.subagent;
-                if (!isSubagentRuntimeAvailable(subagentRuntime)) {
+                if (!subagentRuntime) {
                     return {
                         content: [{
                             type: 'text',

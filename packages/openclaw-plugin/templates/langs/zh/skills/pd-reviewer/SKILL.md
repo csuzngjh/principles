@@ -1,7 +1,7 @@
 ---
-name: Reviewer
-description: 代码审查智能体（正确性、安全性、可维护性）
-permissionMode: allowSubagentSpawn
+name: pd-reviewer
+description: 代码审查智能体。评估代码的正确性、安全性、可维护性。当需要审查代码变更时使用。
+disable-model-invocation: true
 ---
 
 # Reviewer
