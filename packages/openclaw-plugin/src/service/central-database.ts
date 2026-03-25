@@ -40,6 +40,13 @@ export class CentralDatabase {
     this.db.close();
   }
 
+  private tableExists(db: Database.Database, tableName: string): boolean {
+    const result = db.prepare(`
+      SELECT name FROM sqlite_master WHERE type='table' AND name=?
+    `).get(tableName);
+    return !!result;
+  }
+
   private initSchema(): void {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS schema_version (
@@ -292,21 +299,23 @@ export class CentralDatabase {
         totalSynced++;
       }
 
-      // Sync thinking_model_events
-      const thinking = sourceDb.prepare(`
-        SELECT session_id, model_id, matched_pattern, created_at FROM thinking_model_events
-      `).all() as Array<{
-        session_id: string; model_id: string; matched_pattern: string; created_at: string
-      }>;
-      
-      const insertThinking = this.db.prepare(`
-        INSERT INTO aggregated_thinking_events (workspace, session_id, model_id, matched_pattern, created_at)
-        VALUES (?, ?, ?, ?, ?)
-      `);
-      
-      for (const t of thinking) {
-        insertThinking.run(workspaceName, t.session_id, t.model_id, t.matched_pattern, t.created_at);
-        totalSynced++;
+      // Sync thinking_model_events (may not exist in older workspaces)
+      if (this.tableExists(sourceDb, 'thinking_model_events')) {
+        const thinking = sourceDb.prepare(`
+          SELECT session_id, model_id, matched_pattern, created_at FROM thinking_model_events
+        `).all() as Array<{
+          session_id: string; model_id: string; matched_pattern: string; created_at: string
+        }>;
+        
+        const insertThinking = this.db.prepare(`
+          INSERT INTO aggregated_thinking_events (workspace, session_id, model_id, matched_pattern, created_at)
+          VALUES (?, ?, ?, ?, ?)
+        `);
+        
+        for (const t of thinking) {
+          insertThinking.run(workspaceName, t.session_id, t.model_id, t.matched_pattern, t.created_at);
+          totalSynced++;
+        }
       }
 
       // Sync correction_samples
