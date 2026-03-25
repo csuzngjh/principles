@@ -52,6 +52,21 @@ export class CentralDatabase {
         last_sync TEXT
       );
 
+      CREATE TABLE IF NOT EXISTS workspace_config (
+        workspace_name TEXT PRIMARY KEY,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        display_name TEXT,
+        sync_enabled INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE IF NOT EXISTS global_config (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
       CREATE TABLE IF NOT EXISTS aggregated_sessions (
         session_id TEXT PRIMARY KEY,
         workspace TEXT NOT NULL,
@@ -149,10 +164,8 @@ export class CentralDatabase {
     const openClawDir = os.homedir();
     const workspacesDir = path.join(openClawDir, '.openclaw');
     
-    // Clear existing workspaces
     this.workspaces.length = 0;
     
-    // Find all workspace-* directories
     const entries = fs.readdirSync(workspacesDir);
     for (const entry of entries) {
       if (entry.startsWith('workspace-') && entry !== 'workspace') {
@@ -354,8 +367,22 @@ export class CentralDatabase {
     }
   }
 
+  syncEnabled(): Map<string, number> {
+    const results = new Map<string, number>();
+    for (const ws of this.getEnabledWorkspaces()) {
+      try {
+        const count = this.syncWorkspace(ws.name);
+        results.set(ws.name, count);
+      } catch (error) {
+        console.error(`Failed to sync workspace ${ws.name}:`, error);
+        results.set(ws.name, 0);
+      }
+    }
+    return results;
+  }
+
   /**
-   * Sync all workspaces
+   * Sync all workspaces (legacy method - syncs all regardless of config)
    */
   syncAll(): Map<string, number> {
     const results = new Map<string, number>();
@@ -371,8 +398,14 @@ export class CentralDatabase {
     return results;
   }
 
+  private getEnabledWorkspaceFilter(): string {
+    const enabled = this.getWorkspaceConfigs().filter(c => c.enabled && c.syncEnabled);
+    if (enabled.length === 0) return "''";
+    return enabled.map(c => `'${c.workspaceName.replace(/'/g, "''")}'`).join(', ');
+  }
+
   /**
-   * Get aggregated overview stats
+   * Get aggregated overview stats (only from enabled workspaces)
    */
   getOverviewStats(): {
     totalSessions: number;
@@ -386,10 +419,15 @@ export class CentralDatabase {
     approvedSamples: number;
     rejectedSamples: number;
     workspaceCount: number;
+    enabledWorkspaceCount: number;
     workspaceNames: string[];
+    enabledWorkspaceNames: string[];
   } {
+    const filter = this.getEnabledWorkspaceFilter();
+
     const totalSessions = this.db.prepare(`
       SELECT COUNT(DISTINCT session_id) as count FROM aggregated_sessions
+      WHERE workspace IN (${filter})
     `).get() as { count: number };
 
     const toolStats = this.db.prepare(`
@@ -397,18 +435,22 @@ export class CentralDatabase {
         COUNT(*) as total,
         SUM(CASE WHEN outcome = 'failure' THEN 1 ELSE 0 END) as failures
       FROM aggregated_tool_calls
+      WHERE workspace IN (${filter})
     `).get() as { total: number; failures: number };
 
     const painEvents = this.db.prepare(`
       SELECT COUNT(*) as count FROM aggregated_pain_events
+      WHERE workspace IN (${filter})
     `).get() as { count: number };
 
     const corrections = this.db.prepare(`
       SELECT COUNT(*) as count FROM aggregated_user_corrections
+      WHERE workspace IN (${filter})
     `).get() as { count: number };
 
     const thinkingEvents = this.db.prepare(`
       SELECT COUNT(*) as count FROM aggregated_thinking_events
+      WHERE workspace IN (${filter})
     `).get() as { count: number };
 
     const sampleStats = this.db.prepare(`
@@ -418,11 +460,15 @@ export class CentralDatabase {
         SUM(CASE WHEN review_status = 'approved' THEN 1 ELSE 0 END) as approved,
         SUM(CASE WHEN review_status = 'rejected' THEN 1 ELSE 0 END) as rejected
       FROM aggregated_correction_samples
+      WHERE workspace IN (${filter})
     `).get() as { total: number; pending: number; approved: number; rejected: number };
 
     const workspaces = this.db.prepare(`
       SELECT name FROM workspaces ORDER BY name
     `).all() as Array<{ name: string }>;
+
+    const enabledConfigs = this.getWorkspaceConfigs().filter(c => c.enabled && c.syncEnabled);
+    const enabledWorkspaceNames = enabledConfigs.map(c => c.workspaceName);
 
     return {
       totalSessions: totalSessions.count,
@@ -436,7 +482,9 @@ export class CentralDatabase {
       approvedSamples: sampleStats.approved || 0,
       rejectedSamples: sampleStats.rejected || 0,
       workspaceCount: workspaces.length,
+      enabledWorkspaceCount: enabledConfigs.length,
       workspaceNames: workspaces.map(w => w.name),
+      enabledWorkspaceNames,
     };
   }
 
@@ -626,6 +674,121 @@ export class CentralDatabase {
     return this.db.prepare(`
       SELECT name, path, last_sync as lastSync FROM workspaces ORDER BY name
     `).all() as WorkspaceInfo[];
+  }
+
+  getWorkspaceConfigs(): Array<{
+    workspaceName: string;
+    enabled: boolean;
+    displayName: string | null;
+    syncEnabled: boolean;
+  }> {
+    const configs = this.db.prepare(`
+      SELECT workspace_name, enabled, display_name, sync_enabled 
+      FROM workspace_config
+      ORDER BY workspace_name
+    `).all() as Array<{
+      workspace_name: string;
+      enabled: number;
+      display_name: string | null;
+      sync_enabled: number;
+    }>;
+    
+    return configs.map(c => ({
+      workspaceName: c.workspace_name,
+      enabled: c.enabled === 1,
+      displayName: c.display_name,
+      syncEnabled: c.sync_enabled === 1,
+    }));
+  }
+
+  updateWorkspaceConfig(
+    workspaceName: string,
+    updates: {
+      enabled?: boolean;
+      displayName?: string | null;
+      syncEnabled?: boolean;
+    }
+  ): void {
+    const existing = this.db.prepare(`
+      SELECT workspace_name FROM workspace_config WHERE workspace_name = ?
+    `).get(workspaceName);
+
+    if (existing) {
+      const setClauses: string[] = ['updated_at = datetime(\'now\')'];
+      const params: unknown[] = [];
+      
+      if (updates.enabled !== undefined) {
+        setClauses.push('enabled = ?');
+        params.push(updates.enabled ? 1 : 0);
+      }
+      if (updates.displayName !== undefined) {
+        setClauses.push('display_name = ?');
+        params.push(updates.displayName);
+      }
+      if (updates.syncEnabled !== undefined) {
+        setClauses.push('sync_enabled = ?');
+        params.push(updates.syncEnabled ? 1 : 0);
+      }
+      
+      params.push(workspaceName);
+      this.db.prepare(`
+        UPDATE workspace_config SET ${setClauses.join(', ')} WHERE workspace_name = ?
+      `).run(...params);
+    } else {
+      this.db.prepare(`
+        INSERT INTO workspace_config (workspace_name, enabled, display_name, sync_enabled)
+        VALUES (?, ?, ?, ?)
+      `).run(
+        workspaceName,
+        updates.enabled !== undefined ? (updates.enabled ? 1 : 0) : 1,
+        updates.displayName ?? null,
+        updates.syncEnabled !== undefined ? (updates.syncEnabled ? 1 : 0) : 1
+      );
+    }
+  }
+
+  isWorkspaceEnabled(workspaceName: string): boolean {
+    const config = this.db.prepare(`
+      SELECT enabled, sync_enabled FROM workspace_config WHERE workspace_name = ?
+    `).get(workspaceName) as { enabled: number; sync_enabled: number } | undefined;
+    
+    if (!config) return true;
+    return config.enabled === 1 && config.sync_enabled === 1;
+  }
+
+  getEnabledWorkspaces(): WorkspaceInfo[] {
+    return this.workspaces.filter(ws => this.isWorkspaceEnabled(ws.name));
+  }
+
+  addCustomWorkspace(name: string, workspacePath: string): void {
+    if (!this.workspaces.find(ws => ws.name === name)) {
+      this.workspaces.push({ name, path: workspacePath, lastSync: null });
+      this.db.prepare(`
+        INSERT INTO workspaces (name, path, last_sync) VALUES (?, ?, NULL)
+      `).run(name, workspacePath);
+      this.db.prepare(`
+        INSERT INTO workspace_config (workspace_name, enabled, display_name, sync_enabled)
+        VALUES (?, 1, ?, 1)
+      `).run(name, name);
+    }
+  }
+
+  removeWorkspace(workspaceName: string): void {
+    this.updateWorkspaceConfig(workspaceName, { enabled: false, syncEnabled: false });
+  }
+
+  getGlobalConfig(key: string): string | null {
+    const result = this.db.prepare(`
+      SELECT value FROM global_config WHERE key = ?
+    `).get(key) as { value: string } | undefined;
+    return result?.value ?? null;
+  }
+
+  setGlobalConfig(key: string, value: string): void {
+    this.db.prepare(`
+      INSERT OR REPLACE INTO global_config (key, value, updated_at)
+      VALUES (?, ?, datetime('now'))
+    `).run(key, value);
   }
 
   /**

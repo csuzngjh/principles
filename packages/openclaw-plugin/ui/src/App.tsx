@@ -270,6 +270,87 @@ function ErrorState({ error }: { error: string }) {
   return <div className="panel error">{error}</div>;
 }
 
+function WorkspaceConfig() {
+  const [wsData, setWsData] = useState<{
+    configs: Array<{ workspaceName: string; enabled: boolean; displayName: string | null; syncEnabled: boolean }>;
+    workspaces: Array<{ name: string; path: string; lastSync: string | null; config: null | { workspaceName: string; enabled: boolean; displayName: string | null; syncEnabled: boolean } }>;
+  } | null>(null);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState<string | null>(null);
+
+  const loadConfigs = useCallback(async () => {
+    try {
+      const result = await api.getWorkspaceConfigs();
+      setWsData(result);
+      setError('');
+    } catch (err) {
+      setError(String(err));
+    }
+  }, []);
+
+  useEffect(() => {
+    loadConfigs();
+  }, [loadConfigs]);
+
+  const handleToggle = async (workspaceName: string, field: 'enabled' | 'syncEnabled', currentValue: boolean) => {
+    setSaving(workspaceName);
+    try {
+      await api.updateWorkspaceConfig(workspaceName, { [field]: !currentValue });
+      await loadConfigs();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  if (error) return <div className="panel error">{error}</div>;
+  if (!wsData) return <div className="panel muted">Loading workspaces...</div>;
+
+  return (
+    <section className="panel">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-4)' }}>
+        <h3>Workspace Configuration</h3>
+        <span className="badge">{wsData.configs.filter(c => c.enabled && c.syncEnabled).length} / {wsData.workspaces.length} enabled</span>
+      </div>
+      <div className="stack">
+        {wsData.workspaces.map((ws) => {
+          const config = ws.config ?? { workspaceName: ws.name, enabled: true, displayName: ws.name, syncEnabled: true };
+          const isSaving = saving === ws.name;
+          return (
+            <div className="row-card" key={ws.name}>
+              <div>
+                <strong>{ws.name}</strong>
+                <span>{ws.path}</span>
+              </div>
+              <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'center' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={config.enabled}
+                    onChange={() => handleToggle(ws.name, 'enabled', config.enabled)}
+                    disabled={isSaving}
+                  />
+                  <span style={{ fontSize: '13px' }}>Include</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={config.syncEnabled}
+                    onChange={() => handleToggle(ws.name, 'syncEnabled', config.syncEnabled)}
+                    disabled={isSaving || !config.enabled}
+                  />
+                  <span style={{ fontSize: '13px' }}>Sync</span>
+                </label>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function OverviewPage() {
   const [data, setData] = useState<OverviewResponse | null>(null);
   const [error, setError] = useState('');
@@ -304,7 +385,7 @@ function OverviewPage() {
   if (error) return <ErrorState error={error} />;
   if (!data) return <Loading />;
 
-  const centralInfo = (data as OverviewResponse & { centralInfo?: { workspaceCount: number; workspaces: string[] } }).centralInfo;
+  const centralInfo = (data as OverviewResponse & { centralInfo?: { workspaceCount: number; enabledWorkspaceCount: number; workspaces: string[]; enabledWorkspaces: string[] } }).centralInfo;
   const dailyTrend = data.dailyTrend ?? [];
 
   return (
@@ -316,7 +397,7 @@ function OverviewPage() {
         </div>
         <div className="meta">
           {centralInfo && (
-            <div>{centralInfo.workspaceCount} workspaces</div>
+            <div>{centralInfo.enabledWorkspaceCount} / {centralInfo.workspaceCount} workspaces enabled</div>
           )}
           <div>Freshness: {formatDate(data.dataFreshness)}</div>
           <button className="button-secondary" onClick={handleSync} disabled={syncing}>
@@ -324,6 +405,8 @@ function OverviewPage() {
           </button>
         </div>
       </header>
+
+      <WorkspaceConfig />
 
       <section className="kpi-grid">
         <article className="panel kpi"><span className="label">Repeat Error Rate</span><span className="value">{formatPercent(data.summary.repeatErrorRate)}</span></article>

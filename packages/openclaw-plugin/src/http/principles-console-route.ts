@@ -177,7 +177,9 @@ function handleApiRoute(
         },
         centralInfo: {
           workspaceCount: stats.workspaceCount,
+          enabledWorkspaceCount: stats.enabledWorkspaceCount,
           workspaces: stats.workspaceNames,
+          enabledWorkspaces: stats.enabledWorkspaceNames,
         },
       };
     });
@@ -186,13 +188,93 @@ function handleApiRoute(
   if (pathname === `${API_PREFIX}/central/sync` && method === 'POST') {
     return done(() => {
       const centralDb = getCentralDatabase();
-      const results = centralDb.syncAll();
+      const results = centralDb.syncEnabled();
       const summary: Record<string, number> = {};
       results.forEach((count, name) => {
         summary[name] = count;
       });
       return { synced: summary, timestamp: new Date().toISOString() };
     });
+  }
+
+  if (pathname === `${API_PREFIX}/central/workspaces` && method === 'GET') {
+    return done(() => {
+      const centralDb = getCentralDatabase();
+      const configs = centralDb.getWorkspaceConfigs();
+      const workspaces = centralDb.getWorkspaces();
+      return {
+        configs,
+        workspaces: workspaces.map(ws => ({
+          name: ws.name,
+          path: ws.path,
+          lastSync: ws.lastSync,
+          config: configs.find(c => c.workspaceName === ws.name) ?? null,
+        })),
+      };
+    });
+  }
+
+  const workspaceConfigMatch = pathname.match(/^\/plugins\/principles\/api\/central\/workspaces\/([^/]+)$/);
+  if (workspaceConfigMatch && method === 'GET') {
+    return done(() => {
+      const centralDb = getCentralDatabase();
+      const workspaceName = decodeURIComponent(workspaceConfigMatch[1]);
+      const configs = centralDb.getWorkspaceConfigs();
+      const config = configs.find(c => c.workspaceName === workspaceName);
+      return config ?? { workspaceName, enabled: true, displayName: workspaceName, syncEnabled: true };
+    });
+  }
+
+  if (workspaceConfigMatch && method === 'PATCH') {
+    return (async () => {
+      try {
+        const body = await readJsonBody(req) as Record<string, unknown>;
+        const centralDb = getCentralDatabase();
+        const workspaceName = decodeURIComponent(workspaceConfigMatch[1]);
+        centralDb.updateWorkspaceConfig(workspaceName, {
+          enabled: body.enabled as boolean | undefined,
+          displayName: body.displayName as string | null | undefined,
+          syncEnabled: body.syncEnabled as boolean | undefined,
+        });
+        const configs = centralDb.getWorkspaceConfigs();
+        json(res, 200, configs.find(c => c.workspaceName === workspaceName));
+        return true;
+      } catch (error) {
+        if (error instanceof Error && error.message === 'invalid_json') {
+          json(res, 400, { error: 'bad_request', message: 'Request body must be valid JSON.' });
+          return true;
+        }
+        api.logger.warn(`[PD:ControlUI] Workspace config update failed: ${String(error)}`);
+        json(res, 500, { error: 'internal_error', message: String(error) });
+        return true;
+      }
+    })();
+  }
+
+  if (pathname === `${API_PREFIX}/central/workspaces` && method === 'POST') {
+    return (async () => {
+      try {
+        const body = await readJsonBody(req) as Record<string, unknown>;
+        const name = typeof body.name === 'string' ? body.name : '';
+        const workspacePath = typeof body.path === 'string' ? body.path : '';
+        if (!name || !workspacePath) {
+          json(res, 400, { error: 'bad_request', message: 'name and path are required.' });
+          return true;
+        }
+        const centralDb = getCentralDatabase();
+        centralDb.addCustomWorkspace(name, workspacePath);
+        json(res, 201, { success: true, workspace: name });
+        return true;
+      } catch (error) {
+        if (error instanceof Error && error.message === 'invalid_json') {
+          json(res, 400, { error: 'bad_request', message: 'Request body must be valid JSON.' });
+          return true;
+        }
+        api.logger.warn(`[PD:ControlUI] Add workspace failed: ${String(error)}`);
+        json(res, 500, { error: 'internal_error', message: String(error) });
+        return true;
+      }
+    })();
   }
 
   if (pathname === `${API_PREFIX}/samples` && method === 'GET') {
