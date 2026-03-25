@@ -134,6 +134,18 @@ export interface PainSettings {
         model_calibration?: Record<string, number>;
     };
     gfi_gate?: GfiGateSettings;
+    compression?: {
+        /** 触发自动压缩的行数阈值 */
+        line_threshold?: number;
+        /** 触发自动压缩的字节阈值 */
+        size_threshold_kb?: number;
+        /** 自动压缩间隔（小时） */
+        interval_hours?: number;
+        /** 保留的已完成任务数 */
+        keep_completed_tasks?: number;
+        /** Working Memory 最大条数 */
+        max_working_memory_artifacts?: number;
+    };
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -282,6 +294,13 @@ export const DEFAULT_SETTINGS: PainSettings = {
             'docker\\s+push',
             '(curl|wget).*\\|\\s*(ba)?sh',
         ],
+    },
+    compression: {
+        line_threshold: 100,           // 超过 100 行触发压缩
+        size_threshold_kb: 15,         // 超过 15KB 触发压缩
+        interval_hours: 24,            // 每 24 小时最多压缩一次
+        keep_completed_tasks: 3,       // 保留最近 3 个已完成任务
+        max_working_memory_artifacts: 10, // Working Memory 最多 10 条
     }
 };
 

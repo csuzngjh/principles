@@ -717,9 +717,12 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
     if (fs.existsSync(focusPath)) {
       try {
         // 🚀 自动压缩门禁：检查文件大小，超过阈值自动压缩
-        const compressResult = autoCompressFocus(focusPath, workspaceDir);
+        const stateDir = wctx.stateDir;
+        const compressResult = autoCompressFocus(focusPath, workspaceDir, stateDir);
         if (compressResult.compressed) {
           logger?.info?.(`[PD:Prompt] Auto-compressed CURRENT_FOCUS: ${compressResult.oldLines} → ${compressResult.newLines} lines. Milestones archived: ${compressResult.milestonesArchived}`);
+        } else if (compressResult.reason === 'Rate limited (24h interval)') {
+          logger?.debug?.(`[PD:Prompt] Auto-compress skipped: ${compressResult.reason}`);
         }
 
         const currentFocus = fs.readFileSync(focusPath, 'utf8').trim();
