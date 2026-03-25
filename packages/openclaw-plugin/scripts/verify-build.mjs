@@ -20,13 +20,11 @@ const rootDir = join(__dirname, '..');
 const requiredPaths = [
   'dist/bundle.js',
   'dist/openclaw.plugin.json',
-  'dist/agents',
   'dist/templates',
 ];
 
 // Expected minimum counts
 const expectedCounts = {
-  'dist/agents': { min: 5, extension: '.md', label: 'agent definitions' },
   'dist/templates': { min: 1, label: 'template directories' },
 };
 
@@ -96,15 +94,14 @@ for (const [path, config] of Object.entries(expectedCounts)) {
   }
 }
 
-// 3. List agent files for visibility
-const agentsDir = join(rootDir, 'dist/agents');
-if (existsSync(agentsDir)) {
-  const agentFiles = readdirSync(agentsDir)
-    .filter(f => f.endsWith('.md'))
-    .map(f => f.replace('.md', ''));
+// 3. List skill files for visibility (agents migrated to skills in templates/)
+const skillsDir = join(rootDir, 'dist/templates/langs/zh/skills');
+if (existsSync(skillsDir)) {
+  const skillFiles = readdirSync(skillsDir)
+    .filter(f => f.endsWith('.md'));
   
-  if (agentFiles.length > 0) {
-    console.log(`\n📦 Agent types available: ${agentFiles.join(', ')}`);
+  if (skillFiles.length > 0) {
+    console.log(`\n📦 Skills available: ${skillFiles.length} (in dist/templates/langs/zh/skills/)`);
   }
 }
 
