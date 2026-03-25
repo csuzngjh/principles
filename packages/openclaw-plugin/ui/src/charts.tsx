@@ -30,11 +30,13 @@ export function Sparkline({
 
   const max = Math.max(...data);
   const min = Math.min(...data);
-  const range = max - min || 1;
+  const range = max - min;
+  // If all values are the same, draw a flat line in the middle
+  const isFlat = range === 0;
 
   const points = data.map((value, index) => {
     const x = (index / (data.length - 1)) * width;
-    const y = height - ((value - min) / range) * height;
+    const y = isFlat ? height / 2 : height - ((value - min) / range) * height;
     return `${x},${y}`;
   });
 
@@ -69,7 +71,7 @@ export function Sparkline({
       {/* 数据点 */}
       {showDots && data.map((value, index) => {
         const x = (index / (data.length - 1)) * width;
-        const y = height - ((value - min) / range) * height;
+        const y = isFlat ? height / 2 : height - ((value - min) / range!) * height;
         return (
           <circle
             key={index}
@@ -178,8 +180,13 @@ export function DonutChart({
   }
 
   const total = segments.reduce((sum, s) => sum + s.value, 0);
+  
+  // Handle zero total case
+  if (total === 0) {
+    return <span className="chart-empty">No data</span>;
+  }
+
   const radius = (size - strokeWidth) / 2;
-  const circumference = 2 * Math.PI * radius;
   const center = size / 2;
 
   let currentAngle = -90; // 从顶部开始
