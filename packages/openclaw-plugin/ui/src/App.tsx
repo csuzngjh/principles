@@ -273,13 +273,39 @@ function ErrorState({ error }: { error: string }) {
 function OverviewPage() {
   const [data, setData] = useState<OverviewResponse | null>(null);
   const [error, setError] = useState('');
+  const [syncing, setSyncing] = useState(false);
+
+  const loadCentralOverview = useCallback(async () => {
+    try {
+      const result = await api.getCentralOverview();
+      setData(result);
+      setError('');
+    } catch (err) {
+      setError(String(err));
+    }
+  }, []);
 
   useEffect(() => {
-    api.getOverview().then(setData).catch((err) => setError(String(err)));
-  }, []);
+    loadCentralOverview();
+  }, [loadCentralOverview]);
+
+  const handleSync = async () => {
+    setSyncing(true);
+    try {
+      await api.syncCentral();
+      await loadCentralOverview();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   if (error) return <ErrorState error={error} />;
   if (!data) return <Loading />;
+
+  const centralInfo = (data as OverviewResponse & { centralInfo?: { workspaceCount: number; workspaces: string[] } }).centralInfo;
+  const dailyTrend = data.dailyTrend ?? [];
 
   return (
     <div className="page">
@@ -289,8 +315,13 @@ function OverviewPage() {
           <h2>Workspace health and queue pressure</h2>
         </div>
         <div className="meta">
-          <div>Workspace: {data.workspaceDir}</div>
+          {centralInfo && (
+            <div>{centralInfo.workspaceCount} workspaces</div>
+          )}
           <div>Freshness: {formatDate(data.dataFreshness)}</div>
+          <button className="button-secondary" onClick={handleSync} disabled={syncing}>
+            {syncing ? 'Syncing...' : 'Sync All'}
+          </button>
         </div>
       </header>
 
@@ -307,7 +338,7 @@ function OverviewPage() {
         <section className="panel">
           <h3>Recent Trend</h3>
           <div className="trend-list">
-            {data.dailyTrend.map((item) => (
+            {dailyTrend.map((item) => (
               <div className="trend-row" key={item.day}>
                 <div>
                   <strong>{item.day}</strong>
