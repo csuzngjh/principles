@@ -253,7 +253,7 @@ export class ControlUiQueryService {
     this.uiDb.dispose();
   }
 
-  getOverview(): OverviewResponse {
+  getOverview(days: number = 30): OverviewResponse {
     const stats = this.trajectory.getDataStats();
     const regressionRows = this.uiDb.all<{
       tool_name: string;
@@ -334,8 +334,8 @@ export class ControlUiQueryService {
       FROM v_daily_metrics dm
       LEFT JOIN thinking_daily td ON td.day = dm.day
       ORDER BY dm.day DESC
-      LIMIT 14
-    `).reverse();
+      LIMIT ?
+    `, days).reverse();
     const counters = Object.fromEntries(sampleCounters.map((row) => [row.review_status, Number(row.total)]));
     const activeModels = this.uiDb.get<{ count: number }>(
       'SELECT COUNT(DISTINCT model_id) AS count FROM thinking_model_events',

@@ -324,21 +324,21 @@ export class EvolutionQueryService {
   /**
    * 获取统计数据
    */
-  getStats(): EvolutionStatsResponse {
+  getStats(days: number = 30): EvolutionStatsResponse {
     // 获取基础统计
     const stats = this.trajectory.getEvolutionStats();
 
-    // 获取近期活动（最近 7 天）
+    // 获取近期活动
     const now = new Date();
-    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const daysAgo = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
     const recentTasks = this.trajectory.listEvolutionTasks({
-      dateFrom: sevenDaysAgo.toISOString(),
+      dateFrom: daysAgo.toISOString(),
       limit: 10000,
     });
 
     // 按天分组
     const activityByDay = new Map<string, { created: number; completed: number }>();
-    for (let i = 0; i < 7; i++) {
+    for (let i = 0; i < days; i++) {
       const day = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
       const dayStr = day.toISOString().split('T')[0];
       activityByDay.set(dayStr, { created: 0, completed: 0 });
