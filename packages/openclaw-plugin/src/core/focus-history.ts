@@ -1260,3 +1260,200 @@ export function needsAutoCompression(focusPath: string, stateDir?: string): bool
     return false;
   }
 }
+
+// ============================================================================
+// 格式验证与模板恢复
+// ============================================================================
+
+/** CURRENT_FOCUS 模板路径（相对于插件根目录） */
+const CURRENT_FOCUS_TEMPLATE_PATH = 'templates/workspace/okr/CURRENT_FOCUS.md';
+
+/**
+ * 验证 CURRENT_FOCUS.md 格式
+ *
+ * @param content 文件内容
+ * @returns 验证结果
+ */
+export function validateCurrentFocus(content: string): {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+} {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  // 检查必要字段
+  if (!content.includes('**版本**') && !content.includes('**版本**:')) {
+    errors.push('缺少版本字段: **版本**: vX');
+  }
+
+  if (!content.includes('**更新**') && !content.includes('**更新**:')) {
+    errors.push('缺少更新日期字段: **更新**: YYYY-MM-DD');
+  }
+
+  // 检查必要章节
+  if (!content.includes('📍 状态快照') && !content.includes('状态快照')) {
+    warnings.push('缺少状态快照章节');
+  }
+
+  if (!content.includes('🔄 当前任务') && !content.includes('当前任务')) {
+    warnings.push('缺少当前任务章节');
+  }
+
+  if (!content.includes('➡️ 下一步') && !content.includes('下一步')) {
+    warnings.push('缺少下一步章节');
+  }
+
+  // 检查版本号格式
+  const versionMatch = content.match(/\*\*版本\*\*:\s*v([\d.]+)/i);
+  if (versionMatch) {
+    const version = parseFloat(versionMatch[1]);
+    if (isNaN(version) || version < 1) {
+      errors.push(`版本号格式无效: ${versionMatch[1]}`);
+    }
+  }
+
+  // 检查日期格式
+  const dateMatch = content.match(/\*\*更新\*\*:\s*(\d{4}-\d{2}-\d{2})/);
+  if (dateMatch) {
+    const date = new Date(dateMatch[1]);
+    if (isNaN(date.getTime())) {
+      errors.push(`日期格式无效: ${dateMatch[1]}`);
+    }
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    warnings
+  };
+}
+
+/**
+ * 从模板恢复 CURRENT_FOCUS.md
+ *
+ * @param focusPath CURRENT_FOCUS.md 路径
+ * @param extensionRoot 插件根目录
+ * @returns 恢复是否成功
+ */
+export function recoverFromTemplate(
+  focusPath: string,
+  extensionRoot: string
+): {
+  success: boolean;
+  error?: string;
+  templatePath?: string;
+} {
+  try {
+    // 查找模板文件
+    const templatePath = path.join(extensionRoot, CURRENT_FOCUS_TEMPLATE_PATH);
+
+    if (!fs.existsSync(templatePath)) {
+      return {
+        success: false,
+        error: `Template not found: ${templatePath}`
+      };
+    }
+
+    // 读取模板
+    let template = fs.readFileSync(templatePath, 'utf-8');
+
+    // 替换日期占位符
+    const today = new Date().toISOString().split('T')[0];
+    template = template.replace(/{YYYY-MM-DD}/g, today);
+
+    // 备份损坏的文件（如果存在）
+    if (fs.existsSync(focusPath)) {
+      const backupPath = `${focusPath}.corrupted.${Date.now()}.md`;
+      fs.copyFileSync(focusPath, backupPath);
+    }
+
+    // 确保目录存在
+    const focusDir = path.dirname(focusPath);
+    if (!fs.existsSync(focusDir)) {
+      fs.mkdirSync(focusDir, { recursive: true });
+    }
+
+    // 写入恢复的内容
+    fs.writeFileSync(focusPath, template, 'utf-8');
+
+    return {
+      success: true,
+      templatePath
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: String(error)
+    };
+  }
+}
+
+/**
+ * 安全读取 CURRENT_FOCUS.md（自动验证 + 恢复）
+ *
+ * @param focusPath CURRENT_FOCUS.md 路径
+ * @param extensionRoot 插件根目录
+ * @param logger 日志记录器
+ * @returns 文件内容和恢复状态
+ */
+export function safeReadCurrentFocus(
+  focusPath: string,
+  extensionRoot: string,
+  logger?: { warn?: (msg: string) => void; info?: (msg: string) => void }
+): {
+  content: string;
+  recovered: boolean;
+  validationErrors: string[];
+} {
+  // 文件不存在，从模板创建
+  if (!fs.existsSync(focusPath)) {
+    const result = recoverFromTemplate(focusPath, extensionRoot);
+    if (result.success) {
+      logger?.info?.(`[PD:Focus] Created CURRENT_FOCUS.md from template`);
+      return {
+        content: fs.readFileSync(focusPath, 'utf-8'),
+        recovered: true,
+        validationErrors: []
+      };
+    }
+    return {
+      content: '',
+      recovered: false,
+      validationErrors: [`Failed to create from template: ${result.error}`]
+    };
+  }
+
+  // 读取并验证
+  const content = fs.readFileSync(focusPath, 'utf-8');
+  const validation = validateCurrentFocus(content);
+
+  if (validation.valid) {
+    return {
+      content,
+      recovered: false,
+      validationErrors: []
+    };
+  }
+
+  // 验证失败，尝试恢复
+  logger?.warn?.(`[PD:Focus] CURRENT_FOCUS.md validation failed: ${validation.errors.join(', ')}`);
+
+  const result = recoverFromTemplate(focusPath, extensionRoot);
+  if (result.success) {
+    logger?.info?.(`[PD:Focus] Recovered CURRENT_FOCUS.md from template`);
+    return {
+      content: fs.readFileSync(focusPath, 'utf-8'),
+      recovered: true,
+      validationErrors: validation.errors
+    };
+  }
+
+  // 恢复失败，返回原始内容（让系统继续运行）
+  logger?.warn?.(`[PD:Focus] Failed to recover: ${result.error}`);
+  return {
+    content,
+    recovered: false,
+    validationErrors: validation.errors
+  };
+}

@@ -4,7 +4,7 @@ import type { PluginHookBeforePromptBuildEvent, PluginHookAgentContext, PluginHo
 import { clearInjectedProbationIds, getSession, resetFriction, setInjectedProbationIds } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { ContextInjectionConfig, defaultContextConfig } from '../types.js';
-import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection, autoCompressFocus } from '../core/focus-history.js';
+import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection, autoCompressFocus, safeReadCurrentFocus } from '../core/focus-history.js';
 import { empathyObserverManager, type EmpathyObserverApi } from '../service/empathy-observer-manager.js';
 import { PathResolver } from '../core/path-resolver.js';
 
@@ -714,7 +714,23 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
   let workingMemoryContent = '';
   if (!isMinimalMode && contextConfig.projectFocus !== 'off') {
     const focusPath = wctx.resolve('CURRENT_FOCUS');
-    if (fs.existsSync(focusPath)) {
+    const extensionRoot = PathResolver.getExtensionRoot();
+
+    // 🔒 安全读取：自动验证格式，损坏时从模板恢复
+    const { content: currentFocus, recovered, validationErrors } = safeReadCurrentFocus(
+      focusPath,
+      extensionRoot || '',
+      logger
+    );
+
+    if (recovered) {
+      logger?.info?.(`[PD:Prompt] CURRENT_FOCUS.md was recovered from template`);
+    }
+    if (validationErrors.length > 0) {
+      logger?.warn?.(`[PD:Prompt] CURRENT_FOCUS validation errors: ${validationErrors.join(', ')}`);
+    }
+
+    if (currentFocus.trim()) {
       try {
         // 🚀 自动压缩门禁：检查文件大小，超过阈值自动压缩
         const stateDir = wctx.stateDir;
@@ -725,32 +741,33 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
           logger?.debug?.(`[PD:Prompt] Auto-compress skipped: ${compressResult.reason}`);
         }
 
-        const currentFocus = fs.readFileSync(focusPath, 'utf8').trim();
-        if (currentFocus) {
+        // 重新读取（可能被压缩更新了）
+        const finalContent = fs.readFileSync(focusPath, 'utf8').trim();
+        if (finalContent) {
           // 解析工作记忆部分（用于独立注入）
-          const workingMemorySnapshot = parseWorkingMemorySection(currentFocus);
+          const workingMemorySnapshot = parseWorkingMemorySection(finalContent);
           if (workingMemorySnapshot) {
             workingMemoryContent = workingMemoryToInjection(workingMemorySnapshot);
           }
-          
+
           if (contextConfig.projectFocus === 'summary') {
             // Summary mode: intelligent extraction prioritizing key sections
-            projectContextContent = extractSummary(currentFocus, 30);
+            projectContextContent = extractSummary(finalContent, 30);
           } else {
             // Full mode: current version + recent history (3 versions)
             const historyVersions = getHistoryVersions(focusPath, 3);
             if (historyVersions.length > 0) {
               const historySections = historyVersions.map((v, i) =>
-                `\n---\n\n**闁告ê妫楄ぐ鍫曟偋閸喐鎷?v${historyVersions.length - i}**\n\n${v}`
+                `\n---\n\n**历史版本 v${historyVersions.length - i}**\n\n${v}`
               ).join('');
-              projectContextContent = `${currentFocus}${historySections}`;
+              projectContextContent = `${finalContent}${historySections}`;
             } else {
-              projectContextContent = currentFocus;
+              projectContextContent = finalContent;
             }
           }
         }
       } catch (e) {
-        logger?.error(`[PD:Prompt] Failed to read CURRENT_FOCUS: ${String(e)}`);
+        logger?.error(`[PD:Prompt] Failed to process CURRENT_FOCUS: ${String(e)}`);
       }
     }
   }
