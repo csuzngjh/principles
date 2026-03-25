@@ -1,5 +1,14 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { BrowserRouter, NavLink, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
+import {
+  BarChart3,
+  GitBranch,
+  FileCheck,
+  Brain,
+  Download,
+  LogOut,
+  Hexagon,
+} from 'lucide-react';
 import { api, getGatewayToken, setGatewayToken, clearGatewayToken } from './api';
 import type {
   OverviewResponse,
@@ -122,7 +131,9 @@ function LoginPage() {
       <div className="login-container">
         <div className="login-header">
           <div className="login-logo">
-            <span className="logo-icon">◈</span>
+            <span className="logo-icon">
+              <Hexagon strokeWidth={1.5} />
+            </span>
             <h1>Principles Console</h1>
           </div>
           <p className="login-subtitle">AI Agent 进化流程监控平台</p>
@@ -197,37 +208,51 @@ function Shell({ children }: { children: React.ReactNode }) {
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-logo">
-            <span className="logo-icon">◈</span>
+            <span className="logo-icon">
+              <Hexagon strokeWidth={1.5} />
+            </span>
           </div>
           <span className="eyebrow">Principles Console</span>
           <h1>进化控制台</h1>
           <p>AI Agent 自主进化监控平台</p>
         </div>
         <nav className="nav">
-          <NavLink to="/overview">
-            <span className="nav-icon">📊</span>
+          <NavLink to="/overview" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+            <span className="nav-icon">
+              <BarChart3 strokeWidth={1.75} />
+            </span>
             <span>概览</span>
           </NavLink>
-          <NavLink to="/evolution">
-            <span className="nav-icon">🔄</span>
+          <NavLink to="/evolution" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+            <span className="nav-icon">
+              <GitBranch strokeWidth={1.75} />
+            </span>
             <span>进化追踪</span>
           </NavLink>
-          <NavLink to="/samples">
-            <span className="nav-icon">📝</span>
+          <NavLink to="/samples" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+            <span className="nav-icon">
+              <FileCheck strokeWidth={1.75} />
+            </span>
             <span>样本审核</span>
           </NavLink>
-          <NavLink to="/thinking-models">
-            <span className="nav-icon">🧠</span>
+          <NavLink to="/thinking-models" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+            <span className="nav-icon">
+              <Brain strokeWidth={1.75} />
+            </span>
             <span>思维模型</span>
           </NavLink>
         </nav>
         <div className="sidebar-footer">
           <a className="export-link" href={api.exportCorrections('redacted')}>
-            <span className="nav-icon">📥</span>
+            <span className="nav-icon">
+              <Download strokeWidth={1.75} />
+            </span>
             <span>导出样本</span>
           </a>
           <button className="logout-button" onClick={logout}>
-            <span className="nav-icon">🚪</span>
+            <span className="nav-icon">
+              <LogOut strokeWidth={1.75} />
+            </span>
             <span>退出登录</span>
           </button>
         </div>
@@ -447,8 +472,8 @@ function SamplesPage() {
                   <p>{selected.sessionId} | {selected.reviewStatus} | score {selected.qualityScore}</p>
                 </div>
                 <div className="button-row">
-                  <button onClick={() => review('approved')}>Approve</button>
-                  <button className="ghost" onClick={() => review('rejected')}>Reject</button>
+                  <button className="button-primary" onClick={() => review('approved')}>Approve</button>
+                  <button className="button-ghost" onClick={() => review('rejected')}>Reject</button>
                 </div>
               </div>
               <article>
