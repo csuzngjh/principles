@@ -837,3 +837,621 @@ export function workingMemoryToInjection(snapshot: WorkingMemorySnapshot | null)
   
   return lines.join('\n');
 }
+
+// ============================================================================
+// 自动压缩与维护
+// ============================================================================
+
+/** 默认压缩配置 */
+const DEFAULT_COMPRESSION_CONFIG = {
+  lineThreshold: 100,
+  sizeThreshold: 15 * 1024, // 15KB
+  intervalMs: 24 * 60 * 60 * 1000, // 24 hours
+  keepCompletedTasks: 3,
+  maxWorkingMemoryArtifacts: 10,
+};
+
+/** 压缩时间记录文件名 */
+const LAST_COMPRESS_FILE = '.last_compress';
+
+/**
+ * 压缩配置接口
+ */
+interface CompressionConfig {
+  lineThreshold: number;
+  sizeThreshold: number;
+  intervalMs: number;
+  keepCompletedTasks: number;
+  maxWorkingMemoryArtifacts: number;
+}
+
+/**
+ * 从 pain_settings.json 加载压缩配置
+ *
+ * @param stateDir state 目录路径
+ * @returns 压缩配置
+ */
+function loadCompressionConfig(stateDir?: string): CompressionConfig {
+  if (!stateDir) {
+    return DEFAULT_COMPRESSION_CONFIG;
+  }
+
+  try {
+    const configPath = path.join(stateDir, 'pain_settings.json');
+    if (!fs.existsSync(configPath)) {
+      return DEFAULT_COMPRESSION_CONFIG;
+    }
+
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    const compression = config?.compression || {};
+
+    return {
+      lineThreshold: compression.line_threshold ?? DEFAULT_COMPRESSION_CONFIG.lineThreshold,
+      sizeThreshold: (compression.size_threshold_kb ?? 15) * 1024,
+      intervalMs: (compression.interval_hours ?? 24) * 60 * 60 * 1000,
+      keepCompletedTasks: compression.keep_completed_tasks ?? DEFAULT_COMPRESSION_CONFIG.keepCompletedTasks,
+      maxWorkingMemoryArtifacts: compression.max_working_memory_artifacts ?? DEFAULT_COMPRESSION_CONFIG.maxWorkingMemoryArtifacts,
+    };
+  } catch {
+    return DEFAULT_COMPRESSION_CONFIG;
+  }
+}
+
+/**
+ * 检查是否可以进行自动压缩（频率限制）
+ *
+ * @param stateDir state 目录路径
+ * @returns 是否可以进行压缩
+ */
+function canAutoCompress(stateDir: string): boolean {
+  const lastCompressPath = path.join(stateDir, LAST_COMPRESS_FILE);
+
+  if (!fs.existsSync(lastCompressPath)) {
+    return true;
+  }
+
+  try {
+    const config = loadCompressionConfig(stateDir);
+    const lastCompressTime = parseInt(fs.readFileSync(lastCompressPath, 'utf-8'), 10);
+    const now = Date.now();
+    return (now - lastCompressTime) >= config.intervalMs;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * 记录压缩时间
+ *
+ * @param stateDir state 目录路径
+ */
+function recordCompressTime(stateDir: string): void {
+  try {
+    if (!fs.existsSync(stateDir)) {
+      fs.mkdirSync(stateDir, { recursive: true });
+    }
+    fs.writeFileSync(path.join(stateDir, LAST_COMPRESS_FILE), Date.now().toString(), 'utf-8');
+  } catch (error) {
+    logError('Failed to record compress time', error);
+  }
+}
+
+/**
+ * 提取已完成任务作为里程碑
+ */
+export function extractMilestones(content: string): {
+  completedTasks: string[];
+  fileArtifacts: string[];
+} {
+  const completedTasks: string[] = [];
+  const fileArtifacts: string[] = [];
+  const lines = content.split('\n');
+
+  let inTaskSection = false;
+  let inWorkingMemory = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    // 识别章节
+    if (/^#{1,3}\s*.*当前任务|🔄/.test(trimmed)) {
+      inTaskSection = true;
+      inWorkingMemory = false;
+    } else if (/^#{1,3}\s*.*下一步|➡️/.test(trimmed)) {
+      inTaskSection = false;
+      inWorkingMemory = false;
+    } else if (/^##\s*🧠\s*Working Memory/.test(trimmed)) {
+      inWorkingMemory = true;
+      inTaskSection = false;
+    }
+
+    // 提取已完成任务
+    if (inTaskSection && /^-\s*\[x\]/i.test(trimmed)) {
+      completedTasks.push(trimmed.replace(/^-\s*\[x\]\s*/i, ''));
+    }
+
+    // 提取文件引用（从工作记忆）
+    if (inWorkingMemory) {
+      const fileMatch = trimmed.match(/^\|\s*`?([^`|\n]+)`?\s*\|/);
+      if (fileMatch && !fileMatch[1].includes('文件路径')) {
+        fileArtifacts.push(fileMatch[1].trim());
+      }
+    }
+  }
+
+  return {
+    completedTasks: completedTasks.slice(-10), // 最多 10 个
+    fileArtifacts: fileArtifacts.slice(-10)
+  };
+}
+
+/**
+ * 归档里程碑到 daily memory 文件
+ */
+export function archiveMilestonesToDaily(
+  workspaceDir: string,
+  milestones: { completedTasks: string[]; fileArtifacts: string[] },
+  version: string
+): string | null {
+  if (milestones.completedTasks.length === 0 && milestones.fileArtifacts.length === 0) {
+    return null;
+  }
+
+  const dateStr = new Date().toISOString().split('T')[0];
+  const memoryDir = path.join(workspaceDir, 'memory');
+  const dailyLogPath = path.join(memoryDir, `${dateStr}.md`);
+  const timestamp = new Date().toISOString();
+
+  // 确保目录存在
+  if (!fs.existsSync(memoryDir)) {
+    fs.mkdirSync(memoryDir, { recursive: true });
+  }
+
+  // 构建里程碑内容
+  const lines: string[] = [];
+  lines.push(`\n## 🏆 里程碑 [CURRENT_FOCUS v${version} 压缩]`);
+  lines.push(`> 时间: ${timestamp}`);
+  lines.push('');
+
+  if (milestones.completedTasks.length > 0) {
+    lines.push('### 已完成任务');
+    for (const task of milestones.completedTasks) {
+      lines.push(`- [x] ${task}`);
+    }
+    lines.push('');
+  }
+
+  if (milestones.fileArtifacts.length > 0) {
+    lines.push('### 相关文件');
+    for (const file of milestones.fileArtifacts) {
+      lines.push(`- \`${file}\``);
+    }
+    lines.push('');
+  }
+
+  lines.push('---');
+  lines.push('');
+
+  // 追加到 daily log
+  try {
+    fs.appendFileSync(dailyLogPath, lines.join('\n'), 'utf-8');
+    return dailyLogPath;
+  } catch (error) {
+    logError(`Failed to archive milestones to ${dailyLogPath}`, error);
+    return null;
+  }
+}
+
+/**
+ * 清理过期信息和验证文件引用
+ */
+export function cleanupStaleInfo(
+  content: string,
+  workspaceDir?: string,
+  config?: CompressionConfig
+): string {
+  const effectiveConfig = config || DEFAULT_COMPRESSION_CONFIG;
+  const lines = content.split('\n');
+  const result: string[] = [];
+
+  let inWorkingMemory = false;
+  let inFileTable = false;
+  let completedCount = 0;
+  let artifactCount = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    // 检测 Working Memory 章节
+    if (/^##\s*🧠\s*Working Memory/.test(trimmed)) {
+      inWorkingMemory = true;
+      inFileTable = false;
+    } else if (/^##\s/.test(trimmed) && !trimmed.includes('Working Memory')) {
+      inWorkingMemory = false;
+      inFileTable = false;
+    }
+
+    // 检测文件表格
+    if (inWorkingMemory && /^\|\s*文件路径/.test(trimmed)) {
+      inFileTable = true;
+      result.push(line);
+      continue;
+    }
+
+    if (inFileTable && /^\|[^|]+\|[^|]+\|[^|]+\|/.test(trimmed)) {
+      // 检查是否是表格分隔行
+      if (/^\|[-\s|:]+\|$/.test(trimmed)) {
+        result.push(line);
+        continue;
+      }
+
+      // 提取文件路径
+      const match = trimmed.match(/^\|\s*`?([^`|\n]+)`?\s*\|/);
+      if (match) {
+        const filePath = match[1].trim();
+        artifactCount++;
+
+        // 限制条数
+        if (artifactCount > effectiveConfig.maxWorkingMemoryArtifacts) {
+          continue; // 跳过超出限制的条目
+        }
+
+        // 可选：验证文件是否存在
+        if (workspaceDir) {
+          const fullPath = path.join(workspaceDir, filePath);
+          if (!fs.existsSync(fullPath)) {
+            continue; // 文件不存在，跳过
+          }
+        }
+
+        result.push(line);
+        continue;
+      }
+    }
+
+    // 处理已完成任务
+    if (/^-\s*\[x\]/i.test(trimmed)) {
+      completedCount++;
+      if (completedCount > effectiveConfig.keepCompletedTasks) {
+        continue; // 跳过超出限制的已完成任务
+      }
+    }
+
+    result.push(line);
+  }
+
+  return result.join('\n');
+}
+
+/**
+ * 自动压缩 CURRENT_FOCUS.md
+ *
+ * @param focusPath CURRENT_FOCUS.md 的完整路径
+ * @param workspaceDir 工作区目录（可选，用于验证文件引用）
+ * @param stateDir state 目录路径（可选，用于频率限制）
+ * @returns 压缩结果信息，如果不需要压缩则返回 null
+ */
+export function autoCompressFocus(
+  focusPath: string,
+  workspaceDir?: string,
+  stateDir?: string
+): {
+  compressed: boolean;
+  oldLines: number;
+  newLines: number;
+  milestonesArchived: boolean;
+  backupPath: string | null;
+  reason: string;
+} {
+  // 检查文件是否存在
+  if (!fs.existsSync(focusPath)) {
+    return {
+      compressed: false,
+      oldLines: 0,
+      newLines: 0,
+      milestonesArchived: false,
+      backupPath: null,
+      reason: 'File not found'
+    };
+  }
+
+  // 加载配置
+  const config = loadCompressionConfig(stateDir);
+
+  const oldContent = fs.readFileSync(focusPath, 'utf-8');
+  const oldLines = oldContent.split('\n').length;
+  const oldSize = Buffer.byteLength(oldContent, 'utf-8');
+
+  // 检查是否需要压缩（行数或大小阈值）
+  const needsCompression = 
+    oldLines > config.lineThreshold || 
+    oldSize > config.sizeThreshold;
+
+  if (!needsCompression) {
+    return {
+      compressed: false,
+      oldLines,
+      newLines: oldLines,
+      milestonesArchived: false,
+      backupPath: null,
+      reason: 'Below threshold'
+    };
+  }
+
+  // 检查频率限制
+  if (stateDir && !canAutoCompress(stateDir)) {
+    return {
+      compressed: false,
+      oldLines,
+      newLines: oldLines,
+      milestonesArchived: false,
+      backupPath: null,
+      reason: 'Rate limited (24h interval)'
+    };
+  }
+
+  // 1. 提取里程碑
+  const version = extractVersion(oldContent);
+  const milestones = extractMilestones(oldContent);
+
+  // 2. 归档里程碑到 daily memory
+  let milestonesArchived = false;
+  if (workspaceDir) {
+    const archivePath = archiveMilestonesToDaily(workspaceDir, milestones, version);
+    milestonesArchived = archivePath !== null;
+  }
+
+  // 3. 清理过期信息（传入配置）
+  let newContent = cleanupStaleInfo(oldContent, workspaceDir, config);
+
+  // 4. 压缩内容（使用 extractSummary）
+  newContent = extractSummary(newContent, 50);
+
+  // 5. 递增版本号和日期
+  const newVersion = `${parseInt(version, 10) + 1}`;
+  const today = new Date().toISOString().split('T')[0];
+  newContent = newContent
+    .replace(/\*\*版本\*\*:\s*v[\d.]+/i, `**版本**: v${newVersion}`)
+    .replace(/\*\*更新\*\*:\s*\d{4}-\d{2}-\d{2}/, `**更新**: ${today}`);
+
+  // 6. 备份原版本
+  const backupPath = backupToHistory(focusPath, oldContent);
+
+  // 7. 清理过期历史
+  cleanupHistory(focusPath);
+
+  // 8. 写入新内容
+  fs.writeFileSync(focusPath, newContent, 'utf-8');
+
+  // 9. 记录压缩时间
+  if (stateDir) {
+    recordCompressTime(stateDir);
+  }
+
+  const newLines = newContent.split('\n').length;
+
+  return {
+    compressed: true,
+    oldLines,
+    newLines,
+    milestonesArchived,
+    backupPath,
+    reason: `Auto-compressed: ${oldLines} → ${newLines} lines`
+  };
+}
+
+/**
+ * 检查是否需要自动压缩
+ */
+export function needsAutoCompression(focusPath: string, stateDir?: string): boolean {
+  if (!fs.existsSync(focusPath)) {
+    return false;
+  }
+
+  try {
+    const config = stateDir ? loadCompressionConfig(stateDir) : DEFAULT_COMPRESSION_CONFIG;
+    const content = fs.readFileSync(focusPath, 'utf-8');
+    const lines = content.split('\n').length;
+    const size = Buffer.byteLength(content, 'utf-8');
+
+    return lines > config.lineThreshold || size > config.sizeThreshold;
+  } catch {
+    return false;
+  }
+}
+
+// ============================================================================
+// 格式验证与模板恢复
+// ============================================================================
+
+/** CURRENT_FOCUS 模板路径（相对于插件根目录） */
+const CURRENT_FOCUS_TEMPLATE_PATH = 'templates/workspace/okr/CURRENT_FOCUS.md';
+
+/**
+ * 验证 CURRENT_FOCUS.md 格式
+ *
+ * 仅校验会导致程序崩溃的核心问题，不过度校验
+ *
+ * @param content 文件内容
+ * @returns 验证结果
+ */
+export function validateCurrentFocus(content: string): {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+} {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  // 仅检查会导致程序崩溃的核心问题
+
+  // 1. 文件为空
+  if (!content || !content.trim()) {
+    errors.push('文件为空');
+    return { valid: false, errors, warnings };
+  }
+
+  // 2. 检查是否是有效的文本（排除二进制乱码）
+  // 如果有超过 50% 的非打印字符，认为是乱码
+  const nonPrintable = content.split('').filter(c => {
+    const code = c.charCodeAt(0);
+    // 允许：换行、制表符、中文、英文、数字、标点
+    return code < 32 && code !== 10 && code !== 13 && code !== 9;
+  }).length;
+
+  if (nonPrintable > content.length * 0.5) {
+    errors.push('文件内容损坏（可能是二进制乱码）');
+    return { valid: false, errors, warnings };
+  }
+
+  // 以下仅作为警告，不触发恢复
+
+  // 提示缺少建议的章节（不影响程序运行）
+  if (!content.includes('下一步') && !content.includes('Next')) {
+    warnings.push('缺少下一步章节（建议保留）');
+  }
+
+  return {
+    valid: true,  // 只要不崩溃就认为是 valid
+    errors,
+    warnings
+  };
+}
+
+/**
+ * 从模板恢复 CURRENT_FOCUS.md
+ *
+ * @param focusPath CURRENT_FOCUS.md 路径
+ * @param extensionRoot 插件根目录
+ * @returns 恢复是否成功
+ */
+export function recoverFromTemplate(
+  focusPath: string,
+  extensionRoot: string
+): {
+  success: boolean;
+  error?: string;
+  templatePath?: string;
+} {
+  try {
+    // 查找模板文件
+    const templatePath = path.join(extensionRoot, CURRENT_FOCUS_TEMPLATE_PATH);
+
+    if (!fs.existsSync(templatePath)) {
+      return {
+        success: false,
+        error: `Template not found: ${templatePath}`
+      };
+    }
+
+    // 读取模板
+    let template = fs.readFileSync(templatePath, 'utf-8');
+
+    // 替换日期占位符
+    const today = new Date().toISOString().split('T')[0];
+    template = template.replace(/{YYYY-MM-DD}/g, today);
+
+    // 备份损坏的文件（如果存在）
+    if (fs.existsSync(focusPath)) {
+      const backupPath = `${focusPath}.corrupted.${Date.now()}.md`;
+      fs.copyFileSync(focusPath, backupPath);
+    }
+
+    // 确保目录存在
+    const focusDir = path.dirname(focusPath);
+    if (!fs.existsSync(focusDir)) {
+      fs.mkdirSync(focusDir, { recursive: true });
+    }
+
+    // 写入恢复的内容
+    fs.writeFileSync(focusPath, template, 'utf-8');
+
+    return {
+      success: true,
+      templatePath
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: String(error)
+    };
+  }
+}
+
+/**
+ * 安全读取 CURRENT_FOCUS.md（自动验证 + 恢复）
+ *
+ * 仅在文件为空或损坏时才恢复，其他情况正常使用
+ *
+ * @param focusPath CURRENT_FOCUS.md 路径
+ * @param extensionRoot 插件根目录
+ * @param logger 日志记录器
+ * @returns 文件内容和恢复状态
+ */
+export function safeReadCurrentFocus(
+  focusPath: string,
+  extensionRoot: string,
+  logger?: { warn?: (msg: string) => void; info?: (msg: string) => void }
+): {
+  content: string;
+  recovered: boolean;
+  validationErrors: string[];
+} {
+  // 文件不存在，从模板创建
+  if (!fs.existsSync(focusPath)) {
+    const result = recoverFromTemplate(focusPath, extensionRoot);
+    if (result.success) {
+      logger?.info?.(`[PD:Focus] Created CURRENT_FOCUS.md from template`);
+      return {
+        content: fs.readFileSync(focusPath, 'utf-8'),
+        recovered: true,
+        validationErrors: []
+      };
+    }
+    return {
+      content: '',
+      recovered: false,
+      validationErrors: [`Failed to create from template: ${result.error}`]
+    };
+  }
+
+  // 读取并验证
+  const content = fs.readFileSync(focusPath, 'utf-8');
+  const validation = validateCurrentFocus(content);
+
+  // 记录警告（不触发恢复）
+  if (validation.warnings.length > 0) {
+    logger?.warn?.(`[PD:Focus] CURRENT_FOCUS.md warnings: ${validation.warnings.join(', ')}`);
+  }
+
+  // 仅在有严重错误时才恢复
+  if (!validation.valid) {
+    logger?.warn?.(`[PD:Focus] CURRENT_FOCUS.md corrupted: ${validation.errors.join(', ')}`);
+
+    const result = recoverFromTemplate(focusPath, extensionRoot);
+    if (result.success) {
+      logger?.info?.(`[PD:Focus] Recovered CURRENT_FOCUS.md from template`);
+      return {
+        content: fs.readFileSync(focusPath, 'utf-8'),
+        recovered: true,
+        validationErrors: validation.errors
+      };
+    }
+
+    // 恢复失败，返回原始内容（让系统继续运行）
+    logger?.warn?.(`[PD:Focus] Failed to recover: ${result.error}`);
+    return {
+      content,
+      recovered: false,
+      validationErrors: validation.errors
+    };
+  }
+
+  // 正常情况：文件有效
+  return {
+    content,
+    recovered: false,
+    validationErrors: []
+  };
+}

@@ -98,7 +98,6 @@ export class EmpathyObserverManager {
         if (!this.shouldTrigger(api, sessionId)) return null;
         if (!userMessage?.trim()) return null;
 
-
         const timestamp = Date.now();
         const sessionKey = `${OBSERVER_SESSION_PREFIX}${sessionId}:${timestamp}`;
         this.sessionLocks.set(sessionId, sessionKey);

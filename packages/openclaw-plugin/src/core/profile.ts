@@ -52,7 +52,7 @@ export const PROFILE_DEFAULTS = {
   thinking_checkpoint: {
     enabled: false,  // Default OFF to avoid blocking new users
     window_ms: 5 * 60 * 1000, // 5 minute window
-  high_risk_tools: ['run_shell_command', 'delete_file', 'move_file', 'pd_run_worker'],
+  high_risk_tools: ['run_shell_command', 'delete_file', 'move_file'],
   },
   custom_guards: [] as Array<{ pattern: string; message: string; severity: string }>,
 };

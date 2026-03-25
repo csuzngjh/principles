@@ -57,6 +57,6 @@ deep_reflect(
 ## 4. 智能体路由澄清
 
 - `agents_list`、`sessions_list`、`sessions_send`、`sessions_spawn` 用于同级代理和同级会话
-- `pd_run_worker` 用于启动 Principles 内部 worker，例如 `diagnostician`、`explorer`
+- 使用 `sessions_spawn` 配合 `pd-diagnostician/pd-explorer` skill 启动 Principles 内部 worker，例如 `diagnostician`、`explorer`
 - `subagents` 用于查看已启动内部 worker 的状态和输出
 - 不要用同级会话工具把内部 worker 伪装成同级代理

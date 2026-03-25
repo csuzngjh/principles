@@ -1,5 +1,14 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { BrowserRouter, NavLink, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
+import {
+  BarChart3,
+  GitBranch,
+  FileCheck,
+  Brain,
+  Download,
+  LogOut,
+  Hexagon,
+} from 'lucide-react';
 import { api, getGatewayToken, setGatewayToken, clearGatewayToken } from './api';
 import type {
   OverviewResponse,
@@ -122,7 +131,9 @@ function LoginPage() {
       <div className="login-container">
         <div className="login-header">
           <div className="login-logo">
-            <span className="logo-icon">◈</span>
+            <span className="logo-icon">
+              <Hexagon strokeWidth={1.5} />
+            </span>
             <h1>Principles Console</h1>
           </div>
           <p className="login-subtitle">AI Agent 进化流程监控平台</p>
@@ -197,37 +208,51 @@ function Shell({ children }: { children: React.ReactNode }) {
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-logo">
-            <span className="logo-icon">◈</span>
+            <span className="logo-icon">
+              <Hexagon strokeWidth={1.5} />
+            </span>
           </div>
           <span className="eyebrow">Principles Console</span>
           <h1>进化控制台</h1>
           <p>AI Agent 自主进化监控平台</p>
         </div>
         <nav className="nav">
-          <NavLink to="/overview">
-            <span className="nav-icon">📊</span>
+          <NavLink to="/overview" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+            <span className="nav-icon">
+              <BarChart3 strokeWidth={1.75} />
+            </span>
             <span>概览</span>
           </NavLink>
-          <NavLink to="/evolution">
-            <span className="nav-icon">🔄</span>
+          <NavLink to="/evolution" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+            <span className="nav-icon">
+              <GitBranch strokeWidth={1.75} />
+            </span>
             <span>进化追踪</span>
           </NavLink>
-          <NavLink to="/samples">
-            <span className="nav-icon">📝</span>
+          <NavLink to="/samples" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+            <span className="nav-icon">
+              <FileCheck strokeWidth={1.75} />
+            </span>
             <span>样本审核</span>
           </NavLink>
-          <NavLink to="/thinking-models">
-            <span className="nav-icon">🧠</span>
+          <NavLink to="/thinking-models" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+            <span className="nav-icon">
+              <Brain strokeWidth={1.75} />
+            </span>
             <span>思维模型</span>
           </NavLink>
         </nav>
         <div className="sidebar-footer">
           <a className="export-link" href={api.exportCorrections('redacted')}>
-            <span className="nav-icon">📥</span>
+            <span className="nav-icon">
+              <Download strokeWidth={1.75} />
+            </span>
             <span>导出样本</span>
           </a>
           <button className="logout-button" onClick={logout}>
-            <span className="nav-icon">🚪</span>
+            <span className="nav-icon">
+              <LogOut strokeWidth={1.75} />
+            </span>
             <span>退出登录</span>
           </button>
         </div>
@@ -245,16 +270,181 @@ function ErrorState({ error }: { error: string }) {
   return <div className="panel error">{error}</div>;
 }
 
+function WorkspaceConfig() {
+  const [wsData, setWsData] = useState<{
+    configs: Array<{ workspaceName: string; enabled: boolean; displayName: string | null; syncEnabled: boolean }>;
+    workspaces: Array<{ name: string; path: string; lastSync: string | null; config: null | { workspaceName: string; enabled: boolean; displayName: string | null; syncEnabled: boolean } }>;
+  } | null>(null);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState<string | null>(null);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newWsName, setNewWsName] = useState('');
+  const [newWsPath, setNewWsPath] = useState('');
+  const [adding, setAdding] = useState(false);
+
+  const loadConfigs = useCallback(async () => {
+    try {
+      const result = await api.getWorkspaceConfigs();
+      setWsData(result);
+      setError('');
+    } catch (err) {
+      setError(String(err));
+    }
+  }, []);
+
+  useEffect(() => {
+    loadConfigs();
+  }, [loadConfigs]);
+
+  const handleToggle = async (workspaceName: string, field: 'enabled' | 'syncEnabled', currentValue: boolean) => {
+    setSaving(workspaceName);
+    try {
+      await api.updateWorkspaceConfig(workspaceName, { [field]: !currentValue });
+      await loadConfigs();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const handleAddWorkspace = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newWsName.trim() || !newWsPath.trim()) return;
+    setAdding(true);
+    setError('');
+    try {
+      await api.addCustomWorkspace(newWsName.trim(), newWsPath.trim());
+      setNewWsName('');
+      setNewWsPath('');
+      setShowAddForm(false);
+      await loadConfigs();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  if (error) return <div className="panel error">{error}</div>;
+  if (!wsData) return <div className="panel muted">Loading workspaces...</div>;
+
+  return (
+    <section className="panel">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-4)' }}>
+        <h3>Workspace Configuration</h3>
+        <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'center' }}>
+          <span className="badge">{wsData.configs.filter(c => c.enabled && c.syncEnabled).length} / {wsData.workspaces.length} enabled</span>
+          <button className="button-secondary" onClick={() => setShowAddForm(!showAddForm)}>
+            {showAddForm ? '取消' : '+ 添加'}
+          </button>
+        </div>
+      </div>
+
+      {showAddForm && (
+        <form className="add-workspace-form" onSubmit={handleAddWorkspace} style={{ marginBottom: 'var(--space-4)', padding: 'var(--space-3)', background: 'var(--color-surface)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}>
+          <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-end' }}>
+            <div style={{ flex: 1 }}>
+              <label style={{ display: 'block', fontSize: '12px', marginBottom: '4px', color: 'var(--color-text-secondary)' }}>Workspace Name</label>
+              <input
+                type="text"
+                value={newWsName}
+                onChange={(e) => setNewWsName(e.target.value)}
+                placeholder="workspace-custom"
+                style={{ width: '100%', padding: 'var(--space-2)', fontSize: '13px' }}
+              />
+            </div>
+            <div style={{ flex: 2 }}>
+              <label style={{ display: 'block', fontSize: '12px', marginBottom: '4px', color: 'var(--color-text-secondary)' }}>Path</label>
+              <input
+                type="text"
+                value={newWsPath}
+                onChange={(e) => setNewWsPath(e.target.value)}
+                placeholder="/home/user/.openclaw/workspace-custom"
+                style={{ width: '100%', padding: 'var(--space-2)', fontSize: '13px' }}
+              />
+            </div>
+            <button type="submit" className="button-primary" disabled={adding || !newWsName.trim() || !newWsPath.trim()}>
+              {adding ? '添加中...' : '添加'}
+            </button>
+          </div>
+        </form>
+      )}
+
+      <div className="stack">
+        {wsData.workspaces.map((ws) => {
+          const config = ws.config ?? { workspaceName: ws.name, enabled: true, displayName: ws.name, syncEnabled: true };
+          const isSaving = saving === ws.name;
+          return (
+            <div className="row-card" key={ws.name}>
+              <div>
+                <strong>{ws.name}</strong>
+                <span>{ws.path}</span>
+              </div>
+              <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'center' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={config.enabled}
+                    onChange={() => handleToggle(ws.name, 'enabled', config.enabled)}
+                    disabled={isSaving}
+                  />
+                  <span style={{ fontSize: '13px' }}>Include</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={config.syncEnabled}
+                    onChange={() => handleToggle(ws.name, 'syncEnabled', config.syncEnabled)}
+                    disabled={isSaving || !config.enabled}
+                  />
+                  <span style={{ fontSize: '13px' }}>Sync</span>
+                </label>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function OverviewPage() {
   const [data, setData] = useState<OverviewResponse | null>(null);
   const [error, setError] = useState('');
+  const [syncing, setSyncing] = useState(false);
+
+  const loadCentralOverview = useCallback(async () => {
+    try {
+      const result = await api.getCentralOverview();
+      setData(result);
+      setError('');
+    } catch (err) {
+      setError(String(err));
+    }
+  }, []);
 
   useEffect(() => {
-    api.getOverview().then(setData).catch((err) => setError(String(err)));
-  }, []);
+    loadCentralOverview();
+  }, [loadCentralOverview]);
+
+  const handleSync = async () => {
+    setSyncing(true);
+    try {
+      await api.syncCentral();
+      await loadCentralOverview();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   if (error) return <ErrorState error={error} />;
   if (!data) return <Loading />;
+
+  const centralInfo = (data as OverviewResponse & { centralInfo?: { workspaceCount: number; enabledWorkspaceCount: number; workspaces: string[]; enabledWorkspaces: string[] } }).centralInfo;
+  const dailyTrend = data.dailyTrend ?? [];
 
   return (
     <div className="page">
@@ -264,25 +454,32 @@ function OverviewPage() {
           <h2>Workspace health and queue pressure</h2>
         </div>
         <div className="meta">
-          <div>Workspace: {data.workspaceDir}</div>
+          {centralInfo && (
+            <div>{centralInfo.enabledWorkspaceCount} / {centralInfo.workspaceCount} workspaces enabled</div>
+          )}
           <div>Freshness: {formatDate(data.dataFreshness)}</div>
+          <button className="button-secondary" onClick={handleSync} disabled={syncing}>
+            {syncing ? 'Syncing...' : 'Sync All'}
+          </button>
         </div>
       </header>
 
+      <WorkspaceConfig />
+
       <section className="kpi-grid">
-        <article className="panel"><span>Repeat Error Rate</span><strong>{formatPercent(data.summary.repeatErrorRate)}</strong></article>
-        <article className="panel"><span>User Correction Rate</span><strong>{formatPercent(data.summary.userCorrectionRate)}</strong></article>
-        <article className="panel"><span>Pending Samples</span><strong>{data.summary.pendingSamples}</strong></article>
-        <article className="panel"><span>Approved Samples</span><strong>{data.summary.approvedSamples}</strong></article>
-        <article className="panel"><span>Thinking Coverage</span><strong>{formatPercent(data.summary.thinkingCoverageRate)}</strong></article>
-        <article className="panel"><span>Pain Events</span><strong>{data.summary.painEvents}</strong></article>
+        <article className="panel kpi"><span className="label">Repeat Error Rate</span><span className="value">{formatPercent(data.summary.repeatErrorRate)}</span></article>
+        <article className="panel kpi"><span className="label">User Correction Rate</span><span className="value">{formatPercent(data.summary.userCorrectionRate)}</span></article>
+        <article className="panel kpi"><span className="label">Pending Samples</span><span className="value">{data.summary.pendingSamples}</span></article>
+        <article className="panel kpi"><span className="label">Approved Samples</span><span className="value">{data.summary.approvedSamples}</span></article>
+        <article className="panel kpi"><span className="label">Thinking Coverage</span><span className="value">{formatPercent(data.summary.thinkingCoverageRate)}</span></article>
+        <article className="panel kpi"><span className="label">Pain Events</span><span className="value">{data.summary.painEvents}</span></article>
       </section>
 
       <div className="grid two-columns">
         <section className="panel">
           <h3>Recent Trend</h3>
           <div className="trend-list">
-            {data.dailyTrend.map((item) => (
+            {dailyTrend.map((item) => (
               <div className="trend-row" key={item.day}>
                 <div>
                   <strong>{item.day}</strong>
@@ -447,8 +644,8 @@ function SamplesPage() {
                   <p>{selected.sessionId} | {selected.reviewStatus} | score {selected.qualityScore}</p>
                 </div>
                 <div className="button-row">
-                  <button onClick={() => review('approved')}>Approve</button>
-                  <button className="ghost" onClick={() => review('rejected')}>Reject</button>
+                  <button className="button-primary" onClick={() => review('approved')}>Approve</button>
+                  <button className="button-ghost" onClick={() => review('rejected')}>Reject</button>
                 </div>
               </div>
               <article>

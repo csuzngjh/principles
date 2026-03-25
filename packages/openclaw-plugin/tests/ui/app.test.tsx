@@ -50,9 +50,7 @@ describe('Principles Console App', () => {
     vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
 
-      // First call (auth check) returns 401 to show login
-      // Second call (with token) returns success
-      if (url.includes('/api/overview')) {
+      if (url.includes('/api/central/overview') || url.includes('/api/overview')) {
         overviewCallCount++;
         const hasAuth = init?.headers && JSON.stringify(init.headers).includes('Bearer');
 
@@ -74,10 +72,10 @@ describe('Principles Console App', () => {
             topRegressions: [],
             sampleQueue: { counters: { pending: 2 }, preview: [] },
             thinkingSummary: { activeModels: 2, dormantModels: 7, effectiveModels: 1, coverageRate: 0.4 },
+            centralInfo: { workspaceCount: 3, workspaces: ['workspace-main', 'workspace-builder', 'workspace-pm'] },
           }), { status: 200 }));
         }
 
-        // Initial auth check fails
         return Promise.resolve(new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 }));
       }
 

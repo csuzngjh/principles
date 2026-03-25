@@ -214,6 +214,6 @@ _This folder is home. Treat it that way._
 用下面这几条避免把同级代理和 Principles 内部 worker 混淆：
 
 - **同级代理 / 同级会话**：`agents_list`、`sessions_list`、`sessions_send`、`sessions_spawn`
-- **内部 worker**（例如 `diagnostician`、`explorer`）：使用 `pd_run_worker` 启动
+- **内部 worker**（例如 `diagnostician`、`explorer`）：使用 `sessions_spawn` 配合 `pd-diagnostician/pd-explorer` skill 启动
 - **查询内部 worker**：使用 `subagents`
 - **不要**把 `diagnostician` 或 `explorer` 当成同级 peer session 目标

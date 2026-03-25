@@ -207,7 +207,7 @@ describe('EvolutionEngine', () => {
 
     test('Seed tier should block subagent spawn', () => {
       const decision = engine.beforeToolCall({
-      toolName: 'pd_run_worker',
+      toolName: 'sessions_spawn',
       });
       expect(decision.allowed).toBe(false);
     });
