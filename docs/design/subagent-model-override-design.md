@@ -412,9 +412,8 @@ api.config.agents?.defaults?.subagents?.model  // 子智能体模型配置
 |------|------|
 | `packages/openclaw-plugin/src/hooks/pain.ts` | 捕获工具失败，生成 pain_flag |
 | `packages/openclaw-plugin/src/service/evolution-worker.ts` | 后台轮询，入队进化任务 |
-| `packages/openclaw-plugin/src/hooks/prompt.ts` | 注入进化指令 |
-| `packages/openclaw-plugin/src/tools/agent-spawn.ts` | 子智能体启动工具 |
-| `packages/openclaw-plugin/src/core/agent-loader.ts` | Agent 定义加载器 |
+| `packages/openclaw-plugin/src/hooks/prompt.ts` | 注入进化指令，调用 sessions_spawn |
+| `packages/openclaw-plugin/src/constants/diagnostician.ts` | 诊断协议常量 |
 
 ## 参考资料
 

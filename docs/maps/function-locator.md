@@ -65,7 +65,6 @@
 | 任务 | 文件 | 函数 | 说明 |
 |------|------|------|------|
 | 修改深度反思工具 | `src/tools/deep-reflect.ts` | `createDeepReflectTool()` | deep_reflect 工具 |
-| 修改智能体生成工具 | `src/tools/agent-spawn.ts` | `createAgentSpawnTool()` | pd_run_worker 工具 |
 | 添加新的自定义工具 | `src/tools/` 目录 | 创建新文件 | 工具工厂模式 |
 
 ### 服务相关
@@ -234,7 +233,6 @@
 | 文件 | 主要导出 | 用途 |
 |------|----------|------|
 | `deep-reflect.ts` | `createDeepReflectTool()` | deep_reflect 工具 |
-| `agent-spawn.ts` | `createAgentSpawnTool()`, `spawnAgentSequence()` | pd_run_worker 工具 |
 | `critique-prompt.ts` | 批判提示模板 | 深度反思 |
 | `model-index.ts` | 思维模型索引 | 模型管理 |
 

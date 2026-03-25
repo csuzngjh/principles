@@ -240,9 +240,9 @@ describe('GFI Gate - Hard Intercept', () => {
       expect(result?.blockReason).toContain('GFI');
     });
 
-    it('should NOT block pd_run_worker (low risk) when GFI < 70', () => {
+    it('should NOT block sessions_spawn (low risk) when GFI < 70', () => {
       const mockCtx = { workspaceDir, sessionId: 'test-session' };
-      const mockEvent = { toolName: 'pd_run_worker', params: { task: 'Analyze code' } };
+      const mockEvent = { toolName: 'sessions_spawn', params: { task: 'Analyze code' } };
 
       vi.mocked(sessionTracker.getSession).mockReturnValue({ currentGfi: 50 } as any);
       mockTrust.getScore.mockReturnValue(70);
@@ -252,7 +252,7 @@ describe('GFI Gate - Hard Intercept', () => {
 
       const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
 
-      // pd_run_worker 不在 WRITE_TOOLS 中，应该直接返回（不被 gate 处理）
+      // sessions_spawn 不在 WRITE_TOOLS 中，应该直接返回（不被 gate 处理）
       // 但如果它被当作 AGENT_TOOLS 处理，也应该不被 GFI gate 拦截
       expect(result).toBeUndefined();
     });
