@@ -277,6 +277,10 @@ function WorkspaceConfig() {
   } | null>(null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState<string | null>(null);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newWsName, setNewWsName] = useState('');
+  const [newWsPath, setNewWsPath] = useState('');
+  const [adding, setAdding] = useState(false);
 
   const loadConfigs = useCallback(async () => {
     try {
@@ -304,6 +308,24 @@ function WorkspaceConfig() {
     }
   };
 
+  const handleAddWorkspace = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newWsName.trim() || !newWsPath.trim()) return;
+    setAdding(true);
+    setError('');
+    try {
+      await api.addCustomWorkspace(newWsName.trim(), newWsPath.trim());
+      setNewWsName('');
+      setNewWsPath('');
+      setShowAddForm(false);
+      await loadConfigs();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setAdding(false);
+    }
+  };
+
   if (error) return <div className="panel error">{error}</div>;
   if (!wsData) return <div className="panel muted">Loading workspaces...</div>;
 
@@ -311,8 +333,44 @@ function WorkspaceConfig() {
     <section className="panel">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-4)' }}>
         <h3>Workspace Configuration</h3>
-        <span className="badge">{wsData.configs.filter(c => c.enabled && c.syncEnabled).length} / {wsData.workspaces.length} enabled</span>
+        <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'center' }}>
+          <span className="badge">{wsData.configs.filter(c => c.enabled && c.syncEnabled).length} / {wsData.workspaces.length} enabled</span>
+          <button className="button-secondary" onClick={() => setShowAddForm(!showAddForm)}>
+            {showAddForm ? '取消' : '+ 添加'}
+          </button>
+        </div>
       </div>
+
+      {showAddForm && (
+        <form className="add-workspace-form" onSubmit={handleAddWorkspace} style={{ marginBottom: 'var(--space-4)', padding: 'var(--space-3)', background: 'var(--color-surface)', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}>
+          <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-end' }}>
+            <div style={{ flex: 1 }}>
+              <label style={{ display: 'block', fontSize: '12px', marginBottom: '4px', color: 'var(--color-text-secondary)' }}>Workspace Name</label>
+              <input
+                type="text"
+                value={newWsName}
+                onChange={(e) => setNewWsName(e.target.value)}
+                placeholder="workspace-custom"
+                style={{ width: '100%', padding: 'var(--space-2)', fontSize: '13px' }}
+              />
+            </div>
+            <div style={{ flex: 2 }}>
+              <label style={{ display: 'block', fontSize: '12px', marginBottom: '4px', color: 'var(--color-text-secondary)' }}>Path</label>
+              <input
+                type="text"
+                value={newWsPath}
+                onChange={(e) => setNewWsPath(e.target.value)}
+                placeholder="/home/user/.openclaw/workspace-custom"
+                style={{ width: '100%', padding: 'var(--space-2)', fontSize: '13px' }}
+              />
+            </div>
+            <button type="submit" className="button-primary" disabled={adding || !newWsName.trim() || !newWsPath.trim()}>
+              {adding ? '添加中...' : '添加'}
+            </button>
+          </div>
+        </form>
+      )}
+
       <div className="stack">
         {wsData.workspaces.map((ws) => {
           const config = ws.config ?? { workspaceName: ws.name, enabled: true, displayName: ws.name, syncEnabled: true };
