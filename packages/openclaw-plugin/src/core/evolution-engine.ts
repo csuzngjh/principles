@@ -252,7 +252,7 @@ export class EvolutionEngine {
     }
 
     // 子智能体检查
-    if ((context.toolName === 'pd_run_worker' || context.toolName === 'sessions_spawn') && !perms.allowSubagentSpawn) {
+    if (context.toolName === 'sessions_spawn' && !perms.allowSubagentSpawn) {
       return {
         allowed: false,
         reason: `Tier ${this.scorecard.currentTier} (${tierDef.name}) 未解锁子智能体权限`,

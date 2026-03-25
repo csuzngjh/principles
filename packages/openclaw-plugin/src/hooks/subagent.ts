@@ -4,7 +4,6 @@ import { writePainFlag } from '../core/pain.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { empathyObserverManager, type EmpathyObserverApi } from '../service/empathy-observer-manager.js';
 import { acquireQueueLock } from '../service/evolution-worker.js';
-import { isSubagentRuntimeAvailable } from '../utils/subagent-probe.js';
 
 const COMPLETION_RETRY_DELAY_MS = 250;
 const COMPLETION_MAX_RETRIES = 3;
@@ -325,7 +324,7 @@ export async function handleSubagentEnded(
         }
 
         // Read diagnostician output and create principle with generalized pattern
-        if (completedTaskId && isSubagentRuntimeAvailable(ctx.api?.runtime?.subagent)) {
+        if (completedTaskId && ctx.api?.runtime?.subagent) {
             try {
                 const messages = await ctx.api?.runtime?.subagent?.getSessionMessages?.({
                     sessionKey: targetSessionKey,

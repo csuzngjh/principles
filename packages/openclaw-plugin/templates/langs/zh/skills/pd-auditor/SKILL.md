@@ -1,7 +1,7 @@
 ---
-name: Auditor
-description: 演绎审计智能体（axiom/system/via-negativa）
-permissionMode: allowSubagentSpawn
+name: pd-auditor
+description: 演绎审计智能体。使用公理验证、系统审计、否定论证方法验证系统一致性。当需要审计系统或流程时使用。
+disable-model-invocation: true
 ---
 
 # Auditor

@@ -2,7 +2,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { createHash } from 'crypto';
 import type { OpenClawPluginServiceContext, OpenClawPluginApi } from '../openclaw-sdk.js';
-import { loadAgentDefinition } from '../core/agent-loader.js';
 import { DictionaryService } from '../core/dictionary-service.js';
 import { DetectionService } from '../core/detection-service.js';
 import { ensureStateTemplates } from '../core/init.js';
@@ -403,7 +402,15 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
                   `Trigger text: "${highestScoreTask.trigger_text_preview || 'N/A'}"`;
 
             // Prepare HEARTBEAT content first
-            const agentDef = loadAgentDefinition('diagnostician');
+            // Use inline diagnostician prompt (pd-diagnostician skill equivalent)
+            const diagnosticianPrompt = `Use 5 Whys methodology to diagnose the root cause of the pain signal above.
+
+Follow these phases:
+1. **Phase 1 - Evidence Gathering**: Read logs, search code, record evidence sources
+2. **Phase 2 - Causal Chain**: Each Why must have evidence support, max 5 layers
+3. **Phase 3 - Root Cause Classification**: Classify as People/Design/Assumption/Tooling
+4. **Phase 4 - Principle Extraction**: Extract reusable protection principles`;
+
             const heartbeatPath = wctx.resolve('HEARTBEAT');
             const markerFilePath = path.join(wctx.stateDir, `.evolution_complete_${highestScoreTask.id}`);
             const heartbeatContent = [
@@ -419,7 +426,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
                 ``,
                 `---`,
                 ``,
-                agentDef ? agentDef.systemPrompt : `Use 5 Whys methodology to diagnose the root cause of the pain signal above.`,
+                diagnosticianPrompt,
                 ``,
                 `---`,
                 ``,
