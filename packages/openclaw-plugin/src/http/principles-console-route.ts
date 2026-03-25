@@ -5,6 +5,7 @@ import type { OpenClawPluginApi, OpenClawPluginHttpRouteParams } from '../opencl
 import { ControlUiQueryService } from '../service/control-ui-query-service.js';
 import { getEvolutionQueryService } from '../service/evolution-query-service.js';
 import { TrajectoryRegistry } from '../core/trajectory.js';
+import { getCentralDatabase } from '../service/central-database.js';
 
 const ROUTE_PREFIX = '/plugins/principles';
 const API_PREFIX = `${ROUTE_PREFIX}/api`;
@@ -122,6 +123,76 @@ function handleApiRoute(
 
   if (pathname === `${API_PREFIX}/overview` && method === 'GET') {
     return done(() => service.getOverview());
+  }
+
+  if (pathname === `${API_PREFIX}/central/overview` && method === 'GET') {
+    return done(() => {
+      const centralDb = getCentralDatabase();
+      const stats = centralDb.getOverviewStats();
+      const trend = centralDb.getDailyTrend(14);
+      const regressions = centralDb.getTopRegressions(5);
+      const thinkingStats = centralDb.getThinkingModelStats();
+      const workspaces = centralDb.getWorkspaces();
+      
+      return {
+        workspaceDir: 'central',
+        generatedAt: new Date().toISOString(),
+        dataFreshness: workspaces.length > 0 ? (workspaces[0].lastSync ?? null) : null,
+        dataSource: 'central_aggregated_db',
+        runtimeControlPlaneSource: 'all_workspaces',
+        summary: {
+          repeatErrorRate: stats.totalToolCalls > 0 
+            ? stats.totalFailures / stats.totalToolCalls 
+            : 0,
+          userCorrectionRate: stats.totalToolCalls > 0 
+            ? stats.totalCorrections / stats.totalToolCalls 
+            : 0,
+          pendingSamples: stats.pendingSamples,
+          approvedSamples: stats.approvedSamples,
+          thinkingCoverageRate: stats.totalToolCalls > 0 
+            ? stats.totalThinkingEvents / stats.totalToolCalls 
+            : 0,
+          painEvents: stats.totalPainEvents,
+          principleEventCount: 0,
+          gateBlocks: 0,
+          taskOutcomes: 0,
+        },
+        dailyTrend: trend,
+        topRegressions: regressions,
+        sampleQueue: {
+          counters: {
+            pending: stats.pendingSamples,
+            approved: stats.approvedSamples,
+            rejected: stats.rejectedSamples,
+          },
+          preview: [],
+        },
+        thinkingSummary: {
+          activeModels: thinkingStats.activeModels,
+          dormantModels: thinkingStats.totalModels - thinkingStats.activeModels,
+          effectiveModels: thinkingStats.models.filter(m => m.coverageRate > 0.1).length,
+          coverageRate: stats.totalToolCalls > 0 
+            ? stats.totalThinkingEvents / stats.totalToolCalls 
+            : 0,
+        },
+        centralInfo: {
+          workspaceCount: stats.workspaceCount,
+          workspaces: stats.workspaceNames,
+        },
+      };
+    });
+  }
+
+  if (pathname === `${API_PREFIX}/central/sync` && method === 'POST') {
+    return done(() => {
+      const centralDb = getCentralDatabase();
+      const results = centralDb.syncAll();
+      const summary: Record<string, number> = {};
+      results.forEach((count, name) => {
+        summary[name] = count;
+      });
+      return { synced: summary, timestamp: new Date().toISOString() };
+    });
   }
 
   if (pathname === `${API_PREFIX}/samples` && method === 'GET') {

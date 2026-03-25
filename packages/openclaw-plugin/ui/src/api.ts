@@ -120,6 +120,12 @@ export const api = {
   getOverview(): Promise<OverviewResponse> {
     return requestJson('/plugins/principles/api/overview');
   },
+  getCentralOverview(): Promise<OverviewResponse & { centralInfo?: { workspaceCount: number; workspaces: string[] } }> {
+    return requestJson('/plugins/principles/api/central/overview');
+  },
+  syncCentral(): Promise<{ synced: Record<string, number>; timestamp: string }> {
+    return requestJson('/plugins/principles/api/central/sync', { method: 'POST' });
+  },
   listSamples(search: URLSearchParams): Promise<SamplesResponse> {
     return requestJson(`/plugins/principles/api/samples?${search.toString()}`);
   },
