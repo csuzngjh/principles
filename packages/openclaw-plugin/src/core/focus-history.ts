@@ -842,17 +842,99 @@ export function workingMemoryToInjection(snapshot: WorkingMemorySnapshot | null)
 // 自动压缩与维护
 // ============================================================================
 
-/** 自动压缩触发阈值（行数） */
-const AUTO_COMPRESS_LINE_THRESHOLD = 100;
+/** 默认压缩配置 */
+const DEFAULT_COMPRESSION_CONFIG = {
+  lineThreshold: 100,
+  sizeThreshold: 15 * 1024, // 15KB
+  intervalMs: 24 * 60 * 60 * 1000, // 24 hours
+  keepCompletedTasks: 3,
+  maxWorkingMemoryArtifacts: 10,
+};
 
-/** 自动压缩触发阈值（字节） */
-const AUTO_COMPRESS_SIZE_THRESHOLD = 15 * 1024; // 15KB
+/** 压缩时间记录文件名 */
+const LAST_COMPRESS_FILE = '.last_compress';
 
-/** 保留最近已完成任务数 */
-const KEEP_COMPLETED_TASKS_COUNT = 3;
+/**
+ * 压缩配置接口
+ */
+interface CompressionConfig {
+  lineThreshold: number;
+  sizeThreshold: number;
+  intervalMs: number;
+  keepCompletedTasks: number;
+  maxWorkingMemoryArtifacts: number;
+}
 
-/** 工作记忆最大条数 */
-const MAX_WORKING_MEMORY_ARTIFACTS = 10;
+/**
+ * 从 pain_settings.json 加载压缩配置
+ *
+ * @param stateDir state 目录路径
+ * @returns 压缩配置
+ */
+function loadCompressionConfig(stateDir?: string): CompressionConfig {
+  if (!stateDir) {
+    return DEFAULT_COMPRESSION_CONFIG;
+  }
+
+  try {
+    const configPath = path.join(stateDir, 'pain_settings.json');
+    if (!fs.existsSync(configPath)) {
+      return DEFAULT_COMPRESSION_CONFIG;
+    }
+
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    const compression = config?.compression || {};
+
+    return {
+      lineThreshold: compression.line_threshold || DEFAULT_COMPRESSION_CONFIG.lineThreshold,
+      sizeThreshold: (compression.size_threshold_kb || 15) * 1024,
+      intervalMs: (compression.interval_hours || 24) * 60 * 60 * 1000,
+      keepCompletedTasks: compression.keep_completed_tasks || DEFAULT_COMPRESSION_CONFIG.keepCompletedTasks,
+      maxWorkingMemoryArtifacts: compression.max_working_memory_artifacts || DEFAULT_COMPRESSION_CONFIG.maxWorkingMemoryArtifacts,
+    };
+  } catch {
+    return DEFAULT_COMPRESSION_CONFIG;
+  }
+}
+
+/**
+ * 检查是否可以进行自动压缩（频率限制）
+ *
+ * @param stateDir state 目录路径
+ * @returns 是否可以进行压缩
+ */
+function canAutoCompress(stateDir: string): boolean {
+  const lastCompressPath = path.join(stateDir, LAST_COMPRESS_FILE);
+
+  if (!fs.existsSync(lastCompressPath)) {
+    return true;
+  }
+
+  try {
+    const config = loadCompressionConfig(stateDir);
+    const lastCompressTime = parseInt(fs.readFileSync(lastCompressPath, 'utf-8'), 10);
+    const now = Date.now();
+    return (now - lastCompressTime) >= config.intervalMs;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * 记录压缩时间
+ *
+ * @param stateDir state 目录路径
+ */
+function recordCompressTime(stateDir: string): void {
+  try {
+    if (!fs.existsSync(stateDir)) {
+      fs.mkdirSync(stateDir, { recursive: true });
+    }
+    fs.writeFileSync(path.join(stateDir, LAST_COMPRESS_FILE), Date.now().toString(), 'utf-8');
+  } catch (error) {
+    logError('Failed to record compress time', error);
+  }
+}
 
 /**
  * 提取已完成任务作为里程碑
@@ -965,8 +1047,10 @@ export function archiveMilestonesToDaily(
  */
 export function cleanupStaleInfo(
   content: string,
-  workspaceDir?: string
+  workspaceDir?: string,
+  config?: CompressionConfig
 ): string {
+  const effectiveConfig = config || DEFAULT_COMPRESSION_CONFIG;
   const lines = content.split('\n');
   const result: string[] = [];
 
@@ -1009,7 +1093,7 @@ export function cleanupStaleInfo(
         artifactCount++;
 
         // 限制条数
-        if (artifactCount > MAX_WORKING_MEMORY_ARTIFACTS) {
+        if (artifactCount > effectiveConfig.maxWorkingMemoryArtifacts) {
           continue; // 跳过超出限制的条目
         }
 
@@ -1029,7 +1113,7 @@ export function cleanupStaleInfo(
     // 处理已完成任务
     if (/^-\s*\[x\]/i.test(trimmed)) {
       completedCount++;
-      if (completedCount > KEEP_COMPLETED_TASKS_COUNT) {
+      if (completedCount > effectiveConfig.keepCompletedTasks) {
         continue; // 跳过超出限制的已完成任务
       }
     }
@@ -1045,11 +1129,13 @@ export function cleanupStaleInfo(
  *
  * @param focusPath CURRENT_FOCUS.md 的完整路径
  * @param workspaceDir 工作区目录（可选，用于验证文件引用）
+ * @param stateDir state 目录路径（可选，用于频率限制）
  * @returns 压缩结果信息，如果不需要压缩则返回 null
  */
 export function autoCompressFocus(
   focusPath: string,
-  workspaceDir?: string
+  workspaceDir?: string,
+  stateDir?: string
 ): {
   compressed: boolean;
   oldLines: number;
@@ -1070,14 +1156,17 @@ export function autoCompressFocus(
     };
   }
 
+  // 加载配置
+  const config = loadCompressionConfig(stateDir);
+
   const oldContent = fs.readFileSync(focusPath, 'utf-8');
   const oldLines = oldContent.split('\n').length;
   const oldSize = Buffer.byteLength(oldContent, 'utf-8');
 
-  // 检查是否需要压缩
+  // 检查是否需要压缩（行数或大小阈值）
   const needsCompression = 
-    oldLines > AUTO_COMPRESS_LINE_THRESHOLD || 
-    oldSize > AUTO_COMPRESS_SIZE_THRESHOLD;
+    oldLines > config.lineThreshold || 
+    oldSize > config.sizeThreshold;
 
   if (!needsCompression) {
     return {
@@ -1087,6 +1176,18 @@ export function autoCompressFocus(
       milestonesArchived: false,
       backupPath: null,
       reason: 'Below threshold'
+    };
+  }
+
+  // 检查频率限制
+  if (stateDir && !canAutoCompress(stateDir)) {
+    return {
+      compressed: false,
+      oldLines,
+      newLines: oldLines,
+      milestonesArchived: false,
+      backupPath: null,
+      reason: 'Rate limited (24h interval)'
     };
   }
 
@@ -1101,8 +1202,8 @@ export function autoCompressFocus(
     milestonesArchived = archivePath !== null;
   }
 
-  // 3. 清理过期信息
-  let newContent = cleanupStaleInfo(oldContent, workspaceDir);
+  // 3. 清理过期信息（传入配置）
+  let newContent = cleanupStaleInfo(oldContent, workspaceDir, config);
 
   // 4. 压缩内容（使用 extractSummary）
   newContent = extractSummary(newContent, 50);
@@ -1123,6 +1224,11 @@ export function autoCompressFocus(
   // 8. 写入新内容
   fs.writeFileSync(focusPath, newContent, 'utf-8');
 
+  // 9. 记录压缩时间
+  if (stateDir) {
+    recordCompressTime(stateDir);
+  }
+
   const newLines = newContent.split('\n').length;
 
   return {
@@ -1138,17 +1244,18 @@ export function autoCompressFocus(
 /**
  * 检查是否需要自动压缩
  */
-export function needsAutoCompression(focusPath: string): boolean {
+export function needsAutoCompression(focusPath: string, stateDir?: string): boolean {
   if (!fs.existsSync(focusPath)) {
     return false;
   }
 
   try {
+    const config = stateDir ? loadCompressionConfig(stateDir) : DEFAULT_COMPRESSION_CONFIG;
     const content = fs.readFileSync(focusPath, 'utf-8');
     const lines = content.split('\n').length;
     const size = Buffer.byteLength(content, 'utf-8');
 
-    return lines > AUTO_COMPRESS_LINE_THRESHOLD || size > AUTO_COMPRESS_SIZE_THRESHOLD;
+    return lines > config.lineThreshold || size > config.sizeThreshold;
   } catch {
     return false;
   }

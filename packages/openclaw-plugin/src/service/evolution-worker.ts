@@ -11,6 +11,7 @@ import { WorkspaceContext } from '../core/workspace-context.js';
 import { initPersistence, flushAllSessions } from '../core/session-tracker.js';
 import { acquireLockAsync, releaseLock, type LockContext } from '../utils/file-lock.js';
 import { getEvolutionLogger, type EvolutionStage } from '../core/evolution-logger.js';
+import { DIAGNOSTICIAN_PROTOCOL_SUMMARY } from '../constants/diagnostician.js';
 
 let intervalId: NodeJS.Timeout | null = null;
 
@@ -402,15 +403,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
                   `Trigger text: "${highestScoreTask.trigger_text_preview || 'N/A'}"`;
 
             // Prepare HEARTBEAT content first
-            // Use inline diagnostician prompt (pd-diagnostician skill equivalent)
-            const diagnosticianPrompt = `Use 5 Whys methodology to diagnose the root cause of the pain signal above.
-
-Follow these phases:
-1. **Phase 1 - Evidence Gathering**: Read logs, search code, record evidence sources
-2. **Phase 2 - Causal Chain**: Each Why must have evidence support, max 5 layers
-3. **Phase 3 - Root Cause Classification**: Classify as People/Design/Assumption/Tooling
-4. **Phase 4 - Principle Extraction**: Extract reusable protection principles`;
-
+            // Use shared diagnostician protocol (consistent with pd-diagnostician skill)
             const heartbeatPath = wctx.resolve('HEARTBEAT');
             const markerFilePath = path.join(wctx.stateDir, `.evolution_complete_${highestScoreTask.id}`);
             const heartbeatContent = [
@@ -426,7 +419,7 @@ Follow these phases:
                 ``,
                 `---`,
                 ``,
-                diagnosticianPrompt,
+                DIAGNOSTICIAN_PROTOCOL_SUMMARY,
                 ``,
                 `---`,
                 ``,
