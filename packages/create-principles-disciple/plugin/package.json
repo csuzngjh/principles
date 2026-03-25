@@ -1,0 +1,75 @@
+{
+  "name": "principles-disciple",
+  "version": "1.7.5",
+  "description": "Native OpenClaw plugin for Principles Disciple",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "templates",
+    "agents",
+    "openclaw.plugin.json"
+  ],
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/csuzngjh/principles.git",
+    "directory": "packages/openclaw-plugin"
+  },
+  "author": "csuzngjh",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/csuzngjh/principles/issues"
+  },
+  "homepage": "https://github.com/csuzngjh/principles#readme",
+  "openclaw": {
+    "id": "principles-disciple",
+    "name": "Principles Disciple",
+    "extensions": [
+      "./dist/index.js"
+    ]
+  },
+  "scripts": {
+    "build": "tsc",
+    "build:web": "node scripts/build-web.mjs",
+    "build:bundle": "node esbuild.config.js && node scripts/build-web.mjs",
+    "build:production": "tsc && node esbuild.config.js --production && node scripts/build-web.mjs --production && node scripts/verify-build.mjs",
+    "test": "vitest run",
+    "postinstall": "node scripts/install-dependencies.cjs"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.3.0",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/micromatch": "^4.0.10",
+    "@types/node": "^25.5.0",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "@types/ws": "^8.5.13",
+    "@vitest/coverage-v8": "^4.1.0",
+    "esbuild": "^0.27.4",
+    "jsdom": "^29.0.1",
+    "typescript": "^5.0.0",
+    "vitest": "^4.1.0",
+    "ws": "^8.18.0"
+  },
+  "peerDependencies": {
+    "openclaw": ">=1.0.0"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "@sinclair/typebox": "^0.34.48",
+    "better-sqlite3": "^12.8.0",
+    "lucide-react": "^0.468.0",
+    "micromatch": "^4.0.8",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-router-dom": "^7.9.4"
+  }
+}

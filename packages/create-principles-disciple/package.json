@@ -8,6 +8,8 @@
   },
   "files": [
     "dist",
+    "plugin",
+    "templates",
     "README.md",
     "LICENSE"
   ],
