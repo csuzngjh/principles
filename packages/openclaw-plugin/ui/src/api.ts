@@ -117,11 +117,13 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  getOverview(): Promise<OverviewResponse> {
-    return requestJson('/plugins/principles/api/overview');
+  getOverview(days?: number): Promise<OverviewResponse> {
+    const params = days ? `?days=${days}` : '';
+    return requestJson(`/plugins/principles/api/overview${params}`);
   },
-  getCentralOverview(): Promise<OverviewResponse & { centralInfo?: { workspaceCount: number; enabledWorkspaceCount: number; workspaces: string[]; enabledWorkspaces: string[] } }> {
-    return requestJson('/plugins/principles/api/central/overview');
+  getCentralOverview(days?: number): Promise<OverviewResponse & { centralInfo?: { workspaceCount: number; enabledWorkspaceCount: number; workspaces: string[]; enabledWorkspaces: string[] } }> {
+    const params = days ? `?days=${days}` : '';
+    return requestJson(`/plugins/principles/api/central/overview${params}`);
   },
   syncCentral(): Promise<{ synced: Record<string, number>; timestamp: string }> {
     return requestJson('/plugins/principles/api/central/sync', { method: 'POST' });
@@ -175,7 +177,8 @@ export const api = {
   getEvolutionTrace(traceId: string): Promise<EvolutionTraceResponse> {
     return requestJson(`/plugins/principles/api/evolution/trace/${encodeURIComponent(traceId)}`);
   },
-  getEvolutionStats(): Promise<EvolutionStatsResponse> {
-    return requestJson('/plugins/principles/api/evolution/stats');
+  getEvolutionStats(days?: number): Promise<EvolutionStatsResponse> {
+    const params = days ? `?days=${days}` : '';
+    return requestJson(`/plugins/principles/api/evolution/stats${params}`);
   },
 };

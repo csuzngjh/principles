@@ -121,15 +121,24 @@ function handleApiRoute(
     }
   };
 
+  // Helper to parse and clamp days parameter
+  const parseDays = (param: string | null): number => {
+    const value = param ? Number(param) : 30;
+    if (!Number.isFinite(value) || value < 1) return 30;
+    return Math.min(365, Math.max(1, Math.floor(value)));
+  };
+
   if (pathname === `${API_PREFIX}/overview` && method === 'GET') {
-    return done(() => service.getOverview());
+    const days = parseDays(url.searchParams.get('days'));
+    return done(() => service.getOverview(days));
   }
 
   if (pathname === `${API_PREFIX}/central/overview` && method === 'GET') {
+    const days = parseDays(url.searchParams.get('days'));
     return done(() => {
       const centralDb = getCentralDatabase();
       const stats = centralDb.getOverviewStats();
-      const trend = centralDb.getDailyTrend(14);
+      const trend = centralDb.getDailyTrend(days);
       const regressions = centralDb.getTopRegressions(5);
       const thinkingStats = centralDb.getThinkingModelStats();
       const workspaces = centralDb.getWorkspaces();
@@ -397,9 +406,10 @@ function handleApiRoute(
   }
 
   if (pathname === `${API_PREFIX}/evolution/stats` && method === 'GET') {
+    const days = parseDays(url.searchParams.get('days'));
     return done(() => {
       const evoService = evolutionService();
-      return evoService.getStats();
+      return evoService.getStats(days);
     });
   }
 
