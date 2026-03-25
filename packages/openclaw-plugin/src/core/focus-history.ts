@@ -1271,6 +1271,8 @@ const CURRENT_FOCUS_TEMPLATE_PATH = 'templates/workspace/okr/CURRENT_FOCUS.md';
 /**
  * 验证 CURRENT_FOCUS.md 格式
  *
+ * 仅校验会导致程序崩溃的核心问题，不过度校验
+ *
  * @param content 文件内容
  * @returns 验证结果
  */
@@ -1282,48 +1284,36 @@ export function validateCurrentFocus(content: string): {
   const errors: string[] = [];
   const warnings: string[] = [];
 
-  // 检查必要字段
-  if (!content.includes('**版本**') && !content.includes('**版本**:')) {
-    errors.push('缺少版本字段: **版本**: vX');
+  // 仅检查会导致程序崩溃的核心问题
+
+  // 1. 文件为空
+  if (!content || !content.trim()) {
+    errors.push('文件为空');
+    return { valid: false, errors, warnings };
   }
 
-  if (!content.includes('**更新**') && !content.includes('**更新**:')) {
-    errors.push('缺少更新日期字段: **更新**: YYYY-MM-DD');
+  // 2. 检查是否是有效的文本（排除二进制乱码）
+  // 如果有超过 50% 的非打印字符，认为是乱码
+  const nonPrintable = content.split('').filter(c => {
+    const code = c.charCodeAt(0);
+    // 允许：换行、制表符、中文、英文、数字、标点
+    return code < 32 && code !== 10 && code !== 13 && code !== 9;
+  }).length;
+
+  if (nonPrintable > content.length * 0.5) {
+    errors.push('文件内容损坏（可能是二进制乱码）');
+    return { valid: false, errors, warnings };
   }
 
-  // 检查必要章节
-  if (!content.includes('📍 状态快照') && !content.includes('状态快照')) {
-    warnings.push('缺少状态快照章节');
-  }
+  // 以下仅作为警告，不触发恢复
 
-  if (!content.includes('🔄 当前任务') && !content.includes('当前任务')) {
-    warnings.push('缺少当前任务章节');
-  }
-
-  if (!content.includes('➡️ 下一步') && !content.includes('下一步')) {
-    warnings.push('缺少下一步章节');
-  }
-
-  // 检查版本号格式
-  const versionMatch = content.match(/\*\*版本\*\*:\s*v([\d.]+)/i);
-  if (versionMatch) {
-    const version = parseFloat(versionMatch[1]);
-    if (isNaN(version) || version < 1) {
-      errors.push(`版本号格式无效: ${versionMatch[1]}`);
-    }
-  }
-
-  // 检查日期格式
-  const dateMatch = content.match(/\*\*更新\*\*:\s*(\d{4}-\d{2}-\d{2})/);
-  if (dateMatch) {
-    const date = new Date(dateMatch[1]);
-    if (isNaN(date.getTime())) {
-      errors.push(`日期格式无效: ${dateMatch[1]}`);
-    }
+  // 提示缺少建议的章节（不影响程序运行）
+  if (!content.includes('下一步') && !content.includes('Next')) {
+    warnings.push('缺少下一步章节（建议保留）');
   }
 
   return {
-    valid: errors.length === 0,
+    valid: true,  // 只要不崩溃就认为是 valid
     errors,
     warnings
   };
@@ -1392,6 +1382,8 @@ export function recoverFromTemplate(
 /**
  * 安全读取 CURRENT_FOCUS.md（自动验证 + 恢复）
  *
+ * 仅在文件为空或损坏时才恢复，其他情况正常使用
+ *
  * @param focusPath CURRENT_FOCUS.md 路径
  * @param extensionRoot 插件根目录
  * @param logger 日志记录器
@@ -1428,32 +1420,38 @@ export function safeReadCurrentFocus(
   const content = fs.readFileSync(focusPath, 'utf-8');
   const validation = validateCurrentFocus(content);
 
-  if (validation.valid) {
+  // 记录警告（不触发恢复）
+  if (validation.warnings.length > 0) {
+    logger?.warn?.(`[PD:Focus] CURRENT_FOCUS.md warnings: ${validation.warnings.join(', ')}`);
+  }
+
+  // 仅在有严重错误时才恢复
+  if (!validation.valid) {
+    logger?.warn?.(`[PD:Focus] CURRENT_FOCUS.md corrupted: ${validation.errors.join(', ')}`);
+
+    const result = recoverFromTemplate(focusPath, extensionRoot);
+    if (result.success) {
+      logger?.info?.(`[PD:Focus] Recovered CURRENT_FOCUS.md from template`);
+      return {
+        content: fs.readFileSync(focusPath, 'utf-8'),
+        recovered: true,
+        validationErrors: validation.errors
+      };
+    }
+
+    // 恢复失败，返回原始内容（让系统继续运行）
+    logger?.warn?.(`[PD:Focus] Failed to recover: ${result.error}`);
     return {
       content,
       recovered: false,
-      validationErrors: []
-    };
-  }
-
-  // 验证失败，尝试恢复
-  logger?.warn?.(`[PD:Focus] CURRENT_FOCUS.md validation failed: ${validation.errors.join(', ')}`);
-
-  const result = recoverFromTemplate(focusPath, extensionRoot);
-  if (result.success) {
-    logger?.info?.(`[PD:Focus] Recovered CURRENT_FOCUS.md from template`);
-    return {
-      content: fs.readFileSync(focusPath, 'utf-8'),
-      recovered: true,
       validationErrors: validation.errors
     };
   }
 
-  // 恢复失败，返回原始内容（让系统继续运行）
-  logger?.warn?.(`[PD:Focus] Failed to recover: ${result.error}`);
+  // 正常情况：文件有效
   return {
     content,
     recovered: false,
-    validationErrors: validation.errors
+    validationErrors: []
   };
 }
