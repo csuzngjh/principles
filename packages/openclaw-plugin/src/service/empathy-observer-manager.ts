@@ -87,7 +87,9 @@ export class EmpathyObserverManager {
         if (!api || !sessionId) return false;
         const enabled = api.config?.empathy_engine?.enabled !== false;
         if (!enabled) return false;
-        if (!api.runtime?.subagent) return false;
+        // Use isSubagentAvailable() instead of truthy check to properly detect
+        // unavailable runtime (Proxy that throws on method access in embedded mode)
+        if (!this.isSubagentAvailable(api)) return false;
 
         return !this.sessionLocks.has(sessionId);
     }
