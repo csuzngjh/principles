@@ -73,9 +73,12 @@ export interface RuntimeSummary {
     trustInputReady: boolean;
     phase3ShadowEligible: boolean;
     evolutionEligible: number;
+    evolutionReferenceOnly: number;
+    evolutionReferenceOnlyReasons: string[];
     evolutionRejected: number;
     evolutionRejectedReasons: string[];
     trustRejectedReasons: string[];
+    legacyDirectiveFilePresent: boolean;
     directiveStatus: 'compatibility-only' | 'missing' | 'present';
     directiveIgnoredReason: string;
     /**
@@ -276,10 +279,11 @@ export class RuntimeSummaryService {
         lastUpdated: generatedAt,
       },
       activeSessions: activeSessionIds,
-      currentTrustScore: legacyTrust.summary.score ?? 0,
+      currentTrustScore: legacyTrust.phase3Input.score ?? null,
       workspaceState: {
-        frozen: legacyTrust.summary.frozen,
-        lastUpdated: legacyTrust.summary.lastUpdated ?? generatedAt,
+        frozen: legacyTrust.phase3Input.frozen ?? null,
+        lastUpdated: legacyTrust.phase3Input.lastUpdated ?? null,
+        trustClassification: phase3Inputs.trust.classification,
       },
     };
 
@@ -328,9 +332,12 @@ export class RuntimeSummaryService {
         trustInputReady: phase3Inputs.trustInputReady,
         phase3ShadowEligible: phase3Inputs.phase3ShadowEligible,
         evolutionEligible: phase3Inputs.evolution.eligible.length,
+        evolutionReferenceOnly: phase3Inputs.evolution.referenceOnly.length,
+        evolutionReferenceOnlyReasons: [...new Set(phase3Inputs.evolution.referenceOnly.map((entry) => entry.classification))],
         evolutionRejected: phase3Inputs.evolution.rejected.length,
         evolutionRejectedReasons: phase3Inputs.evolution.rejected.flatMap((entry) => entry.reasons),
         trustRejectedReasons: phase3Inputs.trust.rejectedReasons,
+        legacyDirectiveFilePresent: directive !== null,
         directiveStatus: directive ? 'compatibility-only' : 'missing',
         directiveIgnoredReason: 'queue is only truth source',
         eligibilitySource: 'runtime_truth',
