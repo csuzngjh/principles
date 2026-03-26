@@ -179,6 +179,80 @@ describe('evaluatePhase3Inputs', () => {
     });
   });
 
+  // Task 3: Timeout-Only Outcome Filtering Tests
+  describe('Timeout-Only Outcome Filtering', () => {
+    it('rejects tasks with only timeout outcomes', () => {
+      const result = evaluatePhase3Inputs(
+        [{
+          id: 'e5da4f5c',
+          status: 'completed',
+          resolution: 'auto_completed_timeout',
+          completed_at: '2026-03-24T15:29:39.710Z'
+        }],
+        { score: 85, frozen: true, lastUpdated: '2026-03-20T10:00:00Z' }
+      );
+      expect(result.evolution.rejected).toHaveLength(1);
+      expect(result.evolution.rejected[0].reasons).toContain('timeout_only_outcome');
+      expect(result.queueTruthReady).toBe(false);
+    });
+
+    it('allows tasks with mixed outcomes (timeout + success)', () => {
+      const result = evaluatePhase3Inputs(
+        [{
+          id: 'task-mixed',
+          status: 'completed',
+          completed_at: '2026-03-24T15:29:39.710Z'
+        }],
+        { score: 85, frozen: true, lastUpdated: '2026-03-20T10:00:00Z' }
+      );
+      expect(result.evolution.eligible).toHaveLength(1);
+      expect(result.evolution.rejected).toHaveLength(0);
+      expect(result.queueTruthReady).toBe(true);
+    });
+
+    it('allows tasks with successful completion markers', () => {
+      const result = evaluatePhase3Inputs(
+        [{
+          id: 'task-success',
+          status: 'completed',
+          resolution: 'marker_detected',
+          completed_at: '2026-03-24T15:29:39.710Z'
+        }],
+        { score: 85, frozen: true, lastUpdated: '2026-03-20T10:00:00Z' }
+      );
+      expect(result.evolution.eligible).toHaveLength(1);
+      expect(result.evolution.rejected).toHaveLength(0);
+    });
+
+    it('rejects multiple timeout-only tasks correctly', () => {
+      const result = evaluatePhase3Inputs(
+        [
+          { id: 'timeout-1', status: 'completed', resolution: 'auto_completed_timeout', completed_at: '2026-03-24T15:29:39.710Z' },
+          { id: 'timeout-2', status: 'completed', resolution: 'auto_completed_timeout', completed_at: '2026-03-24T15:30:39.710Z' }
+        ],
+        { score: 85, frozen: true, lastUpdated: '2026-03-20T10:00:00Z' }
+      );
+      expect(result.evolution.rejected).toHaveLength(2);
+      expect(result.evolution.rejected.every(r => r.reasons.includes('timeout_only_outcome'))).toBe(true);
+      expect(result.queueTruthReady).toBe(false);
+    });
+
+    it('allows mix of timeout-only and valid tasks', () => {
+      const result = evaluatePhase3Inputs(
+        [
+          { id: 'timeout-1', status: 'completed', resolution: 'auto_completed_timeout', completed_at: '2026-03-24T15:29:39.710Z' },
+          { id: 'valid-1', status: 'completed', completed_at: '2026-03-24T15:30:39.710Z' }
+        ],
+        { score: 85, frozen: true, lastUpdated: '2026-03-20T10:00:00Z' }
+      );
+      expect(result.evolution.eligible).toHaveLength(1);
+      expect(result.evolution.eligible[0].taskId).toBe('valid-1');
+      expect(result.evolution.rejected).toHaveLength(1);
+      expect(result.evolution.rejected[0].taskId).toBe('timeout-1');
+      expect(result.queueTruthReady).toBe(false);
+    });
+  });
+
   // Task 6: Trust Input Validation Tests
   describe('Trust Input Validation', () => {
     it('accepts frozen trust with valid score', () => {
