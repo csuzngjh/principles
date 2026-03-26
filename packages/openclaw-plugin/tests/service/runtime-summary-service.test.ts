@@ -624,5 +624,70 @@ describe('RuntimeSummaryService', () => {
         ])
       );
     });
+
+    it('labels directive status as compatibility-only when directive file exists', () => {
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 85,
+        frozen: true,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+        { id: 'task-1', status: 'completed', completed_at: '2026-03-25T10:00:00.000Z' },
+        { id: 'task-2', status: 'in_progress', started_at: '2026-03-25T11:00:00.000Z' }
+      ]);
+      writeJson(path.join(workspace, '.state', 'evolution_directive.json'), {
+        active: true,
+        task: 'some task',
+        timestamp: '2026-03-20T10:00:00Z',
+      });
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      expect(summary.phase3.directiveStatus).toBe('compatibility-only');
+      expect(summary.phase3.directiveIgnoredReason).toBe('queue is only truth source');
+    });
+
+    it('reports directive status as missing when directive file does not exist', () => {
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 85,
+        frozen: true,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+        { id: 'task-1', status: 'completed', completed_at: '2026-03-25T10:00:00.000Z' }
+      ]);
+      // No evolution_directive.json file
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      expect(summary.phase3.directiveStatus).toBe('missing');
+      expect(summary.phase3.directiveIgnoredReason).toBe('queue is only truth source');
+    });
+
+    it('reports directive as compatibility-only even when stale', () => {
+      // Production scenario: directive stopped updating on 2026-03-22
+      // Should still be labeled as compatibility-only, not 'stale'
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 85,
+        frozen: true,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+        { id: 'task-1', status: 'completed', completed_at: '2026-03-25T10:00:00.000Z' }
+      ]);
+      writeJson(path.join(workspace, '.state', 'evolution_directive.json'), {
+        active: true,
+        task: 'old task',
+        timestamp: '2026-03-22T00:00:00Z', // Stale timestamp
+      });
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      expect(summary.phase3.directiveStatus).toBe('compatibility-only');
+      expect(summary.phase3.directiveIgnoredReason).toBe('queue is only truth source');
+    });
   });
 });
