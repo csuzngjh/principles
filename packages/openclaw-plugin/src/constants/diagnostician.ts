@@ -55,8 +55,3 @@ Extract protection principle with:
 }
 \`\`\`
 `;
-
-/**
- * 完整诊断协议文件路径（相对于插件根目录）
- */
-export const DIAGNOSTICIAN_SKILL_PATH = 'templates/langs/zh/skills/pd-diagnostician/SKILL.md';

@@ -3,7 +3,7 @@
    Warm Natural × Soft UI Evolution
    ========================================================================== */
 
-/* Google Fonts */
+/* Google Fonts - display=swap for non-blocking font loading */
 @import url('https://fonts.googleapis.com/css2?family=Calistoga&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
 /* ==========================================================================
@@ -304,10 +304,10 @@ input, select {
 .page {
   display: grid;
   gap: var(--space-6);
-  animation: pageEnter var(--duration-slow) var(--ease-out);
+  animation: page-enter var(--duration-slow) var(--ease-out);
 }
 
-@keyframes pageEnter {
+@keyframes page-enter {
   from {
     opacity: 0;
     transform: translateY(8px);
@@ -990,7 +990,7 @@ pre {
   font-size: 12px;
   line-height: 1.6;
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: anywhere;
   background: var(--bg-sunken);
   padding: var(--space-3) var(--space-4);
   border-radius: var(--radius-md);
