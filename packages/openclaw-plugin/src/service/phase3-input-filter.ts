@@ -1,3 +1,16 @@
+/**
+ * Phase 3 Input Filter
+ *
+ * CRITICAL: evaluatePhase3Inputs() does NOT read or use evolution_directive.json
+ * Directive is a compatibility-only display artifact, not a truth source.
+ *
+ * Phase 3 eligibility depends ONLY on:
+ * - Queue truth (valid evolution samples from queue)
+ * - Trust input (frozen trust scorecard)
+ *
+ * Any directive file is ignored for eligibility decisions.
+ */
+
 export interface Phase3EvolutionInput {
   id?: string | null;
   status?: string | null;
@@ -87,6 +100,17 @@ function isTimeoutOnlyOutcome(item: Phase3EvolutionInput): boolean {
   return resolution === 'auto_completed_timeout';
 }
 
+/**
+ * Evaluates Phase 3 readiness based on queue and trust inputs.
+ *
+ * IMPORTANT: Does NOT use evolution_directive.json.
+ * Directive is compatibility-only display artifact, not a truth source.
+ * Queue is the only authoritative execution truth source for Phase 3.
+ *
+ * @param queue - Evolution queue items to validate
+ * @param trust - Trust input (frozen scorecard)
+ * @returns Phase 3 eligibility results
+ */
 export function evaluatePhase3Inputs(
   queue: Phase3EvolutionInput[],
   trust: Phase3TrustInput
