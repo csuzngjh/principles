@@ -181,7 +181,7 @@ describe('evaluatePhase3Inputs', () => {
 
   // Task 3: Timeout-Only Outcome Filtering Tests
   describe('Timeout-Only Outcome Filtering', () => {
-    it('rejects tasks with only timeout outcomes', () => {
+    it('classifies timeout-only outcomes as reference_only (not rejected)', () => {
       const result = evaluatePhase3Inputs(
         [{
           id: 'e5da4f5c',
@@ -191,9 +191,15 @@ describe('evaluatePhase3Inputs', () => {
         }],
         { score: 85, frozen: true, lastUpdated: '2026-03-20T10:00:00Z' }
       );
-      expect(result.evolution.rejected).toHaveLength(1);
-      expect(result.evolution.rejected[0].reasons).toContain('timeout_only_outcome');
-      expect(result.queueTruthReady).toBe(false);
+      // Timeout-only outcomes go to referenceOnly, NOT rejected
+      expect(result.evolution.referenceOnly).toHaveLength(1);
+      expect(result.evolution.referenceOnly[0].taskId).toBe('e5da4f5c');
+      expect(result.evolution.referenceOnly[0].classification).toBe('timeout_only');
+      // They should NOT be in rejected
+      expect(result.evolution.rejected).toHaveLength(0);
+      // Queue is still "ready" because timeout outcomes are valid data
+      // (just not positive evidence for capability)
+      expect(result.queueTruthReady).toBe(true);
     });
 
     it('allows tasks with mixed outcomes (timeout + success)', () => {
@@ -224,7 +230,7 @@ describe('evaluatePhase3Inputs', () => {
       expect(result.evolution.rejected).toHaveLength(0);
     });
 
-    it('rejects multiple timeout-only tasks correctly', () => {
+    it('rejects multiple timeout-only tasks to referenceOnly', () => {
       const result = evaluatePhase3Inputs(
         [
           { id: 'timeout-1', status: 'completed', resolution: 'auto_completed_timeout', completed_at: '2026-03-24T15:29:39.710Z' },
@@ -232,9 +238,13 @@ describe('evaluatePhase3Inputs', () => {
         ],
         { score: 85, frozen: true, lastUpdated: '2026-03-20T10:00:00Z' }
       );
-      expect(result.evolution.rejected).toHaveLength(2);
-      expect(result.evolution.rejected.every(r => r.reasons.includes('timeout_only_outcome'))).toBe(true);
-      expect(result.queueTruthReady).toBe(false);
+      // Both go to referenceOnly
+      expect(result.evolution.referenceOnly).toHaveLength(2);
+      expect(result.evolution.referenceOnly.every(r => r.classification === 'timeout_only')).toBe(true);
+      // None in rejected
+      expect(result.evolution.rejected).toHaveLength(0);
+      // Queue is ready because no invalid data
+      expect(result.queueTruthReady).toBe(true);
     });
 
     it('allows mix of timeout-only and valid tasks', () => {
@@ -247,9 +257,12 @@ describe('evaluatePhase3Inputs', () => {
       );
       expect(result.evolution.eligible).toHaveLength(1);
       expect(result.evolution.eligible[0].taskId).toBe('valid-1');
-      expect(result.evolution.rejected).toHaveLength(1);
-      expect(result.evolution.rejected[0].taskId).toBe('timeout-1');
-      expect(result.queueTruthReady).toBe(false);
+      // Timeout goes to referenceOnly, not rejected
+      expect(result.evolution.referenceOnly).toHaveLength(1);
+      expect(result.evolution.referenceOnly[0].taskId).toBe('timeout-1');
+      expect(result.evolution.rejected).toHaveLength(0);
+      // Queue is ready because all data is valid
+      expect(result.queueTruthReady).toBe(true);
     });
   });
 
@@ -389,13 +402,15 @@ describe('evaluatePhase3Inputs', () => {
       // Task 6a7c7c48 has no status field (undefined), so it gets 'invalid_status'
       expect(missingStatusReject?.reasons).toContain('invalid_status');
 
-      // Verify timeout-only outcome exclusions
-      const timeoutOnlyRejected = result.evolution.rejected.filter(r =>
-        r.reasons.includes('timeout_only_outcome')
+      // Verify timeout-only outcomes are in referenceOnly (not rejected)
+      const referenceOnlyTaskIds = result.evolution.referenceOnly.map(r => r.taskId);
+      expect(referenceOnlyTaskIds).toContain('e5da4f5c');
+      expect(referenceOnlyTaskIds).toContain('24e30221');
+      // All referenceOnly items should have timeout_only classification
+      const timeoutOnlyReference = result.evolution.referenceOnly.filter(r =>
+        r.classification === 'timeout_only'
       );
-      expect(timeoutOnlyRejected.length).toBeGreaterThan(0);
-      expect(timeoutOnlyRejected.map(r => r.taskId)).toContain('e5da4f5c');
-      expect(timeoutOnlyRejected.map(r => r.taskId)).toContain('24e30221');
+      expect(timeoutOnlyReference.length).toBeGreaterThan(0);
 
       // Verify trust rejection
       expect(result.trust.eligible).toBe(false);
@@ -413,12 +428,11 @@ describe('evaluatePhase3Inputs', () => {
     });
 
     it('correctly accumulates multiple rejection reasons for single task', () => {
-      // Test task with multiple issues: timeout + invalid timestamps
+      // Test task with multiple issues: invalid timestamps (not timeout - that goes to referenceOnly)
       const result = evaluatePhase3Inputs(
         [{
           id: 'multi-issue-task',
           status: 'completed',
-          resolution: 'auto_completed_timeout',
           completed_at: 'not-a-timestamp'
         }],
         { score: 85, frozen: true, lastUpdated: '2026-03-20T10:00:00Z' }
@@ -428,12 +442,154 @@ describe('evaluatePhase3Inputs', () => {
       const rejection = result.evolution.rejected[0];
       expect(rejection.reasons).toEqual(
         expect.arrayContaining([
-          'timeout_only_outcome',
           'invalid_completed_at',
           'missing_completed_at'
         ])
       );
-      expect(rejection.reasons.length).toBe(3); // Deduplicated
+      expect(rejection.reasons.length).toBe(2); // Deduplicated
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Task 2: Three-Lane Phase 3 Input Classification Tests
+  // ═══════════════════════════════════════════════════════════════════════════
+  describe('Three-Lane Phase 3 Input Classification', () => {
+    /**
+     * PURPOSE: Prove that Phase 3 inputs support three distinct lanes:
+     * - authoritative: Valid Phase 3 inputs (can be used for eligibility)
+     * - reference_only: Useful evidence that must NOT be used as positive eligibility input
+     * - rejected: Invalid, corrupt, or policy-prohibited input
+     */
+
+    it('classifies timeout-only outcomes as reference_only (not rejected)', () => {
+      // Timeout-only outcomes are valid completed tasks, but they shouldn't
+      // count as positive evidence for capability assessment.
+      // They belong in reference_only, NOT rejected.
+      const result = evaluatePhase3Inputs(
+        [{
+          id: 'timeout-task',
+          status: 'completed',
+          resolution: 'auto_completed_timeout',
+          completed_at: '2026-03-24T15:29:39.710Z'
+        }],
+        { score: 85, frozen: true, lastUpdated: '2026-03-20T10:00:00Z' }
+      );
+
+      // CURRENT BEHAVIOR (BUG): timeout_only_outcome is in rejected
+      // EXPECTED: timeout_only_outcome should be in referenceOnly
+      expect(result.evolution.referenceOnly).toBeDefined();
+      expect(result.evolution.referenceOnly.length).toBeGreaterThan(0);
+      expect(result.evolution.referenceOnly[0].taskId).toBe('timeout-task');
+      expect(result.evolution.referenceOnly[0].classification).toBe('timeout_only');
+    });
+
+    it('keeps legacy queue statuses in rejected (not reference_only)', () => {
+      // Legacy statuses like 'resolved', 'paused' are truly invalid for Phase 3.
+      // They should be in rejected, NOT reference_only.
+      const result = evaluatePhase3Inputs(
+        [{ id: 'legacy-task', status: 'resolved', started_at: '2026-03-22T03:15:55.012Z' }],
+        { score: 85, frozen: true, lastUpdated: '2026-03-20T10:00:00Z' }
+      );
+
+      // Legacy status should remain in rejected
+      expect(result.evolution.rejected.length).toBeGreaterThan(0);
+      expect(result.evolution.rejected[0].reasons).toContain('legacy_queue_status');
+      
+      // Legacy status should NOT be in referenceOnly
+      const referenceTaskIds = (result.evolution.referenceOnly || []).map(r => r.taskId);
+      expect(referenceTaskIds).not.toContain('legacy-task');
+    });
+
+    it('keeps invalid queue rows (null status, missing task ID) in rejected', () => {
+      // Corrupt data should always be rejected.
+      const result = evaluatePhase3Inputs(
+        [
+          { id: 'null-status-task', status: null },
+          { status: 'pending' } // Missing ID
+        ],
+        { score: 85, frozen: true, lastUpdated: '2026-03-20T10:00:00Z' }
+      );
+
+      expect(result.evolution.rejected.length).toBe(2);
+      const rejectedIds = result.evolution.rejected.map(r => r.taskId);
+      expect(rejectedIds).toContain('null-status-task');
+      expect(rejectedIds).toContain(null);
+    });
+
+    it('classifies unfrozen trust as rejected (not unknown or authoritative)', () => {
+      // Unfrozen trust schema means the trust data is not in the expected format.
+      // This should be rejected, not treated as unknown=0.
+      const result = evaluatePhase3Inputs(
+        [{ id: 'task-1', status: 'pending' }],
+        { score: 85, frozen: false, lastUpdated: '2026-03-20T10:00:00Z' }
+      );
+
+      // Trust should be rejected
+      expect(result.trust.eligible).toBe(false);
+      expect(result.trust.rejectedReasons).toContain('legacy_or_unfrozen_trust_schema');
+      
+      // Trust classification should explicitly show 'rejected'
+      expect(result.trust.classification).toBe('rejected');
+    });
+
+    it('classifies missing trust score as unknown (not authoritative 0)', () => {
+      // Missing trust score should be 'unknown', NOT silently converted to 0.
+      // This prevents the system from making decisions based on fake data.
+      const result = evaluatePhase3Inputs(
+        [{ id: 'task-1', status: 'pending' }],
+        { score: null, frozen: true, lastUpdated: '2026-03-20T10:00:00Z' }
+      );
+
+      // Trust should show classification as 'unknown'
+      expect(result.trust.classification).toBe('unknown');
+      expect(result.trust.eligible).toBe(false);
+      expect(result.trust.rejectedReasons).toContain('missing_trust_score');
+    });
+
+    it('classifies valid frozen trust as authoritative', () => {
+      // Only frozen trust with valid score is authoritative.
+      const result = evaluatePhase3Inputs(
+        [{ id: 'task-1', status: 'pending' }],
+        { score: 85, frozen: true, lastUpdated: '2026-03-20T10:00:00Z' }
+      );
+
+      expect(result.trust.classification).toBe('authoritative');
+      expect(result.trust.eligible).toBe(true);
+      expect(result.trust.rejectedReasons).toHaveLength(0);
+    });
+
+    it('separates eligible, referenceOnly, and rejected in evolution results', () => {
+      // Test a mix of all three categories
+      const result = evaluatePhase3Inputs(
+        [
+          // Authoritative (eligible)
+          { id: 'valid-1', status: 'pending' },
+          { id: 'valid-2', status: 'completed', completed_at: '2026-03-24T15:29:39.710Z' },
+          // Reference only (timeout-only outcomes)
+          { id: 'timeout-1', status: 'completed', resolution: 'auto_completed_timeout', completed_at: '2026-03-24T15:29:39.710Z' },
+          // Rejected (legacy status)
+          { id: 'legacy-1', status: 'resolved', started_at: '2026-03-22T03:15:55.012Z' },
+          // Rejected (null status)
+          { id: 'null-1', status: null }
+        ],
+        { score: 85, frozen: true, lastUpdated: '2026-03-20T10:00:00Z' }
+      );
+
+      // Eligible (authoritative)
+      expect(result.evolution.eligible.length).toBe(2);
+      const eligibleIds = result.evolution.eligible.map(e => e.taskId);
+      expect(eligibleIds).toContain('valid-1');
+      expect(eligibleIds).toContain('valid-2');
+
+      // Reference only
+      expect(result.evolution.referenceOnly.length).toBe(1);
+      expect(result.evolution.referenceOnly[0].taskId).toBe('timeout-1');
+
+      // Rejected
+      expect(result.evolution.rejected.length).toBe(2);
+      const rejectedIds = result.evolution.rejected.map(r => r.taskId);
+      expect(rejectedIds).toContain('legacy-1');
+      expect(rejectedIds).toContain('null-1');
     });
   });
 });
