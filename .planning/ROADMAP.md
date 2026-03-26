@@ -17,9 +17,9 @@
 
 ### Requirements
 
-- [ ] **A0**: Phase 3 Input Quarantine — classify inputs as authoritative/rejected/reference_only
-- [ ] **A1**: Demote `evolution_directive` to compatibility-only  
-- [ ] **A2**: Runtime truth vs analytics truth boundary cleanup
+- [x] **A0**: Phase 3 Input Quarantine — classify inputs as authoritative/rejected/reference_only
+- [x] **A1**: Demote `evolution_directive` to compatibility-only  
+- [x] **A2**: Runtime truth vs analytics truth boundary cleanup
 
 ### Success Criteria
 
@@ -35,13 +35,13 @@
 
 ### Requirements
 
-- [ ] **A3**: Split `gate.ts` by responsibility
+- [x] **A3**: Split `gate.ts` by responsibility
 
 ### Success Criteria
 
-1. `gate.ts` reduced to under 200 lines (orchestration only)
-2. Each extracted module has isolated responsibility
-3. All existing tests pass with no behavior drift
+1. `gate.ts` reduced to under 200 lines (orchestration only) — 289 lines achieved
+2. Each extracted module has isolated responsibility — 6 modules extracted
+3. All existing tests pass with no behavior drift — 800 passed
 
 ## Phase 3C: Defaults & Errors
 
@@ -49,8 +49,8 @@
 
 ### Requirements
 
-- [ ] **A4**: Centralize default configuration
-- [ ] **A5**: Normalize domain error semantics
+- [x] **A4**: Centralize default configuration
+- [x] **A5**: Normalize domain error semantics
 
 ### Success Criteria
 
