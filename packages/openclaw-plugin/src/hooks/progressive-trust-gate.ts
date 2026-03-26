@@ -17,6 +17,10 @@
  * - Progressive gate settings from profile.progressive_gate
  * - Trust limits from config.trust
  * - Plan approval patterns and operations
+ *
+ * **Block Persistence:**
+ * - Uses shared `recordGateBlockAndReturn` from gate-block-helper.ts
+ * - Ensures single authoritative block persistence path
  */
 
 import * as fs from 'fs';
@@ -27,8 +31,8 @@ import { isRisky, normalizePath, planStatus as getPlanStatus } from '../utils/io
 import { matchesAnyPattern } from '../utils/glob-match.js';
 import { assessRiskLevel, estimateLineChanges, getTargetFileLineCount, calculatePercentageThreshold } from '../core/risk-calculator.js';
 import { checkEvolutionGate } from '../core/evolution-engine.js';
-import { trackBlock } from '../core/session-tracker.js';
 import { EventLogService } from '../core/event-log.js';
+import { recordGateBlockAndReturn } from './gate-block-helper.js';
 
 /**
  * Configuration for progressive gate behavior
@@ -77,7 +81,7 @@ export function buildLineLimitReason(
 }
 
 /**
- * Block a tool call and record the block event
+ * Internal helper to call the shared block helper with progressive-trust-gate source tag.
  */
 function block(
   filePath: string,
@@ -87,62 +91,13 @@ function block(
   logger: { warn?: (message: string) => void; error?: (message: string) => void },
   sessionId?: string
 ): PluginHookBeforeToolCallResult {
-  logger.error?.(`[PD_GATE] BLOCKED: ${filePath}. Reason: ${reason}`);
-
-  if (sessionId) {
-    trackBlock(sessionId);
-  }
-
-  const trajectoryPayload = {
-    sessionId: sessionId ?? null,
-    toolName,
+  return recordGateBlockAndReturn(wctx, {
     filePath,
     reason,
-  };
-
-  try {
-    wctx.eventLog.recordGateBlock(sessionId, {
-      toolName,
-      filePath,
-      reason,
-    });
-  } catch (error) {
-    logger.warn?.(`[PD_GATE] Failed to record gate block event: ${String(error)}`);
-  }
-
-  try {
-    wctx.trajectory?.recordGateBlock?.(trajectoryPayload);
-  } catch (error) {
-    logger.warn?.(`[PD_GATE] Failed to record trajectory gate block: ${String(error)}`);
-  }
-
-  return {
-    block: true,
-    blockReason: `[Principles Disciple] Security Gate Blocked this action.
-File: ${filePath}
-Reason: ${reason}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📋 How to unblock this operation:
-
-1. Use the plan-script skill to create a PLAN.md:
-   → Invoke: skill:plan-script
-
-2. Fill in the plan with:
-   - Target Files: ${filePath}
-   - Steps: What you want to do (be specific)
-   - Metrics: How to verify success
-   - Active Mental Models: Select 2 relevant models from .principles/THINKING_OS.md
-   - Rollback: How to restore if it fails
-
-3. After completing the plan, set STATUS: READY in PLAN.md
-
-4. Retry the operation
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-This is a mandatory security gate. The operation was blocked because the modification exceeds the allowed threshold for your current trust stage.
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
-  };
+    toolName,
+    sessionId,
+    blockSource: 'progressive-trust-gate',
+  }, logger);
 }
 
 /**
