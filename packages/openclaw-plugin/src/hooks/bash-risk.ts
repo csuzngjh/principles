@@ -80,13 +80,20 @@ export function analyzeBashCommand(
   // If no tokens (e.g., pure pipe-only), use the original
   const segments = tokens.length > 0 ? tokens : [normalizedCmd];
 
-  // Also strip outer $() and backticks from each segment
+  // Also strip outer $() and backticks from each segment, but PRESERVE inner content
   const cleanSegments = segments.map(seg => {
     let s = seg;
-    // Strip leading $() or ${} or backtick-wrapped commands
-    s = s.replace(/^\$\([^)]+\)$/, '').replace(/^\$\{[^}]+\}$/, '').replace(/^`([^`]+)`$/, '$1');
+    // Extract inner content from $() or ${} or backtick-wrapped commands
+    // IMPORTANT: Preserve the inner command for analysis, don't drop it entirely
+    s = s.replace(/^\$\(([^)]+)\)$/, '$1').replace(/^\$\{([^}]+)\}$/, '$1').replace(/^`([^`]+)`$/, '$1');
     return s.trim();
   }).filter(s => s.length > 0);
+
+  // SECURITY: If original input was non-empty but we have no analyzable content, fail closed
+  if (cleanSegments.length === 0 && normalizedCmd.trim().length > 0) {
+    logger?.warn?.(`[PD_GATE] Bash command analysis produced empty segments from non-empty input, failing closed: ${normalizedCmd.substring(0, 100)}`);
+    return 'dangerous';
+  }
 
   // 1. Check dangerous patterns against each segment
   for (const seg of cleanSegments) {
