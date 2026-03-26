@@ -12,10 +12,11 @@ export interface RuntimeTruth {
     lastUpdated: string;
   };
   activeSessions: string[];
-  currentTrustScore: number;
+  currentTrustScore: number | null;
   workspaceState: {
-    frozen: boolean;
-    lastUpdated: string;
+    frozen: boolean | null;
+    lastUpdated: string | null;
+    trustClassification: 'authoritative' | 'unknown' | 'rejected';
   };
 }
 
