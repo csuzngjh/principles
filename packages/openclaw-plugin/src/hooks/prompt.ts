@@ -522,6 +522,10 @@ You are a **self-evolving AI agent** powered by Principles Disciple.
   }
 
   // 闁崇儤鍔忛弲鏌ュ煛?3. Evolution Directive (always on, highest priority) - stays in prependContext 闁崇儤鍔忛弲鏌ュ煛?
+  // NOTE: evolutionDirective is injected from EVOLUTION_QUEUE for active tasks
+  // NOT used for Phase 3 eligibility decisions
+  // EVOLUTION_DIRECTIVE.json is a compatibility-only display artifact
+  // Phase 3 eligibility uses only queue and trust (see phase3-input-filter.ts)
   let evolutionDirective = '';
   const queuePath = wctx.resolve('EVOLUTION_QUEUE');
   if (fs.existsSync(queuePath)) {
