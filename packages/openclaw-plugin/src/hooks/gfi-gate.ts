@@ -22,6 +22,7 @@ import { getSession } from '../core/session-tracker.js';
 import { estimateLineChanges } from '../core/risk-calculator.js';
 import { analyzeBashCommand, calculateDynamicThreshold, type DynamicThresholdConfig } from './bash-risk.js';
 import { BASH_TOOLS_SET, HIGH_RISK_TOOLS, LOW_RISK_WRITE_TOOLS, AGENT_TOOLS } from '../constants/tools.js';
+import { AGENT_SPAWN_GFI_THRESHOLD } from '../config/index.js';
 import type { WorkspaceContext } from '../core/workspace-context.js';
 import type { PluginHookBeforeToolCallEvent, PluginHookBeforeToolCallResult } from '../openclaw-sdk.js';
 
@@ -203,7 +204,6 @@ GFI: ${currentGfi}/100
 
   // AGENT_TOOLS: Block subagent spawn when GFI is critically high
   if (AGENT_TOOLS.has(event.toolName)) {
-    const AGENT_SPAWN_GFI_THRESHOLD = 90;
     if (currentGfi >= AGENT_SPAWN_GFI_THRESHOLD) {
       logger?.warn?.(`[PD:GFI_GATE] Agent tool "${event.toolName}" blocked by GFI: ${currentGfi} >= ${AGENT_SPAWN_GFI_THRESHOLD}`);
       return {

@@ -27,6 +27,8 @@ import { isRisky, normalizePath, planStatus as getPlanStatus } from '../utils/io
 import { matchesAnyPattern } from '../utils/glob-match.js';
 import { assessRiskLevel, estimateLineChanges, getTargetFileLineCount, calculatePercentageThreshold } from '../core/risk-calculator.js';
 import { checkEvolutionGate } from '../core/evolution-engine.js';
+import { trackBlock } from '../core/session-tracker.js';
+import { EventLogService } from '../core/event-log.js';
 
 /**
  * Configuration for progressive gate behavior
@@ -86,6 +88,10 @@ function block(
   sessionId?: string
 ): PluginHookBeforeToolCallResult {
   logger.error?.(`[PD_GATE] BLOCKED: ${filePath}. Reason: ${reason}`);
+
+  if (sessionId) {
+    trackBlock(sessionId);
+  }
 
   const trajectoryPayload = {
     sessionId: sessionId ?? null,
@@ -335,7 +341,14 @@ export function checkProgressiveTrustGate(
     // Audit log for Stage 4 bypass (security traceability)
     try {
       const stateDir = wctx.resolve('STATE_DIR');
-      // EventLogService.get would be called here but we skip for simplicity
+      const eventLog = EventLogService.get(stateDir);
+      eventLog.recordGateBypass(ctx.sessionId, {
+        toolName: event.toolName,
+        filePath: relPath,
+        bypassType: 'stage4_architect',
+        trustScore,
+        trustStage: stage,
+      });
       logger.info?.(`[PD_GATE] Stage 4 Architect bypass recorded for ${relPath}`);
     } catch (auditErr) {
       logger.warn?.(`[PD_GATE] Failed to record Stage 4 bypass audit: ${String(auditErr)}`);

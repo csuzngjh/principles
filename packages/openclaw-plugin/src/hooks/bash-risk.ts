@@ -57,6 +57,19 @@ export function analyzeBashCommand(
   };
   normalizedCmd = normalizedCmd.replace(/[а-яА-Яіјѕԁɡһⅰƚмпеꜱѵѡᴦꜱ]/g, m => CYRILLIC_TO_LATIN[m] ?? m);
 
+  // Zero-width character detection — detect hidden characters that could bypass pattern matching
+  // Common zero-width characters used in command injection:
+  // - Zero-width space (U+200B)
+  // - Zero-width non-joiner (U+200C)
+  // - Zero-width joiner (U+200D)
+  // - Word joiner (U+2060)
+  // - Zero-width invisible separator (U+FEFF)
+  const ZERO_WIDTH_CHARS = /[\u200B\u200C\u200D\u2060\uFEFF]/g;
+  if (ZERO_WIDTH_CHARS.test(command)) {
+    logger?.warn?.(`[PD_GATE] Bash command contains zero-width characters — blocking as dangerous`);
+    return 'dangerous'; // Fail-closed: zero-width chars are suspicious
+  }
+
   // Tokenize command chain before pattern matching to catch `cmd1 && cmd2` bypasses
   // Only split on statement separators (; && ||), NOT on pipe (|) which is part of the command
   const tokens = normalizedCmd

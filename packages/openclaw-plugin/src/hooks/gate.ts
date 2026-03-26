@@ -1,3 +1,18 @@
+/**
+ * Security Gate Hook - Orchestration Layer
+ * 
+ * HOOK CHAIN PRIORITY (short-circuits on first block):
+ * 
+ * 1. Early Return: Skip if not write/bash/agent tool or no workspace
+ * 2. Thinking OS Checkpoint (P-10): Deep reflection enforcement  
+ * 3. GFI Gate: Fatigue index-based blocking
+ * 4. Bash Mutation Detection: Heuristic for bash file modifications
+ * 5. Progressive Trust Gate: Stage 1-4 access control
+ * 6. Edit Verification (P-03): Exact/fuzzy match for edit operations
+ * 
+ * Zero-width character detection is handled in bash-risk.ts.
+ */
+
 import * as fs from 'fs';
 import * as path from 'path';
 import { isRisky, normalizePath, planStatus as getPlanStatus } from '../utils/io.js';
