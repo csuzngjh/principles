@@ -506,4 +506,123 @@ describe('RuntimeSummaryService', () => {
 
     expect(summary.metadata.warnings.join('\n')).toContain('Skipped 1 malformed event line');
   });
+
+  // Task 8: Updated phase3 integration tests
+  describe('Phase 3 Input Quarantine Integration', () => {
+    it('reports legacy queue status as rejection reason in phase3 section', () => {
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 85,
+        frozen: true,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+        { id: '1afdd4bb', status: 'resolved', started_at: '2026-03-24T15:29:39.710Z', completed_at: '2026-03-24T15:29:39.710Z' }
+      ]);
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      expect(summary.phase3.queueTruthReady).toBe(false);
+      expect(summary.phase3.evolutionRejectedReasons).toContain('legacy_queue_status');
+    });
+
+    it('reports null status as rejection reason in phase3 section', () => {
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 85,
+        frozen: true,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+        { id: '6a7c7c48', status: null, started_at: '2026-03-24T15:29:39.710Z' }
+      ]);
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      expect(summary.phase3.queueTruthReady).toBe(false);
+      expect(summary.phase3.evolutionRejectedReasons).toContain('missing_status');
+    });
+
+    it('reports timeout-only outcomes as rejection reason in phase3 section', () => {
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 85,
+        frozen: true,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+        { id: 'e5da4f5c', status: 'completed', resolution: 'auto_completed_timeout', completed_at: '2026-03-24T15:29:39.710Z' }
+      ]);
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      expect(summary.phase3.queueTruthReady).toBe(false);
+      expect(summary.phase3.evolutionRejectedReasons).toContain('timeout_only_outcome');
+    });
+
+    it('reports unfrozen trust as rejection reason in phase3 section', () => {
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 85,
+        frozen: false,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+        { id: 'task-1', status: 'pending' }
+      ]);
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      expect(summary.phase3.trustInputReady).toBe(false);
+      expect(summary.phase3.trustRejectedReasons).toContain('legacy_or_unfrozen_trust_schema');
+    });
+
+    it('reports missing trust score as rejection reason in phase3 section', () => {
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: null,
+        frozen: true,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+        { id: 'task-1', status: 'pending' }
+      ]);
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      expect(summary.phase3.trustInputReady).toBe(false);
+      expect(summary.phase3.trustRejectedReasons).toContain('missing_trust_score');
+    });
+
+    it('handles mixed rejection reasons from queue and trust inputs', () => {
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: null,
+        frozen: false,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+        { id: 'task-1', status: 'resolved' },
+        { id: 'task-2', status: 'completed', resolution: 'auto_completed_timeout', completed_at: '2026-03-24T15:29:39.710Z' }
+      ]);
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      expect(summary.phase3.queueTruthReady).toBe(false);
+      expect(summary.phase3.trustInputReady).toBe(false);
+      expect(summary.phase3.phase3ShadowEligible).toBe(false);
+      expect(summary.phase3.evolutionRejectedReasons).toEqual(
+        expect.arrayContaining([
+          'legacy_queue_status',
+          'timeout_only_outcome'
+        ])
+      );
+      expect(summary.phase3.trustRejectedReasons).toEqual(
+        expect.arrayContaining([
+          'legacy_or_unfrozen_trust_schema',
+          'missing_trust_score'
+        ])
+      );
+    });
+  });
 });
