@@ -61,6 +61,8 @@ export interface RuntimeSummary {
     evolutionRejected: number;
     evolutionRejectedReasons: string[];
     trustRejectedReasons: string[];
+    directiveStatus: 'compatibility-only' | 'missing' | 'present';
+    directiveIgnoredReason: string;
   };
   pain: {
     activeFlag: boolean;
@@ -207,6 +209,8 @@ export class RuntimeSummaryService {
     }
 
     const queue = this.readJsonFile<QueueItem[]>(wctx.resolve('EVOLUTION_QUEUE'), warnings, false);
+    // compatibility-only display artifact - not a truth source for Phase 3 eligibility
+    // queue is the only authoritative execution truth source for Phase 3
     const directive = this.readJsonFile<DirectiveFile>(wctx.resolve('EVOLUTION_DIRECTIVE'), warnings, false);
     const queueStats = this.buildQueueStats(queue);
     const directiveSummary = this.buildDirectiveSummary(queue, directive, generatedAt, warnings);
@@ -250,6 +254,8 @@ export class RuntimeSummaryService {
         evolutionRejected: phase3Inputs.evolution.rejected.length,
         evolutionRejectedReasons: phase3Inputs.evolution.rejected.flatMap((entry) => entry.reasons),
         trustRejectedReasons: phase3Inputs.trust.rejectedReasons,
+        directiveStatus: directive ? 'compatibility-only' : 'missing',
+        directiveIgnoredReason: 'queue is only truth source',
       },
       pain: {
         activeFlag: Object.keys(painFlag).length > 0,
@@ -364,6 +370,11 @@ export class RuntimeSummaryService {
     return stats;
   }
 
+  /**
+   * Builds directive summary for compatibility display only.
+   * NOT a truth source for Phase 3 eligibility or decisions.
+   * Queue is the only authoritative execution truth source.
+   */
   private static buildDirectiveSummary(
     queue: QueueItem[] | null,
     directive: DirectiveFile | null,
