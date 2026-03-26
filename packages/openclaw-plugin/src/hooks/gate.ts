@@ -9,6 +9,13 @@ import { WorkspaceContext } from '../core/workspace-context.js';
 import { checkEvolutionGate } from '../core/evolution-engine.js';
 import { EventLogService } from '../core/event-log.js';
 import { checkThinkingCheckpoint } from './thinking-checkpoint.js';
+import { handleEditVerification } from './edit-verification.js';
+import { 
+  analyzeBashCommand as extAnalyzeBashCommand, 
+  calculateDynamicThreshold as extCalculateDynamicThreshold 
+} from './bash-risk.js';
+import { checkGfiGate } from './gfi-gate.js';
+import { checkProgressiveTrustGate } from './progressive-trust-gate.js';
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult } from '../openclaw-sdk.js';
 import {
   AGENT_TOOLS,
@@ -22,115 +29,8 @@ import {
 const TRAJECTORY_GATE_BLOCK_RETRY_DELAY_MS = 250;
 const TRAJECTORY_GATE_BLOCK_MAX_RETRIES = 3;
 
-// ═══ GFI Gate Tool Tiers ═══
-// TIER 0: 只读工具 - 永不拦截
-// TIER 1: 低风险修改 - GFI >= low_risk_block 时拦截
-// 注意：sessions_spawn、task 是 Agent 派生工具，常规阈值不拦截
-// 但极高 GFI (>=90) 时仍会拦截，防止极端情况下失控
-// TIER 2: 高风险操作 - GFI >= high_risk_block 时拦截
-// TIER 3: Bash 命令 - 根据内容判断
-/**
- * 分析 Bash 命令风险等级
- */
-function analyzeBashCommand(
-  command: string,
-  safePatterns: string[],
-  dangerousPatterns: string[],
-  logger?: { warn?: (message: string) => void }
-): 'safe' | 'dangerous' | 'normal' {
-  let normalizedCmd = command.trim().toLowerCase();
-
-  // P2 fix: Unicode de-obfuscation — convert Cyrillic/Unicode lookalikes to ASCII equivalents
-  // Common Cyrillic lookalikes that could bypass detection: аеорсух (Cyrillic) → aeopcyx (Latin)
-  const CYRILLIC_TO_LATIN: Record<string, string> = {
-    'а': 'a', 'е': 'e', 'о': 'o', 'р': 'p', 'с': 'c', 'у': 'y', 'х': 'x',
-    'А': 'a', 'Е': 'e', 'О': 'o', 'Р': 'p', 'С': 'c', 'У': 'y', 'Х': 'x',
-    // Additional confusable chars
-    'і': 'i', 'ј': 'j', 'ѕ': 's', 'ԁ': 'd', 'ɡ': 'g', 'һ': 'h', 'ⅰ': 'i',
-    'ƚ': 'l', 'м': 'm', 'п': 'n', 'ѵ': 'v', 'ѡ': 'w', 'ᴦ': 'r', 'ꜱ': 's',
-  };
-  normalizedCmd = normalizedCmd.replace(/[а-яА-Яіјѕԁɡһⅰƚмпеꜱѵѡᴦꜱ]/g, m => CYRILLIC_TO_LATIN[m] ?? m);
-
-  // P2 fix: Tokenize command chain before pattern matching to catch `cmd1 && cmd2` bypasses
-  // Only split on statement separators (; && ||), NOT on pipe (|) which is part of the command
-  const tokens = normalizedCmd
-    .split(/\s*(?:;|&&|\|\|)\s*/)
-    .map(t => t.trim())
-    .filter(t => t.length > 0);
-
-  // If no tokens (e.g., pure pipe-only), use the original
-  const segments = tokens.length > 0 ? tokens : [normalizedCmd];
-
-  // P2 fix: Also strip outer $() and backticks from each segment
-  const cleanSegments = segments.map(seg => {
-    let s = seg;
-    // Strip leading $() or ${} or backtick-wrapped commands
-    s = s.replace(/^\$\([^)]+\)$/, '').replace(/^\$\{[^}]+\}$/, '').replace(/^`([^`]+)`$/, '$1');
-    return s.trim();
-  }).filter(s => s.length > 0);
-
-  // 1. Check dangerous patterns against each segment
-  for (const seg of cleanSegments) {
-    for (const pattern of dangerousPatterns) {
-      try {
-        if (new RegExp(pattern, 'i').test(seg)) {
-          return 'dangerous';
-        }
-      } catch (error) {
-        logger?.warn?.(`[PD_GATE] Invalid dangerous bash regex "${pattern}": ${String(error)}. Failing closed.`);
-        return 'dangerous';
-        // Fail-closed: 无效的危险模式正则视为匹配危险命令
-      }
-    }
-  }
-
-  // 2. Check safe patterns (only if ALL segments are safe)
-  for (const seg of cleanSegments) {
-    let isSafe = false;
-    for (const pattern of safePatterns) {
-      try {
-        if (new RegExp(pattern, 'i').test(seg)) {
-          isSafe = true;
-          break;
-        }
-      } catch (error) {
-        logger?.warn?.(`[PD_GATE] Invalid safe bash regex "${pattern}": ${String(error)}. Ignoring safe override.`);
-      }
-    }
-    if (!isSafe) {
-      // Not all segments are safe → treat as normal
-      return 'normal';
-    }
-  }
-
-  // All segments are safe
-  return 'safe';
-}
-
-/**
- * 计算动态 GFI 阈值
- */
-function calculateDynamicThreshold(
-  baseThreshold: number,
-  trustStage: number,
-  lineChanges: number,
-  config: {
-    large_change_lines: number;
-    trust_stage_multipliers: Record<string, number>;
-  }
-): number {
-  // 1. Trust Stage 乘数
-  const stageMultiplier = config.trust_stage_multipliers[trustStage.toString()] || 1.0;
-  let threshold = baseThreshold * stageMultiplier;
-  
-  // 2. 大规模修改降低阈值
-  if (lineChanges > config.large_change_lines) {
-    const ratio = Math.min(lineChanges / 200, 0.5); // 最多降低 50%
-    threshold = threshold * (1 - ratio);
-  }
-  
-  return Math.round(Math.max(threshold, 0));
-}
+// NOTE: bash-risk functions moved to bash-risk.ts
+// Using imports: extAnalyzeBashCommand, extCalculateDynamicThreshold
 
 export function handleBeforeToolCall(
   event: PluginHookBeforeToolCallEvent,
@@ -210,7 +110,7 @@ export function handleBeforeToolCall(
     // TIER 3: Bash 命令 - 根据内容判断
     if (BASH_TOOLS_SET.has(event.toolName)) {
       const command = String(event.params.command || event.params.args || '');
-      const bashRisk = analyzeBashCommand(
+      const bashRisk = extAnalyzeBashCommand(
         command,
         gfiGateConfig?.bash_safe_patterns || [],
         gfiGateConfig?.bash_dangerous_patterns || [],
@@ -245,7 +145,7 @@ export function handleBeforeToolCall(
         const trustEngine = wctx.trust;
         const stage = trustEngine.getStage();
         const baseThreshold = gfiGateConfig?.thresholds?.low_risk_block || 70;
-        const dynamicThreshold = calculateDynamicThreshold(
+        const dynamicThreshold = extCalculateDynamicThreshold(
           baseThreshold,
           stage,
           0, // bash 命令没有行数概念
@@ -282,7 +182,7 @@ GFI: ${currentGfi}/100
       const trustEngine = wctx.trust;
       const stage = trustEngine.getStage();
       const baseThreshold = gfiGateConfig?.thresholds?.high_risk_block || 40;
-      const dynamicThreshold = calculateDynamicThreshold(
+      const dynamicThreshold = extCalculateDynamicThreshold(
         baseThreshold,
         stage,
         0,
@@ -321,7 +221,7 @@ GFI: ${currentGfi}/100
       const stage = trustEngine.getStage();
       const lineChanges = estimateLineChanges({ toolName: event.toolName, params: event.params });
       const baseThreshold = gfiGateConfig?.thresholds?.low_risk_block || 70;
-      const dynamicThreshold = calculateDynamicThreshold(
+      const dynamicThreshold = extCalculateDynamicThreshold(
         baseThreshold,
         stage,
         lineChanges,
@@ -839,175 +739,5 @@ Solution:
 This is enforced by P-03 (精确匹配前验证原则).`;
 }
 
-/**
- * Handle edit tool verification before allowing the operation
- * This enforces P-03 at the tool layer
- */
-function handleEditVerification(
-  event: PluginHookBeforeToolCallEvent,
-  wctx: WorkspaceContext,
-  ctx: PluginHookToolContext & { logger?: any },
-  config: {
-    enabled?: boolean;
-    max_file_size_bytes?: number;
-    fuzzy_match_enabled?: boolean;
-    fuzzy_match_threshold?: number;
-    skip_large_file_action?: 'warn' | 'block';
-  } = {}
-): PluginHookBeforeToolCallResult | void {
-  const logger = ctx.logger || console;
-  const maxSizeBytes = config.max_file_size_bytes ?? 10 * 1024 * 1024; // Default 10MB
-  const fuzzyMatchEnabled = config.fuzzy_match_enabled !== false;
-  const fuzzyMatchThreshold = config.fuzzy_match_threshold ?? 0.8;
-  const skipAction: 'warn' | 'block' = config.skip_large_file_action ?? 'warn';
-
-  // 1. Extract parameters (handle both parameter naming conventions)
-  const filePath = event.params.file_path || event.params.path || event.params.file;
-  const oldText = event.params.oldText || event.params.old_string;
-
-  if (!filePath || !oldText) {
-    // Missing required parameters, let it fail naturally
-    return;
-  }
-
-  // 2. Resolve and read file
-  let absolutePath: string;
-  try {
-    absolutePath = wctx.resolve(filePath);
-  } catch (error) {
-    // Path resolution error, let it fail naturally
-    return;
-  }
-
-  // 2.5. Skip verification for binary files
-  const BINARY_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg',
-                           '.pdf', '.zip', '.tar', '.gz', '.7z', '.rar',
-                           '.exe', '.dll', '.so', '.dylib', '.bin',
-                           '.mp3', '.mp4', '.avi', '.mov', '.wav',
-                           '.ttf', '.otf', '.woff', '.woff2',
-                           '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx'];
-  const ext = path.extname(absolutePath).toLowerCase();
-  if (BINARY_EXTENSIONS.includes(ext)) {
-    logger?.info?.(`[PD_GATE:EDIT_VERIFY] Skipping verification for binary file: ${path.basename(filePath)}`);
-    return;
-  }
-
-  try {
-    // 2.6. Check file size before reading (P-03 improvement)
-    try {
-      const stats = fs.statSync(absolutePath);
-      const fileSizeBytes = stats.size;
-      const fileSizeMB = fileSizeBytes / (1024 * 1024);
-
-      if (fileSizeBytes > maxSizeBytes) {
-        const message = `[PD_GATE:EDIT_VERIFY] File size check: ${path.basename(filePath)} is ${fileSizeMB.toFixed(2)}MB (threshold: ${(maxSizeBytes / (1024 * 1024)).toFixed(2)}MB)`;
-
-        if (skipAction === 'block') {
-          logger?.warn?.(message + ' - BLOCKED');
-          return {
-            block: true,
-            blockReason: `${message}\n\nFile is too large for edit verification. Increase max_file_size_bytes in PROFILE.json or reduce file size.`
-          };
-        } else {
-          logger?.warn?.(message + ' - SKIPPING verification');
-          return; // Skip verification but allow operation
-        }
-      }
-
-      logger?.info?.(`[PD_GATE:EDIT_VERIFY] File size check passed: ${path.basename(filePath)} (${fileSizeMB.toFixed(2)}MB)`);
-    } catch (statError) {
-      // File stat error (e.g., permission denied)
-      const errStr = statError instanceof Error ? statError.message : String(statError);
-      const errCode = (statError as any).code;
-
-      if (errCode === 'EACCES' || errCode === 'EPERM') {
-        logger?.error?.(`[PD_GATE:EDIT_VERIFY] Permission denied accessing file: ${path.basename(filePath)} (${errStr})`);
-        return {
-          block: true,
-          blockReason: `[P-03 Error] Permission denied: Cannot access file ${absolutePath}\n\nError: ${errStr}\n\nSolution: Check file permissions or run with appropriate access rights.`
-        };
-      } else if (errCode === 'ENOENT') {
-        logger?.warn?.(`[PD_GATE:EDIT_VERIFY] File not found: ${path.basename(filePath)} (${errStr})`);
-        // File doesn't exist - let the edit operation proceed (it will create the file)
-        return;
-      } else {
-        logger?.warn?.(`[PD_GATE:EDIT_VERIFY] Stat error: ${errStr}`);
-        // Let it fail naturally on read attempt
-      }
-    }
-
-    // 3. Read current file content with improved error handling
-    let currentContent: string;
-    try {
-      currentContent = fs.readFileSync(absolutePath, 'utf-8');
-    } catch (readError) {
-      const errStr = readError instanceof Error ? readError.message : String(readError);
-      const errCode = (readError as any).code;
-
-      if (errCode === 'EACCES' || errCode === 'EPERM') {
-        logger?.error?.(`[PD_GATE:EDIT_VERIFY] Permission denied reading file: ${path.basename(filePath)} (${errStr})`);
-        return {
-          block: true,
-          blockReason: `[P-03 Error] Permission denied: Cannot read file ${absolutePath}\n\nError: ${errStr}\n\nSolution: Check file permissions or run with appropriate access rights.`
-        };
-      } else if (errCode === 'ENOENT') {
-        logger?.warn?.(`[PD_GATE:EDIT_VERIFY] File not found: ${path.basename(filePath)} (${errStr})`);
-        // File doesn't exist - let the edit operation proceed
-        return;
-      } else if (errStr.includes('UTF-8') || errStr.includes('encoding')) {
-        logger?.error?.(`[PD_GATE:EDIT_VERIFY] Encoding error reading file: ${path.basename(filePath)} (${errStr})`);
-        return {
-          block: true,
-          blockReason: `[P-03 Error] Encoding error: Cannot read file ${absolutePath}\n\nError: ${errStr}\n\nThe file appears to use an encoding other than UTF-8. Edit verification requires UTF-8 readable text files.\n\nSolution: Ensure the file is UTF-8 encoded text, or mark binary extensions to skip verification.`
-        };
-      } else {
-        logger?.warn?.(`[PD_GATE:EDIT_VERIFY] Read error: ${errStr}`);
-        // Let it fail naturally
-        return;
-      }
-    }
-
-    // 4. Verify oldText exists in current content
-    if (!currentContent.includes(oldText)) {
-      logger?.info?.(`[PD_GATE:EDIT_VERIFY] Exact match failed for ${path.basename(filePath)}, trying fuzzy match`);
-
-      // 5. Try fuzzy matching (if enabled)
-      if (fuzzyMatchEnabled) {
-        const fuzzyResult = tryFuzzyMatch(currentContent, oldText, fuzzyMatchThreshold);
-
-        if (fuzzyResult.found && fuzzyResult.correctedText) {
-          logger?.info?.(`[PD_GATE:EDIT_VERIFY] Fuzzy match found for ${path.basename(filePath)}, auto-correcting oldText`);
-
-          // Return corrected parameters
-          return {
-            params: {
-              ...event.params,
-              oldText: fuzzyResult.correctedText,
-              old_string: fuzzyResult.correctedText
-            }
-          };
-        }
-      }
-
-      // 6. No match found, block the operation with helpful error
-      const errorMsg = generateEditError(absolutePath, oldText, currentContent);
-
-      logger?.error?.(`[PD_GATE:EDIT_VERIFY] Block edit on ${path.basename(filePath)}: oldText not found`);
-
-      return {
-        block: true,
-        blockReason: errorMsg
-      };
-    }
-
-    // 7. Verification passed, allow edit to proceed
-    logger?.info?.(`[PD_GATE:EDIT_VERIFY] Verified edit on ${path.basename(filePath)}`);
-    return;
-
-  } catch (error) {
-    // Unexpected error - let it fail naturally
-    const errorStr = error instanceof Error ? error.message : String(error);
-    logger?.warn?.(`[PD_GATE:EDIT_VERIFY] Unexpected error: ${errorStr}`);
-    return;
-  }
-}
+// NOTE: handleEditVerification moved to edit-verification.ts
+// Using import from './edit-verification.js'

@@ -174,11 +174,11 @@ export function checkProgressiveTrustGate(
   };
 
   const riskLevel = assessRiskLevel(relPath, { toolName: event.toolName, params: event.params }, []); // Empty risk_paths for now
-  const planApprovals = ctx.pluginConfig?.plan_approvals as any;
+  const planApprovals = (ctx as any).pluginConfig?.plan_approvals as any;
   const canUsePlanApproval = Boolean(
     stage === 1 &&
     planApprovals?.enabled &&
-    getPlanStatus(ctx.workspaceDir) === 'READY' &&
+    getPlanStatus(ctx.workspaceDir || '') === 'READY' &&
     planApprovals.allowed_operations?.includes(event.toolName) &&
     matchesAnyPattern(relPath, planApprovals.allowed_patterns || []) &&
     ((planApprovals.max_lines_override ?? -1) === -1 || lineChanges <= (planApprovals.max_lines_override ?? -1))
@@ -264,7 +264,7 @@ export function checkProgressiveTrustGate(
     }
 
     // Percentage-based threshold calculation
-    const targetAbsolutePath = typeof event.params.file_path === 'string' ? path.join(ctx.workspaceDir, event.params.file_path) : null;
+    const targetAbsolutePath = typeof event.params.file_path === 'string' && ctx.workspaceDir ? path.join(ctx.workspaceDir, event.params.file_path) : null;
     const targetLineCount = targetAbsolutePath ? getTargetFileLineCount(targetAbsolutePath) : null;
     const minLinesFallback = trustSettings.limits?.min_lines_fallback ?? 20;
     const stage2MaxPercentage = trustSettings.limits?.stage_2_max_percentage ?? 10;
@@ -291,14 +291,14 @@ export function checkProgressiveTrustGate(
   // Stage 3 (Developer): Allow normal writes. Require READY plan for risk paths.
   if (stage === 3) {
     if (risky) {
-      const planStatus = getPlanStatus(ctx.workspaceDir);
+      const planStatus = getPlanStatus(ctx.workspaceDir || '');
       if (planStatus !== 'READY') {
         return block(relPath, `No READY plan found. Stage 3 requires a plan for risk path modifications.`, wctx, event.toolName, logger, ctx.sessionId);
       }
     }
 
     // Percentage-based threshold calculation
-    const targetAbsolutePath = typeof event.params.file_path === 'string' ? path.join(ctx.workspaceDir, event.params.file_path) : null;
+    const targetAbsolutePath = typeof event.params.file_path === 'string' && ctx.workspaceDir ? path.join(ctx.workspaceDir, event.params.file_path) : null;
     const targetLineCount = targetAbsolutePath ? getTargetFileLineCount(targetAbsolutePath) : null;
     const minLinesFallback = trustSettings.limits?.min_lines_fallback ?? 20;
     const stage3MaxPercentage = trustSettings.limits?.stage_3_max_percentage ?? 15;
