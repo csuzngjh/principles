@@ -40,6 +40,11 @@ export interface Phase3InputFilterResult {
   trust: Phase3TrustResult;
 }
 
+/**
+ * Legacy queue statuses that are rejected for Phase 3
+ */
+const LEGACY_QUEUE_STATUSES = ['resolved', 'blocked', 'failed', 'cancelled', 'paused'];
+
 function normalizeTaskId(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const normalized = value.trim();
@@ -51,6 +56,14 @@ function normalizeStatus(value: unknown): 'pending' | 'in_progress' | 'completed
   if (normalized === 'in_progress' || normalized === 'completed') return normalized;
   if (normalized === 'pending') return 'pending';
   return null;
+}
+
+/**
+ * Checks if a status is a legacy value that should be rejected
+ */
+function isLegacyStatus(value: unknown): boolean {
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  return LEGACY_QUEUE_STATUSES.includes(normalized);
 }
 
 function normalizeTimestamp(value: unknown): string | null {
@@ -86,13 +99,24 @@ export function evaluatePhase3Inputs(
     const startedAt = normalizeTimestamp(item?.started_at);
     const completedAt = normalizeTimestamp(item?.completed_at);
 
+    // Check for legacy statuses first (before other status validation)
+    if (isLegacyStatus(item?.status)) {
+      reasons.push('legacy_queue_status');
+    }
+
+    // Check for null status separately
+    if (item?.status === null) {
+      reasons.push('missing_status');
+    }
+
     if (!taskId) {
       reasons.push('missing_task_id');
     } else if ((taskIdCounts.get(taskId) ?? 0) > 1) {
       reasons.push('reused_task_id');
     }
 
-    if (!status) {
+    // Only add invalid_status if it's not a legacy status and not null
+    if (!status && !isLegacyStatus(item?.status) && item?.status !== null) {
       reasons.push('invalid_status');
     }
 
