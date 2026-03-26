@@ -3,11 +3,12 @@ import * as path from 'path';
 import { isRisky, normalizePath, planStatus as getPlanStatus } from '../utils/io.js';
 import { matchesAnyPattern } from '../utils/glob-match.js';
 import { normalizeProfile } from '../core/profile.js';
-import { trackBlock, hasRecentThinking, getSession } from '../core/session-tracker.js';
+import { trackBlock, getSession } from '../core/session-tracker.js';
 import { assessRiskLevel, estimateLineChanges, getTargetFileLineCount, calculatePercentageThreshold } from '../core/risk-calculator.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { checkEvolutionGate } from '../core/evolution-engine.js';
 import { EventLogService } from '../core/event-log.js';
+import { checkThinkingCheckpoint } from './thinking-checkpoint.js';
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult } from '../openclaw-sdk.js';
 import {
   AGENT_TOOLS,
@@ -188,17 +189,14 @@ export function handleBeforeToolCall(
 
   // ═══ THINKING OS CHECKPOINT (P-10) — Config-gated ═══
   // Only enforced when thinking_checkpoint.enabled = true in PROFILE.json
-  const isHighRisk = profile.thinking_checkpoint?.high_risk_tools?.includes(event.toolName) ?? false;
-  if (profile.thinking_checkpoint?.enabled && isHighRisk && ctx.sessionId) {
-    const windowMs = profile.thinking_checkpoint.window_ms ?? 5 * 60 * 1000;
-    const hasThinking = hasRecentThinking(ctx.sessionId, windowMs);
-    if (!hasThinking) {
-      logger?.info?.(`[PD:THINKING_GATE] High-risk tool "${event.toolName}" called without recent deep thinking`);
-      return {
-        block: true,
-        blockReason: `[Thinking OS Checkpoint] 高风险操作 "${event.toolName}" 需要先进行深度思考。\n\n请先使用 deep_reflect 工具分析当前情况，然后再尝试此操作。\n\n这是强制性检查点，目的是确保决策质量。\n\n提示：调用 deep_reflect 后，${Math.round(windowMs/60000)}分钟内的操作将自动放行。\n\n可在PROFILE.json中设置 thinking_checkpoint.enabled: false 来禁用此检查。`,
-      };
-    }
+  const thinkingResult = checkThinkingCheckpoint(
+    event,
+    profile.thinking_checkpoint || {},
+    ctx.sessionId,
+    logger
+  );
+  if (thinkingResult) {
+    return thinkingResult;
   }
 
   // ═══ GFI GATE - Hard Intercept ═══
