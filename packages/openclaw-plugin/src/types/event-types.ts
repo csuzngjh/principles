@@ -115,6 +115,8 @@ export interface GateBlockEventData {
   filePath: string;
   reason: string;
   planStatus?: string;
+  /** Source module that triggered the block (for audit trail) */
+  blockSource?: string;
 }
 
 export interface GateBypassEventData {

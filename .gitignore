@@ -37,6 +37,7 @@ packages/create-principles-disciple/plugin/
 # Local environment and state (DO NOT COMMIT)
 .claude/
 claude/
+.planning/
 conductor/
 .principles/
 .state/

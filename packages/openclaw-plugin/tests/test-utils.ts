@@ -9,7 +9,7 @@ import { WorkspaceContext } from '../src/core/workspace-context.js';
  */
 export function createTestContext(overrides: { workspaceDir?: string, stateDir?: string } = {}): WorkspaceContext {
     let workspaceDir = overrides.workspaceDir;
-    
+
     if (!workspaceDir) {
         workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-test-'));
     }
@@ -26,4 +26,23 @@ export function createTestContext(overrides: { workspaceDir?: string, stateDir?:
     // Actually, clearCache might be better
     WorkspaceContext.clearCache();
     return WorkspaceContext.fromHookContext(mockCtx);
+}
+
+/**
+ * Safely removes a directory, ignoring Windows EPERM/ENOTEMPTY errors.
+ * Windows file locks can cause these errors when file handles are still held.
+ * The OS will eventually clean up temp directories, so it's safe to ignore.
+ */
+export function safeRmDir(dir: string): void {
+    try {
+        if (fs.existsSync(dir)) {
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
+    } catch (err: any) {
+        // On Windows, ignore EPERM/ENOTEMPTY errors (file handle still held)
+        // The OS will clean up temp directories eventually
+        if (process.platform !== 'win32' || (err?.code !== 'EPERM' && err?.code !== 'ENOTEMPTY')) {
+            throw err;
+        }
+    }
 }

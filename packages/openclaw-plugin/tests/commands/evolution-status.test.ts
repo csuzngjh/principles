@@ -80,7 +80,11 @@ describe('evolution commands', () => {
     expect(result.text).toContain('legacy/frozen');
     expect(result.text).toContain('Session GFI: current 45, peak 78');
     expect(result.text).toContain('Queue: pending 1, in_progress 0, completed 0');
-    expect(result.text).toContain('Directive (derived from queue, compatibility only)');
+    expect(result.text).toMatch(/Legacy Directive File: (present|missing) \(compatibility-only display artifact\)/);
+    expect(result.text).toContain('Note: Legacy directive file is NOT a truth source for Phase 3 eligibility');
+    expect(result.text).toContain('Queue is the only authoritative execution truth source');
+    expect(result.text).toContain('Active Evolution Task: --');
+    expect(result.text).toContain('Phase 3 Legacy Directive File: compatibility-only (queue is only truth source)');
     expect(result.text).toContain('Phase 3: ready');
     expect(result.text).toContain('queueTruthReady');
     expect(result.text).toContain('probation principles: 1');
@@ -137,5 +141,85 @@ describe('evolution commands', () => {
 
     const updated = new EvolutionReducerImpl({ workspaceDir: workspace }).getPrincipleById(pid);
     expect(updated?.status).toBe('deprecated');
+  });
+
+  it('handles stale directive correctly in production scenario', () => {
+    // Production evidence: evolution_directive.json stopped updating on 2026-03-22
+    // Phase 3 eligibility should work based on queue and trust alone
+    const workspace = makeTempDir();
+    const reducer = new EvolutionReducerImpl({ workspaceDir: workspace });
+
+    // Create principle from diagnosis
+    reducer.createPrincipleFromDiagnosis({
+      painId: 'pain-1',
+      painType: 'tool_failure',
+      triggerPattern: 'file write operation fails',
+      action: 'check file permissions',
+      source: 'write',
+    });
+
+    writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+      trust_score: 85,
+      frozen: true,
+      last_updated: '2026-03-20T10:00:00Z',
+    });
+
+    // Valid queue with completed tasks
+    writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+      { id: 'task-1', status: 'completed', completed_at: '2026-03-25T10:00:00.000Z', score: 50 },
+      { id: 'task-2', status: 'completed', completed_at: '2026-03-25T11:00:00.000Z', score: 60 }
+    ]);
+
+    // Stale directive file (production scenario - stopped updating on 2026-03-22)
+    writeJson(path.join(workspace, '.state', 'evolution_directive.json'), {
+      active: true,
+      task: 'old directive task',
+      timestamp: '2026-03-22T00:00:00Z', // Stale
+    });
+
+    writeJson(path.join(workspace, '.state', 'sessions', 's1.json'), {
+      sessionId: 's1',
+      currentGfi: 45,
+      dailyGfiPeak: 78,
+      lastActivityAt: 1,
+    });
+
+    const result = handleEvolutionStatusCommand({
+      config: { workspaceDir: workspace, language: 'en' },
+      sessionId: 's1',
+    } as any);
+
+    // Verify Phase 3 eligibility based on queue and trust, not directive
+    expect(result.text).toContain('Phase 3: ready yes');
+    expect(result.text).toContain('queueTruthReady yes');
+    expect(result.text).toContain('trustInputReady yes');
+    expect(result.text).toContain('eligible 2');
+
+    // Verify directive is labeled as compatibility-only
+    expect(result.text).toMatch(/Legacy Directive File: (present|missing) \(compatibility-only display artifact\)/);
+    expect(result.text).toContain('Note: Legacy directive file is NOT a truth source for Phase 3 eligibility');
+    expect(result.text).toContain('Queue is the only authoritative execution truth source');
+
+    // Verify directive status does not affect eligibility
+    expect(result.text).toContain('Phase 3 Legacy Directive File: compatibility-only (queue is only truth source)');
+  });
+
+  it('surfaces reference-only outcomes separately from rejected outcomes', () => {
+    const workspace = makeTempDir();
+    writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+      trust_score: 85,
+      frozen: true,
+      last_updated: '2026-03-20T10:00:00Z',
+    });
+    writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+      { id: 'timeout-1', status: 'completed', resolution: 'auto_completed_timeout', completed_at: '2026-03-25T10:00:00.000Z' },
+    ]);
+
+    const result = handleEvolutionStatusCommand({
+      config: { workspaceDir: workspace, language: 'en' },
+    } as any);
+
+    expect(result.text).toContain('reference_only 1');
+    expect(result.text).toContain('timeout_only');
   });
 });

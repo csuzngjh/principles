@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { WorkspaceNotFoundError } from '../config/index.js';
 
 const CENTRAL_DB_DIR = '.central';
 const CENTRAL_DB_NAME = 'aggregated.db';
@@ -195,7 +196,7 @@ export class CentralDatabase {
   syncWorkspace(workspaceName: string): number {
     const workspace = this.workspaces.find(w => w.name === workspaceName);
     if (!workspace) {
-      throw new Error(`Workspace not found: ${workspaceName}`);
+      throw new WorkspaceNotFoundError(workspaceName);
     }
 
     const trajectoryDbPath = path.join(workspace.path, '.state', 'trajectory.db');

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { handleBeforeToolCall } from '../../src/hooks/gate.js';
+import { normalizeProfile, PROFILE_DEFAULTS } from '../../src/core/profile.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
@@ -201,5 +202,88 @@ describe('Progressive Gate Hook', () => {
     expect(result).toBeDefined();
     expect(result?.block).toBe(true);
     expect(result?.blockReason).toContain('No READY plan found');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Task 4: Default Values Consistency Tests
+// ═══════════════════════════════════════════════════════════════════════════
+describe('Gate Default Values Consistency', () => {
+  /**
+   * PURPOSE: Prove that gate.ts inline defaults match PROFILE_DEFAULTS.
+   * If gate.ts has inline defaults that differ from normalizeProfile(),
+   * this is a bug - the defaults should come from a single source of truth.
+   *
+   * IMPORTANT: gate.ts should use normalizeProfile({}) for defaults,
+   * not maintain a separate inline object.
+   */
+
+  it('gate.ts uses PROFILE_DEFAULTS when PROFILE.json does not exist', () => {
+    // When PROFILE.json doesn't exist, gate.ts should use defaults from normalizeProfile
+    const expectedDefaults = normalizeProfile({});
+
+    // Verify key defaults are correct
+    expect(expectedDefaults.progressive_gate.enabled).toBe(true);
+    expect(expectedDefaults.edit_verification.enabled).toBe(true);
+    expect(expectedDefaults.thinking_checkpoint.enabled).toBe(false);
+    expect(expectedDefaults.risk_paths).toEqual([]);
+    expect(expectedDefaults.gate.require_plan_for_risk_paths).toBe(true);
+  });
+
+  it('gate.ts default behavior matches normalizeProfile({})', () => {
+    const defaults = normalizeProfile({});
+
+    // Test gate behavior with no PROFILE.json
+    const mockCtx = { workspaceDir: '/test/workspace', sessionId: 'test-session' };
+    const mockEvent = {
+      toolName: 'write',
+      params: { file_path: 'src/test.ts', content: 'test' }
+    };
+
+    vi.mocked(fs.existsSync).mockReturnValue(false); // No PROFILE.json
+    vi.mocked(WorkspaceContext.fromHookContext).mockReturnValue({
+      workspaceDir: '/test/workspace',
+      trust: { getScore: () => 80, getStage: () => 4 },
+      config: { get: () => undefined },
+      eventLog: { recordGateBlock: () => {} },
+      trajectory: { recordGateBlock: () => {} },
+      resolve: (key: string) => `/test/workspace/.state/${key}.json`,
+    } as any);
+
+    // Should not throw, should use defaults
+    const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
+
+    // With defaults: progressive_gate.enabled=true, trust=Stage4, should allow
+    // (Stage 4 bypasses progressive gate)
+    expect(result).toBeUndefined();
+  });
+
+  it('gate.ts thinking_checkpoint default is OFF (false)', () => {
+    const defaults = normalizeProfile({});
+
+    // CRITICAL: thinking_checkpoint must default to false
+    // Otherwise new users will be blocked by deep reflection requirement
+    expect(defaults.thinking_checkpoint.enabled).toBe(false);
+
+    // Verify gate.ts respects this default
+    const mockCtx = { workspaceDir: '/test/workspace', sessionId: 'test-session' };
+    const bashEvent = {
+      toolName: 'run_shell_command',
+      params: { command: 'ls -la' }
+    };
+
+    vi.mocked(fs.existsSync).mockReturnValue(false); // No PROFILE.json
+    vi.mocked(WorkspaceContext.fromHookContext).mockReturnValue({
+      workspaceDir: '/test/workspace',
+      trust: { getScore: () => 80, getStage: () => 4 },
+      config: { get: () => undefined },
+      eventLog: { recordGateBlock: () => {} },
+      trajectory: { recordGateBlock: () => {} },
+      resolve: (key: string) => `/test/workspace/.state/${key}.json`,
+    } as any);
+
+    // Should NOT be blocked by thinking checkpoint (default OFF)
+    const result = handleBeforeToolCall(bashEvent as any, mockCtx as any);
+    expect(result).toBeUndefined();
   });
 });

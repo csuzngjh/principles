@@ -298,13 +298,13 @@ ${Array.from({ length: 40 }, (_, i) => `| Item ${i + 1} | Value ${i + 1} |`).joi
 
       // 应该提取出两个文件
       expect(snapshot.artifacts.length).toBe(2);
-      
+
       // 检查第一个文件（write_file = created）
-      expect(snapshot.artifacts[0].path).toBe('packages/openclaw-plugin/src/hooks/prompt.ts');
+      expect(snapshot.artifacts[0].path).toMatch(/packages[\\\/]openclaw-plugin[\\\/]src[\\\/]hooks[\\\/]prompt\.ts$/);
       expect(snapshot.artifacts[0].action).toBe('created');
-      
+
       // 检查第二个文件（replace = modified）
-      expect(snapshot.artifacts[1].path).toBe('packages/openclaw-plugin/src/core/focus-history.ts');
+      expect(snapshot.artifacts[1].path).toMatch(/packages[\\\/]openclaw-plugin[\\\/]src[\\\/]core[\\\/]focus-history\.ts$/);
       expect(snapshot.artifacts[1].action).toBe('modified');
     });
 
@@ -343,7 +343,7 @@ ${Array.from({ length: 40 }, (_, i) => `| Item ${i + 1} | Value ${i + 1} |`).joi
 
       // 只应该保留 valid-file.ts（node_modules 和 .config. 被过滤）
       expect(snapshot.artifacts.length).toBe(1);
-      expect(snapshot.artifacts[0].path).toBe('src/valid-file.ts');
+      expect(snapshot.artifacts[0].path).toMatch(/src[\\\/]valid-file\.ts$/);
     });
 
     it('should extract problems and solutions from text', () => {

@@ -333,7 +333,7 @@ function WorkspaceConfig() {
   return (
     <CollapsiblePanel
       title="Workspace Configuration"
-      badge={<span className="badge">{wsData.configs.filter(c => c.enabled && c.syncEnabled).length} / {wsData.workspaces.length} enabled</span>}
+      badge={<span className="badge">{(wsData.configs ?? []).filter(c => c.enabled && c.syncEnabled).length} / {wsData.workspaces?.length ?? 0} enabled</span>}
       defaultCollapsed={true}
     >
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 'var(--space-4)' }}>
@@ -373,7 +373,7 @@ function WorkspaceConfig() {
       )}
 
       <div className="stack">
-        {wsData.workspaces.map((ws) => {
+        {(wsData.workspaces ?? []).map((ws) => {
           const config = ws.config ?? { workspaceName: ws.name, enabled: true, displayName: ws.name, syncEnabled: true };
           const isSaving = saving === ws.name;
           return (

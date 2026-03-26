@@ -506,4 +506,609 @@ describe('RuntimeSummaryService', () => {
 
     expect(summary.metadata.warnings.join('\n')).toContain('Skipped 1 malformed event line');
   });
+
+  // Task 8: Updated phase3 integration tests
+  describe('Phase 3 Input Quarantine Integration', () => {
+    it('reports legacy queue status as rejection reason in phase3 section', () => {
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 85,
+        frozen: true,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+        { id: '1afdd4bb', status: 'resolved', started_at: '2026-03-24T15:29:39.710Z', completed_at: '2026-03-24T15:29:39.710Z' }
+      ]);
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      expect(summary.phase3.queueTruthReady).toBe(false);
+      expect(summary.phase3.evolutionRejectedReasons).toContain('legacy_queue_status');
+    });
+
+    it('reports null status as rejection reason in phase3 section', () => {
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 85,
+        frozen: true,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+        { id: '6a7c7c48', status: null, started_at: '2026-03-24T15:29:39.710Z' }
+      ]);
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      expect(summary.phase3.queueTruthReady).toBe(false);
+      expect(summary.phase3.evolutionRejectedReasons).toContain('missing_status');
+    });
+
+    it('reports timeout-only outcomes as referenceOnly (not rejected)', () => {
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 85,
+        frozen: true,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+        { id: 'e5da4f5c', status: 'completed', resolution: 'auto_completed_timeout', completed_at: '2026-03-24T15:29:39.710Z' }
+      ]);
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      // Timeout-only outcomes are valid data (queue is ready)
+      // They go to referenceOnly, not rejected
+      expect(summary.phase3.queueTruthReady).toBe(true);
+      // No rejection reasons from timeout
+      expect(summary.phase3.evolutionRejectedReasons).not.toContain('timeout_only_outcome');
+    });
+
+    it('reports unfrozen trust as rejection reason in phase3 section', () => {
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 85,
+        frozen: false,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+        { id: 'task-1', status: 'pending' }
+      ]);
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      expect(summary.phase3.trustInputReady).toBe(false);
+      expect(summary.phase3.trustRejectedReasons).toContain('legacy_or_unfrozen_trust_schema');
+    });
+
+    it('reports missing trust score as rejection reason in phase3 section', () => {
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: null,
+        frozen: true,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+        { id: 'task-1', status: 'pending' }
+      ]);
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      expect(summary.phase3.trustInputReady).toBe(false);
+      expect(summary.phase3.trustRejectedReasons).toContain('missing_trust_score');
+    });
+
+    it('handles mixed rejection reasons from queue and trust inputs', () => {
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: null,
+        frozen: false,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+        { id: 'task-1', status: 'resolved' }, // Legacy status -> rejected
+        { id: 'task-2', status: 'completed', resolution: 'auto_completed_timeout', completed_at: '2026-03-24T15:29:39.710Z' } // Timeout -> referenceOnly
+      ]);
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      expect(summary.phase3.trustInputReady).toBe(false);
+      expect(summary.phase3.phase3ShadowEligible).toBe(false);
+      // Only legacy_queue_status is rejected, timeout is referenceOnly
+      expect(summary.phase3.evolutionRejectedReasons).toEqual(
+        expect.arrayContaining([
+          'legacy_queue_status',
+        ])
+      );
+      // Trust rejection reasons include both issues
+      expect(summary.phase3.trustRejectedReasons).toEqual(
+        expect.arrayContaining([
+          'legacy_or_unfrozen_trust_schema',
+          'missing_trust_score',
+        ])
+      );
+    });
+
+    it('labels directive status as compatibility-only when directive file exists', () => {
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 85,
+        frozen: true,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+        { id: 'task-1', status: 'completed', completed_at: '2026-03-25T10:00:00.000Z' },
+        { id: 'task-2', status: 'in_progress', started_at: '2026-03-25T11:00:00.000Z' }
+      ]);
+      writeJson(path.join(workspace, '.state', 'evolution_directive.json'), {
+        active: true,
+        task: 'some task',
+        timestamp: '2026-03-20T10:00:00Z',
+      });
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      expect(summary.phase3.directiveStatus).toBe('compatibility-only');
+      expect(summary.phase3.directiveIgnoredReason).toBe('queue is only truth source');
+    });
+
+    it('reports directive status as missing when directive file does not exist', () => {
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 85,
+        frozen: true,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+        { id: 'task-1', status: 'completed', completed_at: '2026-03-25T10:00:00.000Z' }
+      ]);
+      // No evolution_directive.json file
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      expect(summary.phase3.directiveStatus).toBe('missing');
+      expect(summary.phase3.directiveIgnoredReason).toBe('queue is only truth source');
+    });
+
+    it('reports directive as compatibility-only even when stale', () => {
+      // Production scenario: directive stopped updating on 2026-03-22
+      // Should still be labeled as compatibility-only, not 'stale'
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 85,
+        frozen: true,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+        { id: 'task-1', status: 'completed', completed_at: '2026-03-25T10:00:00.000Z' }
+      ]);
+      writeJson(path.join(workspace, '.state', 'evolution_directive.json'), {
+        active: true,
+        task: 'old task',
+        timestamp: '2026-03-22T00:00:00Z', // Stale timestamp
+      });
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      expect(summary.phase3.directiveStatus).toBe('compatibility-only');
+      expect(summary.phase3.directiveIgnoredReason).toBe('queue is only truth source');
+    });
+
+    it('labels directive as compatibility-only even when active flag is false', () => {
+      // Directive presence matters for labeling, not the active flag value
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 85,
+        frozen: true,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+        { id: 'task-1', status: 'completed', completed_at: '2026-03-25T10:00:00.000Z' }
+      ]);
+      writeJson(path.join(workspace, '.state', 'evolution_directive.json'), {
+        active: false, // inactive directive
+        task: 'inactive task',
+        timestamp: '2026-03-20T10:00:00Z',
+      });
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      expect(summary.phase3.directiveStatus).toBe('compatibility-only');
+      expect(summary.phase3.directiveIgnoredReason).toBe('queue is only truth source');
+    });
+
+    it('labels directive as compatibility-only even with minimal/empty fields', () => {
+      // Directive file exists with minimal content should still be labeled
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 85,
+        frozen: true,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+        { id: 'task-1', status: 'completed', completed_at: '2026-03-25T10:00:00.000Z' }
+      ]);
+      writeJson(path.join(workspace, '.state', 'evolution_directive.json'), {
+        // Minimal directive with no task, timestamp, or active fields
+      });
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      expect(summary.phase3.directiveStatus).toBe('compatibility-only');
+      expect(summary.phase3.directiveIgnoredReason).toBe('queue is only truth source');
+    });
+  });
+
+  // Task 8: TDD tests for Runtime vs Analytics Separation (RED phase)
+  describe('Runtime vs Analytics Separation', () => {
+    it('populates runtime truth section with queue, sessions, trust, workspace state', () => {
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 85,
+        frozen: true,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+        { id: 'task-1', status: 'pending' },
+        { id: 'task-2', status: 'in_progress' },
+        { id: 'task-3', status: 'completed' },
+      ]);
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      // These properties don't exist yet - tests will FAIL (RED phase)
+      expect(summary.runtime.queueState.total).toBe(3);
+      expect(summary.runtime.queueState.pending).toBe(1);
+      expect(summary.runtime.queueState.inProgress).toBe(1);
+      expect(summary.runtime.queueState.completed).toBe(1);
+      expect(summary.runtime.activeSessions).toEqual(expect.any(Array));
+      expect(summary.runtime.currentTrustScore).toBe(85);
+      expect(summary.runtime.workspaceState.frozen).toBe(true);
+    });
+
+    it('populates analytics truth section with trajectory, daily stats, trends', () => {
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 75,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      writeJson(path.join(workspace, '.state', 'logs', 'daily-stats.json'), {
+        '2026-03-20': {
+          toolCalls: 120,
+          painSignals: 15,
+          evolutionTasks: 5,
+        },
+      });
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      // These properties don't exist yet - tests will FAIL (RED phase)
+      expect(summary.analytics.trajectoryData).toBeDefined();
+      expect(summary.analytics.dailyStats.toolCalls).toBe(120);
+      expect(summary.analytics.dailyStats.painSignals).toBe(15);
+      expect(summary.analytics.trends).toBeDefined();
+    });
+
+    it('calculates Phase 3 readiness from runtime truth only', () => {
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 85,
+        frozen: true,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+        { id: 'task-1', status: 'completed', completed_at: '2026-03-25T10:00:00.000Z' },
+        { id: 'task-2', status: 'pending' },
+      ]);
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      // Runtime truth drives eligibility
+      expect(summary.phase3.queueTruthReady).toBe(true);
+      expect(summary.phase3.trustInputReady).toBe(true);
+      expect(summary.phase3.phase3ShadowEligible).toBe(true);
+
+      // Phase 3 eligibility source should be runtime truth
+      expect(summary.phase3.eligibilitySource).toBe('runtime_truth');
+    });
+
+    it('does not use analytics for Phase 3 eligibility', () => {
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 85,
+        frozen: true,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      // Invalid runtime queue - no valid entries
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+        { id: 'task-1', status: 'resolved' }, // legacy status - invalid
+      ]);
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      // Runtime truth invalid → not eligible, regardless of analytics
+      expect(summary.phase3.queueTruthReady).toBe(false);
+      expect(summary.phase3.phase3ShadowEligible).toBe(false);
+
+      // Analytics data exists but is ignored for eligibility
+      expect(summary.analytics).toBeDefined();
+    });
+
+    it('separates queue into runtime truth section only', () => {
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 75,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+        { id: 'task-1', status: 'pending', score: 50 },
+        { id: 'task-2', status: 'in_progress', score: 60 },
+        { id: 'task-3', status: 'completed', score: 10 },
+      ]);
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      // Queue data belongs to runtime truth
+      expect(summary.runtime.queueState.total).toBe(3);
+      expect(summary.runtime.queueState.pending).toBe(1);
+      expect(summary.runtime.queueState.inProgress).toBe(1);
+      expect(summary.runtime.queueState.completed).toBe(1);
+      expect(summary.runtime.queueState.lastUpdated).toBeDefined();
+
+      // Analytics section should NOT have queue data
+      expect(summary.analytics.trajectoryData).not.toHaveProperty('queue');
+    });
+
+    it('separates trust into runtime truth section only', () => {
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 85,
+        frozen: true,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      // Trust data belongs to runtime truth
+      expect(summary.runtime.currentTrustScore).toBe(85);
+      expect(summary.runtime.workspaceState.frozen).toBe(true);
+      expect(summary.runtime.workspaceState.lastUpdated).toBe('2026-03-20T10:00:00Z');
+
+      // Analytics section should NOT have trust data
+      expect(summary.analytics.trajectoryData).not.toHaveProperty('trustScore');
+    });
+
+    it('does not coerce missing trust into authoritative runtime truth', () => {
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        frozen: false,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+        { id: 'task-1', status: 'pending' },
+      ]);
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      expect(summary.runtime.currentTrustScore).toBeNull();
+      expect(summary.runtime.workspaceState.frozen).toBe(false);
+      expect(summary.runtime.workspaceState.trustClassification).toBe('rejected');
+      expect(summary.phase3.trustRejectedReasons).toContain('legacy_or_unfrozen_trust_schema');
+      expect(summary.phase3.trustRejectedReasons).toContain('missing_trust_score');
+    });
+
+    it('surfaces reference-only Phase 3 evidence in the runtime summary', () => {
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 85,
+        frozen: true,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+        { id: 'timeout-1', status: 'completed', resolution: 'auto_completed_timeout', completed_at: '2026-03-24T15:29:39.710Z' },
+      ]);
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      expect(summary.phase3.queueTruthReady).toBe(true);
+      expect(summary.phase3.evolutionReferenceOnly).toBe(1);
+      expect(summary.phase3.evolutionReferenceOnlyReasons).toContain('timeout_only');
+      expect(summary.phase3.evolutionRejected).toBe(0);
+      expect(summary.phase3.phase3ShadowEligible).toBe(false);
+    });
+
+    it('includes lastUpdated timestamps in runtime truth section', () => {
+      const workspace = makeWorkspace();
+      const lastUpdated = '2026-03-20T10:00:00Z';
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 85,
+        frozen: true,
+        last_updated: lastUpdated,
+      });
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+        { id: 'task-1', status: 'pending' },
+      ]);
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      // Runtime truth section includes timing metadata
+      expect(summary.runtime.queueState.lastUpdated).toBeDefined();
+      expect(summary.runtime.workspaceState.lastUpdated).toBe(lastUpdated);
+    });
+
+    it('populates activeSessions from session tracker in runtime truth', () => {
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 75,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      writeSession(workspace, 'session-1', {
+        currentGfi: 10,
+        lastActivityAt: 100,
+      });
+      writeSession(workspace, 'session-2', {
+        currentGfi: 20,
+        lastActivityAt: 200,
+      });
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      // Active sessions belong to runtime truth
+      expect(summary.runtime.activeSessions).toEqual(expect.any(Array));
+      expect(summary.runtime.activeSessions).toContain('session-1');
+      expect(summary.runtime.activeSessions).toContain('session-2');
+
+      // Analytics section should NOT have sessions
+      expect(summary.analytics).not.toHaveProperty('sessions');
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Task 3: Directive File Does Not Affect Phase 3 Eligibility
+  // ═══════════════════════════════════════════════════════════════════════════
+  describe('Directive File Is Compatibility-Only Display Artifact', () => {
+    /**
+     * PURPOSE: Prove that EVOLUTION_DIRECTIVE.json does NOT affect Phase 3 eligibility.
+     * Directive is a compatibility-only display artifact, not a truth source.
+     * Phase 3 eligibility depends ONLY on queue and trust.
+     */
+
+    it('Phase 3 eligibility is same whether directive exists or not', () => {
+      const workspace = makeWorkspace();
+
+      // Valid queue and trust for Phase 3
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 85,
+        frozen: true,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+        { id: 'task-1', status: 'pending' },
+      ]);
+
+      // Get summary WITHOUT directive file
+      const summaryWithoutDirective = RuntimeSummaryService.getSummary(workspace);
+
+      // Now add directive file with conflicting content
+      writeJson(path.join(workspace, '.state', 'evolution_directive.json'), {
+        active: false, // Contradicts queue
+        task: 'completely different task',
+        taskId: 'different-id',
+        timestamp: '2026-03-15T10:00:00Z', // Old timestamp
+      });
+
+      const summaryWithDirective = RuntimeSummaryService.getSummary(workspace);
+
+      // Phase 3 eligibility should be IDENTICAL regardless of directive
+      expect(summaryWithDirective.phase3.phase3ShadowEligible).toBe(
+        summaryWithoutDirective.phase3.phase3ShadowEligible
+      );
+      expect(summaryWithDirective.phase3.queueTruthReady).toBe(
+        summaryWithoutDirective.phase3.queueTruthReady
+      );
+      expect(summaryWithDirective.phase3.trustInputReady).toBe(
+        summaryWithoutDirective.phase3.trustInputReady
+      );
+
+      // Both should be eligible because queue and trust are valid
+      expect(summaryWithDirective.phase3.phase3ShadowEligible).toBe(true);
+    });
+
+    it('Phase 3 eligibility is false when queue invalid, regardless of directive', () => {
+      const workspace = makeWorkspace();
+
+      // Valid trust
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 85,
+        frozen: true,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+
+      // Invalid queue (legacy status)
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+        { id: 'task-1', status: 'resolved' }, // Legacy status
+      ]);
+
+      // Add directive claiming everything is fine
+      writeJson(path.join(workspace, '.state', 'evolution_directive.json'), {
+        active: true,
+        task: 'valid active task',
+        taskId: 'task-1',
+        timestamp: new Date().toISOString(),
+      });
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      // Phase 3 eligibility should be false despite directive claiming active
+      expect(summary.phase3.phase3ShadowEligible).toBe(false);
+      expect(summary.phase3.queueTruthReady).toBe(false);
+    });
+
+    it('Phase 3 eligibility is false when trust invalid, regardless of directive', () => {
+      const workspace = makeWorkspace();
+
+      // Invalid trust (unfrozen)
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 85,
+        frozen: false, // Invalid for Phase 3
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+
+      // Valid queue
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+        { id: 'task-1', status: 'pending' },
+      ]);
+
+      // Add directive claiming everything is fine
+      writeJson(path.join(workspace, '.state', 'evolution_directive.json'), {
+        active: true,
+        task: 'valid active task',
+        timestamp: new Date().toISOString(),
+      });
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      // Phase 3 eligibility should be false despite directive
+      expect(summary.phase3.phase3ShadowEligible).toBe(false);
+      expect(summary.phase3.trustInputReady).toBe(false);
+    });
+
+    it('directive summary shows queue-derived values, not file content', () => {
+      const workspace = makeWorkspace();
+
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 85,
+        frozen: true,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+
+      // Queue has in_progress task
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+        {
+          id: 'queue-task-123',
+          status: 'in_progress',
+          task: 'task from queue',
+          started_at: '2026-03-24T10:00:00Z',
+        },
+      ]);
+
+      // Directive has completely different content (stale/mismatch)
+      writeJson(path.join(workspace, '.state', 'evolution_directive.json'), {
+        active: true,
+        task: 'stale task from directive file',
+        taskId: 'directive-task-999',
+        timestamp: '2026-03-15T10:00:00Z',
+      });
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      // Directive summary should show queue-derived values
+      // The directive taskPreview should come from queue, not directive file
+      expect(summary.evolution.directive.exists).toBe(true);
+      expect(summary.evolution.directive.active).toBe(true);
+
+      // The directiveStatus should indicate it's compatibility-only
+      expect(summary.phase3.directiveStatus).toBe('compatibility-only');
+      expect(summary.phase3.directiveIgnoredReason).toBe('queue is only truth source');
+    });
+  });
 });

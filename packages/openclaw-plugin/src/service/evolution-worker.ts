@@ -12,8 +12,10 @@ import { initPersistence, flushAllSessions } from '../core/session-tracker.js';
 import { acquireLockAsync, releaseLock, type LockContext } from '../utils/file-lock.js';
 import { getEvolutionLogger, type EvolutionStage } from '../core/evolution-logger.js';
 import { DIAGNOSTICIAN_PROTOCOL_SUMMARY } from '../constants/diagnostician.js';
+import { LockUnavailableError } from '../config/index.js';
 
 let intervalId: NodeJS.Timeout | null = null;
+let timeoutId: NodeJS.Timeout | null = null;
 
 export interface EvolutionQueueItem {
     id: string;
@@ -122,8 +124,8 @@ export async function acquireQueueLock(resourcePath: string, logger: any, lockSu
 async function requireQueueLock(resourcePath: string, logger: any, scope: string, lockSuffix: string = EVOLUTION_QUEUE_LOCK_SUFFIX): Promise<() => void> {
     try {
         return await acquireQueueLock(resourcePath, logger, lockSuffix);
-    } catch {
-        throw new Error(`[PD:EvolutionWorker] ${scope}: queue lock unavailable for ${resourcePath}`);
+    } catch (err) {
+        throw new LockUnavailableError(resourcePath, scope, { cause: err });
     }
 }
 
@@ -676,6 +678,17 @@ export async function registerEvolutionTaskSession(
     }
 }
 
+/**
+ * Evolution Worker - Background service for pain processing and evolution task management.
+ *
+ * IMPORTANT: evolution_directive.json is a COMPATIBILITY-ONLY DISPLAY ARTIFACT.
+ * This service does NOT read or use directive for Phase 3 eligibility or any decisions.
+ * Queue (EVOLUTION_QUEUE) is the only authoritative execution truth source.
+ *
+ * Directive exists solely for UI/backwards compatibility display purposes.
+ * Production evidence shows directive stopped updating on 2026-03-22 and is stale.
+ */
+
 export interface ExtendedEvolutionWorkerService {
     id: string;
     api: OpenClawPluginApi | null;
@@ -725,7 +738,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
             });
         }, interval);
 
-        setTimeout(() => {
+        timeoutId = setTimeout(() => {
             void (async () => {
                 await checkPainFlag(wctx, logger);
                 await processEvolutionQueue(wctx, logger, eventLog);
@@ -742,6 +755,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
     stop(ctx: OpenClawPluginServiceContext): void {
         if (ctx?.logger) ctx.logger.info('[PD:EvolutionWorker] Stopping background service...');
         if (intervalId) clearInterval(intervalId);
+        if (timeoutId) clearTimeout(timeoutId);
         flushAllSessions();
     }
 };

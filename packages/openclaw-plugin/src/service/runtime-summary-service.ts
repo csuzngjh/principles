@@ -5,6 +5,8 @@ import { resolvePdPath } from '../core/paths.js';
 import { listSessions } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { evaluatePhase3Inputs } from './phase3-input-filter.js';
+import { TrajectoryRegistry } from '../core/trajectory.js';
+import type { RuntimeTruth, AnalyticsTruth, TrendMetrics } from '../types/runtime-summary.js';
 
 export type RuntimeDataQuality = 'authoritative' | 'partial';
 export type RuntimeRewardPolicy =
@@ -26,6 +28,19 @@ interface RuntimePainSignal {
 }
 
 export interface RuntimeSummary {
+  /**
+   * Runtime truth represents the current state of the system.
+   * Used for control decisions, Phase 3 eligibility, and real-time operations.
+   */
+  runtime: RuntimeTruth;
+
+  /**
+   * Analytics truth represents historical data and aggregated metrics.
+   * Used for insights, trends, and supporting evidence (where explicitly allowed).
+   * NOT used for control decisions or Phase 3 eligibility.
+   */
+  analytics: AnalyticsTruth;
+
   gfi: {
     current: number | null;
     peak: number | null;
@@ -58,9 +73,19 @@ export interface RuntimeSummary {
     trustInputReady: boolean;
     phase3ShadowEligible: boolean;
     evolutionEligible: number;
+    evolutionReferenceOnly: number;
+    evolutionReferenceOnlyReasons: string[];
     evolutionRejected: number;
     evolutionRejectedReasons: string[];
     trustRejectedReasons: string[];
+    legacyDirectiveFilePresent: boolean;
+    directiveStatus: 'compatibility-only' | 'missing' | 'present';
+    directiveIgnoredReason: string;
+    /**
+     * Source of Phase 3 eligibility calculation.
+     * Should always be 'runtime_truth' - analytics not used for control decisions.
+     */
+    eligibilitySource: 'runtime_truth';
   };
   pain: {
     activeFlag: boolean;
@@ -174,13 +199,22 @@ export class RuntimeSummaryService {
       ? (wctx.eventLog as { getBufferedEvents: () => EventLogEntry[] }).getBufferedEvents()
       : [];
     const events = this.mergeEvents(persistedEvents, bufferedEvents);
-    const dailyStats = this.readJsonFile<Record<string, { gfi?: { peak?: number } }>>(
+    const dailyStats = this.readJsonFile<Record<string, {
+      gfi?: { peak?: number };
+      toolCalls?: number;
+      painSignals?: number;
+      evolutionTasks?: number;
+    }>>(
       path.join(wctx.stateDir, 'logs', 'daily-stats.json'),
       warnings,
       false
     );
+
+    // Get most recent date from daily stats, fallback to today
     const today = generatedAt.slice(0, 10);
-    const dailyGfiPeak = dailyStats?.[today]?.gfi?.peak;
+    const availableDates = Object.keys(dailyStats || {}).sort().reverse();
+    const statsDate = availableDates.length > 0 ? availableDates[0] : today;
+    const dailyGfiPeak = dailyStats?.[statsDate]?.gfi?.peak;
 
     const gfiCurrent =
       selectedSession.session && Number.isFinite(selectedSession.session.currentGfi)
@@ -207,6 +241,8 @@ export class RuntimeSummaryService {
     }
 
     const queue = this.readJsonFile<QueueItem[]>(wctx.resolve('EVOLUTION_QUEUE'), warnings, false);
+    // compatibility-only display artifact - not a truth source for Phase 3 eligibility
+    // queue is the only authoritative execution truth source for Phase 3
     const directive = this.readJsonFile<DirectiveFile>(wctx.resolve('EVOLUTION_DIRECTIVE'), warnings, false);
     const queueStats = this.buildQueueStats(queue);
     const directiveSummary = this.buildDirectiveSummary(queue, directive, generatedAt, warnings);
@@ -229,7 +265,56 @@ export class RuntimeSummaryService {
     const gfiSources = this.buildGfiSources(events, selectedSessionId);
     const gateStats = this.buildGateStats(events, selectedSessionId, warnings);
 
+    // Read trajectory analytics data (historical data, NOT runtime truth)
+    const trajectoryStats = this.readTrajectoryStats(workspaceDir, warnings);
+
+    // Build runtime truth section (current state for control decisions)
+    const activeSessionIds = sessions.map(s => s.sessionId);
+    const runtimeTruth: RuntimeTruth = {
+      queueState: {
+        total: queueStats.pending + queueStats.inProgress + queueStats.completed,
+        pending: queueStats.pending,
+        inProgress: queueStats.inProgress,
+        completed: queueStats.completed,
+        lastUpdated: generatedAt,
+      },
+      activeSessions: activeSessionIds,
+      currentTrustScore: legacyTrust.phase3Input.score ?? null,
+      workspaceState: {
+        frozen: legacyTrust.phase3Input.frozen ?? null,
+        lastUpdated: legacyTrust.phase3Input.lastUpdated ?? null,
+        trustClassification: phase3Inputs.trust.classification,
+      },
+    };
+
+    // Build analytics truth section (historical data for insights)
+    const analyticsTruth: AnalyticsTruth = {
+      trajectoryData: {
+        totalTasks: trajectoryStats.assistantTurns + trajectoryStats.userTurns,
+        successRate: trajectoryStats.toolCalls > 0
+          ? (trajectoryStats.toolCalls - trajectoryStats.failures) / trajectoryStats.toolCalls
+          : 0,
+        timeoutRate: trajectoryStats.failures > 0
+          ? trajectoryStats.failures / (trajectoryStats.assistantTurns + trajectoryStats.userTurns || 1)
+          : 0,
+        trustChanges: 0, // Not tracked in current trajectory schema
+        lastUpdated: trajectoryStats.lastIngestAt ?? generatedAt,
+      },
+      dailyStats: {
+        toolCalls: dailyStats?.[statsDate]?.toolCalls ?? 0,
+        painSignals: dailyStats?.[statsDate]?.painSignals ?? 0,
+        evolutionTasks: dailyStats?.[statsDate]?.evolutionTasks ?? 0,
+        lastUpdated: statsDate,
+      },
+      trends: {
+        sevenDay: { successRateChange: 0, toolCallVolumeChange: 0, painSignalRateChange: 0 },
+        thirtyDay: { successRateChange: 0, toolCallVolumeChange: 0, painSignalRateChange: 0 },
+      },
+    };
+
     return {
+      runtime: runtimeTruth,
+      analytics: analyticsTruth,
       gfi: {
         current: gfiCurrent,
         peak: gfiPeak,
@@ -247,9 +332,15 @@ export class RuntimeSummaryService {
         trustInputReady: phase3Inputs.trustInputReady,
         phase3ShadowEligible: phase3Inputs.phase3ShadowEligible,
         evolutionEligible: phase3Inputs.evolution.eligible.length,
+        evolutionReferenceOnly: phase3Inputs.evolution.referenceOnly.length,
+        evolutionReferenceOnlyReasons: [...new Set(phase3Inputs.evolution.referenceOnly.map((entry) => entry.classification))],
         evolutionRejected: phase3Inputs.evolution.rejected.length,
         evolutionRejectedReasons: phase3Inputs.evolution.rejected.flatMap((entry) => entry.reasons),
         trustRejectedReasons: phase3Inputs.trust.rejectedReasons,
+        legacyDirectiveFilePresent: directive !== null,
+        directiveStatus: directive ? 'compatibility-only' : 'missing',
+        directiveIgnoredReason: 'queue is only truth source',
+        eligibilitySource: 'runtime_truth',
       },
       pain: {
         activeFlag: Object.keys(painFlag).length > 0,
@@ -364,6 +455,11 @@ export class RuntimeSummaryService {
     return stats;
   }
 
+  /**
+   * Builds directive summary for compatibility display only.
+   * NOT a truth source for Phase 3 eligibility or decisions.
+   * Queue is the only authoritative execution truth source.
+   */
   private static buildDirectiveSummary(
     queue: QueueItem[] | null,
     directive: DirectiveFile | null,
@@ -703,5 +799,47 @@ export class RuntimeSummaryService {
 
   private static asFiniteNumber(value: unknown): number | undefined {
     return Number.isFinite(value) ? Number(value) : undefined;
+  }
+
+  /**
+   * Read trajectory analytics data from trajectory database.
+   *
+   * Returns: Analytics data (historical metrics) aggregated from trajectory database.
+   * Not: Runtime truth or real-time queue state.
+   */
+  private static readTrajectoryStats(
+    workspaceDir: string,
+    warnings: string[]
+  ): {
+    assistantTurns: number;
+    userTurns: number;
+    toolCalls: number;
+    failures: number;
+    lastIngestAt: string | null;
+  } {
+    try {
+      // Use transient database instance to avoid locking issues
+      const stats = TrajectoryRegistry.use(workspaceDir, (db) => db.getDataStats());
+
+      return {
+        assistantTurns: stats.assistantTurns,
+        userTurns: stats.userTurns,
+        toolCalls: stats.toolCalls,
+        failures: stats.painEvents, // Approximate failures from pain events
+        lastIngestAt: stats.lastIngestAt,
+      };
+    } catch (error) {
+      pushWarning(
+        warnings,
+        `Failed to read trajectory analytics: ${error instanceof Error ? error.message : String(error)}`
+      );
+      return {
+        assistantTurns: 0,
+        userTurns: 0,
+        toolCalls: 0,
+        failures: 0,
+        lastIngestAt: null,
+      };
+    }
   }
 }
