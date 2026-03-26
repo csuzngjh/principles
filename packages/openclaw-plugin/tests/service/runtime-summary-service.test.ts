@@ -690,4 +690,189 @@ describe('RuntimeSummaryService', () => {
       expect(summary.phase3.directiveIgnoredReason).toBe('queue is only truth source');
     });
   });
+
+  // Task 8: TDD tests for Runtime vs Analytics Separation (RED phase)
+  describe('Runtime vs Analytics Separation', () => {
+    it('populates runtime truth section with queue, sessions, trust, workspace state', () => {
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 85,
+        frozen: true,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+        { id: 'task-1', status: 'pending' },
+        { id: 'task-2', status: 'in_progress' },
+        { id: 'task-3', status: 'completed' },
+      ]);
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      // These properties don't exist yet - tests will FAIL (RED phase)
+      expect(summary.runtime.queueState.total).toBe(3);
+      expect(summary.runtime.queueState.pending).toBe(1);
+      expect(summary.runtime.queueState.inProgress).toBe(1);
+      expect(summary.runtime.queueState.completed).toBe(1);
+      expect(summary.runtime.activeSessions).toEqual(expect.any(Array));
+      expect(summary.runtime.currentTrustScore).toBe(85);
+      expect(summary.runtime.workspaceState.frozen).toBe(true);
+    });
+
+    it('populates analytics truth section with trajectory, daily stats, trends', () => {
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 75,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      writeJson(path.join(workspace, '.state', 'logs', 'daily-stats.json'), {
+        '2026-03-20': {
+          toolCalls: 120,
+          painSignals: 15,
+          evolutionTasks: 5,
+        },
+      });
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      // These properties don't exist yet - tests will FAIL (RED phase)
+      expect(summary.analytics.trajectoryData).toBeDefined();
+      expect(summary.analytics.dailyStats.toolCalls).toBe(120);
+      expect(summary.analytics.dailyStats.painSignals).toBe(15);
+      expect(summary.analytics.trends).toBeDefined();
+    });
+
+    it('calculates Phase 3 readiness from runtime truth only', () => {
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 85,
+        frozen: true,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+        { id: 'task-1', status: 'completed', completed_at: '2026-03-25T10:00:00.000Z' },
+        { id: 'task-2', status: 'pending' },
+      ]);
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      // Runtime truth drives eligibility
+      expect(summary.phase3.queueTruthReady).toBe(true);
+      expect(summary.phase3.trustInputReady).toBe(true);
+      expect(summary.phase3.phase3ShadowEligible).toBe(true);
+
+      // Phase 3 eligibility source should be runtime truth
+      expect(summary.phase3.eligibilitySource).toBe('runtime_truth');
+    });
+
+    it('does not use analytics for Phase 3 eligibility', () => {
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 85,
+        frozen: true,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      // Invalid runtime queue - no valid entries
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+        { id: 'task-1', status: 'resolved' }, // legacy status - invalid
+      ]);
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      // Runtime truth invalid → not eligible, regardless of analytics
+      expect(summary.phase3.queueTruthReady).toBe(false);
+      expect(summary.phase3.phase3ShadowEligible).toBe(false);
+
+      // Analytics data exists but is ignored for eligibility
+      expect(summary.analytics).toBeDefined();
+    });
+
+    it('separates queue into runtime truth section only', () => {
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 75,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+        { id: 'task-1', status: 'pending', score: 50 },
+        { id: 'task-2', status: 'in_progress', score: 60 },
+        { id: 'task-3', status: 'completed', score: 10 },
+      ]);
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      // Queue data belongs to runtime truth
+      expect(summary.runtime.queueState.total).toBe(3);
+      expect(summary.runtime.queueState.pending).toBe(1);
+      expect(summary.runtime.queueState.inProgress).toBe(1);
+      expect(summary.runtime.queueState.completed).toBe(1);
+      expect(summary.runtime.queueState.lastUpdated).toBeDefined();
+
+      // Analytics section should NOT have queue data
+      expect(summary.analytics.trajectoryData).not.toHaveProperty('queue');
+    });
+
+    it('separates trust into runtime truth section only', () => {
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 85,
+        frozen: true,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      // Trust data belongs to runtime truth
+      expect(summary.runtime.currentTrustScore).toBe(85);
+      expect(summary.runtime.workspaceState.frozen).toBe(true);
+      expect(summary.runtime.workspaceState.lastUpdated).toBe('2026-03-20T10:00:00Z');
+
+      // Analytics section should NOT have trust data
+      expect(summary.analytics.trajectoryData).not.toHaveProperty('trustScore');
+    });
+
+    it('includes lastUpdated timestamps in runtime truth section', () => {
+      const workspace = makeWorkspace();
+      const lastUpdated = '2026-03-20T10:00:00Z';
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 85,
+        frozen: true,
+        last_updated: lastUpdated,
+      });
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+        { id: 'task-1', status: 'pending' },
+      ]);
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      // Runtime truth section includes timing metadata
+      expect(summary.runtime.queueState.lastUpdated).toBeDefined();
+      expect(summary.runtime.workspaceState.lastUpdated).toBe(lastUpdated);
+    });
+
+    it('populates activeSessions from session tracker in runtime truth', () => {
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 75,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      writeSession(workspace, 'session-1', {
+        currentGfi: 10,
+        lastActivityAt: 100,
+      });
+      writeSession(workspace, 'session-2', {
+        currentGfi: 20,
+        lastActivityAt: 200,
+      });
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      // Active sessions belong to runtime truth
+      expect(summary.runtime.activeSessions).toEqual(expect.any(Array));
+      expect(summary.runtime.activeSessions).toContain('session-1');
+      expect(summary.runtime.activeSessions).toContain('session-2');
+
+      // Analytics section should NOT have sessions
+      expect(summary.analytics).not.toHaveProperty('sessions');
+    });
+  });
 });
