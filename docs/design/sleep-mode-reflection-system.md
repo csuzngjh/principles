@@ -1012,19 +1012,19 @@ Dreamer → Philosopher             Philosopher 独立分析原始轨迹
 
 > v2.0 的自审结果。以下 7 个瑕疵在 v3.0 中通过对应的增强措施解决。
 
-### 9.1 瑕疵总览
+### 10.1 瑕疵总览
 
 | # | 瑕疵 | 严重度 | 增强措施 | 阶段 |
 |---|------|--------|---------|------|
-| 1 | LLM 评 LLM = 循环论证 | 🔴 高 | 可执行性验证层 (§9.2) | Phase 2 |
-| 2 | 静态阈值脆弱 | 🟡 中 | 自适应阈值系统 (§9.3) | Phase 2 |
-| 3 | 训练数据多样性坍缩 | 🔴 高 | 模型多样性 + 锦标赛选择 (§9.4, §9.7) | Phase 2 |
-| 4 | Scribe 空中楼阁 | 🔴 高 | 可执行性验证层 (§9.2) | Phase 2 |
-| 5 | 线性截断丢失关键信息 | 🟡 中 | 智能轨迹压缩 (§9.5) | Phase 2 |
-| 6 | 无跨 Session 模式学习 | 🟡 中 | 跨 Session 模式注入 (§9.6) | Phase 2 |
-| 7 | 训练-推理分布偏移 | 🟡 中 | 任务类型标签 + 平衡抽样 (§9.8) | Phase 3 |
+| 1 | LLM 评 LLM = 循环论证 | 🔴 高 | 可执行性验证层 (§10.2) | Phase 2 |
+| 2 | 静态阈值脆弱 | 🟡 中 | 自适应阈值系统 (§10.3) | Phase 2 |
+| 3 | 训练数据多样性坍缩 | 🔴 高 | 模型多样性 + 锦标赛选择 (§10.4, §10.7) | Phase 2 |
+| 4 | Scribe 空中楼阁 | 🔴 高 | 可执行性验证层 (§10.2) | Phase 2 |
+| 5 | 线性截断丢失关键信息 | 🟡 中 | 智能轨迹压缩 (§10.5) | Phase 2 |
+| 6 | 无跨 Session 模式学习 | 🟡 中 | 跨 Session 模式注入 (§10.6) | Phase 2 |
+| 7 | 训练-推理分布偏移 | 🟡 中 | 任务类型标签 + 平衡抽样 (§10.8) | Phase 3 |
 
-### 9.2 可执行性验证层 — 解决循环论证 + 空中楼阁
+### 10.2 可执行性验证层 — 解决循环论证 + 空中楼阁
 
 **问题**: Scribe 可能写出"先读取 config.ts"，但该文件不存在。用"不可执行的理想"训练模型会让模型学会"说漂亮话"而非"做实事"。
 
@@ -1051,7 +1051,7 @@ function verifyExecutability(scribeOutput: string, workspaceDir: string): Execut
 
 **降级策略**: 验证失败时**模糊化**而非丢弃——把"读取 config.ts"替换为"读取相关配置文件"，保留行为模式教学价值。
 
-### 9.3 自适应阈值系统 — 解决静态阈值脆弱
+### 10.3 自适应阈值系统 — 解决静态阈值脆弱
 
 **核心原则**: LLM 决定"反思什么"（定性），代码决定"接受多少"（定量）。
 
@@ -1092,7 +1092,7 @@ class AdaptiveThresholdManager {
 | `cooldownMs` | 2h | 30min ~ 4h | 日积累量偏离 2-5 条 |
 | `minTurns` | 8 | 4 ~ ∞ | Session 长度 EMA 变化 |
 
-### 9.4 模型多样性 — 解决训练数据坍缩
+### 10.4 模型多样性 — 解决训练数据坍缩
 
 ```
 多模型 Trinity (如果环境有多模型):
@@ -1108,7 +1108,7 @@ class AdaptiveThresholdManager {
 
 **多样性监控**: 每条 DPO 数据计算 `diversity_hash`。如果最近 10 条 hash 相似度 > 80%，自动提升 Scribe temperature 或切换 prompt 变体。
 
-### 9.5 智能轨迹压缩 — 解决线性截断问题
+### 10.5 智能轨迹压缩 — 解决线性截断问题
 
 不按位置截断，按**信息密度**选择最有价值的 turns：
 
@@ -1125,7 +1125,7 @@ function computeInfoScore(turn, index, trajectory): number {
 // 按价值排序 → 选 top-K 填满 token 预算 → 恢复原始时序
 ```
 
-### 9.6 跨 Session 模式注入 — 解决单 session 盲区
+### 10.6 跨 Session 模式注入 — 解决单 session 盲区
 
 用 **SQL**（不是 LLM）聚合历史弱点，注入 Philosopher 的上下文：
 
@@ -1150,7 +1150,7 @@ Philosopher prompt 注入：
 请特别关注: 本 session 是否重复上述已知弱点？
 ```
 
-### 9.7 锦标赛选择 — 提高 Scribe 输出质量
+### 10.7 锦标赛选择 — 提高 Scribe 输出质量
 
 生成多个候选，用**代码**（不是 LLM）选最优：
 
@@ -1167,7 +1167,7 @@ Philosopher 审计 → Scribe 候选 A (temp=0.5)
 
 可配置 `tournament_candidates: 1 | 2 | 3`（Phase 1 默认 1，Phase 2 可升至 2-3）。
 
-### 9.8 任务类型标签 + 平衡抽样 — 解决分布偏移
+### 10.8 任务类型标签 + 平衡抽样 — 解决分布偏移
 
 训练数据加类型标签，加载时按类型平衡：
 
@@ -1181,7 +1181,7 @@ Philosopher 审计 → Scribe 候选 A (temp=0.5)
 balanced = balance_by_task_type(dataset, max_ratio=0.4)
 ```
 
-### 9.9 结构化 JSON 输出 — 约束 Trinity 角色
+### 10.9 结构化 JSON 输出 — 约束 Trinity 角色
 
 强制 Trinity 输出结构化 JSON，而非自由文本：
 

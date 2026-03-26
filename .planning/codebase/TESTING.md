@@ -56,7 +56,7 @@ tests/
  └── hygiene-tracker.test.ts  # Hygiene metrics tests
 ```
 
-**Total:** 69 test files covering all major modules
+**Total:** 78 test files covering all major modules
 
 **Naming Conventions:**
 - `*.test.ts` — Standard unit tests
