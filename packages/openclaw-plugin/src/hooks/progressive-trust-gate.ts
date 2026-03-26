@@ -149,6 +149,7 @@ This is a mandatory security gate. The operation was blocked because the modific
  * @param lineChanges - Estimated line changes
  * @param logger - Logger instance
  * @param ctx - Hook context
+ * @param profile - Gate profile containing risk_paths and progressive_gate config
  * @returns PluginHookBeforeToolCallResult to block, or undefined to allow
  */
 export function checkProgressiveTrustGate(
@@ -158,8 +159,14 @@ export function checkProgressiveTrustGate(
   risky: boolean,
   lineChanges: number,
   logger: { warn?: (message: string) => void; error?: (message: string) => void; info?: (message: string) => void },
-  ctx: { workspaceDir?: string; sessionId?: string }
+  ctx: { workspaceDir?: string; sessionId?: string },
+  profile?: { risk_paths: string[]; progressive_gate?: { enabled?: boolean; plan_approvals?: any } }
 ): PluginHookBeforeToolCallResult | void {
+  // Check if progressive gate is disabled
+  if (profile?.progressive_gate?.enabled === false) {
+    return;
+  }
+
   const trustEngine = wctx.trust;
   const trustScore = trustEngine.getScore();
   const stage = trustEngine.getStage();
@@ -173,8 +180,8 @@ export function checkProgressiveTrustGate(
     }
   };
 
-  const riskLevel = assessRiskLevel(relPath, { toolName: event.toolName, params: event.params }, []); // Empty risk_paths for now
-  const planApprovals = (ctx as any).pluginConfig?.plan_approvals as any;
+  const riskLevel = assessRiskLevel(relPath, { toolName: event.toolName, params: event.params }, profile?.risk_paths || []);
+  const planApprovals = profile?.progressive_gate?.plan_approvals;
   const canUsePlanApproval = Boolean(
     stage === 1 &&
     planApprovals?.enabled &&

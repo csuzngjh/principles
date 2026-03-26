@@ -4,6 +4,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { withLock } from '../utils/file-lock.js';
 import { resolvePdPath } from './paths.js';
+import { SampleNotFoundError } from '../config/index.js';
 
 /**
  * Trajectory database stores HISTORICAL and ANALYTICS data.
@@ -783,7 +784,7 @@ export class TrajectoryDatabase {
       return true;
     });
     if (!updated) {
-      throw new Error(`Correction sample not found: ${sampleId}`);
+      throw new SampleNotFoundError(sampleId);
     }
 
     const record = this.db.prepare(`
@@ -794,7 +795,7 @@ export class TrajectoryDatabase {
       WHERE sample_id = ?
     `).get(sampleId) as Record<string, unknown>;
     if (!record) {
-      throw new Error(`Correction sample not found after review update: ${sampleId}`);
+      throw new SampleNotFoundError(`${sampleId} (after update)`);
     }
 
     return {
