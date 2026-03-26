@@ -689,6 +689,50 @@ describe('RuntimeSummaryService', () => {
       expect(summary.phase3.directiveStatus).toBe('compatibility-only');
       expect(summary.phase3.directiveIgnoredReason).toBe('queue is only truth source');
     });
+
+    it('labels directive as compatibility-only even when active flag is false', () => {
+      // Directive presence matters for labeling, not the active flag value
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 85,
+        frozen: true,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+        { id: 'task-1', status: 'completed', completed_at: '2026-03-25T10:00:00.000Z' }
+      ]);
+      writeJson(path.join(workspace, '.state', 'evolution_directive.json'), {
+        active: false, // inactive directive
+        task: 'inactive task',
+        timestamp: '2026-03-20T10:00:00Z',
+      });
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      expect(summary.phase3.directiveStatus).toBe('compatibility-only');
+      expect(summary.phase3.directiveIgnoredReason).toBe('queue is only truth source');
+    });
+
+    it('labels directive as compatibility-only even with minimal/empty fields', () => {
+      // Directive file exists with minimal content should still be labeled
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 85,
+        frozen: true,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+        { id: 'task-1', status: 'completed', completed_at: '2026-03-25T10:00:00.000Z' }
+      ]);
+      writeJson(path.join(workspace, '.state', 'evolution_directive.json'), {
+        // Minimal directive with no task, timestamp, or active fields
+      });
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      expect(summary.phase3.directiveStatus).toBe('compatibility-only');
+      expect(summary.phase3.directiveIgnoredReason).toBe('queue is only truth source');
+    });
   });
 
   // Task 8: TDD tests for Runtime vs Analytics Separation (RED phase)
