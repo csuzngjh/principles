@@ -163,9 +163,9 @@ jobs:
           echo "✅ Bumped: $NPM_VERSION → $NEW_VERSION"
 
       - name: Sync version to all files
-        if: steps.bump.outputs.type != 'none'
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
+          # Always sync - extracts version from package.json (already bumped by bump step, or from tag push commit)
+          VERSION=$(node -p "require('./packages/openclaw-plugin/package.json').version")
           echo "🔄 Syncing version $VERSION to all files..."
           
           # 1. Sync openclaw.plugin.json
@@ -175,21 +175,28 @@ jobs:
             echo "✅ Synced: $PLUGIN_JSON"
           fi
           
-          # 2. Sync root package.json
+          # 2. Sync dist/openclaw.plugin.json (embedded in npm package)
+          DIST_PLUGIN_JSON="packages/openclaw-plugin/dist/openclaw.plugin.json"
+          if [ -f "$DIST_PLUGIN_JSON" ]; then
+            sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" "$DIST_PLUGIN_JSON"
+            echo "✅ Synced: $DIST_PLUGIN_JSON"
+          fi
+          
+          # 3. Sync root package.json
           ROOT_PKG="package.json"
           if [ -f "$ROOT_PKG" ]; then
             sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" "$ROOT_PKG"
             echo "✅ Synced: $ROOT_PKG"
           fi
           
-          # 3. Sync README.md
+          # 4. Sync README.md
           README="README.md"
           if [ -f "$README" ]; then
             sed -i "s/(v[0-9]\+\.[0-9]\+\.[0-9]\+)/(v$VERSION)/g" "$README"
             echo "✅ Synced: $README"
           fi
           
-          # 4. Sync README_ZH.md
+          # 5. Sync README_ZH.md
           README_ZH="README_ZH.md"
           if [ -f "$README_ZH" ]; then
             sed -i "s/(v[0-9]\+\.[0-9]\+\.[0-9]\+)/(v$VERSION)/g" "$README_ZH"
