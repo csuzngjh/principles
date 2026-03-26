@@ -4,6 +4,16 @@ import path from 'path';
 import { withLock } from '../utils/file-lock.js';
 import { resolvePdPath } from './paths.js';
 
+/**
+ * Control UI database stores ANALYTICS READ MODELS.
+ *
+ * PURPOSE: Aggregated data for dashboard visualization and historical insights.
+ * USAGE: Control UI queries and dashboard displays.
+ * NOT FOR: Control decisions, Phase 3 eligibility, or real-time operations.
+ *
+ * Runtime truth comes from: queue state, workspace trust scorecard, active sessions
+ */
+
 export interface ThinkingModelEventInput {
   sessionId: string;
   runId: string;
@@ -116,6 +126,12 @@ export class ControlUiDatabase {
     });
   }
 
+  /**
+   * Get recent thinking context for a session.
+   *
+   * Returns: Analytics data (read model) aggregated from trajectory database.
+   * Not: Runtime truth or real-time queue state.
+   */
   getRecentThinkingContext(sessionId: string, beforeCreatedAt: string, limit = 5): RecentThinkingContext {
     return {
       toolCalls: this.all<{
@@ -238,10 +254,22 @@ export class ControlUiDatabase {
     };
   }
 
+  /**
+   * Execute SQL query and return all rows.
+   *
+   * Returns: Analytics data (read model) aggregated from trajectory database.
+   * Not: Runtime truth or real-time queue state.
+   */
   all<T>(sql: string, ...params: unknown[]): T[] {
     return this.db.prepare(sql).all(...params) as T[];
   }
 
+  /**
+   * Execute SQL query and return first row.
+   *
+   * Returns: Analytics data (read model) aggregated from trajectory database.
+   * Not: Runtime truth or real-time queue state.
+   */
   get<T>(sql: string, ...params: unknown[]): T | undefined {
     return this.db.prepare(sql).get(...params) as T | undefined;
   }
