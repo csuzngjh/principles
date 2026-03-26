@@ -1,8 +1,44 @@
+/**
+ * Phase 3 Input Filter
+ *
+ * CRITICAL: evaluatePhase3Inputs() does NOT read or use evolution_directive.json
+ * Directive is a compatibility-only display artifact, not a truth source.
+ *
+ * Phase 3 eligibility depends ONLY on:
+ * - Queue truth (valid evolution samples from queue)
+ * - Trust input (frozen trust scorecard)
+ *
+ * Any directive file is ignored for eligibility decisions.
+ *
+ * THREE-LANE CLASSIFICATION:
+ * - authoritative: Valid inputs that can be used for Phase 3 eligibility decisions
+ * - reference_only: Valid evidence that must NOT be used as positive eligibility input
+ *   (e.g., timeout-only outcomes - they indicate completion but not success)
+ * - rejected: Invalid, corrupt, or policy-prohibited input
+ */
+
+/**
+ * Classification for Phase 3 inputs.
+ * - authoritative: Can be used for Phase 3 eligibility decisions
+ * - reference_only: Valid data but not for eligibility (e.g., timeout outcomes)
+ * - rejected: Invalid or corrupt data
+ */
+export type Phase3Classification = 'authoritative' | 'reference_only' | 'rejected';
+
+/**
+ * Classification for trust input state.
+ * - authoritative: Frozen trust with valid score
+ * - unknown: Missing trust score (not silently coerced to 0)
+ * - rejected: Unfrozen trust or invalid schema
+ */
+export type TrustClassification = 'authoritative' | 'unknown' | 'rejected';
+
 export interface Phase3EvolutionInput {
   id?: string | null;
   status?: string | null;
   started_at?: string | null;
   completed_at?: string | null;
+  resolution?: string | null;
 }
 
 export interface Phase3TrustInput {
@@ -18,6 +54,13 @@ export interface Phase3EvolutionSample {
   completedAt: string | null;
 }
 
+export interface Phase3ReferenceOnlySample {
+  taskId: string;
+  status: string;
+  classification: 'timeout_only' | 'other_reference';
+  reason: string;
+}
+
 export interface Phase3RejectedEvolutionSample {
   taskId: string | null;
   status: string | null;
@@ -26,6 +69,7 @@ export interface Phase3RejectedEvolutionSample {
 
 export interface Phase3TrustResult {
   eligible: boolean;
+  classification: TrustClassification;
   rejectedReasons: string[];
 }
 
@@ -35,10 +79,16 @@ export interface Phase3InputFilterResult {
   phase3ShadowEligible: boolean;
   evolution: {
     eligible: Phase3EvolutionSample[];
+    referenceOnly: Phase3ReferenceOnlySample[];
     rejected: Phase3RejectedEvolutionSample[];
   };
   trust: Phase3TrustResult;
 }
+
+/**
+ * Legacy queue statuses that are rejected for Phase 3
+ */
+const LEGACY_QUEUE_STATUSES = ['resolved', 'blocked', 'failed', 'cancelled', 'paused'];
 
 function normalizeTaskId(value: unknown): string | null {
   if (typeof value !== 'string') return null;
@@ -53,6 +103,14 @@ function normalizeStatus(value: unknown): 'pending' | 'in_progress' | 'completed
   return null;
 }
 
+/**
+ * Checks if a status is a legacy value that should be rejected
+ */
+function isLegacyStatus(value: unknown): boolean {
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  return LEGACY_QUEUE_STATUSES.includes(normalized);
+}
+
 function normalizeTimestamp(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const normalized = value.trim();
@@ -65,11 +123,36 @@ function dedupe(values: string[]): string[] {
   return [...new Set(values)];
 }
 
+/**
+ * Checks if a task has a timeout-only outcome (resolution indicates only timeout)
+ */
+function isTimeoutOnlyOutcome(item: Phase3EvolutionInput): boolean {
+  const resolution = typeof item?.resolution === 'string' ? item.resolution.trim().toLowerCase() : '';
+  return resolution === 'auto_completed_timeout';
+}
+
+/**
+ * Evaluates Phase 3 readiness based on queue and trust inputs.
+ *
+ * IMPORTANT: Does NOT use evolution_directive.json.
+ * Directive is compatibility-only display artifact, not a truth source.
+ * Queue is the only authoritative execution truth source for Phase 3.
+ *
+ * THREE-LANE CLASSIFICATION:
+ * - authoritative: Valid inputs for Phase 3 eligibility
+ * - reference_only: Valid evidence but not for eligibility (e.g., timeout outcomes)
+ * - rejected: Invalid, corrupt, or policy-prohibited input
+ *
+ * @param queue - Evolution queue items to validate
+ * @param trust - Trust input (frozen scorecard)
+ * @returns Phase 3 eligibility results
+ */
 export function evaluatePhase3Inputs(
   queue: Phase3EvolutionInput[],
   trust: Phase3TrustInput
 ): Phase3InputFilterResult {
   const eligible: Phase3EvolutionSample[] = [];
+  const referenceOnly: Phase3ReferenceOnlySample[] = [];
   const rejected: Phase3RejectedEvolutionSample[] = [];
   const taskIdCounts = new Map<string, number>();
 
@@ -86,13 +169,24 @@ export function evaluatePhase3Inputs(
     const startedAt = normalizeTimestamp(item?.started_at);
     const completedAt = normalizeTimestamp(item?.completed_at);
 
+    // Check for legacy statuses first (before other status validation)
+    if (isLegacyStatus(item?.status)) {
+      reasons.push('legacy_queue_status');
+    }
+
+    // Check for null status separately
+    if (item?.status === null) {
+      reasons.push('missing_status');
+    }
+
     if (!taskId) {
       reasons.push('missing_task_id');
     } else if ((taskIdCounts.get(taskId) ?? 0) > 1) {
       reasons.push('reused_task_id');
     }
 
-    if (!status) {
+    // Only add invalid_status if it's not a legacy status and not null
+    if (!status && !isLegacyStatus(item?.status) && item?.status !== null) {
       reasons.push('invalid_status');
     }
 
@@ -112,6 +206,7 @@ export function evaluatePhase3Inputs(
       reasons.push('missing_completed_at');
     }
 
+    // Handle rejected items first
     if (reasons.length > 0) {
       rejected.push({
         taskId,
@@ -125,6 +220,19 @@ export function evaluatePhase3Inputs(
       continue;
     }
 
+    // Check for timeout-only outcomes (REFERENCE_ONLY, not rejected)
+    // These are valid completions but shouldn't count as positive evidence
+    if (status === 'completed' && isTimeoutOnlyOutcome(item)) {
+      referenceOnly.push({
+        taskId,
+        status: 'completed',
+        classification: 'timeout_only',
+        reason: 'Task completed via timeout - valid execution but not positive capability evidence',
+      });
+      continue;
+    }
+
+    // Valid eligible sample
     eligible.push({
       taskId,
       status,
@@ -133,20 +241,34 @@ export function evaluatePhase3Inputs(
     });
   }
 
+  // Trust classification logic
   const trustRejectedReasons: string[] = [];
   const score = typeof trust.score === 'number' && Number.isFinite(trust.score) ? trust.score : null;
 
+  let trustClassification: TrustClassification = 'authoritative';
+
   if (trust.frozen !== true) {
     trustRejectedReasons.push('legacy_or_unfrozen_trust_schema');
+    trustClassification = 'rejected';
   }
 
   if (score === null) {
     trustRejectedReasons.push('missing_trust_score');
+    // Missing score = unknown (unless already rejected for unfrozen)
+    if (trustClassification !== 'rejected') {
+      trustClassification = 'unknown';
+    }
   }
 
   const trustInputReady = trustRejectedReasons.length === 0;
-  const queueTruthReady = queue.length > 0 && rejected.length === 0 && eligible.length > 0;
-  const phase3ShadowEligible = queueTruthReady && trustInputReady;
+  // Queue is ready when:
+  // 1. Queue has items
+  // 2. No invalid/corrupt items (rejected is empty)
+  // 3. Either eligible OR referenceOnly has items (valid data exists)
+  // Note: referenceOnly (timeout outcomes) is valid data, just not positive evidence
+  const hasValidData = eligible.length > 0 || referenceOnly.length > 0;
+  const queueTruthReady = queue.length > 0 && rejected.length === 0 && hasValidData;
+  const phase3ShadowEligible = queueTruthReady && trustInputReady && eligible.length > 0;
 
   return {
     queueTruthReady,
@@ -154,10 +276,12 @@ export function evaluatePhase3Inputs(
     phase3ShadowEligible,
     evolution: {
       eligible,
+      referenceOnly,
       rejected,
     },
     trust: {
       eligible: trustInputReady,
+      classification: trustClassification,
       rejectedReasons: trustRejectedReasons,
     },
   };

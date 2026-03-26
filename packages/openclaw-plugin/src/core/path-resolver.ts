@@ -1,6 +1,7 @@
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
+import { PathResolutionError } from '../config/index.js';
 
 export interface PathResolverOptions {
     workspaceDir?: string;
@@ -334,7 +335,7 @@ export class PathResolver {
         const resolved = pathMap[key];
         if (!resolved) {
             this.log('warn', `Unknown path key: ${key}`);
-            throw new Error(`Unknown path key: ${key}`);
+            throw new PathResolutionError(key);
         }
 
         this.log('debug', `Resolved path for '${key}': ${resolved}`);

@@ -80,6 +80,8 @@ describe('Principles Console App', () => {
       }
 
       return Promise.resolve(new Response(JSON.stringify({
+        configs: [],
+        workspaces: [],
         summary: { totalModels: 0, activeModels: 0, dormantModels: 0, effectiveModels: 0, coverageRate: 0 },
         topModels: [],
         dormantModels: [],
