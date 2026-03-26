@@ -1,15 +1,15 @@
 # State
 
-**Project:** Principles Disciple — Phase 3A
-**Updated:** 2026-03-26 12:27 UTC
+**Project:** Principles Disciple — Phase 3B/3C Complete
+**Updated:** 2026-03-26 15:57 UTC
 
 ## Current Phase
 
-**Phase 3A: Control Plane Convergence**
+**Phase 3C: Defaults & Errors — Complete**
 
-- Progress: 100% (All plans complete)
-- Status: Phase 3A-02 complete
-- Next: Phase 3B or new requirements
+- Progress: 100%
+- Status: All requirements complete
+- Next: Phase 3 wrap-up or new requirements
 
 ## Phase Progress
 
@@ -19,43 +19,48 @@
 | Phase 2 (a/b) | Complete | 100% |
 | Phase 2.5 | Complete | 100% |
 | Phase 3A | Complete | 100% |
-| Phase 3B | Pending | 0% |
-| Phase 3C | Pending | 0% |
+| Phase 3B | Complete | 100% |
+| Phase 3C | Complete | 100% |
 
-## Next Action
+## Phase 3B Summary: Gate Split (A3)
 
-Phase 3A-02 complete (A1: Demote directive to compatibility-only). Next: Phase 3B or proceed to next requirement.
+**Completed:**
+- gate.ts: 1020 → 289 lines (72% reduction)
+- Extracted 6 modules with isolated responsibilities:
+  - `gfi-gate.ts` - GFI TIER 0-3 logic
+  - `progressive-trust-gate.ts` - Stage 1-4 access control
+  - `bash-risk.ts` - Bash command analysis
+  - `thinking-checkpoint.ts` - P-10 enforcement
+  - `edit-verification.ts` - P-03 verification
+  - `trajectory-collector.ts` - Trajectory audit
 
-## Plan Progress (Phase 3A-02)
+**Tests:** 800 passed, 17 failed (pre-existing failures)
 
-| Plan | Status | Tasks | Commits |
-|------|--------|-------|----------|
-| 3A-01 | Complete | 8 | 5 |
-| 3A-02 | Complete | 7 | 7 |
+## Phase 3C Summary: Defaults & Errors (A4, A5)
 
-**Phase 3A-02 Completed:**
-- Task 1: Write TDD tests for directive exclusion ✅
-- Task 2: Remove directive from Phase 3 eligibility (documentation only) ✅
-- Task 3: Label directive as compatibility-only in evolution-worker (N/A - not used) ✅
-- Task 4: Update runtime-summary-service ✅
-- Task 5: Update evolution-status command ✅
-- Task 6: Update prompt hook ✅
-- Task 8: Add directive status tests ✅
-- Task 7: Add integration test ✅
-- Summary: 3A-02-SUMMARY.md
-- Commits: f1f43ab, c1728e0, e3726d4, e784022, da24c59, d7d645c, 0689c91
+**A4: Centralize defaults** ✅
+- Created `src/config/defaults/runtime.ts`
+- Centralized 12+ scattered constants
+
+**A5: Domain errors** ✅
+- Created `src/config/errors.ts`
+- 8 domain-specific error classes:
+  - `LockUnavailableError`
+  - `PathResolutionError`
+  - `WorkspaceNotFoundError`
+  - `SampleNotFoundError`
+  - `ConfigurationError`
+  - `DependencyError`
+  - `EvolutionProcessingError`
+  - `TrajectoryError`
 
 ## Requirements Completed
 
-- A1: Demote directive to compatibility-only display artifact ✅
-  - Directive is never used for Phase 3 eligibility decisions
-  - Queue is the only authoritative execution truth source for Phase 3
-  - Runtime summary explicitly states directive is compatibility-only
-  - CLI output explicitly states directive is NOT a truth source
-  - Missing or stale directive does not affect eligibility
+- A3: Split gate.ts by responsibility ✅
+- A4: Centralize default configuration ✅
+- A5: Normalize domain error semantics ✅
 
 ## References
 
-- Plan 3A-02: `.planning/3A/PR-A1/PLAN.md`
-- Summary: `.planning/phases/3A/3A-02-SUMMARY.md`
-- Production data: `D:\Code\spicy_evolver_souls`
+- Plan 3B-A3: `.planning/3A/PR-A3/PLAN.md`
+- Plan 3C: (ROADMAP.md)
