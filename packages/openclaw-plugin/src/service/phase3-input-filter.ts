@@ -3,6 +3,7 @@ export interface Phase3EvolutionInput {
   status?: string | null;
   started_at?: string | null;
   completed_at?: string | null;
+  resolution?: string | null;
 }
 
 export interface Phase3TrustInput {
@@ -78,6 +79,14 @@ function dedupe(values: string[]): string[] {
   return [...new Set(values)];
 }
 
+/**
+ * Checks if a task has a timeout-only outcome (resolution indicates only timeout)
+ */
+function isTimeoutOnlyOutcome(item: Phase3EvolutionInput): boolean {
+  const resolution = typeof item?.resolution === 'string' ? item.resolution.trim().toLowerCase() : '';
+  return resolution === 'auto_completed_timeout';
+}
+
 export function evaluatePhase3Inputs(
   queue: Phase3EvolutionInput[],
   trust: Phase3TrustInput
@@ -134,6 +143,11 @@ export function evaluatePhase3Inputs(
 
     if (status === 'completed' && !completedAt) {
       reasons.push('missing_completed_at');
+    }
+
+    // Check for timeout-only outcomes (exclude from positive capability evidence)
+    if (status === 'completed' && isTimeoutOnlyOutcome(item)) {
+      reasons.push('timeout_only_outcome');
     }
 
     if (reasons.length > 0) {
