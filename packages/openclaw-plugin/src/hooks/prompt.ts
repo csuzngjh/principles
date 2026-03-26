@@ -522,11 +522,11 @@ You are a **self-evolving AI agent** powered by Principles Disciple.
   }
 
   // 闁崇儤鍔忛弲鏌ュ煛?3. Evolution Directive (always on, highest priority) - stays in prependContext 闁崇儤鍔忛弲鏌ュ煛?
-  // NOTE: evolutionDirective is injected from EVOLUTION_QUEUE for active tasks
+  // NOTE: active evolution task prompt is injected from EVOLUTION_QUEUE for active tasks
   // NOT used for Phase 3 eligibility decisions
   // EVOLUTION_DIRECTIVE.json is a compatibility-only display artifact
   // Phase 3 eligibility uses only queue and trust (see phase3-input-filter.ts)
-  let evolutionDirective = '';
+  let activeEvolutionTaskPrompt = '';
   const queuePath = wctx.resolve('EVOLUTION_QUEUE');
   if (fs.existsSync(queuePath)) {
     try {
@@ -556,7 +556,7 @@ You are a **self-evolving AI agent** powered by Principles Disciple.
         logger?.info(`[PD:Prompt] Injecting EVOLUTION TASK for: ${inProgressTask.id}`);
 
         if (trigger === 'user') {
-          evolutionDirective = `<evolution_task priority="high">
+          activeEvolutionTaskPrompt = `<evolution_task priority="high">
 TASK: ${escapedTask}
 
 REQUIRED ACTION (两阶段回复):
@@ -585,7 +585,7 @@ IMPORTANT:
 - 子代理结果会作为新消息到达，届时再进行阶段2的回复。
 </evolution_task>\n`;
         } else {
-          evolutionDirective = `<evolution_task priority="critical">
+          activeEvolutionTaskPrompt = `<evolution_task priority="critical">
 TASK: ${escapedTask}
 
 REQUIRED ACTION:
@@ -598,7 +598,7 @@ REQUIRED ACTION:
         break;
       }
 
-      if (!evolutionDirective && inProgressTasks.length > 0) {
+      if (!activeEvolutionTaskPrompt && inProgressTasks.length > 0) {
         logger?.warn('[PD:Prompt] Skipping evolution task injection because task payload is invalid.');
       }
     } catch (e) {
@@ -607,8 +607,8 @@ REQUIRED ACTION:
   }
 
   // Inject queue-derived evolution task at the front of prependContext
-  if (evolutionDirective) {
-    prependContext = evolutionDirective + prependContext;
+  if (activeEvolutionTaskPrompt) {
+    prependContext = activeEvolutionTaskPrompt + prependContext;
   }
 
   // 鈺愨晲鈺?4. Empathy Observer Spawn (async sidecar) 鈺愨晲鈺?

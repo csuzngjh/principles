@@ -877,6 +877,45 @@ describe('RuntimeSummaryService', () => {
       expect(summary.analytics.trajectoryData).not.toHaveProperty('trustScore');
     });
 
+    it('does not coerce missing trust into authoritative runtime truth', () => {
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        frozen: false,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+        { id: 'task-1', status: 'pending' },
+      ]);
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      expect(summary.runtime.currentTrustScore).toBeNull();
+      expect(summary.runtime.workspaceState.frozen).toBe(false);
+      expect(summary.runtime.workspaceState.trustClassification).toBe('rejected');
+      expect(summary.phase3.trustRejectedReasons).toContain('legacy_or_unfrozen_trust_schema');
+      expect(summary.phase3.trustRejectedReasons).toContain('missing_trust_score');
+    });
+
+    it('surfaces reference-only Phase 3 evidence in the runtime summary', () => {
+      const workspace = makeWorkspace();
+      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
+        trust_score: 85,
+        frozen: true,
+        last_updated: '2026-03-20T10:00:00Z',
+      });
+      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
+        { id: 'timeout-1', status: 'completed', resolution: 'auto_completed_timeout', completed_at: '2026-03-24T15:29:39.710Z' },
+      ]);
+
+      const summary = RuntimeSummaryService.getSummary(workspace);
+
+      expect(summary.phase3.queueTruthReady).toBe(true);
+      expect(summary.phase3.evolutionReferenceOnly).toBe(1);
+      expect(summary.phase3.evolutionReferenceOnlyReasons).toContain('timeout_only');
+      expect(summary.phase3.evolutionRejected).toBe(0);
+      expect(summary.phase3.phase3ShadowEligible).toBe(false);
+    });
+
     it('includes lastUpdated timestamps in runtime truth section', () => {
       const workspace = makeWorkspace();
       const lastUpdated = '2026-03-20T10:00:00Z';
