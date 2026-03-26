@@ -15,23 +15,55 @@
  * - High-risk tool list
  */
 
+import { hasRecentThinking } from '../core/session-tracker.js';
 import type { PluginHookBeforeToolCallEvent, PluginHookBeforeToolCallResult } from '../openclaw-sdk.js';
 
-// TODO: Extract types from gate.ts related to thinking checkpoint
 export interface ThinkingCheckpointConfig {
   enabled?: boolean;
   window_ms?: number;
   high_risk_tools?: string[];
 }
 
-// TODO: Extract thinking checkpoint logic from gate.ts
+/**
+ * Checks if a tool call requires a recent deep thinking checkpoint.
+ *
+ * This enforces P-10 (Thinking OS Checkpoint) - high-risk operations must
+ * be preceded by deep reflection within the configured time window.
+ *
+ * @param event - The before_tool_call event
+ * @param config - Thinking checkpoint configuration from profile
+ * @param sessionId - Current session ID
+ * @param logger - Optional logger for info messages
+ * @returns Block result if thinking required, undefined otherwise
+ */
 export function checkThinkingCheckpoint(
   event: PluginHookBeforeToolCallEvent,
-  sessionId: string | undefined,
   config: ThinkingCheckpointConfig,
-  hasRecentThinking: (sessionId: string, windowMs: number) => boolean
-): PluginHookBeforeToolCallResult | void {
-  // TODO: Implement thinking checkpoint check
-  // This is currently in gate.ts lines 189-202
-  throw new Error('Not implemented yet');
+  sessionId: string | undefined,
+  logger?: { info?: (message: string) => void }
+): PluginHookBeforeToolCallResult | undefined {
+  const enabled = config.enabled ?? false;
+  const windowMs = config.window_ms ?? 5 * 60 * 1000;
+  const highRiskTools = config.high_risk_tools ?? ['run_shell_command', 'delete_file', 'move_file'];
+
+  if (!enabled || !sessionId) {
+    return undefined;
+  }
+
+  const isHighRisk = highRiskTools.includes(event.toolName);
+  if (!isHighRisk) {
+    return undefined;
+  }
+
+  const hasThinking = hasRecentThinking(sessionId, windowMs);
+  if (!hasThinking) {
+    logger?.info?.(`[PD:THINKING_GATE] High-risk tool "${event.toolName}" called without recent deep thinking`);
+
+    return {
+      block: true,
+      blockReason: `[Thinking OS Checkpoint] 高风险操作 "${event.toolName}" 需要先进行深度思考。\n\n请先使用 deep_reflect 工具分析当前情况，然后再尝试此操作。\n\n这是强制性检查点，目的是确保决策质量。\n\n提示：调用 deep_reflect 后，${Math.round(windowMs/60000)}分钟内的操作将自动放行。\n\n可在PROFILE.json中设置 thinking_checkpoint.enabled: false 来禁用此检查。`,
+    };
+  }
+
+  return undefined;
 }
