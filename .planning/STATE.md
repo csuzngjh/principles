@@ -1,15 +1,15 @@
 # State
 
 **Project:** Principles Disciple — Phase 3A
-**Updated:** 2026-03-26 12:07 UTC
+**Updated:** 2026-03-26 12:27 UTC
 
 ## Current Phase
 
 **Phase 3A: Control Plane Convergence**
 
-- Progress: 100% (All waves complete)
-- Status: Phase 3A-01 complete
-- Next: PR-A1, PR-A2 (Trust & Input Validation refinements)
+- Progress: 100% (All plans complete)
+- Status: Phase 3A-02 complete
+- Next: Phase 3B or new requirements
 
 ## Phase Progress
 
@@ -24,31 +24,38 @@
 
 ## Next Action
 
-Phase 3A-01 complete. Next: PR-A1, PR-A2 (Trust & Input Validation refinements)
+Phase 3A-02 complete (A1: Demote directive to compatibility-only). Next: Phase 3B or proceed to next requirement.
 
-## Wave Progress (Phase 3A-01)
+## Plan Progress (Phase 3A-02)
 
-| Wave | Tasks | Status | Completion |
-|------|-------|--------|------------|
-| Wave 1 | Tasks 1, 2, 6, 7 | Complete | 100% |
-| Wave 2 | Tasks 3, 8 | Complete | 100% |
-| Wave 3 | Task 4 | Complete | 100% |
-| Wave 4 | Task 5 | Complete | 100% |
+| Plan | Status | Tasks | Commits |
+|------|--------|-------|----------|
+| 3A-01 | Complete | 8 | 5 |
+| 3A-02 | Complete | 7 | 7 |
 
-**Wave 2 Completed:**
-- Task 3: Add timeout-only outcome filtering ✅
-- Task 8: Update runtime-summary-service tests ✅
-- All 46 phase3-related tests passing
-- Commits: c447fa0, 1294875, faf22d6
+**Phase 3A-02 Completed:**
+- Task 1: Write TDD tests for directive exclusion ✅
+- Task 2: Remove directive from Phase 3 eligibility (documentation only) ✅
+- Task 3: Label directive as compatibility-only in evolution-worker (N/A - not used) ✅
+- Task 4: Update runtime-summary-service ✅
+- Task 5: Update evolution-status command ✅
+- Task 6: Update prompt hook ✅
+- Task 8: Add directive status tests ✅
+- Task 7: Add integration test ✅
+- Summary: 3A-02-SUMMARY.md
+- Commits: f1f43ab, c1728e0, e3726d4, e784022, da24c59, d7d645c, 0689c91
 
-**Wave 3+4 Completed:**
-- Task 4: Integrate all filters in evaluatePhase3Inputs ✅
-- Task 5: Update integration tests with production sample ✅
-- All 48 phase3-related tests passing (27 + 21 runtime-summary)
-- Commit: cb38798
+## Requirements Completed
+
+- A1: Demote directive to compatibility-only display artifact ✅
+  - Directive is never used for Phase 3 eligibility decisions
+  - Queue is the only authoritative execution truth source for Phase 3
+  - Runtime summary explicitly states directive is compatibility-only
+  - CLI output explicitly states directive is NOT a truth source
+  - Missing or stale directive does not affect eligibility
 
 ## References
 
-- Plan: `docs/superpowers/plans/2026-03-26-phase-3-gate-cleanup.md`
-- Roadmap: This file
+- Plan 3A-02: `.planning/3A/PR-A1/PLAN.md`
+- Summary: `.planning/phases/3A/3A-02-SUMMARY.md`
 - Production data: `D:\Code\spicy_evolver_souls`
