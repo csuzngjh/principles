@@ -5,6 +5,16 @@ import crypto from 'crypto';
 import { withLock } from '../utils/file-lock.js';
 import { resolvePdPath } from './paths.js';
 
+/**
+ * Trajectory database stores HISTORICAL and ANALYTICS data.
+ *
+ * PURPOSE: Track task outcomes, trust changes, and evolution progress over time.
+ * USAGE: Insights, trends, and Phase 3 supporting evidence (where explicitly allowed).
+ * NOT FOR: Control decisions, Phase 3 eligibility, or real-time operations.
+ *
+ * Runtime truth comes from: queue state, workspace trust scorecard, active sessions
+ */
+
 const DEFAULT_INLINE_THRESHOLD = 16 * 1024;
 const DEFAULT_BUSY_TIMEOUT_MS = 5000;
 const DEFAULT_ORPHAN_BLOB_GRACE_DAYS = 7;
@@ -546,6 +556,12 @@ export class TrajectoryDatabase {
     });
   }
 
+  /**
+   * List evolution tasks with optional filtering.
+   *
+   * Returns: Analytics data aggregated from trajectory database.
+   * Not: Runtime truth or real-time queue state.
+   */
   listEvolutionTasks(filters: EvolutionTaskFilters = {}): EvolutionTaskRecord[] {
     const conditions: string[] = [];
     const values: unknown[] = [];
@@ -593,6 +609,12 @@ export class TrajectoryDatabase {
     }));
   }
 
+  /**
+   * List evolution events for a trace or globally.
+   *
+   * Returns: Analytics data aggregated from trajectory database.
+   * Not: Runtime truth or real-time queue state.
+   */
   listEvolutionEvents(traceId?: string, filters: { limit?: number; offset?: number } = {}): EvolutionEventRecord[] {
     const limit = filters.limit ?? 100;
     const offset = filters.offset ?? 0;
@@ -628,6 +650,12 @@ export class TrajectoryDatabase {
     }));
   }
 
+  /**
+   * Get evolution task by trace ID.
+   *
+   * Returns: Analytics data aggregated from trajectory database.
+   * Not: Runtime truth or real-time queue state.
+   */
   getEvolutionTaskByTraceId(traceId: string): EvolutionTaskRecord | null {
     const row = this.db.prepare(`
       SELECT id, task_id, trace_id, source, reason, score, status,
@@ -656,6 +684,12 @@ export class TrajectoryDatabase {
     };
   }
 
+  /**
+   * Get evolution task statistics.
+   *
+   * Returns: Analytics data aggregated from trajectory database.
+   * Not: Runtime truth or real-time queue state.
+   */
   getEvolutionStats(): { total: number; pending: number; inProgress: number; completed: number; failed: number } {
     const rows = this.db.prepare(`
       SELECT status, COUNT(*) as count FROM evolution_tasks GROUP BY status
@@ -672,6 +706,12 @@ export class TrajectoryDatabase {
     return stats;
   }
 
+  /**
+   * List assistant turns for a session.
+   *
+   * Returns: Analytics data aggregated from trajectory database.
+   * Not: Runtime truth or real-time queue state.
+   */
   listAssistantTurns(sessionId: string): AssistantTurnRecord[] {
     const rows = this.db.prepare(`
       SELECT id, session_id, run_id, provider, model, raw_text, sanitized_text, blob_ref, created_at
@@ -693,6 +733,12 @@ export class TrajectoryDatabase {
     }));
   }
 
+  /**
+   * List correction samples with optional review status filter.
+   *
+   * Returns: Analytics data aggregated from trajectory database.
+   * Not: Runtime truth or real-time queue state.
+   */
   listCorrectionSamples(status: CorrectionSampleReviewStatus = 'pending'): CorrectionSampleRecord[] {
     const rows = this.db.prepare(`
       SELECT sample_id, session_id, bad_assistant_turn_id, user_correction_turn_id,
@@ -767,6 +813,12 @@ export class TrajectoryDatabase {
     };
   }
 
+  /**
+   * Export correction samples to JSONL file.
+   *
+   * Returns: Analytics data aggregated from trajectory database.
+   * Not: Runtime truth or real-time queue state.
+   */
   exportCorrections(opts: { mode: CorrectionExportMode; approvedOnly: boolean }): TrajectoryExportResult {
     const rows = this.db.prepare(`
       SELECT cs.sample_id, cs.session_id, cs.recovery_tool_span_json, cs.diff_excerpt, cs.quality_score,
@@ -808,6 +860,12 @@ export class TrajectoryDatabase {
     return { filePath: exportPath, count: rows.length, mode: opts.mode };
   }
 
+  /**
+   * Export analytics data to JSON file.
+   *
+   * Returns: Analytics data aggregated from trajectory database.
+   * Not: Runtime truth or real-time queue state.
+   */
   exportAnalytics(): TrajectoryExportResult {
     const payload = {
       generatedAt: nowIso(),
@@ -823,6 +881,12 @@ export class TrajectoryDatabase {
     return { filePath: exportPath, count: Array.isArray(payload.dailyMetrics) ? payload.dailyMetrics.length : 0 };
   }
 
+  /**
+   * Get trajectory database statistics.
+   *
+   * Returns: Analytics data aggregated from trajectory database.
+   * Not: Runtime truth or real-time queue state.
+   */
   getDataStats(): TrajectoryDataStats {
     const getCount = (table: string, where?: string) => {
       const sql = where ? `SELECT COUNT(*) as count FROM ${table} WHERE ${where}` : `SELECT COUNT(*) as count FROM ${table}`;
@@ -1081,6 +1145,12 @@ export class TrajectoryDatabase {
     `);
   }
 
+  /**
+   * Get daily metrics for analytics.
+   *
+   * Returns: Analytics data aggregated from trajectory database.
+   * Not: Runtime truth or real-time queue state.
+   */
   private dailyMetrics(): DailyMetricRow[] {
     return this.db.prepare('SELECT * FROM v_daily_metrics ORDER BY day ASC').all() as DailyMetricRow[];
   }
