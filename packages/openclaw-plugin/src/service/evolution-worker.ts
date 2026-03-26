@@ -676,6 +676,17 @@ export async function registerEvolutionTaskSession(
     }
 }
 
+/**
+ * Evolution Worker - Background service for pain processing and evolution task management.
+ *
+ * IMPORTANT: evolution_directive.json is a COMPATIBILITY-ONLY DISPLAY ARTIFACT.
+ * This service does NOT read or use directive for Phase 3 eligibility or any decisions.
+ * Queue (EVOLUTION_QUEUE) is the only authoritative execution truth source.
+ *
+ * Directive exists solely for UI/backwards compatibility display purposes.
+ * Production evidence shows directive stopped updating on 2026-03-22 and is stale.
+ */
+
 export interface ExtendedEvolutionWorkerService {
     id: string;
     api: OpenClawPluginApi | null;
