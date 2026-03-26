@@ -12,6 +12,7 @@ import { initPersistence, flushAllSessions } from '../core/session-tracker.js';
 import { acquireLockAsync, releaseLock, type LockContext } from '../utils/file-lock.js';
 import { getEvolutionLogger, type EvolutionStage } from '../core/evolution-logger.js';
 import { DIAGNOSTICIAN_PROTOCOL_SUMMARY } from '../constants/diagnostician.js';
+import { LockUnavailableError } from '../config/index.js';
 
 let intervalId: NodeJS.Timeout | null = null;
 
@@ -122,8 +123,8 @@ export async function acquireQueueLock(resourcePath: string, logger: any, lockSu
 async function requireQueueLock(resourcePath: string, logger: any, scope: string, lockSuffix: string = EVOLUTION_QUEUE_LOCK_SUFFIX): Promise<() => void> {
     try {
         return await acquireQueueLock(resourcePath, logger, lockSuffix);
-    } catch {
-        throw new Error(`[PD:EvolutionWorker] ${scope}: queue lock unavailable for ${resourcePath}`);
+    } catch (err) {
+        throw new LockUnavailableError(resourcePath, scope, { cause: err });
     }
 }
 

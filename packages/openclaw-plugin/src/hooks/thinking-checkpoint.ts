@@ -17,6 +17,10 @@
 
 import { hasRecentThinking } from '../core/session-tracker.js';
 import type { PluginHookBeforeToolCallEvent, PluginHookBeforeToolCallResult } from '../openclaw-sdk.js';
+import { 
+  THINKING_CHECKPOINT_WINDOW_MS,
+  THINKING_CHECKPOINT_DEFAULT_HIGH_RISK_TOOLS 
+} from '../config/index.js';
 
 export interface ThinkingCheckpointConfig {
   enabled?: boolean;
@@ -43,8 +47,8 @@ export function checkThinkingCheckpoint(
   logger?: { info?: (message: string) => void }
 ): PluginHookBeforeToolCallResult | undefined {
   const enabled = config.enabled ?? false;
-  const windowMs = config.window_ms ?? 5 * 60 * 1000;
-  const highRiskTools = config.high_risk_tools ?? ['run_shell_command', 'delete_file', 'move_file'];
+  const windowMs = config.window_ms ?? THINKING_CHECKPOINT_WINDOW_MS;
+  const highRiskTools = config.high_risk_tools ?? [...THINKING_CHECKPOINT_DEFAULT_HIGH_RISK_TOOLS];
 
   if (!enabled || !sessionId) {
     return undefined;
