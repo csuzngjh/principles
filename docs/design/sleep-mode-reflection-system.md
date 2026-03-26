@@ -428,20 +428,32 @@ if (task.type === 'sleep_reflection') {
 ### 5.2 触发条件（三重门卫）
 
 ```typescript
-function shouldEnterSleepMode(wctx, config): boolean {
+// ⚠️ SDK 审计修正: listSessions() 无外部 API。
+// 正确做法: 用 llm_output hook 记录时间戳，在 index.ts 中注册:
+//
+// api.on('llm_output', (_event, ctx) => {
+//   if (!ctx.workspaceDir) return;
+//   fs.writeFileSync(
+//     path.join(stateDir, '.last_active.json'),
+//     JSON.stringify({ ts: Date.now(), sessionKey: ctx.sessionKey }),
+//   );
+// });
+
+function shouldEnterSleepMode(stateDir: string, config: PainConfig): boolean {
   // 门卫 1: 冷却期 — 防止频繁反思
-  if (now - lastReflectionAt < config.reflectionCooldownMs) return false;
+  const cooldownFile = path.join(stateDir, '.last_reflection.json');
+  if (fs.existsSync(cooldownFile)) {
+    const { ts } = JSON.parse(fs.readFileSync(cooldownFile, 'utf8')) as { ts: number };
+    if ((Date.now() - ts) < (config.get('sleep.cooldown_ms') || 7_200_000)) return false;
+  }
 
-  // 门卫 2: 全局空闲 — 所有 session 都不活跃
-  const sessions = listSessions(wctx.workspaceDir);
-  const allIdle = sessions.every(s => (now - s.lastActivityAt) > config.idleThresholdMs);
-  if (!allIdle) return false;
+  // 门卫 2: 全局空闲 — 通过 llm_output hook 记录的最后活跃时间判断
+  const lastActiveFile = path.join(stateDir, '.last_active.json');
+  if (!fs.existsSync(lastActiveFile)) return false;
+  const { ts } = JSON.parse(fs.readFileSync(lastActiveFile, 'utf8')) as { ts: number };
+  if ((Date.now() - ts) < (config.get('sleep.idle_threshold_ms') || 1_800_000)) return false;
 
-  // 门卫 3: 数据门槛 — 有足够数据值得反思
-  const stats = wctx.trajectory?.getDataStats();
-  if (stats.assistantTurns < config.minTurnsForReflection) return false;
-
-  return true;
+  return true;  // 门卫 3 (数据门槛) 在调用方检查 trajectory stats
 }
 ```
 
@@ -562,47 +574,62 @@ Phase 2 拆分为 Trinity 模型 — 三个认知正交的角色：
 #### 通过 subagent API 实现
 
 ```typescript
-// Phase 2: Trinity 链式调用
-async function trinityReflection(api, trajectory, thinkingModels) {
-  const dreamerSession = `dreamer-${Date.now()}`;
-  const philosopherSession = `philosopher-${Date.now()}`;
-  const scribeSession = `scribe-${Date.now()}`;
+// Phase 2: Trinity 链式调用（已根据 SDK 审计修正）
+import crypto from 'crypto';
 
-  // Step 1: Dreamer — 场景还原
-  const { runId: r1 } = await api.runtime.subagent.run({
-    sessionKey: dreamerSession,
-    message: buildDreamerPrompt(trajectory),
-    extraSystemPrompt: 'You are Dreamer. Reconstruct the decision narrative.',
-  });
-  await api.runtime.subagent.waitForRun({ runId: r1, timeoutMs: 3 * 60 * 1000 });
-  const dreamerOutput = await getAssistantText(api, dreamerSession);
+async function trinityReflection(api: OpenClawPluginApi, trajectory: StructuredTrajectory, thinkingModels: ThinkingModelDefinition[]) {
+  // ✅ 正确格式: agent:{agentId}:subagent:{uuid}
+  const dreamerKey     = `agent:main:subagent:ne-dreamer-${crypto.randomUUID()}`;
+  const philosopherKey = `agent:main:subagent:ne-philosopher-${crypto.randomUUID()}`;
+  const scribeKey      = `agent:main:subagent:ne-scribe-${crypto.randomUUID()}`;
 
-  // Step 2: Philosopher — 原则审计
-  const { runId: r2 } = await api.runtime.subagent.run({
-    sessionKey: philosopherSession,
-    message: buildPhilosopherPrompt(dreamerOutput, thinkingModels),
-    extraSystemPrompt: 'You are Philosopher. Audit each decision against principles.',
-  });
-  await api.runtime.subagent.waitForRun({ runId: r2, timeoutMs: 3 * 60 * 1000 });
-  const philosopherOutput = await getAssistantText(api, philosopherSession);
+  try {
+    // Step 1: Dreamer — 场景还原
+    const { runId: r1 } = await api.runtime.subagent.run({
+      sessionKey: dreamerKey,
+      message: buildDreamerPrompt(trajectory),        // ✅ 'message' 不是 'task'
+      extraSystemPrompt: DREAMER_SYSTEM_PROMPT,
+      deliver: false,                                 // 不发送到 chat channel
+    });
+    const w1 = await api.runtime.subagent.waitForRun({ runId: r1, timeoutMs: 180_000 });
+    if (w1.status !== 'ok') throw new Error(`Dreamer failed: ${w1.status} ${w1.error ?? ''}`);
+    const d1 = await api.runtime.subagent.getSessionMessages({ sessionKey: dreamerKey, limit: 5 });
+    const dreamerOutput = extractLastAssistantText(d1.messages);
 
-  // Step 3: Scribe — 轨迹改写
-  const { runId: r3 } = await api.runtime.subagent.run({
-    sessionKey: scribeSession,
-    message: buildScribePrompt(dreamerOutput, philosopherOutput),
-    extraSystemPrompt: 'You are Scribe. Rewrite the trajectory to embody the principles.',
-  });
-  await api.runtime.subagent.waitForRun({ runId: r3, timeoutMs: 3 * 60 * 1000 });
-  const scribeOutput = await getAssistantText(api, scribeSession);
+    // Step 2: Philosopher — 原则审计
+    const { runId: r2 } = await api.runtime.subagent.run({
+      sessionKey: philosopherKey,
+      message: buildPhilosopherPrompt(trajectory, dreamerOutput, thinkingModels),
+      extraSystemPrompt: PHILOSOPHER_SYSTEM_PROMPT,
+      deliver: false,
+    });
+    const w2 = await api.runtime.subagent.waitForRun({ runId: r2, timeoutMs: 180_000 });
+    if (w2.status !== 'ok') throw new Error(`Philosopher failed: ${w2.status} ${w2.error ?? ''}`);
+    const d2 = await api.runtime.subagent.getSessionMessages({ sessionKey: philosopherKey, limit: 5 });
+    const philosopherOutput = extractLastAssistantText(d2.messages);
 
-  // Cleanup
-  await Promise.all([
-    api.runtime.subagent.deleteSession({ sessionKey: dreamerSession }),
-    api.runtime.subagent.deleteSession({ sessionKey: philosopherSession }),
-    api.runtime.subagent.deleteSession({ sessionKey: scribeSession }),
-  ]);
+    // Step 3: Scribe — 轨迹改写
+    const { runId: r3 } = await api.runtime.subagent.run({
+      sessionKey: scribeKey,
+      message: buildScribePrompt(dreamerOutput, philosopherOutput),
+      extraSystemPrompt: SCRIBE_SYSTEM_PROMPT,
+      deliver: false,
+    });
+    const w3 = await api.runtime.subagent.waitForRun({ runId: r3, timeoutMs: 180_000 });
+    if (w3.status !== 'ok') throw new Error(`Scribe failed: ${w3.status} ${w3.error ?? ''}`);
+    const d3 = await api.runtime.subagent.getSessionMessages({ sessionKey: scribeKey, limit: 5 });
+    const scribeOutput = extractLastAssistantText(d3.messages);
 
-  return { dreamerOutput, philosopherOutput, scribeOutput };
+    return { dreamerOutput, philosopherOutput, scribeOutput };
+
+  } finally {
+    // 始终清理 subagent sessions（best-effort）
+    await Promise.allSettled([
+      api.runtime.subagent.deleteSession({ sessionKey: dreamerKey,     deleteTranscript: true }),
+      api.runtime.subagent.deleteSession({ sessionKey: philosopherKey, deleteTranscript: true }),
+      api.runtime.subagent.deleteSession({ sessionKey: scribeKey,      deleteTranscript: true }),
+    ]);
+  }
 }
 ```
 
