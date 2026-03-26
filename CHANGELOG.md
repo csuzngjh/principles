@@ -1,3 +1,16 @@
+# [1.7.6](https://github.com/csuzngjh/principles/compare/v1.7.5...v1.7.6) (2026-03-26)
+
+### Features
+
+* **phase-3:** control plane cleanup — gate.ts modular split into 6 sub-modules (thinking-checkpoint, bash-risk, progressive-trust-gate, edit-verification, gfi-gate, gate-block-helper) ([52e476e](https://github.com/csuzngjh/principles/commit/52e476e))
+* **phase-3:** legacy queue status filtering (resolved/blocked/failed/cancelled/paused) + Trust input validation + timeout-only outcome filtering ([52e476e](https://github.com/csuzngjh/principles/commit/52e476e))
+
+### Bug Fixes
+
+* **gate:** fix bash-risk.ts command substitution handling ([52e476e](https://github.com/csuzngjh/principles/commit/52e476e))
+* docs: fix chapter numbering in sleep-mode-reflection-system.md ([52e476e](https://github.com/csuzngjh/principles/commit/52e476e))
+* fix: LockUnavailableError message dynamic resource naming ([52e476e](https://github.com/csuzngjh/principles/commit/52e476e))
+
 # [1.7.5](https://github.com/csuzngjh/principles/compare/v1.7.4...v1.7.5) (2026-03-25)
 
 
