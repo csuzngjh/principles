@@ -18,6 +18,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { evaluatePhase3Inputs } from '../../src/service/phase3-input-filter.js';
+import { safeRmDir } from '../test-utils.js';
 
 vi.mock('../../src/core/dictionary-service');
 vi.mock('../../src/core/session-tracker', () => ({
@@ -134,7 +135,7 @@ describe('EvolutionWorkerService', () => {
             expect(candidate.samples[0].length).toBeGreaterThan(200);
             expect(candidate.samples[0].length).toBeLessThanOrEqual(1000);
         } finally {
-            fs.rmSync(dir, { recursive: true, force: true });
+            safeRmDir(dir);
         }
     });
 
@@ -165,7 +166,7 @@ describe('EvolutionWorkerService', () => {
             expect(saved[1].assigned_session_key).toBe('agent:diagnostician:session-1');
             expect(saved[1].started_at).toBeDefined();
         } finally {
-            fs.rmSync(dir, { recursive: true, force: true });
+            safeRmDir(dir);
         }
     });
 
@@ -209,7 +210,7 @@ describe('EvolutionWorkerService', () => {
             expect(addRule).toHaveBeenCalled();
             expect(saved.candidates.deadbeef.status).toBe('promoted');
         } finally {
-            fs.rmSync(dir, { recursive: true, force: true });
+            safeRmDir(dir);
         }
     });
 
@@ -276,7 +277,7 @@ describe('EvolutionWorkerService', () => {
             expect(fs.existsSync(path.join(stateDir, 'evolution_directive.json'))).toBe(false);
         } finally {
             EvolutionWorkerService.stop(ctx as any);
-            fs.rmSync(workspaceDir, { recursive: true, force: true });
+            safeRmDir(workspaceDir);
         }
     });
 

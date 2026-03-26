@@ -15,6 +15,7 @@ import { DIAGNOSTICIAN_PROTOCOL_SUMMARY } from '../constants/diagnostician.js';
 import { LockUnavailableError } from '../config/index.js';
 
 let intervalId: NodeJS.Timeout | null = null;
+let timeoutId: NodeJS.Timeout | null = null;
 
 export interface EvolutionQueueItem {
     id: string;
@@ -737,7 +738,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
             });
         }, interval);
 
-        setTimeout(() => {
+        timeoutId = setTimeout(() => {
             void (async () => {
                 await checkPainFlag(wctx, logger);
                 await processEvolutionQueue(wctx, logger, eventLog);
@@ -754,6 +755,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
     stop(ctx: OpenClawPluginServiceContext): void {
         if (ctx?.logger) ctx.logger.info('[PD:EvolutionWorker] Stopping background service...');
         if (intervalId) clearInterval(intervalId);
+        if (timeoutId) clearTimeout(timeoutId);
         flushAllSessions();
     }
 };
