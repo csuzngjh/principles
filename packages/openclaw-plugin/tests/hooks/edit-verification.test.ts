@@ -548,12 +548,13 @@ describe('edit-verification - handleEditVerification', () => {
     });
 
     it('should respect custom fuzzy_match_threshold', () => {
-      const fileContent = 'const x = 1;\nconst y = 2;\nconst z = 3;';
+      // Use content with whitespace differences to trigger fuzzy match
+      const fileContent = 'const  x  =  1;\nconst  y  =  2;\nconst z = 3;'; // Extra spaces
       const event = {
         ...mockEvent,
         params: {
           ...mockEvent.params,
-          oldText: 'const x = 1;\nconst y = 2;',
+          oldText: 'const x = 1;\nconst y = 2;', // No extra spaces
         },
       };
 
@@ -571,8 +572,10 @@ describe('edit-verification - handleEditVerification', () => {
         }
       );
 
-      // 2/3 = 66.7% > 60%, should pass with fuzzy match
+      // Fuzzy match should find and correct the text
+      // 2/2 lines match (normalized) = 100% > 60%, should pass with fuzzy match
       expect(result?.params?.oldText).toBeTruthy();
+      expect(result?.params?.oldText).toBe('const  x  =  1;\nconst  y  =  2;');
     });
   });
 
