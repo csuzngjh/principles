@@ -1314,5 +1314,253 @@ interface PhilosopherOutput {
 
 ---
 
-*Last updated: 2026-03-26*
-*Version: 3.0 — 增强版: 动态阈值 + 可执行性验证 + 智能压缩 + 多模型多样性*
+## 附录 B: 与现有 PD 代码集成矩阵
+
+> **评审日期**: 2026-03-27
+
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│                      Nocturnal Evolution 集成矩阵                         │
+├─────────────────────┬─────────────┬──────────────────────────────────────┤
+│ 组件                │ 复用程度    │ 具体方案                              │
+├─────────────────────┼─────────────┼──────────────────────────────────────┤
+│ trajectory.ts       │ ████████░░  │ 直接复用 listAssistantTurns()        │
+│                     │ 80%         │ 复用 getDataStats().lastIngestAt     │
+│                     │             │ 扩展 exportOrpoJsonl()               │
+├─────────────────────┼─────────────┼──────────────────────────────────────┤
+│ thinking-models.ts  │ ██████████  │ 直接复用 detectThinkingModelMatches()│
+│                     │ 100%        │ 无需修改                              │
+├─────────────────────┼─────────────┼──────────────────────────────────────┤
+│ evolution-worker.ts │ █████░░░░░  │ 复用调度框架                          │
+│                     │ 50%         │ 新增 taskType: 'sleep_reflection'    │
+│                     │             │ 新增 checkIdleAndEnqueueReflection() │
+├─────────────────────┼─────────────┼──────────────────────────────────────┤
+│ pain.ts             │ ███████░░░  │ 复用 pain 事件链                      │
+│                     │ 70%         │ 扩展触发条件（空闲 → pain 信号）       │
+├─────────────────────┼─────────────┼──────────────────────────────────────┤
+│ session-tracker.ts  │ ███░░░░░░░  │ 复用 getDailySummary()                │
+│                     │ 30%         │ 新增 exportSessionTimeline()          │
+├─────────────────────┼─────────────┼──────────────────────────────────────┤
+│ Arbiter 评分        │ ░░░░░░░░░░  │ 🆕 新建                               │
+│                     │ 0%          │ nocturnal-arbiter.ts                  │
+├─────────────────────┼─────────────┼──────────────────────────────────────┤
+│ Trinity 角色        │ ░░░░░░░░░░  │ 🆕 新建                               │
+│ (Dreamer/Philosopher│ 0%          │ agents/dreamer.md                     │
+│ /Scribe)            │             │ agents/philosopher.md                 │
+│                     │             │ agents/scribe.md                      │
+├─────────────────────┼─────────────┼──────────────────────────────────────┤
+│ 空闲检测            │ ░░░░░░░░░░  │ 🆕 新建                               │
+│                     │ 0%          │ nocturnal-idle-detector.ts            │
+├─────────────────────┼─────────────┼──────────────────────────────────────┤
+│ ORPO 导出           │ ████░░░░░░  │ 扩展 exportCorrections()              │
+│                     │ 40%         │ 新增 exportOrpoJsonl() 方法           │
+└─────────────────────┴─────────────┴──────────────────────────────────────┘
+```
+
+### SDK 验证结果
+
+| 检查项 | 结果 | 位置 |
+|--------|------|------|
+| `api.runtime.subagent.run()` 支持 `extraSystemPrompt` | ✅ | `openclaw-sdk.d.ts:68-76` |
+| `trajectory.getDataStats().lastIngestAt` | ✅ | `trajectory.ts:37,891` |
+| `llm_output` hook 存在 | ✅ | `PluginHookLlmOutputEvent` |
+| `detectThinkingModelMatches()` | ✅ | `thinking-models.ts` |
+
+---
+
+## 附录 C: 评审发现的问题
+
+### 高风险问题
+
+| # | 问题 | 影响 | 建议 |
+|---|------|------|------|
+| **1** | Trinity 角色调用方式需验证 SDK | 设计文档使用 `extraSystemPrompt` 参数 | ✅ 已验证 SDK 支持 |
+| **2** | 空闲检测数据源 | 需要确认 `lastIngestAt` 可用 | ✅ 已验证 trajectory.ts 有此字段 |
+| **3** | Arbiter 15% 阈值无实证依据 | 设计承认"缺乏实证基础" | Phase 0 先收集 50+ 条数据确定阈值 |
+| **4** | Token 截断策略 | 线性截断可能丢失高价值 turns | 需实现智能压缩（Phase 2） |
+
+### 中风险问题
+
+| # | 问题 | 影响 | 建议 |
+|---|------|------|------|
+| **5** | Phase 1 vs v3.0 范围不清晰 | 7 个增强措施未明确分配 | 见附录 D Phase 规划 |
+| **6** | 可执行性验证层 Phase 分配不明 | 对防止"空中楼阁"至关重要 | 建议放入 Phase 1.5 |
+
+---
+
+## 附录 D: 建议的实施路线
+
+```
+Phase 0: 设计验证 (≤1 周)
+─────────────────────────────
+□ 跑数据统计脚本验证 session 长度分布
+□ 手动模拟一次 Trinity 反思（用现有 session 数据）
+□ 确定 Arbiter 初始阈值（通过 compositeImprovement 分布分析）
+
+            ↓
+
+Phase 1: MVP (2 周)
+───────────────────
+新增文件:
+  src/service/nocturnal-service.ts         # 核心反思流程
+  src/core/nocturnal-arbiter.ts            # 质量门禁
+  agents/reflector.md                      # 单角色反思 Agent
+
+修改文件:
+  evolution-worker.ts                      # 新增 sleep_reflection 任务类型
+  trajectory.ts                            # 扩展 exportOrpoJsonl()
+
+功能:
+  ✓ 空闲检测 → 入队 sleep_reflection
+  ✓ 单 subagent 反思（非 Trinity 三角色）
+  ✓ 基础指标计算 + Arbiter 门禁
+  ✓ ORPO JSONL 输出
+  ✓ 人工审核 10 条对比对
+
+            ↓
+
+Phase 1.5: 可执行性验证 (1 周)
+─────────────────────────────────
+新增文件:
+  src/core/nocturnal-executability.ts      # 可执行性验证层
+
+功能:
+  ✓ 文件引用检查（路径是否存在）
+  ✓ 工具合法性检查
+  ✓ 步骤顺序验证（read 在 write 前）
+  ✓ 失败时模糊化处理而非直接丢弃
+
+            ↓
+
+Phase 2: Trinity 增强 (3 周)
+──────────────────────────────
+新增文件:
+  agents/dreamer.md                        # 回放者角色
+  agents/philosopher.md                    # 原则官角色
+  agents/scribe.md                         # 记录员角色
+  src/core/nocturnal-metrics.ts            # 七维指标体系
+  src/core/adaptive-threshold.ts           # 自适应阈值
+
+功能:
+  ✓ Trinity 三角色链式调用
+  ✓ 七维代理指标计算
+  ✓ 动态阈值自适应（通过率 40-60%）
+  ✓ 智能压缩
+  ✓ 跨 Session 模式注入
+
+            ↓
+
+Phase 3: 训练闭环 (持续)
+─────────────────────────
+新增文件:
+  scripts/train_nocturnal.py               # Unsloth + ORPO 训练脚本
+  scripts/export-gguf.py                   # 导出 GGUF 格式
+
+功能:
+  ✓ 积累 1K+ 高质量对比对
+  ✓ RTX 4090 ORPO 训练 (VRAM < 20GB)
+  ✓ A/B 测试验证微调效果
+  ✓ 导出 GGUF + Ollama 部署
+```
+
+---
+
+## 附录 E: Phase 1 MVP 任务清单
+
+```yaml
+Phase 1 MVP 任务拆解:
+
+  1. 空闲检测模块 (2d)
+     - [ ] 新增 nocturnal-idle-detector.ts
+     - [ ] 复用 trajectory.getDataStats().lastIngestAt 判断空闲
+     - [ ] 实现 shouldEnterSleepMode() 三重门卫逻辑
+     - [ ] 配置默认值 idle_threshold_ms: 1800000 (30min)
+
+  2. 队列集成 (1d)
+     - [ ] EvolutionQueueItem 新增 taskType: 'sleep_reflection' | 'pain'
+     - [ ] evolution-worker.ts 新增 checkIdleAndEnqueueReflection()
+     - [ ] processEvolutionQueue() 增加 taskType 分发逻辑
+
+  3. 反思服务 (3d)
+     - [ ] 新增 nocturnal-service.ts
+     - [ ] 实现 extractStructuredTrajectory() (复用 trajectory.ts)
+     - [ ] 实现 singleAgentReflection() (单 subagent 版本)
+
+  4. 质量门禁 (2d)
+     - [ ] 新增 nocturnal-arbiter.ts
+     - [ ] 实现 arbiterGate() 综合评分
+     - [ ] 复用 detectThinkingModelMatches() 计算激活率
+     - [ ] 初始阈值 15%，后续由 Phase 2 自适应
+
+  5. ORPO 导出 (1d)
+     - [ ] 扩展 trajectory.ts 新增 exportOrpoJsonl()
+     - [ ] 输出 {prompt, chosen, rejected, metadata} 格式
+     - [ ] 实现 token 截断 (max_trajectory_tokens: 2048)
+
+  6. 测试与验证 (1d)
+     - [ ] 单元测试: nocturnal-idle-detector.test.ts
+     - [ ] 单元测试: nocturnal-arbiter.test.ts
+     - [ ] 集成测试: 空闲 → 入队 → 反思 → 导出完整流程
+     - [ ] 人工审核 10 条对比对
+```
+
+---
+
+## 附录 F: CPU/手机友好训练方案 — IA³ + 小模型
+
+设计目标: 让 Nocturnal Evolution 在没有 GPU 的设备上也能训练
+
+### IA³ (Infused Adapter by Injecting Parameters) 原理
+
+核心思想: 不引入新的参数矩阵，只给现有参数乘以一个可学习的缩放向量。
+
+```
+传统 LoRA:  W' = W + BA      (新增两个矩阵)
+IA³:        W' = W ⊙ l       (只新增一个向量 l，逐元素相乘)
+```
+
+### 参数量对比 (7B 模型)
+
+| 方法 | 可训练参数 | 占比 |
+|------|-----------|------|
+| 全量微调 | ~7B | 100% |
+| LoRA (r=16) | ~4M | 0.057% |
+| IA³ | ~0.3M | 0.004% |
+| Prompt Tuning | ~0.1M | 0.001% |
+
+IA³ 比同等效果的 LoRA 少约 10-50 倍参数。
+
+### 全设备谱系训练方案
+
+| 设备 | 推荐方案 | 模型大小 | 预估时间 (1K样本) | VRAM/RAM |
+|------|---------|---------|------------------|----------|
+| 📱 手机 | IA³ + 0.15B | ~150MB | 4-8h | ~2GB RAM |
+| 💻 低配笔记本 | IA³ + 0.5B | ~600MB | 2-4h | ~4GB RAM |
+| 🖥️ CPU PC | IA³ + 0.5B | ~600MB | 1-3h | ~4GB RAM |
+| 🖥️ GPU 4090 | LoRA + 7B | ~14GB VRAM | 2-4h | ~17-21GB |
+
+**核心理念**: IA³ 不是 LoRA 的替代品，而是验证工具。先用 IA³ 快速确认"数据质量 OK"，再用 LoRA 正式训练。
+
+---
+
+## 附录 G: PEFT 前沿算法调研 (2026-03-27)
+
+| 算法 | 来源 | 核心亮点 | 参数量(7B) |
+|------|------|---------|-----------|
+| FAA (Fourier-Activated Adapter) | arXiv 2512.22378 | 傅里叶频域分解，频率感知调制 | adapter 级 |
+| LoFT | ICLR 2026 | 低秩适配但效果等价全量微调 | ~4M |
+| MetaLoRA | CVPR 2025 Highlight | 元学习自动优化 LoRA 超参数 | 同 LoRA |
+| DoRA | NVlabs, ICML 2024 Oral | 权重分解，比 LoRA 更少参数更好效果 | 比 LoRA 少30% |
+
+### 更新后的训练方案推荐
+
+| 阶段 | 旧方案 | 新方案 | 理由 |
+|------|--------|--------|------|
+| CPU 快速验证 | IA³ + 0.5B | FAA + 0.5B | FAA 频域分解比 IA³ 简单缩放更强 |
+| GPU 正式训练 | LoRA + 7B | LoFT + 7B 或 DoRA + 7B | 效果更接近全量微调 |
+| 超参数优化 | 手动 + AdaptiveThreshold | MetaLoRA 自动搜索 | 自动找最优配置 |
+
+---
+
+*Last updated: 2026-03-27*
+*Version: 3.1 — 新增附录 B-G（集成矩阵、SDK验证、评审问题、实施路线、任务清单、CPU训练方案、PEFT前沿算法）*
