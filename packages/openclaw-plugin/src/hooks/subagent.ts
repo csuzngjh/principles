@@ -246,7 +246,10 @@ export async function handleSubagentEnded(
         // Improved matching logic: support both direct session key match and HEARTBEAT placeholder match
         // This fixes task_outcomes being empty for HEARTBEAT-triggered diagnostician runs
         const matchedTask = queue.find((task: any) => {
-            if (task?.status !== 'in_progress') return false;
+            // V2: Skip sleep_reflection tasks - they don't use HEARTBEAT completion flow
+            // V2: Only process pain_diagnosis tasks via subagent completion
+            // sleep_reflection tasks are handled by nocturnal service (different flow)
+            if (task?.taskKind === 'sleep_reflection') return false;
             
             const taskSessionKey = task?.assigned_session_key;
             

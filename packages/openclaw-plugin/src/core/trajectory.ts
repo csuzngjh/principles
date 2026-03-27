@@ -130,7 +130,13 @@ export interface TrajectorySessionInput {
   startedAt?: string;
 }
 
-export interface EvolutionTaskInput {
+// V2: Task kind and priority types for queue schema
+export type TaskKind = 'pain_diagnosis' | 'sleep_reflection' | 'model_eval';
+// V2: Task priority for scheduling
+export type TaskPriority = 'high' | 'medium' | 'low';
+
+// V2: EvolutionTaskInput with all V2 fields
+interface EvolutionTaskInputBase {
   taskId: string;
   traceId: string;
   source: string;
@@ -144,6 +150,21 @@ export interface EvolutionTaskInput {
   createdAt?: string;
   updatedAt?: string;
 }
+
+// V2: Full EvolutionTaskInput with queue schema extensions
+interface EvolutionTaskInputV2 extends EvolutionTaskInputBase {
+  taskKind?: TaskKind;
+  priority?: TaskPriority;
+  retryCount?: number;
+  maxRetries?: number;
+  lastError?: string | null;
+  resultRef?: string | null;
+}
+
+// Backward-compatible type alias
+type EvolutionTaskInput = EvolutionTaskInputBase;
+
+export { EvolutionTaskInputV2 };
 
 export interface EvolutionEventInput {
   traceId: string;

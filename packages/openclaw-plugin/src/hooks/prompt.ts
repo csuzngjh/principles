@@ -531,9 +531,18 @@ You are a **self-evolving AI agent** powered by Principles Disciple.
   if (fs.existsSync(queuePath)) {
     try {
       const queue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
+      // V2: Filter to only in_progress pain_diagnosis tasks
+      // This ensures sleep_reflection tasks never get injected into user prompts
       const inProgressTasks = [...queue]
-        .filter((t: any) => t.status === 'in_progress')
+        .filter((t: any) => t.status === 'in_progress' && (t.taskKind === 'pain_diagnosis' || !t.taskKind))
         .sort((a: any, b: any) => {
+          // V2: Prioritize by taskKind first (pain_diagnosis before others), then by score
+          if (a.taskKind !== b.taskKind) {
+            const kindPriority: Record<string, number> = { pain_diagnosis: 0, model_eval: 1, sleep_reflection: 2 };
+            const aPriority = kindPriority[String(a.taskKind ?? '')] ?? 3;
+            const bPriority = kindPriority[String(b.taskKind ?? '')] ?? 3;
+            if (aPriority !== bPriority) return aPriority - bPriority;
+          }
           const scoreA = Number.isFinite(a?.score) ? Number(a.score) : 0;
           const scoreB = Number.isFinite(b?.score) ? Number(b.score) : 0;
           return scoreB - scoreA;

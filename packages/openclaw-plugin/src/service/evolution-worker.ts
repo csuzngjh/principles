@@ -17,7 +17,57 @@ import { LockUnavailableError } from '../config/index.js';
 let intervalId: NodeJS.Timeout | null = null;
 let timeoutId: NodeJS.Timeout | null = null;
 
+/**
+ * Queue V2 Schema - Supports multiple task kinds while preserving pain_diagnosis semantics.
+ * 
+ * taskKind semantics:
+ * - pain_diagnosis: User-adjacent, triggers HEARTBEAT, injects into user prompts
+ * - sleep_reflection: Background-only, never injects into user prompts, no HEARTBEAT
+ * 
+ * Old queue items (without taskKind) are migrated to pain_diagnosis for compatibility.
+ */
+export type TaskKind = 'pain_diagnosis' | 'sleep_reflection' | 'model_eval';
+export type TaskPriority = 'high' | 'medium' | 'low';
+export type QueueStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'canceled';
+export type TaskResolution = 'marker_detected' | 'auto_completed_timeout' | 'failed_max_retries' | 'canceled';
+
 export interface EvolutionQueueItem {
+    // Core identity
+    id: string;
+    taskKind: TaskKind;          // V2: distinguishes task types
+    priority: TaskPriority;      // V2: scheduling priority
+    source: string;
+    traceId?: string;           // Trace ID for linking events across the evolution lifecycle
+    
+    // Legacy fields (still used for pain_diagnosis)
+    task?: string;
+    score: number;
+    reason: string;
+    timestamp: string;
+    enqueued_at?: string;
+    started_at?: string;
+    completed_at?: string;
+    assigned_session_key?: string;
+    trigger_text_preview?: string;
+    status: QueueStatus;        // V2: includes 'failed' and 'canceled'
+    resolution?: TaskResolution;
+    session_id?: string;
+    agent_id?: string;
+    
+    // V2 retry support
+    retryCount: number;         // V2: number of retry attempts
+    maxRetries: number;         // V2: maximum retry attempts allowed
+    lastError?: string;         // V2: last error message if failed
+    
+    // V2 result reference
+    resultRef?: string;         // V2: reference to result artifact
+}
+
+/**
+ * Legacy queue item shape (pre-V2) for migration compatibility.
+ * These items lack taskKind, priority, retryCount, maxRetries, lastError fields.
+ */
+interface LegacyEvolutionQueueItem {
     id: string;
     task?: string;
     score: number;
@@ -29,11 +79,64 @@ export interface EvolutionQueueItem {
     completed_at?: string;
     assigned_session_key?: string;
     trigger_text_preview?: string;
-    status: 'pending' | 'in_progress' | 'completed';
-    resolution?: 'marker_detected' | 'auto_completed_timeout';
+    status?: string;
+    resolution?: string;
     session_id?: string;
     agent_id?: string;
-    traceId?: string; // Trace ID for linking events across the evolution lifecycle
+    traceId?: string;
+}
+
+/**
+ * Default values for new V2 fields when migrating legacy items.
+ */
+const DEFAULT_TASK_KIND: TaskKind = 'pain_diagnosis';
+const DEFAULT_PRIORITY: TaskPriority = 'medium';
+const DEFAULT_MAX_RETRIES = 3;
+
+/**
+ * Migrate a legacy queue item to V2 schema.
+ * Old items without taskKind are assumed to be pain_diagnosis for backward compatibility.
+ */
+function migrateToV2(item: LegacyEvolutionQueueItem): EvolutionQueueItem {
+    return {
+        id: item.id,
+        taskKind: (item as any).taskKind || DEFAULT_TASK_KIND,
+        priority: (item as any).priority || DEFAULT_PRIORITY,
+        source: item.source,
+        traceId: item.traceId,
+        task: item.task,
+        score: item.score,
+        reason: item.reason,
+        timestamp: item.timestamp,
+        enqueued_at: item.enqueued_at,
+        started_at: item.started_at,
+        completed_at: item.completed_at,
+        assigned_session_key: item.assigned_session_key,
+        trigger_text_preview: item.trigger_text_preview,
+        status: (item.status as QueueStatus) || 'pending',
+        resolution: item.resolution as TaskResolution | undefined,
+        session_id: item.session_id,
+        agent_id: item.agent_id,
+        retryCount: (item as any).retryCount || 0,
+        maxRetries: (item as any).maxRetries || DEFAULT_MAX_RETRIES,
+        lastError: (item as any).lastError,
+        resultRef: (item as any).resultRef,
+    };
+}
+
+/**
+ * Check if an item is a legacy (pre-V2) queue item.
+ */
+function isLegacyQueueItem(item: any): boolean {
+    return item && typeof item === 'object' && !('taskKind' in item);
+}
+
+/**
+ * Migrate entire queue to V2 schema if needed.
+ * Returns a new array with all items migrated to V2 format.
+ */
+function migrateQueueToV2(queue: any[]): EvolutionQueueItem[] {
+    return queue.map(item => isLegacyQueueItem(item) ? migrateToV2(item) : item);
 }
 
 const PAIN_QUEUE_DEDUP_WINDOW_MS = 30 * 60 * 1000;
@@ -236,8 +339,12 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: any) {
             const taskId = createEvolutionTaskId(source, score, preview, reason, now);
             const nowIso = new Date(now).toISOString();
             const effectiveTraceId = traceId || taskId;
+            
+            // V2: New queue items include all V2 fields with pain_diagnosis defaults
             queue.push({
                 id: taskId,
+                taskKind: 'pain_diagnosis',   // V2: All pain-flag triggered tasks are pain_diagnosis
+                priority: score >= 70 ? 'high' : score >= 40 ? 'medium' : 'low',  // V2: Priority based on score
                 score,
                 source,
                 reason,
@@ -248,6 +355,8 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: any) {
                 session_id: sessionId || undefined,
                 agent_id: agentId || undefined,
                 traceId: effectiveTraceId,
+                retryCount: 0,               // V2: No retries yet
+                maxRetries: 3,                // V2: Default max retries
             });
 
             fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
@@ -291,9 +400,9 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
     const evoLogger = getEvolutionLogger(wctx.workspaceDir, wctx.trajectory);
 
     try {
-        let queue: EvolutionQueueItem[] = [];
+        let rawQueue: any[] = [];
         try {
-            queue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
+            rawQueue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
         } catch (e) {
             // Backup corrupted file instead of silently discarding
             const backupPath = `${queuePath}.corrupted.${Date.now()}`;
@@ -311,13 +420,24 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
             return;
         }
 
-        let queueChanged = false;
+        // V2: Migrate queue to current schema if needed
+        const queue: EvolutionQueueItem[] = migrateQueueToV2(rawQueue);
+
+        let queueChanged = isLegacyQueueItem(rawQueue);
 
         const config = wctx.config;
         const timeout = config.get('intervals.task_timeout_ms') || (60 * 60 * 1000); // Default 1 hour
 
-        // Check in_progress tasks for completion
+        // V2: Check for failed tasks that exceeded max retries
         for (const task of queue.filter(t => t.status === 'in_progress')) {
+            if (task.taskKind === 'sleep_reflection') {
+                // sleep_reflection tasks are processed differently - skip HEARTBEAT logic
+                continue;
+            }
+        }
+
+        // Check in_progress tasks for completion (only pain_diagnosis gets HEARTBEAT treatment)
+        for (const task of queue.filter(t => t.status === 'in_progress' && t.taskKind === 'pain_diagnosis')) {
             const startedAt = new Date(task.started_at || task.timestamp);
 
             // Condition 1: Check for marker file (created by diagnostician on completion)
@@ -395,10 +515,18 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
             }
         }
 
-        const pendingTasks = queue.filter(t => t.status === 'pending');
+        // V2: Only process pain_diagnosis tasks for HEARTBEAT injection
+        // sleep_reflection tasks are handled by nocturnal service (not implemented yet)
+        const pendingTasks = queue.filter(t => t.status === 'pending' && t.taskKind === 'pain_diagnosis');
 
         if (pendingTasks.length > 0) {
-            const highestScoreTask = pendingTasks.sort((a, b) => b.score - a.score)[0];
+            // V2: Also sort by priority within same score
+            const priorityWeight = { high: 3, medium: 2, low: 1 };
+            const highestScoreTask = pendingTasks.sort((a, b) => {
+                const scoreDiff = b.score - a.score;
+                if (scoreDiff !== 0) return scoreDiff;
+                return (priorityWeight[b.priority] || 2) - (priorityWeight[a.priority] || 2);
+            })[0];
             const nowIso = new Date().toISOString();
 
             const taskDescription = `Diagnose systemic pain [ID: ${highestScoreTask.id}]. Source: ${highestScoreTask.source}. Reason: ${highestScoreTask.reason}. ` +
@@ -654,13 +782,17 @@ export async function registerEvolutionTaskSession(
     const releaseLock = await requireQueueLock(queuePath, logger, 'registerEvolutionTaskSession');
 
     try {
-        let queue: EvolutionQueueItem[];
+        let rawQueue: any[];
         try {
-            queue = JSON.parse(fs.readFileSync(queuePath, 'utf8')) as EvolutionQueueItem[];
+            rawQueue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
         } catch (parseErr) {
             logger?.warn?.(`[PD:EvolutionWorker] Failed to parse EVOLUTION_QUEUE for session registration: ${queuePath} - ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`);
             return false;
         }
+        
+        // V2: Migrate queue to current schema
+        const queue: EvolutionQueueItem[] = migrateQueueToV2(rawQueue);
+        
         const task = queue.find((item) => item.id === taskId && item.status === 'in_progress');
         if (!task) {
             logger?.warn?.(`[PD:EvolutionWorker] Could not find in-progress evolution task ${taskId} for session assignment`);
