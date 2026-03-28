@@ -11,11 +11,11 @@
 // ===== 等级定义 =====
 
 export enum EvolutionTier {
-  Seed = 1,      // 萌芽：只读 + 基础文档
-  Sprout = 2,    // 新芽：单文件编辑 (<50行)
-  Sapling = 3,   // 幼苗：多文件 + 测试 + 子智能体
-  Tree = 4,      // 大树：重构 + 风险路径
-  Forest = 5     // 森林：完全自主
+  Seed = 1,      // 起步：150行 + 3文件 + 子智能体（现代 AI 能力已足够强）
+  Sprout = 2,    // 成长：300行 + 5文件
+  Sapling = 3,   // 独当：500行 + 10文件 + 风险路径
+  Tree = 4,      // 专家：1000行 + 20文件
+  Forest = 5     // 大师：完全自主
 }
 
 export interface TierPermissions {
@@ -33,10 +33,16 @@ export interface TierDefinition {
 }
 
 export const TIER_DEFINITIONS: readonly TierDefinition[] = [
-  { tier: EvolutionTier.Seed,    name: 'Seed',    requiredPoints: 0,    permissions: { maxLinesPerWrite: 20,  maxFilesPerTask: 1,  allowRiskPath: false, allowSubagentSpawn: false }},
-  { tier: EvolutionTier.Sprout,  name: 'Sprout',  requiredPoints: 50,   permissions: { maxLinesPerWrite: 50,  maxFilesPerTask: 2,  allowRiskPath: false, allowSubagentSpawn: false }},
-  { tier: EvolutionTier.Sapling, name: 'Sapling', requiredPoints: 200,  permissions: { maxLinesPerWrite: 200, maxFilesPerTask: 5,  allowRiskPath: false, allowSubagentSpawn: true  }},
-  { tier: EvolutionTier.Tree,    name: 'Tree',    requiredPoints: 500,  permissions: { maxLinesPerWrite: 500, maxFilesPerTask: 10, allowRiskPath: true,  allowSubagentSpawn: true  }},
+  // 2026-03-28: 大幅放宽限制，现代 AI 能力已很强
+  // Seed: 从 20 行提升到 150 行，允许 3 文件，允许子智能体
+  { tier: EvolutionTier.Seed,    name: 'Seed',    requiredPoints: 0,    permissions: { maxLinesPerWrite: 150,  maxFilesPerTask: 3,  allowRiskPath: false, allowSubagentSpawn: true  }},
+  // Sprout: 中等规模开发
+  { tier: EvolutionTier.Sprout,  name: 'Sprout',  requiredPoints: 50,   permissions: { maxLinesPerWrite: 300,  maxFilesPerTask: 5,  allowRiskPath: false, allowSubagentSpawn: true  }},
+  // Sapling: 较大规模开发，可访问风险路径（需 PLAN）
+  { tier: EvolutionTier.Sapling, name: 'Sapling', requiredPoints: 200,  permissions: { maxLinesPerWrite: 500,  maxFilesPerTask: 10, allowRiskPath: true,  allowSubagentSpawn: true  }},
+  // Tree: 大型重构
+  { tier: EvolutionTier.Tree,    name: 'Tree',    requiredPoints: 500,  permissions: { maxLinesPerWrite: 1000, maxFilesPerTask: 20, allowRiskPath: true,  allowSubagentSpawn: true  }},
+  // Forest: 完全自主
   { tier: EvolutionTier.Forest,  name: 'Forest',  requiredPoints: 1000, permissions: { maxLinesPerWrite: Infinity, maxFilesPerTask: Infinity, allowRiskPath: true, allowSubagentSpawn: true }},
 ] as const;
 

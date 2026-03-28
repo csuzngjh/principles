@@ -1,26 +1,17 @@
 /**
  * Progressive Trust Gate Module
  *
- * Handles progressive access control based on trust stages (1-4).
+ * 2026-03-28: 重构为 EP 系统优先决策
+ * - EP System 作为主决策系统
+ * - Trust Engine 作为 fallback
  *
- * **Responsibilities:**
- * - Enforce trust stage-based permissions:
- *   - Stage 1 (Bankruptcy): Block ALL writes to risk paths, medium+ changes
- *   - Stage 2 (Editor): Block risk paths, large changes
- *   - Stage 3 (Developer): Require READY plan for risk paths, normal limits
- *   - Stage 4 (Architect): Full bypass with audit logging
- * - Apply percentage-based line change limits for large files
- * - Handle plan approval whitelist for Stage 1
- * - Record EP simulation for comparison analysis
- *
- * **Configuration:**
- * - Progressive gate settings from profile.progressive_gate
- * - Trust limits from config.trust
- * - Plan approval patterns and operations
+ * **决策流程：**
+ * 1. EP System 检查 → 拒绝则直接返回
+ * 2. EP System 允许 → 放行
+ * 3. EP System 异常 → 回退到 Trust Engine
  *
  * **Block Persistence:**
  * - Uses shared `recordGateBlockAndReturn` from gate-block-helper.ts
- * - Ensures single authoritative block persistence path
  */
 
 import * as fs from 'fs';
@@ -29,9 +20,8 @@ import type { PluginHookBeforeToolCallEvent, PluginHookBeforeToolCallResult } fr
 import type { WorkspaceContext } from '../core/workspace-context.js';
 import { isRisky, normalizePath, planStatus as getPlanStatus } from '../utils/io.js';
 import { matchesAnyPattern } from '../utils/glob-match.js';
-import { assessRiskLevel, estimateLineChanges, getTargetFileLineCount, calculatePercentageThreshold } from '../core/risk-calculator.js';
+import { assessRiskLevel, estimateLineChanges } from '../core/risk-calculator.js';
 import { checkEvolutionGate } from '../core/evolution-engine.js';
-import { EventLogService } from '../core/event-log.js';
 import { recordGateBlockAndReturn } from './gate-block-helper.js';
 
 /**
@@ -154,9 +144,10 @@ export function checkProgressiveTrustGate(
 
   logger.info?.(`[PD_GATE] Trust: ${trustScore} (Stage ${stage}), Risk: ${riskLevel}, Path: ${relPath}`);
 
-  // ── EP SIMULATION MODE (M6验证) ──
-  // 记录EP系统的模拟决策，但不生效（仅用于对比分析）
-  // BUGFIX #90: 移到所有Stage检查之前，确保所有Stage都触发EP simulation记录
+  // ═══════════════════════════════════════════════════════════════
+  // EP SYSTEM - PRIMARY DECISION MAKER (2026-03-28)
+  // Evolution Points 系统替代 Trust Engine 成为主决策系统
+  // ═══════════════════════════════════════════════════════════════
   try {
     const epDecision = checkEvolutionGate(ctx.workspaceDir!, {
       toolName: event.toolName,
@@ -165,38 +156,42 @@ export function checkProgressiveTrustGate(
       isRiskPath: risky,
     });
 
-    const epLogEntry = {
-      timestamp: new Date().toISOString(),
-      toolName: event.toolName,
-      filePath: relPath,
-      trustEngine: { score: trustScore, stage, decision: 'allow' },
-      epSystem: { tier: epDecision.currentTier ?? 'UNKNOWN', allowed: epDecision.allowed, reason: epDecision.reason },
-      conflict: epDecision.allowed === false, // Trust允许但EP拒绝（任何阶段）
-    };
+    logger.info?.(`[PD_GATE] EP Tier: ${epDecision.currentTier}, Allowed: ${epDecision.allowed}, Reason: ${epDecision.reason || 'none'}`);
 
-    const epLogPath = path.join(ctx.workspaceDir!, '.state', 'ep_simulation.jsonl');
+    // EP 系统拒绝时直接返回
+    if (!epDecision.allowed) {
+      return block(relPath, epDecision.reason || `EP System blocked this operation.`, wctx, event.toolName, logger, ctx.sessionId);
+    }
 
-    // 安全创建目录（如果失败则跳过日志写入，但不影响 Trust Engine 决策）
-    let canWriteEpLog = true;
+    // EP 系统允许，记录并放行
+    // 记录 EP 决策日志（用于审计和分析）
+    const epLogPath = path.join(ctx.workspaceDir!, '.state', 'ep_decisions.jsonl');
     try {
       fs.mkdirSync(path.dirname(epLogPath), { recursive: true });
-    } catch (mkdirErr: any) {
-      if (!mkdirErr || mkdirErr.code !== 'EEXIST') {
-        logger.warn?.(`[PD_EP_SIM] Failed to create log dir: ${mkdirErr?.message ?? String(mkdirErr)}, skipping log`);
-        canWriteEpLog = false;
-      }
+      fs.appendFileSync(epLogPath, JSON.stringify({
+        timestamp: new Date().toISOString(),
+        toolName: event.toolName,
+        filePath: relPath,
+        tier: epDecision.currentTier,
+        allowed: true,
+        lineChanges,
+        isRiskPath: risky,
+      }) + '\n');
+    } catch (logErr) {
+      // 日志失败不影响决策
     }
 
-    if (canWriteEpLog) {
-      fs.appendFileSync(epLogPath, JSON.stringify(epLogEntry) + '\n');
-    }
-
-    logger.info?.(`[PD_EP_SIM] Tier: ${epDecision.currentTier}, Allowed: ${epDecision.allowed}, Trust: ${trustScore} (Stage ${stage})`);
+    // EP 系统允许，直接放行（不再走 Trust Engine 逻辑）
+    return;
   } catch (err) {
-    // EP 模拟失败不应该影响 Trust Engine 决策
+    // EP 系统异常时，回退到 Trust Engine
     const errMsg = err instanceof Error ? err.message : String(err);
-    logger.warn?.(`[PD_EP_SIM] Simulation failed: ${errMsg}, continuing with Trust Engine`);
+    logger.warn?.(`[PD_GATE] EP system error, falling back to Trust Engine: ${errMsg}`);
   }
+
+  // ═══════════════════════════════════════════════════════════════
+  // FALLBACK: Trust Engine (仅在 EP 系统异常时使用)
+  // ═══════════════════════════════════════════════════════════════
 
   // Stage 1 (Bankruptcy): Block ALL writes to risk paths, and all medium+ writes
   if (stage === 1) {
@@ -208,19 +203,11 @@ export function checkProgressiveTrustGate(
         pattern: relPath,
         planStatus
       });
-      wctx.trajectory?.recordGateBlock?.({
-        sessionId: ctx.sessionId,
-        toolName: event.toolName,
-        filePath: relPath,
-        reason: 'plan_approval',
-        planStatus,
-      });
       logger.info?.(`[PD_GATE] Stage 1 PLAN approval: ${relPath}`);
       return;
     }
 
     if (risky || riskLevel !== 'LOW') {
-      // Block if not approved by whitelist
       return block(relPath, `Trust score too low (${trustScore}). Stage 1 agents cannot modify risk paths or perform non-trivial edits.`, wctx, event.toolName, logger, ctx.sessionId);
     }
   }
@@ -231,28 +218,9 @@ export function checkProgressiveTrustGate(
       return block(relPath, `Stage 2 agents are not authorized to modify risk paths.`, wctx, event.toolName, logger, ctx.sessionId);
     }
 
-    // Percentage-based threshold calculation
-    const targetAbsolutePath = typeof event.params.file_path === 'string' && ctx.workspaceDir ? path.join(ctx.workspaceDir, event.params.file_path) : null;
-    const targetLineCount = targetAbsolutePath ? getTargetFileLineCount(targetAbsolutePath) : null;
-    const minLinesFallback = trustSettings.limits?.min_lines_fallback ?? 20;
-    const stage2MaxPercentage = trustSettings.limits?.stage_2_max_percentage ?? 10;
     const stage2FixedLimit = trustSettings.limits?.stage_2_max_lines ?? 50;
-
-    let effectiveLimit: number;
-    let limitType: 'percentage' | 'fixed';
-    let actualPercentage: number | null = null;
-
-    if (targetLineCount !== null && targetLineCount > 0) {
-      effectiveLimit = calculatePercentageThreshold(targetLineCount, stage2MaxPercentage, minLinesFallback);
-      actualPercentage = Math.round((lineChanges / targetLineCount) * 100);
-      limitType = 'percentage';
-    } else {
-      effectiveLimit = stage2FixedLimit;
-      limitType = 'fixed';
-    }
-
-    if (lineChanges > effectiveLimit) {
-      return block(relPath, buildLineLimitReason(lineChanges, effectiveLimit, limitType, targetLineCount, actualPercentage, 2), wctx, event.toolName, logger, ctx.sessionId);
+    if (lineChanges > stage2FixedLimit) {
+      return block(relPath, `Modification too large (${lineChanges} lines) for Stage 2. Max allowed is ${stage2FixedLimit}.`, wctx, event.toolName, logger, ctx.sessionId);
     }
   }
 
@@ -265,49 +233,15 @@ export function checkProgressiveTrustGate(
       }
     }
 
-    // Percentage-based threshold calculation
-    const targetAbsolutePath = typeof event.params.file_path === 'string' && ctx.workspaceDir ? path.join(ctx.workspaceDir, event.params.file_path) : null;
-    const targetLineCount = targetAbsolutePath ? getTargetFileLineCount(targetAbsolutePath) : null;
-    const minLinesFallback = trustSettings.limits?.min_lines_fallback ?? 20;
-    const stage3MaxPercentage = trustSettings.limits?.stage_3_max_percentage ?? 15;
     const stage3FixedLimit = trustSettings.limits?.stage_3_max_lines ?? 300;
-
-    let effectiveLimit: number;
-    let limitType: 'percentage' | 'fixed';
-    let actualPercentage: number | null = null;
-
-    if (targetLineCount !== null && targetLineCount > 0) {
-      effectiveLimit = calculatePercentageThreshold(targetLineCount, stage3MaxPercentage, minLinesFallback);
-      actualPercentage = Math.round((lineChanges / targetLineCount) * 100);
-      limitType = 'percentage';
-    } else {
-      effectiveLimit = stage3FixedLimit;
-      limitType = 'fixed';
-    }
-
-    if (lineChanges > effectiveLimit) {
-      return block(relPath, buildLineLimitReason(lineChanges, effectiveLimit, limitType, targetLineCount, actualPercentage, 3), wctx, event.toolName, logger, ctx.sessionId);
+    if (lineChanges > stage3FixedLimit) {
+      return block(relPath, `Modification too large (${lineChanges} lines) for Stage 3. Max allowed is ${stage3FixedLimit}.`, wctx, event.toolName, logger, ctx.sessionId);
     }
   }
 
   // Stage 4 (Architect): Full bypass
   if (stage === 4) {
     logger.info?.(`[PD_GATE] Trusted Architect bypass for ${relPath}`);
-    // Audit log for Stage 4 bypass (security traceability)
-    try {
-      const stateDir = wctx.resolve('STATE_DIR');
-      const eventLog = EventLogService.get(stateDir);
-      eventLog.recordGateBypass(ctx.sessionId, {
-        toolName: event.toolName,
-        filePath: relPath,
-        bypassType: 'stage4_architect',
-        trustScore,
-        trustStage: stage,
-      });
-      logger.info?.(`[PD_GATE] Stage 4 Architect bypass recorded for ${relPath}`);
-    } catch (auditErr) {
-      logger.warn?.(`[PD_GATE] Failed to record Stage 4 bypass audit: ${String(auditErr)}`);
-    }
     return;
   }
 }
