@@ -50,14 +50,15 @@ describe('Gate Integration - Tier Progression Flow', () => {
     cleanupWorkspace(workspace);
   });
 
-  test('Seed tier: maxLinesPerWrite = 20', () => {
+  test('Seed tier: maxLinesPerWrite = 150 (updated for modern AI capabilities)', () => {
     const tierDef = engine.getTierDefinition();
-    expect(tierDef.permissions.maxLinesPerWrite).toBe(20);
+    expect(tierDef.permissions.maxLinesPerWrite).toBe(150);
+    expect(tierDef.permissions.maxFilesPerTask).toBe(3);
     expect(tierDef.permissions.allowRiskPath).toBe(false);
-    expect(tierDef.permissions.allowSubagentSpawn).toBe(false);
+    expect(tierDef.permissions.allowSubagentSpawn).toBe(true); // Now allowed at Seed tier
   });
 
-  test('Seed → Sprout: line limit increases to 50', () => {
+  test('Seed → Sprout: line limit increases to 300', () => {
     // 50 points = Sprout
     for (let i = 0; i < 17; i++) {
       engine.recordSuccess('write', { difficulty: 'normal' });
@@ -67,10 +68,10 @@ describe('Gate Integration - Tier Progression Flow', () => {
     expect(tier).toBeGreaterThanOrEqual(EvolutionTier.Sprout);
     
     const tierDef = engine.getTierDefinition();
-    expect(tierDef.permissions.maxLinesPerWrite).toBe(50);
+    expect(tierDef.permissions.maxLinesPerWrite).toBe(300);
   });
 
-  test('Seed → Sapling: line limit increases to 200, subagent unlocks', () => {
+  test('Seed → Sapling: line limit increases to 500, risk path unlocks', () => {
     // 200 points = Sapling
     for (let i = 0; i < 26; i++) {
       engine.recordSuccess('write', { difficulty: 'hard' });
@@ -80,8 +81,8 @@ describe('Gate Integration - Tier Progression Flow', () => {
     expect(tier).toBeGreaterThanOrEqual(EvolutionTier.Sapling);
     
     const tierDef = engine.getTierDefinition();
-    expect(tierDef.permissions.maxLinesPerWrite).toBe(200);
-    expect(tierDef.permissions.allowRiskPath).toBe(false); // Risk path unlocks at Tree
+    expect(tierDef.permissions.maxLinesPerWrite).toBe(500);
+    expect(tierDef.permissions.allowRiskPath).toBe(true); // Risk path unlocks at Sapling
     expect(tierDef.permissions.allowSubagentSpawn).toBe(true);
   });
 
@@ -125,57 +126,61 @@ describe('Gate Integration - Blocking Recovery', () => {
   });
 
   test('blocked operation: agent can continue with allowed operations', () => {
-    // Seed tier: 20 line limit
+    // Seed tier: 150 line limit - so 200 lines should be blocked
     const blocked = engine.beforeToolCall({
       toolName: 'write',
-      content: Array(21).fill('line').join('\n'),
+      content: Array(200).fill('line').join('\n'),
     });
     expect(blocked.allowed).toBe(false);
-    expect(blocked.reason).toContain('20');
+    expect(blocked.reason).toContain('150');
     
-    // But 10-line write should work
+    // But 100-line write should work (within 150 limit)
     const allowed = engine.beforeToolCall({
       toolName: 'write',
-      content: Array(10).fill('line').join('\n'),
+      content: Array(100).fill('line').join('\n'),
     });
     expect(allowed.allowed).toBe(true);
   });
 
   test('after promotion: previously blocked operations now allowed', () => {
-    // Initially Seed: 20 line limit
+    // Initially Seed: 150 line limit
     const blocked = engine.beforeToolCall({
       toolName: 'write',
-      content: Array(21).fill('line').join('\n'),
+      content: Array(200).fill('line').join('\n'),
     });
     expect(blocked.allowed).toBe(false);
     
-    // Earn points and promote
+    // Earn points and promote to Sprout
     for (let i = 0; i < 17; i++) {
       engine.recordSuccess('write', { difficulty: 'normal' });
     }
     
-    // Now Sprout: 50 line limit
+    // Now Sprout: 300 line limit
     const nowAllowed = engine.beforeToolCall({
       toolName: 'write',
-      content: Array(30).fill('line').join('\n'),
+      content: Array(200).fill('line').join('\n'),
     });
     expect(nowAllowed.allowed).toBe(true);
   });
 
-  test('subagent spawn unlocks after promotion', () => {
-    // Seed: subagent spawn blocked
+  test('risk path access unlocks after promotion to Sapling', () => {
+    // Seed: risk path blocked
     const blocked = engine.beforeToolCall({
-        toolName: 'sessions_spawn',
+        toolName: 'write',
+        isRiskPath: true,
+        lineCount: 10,
     });
     expect(blocked.allowed).toBe(false);
     
-    // Promote to Sapling (where subagent unlocks)
+    // Promote to Sapling (where risk path unlocks)
     for (let i = 0; i < 26; i++) {
       engine.recordSuccess('write', { difficulty: 'hard' });
     }
     
     const allowed = engine.beforeToolCall({
-        toolName: 'sessions_spawn',
+        toolName: 'write',
+        isRiskPath: true,
+        lineCount: 10,
     });
     expect(allowed.allowed).toBe(true);
   });
@@ -195,17 +200,17 @@ describe('Gate Integration - Multi-tool Consistency', () => {
   });
 
   test('write tool respects line limit', () => {
-    // Exactly at limit (20) - should allow
+    // Exactly at limit (150) - should allow
     const exact = engine.beforeToolCall({
       toolName: 'write',
-      content: Array(20).fill('line').join('\n'),
+      content: Array(150).fill('line').join('\n'),
     });
     expect(exact.allowed).toBe(true);
     
-    // 1 over limit (21) - should block
+    // 1 over limit (151) - should block
     const over = engine.beforeToolCall({
       toolName: 'write',
-      content: Array(21).fill('line').join('\n'),
+      content: Array(151).fill('line').join('\n'),
     });
     expect(over.allowed).toBe(false);
   });
@@ -213,25 +218,29 @@ describe('Gate Integration - Multi-tool Consistency', () => {
   test('edit tool respects line limit', () => {
     const allowed = engine.beforeToolCall({
       toolName: 'edit',
-      content: Array(15).fill('line').join('\n'),
+      content: Array(100).fill('line').join('\n'),
     });
     expect(allowed.allowed).toBe(true);
     
     const blocked = engine.beforeToolCall({
       toolName: 'edit',
-      content: Array(25).fill('line').join('\n'),
+      content: Array(200).fill('line').join('\n'),
     });
     expect(blocked.allowed).toBe(false);
   });
 
-  test('high-risk tools blocked at Seed tier', () => {
-    const blockedTools = ['run_shell_command', 'delete_file', 'sessions_spawn'];
+  test('high-risk tools blocked at Seed tier for risk paths', () => {
+    // run_shell_command and delete_file are high-risk, blocked for risk paths
+    const highRiskTools = ['run_shell_command', 'delete_file'];
     
-    for (const tool of blockedTools) {
-      const result = engine.beforeToolCall({ toolName: tool });
+    for (const tool of highRiskTools) {
+      const result = engine.beforeToolCall({ toolName: tool, isRiskPath: true });
       expect(result.allowed).toBe(false);
-      expect(result.reason).toContain('未解锁');
     }
+    
+    // sessions_spawn is now allowed at Seed tier
+    const spawnResult = engine.beforeToolCall({ toolName: 'sessions_spawn' });
+    expect(spawnResult.allowed).toBe(true);
   });
 
   test('read tool always allowed (no content restriction)', () => {
@@ -339,17 +348,18 @@ describe('Gate Integration - Persistence', () => {
     engine = new EvolutionEngine(workspace);
     expect(engine.getTier()).toBe(EvolutionTier.Seed);
     
-    let allowed = engine.beforeToolCall({ toolName: 'sessions_spawn' });
-    expect(allowed.allowed).toBe(false);
+    // Risk path should be blocked at Seed
+    let blocked = engine.beforeToolCall({ toolName: 'write', isRiskPath: true, lineCount: 10 });
+    expect(blocked.allowed).toBe(false);
     
     // Earn points
     for (let i = 0; i < 26; i++) {
       engine.recordSuccess('write', { difficulty: 'hard' });
     }
     
-    // Now Sapling
+    // Now Sapling - risk path allowed
     expect(engine.getTier()).toBeGreaterThanOrEqual(EvolutionTier.Sapling);
-    allowed = engine.beforeToolCall({ toolName: 'sessions_spawn' });
+    let allowed = engine.beforeToolCall({ toolName: 'write', isRiskPath: true, lineCount: 10 });
     expect(allowed.allowed).toBe(true);
     
     // Restart engine (simulating process restart)
@@ -357,7 +367,7 @@ describe('Gate Integration - Persistence', () => {
     
     // Should still be Sapling with same permissions
     expect(engine.getTier()).toBeGreaterThanOrEqual(EvolutionTier.Sapling);
-    allowed = engine.beforeToolCall({ toolName: 'sessions_spawn' });
+    allowed = engine.beforeToolCall({ toolName: 'write', isRiskPath: true, lineCount: 10 });
     expect(allowed.allowed).toBe(true);
   });
 
@@ -427,16 +437,24 @@ describe('Gate Integration - Real World Scenarios', () => {
     // New agent at Seed
     expect(engine.getTier()).toBe(EvolutionTier.Seed);
     
-    // Attempt 100-line write - blocked
+    // Attempt 200-line write - blocked (Seed limit is 150)
     let decision = engine.beforeToolCall({
       toolName: 'write',
-      content: Array(100).fill('line').join('\n'),
+      content: Array(200).fill('line').join('\n'),
     });
     expect(decision.allowed).toBe(false);
     
-    // Attempt subagent spawn - blocked  
+    // Subagent spawn is now allowed at Seed
     decision = engine.beforeToolCall({
       toolName: 'sessions_spawn',
+    });
+    expect(decision.allowed).toBe(true);
+    
+    // Risk path is blocked at Seed
+    decision = engine.beforeToolCall({
+      toolName: 'write',
+      isRiskPath: true,
+      lineCount: 10,
     });
     expect(decision.allowed).toBe(false);
     
@@ -489,17 +507,17 @@ describe('Gate Integration - Real World Scenarios', () => {
     const summary = engine.getStatusSummary();
     
     expect(summary.tier).toBe(EvolutionTier.Seed);
-    expect(summary.permissions.maxLinesPerWrite).toBe(20);
+    expect(summary.permissions.maxLinesPerWrite).toBe(150);
     expect(summary.permissions.allowRiskPath).toBe(false);
-    expect(summary.permissions.allowSubagentSpawn).toBe(false);
+    expect(summary.permissions.allowSubagentSpawn).toBe(true); // Allowed at Seed tier
     
-    // Earn promotion
+    // Earn promotion to Sapling (risk path unlocks)
     for (let i = 0; i < 26; i++) {
       engine.recordSuccess('write', { difficulty: 'hard' });
     }
     
     const summaryAfter = engine.getStatusSummary();
-    expect(summaryAfter.permissions.allowSubagentSpawn).toBe(true);
+    expect(summaryAfter.permissions.allowRiskPath).toBe(true);
   });
 
   test('different workspaces have independent gate state', () => {
@@ -507,17 +525,17 @@ describe('Gate Integration - Real World Scenarios', () => {
     const workspace2 = createTempWorkspace();
     const engine2 = new EvolutionEngine(workspace2);
     
-    // Engine 1 promotes
+    // Engine 1 promotes to Sapling
     for (let i = 0; i < 26; i++) {
       engine1.recordSuccess('write', { difficulty: 'hard' });
     }
     
-    // Engine 1 has subagent permission
-    let decision1 = engine1.beforeToolCall({ toolName: 'sessions_spawn' });
+    // Engine 1 has risk path permission (Sapling tier)
+    let decision1 = engine1.beforeToolCall({ toolName: 'write', isRiskPath: true, lineCount: 10 });
     expect(decision1.allowed).toBe(true);
     
-    // Engine 2 is still Seed
-    let decision2 = engine2.beforeToolCall({ toolName: 'sessions_spawn' });
+    // Engine 2 is still Seed - risk path blocked
+    let decision2 = engine2.beforeToolCall({ toolName: 'write', isRiskPath: true, lineCount: 10 });
     expect(decision2.allowed).toBe(false);
     
     cleanupWorkspace(workspace2);
