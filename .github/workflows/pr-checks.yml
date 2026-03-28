@@ -43,6 +43,9 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/first-interaction@v3
+        # This action returns exit code 1 for non-first-time contributors
+        # which is expected behavior, not an error
+        continue-on-error: true
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           pr-message: |

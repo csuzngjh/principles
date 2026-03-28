@@ -5,11 +5,13 @@ import * as path from 'path';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
 import * as riskCalculator from '../../src/core/risk-calculator.js';
 import * as sessionTracker from '../../src/core/session-tracker.js';
+import * as evolutionEngine from '../../src/core/evolution-engine.js';
 
 vi.mock('fs');
 vi.mock('../../src/core/workspace-context.js');
 vi.mock('../../src/core/risk-calculator.js');
 vi.mock('../../src/core/session-tracker.js');
+vi.mock('../../src/core/evolution-engine.js');
 
 describe('GFI Gate - Hard Intercept', () => {
   const workspaceDir = '/mock/workspace';
@@ -661,6 +663,10 @@ describe('GFI Gate - Hard Intercept', () => {
           progressive_gate: { enabled: true },
         })
       );
+      // EP system throws error to trigger Trust Engine fallback for this test
+      vi.mocked(evolutionEngine.checkEvolutionGate).mockImplementation(() => {
+        throw new Error('EP system error for testing');
+      });
 
       const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
 
@@ -669,15 +675,15 @@ describe('GFI Gate - Hard Intercept', () => {
       expect(mockEventLog.recordGateBlock).toHaveBeenCalledWith('test-session', {
         toolName: 'write',
         filePath: 'src/large-change.ts',
-        reason: 'Modification too large: 20 lines. Stage 2 limit is 10 lines (fixed threshold). Note: Could not read target file to calculate percentage-based limit. Check file permissions and encoding.',
-        blockSource: expect.any(String),
+        reason: 'Modification too large (20 lines) for Stage 2. Max allowed is 10.',
+        blockSource: 'progressive-trust-gate',
       });
       expect(mockTrajectory.recordGateBlock).toHaveBeenCalledWith({
         sessionId: 'test-session',
         toolName: 'write',
         filePath: 'src/large-change.ts',
-        reason: 'Modification too large: 20 lines. Stage 2 limit is 10 lines (fixed threshold). Note: Could not read target file to calculate percentage-based limit. Check file permissions and encoding.',
-        blockSource: expect.any(String),
+        reason: 'Modification too large (20 lines) for Stage 2. Max allowed is 10.',
+        blockSource: 'progressive-trust-gate',
       });
     });
 
@@ -704,6 +710,10 @@ describe('GFI Gate - Hard Intercept', () => {
           progressive_gate: { enabled: true },
         })
       );
+      // EP system throws error to trigger Trust Engine fallback for this test
+      vi.mocked(evolutionEngine.checkEvolutionGate).mockImplementation(() => {
+        throw new Error('EP system error for testing');
+      });
 
       const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
       await vi.advanceTimersByTimeAsync(300);
@@ -712,8 +722,8 @@ describe('GFI Gate - Hard Intercept', () => {
       expect(mockEventLog.recordGateBlock).toHaveBeenCalledWith('test-session', {
         toolName: 'write',
         filePath: 'src/large-change.ts',
-        reason: 'Modification too large: 20 lines. Stage 2 limit is 10 lines (fixed threshold). Note: Could not read target file to calculate percentage-based limit. Check file permissions and encoding.',
-        blockSource: expect.any(String),
+        reason: 'Modification too large (20 lines) for Stage 2. Max allowed is 10.',
+        blockSource: 'progressive-trust-gate',
       });
       expect(mockTrajectory.recordGateBlock).toHaveBeenCalledTimes(2);
     });

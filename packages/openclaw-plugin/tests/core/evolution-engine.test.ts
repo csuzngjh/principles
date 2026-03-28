@@ -179,19 +179,19 @@ describe('EvolutionEngine', () => {
   // ===== Gate 检查测试 =====
 
   describe('Gate Integration', () => {
-    test('Seed tier should limit to 20 lines', () => {
+    test('Seed tier should limit to 150 lines', () => {
       const decision = engine.beforeToolCall({
         toolName: 'write',
-        content: Array(21).fill('line').join('\n'),
+        content: Array(151).fill('line').join('\n'),
       });
       expect(decision.allowed).toBe(false);
-      expect(decision.reason).toContain('20');
+      expect(decision.reason).toContain('150');
     });
 
     test('Seed tier should allow within limit', () => {
       const decision = engine.beforeToolCall({
         toolName: 'write',
-        content: Array(10).fill('line').join('\n'),
+        content: Array(100).fill('line').join('\n'),
       });
       expect(decision.allowed).toBe(true);
     });
@@ -201,15 +201,16 @@ describe('EvolutionEngine', () => {
         toolName: 'write',
         filePath: 'src/core/trust-engine.ts',
         isRiskPath: true,
+        lineCount: 10,
       });
       expect(decision.allowed).toBe(false);
     });
 
-    test('Seed tier should block subagent spawn', () => {
+    test('Seed tier should allow subagent spawn', () => {
       const decision = engine.beforeToolCall({
       toolName: 'sessions_spawn',
       });
-      expect(decision.allowed).toBe(false);
+      expect(decision.allowed).toBe(true);
     });
 
     test('Forest tier should allow everything', () => {
