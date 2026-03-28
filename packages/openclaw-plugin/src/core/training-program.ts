@@ -31,6 +31,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
+import { fileURLToPath } from 'url';
 import {
   type TrainingExperimentSpec,
   type TrainingExperimentResult,
@@ -68,6 +69,8 @@ import {
  * Path to the external trainer scripts directory.
  */
 const TRAINER_SCRIPTS_DIR = 'scripts/nocturnal/trainer';
+const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.resolve(MODULE_DIR, '..', '..', '..', '..');
 
 /**
  * Default hyperparameters for ORPO training.
@@ -253,7 +256,12 @@ export interface ExecuteTrainerParams {
  * 1. Validates the trainer script exists
  * 2. Serializes the experiment spec to JSON
  * 3. Invokes the Python backend
- * 4. Returns the trainer's output for validation
+ * 4. Returns the trainer's parsed result
+ *
+ * The trainer protocol:
+ * - stdout: MUST contain only the machine-readable JSON result (TrainingExperimentResult)
+ * - stderr: Contains training progress logs (ignored by plugin)
+ * - result file: Written to output dir as backup if stdout parsing fails
  *
  * NOTE: This is a fire-and-forget execution. The plugin does not poll
  * the trainer. For Phase 7, trainer execution is assumed to be synchronous
@@ -261,16 +269,17 @@ export interface ExecuteTrainerParams {
  *
  * @param spec - The experiment specification
  * @param scriptsDir - Override for the scripts directory
- * @returns The trainer's raw output (JSON string) or path to result file
+ * @returns The trainer's result as parsed JSON object
  *
  * @throws Error if the trainer script is not found
  * @throws Error if trainer execution fails
+ * @throws Error if result cannot be parsed
  */
 export async function executeTrainer(
   spec: TrainingExperimentSpec,
   scriptsDir?: string
-): Promise<string> {
-  const baseDir = scriptsDir ?? path.join(process.cwd(), TRAINER_SCRIPTS_DIR);
+): Promise<import('./external-training-contract.js').TrainingExperimentResult> {
+  const baseDir = scriptsDir ?? path.join(REPO_ROOT, TRAINER_SCRIPTS_DIR);
 
   // Map backend to script name
   const scriptMap: Record<TrainerBackendKind, string> = {
@@ -301,11 +310,24 @@ export async function executeTrainer(
   }
   fs.writeFileSync(specPath, specJson, 'utf-8');
 
+  // Result file path (written by trainer to output dir)
+  const resultFilePath = path.join(spec.outputDir, `result-${spec.experimentId}.json`);
+
   try {
     if (spec.backend === 'dry-run') {
-      // For dry-run, we can execute without the actual Python scripts
-      // Just validate the spec and return a mock result path
-      return specPath;
+      // For dry-run, simulate a successful dry-run result
+      // No actual Python script execution needed - dry-run just validates spec
+      return {
+        experimentId: spec.experimentId,
+        backend: 'dry-run',
+        status: 'dry_run' as const,
+        targetWorkerProfile: spec.targetWorkerProfile,
+        targetModelFamily: spec.targetModelFamily,
+        datasetFingerprint: spec.datasetFingerprint,
+        configFingerprint: spec.configFingerprint,
+        codeHash: spec.codeHash,
+        createdAt: new Date().toISOString(),
+      };
     }
 
     // Execute the Python trainer
@@ -320,10 +342,39 @@ export async function executeTrainer(
     });
 
     if (stderr) {
-      console.error(`[trainer] stderr: ${stderr}`);
+      // Training logs go to stderr - we don't process them, just log for debugging
+      console.error(`[trainer] training logs (stderr): ${stderr.substring(0, 500)}`);
     }
 
-    return stdout.trim();
+    // Try to parse stdout as JSON first
+    const trimmedStdout = stdout.trim();
+    if (trimmedStdout) {
+      try {
+        const result = JSON.parse(trimmedStdout);
+        return result as import('./external-training-contract.js').TrainingExperimentResult;
+      } catch {
+        // stdout wasn't clean JSON, try result file
+      }
+    }
+
+    // Fallback: try to read result file
+    if (fs.existsSync(resultFilePath)) {
+      try {
+        const resultContent = fs.readFileSync(resultFilePath, 'utf-8');
+        const result = JSON.parse(resultContent);
+        return result as import('./external-training-contract.js').TrainingExperimentResult;
+      } catch {
+        throw new Error(
+          `Failed to parse trainer result from stdout or result file: ${resultFilePath}. ` +
+            `stdout was: ${trimmedStdout.substring(0, 200)}`
+        );
+      }
+    }
+
+    throw new Error(
+      `Trainer output was not valid JSON and no result file found. ` +
+        `stdout: ${trimmedStdout.substring(0, 200)}, result file: ${resultFilePath}`
+    );
   } finally {
     // Clean up spec file after execution
     if (fs.existsSync(specPath)) {

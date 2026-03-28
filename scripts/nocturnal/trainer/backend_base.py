@@ -304,7 +304,10 @@ def main() -> None:
     backend = backend_class(spec)
     result = backend.run()
 
-    # Output result to stdout
+    # Save result to output directory as backup (in case stdout parsing fails on plugin side)
+    save_result(result, output_dir)
+
+    # Output result to stdout (machine-readable JSON only - no logs mixed in)
     print(json.dumps(result.to_dict(), indent=2))
 
 

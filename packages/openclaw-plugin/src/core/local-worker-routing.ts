@@ -41,6 +41,7 @@ import {
   getDeployment,
 } from './model-deployment-registry.js';
 import { isCheckpointDeployable } from './model-training-registry.js';
+import { getPromotionState } from './promotion-gate.js';
 
 // ---------------------------------------------------------------------------
 // Routing Input Contract
@@ -159,6 +160,31 @@ export interface RoutingDecision {
     /** Whether the active checkpoint is currently marked as deployable in the training registry. */
     checkpointDeployable: boolean;
   };
+
+  /**
+   * The active checkpoint ID that would be used for routing (if decision === 'route_local').
+   * This is the checkpoint from the deployment registry.
+   * Null if decision === 'stay_main' or if no checkpoint is active.
+   *
+   * USE FOR SHADOW OBSERVATIONS:
+   * When routing in shadow mode (checkpoint is in shadow_ready state),
+   * the caller should record a shadow observation using this checkpoint ID.
+   */
+  activeCheckpointId: string | null;
+
+  /**
+   * The promotion state of the active checkpoint.
+   * Indicates whether this is a regular deployment or a shadow rollout.
+   * Useful for determining whether to record shadow observations.
+   */
+  activeCheckpointState?: 'promotable' | 'shadow_ready' | 'candidate_only';
+
+  /**
+   * Deprecated: runtime shadow observations are now recorded from real
+   * subagent lifecycle hooks instead of from classifyTask().
+   */
+  shadowObservationId?: string;
+
 }
 
 // ---------------------------------------------------------------------------
@@ -647,6 +673,21 @@ export function classifyTask(
     }
   }
 
+  // --- Get active checkpoint ID and state for shadow observation integration ---
+  let activeCheckpointId: string | null = null;
+  let activeCheckpointState: 'promotable' | 'shadow_ready' | 'candidate_only' | null = null;
+
+  if (targetProfile && deploymentCheck.performed) {
+    const deployment = getDeployment(stateDir, targetProfile);
+    activeCheckpointId = deployment?.activeCheckpointId ?? null;
+    if (activeCheckpointId) {
+      const promotionState = getPromotionState(stateDir, activeCheckpointId);
+      if (promotionState === 'shadow_ready' || promotionState === 'promotable' || promotionState === 'candidate_only') {
+        activeCheckpointState = promotionState;
+      }
+    }
+  }
+
   return {
     decision,
     targetProfile: decision === 'route_local' ? targetProfile : null,
@@ -654,6 +695,9 @@ export function classifyTask(
     reason: finalReason,
     blockers: decision === 'stay_main' ? finalBlockers : [],
     deploymentCheck,
+    activeCheckpointId,
+    activeCheckpointState: activeCheckpointState ?? undefined,
+    shadowObservationId: undefined,
   };
 }
 

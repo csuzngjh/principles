@@ -36,6 +36,8 @@
  *   evaluator's actual assessment behavior, not from the benchmark harness.
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
 import type { ORPOSample, ScoredSample, ScorerAdapter, EvalMode } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -256,48 +258,200 @@ export const StructuralScorerAdapter: ScorerAdapter = {
 // ---------------------------------------------------------------------------
 
 /**
- * LocalModelScorerAdapter — placeholder for real model-based evaluation.
+ * LocalModelScorerAdapter — real model-based evaluation via Python backend.
  *
- * This adapter is the entry point for checkpoint-aware evaluation using a
- * real model. The checkpointRef is used to route to the appropriate
- * checkpoint-specific model variant.
+ * This adapter delegates to an external Python evaluator backend that:
+ * 1. Loads the base model + PEFT adapter from the checkpoint path
+ * 2. Runs inference on each sample
+ * 3. Computes preference scores based on log probability differences
  *
- * CURRENT IMPLEMENTATION: STUB
- * The stub returns a fixed score so the adapter contract is exercised in
- * the benchmark pipeline without requiring actual model inference.
- * Replace the stub body with real model inference when the evaluation
- * infrastructure is available.
- *
- * REQUIRED: Real implementation must call the actual model endpoint for
- * the specified checkpointRef and return the model's genuine assessment.
- * The score must reflect real model behavior, NOT synthetic bias.
+ * The checkpointRef is used to resolve the checkpoint path and base model.
+ * Resolution is handled by the Python backend using standard paths.
  */
-export const LOCAL_MODEL_SCORER_VERSION = '0.1.0-stub';
+export const LOCAL_MODEL_SCORER_VERSION = '0.1.0';
 
 /**
- * STUB IMPLEMENTATION — replace with real model inference.
- *
- * This stub exists to establish the ScorerAdapter contract in the pipeline.
- * It does NOT produce meaningful checkpoint-specific scores.
+ * Default path to the evaluator backend scripts.
  */
-async function stubModelScore(
-  _sample: ORPOSample,
-  _mode: EvalMode,
+const EVALUATOR_SCRIPTS_DIR = 'scripts/nocturnal/evaluator';
+
+/**
+ * Default base model family for evaluation (used when not specified in checkpoint).
+ */
+const DEFAULT_BASE_MODEL = process.env.NOCTURNAL_BASE_MODEL ?? 'Qwen/Qwen2.5-7B-Instruct';
+
+/**
+ * Default output directory for evaluator results.
+ */
+const EVALUATOR_OUTPUT_DIR = '.state/nocturnal/evaluator-output';
+
+function readEvaluatorResultFile(outputDir: string, requestId: string): any {
+  const resultPath = path.join(outputDir, `eval-result-${requestId}.json`);
+  if (!fs.existsSync(resultPath)) {
+    throw new Error(`Evaluator result file not found: ${resultPath}`);
+  }
+  return JSON.parse(fs.readFileSync(resultPath, 'utf-8'));
+}
+
+function parseEvaluatorOutput(stdout: string, outputDir: string, requestId: string): any {
+  const trimmedStdout = stdout.trim();
+  if (trimmedStdout) {
+    try {
+      return JSON.parse(trimmedStdout);
+    } catch {
+      // stdout may contain progress logs; fall through to result file
+    }
+  }
+  return readEvaluatorResultFile(outputDir, requestId);
+}
+
+/**
+ * Resolve a checkpointRef to its filesystem path.
+ *
+ * Resolution strategy:
+ * 1. If checkpointRef is an existing directory, use it as-is
+ * 2. If checkpointRef looks like an absolute or explicit relative path, use it
+ * 3. Otherwise, search for a matching checkpoint by scanning the standard
+ *    checkpoint root for a subdirectory whose metadata matches checkpointRef
+ *
+ * The evaluator backend expects the path to point to the checkpoint directory
+ * containing the adapter/ subdirectory with adapter weights.
+ */
+function resolveCheckpointPath(checkpointRef: string): string {
+  // Case 1: Already a valid directory - use as-is
+  if (fs.existsSync(checkpointRef) && fs.lstatSync(checkpointRef).isDirectory()) {
+    return checkpointRef;
+  }
+
+  // Case 2: Looks like an explicit path
+  if (checkpointRef.startsWith('/') || checkpointRef.startsWith('.') || checkpointRef.includes('\\')) {
+    return checkpointRef;
+  }
+
+  // Case 3: Search standard checkpoint root for matching checkpoint
+  // The trainer saves checkpoints as "checkpoint-<full-uuid>/" but returns
+  // "ckpt-<short-id>" as the checkpointRef. We scan for dirs whose
+  // metadata.json contains a matching checkpointId.
+  const standardRoot = path.join(process.cwd(), '.state', 'nocturnal', 'checkpoints');
+  if (fs.existsSync(standardRoot)) {
+    try {
+      const entries = fs.readdirSync(standardRoot, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const metaPath = path.join(standardRoot, entry.name, 'metadata.json');
+        if (fs.existsSync(metaPath)) {
+          const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+          // Match by checkpointId or checkpointRef (which is "ckpt-" + short id)
+          if (meta.checkpointId === checkpointRef ||
+              meta.checkpointRef === checkpointRef ||
+              (`ckpt-${meta.checkpointId.slice(0, 8)}` === checkpointRef)) {
+            return path.join(standardRoot, entry.name);
+          }
+        }
+      }
+    } catch {
+      // Scanning failed - fall through to return checkpointRef as-is
+    }
+  }
+
+  // Fallback: return as-is (evaluator will fail with clear error)
+  return checkpointRef;
+}
+
+/**
+ * Call the Python evaluator backend for a batch of samples.
+ *
+ * This function:
+ * 1. Writes an evaluation request JSON file
+ * 2. Invokes the Python evaluator
+ * 3. Parses and returns the result
+ *
+ * NOTE: This implementation scores one sample at a time by calling the backend
+ * per sample. For production, batching multiple samples per call would be more efficient.
+ */
+async function callEvaluator(
+  sample: ORPOSample,
+  mode: EvalMode,
   checkpointRef: string
-): Promise<number> {
-  // TODO (when real model inference is available):
-  // 1. Resolve checkpointRef to model endpoint / variant config
-  // 2. Construct prompt from sample (chosen/rejected/rationale)
-  // 3. Call model endpoint for each sample
-  // 4. Return model's genuine score (0.0–1.0)
-  //
-  // The stub below returns 0.5 so that runCompare() with two different
-  // checkpointRefs still shows the contract works, but produces no
-  // meaningful delta until real inference is plugged in.
-  void _sample;
-  void _mode;
-  void checkpointRef;
-  return 0.5;
+): Promise<{ score: number; justification: string }> {
+  const { exec } = await import('child_process');
+  const { promisify } = await import('util');
+  const execAsync = promisify(exec);
+  const os = await import('os');
+  const crypto = await import('crypto');
+
+  // Resolve the checkpoint path using the registry or standard paths
+  const resolvedPath = resolveCheckpointPath(checkpointRef);
+
+  // Create request ID and temp directory
+  const requestId = crypto.randomUUID();
+  const tempDir = path.join(os.tmpdir(), `nocturnal-eval-${requestId}`);
+  fs.mkdirSync(tempDir, { recursive: true });
+
+  try {
+    // Build evaluation request
+    const request = {
+      requestId,
+      checkpointRef,
+      checkpointPath: resolvedPath,
+      baseModelName: DEFAULT_BASE_MODEL,
+      samples: [
+        {
+          sampleFingerprint: sample.sampleFingerprint,
+          prompt: sample.prompt,
+          chosen: sample.chosen,
+          rejected: sample.rejected,
+          rationale: mode === 'reduced_prompt' ? '' : sample.rationale,
+        },
+      ],
+      mode,
+      adapterFormat: 'peft-adapter',
+    };
+
+    // Write request file
+    const requestPath = path.join(tempDir, `request-${requestId}.json`);
+    fs.writeFileSync(requestPath, JSON.stringify(request, null, 2), 'utf-8');
+
+    // Ensure output directory exists
+    const outputDir = path.join(process.cwd(), EVALUATOR_OUTPUT_DIR);
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true });
+    }
+
+    // Call Python evaluator
+    const scriptPath = path.join(process.cwd(), EVALUATOR_SCRIPTS_DIR, 'main.py');
+    const cmd = `python "${scriptPath}" --request "${requestPath}" --output-dir "${outputDir}"`;
+
+    const { stdout, stderr } = await execAsync(cmd, { timeout: 300000 }); // 5 min timeout
+
+    if (stderr) {
+      // Log warnings but don't fail on stderr
+      console.error(`[evaluator] stderr: ${stderr.substring(0, 300)}`);
+    }
+
+    const result = parseEvaluatorOutput(stdout, outputDir, requestId);
+
+    if (result.status === 'failed') {
+      throw new Error(`Evaluator failed: ${result.errorMessage}`);
+    }
+
+    if (!result.scores || result.scores.length === 0) {
+      throw new Error('Evaluator returned no scores');
+    }
+
+    const scoredSample = result.scores[0];
+    return {
+      score: scoredSample.score,
+      justification: scoredSample.justification,
+    };
+  } finally {
+    // Clean up temp directory
+    try {
+      fs.rmSync(tempDir, { recursive: true });
+    } catch {
+      // Ignore cleanup errors
+    }
+  }
 }
 
 export const LocalModelScorerAdapter: ScorerAdapter = {
@@ -309,20 +463,37 @@ export const LocalModelScorerAdapter: ScorerAdapter = {
     mode: EvalMode,
     checkpointRef?: string
   ): Promise<ScoredSample> {
-    const rawScore = await stubModelScore(sample, mode, checkpointRef ?? 'unknown');
-    const score = Math.round(Math.max(0.0, Math.min(1.0, rawScore)) * 1000) / 1000;
+    const ref = checkpointRef ?? 'unknown';
 
-    return {
-      sampleFingerprint: sample.sampleFingerprint,
-      score,
-      justification: `[local-model:${mode}:${checkpointRef ?? 'no-ref'}] stub score: ${score.toFixed(3)} — replace with real model inference`,
-      mode,
-      evaluator: {
-        type: 'local-model',
-        version: LOCAL_MODEL_SCORER_VERSION,
-        checkpointRef,
-      },
-    };
+    try {
+      const result = await callEvaluator(sample, mode, ref);
+
+      return {
+        sampleFingerprint: sample.sampleFingerprint,
+        score: result.score,
+        justification: result.justification,
+        mode,
+        evaluator: {
+          type: 'local-model',
+          version: LOCAL_MODEL_SCORER_VERSION,
+          checkpointRef: ref,
+        },
+      };
+    } catch (err) {
+      // Fail-safe: if evaluator fails, return 0.0 but log the error
+      console.error(`[LocalModelScorerAdapter] Evaluation failed for ${ref}: ${err}`);
+      return {
+        sampleFingerprint: sample.sampleFingerprint,
+        score: 0.0,
+        justification: `[local-model:${mode}:${ref}] evaluation failed: ${String(err)} — returning 0.0 as fail-safe`,
+        mode,
+        evaluator: {
+          type: 'local-model',
+          version: LOCAL_MODEL_SCORER_VERSION,
+          checkpointRef: ref,
+        },
+      };
+    }
   },
 };
 
@@ -353,3 +524,8 @@ export function getScorerAdapter(name: string): ScorerAdapter {
       );
   }
 }
+
+export const __internal = {
+  parseEvaluatorOutput,
+  resolveCheckpointPath,
+};

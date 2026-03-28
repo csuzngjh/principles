@@ -59,6 +59,10 @@ import {
 import {
   type TrainableWorkerProfile,
 } from './external-training-contract.js';
+import {
+  computeShadowStats,
+  type ShadowStats,
+} from './shadow-observation-registry.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -219,7 +223,8 @@ function readRegistry(stateDir: string): PromotionRegistry {
   try {
     const content = fs.readFileSync(registryPath, 'utf-8');
     return JSON.parse(content) as PromotionRegistry;
-  } catch {
+  } catch (err) {
+    console.warn(`[promotion-gate] Registry corrupted at ${registryPath}, recovering with empty state: ${String(err)}`);
     return { promotions: [] };
   }
 }
@@ -273,6 +278,8 @@ export interface PromotionGateResult {
     baseline: number;
     threshold: number;
     passed: boolean;
+    /** Source of the evidence: 'shadow' (real runtime) or 'eval-proxy' (fallback) */
+    source?: 'shadow' | 'eval-proxy';
   }[];
 
   /** Primary objective (delta) check */
@@ -388,40 +395,72 @@ export function evaluatePromotionGate(
   }
 
   // --- Check 5: Arbiter reject rate constraint ---
-  // For Phase 7, we use the eval's verdict as a proxy for arbiter reject rate
-  // In a full implementation, this would come from runtime telemetry
-  const arbiterRejectRate = evalSummary.verdict === 'fail' ? 1 : 0;
+  // PREFER real shadow evidence over eval verdict proxy
+  // Shadow evidence comes from actual runtime routing decisions
+  const shadowStats = computeShadowStats(stateDir, { checkpointId });
+  let arbiterRejectRate: number;
+  let arbiterRejectSource: 'shadow' | 'eval-proxy';
+
+  if (shadowStats && shadowStats.isStatisticallySignificant) {
+    // Use real shadow evidence: reject rate from shadow routing
+    arbiterRejectRate = shadowStats.rejectRate;
+    arbiterRejectSource = 'shadow';
+  } else {
+    // Fall back to eval verdict proxy (Phase 7 initial state)
+    // This is a coarse approximation: 'fail' verdict maps to 100% reject
+    arbiterRejectRate = evalSummary.verdict === 'fail' ? 1 : 0;
+    arbiterRejectSource = 'eval-proxy';
+  }
+
   const arbiterRejectCheck = {
     constraint: 'arbiterRejectRate',
     actual: arbiterRejectRate,
     baseline: baselineMetrics.arbiterRejectRate,
     threshold: baselineMetrics.arbiterRejectRate + allowedMargin,
     passed: arbiterRejectRate <= baselineMetrics.arbiterRejectRate + allowedMargin,
+    source: arbiterRejectSource,
   };
   constraintChecks.push(arbiterRejectCheck);
 
   if (!arbiterRejectCheck.passed) {
     blockers.push(
       `arbiterRejectRate regressed: ${arbiterRejectRate.toFixed(4)} > ${arbiterRejectCheck.threshold.toFixed(4)} ` +
-        `(baseline: ${baselineMetrics.arbiterRejectRate.toFixed(4)}, margin: ${allowedMargin})`
+        `(baseline: ${baselineMetrics.arbiterRejectRate.toFixed(4)}, margin: ${allowedMargin}) ` +
+        `[source: ${arbiterRejectSource}${shadowStats ? `, n=${shadowStats.totalCount}` : ''}]`
     );
   }
 
   // --- Check 6: Executability reject rate constraint ---
-  // Similarly, we use verdict as proxy
-  const executabilityRejectRate = evalSummary.verdict === 'fail' ? 0.1 : 0;
+  // PREFER real shadow evidence: escalation rate + profile rejection rate
+  let executabilityRejectRate: number;
+  let executabilityRejectSource: 'shadow' | 'eval-proxy';
+
+  if (shadowStats && shadowStats.isStatisticallySignificant) {
+    // Use real shadow evidence: escalation + profile rejection from routing
+    executabilityRejectRate = shadowStats.escalationRate + shadowStats.profileRejectedRate;
+    executabilityRejectSource = 'shadow';
+  } else {
+    // Fall back to eval verdict proxy
+    // This is a coarse approximation
+    executabilityRejectRate = evalSummary.verdict === 'fail' ? 0.1 : 0;
+    executabilityRejectSource = 'eval-proxy';
+  }
+
   const executabilityRejectCheck = {
     constraint: 'executabilityRejectRate',
     actual: executabilityRejectRate,
     baseline: baselineMetrics.executabilityRejectRate,
     threshold: baselineMetrics.executabilityRejectRate + allowedMargin,
     passed: executabilityRejectRate <= baselineMetrics.executabilityRejectRate + allowedMargin,
+    source: executabilityRejectSource,
   };
   constraintChecks.push(executabilityRejectCheck);
 
   if (!executabilityRejectCheck.passed) {
     blockers.push(
-      `executabilityRejectRate regressed: ${executabilityRejectRate.toFixed(4)} > ${executabilityRejectCheck.threshold.toFixed(4)}`
+      `executabilityRejectRate regressed: ${executabilityRejectRate.toFixed(4)} > ${executabilityRejectCheck.threshold.toFixed(4)} ` +
+        `(baseline: ${baselineMetrics.executabilityRejectRate.toFixed(4)}, margin: ${allowedMargin}) ` +
+        `[source: ${executabilityRejectSource}${shadowStats ? `, n=${shadowStats.totalCount}` : ''}]`
     );
   }
 

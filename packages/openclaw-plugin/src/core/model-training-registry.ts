@@ -220,7 +220,8 @@ function readRegistry(stateDir: string): ModelTrainingRegistry {
   try {
     const content = fs.readFileSync(registryPath, 'utf-8');
     return JSON.parse(content) as ModelTrainingRegistry;
-  } catch {
+  } catch (err) {
+    console.warn(`[model-training-registry] Registry corrupted at ${registryPath}, recovering with empty state: ${String(err)}`);
     return { trainingRuns: [], checkpoints: [], evalSummaries: [] };
   }
 }

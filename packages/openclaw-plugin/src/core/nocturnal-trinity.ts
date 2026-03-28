@@ -170,6 +170,8 @@ export interface TrinityDraftArtifact {
 export interface TrinityTelemetry {
   /** Whether Trinity or single-reflector was used */
   chainMode: 'trinity' | 'single-reflector';
+  /** Whether stub implementations were used (always true in Phase 8) */
+  usedStubs: boolean;
   /** Whether each stage passed */
   dreamerPassed: boolean;
   philosopherPassed: boolean;
@@ -508,8 +510,34 @@ export interface RunTrinityOptions {
  */
 export function runTrinity(options: RunTrinityOptions): TrinityResult {
   const { snapshot, principleId, config } = options;
+
+  // Fail-fast: real LLM-based Trinity stages are not yet implemented.
+  // If useStubs is explicitly false, the caller expects real model calls which don't exist.
+  if (!config.useStubs) {
+    const errorMsg = '[Trinity] Not Implemented: useStubs=false but real LLM-based Trinity stages are not yet implemented. Set useStubs=true to use stub implementations, or implement invokeDreamer/invokePhilosopher/invokeScribe first.';
+    const failures: TrinityStageFailure[] = [{ stage: 'dreamer', reason: errorMsg }];
+    const telemetry: TrinityTelemetry = {
+      chainMode: 'trinity',
+      usedStubs: false,  // No stub was called — we failed before invoking anything
+      dreamerPassed: false,
+      philosopherPassed: false,
+      scribePassed: false,
+      candidateCount: 0,
+      selectedCandidateIndex: -1,
+      stageFailures: [`Configuration: ${errorMsg}`],
+    };
+    console.error(`[Trinity] ERROR: ${errorMsg}`);
+    return {
+      success: false,
+      telemetry,
+      failures,
+      fallbackOccurred: false,
+    };
+  }
+
   const telemetry: TrinityTelemetry = {
     chainMode: 'trinity',
+    usedStubs: true,
     dreamerPassed: false,
     philosopherPassed: false,
     scribePassed: false,
@@ -520,10 +548,8 @@ export function runTrinity(options: RunTrinityOptions): TrinityResult {
 
   const failures: TrinityStageFailure[] = [];
 
-  // Step 1: Dreamer — generate candidates
-  const dreamerOutput = config.useStubs
-    ? invokeStubDreamer(snapshot, principleId, config.maxCandidates)
-    : invokeStubDreamer(snapshot, principleId, config.maxCandidates); // TODO: real call
+  // Step 1: Dreamer — generate candidates (stub)
+  const dreamerOutput = invokeStubDreamer(snapshot, principleId, config.maxCandidates);
 
   if (!dreamerOutput.valid || dreamerOutput.candidates.length === 0) {
     failures.push({
@@ -542,10 +568,8 @@ export function runTrinity(options: RunTrinityOptions): TrinityResult {
   telemetry.dreamerPassed = true;
   telemetry.candidateCount = dreamerOutput.candidates.length;
 
-  // Step 2: Philosopher — rank candidates
-  const philosopherOutput = config.useStubs
-    ? invokeStubPhilosopher(dreamerOutput, principleId)
-    : invokeStubPhilosopher(dreamerOutput, principleId); // TODO: real call
+  // Step 2: Philosopher — rank candidates (stub)
+  const philosopherOutput = invokeStubPhilosopher(dreamerOutput, principleId);
 
   if (!philosopherOutput.valid || philosopherOutput.judgments.length === 0) {
     failures.push({
@@ -563,10 +587,8 @@ export function runTrinity(options: RunTrinityOptions): TrinityResult {
 
   telemetry.philosopherPassed = true;
 
-  // Step 3: Scribe — produce final artifact using tournament selection
-  const draftArtifact = config.useStubs
-    ? invokeStubScribe(dreamerOutput, philosopherOutput, snapshot, principleId, telemetry, config)
-    : invokeStubScribe(dreamerOutput, philosopherOutput, snapshot, principleId, telemetry, config);
+  // Step 3: Scribe — produce final artifact using tournament selection (stub)
+  const draftArtifact = invokeStubScribe(dreamerOutput, philosopherOutput, snapshot, principleId, telemetry, config);
 
   if (!draftArtifact) {
     failures.push({
@@ -692,5 +714,5 @@ export function draftToArtifact(draft: TrinityDraftArtifact): {
 export const DEFAULT_TRINITY_CONFIG: TrinityConfig = {
   useTrinity: true,
   maxCandidates: 3,
-  useStubs: false,
+  useStubs: true,  // Stubs are the only implemented option; real LLM calls are TODO
 };

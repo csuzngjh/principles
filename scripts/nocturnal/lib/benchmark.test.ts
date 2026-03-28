@@ -19,8 +19,10 @@ import * as crypto from 'crypto';
 
 import {
   StructuralScorerAdapter,
+  LocalModelScorerAdapter,
   getScorerAdapter,
   STRUCTURAL_SCORER_VERSION,
+  __internal as scorerInternals,
 } from './scorer.js';
 
 import {
@@ -57,6 +59,8 @@ import type {
   EvalMode,
   SampleScore,
 } from './types.js';
+
+import { vi } from 'vitest';
 
 // ---------------------------------------------------------------------------
 // Test Fixtures
@@ -224,6 +228,33 @@ describe('Benchmark scorer', () => {
       // evaluator metadata confirms checkpointRef was accepted but not used
       expect(result1.evaluator.checkpointRef).toBeUndefined();
       expect(result2.evaluator.checkpointRef).toBeUndefined();
+    });
+  });
+
+  describe('LocalModelScorerAdapter protocol hardening', () => {
+    it('falls back to the evaluator result file when stdout contains logs', async () => {
+      const tmpDir = makeTmpDir();
+      const requestId = 'req-test-1';
+      const resultPath = path.join(tmpDir, `eval-result-${requestId}.json`);
+      fs.writeFileSync(
+        resultPath,
+        JSON.stringify({
+          requestId,
+          checkpointRef: 'ckpt-1',
+          status: 'completed',
+          scores: [{ sampleFingerprint: 'sf-1', score: 0.77, justification: 'from file', mode: 'reduced_prompt' }],
+        }),
+        'utf-8'
+      );
+
+      const parsed = scorerInternals.parseEvaluatorOutput(
+        '[peft-evaluator] loading checkpoint\n[peft-evaluator] scoring\n',
+        tmpDir,
+        requestId
+      );
+
+      expect(parsed.scores[0].score).toBe(0.77);
+      rmdir(tmpDir);
     });
   });
 });

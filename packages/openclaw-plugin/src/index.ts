@@ -18,6 +18,10 @@ import type {
   PluginHookBeforeMessageWriteEvent,
   PluginHookBeforeMessageWriteResult,
 } from './openclaw-sdk.js';
+import * as crypto from 'crypto';
+import type { WorkerProfile } from './core/model-deployment-registry.js';
+import { classifyTask } from './core/local-worker-routing.js';
+import { completeShadowObservation, recordShadowRouting } from './core/shadow-observation-registry.js';
 import { getCommandDescription } from './i18n/commands.js';
 import { handleBeforePromptBuild } from './hooks/prompt.js';
 import { handleBeforeToolCall } from './hooks/gate.js';
@@ -41,6 +45,8 @@ import { handlePrincipleRollbackCommand } from './commands/principle-rollback.js
 import { handleExportCommand } from './commands/export.js';
 import { handleSamplesCommand } from './commands/samples.js';
 import { handleNocturnalReviewCommand } from './commands/nocturnal-review.js';
+import { handleNocturnalTrainCommand } from './commands/nocturnal-train.js';
+import { handleNocturnalRolloutCommand } from './commands/nocturnal-rollout.js';
 import { EvolutionWorkerService } from './service/evolution-worker.js';
 import { TrajectoryService } from './service/trajectory-service.js';
 import { ensureWorkspaceTemplates } from './core/init.js';
@@ -52,6 +58,26 @@ import { createPrinciplesConsoleRoute } from './http/principles-console-route.js
 
 // Track initialization to avoid repeated calls
 let workspaceInitialized = false;
+
+// Map from childSessionKey → shadowObservationId
+// Used to complete shadow observations when subagent ends
+const pendingShadowObservations = new Map<string, string>();
+
+// PD local worker profiles that are managed by the shadow routing policy
+const PD_LOCAL_PROFILES = new Set<WorkerProfile>(['local-reader', 'local-editor']);
+
+function computeRuntimeShadowTaskFingerprint(event: PluginHookSubagentSpawningEvent): string {
+  const payload = {
+    childSessionKey: event.childSessionKey,
+    agentId: event.agentId,
+    label: event.label ?? '',
+    mode: event.mode,
+    threadRequested: event.threadRequested,
+    requesterChannel: event.requester?.channel ?? '',
+    requesterThreadId: event.requester?.threadId ?? '',
+  };
+  return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex').slice(0, 16);
+}
 
 const plugin = {
   name: "Principles Disciple",
@@ -168,9 +194,38 @@ const plugin = {
     // ── Hook: Subagent Loop Closure ──
     api.on(
       'subagent_spawning',
-      (_event: PluginHookSubagentSpawningEvent, _ctx: PluginHookSubagentContext): void | PluginHookSubagentSpawningResult => {
-        // No-op for now, just to satisfy the interface expected by tests.
-        return { status: 'ok' };
+      (event: PluginHookSubagentSpawningEvent, ctx: PluginHookSubagentContext): void | PluginHookSubagentSpawningResult => {
+        try {
+          const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
+          const { agentId, childSessionKey } = event;
+          // Only handle PD local worker profiles
+          if (!PD_LOCAL_PROFILES.has(agentId as WorkerProfile)) {
+            return { status: 'ok' };
+          }
+          // Use the real runtime hook to record shadow evidence. We still consult the
+          // routing/deployment state here, but the observation itself must originate
+          // from actual subagent execution rather than an operator command path.
+          const routingInput = { targetProfile: agentId as WorkerProfile };
+          const decision = classifyTask(routingInput, workspaceDir);
+          const shouldRecordShadow =
+            decision.activeCheckpointState === 'shadow_ready' &&
+            !!decision.activeCheckpointId &&
+            decision.deploymentCheck.routingEnabled &&
+            decision.deploymentCheck.checkpointDeployable;
+
+          if (shouldRecordShadow) {
+            const observation = recordShadowRouting(workspaceDir, {
+              checkpointId: decision.activeCheckpointId!,
+              workerProfile: agentId as WorkerProfile,
+              taskFingerprint: computeRuntimeShadowTaskFingerprint(event),
+            });
+            pendingShadowObservations.set(childSessionKey, observation.observationId);
+          }
+          return { status: 'ok' };
+        } catch (err) {
+          api.logger.error(`[PD] Error in subagent_spawning shadow routing: ${String(err)}`);
+          return { status: 'ok' }; // Don't block spawn on shadow observation errors
+        }
       }
     );
 
@@ -179,6 +234,25 @@ const plugin = {
       (event: PluginHookSubagentEndedEvent, ctx: PluginHookSubagentContext): void => {
         try {
           const workspaceDir = api.resolvePath('.');
+          // Complete any pending shadow observation for this subagent session
+          const shadowObsId = pendingShadowObservations.get(event.targetSessionKey);
+          if (shadowObsId && workspaceDir) {
+            try {
+              const outcome = event.outcome === 'ok'
+                ? 'accepted'
+                : event.outcome === 'error'
+                  ? 'rejected'
+                  : 'escalated';
+              completeShadowObservation(workspaceDir, {
+                observationId: shadowObsId,
+                outcome,
+                failureSignals: event.outcome === 'error' ? { threwException: true, timedOut: false, invalidOutput: false, profileRejected: false, extra: {} } : undefined,
+              });
+              pendingShadowObservations.delete(event.targetSessionKey);
+            } catch (err) {
+              api.logger.error(`[PD] Failed to complete shadow observation: ${String(err)}`);
+            }
+          }
           handleSubagentEnded(event, { ...ctx, workspaceDir, api });
         } catch (err) {
           api.logger.error(`[PD] Error in subagent_ended: ${String(err)}`);
@@ -547,6 +621,38 @@ const plugin = {
         } catch (err) {
           api.logger.error(`[PD] Command /pd-nocturnal-review failed: ${String(err)}`);
           return { text: language === 'zh' ? "Nocturnal review 命令执行失败，请检查日志。" : "Nocturnal review command failed. Check logs." };
+        }
+      }
+    });
+
+    api.registerCommand({
+      name: "nocturnal-train",
+      description: 'Nocturnal training operations [create-experiment|show-experiment|import-result|attach-eval|show-lineage|list-experiments|list-checkpoints|stats]',
+      acceptsArgs: true,
+      handler: (ctx) => {
+        try {
+          const workspaceDir = api.resolvePath('.');
+          if (ctx.config) ctx.config.workspaceDir = workspaceDir;
+          return handleNocturnalTrainCommand(ctx);
+        } catch (err) {
+          api.logger.error(`[PD] Command /nocturnal-train failed: ${String(err)}`);
+          return { text: language === 'zh' ? "Nocturnal train 命令执行失败，请检查日志。" : "Nocturnal train command failed. Check logs." };
+        }
+      }
+    });
+
+    api.registerCommand({
+      name: "nocturnal-rollout",
+      description: 'Nocturnal rollout and promotion [evaluate-promotion|advance-promotion|bind|enable-routing|disable-routing|rollback|status|show-promotion]',
+      acceptsArgs: true,
+      handler: (ctx) => {
+        try {
+          const workspaceDir = api.resolvePath('.');
+          if (ctx.config) ctx.config.workspaceDir = workspaceDir;
+          return handleNocturnalRolloutCommand(ctx);
+        } catch (err) {
+          api.logger.error(`[PD] Command /nocturnal-rollout failed: ${String(err)}`);
+          return { text: language === 'zh' ? "Nocturnal rollout 命令执行失败，请检查日志。" : "Nocturnal rollout command failed. Check logs." };
         }
       }
     });

@@ -213,8 +213,9 @@ function readRegistry(workspaceDir: string): NocturnalDatasetRecord[] {
   try {
     const content = fs.readFileSync(registryPath, 'utf-8');
     return JSON.parse(content) as NocturnalDatasetRecord[];
-  } catch {
-    // Corrupted registry — fail-safe to empty array
+  } catch (err) {
+    // Corrupted registry — fail-safe to empty array, but log the problem
+    console.warn(`[nocturnal-dataset] Registry corrupted at ${registryPath}, recovering with empty state: ${String(err)}`);
     return [];
   }
 }
