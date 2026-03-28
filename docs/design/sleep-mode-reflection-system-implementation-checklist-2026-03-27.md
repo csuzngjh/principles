@@ -370,27 +370,73 @@ Acceptance:
 
 Goal: complete the first end-to-end training cycle and deploy only to bounded local workers.
 
-### Task 7.1: External trainer contract
+Phase 7 must be executed with these additional locked constraints:
+
+- ORPO-first training path
+- backend-pluggable external trainer
+- `PEFT + TRL` as the stable semantic contract
+- `Unsloth` as a compatible acceleration backend, not the only backend
+- `hf-mount` only as optional trainer/evaluator infrastructure
+- no main-agent training
+- CPU-only is experimental, not a guaranteed production-training tier
+- first rollout only targets bounded local workers
+
+Authoritative Phase 7 specs:
+
+- `docs/spec/nocturnal-research-program.md`
+- `docs/spec/nocturnal-training-contract.md`
+- `docs/spec/nocturnal-promotion-policy.md`
+- `docs/spec/nocturnal-phase7-task-pack.md`
+
+### Task 7.1: Research program alignment
 
 Files:
+- Add: `docs/spec/nocturnal-research-program.md`
 - Add: `docs/spec/nocturnal-training-contract.md`
+- Add: `docs/spec/nocturnal-promotion-policy.md`
+- Add: `docs/spec/nocturnal-phase7-task-pack.md`
 - Add scripts/config outside plugin as needed
 
 Deliverables:
 - one model family target
+- hardware tier policy
 - dataset contract
 - checkpoint naming and registration contract
+- explicit search-space policy
 
-### Task 7.2: Shadow deployment
+### Task 7.2: Plugin-side training contract
+
+Files:
+- add external training contract and registry integration modules
+- add tests
+
+Deliverables:
+- normalized experiment spec/result contract
+- backend enum for `peft-trl-orpo`, `unsloth-orpo`, `dry-run`
+- lineage recording for dataset/config/code hash
+
+### Task 7.3: External trainer backends
+
+Files:
+- add trainer scripts/config outside plugin
+- add smoke tests or fixture-based contract tests
+
+Deliverables:
+- PEFT/TRT ORPO backend
+- Unsloth ORPO backend
+- dry-run backend
+
+### Task 7.4: Shadow deployment and promotion gate
 
 Files:
 - deployment registry updates
 - runtime metrics hooks if needed
 
 Acceptance:
-- new checkpoint runs only on selected local worker profile
+- new checkpoint runs only on selected bounded local worker profile
 - orchestrator review remains mandatory
 - rollback path tested
+- promotion is gated by benchmark and runtime evidence, not just training success
 
 ## Done Definition for the Entire Initiative
 

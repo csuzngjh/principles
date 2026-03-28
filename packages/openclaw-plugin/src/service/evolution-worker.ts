@@ -13,6 +13,8 @@ import { acquireLockAsync, releaseLock, type LockContext } from '../utils/file-l
 import { getEvolutionLogger, type EvolutionStage } from '../core/evolution-logger.js';
 import { DIAGNOSTICIAN_PROTOCOL_SUMMARY } from '../constants/diagnostician.js';
 import { LockUnavailableError } from '../config/index.js';
+import { checkWorkspaceIdle, checkCooldown } from './nocturnal-runtime.js';
+import { executeNocturnalReflectionAsync } from './nocturnal-service.js';
 
 let intervalId: NodeJS.Timeout | null = null;
 let timeoutId: NodeJS.Timeout | null = null;
@@ -279,6 +281,64 @@ export function hasEquivalentPromotedRule(dictionary: { getAllRules(): Record<st
     });
 }
 
+/**
+ * Enqueue a sleep_reflection task if one is not already pending.
+ * Phase 2.4: Called when workspace is idle to trigger nocturnal reflection.
+ */
+async function enqueueSleepReflectionTask(
+    wctx: WorkspaceContext,
+    logger: any
+): Promise<void> {
+    const queuePath = wctx.resolve('EVOLUTION_QUEUE');
+    const releaseLock = await requireQueueLock(queuePath, logger, 'enqueueSleepReflection', EVOLUTION_QUEUE_LOCK_SUFFIX);
+
+    try {
+        let rawQueue: any[] = [];
+        try {
+            rawQueue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
+        } catch {
+            // Queue doesn't exist yet - create empty array
+            rawQueue = [];
+        }
+
+        const queue: EvolutionQueueItem[] = migrateQueueToV2(rawQueue);
+
+        // Check if a sleep_reflection task is already pending
+        const hasPendingSleepReflection = queue.some(
+            t => t.taskKind === 'sleep_reflection' && (t.status === 'pending' || t.status === 'in_progress')
+        );
+        if (hasPendingSleepReflection) {
+            logger?.debug?.('[PD:EvolutionWorker] sleep_reflection task already pending/in-progress, skipping');
+            return;
+        }
+
+        const now = Date.now();
+        const taskId = createEvolutionTaskId('nocturnal', 50, 'idle workspace', 'Sleep-mode reflection', now);
+        const nowIso = new Date(now).toISOString();
+
+        queue.push({
+            id: taskId,
+            taskKind: 'sleep_reflection',
+            priority: 'medium',
+            score: 50,
+            source: 'nocturnal',
+            reason: 'Sleep-mode reflection triggered by idle workspace',
+            trigger_text_preview: 'Idle workspace detected',
+            timestamp: nowIso,
+            enqueued_at: nowIso,
+            status: 'pending',
+            traceId: taskId,
+            retryCount: 0,
+            maxRetries: 1, // sleep_reflection doesn't retry
+        });
+
+        fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+        logger?.info?.(`[PD:EvolutionWorker] Enqueued sleep_reflection task ${taskId}`);
+    } finally {
+        releaseLock();
+    }
+}
+
 async function checkPainFlag(wctx: WorkspaceContext, logger: any) {
     try {
         const painFlagPath = wctx.resolve('PAIN_FLAG');
@@ -423,7 +483,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
         // V2: Migrate queue to current schema if needed
         const queue: EvolutionQueueItem[] = migrateQueueToV2(rawQueue);
 
-        let queueChanged = isLegacyQueueItem(rawQueue);
+        let queueChanged = rawQueue.some(isLegacyQueueItem);
 
         const config = wctx.config;
         const timeout = config.get('intervals.task_timeout_ms') || (60 * 60 * 1000); // Default 1 hour
@@ -516,8 +576,49 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
         }
 
         // V2: Only process pain_diagnosis tasks for HEARTBEAT injection
-        // sleep_reflection tasks are handled by nocturnal service (not implemented yet)
+        // sleep_reflection tasks are handled by nocturnal service (Phase 2.4)
         const pendingTasks = queue.filter(t => t.status === 'pending' && t.taskKind === 'pain_diagnosis');
+
+        // Phase 2.4: Process sleep_reflection tasks
+        for (const sleepTask of queue.filter(t => t.status === 'pending' && t.taskKind === 'sleep_reflection')) {
+            const nowIso = new Date().toISOString();
+            sleepTask.status = 'in_progress';
+            sleepTask.started_at = nowIso;
+            queueChanged = true;
+
+            try {
+                logger?.info?.(`[PD:EvolutionWorker] Processing sleep_reflection task ${sleepTask.id}`);
+
+                // Call the nocturnal reflection service
+                const result = await executeNocturnalReflectionAsync(wctx.workspaceDir, wctx.stateDir);
+
+                if (result.success && result.artifact) {
+                    sleepTask.status = 'completed';
+                    sleepTask.completed_at = new Date().toISOString();
+                    sleepTask.resolution = 'marker_detected';
+                    sleepTask.resultRef = result.diagnostics.persistedPath;
+                    logger?.info?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} completed successfully`);
+                } else {
+                    // Record failure with skip reason
+                    const skipReason = result.skipReason || (result.noTargetSelected ? 'no_target' : 'validation_failed');
+                    sleepTask.status = 'failed';
+                    sleepTask.completed_at = new Date().toISOString();
+                    sleepTask.resolution = 'failed_max_retries';
+                    sleepTask.lastError = `Nocturnal reflection failed: ${result.validationFailures.join('; ') || skipReason}`;
+                    sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
+                    logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} failed: ${sleepTask.lastError}`);
+                }
+            } catch (taskErr) {
+                sleepTask.status = 'failed';
+                sleepTask.completed_at = new Date().toISOString();
+                sleepTask.resolution = 'failed_max_retries';
+                sleepTask.lastError = String(taskErr);
+                sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
+                logger?.error?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} threw: ${taskErr}`);
+            }
+
+            queueChanged = true;
+        }
 
         if (pendingTasks.length > 0) {
             // V2: Also sort by priority within same score
@@ -857,6 +958,23 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
 
         intervalId = setInterval(() => {
             void (async () => {
+                // V2: Nocturnal idle check — logs workspace idle state on each cycle.
+                // This makes nocturnal-runtime a visible part of the worker lifecycle.
+                // Phase 2.4: Enqueue sleep_reflection when workspace is idle and not in cooldown.
+                const idleResult = checkWorkspaceIdle(wctx.workspaceDir, {});
+                if (idleResult.isIdle) {
+                    logger?.debug?.(`[PD:EvolutionWorker] Workspace idle (${idleResult.idleForMs}ms since last activity)`);
+                    // Phase 2.4: Enqueue sleep_reflection task if not in global cooldown
+                    const cooldown = checkCooldown(wctx.stateDir);
+                    if (!cooldown.globalCooldownActive && !cooldown.quotaExhausted) {
+                        enqueueSleepReflectionTask(wctx, logger).catch((err) => {
+                            logger?.error?.(`[PD:EvolutionWorker] Failed to enqueue sleep_reflection task: ${String(err)}`);
+                        });
+                    }
+                } else {
+                    logger?.debug?.(`[PD:EvolutionWorker] Workspace active (last activity ${idleResult.idleForMs}ms ago)`);
+                }
+
                 await checkPainFlag(wctx, logger);
                 await processEvolutionQueue(wctx, logger, eventLog);
                 if (api) {

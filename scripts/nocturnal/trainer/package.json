@@ -1,0 +1,13 @@
+{
+  "name": "@principles/nocturnal-trainer",
+  "version": "0.1.0",
+  "description": "Nocturnal external trainer backends",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dry-run": "python trainer/main.py --spec experiment.json --output-dir /tmp/nocturnal-test"
+  },
+  "devDependencies": {},
+  "dependencies": {}
+}

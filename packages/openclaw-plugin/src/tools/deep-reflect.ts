@@ -20,9 +20,10 @@ function writeToReflectionLog(
     depth?: number
 ): void {
     const reflectionLogPath = resolvePdPath(workspaceDir, 'REFLECTION_LOG');
+
+    // Ensure memory directory exists (backward-compatible: create if missing)
+    // Note: resolvePdPath returns the full path; ensure parent dir exists
     const memoryDir = path.dirname(reflectionLogPath);
-    
-    // Ensure memory directory exists
     if (!fs.existsSync(memoryDir)) {
         fs.mkdirSync(memoryDir, { recursive: true });
     }

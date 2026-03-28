@@ -1,0 +1,688 @@
+import { describe, it, expect } from 'vitest';
+import {
+  runTrinity,
+  validateDraftArtifact,
+  draftToArtifact,
+  DEFAULT_TRINITY_CONFIG,
+  type TrinityConfig,
+  type DreamerOutput,
+  type PhilosopherOutput,
+  type TrinityDraftArtifact,
+} from '../../src/core/nocturnal-trinity.js';
+import {
+  validateDreamerOutput,
+  validatePhilosopherOutput,
+  validateTrinityDraft,
+} from '../../src/core/nocturnal-arbiter.js';
+
+// ---------------------------------------------------------------------------
+// Test Fixtures
+// ---------------------------------------------------------------------------
+
+function makeSnapshot(overrides: Partial<{
+  failureCount: number;
+  totalPainEvents: number;
+  totalGateBlocks: number;
+}> = {}): {
+  sessionId: string;
+  stats: { failureCount: number; totalPainEvents: number; totalGateBlocks: number; totalAssistantTurns: number; totalToolCalls: number };
+} {
+  return {
+    sessionId: 'session-test-123',
+    stats: {
+      failureCount: overrides.failureCount ?? 0,
+      totalPainEvents: overrides.totalPainEvents ?? 0,
+      totalGateBlocks: overrides.totalGateBlocks ?? 0,
+      totalAssistantTurns: 5,
+      totalToolCalls: 10,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Tests: validateDreamerOutput
+// ---------------------------------------------------------------------------
+
+describe('validateDreamerOutput', () => {
+  it('passes a valid Dreamer output with candidates', () => {
+    const output = {
+      valid: true,
+      candidates: [
+        {
+          candidateIndex: 0,
+          badDecision: 'Did something wrong',
+          betterDecision: 'Do it right',
+          rationale: 'Because the principle says so',
+          confidence: 0.9,
+        },
+      ],
+      generatedAt: '2026-03-27T12:00:00.000Z',
+    };
+    const result = validateDreamerOutput(output);
+    expect(result.valid).toBe(true);
+    expect(result.failures).toHaveLength(0);
+  });
+
+  it('passes a valid Dreamer output with multiple candidates', () => {
+    const output = {
+      valid: true,
+      candidates: [
+        {
+          candidateIndex: 0,
+          badDecision: 'Did something wrong',
+          betterDecision: 'Do it right',
+          rationale: 'Because the principle says so',
+          confidence: 0.9,
+        },
+        {
+          candidateIndex: 1,
+          badDecision: 'Did another wrong thing',
+          betterDecision: 'Do it differently',
+          rationale: 'Alternative approach is better',
+          confidence: 0.8,
+        },
+      ],
+      generatedAt: '2026-03-27T12:00:00.000Z',
+    };
+    const result = validateDreamerOutput(output);
+    expect(result.valid).toBe(true);
+    expect(result.failures).toHaveLength(0);
+  });
+
+  it('rejects Dreamer output marked invalid', () => {
+    const output = {
+      valid: false,
+      candidates: [],
+      reason: 'No signal found',
+      generatedAt: '2026-03-27T12:00:00.000Z',
+    };
+    const result = validateDreamerOutput(output);
+    expect(result.valid).toBe(false);
+    expect(result.failures.some(f => f.includes('marked invalid'))).toBe(true);
+  });
+
+  it('rejects Dreamer output marked invalid without reason', () => {
+    const output = {
+      valid: false,
+      candidates: [],
+      generatedAt: '2026-03-27T12:00:00.000Z',
+    };
+    const result = validateDreamerOutput(output);
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects Dreamer output without candidates array', () => {
+    const output = {
+      valid: true,
+      generatedAt: '2026-03-27T12:00:00.000Z',
+    };
+    const result = validateDreamerOutput(output);
+    expect(result.valid).toBe(false);
+    expect(result.failures.some(f => f.includes('candidates array'))).toBe(true);
+  });
+
+  it('rejects Dreamer candidate missing required fields', () => {
+    const output = {
+      valid: true,
+      candidates: [
+        {
+          candidateIndex: 0,
+          badDecision: 'Has badDecision but missing betterDecision',
+          // missing: betterDecision, rationale, confidence
+        },
+      ],
+      generatedAt: '2026-03-27T12:00:00.000Z',
+    };
+    const result = validateDreamerOutput(output);
+    expect(result.valid).toBe(false);
+    expect(result.failures.some(f => f.includes('betterDecision'))).toBe(true);
+    expect(result.failures.some(f => f.includes('rationale'))).toBe(true);
+    expect(result.failures.some(f => f.includes('confidence'))).toBe(true);
+  });
+
+  it('rejects Dreamer candidate with invalid confidence (out of range)', () => {
+    const output = {
+      valid: true,
+      candidates: [
+        {
+          candidateIndex: 0,
+          badDecision: 'Wrong',
+          betterDecision: 'Right',
+          rationale: 'Because',
+          confidence: 1.5, // out of range
+        },
+      ],
+      generatedAt: '2026-03-27T12:00:00.000Z',
+    };
+    const result = validateDreamerOutput(output);
+    expect(result.valid).toBe(false);
+    expect(result.failures.some(f => f.includes('confidence'))).toBe(true);
+  });
+
+  it('rejects Dreamer candidate with duplicate candidateIndex', () => {
+    const output = {
+      valid: true,
+      candidates: [
+        {
+          candidateIndex: 0,
+          badDecision: 'Wrong 1',
+          betterDecision: 'Right 1',
+          rationale: 'Because 1',
+          confidence: 0.9,
+        },
+        {
+          candidateIndex: 0, // duplicate
+          badDecision: 'Wrong 2',
+          betterDecision: 'Right 2',
+          rationale: 'Because 2',
+          confidence: 0.8,
+        },
+      ],
+      generatedAt: '2026-03-27T12:00:00.000Z',
+    };
+    const result = validateDreamerOutput(output);
+    expect(result.valid).toBe(false);
+    expect(result.failures.some(f => f.includes('duplicate'))).toBe(true);
+  });
+
+  it('rejects Dreamer candidate with identical badDecision and betterDecision', () => {
+    const output = {
+      valid: true,
+      candidates: [
+        {
+          candidateIndex: 0,
+          badDecision: 'Do the same thing',
+          betterDecision: 'Do the same thing', // identical
+          rationale: 'Because it is correct',
+          confidence: 0.9,
+        },
+      ],
+      generatedAt: '2026-03-27T12:00:00.000Z',
+    };
+    const result = validateDreamerOutput(output);
+    expect(result.valid).toBe(false);
+    expect(result.failures.some(f => f.includes('identical'))).toBe(true);
+  });
+
+  it('rejects Dreamer output missing generatedAt', () => {
+    const output = {
+      valid: true,
+      candidates: [
+        {
+          candidateIndex: 0,
+          badDecision: 'Wrong',
+          betterDecision: 'Right',
+          rationale: 'Because',
+          confidence: 0.9,
+        },
+      ],
+      // missing generatedAt
+    };
+    const result = validateDreamerOutput(output);
+    expect(result.valid).toBe(false);
+    expect(result.failures.some(f => f.includes('generatedAt'))).toBe(true);
+  });
+
+  it('rejects non-object input', () => {
+    const result = validateDreamerOutput(null);
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects string input', () => {
+    const result = validateDreamerOutput('not an object');
+    expect(result.valid).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: validatePhilosopherOutput
+// ---------------------------------------------------------------------------
+
+describe('validatePhilosopherOutput', () => {
+  it('passes a valid Philosopher output', () => {
+    const output = {
+      valid: true,
+      judgments: [
+        {
+          candidateIndex: 0,
+          critique: 'Strong alignment',
+          principleAligned: true,
+          score: 0.92,
+          rank: 1,
+        },
+      ],
+      overallAssessment: 'Good candidate set',
+      generatedAt: '2026-03-27T12:00:00.000Z',
+    };
+    const result = validatePhilosopherOutput(output);
+    expect(result.valid).toBe(true);
+    expect(result.failures).toHaveLength(0);
+  });
+
+  it('rejects Philosopher output marked invalid', () => {
+    const output = {
+      valid: false,
+      judgments: [],
+      reason: 'No candidates to judge',
+      generatedAt: '2026-03-27T12:00:00.000Z',
+    };
+    const result = validatePhilosopherOutput(output);
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects Philosopher output without judgments array', () => {
+    const output = {
+      valid: true,
+      overallAssessment: 'Good',
+      generatedAt: '2026-03-27T12:00:00.000Z',
+    };
+    const result = validatePhilosopherOutput(output);
+    expect(result.valid).toBe(false);
+    expect(result.failures.some(f => f.includes('judgments array'))).toBe(true);
+  });
+
+  it('rejects Philosopher judgment missing required fields', () => {
+    const output = {
+      valid: true,
+      judgments: [
+        {
+          candidateIndex: 0,
+          // missing: critique, principleAligned, score, rank
+        },
+      ],
+      overallAssessment: 'Good',
+      generatedAt: '2026-03-27T12:00:00.000Z',
+    };
+    const result = validatePhilosopherOutput(output);
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects Philosopher judgment with invalid score (out of range)', () => {
+    const output = {
+      valid: true,
+      judgments: [
+        {
+          candidateIndex: 0,
+          critique: 'Good',
+          principleAligned: true,
+          score: 1.5, // out of range
+          rank: 1,
+        },
+      ],
+      overallAssessment: 'Good',
+      generatedAt: '2026-03-27T12:00:00.000Z',
+    };
+    const result = validatePhilosopherOutput(output);
+    expect(result.valid).toBe(false);
+    expect(result.failures.some(f => f.includes('score'))).toBe(true);
+  });
+
+  it('rejects Philosopher judgment with invalid rank (must be >= 1)', () => {
+    const output = {
+      valid: true,
+      judgments: [
+        {
+          candidateIndex: 0,
+          critique: 'Good',
+          principleAligned: true,
+          score: 0.9,
+          rank: 0, // invalid
+        },
+      ],
+      overallAssessment: 'Good',
+      generatedAt: '2026-03-27T12:00:00.000Z',
+    };
+    const result = validatePhilosopherOutput(output);
+    expect(result.valid).toBe(false);
+    expect(result.failures.some(f => f.includes('rank'))).toBe(true);
+  });
+
+  it('rejects Philosopher output with non-sequential ranks', () => {
+    const output = {
+      valid: true,
+      judgments: [
+        {
+          candidateIndex: 0,
+          critique: 'Good',
+          principleAligned: true,
+          score: 0.9,
+          rank: 1,
+        },
+        {
+          candidateIndex: 1,
+          critique: 'Also good',
+          principleAligned: true,
+          score: 0.8,
+          rank: 3, // should be 2
+        },
+      ],
+      overallAssessment: 'Good',
+      generatedAt: '2026-03-27T12:00:00.000Z',
+    };
+    const result = validatePhilosopherOutput(output);
+    expect(result.valid).toBe(false);
+    expect(result.failures.some(f => f.includes('sequential ranks'))).toBe(true);
+  });
+
+  it('rejects Philosopher output missing overallAssessment', () => {
+    const output = {
+      valid: true,
+      judgments: [
+        {
+          candidateIndex: 0,
+          critique: 'Good',
+          principleAligned: true,
+          score: 0.9,
+          rank: 1,
+        },
+      ],
+      // missing overallAssessment
+      generatedAt: '2026-03-27T12:00:00.000Z',
+    };
+    const result = validatePhilosopherOutput(output);
+    expect(result.valid).toBe(false);
+    expect(result.failures.some(f => f.includes('overallAssessment'))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: validateTrinityDraft
+// ---------------------------------------------------------------------------
+
+describe('validateTrinityDraft', () => {
+  function makeValidDraft(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      selectedCandidateIndex: 0,
+      badDecision: 'Did something wrong',
+      betterDecision: 'Do it right',
+      rationale: 'Because the principle says so and this is the right approach',
+      sessionId: 'session-test-123',
+      principleId: 'T-01',
+      sourceSnapshotRef: 'snapshot-test-001',
+      telemetry: {
+        chainMode: 'trinity',
+        dreamerPassed: true,
+        philosopherPassed: true,
+        scribePassed: true,
+        candidateCount: 3,
+        selectedCandidateIndex: 0,
+        stageFailures: [],
+      },
+      ...overrides,
+    };
+  }
+
+  it('passes a valid Trinity draft artifact', () => {
+    const draft = makeValidDraft();
+    const result = validateTrinityDraft(draft);
+    expect(result.valid).toBe(true);
+    expect(result.failures).toHaveLength(0);
+  });
+
+  it('rejects draft with missing badDecision', () => {
+    const draft = makeValidDraft();
+    delete draft.badDecision;
+    const result = validateTrinityDraft(draft);
+    expect(result.valid).toBe(false);
+    expect(result.failures.some(f => f.includes('badDecision'))).toBe(true);
+  });
+
+  it('rejects draft with empty badDecision', () => {
+    const draft = makeValidDraft({ badDecision: '   ' });
+    const result = validateTrinityDraft(draft);
+    expect(result.valid).toBe(false);
+    expect(result.failures.some(f => f.includes('badDecision'))).toBe(true);
+  });
+
+  it('rejects draft with short rationale (< 20 chars)', () => {
+    const draft = makeValidDraft({ rationale: 'Too short' });
+    const result = validateTrinityDraft(draft);
+    expect(result.valid).toBe(false);
+    expect(result.failures.some(f => f.includes('rationale'))).toBe(true);
+  });
+
+  it('rejects draft with identical badDecision and betterDecision', () => {
+    const draft = makeValidDraft({
+      badDecision: 'Same thing',
+      betterDecision: 'Same thing',
+    });
+    const result = validateTrinityDraft(draft);
+    expect(result.valid).toBe(false);
+    expect(result.failures.some(f => f.includes('identical'))).toBe(true);
+  });
+
+  it('rejects draft with invalid telemetry', () => {
+    const draft = makeValidDraft({ telemetry: null });
+    const result = validateTrinityDraft(draft);
+    expect(result.valid).toBe(false);
+    expect(result.failures.some(f => f.includes('telemetry'))).toBe(true);
+  });
+
+  it('rejects draft with invalid chainMode in telemetry', () => {
+    const draft = makeValidDraft({
+      telemetry: {
+        chainMode: 'invalid-mode', // must be 'trinity' or 'single-reflector'
+        dreamerPassed: true,
+        philosopherPassed: true,
+        scribePassed: true,
+        candidateCount: 3,
+        selectedCandidateIndex: 0,
+        stageFailures: [],
+      },
+    });
+    const result = validateTrinityDraft(draft);
+    expect(result.valid).toBe(false);
+    expect(result.failures.some(f => f.includes('chainMode'))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: runTrinity — successful path
+// ---------------------------------------------------------------------------
+
+describe('runTrinity', () => {
+  it('produces a successful Trinity result with valid snapshot (failure signal)', () => {
+    const snapshot = makeSnapshot({ failureCount: 2 });
+    const config: TrinityConfig = {
+      useTrinity: true,
+      maxCandidates: 3,
+      useStubs: true, // Use stub implementations
+    };
+
+    const result = runTrinity({ snapshot, principleId: 'T-08', config });
+
+    expect(result.success).toBe(true);
+    expect(result.artifact).toBeDefined();
+    expect(result.telemetry.chainMode).toBe('trinity');
+    expect(result.telemetry.dreamerPassed).toBe(true);
+    expect(result.telemetry.philosopherPassed).toBe(true);
+    expect(result.telemetry.scribePassed).toBe(true);
+    expect(result.telemetry.candidateCount).toBeGreaterThan(0);
+    expect(result.telemetry.selectedCandidateIndex).toBeGreaterThanOrEqual(0);
+    expect(result.failures).toHaveLength(0);
+    expect(result.fallbackOccurred).toBe(false);
+  });
+
+  it('produces a successful Trinity result with pain signal', () => {
+    const snapshot = makeSnapshot({ totalPainEvents: 3 });
+    const config: TrinityConfig = {
+      useTrinity: true,
+      maxCandidates: 3,
+      useStubs: true,
+    };
+
+    const result = runTrinity({ snapshot, principleId: 'T-08', config });
+
+    expect(result.success).toBe(true);
+    expect(result.artifact).toBeDefined();
+  });
+
+  it('produces a successful Trinity result with gate block signal', () => {
+    const snapshot = makeSnapshot({ totalGateBlocks: 1 });
+    const config: TrinityConfig = {
+      useTrinity: true,
+      maxCandidates: 3,
+      useStubs: true,
+    };
+
+    const result = runTrinity({ snapshot, principleId: 'T-03', config });
+
+    expect(result.success).toBe(true);
+    expect(result.artifact).toBeDefined();
+  });
+
+  it('respects maxCandidates config', () => {
+    const snapshot = makeSnapshot({ failureCount: 5 });
+    const config: TrinityConfig = {
+      useTrinity: true,
+      maxCandidates: 2,
+      useStubs: true,
+    };
+
+    const result = runTrinity({ snapshot, principleId: 'T-08', config });
+
+    expect(result.success).toBe(true);
+    expect(result.telemetry.candidateCount).toBeLessThanOrEqual(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: runTrinity — failure paths
+// ---------------------------------------------------------------------------
+
+describe('runTrinity — failure paths', () => {
+  it('fails when snapshot has no signal and generates no candidates', () => {
+    // Snapshot with all zero stats - stub will fail to generate candidates
+    const snapshot = makeSnapshot({
+      failureCount: 0,
+      totalPainEvents: 0,
+      totalGateBlocks: 0,
+    });
+    const config: TrinityConfig = {
+      useTrinity: true,
+      maxCandidates: 3,
+      useStubs: true,
+    };
+
+    const result = runTrinity({ snapshot, principleId: 'T-08', config });
+
+    expect(result.success).toBe(false);
+    expect(result.failures.length).toBeGreaterThan(0);
+    expect(result.failures[0].stage).toBe('dreamer');
+    expect(result.telemetry.dreamerPassed).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: validateDraftArtifact
+// ---------------------------------------------------------------------------
+
+describe('validateDraftArtifact', () => {
+  function makeValidArtifact(): TrinityDraftArtifact {
+    return {
+      selectedCandidateIndex: 0,
+      badDecision: 'Did something wrong',
+      betterDecision: 'Do it right',
+      rationale: 'Because the principle says so and this is the correct approach',
+      sessionId: 'session-test-123',
+      principleId: 'T-01',
+      sourceSnapshotRef: 'snapshot-test-001',
+      telemetry: {
+        chainMode: 'trinity',
+        dreamerPassed: true,
+        philosopherPassed: true,
+        scribePassed: true,
+        candidateCount: 3,
+        selectedCandidateIndex: 0,
+        stageFailures: [],
+      },
+    };
+  }
+
+  it('passes a valid TrinityDraftArtifact', () => {
+    const artifact = makeValidArtifact();
+    const result = validateDraftArtifact(artifact);
+    expect(result.valid).toBe(true);
+    expect(result.failures).toHaveLength(0);
+  });
+
+  it('rejects artifact with missing badDecision', () => {
+    const artifact = makeValidArtifact();
+    delete (artifact as Record<string, unknown>).badDecision;
+    const result = validateDraftArtifact(artifact);
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects artifact with empty betterDecision', () => {
+    const artifact = makeValidArtifact();
+    artifact.betterDecision = '   ';
+    const result = validateDraftArtifact(artifact);
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects artifact with short rationale', () => {
+    const artifact = makeValidArtifact();
+    artifact.rationale = 'Too short';
+    const result = validateDraftArtifact(artifact);
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects artifact with identical badDecision and betterDecision', () => {
+    const artifact = makeValidArtifact();
+    artifact.badDecision = 'Same';
+    artifact.betterDecision = 'Same';
+    const result = validateDraftArtifact(artifact);
+    expect(result.valid).toBe(false);
+    expect(result.failures.some(f => f.includes('identical'))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: draftToArtifact
+// ---------------------------------------------------------------------------
+
+describe('draftToArtifact', () => {
+  it('converts TrinityDraftArtifact to NocturnalArtifact-compatible structure', () => {
+    const draft: TrinityDraftArtifact = {
+      selectedCandidateIndex: 1,
+      badDecision: 'Did something wrong',
+      betterDecision: 'Do it right',
+      rationale: 'Because the principle says so',
+      sessionId: 'session-test-123',
+      principleId: 'T-01',
+      sourceSnapshotRef: 'snapshot-test-001',
+      telemetry: {
+        chainMode: 'trinity',
+        dreamerPassed: true,
+        philosopherPassed: true,
+        scribePassed: true,
+        candidateCount: 3,
+        selectedCandidateIndex: 1,
+        stageFailures: [],
+      },
+    };
+
+    const artifact = draftToArtifact(draft);
+
+    expect(artifact.artifactId).toBeDefined(); // Generated UUID
+    expect(artifact.sessionId).toBe('session-test-123');
+    expect(artifact.principleId).toBe('T-01');
+    expect(artifact.badDecision).toBe('Did something wrong');
+    expect(artifact.betterDecision).toBe('Do it right');
+    expect(artifact.rationale).toBe('Because the principle says so');
+    expect(artifact.sourceSnapshotRef).toBe('snapshot-test-001');
+    expect(artifact.createdAt).toBeDefined(); // Current timestamp
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: DEFAULT_TRINITY_CONFIG
+// ---------------------------------------------------------------------------
+
+describe('DEFAULT_TRINITY_CONFIG', () => {
+  it('has sensible defaults', () => {
+    expect(DEFAULT_TRINITY_CONFIG.useTrinity).toBe(true);
+    expect(DEFAULT_TRINITY_CONFIG.maxCandidates).toBe(3);
+    expect(DEFAULT_TRINITY_CONFIG.useStubs).toBe(false);
+  });
+});

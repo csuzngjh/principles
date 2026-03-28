@@ -161,9 +161,8 @@ interface EvolutionTaskInputV2 extends EvolutionTaskInputBase {
   resultRef?: string | null;
 }
 
-// Backward-compatible type alias
-type EvolutionTaskInput = EvolutionTaskInputBase;
-
+// V2: recordEvolutionTask and updateEvolutionTask accept the V2 schema
+export type EvolutionTaskInput = EvolutionTaskInputV2;
 export { EvolutionTaskInputV2 };
 
 export interface EvolutionEventInput {
@@ -191,6 +190,13 @@ export interface EvolutionTaskRecord {
   resolution: string | null;
   createdAt: string;
   updatedAt: string;
+  // V2 fields
+  taskKind: TaskKind | null;
+  priority: TaskPriority | null;
+  retryCount: number | null;
+  maxRetries: number | null;
+  lastError: string | null;
+  resultRef: string | null;
 }
 
 export interface EvolutionEventRecord {
@@ -385,6 +391,9 @@ export class TrajectoryDatabase {
   recordToolCall(input: TrajectoryToolCallInput): number {
     this.recordSession({ sessionId: input.sessionId, startedAt: input.createdAt });
     const createdAt = input.createdAt ?? nowIso();
+    // Extract filePath from paramsJson if provided and is an object with filePath
+    const paramsObj = input.paramsJson as Record<string, unknown> | undefined;
+    const filePath = paramsObj && typeof paramsObj.filePath === 'string' ? paramsObj.filePath : null;
     const rowId = this.withWrite(() => {
       const result = this.db.prepare(`
         INSERT INTO tool_calls (
@@ -497,18 +506,27 @@ export class TrajectoryDatabase {
 
   recordEvolutionTask(input: EvolutionTaskInput): void {
     const now = nowIso();
+    // Cast to V2 to access new fields
+    const v2 = input as EvolutionTaskInputV2;
     this.withWrite(() => {
       this.db.prepare(`
         INSERT INTO evolution_tasks (
           task_id, trace_id, source, reason, score, status,
-          enqueued_at, started_at, completed_at, resolution, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          enqueued_at, started_at, completed_at, resolution, created_at, updated_at,
+          task_kind, priority, retry_count, max_retries, last_error, result_ref
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(task_id) DO UPDATE SET
           status = excluded.status,
           started_at = excluded.started_at,
           completed_at = excluded.completed_at,
           resolution = excluded.resolution,
-          updated_at = excluded.updated_at
+          updated_at = excluded.updated_at,
+          task_kind = excluded.task_kind,
+          priority = excluded.priority,
+          retry_count = excluded.retry_count,
+          max_retries = excluded.max_retries,
+          last_error = excluded.last_error,
+          result_ref = excluded.result_ref
       `).run(
         input.taskId,
         input.traceId,
@@ -522,12 +540,20 @@ export class TrajectoryDatabase {
         input.resolution ?? null,
         input.createdAt ?? now,
         input.updatedAt ?? now,
+        v2.taskKind ?? null,
+        v2.priority ?? null,
+        v2.retryCount ?? null,
+        v2.maxRetries ?? null,
+        v2.lastError ?? null,
+        v2.resultRef ?? null,
       );
     });
   }
 
   updateEvolutionTask(taskId: string, updates: Partial<Omit<EvolutionTaskInput, 'taskId' | 'traceId' | 'source'>>): void {
     const now = nowIso();
+    // Cast to V2 to access new fields
+    const v2Updates = updates as Partial<Omit<EvolutionTaskInputV2, 'taskId' | 'traceId' | 'source'>>;
     this.withWrite(() => {
       const setClauses: string[] = ['updated_at = ?'];
       const values: unknown[] = [now];
@@ -551,6 +577,31 @@ export class TrajectoryDatabase {
       if (updates.score !== undefined) {
         setClauses.push('score = ?');
         values.push(updates.score);
+      }
+      // V2 fields
+      if (v2Updates.taskKind !== undefined) {
+        setClauses.push('task_kind = ?');
+        values.push(v2Updates.taskKind);
+      }
+      if (v2Updates.priority !== undefined) {
+        setClauses.push('priority = ?');
+        values.push(v2Updates.priority);
+      }
+      if (v2Updates.retryCount !== undefined) {
+        setClauses.push('retry_count = ?');
+        values.push(v2Updates.retryCount);
+      }
+      if (v2Updates.maxRetries !== undefined) {
+        setClauses.push('max_retries = ?');
+        values.push(v2Updates.maxRetries);
+      }
+      if (v2Updates.lastError !== undefined) {
+        setClauses.push('last_error = ?');
+        values.push(v2Updates.lastError);
+      }
+      if (v2Updates.resultRef !== undefined) {
+        setClauses.push('result_ref = ?');
+        values.push(v2Updates.resultRef);
       }
 
       values.push(taskId);
@@ -607,7 +658,8 @@ export class TrajectoryDatabase {
 
     const rows = this.db.prepare(`
       SELECT id, task_id, trace_id, source, reason, score, status,
-             enqueued_at, started_at, completed_at, resolution, created_at, updated_at
+             enqueued_at, started_at, completed_at, resolution, created_at, updated_at,
+             task_kind, priority, retry_count, max_retries, last_error, result_ref
       FROM evolution_tasks
       ${whereClause}
       ORDER BY created_at DESC
@@ -628,6 +680,12 @@ export class TrajectoryDatabase {
       resolution: row.resolution ? String(row.resolution) : null,
       createdAt: String(row.created_at),
       updatedAt: String(row.updated_at),
+      taskKind: row.task_kind ? (row.task_kind as TaskKind) : null,
+      priority: row.priority ? (row.priority as TaskPriority) : null,
+      retryCount: row.retry_count != null ? Number(row.retry_count) : null,
+      maxRetries: row.max_retries != null ? Number(row.max_retries) : null,
+      lastError: row.last_error ? String(row.last_error) : null,
+      resultRef: row.result_ref ? String(row.result_ref) : null,
     }));
   }
 
@@ -681,7 +739,8 @@ export class TrajectoryDatabase {
   getEvolutionTaskByTraceId(traceId: string): EvolutionTaskRecord | null {
     const row = this.db.prepare(`
       SELECT id, task_id, trace_id, source, reason, score, status,
-             enqueued_at, started_at, completed_at, resolution, created_at, updated_at
+             enqueued_at, started_at, completed_at, resolution, created_at, updated_at,
+             task_kind, priority, retry_count, max_retries, last_error, result_ref
       FROM evolution_tasks
       WHERE trace_id = ?
       LIMIT 1
@@ -703,6 +762,12 @@ export class TrajectoryDatabase {
       resolution: row.resolution ? String(row.resolution) : null,
       createdAt: String(row.created_at),
       updatedAt: String(row.updated_at),
+      taskKind: row.task_kind ? (row.task_kind as TaskKind) : null,
+      priority: row.priority ? (row.priority as TaskPriority) : null,
+      retryCount: row.retry_count != null ? Number(row.retry_count) : null,
+      maxRetries: row.max_retries != null ? Number(row.max_retries) : null,
+      lastError: row.last_error ? String(row.last_error) : null,
+      resultRef: row.result_ref ? String(row.result_ref) : null,
     };
   }
 
@@ -729,6 +794,46 @@ export class TrajectoryDatabase {
   }
 
   /**
+   * List recent sessions from the trajectory database.
+   *
+   * Returns: Recent session records ordered by most recently updated.
+   *
+   * @param options.limit - Maximum number of sessions to return (default: 20)
+   * @param options.dateFrom - Only return sessions updated after this date
+   * @param options.dateTo - Only return sessions updated before this date
+   */
+  listRecentSessions(options: { limit?: number; dateFrom?: string; dateTo?: string } = {}): Array<{ sessionId: string; startedAt: string; updatedAt: string }> {
+    const conditions: string[] = [];
+    const values: unknown[] = [];
+
+    if (options.dateFrom) {
+      conditions.push('updated_at >= ?');
+      values.push(options.dateFrom);
+    }
+    if (options.dateTo) {
+      conditions.push('updated_at <= ?');
+      values.push(options.dateTo);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const limit = options.limit ?? 20;
+
+    const rows = this.db.prepare(`
+      SELECT session_id, started_at, updated_at
+      FROM sessions
+      ${whereClause}
+      ORDER BY updated_at DESC
+      LIMIT ?
+    `).all(...values, limit) as Array<Record<string, unknown>>;
+
+    return rows.map((row) => ({
+      sessionId: String(row.session_id),
+      startedAt: String(row.started_at),
+      updatedAt: String(row.updated_at),
+    }));
+  }
+
+  /**
    * List assistant turns for a session.
    *
    * Returns: Analytics data aggregated from trajectory database.
@@ -751,6 +856,124 @@ export class TrajectoryDatabase {
       rawText: this.restoreRawText(row.raw_text as string | null, row.blob_ref as string | null),
       sanitizedText: String(row.sanitized_text ?? ''),
       blobRef: row.blob_ref ? String(row.blob_ref) : null,
+      createdAt: String(row.created_at),
+    }));
+  }
+
+  /**
+   * List tool calls for a session.
+   *
+   * Returns: Analytics data aggregated from trajectory database.
+   * Not: Runtime truth or real-time queue state.
+   */
+  listToolCallsForSession(sessionId: string): Array<{
+    id: number;
+    toolName: string;
+    outcome: string;
+    filePath: string | null;
+    durationMs: number | null;
+    exitCode: number | null;
+    errorType: string | null;
+    errorMessage: string | null;
+    gfiBefore: number | null;
+    gfiAfter: number | null;
+    createdAt: string;
+  }> {
+    const rows = this.db.prepare(`
+      SELECT id, tool_name, outcome, params_json, duration_ms, exit_code, error_type, error_message,
+             gfi_before, gfi_after, created_at
+      FROM tool_calls
+      WHERE session_id = ?
+      ORDER BY id ASC
+    `).all(sessionId) as Array<Record<string, unknown>>;
+
+    return rows.map((row) => {
+      // Extract filePath from params_json if present
+      let filePath: string | null = null;
+      if (row.params_json && typeof row.params_json === 'string') {
+        try {
+          const params = JSON.parse(row.params_json);
+          if (params && typeof params.filePath === 'string') {
+            filePath = params.filePath;
+          }
+        } catch {
+          // Ignore malformed JSON
+        }
+      }
+      return {
+        id: Number(row.id),
+        toolName: String(row.tool_name),
+        outcome: String(row.outcome),
+        filePath,
+        durationMs: row.duration_ms != null ? Number(row.duration_ms) : null,
+        exitCode: row.exit_code != null ? Number(row.exit_code) : null,
+        errorType: row.error_type ? String(row.error_type) : null,
+        errorMessage: row.error_message ? String(row.error_message) : null,
+        gfiBefore: row.gfi_before != null ? Number(row.gfi_before) : null,
+        gfiAfter: row.gfi_after != null ? Number(row.gfi_after) : null,
+        createdAt: String(row.created_at),
+      };
+    });
+  }
+
+  /**
+   * List pain events for a session.
+   *
+   * Returns: Analytics data aggregated from trajectory database.
+   * Not: Runtime truth or real-time queue state.
+   */
+  listPainEventsForSession(sessionId: string): Array<{
+    id: number;
+    source: string;
+    score: number;
+    reason: string | null;
+    severity: string | null;
+    origin: string | null;
+    confidence: number | null;
+    createdAt: string;
+  }> {
+    const rows = this.db.prepare(`
+      SELECT id, source, score, reason, severity, origin, confidence, created_at
+      FROM pain_events
+      WHERE session_id = ?
+      ORDER BY created_at ASC
+    `).all(sessionId) as Array<Record<string, unknown>>;
+
+    return rows.map((row) => ({
+      id: Number(row.id),
+      source: String(row.source),
+      score: Number(row.score),
+      reason: row.reason ? String(row.reason) : null,
+      severity: row.severity ? String(row.severity) : null,
+      origin: row.origin ? String(row.origin) : null,
+      confidence: row.confidence != null ? Number(row.confidence) : null,
+      createdAt: String(row.created_at),
+    }));
+  }
+
+  /**
+   * List user turns for a session.
+   * Returns sanitized/reduced fields for nocturnal use — NO raw text.
+   */
+  listUserTurnsForSession(sessionId: string): Array<{
+    id: number;
+    turnIndex: number;
+    correctionDetected: boolean;
+    correctionCue: string | null;
+    createdAt: string;
+  }> {
+    const rows = this.db.prepare(`
+      SELECT id, turn_index, correction_detected, correction_cue, created_at
+      FROM user_turns
+      WHERE session_id = ?
+      ORDER BY turn_index ASC
+    `).all(sessionId) as Array<Record<string, unknown>>;
+
+    return rows.map((row) => ({
+      id: Number(row.id),
+      turnIndex: Number(row.turn_index),
+      correctionDetected: Boolean(row.correction_detected),
+      correctionCue: row.correction_cue ? String(row.correction_cue) : null,
       createdAt: String(row.created_at),
     }));
   }
@@ -784,6 +1007,35 @@ export class TrajectoryDatabase {
       exportMode: row.export_mode as CorrectionExportMode,
       createdAt: String(row.created_at),
       updatedAt: String(row.updated_at),
+    }));
+  }
+
+  /**
+   * List gate blocks for a session.
+   * Returns minimal fields for nocturnal use — no raw text.
+   */
+  listGateBlocksForSession(sessionId: string): Array<{
+    id: number;
+    toolName: string;
+    filePath: string | null;
+    reason: string;
+    planStatus: string | null;
+    createdAt: string;
+  }> {
+    const rows = this.db.prepare(`
+      SELECT id, tool_name, file_path, reason, plan_status, created_at
+      FROM gate_blocks
+      WHERE session_id = ?
+      ORDER BY id ASC
+    `).all(sessionId) as Array<Record<string, unknown>>;
+
+    return rows.map((row) => ({
+      id: Number(row.id),
+      toolName: String(row.tool_name),
+      filePath: row.file_path ? String(row.file_path) : null,
+      reason: String(row.reason),
+      planStatus: row.plan_status ? String(row.plan_status) : null,
+      createdAt: String(row.created_at),
     }));
   }
 
@@ -1093,6 +1345,28 @@ export class TrajectoryDatabase {
         metadata_json TEXT,
         created_at TEXT NOT NULL
       );
+    `);
+
+    // V2 migration: Add V2 columns to evolution_tasks if they don't exist
+    // SQLite does not support IF NOT EXISTS for ADD COLUMN, so we must check manually
+    // before each ALTER to avoid "duplicate column name" errors on existing DBs
+    const v2Columns = [
+      { name: 'task_kind', type: 'TEXT' },
+      { name: 'priority', type: 'TEXT' },
+      { name: 'retry_count', type: 'INTEGER' },
+      { name: 'max_retries', type: 'INTEGER' },
+      { name: 'last_error', type: 'TEXT' },
+      { name: 'result_ref', type: 'TEXT' },
+    ];
+    for (const col of v2Columns) {
+      const exists = this.db.prepare(`PRAGMA table_info(evolution_tasks)`).all()
+        .some((row: any) => row.name === col.name);
+      if (!exists) {
+        this.db.exec(`ALTER TABLE evolution_tasks ADD COLUMN ${col.name} ${col.type}`);
+      }
+    }
+
+    this.db.exec(`
       CREATE VIEW IF NOT EXISTS v_error_clusters AS
       SELECT tool_name, COALESCE(error_type, 'unknown') AS error_type, COUNT(*) AS occurrences
       FROM tool_calls

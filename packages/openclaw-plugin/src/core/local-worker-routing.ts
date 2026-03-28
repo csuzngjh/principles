@@ -1,0 +1,693 @@
+/**
+ * Local Worker Routing Policy — Task Classification and Routing Decisions
+ * ======================================================================
+ *
+ * PURPOSE: Provide an explainable, testable policy that decides whether a given
+ * task can be delegated to a local-worker profile (local-reader or local-editor)
+ * or must stay on the main agent.
+ *
+ * ARCHITECTURE:
+ *   - This module is POLICY ONLY — it makes routing decisions but does NOT execute them
+ *   - The main agent (or a delegation hook in a future phase) is responsible for
+ *     actually routing the task based on the RoutingDecision returned here
+ *   - All decisions are deterministic and based on structured input fields
+ *   - No model inference, no learning, no dynamic adaptation
+ *
+ * TASK CLASSIFICATION TAXONOMY:
+ *   reader_eligible      — clearly suitable for local-reader
+ *   editor_eligible     — clearly suitable for local-editor
+ *   high_entropy_disallowed — high-complexity tasks that must stay on main agent
+ *   risk_disallowed     — tasks with destructive or high-risk signals
+ *   ambiguous_scope     — tasks that are unclear and need main-agent judgment
+ *   deployment_unavailable — no enabled deployment exists for the target profile
+ *
+ * FAIL-CLOSED PRINCIPLE:
+ *   - When in doubt → stay_main
+ *   - Unclear intent → stay_main
+ *   - High complexity → stay_main
+ *   - Any risk signal → stay_main
+ *   - No enabled deployment → stay_main
+ *
+ * DESIGN CONSTRAINTS:
+ *   - No actual task execution
+ *   - No automatic learning or route optimization
+ *   - No Trinity or adaptive threshold logic
+ *   - Routing decisions are fully explainable (return `reason` + `blockers[]`)
+ */
+
+import type { WorkerProfile } from './model-deployment-registry.js';
+import {
+  isRoutingEnabledForProfile,
+  getDeployment,
+} from './model-deployment-registry.js';
+import { isCheckpointDeployable } from './model-training-registry.js';
+
+// ---------------------------------------------------------------------------
+// Routing Input Contract
+// ---------------------------------------------------------------------------
+
+/**
+ * The input contract for a routing decision.
+ * All fields are optional — the classifier handles missing data gracefully
+ * by treating it as ambiguous (stay_main).
+ */
+export interface RoutingInput {
+  /**
+   * A short label or name for the task intent.
+   * E.g., "read_file", "edit_config", "debug_memory_leak", "design_system"
+   */
+  taskIntent?: string;
+
+  /**
+   * Natural-language description of the task.
+   * The classifier examines this for keywords indicating complexity/risk.
+   */
+  taskDescription?: string;
+
+  /**
+   * Specific tools requested or implied by the task.
+   * These are examined for risk signals (e.g., bash, rm, git push).
+   */
+  requestedTools?: string[];
+
+  /**
+   * Specific files involved or targeted.
+   * Examined for risk-path indicators (e.g., .git/, node_modules, production configs).
+   */
+  requestedFiles?: string[];
+
+  /**
+   * Shape of expected output.
+   * E.g., "json", "markdown", "one_line", "full_report"
+   */
+  expectedOutputShape?: string;
+
+  /**
+   * Explicit risk signals detected in the task.
+   * E.g., ["destructive", "production", "irreversible", "large_scale"]
+   * Any non-empty riskSignals → automatic stay_main.
+   */
+  riskSignals?: string[];
+
+  /**
+   * Complexity hints for the task.
+   * E.g., ["multi_step", "cross_file", "ambiguous", "requires_planning"]
+   */
+  complexityHints?: string[];
+
+  /**
+   * Target worker profile for routing consideration.
+   * If omitted, both profiles are evaluated and the best match is returned.
+   */
+  targetProfile?: WorkerProfile;
+}
+
+// ---------------------------------------------------------------------------
+// Routing Decision Contract
+// ---------------------------------------------------------------------------
+
+/**
+ * The result of a routing classification decision.
+ * Always includes a `reason` and a `blockers` list for full explainability.
+ */
+export interface RoutingDecision {
+  /**
+   * The routing verdict.
+   * - `route_local` — the task may be delegated to `targetProfile`
+   * - `stay_main` — the task must remain on the main agent
+   */
+  decision: 'route_local' | 'stay_main';
+
+  /**
+   * Which profile the task should be routed to (if decision === 'route_local').
+   * Null if decision === 'stay_main'.
+   */
+  targetProfile: WorkerProfile | null;
+
+  /**
+   * The task classification category that led to this decision.
+   */
+  classification:
+    | 'reader_eligible'
+    | 'editor_eligible'
+    | 'high_entropy_disallowed'
+    | 'risk_disallowed'
+    | 'ambiguous_scope'
+    | 'profile_mismatch'
+    | 'deployment_unavailable';
+
+  /**
+   * Human-readable explanation of the routing decision.
+   * Must be specific enough that a developer can understand why a task was accepted/rejected.
+   */
+  reason: string;
+
+  /**
+   * List of specific reasons that blocked routing (if decision === 'stay_main').
+   * Empty if decision === 'route_local'.
+   */
+  blockers: string[];
+
+  /**
+   * Whether a deployment check was performed and whether it passed.
+   * Useful for diagnostics when deployment_unavailable is the classification.
+   */
+  deploymentCheck: {
+    performed: boolean;
+    profileAvailable: boolean;
+    routingEnabled: boolean;
+    /** Whether the active checkpoint is currently marked as deployable in the training registry. */
+    checkpointDeployable: boolean;
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Keyword Classifiers
+// ---------------------------------------------------------------------------
+
+/**
+ * Keywords that indicate a task is suitable for `local-reader`.
+ * Matched against taskIntent + taskDescription.
+ */
+const READER_KEYWORDS = [
+  'read', 'view', 'show', 'get', 'find', 'search', 'grep', 'look',
+  'inspect', 'examine', 'list', 'cat', 'head', 'tail', 'diff',
+  'summary', 'summarize', 'extract', 'parse', 'review',
+  'check', 'verify', 'status', 'describe', 'explain_what',
+  'browse', 'fetch', 'show_content', 'file_content', 'code_read',
+];
+
+/**
+ * Keywords that indicate a task is suitable for `local-editor`.
+ * Matched against taskIntent + taskDescription.
+ */
+const EDITOR_KEYWORDS = [
+  'edit', 'update', 'modify', 'change', 'fix', 'patch', 'replace',
+  'add', 'remove', 'delete', 'insert', 'rewrite', 'refactor',
+  'apply', 'execute', 'run', 'transform', 'convert', 'migrate',
+  'write', 'create_file', 'append', 'touch', 'rename',
+];
+
+/**
+ * Keywords that indicate HIGH ENTROPY — tasks that must stay on main agent.
+ * These indicate open-ended, multi-step, or ambiguous tasks.
+ */
+const HIGH_ENTROPY_KEYWORDS = [
+  'design', 'architect', 'plan', 'strategy', 'roadmap', 'propose',
+  'research', 'investigate', 'explore', 'evaluate', 'compare',
+  'decide', 'choose', 'recommend', 'suggest', 'analyze_tradeoffs',
+  'unclear', 'vague', 'ambiguous', 'open_ended', 'multiple_options',
+  'architecture', 'system_design', 'high_level', 'blueprint',
+  'thinking', 'reasoning', '思考', '分析', '设计',
+];
+
+/**
+ * Keywords that indicate RISK — tasks that must stay on main agent.
+ * These indicate destructive, irreversible, or production-sensitive operations.
+ */
+const RISK_KEYWORDS = [
+  'rm', 'delete', 'remove', 'drop', 'truncate', 'destroy',
+  'force_push', 'force_reset', 'hard_reset', 'rebase_force',
+  'exec', 'eval', 'sudo', 'chmod_777', 'shutdown', 'reboot',
+  'production', 'prod', 'live', 'deploy', 'release',
+  'database', 'db_', 'migration', 'seed',
+  'secrets', 'credentials', 'password', 'api_key', 'token',
+  'bulk', 'batch', 'all_files', 'entire_', 'recursive_delete',
+];
+
+/**
+ * Risk file patterns — files whose modification indicates high risk.
+ * Matched against requestedFiles using simple includes check.
+ */
+const RISK_FILE_PATTERNS = [
+  '.git/config',
+  'package-lock.json',
+  'yarn.lock',
+  'pnpm-lock.yaml',
+  'node_modules',
+  '.env',
+  'secrets',
+  'credentials',
+  '.aws/credentials',
+  '~/.ssh/',
+  '/etc/',
+  'production',
+  '.k8s',
+  'docker-compose.yml',
+  'Dockerfile',
+];
+
+/**
+ * Tools that are inherently risky and indicate a task must stay on main agent.
+ */
+const RISK_TOOLS = [
+  'bash', 'shell', 'exec', 'run_command', 'execute',
+  'git_push', 'git_force_push', 'git_reset',
+  'http_delete', 'DROP', 'DELETE *', 'truncate',
+  'sudo', 'chmod', 'chown',
+];
+
+// ---------------------------------------------------------------------------
+// Classification Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Simple case-insensitive keyword match.
+ */
+function containsKeyword(text: string | undefined, keywords: string[]): boolean {
+  if (!text) return false;
+  const lower = text.toLowerCase();
+  return keywords.some((kw) => lower.includes(kw));
+}
+
+/**
+ * Check if any tool name looks like a risk tool.
+ */
+function hasRiskTool(tools: string[] | undefined): boolean {
+  if (!tools || tools.length === 0) return false;
+  const combined = tools.join(' ').toLowerCase();
+  return RISK_TOOLS.some((rt) => combined.includes(rt));
+}
+
+/**
+ * Check if any requested file matches a risk pattern.
+ */
+function hasRiskFile(files: string[] | undefined): boolean {
+  if (!files || files.length === 0) return false;
+  return files.some((f) => {
+    const lower = f.toLowerCase();
+    return RISK_FILE_PATTERNS.some((rp) => lower.includes(rp.toLowerCase()));
+  });
+}
+
+/**
+ * Compute a combined text from all input fields for keyword scanning.
+ */
+function computeCombinedText(input: RoutingInput): string {
+  const parts: string[] = [];
+  if (input.taskIntent) parts.push(input.taskIntent);
+  if (input.taskDescription) parts.push(input.taskDescription);
+  if (input.expectedOutputShape) parts.push(input.expectedOutputShape);
+  if (input.complexityHints) parts.push(input.complexityHints.join(' '));
+  return parts.join(' ').toLowerCase();
+}
+
+// ---------------------------------------------------------------------------
+// Core Classification Logic
+// ---------------------------------------------------------------------------
+
+/**
+ * Classify the task based on its input fields.
+ * Returns a raw classification category (before deployment check).
+ */
+function classifyTaskKind(input: RoutingInput): RoutingDecision['classification'] {
+  const text = computeCombinedText(input);
+  const { taskIntent, taskDescription, requestedTools, requestedFiles, riskSignals, complexityHints } = input;
+
+  // --- Step 1: Explicit risk signals always block ---
+  if (riskSignals && riskSignals.length > 0) {
+    return 'risk_disallowed';
+  }
+
+  // --- Step 2: High-entropy keyword detection ---
+  if (complexityHints?.some((h) =>
+    ['multi_step', 'cross_file', 'ambiguous', 'requires_planning', 'open_ended', 'unclear'].includes(h)
+  )) {
+    return 'high_entropy_disallowed';
+  }
+
+  if (containsKeyword(text, HIGH_ENTROPY_KEYWORDS)) {
+    return 'high_entropy_disallowed';
+  }
+
+  // Architecture design keywords in intent or description
+  if (containsKeyword(taskIntent, ['design', 'architect', 'plan', 'propose']) ||
+      containsKeyword(taskDescription, ['design', 'architect', 'plan', 'propose'])) {
+    return 'high_entropy_disallowed';
+  }
+
+  // --- Step 3: Risk keyword detection (intent/description text) ---
+  // Check text-based risk signals even without explicit risk tools/files.
+  // Must run BEFORE editor eligibility to prevent destructive keywords
+  // (delete, remove, drop, etc.) from being misclassified as editor-eligible.
+  if (containsKeyword(taskIntent, RISK_KEYWORDS) ||
+      containsKeyword(taskDescription, RISK_KEYWORDS)) {
+    return 'risk_disallowed';
+  }
+
+  // --- Step 4: Risk tool detection ---
+  if (hasRiskTool(requestedTools ?? [])) {
+    return 'risk_disallowed';
+  }
+
+  // --- Step 5: Risk file pattern detection ---
+  if (hasRiskFile(requestedFiles ?? [])) {
+    return 'risk_disallowed';
+  }
+
+  // --- Step 6: Reader eligibility ---
+  // Task intent and description both clearly indicate reading/gathering
+  const intentIsReader = containsKeyword(taskIntent, READER_KEYWORDS);
+  const descIsReader = containsKeyword(taskDescription, READER_KEYWORDS);
+
+  if (intentIsReader && (descIsReader || !taskDescription)) {
+    return 'reader_eligible';
+  }
+
+  // --- Step 7: Editor eligibility ---
+  // Bounded scope: editing a known set of files (1-3) is editor-eligible.
+  // Large-scale multi-file editing (4+ distinct files) is inherently high-entropy
+  // — requires coordinating changes across a large surface area and carries
+  // significant unintended-change risk. Must stay on main agent.
+  const uniqueFiles = requestedFiles
+    ? [...new Set(requestedFiles.filter((f) => f.trim().length > 0))]
+    : [];
+  const intentIsEditor = containsKeyword(taskIntent, EDITOR_KEYWORDS);
+  const descIsEditor = containsKeyword(taskDescription, EDITOR_KEYWORDS);
+
+  if (intentIsEditor && (descIsEditor || !taskDescription)) {
+    if (uniqueFiles.length >= 4) {
+      return 'high_entropy_disallowed';
+    }
+    return 'editor_eligible';
+  }
+
+  // --- Step 8: Ambiguous scope ---
+  // If we have some description but can't classify it clearly
+  if (taskDescription && taskDescription.trim().length > 0) {
+    const trimmed = taskDescription.trim();
+    // Very short or generic descriptions → ambiguous
+    if (trimmed.length < 20 || ['todo', 'fix', 'improve', 'change', 'update', 'something'].includes(trimmed.toLowerCase())) {
+      return 'ambiguous_scope';
+    }
+    // Contains question words suggesting open-ended reasoning
+    if (/\b(why|how|should|could|would|what if|should we|whether to)\b/i.test(trimmed)) {
+      return 'ambiguous_scope';
+    }
+  }
+
+  // --- Step 9: No sufficient information ---
+  if (!taskIntent && !taskDescription) {
+    return 'ambiguous_scope';
+  }
+
+  // Default to ambiguous rather than risky — fail to stay_main
+  return 'ambiguous_scope';
+}
+
+/**
+ * Build the reason string for a given classification.
+ */
+function buildReason(
+  classification: RoutingDecision['classification'],
+  input: RoutingInput
+): string {
+  const { taskIntent, taskDescription } = input;
+
+  switch (classification) {
+    case 'reader_eligible':
+      return `Task "${taskIntent || taskDescription || '(unnamed)'}" is classified as reader_eligible. ` +
+        `Keywords indicate focused reading, inspection, or information retrieval. ` +
+        `No high-entropy or risk signals detected.`;
+
+    case 'editor_eligible':
+      return `Task "${taskIntent || taskDescription || '(unnamed)'}" is classified as editor_eligible. ` +
+        `Keywords indicate bounded editing, modification, or repair. ` +
+        `No high-entropy or risk signals detected.`;
+
+    case 'high_entropy_disallowed': {
+      const uniqueFiles = input.requestedFiles
+        ? [...new Set(input.requestedFiles.filter((f) => f.trim().length > 0))]
+        : [];
+      const isLargeScaleEdit = uniqueFiles.length >= 4;
+      if (isLargeScaleEdit) {
+        return `Task "${taskIntent || taskDescription || '(unnamed)'}" is blocked as high_entropy_disallowed. ` +
+          `Editing ${uniqueFiles.length} files simultaneously exceeds the bounded-scope limit for local-editor. ` +
+          `Large-scale multi-file edits require the main agent's coordination and risk judgment.`;
+      }
+      return `Task "${taskIntent || taskDescription || '(unnamed)'}" is blocked as high_entropy_disallowed. ` +
+        `Keywords indicate open-ended planning, architecture design, or ambiguous multi-step work. ` +
+        `These tasks require the main agent's full reasoning capability.`;
+    }
+
+    case 'risk_disallowed':
+      return `Task "${taskIntent || taskDescription || '(unnamed)'}" is blocked as risk_disallowed. ` +
+        `Detected destructive, production, or irreversible operation signals. ` +
+        `All risky operations must remain on the main agent with human oversight.`;
+
+    case 'ambiguous_scope':
+      return `Task "${taskIntent || taskDescription || '(unnamed)'}" is blocked as ambiguous_scope. ` +
+        `The task description is too vague, too short, or contains open-ended question words. ` +
+        `Main agent must clarify scope before delegation.`;
+
+    case 'profile_mismatch':
+      return `Task profile does not match the requested target profile. ` +
+        `The task's natural classification is incompatible with the specified worker profile. ` +
+        `Main agent must re-route or choose a compatible profile.`;
+
+    case 'deployment_unavailable':
+      return `No enabled deployment available for routing. ` +
+        `Either no checkpoint is bound to the profile, or routing has been disabled. ` +
+        `Main agent must handle this task.`;
+  }
+}
+
+/**
+ * Build the blockers list for a given classification.
+ */
+function buildBlockers(
+  classification: RoutingDecision['classification'],
+  input: RoutingInput
+): string[] {
+  switch (classification) {
+    case 'reader_eligible':
+      return [];
+    case 'editor_eligible':
+      return [];
+    case 'high_entropy_disallowed': {
+      const uniqueFiles = input.requestedFiles
+        ? [...new Set(input.requestedFiles.filter((f) => f.trim().length > 0))]
+        : [];
+      const isLargeScaleEdit = uniqueFiles.length >= 4;
+      return [
+        isLargeScaleEdit
+          ? `large-scale multi-file edit detected (${uniqueFiles.length} files): scope too broad for local-editor`
+          : 'task contains high-entropy keywords (design/plan/architect/investigate)',
+        'complexity hint indicates multi-step or open-ended work',
+        'main agent required for full reasoning and judgment',
+      ];
+    }
+    case 'risk_disallowed':
+      return [
+        'risk tool requested (bash/exec/sudo/DROP/DELETE)',
+        'risk file pattern detected (production/secrets/.git/node_modules)',
+        'explicit risk signal present in input',
+        'main agent must supervise high-risk operations',
+      ];
+    case 'ambiguous_scope':
+      return [
+        'task description too vague or generic',
+        'task intent not provided or unclear',
+        'open-ended question words detected',
+        'main agent must clarify scope before delegation',
+      ];
+    case 'profile_mismatch':
+      return [
+        'task natural profile incompatible with requested target profile',
+        'main agent must re-route or select a compatible profile',
+      ];
+
+    case 'deployment_unavailable':
+      return [
+        'no enabled deployment found for target profile',
+        'routing may be disabled in deployment registry',
+        'main agent must handle task directly',
+      ];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/**
+ * Classify a task and produce a routing decision.
+ *
+ * This is the main entry point for routing policy evaluation.
+ * It:
+ *   1. Classifies the task kind based on keywords and heuristics
+ *   2. Checks deployment availability for the target profile
+ *   3. Returns a fully explainable RoutingDecision
+ *
+ * @param input - The routing input describing the task
+ * @param stateDir - Workspace state directory (for deployment registry lookup)
+ * @returns RoutingDecision with classification, reason, blockers, and routing verdict
+ */
+export function classifyTask(
+  input: RoutingInput,
+  stateDir: string
+): RoutingDecision {
+  // --- Determine the raw task classification ---
+  const classification = classifyTaskKind(input);
+
+  // --- Determine the target profile ---
+  // If input specifies a target, use it. Otherwise, pick based on classification.
+  // NOTE: When explicitly specified, we must validate profile-task compatibility below.
+  const targetProfile: WorkerProfile | null =
+    input.targetProfile ??
+    (classification === 'reader_eligible'
+      ? 'local-reader'
+      : classification === 'editor_eligible'
+      ? 'local-editor'
+      : null);
+
+  // --- Profile-task compatibility check ---
+  // Only applies when input.targetProfile is EXPLICITLY set.
+  // When auto-derived (input.targetProfile is null), compatibility is already
+  // guaranteed by the auto-derivation logic above (reader_eligible → local-reader).
+  // This check prevents routing a reader task to an editor profile (or vice versa)
+  // when the caller explicitly requests the wrong profile.
+  const isProfileCompatible =
+    input.targetProfile === undefined
+      ? true // Auto-derived profile is always compatible by construction
+      : targetProfile === 'local-reader'
+        ? classification === 'reader_eligible'
+        : targetProfile === 'local-editor'
+          ? classification === 'editor_eligible'
+          : false;
+
+  // --- Deployment availability check ---
+  let deploymentCheck: RoutingDecision['deploymentCheck'] = {
+    performed: false,
+    profileAvailable: false,
+    routingEnabled: false,
+    checkpointDeployable: false,
+  };
+
+  if (targetProfile) {
+    const deployment = getDeployment(stateDir, targetProfile);
+    const activeCheckpointId = deployment?.activeCheckpointId ?? null;
+    // Re-check deployability on every routing decision — a checkpoint may have been revoked
+    const checkpointDeployable = activeCheckpointId
+      ? isCheckpointDeployable(stateDir, activeCheckpointId)
+      : false;
+    deploymentCheck = {
+      performed: true,
+      profileAvailable: deployment !== null,
+      routingEnabled: isRoutingEnabledForProfile(stateDir, targetProfile),
+      checkpointDeployable,
+    };
+  }
+
+  // --- Build the decision ---
+  const blockers = buildBlockers(classification, input);
+  const reason = buildReason(classification, input);
+
+  // FAIL-CLOSED: route_local only if:
+  //   1. Classification is eligible (reader_eligible or editor_eligible)
+  //   2. A target profile was identified
+  //   3. The task's natural profile is compatible with the target profile
+  //   4. Deployment is available and routing is enabled
+  const isEligibleForRouting =
+    (classification === 'reader_eligible' || classification === 'editor_eligible') &&
+    targetProfile !== null &&
+    isProfileCompatible &&
+    deploymentCheck.routingEnabled;
+
+  const decision: RoutingDecision['decision'] = isEligibleForRouting
+    ? 'route_local'
+    : 'stay_main';
+
+  // Derive the final classification — preserves the root cause of stay_main:
+  //   - profile_mismatch: task would be eligible but wrong profile requested
+  //   - deployment_unavailable: eligible and compatible but no routing enabled
+  //   - raw classification: blocked by high_entropy / risk / ambiguous
+  const isEligible = classification === 'reader_eligible' || classification === 'editor_eligible';
+  const finalClassification: RoutingDecision['classification'] =
+    isEligibleForRouting
+      ? classification
+      : isEligible && targetProfile !== null && !isProfileCompatible
+      ? 'profile_mismatch'
+      : isEligible
+      ? 'deployment_unavailable'
+      : classification;
+
+  // Build explainability fields specific to the stay_main reason
+  let finalReason = reason;
+  let finalBlockers = blockers;
+
+  if (decision === 'stay_main') {
+    if (finalClassification === 'profile_mismatch') {
+      const wanted = classification === 'reader_eligible' ? 'local-reader' : 'local-editor';
+      finalReason = `Task is ${classification} but was explicitly targeted at ${targetProfile}. ` +
+        `Routing requires "${wanted}" profile. Ensure the task intent matches the requested profile.`;
+      finalBlockers = [
+        `profile mismatch: task is ${classification} but targetProfile is ${targetProfile}`,
+        `required profile: ${wanted}`,
+      ];
+    } else if (finalClassification === 'deployment_unavailable') {
+      if (!deploymentCheck.performed) {
+        finalReason = reason;
+      } else if (!deploymentCheck.profileAvailable) {
+        finalReason = `Task is ${classification} but no deployment exists for ${targetProfile}. ` +
+          `Bind a checkpoint via bindCheckpointToWorkerProfile() and enable routing.`;
+        finalBlockers = [`no deployment found for profile: ${targetProfile}`];
+      } else if (!deploymentCheck.checkpointDeployable) {
+        finalReason = `Task is ${classification} but the active checkpoint has been revoked (no longer deployable). ` +
+          `Re-bind a passing checkpoint or re-evaluate the current one.`;
+        finalBlockers = [
+          `active checkpoint is no longer deployable: ${targetProfile}`,
+          'revoked checkpoints must not be used for routing',
+        ];
+      } else if (!deploymentCheck.routingEnabled) {
+        finalReason = `Task is ${classification} and deployment exists for ${targetProfile} but routing is not enabled. ` +
+          `Enable routing via enableRoutingForProfile() in the deployment registry.`;
+        finalBlockers = [`routing is disabled for profile: ${targetProfile}`];
+      }
+    }
+  }
+
+  return {
+    decision,
+    targetProfile: decision === 'route_local' ? targetProfile : null,
+    classification: finalClassification,
+    reason: finalReason,
+    blockers: decision === 'stay_main' ? finalBlockers : [],
+    deploymentCheck,
+  };
+}
+
+/**
+ * Convenience: check if a specific profile can handle a task.
+ * Equivalent to calling classifyTask with targetProfile set.
+ */
+export function canRouteToProfile(
+  input: RoutingInput,
+  stateDir: string,
+  profile: WorkerProfile
+): boolean {
+  const decision = classifyTask({ ...input, targetProfile: profile }, stateDir);
+  return decision.decision === 'route_local';
+}
+
+// ---------------------------------------------------------------------------
+// Read-Only Query Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Check if any local worker routing is currently enabled for any profile.
+ */
+export function isAnyLocalRoutingEnabled(stateDir: string): boolean {
+  return isRoutingEnabledForProfile(stateDir, 'local-reader') ||
+    isRoutingEnabledForProfile(stateDir, 'local-editor');
+}
+
+/**
+ * List all profiles that currently have routing enabled.
+ */
+export function listEnabledProfiles(stateDir: string): WorkerProfile[] {
+  const enabled: WorkerProfile[] = [];
+  if (isRoutingEnabledForProfile(stateDir, 'local-reader')) enabled.push('local-reader');
+  if (isRoutingEnabledForProfile(stateDir, 'local-editor')) enabled.push('local-editor');
+  return enabled;
+}

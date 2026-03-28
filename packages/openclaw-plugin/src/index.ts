@@ -40,6 +40,7 @@ import { handleEvolutionStatusCommand } from './commands/evolution-status.js';
 import { handlePrincipleRollbackCommand } from './commands/principle-rollback.js';
 import { handleExportCommand } from './commands/export.js';
 import { handleSamplesCommand } from './commands/samples.js';
+import { handleNocturnalReviewCommand } from './commands/nocturnal-review.js';
 import { EvolutionWorkerService } from './service/evolution-worker.js';
 import { TrajectoryService } from './service/trajectory-service.js';
 import { ensureWorkspaceTemplates } from './core/init.js';
@@ -289,8 +290,9 @@ const plugin = {
 | \`/pd-status\` | 查看进化状态 | 想了解当前 GFI 和 Pain 情况 |
 | \`/pd-trust\` | 查看信任分数 | 想知道自己的权限等级 |
 | \`/pd-focus\` | 焦点文件管理 | 查看/压缩/回滚历史版本 |
-| \`/pd-export\` | 导出分析/样本 | 导出 analytics 或纠错样本 |
+| \`/pd-export\` | 导出数据 | 导出 analytics/corrections/orpo |
 | \`/pd-samples\` | 审核纠错样本 | 查看待审核样本并批准/拒绝 |
+| \`/pd-nocturnal-review\` | 审核 nocturnal 样本 | 审核 nocturnal 训练样本并导出 ORPO |
 
 ## ⚙️ 配置管理
 | 命令 | 用途 | 使用时机 |
@@ -347,8 +349,9 @@ const plugin = {
 | \`/pd-status\` | View evolution status | Check GFI and Pain status |
 | \`/pd-trust\` | View trust score | Check your permission level |
 | \`/pd-focus\` | Focus file management | View/compress/rollback history |
-| \`/pd-export\` | Export analytics/samples | Export analytics or correction samples |
+| \`/pd-export\` | Export data | Export analytics/corrections/orpo |
 | \`/pd-samples\` | Review correction samples | Review pending correction samples |
+| \`/pd-nocturnal-review\` | Review nocturnal samples | Review nocturnal training samples and export ORPO |
 
 ## ⚙️ Configuration
 | Command | Purpose | When to Use |
@@ -528,6 +531,22 @@ const plugin = {
         } catch (err) {
           api.logger.error(`[PD] Command /pd-samples failed: ${String(err)}`);
           return { text: language === 'zh' ? "样本命令执行失败，请检查日志。" : "Samples command failed. Check logs." };
+        }
+      }
+    });
+
+    api.registerCommand({
+      name: "pd-nocturnal-review",
+      description: 'Review nocturnal dataset samples [list|show|approve|reject|set-family|stats]',
+      acceptsArgs: true,
+      handler: (ctx) => {
+        try {
+          const workspaceDir = api.resolvePath('.');
+          if (ctx.config) ctx.config.workspaceDir = workspaceDir;
+          return handleNocturnalReviewCommand(ctx);
+        } catch (err) {
+          api.logger.error(`[PD] Command /pd-nocturnal-review failed: ${String(err)}`);
+          return { text: language === 'zh' ? "Nocturnal review 命令执行失败，请检查日志。" : "Nocturnal review command failed. Check logs." };
         }
       }
     });
