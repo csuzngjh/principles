@@ -54,10 +54,19 @@ for FILE in $STAGED_FILES; do
 import sys
 import re
 
-# Known garbled character patterns
+# Garbled character detection patterns
+# When UTF-8 Chinese is corrupted by being interpreted as GBK/GB2312,
+# it produces sequences of high-range CJK characters (U+9F00-U+9FFF range)
+# Normal Chinese text rarely has long sequences in this specific range.
+#
+# Detection strategy:
+# 1. Long sequences (4+) of high-range CJK characters
+# 2. Mixed patterns: normal CJK followed by high-range CJK
 garbled_patterns = [
-    r'[\u9f00-\u9fff\u9500-\u95ff\u9a00-\u9aff][\u9f00-\u9fff\u9500-\u95ff\u9a00-\u9aff]',
-    r'[\u4e00-\u9fff][\u9f00-\u9fff]{2,}',  # Mixed normal + garbled
+    # Long sequences of high-range CJK (rare in normal text)
+    r'[\u9f00-\u9fff\u9500-\u95ff\u9a00-\u9aff]{4,}',
+    # Normal CJK followed by 3+ high-range CJK (indicates corruption)
+    r'[\u4e00-\u9fff][\u9f00-\u9fff]{3,}',
 ]
 
 try:

@@ -5,10 +5,12 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
 import * as riskCalculator from '../../src/core/risk-calculator.js';
+import * as evolutionEngine from '../../src/core/evolution-engine.js';
 
 vi.mock('fs');
 vi.mock('../../src/core/workspace-context.js');
 vi.mock('../../src/core/risk-calculator.js');
+vi.mock('../../src/core/evolution-engine.js');
 
 describe('Progressive Gate Hook', () => {
   const workspaceDir = '/mock/workspace';
@@ -56,7 +58,7 @@ describe('Progressive Gate Hook', () => {
     vi.mocked(riskCalculator.estimateLineChanges).mockReturnValue(1);
   });
 
-  it('should block ALL risk path writes for Stage 1 (Bankruptcy)', () => {
+  it('should block risk path writes at Seed tier (EP system)', () => {
     const mockCtx = { workspaceDir };
     const mockEvent = { 
         toolName: 'write', 
@@ -69,15 +71,21 @@ describe('Progressive Gate Hook', () => {
     vi.mocked(fs.readFileSync).mockImplementation(() => {
         return JSON.stringify({ risk_paths: ['src/'], progressive_gate: { enabled: true } });
     });
+    // EP system blocks risk path at Seed tier
+    vi.mocked(evolutionEngine.checkEvolutionGate).mockReturnValue({
+      allowed: false,
+      currentTier: 1,
+      reason: 'Seed tier cannot modify risk paths'
+    });
 
     const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
 
     expect(result).toBeDefined();
     expect(result?.block).toBe(true);
-    expect(result?.blockReason).toContain('Trust score too low');
+    expect(result?.blockReason).toContain('risk path');
   });
 
-  it('should block large writes (>10 lines) for Stage 2 (Editor)', () => {
+  it('should block large writes at Seed tier (EP system)', () => {
     const mockCtx = { workspaceDir };
     const mockEvent = { 
         toolName: 'write', 
@@ -86,20 +94,26 @@ describe('Progressive Gate Hook', () => {
 
     mockTrust.getScore.mockReturnValue(50);
     mockTrust.getStage.mockReturnValue(2);
-    vi.mocked(riskCalculator.estimateLineChanges).mockReturnValue(15);
+    vi.mocked(riskCalculator.estimateLineChanges).mockReturnValue(200);
     vi.mocked(fs.existsSync).mockReturnValue(true);
     vi.mocked(fs.readFileSync).mockImplementation(() => {
         return JSON.stringify({ risk_paths: ['src/'], progressive_gate: { enabled: true } });
+    });
+    // EP system blocks 200 lines at Seed tier (limit is 150)
+    vi.mocked(evolutionEngine.checkEvolutionGate).mockReturnValue({
+      allowed: false,
+      currentTier: 1,
+      reason: 'Seed tier limit is 150 lines per write, requested 200'
     });
 
     const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
 
     expect(result).toBeDefined();
     expect(result?.block).toBe(true);
-    expect(result?.blockReason).toContain('Modification too large');
+    expect(result?.blockReason).toContain('150');
   });
 
-  it('should require PLAN for risk paths in Stage 3 (Developer)', () => {
+  it('should allow risk paths at Sapling tier (EP system)', () => {
     const mockCtx = { workspaceDir };
     const mockEvent = { 
         toolName: 'write', 
@@ -109,20 +123,22 @@ describe('Progressive Gate Hook', () => {
     mockTrust.getScore.mockReturnValue(70);
     mockTrust.getStage.mockReturnValue(3);
     vi.mocked(fs.existsSync).mockReturnValue(true);
-    vi.mocked(fs.readFileSync).mockImplementation((p: any) => {
-        if (p.includes('PROFILE.json')) return JSON.stringify({ risk_paths: ['src/'], progressive_gate: { enabled: true } });
-        if (p.includes('PLAN.md')) return 'STATUS: DRAFT\n';
-        return '';
+    vi.mocked(fs.readFileSync).mockImplementation(() => {
+        return JSON.stringify({ risk_paths: ['src/'], progressive_gate: { enabled: true } });
+    });
+    // EP system allows at Sapling tier (risk path allowed)
+    vi.mocked(evolutionEngine.checkEvolutionGate).mockReturnValue({
+      allowed: true,
+      currentTier: 3,
+      reason: ''
     });
 
     const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
 
-    expect(result).toBeDefined();
-    expect(result?.block).toBe(true);
-    expect(result?.blockReason).toContain('No READY plan found');
+    expect(result).toBeUndefined(); // Allowed
   });
 
-  it('should allow everything for Stage 4 (Architect)', () => {
+  it('should allow everything for Forest tier (EP system)', () => {
     const mockCtx = { workspaceDir };
     const mockEvent = { 
         toolName: 'write', 
@@ -135,6 +151,12 @@ describe('Progressive Gate Hook', () => {
     vi.mocked(fs.readFileSync).mockImplementation(() => {
         return JSON.stringify({ risk_paths: ['src/'], progressive_gate: { enabled: true } });
     });
+    // EP system allows everything at Forest tier
+    vi.mocked(evolutionEngine.checkEvolutionGate).mockReturnValue({
+      allowed: true,
+      currentTier: 5,
+      reason: ''
+    });
 
     const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
 
@@ -142,8 +164,8 @@ describe('Progressive Gate Hook', () => {
   });
 
   describe('Stage 1 PLAN Approvals', () => {
-    it('should allow operation when PLAN is READY and matches whitelist', () => {
-      const mockCtx = { workspaceDir };
+    it('should allow operation when PLAN is READY and matches whitelist (Trust Engine fallback)', () => {
+      const mockCtx = { workspaceDir, sessionId: 'test-session' };
       const mockEvent = {
         toolName: 'write',
         params: { file_path: 'skills/my-skill.md' }
@@ -170,13 +192,18 @@ describe('Progressive Gate Hook', () => {
         if (p.includes('PLAN.md')) return 'STATUS: READY\n';
         return '';
       });
+      // EP system throws error to test Trust Engine PLAN approval fallback
+      vi.mocked(evolutionEngine.checkEvolutionGate).mockImplementation(() => {
+        throw new Error('EP system error for testing fallback');
+      });
 
       const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
 
       expect(result).toBeUndefined(); 
-      expect(mockWctx.trajectory.recordGateBlock).toHaveBeenCalledWith(expect.objectContaining({
+      // When PLAN approval is used via Trust Engine fallback, recordPlanApproval should be called
+      expect(mockEventLog.recordPlanApproval).toHaveBeenCalledWith('test-session', expect.objectContaining({
         toolName: 'write',
-        reason: 'plan_approval',
+        filePath: 'skills/my-skill.md',
       }));
     });
   });
