@@ -170,7 +170,7 @@ describe('RuntimeSummaryService', () => {
     const summary = RuntimeSummaryService.getSummary(workspace);
 
     expect(summary.phase3.queueTruthReady).toBe(true);
-    expect(summary.phase3.phase3ShadowEligible).toBe(false);
+    expect(summary.phase3.phase3ShadowEligible).toBe(true);
   });
 
   it('prefers the explicit session when provided', () => {

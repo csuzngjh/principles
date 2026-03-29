@@ -61,18 +61,22 @@ describe('Gate Pipeline Integration - Single Authoritative Path', () => {
     recordGateBlock: vi.fn(),
   };
 
+  const mockEvolution = {
+    getTier: vi.fn().mockReturnValue(3),
+    getPoints: vi.fn().mockReturnValue(200),
+  };
+
   const mockWctx = {
     workspaceDir,
     stateDir: '/mock/state',
     config: mockConfig,
     eventLog: mockEventLog,
     trajectory: mockTrajectory,
+    evolution: mockEvolution,
     resolve: vi.fn().mockImplementation((key) => {
-      // Handle both short keys and file paths
       if (key === 'PROFILE') return path.join(workspaceDir, '.principles', 'PROFILE.json');
       if (key === 'PLAN') return path.join(workspaceDir, 'PLAN.md');
       if (key === 'STATE_DIR') return path.join(workspaceDir, '.state');
-      // For file paths, resolve to absolute path
       if (typeof key === 'string' && !key.includes(':')) {
         return path.join(workspaceDir, key);
       }

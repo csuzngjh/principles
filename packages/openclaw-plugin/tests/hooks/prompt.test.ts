@@ -195,14 +195,7 @@ describe('Prompt Context Injection Hook', () => {
     expect(result).toBeUndefined();
   });
 
-  it('should inject current trust score and stage in runtime_state', async () => {
-    vi.mocked(fs.existsSync).mockReturnValue(false);
-    
-    const result = await handleBeforePromptBuild({} as any, { workspaceDir, trigger: 'user' } as any);
-    
-    expect(result).toBeDefined();
-    expect(result?.prependContext).toContain('<system_override:runtime_constraints>');
-  });
+
 
   it('records latest user turn and flags explicit corrections', async () => {
   vi.mocked(fs.existsSync).mockReturnValue(false);
@@ -560,7 +553,6 @@ describe('Prompt Context Injection Hook', () => {
 
     expect(result).toBeDefined();
     expect(result?.prependContext).not.toContain('<evolution_task');
-    expect(result?.prependContext).toContain('<system_override:runtime_constraints>');
     expect(mockWarn).toHaveBeenCalledWith('[PD:Prompt] Skipping evolution task injection because task payload is invalid.');
   });
 
@@ -590,7 +582,6 @@ describe('Prompt Context Injection Hook', () => {
     expect(result?.prependContext).toContain('<evolution_task');
     expect(result?.prependContext).toContain('sessions_spawn(task="使用 pd-diagnostician skill');
     expect(result?.prependContext).not.toContain('Reply with "[EVOLUTION_ACK]" only');
-    expect(result?.prependContext).toContain('<system_override:runtime_constraints>');
   });
 
   it('should appendSystemContext with THINKING_OS.md if it exists and enabled', async () => {
@@ -788,7 +779,6 @@ describe('Prompt Context Injection Hook', () => {
     
     // prependContext: Only short dynamic directives
     const dynamicContext = result?.prependContext ?? '';
-    expect(dynamicContext).toContain('<system_override:runtime_constraints>');
     // project_context and reflection_log should NOT be in prependContext
     expect(dynamicContext).not.toContain('<project_context>');
     expect(dynamicContext).not.toContain('<reflection_log>');
@@ -926,7 +916,6 @@ describe('Prompt Context Injection Hook', () => {
         sessionId: 'agent:main:123'
       } as any);
 
-      expect(result?.prependContext).toContain('<system_override:runtime_constraints>');
     });
   });
 

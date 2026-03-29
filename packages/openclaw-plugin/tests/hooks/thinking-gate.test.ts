@@ -4,11 +4,20 @@
  * Tests the mandatory deep thinking checkpoint before high-risk operations.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { handleBeforeToolCall } from '../../src/hooks/gate.js';
 import { recordThinkingCheckpoint, hasRecentThinking, clearSession } from '../../src/core/session-tracker.js';
+import { WorkspaceContext } from '../../src/core/workspace-context.js';
+import * as riskCalculator from '../../src/core/risk-calculator.js';
+import * as evolutionEngine from '../../src/core/evolution-engine.js';
 import * as fs from 'fs';
 import * as path from 'path';
+
+vi.mock('../../src/core/workspace-context.js');
+vi.mock('../../src/core/risk-calculator.js');
+vi.mock('../../src/core/evolution-engine.js', () => ({
+  checkEvolutionGate: vi.fn().mockReturnValue({ allowed: true, currentTier: 3, reason: undefined }),
+}));
 
 const MOCK_SESSION_ID = 'test-thinking-session-001';
 // Use os.tmpdir() for cross-platform compatibility
@@ -41,12 +50,51 @@ function createMockEvent(toolName: string, params: Record<string, any> = {}) {
   };
 }
 
+// Mock evolution object for WorkspaceContext
+const mockEvolution = {
+  getTier: vi.fn().mockReturnValue(3),
+  getPoints: vi.fn().mockReturnValue(200),
+};
+
+// Mock WorkspaceContext that will be returned from fromHookContext
+const mockWctx = {
+  workspaceDir: MOCK_WORKSPACE,
+  stateDir: path.join(MOCK_WORKSPACE, '.principles'),
+  config: {
+    get: vi.fn().mockImplementation((key) => {
+      if (key === 'gfi_gate') return {
+        enabled: true,
+        thresholds: { low_risk_block: 70, high_risk_block: 40, large_change_block: 50 },
+        large_change_lines: 50,
+        ep_tier_multipliers: { '1': 0.5, '2': 0.75, '3': 1.0, '4': 1.5, '5': 2.0 },
+        bash_safe_patterns: [],
+        bash_dangerous_patterns: [],
+      };
+      return undefined;
+    }),
+  },
+  eventLog: { recordGateBlock: vi.fn(), recordPlanApproval: vi.fn(), recordGfiGateBlock: vi.fn() },
+  trajectory: { recordGateBlock: vi.fn(), recordTaskOutcome: vi.fn() },
+  evolution: mockEvolution,
+  resolve: vi.fn().mockImplementation((key) => {
+    if (key === 'PROFILE') return path.join(MOCK_WORKSPACE, '.principles', 'PROFILE.json');
+    if (key === 'PLAN') return path.join(MOCK_WORKSPACE, 'PLAN.md');
+    return '';
+  }),
+};
+
 describe('Thinking OS Checkpoint (P-10)', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
     clearSession(MOCK_SESSION_ID);
     // Create workspace directory and PROFILE.json with checkpoint enabled
     fs.mkdirSync(path.dirname(PROFILE_PATH), { recursive: true });
     fs.writeFileSync(PROFILE_PATH, JSON.stringify(TEST_PROFILE));
+    // Mock WorkspaceContext.fromHookContext to return our mock with evolution
+    vi.mocked(WorkspaceContext.fromHookContext).mockReturnValue(mockWctx as any);
+    vi.mocked(riskCalculator.assessRiskLevel).mockReturnValue('LOW');
+    vi.mocked(riskCalculator.estimateLineChanges).mockReturnValue(1);
   });
 
   afterEach(() => {
@@ -142,10 +190,8 @@ describe('Thinking OS Checkpoint (P-10)', () => {
 
     it('should expire after time window passes', async () => {
       recordThinkingCheckpoint(MOCK_SESSION_ID, MOCK_WORKSPACE);
-      // Initially should be true
       expect(hasRecentThinking(MOCK_SESSION_ID, 1000)).toBe(true);
-      // Wait for window to expire
-      await new Promise(resolve => setTimeout(resolve, 150));
+      vi.advanceTimersByTime(150);
       expect(hasRecentThinking(MOCK_SESSION_ID, 100)).toBe(false);
     });
   });
