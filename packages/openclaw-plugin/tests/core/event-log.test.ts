@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { EventLogService, EventLog } from '../../src/core/event-log.js';
-import type { DailyStats, TrustChangeEventData, DeepReflectionEventData } from '../../src/types/event-types.js';
+import type { DailyStats, DeepReflectionEventData } from '../../src/types/event-types.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -17,32 +17,6 @@ describe('EventLog', () => {
   afterEach(() => {
     eventLog.dispose();
     fs.rmSync(tempDir, { recursive: true, force: true });
-  });
-
-  describe('recordTrustChange', () => {
-    it('should record trust change event', () => {
-      const data: TrustChangeEventData = {
-        previousScore: 50,
-        newScore: 60,
-        delta: 10,
-        reason: 'subagent_success'
-      };
-
-      eventLog.recordTrustChange('session-1', data);
-      eventLog.flush();
-
-      const eventsFile = path.join(tempDir, 'logs', 'events.jsonl');
-      expect(fs.existsSync(eventsFile)).toBe(true);
-
-      const content = fs.readFileSync(eventsFile, 'utf-8');
-      const lines = content.trim().split('\n');
-      expect(lines.length).toBe(1);
-
-      const event = JSON.parse(lines[0]);
-      expect(event.type).toBe('trust_change');
-      expect(event.sessionId).toBe('session-1');
-      expect(event.data.delta).toBe(10);
-    });
   });
 
   describe('recordDeepReflection', () => {

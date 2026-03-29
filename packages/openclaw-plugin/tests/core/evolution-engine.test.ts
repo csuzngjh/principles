@@ -179,23 +179,6 @@ describe('EvolutionEngine', () => {
   // ===== Gate 检查测试 =====
 
   describe('Gate Integration', () => {
-    test('Seed tier should limit to 150 lines', () => {
-      const decision = engine.beforeToolCall({
-        toolName: 'write',
-        content: Array(151).fill('line').join('\n'),
-      });
-      expect(decision.allowed).toBe(false);
-      expect(decision.reason).toContain('150');
-    });
-
-    test('Seed tier should allow within limit', () => {
-      const decision = engine.beforeToolCall({
-        toolName: 'write',
-        content: Array(100).fill('line').join('\n'),
-      });
-      expect(decision.allowed).toBe(true);
-    });
-
     test('Seed tier should block risk path', () => {
       const decision = engine.beforeToolCall({
         toolName: 'write',
