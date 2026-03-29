@@ -9,7 +9,7 @@ vi.mock('fs');
 vi.mock('../../src/core/session-tracker.js');
 vi.mock('../../src/core/workspace-context.js');
 
-// 鈺愨晲鈺?Test Group: Model Resolution Functions 鈺愨晲鈺?
+// 🎭️Test Group: Model Resolution Functions 🎭️
 describe('resolveModelFromConfig', () => {
   it('parses string format "provider/model"', () => {
     expect(resolveModelFromConfig('openai/gpt-4o')).toBe('openai/gpt-4o');
@@ -219,10 +219,10 @@ describe('Prompt Context Injection Hook', () => {
   expect(mockWctx.trajectory.listAssistantTurns).toHaveBeenCalledWith('session-1');
 });
 
-  // 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+  // ──────────────────────────────────────────────────────────────────────
   // IMPORTANT: project_context and reflection_log are now in appendSystemContext
   // This fixes WebUI UX issue (Issue #23) and enables Prompt Caching
-  // 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+  // ──────────────────────────────────────────────────────────────────────
 
   it('should NOT inject project_context by default (projectFocus: off)', async () => {
     vi.mocked(fs.existsSync).mockImplementation((p) => p.toString().includes('CURRENT_FOCUS.md'));
@@ -387,7 +387,7 @@ describe('Prompt Context Injection Hook', () => {
   });
 
   it('should properly escape special characters in task string', async () => {
-    // 浠诲姟鍖呭惈鐗规畩瀛楃锛氬弽鏂滄潬銆佸弻寮曞彿銆佹崲琛岀
+    // 任务包含特殊字符：反斜杠、双引号、换行符
     const taskWithSpecialChars = 'Fix path C:\\Users\\admin and "quoted text"\nwith newline';
     
     vi.mocked(fs.existsSync).mockImplementation((p) => p.toString().includes('evolution_queue.json'));
@@ -417,7 +417,7 @@ describe('Prompt Context Injection Hook', () => {
       api: mockApi
     } as any);
 
-    // 楠岃瘉杞箟鍚庣殑瀛楃涓?
+    // 验证转义后的字符串中
     expect(result?.prependContext).toContain('C:\\\\Users\\\\admin');
     expect(result?.prependContext).toContain('\\"quoted text\\"');
     expect(result?.prependContext).toContain('\\nwith newline');
@@ -784,13 +784,13 @@ describe('Prompt Context Injection Hook', () => {
     expect(dynamicContext).not.toContain('<reflection_log>');
   });
 
-  // 鈺愨晲鈺?Test Group 1: isMinimalMode 鈺愨晲鈺?
+  // 🎭️Test Group 1: isMinimalMode 🎭️
   describe('isMinimalMode detection', () => {
     beforeEach(() => {
       vi.mocked(fs.existsSync).mockReturnValue(false);
     });
 
-    it('heartbeat trigger 鈫?isMinimalMode = true', async () => {
+    it('heartbeat trigger → isMinimalMode = true', async () => {
       const result = await handleBeforePromptBuild({} as any, {
         workspaceDir,
         trigger: 'heartbeat',
@@ -801,7 +801,7 @@ describe('Prompt Context Injection Hook', () => {
       expect(result?.appendSystemContext).not.toContain('<project_context>');
     });
 
-    it('sessionId 鍚?:subagent: 鈫?isMinimalMode = true', async () => {
+    it('sessionId contains :subagent: → isMinimalMode = true', async () => {
       const result = await handleBeforePromptBuild({} as any, {
         workspaceDir,
         trigger: 'user',
@@ -812,7 +812,7 @@ describe('Prompt Context Injection Hook', () => {
       expect(result?.appendSystemContext).not.toContain('<project_context>');
     });
 
-    it('涓讳細璇?sessionId 鈫?isMinimalMode = false', async () => {
+    it('main session with sessionId → isMinimalMode = false', async () => {
       vi.mocked(fs.existsSync).mockImplementation((p) => {
         if (p.toString().includes('PROFILE.json')) return true;
         if (p.toString().includes('CURRENT_FOCUS.md')) return true;
@@ -893,13 +893,13 @@ describe('Prompt Context Injection Hook', () => {
     });
   });
 
-  // 鈺愨晲鈺?Test Group 2: Minimal Mode 娉ㄥ叆琛屼负 鈺愨晲鈺?
+  // 🎭️Test Group 2: Minimal Mode 注入行为 🎭️
   describe('Minimal Mode injection behavior', () => {
     beforeEach(() => {
       vi.mocked(fs.existsSync).mockReturnValue(false);
     });
 
-    it('minimal mode: 涓嶅惈 <project_context> in appendSystemContext', async () => {
+    it('minimal mode: 不包含 <project_context> in appendSystemContext', async () => {
       const result = await handleBeforePromptBuild({} as any, { 
         workspaceDir, 
         trigger: 'heartbeat',
@@ -909,7 +909,7 @@ describe('Prompt Context Injection Hook', () => {
       expect(result?.appendSystemContext).not.toContain('<project_context>');
     });
 
-    it('minimal mode: 浠嶅惈 <runtime_state>', async () => {
+    it('minimal mode: 仍包含 <runtime_state>', async () => {
       const result = await handleBeforePromptBuild({} as any, {
         workspaceDir,
         trigger: 'heartbeat',
@@ -919,13 +919,13 @@ describe('Prompt Context Injection Hook', () => {
     });
   });
 
-  // 鈺愨晲鈺?Test Group 3: Size Guard 鈺愨晲鈺?
+  // 🎭️Test Group 3: Size Guard 🎭️
   describe('Size Guard', () => {
     beforeEach(() => {
       vi.mocked(fs.existsSync).mockReturnValue(false);
     });
 
-    it('瓒呰繃 10000 瀛楃 鈫?瑙﹀彂鎴柇 in appendSystemContext', async () => {
+    it('超过 10000 字符 → 触发截断 in appendSystemContext', async () => {
       const largeContent = Array.from({ length: 80 }, (_, i) => 
         `Line ${i + 1}: This is a long line of content with enough data to exceed the 10000 character limit for testing size guard functionality`
       ).join('\n');
@@ -1030,7 +1030,7 @@ describe('Prompt Context Injection Hook', () => {
       expect(result?.appendSystemContext).toContain('[truncated]');
     });
 
-    it('< 20 琛屼笉鎴柇', async () => {
+    it('< 20 字符不截断', async () => {
       const fifteenLines = Array.from({ length: 15 }, (_, i) =>
         `Line ${i + 1}: This is content line number ${i + 1} for testing no truncation when under 20 lines`
       ).join('\n');
@@ -1061,7 +1061,7 @@ describe('Prompt Context Injection Hook', () => {
     });
   });
 
-  // 鈺愨晲鈺?Test Group 4: ContextInjectionConfig 閰嶇疆娴嬭瘯 鈺愨晲鈺?
+  // 🎭️Test Group 4: ContextInjectionConfig 配置测试 🎭️
   describe('ContextInjectionConfig settings', () => {
     it('thinkingOs: false 鈫?涓嶆敞鍏?THINKING_OS', async () => {
       vi.mocked(fs.existsSync).mockImplementation((p) => {
@@ -1316,7 +1316,7 @@ describe('Prompt Context Injection Hook', () => {
     });
   });
 
-  // 鈺愨晲鈺?Test Group 5: WebUI UX + Prompt Caching 鈺愨晲鈺?
+  // 🎭️Test Group 5: WebUI UX + Prompt Caching 🎭️
   describe('WebUI UX and Prompt Caching optimization', () => {
     it('prependContext should NOT contain long content (WebUI displays it)', async () => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
