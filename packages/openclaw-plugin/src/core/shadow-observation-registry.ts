@@ -27,7 +27,7 @@
  * DESIGN CONSTRAINTS:
  *   - Fail-closed: if no shadow evidence exists, fall back to eval proxies
  *   - Shadow evidence must be statistically significant (min sample size)
- *   - Observations are append-only (no deletion, only expiration)
+ *   - Observations are retained until cleanup removes expired entries
  */
 
 import * as fs from 'fs';

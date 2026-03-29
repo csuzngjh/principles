@@ -32,6 +32,7 @@
 
 import * as crypto from 'crypto';
 import * as fs from 'fs';
+import { fileURLToPath } from 'url';
 
 // ---------------------------------------------------------------------------
 // Backend Enum
@@ -428,8 +429,8 @@ export function computeDatasetFingerprint(exportPath: string, sampleCount: numbe
  */
 export function computeCodeHash(): string {
   try {
-    // Hash the actual contract source file content
-    const sourcePath = __filename;
+    // Hash the actual contract source file content using ESM-safe resolution
+    const sourcePath = fileURLToPath(import.meta.url);
     const sourceContent = fs.readFileSync(sourcePath, 'utf-8');
     // Include only the relevant contract definitions (first 500 lines)
     // to avoid hash changes from comments/timestamps
@@ -437,7 +438,8 @@ export function computeCodeHash(): string {
     return crypto.createHash('sha256').update(relevantContent).digest('hex').slice(0, 16);
   } catch {
     // Fallback if source cannot be read (should not happen in normal operation)
-    const fallback = `nocturnal-phase7-v1:${Date.now()}`;
+    // Use a deterministic version string — NOT Date.now() — so the hash is stable
+    const fallback = 'nocturnal-phase7-v1:deterministic-fallback';
     return crypto.createHash('sha256').update(fallback).digest('hex').slice(0, 16);
   }
 }

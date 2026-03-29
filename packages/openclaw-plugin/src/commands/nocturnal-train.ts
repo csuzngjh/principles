@@ -24,7 +24,7 @@
 
 import * as path from 'path';
 import * as fs from 'fs';
-import { execSync } from 'child_process';
+import { execSync, execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
@@ -254,6 +254,13 @@ Hardware tiers:
       const manifestPath = path.join(workspaceDir, '.state', 'exports', 'orpo', `${datasetExportId}-manifest.json`);
       if (fs.existsSync(manifestPath)) {
         const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+        if (!manifest.datasetFingerprint) {
+          return {
+            text: zh
+              ? `错误: manifest 文件缺少 datasetFingerprint: ${manifestPath}`
+              : `Error: manifest missing datasetFingerprint: ${manifestPath}`,
+          };
+        }
         datasetFingerprint = manifest.datasetFingerprint;
       }
 
@@ -502,10 +509,14 @@ Next steps:
 
       // Validate spec exists
       const specPath = path.join(workspaceDir, '.state', 'nocturnal', 'checkpoints', `experiment-${experimentId}.json`);
-      let spec: any = {};
-      if (fs.existsSync(specPath)) {
-        spec = JSON.parse(fs.readFileSync(specPath, 'utf-8'));
+      if (!fs.existsSync(specPath)) {
+        return {
+          text: zh
+            ? `错误: 未找到实验 spec 文件: ${specPath}`
+            : `Error: Experiment spec not found: ${specPath}`,
+        };
       }
+      const spec = JSON.parse(fs.readFileSync(specPath, 'utf-8'));
 
       // Process the result
       const program = new TrainingProgram(workspaceDir);
@@ -623,11 +634,12 @@ Next steps:
           const benchmarkScript = BENCHMARK_SCRIPT_PATH;
         const outputDir = path.join(workspaceDir, '.state', 'nocturnal', 'evals');
 
-        // Build the compare command - pass ARTIFACT PATHS (not registry IDs) to the scorer
-        // The run-benchmark.ts scorer (resolveCheckpointPath) will receive these as absolute paths
-        // so it can load the PEFT adapters directly without registry-based ID resolution.
-        const cmdParts = [
-          'npx', '--yes', 'ts-node',
+        // Build the compare command - pass ARTIFACT PATHS as separate arguments
+        // to avoid shell injection when paths contain special characters.
+        // Use execFileSync to pass arguments as an array (no shell interpolation).
+        const cmdArgs = [
+          '--yes',
+          'ts-node',
           benchmarkScript,
           'compare',
           `--export-id=${exportId}`,
@@ -637,7 +649,6 @@ Next steps:
           `--scorer=${scorerType}`,
           `--output-dir=${outputDir}`,
         ];
-        const cmd = cmdParts.join(' ');
 
         let benchmarkResult: {
           delta: { delta: number; baselineScore: number; candidateScore: number };
@@ -647,8 +658,8 @@ Next steps:
         let benchmarkError = '';
 
         try {
-          // Use execSync for simplicity in sync command handler
-          const stdout = execSync(cmd, {
+          // Use execFileSync to avoid shell injection — paths are passed as args, not interpolated
+          const stdout = execFileSync('npx', cmdArgs, {
             cwd: process.cwd(),
             timeout: 300000, // 5 min timeout
             encoding: 'utf-8',
@@ -710,6 +721,7 @@ Next steps:
 
       try {
         program.attachEvalAndMarkDeployable(checkpointId, evalSummary);
+        const deployable = verdict === 'pass' || verdict === 'compare_only';
 
         return {
           text: zh
@@ -721,7 +733,7 @@ Benchmark: ${benchmarkId}
 Delta: ${delta >= 0 ? '+' : ''}${delta.toFixed(4)}
 Verdict: ${verdict}
 Mode: ${mode}
-Deployable: Yes
+Deployable: ${deployable ? 'Yes' : 'No'}
 
 下一步:
 1. 评估晋升: /nocturnal-rollout evaluate-promotion ${checkpointId}
@@ -734,7 +746,7 @@ Candidate Score: ${candidateScore.toFixed(4)}
 Delta: ${delta >= 0 ? '+' : ''}${delta.toFixed(4)}
 Verdict: ${verdict}
 Mode: ${mode}
-Deployable: Yes
+Deployable: ${deployable ? 'Yes' : 'No'}
 
 Next steps:
 1. Evaluate promotion: /nocturnal-rollout evaluate-promotion ${checkpointId}

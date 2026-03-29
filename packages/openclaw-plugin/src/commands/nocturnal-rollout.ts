@@ -623,13 +623,13 @@ ${lines.join('\n')}`,
     // Execute a routing decision for a task. Records shadow observation if routing to shadow.
     if (subcommand === 'route') {
       // Parse routing input arguments
-      const intentArg = parts.find((p) => p.startsWith('--intent='))?.split('=')[1] ?? '';
-      const descriptionArg = parts.find((p) => p.startsWith('--description='))?.split('=')[1] ?? '';
-      const toolsArg = parts.find((p) => p.startsWith('--tools='))?.split('=')[1] ?? '';
-      const filesArg = parts.find((p) => p.startsWith('--files='))?.split('=')[1] ?? '';
-      const outputArg = parts.find((p) => p.startsWith('--output='))?.split('=')[1] ?? '';
-      const riskArg = parts.find((p) => p.startsWith('--risk='))?.split('=')[1] ?? '';
-      const complexityArg = parts.find((p) => p.startsWith('--complexity='))?.split('=')[1] ?? '';
+      const intentArg = parts.find((p) => p.startsWith('--intent='))?.slice('--intent='.length) ?? '';
+      const descriptionArg = parts.find((p) => p.startsWith('--description='))?.slice('--description='.length) ?? '';
+      const toolsArg = parts.find((p) => p.startsWith('--tools='))?.slice('--tools='.length) ?? '';
+      const filesArg = parts.find((p) => p.startsWith('--files='))?.slice('--files='.length) ?? '';
+      const outputArg = parts.find((p) => p.startsWith('--output='))?.slice('--output='.length) ?? '';
+      const riskArg = parts.find((p) => p.startsWith('--risk='))?.slice('--risk='.length) ?? '';
+      const complexityArg = parts.find((p) => p.startsWith('--complexity='))?.slice('--complexity='.length) ?? '';
 
       const routingInput: RoutingInput = {
         taskIntent: intentArg || undefined,

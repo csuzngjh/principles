@@ -57,6 +57,12 @@ export interface TrainingRun {
   /** Unique identifier for this training run */
   trainRunId: string;
 
+  /**
+   * Experiment ID this run belongs to.
+   * Enables lookup by experimentId in addition to trainRunId.
+   */
+  experimentId: string;
+
   /** Target model family this run produces checkpoints for */
   targetModelFamily: string;
 
@@ -278,6 +284,7 @@ const VALID_RUN_TRANSITIONS: Record<TrainingRunStatus, TrainingRunStatus[]> = {
 export function registerTrainingRun(
   stateDir: string,
   params: {
+    experimentId: string;
     targetModelFamily: string;
     datasetFingerprint: string;
     exportId: string;
@@ -291,6 +298,7 @@ export function registerTrainingRun(
 
     const run: TrainingRun = {
       trainRunId,
+      experimentId: params.experimentId,
       targetModelFamily: params.targetModelFamily,
       datasetFingerprint: params.datasetFingerprint,
       exportId: params.exportId,

@@ -58,7 +58,7 @@ import {
   registerCheckpoint,
   attachEvalSummary,
   markCheckpointDeployable,
-  getCheckpoint,
+  getCheckpointLineage,
 } from './model-training-registry.js';
 
 // ---------------------------------------------------------------------------
@@ -224,6 +224,7 @@ export function createExperiment(
 
   // --- Register training run in registry ---
   const trainRun = registerTrainingRun(stateDir, {
+    experimentId: spec.experimentId,
     targetModelFamily: spec.targetModelFamily,
     datasetFingerprint: spec.datasetFingerprint,
     exportId: spec.datasetExportId,
@@ -570,6 +571,6 @@ export class TrainingProgram {
    * Get checkpoint lineage for audit.
    */
   getCheckpointLineage(checkpointId: string) {
-    return getCheckpoint(this.stateDir, checkpointId);
+    return getCheckpointLineage(this.stateDir, checkpointId);
   }
 }

@@ -85,7 +85,7 @@ describe('nocturnal-train command', () => {
       .split('\n')
       .map((line) => line.trim())
       .map((line) => line.replace(/^-+\s*/, ''))
-      .filter((line) => /^[A-Za-z]:\\/.test(line));
+      .filter((line) => path.isAbsolute(line));
 
     expect(pathLines).toHaveLength(2);
     const [trainerSpecPath, workspaceSpecPath] = pathLines;
