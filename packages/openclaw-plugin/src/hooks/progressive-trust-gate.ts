@@ -1,7 +1,7 @@
 /**
- * Progressive Trust Gate Module (EP-Only Version)
+ * Progressive Gate Module (EP-Only Version)
  *
- * 信任分系统已移除 - EP (Evolution Points) 是唯一的门控机制。
+ * EP (Evolution Points) 是唯一的门控机制。
  *
  * **EP 门控逻辑:**
  * - Seed (0分): 只读 + 基础文档

@@ -7,7 +7,7 @@
  * 2. Thinking OS Checkpoint (P-10): Deep reflection enforcement
  * 3. GFI Gate: Fatigue index-based blocking
  * 4. Bash Mutation Detection: Heuristic for bash file modifications
- * 5. Progressive Trust Gate: Stage 1-4 access control
+ * 5. Progressive Gate: EP tier-based access control
  * 6. Edit Verification (P-03): Exact/fuzzy match for edit operations
  *
  * IMPORTANT: This is the SINGLE AUTHORITATIVE orchestration path.

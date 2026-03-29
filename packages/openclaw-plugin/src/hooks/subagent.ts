@@ -179,7 +179,7 @@ export async function handleSubagentEnded(
 
     const config = wctx.config;
 
-    // ── Outcome-based Trust Score and Pain Signal handling ──
+    // ── Outcome-based EP and Pain Signal handling ──
     // OpenClaw v2026.3.23 fixes: timeout may be false positive (fast-finishing workers)
     // Only penalize actual errors, not timeout/killed/reset
     
