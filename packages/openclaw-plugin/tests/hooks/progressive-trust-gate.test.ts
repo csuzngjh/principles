@@ -6,6 +6,8 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { PluginHookBeforeToolCallEvent } from '../../src/openclaw-sdk.js';
+import { checkProgressiveTrustGate } from '../../src/hooks/progressive-trust-gate.js';
+import { checkEvolutionGate } from '../../src/core/evolution-engine.js';
 
 vi.mock('../../src/core/workspace-context.js', () => ({
   WorkspaceContext: {
@@ -37,9 +39,8 @@ describe('progressive-trust-gate', () => {
   describe('checkProgressiveTrustGate', () => {
     let mockEvent: PluginHookBeforeToolCallEvent;
     let mockLogger: any;
-    let checkEvolutionGate: any;
 
-    beforeEach(async () => {
+    beforeEach(() => {
       mockEvent = {
         toolName: 'edit',
         params: {
@@ -55,15 +56,11 @@ describe('progressive-trust-gate', () => {
       };
 
       vi.clearAllMocks();
-
-      const evolutionEngine = await import('../../src/core/evolution-engine.js');
-      checkEvolutionGate = evolutionEngine.checkEvolutionGate;
     });
 
     it('should allow when EP gate permits', () => {
-      checkEvolutionGate.mockReturnValue({ allowed: true, currentTier: 'SEED' });
+      vi.mocked(checkEvolutionGate).mockReturnValue({ allowed: true, currentTier: 1 });
 
-      const { checkProgressiveTrustGate } = require('../../src/hooks/progressive-trust-gate.js');
       const result = checkProgressiveTrustGate(
         mockEvent,
         mockWctx as any,
@@ -81,9 +78,8 @@ describe('progressive-trust-gate', () => {
     });
 
     it('should block when EP gate denies', () => {
-      checkEvolutionGate.mockReturnValue({ allowed: false, currentTier: 'SEED', reason: 'Insufficient EP' });
+      vi.mocked(checkEvolutionGate).mockReturnValue({ allowed: false, currentTier: 1, reason: 'Insufficient EP' });
 
-      const { checkProgressiveTrustGate } = require('../../src/hooks/progressive-trust-gate.js');
       const result = checkProgressiveTrustGate(
         mockEvent,
         mockWctx as any,
@@ -101,9 +97,8 @@ describe('progressive-trust-gate', () => {
     });
 
     it('should handle risk path decisions via EP gate', () => {
-      checkEvolutionGate.mockReturnValue({ allowed: true, currentTier: 'TREE' });
+      vi.mocked(checkEvolutionGate).mockReturnValue({ allowed: true, currentTier: 4 });
 
-      const { checkProgressiveTrustGate } = require('../../src/hooks/progressive-trust-gate.js');
       const result = checkProgressiveTrustGate(
         mockEvent,
         mockWctx as any,
@@ -122,9 +117,8 @@ describe('progressive-trust-gate', () => {
     });
 
     it('should skip gate when workspaceDir is missing', () => {
-      checkEvolutionGate.mockReturnValue({ allowed: false, currentTier: 'SEED' });
+      vi.mocked(checkEvolutionGate).mockReturnValue({ allowed: false, currentTier: 1 });
 
-      const { checkProgressiveTrustGate } = require('../../src/hooks/progressive-trust-gate.js');
       const result = checkProgressiveTrustGate(
         mockEvent,
         mockWctx as any,

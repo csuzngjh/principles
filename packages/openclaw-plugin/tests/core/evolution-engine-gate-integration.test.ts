@@ -50,14 +50,13 @@ describe('Gate Integration - Tier Progression Flow', () => {
     cleanupWorkspace(workspace);
   });
 
-  test('Seed tier: maxLinesPerWrite = 20', () => {
+  test('Seed tier: basic permissions', () => {
     const tierDef = engine.getTierDefinition();
-    expect(tierDef.permissions.maxLinesPerWrite).toBe(20);
     expect(tierDef.permissions.allowRiskPath).toBe(false);
     expect(tierDef.permissions.allowSubagentSpawn).toBe(false);
   });
 
-  test('Seed → Sprout: line limit increases to 50', () => {
+  test('Seed → Sprout: file limit increases', () => {
     // 50 points = Sprout
     for (let i = 0; i < 17; i++) {
       engine.recordSuccess('write', { difficulty: 'normal' });
@@ -67,10 +66,10 @@ describe('Gate Integration - Tier Progression Flow', () => {
     expect(tier).toBeGreaterThanOrEqual(EvolutionTier.Sprout);
     
     const tierDef = engine.getTierDefinition();
-    expect(tierDef.permissions.maxLinesPerWrite).toBe(50);
+    expect(tierDef.permissions.maxFilesPerTask).toBe(2);
   });
 
-  test('Seed → Sapling: line limit increases to 200, subagent unlocks', () => {
+  test('Seed → Sapling: subagent unlocks', () => {
     // 200 points = Sapling
     for (let i = 0; i < 26; i++) {
       engine.recordSuccess('write', { difficulty: 'hard' });
@@ -80,7 +79,6 @@ describe('Gate Integration - Tier Progression Flow', () => {
     expect(tier).toBeGreaterThanOrEqual(EvolutionTier.Sapling);
     
     const tierDef = engine.getTierDefinition();
-    expect(tierDef.permissions.maxLinesPerWrite).toBe(200);
     expect(tierDef.permissions.allowRiskPath).toBe(false); // Risk path unlocks at Tree
     expect(tierDef.permissions.allowSubagentSpawn).toBe(true);
   });
@@ -102,10 +100,9 @@ describe('Gate Integration - Tier Progression Flow', () => {
     for (let i = 0; i < 63; i++) engine.recordSuccess('write', { difficulty: 'hard' });
     expect(engine.getTier()).toBe(EvolutionTier.Forest);
     
-    // Forest: no limits
+    // Forest: all unlocked
     const tierDef = engine.getTierDefinition();
     const perms = tierDef.permissions;
-    expect(perms.maxLinesPerWrite).toBe(Infinity);
     expect(perms.allowRiskPath).toBe(true);
     expect(perms.allowSubagentSpawn).toBe(true);
   });
@@ -124,28 +121,19 @@ describe('Gate Integration - Blocking Recovery', () => {
     cleanupWorkspace(workspace);
   });
 
-  test('blocked operation: agent can continue with allowed operations', () => {
-    // Seed tier: 20 line limit
-    const blocked = engine.beforeToolCall({
+  test('write tool always allowed (line limits removed)', () => {
+    // Write operations are always allowed in EP system
+    const result = engine.beforeToolCall({
       toolName: 'write',
-      content: Array(21).fill('line').join('\n'),
+      content: Array(100).fill('line').join('\n'),
     });
-    expect(blocked.allowed).toBe(false);
-    expect(blocked.reason).toContain('20');
-    
-    // But 10-line write should work
-    const allowed = engine.beforeToolCall({
-      toolName: 'write',
-      content: Array(10).fill('line').join('\n'),
-    });
-    expect(allowed.allowed).toBe(true);
+    expect(result.allowed).toBe(true);
   });
 
-  test('after promotion: previously blocked operations now allowed', () => {
-    // Initially Seed: 20 line limit
+  test('after promotion: subagent spawn now allowed', () => {
+    // Initially Seed: subagent spawn blocked
     const blocked = engine.beforeToolCall({
-      toolName: 'write',
-      content: Array(21).fill('line').join('\n'),
+        toolName: 'sessions_spawn',
     });
     expect(blocked.allowed).toBe(false);
     
@@ -154,10 +142,20 @@ describe('Gate Integration - Blocking Recovery', () => {
       engine.recordSuccess('write', { difficulty: 'normal' });
     }
     
-    // Now Sprout: 50 line limit
+    // Now Sprout: still no subagent (unlocks at Sapling)
+    const stillBlocked = engine.beforeToolCall({
+        toolName: 'sessions_spawn',
+    });
+    expect(stillBlocked.allowed).toBe(false);
+    
+    // Promote to Sapling (need 200 points total, 17 normal = 51, so need ~19 hard)
+    for (let i = 0; i < 19; i++) {
+      engine.recordSuccess('write', { difficulty: 'hard' });
+    }
+    
+    // Now allowed
     const nowAllowed = engine.beforeToolCall({
-      toolName: 'write',
-      content: Array(30).fill('line').join('\n'),
+        toolName: 'sessions_spawn',
     });
     expect(nowAllowed.allowed).toBe(true);
   });
@@ -194,34 +192,20 @@ describe('Gate Integration - Multi-tool Consistency', () => {
     cleanupWorkspace(workspace);
   });
 
-  test('write tool respects line limit', () => {
-    // Exactly at limit (20) - should allow
-    const exact = engine.beforeToolCall({
+  test('write tool always allowed', () => {
+    const result = engine.beforeToolCall({
       toolName: 'write',
-      content: Array(20).fill('line').join('\n'),
+      content: Array(100).fill('line').join('\n'),
     });
-    expect(exact.allowed).toBe(true);
-    
-    // 1 over limit (21) - should block
-    const over = engine.beforeToolCall({
-      toolName: 'write',
-      content: Array(21).fill('line').join('\n'),
-    });
-    expect(over.allowed).toBe(false);
+    expect(result.allowed).toBe(true);
   });
 
-  test('edit tool respects line limit', () => {
-    const allowed = engine.beforeToolCall({
+  test('edit tool always allowed', () => {
+    const result = engine.beforeToolCall({
       toolName: 'edit',
-      content: Array(15).fill('line').join('\n'),
+      content: Array(100).fill('line').join('\n'),
     });
-    expect(allowed.allowed).toBe(true);
-    
-    const blocked = engine.beforeToolCall({
-      toolName: 'edit',
-      content: Array(25).fill('line').join('\n'),
-    });
-    expect(blocked.allowed).toBe(false);
+    expect(result.allowed).toBe(true);
   });
 
   test('high-risk tools blocked at Seed tier', () => {
@@ -424,33 +408,24 @@ describe('Gate Integration - Real World Scenarios', () => {
   });
 
   test('agent starts small, grows capability', () => {
-    // New agent at Seed
     expect(engine.getTier()).toBe(EvolutionTier.Seed);
     
-    // Attempt 100-line write - blocked
     let decision = engine.beforeToolCall({
       toolName: 'write',
       content: Array(100).fill('line').join('\n'),
     });
-    expect(decision.allowed).toBe(false);
+    expect(decision.allowed).toBe(true);
     
-    // Attempt subagent spawn - blocked  
     decision = engine.beforeToolCall({
       toolName: 'sessions_spawn',
     });
     expect(decision.allowed).toBe(false);
     
-    // Work hard, grow to Forest
     for (let i = 0; i < 125; i++) {
       engine.recordSuccess('write', { difficulty: 'hard' });
     }
     
-    // Now Forest - can do anything
-    decision = engine.beforeToolCall({
-      toolName: 'write',
-      content: Array(1000).fill('line').join('\n'),
-    });
-    expect(decision.allowed).toBe(true);
+    expect(engine.getTier()).toBe(EvolutionTier.Forest);
     
     decision = engine.beforeToolCall({
       toolName: 'sessions_spawn',
@@ -489,11 +464,9 @@ describe('Gate Integration - Real World Scenarios', () => {
     const summary = engine.getStatusSummary();
     
     expect(summary.tier).toBe(EvolutionTier.Seed);
-    expect(summary.permissions.maxLinesPerWrite).toBe(20);
     expect(summary.permissions.allowRiskPath).toBe(false);
     expect(summary.permissions.allowSubagentSpawn).toBe(false);
     
-    // Earn promotion
     for (let i = 0; i < 26; i++) {
       engine.recordSuccess('write', { difficulty: 'hard' });
     }

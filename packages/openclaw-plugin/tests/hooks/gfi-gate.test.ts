@@ -5,11 +5,15 @@ import * as path from 'path';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
 import * as riskCalculator from '../../src/core/risk-calculator.js';
 import * as sessionTracker from '../../src/core/session-tracker.js';
+import * as evolutionEngine from '../../src/core/evolution-engine.js';
 
 vi.mock('fs');
 vi.mock('../../src/core/workspace-context.js');
 vi.mock('../../src/core/risk-calculator.js');
 vi.mock('../../src/core/session-tracker.js');
+vi.mock('../../src/core/evolution-engine.js', () => ({
+  checkEvolutionGate: vi.fn().mockReturnValue({ allowed: true, currentTier: 3, reason: undefined }),
+}));
 
 describe('GFI Gate - Hard Intercept', () => {
   const workspaceDir = '/mock/workspace';
@@ -27,11 +31,12 @@ describe('GFI Gate - Hard Intercept', () => {
                 large_change_block: 50
             },
             large_change_lines: 50,
-            trust_stage_multipliers: {
+            ep_tier_multipliers: {
                 '1': 0.5,
                 '2': 0.75,
                 '3': 1.0,
-                '4': 1.5
+                '4': 1.5,
+                '5': 2.0
             },
             bash_safe_patterns: [
                 '^(ls|dir|pwd|which|where|echo|env|cat|type|head|tail|less|more)\\b',
@@ -63,12 +68,18 @@ describe('GFI Gate - Hard Intercept', () => {
     recordTaskOutcome: vi.fn(),
   };
 
+  const mockEvolution = {
+    getTier: vi.fn().mockReturnValue(3),
+    getPoints: vi.fn().mockReturnValue(200),
+  };
+
   const mockWctx = {
     workspaceDir,
     stateDir: '/mock/state',
     config: mockConfig,
     eventLog: mockEventLog,
     trajectory: mockTrajectory,
+    evolution: mockEvolution,
     resolve: vi.fn().mockImplementation((key) => {
         if (key === 'PROFILE') return path.join(workspaceDir, '.principles', 'PROFILE.json');
         if (key === 'PLAN') return path.join(workspaceDir, 'PLAN.md');
@@ -500,13 +511,14 @@ describe('GFI Gate - Hard Intercept', () => {
   // ════════════════════════════════════════════════
   // Trust Stage 联动
   // ════════════════════════════════════════════════
-  describe('Trust Stage multipliers', () => {
-    it('should use lower threshold for Stage 1 (×0.5)', () => {
+  describe('EP Tier multipliers', () => {
+    it('should use lower threshold for Tier 1 (×0.5)', () => {
       const mockCtx = { workspaceDir, sessionId: 'test-session' };
       const mockEvent = { toolName: 'write', params: { file_path: 'test.txt', content: 'test' } };
 
       // 基础阈值 70 × 0.5 = 35
       // GFI = 40 应该被拦截 
+      mockEvolution.getTier.mockReturnValue(1);
       vi.mocked(sessionTracker.getSession).mockReturnValue({ currentGfi: 40 } as any);
 
       vi.mocked(fs.existsSync).mockReturnValue(true);
@@ -519,12 +531,13 @@ describe('GFI Gate - Hard Intercept', () => {
       expect(result?.blockReason).toContain('GFI');
     });
 
-    it('should use standard threshold for Stage 3 (×1.0)', () => {
+    it('should use standard threshold for Tier 3 (×1.0)', () => {
       const mockCtx = { workspaceDir, sessionId: 'test-session' };
       const mockEvent = { toolName: 'write', params: { file_path: 'test.txt', content: 'test' } };
 
       // 基础阈值 70 × 1.0 = 70
       // GFI = 65 应该放行
+      mockEvolution.getTier.mockReturnValue(3);
       vi.mocked(sessionTracker.getSession).mockReturnValue({ currentGfi: 65 } as any);
 
       vi.mocked(fs.existsSync).mockReturnValue(true);
@@ -535,12 +548,13 @@ describe('GFI Gate - Hard Intercept', () => {
       expect(result).toBeUndefined(); // 放行
     });
 
-    it('should use higher threshold for Stage 4 (×1.5)', () => {
+    it('should use higher threshold for Tier 4 (×1.5)', () => {
       const mockCtx = { workspaceDir, sessionId: 'test-session' };
       const mockEvent = { toolName: 'write', params: { file_path: 'test.txt', content: 'test' } };
 
       // 基础阈值 70 × 1.5 = 105
       // GFI = 80 应该放行
+      mockEvolution.getTier.mockReturnValue(4);
       vi.mocked(sessionTracker.getSession).mockReturnValue({ currentGfi: 80 } as any);
 
       vi.mocked(fs.existsSync).mockReturnValue(true);
@@ -621,12 +635,19 @@ describe('GFI Gate - Hard Intercept', () => {
   });
 
   describe('Gate block accounting', () => {
-    it('records stage-based blocks to both session tracker and event log with the real session id', () => {
+    it('records EP-based blocks to both session tracker and event log with the real session id', () => {
       const mockCtx = { workspaceDir, sessionId: 'test-session' };
       const mockEvent = {
         toolName: 'write',
         params: { file_path: 'src/large-change.ts', content: 'test' },
       };
+
+      // Mock EP gate to block
+      vi.mocked(evolutionEngine.checkEvolutionGate).mockReturnValueOnce({
+        allowed: false,
+        currentTier: 1,
+        reason: 'Seed tier cannot write files',
+      });
 
       vi.mocked(sessionTracker.getSession).mockReturnValue({ currentGfi: 0 } as any);
 
@@ -645,15 +666,15 @@ describe('GFI Gate - Hard Intercept', () => {
       expect(mockEventLog.recordGateBlock).toHaveBeenCalledWith('test-session', {
         toolName: 'write',
         filePath: 'src/large-change.ts',
-        reason: 'Modification too large: 20 lines. Stage 2 limit is 10 lines (fixed threshold). Note: Could not read target file to calculate percentage-based limit. Check file permissions and encoding.',
-        blockSource: expect.any(String),
+        reason: expect.stringContaining('[EP Gate]'),
+        blockSource: 'progressive-trust-gate',
       });
       expect(mockTrajectory.recordGateBlock).toHaveBeenCalledWith({
         sessionId: 'test-session',
         toolName: 'write',
         filePath: 'src/large-change.ts',
-        reason: 'Modification too large: 20 lines. Stage 2 limit is 10 lines (fixed threshold). Note: Could not read target file to calculate percentage-based limit. Check file permissions and encoding.',
-        blockSource: expect.any(String),
+        reason: expect.stringContaining('[EP Gate]'),
+        blockSource: 'progressive-trust-gate',
       });
     });
 
@@ -663,6 +684,13 @@ describe('GFI Gate - Hard Intercept', () => {
         toolName: 'write',
         params: { file_path: 'src/large-change.ts', content: 'test' },
       };
+
+      // Mock EP gate to block
+      vi.mocked(evolutionEngine.checkEvolutionGate).mockReturnValueOnce({
+        allowed: false,
+        currentTier: 1,
+        reason: 'Seed tier cannot write files',
+      });
 
       mockTrajectory.recordGateBlock
         .mockImplementationOnce(() => {
@@ -687,8 +715,8 @@ describe('GFI Gate - Hard Intercept', () => {
       expect(mockEventLog.recordGateBlock).toHaveBeenCalledWith('test-session', {
         toolName: 'write',
         filePath: 'src/large-change.ts',
-        reason: 'Modification too large: 20 lines. Stage 2 limit is 10 lines (fixed threshold). Note: Could not read target file to calculate percentage-based limit. Check file permissions and encoding.',
-        blockSource: expect.any(String),
+        reason: expect.stringContaining('[EP Gate]'),
+        blockSource: 'progressive-trust-gate',
       });
       expect(mockTrajectory.recordGateBlock).toHaveBeenCalledTimes(2);
     });
