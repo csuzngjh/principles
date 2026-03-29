@@ -20,10 +20,16 @@
  *  - Telemetry records chain mode, stage outcomes, candidate counts
  *  - Tournament selection is deterministic (same inputs → same winner)
  *
- * PHASE 6 ONLY — No real training, no automatic deployment
+ * RUNTIME ADAPTER:
+ *  - useStubs=true: uses synchronous stub implementations (no external calls)
+ *  - useStubs=false: requires a TrinityRuntimeAdapter for real subagent execution
+ *  - Adapter uses ONLY public plugin runtime APIs (api.runtime.subagent.*)
  */
 
 import { randomUUID } from 'crypto';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as url from 'url';
 import type { NocturnalSessionSnapshot } from './nocturnal-trajectory-extractor.js';
 import {
   runTournament,
@@ -36,6 +42,519 @@ import {
   getEffectiveThresholds,
   type ThresholdValues,
 } from './adaptive-thresholds.js';
+
+// ---------------------------------------------------------------------------
+// Role Prompt Loading
+// ---------------------------------------------------------------------------
+
+const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
+const AGENTS_DIR = path.join(__dirname, '../agents');
+
+function loadRolePrompt(filename: string): string {
+  const filePath = path.join(AGENTS_DIR, filename);
+  try {
+    return fs.readFileSync(filePath, 'utf-8');
+  } catch {
+    console.warn(`[Trinity] Could not load role prompt: ${filename}`);
+    return '';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Trinity Runtime Adapter
+// ---------------------------------------------------------------------------
+
+/**
+ * Interface for Trinity stage invocation.
+ * Implementations can use real subagent runtimes or stubs.
+ */
+export interface TrinityRuntimeAdapter {
+  /**
+   * Invoke the Dreamer stage.
+   * @param snapshot Session trajectory snapshot
+   * @param principleId Target principle ID
+   * @param maxCandidates Maximum number of candidates to generate
+   * @returns Dreamer output JSON
+   */
+  invokeDreamer(
+    snapshot: NocturnalSessionSnapshot,
+    principleId: string,
+    maxCandidates: number
+  ): Promise<DreamerOutput>;
+
+  /**
+   * Invoke the Philosopher stage.
+   * @param dreamerOutput Dreamer's output
+   * @param principleId Target principle ID
+   * @returns Philosopher output JSON
+   */
+  invokePhilosopher(
+    dreamerOutput: DreamerOutput,
+    principleId: string
+  ): Promise<PhilosopherOutput>;
+
+  /**
+   * Invoke the Scribe stage.
+   * @param dreamerOutput Dreamer's output
+   * @param philosopherOutput Philosopher's output
+   * @param snapshot Session snapshot
+   * @param principleId Target principle ID
+   * @param telemetry Running telemetry
+   * @param config Trinity config
+   * @returns Scribe draft artifact or null if failed
+   */
+  invokeScribe(
+    dreamerOutput: DreamerOutput,
+    philosopherOutput: PhilosopherOutput,
+    snapshot: NocturnalSessionSnapshot,
+    principleId: string,
+    telemetry: TrinityTelemetry,
+    config: TrinityConfig
+  ): Promise<TrinityDraftArtifact | null>;
+
+  /**
+   * Clean up any resources used by the adapter.
+   * Called after Trinity chain completes (success or failure).
+   */
+  close?(): Promise<void>;
+}
+
+// ---------------------------------------------------------------------------
+// OpenClaw Runtime Adapter
+// ---------------------------------------------------------------------------
+
+/**
+ * OpenClaw-backed Trinity runtime adapter.
+ * Uses ONLY public plugin runtime APIs (api.runtime.subagent.*).
+ * Does NOT depend on OpenClaw internals.
+ */
+export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
+  private readonly api: {
+    runtime: {
+      subagent: {
+        run: (opts: {
+          sessionKey: string;
+          message: string;
+          extraSystemPrompt?: string;
+          deliver?: boolean;
+        }) => Promise<{ runId: string }>;
+        waitForRun: (opts: { runId: string; timeoutMs: number }) => Promise<{
+          status: string;
+          error?: string;
+        }>;
+        getSessionMessages: (opts: {
+          sessionKey: string;
+          limit: number;
+        }) => Promise<{
+          messages: unknown[];
+        }>;
+        deleteSession: (opts: {
+          sessionKey: string;
+          deleteTranscript?: boolean;
+        }) => Promise<void>;
+      };
+    };
+  };
+
+  private readonly stageTimeoutMs: number;
+
+  constructor(
+    api: OpenClawTrinityRuntimeAdapter['api'],
+    stageTimeoutMs = 180_000
+  ) {
+    this.api = api;
+    this.stageTimeoutMs = stageTimeoutMs;
+  }
+
+  async invokeDreamer(
+    snapshot: NocturnalSessionSnapshot,
+    principleId: string,
+    maxCandidates: number
+  ): Promise<DreamerOutput> {
+    const sessionKey = `agent:main:subagent:ne-dreamer-${randomUUID()}`;
+    const systemPrompt = loadRolePrompt('nocturnal-dreamer.md');
+
+    const prompt = this.buildDreamerPrompt(snapshot, principleId, maxCandidates);
+
+    try {
+      const { runId } = await this.api.runtime.subagent.run({
+        sessionKey,
+        message: prompt,
+        extraSystemPrompt: systemPrompt,
+        deliver: false,
+      });
+
+      const result = await this.api.runtime.subagent.waitForRun({
+        runId,
+        timeoutMs: this.stageTimeoutMs,
+      });
+
+      if (result.status !== 'ok') {
+        return {
+          valid: false,
+          candidates: [],
+          reason: `Dreamer subagent failed: ${result.error ?? result.status}`,
+          generatedAt: new Date().toISOString(),
+        };
+      }
+
+      const messages = await this.api.runtime.subagent.getSessionMessages({
+        sessionKey,
+        limit: 5,
+      });
+
+      const outputText = this.extractAssistantText(messages.messages as Array<{ role: string; text?: string; content?: string }>);
+      return this.parseDreamerOutput(outputText);
+    } finally {
+      await this.api.runtime.subagent.deleteSession({
+        sessionKey,
+        deleteTranscript: true,
+      }).catch(() => {});
+    }
+  }
+
+  async invokePhilosopher(
+    dreamerOutput: DreamerOutput,
+    principleId: string
+  ): Promise<PhilosopherOutput> {
+    const sessionKey = `agent:main:subagent:ne-philosopher-${randomUUID()}`;
+    const systemPrompt = loadRolePrompt('nocturnal-philosopher.md');
+
+    const prompt = this.buildPhilosopherPrompt(dreamerOutput, principleId);
+
+    try {
+      const { runId } = await this.api.runtime.subagent.run({
+        sessionKey,
+        message: prompt,
+        extraSystemPrompt: systemPrompt,
+        deliver: false,
+      });
+
+      const result = await this.api.runtime.subagent.waitForRun({
+        runId,
+        timeoutMs: this.stageTimeoutMs,
+      });
+
+      if (result.status !== 'ok') {
+        return {
+          valid: false,
+          judgments: [],
+          overallAssessment: '',
+          reason: `Philosopher subagent failed: ${result.error ?? result.status}`,
+          generatedAt: new Date().toISOString(),
+        };
+      }
+
+      const messages = await this.api.runtime.subagent.getSessionMessages({
+        sessionKey,
+        limit: 5,
+      });
+
+      const outputText = this.extractAssistantText(messages.messages as Array<{ role: string; text?: string; content?: string }>);
+      return this.parsePhilosopherOutput(outputText);
+    } finally {
+      await this.api.runtime.subagent.deleteSession({
+        sessionKey,
+        deleteTranscript: true,
+      }).catch(() => {});
+    }
+  }
+
+  async invokeScribe(
+    dreamerOutput: DreamerOutput,
+    philosopherOutput: PhilosopherOutput,
+    snapshot: NocturnalSessionSnapshot,
+    principleId: string,
+    telemetry: TrinityTelemetry,
+    config: TrinityConfig
+  ): Promise<TrinityDraftArtifact | null> {
+    const sessionKey = `agent:main:subagent:ne-scribe-${randomUUID()}`;
+    const systemPrompt = loadRolePrompt('nocturnal-scribe.md');
+
+    const prompt = this.buildScribePrompt(dreamerOutput, philosopherOutput, snapshot, principleId);
+
+    try {
+      const { runId } = await this.api.runtime.subagent.run({
+        sessionKey,
+        message: prompt,
+        extraSystemPrompt: systemPrompt,
+        deliver: false,
+      });
+
+      const result = await this.api.runtime.subagent.waitForRun({
+        runId,
+        timeoutMs: this.stageTimeoutMs,
+      });
+
+      if (result.status !== 'ok') {
+        return null;
+      }
+
+      const messages = await this.api.runtime.subagent.getSessionMessages({
+        sessionKey,
+        limit: 5,
+      });
+
+      const outputText = this.extractAssistantText(messages.messages as Array<{ role: string; text?: string; content?: string }>);
+      return this.parseScribeOutput(outputText, snapshot, principleId, telemetry);
+    } finally {
+      await this.api.runtime.subagent.deleteSession({
+        sessionKey,
+        deleteTranscript: true,
+      }).catch(() => {});
+    }
+  }
+
+  async close(): Promise<void> {
+    // Nothing to clean up in this implementation
+  }
+
+  // ---------------------------------------------------------------------------
+  // Private Helper Methods
+  // ---------------------------------------------------------------------------
+
+  private extractAssistantText(
+    messages: Array<{ role: string; text?: string; content?: string }>
+  ): string {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i] as { role: string; text?: string; content?: string };
+      if (msg.role === 'assistant') {
+        return msg.text ?? msg.content ?? '';
+      }
+    }
+    return '';
+  }
+
+  private buildDreamerPrompt(
+    snapshot: NocturnalSessionSnapshot,
+    principleId: string,
+    maxCandidates: number
+  ): string {
+    return `Target Principle: ${principleId}
+
+Session Snapshot:
+- Session ID: ${snapshot.sessionId}
+- Assistant Turns: ${snapshot.stats.totalAssistantTurns}
+- Tool Calls: ${snapshot.stats.totalToolCalls}
+- Failures: ${snapshot.stats.failureCount}
+- Pain Events: ${snapshot.stats.totalPainEvents}
+- Gate Blocks: ${snapshot.stats.totalGateBlocks}
+
+Please analyze this session and generate ${maxCandidates} candidate corrections. Each candidate should identify a bad decision and propose a better alternative grounded in the target principle.
+
+Respond with ONLY a valid JSON object matching the DreamerOutput contract.`;
+  }
+
+  private buildPhilosopherPrompt(
+    dreamerOutput: DreamerOutput,
+    principleId: string
+  ): string {
+    const candidatesJson = JSON.stringify(dreamerOutput.candidates, null, 2);
+    return `Target Principle: ${principleId}
+
+Dreamer's Candidates:
+${candidatesJson}
+
+Please evaluate each candidate and rank them by principle alignment, specificity, and actionability. Respond with ONLY a valid JSON object matching the PhilosopherOutput contract.`;
+  }
+
+  private buildScribePrompt(
+    dreamerOutput: DreamerOutput,
+    philosopherOutput: PhilosopherOutput,
+    snapshot: NocturnalSessionSnapshot,
+    principleId: string
+  ): string {
+    const candidatesJson = JSON.stringify(dreamerOutput.candidates, null, 2);
+    const judgmentsJson = JSON.stringify(philosopherOutput.judgments, null, 2);
+    return `Target Principle: ${principleId}
+Session ID: ${snapshot.sessionId}
+
+Dreamer's Candidates:
+${candidatesJson}
+
+Philosopher's Judgments:
+${judgmentsJson}
+
+Select the best candidate (Philosopher's rank 1) and synthesize it into a final TrinityDraftArtifact. Respond with ONLY a valid JSON object.`;
+  }
+
+  private parseDreamerOutput(text: string): DreamerOutput {
+    const json = this.extractJson(text);
+    if (!json) {
+      return {
+        valid: false,
+        candidates: [],
+        reason: 'Failed to parse Dreamer output as JSON',
+        generatedAt: new Date().toISOString(),
+      };
+    }
+
+    try {
+      const parsed = JSON.parse(json);
+      // Validate required structure
+      if (typeof parsed.valid !== 'boolean') {
+        return {
+          valid: false,
+          candidates: [],
+          reason: 'Dreamer output missing "valid" field',
+          generatedAt: new Date().toISOString(),
+        };
+      }
+      if (!Array.isArray(parsed.candidates)) {
+        return {
+          valid: false,
+          candidates: [],
+          reason: 'Dreamer output missing "candidates" array',
+          generatedAt: new Date().toISOString(),
+        };
+      }
+      return {
+        valid: parsed.valid,
+        candidates: parsed.candidates,
+        reason: parsed.reason,
+        generatedAt: parsed.generatedAt ?? new Date().toISOString(),
+      };
+    } catch {
+      return {
+        valid: false,
+        candidates: [],
+        reason: `JSON parse error: ${text.slice(0, 100)}`,
+        generatedAt: new Date().toISOString(),
+      };
+    }
+  }
+
+  private parsePhilosopherOutput(text: string): PhilosopherOutput {
+    const json = this.extractJson(text);
+    if (!json) {
+      return {
+        valid: false,
+        judgments: [],
+        overallAssessment: '',
+        reason: 'Failed to parse Philosopher output as JSON',
+        generatedAt: new Date().toISOString(),
+      };
+    }
+
+    try {
+      const parsed = JSON.parse(json);
+      if (typeof parsed.valid !== 'boolean') {
+        return {
+          valid: false,
+          judgments: [],
+          overallAssessment: '',
+          reason: 'Philosopher output missing "valid" field',
+          generatedAt: new Date().toISOString(),
+        };
+      }
+      if (!Array.isArray(parsed.judgments)) {
+        return {
+          valid: false,
+          judgments: [],
+          overallAssessment: '',
+          reason: 'Philosopher output missing "judgments" array',
+          generatedAt: new Date().toISOString(),
+        };
+      }
+      return {
+        valid: parsed.valid,
+        judgments: parsed.judgments,
+        overallAssessment: parsed.overallAssessment ?? '',
+        reason: parsed.reason,
+        generatedAt: parsed.generatedAt ?? new Date().toISOString(),
+      };
+    } catch {
+      return {
+        valid: false,
+        judgments: [],
+        overallAssessment: '',
+        reason: `JSON parse error: ${text.slice(0, 100)}`,
+        generatedAt: new Date().toISOString(),
+      };
+    }
+  }
+
+  private parseScribeOutput(
+    text: string,
+    snapshot: NocturnalSessionSnapshot,
+    principleId: string,
+    telemetry: TrinityTelemetry
+  ): TrinityDraftArtifact | null {
+    const json = this.extractJson(text);
+    if (!json) {
+      return null;
+    }
+
+    try {
+      const parsed = JSON.parse(json);
+      if (typeof parsed.selectedCandidateIndex !== 'number') {
+        return null;
+      }
+
+      return {
+        selectedCandidateIndex: parsed.selectedCandidateIndex,
+        badDecision: parsed.badDecision ?? '',
+        betterDecision: parsed.betterDecision ?? '',
+        rationale: parsed.rationale ?? '',
+        sessionId: snapshot.sessionId,
+        principleId,
+        sourceSnapshotRef: `snapshot-${snapshot.sessionId}-${Date.now()}`,
+        telemetry: {
+          chainMode: 'trinity',
+          usedStubs: false,
+          dreamerPassed: true,
+          philosopherPassed: true,
+          scribePassed: true,
+          candidateCount: parsed.candidateCount ?? 0,
+          selectedCandidateIndex: parsed.selectedCandidateIndex,
+          stageFailures: [],
+        },
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Extract JSON object from text that may contain markdown code blocks.
+   */
+  private extractJson(text: string): string | null {
+    // Try direct parse first
+    try {
+      JSON.parse(text);
+      return text;
+    } catch {
+      // Try extracting from markdown code blocks
+    }
+
+    // Match triple-backtick JSON blocks
+    const codeBlockMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+    if (codeBlockMatch) {
+      const extracted = codeBlockMatch[1].trim();
+      try {
+        JSON.parse(extracted);
+        return extracted;
+      } catch {
+        // Not valid JSON
+      }
+    }
+
+    // Try to find first { and last } to extract JSON object
+    const firstBrace = text.indexOf('{');
+    const lastBrace = text.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+      const extracted = text.slice(firstBrace, lastBrace + 1);
+      try {
+        JSON.parse(extracted);
+        return extracted;
+      } catch {
+        // Not valid JSON
+      }
+    }
+
+    return null;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Trinity Mode Configuration
@@ -59,9 +578,16 @@ export interface TrinityConfig {
 
   /**
    * Whether to use stub stage outputs (for testing without real model calls).
-   * Default: false (uses stub in testing, real calls in production)
+   * Default: false (real subagent calls via runtimeAdapter)
    */
   useStubs: boolean;
+
+  /**
+   * Runtime adapter for real subagent execution.
+   * Required when useStubs is false. Ignored when useStubs is true.
+   * Default: undefined
+   */
+  runtimeAdapter?: TrinityRuntimeAdapter;
 
   /**
    * Scoring weights for tournament selection.
@@ -503,7 +1029,8 @@ export interface RunTrinityOptions {
 }
 
 /**
- * Execute the Trinity chain: Dreamer -> Philosopher -> Scribe.
+ * Execute the Trinity chain using stubs (synchronous).
+ * Use runTrinityAsync for real subagent execution via runtime adapter.
  *
  * @param options - Trinity execution options
  * @returns TrinityResult with final artifact or failure info
@@ -511,14 +1038,55 @@ export interface RunTrinityOptions {
 export function runTrinity(options: RunTrinityOptions): TrinityResult {
   const { snapshot, principleId, config } = options;
 
-  // Fail-fast: real LLM-based Trinity stages are not yet implemented.
-  // If useStubs is explicitly false, the caller expects real model calls which don't exist.
-  if (!config.useStubs) {
-    const errorMsg = '[Trinity] Not Implemented: useStubs=false but real LLM-based Trinity stages are not yet implemented. Set useStubs=true to use stub implementations, or implement invokeDreamer/invokePhilosopher/invokeScribe first.';
+  // Stub path: use synchronous stub implementations
+  if (config.useStubs) {
+    return runTrinityWithStubs(snapshot, principleId, config);
+  }
+
+  // Real execution path: requires runtimeAdapter
+  // This is handled asynchronously in runTrinityAsync
+  const errorMsg = '[Trinity] useStubs=false requires a runtimeAdapter. Use runTrinityAsync for real subagent execution.';
+  const failures: TrinityStageFailure[] = [{ stage: 'dreamer', reason: errorMsg }];
+  const telemetry: TrinityTelemetry = {
+    chainMode: 'trinity',
+    usedStubs: false,
+    dreamerPassed: false,
+    philosopherPassed: false,
+    scribePassed: false,
+    candidateCount: 0,
+    selectedCandidateIndex: -1,
+    stageFailures: [`Configuration: ${errorMsg}`],
+  };
+  console.error(`[Trinity] ERROR: ${errorMsg}`);
+  return {
+    success: false,
+    telemetry,
+    failures,
+    fallbackOccurred: false,
+  };
+}
+
+/**
+ * Execute the Trinity chain with real subagent runtime (asynchronous).
+ * Requires config.runtimeAdapter to be set.
+ *
+ * @param options - Trinity execution options
+ * @returns Promise<TrinityResult> with final artifact or failure info
+ */
+export async function runTrinityAsync(options: RunTrinityOptions): Promise<TrinityResult> {
+  const { snapshot, principleId, config } = options;
+
+  if (config.useStubs) {
+    // Stub path: use synchronous stubs
+    return runTrinityWithStubs(snapshot, principleId, config);
+  }
+
+  if (!config.runtimeAdapter) {
+    const errorMsg = '[Trinity] useStubs=false requires config.runtimeAdapter to be set.';
     const failures: TrinityStageFailure[] = [{ stage: 'dreamer', reason: errorMsg }];
     const telemetry: TrinityTelemetry = {
       chainMode: 'trinity',
-      usedStubs: false,  // No stub was called — we failed before invoking anything
+      usedStubs: false,
       dreamerPassed: false,
       philosopherPassed: false,
       scribePassed: false,
@@ -535,6 +1103,92 @@ export function runTrinity(options: RunTrinityOptions): TrinityResult {
     };
   }
 
+  const adapter = config.runtimeAdapter;
+  const telemetry: TrinityTelemetry = {
+    chainMode: 'trinity',
+    usedStubs: false,
+    dreamerPassed: false,
+    philosopherPassed: false,
+    scribePassed: false,
+    candidateCount: 0,
+    selectedCandidateIndex: -1,
+    stageFailures: [],
+  };
+
+  const failures: TrinityStageFailure[] = [];
+
+  try {
+    // Step 1: Dreamer — generate candidates via real subagent
+    const dreamerOutput = await adapter.invokeDreamer(snapshot, principleId, config.maxCandidates);
+
+    if (!dreamerOutput.valid || dreamerOutput.candidates.length === 0) {
+      failures.push({
+        stage: 'dreamer',
+        reason: dreamerOutput.reason ?? 'No valid candidates generated',
+      });
+      telemetry.stageFailures.push(`Dreamer: ${dreamerOutput.reason ?? 'failed'}`);
+      return { success: false, telemetry, failures, fallbackOccurred: false };
+    }
+
+    telemetry.dreamerPassed = true;
+    telemetry.candidateCount = dreamerOutput.candidates.length;
+
+    // Step 2: Philosopher — rank candidates via real subagent
+    const philosopherOutput = await adapter.invokePhilosopher(dreamerOutput, principleId);
+
+    if (!philosopherOutput.valid || philosopherOutput.judgments.length === 0) {
+      failures.push({
+        stage: 'philosopher',
+        reason: philosopherOutput.reason ?? 'No judgments produced',
+      });
+      telemetry.stageFailures.push(`Philosopher: ${philosopherOutput.reason ?? 'failed'}`);
+      return { success: false, telemetry, failures, fallbackOccurred: false };
+    }
+
+    telemetry.philosopherPassed = true;
+
+    // Step 3: Scribe — synthesize final artifact via real subagent
+    const draftArtifact = await adapter.invokeScribe(
+      dreamerOutput,
+      philosopherOutput,
+      snapshot,
+      principleId,
+      telemetry,
+      config
+    );
+
+    if (!draftArtifact) {
+      failures.push({ stage: 'scribe', reason: 'Failed to synthesize artifact from candidates' });
+      telemetry.stageFailures.push('Scribe: synthesis failed');
+      return { success: false, telemetry, failures, fallbackOccurred: false };
+    }
+
+    telemetry.scribePassed = true;
+    telemetry.selectedCandidateIndex = draftArtifact.selectedCandidateIndex;
+
+    if (draftArtifact.telemetry) {
+      telemetry.tournamentTrace = draftArtifact.telemetry.tournamentTrace;
+      telemetry.winnerAggregateScore = draftArtifact.telemetry.winnerAggregateScore;
+      telemetry.winnerThresholdPassed = draftArtifact.telemetry.winnerThresholdPassed;
+      telemetry.eligibleCandidateCount = draftArtifact.telemetry.eligibleCandidateCount;
+    }
+
+    return { success: true, artifact: draftArtifact, telemetry, failures: [], fallbackOccurred: false };
+  } finally {
+    if (adapter.close) {
+      await adapter.close().catch(() => {});
+    }
+  }
+}
+
+/**
+ * Internal: Run Trinity chain with stub implementations (synchronous).
+ */
+function runTrinityWithStubs(
+  snapshot: NocturnalSessionSnapshot,
+  principleId: string,
+  config: TrinityConfig
+): TrinityResult {
   const telemetry: TrinityTelemetry = {
     chainMode: 'trinity',
     usedStubs: true,
@@ -607,9 +1261,6 @@ export function runTrinity(options: RunTrinityOptions): TrinityResult {
   telemetry.scribePassed = true;
   telemetry.selectedCandidateIndex = draftArtifact.selectedCandidateIndex;
 
-  // Propagate tournament info from artifact.telemetry to result telemetry
-  // invokeStubScribe creates updatedTelemetry but only embeds it in the artifact,
-  // so we need to copy those fields back to the top-level telemetry
   if (draftArtifact.telemetry) {
     telemetry.tournamentTrace = draftArtifact.telemetry.tournamentTrace;
     telemetry.winnerAggregateScore = draftArtifact.telemetry.winnerAggregateScore;
@@ -714,5 +1365,5 @@ export function draftToArtifact(draft: TrinityDraftArtifact): {
 export const DEFAULT_TRINITY_CONFIG: TrinityConfig = {
   useTrinity: true,
   maxCandidates: 3,
-  useStubs: true,  // Stubs are the only implemented option; real LLM calls are TODO
+  useStubs: false,  // Real subagent execution is the default; set useStubs=true for stub-only mode
 };

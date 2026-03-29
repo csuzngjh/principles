@@ -4,6 +4,7 @@ import type { PluginHookBeforePromptBuildEvent, PluginHookAgentContext, PluginHo
 import { clearInjectedProbationIds, getSession, resetFriction, setInjectedProbationIds } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { ContextInjectionConfig, defaultContextConfig } from '../types.js';
+import { classifyTask, type RoutingInput } from '../core/local-worker-routing.js';
 import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection, autoCompressFocus, safeReadCurrentFocus } from '../core/focus-history.js';
 import { empathyObserverManager, type EmpathyObserverApi } from '../service/empathy-observer-manager.js';
 import { PathResolver } from '../core/path-resolver.js';
@@ -850,8 +851,114 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
     appendParts.push(`<evolution_principles>\n${evolutionPrinciplesContent}\n</evolution_principles>`);
   }
 
+  // Routing Guidance (section 5 — injected between evolution principles and core principles)
+  // Inject delegation guidance when task is bounded + deployment allowed + not high-entropy.
+  // This is a non-authoritative suggestion — the main agent decides whether to follow.
+  // Shadow evidence comes from real runtime hooks (subagent_spawning/subagent_ended).
+  if (!isMinimalMode && sessionId) {
+    try {
+      // Extract RoutingInput from the latest user message
+      const latestUserText = extractLatestUserMessage(event.messages);
 
-  // 5. Principles (always on, highest priority, goes last for recency effect)
+      if (latestUserText && latestUserText.trim().length > 0) {
+        // Infer requestedTools and requestedFiles from message content
+        const toolPatterns: Array<{ pattern: RegExp; tool: string }> = [
+          { pattern: /\b(edit|replace|write|modify|update|fix|patch|add|remove|delete|insert)\b/gi, tool: 'edit' },
+          { pattern: /\b(read|cat|view|show|get|find|search|grep|look|inspect|examine|list|head|tail|diff)\b/gi, tool: 'read' },
+          { pattern: /\b(run|execute|exec|bash|shell|command)\b/gi, tool: 'bash' },
+        ];
+        const filePattern = /\b([a-zA-Z]:\\?[^\s,]+\.[a-z]{2,10}|[./][^\s,]+\.[a-z]{2,10})\b/gi;
+        const toolMatches = toolPatterns.flatMap(({ pattern, tool }) => {
+          const matches: string[] = [];
+          let m;
+          const r = new RegExp(pattern.source, pattern.flags);
+          while ((m = r.exec(latestUserText)) !== null) matches.push(tool);
+          return matches;
+        });
+        const fileMatches = latestUserText.match(filePattern) ?? [];
+
+        const routingInput: RoutingInput = {
+          taskIntent: toolMatches[0] ?? undefined,
+          taskDescription: latestUserText.trim(),
+          requestedTools: toolMatches.length > 0 ? toolMatches : undefined,
+          requestedFiles: fileMatches.length > 0 ? fileMatches : undefined,
+        };
+
+        const decision = classifyTask(routingInput, wctx.stateDir);
+
+        // Inject guidance only when: route_local + deployable checkpoint + not high-entropy
+        const isDeployableState =
+          decision.activeCheckpointState === 'shadow_ready' ||
+          decision.activeCheckpointState === 'promotable';
+
+        if (
+          decision.decision === 'route_local' &&
+          decision.targetProfile !== null &&
+          isDeployableState
+        ) {
+          const profile = decision.targetProfile;
+
+          if (profile === 'local-reader') {
+            appendParts.push(`<routing_guidance>
+DELEGATION SUGGESTION: This task appears suitable for the local-reader subagent.
+
+**Task Fit**: ${decision.reason}
+
+**Suggested Action**: Consider routing to \`local-reader\` (pd-explorer skill) for focused reading, inspection, and information retrieval.
+
+**Why This Works**:
+- Task keywords indicate read-only or inspect operations
+- Bounded scope — no multi-file coordination needed
+- Shadow observation in progress — real runtime evidence being collected
+
+**Note**: This is a non-authoritative suggestion. The main agent decides whether to route based on full context. Shadow evidence from runtime hooks will inform future promotion decisions.
+</routing_guidance>`);
+          } else if (profile === 'local-editor') {
+            appendParts.push(`<routing_guidance>
+DELEGATION SUGGESTION: This task appears suitable for the local-editor subagent.
+
+**Task Fit**: ${decision.reason}
+
+**Suggested Action**: Consider routing to \`local-editor\` (pd-repair skill) for bounded editing, modification, and repair tasks.
+
+**Why This Works**:
+- Task keywords indicate bounded modification operations
+- Target files appear limited in scope (1-3 files)
+- Shadow observation in progress — real runtime evidence being collected
+
+**Note**: This is a non-authoritative suggestion. The main agent decides whether to route based on full context. Shadow evidence from runtime hooks will inform future promotion decisions.
+</routing_guidance>`);
+          }
+        } else if (
+          decision.decision === 'stay_main' &&
+          decision.classification !== 'reader_eligible' &&
+          decision.classification !== 'editor_eligible'
+        ) {
+          // Only show stay_main guidance when the task is genuinely high-entropy/risk/ambiguous
+          appendParts.push(`<routing_guidance>
+ROUTING GUIDANCE: Task should remain on the main agent.
+
+**Reason**: ${decision.reason}
+
+**Blockers**: ${decision.blockers.length > 0 ? decision.blockers.join('; ') : 'none'}
+
+**Why Stay Main**:
+- Task contains high-entropy signals (open-ended, multi-step, or ambiguous)
+- Or: task involves risk signals requiring main-agent supervision
+- Or: deployment not available for the natural target profile
+
+**Note**: This is a non-authoritative suggestion backed by policy classification. The main agent has full discretion.
+</routing_guidance>`);
+        }
+      }
+    } catch (e) {
+      // Routing guidance is best-effort — never fail the hook
+      logger?.warn?.(`[PD:Prompt] Routing guidance injection failed: ${String(e)}`);
+    }
+  }
+
+
+  // 6. Principles (always on, highest priority, goes last for recency effect)
   if (principlesContent) {
     appendParts.push(`<core_principles>\n${principlesContent}\n</core_principles>`);
   }
@@ -873,6 +980,7 @@ The sections below are ordered by priority. When conflicts arise, **later sectio
 - \`<reflection_log>\` - Past lessons (inform your approach)
 - \`<thinking_os>\` - Thinking models (guide your reasoning)
 - \`<evolution_principles>\` - Newly learned principles (active + probation)
+- \`<routing_guidance>\` - Delegation suggestions (non-authoritative, best-effort)
 - \`<core_principles>\` - Core rules (NON-NEGOTIABLE, highest priority)
 
 **Remember**: You are the Spicy Evolver. You despise entropy. You evolve through pain.

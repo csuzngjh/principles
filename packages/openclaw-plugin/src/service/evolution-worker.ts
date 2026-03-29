@@ -15,6 +15,7 @@ import { DIAGNOSTICIAN_PROTOCOL_SUMMARY } from '../constants/diagnostician.js';
 import { LockUnavailableError } from '../config/index.js';
 import { checkWorkspaceIdle, checkCooldown } from './nocturnal-runtime.js';
 import { executeNocturnalReflectionAsync } from './nocturnal-service.js';
+import { OpenClawTrinityRuntimeAdapter } from '../core/nocturnal-trinity.js';
 
 let intervalId: NodeJS.Timeout | null = null;
 let timeoutId: NodeJS.Timeout | null = null;
@@ -452,7 +453,7 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: any) {
     }
 }
 
-async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventLog: any) {
+async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventLog: any, api?: OpenClawPluginApi) {
     const queuePath = wctx.resolve('EVOLUTION_QUEUE');
     if (!fs.existsSync(queuePath)) return;
 
@@ -589,8 +590,13 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
             try {
                 logger?.info?.(`[PD:EvolutionWorker] Processing sleep_reflection task ${sleepTask.id}`);
 
+                // Build runtime adapter for real Trinity execution if api is available
+                const runtimeAdapter = api ? new OpenClawTrinityRuntimeAdapter(api) : undefined;
+
                 // Call the nocturnal reflection service
-                const result = await executeNocturnalReflectionAsync(wctx.workspaceDir, wctx.stateDir);
+                const result = await executeNocturnalReflectionAsync(wctx.workspaceDir, wctx.stateDir, {
+                    runtimeAdapter,
+                });
 
                 if (result.success && result.artifact) {
                     sleepTask.status = 'completed';
@@ -976,7 +982,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                 }
 
                 await checkPainFlag(wctx, logger);
-                await processEvolutionQueue(wctx, logger, eventLog);
+                await processEvolutionQueue(wctx, logger, eventLog, api ?? undefined);
                 if (api) {
                     await processDetectionQueue(wctx, api, eventLog);
                 }
@@ -991,7 +997,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
         timeoutId = setTimeout(() => {
             void (async () => {
                 await checkPainFlag(wctx, logger);
-                await processEvolutionQueue(wctx, logger, eventLog);
+                await processEvolutionQueue(wctx, logger, eventLog, api ?? undefined);
                 if (api) {
                     await processDetectionQueue(wctx, api, eventLog);
                 }

@@ -52,10 +52,12 @@ import {
 import {
   draftToArtifact,
   runTrinity,
+  runTrinityAsync,
   DEFAULT_TRINITY_CONFIG,
   type TrinityConfig,
   type TrinityResult,
   type TrinityDraftArtifact,
+  type TrinityRuntimeAdapter,
 } from '../core/nocturnal-trinity.js';
 import {
   validateExecutability,
@@ -157,6 +159,13 @@ export interface NocturnalServiceOptions {
    * Default: { useTrinity: true, maxCandidates: 3, useStubs: false }
    */
   trinityConfig?: Partial<TrinityConfig>;
+
+  /**
+   * Runtime adapter for real subagent execution.
+   * When provided, Trinity stages are invoked via the adapter's async methods.
+   * Ignored when trinityConfig.useStubs is true.
+   */
+  runtimeAdapter?: TrinityRuntimeAdapter;
 
   /**
    * Override the Trinity result (for testing).
@@ -465,9 +474,16 @@ export function executeNocturnalReflection(
       stateDir, // Enable threshold loading/persistence
     };
 
-    if (trinityConfig.useTrinity) {
+    // If useStubs=false but no runtimeAdapter provided in sync context,
+    // fall back to stub behavior (graceful degradation).
+    // For real async execution, use executeNocturnalReflectionAsync with a runtimeAdapter.
+    const effectiveConfig: TrinityConfig = trinityConfig.useTrinity && !trinityConfig.useStubs && !options.runtimeAdapter
+      ? { ...trinityConfig, useStubs: true }
+      : trinityConfig;
+
+    if (effectiveConfig.useTrinity) {
       diagnostics.trinityAttempted = true;
-      trinityResult = runTrinity({ snapshot, principleId: selectedPrincipleId, config: trinityConfig });
+      trinityResult = runTrinity({ snapshot, principleId: selectedPrincipleId, config: effectiveConfig });
       diagnostics.trinityResult = trinityResult;
       diagnostics.chainModeUsed = trinityResult.success ? 'trinity' : 'single-reflector';
       chainModeUsed = trinityResult.success ? 'trinity' : 'single-reflector';
@@ -673,16 +689,262 @@ export function executeNocturnalReflection(
 
 /**
  * Async wrapper for executeNocturnalReflection.
- * Useful for worker integration where you want to await cooldown recording.
+ * When runtimeAdapter is provided in options, uses runTrinityAsync for real subagent execution.
+ * Otherwise falls back to synchronous executeNocturnalReflection.
  */
 export async function executeNocturnalReflectionAsync(
   workspaceDir: string,
   stateDir: string,
   options: NocturnalServiceOptions = {}
 ): Promise<NocturnalRunResult> {
-  // For Phase 2, the core logic is sync. Just wrap the result.
-  // In Phase 3, this would await real subagent calls.
+  // If no runtime adapter and no trinityConfig.override, use sync path
+  if (!options.runtimeAdapter && !options.trinityConfig?.useStubs) {
+    // Sync path with default config (useStubs=false but no adapter = fail)
+    // Fall through to sync wrapper
+    return Promise.resolve(executeNocturnalReflection(workspaceDir, stateDir, options));
+  }
+
+  // If runtime adapter is provided, use async Trinity path
+  if (options.runtimeAdapter) {
+    return executeNocturnalReflectionWithAdapter(workspaceDir, stateDir, options);
+  }
+
+  // Sync path (useStubs=true or other sync options)
   return Promise.resolve(executeNocturnalReflection(workspaceDir, stateDir, options));
+}
+
+/**
+ * Execute nocturnal reflection with real Trinity runtime adapter (async).
+ * This handles the full pipeline with async Trinity stage execution.
+ */
+async function executeNocturnalReflectionWithAdapter(
+  workspaceDir: string,
+  stateDir: string,
+  options: NocturnalServiceOptions
+): Promise<NocturnalRunResult> {
+  const diagnostics: NocturnalRunDiagnostics = {
+    preflight: null,
+    selection: null,
+    idle: null,
+    trinityAttempted: false,
+    trinityResult: null,
+    chainModeUsed: null,
+    arbiterResult: null,
+    executabilityResult: null,
+    persisted: false,
+  };
+
+  // Step 1: Pre-flight check
+  const preflight = checkPreflight(
+    workspaceDir,
+    stateDir,
+    undefined,
+    undefined,
+    options.idleCheckOverride
+  );
+  diagnostics.preflight = preflight;
+
+  if (!preflight.canRun) {
+    return { success: false, noTargetSelected: false, validationFailed: false, validationFailures: [], diagnostics };
+  }
+
+  // Step 2: Target selection
+  const extractor = createNocturnalTrajectoryExtractor(workspaceDir, stateDir);
+  const selector = new NocturnalTargetSelector(workspaceDir, stateDir, extractor, {
+    idleCheckOverride: options.idleCheckOverride,
+  });
+
+  const selection = selector.select();
+  diagnostics.selection = selection;
+
+  if (selection.decision === 'skip') {
+    return {
+      success: false,
+      noTargetSelected: true,
+      skipReason: selection.skipReason,
+      validationFailed: false,
+      validationFailures: [],
+      diagnostics,
+    };
+  }
+
+  const { selectedPrincipleId, selectedSessionId } = selection;
+
+  if (!selectedPrincipleId || !selectedSessionId) {
+    return {
+      success: false,
+      noTargetSelected: true,
+      validationFailed: false,
+      validationFailures: [],
+      diagnostics,
+    };
+  }
+
+  const snapshot = extractor.getNocturnalSessionSnapshot(selectedSessionId);
+  if (!snapshot) {
+    return {
+      success: false,
+      noTargetSelected: true,
+      skipReason: 'insufficient_snapshot_data',
+      validationFailed: false,
+      validationFailures: [],
+      diagnostics,
+    };
+  }
+  diagnostics.idle = { isIdle: true, mostRecentActivityAt: 0, idleForMs: 0, activeSessionCount: 0, abandonedSessionIds: [], trajectoryGuardrailConfirmsIdle: true, reason: 'preflight passed' };
+
+  // Step 3: Record run start
+  void recordRunStart(stateDir, selectedPrincipleId).catch((err) => {
+    console.warn(`[nocturnal-service] Failed to record run start: ${String(err)}`);
+  });
+
+  // Step 4: Trinity execution via adapter (async)
+  let trinityArtifact: TrinityDraftArtifact | null = null;
+  let trinityResult: TrinityResult | null = null;
+  let rawJson: string;
+  let chainModeUsed: 'trinity' | 'single-reflector' = 'single-reflector';
+
+  if (options.skipReflector) {
+    if (!options.reflectorOutputOverride) {
+      return {
+        success: false,
+        noTargetSelected: false,
+        validationFailed: true,
+        validationFailures: ['skipReflector is true but no reflectorOutputOverride provided'],
+        diagnostics,
+      };
+    }
+    rawJson = options.reflectorOutputOverride;
+  } else if (options.trinityResultOverride) {
+    trinityResult = options.trinityResultOverride;
+    diagnostics.trinityAttempted = true;
+    diagnostics.trinityResult = trinityResult;
+    diagnostics.chainModeUsed = trinityResult.success ? 'trinity' : 'single-reflector';
+    chainModeUsed = trinityResult.success ? 'trinity' : 'single-reflector';
+
+    if (!trinityResult.success) {
+      const failures = trinityResult.failures.map((f) => `${f.stage}: ${f.reason}`);
+      void recordRunEnd(stateDir, 'failed', { reason: `Trinity override failed: ${failures.join('; ')}` }).catch((err) => {
+        console.warn(`[nocturnal-service] Failed to record run end: ${String(err)}`);
+      });
+      adjustThresholdsFromSignals(stateDir, { malformedRate: 1.0, arbiterRejectRate: 0.0, executabilityRejectRate: 0.0, qualityDelta: 0.0 });
+      return { success: false, noTargetSelected: false, validationFailed: true, validationFailures: [`Trinity override failed: ${failures.join('; ')}`], snapshot, diagnostics };
+    }
+    trinityArtifact = trinityResult.artifact!;
+    const artifactData = draftToArtifact(trinityArtifact);
+    rawJson = JSON.stringify(artifactData);
+  } else {
+    const trinityConfig: TrinityConfig = {
+      ...DEFAULT_TRINITY_CONFIG,
+      ...options.trinityConfig,
+      runtimeAdapter: options.runtimeAdapter,
+      stateDir,
+    };
+
+    if (trinityConfig.useTrinity) {
+      diagnostics.trinityAttempted = true;
+      trinityResult = await runTrinityAsync({ snapshot, principleId: selectedPrincipleId, config: trinityConfig });
+      diagnostics.trinityResult = trinityResult;
+      diagnostics.chainModeUsed = trinityResult.success ? 'trinity' : 'single-reflector';
+      chainModeUsed = trinityResult.success ? 'trinity' : 'single-reflector';
+
+      if (trinityResult.success) {
+        const draftValidation = validateTrinityDraft(trinityResult.artifact);
+        if (!draftValidation.valid) {
+          const failures = draftValidation.failures;
+          void recordRunEnd(stateDir, 'failed', { reason: `Trinity draft invalid: ${failures.join('; ')}` }).catch((err) => {
+            console.warn(`[nocturnal-service] Failed to record run end: ${String(err)}`);
+          });
+          adjustThresholdsFromSignals(stateDir, { malformedRate: 1.0, arbiterRejectRate: 0.0, executabilityRejectRate: 0.0, qualityDelta: 0.0 });
+          return { success: false, noTargetSelected: false, validationFailed: true, validationFailures: failures, snapshot, diagnostics };
+        }
+        trinityArtifact = trinityResult.artifact!;
+        const artifactData = draftToArtifact(trinityArtifact);
+        rawJson = JSON.stringify(artifactData);
+      } else {
+        const failures = trinityResult.failures.map((f) => `${f.stage}: ${f.reason}`);
+        void recordRunEnd(stateDir, 'failed', { reason: `Trinity chain failed: ${failures.join('; ')}` }).catch((err) => {
+          console.warn(`[nocturnal-service] Failed to record run end: ${String(err)}`);
+        });
+        adjustThresholdsFromSignals(stateDir, { malformedRate: 1.0, arbiterRejectRate: 0.0, executabilityRejectRate: 0.0, qualityDelta: 0.0 });
+        return { success: false, noTargetSelected: false, validationFailed: true, validationFailures: [`Trinity chain failed: ${failures.join('; ')}`], snapshot, diagnostics };
+      }
+    } else {
+      rawJson = invokeStubReflector(snapshot, selectedPrincipleId);
+    }
+  }
+
+  // Step 5: Arbiter validation
+  const arbiterResult = parseAndValidateArtifact(rawJson, {
+    expectedPrincipleId: selectedPrincipleId,
+    expectedSessionId: selectedSessionId,
+  });
+  diagnostics.arbiterResult = arbiterResult;
+
+  if (!arbiterResult.passed || !arbiterResult.artifact) {
+    const failures = arbiterResult.failures.map((f) => f.reason);
+    void recordRunEnd(stateDir, 'failed', { reason: failures.join('; ') }).catch((err) => {
+      console.warn(`[nocturnal-service] Failed to record run end (arbiter failed): ${String(err)}`);
+    });
+    adjustThresholdsFromSignals(stateDir, { malformedRate: 0.0, arbiterRejectRate: 1.0, executabilityRejectRate: 0.0, qualityDelta: 0.0 });
+    return { success: false, noTargetSelected: false, validationFailed: true, validationFailures: failures, diagnostics };
+  }
+
+  // Step 6: Executability check
+  const execResult = validateExecutability(arbiterResult.artifact);
+  if (!execResult.executable) {
+    const failures = execResult.failures.map((f) => f.reason);
+    void recordRunEnd(stateDir, 'failed', { reason: failures.join('; ') }).catch((err) => {
+      console.warn(`[nocturnal-service] Failed to record run end (executability failed): ${String(err)}`);
+    });
+    adjustThresholdsFromSignals(stateDir, { malformedRate: 0.0, arbiterRejectRate: 0.0, executabilityRejectRate: 1.0, qualityDelta: 0.0 });
+    return { success: false, noTargetSelected: false, validationFailed: true, validationFailures: failures, diagnostics };
+  }
+  diagnostics.executabilityResult = { executable: true, failures: [] };
+
+  // Step 7: Persist artifact
+  const artifactWithBoundedAction = { ...arbiterResult.artifact, boundedAction: execResult.boundedAction };
+  let persistedPath: string;
+  try {
+    persistedPath = persistArtifact(workspaceDir, artifactWithBoundedAction);
+    diagnostics.persisted = true;
+    diagnostics.persistedPath = persistedPath;
+  } catch (err) {
+    void recordRunEnd(stateDir, 'failed', { reason: `persistence error: ${String(err)}` }).catch((e) => {
+      console.warn(`[nocturnal-service] Failed to record run end (persistence failed): ${String(e)}`);
+    });
+    return { success: false, noTargetSelected: false, validationFailed: true, validationFailures: [`Failed to persist artifact: ${String(err)}`], snapshot, diagnostics };
+  }
+
+  // Step 8: Register in dataset lineage
+  try {
+    registerSample(workspaceDir, arbiterResult.artifact, persistedPath, null);
+  } catch (err) {
+    console.warn(`[nocturnal-service] Failed to register sample in dataset registry: ${String(err)}`);
+  }
+
+  // Step 9: Record run success
+  void recordRunEnd(stateDir, 'success', { sampleCount: 1 }).catch((err) => {
+    console.warn(`[nocturnal-service] Failed to record run end (success): ${String(err)}`);
+  });
+
+  // Step 10: Adaptive threshold adjustment
+  const malformedRate = trinityResult && !trinityResult.success ? 1.0 : 0.0;
+  const arbiterRejectRate = !arbiterResult.passed ? 1.0 : 0.0;
+  const executabilityRejectRate = !execResult.executable ? 1.0 : 0.0;
+  const qualityDelta = 0.0;
+  adjustThresholdsFromSignals(stateDir, { malformedRate, arbiterRejectRate, executabilityRejectRate, qualityDelta });
+
+  return {
+    success: true,
+    artifact: artifactWithBoundedAction,
+    noTargetSelected: false,
+    validationFailed: false,
+    validationFailures: [],
+    snapshot,
+    diagnostics,
+    trinityTelemetry: trinityResult?.telemetry,
+  };
 }
 
 // ---------------------------------------------------------------------------

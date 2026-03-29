@@ -1,6 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   runTrinity,
+  runTrinityAsync,
   validateDraftArtifact,
   draftToArtifact,
   DEFAULT_TRINITY_CONFIG,
@@ -8,6 +9,7 @@ import {
   type DreamerOutput,
   type PhilosopherOutput,
   type TrinityDraftArtifact,
+  type TrinityRuntimeAdapter,
 } from '../../src/core/nocturnal-trinity.js';
 import {
   validateDreamerOutput,
@@ -683,6 +685,269 @@ describe('DEFAULT_TRINITY_CONFIG', () => {
   it('has sensible defaults', () => {
     expect(DEFAULT_TRINITY_CONFIG.useTrinity).toBe(true);
     expect(DEFAULT_TRINITY_CONFIG.maxCandidates).toBe(3);
-    expect(DEFAULT_TRINITY_CONFIG.useStubs).toBe(false);
+    expect(DEFAULT_TRINITY_CONFIG.useStubs).toBe(false);  // real subagent execution is now the default
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: runTrinity — useStubs=false without adapter (sync failure)
+// ---------------------------------------------------------------------------
+
+describe('runTrinity — useStubs=false without adapter', () => {
+  it('fails with clear error when useStubs=false but no runtimeAdapter provided', () => {
+    const snapshot = makeSnapshot({ failureCount: 2 });
+    const config: TrinityConfig = {
+      useTrinity: true,
+      maxCandidates: 3,
+      useStubs: false,  // No adapter provided!
+    };
+
+    const result = runTrinity({ snapshot, principleId: 'T-08', config });
+
+    expect(result.success).toBe(false);
+    expect(result.failures.length).toBeGreaterThan(0);
+    expect(result.failures[0].stage).toBe('dreamer');
+    expect(result.failures[0].reason).toContain('runtimeAdapter');
+    expect(result.telemetry.usedStubs).toBe(false);
+    expect(result.telemetry.dreamerPassed).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: runTrinityAsync — with mock runtime adapter
+// ---------------------------------------------------------------------------
+
+describe('runTrinityAsync — with mock runtime adapter', () => {
+  function makeMockAdapter(overrides: Partial<{
+    dreamerOutput: DreamerOutput;
+    philosopherOutput: PhilosopherOutput;
+    scribeArtifact: TrinityDraftArtifact | null;
+    closeCalled: boolean;
+  }> = {}): TrinityRuntimeAdapter & { closeCalled: boolean } {
+    const defaultDreamerOutput: DreamerOutput = {
+      valid: true,
+      candidates: [
+        {
+          candidateIndex: 0,
+          badDecision: 'Did something wrong',
+          betterDecision: 'Do it right',
+          rationale: 'Because the principle says so',
+          confidence: 0.9,
+        },
+      ],
+      generatedAt: new Date().toISOString(),
+    };
+
+    const defaultPhilosopherOutput: PhilosopherOutput = {
+      valid: true,
+      judgments: [
+        {
+          candidateIndex: 0,
+          critique: 'Good alignment',
+          principleAligned: true,
+          score: 0.92,
+          rank: 1,
+        },
+      ],
+      overallAssessment: 'Good candidate',
+      generatedAt: new Date().toISOString(),
+    };
+
+    const defaultScribeArtifact: TrinityDraftArtifact = {
+      selectedCandidateIndex: 0,
+      badDecision: 'Did something wrong',
+      betterDecision: 'Do it right',
+      rationale: 'Because the principle says so and this is the right approach',
+      sessionId: 'session-test-123',
+      principleId: 'T-01',
+      sourceSnapshotRef: 'snapshot-test-001',
+      telemetry: {
+        chainMode: 'trinity',
+        usedStubs: false,
+        dreamerPassed: true,
+        philosopherPassed: true,
+        scribePassed: true,
+        candidateCount: 1,
+        selectedCandidateIndex: 0,
+        stageFailures: [],
+      },
+    };
+
+    return {
+      closeCalled: overrides.closeCalled ?? false,
+      invokeDreamer: vi.fn().mockResolvedValue(overrides.dreamerOutput ?? defaultDreamerOutput),
+      invokePhilosopher: vi.fn().mockResolvedValue(overrides.philosopherOutput ?? defaultPhilosopherOutput),
+      invokeScribe: vi.fn().mockResolvedValue(
+        overrides.scribeArtifact === null ? null : (overrides.scribeArtifact ?? defaultScribeArtifact)
+      ),
+      close: vi.fn().mockResolvedValue(undefined),
+    } as unknown as TrinityRuntimeAdapter & { closeCalled: boolean; invokeDreamer: ReturnType<typeof vi.fn>; invokePhilosopher: ReturnType<typeof vi.fn>; invokeScribe: ReturnType<typeof vi.fn> };
+  }
+
+  it('uses runtime adapter when useStubs=false with adapter provided', async () => {
+    const snapshot = makeSnapshot({ failureCount: 2 });
+    const adapter = makeMockAdapter();
+    const config: TrinityConfig = {
+      useTrinity: true,
+      maxCandidates: 3,
+      useStubs: false,
+      runtimeAdapter: adapter,
+    };
+
+    const result = await runTrinityAsync({ snapshot, principleId: 'T-08', config });
+
+    expect(result.success).toBe(true);
+    expect(adapter.invokeDreamer).toHaveBeenCalledWith(snapshot, 'T-08', 3);
+    expect(adapter.invokePhilosopher).toHaveBeenCalled();
+    expect(adapter.invokeScribe).toHaveBeenCalled();
+    expect(result.telemetry.usedStubs).toBe(false);
+    expect(result.telemetry.dreamerPassed).toBe(true);
+    expect(result.telemetry.philosopherPassed).toBe(true);
+    expect(result.telemetry.scribePassed).toBe(true);
+  });
+
+  it('fails closed when Dreamer stage returns invalid output', async () => {
+    const snapshot = makeSnapshot({ failureCount: 2 });
+    const adapter = makeMockAdapter({
+      dreamerOutput: { valid: false, candidates: [], reason: 'No signal found', generatedAt: new Date().toISOString() },
+    });
+    const config: TrinityConfig = {
+      useTrinity: true,
+      maxCandidates: 3,
+      useStubs: false,
+      runtimeAdapter: adapter,
+    };
+
+    const result = await runTrinityAsync({ snapshot, principleId: 'T-08', config });
+
+    expect(result.success).toBe(false);
+    expect(result.failures.length).toBeGreaterThan(0);
+    expect(result.failures[0].stage).toBe('dreamer');
+    expect(result.telemetry.dreamerPassed).toBe(false);
+    expect(result.telemetry.philosopherPassed).toBe(false);
+    expect(result.telemetry.scribePassed).toBe(false);
+  });
+
+  it('fails closed when Philosopher stage returns invalid output', async () => {
+    const snapshot = makeSnapshot({ failureCount: 2 });
+    const adapter = makeMockAdapter({
+      philosopherOutput: { valid: false, judgments: [], overallAssessment: '', reason: 'No candidates', generatedAt: new Date().toISOString() },
+    });
+    const config: TrinityConfig = {
+      useTrinity: true,
+      maxCandidates: 3,
+      useStubs: false,
+      runtimeAdapter: adapter,
+    };
+
+    const result = await runTrinityAsync({ snapshot, principleId: 'T-08', config });
+
+    expect(result.success).toBe(false);
+    expect(result.failures.some(f => f.stage === 'dreamer')).toBe(false);  // Dreamer passed
+    expect(result.failures.some(f => f.stage === 'philosopher')).toBe(true);
+    expect(result.telemetry.dreamerPassed).toBe(true);
+    expect(result.telemetry.philosopherPassed).toBe(false);
+  });
+
+  it('fails closed when Scribe stage returns null', async () => {
+    const snapshot = makeSnapshot({ failureCount: 2 });
+    const adapter = makeMockAdapter({ scribeArtifact: null });
+    const config: TrinityConfig = {
+      useTrinity: true,
+      maxCandidates: 3,
+      useStubs: false,
+      runtimeAdapter: adapter,
+    };
+
+    const result = await runTrinityAsync({ snapshot, principleId: 'T-08', config });
+
+    expect(result.success).toBe(false);
+    expect(result.failures.some(f => f.stage === 'scribe')).toBe(true);
+    expect(result.telemetry.dreamerPassed).toBe(true);
+    expect(result.telemetry.philosopherPassed).toBe(true);
+    expect(result.telemetry.scribePassed).toBe(false);
+  });
+
+  it('calls adapter.close() after successful execution', async () => {
+    const snapshot = makeSnapshot({ failureCount: 2 });
+    const adapter = makeMockAdapter();
+    const config: TrinityConfig = {
+      useTrinity: true,
+      maxCandidates: 3,
+      useStubs: false,
+      runtimeAdapter: adapter,
+    };
+
+    await runTrinityAsync({ snapshot, principleId: 'T-08', config });
+
+    expect(adapter.close).toHaveBeenCalled();
+  });
+
+  it('calls adapter.close() even when execution fails', async () => {
+    const snapshot = makeSnapshot({ failureCount: 2 });
+    const adapter = makeMockAdapter({
+      dreamerOutput: { valid: false, candidates: [], reason: 'No signal', generatedAt: new Date().toISOString() },
+    });
+    const config: TrinityConfig = {
+      useTrinity: true,
+      maxCandidates: 3,
+      useStubs: false,
+      runtimeAdapter: adapter,
+    };
+
+    await runTrinityAsync({ snapshot, principleId: 'T-08', config });
+
+    expect(adapter.close).toHaveBeenCalled();
+  });
+
+  it('produces artifact compatible with draftToArtifact', async () => {
+    const snapshot = makeSnapshot({ failureCount: 2 });
+    const adapter = makeMockAdapter();
+    const config: TrinityConfig = {
+      useTrinity: true,
+      maxCandidates: 3,
+      useStubs: false,
+      runtimeAdapter: adapter,
+    };
+
+    const result = await runTrinityAsync({ snapshot, principleId: 'T-08', config });
+
+    expect(result.success).toBe(true);
+    expect(result.artifact).toBeDefined();
+    const artifact = draftToArtifact(result.artifact!);
+    expect(artifact.artifactId).toBeDefined();
+    expect(artifact.sessionId).toBe('session-test-123');
+    expect(artifact.principleId).toBe('T-01');
+    expect(artifact.badDecision).toBeDefined();
+    expect(artifact.betterDecision).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: runTrinityAsync — useStubs=true still uses stubs
+// ---------------------------------------------------------------------------
+
+describe('runTrinityAsync — useStubs=true uses synchronous stubs', () => {
+  it('still uses stub implementations when useStubs=true even with adapter', async () => {
+    const snapshot = makeSnapshot({ failureCount: 2 });
+    const adapter = {
+      invokeDreamer: vi.fn().mockResolvedValue({ valid: true, candidates: [], generatedAt: new Date().toISOString() }),
+      invokePhilosopher: vi.fn().mockResolvedValue({ valid: true, judgments: [], overallAssessment: '', generatedAt: new Date().toISOString() }),
+      invokeScribe: vi.fn().mockResolvedValue(null),
+    };
+    const config: TrinityConfig = {
+      useTrinity: true,
+      maxCandidates: 3,
+      useStubs: true,  // Explicitly use stubs
+      runtimeAdapter: adapter as unknown as TrinityRuntimeAdapter,
+    };
+
+    // With stubs, adapter is ignored - stub produces success with failureCount signal
+    const result = await runTrinityAsync({ snapshot, principleId: 'T-08', config });
+
+    expect(result.success).toBe(true);  // Stub succeeds because snapshot has failureCount
+    expect(adapter.invokeDreamer).not.toHaveBeenCalled();  // Adapter NOT called
+    expect(adapter.invokePhilosopher).not.toHaveBeenCalled();
+    expect(adapter.invokeScribe).not.toHaveBeenCalled();
   });
 });
