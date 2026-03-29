@@ -17,7 +17,6 @@ import { resolvePdPath } from './paths.js';
 import { withLock } from '../utils/file-lock.js';
 import {
   CONSTRUCTIVE_TOOLS,
-  CONTENT_LIMITED_TOOLS,
   EXPLORATORY_TOOLS,
   HIGH_RISK_TOOLS,
 } from '../constants/tools.js';
@@ -211,27 +210,6 @@ export class EvolutionEngine {
   public beforeToolCall(context: ToolCallContext): GateDecision {
     const tierDef = this.getTierDefinition();
     const perms = tierDef.permissions;
-
-    // 行数检查（仅针对写操作工具）
-    if (CONTENT_LIMITED_TOOLS.has(context.toolName)) {
-      if (context.content) {
-        const lineCount = context.content.split('\n').length;
-        if (lineCount > perms.maxLinesPerWrite) {
-          return {
-            allowed: false,
-            reason: `Tier ${this.scorecard.currentTier} (${tierDef.name}) 限制: 最多 ${perms.maxLinesPerWrite} 行，当前 ${lineCount} 行`,
-            currentTier: this.scorecard.currentTier,
-          };
-        }
-      }
-      if (context.lineCount && context.lineCount > perms.maxLinesPerWrite) {
-        return {
-          allowed: false,
-          reason: `Tier ${this.scorecard.currentTier} (${tierDef.name}) 限制: 最多 ${perms.maxLinesPerWrite} 行`,
-          currentTier: this.scorecard.currentTier,
-        };
-      }
-    }
 
     // 风险路径检查
     if (context.isRiskPath && !perms.allowRiskPath) {

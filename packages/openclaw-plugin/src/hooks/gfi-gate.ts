@@ -4,7 +4,7 @@
  * Handles Fatigue Index (GFI) based tool blocking with TIER 0-3 classification.
  *
  * **Responsibilities:**
- * - Calculate dynamic GFI thresholds based on trust stage and line changes
+ * - Calculate dynamic GFI thresholds based on EP tier and line changes
  * - Apply tier-based tool blocking:
  *   - TIER 0: Read-only tools (never blocked)
  *   - TIER 1: Low-risk writes (blocked when GFI >= low_risk_block threshold)
@@ -14,7 +14,7 @@
  *
  * **Configuration:**
  * - GFI thresholds from config.gfi_gate
- * - Trust stage multipliers for dynamic threshold calculation
+ * - EP tier multipliers for dynamic threshold calculation
  * - Large change adjustments
  *
  * **Block Persistence:**
@@ -38,7 +38,7 @@ export interface GfiGateConfig {
     high_risk_block?: number;
   };
   large_change_lines?: number;
-  trust_stage_multipliers?: Record<string, number>;
+  ep_tier_multipliers?: Record<string, number>;
   bash_safe_patterns?: string[];
   bash_dangerous_patterns?: string[];
 }
@@ -97,16 +97,16 @@ export function checkGfiGate(
     }
 
     // normal bash - check GFI threshold
-    const trustEngine = wctx.trust;
-    const stage = trustEngine.getStage();
+    const evolutionEngine = wctx.evolution;
+    const tier = evolutionEngine.getTier();
     const baseThreshold = config.thresholds?.low_risk_block || 70;
     const dynamicThreshold = calculateDynamicThreshold(
       baseThreshold,
-      stage,
+      tier,
       0,
       {
         large_change_lines: config.large_change_lines || 50,
-        trust_stage_multipliers: config.trust_stage_multipliers || { '1': 0.5, '2': 0.75, '3': 1.0, '4': 1.5 },
+        ep_tier_multipliers: config.ep_tier_multipliers || { '1': 0.5, '2': 0.75, '3': 1.0, '4': 1.5, '5': 2.0 },
       }
     );
 
@@ -120,16 +120,16 @@ export function checkGfiGate(
 
   // TIER 2: High-risk tools
   if (HIGH_RISK_TOOLS.has(event.toolName)) {
-    const trustEngine = wctx.trust;
-    const stage = trustEngine.getStage();
+    const evolutionEngine = wctx.evolution;
+    const tier = evolutionEngine.getTier();
     const baseThreshold = config.thresholds?.high_risk_block || 40;
     const dynamicThreshold = calculateDynamicThreshold(
       baseThreshold,
-      stage,
+      tier,
       0,
       {
         large_change_lines: config.large_change_lines || 50,
-        trust_stage_multipliers: config.trust_stage_multipliers || { '1': 0.5, '2': 0.75, '3': 1.0, '4': 1.5 },
+        ep_tier_multipliers: config.ep_tier_multipliers || { '1': 0.5, '2': 0.75, '3': 1.0, '4': 1.5, '5': 2.0 },
       }
     );
 
@@ -142,17 +142,17 @@ export function checkGfiGate(
 
   // TIER 1: Low-risk write tools
   if (LOW_RISK_WRITE_TOOLS.has(event.toolName)) {
-    const trustEngine = wctx.trust;
-    const stage = trustEngine.getStage();
+    const evolutionEngine = wctx.evolution;
+    const tier = evolutionEngine.getTier();
     const lineChanges = estimateLineChanges({ toolName: event.toolName, params: event.params });
     const baseThreshold = config.thresholds?.low_risk_block || 70;
     const dynamicThreshold = calculateDynamicThreshold(
       baseThreshold,
-      stage,
+      tier,
       lineChanges,
       {
         large_change_lines: config.large_change_lines || 50,
-        trust_stage_multipliers: config.trust_stage_multipliers || { '1': 0.5, '2': 0.75, '3': 1.0, '4': 1.5 },
+        ep_tier_multipliers: config.ep_tier_multipliers || { '1': 0.5, '2': 0.75, '3': 1.0, '4': 1.5, '5': 2.0 },
       }
     );
 

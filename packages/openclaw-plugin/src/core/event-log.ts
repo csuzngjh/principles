@@ -16,7 +16,6 @@ import type {
   PlanApprovalEventData,
   EvolutionTaskEventData,
   DeepReflectionEventData,
-  TrustChangeEventData,
   EmpathyRollbackEventData,
 } from '../types/event-types.js';
 import { createEmptyDailyStats } from '../types/event-types.js';
@@ -91,10 +90,6 @@ export class EventLog {
   recordDeepReflection(sessionId: string | undefined, data: DeepReflectionEventData): void {
     const category = data.passed ? 'passed' : data.timeout ? 'failure' : 'completed';
     this.record('deep_reflection', category, sessionId, data);
-  }
-
-  recordTrustChange(sessionId: string | undefined, data: TrustChangeEventData): void {
-    this.record('trust_change', 'changed', sessionId, data);
   }
 
   recordEmpathyRollback(sessionId: string | undefined, data: EmpathyRollbackEventData): void {

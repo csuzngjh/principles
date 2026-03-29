@@ -108,9 +108,6 @@ describe('RuntimeSummaryService', () => {
 
     expect(summary.gfi.current).toBe(45);
     expect(summary.gfi.peak).toBe(78);
-    expect(summary.legacyTrust.score).toBe(85);
-    expect(summary.legacyTrust.stage).toBe(4);
-    expect(summary.legacyTrust.frozen).toBe(true);
     expect(summary.evolution.queue.pending).toBe(1);
     expect(summary.evolution.queue.completed).toBe(1);
     expect(summary.evolution.directive.exists).toBe(false);
@@ -141,12 +138,8 @@ describe('RuntimeSummaryService', () => {
     expect(summary.metadata.warnings.join('\n')).toContain('partial');
   });
 
-  it('derives compact phase3 readiness flags from queue and trust inputs', () => {
+  it('derives compact phase3 readiness flags from queue inputs', () => {
     const workspace = makeWorkspace();
-    writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
-      trust_score: 85,
-      last_updated: '2026-03-20T10:00:00Z',
-    });
     writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
       { id: 'task-1', status: 'in_progress' },
       { id: 'task-1', status: 'completed', completed_at: '2026-03-20T10:01:00Z' },
@@ -156,7 +149,6 @@ describe('RuntimeSummaryService', () => {
     const summary = RuntimeSummaryService.getSummary(workspace);
 
     expect(summary.phase3.queueTruthReady).toBe(false);
-    expect(summary.phase3.trustInputReady).toBe(false);
     expect(summary.phase3.phase3ShadowEligible).toBe(false);
     expect(summary.phase3.evolutionRejectedReasons).toEqual(
       expect.arrayContaining([
@@ -165,15 +157,10 @@ describe('RuntimeSummaryService', () => {
         'missing_completed_at',
       ])
     );
-    expect(summary.phase3.trustRejectedReasons).toContain('legacy_or_unfrozen_trust_schema');
   });
 
-  it('keeps legacy trust display frozen while conservatively rejecting unfrozen scorecards for phase3 input', () => {
+  it('derives phase3 readiness from valid queue entries', () => {
     const workspace = makeWorkspace();
-    writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
-      trust_score: 85,
-      last_updated: '2026-03-20T10:00:00Z',
-    });
     writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
       { id: 'task-1', status: 'pending' },
       { id: 'task-2', status: 'in_progress', started_at: '2026-03-20T10:00:00Z' },
@@ -182,11 +169,8 @@ describe('RuntimeSummaryService', () => {
 
     const summary = RuntimeSummaryService.getSummary(workspace);
 
-    expect(summary.legacyTrust.frozen).toBe(true);
     expect(summary.phase3.queueTruthReady).toBe(true);
-    expect(summary.phase3.trustInputReady).toBe(false);
     expect(summary.phase3.phase3ShadowEligible).toBe(false);
-    expect(summary.phase3.trustRejectedReasons).toContain('legacy_or_unfrozen_trust_schema');
   });
 
   it('prefers the explicit session when provided', () => {
@@ -545,11 +529,6 @@ describe('RuntimeSummaryService', () => {
 
     it('reports timeout-only outcomes as referenceOnly (not rejected)', () => {
       const workspace = makeWorkspace();
-      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
-        trust_score: 85,
-        frozen: true,
-        last_updated: '2026-03-20T10:00:00Z',
-      });
       writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
         { id: 'e5da4f5c', status: 'completed', resolution: 'auto_completed_timeout', completed_at: '2026-03-24T15:29:39.710Z' }
       ]);
@@ -561,71 +540,6 @@ describe('RuntimeSummaryService', () => {
       expect(summary.phase3.queueTruthReady).toBe(true);
       // No rejection reasons from timeout
       expect(summary.phase3.evolutionRejectedReasons).not.toContain('timeout_only_outcome');
-    });
-
-    it('reports unfrozen trust as rejection reason in phase3 section', () => {
-      const workspace = makeWorkspace();
-      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
-        trust_score: 85,
-        frozen: false,
-        last_updated: '2026-03-20T10:00:00Z',
-      });
-      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
-        { id: 'task-1', status: 'pending' }
-      ]);
-
-      const summary = RuntimeSummaryService.getSummary(workspace);
-
-      expect(summary.phase3.trustInputReady).toBe(false);
-      expect(summary.phase3.trustRejectedReasons).toContain('legacy_or_unfrozen_trust_schema');
-    });
-
-    it('reports missing trust score as rejection reason in phase3 section', () => {
-      const workspace = makeWorkspace();
-      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
-        trust_score: null,
-        frozen: true,
-        last_updated: '2026-03-20T10:00:00Z',
-      });
-      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
-        { id: 'task-1', status: 'pending' }
-      ]);
-
-      const summary = RuntimeSummaryService.getSummary(workspace);
-
-      expect(summary.phase3.trustInputReady).toBe(false);
-      expect(summary.phase3.trustRejectedReasons).toContain('missing_trust_score');
-    });
-
-    it('handles mixed rejection reasons from queue and trust inputs', () => {
-      const workspace = makeWorkspace();
-      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
-        trust_score: null,
-        frozen: false,
-        last_updated: '2026-03-20T10:00:00Z',
-      });
-      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
-        { id: 'task-1', status: 'resolved' }, // Legacy status -> rejected
-        { id: 'task-2', status: 'completed', resolution: 'auto_completed_timeout', completed_at: '2026-03-24T15:29:39.710Z' } // Timeout -> referenceOnly
-      ]);
-
-      const summary = RuntimeSummaryService.getSummary(workspace);
-
-      expect(summary.phase3.trustInputReady).toBe(false);
-      expect(summary.phase3.phase3ShadowEligible).toBe(false);
-      // Only legacy_queue_status is rejected, timeout is referenceOnly
-      expect(summary.phase3.evolutionRejectedReasons).toEqual(
-        expect.arrayContaining([
-          'legacy_queue_status',
-        ])
-      );
-      // Trust rejection reasons include both issues
-      expect(summary.phase3.trustRejectedReasons).toEqual(
-        expect.arrayContaining([
-          'legacy_or_unfrozen_trust_schema',
-          'missing_trust_score',
-        ])
-      );
     });
 
     it('labels directive status as compatibility-only when directive file exists', () => {
@@ -740,13 +654,8 @@ describe('RuntimeSummaryService', () => {
 
   // Task 8: TDD tests for Runtime vs Analytics Separation (RED phase)
   describe('Runtime vs Analytics Separation', () => {
-    it('populates runtime truth section with queue, sessions, trust, workspace state', () => {
+    it('populates runtime truth section with queue and sessions', () => {
       const workspace = makeWorkspace();
-      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
-        trust_score: 85,
-        frozen: true,
-        last_updated: '2026-03-20T10:00:00Z',
-      });
       writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
         { id: 'task-1', status: 'pending' },
         { id: 'task-2', status: 'in_progress' },
@@ -755,14 +664,11 @@ describe('RuntimeSummaryService', () => {
 
       const summary = RuntimeSummaryService.getSummary(workspace);
 
-      // These properties don't exist yet - tests will FAIL (RED phase)
       expect(summary.runtime.queueState.total).toBe(3);
       expect(summary.runtime.queueState.pending).toBe(1);
       expect(summary.runtime.queueState.inProgress).toBe(1);
       expect(summary.runtime.queueState.completed).toBe(1);
       expect(summary.runtime.activeSessions).toEqual(expect.any(Array));
-      expect(summary.runtime.currentTrustScore).toBe(85);
-      expect(summary.runtime.workspaceState.frozen).toBe(true);
     });
 
     it('populates analytics truth section with trajectory, daily stats, trends', () => {
@@ -790,11 +696,6 @@ describe('RuntimeSummaryService', () => {
 
     it('calculates Phase 3 readiness from runtime truth only', () => {
       const workspace = makeWorkspace();
-      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
-        trust_score: 85,
-        frozen: true,
-        last_updated: '2026-03-20T10:00:00Z',
-      });
       writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
         { id: 'task-1', status: 'completed', completed_at: '2026-03-25T10:00:00.000Z' },
         { id: 'task-2', status: 'pending' },
@@ -804,7 +705,6 @@ describe('RuntimeSummaryService', () => {
 
       // Runtime truth drives eligibility
       expect(summary.phase3.queueTruthReady).toBe(true);
-      expect(summary.phase3.trustInputReady).toBe(true);
       expect(summary.phase3.phase3ShadowEligible).toBe(true);
 
       // Phase 3 eligibility source should be runtime truth
@@ -858,44 +758,6 @@ describe('RuntimeSummaryService', () => {
       expect(summary.analytics.trajectoryData).not.toHaveProperty('queue');
     });
 
-    it('separates trust into runtime truth section only', () => {
-      const workspace = makeWorkspace();
-      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
-        trust_score: 85,
-        frozen: true,
-        last_updated: '2026-03-20T10:00:00Z',
-      });
-
-      const summary = RuntimeSummaryService.getSummary(workspace);
-
-      // Trust data belongs to runtime truth
-      expect(summary.runtime.currentTrustScore).toBe(85);
-      expect(summary.runtime.workspaceState.frozen).toBe(true);
-      expect(summary.runtime.workspaceState.lastUpdated).toBe('2026-03-20T10:00:00Z');
-
-      // Analytics section should NOT have trust data
-      expect(summary.analytics.trajectoryData).not.toHaveProperty('trustScore');
-    });
-
-    it('does not coerce missing trust into authoritative runtime truth', () => {
-      const workspace = makeWorkspace();
-      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
-        frozen: false,
-        last_updated: '2026-03-20T10:00:00Z',
-      });
-      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
-        { id: 'task-1', status: 'pending' },
-      ]);
-
-      const summary = RuntimeSummaryService.getSummary(workspace);
-
-      expect(summary.runtime.currentTrustScore).toBeNull();
-      expect(summary.runtime.workspaceState.frozen).toBe(false);
-      expect(summary.runtime.workspaceState.trustClassification).toBe('rejected');
-      expect(summary.phase3.trustRejectedReasons).toContain('legacy_or_unfrozen_trust_schema');
-      expect(summary.phase3.trustRejectedReasons).toContain('missing_trust_score');
-    });
-
     it('surfaces reference-only Phase 3 evidence in the runtime summary', () => {
       const workspace = makeWorkspace();
       writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
@@ -918,12 +780,6 @@ describe('RuntimeSummaryService', () => {
 
     it('includes lastUpdated timestamps in runtime truth section', () => {
       const workspace = makeWorkspace();
-      const lastUpdated = '2026-03-20T10:00:00Z';
-      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
-        trust_score: 85,
-        frozen: true,
-        last_updated: lastUpdated,
-      });
       writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
         { id: 'task-1', status: 'pending' },
       ]);
@@ -932,7 +788,6 @@ describe('RuntimeSummaryService', () => {
 
       // Runtime truth section includes timing metadata
       expect(summary.runtime.queueState.lastUpdated).toBeDefined();
-      expect(summary.runtime.workspaceState.lastUpdated).toBe(lastUpdated);
     });
 
     it('populates activeSessions from session tracker in runtime truth', () => {
@@ -969,18 +824,13 @@ describe('RuntimeSummaryService', () => {
     /**
      * PURPOSE: Prove that EVOLUTION_DIRECTIVE.json does NOT affect Phase 3 eligibility.
      * Directive is a compatibility-only display artifact, not a truth source.
-     * Phase 3 eligibility depends ONLY on queue and trust.
+     * Phase 3 eligibility depends ONLY on queue.
      */
 
     it('Phase 3 eligibility is same whether directive exists or not', () => {
       const workspace = makeWorkspace();
 
-      // Valid queue and trust for Phase 3
-      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
-        trust_score: 85,
-        frozen: true,
-        last_updated: '2026-03-20T10:00:00Z',
-      });
+      // Valid queue for Phase 3
       writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
         { id: 'task-1', status: 'pending' },
       ]);
@@ -1005,23 +855,13 @@ describe('RuntimeSummaryService', () => {
       expect(summaryWithDirective.phase3.queueTruthReady).toBe(
         summaryWithoutDirective.phase3.queueTruthReady
       );
-      expect(summaryWithDirective.phase3.trustInputReady).toBe(
-        summaryWithoutDirective.phase3.trustInputReady
-      );
 
-      // Both should be eligible because queue and trust are valid
+      // Both should be eligible because queue is valid
       expect(summaryWithDirective.phase3.phase3ShadowEligible).toBe(true);
     });
 
     it('Phase 3 eligibility is false when queue invalid, regardless of directive', () => {
       const workspace = makeWorkspace();
-
-      // Valid trust
-      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
-        trust_score: 85,
-        frozen: true,
-        last_updated: '2026-03-20T10:00:00Z',
-      });
 
       // Invalid queue (legacy status)
       writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
@@ -1043,43 +883,8 @@ describe('RuntimeSummaryService', () => {
       expect(summary.phase3.queueTruthReady).toBe(false);
     });
 
-    it('Phase 3 eligibility is false when trust invalid, regardless of directive', () => {
-      const workspace = makeWorkspace();
-
-      // Invalid trust (unfrozen)
-      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
-        trust_score: 85,
-        frozen: false, // Invalid for Phase 3
-        last_updated: '2026-03-20T10:00:00Z',
-      });
-
-      // Valid queue
-      writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [
-        { id: 'task-1', status: 'pending' },
-      ]);
-
-      // Add directive claiming everything is fine
-      writeJson(path.join(workspace, '.state', 'evolution_directive.json'), {
-        active: true,
-        task: 'valid active task',
-        timestamp: new Date().toISOString(),
-      });
-
-      const summary = RuntimeSummaryService.getSummary(workspace);
-
-      // Phase 3 eligibility should be false despite directive
-      expect(summary.phase3.phase3ShadowEligible).toBe(false);
-      expect(summary.phase3.trustInputReady).toBe(false);
-    });
-
     it('directive summary shows queue-derived values, not file content', () => {
       const workspace = makeWorkspace();
-
-      writeJson(path.join(workspace, '.state', 'AGENT_SCORECARD.json'), {
-        trust_score: 85,
-        frozen: true,
-        last_updated: '2026-03-20T10:00:00Z',
-      });
 
       // Queue has in_progress task
       writeJson(path.join(workspace, '.state', 'evolution_queue.json'), [

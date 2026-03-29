@@ -13,12 +13,6 @@ vi.mock('../../src/core/risk-calculator.js');
 describe('Progressive Gate Hook', () => {
   const workspaceDir = '/mock/workspace';
   
-  const mockTrust = {
-    getScorecard: vi.fn(),
-    getScore: vi.fn(),
-    getStage: vi.fn(),
-  };
-
   const mockConfig = {
     get: vi.fn().mockImplementation((key) => {
         if (key === 'trust') return {
@@ -36,7 +30,6 @@ describe('Progressive Gate Hook', () => {
   const mockWctx = {
     workspaceDir,
     stateDir: '/mock/state',
-    trust: mockTrust,
     config: mockConfig,
     eventLog: mockEventLog,
     trajectory: {
@@ -54,131 +47,6 @@ describe('Progressive Gate Hook', () => {
     vi.mocked(WorkspaceContext.fromHookContext).mockReturnValue(mockWctx as any);
     vi.mocked(riskCalculator.assessRiskLevel).mockReturnValue('LOW');
     vi.mocked(riskCalculator.estimateLineChanges).mockReturnValue(1);
-  });
-
-  it('should block ALL risk path writes for Stage 1 (Bankruptcy)', () => {
-    const mockCtx = { workspaceDir };
-    const mockEvent = { 
-        toolName: 'write', 
-        params: { file_path: 'src/main.ts' } 
-    };
-
-    mockTrust.getScore.mockReturnValue(25);
-    mockTrust.getStage.mockReturnValue(1);
-    vi.mocked(fs.existsSync).mockReturnValue(true);
-    vi.mocked(fs.readFileSync).mockImplementation(() => {
-        return JSON.stringify({ risk_paths: ['src/'], progressive_gate: { enabled: true } });
-    });
-
-    const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
-
-    expect(result).toBeDefined();
-    expect(result?.block).toBe(true);
-    expect(result?.blockReason).toContain('Trust score too low');
-  });
-
-  it('should block large writes (>10 lines) for Stage 2 (Editor)', () => {
-    const mockCtx = { workspaceDir };
-    const mockEvent = { 
-        toolName: 'write', 
-        params: { file_path: 'docs/readme.md' } 
-    };
-
-    mockTrust.getScore.mockReturnValue(50);
-    mockTrust.getStage.mockReturnValue(2);
-    vi.mocked(riskCalculator.estimateLineChanges).mockReturnValue(15);
-    vi.mocked(fs.existsSync).mockReturnValue(true);
-    vi.mocked(fs.readFileSync).mockImplementation(() => {
-        return JSON.stringify({ risk_paths: ['src/'], progressive_gate: { enabled: true } });
-    });
-
-    const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
-
-    expect(result).toBeDefined();
-    expect(result?.block).toBe(true);
-    expect(result?.blockReason).toContain('Modification too large');
-  });
-
-  it('should require PLAN for risk paths in Stage 3 (Developer)', () => {
-    const mockCtx = { workspaceDir };
-    const mockEvent = { 
-        toolName: 'write', 
-        params: { file_path: 'src/core.ts' } 
-    };
-
-    mockTrust.getScore.mockReturnValue(70);
-    mockTrust.getStage.mockReturnValue(3);
-    vi.mocked(fs.existsSync).mockReturnValue(true);
-    vi.mocked(fs.readFileSync).mockImplementation((p: any) => {
-        if (p.includes('PROFILE.json')) return JSON.stringify({ risk_paths: ['src/'], progressive_gate: { enabled: true } });
-        if (p.includes('PLAN.md')) return 'STATUS: DRAFT\n';
-        return '';
-    });
-
-    const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
-
-    expect(result).toBeDefined();
-    expect(result?.block).toBe(true);
-    expect(result?.blockReason).toContain('No READY plan found');
-  });
-
-  it('should allow everything for Stage 4 (Architect)', () => {
-    const mockCtx = { workspaceDir };
-    const mockEvent = { 
-        toolName: 'write', 
-        params: { file_path: 'src/core.ts' } 
-    };
-
-    mockTrust.getScore.mockReturnValue(90);
-    mockTrust.getStage.mockReturnValue(4);
-    vi.mocked(fs.existsSync).mockReturnValue(true);
-    vi.mocked(fs.readFileSync).mockImplementation(() => {
-        return JSON.stringify({ risk_paths: ['src/'], progressive_gate: { enabled: true } });
-    });
-
-    const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
-
-    expect(result).toBeUndefined(); // Allowed
-  });
-
-  describe('Stage 1 PLAN Approvals', () => {
-    it('should allow operation when PLAN is READY and matches whitelist', () => {
-      const mockCtx = { workspaceDir };
-      const mockEvent = {
-        toolName: 'write',
-        params: { file_path: 'skills/my-skill.md' }
-      };
-
-      mockTrust.getScore.mockReturnValue(25);
-      mockTrust.getStage.mockReturnValue(1);
-      vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(fs.readFileSync).mockImplementation((p: any) => {
-        if (p.includes('PROFILE.json')) {
-          return JSON.stringify({
-            risk_paths: ['src/'],
-            progressive_gate: {
-              enabled: true,
-              plan_approvals: {
-                enabled: true,
-                max_lines_override: -1,
-                allowed_patterns: ['skills/**'],
-                allowed_operations: ['write']
-              }
-            }
-          });
-        }
-        if (p.includes('PLAN.md')) return 'STATUS: READY\n';
-        return '';
-      });
-
-      const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
-
-      expect(result).toBeUndefined(); 
-      expect(mockWctx.trajectory.recordGateBlock).toHaveBeenCalledWith(expect.objectContaining({
-        toolName: 'write',
-        reason: 'plan_approval',
-      }));
-    });
   });
 
   it('should fall back to original logic if progressive gate is disabled', () => {
@@ -243,18 +111,13 @@ describe('Gate Default Values Consistency', () => {
     vi.mocked(fs.existsSync).mockReturnValue(false); // No PROFILE.json
     vi.mocked(WorkspaceContext.fromHookContext).mockReturnValue({
       workspaceDir: '/test/workspace',
-      trust: { getScore: () => 80, getStage: () => 4 },
       config: { get: () => undefined },
       eventLog: { recordGateBlock: () => {} },
       trajectory: { recordGateBlock: () => {} },
       resolve: (key: string) => `/test/workspace/.state/${key}.json`,
     } as any);
 
-    // Should not throw, should use defaults
     const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
-
-    // With defaults: progressive_gate.enabled=true, trust=Stage4, should allow
-    // (Stage 4 bypasses progressive gate)
     expect(result).toBeUndefined();
   });
 
@@ -275,7 +138,6 @@ describe('Gate Default Values Consistency', () => {
     vi.mocked(fs.existsSync).mockReturnValue(false); // No PROFILE.json
     vi.mocked(WorkspaceContext.fromHookContext).mockReturnValue({
       workspaceDir: '/test/workspace',
-      trust: { getScore: () => 80, getStage: () => 4 },
       config: { get: () => undefined },
       eventLog: { recordGateBlock: () => {} },
       trajectory: { recordGateBlock: () => {} },

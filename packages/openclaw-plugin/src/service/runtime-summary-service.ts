@@ -1,7 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { readPainFlagData } from '../core/pain.js';
-import { resolvePdPath } from '../core/paths.js';
 import { listSessions } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { evaluatePhase3Inputs } from './phase3-input-filter.js';
@@ -47,13 +46,6 @@ export interface RuntimeSummary {
     sources: RuntimeSummarySource[];
     dataQuality: RuntimeDataQuality;
   };
-  legacyTrust: {
-    score: number | null;
-    stage: 1 | 2 | 3 | 4 | null;
-    frozen: true;
-    lastUpdated: string | null;
-    rewardPolicy: RuntimeRewardPolicy;
-  };
   evolution: {
     queue: {
       pending: number;
@@ -70,14 +62,12 @@ export interface RuntimeSummary {
   };
   phase3: {
     queueTruthReady: boolean;
-    trustInputReady: boolean;
     phase3ShadowEligible: boolean;
     evolutionEligible: number;
     evolutionReferenceOnly: number;
     evolutionReferenceOnlyReasons: string[];
     evolutionRejected: number;
     evolutionRejectedReasons: string[];
-    trustRejectedReasons: string[];
     legacyDirectiveFilePresent: boolean;
     directiveStatus: 'compatibility-only' | 'missing' | 'present';
     directiveIgnoredReason: string;
@@ -145,24 +135,7 @@ interface EventLogEntry {
   data?: Record<string, unknown>;
 }
 
-interface ScorecardLike {
-  trust_score?: number;
-  last_updated?: string;
-  frozen?: boolean;
-  reward_policy?: RuntimeRewardPolicy;
-}
-
-interface LegacyTrustReadResult {
-  summary: RuntimeSummary['legacyTrust'];
-  phase3Input: {
-    score: number | null;
-    frozen: boolean | null;
-    lastUpdated: string | null;
-  };
-}
-
 const MAX_SOURCE_EVENTS = 5;
-const LEGACY_TRUST_REWARD_POLICY: RuntimeRewardPolicy = 'frozen_all_positive';
 const GFI_PARTIAL_WARNING =
   'GFI source attribution remains partial in Phase 2b because only the empathy slice is source-attributed; most non-empathy friction still lacks full per-source attribution.';
 const DAILY_GFI_WARNING =
@@ -254,12 +227,7 @@ export class RuntimeSummaryService {
       false
     );
 
-    const legacyTrust = this.readLegacyTrust(
-      resolvePdPath(workspaceDir, 'AGENT_SCORECARD'),
-      wctx,
-      warnings
-    );
-    const phase3Inputs = evaluatePhase3Inputs(queue ?? [], legacyTrust.phase3Input);
+    const phase3Inputs = evaluatePhase3Inputs(queue ?? []);
 
     const lastPainSignal = this.findLastPainSignal(events, selectedSessionId);
     const gfiSources = this.buildGfiSources(events, selectedSessionId);
@@ -279,12 +247,6 @@ export class RuntimeSummaryService {
         lastUpdated: generatedAt,
       },
       activeSessions: activeSessionIds,
-      currentTrustScore: legacyTrust.phase3Input.score ?? null,
-      workspaceState: {
-        frozen: legacyTrust.phase3Input.frozen ?? null,
-        lastUpdated: legacyTrust.phase3Input.lastUpdated ?? null,
-        trustClassification: phase3Inputs.trust.classification,
-      },
     };
 
     // Build analytics truth section (historical data for insights)
@@ -321,7 +283,6 @@ export class RuntimeSummaryService {
         sources: gfiSources,
         dataQuality: 'partial',
       },
-      legacyTrust: legacyTrust.summary,
       evolution: {
         queue: queueStats,
         directive: directiveSummary,
@@ -329,14 +290,12 @@ export class RuntimeSummaryService {
       },
       phase3: {
         queueTruthReady: phase3Inputs.queueTruthReady,
-        trustInputReady: phase3Inputs.trustInputReady,
         phase3ShadowEligible: phase3Inputs.phase3ShadowEligible,
         evolutionEligible: phase3Inputs.evolution.eligible.length,
         evolutionReferenceOnly: phase3Inputs.evolution.referenceOnly.length,
         evolutionReferenceOnlyReasons: [...new Set(phase3Inputs.evolution.referenceOnly.map((entry) => entry.classification))],
         evolutionRejected: phase3Inputs.evolution.rejected.length,
         evolutionRejectedReasons: phase3Inputs.evolution.rejected.flatMap((entry) => entry.reasons),
-        trustRejectedReasons: phase3Inputs.trust.rejectedReasons,
         legacyDirectiveFilePresent: directive !== null,
         directiveStatus: directive ? 'compatibility-only' : 'missing',
         directiveIgnoredReason: 'queue is only truth source',
@@ -503,52 +462,6 @@ export class RuntimeSummaryService {
       active: true,
       ageSeconds,
       taskPreview: derivedTaskPreview,
-    };
-  }
-
-  private static readLegacyTrust(
-    scorecardPath: string,
-    wctx: WorkspaceContext,
-    warnings: string[]
-  ): LegacyTrustReadResult {
-    const scorecard = this.readJsonFile<ScorecardLike>(scorecardPath, warnings, false);
-    const score = Number.isFinite(scorecard?.trust_score) ? Number(scorecard?.trust_score) : null;
-    const rawFrozen = scorecard?.frozen === true ? true : false;
-    const settings = wctx.config.get('trust') as
-      | { stages?: { stage_1_observer?: number; stage_2_editor?: number; stage_3_developer?: number } }
-      | undefined;
-    const stageThresholds = settings?.stages ?? {
-      stage_1_observer: 30,
-      stage_2_editor: 60,
-      stage_3_developer: 80,
-    };
-
-    let stage: 1 | 2 | 3 | 4 | null = null;
-    if (score !== null) {
-      if (score < (stageThresholds.stage_1_observer ?? 30)) {
-        stage = 1;
-      } else if (score < (stageThresholds.stage_2_editor ?? 60)) {
-        stage = 2;
-      } else if (score < (stageThresholds.stage_3_developer ?? 80)) {
-        stage = 3;
-      } else {
-        stage = 4;
-      }
-    }
-
-    return {
-      summary: {
-        score,
-        stage,
-        frozen: true,
-        lastUpdated: scorecard?.last_updated ?? null,
-        rewardPolicy: LEGACY_TRUST_REWARD_POLICY,
-      },
-      phase3Input: {
-        score,
-        frozen: rawFrozen,
-        lastUpdated: scorecard?.last_updated ?? null,
-      },
     };
   }
 

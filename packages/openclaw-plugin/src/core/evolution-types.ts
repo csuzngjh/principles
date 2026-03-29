@@ -19,7 +19,6 @@ export enum EvolutionTier {
 }
 
 export interface TierPermissions {
-  maxLinesPerWrite: number;
   maxFilesPerTask: number;
   allowRiskPath: boolean;
   allowSubagentSpawn: boolean;
@@ -33,11 +32,11 @@ export interface TierDefinition {
 }
 
 export const TIER_DEFINITIONS: readonly TierDefinition[] = [
-  { tier: EvolutionTier.Seed,    name: 'Seed',    requiredPoints: 0,    permissions: { maxLinesPerWrite: 20,  maxFilesPerTask: 1,  allowRiskPath: false, allowSubagentSpawn: false }},
-  { tier: EvolutionTier.Sprout,  name: 'Sprout',  requiredPoints: 50,   permissions: { maxLinesPerWrite: 50,  maxFilesPerTask: 2,  allowRiskPath: false, allowSubagentSpawn: false }},
-  { tier: EvolutionTier.Sapling, name: 'Sapling', requiredPoints: 200,  permissions: { maxLinesPerWrite: 200, maxFilesPerTask: 5,  allowRiskPath: false, allowSubagentSpawn: true  }},
-  { tier: EvolutionTier.Tree,    name: 'Tree',    requiredPoints: 500,  permissions: { maxLinesPerWrite: 500, maxFilesPerTask: 10, allowRiskPath: true,  allowSubagentSpawn: true  }},
-  { tier: EvolutionTier.Forest,  name: 'Forest',  requiredPoints: 1000, permissions: { maxLinesPerWrite: Infinity, maxFilesPerTask: Infinity, allowRiskPath: true, allowSubagentSpawn: true }},
+  { tier: EvolutionTier.Seed,    name: 'Seed',    requiredPoints: 0,    permissions: { maxFilesPerTask: 1,  allowRiskPath: false, allowSubagentSpawn: false }},
+  { tier: EvolutionTier.Sprout,  name: 'Sprout',  requiredPoints: 50,   permissions: { maxFilesPerTask: 2,  allowRiskPath: false, allowSubagentSpawn: false }},
+  { tier: EvolutionTier.Sapling, name: 'Sapling', requiredPoints: 200,  permissions: { maxFilesPerTask: 5,  allowRiskPath: false, allowSubagentSpawn: true  }},
+  { tier: EvolutionTier.Tree,    name: 'Tree',    requiredPoints: 500,  permissions: { maxFilesPerTask: 10, allowRiskPath: true,  allowSubagentSpawn: true  }},
+  { tier: EvolutionTier.Forest,  name: 'Forest',  requiredPoints: 1000, permissions: { maxFilesPerTask: Infinity, allowRiskPath: true, allowSubagentSpawn: true }},
 ] as const;
 
 export function getTierDefinition(tier: EvolutionTier): TierDefinition {
@@ -195,8 +194,6 @@ export interface GateDecision {
 export interface ToolCallContext {
   toolName: string;
   filePath?: string;
-  content?: string;        // 写入的内容（用于行数检查）
-  lineCount?: number;      // 显式行数（如果已知）
   isRiskPath?: boolean;
 }
 

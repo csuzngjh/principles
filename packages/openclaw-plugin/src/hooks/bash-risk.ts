@@ -135,31 +135,31 @@ export function analyzeBashCommand(
 
 export interface DynamicThresholdConfig {
   large_change_lines: number;
-  trust_stage_multipliers: Record<string, number>;
+  ep_tier_multipliers: Record<string, number>;
 }
 
 /**
- * Calculates the dynamic GFI threshold based on trust stage and line changes.
+ * Calculates the dynamic GFI threshold based on EP tier and line changes.
  *
  * The threshold is adjusted by:
- * 1. Trust stage multiplier (higher stages get higher thresholds)
+ * 1. EP tier multiplier (higher tiers get higher thresholds)
  * 2. Large change reduction (big edits lower the threshold to catch more issues)
  *
  * @param baseThreshold - The base GFI threshold (typically 50 for GFI)
- * @param trustStage - Current trust stage (1-4)
+ * @param epTier - Current EP tier (1-5)
  * @param lineChanges - Number of lines being changed
- * @param config - Configuration with large_change_lines and trust_stage_multipliers
+ * @param config - Configuration with large_change_lines and ep_tier_multipliers
  * @returns The adjusted threshold (minimum 0)
  */
 export function calculateDynamicThreshold(
   baseThreshold: number,
-  trustStage: number,
+  epTier: number,
   lineChanges: number,
   config: DynamicThresholdConfig
 ): number {
-  // 1. Trust Stage multiplier
-  const stageMultiplier = config.trust_stage_multipliers[trustStage.toString()] || 1.0;
-  let threshold = baseThreshold * stageMultiplier;
+  // 1. EP Tier multiplier
+  const tierMultiplier = config.ep_tier_multipliers[epTier.toString()] || 1.0;
+  let threshold = baseThreshold * tierMultiplier;
 
   // 2. Large scale modification reduces threshold
   if (lineChanges > config.large_change_lines) {
