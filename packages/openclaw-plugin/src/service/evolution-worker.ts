@@ -646,14 +646,100 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
             }
         }
 
-        // V2: Only process pain_diagnosis tasks for HEARTBEAT injection
-        // sleep_reflection tasks are handled by nocturnal service (Phase 2.4)
+        // V2: Process pain_diagnosis tasks FIRST (quick, inside lock),
+        // then sleep_reflection tasks (slow, lock released during execution).
+        // This order ensures pain tasks are never starved by long-running
+        // nocturnal reflection — sleep_reflection can safely return early
+        // because pain_diagnosis has already been handled.
         const pendingTasks = queue.filter(t => t.status === 'pending' && t.taskKind === 'pain_diagnosis');
 
-        // Phase 2.4: Process sleep_reflection tasks
+        if (pendingTasks.length > 0) {
+            // V2: Also sort by priority within same score
+            const priorityWeight = { high: 3, medium: 2, low: 1 };
+            const highestScoreTask = pendingTasks.sort((a, b) => {
+                const scoreDiff = b.score - a.score;
+                if (scoreDiff !== 0) return scoreDiff;
+                return (priorityWeight[b.priority] || 2) - (priorityWeight[a.priority] || 2);
+            })[0];
+            const nowIso = new Date().toISOString();
+
+            const taskDescription = `Diagnose systemic pain [ID: ${highestScoreTask.id}]. Source: ${highestScoreTask.source}. Reason: ${highestScoreTask.reason}. ` +
+                  `Trigger text: "${highestScoreTask.trigger_text_preview || 'N/A'}"`;
+
+            // Prepare HEARTBEAT content first
+            // Use shared diagnostician protocol (consistent with pd-diagnostician skill)
+            const heartbeatPath = wctx.resolve('HEARTBEAT');
+            const markerFilePath = path.join(wctx.stateDir, `.evolution_complete_${highestScoreTask.id}`);
+            const heartbeatContent = [
+                `## Evolution Task [ID: ${highestScoreTask.id}]`,
+                ``,
+                `**Pain Score**: ${highestScoreTask.score}`,
+                `**Source**: ${highestScoreTask.source}`,
+                `**Reason**: ${highestScoreTask.reason}`,
+                `**Trigger**: "${highestScoreTask.trigger_text_preview || 'N/A'}"`,
+                `**Queued At**: ${highestScoreTask.enqueued_at || nowIso}`,
+                `**Session ID**: ${highestScoreTask.session_id || 'N/A'}`,
+                `**Agent ID**: ${highestScoreTask.agent_id || 'main'}`,
+                ``,
+                `---`,
+                ``,
+                DIAGNOSTICIAN_PROTOCOL_SUMMARY,
+                ``,
+                `---`,
+                ``,
+                `After completing the analysis:`,
+                `1. Write the resulting principle(s) to PRINCIPLES.md`,
+                `2. Mark the task complete by creating an empty file: ${markerFilePath}`,
+                `3. Replace this HEARTBEAT.md content with "HEARTBEAT_OK"`,
+            ].join('\n');
+
+            // Try to write HEARTBEAT.md FIRST
+            // Only mark task as in_progress after successful write to avoid stuck tasks
+            try {
+                fs.writeFileSync(heartbeatPath, heartbeatContent, 'utf8');
+                if (logger) logger.info(`[PD:EvolutionWorker] Wrote diagnostician task to HEARTBEAT.md for task ${highestScoreTask.id}`);
+
+                // HEARTBEAT write succeeded, now mark task as in_progress
+                highestScoreTask.task = taskDescription;
+                highestScoreTask.status = 'in_progress';
+                highestScoreTask.started_at = nowIso;
+                delete highestScoreTask.completed_at;
+                // Use placeholder instead of deleting - allows subagent_ended hook to match
+                // This fixes task_outcomes being empty for HEARTBEAT-triggered diagnostician runs
+                highestScoreTask.assigned_session_key = `heartbeat:diagnostician:${highestScoreTask.id}`;
+                queueChanged = true;
+
+                // Log to EvolutionLogger
+                evoLogger.logStarted({
+                    traceId: highestScoreTask.traceId || highestScoreTask.id,
+                    taskId: highestScoreTask.id,
+                });
+
+                // Update evolution_tasks table
+                wctx.trajectory?.updateEvolutionTask?.(highestScoreTask.id, {
+                    status: 'in_progress',
+                    startedAt: nowIso,
+                });
+
+                if (eventLog) {
+                    eventLog.recordEvolutionTask({
+                        taskId: highestScoreTask.id,
+                        taskType: highestScoreTask.source,
+                        reason: highestScoreTask.reason
+                    });
+                }
+            } catch (heartbeatErr) {
+                // HEARTBEAT write failed - keep task as pending for next cycle retry
+                if (logger) logger.error(`[PD:EvolutionWorker] Failed to write HEARTBEAT.md for task ${highestScoreTask.id}: ${String(heartbeatErr)}. Task will remain pending for next cycle.`);
+                SystemLogger.log(wctx.workspaceDir, 'HEARTBEAT_WRITE_FAILED', `Task ${highestScoreTask.id} HEARTBEAT write failed: ${String(heartbeatErr)}`);
+            }
+        }
+
+        // Phase 2.4: Process sleep_reflection tasks AFTER pain_diagnosis.
         // Claim tasks inside the lock, execute reflection outside the lock,
         // then re-acquire the lock to write results. This prevents the long-running
         // nocturnal reflection from blocking all other queue consumers.
+        // Safe to return early here because pain_diagnosis was already handled above.
         const sleepReflectionTasks = queue.filter(t => t.status === 'pending' && t.taskKind === 'sleep_reflection');
         if (sleepReflectionTasks.length > 0) {
             // --- Phase 1: Claim tasks (inside lock) ---
@@ -663,10 +749,9 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
             }
             queueChanged = true;
 
-            // Write claimed state and release lock so other consumers can proceed
+            // Write claimed state (includes any pain changes from above) and release lock
             if (queueChanged) {
-                const v1Queue = queue.map(t => t);
-                fs.writeFileSync(queuePath, JSON.stringify(v1Queue, null, 2), 'utf8');
+                fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
             }
             releaseLock();
             for (const sleepTask of sleepReflectionTasks) {
@@ -750,92 +835,9 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
                 logger?.warn?.(`[PD:EvolutionWorker] Failed to write sleep_reflection results back: ${String(resultLockErr)}`);
             }
 
-            // Return early — the main function's finally block will check lockReleased
-            // and skip the double-release since we already released it above.
+            // Safe to return — pain_diagnosis was already processed above.
             lockReleased = true;
             return;
-        }
-
-        if (pendingTasks.length > 0) {
-            // V2: Also sort by priority within same score
-            const priorityWeight = { high: 3, medium: 2, low: 1 };
-            const highestScoreTask = pendingTasks.sort((a, b) => {
-                const scoreDiff = b.score - a.score;
-                if (scoreDiff !== 0) return scoreDiff;
-                return (priorityWeight[b.priority] || 2) - (priorityWeight[a.priority] || 2);
-            })[0];
-            const nowIso = new Date().toISOString();
-
-            const taskDescription = `Diagnose systemic pain [ID: ${highestScoreTask.id}]. Source: ${highestScoreTask.source}. Reason: ${highestScoreTask.reason}. ` +
-                  `Trigger text: "${highestScoreTask.trigger_text_preview || 'N/A'}"`;
-
-            // Prepare HEARTBEAT content first
-            // Use shared diagnostician protocol (consistent with pd-diagnostician skill)
-            const heartbeatPath = wctx.resolve('HEARTBEAT');
-            const markerFilePath = path.join(wctx.stateDir, `.evolution_complete_${highestScoreTask.id}`);
-            const heartbeatContent = [
-                `## Evolution Task [ID: ${highestScoreTask.id}]`,
-                ``,
-                `**Pain Score**: ${highestScoreTask.score}`,
-                `**Source**: ${highestScoreTask.source}`,
-                `**Reason**: ${highestScoreTask.reason}`,
-                `**Trigger**: "${highestScoreTask.trigger_text_preview || 'N/A'}"`,
-                `**Queued At**: ${highestScoreTask.enqueued_at || nowIso}`,
-                `**Session ID**: ${highestScoreTask.session_id || 'N/A'}`,
-                `**Agent ID**: ${highestScoreTask.agent_id || 'main'}`,
-                ``,
-                `---`,
-                ``,
-                DIAGNOSTICIAN_PROTOCOL_SUMMARY,
-                ``,
-                `---`,
-                ``,
-                `After completing the analysis:`,
-                `1. Write the resulting principle(s) to PRINCIPLES.md`,
-                `2. Mark the task complete by creating an empty file: ${markerFilePath}`,
-                `3. Replace this HEARTBEAT.md content with "HEARTBEAT_OK"`,
-            ].join('\n');
-
-            // Try to write HEARTBEAT.md FIRST
-            // Only mark task as in_progress after successful write to avoid stuck tasks
-            try {
-                fs.writeFileSync(heartbeatPath, heartbeatContent, 'utf8');
-                if (logger) logger.info(`[PD:EvolutionWorker] Wrote diagnostician task to HEARTBEAT.md for task ${highestScoreTask.id}`);
-
-                // HEARTBEAT write succeeded, now mark task as in_progress
-                highestScoreTask.task = taskDescription;
-                highestScoreTask.status = 'in_progress';
-                highestScoreTask.started_at = nowIso;
-                delete highestScoreTask.completed_at;
-                // Use placeholder instead of deleting - allows subagent_ended hook to match
-                // This fixes task_outcomes being empty for HEARTBEAT-triggered diagnostician runs
-                highestScoreTask.assigned_session_key = `heartbeat:diagnostician:${highestScoreTask.id}`;
-                queueChanged = true;
-
-                // Log to EvolutionLogger
-                evoLogger.logStarted({
-                    traceId: highestScoreTask.traceId || highestScoreTask.id,
-                    taskId: highestScoreTask.id,
-                });
-
-                // Update evolution_tasks table
-                wctx.trajectory?.updateEvolutionTask?.(highestScoreTask.id, {
-                    status: 'in_progress',
-                    startedAt: nowIso,
-                });
-
-                if (eventLog) {
-                    eventLog.recordEvolutionTask({
-                        taskId: highestScoreTask.id,
-                        taskType: highestScoreTask.source,
-                        reason: highestScoreTask.reason
-                    });
-                }
-            } catch (heartbeatErr) {
-                // HEARTBEAT write failed - keep task as pending for next cycle retry
-                if (logger) logger.error(`[PD:EvolutionWorker] Failed to write HEARTBEAT.md for task ${highestScoreTask.id}: ${String(heartbeatErr)}. Task will remain pending for next cycle.`);
-                SystemLogger.log(wctx.workspaceDir, 'HEARTBEAT_WRITE_FAILED', `Task ${highestScoreTask.id} HEARTBEAT write failed: ${String(heartbeatErr)}`);
-            }
         }
 
         if (queueChanged) {
