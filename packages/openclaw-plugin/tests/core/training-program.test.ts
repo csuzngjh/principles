@@ -444,8 +444,9 @@ describe('training-program', () => {
     it('dry-run does not require trainer scripts to exist', async () => {
       const spec = createDryRunSpec();
       // Override scriptsDir to a non-existent path — dry-run should still succeed
-      // (dry-run backend bypasses script existence check)
-      const result = await executeTrainer(spec, '/non/existent/path');
+      // (dry-run backend bypasses script existence check).
+      // Use os.tmpdir() for cross-platform compatibility (Windows disallows mkdir at '/').
+      const result = await executeTrainer(spec, path.join(os.tmpdir(), 'fake-scripts'));
 
       expect(result.status).toBe('dry_run');
     });
