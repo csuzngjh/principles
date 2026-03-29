@@ -592,7 +592,7 @@ REQUIRED ACTION:
     prependContext = activeEvolutionTaskPrompt + prependContext;
   }
 
-  // 鈺愨晲鈺?4. Empathy Observer Spawn (async sidecar) 鈺愨晲鈺?
+  // ─────────────────────────────────────────────────4. Empathy Observer Spawn (async sidecar)
   // Skip if this is a subagent session or if the message indicates agent-to-agent communication
   const latestUserMessage = extractLatestUserMessage(event.messages);
   const isAgentToAgent = latestUserMessage.includes('sourceSession=agent:') || sessionId?.includes(':subagent:') === true;

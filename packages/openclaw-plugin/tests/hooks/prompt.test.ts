@@ -1174,49 +1174,49 @@ describe('Prompt Context Injection Hook', () => {
       expect(result?.appendSystemContext).not.toContain('Focus Content');
     });
 
-    it('projectFocus: summary 鈫?娉ㄥ叆鏅鸿兘鎽樿 project_context in appendSystemContext', async () => {
-      // 浣跨敤缁撴瀯鍖栫殑 CURRENT_FOCUS 鍐呭
+    it('projectFocus: summary → 注入智能摘要的 project_context in appendSystemContext', async () => {
+      // 使用结构化的 CURRENT_FOCUS 内容
       const structuredContent = `# 馃幆 CURRENT_FOCUS
 
 > **鐗堟湰**: v1 | **鐘舵€?*: EXECUTING | **鏇存柊**: 2026-03-16
 
 ---
 
-## 馃搷 鐘舵€佸揩鐓?
+## 🚀 状态快照
 
-| 缁村害 | 鍊?|
+| 类别 | 值 |
 |------|-----|
-| 褰撳墠闃舵 | Phase 2 |
-| 淇′换鍒嗘暟 | 85/100 |
+| 当前阶段 | Phase 2 |
+| 交换分数 | 85/100 |
 
 ---
 
-## 馃攧 褰撳墠浠诲姟
+## 🎯 当前任务
 
-### P0锛堥樆濉?绱ф€ワ級
-- [ ] 鏃?
+### P0（阻碍，正常）
+- [ ] 暂无
 
-### P1锛堣繘琛屼腑锛?
-- [x] 浠诲姟A
-- [ ] 浠诲姟B 鈫?褰撳墠
-
----
-
-## 鉃★笍 涓嬩竴姝?
-
-1. 瀹屾垚浠诲姟B
-2. 寮€濮嬩换鍔
+### P1（进行中）
+- [x] 任务A
+- [ ] 任务B → 当前
 
 ---
 
-## 馃搸 鍙傝€?
+## ➡️ 下一阶段
 
-璇︾粏璁″垝: memory/tasks/PLAN.md`;
+1. 完成任务B
+2. 开始新任务
+
+---
+
+## 📚 参考
+
+详细计划: memory/tasks/PLAN.md`;
 
       vi.mocked(fs.existsSync).mockImplementation((p) => {
         if (p.toString().includes('PROFILE.json')) return true;
         if (p.toString().includes('CURRENT_FOCUS.md')) return true;
-        if (p.toString().includes('.history')) return false; // 鏃犲巻鍙茬増鏈?
+        if (p.toString().includes('.history')) return false; // 无历史版本
         return false;
       });
       vi.mocked(fs.readFileSync).mockImplementation((p) => {
@@ -1237,38 +1237,38 @@ describe('Prompt Context Injection Hook', () => {
 
       // summary mode uses intelligent extraction
       expect(result?.appendSystemContext).toContain('<project_context>');
-      // 鏅鸿兘鎽樿浼樺厛鎻愬彇鍏抽敭绔犺妭
+      // 智能摘要优先提取关键段落
       expect(result?.appendSystemContext).toContain('Phase 2'); // key section preserved
     });
 
-    it('projectFocus: full 鈫?娉ㄥ叆瀹屾暣 project_context + 鍘嗗彶鐗堟湰 in appendSystemContext', async () => {
+    it('projectFocus: full → 注入完整 project_context + 历史版本 in appendSystemContext', async () => {
       const currentContent = `# 馃幆 CURRENT_FOCUS
 
 > **鐗堟湰**: v2 | **鐘舵€?*: EXECUTING | **鏇存柊**: 2026-03-16
 
-## 馃搷 鐘舵€佸揩鐓?
+## 🚀 状态快照
 
-| 缁村害 | 鍊?|
+| 类别 | 值 |
 |------|-----|
-| 褰撳墠闃舵 | Phase 2 |
+| 当前阶段 | Phase 2 |
 
-## 鉃★笍 涓嬩竴姝?
+## ➡️ 下一阶段
 
-1. 褰撳墠浠诲姟`;
+1. 当前任务`;
 
       const historyContent = `# 馃幆 CURRENT_FOCUS
 
 > **鐗堟湰**: v1 | **鐘舵€?*: INIT | **鏇存柊**: 2026-03-15
 
-## 馃搷 鐘舵€佸揩鐓?
+## 🚀 状态快照
 
-| 缁村害 | 鍊?|
+| 类别 | 值 |
 |------|-----|
-| 褰撳墠闃舵 | Phase 1 |
+| 当前阶段 | Phase 1 |
 
-## 鉃★笍 涓嬩竴姝?
+## ➡️ 下一阶段
 
-1. 鍘嗗彶浠诲姟`;
+1. 历史任务`;
 
       vi.mocked(fs.existsSync).mockImplementation((p) => {
         const pathStr = p.toString();
@@ -1312,7 +1312,7 @@ describe('Prompt Context Injection Hook', () => {
 
       expect(result?.appendSystemContext).toContain('<project_context>');
       // Full mode includes current version
-      expect(result?.appendSystemContext).toContain('褰撳墠浠诲姟');
+      expect(result?.appendSystemContext).toContain('当前任务');
     });
   });
 
