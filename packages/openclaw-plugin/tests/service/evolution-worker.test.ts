@@ -24,6 +24,7 @@ vi.mock('../../src/core/dictionary-service');
 vi.mock('../../src/core/session-tracker', () => ({
     initPersistence: vi.fn(),
     flushAllSessions: vi.fn(),
+    listSessions: vi.fn(() => []), // Returns empty sessions for idle detection
 }));
 vi.mock('../../src/core/event-log', () => ({
     EventLogService: {

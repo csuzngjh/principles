@@ -1,5 +1,54 @@
 # State
 
+## 2026-03-27 Nocturnal Reflection Program
+
+**Initiative:** Sleep-Mode Reflection System
+
+- Review owner: Codex acted as design reviewer / phase gatekeeper
+- Canonical docs:
+  - `docs/design/sleep-mode-reflection-system-executable-architecture-2026-03-27.md`
+  - `docs/design/sleep-mode-reflection-system-implementation-checklist-2026-03-27.md`
+- Current reviewed status:
+  - Phase 0: Passed
+  - Phase 1: Passed
+  - Phase 2: Passed
+  - Phase 3: Passed
+  - Phase 4: Passed
+  - Phase 5: Passed
+  - Phase 6: Passed
+- Closure notes through Phase 6:
+  - Phase 2:
+    - queue v2/runtime separation for `pain_diagnosis` vs `sleep_reflection` is in place
+    - nocturnal idle/runtime path is wired into worker lifecycle
+    - evaluability tracking and detector metadata gates are in place
+    - nocturnal trajectory extractor, selector, arbiter, executability validator, and service are implemented
+    - worker integration for background `sleep_reflection` is implemented and reviewed
+  - Phase 3:
+    - nocturnal dataset lineage store is in place
+    - ORPO export path is separated from legacy correction export
+    - human review gate is required before training export
+  - Phase 4:
+    - offline benchmark contract and scorer adapter contract are in place
+    - training run / checkpoint / eval lineage registry is in place
+  - Phase 5:
+    - deployment registry exists for `local-reader` and `local-editor`
+    - routing policy is explainable, fail-closed, and bounded-scope
+  - Phase 6:
+    - Trinity chain is implemented and review-passed
+    - deterministic candidate scoring / tournament selection is implemented
+    - adaptive threshold updates are wired into key failure paths
+    - reviewed subset comparison computes quality from current Trinity outputs
+- Phase 7 objective:
+  - complete the first externalized training cycle and controlled rollout to bounded local workers
+- Remaining phases after current checkpoint:
+  - Phase 7: Training and Controlled Rollout
+- Next recommended action:
+  - prepare and execute the Phase 7 task pack
+  - keep training execution external to the plugin
+  - preserve controlled rollout, explicit model-family binding, and rollback-first deployment
+  - use the formal Phase 7 specs under `docs/spec/`
+  - keep Phase 7 ORPO-first and backend-pluggable
+
 **Project:** Principles Disciple — Phase 3B/3C Complete
 **Updated:** 2026-03-26 15:57 UTC
 
