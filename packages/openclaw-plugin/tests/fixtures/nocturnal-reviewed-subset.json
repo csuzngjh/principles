@@ -1,0 +1,183 @@
+{
+  "$schema": "nocturnal-reviewed-subset-v1",
+  "description": "Reviewed subset fixture for comparing single-reflector vs Trinity quality",
+  "version": "1.0.0",
+  "createdAt": "2026-03-28T00:00:00.000Z",
+  "testCases": [
+    {
+      "caseId": "case-001",
+      "principleId": "T-01",
+      "principleDescription": "Map Before Territory: Always survey the existing structure before making changes",
+      "sessionId": "session-case-001",
+      "signalType": "failure",
+      "signalContext": "Agent edited src/main.ts without reading it first, causing a merge conflict",
+      "singleReflectorOutput": {
+        "artifactId": "single-001-artifact",
+        "sessionId": "session-case-001",
+        "principleId": "T-01",
+        "sourceSnapshotRef": "snapshot-case-001",
+        "badDecision": "Edited src/main.ts without first reading its contents, leading to a merge conflict",
+        "betterDecision": "Read src/main.ts to understand its current structure before making edits",
+        "rationale": "Surveying the existing territory prevents conflicts and ensures edits integrate properly",
+        "createdAt": "2026-03-28T00:01:00.000Z"
+      },
+      "trinityOutput": {
+        "selectedCandidateIndex": 0,
+        "badDecision": "Edited src/main.ts without first reading its contents, leading to a merge conflict with parallel changes",
+        "betterDecision": "Before editing, read src/main.ts to understand its current structure and identify any conflicting sections",
+        "rationale": "Surveying the existing territory before making changes prevents conflicts and ensures the edit integrates properly with the current implementation",
+        "sessionId": "session-case-001",
+        "principleId": "T-01",
+        "sourceSnapshotRef": "snapshot-case-001",
+        "telemetry": {
+          "chainMode": "trinity",
+          "dreamerPassed": true,
+          "philosopherPassed": true,
+          "scribePassed": true,
+          "candidateCount": 3,
+          "selectedCandidateIndex": 0,
+          "stageFailures": []
+        }
+      },
+      "qualityScores": {
+        "singleReflector": {
+          "specificity": 0.85,
+          "principleAlignment": 0.90,
+          "actionability": 0.88,
+          "rationaleQuality": 0.85,
+          "overall": 0.87
+        },
+        "trinity": {
+          "specificity": 0.95,
+          "principleAlignment": 0.95,
+          "actionability": 0.92,
+          "rationaleQuality": 0.95,
+          "overall": 0.94
+        }
+      },
+      "trinityWins": true,
+      "notes": "Trinity produces more specific badDecision and betterDecision with better rationale"
+    },
+    {
+      "caseId": "case-002",
+      "principleId": "T-08",
+      "principleDescription": "Pain as Signal: Treat failures and errors as signals to pause and reflect",
+      "sessionId": "session-case-002",
+      "signalType": "pain",
+      "signalContext": "Agent retries failing bash command 3 times without any diagnosis",
+      "singleReflectorOutput": {
+        "artifactId": "single-002-artifact",
+        "sessionId": "session-case-002",
+        "principleId": "T-08",
+        "sourceSnapshotRef": "snapshot-case-002",
+        "badDecision": "Retried failing operation without diagnosing",
+        "betterDecision": "Diagnose before retrying",
+        "rationale": "Treating failures as signals prevents repeated failures",
+        "createdAt": "2026-03-28T00:02:00.000Z"
+      },
+      "trinityOutput": {
+        "selectedCandidateIndex": 0,
+        "badDecision": "After bash command failed with 'command not found', immediately retried the exact same command without pausing to diagnose the root cause",
+        "betterDecision": "When the bash command fails, pause to check if the tool is installed, verify the path, or consult documentation before retrying",
+        "rationale": "Treating each failure as a signal to diagnose rather than blindly retry prevents repeated failures and respects the cost of each action attempt",
+        "sessionId": "session-case-002",
+        "principleId": "T-08",
+        "sourceSnapshotRef": "snapshot-case-002",
+        "telemetry": {
+          "chainMode": "trinity",
+          "dreamerPassed": true,
+          "philosopherPassed": true,
+          "scribePassed": true,
+          "candidateCount": 2,
+          "selectedCandidateIndex": 0,
+          "stageFailures": []
+        }
+      },
+      "qualityScores": {
+        "singleReflector": {
+          "specificity": 0.70,
+          "principleAlignment": 0.85,
+          "actionability": 0.75,
+          "rationaleQuality": 0.80,
+          "overall": 0.77
+        },
+        "trinity": {
+          "specificity": 0.95,
+          "principleAlignment": 0.95,
+          "actionability": 0.90,
+          "rationaleQuality": 0.95,
+          "overall": 0.94
+        }
+      },
+      "trinityWins": true,
+      "notes": "Single-reflector is generic; Trinity provides specific diagnosis steps"
+    },
+    {
+      "caseId": "case-003",
+      "principleId": "T-03",
+      "principleDescription": "Evidence Over Intuition: Ground decisions in observable evidence",
+      "sessionId": "session-case-003",
+      "signalType": "gate_block",
+      "signalContext": "Agent proceeded with a tool call despite receiving a gate block",
+      "singleReflectorOutput": {
+        "artifactId": "single-003-artifact",
+        "sessionId": "session-case-003",
+        "principleId": "T-03",
+        "sourceSnapshotRef": "snapshot-case-003",
+        "badDecision": "Proceeded despite gate block",
+        "betterDecision": "Respect gate blocks",
+        "rationale": "Gate blocks are safety mechanisms",
+        "createdAt": "2026-03-28T00:03:00.000Z"
+      },
+      "trinityOutput": {
+        "selectedCandidateIndex": 0,
+        "badDecision": "Proceeded with a tool call despite receiving a gate block, bypassing the safety check",
+        "betterDecision": "Read the blocked operation documentation and obtain proper authorization before retrying the operation",
+        "rationale": "Respecting gate blocks prevents unintended system modifications and ensures alignment with operational constraints",
+        "sessionId": "session-case-003",
+        "principleId": "T-03",
+        "sourceSnapshotRef": "snapshot-case-003",
+        "telemetry": {
+          "chainMode": "trinity",
+          "dreamerPassed": true,
+          "philosopherPassed": true,
+          "scribePassed": true,
+          "candidateCount": 3,
+          "selectedCandidateIndex": 0,
+          "stageFailures": []
+        }
+      },
+      "qualityScores": {
+        "singleReflector": {
+          "specificity": 0.60,
+          "principleAlignment": 0.75,
+          "actionability": 0.65,
+          "rationaleQuality": 0.70,
+          "overall": 0.68
+        },
+        "trinity": {
+          "specificity": 0.90,
+          "principleAlignment": 0.95,
+          "actionability": 0.88,
+          "rationaleQuality": 0.92,
+          "overall": 0.91
+        }
+      },
+      "trinityWins": true,
+      "notes": "Single-reflector is too generic; Trinity is much more specific"
+    }
+  ],
+  "summary": {
+    "totalCases": 3,
+    "trinityWins": 3,
+    "singleReflectorWins": 0,
+    "averageDelta": {
+      "specificity": 0.23,
+      "principleAlignment": 0.10,
+      "actionability": 0.17,
+      "rationaleQuality": 0.17,
+      "overall": 0.19
+    },
+    "conclusion": "Trinity consistently outperforms single-reflector on reviewed subset"
+  }
+}

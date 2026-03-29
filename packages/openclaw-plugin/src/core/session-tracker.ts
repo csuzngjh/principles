@@ -427,6 +427,21 @@ export function clearSession(sessionId: string): void {
     sessions.delete(sessionId);
 }
 
+/**
+ * Seed a session directly into SessionTracker.sessions for testing.
+ * This bypasses the normal tool-call flow to set up test data for
+ * checkWorkspaceIdle without requiring full integration test setup.
+ *
+ * @param sessionId - Session ID
+ * @param workspaceDir - Workspace directory (optional, for filtering)
+ * @param lastActivityAt - Unix timestamp in ms (default: now)
+ */
+export function seedSessionForTest(sessionId: string, workspaceDir?: string, lastActivityAt?: number): void {
+    const state = getOrCreateSession(sessionId, workspaceDir);
+    state.lastActivityAt = lastActivityAt ?? Date.now();
+    state.lastControlActivityAt = state.lastActivityAt;
+}
+
 // Memory cleanup for abandoned sessions (older than 2 hours)
 export function garbageCollectSessions(): void {
     const twoHoursAgo = Date.now() - 2 * 60 * 60 * 1000;

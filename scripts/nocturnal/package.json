@@ -1,0 +1,13 @@
+{
+  "name": "@principles/nocturnal-benchmark",
+  "version": "0.1.0",
+  "description": "Nocturnal offline evaluation benchmark tools",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.0"
+  }
+}

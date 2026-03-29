@@ -1,0 +1,33 @@
+{
+    "benchmarkExportId":  "bench-1",
+    "datasetFingerprint":  "fp1",
+    "targetModelFamily":  "qwen2.5-7b-reader",
+    "datasetExportId":  "export-1",
+    "hardwareTier":  "cpu-experimental",
+    "backend":  "dry-run",
+    "datasetExportPath":  "D:/Code/principles/does-not-matter.jsonl",
+    "hyperparameters":  {
+                            "loraAlpha":  32,
+                            "gradientAccumulation":  8,
+                            "loraRank":  16,
+                            "learningRate":  0.0003,
+                            "warmupRatio":  0.1,
+                            "maxSteps":  10,
+                            "maxSeqLength":  512,
+                            "batchSize":  2,
+                            "loraDropout":  0.05
+                        },
+    "budget":  {
+                   "maxWallClockMinutes":  1
+               },
+    "trainingMode":  "orpo",
+    "codeHash":  "code1",
+    "outputDir":  "D:/Code/principles/.tmp-trainer",
+    "targetWorkerProfile":  "local-reader",
+    "experimentId":  "exp-test",
+    "expectedArtifact":  {
+                             "checkpointName":  "ckpt",
+                             "adapterFormat":  "peft-adapter"
+                         },
+    "configFingerprint":  "cfg1"
+}

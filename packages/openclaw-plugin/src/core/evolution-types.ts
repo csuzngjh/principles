@@ -221,6 +221,70 @@ export interface TierPromotionEvent {
 
 export type PrincipleStatus = 'candidate' | 'probation' | 'active' | 'deprecated';
 
+/**
+ * Evaluability classification — determines whether a P_xxx principle can enter
+ * automatic nocturnal targeting.
+ *
+ * - deterministic:    Machine-checkable via deterministic rules/tool detectors
+ * - weak_heuristic:  Checkable via heuristic signals, may have false positives
+ * - manual_only:     No machine-checkable detector — stays in prompts only
+ */
+export type PrincipleEvaluatorLevel = 'deterministic' | 'weak_heuristic' | 'manual_only';
+
+/**
+ * Shared alias for PrincipleEvaluatorLevel — used by modules that reference
+ * the same evaluability classification without direct coupling to evolution-types.
+ * @deprecated Use PrincipleEvaluatorLevel directly. This alias exists for
+ * backwards compatibility with principle-training-state.ts.
+ */
+export type Evaluability = PrincipleEvaluatorLevel;
+
+/**
+ * Structured detector metadata for P_xxx principles.
+ * Allows the principle to enter automatic nocturnal targeting.
+ *
+ * If any required field is missing, the principle defaults to 'manual_only'.
+ */
+export interface PrincipleDetectorSpec {
+  /** Topic/scenario tags where this detector applies */
+  applicabilityTags: string[];
+  /** Evidence that the principle was followed */
+  positiveSignals: string[];
+  /** Evidence that the principle was violated */
+  negativeSignals: string[];
+  /** Tool call sequences that indicate the principle is relevant */
+  toolSequenceHints: string[][];
+  /** Confidence in the detector's signal quality */
+  confidence: 'high' | 'medium' | 'low';
+}
+
+/**
+ * Validates that a detector metadata object has all required fields with non-empty values.
+ * Used as defense-in-depth before accepting detectorMetadata for auto-trainable principles.
+ */
+export function isCompleteDetectorMetadata(
+  meta: unknown
+): meta is PrincipleDetectorSpec {
+  if (!meta || typeof meta !== 'object') return false;
+  const m = meta as Record<string, unknown>;
+  const VALID_CONFIDENCE = ['high', 'medium', 'low'] as const;
+  if (
+    typeof m.confidence !== 'string' ||
+    !(VALID_CONFIDENCE as readonly string[]).includes(m.confidence)
+  ) {
+    return false;
+  }
+  const nonEmptyStringArray = (arr: unknown): boolean =>
+    Array.isArray(arr) &&
+    arr.length > 0 &&
+    arr.every((s) => typeof s === 'string' && s.length > 0);
+  return (
+    nonEmptyStringArray(m.applicabilityTags) &&
+    nonEmptyStringArray(m.positiveSignals) &&
+    nonEmptyStringArray(m.negativeSignals)
+  );
+}
+
 export interface Principle {
   id: string;
   version: number;
@@ -244,6 +308,18 @@ export interface Principle {
   createdAt: string;
   activatedAt?: string;
   deprecatedAt?: string;
+  /**
+   * Evaluability classification. Defaults to 'manual_only' if not set.
+   * Principles with 'manual_only' evaluability cannot enter automatic
+   * nocturnal targeting.
+   */
+  evaluability: PrincipleEvaluatorLevel;
+  /**
+   * Structured detector metadata. If present and valid, the principle
+   * may be auto-trainable (deterministic / weak_heuristic).
+   * Absent or malformed = 'manual_only' evaluability.
+   */
+  detectorMetadata?: PrincipleDetectorSpec;
 }
 
 export type EvolutionLoopEventType =
@@ -273,6 +349,12 @@ export interface CandidateCreatedData {
   trigger: string;
   action: string;
   status: 'candidate';
+  /** Pain type that generated this candidate — preserved on replay */
+  painType?: 'tool_failure' | 'subagent_error' | 'user_frustration';
+  /** Optional evaluability — defaults to 'manual_only' if omitted */
+  evaluability?: PrincipleEvaluatorLevel;
+  /** Optional detector metadata — absent = manual_only */
+  detectorMetadata?: PrincipleDetectorSpec;
 }
 
 export interface PrinciplePromotedData {
