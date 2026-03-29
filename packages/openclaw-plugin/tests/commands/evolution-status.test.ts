@@ -189,10 +189,9 @@ describe('evolution commands', () => {
       sessionId: 's1',
     } as any);
 
-    // Verify Phase 3 eligibility based on queue and trust, not directive
+    // Verify Phase 3 eligibility based on queue only, not directive
     expect(result.text).toContain('Phase 3: ready yes');
     expect(result.text).toContain('queueTruthReady yes');
-    expect(result.text).toContain('trustInputReady yes');
     expect(result.text).toContain('eligible 2');
 
     // Verify directive is labeled as compatibility-only

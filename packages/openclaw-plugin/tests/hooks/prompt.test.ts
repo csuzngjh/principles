@@ -145,12 +145,6 @@ describe('getDiagnosticianModel', () => {
 describe('Prompt Context Injection Hook', () => {
   const workspaceDir = '/mock/workspace';
   
-  const mockTrust = {
-    getScorecard: vi.fn().mockReturnValue({ trust_score: 85 }),
-    getScore: vi.fn().mockReturnValue(85),
-    getStage: vi.fn().mockReturnValue(4),
-  };
-
   const mockHygiene = {
     getStats: vi.fn().mockReturnValue({ writes: 0, streak: 0, lastWrite: null }),
     recordWrite: vi.fn(),
@@ -164,7 +158,6 @@ describe('Prompt Context Injection Hook', () => {
   const mockWctx = {
     workspaceDir,
     stateDir: '/mock/state',
-    trust: mockTrust,
     hygiene: mockHygiene,
     config: mockConfig,
     trajectory: {
@@ -208,10 +201,8 @@ describe('Prompt Context Injection Hook', () => {
     const result = await handleBeforePromptBuild({} as any, { workspaceDir, trigger: 'user' } as any);
     
     expect(result).toBeDefined();
-    // trustScore stays in prependContext's <runtime_state>
     expect(result?.prependContext).toContain('<system_override:runtime_constraints>');
-    expect(result?.prependContext).toContain('Trust Score: 85/100');
-    expect(result?.prependContext).toContain('Stage 4');  });
+  });
 
   it('records latest user turn and flags explicit corrections', async () => {
   vi.mocked(fs.existsSync).mockReturnValue(false);
@@ -600,7 +591,6 @@ describe('Prompt Context Injection Hook', () => {
     expect(result?.prependContext).toContain('sessions_spawn(task="使用 pd-diagnostician skill');
     expect(result?.prependContext).not.toContain('Reply with "[EVOLUTION_ACK]" only');
     expect(result?.prependContext).toContain('<system_override:runtime_constraints>');
-    expect(result?.prependContext).toContain('Trust Score:');
   });
 
   it('should appendSystemContext with THINKING_OS.md if it exists and enabled', async () => {
@@ -636,8 +626,6 @@ describe('Prompt Context Injection Hook', () => {
     const result = await handleBeforePromptBuild({} as any, { workspaceDir, trigger: 'user' } as any);
 
     expect(result?.appendSystemContext).not.toContain('<core_principles>');
-    // Trust score is now in prependContext's <runtime_state>
-    expect(result?.prependContext).toContain('Trust Score:');
   });
 
   it('should handle PRINCIPLES.md read error gracefully', async () => {
@@ -801,7 +789,6 @@ describe('Prompt Context Injection Hook', () => {
     // prependContext: Only short dynamic directives
     const dynamicContext = result?.prependContext ?? '';
     expect(dynamicContext).toContain('<system_override:runtime_constraints>');
-    expect(dynamicContext).toContain('Trust Score:');
     // project_context and reflection_log should NOT be in prependContext
     expect(dynamicContext).not.toContain('<project_context>');
     expect(dynamicContext).not.toContain('<reflection_log>');
@@ -940,7 +927,6 @@ describe('Prompt Context Injection Hook', () => {
       } as any);
 
       expect(result?.prependContext).toContain('<system_override:runtime_constraints>');
-      expect(result?.prependContext).toContain('Trust Score:');
     });
   });
 
@@ -1140,107 +1126,7 @@ describe('Prompt Context Injection Hook', () => {
       expect(result?.appendSystemContext).toContain('Thinking OS Content');
     });
 
-    it('omits trust score when trustScore is disabled', async () => {
-      vi.mocked(fs.existsSync).mockImplementation((p) => {
-        if (p.toString().includes('PROFILE.json')) return true;
-        return false;
-      });
-      vi.mocked(fs.readFileSync).mockImplementation((p) => {
-        if (p.toString().includes('PROFILE.json')) {
-          return JSON.stringify({ contextInjection: { trustScore: false } });
-        }
-        return '';
-      });
-
-      const result = await handleBeforePromptBuild({} as any, {
-        workspaceDir,
-        trigger: 'user',
-        sessionId: 'agent:main:123'
-      } as any);
-
-      expect(result?.prependContext).not.toContain('<runtime_state>');
-      expect(result?.prependContext).not.toContain('Trust:');
-    });
-
-    it('trustScore: true 鈫?娉ㄥ叆淇′换鍒嗘暟', async () => {
-      vi.mocked(fs.existsSync).mockImplementation((p) => {
-        if (p.toString().includes('PROFILE.json')) return true;
-        return false;
-      });
-      vi.mocked(fs.readFileSync).mockImplementation((p) => {
-        if (p.toString().includes('PROFILE.json')) {
-          return JSON.stringify({ contextInjection: { trustScore: true } });
-        }
-        return '';
-      });
-
-      const result = await handleBeforePromptBuild({} as any, {
-        workspaceDir,
-        trigger: 'user',
-        sessionId: 'agent:main:123'
-      } as any);
-
-      expect(result?.prependContext).toContain('<system_override:runtime_constraints>');
-      expect(result?.prependContext).toContain('Trust Score:');
-    });
-
-    it('omits reflection log when reflectionLog is disabled', async () => {
-      vi.mocked(fs.existsSync).mockImplementation((p) => {
-        if (p.toString().includes('PROFILE.json')) return true;
-        if (p.toString().includes('reflection-log.md')) return true;
-        return false;
-      });
-      vi.mocked(fs.readFileSync).mockImplementation((p) => {
-        if (p.toString().includes('PROFILE.json')) {
-          return JSON.stringify({ contextInjection: { reflectionLog: false } });
-        }
-        if (p.toString().includes('reflection-log.md')) {
-          return 'Reflection Log Content';
-        }
-        return '';
-      });
-
-      const result = await handleBeforePromptBuild({} as any, {
-        workspaceDir,
-        trigger: 'user',
-        sessionId: 'agent:main:123'
-      } as any);
-
-      // reflection_log is now in appendSystemContext
-      expect(result?.appendSystemContext).not.toContain('<reflection_log>');
-      expect(result?.appendSystemContext).not.toContain('Reflection Log Content');
-    });
-
-    it('reflectionLog: true 鈫?娉ㄥ叆鍙嶆€濇棩蹇?in appendSystemContext', async () => {
-      vi.mocked(fs.existsSync).mockImplementation((p) => {
-        if (p.toString().includes('PROFILE.json')) return true;
-        if (p.toString().includes('reflection-log.md')) return true;
-        return false;
-      });
-      vi.mocked(fs.readFileSync).mockImplementation((p) => {
-        if (p.toString().includes('PROFILE.json')) {
-          return JSON.stringify({ contextInjection: { reflectionLog: true } });
-        }
-        if (p.toString().includes('reflection-log.md')) {
-          return 'Reflection Log Content';
-        }
-        return '';
-      });
-
-      const result = await handleBeforePromptBuild({} as any, {
-        workspaceDir,
-        trigger: 'user',
-        sessionId: 'agent:main:123'
-      } as any);
-
-      // reflection_log is now in appendSystemContext (WebUI-hidden, Prompt Cacheable)
-      expect(result?.appendSystemContext).toContain('<reflection_log>');
-      expect(result?.appendSystemContext).toContain('Reflection Log Content');
-      // Should NOT be in prependContext
-      expect(result?.prependContext).not.toContain('<reflection_log>');
-    });
-
-    it('澶氶」閰嶇疆鍚屾椂鐢熸晥: thinkingOs=false, trustScore=false, reflectionLog=false', async () => {
+    it('澶氶」閰嶇疆鍚屾椂鐢熸晥: thinkingOs=false, reflectionLog=false', async () => {
       vi.mocked(fs.existsSync).mockImplementation((p) => {
         if (p.toString().includes('PROFILE.json')) return true;
         if (p.toString().includes('THINKING_OS.md')) return true;
@@ -1252,7 +1138,6 @@ describe('Prompt Context Injection Hook', () => {
           return JSON.stringify({ 
             contextInjection: { 
               thinkingOs: false, 
-              trustScore: false, 
               reflectionLog: false 
             } 
           });
@@ -1466,7 +1351,7 @@ describe('Prompt Context Injection Hook', () => {
 
       // prependContext should only contain short dynamic content
       const prependLength = result?.prependContext?.length ?? 0;
-      // trustScore is short (< 500 chars), evolutionDirective is also short
+      // evolutionDirective is short
       expect(prependLength).toBeLessThan(2000);
       
       // Long content should be in appendSystemContext

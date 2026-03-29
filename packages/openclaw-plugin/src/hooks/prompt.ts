@@ -493,36 +493,7 @@ You are a **self-evolving AI agent** powered by Principles Disciple.
 - If you need self-inspection, prioritize the worker entry pointed by PathResolver key: EVOLUTION_WORKER
 `;
 
-  // 闁崇儤鍔忛弲鏌ュ煛?2. Trust Score (configurable, dynamic) - stays in prependContext 闁崇儤鍔忛弲鏌ュ煛?
-  // This is short (< 200 chars) and provides critical runtime state
-  if (contextConfig.trustScore) {
-    const trustScore = wctx.trust.getScore();
-    const stage = wctx.trust.getStage();
-    const hygiene = wctx.hygiene.getStats();
-
-    const safeScore = Math.max(0, Math.min(100, Number(trustScore) || 0));
-    const safeStage = Math.max(1, Math.min(4, Number(stage) || 1));
-
-    let trustContext = `Trust Score: ${safeScore}/100 (Stage ${safeStage})\n`;
-    trustContext += `Hygiene: ${hygiene.persistenceCount} persists today\n`;
-
-    // Stage-based restrictions
-    if (safeStage === 1) {
-      trustContext += `ACTION CONSTRAINT: You are in READ-ONLY MODE. You MUST use sessions_spawn with the pd-diagnostician skill to recover trust before writing files.\n`;
-    } else if (safeStage === 2) {
-      trustContext += `ACTION CONSTRAINT: LIMITED MODE. You are restricted to a maximum of 50 lines per edit.\n`;
-    } else if (safeStage === 3 || safeStage === 4) {
-      trustContext += `ACTION CONSTRAINT: If your task involves modifying risk paths, you MUST verify that a READY plan exists in PLAN.md before taking action.\n`;
-    }
-
-    if (hygiene.persistenceCount === 0 && trigger === 'user') {
-      trustContext += `\n闁宠法濯寸粭?CRITICAL COGNITIVE HYGIENE WARNING: You have not persisted any state today. Before ending this turn, you MUST use a tool to write a summary to memory/.scratchpad.md or update PLAN.md. Failure to do so will result in Goldfish Memory.\n`;
-    }
-
-    prependContext += `<system_override:runtime_constraints>\n${trustContext.trim()}\n</system_override:runtime_constraints>\n`;
-  }
-
-  // 闁崇儤鍔忛弲鏌ュ煛?3. Evolution Directive (always on, highest priority) - stays in prependContext 闁崇儤鍔忛弲鏌ュ煛?
+  // 闁崇儤鍔忛弲鏌ュ煛?2. Evolution Directive (always on, highest priority) - stays in prependContext 闁崇儤鍔忛弲鏌ュ煛?
   // NOTE: active evolution task prompt is injected from EVOLUTION_QUEUE for active tasks
   // NOT used for Phase 3 eligibility decisions
   // EVOLUTION_DIRECTIVE.json is a compatibility-only display artifact
