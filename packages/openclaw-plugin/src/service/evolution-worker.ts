@@ -559,11 +559,27 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
         const config = wctx.config;
         const timeout = config.get('intervals.task_timeout_ms') || (60 * 60 * 1000); // Default 1 hour
 
-        // V2: Check for failed tasks that exceeded max retries
-        for (const task of queue.filter(t => t.status === 'in_progress')) {
-            if (task.taskKind === 'sleep_reflection') {
-                // sleep_reflection tasks are processed differently - skip HEARTBEAT logic
-                continue;
+        // V2: Recover stuck in_progress sleep_reflection tasks.
+        // If the worker crashes or the result write-back fails after Phase 1 claimed
+        // the task, it stays in_progress indefinitely. Detect via timeout and mark
+        // as failed so a fresh task can be enqueued on the next idle cycle.
+        for (const task of queue.filter(t => t.status === 'in_progress' && t.taskKind === 'sleep_reflection')) {
+            const startedAt = new Date(task.started_at || task.timestamp);
+            const age = Date.now() - startedAt.getTime();
+            if (age > timeout) {
+                task.status = 'failed';
+                task.completed_at = new Date().toISOString();
+                task.resolution = 'failed_max_retries';
+                task.lastError = `sleep_reflection timed out after ${Math.round(timeout / 60000)} minutes`;
+                task.retryCount = (task.retryCount ?? 0) + 1;
+                queueChanged = true;
+                logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${task.id} timed out after ${Math.round(age / 60000)} minutes, marking as failed`);
+                evoLogger.logCompleted({
+                    traceId: task.traceId || task.id,
+                    taskId: task.id,
+                    resolution: 'manual',
+                    durationMs: age,
+                });
             }
         }
 

@@ -370,6 +370,80 @@ describe('promotion-gate', () => {
       expect(p2.state).toBe('shadow_ready');
       expect(p2.shadowStartedAt).toBe(originalShadowStartedAt);
     });
+
+    it('resets shadowStartedAt when re-entering shadow after demotion to candidate_only', () => {
+      const { checkpointId } = createCheckpointWithEval({
+        delta: 0.15,
+        verdict: 'pass',
+        candidateScore: 0.85,
+      });
+
+      // 1. Advance to shadow_ready — sets shadowStartedAt
+      const p1 = advancePromotion(stateDir, {
+        checkpointId,
+        targetProfile: 'local-reader',
+        baselineMetrics: DEFAULT_BASELINE_METRICS,
+        orchestratorReviewPassed: true,
+      });
+      expect(p1.state).toBe('shadow_ready');
+      expect(p1.shadowStartedAt).toBeDefined();
+      const originalShadowStartedAt = p1.shadowStartedAt;
+
+      // 2. Demote: advance WITHOUT review → candidate_only
+      const p2 = advancePromotion(stateDir, {
+        checkpointId,
+        targetProfile: 'local-reader',
+        baselineMetrics: DEFAULT_BASELINE_METRICS,
+        // No orchestratorReviewPassed → gate passes but stays candidate_only
+      });
+      expect(p2.state).toBe('candidate_only');
+
+      // 3. Re-enter shadow: advance WITH review → shadow_ready
+      const p3 = advancePromotion(stateDir, {
+        checkpointId,
+        targetProfile: 'local-reader',
+        baselineMetrics: DEFAULT_BASELINE_METRICS,
+        orchestratorReviewPassed: true,
+      });
+      expect(p3.state).toBe('shadow_ready');
+      // MUST reset shadowStartedAt — the checkpoint left the shadow path
+      expect(p3.shadowStartedAt).toBeDefined();
+      expect(p3.shadowStartedAt).not.toBe(originalShadowStartedAt);
+    });
+
+    it('resets shadowStartedAt when re-entering shadow after rejection', () => {
+      const { checkpointId } = createCheckpointWithEval({
+        delta: 0.15,
+        verdict: 'pass',
+        candidateScore: 0.85,
+      });
+
+      // 1. Advance to shadow_ready
+      const p1 = advancePromotion(stateDir, {
+        checkpointId,
+        targetProfile: 'local-reader',
+        baselineMetrics: DEFAULT_BASELINE_METRICS,
+        orchestratorReviewPassed: true,
+      });
+      expect(p1.state).toBe('shadow_ready');
+      const originalShadowStartedAt = p1.shadowStartedAt;
+
+      // 2. Reject
+      const p2 = rejectCheckpoint(stateDir, checkpointId, 'Shadow metrics regressed');
+      expect(p2.state).toBe('rejected');
+
+      // 3. Re-enter shadow: advance with review → shadow_ready
+      const p3 = advancePromotion(stateDir, {
+        checkpointId,
+        targetProfile: 'local-reader',
+        baselineMetrics: DEFAULT_BASELINE_METRICS,
+        orchestratorReviewPassed: true,
+      });
+      expect(p3.state).toBe('shadow_ready');
+      // MUST reset — checkpoint was rejected, this is a fresh shadow entry
+      expect(p3.shadowStartedAt).toBeDefined();
+      expect(p3.shadowStartedAt).not.toBe(originalShadowStartedAt);
+    });
   });
 
   // -------------------------------------------------------------------------
