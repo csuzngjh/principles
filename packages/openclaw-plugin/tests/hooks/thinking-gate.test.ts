@@ -17,6 +17,10 @@ vi.mock('../../src/core/workspace-context.js');
 vi.mock('../../src/core/risk-calculator.js');
 vi.mock('../../src/core/evolution-engine.js', () => ({
   checkEvolutionGate: vi.fn().mockReturnValue({ allowed: true, currentTier: 3, reason: undefined }),
+  getEvolutionEngine: vi.fn().mockReturnValue({
+    getTier: vi.fn().mockReturnValue(3),
+    getPoints: vi.fn().mockReturnValue(200),
+  }),
 }));
 
 const MOCK_SESSION_ID = 'test-thinking-session-001';

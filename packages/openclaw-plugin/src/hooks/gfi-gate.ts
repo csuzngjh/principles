@@ -78,6 +78,10 @@ export function checkGfiGate(
   const session = getSession(sessionId);
   const currentGfi = session?.currentGfi || 0;
 
+  const getEpTier = (): number => {
+    return getEvolutionEngine(wctx.workspaceDir).getTier();
+  };
+
   // TIER 3: Bash commands
   if (BASH_TOOLS_SET.has(event.toolName)) {
     const command = String(event.params.command || event.params.args || '');
@@ -98,8 +102,7 @@ export function checkGfiGate(
     }
 
     // normal bash - check GFI threshold
-    const evolutionEngine = getEvolutionEngine(wctx.workspaceDir);
-    const tier = evolutionEngine.getTier();
+    const tier = getEpTier();
     const baseThreshold = config.thresholds?.low_risk_block || 70;
     const dynamicThreshold = calculateDynamicThreshold(
       baseThreshold,
@@ -121,8 +124,7 @@ export function checkGfiGate(
 
   // TIER 2: High-risk tools
   if (HIGH_RISK_TOOLS.has(event.toolName)) {
-    const evolutionEngine = getEvolutionEngine(wctx.workspaceDir);
-    const tier = evolutionEngine.getTier();
+    const tier = getEpTier();
     const baseThreshold = config.thresholds?.high_risk_block || 40;
     const dynamicThreshold = calculateDynamicThreshold(
       baseThreshold,
@@ -143,8 +145,7 @@ export function checkGfiGate(
 
   // TIER 1: Low-risk write tools
   if (LOW_RISK_WRITE_TOOLS.has(event.toolName)) {
-    const evolutionEngine = getEvolutionEngine(wctx.workspaceDir);
-    const tier = evolutionEngine.getTier();
+    const tier = getEpTier();
     const lineChanges = estimateLineChanges({ toolName: event.toolName, params: event.params });
     const baseThreshold = config.thresholds?.low_risk_block || 70;
     const dynamicThreshold = calculateDynamicThreshold(

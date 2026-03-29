@@ -25,11 +25,20 @@ vi.mock('../../src/core/session-tracker.js', () => ({
   trackBlock: vi.fn(),
   hasRecentThinking: vi.fn(() => false),
 }));
-vi.mock('../../src/core/evolution-engine.js', () => ({
-  checkEvolutionGate: vi.fn(() => ({ allowed: true, currentTier: 'SEED' })),
-}));
+vi.mock('../../src/core/evolution-engine.js', async () => {
+  const actual = await vi.importActual('../../src/core/evolution-engine.js');
+  return {
+    ...actual,
+    checkEvolutionGate: vi.fn(() => ({ allowed: true, currentTier: 'SEED' })),
+    getEvolutionEngine: vi.fn(),
+  };
+});
 
-// Import the mocked hasRecentThinking for test manipulation
+const mockEvolution = {
+  getTier: vi.fn().mockReturnValue(3),
+  getPoints: vi.fn().mockReturnValue(200),
+};
+
 const mockedHasRecentThinking = vi.mocked(sessionTracker.hasRecentThinking);
 
 describe('Gate Pipeline Integration - Single Authoritative Path', () => {
@@ -61,11 +70,6 @@ describe('Gate Pipeline Integration - Single Authoritative Path', () => {
     recordGateBlock: vi.fn(),
   };
 
-  const mockEvolution = {
-    getTier: vi.fn().mockReturnValue(3),
-    getPoints: vi.fn().mockReturnValue(200),
-  };
-
   const mockWctx = {
     workspaceDir,
     stateDir: '/mock/state',
@@ -90,6 +94,7 @@ describe('Gate Pipeline Integration - Single Authoritative Path', () => {
     vi.mocked(WorkspaceContext.fromHookContext).mockReturnValue(mockWctx as any);
     vi.mocked(sessionTracker.getSession).mockReturnValue({ currentGfi: 0 } as any);
     vi.mocked(sessionTracker.trackBlock).mockImplementation(() => {});
+    vi.mocked(evolutionEngine.getEvolutionEngine).mockReturnValue(mockEvolution);
   });
 
   afterEach(() => {

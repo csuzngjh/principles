@@ -2,15 +2,35 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { checkGfiGate } from '../../src/hooks/gfi-gate.js';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
 import * as sessionTracker from '../../src/core/session-tracker.js';
+import * as evolutionEngine from '../../src/core/evolution-engine.js';
+import { EvolutionTier } from '../../src/core/evolution-types.js';
 
 vi.mock('../../src/core/session-tracker.js');
+vi.mock('../../src/core/evolution-engine.js', async () => {
+  const actual = await vi.importActual('../../src/core/evolution-engine.js');
+  return {
+    ...actual,
+    getEvolutionEngine: vi.fn(),
+  };
+});
+
+const mockEvolution = {
+  getTier: vi.fn().mockReturnValue(EvolutionTier.Sapling),
+  getPoints: vi.fn().mockReturnValue(200),
+  getAvailablePoints: vi.fn().mockReturnValue(200),
+  getTierDefinition: vi.fn().mockReturnValue({
+    tier: EvolutionTier.Sapling,
+    name: 'Sapling',
+    requiredPoints: 200,
+    permissions: { maxLinesPerWrite: 500, maxFilesPerTask: 10, allowRiskPath: true, allowSubagentSpawn: true }
+  }),
+};
 
 describe('checkGfiGate', () => {
-  const mockEvolution = {
-    getTier: vi.fn(),
-  };
+  const workspaceDir = '/mock/workspace';
 
   const mockWctx = {
+    workspaceDir,
     evolution: mockEvolution,
   } as any;
 
@@ -46,7 +66,16 @@ describe('checkGfiGate', () => {
     vi.mocked(sessionTracker.getSession).mockReturnValue({
       currentGfi: 0,
     } as any);
-    mockEvolution.getTier.mockReturnValue(3);
+    mockEvolution.getTier.mockReturnValue(EvolutionTier.Sapling);
+    mockEvolution.getPoints.mockReturnValue(200);
+    mockEvolution.getAvailablePoints.mockReturnValue(200);
+    mockEvolution.getTierDefinition.mockReturnValue({
+      tier: EvolutionTier.Sapling,
+      name: 'Sapling',
+      requiredPoints: 200,
+      permissions: { maxLinesPerWrite: 500, maxFilesPerTask: 10, allowRiskPath: true, allowSubagentSpawn: true }
+    });
+    vi.mocked(evolutionEngine.getEvolutionEngine).mockReturnValue(mockEvolution);
   });
 
   // ════════════════════════════════════════════════
