@@ -457,7 +457,7 @@ export async function handleBeforePromptBuild(
   // 闁崇儤鍔忛弲鏌ュ煛?STRUCTURE (Optimized for WebUI UX + Prompt Caching) 闁崇儤鍔忛弲鏌ュ煛?
   // prependSystemContext: Minimal identity (cacheable, ~15 lines)
   // appendSystemContext: Principles + Thinking OS + reflection_log + project_context (cacheable, WebUI-hidden)
-  // prependContext: Only short dynamic directives: trustScore + evolutionDirective + heartbeat
+  // prependContext: Only short dynamic directives: evolutionDirective + heartbeat
 
   let prependSystemContext = '';
   let prependContext = '';

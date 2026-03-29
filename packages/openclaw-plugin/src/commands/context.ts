@@ -73,7 +73,6 @@ function showStatus(workspaceDir: string, isZh: boolean): string {
 |------|------|------|
 | 核心原则 | ✅ 始终开启 | 不可关闭 |
 | 思维模型 | ${config.thinkingOs ? '✅ 开启' : '❌ 关闭'} | /pd-context thinking on/off |
-| 信任分数 | ${config.trustScore ? '✅ 开启' : '❌ 关闭'} | /pd-context trust on/off |
 | 反思日志 | ${config.reflectionLog ? '✅ 开启' : '❌ 关闭'} | /pd-context reflection on/off |
 | 项目上下文 | ${formatProjectFocus(config.projectFocus, isZh)} | /pd-context focus full/summary/off |
 
@@ -87,7 +86,6 @@ function showStatus(workspaceDir: string, isZh: boolean): string {
 |---------|--------|---------|
 | Core Principles | ✅ Always ON | Not configurable |
 | Thinking OS | ${config.thinkingOs ? '✅ ON' : '❌ OFF'} | /pd-context thinking on/off |
-| Trust Score | ${config.trustScore ? '✅ ON' : '❌ OFF'} | /pd-context trust on/off |
 | Reflection Log | ${config.reflectionLog ? '✅ ON' : '❌ OFF'} | /pd-context reflection on/off |
 | Project Context | ${formatProjectFocus(config.projectFocus, isZh)} | /pd-context focus full/summary/off |
 
@@ -101,7 +99,7 @@ function showStatus(workspaceDir: string, isZh: boolean): string {
  */
 function toggleSetting(
     workspaceDir: string,
-    key: 'thinkingOs' | 'trustScore' | 'reflectionLog',
+    key: 'thinkingOs' | 'reflectionLog',
     value: string,
     isZh: boolean
 ): string {
@@ -120,7 +118,7 @@ function toggleSetting(
     
     const newValue = config[key];
     const keyName = isZh 
-        ? { thinkingOs: '思维模型', trustScore: '信任分数', reflectionLog: '反思日志' }[key]
+        ? { thinkingOs: '思维模型', reflectionLog: '反思日志' }[key]
         : key;
     
     // No change needed
@@ -219,7 +217,6 @@ function applyPreset(
         case 'minimal':
             config = {
                 thinkingOs: false,
-                trustScore: true,
                 reflectionLog: false,
                 projectFocus: 'off',
                 evolutionContext: { ...defaultContextConfig.evolutionContext }
@@ -228,7 +225,6 @@ function applyPreset(
         case 'standard':
             config = {
                 thinkingOs: true,
-                trustScore: true,
                 reflectionLog: false,
                 projectFocus: 'off',
                 evolutionContext: { ...defaultContextConfig.evolutionContext }
@@ -237,7 +233,6 @@ function applyPreset(
         case 'full':
             config = {
                 thinkingOs: true,
-                trustScore: true,
                 reflectionLog: true,
                 projectFocus: 'summary',
                 evolutionContext: { ...defaultContextConfig.evolutionContext }
@@ -326,9 +321,6 @@ export function handleContextCommand(ctx: PluginCommandContext): PluginCommandRe
             break;
         case 'thinking':
             result = toggleSetting(workspaceDir, 'thinkingOs', value, isZh);
-            break;
-        case 'trust':
-            result = toggleSetting(workspaceDir, 'trustScore', value, isZh);
             break;
         case 'reflection':
             result = toggleSetting(workspaceDir, 'reflectionLog', value, isZh);

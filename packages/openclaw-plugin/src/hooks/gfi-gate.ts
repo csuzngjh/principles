@@ -28,6 +28,7 @@ import { analyzeBashCommand, calculateDynamicThreshold, type DynamicThresholdCon
 import { BASH_TOOLS_SET, HIGH_RISK_TOOLS, LOW_RISK_WRITE_TOOLS, AGENT_TOOLS } from '../constants/tools.js';
 import { AGENT_SPAWN_GFI_THRESHOLD } from '../config/index.js';
 import { recordGateBlockAndReturn } from './gate-block-helper.js';
+import { getEvolutionEngine } from '../core/evolution-engine.js';
 import type { WorkspaceContext } from '../core/workspace-context.js';
 import type { PluginHookBeforeToolCallEvent, PluginHookBeforeToolCallResult } from '../openclaw-sdk.js';
 
@@ -97,7 +98,7 @@ export function checkGfiGate(
     }
 
     // normal bash - check GFI threshold
-    const evolutionEngine = wctx.evolution;
+    const evolutionEngine = getEvolutionEngine(wctx.workspaceDir);
     const tier = evolutionEngine.getTier();
     const baseThreshold = config.thresholds?.low_risk_block || 70;
     const dynamicThreshold = calculateDynamicThreshold(
@@ -120,7 +121,7 @@ export function checkGfiGate(
 
   // TIER 2: High-risk tools
   if (HIGH_RISK_TOOLS.has(event.toolName)) {
-    const evolutionEngine = wctx.evolution;
+    const evolutionEngine = getEvolutionEngine(wctx.workspaceDir);
     const tier = evolutionEngine.getTier();
     const baseThreshold = config.thresholds?.high_risk_block || 40;
     const dynamicThreshold = calculateDynamicThreshold(
@@ -142,7 +143,7 @@ export function checkGfiGate(
 
   // TIER 1: Low-risk write tools
   if (LOW_RISK_WRITE_TOOLS.has(event.toolName)) {
-    const evolutionEngine = wctx.evolution;
+    const evolutionEngine = getEvolutionEngine(wctx.workspaceDir);
     const tier = evolutionEngine.getTier();
     const lineChanges = estimateLineChanges({ toolName: event.toolName, params: event.params });
     const baseThreshold = config.thresholds?.low_risk_block || 70;
