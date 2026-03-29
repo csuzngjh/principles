@@ -238,18 +238,6 @@ export class EvolutionEngine {
       };
     }
 
-    // 内容行数检查（对 write 和 edit 工具）
-    if ((context.toolName === 'write' || context.toolName === 'edit') && context.content) {
-      const contentLines = context.content.split('\n').length;
-      if (contentLines > perms.maxLinesPerWrite) {
-        return {
-          allowed: false,
-          reason: `Tier ${this.scorecard.currentTier} (${tierDef.name}) 单次写入限制 ${perms.maxLinesPerWrite} 行，当前 ${contentLines} 行`,
-          currentTier: this.scorecard.currentTier,
-        };
-      }
-    }
-
     return { allowed: true, currentTier: this.scorecard.currentTier };
   }
 
