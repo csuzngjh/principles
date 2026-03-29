@@ -158,8 +158,13 @@ export function scoreCandidate(
   const hasSpecificTarget = /[a-zA-Z0-9_\-]+\.(ts|js|json|md|yml|yaml|sh|py|go|rs)/.test(candidate.betterDecision);
   if (hasSpecificTarget) boundedness += 0.2;
   // Not too generic
-  const genericPatterns = ['something', 'something else', 'it', 'the thing'];
-  const isGeneric = genericPatterns.some((p) => candidate.betterDecision.toLowerCase().includes(p));
+  const genericPatterns = [
+    /\bsomething\b/i,
+    /\bsomething else\b/i,
+    /\bit\b/i,
+    /\bthe thing\b/i,
+  ];
+  const isGeneric = genericPatterns.some((pattern) => pattern.test(candidate.betterDecision));
   if (isGeneric) boundedness -= 0.3;
   // Not too long (multi-step vagueness)
   if (candidate.betterDecision.length > 200) boundedness -= 0.1;

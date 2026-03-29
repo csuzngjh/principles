@@ -34,6 +34,25 @@ export type TaskPriority = 'high' | 'medium' | 'low';
 export type QueueStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'canceled';
 export type TaskResolution = 'marker_detected' | 'auto_completed_timeout' | 'failed_max_retries' | 'canceled';
 
+/**
+ * Recent pain context attached to sleep_reflection tasks.
+ * Carries explicit recent pain signal metadata without being a separate task kind.
+ * Used by NocturnalTargetSelector for ranking bias and context enrichment.
+ */
+export interface RecentPainContext {
+  /** Most recent unresolved pain event */
+  mostRecent: {
+    score: number;
+    source: string;
+    reason: string;
+    timestamp: string;
+  } | null;
+  /** Count of pain events in the recent window (for signal strength) */
+  recentPainCount: number;
+  /** Highest pain score in the recent window */
+  recentMaxPainScore: number;
+}
+
 export interface EvolutionQueueItem {
     // Core identity
     id: string;
@@ -64,6 +83,11 @@ export interface EvolutionQueueItem {
     
     // V2 result reference
     resultRef?: string;         // V2: reference to result artifact
+
+    // V2: Recent pain context for sleep_reflection tasks
+    // Attaches explicit recent pain signal without merging task kinds.
+    // Used by target selector for ranking bias and context enrichment.
+    recentPainContext?: RecentPainContext;
 }
 
 /**
@@ -283,6 +307,47 @@ export function hasEquivalentPromotedRule(dictionary: { getAllRules(): Record<st
 }
 
 /**
+ * Read recent pain context from PAIN_FLAG file.
+ * Returns structured pain metadata for attaching to sleep_reflection tasks.
+ * Returns null if no pain flag exists.
+ */
+function readRecentPainContext(wctx: WorkspaceContext): RecentPainContext {
+    const painFlagPath = wctx.resolve('PAIN_FLAG');
+    if (!fs.existsSync(painFlagPath)) {
+        return { mostRecent: null, recentPainCount: 0, recentMaxPainScore: 0 };
+    }
+
+    try {
+        const rawPain = fs.readFileSync(painFlagPath, 'utf8');
+        const lines = rawPain.split('\n');
+
+        let score = 0;
+        let source = '';
+        let reason = '';
+        let timestamp = '';
+
+        for (const line of lines) {
+            if (line.startsWith('score:')) score = parseInt(line.split(':', 2)[1].trim(), 10) || 0;
+            if (line.startsWith('source:')) source = line.split(':', 2)[1].trim();
+            if (line.startsWith('reason:')) reason = line.slice('reason:'.length).trim();
+            if (line.startsWith('timestamp:')) timestamp = line.slice('timestamp:'.length).trim();
+        }
+
+        if (score > 0) {
+            return {
+                mostRecent: { score, source, reason, timestamp },
+                recentPainCount: 1,
+                recentMaxPainScore: score,
+            };
+        }
+    } catch {
+        // Best effort — non-fatal
+    }
+
+    return { mostRecent: null, recentPainCount: 0, recentMaxPainScore: 0 };
+}
+
+/**
  * Enqueue a sleep_reflection task if one is not already pending.
  * Phase 2.4: Called when workspace is idle to trigger nocturnal reflection.
  */
@@ -317,6 +382,9 @@ async function enqueueSleepReflectionTask(
         const taskId = createEvolutionTaskId('nocturnal', 50, 'idle workspace', 'Sleep-mode reflection', now);
         const nowIso = new Date(now).toISOString();
 
+        // Attach recent pain context if available
+        const recentPainContext = readRecentPainContext(wctx);
+
         queue.push({
             id: taskId,
             taskKind: 'sleep_reflection',
@@ -331,6 +399,7 @@ async function enqueueSleepReflectionTask(
             traceId: taskId,
             retryCount: 0,
             maxRetries: 1, // sleep_reflection doesn't retry
+            recentPainContext,
         });
 
         fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');

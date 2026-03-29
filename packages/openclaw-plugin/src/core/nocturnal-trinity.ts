@@ -31,6 +31,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as url from 'url';
 import type { NocturnalSessionSnapshot } from './nocturnal-trajectory-extractor.js';
+import { computeThinkingModelDelta } from './nocturnal-trajectory-extractor.js';
 import {
   runTournament,
   DEFAULT_SCORING_WEIGHTS,
@@ -691,6 +692,10 @@ export interface TrinityDraftArtifact {
   sourceSnapshotRef: string;
   /** Chain telemetry */
   telemetry: TrinityTelemetry;
+  /** Reflection quality: delta in thinking model activation (-1 to 1) */
+  thinkingModelDelta?: number;
+  /** Reflection quality: gain in planning ratio (-1 to 1) */
+  planningRatioGain?: number;
 }
 
 export interface TrinityTelemetry {
@@ -779,12 +784,13 @@ function invokeStubDreamer(
   const candidates: DreamerCandidate[] = [];
 
   // Generate candidates based on available signals
-  // NOTE: betterDecision includes file paths to pass boundedness threshold
+  // NOTE: betterDecision includes thinking model patterns so computeThinkingModelDelta > 0
+  //       (these activate T-03, T-05, T-08 patterns respectively)
   if (hasGateBlocks) {
     candidates.push({
       candidateIndex: 0,
       badDecision: 'Proceeded with a tool call despite receiving a gate block, bypassing the safety check',
-      betterDecision: 'Read docs/gateblocks.md and verify the authorization requirements in config.json before retrying',
+      betterDecision: 'Review docs/gateblocks.md and verify authorization requirements first; based on the evidence, this irreversible action must be reviewed before proceeding',
       rationale: 'Respecting gate blocks prevents unintended system modifications',
       confidence: 0.95,
     });
@@ -792,7 +798,7 @@ function invokeStubDreamer(
       candidates.push({
         candidateIndex: 1,
         badDecision: 'Retried the same operation immediately after gate block without understanding why',
-        betterDecision: 'Check the reason in src/gatekeeper.ts and address the root cause before proceeding',
+        betterDecision: 'Check the gatekeeper source first to diagnose the block reason; this is irreversible, so we must be certain before proceeding',
         rationale: 'Understanding why a gate blocked prevents repeated blocks',
         confidence: 0.85,
       });
@@ -801,7 +807,7 @@ function invokeStubDreamer(
       candidates.push({
         candidateIndex: 2,
         badDecision: 'Modified the target of the blocked operation to bypass the check',
-        betterDecision: 'Request human authorization in docs/auth.md for the intended operation',
+        betterDecision: 'Review docs/auth.md first to understand the authorization structure, then request proper review before any change',
         rationale: 'Proper authorization ensures accountability and prevents unintended changes',
         confidence: 0.75,
       });
@@ -810,7 +816,7 @@ function invokeStubDreamer(
     candidates.push({
       candidateIndex: 0,
       badDecision: 'Continued executing operations without pausing to address accumulated pain signals',
-      betterDecision: 'Check pain signals in logs/pain.json and identify the root cause before proceeding',
+      betterDecision: 'Check logs/pain.json first to analyze pain signals; this error indicates we should stop and reconsider before proceeding',
       rationale: 'Pain signals indicate accumulated friction or error conditions',
       confidence: 0.90,
     });
@@ -818,7 +824,7 @@ function invokeStubDreamer(
       candidates.push({
         candidateIndex: 1,
         badDecision: 'Ignored warning pain events and proceeded with high-risk operations',
-        betterDecision: 'Review the source code in src/pain-detector.ts and resolve friction points',
+        betterDecision: 'Review src/pain-detector.ts first; based on the evidence, this indicates a deeper issue we must not ignore',
         rationale: 'Addressing friction reduces error rates and improves outcomes',
         confidence: 0.80,
       });
@@ -827,7 +833,7 @@ function invokeStubDreamer(
       candidates.push({
         candidateIndex: 2,
         badDecision: 'Retried failing operations without analyzing why they caused pain',
-        betterDecision: 'Analyze the pain pattern using logs/errors.json and adjust the approach before retrying',
+        betterDecision: 'Analyze logs/errors.json first to identify the failure pattern; this suggests we should stop and rethink before retrying',
         rationale: 'Pattern analysis prevents recurring pain from the same source',
         confidence: 0.70,
       });
@@ -836,7 +842,7 @@ function invokeStubDreamer(
     candidates.push({
       candidateIndex: 0,
       badDecision: 'Retried a failing operation without diagnosing the root cause',
-      betterDecision: 'Check the error message in logs/failure.json and verify preconditions in config.json before retrying',
+      betterDecision: 'Verify config.json preconditions first, based on the error in logs/failure.json, before retrying',
       rationale: 'Diagnosing failures before retry prevents repeated failures',
       confidence: 0.92,
     });
@@ -844,7 +850,7 @@ function invokeStubDreamer(
       candidates.push({
         candidateIndex: 1,
         badDecision: 'Continued to the next operation after a failure without addressing it',
-        betterDecision: 'Analyze the failure using docs/debugging.md and verify the fix before continuing',
+        betterDecision: 'Check docs/debugging.md first to diagnose what failed; we must not ignore this when the action is irreversible',
         rationale: 'Unaddressed failures compound and cause larger issues',
         confidence: 0.85,
       });
@@ -853,7 +859,7 @@ function invokeStubDreamer(
       candidates.push({
         candidateIndex: 2,
         badDecision: 'Assumed the failure was transient and retried without investigation',
-        betterDecision: 'Verify the failure is resolved by checking src/validator.ts before retrying',
+        betterDecision: 'Verify src/validator.ts state first; this error indicates a deeper problem before assuming resolution',
         rationale: 'Verification prevents cascading failures from unresolved issues',
         confidence: 0.78,
       });
@@ -1345,7 +1351,14 @@ export function draftToArtifact(draft: TrinityDraftArtifact): {
   betterDecision: string;
   rationale: string;
   createdAt: string;
+  thinkingModelDelta?: number;
+  planningRatioGain?: number;
 } {
+  // Compute reflection quality metrics
+  const thinkingModelDelta = draft.thinkingModelDelta ?? computeThinkingModelDelta(draft.badDecision, draft.betterDecision);
+  // planningRatioGain requires an improved snapshot — Trinity draft doesn't have one, so default to 0
+  const planningRatioGain = draft.planningRatioGain ?? 0;
+
   return {
     artifactId: randomUUID(),
     sessionId: draft.sessionId,
@@ -1355,6 +1368,8 @@ export function draftToArtifact(draft: TrinityDraftArtifact): {
     betterDecision: draft.betterDecision,
     rationale: draft.rationale,
     createdAt: new Date().toISOString(),
+    thinkingModelDelta,
+    planningRatioGain,
   };
 }
 

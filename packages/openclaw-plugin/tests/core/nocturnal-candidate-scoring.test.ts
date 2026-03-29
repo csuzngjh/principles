@@ -96,6 +96,19 @@ describe('scoreCandidate', () => {
     expect(scores.boundedness).toBeGreaterThan(0.5);
   });
 
+  it('does not penalize words that merely contain "it" as a substring', () => {
+    const candidate = makeCandidate({
+      betterDecision: 'Verify preconditions in config.json before retrying',
+      confidence: 0.92,
+    });
+    const judgment = makeJudgment(0, { score: 0.92, principleAligned: true });
+    const scores = scoreCandidate(candidate, judgment);
+
+    // Boundedness should remain 0.7 (0.5 base + 0.2 specific target) because
+    // "preconditions" must not trigger the generic word "it" penalty.
+    expect(scores.boundedness).toBe(0.7);
+  });
+
   it('uses custom weights when provided', () => {
     const candidate = makeCandidate();
     const judgment = makeJudgment(0);

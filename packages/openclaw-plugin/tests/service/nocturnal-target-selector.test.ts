@@ -495,4 +495,121 @@ describe('NocturnalTargetSelector', () => {
       expect(result.skipReason).toBe('all_targets_in_cooldown');
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Pain context bias
+  // -------------------------------------------------------------------------
+
+  describe('pain context bias', () => {
+    it('includes pain context in diagnostics when provided', () => {
+      seedTrainingState(stateDir, 'T-01', {
+        evaluability: 'deterministic',
+        internalizationStatus: 'needs_training',
+        applicableOpportunityCount: 5,
+        observedViolationCount: 2,
+        complianceRate: 0.6,
+      });
+
+      const recentPainContext = {
+        mostRecent: { score: 8, source: 'tool_failure', reason: 'edit failed', timestamp: '2026-03-27T10:00:00.000Z' },
+        recentPainCount: 3,
+        recentMaxPainScore: 8,
+      };
+
+      const selector = new NocturnalTargetSelector(workspaceDir, stateDir, extractor, {
+        recentPainContext,
+      });
+      const result = selector.select();
+
+      expect(result.diagnostics.painContext).toBeDefined();
+      expect(result.diagnostics.painContext!.hasRecentPain).toBe(true);
+      expect(result.diagnostics.painContext!.recentPainCount).toBe(3);
+      expect(result.diagnostics.painContext!.recentMaxPainScore).toBe(8);
+      expect(result.diagnostics.painContext!.painSource).toBe('tool_failure');
+    });
+
+    it('does not include pain context in diagnostics when not provided', () => {
+      seedTrainingState(stateDir, 'T-01', {
+        evaluability: 'deterministic',
+        internalizationStatus: 'needs_training',
+      });
+
+      const selector = new NocturnalTargetSelector(workspaceDir, stateDir, extractor);
+      const result = selector.select();
+
+      expect(result.diagnostics.painContext).toBeUndefined();
+    });
+
+    it('biases toward principles when recent pain count is high', () => {
+      // Seed one principle with known scoring characteristics
+      seedTrainingState(stateDir, 'T-01', {
+        evaluability: 'deterministic',
+        internalizationStatus: 'needs_training',
+        applicableOpportunityCount: 10,
+        observedViolationCount: 5,
+        complianceRate: 0.5,
+        generatedSampleCount: 5,
+        violationTrend: 0,
+      });
+
+      seedSession(trajectory, 'session-violating');
+      seedToolCall(trajectory, 'session-violating', 'edit_file', 'failure', 'error');
+
+      // Without pain context - baseline score
+      // Base 50 + compliance 12.5 (0.5*25) + scarcity 9 (15-6) + trend 0 = 71.5 -> 71
+      const selectorWithoutPain = new NocturnalTargetSelector(workspaceDir, stateDir, extractor);
+      const resultWithoutPain = selectorWithoutPain.select();
+
+      // With high pain context - score should be boosted
+      // Pain contribution: mostRecent (score 9) = 13.5, additional 4 = 4, high pain bonus = 5
+      // Total pain = 22.5 -> 23
+      // New total: 71 + 23 = 94
+      const highPainContext = {
+        mostRecent: { score: 9, source: 'tool_failure', reason: 'high pain', timestamp: '2026-03-27T10:00:00.000Z' },
+        recentPainCount: 5,
+        recentMaxPainScore: 9,
+      };
+
+      const selectorWithPain = new NocturnalTargetSelector(workspaceDir, stateDir, extractor, {
+        recentPainContext: highPainContext,
+      });
+      const resultWithPain = selectorWithPain.select();
+
+      // Pain context should be present and have correct values
+      expect(resultWithPain.diagnostics.painContext).toBeDefined();
+      expect(resultWithPain.diagnostics.painContext!.hasRecentPain).toBe(true);
+      expect(resultWithPain.diagnostics.painContext!.recentMaxPainScore).toBe(9);
+      expect(resultWithPain.diagnostics.painContext!.recentPainCount).toBe(5);
+
+      // Score with pain should be significantly higher than without pain
+      const t01ScoreWithPain = resultWithPain.diagnostics.scoringBreakdown['T-01'];
+      const t01ScoreWithoutPain = resultWithoutPain.diagnostics.scoringBreakdown['T-01'];
+      expect(t01ScoreWithPain).toBeGreaterThan(t01ScoreWithoutPain);
+
+      // The difference should be at least 20 (pain contribution)
+      expect(t01ScoreWithPain - t01ScoreWithoutPain).toBeGreaterThanOrEqual(20);
+    });
+
+    it('has zero painContext when recentPainCount is 0', () => {
+      seedTrainingState(stateDir, 'T-01', {
+        evaluability: 'deterministic',
+        internalizationStatus: 'needs_training',
+      });
+
+      const emptyPainContext = {
+        mostRecent: null,
+        recentPainCount: 0,
+        recentMaxPainScore: 0,
+      };
+
+      const selector = new NocturnalTargetSelector(workspaceDir, stateDir, extractor, {
+        recentPainContext: emptyPainContext,
+      });
+      const result = selector.select();
+
+      expect(result.diagnostics.painContext).toBeDefined();
+      expect(result.diagnostics.painContext!.hasRecentPain).toBe(false);
+      expect(result.diagnostics.painContext!.recentPainCount).toBe(0);
+    });
+  });
 });

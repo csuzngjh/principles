@@ -34,6 +34,7 @@ import { randomUUID } from 'crypto';
 import {
   NocturnalTrajectoryExtractor,
   createNocturnalTrajectoryExtractor,
+  computeThinkingModelDelta,
   type NocturnalSessionSnapshot,
 } from '../core/nocturnal-trajectory-extractor.js';
 import {
@@ -172,6 +173,13 @@ export interface NocturnalServiceOptions {
    * If provided, this result is used instead of running the Trinity chain.
    */
   trinityResultOverride?: TrinityResult;
+
+  /**
+   * Recent pain context from the evolution queue.
+   * When provided, the target selector uses it for ranking bias and diagnostics enrichment.
+   * This threads recent pain signals into sleep_reflection targeting without merging task kinds.
+   */
+  painContext?: import('../service/evolution-worker.js').RecentPainContext;
 }
 
 // ---------------------------------------------------------------------------
@@ -211,17 +219,22 @@ function invokeStubReflector(
     rationale = `Respecting gate blocks prevents unintended system modifications and ensures alignment with operational constraints`;
   } else if (hasPain) {
     badDecision = `Continued executing operations without pausing to address accumulated pain signals`;
-    betterDecision = `Check the pain signals and identify the root cause before proceeding with the next operation`;
+    betterDecision = `Let me stop and reconsider when pain signals accumulate — the error tells us something needs fixing first`;
     rationale = `Pain signals indicate accumulated friction or error conditions that should be addressed before continuing`;
   } else if (hasFailures) {
     badDecision = `Retried a failing operation without diagnosing the root cause of the failure`;
-    betterDecision = `Check the error message and verify preconditions before retrying a failed bash command`;
+    betterDecision = `Based on the evidence from the error logs, let me first check the actual source code to understand the precondition before retrying`;
     rationale = `Diagnosing failures before retry prevents repeated failures and respects the cost of each action attempt`;
   } else {
     badDecision = `Proceeded with an operation without verifying preconditions or checking for conflicting changes`;
-    betterDecision = `Read the relevant file and verify the current state before making changes to avoid conflicts`;
+    betterDecision = `Let me first understand the current state of the codebase by reading the relevant files before making any changes`;
     rationale = `Verifying preconditions and current state prevents errors and ensures actions are appropriate for the actual situation`;
   }
+
+  // Compute design-alignment reflection quality metrics
+  const thinkingModelDelta = computeThinkingModelDelta(badDecision, betterDecision);
+  // Stub reflectors don't have an improved snapshot, so planningRatioGain is 0
+  const planningRatioGain = 0;
 
   const artifact = {
     artifactId,
@@ -232,6 +245,8 @@ function invokeStubReflector(
     betterDecision,
     rationale,
     createdAt: now,
+    thinkingModelDelta,
+    planningRatioGain,
   };
 
   return JSON.stringify(artifact);
@@ -335,6 +350,7 @@ export function executeNocturnalReflection(
   const extractor = createNocturnalTrajectoryExtractor(workspaceDir, stateDir);
   const selector = new NocturnalTargetSelector(workspaceDir, stateDir, extractor, {
     idleCheckOverride: options.idleCheckOverride,
+    recentPainContext: options.painContext,
   });
 
   const selection = selector.select();
@@ -552,6 +568,10 @@ export function executeNocturnalReflection(
   const arbiterResult = parseAndValidateArtifact(rawJson, {
     expectedPrincipleId: selectedPrincipleId,
     expectedSessionId: selectedSessionId,
+    qualityThresholds: {
+      thinkingModelDeltaMin: 0.01,
+      planningRatioGainMin: -0.5,
+    },
   });
   diagnostics.arbiterResult = arbiterResult;
 
@@ -752,6 +772,7 @@ async function executeNocturnalReflectionWithAdapter(
   const extractor = createNocturnalTrajectoryExtractor(workspaceDir, stateDir);
   const selector = new NocturnalTargetSelector(workspaceDir, stateDir, extractor, {
     idleCheckOverride: options.idleCheckOverride,
+    recentPainContext: options.painContext,
   });
 
   const selection = selector.select();
@@ -878,6 +899,10 @@ async function executeNocturnalReflectionWithAdapter(
   const arbiterResult = parseAndValidateArtifact(rawJson, {
     expectedPrincipleId: selectedPrincipleId,
     expectedSessionId: selectedSessionId,
+    qualityThresholds: {
+      thinkingModelDeltaMin: 0.01,
+      planningRatioGainMin: -0.5,
+    },
   });
   diagnostics.arbiterResult = arbiterResult;
 

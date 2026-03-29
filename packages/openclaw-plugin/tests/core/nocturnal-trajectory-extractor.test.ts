@@ -6,6 +6,10 @@ import {
   NocturnalTrajectoryExtractor,
   listNocturnalCandidateSessions,
   getNocturnalSessionSnapshot,
+  computeThinkingModelActivation,
+  computePlanningRatio,
+  computeThinkingModelDelta,
+  computePlanningRatioGain,
   type NocturnalSessionSnapshot,
   type NocturnalSessionSummary,
 } from '../../src/core/nocturnal-trajectory-extractor.js';
@@ -375,6 +379,256 @@ describe('NocturnalTrajectoryExtractor', () => {
       expect(snapshot!.assistantTurns[0].sanitizedText).toBe('Summary: large file processed');
       // The JSON should not contain the long raw content
       expect(JSON.stringify(snapshot)).not.toContain(longContent);
+    });
+  });
+});
+
+describe('Reflection Quality Metrics', () => {
+  // -------------------------------------------------------------------------
+  // computeThinkingModelActivation
+  // -------------------------------------------------------------------------
+
+  describe('computeThinkingModelActivation', () => {
+    it('returns 0 for empty text', () => {
+      expect(computeThinkingModelActivation('')).toBe(0);
+      expect(computeThinkingModelActivation('   ')).toBe(0);
+    });
+
+    it('returns 0 for text with no thinking model patterns', () => {
+      const text = 'Just do it now without any planning';
+      const activation = computeThinkingModelActivation(text);
+      expect(activation).toBeGreaterThanOrEqual(0);
+      expect(activation).toBeLessThanOrEqual(1);
+    });
+
+    it('returns positive value for text with thinking model patterns', () => {
+      // T-01 pattern: "let me first understand the structure"
+      const text = 'Let me first understand the structure before editing anything';
+      const activation = computeThinkingModelActivation(text);
+      expect(activation).toBeGreaterThan(0);
+      expect(activation).toBeLessThanOrEqual(1);
+    });
+
+    it('returns value rounded to 2 decimal places', () => {
+      const text = 'Based on the evidence and logs, let me check the actual source code';
+      const activation = computeThinkingModelActivation(text);
+      // Should be rounded to 2 decimal places
+      expect(activation * 100).toBe(Math.round(activation * 100));
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // computePlanningRatio
+  // -------------------------------------------------------------------------
+
+  describe('computePlanningRatio', () => {
+    it('returns 0 for snapshot with no tool calls', () => {
+      const snapshot: NocturnalSessionSnapshot = {
+        sessionId: 'test',
+        startedAt: '',
+        principleId: '',
+        assistantTurns: [],
+        userTurns: [],
+        toolCalls: [],
+        painEvents: [],
+        gateBlocks: [],
+        stats: { failureCount: 0, totalPainEvents: 0, totalGateBlocks: 0 },
+      };
+      expect(computePlanningRatio(snapshot)).toBe(0);
+    });
+
+    it('returns 0 for snapshot with writes but no preceding reads', () => {
+      const snapshot: NocturnalSessionSnapshot = {
+        sessionId: 'test',
+        startedAt: '',
+        principleId: '',
+        assistantTurns: [],
+        userTurns: [],
+        toolCalls: [
+          { toolName: 'edit', outcome: 'success', filePath: null, durationMs: 100, exitCode: null, errorType: null, errorMessage: null, createdAt: '' },
+          { toolName: 'write', outcome: 'success', filePath: null, durationMs: 100, exitCode: null, errorType: null, errorMessage: null, createdAt: '' },
+        ],
+        painEvents: [],
+        gateBlocks: [],
+        stats: { failureCount: 0, totalPainEvents: 0, totalGateBlocks: 0 },
+      };
+      expect(computePlanningRatio(snapshot)).toBe(0);
+    });
+
+    it('returns 1 for snapshot where all writes are preceded by reads', () => {
+      const snapshot: NocturnalSessionSnapshot = {
+        sessionId: 'test',
+        startedAt: '',
+        principleId: '',
+        assistantTurns: [],
+        userTurns: [],
+        toolCalls: [
+          { toolName: 'read', outcome: 'success', filePath: null, durationMs: 100, exitCode: null, errorType: null, errorMessage: null, createdAt: '' },
+          { toolName: 'edit', outcome: 'success', filePath: null, durationMs: 100, exitCode: null, errorType: null, errorMessage: null, createdAt: '' },
+        ],
+        painEvents: [],
+        gateBlocks: [],
+        stats: { failureCount: 0, totalPainEvents: 0, totalGateBlocks: 0 },
+      };
+      expect(computePlanningRatio(snapshot)).toBe(1);
+    });
+
+    it('returns 0.5 when half of writes are preceded by reads', () => {
+      const snapshot: NocturnalSessionSnapshot = {
+        sessionId: 'test',
+        startedAt: '',
+        principleId: '',
+        assistantTurns: [],
+        userTurns: [],
+        toolCalls: [
+          { toolName: 'read', outcome: 'success', filePath: null, durationMs: 100, exitCode: null, errorType: null, errorMessage: null, createdAt: '' },
+          { toolName: 'edit', outcome: 'success', filePath: null, durationMs: 100, exitCode: null, errorType: null, errorMessage: null, createdAt: '' },
+          { toolName: 'edit', outcome: 'success', filePath: null, durationMs: 100, exitCode: null, errorType: null, errorMessage: null, createdAt: '' },
+        ],
+        painEvents: [],
+        gateBlocks: [],
+        stats: { failureCount: 0, totalPainEvents: 0, totalGateBlocks: 0 },
+      };
+      expect(computePlanningRatio(snapshot)).toBe(0.5);
+    });
+
+    it('returns value rounded to 2 decimal places', () => {
+      const snapshot: NocturnalSessionSnapshot = {
+        sessionId: 'test',
+        startedAt: '',
+        principleId: '',
+        assistantTurns: [],
+        userTurns: [],
+        toolCalls: [
+          { toolName: 'read', outcome: 'success', filePath: null, durationMs: 100, exitCode: null, errorType: null, errorMessage: null, createdAt: '' },
+          { toolName: 'read', outcome: 'success', filePath: null, durationMs: 100, exitCode: null, errorType: null, errorMessage: null, createdAt: '' },
+          { toolName: 'edit', outcome: 'success', filePath: null, durationMs: 100, exitCode: null, errorType: null, errorMessage: null, createdAt: '' },
+        ],
+        painEvents: [],
+        gateBlocks: [],
+        stats: { failureCount: 0, totalPainEvents: 0, totalGateBlocks: 0 },
+      };
+      expect(computePlanningRatio(snapshot)).toBe(1);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // computeThinkingModelDelta
+  // -------------------------------------------------------------------------
+
+  describe('computeThinkingModelDelta', () => {
+    it('returns 0 for identical texts', () => {
+      const text = 'Just do it now';
+      expect(computeThinkingModelDelta(text, text)).toBe(0);
+    });
+
+    it('returns positive delta when improved has more thinking models', () => {
+      const original = 'Edit the file now';
+      const improved = 'Let me first understand the structure before editing anything';
+      const delta = computeThinkingModelDelta(original, improved);
+      expect(delta).toBeGreaterThan(0);
+    });
+
+    it('returns negative delta when improved has fewer thinking models', () => {
+      const original = 'Let me first understand the structure before editing anything';
+      const improved = 'Edit the file now';
+      const delta = computeThinkingModelDelta(original, improved);
+      expect(delta).toBeLessThan(0);
+    });
+
+    it('returns delta rounded to 2 decimal places', () => {
+      const original = 'Edit the file';
+      const improved = 'Based on the evidence, let me check the actual source and verify before editing';
+      const delta = computeThinkingModelDelta(original, improved);
+      expect(delta * 100).toBe(Math.round(delta * 100));
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // computePlanningRatioGain
+  // -------------------------------------------------------------------------
+
+  describe('computePlanningRatioGain', () => {
+    it('returns 0 for identical snapshots', () => {
+      const snapshot: NocturnalSessionSnapshot = {
+        sessionId: 'test',
+        startedAt: '',
+        principleId: '',
+        assistantTurns: [],
+        userTurns: [],
+        toolCalls: [
+          { toolName: 'read', outcome: 'success', filePath: null, durationMs: 100, exitCode: null, errorType: null, errorMessage: null, createdAt: '' },
+          { toolName: 'edit', outcome: 'success', filePath: null, durationMs: 100, exitCode: null, errorType: null, errorMessage: null, createdAt: '' },
+        ],
+        painEvents: [],
+        gateBlocks: [],
+        stats: { failureCount: 0, totalPainEvents: 0, totalGateBlocks: 0 },
+      };
+      expect(computePlanningRatioGain(snapshot, snapshot)).toBe(0);
+    });
+
+    it('returns positive gain when improved has better planning ratio', () => {
+      const original: NocturnalSessionSnapshot = {
+        sessionId: 'test',
+        startedAt: '',
+        principleId: '',
+        assistantTurns: [],
+        userTurns: [],
+        toolCalls: [
+          { toolName: 'edit', outcome: 'success', filePath: null, durationMs: 100, exitCode: null, errorType: null, errorMessage: null, createdAt: '' },
+        ],
+        painEvents: [],
+        gateBlocks: [],
+        stats: { failureCount: 0, totalPainEvents: 0, totalGateBlocks: 0 },
+      };
+      const improved: NocturnalSessionSnapshot = {
+        sessionId: 'test',
+        startedAt: '',
+        principleId: '',
+        assistantTurns: [],
+        userTurns: [],
+        toolCalls: [
+          { toolName: 'read', outcome: 'success', filePath: null, durationMs: 100, exitCode: null, errorType: null, errorMessage: null, createdAt: '' },
+          { toolName: 'edit', outcome: 'success', filePath: null, durationMs: 100, exitCode: null, errorType: null, errorMessage: null, createdAt: '' },
+        ],
+        painEvents: [],
+        gateBlocks: [],
+        stats: { failureCount: 0, totalPainEvents: 0, totalGateBlocks: 0 },
+      };
+      const gain = computePlanningRatioGain(original, improved);
+      expect(gain).toBeGreaterThan(0);
+    });
+
+    it('returns negative gain when improved has worse planning ratio', () => {
+      const original: NocturnalSessionSnapshot = {
+        sessionId: 'test',
+        startedAt: '',
+        principleId: '',
+        assistantTurns: [],
+        userTurns: [],
+        toolCalls: [
+          { toolName: 'read', outcome: 'success', filePath: null, durationMs: 100, exitCode: null, errorType: null, errorMessage: null, createdAt: '' },
+          { toolName: 'edit', outcome: 'success', filePath: null, durationMs: 100, exitCode: null, errorType: null, errorMessage: null, createdAt: '' },
+        ],
+        painEvents: [],
+        gateBlocks: [],
+        stats: { failureCount: 0, totalPainEvents: 0, totalGateBlocks: 0 },
+      };
+      const improved: NocturnalSessionSnapshot = {
+        sessionId: 'test',
+        startedAt: '',
+        principleId: '',
+        assistantTurns: [],
+        userTurns: [],
+        toolCalls: [
+          { toolName: 'edit', outcome: 'success', filePath: null, durationMs: 100, exitCode: null, errorType: null, errorMessage: null, createdAt: '' },
+        ],
+        painEvents: [],
+        gateBlocks: [],
+        stats: { failureCount: 0, totalPainEvents: 0, totalGateBlocks: 0 },
+      };
+      const gain = computePlanningRatioGain(original, improved);
+      expect(gain).toBeLessThan(0);
     });
   });
 });

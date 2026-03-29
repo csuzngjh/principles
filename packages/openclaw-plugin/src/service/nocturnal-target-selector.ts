@@ -90,6 +90,13 @@ export interface SelectionDiagnostics {
   cooldownCheckPassed: boolean;
   /** Whether quota check passed */
   quotaCheckPassed: boolean;
+  /** Recent pain context used for ranking bias (if available) */
+  painContext?: {
+    recentPainCount: number;
+    recentMaxPainScore: number;
+    hasRecentPain: boolean;
+    painSource?: string;
+  };
 }
 
 export interface NocturnalSelectionResult {
@@ -136,10 +143,19 @@ interface ViolationSignal {
  * 2. Violation trend (worsening trend = higher priority)
  * 3. Sample scarcity (fewer samples = more valuable)
  * 4. Cooldown penalty (in cooldown = lower priority)
+ * 5. Pain context bias (recent pain = higher priority for related principles)
  *
  * Score range: 0-100 (normalized)
  */
-function scorePrinciple(state: PrincipleTrainingState, cooldownActive: boolean): number {
+function scorePrinciple(
+  state: PrincipleTrainingState,
+  cooldownActive: boolean,
+  recentPainContext?: {
+    mostRecent: { score: number; source: string; reason: string; timestamp: string } | null;
+    recentPainCount: number;
+    recentMaxPainScore: number;
+  }
+): number {
   let score = 50; // Base score
 
   // Compliance contribution: 0-25 points
@@ -163,6 +179,24 @@ function scorePrinciple(state: PrincipleTrainingState, cooldownActive: boolean):
   // Cooldown penalty: -30 points
   if (cooldownActive) {
     score -= 30;
+  }
+
+  // Pain context bias: up to +25 points
+  // Bias toward principles related to recent pain signals
+  if (recentPainContext && recentPainContext.recentPainCount > 0) {
+    // Most recent pain score contributes up to 15 points (pain scores are 1-10)
+    const mostRecentPainScore = recentPainContext.mostRecent?.score ?? 0;
+    const painScoreContribution = Math.round((mostRecentPainScore / 10) * 15);
+    score += painScoreContribution;
+
+    // Additional pain count adds up to 5 more points
+    const additionalPainContribution = Math.min(recentPainContext.recentPainCount - 1, 5) * 1;
+    score += additionalPainContribution;
+
+    // High pain scores (> 7) get extra 5-point boost
+    if (recentPainContext.recentMaxPainScore > 7) {
+      score += 5;
+    }
   }
 
   return Math.max(0, Math.min(100, score));
@@ -211,6 +245,22 @@ export interface NocturnalTargetSelectorOptions {
    * If provided, this result is used instead of calling checkWorkspaceIdle.
    */
   idleCheckOverride?: IdleCheckResult;
+
+  /**
+   * Recent pain context from evolution worker.
+   * When provided, principles related to recent pain signals get ranking bias.
+   * This threads recent pain into sleep_reflection targeting without merging task kinds.
+   */
+  recentPainContext?: {
+    mostRecent: {
+      score: number;
+      source: string;
+      reason: string;
+      timestamp: string;
+    } | null;
+    recentPainCount: number;
+    recentMaxPainScore: number;
+  };
 }
 
 /**
@@ -229,6 +279,16 @@ export class NocturnalTargetSelector {
     idleThresholdMs: number;
   };
   private readonly idleCheckOverride?: IdleCheckResult;
+  private readonly recentPainContext?: {
+    mostRecent: {
+      score: number;
+      source: string;
+      reason: string;
+      timestamp: string;
+    } | null;
+    recentPainCount: number;
+    recentMaxPainScore: number;
+  };
 
   constructor(
     workspaceDir: string,
@@ -239,9 +299,10 @@ export class NocturnalTargetSelector {
     this.workspaceDir = workspaceDir;
     this.stateDir = stateDir;
     this.extractor = extractor;
-    // Destructure so it's NOT included in opts (stored separately)
-    const { idleCheckOverride, ...restOptions } = options;
+    // Destructure so they are NOT included in opts (stored separately)
+    const { idleCheckOverride, recentPainContext, ...restOptions } = options;
     this.idleCheckOverride = idleCheckOverride;
+    this.recentPainContext = recentPainContext;
     this.opts = {
       minViolationDensity: restOptions.minViolationDensity ?? 0.1,
       maxSessionCandidates: restOptions.maxSessionCandidates ?? 50,
@@ -266,6 +327,12 @@ export class NocturnalTargetSelector {
       idleCheckPassed: false,
       cooldownCheckPassed: false,
       quotaCheckPassed: false,
+      painContext: this.recentPainContext ? {
+        recentPainCount: this.recentPainContext.recentPainCount,
+        recentMaxPainScore: this.recentPainContext.recentMaxPainScore,
+        hasRecentPain: this.recentPainContext.recentPainCount > 0,
+        painSource: this.recentPainContext.mostRecent?.source,
+      } : undefined,
     };
 
     // Step 1: Idle check — if workspace is not idle, skip
@@ -321,7 +388,7 @@ export class NocturnalTargetSelector {
     for (const state of evaluablePrinciples) {
       const cooldownCheck = checkCooldown(this.stateDir, state.principleId);
       const cooldownActive = cooldownCheck.principleCooldownActive;
-      const score = scorePrinciple(state, cooldownActive);
+      const score = scorePrinciple(state, cooldownActive, this.recentPainContext);
 
       if (cooldownActive) {
         diagnostics.filteredByCooldown++;

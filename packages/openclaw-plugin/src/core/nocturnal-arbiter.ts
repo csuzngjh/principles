@@ -41,6 +41,8 @@ export interface RawReflectionArtifact {
   betterDecision?: unknown;
   rationale?: unknown;
   createdAt?: unknown;
+  thinkingModelDelta?: unknown;
+  planningRatioGain?: unknown;
   invalid?: unknown;
   reason?: unknown;
 }
@@ -58,6 +60,10 @@ export interface NocturnalArtifact {
   betterDecision: string;
   rationale: string;
   createdAt: string;
+  /** Design-alignment metric: delta in thinking model activation (-1 to 1) */
+  thinkingModelDelta?: number;
+  /** Design-alignment metric: gain in planning ratio (-1 to 1) */
+  planningRatioGain?: number;
 }
 
 /**
@@ -434,6 +440,25 @@ export interface ArbiterOptions {
    * If provided, the artifact's sessionId must match this.
    */
   expectedSessionId?: string;
+
+  /**
+   * Minimum quality thresholds for reflection metrics.
+   * If provided, artifacts failing these thresholds are rejected.
+   */
+  qualityThresholds?: {
+    /**
+     * Minimum thinkingModelDelta (delta in thinking model activation).
+     * Must be > 0 for artifact to pass (cognitive improvement required).
+     * Default: undefined (no threshold — only range check [-1, 1])
+     */
+    thinkingModelDeltaMin?: number;
+    /**
+     * Minimum planningRatioGain.
+     * Must be >= -0.5 for artifact to pass (no catastrophic planning regression).
+     * Default: undefined (no threshold — only range check [-1, 1])
+     */
+    planningRatioGainMin?: number;
+  };
 }
 
 /**
@@ -570,6 +595,60 @@ export function validateArtifact(
     });
   }
 
+  // Rule 10: Validate optional reflection quality metrics (if present)
+  const thinkingModelDelta = obj.thinkingModelDelta;
+  if (thinkingModelDelta !== undefined && typeof thinkingModelDelta !== 'number') {
+    failures.push({
+      reason: 'thinkingModelDelta must be a number if present',
+      field: 'thinkingModelDelta',
+    });
+  } else if (typeof thinkingModelDelta === 'number' && (thinkingModelDelta < -1 || thinkingModelDelta > 1)) {
+    failures.push({
+      reason: 'thinkingModelDelta must be between -1 and 1',
+      field: 'thinkingModelDelta',
+    });
+  }
+
+  const planningRatioGain = obj.planningRatioGain;
+  if (planningRatioGain !== undefined && typeof planningRatioGain !== 'number') {
+    failures.push({
+      reason: 'planningRatioGain must be a number if present',
+      field: 'planningRatioGain',
+    });
+  } else if (typeof planningRatioGain === 'number' && (planningRatioGain < -1 || planningRatioGain > 1)) {
+    failures.push({
+      reason: 'planningRatioGain must be between -1 and 1',
+      field: 'planningRatioGain',
+    });
+  }
+
+  // Rule 11: Quality threshold gate — reject low-signal artifacts
+  // A reflection artifact must show positive cognitive improvement (thinkingModelDelta > 0).
+  // planningRatioGain must not show catastrophic regression (< -0.5).
+  if (
+    options.qualityThresholds?.thinkingModelDeltaMin !== undefined &&
+    thinkingModelDelta !== undefined &&
+    typeof thinkingModelDelta === 'number' &&
+    thinkingModelDelta <= options.qualityThresholds.thinkingModelDeltaMin
+  ) {
+    failures.push({
+      reason: `thinkingModelDelta (${thinkingModelDelta}) does not meet minimum quality threshold (${options.qualityThresholds.thinkingModelDeltaMin}) — reflection shows no cognitive improvement`,
+      field: 'thinkingModelDelta',
+    });
+  }
+
+  if (
+    options.qualityThresholds?.planningRatioGainMin !== undefined &&
+    planningRatioGain !== undefined &&
+    typeof planningRatioGain === 'number' &&
+    planningRatioGain < options.qualityThresholds.planningRatioGainMin
+  ) {
+    failures.push({
+      reason: `planningRatioGain (${planningRatioGain}) shows catastrophic planning regression — below minimum threshold (${options.qualityThresholds.planningRatioGainMin})`,
+      field: 'planningRatioGain',
+    });
+  }
+
   // Final decision
   if (failures.length > 0) {
     return {
@@ -589,6 +668,8 @@ export function validateArtifact(
     betterDecision: String(obj.betterDecision),
     rationale: String(obj.rationale),
     createdAt: String(obj.createdAt),
+    thinkingModelDelta: typeof obj.thinkingModelDelta === 'number' ? obj.thinkingModelDelta : undefined,
+    planningRatioGain: typeof obj.planningRatioGain === 'number' ? obj.planningRatioGain : undefined,
   };
 
   return {

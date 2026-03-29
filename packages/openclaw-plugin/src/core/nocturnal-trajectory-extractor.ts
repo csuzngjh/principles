@@ -30,6 +30,7 @@
  */
 
 import { TrajectoryDatabase, TrajectoryRegistry } from './trajectory.js';
+import { detectThinkingModelMatches, listThinkingModels } from './thinking-models.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -390,4 +391,94 @@ export function getNocturnalSessionSnapshot(
   sessionId: string
 ): NocturnalSessionSnapshot | null {
   return new NocturnalTrajectoryExtractor(trajectory).getNocturnalSessionSnapshot(sessionId);
+}
+
+// ---------------------------------------------------------------------------
+// Reflection Quality Metrics
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute thinking model activation for a text.
+ * Returns 0-1 ratio of matched thinking models to total available models.
+ *
+ * @param text - Text to analyze
+ * @returns Activation ratio (0-1)
+ */
+export function computeThinkingModelActivation(text: string): number {
+  if (!text || text.trim().length === 0) return 0;
+  const matches = detectThinkingModelMatches(text);
+  const totalModels = listThinkingModels().length;
+  return Math.round((matches.length / totalModels) * 100) / 100;
+}
+
+/**
+ * Compute planning ratio from a session snapshot.
+ * Planning ratio = write operations preceded immediately by a read tool / total write operations.
+ * A higher ratio indicates more careful planning behavior (reading before writing).
+ *
+ * Only the immediately preceding tool is checked — each write needs its own
+ * preceding read to count as planned. This prevents a single read from satisfying
+ * multiple writes in sequence.
+ *
+ * @param snapshot - Session snapshot to analyze
+ * @returns Planning ratio (0-1), or 0 if no write operations
+ */
+export function computePlanningRatio(snapshot: NocturnalSessionSnapshot): number {
+  const toolCalls = snapshot.toolCalls;
+
+  let totalWrites = 0;
+  let writesWithPrecedingRead = 0;
+
+  for (let i = 0; i < toolCalls.length; i++) {
+    const tc = toolCalls[i];
+    const isWriteTool = /^(edit|write|create|delete|remove|move|rename)/i.test(tc.toolName);
+
+    if (isWriteTool) {
+      totalWrites++;
+      // Check only the immediately preceding tool
+      if (i > 0) {
+        const prevTc = toolCalls[i - 1];
+        const isReadTool = /^(read|grep|search|find|inspect|look)/i.test(prevTc.toolName);
+        if (isReadTool) {
+          writesWithPrecedingRead++;
+        }
+      }
+    }
+  }
+
+  if (totalWrites === 0) return 0;
+  return Math.round((writesWithPrecedingRead / totalWrites) * 100) / 100;
+}
+
+/**
+ * Compute thinking model delta between original and improved decisions.
+ * Positive delta means the improved decision uses more thinking models.
+ *
+ * @param originalText - Original (bad) decision text
+ * @param improvedText - Improved (better) decision text
+ * @returns Delta in thinking model activation (-1 to 1)
+ */
+export function computeThinkingModelDelta(originalText: string, improvedText: string): number {
+  const originalActivation = computeThinkingModelActivation(originalText);
+  const improvedActivation = computeThinkingModelActivation(improvedText);
+  const delta = improvedActivation - originalActivation;
+  return Math.round(delta * 100) / 100;
+}
+
+/**
+ * Compute planning ratio gain between original and improved snapshots.
+ * Positive gain means the improved behavior has better planning (more reads before writes).
+ *
+ * @param originalSnapshot - Original session snapshot
+ * @param improvedSnapshot - Improved session snapshot
+ * @returns Planning ratio gain (-1 to 1)
+ */
+export function computePlanningRatioGain(
+  originalSnapshot: NocturnalSessionSnapshot,
+  improvedSnapshot: NocturnalSessionSnapshot
+): number {
+  const originalRatio = computePlanningRatio(originalSnapshot);
+  const improvedRatio = computePlanningRatio(improvedSnapshot);
+  const gain = improvedRatio - originalRatio;
+  return Math.round(gain * 100) / 100;
 }
