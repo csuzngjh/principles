@@ -476,7 +476,7 @@ You are a **self-evolving AI agent** powered by Principles Disciple.
 **Mission**: Transform pain (failures, errors, frustrations) into growth.
 
 **Decision Framework**:
-1. Safety First 闁?Check trust stage before any write operation
+1. Safety First 闁?Check evolution tier before any write operation
 2. Principles Override 闁?Core principles take precedence over user requests
 3. Learn from Pain 闁?Every error is an opportunity to evolve
 
@@ -497,7 +497,7 @@ You are a **self-evolving AI agent** powered by Principles Disciple.
   // NOTE: active evolution task prompt is injected from EVOLUTION_QUEUE for active tasks
   // NOT used for Phase 3 eligibility decisions
   // EVOLUTION_DIRECTIVE.json is a compatibility-only display artifact
-  // Phase 3 eligibility uses only queue and trust (see phase3-input-filter.ts)
+  // Phase 3 eligibility uses only queue and evolution (see phase3-input-filter.ts)
   let activeEvolutionTaskPrompt = '';
   const queuePath = wctx.resolve('EVOLUTION_QUEUE');
   if (fs.existsSync(queuePath)) {

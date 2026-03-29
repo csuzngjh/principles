@@ -161,7 +161,7 @@ export interface EvolutionConfig {
   /** 信任分系统双轨运行时的配置 */
   dualTrack: {
     enabled: boolean;
-    primarySystem: 'trust' | 'evolution';  // 主决策系统
+    primarySystem: 'evolution';  // 主决策系统 (trust 已废弃)
   };
 }
 

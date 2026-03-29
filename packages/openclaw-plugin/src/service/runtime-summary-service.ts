@@ -259,7 +259,6 @@ export class RuntimeSummaryService {
         timeoutRate: trajectoryStats.failures > 0
           ? trajectoryStats.failures / (trajectoryStats.assistantTurns + trajectoryStats.userTurns || 1)
           : 0,
-        trustChanges: 0, // Not tracked in current trajectory schema
         lastUpdated: trajectoryStats.lastIngestAt ?? generatedAt,
       },
       dailyStats: {

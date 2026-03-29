@@ -25,7 +25,6 @@ export interface AnalyticsTruth {
     totalTasks: number;
     successRate: number;
     timeoutRate: number;
-    trustChanges: number;
     lastUpdated: string;
   };
   dailyStats: {

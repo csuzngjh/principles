@@ -267,13 +267,12 @@ function showHelp(isZh: boolean): string {
 
 **单项控制**:
 \`/pd-context thinking on/off\` - 开关思维模型
-\`/pd-context trust on/off\` - 开关信任分数
 \`/pd-context reflection on/off\` - 开关反思日志
 \`/pd-context focus full/summary/off\` - 设置项目上下文模式
 
 **预设模式**:
-\`/pd-context minimal\` - 最小模式（仅信任分数）
-\`/pd-context standard\` - 标准模式（原则+思维模型+信任分数）
+\`/pd-context minimal\` - 最小模式（仅核心原则）
+\`/pd-context standard\` - 标准模式（原则+思维模型）
 \`/pd-context full\` - 完整模式（全部开启）
 
 **注意**: 核心原则始终注入，不可关闭。
@@ -287,13 +286,12 @@ function showHelp(isZh: boolean): string {
 
 **Individual Control**:
 \`/pd-context thinking on/off\` - Toggle Thinking OS
-\`/pd-context trust on/off\` - Toggle Trust Score
 \`/pd-context reflection on/off\` - Toggle Reflection Log
 \`/pd-context focus full/summary/off\` - Set Project Context mode
 
 **Presets**:
-\`/pd-context minimal\` - Minimal mode (trust score only)
-\`/pd-context standard\` - Standard mode (principles + thinking + trust)
+\`/pd-context minimal\` - Minimal mode (core principles only)
+\`/pd-context standard\` - Standard mode (principles + thinking)
 \`/pd-context full\` - Full mode (all enabled)
 
 **Note**: Core Principles are always injected and cannot be disabled.
