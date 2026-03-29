@@ -660,8 +660,10 @@ export function advancePromotion(
       createdAt: existingIdx >= 0
         ? registry.promotions[existingIdx].createdAt
         : now,
-      shadowStartedAt: targetState === 'shadow_ready' || targetState === 'promotable'
-        ? now
+      shadowStartedAt: (targetState === 'shadow_ready' || targetState === 'promotable')
+        ? (existingIdx >= 0 && registry.promotions[existingIdx].shadowStartedAt
+          ? registry.promotions[existingIdx].shadowStartedAt  // preserve original timestamp
+          : now)  // first entry into shadow
         : existingIdx >= 0
           ? registry.promotions[existingIdx].shadowStartedAt
           : undefined,

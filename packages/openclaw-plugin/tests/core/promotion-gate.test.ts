@@ -340,6 +340,36 @@ describe('promotion-gate', () => {
       expect(promotion2.state).toBe('shadow_ready');
       expect(promotion2.promotionId).toBe(promotion1.promotionId);
     });
+
+    it('preserves original shadowStartedAt on repeated advancePromotion calls', () => {
+      const { checkpointId } = createCheckpointWithEval({
+        delta: 0.15,
+        verdict: 'pass',
+        candidateScore: 0.85,
+      });
+
+      // First advance: candidate_only → shadow_ready (sets shadowStartedAt)
+      const p1 = advancePromotion(stateDir, {
+        checkpointId,
+        targetProfile: 'local-reader',
+        baselineMetrics: DEFAULT_BASELINE_METRICS,
+        orchestratorReviewPassed: true,
+      });
+      expect(p1.state).toBe('shadow_ready');
+      expect(p1.shadowStartedAt).toBeDefined();
+      const originalShadowStartedAt = p1.shadowStartedAt;
+
+      // Advance again: shadow_ready → shadow_ready (shadow window not elapsed)
+      // This MUST NOT reset shadowStartedAt
+      const p2 = advancePromotion(stateDir, {
+        checkpointId,
+        targetProfile: 'local-reader',
+        baselineMetrics: DEFAULT_BASELINE_METRICS,
+        orchestratorReviewPassed: true,
+      });
+      expect(p2.state).toBe('shadow_ready');
+      expect(p2.shadowStartedAt).toBe(originalShadowStartedAt);
+    });
   });
 
   // -------------------------------------------------------------------------

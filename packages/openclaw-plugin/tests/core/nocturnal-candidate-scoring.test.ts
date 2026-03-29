@@ -118,6 +118,36 @@ describe('scoreCandidate', () => {
     // With higher weight on principleAlignment, aggregate should be higher for aligned candidates
     expect(scores.aggregate).toBeGreaterThan(0);
   });
+
+  it('does not crash when badDecision is undefined — lowers score instead', () => {
+    const candidate = makeCandidate({ badDecision: undefined as unknown as string });
+    const judgment = makeJudgment(0);
+    const scores = scoreCandidate(candidate, judgment);
+
+    expect(scores.schemaCompleteness).toBeLessThan(1.0);
+    expect(scores.aggregate).toBeGreaterThanOrEqual(0);
+  });
+
+  it('does not crash when betterDecision is undefined — lowers score instead', () => {
+    const candidate = makeCandidate({ betterDecision: undefined as unknown as string });
+    const judgment = makeJudgment(0);
+    const scores = scoreCandidate(candidate, judgment);
+
+    expect(scores.schemaCompleteness).toBeLessThan(1.0);
+    expect(scores.aggregate).toBeGreaterThanOrEqual(0);
+  });
+
+  it('does not crash when both badDecision and betterDecision are undefined', () => {
+    const candidate = makeCandidate({
+      badDecision: undefined as unknown as string,
+      betterDecision: undefined as unknown as string,
+    });
+    const judgment = makeJudgment(0);
+    const scores = scoreCandidate(candidate, judgment);
+
+    expect(scores.schemaCompleteness).toBeLessThan(1.0);
+    expect(scores.aggregate).toBeGreaterThanOrEqual(0);
+  });
 });
 
 // ---------------------------------------------------------------------------
