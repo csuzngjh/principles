@@ -67,8 +67,8 @@ describe('nocturnal-train command', () => {
     rmdir(tmpDir);
   });
 
-  it('persists durable spec files for manual create-experiment flow', () => {
-    const result = handleNocturnalTrainCommand(
+  it('persists durable spec files for manual create-experiment flow', async () => {
+    const result = await handleNocturnalTrainCommand(
       makeCtx(
         tmpDir,
         'create-experiment --backend=peft-trl-orpo --family=qwen2.5-7b-reader --dataset=export-123'
@@ -84,7 +84,7 @@ describe('nocturnal-train command', () => {
     const pathLines = result.text
       .split('\n')
       .map((line) => line.trim())
-      .map((line) => line.replace(/^-+\s*/, ''))
+      .map((line) => line.replace(/^-+ \s*/, ''))
       .filter((line) => path.isAbsolute(line));
 
     expect(pathLines).toHaveLength(2);

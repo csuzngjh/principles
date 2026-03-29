@@ -331,51 +331,91 @@ export async function executeTrainer(
       };
     }
 
-    // Execute the Python trainer
-    const { exec } = await import('child_process');
-    const { promisify } = await import('util');
-    const execAsync = promisify(exec);
+    // Execute the Python trainer using spawn (streaming).
+    const { spawn } = await import('child_process');
+    // - stdout is collected into a fixed-size buffer (1MB max) to prevent OOM from training logs
+    // - stderr is piped directly to parent stderr so it never accumulates in memory
+    // - Non-zero exit codes are handled with clear error messages
+    const timeoutMs = (spec.budget.maxWallClockMinutes * 60 * 1000) + 30000;
+    const pythonExecutable = process.platform === 'win32' ? 'python' : 'python3';
+    const MAX_STDOUT_BUFFER = 1 * 1024 * 1024; // 1MB cap
 
-    const cmd = `python "${scriptPath}" --spec "${specPath}" --output-dir "${spec.outputDir}"`;
+    const trainerResult = await new Promise<
+      import('./external-training-contract.js').TrainingExperimentResult
+    >((resolve, reject) => {
+      const proc = spawn(pythonExecutable, [scriptPath, '--spec', specPath, '--output-dir', spec.outputDir]);
 
-    const { stdout, stderr } = await execAsync(cmd, {
-      timeout: (spec.budget.maxWallClockMinutes * 60 * 1000) + 30000, // timeout + 30s buffer
+      // Collect stdout with size cap to prevent OOM from huge log output
+      const stdoutChunks: Buffer[] = [];
+      let stdoutSize = 0;
+
+      proc.stdout.on('data', (chunk: Buffer) => {
+        const remaining = MAX_STDOUT_BUFFER - stdoutSize;
+        if (remaining > 0) {
+          stdoutChunks.push(chunk.slice(0, remaining));
+          stdoutSize += Math.min(chunk.length, remaining);
+        }
+      });
+
+      // Pipe stderr directly — training logs must NOT accumulate in memory
+      proc.stderr.pipe(process.stderr);
+
+      const timer = setTimeout(() => {
+        proc.kill();
+        reject(new Error(`Trainer timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+
+      proc.on('close', (code) => {
+        clearTimeout(timer);
+        if (code === 0) {
+          const stdout = Buffer.concat(stdoutChunks).toString('utf-8');
+          const trimmed = stdout.trim();
+          if (trimmed) {
+            try {
+              resolve(JSON.parse(trimmed) as import('./external-training-contract.js').TrainingExperimentResult);
+              return;
+            } catch {
+              // fall through to result file
+            }
+          }
+          // Fallback: try result file
+          if (fs.existsSync(resultFilePath)) {
+            try {
+              const content = fs.readFileSync(resultFilePath, 'utf-8');
+              resolve(JSON.parse(content) as import('./external-training-contract.js').TrainingExperimentResult);
+              return;
+            } catch {
+              // fall through to error
+            }
+          }
+          reject(
+            new Error(
+              `Trainer stdout was not valid JSON and result file also invalid. ` +
+                `result file: ${resultFilePath}`
+            )
+          );
+        } else {
+          // Non-zero exit — try result file as last resort
+          if (fs.existsSync(resultFilePath)) {
+            try {
+              const content = fs.readFileSync(resultFilePath, 'utf-8');
+              resolve(JSON.parse(content) as import('./external-training-contract.js').TrainingExperimentResult);
+            } catch {
+              reject(new Error(`Trainer exited with code ${code} and result file was invalid: ${resultFilePath}`));
+            }
+          } else {
+            reject(new Error(`Trainer exited with code ${code} and no result file found at: ${resultFilePath}`));
+          }
+        }
+      });
+
+      proc.on('error', (err) => {
+        clearTimeout(timer);
+        reject(new Error(`Trainer spawn failed: ${err.message}`));
+      });
     });
 
-    if (stderr) {
-      // Training logs go to stderr - we don't process them, just log for debugging
-      console.error(`[trainer] training logs (stderr): ${stderr.substring(0, 500)}`);
-    }
-
-    // Try to parse stdout as JSON first
-    const trimmedStdout = stdout.trim();
-    if (trimmedStdout) {
-      try {
-        const result = JSON.parse(trimmedStdout);
-        return result as import('./external-training-contract.js').TrainingExperimentResult;
-      } catch {
-        // stdout wasn't clean JSON, try result file
-      }
-    }
-
-    // Fallback: try to read result file
-    if (fs.existsSync(resultFilePath)) {
-      try {
-        const resultContent = fs.readFileSync(resultFilePath, 'utf-8');
-        const result = JSON.parse(resultContent);
-        return result as import('./external-training-contract.js').TrainingExperimentResult;
-      } catch {
-        throw new Error(
-          `Failed to parse trainer result from stdout or result file: ${resultFilePath}. ` +
-            `stdout was: ${trimmedStdout.substring(0, 200)}`
-        );
-      }
-    }
-
-    throw new Error(
-      `Trainer output was not valid JSON and no result file found. ` +
-        `stdout: ${trimmedStdout.substring(0, 200)}, result file: ${resultFilePath}`
-    );
+    return trainerResult;
   } finally {
     // Clean up spec file after execution
     if (fs.existsSync(specPath)) {
@@ -412,15 +452,25 @@ export interface ProcessTrainerResultParams {
  * 3. Return checkpoint for eval attachment
  *
  * @param params - Processing parameters
- * @returns The registered checkpoint
+ * @returns The registered checkpoint, or null for dry_run (no checkpoint produced)
  *
  * @throws Error if validation fails
  * @throws Error if checkpoint registration fails
  */
 export function processTrainerResult(
   params: ProcessTrainerResultParams
-): { checkpointId: string; checkpointRef: string } {
+): { checkpointId: string; checkpointRef: string } | null {
   const { spec, trainRunId, result, stateDir } = params;
+
+  // --- Handle dry_run BEFORE validation (it has no checkpoint and should not be validated) ---
+  if (result.status === 'dry_run') {
+    // Dry-run: mark completed (no checkpoint expected) and return null.
+    // This is a supported non-error outcome — upper layers distinguish it from
+    // completed (which has a checkpoint) by checking the return value.
+    startTrainingRun(stateDir, trainRunId);
+    completeTrainingRun(stateDir, trainRunId);
+    return null;
+  }
 
   // --- Validate result against spec (fail-closed) ---
   const validation = validateTrainerResult(spec, result);
@@ -440,35 +490,34 @@ export function processTrainerResult(
   }
 
   // --- Update training run status ---
-  // First transition from pending -> running
+  // Transition pending -> running (required before 'completed')
   startTrainingRun(stateDir, trainRunId);
 
-  if (result.status === 'completed') {
-    completeTrainingRun(stateDir, trainRunId);
-  } else if (result.status === 'failed') {
+  if (result.status === 'failed') {
     failTrainingRun(stateDir, trainRunId, result.failureReason ?? 'Unknown failure');
     throw new Error(`Training failed: ${result.failureReason}`);
-  } else if (result.status === 'dry_run') {
-    // Dry-run: still mark completed but with no checkpoint
-    completeTrainingRun(stateDir, trainRunId);
-    throw new Error(
-      `Dry-run completed without producing a checkpoint. ` +
-        `To produce a deployable checkpoint, use 'peft-trl-orpo' or 'unsloth-orpo' backend.`
-    );
   }
 
-  // --- Register checkpoint ---
+  // result.status === 'completed' (or any other non-failed/dry_run) — proceed to checkpoint
   if (!result.checkpointId || !result.artifact) {
+    // Mark run failed since it didn't produce a checkpoint (run is in 'running' state)
+    failTrainingRun(stateDir, trainRunId, 'Trainer result is marked completed but missing checkpointId or artifact');
     throw new Error(
       `Trainer result is marked 'completed' but missing checkpointId or artifact.`
     );
   }
 
+  // --- Register checkpoint BEFORE marking run completed ---
+  // Ordering matters: if registerCheckpoint throws, run stays in 'running' state
+  // (not 'completed'), making the failure visible in registry audits.
   const checkpoint = registerCheckpoint(stateDir, {
     trainRunId,
     targetModelFamily: spec.targetModelFamily,
     artifactPath: result.artifact.artifactPath,
   });
+
+  // Checkpoint registered successfully — now mark run completed
+  completeTrainingRun(stateDir, trainRunId);
 
   return {
     checkpointId: checkpoint.checkpointId,
@@ -525,12 +574,13 @@ export class TrainingProgram {
 
   /**
    * Process a trainer result and register the checkpoint.
+   * Returns null for dry_run (no checkpoint produced).
    */
   processResult(params: {
     spec: TrainingExperimentSpec;
     trainRunId: string;
     result: TrainingExperimentResult;
-  }): { checkpointId: string; checkpointRef: string } {
+  }): { checkpointId: string; checkpointRef: string } | null {
     return processTrainerResult({
       ...params,
       stateDir: this.stateDir,

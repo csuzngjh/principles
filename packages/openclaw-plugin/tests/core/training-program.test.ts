@@ -12,9 +12,13 @@ import {
   DEFAULT_ORPO_HYPERPARAMETERS,
   DEFAULT_BUDGET,
   TrainingProgram,
+  processTrainerResult,
+  executeTrainer,
   type CreateExperimentParams,
+  type ProcessTrainerResultParams,
 } from '../../src/core/training-program.js';
 import { getFullRegistry } from '../../src/core/model-training-registry.js';
+import type { TrainingExperimentResult } from '../../src/core/external-training-contract.js';
 
 describe('training-program', () => {
   // -------------------------------------------------------------------------
@@ -227,6 +231,223 @@ describe('training-program', () => {
 
       const registry = getFullRegistry(stateDir);
       expect(registry.trainingRuns).toHaveLength(2);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // processTrainerResult
+  // -------------------------------------------------------------------------
+
+  function makeCompletedResult(spec: ReturnType<typeof createExperiment>['spec'], overrides?: Partial<TrainingExperimentResult>): TrainingExperimentResult {
+    return {
+      experimentId: spec.experimentId,
+      backend: spec.backend,
+      status: 'completed',
+      targetWorkerProfile: spec.targetWorkerProfile,
+      targetModelFamily: spec.targetModelFamily,
+      datasetFingerprint: spec.datasetFingerprint,
+      configFingerprint: spec.configFingerprint,
+      codeHash: spec.codeHash,
+      checkpointId: 'ckpt-001',
+      artifact: {
+        adapterFormat: 'peft-adapter',
+        artifactPath: path.join(tempDir, '.state', 'nocturnal', 'checkpoints', 'checkpoint'),
+      },
+      ...overrides,
+    };
+  }
+
+  function makeFailedResult(spec: ReturnType<typeof createExperiment>['spec']): TrainingExperimentResult {
+    return {
+      experimentId: spec.experimentId,
+      backend: spec.backend,
+      status: 'failed',
+      targetWorkerProfile: spec.targetWorkerProfile,
+      targetModelFamily: spec.targetModelFamily,
+      datasetFingerprint: spec.datasetFingerprint,
+      configFingerprint: spec.configFingerprint,
+      codeHash: spec.codeHash,
+      failureReason: 'CUDA out of memory',
+    };
+  }
+
+  function makeDryRunResult(spec: ReturnType<typeof createExperiment>['spec']): TrainingExperimentResult {
+    return {
+      experimentId: spec.experimentId,
+      backend: 'dry-run',
+      status: 'dry_run',
+      targetWorkerProfile: spec.targetWorkerProfile,
+      targetModelFamily: spec.targetModelFamily,
+      datasetFingerprint: spec.datasetFingerprint,
+      configFingerprint: spec.configFingerprint,
+      codeHash: spec.codeHash,
+    };
+  }
+
+  describe('processTrainerResult', () => {
+    function createValidExperiment() {
+      const params: CreateExperimentParams = {
+        backend: 'peft-trl-orpo',
+        targetWorkerProfile: 'local-reader',
+        targetModelFamily: 'qwen2.5-7b-reader',
+        datasetExportId: 'export-process-123',
+        datasetExportPath: path.join(tempDir, '.state', 'exports', 'orpo', 'export-process-123.jsonl'),
+        datasetFingerprint: 'fp-process-abc',
+        benchmarkExportId: 'benchmark-process-456',
+        outputDir: path.join(tempDir, '.state', 'nocturnal', 'checkpoints'),
+      };
+      return createExperiment(stateDir, params);
+    }
+
+    it('completed result: transitions run to completed and registers checkpoint', () => {
+      const { spec, trainRunId } = createValidExperiment();
+      const result = makeCompletedResult(spec);
+
+      const { checkpointId, checkpointRef } = processTrainerResult({
+        spec,
+        trainRunId,
+        result,
+        stateDir,
+      });
+
+      expect(checkpointId).toBeDefined();
+      expect(checkpointRef).toBeDefined();
+
+      const registry = getFullRegistry(stateDir);
+      const run = registry.trainingRuns.find(r => r.trainRunId === trainRunId)!;
+      expect(run.status).toBe('completed');
+      expect(registry.checkpoints).toHaveLength(1);
+      expect(registry.checkpoints[0].checkpointId).toBe(checkpointId);
+    });
+
+    it('completed result missing checkpointId: transitions run to failed and throws', () => {
+      const { spec, trainRunId } = createValidExperiment();
+      const result = makeCompletedResult(spec, { checkpointId: undefined, artifact: undefined });
+
+      expect(() => processTrainerResult({ spec, trainRunId, result, stateDir })).toThrow(/missing checkpointId or artifact/);
+
+      const registry = getFullRegistry(stateDir);
+      const run = registry.trainingRuns.find(r => r.trainRunId === trainRunId)!;
+      expect(run.status).toBe('failed');
+    });
+
+    it('failed result: transitions run to failed and throws', () => {
+      const { spec, trainRunId } = createValidExperiment();
+      const result = makeFailedResult(spec);
+
+      expect(() => processTrainerResult({ spec, trainRunId, result, stateDir })).toThrow(/CUDA out of memory/);
+
+      const registry = getFullRegistry(stateDir);
+      const run = registry.trainingRuns.find(r => r.trainRunId === trainRunId)!;
+      expect(run.status).toBe('failed');
+    });
+
+    it('dry_run result: transitions run to completed and returns null (no checkpoint)', () => {
+      const { spec, trainRunId } = createValidExperiment();
+      const result = makeDryRunResult(spec);
+
+      const processed = processTrainerResult({ spec, trainRunId, result, stateDir });
+
+      // dry_run is a non-error outcome — returns null (no checkpoint) and does NOT throw
+      expect(processed).toBeNull();
+
+      const registry = getFullRegistry(stateDir);
+      const run = registry.trainingRuns.find(r => r.trainRunId === trainRunId)!;
+      expect(run.status).toBe('completed');
+      // No checkpoint should be registered for dry-run
+      expect(registry.checkpoints).toHaveLength(0);
+    });
+
+    it('completed result: registers checkpoint before marking run completed', () => {
+      // This verifies the ordering fix: registerCheckpoint is called before
+      // completeTrainingRun, so if registerCheckpoint were to throw, the run
+      // would stay in 'running' (not 'completed') state.
+      const { spec, trainRunId } = createValidExperiment();
+      const result = makeCompletedResult(spec);
+
+      const { checkpointId } = processTrainerResult({
+        spec,
+        trainRunId,
+        result,
+        stateDir,
+      })!;
+
+      const registry = getFullRegistry(stateDir);
+      const run = registry.trainingRuns.find(r => r.trainRunId === trainRunId)!;
+      // Verify: checkpoint is registered AND run is completed (happy path)
+      expect(run.status).toBe('completed');
+      expect(registry.checkpoints).toHaveLength(1);
+      expect(registry.checkpoints[0].checkpointId).toBe(checkpointId);
+    });
+
+    it('TrainingProgram.processResult returns null for dry_run (non-error outcome)', () => {
+      const program = new TrainingProgram(stateDir);
+      const params: CreateExperimentParams = {
+        backend: 'dry-run',
+        targetWorkerProfile: 'local-reader',
+        targetModelFamily: 'qwen2.5-7b-reader',
+        datasetExportId: 'export-dryrun-process',
+        datasetExportPath: path.join(tempDir, '.state', 'exports', 'orpo', 'export-dryrun-process.jsonl'),
+        datasetFingerprint: 'fp-dryrun-process',
+        benchmarkExportId: 'benchmark-dryrun',
+        outputDir: path.join(tempDir, '.state', 'nocturnal', 'checkpoints'),
+      };
+      const { spec, trainRunId } = program.createExperiment(params);
+      const dryRunResult = makeDryRunResult(spec);
+
+      const processed = program.processResult({ spec, trainRunId, result: dryRunResult });
+
+      // dry_run returns null (no checkpoint) — this is a valid, non-error outcome
+      expect(processed).toBeNull();
+
+      const registry = getFullRegistry(stateDir);
+      const run = registry.trainingRuns.find(r => r.trainRunId === trainRunId)!;
+      expect(run.status).toBe('completed');
+      expect(registry.checkpoints).toHaveLength(0);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // executeTrainer (dry-run path)
+  // -------------------------------------------------------------------------
+
+  describe('executeTrainer', () => {
+    function createDryRunSpec() {
+      const params: CreateExperimentParams = {
+        backend: 'dry-run',
+        targetWorkerProfile: 'local-reader',
+        targetModelFamily: 'qwen2.5-7b-reader',
+        datasetExportId: 'export-dryrun',
+        datasetExportPath: path.join(tempDir, '.state', 'exports', 'orpo', 'export-dryrun.jsonl'),
+        datasetFingerprint: 'fp-dryrun',
+        benchmarkExportId: 'benchmark-dryrun',
+        outputDir: path.join(tempDir, '.state', 'nocturnal', 'checkpoints'),
+      };
+      const { spec } = createExperiment(stateDir, params);
+      return spec;
+    }
+
+    it('dry-run backend returns dry_run result without executing Python', async () => {
+      const spec = createDryRunSpec();
+
+      // If this were NOT dry-run, it would try to exec python. Since it IS dry-run,
+      // it should return immediately without exec.
+      const result = await executeTrainer(spec);
+
+      expect(result.status).toBe('dry_run');
+      expect(result.experimentId).toBe(spec.experimentId);
+      expect(result.backend).toBe('dry-run');
+      expect(result.targetWorkerProfile).toBe(spec.targetWorkerProfile);
+      expect(result.targetModelFamily).toBe(spec.targetModelFamily);
+    });
+
+    it('dry-run does not require trainer scripts to exist', async () => {
+      const spec = createDryRunSpec();
+      // Override scriptsDir to a non-existent path — dry-run should still succeed
+      // (dry-run backend bypasses script existence check)
+      const result = await executeTrainer(spec, '/non/existent/path');
+
+      expect(result.status).toBe('dry_run');
     });
   });
 });

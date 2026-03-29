@@ -24,7 +24,7 @@
 
 import * as path from 'path';
 import * as fs from 'fs';
-import { execSync, execFileSync } from 'child_process';
+import { execFileSync, spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
@@ -129,7 +129,7 @@ function formatCheckpoint(cp: ReturnType<typeof getCheckpoint>, zh: boolean): st
   return lines.join('\n  ');
 }
 
-export function handleNocturnalTrainCommand(ctx: PluginCommandContext): PluginCommandResult {
+export async function handleNocturnalTrainCommand(ctx: PluginCommandContext): Promise<PluginCommandResult> {
   const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
   const zh = isZh(ctx);
   const args = (ctx.args || '').trim();
@@ -302,8 +302,6 @@ Hardware tiers:
       // This closes the gap in the create-experiment -> trainer -> import-result chain.
       // NOTE: This blocks until training completes (could be minutes).
       if (runNow) {
-        // Inline synchronous trainer execution using execSync
-        // (executeTrainer is async; we inline it here to stay in sync command handler)
         const spec = createResult.spec;
         const baseDir = TRAINER_SCRIPTS_DIR;
         const scriptPath = path.join(baseDir, 'main.py');
@@ -334,27 +332,81 @@ Hardware tiers:
               createdAt: new Date().toISOString(),
             };
           } else {
-            // Execute trainer synchronously
-            const cmd = `python "${scriptPath}" --spec "${specPath}" --output-dir "${outputDir}"`;
-            const stdout = execSync(cmd, {
-              timeout: (spec.budget.maxWallClockMinutes * 60 * 1000) + 30000,
-              encoding: 'utf-8',
+            // Execute trainer using spawn (streaming, no full log buffering).
+            // stdout is collected into a fixed-size buffer (1MB) to avoid OOM.
+            // stderr is piped directly to parent stderr to avoid memory accumulation.
+            const timeoutMs = (spec.budget.maxWallClockMinutes * 60 * 1000) + 30000;
+            const pythonExe = process.platform === 'win32' ? 'python' : 'python3';
+            const MAX_STDOUT_BUFFER = 1 * 1024 * 1024; // 1MB cap
+
+            trainerResult = await new Promise((resolve, reject) => {
+              const proc = spawn(pythonExe, [scriptPath, '--spec', specPath, '--output-dir', outputDir], {
+                timeout: timeoutMs,
+              });
+
+              // Collect stdout with size cap to prevent OOM
+              const stdoutChunks: Buffer[] = [];
+              let stdoutSize = 0;
+
+              proc.stdout.on('data', (chunk: Buffer) => {
+                const remaining = MAX_STDOUT_BUFFER - stdoutSize;
+                if (remaining > 0) {
+                  stdoutChunks.push(chunk.slice(0, remaining));
+                  stdoutSize += Math.min(chunk.length, remaining);
+                }
+              });
+
+              // Pipe stderr directly — training logs can be large, don't buffer
+              proc.stderr.pipe(process.stderr);
+
+              const timer = setTimeout(() => {
+                proc.kill();
+                reject(new Error(`Trainer timed out after ${timeoutMs}ms`));
+              }, timeoutMs);
+
+              proc.on('close', (code) => {
+                clearTimeout(timer);
+                if (code === 0) {
+                  const stdout = Buffer.concat(stdoutChunks).toString('utf-8');
+                  const trimmed = stdout.trim();
+                  if (trimmed) {
+                    try {
+                      resolve(JSON.parse(trimmed));
+                      return;
+                    } catch {
+                      // fall through to result file
+                    }
+                  }
+                  // Fallback to result file
+                  if (fs.existsSync(resultFilePath)) {
+                    try {
+                      resolve(JSON.parse(fs.readFileSync(resultFilePath, 'utf-8')));
+                      return;
+                    } catch {
+                      reject(new Error(`Trainer stdout was not valid JSON and result file also invalid: ${resultFilePath}`));
+                      return;
+                    }
+                  }
+                  reject(new Error(`Trainer produced no parseable stdout and no result file found at: ${resultFilePath}`));
+                } else {
+                  // Non-zero exit: try result file as last resort
+                  if (fs.existsSync(resultFilePath)) {
+                    try {
+                      resolve(JSON.parse(fs.readFileSync(resultFilePath, 'utf-8')));
+                    } catch {
+                      reject(new Error(`Trainer exited with code ${code} and result file was invalid`));
+                    }
+                  } else {
+                    reject(new Error(`Trainer exited with code ${code} and no result file found`));
+                  }
+                }
+              });
+
+              proc.on('error', (err) => {
+                clearTimeout(timer);
+                reject(new Error(`Trainer spawn failed: ${err.message}`));
+              });
             });
-            const trimmedStdout = stdout.trim();
-            if (trimmedStdout) {
-              try {
-                trainerResult = JSON.parse(trimmedStdout);
-              } catch {
-                // fall through to result file
-              }
-            }
-            if (!trainerResult && fs.existsSync(resultFilePath)) {
-              const content = fs.readFileSync(resultFilePath, 'utf-8');
-              trainerResult = JSON.parse(content);
-            }
-            if (!trainerResult) {
-              throw new Error(`Trainer output was not valid JSON and no result file found. stdout: ${trimmedStdout.substring(0, 200)}, result file: ${resultFilePath}`);
-            }
           }
         } catch (err: any) {
           return {
@@ -370,7 +422,8 @@ Hardware tiers:
         }
 
         // Process trainer result (register checkpoint)
-        let processed: { checkpointId: string; checkpointRef: string };
+        // dry_run returns null (no checkpoint); other statuses throw on error
+        let processed: { checkpointId: string; checkpointRef: string } | null;
         try {
           processed = program.processResult({
             spec: createResult.spec,
@@ -382,6 +435,27 @@ Hardware tiers:
             text: zh
               ? `❌ 结果导入失败: ${err.message}`
               : `❌ Result import failed: ${err.message}`,
+          };
+        }
+
+        if (processed === null) {
+          // dry_run completed with no checkpoint — this is a non-error outcome
+          return {
+            text: zh
+              ? `✅ Dry-run 完成（未产生 checkpoint）
+实验 ID: ${createResult.spec.experimentId}
+训练 Run ID: ${createResult.trainRunId}
+状态: ${trainerResult.status}
+
+下一步:
+若需产生可部署的 checkpoint，请使用 --backend=peft-trl-orpo 或 --backend=unsloth-orpo 重试。`
+              : `✅ Dry-run complete (no checkpoint produced)
+Experiment ID: ${createResult.spec.experimentId}
+Training Run ID: ${createResult.trainRunId}
+Status: ${trainerResult.status}
+
+Next steps:
+To produce a deployable checkpoint, retry with --backend=peft-trl-orpo or --backend=unsloth-orpo.`,
           };
         }
 
@@ -520,16 +594,41 @@ Next steps:
 
       // Process the result
       const program = new TrainingProgram(workspaceDir);
+      let processed: { checkpointId: string; checkpointRef: string } | null;
       try {
-        const processed = program.processResult({
+        processed = program.processResult({
           spec,
           trainRunId: run.trainRunId,
           result,
         });
-
+      } catch (err: any) {
         return {
           text: zh
-            ? `✅ 结果已导入
+            ? `❌ 导入失败: ${err.message}`
+            : `❌ Import failed: ${err.message}`,
+        };
+      }
+
+      if (processed === null) {
+        // dry_run: non-error outcome with no checkpoint
+        return {
+          text: zh
+            ? `✅ Dry-run 结果已导入（无 checkpoint）
+Status: ${result.status}
+训练 Run: ${run.trainRunId}
+
+若需产生可部署的 checkpoint，请使用 --backend=peft-trl-orpo 或 --backend=unsloth-orpo 重试。`
+            : `✅ Dry-run result imported (no checkpoint)
+Status: ${result.status}
+Training Run: ${run.trainRunId}
+
+To produce a deployable checkpoint, retry with --backend=peft-trl-orpo or --backend=unsloth-orpo.`,
+        };
+      }
+
+      return {
+        text: zh
+          ? `✅ 结果已导入
 Status: ${result.status}
 Checkpoint ID: ${processed.checkpointId}
 Checkpoint Ref: ${processed.checkpointRef}
@@ -540,7 +639,7 @@ ${result.failureReason ? `Failure: ${result.failureReason}` : ''}
 下一步:
 1. 运行评估: /nocturnal-train attach-eval ${processed.checkpointId} --benchmark-id=<id> --delta=<number> --verdict=<pass|fail>
 2. 查看详情: /nocturnal-train show-lineage ${processed.checkpointId}`
-            : `✅ Result imported
+          : `✅ Result imported
 Status: ${result.status}
 Checkpoint ID: ${processed.checkpointId}
 Checkpoint Ref: ${processed.checkpointRef}
@@ -551,14 +650,7 @@ ${result.failureReason ? `Failure: ${result.failureReason}` : ''}
 Next steps:
 1. Run eval: /nocturnal-train attach-eval ${processed.checkpointId} --benchmark-id=<id> --delta=<number> --verdict=<pass|fail>
 2. View details: /nocturnal-train show-lineage ${processed.checkpointId}`,
-        };
-      } catch (err: any) {
-        return {
-          text: zh
-            ? `❌ 导入失败: ${err.message}`
-            : `❌ Import failed: ${err.message}`,
-        };
-      }
+      };
     }
 
     // ── Attach Eval ──────────────────────────────────────────────────────
