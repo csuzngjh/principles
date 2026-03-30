@@ -7,7 +7,7 @@ export const READ_ONLY_TOOL_NAMES = [
   'memory_recall', 'save_memory', 'todo_read', 'todo_write',
   'ask_user', 'ask_user_question',
   'deep_reflect',
-  'pd-status', 'trust', 'report',
+  'pd-status', 'report',
 ] as const;
 
 export const LOW_RISK_WRITE_TOOL_NAMES = [

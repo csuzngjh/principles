@@ -35,7 +35,6 @@ import { handleInitStrategy, handleManageOkr } from './commands/strategy.js';
 import { handleBootstrapTools, handleResearchTools } from './commands/capabilities.js';
 import { handleThinkingOs } from './commands/thinking-os.js';
 import { handleEvolveTask } from './commands/evolver.js';
-import { handleTrustCommand } from './commands/trust.js';
 import { handlePainCommand } from './commands/pain.js';
 import { handleContextCommand } from './commands/context.js';
 import { handleFocusCommand } from './commands/focus.js';
@@ -362,7 +361,6 @@ const plugin = {
 | 命令 | 用途 | 使用时机 |
 |------|------|----------|
 | \`/pd-status\` | 查看进化状态 | 想了解当前 GFI 和 Pain 情况 |
-| \`/pd-trust\` | 查看信任分数 | 想知道自己的权限等级 |
 | \`/pd-focus\` | 焦点文件管理 | 查看/压缩/回滚历史版本 |
 | \`/pd-export\` | 导出数据 | 导出 analytics/corrections/orpo |
 | \`/pd-samples\` | 审核纠错样本 | 查看待审核样本并批准/拒绝 |
@@ -399,12 +397,6 @@ const plugin = {
 /pd-context status
 \`\`\`
 
-**查看信任分数：**
-\`\`\`
-/pd-trust
-\`\`\`
-
----
 🔍 输入任意命令后加 \`help\` 可查看详细帮助，如 \`/pd-context help\`
 `.trim() };
         } else {
@@ -421,7 +413,6 @@ const plugin = {
 | Command | Purpose | When to Use |
 |---------|---------|-------------|
 | \`/pd-status\` | View evolution status | Check GFI and Pain status |
-| \`/pd-trust\` | View trust score | Check your permission level |
 | \`/pd-focus\` | Focus file management | View/compress/rollback history |
 | \`/pd-export\` | Export data | Export analytics/corrections/orpo |
 | \`/pd-samples\` | Review correction samples | Review pending correction samples |
@@ -458,24 +449,9 @@ const plugin = {
 /pd-context status
 \`\`\`
 
-**Check trust score:**
-\`\`\`
-/pd-trust
-\`\`\`
-
----
 🔍 Add \`help\` after any command for details, e.g., \`/pd-context help\`
 `.trim() };
         }
-      }
-    });
-
-    api.registerCommand({
-      name: "pd-trust",
-      description: getCommandDescription('pd-trust', language),
-      handler: (ctx) => {
-        const workspaceDir = api.resolvePath('.');
-        return { text: handleTrustCommand({ ...ctx, workspaceDir }) };
       }
     });
 

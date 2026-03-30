@@ -448,50 +448,37 @@ describe('EvolutionWorkerService', () => {
         });
     });
 
-    describe('Phase 3 Eligibility - Directive Exclusion', () => {
-        it('makes queue-only eligible when directive is missing', () => {
+    describe('Phase 3 Eligibility - Queue Only (Trust Removed)', () => {
+        it('makes queue eligible when tasks are valid', () => {
             const result = evaluatePhase3Inputs(
-                [{ id: 'task-1', status: 'completed', completed_at: '2026-03-25T10:00:00.000Z' }],
-                { score: 85, frozen: true }
+                [{ id: 'task-1', status: 'completed', completed_at: '2026-03-25T10:00:00.000Z' }]
             );
 
             expect(result.phase3ShadowEligible).toBe(true);
             expect(result.queueTruthReady).toBe(true);
-            expect(result.trustInputReady).toBe(true);
             expect(result.evolution.eligible).toHaveLength(1);
             expect(result.evolution.rejected).toHaveLength(0);
         });
 
-        it('makes queue-only eligible when directive is stale (production scenario)', () => {
-            // Production evidence shows directive stopped updating on 2026-03-22
-            // Phase 3 eligibility should still work based on queue and trust alone
+        it('makes queue eligible when directive is stale (production scenario)', () => {
             const result = evaluatePhase3Inputs(
-                [{ id: 'task-1', status: 'completed', completed_at: '2026-03-25T10:00:00.000Z' }],
-                { score: 85, frozen: true }
+                [{ id: 'task-1', status: 'completed', completed_at: '2026-03-25T10:00:00.000Z' }]
             );
 
-            // Directive state (stale vs fresh) should never affect eligibility
-            // Only queue and trust matter
             expect(result.phase3ShadowEligible).toBe(true);
             expect(result.queueTruthReady).toBe(true);
-            expect(result.trustInputReady).toBe(true);
         });
 
-        it('rejects empty queue regardless of directive state', () => {
-            const result = evaluatePhase3Inputs(
-                [],
-                { score: 85, frozen: true, lastUpdated: '2026-03-25' }
-            );
+        it('rejects empty queue', () => {
+            const result = evaluatePhase3Inputs([]);
 
             expect(result.phase3ShadowEligible).toBe(false);
             expect(result.queueTruthReady).toBe(false);
-            expect(result.trustInputReady).toBe(true);
         });
 
-        it('rejects invalid queue regardless of directive state', () => {
+        it('rejects invalid queue status', () => {
             const result = evaluatePhase3Inputs(
-                [{ id: 'task-1', status: 'invalid' }],
-                { score: 85, frozen: true, lastUpdated: '2026-03-25' }
+                [{ id: 'task-1', status: 'invalid' }]
             );
 
             expect(result.phase3ShadowEligible).toBe(false);
@@ -499,68 +486,29 @@ describe('EvolutionWorkerService', () => {
             expect(result.evolution.rejected[0].reasons).toContain('invalid_status');
         });
 
-        it('rejects when trust input is invalid regardless of directive', () => {
+        it('eligible requires queue with valid completed tasks', () => {
             const result = evaluatePhase3Inputs(
-                [{ id: 'task-1', status: 'completed', completed_at: '2026-03-25T10:00:00.000Z' }],
-                { score: null, frozen: false }
+                [{ id: 'task-1', status: 'completed', completed_at: '2026-03-25T10:00:00.000Z' }]
             );
 
-            expect(result.phase3ShadowEligible).toBe(false);
+            expect(result.phase3ShadowEligible).toBe(true);
             expect(result.queueTruthReady).toBe(true);
-            expect(result.trustInputReady).toBe(false);
-            expect(result.trust.rejectedReasons).toContain('missing_trust_score');
-            expect(result.trust.rejectedReasons).toContain('legacy_or_unfrozen_trust_schema');
-        });
-
-        it('requires both queue truth ready AND trust input ready for Phase 3', () => {
-            // Queue ready, trust not ready
-            const result1 = evaluatePhase3Inputs(
-                [{ id: 'task-1', status: 'completed', completed_at: '2026-03-25T10:00:00.000Z' }],
-                { score: null, frozen: false }
-            );
-            expect(result1.phase3ShadowEligible).toBe(false);
-            expect(result1.queueTruthReady).toBe(true);
-            expect(result1.trustInputReady).toBe(false);
-
-            // Trust ready, queue not ready
-            const result2 = evaluatePhase3Inputs(
-                [],
-                { score: 85, frozen: true }
-            );
-            expect(result2.phase3ShadowEligible).toBe(false);
-            expect(result2.queueTruthReady).toBe(false);
-            expect(result2.trustInputReady).toBe(true);
-
-            // Both ready
-            const result3 = evaluatePhase3Inputs(
-                [{ id: 'task-1', status: 'completed', completed_at: '2026-03-25T10:00:00.000Z' }],
-                { score: 85, frozen: true }
-            );
-            expect(result3.phase3ShadowEligible).toBe(true);
-            expect(result3.queueTruthReady).toBe(true);
-            expect(result3.trustInputReady).toBe(true);
         });
 
         it('does not accept directive as a parameter (API design)', () => {
-            // evaluatePhase3Inputs should only accept queue and trust
-            // This test verifies the function signature does NOT include directive
             const func = evaluatePhase3Inputs;
             const funcString = func.toString();
 
-            // Function should not have directive parameter in signature
             expect(funcString).not.toMatch(/directive\s*:/);
             expect(funcString).not.toMatch(/directive\s*\)/);
         });
 
         it('handles multiple queue items correctly', () => {
-            const result = evaluatePhase3Inputs(
-                [
-                    { id: 'task-1', status: 'completed', completed_at: '2026-03-25T10:00:00.000Z' },
-                    { id: 'task-2', status: 'in_progress', started_at: '2026-03-25T11:00:00.000Z' },
-                    { id: 'task-3', status: 'pending' }
-                ],
-                { score: 85, frozen: true }
-            );
+            const result = evaluatePhase3Inputs([
+                { id: 'task-1', status: 'completed', completed_at: '2026-03-25T10:00:00.000Z' },
+                { id: 'task-2', status: 'in_progress', started_at: '2026-03-25T11:00:00.000Z' },
+                { id: 'task-3', status: 'pending' }
+            ]);
 
             expect(result.phase3ShadowEligible).toBe(true);
             expect(result.evolution.eligible).toHaveLength(3);
