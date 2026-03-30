@@ -15,10 +15,6 @@ const mockEmitSync = vi.fn();
 describe('Subagent Hook', () => {
     const workspaceDir = '/mock/workspace';
 
-const mockTrust = {
-    recordSuccess: vi.fn(),
-};
-
 const mockTrajectory = {
     recordTaskOutcome: vi.fn(),
 };
@@ -35,7 +31,6 @@ const mockTrajectory = {
 
     const mockWctx = {
         workspaceDir,
-        trust: mockTrust,
         config: mockConfig,
         evolutionReducer: { emitSync: mockEmitSync },
         trajectory: mockTrajectory,
@@ -68,11 +63,6 @@ const mockTrajectory = {
 
         await handleSubagentEnded(mockEvent as any, mockCtx as any);
 
-        expect(mockTrust.recordSuccess).toHaveBeenCalledWith(
-            'subagent_success',
-            expect.objectContaining({ sessionId: 's1' }),
-            true
-        );
         expect(mockTrajectory.recordTaskOutcome).not.toHaveBeenCalled();
     });
 
@@ -85,7 +75,6 @@ const mockTrajectory = {
 
         await handleSubagentEnded(mockEvent as any, mockCtx as any);
 
-        expect(mockTrust.recordSuccess).not.toHaveBeenCalled();
         expect(mockEmitSync).toHaveBeenCalledWith(expect.objectContaining({
             type: 'pain_detected',
             data: expect.objectContaining({
@@ -123,15 +112,10 @@ const mockTrajectory = {
 
         await handleSubagentEnded(mockEvent as any, mockCtx as any);
 
-        // Killed should NOT trigger pain_detected event
         expect(mockEmitSync).not.toHaveBeenCalled();
-        // Should also NOT record success (it was terminated, not successful)
-        expect(mockTrust.recordSuccess).not.toHaveBeenCalled();
     });
 
     it('should NOT emit pain_detected for reset outcome (system reset)', async () => {
-        // Reset outcome indicates system-level session reset
-        // This is not an agent failure - should not trigger pain penalties
         const mockCtx = { workspaceDir, sessionId: 's5' };
         const mockEvent = {
             targetSessionKey: 'agent:main:subagent:diagnostician-123',
@@ -140,10 +124,7 @@ const mockTrajectory = {
 
         await handleSubagentEnded(mockEvent as any, mockCtx as any);
 
-        // Reset should NOT trigger pain_detected event
         expect(mockEmitSync).not.toHaveBeenCalled();
-        // Should also NOT record success (it was reset, not successful)
-        expect(mockTrust.recordSuccess).not.toHaveBeenCalled();
     });
 
     it('should match HEARTBEAT placeholder task for diagnostician session', async () => {

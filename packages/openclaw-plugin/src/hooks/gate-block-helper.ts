@@ -119,7 +119,7 @@ Reason: ${reason}
 4. Retry the operation
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-This is a mandatory security gate. The operation was blocked because the modification exceeds the allowed threshold for your current trust stage.
+This is a mandatory security gate. The operation was blocked because the modification exceeds the allowed threshold for your current evolution tier.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
   };
 }

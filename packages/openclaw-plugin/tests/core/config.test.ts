@@ -74,11 +74,6 @@ describe('PainConfig', () => {
 
     it('should validate and correct out-of-range values', () => {
         const mockConfig = {
-            trust: {
-                stages: {
-                    stage_1_observer: 999 // Invalid
-                }
-            },
             intervals: {
                 worker_poll_ms: 500 // Too fast, should be corrected
             }
@@ -90,7 +85,6 @@ describe('PainConfig', () => {
         const config = new PainConfig(stateDir);
         config.load();
 
-        expect(config.get('trust.stages.stage_1_observer')).toBe(30); // Reset to default
         expect(config.get('intervals.worker_poll_ms')).toBe(15 * 60 * 1000); // Reset to default
     });
 });

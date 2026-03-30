@@ -15,15 +15,14 @@ An evolutionary agent framework built around pain signals, guarded execution, an
 - `Pain` captures failure and frustration signals
 - `GFI` is the short-term friction brake
 - `Gate` is the execution intercept layer
-- `legacy trust` is still present for compatibility, but currently `frozen`
-- `Evolution` remains the learning plane and is not the authoritative control plane
+- `Evolution` is the learning plane with EP (Evolution Points) as the sole gating mechanism
+- `EP Tier` determines agent capabilities (Seed → Sprout → Sapling → Tree → Forest)
 
 ## Key Commands
 
 | Command | Description |
 |---|---|
 | `/pd-evolution-status` | Show the current control-plane and evolution summary |
-| `/pd-trust` | Show the frozen legacy trust compatibility view |
 | `/pd-evolve` | Run an evolution task |
 | `/pd-rollback` | Roll back the latest or specified empathy penalty |
 | `/pd-help` | Show help |
@@ -35,7 +34,7 @@ Evolution Status
 ================
 
 Control Plane
-- Legacy Trust: 85/100 (stage 4, legacy/frozen, frozen_all_positive)
+- EP Tier: Sapling (200 points)
 - Session GFI: current 18, peak 25 (partial)
 - GFI Sources: user_empathy(18)
 - Pain Flag: inactive
@@ -50,10 +49,7 @@ Evolution
 
 ## Important Behavior Notes
 
-- `/pd-trust` does not imply ongoing automatic promotion anymore.
-- `tool_success` and `subagent_success` no longer inflate trust.
 - `/pd-rollback` now removes only the `user_empathy` GFI slice; it does not wipe the full session GFI.
-- Before Phase 3, operators should validate production observation snapshots instead of cutting over Gate authority.
 
 ## Usage
 

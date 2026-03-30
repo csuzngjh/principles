@@ -25,51 +25,15 @@ export interface GfiGateSettings {
         large_change_block: number;  // 大规模修改警告阈值
     };
     large_change_lines: number;      // 触发规模衰减的行数
-    trust_stage_multipliers: {
-        '1': number;  // Observer
-        '2': number;  // Editor
-        '3': number;  // Developer
-        '4': number;  // Architect
+    ep_tier_multipliers: {
+        '1': number;  // Seed
+        '2': number;  // Sprout
+        '3': number;  // Sapling
+        '4': number;  // Tree
+        '5': number;  // Forest
     };
     bash_safe_patterns: string[];      // 安全命令正则模式
     bash_dangerous_patterns: string[]; // 危险命令正则模式
-}
-
-export interface TrustSettings {
-    stages: {
-        stage_1_observer: number;
-        stage_2_editor: number;
-        stage_3_developer: number;
-    };
-    cold_start: {
-        initial_trust: number;
-        grace_failures: number;
-        cold_start_period_ms: number;
-    };
-    penalties: {
-        tool_failure_base: number;
-        risky_failure_base: number;
-        gate_bypass_attempt: number;
-        failure_streak_multiplier: number;
-        max_penalty: number;
-    };
-    rewards: {
-        success_base: number;
-        subagent_success: number;
-        tool_success_reward: number;
-        streak_bonus_threshold: number;
-        streak_bonus: number;
-        recovery_boost: number;
-        max_reward: number;
-    };
-    limits: {
-        stage_2_max_lines: number;
-        stage_3_max_lines: number;
-        stage_2_max_percentage: number;
-        stage_3_max_percentage: number;
-        min_lines_fallback: number;
-    };
-    history_limit?: number;
 }
 
 export interface DiagnosticianSettings {
@@ -117,7 +81,6 @@ export interface PainSettings {
         initial_delay_ms: number;
         task_timeout_ms: number;
     };
-    trust: TrustSettings;
     deep_reflection?: DeepReflectionSettings;
     empathy_engine?: {
         enabled?: boolean;
@@ -194,46 +157,6 @@ export const DEFAULT_SETTINGS: PainSettings = {
         initial_delay_ms: 5000,
         task_timeout_ms: 60 * 60 * 1000  // 1 hour, matching evolution-worker.ts default
     },
-    trust: {
-        stages: {
-            stage_1_observer: 30,
-            stage_2_editor: 60,
-            stage_3_developer: 80,
-        },
-        cold_start: {
-            // 🚀 The most important change: Start at 85 (Developer level)
-            // This allows the AI to perform medium-sized edits right out of the box
-            // without needing to beg for a PLAN.md on every single change.
-            initial_trust: 85, 
-            grace_failures: 5, // Give the AI 5 free mistakes before deducting any trust points
-            cold_start_period_ms: 24 * 60 * 60 * 1000,
-        },
-        penalties: {
-            // 🛡️ Forgiving penalties for exploration
-            tool_failure_base: -2, // Was -8. A simple 'ls' typo shouldn't cost 8 points.
-            risky_failure_base: -10, // Was -15.
-            gate_bypass_attempt: -5,
-            failure_streak_multiplier: -2,
-            max_penalty: -20,
-        },
-        rewards: {
-            success_base: 2, // Was 1. Faster recovery
-            subagent_success: 5, // Was 3.
-            tool_success_reward: 0.2, // 👈 Minor reward for tool success, but resets streak!
-            streak_bonus_threshold: 3, // Was 5. Easier to get bonuses
-            streak_bonus: 5,
-            recovery_boost: 5, // Was 3. If trust drops low, it's easier to climb back up
-            max_reward: 15,
-        },
-        limits: {
-            stage_2_max_lines: 50, // Was 10. 10 lines is barely enough to fix a function signature.
-            stage_3_max_lines: 300, // Was 100. Allow substantial feature implementation.
-            stage_2_max_percentage: 10, // Percentage-based threshold for Stage 2
-            stage_3_max_percentage: 15, // Percentage-based threshold for Stage 3
-            min_lines_fallback: 20, // Minimum threshold even for small files
-        },
-        history_limit: 50
-    },
     deep_reflection: {
         enabled: true,
         mode: 'auto',
@@ -270,11 +193,12 @@ export const DEFAULT_SETTINGS: PainSettings = {
             large_change_block: 50,  // 大规模修改警告阈值
         },
         large_change_lines: 50,
-        trust_stage_multipliers: {
-            '1': 0.5,   // Observer: 更严格，阈值减半
-            '2': 0.75,  // Editor: 阈值降低 25%
-            '3': 1.0,   // Developer: 标准阈值
-            '4': 1.5,   // Architect: 更宽松，阈值提高 50%
+        ep_tier_multipliers: {
+            '1': 0.5,   // Seed: 更严格，阈值减半
+            '2': 0.75,  // Sprout: 阈值降低 25%
+            '3': 1.0,   // Sapling: 标准阈值
+            '4': 1.5,   // Tree: 更宽松
+            '5': 2.0,   // Forest: 最宽松
         },
         bash_safe_patterns: [
             '^(ls|dir|pwd|which|where|echo|env|cat|type|head|tail|less|more)\\b',
@@ -365,20 +289,8 @@ export class PainConfig {
      * Basic validation for critical settings
      */
     private validate(settings: PainSettings): void {
-        // Ensure trust scores stay within 0-100 logical range
-        const s = settings.trust.stages;
-        if (s.stage_1_observer < 0 || s.stage_1_observer > 100) s.stage_1_observer = 30;
-        if (s.stage_2_editor < 0 || s.stage_2_editor > 100) s.stage_2_editor = 60;
-        if (s.stage_3_developer < 0 || s.stage_3_developer > 100) s.stage_3_developer = 80;
-        
         // Ensure intervals are positive
         if (settings.intervals.worker_poll_ms < 1000) settings.intervals.worker_poll_ms = 15 * 60 * 1000;
-        
-        // Ensure percentage limits are in valid range [0, 100]
-        const l = settings.trust.limits;
-        if (l.stage_2_max_percentage < 0 || l.stage_2_max_percentage > 100) l.stage_2_max_percentage = 10;
-        if (l.stage_3_max_percentage < 0 || l.stage_3_max_percentage > 100) l.stage_3_max_percentage = 15;
-        if (l.min_lines_fallback < 1) l.min_lines_fallback = 20;
     }
 
     /**

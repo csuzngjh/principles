@@ -100,16 +100,6 @@ describe('WorkspaceContext', () => {
         expect(wctx.eventLog).toBe(eventLog); // Should be cached
     });
 
-    it('should lazy load Trust service', () => {
-        const mockCtx = { workspaceDir };
-        const wctx = WorkspaceContext.fromHookContext(mockCtx);
-        
-        const trust = wctx.trust;
-        expect(trust).toBeDefined();
-        expect(trust.recordSuccess).toBeDefined();
-        expect(wctx.trust).toBe(trust);
-    });
-
     it('should pass trajectory settings from config into the registry', async () => {
         const { TrajectoryRegistry } = await import('../../src/core/trajectory.js');
         const mockCtx = { workspaceDir };
@@ -140,46 +130,5 @@ describe('WorkspaceContext', () => {
         const dictionary = wctx.dictionary;
         expect(dictionary).toBeDefined();
         expect(wctx.dictionary).toBe(dictionary);
-    });
-
-    it('should maintain backward compatibility for legacy trust APIs', async () => {
-        const { getAgentScorecard, recordSuccess } = await import('../../src/core/trust-engine.js');
-        const { ConfigService } = await import('../../src/core/config-service.js');
-        
-        // Reset ConfigService singleton to ensure clean state
-        ConfigService.reset();
-        
-        // Track file system state
-        const files: Record<string, { exists: boolean; data: string }> = {};
-        
-        vi.mocked(fs.existsSync).mockImplementation((p) => {
-            const key = p.toString();
-            return files[key]?.exists ?? false;
-        });
-        
-        vi.mocked(fs.readFileSync).mockImplementation((p) => {
-            const key = p.toString();
-            return files[key]?.data ?? '';
-        });
-        
-        vi.mocked(fs.writeFileSync).mockImplementation((p, d) => {
-            const key = p.toString();
-            files[key] = { exists: true, data: d as string };
-        });
-        
-        vi.mocked(fs.mkdirSync).mockImplementation(() => undefined);
-
-        // This should not throw and return a valid scorecard
-        const scorecard = getAgentScorecard(workspaceDir);
-        expect(scorecard).toBeDefined();
-        expect(scorecard.trust_score).toBe(85); 
-        expect(scorecard.frozen).toBe(true);
-        expect(scorecard.reward_policy).toBe('frozen_all_positive');
-
-        recordSuccess(workspaceDir, 'success');
-        const updatedScorecard = getAgentScorecard(workspaceDir);
-        expect(updatedScorecard.trust_score).toBe(85);
-        expect(updatedScorecard.frozen).toBe(true);
-        expect(updatedScorecard.reward_policy).toBe('frozen_all_positive');
     });
 });

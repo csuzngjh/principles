@@ -32,7 +32,7 @@ disable-model-invocation: true
 | `/pd-thinking` | 管理思维模型与候选方案 | 元认知管理 |
 | `/pd-evolve` | 执行完整进化循环 | 问题修复 |
 | `/pd-daily` | 配置并发送进化日报 | 日常查看 |
-| `/pd-trust` | 查看信任积分与安全等级 | 权限查询 |
+| `/pd-evolution-status` | 查看EP等级与安全状态 | 状态查询 |
 | `/pd-status` | 查看系统状态（GFI和痛苦词典） | 健康检查 |
 | `/pd-grooming` | 工作区数字大扫除 | 熵减维护 |
 | `/pd-help` | 获取交互式命令引导 | 本技能 |
@@ -72,7 +72,7 @@ disable-model-invocation: true
 
 **推荐流程**:
 1. `/pd-daily` - 发送今日进化日报
-2. `/pd-trust` - 查看当前信任积分
+2. `/pd-evolution-status` - 查看当前信任积分
 3. `/pd-okr` - 检查 OKR 对齐情况
 
 **话术**: "日报在手，进化我有。让我帮你回顾今天的成果。"
@@ -95,7 +95,7 @@ disable-model-invocation: true
 **触发条件**: 用户说"权限不够"、"被拦截了"、"安全等级"
 
 **推荐流程**:
-1. `/pd-trust` - 查看信任积分和安全等级
+1. `/pd-evolution-status` - 查看信任积分和安全等级
 2. 解释当前等级的能力边界
 
 **话术**: "信任是挣来的，不是给的。让我帮你了解当前的安全等级。"
@@ -207,8 +207,8 @@ disable-model-invocation: true
 **Q: 什么是 GFI（摩擦指数）？**
 A: GFI (Global Friction Index) 衡量系统的"痛苦程度"，分值范围 0-100。值越高表示摩擦越大，需要关注。
 
-**Q: 信任积分如何计算？**
-A: 基于成功操作累积积分，失败操作扣分。达到阈值后自动升级安全等级，解锁更多权限。
+**Q: EP (进化积分) 如何计算？**
+A: EP (Evolution Points) 通过成功完成任务和问题修复累积。失败会扣除EP但有保护机制。达到阈值后自动升级EP等级，解锁更多权限（更大的代码修改限额）。
 
 **Q: Pain Signal 是什么？**
 A: Pain Signal 是系统检测到的问题信号，存储在 `.state/.pain_flag` 中。触发后系统会启动进化循环。

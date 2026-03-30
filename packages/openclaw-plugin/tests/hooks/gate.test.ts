@@ -163,51 +163,6 @@ describe('Progressive Gate Hook', () => {
     expect(result).toBeUndefined(); // Allowed
   });
 
-  describe('Stage 1 PLAN Approvals', () => {
-    it('should allow operation when PLAN is READY and matches whitelist (Trust Engine fallback)', () => {
-      const mockCtx = { workspaceDir, sessionId: 'test-session' };
-      const mockEvent = {
-        toolName: 'write',
-        params: { file_path: 'skills/my-skill.md' }
-      };
-
-      mockTrust.getScore.mockReturnValue(25);
-      mockTrust.getStage.mockReturnValue(1);
-      vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(fs.readFileSync).mockImplementation((p: any) => {
-        if (p.includes('PROFILE.json')) {
-          return JSON.stringify({
-            risk_paths: ['src/'],
-            progressive_gate: {
-              enabled: true,
-              plan_approvals: {
-                enabled: true,
-                max_lines_override: -1,
-                allowed_patterns: ['skills/**'],
-                allowed_operations: ['write']
-              }
-            }
-          });
-        }
-        if (p.includes('PLAN.md')) return 'STATUS: READY\n';
-        return '';
-      });
-      // EP system throws error to test Trust Engine PLAN approval fallback
-      vi.mocked(evolutionEngine.checkEvolutionGate).mockImplementation(() => {
-        throw new Error('EP system error for testing fallback');
-      });
-
-      const result = handleBeforeToolCall(mockEvent as any, mockCtx as any);
-
-      expect(result).toBeUndefined(); 
-      // When PLAN approval is used via Trust Engine fallback, recordPlanApproval should be called
-      expect(mockEventLog.recordPlanApproval).toHaveBeenCalledWith('test-session', expect.objectContaining({
-        toolName: 'write',
-        filePath: 'skills/my-skill.md',
-      }));
-    });
-  });
-
   it('should fall back to original logic if progressive gate is disabled', () => {
     const mockCtx = { workspaceDir };
     const mockEvent = { 

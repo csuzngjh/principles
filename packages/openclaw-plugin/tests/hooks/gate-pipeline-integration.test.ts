@@ -25,22 +25,25 @@ vi.mock('../../src/core/session-tracker.js', () => ({
   trackBlock: vi.fn(),
   hasRecentThinking: vi.fn(() => false),
 }));
-vi.mock('../../src/core/evolution-engine.js', () => ({
-  checkEvolutionGate: vi.fn(() => ({ allowed: true, currentTier: 'SEED' })),
-}));
+vi.mock('../../src/core/evolution-engine.js', async () => {
+  const actual = await vi.importActual('../../src/core/evolution-engine.js');
+  return {
+    ...actual,
+    checkEvolutionGate: vi.fn(() => ({ allowed: true, currentTier: 'SEED' })),
+    getEvolutionEngine: vi.fn(),
+  };
+});
 
-// Import the mocked hasRecentThinking for test manipulation
+const mockEvolution = {
+  getTier: vi.fn().mockReturnValue(3),
+  getPoints: vi.fn().mockReturnValue(200),
+};
+
 const mockedHasRecentThinking = vi.mocked(sessionTracker.hasRecentThinking);
 
 describe('Gate Pipeline Integration - Single Authoritative Path', () => {
   const workspaceDir = '/mock/workspace';
   const sessionId = 'test-session-123';
-
-  const mockTrust = {
-    getScorecard: vi.fn(),
-    getScore: vi.fn(),
-    getStage: vi.fn(),
-  };
 
   const mockConfig = {
     get: vi.fn().mockImplementation((key) => {
@@ -70,16 +73,14 @@ describe('Gate Pipeline Integration - Single Authoritative Path', () => {
   const mockWctx = {
     workspaceDir,
     stateDir: '/mock/state',
-    trust: mockTrust,
     config: mockConfig,
     eventLog: mockEventLog,
     trajectory: mockTrajectory,
+    evolution: mockEvolution,
     resolve: vi.fn().mockImplementation((key) => {
-      // Handle both short keys and file paths
       if (key === 'PROFILE') return path.join(workspaceDir, '.principles', 'PROFILE.json');
       if (key === 'PLAN') return path.join(workspaceDir, 'PLAN.md');
       if (key === 'STATE_DIR') return path.join(workspaceDir, '.state');
-      // For file paths, resolve to absolute path
       if (typeof key === 'string' && !key.includes(':')) {
         return path.join(workspaceDir, key);
       }
@@ -93,10 +94,7 @@ describe('Gate Pipeline Integration - Single Authoritative Path', () => {
     vi.mocked(WorkspaceContext.fromHookContext).mockReturnValue(mockWctx as any);
     vi.mocked(sessionTracker.getSession).mockReturnValue({ currentGfi: 0 } as any);
     vi.mocked(sessionTracker.trackBlock).mockImplementation(() => {});
-    
-    // Default: Stage 3 Developer
-    mockTrust.getScore.mockReturnValue(70);
-    mockTrust.getStage.mockReturnValue(3);
+    vi.mocked(evolutionEngine.getEvolutionEngine).mockReturnValue(mockEvolution);
   });
 
   afterEach(() => {
@@ -108,10 +106,6 @@ describe('Gate Pipeline Integration - Single Authoritative Path', () => {
   // ═══════════════════════════════════════════════════════════════════════════
   describe('Edit Verification Integration', () => {
     it('should run edit verification when progressive gate is enabled and operation is allowed', () => {
-      // Setup: Stage 4 Architect (bypasses progressive gate)
-      mockTrust.getScore.mockReturnValue(95);
-      mockTrust.getStage.mockReturnValue(4);
-
       const fileContent = 'const x = 1;\n';
       const editEvent = {
         toolName: 'edit',
@@ -149,9 +143,6 @@ describe('Gate Pipeline Integration - Single Authoritative Path', () => {
     });
 
     it('should allow edit when oldText matches (progressive gate enabled)', () => {
-      mockTrust.getScore.mockReturnValue(95);
-      mockTrust.getStage.mockReturnValue(4);
-
       const fileContent = 'const x = 1;\n';
       const editEvent = {
         toolName: 'edit',
@@ -191,9 +182,7 @@ describe('Gate Pipeline Integration - Single Authoritative Path', () => {
   // ═══════════════════════════════════════════════════════════════════════════
   describe('GFI Gate Block Persistence', () => {
     it('should use single authoritative block path when GFI gate blocks', () => {
-      // Setup: High GFI to trigger GFI gate block
       vi.mocked(sessionTracker.getSession).mockReturnValue({ currentGfi: 85 } as any);
-      mockTrust.getStage.mockReturnValue(3);
 
       const writeEvent = {
         toolName: 'write',
@@ -231,7 +220,6 @@ describe('Gate Pipeline Integration - Single Authoritative Path', () => {
 
     it('should persist trajectory gate block with retry on failure', async () => {
       vi.mocked(sessionTracker.getSession).mockReturnValue({ currentGfi: 85 } as any);
-      mockTrust.getStage.mockReturnValue(3);
 
       const writeEvent = {
         toolName: 'write',
@@ -303,8 +291,7 @@ describe('Gate Pipeline Integration - Single Authoritative Path', () => {
         currentGfi: 0,
         lastThinkingAt: Date.now() - 600000, // 10 min ago
       } as any);
-      mockedHasRecentThinking.mockReturnValue(false); // No recent thinking
-      mockTrust.getStage.mockReturnValue(4);
+      mockedHasRecentThinking.mockReturnValue(false);
 
       const result = handleBeforeToolCall(bashEvent as any, { workspaceDir, sessionId } as any);
 
@@ -344,9 +331,7 @@ describe('Gate Pipeline Integration - Single Authoritative Path', () => {
         currentGfi: 0,
         lastThinkingAt: Date.now() - 60000, // 1 min ago (within window)
       } as any);
-      mockedHasRecentThinking.mockReturnValue(true); // Recent thinking exists!
-      mockTrust.getScore.mockReturnValue(95);
-      mockTrust.getStage.mockReturnValue(4);
+      mockedHasRecentThinking.mockReturnValue(true);
 
       const result = handleBeforeToolCall(bashEvent as any, { workspaceDir, sessionId } as any);
 
@@ -361,7 +346,6 @@ describe('Gate Pipeline Integration - Single Authoritative Path', () => {
   describe('Single Block Persistence Implementation', () => {
     it('should have only ONE trackBlock call per gate block (no duplicate tracking)', () => {
       vi.mocked(sessionTracker.getSession).mockReturnValue({ currentGfi: 85 } as any);
-      mockTrust.getStage.mockReturnValue(3);
 
       const writeEvent = {
         toolName: 'write',
@@ -391,7 +375,6 @@ describe('Gate Pipeline Integration - Single Authoritative Path', () => {
 
     it('should have only ONE eventLog.recordGateBlock call per gate block', () => {
       vi.mocked(sessionTracker.getSession).mockReturnValue({ currentGfi: 85 } as any);
-      mockTrust.getStage.mockReturnValue(3);
 
       const writeEvent = {
         toolName: 'write',

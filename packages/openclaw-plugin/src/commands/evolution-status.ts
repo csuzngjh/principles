@@ -10,10 +10,6 @@ function formatNumber(value: number | null): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
-function formatStage(value: number | null): string {
-  return value === null ? '--' : String(value);
-}
-
 function formatSources(
   sources: Array<{ source: string; score?: number }>
 ): string {
@@ -42,8 +38,6 @@ function buildEnglishOutput(
     '================',
     '',
     'Control Plane',
-    `- Legacy Trust: ${formatNumber(summary.legacyTrust.score)}/100 (stage ${formatStage(summary.legacyTrust.stage)}, legacy/frozen, ${summary.legacyTrust.rewardPolicy})`,
-    `- Runtime Trust Truth: score ${formatNumber(summary.runtime.currentTrustScore)}, classification ${summary.runtime.workspaceState.trustClassification}, frozen ${summary.runtime.workspaceState.frozen === null ? '--' : String(summary.runtime.workspaceState.frozen)}`,
     `- Session GFI: current ${formatNumber(summary.gfi.current)}, peak ${formatNumber(summary.gfi.peak)} (${summary.gfi.dataQuality})`,
     `- GFI Sources: ${formatSources(summary.gfi.sources)}`,
     `- Pain Flag: ${summary.pain.activeFlag ? 'active' : 'inactive'}${summary.pain.activeFlagSource ? ` (${summary.pain.activeFlagSource})` : ''}`,
@@ -55,7 +49,7 @@ function buildEnglishOutput(
     `- Legacy Directive File: ${summary.phase3.legacyDirectiveFilePresent ? 'present' : 'missing'} (compatibility-only display artifact)`,
     `- Note: Legacy directive file is NOT a truth source for Phase 3 eligibility. Queue is the only authoritative execution truth source.`,
     `- Active Evolution Task: ${summary.evolution.directive.taskPreview ?? '--'}`,
-    `- Phase 3: ready ${summary.phase3.phase3ShadowEligible ? 'yes' : 'no'}, queueTruthReady ${summary.phase3.queueTruthReady ? 'yes' : 'no'}, trustInputReady ${summary.phase3.trustInputReady ? 'yes' : 'no'}, eligible ${summary.phase3.evolutionEligible}, reference_only ${summary.phase3.evolutionReferenceOnly}, rejected ${summary.phase3.evolutionRejected}${summary.phase3.evolutionReferenceOnlyReasons.length > 0 ? ` (reference ${summary.phase3.evolutionReferenceOnlyReasons.slice(0, 2).join(', ')})` : ''}${summary.phase3.evolutionRejectedReasons.length > 0 ? ` (${summary.phase3.evolutionRejectedReasons.slice(0, 3).join(', ')})` : ''}${summary.phase3.trustRejectedReasons.length > 0 ? `; trust ${summary.phase3.trustRejectedReasons.slice(0, 2).join(', ')}` : ''}`,
+    `- Phase 3: ready ${summary.phase3.phase3ShadowEligible ? 'yes' : 'no'}, queueTruthReady ${summary.phase3.queueTruthReady ? 'yes' : 'no'}, eligible ${summary.phase3.evolutionEligible}, reference_only ${summary.phase3.evolutionReferenceOnly}, rejected ${summary.phase3.evolutionRejected}${summary.phase3.evolutionReferenceOnlyReasons.length > 0 ? ` (reference ${summary.phase3.evolutionReferenceOnlyReasons.slice(0, 2).join(', ')})` : ''}${summary.phase3.evolutionRejectedReasons.length > 0 ? ` (${summary.phase3.evolutionRejectedReasons.slice(0, 3).join(', ')})` : ''}`,
     `- Phase 3 Legacy Directive File: ${summary.phase3.directiveStatus} (${summary.phase3.directiveIgnoredReason})`,
     '',
     'Principles',
@@ -93,8 +87,6 @@ function buildChineseOutput(
     '================',
     '',
     '控制面',
-    `- Legacy Trust: ${formatNumber(summary.legacyTrust.score)}/100（阶段 ${formatStage(summary.legacyTrust.stage)}，legacy/frozen，${summary.legacyTrust.rewardPolicy}）`,
-    `- Runtime Trust Truth: score ${formatNumber(summary.runtime.currentTrustScore)}，classification ${summary.runtime.workspaceState.trustClassification}，frozen ${summary.runtime.workspaceState.frozen === null ? '--' : String(summary.runtime.workspaceState.frozen)}`,
     `- 会话 GFI: 当前 ${formatNumber(summary.gfi.current)}，峰值 ${formatNumber(summary.gfi.peak)}（${summary.gfi.dataQuality}）`,
     `- GFI 来源: ${formatSources(summary.gfi.sources)}`,
     `- Pain Flag: ${summary.pain.activeFlag ? 'active' : 'inactive'}${summary.pain.activeFlagSource ? `（${summary.pain.activeFlagSource}）` : ''}`,
@@ -106,7 +98,7 @@ function buildChineseOutput(
     `- Legacy Directive File: ${summary.phase3.legacyDirectiveFilePresent ? 'present' : 'missing'} （兼容仅显示产物）`,
     `- 注：Legacy directive file 不是 Phase 3 合格性的真实源。队列是唯一权威的执行真实源。`,
     `- Active Evolution Task: ${summary.evolution.directive.taskPreview ?? '--'}`,
-    `- Phase 3: ready ${summary.phase3.phase3ShadowEligible ? 'yes' : 'no'}，queueTruthReady ${summary.phase3.queueTruthReady ? 'yes' : 'no'}，trustInputReady ${summary.phase3.trustInputReady ? 'yes' : 'no'}，eligible ${summary.phase3.evolutionEligible}，reference_only ${summary.phase3.evolutionReferenceOnly}，rejected ${summary.phase3.evolutionRejected}${summary.phase3.evolutionReferenceOnlyReasons.length > 0 ? `（reference ${summary.phase3.evolutionReferenceOnlyReasons.slice(0, 2).join(', ')}）` : ''}${summary.phase3.evolutionRejectedReasons.length > 0 ? `（${summary.phase3.evolutionRejectedReasons.slice(0, 3).join(', ')}）` : ''}${summary.phase3.trustRejectedReasons.length > 0 ? `；trust ${summary.phase3.trustRejectedReasons.slice(0, 2).join(', ')}` : ''}`,
+    `- Phase 3: ready ${summary.phase3.phase3ShadowEligible ? 'yes' : 'no'}，queueTruthReady ${summary.phase3.queueTruthReady ? 'yes' : 'no'}，eligible ${summary.phase3.evolutionEligible}，reference_only ${summary.phase3.evolutionReferenceOnly}，rejected ${summary.phase3.evolutionRejected}${summary.phase3.evolutionReferenceOnlyReasons.length > 0 ? `（reference ${summary.phase3.evolutionReferenceOnlyReasons.slice(0, 2).join(', ')}）` : ''}${summary.phase3.evolutionRejectedReasons.length > 0 ? `（${summary.phase3.evolutionRejectedReasons.slice(0, 3).join(', ')}）` : ''}`,
     `- Phase 3 Legacy Directive File: ${summary.phase3.directiveStatus} (${summary.phase3.directiveIgnoredReason})`,
     '',
     '原则统计',

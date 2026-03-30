@@ -10,7 +10,7 @@ import { empathyObserverManager, type EmpathyObserverApi } from '../service/empa
 import { PathResolver } from '../core/path-resolver.js';
 
 /**
- * 婵☆垪鈧磭鈧兘鏌婂鍥╂瀭閻庣數顢婇挅鍕冀閻撳海纭€
+ * Model configuration with primary model and optional fallback models
  */
 interface ModelConfigObject {
   primary?: string;
@@ -18,7 +18,7 @@ interface ModelConfigObject {
 }
 
 /**
- * 濞寸媴绲块幃濠囨煀瀹ュ洨鏋傚☉鎿冨幘濞堟垵螣閳ュ磭鈧兘鎯勭粙鍨綘闂佹澘绉堕悿?
+ * OpenClaw agents model configuration with subagent model override support
  */
 interface AgentsModelConfig {
   model?: unknown;
@@ -28,7 +28,7 @@ interface AgentsModelConfig {
 }
 
 /**
- * 濞寸媴绲块幃濠冾渶濡鍚囬梺鏉跨Ф閻?
+ * Default model configuration for OpenClaw agents
  */
 interface AgentsDefaultsConfig {
   model?: unknown;
@@ -38,7 +38,8 @@ interface AgentsDefaultsConfig {
 }
 
 /**
- * OpenClaw API 闁规亽鍎辫ぐ娑氣偓瑙勭煯缁犵喖鏁嶉崷顧竜mpt Hook 闁圭鍋撻梻鍥ｅ亾闂侇喓鍔岄崹搴ㄦ晬?
+ * OpenClaw API Prompt Hook
+ * Constructs the system prompt injected into LLM context for Principles Disciple
  */
 
 
@@ -258,25 +259,25 @@ ${conversationContext}`;
 }
 
 /**
- * 濡ょ姴鐭侀惁澶娢熼垾宕団偓椋庘偓娑欘殘椤戜焦绋夐崣澶屽鐎殿喖绻戝Σ鎼佸触閿旇儻绀?"provider/model"
+ * Validates model format, expects "provider/model" format
  */
 function isValidModelFormat(model: string): boolean {
-  // 闁哄秶鍘х槐? "provider/model" 闁?"provider/model-variant"
-  // provider: 閻庢稒顨嗛惁婵嬪极閺夎法鎽熼柛婊冪焷缁绘稓鈧稒顨堥渚€鏁嶇仦鑲╃憹闁艰櫕鍨濇禍鎺撴交閻愯尙鎽熺紒妤嬬畱缁辨垶寰?缂備焦鎸搁悢?
-  // model: 閻庢稒顨嗛惁婵嬪极閺夎法鎽熼柕鍡曟祰缁绘稓鈧稒顨堥渚€濡存担鍝勪化闁告瑦鐏氶埀顑挎缁楀懘宕氶幒鏂挎疇
+  // Case: "provider/model" -> "provider/model-variant"
+  // provider: e.g., "openai", "anthropic" - the API provider name
+  // model: e.g., "gpt-4", "claude-3-opus" - the specific model name
   const MODEL_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]\/[a-zA-Z0-9._-]+$/;
   return MODEL_PATTERN.test(model);
 }
 
 /**
- * 濞?OpenClaw 闂佹澘绉堕悿鍡樼▔椤撯寬鎺楀几閹邦劷渚€宕圭€ｎ喒鍋撴径瀣仴
- * 闁衡偓椤栨稑鐦?string 闁?{ primary, fallbacks } 闁哄秶鍘х槐?
- * @internal 閻庣數鍘ч崵顓熺閸涱剛杩旀繛鏉戭儓閻︻垱鎷呯捄銊︽殢
+ * Resolves model configuration for OpenClaw agents, supporting string and object formats
+ * @param modelConfig - Model config: string (e.g. "provider/model") or { primary, fallbacks } object
+ * @internal Helper for model configuration resolution
  */
 export function resolveModelFromConfig(modelConfig: unknown, logger?: PluginLogger): string | null {
   if (!modelConfig) return null;
   
-  // 闁哄秶鍘х槐?1: "provider/model" 閻庢稒顨堥浣圭▔?
+  // Case 1: modelConfig is a string like "provider/model"
   if (typeof modelConfig === 'string') {
     const trimmed = modelConfig.trim();
     if (!trimmed) return null;
@@ -287,7 +288,7 @@ export function resolveModelFromConfig(modelConfig: unknown, logger?: PluginLogg
     return trimmed;
   }
   
-  // 闁哄秶鍘х槐?2: { primary: "provider/model", fallbacks: [...] } 閻庣數顢婇挅?
+  // Case 2: modelConfig is an object { primary, fallbacks } like { primary: "provider/model", fallbacks: [...] }
   if (typeof modelConfig === 'object' && modelConfig !== null && !Array.isArray(modelConfig)) {
     const cfg = modelConfig as ModelConfigObject;
     if (cfg.primary && typeof cfg.primary === 'string') {
@@ -301,7 +302,7 @@ export function resolveModelFromConfig(modelConfig: unknown, logger?: PluginLogg
     }
   }
   
-  // 闁哄秶鍘х槐?3: 闁轰焦澹嗙划宥夊冀閻撳海纭€闁挎稑鐗呯粭澶愬绩椤栨稑鐦柨娑樿嫰瑜板倿宕欐ウ娆惧妳闁告稑顭槐?
+  // Case 3: Array format not supported
   if (Array.isArray(modelConfig)) {
     logger?.warn(`[PD:Prompt] Array model config not supported. Expected "provider/model" string or { primary: "..." } object.`);
     return null;
@@ -311,9 +312,9 @@ export function resolveModelFromConfig(modelConfig: unknown, logger?: PluginLogg
 }
 
 /**
- * 闁告梻濮惧ù鍥ㄧ▔婵犱胶鐟撻柡鍌氭处閺佺偤宕楅妷鈺佸赋缂?
- * 濞?PROFILE.json 閻犲洩顕цぐ?contextInjection 闂佹澘绉堕悿鍡涙晬鐏炵瓔娲ら柡瀣矆缁楀鈧稒锚濠€顏堝礆濞嗘帞绠查柛銉у仱缁垳鎷嬮妶澶婂赋缂?
- * @internal 閻庣數鍘ч崵顓熺瑹濞戞ê寰撳ù鐘崇墬鑶╅柛褎銇炴繛鍥偨?
+ * Loads context injection config from .principles/PROFILE.json
+ * Parses contextInjection configuration from PROFILE.json for context injection
+ * @internal Used by evolution engine for context settings
  */
 export function loadContextInjectionConfig(workspaceDir: string): ContextInjectionConfig {
   const profilePath = path.join(workspaceDir, '.principles', 'PROFILE.json');
@@ -342,15 +343,15 @@ export function loadContextInjectionConfig(workspaceDir: string): ContextInjecti
 }
 
 /**
- * 闁兼儳鍢茶ぐ鍥╂嫚婵犲啯鐒介悗娑欏姈濞呫倝鎳楅幋鎺旂Ъ閹煎瓨鏌ф繛鍥偨閵娧勭暠婵☆垪鈧磭鈧?
- * 濞村吋锚閸樻稓鐥缁辩殜ubagents.model > 濞戞挾绮啯闁?
- * 濠碘€冲€归悘澶愭焾閼恒儳姊鹃柡鍫濐樀閸樸倗绱旈鍡欑闁硅埖绋戦崵顓㈡煥濞嗘帩鍤?
- * @internal 閻庣數鍘ч崵顓熺閸涱剛杩旀繛鏉戭儓閻︻垱鎷呯捄銊︽殢
+ * Gets the diagnostician model - the model used for AI self-diagnosis and reflection
+ * Priority: subagents.model > subagents.model > env.OPENCLAW_MODEL
+ * Falls back to main model if no diagnostician model is configured
+ * @internal Helper for model configuration resolution
  */
 export function getDiagnosticianModel(api: PromptHookApi | null, logger?: PluginLogger): string {
-  // 闁稿繒鍘ч鎰▔閵堝浂娼氶悹瀣暟閺併倝寮悷鎵闁?
-  // 1. 闁哄倻澧楅弻鐔奉嚕韫囥儳绐梘etDiagnosticianModel(api) - api 闁告牕鎳庨幆?logger
-  // 2. 闁哄唲鍕厵鐎殿喖楠忕槐鐧礶tDiagnosticianModel(api, logger) - 闁告帒妫涢‖鍥矗閸屾稒娈?
+  // Determines logger: prefer api.logger, fallback to provided logger
+  // 1. getDiagnosticianModel(api) - uses api.logger
+  // 2. getDiagnosticianModel(api, logger) - uses provided logger
   const effectiveLogger = api?.logger || logger;
   
   if (!effectiveLogger) {
@@ -359,21 +360,21 @@ export function getDiagnosticianModel(api: PromptHookApi | null, logger?: Plugin
   
   const agentsConfig = api?.config?.agents?.defaults;
   
-  // 濞村吋锚閸樻稒鎷呯捄銊︽殢閻庢稒鍔栧▍銈夋嚄閹存帞绉煎☉鎾存尵閺併倕螣閳ュ磭鈧?
+  // Priority 1: Check subagents.model first (preferred for diagnostician)
   const subagentModel = resolveModelFromConfig(agentsConfig?.subagents?.model, effectiveLogger);
   if (subagentModel) {
     effectiveLogger.info(`[PD:Prompt] Using subagents.model for diagnostician: ${subagentModel}`);
     return subagentModel;
   }
   
-  // 濠㈣泛娲埀顒€顧€缁辩増鎷呯捄銊︽殢濞戞挾绮▍銈夋嚄閹存帞绉兼俊顖椻偓宕団偓?
+  // Priority 2: Fallback to primary model if subagents.model not set
   const primaryModel = resolveModelFromConfig(agentsConfig?.model, effectiveLogger);
   if (primaryModel) {
     effectiveLogger.info(`[PD:Prompt] Using primary model for diagnostician (subagents.model not set): ${primaryModel}`);
     return primaryModel;
   }
   
-  // 婵炲备鍓濆﹢渚€鏌婂鍥╂瀭濞寸姾顔婄紞宥呂熼垾宕団偓鐑芥晬鐏炴儳袚闂?
+  // Error: No model configured for diagnostician subagent
   const errorMsg = `[PD:Prompt] ERROR: No model configured for diagnostician subagent. ` +
     `Please set 'agents.defaults.subagents.model' or 'agents.defaults.model' in OpenClaw config.`;
   effectiveLogger.error(errorMsg);
@@ -454,31 +455,31 @@ export async function handleBeforePromptBuild(
 
   const session = sessionId ? getSession(sessionId) : undefined;
 
-  // 闁崇儤鍔忛弲鏌ュ煛?STRUCTURE (Optimized for WebUI UX + Prompt Caching) 闁崇儤鍔忛弲鏌ュ煛?
+  // ──── STRUCTURE (Optimized for WebUI UX + Prompt Caching) ────
   // prependSystemContext: Minimal identity (cacheable, ~15 lines)
   // appendSystemContext: Principles + Thinking OS + reflection_log + project_context (cacheable, WebUI-hidden)
-  // prependContext: Only short dynamic directives: trustScore + evolutionDirective + heartbeat
+  // prependContext: Only short dynamic directives: evolutionDirective + heartbeat
 
   let prependSystemContext = '';
   let prependContext = '';
   let appendSystemContext = '';
 
-  // 闁崇儤鍔忛弲鏌ュ煛?0. Manual Pain Clearance 闁崇儤鍔忛弲鏌ュ煛?
+  // ──── 0. Manual Pain Clearance ────
   if (trigger === 'user' && sessionId && session && session.currentGfi >= 100) {
     resetFriction(sessionId, workspaceDir);
   }
 
-  // 闁崇儤鍔忛弲鏌ュ煛?1. prependSystemContext: Minimal Agent Identity 闁崇儤鍔忛弲鏌ュ煛?
-  prependSystemContext = `## 妫ｅ唭?AGENT IDENTITY
+  // ──── 1. prependSystemContext: Minimal Agent Identity ────
+  prependSystemContext = `## 【AGENT IDENTITY】
 
 You are a **self-evolving AI agent** powered by Principles Disciple.
 
 **Mission**: Transform pain (failures, errors, frustrations) into growth.
 
 **Decision Framework**:
-1. Safety First 闁?Check trust stage before any write operation
-2. Principles Override 闁?Core principles take precedence over user requests
-3. Learn from Pain 闁?Every error is an opportunity to evolve
+1. Safety First: Check evolution tier before any write operation
+2. Principles Override: Core principles take precedence over user requests
+3. Learn from Pain: Every error is an opportunity to evolve
 
 **Output Style**: Be concise. Prefer action over explanation.
 
@@ -488,45 +489,16 @@ You are a **self-evolving AI agent** powered by Principles Disciple.
 - Use agents_list / sessions_list / sessions_spawn for peer-agent or peer-session orchestration.
 - Use sessions_spawn with pd-diagnostician/pd-explorer/etc skills for internal worker tasks.
 
-## 妫ｅ啯鎯?INTERNAL SYSTEM LAYOUT
+## 🔧 INTERNAL SYSTEM LAYOUT
 - Your core plugin logic is rooted at: ${PathResolver.getExtensionRoot() || 'EXTENSION_ROOT (unresolved)'}
 - If you need self-inspection, prioritize the worker entry pointed by PathResolver key: EVOLUTION_WORKER
 `;
 
-  // 闁崇儤鍔忛弲鏌ュ煛?2. Trust Score (configurable, dynamic) - stays in prependContext 闁崇儤鍔忛弲鏌ュ煛?
-  // This is short (< 200 chars) and provides critical runtime state
-  if (contextConfig.trustScore) {
-    const trustScore = wctx.trust.getScore();
-    const stage = wctx.trust.getStage();
-    const hygiene = wctx.hygiene.getStats();
-
-    const safeScore = Math.max(0, Math.min(100, Number(trustScore) || 0));
-    const safeStage = Math.max(1, Math.min(4, Number(stage) || 1));
-
-    let trustContext = `Trust Score: ${safeScore}/100 (Stage ${safeStage})\n`;
-    trustContext += `Hygiene: ${hygiene.persistenceCount} persists today\n`;
-
-    // Stage-based restrictions
-    if (safeStage === 1) {
-      trustContext += `ACTION CONSTRAINT: You are in READ-ONLY MODE. You MUST use sessions_spawn with the pd-diagnostician skill to recover trust before writing files.\n`;
-    } else if (safeStage === 2) {
-      trustContext += `ACTION CONSTRAINT: LIMITED MODE. You are restricted to a maximum of 50 lines per edit.\n`;
-    } else if (safeStage === 3 || safeStage === 4) {
-      trustContext += `ACTION CONSTRAINT: If your task involves modifying risk paths, you MUST verify that a READY plan exists in PLAN.md before taking action.\n`;
-    }
-
-    if (hygiene.persistenceCount === 0 && trigger === 'user') {
-      trustContext += `\n闁宠法濯寸粭?CRITICAL COGNITIVE HYGIENE WARNING: You have not persisted any state today. Before ending this turn, you MUST use a tool to write a summary to memory/.scratchpad.md or update PLAN.md. Failure to do so will result in Goldfish Memory.\n`;
-    }
-
-    prependContext += `<system_override:runtime_constraints>\n${trustContext.trim()}\n</system_override:runtime_constraints>\n`;
-  }
-
-  // 闁崇儤鍔忛弲鏌ュ煛?3. Evolution Directive (always on, highest priority) - stays in prependContext 闁崇儤鍔忛弲鏌ュ煛?
+  // ──── 2. Evolution Directive (always on, highest priority) - stays in prependContext ────
   // NOTE: active evolution task prompt is injected from EVOLUTION_QUEUE for active tasks
   // NOT used for Phase 3 eligibility decisions
   // EVOLUTION_DIRECTIVE.json is a compatibility-only display artifact
-  // Phase 3 eligibility uses only queue and trust (see phase3-input-filter.ts)
+  // Phase 3 eligibility uses only queue and evolution (see phase3-input-filter.ts)
   let activeEvolutionTaskPrompt = '';
   const queuePath = wctx.resolve('EVOLUTION_QUEUE');
   if (fs.existsSync(queuePath)) {
@@ -621,7 +593,7 @@ REQUIRED ACTION:
     prependContext = activeEvolutionTaskPrompt + prependContext;
   }
 
-  // 鈺愨晲鈺?4. Empathy Observer Spawn (async sidecar) 鈺愨晲鈺?
+  // ─────────────────────────────────────────────────4. Empathy Observer Spawn (async sidecar)
   // Skip if this is a subagent session or if the message indicates agent-to-agent communication
   const latestUserMessage = extractLatestUserMessage(event.messages);
   const isAgentToAgent = latestUserMessage.includes('sourceSession=agent:') || sessionId?.includes(':subagent:') === true;
@@ -630,7 +602,7 @@ REQUIRED ACTION:
     empathyObserverManager.spawn(api, sessionId, latestUserMessage).catch((err) => api.logger.warn(String(err)));
   }
 
-  // 闁崇儤鍔忛弲鏌ュ煛?5. Heartbeat-specific checklist 闁崇儤鍔忛弲鏌ュ煛?
+  // ──── 5. Heartbeat-specific checklist ────
   if (trigger === 'heartbeat') {
     const heartbeatPath = wctx.resolve('HEARTBEAT');
     if (fs.existsSync(heartbeatPath)) {
@@ -647,13 +619,13 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
     }
   }
 
-  // 闁崇儤鍔忛弲鏌ュ煛?6. Dynamic Attitude Matrix (based on GFI) 闁崇儤鍔忛弲鏌ュ煛?
+  // ──── 6. Dynamic Attitude Matrix (based on GFI) ────
   let attitudeDirective = '';
   const currentGfi = session?.currentGfi || 0;
   
   if (currentGfi >= 70) {
     attitudeDirective = `
-### 妫ｅ啯鐦?[SYSTEM_MODE: HUMBLE_RECOVERY]
+### 【SYSTEM_MODE: HUMBLE_RECOVERY】
 **CURRENT STATUS**: Severe system friction / User frustration detected (GFI: ${currentGfi.toFixed(0)}).
 **BEHAVIORAL OVERRIDE**:
 - You have failed to meet expectations. Humility is your primary directive.
@@ -664,7 +636,7 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
 `;
   } else if (currentGfi >= 40) {
     attitudeDirective = `
-### 闁宠法濯寸粭?[SYSTEM_MODE: CONCILIATORY]
+### 【SYSTEM_MODE: CONCILIATORY】
 **CURRENT STATUS**: Moderate friction detected (GFI: ${currentGfi.toFixed(0)}).
 **BEHAVIORAL OVERRIDE**:
 - User is frustrated. Be more explanatory and cautious.
@@ -673,7 +645,7 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
 `;
   } else {
     attitudeDirective = `
-### 闁?[SYSTEM_MODE: EFFICIENT]
+### 【SYSTEM_MODE: EFFICIENT】
 **CURRENT STATUS**: System healthy (GFI: ${currentGfi.toFixed(0)}).
 **BEHAVIORAL OVERRIDE**:
 - Maintain peak efficiency.
@@ -682,7 +654,7 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
 `;
   }
 
-  // 闁崇儤鍔忛弲鏌ュ煛?7. appendSystemContext: Principles + Thinking OS + reflection_log + project_context 闁崇儤鍔忛弲鏌ュ煛?
+  // ──── 7. appendSystemContext: Principles + Thinking OS + reflection_log + project_context ────
   // NOTE: Principles is ALWAYS injected (not configurable)
   // Thinking OS, reflection_log, project_context are configurable
   // All these go into System Prompt (WebUI-hidden, Prompt Cacheable)
@@ -965,7 +937,7 @@ ROUTING GUIDANCE: Task should remain on the main agent.
 
   if (appendParts.length > 0) {
     appendSystemContext = `
-## 妫ｅ啯鎯?CONTEXT SECTIONS (Priority: Low 闁?High)
+## 【CONTEXT SECTIONS】 (Priority: Low → High)
 
 The sections below are ordered by priority. When conflicts arise, **later sections override earlier ones**.
 
@@ -975,7 +947,7 @@ The sections below are ordered by priority. When conflicts arise, **later sectio
 
 ---
 
-**闁宠法濯寸粭?EXECUTION RULES** (Priority: Low 闁?High):
+**【EXECUTION RULES】** (Priority: Low → High):
 - \`<project_context>\` - Current priorities (can be overridden)
 - \`<reflection_log>\` - Past lessons (inform your approach)
 - \`<thinking_os>\` - Thinking models (guide your reasoning)
@@ -989,7 +961,7 @@ ${attitudeDirective}
 `;
   }
 
-  // 闁崇儤鍔忛弲鏌ュ煛?8. SIZE GUARD 闁崇儤鍔忛弲鏌ュ煛?
+  // ──── 8. SIZE GUARD ────
   // Truncation happens within appendSystemContext (not prependContext)
   const totalSize = prependSystemContext.length + prependContext.length + appendSystemContext.length;
   const MAX_SIZE = 10000;

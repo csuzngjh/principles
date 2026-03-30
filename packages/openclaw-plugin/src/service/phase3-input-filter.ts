@@ -6,7 +6,6 @@
  *
  * Phase 3 eligibility depends ONLY on:
  * - Queue truth (valid evolution samples from queue)
- * - Trust input (frozen trust scorecard)
  *
  * Any directive file is ignored for eligibility decisions.
  *
@@ -25,26 +24,12 @@
  */
 export type Phase3Classification = 'authoritative' | 'reference_only' | 'rejected';
 
-/**
- * Classification for trust input state.
- * - authoritative: Frozen trust with valid score
- * - unknown: Missing trust score (not silently coerced to 0)
- * - rejected: Unfrozen trust or invalid schema
- */
-export type TrustClassification = 'authoritative' | 'unknown' | 'rejected';
-
 export interface Phase3EvolutionInput {
   id?: string | null;
   status?: string | null;
   started_at?: string | null;
   completed_at?: string | null;
   resolution?: string | null;
-}
-
-export interface Phase3TrustInput {
-  score?: number | null;
-  frozen?: boolean | null;
-  lastUpdated?: string | null;
 }
 
 export interface Phase3EvolutionSample {
@@ -67,22 +52,14 @@ export interface Phase3RejectedEvolutionSample {
   reasons: string[];
 }
 
-export interface Phase3TrustResult {
-  eligible: boolean;
-  classification: TrustClassification;
-  rejectedReasons: string[];
-}
-
 export interface Phase3InputFilterResult {
   queueTruthReady: boolean;
-  trustInputReady: boolean;
   phase3ShadowEligible: boolean;
   evolution: {
     eligible: Phase3EvolutionSample[];
     referenceOnly: Phase3ReferenceOnlySample[];
     rejected: Phase3RejectedEvolutionSample[];
   };
-  trust: Phase3TrustResult;
 }
 
 /**
@@ -132,7 +109,7 @@ function isTimeoutOnlyOutcome(item: Phase3EvolutionInput): boolean {
 }
 
 /**
- * Evaluates Phase 3 readiness based on queue and trust inputs.
+ * Evaluates Phase 3 readiness based on queue inputs.
  *
  * IMPORTANT: Does NOT use evolution_directive.json.
  * Directive is compatibility-only display artifact, not a truth source.
@@ -144,12 +121,10 @@ function isTimeoutOnlyOutcome(item: Phase3EvolutionInput): boolean {
  * - rejected: Invalid, corrupt, or policy-prohibited input
  *
  * @param queue - Evolution queue items to validate
- * @param trust - Trust input (frozen scorecard)
  * @returns Phase 3 eligibility results
  */
 export function evaluatePhase3Inputs(
-  queue: Phase3EvolutionInput[],
-  trust: Phase3TrustInput
+  queue: Phase3EvolutionInput[]
 ): Phase3InputFilterResult {
   const eligible: Phase3EvolutionSample[] = [];
   const referenceOnly: Phase3ReferenceOnlySample[] = [];
@@ -241,26 +216,6 @@ export function evaluatePhase3Inputs(
     });
   }
 
-  // Trust classification logic
-  const trustRejectedReasons: string[] = [];
-  const score = typeof trust.score === 'number' && Number.isFinite(trust.score) ? trust.score : null;
-
-  let trustClassification: TrustClassification = 'authoritative';
-
-  if (trust.frozen !== true) {
-    trustRejectedReasons.push('legacy_or_unfrozen_trust_schema');
-    trustClassification = 'rejected';
-  }
-
-  if (score === null) {
-    trustRejectedReasons.push('missing_trust_score');
-    // Missing score = unknown (unless already rejected for unfrozen)
-    if (trustClassification !== 'rejected') {
-      trustClassification = 'unknown';
-    }
-  }
-
-  const trustInputReady = trustRejectedReasons.length === 0;
   // Queue is ready when:
   // 1. Queue has items
   // 2. No invalid/corrupt items (rejected is empty)
@@ -268,21 +223,15 @@ export function evaluatePhase3Inputs(
   // Note: referenceOnly (timeout outcomes) is valid data, just not positive evidence
   const hasValidData = eligible.length > 0 || referenceOnly.length > 0;
   const queueTruthReady = queue.length > 0 && rejected.length === 0 && hasValidData;
-  const phase3ShadowEligible = queueTruthReady && trustInputReady && eligible.length > 0;
+  const phase3ShadowEligible = queueTruthReady && eligible.length > 0;
 
   return {
     queueTruthReady,
-    trustInputReady,
     phase3ShadowEligible,
     evolution: {
       eligible,
       referenceOnly,
       rejected,
-    },
-    trust: {
-      eligible: trustInputReady,
-      classification: trustClassification,
-      rejectedReasons: trustRejectedReasons,
     },
   };
 }
