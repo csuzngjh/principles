@@ -2,7 +2,7 @@ import type { PluginHookSubagentEndedEvent, PluginHookSubagentContext, PluginLog
 import * as fs from 'fs';
 import { writePainFlag } from '../core/pain.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
-import { empathyObserverManager, type EmpathyObserverApi } from '../service/empathy-observer-manager.js';
+import { empathyObserverManager, isEmpathyObserverSession, type EmpathyObserverApi } from '../service/empathy-observer-manager.js';
 import { acquireQueueLock, type EvolutionQueueItem } from '../service/evolution-worker.js';
 import { recordEvolutionSuccess } from '../core/evolution-engine.js';
 
@@ -172,8 +172,8 @@ export async function handleSubagentEnded(
 
     const wctx = WorkspaceContext.fromHookContext(ctx);
     const logger: HookLogger = ctx.api?.logger ?? console;
-    if (targetSessionKey?.startsWith('empathy_obs:')) {
-        await empathyObserverManager.reap(ctx.api, targetSessionKey, workspaceDir);
+    if (isEmpathyObserverSession(targetSessionKey || '')) {
+        await empathyObserverManager.reap(ctx.api, targetSessionKey!, workspaceDir);
         return;
     }
 
