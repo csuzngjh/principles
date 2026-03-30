@@ -220,7 +220,7 @@ function applyRateLimit(
 }
 
 
-function isEmpathyAuditPayload(text: string): boolean {
+export function isEmpathyAuditPayload(text: string): boolean {
     if (!text || typeof text !== 'string') return false;
     if (/^\s*\{[\s\S]*"damageDetected"[\s\S]*\}\s*$/.test(text)) return true;
     if (/\{\s*[^}]*"damageDetected"\s*:/.test(text)) return true;

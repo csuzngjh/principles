@@ -6,7 +6,7 @@ import { WorkspaceContext } from '../core/workspace-context.js';
 import { ContextInjectionConfig, defaultContextConfig } from '../types.js';
 import { classifyTask, type RoutingInput } from '../core/local-worker-routing.js';
 import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection, autoCompressFocus, safeReadCurrentFocus } from '../core/focus-history.js';
-import { empathyObserverManager, type EmpathyObserverApi } from '../service/empathy-observer-manager.js';
+import { empathyObserverManager, isEmpathyObserverSession, type EmpathyObserverApi } from '../service/empathy-observer-manager.js';
 import { PathResolver } from '../core/path-resolver.js';
 
 /**
@@ -596,7 +596,9 @@ REQUIRED ACTION:
     prependContext = activeEvolutionTaskPrompt + prependContext;
   }
 
-  prependContext = empathySilenceConstraint + '\n\n' + prependContext;
+  if (!isEmpathyObserverSession(sessionId || '')) {
+    prependContext = empathySilenceConstraint + '\n\n' + prependContext;
+  }
 
   // ─────────────────────────────────────────────────4. Empathy Observer Spawn (async sidecar)
   // Skip if this is a subagent session or if the message indicates agent-to-agent communication
