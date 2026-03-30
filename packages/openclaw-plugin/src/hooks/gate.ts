@@ -170,7 +170,7 @@ export function handleBeforeToolCall(
       return progressiveGateResult;
     }
     // NOTE: Do NOT return here! Continue to edit verification.
-    // Stage 4 bypass or Stage 1-3 allow should still run edit verification.
+    // All allowed operations (regardless of EP tier) should still run edit verification.
   } else {
     // FALLBACK: Legacy Gate Logic (when progressive gate is disabled)
     if (risky && profile.gate?.require_plan_for_risk_paths) {

@@ -157,12 +157,6 @@ export interface EvolutionConfig {
     tier5Trivial: number;   // Forest级做trivial任务的系数
     tier5Normal: number;    // Forest级做normal任务的系数
   };
-  
-  /** 信任分系统双轨运行时的配置 */
-  dualTrack: {
-    enabled: boolean;
-    primarySystem: 'evolution';  // 主决策系统 (trust 已废弃)
-  };
 }
 
 export const DEFAULT_EVOLUTION_CONFIG: EvolutionConfig = {
@@ -173,10 +167,6 @@ export const DEFAULT_EVOLUTION_CONFIG: EvolutionConfig = {
     tier4Normal: 0.5,
     tier5Trivial: 0.1,
     tier5Normal: 0.5,
-  },
-  dualTrack: {
-    enabled: true,
-    primarySystem: 'evolution',
   },
 };
 
