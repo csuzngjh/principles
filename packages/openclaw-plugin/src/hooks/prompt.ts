@@ -596,16 +596,14 @@ REQUIRED ACTION:
     prependContext = activeEvolutionTaskPrompt + prependContext;
   }
 
-  if (!isEmpathyObserverSession(sessionId || '')) {
-    prependContext = '### BEHAVIORAL_CONSTRAINTS\n' + empathySilenceConstraint + '\n\n' + prependContext;
-  }
-
   // ─────────────────────────────────────────────────4. Empathy Observer Spawn (async sidecar)
   // Skip if this is a subagent session or if the message indicates agent-to-agent communication
   const latestUserMessage = extractLatestUserMessage(event.messages);
   const isAgentToAgent = latestUserMessage.includes('sourceSession=agent:') || sessionId?.includes(':subagent:') === true;
 
   if (trigger === 'user' && sessionId && api && !isAgentToAgent) {
+    // Only inject empathy constraint when empathy observer will actually be spawned
+    prependContext = '### BEHAVIORAL_CONSTRAINTS\n' + empathySilenceConstraint + '\n\n' + prependContext;
     empathyObserverManager.spawn(api, sessionId, latestUserMessage).catch((err) => api.logger.warn(String(err)));
   }
 

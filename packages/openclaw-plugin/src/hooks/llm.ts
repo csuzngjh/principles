@@ -222,11 +222,10 @@ function applyRateLimit(
 
 export function isEmpathyAuditPayload(text: string): boolean {
     if (!text || typeof text !== 'string') return false;
-    if (/^\s*\{[\s\S]*"damageDetected"[\s\S]*\}\s*$/.test(text)) return true;
-    if (/\{\s*[^}]*"damageDetected"\s*:/.test(text)) return true;
-    if (/<empathy\s+([^>]*)\/?>/i.test(text)) return true;
-    if (/"empathy"\s*:\s*\{[\s\S]*?"damageDetected"[\s\S]*?\}/i.test(text)) return true;
-    if (/^\s*\[EMOTIONAL_DAMAGE_DETECTED(?::(mild|moderate|severe))?\]\s*$/i.test(text)) return true;
+    const trimmed = text.trim();
+    if (/^\{[\s\S]*"damageDetected"[\s\S]*\}$/.test(trimmed)) return true;
+    if (/^<empathy\s+([^>]*)\/?>/i.test(trimmed)) return true;
+    if (/^\s*\[EMOTIONAL_DAMAGE_DETECTED(?::(mild|moderate|severe))?\]\s*$/i.test(trimmed)) return true;
     return false;
 }
 

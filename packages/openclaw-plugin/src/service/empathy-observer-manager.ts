@@ -48,43 +48,6 @@ export class EmpathyObserverManager {
         return EmpathyObserverManager.instance;
     }
 
-    /**
-     * Probe whether the subagent runtime is actually functional.
-     * api.runtime.subagent always exists (it's a Proxy), but in embedded mode
-     * every method throws "only available during a gateway request".
-     * We cache the result to avoid repeated probing.
-     */
-    private subagentAvailableCache: boolean | null = null;
-
-    private isSubagentAvailable(api: EmpathyObserverApi): boolean {
-        if (this.subagentAvailableCache !== null) return this.subagentAvailableCache;
-        try {
-            // Accessing .run on the Proxy is safe; calling it with bad params
-            // will throw the unavailability error synchronously before any async work.
-            // We use a deliberate no-op probe: pass an empty object and catch immediately.
-            const probe = api.runtime?.subagent?.run;
-            if (typeof probe !== 'function') {
-                this.subagentAvailableCache = false;
-                return false;
-            }
-            // Call with intentionally invalid params — the unavailable runtime throws
-            // synchronously, the real runtime returns a rejected Promise.
-            const result = probe.call(api.runtime.subagent, {} as never);
-            if (result && typeof result.catch === 'function') {
-                // It returned a Promise → runtime is real (even if the call fails for bad params)
-                result.catch(() => { /* suppress the expected bad-params rejection */ });
-                this.subagentAvailableCache = true;
-                return true;
-            }
-            this.subagentAvailableCache = false;
-            return false;
-        } catch {
-            // Threw synchronously → unavailable runtime
-            this.subagentAvailableCache = false;
-            return false;
-        }
-    }
-
     shouldTrigger(api: EmpathyObserverApi | null | undefined, sessionId: string): boolean {
         if (!api || !sessionId) {
             api?.logger?.warn?.('[PD:EmpathyObserver] shouldTrigger=false: api or sessionId null');
@@ -168,7 +131,7 @@ export class EmpathyObserverManager {
             api.logger.info(`[PD:EmpathyObserver] Retrieved messages for ${targetSessionKey}`);
 
             const rawText = this.extractAssistantText(messages.messages, messages.assistantTexts);
-            api.logger.info(`[PD:EmpathyObserver] Raw observer output for ${targetSessionKey}: ${JSON.stringify(rawText)}`);
+            api.logger?.debug?.(`[PD:EmpathyObserver] Raw observer output for ${targetSessionKey}: ${JSON.stringify(rawText)}`);
             const parsed = this.parseJsonPayload(rawText, api.logger);
             api.logger.info(`[PD:EmpathyObserver] Payload parsed: ${JSON.stringify(parsed)}`);
 
@@ -236,7 +199,7 @@ export class EmpathyObserverManager {
     }
 
     isObserverSession(sessionKey: string): boolean {
-        return typeof sessionKey === 'string' && sessionKey.startsWith(OBSERVER_SESSION_PREFIX);
+        return isEmpathyObserverSession(sessionKey);
     }
 
     private extractParentSessionId(sessionKey: string): string | null {
