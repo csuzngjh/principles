@@ -12,6 +12,10 @@ full_test_report*.txt
 temp/
 tmp/
 
+# Python ML training environments (separate from project)
+scripts/nocturnal/trainer/.venv/
+scripts/nocturnal/trainer/experiment-*.json
+
 # Node.js packages
 packages/*/node_modules/
 packages/*/dist/

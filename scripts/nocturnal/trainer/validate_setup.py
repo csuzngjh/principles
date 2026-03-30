@@ -351,15 +351,15 @@ def test_peft_trl_validation():
             fail("未正确验证 training mode")
             return False
 
-        # 测试 3: CPU-Experimental 拒绝
-        step("验证 CPU-Experimental 拒绝")
+        # 测试 3: CPU-Experimental 接受
+        step("验证 CPU-Experimental 接受")
         spec_cpu = TrainingExperimentSpec(
             experimentId="peft-test",
             backend="peft-trl-orpo",
             trainingMode="orpo",
             targetWorkerProfile="local-reader",
             targetModelFamily="Qwen/Qwen2-0.5B-Instruct",
-            hardwareTier="cpu-experimental",  # 错误!
+            hardwareTier="cpu-experimental",  # 现在接受
             datasetExportId="exp-123",
             datasetExportPath=str(Path(tmpdir) / "fake.jsonl"),
             datasetFingerprint="fp-abc",
@@ -369,16 +369,16 @@ def test_peft_trl_validation():
             codeHash="fp-code",
             hyperparameters=TrainingHyperparameters(
                 learningRate=3e-4,
-                batchSize=2,
-                gradientAccumulation=8,
-                loraRank=16,
-                loraAlpha=32,
+                batchSize=1,  # CPU 推荐值
+                gradientAccumulation=4,
+                loraRank=8,   # CPU 推荐值
+                loraAlpha=16,
                 loraDropout=0.05,
                 warmupRatio=0.1,
                 maxSteps=10,
-                maxSeqLength=1024,
+                maxSeqLength=512,  # CPU 推荐值
             ),
-            budget=TrainingBudget(maxWallClockMinutes=5),
+            budget=TrainingBudget(maxWallClockMinutes=120),
             expectedArtifact=ExpectedArtifact(
                 checkpointName="test",
                 adapterFormat="peft-adapter",
@@ -386,10 +386,12 @@ def test_peft_trl_validation():
         )
         backend_cpu = PeftTrlORPOBackend(spec_cpu)
         validated_cpu = backend_cpu.validate_spec()
-        if not validated_cpu and any("cpu" in e.lower() for e in backend_cpu.errors):
-            ok("正确拒绝 CPU-Experimental")
+        # 文件不存在会报错，但 CPU 应该被接受（不是 CPU 相关的错误）
+        cpu_errors = [e for e in backend_cpu.errors if "cpu" in e.lower()]
+        if len(cpu_errors) == 0:
+            ok("正确接受 CPU-Experimental (文件不存在错误是预期的)")
         else:
-            fail("未正确验证 hardware tier")
+            fail(f"CPU-Experimental 应该被接受，但收到 CPU 相关错误: {cpu_errors}")
             return False
 
     return True
