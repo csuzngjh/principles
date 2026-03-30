@@ -4,6 +4,7 @@ import { writePainFlag } from '../core/pain.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { empathyObserverManager, type EmpathyObserverApi } from '../service/empathy-observer-manager.js';
 import { acquireQueueLock, type EvolutionQueueItem } from '../service/evolution-worker.js';
+import { recordEvolutionSuccess } from '../core/evolution-engine.js';
 
 const COMPLETION_RETRY_DELAY_MS = 250;
 const COMPLETION_MAX_RETRIES = 3;
@@ -178,7 +179,7 @@ export async function handleSubagentEnded(
 
     const config = wctx.config;
 
-    // ── Outcome-based Trust Score and Pain Signal handling ──
+    // ── Outcome-based EP and Pain Signal handling ──
     // OpenClaw v2026.3.23 fixes: timeout may be false positive (fast-finishing workers)
     // Only penalize actual errors, not timeout/killed/reset
     
@@ -220,10 +221,10 @@ export async function handleSubagentEnded(
     }
 
     if (outcome === 'ok' || outcome === 'deleted') {
-        wctx.trust.recordSuccess('subagent_success', {
+        recordEvolutionSuccess(workspaceDir, 'subagent', {
             sessionId: ctx.sessionId,
-            api: ctx.api
-        }, true);
+            reason: 'subagent_success',
+        });
     }
 
     if ((outcome !== 'ok' && outcome !== 'deleted') || !isDiagnosticianSession(targetSessionKey)) {

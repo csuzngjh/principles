@@ -49,10 +49,6 @@ export const commandDescriptions: Record<string, Record<SupportedLanguage, strin
     zh: '工作区清理与大扫除',
     en: 'Workspace cleanup and grooming'
   },
-  'pd-trust': {
-    zh: '查看信任分数和权限等级 (1-4)',
-    en: 'View trust score and permission stage (1-4)'
-  },
   'pd-help': {
     zh: '显示所有命令和使用指南',
     en: 'Show all commands and usage guide'
@@ -62,8 +58,8 @@ export const commandDescriptions: Record<string, Record<SupportedLanguage, strin
     en: 'View system status (GFI, Pain dictionary)'
   },
   'pd-context': {
-    zh: '控制上下文注入 [status|thinking|trust|reflection|focus|preset] - 输入 /pd-context help 查看详情',
-    en: 'Control context injection [status|thinking|trust|reflection|focus|preset] - Type /pd-context help for details'
+    zh: '控制上下文注入 [status|thinking|reflection|focus|preset] - 输入 /pd-context help 查看详情',
+    en: 'Control context injection [status|thinking|reflection|focus|preset] - Type /pd-context help for details'
   },
   'pd-focus': {
     zh: '管理 CURRENT_FOCUS.md [status|history|compress|rollback] - 查看/压缩/回滚焦点文件',

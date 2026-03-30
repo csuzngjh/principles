@@ -103,12 +103,6 @@
       "large_change_block": 50
     },
     "large_change_lines": 50,
-    "trust_stage_multipliers": {
-      "1": 0.5,
-      "2": 0.75,
-      "3": 1.0,
-      "4": 1.5
-    },
     "bash_safe_patterns": [
       "^(ls|dir|pwd|which|where|echo|env|cat|type|head|tail|less|more)\\b",
       "^git\\s+(status|log|diff|branch|show|remote)\\b",

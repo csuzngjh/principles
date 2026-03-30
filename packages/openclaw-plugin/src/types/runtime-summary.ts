@@ -1,7 +1,7 @@
 /**
  * Runtime truth represents the current state of the system.
  * Used for control decisions, Phase 3 eligibility, and real-time operations.
- * Sources: queue state, workspace trust scorecard, active session registry
+ * Sources: queue state, active session registry
  */
 export interface RuntimeTruth {
   queueState: {
@@ -12,12 +12,6 @@ export interface RuntimeTruth {
     lastUpdated: string;
   };
   activeSessions: string[];
-  currentTrustScore: number | null;
-  workspaceState: {
-    frozen: boolean | null;
-    lastUpdated: string | null;
-    trustClassification: 'authoritative' | 'unknown' | 'rejected';
-  };
 }
 
 /**
@@ -31,7 +25,6 @@ export interface AnalyticsTruth {
     totalTasks: number;
     successRate: number;
     timeoutRate: number;
-    trustChanges: number;
     lastUpdated: string;
   };
   dailyStats: {

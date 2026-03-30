@@ -32,7 +32,7 @@ I'm your intelligent mentor, helping you understand and use all features of Prin
 | `/pd-thinking` | Manage mental models and candidates | Metacognition |
 | `/pd-evolve` | Execute full evolution loop | Bug fix |
 | `/pd-daily` | Configure and send evolution daily report | Daily review |
-| `/pd-trust` | View trust score and security stage | Permission check |
+| `/pd-evolution-status` | View trust score and security stage | Permission check |
 | `/pd-status` | View system status (GFI and Pain Dictionary) | Health check |
 | `/pd-grooming` | Workspace digital cleanup | Entropy reduction |
 | `/pd-help` | Get interactive command guidance | This skill |
@@ -72,7 +72,7 @@ I'm your intelligent mentor, helping you understand and use all features of Prin
 
 **Recommended Flow**:
 1. `/pd-daily` - Send today's evolution report
-2. `/pd-trust` - View current trust score
+2. `/pd-evolution-status` - View current trust score
 3. `/pd-okr` - Check OKR alignment
 
 **Script**: "Daily report in hand, evolution I command. Let me help you review today's achievements."
@@ -95,7 +95,7 @@ I'm your intelligent mentor, helping you understand and use all features of Prin
 **Trigger**: User says "not enough permissions", "blocked", "security level"
 
 **Recommended Flow**:
-1. `/pd-trust` - View trust score and security stage
+1. `/pd-evolution-status` - View trust score and security stage
 2. Explain current stage's capability boundaries
 
 **Script**: "Trust is earned, not given. Let me help you understand your current security level."
@@ -207,8 +207,8 @@ These skills are usually called automatically by the system, but advanced users 
 **Q: What is GFI (Friction Index)?**
 A: GFI (Global Friction Index) measures the system's "pain level", range 0-100. Higher values indicate more friction, requiring attention.
 
-**Q: How is trust score calculated?**
-A: Based on successful operations accumulating points, failed operations deducting points. Reaching thresholds automatically upgrades security stage, unlocking more permissions.
+**Q: How is EP (Evolution Points) calculated?**
+A: EP is earned through successful task completion and problem resolution. Failures may deduct EP but have protection mechanisms. Reaching EP thresholds automatically upgrades your tier, unlocking more permissions (larger code modification limits).
 
 **Q: What is Pain Signal?**
 A: Pain Signal is a problem signal detected by the system, stored in `.state/.pain_flag`. When triggered, the system starts the evolution loop.
