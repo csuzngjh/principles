@@ -285,10 +285,13 @@ def load_model_for_training(
                 f"[peft-trl-orpo] Loading {model_name} with bfloat16 (bitsandbytes not available)"
             )
     else:
-        # CPU or memory-constrained: use float32 with CPU mapping
+        # CPU mode: use float32 with CPU mapping and memory optimizations
         load_kwargs["torch_dtype"] = torch.float32
         load_kwargs["device_map"] = "cpu"
+        # Enable low_cpu_mem_usage for faster loading on memory-constrained systems
+        load_kwargs["low_cpu_mem_usage"] = True
         print(f"[peft-trl-orpo] Loading {model_name} for CPU training (float32)")
+        print("[peft-trl-orpo] CPU mode: low_cpu_mem_usage enabled")
 
     # Load base model
     model = AutoModelForCausalLM.from_pretrained(model_name, **load_kwargs)
@@ -391,10 +394,13 @@ class PeftTrlORPOBackend(TrainerBackend):
 
         # Validate hardware tier
         if self.spec.hardwareTier == "cpu-experimental":
-            self.errors.append(
-                "PEFT-TRL backend cannot run on CPU-Experimental. "
-                "Use 'consumer-gpu' (RTX 4090 24GB) or 'small-gpu' (8-16GB)."
-            )
+            # CPU training is supported but requires careful configuration
+            print("[peft-trl-orpo] WARNING: CPU training is extremely slow.")
+            print("[peft-trl-orpo] Recommendations:")
+            print("  - Use small models (Qwen2-0.5B, Qwen2-1.5B)")
+            print("  - Use batch_size=1, gradient_accumulation=1")
+            print("  - Use max_seq_length <= 1024")
+            print("  - Expect training to take hours instead of minutes")
 
         return len(self.errors) == 0
 
@@ -511,6 +517,28 @@ class PeftTrlORPOBackend(TrainerBackend):
             output_dir = Path(self.spec.outputDir) / f"checkpoint-{checkpoint_id}"
             output_dir.mkdir(parents=True, exist_ok=True)
 
+            # CPU-specific configuration
+            is_cpu = self.spec.hardwareTier == "cpu-experimental"
+            if is_cpu:
+                # CPU mode: use memory-efficient settings
+                # - No mixed precision (fp32 only)
+                # - Use adafactor or adamw_torch (paged_adamw_8bit requires GPU)
+                # - Enable gradient checkpointing to save memory
+                # - Single-threaded dataloader to avoid issues
+                optim = "adafactor"  # Memory-efficient, works on CPU
+                use_bf16 = False
+                use_fp16 = False
+                gradient_checkpointing = True
+                dataloader_num_workers = 0
+                print("[peft-trl-orpo] CPU mode: using adafactor optimizer, gradient checkpointing enabled")
+            else:
+                # GPU mode: use 8-bit optimizer and bf16
+                optim = "paged_adamw_8bit"
+                use_bf16 = True
+                use_fp16 = False
+                gradient_checkpointing = False
+                dataloader_num_workers = 0  # Safe default
+
             orpo_config = ORPOConfig(
                 output_dir=str(output_dir),
                 beta=0.1,  # ORPO penalty coefficient (from paper)
@@ -518,43 +546,56 @@ class PeftTrlORPOBackend(TrainerBackend):
                 per_device_train_batch_size=hps.batchSize,
                 gradient_accumulation_steps=hps.gradientAccumulation,
                 max_steps=hps.maxSteps,
-                max_seq_length=hps.maxSeqLength,
+                max_length=hps.maxSeqLength,  # TRL 0.29 uses max_length
                 warmup_ratio=hps.warmupRatio,
                 logging_steps=10,
                 save_strategy="steps",
                 save_steps=max(1, hps.maxSteps // 5),  # Save 5 times during training
                 save_total_limit=1,  # Keep only best checkpoint
                 report_to="none",  # Disable wandb/etc unless explicitly configured
-                fp16=False,
-                bf16=self.spec.hardwareTier in ("consumer-gpu", "small-gpu"),
+                fp16=use_fp16,
+                bf16=use_bf16,
                 remove_unused_columns=False,
-                optim="paged_adamw_8bit",  # Memory-efficient optimizer
+                optim=optim,
                 ddp_find_unused_parameters=False,
+                gradient_checkpointing=gradient_checkpointing,
+                dataloader_num_workers=dataloader_num_workers,
             )
             print(
                 f"[peft-trl-orpo] ORPO config: steps={hps.maxSteps}, batch_size={hps.batchSize}, lr={hps.learningRate}"
             )
 
             # -----------------------------------------------------------------
-            # Step 6: Initialize ORPO Trainer
+            # Step 6: Enable gradient checkpointing for CPU mode
             # -----------------------------------------------------------------
+            if is_cpu:
+                # Enable gradient checkpointing on the model to save memory
+                if hasattr(model, "gradient_checkpointing_enable"):
+                    model.gradient_checkpointing_enable()
+                    print("[peft-trl-orpo] Gradient checkpointing enabled on model")
+
+            # -----------------------------------------------------------------
+            # Step 7: Initialize ORPO Trainer
+            # -----------------------------------------------------------------
+            # Note: Don't pass peft_config to ORPOTrainer since we already
+            # wrapped the model with PEFT in load_model_for_training.
+            # TRL 0.29+ doesn't allow both.
             trainer = ORPOTrainer(
                 model=model,
                 args=orpo_config,
                 processing_class=tokenizer,
                 train_dataset=dataset,
-                peft_config=lora_config,
             )
 
             # -----------------------------------------------------------------
-            # Step 7: Train!
+            # Step 8: Train!
             # -----------------------------------------------------------------
             print(f"[peft-trl-orpo] Starting ORPO training for {hps.maxSteps} steps...")
             training_output = trainer.train()
             print(f"[peft-trl-orpo] Training completed")
 
             # -----------------------------------------------------------------
-            # Step 8: Save adapter checkpoint
+            # Step 9: Save adapter checkpoint
             # -----------------------------------------------------------------
             adapter_path = output_dir / "adapter"
             model.save_pretrained(str(adapter_path))
@@ -601,7 +642,7 @@ class PeftTrlORPOBackend(TrainerBackend):
                 json.dump(checkpoint_meta, f, indent=2)
 
             # -----------------------------------------------------------------
-            # Step 9: Compute metrics
+            # Step 10: Compute metrics
             # -----------------------------------------------------------------
             elapsed = time.time() - start_time
             wall_clock_minutes = round(elapsed / 60, 2)
@@ -621,7 +662,7 @@ class PeftTrlORPOBackend(TrainerBackend):
                 )
 
             # -----------------------------------------------------------------
-            # Step 10: Return result
+            # Step 11: Return result
             # -----------------------------------------------------------------
             result = TrainingExperimentResult(
                 experimentId=self.spec.experimentId,

@@ -238,17 +238,56 @@ class TestBackendValidation:
         assert backend.validate_spec() is False
         assert any("orpo" in e.lower() for e in backend.errors)
 
-    def test_peft_trl_rejects_cpu_experimental(self):
-        """peft-trl backend should reject CPU experimental."""
+    def test_peft_trl_accepts_cpu_experimental(self):
+        """peft-trl backend should accept CPU experimental with warnings."""
         from peft_trl_orpo_backend import PeftTrlORPOBackend
 
-        spec = create_valid_spec(
-            backend="peft-trl-orpo", hardware_tier="cpu-experimental"
+        # Create a fake dataset file for validation
+        tmpdir = tempfile.mkdtemp()
+        dataset_path = os.path.join(tmpdir, "test-export.jsonl")
+        with open(dataset_path, "w") as f:
+            f.write('{"prompt": "test", "chosen": "good", "rejected": "bad"}\n')
+
+        spec = TrainingExperimentSpec(
+            experimentId="test-exp-123",
+            backend="peft-trl-orpo",
+            trainingMode="orpo",
+            targetWorkerProfile="local-reader",
+            targetModelFamily="Qwen/Qwen2-0.5B-Instruct",
+            hardwareTier="cpu-experimental",
+            datasetExportId="export-456",
+            datasetExportPath=dataset_path,
+            datasetFingerprint="fp-test-abc",
+            benchmarkExportId="benchmark-789",
+            outputDir=tmpdir,
+            configFingerprint="fp-config-xyz",
+            codeHash="fp-code-123",
+            hyperparameters=TrainingHyperparameters(
+                learningRate=3e-4,
+                batchSize=1,
+                gradientAccumulation=4,
+                loraRank=8,
+                loraAlpha=16,
+                loraDropout=0.05,
+                warmupRatio=0.1,
+                maxSteps=10,
+                maxSeqLength=512,
+            ),
+            budget=TrainingBudget(maxWallClockMinutes=120),
+            expectedArtifact=ExpectedArtifact(
+                checkpointName="test-checkpoint",
+                adapterFormat="peft-adapter",
+            ),
         )
         backend = PeftTrlORPOBackend(spec)
 
-        assert backend.validate_spec() is False
-        assert any("cpu" in e.lower() for e in backend.errors)
+        # CPU is now accepted (with warnings printed to stdout)
+        assert backend.validate_spec() is True
+        assert len(backend.errors) == 0
+
+        # Cleanup
+        import shutil
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 class TestResultSerialization:
