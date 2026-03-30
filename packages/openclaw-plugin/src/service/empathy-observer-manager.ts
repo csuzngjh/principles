@@ -240,10 +240,8 @@ export class EmpathyObserverManager {
 
     private extractParentSessionId(sessionKey: string): string | null {
         if (!this.isObserverSession(sessionKey)) return null;
-        const rest = sessionKey.slice(OBSERVER_SESSION_PREFIX.length);
-        const marker = rest.lastIndexOf('-');
-        if (marker <= 0) return null;
-        return rest.slice(0, marker);
+        const match = sessionKey.match(/empathy-obs-(.+)-\d+_[a-z0-9]+$/);
+        return match ? match[1] : null;
     }
 
     private parseJsonPayload(rawText: string, logger?: PluginLogger): EmpathyObserverPayload | null {

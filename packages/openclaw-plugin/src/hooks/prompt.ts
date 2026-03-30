@@ -597,7 +597,7 @@ REQUIRED ACTION:
   }
 
   if (!isEmpathyObserverSession(sessionId || '')) {
-    prependContext = empathySilenceConstraint + '\n\n' + prependContext;
+    prependContext = '### BEHAVIORAL_CONSTRAINTS\n' + empathySilenceConstraint + '\n\n' + prependContext;
   }
 
   // ─────────────────────────────────────────────────4. Empathy Observer Spawn (async sidecar)
