@@ -118,6 +118,7 @@ jobs:
       - name: Run tests
         if: steps.package.outputs.pkg == 'openclaw-plugin'
         working-directory: packages/openclaw-plugin
+        timeout-minutes: 10
         run: npm test || echo "Tests failed, continuing..."
 
       - name: Determine version bump type
