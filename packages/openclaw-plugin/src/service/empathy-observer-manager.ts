@@ -168,6 +168,7 @@ export class EmpathyObserverManager {
             api.logger.info(`[PD:EmpathyObserver] Retrieved messages for ${targetSessionKey}`);
 
             const rawText = this.extractAssistantText(messages.messages, messages.assistantTexts);
+            api.logger.info(`[PD:EmpathyObserver] Raw observer output for ${targetSessionKey}: ${JSON.stringify(rawText)}`);
             const parsed = this.parseJsonPayload(rawText, api.logger);
             api.logger.info(`[PD:EmpathyObserver] Payload parsed: ${JSON.stringify(parsed)}`);
 
