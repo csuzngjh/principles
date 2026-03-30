@@ -1,0 +1,34 @@
+{
+  "experimentId": "abdd8b15-d0d0-44de-9f30-e259542c50c3",
+  "backend": "peft-trl-orpo",
+  "trainingMode": "orpo",
+  "targetWorkerProfile": "local-reader",
+  "targetModelFamily": "qwen2.5-7b-reader",
+  "hardwareTier": "consumer-gpu",
+  "datasetExportId": "export-123",
+  "datasetExportPath": "/tmp/pd-nocturnal-train-test-7kFVZF/.state/exports/orpo/export-123.jsonl",
+  "datasetFingerprint": "dataset-fp-123",
+  "benchmarkExportId": "export-123",
+  "outputDir": "/tmp/pd-nocturnal-train-test-7kFVZF/.state/nocturnal/checkpoints",
+  "configFingerprint": "dc867911eece7ac3",
+  "codeHash": "5ae099f8a5ab8091",
+  "hyperparameters": {
+    "learningRate": 0.0003,
+    "batchSize": 2,
+    "gradientAccumulation": 8,
+    "loraRank": 16,
+    "loraAlpha": 32,
+    "loraDropout": 0.05,
+    "warmupRatio": 0.1,
+    "maxSteps": 1000,
+    "maxSeqLength": 2048
+  },
+  "budget": {
+    "maxWallClockMinutes": 240,
+    "maxTrainTokens": 2000000
+  },
+  "expectedArtifact": {
+    "checkpointName": "checkpoint-qwen2.5-7b-reader-1774831304281",
+    "adapterFormat": "peft-adapter"
+  }
+}

@@ -342,6 +342,24 @@ describe('training-program', () => {
       expect(run.status).toBe('failed');
     });
 
+    it('validation failure: transitions pending → running → failed (not invalid transition)', () => {
+      const { spec, trainRunId } = createValidExperiment();
+      // Tamper with experimentId to trigger validation failure
+      const tamperedResult: TrainingExperimentResult = {
+        ...makeCompletedResult(spec),
+        experimentId: 'WRONG-ID',
+      };
+
+      expect(() => processTrainerResult({ spec, trainRunId, result: tamperedResult, stateDir }))
+        .toThrow(/validation failed/);
+
+      const registry = getFullRegistry(stateDir);
+      const run = registry.trainingRuns.find(r => r.trainRunId === trainRunId)!;
+      // Must be 'failed', not stuck in 'pending' or crash with invalid transition
+      expect(run.status).toBe('failed');
+      expect(run.failureReason).toContain('Validation failed');
+    });
+
     it('dry_run result: transitions run to completed and returns null (no checkpoint)', () => {
       const { spec, trainRunId } = createValidExperiment();
       const result = makeDryRunResult(spec);

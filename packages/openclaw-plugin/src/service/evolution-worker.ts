@@ -528,6 +528,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
 
     const releaseLock = await requireQueueLock(queuePath, logger, 'processEvolutionQueue');
     const evoLogger = getEvolutionLogger(wctx.workspaceDir, wctx.trajectory);
+    let lockReleased = false;
 
     try {
         let rawQueue: any[] = [];
@@ -558,11 +559,27 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
         const config = wctx.config;
         const timeout = config.get('intervals.task_timeout_ms') || (60 * 60 * 1000); // Default 1 hour
 
-        // V2: Check for failed tasks that exceeded max retries
-        for (const task of queue.filter(t => t.status === 'in_progress')) {
-            if (task.taskKind === 'sleep_reflection') {
-                // sleep_reflection tasks are processed differently - skip HEARTBEAT logic
-                continue;
+        // V2: Recover stuck in_progress sleep_reflection tasks.
+        // If the worker crashes or the result write-back fails after Phase 1 claimed
+        // the task, it stays in_progress indefinitely. Detect via timeout and mark
+        // as failed so a fresh task can be enqueued on the next idle cycle.
+        for (const task of queue.filter(t => t.status === 'in_progress' && t.taskKind === 'sleep_reflection')) {
+            const startedAt = new Date(task.started_at || task.timestamp);
+            const age = Date.now() - startedAt.getTime();
+            if (age > timeout) {
+                task.status = 'failed';
+                task.completed_at = new Date().toISOString();
+                task.resolution = 'failed_max_retries';
+                task.lastError = `sleep_reflection timed out after ${Math.round(timeout / 60000)} minutes`;
+                task.retryCount = (task.retryCount ?? 0) + 1;
+                queueChanged = true;
+                logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${task.id} timed out after ${Math.round(age / 60000)} minutes, marking as failed`);
+                evoLogger.logCompleted({
+                    traceId: task.traceId || task.id,
+                    taskId: task.id,
+                    resolution: 'manual',
+                    durationMs: age,
+                });
             }
         }
 
@@ -645,55 +662,12 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
             }
         }
 
-        // V2: Only process pain_diagnosis tasks for HEARTBEAT injection
-        // sleep_reflection tasks are handled by nocturnal service (Phase 2.4)
+        // V2: Process pain_diagnosis tasks FIRST (quick, inside lock),
+        // then sleep_reflection tasks (slow, lock released during execution).
+        // This order ensures pain tasks are never starved by long-running
+        // nocturnal reflection — sleep_reflection can safely return early
+        // because pain_diagnosis has already been handled.
         const pendingTasks = queue.filter(t => t.status === 'pending' && t.taskKind === 'pain_diagnosis');
-
-        // Phase 2.4: Process sleep_reflection tasks
-        for (const sleepTask of queue.filter(t => t.status === 'pending' && t.taskKind === 'sleep_reflection')) {
-            const nowIso = new Date().toISOString();
-            sleepTask.status = 'in_progress';
-            sleepTask.started_at = nowIso;
-            queueChanged = true;
-
-            try {
-                logger?.info?.(`[PD:EvolutionWorker] Processing sleep_reflection task ${sleepTask.id}`);
-
-                // Build runtime adapter for real Trinity execution if api is available
-                const runtimeAdapter = api ? new OpenClawTrinityRuntimeAdapter(api) : undefined;
-
-                // Call the nocturnal reflection service
-                const result = await executeNocturnalReflectionAsync(wctx.workspaceDir, wctx.stateDir, {
-                    runtimeAdapter,
-                });
-
-                if (result.success && result.artifact) {
-                    sleepTask.status = 'completed';
-                    sleepTask.completed_at = new Date().toISOString();
-                    sleepTask.resolution = 'marker_detected';
-                    sleepTask.resultRef = result.diagnostics.persistedPath;
-                    logger?.info?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} completed successfully`);
-                } else {
-                    // Record failure with skip reason
-                    const skipReason = result.skipReason || (result.noTargetSelected ? 'no_target' : 'validation_failed');
-                    sleepTask.status = 'failed';
-                    sleepTask.completed_at = new Date().toISOString();
-                    sleepTask.resolution = 'failed_max_retries';
-                    sleepTask.lastError = `Nocturnal reflection failed: ${result.validationFailures.join('; ') || skipReason}`;
-                    sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
-                    logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} failed: ${sleepTask.lastError}`);
-                }
-            } catch (taskErr) {
-                sleepTask.status = 'failed';
-                sleepTask.completed_at = new Date().toISOString();
-                sleepTask.resolution = 'failed_max_retries';
-                sleepTask.lastError = String(taskErr);
-                sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
-                logger?.error?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} threw: ${taskErr}`);
-            }
-
-            queueChanged = true;
-        }
 
         if (pendingTasks.length > 0) {
             // V2: Also sort by priority within same score
@@ -777,13 +751,120 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
             }
         }
 
+        // Phase 2.4: Process sleep_reflection tasks AFTER pain_diagnosis.
+        // Claim tasks inside the lock, execute reflection outside the lock,
+        // then re-acquire the lock to write results. This prevents the long-running
+        // nocturnal reflection from blocking all other queue consumers.
+        // Safe to return early here because pain_diagnosis was already handled above.
+        const sleepReflectionTasks = queue.filter(t => t.status === 'pending' && t.taskKind === 'sleep_reflection');
+        if (sleepReflectionTasks.length > 0) {
+            // --- Phase 1: Claim tasks (inside lock) ---
+            for (const sleepTask of sleepReflectionTasks) {
+                sleepTask.status = 'in_progress';
+                sleepTask.started_at = new Date().toISOString();
+            }
+            queueChanged = true;
+
+            // Write claimed state (includes any pain changes from above) and release lock
+            if (queueChanged) {
+                fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+            }
+            releaseLock();
+            for (const sleepTask of sleepReflectionTasks) {
+                try {
+                    logger?.info?.(`[PD:EvolutionWorker] Processing sleep_reflection task ${sleepTask.id}`);
+
+                    // Build runtime adapter for real Trinity execution if api is available
+                    const runtimeAdapter = api ? new OpenClawTrinityRuntimeAdapter(api) : undefined;
+
+                    // Call the nocturnal reflection service
+                    const result = await executeNocturnalReflectionAsync(wctx.workspaceDir, wctx.stateDir, {
+                        runtimeAdapter,
+                    });
+
+                    if (result.success && result.artifact) {
+                        sleepTask.status = 'completed';
+                        sleepTask.completed_at = new Date().toISOString();
+                        sleepTask.resolution = 'marker_detected';
+                        sleepTask.resultRef = result.diagnostics.persistedPath;
+                        logger?.info?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} completed successfully`);
+                    } else {
+                        // Record failure with skip reason
+                        const skipReason = result.skipReason || (result.noTargetSelected ? 'no_target' : 'validation_failed');
+                        sleepTask.status = 'failed';
+                        sleepTask.completed_at = new Date().toISOString();
+                        sleepTask.resolution = 'failed_max_retries';
+                        sleepTask.lastError = `Nocturnal reflection failed: ${result.validationFailures.join('; ') || skipReason}`;
+                        sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
+                        logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} failed: ${sleepTask.lastError}`);
+                    }
+                } catch (taskErr) {
+                    sleepTask.status = 'failed';
+                    sleepTask.completed_at = new Date().toISOString();
+                    sleepTask.resolution = 'failed_max_retries';
+                    sleepTask.lastError = String(taskErr);
+                    sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
+                    logger?.error?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} threw: ${taskErr}`);
+                }
+            }
+
+            // --- Phase 3: Write results back (re-acquire lock) ---
+            try {
+                const resultLock = await requireQueueLock(queuePath, logger, 'sleepReflectionResult');
+                try {
+                    // Re-read queue to merge with any changes made while lock was released
+                    let freshQueue: any[] = [];
+                    try {
+                        freshQueue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
+                    } catch { /* empty queue if corrupted */ }
+
+                    // Merge: update tasks by ID
+                    for (const sleepTask of sleepReflectionTasks) {
+                        const idx = freshQueue.findIndex((t: any) => t.id === sleepTask.id);
+                        if (idx >= 0) {
+                            freshQueue[idx] = sleepTask;
+                        }
+                    }
+                    fs.writeFileSync(queuePath, JSON.stringify(freshQueue, null, 2), 'utf8');
+
+                    // Log completions to EvolutionLogger
+                    for (const sleepTask of sleepReflectionTasks) {
+                        if (sleepTask.status === 'completed' || sleepTask.status === 'failed') {
+                            evoLogger.logCompleted({
+                                traceId: sleepTask.traceId || sleepTask.id,
+                                taskId: sleepTask.id,
+                                resolution: sleepTask.status === 'completed'
+                                    ? (sleepTask.resolution === 'marker_detected' ? 'marker_detected' : 'manual')
+                                    : 'manual',
+                                durationMs: sleepTask.started_at
+                                    ? Date.now() - new Date(sleepTask.started_at).getTime()
+                                    : undefined,
+                            });
+                        }
+                    }
+                } finally {
+                    resultLock();
+                }
+            } catch (resultLockErr) {
+                // If we can't re-acquire lock, results are in memory but not persisted.
+                // Tasks will appear stuck as in_progress and will be retried on next cycle.
+                logger?.warn?.(`[PD:EvolutionWorker] Failed to write sleep_reflection results back: ${String(resultLockErr)}`);
+            }
+
+            // Safe to return — pain_diagnosis was already processed above.
+            lockReleased = true;
+            return;
+        }
+
         if (queueChanged) {
             fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
         }
     } catch (err) {
         if (logger) logger.warn(`[PD:EvolutionWorker] Error processing evolution queue: ${String(err)}`);
     } finally {
-        releaseLock();
+        if (!lockReleased) {
+            releaseLock();
+        }
     }
 }
 

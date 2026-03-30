@@ -472,6 +472,11 @@ export function processTrainerResult(
     return null;
   }
 
+  // --- Transition pending -> running first ---
+  // Must happen before any validation or failure path so that
+  // failTrainingRun has a valid transition (running → failed).
+  startTrainingRun(stateDir, trainRunId);
+
   // --- Validate result against spec (fail-closed) ---
   const validation = validateTrainerResult(spec, result);
   if (!validation.valid) {
@@ -479,7 +484,7 @@ export function processTrainerResult(
       .map((e) => `  - ${e.field}: ${e.reason} (expected: ${e.expected}, got: ${e.actual})`)
       .join('\n');
 
-    // Fail the training run in registry
+    // Fail the training run in registry (running → failed is valid)
     failTrainingRun(stateDir, trainRunId, `Validation failed:\n${errorMessages}`);
 
     throw new Error(
@@ -490,8 +495,7 @@ export function processTrainerResult(
   }
 
   // --- Update training run status ---
-  // Transition pending -> running (required before 'completed')
-  startTrainingRun(stateDir, trainRunId);
+  // Already transitioned to 'running' above
 
   if (result.status === 'failed') {
     failTrainingRun(stateDir, trainRunId, result.failureReason ?? 'Unknown failure');

@@ -660,8 +660,18 @@ export function advancePromotion(
       createdAt: existingIdx >= 0
         ? registry.promotions[existingIdx].createdAt
         : now,
-      shadowStartedAt: targetState === 'shadow_ready' || targetState === 'promotable'
-        ? now
+      shadowStartedAt: (targetState === 'shadow_ready' || targetState === 'promotable')
+        ? (() => {
+            const existing = existingIdx >= 0 ? registry.promotions[existingIdx] : null;
+            // Only preserve shadowStartedAt if the checkpoint was already on the
+            // shadow path (shadow_ready or promotable). A demotion to candidate_only
+            // or rejected means the next shadow entry is a fresh start — use now.
+            if (existing?.shadowStartedAt &&
+                (existing.state === 'shadow_ready' || existing.state === 'promotable')) {
+              return existing.shadowStartedAt;
+            }
+            return now;
+          })()
         : existingIdx >= 0
           ? registry.promotions[existingIdx].shadowStartedAt
           : undefined,
