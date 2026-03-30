@@ -282,6 +282,172 @@ describe('EvolutionWorkerService', () => {
         }
     });
 
+    describe('sleep_reflection stuck in_progress recovery', () => {
+        it('should recover stuck in_progress sleep_reflection tasks older than timeout', async () => {
+            const mockDict = {
+                flush: vi.fn()
+            };
+            vi.mocked(DictionaryService.get).mockReturnValue(mockDict as any);
+
+            const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-sleep-recovery-'));
+            const stateDir = path.join(workspaceDir, '.state');
+            fs.mkdirSync(path.join(stateDir, 'sessions'), { recursive: true });
+            fs.mkdirSync(path.join(stateDir, 'logs'), { recursive: true });
+
+            // Create a sleep_reflection task that's been in_progress for 2 hours
+            const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+            fs.writeFileSync(
+                path.join(stateDir, 'evolution_queue.json'),
+                JSON.stringify([
+                    {
+                        id: 'sleep-stuck',
+                        taskKind: 'sleep_reflection',
+                        priority: 'medium',
+                        score: 50,
+                        source: 'nocturnal',
+                        reason: 'Sleep-mode reflection',
+                        trigger_text_preview: 'Idle workspace detected',
+                        timestamp: twoHoursAgo,
+                        enqueued_at: twoHoursAgo,
+                        started_at: twoHoursAgo,
+                        status: 'in_progress',
+                        traceId: 'sleep-stuck',
+                        retryCount: 0,
+                        maxRetries: 1,
+                    },
+                ], null, 2),
+                'utf8'
+            );
+
+            const ctx = {
+                workspaceDir,
+                stateDir,
+                logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+            };
+
+            try {
+                EvolutionWorkerService.start(ctx as any);
+                await vi.advanceTimersByTimeAsync(5000);
+
+                const queue = JSON.parse(fs.readFileSync(path.join(stateDir, 'evolution_queue.json'), 'utf8'));
+                expect(queue[0].status).toBe('failed');
+                expect(queue[0].resolution).toBe('failed_max_retries');
+                expect(queue[0].completed_at).toBeDefined();
+                expect(queue[0].lastError).toContain('timed out');
+            } finally {
+                EvolutionWorkerService.stop(ctx as any);
+                safeRmDir(workspaceDir);
+            }
+        });
+
+        it('should not recover sleep_reflection tasks within timeout', async () => {
+            const mockDict = { flush: vi.fn() };
+            vi.mocked(DictionaryService.get).mockReturnValue(mockDict as any);
+
+            const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-sleep-recent-'));
+            const stateDir = path.join(workspaceDir, '.state');
+            fs.mkdirSync(path.join(stateDir, 'sessions'), { recursive: true });
+            fs.mkdirSync(path.join(stateDir, 'logs'), { recursive: true });
+
+            // Task started 10 minutes ago — well within 1-hour timeout
+            const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+            fs.writeFileSync(
+                path.join(stateDir, 'evolution_queue.json'),
+                JSON.stringify([
+                    {
+                        id: 'sleep-recent',
+                        taskKind: 'sleep_reflection',
+                        priority: 'medium',
+                        score: 50,
+                        source: 'nocturnal',
+                        reason: 'Sleep-mode reflection',
+                        trigger_text_preview: 'Idle workspace detected',
+                        timestamp: tenMinutesAgo,
+                        enqueued_at: tenMinutesAgo,
+                        started_at: tenMinutesAgo,
+                        status: 'in_progress',
+                        traceId: 'sleep-recent',
+                        retryCount: 0,
+                        maxRetries: 1,
+                    },
+                ], null, 2),
+                'utf8'
+            );
+
+            const ctx = {
+                workspaceDir,
+                stateDir,
+                logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+            };
+
+            try {
+                EvolutionWorkerService.start(ctx as any);
+                await vi.advanceTimersByTimeAsync(5000);
+
+                const queue = JSON.parse(fs.readFileSync(path.join(stateDir, 'evolution_queue.json'), 'utf8'));
+                // Still in_progress — not old enough to recover
+                expect(queue[0].status).toBe('in_progress');
+            } finally {
+                EvolutionWorkerService.stop(ctx as any);
+                safeRmDir(workspaceDir);
+            }
+        });
+
+        it('should not affect pain_diagnosis in_progress timeout logic', async () => {
+            const mockDict = { flush: vi.fn() };
+            vi.mocked(DictionaryService.get).mockReturnValue(mockDict as any);
+
+            const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pain-unchanged-'));
+            const stateDir = path.join(workspaceDir, '.state');
+            fs.mkdirSync(path.join(stateDir, 'sessions'), { recursive: true });
+            fs.mkdirSync(path.join(stateDir, 'logs'), { recursive: true });
+
+            // pain_diagnosis task that's been in_progress for 2 hours — should be auto-completed
+            const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+            fs.writeFileSync(
+                path.join(stateDir, 'evolution_queue.json'),
+                JSON.stringify([
+                    {
+                        id: 'pain-old',
+                        taskKind: 'pain_diagnosis',
+                        priority: 'high',
+                        score: 90,
+                        source: 'tool_failure',
+                        reason: 'write failed',
+                        trigger_text_preview: 'Tool edit failed',
+                        timestamp: twoHoursAgo,
+                        enqueued_at: twoHoursAgo,
+                        started_at: twoHoursAgo,
+                        status: 'in_progress',
+                        traceId: 'pain-old',
+                        retryCount: 0,
+                        maxRetries: 3,
+                    },
+                ], null, 2),
+                'utf8'
+            );
+
+            const ctx = {
+                workspaceDir,
+                stateDir,
+                logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+            };
+
+            try {
+                EvolutionWorkerService.start(ctx as any);
+                await vi.advanceTimersByTimeAsync(5000);
+
+                const queue = JSON.parse(fs.readFileSync(path.join(stateDir, 'evolution_queue.json'), 'utf8'));
+                // pain_diagnosis uses auto_completed_timeout, NOT failed
+                expect(queue[0].status).toBe('completed');
+                expect(queue[0].resolution).toBe('auto_completed_timeout');
+            } finally {
+                EvolutionWorkerService.stop(ctx as any);
+                safeRmDir(workspaceDir);
+            }
+        });
+    });
+
     describe('Phase 3 Eligibility - Queue Only (Trust Removed)', () => {
         it('makes queue eligible when tasks are valid', () => {
             const result = evaluatePhase3Inputs(

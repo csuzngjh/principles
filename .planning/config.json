@@ -7,9 +7,17 @@
   "workflow": {
     "research": false,
     "plan_check": false,
-    "verifier": false,
-    "nyquist_validation": false,
-    "auto_advance": false
+    "verifier": true,
+    "nyquist_validation": true,
+    "auto_advance": false,
+    "ui_phase": true,
+    "ui_safety_gate": true
+  },
+  "git": {
+    "branching_strategy": "none"
+  },
+  "hooks": {
+    "context_warnings": true
   },
   "project": {
     "name": "principles-disciple",

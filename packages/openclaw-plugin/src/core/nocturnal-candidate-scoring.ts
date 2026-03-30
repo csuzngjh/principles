@@ -139,7 +139,7 @@ export function scoreCandidate(
   if (!candidate.betterDecision || candidate.betterDecision.trim().length === 0) schemaCompleteness -= 0.2;
   if (!candidate.rationale || candidate.rationale.trim().length === 0) schemaCompleteness -= 0.2;
   if (typeof candidate.confidence !== 'number' || candidate.confidence < 0 || candidate.confidence > 1) schemaCompleteness -= 0.2;
-  if (candidate.badDecision.trim() === candidate.betterDecision.trim()) schemaCompleteness -= 0.2;
+  if (candidate.badDecision && candidate.betterDecision && candidate.badDecision.trim() === candidate.betterDecision.trim()) schemaCompleteness -= 0.2;
   schemaCompleteness = Math.max(0, schemaCompleteness);
 
   // Principle alignment: from Philosopher judgment
@@ -147,15 +147,18 @@ export function scoreCandidate(
 
   // Executability: betterDecision contains actionable verb
   const actionableVerbs = ['read', 'check', 'verify', 'edit', 'write', 'search', 'grep', 'review', 'analyze', 'diagnose', 'debug', 'inspect', 'examine', 'test'];
-  const hasActionableVerb = actionableVerbs.some((v) =>
-    candidate.betterDecision.toLowerCase().includes(v)
-  );
+  const hasActionableVerb = candidate.betterDecision
+    ? actionableVerbs.some((v) =>
+        candidate.betterDecision.toLowerCase().includes(v)
+      )
+    : false;
   const executability = hasActionableVerb ? 1.0 : 0.4;
 
   // Boundedness: specific and constrained
   let boundedness = 0.5;
   // Specific: mentions specific targets (files, tools, etc.)
-  const hasSpecificTarget = /[a-zA-Z0-9_\-]+\.(ts|js|json|md|yml|yaml|sh|py|go|rs)/.test(candidate.betterDecision);
+  const betterDecisionStr = candidate.betterDecision ?? '';
+  const hasSpecificTarget = /[a-zA-Z0-9_\-]+\.(ts|js|json|md|yml|yaml|sh|py|go|rs)/.test(betterDecisionStr);
   if (hasSpecificTarget) boundedness += 0.2;
   // Not too generic
   const genericPatterns = [
@@ -164,10 +167,10 @@ export function scoreCandidate(
     /\bit\b/i,
     /\bthe thing\b/i,
   ];
-  const isGeneric = genericPatterns.some((pattern) => pattern.test(candidate.betterDecision));
+  const isGeneric = genericPatterns.some((pattern) => pattern.test(betterDecisionStr));
   if (isGeneric) boundedness -= 0.3;
-  // Not too long (multi-step vagueness)
-  if (candidate.betterDecision.length > 200) boundedness -= 0.1;
+  // Not too long (如果 multi-step vagueness)
+  if (betterDecisionStr.length > 200) boundedness -= 0.1;
   boundedness = Math.max(0, Math.min(1, boundedness));
 
   // Confidence: from Dreamer's confidence, adjusted by consistency
