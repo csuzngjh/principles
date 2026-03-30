@@ -3,7 +3,7 @@ import { trackFriction } from '../core/session-tracker.js';
 import { isSubagentRuntimeAvailable } from '../utils/subagent-probe.js';
 import type { PluginLogger } from '../openclaw-sdk.js';
 
-const OBSERVER_SESSION_PREFIX = 'empathy_obs:';
+const OBSERVER_SESSION_PREFIX = 'agent:main:subagent:empathy-obs-';
 
 
 export interface EmpathyObserverApi {
@@ -22,6 +22,7 @@ export interface EmpathyObserverApi {
                 idempotencyKey?: string;
             }) => Promise<unknown>;
             getSessionMessages: (params: { sessionKey: string; limit?: number }) => Promise<{ messages: unknown[]; assistantTexts?: string[] }>;
+            deleteSession: (params: { sessionKey: string; deleteTranscript?: boolean }) => Promise<void>;
         };
     };
     logger: PluginLogger;
@@ -85,22 +86,44 @@ export class EmpathyObserverManager {
     }
 
     shouldTrigger(api: EmpathyObserverApi | null | undefined, sessionId: string): boolean {
-        if (!api || !sessionId) return false;
+        if (!api || !sessionId) {
+            api?.logger?.warn?.('[PD:EmpathyObserver] shouldTrigger=false: api or sessionId null');
+            return false;
+        }
         const enabled = api.config?.empathy_engine?.enabled !== false;
-        if (!enabled) return false;
-        if (!isSubagentRuntimeAvailable(api.runtime?.subagent)) return false;
-
-        return !this.sessionLocks.has(sessionId);
+        if (!enabled) {
+            api.logger?.warn?.('[PD:EmpathyObserver] shouldTrigger=false: empathy_engine disabled');
+            return false;
+        }
+        const subagentOk = isSubagentRuntimeAvailable(api.runtime?.subagent);
+        if (!subagentOk) {
+            api.logger?.warn?.('[PD:EmpathyObserver] shouldTrigger=false: subagent runtime unavailable');
+            return false;
+        }
+        if (this.sessionLocks.has(sessionId)) {
+            api.logger?.warn?.(`[PD:EmpathyObserver] shouldTrigger=false: session ${sessionId} locked`);
+            return false;
+        }
+        api.logger?.info?.(`[PD:EmpathyObserver] shouldTrigger=true for session ${sessionId}`);
+        return true;
     }
 
     async spawn(api: EmpathyObserverApi | null | undefined, sessionId: string, userMessage: string): Promise<string | null> {
         if (!api) return null;
-        if (!this.shouldTrigger(api, sessionId)) return null;
-        if (!userMessage?.trim()) return null;
+        if (!this.shouldTrigger(api, sessionId)) {
+            api?.logger?.warn?.(`[PD:EmpathyObserver] spawn skipped: shouldTrigger=false for session ${sessionId}`);
+            return null;
+        }
+        if (!userMessage?.trim()) {
+            api?.logger?.warn?.('[PD:EmpathyObserver] spawn skipped: empty userMessage');
+            return null;
+        }
 
         const timestamp = Date.now();
-        const sessionKey = `${OBSERVER_SESSION_PREFIX}${sessionId}:${timestamp}`;
+        const uuid = `${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+        const sessionKey = `${OBSERVER_SESSION_PREFIX}${sessionId}-${uuid}`;
         this.sessionLocks.set(sessionId, sessionKey);
+        api.logger.info(`[PD:EmpathyObserver] Spawn starting for session ${sessionId}, key=${sessionKey}`);
 
         const prompt = [
             'You are an empathy observer.',
@@ -117,11 +140,11 @@ export class EmpathyObserverManager {
                 deliver: false,
                 idempotencyKey: `${sessionId}:${timestamp}`,
             });
-            api.logger.info(`[PD:EmpathyObserver] Spawned observer ${sessionKey}`);
+            api.logger.info(`[PD:EmpathyObserver] Spawn succeeded for ${sessionKey}`);
             return sessionKey;
         } catch (error) {
             this.sessionLocks.delete(sessionId);
-            api.logger.warn(`[PD:EmpathyObserver] Failed to spawn observer for ${sessionId}: ${String(error)}`);
+            api.logger.warn(`[PD:EmpathyObserver] Spawn failed for ${sessionId}: ${String(error)}`);
             return null;
         }
     }
@@ -129,6 +152,7 @@ export class EmpathyObserverManager {
     async reap(api: EmpathyObserverApi | null | undefined, targetSessionKey: string, workspaceDir: string): Promise<void> {
         if (!api || !workspaceDir || !this.isObserverSession(targetSessionKey)) return;
 
+        api.logger.info(`[PD:EmpathyObserver] Reap starting for ${targetSessionKey}`);
         const sessionId = this.extractParentSessionId(targetSessionKey);
         const unlock = () => {
             if (sessionId && this.sessionLocks.get(sessionId) === targetSessionKey) {
@@ -141,9 +165,11 @@ export class EmpathyObserverManager {
                 sessionKey: targetSessionKey,
                 limit: 20,
             });
+            api.logger.info(`[PD:EmpathyObserver] Retrieved messages for ${targetSessionKey}`);
 
             const rawText = this.extractAssistantText(messages.messages, messages.assistantTexts);
             const parsed = this.parseJsonPayload(rawText, api.logger);
+            api.logger.info(`[PD:EmpathyObserver] Payload parsed: ${JSON.stringify(parsed)}`);
 
             if (parsed?.damageDetected && sessionId) {
                 const wctx = WorkspaceContext.fromHookContext({ workspaceDir });
@@ -185,22 +211,37 @@ export class EmpathyObserverManager {
                     api.logger.warn(`[PD:EmpathyObserver] Failed to persist observer pain event for ${sessionId}: ${String(error)}`);
                 }
                 api.logger.info(`[PD:EmpathyObserver] Applied GFI +${score} for ${sessionId}`);
+            } else {
+                api.logger.info(`[PD:EmpathyObserver] No damage detected or no sessionId for ${targetSessionKey}`);
+            }
+
+            try {
+                await api.runtime.subagent.deleteSession({ sessionKey: targetSessionKey });
+                api.logger.info(`[PD:EmpathyObserver] deleteSession succeeded for ${targetSessionKey}`);
+            } catch (error) {
+                api.logger.warn(`[PD:EmpathyObserver] deleteSession failed for ${targetSessionKey}: ${String(error)}`);
             }
         } catch (error) {
-            api.logger.warn(`[PD:EmpathyObserver] Failed to reap ${targetSessionKey}: ${String(error)}`);
+            api.logger.warn(`[PD:EmpathyObserver] Reap failed for ${targetSessionKey}: ${String(error)}`);
+            try {
+                await api.runtime.subagent.deleteSession({ sessionKey: targetSessionKey });
+                api.logger.info(`[PD:EmpathyObserver] deleteSession succeeded after reap failure for ${targetSessionKey}`);
+            } catch (deleteError) {
+                api.logger.warn(`[PD:EmpathyObserver] deleteSession also failed after reap failure for ${targetSessionKey}: ${String(deleteError)}`);
+            }
         } finally {
             unlock();
         }
     }
 
-    private isObserverSession(sessionKey: string): boolean {
+    isObserverSession(sessionKey: string): boolean {
         return typeof sessionKey === 'string' && sessionKey.startsWith(OBSERVER_SESSION_PREFIX);
     }
 
     private extractParentSessionId(sessionKey: string): string | null {
         if (!this.isObserverSession(sessionKey)) return null;
         const rest = sessionKey.slice(OBSERVER_SESSION_PREFIX.length);
-        const marker = rest.lastIndexOf(':');
+        const marker = rest.lastIndexOf('-');
         if (marker <= 0) return null;
         return rest.slice(0, marker);
     }
@@ -265,3 +306,7 @@ export class EmpathyObserverManager {
 }
 
 export const empathyObserverManager = EmpathyObserverManager.getInstance();
+
+export function isEmpathyObserverSession(sessionKey: string): boolean {
+    return typeof sessionKey === 'string' && sessionKey.startsWith(OBSERVER_SESSION_PREFIX);
+}

@@ -495,11 +495,14 @@ You are a **self-evolving AI agent** powered by Principles Disciple.
 `;
 
   // ──── 2. Evolution Directive (always on, highest priority) - stays in prependContext ────
-  // NOTE: active evolution task prompt is injected from EVOLUTION_QUEUE for active tasks
-  // NOT used for Phase 3 eligibility decisions
-  // EVOLUTION_DIRECTIVE.json is a compatibility-only display artifact
-  // Phase 3 eligibility uses only queue and evolution (see phase3-input-filter.ts)
   let activeEvolutionTaskPrompt = '';
+  const empathySilenceConstraint = `
+### 【EMPATHY OUTPUT RESTRICTION】
+Do NOT output empathy diagnostic text in JSON, XML, or tag format.
+Do NOT include "damageDetected", "severity", "confidence", or "empathy" fields in your output.
+The empathy observer subagent handles pain detection independently.
+`.trim();
+
   const queuePath = wctx.resolve('EVOLUTION_QUEUE');
   if (fs.existsSync(queuePath)) {
     try {
@@ -592,6 +595,8 @@ REQUIRED ACTION:
   if (activeEvolutionTaskPrompt) {
     prependContext = activeEvolutionTaskPrompt + prependContext;
   }
+
+  prependContext = empathySilenceConstraint + '\n\n' + prependContext;
 
   // ─────────────────────────────────────────────────4. Empathy Observer Spawn (async sidecar)
   // Skip if this is a subagent session or if the message indicates agent-to-agent communication

@@ -220,6 +220,16 @@ function applyRateLimit(
 }
 
 
+function isEmpathyAuditPayload(text: string): boolean {
+    if (!text || typeof text !== 'string') return false;
+    if (/^\s*\{[\s\S]*"damageDetected"[\s\S]*\}\s*$/.test(text)) return true;
+    if (/\{\s*[^}]*"damageDetected"\s*:/.test(text)) return true;
+    if (/<empathy\s+([^>]*)\/?>/i.test(text)) return true;
+    if (/"empathy"\s*:\s*\{[\s\S]*?"damageDetected"[\s\S]*?\}/i.test(text)) return true;
+    if (/^\s*\[EMOTIONAL_DAMAGE_DETECTED(?::(mild|moderate|severe))?\]\s*$/i.test(text)) return true;
+    return false;
+}
+
 export function handleLlmOutput(
     event: PluginHookLlmOutputEvent,
     ctx: PluginHookAgentContext & { workspaceDir?: string }
@@ -257,15 +267,16 @@ export function handleLlmOutput(
     }
 
     // ── Track B: Semantic Pain Detection (V1.3.0 Funnel) ──
+    const detectionText = isEmpathyAuditPayload(text) ? '' : text;
     const detectionService = DetectionService.get(wctx.stateDir);
-    const detection = detectionService.detect(text);
+    const detection = detectionService.detect(detectionText);
 
     if (detection.detected) {
         eventLog.recordRuleMatch(ctx.sessionId, {
             ruleId: detection.ruleId || detection.source,
             layer: detection.source === 'l1_exact' ? 'L1' : (detection.source === 'l2_cache' ? 'L2' : 'L3'),
             severity: detection.severity || 0,
-            textPreview: text.substring(0, 100)
+            textPreview: detectionText.substring(0, 100)
         });
     }
 
@@ -277,80 +288,7 @@ export function handleLlmOutput(
         ? `Agent triggered pain detection (Source: ${detection.source}${detection.ruleId ? `, Rule: ${detection.ruleId}` : ''})`
         : '';
 
-    // empathy sub-pipeline (enabled by default)
-    const empathyEnabled = config.get('empathy_engine.enabled');
-    if (empathyEnabled !== false) {
-        if (signal.detected) {
-            const dedupeWindow = Number(config.get('empathy_engine.dedupe_window_ms') ?? 60000);
-            const deduped = shouldDedupe(ctx.sessionId, event.runId, signal, dedupeWindow);
-
-            if (!deduped) {
-                const baseScore = mapSeverityToPenalty(signal.severity, config);
-                const weightedScore = Math.round(baseScore * signal.confidence);
-                const calibrationFactor = resolveCalibrationFactor(event, config);
-                const calibratedScore = Math.round(weightedScore * calibrationFactor);
-                const boundedScore = applyRateLimit(ctx.sessionId, event.runId, calibratedScore, config);
-
-                if (boundedScore > 0) {
-                    trackFriction(
-                        ctx.sessionId,
-                        boundedScore,
-                        `user_empathy_${signal.severity}`,
-                        ctx.workspaceDir,
-                        { source: 'user_empathy' }
-                    );
-                    try {
-                        wctx.trajectory?.recordPainEvent?.({
-                            sessionId: ctx.sessionId,
-                            source: 'user_empathy',
-                            score: boundedScore,
-                            reason: signal.reason || 'Assistant self-reported user emotional distress.',
-                            severity: signal.severity,
-                            origin: 'assistant_self_report',
-                            confidence: signal.confidence,
-                        });
-                    } catch (error) {
-                        ctx.logger?.warn?.(`[PD:LLM] Failed to persist empathy pain event to trajectory: ${String(error)}`);
-                    }
-                    // Generate unique event ID for rollback support
-                    const eventId = `emp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-                    eventLog.recordPainSignal(ctx.sessionId, {
-                        score: boundedScore,
-                        source: 'user_empathy',
-                        reason: signal.reason || 'Assistant self-reported user emotional distress.',
-                        isRisky: false,
-                        origin: 'assistant_self_report',
-                        severity: signal.severity,
-                        confidence: signal.confidence,
-                        detection_mode: signal.mode,
-                        deduped: false,
-                        trigger_text_excerpt: text.substring(0, 120),
-                        raw_score: weightedScore,
-                        calibrated_score: calibratedScore,
-                        eventId,
-                    } as any);
-                }
-            } else {
-                eventLog.recordPainSignal(ctx.sessionId, {
-                    score: 0,
-                    source: 'user_empathy',
-                    reason: signal.reason || 'Deduped empathy signal.',
-                    isRisky: false,
-                    origin: 'assistant_self_report',
-                    severity: signal.severity,
-                    confidence: signal.confidence,
-                    detection_mode: signal.mode,
-                    deduped: true,
-                    trigger_text_excerpt: text.substring(0, 120),
-                    raw_score: Math.round(mapSeverityToPenalty(signal.severity, config) * signal.confidence),
-                    calibrated_score: Math.round(mapSeverityToPenalty(signal.severity, config) * signal.confidence * resolveCalibrationFactor(event, config))
-                });
-            }
-        }
-    }
-
     // ═══ Natural Language Rollback Detection ═══
-    // Detect [EMPATHY_ROLLBACK_REQUEST] tag and trigger rollback
     const rollbackMatch = text.match(/^\s*\[EMPATHY_ROLLBACK_REQUEST\]\s*$/m);
     if (rollbackMatch) {
         const eventId = eventLog.getLastEmpathyEventId(ctx.sessionId);
