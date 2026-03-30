@@ -270,9 +270,9 @@ function isValidModelFormat(model: string): boolean {
 }
 
 /**
- * 濞?OpenClaw 闂佹澘绉堕悿鍡樼▔椤撯寬鎺楀几閹邦劷渚€宕圭€ｎ喒鍋撴径瀣仴
+ * Resolves model configuration for OpenClaw agents, supporting string and object formats
  * @param modelConfig - Model config: string (e.g. "provider/model") or { primary, fallbacks } object
- * @internal 閻庣數鍘ч崵顓熺閸涱剛杩旀繛鏉戭儓閻︻垱鎷呯捄銊︽殢
+ * @internal Helper for model configuration resolution
  */
 export function resolveModelFromConfig(modelConfig: unknown, logger?: PluginLogger): string | null {
   if (!modelConfig) return null;
@@ -313,8 +313,8 @@ export function resolveModelFromConfig(modelConfig: unknown, logger?: PluginLogg
 
 /**
  * Loads context injection config from .principles/PROFILE.json
- * 濞?PROFILE.json 閻犲洩顕цぐ?contextInjection 闂佹澘绉堕悿鍡涙晬鐏炵瓔娲ら柡瀣矆缁楀鈧稒锚濠€顏堝礆濞嗘帞绠查柛銉у仱缁垳鎷嬮妶澶婂赋缂?
- * @internal 閻庣數鍘ч崵顓熺瑹濞戞ê寰撳ù鐘崇墬鑶╅柛褎銇炴繛鍥偨?
+ * Parses contextInjection configuration from PROFILE.json for context injection
+ * @internal Used by evolution engine for context settings
  */
 export function loadContextInjectionConfig(workspaceDir: string): ContextInjectionConfig {
   const profilePath = path.join(workspaceDir, '.principles', 'PROFILE.json');
@@ -346,7 +346,7 @@ export function loadContextInjectionConfig(workspaceDir: string): ContextInjecti
  * Gets the diagnostician model - the model used for AI self-diagnosis and reflection
  * Priority: subagents.model > subagents.model > env.OPENCLAW_MODEL
  * Falls back to main model if no diagnostician model is configured
- * @internal 閻庣數鍘ч崵顓熺閸涱剛杩旀繛鏉戭儓閻︻垱鎷呯捄銊︽殢
+ * @internal Helper for model configuration resolution
  */
 export function getDiagnosticianModel(api: PromptHookApi | null, logger?: PluginLogger): string {
   // Determines logger: prefer api.logger, fallback to provided logger
@@ -374,7 +374,7 @@ export function getDiagnosticianModel(api: PromptHookApi | null, logger?: Plugin
     return primaryModel;
   }
   
-  // 婵炲备鍓濆﹢渚€鏌婂鍥╂瀭濞寸姾顔婄紞宥呂熼垾宕団偓鐑芥晬鐏炴儳袚闂?
+  // Error: No model configured for diagnostician subagent
   const errorMsg = `[PD:Prompt] ERROR: No model configured for diagnostician subagent. ` +
     `Please set 'agents.defaults.subagents.model' or 'agents.defaults.model' in OpenClaw config.`;
   effectiveLogger.error(errorMsg);
