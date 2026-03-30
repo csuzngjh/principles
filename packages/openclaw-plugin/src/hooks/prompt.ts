@@ -6,7 +6,7 @@ import { WorkspaceContext } from '../core/workspace-context.js';
 import { ContextInjectionConfig, defaultContextConfig } from '../types.js';
 import { classifyTask, type RoutingInput } from '../core/local-worker-routing.js';
 import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection, autoCompressFocus, safeReadCurrentFocus } from '../core/focus-history.js';
-import { empathyObserverManager, type EmpathyObserverApi } from '../service/empathy-observer-manager.js';
+import { empathyObserverManager, isEmpathyObserverSession, type EmpathyObserverApi } from '../service/empathy-observer-manager.js';
 import { PathResolver } from '../core/path-resolver.js';
 
 /**
@@ -495,11 +495,14 @@ You are a **self-evolving AI agent** powered by Principles Disciple.
 `;
 
   // ──── 2. Evolution Directive (always on, highest priority) - stays in prependContext ────
-  // NOTE: active evolution task prompt is injected from EVOLUTION_QUEUE for active tasks
-  // NOT used for Phase 3 eligibility decisions
-  // EVOLUTION_DIRECTIVE.json is a compatibility-only display artifact
-  // Phase 3 eligibility uses only queue and evolution (see phase3-input-filter.ts)
   let activeEvolutionTaskPrompt = '';
+  const empathySilenceConstraint = `
+### 【EMPATHY OUTPUT RESTRICTION】
+Do NOT output empathy diagnostic text in JSON, XML, or tag format.
+Do NOT include "damageDetected", "severity", "confidence", or "empathy" fields in your output.
+The empathy observer subagent handles pain detection independently.
+`.trim();
+
   const queuePath = wctx.resolve('EVOLUTION_QUEUE');
   if (fs.existsSync(queuePath)) {
     try {
@@ -599,6 +602,8 @@ REQUIRED ACTION:
   const isAgentToAgent = latestUserMessage.includes('sourceSession=agent:') || sessionId?.includes(':subagent:') === true;
 
   if (trigger === 'user' && sessionId && api && !isAgentToAgent) {
+    // Only inject empathy constraint when empathy observer will actually be spawned
+    prependContext = '### BEHAVIORAL_CONSTRAINTS\n' + empathySilenceConstraint + '\n\n' + prependContext;
     empathyObserverManager.spawn(api, sessionId, latestUserMessage).catch((err) => api.logger.warn(String(err)));
   }
 

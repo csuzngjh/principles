@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { handleLlmOutput, extractEmpathySignal } from '../../src/hooks/llm';
+import { handleLlmOutput, extractEmpathySignal, isEmpathyAuditPayload } from '../../src/hooks/llm';
 import * as painFlags from '../../src/core/pain';
 import * as sessionTracker from '../../src/core/session-tracker';
 import { ControlUiDatabase } from '../../src/core/control-ui-db';
@@ -166,7 +166,7 @@ describe('LLM Cognitive Distress Hook', () => {
         }));
     });
 
-    it('should apply empathy penalty and write event log', () => {
+    it('should NOT produce user_empathy from empathy JSON in main model output (Path 1 disabled)', () => {
         vi.spyOn(sessionTracker, 'trackFriction').mockImplementation(() => ({ currentGfi: 0 } as any));
         const mockFunnel = { detect: vi.fn().mockReturnValue({ detected: false, source: 'l3_async_queued' }) };
         vi.mocked(DetectionService.get).mockReturnValue(mockFunnel as any);
@@ -181,84 +181,55 @@ describe('LLM Cognitive Distress Hook', () => {
 
         handleLlmOutput(mockEvent as any, { workspaceDir, sessionId } as any);
 
-        expect(sessionTracker.trackFriction).toHaveBeenCalledWith(
+        expect(sessionTracker.trackFriction).not.toHaveBeenCalledWith(
             sessionId,
-            13,
-            'user_empathy_moderate',
-            workspaceDir,
-            { source: 'user_empathy' }
-        );
-        expect(mockEventLog.recordPainSignal).toHaveBeenCalledWith(
-            sessionId,
-            expect.objectContaining({
-                source: 'user_empathy',
-                severity: 'moderate',
-                detection_mode: 'legacy_tag',
-                raw_score: 25,
-                calibrated_score: 13
-            })
-        );
-        expect(mockWctx.trajectory.recordAssistantTurn).toHaveBeenCalledWith(
-            expect.objectContaining({
-                sessionId,
-                runId: 'r1',
-                rawText: '[EMOTIONAL_DAMAGE_DETECTED:moderate]',
-                sanitizedText: '',
-            })
+            expect.anything(),
+            expect.stringContaining('user_empathy'),
+            expect.anything(),
+            expect.anything()
         );
     });
 
-
-    it('should enforce per-turn rate limit within same runId', () => {
+    it('should NOT produce user_empathy from structured empathy tag in main model output', () => {
         vi.spyOn(sessionTracker, 'trackFriction').mockImplementation(() => ({ currentGfi: 0 } as any));
         const mockFunnel = { detect: vi.fn().mockReturnValue({ detected: false, source: 'l3_async_queued' }) };
         vi.mocked(DetectionService.get).mockReturnValue(mockFunnel as any);
 
-        const event1 = {
+        const event = {
             runId: 'same-run',
             sessionId,
             provider: 'test',
             model: 'test',
             assistantTexts: ['<empathy signal="damage" severity="severe" confidence="1" reason="reason-a"/>'],
         };
-        const event2 = {
-            runId: 'same-run',
+
+        handleLlmOutput(event as any, { workspaceDir, sessionId } as any);
+
+        expect(sessionTracker.trackFriction).not.toHaveBeenCalledWith(
             sessionId,
-            provider: 'test',
-            model: 'test',
-            assistantTexts: ['<empathy signal="damage" severity="severe" confidence="1" reason="reason-b"/>'],
-        };
-
-        handleLlmOutput(event1 as any, { workspaceDir, sessionId } as any);
-        handleLlmOutput(event2 as any, { workspaceDir, sessionId } as any);
-
-        const calls = (sessionTracker.trackFriction as any).mock.calls;
-        expect(calls[0][1]).toBe(20); // 40 severe * 0.5 calibration
-        expect(calls[1][1]).toBe(20); // capped by max_per_turn=40 across same run
+            expect.anything(),
+            expect.stringContaining('user_empathy'),
+            expect.anything(),
+            expect.anything()
+        );
     });
 
-    it('should dedupe repeated empathy signal within window', () => {
-        vi.useFakeTimers();
-        vi.spyOn(sessionTracker, 'trackFriction').mockImplementation(() => ({ currentGfi: 0 } as any));
-        const mockFunnel = { detect: vi.fn().mockReturnValue({ detected: false, source: 'l3_async_queued' }) };
+    it('should filter empathy audit payloads before detection to prevent rule_match pollution', () => {
+        const mockFunnel = {
+            detect: vi.fn().mockReturnValue({ detected: false, source: 'l3_async_queued' })
+        };
         vi.mocked(DetectionService.get).mockReturnValue(mockFunnel as any);
 
         const mockEvent = {
             runId: 'r1',
             sessionId,
             provider: 'test',
-            model: 'test',
-            assistantTexts: ['[EMOTIONAL_DAMAGE_DETECTED:severe]'],
+            assistantTexts: ['{"damageDetected": true, "severity": "moderate", "confidence": 0.8, "reason": "frustration"}'],
         };
 
         handleLlmOutput(mockEvent as any, { workspaceDir, sessionId } as any);
-        handleLlmOutput(mockEvent as any, { workspaceDir, sessionId } as any);
 
-        expect(sessionTracker.trackFriction).toHaveBeenCalledTimes(1);
-        expect(mockEventLog.recordPainSignal).toHaveBeenLastCalledWith(
-            sessionId,
-            expect.objectContaining({ deduped: true })
-        );
+        expect(mockFunnel.detect).toHaveBeenCalledWith('');
     });
 
     it('should continue pain processing when trajectory persistence fails', () => {
