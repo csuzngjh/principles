@@ -259,7 +259,7 @@ ${conversationContext}`;
 }
 
 /**
- * 濡ょ姴鐭侀惁澶娢熼垾宕団偓椋庘偓娑欘殘椤戜焦绋夐崣澶屽鐎殿喖绻戝Σ鎼佸触閿旇儻绀?"provider/model"
+ * Validates model format, expects "provider/model" format
  */
 function isValidModelFormat(model: string): boolean {
   // Case: "provider/model" -> "provider/model-variant"
