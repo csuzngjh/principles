@@ -360,14 +360,14 @@ export function getDiagnosticianModel(api: PromptHookApi | null, logger?: Plugin
   
   const agentsConfig = api?.config?.agents?.defaults;
   
-  // 濞村吋锚閸樻稒鎷呯捄銊︽殢閻庢稒鍔栧▍銈夋嚄閹存帞绉煎☉鎾存尵閺併倕螣閳ュ磭鈧?
+  // Priority 1: Check subagents.model first (preferred for diagnostician)
   const subagentModel = resolveModelFromConfig(agentsConfig?.subagents?.model, effectiveLogger);
   if (subagentModel) {
     effectiveLogger.info(`[PD:Prompt] Using subagents.model for diagnostician: ${subagentModel}`);
     return subagentModel;
   }
   
-  // 濠㈣泛娲埀顒€顧€缁辩増鎷呯捄銊︽殢濞戞挾绮▍銈夋嚄閹存帞绉兼俊顖椻偓宕団偓?
+  // Priority 2: Fallback to primary model if subagents.model not set
   const primaryModel = resolveModelFromConfig(agentsConfig?.model, effectiveLogger);
   if (primaryModel) {
     effectiveLogger.info(`[PD:Prompt] Using primary model for diagnostician (subagents.model not set): ${primaryModel}`);
@@ -489,7 +489,7 @@ You are a **self-evolving AI agent** powered by Principles Disciple.
 - Use agents_list / sessions_list / sessions_spawn for peer-agent or peer-session orchestration.
 - Use sessions_spawn with pd-diagnostician/pd-explorer/etc skills for internal worker tasks.
 
-## 妫ｅ啯鎯?INTERNAL SYSTEM LAYOUT
+## 🔧 INTERNAL SYSTEM LAYOUT
 - Your core plugin logic is rooted at: ${PathResolver.getExtensionRoot() || 'EXTENSION_ROOT (unresolved)'}
 - If you need self-inspection, prioritize the worker entry pointed by PathResolver key: EVOLUTION_WORKER
 `;
