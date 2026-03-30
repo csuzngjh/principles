@@ -139,24 +139,101 @@ async function installPlugin(pluginDir: string): Promise<void> {
   logger.success('插件安装成功');
 }
 
-/**
- * 安装插件依赖
- */
+function verifyNativeModule(modulePath: string): boolean {
+  try {
+    require(modulePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function installPluginDependencies(): Promise<void> {
   const extDir = getPluginExtDir();
-  const micromatchPath = path.join(extDir, 'node_modules', 'micromatch');
-  
-  // 检查关键依赖是否存在
-  if (!existsSync(micromatchPath)) {
-    logger.step('安装插件运行时依赖');
-    try {
-      const execOpts = getExecOptions(extDir);
-      execSync('npm install --silent micromatch@^4.0.8 @sinclair/typebox@^0.34.48', execOpts);
-      logger.success('插件依赖安装完成');
-    } catch (error) {
-      logger.warn('依赖安装失败，插件可能无法正常工作');
-      logger.info('手动修复: cd ~/.openclaw/extensions/principles-disciple && npm install micromatch @sinclair/typebox');
+  const packageJsonPath = path.join(extDir, 'package.json');
+  const nodeModulesPath = path.join(extDir, 'node_modules');
+  const nativeModules = ['better-sqlite3'];
+
+  if (!existsSync(packageJsonPath)) {
+    logger.warn('插件 package.json 不存在，跳过依赖安装');
+    return;
+  }
+
+  const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
+  const allDeps = Object.keys({ ...packageJson.dependencies, ...packageJson.devDependencies });
+
+  let needsInstall = !existsSync(nodeModulesPath);
+
+  if (!needsInstall) {
+    for (const dep of allDeps) {
+      if (!existsSync(path.join(extDir, 'node_modules', dep))) {
+        needsInstall = true;
+        break;
+      }
     }
+    if (!needsInstall) {
+      for (const mod of nativeModules) {
+        const modPath = path.join(extDir, 'node_modules', mod);
+        if (existsSync(modPath) && !verifyNativeModule(mod)) {
+          logger.warn(`原生模块 ${mod} 验证失败，需要重新编译`);
+          needsInstall = true;
+          break;
+        }
+      }
+    }
+  }
+
+  if (!needsInstall) {
+    logger.success('插件依赖已安装');
+    return;
+  }
+
+  logger.step('安装插件运行时依赖');
+  try {
+    const execOpts = getExecOptions(extDir);
+    logger.info('下载并安装 npm 依赖...');
+    execSync('npm install --ignore-scripts', execOpts);
+
+    for (const mod of nativeModules) {
+      const modPath = path.join(extDir, 'node_modules', mod);
+      if (existsSync(modPath)) {
+        logger.info(`编译原生模块 ${mod}...`);
+        try {
+          execSync(`npm rebuild ${mod}`, execOpts);
+        } catch (e) {
+          logger.warn(`原生模块 ${mod} 编译失败: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+    }
+
+    let nativeModulesOk = true;
+    for (const nativeMod of nativeModules) {
+      const nativeModPath = path.join(extDir, 'node_modules', nativeMod);
+      if (existsSync(nativeModPath)) {
+        if (verifyNativeModule(nativeMod)) {
+          logger.success(`原生模块 ${nativeMod} 验证通过`);
+        } else {
+          logger.warn(`原生模块 ${nativeMod} 验证失败`);
+          nativeModulesOk = false;
+        }
+      }
+    }
+
+    if (nativeModulesOk) {
+      logger.success('插件依赖安装完成');
+    } else {
+      logger.warn('部分原生模块可能无法正常工作');
+      logger.info('如果遇到问题，运行: cd ~/.openclaw/extensions/principles-disciple && npm rebuild');
+    }
+  } catch (error) {
+    logger.error('依赖安装失败');
+    logger.error(`错误: ${error instanceof Error ? error.message : String(error)}`);
+    logger.info('');
+    logger.info('手动修复步骤:');
+    logger.info(`  cd ${extDir}`);
+    logger.info('  npm install --ignore-scripts');
+    logger.info('  npm rebuild better-sqlite3');
+    // 不退出，让安装继续，可能基本功能还能用
   }
 }
 
