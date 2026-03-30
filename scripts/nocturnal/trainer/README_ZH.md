@@ -117,18 +117,80 @@ print(json.dumps(spec, indent=2))
 python main.py --spec my_experiment.json --output-dir ./checkpoints
 ```
 
+#### CPU 训练 (实验性)
+
+CPU 训练**极慢**，但可以在没有 GPU 的环境中运行。适合：
+- 测试训练流程
+- 小规模数据集验证
+- 学习和调试
+
+```bash
+# 创建 CPU 训练 spec
+python -c "
+import json, tempfile
+spec = {
+    'experimentId': 'cpu-test-001',
+    'backend': 'peft-trl-orpo',
+    'trainingMode': 'orpo',
+    'targetWorkerProfile': 'local-reader',
+    # 必须使用小模型！推荐 0.5B 或 1.5B
+    'targetModelFamily': 'Qwen/Qwen2-0.5B-Instruct',
+    'hardwareTier': 'cpu-experimental',
+    'datasetExportId': 'export-123',
+    'datasetExportPath': '/path/to/your/export.jsonl',
+    'datasetFingerprint': 'fp-abc',
+    'benchmarkExportId': 'bench-456',
+    'outputDir': tempfile.gettempdir(),
+    'configFingerprint': 'fp-config',
+    'codeHash': 'fp-code',
+    'hyperparameters': {
+        'learningRate': 3e-4,
+        'batchSize': 1,           # CPU 必须用 1
+        'gradientAccumulation': 4, # 用梯度累积补偿小 batch
+        'loraRank': 8,            # 减小 LoRA rank 节省内存
+        'loraAlpha': 16,
+        'loraDropout': 0.05,
+        'warmupRatio': 0.1,
+        'maxSteps': 50,           # 减少步数
+        'maxSeqLength': 512       # 减短序列长度
+    },
+    'budget': {'maxWallClockMinutes': 120},
+    'expectedArtifact': {'checkpointName': 'cpu-checkpoint', 'adapterFormat': 'peft-adapter'}
+}
+print(json.dumps(spec, indent=2))
+" > cpu_experiment.json
+
+# 运行 CPU 训练
+python main.py --spec cpu_experiment.json --output-dir ./checkpoints
+```
+
+**CPU 训练优化建议：**
+
+| 参数 | GPU 推荐 | CPU 推荐 | 原因 |
+|------|----------|----------|------|
+| 模型大小 | 7B-14B | **0.5B-1.5B** | 大模型内存不足 |
+| batchSize | 2-4 | **1** | CPU 内存有限 |
+| gradientAccumulation | 8 | **4-16** | 补偿小 batch |
+| loraRank | 16-32 | **4-8** | 减少参数 |
+| maxSeqLength | 2048 | **512-1024** | 减少内存 |
+| maxSteps | 1000+ | **50-200** | 时间限制 |
+
+**预计时间对比：**
+- GPU (RTX 4090): 100 steps ≈ 5 分钟
+- CPU (8核): 100 steps ≈ 2-4 小时
+
 ## 环境要求
 
 ### 最低要求
 
-| 组件 | Dry-Run | 真实训练 |
-|------|---------|----------|
-| Python | 3.8+ | 3.8+ |
-| 内存 | 4 GB | 8 GB |
-| 显存 | - | 8 GB (如 RTX 3070) |
-| 存储 | 1 GB | 10 GB |
+| 组件 | Dry-Run | CPU 训练 | GPU 训练 |
+|------|---------|----------|----------|
+| Python | 3.8+ | 3.8+ | 3.8+ |
+| 内存 | 4 GB | **16 GB** | 8 GB |
+| 显存 | - | - | 8 GB (如 RTX 3070) |
+| 存储 | 1 GB | 5 GB | 10 GB |
 
-### 推荐配置 (真实训练)
+### 推荐配置 (GPU 训练)
 
 | 组件 | 推荐 |
 |------|------|
