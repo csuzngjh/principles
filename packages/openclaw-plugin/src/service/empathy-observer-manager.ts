@@ -54,7 +54,7 @@ export class EmpathyObserverManager {
     private static instance: EmpathyObserverManager;
     private sessionLocks = new Map<string, string>();
     private activeRuns = new Map<string, ObserverRunMetadata>();
-    private completedSessions = new Set<string>();
+    private completedSessions = new Map<string, number>();
 
     private constructor() {}
 
@@ -84,22 +84,18 @@ export class EmpathyObserverManager {
         return isEmpathyObserverSession(sessionKey);
     }
 
-    /**
-     * Clean up stale locks and completed sessions periodically
-     */
-    cleanupStaleState(): void {
-        const now = Date.now();
-        const staleThreshold = 5 * 60 * 1000;
+    private markCompleted(observerSessionKey: string): void {
+        this.completedSessions.set(observerSessionKey, Date.now());
+    }
 
-        for (const [sessionId, metadata] of this.activeRuns.entries()) {
-            if (now - metadata.startedAt > staleThreshold) {
-                this.activeRuns.delete(sessionId);
-            }
+    private isCompleted(observerSessionKey: string): boolean {
+        const timestamp = this.completedSessions.get(observerSessionKey);
+        if (!timestamp) return false;
+        if (Date.now() - timestamp > 5 * 60 * 1000) {
+            this.completedSessions.delete(observerSessionKey);
+            return false;
         }
-
-        if (this.completedSessions.size > 1000) {
-            this.completedSessions.clear();
-        }
+        return true;
     }
 
     shouldTrigger(api: EmpathyObserverApi | null | undefined, sessionId: string): boolean {
@@ -235,13 +231,13 @@ export class EmpathyObserverManager {
         parentSessionId: string,
         workspaceDir?: string
     ): Promise<void> {
-        if (this.completedSessions.has(observerSessionKey)) {
+        if (this.isCompleted(observerSessionKey)) {
             api.logger.info(`[PD:EmpathyObserver] reapBySession: already processed ${observerSessionKey}, skipping`);
             this.cleanupState(parentSessionId, observerSessionKey);
             return;
         }
 
-        this.completedSessions.add(observerSessionKey);
+        this.markCompleted(observerSessionKey);
         api.logger.info(`[PD:EmpathyObserver] reapBySession starting for ${observerSessionKey}`);
 
         const sessionId = this.extractParentSessionId(observerSessionKey);
@@ -326,7 +322,7 @@ export class EmpathyObserverManager {
     ): Promise<void> {
         if (!api || !this.isObserverSession(targetSessionKey)) return;
 
-        if (this.completedSessions.has(targetSessionKey)) {
+        if (this.isCompleted(targetSessionKey)) {
             api.logger.info(`[PD:EmpathyObserver] reap fallback: already processed ${targetSessionKey}, skipping`);
             return;
         }
