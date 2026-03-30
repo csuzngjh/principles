@@ -20,6 +20,7 @@ export interface EmpathyObserverApi {
                 lane?: string;
                 deliver?: boolean;
                 idempotencyKey?: string;
+                expectsCompletionMessage?: boolean;
             }) => Promise<unknown>;
             getSessionMessages: (params: { sessionKey: string; limit?: number }) => Promise<{ messages: unknown[]; assistantTexts?: string[] }>;
             deleteSession: (params: { sessionKey: string; deleteTranscript?: boolean }) => Promise<void>;
@@ -56,6 +57,11 @@ export class EmpathyObserverManager {
         const enabled = api.config?.empathy_engine?.enabled !== false;
         if (!enabled) {
             api.logger?.warn?.('[PD:EmpathyObserver] shouldTrigger=false: empathy_engine disabled');
+            return false;
+        }
+        // Skip BOOT sessions - they run outside "gateway request" context where subagent.run() is unavailable
+        if (sessionId.startsWith('boot-')) {
+            api.logger?.warn?.('[PD:EmpathyObserver] shouldTrigger=false: boot session (gateway request context unavailable)');
             return false;
         }
         const subagentOk = isSubagentRuntimeAvailable(api.runtime?.subagent);
@@ -102,6 +108,7 @@ export class EmpathyObserverManager {
                 lane: 'subagent',
                 deliver: false,
                 idempotencyKey: `${sessionId}:${timestamp}`,
+                expectsCompletionMessage: true,
             });
             api.logger.info(`[PD:EmpathyObserver] Spawn succeeded for ${sessionKey}`);
             return sessionKey;
