@@ -12,6 +12,7 @@ describe('EmpathyObserverManager', () => {
   let manager: EmpathyObserverManager;
 
   let run: ReturnType<typeof vi.fn>;
+  let waitForRun: ReturnType<typeof vi.fn>;
   let getSessionMessages: ReturnType<typeof vi.fn>;
   let deleteSession: ReturnType<typeof vi.fn>;
   const logger = {
@@ -38,8 +39,11 @@ describe('EmpathyObserverManager', () => {
     vi.clearAllMocks();
     manager = EmpathyObserverManager.getInstance();
     (manager as any).sessionLocks.clear();
+    (manager as any).activeRuns.clear();
+    (manager as any).completedSessions.clear();
 
     run = mockAsyncFn().mockResolvedValue({ runId: 'r1' });
+    waitForRun = mockAsyncFn().mockResolvedValue({ status: 'ok' });
     getSessionMessages = mockAsyncFn().mockResolvedValue({
       messages: [],
       assistantTexts: [],
@@ -55,6 +59,7 @@ describe('EmpathyObserverManager', () => {
       runtime: {
         subagent: {
           run,
+          waitForRun,
           getSessionMessages,
           deleteSession,
         },
@@ -96,9 +101,73 @@ describe('EmpathyObserverManager', () => {
 
     const result = await manager.spawn(api, 'session-X', 'test message');
 
-    expect(result).toMatch(/^agent:main:subagent:empathy-obs-.*-\d+_[a-z0-9]+$/);
+    expect(result).toMatch(/^agent:main:subagent:empathy-obs-session-X-\d+$/);
     const sessionKeyArg = (run as any).mock.calls[0][0].sessionKey;
-    expect(sessionKeyArg).toMatch(/^agent:main:subagent:empathy-obs-session-X-/);
+    expect(sessionKeyArg).toMatch(/^agent:main:subagent:empathy-obs-session-X-\d+$/);
+  });
+
+  it('spawn returns session key without blocking on waitForRun', async () => {
+    run.mockResolvedValue({ runId: 'r1' });
+
+    const resultPromise = manager.spawn(api, 'session-Y', 'test message');
+    expect(run).toHaveBeenCalledTimes(1);
+    const result = await resultPromise;
+    expect(result).toMatch(/^agent:main:subagent:empathy-obs-/);
+  });
+
+  it('waitForRun(status=ok) triggers reapBySession with friction tracking', async () => {
+    run.mockResolvedValue({ runId: 'r1' });
+    waitForRun.mockResolvedValue({ status: 'ok' });
+    getSessionMessages.mockResolvedValue({
+      messages: [{ role: 'assistant', content: '{"damageDetected":true,"severity":"severe","confidence":0.9,"reason":"frustration"}' }],
+      assistantTexts: ['{"damageDetected":true,"severity":"severe","confidence":0.9,"reason":"frustration"}'],
+    });
+
+    await manager.spawn(api, 'session-Z', 'test message');
+
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    expect(waitForRun).toHaveBeenCalledWith({ runId: 'r1', timeoutMs: 30000 });
+    expect(getSessionMessages).toHaveBeenCalled();
+    expect(sessionTracker.trackFriction).toHaveBeenCalledWith(
+      'session-Z',
+      40,
+      'observer_empathy_severe',
+      '',
+      { source: 'user_empathy' }
+    );
+  });
+
+  it('waitForRun(status=error) still triggers cleanup', async () => {
+    run.mockResolvedValue({ runId: 'r1' });
+    waitForRun.mockResolvedValue({ status: 'error', error: 'some error' });
+    getSessionMessages.mockResolvedValue({
+      messages: [{ role: 'assistant', content: '{"damageDetected":false}' }],
+      assistantTexts: ['{"damageDetected":false}'],
+    });
+
+    await manager.spawn(api, 'session-E', 'test message');
+
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    expect(waitForRun).toHaveBeenCalled();
+    expect(deleteSession).toHaveBeenCalled();
+  });
+
+  it('waitForRun(status=timeout) still triggers cleanup', async () => {
+    run.mockResolvedValue({ runId: 'r1' });
+    waitForRun.mockResolvedValue({ status: 'timeout' });
+    getSessionMessages.mockResolvedValue({
+      messages: [{ role: 'assistant', content: '{"damageDetected":false}' }],
+      assistantTexts: ['{"damageDetected":false}'],
+    });
+
+    await manager.spawn(api, 'session-T', 'test message');
+
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    expect(waitForRun).toHaveBeenCalled();
+    expect(deleteSession).toHaveBeenCalled();
   });
 
   it('applies friction on valid observer JSON payload and calls deleteSession', async () => {
@@ -107,7 +176,7 @@ describe('EmpathyObserverManager', () => {
       assistantTexts: ['{"damageDetected":true,"severity":"severe","confidence":0.9,"reason":"frustration"}'],
     });
 
-    const sessionKey = 'agent:main:subagent:empathy-obs-test123-1774856418172_g6vwos';
+    const sessionKey = 'agent:main:subagent:empathy-obs-test123-1774856418172';
     await manager.reap(api, sessionKey, '/workspace/principles');
 
     expect(sessionTracker.trackFriction).toHaveBeenCalledWith(
@@ -136,11 +205,11 @@ describe('EmpathyObserverManager', () => {
       assistantTexts: ['not-json-response'],
     });
 
-    await manager.reap(api, 'agent:main:subagent:empathy-obs-test456', '/workspace/principles');
+    await manager.reap(api, 'agent:main:subagent:empathy-obs-test456-1234567890', '/workspace/principles');
 
     expect(sessionTracker.trackFriction).not.toHaveBeenCalled();
     expect(logger.warn).toHaveBeenCalled();
-    expect(deleteSession).toHaveBeenCalledWith({ sessionKey: 'agent:main:subagent:empathy-obs-test456' });
+    expect(deleteSession).toHaveBeenCalledWith({ sessionKey: 'agent:main:subagent:empathy-obs-test456-1234567890' });
   });
 
   it('does not write user_empathy when damageDetected is false', async () => {
@@ -149,10 +218,30 @@ describe('EmpathyObserverManager', () => {
       assistantTexts: ['{"damageDetected":false}'],
     });
 
-    await manager.reap(api, 'agent:main:subagent:empathy-obs-test789', '/workspace/principles');
+    await manager.reap(api, 'agent:main:subagent:empathy-obs-test789-1234567890', '/workspace/principles');
 
     expect(sessionTracker.trackFriction).not.toHaveBeenCalled();
     expect(deleteSession).toHaveBeenCalled();
+  });
+
+  it('fallback reap does not double-write for same session', async () => {
+    getSessionMessages.mockResolvedValue({
+      messages: [{ role: 'assistant', content: '{"damageDetected":true,"severity":"mild","confidence":0.9}' }],
+      assistantTexts: ['{"damageDetected":true,"severity":"mild","confidence":0.9}'],
+    });
+
+    const sessionKey = 'agent:main:subagent:empathy-obs-session-W-1234567890';
+    await manager.reap(api, sessionKey, '/workspace/principles');
+    await manager.reap(api, sessionKey, '/workspace/principles');
+
+    expect(sessionTracker.trackFriction).toHaveBeenCalledTimes(1);
+    expect(deleteSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('extracts parent session ID correctly from new key format', () => {
+    const sessionKey = 'agent:main:subagent:empathy-obs-session_X-1234567890';
+    const parentId = manager.extractParentSessionId(sessionKey);
+    expect(parentId).toBe('session_X');
   });
 
   describe('isEmpathyObserverSession', () => {
@@ -165,6 +254,19 @@ describe('EmpathyObserverManager', () => {
       expect(isEmpathyObserverSession('agent:main:subagent:worker-123')).toBe(false);
       expect(isEmpathyObserverSession('agent:diagnostician:session-456')).toBe(false);
       expect(isEmpathyObserverSession('empathy_obs:old-format')).toBe(false);
+    });
+  });
+
+  describe('buildEmpathyObserverSessionKey', () => {
+    it('sanitizes parent session ID', () => {
+      const key = manager.buildEmpathyObserverSessionKey('session/with:invalid&chars');
+      expect(key).toMatch(/^agent:main:subagent:empathy-obs-session_with_invalid_chars-\d+$/);
+    });
+
+    it('truncates long session IDs', () => {
+      const longSessionId = 'a'.repeat(100);
+      const key = manager.buildEmpathyObserverSessionKey(longSessionId);
+      expect(key.length).toBeLessThan(120);
     });
   });
 });
