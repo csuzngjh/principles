@@ -98,6 +98,23 @@ export class EmpathyObserverManager {
         return true;
     }
 
+    private isActive(parentSessionId: string): boolean {
+        const metadata = this.activeRuns.get(parentSessionId);
+        if (!metadata) return false;
+        if (Date.now() - metadata.startedAt > 5 * 60 * 1000) {
+            this.activeRuns.delete(parentSessionId);
+            if (this.sessionLocks.get(parentSessionId) === metadata.observerSessionKey) {
+                this.sessionLocks.delete(parentSessionId);
+            }
+            return false;
+        }
+        return true;
+    }
+
+    private getActiveMetadata(parentSessionId: string): ObserverRunMetadata | undefined {
+        return this.activeRuns.get(parentSessionId);
+    }
+
     shouldTrigger(api: EmpathyObserverApi | null | undefined, sessionId: string): boolean {
         if (!api || !sessionId) {
             api?.logger?.warn?.('[PD:EmpathyObserver] shouldTrigger=false: api or sessionId null');
@@ -118,8 +135,8 @@ export class EmpathyObserverManager {
             api.logger?.warn?.('[PD:EmpathyObserver] shouldTrigger=false: subagent runtime unavailable');
             return false;
         }
-        if (this.sessionLocks.has(sessionId)) {
-            api.logger?.warn?.(`[PD:EmpathyObserver] shouldTrigger=false: session ${sessionId} locked`);
+        if (this.isActive(sessionId)) {
+            api.logger?.warn?.(`[PD:EmpathyObserver] shouldTrigger=false: session ${sessionId} has active run`);
             return false;
         }
         api.logger?.info?.(`[PD:EmpathyObserver] shouldTrigger=true for session ${sessionId}`);
