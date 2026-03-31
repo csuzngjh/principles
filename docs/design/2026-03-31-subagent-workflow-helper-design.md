@@ -341,6 +341,40 @@ flowchart TD
 4. cleanup 失败不能伪装成“完全成功”  
 5. 任何活跃 workflow 都必须可查询到其当前状态
 
+### 8.1 对外展示状态与内部语义状态分离
+
+为了兼顾实现复杂度与可观测性，建议将状态拆成两层：
+
+#### 对外展示状态
+
+用于 UI、summary、审计视图，只保留少量核心状态：
+
+- `pending`
+- `running`
+- `finalizing`
+- `completed`
+- `failed`
+
+#### 内部语义状态
+
+用于 helper 内核控制、补偿和恢复，保留更细的状态语义：
+
+- `requested`
+- `spawned`
+- `waiting`
+- `timeout_pending`
+- `error_pending`
+- `result_ready`
+- `finalizing`
+- `persisted`
+- `cleanup_pending`
+- `completed`
+- `completed_with_cleanup_error`
+- `expired`
+- `failed`
+
+这样既回应了“状态机过多会增加实现复杂度”的担忧，也不会为了简化展示层而丢掉底层恢复语义。
+
 ---
 
 ## 9. 核心组件设计
@@ -354,15 +388,15 @@ flowchart TD
 ```ts
 type WorkflowTransport = 'runtime_direct' | 'registry_backed';
 
-interface SubagentWorkflowSpec<TResult> {
+interface SubagentWorkflowSpec {
   workflowType: string;
   transport: WorkflowTransport;
   timeoutMs: number;
   ttlMs: number;
+  cleanupRetryIntervalMs: number;
+  maxCleanupRetries: number;
   shouldDeleteSessionAfterFinalize: boolean;
-  parseResult: (ctx: WorkflowResultContext) => Promise<TResult | null>;
-  persistResult: (ctx: WorkflowPersistContext<TResult>) => Promise<void>;
-  shouldFinalizeOnWaitStatus: (status: 'ok' | 'timeout' | 'error') => boolean;
+  onResultReady: (ctx: WorkflowFinalizeContext) => Promise<void>;
 }
 ```
 
@@ -373,6 +407,15 @@ interface SubagentWorkflowSpec<TResult> {
 - timeout / error 是否允许进入 finalize
 
 但不再允许每个模块自造一整套生命周期。
+
+补充说明：
+
+- helper 统一管理生命周期、幂等、cleanup、可观测性
+- 业务模块通过 `onResultReady` 决定如何解释和落库结果
+- helper 不承载 empathy / diagnostician / reflect 的业务字段语义
+
+这吸收了实施评审中的一个重要意见：  
+第一版先统一“行为约束”和“生命周期”，不要过度依赖复杂泛型。
 
 ### 9.2 Workflow Manager
 
@@ -449,6 +492,28 @@ interface SubagentWorkflowSpec<TResult> {
 - `payload_json`
 - `created_at`
 
+### 9.4.1 为什么 Phase A 仍建议引入 SQLite
+
+这里需要明确回应一个实施层面的争议：为什么不是先用纯内存 `Map` 或 JSON 文件 fallback。
+
+原因是 PD 当前想解决的核心问题正是：
+
+- 进程重启后状态丢失
+- fallback 接不上
+- hook 和 polling 跨时序竞争
+- orphan session 无法回溯
+- 事故发生后无法审计真实生命周期
+
+如果 Phase A 继续只靠内存 + 文件拼接，很多“看起来修了”的问题会在重启、超时、OpenClaw 升级后再次出现。  
+因此，本方案仍建议 **Phase A 就建立持久化 store**，但做法要克制：
+
+- schema 极简
+- 不追求一上来做复杂归档系统
+- 先满足“可恢复、可审计、可原子 finalize”
+
+也就是说：  
+**Phase A 需要持久化，但不需要重型数据库工程。**
+
 ### 9.5 Audit / Recovery
 
 需要一个审计器定期扫描：
@@ -504,9 +569,74 @@ startWorkflow(spec, {
 
 定时做 TTL 恢复和 orphan cleanup。
 
+### 10.6 首版接口收敛原则
+
+这里吸收实施评审中的一个重要意见：**第一版 helper 不要过度泛化。**
+
+因此，首版 API 设计建议遵守：
+
+- 不为所有未来场景预留过多抽象层数
+- 不强推复杂泛型
+- 先统一生命周期，再逐步抽象业务回调接口
+
+首版推荐的业务接入方式可以收敛为：
+
+```ts
+interface SubagentWorkflowSpec {
+  workflowType: string;
+  transport: 'runtime_direct' | 'registry_backed';
+  timeoutMs: number;
+  ttlMs: number;
+  cleanupRetryIntervalMs: number;
+  maxCleanupRetries: number;
+  shouldDeleteSessionAfterFinalize: boolean;
+  onResultReady: (ctx: WorkflowFinalizeContext) => Promise<void>;
+}
+```
+
+这个版本更适合 Phase A 落地。
+
 ---
 
 ## 11. 统一策略
+
+### 11.0 finalizeOnce 的原子性要求
+
+这是整个 helper 成败的核心约束之一。
+
+**不能只靠内存 Map 或 `if (state === 'completed') return` 来防双写。**
+
+因为 PD 当前的真实运行环境里，至少会发生这些竞争：
+
+- `waitForRun` 主链路与 `subagent_ended` fallback 同时命中
+- 同一 workflow 被 sweep / retry 再次捞起
+- 进程重启后旧 workflow 被恢复
+
+因此，`finalizeOnce` 必须下推到持久化层实现原子状态抢占。推荐模式：
+
+```sql
+UPDATE subagent_workflows
+SET state = 'finalizing', updated_at = ?
+WHERE workflow_id = ?
+  AND state IN ('result_ready', 'timeout_pending', 'error_pending');
+```
+
+只有 `changes() = 1` 的执行者，才允许继续：
+
+- 读取消息
+- 执行业务 `onResultReady`
+- 执行 cleanup
+- 写终态
+
+其他并发执行者必须立即退出。
+
+### 11.0.1 completion 与 cleanup 的关系
+
+建议明确如下语义：
+
+- `completed`: 业务 finalize 成功，cleanup 成功
+- `completed_with_cleanup_error`: 业务 finalize 成功，但 cleanup 失败
+- `cleanup_pending`: cleanup 尚未成功，需要 sweep 或 retry
 
 ### 11.1 timeout 策略
 
@@ -517,6 +647,18 @@ startWorkflow(spec, {
 - 保留 workflow 记录
 - 是否允许 cleanup，由 spec 决定
 - 等待 fallback 或 sweep
+
+### 11.1.1 timeout 的二次确认
+
+这里吸收评审 A 的建议：  
+部分 timeout 可能只是“等待超时”，并不代表“结果不可读”。
+
+因此对 `runtime_direct` 路径，建议在进入 `timeout_pending` 前增加一次轻量确认：
+
+1. `waitForRun(timeout)` 返回 timeout
+2. helper 立即执行一次受控的 `getSessionMessages()`
+3. 如果能读到完整且合法的最终结果，则直接短路进入 `result_ready`
+4. 否则再进入 `timeout_pending`
 
 ### 11.2 error 策略
 
@@ -540,6 +682,21 @@ helper 统一维护：
 - 是否已成功完成
 - 是否已进入 `finalizing`
 - 是否有同 dedupeKey 的成功结果
+
+### 11.3.1 DedupeKey 规则
+
+`dedupeKey` 不能简单等于 `workflowType + parentSessionId`，否则会误伤同一会话内的多次同类任务。
+
+推荐优先级：
+
+1. `logicalTaskId`
+2. `toolCallId`
+3. `workflowType + parentSessionId + inputHash`
+4. `workflowType + parentSessionId + contextSummaryHash`
+
+原则是：
+
+> 同一 parent session 内，必须允许多次同类 workflow 合法存在；dedupeKey 只防“同一个逻辑任务被重复 finalize”，不防“同类任务再次发生”。
 
 ### 11.4 cleanup 策略
 
@@ -603,7 +760,40 @@ helper 接入后：
 
 ## 13. 实施计划
 
-### Phase A：建立 helper 内核，不接业务
+### 13.0 迁移哲学
+
+这项改造不能采用“一刀切重构”。  
+推荐迁移方式是：
+
+- Adapter
+- feature flag
+- shadow mode
+- per-workflow rollout
+
+现有业务模块在迁移期内保持对外接口不变，只把内部生命周期管理逐步切换到 helper。
+
+例如：
+
+```ts
+class EmpathyObserverManager {
+  private workflowHelper?: SubagentWorkflowHelper;
+
+  async spawn(...) {
+    if (this.workflowHelper?.isEnabled('empathy_observer')) {
+      return this.workflowHelper.startWorkflow(...);
+    }
+    return this.legacySpawn(...);
+  }
+}
+```
+
+这种迁移方式的好处是：
+
+- review 边界清晰
+- 能逐步 shadow 对比
+- 出问题时可以快速回退到 legacy path
+
+### Phase A：建立 helper 内核，只接 shadow / audit，不接管业务 authority
 
 交付：
 
@@ -614,7 +804,31 @@ helper 接入后：
 - workflow store
 - workflow audit / sweep
 
-这一阶段只 shadow 运行，不接管业务。
+明确不做：
+
+- 不一次迁移 empathy / deep-reflect / diagnostician
+- 不大规模改现有业务模块的落库逻辑
+- 不在这一阶段做复杂历史归档系统
+- 不在这一阶段替换全部 `subagent_ended` 逻辑
+
+这一阶段只做：
+
+- helper 内核运行
+- workflow 记录
+- shadow 观察
+- sweep / audit 骨架
+
+### 13.1 Phase A 默认参数建议
+
+```ts
+const DEFAULT_SUBAGENT_WORKFLOW_CONFIG = {
+  workflowTtlMs: 60 * 60 * 1000,
+  cleanupRetryIntervalMs: 5 * 60 * 1000,
+  maxCleanupRetries: 3,
+  sweepIntervalMs: 15 * 60 * 1000,
+  timeoutSecondLookRead: true,
+};
+```
 
 ### Phase B：接入 Empathy Observer
 
@@ -691,6 +905,7 @@ OpenClaw 变化时，冲击面集中到 driver 层，而不是每个业务模块
 
 - 采用 phased rollout
 - 先 empathy，再 deep-reflect，再 diagnostician
+- 旧模块通过 adapter 过渡，不做硬切
 
 ### 风险 3：新旧链路并存造成双写
 
