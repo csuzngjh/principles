@@ -74,5 +74,10 @@
     "deep_reflection": {
       "label": "💡 AI 深度反思功能"
     }
+  },
+  "buildFingerprint": {
+    "gitSha": "4e632d4c5c2c",
+    "bundleMd5": "ed0922a01d46d55a49cd96f8feb158a9",
+    "builtAt": "2026-03-31T03:48:08.676Z"
   }
 }
