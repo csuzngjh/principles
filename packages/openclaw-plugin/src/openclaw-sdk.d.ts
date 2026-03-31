@@ -229,7 +229,7 @@ export type PluginHookName =
     | 'llm_input' | 'llm_output' | 'agent_end'
     | 'before_compaction' | 'after_compaction' | 'before_reset'
     | 'message_received' | 'message_sending' | 'message_sent'
-    | 'before_tool_call' | 'after_tool_call' | 'tool_result_persist' | 'before_message_write'
+    | 'before_tool_call' | 'after_tool_call' | 'tool_result_persist' | 'before_message_write' | 'session_start' | 'session_end'
     | 'session_start' | 'session_end'
     | 'subagent_spawning' | 'subagent_delivery_target' | 'subagent_spawned' | 'subagent_ended'
     | 'gateway_start' | 'gateway_stop';
@@ -305,6 +305,26 @@ export type PluginHookAfterToolCallEvent = {
     result?: any;
     error?: string;
     durationMs?: number;
+};
+
+export type PluginHookToolResultPersistContext = {
+    agentId?: string;
+    sessionKey?: string;
+    toolName?: string;
+    toolCallId?: string;
+};
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type PluginHookToolResultPersistEvent<TMessage = any> = {
+    toolName?: string;
+    toolCallId?: string;
+    /** The toolResult message about to be written to the session transcript. */
+    message: TMessage;
+    isSynthetic?: boolean;
+};
+
+export type PluginHookToolResultPersistResult<TMessage = any> = {
+    message?: TMessage;
 };
 
 export type PluginHookLlmOutputEvent = {
@@ -460,5 +480,6 @@ export type PluginHookHandlerMap = {
     before_compaction: (event: PluginHookBeforeCompactionEvent, ctx: PluginHookAgentContext) => any;
     after_compaction: (event: PluginHookAfterCompactionEvent, ctx: PluginHookAgentContext) => any;
     before_message_write: (event: PluginHookBeforeMessageWriteEvent, ctx: PluginHookSessionContext) => any;
+    tool_result_persist: (event: PluginHookToolResultPersistEvent, ctx: PluginHookToolResultPersistContext) => PluginHookToolResultPersistResult | void;
     [key: string]: (...args: any[]) => any;
 };

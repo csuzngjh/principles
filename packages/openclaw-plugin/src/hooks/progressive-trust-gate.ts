@@ -24,6 +24,50 @@ import { assessRiskLevel, estimateLineChanges } from '../core/risk-calculator.js
 import { checkEvolutionGate } from '../core/evolution-engine.js';
 import { recordGateBlockAndReturn } from './gate-block-helper.js';
 
+// ═══ P-16: Core Governance Files — Exempt from all Blocking ═══
+// 这些文件是团队协作的基础，必须始终放行，不受 GFI 和 Risk Path 限制
+// 可通过 PROFILE.core_governance_files 扩展（merge 而非覆盖）
+const DEFAULT_CORE_GOVERNANCE_PATTERNS = [
+  'PLAN.md',
+  'AGENTS.md',
+  'VERSION.md',
+  '.team/',
+  'MEMORY.md',
+  'SOUL.md',
+  'IDENTITY.md',
+  'USER.md',
+  'HEARTBEAT.md',
+  'BOOTSTRAP.md',
+  'PRINCIPLES.md',
+  'TEAM_ROLE.md',
+  'REPAIR_OPERATING_PROMPT.md',
+];
+
+/**
+ * Get effective core governance patterns from PROFILE config, merged with defaults.
+ * PROFILE.core_governance_files extends (not replaces) the default list.
+ */
+function getCoreGovernancePatterns(profile?: { core_governance_files?: string[] }): string[] {
+  const base = DEFAULT_CORE_GOVERNANCE_PATTERNS;
+  const extra = profile?.core_governance_files ?? [];
+  return [...new Set([...base, ...extra])];
+}
+
+/**
+ * Check if a file path matches a core governance pattern.
+ * Core governance files are exempt from all gate blocking (P-16).
+ */
+function isCoreGovernanceFile(filePath?: string, corePatterns?: string[]): boolean {
+  if (!filePath) return false;
+  const patterns = corePatterns ?? DEFAULT_CORE_GOVERNANCE_PATTERNS;
+  const normalized = filePath.replace(/\\/g, '/');
+  return patterns.some(pattern =>
+    pattern.endsWith('/')
+      ? normalized.includes(pattern)
+      : normalized.endsWith(pattern) || normalized.includes(`/${pattern}`)
+  );
+}
+
 /**
  * Configuration for progressive gate behavior
  */
@@ -111,8 +155,15 @@ export function checkProgressiveTrustGate(
   lineChanges: number,
   logger: { warn?: (message: string) => void; error?: (message: string) => void; info?: (message: string) => void },
   ctx: { workspaceDir?: string; sessionId?: string },
-  profile?: { risk_paths: string[]; progressive_gate?: { enabled?: boolean; plan_approvals?: any } }
+  profile?: { risk_paths: string[]; progressive_gate?: { enabled?: boolean; plan_approvals?: any }; core_governance_files?: string[] }
 ): PluginHookBeforeToolCallResult | void {
+  // P-16: Core governance files are exempt from all gate blocking
+  const corePatterns = getCoreGovernancePatterns(profile);
+  if (isCoreGovernanceFile(relPath, corePatterns)) {
+    logger.info?.(`[PD_GATE:P-16] Core governance file exempt — bypass all gates: ${relPath}`);
+    return; // Always allow core governance files
+  }
+
   // Check if progressive gate is disabled
   if (profile?.progressive_gate?.enabled === false) {
     return;
