@@ -178,6 +178,37 @@ describe('EmpathyObserverManager', () => {
     expect((manager as any).sessionLocks.has('session-T')).toBe(false);
   });
 
+  it('timed-out entry expires after TTL and allows new spawn', async () => {
+    run.mockResolvedValue({ runId: 'r1' });
+    waitForRun.mockResolvedValue({ status: 'timeout' });
+
+    await manager.spawn(api, 'session-Expire', 'test message');
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    expect((manager as any).activeRuns.has('session-Expire')).toBe(true);
+    expect(manager.shouldTrigger(api, 'session-Expire')).toBe(false);
+
+    // Simulate TTL expiry: set observedAt to 6 minutes ago
+    const metadata = (manager as any).activeRuns.get('session-Expire');
+    metadata.observedAt = Date.now() - 6 * 60 * 1000;
+
+    // After TTL expiry, shouldTrigger should allow new observer
+    expect(manager.shouldTrigger(api, 'session-Expire')).toBe(true);
+  });
+
+  it('reap does not markCompleted when getSessionMessages fails', async () => {
+    run.mockResolvedValue({ runId: 'r1' });
+    waitForRun.mockResolvedValue({ status: 'ok' });
+    getSessionMessages.mockRejectedValue(new Error('session not ready'));
+
+    await manager.spawn(api, 'session-Err', 'test message');
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    expect(deleteSession).toHaveBeenCalled();
+    // completedSessions should NOT have this session marked as completed
+    expect((manager as any).completedSessions.has('agent:main:subagent:empathy-obs-session-Err-')).toBe(false);
+  });
+
   it('applies friction on valid observer JSON payload and calls deleteSession', async () => {
     getSessionMessages.mockResolvedValue({
       messages: [{ role: 'assistant', content: '{"damageDetected":true,"severity":"severe","confidence":0.9,"reason":"frustration"}' }],

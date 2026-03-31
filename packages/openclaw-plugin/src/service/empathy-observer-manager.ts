@@ -19,6 +19,9 @@ interface ObserverRunMetadata {
     startedAt: number;
     timedOutAt?: number;
     erroredAt?: number;
+    // Timestamp when observer reached a terminal (timeout/error) state;
+    // used for TTL-based cleanup of orphaned entries
+    observedAt?: number;
 }
 
 type EmpathyObserverPayload = {
@@ -103,9 +106,19 @@ export class EmpathyObserverManager {
     private isActive(parentSessionId: string): boolean {
         const metadata = this.activeRuns.get(parentSessionId);
         if (!metadata) return false;
-        // Timed-out or errored entries stay active to block concurrent spawns,
-        // but are cleaned up by fallback when subagent_ended fires
-        if (metadata.timedOutAt || metadata.erroredAt) return true;
+        if (metadata.timedOutAt || metadata.erroredAt) {
+            if (!metadata.observedAt) return true;
+            // TTL-based cleanup of orphaned timed-out/error entries:
+            // if fallback never fired, expire the block so parent session recovers
+            if (Date.now() - metadata.observedAt > 5 * 60 * 1000) {
+                this.activeRuns.delete(parentSessionId);
+                if (this.sessionLocks.get(parentSessionId) === metadata.observerSessionKey) {
+                    this.sessionLocks.delete(parentSessionId);
+                }
+                return false;
+            }
+            return true;
+        }
         if (Date.now() - metadata.startedAt > 5 * 60 * 1000) {
             this.activeRuns.delete(parentSessionId);
             if (this.sessionLocks.get(parentSessionId) === metadata.observerSessionKey) {
@@ -238,11 +251,10 @@ export class EmpathyObserverManager {
             api.logger.info(`[PD:EmpathyObserver] finalizeRun: wait completed status=${waitResult.status}`);
         } catch (error) {
             api.logger.warn(`[PD:EmpathyObserver] finalizeRun: waitForRun threw for ${runId}: ${String(error)}`);
-            // Treat exception as pending - do NOT enter destructive cleanup
-            // Mark as errored, keep activeRuns entry, release sessionLock only
             const updatedMetadata = this.activeRuns.get(parentSessionId);
             if (updatedMetadata) {
                 updatedMetadata.erroredAt = Date.now();
+                updatedMetadata.observedAt = Date.now();
             }
             this.cleanupState(parentSessionId, observerSessionKey, false);
             return;
@@ -253,9 +265,8 @@ export class EmpathyObserverManager {
             const updatedMetadata = this.activeRuns.get(parentSessionId);
             if (updatedMetadata) {
                 updatedMetadata.timedOutAt = Date.now();
+                updatedMetadata.observedAt = Date.now();
             }
-            // Keep activeRuns entry so fallback can find original parentSessionId;
-            // release sessionLock so parent session is not permanently blocked
             this.cleanupState(parentSessionId, observerSessionKey, false);
             return;
         }
@@ -265,8 +276,8 @@ export class EmpathyObserverManager {
             const updatedMetadata = this.activeRuns.get(parentSessionId);
             if (updatedMetadata) {
                 updatedMetadata.erroredAt = Date.now();
+                updatedMetadata.observedAt = Date.now();
             }
-            // Keep activeRuns entry so fallback can find original parentSessionId
             this.cleanupState(parentSessionId, observerSessionKey, false);
             return;
         }
@@ -289,7 +300,6 @@ export class EmpathyObserverManager {
             return;
         }
 
-        this.markCompleted(observerSessionKey);
         api.logger.info(`[PD:EmpathyObserver] reapBySession starting for ${observerSessionKey}`);
 
         const storedMetadata = this.activeRuns.get(parentSessionId);
@@ -297,6 +307,7 @@ export class EmpathyObserverManager {
         // (session key may have been sanitized/truncated and doesn't match original)
         const sessionId = storedMetadata?.parentSessionId || this.extractParentSessionId(observerSessionKey) || parentSessionId;
 
+        let finalized = false;
         try {
             const messages = await api.runtime.subagent.getSessionMessages({
                 sessionKey: observerSessionKey,
@@ -352,6 +363,7 @@ export class EmpathyObserverManager {
             } else {
                 api.logger.info(`[PD:EmpathyObserver] No damage detected or no sessionId for ${observerSessionKey}`);
             }
+            finalized = true;
         } catch (error) {
             api.logger.warn(`[PD:EmpathyObserver] reapBySession failed to read messages for ${observerSessionKey}: ${String(error)}`);
         }
@@ -363,6 +375,10 @@ export class EmpathyObserverManager {
             api.logger.warn(`[PD:EmpathyObserver] deleteSession failed for ${observerSessionKey}: ${String(error)}`);
         }
 
+        // Only mark completed after all critical operations succeeded
+        if (finalized) {
+            this.markCompleted(observerSessionKey);
+        }
         this.cleanupState(parentSessionId, observerSessionKey);
     }
 
