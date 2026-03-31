@@ -178,6 +178,10 @@ function ensureStagePaths(runDir, stageIndex, stageName) {
     reviewerAPath: path.join(stageDir, 'reviewer-a.md'),
     reviewerBPath: path.join(stageDir, 'reviewer-b.md'),
     decisionPath: path.join(stageDir, 'decision.md'),
+    scorecardPath: path.join(stageDir, 'scorecard.json'),
+    producerStdoutPath: path.join(stageDir, 'producer-stdout.log'),
+    reviewerAStdoutPath: path.join(stageDir, 'reviewer-a-stdout.log'),
+    reviewerBStdoutPath: path.join(stageDir, 'reviewer-b-stdout.log'),
     producerWorklogPath: path.join(stageDir, 'producer-worklog.md'),
     reviewerAWorklogPath: path.join(stageDir, 'reviewer-a-worklog.md'),
     reviewerBWorklogPath: path.join(stageDir, 'reviewer-b-worklog.md'),
@@ -218,7 +222,27 @@ function ensureStagePaths(runDir, stageIndex, stageName) {
   return paths;
 }
 
-function decideAndPersist({ runDir, stageName, stageDir, decisionPath, producerPath, reviewerAPath, reviewerBPath, state }) {
+function roleArtifactPaths(paths, role) {
+  if (role === 'producer') {
+    return { reportPath: paths.producerPath, stdoutPath: paths.producerStdoutPath };
+  }
+  if (role === 'reviewer_a') {
+    return { reportPath: paths.reviewerAPath, stdoutPath: paths.reviewerAStdoutPath };
+  }
+  return { reportPath: paths.reviewerBPath, stdoutPath: paths.reviewerBStdoutPath };
+}
+
+function readRoleOutput({ reportPath, stdout }) {
+  if (fileExists(reportPath)) {
+    const report = fs.readFileSync(reportPath, 'utf8').trim();
+    if (report) {
+      return report;
+    }
+  }
+  return String(stdout ?? '').trim();
+}
+
+function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecardPath, producerPath, reviewerAPath, reviewerBPath, state }) {
   const producer = fs.readFileSync(producerPath, 'utf8');
   const reviewerA = fs.readFileSync(reviewerAPath, 'utf8');
   const reviewerB = fs.readFileSync(reviewerBPath, 'utf8');
@@ -262,6 +286,23 @@ function decideAndPersist({ runDir, stageName, stageDir, decisionPath, producerP
   ].join('\n');
 
   writeText(decisionPath, `${content}\n`);
+  writeJson(scorecardPath, {
+    stage: stageName,
+    round: state.currentRound,
+    outcome: decision.outcome,
+    summary: decision.summary,
+    approvalCount: decision.metrics.approvalCount,
+    blockerCount: decision.metrics.blockerCount,
+    reviewerAVerdict: decision.metrics.reviewerAVerdict,
+    reviewerBVerdict: decision.metrics.reviewerBVerdict,
+    producerSectionChecks: decision.metrics.producerSectionChecks,
+    reviewerSectionChecks: decision.metrics.reviewerSectionChecks,
+    producerChecks: decision.metrics.producerChecks,
+    reviewerAChecks: decision.metrics.reviewerAChecks,
+    reviewerBChecks: decision.metrics.reviewerBChecks,
+    blockers: decision.blockers,
+    updatedAt: nowIso(),
+  });
   appendTimeline(runDir, `Stage ${stageName} round ${state.currentRound} decision: ${decision.outcome}`);
   updateSummary(runDir, [
     `Status: ${state.status}`,
@@ -322,11 +363,12 @@ function executeStage(runDir, state, spec) {
     ? fs.readFileSync(previousDecisionPath, 'utf8')
     : '';
 
-  const { stageDir, briefPath, producerPath, reviewerAPath, reviewerBPath, decisionPath } = ensureStagePaths(
+  const paths = ensureStagePaths(
     runDir,
     state.currentStageIndex,
     stageName,
   );
+  const { stageDir, briefPath, producerPath, reviewerAPath, reviewerBPath, decisionPath, scorecardPath } = paths;
 
   writeText(briefPath, `${buildStageBrief(spec, stageName, state.currentRound, previousDecision)}\n`);
   appendTimeline(runDir, `Stage ${stageName} round ${state.currentRound} started`);
@@ -361,20 +403,24 @@ function executeStage(runDir, state, spec) {
       model: config.model,
       prompt,
     });
-    outputs[role] = output;
+    const { reportPath, stdoutPath } = roleArtifactPaths(paths, role);
+    writeText(stdoutPath, `${output}\n`);
+    outputs[role] = readRoleOutput({ reportPath, stdout: output });
 
-    const outputPath = role === 'producer' ? producerPath : role === 'reviewer_a' ? reviewerAPath : reviewerBPath;
-    writeText(outputPath, `${output}\n`);
+    if (!fileExists(reportPath) || !fs.readFileSync(reportPath, 'utf8').trim()) {
+      writeText(reportPath, `${outputs[role]}\n`);
+    }
     appendTimeline(runDir, `${role} completed stage ${stageName} round ${state.currentRound}`);
   }
 
   return decideAndPersist({
     runDir,
     stageName,
-    stageDir,
-    decisionPath,
-    producerPath,
-    reviewerAPath,
+      stageDir,
+      decisionPath,
+      scorecardPath,
+      producerPath,
+      reviewerAPath,
     reviewerBPath,
     state,
   });

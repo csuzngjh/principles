@@ -143,6 +143,7 @@ export function buildRolePrompt({ spec, stage, round, role, runDir, stageDir, br
     `Working directory for task artifacts: ${stageDir}`,
     `Overall sprint directory: ${runDir}`,
     `Read the stage brief first: ${briefPath}`,
+    `Your final report file: ${outputPath}`,
     `Your worklog file: ${worklogPath}`,
     `Your role state file: ${roleStatePath}`,
     `Shared skill references are available at:`,
@@ -150,6 +151,7 @@ export function buildRolePrompt({ spec, stage, round, role, runDir, stageDir, br
     `Before substantial work, create or update your role state file with: role, stage, round, status, checklist, updatedAt.`,
     `During work, append short checkpoints to your worklog whenever you complete a meaningful investigation step, code change, review finding, or verification step.`,
     `If you get stuck, record the concrete blocker and next best action in both the role state file and worklog before ending.`,
+    `Prefer shell commands for file updates when direct write/edit tools are flaky in long sessions.`,
   ];
 
   if (role === 'producer') {
@@ -158,10 +160,10 @@ export function buildRolePrompt({ spec, stage, round, role, runDir, stageDir, br
       `You may inspect and modify repository code when the stage requires implementation.`,
       `You are expected to work autonomously within this stage until you either satisfy the stage goals or hit a concrete blocker.`,
       `Persist your intermediate findings frequently so a future agent can resume without relying on chat context.`,
-      `At the end, print a markdown report with exactly these sections: SUMMARY, CHANGES, EVIDENCE, KEY_EVENTS, CHECKS, OPEN_RISKS.`,
+      `At the end, write a markdown report to ${outputPath} with exactly these sections: SUMMARY, CHANGES, EVIDENCE, KEY_EVENTS, CHECKS, OPEN_RISKS.`,
       `KEY_EVENTS should be bullets describing concrete completed milestones or validated events.`,
       `CHECKS should be a single-line machine-readable summary such as: CHECKS: evidence=ok;tests=not-run;scope=pd-only;prompt-isolation=confirmed`,
-      `Do not write the report file yourself; stdout will be captured into ${outputPath}.`,
+      `Do not dump long reasoning logs to stdout. Stdout should only contain a short completion line such as: ROLE_STATUS: completed; report=${outputPath}`,
       `Stay within Principles. Do not modify OpenClaw.`,
     ].join('\n');
   }
@@ -172,9 +174,9 @@ export function buildRolePrompt({ spec, stage, round, role, runDir, stageDir, br
     `Read the producer report: ${counterpart}`,
     `Review independently. Do not modify repository files unless explicitly needed for evidence collection.`,
     `You are expected to challenge weak assumptions and record checkpoints while reviewing, not just emit a final verdict.`,
-    `At the end, print a markdown report with exactly these sections: VERDICT, BLOCKERS, FINDINGS, NEXT_FOCUS, CHECKS.`,
+    `At the end, write a markdown report to ${outputPath} with exactly these sections: VERDICT, BLOCKERS, FINDINGS, NEXT_FOCUS, CHECKS.`,
     `CHECKS should be a single-line machine-readable summary such as: CHECKS: criteria=met;blockers=0;verification=partial`,
     `VERDICT must be one of: APPROVE, REVISE, BLOCK.`,
-    `Do not write the report file yourself; stdout will be captured into ${outputPath}.`,
+    `Do not dump long reasoning logs to stdout. Stdout should only contain a short completion line such as: ROLE_STATUS: completed; report=${outputPath}`,
   ].join('\n');
 }
