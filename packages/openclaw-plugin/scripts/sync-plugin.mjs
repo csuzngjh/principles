@@ -17,7 +17,8 @@
  *   --help             Show help message
  */
 
-import { copyFileSync, cpSync, existsSync, rmSync, readFileSync, mkdirSync } from 'fs';
+import { copyFileSync, cpSync, existsSync, rmSync, readFileSync, readFileSync as readFileSyncRaw, mkdirSync, writeFileSync } from 'fs';
+import { createHash } from 'crypto';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
@@ -201,31 +202,17 @@ function installDependencies() {
 }
 
 /**
- * Build the plugin
+ * Build the plugin.
+ * Always runs build:production to ensure dist/bundle.js (the actual shipped artifact)
+ * is always fresh. We no longer compare timestamps because:
+ *   1. tsc alone updates index.js without updating bundle.js
+ *   2. Comparing index.js vs src files falsely claims "up to date"
+ *   3. The cost of a extra ~10s build is far cheaper than shipping stale bundles
+ *
+ * Use --skip-build only in CI where you know dist/ is already fresh.
  */
 function buildPlugin() {
-    console.log('\n🔨 Building plugin...');
-
-    const distDir = join(SOURCE_DIR, 'dist');
-    const indexJs = join(distDir, 'index.js');
-
-    // Check if rebuild is needed
-    if (existsSync(indexJs)) {
-        const pkgJson = join(SOURCE_DIR, 'package.json');
-        const srcDir = join(SOURCE_DIR, 'src');
-
-        // Simple check: if dist is newer than src, skip
-        try {
-            const distTime = execSync(`stat -c %Y "${indexJs}"`, { encoding: 'utf-8' }).trim();
-            const srcFiles = execSync(`find "${srcDir}" -name "*.ts" -exec stat -c %Y {} \\; | sort -rn | head -1`, { encoding: 'utf-8' }).trim();
-            if (srcFiles && parseInt(distTime) > parseInt(srcFiles)) {
-                console.log('✅ Build is up to date');
-                return;
-            }
-        } catch {
-            // Ignore stat errors, proceed with build
-        }
-    }
+    console.log('\n🔨 Building plugin (always — no timestamp skip logic)...');
 
     try {
         execSync('npm run build:production', {
@@ -237,10 +224,198 @@ function buildPlugin() {
         console.error('❌ Build failed');
         process.exit(1);
     }
+
+    // Post-build verification: ensure critical symbols made it into bundle.js
+    verifyBundleContents();
 }
 
 /**
- * Verify build exists
+ * Verify the built bundle contains all critical symbols.
+ * This catches build failures where tsc succeeds but esbuild/bundling silently drops code.
+ */
+function verifyBundleContents() {
+    const bundleJs = join(SOURCE_DIR, 'dist', 'bundle.js');
+    if (!existsSync(bundleJs)) {
+        console.error('❌ dist/bundle.js missing after build.');
+        process.exit(1);
+    }
+
+    const content = readFileSync(bundleJs, 'utf-8');
+
+    // Critical symbols that must exist in the bundled plugin.
+    // These are functions/classes that were previously silently dropped from the bundle.
+    // NOTE: esbuild minifies class names (EmpathyObserverManager -> EmpathyObserver) and
+    // inlines const values (OBSERVER_SESSION_PREFIX -> "empathy-obs-"), so check for
+    // the actual bundled forms, not the source-level names.
+    const requiredSymbols = [
+        { name: 'finalizeRun',       reason: 'main empathy observer回收链路 (waitForRun驱动)' },
+        { name: 'reapBySession',      reason: '统一回收入口 (reap + deleteSession + 清理状态)' },
+        { name: 'EmpathyObserver',    reason: 'EmpathyObserverManager class (minified name in bundle)' },
+        { name: 'empathy-obs-',       reason: 'OBSERVER_SESSION_PREFIX value (inlined by esbuild)' },
+    ];
+
+    const missing = [];
+    for (const sym of requiredSymbols) {
+        if (!content.includes(sym.name)) {
+            missing.push(`  - ${sym.name}: ${sym.reason}`);
+        }
+    }
+
+    if (missing.length > 0) {
+        console.error('\n❌ Bundle verification FAILED — missing critical symbols:');
+        missing.forEach(m => console.error(m));
+        console.error('\n  This means the build produced a stale/incomplete bundle.');
+        console.error('  Check for esbuild errors, tree-shaking issues, or source import problems.');
+        process.exit(1);
+    }
+
+    console.log('✅ Bundle verification passed — all critical symbols present');
+
+    // Write build fingerprint to dist/openclaw.plugin.json
+    writeBuildFingerprint();
+}
+
+/**
+ * Write a build fingerprint (git SHA + bundle MD5) into dist/openclaw.plugin.json.
+ * This allows post-install verification to detect stale installations.
+ */
+function writeBuildFingerprint() {
+    const bundleJs = join(SOURCE_DIR, 'dist', 'bundle.js');
+    const manifestSrc = join(SOURCE_DIR, 'openclaw.plugin.json');
+    const manifestDist = join(SOURCE_DIR, 'dist', 'openclaw.plugin.json');
+
+    // Get git SHA of current commit
+    let gitSha = 'unknown';
+    try {
+        gitSha = execSync('git rev-parse HEAD', {
+            cwd: SOURCE_DIR,
+            encoding: 'utf-8',
+            timeout: 10000,
+        }).trim().slice(0, 12);
+    } catch {
+        console.warn('⚠️  Could not get git SHA, fingerprint will be incomplete');
+    }
+
+    // Compute MD5 of bundle.js
+    let bundleMd5 = 'unknown';
+    try {
+        const bundleContent = readFileSyncRaw(bundleJs);
+        bundleMd5 = createHash('md5').update(bundleContent).digest('hex');
+    } catch {
+        console.warn('⚠️  Could not compute bundle MD5, fingerprint will be incomplete');
+    }
+
+    // Read manifest
+    let manifest;
+    try {
+        manifest = JSON.parse(readFileSync(manifestDist, 'utf-8'));
+    } catch {
+        try {
+            manifest = JSON.parse(readFileSync(manifestSrc, 'utf-8'));
+        } catch {
+            console.warn('⚠️  Could not read openclaw.plugin.json, skipping fingerprint');
+            return;
+        }
+    }
+
+    // Attach fingerprint
+    manifest.buildFingerprint = {
+        gitSha,
+        bundleMd5,
+        builtAt: new Date().toISOString(),
+    };
+
+    // Write back to dist/openclaw.plugin.json (this is what gets synced)
+    try {
+        mkdirSync(join(SOURCE_DIR, 'dist'), { recursive: true });
+        writeFileAtomic(manifestDist, JSON.stringify(manifest, null, 2) + '\n');
+        console.log(`✅ Build fingerprint: git=${gitSha} bundleMd5=${bundleMd5}`);
+    } catch (err) {
+        console.warn(`⚠️  Could not write fingerprint to dist/openclaw.plugin.json: ${err.message}`);
+    }
+
+    // Also update the root openclaw.plugin.json so that both synced files have the fingerprint.
+    // This ensures fingerprint verification works whether OpenClaw loads from dist/ or root manifest.
+    try {
+        const rootManifest = JSON.parse(readFileSync(manifestSrc, 'utf-8'));
+        rootManifest.buildFingerprint = manifest.buildFingerprint;
+        writeFileAtomic(manifestSrc, JSON.stringify(rootManifest, null, 2) + '\n');
+    } catch {
+        // Non-fatal — root manifest may be identical in content
+    }
+}
+
+/**
+ * Atomic file write (write to temp then rename, to avoid partial writes).
+ */
+function writeFileAtomic(filePath, content) {
+    const tmp = filePath + '.tmp.' + Date.now();
+    writeFileSync(tmp, content, 'utf-8');
+    rmSync(filePath, { force: true });
+    copyFileSync(tmp, filePath);
+    rmSync(tmp, { force: true });
+}
+
+/**
+ * Verify the installed plugin matches the source fingerprint.
+ * If fingerprint in installed manifest differs from source manifest → abort.
+ * This catches the case where a previous sync synced a stale bundle.
+ */
+function verifyInstalledFingerprint() {
+    // Read from dist/ manifests because:
+    // - dist/openclaw.plugin.json has the buildFingerprint written by writeBuildFingerprint()
+    // - Root openclaw.plugin.json is copied from SOURCE_DIR (no fingerprint, not updated by writeBuildFingerprint)
+    const sourceManifest = join(SOURCE_DIR, 'dist', 'openclaw.plugin.json');
+    const installedManifest = join(INSTALL_DIR, 'dist', 'openclaw.plugin.json');
+
+    if (!existsSync(installedManifest)) {
+        console.error('\n❌ Installed manifest not found — sync may have failed.');
+        process.exit(1);
+    }
+
+    let sourceFp, installedFp;
+    try {
+        const sm = JSON.parse(readFileSync(sourceManifest, 'utf-8'));
+        const im = JSON.parse(readFileSync(installedManifest, 'utf-8'));
+        sourceFp = sm.buildFingerprint;
+        installedFp = im.buildFingerprint;
+    } catch {
+        // If we can't read/parse, skip verification
+        console.warn('⚠️  Could not read fingerprints, skipping fingerprint verification');
+        return;
+    }
+
+    if (!sourceFp || !installedFp) {
+        console.warn('⚠️  Missing fingerprint in one or both manifests, skipping verification.');
+        return;
+    }
+
+    const gitMismatch = sourceFp.gitSha !== installedFp.gitSha;
+    const md5Mismatch = sourceFp.bundleMd5 !== installedFp.bundleMd5;
+
+    if (gitMismatch || md5Mismatch) {
+        console.error('\n❌ INSTALLED PLUGIN IS STALE — FINGERPRINT MISMATCH');
+        console.error('   This means the installed plugin bundle does not match the current source build.');
+        if (gitMismatch) {
+            console.error(`   Source git SHA:    ${sourceFp.gitSha} (current)`);
+            console.error(`   Installed git SHA: ${installedFp.gitSha} (old)`);
+        }
+        if (md5Mismatch) {
+            console.error(`   Source bundle MD5:  ${sourceFp.bundleMd5} (current)`);
+            console.error(`   Installed bundle:  ${installedFp.bundleMd5} (old)`);
+        }
+        console.error('\n   → Run WITHOUT --skip-build to rebuild and reinstall:');
+        console.error(`     cd ${SOURCE_DIR} && node scripts/sync-plugin.mjs`);
+        process.exit(1);
+    }
+
+    console.log('✅ Installed fingerprint verified — matches current source build');
+}
+
+/**
+ * Verify build exists and bundle contains critical symbols.
+ * Called when --skip-build is used (e.g., in CI with fresh dist/).
+ * Still verifies critical symbols to catch any pre-existing build issues.
  */
 function verifyBuild() {
     const distDir = join(SOURCE_DIR, 'dist');
@@ -257,6 +432,14 @@ function verifyBuild() {
         console.error('❌ dist/index.js or dist/bundle.js not found.');
         console.error('   Run without --skip-build to build automatically.');
         process.exit(1);
+    }
+
+    // Verify critical symbols even when skipping build
+    // (catches stale dist from previous failed builds)
+    try {
+        verifyBundleContents();
+    } catch {
+        // verifyBundleContents already exits on failure
     }
 
     console.log('✅ Build verified');
@@ -452,11 +635,24 @@ function main() {
         process.exit(1);
     }
 
+    // Step 10: Verify installed fingerprint matches current source
+    verifyInstalledFingerprint();
+
+    // Build fingerprint info for report
+    let fpReport = '';
+    try {
+        const sourceManifest = JSON.parse(readFileSync(join(SOURCE_DIR, 'dist', 'openclaw.plugin.json'), 'utf-8'));
+        const fp = sourceManifest.buildFingerprint;
+        if (fp) {
+            fpReport = `\n   Build:    ${fp.gitSha} / MD5 ${fp.bundleMd5.slice(0, 8)}…`;
+        }
+    } catch { /* ignore */ }
+
     // Success!
     console.log('\n╔════════════════════════════════════════════════════════════╗');
     console.log('║                  ✅ Installation Complete                  ║');
     console.log('╚════════════════════════════════════════════════════════════╝');
-    console.log(`\n   Version:  v${sourceVersion}`);
+    console.log(`\n   Version:  v${sourceVersion}${fpReport}`);
     console.log(`   Language: ${args.lang}`);
     console.log(`   Source:   ${SOURCE_DIR}`);
     console.log(`   Target:   ${INSTALL_DIR}`);
