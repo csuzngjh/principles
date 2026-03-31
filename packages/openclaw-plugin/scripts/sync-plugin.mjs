@@ -33,7 +33,6 @@ const INSTALL_DIR = join(OPENCLAW_DIR, 'extensions', 'principles-disciple');
 const SYNC_ITEMS = [
     'dist',
     'templates',
-    'agents',
     'scripts',
     'docs',
     'openclaw.plugin.json',
@@ -264,6 +263,31 @@ function verifyBuild() {
 }
 
 /**
+ * Remove existing installation directory (clean slate)
+ * This ensures no stale files remain from old versions.
+ */
+function cleanTargetDir(force) {
+    if (!existsSync(INSTALL_DIR)) {
+        return;
+    }
+
+    if (!force) {
+        const installedVersion = getVersion(INSTALL_DIR);
+        if (installedVersion && installedVersion !== getVersion(SOURCE_DIR)) {
+            console.error(`\n❌ VERSION CONFLICT:`);
+            console.error(`   Installed: v${installedVersion}`);
+            console.error(`   Source:    v${getVersion(SOURCE_DIR)}`);
+            console.error(`   Run with --force to overwrite, or uninstall first.`);
+            process.exit(1);
+        }
+    }
+
+    console.log('\n🗑️  Removing existing installation...');
+    rmSync(INSTALL_DIR, { recursive: true, force: true });
+    console.log(`   Removed: ${INSTALL_DIR}`);
+}
+
+/**
  * Ensure installation directory exists
  */
 function ensureInstallDir() {
@@ -399,16 +423,11 @@ function main() {
         verifyBuild();
     }
 
-    // Step 4: Ensure installation directory exists
-    ensureInstallDir();
+    // Step 4: Clean existing installation (must happen after build so we know what's current)
+    cleanTargetDir(args.force);
 
-    // Step 5: Check existing installation
-    if (existsSync(join(INSTALL_DIR, 'package.json'))) {
-        const installedVersion = getVersion(INSTALL_DIR);
-        if (installedVersion) {
-            console.log(`\n📦 Existing installation: v${installedVersion}`);
-        }
-    }
+    // Step 5: Ensure installation directory exists
+    ensureInstallDir();
 
     // Step 6: Sync files
     console.log('\n📦 Syncing files to OpenClaw...');
