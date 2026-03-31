@@ -74,6 +74,16 @@ npm run ai-sprint -- --status <run-id>
 
 This prints structured JSON with current state and latest summary.
 
+The latest stage `decision.md` also contains machine-readable metrics such as:
+
+- `approvalCount`
+- `blockerCount`
+- `producerSectionChecks`
+- `reviewerSectionChecks`
+- `producerChecks`
+- `reviewerAChecks`
+- `reviewerBChecks`
+
 ### Pause a run
 
 Use:
@@ -118,3 +128,4 @@ Current role defaults:
 - AI session memory is treated as disposable.
 - The first implementation is intentionally narrow and task-template-driven.
 - Role worklogs and role state files exist specifically to reduce context-loss and drift during long-running agent work.
+- Producer and reviewer prompts now require a `CHECKS:` line so the orchestrator can make earlier, less ambiguous stage decisions.

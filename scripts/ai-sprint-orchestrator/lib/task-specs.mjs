@@ -50,6 +50,28 @@ export function getTaskSpec(taskId) {
           'Call out any remaining runtime assumptions or production gaps.',
         ],
       },
+      stageCriteria: {
+        'investigate': {
+          requiredApprovals: 2,
+          requiredProducerSections: ['SUMMARY', 'EVIDENCE', 'KEY_EVENTS', 'CHECKS'],
+          requiredReviewerSections: ['VERDICT', 'BLOCKERS', 'FINDINGS', 'NEXT_FOCUS', 'CHECKS'],
+        },
+        'fix-plan': {
+          requiredApprovals: 2,
+          requiredProducerSections: ['SUMMARY', 'CHANGES', 'EVIDENCE', 'CHECKS'],
+          requiredReviewerSections: ['VERDICT', 'BLOCKERS', 'FINDINGS', 'NEXT_FOCUS', 'CHECKS'],
+        },
+        'implement': {
+          requiredApprovals: 2,
+          requiredProducerSections: ['SUMMARY', 'CHANGES', 'EVIDENCE', 'CHECKS'],
+          requiredReviewerSections: ['VERDICT', 'BLOCKERS', 'FINDINGS', 'NEXT_FOCUS', 'CHECKS'],
+        },
+        'verify': {
+          requiredApprovals: 2,
+          requiredProducerSections: ['SUMMARY', 'EVIDENCE', 'CHECKS'],
+          requiredReviewerSections: ['VERDICT', 'BLOCKERS', 'FINDINGS', 'NEXT_FOCUS', 'CHECKS'],
+        },
+      },
     };
   }
 
@@ -80,6 +102,12 @@ export function buildStageBrief(spec, stage, round, previousDecision) {
     `## Exit Criteria`,
     `- Both reviewers return VERDICT: APPROVE`,
     `- No unresolved blocker remains in reviewer outputs`,
+    ...(spec.stageCriteria?.[stage]?.requiredProducerSections?.length
+      ? [`- Producer report must contain sections: ${spec.stageCriteria[stage].requiredProducerSections.join(', ')}`]
+      : []),
+    ...(spec.stageCriteria?.[stage]?.requiredReviewerSections?.length
+      ? [`- Reviewer reports must contain sections: ${spec.stageCriteria[stage].requiredReviewerSections.join(', ')}`]
+      : []),
     '',
   ].join('\n');
 }
@@ -130,7 +158,9 @@ export function buildRolePrompt({ spec, stage, round, role, runDir, stageDir, br
       `You may inspect and modify repository code when the stage requires implementation.`,
       `You are expected to work autonomously within this stage until you either satisfy the stage goals or hit a concrete blocker.`,
       `Persist your intermediate findings frequently so a future agent can resume without relying on chat context.`,
-      `At the end, print a markdown report with exactly these sections: SUMMARY, CHANGES, EVIDENCE, OPEN_RISKS.`,
+      `At the end, print a markdown report with exactly these sections: SUMMARY, CHANGES, EVIDENCE, KEY_EVENTS, CHECKS, OPEN_RISKS.`,
+      `KEY_EVENTS should be bullets describing concrete completed milestones or validated events.`,
+      `CHECKS should be a single-line machine-readable summary such as: CHECKS: evidence=ok;tests=not-run;scope=pd-only;prompt-isolation=confirmed`,
       `Do not write the report file yourself; stdout will be captured into ${outputPath}.`,
       `Stay within Principles. Do not modify OpenClaw.`,
     ].join('\n');
@@ -142,7 +172,8 @@ export function buildRolePrompt({ spec, stage, round, role, runDir, stageDir, br
     `Read the producer report: ${counterpart}`,
     `Review independently. Do not modify repository files unless explicitly needed for evidence collection.`,
     `You are expected to challenge weak assumptions and record checkpoints while reviewing, not just emit a final verdict.`,
-    `At the end, print a markdown report with exactly these sections: VERDICT, BLOCKERS, FINDINGS, NEXT_FOCUS.`,
+    `At the end, print a markdown report with exactly these sections: VERDICT, BLOCKERS, FINDINGS, NEXT_FOCUS, CHECKS.`,
+    `CHECKS should be a single-line machine-readable summary such as: CHECKS: criteria=met;blockers=0;verification=partial`,
     `VERDICT must be one of: APPROVE, REVISE, BLOCK.`,
     `Do not write the report file yourself; stdout will be captured into ${outputPath}.`,
   ].join('\n');

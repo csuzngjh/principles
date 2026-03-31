@@ -219,9 +219,12 @@ function ensureStagePaths(runDir, stageIndex, stageName) {
 }
 
 function decideAndPersist({ runDir, stageName, stageDir, decisionPath, producerPath, reviewerAPath, reviewerBPath, state }) {
+  const producer = fs.readFileSync(producerPath, 'utf8');
   const reviewerA = fs.readFileSync(reviewerAPath, 'utf8');
   const reviewerB = fs.readFileSync(reviewerBPath, 'utf8');
   const decision = decideStage({
+    stageCriteria: getTaskSpec(state.taskId).stageCriteria?.[stageName],
+    producer,
     reviewerA,
     reviewerB,
     currentRound: state.currentRound,
@@ -241,6 +244,17 @@ function decideAndPersist({ runDir, stageName, stageDir, decisionPath, producerP
     `## Blockers`,
     ...(decision.blockers.length ? decision.blockers.map((b) => `- ${b}`) : ['- None.']),
     '',
+    `## Metrics`,
+    `- approvalCount: ${decision.metrics.approvalCount}`,
+    `- blockerCount: ${decision.metrics.blockerCount}`,
+    `- reviewerAVerdict: ${decision.metrics.reviewerAVerdict}`,
+    `- reviewerBVerdict: ${decision.metrics.reviewerBVerdict}`,
+    `- producerSectionChecks: ${JSON.stringify(decision.metrics.producerSectionChecks)}`,
+    `- reviewerSectionChecks: ${JSON.stringify(decision.metrics.reviewerSectionChecks)}`,
+    `- producerChecks: ${decision.metrics.producerChecks ?? 'n/a'}`,
+    `- reviewerAChecks: ${decision.metrics.reviewerAChecks ?? 'n/a'}`,
+    `- reviewerBChecks: ${decision.metrics.reviewerBChecks ?? 'n/a'}`,
+    '',
     `## Files`,
     `- Producer: ${producerPath}`,
     `- Reviewer A: ${reviewerAPath}`,
@@ -254,6 +268,8 @@ function decideAndPersist({ runDir, stageName, stageDir, decisionPath, producerP
     `Stage: ${stageName}`,
     `Round: ${state.currentRound}`,
     `Outcome: ${decision.outcome}`,
+    `Approval count: ${decision.metrics.approvalCount}/2`,
+    `Blocker count: ${decision.metrics.blockerCount}`,
     ...(decision.blockers.length ? [`Top blocker: ${decision.blockers[0]}`] : ['Top blocker: none']),
   ]);
   return decision;
