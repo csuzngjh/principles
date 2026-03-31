@@ -1,0 +1,123 @@
+const DEFAULT_STAGE_ORDER = ['investigate', 'fix-plan', 'implement', 'verify'];
+
+export function getTaskSpec(taskId) {
+  if (taskId === 'empathy-runtime-fix') {
+    return {
+      id: 'empathy-runtime-fix',
+      title: 'Fix empathy observer production failure',
+      workspace: 'D:/Code/principles',
+      branchWorkspace: 'D:/Code/principles-empathy-fix',
+      maxRoundsPerStage: 3,
+      maxRuntimeMinutes: 90,
+      stages: DEFAULT_STAGE_ORDER,
+      producer: {
+        agent: 'opencode',
+        model: 'minimax-cn-coding-plan/MiniMax-M2.7',
+      },
+      reviewerA: {
+        agent: 'iflow',
+        model: 'glm-5',
+      },
+      reviewerB: {
+        agent: 'iflow',
+        model: 'glm-5',
+      },
+      escalationReviewer: {
+        agent: 'claude',
+        model: 'GLM-5.1',
+      },
+      context: [
+        'Use PD-only changes; do not modify OpenClaw.',
+        'Focus on the empathy observer production failure and subagent lifecycle reliability.',
+        'Keep code quality high and avoid unnecessary architectural expansion in the first fix.',
+      ],
+      stageGoals: {
+        'investigate': [
+          'Identify the most likely root cause chain for missing user_empathy persistence.',
+          'Confirm whether observer prompt contamination is occurring on latest code.',
+          'Confirm whether timeout/error/fallback paths can leave data unpersisted.',
+        ],
+        'fix-plan': [
+          'Produce a minimal PD-only repair plan.',
+          'Define tests, rollback points, and scope boundaries.',
+        ],
+        'implement': [
+          'Implement the fix in the empathy observer path.',
+          'Add focused tests and run targeted verification.',
+        ],
+        'verify': [
+          'Verify the fix path with code and test evidence.',
+          'Call out any remaining runtime assumptions or production gaps.',
+        ],
+      },
+    };
+  }
+
+  throw new Error(`Unknown task spec: ${taskId}`);
+}
+
+export function buildStageBrief(spec, stage, round, previousDecision) {
+  const goals = spec.stageGoals[stage] ?? [];
+  const carryForward = previousDecision
+    ? `## Carry Forward\n\n${previousDecision}\n`
+    : '## Carry Forward\n\n- None.\n';
+
+  return [
+    `# Stage Brief`,
+    '',
+    `- Task: ${spec.title}`,
+    `- Stage: ${stage}`,
+    `- Round: ${round}`,
+    '',
+    `## Goals`,
+    ...goals.map((goal) => `- ${goal}`),
+    '',
+    carryForward.trimEnd(),
+    '',
+    `## Constraints`,
+    ...spec.context.map((line) => `- ${line}`),
+    '',
+    `## Exit Criteria`,
+    `- Both reviewers return VERDICT: APPROVE`,
+    `- No unresolved blocker remains in reviewer outputs`,
+    '',
+  ].join('\n');
+}
+
+export function buildRolePrompt({ spec, stage, round, role, runDir, stageDir, briefPath, producerPath, reviewerAPath, reviewerBPath }) {
+  const outputPathMap = {
+    producer: producerPath,
+    reviewer_a: reviewerAPath,
+    reviewer_b: reviewerBPath,
+  };
+  const outputPath = outputPathMap[role];
+  const base = [
+    `You are acting as ${role} in an AI sprint orchestrator for the Principles repository.`,
+    `Current task: ${spec.title}`,
+    `Stage: ${stage}`,
+    `Round: ${round}`,
+    `Working directory for task artifacts: ${stageDir}`,
+    `Overall sprint directory: ${runDir}`,
+    `Read the stage brief first: ${briefPath}`,
+  ];
+
+  if (role === 'producer') {
+    return [
+      ...base,
+      `You may inspect and modify repository code when the stage requires implementation.`,
+      `At the end, print a markdown report with exactly these sections: SUMMARY, CHANGES, EVIDENCE, OPEN_RISKS.`,
+      `Do not write the report file yourself; stdout will be captured into ${outputPath}.`,
+      `Stay within Principles. Do not modify OpenClaw.`,
+    ].join('\n');
+  }
+
+  const counterpart = role === 'reviewer_a' ? producerPath : producerPath;
+  return [
+    ...base,
+    `Read the producer report: ${counterpart}`,
+    `Review independently. Do not modify repository files unless explicitly needed for evidence collection.`,
+    `At the end, print a markdown report with exactly these sections: VERDICT, BLOCKERS, FINDINGS, NEXT_FOCUS.`,
+    `VERDICT must be one of: APPROVE, REVISE, BLOCK.`,
+    `Do not write the report file yourself; stdout will be captured into ${outputPath}.`,
+  ].join('\n');
+}
