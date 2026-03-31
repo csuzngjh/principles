@@ -17,6 +17,8 @@ interface ObserverRunMetadata {
     observerSessionKey: string;
     workspaceDir?: string;
     startedAt: number;
+    timedOutAt?: number;
+    erroredAt?: number;
 }
 
 type EmpathyObserverPayload = {
@@ -55,9 +57,6 @@ export class EmpathyObserverManager {
     private sessionLocks = new Map<string, string>();
     private activeRuns = new Map<string, ObserverRunMetadata>();
     private completedSessions = new Map<string, number>();
-    // Track sessions that timed out - these should NOT be cleaned up by main path
-    // They will be handled by fallback subagent_ended path if/when it fires
-    private timedOutSessions = new Set<string>();
 
     private constructor() {}
 
@@ -104,6 +103,9 @@ export class EmpathyObserverManager {
     private isActive(parentSessionId: string): boolean {
         const metadata = this.activeRuns.get(parentSessionId);
         if (!metadata) return false;
+        // Timed-out or errored entries stay active to block concurrent spawns,
+        // but are cleaned up by fallback when subagent_ended fires
+        if (metadata.timedOutAt || metadata.erroredAt) return true;
         if (Date.now() - metadata.startedAt > 5 * 60 * 1000) {
             this.activeRuns.delete(parentSessionId);
             if (this.sessionLocks.get(parentSessionId) === metadata.observerSessionKey) {
@@ -208,7 +210,7 @@ export class EmpathyObserverManager {
 
     /**
      * Main回收链路: 使用 waitForRun 驱动回收
-     * 仅在 ok/error 时回收; timeout 时保留 session 由 fallback 处理
+     * 仅在 ok 时回收; timeout/exception 保留 session 由 fallback 处理
      */
     private async finalizeRun(
         api: EmpathyObserverApi,
@@ -236,13 +238,36 @@ export class EmpathyObserverManager {
             api.logger.info(`[PD:EmpathyObserver] finalizeRun: wait completed status=${waitResult.status}`);
         } catch (error) {
             api.logger.warn(`[PD:EmpathyObserver] finalizeRun: waitForRun threw for ${runId}: ${String(error)}`);
-            waitResult = { status: 'error', error: String(error) };
+            // Treat exception as pending - do NOT enter destructive cleanup
+            // Mark as errored, keep activeRuns entry, release sessionLock only
+            const updatedMetadata = this.activeRuns.get(parentSessionId);
+            if (updatedMetadata) {
+                updatedMetadata.erroredAt = Date.now();
+            }
+            this.cleanupState(parentSessionId, observerSessionKey, false);
+            return;
         }
 
         if (waitResult.status === 'timeout') {
             api.logger.warn(`[PD:EmpathyObserver] finalizeRun: observer wait timed out; deferring cleanup for ${observerSessionKey}`);
-            this.timedOutSessions.add(observerSessionKey);
-            this.cleanupState(parentSessionId, observerSessionKey);
+            const updatedMetadata = this.activeRuns.get(parentSessionId);
+            if (updatedMetadata) {
+                updatedMetadata.timedOutAt = Date.now();
+            }
+            // Keep activeRuns entry so fallback can find original parentSessionId;
+            // release sessionLock so parent session is not permanently blocked
+            this.cleanupState(parentSessionId, observerSessionKey, false);
+            return;
+        }
+
+        if (waitResult.status === 'error') {
+            api.logger.warn(`[PD:EmpathyObserver] finalizeRun: observer run errored: ${waitResult.error}; deferring cleanup for ${observerSessionKey}`);
+            const updatedMetadata = this.activeRuns.get(parentSessionId);
+            if (updatedMetadata) {
+                updatedMetadata.erroredAt = Date.now();
+            }
+            // Keep activeRuns entry so fallback can find original parentSessionId
+            this.cleanupState(parentSessionId, observerSessionKey, false);
             return;
         }
 
@@ -374,8 +399,10 @@ export class EmpathyObserverManager {
         await this.reapBySession(api, targetSessionKey, parentSessionId, workspaceDir);
     }
 
-    private cleanupState(parentSessionId: string, observerSessionKey: string): void {
-        this.activeRuns.delete(parentSessionId);
+    private cleanupState(parentSessionId: string, observerSessionKey: string, deleteFromActiveRuns = true): void {
+        if (deleteFromActiveRuns) {
+            this.activeRuns.delete(parentSessionId);
+        }
         if (this.sessionLocks.get(parentSessionId) === observerSessionKey) {
             this.sessionLocks.delete(parentSessionId);
         }

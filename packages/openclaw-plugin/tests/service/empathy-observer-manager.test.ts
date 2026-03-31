@@ -138,7 +138,7 @@ describe('EmpathyObserverManager', () => {
     );
   });
 
-  it('waitForRun(status=error) still triggers cleanup', async () => {
+  it('waitForRun(status=error) does NOT call deleteSession - treated as pending', async () => {
     run.mockResolvedValue({ runId: 'r1' });
     waitForRun.mockResolvedValue({ status: 'error', error: 'some error' });
     getSessionMessages.mockResolvedValue({
@@ -151,7 +151,11 @@ describe('EmpathyObserverManager', () => {
     await new Promise(resolve => setTimeout(resolve, 50));
 
     expect(waitForRun).toHaveBeenCalled();
-    expect(deleteSession).toHaveBeenCalled();
+    expect(deleteSession).not.toHaveBeenCalled();
+    expect(sessionTracker.trackFriction).not.toHaveBeenCalled();
+    // Entry stays in activeRuns to block concurrent spawn
+    expect((manager as any).activeRuns.has('session-E')).toBe(true);
+    expect((manager as any).sessionLocks.has('session-E')).toBe(false);
   });
 
   it('waitForRun(status=timeout) does NOT call deleteSession - cleanup deferred', async () => {
@@ -167,10 +171,11 @@ describe('EmpathyObserverManager', () => {
     await new Promise(resolve => setTimeout(resolve, 50));
 
     expect(waitForRun).toHaveBeenCalled();
-    // timeout should NOT trigger deleteSession - session is kept for fallback path
     expect(deleteSession).not.toHaveBeenCalled();
-    // trackFriction should NOT be called because we didn't reap
     expect(sessionTracker.trackFriction).not.toHaveBeenCalled();
+    // Entry stays in activeRuns to block concurrent spawn; sessionLock is released
+    expect((manager as any).activeRuns.has('session-T')).toBe(true);
+    expect((manager as any).sessionLocks.has('session-T')).toBe(false);
   });
 
   it('applies friction on valid observer JSON payload and calls deleteSession', async () => {
