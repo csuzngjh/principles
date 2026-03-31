@@ -45,11 +45,12 @@ function makeRunId(taskId) {
   return `${stamp}-${slugify(taskId)}`;
 }
 
-function createSprintState(spec, runId) {
+function createSprintState(spec, runId, specPath) {
   return {
     runId,
     taskId: spec.id,
     title: spec.title,
+    specPath: specPath || null,
     status: 'running',
     currentStageIndex: 0,
     currentStage: spec.stages[0],
@@ -77,6 +78,18 @@ function loadOrInitState(args) {
     }
     const state = readJson(sprintFile);
     if (state.status === 'halted' || state.status === 'aborted') {
+      // Validate: if halted mid-stage, the previous stage must have advanced
+      if (state.currentStageIndex > 0) {
+        const prevStageName = loadSpec(state, args).stages[state.currentStageIndex - 1];
+        const prevDecisionPath = path.join(runDir, 'stages', `${String(state.currentStageIndex).padStart(2, '0')}-${prevStageName}`, 'decision.md');
+        if (fileExists(prevDecisionPath)) {
+          const prevDecisionText = fs.readFileSync(prevDecisionPath, 'utf8');
+          const outcomeMatch = prevDecisionText.match(/Outcome:\s*(\w+)/);
+          if (outcomeMatch && outcomeMatch[1] !== 'advance') {
+            throw new Error(`Cannot resume: previous stage "${prevStageName}" outcome was "${outcomeMatch[1]}" (expected "advance"). Fix the previous stage first.`);
+          }
+        }
+      }
       const previousStatus = state.status;
       state.status = 'running';
       state.haltReason = null;
@@ -91,10 +104,10 @@ function loadOrInitState(args) {
     throw new Error('Missing required --task <task-id>');
   }
 
-  const spec = getTaskSpec(args.task);
+  const spec = getTaskSpec(args.task, args.taskSpec);
   const runId = makeRunId(spec.id);
   const runDir = path.join(sprintRoot, runId);
-  const state = createSprintState(spec, runId);
+  const state = createSprintState(spec, runId, args.taskSpec);
   ensureDir(runDir);
   writeJson(path.join(runDir, 'sprint.json'), state);
   writeText(path.join(runDir, 'timeline.md'), `# Timeline\n\n- ${nowIso()} Created sprint ${runId}\n`);
@@ -119,8 +132,24 @@ function updateSummary(runDir, lines) {
   writeText(path.join(runDir, 'latest-summary.md'), `# Latest Summary\n\n${lines.map((line) => `- ${line}`).join('\n')}\n`);
 }
 
+const MAX_TIMELINE_LINES = 500;
+
 function appendTimeline(runDir, line) {
-  appendText(path.join(runDir, 'timeline.md'), `- ${nowIso()} ${line}\n`);
+  const tlPath = path.join(runDir, 'timeline.md');
+  appendText(tlPath, `- ${nowIso()} ${line}\n`);
+
+  // Rotate if too long
+  if (fileExists(tlPath)) {
+    const content = fs.readFileSync(tlPath, 'utf8');
+    const lineCount = content.split('\n').filter((l) => l.startsWith('- ')).length;
+    if (lineCount > MAX_TIMELINE_LINES) {
+      const archivePath = path.join(runDir, 'timeline-archive.md');
+      appendText(archivePath, content);
+      const lines = content.split('\n').filter((l) => l.startsWith('- '));
+      const kept = lines.slice(-300);
+      writeText(tlPath, `# Timeline (archived ${lineCount - 300} older entries)\n\n${kept.join('\n')}\n`);
+    }
+  }
 }
 
 function runAgent({ cwd, agent, model, prompt, timeoutSeconds = 1800, failLogPath = null }) {
@@ -189,6 +218,11 @@ function roleConfig(spec, role) {
   if (role === 'reviewer_a') return spec.reviewerA;
   if (role === 'reviewer_b') return spec.reviewerB;
   throw new Error(`Unknown role: ${role}`);
+}
+
+function loadSpec(state, args) {
+  const specPath = (args && args.taskSpec) || (state && state.specPath) || null;
+  return getTaskSpec(state.taskId, specPath);
 }
 
 function roleTimeout(spec, role) {
@@ -339,7 +373,7 @@ function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecard
   const reviewerA = fs.readFileSync(reviewerAPath, 'utf8');
   const reviewerB = fs.readFileSync(reviewerBPath, 'utf8');
   const decision = decideStage({
-    stageCriteria: getTaskSpec(state.taskId).stageCriteria?.[stageName],
+    stageCriteria: loadSpec(state).stageCriteria?.[stageName],
     producer,
     reviewerA,
     reviewerB,
@@ -425,9 +459,10 @@ function advanceState(state, spec, decision) {
     return;
   }
 
+  // Both 'halt' and 'error' outcomes halt the sprint
   state.status = 'halted';
   state.haltReason = {
-    type: 'max_rounds_exceeded',
+    type: decision.outcome === 'error' ? 'stage_error' : 'max_rounds_exceeded',
     stage: state.currentStage,
     round: state.currentRound,
     details: decision.summary,
@@ -681,6 +716,52 @@ function pauseRun(runId) {
   ]);
 }
 
+function listRuns() {
+  ensureDir(sprintRoot);
+  const entries = [];
+  for (const entry of fs.readdirSync(sprintRoot)) {
+    const sprintFile = path.join(sprintRoot, entry, 'sprint.json');
+    if (!fileExists(sprintFile)) continue;
+    try {
+      const state = readJson(sprintFile);
+      const elapsedMin = ((Date.now() - (Date.parse(state.createdAt) || Date.now())) / 60_000).toFixed(0);
+      entries.push({
+        runId: entry,
+        task: state.taskId ?? '?',
+        title: (state.title ?? '').slice(0, 40),
+        status: state.status ?? '?',
+        stage: `${state.currentStage ?? '?'} (${(state.currentStageIndex ?? 0) + 1})`,
+        round: state.currentRound ?? '?',
+        elapsed: `${elapsedMin}m`,
+      });
+    } catch {}
+  }
+
+  if (entries.length === 0) {
+    console.log('No sprint runs found.');
+    return;
+  }
+
+  // Sort by createdAt descending (newest first)
+  entries.reverse();
+
+  const statusIcon = (s) => s === 'completed' ? '[OK]' : s === 'running' ? '>>>' : s === 'halted' ? '[!!]' : s === 'paused' ? '[||]' : '[??]';
+
+  const lines = [
+    '=== Sprint Runs ===',
+    '',
+  ];
+
+  for (const e of entries) {
+    lines.push(`  ${statusIcon(e.status)} ${e.status.padEnd(10)} ${e.runId.slice(0, 50)}`);
+    lines.push(`     ${e.task} | stage ${e.stage} | round ${e.round} | ${e.elapsed}`);
+  }
+
+  lines.push('');
+  lines.push(`  Total: ${entries.length} runs`);
+  console.log(lines.join('\n'));
+}
+
 function showStatus(runId) {
   const runDir = path.join(sprintRoot, runId);
   const sprintFile = path.join(runDir, 'sprint.json');
@@ -688,7 +769,7 @@ function showStatus(runId) {
     throw new Error(`Run not found: ${runId}`);
   }
   const state = reconcileRunState(runDir, readJson(sprintFile));
-  const spec = getTaskSpec(state.taskId);
+  const spec = loadSpec(state);
   const now = Date.now();
   const createdMs = Date.parse(state.createdAt) || now;
   const heartbeatMs = Date.parse(state.lastHeartbeatAt) || now;
@@ -705,7 +786,7 @@ function showStatus(runId) {
   // Count completed stages by scanning decision files
   const stagesDir = path.join(runDir, 'stages');
   const completedStages = [];
-  if (fs.existsSync(stagesDir)) {
+  if (fileExists(stagesDir)) {
     for (const entry of fs.readdirSync(stagesDir)) {
       const decFile = path.join(stagesDir, entry, 'decision.md');
       if (fileExists(decFile)) {
@@ -799,6 +880,29 @@ function showStatus(runId) {
 function main() {
   const args = parseArgs(process.argv.slice(2));
 
+  if (args.help) {
+    console.log([
+      'AI Sprint Orchestrator',
+      '',
+      'Usage:',
+      '  node run.mjs --task <task-id> [--task-spec <path>]   Start a new sprint',
+      '  node run.mjs --resume <run-id>                        Resume a halted/aborted sprint',
+      '  node run.mjs --status <run-id>                        Show sprint dashboard',
+      '  node run.mjs --list                                   List all sprint runs',
+      '  node run.mjs --pause <run-id>                         Pause a running sprint',
+      '  node run.mjs --abort <run-id>                         Abort a sprint',
+      '',
+      'Task specs are loaded from ops/ai-sprints/specs/<task-id>.json',
+      'Override with --task-spec <path> to use a custom spec file.',
+    ].join('\n'));
+    return;
+  }
+
+  if (args.list) {
+    listRuns();
+    return;
+  }
+
   if (args.abort) {
     abortRun(args.abort);
     console.log(`Aborted sprint ${args.abort}`);
@@ -817,18 +921,22 @@ function main() {
   }
 
   const { runDir, state } = loadOrInitState(args);
-  const spec = getTaskSpec(state.taskId);
+  const spec = loadSpec(state, args);
   const sprintStartedAt = Date.parse(state.createdAt) || Date.now();
 
   // Acquire exclusive lock to prevent concurrent orchestrators
   const lockPath = path.join(runDir, 'orchestrator.lock');
   if (fileExists(lockPath)) {
     const lockData = readJson(lockPath);
+    const lockAge = Date.now() - Date.parse(lockData.acquiredAt || 0);
     if (lockData.pid && pidExists(lockData.pid) && lockData.pid !== process.pid) {
-      const lockAge = Date.now() - Date.parse(lockData.acquiredAt || 0);
       if (lockAge < 30 * 60 * 1000) { // lock valid for 30 min
         throw new Error(`Another orchestrator (PID ${lockData.pid}) is running. Acquired at ${lockData.acquiredAt}. Aborting.`);
       }
+    }
+    // Clean up expired or stale lock
+    if (lockAge >= 30 * 60 * 1000 || !pidExists(lockData.pid)) {
+      try { fs.unlinkSync(lockPath); } catch {}
     }
   }
   writeJson(lockPath, { pid: process.pid, acquiredAt: nowIso() });
