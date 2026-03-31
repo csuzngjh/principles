@@ -2,6 +2,7 @@
 /**
  * Bundle plugin for npm publishing.
  * Copies pre-built plugin files from openclaw-plugin to plugin/ directory.
+ * MUST produce identical output to what sync-plugin.mjs syncs.
  */
 
 import { existsSync, mkdirSync, rmSync, cpSync } from 'fs';
@@ -14,6 +15,16 @@ const __dirname = dirname(__filename);
 const ROOT_DIR = join(__dirname, '..', '..', '..');
 const PLUGIN_SRC = join(ROOT_DIR, 'openclaw-plugin');
 const PLUGIN_DEST = join(__dirname, '..', 'plugin');
+
+// Files to bundle — MUST match SYNC_ITEMS in sync-plugin.mjs
+const SYNC_ITEMS = [
+  'dist',
+  'templates',
+  'scripts',
+  'docs',
+  'openclaw.plugin.json',
+  'package.json',
+];
 
 console.log('📦 Bundling plugin for npm publish...\n');
 
@@ -33,23 +44,21 @@ if (existsSync(PLUGIN_DEST)) {
 
 mkdirSync(PLUGIN_DEST, { recursive: true });
 
-// Copy dist
-console.log('  Copying dist/...');
-cpSync(distDir, join(PLUGIN_DEST, 'dist'), { recursive: true });
-
-// Copy openclaw.plugin.json
-console.log('  Copying openclaw.plugin.json...');
-cpSync(
-  join(PLUGIN_SRC, 'openclaw.plugin.json'),
-  join(PLUGIN_DEST, 'openclaw.plugin.json')
-);
-
-// Copy package.json
-console.log('  Copying package.json...');
-cpSync(
-  join(PLUGIN_SRC, 'package.json'),
-  join(PLUGIN_DEST, 'package.json')
-);
+// Copy each item — same as sync-plugin.mjs
+for (const item of SYNC_ITEMS) {
+  const src = join(PLUGIN_SRC, item);
+  if (!existsSync(src)) {
+    console.log(`  ⚠️  Skipping ${item} (not found in source)`);
+    continue;
+  }
+  console.log(`  Copying ${item}...`);
+  try {
+    cpSync(src, join(PLUGIN_DEST, item), { recursive: true });
+  } catch {
+    // File copy for regular files
+    cpSync(src, join(PLUGIN_DEST, item));
+  }
+}
 
 console.log('\n✅ Plugin bundled successfully!');
 console.log(`   Location: ${PLUGIN_DEST}`);
