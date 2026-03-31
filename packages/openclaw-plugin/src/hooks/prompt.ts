@@ -604,7 +604,7 @@ REQUIRED ACTION:
   if (trigger === 'user' && sessionId && api && !isAgentToAgent) {
     // Only inject empathy constraint when empathy observer will actually be spawned
     prependContext = '### BEHAVIORAL_CONSTRAINTS\n' + empathySilenceConstraint + '\n\n' + prependContext;
-    empathyObserverManager.spawn(api, sessionId, latestUserMessage).catch((err) => api.logger.warn(String(err)));
+    empathyObserverManager.spawn(api, sessionId, latestUserMessage, workspaceDir).catch((err) => api.logger.warn(String(err)));
   }
 
   // ──── 5. Heartbeat-specific checklist ────
