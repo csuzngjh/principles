@@ -402,16 +402,20 @@ ops/ai-sprints/
 每个阶段采用固定循环：
 
 1. 编排器生成阶段 `brief.md`
-2. 调用 producer 执行
-3. producer 写入 `producer.md`
-4. 调用 reviewer_a
-5. reviewer_a 写入 `reviewer-a.md`
-6. 调用 reviewer_b
-7. reviewer_b 写入 `reviewer-b.md`
-8. 编排器聚合并生成 `decision.md`
-9. 若达标，进入下一阶段
-10. 若未达标，提升轮次并继续当前阶段
-11. 若超出阈值，写入 `haltReason` 并暂停
+2. 为每个角色创建 `worklog` 和 `state` 占位文件
+3. 调用 producer 执行
+4. producer 在工作过程中持续写入 `producer-worklog.md` 和 `producer-state.json`
+5. producer 最终产出 `producer.md`
+6. 调用 reviewer_a
+7. reviewer_a 在工作过程中持续写入 `reviewer-a-worklog.md` 和 `reviewer-a-state.json`
+8. reviewer_a 最终产出 `reviewer-a.md`
+9. 调用 reviewer_b
+10. reviewer_b 在工作过程中持续写入 `reviewer-b-worklog.md` 和 `reviewer-b-state.json`
+11. reviewer_b 最终产出 `reviewer-b.md`
+12. 编排器聚合并生成 `decision.md`
+13. 若达标，进入下一阶段
+14. 若未达标，提升轮次并继续当前阶段
+15. 若超出阈值，写入 `haltReason` 并暂停
 
 ## 11. 自动推进规则
 
@@ -462,6 +466,17 @@ ops/ai-sprints/
 - 是否需要人工干预
 
 这能避免“AI 在后台跑，但人完全不知道它现在偏没偏”。
+
+此外，每个角色还应强制维护：
+
+- `producer-worklog.md`
+- `reviewer-a-worklog.md`
+- `reviewer-b-worklog.md`
+- `producer-state.json`
+- `reviewer-a-state.json`
+- `reviewer-b-state.json`
+
+这样即使单次执行很长、上下文压缩、会话中断，后续角色也能从本地文件恢复。
 
 ## 13. 推荐模型分工
 

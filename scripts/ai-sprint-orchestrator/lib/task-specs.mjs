@@ -91,6 +91,22 @@ export function buildRolePrompt({ spec, stage, round, role, runDir, stageDir, br
     reviewer_b: reviewerBPath,
   };
   const outputPath = outputPathMap[role];
+  const worklogPath = role === 'producer'
+    ? `${stageDir}/producer-worklog.md`
+    : role === 'reviewer_a'
+      ? `${stageDir}/reviewer-a-worklog.md`
+      : `${stageDir}/reviewer-b-worklog.md`;
+  const roleStatePath = role === 'producer'
+    ? `${stageDir}/producer-state.json`
+    : role === 'reviewer_a'
+      ? `${stageDir}/reviewer-a-state.json`
+      : `${stageDir}/reviewer-b-state.json`;
+  const sharedSkills = [
+    'C:/Users/Administrator/.codex/skills/acpx/SKILL.md',
+    'C:/Users/Administrator/.codex/superpowers/skills/systematic-debugging/SKILL.md',
+    'C:/Users/Administrator/.codex/superpowers/skills/verification-before-completion/SKILL.md',
+    'C:/Users/Administrator/.agents/skills/self-improving-agent/SKILL.md',
+  ];
   const base = [
     `You are acting as ${role} in an AI sprint orchestrator for the Principles repository.`,
     `Current task: ${spec.title}`,
@@ -99,12 +115,21 @@ export function buildRolePrompt({ spec, stage, round, role, runDir, stageDir, br
     `Working directory for task artifacts: ${stageDir}`,
     `Overall sprint directory: ${runDir}`,
     `Read the stage brief first: ${briefPath}`,
+    `Your worklog file: ${worklogPath}`,
+    `Your role state file: ${roleStatePath}`,
+    `Shared skill references are available at:`,
+    ...sharedSkills.map((skill) => `- ${skill}`),
+    `Before substantial work, create or update your role state file with: role, stage, round, status, checklist, updatedAt.`,
+    `During work, append short checkpoints to your worklog whenever you complete a meaningful investigation step, code change, review finding, or verification step.`,
+    `If you get stuck, record the concrete blocker and next best action in both the role state file and worklog before ending.`,
   ];
 
   if (role === 'producer') {
     return [
       ...base,
       `You may inspect and modify repository code when the stage requires implementation.`,
+      `You are expected to work autonomously within this stage until you either satisfy the stage goals or hit a concrete blocker.`,
+      `Persist your intermediate findings frequently so a future agent can resume without relying on chat context.`,
       `At the end, print a markdown report with exactly these sections: SUMMARY, CHANGES, EVIDENCE, OPEN_RISKS.`,
       `Do not write the report file yourself; stdout will be captured into ${outputPath}.`,
       `Stay within Principles. Do not modify OpenClaw.`,
@@ -116,6 +141,7 @@ export function buildRolePrompt({ spec, stage, round, role, runDir, stageDir, br
     ...base,
     `Read the producer report: ${counterpart}`,
     `Review independently. Do not modify repository files unless explicitly needed for evidence collection.`,
+    `You are expected to challenge weak assumptions and record checkpoints while reviewing, not just emit a final verdict.`,
     `At the end, print a markdown report with exactly these sections: VERDICT, BLOCKERS, FINDINGS, NEXT_FOCUS.`,
     `VERDICT must be one of: APPROVE, REVISE, BLOCK.`,
     `Do not write the report file yourself; stdout will be captured into ${outputPath}.`,

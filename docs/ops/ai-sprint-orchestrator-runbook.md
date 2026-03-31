@@ -38,8 +38,14 @@ Important files:
 - `latest-summary.md`: latest operator-facing summary
 - `stages/<nn-stage>/brief.md`: stage brief
 - `stages/<nn-stage>/producer.md`: producer output
+- `stages/<nn-stage>/producer-worklog.md`: producer checkpoint log
+- `stages/<nn-stage>/producer-state.json`: producer resumable state
 - `stages/<nn-stage>/reviewer-a.md`: reviewer A output
+- `stages/<nn-stage>/reviewer-a-worklog.md`: reviewer A checkpoint log
+- `stages/<nn-stage>/reviewer-a-state.json`: reviewer A resumable state
 - `stages/<nn-stage>/reviewer-b.md`: reviewer B output
+- `stages/<nn-stage>/reviewer-b-worklog.md`: reviewer B checkpoint log
+- `stages/<nn-stage>/reviewer-b-state.json`: reviewer B resumable state
 - `stages/<nn-stage>/decision.md`: stage decision
 
 ## State Contract
@@ -111,3 +117,4 @@ Current role defaults:
 - The orchestrator uses files as the source of truth.
 - AI session memory is treated as disposable.
 - The first implementation is intentionally narrow and task-template-driven.
+- Role worklogs and role state files exist specifically to reduce context-loss and drift during long-running agent work.

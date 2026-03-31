@@ -171,14 +171,51 @@ function roleConfig(spec, role) {
 function ensureStagePaths(runDir, stageIndex, stageName) {
   const stageDir = path.join(runDir, 'stages', `${String(stageIndex + 1).padStart(2, '0')}-${stageName}`);
   ensureDir(stageDir);
-  return {
+  const paths = {
     stageDir,
     briefPath: path.join(stageDir, 'brief.md'),
     producerPath: path.join(stageDir, 'producer.md'),
     reviewerAPath: path.join(stageDir, 'reviewer-a.md'),
     reviewerBPath: path.join(stageDir, 'reviewer-b.md'),
     decisionPath: path.join(stageDir, 'decision.md'),
+    producerWorklogPath: path.join(stageDir, 'producer-worklog.md'),
+    reviewerAWorklogPath: path.join(stageDir, 'reviewer-a-worklog.md'),
+    reviewerBWorklogPath: path.join(stageDir, 'reviewer-b-worklog.md'),
+    producerStatePath: path.join(stageDir, 'producer-state.json'),
+    reviewerAStatePath: path.join(stageDir, 'reviewer-a-state.json'),
+    reviewerBStatePath: path.join(stageDir, 'reviewer-b-state.json'),
   };
+
+  const placeholderFiles = [
+    paths.producerWorklogPath,
+    paths.reviewerAWorklogPath,
+    paths.reviewerBWorklogPath,
+  ];
+  for (const file of placeholderFiles) {
+    if (!fileExists(file)) {
+      writeText(file, '# Worklog\n\n');
+    }
+  }
+
+  const placeholderStates = [
+    [paths.producerStatePath, 'producer'],
+    [paths.reviewerAStatePath, 'reviewer_a'],
+    [paths.reviewerBStatePath, 'reviewer_b'],
+  ];
+  for (const [file, role] of placeholderStates) {
+    if (!fileExists(file)) {
+      writeJson(file, {
+        role,
+        stage: stageName,
+        round: 0,
+        status: 'idle',
+        checklist: [],
+        updatedAt: nowIso(),
+      });
+    }
+  }
+
+  return paths;
 }
 
 function decideAndPersist({ runDir, stageName, stageDir, decisionPath, producerPath, reviewerAPath, reviewerBPath, state }) {
