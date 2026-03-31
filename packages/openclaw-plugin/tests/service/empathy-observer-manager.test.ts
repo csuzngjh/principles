@@ -320,6 +320,35 @@ describe('EmpathyObserverManager', () => {
     );
   });
 
+  it('ok path sets observedAt even when reapBySession fails', async () => {
+    run.mockResolvedValue({ runId: 'r1' });
+    waitForRun.mockResolvedValue({ status: 'ok' });
+    getSessionMessages.mockRejectedValue(new Error('session not ready'));
+
+    await manager.spawn(api, 'session-ObservedAt', 'test message');
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    const metadata = (manager as any).activeRuns.get('session-ObservedAt');
+    expect(metadata.observedAt).toBeDefined();
+    expect(metadata.observedAt).toBeGreaterThan(0);
+  });
+
+  it('ok path reapBySession failure preserves activeRuns so fallback can recover', async () => {
+    run.mockResolvedValue({ runId: 'r1' });
+    waitForRun.mockResolvedValue({ status: 'ok' });
+    getSessionMessages.mockRejectedValue(new Error('session not ready'));
+
+    const sessionKey = await manager.spawn(api, 'session-Fallback', 'test message');
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    // activeRuns entry should still exist (for fallback)
+    expect((manager as any).activeRuns.has('session-Fallback')).toBe(true);
+    // sessionLock should be released (deleteSession likely failed too)
+    expect((manager as any).sessionLocks.has('session-Fallback')).toBe(false);
+    // isCompleted should be false (finalized=false)
+    expect((manager as any).completedSessions.has(sessionKey)).toBe(false);
+  });
+
   it('extracts parent session ID correctly from new key format', () => {
     const sessionKey = 'agent:main:subagent:empathy-obs-session_X-1234567890';
     const parentId = manager.extractParentSessionId(sessionKey);

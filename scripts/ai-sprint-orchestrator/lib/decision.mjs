@@ -1,10 +1,12 @@
+const VERDICT_RE = /(?:VERDICT:\s*\*{0,2}|##\s*VERDICT\s*\n+\*{0,2}\s*)(APPROVE|REVISE|BLOCK)\b/i;
+
 export function normalizeVerdict(text) {
-  const match = String(text ?? '').match(/VERDICT:\s*(APPROVE|REVISE|BLOCK)\b/i);
+  const match = String(text ?? '').match(VERDICT_RE);
   return match ? match[1].toUpperCase() : 'REVISE';
 }
 
 export function hasExplicitVerdict(text) {
-  return /VERDICT:\s*(APPROVE|REVISE|BLOCK)\b/i.test(String(text ?? ''));
+  return VERDICT_RE.test(String(text ?? ''));
 }
 
 export function extractBullets(text, heading) {

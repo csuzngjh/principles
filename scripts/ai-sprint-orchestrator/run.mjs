@@ -75,7 +75,16 @@ function loadOrInitState(args) {
     if (!fileExists(sprintFile)) {
       throw new Error(`Run not found: ${args.resume}`);
     }
-    return { runDir, state: readJson(sprintFile), resumed: true };
+    const state = readJson(sprintFile);
+    if (state.status === 'halted' || state.status === 'aborted') {
+      const previousStatus = state.status;
+      state.status = 'running';
+      state.haltReason = null;
+      state.updatedAt = nowIso();
+      writeJson(sprintFile, state);
+      appendTimeline(runDir, `Sprint resumed from ${previousStatus} by operator`);
+    }
+    return { runDir, state, resumed: true };
   }
 
   if (!args.task) {
@@ -114,7 +123,7 @@ function appendTimeline(runDir, line) {
   appendText(path.join(runDir, 'timeline.md'), `- ${nowIso()} ${line}\n`);
 }
 
-function runAgent({ cwd, agent, model, prompt, timeoutSeconds = 1800 }) {
+function runAgent({ cwd, agent, model, prompt, timeoutSeconds = 1800, failLogPath = null }) {
   const promptFile = path.join(os.tmpdir(), `ai-sprint-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`);
   fs.writeFileSync(promptFile, prompt, 'utf8');
 
@@ -126,18 +135,19 @@ function runAgent({ cwd, agent, model, prompt, timeoutSeconds = 1800 }) {
         [
           '-NoProfile',
           '-Command',
-          `acpx --cwd $env:AI_SPRINT_CWD --approve-all --model $env:AI_SPRINT_MODEL ${agent} exec -f $env:AI_SPRINT_PROMPT`,
+          `acpx --cwd $env:AI_SPRINT_CWD --approve-all --model $env:AI_SPRINT_MODEL --timeout $env:AI_SPRINT_TIMEOUT ${agent} exec -f $env:AI_SPRINT_PROMPT`,
         ],
         {
           cwd,
           encoding: 'utf8',
           maxBuffer: 10 * 1024 * 1024,
-          timeout: timeoutSeconds * 1000,
+          timeout: (timeoutSeconds + 60) * 1000,
           shell: false,
           env: {
             ...process.env,
             AI_SPRINT_CWD: cwd,
             AI_SPRINT_MODEL: model,
+            AI_SPRINT_TIMEOUT: String(timeoutSeconds),
             AI_SPRINT_PROMPT: promptFile,
           },
         },
@@ -145,12 +155,12 @@ function runAgent({ cwd, agent, model, prompt, timeoutSeconds = 1800 }) {
     } else {
       result = spawnSync(
         'acpx',
-        ['--cwd', cwd, '--approve-all', '--model', model, agent, 'exec', '-f', promptFile],
+        ['--cwd', cwd, '--approve-all', '--model', model, '--timeout', String(timeoutSeconds), agent, 'exec', '-f', promptFile],
         {
           cwd,
           encoding: 'utf8',
           maxBuffer: 10 * 1024 * 1024,
-          timeout: timeoutSeconds * 1000,
+          timeout: (timeoutSeconds + 60) * 1000,
           shell: false,
         },
       );
@@ -162,12 +172,13 @@ function runAgent({ cwd, agent, model, prompt, timeoutSeconds = 1800 }) {
   const stdout = result.stdout ?? '';
   const stderr = result.stderr ?? '';
 
-  if (result.error) {
-    throw result.error;
-  }
-
-  if (result.status !== 0) {
-    throw new Error(`Agent ${agent} failed with status ${result.status}\n${stdout}\n${stderr}`);
+  if (result.error || result.status !== 0) {
+    if (failLogPath) {
+      ensureDir(path.dirname(failLogPath));
+      writeText(failLogPath, `# Agent Failure Log\n\n- agent: ${agent}\n- model: ${model}\n- exitStatus: ${result.status ?? 'N/A'}\n- error: ${result.error?.message ?? 'none'}\n\n## stdout\n\n${stdout}\n\n## stderr\n\n${stderr}\n`);
+    }
+    if (result.error) throw result.error;
+    throw new Error(`Agent ${agent} failed with status ${result.status}\n${stdout.slice(0, 2000)}\n${stderr.slice(0, 2000)}`);
   }
 
   return stdout.trim();
@@ -178,6 +189,11 @@ function roleConfig(spec, role) {
   if (role === 'reviewer_a') return spec.reviewerA;
   if (role === 'reviewer_b') return spec.reviewerB;
   throw new Error(`Unknown role: ${role}`);
+}
+
+function roleTimeout(spec, role) {
+  const config = roleConfig(spec, role);
+  return config.timeoutSeconds ?? 600;
 }
 
 function ensureStagePaths(runDir, stageIndex, stageName) {
@@ -255,10 +271,9 @@ function readRoleOutput({ reportPath, stdout }) {
 }
 
 function protectedArtifacts(runDir, paths) {
+  // Only check stage-level artifacts; sprint.json/timeline/summary are
+  // also written by the orchestrator itself, so mtime checks are unreliable.
   return [
-    path.join(runDir, 'sprint.json'),
-    path.join(runDir, 'timeline.md'),
-    path.join(runDir, 'latest-summary.md'),
     paths.decisionPath,
     paths.scorecardPath,
   ];
@@ -282,6 +297,44 @@ function detectProtectedWriteViolation(files, snapshot) {
 }
 
 function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecardPath, producerPath, reviewerAPath, reviewerBPath, state }) {
+  const missingFiles = [];
+  if (!fileExists(producerPath)) missingFiles.push(`producer: ${producerPath}`);
+  if (!fileExists(reviewerAPath)) missingFiles.push(`reviewer_a: ${reviewerAPath}`);
+  if (!fileExists(reviewerBPath)) missingFiles.push(`reviewer_b: ${reviewerBPath}`);
+
+  if (missingFiles.length > 0) {
+    writeText(decisionPath, [
+      `# Decision`,
+      '',
+      `- Stage: ${stageName}`,
+      `- Round: ${state.currentRound}`,
+      `- Outcome: error`,
+      '',
+      `## Missing reports`,
+      ...missingFiles.map((f) => `- ${f}`),
+      '',
+      `Cannot render stage decision because required role reports are missing.`,
+      '',
+    ].join('\n'));
+    writeJson(scorecardPath, {
+      stage: stageName,
+      round: state.currentRound,
+      outcome: 'error',
+      summary: `Missing reports: ${missingFiles.join('; ')}`,
+      missingReports: missingFiles,
+      updatedAt: nowIso(),
+    });
+    appendTimeline(runDir, `Stage ${stageName} round ${state.currentRound} decision: error (missing reports)`);
+    updateSummary(runDir, [
+      `Status: ${state.status}`,
+      `Stage: ${stageName}`,
+      `Round: ${state.currentRound}`,
+      `Outcome: error`,
+      `Missing: ${missingFiles.join('; ')}`,
+    ]);
+    return { outcome: 'error', summary: `Missing reports: ${missingFiles.join('; ')}`, blockers: missingFiles, metrics: {} };
+  }
+
   const producer = fs.readFileSync(producerPath, 'utf8');
   const reviewerA = fs.readFileSync(reviewerAPath, 'utf8');
   const reviewerB = fs.readFileSync(reviewerBPath, 'utf8');
@@ -444,6 +497,18 @@ function executeStage(runDir, state, spec) {
   const protectedFiles = protectedArtifacts(runDir, paths);
 
   writeText(briefPath, `${buildStageBrief(spec, stageName, state.currentRound, previousDecision)}\n`);
+
+  // On round > 1, clear previous round's role reports so agents must regenerate them
+  if (state.currentRound > 1) {
+    const staleReports = [producerPath, reviewerAPath, reviewerBPath];
+    for (const fp of staleReports) {
+      if (fileExists(fp)) {
+        fs.unlinkSync(fp);
+      }
+    }
+    appendTimeline(runDir, `Cleared previous round reports for stage ${stageName} round ${state.currentRound}`);
+  }
+
   appendTimeline(runDir, `Stage ${stageName} round ${state.currentRound} started`);
   updateSummary(runDir, [
     `Status: ${state.status}`,
@@ -454,10 +519,34 @@ function executeStage(runDir, state, spec) {
 
   const roles = ['producer', 'reviewer_a', 'reviewer_b'];
   const outputs = {};
+  const stageStartedAt = Date.now();
+  const stageTimeoutMs = (spec.stageTimeoutMinutes ?? 30) * 60_000;
 
   for (const role of roles) {
     maybeAbort(runDir, state);
     heartbeatState(runDir, state, { currentRole: role });
+
+    // Per-stage runtime check
+    const stageElapsed = Date.now() - stageStartedAt;
+    if (stageElapsed > stageTimeoutMs) {
+      state.status = 'halted';
+      state.haltReason = {
+        type: 'stage_timeout',
+        stage: stageName,
+        round: state.currentRound,
+        details: `Stage ${stageName} exceeded ${(stageTimeoutMs / 60_000).toFixed(0)} minutes at role ${role}`,
+        blockers: [`Stage timeout at role ${role} after ${(stageElapsed / 60_000).toFixed(1)} minutes`],
+      };
+      saveState(runDir, state);
+      appendTimeline(runDir, `Sprint halted: ${state.haltReason.details}`);
+      updateSummary(runDir, [
+        `Status: ${state.status}`,
+        `Stage: ${stageName}`,
+        `Round: ${state.currentRound}`,
+        `Halt reason: ${state.haltReason.details}`,
+      ]);
+      return { outcome: 'halt', summary: state.haltReason.details, blockers: state.haltReason.blockers, metrics: {} };
+    }
     const config = roleConfig(spec, role);
     const prompt = buildRolePrompt({
       spec,
@@ -471,16 +560,38 @@ function executeStage(runDir, state, spec) {
       reviewerAPath,
       reviewerBPath,
     });
-    const protectedSnapshot = snapshotProtectedFiles(protectedFiles);
-    const output = runAgent({
-      cwd: role === 'producer' ? (spec.branchWorkspace || spec.workspace) : spec.workspace,
-      agent: config.agent,
-      model: config.model,
-      prompt,
-    });
+    // P3: skip role if report already exists and is non-empty
     const { reportPath, stdoutPath } = roleArtifactPaths(paths, role);
-    writeText(stdoutPath, `${output}\n`);
-    outputs[role] = readRoleOutput({ reportPath, stdout: output });
+    if (fileExists(reportPath) && fs.readFileSync(reportPath, 'utf8').trim()) {
+      outputs[role] = fs.readFileSync(reportPath, 'utf8').trim();
+      appendTimeline(runDir, `${role} skipped (report already exists) stage ${stageName} round ${state.currentRound}`);
+      continue;
+    }
+    const protectedSnapshot = snapshotProtectedFiles(protectedFiles);
+    const failLog = path.join(stageDir, `${role.replace('_', '-')}-failure.log`);
+    let output;
+    let agentTimedOut = false;
+    try {
+      output = runAgent({
+        cwd: role === 'producer' ? (spec.branchWorkspace || spec.workspace) : spec.workspace,
+        agent: config.agent,
+        model: config.model,
+        prompt,
+        timeoutSeconds: roleTimeout(spec, role),
+        failLogPath: failLog,
+      });
+    } catch (agentErr) {
+      // If spawnSync timed out but the agent wrote its report, continue instead of halting
+      if (fileExists(reportPath) && fs.readFileSync(reportPath, 'utf8').trim()) {
+        appendTimeline(runDir, `${role} spawnSync timed out but report exists — recovering stage ${stageName} round ${state.currentRound}`);
+        output = null;
+        agentTimedOut = true;
+      } else {
+        throw agentErr;
+      }
+    }
+    if (output) writeText(stdoutPath, `${output}\n`);
+    outputs[role] = readRoleOutput({ reportPath, stdout: output ?? '' });
 
     if (!fileExists(reportPath) || !fs.readFileSync(reportPath, 'utf8').trim()) {
       writeText(reportPath, `${outputs[role]}\n`);
@@ -573,13 +684,116 @@ function pauseRun(runId) {
 function showStatus(runId) {
   const runDir = path.join(sprintRoot, runId);
   const sprintFile = path.join(runDir, 'sprint.json');
-  const summaryFile = path.join(runDir, 'latest-summary.md');
   if (!fileExists(sprintFile)) {
     throw new Error(`Run not found: ${runId}`);
   }
   const state = reconcileRunState(runDir, readJson(sprintFile));
-  const summary = fileExists(summaryFile) ? fs.readFileSync(summaryFile, 'utf8') : '';
-  console.log(JSON.stringify({ state, summary }, null, 2));
+  const spec = getTaskSpec(state.taskId);
+  const now = Date.now();
+  const createdMs = Date.parse(state.createdAt) || now;
+  const heartbeatMs = Date.parse(state.lastHeartbeatAt) || now;
+  const elapsedMin = ((now - createdMs) / 60_000).toFixed(1);
+  const heartbeatAgeSec = ((now - heartbeatMs) / 1000).toFixed(0);
+  const maxRuntime = spec.maxRuntimeMinutes ?? 90;
+  const maxRounds = state.maxRoundsPerStage ?? 3;
+
+  // Find latest scorecard
+  const stageDirName = `${String(state.currentStageIndex + 1).padStart(2, '0')}-${state.currentStage}`;
+  const scorecardFile = path.join(runDir, 'stages', stageDirName, 'scorecard.json');
+  const scorecard = fileExists(scorecardFile) ? readJson(scorecardFile) : null;
+
+  // Count completed stages by scanning decision files
+  const stagesDir = path.join(runDir, 'stages');
+  const completedStages = [];
+  if (fs.existsSync(stagesDir)) {
+    for (const entry of fs.readdirSync(stagesDir)) {
+      const decFile = path.join(stagesDir, entry, 'decision.md');
+      if (fileExists(decFile)) {
+        const text = fs.readFileSync(decFile, 'utf8');
+        const outcomeMatch = text.match(/Outcome:\s*(\w+)/);
+        completedStages.push({ dir: entry, outcome: outcomeMatch?.[1] ?? 'unknown' });
+      }
+    }
+  }
+
+  // Latest timeline entries (last 8)
+  const timelineFile = path.join(runDir, 'timeline.md');
+  let recentEvents = [];
+  if (fileExists(timelineFile)) {
+    recentEvents = fs.readFileSync(timelineFile, 'utf8')
+      .split('\n')
+      .filter((l) => l.startsWith('- '))
+      .slice(-8)
+      .map((l) => l.replace(/^- (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\d{3}Z\s*/, ''));
+  }
+
+  // Build driver dashboard
+  const statusIcon = state.status === 'running' ? '>>>' : state.status === 'completed' ? '[OK]' : '[!!]';
+  const aliveHint = state.status === 'running'
+    ? (parseInt(heartbeatAgeSec, 10) > 120 ? `WARNING: heartbeat ${heartbeatAgeSec}s ago` : `heartbeat ${heartbeatAgeSec}s ago`)
+    : '';
+
+  const lines = [
+    `=== Sprint Dashboard ===`,
+    '',
+    `  ${statusIcon} ${state.status.toUpperCase()}`,
+    `  Task:     ${state.title}`,
+    `  Run:      ${runId}`,
+    '',
+    `  Stage:    ${state.currentStage}  (${state.currentStageIndex + 1}/${spec.stages.length})`,
+    `  Round:    ${state.currentRound} / ${maxRounds}`,
+    `  Role:     ${state.currentRole ?? 'idle'}`,
+    '',
+    `  Elapsed:  ${elapsedMin} min / ${maxRuntime} min max`,
+    `  ${aliveHint}`,
+    '',
+  ];
+
+  // Stage progress bar
+  if (spec.stages.length > 0) {
+    lines.push('  Stages:');
+    for (const stage of spec.stages) {
+      const done = completedStages.find((s) => s.dir.includes(stage));
+      const isCurrent = stage === state.currentStage;
+      const marker = done ? (done.outcome === 'advance' ? ' [PASS]' : ` [${done.outcome}]`) : (isCurrent ? ' >>' : ' --');
+      lines.push(`    ${stage}${marker}`);
+    }
+    lines.push('');
+  }
+
+  // Latest scorecard
+  if (scorecard) {
+    lines.push('  Latest round verdict:');
+    lines.push(`    reviewer_a: ${scorecard.reviewerAVerdict ?? '?'}`);
+    lines.push(`    reviewer_b: ${scorecard.reviewerBVerdict ?? '?'}`);
+    lines.push(`    approvals:  ${scorecard.approvalCount ?? 0} / 2 required`);
+    if (scorecard.blockerCount > 0) {
+      lines.push(`    blockers:   ${scorecard.blockerCount}`);
+      for (const b of (scorecard.blockers ?? []).slice(0, 3)) {
+        lines.push(`      - ${b.slice(0, 120)}`);
+      }
+    }
+    lines.push('');
+  }
+
+  // Recent events
+  if (recentEvents.length > 0) {
+    lines.push('  Recent events:');
+    for (const evt of recentEvents) {
+      lines.push(`    ${evt}`);
+    }
+    lines.push('');
+  }
+
+  // Controls reminder
+  lines.push('  Controls:');
+  lines.push(`    npm run ai-sprint -- --status ${runId}`);
+  lines.push(`    npm run ai-sprint -- --pause  ${runId}`);
+  lines.push(`    npm run ai-sprint -- --abort  ${runId}`);
+  lines.push(`    npm run ai-sprint -- --resume ${runId}`);
+  lines.push('');
+
+  console.log(lines.join('\n'));
 }
 
 function main() {
@@ -604,12 +818,50 @@ function main() {
 
   const { runDir, state } = loadOrInitState(args);
   const spec = getTaskSpec(state.taskId);
+  const sprintStartedAt = Date.parse(state.createdAt) || Date.now();
+
+  // Acquire exclusive lock to prevent concurrent orchestrators
+  const lockPath = path.join(runDir, 'orchestrator.lock');
+  if (fileExists(lockPath)) {
+    const lockData = readJson(lockPath);
+    if (lockData.pid && pidExists(lockData.pid) && lockData.pid !== process.pid) {
+      const lockAge = Date.now() - Date.parse(lockData.acquiredAt || 0);
+      if (lockAge < 30 * 60 * 1000) { // lock valid for 30 min
+        throw new Error(`Another orchestrator (PID ${lockData.pid}) is running. Acquired at ${lockData.acquiredAt}. Aborting.`);
+      }
+    }
+  }
+  writeJson(lockPath, { pid: process.pid, acquiredAt: nowIso() });
 
   appendTimeline(runDir, state.currentRound === 1 && state.currentStageIndex === 0 ? 'Sprint execution started' : 'Sprint resumed');
 
   try {
     while (state.status === 'running') {
       heartbeatState(runDir, state);
+
+      // Global runtime check
+      const elapsedMinutes = (Date.now() - sprintStartedAt) / 60_000;
+      const maxRuntime = state.maxRuntimeMinutes ?? spec.maxRuntimeMinutes ?? 90;
+      if (elapsedMinutes > maxRuntime) {
+        state.status = 'halted';
+        state.haltReason = {
+          type: 'max_runtime_exceeded',
+          stage: state.currentStage,
+          round: state.currentRound,
+          details: `Sprint exceeded ${maxRuntime} minutes (elapsed: ${elapsedMinutes.toFixed(1)}min)`,
+          blockers: ['Runtime limit exceeded.'],
+        };
+        saveState(runDir, state);
+        appendTimeline(runDir, `Sprint halted: ${state.haltReason.details}`);
+        updateSummary(runDir, [
+          `Status: ${state.status}`,
+          `Stage: ${state.currentStage}`,
+          `Round: ${state.currentRound}`,
+          `Halt reason: ${state.haltReason.details}`,
+        ]);
+        break;
+      }
+
       const decision = executeStage(runDir, state, spec);
       advanceState(state, spec, decision);
       saveState(runDir, state);
@@ -652,6 +904,9 @@ function main() {
       ]);
     }
   }
+
+  // Release lock
+  try { fs.unlinkSync(lockPath); } catch {}
 
   console.log(runDir);
 }

@@ -214,8 +214,14 @@ export class EmpathyObserverManager {
             startedAt: Date.now(),
         });
 
-        this.finalizeRun(api, sessionId, sessionKey, workspaceDir).catch((err) => {
-            api.logger.warn(`[PD:EmpathyObserver] finalizeRun failed for ${sessionKey}: ${String(err)}`);
+        this.finalizeRun(api, sessionId, sessionKey, workspaceDir).catch(async (err) => {
+            api.logger.warn(`[PD:EmpathyObserver] finalizeRun failed (will retry once): ${String(err)}`);
+            await new Promise((r) => setTimeout(r, 2000));
+            try {
+                await this.finalizeRun(api, sessionId, sessionKey, workspaceDir);
+            } catch (retryErr) {
+                api.logger.warn(`[PD:EmpathyObserver] finalizeRun retry also failed: ${String(retryErr)}`);
+            }
         });
 
         return sessionKey;
@@ -282,6 +288,9 @@ export class EmpathyObserverManager {
             return;
         }
 
+        // Set observedAt before reapBySession so TTL cleanup works even if reapBySession fails
+        const updatedMetadata = this.activeRuns.get(parentSessionId);
+        if (updatedMetadata) { updatedMetadata.observedAt = Date.now(); }
         await this.reapBySession(api, observerSessionKey, parentSessionId, workspaceDir);
     }
 
@@ -379,7 +388,8 @@ export class EmpathyObserverManager {
         if (finalized) {
             this.markCompleted(observerSessionKey);
         }
-        this.cleanupState(parentSessionId, observerSessionKey);
+        // Only delete from activeRuns if finalized; otherwise preserve entry for subagent_ended fallback
+        this.cleanupState(parentSessionId, observerSessionKey, finalized);
     }
 
     /**

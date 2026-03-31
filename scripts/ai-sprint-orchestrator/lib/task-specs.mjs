@@ -8,23 +8,28 @@ export function getTaskSpec(taskId) {
       workspace: 'D:/Code/principles',
       branchWorkspace: 'D:/Code/principles-empathy-fix',
       maxRoundsPerStage: 3,
-      maxRuntimeMinutes: 90,
+      maxRuntimeMinutes: 360,
+      stageTimeoutMinutes: 30,
       stages: DEFAULT_STAGE_ORDER,
       producer: {
         agent: 'opencode',
         model: 'minimax-cn-coding-plan/MiniMax-M2.7',
+        timeoutSeconds: 1200,
       },
       reviewerA: {
         agent: 'iflow',
         model: 'glm-5',
+        timeoutSeconds: 900,
       },
       reviewerB: {
         agent: 'iflow',
         model: 'glm-5',
+        timeoutSeconds: 900,
       },
       escalationReviewer: {
         agent: 'claude',
         model: 'GLM-5.1',
+        timeoutSeconds: 900,
       },
       context: [
         'Use PD-only changes; do not modify OpenClaw.',
@@ -188,9 +193,25 @@ export function buildRolePrompt({ spec, stage, round, role, runDir, stageDir, br
   }
 
   const counterpart = role === 'reviewer_a' ? producerPath : producerPath;
+
+  const reviewerFocus = role === 'reviewer_a'
+    ? [
+        `Your primary focus: correctness and root-cause analysis.`,
+        `Challenge whether the producer's evidence actually supports the claimed conclusions.`,
+        `Check for logical gaps, untested edge cases, and missing error paths.`,
+        `Verify that code citations (file paths, line numbers) are accurate by reading the referenced files.`,
+      ]
+    : [
+        `Your primary focus: scope control, regression risk, and test coverage.`,
+        `Check whether the producer's changes are the smallest sufficient fix, or if scope has crept.`,
+        `Identify missing tests, insufficient coverage, and potential side effects.`,
+        `Flag any unnecessary architectural expansion or gold-plating.`,
+      ];
+
   return [
     ...base,
     `Read the producer report: ${counterpart}`,
+    ...reviewerFocus,
     `Review independently. Do not modify repository files unless explicitly needed for evidence collection.`,
     `You are expected to challenge weak assumptions and record checkpoints while reviewing, not just emit a final verdict.`,
     `At the end, write a markdown report to ${outputPath} with exactly these sections: VERDICT, BLOCKERS, FINDINGS, HYPOTHESIS_MATRIX, NEXT_FOCUS, CHECKS.`,
