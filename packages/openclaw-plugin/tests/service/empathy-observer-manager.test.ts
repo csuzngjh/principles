@@ -154,12 +154,12 @@ describe('EmpathyObserverManager', () => {
     expect(deleteSession).toHaveBeenCalled();
   });
 
-  it('waitForRun(status=timeout) still triggers cleanup', async () => {
+  it('waitForRun(status=timeout) does NOT call deleteSession - cleanup deferred', async () => {
     run.mockResolvedValue({ runId: 'r1' });
     waitForRun.mockResolvedValue({ status: 'timeout' });
     getSessionMessages.mockResolvedValue({
-      messages: [{ role: 'assistant', content: '{"damageDetected":false}' }],
-      assistantTexts: ['{"damageDetected":false}'],
+      messages: [{ role: 'assistant', content: '{"damageDetected":true,"severity":"severe"}' }],
+      assistantTexts: ['{"damageDetected":true,"severity":"severe"}'],
     });
 
     await manager.spawn(api, 'session-T', 'test message');
@@ -167,7 +167,10 @@ describe('EmpathyObserverManager', () => {
     await new Promise(resolve => setTimeout(resolve, 50));
 
     expect(waitForRun).toHaveBeenCalled();
-    expect(deleteSession).toHaveBeenCalled();
+    // timeout should NOT trigger deleteSession - session is kept for fallback path
+    expect(deleteSession).not.toHaveBeenCalled();
+    // trackFriction should NOT be called because we didn't reap
+    expect(sessionTracker.trackFriction).not.toHaveBeenCalled();
   });
 
   it('applies friction on valid observer JSON payload and calls deleteSession', async () => {
@@ -236,6 +239,30 @@ describe('EmpathyObserverManager', () => {
 
     expect(sessionTracker.trackFriction).toHaveBeenCalledTimes(1);
     expect(deleteSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses original parentSessionId for business attribution even when session key is sanitized', async () => {
+    run.mockResolvedValue({ runId: 'r1' });
+    waitForRun.mockResolvedValue({ status: 'ok' });
+    getSessionMessages.mockResolvedValue({
+      messages: [{ role: 'assistant', content: '{"damageDetected":true,"severity":"moderate","confidence":0.85,"reason":"user seems frustrated"}' }],
+      assistantTexts: ['{"damageDetected":true,"severity":"moderate","confidence":0.85,"reason":"user seems frustrated"}'],
+    });
+
+    // Session ID with characters that get sanitized in session key
+    const originalSessionId = 'session/with:invalid&chars';
+    const result = await manager.spawn(api, originalSessionId, 'test message');
+
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    // trackFriction should be called with ORIGINAL sessionId, not sanitized version
+    expect(sessionTracker.trackFriction).toHaveBeenCalledWith(
+      originalSessionId,  // NOT 'session_with_invalid_chars'
+      25,
+      'observer_empathy_moderate',
+      '',
+      { source: 'user_empathy' }
+    );
   });
 
   it('extracts parent session ID correctly from new key format', () => {

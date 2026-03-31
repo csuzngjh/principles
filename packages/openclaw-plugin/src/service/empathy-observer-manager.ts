@@ -55,6 +55,9 @@ export class EmpathyObserverManager {
     private sessionLocks = new Map<string, string>();
     private activeRuns = new Map<string, ObserverRunMetadata>();
     private completedSessions = new Map<string, number>();
+    // Track sessions that timed out - these should NOT be cleaned up by main path
+    // They will be handled by fallback subagent_ended path if/when it fires
+    private timedOutSessions = new Set<string>();
 
     private constructor() {}
 
@@ -205,7 +208,7 @@ export class EmpathyObserverManager {
 
     /**
      * Main回收链路: 使用 waitForRun 驱动回收
-     * 无论 ok/error/timeout 都执行统一 cleanup
+     * 仅在 ok/error 时回收; timeout 时保留 session 由 fallback 处理
      */
     private async finalizeRun(
         api: EmpathyObserverApi,
@@ -236,6 +239,13 @@ export class EmpathyObserverManager {
             waitResult = { status: 'error', error: String(error) };
         }
 
+        if (waitResult.status === 'timeout') {
+            api.logger.warn(`[PD:EmpathyObserver] finalizeRun: observer wait timed out; deferring cleanup for ${observerSessionKey}`);
+            this.timedOutSessions.add(observerSessionKey);
+            this.cleanupState(parentSessionId, observerSessionKey);
+            return;
+        }
+
         await this.reapBySession(api, observerSessionKey, parentSessionId, workspaceDir);
     }
 
@@ -257,7 +267,10 @@ export class EmpathyObserverManager {
         this.markCompleted(observerSessionKey);
         api.logger.info(`[PD:EmpathyObserver] reapBySession starting for ${observerSessionKey}`);
 
-        const sessionId = this.extractParentSessionId(observerSessionKey);
+        const storedMetadata = this.activeRuns.get(parentSessionId);
+        // Use original parentSessionId from metadata, NOT extracted from session key
+        // (session key may have been sanitized/truncated and doesn't match original)
+        const sessionId = storedMetadata?.parentSessionId || this.extractParentSessionId(observerSessionKey) || parentSessionId;
 
         try {
             const messages = await api.runtime.subagent.getSessionMessages({
@@ -344,7 +357,20 @@ export class EmpathyObserverManager {
             return;
         }
 
-        const parentSessionId = this.extractParentSessionId(targetSessionKey) || '';
+        // Find the original parentSessionId by matching observerSessionKey in activeRuns
+        // (the session key may have been sanitized, so we can't rely on extraction alone)
+        let parentSessionId = '';
+        for (const [key, metadata] of this.activeRuns) {
+            if (metadata.observerSessionKey === targetSessionKey) {
+                parentSessionId = key;
+                break;
+            }
+        }
+        // Fallback: extract from session key (may be truncated but better than nothing for logging)
+        if (!parentSessionId) {
+            parentSessionId = this.extractParentSessionId(targetSessionKey) || '';
+        }
+
         await this.reapBySession(api, targetSessionKey, parentSessionId, workspaceDir);
     }
 
