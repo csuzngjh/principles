@@ -3,6 +3,10 @@ export function normalizeVerdict(text) {
   return match ? match[1].toUpperCase() : 'REVISE';
 }
 
+export function hasExplicitVerdict(text) {
+  return /VERDICT:\s*(APPROVE|REVISE|BLOCK)\b/i.test(String(text ?? ''));
+}
+
 export function extractBullets(text, heading) {
   const source = String(text ?? '');
   const pattern = new RegExp(`${heading}:\\s*([\\s\\S]*?)(?:\\n[A-Z_ ]+:|$)`, 'i');
@@ -51,6 +55,8 @@ export function buildStageMetrics({ stageCriteria, producer, reviewerA, reviewer
     blockerCount: blockers.length,
     reviewerAVerdict,
     reviewerBVerdict,
+    reviewerAHasExplicitVerdict: hasExplicitVerdict(reviewerA),
+    reviewerBHasExplicitVerdict: hasExplicitVerdict(reviewerB),
     blockers,
     producerSectionChecks,
     reviewerSectionChecks,
@@ -68,17 +74,24 @@ export function decideStage({ stageCriteria, producer, reviewerA, reviewerB, cur
   const producerSectionsSatisfied = Object.values(metrics.producerSectionChecks).every(Boolean);
   const reviewerSectionsSatisfied = Object.values(metrics.reviewerSectionChecks).every(Boolean);
   const requiredApprovals = stageCriteria?.requiredApprovals ?? 2;
+  const explicitVerdictsOk = metrics.reviewerAHasExplicitVerdict && metrics.reviewerBHasExplicitVerdict;
+  const structuralBlockers = [];
+
+  if (!explicitVerdictsOk) {
+    structuralBlockers.push('One or more reviewers did not emit a strict VERDICT: APPROVE|REVISE|BLOCK line.');
+  }
 
   if (
     verdictA === 'APPROVE' &&
     verdictB === 'APPROVE' &&
+    explicitVerdictsOk &&
     metrics.approvalCount >= requiredApprovals &&
     producerSectionsSatisfied &&
     reviewerSectionsSatisfied
   ) {
     return {
       outcome: 'advance',
-      blockers,
+      blockers: [...structuralBlockers, ...blockers],
       metrics,
       summary: 'Both reviewers approved the stage output.',
     };
@@ -87,7 +100,7 @@ export function decideStage({ stageCriteria, producer, reviewerA, reviewerB, cur
   if (currentRound >= maxRoundsPerStage) {
     return {
       outcome: 'halt',
-      blockers,
+      blockers: [...structuralBlockers, ...blockers],
       metrics,
       summary: 'Stage exceeded maximum rounds without both reviewers approving.',
     };
@@ -95,7 +108,7 @@ export function decideStage({ stageCriteria, producer, reviewerA, reviewerB, cur
 
   return {
     outcome: 'revise',
-    blockers,
+    blockers: [...structuralBlockers, ...blockers],
     metrics,
     summary: 'At least one reviewer requested revision or blocked progress.',
   };

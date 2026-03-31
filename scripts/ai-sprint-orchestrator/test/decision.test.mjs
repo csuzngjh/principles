@@ -1,10 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { decideStage, normalizeVerdict, extractBullets, buildStageMetrics } from '../lib/decision.mjs';
+import { decideStage, normalizeVerdict, extractBullets, buildStageMetrics, hasExplicitVerdict } from '../lib/decision.mjs';
 
 test('normalizeVerdict extracts explicit verdict', () => {
   assert.equal(normalizeVerdict('VERDICT: approve'), 'APPROVE');
   assert.equal(normalizeVerdict('VERDICT: BLOCK'), 'BLOCK');
+});
+
+test('hasExplicitVerdict rejects non-standard verdicts', () => {
+  assert.equal(hasExplicitVerdict('VERDICT: APPROVE'), true);
+  assert.equal(hasExplicitVerdict('VERDICT: PARTIAL_APPROVE'), false);
 });
 
 test('extractBullets reads bullet lines from section', () => {
@@ -68,4 +73,22 @@ test('buildStageMetrics tracks section and approval counts', () => {
   assert.equal(metrics.producerSectionChecks.CHECKS, true);
   assert.equal(metrics.reviewerSectionChecks.VERDICT, true);
   assert.equal(metrics.reviewerSectionChecks.CHECKS, true);
+});
+
+test('decideStage does not advance with invalid reviewer verdict syntax', () => {
+  const result = decideStage({
+    stageCriteria: {
+      requiredApprovals: 2,
+      requiredProducerSections: ['SUMMARY'],
+      requiredReviewerSections: ['VERDICT', 'BLOCKERS'],
+    },
+    producer: 'SUMMARY:\nDone',
+    reviewerA: 'VERDICT: PARTIAL_APPROVE\nBLOCKERS:\n- None.',
+    reviewerB: 'VERDICT: APPROVE\nBLOCKERS:\n- None.',
+    currentRound: 1,
+    maxRoundsPerStage: 3,
+  });
+
+  assert.equal(result.outcome, 'revise');
+  assert.equal(result.blockers[0], 'One or more reviewers did not emit a strict VERDICT: APPROVE|REVISE|BLOCK line.');
 });

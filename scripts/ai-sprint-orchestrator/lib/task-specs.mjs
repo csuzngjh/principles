@@ -53,8 +53,8 @@ export function getTaskSpec(taskId) {
       stageCriteria: {
         'investigate': {
           requiredApprovals: 2,
-          requiredProducerSections: ['SUMMARY', 'EVIDENCE', 'KEY_EVENTS', 'CHECKS'],
-          requiredReviewerSections: ['VERDICT', 'BLOCKERS', 'FINDINGS', 'NEXT_FOCUS', 'CHECKS'],
+          requiredProducerSections: ['SUMMARY', 'EVIDENCE', 'KEY_EVENTS', 'HYPOTHESIS_MATRIX', 'CHECKS'],
+          requiredReviewerSections: ['VERDICT', 'BLOCKERS', 'FINDINGS', 'HYPOTHESIS_MATRIX', 'NEXT_FOCUS', 'CHECKS'],
         },
         'fix-plan': {
           requiredApprovals: 2,
@@ -72,6 +72,13 @@ export function getTaskSpec(taskId) {
           requiredReviewerSections: ['VERDICT', 'BLOCKERS', 'FINDINGS', 'NEXT_FOCUS', 'CHECKS'],
         },
       },
+      investigateHypotheses: [
+        'prompt_contamination_from_prompt_ts',
+        'wait_for_run_timeout_or_error_causes_non_persistence',
+        'subagent_ended_fallback_is_not_reliable_enough',
+        'workspace_dir_or_wrong_workspace_write',
+        'lock_or_ttl_path_causes_observer_inactivity_or_data_loss',
+      ],
     };
   }
 
@@ -80,6 +87,7 @@ export function getTaskSpec(taskId) {
 
 export function buildStageBrief(spec, stage, round, previousDecision) {
   const goals = spec.stageGoals[stage] ?? [];
+  const hypotheses = stage === 'investigate' ? (spec.investigateHypotheses ?? []) : [];
   const carryForward = previousDecision
     ? `## Carry Forward\n\n${previousDecision}\n`
     : '## Carry Forward\n\n- None.\n';
@@ -94,6 +102,13 @@ export function buildStageBrief(spec, stage, round, previousDecision) {
     `## Goals`,
     ...goals.map((goal) => `- ${goal}`),
     '',
+    ...(hypotheses.length
+      ? [
+        `## Required Hypotheses`,
+        ...hypotheses.map((item) => `- ${item}`),
+        '',
+      ]
+      : []),
     carryForward.trimEnd(),
     '',
     `## Constraints`,
@@ -146,6 +161,7 @@ export function buildRolePrompt({ spec, stage, round, role, runDir, stageDir, br
     `Your final report file: ${outputPath}`,
     `Your worklog file: ${worklogPath}`,
     `Your role state file: ${roleStatePath}`,
+    `Protected orchestrator-owned files that you must NOT modify: ${runDir}/sprint.json, ${runDir}/timeline.md, ${runDir}/latest-summary.md, ${stageDir}/decision.md, ${stageDir}/scorecard.json`,
     `Shared skill references are available at:`,
     ...sharedSkills.map((skill) => `- ${skill}`),
     `Before substantial work, create or update your role state file with: role, stage, round, status, checklist, updatedAt.`,
@@ -160,8 +176,11 @@ export function buildRolePrompt({ spec, stage, round, role, runDir, stageDir, br
       `You may inspect and modify repository code when the stage requires implementation.`,
       `You are expected to work autonomously within this stage until you either satisfy the stage goals or hit a concrete blocker.`,
       `Persist your intermediate findings frequently so a future agent can resume without relying on chat context.`,
-      `At the end, write a markdown report to ${outputPath} with exactly these sections: SUMMARY, CHANGES, EVIDENCE, KEY_EVENTS, CHECKS, OPEN_RISKS.`,
+      `At the end, write a markdown report to ${outputPath} with exactly these sections: SUMMARY, CHANGES, EVIDENCE, KEY_EVENTS, HYPOTHESIS_MATRIX, CHECKS, OPEN_RISKS.`,
       `KEY_EVENTS should be bullets describing concrete completed milestones or validated events.`,
+      stage === 'investigate'
+        ? `HYPOTHESIS_MATRIX must include one bullet per required hypothesis in this exact shape: - <hypothesis_id>: SUPPORTED|REFUTED|UNPROVEN — <brief evidence>.`
+        : `HYPOTHESIS_MATRIX should capture any remaining competing explanations or risk assumptions.`,
       `CHECKS should be a single-line machine-readable summary such as: CHECKS: evidence=ok;tests=not-run;scope=pd-only;prompt-isolation=confirmed`,
       `Do not dump long reasoning logs to stdout. Stdout should only contain a short completion line such as: ROLE_STATUS: completed; report=${outputPath}`,
       `Stay within Principles. Do not modify OpenClaw.`,
@@ -174,9 +193,12 @@ export function buildRolePrompt({ spec, stage, round, role, runDir, stageDir, br
     `Read the producer report: ${counterpart}`,
     `Review independently. Do not modify repository files unless explicitly needed for evidence collection.`,
     `You are expected to challenge weak assumptions and record checkpoints while reviewing, not just emit a final verdict.`,
-    `At the end, write a markdown report to ${outputPath} with exactly these sections: VERDICT, BLOCKERS, FINDINGS, NEXT_FOCUS, CHECKS.`,
+    `At the end, write a markdown report to ${outputPath} with exactly these sections: VERDICT, BLOCKERS, FINDINGS, HYPOTHESIS_MATRIX, NEXT_FOCUS, CHECKS.`,
+    stage === 'investigate'
+      ? `HYPOTHESIS_MATRIX must classify each required hypothesis with one bullet in this exact shape: - <hypothesis_id>: SUPPORTED|REFUTED|UNPROVEN — <brief evidence>.`
+      : `HYPOTHESIS_MATRIX should capture any remaining competing explanations or risk assumptions.`,
     `CHECKS should be a single-line machine-readable summary such as: CHECKS: criteria=met;blockers=0;verification=partial`,
-    `VERDICT must be one of: APPROVE, REVISE, BLOCK.`,
+    `VERDICT must be exactly one of: APPROVE, REVISE, BLOCK.`,
     `Do not dump long reasoning logs to stdout. Stdout should only contain a short completion line such as: ROLE_STATUS: completed; report=${outputPath}`,
   ].join('\n');
 }

@@ -56,6 +56,10 @@ function createSprintState(spec, runId) {
     currentRound: 1,
     maxRoundsPerStage: spec.maxRoundsPerStage,
     maxRuntimeMinutes: spec.maxRuntimeMinutes,
+    staleAfterMs: spec.staleAfterMs ?? 5 * 60 * 1000,
+    orchestratorPid: process.pid,
+    lastHeartbeatAt: nowIso(),
+    currentRole: null,
     haltReason: null,
     createdAt: nowIso(),
     updatedAt: nowIso(),
@@ -92,6 +96,14 @@ function loadOrInitState(args) {
 function saveState(runDir, state) {
   state.updatedAt = nowIso();
   writeJson(path.join(runDir, 'sprint.json'), state);
+}
+
+function heartbeatState(runDir, state, patch = {}) {
+  Object.assign(state, patch, {
+    orchestratorPid: process.pid,
+    lastHeartbeatAt: nowIso(),
+  });
+  saveState(runDir, state);
 }
 
 function updateSummary(runDir, lines) {
@@ -242,6 +254,33 @@ function readRoleOutput({ reportPath, stdout }) {
   return String(stdout ?? '').trim();
 }
 
+function protectedArtifacts(runDir, paths) {
+  return [
+    path.join(runDir, 'sprint.json'),
+    path.join(runDir, 'timeline.md'),
+    path.join(runDir, 'latest-summary.md'),
+    paths.decisionPath,
+    paths.scorecardPath,
+  ];
+}
+
+function snapshotProtectedFiles(files) {
+  const snapshot = {};
+  for (const file of files) {
+    snapshot[file] = fileExists(file) ? fs.statSync(file).mtimeMs : null;
+  }
+  return snapshot;
+}
+
+function detectProtectedWriteViolation(files, snapshot) {
+  for (const file of files) {
+    const previous = snapshot[file] ?? null;
+    const current = fileExists(file) ? fs.statSync(file).mtimeMs : null;
+    if (previous !== current) return file;
+  }
+  return null;
+}
+
 function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecardPath, producerPath, reviewerAPath, reviewerBPath, state }) {
   const producer = fs.readFileSync(producerPath, 'utf8');
   const reviewerA = fs.readFileSync(reviewerAPath, 'utf8');
@@ -351,6 +390,39 @@ function maybeAbort(runDir, state) {
   Object.assign(state, fresh);
 }
 
+function pidExists(pid) {
+  if (!pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function reconcileRunState(runDir, state) {
+  if (state.status !== 'running') return state;
+  if (pidExists(state.orchestratorPid)) return state;
+
+  state.status = 'halted';
+  state.haltReason = {
+    type: 'stale_orchestrator',
+    stage: state.currentStage,
+    round: state.currentRound,
+    details: `Orchestrator pid ${state.orchestratorPid ?? 'unknown'} is no longer alive.`,
+    blockers: ['The sprint process ended before stage completion. Resume or restart the run.'],
+  };
+  saveState(runDir, state);
+  updateSummary(runDir, [
+    `Status: ${state.status}`,
+    `Stage: ${state.currentStage}`,
+    `Round: ${state.currentRound}`,
+    `Halt reason: ${state.haltReason.details}`,
+  ]);
+  appendTimeline(runDir, `Sprint reconciled to halted: ${state.haltReason.details}`);
+  return state;
+}
+
 function executeStage(runDir, state, spec) {
   const stageName = state.currentStage;
   const previousDecisionPath = path.join(
@@ -369,6 +441,7 @@ function executeStage(runDir, state, spec) {
     stageName,
   );
   const { stageDir, briefPath, producerPath, reviewerAPath, reviewerBPath, decisionPath, scorecardPath } = paths;
+  const protectedFiles = protectedArtifacts(runDir, paths);
 
   writeText(briefPath, `${buildStageBrief(spec, stageName, state.currentRound, previousDecision)}\n`);
   appendTimeline(runDir, `Stage ${stageName} round ${state.currentRound} started`);
@@ -384,6 +457,7 @@ function executeStage(runDir, state, spec) {
 
   for (const role of roles) {
     maybeAbort(runDir, state);
+    heartbeatState(runDir, state, { currentRole: role });
     const config = roleConfig(spec, role);
     const prompt = buildRolePrompt({
       spec,
@@ -397,6 +471,7 @@ function executeStage(runDir, state, spec) {
       reviewerAPath,
       reviewerBPath,
     });
+    const protectedSnapshot = snapshotProtectedFiles(protectedFiles);
     const output = runAgent({
       cwd: role === 'producer' ? (spec.branchWorkspace || spec.workspace) : spec.workspace,
       agent: config.agent,
@@ -410,7 +485,28 @@ function executeStage(runDir, state, spec) {
     if (!fileExists(reportPath) || !fs.readFileSync(reportPath, 'utf8').trim()) {
       writeText(reportPath, `${outputs[role]}\n`);
     }
+    const violatedFile = detectProtectedWriteViolation(protectedFiles, protectedSnapshot);
+    if (violatedFile) {
+      state.status = 'halted';
+      state.haltReason = {
+        type: 'protected_file_modified',
+        stage: stageName,
+        round: state.currentRound,
+        details: `${role} modified orchestrator-owned file ${violatedFile}`,
+        blockers: [`Protected file modified: ${violatedFile}`],
+      };
+      saveState(runDir, state);
+      appendTimeline(runDir, `Sprint halted: ${role} modified protected file ${violatedFile}`);
+      updateSummary(runDir, [
+        `Status: ${state.status}`,
+        `Stage: ${stageName}`,
+        `Round: ${state.currentRound}`,
+        `Halt reason: ${state.haltReason.details}`,
+      ]);
+      throw new Error(state.haltReason.details);
+    }
     appendTimeline(runDir, `${role} completed stage ${stageName} round ${state.currentRound}`);
+    heartbeatState(runDir, state, { currentRole: null });
   }
 
   return decideAndPersist({
@@ -481,7 +577,7 @@ function showStatus(runId) {
   if (!fileExists(sprintFile)) {
     throw new Error(`Run not found: ${runId}`);
   }
-  const state = readJson(sprintFile);
+  const state = reconcileRunState(runDir, readJson(sprintFile));
   const summary = fileExists(summaryFile) ? fs.readFileSync(summaryFile, 'utf8') : '';
   console.log(JSON.stringify({ state, summary }, null, 2));
 }
@@ -511,26 +607,48 @@ function main() {
 
   appendTimeline(runDir, state.currentRound === 1 && state.currentStageIndex === 0 ? 'Sprint execution started' : 'Sprint resumed');
 
-  while (state.status === 'running') {
-    const decision = executeStage(runDir, state, spec);
-    advanceState(state, spec, decision);
-    saveState(runDir, state);
-    if (state.status === 'completed') {
-      appendTimeline(runDir, 'Sprint completed');
-      updateSummary(runDir, [
-        `Status: ${state.status}`,
-        `Stage: ${state.currentStage}`,
-        `Round: ${state.currentRound}`,
-        'All stages finished.',
-      ]);
+  try {
+    while (state.status === 'running') {
+      heartbeatState(runDir, state);
+      const decision = executeStage(runDir, state, spec);
+      advanceState(state, spec, decision);
+      saveState(runDir, state);
+      if (state.status === 'completed') {
+        appendTimeline(runDir, 'Sprint completed');
+        updateSummary(runDir, [
+          `Status: ${state.status}`,
+          `Stage: ${state.currentStage}`,
+          `Round: ${state.currentRound}`,
+          'All stages finished.',
+        ]);
+      }
+      if (state.status === 'halted') {
+        appendTimeline(runDir, `Sprint halted: ${state.haltReason?.details ?? 'unknown reason'}`);
+        updateSummary(runDir, [
+          `Status: ${state.status}`,
+          `Stage: ${state.currentStage}`,
+          `Round: ${state.currentRound}`,
+          `Halt reason: ${state.haltReason?.details ?? 'unknown reason'}`,
+        ]);
+      }
     }
-    if (state.status === 'halted') {
-      appendTimeline(runDir, `Sprint halted: ${state.haltReason?.details ?? 'unknown reason'}`);
+  } catch (error) {
+    if (state.status !== 'halted') {
+      state.status = 'halted';
+      state.haltReason = {
+        type: 'orchestrator_error',
+        stage: state.currentStage,
+        round: state.currentRound,
+        details: String(error),
+        blockers: [String(error)],
+      };
+      saveState(runDir, state);
+      appendTimeline(runDir, `Sprint halted by orchestrator error: ${String(error)}`);
       updateSummary(runDir, [
         `Status: ${state.status}`,
         `Stage: ${state.currentStage}`,
         `Round: ${state.currentRound}`,
-        `Halt reason: ${state.haltReason?.details ?? 'unknown reason'}`,
+        `Halt reason: ${String(error)}`,
       ]);
     }
   }
