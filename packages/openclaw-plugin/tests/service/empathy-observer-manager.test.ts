@@ -201,12 +201,28 @@ describe('EmpathyObserverManager', () => {
     waitForRun.mockResolvedValue({ status: 'ok' });
     getSessionMessages.mockRejectedValue(new Error('session not ready'));
 
-    await manager.spawn(api, 'session-Err', 'test message');
+    const sessionKey = await manager.spawn(api, 'session-Err', 'test message');
     await new Promise(resolve => setTimeout(resolve, 50));
 
     expect(deleteSession).toHaveBeenCalled();
-    // completedSessions should NOT have this session marked as completed
-    expect((manager as any).completedSessions.has('agent:main:subagent:empathy-obs-session-Err-')).toBe(false);
+    expect((manager as any).completedSessions.has(sessionKey)).toBe(false);
+  });
+
+  it('marks completed when message reading succeeds even if deleteSession fails', async () => {
+    run.mockResolvedValue({ runId: 'r1' });
+    waitForRun.mockResolvedValue({ status: 'ok' });
+    getSessionMessages.mockResolvedValue({
+      messages: [{ role: 'assistant', content: '{"damageDetected":true,"severity":"moderate"}' }],
+      assistantTexts: ['{"damageDetected":true,"severity":"moderate"}'],
+    });
+    deleteSession.mockRejectedValue(new Error('cleanup failed'));
+
+    const sessionKey = await manager.spawn(api, 'session-DelFail', 'test message');
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    expect(deleteSession).toHaveBeenCalled();
+    // finalized=true (message reading succeeded) marks completed regardless of deleteSession outcome
+    expect((manager as any).completedSessions.has(sessionKey)).toBe(true);
   });
 
   it('applies friction on valid observer JSON payload and calls deleteSession', async () => {
@@ -268,9 +284,12 @@ describe('EmpathyObserverManager', () => {
       messages: [{ role: 'assistant', content: '{"damageDetected":true,"severity":"mild","confidence":0.9}' }],
       assistantTexts: ['{"damageDetected":true,"severity":"mild","confidence":0.9}'],
     });
+    deleteSession.mockResolvedValue(undefined);
 
     const sessionKey = 'agent:main:subagent:empathy-obs-session-W-1234567890';
+
     await manager.reap(api, sessionKey, '/workspace/principles');
+    expect((manager as any).completedSessions.has(sessionKey)).toBe(true);
     await manager.reap(api, sessionKey, '/workspace/principles');
 
     expect(sessionTracker.trackFriction).toHaveBeenCalledTimes(1);
