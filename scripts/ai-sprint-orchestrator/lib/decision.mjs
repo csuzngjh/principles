@@ -84,7 +84,8 @@ export function checkDimensionThresholds(dimensionScores, requiredDimensions, th
 }
 
 export function extractContractItems(text) {
-  const source = String(text ?? '');
+  // Strip markdown code fences so inner sections are visible to regex
+  const source = String(text ?? '').replace(/```[\s\S]*?```/g, (m) => m.replace(/```\w*\n?/g, ''));
   const match = source.match(CONTRACT_RE);
   if (!match) return [];
   const items = [];

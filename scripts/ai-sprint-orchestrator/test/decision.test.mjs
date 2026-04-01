@@ -908,3 +908,27 @@ test('extractContractItems ignores *** and ___ separators', () => {
   assert.equal(items[0].deliverable, 'item_a');
   assert.equal(items[1].deliverable, 'item_b');
 });
+
+test('extractContractItems strips markdown code fences before parsing', () => {
+  const text = [
+    '## CONTRACT',
+    '',
+    '```',
+    'CONTRACT:',
+    '- transport_audit status: DONE',
+    '- lifecycle_hook_map status: DONE',
+    '- openclaw_assumptions_documented status: DONE',
+    '- failure_mode_inventory status: DONE',
+    '```',
+    '',
+    '---',
+    '',
+    '## APPENDIX: Round 2 Blocker Resolution',
+  ].join('\n');
+  const items = extractContractItems(text);
+  assert.equal(items.length, 4);
+  assert.equal(items[0].deliverable, 'transport_audit');
+  assert.equal(items[0].status, 'DONE');
+  assert.equal(items[3].deliverable, 'failure_mode_inventory');
+  assert.equal(items[3].status, 'DONE');
+});
