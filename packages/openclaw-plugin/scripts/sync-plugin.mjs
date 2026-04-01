@@ -147,6 +147,22 @@ function checkPrerequisites() {
     try {
         const npmVersion = execSync('npm --version', { encoding: 'utf-8' }).trim();
         console.log(`✅ npm ${npmVersion}`);
+
+        // Check for global package conflicts that cause module resolution traps
+        console.log('🔍 Checking for global package conflicts...');
+        try {
+            const globalConflict = execSync('npm list -g principles-disciple --depth=0 2>/dev/null', { encoding: 'utf-8' });
+            if (globalConflict.includes('principles-disciple')) {
+                console.error('\n❌ CONFLICT DETECTED: A version of "principles-disciple" is installed globally via npm.');
+                console.error('This will block OpenClaw from loading the extension version you are trying to install.');
+                console.error('\nACTION REQUIRED: Please run the following command first:');
+                console.error('   npm uninstall -g principles-disciple\n');
+                process.exit(1);
+            }
+        } catch (e) {
+            // npm list returns non-zero if not found, which is what we want
+            console.log('✅ No global package conflicts detected.');
+        }
     } catch {
         console.error('❌ npm not found. Please install Node.js with npm.');
         process.exit(1);

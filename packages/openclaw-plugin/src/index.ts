@@ -83,7 +83,7 @@ const plugin = {
   description: "Evolutionary programming agent framework with strategic guardrails and reflection loops.",
 
   register(api: OpenClawPluginApi) {
-    api.logger.info("Principles Disciple Plugin registered.");
+    api.logger.info(`Principles Disciple Plugin registered. (Path: ${api.rootDir})`);
     PathResolver.setExtensionRoot(api.rootDir);
     api.registerHttpRoute(createPrinciplesConsoleRoute(api));
 
