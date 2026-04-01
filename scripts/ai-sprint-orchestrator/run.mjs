@@ -606,37 +606,65 @@ function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecard
 }
 
 /**
- * Run merge gate: fetch origin and compare local vs remote HEAD SHA.
- * Returns { localHeadSha, remoteHeadSha, shaMatch }.
+ * Run merge gate: fetch origin and compare local vs remote feature-branch HEAD SHA.
+ * Compares against the sprint's feature branch (state.worktree.branchName),
+ * NOT origin/HEAD (which is the remote default branch, not our branch).
+ *
+ * Returns { localHeadSha, remoteHeadSha, shaMatch, branchName }.
  * Writes result to stages/<stage>/merge-gate.json.
  */
 function runMergeGateCheck({ runDir, state, spec, mergeGatePath }) {
   const workspace = state.worktree?.worktreePath ?? spec.workspace;
   const remote = 'origin';
 
+  // Determine the feature branch to compare against
+  const branchName = state.worktree?.branchName ?? spec.branch ?? 'main';
+  const remoteRef = `refs/remotes/${remote}/${branchName}`;
+
   try {
-    // Fetch latest remote HEAD
-    spawnSync('git', ['fetch', remote], { cwd: workspace, encoding: 'utf8', timeout: 60_000 });
+    // Fetch the specific remote branch (not all of origin, just what we need)
+    // Use refspec to fetch only the branch we care about
+    const fetchResult = spawnSync('git', ['fetch', remote, `refs/heads/${branchName}:refs/remotes/${remote}/${branchName}`], {
+      cwd: workspace,
+      encoding: 'utf8',
+      timeout: 60_000,
+    });
+
+    // If fetch fails (branch doesn't exist on remote), record that clearly
+    if (fetchResult.status !== 0) {
+      const fetchErr = fetchResult.stderr?.trim() || fetchResult.stdout?.trim() || 'unknown';
+      appendTimeline(runDir, `Merge gate: branch ${branchName} does not exist on remote: ${fetchErr}`);
+      const result = { localHeadSha: null, remoteHeadSha: null, shaMatch: false, branchName, error: `Branch '${branchName}' not found on remote. Has it been pushed?`, fetchFailed: true };
+      writeJson(mergeGatePath, result);
+      return result;
+    }
 
     const localSha = (spawnSync('git', ['rev-parse', 'HEAD'], {
       cwd: workspace, encoding: 'utf8', timeout: 10_000,
     }).stdout ?? '').trim();
 
-    const remoteSha = (spawnSync('git', ['rev-parse', `${remote}/HEAD`], {
+    const remoteSha = (spawnSync('git', ['rev-parse', remoteRef], {
       cwd: workspace, encoding: 'utf8', timeout: 10_000,
     }).stdout ?? '').trim();
 
+    if (!remoteSha) {
+      appendTimeline(runDir, `Merge gate: remote ref ${remoteRef} not found after fetch`);
+      const result = { localHeadSha: localSha, remoteHeadSha: null, shaMatch: false, branchName, error: `Remote ref '${remoteRef}' not found after fetch`, fetchFailed: true };
+      writeJson(mergeGatePath, result);
+      return result;
+    }
+
     const shaMatch = localSha === remoteSha;
 
-    const result = { localHeadSha: localSha, remoteHeadSha: remoteSha, shaMatch };
+    const result = { localHeadSha: localSha, remoteHeadSha: remoteSha, shaMatch, branchName };
 
     writeJson(mergeGatePath, result);
-    appendTimeline(runDir, `Merge gate: local=${localSha.slice(0, 7)} remote=${remoteSha.slice(0, 7)} match=${shaMatch}`);
+    appendTimeline(runDir, `Merge gate: branch=${branchName} local=${localSha.slice(0, 7)} remote=${remoteSha.slice(0, 7)} match=${shaMatch}`);
 
     return result;
   } catch (gateErr) {
     appendTimeline(runDir, `Merge gate check failed: ${gateErr.message}`);
-    return { localHeadSha: null, remoteHeadSha: null, shaMatch: false, error: gateErr.message };
+    return { localHeadSha: null, remoteHeadSha: null, shaMatch: false, branchName, error: gateErr.message };
   }
 }
 
@@ -650,17 +678,18 @@ function advanceState(state, spec, decision, { runDir } = {}) {
         const mergeGate = runMergeGateCheck({ runDir, state, spec, mergeGatePath });
         if (!mergeGate.shaMatch) {
           state.status = 'halted';
-          const isFetchError = Boolean(mergeGate.error);
+          const fetchFailed = Boolean(mergeGate.fetchFailed);
           state.haltReason = {
-            type: isFetchError ? 'merge_gate_fetch_failed' : 'merge_gate_failed',
+            type: fetchFailed ? 'merge_gate_branch_not_on_remote' : 'merge_gate_sha_mismatch',
             stage: state.currentStage,
             round: state.currentRound,
-            details: isFetchError
-              ? `Merge gate check failed: git fetch error — ${mergeGate.error}. Verify network access and remote 'origin' exists.`
-              : `Merge gate failed: local SHA ${mergeGate.localHeadSha?.slice(0, 7) ?? '?'} != remote HEAD ${mergeGate.remoteHeadSha?.slice(0, 7) ?? '?'}. Push or merge before completing.`,
-            blockers: [isFetchError
-              ? `Git fetch failed: ${mergeGate.error}`
-              : 'Local SHA does not match remote PR head. Fetch and merge or rebase before completing.'],
+            branch: mergeGate.branchName,
+            details: fetchFailed
+              ? `Merge gate failed: branch '${mergeGate.branchName}' does not exist on remote. Push the branch first. Error: ${mergeGate.error}`
+              : `Merge gate failed: local SHA ${mergeGate.localHeadSha?.slice(0, 7) ?? '?'} != remote/${mergeGate.branchName} SHA ${mergeGate.remoteHeadSha?.slice(0, 7) ?? '?'}. Push or rebase before completing.`,
+            blockers: [fetchFailed
+              ? `Remote branch '${mergeGate.branchName}' not found. Run: git push -u origin ${mergeGate.branchName}`
+              : 'Local SHA does not match remote branch head. Push or rebase before completing.'],
             mergeGate,
           };
           return;
@@ -828,12 +857,16 @@ const MUTATING_STAGES = ['implement-pass-1', 'implement-pass-2'];
 /**
  * Ensure a git worktree exists for the given mutating stage.
  * Reuses existing worktree if already present. Returns null if not applicable.
+ *
+ * Uses a legal git worktree add: git worktree add -b <newBranch> <worktreePath> <baseRef>
+ * where baseRef is a real git ref (branch/tag/SHA), not a filesystem path.
  */
 function ensureWorktree({ spec, runDir, state, stageName }) {
   if (!MUTATING_STAGES.includes(stageName)) return null;
 
   const baseWorkspace = spec.workspace;
   const baseBranch = spec.branch ?? 'main';
+  const baseRef = baseBranch; // Must be a git ref, not a path
 
   // Reuse existing worktree if already created for this stage
   if (state.worktree?.worktreePath && fileExists(state.worktree.worktreePath)) {
@@ -847,24 +880,19 @@ function ensureWorktree({ spec, runDir, state, stageName }) {
   try {
     ensureDir(path.dirname(worktreePath));
 
-    // Try to create a new worktree with a new branch
-    let result = spawnSync('git', ['worktree', 'add', '-b', branchName, worktreePath, baseWorkspace], {
+    // Create a new worktree with a new branch based on baseRef (a real git ref)
+    // Syntax: git worktree add -b <newBranch> <path> <startPoint>
+    // where <startPoint> is baseRef (e.g., 'main' or 'origin/main')
+    const result = spawnSync('git', ['worktree', 'add', '-b', branchName, worktreePath, baseRef], {
       cwd: baseWorkspace,
       encoding: 'utf8',
       timeout: 30_000,
     });
 
     if (result.status !== 0) {
-      // Branch may already exist locally — try adding with existing branch
-      result = spawnSync('git', ['worktree', 'add', worktreePath, branchName], {
-        cwd: baseWorkspace,
-        encoding: 'utf8',
-        timeout: 30_000,
-      });
-      if (result.status !== 0) {
-        appendTimeline(runDir, `Worktree creation failed: ${result.stderr} — falling back to base workspace`);
-        return null;
-      }
+      const errMsg = result.stderr?.trim() || result.stdout?.trim() || 'unknown error';
+      appendTimeline(runDir, `Worktree creation failed: ${errMsg} — falling back to base workspace`);
+      return null;
     }
 
     const headSha = (spawnSync('git', ['rev-parse', 'HEAD'], {
@@ -878,11 +906,12 @@ function ensureWorktree({ spec, runDir, state, stageName }) {
       branchName,
       headSha,
       baseBranch,
+      baseWorkspace, // Store for cleanup cwd
       dirtyFiles: [],
     };
 
     state.worktree = worktreeInfo;
-    appendTimeline(runDir, `Created worktree at ${worktreePath} (branch: ${branchName}, sha: ${headSha})`);
+    appendTimeline(runDir, `Created worktree at ${worktreePath} (branch: ${branchName}, baseRef: ${baseRef}, sha: ${headSha})`);
     return worktreeInfo;
   } catch (wtErr) {
     appendTimeline(runDir, `Worktree creation failed: ${wtErr.message} — falling back to base workspace`);
@@ -919,7 +948,7 @@ function captureGitStatus({ worktreePath, runDir, stageDir, state }) {
       worktreePath,
       dirtyFiles,
       baseBranch: state.worktree?.baseBranch ?? null,
-      remoteBranch: null,
+      remoteBranch: state.worktree?.branchName ? `origin/${state.worktree.branchName}` : null,
     };
 
     const gitStatusPath = path.join(stageDir, 'git-status.json');
@@ -934,20 +963,23 @@ function captureGitStatus({ worktreePath, runDir, stageDir, state }) {
 
 /**
  * Remove the worktree from the filesystem (on halt).
+ * Uses the stored baseWorkspace as cwd (the git repo root), not the worktree's parent dir.
  */
 function cleanupWorktree({ state, runDir }) {
   if (!state.worktree?.worktreePath) return;
-  const { worktreePath } = state.worktree;
+  const { worktreePath, baseWorkspace } = state.worktree;
+  // Use the git repo root (baseWorkspace) as cwd, not the worktree's parent dir
+  const gitCwd = baseWorkspace ?? runDir;
   try {
     spawnSync('git', ['worktree', 'remove', '--force', worktreePath], {
-      cwd: path.dirname(worktreePath),
+      cwd: gitCwd,
       encoding: 'utf8',
       timeout: 30_000,
     });
     appendTimeline(runDir, `Cleaned up worktree at ${worktreePath}`);
     state.worktree = null;
-  } catch {
-    appendTimeline(runDir, `Worktree cleanup failed for ${worktreePath} — manual cleanup required`);
+  } catch (cleanupErr) {
+    appendTimeline(runDir, `Worktree cleanup failed for ${worktreePath}: ${cleanupErr.message} — manual cleanup may be required`);
   }
 }
 
