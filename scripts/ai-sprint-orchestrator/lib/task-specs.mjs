@@ -99,41 +99,73 @@ export function buildStageBrief(spec, stage, round, previousDecision, handoff = 
       ]
       : []),
     `## Exit Criteria`,
-    `- Both reviewers return VERDICT: APPROVE`,
-    `- No unresolved blocker remains in reviewer outputs`,
-    ...(scoringDimensions.length > 0
-      ? [`- All scoring dimensions meet threshold (${dimensionThreshold}/5)`]
-      : []),
-    ...(requiredDeliverables.length > 0
-      ? ['- All contract deliverables reach status: DONE']
-      : []),
-    ...(stageCriteria?.requiredProducerSections?.length
-      ? [`- Producer report must contain sections: ${stageCriteria.requiredProducerSections.join(', ')}`]
-      : []),
-    ...(stageCriteria?.requiredReviewerSections?.length
-      ? [`- Reviewer reports must contain sections: ${stageCriteria.requiredReviewerSections.join(', ')}`]
-      : []),
+    ...(stageCriteria?.globalReviewerRequired === true
+      ? [
+          `- reviewer_a returns VERDICT: APPROVE`,
+          `- reviewer_b returns VERDICT: APPROVE`,
+          `- global_reviewer returns VERDICT: APPROVE`,
+          `- No unresolved blocker remains in any reviewer output`,
+          ...(scoringDimensions.length > 0
+            ? [`- All scoring dimensions meet threshold (${dimensionThreshold}/5)`]
+            : []),
+          ...(requiredDeliverables.length > 0
+            ? ['- All contract deliverables reach status: DONE']
+            : []),
+          ...(stageCriteria?.requiredProducerSections?.length
+            ? [`- Producer report must contain sections: ${stageCriteria.requiredProducerSections.join(', ')}`]
+            : []),
+          ...(stageCriteria?.requiredReviewerSections?.length
+            ? [`- Reviewer reports must contain sections: ${stageCriteria.requiredReviewerSections.join(', ')}`]
+            : []),
+          ...(stageCriteria?.requiredGlobalReviewerSections?.length
+            ? [`- Global reviewer report must contain sections: ${stageCriteria.requiredGlobalReviewerSections.join(', ')}`]
+            : []),
+          ...(stageCriteria?.globalReviewerMustAnswer?.length
+            ? [`- Global reviewer must answer macro questions: ${stageCriteria.globalReviewerMustAnswer.join(', ')}`]
+            : []),
+        ]
+      : [
+          `- Both reviewers return VERDICT: APPROVE`,
+          `- No unresolved blocker remains in reviewer outputs`,
+          ...(scoringDimensions.length > 0
+            ? [`- All scoring dimensions meet threshold (${dimensionThreshold}/5)`]
+            : []),
+          ...(requiredDeliverables.length > 0
+            ? ['- All contract deliverables reach status: DONE']
+            : []),
+          ...(stageCriteria?.requiredProducerSections?.length
+            ? [`- Producer report must contain sections: ${stageCriteria.requiredProducerSections.join(', ')}`]
+            : []),
+          ...(stageCriteria?.requiredReviewerSections?.length
+            ? [`- Reviewer reports must contain sections: ${stageCriteria.requiredReviewerSections.join(', ')}`]
+            : []),
+        ]),
     '',
   ].join('\n');
 }
 
-export function buildRolePrompt({ spec, stage, round, role, runDir, stageDir, briefPath, producerPath, reviewerAPath, reviewerBPath }) {
+export function buildRolePrompt({ spec, stage, round, role, runDir, stageDir, briefPath, producerPath, reviewerAPath, reviewerBPath, globalReviewerPath }) {
   const outputPathMap = {
     producer: producerPath,
     reviewer_a: reviewerAPath,
     reviewer_b: reviewerBPath,
+    global_reviewer: globalReviewerPath,
   };
-  const outputPath = outputPathMap[role];
+  const outputPath = outputPathMap[role] ?? producerPath;
   const worklogPath = role === 'producer'
     ? `${stageDir}/producer-worklog.md`
     : role === 'reviewer_a'
       ? `${stageDir}/reviewer-a-worklog.md`
-      : `${stageDir}/reviewer-b-worklog.md`;
+      : role === 'reviewer_b'
+        ? `${stageDir}/reviewer-b-worklog.md`
+        : `${stageDir}/global-reviewer-worklog.md`;
   const roleStatePath = role === 'producer'
     ? `${stageDir}/producer-state.json`
     : role === 'reviewer_a'
       ? `${stageDir}/reviewer-a-state.json`
-      : `${stageDir}/reviewer-b-state.json`;
+      : role === 'reviewer_b'
+        ? `${stageDir}/reviewer-b-state.json`
+        : `${stageDir}/global-reviewer-state.json`;
   const home = os.homedir();
   const sharedSkills = [
     path.join(home, '.codex', 'skills', 'acpx', 'SKILL.md'),
@@ -172,18 +204,27 @@ export function buildRolePrompt({ spec, stage, round, role, runDir, stageDir, br
           `All deliverables must reach status: DONE for the stage to advance.`,
         ]
       : [];
+    const codeEvidenceInstruction = [
+      `Your report must include a CODE_EVIDENCE section. Format:`,
+      `- files_checked: <comma-separated list of files you examined>`,
+      `- evidence_source: local|remote|both`,
+      `- sha: <HEAD SHA at time of evidence collection>`,
+      `- branch/worktree: <branch name or worktree path if applicable>`,
+      `When OpenClaw runtime semantics are involved, add: evidence_scope: principles|openclaw|both`,
+    ].join('\n');
 
     return [
       ...base,
       `You may inspect and modify repository code when the stage requires implementation.`,
       `You are expected to work autonomously within this stage until you either satisfy the stage goals or hit a concrete blocker.`,
       `Persist your intermediate findings frequently so a future agent can resume without relying on chat context.`,
-      `At the end, write a markdown report to ${outputPath} with exactly these sections: SUMMARY, CHANGES, EVIDENCE, KEY_EVENTS, HYPOTHESIS_MATRIX, CHECKS, OPEN_RISKS${requiredDeliverables.length > 0 ? ', CONTRACT' : ''}.`,
+      `At the end, write a markdown report to ${outputPath} with exactly these sections: SUMMARY, CHANGES, EVIDENCE, CODE_EVIDENCE, KEY_EVENTS, HYPOTHESIS_MATRIX, CHECKS, OPEN_RISKS${requiredDeliverables.length > 0 ? ', CONTRACT' : ''}.`,
       `KEY_EVENTS should be bullets describing concrete completed milestones or validated events.`,
       stage === 'investigate'
         ? `HYPOTHESIS_MATRIX must include one bullet per required hypothesis in this exact shape: - <hypothesis_id>: SUPPORTED|REFUTED|UNPROVEN — <brief evidence>.`
         : `HYPOTHESIS_MATRIX should capture any remaining competing explanations or risk assumptions.`,
       `CHECKS should be a single-line machine-readable summary such as: CHECKS: evidence=ok;tests=not-run;scope=pd-only;prompt-isolation=confirmed`,
+      codeEvidenceInstruction,
       ...contractInstruction,
       `Do not dump long reasoning logs to stdout. Stdout should only contain a short completion line such as: ROLE_STATUS: completed; report=${outputPath}`,
       `Stay within Principles. Do not modify OpenClaw.`,
@@ -191,6 +232,56 @@ export function buildRolePrompt({ spec, stage, round, role, runDir, stageDir, br
   }
 
   const counterpart = role === 'reviewer_a' ? producerPath : producerPath;
+
+  // Global reviewer case — macro goal alignment, business/data flow, architecture
+  if (role === 'global_reviewer') {
+    const stageCriteria = spec.stageCriteria?.[stage] ?? {};
+    const requiredMacroAnswers = stageCriteria?.globalReviewerMustAnswer ?? [];
+    const macroQuestions = [
+      'Q1: OpenClaw compatibility — runtime hook assumptions verified via cross-repo source reading?',
+      'Q2: Business flow closure — subagent results routed and persisted without loss windows?',
+      'Q3: Architecture convergence — unified protocol or new implicit divergence introduced?',
+      'Q4: Data flow closure — sessionKey/runId/parentSessionId chain correctly attributed in helper layer?',
+      'Q5: Distance to goal — is this sprint actually closer to unified PD subagent workflow?',
+    ];
+    const macroAnswersInstruction = requiredMacroAnswers.length > 0
+      ? [
+          `You must answer the required macro questions in a MACRO_ANSWERS section.`,
+          `Format: MACRO_ANSWERS:\n${requiredMacroAnswers.map((q) => `${q}: <your answer> — <evidence or cross-repo reference>`).join('\n')}`,
+          `Required macro questions for this stage: ${requiredMacroAnswers.map((q) => q).join(', ')}`,
+        ].join('\n')
+      : [
+          `Include a MACRO_ANSWERS section answering the five standard macro questions:`,
+          `MACRO_ANSWERS:`,
+          `Q1: <OpenClaw compatibility answer> — <evidence or cross-repo reference>`,
+          `Q2: <Business flow closure answer> — <evidence>`,
+          `Q3: <Architecture convergence answer> — <architectural rationale or trade-off>`,
+          `Q4: <Data flow closure answer> — <dedupe/finalize risk assessment>`,
+          `Q5: <Distance to goal answer> — <remaining gap and next priority>`,
+        ].join('\n');
+
+    return [
+      ...base,
+      `You are the global reviewer — focused on macro goal alignment, business flow, data flow, architecture, and OpenClaw compatibility.`,
+      `You do NOT review local code correctness (that's reviewer_a's job) or runtime/compatibility (that's reviewer_b's job).`,
+      `You focus on: Does this change actually serve the end goal? Is the business flow closed? Is the architecture converging?`,
+      `Read the stage brief: ${briefPath}`,
+      `Read the producer report: ${producerPath}`,
+      `Read reviewer A's report: ${reviewerAPath}`,
+      `Read reviewer B's report: ${reviewerBPath}`,
+      macroAnswersInstruction,
+      `Your report must include a CODE_EVIDENCE section when your assessment relies on source reading. Format:`,
+      `- files_verified: <comma-separated list of files you examined>`,
+      `- evidence_source: local|remote|both`,
+      `- sha: <the SHA you verified against>`,
+      `When OpenClaw hook semantics are involved: evidence_scope: principles|openclaw|both`,
+      `At the end, write a markdown report to ${outputPath} with exactly these sections: VERDICT, MACRO_ANSWERS, BLOCKERS, FINDINGS, CODE_EVIDENCE, NEXT_FOCUS, CHECKS.`,
+      `VERDICT must be exactly one of: APPROVE, REVISE, BLOCK.`,
+      `BLOCK means: the macro goal is not served, or critical architecture/business flow risks exist even if local correctness is fine.`,
+      `CHECKS should be a single-line machine-readable summary such as: CHECKS: macro=aligned;business_flow=closed;architecture=converging`,
+      `Do not dump long reasoning logs to stdout. Stdout should only contain a short completion line such as: ROLE_STATUS: completed; report=${outputPath}`,
+    ].join('\n');
+  }
 
   const stageCriteria = spec.stageCriteria?.[stage];
   const scoringDimensions = stageCriteria?.scoringDimensions ?? [];
@@ -211,13 +302,21 @@ export function buildRolePrompt({ spec, stage, round, role, runDir, stageDir, br
         `Flag any unnecessary architectural expansion or gold-plating.`,
       ];
 
+  const codeEvidenceReviewerInstruction = [
+    `Your report must include a CODE_EVIDENCE section. Format:`,
+    `- files_verified: <comma-separated list of files you read or checked for evidence>`,
+    `- evidence_source: local|remote|both`,
+    `- sha: <the SHA you verified against>`,
+    `When OpenClaw runtime semantics are involved, add: evidence_scope: principles|openclaw|both`,
+  ].join('\n');
+
   return [
     ...base,
     `Read the producer report: ${counterpart}`,
     ...reviewerFocus,
     `Review independently. Do not modify repository files unless explicitly needed for evidence collection.`,
     `You are expected to challenge weak assumptions and record checkpoints while reviewing, not just emit a final verdict.`,
-    `At the end, write a markdown report to ${outputPath} with exactly these sections: VERDICT, BLOCKERS, FINDINGS, HYPOTHESIS_MATRIX, NEXT_FOCUS, CHECKS.`,
+    `At the end, write a markdown report to ${outputPath} with exactly these sections: VERDICT, BLOCKERS, FINDINGS, CODE_EVIDENCE, HYPOTHESIS_MATRIX, NEXT_FOCUS, CHECKS.`,
     stage === 'investigate'
       ? `HYPOTHESIS_MATRIX must classify each required hypothesis with one bullet in this exact shape: - <hypothesis_id>: SUPPORTED|REFUTED|UNPROVEN — <brief evidence>.`
       : `HYPOTHESIS_MATRIX should capture any remaining competing explanations or risk assumptions.`,
@@ -228,6 +327,7 @@ export function buildRolePrompt({ spec, stage, round, role, runDir, stageDir, br
     requiredDeliverables.length > 0
       ? `Check the producer's CONTRACT section. Verify each deliverable's status is honestly assessed. Flag any deliverable marked DONE that lacks convincing evidence.`
       : '',
+    codeEvidenceReviewerInstruction,
     `VERDICT must be exactly one of: APPROVE, REVISE, BLOCK.`,
     `Do not dump long reasoning logs to stdout. Stdout should only contain a short completion line such as: ROLE_STATUS: completed; report=${outputPath}`,
   ].filter(Boolean).join('\n');
