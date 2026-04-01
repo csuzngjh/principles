@@ -247,12 +247,18 @@ AI 会话不应成为唯一真相源。
 
 ## 7. 阶段模型
 
-第一版采用固定阶段流水线：
+第一版采用固定阶段流水线（6阶段，适合重构任务）：
 
 1. `investigate`
-2. `fix-plan`
-3. `implement`
-4. `verify`
+2. `architecture-cut`
+3. `patch-plan`
+4. `implement-pass-1`
+5. `implement-pass-2`
+6. `verify`
+
+> **为什么增加 `architecture-cut`？**
+> 重构类任务在"调查完根因"和"写修复方案"之间，还存在"要不要动架构"的选择。`architecture-cut` 让 reviewer 有机会在上游评估架构影响，避免在 `patch-plan` 里才发现范围失控。
+> `implement` 拆成 `implement-pass-1` 和 `implement-pass-2` 是为了让 review findings 有结构化的一次修复周期，避免反复REVISE的死循环。
 
 ### 7.1 `investigate`
 
@@ -264,11 +270,24 @@ AI 会话不应成为唯一真相源。
 
 退出条件：
 
-- 至少 1 个 producer 结论
-- 至少 2 个 reviewer 审查
+- 至少 1 个 producer 结论（HYPOTHESIS_MATRIX 完整）
+- 至少 2 个 reviewer 审查（APPROVE 数量 ≥ 2）
 - 形成阶段决议，且列出最高置信根因和待证伪点
 
-### 7.2 `fix-plan`
+### 7.2 `architecture-cut`
+
+目标：
+
+- 评估"要不要从架构层修"还是"局部补丁即可"
+- 确定修复策略的边界
+
+退出条件：
+
+- 有明确的架构决策记录（动/不动架构的原因）
+- reviewer 认可该决策的可逆性和风险
+- **仅当任务为重构类时强制介入**；纯 bugfix 类可跳过
+
+### 7.3 `patch-plan`
 
 目标：
 
@@ -281,11 +300,11 @@ AI 会话不应成为唯一真相源。
 - reviewers 同意范围受控
 - 有验证清单
 
-### 7.3 `implement`
+### 7.4 `implement-pass-1`
 
 目标：
 
-- producer 实施改动
+- producer 实施第一轮修复
 - reviewers 发现实现缺口和测试缺口
 
 退出条件：
@@ -294,7 +313,19 @@ AI 会话不应成为唯一真相源。
 - 目标测试已运行
 - reviewers 没有剩余阻断问题
 
-### 7.4 `verify`
+### 7.5 `implement-pass-2`
+
+目标：
+
+- 针对 `implement-pass-1` 的 review findings 做修复
+- 范围不得超出 `patch-plan` 原始边界
+
+退出条件：
+
+- review findings 全部解决
+- reviewers APPROVE
+
+### 7.6 `verify`
 
 目标：
 
@@ -303,7 +334,8 @@ AI 会话不应成为唯一真相源。
 
 退出条件：
 
-- 有验证证据
+- 有验证证据（CODE_EVIDENCE + TEST_EVIDENCE）
+- merge gate 通过（local SHA == remote targetBranch SHA）
 - reviewers 认可验证充分性
 
 ## 8. 角色模型
@@ -320,31 +352,46 @@ AI 会话不应成为唯一真相源。
 - 不得跳过阶段目标
 - 必须输出结构化结果文件
 
-### 8.2 Reviewer A
+### 8.2 Reviewer A — 代码与局部正确性
 
 职责：
 
-- 从正确性和风险角度反驳 producer
+- 从正确性和局部逻辑角度反驳 producer
 
 重点：
 
-- 根因是否站得住
-- 实现是否遗漏边界
-- 验证是否存在假阳性
+- patch 是否真修了问题
+- 测试是否覆盖回归
+- 局部逻辑、异常处理、幂等性、边界条件
 
-### 8.3 Reviewer B
+### 8.3 Reviewer B — 运行时与兼容性
 
 职责：
 
-- 从范围控制和质量角度审查 producer
+- 从 OpenClaw 运行时语义、跨仓库依赖、环境兼容性角度审查 producer
 
 重点：
 
-- 是否过度改动
-- 是否缺少测试
-- 是否存在更小修复路径
+- OpenClaw 运行时语义是否成立
+- git/worktree/merge gate 等外部系统语义是否正确
+- 子代理生命周期 hook 是否被正确处理
+- 是否存在跨仓库依赖未声明
 
-### 8.4 Orchestrator
+### 8.4 Global Reviewer — 全局目标、业务流、数据流、架构闭环
+
+职责：
+
+- 评估当前改动是否服务最终目标，不只看局部 patch
+
+重点（仅在 `architecture-cut` 和 `verify` 阶段强制介入）：
+
+- 业务流是否闭环
+- 数据流是否闭环（子代理输出是否正确持久化）
+- 架构是否更收敛，而非引入新的隐式协议
+- 是否真的更接近"统一 PD 子代理工作流"目标
+- OpenClaw 兼容性假设是否经过跨仓库核验
+
+### 8.5 Orchestrator
 
 职责：
 
@@ -420,23 +467,76 @@ ops/ai-sprints/
 
 ## 10. 执行模型
 
-每个阶段采用固定循环：
+每个阶段采用固定循环，分两段执行：
+
+### 10.1 Phase 1：Producer（串行）
 
 1. 编排器生成阶段 `brief.md`
 2. 为每个角色创建 `worklog` 和 `state` 占位文件
 3. 调用 producer 执行
 4. producer 在工作过程中持续写入 `producer-worklog.md` 和 `producer-state.json`
 5. producer 最终产出 `producer.md`
-6. 调用 reviewer_a
-7. reviewer_a 在工作过程中持续写入 `reviewer-a-worklog.md` 和 `reviewer-a-state.json`
-8. reviewer_a 最终产出 `reviewer-a.md`
-9. 调用 reviewer_b
-10. reviewer_b 在工作过程中持续写入 `reviewer-b-worklog.md` 和 `reviewer-b-state.json`
-11. reviewer_b 最终产出 `reviewer-b.md`
-12. 编排器聚合并生成 `decision.md`
-13. 若达标，进入下一阶段
-14. 若未达标，提升轮次并继续当前阶段
-15. 若超出阈值，写入 `haltReason` 并暂停
+
+### 10.2 Phase 2：Reviewers（并行）
+
+6. **并行调用** `reviewer_a` 和 `reviewer_b`
+   - 两者同时运行，独立计时，独立超时
+   - 任一 reviewer 超时：记录 `timedOut: true`，不阻塞另一 reviewer
+   - 任一 reviewer 抛出非超时异常：记录 `error`，不取消另一方
+7. 两个 reviewer 都完成后，编排器聚合两份报告
+8. 编排器聚合并生成 `decision.md`
+9. 若达标，进入下一阶段（或 `implement-pass-1` → `implement-pass-2` 自动路由）
+10. 若未达标，提升轮次并继续当前阶段
+11. 若超出阈值，写入 `haltReason` 并暂停
+
+> **global_reviewer 介入时机**：仅在 `architecture-cut` 和 `verify` 阶段强制参与。在这两个阶段，spec 的 `stageCriteria` 会要求 global_reviewer 介入。
+
+## 10.3 Git / Worktree / Merge Gate 真相源关系
+
+在 mutating stages（`implement-pass-1`、`implement-pass-2`），sprint 使用隔离的 git worktree 来隔离修改，防止污染主分支。
+
+**真相源关系**：
+
+```
+spec.branch                          ← PR 对应的真实远端分支（如 'feat/my-feature'）
+  ↓
+state.worktree.branchName            ← sprint/<runId>/<stageName>（内部临时分支，永远不在远端）
+  ↓
+worktreeInfo.baseWorkspace           ← git repo 根目录（用于 git cwd）
+  ↓
+git-status.json (per stage)         ← 当前 worktree 的 git 状态快照
+  ↓
+merge-gate.json                      ← final stage 比较 local HEAD vs remote/<targetBranch>
+```
+
+**关键区分**：
+
+| 字段 | 含义 | 例子 |
+|------|------|------|
+| `spec.branch` | PR 目标分支（merge gate 比较对象） | `feat/ai-sprint-orchestrator-workflow-optimization` |
+| `state.worktree.branchName` | sprint 内部临时分支（never on remote） | `sprint/abc123/def/implement-pass-1` |
+| `worktreeInfo.baseWorkspace` | git repo 根目录 | `D:/Code/principles` |
+
+**merge gate 语义**：
+
+- 比较：`local HEAD SHA` vs `remote/<spec.branch> SHA`
+- **永远不比较** `origin/HEAD`（那是远端默认分支，不是当前 PR）
+- **永远不比较** `state.worktree.branchName`（那是内部分支，不在远端）
+- 如果 `spec.branch` 未设置，默认比较 `main`
+
+**worktree 创建语义**：
+
+```
+git worktree add -b <branchName> <worktreePath> <baseRef>
+```
+
+- `<branchName>` = `sprint/<runId>/<stageName>`（新创建的内部分支）
+- `<baseRef>` = `spec.branch ?? 'main'`（一个真实存在的 git ref，不是路径）
+- `<worktreePath>` = `runDir/worktrees/<stageName>`（本地文件系统路径）
+
+**cleanup on halt**：
+
+当 sprint 进入 `halted` 状态时，`cleanupWorktree` 使用 `baseWorkspace`（而非 worktree 父目录）作为 `git worktree remove --force` 的 cwd，确保清理命令在正确的 git repo 根执行。
 
 ## 11. 自动推进规则
 
@@ -474,6 +574,8 @@ ops/ai-sprints/
 - `agent_error`
 - `operator_pause`
 - `operator_abort`
+- `merge_gate_branch_not_on_remote` — `spec.branch` 指定的分支尚未推送到远端
+- `merge_gate_sha_mismatch` — local HEAD SHA 与 `remote/<spec.branch>` SHA 不一致，需 push 或 rebase
 
 ## 12. 可观测性
 

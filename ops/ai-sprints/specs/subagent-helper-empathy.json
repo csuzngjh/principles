@@ -1,0 +1,150 @@
+{
+  "id": "subagent-helper-empathy",
+  "title": "Subagent Helper: migrate empathy observer to workflow helper",
+  "workspace": "D:/Code/principles",
+  "branchWorkspace": "D:/Code/principles-subagent-helper-empathy",
+  "branch": "feat/subagent-helper-empathy",
+  "maxRoundsPerStage": 3,
+  "maxRuntimeMinutes": 360,
+  "stageTimeoutMinutes": 30,
+  "stages": ["investigate", "architecture-cut", "patch-plan", "implement-pass-1", "implement-pass-2", "verify"],
+  "producer": {
+    "agent": "opencode",
+    "model": "minimax-cn-coding-plan/MiniMax-M2.7",
+    "timeoutSeconds": 120
+  },
+  "reviewerA": {
+    "agent": "iflow",
+    "model": "glm-5",
+    "timeoutSeconds": 900,
+    "role": "code_and_local_correctness",
+    "focus": "empathy observer patch correctness, test coverage, CODE_EVIDENCE"
+  },
+  "reviewerB": {
+    "agent": "claude",
+    "model": "GLM-5.1",
+    "timeoutSeconds": 900,
+    "role": "runtime_and_compatibility",
+    "focus": "OpenClaw hook semantics, subagent lifecycle, cross-repo assumptions"
+  },
+  "escalationReviewer": {
+    "agent": "claude",
+    "model": "GLM-5.1",
+    "timeoutSeconds": 900,
+    "role": "global_reviewer",
+    "focus": "macro: business flow, data flow, architecture, OpenClaw compatibility"
+  },
+  "context": [
+    "Use PD-only changes; do not modify D:/Code/openclaw.",
+    "PR2 scope: empathy observer + deep-reflect ONLY. Diagnostician/Nocturnal NOT migrated in this PR.",
+    "Helper lives in packages/openclaw-plugin/src/service/subagent-workflow/.",
+    "Keep code quality high and avoid unnecessary architectural expansion.",
+    "All OpenClaw compatibility assumptions must be verified by reviewer_b via cross-repo source reading."
+  ],
+  "stageGoals": {
+    "investigate": [
+      "Audit empathy observer's current subagent transport: runtime_direct vs registry_backed.",
+      "Identify all lifecycle hooks (subagent_spawned, subagent_ended, etc.) currently used.",
+      "Document current timeout/error/fallback/cleanup paths and their failure modes.",
+      "Assess OpenClaw assumptions: does runtime.subagent.run() guarantee subagent_ended hook?"
+    ],
+    "architecture-cut": [
+      "Decide: migrate empathy to helper (runtime_direct transport) or keep existing?",
+      "Define the EmpathyObserverManager interface: startWorkflow(), finalizeOnce(), etc.",
+      "Document OpenClaw compatibility assumptions and cross-repo verification results.",
+      "global_reviewer must explicitly answer: Is migration architecturally sound? Are assumptions verified?"
+    ],
+    "patch-plan": [
+      "Design EmpathyObserverManager spec with workflowType, transport, timeout, ttl, parseResult, persistResult.",
+      "Plan shadow-run period: old and new transport coexist, dedupeKey prevents dual finalize.",
+      "Define cleanup strategy: completed_with_cleanup_error vs cleanup_pending states.",
+      "Define empathy-check.json output format for empathy persistence validation."
+    ],
+    "implement-pass-1": [
+      "Implement EmpathyObserverManager with RuntimeDirectDriver.",
+      "Implement startWorkflow(), notifyWaitResult(), finalizeOnce() with idempotency.",
+      "Add workflow store integration (subagent_workflows table).",
+      "Run shadow mode alongside existing empathy observer path."
+    ],
+    "implement-pass-2": [
+      "Address review findings from implement-pass-1.",
+      "Validate shadow-run comparison: new path produces same empathy output as old path.",
+      "Do not expand scope beyond EmpathyObserverManager and its RuntimeDirectDriver."
+    ],
+    "verify": [
+      "Verify empathy persistence via empathy-check.json evidence.",
+      "Confirm merge gate: local SHA == remote/feat/subagent-helper-empathy SHA.",
+      "global_reviewer must confirm: OpenClaw assumptions verified? Business flow closed? Architecture improved?",
+      "Confirm no regression in other subagent modules."
+    ]
+  },
+  "stageCriteria": {
+    "investigate": {
+      "requiredApprovals": 2,
+      "requiredProducerSections": ["SUMMARY", "EVIDENCE", "CODE_EVIDENCE", "KEY_EVENTS", "TRANSPORT_AUDIT", "OPENCLAW_ASSUMPTIONS", "CHECKS"],
+      "requiredReviewerSections": ["VERDICT", "BLOCKERS", "FINDINGS", "TRANSPORT_ASSESSMENT", "OPENCLAW_ASSUMPTION_REVIEW", "NEXT_FOCUS", "CHECKS"],
+      "scoringDimensions": ["evidence_quality", "assumption_coverage", "transport_audit_completeness"],
+      "dimensionThreshold": 3,
+      "requiredDeliverables": ["transport_audit", "lifecycle_hook_map", "openclaw_assumptions_documented", "failure_mode_inventory"]
+    },
+    "architecture-cut": {
+      "requiredApprovals": 3,
+      "requiredProducerSections": ["SUMMARY", "ARCHITECTURE_DECISION", "OPENCLAW_ASSUMPTIONS_VERIFIED", "INTERFACE_DESIGN", "TRADE_OFFS", "CHECKS"],
+      "requiredReviewerSections": ["VERDICT", "BLOCKERS", "FINDINGS", "OPENCLAW_COMPATIBILITY_REVIEW", "ARCHITECTURE_ASSESSMENT", "NEXT_FOCUS", "CHECKS"],
+      "scoringDimensions": ["decision_quality", "openclaw_verification_completeness", "interface_soundness", "extensibility"],
+      "dimensionThreshold": 3,
+      "requiredDeliverables": ["architecture_decision", "openclaw_cross_repo_verification", "helper_interface_draft", "shadow_run_plan"],
+      "globalReviewerRequired": true,
+      "globalReviewerMustAnswer": ["Q1", "Q2", "Q3", "Q4", "Q5"]
+    },
+    "patch-plan": {
+      "requiredApprovals": 2,
+      "requiredProducerSections": ["SUMMARY", "CHANGES", "CODE_EVIDENCE", "EVIDENCE", "INTERFACE_SPEC", "SHADOW_RUN_PLAN", "CHECKS"],
+      "requiredReviewerSections": ["VERDICT", "BLOCKERS", "FINDINGS", "CODE_EVIDENCE", "INTERFACE_ASSESSMENT", "NEXT_FOCUS", "CHECKS"],
+      "scoringDimensions": ["plan_completeness", "interface_soundness", "shadow_run_safety", "rollback_defined"],
+      "dimensionThreshold": 3,
+      "requiredDeliverables": ["empathy_observer_spec", "workflow_spec", "shadow_run_plan", "rollback_steps"]
+    },
+    "implement-pass-1": {
+      "requiredApprovals": 2,
+      "requiredProducerSections": ["SUMMARY", "CHANGES", "CODE_EVIDENCE", "EVIDENCE", "KEY_EVENTS", "SHADOW_RUN_COMPARISON", "CHECKS"],
+      "requiredReviewerSections": ["VERDICT", "BLOCKERS", "FINDINGS", "CODE_EVIDENCE", "INTERFACE_COMPLIANCE", "NEXT_FOCUS", "CHECKS"],
+      "scoringDimensions": ["correctness", "scope_control", "interface_adherence", "shadow_run_validity"],
+      "dimensionThreshold": 3,
+      "requiredDeliverables": ["empathy_observer_manager_impl", "runtime_direct_driver", "workflow_store_integration", "shadow_run_evidence"]
+    },
+    "implement-pass-2": {
+      "requiredApprovals": 2,
+      "requiredProducerSections": ["SUMMARY", "CHANGES", "CODE_EVIDENCE", "EVIDENCE", "KEY_EVENTS", "SHADOW_COMPARISON_UPDATED", "CHECKS"],
+      "requiredReviewerSections": ["VERDICT", "BLOCKERS", "FINDINGS", "CODE_EVIDENCE", "NEXT_FOCUS", "CHECKS"],
+      "scoringDimensions": ["correctness", "scope_control", "shadow_run_parity", "regression_risk"],
+      "dimensionThreshold": 3,
+      "requiredDeliverables": ["review_findings_addressed", "shadow_parity_confirmed", "no_scope_creep"]
+    },
+    "verify": {
+      "requiredApprovals": 3,
+      "requiredProducerSections": ["SUMMARY", "EVIDENCE", "CODE_EVIDENCE", "EMPATHY_CHECK", "SHADOW_RUN_FINAL_REPORT", "CHECKS"],
+      "requiredReviewerSections": ["VERDICT", "BLOCKERS", "FINDINGS", "CODE_EVIDENCE", "NEXT_FOCUS", "CHECKS"],
+      "scoringDimensions": ["verification_thoroughness", "gap_analysis", "production_readiness", "architecture_improvement"],
+      "dimensionThreshold": 3,
+      "requiredDeliverables": ["empathy_persistence_verified", "openclaw_assumptions_final_review", "deployment_checklist", "global_reviewer_final_assessment"],
+      "globalReviewerRequired": true,
+      "globalReviewerMustAnswer": ["Q1", "Q2", "Q3", "Q4", "Q5"]
+    }
+  },
+  "stageRoleTimeouts": {
+    "investigate": { "producer": 900, "reviewer_a": 720, "reviewer_b": 720 },
+    "architecture-cut": { "producer": 600, "reviewer_a": 480, "reviewer_b": 480 },
+    "patch-plan": { "producer": 720, "reviewer_a": 600, "reviewer_b": 600 },
+    "implement-pass-1": { "producer": 900, "reviewer_a": 720, "reviewer_b": 720 },
+    "implement-pass-2": { "producer": 600, "reviewer_a": 480, "reviewer_b": 480 },
+    "verify": { "producer": 720, "reviewer_a": 480, "reviewer_b": 480 }
+  },
+  "investigateHypotheses": [
+    "empathy_uses_runtime_direct_transport",
+    "empathy_has_unverified_openclaw_hook_assumptions",
+    "empathy_timeout_leads_to_false_completion",
+    "empathy_cleanup_not_idempotent",
+    "empathy_lacks_dedupe_key"
+  ]
+}
