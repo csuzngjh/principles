@@ -603,7 +603,9 @@ REQUIRED ACTION:
   const latestUserMessage = extractLatestUserMessage(event.messages);
   const isAgentToAgent = latestUserMessage.includes('sourceSession=agent:') || sessionId?.includes(':subagent:') === true;
 
-  if (trigger === 'user' && sessionId && api && !isAgentToAgent) {
+  const isUserInteraction = trigger === 'user' || trigger === 'api' || !trigger;
+
+  if (isUserInteraction && sessionId && api && !isAgentToAgent) {
     // Only inject empathy constraint when empathy observer will actually be spawned
     prependContext = '### BEHAVIORAL_CONSTRAINTS\n' + empathySilenceConstraint + '\n\n' + prependContext;
     empathyObserverManager.spawn(api, sessionId, latestUserMessage, workspaceDir).catch((err) => api.logger.warn(String(err)));

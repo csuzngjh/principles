@@ -23,6 +23,7 @@ import type { WorkerProfile } from './core/model-deployment-registry.js';
 import { classifyTask } from './core/local-worker-routing.js';
 import { completeShadowObservation, recordShadowRouting } from './core/shadow-observation-registry.js';
 import { getCommandDescription } from './i18n/commands.js';
+import { WorkspaceContext } from './core/workspace-context.js';
 import { handleBeforePromptBuild } from './hooks/prompt.js';
 import { handleBeforeToolCall } from './hooks/gate.js';
 import { handleAfterToolCall } from './hooks/pain.js';
@@ -83,7 +84,7 @@ const plugin = {
   description: "Evolutionary programming agent framework with strategic guardrails and reflection loops.",
 
   register(api: OpenClawPluginApi) {
-    api.logger.info("Principles Disciple Plugin registered.");
+    api.logger.info(`Principles Disciple Plugin registered. (Path: ${api.rootDir})`);
     PathResolver.setExtensionRoot(api.rootDir);
     api.registerHttpRoute(createPrinciplesConsoleRoute(api));
 
@@ -101,8 +102,22 @@ const plugin = {
             SystemLogger.log(workspaceDir, 'SYSTEM_BOOT', `Principles Disciple online. Language: ${language}`);
             workspaceInitialized = true;
           }
-          return await handleBeforePromptBuild(event, { ...ctx, api, workspaceDir });
+          const result = await handleBeforePromptBuild(event, { ...ctx, api, workspaceDir });
+          
+          // Record success
+          WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
+            hook: 'before_prompt_build',
+            sessionId: ctx.sessionId
+          });
+          
+          return result;
         } catch (err) {
+          const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
+          WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
+            hook: 'before_prompt_build',
+            sessionId: ctx.sessionId,
+            error: String(err)
+          });
           api.logger.error(`[PD] Error in before_prompt_build: ${String(err)}`);
         }
       }
@@ -112,12 +127,22 @@ const plugin = {
     api.on(
       'before_tool_call',
       (event: PluginHookBeforeToolCallEvent, ctx: PluginHookToolContext): PluginHookBeforeToolCallResult | void => {
+        const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
         try {
           const pluginConfig = api.pluginConfig ?? {};
-          const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
           const logger = api.logger;
-          return handleBeforeToolCall(event, { ...ctx, workspaceDir, pluginConfig, logger });
+          const result = handleBeforeToolCall(event, { ...ctx, workspaceDir, pluginConfig, logger });
+          
+          WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
+            hook: 'before_tool_call'
+          });
+          
+          return result;
         } catch (err) {
+          WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
+            hook: 'before_tool_call',
+            error: String(err)
+          });
           api.logger.error(`[PD] Error in before_tool_call: ${String(err)}`);
         }
       }
@@ -127,13 +152,21 @@ const plugin = {
     api.on(
       'after_tool_call',
       (event: PluginHookAfterToolCallEvent, ctx: PluginHookToolContext): void => {
+        const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
         try {
           const pluginConfig = api.pluginConfig ?? {};
-          const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
           // Pass api separately to handleAfterToolCall to maintain type safety
           handleAfterToolCall(event, { ...ctx, workspaceDir, pluginConfig }, api);
+          
+          WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
+            hook: 'after_tool_call'
+          });
         } catch (err) {
-          api.logger.error(`[PD] Error in after_tool_call: ${String(err)}`);
+          WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
+            hook: 'after_tool_call',
+            error: String(err)
+          });
+          api.logger.error(`[PD:EmpathyObserver] Error in after_tool_call: ${String(err)}`);
         }
       }
     );
@@ -142,10 +175,20 @@ const plugin = {
     api.on(
       'llm_output',
       (event: PluginHookLlmOutputEvent, ctx: PluginHookAgentContext): void => {
+        const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
         try {
-          const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
           handleLlmOutput(event, { ...ctx, workspaceDir });
+          
+          WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
+            hook: 'llm_output',
+            sessionId: ctx.sessionId
+          });
         } catch (err) {
+          WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
+            hook: 'llm_output',
+            sessionId: ctx.sessionId,
+            error: String(err)
+          });
           api.logger.error(`[PD] Error in llm_output: ${String(err)}`);
         }
       }

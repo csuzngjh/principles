@@ -3,6 +3,7 @@ node_modules/
 *.log
 .env
 coverage/
+coverage-report.json
 
 # 编译产物 - 源码在 src/ 目录
 *.js

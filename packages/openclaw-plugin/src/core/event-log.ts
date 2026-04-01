@@ -195,9 +195,23 @@ export class EventLog {
           else stats.empathy.confidenceDistribution.low++;
         }
 
-        // Update dedupe hit rate
         const total = stats.empathy.totalEvents + stats.empathy.dedupedCount;
         stats.empathy.dedupeHitRate = total > 0 ? stats.empathy.dedupedCount / total : 0;
+      }
+    } else if (entry.type === 'hook_execution') {
+      const data = entry.data as unknown as HookExecutionEventData;
+      stats.hooks.total++;
+      if (entry.category === 'success') stats.hooks.success++;
+      else stats.hooks.failure++;
+
+      // Track by type
+      if (data.hook) {
+        if (!stats.hooks.byType[data.hook]) {
+          stats.hooks.byType[data.hook] = { total: 0, success: 0, failure: 0 };
+        }
+        stats.hooks.byType[data.hook].total++;
+        if (entry.category === 'success') stats.hooks.byType[data.hook].success++;
+        else stats.hooks.byType[data.hook].failure++;
       }
     } else if (entry.type === 'empathy_rollback') {
       const data = entry.data as unknown as EmpathyRollbackEventData;
