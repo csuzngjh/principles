@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -83,11 +84,12 @@ export function buildRolePrompt({ spec, stage, round, role, runDir, stageDir, br
     : role === 'reviewer_a'
       ? `${stageDir}/reviewer-a-state.json`
       : `${stageDir}/reviewer-b-state.json`;
+  const home = os.homedir();
   const sharedSkills = [
-    'C:/Users/Administrator/.codex/skills/acpx/SKILL.md',
-    'C:/Users/Administrator/.codex/superpowers/skills/systematic-debugging/SKILL.md',
-    'C:/Users/Administrator/.codex/superpowers/skills/verification-before-completion/SKILL.md',
-    'C:/Users/Administrator/.agents/skills/self-improving-agent/SKILL.md',
+    path.join(home, '.codex', 'skills', 'acpx', 'SKILL.md'),
+    path.join(home, '.codex', 'superpowers', 'skills', 'systematic-debugging', 'SKILL.md'),
+    path.join(home, '.codex', 'superpowers', 'skills', 'verification-before-completion', 'SKILL.md'),
+    path.join(home, '.agents', 'skills', 'self-improving-agent', 'SKILL.md'),
   ];
   const base = [
     `You are acting as ${role} in an AI sprint orchestrator for the Principles repository.`,
