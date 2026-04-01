@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import { decideStage } from './lib/decision.mjs';
 import { ensureDir, appendText, fileExists, readJson, writeJson, writeText } from './lib/state-store.mjs';
 import { buildRolePrompt, buildStageBrief, getTaskSpec } from './lib/task-specs.mjs';
+import { archiveRunById } from './lib/archive.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -891,7 +892,9 @@ function main() {
       '  node run.mjs --list                                   List all sprint runs',
       '  node run.mjs --pause <run-id>                         Pause a running sprint',
       '  node run.mjs --abort <run-id>                         Abort a sprint',
+      '  node run.mjs --archive <run-id>                       Archive a completed/halted sprint',
       '',
+      'Sprints auto-archive on completion or halt.',
       'Task specs are loaded from ops/ai-sprints/specs/<task-id>.json',
       'Override with --task-spec <path> to use a custom spec file.',
     ].join('\n'));
@@ -900,6 +903,17 @@ function main() {
 
   if (args.list) {
     listRuns();
+    return;
+  }
+
+  if (args.archive) {
+    try {
+      const archiveDir = archiveRunById(args.archive);
+      console.log(`Archived: ${archiveDir}`);
+    } catch (err) {
+      console.error(`Archive failed: ${err.message}`);
+      process.exitCode = 1;
+    }
     return;
   }
 
@@ -1010,6 +1024,18 @@ function main() {
         `Round: ${state.currentRound}`,
         `Halt reason: ${String(error)}`,
       ]);
+    }
+  }
+
+  // Auto-archive if sprint reached a terminal state
+  if (state.status === 'completed' || state.status === 'halted') {
+    try {
+      const archiveDir = archiveRunById(args.resume || path.basename(runDir));
+      appendTimeline(runDir, `Auto-archived to ${path.relative(path.join(repoRoot, 'ops', 'ai-sprints'), archiveDir)}`);
+      console.log(`Archived: ${archiveDir}`);
+    } catch (archiveErr) {
+      // Archive failure must not block orchestrator exit
+      console.error(`Auto-archive failed: ${archiveErr.message}`);
     }
   }
 
