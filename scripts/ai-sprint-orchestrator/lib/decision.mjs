@@ -19,7 +19,7 @@ export function extractBullets(text, heading) {
     .map((line) => line.trim())
     .filter((line) => line.startsWith('-'))
     .map((line) => line.slice(1).trim())
-    .filter(Boolean);
+    .filter((line) => Boolean(line) && !/^none\.?\s*$/i.test(line));
 }
 
 export function hasSection(text, heading) {
@@ -83,17 +83,20 @@ export function decideStage({ stageCriteria, producer, reviewerA, reviewerB, cur
     structuralBlockers.push('One or more reviewers did not emit a strict VERDICT: APPROVE|REVISE|BLOCK line.');
   }
 
+  const allBlockers = [...structuralBlockers, ...blockers];
+
   if (
     verdictA === 'APPROVE' &&
     verdictB === 'APPROVE' &&
     explicitVerdictsOk &&
     metrics.approvalCount >= requiredApprovals &&
     producerSectionsSatisfied &&
-    reviewerSectionsSatisfied
+    reviewerSectionsSatisfied &&
+    allBlockers.length === 0
   ) {
     return {
       outcome: 'advance',
-      blockers: [...structuralBlockers, ...blockers],
+      blockers: allBlockers,
       metrics,
       summary: 'Both reviewers approved the stage output.',
     };

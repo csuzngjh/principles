@@ -92,3 +92,21 @@ test('decideStage does not advance with invalid reviewer verdict syntax', () => 
   assert.equal(result.outcome, 'revise');
   assert.equal(result.blockers[0], 'One or more reviewers did not emit a strict VERDICT: APPROVE|REVISE|BLOCK line.');
 });
+
+test('decideStage does not advance when reviewers list real blockers despite APPROVE', () => {
+  const result = decideStage({
+    stageCriteria: {
+      requiredApprovals: 2,
+      requiredProducerSections: ['SUMMARY'],
+      requiredReviewerSections: ['VERDICT', 'BLOCKERS'],
+    },
+    producer: 'SUMMARY:\nDone',
+    reviewerA: 'VERDICT: APPROVE\nBLOCKERS:\n- Missing test for edge case',
+    reviewerB: 'VERDICT: APPROVE\nBLOCKERS:\n- None.',
+    currentRound: 1,
+    maxRoundsPerStage: 3,
+  });
+
+  assert.equal(result.outcome, 'revise');
+  assert.equal(result.metrics.blockerCount, 1);
+});

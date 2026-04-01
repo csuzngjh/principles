@@ -474,6 +474,7 @@ function advanceState(state, spec, decision) {
 function maybeAbort(runDir, state) {
   const fresh = readJson(path.join(runDir, 'sprint.json'));
   if (fresh.status === 'aborted' || fresh.status === 'paused') {
+    Object.assign(state, fresh);
     throw new Error(`Sprint ${fresh.status} by operator.`);
   }
   Object.assign(state, fresh);
