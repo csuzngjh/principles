@@ -117,23 +117,28 @@ export function buildStageBrief(spec, stage, round, previousDecision, handoff = 
   ].join('\n');
 }
 
-export function buildRolePrompt({ spec, stage, round, role, runDir, stageDir, briefPath, producerPath, reviewerAPath, reviewerBPath }) {
+export function buildRolePrompt({ spec, stage, round, role, runDir, stageDir, briefPath, producerPath, reviewerAPath, reviewerBPath, globalReviewerPath }) {
   const outputPathMap = {
     producer: producerPath,
     reviewer_a: reviewerAPath,
     reviewer_b: reviewerBPath,
+    global_reviewer: globalReviewerPath,
   };
-  const outputPath = outputPathMap[role];
+  const outputPath = outputPathMap[role] ?? producerPath;
   const worklogPath = role === 'producer'
     ? `${stageDir}/producer-worklog.md`
     : role === 'reviewer_a'
       ? `${stageDir}/reviewer-a-worklog.md`
-      : `${stageDir}/reviewer-b-worklog.md`;
+      : role === 'reviewer_b'
+        ? `${stageDir}/reviewer-b-worklog.md`
+        : `${stageDir}/global-reviewer-worklog.md`;
   const roleStatePath = role === 'producer'
     ? `${stageDir}/producer-state.json`
     : role === 'reviewer_a'
       ? `${stageDir}/reviewer-a-state.json`
-      : `${stageDir}/reviewer-b-state.json`;
+      : role === 'reviewer_b'
+        ? `${stageDir}/reviewer-b-state.json`
+        : `${stageDir}/global-reviewer-state.json`;
   const home = os.homedir();
   const sharedSkills = [
     path.join(home, '.codex', 'skills', 'acpx', 'SKILL.md'),
@@ -200,6 +205,56 @@ export function buildRolePrompt({ spec, stage, round, role, runDir, stageDir, br
   }
 
   const counterpart = role === 'reviewer_a' ? producerPath : producerPath;
+
+  // Global reviewer case — macro goal alignment, business/data flow, architecture
+  if (role === 'global_reviewer') {
+    const stageCriteria = spec.stageCriteria?.[stage] ?? {};
+    const requiredMacroAnswers = stageCriteria?.globalReviewerMustAnswer ?? [];
+    const macroQuestions = [
+      'Q1: OpenClaw compatibility — runtime hook assumptions verified via cross-repo source reading?',
+      'Q2: Business flow closure — subagent results routed and persisted without loss windows?',
+      'Q3: Architecture convergence — unified protocol or new implicit divergence introduced?',
+      'Q4: Data flow closure — sessionKey/runId/parentSessionId chain correctly attributed in helper layer?',
+      'Q5: Distance to goal — is this sprint actually closer to unified PD subagent workflow?',
+    ];
+    const macroAnswersInstruction = requiredMacroAnswers.length > 0
+      ? [
+          `You must answer the required macro questions in a MACRO_ANSWERS section.`,
+          `Format: MACRO_ANSWERS:\n${requiredMacroAnswers.map((q) => `${q}: <your answer> — <evidence or cross-repo reference>`).join('\n')}`,
+          `Required macro questions for this stage: ${requiredMacroAnswers.map((q) => q).join(', ')}`,
+        ].join('\n')
+      : [
+          `Include a MACRO_ANSWERS section answering the five standard macro questions:`,
+          `MACRO_ANSWERS:`,
+          `Q1: <OpenClaw compatibility answer> — <evidence or cross-repo reference>`,
+          `Q2: <Business flow closure answer> — <evidence>`,
+          `Q3: <Architecture convergence answer> — <architectural rationale or trade-off>`,
+          `Q4: <Data flow closure answer> — <dedupe/finalize risk assessment>`,
+          `Q5: <Distance to goal answer> — <remaining gap and next priority>`,
+        ].join('\n');
+
+    return [
+      ...base,
+      `You are the global reviewer — focused on macro goal alignment, business flow, data flow, architecture, and OpenClaw compatibility.`,
+      `You do NOT review local code correctness (that's reviewer_a's job) or runtime/compatibility (that's reviewer_b's job).`,
+      `You focus on: Does this change actually serve the end goal? Is the business flow closed? Is the architecture converging?`,
+      `Read the stage brief: ${briefPath}`,
+      `Read the producer report: ${producerPath}`,
+      `Read reviewer A's report: ${reviewerAPath}`,
+      `Read reviewer B's report: ${reviewerBPath}`,
+      macroAnswersInstruction,
+      `Your report must include a CODE_EVIDENCE section when your assessment relies on source reading. Format:`,
+      `- files_verified: <comma-separated list of files you examined>`,
+      `- evidence_source: local|remote|both`,
+      `- sha: <the SHA you verified against>`,
+      `When OpenClaw hook semantics are involved: evidence_scope: principles|openclaw|both`,
+      `At the end, write a markdown report to ${outputPath} with exactly these sections: VERDICT, MACRO_ANSWERS, BLOCKERS, FINDINGS, CODE_EVIDENCE, NEXT_FOCUS, CHECKS.`,
+      `VERDICT must be exactly one of: APPROVE, REVISE, BLOCK.`,
+      `BLOCK means: the macro goal is not served, or critical architecture/business flow risks exist even if local correctness is fine.`,
+      `CHECKS should be a single-line machine-readable summary such as: CHECKS: macro=aligned;business_flow=closed;architecture=converging`,
+      `Do not dump long reasoning logs to stdout. Stdout should only contain a short completion line such as: ROLE_STATUS: completed; report=${outputPath}`,
+    ].join('\n');
+  }
 
   const stageCriteria = spec.stageCriteria?.[stage];
   const scoringDimensions = stageCriteria?.scoringDimensions ?? [];

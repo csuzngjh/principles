@@ -13,6 +13,7 @@ import {
   buildHandoff,
   extractCodeEvidence,
   hasCodeEvidence,
+  extractMacroAnswers,
 } from '../lib/decision.mjs';
 
 test('normalizeVerdict extracts explicit verdict', () => {
@@ -103,7 +104,7 @@ test('decideStage does not advance with invalid reviewer verdict syntax', () => 
   });
 
   assert.equal(result.outcome, 'revise');
-  assert.equal(result.blockers[0], 'One or more reviewers did not emit a strict VERDICT: APPROVE|REVISE|BLOCK line.');
+  assert.equal(result.blockers[0], 'Reviewer A did not emit a strict VERDICT: APPROVE|REVISE|BLOCK line.');
 });
 
 test('decideStage does not advance when reviewers list real blockers despite APPROVE', () => {
@@ -507,4 +508,256 @@ test('buildHandoff includes CODE_EVIDENCE from all roles', () => {
   assert.deepEqual(handoff.producerCodeEvidence.filesChecked, ['main.ts']);
   assert.deepEqual(handoff.reviewerACodeEvidence.filesChecked, ['a.ts']);
   assert.deepEqual(handoff.reviewerBCodeEvidence.filesChecked, ['b.ts']);
+});
+
+// --- Global reviewer tests ---
+
+test('extractMacroAnswers parses MACRO_ANSWERS section', () => {
+  const text = [
+    'VERDICT: APPROVE',
+    'MACRO_ANSWERS:',
+    'Q1: OpenClaw hook timing verified via source reading — hooks/subagent.ts line 42',
+    'Q2: Business flow closed — empathy results persisted to subagent_workflows table',
+    'Q3: Architecture converging — unified RuntimeDirectDriver used by both empathy and deep-reflect',
+    'Q4: Data flow closed — sessionKey = child session identity, runId = agent run identity',
+    'Q5: Sprint moves closer to unified PD subagent workflow — next step is Nocturnal migration',
+    'NEXT_FOCUS: Monitor shadow-run parity',
+  ].join('\n');
+  const result = extractMacroAnswers(text, ['Q1', 'Q2', 'Q3', 'Q4', 'Q5']);
+  assert.deepEqual(result.found, ['Q1', 'Q2', 'Q3', 'Q4', 'Q5']);
+  assert.deepEqual(result.satisfied, ['Q1', 'Q2', 'Q3', 'Q4', 'Q5']);
+  assert.equal(result.allSatisfied, true);
+});
+
+test('extractMacroAnswers marks incomplete answers as not satisfied', () => {
+  const text = [
+    'VERDICT: REVISE',
+    'MACRO_ANSWERS:',
+    'Q1: OpenClaw hook timing verified — hooks/subagent.ts line 42',
+    'Q2: n/a — pending cross-repo verification',
+    'Q3: Architecture converging — unified RuntimeDirectDriver',
+    'BLOCKERS:\n- Need more evidence for Q2',
+  ].join('\n');
+  const result = extractMacroAnswers(text, ['Q1', 'Q2', 'Q3', 'Q4']);
+  assert.deepEqual(result.found, ['Q1', 'Q2', 'Q3']);
+  assert.deepEqual(result.satisfied, ['Q1', 'Q3']);
+  assert.equal(result.allSatisfied, false);
+});
+
+test('extractMacroAnswers returns empty when no MACRO_ANSWERS section', () => {
+  const result = extractMacroAnswers('VERDICT: APPROVE\nBLOCKERS:\n- None.', ['Q1', 'Q2']);
+  assert.deepEqual(result.found, []);
+  assert.deepEqual(result.satisfied, []);
+  assert.equal(result.allSatisfied, false);
+});
+
+test('buildStageMetrics includes global_reviewer fields', () => {
+  const metrics = buildStageMetrics({
+    stageCriteria: {
+      requiredProducerSections: ['SUMMARY'],
+      requiredReviewerSections: ['VERDICT'],
+      requiredGlobalReviewerSections: ['VERDICT', 'MACRO_ANSWERS'],
+      globalReviewerRequired: true,
+      globalReviewerMustAnswer: ['Q1', 'Q2'],
+    },
+    producer: 'SUMMARY:\nDone',
+    reviewerA: 'VERDICT: APPROVE',
+    reviewerB: 'VERDICT: APPROVE',
+    globalReviewer: [
+      'VERDICT: APPROVE',
+      'MACRO_ANSWERS:',
+      'Q1: OpenClaw compatible — hooks/subagent.ts verified',
+      'Q2: Business flow closed — results persisted',
+    ].join('\n'),
+  });
+
+  assert.equal(metrics.globalReviewerVerdict, 'APPROVE');
+  assert.equal(metrics.globalReviewerHasExplicitVerdict, true);
+  assert.equal(metrics.globalReviewerRequired, true);
+  assert.deepEqual(metrics.globalReviewerChecks.VERDICT, true);
+  assert.deepEqual(metrics.globalReviewerChecks.MACRO_ANSWERS, true);
+  assert.deepEqual(metrics.macroAnswersFound, ['Q1', 'Q2']);
+  assert.deepEqual(metrics.macroAnswersSatisfied, ['Q1', 'Q2']);
+  assert.equal(metrics.macroAnswersAllSatisfied, true);
+  assert.deepEqual(metrics.requiredMacroAnswers, ['Q1', 'Q2']);
+});
+
+test('decideStage with globalReviewerRequired — advances when all three APPROVE', () => {
+  const result = decideStage({
+    stageCriteria: {
+      requiredApprovals: 3,
+      requiredProducerSections: ['SUMMARY'],
+      requiredReviewerSections: ['VERDICT', 'BLOCKERS'],
+      requiredGlobalReviewerSections: ['VERDICT', 'MACRO_ANSWERS'],
+      globalReviewerRequired: true,
+      globalReviewerMustAnswer: ['Q1', 'Q2'],
+    },
+    producer: 'SUMMARY:\nDone',
+    reviewerA: 'VERDICT: APPROVE\nBLOCKERS:\n- None.',
+    reviewerB: 'VERDICT: APPROVE\nBLOCKERS:\n- None.',
+    globalReviewer: [
+      'VERDICT: APPROVE',
+      'MACRO_ANSWERS:',
+      'Q1: OpenClaw compatible',
+      'Q2: Business flow closed',
+    ].join('\n'),
+    currentRound: 1,
+    maxRoundsPerStage: 3,
+  });
+
+  assert.equal(result.outcome, 'advance');
+  assert.equal(result.metrics.approvalCount, 3);
+});
+
+test('decideStage with globalReviewerRequired — cannot advance when global reviewer missing', () => {
+  const result = decideStage({
+    stageCriteria: {
+      requiredApprovals: 3,
+      requiredProducerSections: ['SUMMARY'],
+      requiredReviewerSections: ['VERDICT', 'BLOCKERS'],
+      requiredGlobalReviewerSections: ['VERDICT', 'MACRO_ANSWERS'],
+      globalReviewerRequired: true,
+      globalReviewerMustAnswer: ['Q1', 'Q2'],
+    },
+    producer: 'SUMMARY:\nDone',
+    reviewerA: 'VERDICT: APPROVE\nBLOCKERS:\n- None.',
+    reviewerB: 'VERDICT: APPROVE\nBLOCKERS:\n- None.',
+    globalReviewer: null,
+    currentRound: 1,
+    maxRoundsPerStage: 3,
+  });
+
+  assert.equal(result.outcome, 'revise');
+  assert.ok(result.blockers.some((b) => b.includes('Global reviewer')));
+});
+
+test('decideStage with globalReviewerRequired — cannot advance when Q-answers missing', () => {
+  const result = decideStage({
+    stageCriteria: {
+      requiredApprovals: 3,
+      requiredProducerSections: ['SUMMARY'],
+      requiredReviewerSections: ['VERDICT', 'BLOCKERS'],
+      requiredGlobalReviewerSections: ['VERDICT', 'MACRO_ANSWERS'],
+      globalReviewerRequired: true,
+      globalReviewerMustAnswer: ['Q1', 'Q2', 'Q3'],
+    },
+    producer: 'SUMMARY:\nDone',
+    reviewerA: 'VERDICT: APPROVE\nBLOCKERS:\n- None.',
+    reviewerB: 'VERDICT: APPROVE\nBLOCKERS:\n- None.',
+    globalReviewer: [
+      'VERDICT: APPROVE',
+      'MACRO_ANSWERS:',
+      'Q1: OpenClaw compatible',
+      'Q2: Business flow closed',
+      // Q3 missing
+    ].join('\n'),
+    currentRound: 1,
+    maxRoundsPerStage: 3,
+  });
+
+  assert.equal(result.outcome, 'revise');
+  assert.ok(result.blockers.some((b) => b.includes('Q3')));
+});
+
+test('decideStage with globalReviewerRequired — BLOCK from global reviewer halts even if A and B approve', () => {
+  const result = decideStage({
+    stageCriteria: {
+      requiredApprovals: 3,
+      requiredProducerSections: ['SUMMARY'],
+      requiredReviewerSections: ['VERDICT', 'BLOCKERS'],
+      requiredGlobalReviewerSections: ['VERDICT', 'MACRO_ANSWERS'],
+      globalReviewerRequired: true,
+      globalReviewerMustAnswer: ['Q1'],
+    },
+    producer: 'SUMMARY:\nDone',
+    reviewerA: 'VERDICT: APPROVE\nBLOCKERS:\n- None.',
+    reviewerB: 'VERDICT: APPROVE\nBLOCKERS:\n- None.',
+    globalReviewer: [
+      'VERDICT: BLOCK',
+      'BLOCKERS:\n- Architecture diverges — new implicit protocol introduced',
+      'MACRO_ANSWERS:',
+      'Q1: OpenClaw compatible — hooks verified',
+    ].join('\n'),
+    currentRound: 1,
+    maxRoundsPerStage: 3,
+  });
+
+  assert.equal(result.outcome, 'revise');
+  assert.ok(result.blockers.some((b) => b.includes('[GLOBAL]') && b.includes('Architecture diverges')));
+});
+
+test('decideStage with globalReviewerRequired — BLOCK without specific blockers still blocks', () => {
+  const result = decideStage({
+    stageCriteria: {
+      requiredApprovals: 3,
+      requiredProducerSections: ['SUMMARY'],
+      requiredReviewerSections: ['VERDICT', 'BLOCKERS'],
+      requiredGlobalReviewerSections: ['VERDICT'],
+      globalReviewerRequired: true,
+    },
+    producer: 'SUMMARY:\nDone',
+    reviewerA: 'VERDICT: APPROVE\nBLOCKERS:\n- None.',
+    reviewerB: 'VERDICT: APPROVE\nBLOCKERS:\n- None.',
+    globalReviewer: 'VERDICT: BLOCK',
+    currentRound: 1,
+    maxRoundsPerStage: 3,
+  });
+
+  assert.equal(result.outcome, 'revise');
+  assert.ok(result.blockers.some((b) => b.includes('Global reviewer BLOCKED with no specific blockers')));
+});
+
+test('decideStage without globalReviewerRequired — ignores global_reviewer even if provided', () => {
+  const result = decideStage({
+    stageCriteria: {
+      requiredApprovals: 2,
+      requiredProducerSections: ['SUMMARY'],
+      requiredReviewerSections: ['VERDICT', 'BLOCKERS'],
+      globalReviewerRequired: false,
+    },
+    producer: 'SUMMARY:\nDone',
+    reviewerA: 'VERDICT: APPROVE\nBLOCKERS:\n- None.',
+    reviewerB: 'VERDICT: APPROVE\nBLOCKERS:\n- None.',
+    globalReviewer: 'VERDICT: BLOCK\nBLOCKERS:\n- Should be ignored',
+    currentRound: 1,
+    maxRoundsPerStage: 3,
+  });
+
+  assert.equal(result.outcome, 'advance');
+  assert.equal(result.metrics.approvalCount, 2);
+});
+
+test('buildHandoff includes global_reviewer blockers and focus', () => {
+  const handoff = buildHandoff({
+    reviewerA: 'VERDICT: REVISE\nBLOCKERS:\n- ReviewerA blocker\nNEXT_FOCUS: Fix X',
+    reviewerB: 'VERDICT: REVISE\nBLOCKERS:\n- ReviewerB blocker\nNEXT_FOCUS: Fix Y',
+    globalReviewer: 'VERDICT: REVISE\nBLOCKERS:\n- Global blocker\nNEXT_FOCUS: Fix Z',
+    producer: 'SUMMARY:\nDone',
+    metrics: { globalReviewerVerdict: 'REVISE' },
+    stageName: 'architecture-cut',
+    round: 2,
+  });
+
+  assert.deepEqual(handoff.blockers, ['ReviewerA blocker', 'ReviewerB blocker', 'Global blocker']);
+  assert.ok(handoff.focusForNextRound.includes('Fix X'));
+  assert.ok(handoff.focusForNextRound.includes('Fix Y'));
+  assert.ok(handoff.focusForNextRound.includes('Fix Z'));
+  assert.equal(handoff.dimensionScores.globalReviewer, 'REVISE');
+});
+
+test('buildHandoff handles missing global_reviewer gracefully', () => {
+  const handoff = buildHandoff({
+    reviewerA: 'VERDICT: APPROVE\nBLOCKERS:\n- None.',
+    reviewerB: 'VERDICT: APPROVE\nBLOCKERS:\n- None.',
+    globalReviewer: null,
+    producer: 'SUMMARY:\nDone',
+    metrics: {},
+    stageName: 'investigate',
+    round: 1,
+  });
+
+  assert.deepEqual(handoff.blockers, []);
+  assert.equal(handoff.focusForNextRound, null);
+  assert.equal(handoff.globalReviewerCodeEvidence, null);
+  assert.equal(handoff.dimensionScores.globalReviewer, null);
 });

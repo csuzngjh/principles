@@ -312,6 +312,7 @@ function roleConfig(spec, role) {
   if (role === 'producer') return spec.producer;
   if (role === 'reviewer_a') return spec.reviewerA;
   if (role === 'reviewer_b') return spec.reviewerB;
+  if (role === 'global_reviewer') return spec.escalationReviewer ?? null;
   throw new Error(`Unknown role: ${role}`);
 }
 
@@ -341,23 +342,28 @@ function ensureStagePaths(runDir, stageIndex, stageName) {
     producerPath: path.join(stageDir, 'producer.md'),
     reviewerAPath: path.join(stageDir, 'reviewer-a.md'),
     reviewerBPath: path.join(stageDir, 'reviewer-b.md'),
+    globalReviewerPath: path.join(stageDir, 'global-reviewer.md'),
     decisionPath: path.join(stageDir, 'decision.md'),
     scorecardPath: path.join(stageDir, 'scorecard.json'),
     producerStdoutPath: path.join(stageDir, 'producer-stdout.log'),
     reviewerAStdoutPath: path.join(stageDir, 'reviewer-a-stdout.log'),
     reviewerBStdoutPath: path.join(stageDir, 'reviewer-b-stdout.log'),
+    globalReviewerStdoutPath: path.join(stageDir, 'global-reviewer-stdout.log'),
     producerWorklogPath: path.join(stageDir, 'producer-worklog.md'),
     reviewerAWorklogPath: path.join(stageDir, 'reviewer-a-worklog.md'),
     reviewerBWorklogPath: path.join(stageDir, 'reviewer-b-worklog.md'),
+    globalReviewerWorklogPath: path.join(stageDir, 'global-reviewer-worklog.md'),
     producerStatePath: path.join(stageDir, 'producer-state.json'),
     reviewerAStatePath: path.join(stageDir, 'reviewer-a-state.json'),
     reviewerBStatePath: path.join(stageDir, 'reviewer-b-state.json'),
+    globalReviewerStatePath: path.join(stageDir, 'global-reviewer-state.json'),
   };
 
   const placeholderFiles = [
     paths.producerWorklogPath,
     paths.reviewerAWorklogPath,
     paths.reviewerBWorklogPath,
+    paths.globalReviewerWorklogPath,
   ];
   for (const file of placeholderFiles) {
     if (!fileExists(file)) {
@@ -369,6 +375,7 @@ function ensureStagePaths(runDir, stageIndex, stageName) {
     [paths.producerStatePath, 'producer'],
     [paths.reviewerAStatePath, 'reviewer_a'],
     [paths.reviewerBStatePath, 'reviewer_b'],
+    [paths.globalReviewerStatePath, 'global_reviewer'],
   ];
   for (const [file, role] of placeholderStates) {
     if (!fileExists(file)) {
@@ -393,7 +400,13 @@ function roleArtifactPaths(paths, role) {
   if (role === 'reviewer_a') {
     return { reportPath: paths.reviewerAPath, stdoutPath: paths.reviewerAStdoutPath };
   }
-  return { reportPath: paths.reviewerBPath, stdoutPath: paths.reviewerBStdoutPath };
+  if (role === 'reviewer_b') {
+    return { reportPath: paths.reviewerBPath, stdoutPath: paths.reviewerBStdoutPath };
+  }
+  if (role === 'global_reviewer') {
+    return { reportPath: paths.globalReviewerPath, stdoutPath: paths.globalReviewerStdoutPath };
+  }
+  throw new Error(`Unknown role: ${role}`);
 }
 
 function readRoleOutput({ reportPath, stdout }) {
@@ -434,7 +447,7 @@ function detectProtectedWriteViolation(files, snapshot) {
   return null;
 }
 
-function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecardPath, producerPath, reviewerAPath, reviewerBPath, state, reviewerTimeouts = null }) {
+function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecardPath, producerPath, reviewerAPath, reviewerBPath, globalReviewerPath, state, reviewerTimeouts = null }) {
   // Build lookup maps for reviewer timeout/error state
   const timeoutMap = new Map((reviewerTimeouts ?? []).map((r) => [r.role, r]));
   const missingFiles = [];
@@ -450,6 +463,12 @@ function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecard
     if (info?.timedOut) missingFiles.push(`reviewer_b: ${reviewerBPath} (timed out, no report)`);
     else if (info) missingFiles.push(`reviewer_b: ${reviewerBPath} (error, no report)`);
     else missingFiles.push(`reviewer_b: ${reviewerBPath} (missing)`);
+  }
+
+  const stageCriteria = loadSpec(state).stageCriteria?.[stageName] ?? {};
+  const globalReviewerRequired = stageCriteria.globalReviewerRequired === true;
+  if (globalReviewerRequired && globalReviewerPath && !fileExists(globalReviewerPath)) {
+    missingFiles.push(`global_reviewer: ${globalReviewerPath} (missing — required for this stage)`);
   }
 
   if (missingFiles.length > 0) {
@@ -489,11 +508,15 @@ function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecard
   const producer = fs.readFileSync(producerPath, 'utf8');
   const reviewerA = fs.readFileSync(reviewerAPath, 'utf8');
   const reviewerB = fs.readFileSync(reviewerBPath, 'utf8');
+  const globalReviewer = (globalReviewerRequired && globalReviewerPath && fileExists(globalReviewerPath))
+    ? fs.readFileSync(globalReviewerPath, 'utf8')
+    : null;
   const decision = decideStage({
     stageCriteria: loadSpec(state).stageCriteria?.[stageName],
     producer,
     reviewerA,
     reviewerB,
+    globalReviewer: globalReviewerRequired ? globalReviewer : null,
     currentRound: state.currentRound,
     maxRoundsPerStage: state.maxRoundsPerStage,
   });
@@ -521,6 +544,14 @@ function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecard
     `- producerChecks: ${decision.metrics.producerChecks ?? 'n/a'}`,
     `- reviewerAChecks: ${decision.metrics.reviewerAChecks ?? 'n/a'}`,
     `- reviewerBChecks: ${decision.metrics.reviewerBChecks ?? 'n/a'}`,
+    ...(decision.metrics.globalReviewerVerdict
+      ? [
+        `- globalReviewerVerdict: ${decision.metrics.globalReviewerVerdict}`,
+        `- globalReviewerRequired: true`,
+        `- globalReviewerChecks: ${decision.metrics.globalReviewerChecks ?? 'n/a'}`,
+        `- macroAnswersSatisfied: ${decision.metrics.macroAnswersSatisfied ?? false}`,
+      ]
+      : []),
     ...(decision.metrics.scoringDimensions?.length
       ? [
         `- scoringDimensions: ${decision.metrics.scoringDimensions.join(', ')}`,
@@ -539,6 +570,7 @@ function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecard
     `- Producer: ${producerPath}`,
     `- Reviewer A: ${reviewerAPath}`,
     `- Reviewer B: ${reviewerBPath}`,
+    ...(globalReviewerRequired ? [`- Global Reviewer: ${globalReviewerPath}`] : []),
   ].join('\n');
 
   writeText(decisionPath, `${content}\n`);
@@ -557,6 +589,16 @@ function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecard
     producerChecks: decision.metrics.producerChecks,
     reviewerAChecks: decision.metrics.reviewerAChecks,
     reviewerBChecks: decision.metrics.reviewerBChecks,
+    ...(decision.metrics.globalReviewerVerdict
+      ? {
+        globalReviewerVerdict: decision.metrics.globalReviewerVerdict,
+        globalReviewerRequired: true,
+        globalReviewerChecks: decision.metrics.globalReviewerChecks,
+        macroAnswersSatisfied: decision.metrics.macroAnswersSatisfied,
+        macroAnswersRequired: decision.metrics.macroAnswersRequired ?? [],
+        macroAnswersFound: decision.metrics.macroAnswersFound ?? [],
+      }
+      : {}),
     blockers: decision.blockers,
     ...(decision.metrics.scoringDimensions?.length
       ? {
@@ -598,7 +640,7 @@ function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecard
     `Stage: ${stageName}`,
     `Round: ${state.currentRound}`,
     `Outcome: ${decision.outcome}`,
-    `Approval count: ${decision.metrics.approvalCount}/2`,
+    `Approval count: ${decision.metrics.approvalCount}/2${decision.metrics.globalReviewerVerdict ? ` + global_reviewer: ${decision.metrics.globalReviewerVerdict}` : ''}`,
     `Blocker count: ${decision.metrics.blockerCount}`,
     ...(decision.blockers.length ? [`Top blocker: ${decision.blockers[0]}`] : ['Top blocker: none']),
   ]);
@@ -1004,7 +1046,7 @@ async function executeStage(runDir, state, spec) {
     state.currentStageIndex,
     stageName,
   );
-  const { stageDir, briefPath, producerPath, reviewerAPath, reviewerBPath, decisionPath, scorecardPath } = paths;
+  const { stageDir, briefPath, producerPath, reviewerAPath, reviewerBPath, globalReviewerPath, decisionPath, scorecardPath } = paths;
   const protectedFiles = protectedArtifacts(runDir, paths);
 
   // Read handoff data for structured carry forward
@@ -1015,7 +1057,7 @@ async function executeStage(runDir, state, spec) {
 
   // On round > 1, clear previous round's role reports so agents must regenerate them
   if (state.currentRound > 1) {
-    const staleReports = [producerPath, reviewerAPath, reviewerBPath];
+    const staleReports = [producerPath, reviewerAPath, reviewerBPath, globalReviewerPath];
     for (const fp of staleReports) {
       if (fileExists(fp)) {
         fs.unlinkSync(fp);
@@ -1209,6 +1251,71 @@ async function executeStage(runDir, state, spec) {
   }
   heartbeatState(runDir, state, { currentRole: null });
 
+  // ── Phase 3: Global reviewer (sequential, only if required) ──────────────
+  const stageCriteria = spec.stageCriteria?.[stageName] ?? {};
+  const globalReviewerRequired = stageCriteria.globalReviewerRequired === true;
+  let globalReviewerOutput = null;
+  let globalReviewerTimedOut = false;
+
+  if (globalReviewerRequired) {
+    maybeAbort(runDir, state);
+    heartbeatState(runDir, state, { currentRole: 'global_reviewer' });
+    appendTimeline(runDir, `Stage ${stageName} round ${state.currentRound} global_reviewer is required — running sequentially after A/B`);
+
+    const globalReviewerConfig = roleConfig(spec, 'global_reviewer');
+    if (!globalReviewerConfig) {
+      appendTimeline(runDir, `global_reviewer config not found in spec — skipping`);
+    } else {
+      const globalReviewerPrompt = buildRolePrompt({
+        spec,
+        stage: stageName,
+        round: state.currentRound,
+        role: 'global_reviewer',
+        runDir,
+        stageDir,
+        briefPath,
+        producerPath,
+        reviewerAPath,
+        reviewerBPath,
+        globalReviewerPath: paths.globalReviewerPath,
+      });
+      const { reportPath: grReportPath, stdoutPath: grStdoutPath } = roleArtifactPaths(paths, 'global_reviewer');
+
+      if (fileExists(grReportPath) && fs.readFileSync(grReportPath, 'utf8').trim()) {
+        globalReviewerOutput = fs.readFileSync(grReportPath, 'utf8').trim();
+        appendTimeline(runDir, `global_reviewer skipped (report already exists) stage ${stageName} round ${state.currentRound}`);
+      } else {
+        const protectedSnapshot = snapshotProtectedFiles(protectedFiles);
+        const grFailLog = path.join(stageDir, 'global-reviewer-failure.log');
+        let grOutput;
+        try {
+          grOutput = runAgent({
+            cwd: spec.workspace,
+            agent: globalReviewerConfig.agent,
+            model: globalReviewerConfig.model,
+            prompt: globalReviewerPrompt,
+            timeoutSeconds: stageRoleTimeout(spec, stageName, 'global_reviewer'),
+            failLogPath: grFailLog,
+          });
+        } catch (grErr) {
+          appendTimeline(runDir, `global_reviewer error: ${grErr.message}`);
+          grOutput = null;
+        }
+        if (grOutput) writeText(grStdoutPath, `${grOutput}\n`);
+        globalReviewerOutput = readRoleOutput({ reportPath: grReportPath, stdout: grOutput ?? '' });
+        if (!fileExists(grReportPath) || !fs.readFileSync(grReportPath, 'utf8').trim()) {
+          writeText(grReportPath, `${globalReviewerOutput}\n`);
+        }
+        const grViolated = detectProtectedWriteViolation(protectedFiles, protectedSnapshot);
+        if (grViolated) {
+          appendTimeline(runDir, `global_reviewer modified protected file ${grViolated} — continuing anyway`);
+        }
+        appendTimeline(runDir, `global_reviewer completed stage ${stageName} round ${state.currentRound}`);
+      }
+    }
+    heartbeatState(runDir, state, { currentRole: null });
+  }
+
   return decideAndPersist({
     runDir,
     stageName,
@@ -1218,6 +1325,7 @@ async function executeStage(runDir, state, spec) {
     producerPath,
     reviewerAPath,
     reviewerBPath,
+    globalReviewerPath,
     state,
     reviewerTimeouts: reviewerTimeouts.length > 0 ? reviewerTimeouts : null,
   });
