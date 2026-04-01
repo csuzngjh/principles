@@ -553,6 +553,8 @@ helper 统一维护：
 
 ## 12. 与现有业务的映射
 
+> **PR2 范围声明**：PR2 仅接入 Empathy Observer 和 Deep Reflect。Diagnostician / Evolution / Nocturnal / Routing Shadow Observation 不在 PR2 范围内，留待后续阶段。
+
 ### 12.1 Empathy Observer
 
 最适合作为 helper 第一批接入对象。
@@ -580,30 +582,77 @@ helper 接入后：
 - cleanup 和 timeout 语义不稳
 - 适合验证 `runtime_direct` driver 的通用性
 
-### 12.3 Diagnostician / Evolution
+### 12.3 Diagnostician / Evolution（PR2 不迁移）
 
-第三批接入。
+**PR2 明确不涉及此模块。** 原因：
 
-原因：
+- transport 是 `registry_backed`，复杂度高于 `runtime_direct`
+- queue / HEARTBEAT / placeholder 匹配逻辑尚未完全稳定
+- 待 helper 内核在 empathy + deep-reflect 上验证后，再以 diagnosed 方式迁移
 
-- transport 是 `registry_backed`
-- 有 queue / HEARTBEAT / placeholder 匹配逻辑
-- 最能验证 helper 是否真的支持 heterogeneous transport
+### 12.4 Nocturnal / Routing / Shadow Observation（PR2 不迁移）
 
-### 12.4 Nocturnal / Routing / Shadow Observation
-
-第四批接入。
-
-原因：
+**PR2 明确不涉及此模块。** 原因：
 
 - 往往更复杂，跨多个服务和文件
-- 需要在 helper 内核稳定后再迁移
+- 需要在 helper 内核稳定后再评估
+
+---
+
+## 12B. PR2 执行：通过 AI Sprint Orchestrator 驱动
+
+### 12B.1 为什么用 orchestrator 驱动 PR2
+
+PR2 的 helper 实现本身是 PD 内部工作流重构，但它的执行环境与 OpenClaw 深度耦合。如果用纯人工方式执行，容易在 OpenClaw 兼容性上出现"见到树木不见森林"的问题。
+
+使用 ai sprint orchestrator 驱动 PR2 的好处：
+
+- `global_reviewer` 在 `architecture-cut` 和 `verify` 阶段强制介入，确保 OpenClaw 兼容性假设被显式核验
+- reviewer_b（运行时兼容性角色）专门负责检查 OpenClaw 跨仓库假设
+- 多 round 迭代让"发现 OpenClaw 假设"和"验证修复"之间有结构化反馈
+- 结构化 handoff 让诊断和实现之间的上下文不丢失
+
+### 12B.2 PR2 的两个任务实例
+
+PR2 拆成两个独立的 sprint 实例并行/顺序执行：
+
+| 任务 ID | 职责 | 对应 helper 组件 |
+|---------|------|-----------------|
+| `subagent-helper-empathy` | 迁移 empathy observer 到 helper | EmpathyObserverManager |
+| `subagent-helper-deep-reflect` | 迁移 deep reflect 到 helper | DeepReflectLifecycleHook |
+
+两者可以顺序执行（先 empathy，再 deep-reflect），也可以按优先级并行。
+
+### 12B.3 PR2 中 global_reviewer 必须回答的宏观问题
+
+在 `architecture-cut` 和 `verify` 阶段，global_reviewer 必须显式回答：
+
+1. **OpenClaw 兼容性**：当前对 OpenClaw 运行时 hook 的假设（如 `subagent_ended` 的触发时机）是否经过跨仓库源码核验？是否有可能在 OpenClaw 升级后失效？
+
+2. **业务流闭环**：helper 接管后，empathy/deep-reflect 的结果持久化路径是否明确？是否有丢失窗口？
+
+3. **架构收敛性**：引入 helper 后，PD 子代理调用是更统一了，还是引入了新的隐式协议？
+
+4. **数据流闭环**：子代理的 `sessionKey / runId / parentSessionId` 链是否在 helper 层被正确归因？是否存在双重 finalize 风险？
+
+5. **与 Diagnostician/Nocturnal 的边界**：PR2 仅处理 empathy 和 deep-reflect，当前对 Diagnostician/Nocturnal 不做迁移。helper 内核的接口设计是否保留了对 `registry_backed` transport 的扩展能力？
+
+### 12B.4 OpenClaw 跨仓库假设核验清单
+
+PR2 开始前，必须在 ai sprint orchestrator 的 `investigate` 阶段核验以下假设（由 reviewer_b 负责）：
+
+| 假设 | 验证方法 | 如果不成立 |
+|------|---------|-----------|
+| `subagent_ended` hook 在 `registry_backed` transport 下由 `subagent-registry-completion.ts` 触发 | 读 `D:/Code/openclaw/src/agents/subagent-registry-completion.ts` | 需重新设计 lifecycle hook 假设 |
+| `runtime.subagent.run()` 不等价于进入 subagent registry | 读 `D:/Code/openclaw/src/gateway/server-plugins.ts` | 需在 helper 层区分 transport 类型 |
+| `sessions_spawn` 的 child session key 生成逻辑在 `subagent-spawn.ts` | 读 `D:/Code/openclaw/src/agents/subagent-spawn.ts` | 需在 helper 层重做 session key 归因 |
+| 子代理结果在 `waitForRun` 超时后仍可能在 `getSessionMessages` 中出现 | 需要确认是否有 OpenClaw 侧的 retry/backfill 机制 | 需在 helper 层调整 finalize 策略 |
 
 ---
 
 ## 13. 实施计划
 
-### Phase A：建立 helper 内核，不接业务
+### Phase A：建立 helper 内核，不接业务（可选：ai sprint orchestrator 驱动）
 
 交付：
 
@@ -614,9 +663,9 @@ helper 接入后：
 - workflow store
 - workflow audit / sweep
 
-这一阶段只 shadow 运行，不接管业务。
+> **推荐用 ai sprint orchestrator 执行 Phase A**（任务 ID: `subagent-helper-empathy` 的 `investigate` 阶段）。Phase A 本质上是调查 + 架构决策任务，适合 orchestrator 的 6 阶段模型。
 
-### Phase B：接入 Empathy Observer
+### Phase B：接入 Empathy Observer（PR2 主线）
 
 交付：
 
@@ -624,19 +673,22 @@ helper 接入后：
 - 保留短期 shadow 对比
 - 验证 orphan / timeout / cleanup 指标
 
-### Phase C：接入 Deep Reflect
+### Phase C：接入 Deep Reflect（PR2 主线）
 
 交付：
 
 - 移除 `sessionKey == runId` 这类错误假设
 - 统一 cleanup 与 timeout 策略
 
-### Phase D：接入 Diagnostician / Evolution
+### Phase D：接入 Diagnostician / Evolution（PR2 后）
 
-交付：
+**Phase D 在 PR2 之后执行，不在本轮范围内。**
 
-- 把 queue / placeholder / hook 匹配的生命周期收敛进 helper
-- 降低 `subagent.ts` 的复杂度和脆弱字符串协议
+原因：
+
+- transport 是 `registry_backed`，需要 Phase A/B 验证后迁移
+- queue / HEARTBEAT / placeholder 逻辑需重新诊断
+- 待 PR2 验证 helper 内核稳定性后再启动
 
 ---
 

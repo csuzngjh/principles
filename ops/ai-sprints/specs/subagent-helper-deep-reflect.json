@@ -1,0 +1,150 @@
+{
+  "id": "subagent-helper-deep-reflect",
+  "title": "Subagent Helper: migrate deep reflect to workflow helper",
+  "workspace": "D:/Code/principles",
+  "branchWorkspace": "D:/Code/principles-subagent-helper-deep-reflect",
+  "branch": "feat/subagent-helper-deep-reflect",
+  "maxRoundsPerStage": 3,
+  "maxRuntimeMinutes": 360,
+  "stageTimeoutMinutes": 30,
+  "stages": ["investigate", "architecture-cut", "patch-plan", "implement-pass-1", "implement-pass-2", "verify"],
+  "producer": {
+    "agent": "opencode",
+    "model": "minimax-cn-coding-plan/MiniMax-M2.7",
+    "timeoutSeconds": 120
+  },
+  "reviewerA": {
+    "agent": "iflow",
+    "model": "glm-5",
+    "timeoutSeconds": 900,
+    "role": "code_and_local_correctness",
+    "focus": "deep reflect lifecycle correctness, session cleanup, CODE_EVIDENCE"
+  },
+  "reviewerB": {
+    "agent": "claude",
+    "model": "GLM-5.1",
+    "timeoutSeconds": 900,
+    "role": "runtime_and_compatibility",
+    "focus": "OpenClaw hook semantics, sessionKey/runId归因, cross-repo assumptions"
+  },
+  "escalationReviewer": {
+    "agent": "claude",
+    "model": "GLM-5.1",
+    "timeoutSeconds": 900,
+    "role": "global_reviewer",
+    "focus": "macro: business flow, data flow, architecture, OpenClaw compatibility"
+  },
+  "context": [
+    "Use PD-only changes; do not modify D:/Code/openclaw.",
+    "PR2 scope: empathy observer + deep-reflect ONLY. Diagnostician/Nocturnal NOT migrated in this PR.",
+    "DeepReflect currently has sessionKey/runId semantic confusion — must be resolved in this PR.",
+    "Helper lives in packages/openclaw-plugin/src/service/subagent-workflow/.",
+    "DeepReflect lifecycle hooks: subagent_spawned, subagent_checkpoint, subagent_ended — must be verified."
+  ],
+  "stageGoals": {
+    "investigate": [
+      "Audit deep reflect's current subagent transport: runtime_direct vs registry_backed.",
+      "Identify sessionKey vs runId confusion: which is which, where used, what the correct mapping is.",
+      "Audit lifecycle hooks: subagent_spawned, subagent_checkpoint, subagent_ended — which fire, when, from where.",
+      "Document current cleanup and timeout paths and failure modes."
+    ],
+    "architecture-cut": [
+      "Decide: migrate deep reflect to helper (runtime_direct transport) or keep existing?",
+      "Define DeepReflectLifecycleHook interface.",
+      "Resolve sessionKey/runId confusion: document correct attribution chain.",
+      "global_reviewer must explicitly answer: Is migration architecturally sound? Session chain correctly attributed?"
+    ],
+    "patch-plan": [
+      "Design DeepReflectLifecycleHook spec with lifecycle_hooks integration.",
+      "Plan checkpoint artifact schema: session_key, run_id, checkpoint_timestamp, reflect_payload, persistence_confirmed.",
+      "Define when subagent_checkpoint fires and what it writes.",
+      "Plan shadow-run period to compare old vs new behavior."
+    ],
+    "implement-pass-1": [
+      "Implement DeepReflectLifecycleHook with RuntimeDirectDriver.",
+      "Fix sessionKey/runId attribution: sessionKey = child session identity, runId = agent run identity.",
+      "Implement lifecycle hooks: subagent_spawned → checkpoint tracking, subagent_ended → finalize.",
+      "Run shadow mode alongside existing deep reflect path."
+    ],
+    "implement-pass-2": [
+      "Address review findings from implement-pass-1.",
+      "Validate shadow-run comparison: new path produces equivalent reflect payloads.",
+      "Do not expand scope beyond DeepReflectLifecycleHook and its RuntimeDirectDriver."
+    ],
+    "verify": [
+      "Verify lifecycle hook firing order via deep-reflect-checkpoint.json artifacts.",
+      "Confirm merge gate: local SHA == remote/feat/subagent-helper-deep-reflect SHA.",
+      "global_reviewer must confirm: OpenClaw assumptions verified? Session chain correctly closed?",
+      "Confirm sessionKey/runId confusion resolved, no double-finalize."
+    ]
+  },
+  "stageCriteria": {
+    "investigate": {
+      "requiredApprovals": 2,
+      "requiredProducerSections": ["SUMMARY", "EVIDENCE", "CODE_EVIDENCE", "KEY_EVENTS", "TRANSPORT_AUDIT", "SESSION_KEY_RUNID_AUDIT", "CHECKS"],
+      "requiredReviewerSections": ["VERDICT", "BLOCKERS", "FINDINGS", "TRANSPORT_ASSESSMENT", "SESSION_CHAIN_REVIEW", "NEXT_FOCUS", "CHECKS"],
+      "scoringDimensions": ["evidence_quality", "assumption_coverage", "audit_completeness"],
+      "dimensionThreshold": 3,
+      "requiredDeliverables": ["transport_audit", "session_key_runid_map", "lifecycle_hook_map", "failure_mode_inventory"]
+    },
+    "architecture-cut": {
+      "requiredApprovals": 3,
+      "requiredProducerSections": ["SUMMARY", "ARCHITECTURE_DECISION", "SESSION_CHAIN_CORRECTION", "INTERFACE_DESIGN", "TRADE_OFFS", "CHECKS"],
+      "requiredReviewerSections": ["VERDICT", "BLOCKERS", "FINDINGS", "SESSION_CHAIN_ASSESSMENT", "ARCHITECTURE_ASSESSMENT", "NEXT_FOCUS", "CHECKS"],
+      "scoringDimensions": ["decision_quality", "session_attribution_correctness", "interface_soundness", "extensibility"],
+      "dimensionThreshold": 3,
+      "requiredDeliverables": ["architecture_decision", "session_chain_correction", "lifecycle_hook_spec", "shadow_run_plan"],
+      "globalReviewerRequired": true,
+      "globalReviewerMustAnswer": ["Q1", "Q2", "Q3", "Q4", "Q5"]
+    },
+    "patch-plan": {
+      "requiredApprovals": 2,
+      "requiredProducerSections": ["SUMMARY", "CHANGES", "CODE_EVIDENCE", "EVIDENCE", "INTERFACE_SPEC", "CHECKPOINT_ARTIFACT_SCHEMA", "SHADOW_RUN_PLAN", "CHECKS"],
+      "requiredReviewerSections": ["VERDICT", "BLOCKERS", "FINDINGS", "CODE_EVIDENCE", "INTERFACE_ASSESSMENT", "NEXT_FOCUS", "CHECKS"],
+      "scoringDimensions": ["plan_completeness", "interface_soundness", "session_chain_preserved", "rollback_defined"],
+      "dimensionThreshold": 3,
+      "requiredDeliverables": ["deep_reflect_lifecycle_hook_spec", "checkpoint_artifact_schema", "shadow_run_plan", "rollback_steps"]
+    },
+    "implement-pass-1": {
+      "requiredApprovals": 2,
+      "requiredProducerSections": ["SUMMARY", "CHANGES", "CODE_EVIDENCE", "EVIDENCE", "KEY_EVENTS", "SESSION_CHAIN_FIX", "SHADOW_RUN_COMPARISON", "CHECKS"],
+      "requiredReviewerSections": ["VERDICT", "BLOCKERS", "FINDINGS", "CODE_EVIDENCE", "INTERFACE_COMPLIANCE", "SESSION_CHAIN_VALIDATION", "NEXT_FOCUS", "CHECKS"],
+      "scoringDimensions": ["correctness", "scope_control", "session_attribution_fixed", "shadow_run_validity"],
+      "dimensionThreshold": 3,
+      "requiredDeliverables": ["deep_reflect_impl", "session_key_runid_fix", "lifecycle_hooks_integrated", "shadow_run_evidence"]
+    },
+    "implement-pass-2": {
+      "requiredApprovals": 2,
+      "requiredProducerSections": ["SUMMARY", "CHANGES", "CODE_EVIDENCE", "EVIDENCE", "KEY_EVENTS", "SHADOW_COMPARISON_UPDATED", "CHECKS"],
+      "requiredReviewerSections": ["VERDICT", "BLOCKERS", "FINDINGS", "CODE_EVIDENCE", "NEXT_FOCUS", "CHECKS"],
+      "scoringDimensions": ["correctness", "scope_control", "shadow_run_parity", "regression_risk"],
+      "dimensionThreshold": 3,
+      "requiredDeliverables": ["review_findings_addressed", "shadow_parity_confirmed", "no_scope_creep"]
+    },
+    "verify": {
+      "requiredApprovals": 3,
+      "requiredProducerSections": ["SUMMARY", "EVIDENCE", "CODE_EVIDENCE", "DEEP_REFLECT_CHECKPOINT", "SHADOW_RUN_FINAL_REPORT", "SESSION_CHAIN_CLOSED", "CHECKS"],
+      "requiredReviewerSections": ["VERDICT", "BLOCKERS", "FINDINGS", "CODE_EVIDENCE", "NEXT_FOCUS", "CHECKS"],
+      "scoringDimensions": ["verification_thoroughness", "gap_analysis", "production_readiness", "architecture_improvement"],
+      "dimensionThreshold": 3,
+      "requiredDeliverables": ["lifecycle_hook_verified", "session_chain_confirmed", "no_double_finalize", "deployment_checklist", "global_reviewer_final_assessment"],
+      "globalReviewerRequired": true,
+      "globalReviewerMustAnswer": ["Q1", "Q2", "Q3", "Q4", "Q5"]
+    }
+  },
+  "stageRoleTimeouts": {
+    "investigate": { "producer": 900, "reviewer_a": 720, "reviewer_b": 720 },
+    "architecture-cut": { "producer": 600, "reviewer_a": 480, "reviewer_b": 480 },
+    "patch-plan": { "producer": 720, "reviewer_a": 600, "reviewer_b": 600 },
+    "implement-pass-1": { "producer": 900, "reviewer_a": 720, "reviewer_b": 720 },
+    "implement-pass-2": { "producer": 600, "reviewer_a": 480, "reviewer_b": 480 },
+    "verify": { "producer": 720, "reviewer_a": 480, "reviewer_b": 480 }
+  },
+  "investigateHypotheses": [
+    "deep_reflect_uses_runtime_direct_transport",
+    "deep_reflect_session_key_run_id_confusion_causes_cleanup_mismatch",
+    "deep_reflect_subagent_checkpoint_never_fires",
+    "deep_reflect_cleanup_not_idempotent",
+    "deep_reflect_lacks_dedupe_key"
+  ]
+}
