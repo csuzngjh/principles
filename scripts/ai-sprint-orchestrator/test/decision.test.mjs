@@ -761,3 +761,121 @@ test('buildHandoff handles missing global_reviewer gracefully', () => {
   assert.equal(handoff.globalReviewerCodeEvidence, null);
   assert.equal(handoff.dimensionScores.globalReviewer, null);
 });
+
+// --- Markdown heading compatibility tests ---
+
+test('extractContractItems parses ## CONTRACT (markdown heading)', () => {
+  const text = [
+    'SUMMARY:\nDone',
+    '## CONTRACT',
+    '- Root cause identified with evidence status: DONE evidence: "see EVIDENCE"',
+    '- Fix proposed status: TODO',
+  ].join('\n');
+
+  const items = extractContractItems(text);
+  assert.equal(items.length, 2);
+  assert.equal(items[0].status, 'DONE');
+  assert.equal(items[1].status, 'TODO');
+});
+
+test('extractContractItems parses CONTRACT: (colon format)', () => {
+  const text = [
+    'SUMMARY:\nDone',
+    'CONTRACT:',
+    '- Root cause identified status: DONE',
+    '- Fix proposed status: PARTIAL',
+  ].join('\n');
+
+  const items = extractContractItems(text);
+  assert.equal(items.length, 2);
+  assert.equal(items[0].status, 'DONE');
+  assert.equal(items[1].status, 'PARTIAL');
+});
+
+test('extractCodeEvidence parses ## CODE_EVIDENCE (markdown heading)', () => {
+  const text = [
+    '## CODE_EVIDENCE',
+    '- files_checked: src/observer.js, src/persistence.ts',
+    '- evidence_source: local',
+    '- sha: abc123def',
+    '- branch/worktree: main',
+  ].join('\n');
+  const evidence = extractCodeEvidence(text);
+  assert.ok(evidence, 'should parse ## CODE_EVIDENCE');
+  assert.deepEqual(evidence.filesChecked, ['src/observer.js', 'src/persistence.ts']);
+  assert.equal(evidence.evidenceSource, 'local');
+  assert.equal(evidence.sha, 'abc123def');
+});
+
+test('extractCodeEvidence parses comma-separated files_checked (no brackets)', () => {
+  const text = [
+    'CODE_EVIDENCE:',
+    '- files_checked: empathy-observer-manager.ts, hooks/subagent.ts, index.ts',
+    '- evidence_source: both',
+    '- sha: b1964a55',
+  ].join('\n');
+  const evidence = extractCodeEvidence(text);
+  assert.ok(evidence, 'should parse flat comma list');
+  assert.deepEqual(evidence.filesChecked, ['empathy-observer-manager.ts', 'hooks/subagent.ts', 'index.ts']);
+});
+
+test('extractCodeEvidence parses comma-separated files_verified (no brackets)', () => {
+  const text = [
+    '## CODE_EVIDENCE',
+    '- files_verified: src/fix.ts, src/test.ts, src/helper.ts',
+    '- evidence_source: both',
+    '- sha: fed123',
+  ].join('\n');
+  const evidence = extractCodeEvidence(text);
+  assert.ok(evidence, 'should parse flat comma list for files_verified');
+  assert.deepEqual(evidence.filesChecked, ['src/fix.ts', 'src/test.ts', 'src/helper.ts']);
+});
+
+test('hasCodeEvidence returns true for ## CODE_EVIDENCE', () => {
+  assert.equal(hasCodeEvidence('## CODE_EVIDENCE\n- files_checked: a.ts'), true);
+});
+
+test('decideStage advances with ## CONTRACT and ## CODE_EVIDENCE', () => {
+  const result = decideStage({
+    stageCriteria: {
+      requiredApprovals: 2,
+      requiredProducerSections: ['SUMMARY'],
+      requiredReviewerSections: ['VERDICT', 'BLOCKERS'],
+      requiredDeliverables: ['root_cause'],
+    },
+    producer: [
+      'SUMMARY:\nDone',
+      '## CONTRACT',
+      '- Root cause identified status: DONE',
+      '## CODE_EVIDENCE',
+      '- files_checked: a.ts, b.ts',
+      '- sha: abc123',
+    ].join('\n'),
+    reviewerA: 'VERDICT: APPROVE\nBLOCKERS:\n- None.',
+    reviewerB: 'VERDICT: APPROVE\nBLOCKERS:\n- None.',
+    currentRound: 1,
+    maxRoundsPerStage: 3,
+  });
+
+  assert.equal(result.outcome, 'advance');
+  assert.equal(result.metrics.contractCheck.allDone, true);
+  assert.ok(result.metrics.producerCodeEvidence, 'should have CODE_EVIDENCE');
+  assert.deepEqual(result.metrics.producerCodeEvidence.filesChecked, ['a.ts', 'b.ts']);
+});
+
+test('extractContractItems parses ## CONTRACT correctly when followed by ## CODE_EVIDENCE', () => {
+  // Verify ## CONTRACT section stops at ## CODE_EVIDENCE boundary
+  const text = [
+    'SUMMARY:\nDone',
+    '## CONTRACT',
+    '- Root cause identified status: DONE',
+    '## CODE_EVIDENCE',
+    '- files_checked: a.ts, b.ts',
+    '- sha: abc123',
+  ].join('\n');
+  const items = extractContractItems(text);
+  // Should only have the contract item, NOT the CODE_EVIDENCE lines
+  assert.equal(items.length, 1);
+  assert.equal(items[0].status, 'DONE');
+  assert.ok(items[0].deliverable.includes('Root cause identified'));
+});

@@ -1,14 +1,19 @@
 const VERDICT_RE = /(?:VERDICT:\s*\*{0,2}|##\s*VERDICT\s*\n+\*{0,2}\s*)(APPROVE|REVISE|BLOCK)\b/i;
 const DIMENSIONS_RE = /^DIMENSIONS:\s*(.+)$/im;
-const CONTRACT_RE = /CONTRACT:\s*([\s\S]*?)(?:\n[A-Z_ ]+:|$)/i;
-const CODE_EVIDENCE_RE = /CODE_EVIDENCE:\s*([\s\S]*?)(?:\n[A-Z_ ]+:|$)/i;
+// Match both "SECTION:" and "## SECTION" markdown heading formats
+// Section terminator matches either "SECTION:" or "## SECTION" (with optional colon)
+const CONTRACT_RE = /(?:##\s*)?CONTRACT:?\s*\n([\s\S]*?)(?=\n(?:##\s+)?[A-Z][A-Z_ ]+:\s|\n##\s+[A-Z]|\n[A-Z][A-Z_ ]+:\s|$)/i;
+const CODE_EVIDENCE_RE = /(?:##\s*)?CODE_EVIDENCE:?\s*\n([\s\S]*?)(?=\n(?:##\s+)?[A-Z][A-Z_ ]+:\s|\n##\s+[A-Z]|\n[A-Z][A-Z_ ]+:\s|$)/i;
+// Support both bracket format [a, b] and plain comma list a, b
 const FILES_CHECKED_RE = /files_check(?:ed|es):\s*\[([^\]]*)\]/i;
+const FILES_CHECKED_FLAT_RE = /files_check(?:ed|es):\s*([^\n]+)/i;
 const FILES_VERIFIED_RE = /files_verified:\s*\[([^\]]*)\]/i;
+const FILES_VERIFIED_FLAT_RE = /files_verified:\s*([^\n]+)/i;
 const EVIDENCE_SOURCE_RE = /evidence_source:\s*(local|remote|both)/i;
 const SHA_RE = /sha:\s*([a-f0-9]+)/i;
 const BRANCH_RE = /branch\/worktree:\s*([^\n]+)/i;
 const EVIDENCE_SCOPE_RE = /evidence_scope:\s*(principles|openclaw|both)/i;
-const MACRO_ANSWERS_RE = /MACRO_ANSWERS:\s*([\s\S]*?)(?:\n[A-Z_ ]+:|$)/i;
+const MACRO_ANSWERS_RE = /(?:##\s*)?MACRO_ANSWERS:?\s*\n?([\s\S]*?)(?:\n(?:##\s*)?[A-Z_ ]+:|$)/i;
 
 export function normalizeVerdict(text) {
   const match = String(text ?? '').match(VERDICT_RE);
@@ -112,7 +117,9 @@ export function extractCodeEvidence(text) {
 
   const body = match[1];
   // Try files_checked (producer style) or files_verified (reviewer style)
-  const filesCheckedMatch = body.match(FILES_CHECKED_RE) || body.match(FILES_VERIFIED_RE);
+  // Support both [a, b] bracket format and plain comma list format
+  const filesCheckedMatch = body.match(FILES_CHECKED_RE) || body.match(FILES_CHECKED_FLAT_RE)
+    || body.match(FILES_VERIFIED_RE) || body.match(FILES_VERIFIED_FLAT_RE);
   const evidenceSourceMatch = body.match(EVIDENCE_SOURCE_RE);
   const shaMatch = body.match(SHA_RE);
   const branchMatch = body.match(BRANCH_RE);
