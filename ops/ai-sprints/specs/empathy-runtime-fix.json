@@ -10,8 +10,8 @@
   "producer": {
     "agent": "opencode",
     "model": "minimax-cn-coding-plan/MiniMax-M2.7",
-    "timeoutSeconds": 1200
-  },
+    "timeoutSeconds": 120
+    },
   "reviewerA": {
     "agent": "iflow",
     "model": "glm-5",
@@ -55,22 +55,34 @@
     "investigate": {
       "requiredApprovals": 2,
       "requiredProducerSections": ["SUMMARY", "EVIDENCE", "KEY_EVENTS", "HYPOTHESIS_MATRIX", "CHECKS"],
-      "requiredReviewerSections": ["VERDICT", "BLOCKERS", "FINDINGS", "HYPOTHESIS_MATRIX", "NEXT_FOCUS", "CHECKS"]
+      "requiredReviewerSections": ["VERDICT", "BLOCKERS", "FINDINGS", "HYPOTHESIS_MATRIX", "NEXT_FOCUS", "CHECKS"],
+      "scoringDimensions": ["evidence_quality", "hypothesis_coverage", "root_cause_confidence"],
+      "dimensionThreshold": 3,
+      "requiredDeliverables": ["root_cause_identified", "reproduction_steps", "failure_mode_analysis"]
     },
     "fix-plan": {
       "requiredApprovals": 2,
       "requiredProducerSections": ["SUMMARY", "CHANGES", "EVIDENCE", "CHECKS"],
-      "requiredReviewerSections": ["VERDICT", "BLOCKERS", "FINDINGS", "NEXT_FOCUS", "CHECKS"]
+      "requiredReviewerSections": ["VERDICT", "BLOCKERS", "FINDINGS", "NEXT_FOCUS", "CHECKS"],
+      "scoringDimensions": ["plan_completeness", "risk_assessment", "rollback_safety"],
+      "dimensionThreshold": 3,
+      "requiredDeliverables": ["minimal_fix_plan", "test_outline", "rollback_steps"]
     },
     "implement": {
       "requiredApprovals": 2,
       "requiredProducerSections": ["SUMMARY", "CHANGES", "EVIDENCE", "CHECKS"],
-      "requiredReviewerSections": ["VERDICT", "BLOCKERS", "FINDINGS", "NEXT_FOCUS", "CHECKS"]
+      "requiredReviewerSections": ["VERDICT", "BLOCKERS", "FINDINGS", "NEXT_FOCUS", "CHECKS"],
+      "scoringDimensions": ["correctness", "scope_control", "test_coverage", "regression_risk"],
+      "dimensionThreshold": 3,
+      "requiredDeliverables": ["targeted_fix", "focused_tests", "verification_evidence"]
     },
     "verify": {
       "requiredApprovals": 2,
       "requiredProducerSections": ["SUMMARY", "EVIDENCE", "CHECKS"],
-      "requiredReviewerSections": ["VERDICT", "BLOCKERS", "FINDINGS", "NEXT_FOCUS", "CHECKS"]
+      "requiredReviewerSections": ["VERDICT", "BLOCKERS", "FINDINGS", "NEXT_FOCUS", "CHECKS"],
+      "scoringDimensions": ["verification_thoroughness", "gap_analysis", "production_readiness"],
+      "dimensionThreshold": 3,
+      "requiredDeliverables": ["verification_report", "remaining_gaps", "deployment_checklist"]
     }
   },
   "investigateHypotheses": [

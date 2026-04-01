@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { fileURLToPath } from 'url';
-import { decideStage } from './lib/decision.mjs';
+import { decideStage, buildStageMetrics, buildHandoff } from './lib/decision.mjs';
 import { ensureDir, appendText, fileExists, readJson, writeJson, writeText } from './lib/state-store.mjs';
 import { buildRolePrompt, buildStageBrief, getTaskSpec } from './lib/task-specs.mjs';
 import { archiveRunById } from './lib/archive.mjs';
@@ -405,6 +405,19 @@ function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecard
     `- producerChecks: ${decision.metrics.producerChecks ?? 'n/a'}`,
     `- reviewerAChecks: ${decision.metrics.reviewerAChecks ?? 'n/a'}`,
     `- reviewerBChecks: ${decision.metrics.reviewerBChecks ?? 'n/a'}`,
+    ...(decision.metrics.scoringDimensions?.length
+      ? [
+        `- scoringDimensions: ${decision.metrics.scoringDimensions.join(', ')}`,
+        `- reviewerADimensions: ${JSON.stringify(decision.metrics.reviewerADimensions)}`,
+        `- reviewerBDimensions: ${JSON.stringify(decision.metrics.reviewerBDimensions)}`,
+        `- dimensionFailures: ${decision.metrics.dimensionFailures.length}`,
+      ]
+      : []),
+    ...(decision.metrics.contractItems?.length
+      ? [
+        `- contractDoneItems: ${decision.metrics.contractCheck.doneItems}/${decision.metrics.contractCheck.totalItems}`,
+      ]
+      : []),
     '',
     `## Files`,
     `- Producer: ${producerPath}`,
@@ -413,7 +426,8 @@ function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecard
   ].join('\n');
 
   writeText(decisionPath, `${content}\n`);
-  writeJson(scorecardPath, {
+
+  const scorecard = {
     stage: stageName,
     round: state.currentRound,
     outcome: decision.outcome,
@@ -428,8 +442,37 @@ function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecard
     reviewerAChecks: decision.metrics.reviewerAChecks,
     reviewerBChecks: decision.metrics.reviewerBChecks,
     blockers: decision.blockers,
+    ...(decision.metrics.scoringDimensions?.length
+      ? {
+        scoringDimensions: decision.metrics.scoringDimensions,
+        reviewerADimensions: decision.metrics.reviewerADimensions,
+        reviewerBDimensions: decision.metrics.reviewerBDimensions,
+        dimensionFailures: decision.metrics.dimensionFailures,
+      }
+      : {}),
+    ...(decision.metrics.contractItems?.length
+      ? {
+        contractItems: decision.metrics.contractItems,
+        contractCheck: decision.metrics.contractCheck,
+      }
+      : {}),
     updatedAt: nowIso(),
-  });
+  };
+  writeJson(scorecardPath, scorecard);
+
+  // Build and write handoff for next round
+  if (decision.outcome === 'revise') {
+    const handoff = buildHandoff({
+      reviewerA,
+      reviewerB,
+      producer,
+      metrics: decision.metrics,
+      stageName,
+      round: state.currentRound,
+    });
+    const handoffPath = path.join(stageDir, 'handoff.json');
+    writeJson(handoffPath, handoff);
+  }
   appendTimeline(runDir, `Stage ${stageName} round ${state.currentRound} decision: ${decision.outcome}`);
   updateSummary(runDir, [
     `Status: ${state.status}`,
@@ -533,7 +576,11 @@ function executeStage(runDir, state, spec) {
   const { stageDir, briefPath, producerPath, reviewerAPath, reviewerBPath, decisionPath, scorecardPath } = paths;
   const protectedFiles = protectedArtifacts(runDir, paths);
 
-  writeText(briefPath, `${buildStageBrief(spec, stageName, state.currentRound, previousDecision)}\n`);
+  // Read handoff data for structured carry forward
+  const handoffPath = path.join(stageDir, 'handoff.json');
+  const handoff = fileExists(handoffPath) ? readJson(handoffPath) : null;
+
+  writeText(briefPath, `${buildStageBrief(spec, stageName, state.currentRound, previousDecision, handoff)}\n`);
 
   // On round > 1, clear previous round's role reports so agents must regenerate them
   if (state.currentRound > 1) {
