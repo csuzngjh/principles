@@ -5,8 +5,8 @@ import type { PluginLogger, SubagentRunResult, SubagentWaitResult } from '../ope
 
 const OBSERVER_SESSION_PREFIX = 'agent:main:subagent:empathy-obs-';
 
-// Default timeout for waitForRun (30 seconds)
-const DEFAULT_WAIT_TIMEOUT_MS = 30_000;
+// Default timeout for waitForRun (90 seconds)
+const DEFAULT_WAIT_TIMEOUT_MS = 90_000;
 
 /**
  * Run metadata for active empathy observer runs
@@ -143,11 +143,7 @@ export class EmpathyObserverManager {
             api.logger?.warn?.('[PD:EmpathyObserver] shouldTrigger=false: empathy_engine disabled');
             return false;
         }
-        // Skip BOOT sessions - they run outside "gateway request" context where subagent.run() is unavailable
-        if (sessionId.startsWith('boot-')) {
-            api.logger?.warn?.('[PD:EmpathyObserver] shouldTrigger=false: boot session (gateway request context unavailable)');
-            return false;
-        }
+
         const subagentOk = isSubagentRuntimeAvailable(api.runtime?.subagent);
         if (!subagentOk) {
             api.logger?.warn?.('[PD:EmpathyObserver] shouldTrigger=false: subagent runtime unavailable');

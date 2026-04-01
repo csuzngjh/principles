@@ -52,6 +52,7 @@ function parseArgs() {
         skipBuild: false,
         skipDeps: false,
         force: false,
+        restart: false,
         help: false,
     };
 
@@ -67,6 +68,9 @@ function parseArgs() {
                 break;
             case '--skip-deps':
                 args.skipDeps = true;
+                break;
+            case '--restart':
+                args.restart = true;
                 break;
             case '--force':
             case '-f':
