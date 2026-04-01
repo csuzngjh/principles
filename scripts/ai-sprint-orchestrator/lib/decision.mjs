@@ -1,6 +1,13 @@
 const VERDICT_RE = /(?:VERDICT:\s*\*{0,2}|##\s*VERDICT\s*\n+\*{0,2}\s*)(APPROVE|REVISE|BLOCK)\b/i;
 const DIMENSIONS_RE = /^DIMENSIONS:\s*(.+)$/im;
 const CONTRACT_RE = /CONTRACT:\s*([\s\S]*?)(?:\n[A-Z_ ]+:|$)/i;
+const CODE_EVIDENCE_RE = /CODE_EVIDENCE:\s*([\s\S]*?)(?:\n[A-Z_ ]+:|$)/i;
+const FILES_CHECKED_RE = /files_check(?:ed|es):\s*\[([^\]]*)\]/i;
+const FILES_VERIFIED_RE = /files_verified:\s*\[([^\]]*)\]/i;
+const EVIDENCE_SOURCE_RE = /evidence_source:\s*(local|remote|both)/i;
+const SHA_RE = /sha:\s*([a-f0-9]+)/i;
+const BRANCH_RE = /branch\/worktree:\s*([^\n]+)/i;
+const EVIDENCE_SCOPE_RE = /evidence_scope:\s*(principles|openclaw|both)/i;
 
 export function normalizeVerdict(text) {
   const match = String(text ?? '').match(VERDICT_RE);
@@ -97,6 +104,37 @@ export function checkContractCompletion(contractItems) {
   };
 }
 
+export function extractCodeEvidence(text) {
+  const source = String(text ?? '');
+  const match = source.match(CODE_EVIDENCE_RE);
+  if (!match) return null;
+
+  const body = match[1];
+  // Try files_checked (producer style) or files_verified (reviewer style)
+  const filesCheckedMatch = body.match(FILES_CHECKED_RE) || body.match(FILES_VERIFIED_RE);
+  const evidenceSourceMatch = body.match(EVIDENCE_SOURCE_RE);
+  const shaMatch = body.match(SHA_RE);
+  const branchMatch = body.match(BRANCH_RE);
+  const scopeMatch = body.match(EVIDENCE_SCOPE_RE);
+
+  const parseFileList = (str) => {
+    if (!str) return [];
+    return str.split(',').map((f) => f.trim()).filter(Boolean);
+  };
+
+  return {
+    filesChecked: filesCheckedMatch ? parseFileList(filesCheckedMatch[1]) : [],
+    evidenceSource: evidenceSourceMatch ? evidenceSourceMatch[1] : null,
+    sha: shaMatch ? shaMatch[1] : null,
+    branchWorktree: branchMatch ? branchMatch[1].trim() : null,
+    evidenceScope: scopeMatch ? scopeMatch[1] : null,
+  };
+}
+
+export function hasCodeEvidence(text) {
+  return CODE_EVIDENCE_RE.test(String(text ?? ''));
+}
+
 export function buildHandoff({ reviewerA, reviewerB, producer, metrics, stageName, round }) {
   const blockersA = extractBullets(reviewerA, 'BLOCKERS');
   const blockersB = extractBullets(reviewerB, 'BLOCKERS');
@@ -114,6 +152,9 @@ export function buildHandoff({ reviewerA, reviewerB, producer, metrics, stageNam
       reviewerB: metrics?.reviewerBDimensions ?? {},
     },
     contractItems,
+    producerCodeEvidence: extractCodeEvidence(producer),
+    reviewerACodeEvidence: extractCodeEvidence(reviewerA),
+    reviewerBCodeEvidence: extractCodeEvidence(reviewerB),
     stageName,
     round,
     generatedAt: new Date().toISOString(),
@@ -173,6 +214,12 @@ export function buildStageMetrics({ stageCriteria, producer, reviewerA, reviewer
     contractItems,
     contractCheck,
     requiredDeliverables,
+    producerCodeEvidence: extractCodeEvidence(producer),
+    reviewerACodeEvidence: extractCodeEvidence(reviewerA),
+    reviewerBCodeEvidence: extractCodeEvidence(reviewerB),
+    producerHasCodeEvidence: hasCodeEvidence(producer),
+    reviewerAHasCodeEvidence: hasCodeEvidence(reviewerA),
+    reviewerBHasCodeEvidence: hasCodeEvidence(reviewerB),
   };
 }
 

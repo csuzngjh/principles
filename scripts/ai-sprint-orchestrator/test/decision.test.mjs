@@ -11,6 +11,8 @@ import {
   extractContractItems,
   checkContractCompletion,
   buildHandoff,
+  extractCodeEvidence,
+  hasCodeEvidence,
 } from '../lib/decision.mjs';
 
 test('normalizeVerdict extracts explicit verdict', () => {
@@ -390,4 +392,119 @@ test('decideStage with dimension failure AND contract failure reports both as bl
   const hasContractBlocker = result.blockers.some((b) => b.includes('Contract not fulfilled'));
   assert.ok(hasDimensionBlocker, 'should have dimension blocker');
   assert.ok(hasContractBlocker, 'should have contract blocker');
+});
+
+// --- CODE_EVIDENCE tests ---
+
+test('extractCodeEvidence parses producer CODE_EVIDENCE section', () => {
+  const text = [
+    'SUMMARY:\nDone',
+    'CODE_EVIDENCE:',
+    '- files_checked: [src/observer.js, src/persistence.ts]',
+    '- evidence_source: local',
+    '- sha: abc123def',
+    '- branch/worktree: sprint/abc123/investigate',
+    'FINDINGS:\nNone.',
+  ].join('\n');
+  const evidence = extractCodeEvidence(text);
+  assert.deepEqual(evidence.filesChecked, ['src/observer.js', 'src/persistence.ts']);
+  assert.equal(evidence.evidenceSource, 'local');
+  assert.equal(evidence.sha, 'abc123def');
+  assert.equal(evidence.branchWorktree, 'sprint/abc123/investigate');
+});
+
+test('extractCodeEvidence parses reviewer CODE_EVIDENCE section', () => {
+  const text = [
+    'VERDICT: APPROVE',
+    'CODE_EVIDENCE:',
+    '- files_verified: [src/fix.ts, src/test.ts]',
+    '- evidence_source: both',
+    '- sha: fed123',
+  ].join('\n');
+  const evidence = extractCodeEvidence(text);
+  assert.deepEqual(evidence.filesChecked, ['src/fix.ts', 'src/test.ts']);
+  assert.equal(evidence.evidenceSource, 'both');
+  assert.equal(evidence.sha, 'fed123');
+});
+
+test('extractCodeEvidence returns null when no CODE_EVIDENCE section', () => {
+  assert.equal(extractCodeEvidence('SUMMARY:\nDone'), null);
+  assert.equal(extractCodeEvidence(''), null);
+});
+
+test('extractCodeEvidence parses evidence_scope annotation', () => {
+  const text = [
+    'CODE_EVIDENCE:',
+    '- files_checked: [src/runtime.ts]',
+    '- evidence_source: both',
+    '- sha: fed123',
+    '- evidence_scope: openclaw',
+  ].join('\n');
+  const evidence = extractCodeEvidence(text);
+  assert.equal(evidence.evidenceScope, 'openclaw');
+});
+
+test('extractCodeEvidence handles missing fields gracefully', () => {
+  const text = 'CODE_EVIDENCE:\n- files_checked: [src/a.ts]\n- sha: abc';
+  const evidence = extractCodeEvidence(text);
+  assert.deepEqual(evidence.filesChecked, ['src/a.ts']);
+  assert.equal(evidence.evidenceSource, null);
+  assert.equal(evidence.evidenceScope, null);
+});
+
+test('hasCodeEvidence returns true when CODE_EVIDENCE present', () => {
+  assert.equal(hasCodeEvidence('CODE_EVIDENCE:\n- files_checked: [a.ts]'), true);
+  assert.equal(hasCodeEvidence('SUMMARY:\nDone'), false);
+});
+
+test('buildStageMetrics includes CODE_EVIDENCE fields', () => {
+  const metrics = buildStageMetrics({
+    stageCriteria: {
+      requiredProducerSections: ['SUMMARY'],
+      requiredReviewerSections: ['VERDICT'],
+    },
+    producer: 'SUMMARY:\nDone\nCODE_EVIDENCE:\n- files_checked: [a.ts]\n- sha: abc',
+    reviewerA: 'VERDICT: APPROVE\nCODE_EVIDENCE:\n- files_verified: [b.ts]\n- sha: def',
+    reviewerB: 'VERDICT: APPROVE\nCODE_EVIDENCE:\n- files_verified: [c.ts]\n- sha: def',
+  });
+
+  assert.equal(metrics.producerHasCodeEvidence, true);
+  assert.equal(metrics.reviewerAHasCodeEvidence, true);
+  assert.equal(metrics.reviewerBHasCodeEvidence, true);
+  assert.equal(metrics.producerCodeEvidence.sha, 'abc');
+  assert.equal(metrics.reviewerACodeEvidence.sha, 'def');
+  assert.equal(metrics.reviewerBCodeEvidence.sha, 'def');
+});
+
+test('buildStageMetrics handles missing CODE_EVIDENCE gracefully', () => {
+  const metrics = buildStageMetrics({
+    stageCriteria: {
+      requiredProducerSections: ['SUMMARY'],
+      requiredReviewerSections: ['VERDICT'],
+    },
+    producer: 'SUMMARY:\nDone',
+    reviewerA: 'VERDICT: APPROVE',
+    reviewerB: 'VERDICT: APPROVE',
+  });
+
+  assert.equal(metrics.producerHasCodeEvidence, false);
+  assert.equal(metrics.reviewerAHasCodeEvidence, false);
+  assert.equal(metrics.reviewerBHasCodeEvidence, false);
+  assert.equal(metrics.producerCodeEvidence, null);
+  assert.equal(metrics.reviewerACodeEvidence, null);
+  assert.equal(metrics.reviewerBCodeEvidence, null);
+});
+
+test('buildHandoff includes CODE_EVIDENCE from all roles', () => {
+  const handoff = buildHandoff({
+    reviewerA: 'VERDICT: APPROVE\nBLOCKERS:\n- None.\nCODE_EVIDENCE:\n- files_verified: [a.ts]\n- sha: abc',
+    reviewerB: 'VERDICT: APPROVE\nBLOCKERS:\n- None.\nCODE_EVIDENCE:\n- files_verified: [b.ts]\n- sha: def',
+    producer: 'SUMMARY:\nDone\nCODE_EVIDENCE:\n- files_checked: [main.ts]\n- sha: ghi',
+    metrics: {},
+    stageName: 'implement-pass-1',
+    round: 1,
+  });
+  assert.deepEqual(handoff.producerCodeEvidence.filesChecked, ['main.ts']);
+  assert.deepEqual(handoff.reviewerACodeEvidence.filesChecked, ['a.ts']);
+  assert.deepEqual(handoff.reviewerBCodeEvidence.filesChecked, ['b.ts']);
 });

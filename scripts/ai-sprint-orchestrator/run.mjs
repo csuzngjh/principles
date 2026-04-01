@@ -63,6 +63,7 @@ function createSprintState(spec, runId, specPath) {
     lastHeartbeatAt: nowIso(),
     currentRole: null,
     haltReason: null,
+    worktree: null,  // { worktreePath, branchName, headSha, baseBranch } — set by ensureWorktree
     createdAt: nowIso(),
     updatedAt: nowIso(),
   };
@@ -214,6 +215,99 @@ function runAgent({ cwd, agent, model, prompt, timeoutSeconds = 1800, failLogPat
   return stdout.trim();
 }
 
+/**
+ * Async agent runner using spawn (non-blocking) — used for parallel reviewer execution.
+ * Returns a Promise that resolves with { stdout, stderr, status } or rejects on error.
+ */
+function runAgentAsync({ cwd, agent, model, prompt, timeoutSeconds = 1800 }) {
+  return new Promise((resolve, reject) => {
+    const { spawn } = require('child_process');
+    const promptFile = path.join(os.tmpdir(), `ai-sprint-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`);
+
+    const cleanup = () => {
+      try { fs.rmSync(promptFile, { force: true }); } catch {}
+    };
+
+    try {
+      fs.writeFileSync(promptFile, prompt, 'utf8');
+    } catch (writeErr) {
+      reject(new Error(`Failed to write prompt file: ${writeErr.message}`));
+      return;
+    }
+
+    const timeoutMs = (timeoutSeconds + 60) * 1000;
+    let settled = false;
+    let stdout = '';
+    let stderr = '';
+    let proc;
+
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        cleanup();
+        try { proc?.kill(); } catch {}
+        reject(new Error(`Agent ${agent} timed out after ${timeoutSeconds}s`));
+      }
+    }, timeoutMs);
+
+    try {
+      if (process.platform === 'win32') {
+        proc = spawn('powershell.exe', [
+          '-NoProfile', '-Command',
+          `acpx --cwd $env:AI_SPRINT_CWD --approve-all --model $env:AI_SPRINT_MODEL --timeout $env:AI_SPRINT_TIMEOUT ${agent} exec -f $env:AI_SPRINT_PROMPT`,
+        ], {
+          cwd,
+          encoding: 'utf8',
+          maxBuffer: 10 * 1024 * 1024,
+          shell: false,
+          env: {
+            ...process.env,
+            AI_SPRINT_CWD: cwd,
+            AI_SPRINT_MODEL: model,
+            AI_SPRINT_TIMEOUT: String(timeoutSeconds),
+            AI_SPRINT_PROMPT: promptFile,
+          },
+        });
+      } else {
+        proc = spawn('acpx', [
+          '--cwd', cwd, '--approve-all', '--model', model,
+          '--timeout', String(timeoutSeconds), agent, 'exec', '-f', promptFile,
+        ], {
+          cwd,
+          encoding: 'utf8',
+          maxBuffer: 10 * 1024 * 1024,
+          shell: false,
+        });
+      }
+    } catch (spawnErr) {
+      settled = true;
+      clearTimeout(timer);
+      cleanup();
+      reject(new Error(`Failed to spawn agent ${agent}: ${spawnErr.message}`));
+      return;
+    }
+
+    proc.stdout.on('data', (data) => { stdout += data; });
+    proc.stderr.on('data', (data) => { stderr += data; });
+    proc.on('close', (code) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        cleanup();
+        resolve({ stdout: stdout.trim(), stderr: stderr.trim(), status: code });
+      }
+    });
+    proc.on('error', (err) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        cleanup();
+        reject(err);
+      }
+    });
+  });
+}
+
 function roleConfig(spec, role) {
   if (role === 'producer') return spec.producer;
   if (role === 'reviewer_a') return spec.reviewerA;
@@ -226,9 +320,16 @@ function loadSpec(state, args) {
   return getTaskSpec(state.taskId, specPath);
 }
 
-function roleTimeout(spec, role) {
+/**
+ * Resolve per-role timeout for a given stage.
+ * Priority: spec.stageRoleTimeouts[stage][role] > config.timeoutSeconds > 600
+ */
+function stageRoleTimeout(spec, stage, role) {
+  if (spec.stageRoleTimeouts?.[stage]?.[role] != null) {
+    return spec.stageRoleTimeouts[stage][role];
+  }
   const config = roleConfig(spec, role);
-  return config.timeoutSeconds ?? 600;
+  return config?.timeoutSeconds ?? 600;
 }
 
 function ensureStagePaths(runDir, stageIndex, stageName) {
@@ -333,11 +434,13 @@ function detectProtectedWriteViolation(files, snapshot) {
   return null;
 }
 
-function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecardPath, producerPath, reviewerAPath, reviewerBPath, state }) {
+function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecardPath, producerPath, reviewerAPath, reviewerBPath, state, reviewerTimeouts = null }) {
+  // Identify genuinely missing reports (not just timeouts with no report)
+  const timedOutRoles = new Set((reviewerTimeouts ?? []).map((r) => r.role));
   const missingFiles = [];
   if (!fileExists(producerPath)) missingFiles.push(`producer: ${producerPath}`);
-  if (!fileExists(reviewerAPath)) missingFiles.push(`reviewer_a: ${reviewerAPath}`);
-  if (!fileExists(reviewerBPath)) missingFiles.push(`reviewer_b: ${reviewerBPath}`);
+  if (!fileExists(reviewerAPath) && !timedOutRoles.has('reviewer_a')) missingFiles.push(`reviewer_a: ${reviewerAPath} (timed out)`);
+  if (!fileExists(reviewerBPath) && !timedOutRoles.has('reviewer_b')) missingFiles.push(`reviewer_b: ${reviewerBPath} (timed out)`);
 
   if (missingFiles.length > 0) {
     writeText(decisionPath, [
@@ -359,6 +462,7 @@ function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecard
       outcome: 'error',
       summary: `Missing reports: ${missingFiles.join('; ')}`,
       missingReports: missingFiles,
+      reviewerTimeouts: reviewerTimeouts ?? null,
       updatedAt: nowIso(),
     });
     appendTimeline(runDir, `Stage ${stageName} round ${state.currentRound} decision: error (missing reports)`);
@@ -458,6 +562,9 @@ function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecard
         contractCheck: decision.metrics.contractCheck,
       }
       : {}),
+    ...(reviewerTimeouts
+      ? { reviewerTimeouts }
+      : {}),
     updatedAt: nowIso(),
   };
   writeJson(scorecardPath, scorecard);
@@ -488,9 +595,63 @@ function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecard
   return decision;
 }
 
-function advanceState(state, spec, decision) {
+/**
+ * Run merge gate: fetch origin and compare local vs remote HEAD SHA.
+ * Returns { localHeadSha, remoteHeadSha, shaMatch }.
+ * Writes result to stages/<stage>/merge-gate.json.
+ */
+function runMergeGateCheck({ runDir, state, spec }) {
+  const workspace = state.worktree?.worktreePath ?? spec.workspace;
+  const remote = 'origin';
+
+  try {
+    // Fetch latest remote HEAD
+    spawnSync('git', ['fetch', remote], { cwd: workspace, encoding: 'utf8', timeout: 60_000 });
+
+    const localSha = (spawnSync('git', ['rev-parse', 'HEAD'], {
+      cwd: workspace, encoding: 'utf8', timeout: 10_000,
+    }).stdout ?? '').trim();
+
+    const remoteSha = (spawnSync('git', ['rev-parse', `${remote}/HEAD`], {
+      cwd: workspace, encoding: 'utf8', timeout: 10_000,
+    }).stdout ?? '').trim();
+
+    const shaMatch = localSha === remoteSha;
+
+    const result = { localHeadSha: localSha, remoteHeadSha: remoteSha, shaMatch };
+
+    // Write to verify stage directory
+    const stageDirName = `${String(state.currentStageIndex + 1).padStart(2, '0')}-${state.currentStage}`;
+    const mergeGatePath = path.join(runDir, 'stages', stageDirName, 'merge-gate.json');
+    writeJson(mergeGatePath, result);
+    appendTimeline(runDir, `Merge gate: local=${localSha.slice(0, 7)} remote=${remoteSha.slice(0, 7)} match=${shaMatch}`);
+
+    return result;
+  } catch (gateErr) {
+    appendTimeline(runDir, `Merge gate check failed: ${gateErr.message}`);
+    return { localHeadSha: null, remoteHeadSha: null, shaMatch: false, error: gateErr.message };
+  }
+}
+
+function advanceState(state, spec, decision, { runDir } = {}) {
   if (decision.outcome === 'advance') {
     if (state.currentStageIndex >= spec.stages.length - 1) {
+      // Merge gate check before completing final stage
+      if (runDir) {
+        const mergeGate = runMergeGateCheck({ runDir, state, spec });
+        if (!mergeGate.shaMatch) {
+          state.status = 'halted';
+          state.haltReason = {
+            type: 'merge_gate_failed',
+            stage: state.currentStage,
+            round: state.currentRound,
+            details: `Merge gate failed: local SHA ${mergeGate.localHeadSha?.slice(0, 7) ?? '?'} != remote HEAD ${mergeGate.remoteHeadSha?.slice(0, 7) ?? '?'}. Push or merge before completing.`,
+            blockers: ['Local SHA does not match remote PR head. Fetch and merge or rebase before completing.'],
+            mergeGate,
+          };
+          return;
+        }
+      }
       state.status = 'completed';
       return;
     }
@@ -501,6 +662,12 @@ function advanceState(state, spec, decision) {
   }
 
   if (decision.outcome === 'revise') {
+    // Route implement-pass-1 revise → implement-pass-2 automatically
+    if (state.currentStage === 'implement-pass-1') {
+      state.currentStage = 'implement-pass-2';
+      state.currentRound = 1;
+      return;
+    }
     state.currentRound += 1;
     return;
   }
@@ -555,10 +722,221 @@ function reconcileRunState(runDir, state) {
     `Halt reason: ${state.haltReason.details}`,
   ]);
   appendTimeline(runDir, `Sprint reconciled to halted: ${state.haltReason.details}`);
+  cleanupWorktree({ state, runDir });
   return state;
 }
 
-function executeStage(runDir, state, spec) {
+/**
+ * Execute a single reviewer role asynchronously with independent timeout tracking.
+ * Returns a result object: { role, output, timedOut, reportExisted, violatedFile }
+ */
+async function runReviewerRole({ runDir, state, spec, paths, role }) {
+  const stageName = state.currentStage;
+  const config = roleConfig(spec, role);
+  const { reportPath, stdoutPath } = roleArtifactPaths(paths, role);
+  const failLog = path.join(paths.stageDir, `${role.replace('_', '-')}-failure.log`);
+
+  // Skip if report already exists
+  if (fileExists(reportPath) && fs.readFileSync(reportPath, 'utf8').trim()) {
+    return { role, output: fs.readFileSync(reportPath, 'utf8').trim(), timedOut: false, reportExisted: true, violatedFile: null };
+  }
+
+  const protectedFiles = protectedArtifacts(runDir, paths);
+  const protectedSnapshot = snapshotProtectedFiles(protectedFiles);
+  const prompt = buildRolePrompt({
+    spec,
+    stage: stageName,
+    round: state.currentRound,
+    role,
+    runDir,
+    stageDir: paths.stageDir,
+    briefPath: paths.briefPath,
+    producerPath: paths.producerPath,
+    reviewerAPath: paths.reviewerAPath,
+    reviewerBPath: paths.reviewerBPath,
+  });
+  const timeoutSeconds = stageRoleTimeout(spec, stageName, role);
+  const cwd = spec.workspace;
+
+  let output = null;
+  let timedOut = false;
+  let violatedFile = null;
+
+  try {
+    const result = await runAgentAsync({ cwd, agent: config.agent, model: config.model, prompt, timeoutSeconds });
+    const stdout = result.stdout ?? '';
+    const stderr = result.stderr ?? '';
+
+    if (result.status !== 0) {
+      // Agent returned non-zero exit
+      ensureDir(path.dirname(failLog));
+      writeText(failLog, `# Agent Failure Log\n\n- agent: ${config.agent}\n- model: ${config.model}\n- exitStatus: ${result.status}\n\n## stdout\n\n${stdout.slice(0, 2000)}\n\n## stderr\n\n${stderr.slice(0, 2000)}\n`);
+      throw new Error(`Agent ${config.agent} failed with status ${result.status}`);
+    }
+
+    output = stdout.trim();
+    if (output) writeText(stdoutPath, `${output}\n`);
+  } catch (err) {
+    // Check if the agent wrote its report despite the error
+    if (fileExists(reportPath) && fs.readFileSync(reportPath, 'utf8').trim()) {
+      output = null;
+      timedOut = true;
+    } else if (err.message?.includes('timed out')) {
+      timedOut = true;
+      ensureDir(path.dirname(failLog));
+      writeText(failLog, `# Agent Timeout Log\n\n- agent: ${config.agent}\n- model: ${config.model}\n- timeout: ${timeoutSeconds}s\n- error: ${err.message}\n`);
+    } else {
+      // Re-throw unexpected errors (but don't lose the fail log)
+      ensureDir(path.dirname(failLog));
+      writeText(failLog, `# Agent Failure Log\n\n- agent: ${config.agent}\n- model: ${config.model}\n- error: ${err.message}\n`);
+      throw err;
+    }
+  }
+
+  const text = readRoleOutput({ reportPath, stdout: output ?? '' });
+  if (!text && output) {
+    writeText(reportPath, `${output}\n`);
+  } else if (text) {
+    if (!fileExists(reportPath)) writeText(reportPath, `${text}\n`);
+  }
+
+  const violated = detectProtectedWriteViolation(protectedFiles, protectedSnapshot);
+  if (violated) {
+    violatedFile = violated;
+  }
+
+  return { role, output: text || output || null, timedOut, reportExisted: false, violatedFile };
+}
+
+const MUTATING_STAGES = ['implement-pass-1', 'implement-pass-2'];
+
+/**
+ * Ensure a git worktree exists for the given mutating stage.
+ * Reuses existing worktree if already present. Returns null if not applicable.
+ */
+function ensureWorktree({ spec, runDir, state, stageName }) {
+  if (!MUTATING_STAGES.includes(stageName)) return null;
+
+  const baseWorkspace = spec.workspace;
+  const baseBranch = spec.branch ?? 'main';
+
+  // Reuse existing worktree if already created for this stage
+  if (state.worktree?.worktreePath && fileExists(state.worktree.worktreePath)) {
+    appendTimeline(runDir, `Reusing existing worktree at ${state.worktree.worktreePath}`);
+    return state.worktree;
+  }
+
+  const branchName = `sprint/${state.runId.slice(0, 12)}/${stageName}`;
+  const worktreePath = path.join(runDir, 'worktrees', stageName);
+
+  try {
+    ensureDir(path.dirname(worktreePath));
+
+    // Try to create a new worktree with a new branch
+    let result = spawnSync('git', ['worktree', 'add', '-b', branchName, worktreePath, baseWorkspace], {
+      cwd: baseWorkspace,
+      encoding: 'utf8',
+      timeout: 30_000,
+    });
+
+    if (result.status !== 0) {
+      // Branch may already exist locally — try adding with existing branch
+      result = spawnSync('git', ['worktree', 'add', worktreePath, branchName], {
+        cwd: baseWorkspace,
+        encoding: 'utf8',
+        timeout: 30_000,
+      });
+      if (result.status !== 0) {
+        appendTimeline(runDir, `Worktree creation failed: ${result.stderr} — falling back to base workspace`);
+        return null;
+      }
+    }
+
+    const headSha = (spawnSync('git', ['rev-parse', 'HEAD'], {
+      cwd: worktreePath,
+      encoding: 'utf8',
+      timeout: 10_000,
+    }).stdout ?? '').trim();
+
+    const worktreeInfo = {
+      worktreePath,
+      branchName,
+      headSha,
+      baseBranch,
+      dirtyFiles: [],
+    };
+
+    state.worktree = worktreeInfo;
+    appendTimeline(runDir, `Created worktree at ${worktreePath} (branch: ${branchName}, sha: ${headSha})`);
+    return worktreeInfo;
+  } catch (wtErr) {
+    appendTimeline(runDir, `Worktree creation failed: ${wtErr.message} — falling back to base workspace`);
+    return null;
+  }
+}
+
+/**
+ * Capture git status for the worktree and write git-status.json to stageDir.
+ */
+function captureGitStatus({ worktreePath, runDir, stageDir, state }) {
+  if (!worktreePath || !fileExists(worktreePath)) return null;
+  try {
+    const statusResult = spawnSync('git', ['status', '--short'], {
+      cwd: worktreePath,
+      encoding: 'utf8',
+      timeout: 10_000,
+    });
+    const branchResult = spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+      cwd: worktreePath,
+      encoding: 'utf8',
+      timeout: 10_000,
+    });
+    const shaResult = spawnSync('git', ['rev-parse', 'HEAD'], {
+      cwd: worktreePath,
+      encoding: 'utf8',
+      timeout: 10_000,
+    });
+    const dirtyFiles = ((statusResult.stdout ?? '').trim().split('\n').filter(Boolean) || []);
+
+    const gitStatus = {
+      branch: (branchResult.stdout ?? '').trim(),
+      headSha: (shaResult.stdout ?? '').trim(),
+      worktreePath,
+      dirtyFiles,
+      baseBranch: state.worktree?.baseBranch ?? null,
+      remoteBranch: null,
+    };
+
+    const gitStatusPath = path.join(stageDir, 'git-status.json');
+    writeJson(gitStatusPath, gitStatus);
+    appendTimeline(runDir, `Git status: ${dirtyFiles.length} dirty files, sha: ${gitStatus.headSha}`);
+    return gitStatus;
+  } catch (err) {
+    appendTimeline(runDir, `Git status capture failed: ${err.message}`);
+    return null;
+  }
+}
+
+/**
+ * Remove the worktree from the filesystem (on halt).
+ */
+function cleanupWorktree({ state, runDir }) {
+  if (!state.worktree?.worktreePath) return;
+  const { worktreePath } = state.worktree;
+  try {
+    spawnSync('git', ['worktree', 'remove', '--force', worktreePath], {
+      cwd: path.dirname(worktreePath),
+      encoding: 'utf8',
+      timeout: 30_000,
+    });
+    appendTimeline(runDir, `Cleaned up worktree at ${worktreePath}`);
+    state.worktree = null;
+  } catch {
+    appendTimeline(runDir, `Worktree cleanup failed for ${worktreePath} — manual cleanup required`);
+  }
+}
+
+async function executeStage(runDir, state, spec) {
   const stageName = state.currentStage;
   const previousDecisionPath = path.join(
     runDir,
@@ -595,7 +973,12 @@ function executeStage(runDir, state, spec) {
     appendTimeline(runDir, `Cleared previous round reports for stage ${stageName} round ${state.currentRound}`);
   }
 
-  appendTimeline(runDir, `Stage ${stageName} round ${state.currentRound} started`);
+  const outputs = {};
+  const stageStartedAt = Date.now();
+  const stageTimeoutMs = (spec.stageTimeoutMinutes ?? 30) * 60_000;
+
+  // ── Phase 1: Producer (sequential) ────────────────────────────────────────
+  appendTimeline(runDir, `Stage ${stageName} round ${state.currentRound} started (producer)`);
   updateSummary(runDir, [
     `Status: ${state.status}`,
     `Stage: ${stageName}`,
@@ -603,119 +986,178 @@ function executeStage(runDir, state, spec) {
     'Producer is running.',
   ]);
 
-  const roles = ['producer', 'reviewer_a', 'reviewer_b'];
-  const outputs = {};
-  const stageStartedAt = Date.now();
-  const stageTimeoutMs = (spec.stageTimeoutMinutes ?? 30) * 60_000;
+  maybeAbort(runDir, state);
+  heartbeatState(runDir, state, { currentRole: 'producer' });
 
-  for (const role of roles) {
-    maybeAbort(runDir, state);
-    heartbeatState(runDir, state, { currentRole: role });
-
-    // Per-stage runtime check
-    const stageElapsed = Date.now() - stageStartedAt;
-    if (stageElapsed > stageTimeoutMs) {
-      state.status = 'halted';
-      state.haltReason = {
-        type: 'stage_timeout',
-        stage: stageName,
-        round: state.currentRound,
-        details: `Stage ${stageName} exceeded ${(stageTimeoutMs / 60_000).toFixed(0)} minutes at role ${role}`,
-        blockers: [`Stage timeout at role ${role} after ${(stageElapsed / 60_000).toFixed(1)} minutes`],
-      };
-      saveState(runDir, state);
-      appendTimeline(runDir, `Sprint halted: ${state.haltReason.details}`);
-      updateSummary(runDir, [
-        `Status: ${state.status}`,
-        `Stage: ${stageName}`,
-        `Round: ${state.currentRound}`,
-        `Halt reason: ${state.haltReason.details}`,
-      ]);
-      return { outcome: 'halt', summary: state.haltReason.details, blockers: state.haltReason.blockers, metrics: {} };
-    }
-    const config = roleConfig(spec, role);
-    const prompt = buildRolePrompt({
-      spec,
+  // Per-stage runtime check before producer
+  const stageElapsedProducer = Date.now() - stageStartedAt;
+  if (stageElapsedProducer > stageTimeoutMs) {
+    state.status = 'halted';
+    state.haltReason = {
+      type: 'stage_timeout',
       stage: stageName,
       round: state.currentRound,
-      role,
-      runDir,
-      stageDir,
-      briefPath,
-      producerPath,
-      reviewerAPath,
-      reviewerBPath,
-    });
-    // P3: skip role if report already exists and is non-empty
-    const { reportPath, stdoutPath } = roleArtifactPaths(paths, role);
-    if (fileExists(reportPath) && fs.readFileSync(reportPath, 'utf8').trim()) {
-      outputs[role] = fs.readFileSync(reportPath, 'utf8').trim();
-      appendTimeline(runDir, `${role} skipped (report already exists) stage ${stageName} round ${state.currentRound}`);
-      continue;
+      details: `Stage ${stageName} exceeded ${(stageTimeoutMs / 60_000).toFixed(0)} minutes before producer`,
+      blockers: [`Stage timeout before producer started after ${(stageElapsedProducer / 60_000).toFixed(1)} minutes`],
+    };
+    saveState(runDir, state);
+    appendTimeline(runDir, `Sprint halted: ${state.haltReason.details}`);
+    updateSummary(runDir, [
+      `Status: ${state.status}`,
+      `Stage: ${stageName}`,
+      `Round: ${state.currentRound}`,
+      `Halt reason: ${state.haltReason.details}`,
+    ]);
+    return { outcome: 'halt', summary: state.haltReason.details, blockers: state.haltReason.blockers, metrics: {} };
+  }
+
+  const producerConfig = roleConfig(spec, 'producer');
+  const producerPrompt = buildRolePrompt({
+    spec,
+    stage: stageName,
+    round: state.currentRound,
+    role: 'producer',
+    runDir,
+    stageDir,
+    briefPath,
+    producerPath,
+    reviewerAPath,
+    reviewerBPath,
+  });
+  const { reportPath: producerReportPath, stdoutPath: producerStdoutPath } = roleArtifactPaths(paths, 'producer');
+
+  // Worktree setup for mutating stages
+  const worktreeInfo = ensureWorktree({ spec, runDir, state, stageName });
+  const producerWorkspace = worktreeInfo?.worktreePath ?? (spec.branchWorkspace || spec.workspace);
+
+  if (fileExists(producerReportPath) && fs.readFileSync(producerReportPath, 'utf8').trim()) {
+    outputs.producer = fs.readFileSync(producerReportPath, 'utf8').trim();
+    appendTimeline(runDir, `producer skipped (report already exists) stage ${stageName} round ${state.currentRound}`);
+    // Capture git status even for skipped producer (worktree may have changed)
+    if (worktreeInfo?.worktreePath) {
+      captureGitStatus({ worktreePath: worktreeInfo.worktreePath, runDir, stageDir, state });
     }
+  } else {
     const protectedSnapshot = snapshotProtectedFiles(protectedFiles);
-    const failLog = path.join(stageDir, `${role.replace('_', '-')}-failure.log`);
-    let output;
-    let agentTimedOut = false;
+    const producerFailLog = path.join(stageDir, 'producer-failure.log');
+    let producerOutput;
     try {
-      output = runAgent({
-        cwd: role === 'producer' ? (spec.branchWorkspace || spec.workspace) : spec.workspace,
-        agent: config.agent,
-        model: config.model,
-        prompt,
-        timeoutSeconds: roleTimeout(spec, role),
-        failLogPath: failLog,
+      producerOutput = runAgent({
+        cwd: producerWorkspace,
+        agent: producerConfig.agent,
+        model: producerConfig.model,
+        prompt: producerPrompt,
+        timeoutSeconds: stageRoleTimeout(spec, stageName, 'producer'),
+        failLogPath: producerFailLog,
       });
     } catch (agentErr) {
-      // If spawnSync timed out but the agent wrote its report, continue instead of halting
-      if (fileExists(reportPath) && fs.readFileSync(reportPath, 'utf8').trim()) {
-        appendTimeline(runDir, `${role} spawnSync timed out but report exists — recovering stage ${stageName} round ${state.currentRound}`);
-        output = null;
-        agentTimedOut = true;
+      if (fileExists(producerReportPath) && fs.readFileSync(producerReportPath, 'utf8').trim()) {
+        appendTimeline(runDir, `producer spawnSync timed out but report exists — recovering stage ${stageName} round ${state.currentRound}`);
+        producerOutput = null;
       } else {
         throw agentErr;
       }
     }
-    if (output) writeText(stdoutPath, `${output}\n`);
-    outputs[role] = readRoleOutput({ reportPath, stdout: output ?? '' });
-
-    if (!fileExists(reportPath) || !fs.readFileSync(reportPath, 'utf8').trim()) {
-      writeText(reportPath, `${outputs[role]}\n`);
+    if (producerOutput) writeText(producerStdoutPath, `${producerOutput}\n`);
+    outputs.producer = readRoleOutput({ reportPath: producerReportPath, stdout: producerOutput ?? '' });
+    if (!fileExists(producerReportPath) || !fs.readFileSync(producerReportPath, 'utf8').trim()) {
+      writeText(producerReportPath, `${outputs.producer}\n`);
     }
-    const violatedFile = detectProtectedWriteViolation(protectedFiles, protectedSnapshot);
-    if (violatedFile) {
+    const producerViolated = detectProtectedWriteViolation(protectedFiles, protectedSnapshot);
+    if (producerViolated) {
       state.status = 'halted';
       state.haltReason = {
         type: 'protected_file_modified',
         stage: stageName,
         round: state.currentRound,
-        details: `${role} modified orchestrator-owned file ${violatedFile}`,
-        blockers: [`Protected file modified: ${violatedFile}`],
+        details: `producer modified orchestrator-owned file ${producerViolated}`,
+        blockers: [`Protected file modified: ${producerViolated}`],
       };
       saveState(runDir, state);
-      appendTimeline(runDir, `Sprint halted: ${role} modified protected file ${violatedFile}`);
+      appendTimeline(runDir, `Sprint halted: producer modified protected file ${producerViolated}`);
       updateSummary(runDir, [
         `Status: ${state.status}`,
         `Stage: ${stageName}`,
         `Round: ${state.currentRound}`,
         `Halt reason: ${state.haltReason.details}`,
       ]);
+      cleanupWorktree({ state, runDir });
       throw new Error(state.haltReason.details);
     }
-    appendTimeline(runDir, `${role} completed stage ${stageName} round ${state.currentRound}`);
-    heartbeatState(runDir, state, { currentRole: null });
+    appendTimeline(runDir, `producer completed stage ${stageName} round ${state.currentRound}`);
+    // Capture git status after producer completes for reviewers to reference
+    if (worktreeInfo?.worktreePath) {
+      captureGitStatus({ worktreePath: worktreeInfo.worktreePath, runDir, stageDir, state });
+    }
   }
+  heartbeatState(runDir, state, { currentRole: null });
+
+  // ── Phase 2: Reviewers in parallel ────────────────────────────────────────
+  maybeAbort(runDir, state);
+  heartbeatState(runDir, state, { currentRole: 'reviewer_a || reviewer_b' });
+
+  // Per-stage runtime check before launching reviewers
+  const stageElapsedReviewers = Date.now() - stageStartedAt;
+  if (stageElapsedReviewers > stageTimeoutMs) {
+    state.status = 'halted';
+    state.haltReason = {
+      type: 'stage_timeout',
+      stage: stageName,
+      round: state.currentRound,
+      details: `Stage ${stageName} exceeded ${(stageTimeoutMs / 60_000).toFixed(0)} minutes before reviewers`,
+      blockers: [`Stage timeout before reviewers after ${(stageElapsedReviewers / 60_000).toFixed(1)} minutes`],
+    };
+    saveState(runDir, state);
+    appendTimeline(runDir, `Sprint halted: ${state.haltReason.details}`);
+    updateSummary(runDir, [
+      `Status: ${state.status}`,
+      `Stage: ${stageName}`,
+      `Round: ${state.currentRound}`,
+      `Halt reason: ${state.haltReason.details}`,
+    ]);
+    cleanupWorktree({ state, runDir });
+    return { outcome: 'halt', summary: state.haltReason.details, blockers: state.haltReason.blockers, metrics: {} };
+  }
+
+  appendTimeline(runDir, `Stage ${stageName} round ${state.currentRound} reviewers launching in parallel`);
+  updateSummary(runDir, [
+    `Status: ${state.status}`,
+    `Stage: ${stageName}`,
+    `Round: ${state.currentRound}`,
+    'Reviewers are running in parallel.',
+  ]);
+
+  // Run both reviewers in parallel
+  const reviewerResults = await Promise.all([
+    runReviewerRole({ runDir, state, spec, paths, role: 'reviewer_a' }),
+    runReviewerRole({ runDir, state, spec, paths, role: 'reviewer_b' }),
+  ]);
+
+  // Collect outputs and timeout flags
+  const reviewerTimeouts = [];
+  for (const result of reviewerResults) {
+    outputs[result.role] = result.output;
+    if (result.timedOut) {
+      appendTimeline(runDir, `${result.role} timed out stage ${stageName} round ${state.currentRound}`);
+      reviewerTimeouts.push({ role: result.role, timedOut: true, hadReport: result.reportExisted });
+    }
+    if (result.violatedFile) {
+      appendTimeline(runDir, `${result.role} modified protected file ${result.violatedFile}`);
+    }
+  }
+  heartbeatState(runDir, state, { currentRole: null });
 
   return decideAndPersist({
     runDir,
     stageName,
-      stageDir,
-      decisionPath,
-      scorecardPath,
-      producerPath,
-      reviewerAPath,
+    stageDir,
+    decisionPath,
+    scorecardPath,
+    producerPath,
+    reviewerAPath,
     reviewerBPath,
     state,
+    reviewerTimeouts: reviewerTimeouts.length > 0 ? reviewerTimeouts : null,
   });
 }
 
@@ -928,7 +1370,7 @@ function showStatus(runId) {
   console.log(lines.join('\n'));
 }
 
-function main() {
+async function main() {
   const args = parseArgs(process.argv.slice(2));
 
   if (args.help) {
@@ -1034,8 +1476,8 @@ function main() {
         break;
       }
 
-      const decision = executeStage(runDir, state, spec);
-      advanceState(state, spec, decision);
+      const decision = await executeStage(runDir, state, spec);
+      advanceState(state, spec, decision, { runDir });
       saveState(runDir, state);
       if (state.status === 'completed') {
         appendTimeline(runDir, 'Sprint completed');
@@ -1095,4 +1537,7 @@ function main() {
   console.log(runDir);
 }
 
-main();
+main().catch((err) => {
+  console.error('Fatal error:', err.message);
+  process.exit(1);
+});

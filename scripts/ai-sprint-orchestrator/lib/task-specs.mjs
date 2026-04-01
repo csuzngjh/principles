@@ -172,18 +172,27 @@ export function buildRolePrompt({ spec, stage, round, role, runDir, stageDir, br
           `All deliverables must reach status: DONE for the stage to advance.`,
         ]
       : [];
+    const codeEvidenceInstruction = [
+      `Your report must include a CODE_EVIDENCE section. Format:`,
+      `- files_checked: <comma-separated list of files you examined>`,
+      `- evidence_source: local|remote|both`,
+      `- sha: <HEAD SHA at time of evidence collection>`,
+      `- branch/worktree: <branch name or worktree path if applicable>`,
+      `When OpenClaw runtime semantics are involved, add: evidence_scope: principles|openclaw|both`,
+    ].join('\n');
 
     return [
       ...base,
       `You may inspect and modify repository code when the stage requires implementation.`,
       `You are expected to work autonomously within this stage until you either satisfy the stage goals or hit a concrete blocker.`,
       `Persist your intermediate findings frequently so a future agent can resume without relying on chat context.`,
-      `At the end, write a markdown report to ${outputPath} with exactly these sections: SUMMARY, CHANGES, EVIDENCE, KEY_EVENTS, HYPOTHESIS_MATRIX, CHECKS, OPEN_RISKS${requiredDeliverables.length > 0 ? ', CONTRACT' : ''}.`,
+      `At the end, write a markdown report to ${outputPath} with exactly these sections: SUMMARY, CHANGES, EVIDENCE, CODE_EVIDENCE, KEY_EVENTS, HYPOTHESIS_MATRIX, CHECKS, OPEN_RISKS${requiredDeliverables.length > 0 ? ', CONTRACT' : ''}.`,
       `KEY_EVENTS should be bullets describing concrete completed milestones or validated events.`,
       stage === 'investigate'
         ? `HYPOTHESIS_MATRIX must include one bullet per required hypothesis in this exact shape: - <hypothesis_id>: SUPPORTED|REFUTED|UNPROVEN — <brief evidence>.`
         : `HYPOTHESIS_MATRIX should capture any remaining competing explanations or risk assumptions.`,
       `CHECKS should be a single-line machine-readable summary such as: CHECKS: evidence=ok;tests=not-run;scope=pd-only;prompt-isolation=confirmed`,
+      codeEvidenceInstruction,
       ...contractInstruction,
       `Do not dump long reasoning logs to stdout. Stdout should only contain a short completion line such as: ROLE_STATUS: completed; report=${outputPath}`,
       `Stay within Principles. Do not modify OpenClaw.`,
@@ -211,13 +220,21 @@ export function buildRolePrompt({ spec, stage, round, role, runDir, stageDir, br
         `Flag any unnecessary architectural expansion or gold-plating.`,
       ];
 
+  const codeEvidenceReviewerInstruction = [
+    `Your report must include a CODE_EVIDENCE section. Format:`,
+    `- files_verified: <comma-separated list of files you read or checked for evidence>`,
+    `- evidence_source: local|remote|both`,
+    `- sha: <the SHA you verified against>`,
+    `When OpenClaw runtime semantics are involved, add: evidence_scope: principles|openclaw|both`,
+  ].join('\n');
+
   return [
     ...base,
     `Read the producer report: ${counterpart}`,
     ...reviewerFocus,
     `Review independently. Do not modify repository files unless explicitly needed for evidence collection.`,
     `You are expected to challenge weak assumptions and record checkpoints while reviewing, not just emit a final verdict.`,
-    `At the end, write a markdown report to ${outputPath} with exactly these sections: VERDICT, BLOCKERS, FINDINGS, HYPOTHESIS_MATRIX, NEXT_FOCUS, CHECKS.`,
+    `At the end, write a markdown report to ${outputPath} with exactly these sections: VERDICT, BLOCKERS, FINDINGS, CODE_EVIDENCE, HYPOTHESIS_MATRIX, NEXT_FOCUS, CHECKS.`,
     stage === 'investigate'
       ? `HYPOTHESIS_MATRIX must classify each required hypothesis with one bullet in this exact shape: - <hypothesis_id>: SUPPORTED|REFUTED|UNPROVEN — <brief evidence>.`
       : `HYPOTHESIS_MATRIX should capture any remaining competing explanations or risk assumptions.`,
@@ -228,6 +245,7 @@ export function buildRolePrompt({ spec, stage, round, role, runDir, stageDir, br
     requiredDeliverables.length > 0
       ? `Check the producer's CONTRACT section. Verify each deliverable's status is honestly assessed. Flag any deliverable marked DONE that lacks convincing evidence.`
       : '',
+    codeEvidenceReviewerInstruction,
     `VERDICT must be exactly one of: APPROVE, REVISE, BLOCK.`,
     `Do not dump long reasoning logs to stdout. Stdout should only contain a short completion line such as: ROLE_STATUS: completed; report=${outputPath}`,
   ].filter(Boolean).join('\n');
