@@ -98,7 +98,8 @@ const plugin = {
           const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
           if (!workspaceInitialized && workspaceDir) {
             migrateDirectoryStructure(api, workspaceDir);
-          SystemLogger.log(workspaceDir, 'SYSTEM_BOOT', `Principles Disciple online. Language: ${language}`);
+            ensureWorkspaceTemplates(api, workspaceDir, language);
+            SystemLogger.log(workspaceDir, 'SYSTEM_BOOT', `Principles Disciple online. Language: ${language}`);
             workspaceInitialized = true;
           }
           const result = await handleBeforePromptBuild(event, { ...ctx, api, workspaceDir });
