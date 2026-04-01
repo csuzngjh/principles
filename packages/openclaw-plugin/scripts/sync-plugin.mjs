@@ -679,7 +679,7 @@ function main() {
     console.log(`   Target:   ${INSTALL_DIR}`);
 
     // Handle automatic restart if requested
-    if (args['--restart']) {
+    if (args.restart) {
         console.log('\n🔄 Restarting OpenClaw Gateway...');
         try {
             // 1. Find and kill existing gateway
