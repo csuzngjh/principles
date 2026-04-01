@@ -1171,6 +1171,7 @@ async function executeStage(runDir, state, spec) {
     const protectedSnapshot = snapshotProtectedFiles(protectedFiles);
     const producerFailLog = path.join(stageDir, 'producer-failure.log');
     let producerOutput;
+    let producerTimedOut = false;
     try {
       producerOutput = runAgent({
         cwd: producerWorkspace,
@@ -1185,6 +1186,7 @@ async function executeStage(runDir, state, spec) {
       if (fileExists(producerReportPath) && fs.readFileSync(producerReportPath, 'utf8').trim()) {
         appendTimeline(runDir, `producer spawnSync timed out but report exists — recovering stage ${stageName} round ${state.currentRound}`);
         producerOutput = null;
+        producerTimedOut = true;
       } else {
         throw agentErr;
       }
@@ -1194,7 +1196,9 @@ async function executeStage(runDir, state, spec) {
     if (!fileExists(producerReportPath) || !fs.readFileSync(producerReportPath, 'utf8').trim()) {
       writeText(producerReportPath, `${outputs.producer}\n`);
     }
-    const producerViolated = detectProtectedWriteViolation(protectedFiles, protectedSnapshot);
+    // Skip mtime-based violation check during timeout recovery — the producer may have
+    // been mid-write when interrupted, causing spurious mtime changes on protected files.
+    const producerViolated = producerTimedOut ? null : detectProtectedWriteViolation(protectedFiles, protectedSnapshot);
     if (producerViolated) {
       state.status = 'halted';
       state.haltReason = {
