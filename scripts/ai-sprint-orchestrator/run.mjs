@@ -686,20 +686,24 @@ function runMergeGateCheck({ runDir, state, spec, mergeGatePath }) {
       return result;
     }
 
-    const localSha = (spawnSync('git', ['rev-parse', 'HEAD'], {
+    const localShaResult = spawnSync('git', ['rev-parse', 'HEAD'], {
       cwd: workspace, encoding: 'utf8', timeout: 10_000,
-    }).stdout ?? '').trim();
-
-    const remoteSha = (spawnSync('git', ['rev-parse', remoteRef], {
-      cwd: workspace, encoding: 'utf8', timeout: 10_000,
-    }).stdout ?? '').trim();
-
-    if (!remoteSha) {
-      appendTimeline(runDir, `Merge gate: remote ref ${remoteRef} not found after fetch`);
-      const result = { localHeadSha: localSha, remoteHeadSha: null, shaMatch: false, targetBranch, error: `Remote ref '${remoteRef}' not found after fetch`, fetchFailed: true };
-      writeJson(mergeGatePath, result);
-      return result;
+    });
+    if (localShaResult.status !== 0) {
+      const errMsg = localShaResult.stderr?.trim() || localShaResult.stdout?.trim() || 'unknown';
+      appendTimeline(runDir, `Merge gate: git rev-parse HEAD failed with status ${localShaResult.status}: ${errMsg}`);
+      return { localHeadSha: null, remoteHeadSha: null, shaMatch: false, targetBranch, error: `git rev-parse HEAD failed: ${errMsg}` };
     }
+    const localSha = (localShaResult.stdout ?? '').trim();
+
+    const remoteShaResult = spawnSync('git', ['rev-parse', remoteRef], {
+      cwd: workspace, encoding: 'utf8', timeout: 10_000,
+    });
+    if (remoteShaResult.status !== 0) {
+      appendTimeline(runDir, `Merge gate: remote ref ${remoteRef} not found after fetch (git status ${remoteShaResult.status})`);
+      return { localHeadSha: localSha, remoteHeadSha: null, shaMatch: false, targetBranch, error: `Remote ref '${remoteRef}' not found after fetch` };
+    }
+    const remoteSha = (remoteShaResult.stdout ?? '').trim();
 
     const shaMatch = localSha === remoteSha;
 
@@ -821,7 +825,7 @@ function reconcileRunState(runDir, state) {
  * Execute a single reviewer role asynchronously with independent timeout tracking.
  * Returns a result object: { role, output, timedOut, reportExisted, violatedFile }
  */
-async function runReviewerRole({ runDir, state, spec, paths, role }) {
+async function runReviewerRole({ runDir, state, spec, paths, role, worktreeInfo }) {
   const stageName = state.currentStage;
   const config = roleConfig(spec, role);
   const { reportPath, stdoutPath } = roleArtifactPaths(paths, role);
@@ -845,9 +849,11 @@ async function runReviewerRole({ runDir, state, spec, paths, role }) {
     producerPath: paths.producerPath,
     reviewerAPath: paths.reviewerAPath,
     reviewerBPath: paths.reviewerBPath,
+    globalReviewerPath: paths.globalReviewerPath,
   });
   const timeoutSeconds = stageRoleTimeout(spec, stageName, role);
-  const cwd = spec.workspace;
+  // Reviewers must verify code in the same workspace where producer made changes
+  const cwd = worktreeInfo?.worktreePath ?? (spec.branchWorkspace || spec.workspace);
 
   let output = null;
   let timedOut = false;
@@ -1224,11 +1230,11 @@ async function executeStage(runDir, state, spec) {
   // Run both reviewers in parallel — each wrapped in try/catch so one failure doesn't cancel the other
   const reviewerResults = [];
   const [resultA, resultB] = await Promise.all([
-    runReviewerRole({ runDir, state, spec, paths, role: 'reviewer_a' }).catch((err) => {
+    runReviewerRole({ runDir, state, spec, paths, role: 'reviewer_a', worktreeInfo }).catch((err) => {
       appendTimeline(runDir, `reviewer_a threw unhandled error: ${err.message}`);
       return { role: 'reviewer_a', output: null, timedOut: false, reportExisted: false, violatedFile: null, error: String(err) };
     }),
-    runReviewerRole({ runDir, state, spec, paths, role: 'reviewer_b' }).catch((err) => {
+    runReviewerRole({ runDir, state, spec, paths, role: 'reviewer_b', worktreeInfo }).catch((err) => {
       appendTimeline(runDir, `reviewer_b threw unhandled error: ${err.message}`);
       return { role: 'reviewer_b', output: null, timedOut: false, reportExisted: false, violatedFile: null, error: String(err) };
     }),
@@ -1291,7 +1297,7 @@ async function executeStage(runDir, state, spec) {
         let grOutput;
         try {
           grOutput = runAgent({
-            cwd: spec.workspace,
+            cwd: worktreeInfo?.worktreePath ?? (spec.branchWorkspace || spec.workspace),
             agent: globalReviewerConfig.agent,
             model: globalReviewerConfig.model,
             prompt: globalReviewerPrompt,
@@ -1651,6 +1657,7 @@ async function main() {
       advanceState(state, spec, decision, { runDir });
       saveState(runDir, state);
       if (state.status === 'completed') {
+        cleanupWorktree({ state, runDir });
         appendTimeline(runDir, 'Sprint completed');
         updateSummary(runDir, [
           `Status: ${state.status}`,
@@ -1660,6 +1667,7 @@ async function main() {
         ]);
       }
       if (state.status === 'halted') {
+        cleanupWorktree({ state, runDir });
         appendTimeline(runDir, `Sprint halted: ${state.haltReason?.details ?? 'unknown reason'}`);
         updateSummary(runDir, [
           `Status: ${state.status}`,
