@@ -143,6 +143,12 @@ export class EmpathyObserverManager {
             api.logger?.warn?.('[PD:EmpathyObserver] shouldTrigger=false: empathy_engine disabled');
             return false;
         }
+        // Skip BOOT sessions - they run outside "gateway request" context where subagent.run() is unavailable
+        // This is an OpenClaw architecture limitation, not a plugin bug
+        if (sessionId.startsWith('boot-')) {
+            api.logger?.info?.(`[PD:EmpathyObserver] shouldTrigger=false: boot session (subagent unavailable during gateway boot)`);
+            return false;
+        }
 
         const subagentOk = isSubagentRuntimeAvailable(api.runtime?.subagent);
         if (!subagentOk) {
