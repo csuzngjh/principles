@@ -13,11 +13,88 @@ import { acquireLockAsync, releaseLock, type LockContext } from '../utils/file-l
 import { getEvolutionLogger, type EvolutionStage } from '../core/evolution-logger.js';
 import { DIAGNOSTICIAN_PROTOCOL_SUMMARY } from '../constants/diagnostician.js';
 import { LockUnavailableError } from '../config/index.js';
+import { checkWorkspaceIdle, checkCooldown } from './nocturnal-runtime.js';
+import { executeNocturnalReflectionAsync } from './nocturnal-service.js';
+import { OpenClawTrinityRuntimeAdapter } from '../core/nocturnal-trinity.js';
 
 let intervalId: NodeJS.Timeout | null = null;
 let timeoutId: NodeJS.Timeout | null = null;
 
+/**
+ * Queue V2 Schema - Supports multiple task kinds while preserving pain_diagnosis semantics.
+ * 
+ * taskKind semantics:
+ * - pain_diagnosis: User-adjacent, triggers HEARTBEAT, injects into user prompts
+ * - sleep_reflection: Background-only, never injects into user prompts, no HEARTBEAT
+ * 
+ * Old queue items (without taskKind) are migrated to pain_diagnosis for compatibility.
+ */
+export type TaskKind = 'pain_diagnosis' | 'sleep_reflection' | 'model_eval';
+export type TaskPriority = 'high' | 'medium' | 'low';
+export type QueueStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'canceled';
+export type TaskResolution = 'marker_detected' | 'auto_completed_timeout' | 'failed_max_retries' | 'canceled';
+
+/**
+ * Recent pain context attached to sleep_reflection tasks.
+ * Carries explicit recent pain signal metadata without being a separate task kind.
+ * Used by NocturnalTargetSelector for ranking bias and context enrichment.
+ */
+export interface RecentPainContext {
+  /** Most recent unresolved pain event */
+  mostRecent: {
+    score: number;
+    source: string;
+    reason: string;
+    timestamp: string;
+  } | null;
+  /** Count of pain events in the recent window (for signal strength) */
+  recentPainCount: number;
+  /** Highest pain score in the recent window */
+  recentMaxPainScore: number;
+}
+
 export interface EvolutionQueueItem {
+    // Core identity
+    id: string;
+    taskKind: TaskKind;          // V2: distinguishes task types
+    priority: TaskPriority;      // V2: scheduling priority
+    source: string;
+    traceId?: string;           // Trace ID for linking events across the evolution lifecycle
+    
+    // Legacy fields (still used for pain_diagnosis)
+    task?: string;
+    score: number;
+    reason: string;
+    timestamp: string;
+    enqueued_at?: string;
+    started_at?: string;
+    completed_at?: string;
+    assigned_session_key?: string;
+    trigger_text_preview?: string;
+    status: QueueStatus;        // V2: includes 'failed' and 'canceled'
+    resolution?: TaskResolution;
+    session_id?: string;
+    agent_id?: string;
+    
+    // V2 retry support
+    retryCount: number;         // V2: number of retry attempts
+    maxRetries: number;         // V2: maximum retry attempts allowed
+    lastError?: string;         // V2: last error message if failed
+    
+    // V2 result reference
+    resultRef?: string;         // V2: reference to result artifact
+
+    // V2: Recent pain context for sleep_reflection tasks
+    // Attaches explicit recent pain signal without merging task kinds.
+    // Used by target selector for ranking bias and context enrichment.
+    recentPainContext?: RecentPainContext;
+}
+
+/**
+ * Legacy queue item shape (pre-V2) for migration compatibility.
+ * These items lack taskKind, priority, retryCount, maxRetries, lastError fields.
+ */
+interface LegacyEvolutionQueueItem {
     id: string;
     task?: string;
     score: number;
@@ -29,11 +106,64 @@ export interface EvolutionQueueItem {
     completed_at?: string;
     assigned_session_key?: string;
     trigger_text_preview?: string;
-    status: 'pending' | 'in_progress' | 'completed';
-    resolution?: 'marker_detected' | 'auto_completed_timeout';
+    status?: string;
+    resolution?: string;
     session_id?: string;
     agent_id?: string;
-    traceId?: string; // Trace ID for linking events across the evolution lifecycle
+    traceId?: string;
+}
+
+/**
+ * Default values for new V2 fields when migrating legacy items.
+ */
+const DEFAULT_TASK_KIND: TaskKind = 'pain_diagnosis';
+const DEFAULT_PRIORITY: TaskPriority = 'medium';
+const DEFAULT_MAX_RETRIES = 3;
+
+/**
+ * Migrate a legacy queue item to V2 schema.
+ * Old items without taskKind are assumed to be pain_diagnosis for backward compatibility.
+ */
+function migrateToV2(item: LegacyEvolutionQueueItem): EvolutionQueueItem {
+    return {
+        id: item.id,
+        taskKind: (item as any).taskKind || DEFAULT_TASK_KIND,
+        priority: (item as any).priority || DEFAULT_PRIORITY,
+        source: item.source,
+        traceId: item.traceId,
+        task: item.task,
+        score: item.score,
+        reason: item.reason,
+        timestamp: item.timestamp,
+        enqueued_at: item.enqueued_at,
+        started_at: item.started_at,
+        completed_at: item.completed_at,
+        assigned_session_key: item.assigned_session_key,
+        trigger_text_preview: item.trigger_text_preview,
+        status: (item.status as QueueStatus) || 'pending',
+        resolution: item.resolution as TaskResolution | undefined,
+        session_id: item.session_id,
+        agent_id: item.agent_id,
+        retryCount: (item as any).retryCount || 0,
+        maxRetries: (item as any).maxRetries || DEFAULT_MAX_RETRIES,
+        lastError: (item as any).lastError,
+        resultRef: (item as any).resultRef,
+    };
+}
+
+/**
+ * Check if an item is a legacy (pre-V2) queue item.
+ */
+function isLegacyQueueItem(item: any): boolean {
+    return item && typeof item === 'object' && !('taskKind' in item);
+}
+
+/**
+ * Migrate entire queue to V2 schema if needed.
+ * Returns a new array with all items migrated to V2 format.
+ */
+function migrateQueueToV2(queue: any[]): EvolutionQueueItem[] {
+    return queue.map(item => isLegacyQueueItem(item) ? migrateToV2(item) : item);
 }
 
 const PAIN_QUEUE_DEDUP_WINDOW_MS = 30 * 60 * 1000;
@@ -176,6 +306,109 @@ export function hasEquivalentPromotedRule(dictionary: { getAllRules(): Record<st
     });
 }
 
+/**
+ * Read recent pain context from PAIN_FLAG file.
+ * Returns structured pain metadata for attaching to sleep_reflection tasks.
+ * Returns null if no pain flag exists.
+ */
+function readRecentPainContext(wctx: WorkspaceContext): RecentPainContext {
+    const painFlagPath = wctx.resolve('PAIN_FLAG');
+    if (!fs.existsSync(painFlagPath)) {
+        return { mostRecent: null, recentPainCount: 0, recentMaxPainScore: 0 };
+    }
+
+    try {
+        const rawPain = fs.readFileSync(painFlagPath, 'utf8');
+        const lines = rawPain.split('\n');
+
+        let score = 0;
+        let source = '';
+        let reason = '';
+        let timestamp = '';
+
+        for (const line of lines) {
+            if (line.startsWith('score:')) score = parseInt(line.split(':', 2)[1].trim(), 10) || 0;
+            if (line.startsWith('source:')) source = line.split(':', 2)[1].trim();
+            if (line.startsWith('reason:')) reason = line.slice('reason:'.length).trim();
+            if (line.startsWith('timestamp:')) timestamp = line.slice('timestamp:'.length).trim();
+        }
+
+        if (score > 0) {
+            return {
+                mostRecent: { score, source, reason, timestamp },
+                recentPainCount: 1,
+                recentMaxPainScore: score,
+            };
+        }
+    } catch {
+        // Best effort — non-fatal
+    }
+
+    return { mostRecent: null, recentPainCount: 0, recentMaxPainScore: 0 };
+}
+
+/**
+ * Enqueue a sleep_reflection task if one is not already pending.
+ * Phase 2.4: Called when workspace is idle to trigger nocturnal reflection.
+ */
+async function enqueueSleepReflectionTask(
+    wctx: WorkspaceContext,
+    logger: any
+): Promise<void> {
+    const queuePath = wctx.resolve('EVOLUTION_QUEUE');
+    const releaseLock = await requireQueueLock(queuePath, logger, 'enqueueSleepReflection', EVOLUTION_QUEUE_LOCK_SUFFIX);
+
+    try {
+        let rawQueue: any[] = [];
+        try {
+            rawQueue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
+        } catch {
+            // Queue doesn't exist yet - create empty array
+            rawQueue = [];
+        }
+
+        const queue: EvolutionQueueItem[] = migrateQueueToV2(rawQueue);
+
+        // Check if a sleep_reflection task is already pending
+        const hasPendingSleepReflection = queue.some(
+            t => t.taskKind === 'sleep_reflection' && (t.status === 'pending' || t.status === 'in_progress')
+        );
+        if (hasPendingSleepReflection) {
+            logger?.debug?.('[PD:EvolutionWorker] sleep_reflection task already pending/in-progress, skipping');
+            return;
+        }
+
+        const now = Date.now();
+        const taskId = createEvolutionTaskId('nocturnal', 50, 'idle workspace', 'Sleep-mode reflection', now);
+        const nowIso = new Date(now).toISOString();
+
+        // Attach recent pain context if available
+        const recentPainContext = readRecentPainContext(wctx);
+
+        queue.push({
+            id: taskId,
+            taskKind: 'sleep_reflection',
+            priority: 'medium',
+            score: 50,
+            source: 'nocturnal',
+            reason: 'Sleep-mode reflection triggered by idle workspace',
+            trigger_text_preview: 'Idle workspace detected',
+            timestamp: nowIso,
+            enqueued_at: nowIso,
+            status: 'pending',
+            traceId: taskId,
+            retryCount: 0,
+            maxRetries: 1, // sleep_reflection doesn't retry
+            recentPainContext,
+        });
+
+        fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+        logger?.info?.(`[PD:EvolutionWorker] Enqueued sleep_reflection task ${taskId}`);
+    } finally {
+        releaseLock();
+    }
+}
+
 async function checkPainFlag(wctx: WorkspaceContext, logger: any) {
     try {
         const painFlagPath = wctx.resolve('PAIN_FLAG');
@@ -236,8 +469,12 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: any) {
             const taskId = createEvolutionTaskId(source, score, preview, reason, now);
             const nowIso = new Date(now).toISOString();
             const effectiveTraceId = traceId || taskId;
+            
+            // V2: New queue items include all V2 fields with pain_diagnosis defaults
             queue.push({
                 id: taskId,
+                taskKind: 'pain_diagnosis',   // V2: All pain-flag triggered tasks are pain_diagnosis
+                priority: score >= 70 ? 'high' : score >= 40 ? 'medium' : 'low',  // V2: Priority based on score
                 score,
                 source,
                 reason,
@@ -248,6 +485,8 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: any) {
                 session_id: sessionId || undefined,
                 agent_id: agentId || undefined,
                 traceId: effectiveTraceId,
+                retryCount: 0,               // V2: No retries yet
+                maxRetries: 3,                // V2: Default max retries
             });
 
             fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
@@ -283,17 +522,18 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: any) {
     }
 }
 
-async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventLog: any) {
+async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventLog: any, api?: OpenClawPluginApi) {
     const queuePath = wctx.resolve('EVOLUTION_QUEUE');
     if (!fs.existsSync(queuePath)) return;
 
     const releaseLock = await requireQueueLock(queuePath, logger, 'processEvolutionQueue');
     const evoLogger = getEvolutionLogger(wctx.workspaceDir, wctx.trajectory);
+    let lockReleased = false;
 
     try {
-        let queue: EvolutionQueueItem[] = [];
+        let rawQueue: any[] = [];
         try {
-            queue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
+            rawQueue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
         } catch (e) {
             // Backup corrupted file instead of silently discarding
             const backupPath = `${queuePath}.corrupted.${Date.now()}`;
@@ -311,13 +551,40 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
             return;
         }
 
-        let queueChanged = false;
+        // V2: Migrate queue to current schema if needed
+        const queue: EvolutionQueueItem[] = migrateQueueToV2(rawQueue);
+
+        let queueChanged = rawQueue.some(isLegacyQueueItem);
 
         const config = wctx.config;
         const timeout = config.get('intervals.task_timeout_ms') || (60 * 60 * 1000); // Default 1 hour
 
-        // Check in_progress tasks for completion
-        for (const task of queue.filter(t => t.status === 'in_progress')) {
+        // V2: Recover stuck in_progress sleep_reflection tasks.
+        // If the worker crashes or the result write-back fails after Phase 1 claimed
+        // the task, it stays in_progress indefinitely. Detect via timeout and mark
+        // as failed so a fresh task can be enqueued on the next idle cycle.
+        for (const task of queue.filter(t => t.status === 'in_progress' && t.taskKind === 'sleep_reflection')) {
+            const startedAt = new Date(task.started_at || task.timestamp);
+            const age = Date.now() - startedAt.getTime();
+            if (age > timeout) {
+                task.status = 'failed';
+                task.completed_at = new Date().toISOString();
+                task.resolution = 'failed_max_retries';
+                task.lastError = `sleep_reflection timed out after ${Math.round(timeout / 60000)} minutes`;
+                task.retryCount = (task.retryCount ?? 0) + 1;
+                queueChanged = true;
+                logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${task.id} timed out after ${Math.round(age / 60000)} minutes, marking as failed`);
+                evoLogger.logCompleted({
+                    traceId: task.traceId || task.id,
+                    taskId: task.id,
+                    resolution: 'manual',
+                    durationMs: age,
+                });
+            }
+        }
+
+        // Check in_progress tasks for completion (only pain_diagnosis gets HEARTBEAT treatment)
+        for (const task of queue.filter(t => t.status === 'in_progress' && t.taskKind === 'pain_diagnosis')) {
             const startedAt = new Date(task.started_at || task.timestamp);
 
             // Condition 1: Check for marker file (created by diagnostician on completion)
@@ -395,10 +662,21 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
             }
         }
 
-        const pendingTasks = queue.filter(t => t.status === 'pending');
+        // V2: Process pain_diagnosis tasks FIRST (quick, inside lock),
+        // then sleep_reflection tasks (slow, lock released during execution).
+        // This order ensures pain tasks are never starved by long-running
+        // nocturnal reflection — sleep_reflection can safely return early
+        // because pain_diagnosis has already been handled.
+        const pendingTasks = queue.filter(t => t.status === 'pending' && t.taskKind === 'pain_diagnosis');
 
         if (pendingTasks.length > 0) {
-            const highestScoreTask = pendingTasks.sort((a, b) => b.score - a.score)[0];
+            // V2: Also sort by priority within same score
+            const priorityWeight = { high: 3, medium: 2, low: 1 };
+            const highestScoreTask = pendingTasks.sort((a, b) => {
+                const scoreDiff = b.score - a.score;
+                if (scoreDiff !== 0) return scoreDiff;
+                return (priorityWeight[b.priority] || 2) - (priorityWeight[a.priority] || 2);
+            })[0];
             const nowIso = new Date().toISOString();
 
             const taskDescription = `Diagnose systemic pain [ID: ${highestScoreTask.id}]. Source: ${highestScoreTask.source}. Reason: ${highestScoreTask.reason}. ` +
@@ -473,13 +751,120 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
             }
         }
 
+        // Phase 2.4: Process sleep_reflection tasks AFTER pain_diagnosis.
+        // Claim tasks inside the lock, execute reflection outside the lock,
+        // then re-acquire the lock to write results. This prevents the long-running
+        // nocturnal reflection from blocking all other queue consumers.
+        // Safe to return early here because pain_diagnosis was already handled above.
+        const sleepReflectionTasks = queue.filter(t => t.status === 'pending' && t.taskKind === 'sleep_reflection');
+        if (sleepReflectionTasks.length > 0) {
+            // --- Phase 1: Claim tasks (inside lock) ---
+            for (const sleepTask of sleepReflectionTasks) {
+                sleepTask.status = 'in_progress';
+                sleepTask.started_at = new Date().toISOString();
+            }
+            queueChanged = true;
+
+            // Write claimed state (includes any pain changes from above) and release lock
+            if (queueChanged) {
+                fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+            }
+            releaseLock();
+            for (const sleepTask of sleepReflectionTasks) {
+                try {
+                    logger?.info?.(`[PD:EvolutionWorker] Processing sleep_reflection task ${sleepTask.id}`);
+
+                    // Build runtime adapter for real Trinity execution if api is available
+                    const runtimeAdapter = api ? new OpenClawTrinityRuntimeAdapter(api) : undefined;
+
+                    // Call the nocturnal reflection service
+                    const result = await executeNocturnalReflectionAsync(wctx.workspaceDir, wctx.stateDir, {
+                        runtimeAdapter,
+                    });
+
+                    if (result.success && result.artifact) {
+                        sleepTask.status = 'completed';
+                        sleepTask.completed_at = new Date().toISOString();
+                        sleepTask.resolution = 'marker_detected';
+                        sleepTask.resultRef = result.diagnostics.persistedPath;
+                        logger?.info?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} completed successfully`);
+                    } else {
+                        // Record failure with skip reason
+                        const skipReason = result.skipReason || (result.noTargetSelected ? 'no_target' : 'validation_failed');
+                        sleepTask.status = 'failed';
+                        sleepTask.completed_at = new Date().toISOString();
+                        sleepTask.resolution = 'failed_max_retries';
+                        sleepTask.lastError = `Nocturnal reflection failed: ${result.validationFailures.join('; ') || skipReason}`;
+                        sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
+                        logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} failed: ${sleepTask.lastError}`);
+                    }
+                } catch (taskErr) {
+                    sleepTask.status = 'failed';
+                    sleepTask.completed_at = new Date().toISOString();
+                    sleepTask.resolution = 'failed_max_retries';
+                    sleepTask.lastError = String(taskErr);
+                    sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
+                    logger?.error?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} threw: ${taskErr}`);
+                }
+            }
+
+            // --- Phase 3: Write results back (re-acquire lock) ---
+            try {
+                const resultLock = await requireQueueLock(queuePath, logger, 'sleepReflectionResult');
+                try {
+                    // Re-read queue to merge with any changes made while lock was released
+                    let freshQueue: any[] = [];
+                    try {
+                        freshQueue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
+                    } catch { /* empty queue if corrupted */ }
+
+                    // Merge: update tasks by ID
+                    for (const sleepTask of sleepReflectionTasks) {
+                        const idx = freshQueue.findIndex((t: any) => t.id === sleepTask.id);
+                        if (idx >= 0) {
+                            freshQueue[idx] = sleepTask;
+                        }
+                    }
+                    fs.writeFileSync(queuePath, JSON.stringify(freshQueue, null, 2), 'utf8');
+
+                    // Log completions to EvolutionLogger
+                    for (const sleepTask of sleepReflectionTasks) {
+                        if (sleepTask.status === 'completed' || sleepTask.status === 'failed') {
+                            evoLogger.logCompleted({
+                                traceId: sleepTask.traceId || sleepTask.id,
+                                taskId: sleepTask.id,
+                                resolution: sleepTask.status === 'completed'
+                                    ? (sleepTask.resolution === 'marker_detected' ? 'marker_detected' : 'manual')
+                                    : 'manual',
+                                durationMs: sleepTask.started_at
+                                    ? Date.now() - new Date(sleepTask.started_at).getTime()
+                                    : undefined,
+                            });
+                        }
+                    }
+                } finally {
+                    resultLock();
+                }
+            } catch (resultLockErr) {
+                // If we can't re-acquire lock, results are in memory but not persisted.
+                // Tasks will appear stuck as in_progress and will be retried on next cycle.
+                logger?.warn?.(`[PD:EvolutionWorker] Failed to write sleep_reflection results back: ${String(resultLockErr)}`);
+            }
+
+            // Safe to return — pain_diagnosis was already processed above.
+            lockReleased = true;
+            return;
+        }
+
         if (queueChanged) {
             fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
         }
     } catch (err) {
         if (logger) logger.warn(`[PD:EvolutionWorker] Error processing evolution queue: ${String(err)}`);
     } finally {
-        releaseLock();
+        if (!lockReleased) {
+            releaseLock();
+        }
     }
 }
 
@@ -654,13 +1039,17 @@ export async function registerEvolutionTaskSession(
     const releaseLock = await requireQueueLock(queuePath, logger, 'registerEvolutionTaskSession');
 
     try {
-        let queue: EvolutionQueueItem[];
+        let rawQueue: any[];
         try {
-            queue = JSON.parse(fs.readFileSync(queuePath, 'utf8')) as EvolutionQueueItem[];
+            rawQueue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
         } catch (parseErr) {
             logger?.warn?.(`[PD:EvolutionWorker] Failed to parse EVOLUTION_QUEUE for session registration: ${queuePath} - ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`);
             return false;
         }
+        
+        // V2: Migrate queue to current schema
+        const queue: EvolutionQueueItem[] = migrateQueueToV2(rawQueue);
+        
         const task = queue.find((item) => item.id === taskId && item.status === 'in_progress');
         if (!task) {
             logger?.warn?.(`[PD:EvolutionWorker] Could not find in-progress evolution task ${taskId} for session assignment`);
@@ -725,8 +1114,25 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
 
         intervalId = setInterval(() => {
             void (async () => {
+                // V2: Nocturnal idle check — logs workspace idle state on each cycle.
+                // This makes nocturnal-runtime a visible part of the worker lifecycle.
+                // Phase 2.4: Enqueue sleep_reflection when workspace is idle and not in cooldown.
+                const idleResult = checkWorkspaceIdle(wctx.workspaceDir, {});
+                if (idleResult.isIdle) {
+                    logger?.debug?.(`[PD:EvolutionWorker] Workspace idle (${idleResult.idleForMs}ms since last activity)`);
+                    // Phase 2.4: Enqueue sleep_reflection task if not in global cooldown
+                    const cooldown = checkCooldown(wctx.stateDir);
+                    if (!cooldown.globalCooldownActive && !cooldown.quotaExhausted) {
+                        enqueueSleepReflectionTask(wctx, logger).catch((err) => {
+                            logger?.error?.(`[PD:EvolutionWorker] Failed to enqueue sleep_reflection task: ${String(err)}`);
+                        });
+                    }
+                } else {
+                    logger?.debug?.(`[PD:EvolutionWorker] Workspace active (last activity ${idleResult.idleForMs}ms ago)`);
+                }
+
                 await checkPainFlag(wctx, logger);
-                await processEvolutionQueue(wctx, logger, eventLog);
+                await processEvolutionQueue(wctx, logger, eventLog, api ?? undefined);
                 if (api) {
                     await processDetectionQueue(wctx, api, eventLog);
                 }
@@ -741,7 +1147,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
         timeoutId = setTimeout(() => {
             void (async () => {
                 await checkPainFlag(wctx, logger);
-                await processEvolutionQueue(wctx, logger, eventLog);
+                await processEvolutionQueue(wctx, logger, eventLog, api ?? undefined);
                 if (api) {
                     await processDetectionQueue(wctx, api, eventLog);
                 }

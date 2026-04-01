@@ -1,9 +1,11 @@
 {
   "name": "principles-disciple-monorepo",
-  "version": "1.7.5",
+  "version": "1.7.8",
   "description": "Principles Disciple - OpenClaw Plugin Monorepo",
   "private": true,
   "scripts": {
+    "ai-sprint": "node scripts/ai-sprint-orchestrator/run.mjs",
+    "ai-sprint:test": "node --test scripts/ai-sprint-orchestrator/test/*.mjs",
     "release": "semantic-release",
     "release:dry-run": "semantic-release --dry-run",
     "version:patch": "cd packages/openclaw-plugin && npm version patch",

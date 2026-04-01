@@ -1,6 +1,6 @@
 {
   "name": "create-principles-disciple",
-  "version": "1.7.2",
+  "version": "1.7.8",
   "description": "Interactive CLI installer for Principles Disciple OpenClaw plugin",
   "type": "module",
   "bin": {
@@ -39,7 +39,7 @@
   "devDependencies": {
     "@types/fs-extra": "^11.0.4",
     "@types/node": "^25.5.0",
-    "typescript": "^5.0.0"
+    "typescript": "^6.0.2"
   },
   "engines": {
     "node": ">=18.0.0"

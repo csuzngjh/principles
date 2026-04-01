@@ -1,18 +1,20 @@
 /**
- * Tests for Progressive Trust Gate Module
+ * Tests for Progressive Trust Gate Module (EP-Only Version)
  *
- * Tests progressive access control based on trust stages (1-4).
+ * 2026-03-29: EP System 是唯一的门控机制
+ * - 不再有 Trust Score (30-100) 系统
+ * - 不再有 Stage 1-4 分级
+ * - 不再有基于行数的限制
+ * - EP (Evolution Points) 是唯一的门控机制
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { PluginHookBeforeToolCallEvent } from '../../src/openclaw-sdk.js';
-import { WorkspaceContext } from '../../src/core/workspace-context.js';
 import {
   checkProgressiveTrustGate,
-  buildLineLimitReason,
-  type ProgressiveGateConfig,
-  type TrustLimits
+  buildEvolutionGateReason,
 } from '../../src/hooks/progressive-trust-gate.js';
+import { checkEvolutionGate } from '../../src/core/evolution-engine.js';
 
 // Mock dependencies
 vi.mock('../../src/core/workspace-context.js', () => ({
@@ -33,39 +35,24 @@ vi.mock('../../src/utils/glob-match.js', () => ({
 
 vi.mock('../../src/core/risk-calculator.js', () => ({
   assessRiskLevel: vi.fn(() => 'LOW'),
-  estimateLineChanges: vi.fn(() => 10),
-  getTargetFileLineCount: vi.fn(() => 100),
-  calculatePercentageThreshold: vi.fn(() => 10)
+  estimateLineChanges: vi.fn(() => 10)
 }));
 
 vi.mock('../../src/core/evolution-engine.js', () => ({
-  checkEvolutionGate: vi.fn(() => ({ allowed: true, currentTier: 'SEED' }))
+  checkEvolutionGate: vi.fn(() => ({ allowed: true, currentTier: 1 }))
 }));
 
-import * as fs from 'fs';
-import * as path from 'path';
+vi.mock('../../src/hooks/gate-block-helper.js', () => ({
+  recordGateBlockAndReturn: vi.fn((wctx, params) => ({
+    block: true,
+    blockReason: params.reason || 'Blocked'
+  }))
+}));
 
-// Mock workspace context
+// Mock workspace context - simplified for EP-only
 const mockWctx = {
-  trust: {
-    getScore: vi.fn(() => 50),
-    getStage: vi.fn(() => 2)
-  },
   config: {
-    get: vi.fn((key) => {
-      if (key === 'trust') {
-        return {
-          limits: {
-            stage_2_max_lines: 50,
-            stage_3_max_lines: 300,
-            stage_2_max_percentage: 10,
-            stage_3_max_percentage: 15,
-            min_lines_fallback: 20
-          }
-        };
-      }
-      return {};
-    })
+    get: vi.fn(() => ({}))
   },
   eventLog: {
     recordGateBlock: vi.fn(),
@@ -77,8 +64,8 @@ const mockWctx = {
   resolve: vi.fn((key) => key)
 };
 
-describe('progressive-trust-gate', () => {
-  describe('checkProgressiveTrustGate', () => {
+describe('progressive-trust-gate (EP-Only)', () => {
+  describe('checkProgressiveTrustGate - EP System', () => {
     let mockEvent: PluginHookBeforeToolCallEvent;
     let mockLogger: any;
 
@@ -87,7 +74,7 @@ describe('progressive-trust-gate', () => {
         toolName: 'edit',
         params: {
           file_path: '/test/file.ts',
-          content: 'test content\n'.repeat(10) // 10 lines
+          content: 'test content\n'.repeat(10)
         }
       } as any;
 
@@ -97,121 +84,100 @@ describe('progressive-trust-gate', () => {
         error: vi.fn()
       };
 
-      // Reset mocks
+      // Reset EP mock
+      vi.mocked(checkEvolutionGate).mockReturnValue({ allowed: true, currentTier: 1 });
+
       vi.clearAllMocks();
     });
 
-    it('should allow Stage 4 Architect operations without restriction', () => {
-      mockWctx.trust.getStage.mockReturnValue(4);
+    it('should allow when EP system allows', () => {
+      vi.mocked(checkEvolutionGate).mockReturnValue({ allowed: true, currentTier: 1 });
 
       const result = checkProgressiveTrustGate(
         mockEvent,
         mockWctx as any,
         '/test/file.ts',
         false,
-        10,
+        100, // Even large changes are allowed by EP
         mockLogger,
-        { workspaceDir: '/test', sessionId: 'test-session', pluginConfig: {} }
+        { workspaceDir: '/test', sessionId: 'test-session' },
+        {}
       );
 
-      expect(result).toBeUndefined(); // Undefined means allow
+      // EP allows, so result should be undefined (allow)
+      expect(result).toBeUndefined();
+    });
+
+    it('should block when EP system denies', () => {
+      vi.mocked(checkEvolutionGate).mockReturnValue({
+        allowed: false,
+        currentTier: 1,
+        reason: 'EP Tier 1 limit: 150 lines max'
+      });
+
+      const result = checkProgressiveTrustGate(
+        mockEvent,
+        mockWctx as any,
+        '/test/file.ts',
+        false,
+        200,
+        mockLogger,
+        { workspaceDir: '/test', sessionId: 'test-session' },
+        {}
+      );
+
+      expect(result).toBeDefined();
+      expect(result?.block).toBe(true);
+      expect(result?.blockReason).toContain('EP');
+    });
+
+    it('should log EP decision info', () => {
+      vi.mocked(checkEvolutionGate).mockReturnValue({ allowed: true, currentTier: 2 });
+
+      checkProgressiveTrustGate(
+        mockEvent,
+        mockWctx as any,
+        '/test/file.ts',
+        false,
+        10,
+        mockLogger,
+        { workspaceDir: '/test', sessionId: 'test-session' },
+        {}
+      );
+
       expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('Trusted Architect bypass')
+        expect.stringContaining('EP Gate:')
       );
     });
 
-    it('should block Stage 1 operations on risk paths', () => {
-      mockWctx.trust.getStage.mockReturnValue(1);
+    it('should allow risky path when EP allows', () => {
+      vi.mocked(checkEvolutionGate).mockReturnValue({
+        allowed: true,
+        currentTier: 4, // Tree tier - can access risk paths
+        reason: 'Tier 4 unlocked'
+      });
 
       const result = checkProgressiveTrustGate(
         mockEvent,
         mockWctx as any,
         '/test/risk-path',
         true, // risky
-        10,
+        500,
         mockLogger,
-        { workspaceDir: '/test', sessionId: 'test-session', pluginConfig: {} }
-      );
-
-      expect(result).toBeDefined();
-      expect(result?.block).toBe(true);
-      expect(result?.blockReason).toContain('Trust score too low');
-    });
-
-    it('should allow Stage 1 operations with plan approval', () => {
-      mockWctx.trust.getStage.mockReturnValue(1);
-
-      // Override mock to allow plan approval
-      vi.doMock('../../src/utils/io.js', () => ({
-        getPlanStatus: vi.fn(() => 'READY'),
-        isRisky: vi.fn(() => true)
-      }));
-
-      vi.doMock('../../src/utils/glob-match.js', () => ({
-        matchesAnyPattern: vi.fn(() => true)
-      }));
-
-      // Note: This test would require more complex mocking
-      // For now, just verify the structure
-      expect(true).toBe(true);
-    });
-
-    it('should block Stage 2 operations on risk paths', () => {
-      mockWctx.trust.getStage.mockReturnValue(2);
-
-      const result = checkProgressiveTrustGate(
-        mockEvent,
-        mockWctx as any,
-        '/test/risk-path',
-        true, // risky
-        10,
-        mockLogger,
-        { workspaceDir: '/test', sessionId: 'test-session', pluginConfig: {} }
-      );
-
-      expect(result).toBeDefined();
-      expect(result?.block).toBe(true);
-      expect(result?.blockReason).toContain('Stage 2 agents are not authorized');
-    });
-
-    it('should block Stage 2 operations exceeding line limit', () => {
-      mockWctx.trust.getStage.mockReturnValue(2);
-
-      const result = checkProgressiveTrustGate(
-        mockEvent,
-        mockWctx as any,
-        '/test/file.ts',
-        false, // not risky
-        100, // exceeds 50 line limit
-        mockLogger,
-        { workspaceDir: '/test', sessionId: 'test-session', pluginConfig: {} }
-      );
-
-      expect(result).toBeDefined();
-      expect(result?.block).toBe(true);
-      expect(result?.blockReason).toContain('Modification too large');
-    });
-
-    it('should allow Stage 2 operations within line limit', () => {
-      mockWctx.trust.getStage.mockReturnValue(2);
-
-      const result = checkProgressiveTrustGate(
-        mockEvent,
-        mockWctx as any,
-        '/test/file.ts',
-        false,
-        10, // within 50 line limit
-        mockLogger,
-        { workspaceDir: '/test', sessionId: 'test-session', pluginConfig: {} }
+        { workspaceDir: '/test', sessionId: 'test-session' },
+        {}
       );
 
       expect(result).toBeUndefined();
     });
 
-    it.skip('should block Stage 3 operations on risk paths without READY plan', () => {
-      // Skipped: Cannot override top-level mock to return 'DRAFT' with vi.doMock
-      // The blocking behavior is tested through integration tests
-      
+    it('should block risky path when EP denies', () => {
+      vi.mocked(checkEvolutionGate).mockReturnValue({
+        allowed: false,
+        currentTier: 2, // Sprout tier - cannot access risk paths
+        reason: 'Risk paths require Tree tier'
+      });
+
       const result = checkProgressiveTrustGate(
         mockEvent,
         mockWctx as any,
@@ -219,125 +185,93 @@ describe('progressive-trust-gate', () => {
         true, // risky
         10,
         mockLogger,
-        { workspaceDir: '/test', sessionId: 'test-session', pluginConfig: {} }
+        { workspaceDir: '/test', sessionId: 'test-session' },
+        {}
       );
 
       expect(result).toBeDefined();
       expect(result?.block).toBe(true);
-      expect(result?.blockReason).toContain('No READY plan found');
     });
 
-    it('should allow Stage 3 operations on risk paths with READY plan', () => {
-      mockWctx.trust.getStage.mockReturnValue(3);
-
+    it('should skip check when no workspaceDir', () => {
       const result = checkProgressiveTrustGate(
         mockEvent,
         mockWctx as any,
-        '/test/risk-path',
-        true,
+        '/test/file.ts',
+        false,
         10,
         mockLogger,
-        { workspaceDir: '/test', sessionId: 'test-session', pluginConfig: {} }
+        { sessionId: 'test-session' }, // No workspaceDir
+        {}
       );
 
       expect(result).toBeUndefined();
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('No workspaceDir')
+      );
     });
 
-    it('should block Stage 3 operations exceeding line limit', () => {
-      mockWctx.trust.getStage.mockReturnValue(3);
+    it('should pass correct parameters to checkEvolutionGate', () => {
+      vi.mocked(checkEvolutionGate).mockReturnValue({ allowed: true, currentTier: 1 });
 
-      const result = checkProgressiveTrustGate(
+      checkProgressiveTrustGate(
         mockEvent,
         mockWctx as any,
         '/test/file.ts',
-        false,
-        500, // exceeds 300 line limit
+        true, // isRiskPath
+        100,
         mockLogger,
-        { workspaceDir: '/test', sessionId: 'test-session', pluginConfig: {} }
+        { workspaceDir: '/test', sessionId: 'test-session' },
+        {}
       );
 
-      expect(result).toBeDefined();
-      expect(result?.block).toBe(true);
-      expect(result?.blockReason).toContain('Modification too large');
+      expect(checkEvolutionGate).toHaveBeenCalledWith('/test', {
+        toolName: 'edit',
+        isRiskPath: true,
+      });
+    });
+  });
+
+  describe('buildEvolutionGateReason', () => {
+    it('should build EP gate rejection reason with tier info', () => {
+      const reason = buildEvolutionGateReason(2, 'Sprout', 'Max 50 lines');
+
+      expect(reason).toContain('EP Gate');
+      expect(reason).toContain('Tier 2');
+      expect(reason).toContain('Sprout');
+      expect(reason).toContain('Max 50 lines');
     });
 
-    it.skip('should record EP simulation for all stages', () => {
-      // Skipped: vi.spyOn(fs, 'appendFileSync') doesn't work in ESM modules
-      // EP simulation logging is tested through integration tests
-      
-      const result = checkProgressiveTrustGate(
-        mockEvent,
+    it('should handle unknown tier name', () => {
+      const reason = buildEvolutionGateReason(99, 'Unknown', 'Some restriction');
+
+      expect(reason).toContain('EP Gate');
+      expect(reason).toContain('Tier 99');
+      expect(reason).toContain('Unknown');
+    });
+  });
+
+  describe('EP Tier Names', () => {
+    it('should pass correct tier info to checkEvolutionGate', () => {
+      vi.mocked(checkEvolutionGate).mockReturnValue({ allowed: true, currentTier: 1 });
+      const event = { toolName: 'edit', params: { file_path: '/test.ts', content: '' } } as any;
+      const logger = { info: vi.fn() };
+
+      checkProgressiveTrustGate(
+        event,
         mockWctx as any,
-        '/test/file.ts',
+        '/test.ts',
         false,
-        10
+        10,
+        logger,
+        { workspaceDir: '/test' },
+        {}
       );
 
-      // Should attempt to write EP simulation log
-      expect(mockFsAppendFileSync).toHaveBeenCalled();
-
-      mockFsAppendFileSync.mockRestore();
-      mockFsMkdirSync.mockRestore();
-    });
-  });
-
-  describe('buildLineLimitReason', () => {
-    it('should build reason for percentage-based limit', () => {
-      const reason = buildLineLimitReason(
-        100, // lineChanges
-        10,  // effectiveLimit
-        'percentage',
-        1000, // targetLineCount
-        10,   // actualPercentage
-        2     // stage
-      );
-
-      expect(reason).toContain('100 lines');
-      expect(reason).toContain('10% of 1000 lines');
-      expect(reason).toContain('Stage 2 limit is 10 lines');
-      expect(reason).toContain('percentage');
-    });
-
-    it('should build reason for fixed limit', () => {
-      const reason = buildLineLimitReason(
-        100, // lineChanges
-        50,  // effectiveLimit
-        'fixed',
-        null, // targetLineCount
-        null, // actualPercentage
-        2     // stage
-      );
-
-      expect(reason).toContain('100 lines');
-      expect(reason).toContain('Stage 2 limit is 50 lines');
-      expect(reason).toContain('fixed threshold');
-      expect(reason).toContain('Could not read target file');
-    });
-  });
-
-  describe('ProgressiveGateConfig', () => {
-    it('should accept partial configuration', () => {
-      const config: ProgressiveGateConfig = {
-        enabled: true,
-        plan_approvals: {
-          enabled: false
-        }
-      };
-
-      expect(config.enabled).toBe(true);
-      expect(config.plan_approvals?.enabled).toBe(false);
-    });
-  });
-
-  describe('TrustLimits', () => {
-    it('should accept partial limits', () => {
-      const limits: TrustLimits = {
-        stage_2_max_lines: 50,
-        stage_3_max_lines: 300
-      };
-
-      expect(limits.stage_2_max_lines).toBe(50);
-      expect(limits.stage_3_max_lines).toBe(300);
+      expect(checkEvolutionGate).toHaveBeenCalledWith('/test', {
+        toolName: 'edit',
+        isRiskPath: false,
+      });
     });
   });
 });

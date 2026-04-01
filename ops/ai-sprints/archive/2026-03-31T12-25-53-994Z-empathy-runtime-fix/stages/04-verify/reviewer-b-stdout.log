@@ -1,0 +1,317 @@
+[client] initialize (running)
+
+[client] session/new (running)
+I'll read the stage brief and producer report to understand my verification task.
+
+[tool] Read File (pending)
+
+[tool] Read File (pending)
+
+[tool] ops\stages\04-verify\brief.md (completed)
+  kind: read
+  files: D:\Code\principles\ops\ai-sprints\2026-03-31T12-25-53-994Z-empathy-runtime-fix\stages\04-verify\brief.md
+  output:
+    Read all 26 lines from ops/ai-sprints/2026-03-31T12-25-53-994Z-empathy-runtime-fix/stages/04-verify/brief.md
+
+[tool] ops\stages\04-verify\producer.md (completed)
+  kind: read
+  files: D:\Code\principles\ops\ai-sprints\2026-03-31T12-25-53-994Z-empathy-runtime-fix\stages\04-verify\producer.md
+  output:
+    Read all 127 lines from ops/ai-sprints/2026-03-31T12-25-53-994Z-empathy-runtime-fix/stages/04-verify/producer.md
+Now let me read the actual code changes and test file to verify the producer's claims.
+
+[tool] Read File (pending)
+
+[tool] Read File (pending)
+
+[tool] ...ages\\empathy-observer-manager.test.ts (completed)
+  kind: read
+  files: D:\Code\principles\packages\openclaw-plugin\tests\service\empathy-observer-manager.test.ts
+  output:
+    Read all 384 lines from packages/openclaw-plugin/tests/service/empathy-observer-manager.test.ts
+
+[tool] ...packages\\empathy-observer-manager.ts (completed)
+  kind: read
+  files: D:\Code\principles\packages\openclaw-plugin\src\service\empathy-observer-manager.ts
+  output:
+    Read all 510 lines from packages/openclaw-plugin/src/service/empathy-observer-manager.ts
+Now let me initialize my role state and start the verification work.
+
+[tool] Write File (pending)
+
+[tool] Write File (pending)
+
+[tool] Write to ops\04-verify\reviewer-b-state.json (completed)
+  kind: edit
+  output:
+    diff reviewer-b-state.json (+7 lines)
+
+[tool] Write to ops\04-verify\reviewer-b-worklog.md (completed)
+  kind: edit
+  output:
+    diff reviewer-b-worklog.md (+13 lines)
+Now let me verify the exact changes by examining the git diff to ensure code matches producer claims:
+
+[tool] Shell (pending)
+
+[tool] cd D:\Code\principles; git diff HEAD packages/openclaw-plugin/src/service/empathy-observer-manager.ts [current working directory D:\Code\principles] (Get git diff for empathy-observer-manager.ts) (completed)
+  kind: execute
+  output:
+    diff --git a/packages/openclaw-plugin/src/service/empathy-observer-manager.ts b/packages/openclaw-plugin/src/service/empathy-observer-manager.ts
+    index 7cc458b..885ff3c 100644
+    --- a/packages/openclaw-plugin/src/service/empathy-observer-manager.ts
+    +++ b/packages/openclaw-plugin/src/service/empathy-observer-manager.ts
+    @@ -214,8 +214,14 @@ export class EmpathyObserverManager {
+                 startedAt: Date.now(),
+             });
+     
+    -        this.finalizeRun(api, sessionId, sessionKey, workspaceDir).catch((err) => {
+    -            api.logger.warn(`[PD:EmpathyObserver] finalizeRun failed for ${sessionKey}: ${String(err)}`);
+    +        this.finalizeRun(api, sessionId, sessionKey, workspaceDir).catch(async (err) => {
+    +            api.logger.warn(`[PD:EmpathyObserver] finalizeRun failed (will retry once): ${String(err)}`);
+    +            await new Promise((r) => setTimeout(r, 2000));
+    +            try {
+    +                await this.finalizeRun(api, sessionId, sessionKey, workspaceDir);
+    +            } catch (retryErr) {
+    +                api.logger.warn(`[PD:EmpathyObserver] finalizeRun retry also failed: ${String(retryErr)}`);
+    +            }
+             });
+     
+             return sessionKey;
+    @@ -282,6 +288,9 @@ export class EmpathyObserverManager {
+                 return;
+             }
+     
+    +        // Set observedAt before reapBySession so TTL cleanup works even if reapBySession fails
+    +        const updatedMetadata = this.activeRuns.get(parentSessionId);
+    +        if (updatedMetadata) { updatedMetadata.observedAt = Date.now(); }
+    ... (13 more lines)
+
+[tool] Shell (pending)
+
+[tool] cd D:\Code\principles; git diff HEAD packages/openclaw-plugin/tests/service/empathy-observer-manager.test.ts [current working directory D:\Code\principles] (Get git diff for test file) (completed)
+  kind: execute
+  output:
+    diff --git a/packages/openclaw-plugin/tests/service/empathy-observer-manager.test.ts b/packages/openclaw-plugin/tests/service/empathy-observer-manager.test.ts
+    index 38f5fcf..b9fccf6 100644
+    --- a/packages/openclaw-plugin/tests/service/empathy-observer-manager.test.ts
+    +++ b/packages/openclaw-plugin/tests/service/empathy-observer-manager.test.ts
+    @@ -320,6 +320,35 @@ describe('EmpathyObserverManager', () => {
+         );
+       });
+     
+    +  it('ok path sets observedAt even when reapBySession fails', async () => {
+    +    run.mockResolvedValue({ runId: 'r1' });
+    +    waitForRun.mockResolvedValue({ status: 'ok' });
+    +    getSessionMessages.mockRejectedValue(new Error('session not ready'));
+    +
+    +    await manager.spawn(api, 'session-ObservedAt', 'test message');
+    +    await new Promise(resolve => setTimeout(resolve, 50));
+    +
+    +    const metadata = (manager as any).activeRuns.get('session-ObservedAt');
+    +    expect(metadata.observedAt).toBeDefined();
+    +    expect(metadata.observedAt).toBeGreaterThan(0);
+    +  });
+    +
+    +  it('ok path reapBySession failure preserves activeRuns so fallback can recover', async () => {
+    +    run.mockResolvedValue({ runId: 'r1' });
+    +    waitForRun.mockResolvedValue({ status: 'ok' });
+    +    getSessionMessages.mockRejectedValue(new Error('session not ready'));
+    +
+    +    const sessionKey = await manager.spawn(api, 'session-Fallback', 'test message');
+    +    await new Promise(resolve => setTimeout(resolve, 50));
+    ... (12 more lines)
+Good, the diffs match the producer's claims. Let me run the tests to verify they pass:
+
+[tool] Shell (pending)
+
+[tool] cd D:\Code\principles\packages\openclaw-plugin; npm test -- --run tests/service/empathy-observer-manager.test.ts 2>&1 [current working directory D:\Code\principles] [timeout: 120000s] (Run empathy-observer-manager tests) (failed)
+  kind: execute
+  output:
+    Internal Error: Timeout cannot exceed 3600 seconds (1 hour).
+
+[tool] Shell (pending)
+
+[tool] cd D:\Code\principles\packages\openclaw-plugin; npm test -- --run tests/service/empathy-observer-manager.test.ts 2>&1 [current working directory D:\Code\principles] (Run empathy-observer-manager tests) (completed)
+  kind: execute
+  output:
+    > principles-disciple@1.8.0 test
+    > vitest run --run tests/service/empathy-observer-manager.test.ts
+    
+    
+     RUN  v4.1.0 D:/Code/principles/packages/openclaw-plugin
+    
+    
+     Test Files  1 passed (1)
+          Tests  22 passed (22)
+       Start at  00:02:46
+       Duration  940ms (transform 105ms, setup 0ms, import 298ms, tests 558ms, environment 0ms)
+Tests pass. Now let me check for any TypeScript errors and verify scope control:
+
+[tool] Shell (pending)
+
+[tool] cd D:\Code\principles\packages\openclaw-plugin; npx tsc --noEmit --pretty false 2>&1 | Select-String -Pattern "empathy-observer-manager" -Context 0,2 [current working directory D:\Code\principles] (Check TypeScript errors for empathy-observer-manager) (completed)
+  kind: execute
+Good, no TypeScript errors. Now let me check for any unintended changes to other files:
+
+[tool] Shell (pending)
+
+[tool] cd D:\Code\principles; git status --short 2>&1 [current working directory D:\Code\principles] (Check git status for scope verification) (completed)
+  kind: execute
+  output:
+    M packages/openclaw-plugin/src/service/empathy-observer-manager.ts
+     M packages/openclaw-plugin/tests/service/empathy-observer-manager.test.ts
+     M scripts/ai-sprint-orchestrator/lib/decision.mjs
+     M scripts/ai-sprint-orchestrator/lib/task-specs.mjs
+     M scripts/ai-sprint-orchestrator/run.mjs
+I see the empathy observer files are modified. Let me check if the orchestrator changes are part of this fix or pre-existing:
+
+[tool] Shell (pending)
+
+[tool] cd D:\Code\principles; git diff HEAD scripts/ai-sprint-orchestrator/ 2>&1 | Select-Object -First 50 [current working directory D:\Code\principles] (Check orchestrator changes) (failed)
+  kind: execute
+  output:
+    Internal Error: Stdout:
+    diff --git a/scripts/ai-sprint-orchestrator/lib/decision.mjs b/scripts/ai-sprint-orchestrator/lib/decision.mjs
+    index 6fdde22..0a90f9e 100644
+    --- a/scripts/ai-sprint-orchestrator/lib/decision.mjs
+    +++ b/scripts/ai-sprint-orchestrator/lib/decision.mjs
+    @@ -1,10 +1,12 @@
+    +const VERDICT_RE = /(?:VERDICT:\s*|##\s*VERDICT\s*\n+)(APPROVE|REVISE|BLOCK)\b/i;
+    +
+     export function normalizeVerdict(text) {
+    -  const match = String(text ?? '').match(/VERDICT:\s*(APPROVE|REVISE|BLOCK)\b/i);
+    +  const match = String(text ?? '').match(VERDICT_RE);
+       return match ? match[1].toUpperCase() : 'REVISE';
+     }
+     
+     export function hasExplicitVerdict(text) {
+    -  return /VERDICT:\s*(APPROVE|REVISE|BLOCK)\b/i.test(String(text ?? ''));
+    +  return VERDICT_RE.test(String(text ?? ''));
+     }
+     
+     export function extractBullets(text, heading) {
+    diff --git a/scripts/ai-sprint-orchestrator/lib/task-specs.mjs b/scripts/ai-sprint-orchestrator/lib/task-specs.mjs
+    index 4088e23..997ba80 100644
+    --- a/scripts/ai-sprint-orchestrator/lib/task-specs.mjs
+    +++ b/scripts/ai-sprint-orchestrator/lib/task-specs.mjs
+    @@ -8,23 +8,28 @@ export function getTaskSpec(taskId) {
+           workspace: 'D:/Code/principles',
+           branchWorkspace: 'D:/Code/principles-empathy-fix',
+           maxRoundsPerStage: 3,
+    ... (24 more lines)
+The orchestrator changes are from the sprint orchestrator itself, not part of the empathy observer fix. These are infrastructure changes for the AI sprint process, not related to the production code fix. Let me update my worklog and continue analyzing:
+
+[tool] Edit (pending)
+
+[client] fs/read_text_file (running)
+
+[tool] ops\04-verify\reviewer-b-worklog.md: ## 2026-03-31T12:30:10Z - Read... => ## 2026-03-31T12:30:10Z - Read... (completed)
+  kind: edit
+  files: D:\Code\principles\ops\ai-sprints\2026-03-31T12-25-53-994Z-empathy-runtime-fix\stages\04-verify\reviewer-b-worklog.md
+  output:
+    diff reviewer-b-worklog.md (+17 lines)
+Now let me analyze test coverage for the new code paths. I need to check if the retry logic (Change 3) is tested:
+
+[tool] Search (pending)
+
+[tool] 'finalizeRun.*retry|retry.*finalizeRun' within ...packages\openclaw-plugin\tests\service (completed)
+  kind: search
+  output:
+    No matches found
+The producer noted that the retry wrapper (Change 3) has no dedicated test. Let me verify this is a valid concern and check if there are other gaps:
+
+[tool] Search (pending)
+
+[tool] 'subagent_ended|reap\(' within ...packages\openclaw-plugin\tests\service (completed)
+  kind: search
+  output:
+    Found 5 matches
+Let me check if there's a test for the subagent_ended fallback path specifically:
+
+[tool] Read File (pending)
+
+[tool] ...ages\\empathy-observer-manager.test.ts (completed)
+  kind: read
+  files: D:\Code\principles\packages\openclaw-plugin\tests\service\empathy-observer-manager.test.ts:280
+  output:
+    Read lines 281-340 of 384 from packages/openclaw-plugin/tests/service/empathy-observer-manager.test.ts
+Good. Now let me check the implement stage artifacts to understand what was originally planned:
+
+[tool] Glob (pending)
+
+[tool] '**/*.md' within ops\stages\03-implement (completed)
+  kind: search
+  output:
+    Found 3 matching file(s)
+
+[tool] Read File (pending)
+
+[tool] ops\stages\03-implement\producer.md (completed)
+  kind: read
+  files: D:\Code\principles\ops\ai-sprints\2026-03-31T12-25-53-994Z-empathy-runtime-fix\stages\03-implement\producer.md
+  output:
+    Read all 26 lines from ops/ai-sprints/2026-03-31T12-25-53-994Z-empathy-runtime-fix/stages/03-implement/producer.md
+Let me also read the diagnose stage to understand the root cause analysis:
+
+[tool] Glob (pending)
+
+[tool] '**/brief.md' within ops\\stages (completed)
+  kind: search
+  output:
+    Found 3 matching file(s)
+
+[tool] Read File (pending)
+
+[tool] ops\stages\02-fix-plan\producer.md (completed)
+  kind: read
+  files: D:\Code\principles\ops\ai-sprints\2026-03-31T12-25-53-994Z-empathy-runtime-fix\stages\02-fix-plan\producer.md
+  output:
+    Read all 230 lines from ops/ai-sprints/2026-03-31T12-25-53-994Z-empathy-runtime-fix/stages/02-fix-plan/producer.md
+I now have a comprehensive understanding. Let me verify if the Test 3 (retry test) from the plan was actually implemented:
+
+[tool] Search (pending)
+
+[tool] 'finalizeRun retries|retries once' within ...packages\openclaw-plugin\tests\service (completed)
+  kind: search
+  output:
+    No matches found
+The retry test (Test 3 from the plan) was NOT implemented. The producer mentioned this in their report. Let me verify the total test count matches:
+
+[tool] Shell (pending)
+
+[tool] cd D:\Code\principles\packages\openclaw-plugin; (Get-Content tests/service/empathy-observer-manager.test.ts | Select-String "^\s*it\(").Count [current working directory D:\Code\principles] (Count total test cases) (completed)
+  kind: execute
+  output:
+    22
+22 tests total. The plan called for 3 new tests, but only 2 were implemented. Now let me write my final report:
+
+[tool] Edit (pending)
+
+[client] fs/read_text_file (running)
+
+[tool] ops\04-verify\reviewer-b-worklog.md: ## 2026-03-31T12:30:50Z - Anal... => ## 2026-03-31T12:30:50Z - Anal... (completed)
+  kind: edit
+  files: D:\Code\principles\ops\ai-sprints\2026-03-31T12-25-53-994Z-empathy-runtime-fix\stages\04-verify\reviewer-b-worklog.md
+  output:
+    diff reviewer-b-worklog.md (+23 lines)
+
+[tool] Write File (pending)
+
+[tool] Write to ops\stages\04-verify\reviewer-b.md (completed)
+  kind: edit
+  output:
+    diff reviewer-b.md (+61 lines)
+
+[tool] Edit (pending)
+
+[client] fs/read_text_file (running)
+
+[tool] ops\04-verify\reviewer-b-state.json: {... => {... (completed)
+  kind: edit
+  files: D:\Code\principles\ops\ai-sprints\2026-03-31T12-25-53-994Z-empathy-runtime-fix\stages\04-verify\reviewer-b-state.json
+  output:
+    diff reviewer-b-state.json (+1 lines)
+ROLE_STATUS: completed; report=D:\Code\principles\ops\ai-sprints\2026-03-31T12-25-53-994Z-empathy-runtime-fix\stages\04-verify\reviewer-b.md
+
+[done] end_turn

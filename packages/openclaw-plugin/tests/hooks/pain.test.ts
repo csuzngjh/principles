@@ -20,11 +20,6 @@ describe('Post-Write Checks & Pain Hook', () => {
   const mockEventLog = {
     recordToolCall: vi.fn(),
     recordPainSignal: vi.fn(),
-    recordTrustChange: vi.fn(),
-  };
-  const mockTrust = {
-    recordFailure: vi.fn(),
-    recordSuccess: vi.fn(),
   };
   const mockConfig = {
     get: vi.fn().mockReturnValue(30),
@@ -35,7 +30,6 @@ describe('Post-Write Checks & Pain Hook', () => {
     stateDir: '/mock/state',
     config: mockConfig,
     eventLog: mockEventLog,
-    trust: mockTrust,
     trajectory: {
       recordToolCall: vi.fn(),
       recordPainEvent: vi.fn(),
@@ -68,11 +62,10 @@ describe('Post-Write Checks & Pain Hook', () => {
     // Should still create context
     expect(WorkspaceContext.fromHookContext).toHaveBeenCalled();
     expect(fs.writeFileSync).not.toHaveBeenCalled();
-    expect(mockTrust.recordFailure).not.toHaveBeenCalled();
     expect(mockEmitSync).not.toHaveBeenCalled();
   });
 
-  it('should capture pain on tool error with correct source and record failure', () => {
+  it('should capture pain on tool error with correct source', () => {
     const mockCtx = { workspaceDir, sessionId: 's1', api: { logger: {} } };
     const mockEvent = { 
         toolName: 'write', 
@@ -93,12 +86,7 @@ describe('Post-Write Checks & Pain Hook', () => {
     const callArgs = vi.mocked(fs.writeFileSync).mock.calls[0];
     expect(callArgs[0]).toContain('.pain_flag');
 
-    // Verify recordFailure call through context
-    expect(mockTrust.recordFailure).toHaveBeenCalledWith(
-        'tool',
-        expect.objectContaining({ sessionId: 's1' })
-    );
-    expect(mockEmitSync).toHaveBeenCalledWith(expect.objectContaining({
+    expect(mockEmitSync.toHaveBeenCalledWith(expect.objectContaining({
       type: 'pain_detected',
       data: expect.objectContaining({
         painType: 'tool_failure',

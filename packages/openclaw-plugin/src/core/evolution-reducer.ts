@@ -12,10 +12,13 @@ import type {
   PainDetectedData,
   Principle,
   PrincipleDeprecatedData,
+  PrincipleDetectorSpec,
+  PrincipleEvaluatorLevel,
   PrinciplePromotedData,
   PrincipleRolledBackData,
   PrincipleStatus,
 } from './evolution-types.js';
+import { isCompleteDetectorMetadata } from './evolution-types.js';
 
 export interface EvolutionReducer {
   emit(event: EvolutionLoopEvent): void;
@@ -39,6 +42,10 @@ export interface EvolutionReducer {
     triggerPattern: string;
     action: string;
     source: string;
+    /** Evaluability level — defaults to 'manual_only' if omitted */
+    evaluability?: PrincipleEvaluatorLevel;
+    /** Detector metadata — absent or malformed = 'manual_only' evaluability */
+    detectorMetadata?: PrincipleDetectorSpec;
   }): string | null;
   getStats(): {
     candidateCount: number;
@@ -204,6 +211,8 @@ export class EvolutionReducerImpl implements EvolutionReducer {
     triggerPattern: string;
     action: string;
     source: string;
+    evaluability?: PrincipleEvaluatorLevel;
+    detectorMetadata?: PrincipleDetectorSpec;
   }): string | null {
     // Check blacklist first
     if (this.isBlacklisted(params.painId, params.triggerPattern)) {
@@ -215,21 +224,59 @@ export class EvolutionReducerImpl implements EvolutionReducer {
       return null;
     }
 
+    // Evaluability defaults to 'manual_only' — the only way to get auto-trainable
+    // is to explicitly provide valid detectorMetadata.
+    // Enforce: deterministic/weak_heuristic requires complete detectorMetadata to be present.
+    let evaluability: PrincipleEvaluatorLevel = params.evaluability ?? 'manual_only';
+    if (evaluability !== 'manual_only' && !isCompleteDetectorMetadata(params.detectorMetadata)) {
+      SystemLogger.log(
+        this.workspaceDir,
+        'EVALUABILITY_DOWNGRADED',
+        `Principle for painId "${params.painId}" requested evaluability="${evaluability}" without detectorMetadata — downgrading to "manual_only". Provide valid detectorMetadata to enable auto-training.`
+      );
+      evaluability = 'manual_only';
+    }
+
     // Check if a principle already exists for this painId
     const existingPrinciple = [...this.principles.values()].find(
       p => p.source.painId === params.painId
     );
 
     if (existingPrinciple) {
-      // Update existing principle instead of creating new one
+      // Update existing principle instead of creating new one.
+      // Apply the same evaluability normalization as new creation:
+      // deterministic/weak_heuristic without detectorMetadata → downgraded to manual_only.
       existingPrinciple.trigger = params.triggerPattern;
       existingPrinciple.action = params.action;
       existingPrinciple.text = `When ${params.triggerPattern}, then ${params.action}.`;
       existingPrinciple.version += 1;
+      if (params.evaluability !== undefined) {
+        // Apply normalization (params.evaluability may be invalid without complete metadata)
+        const normalizedEvaluability = (() => {
+          if (params.evaluability === 'manual_only' || isCompleteDetectorMetadata(params.detectorMetadata)) {
+            return params.evaluability;
+          }
+          SystemLogger.log(
+            this.workspaceDir,
+            'EVALUABILITY_DOWNGRADED',
+            `Principle update for painId "${params.painId}" requested evaluability="${params.evaluability}" without detectorMetadata — downgrading to "manual_only".`
+          );
+          return 'manual_only';
+        })();
+        existingPrinciple.evaluability = normalizedEvaluability;
+      }
+      // Preserve detectorMetadata unless explicitly provided in this call.
+      // Accept only if complete (defense in depth — subagent should already filter).
+      if (isCompleteDetectorMetadata(params.detectorMetadata)) {
+        existingPrinciple.detectorMetadata = structuredClone(params.detectorMetadata);
+      } else if (params.detectorMetadata !== undefined) {
+        // Malformed metadata provided — clear any existing metadata
+        existingPrinciple.detectorMetadata = undefined;
+      }
       SystemLogger.log(
         this.workspaceDir,
         'PRINCIPLE_UPDATED',
-        `Principle ${existingPrinciple.id} updated from diagnostician: "${params.triggerPattern.slice(0, 50)}..."`
+        `Principle ${existingPrinciple.id} updated from diagnostician: "${params.triggerPattern.slice(0, 50)}..." [evaluability: ${existingPrinciple.evaluability}]`
       );
       return existingPrinciple.id;
     }
@@ -254,6 +301,10 @@ export class EvolutionReducerImpl implements EvolutionReducer {
       feedbackScore: 0,
       usageCount: 0,
       createdAt: now,
+      evaluability,
+      detectorMetadata: isCompleteDetectorMetadata(params.detectorMetadata)
+        ? structuredClone(params.detectorMetadata)
+        : undefined,
     };
 
     this.principles.set(principleId, principle);
@@ -263,10 +314,15 @@ export class EvolutionReducerImpl implements EvolutionReducer {
       type: 'candidate_created',
       data: {
         painId: principle.source.painId,
+        painType: params.painType,
         principleId,
         trigger: params.triggerPattern,
         action: params.action,
         status: 'candidate',
+        evaluability,
+        detectorMetadata: isCompleteDetectorMetadata(params.detectorMetadata)
+          ? structuredClone(params.detectorMetadata)
+          : undefined,
       },
     });
 
@@ -276,7 +332,7 @@ export class EvolutionReducerImpl implements EvolutionReducer {
     SystemLogger.log(
       this.workspaceDir,
       'PRINCIPLE_CREATED',
-      `Principle ${principleId} created from diagnostician: "${params.triggerPattern.slice(0, 50)}..."`
+      `Principle ${principleId} created from diagnostician: "${params.triggerPattern.slice(0, 50)}..." [evaluability: ${evaluability}]`
     );
 
     return principleId;
@@ -355,6 +411,13 @@ export class EvolutionReducerImpl implements EvolutionReducer {
     const existing = this.principles.get(data.principleId);
     if (existing) {
       existing.status = 'candidate';
+      // Apply evaluability from event if present (supports event replay)
+      if (data.evaluability) {
+        existing.evaluability = data.evaluability;
+      }
+      if (data.detectorMetadata) {
+        existing.detectorMetadata = structuredClone(data.detectorMetadata);
+      }
       return;
     }
 
@@ -364,7 +427,7 @@ export class EvolutionReducerImpl implements EvolutionReducer {
       text: `When ${data.trigger}, then ${data.action}.`,
       source: {
         painId: data.painId,
-        painType: 'tool_failure',
+        painType: data.painType ?? 'tool_failure',
         timestamp: ts,
       },
       trigger: data.trigger,
@@ -375,6 +438,11 @@ export class EvolutionReducerImpl implements EvolutionReducer {
       feedbackScore: 0,
       usageCount: 0,
       createdAt: ts,
+      // Evaluability defaults to 'manual_only' for replayed events without the field
+      evaluability: data.evaluability ?? 'manual_only',
+      detectorMetadata: data.detectorMetadata
+        ? structuredClone(data.detectorMetadata)
+        : undefined,
     };
     this.principles.set(principle.id, principle);
   }

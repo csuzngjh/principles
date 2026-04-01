@@ -1,6 +1,6 @@
 # 💤 Nocturnal Evolution — 原则驱动的深度反思与行为进化系统
 
-> **版本**: v4.0 | **日期**: 2026-03-27 | **状态**: Design
+> **版本**: v4.1 | **日期**: 2026-03-27 | **状态**: Design
 > **约束**: 训练管线须在消费级显卡 (RTX 4090 24GB) 上可运行
 > **核心原则**: LLM 负责定性分析，代码负责定量裁决——永远不让 LLM 调自己的阈值
 > **增强回路**: 选择高 ROI 原则优先固化 → 训练资源集中 → 内化速度加快 → 释放训练带宽给下一个原则
@@ -259,7 +259,7 @@ function shouldReflect(input: NocturnalReflectionInput): boolean {
 |------|---------|------|
 | 输入任务队列 | `.state/evolution_queue.json` | JSON Array |
 | 轨迹数据 | `.state/trajectory.db` | SQLite |
-| 原则状态 | `.state/principle_stats.db` | SQLite（新增） |
+| 原则内化状态 | `.state/principle_internalization.json` | JSON |
 | 输出训练数据 | `.state/exports/dpo/reflection-{ts}.jsonl` | JSONL |
 | 反思日志 | `memory/reflection-log.md` | Markdown |
 
@@ -1295,6 +1295,77 @@ function detectPlanningPattern(toolSequence: string[]): boolean {
 | ORPO/DPO JSONL | `.state/exports/dpo/reflection-{timestamp}.jsonl` | LoRA 微调训练数据 |
 | 反思日志 | `memory/reflection-log.md` (追加) | 人类可读的进化记录 |
 | 进化任务 | `evolution_tasks` 表 (`source='nocturnal_evolution'`) | 分析和审计 |
+
+### 6.5 即时生效机制：reflection-log.md 注入
+
+> **短程增强回路 (R1.5)** — 反思价值在 LoRA 训练前就能兑现
+
+反思产出的改进示范会在 **下一次会话** 立即生效，无需等待 LoRA 训练：
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      即时生效流程                                            │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ① Trinity 反思完成                                                         │
+│         │                                                                   │
+│         ▼                                                                   │
+│  ② 追加写入 memory/reflection-log.md                                        │
+│     格式：[原则ID] 场景摘要 → 改进示范                                       │
+│         │                                                                   │
+│         ▼                                                                   │
+│  ③ before_prompt_build hook 读取最近 N 条反思记录                           │
+│     (复用现有的 reflectionLog 注入逻辑)                                      │
+│         │                                                                   │
+│         ▼                                                                   │
+│  ④ 注入到 appendSystemContext                                               │
+│     （不占用 prependContext 的动态配额）                                     │
+│         │                                                                   │
+│         ▼                                                                   │
+│  ⑤ 下次推理时，Agent 可参考"上次类似场景的改进示范"                          │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**注入配置**（复用现有 `ContextInjectionConfig`）：
+
+```typescript
+// 在 config.ts 中已有：
+interface ContextInjectionConfig {
+  thinkingOs: boolean;
+  trustScore: boolean;
+  reflectionLog: boolean;      // ← 复用此开关
+  // ...
+}
+
+// 默认开启，保留最近 7 天的反思记录
+const REFLECTION_LOG_RETENTION_DAYS = 7;
+```
+
+**reflection-log.md 格式示例**：
+
+```markdown
+## 2026-03-27 反思记录
+
+### T-01 Survey Before Acting
+- **场景**：用户请求新增 API endpoint
+- **原始行为**：直接创建文件 → 失败（找不到依赖）
+- **改进示范**：先读取 routes.ts 和 config.ts 了解结构 → 制定分步计划 → 成功
+
+### T-03 Evidence Over Assumption
+- **场景**：调试用户反馈的 bug
+- **原始行为**：假设是缓存问题 → 清缓存 → 无效
+- **改进示范**：先读取日志定位错误 → 发现是权限问题 → 修复
+```
+
+**与 LoRA 训练的关系**：
+
+| 通道 | 生效速度 | 效果持久性 | 适用场景 |
+|------|---------|-----------|---------|
+| **即时注入** | 下次会话 | 依赖上下文保留 | 快速试错、新原则探索 |
+| **LoRA 训练** | 积累 1K+ 后 | 模型参数级固化 | 高频原则内化 |
+
+两个通道互补：即时注入快速验证改进方向，LoRA 训练固化验证有效的行为模式。
 
 ---
 
@@ -2789,6 +2860,19 @@ async function selectReflectionTarget(wctx: WorkspaceContext): NocturnalReflecti
 }
 ```
 
+> **反思目标 vs Philosopher 审计范围**
+>
+> 每次反思有一个明确的 `targetPrincipleId`（训练优先级最高的原则），但：
+> - **Philosopher 仍然审计所有 T-01~T-09** — 这是为了理解完整的上下文，发现潜在的关联问题
+> - **Scribe 只改写与 `targetPrincipleId` 相关的决策点** — 训练数据聚焦，偏好信号更干净
+>
+> 例如：如果 `targetPrincipleId = 'T-01'`：
+> - Philosopher 会发现"违反 T-01，同时 T-03 也有问题"
+> - 但 Scribe 的改写重点是"如何在动手前先调研"（T-01）
+> - T-03 的问题可以在后续反思中单独处理
+>
+> 这避免了"一次反思改太多东西"导致的训练信号模糊问题。
+
 ### 15.9 Arbiter 评估方式区分
 
 ```typescript
@@ -2807,13 +2891,48 @@ function computePrincipleImprovement(
     const improvedHas = improvedMatches.some(m => m.modelId === principleId);
     return improvedHas && !originalHas ? 0.4 : 0;  // 从无到有 = 大改善
   } else {
-    // 进化原则 (P_xxx)：用原则的 trigger/action 关键词匹配
+    // 进化原则 (P_xxx)：检测是否避免了原 trigger 场景，或体现了正确 action
     const principle = reducer.getPrincipleById(principleId);
     if (!principle) return 0;
-    const triggerPresent = scribeOutput.toLowerCase().includes(principle.trigger.toLowerCase());
-    const actionPresent = scribeOutput.toLowerCase().includes(principle.action.toLowerCase());
-    return (triggerPresent && actionPresent) ? 0.3 : triggerPresent ? 0.15 : 0;
+    
+    // ⚠️ 不用简单的 includes()，改用更精确的检测
+    // 原因："write_file failed" 会误匹配 "write_file 成功了"
+    
+    // 方法 1：检测是否避免了原 trigger 场景（负面触发不再出现）
+    const triggerAvoided = !containsTriggerPattern(scribeOutput, principle.trigger);
+    
+    // 方法 2：检测是否体现了正确 action（正面行为出现）
+    const actionDemonstrated = containsActionPattern(scribeOutput, principle.action);
+    
+    // 综合评分：避免错误 + 体现正确 = 最佳
+    if (triggerAvoided && actionDemonstrated) return 0.4;
+    if (actionDemonstrated) return 0.25;  // 体现了正确行为
+    if (triggerAvoided) return 0.15;      // 至少避免了错误
+    return 0;
   }
+}
+
+/**
+ * 检测文本是否包含 trigger 模式（精确匹配，避免误判）
+ * 例如：trigger = "write_file failed" 只匹配失败场景，不匹配 "write_file 成功"
+ */
+function containsTriggerPattern(text: string, trigger: string): boolean {
+  // 将 trigger 转换为正则，允许空白变化，但保持核心词序
+  const escaped = trigger.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp(escaped.replace(/\s+/g, '\\s+'), 'i');
+  return pattern.test(text);
+}
+
+/**
+ * 检测文本是否体现了 action 行为
+ * action 通常是正面指导，如 "先读取现有结构再修改"
+ */
+function containsActionPattern(text: string, action: string): boolean {
+  // 检测 action 的关键词是否出现（分词后至少命中 50%）
+  const keywords = action.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+  const textLower = text.toLowerCase();
+  const hits = keywords.filter(kw => textLower.includes(kw)).length;
+  return hits >= Math.ceil(keywords.length * 0.5);
 }
 ```
 
@@ -2908,7 +3027,7 @@ CREATE TABLE principle_internalization (
 ---
 
 *Last updated: 2026-03-27*
-*Version: 4.0 — 新增 §15 (内化追踪子系统：训练优先级选择、SQL 聚合遵循率、T-xx/P_xxx 评估区分、完整闭环图)*
+*Version: 4.1 — 修复文档瑕疵：(1) 统一 shouldReflect() 函数 (P.3 引用 §0.6)；(2) 澄清反思目标 vs Philosopher 审计范围 (§15.8)；(3) 修复 P_xxx 关键词匹配误判 (§15.9)；(4) 补充即时生效机制说明 (§6.5)；(5) 统一存储位置为 JSON*
 
 ---
 
@@ -3186,31 +3305,64 @@ Pain 信号发生
 
 ### P.3 反思准入判定代码
 
+> **完整实现见 §0.6**。以下为补充说明。
+
 ```typescript
-interface ReflectionCandidate {
-  principleId: string;
-  complianceRate: number;      // 最近 N 次行为的遵循率
-  violationTrend: number;      // 违反频率变化（正数=上升，负数=下降）
-  trainingSamples: number;     // 已生成的训练样本数
-  painAssociations: PainSignal[]; // 关联的 Pain 信号
-  
-  // 是否应该进入反思流程
-  shouldReflect(): boolean {
+// 反思准入的核心逻辑（与 §0.6 shouldReflect() 一致）
+// 任何修改应同步更新两处
+
+interface ReflectionAdmissionResult {
+  admitted: boolean;
+  reason: 'pain_signal' | 'low_compliance' | 'rising_violations' | 'new_principle' | 'reactivated' | 'skipped';
+  targetPrincipleId?: string;  // 如果 admitted，指向最该反思的原则
+}
+
+function evaluateReflectionAdmission(
+  principles: PrincipleInternalization[],
+  painSignals: Map<string, PainSignal[]>  // principleId -> associated pains
+): ReflectionAdmissionResult {
+  // 筛选符合反思条件的原则
+  const candidates = principles.filter(p => {
     // 条件 1：有 Pain 关联
-    if (this.painAssociations.length > 0) return true;
+    const pains = painSignals.get(p.principleId) ?? [];
+    if (pains.length > 0) return true;
     
-    // 条件 2：遵循率低于阈值
-    if (this.complianceRate < 0.85) return true;
+    // 条件 2：遵循率低
+    if (p.complianceRate < 0.85) return true;
     
     // 条件 3：违反趋势上升
-    if (this.violationTrend > 0) return true;
+    if (p.violationTrend > 0) return true;
     
-    // 条件 4：从未训练过（新原则）
-    if (this.trainingSamples === 0) return true;
+    // 条件 4：新原则
+    if (p.trainingSamples === 0) return true;
     
-    // 其他情况：跳过反思
+    // 条件 5：已内化但有新违反（重新激活）
+    if ((p.status === 'internalized' || p.status === 'dormant') && pains.length > 0) return true;
+    
     return false;
+  });
+  
+  if (candidates.length === 0) {
+    return { admitted: false, reason: 'skipped' };
   }
+  
+  // 按 trainingPriority 排序，选最高的
+  const target = candidates.sort((a, b) => b.trainingPriority - a.trainingPriority)[0];
+  
+  // 确定原因
+  const pains = painSignals.get(target.principleId) ?? [];
+  let reason: ReflectionAdmissionResult['reason'] = 'low_compliance';
+  if (pains.length > 0 && (target.status === 'internalized' || target.status === 'dormant')) {
+    reason = 'reactivated';
+  } else if (pains.length > 0) {
+    reason = 'pain_signal';
+  } else if (target.trainingSamples === 0) {
+    reason = 'new_principle';
+  } else if (target.violationTrend > 0) {
+    reason = 'rising_violations';
+  }
+  
+  return { admitted: true, reason, targetPrincipleId: target.principleId };
 }
 ```
 
@@ -3374,4 +3526,4 @@ function computeEnhancementPotential(p: PrinciplePriority): number {
   return spaceReleased * (1 + dependencyBoost);
 }
 ```
-*Version: 4.0 — 新增 §15 内化追踪子系统（补完闭环），修正增强回路杠杆点（训练带宽而非 prompt token），修复 4 个结构性断裂*
+*Version: 4.1 — 修复文档瑕疵：统一 shouldReflect()、澄清审计范围、修复 P_xxx 匹配、补充即时生效机制、统一存储位置*

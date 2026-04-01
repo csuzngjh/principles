@@ -15,7 +15,7 @@ export type EventType =
   | 'plan_approval'
   | 'evolution_task'
   | 'deep_reflection'
-  | 'trust_change'
+
   | 'empathy_rollback'
   | 'error'
   | 'warn';
@@ -55,13 +55,6 @@ export interface EventLogEntry {
 }
 
 // ============== Specific Event Data ==============
-
-export interface TrustChangeEventData {
-  previousScore: number;
-  newScore: number;
-  delta: number;
-  reason: string;
-}
 
 export interface ToolCallEventData {
   toolName: string;
@@ -122,9 +115,7 @@ export interface GateBlockEventData {
 export interface GateBypassEventData {
   toolName: string;
   filePath: string;
-  bypassType: 'stage4_architect' | 'plan_approved' | 'whitelisted';
-  trustScore: number;
-  trustStage: number;
+  bypassType: 'stage4_architect' | 'whitelisted';
 }
 
 export interface PlanApprovalEventData {

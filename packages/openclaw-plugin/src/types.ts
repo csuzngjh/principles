@@ -33,9 +33,6 @@ export interface ContextInjectionConfig {
   
   /** Reflection log - can be toggled */
   reflectionLog: boolean;
-  
-  /** Trust score awareness - can be toggled */
-  trustScore: boolean;
 
   /** Evolution task context injection settings */
   evolutionContext: EvolutionContextConfig;
@@ -48,13 +45,11 @@ export interface ContextInjectionConfig {
  * - thinkingOs: true (can be turned off)
  * - projectFocus: 'off' (default closed, user can enable)
  * - reflectionLog: true (default on)
- * - trustScore: true (can be turned off)
  */
 export const defaultContextConfig: ContextInjectionConfig = {
   thinkingOs: true,
   projectFocus: 'off',
   reflectionLog: true,
-  trustScore: true,
   evolutionContext: {
     enabled: true,
     maxMessages: 4,

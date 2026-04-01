@@ -132,7 +132,6 @@ describe('Plugin Integration', () => {
         'pd-status',
         'pd-daily',
         'pd-grooming',
-        'pd-trust',
         'pd-help'
       ];
       for (const cmd of expectedCommands) {

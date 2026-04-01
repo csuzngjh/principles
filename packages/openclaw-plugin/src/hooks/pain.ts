@@ -8,6 +8,7 @@ import { denoiseError, computeHash } from '../utils/hashing.js';
 import { SystemLogger } from '../core/system-logger.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { getEvolutionLogger, createTraceId } from '../core/evolution-logger.js';
+import { recordEvolutionSuccess, recordEvolutionFailure } from '../core/evolution-engine.js';
 import type { EvolutionLoopEvent } from '../core/evolution-types.js';
 import type { PluginHookAfterToolCallEvent, PluginHookToolContext, OpenClawPluginApi } from '../openclaw-sdk.js';
 
@@ -57,7 +58,6 @@ export function handleAfterToolCall(
   const wctx = WorkspaceContext.fromHookContext({ ...ctx, workspaceDir: effectiveWorkspaceDir });
   const config = wctx.config;
   const eventLog = wctx.eventLog;
-  const trust = wctx.trust;
   const sessionId = ctx.sessionId || 'unknown';
   const sessionState = ctx.sessionId ? getSession(ctx.sessionId) : undefined;
   const gfiBefore = sessionState?.currentGfi ?? 0;
@@ -143,11 +143,10 @@ export function handleAfterToolCall(
     
     const isRisk = isRisky(relPath, profile.risk_paths);
     
-    trust.recordFailure(isRisk ? 'risky' : 'tool', {
+    recordEvolutionFailure(effectiveWorkspaceDir, event.toolName, {
+        filePath: relPath,
+        reason: isRisk ? 'risky' : 'tool',
         sessionId,
-        api,
-        toolName: event.toolName,
-        error: event.error // Pass error for timeout detection
     });
     
     // Record tool call failure event
@@ -186,11 +185,9 @@ export function handleAfterToolCall(
     // ── SUCCESS BRANCH ──
     const resetState = resetFriction(sessionId, effectiveWorkspaceDir);
     
-    // 👈 Record success to reset failure streak and earn minor trust (if constructive)
-    trust.recordSuccess('tool_success', { 
-        sessionId, 
-        api,
-        toolName: event.toolName // 👈 NEW: Pass toolName for classification
+    recordEvolutionSuccess(effectiveWorkspaceDir, event.toolName, {
+        sessionId,
+        reason: 'tool_success',
     });
 
     const injectedProbationIds = getInjectedProbationIds(sessionId, effectiveWorkspaceDir);

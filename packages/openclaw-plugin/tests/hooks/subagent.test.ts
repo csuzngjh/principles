@@ -3,6 +3,7 @@ import { handleSubagentEnded } from '../../src/hooks/subagent.js';
 import * as fs from 'fs';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
 import * as evolutionWorker from '../../src/service/evolution-worker.js';
+import { empathyObserverManager } from '../../src/service/empathy-observer-manager.js';
 
 vi.mock('fs');
 vi.mock('../../src/core/workspace-context.js');
@@ -14,10 +15,6 @@ const mockEmitSync = vi.fn();
 
 describe('Subagent Hook', () => {
     const workspaceDir = '/mock/workspace';
-
-const mockTrust = {
-    recordSuccess: vi.fn(),
-};
 
 const mockTrajectory = {
     recordTaskOutcome: vi.fn(),
@@ -35,7 +32,6 @@ const mockTrajectory = {
 
     const mockWctx = {
         workspaceDir,
-        trust: mockTrust,
         config: mockConfig,
         evolutionReducer: { emitSync: mockEmitSync },
         trajectory: mockTrajectory,
@@ -68,11 +64,6 @@ const mockTrajectory = {
 
         await handleSubagentEnded(mockEvent as any, mockCtx as any);
 
-        expect(mockTrust.recordSuccess).toHaveBeenCalledWith(
-            'subagent_success',
-            expect.objectContaining({ sessionId: 's1' }),
-            true
-        );
         expect(mockTrajectory.recordTaskOutcome).not.toHaveBeenCalled();
     });
 
@@ -85,13 +76,66 @@ const mockTrajectory = {
 
         await handleSubagentEnded(mockEvent as any, mockCtx as any);
 
-        expect(mockTrust.recordSuccess).not.toHaveBeenCalled();
         expect(mockEmitSync).toHaveBeenCalledWith(expect.objectContaining({
             type: 'pain_detected',
             data: expect.objectContaining({
                 painType: 'subagent_error',
             }),
         }));
+    });
+
+    it('should call reap and return early for observer session', async () => {
+        const reapSpy = vi.spyOn(empathyObserverManager, 'reap').mockResolvedValue(undefined);
+        const mockCtx = { workspaceDir, sessionId: 's1', api: {} };
+        const mockEvent = { 
+            targetSessionKey: 'agent:main:subagent:empathy-obs-test123',
+            outcome: 'ok' 
+        };
+
+        vi.mocked(fs.existsSync).mockReturnValue(false);
+
+        await handleSubagentEnded(mockEvent as any, mockCtx as any);
+
+        expect(reapSpy).toHaveBeenCalledWith(
+            mockCtx.api,
+            'agent:main:subagent:empathy-obs-test123',
+            workspaceDir
+        );
+        expect(mockEmitSync).not.toHaveBeenCalled();
+        expect(mockTrajectory.recordTaskOutcome).not.toHaveBeenCalled();
+    });
+
+    it('should not enter diagnostician branch for observer session', async () => {
+        const reapSpy = vi.spyOn(empathyObserverManager, 'reap').mockResolvedValue(undefined);
+        vi.mocked(fs.existsSync).mockImplementation((p) => {
+            const pathStr = p.toString();
+            return pathStr.includes('evolution_queue.json') || pathStr.includes('.pain_flag');
+        });
+
+        vi.mocked(fs.readFileSync).mockImplementation((p) => {
+            const pathStr = p.toString();
+            if (pathStr.includes('evolution_queue.json')) {
+                return JSON.stringify([
+                    { id: 'task-b', status: 'in_progress', assigned_session_key: 'agent:main:subagent:empathy-obs-test123' }
+                ]);
+            }
+            if (pathStr.includes('.pain_flag')) {
+                return 'score: 80\nstatus: queued\ntask_id: task-b\n';
+            }
+            return '';
+        });
+
+        const mockCtx = { workspaceDir, sessionId: 's1', api: {} };
+        const mockEvent = { 
+            targetSessionKey: 'agent:main:subagent:empathy-obs-test123',
+            outcome: 'ok' 
+        };
+
+        await handleSubagentEnded(mockEvent as any, mockCtx as any);
+
+        expect(reapSpy).toHaveBeenCalled();
+        const writeSpy = vi.mocked(fs.writeFileSync);
+        expect(writeSpy).not.toHaveBeenCalled();
     });
 
 
@@ -123,15 +167,10 @@ const mockTrajectory = {
 
         await handleSubagentEnded(mockEvent as any, mockCtx as any);
 
-        // Killed should NOT trigger pain_detected event
         expect(mockEmitSync).not.toHaveBeenCalled();
-        // Should also NOT record success (it was terminated, not successful)
-        expect(mockTrust.recordSuccess).not.toHaveBeenCalled();
     });
 
     it('should NOT emit pain_detected for reset outcome (system reset)', async () => {
-        // Reset outcome indicates system-level session reset
-        // This is not an agent failure - should not trigger pain penalties
         const mockCtx = { workspaceDir, sessionId: 's5' };
         const mockEvent = {
             targetSessionKey: 'agent:main:subagent:diagnostician-123',
@@ -140,10 +179,7 @@ const mockTrajectory = {
 
         await handleSubagentEnded(mockEvent as any, mockCtx as any);
 
-        // Reset should NOT trigger pain_detected event
         expect(mockEmitSync).not.toHaveBeenCalled();
-        // Should also NOT record success (it was reset, not successful)
-        expect(mockTrust.recordSuccess).not.toHaveBeenCalled();
     });
 
     it('should match HEARTBEAT placeholder task for diagnostician session', async () => {

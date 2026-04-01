@@ -1,0 +1,6 @@
+*
+!.gitignore
+!specs/
+!specs/*.json
+!archive/
+!archive/**

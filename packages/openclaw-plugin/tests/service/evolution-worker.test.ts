@@ -24,6 +24,7 @@ vi.mock('../../src/core/dictionary-service');
 vi.mock('../../src/core/session-tracker', () => ({
     initPersistence: vi.fn(),
     flushAllSessions: vi.fn(),
+    listSessions: vi.fn(() => []), // Returns empty sessions for idle detection
 }));
 vi.mock('../../src/core/event-log', () => ({
     EventLogService: {
@@ -281,50 +282,203 @@ describe('EvolutionWorkerService', () => {
         }
     });
 
-    describe('Phase 3 Eligibility - Directive Exclusion', () => {
-        it('makes queue-only eligible when directive is missing', () => {
+    describe('sleep_reflection stuck in_progress recovery', () => {
+        it('should recover stuck in_progress sleep_reflection tasks older than timeout', async () => {
+            const mockDict = {
+                flush: vi.fn()
+            };
+            vi.mocked(DictionaryService.get).mockReturnValue(mockDict as any);
+
+            const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-sleep-recovery-'));
+            const stateDir = path.join(workspaceDir, '.state');
+            fs.mkdirSync(path.join(stateDir, 'sessions'), { recursive: true });
+            fs.mkdirSync(path.join(stateDir, 'logs'), { recursive: true });
+
+            // Create a sleep_reflection task that's been in_progress for 2 hours
+            const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+            fs.writeFileSync(
+                path.join(stateDir, 'evolution_queue.json'),
+                JSON.stringify([
+                    {
+                        id: 'sleep-stuck',
+                        taskKind: 'sleep_reflection',
+                        priority: 'medium',
+                        score: 50,
+                        source: 'nocturnal',
+                        reason: 'Sleep-mode reflection',
+                        trigger_text_preview: 'Idle workspace detected',
+                        timestamp: twoHoursAgo,
+                        enqueued_at: twoHoursAgo,
+                        started_at: twoHoursAgo,
+                        status: 'in_progress',
+                        traceId: 'sleep-stuck',
+                        retryCount: 0,
+                        maxRetries: 1,
+                    },
+                ], null, 2),
+                'utf8'
+            );
+
+            const ctx = {
+                workspaceDir,
+                stateDir,
+                logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+            };
+
+            try {
+                EvolutionWorkerService.start(ctx as any);
+                await vi.advanceTimersByTimeAsync(5000);
+
+                const queue = JSON.parse(fs.readFileSync(path.join(stateDir, 'evolution_queue.json'), 'utf8'));
+                expect(queue[0].status).toBe('failed');
+                expect(queue[0].resolution).toBe('failed_max_retries');
+                expect(queue[0].completed_at).toBeDefined();
+                expect(queue[0].lastError).toContain('timed out');
+            } finally {
+                EvolutionWorkerService.stop(ctx as any);
+                safeRmDir(workspaceDir);
+            }
+        });
+
+        it('should not recover sleep_reflection tasks within timeout', async () => {
+            const mockDict = { flush: vi.fn() };
+            vi.mocked(DictionaryService.get).mockReturnValue(mockDict as any);
+
+            const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-sleep-recent-'));
+            const stateDir = path.join(workspaceDir, '.state');
+            fs.mkdirSync(path.join(stateDir, 'sessions'), { recursive: true });
+            fs.mkdirSync(path.join(stateDir, 'logs'), { recursive: true });
+
+            // Task started 10 minutes ago — well within 1-hour timeout
+            const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+            fs.writeFileSync(
+                path.join(stateDir, 'evolution_queue.json'),
+                JSON.stringify([
+                    {
+                        id: 'sleep-recent',
+                        taskKind: 'sleep_reflection',
+                        priority: 'medium',
+                        score: 50,
+                        source: 'nocturnal',
+                        reason: 'Sleep-mode reflection',
+                        trigger_text_preview: 'Idle workspace detected',
+                        timestamp: tenMinutesAgo,
+                        enqueued_at: tenMinutesAgo,
+                        started_at: tenMinutesAgo,
+                        status: 'in_progress',
+                        traceId: 'sleep-recent',
+                        retryCount: 0,
+                        maxRetries: 1,
+                    },
+                ], null, 2),
+                'utf8'
+            );
+
+            const ctx = {
+                workspaceDir,
+                stateDir,
+                logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+            };
+
+            try {
+                EvolutionWorkerService.start(ctx as any);
+                await vi.advanceTimersByTimeAsync(5000);
+
+                const queue = JSON.parse(fs.readFileSync(path.join(stateDir, 'evolution_queue.json'), 'utf8'));
+                // Still in_progress — not old enough to recover
+                expect(queue[0].status).toBe('in_progress');
+            } finally {
+                EvolutionWorkerService.stop(ctx as any);
+                safeRmDir(workspaceDir);
+            }
+        });
+
+        it('should not affect pain_diagnosis in_progress timeout logic', async () => {
+            const mockDict = { flush: vi.fn() };
+            vi.mocked(DictionaryService.get).mockReturnValue(mockDict as any);
+
+            const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pain-unchanged-'));
+            const stateDir = path.join(workspaceDir, '.state');
+            fs.mkdirSync(path.join(stateDir, 'sessions'), { recursive: true });
+            fs.mkdirSync(path.join(stateDir, 'logs'), { recursive: true });
+
+            // pain_diagnosis task that's been in_progress for 2 hours — should be auto-completed
+            const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+            fs.writeFileSync(
+                path.join(stateDir, 'evolution_queue.json'),
+                JSON.stringify([
+                    {
+                        id: 'pain-old',
+                        taskKind: 'pain_diagnosis',
+                        priority: 'high',
+                        score: 90,
+                        source: 'tool_failure',
+                        reason: 'write failed',
+                        trigger_text_preview: 'Tool edit failed',
+                        timestamp: twoHoursAgo,
+                        enqueued_at: twoHoursAgo,
+                        started_at: twoHoursAgo,
+                        status: 'in_progress',
+                        traceId: 'pain-old',
+                        retryCount: 0,
+                        maxRetries: 3,
+                    },
+                ], null, 2),
+                'utf8'
+            );
+
+            const ctx = {
+                workspaceDir,
+                stateDir,
+                logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+            };
+
+            try {
+                EvolutionWorkerService.start(ctx as any);
+                await vi.advanceTimersByTimeAsync(5000);
+
+                const queue = JSON.parse(fs.readFileSync(path.join(stateDir, 'evolution_queue.json'), 'utf8'));
+                // pain_diagnosis uses auto_completed_timeout, NOT failed
+                expect(queue[0].status).toBe('completed');
+                expect(queue[0].resolution).toBe('auto_completed_timeout');
+            } finally {
+                EvolutionWorkerService.stop(ctx as any);
+                safeRmDir(workspaceDir);
+            }
+        });
+    });
+
+    describe('Phase 3 Eligibility - Queue Only (Trust Removed)', () => {
+        it('makes queue eligible when tasks are valid', () => {
             const result = evaluatePhase3Inputs(
-                [{ id: 'task-1', status: 'completed', completed_at: '2026-03-25T10:00:00.000Z' }],
-                { score: 85, frozen: true }
+                [{ id: 'task-1', status: 'completed', completed_at: '2026-03-25T10:00:00.000Z' }]
             );
 
             expect(result.phase3ShadowEligible).toBe(true);
             expect(result.queueTruthReady).toBe(true);
-            expect(result.trustInputReady).toBe(true);
             expect(result.evolution.eligible).toHaveLength(1);
             expect(result.evolution.rejected).toHaveLength(0);
         });
 
-        it('makes queue-only eligible when directive is stale (production scenario)', () => {
-            // Production evidence shows directive stopped updating on 2026-03-22
-            // Phase 3 eligibility should still work based on queue and trust alone
+        it('makes queue eligible when directive is stale (production scenario)', () => {
             const result = evaluatePhase3Inputs(
-                [{ id: 'task-1', status: 'completed', completed_at: '2026-03-25T10:00:00.000Z' }],
-                { score: 85, frozen: true }
+                [{ id: 'task-1', status: 'completed', completed_at: '2026-03-25T10:00:00.000Z' }]
             );
 
-            // Directive state (stale vs fresh) should never affect eligibility
-            // Only queue and trust matter
             expect(result.phase3ShadowEligible).toBe(true);
             expect(result.queueTruthReady).toBe(true);
-            expect(result.trustInputReady).toBe(true);
         });
 
-        it('rejects empty queue regardless of directive state', () => {
-            const result = evaluatePhase3Inputs(
-                [],
-                { score: 85, frozen: true, lastUpdated: '2026-03-25' }
-            );
+        it('rejects empty queue', () => {
+            const result = evaluatePhase3Inputs([]);
 
             expect(result.phase3ShadowEligible).toBe(false);
             expect(result.queueTruthReady).toBe(false);
-            expect(result.trustInputReady).toBe(true);
         });
 
-        it('rejects invalid queue regardless of directive state', () => {
+        it('rejects invalid queue status', () => {
             const result = evaluatePhase3Inputs(
-                [{ id: 'task-1', status: 'invalid' }],
-                { score: 85, frozen: true, lastUpdated: '2026-03-25' }
+                [{ id: 'task-1', status: 'invalid' }]
             );
 
             expect(result.phase3ShadowEligible).toBe(false);
@@ -332,68 +486,29 @@ describe('EvolutionWorkerService', () => {
             expect(result.evolution.rejected[0].reasons).toContain('invalid_status');
         });
 
-        it('rejects when trust input is invalid regardless of directive', () => {
+        it('eligible requires queue with valid completed tasks', () => {
             const result = evaluatePhase3Inputs(
-                [{ id: 'task-1', status: 'completed', completed_at: '2026-03-25T10:00:00.000Z' }],
-                { score: null, frozen: false }
+                [{ id: 'task-1', status: 'completed', completed_at: '2026-03-25T10:00:00.000Z' }]
             );
 
-            expect(result.phase3ShadowEligible).toBe(false);
+            expect(result.phase3ShadowEligible).toBe(true);
             expect(result.queueTruthReady).toBe(true);
-            expect(result.trustInputReady).toBe(false);
-            expect(result.trust.rejectedReasons).toContain('missing_trust_score');
-            expect(result.trust.rejectedReasons).toContain('legacy_or_unfrozen_trust_schema');
-        });
-
-        it('requires both queue truth ready AND trust input ready for Phase 3', () => {
-            // Queue ready, trust not ready
-            const result1 = evaluatePhase3Inputs(
-                [{ id: 'task-1', status: 'completed', completed_at: '2026-03-25T10:00:00.000Z' }],
-                { score: null, frozen: false }
-            );
-            expect(result1.phase3ShadowEligible).toBe(false);
-            expect(result1.queueTruthReady).toBe(true);
-            expect(result1.trustInputReady).toBe(false);
-
-            // Trust ready, queue not ready
-            const result2 = evaluatePhase3Inputs(
-                [],
-                { score: 85, frozen: true }
-            );
-            expect(result2.phase3ShadowEligible).toBe(false);
-            expect(result2.queueTruthReady).toBe(false);
-            expect(result2.trustInputReady).toBe(true);
-
-            // Both ready
-            const result3 = evaluatePhase3Inputs(
-                [{ id: 'task-1', status: 'completed', completed_at: '2026-03-25T10:00:00.000Z' }],
-                { score: 85, frozen: true }
-            );
-            expect(result3.phase3ShadowEligible).toBe(true);
-            expect(result3.queueTruthReady).toBe(true);
-            expect(result3.trustInputReady).toBe(true);
         });
 
         it('does not accept directive as a parameter (API design)', () => {
-            // evaluatePhase3Inputs should only accept queue and trust
-            // This test verifies the function signature does NOT include directive
             const func = evaluatePhase3Inputs;
             const funcString = func.toString();
 
-            // Function should not have directive parameter in signature
             expect(funcString).not.toMatch(/directive\s*:/);
             expect(funcString).not.toMatch(/directive\s*\)/);
         });
 
         it('handles multiple queue items correctly', () => {
-            const result = evaluatePhase3Inputs(
-                [
-                    { id: 'task-1', status: 'completed', completed_at: '2026-03-25T10:00:00.000Z' },
-                    { id: 'task-2', status: 'in_progress', started_at: '2026-03-25T11:00:00.000Z' },
-                    { id: 'task-3', status: 'pending' }
-                ],
-                { score: 85, frozen: true }
-            );
+            const result = evaluatePhase3Inputs([
+                { id: 'task-1', status: 'completed', completed_at: '2026-03-25T10:00:00.000Z' },
+                { id: 'task-2', status: 'in_progress', started_at: '2026-03-25T11:00:00.000Z' },
+                { id: 'task-3', status: 'pending' }
+            ]);
 
             expect(result.phase3ShadowEligible).toBe(true);
             expect(result.evolution.eligible).toHaveLength(3);

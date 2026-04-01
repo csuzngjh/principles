@@ -11,11 +11,11 @@
 // ===== 等级定义 =====
 
 export enum EvolutionTier {
-  Seed = 1,      // 萌芽：只读 + 基础文档
-  Sprout = 2,    // 新芽：单文件编辑 (<50行)
-  Sapling = 3,   // 幼苗：多文件 + 测试 + 子智能体
-  Tree = 4,      // 大树：重构 + 风险路径
-  Forest = 5     // 森林：完全自主
+  Seed = 1,      // 起步：150行 + 3文件 + 子智能体（现代 AI 能力已足够强）
+  Sprout = 2,    // 成长：300行 + 5文件
+  Sapling = 3,   // 独当：500行 + 10文件 + 风险路径
+  Tree = 4,      // 专家：1000行 + 20文件
+  Forest = 5     // 大师：完全自主
 }
 
 export interface TierPermissions {
@@ -33,10 +33,16 @@ export interface TierDefinition {
 }
 
 export const TIER_DEFINITIONS: readonly TierDefinition[] = [
-  { tier: EvolutionTier.Seed,    name: 'Seed',    requiredPoints: 0,    permissions: { maxLinesPerWrite: 20,  maxFilesPerTask: 1,  allowRiskPath: false, allowSubagentSpawn: false }},
-  { tier: EvolutionTier.Sprout,  name: 'Sprout',  requiredPoints: 50,   permissions: { maxLinesPerWrite: 50,  maxFilesPerTask: 2,  allowRiskPath: false, allowSubagentSpawn: false }},
-  { tier: EvolutionTier.Sapling, name: 'Sapling', requiredPoints: 200,  permissions: { maxLinesPerWrite: 200, maxFilesPerTask: 5,  allowRiskPath: false, allowSubagentSpawn: true  }},
-  { tier: EvolutionTier.Tree,    name: 'Tree',    requiredPoints: 500,  permissions: { maxLinesPerWrite: 500, maxFilesPerTask: 10, allowRiskPath: true,  allowSubagentSpawn: true  }},
+  // 2026-03-28: 大幅放宽限制，现代 AI 能力已很强
+  // Seed: 从 20 行提升到 150 行，允许 3 文件，允许子智能体
+  { tier: EvolutionTier.Seed,    name: 'Seed',    requiredPoints: 0,    permissions: { maxLinesPerWrite: 150,  maxFilesPerTask: 3,  allowRiskPath: false, allowSubagentSpawn: true  }},
+  // Sprout: 中等规模开发
+  { tier: EvolutionTier.Sprout,  name: 'Sprout',  requiredPoints: 50,   permissions: { maxLinesPerWrite: 300,  maxFilesPerTask: 5,  allowRiskPath: false, allowSubagentSpawn: true  }},
+  // Sapling: 较大规模开发，可访问风险路径（需 PLAN）
+  { tier: EvolutionTier.Sapling, name: 'Sapling', requiredPoints: 200,  permissions: { maxLinesPerWrite: 500,  maxFilesPerTask: 10, allowRiskPath: true,  allowSubagentSpawn: true  }},
+  // Tree: 大型重构
+  { tier: EvolutionTier.Tree,    name: 'Tree',    requiredPoints: 500,  permissions: { maxLinesPerWrite: 1000, maxFilesPerTask: 20, allowRiskPath: true,  allowSubagentSpawn: true  }},
+  // Forest: 完全自主
   { tier: EvolutionTier.Forest,  name: 'Forest',  requiredPoints: 1000, permissions: { maxLinesPerWrite: Infinity, maxFilesPerTask: Infinity, allowRiskPath: true, allowSubagentSpawn: true }},
 ] as const;
 
@@ -151,12 +157,6 @@ export interface EvolutionConfig {
     tier5Trivial: number;   // Forest级做trivial任务的系数
     tier5Normal: number;    // Forest级做normal任务的系数
   };
-  
-  /** 信任分系统双轨运行时的配置 */
-  dualTrack: {
-    enabled: boolean;
-    primarySystem: 'trust' | 'evolution';  // 主决策系统
-  };
 }
 
 export const DEFAULT_EVOLUTION_CONFIG: EvolutionConfig = {
@@ -167,10 +167,6 @@ export const DEFAULT_EVOLUTION_CONFIG: EvolutionConfig = {
     tier4Normal: 0.5,
     tier5Trivial: 0.1,
     tier5Normal: 0.5,
-  },
-  dualTrack: {
-    enabled: true,
-    primarySystem: 'evolution',
   },
 };
 
@@ -215,6 +211,70 @@ export interface TierPromotionEvent {
 
 export type PrincipleStatus = 'candidate' | 'probation' | 'active' | 'deprecated';
 
+/**
+ * Evaluability classification — determines whether a P_xxx principle can enter
+ * automatic nocturnal targeting.
+ *
+ * - deterministic:    Machine-checkable via deterministic rules/tool detectors
+ * - weak_heuristic:  Checkable via heuristic signals, may have false positives
+ * - manual_only:     No machine-checkable detector — stays in prompts only
+ */
+export type PrincipleEvaluatorLevel = 'deterministic' | 'weak_heuristic' | 'manual_only';
+
+/**
+ * Shared alias for PrincipleEvaluatorLevel — used by modules that reference
+ * the same evaluability classification without direct coupling to evolution-types.
+ * @deprecated Use PrincipleEvaluatorLevel directly. This alias exists for
+ * backwards compatibility with principle-training-state.ts.
+ */
+export type Evaluability = PrincipleEvaluatorLevel;
+
+/**
+ * Structured detector metadata for P_xxx principles.
+ * Allows the principle to enter automatic nocturnal targeting.
+ *
+ * If any required field is missing, the principle defaults to 'manual_only'.
+ */
+export interface PrincipleDetectorSpec {
+  /** Topic/scenario tags where this detector applies */
+  applicabilityTags: string[];
+  /** Evidence that the principle was followed */
+  positiveSignals: string[];
+  /** Evidence that the principle was violated */
+  negativeSignals: string[];
+  /** Tool call sequences that indicate the principle is relevant */
+  toolSequenceHints: string[][];
+  /** Confidence in the detector's signal quality */
+  confidence: 'high' | 'medium' | 'low';
+}
+
+/**
+ * Validates that a detector metadata object has all required fields with non-empty values.
+ * Used as defense-in-depth before accepting detectorMetadata for auto-trainable principles.
+ */
+export function isCompleteDetectorMetadata(
+  meta: unknown
+): meta is PrincipleDetectorSpec {
+  if (!meta || typeof meta !== 'object') return false;
+  const m = meta as Record<string, unknown>;
+  const VALID_CONFIDENCE = ['high', 'medium', 'low'] as const;
+  if (
+    typeof m.confidence !== 'string' ||
+    !(VALID_CONFIDENCE as readonly string[]).includes(m.confidence)
+  ) {
+    return false;
+  }
+  const nonEmptyStringArray = (arr: unknown): boolean =>
+    Array.isArray(arr) &&
+    arr.length > 0 &&
+    arr.every((s) => typeof s === 'string' && s.length > 0);
+  return (
+    nonEmptyStringArray(m.applicabilityTags) &&
+    nonEmptyStringArray(m.positiveSignals) &&
+    nonEmptyStringArray(m.negativeSignals)
+  );
+}
+
 export interface Principle {
   id: string;
   version: number;
@@ -238,6 +298,18 @@ export interface Principle {
   createdAt: string;
   activatedAt?: string;
   deprecatedAt?: string;
+  /**
+   * Evaluability classification. Defaults to 'manual_only' if not set.
+   * Principles with 'manual_only' evaluability cannot enter automatic
+   * nocturnal targeting.
+   */
+  evaluability: PrincipleEvaluatorLevel;
+  /**
+   * Structured detector metadata. If present and valid, the principle
+   * may be auto-trainable (deterministic / weak_heuristic).
+   * Absent or malformed = 'manual_only' evaluability.
+   */
+  detectorMetadata?: PrincipleDetectorSpec;
 }
 
 export type EvolutionLoopEventType =
@@ -267,6 +339,12 @@ export interface CandidateCreatedData {
   trigger: string;
   action: string;
   status: 'candidate';
+  /** Pain type that generated this candidate — preserved on replay */
+  painType?: 'tool_failure' | 'subagent_error' | 'user_frustration';
+  /** Optional evaluability — defaults to 'manual_only' if omitted */
+  evaluability?: PrincipleEvaluatorLevel;
+  /** Optional detector metadata — absent = manual_only */
+  detectorMetadata?: PrincipleDetectorSpec;
 }
 
 export interface PrinciplePromotedData {

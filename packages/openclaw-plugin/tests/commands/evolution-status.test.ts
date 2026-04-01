@@ -77,7 +77,6 @@ describe('evolution commands', () => {
     } as any);
 
     expect(result.text).toContain('Evolution Status');
-    expect(result.text).toContain('legacy/frozen');
     expect(result.text).toContain('Session GFI: current 45, peak 78');
     expect(result.text).toContain('Queue: pending 1, in_progress 0, completed 0');
     expect(result.text).toMatch(/Legacy Directive File: (present|missing) \(compatibility-only display artifact\)/);
@@ -115,7 +114,6 @@ describe('evolution commands', () => {
 
     expect(result.text).toContain('进化状态');
     expect(result.text).toContain('观察期原则: 1');
-    expect(result.text).toContain('Legacy Trust');
   });
 
   it('rolls back principle through command', () => {
@@ -189,10 +187,9 @@ describe('evolution commands', () => {
       sessionId: 's1',
     } as any);
 
-    // Verify Phase 3 eligibility based on queue and trust, not directive
+    // Verify Phase 3 eligibility based on queue only, not directive
     expect(result.text).toContain('Phase 3: ready yes');
     expect(result.text).toContain('queueTruthReady yes');
-    expect(result.text).toContain('trustInputReady yes');
     expect(result.text).toContain('eligible 2');
 
     // Verify directive is labeled as compatibility-only

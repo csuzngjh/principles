@@ -5,7 +5,6 @@ import { PainConfig } from './config.js';
 import { EventLogService, EventLog } from './event-log.js';
 import { DictionaryService } from './dictionary-service.js';
 import { PainDictionary } from './dictionary.js';
-import { TrustEngine } from './trust-engine.js';
 import { HygieneTracker } from './hygiene/tracker.js';
 import { EvolutionReducerImpl } from './evolution-reducer.js';
 import { TrajectoryDatabase, TrajectoryRegistry, TrajectoryDatabaseOptions } from './trajectory.js';
@@ -24,7 +23,6 @@ export class WorkspaceContext {
     private _config?: PainConfig;
     private _eventLog?: EventLog;
     private _dictionary?: PainDictionary;
-    private _trust?: TrustEngine;
     private _hygiene?: HygieneTracker;
     private _evolutionReducer?: EvolutionReducerImpl;
     private _trajectory?: TrajectoryDatabase;
@@ -62,16 +60,6 @@ export class WorkspaceContext {
             this._dictionary = DictionaryService.get(this.stateDir);
         }
         return this._dictionary;
-    }
-
-    /**
-     * Trust engine service bound to this workspace.
-     */
-    get trust(): TrustEngine {
-        if (!this._trust) {
-            this._trust = new TrustEngine(this.workspaceDir);
-        }
-        return this._trust;
     }
 
     /**
@@ -172,7 +160,6 @@ export class WorkspaceContext {
         this._config = undefined;
         this._eventLog = undefined;
         this._dictionary = undefined;
-        this._trust = undefined;
         this._evolutionReducer = undefined;
         this._trajectory = undefined;
     }

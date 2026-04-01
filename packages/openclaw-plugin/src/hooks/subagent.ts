@@ -2,8 +2,9 @@ import type { PluginHookSubagentEndedEvent, PluginHookSubagentContext, PluginLog
 import * as fs from 'fs';
 import { writePainFlag } from '../core/pain.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
-import { empathyObserverManager, type EmpathyObserverApi } from '../service/empathy-observer-manager.js';
+import { empathyObserverManager, isEmpathyObserverSession, type EmpathyObserverApi } from '../service/empathy-observer-manager.js';
 import { acquireQueueLock, type EvolutionQueueItem } from '../service/evolution-worker.js';
+import { recordEvolutionSuccess } from '../core/evolution-engine.js';
 
 const COMPLETION_RETRY_DELAY_MS = 250;
 const COMPLETION_MAX_RETRIES = 3;
@@ -171,14 +172,14 @@ export async function handleSubagentEnded(
 
     const wctx = WorkspaceContext.fromHookContext(ctx);
     const logger: HookLogger = ctx.api?.logger ?? console;
-    if (targetSessionKey?.startsWith('empathy_obs:')) {
-        await empathyObserverManager.reap(ctx.api, targetSessionKey, workspaceDir);
+    if (isEmpathyObserverSession(targetSessionKey || '')) {
+        await empathyObserverManager.reap(ctx.api, targetSessionKey!, workspaceDir);
         return;
     }
 
     const config = wctx.config;
 
-    // ── Outcome-based Trust Score and Pain Signal handling ──
+    // ── Outcome-based EP and Pain Signal handling ──
     // OpenClaw v2026.3.23 fixes: timeout may be false positive (fast-finishing workers)
     // Only penalize actual errors, not timeout/killed/reset
     
@@ -220,10 +221,10 @@ export async function handleSubagentEnded(
     }
 
     if (outcome === 'ok' || outcome === 'deleted') {
-        wctx.trust.recordSuccess('subagent_success', {
+        recordEvolutionSuccess(workspaceDir, 'subagent', {
             sessionId: ctx.sessionId,
-            api: ctx.api
-        }, true);
+            reason: 'subagent_success',
+        });
     }
 
     if ((outcome !== 'ok' && outcome !== 'deleted') || !isDiagnosticianSession(targetSessionKey)) {
@@ -246,7 +247,11 @@ export async function handleSubagentEnded(
         // Improved matching logic: support both direct session key match and HEARTBEAT placeholder match
         // This fixes task_outcomes being empty for HEARTBEAT-triggered diagnostician runs
         const matchedTask = queue.find((task: any) => {
-            if (task?.status !== 'in_progress') return false;
+            // V2: Skip non-pain_diagnosis tasks - they don't use HEARTBEAT completion flow
+            // pain_diagnosis: routed through subagent completion matcher (this block)
+            // sleep_reflection: handled by nocturnal service (separate flow, no HEARTBEAT)
+            // model_eval: handled separately (no HEARTBEAT completion)
+            if (task?.taskKind !== 'pain_diagnosis' && task?.taskKind !== undefined) return false;
             
             const taskSessionKey = task?.assigned_session_key;
             
@@ -335,12 +340,50 @@ export async function handleSubagentEnded(
                 const report = parseDiagnosticianReport(assistantText);
 
                 if (report?.principle) {
+                    // Principles default to 'manual_only' evaluability unless detector metadata
+                    // is explicitly provided. Only deterministic / weak_heuristic evaluability
+                    // can enter automatic nocturnal targeting.
+                    const evaluability = report.principle.evaluability;
+
+                    // Only pass detector metadata if ALL required fields are present and valid.
+                    // Incomplete metadata → 'manual_only' — the principle stays prompt-only.
+                    // Defense in depth: also validate in reducer, but subagent should not pass
+                    // malformed data in the first place.
+                    const rawMeta = report.principle.detector_metadata;
+                    // Require confidence (valid enum) + ALL THREE signal arrays non-empty.
+                    // toolSequenceHints is optional (may be empty or absent).
+                    const VALID_CONFIDENCE = ['high', 'medium', 'low'] as const;
+                    const hasValidConfidence =
+                        typeof rawMeta?.confidence === 'string' &&
+                        (VALID_CONFIDENCE as readonly string[]).includes(rawMeta.confidence);
+                    const signalArrays = [
+                        rawMeta?.applicabilityTags,
+                        rawMeta?.positiveSignals,
+                        rawMeta?.negativeSignals,
+                    ];
+                    const allSignalsNonEmpty = signalArrays.every(
+                        (arr) => Array.isArray(arr) && arr.length > 0 && arr.every((s) => typeof s === 'string' && s.length > 0)
+                    );
+                    const hasCompleteMetadata = hasValidConfidence && allSignalsNonEmpty;
+                    const detectorMetadata: import('../core/evolution-types.js').PrincipleDetectorSpec | undefined =
+                        hasCompleteMetadata && rawMeta.confidence
+                            ? {
+                                  applicabilityTags: rawMeta.applicabilityTags ?? [],
+                                  positiveSignals: rawMeta.positiveSignals ?? [],
+                                  negativeSignals: rawMeta.negativeSignals ?? [],
+                                  toolSequenceHints: rawMeta.toolSequenceHints ?? [],
+                                  confidence: rawMeta.confidence as 'high' | 'medium' | 'low',
+                              }
+                            : undefined;
+
                     const principleId = wctx.evolutionReducer.createPrincipleFromDiagnosis({
                         painId: matchedTask?.id || completedTaskId,
                         painType: 'tool_failure',  // Default, could be extracted from task
                         triggerPattern: report.principle.trigger_pattern,
                         action: report.principle.action,
-                        source: matchedTask?.source || 'diagnostician'
+                        source: matchedTask?.source || 'diagnostician',
+                        evaluability,
+                        detectorMetadata,
                     });
 
                     if (principleId) {
@@ -385,7 +428,22 @@ function extractAssistantText(messages: unknown): string {
 /**
  * Parse diagnostician JSON report from text
  */
-function parseDiagnosticianReport(text: string): { principle?: { trigger_pattern: string; action: string } } | null {
+function parseDiagnosticianReport(
+    text: string
+): {
+    principle?: {
+        trigger_pattern: string;
+        action: string;
+        evaluability?: 'deterministic' | 'weak_heuristic' | 'manual_only';
+        detector_metadata?: {
+            applicabilityTags?: string[];
+            positiveSignals?: string[];
+            negativeSignals?: string[];
+            toolSequenceHints?: string[][];
+            confidence?: 'high' | 'medium' | 'low';
+        };
+    };
+} | null {
     // Try to find JSON in markdown code block
     const jsonMatch = text.match(/```json\n([\s\S]*?)\n```/);
     if (jsonMatch) {
