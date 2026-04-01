@@ -30,6 +30,7 @@
   "title": "<task title>",
   "workspace": "D:/Code/principles",
   "branchWorkspace": "D:/Code/principles-<task-suffix>",
+  "branch": "<pr-branch-name>",
   "maxRoundsPerStage": 3,
   "maxRuntimeMinutes": 360,
   "stageTimeoutMinutes": 30,

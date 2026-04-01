@@ -3,6 +3,7 @@
   "title": "Fix empathy observer production failure",
   "workspace": "D:/Code/principles",
   "branchWorkspace": "D:/Code/principles-empathy-fix",
+  "branch": "feat/ai-sprint-orchestrator-workflow-optimization",
   "maxRoundsPerStage": 3,
   "maxRuntimeMinutes": 360,
   "stageTimeoutMinutes": 30,

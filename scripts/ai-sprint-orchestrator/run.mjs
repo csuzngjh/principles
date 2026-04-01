@@ -606,35 +606,39 @@ function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecard
 }
 
 /**
- * Run merge gate: fetch origin and compare local vs remote feature-branch HEAD SHA.
- * Compares against the sprint's feature branch (state.worktree.branchName),
- * NOT origin/HEAD (which is the remote default branch, not our branch).
+ * Run merge gate: fetch origin and compare local vs remote PR/target branch HEAD SHA.
  *
- * Returns { localHeadSha, remoteHeadSha, shaMatch, branchName }.
+ * IMPORTANT — targetBranch vs worktree.branchName:
+ *   - targetBranch = spec.branch ?? 'main'   ← the REAL PR branch on remote (e.g. 'feat/my-feature')
+ *   - worktree.branchName = sprint/<runId>/<stage>  ← internal temp branch, NEVER on remote
+ *
+ * Merge gate must NEVER use worktree.branchName — it does not exist on the remote.
+ * If spec.branch is not set, merge gate compares against 'main' (safe default).
+ *
+ * Returns { localHeadSha, remoteHeadSha, shaMatch, targetBranch }.
  * Writes result to stages/<stage>/merge-gate.json.
  */
 function runMergeGateCheck({ runDir, state, spec, mergeGatePath }) {
   const workspace = state.worktree?.worktreePath ?? spec.workspace;
   const remote = 'origin';
 
-  // Determine the feature branch to compare against
-  const branchName = state.worktree?.branchName ?? spec.branch ?? 'main';
-  const remoteRef = `refs/remotes/${remote}/${branchName}`;
+  // targetBranch is the REAL PR branch on remote — NEVER the internal sprint worktree branch
+  const targetBranch = spec.branch ?? 'main';
+  const remoteRef = `refs/remotes/${remote}/${targetBranch}`;
 
   try {
-    // Fetch the specific remote branch (not all of origin, just what we need)
-    // Use refspec to fetch only the branch we care about
-    const fetchResult = spawnSync('git', ['fetch', remote, `refs/heads/${branchName}:refs/remotes/${remote}/${branchName}`], {
+    // Fetch the specific remote branch via targeted refspec
+    const fetchResult = spawnSync('git', ['fetch', remote, `refs/heads/${targetBranch}:refs/remotes/${remote}/${targetBranch}`], {
       cwd: workspace,
       encoding: 'utf8',
       timeout: 60_000,
     });
 
-    // If fetch fails (branch doesn't exist on remote), record that clearly
+    // If fetch fails (branch doesn't exist on remote), record clearly
     if (fetchResult.status !== 0) {
       const fetchErr = fetchResult.stderr?.trim() || fetchResult.stdout?.trim() || 'unknown';
-      appendTimeline(runDir, `Merge gate: branch ${branchName} does not exist on remote: ${fetchErr}`);
-      const result = { localHeadSha: null, remoteHeadSha: null, shaMatch: false, branchName, error: `Branch '${branchName}' not found on remote. Has it been pushed?`, fetchFailed: true };
+      appendTimeline(runDir, `Merge gate: target branch '${targetBranch}' does not exist on remote: ${fetchErr}`);
+      const result = { localHeadSha: null, remoteHeadSha: null, shaMatch: false, targetBranch, error: `Branch '${targetBranch}' not found on remote. Has it been pushed?`, fetchFailed: true };
       writeJson(mergeGatePath, result);
       return result;
     }
@@ -649,22 +653,22 @@ function runMergeGateCheck({ runDir, state, spec, mergeGatePath }) {
 
     if (!remoteSha) {
       appendTimeline(runDir, `Merge gate: remote ref ${remoteRef} not found after fetch`);
-      const result = { localHeadSha: localSha, remoteHeadSha: null, shaMatch: false, branchName, error: `Remote ref '${remoteRef}' not found after fetch`, fetchFailed: true };
+      const result = { localHeadSha: localSha, remoteHeadSha: null, shaMatch: false, targetBranch, error: `Remote ref '${remoteRef}' not found after fetch`, fetchFailed: true };
       writeJson(mergeGatePath, result);
       return result;
     }
 
     const shaMatch = localSha === remoteSha;
 
-    const result = { localHeadSha: localSha, remoteHeadSha: remoteSha, shaMatch, branchName };
+    const result = { localHeadSha: localSha, remoteHeadSha: remoteSha, shaMatch, targetBranch };
 
     writeJson(mergeGatePath, result);
-    appendTimeline(runDir, `Merge gate: branch=${branchName} local=${localSha.slice(0, 7)} remote=${remoteSha.slice(0, 7)} match=${shaMatch}`);
+    appendTimeline(runDir, `Merge gate: targetBranch=${targetBranch} local=${localSha.slice(0, 7)} remote=${remoteSha.slice(0, 7)} match=${shaMatch}`);
 
     return result;
   } catch (gateErr) {
     appendTimeline(runDir, `Merge gate check failed: ${gateErr.message}`);
-    return { localHeadSha: null, remoteHeadSha: null, shaMatch: false, branchName, error: gateErr.message };
+    return { localHeadSha: null, remoteHeadSha: null, shaMatch: false, targetBranch, error: gateErr.message };
   }
 }
 
@@ -683,13 +687,13 @@ function advanceState(state, spec, decision, { runDir } = {}) {
             type: fetchFailed ? 'merge_gate_branch_not_on_remote' : 'merge_gate_sha_mismatch',
             stage: state.currentStage,
             round: state.currentRound,
-            branch: mergeGate.branchName,
+            targetBranch: mergeGate.targetBranch,
             details: fetchFailed
-              ? `Merge gate failed: branch '${mergeGate.branchName}' does not exist on remote. Push the branch first. Error: ${mergeGate.error}`
-              : `Merge gate failed: local SHA ${mergeGate.localHeadSha?.slice(0, 7) ?? '?'} != remote/${mergeGate.branchName} SHA ${mergeGate.remoteHeadSha?.slice(0, 7) ?? '?'}. Push or rebase before completing.`,
+              ? `Merge gate failed: target branch '${mergeGate.targetBranch}' does not exist on remote. Has it been pushed? Error: ${mergeGate.error}`
+              : `Merge gate failed: local SHA ${mergeGate.localHeadSha?.slice(0, 7) ?? '?'} != remote/${mergeGate.targetBranch} SHA ${mergeGate.remoteHeadSha?.slice(0, 7) ?? '?'}. Push or rebase before completing.`,
             blockers: [fetchFailed
-              ? `Remote branch '${mergeGate.branchName}' not found. Run: git push -u origin ${mergeGate.branchName}`
-              : 'Local SHA does not match remote branch head. Push or rebase before completing.'],
+              ? `Remote branch '${mergeGate.targetBranch}' not found. Run: git push -u origin ${mergeGate.targetBranch}`
+              : 'Local SHA does not match remote target branch head. Push or rebase before completing.'],
             mergeGate,
           };
           return;
