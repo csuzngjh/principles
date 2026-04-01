@@ -155,8 +155,10 @@ function appendTimeline(runDir, line) {
   }
 }
 
-function runAgent({ cwd, agent, model, prompt, timeoutSeconds = 1800, failLogPath = null }) {
-  const promptFile = path.join(os.tmpdir(), `ai-sprint-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`);
+function runAgent({ cwd, agent, model, prompt, timeoutSeconds = 1800, failLogPath = null, promptDir = cwd }) {
+  // promptDir (default=cwd) is where we write the prompt file; must exist and be writable.
+  // On Windows, avoid os.tmpdir() (short ~ paths) and non-existent branchWorkspace dirs.
+  const promptFile = path.join(promptDir, `.ai-sprint-prompt-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`);
   fs.writeFileSync(promptFile, prompt, 'utf8');
 
   let result;
@@ -220,9 +222,9 @@ function runAgent({ cwd, agent, model, prompt, timeoutSeconds = 1800, failLogPat
  * Async agent runner using spawn (non-blocking) — used for parallel reviewer execution.
  * Returns a Promise that resolves with { stdout, stderr, status } or rejects on error.
  */
-function runAgentAsync({ cwd, agent, model, prompt, timeoutSeconds = 1800 }) {
+function runAgentAsync({ cwd, agent, model, prompt, timeoutSeconds = 1800, promptDir = cwd }) {
   return new Promise((resolve, reject) => {
-    const promptFile = path.join(os.tmpdir(), `ai-sprint-${process.pid}-${crypto.randomUUID()}.txt`);
+    const promptFile = path.join(promptDir, `.ai-sprint-prompt-${process.pid}-${crypto.randomUUID()}.txt`);
 
     const cleanup = () => {
       try { fs.rmSync(promptFile, { force: true }); } catch {}
@@ -289,13 +291,20 @@ function runAgentAsync({ cwd, agent, model, prompt, timeoutSeconds = 1800 }) {
 
     proc.stdout.on('data', (data) => { stdout += data; });
     proc.stderr.on('data', (data) => { stderr += data; });
-    proc.on('close', (code) => {
+    // Use 'exit' instead of 'close' — on Windows, powershell.exe child process chains
+    // may keep stdio pipes open after exit, causing 'close' to never fire.
+    // 'exit' fires when the process exits regardless of stdio pipe state.
+    proc.on('exit', (code) => {
       if (!settled) {
         settled = true;
         clearTimeout(timer);
-        cleanup();
+        // Read any remaining buffered stdout/stderr before resolving
         resolve({ stdout: stdout.trim(), stderr: stderr.trim(), status: code });
       }
+    });
+    // Cleanup prompt file on close (stdio fully drained) — separate from resolve
+    proc.on('close', () => {
+      cleanup();
     });
     proc.on('error', (err) => {
       if (!settled) {
@@ -801,13 +810,31 @@ function reconcileRunState(runDir, state) {
   if (state.status !== 'running') return state;
   if (pidExists(state.orchestratorPid)) return state;
 
+  // Detect which artifacts already exist on disk for the current stage/round
+  const stageDirName = `${String(state.currentStageIndex + 1).padStart(2, '0')}-${state.currentStage}`;
+  const stageDir = path.join(runDir, 'stages', stageDirName);
+  const artifacts = {
+    producer: fileExists(path.join(stageDir, 'producer.md')),
+    reviewerA: fileExists(path.join(stageDir, 'reviewer-a.md')),
+    reviewerB: fileExists(path.join(stageDir, 'reviewer-b.md')),
+    globalReviewer: fileExists(path.join(stageDir, 'global-reviewer.md')),
+    decision: fileExists(path.join(stageDir, 'decision.md')),
+  };
+
+  const roleLabel = state.currentRole ?? 'unknown';
+  const diskSummary = Object.entries(artifacts)
+    .filter(([, v]) => v)
+    .map(([k]) => k)
+    .join(', ') || 'none';
+
   state.status = 'halted';
   state.haltReason = {
     type: 'stale_orchestrator',
     stage: state.currentStage,
     round: state.currentRound,
-    details: `Orchestrator pid ${state.orchestratorPid ?? 'unknown'} is no longer alive.`,
-    blockers: ['The sprint process ended before stage completion. Resume or restart the run.'],
+    details: `Orchestrator pid ${state.orchestratorPid ?? 'unknown'} is no longer alive (was: ${roleLabel}). Artifacts on disk: ${diskSummary}.`,
+    blockers: ['The sprint process ended before stage completion. Resume to continue.'],
+    artifacts,
   };
   saveState(runDir, state);
   updateSummary(runDir, [
@@ -815,6 +842,7 @@ function reconcileRunState(runDir, state) {
     `Stage: ${state.currentStage}`,
     `Round: ${state.currentRound}`,
     `Halt reason: ${state.haltReason.details}`,
+    `Disk artifacts: ${diskSummary}`,
   ]);
   appendTimeline(runDir, `Sprint reconciled to halted: ${state.haltReason.details}`);
   cleanupWorktree({ state, runDir });
@@ -853,14 +881,15 @@ async function runReviewerRole({ runDir, state, spec, paths, role, worktreeInfo 
   });
   const timeoutSeconds = stageRoleTimeout(spec, stageName, role);
   // Reviewers must verify code in the same workspace where producer made changes
-  const cwd = worktreeInfo?.worktreePath ?? (spec.branchWorkspace || spec.workspace);
+  // branchWorkspace may not exist — fall back to spec.workspace (always valid)
+  const cwd = worktreeInfo?.worktreePath ?? (fileExists(spec.branchWorkspace) ? spec.branchWorkspace : spec.workspace);
 
   let output = null;
   let timedOut = false;
   let violatedFile = null;
 
   try {
-    const result = await runAgentAsync({ cwd, agent: config.agent, model: config.model, prompt, timeoutSeconds });
+    const result = await runAgentAsync({ cwd, agent: config.agent, model: config.model, prompt, timeoutSeconds, promptDir: runDir });
     const stdout = result.stdout ?? '';
     const stderr = result.stderr ?? '';
 
@@ -1128,7 +1157,8 @@ async function executeStage(runDir, state, spec) {
 
   // Worktree setup for mutating stages
   const worktreeInfo = ensureWorktree({ spec, runDir, state, stageName });
-  const producerWorkspace = worktreeInfo?.worktreePath ?? (spec.branchWorkspace || spec.workspace);
+  // branchWorkspace may not exist — fall back to spec.workspace (always valid)
+  const producerWorkspace = worktreeInfo?.worktreePath ?? (fileExists(spec.branchWorkspace) ? spec.branchWorkspace : spec.workspace);
 
   if (fileExists(producerReportPath) && fs.readFileSync(producerReportPath, 'utf8').trim()) {
     outputs.producer = fs.readFileSync(producerReportPath, 'utf8').trim();
@@ -1149,6 +1179,7 @@ async function executeStage(runDir, state, spec) {
         prompt: producerPrompt,
         timeoutSeconds: stageRoleTimeout(spec, stageName, 'producer'),
         failLogPath: producerFailLog,
+        promptDir: runDir,
       });
     } catch (agentErr) {
       if (fileExists(producerReportPath) && fs.readFileSync(producerReportPath, 'utf8').trim()) {
@@ -1297,12 +1328,13 @@ async function executeStage(runDir, state, spec) {
         let grOutput;
         try {
           grOutput = runAgent({
-            cwd: worktreeInfo?.worktreePath ?? (spec.branchWorkspace || spec.workspace),
+            cwd: worktreeInfo?.worktreePath ?? (fileExists(spec.branchWorkspace) ? spec.branchWorkspace : spec.workspace),
             agent: globalReviewerConfig.agent,
             model: globalReviewerConfig.model,
             prompt: globalReviewerPrompt,
             timeoutSeconds: stageRoleTimeout(spec, stageName, 'global_reviewer'),
             failLogPath: grFailLog,
+            promptDir: runDir,
           });
         } catch (grErr) {
           appendTimeline(runDir, `global_reviewer error: ${grErr.message}`);
