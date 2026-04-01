@@ -1,0 +1,29 @@
+{
+  "stage": "verify",
+  "round": 3,
+  "outcome": "advance",
+  "summary": "Both reviewers approved (verdict regex bug fixed post-sprint)",
+  "approvalCount": 2,
+  "blockerCount": 0,
+  "reviewerAVerdict": "APPROVE",
+  "reviewerBVerdict": "APPROVE",
+  "producerSectionChecks": {
+    "SUMMARY": true,
+    "EVIDENCE": true,
+    "CHECKS": true
+  },
+  "reviewerSectionChecks": {
+    "VERDICT": true,
+    "BLOCKERS": true,
+    "FINDINGS": true,
+    "NEXT_FOCUS": true,
+    "CHECKS": true
+  },
+  "producerChecks": "evidence=ok;tests=22pass;scope=pd-only;openclaw=no-changes;lsp=clean;gitdiff=verified",
+  "reviewerAChecks": "criteria=met;blockers=0;verification=complete;tests=22pass;lsp=clean;scope=pd-only",
+  "reviewerBChecks": "criteria=met;blockers=0;verification=complete;scope=controlled;tests=22pass",
+  "blockers": [
+    "One or more reviewers did not emit a strict VERDICT: APPROVE|REVISE|BLOCK line."
+  ],
+  "updatedAt": "2026-03-31T23:46:01.519Z"
+}
