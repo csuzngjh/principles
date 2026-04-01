@@ -204,8 +204,12 @@ describe('EmpathyObserverManager', () => {
     const sessionKey = await manager.spawn(api, 'session-Err', 'test message');
     await new Promise(resolve => setTimeout(resolve, 50));
 
-    expect(deleteSession).toHaveBeenCalled();
+    // When getSessionMessages fails, finalized=false → do NOT delete session.
+    // Session is preserved so subagent_ended fallback or TTL expiry can recover.
+    expect(deleteSession).not.toHaveBeenCalled();
     expect((manager as any).completedSessions.has(sessionKey)).toBe(false);
+    // activeRuns entry is preserved so fallback can retry
+    expect((manager as any).activeRuns.has('session-Err')).toBe(true);
   });
 
   it('marks completed when message reading succeeds even if deleteSession fails', async () => {
@@ -318,6 +322,41 @@ describe('EmpathyObserverManager', () => {
       '',
       { source: 'user_empathy' }
     );
+  });
+
+  it('ok path sets observedAt even when reapBySession fails', async () => {
+    run.mockResolvedValue({ runId: 'r1' });
+    waitForRun.mockResolvedValue({ status: 'ok' });
+    getSessionMessages.mockRejectedValue(new Error('session not ready'));
+
+    await manager.spawn(api, 'session-ObservedAt', 'test message');
+
+    // Poll until activeRuns entry has observedAt (up to 2s)
+    await vi.waitFor(() => {
+      const metadata = (manager as any).activeRuns.get('session-ObservedAt');
+      expect(metadata).toBeDefined();
+      expect(metadata.observedAt).toBeGreaterThan(0);
+    }, { timeout: 2000, interval: 50 });
+  });
+
+  it('ok path reapBySession failure preserves activeRuns so fallback can recover', async () => {
+    run.mockResolvedValue({ runId: 'r1' });
+    waitForRun.mockResolvedValue({ status: 'ok' });
+    getSessionMessages.mockRejectedValue(new Error('session not ready'));
+
+    const sessionKey = await manager.spawn(api, 'session-Fallback', 'test message');
+
+    // Poll until activeRuns entry is preserved with observedAt set (up to 2s)
+    await vi.waitFor(() => {
+      expect((manager as any).activeRuns.has('session-Fallback')).toBe(true);
+      const metadata = (manager as any).activeRuns.get('session-Fallback');
+      expect(metadata?.observedAt).toBeGreaterThan(0);
+    }, { timeout: 2000, interval: 50 });
+
+    // sessionLock may remain until TTL cleanup (cleanupState is inside reapBySession which threw)
+    // This is an accepted trade-off: lock is cleared by isActive() TTL after 5 minutes
+    // isCompleted should be false (finalized=false)
+    expect((manager as any).completedSessions.has(sessionKey)).toBe(false);
   });
 
   it('extracts parent session ID correctly from new key format', () => {

@@ -592,7 +592,9 @@ REQUIRED ACTION:
   }
 
   // Inject queue-derived evolution task at the front of prependContext
-  if (activeEvolutionTaskPrompt) {
+  // Skip for minimal mode (heartbeat / subagent / observer sessions) to avoid
+  // polluting empathy observer prompts and other internal subagent sessions.
+  if (activeEvolutionTaskPrompt && !isMinimalMode) {
     prependContext = activeEvolutionTaskPrompt + prependContext;
   }
 
