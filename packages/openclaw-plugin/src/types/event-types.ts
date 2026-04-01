@@ -98,7 +98,8 @@ export interface RulePromotionEventData {
 }
 
 export interface HookExecutionEventData {
-  hookName: string;
+  hook: string;
+  sessionId?: string;
   durationMs?: number;
   error?: string;
 }
@@ -266,7 +267,10 @@ export interface EvolutionStats {
 }
 
 export interface HookStats {
-  byType: Record<string, number>;
+  total: number;
+  success: number;
+  failure: number;
+  byType: Record<string, { total: number; success: number; failure: number }>;
   errors: number;
   totalDurationMs: number;
 }
@@ -420,6 +424,9 @@ export function createEmptyDailyStats(date: string): DailyStats {
       rulesPromoted: 0,
     },
     hooks: {
+      total: 0,
+      success: 0,
+      failure: 0,
       byType: {},
       errors: 0,
       totalDurationMs: 0,

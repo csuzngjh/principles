@@ -52,6 +52,7 @@ function parseArgs() {
         skipBuild: false,
         skipDeps: false,
         force: false,
+        restart: false,
         help: false,
     };
 
@@ -67,6 +68,9 @@ function parseArgs() {
                 break;
             case '--skip-deps':
                 args.skipDeps = true;
+                break;
+            case '--restart':
+                args.restart = true;
                 break;
             case '--force':
             case '-f':
@@ -100,6 +104,7 @@ Options:
   --lang <zh|en>     Language for skills (default: zh)
   --skip-build       Skip build step (use existing dist/)
   --skip-deps        Skip dependency installation
+  --restart          Automatically restart OpenClaw gateway after installation
   --force, -f        Force overwrite without prompts
   --help, -h         Show this help message
 
@@ -147,6 +152,22 @@ function checkPrerequisites() {
     try {
         const npmVersion = execSync('npm --version', { encoding: 'utf-8' }).trim();
         console.log(`✅ npm ${npmVersion}`);
+
+        // Check for global package conflicts that cause module resolution traps
+        console.log('🔍 Checking for global package conflicts...');
+        try {
+            const globalConflict = execSync('npm list -g principles-disciple --depth=0 2>/dev/null', { encoding: 'utf-8' });
+            if (globalConflict.includes('principles-disciple')) {
+                console.error('\n❌ CONFLICT DETECTED: A version of "principles-disciple" is installed globally via npm.');
+                console.error('This will block OpenClaw from loading the extension version you are trying to install.');
+                console.error('\nACTION REQUIRED: Please run the following command first:');
+                console.error('   npm uninstall -g principles-disciple\n');
+                process.exit(1);
+            }
+        } catch (e) {
+            // npm list returns non-zero if not found, which is what we want
+            console.log('✅ No global package conflicts detected.');
+        }
     } catch {
         console.error('❌ npm not found. Please install Node.js with npm.');
         process.exit(1);
@@ -656,7 +677,36 @@ function main() {
     console.log(`   Language: ${args.lang}`);
     console.log(`   Source:   ${SOURCE_DIR}`);
     console.log(`   Target:   ${INSTALL_DIR}`);
-    console.log('\n💡 Restart OpenClaw Gateway to load the new version.');
+
+    // Handle automatic restart if requested
+    if (args.restart) {
+        console.log('\n🔄 Restarting OpenClaw Gateway...');
+        try {
+            // 1. Find and kill existing gateway
+            try {
+                const pids = execSync('pgrep -f "openclaw gateway"', { encoding: 'utf-8' }).trim().split('\n');
+                if (pids.length > 0 && pids[0] !== '') {
+                    console.log(`   Found active gateway(s) (PIDs: ${pids.join(', ')}). Terminating...`);
+                    execSync('pgrep -f "openclaw gateway" | xargs kill -9 2>/dev/null || true');
+                    // Small wait for ports to release
+                    execSync('sleep 2');
+                }
+            } catch (e) {
+                console.log('   No active gateway found to terminate.');
+            }
+
+            // 2. Start new gateway in background
+            const logPath = '/tmp/openclaw-auto-restart.log';
+            console.log(`   Starting new gateway (logs: ${logPath})...`);
+            // We use nohup to ensure it persists after the script exits
+            execSync(`nohup openclaw gateway --force > ${logPath} 2>&1 &`, { stdio: 'ignore' });
+            console.log('✅ Gateway restart triggered successfully.');
+        } catch (error) {
+            console.error(`❌ Failed to restart gateway: ${error.message}`);
+        }
+    } else {
+        console.log('\n💡 Restart OpenClaw Gateway to load the new version.');
+    }
 }
 
 main();
