@@ -88,7 +88,7 @@ export function extractContractItems(text) {
   const match = source.match(CONTRACT_RE);
   if (!match) return [];
   const items = [];
-  const blocks = match[1].split(/\r?\n/).filter((l) => l.trim().startsWith('-'));
+  const blocks = match[1].split(/\r?\n/).filter((l) => l.trim().startsWith('-') && !/^[-*_]{3,}\s*$/.test(l.trim()));
   for (const block of blocks) {
     const deliverable = block.replace(/^-\s*/, '').trim();
     const statusMatch = deliverable.match(/status:\s*(DONE|PARTIAL|TODO)/i);

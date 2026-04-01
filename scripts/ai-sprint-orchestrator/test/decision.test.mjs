@@ -879,3 +879,32 @@ test('extractContractItems parses ## CONTRACT correctly when followed by ## CODE
   assert.equal(items[0].status, 'DONE');
   assert.ok(items[0].deliverable.includes('Root cause identified'));
 });
+
+test('extractContractItems ignores markdown horizontal rules (---, ***, ___)', () => {
+  const text = [
+    '## CONTRACT',
+    '- transport_audit status: DONE',
+    '- lifecycle_hook_map status: DONE',
+    '---',
+    '**Round 3 Producer Report**',
+  ].join('\n');
+  const items = extractContractItems(text);
+  assert.equal(items.length, 2);
+  assert.equal(items[0].status, 'DONE');
+  assert.equal(items[1].status, 'DONE');
+  assert.ok(!items.some((i) => i.deliverable.includes('--')), 'no horizontal rule artifacts');
+});
+
+test('extractContractItems ignores *** and ___ separators', () => {
+  const text = [
+    'CONTRACT:',
+    '- item_a status: DONE',
+    '***',
+    '- item_b status: PARTIAL',
+    '___',
+  ].join('\n');
+  const items = extractContractItems(text);
+  assert.equal(items.length, 2);
+  assert.equal(items[0].deliverable, 'item_a');
+  assert.equal(items[1].deliverable, 'item_b');
+});
