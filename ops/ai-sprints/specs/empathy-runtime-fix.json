@@ -99,11 +99,11 @@
     }
   },
   "stageRoleTimeouts": {
-    "investigate": { "producer": 720, "reviewer": 600 },
-    "patch-plan": { "producer": 600, "reviewer": 480 },
-    "implement-pass-1": { "producer": 900, "reviewer": 600 },
-    "implement-pass-2": { "producer": 600, "reviewer": 480 },
-    "verify": { "producer": 720, "reviewer": 480 }
+    "investigate": { "producer": 720, "reviewer_a": 600, "reviewer_b": 600 },
+    "patch-plan": { "producer": 600, "reviewer_a": 480, "reviewer_b": 480 },
+    "implement-pass-1": { "producer": 900, "reviewer_a": 600, "reviewer_b": 600 },
+    "implement-pass-2": { "producer": 600, "reviewer_a": 480, "reviewer_b": 480 },
+    "verify": { "producer": 720, "reviewer_a": 480, "reviewer_b": 480 }
   },
   "investigateHypotheses": [
     "prompt_contamination_from_prompt_ts",

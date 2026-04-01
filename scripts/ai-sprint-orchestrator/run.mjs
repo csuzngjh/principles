@@ -1,4 +1,5 @@
-import { spawnSync } from 'child_process';
+import { spawnSync, spawn } from 'child_process';
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -221,8 +222,7 @@ function runAgent({ cwd, agent, model, prompt, timeoutSeconds = 1800, failLogPat
  */
 function runAgentAsync({ cwd, agent, model, prompt, timeoutSeconds = 1800 }) {
   return new Promise((resolve, reject) => {
-    const { spawn } = require('child_process');
-    const promptFile = path.join(os.tmpdir(), `ai-sprint-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`);
+    const promptFile = path.join(os.tmpdir(), `ai-sprint-${process.pid}-${crypto.randomUUID()}.txt`);
 
     const cleanup = () => {
       try { fs.rmSync(promptFile, { force: true }); } catch {}
@@ -435,12 +435,22 @@ function detectProtectedWriteViolation(files, snapshot) {
 }
 
 function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecardPath, producerPath, reviewerAPath, reviewerBPath, state, reviewerTimeouts = null }) {
-  // Identify genuinely missing reports (not just timeouts with no report)
-  const timedOutRoles = new Set((reviewerTimeouts ?? []).map((r) => r.role));
+  // Build lookup maps for reviewer timeout/error state
+  const timeoutMap = new Map((reviewerTimeouts ?? []).map((r) => [r.role, r]));
   const missingFiles = [];
   if (!fileExists(producerPath)) missingFiles.push(`producer: ${producerPath}`);
-  if (!fileExists(reviewerAPath) && !timedOutRoles.has('reviewer_a')) missingFiles.push(`reviewer_a: ${reviewerAPath} (timed out)`);
-  if (!fileExists(reviewerBPath) && !timedOutRoles.has('reviewer_b')) missingFiles.push(`reviewer_b: ${reviewerBPath} (timed out)`);
+  if (!fileExists(reviewerAPath)) {
+    const info = timeoutMap.get('reviewer_a');
+    if (info?.timedOut) missingFiles.push(`reviewer_a: ${reviewerAPath} (timed out, no report)`);
+    else if (info) missingFiles.push(`reviewer_a: ${reviewerAPath} (error, no report)`);
+    else missingFiles.push(`reviewer_a: ${reviewerAPath} (missing)`);
+  }
+  if (!fileExists(reviewerBPath)) {
+    const info = timeoutMap.get('reviewer_b');
+    if (info?.timedOut) missingFiles.push(`reviewer_b: ${reviewerBPath} (timed out, no report)`);
+    else if (info) missingFiles.push(`reviewer_b: ${reviewerBPath} (error, no report)`);
+    else missingFiles.push(`reviewer_b: ${reviewerBPath} (missing)`);
+  }
 
   if (missingFiles.length > 0) {
     writeText(decisionPath, [
@@ -600,7 +610,7 @@ function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecard
  * Returns { localHeadSha, remoteHeadSha, shaMatch }.
  * Writes result to stages/<stage>/merge-gate.json.
  */
-function runMergeGateCheck({ runDir, state, spec }) {
+function runMergeGateCheck({ runDir, state, spec, mergeGatePath }) {
   const workspace = state.worktree?.worktreePath ?? spec.workspace;
   const remote = 'origin';
 
@@ -620,9 +630,6 @@ function runMergeGateCheck({ runDir, state, spec }) {
 
     const result = { localHeadSha: localSha, remoteHeadSha: remoteSha, shaMatch };
 
-    // Write to verify stage directory
-    const stageDirName = `${String(state.currentStageIndex + 1).padStart(2, '0')}-${state.currentStage}`;
-    const mergeGatePath = path.join(runDir, 'stages', stageDirName, 'merge-gate.json');
     writeJson(mergeGatePath, result);
     appendTimeline(runDir, `Merge gate: local=${localSha.slice(0, 7)} remote=${remoteSha.slice(0, 7)} match=${shaMatch}`);
 
@@ -638,15 +645,22 @@ function advanceState(state, spec, decision, { runDir } = {}) {
     if (state.currentStageIndex >= spec.stages.length - 1) {
       // Merge gate check before completing final stage
       if (runDir) {
-        const mergeGate = runMergeGateCheck({ runDir, state, spec });
+        const finalStageDir = `${String(state.currentStageIndex + 1).padStart(2, '0')}-${state.currentStage}`;
+        const mergeGatePath = path.join(runDir, 'stages', finalStageDir, 'merge-gate.json');
+        const mergeGate = runMergeGateCheck({ runDir, state, spec, mergeGatePath });
         if (!mergeGate.shaMatch) {
           state.status = 'halted';
+          const isFetchError = Boolean(mergeGate.error);
           state.haltReason = {
-            type: 'merge_gate_failed',
+            type: isFetchError ? 'merge_gate_fetch_failed' : 'merge_gate_failed',
             stage: state.currentStage,
             round: state.currentRound,
-            details: `Merge gate failed: local SHA ${mergeGate.localHeadSha?.slice(0, 7) ?? '?'} != remote HEAD ${mergeGate.remoteHeadSha?.slice(0, 7) ?? '?'}. Push or merge before completing.`,
-            blockers: ['Local SHA does not match remote PR head. Fetch and merge or rebase before completing.'],
+            details: isFetchError
+              ? `Merge gate check failed: git fetch error — ${mergeGate.error}. Verify network access and remote 'origin' exists.`
+              : `Merge gate failed: local SHA ${mergeGate.localHeadSha?.slice(0, 7) ?? '?'} != remote HEAD ${mergeGate.remoteHeadSha?.slice(0, 7) ?? '?'}. Push or merge before completing.`,
+            blockers: [isFetchError
+              ? `Git fetch failed: ${mergeGate.error}`
+              : 'Local SHA does not match remote PR head. Fetch and merge or rebase before completing.'],
             mergeGate,
           };
           return;
@@ -665,6 +679,7 @@ function advanceState(state, spec, decision, { runDir } = {}) {
     // Route implement-pass-1 revise → implement-pass-2 automatically
     if (state.currentStage === 'implement-pass-1') {
       state.currentStage = 'implement-pass-2';
+      state.currentStageIndex = spec.stages.indexOf('implement-pass-2');
       state.currentRound = 1;
       return;
     }
@@ -1127,15 +1142,26 @@ async function executeStage(runDir, state, spec) {
     'Reviewers are running in parallel.',
   ]);
 
-  // Run both reviewers in parallel
-  const reviewerResults = await Promise.all([
-    runReviewerRole({ runDir, state, spec, paths, role: 'reviewer_a' }),
-    runReviewerRole({ runDir, state, spec, paths, role: 'reviewer_b' }),
+  // Run both reviewers in parallel — each wrapped in try/catch so one failure doesn't cancel the other
+  const reviewerResults = [];
+  const [resultA, resultB] = await Promise.all([
+    runReviewerRole({ runDir, state, spec, paths, role: 'reviewer_a' }).catch((err) => {
+      appendTimeline(runDir, `reviewer_a threw unhandled error: ${err.message}`);
+      return { role: 'reviewer_a', output: null, timedOut: false, reportExisted: false, violatedFile: null, error: String(err) };
+    }),
+    runReviewerRole({ runDir, state, spec, paths, role: 'reviewer_b' }).catch((err) => {
+      appendTimeline(runDir, `reviewer_b threw unhandled error: ${err.message}`);
+      return { role: 'reviewer_b', output: null, timedOut: false, reportExisted: false, violatedFile: null, error: String(err) };
+    }),
   ]);
+  reviewerResults.push(resultA, resultB);
 
   // Collect outputs and timeout flags
   const reviewerTimeouts = [];
   for (const result of reviewerResults) {
+    if (result.error) {
+      appendTimeline(runDir, `${result.role} error: ${result.error}`);
+    }
     outputs[result.role] = result.output;
     if (result.timedOut) {
       appendTimeline(runDir, `${result.role} timed out stage ${stageName} round ${state.currentRound}`);
@@ -1508,6 +1534,7 @@ async function main() {
         details: String(error),
         blockers: [String(error)],
       };
+      cleanupWorktree({ state, runDir });
       saveState(runDir, state);
       appendTimeline(runDir, `Sprint halted by orchestrator error: ${String(error)}`);
       updateSummary(runDir, [
