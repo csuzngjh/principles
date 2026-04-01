@@ -306,9 +306,11 @@ function readRoleOutput({ reportPath, stdout }) {
 }
 
 function protectedArtifacts(runDir, paths) {
-  // Only check stage-level artifacts; sprint.json/timeline/summary are
-  // also written by the orchestrator itself, so mtime checks are unreliable.
+  // Roles must not modify orchestrator-owned run-level and stage-level truth sources.
+  // mtime checks are still useful to catch accidental writes by producer/reviewer roles.
   return [
+    path.join(runDir, 'latest-summary.md'),
+    path.join(runDir, 'timeline.md'),
     paths.decisionPath,
     paths.scorecardPath,
   ];

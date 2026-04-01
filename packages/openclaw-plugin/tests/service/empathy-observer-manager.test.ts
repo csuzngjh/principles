@@ -204,8 +204,12 @@ describe('EmpathyObserverManager', () => {
     const sessionKey = await manager.spawn(api, 'session-Err', 'test message');
     await new Promise(resolve => setTimeout(resolve, 50));
 
-    expect(deleteSession).toHaveBeenCalled();
+    // When getSessionMessages fails, finalized=false → do NOT delete session.
+    // Session is preserved so subagent_ended fallback or TTL expiry can recover.
+    expect(deleteSession).not.toHaveBeenCalled();
     expect((manager as any).completedSessions.has(sessionKey)).toBe(false);
+    // activeRuns entry is preserved so fallback can retry
+    expect((manager as any).activeRuns.has('session-Err')).toBe(true);
   });
 
   it('marks completed when message reading succeeds even if deleteSession fails', async () => {

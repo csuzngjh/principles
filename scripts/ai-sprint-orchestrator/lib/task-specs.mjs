@@ -42,7 +42,7 @@ export function buildStageBrief(spec, stage, round, previousDecision, handoff = 
       '## Carry Forward',
       '',
       '### What was accomplished',
-      ...(accompanied.length > 0 ? accomplished.map((i) => `- ${i.deliverable}`) : ['- None.']),
+      ...(accomplished.length > 0 ? accomplished.map((i) => `- ${i.deliverable}`) : ['- None.']),
       '',
       '### What needs to change',
       ...(handoff.blockers?.length > 0 ? handoff.blockers.map((b) => `- ${b}`) : ['- No blockers from previous round.']),

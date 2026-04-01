@@ -377,17 +377,19 @@ export class EmpathyObserverManager {
             api.logger.warn(`[PD:EmpathyObserver] reapBySession failed to read messages for ${observerSessionKey}: ${String(error)}`);
         }
 
-        try {
-            await api.runtime.subagent.deleteSession({ sessionKey: observerSessionKey });
-            api.logger.info(`[PD:EmpathyObserver] deleteSession succeeded for ${observerSessionKey}`);
-        } catch (error) {
-            api.logger.warn(`[PD:EmpathyObserver] deleteSession failed for ${observerSessionKey}: ${String(error)}`);
-        }
-
-        // Only mark completed after all critical operations succeeded
+        // Only delete the session if we successfully read messages (finalized=true).
+        // When finalized=false (getSessionMessages failed), preserve the session so
+        // the subagent_ended fallback can retry or the TTL expiry can unblock the parent.
         if (finalized) {
+            try {
+                await api.runtime.subagent.deleteSession({ sessionKey: observerSessionKey });
+                api.logger.info(`[PD:EmpathyObserver] deleteSession succeeded for ${observerSessionKey}`);
+            } catch (error) {
+                api.logger.warn(`[PD:EmpathyObserver] deleteSession failed for ${observerSessionKey}: ${String(error)}`);
+            }
             this.markCompleted(observerSessionKey);
         }
+
         // Only delete from activeRuns if finalized; otherwise preserve entry for subagent_ended fallback
         this.cleanupState(parentSessionId, observerSessionKey, finalized);
     }
