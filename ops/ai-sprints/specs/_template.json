@@ -3,8 +3,27 @@
     "template_version": "1.0",
     "description": "AI Sprint Orchestrator task template for 5-stage workflow",
     "pr2_integration_points": {
-      "EmpathyObserverManager": "Replace manual empathy persistence checks in verify stage",
-      "DeepReflect": "Hook into implement-pass-* stages for reflective subagent lifecycle"
+      "EmpathyObserverManager": {
+        "trigger_stage": "verify",
+        "trigger_condition": "All implement-pass-* stages completed with APPROVE. Producer report requires empathy persistence verification.",
+        "input_contract": {
+          "worktree_path": "worktreeInfo.worktreePath from sprint state",
+          "producer_report": "stages/<stage>/producer.md with EVIDENCE section",
+          "git_status": "stages/<stage>/git-status.json"
+        },
+        "expected_output": "Structured empathy persistence validation: passed/failed per hypothesis, evidence refs, remaining gaps. Written to stages/verify/empathy-check.json.",
+        "failure_mode": "If empathy persistence cannot be confirmed, appends blocker to verify decision."
+      },
+      "DeepReflect": {
+        "trigger_stages": ["implement-pass-1", "implement-pass-2"],
+        "trigger_condition": "Producer completes and before reviewer phase. Hook into subagent lifecycle for each code change.",
+        "lifecycle_hooks": ["subagent_spawned", "subagent_checkpoint", "subagent_ended"],
+        "handoff_artifact": {
+          "schema": "stages/<stage>/deep-reflect-checkpoint.json",
+          "fields": ["session_key", "run_id", "checkpoint_timestamp", "reflect_payload", "persistence_confirmed"]
+        },
+        "failure_mode": "Non-blocking. Logs warning to timeline. Does not halt stage."
+      }
     }
   },
   "id": "<task-id>",
