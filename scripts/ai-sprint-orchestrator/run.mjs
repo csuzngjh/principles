@@ -626,6 +626,7 @@ function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecard
     const handoff = buildHandoff({
       reviewerA,
       reviewerB,
+      globalReviewer,
       producer,
       metrics: decision.metrics,
       stageName,

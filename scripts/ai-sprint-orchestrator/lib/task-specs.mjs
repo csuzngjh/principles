@@ -99,20 +99,47 @@ export function buildStageBrief(spec, stage, round, previousDecision, handoff = 
       ]
       : []),
     `## Exit Criteria`,
-    `- Both reviewers return VERDICT: APPROVE`,
-    `- No unresolved blocker remains in reviewer outputs`,
-    ...(scoringDimensions.length > 0
-      ? [`- All scoring dimensions meet threshold (${dimensionThreshold}/5)`]
-      : []),
-    ...(requiredDeliverables.length > 0
-      ? ['- All contract deliverables reach status: DONE']
-      : []),
-    ...(stageCriteria?.requiredProducerSections?.length
-      ? [`- Producer report must contain sections: ${stageCriteria.requiredProducerSections.join(', ')}`]
-      : []),
-    ...(stageCriteria?.requiredReviewerSections?.length
-      ? [`- Reviewer reports must contain sections: ${stageCriteria.requiredReviewerSections.join(', ')}`]
-      : []),
+    ...(stageCriteria?.globalReviewerRequired === true
+      ? [
+          `- reviewer_a returns VERDICT: APPROVE`,
+          `- reviewer_b returns VERDICT: APPROVE`,
+          `- global_reviewer returns VERDICT: APPROVE`,
+          `- No unresolved blocker remains in any reviewer output`,
+          ...(scoringDimensions.length > 0
+            ? [`- All scoring dimensions meet threshold (${dimensionThreshold}/5)`]
+            : []),
+          ...(requiredDeliverables.length > 0
+            ? ['- All contract deliverables reach status: DONE']
+            : []),
+          ...(stageCriteria?.requiredProducerSections?.length
+            ? [`- Producer report must contain sections: ${stageCriteria.requiredProducerSections.join(', ')}`]
+            : []),
+          ...(stageCriteria?.requiredReviewerSections?.length
+            ? [`- Reviewer reports must contain sections: ${stageCriteria.requiredReviewerSections.join(', ')}`]
+            : []),
+          ...(stageCriteria?.requiredGlobalReviewerSections?.length
+            ? [`- Global reviewer report must contain sections: ${stageCriteria.requiredGlobalReviewerSections.join(', ')}`]
+            : []),
+          ...(stageCriteria?.globalReviewerMustAnswer?.length
+            ? [`- Global reviewer must answer macro questions: ${stageCriteria.globalReviewerMustAnswer.join(', ')}`]
+            : []),
+        ]
+      : [
+          `- Both reviewers return VERDICT: APPROVE`,
+          `- No unresolved blocker remains in reviewer outputs`,
+          ...(scoringDimensions.length > 0
+            ? [`- All scoring dimensions meet threshold (${dimensionThreshold}/5)`]
+            : []),
+          ...(requiredDeliverables.length > 0
+            ? ['- All contract deliverables reach status: DONE']
+            : []),
+          ...(stageCriteria?.requiredProducerSections?.length
+            ? [`- Producer report must contain sections: ${stageCriteria.requiredProducerSections.join(', ')}`]
+            : []),
+          ...(stageCriteria?.requiredReviewerSections?.length
+            ? [`- Reviewer reports must contain sections: ${stageCriteria.requiredReviewerSections.join(', ')}`]
+            : []),
+        ]),
     '',
   ].join('\n');
 }
