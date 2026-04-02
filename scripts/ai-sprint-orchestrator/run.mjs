@@ -1720,6 +1720,7 @@ async function executeStage(runDir, state, spec) {
         }
       } else {
         // Reset counter on non-timeout error
+        if (!state.consecutiveTimeouts) state.consecutiveTimeouts = {};
         state.consecutiveTimeouts[stageName] = 0;
       }
       
@@ -1788,7 +1789,8 @@ async function executeStage(runDir, state, spec) {
     }
     appendTimeline(runDir, `producer completed stage ${stageName} round ${state.currentRound}`);
     // Reset consecutive timeout counter on successful completion
-    if (state.consecutiveTimeouts?.[stageName]) {
+    if (!state.consecutiveTimeouts) state.consecutiveTimeouts = {};
+    if (state.consecutiveTimeouts[stageName]) {
       state.consecutiveTimeouts[stageName] = 0;
     }
     // Capture git status after producer completes for reviewers to reference
