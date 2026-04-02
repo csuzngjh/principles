@@ -15,7 +15,7 @@
   },
   "reviewerA": {
     "agent": "iflow",
-    "model": "glm-5",
+    "model": "zhipuai-coding-plan/glm-5.1",
     "timeoutSeconds": 900,
     "role": "code_and_local_correctness",
     "focus": "empathy observer patch correctness, test coverage, CODE_EVIDENCE"
@@ -25,11 +25,11 @@
     "model": "minimax-cn-coding-plan/MiniMax-M2.7",
     "timeoutSeconds": 900,
     "role": "runtime_and_compatibility",
-    "focus": "OpenClaw hook semantics, subagent lifecycle, cross-repo assumptions"
+    "focus": "OpenClaw runtime semantics, subagent lifecycle boundaries, cross-repo assumptions"
   },
   "escalationReviewer": {
-    "agent": "opencode",
-    "model": "minimax-cn-coding-plan/MiniMax-M2.7",
+    "agent": "iflow",
+    "model": "zhipuai-coding-plan/glm-5.1",
     "timeoutSeconds": 900,
     "role": "global_reviewer",
     "focus": "macro: business flow, data flow, architecture, OpenClaw compatibility"
@@ -38,33 +38,35 @@
     "Use PD-only changes; do not modify D:/Code/openclaw.",
     "PR2 scope: empathy observer + deep-reflect ONLY. Diagnostician/Nocturnal NOT migrated in this PR.",
     "Helper lives in packages/openclaw-plugin/src/service/subagent-workflow/.",
-    "Keep code quality high and avoid unnecessary architectural expansion.",
+    "Treat empathy as plugin-owned runtime_direct only. Do not mix registry_backed semantics into the main model.",
+    "subagent_ended may be used only as fallback, observation, or UNPROVEN signal. It is NOT the primary completion contract.",
+    "If runtime subagent availability is unproven for a surface, the design must degrade instead of forcing sidecar execution.",
     "All OpenClaw compatibility assumptions must be verified by reviewer_b via cross-repo source reading."
   ],
   "stageGoals": {
     "investigate": [
-      "Audit empathy observer's current subagent transport: runtime_direct vs registry_backed.",
-      "Identify all lifecycle hooks (subagent_spawned, subagent_ended, etc.) currently used.",
-      "Document current timeout/error/fallback/cleanup paths and their failure modes.",
-      "Assess OpenClaw assumptions: does runtime.subagent.run() guarantee subagent_ended hook?"
+      "Audit empathy observer's current plugin-owned path as runtime_direct only.",
+      "Identify all currently referenced lifecycle hooks and classify each as primary, fallback, observation, or UNPROVEN.",
+      "Document timeout/error/fallback/cleanup paths and identify where runtime availability or boot-session handling can force degrade.",
+      "Assess OpenClaw assumptions: does runtime.subagent.run() only launch a run, or does it also guarantee registry-backed completion semantics?"
     ],
     "architecture-cut": [
-      "Decide: migrate empathy to helper (runtime_direct transport) or keep existing?",
-      "Define the EmpathyObserverManager interface: startWorkflow(), finalizeOnce(), etc.",
-      "Document OpenClaw compatibility assumptions and cross-repo verification results.",
-      "global_reviewer must explicitly answer: Is migration architecturally sound? Are assumptions verified?"
+      "Decide whether empathy can use helper on the audited surfaces or must degrade on specific surfaces such as boot/runtime-unavailable flows.",
+      "Define the EmpathyObserverManager interface around the single main path: run -> waitForRun(runId) -> getSessionMessages(sessionKey) -> finalizeOnce.",
+      "Document OpenClaw compatibility assumptions and explicitly downgrade subagent_ended to fallback, observation, or UNPROVEN.",
+      "global_reviewer must explicitly answer: Is migration architecturally sound? Are assumptions verified? Are sidecar boundaries explicit?"
     ],
     "patch-plan": [
-      "Design EmpathyObserverManager spec with workflowType, transport, timeout, ttl, parseResult, persistResult.",
-      "Plan shadow-run period: old and new transport coexist, dedupeKey prevents dual finalize.",
+      "Design EmpathyObserverManager spec with workflowType, runtime_direct transport, timeout, ttl, parseResult, persistResult, and degrade policy.",
+      "Plan how old and new empathy paths coexist without dual finalize; dedupeKey must be explicit.",
       "Define cleanup strategy: completed_with_cleanup_error vs cleanup_pending states.",
-      "Define empathy-check.json output format for empathy persistence validation."
+      "Define empathy-check.json output format for empathy persistence validation and workflow debug summary."
     ],
     "implement-pass-1": [
       "Implement EmpathyObserverManager with RuntimeDirectDriver.",
       "Implement startWorkflow(), notifyWaitResult(), finalizeOnce() with idempotency.",
-      "Add workflow store integration (subagent_workflows table).",
-      "Run shadow mode alongside existing empathy observer path."
+      "Add workflow store integration (subagent_workflows table plus workflow events).",
+      "Run shadow mode alongside existing empathy observer path only on surfaces explicitly marked sidecar_allowed."
     ],
     "implement-pass-2": [
       "Address review findings from implement-pass-1.",
@@ -74,7 +76,7 @@
     "verify": [
       "Verify empathy persistence via empathy-check.json evidence.",
       "Confirm merge gate: local SHA == remote/feat/subagent-helper-empathy SHA.",
-      "global_reviewer must confirm: OpenClaw assumptions verified? Business flow closed? Architecture improved?",
+      "global_reviewer must confirm: OpenClaw assumptions verified? Business flow closed? Architecture improved? Degrade boundaries explicit?",
       "Confirm no regression in other subagent modules."
     ]
   },
@@ -85,15 +87,15 @@
       "requiredReviewerSections": ["VERDICT", "BLOCKERS", "FINDINGS", "TRANSPORT_ASSESSMENT", "OPENCLAW_ASSUMPTION_REVIEW", "NEXT_FOCUS", "CHECKS", "DIMENSIONS"],
       "scoringDimensions": ["evidence_quality", "assumption_coverage", "transport_audit_completeness"],
       "dimensionThreshold": 3,
-      "requiredDeliverables": ["transport_audit", "lifecycle_hook_map", "openclaw_assumptions_documented", "failure_mode_inventory"]
+      "requiredDeliverables": ["transport_audit", "lifecycle_hook_map", "openclaw_assumptions_documented", "failure_mode_inventory", "surface_sidecar_gate"]
     },
     "architecture-cut": {
       "requiredApprovals": 3,
-      "requiredProducerSections": ["SUMMARY", "ARCHITECTURE_DECISION", "OPENCLAW_ASSUMPTIONS_VERIFIED", "INTERFACE_DESIGN", "TRADE_OFFS", "CHECKS"],
+      "requiredProducerSections": ["SUMMARY", "ARCHITECTURE_DECISION", "OPENCLAW_ASSUMPTIONS_VERIFIED", "INTERFACE_DESIGN", "SIDECAR_BOUNDARY", "TRADE_OFFS", "CHECKS"],
       "requiredReviewerSections": ["VERDICT", "BLOCKERS", "FINDINGS", "OPENCLAW_COMPATIBILITY_REVIEW", "ARCHITECTURE_ASSESSMENT", "NEXT_FOCUS", "CHECKS"],
       "scoringDimensions": ["decision_quality", "openclaw_verification_completeness", "interface_soundness", "extensibility"],
       "dimensionThreshold": 3,
-      "requiredDeliverables": ["architecture_decision", "openclaw_cross_repo_verification", "helper_interface_draft", "shadow_run_plan"],
+      "requiredDeliverables": ["architecture_decision", "openclaw_cross_repo_verification", "helper_interface_draft", "shadow_run_plan", "runtime_direct_subagent_ended_verified", "surface_degrade_policy"],
       "globalReviewerRequired": true,
       "globalReviewerMustAnswer": ["Q1", "Q2", "Q3", "Q4", "Q5"]
     },
@@ -134,7 +136,7 @@
   },
   "stageRoleTimeouts": {
     "investigate": { "producer": 900, "reviewer_a": 900, "reviewer_b": 900 },
-    "architecture-cut": { "producer": 600, "reviewer_a": 480, "reviewer_b": 480 },
+    "architecture-cut": { "producer": 900, "reviewer_a": 600, "reviewer_b": 600 },
     "patch-plan": { "producer": 720, "reviewer_a": 600, "reviewer_b": 600 },
     "implement-pass-1": { "producer": 900, "reviewer_a": 720, "reviewer_b": 720 },
     "implement-pass-2": { "producer": 600, "reviewer_a": 480, "reviewer_b": 480 },
