@@ -3,7 +3,7 @@
   "title": "Subagent Helper: migrate empathy observer to workflow helper",
   "workspace": "D:/Code/principles",
   "branchWorkspace": "D:/Code/principles-subagent-helper-empathy",
-  "branch": "feat/subagent-helper-empathy",
+  "branch": "feat/subagent-workflow-helper-impl",
   "maxRoundsPerStage": 3,
   "maxRuntimeMinutes": 360,
   "stageTimeoutMinutes": 30,
@@ -138,7 +138,7 @@
     "investigate": { "producer": 900, "reviewer_a": 900, "reviewer_b": 900 },
     "architecture-cut": { "producer": 900, "reviewer_a": 600, "reviewer_b": 600 },
     "patch-plan": { "producer": 720, "reviewer_a": 600, "reviewer_b": 600 },
-    "implement-pass-1": { "producer": 900, "reviewer_a": 720, "reviewer_b": 720 },
+    "implement-pass-1": { "producer": 1800, "reviewer_a": 900, "reviewer_b": 900 },
     "implement-pass-2": { "producer": 600, "reviewer_a": 480, "reviewer_b": 480 },
     "verify": { "producer": 720, "reviewer_a": 480, "reviewer_b": 480 }
   },

@@ -65,6 +65,7 @@ function createSprintState(spec, runId, specPath) {
     currentRole: null,
     haltReason: null,
     worktree: null,  // { worktreePath, branchName, headSha, baseBranch } — set by ensureWorktree
+    consecutiveTimeouts: {}, // { stageName: count } — tracks consecutive timeouts per stage
     createdAt: nowIso(),
     updatedAt: nowIso(),
   };
@@ -1110,7 +1111,18 @@ function ensureWorktree({ spec, runDir, state, stageName }) {
 
   const baseWorkspace = spec.workspace;
   const baseBranch = spec.branch ?? 'main';
-  const baseRef = baseBranch; // Must be a git ref, not a path
+  
+  // Verify baseRef exists; fallback to 'main' if branch not found
+  let baseRef = baseBranch;
+  const verifyRef = spawnSync('git', ['rev-parse', '--verify', baseBranch], {
+    cwd: baseWorkspace,
+    encoding: 'utf8',
+    timeout: 10_000,
+  });
+  if (verifyRef.status !== 0) {
+    appendTimeline(runDir, `Branch '${baseBranch}' not found, falling back to 'main'`);
+    baseRef = 'main';
+  }
 
   // Reuse existing worktree if already created for this stage
   if (state.worktree?.worktreePath && fileExists(state.worktree.worktreePath)) {
@@ -1374,6 +1386,42 @@ async function executeStage(runDir, state, spec) {
         roleLabel: 'producer',
       });
     } catch (agentErr) {
+      // Track consecutive timeouts for fuse mechanism
+      const isTimeout = agentErr.message?.includes('timed out') || agentErr.message?.includes('ETIMEDOUT');
+      if (isTimeout) {
+        state.consecutiveTimeouts[stageName] = (state.consecutiveTimeouts[stageName] || 0) + 1;
+        appendTimeline(runDir, `Producer timeout #${state.consecutiveTimeouts[stageName]} for stage ${stageName}`);
+        
+        // Fuse: halt after 2 consecutive timeouts on same stage
+        if (state.consecutiveTimeouts[stageName] >= 2) {
+          state.status = 'halted';
+          state.haltReason = {
+            type: 'repeated_timeout',
+            stage: stageName,
+            round: state.currentRound,
+            details: `Producer timed out ${state.consecutiveTimeouts[stageName]} times on stage ${stageName}. Timeout may be too short or task too complex.`,
+            blockers: [
+              'Repeated timeout suggests insufficient timeout or overly complex task.',
+              'Consider: 1) Increase timeout in stageRoleTimeouts, 2) Simplify task scope, 3) Check for infinite loops in agent.',
+            ],
+          };
+          saveState(runDir, state);
+          appendTimeline(runDir, `Sprint halted: repeated timeout on stage ${stageName}`);
+          updateSummary(runDir, [
+            `Status: ${state.status}`,
+            `Stage: ${stageName}`,
+            `Round: ${state.currentRound}`,
+            `Halt reason: ${state.haltReason.details}`,
+          ]);
+          cleanupRecordedRoleProcesses(paths, runDir);
+          cleanupWorktree({ state, runDir });
+          throw new Error(state.haltReason.details);
+        }
+      } else {
+        // Reset counter on non-timeout error
+        state.consecutiveTimeouts[stageName] = 0;
+      }
+      
       if (fileExists(producerReportPath) && fs.readFileSync(producerReportPath, 'utf8').trim()) {
         appendTimeline(runDir, `producer spawnSync timed out but report exists — recovering stage ${stageName} round ${state.currentRound}`);
         producerOutput = null;
@@ -1387,10 +1435,10 @@ async function executeStage(runDir, state, spec) {
         });
       } else {
         updateRoleState(paths, 'producer', {
-          status: agentErr.message?.includes('timed out') ? 'timed_out' : 'error',
+          status: isTimeout ? 'timed_out' : 'error',
           lastPid: null,
           finishedAt: nowIso(),
-          terminatedAt: agentErr.message?.includes('timed out') ? nowIso() : null,
+          terminatedAt: isTimeout ? nowIso() : null,
           lastError: agentErr.message ?? String(agentErr),
         });
         throw agentErr;
@@ -1432,6 +1480,10 @@ async function executeStage(runDir, state, spec) {
       throw new Error(state.haltReason.details);
     }
     appendTimeline(runDir, `producer completed stage ${stageName} round ${state.currentRound}`);
+    // Reset consecutive timeout counter on successful completion
+    if (state.consecutiveTimeouts[stageName]) {
+      state.consecutiveTimeouts[stageName] = 0;
+    }
     // Capture git status after producer completes for reviewers to reference
     if (worktreeInfo?.worktreePath) {
       captureGitStatus({ worktreePath: worktreeInfo.worktreePath, runDir, stageDir, state });
