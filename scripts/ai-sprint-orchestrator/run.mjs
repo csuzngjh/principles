@@ -1129,6 +1129,37 @@ function ensureWorktree({ spec, runDir, state, stageName }) {
     appendTimeline(runDir, `Reusing existing worktree at ${state.worktree.worktreePath}`);
     return state.worktree;
   }
+  
+  // Also check if worktree directory exists on disk (state may have been lost)
+  // This handles resume scenarios where sprint.json lost worktree state
+  if (fileExists(worktreePath)) {
+    // Verify it's a valid worktree by checking for .git file
+    const gitFile = path.join(worktreePath, '.git');
+    if (fileExists(gitFile)) {
+      const headSha = (spawnSync('git', ['rev-parse', 'HEAD'], {
+        cwd: worktreePath,
+        encoding: 'utf8',
+        timeout: 10_000,
+      }).stdout ?? '').trim();
+      
+      if (headSha) {
+        const recoveredWorktree = {
+          worktreePath,
+          branchName,
+          headSha,
+          baseBranch,
+          baseWorkspace,
+          dirtyFiles: [],
+        };
+        state.worktree = recoveredWorktree;
+        appendTimeline(runDir, `Recovered existing worktree at ${worktreePath} (branch: ${branchName}, sha: ${headSha})`);
+        return recoveredWorktree;
+      }
+    }
+    // Invalid worktree directory - remove it
+    appendTimeline(runDir, `Removing invalid worktree directory at ${worktreePath}`);
+    try { fs.rmSync(worktreePath, { recursive: true, force: true }); } catch {}
+  }
 
   const branchName = `sprint/${state.runId.slice(0, 12)}/${stageName}`;
   const worktreePath = path.join(runDir, 'worktrees', stageName);
