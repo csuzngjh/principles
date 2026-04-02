@@ -1354,17 +1354,38 @@ function ensureWorktree({ spec, runDir, state, stageName }) {
   const branchName = `sprint/${state.runId.slice(0, 12)}/${stageName}`;
   const worktreePath = path.join(runDir, 'worktrees', stageName);
   
-  // Verify baseRef exists; fallback to 'main' if branch not found
-  let baseRef = baseBranch;
-  const verifyRef = spawnSync('git', ['rev-parse', '--verify', baseBranch], {
-    cwd: baseWorkspace,
-    encoding: 'utf8',
-    timeout: 10_000,
-  });
-  if (verifyRef.status !== 0) {
-    appendTimeline(runDir, `Branch '${baseBranch}' not found, falling back to 'main'`);
-    baseRef = 'main';
-  }
+  // Resolve baseRef with robust fallback chain:
+  // 1. spec.branch (local branch)
+  // 2. origin/{spec.branch} (remote branch)
+  // 3. HEAD (current checkout)
+  // 4. main (default branch)
+  const resolveBaseRef = () => {
+    const candidates = [
+      { ref: baseBranch, label: `spec.branch '${baseBranch}'` },
+      { ref: `origin/${baseBranch}`, label: `remote branch 'origin/${baseBranch}'` },
+      { ref: 'HEAD', label: 'current HEAD' },
+      { ref: 'main', label: 'default branch main' },
+    ];
+    
+    for (const candidate of candidates) {
+      const result = spawnSync('git', ['rev-parse', '--verify', candidate.ref], {
+        cwd: baseWorkspace,
+        encoding: 'utf8',
+        timeout: 10_000,
+      });
+      if (result.status === 0 && result.stdout?.trim()) {
+        if (candidate.ref !== baseBranch) {
+          appendTimeline(runDir, `Base ref resolved to ${candidate.label}`);
+        }
+        return candidate.ref;
+      }
+    }
+    // Last resort: return 'main' even if verification failed
+    appendTimeline(runDir, `Warning: Could not verify any base ref, using 'main'`);
+    return 'main';
+  };
+  
+  const baseRef = resolveBaseRef();
 
   // Reuse existing worktree if already created for this stage
   if (state.worktree?.worktreePath && fileExists(state.worktree.worktreePath)) {

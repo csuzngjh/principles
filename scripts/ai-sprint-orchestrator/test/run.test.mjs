@@ -154,8 +154,10 @@ test('P1-1 NEW: targetBranch defaults to main when spec.branch absent', () => {
 test('P1-2: ensureWorktree worktree add uses baseRef (git ref), not baseWorkspace (path)', () => {
   const body = getFuncBody('ensureWorktree');
 
-  assert.ok(/const baseRef\s*=\s*baseBranch/.test(body),
-    'must define baseRef = baseBranch (a git ref string, not a path)');
+  // Must define baseRef via resolveBaseRef function (not direct assignment)
+  const hasResolveBaseRef = /const baseRef\s*=\s*resolveBaseRef\(\)/.test(body) ||
+                             /baseRef\s*=\s*resolveBaseRef/.test(body);
+  assert.ok(hasResolveBaseRef, 'must define baseRef via resolveBaseRef function');
 
   const argsMatch = body.match(/worktree',\s*'add'[^;]*?\](?:\s*,|\s*\{)/);
   if (argsMatch) {
@@ -327,4 +329,87 @@ test('archive capture uses latest stage git-status.json instead of repo-wide git
     'archive capture should read stage-local git-status.json');
   assert.equal(/spawnSync\('git'/.test(body), false,
     'archive capture should not shell out to repo-wide git commands anymore');
+});
+
+// ---------------------------------------------------------------------------
+// P1-3: Base ref selection robustness
+// ---------------------------------------------------------------------------
+
+test('P1-3: ensureWorktree has robust base ref fallback chain', () => {
+  const body = getFuncBody('ensureWorktree');
+  
+  // Must have a resolveBaseRef or similar function with multiple candidates
+  const hasResolveFunction = /resolveBaseRef|candidates\s*=\s*\[/.test(body);
+  assert.ok(hasResolveFunction, 'ensureWorktree must have a resolve function with fallback candidates');
+  
+  // Must try at least: spec.branch, origin/{branch}, HEAD, main
+  const hasLocalBranch = /spec\.branch|baseBranch/.test(body);
+  const hasRemoteBranch = /origin\/.*branch/.test(body);
+  const hasHead = /HEAD/.test(body);
+  const hasMain = /main/.test(body);
+  
+  assert.ok(hasLocalBranch, 'must try local branch from spec');
+  assert.ok(hasRemoteBranch, 'must try remote branch origin/{branch}');
+  assert.ok(hasHead, 'must fallback to HEAD');
+  assert.ok(hasMain, 'must have final fallback to main');
+});
+
+test('P1-3: base ref resolution logs which candidate was selected', () => {
+  const body = getFuncBody('ensureWorktree');
+  
+  // Should log when using a fallback (not the first choice)
+  const logsFallback = /appendTimeline.*Base ref resolved to|appendTimeline.*resolved to/.test(body);
+  assert.ok(logsFallback, 'must log when using a fallback base ref');
+});
+
+// ---------------------------------------------------------------------------
+// Dynamic timeout: progress detection
+// ---------------------------------------------------------------------------
+
+test('dynamic timeout: checkProgressEvidence checks worklog mtime', () => {
+  const body = getFuncBody('checkProgressEvidence');
+  assert.ok(/worklogPath/.test(body), 'must check worklog path');
+  assert.ok(/mtimeMs|stat\.mtime/.test(body), 'must check file modification time');
+});
+
+test('dynamic timeout: checkProgressEvidence checks stdout growth', () => {
+  const body = getFuncBody('checkProgressEvidence');
+  assert.ok(/lastStdoutLength|currentStdout/.test(body), 'must accept stdout length params');
+  assert.ok(/stdout.*length|length.*stdout/.test(body), 'must compare stdout lengths');
+});
+
+test('dynamic timeout: checkProgressEvidence checks git changes', () => {
+  const body = getFuncBody('checkProgressEvidence');
+  assert.ok(/git.*diff|diff.*name-only/.test(body), 'must check git diff for recent changes');
+  assert.ok(/worktreePath/.test(body), 'must use worktreePath for git diff');
+});
+
+test('dynamic timeout: runAgentWithProgressCheck exists and has soft/hard timeout params', () => {
+  const body = getFuncBody('runAgentWithProgressCheck');
+  assert.ok(/softTimeoutRatio|softTimeoutSeconds/.test(body), 'must have soft timeout param');
+  assert.ok(/hardTimeoutSeconds|hardTimeout|hardTimer/.test(body), 'must have hard timeout param');
+  assert.ok(/extensionSeconds|maxExtensions/.test(body), 'must have extension params');
+});
+
+test('dynamic timeout: progress check extends timeout when progress detected', () => {
+  const body = getFuncBody('runAgentWithProgressCheck');
+  
+  // Must check for progress and conditionally extend
+  const hasProgressCheck = /checkProgressEvidence/.test(body);
+  const hasExtension = /extensionsUsed\+\+|extensionsUsed\s*\+=\s*1/.test(body);
+  
+  assert.ok(hasProgressCheck, 'must call checkProgressEvidence');
+  assert.ok(hasExtension, 'must increment extensionsUsed when progress detected');
+});
+
+test('dynamic timeout: logs extension events to timeline', () => {
+  const body = getFuncBody('runAgentWithProgressCheck');
+  assert.ok(/appendTimeline.*extend|appendTimeline.*progress/.test(body),
+    'must log extension events to timeline');
+});
+
+test('dynamic timeout: respects maxExtensions limit', () => {
+  const body = getFuncBody('runAgentWithProgressCheck');
+  assert.ok(/extensionsUsed\s*<\s*maxExtensions|extensionsUsed.*>=.*maxExtensions/.test(body),
+    'must check extensionsUsed against maxExtensions');
 });
