@@ -13,7 +13,7 @@
 ## Milestones
 
 - ✅ **v1.0-alpha** — Control plane cleanup (Phases 3A-3C, shipped 2026-03-26)
-- 🔵 **v1.1** — WebUI 回路流程增强 (Phases 4-6, in progress)
+- ✅ **v1.1** — WebUI 回路流程增强 (Phases 4-6, shipped 2026-04-02, PR #146)
 
 ---
 
