@@ -8,11 +8,21 @@ AI agent self-evolution framework as an OpenClaw plugin. Drives AI agent self-im
 
 Self-evolving AI agents that learn from pain signals and improve through explicit principle articulation.
 
+## Current Milestone: v1.1 WebUI 回路流程增强
+
+**Goal:** 将 WebUI 从"功能视角"重构为"流程视角"，按回路组织页面，直观展示增强回路、反馈回路和 Gate 系统的完整流程。
+
+**Target features:**
+- 📊 系统概览增强 — GFI/PainFlag/Trust/EP 健康度卡片 + Mini 流程图
+- 🔄 增强回路页面 — 完整"痛点→内化"链路（含夜间训练延伸）
+- 📡 反馈回路页面 — GFI 仪表盘 + 同理心检测 + Gate 拦截关联
+- 🔐 Gate 监控页面 — 拦截统计 + Trust & EP 双轨仪表盘
+
 ## Current State
 
 **Version:** v1.0-alpha (shipped 2026-03-26)
-**Milestone:** Control Plane Cleanup
-**Focus:** Phase 3 shadow capability work
+**Milestone:** Control Plane Cleanup → v1.1 WebUI 回路流程增强
+**Focus:** Phase 3 shadow capability work → WebUI 回路可视化
 
 ## Phase 3 Foundation (v1.0-alpha)
 
@@ -36,6 +46,7 @@ Completed foundational control plane architecture:
 
 ### Active
 
+- [ ] v1.1: WebUI 回路流程增强 — 按回路组织页面，覆盖增强/反馈/Gate 完整链路
 - [ ] Phase 4: Shadow capability enablement
 - [ ] Phase 5: Trust stage visualization
 
@@ -44,6 +55,7 @@ Completed foundational control plane architecture:
 - Mobile app support
 - Multi-workspace aggregation
 - Public plugin marketplace
+- 训练管线修改（夜间模式后端已实现，本里程碑仅做可视化）
 
 ## Key Decisions
 
@@ -52,6 +64,12 @@ Completed foundational control plane architecture:
 | Queue is only Phase 3 truth source | Clean inputs essential for shadow capability | ✓ Established |
 | Directive is display-only | Prevents stale state from contaminating decisions | ✓ Established |
 | Gate split before shadow work | Easier to evolve modules independently | ✓ Established |
+| WebUI 按回路组织页面 | 用户需要流程视角而非功能视角 | — Pending |
+| 夜间训练纳入增强回路 | 是原则内化的自然延伸，不是独立回路 | — Pending |
+| 本里程碑仅做可视化，不改后端 | 夜间模式后端已实现 (Phase 0-6) | — Pending |
+| WebUI 按回路组织页面 | 用户需要流程视角而非功能视角 | — Pending |
+| 夜间训练纳入增强回路 | 是原则内化的自然延伸，不是独立回路 | — Pending |
+| 本里程碑仅做可视化，不改后端 | 夜间模式后端已实现 (Phase 0-6) | — Pending |
 
 ## Context
 
@@ -78,4 +96,21 @@ Completed foundational control plane architecture:
 
 ---
 
-*Last updated: 2026-03-26 after v1.0-alpha milestone*
+*Last updated: 2026-04-02 after v1.1 milestone started*
+
+## Evolution
+
+This document evolves at phase transitions and milestone boundaries.
+
+**After each phase transition** (via `/gsd-transition`):
+1. Requirements invalidated? → Move to Out of Scope with reason
+2. Requirements validated? → Move to Validated with phase reference
+3. New requirements emerged? → Add to Active
+4. Decisions to log? → Add to Key Decisions
+5. "What This Is" still accurate? → Update if drifted
+
+**After each milestone** (via `/gsd-complete-milestone`):
+1. Full review of all sections
+2. Core Value check — still the right priority?
+3. Audit Out of Scope — reasons still valid?
+4. Update Context with current state
