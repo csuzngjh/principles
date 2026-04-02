@@ -264,18 +264,6 @@ function Shell({ children }: { children: React.ReactNode }) {
             </span>
             <span>Gate 监控</span>
           </NavLink>
-          <NavLink to="/feedback" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
-            <span className="nav-icon">
-              <Radio strokeWidth={1.75} />
-            </span>
-            <span>反馈回路</span>
-          </NavLink>
-          <NavLink to="/gate" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
-            <span className="nav-icon">
-              <Lock strokeWidth={1.75} />
-            </span>
-            <span>Gate 监控</span>
-          </NavLink>
         </nav>
         <div className="sidebar-footer">
           <a className="export-link" href={api.exportCorrections('redacted')}>
@@ -1031,7 +1019,17 @@ function EvolutionPage() {
           <h3>🔄 增强回路流程</h3>
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)', padding: 'var(--space-3) 0', flexWrap: 'wrap' }}>
             {['痛点检测', '诊断', '原则生成', '晋升', '活跃', '夜间反思', '训练', '内化'].map((step, i) => {
-              const isActive = evoPrinciples.activeStage === step;
+              // Backend returns 'pending'/'in_progress'/'completed'/'idle' — map to circuit step names
+              const currentStep = (() => {
+                switch (evoPrinciples.activeStage) {
+                  case 'pending': return '痛点检测';
+                  case 'in_progress': return '诊断';
+                  case 'completed': return '内化';
+                  case 'idle': return '活跃';
+                  default: return '活跃';
+                }
+              })();
+              const isActive = currentStep === step;
               return (
                 <React.Fragment key={step}>
                   <span style={{
@@ -1340,7 +1338,7 @@ function FeedbackPage() {
               {empathyEvents.map((event, i) => (
                 <div className="row-card vertical" key={i}>
                   <div>
-                    <strong style={{ color: event.severity === 'severity' ? 'var(--error)' : 'var(--warning)' }}>
+                    <strong style={{ color: event.severity === 'high' || event.severity === 'severe' || event.severity === 'critical' ? 'var(--error)' : 'var(--warning)' }}>
                       [{event.severity}] {new Date(event.timestamp).toLocaleTimeString()}
                     </strong>
                     <span>{event.origin}</span>
