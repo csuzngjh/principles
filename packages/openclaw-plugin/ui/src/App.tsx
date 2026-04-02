@@ -1025,8 +1025,8 @@ function EvolutionPage() {
                   case 'pending': return '痛点检测';
                   case 'in_progress': return '诊断';
                   case 'completed': return '内化';
-                  case 'idle': return '活跃';
-                  default: return '活跃';
+                  case 'idle': return '痛点检测';
+                  default: return '痛点检测';
                 }
               })();
               const isActive = currentStep === step;
