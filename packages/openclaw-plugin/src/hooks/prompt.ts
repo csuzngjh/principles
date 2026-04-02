@@ -7,6 +7,7 @@ import { ContextInjectionConfig, defaultContextConfig } from '../types.js';
 import { classifyTask, type RoutingInput } from '../core/local-worker-routing.js';
 import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection, autoCompressFocus, safeReadCurrentFocus } from '../core/focus-history.js';
 import { empathyObserverManager, isEmpathyObserverSession, type EmpathyObserverApi } from '../service/empathy-observer-manager.js';
+import { EmpathyObserverWorkflowManager, empathyObserverWorkflowSpec } from '../service/subagent-workflow/index.js';
 import { PathResolver } from '../core/path-resolver.js';
 
 /**
@@ -74,6 +75,8 @@ interface PromptHookApi {
     };
     empathy_engine?: {
       enabled?: boolean;
+      /** Shadow mode: also run EmpathyObserverWorkflowManager alongside legacy path */
+      helper_empathy_enabled?: boolean;
     };
   };
   runtime: EmpathyObserverApi['runtime'];
@@ -606,9 +609,24 @@ REQUIRED ACTION:
   const isUserInteraction = trigger === 'user' || trigger === 'api' || !trigger;
 
   if (isUserInteraction && sessionId && api && !isAgentToAgent) {
-    // Only inject empathy constraint when empathy observer will actually be spawned
     prependContext = '### BEHAVIORAL_CONSTRAINTS\n' + empathySilenceConstraint + '\n\n' + prependContext;
     empathyObserverManager.spawn(api, sessionId, latestUserMessage, workspaceDir).catch((err) => api.logger.warn(String(err)));
+
+    if (api.config?.empathy_engine?.helper_empathy_enabled === true && workspaceDir) {
+      // Cast required because SDK SubagentRunParams lacks expectsCompletionMessage
+      // which is supported by the actual OpenClaw runtime
+      const shadowManager = new EmpathyObserverWorkflowManager({
+        workspaceDir,
+        logger: api.logger,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        subagent: api.runtime.subagent as any,
+      });
+      shadowManager.startWorkflow(empathyObserverWorkflowSpec, {
+        parentSessionId: sessionId,
+        workspaceDir,
+        taskInput: latestUserMessage,
+      }).catch((err) => api.logger.warn(`[PD:ShadowEmpathy] workflow failed: ${String(err)}`));
+    }
   }
 
   // ──── 5. Heartbeat-specific checklist ────

@@ -6,7 +6,10 @@ export function ensureDir(dirPath) {
 }
 
 export function readJson(filePath) {
-  return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  const raw = fs.readFileSync(filePath, 'utf8');
+  // Strip UTF-8 BOM (\uFEFF) that PowerShell/acpx may prepend
+  const cleaned = raw.replace(/^\uFEFF/, '');
+  return JSON.parse(cleaned);
 }
 
 export function writeJson(filePath, data) {

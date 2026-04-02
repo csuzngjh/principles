@@ -283,3 +283,86 @@ export interface EvolutionStatsResponse {
     count: number;
   }>;
 }
+
+// ===== Phase 5: Health & Circuit API Types =====
+
+export interface OverviewHealthResponse {
+  gfi: { current: number; peakToday: number; threshold: number };
+  trust: { stage: number; stageLabel: string; score: number };
+  evolution: { tier: string; points: number };
+  painFlag: { active: boolean; source: string | null; score: number | null };
+  principles: { candidate: number; probation: number; active: number; deprecated: number };
+  queue: { pending: number; inProgress: number; completed: number };
+  activeStage: string;
+}
+
+export interface EvolutionPrinciplesResponse {
+  principles: {
+    summary: { candidate: number; probation: number; active: number; deprecated: number };
+    recent: Array<{
+      principleId: string;
+      status: string;
+      triggerPattern: string;
+      action: string;
+      fromStatus: string;
+      toStatus: string;
+      timestamp: string;
+    }>;
+  };
+  nocturnalTraining: {
+    queue: { pending: number; inProgress: number; completed: number };
+    trinityRecords: Array<{ artifactId: string; status: string; createdAt: string }>;
+    arbiterPassRate: number;
+    orpoSampleCount: number;
+    deployments: Array<{ modelId: string; status: string; checkpointPath: string | null }>;
+  };
+  painSourceDistribution: Record<string, number>;
+  activeStage: string;
+}
+
+export interface FeedbackGfiResponse {
+  current: number;
+  peakToday: number;
+  threshold: number;
+  trend: Array<{ hour: string; value: number }>;
+  sources: Record<string, number>;
+}
+
+export interface EmpathyEvent {
+  timestamp: string;
+  severity: string;
+  score: number;
+  reason: string;
+  origin: string;
+  gfiAfter: number;
+}
+
+export interface FeedbackGateBlock {
+  timestamp: string;
+  toolName: string;
+  reason: string;
+  gfi: number;
+  trustStage: number;
+}
+
+export interface GateStatsResponse {
+  today: {
+    gfiBlocks: number;
+    stageBlocks: number;
+    p03Blocks: number;
+    bypassAttempts: number;
+    p16Exemptions: number;
+  };
+  trust: { stage: number; score: number; status: string };
+  evolution: { tier: string; points: number; status: string };
+}
+
+export interface GateBlockItem {
+  timestamp: string;
+  toolName: string;
+  filePath: string | null;
+  reason: string;
+  gateType: string;
+  gfi: number;
+  trustStage: number;
+}

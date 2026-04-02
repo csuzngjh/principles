@@ -91,12 +91,31 @@ describe('createDeepReflectTool', () => {
                 deliver: false,
             }));
 
-            expect(mockSubagent.waitForRun).toHaveBeenCalled();
+            expect(mockSubagent.waitForRun).toHaveBeenCalledWith({ runId: 'test-run-123' });
             expect(mockSubagent.getSessionMessages).toHaveBeenCalled();
             expect(mockSubagent.deleteSession).toHaveBeenCalled();
 
             expect(result).toContain('Insight 1');
             expect(result).toContain('Insight 2');
+        });
+
+        it('should keep sessionKey for message fetch and cleanup while waiting by runId', async () => {
+            mockSubagent.run.mockResolvedValue({ runId: 'run-from-runtime' });
+            mockSubagent.waitForRun.mockResolvedValue({ status: 'ok' });
+            mockSubagent.getSessionMessages.mockResolvedValue({
+                messages: [],
+                assistantTexts: ['Insight']
+            });
+
+            await executeTool({ context: 'Need clearer workflow tracing.' });
+
+            expect(mockSubagent.waitForRun).toHaveBeenCalledWith({ runId: 'run-from-runtime' });
+            expect(mockSubagent.getSessionMessages).toHaveBeenCalledWith({
+                sessionKey: expect.stringMatching(/^agent:main:reflection:/)
+            });
+            expect(mockSubagent.deleteSession).toHaveBeenCalledWith({
+                sessionKey: expect.stringMatching(/^agent:main:reflection:/)
+            });
         });
 
         it('should return a timeout warning cleanly without throwing', async () => {

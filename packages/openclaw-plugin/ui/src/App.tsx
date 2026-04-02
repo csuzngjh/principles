@@ -8,6 +8,14 @@ import {
   Download,
   LogOut,
   Hexagon,
+  Activity,
+  Shield,
+  Zap,
+  AlertTriangle,
+  BookOpen,
+  ListTodo,
+  Radio,
+  Lock,
 } from 'lucide-react';
 import { api, getGatewayToken, setGatewayToken, clearGatewayToken } from './api';
 import type {
@@ -19,6 +27,8 @@ import type {
   EvolutionTasksResponse,
   EvolutionTraceResponse,
   EvolutionStatsResponse,
+  OverviewHealthResponse,
+  EvolutionPrinciplesResponse,
 } from './types';
 import { Sparkline, DonutChart, GroupedBarChart, TimeRangeSelector, CollapsiblePanel } from './charts';
 
@@ -242,6 +252,18 @@ function Shell({ children }: { children: React.ReactNode }) {
             </span>
             <span>思维模型</span>
           </NavLink>
+          <NavLink to="/feedback" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+            <span className="nav-icon">
+              <Radio strokeWidth={1.75} />
+            </span>
+            <span>反馈回路</span>
+          </NavLink>
+          <NavLink to="/gate" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
+            <span className="nav-icon">
+              <Lock strokeWidth={1.75} />
+            </span>
+            <span>Gate 监控</span>
+          </NavLink>
         </nav>
         <div className="sidebar-footer">
           <a className="export-link" href={api.exportCorrections('redacted')}>
@@ -412,6 +434,7 @@ function WorkspaceConfig() {
 
 function OverviewPage() {
   const [data, setData] = useState<OverviewResponse | null>(null);
+  const [health, setHealth] = useState<OverviewHealthResponse | null>(null);
   const [error, setError] = useState('');
   const [syncing, setSyncing] = useState(false);
   const [days, setDays] = useState(30);
@@ -428,6 +451,7 @@ function OverviewPage() {
 
   useEffect(() => {
     loadCentralOverview();
+    api.getOverviewHealth().then(setHealth).catch(() => {});
   }, [loadCentralOverview]);
 
   const handleSync = async () => {
@@ -474,6 +498,42 @@ function OverviewPage() {
       </header>
 
       <WorkspaceConfig />
+
+      {/* System Health Cards (Phase 5) */}
+      {health && (
+        <section className="kpi-grid" style={{ marginBottom: 'var(--space-5)' }}>
+          <article className="panel kpi" style={{ borderLeft: `3px solid ${health.gfi.current >= health.gfi.threshold ? 'var(--error)' : 'var(--success)'}` }}>
+            <span className="label">🟢 GFI 疲劳指数</span>
+            <span className="value">{health.gfi.current}</span>
+            <span>阈值: {health.gfi.threshold} | 今日峰值: {health.gfi.peakToday}</span>
+          </article>
+          <article className="panel kpi" style={{ borderLeft: `3px solid ${health.painFlag.active ? 'var(--warning)' : 'var(--success)'}` }}>
+            <span className="label">🟡 PainFlag</span>
+            <span className="value">{health.painFlag.active ? '活跃' : '正常'}</span>
+            <span>{health.painFlag.source ? `来源: ${health.painFlag.source}` : '无活跃痛点'}</span>
+          </article>
+          <article className="panel kpi" style={{ borderLeft: '3px solid var(--info)' }}>
+            <span className="label">🔵 Trust Stage</span>
+            <span className="value">{health.trust.stageLabel}</span>
+            <span>Stage {health.trust.stage} | 分数: {health.trust.score}</span>
+          </article>
+          <article className="panel kpi" style={{ borderLeft: '3px solid var(--accent)' }}>
+            <span className="label">🟣 EP Tier</span>
+            <span className="value">{health.evolution.tier}</span>
+            <span>积分: {health.evolution.points}</span>
+          </article>
+          <article className="panel kpi" style={{ borderLeft: '3px solid var(--success)' }}>
+            <span className="label">📊 原则总数</span>
+            <span className="value">{health.principles.candidate + health.principles.probation + health.principles.active + health.principles.deprecated}</span>
+            <span>候: {health.principles.candidate} | 试: {health.principles.probation} | 活: {health.principles.active} | 废: {health.principles.deprecated}</span>
+          </article>
+          <article className="panel kpi" style={{ borderLeft: `3px solid ${health.queue.pending > 5 ? 'var(--warning)' : 'var(--success)'}` }}>
+            <span className="label">⏱️ 队列积压</span>
+            <span className="value">{health.queue.pending}</span>
+            <span>待处理: {health.queue.pending} | 处理中: {health.queue.inProgress} | 已完成: {health.queue.completed}</span>
+          </article>
+        </section>
+      )}
 
       <section className="kpi-grid">
         <article className="panel kpi">
@@ -889,6 +949,7 @@ function EvolutionPage() {
   const [tasks, setTasks] = useState<EvolutionTasksResponse | null>(null);
   const [stats, setStats] = useState<EvolutionStatsResponse | null>(null);
   const [trace, setTrace] = useState<EvolutionTraceResponse | null>(null);
+  const [evoPrinciples, setEvoPrinciples] = useState<EvolutionPrinciplesResponse | null>(null);
   const [selectedId, setSelectedId] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [error, setError] = useState('');
@@ -906,9 +967,11 @@ function EvolutionPage() {
     Promise.all([
       api.getEvolutionTasks(search),
       api.getEvolutionStats(days),
-    ]).then(([tasksData, statsData]) => {
+      api.getEvolutionPrinciples(),
+    ]).then(([tasksData, statsData, principlesData]) => {
       setTasks(tasksData);
       setStats(statsData);
+      setEvoPrinciples(principlesData);
       setError('');
     }).catch((err) => setError(String(err)));
   }, [search, days]);
@@ -949,6 +1012,93 @@ function EvolutionPage() {
           </div>
         </div>
       </header>
+
+      {/* Circuit Flow Indicator (Phase 5) */}
+      {evoPrinciples && (
+        <section className="panel" style={{ marginBottom: 'var(--space-5)' }}>
+          <h3>🔄 增强回路流程</h3>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)', padding: 'var(--space-3) 0', flexWrap: 'wrap' }}>
+            {['痛点检测', '诊断', '原则生成', '晋升', '活跃', '夜间反思', '训练', '内化'].map((step, i) => {
+              // Backend returns 'pending'/'in_progress'/'completed'/'idle' — map to circuit step names
+              const currentStep = (() => {
+                switch (evoPrinciples.activeStage) {
+                  case 'pending': return '痛点检测';
+                  case 'in_progress': return '诊断';
+                  case 'completed': return '内化';
+                  case 'idle': return '痛点检测';
+                  default: return '痛点检测';
+                }
+              })();
+              const isActive = currentStep === step;
+              return (
+                <React.Fragment key={step}>
+                  <span style={{
+                    padding: 'var(--space-1) var(--space-2)',
+                    borderRadius: 'var(--radius-md)',
+                    fontSize: '13px',
+                    fontWeight: isActive ? 700 : 400,
+                    background: isActive ? 'var(--accent)' : 'var(--bg-sunken)',
+                    color: isActive ? '#fff' : 'var(--text-secondary)',
+                    border: isActive ? '2px solid var(--accent)' : '1px solid var(--border)',
+                  }}>
+                    {step}
+                  </span>
+                  {i < 7 && <span style={{ color: 'var(--text-tertiary)', fontSize: '12px' }}>→</span>}
+                </React.Fragment>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {/* Principle Lifecycle & Nocturnal Training (Phase 5) */}
+      {evoPrinciples && (
+        <div className="grid two-columns" style={{ marginBottom: 'var(--space-5)' }}>
+          <section className="panel">
+            <h3>📝 原则生命周期</h3>
+            <div className="pill-row" style={{ marginBottom: 'var(--space-3)' }}>
+              <span className="badge" style={{ background: '#f59e0b' }}>候选: {evoPrinciples.principles.summary.candidate}</span>
+              <span className="badge" style={{ background: '#3b82f6' }}>试用: {evoPrinciples.principles.summary.probation}</span>
+              <span className="badge" style={{ background: '#22c55e' }}>活跃: {evoPrinciples.principles.summary.active}</span>
+              <span className="badge" style={{ background: '#ef4444' }}>废弃: {evoPrinciples.principles.summary.deprecated}</span>
+            </div>
+            {evoPrinciples.principles.recent.length > 0 && (
+              <div className="stack">
+                {evoPrinciples.principles.recent.slice(0, 5).map((item, i) => (
+                  <div className="row-card" key={`${item.principleId}-${i}`}>
+                    <div>
+                      <strong>{item.principleId}</strong>
+                      <span>{item.fromStatus} → {item.toStatus}</span>
+                    </div>
+                    <span className="badge">{new Date(item.timestamp).toLocaleString()}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+          <section className="panel">
+            <h3>💤 夜间训练状态</h3>
+            <div className="stack">
+              <div className="row-card">
+                <strong>训练队列</strong>
+                <span>待: {evoPrinciples.nocturnalTraining.queue.pending} | 中: {evoPrinciples.nocturnalTraining.queue.inProgress} | 完: {evoPrinciples.nocturnalTraining.queue.completed}</span>
+              </div>
+              <div className="row-card">
+                <strong>Arbiter 通过率</strong>
+                <span>{(evoPrinciples.nocturnalTraining.arbiterPassRate * 100).toFixed(1)}%</span>
+              </div>
+              <div className="row-card">
+                <strong>ORPO 样本数</strong>
+                <span>{evoPrinciples.nocturnalTraining.orpoSampleCount}</span>
+              </div>
+              <div className="row-card">
+                <strong>模型部署</strong>
+                <span>{evoPrinciples.nocturnalTraining.deployments.length} 个</span>
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
 
       {/* Status Distribution & Recent Activity */}
       <div className="grid two-columns" style={{ marginBottom: 'var(--space-5)' }}>
@@ -1112,6 +1262,239 @@ function EvolutionPage() {
   );
 }
 
+// ===== Phase 6: Feedback Loop Page =====
+function FeedbackPage() {
+  const [gfi, setGfi] = useState<FeedbackGfiResponse | null>(null);
+  const [empathyEvents, setEmpathyEvents] = useState<EmpathyEvent[]>([]);
+  const [gateBlocks, setGateBlocks] = useState<FeedbackGateBlock[]>([]);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    Promise.all([
+      api.getFeedbackGfi(),
+      api.getEmpathyEvents(20),
+      api.getFeedbackGateBlocks(20),
+    ]).then(([gfiData, events, blocks]) => {
+      setGfi(gfiData);
+      setEmpathyEvents(events);
+      setGateBlocks(blocks);
+      setError('');
+    }).catch((err) => setError(String(err)));
+  }, []);
+
+  if (error) return <ErrorState error={error} />;
+  if (!gfi) return <Loading />;
+
+  const gfiPercent = Math.min(100, (gfi.current / gfi.threshold) * 100);
+  const gfiColor = gfi.current >= gfi.threshold ? 'var(--error)' : gfi.current >= gfi.threshold * 0.8 ? 'var(--warning)' : 'var(--success)';
+
+  return (
+    <div className="page">
+      <header className="page-header">
+        <div>
+          <span className="eyebrow">Feedback Loop</span>
+          <h2>反馈回路 — GFI 监控与同理心检测</h2>
+        </div>
+      </header>
+
+      {/* GFI Dashboard */}
+      <section className="panel" style={{ marginBottom: 'var(--space-5)' }}>
+        <h3>GFI 实时仪表盘</h3>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-5)', padding: 'var(--space-4) 0' }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: '48px', fontWeight: 700, color: gfiColor }}>{gfi.current}</div>
+            <div style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>
+              阈值: {gfi.threshold} | 今日峰值: {gfi.peakToday}
+            </div>
+            <div style={{ marginTop: 'var(--space-2)', width: '100%', height: '8px', background: 'var(--bg-sunken)', borderRadius: '4px' }}>
+              <div style={{ width: `${gfiPercent}%`, height: '100%', background: gfiColor, borderRadius: '4px', transition: 'width 0.3s' }} />
+            </div>
+          </div>
+          <div style={{ flex: 2 }}>
+            <h4 style={{ marginBottom: 'var(--space-2)' }}>小时趋势</h4>
+            {gfi.trend.length > 0 && (
+              <GroupedBarChart
+                data={gfi.trend.slice(-12).map((item) => ({
+                  label: item.hour.slice(-5),
+                  values: [item.value],
+                }))}
+                colors={['var(--warning)']}
+                width={400}
+                height={80}
+              />
+            )}
+          </div>
+        </div>
+      </section>
+
+      <div className="grid two-columns">
+        {/* Empathy Events */}
+        <section className="panel">
+          <h3>同理心检测事件</h3>
+          {empathyEvents.length === 0 ? (
+            <div className="muted">暂无同理心事件</div>
+          ) : (
+            <div className="stack">
+              {empathyEvents.map((event, i) => (
+                <div className="row-card vertical" key={i}>
+                  <div>
+                    <strong style={{ color: event.severity === 'high' || event.severity === 'severe' || event.severity === 'critical' ? 'var(--error)' : 'var(--warning)' }}>
+                      [{event.severity}] {new Date(event.timestamp).toLocaleTimeString()}
+                    </strong>
+                    <span>{event.origin}</span>
+                  </div>
+                  <div style={{ fontSize: '0.9em', color: 'var(--text-secondary)' }}>{event.reason}</div>
+                  <div className="pill-row">
+                    <span className="badge">+{event.score}</span>
+                    <span className="badge">GFI: {event.gfiAfter}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* GFI → Gate Blocks */}
+        <section className="panel">
+          <h3>GFI → Gate 拦截关联</h3>
+          {gateBlocks.length === 0 ? (
+            <div className="muted">暂无拦截记录</div>
+          ) : (
+            <div className="stack">
+              {gateBlocks.map((block, i) => (
+                <div className="row-card" key={i}>
+                  <div>
+                    <strong>{block.toolName}</strong>
+                    <span>{new Date(block.timestamp).toLocaleString()}</span>
+                  </div>
+                  <div className="pill-row">
+                    <span className="badge">GFI: {block.gfi}</span>
+                    <span className="badge">Stage: {block.trustStage}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
+    </div>
+  );
+}
+
+// ===== Phase 6: Gate Monitor Page =====
+function GateMonitorPage() {
+  const [gateStats, setGateStats] = useState<GateStatsResponse | null>(null);
+  const [gateBlocks, setGateBlocks] = useState<GateBlockItem[]>([]);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    Promise.all([
+      api.getGateStats(),
+      api.getGateBlocks(50),
+    ]).then(([stats, blocks]) => {
+      setGateStats(stats);
+      setGateBlocks(blocks);
+      setError('');
+    }).catch((err) => setError(String(err)));
+  }, []);
+
+  if (error) return <ErrorState error={error} />;
+  if (!gateStats) return <Loading />;
+
+  return (
+    <div className="page">
+      <header className="page-header">
+        <div>
+          <span className="eyebrow">Gate Monitor</span>
+          <h2>Gate 监控 — 拦截统计与 Trust/EP 双轨</h2>
+        </div>
+      </header>
+
+      {/* Today's Block Stats */}
+      <section className="panel" style={{ marginBottom: 'var(--space-5)' }}>
+        <h3>今日拦截统计</h3>
+        <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(5, 1fr)' }}>
+          <article className="panel kpi">
+            <span className="label">GFI 拦截</span>
+            <span className="value">{gateStats.today.gfiBlocks}</span>
+          </article>
+          <article className="panel kpi">
+            <span className="label">Stage 限制</span>
+            <span className="value">{gateStats.today.stageBlocks}</span>
+          </article>
+          <article className="panel kpi">
+            <span className="label">P-03 不匹配</span>
+            <span className="value">{gateStats.today.p03Blocks}</span>
+          </article>
+          <article className="panel kpi">
+            <span className="label">绕过尝试</span>
+            <span className="value" style={{ color: 'var(--error)' }}>{gateStats.today.bypassAttempts}</span>
+          </article>
+          <article className="panel kpi">
+            <span className="label">P-16 豁免</span>
+            <span className="value">{gateStats.today.p16Exemptions}</span>
+          </article>
+        </div>
+      </section>
+
+      {/* Trust & EP Dual Track */}
+      <div className="grid two-columns" style={{ marginBottom: 'var(--space-5)' }}>
+        <section className="panel">
+          <h3>🔐 Trust Engine</h3>
+          <div style={{ padding: 'var(--space-3) 0' }}>
+            <div style={{ fontSize: '24px', fontWeight: 700 }}>Stage {gateStats.trust.stage}: {gateStats.trust.status}</div>
+            <div style={{ marginTop: 'var(--space-2)', width: '100%', height: '12px', background: 'var(--bg-sunken)', borderRadius: '6px' }}>
+              <div style={{ width: `${gateStats.trust.score}%`, height: '100%', background: 'var(--info)', borderRadius: '6px' }} />
+            </div>
+            <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: 'var(--space-1)' }}>
+              分数: {gateStats.trust.score}/100
+            </div>
+          </div>
+        </section>
+        <section className="panel">
+          <h3>🌱 Evolution Engine</h3>
+          <div style={{ padding: 'var(--space-3) 0' }}>
+            <div style={{ fontSize: '24px', fontWeight: 700 }}>{gateStats.evolution.tier} ({gateStats.evolution.status})</div>
+            <div style={{ marginTop: 'var(--space-2)', width: '100%', height: '12px', background: 'var(--bg-sunken)', borderRadius: '6px' }}>
+              <div style={{ width: `${Math.min(100, gateStats.evolution.points / 10)}%`, height: '100%', background: 'var(--success)', borderRadius: '6px' }} />
+            </div>
+            <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: 'var(--space-1)' }}>
+              积分: {gateStats.evolution.points}
+            </div>
+          </div>
+        </section>
+      </div>
+
+      {/* Block History */}
+      <section className="panel">
+        <h3>拦截历史</h3>
+        {gateBlocks.length === 0 ? (
+          <div className="muted">暂无拦截记录</div>
+        ) : (
+          <div className="list-table">
+            {gateBlocks.map((block, i) => (
+              <div className="table-row" key={i}>
+                <div>
+                  <strong>{block.toolName}</strong>
+                  <span>{block.filePath || '—'}</span>
+                </div>
+                <div>
+                  <span className="badge">{block.gateType}</span>
+                  <span>{block.reason}</span>
+                </div>
+                <div className="align-right">
+                  <span className="badge">GFI: {block.gfi}</span>
+                  <span>{new Date(block.timestamp).toLocaleString()}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
 // Main App Component
 function AppContent() {
   const { isAuthenticated } = useAuth();
@@ -1134,6 +1517,8 @@ function AppContent() {
         <Route path="/evolution" element={<EvolutionPage />} />
         <Route path="/samples" element={<SamplesPage />} />
         <Route path="/thinking-models" element={<ThinkingModelsPage />} />
+        <Route path="/feedback" element={<FeedbackPage />} />
+        <Route path="/gate" element={<GateMonitorPage />} />
       </Routes>
     </Shell>
   );

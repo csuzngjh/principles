@@ -761,3 +761,343 @@ test('buildHandoff handles missing global_reviewer gracefully', () => {
   assert.equal(handoff.globalReviewerCodeEvidence, null);
   assert.equal(handoff.dimensionScores.globalReviewer, null);
 });
+
+// --- Markdown heading compatibility tests ---
+
+test('extractContractItems parses ## CONTRACT (markdown heading)', () => {
+  const text = [
+    'SUMMARY:\nDone',
+    '## CONTRACT',
+    '- Root cause identified with evidence status: DONE evidence: "see EVIDENCE"',
+    '- Fix proposed status: TODO',
+  ].join('\n');
+
+  const items = extractContractItems(text);
+  assert.equal(items.length, 2);
+  assert.equal(items[0].status, 'DONE');
+  assert.equal(items[1].status, 'TODO');
+});
+
+test('extractContractItems parses CONTRACT: (colon format)', () => {
+  const text = [
+    'SUMMARY:\nDone',
+    'CONTRACT:',
+    '- Root cause identified status: DONE',
+    '- Fix proposed status: PARTIAL',
+  ].join('\n');
+
+  const items = extractContractItems(text);
+  assert.equal(items.length, 2);
+  assert.equal(items[0].status, 'DONE');
+  assert.equal(items[1].status, 'PARTIAL');
+});
+
+test('extractCodeEvidence parses ## CODE_EVIDENCE (markdown heading)', () => {
+  const text = [
+    '## CODE_EVIDENCE',
+    '- files_checked: src/observer.js, src/persistence.ts',
+    '- evidence_source: local',
+    '- sha: abc123def',
+    '- branch/worktree: main',
+  ].join('\n');
+  const evidence = extractCodeEvidence(text);
+  assert.ok(evidence, 'should parse ## CODE_EVIDENCE');
+  assert.deepEqual(evidence.filesChecked, ['src/observer.js', 'src/persistence.ts']);
+  assert.equal(evidence.evidenceSource, 'local');
+  assert.equal(evidence.sha, 'abc123def');
+});
+
+test('extractCodeEvidence parses comma-separated files_checked (no brackets)', () => {
+  const text = [
+    'CODE_EVIDENCE:',
+    '- files_checked: empathy-observer-manager.ts, hooks/subagent.ts, index.ts',
+    '- evidence_source: both',
+    '- sha: b1964a55',
+  ].join('\n');
+  const evidence = extractCodeEvidence(text);
+  assert.ok(evidence, 'should parse flat comma list');
+  assert.deepEqual(evidence.filesChecked, ['empathy-observer-manager.ts', 'hooks/subagent.ts', 'index.ts']);
+});
+
+test('extractCodeEvidence parses comma-separated files_verified (no brackets)', () => {
+  const text = [
+    '## CODE_EVIDENCE',
+    '- files_verified: src/fix.ts, src/test.ts, src/helper.ts',
+    '- evidence_source: both',
+    '- sha: fed123',
+  ].join('\n');
+  const evidence = extractCodeEvidence(text);
+  assert.ok(evidence, 'should parse flat comma list for files_verified');
+  assert.deepEqual(evidence.filesChecked, ['src/fix.ts', 'src/test.ts', 'src/helper.ts']);
+});
+
+test('hasCodeEvidence returns true for ## CODE_EVIDENCE', () => {
+  assert.equal(hasCodeEvidence('## CODE_EVIDENCE\n- files_checked: a.ts'), true);
+});
+
+test('decideStage advances with ## CONTRACT and ## CODE_EVIDENCE', () => {
+  const result = decideStage({
+    stageCriteria: {
+      requiredApprovals: 2,
+      requiredProducerSections: ['SUMMARY'],
+      requiredReviewerSections: ['VERDICT', 'BLOCKERS'],
+      requiredDeliverables: ['root_cause'],
+    },
+    producer: [
+      'SUMMARY:\nDone',
+      '## CONTRACT',
+      '- Root cause identified status: DONE',
+      '## CODE_EVIDENCE',
+      '- files_checked: a.ts, b.ts',
+      '- sha: abc123',
+    ].join('\n'),
+    reviewerA: 'VERDICT: APPROVE\nBLOCKERS:\n- None.',
+    reviewerB: 'VERDICT: APPROVE\nBLOCKERS:\n- None.',
+    currentRound: 1,
+    maxRoundsPerStage: 3,
+  });
+
+  assert.equal(result.outcome, 'advance');
+  assert.equal(result.metrics.contractCheck.allDone, true);
+  assert.ok(result.metrics.producerCodeEvidence, 'should have CODE_EVIDENCE');
+  assert.deepEqual(result.metrics.producerCodeEvidence.filesChecked, ['a.ts', 'b.ts']);
+});
+
+test('extractContractItems parses ## CONTRACT correctly when followed by ## CODE_EVIDENCE', () => {
+  // Verify ## CONTRACT section stops at ## CODE_EVIDENCE boundary
+  const text = [
+    'SUMMARY:\nDone',
+    '## CONTRACT',
+    '- Root cause identified status: DONE',
+    '## CODE_EVIDENCE',
+    '- files_checked: a.ts, b.ts',
+    '- sha: abc123',
+  ].join('\n');
+  const items = extractContractItems(text);
+  // Should only have the contract item, NOT the CODE_EVIDENCE lines
+  assert.equal(items.length, 1);
+  assert.equal(items[0].status, 'DONE');
+  assert.ok(items[0].deliverable.includes('Root cause identified'));
+});
+
+test('extractContractItems ignores markdown horizontal rules (---, ***, ___)', () => {
+  const text = [
+    '## CONTRACT',
+    '- transport_audit status: DONE',
+    '- lifecycle_hook_map status: DONE',
+    '---',
+    '**Round 3 Producer Report**',
+  ].join('\n');
+  const items = extractContractItems(text);
+  assert.equal(items.length, 2);
+  assert.equal(items[0].status, 'DONE');
+  assert.equal(items[1].status, 'DONE');
+  assert.ok(!items.some((i) => i.deliverable.includes('--')), 'no horizontal rule artifacts');
+});
+
+test('extractContractItems ignores *** and ___ separators', () => {
+  const text = [
+    'CONTRACT:',
+    '- item_a status: DONE',
+    '***',
+    '- item_b status: PARTIAL',
+    '___',
+  ].join('\n');
+  const items = extractContractItems(text);
+  assert.equal(items.length, 2);
+  assert.equal(items[0].deliverable, 'item_a');
+  assert.equal(items[1].deliverable, 'item_b');
+});
+
+test('extractContractItems strips markdown code fences before parsing', () => {
+  const text = [
+    '## CONTRACT',
+    '',
+    '```',
+    'CONTRACT:',
+    '- transport_audit status: DONE',
+    '- lifecycle_hook_map status: DONE',
+    '- openclaw_assumptions_documented status: DONE',
+    '- failure_mode_inventory status: DONE',
+    '```',
+    '',
+    '---',
+    '',
+    '## APPENDIX: Round 2 Blocker Resolution',
+  ].join('\n');
+  const items = extractContractItems(text);
+  assert.equal(items.length, 4);
+  assert.equal(items[0].deliverable, 'transport_audit');
+  assert.equal(items[0].status, 'DONE');
+  assert.equal(items[3].deliverable, 'failure_mode_inventory');
+  assert.equal(items[3].status, 'DONE');
+});
+
+// --- Parser robustness: DIMENSIONS markdown bold ---
+
+test('parseDimensions extracts from **DIMENSIONS**: markdown bold', () => {
+  const text = 'VERDICT: APPROVE\n**DIMENSIONS**: decision_quality=4; openclaw_verification_completeness=4; interface_soundness=5; extensibility=4\nBLOCKERS:\n- None.';
+  const dims = parseDimensions(text);
+  assert.deepEqual(dims, {
+    decision_quality: 4,
+    openclaw_verification_completeness: 4,
+    interface_soundness: 5,
+    extensibility: 4,
+  });
+});
+
+test('parseDimensions still extracts from plain DIMENSIONS:', () => {
+  const text = 'DIMENSIONS: correctness=5; scope=3';
+  const dims = parseDimensions(text);
+  assert.deepEqual(dims, { correctness: 5, scope: 3 });
+});
+
+// --- Parser robustness: MACRO_ANSWERS with markdown headings and prose colons ---
+
+test('extractMacroAnswers finds Q5 in markdown ### Q5 format', () => {
+  const text = [
+    '## MACRO_ANSWERS',
+    '',
+    '### Q1: Is migration architecturally sound?',
+    '**Yes.** Single transport model.',
+    '',
+    '### Q2: Are assumptions verified?',
+    '**Yes.** Cross-repo verification done.',
+    '',
+    '### Q3: Are sidecar boundaries explicit?',
+    '**Yes.** Four boundaries enforced.',
+    '',
+    '### Q4: Is business flow closed?',
+    '**Yes.** State transitions are complete:',
+    '- pending -> active -> wait_result -> completed',
+    '',
+    '### Q5: Does this serve the end goal?',
+    '**Yes.** End goal achieved.',
+    '',
+    '---',
+    '',
+    '## BLOCKERS',
+    '',
+    '**None.**',
+  ].join('\n');
+  const result = extractMacroAnswers(text, ['Q1', 'Q2', 'Q3', 'Q4', 'Q5']);
+  assert.deepEqual(result.found, ['Q1', 'Q2', 'Q3', 'Q4', 'Q5']);
+  assert.deepEqual(result.satisfied, ['Q1', 'Q2', 'Q3', 'Q4', 'Q5']);
+  assert.equal(result.allSatisfied, true);
+});
+
+// --- Dimensions fallback from state JSON ---
+
+test('buildStageMetrics uses reviewerADimensionsFallback when report has no DIMENSIONS', () => {
+  const metrics = buildStageMetrics({
+    stageCriteria: {
+      requiredProducerSections: ['SUMMARY'],
+      requiredReviewerSections: ['VERDICT'],
+      scoringDimensions: ['correctness', 'scope_control'],
+      dimensionThreshold: 3,
+    },
+    producer: 'SUMMARY:\nDone',
+    reviewerA: 'VERDICT: APPROVE\nBLOCKERS:\n- None.',
+    reviewerB: 'VERDICT: APPROVE\nBLOCKERS:\n- None.',
+    reviewerADimensionsFallback: { correctness: 4, scope_control: 5 },
+    reviewerBDimensionsFallback: { correctness: 5, scope_control: 4 },
+  });
+  assert.deepEqual(metrics.reviewerADimensions, { correctness: 4, scope_control: 5 });
+  assert.deepEqual(metrics.reviewerBDimensions, { correctness: 5, scope_control: 4 });
+  assert.equal(metrics.dimensionFailures.length, 0);
+});
+
+test('decideStage advances with dimensions from fallback', () => {
+  const result = decideStage({
+    stageCriteria: {
+      requiredApprovals: 2,
+      requiredProducerSections: ['SUMMARY'],
+      requiredReviewerSections: ['VERDICT', 'BLOCKERS'],
+      scoringDimensions: ['correctness'],
+      dimensionThreshold: 3,
+    },
+    producer: 'SUMMARY:\nDone',
+    reviewerA: 'VERDICT: APPROVE\nBLOCKERS:\n- None.',
+    reviewerB: 'VERDICT: APPROVE\nBLOCKERS:\n- None.',
+    currentRound: 1,
+    maxRoundsPerStage: 3,
+    reviewerADimensionsFallback: { correctness: 4 },
+    reviewerBDimensionsFallback: { correctness: 5 },
+  });
+  assert.equal(result.outcome, 'advance');
+});
+
+test('decideStage prefers report DIMENSIONS over fallback', () => {
+  const result = decideStage({
+    stageCriteria: {
+      requiredApprovals: 2,
+      requiredProducerSections: ['SUMMARY'],
+      requiredReviewerSections: ['VERDICT', 'BLOCKERS'],
+      scoringDimensions: ['correctness'],
+      dimensionThreshold: 3,
+    },
+    producer: 'SUMMARY:\nDone',
+    reviewerA: 'VERDICT: APPROVE\nDIMENSIONS: correctness=2\nBLOCKERS:\n- None.',
+    reviewerB: 'VERDICT: APPROVE\nBLOCKERS:\n- None.',
+    currentRound: 1,
+    maxRoundsPerStage: 3,
+    reviewerADimensionsFallback: { correctness: 5 },
+    reviewerBDimensionsFallback: { correctness: 5 },
+  });
+  // Report says correctness=2 (below threshold), fallback says 5 — report should win
+  assert.equal(result.outcome, 'revise');
+  assert.ok(result.blockers.some((b) => b.includes('correctness')));
+});
+
+// --- Round 3 replay: 3 APPROVE + 6/6 contract + Q1-Q5 should advance ---
+
+test('decideStage advances when all 3 reviewers approve, contract done, Q1-Q5 satisfied, dimensions from **DIMENSIONS**', () => {
+  const result = decideStage({
+    stageCriteria: {
+      requiredApprovals: 3,
+      requiredProducerSections: ['SUMMARY', 'ARCHITECTURE_DECISION', 'INTERFACE_DESIGN', 'CHECKS'],
+      requiredReviewerSections: ['VERDICT', 'BLOCKERS', 'FINDINGS', 'CHECKS'],
+      requiredGlobalReviewerSections: ['VERDICT', 'MACRO_ANSWERS'],
+      globalReviewerRequired: true,
+      globalReviewerMustAnswer: ['Q1', 'Q2', 'Q3', 'Q4', 'Q5'],
+      scoringDimensions: ['decision_quality', 'openclaw_verification_completeness', 'interface_soundness', 'extensibility'],
+      dimensionThreshold: 3,
+      requiredDeliverables: ['architecture_decision', 'openclaw_cross_repo_verification', 'helper_interface_draft', 'shadow_run_plan', 'runtime_direct_subagent_ended_verified', 'surface_degrade_policy'],
+    },
+    producer: 'SUMMARY:\nDone\nARCHITECTURE_DECISION:\nDecided\nINTERFACE_DESIGN:\nDesigned\nCHECKS: ok\nCONTRACT:\n- architecture_decision status: DONE\n- openclaw_cross_repo_verification status: DONE\n- helper_interface_draft status: DONE\n- shadow_run_plan status: DONE\n- runtime_direct_subagent_ended_verified status: DONE\n- surface_degrade_policy status: DONE',
+    reviewerA: 'VERDICT: APPROVE\nBLOCKERS:\n- None.\nFINDINGS:\n- Good\nCHECKS: ok\n**DIMENSIONS**: decision_quality=4; openclaw_verification_completeness=4; interface_soundness=5; extensibility=4',
+    reviewerB: 'VERDICT: APPROVE\nBLOCKERS:\n- None.\nFINDINGS:\n- Good\nCHECKS: ok\n**DIMENSIONS**: decision_quality=4; openclaw_verification_completeness=4; interface_soundness=5; extensibility=4',
+    globalReviewer: [
+      'VERDICT: APPROVE',
+      '## MACRO_ANSWERS',
+      '',
+      '### Q1: Is migration architecturally sound?',
+      '**Yes.** Single transport model verified.',
+      '',
+      '### Q2: Are assumptions verified?',
+      '**Yes.** Cross-repo verification done.',
+      '',
+      '### Q3: Are sidecar boundaries explicit?',
+      '**Yes.** Four boundaries enforced.',
+      '',
+      '### Q4: Is business flow closed?',
+      '**Yes.** State transitions are complete:',
+      '- pending -> active -> completed',
+      '',
+      '### Q5: Does this serve the end goal?',
+      '**Yes.** End goal achieved.',
+      '',
+      '---',
+      '',
+      '## BLOCKERS',
+      '',
+      '**None.**',
+    ].join('\n'),
+    currentRound: 3,
+    maxRoundsPerStage: 3,
+  });
+  assert.equal(result.outcome, 'advance');
+  assert.equal(result.metrics.approvalCount, 3);
+  assert.equal(result.metrics.dimensionFailures.length, 0);
+  assert.equal(result.metrics.contractCheck.allDone, true);
+});

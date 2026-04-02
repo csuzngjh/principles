@@ -4,6 +4,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { OpenClawPluginApi, OpenClawPluginHttpRouteParams } from '../openclaw-sdk.js';
 import { ControlUiQueryService } from '../service/control-ui-query-service.js';
 import { getEvolutionQueryService } from '../service/evolution-query-service.js';
+import { HealthQueryService } from '../service/health-query-service.js';
 import { TrajectoryRegistry } from '../core/trajectory.js';
 import { getCentralDatabase } from '../service/central-database.js';
 
@@ -430,6 +431,113 @@ function handleApiRoute(
       return true;
     } finally {
       evoService.dispose();
+    }
+  }
+
+  // === Health Query API (v1.1 new endpoints) ===
+  const healthService = () => {
+    const workspaceDir = api.resolvePath('.');
+    return new HealthQueryService(workspaceDir);
+  };
+
+  if (pathname === `${API_PREFIX}/overview/health` && method === 'GET') {
+    const hs = healthService();
+    try {
+      json(res, 200, hs.getOverviewHealth());
+      return true;
+    } catch (error) {
+      api.logger.warn(`[PD:ControlUI] Health overview failed: ${String(error)}`);
+      json(res, 500, { error: 'internal_error', message: String(error) });
+      return true;
+    } finally {
+      hs.dispose();
+    }
+  }
+
+  if (pathname === `${API_PREFIX}/evolution/principles` && method === 'GET') {
+    const hs = healthService();
+    try {
+      json(res, 200, hs.getEvolutionPrinciples());
+      return true;
+    } catch (error) {
+      api.logger.warn(`[PD:ControlUI] Evolution principles failed: ${String(error)}`);
+      json(res, 500, { error: 'internal_error', message: String(error) });
+      return true;
+    } finally {
+      hs.dispose();
+    }
+  }
+
+  if (pathname === `${API_PREFIX}/feedback/gfi` && method === 'GET') {
+    const hs = healthService();
+    try {
+      json(res, 200, hs.getFeedbackGfi());
+      return true;
+    } catch (error) {
+      api.logger.warn(`[PD:ControlUI] Feedback GFI failed: ${String(error)}`);
+      json(res, 500, { error: 'internal_error', message: String(error) });
+      return true;
+    } finally {
+      hs.dispose();
+    }
+  }
+
+  if (pathname === `${API_PREFIX}/feedback/empathy-events` && method === 'GET') {
+    const hs = healthService();
+    try {
+      const limit = url.searchParams.has('limit') ? Number(url.searchParams.get('limit')) : undefined;
+      json(res, 200, hs.getFeedbackEmpathyEvents(limit));
+      return true;
+    } catch (error) {
+      api.logger.warn(`[PD:ControlUI] Feedback empathy events failed: ${String(error)}`);
+      json(res, 500, { error: 'internal_error', message: String(error) });
+      return true;
+    } finally {
+      hs.dispose();
+    }
+  }
+
+  if (pathname === `${API_PREFIX}/feedback/gate-blocks` && method === 'GET') {
+    const hs = healthService();
+    try {
+      const limit = url.searchParams.has('limit') ? Number(url.searchParams.get('limit')) : undefined;
+      json(res, 200, hs.getFeedbackGateBlocks(limit));
+      return true;
+    } catch (error) {
+      api.logger.warn(`[PD:ControlUI] Feedback gate blocks failed: ${String(error)}`);
+      json(res, 500, { error: 'internal_error', message: String(error) });
+      return true;
+    } finally {
+      hs.dispose();
+    }
+  }
+
+  if (pathname === `${API_PREFIX}/gate/stats` && method === 'GET') {
+    const hs = healthService();
+    try {
+      json(res, 200, hs.getGateStats());
+      return true;
+    } catch (error) {
+      api.logger.warn(`[PD:ControlUI] Gate stats failed: ${String(error)}`);
+      json(res, 500, { error: 'internal_error', message: String(error) });
+      return true;
+    } finally {
+      hs.dispose();
+    }
+  }
+
+  if (pathname === `${API_PREFIX}/gate/blocks` && method === 'GET') {
+    const hs = healthService();
+    try {
+      const limit = url.searchParams.has('limit') ? Number(url.searchParams.get('limit')) : undefined;
+      json(res, 200, hs.getGateBlocks(limit));
+      return true;
+    } catch (error) {
+      api.logger.warn(`[PD:ControlUI] Gate blocks failed: ${String(error)}`);
+      json(res, 500, { error: 'internal_error', message: String(error) });
+      return true;
+    } finally {
+      hs.dispose();
     }
   }
 
