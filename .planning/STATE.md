@@ -3,8 +3,8 @@
 ## Project Reference
 
 **Core Value:** 自演化 AI 代理通过痛点信号学习并通过显式原则表达实现自我改进。
-**Current Milestone:** v1.1 WebUI 回路流程增强 ✅ Complete
-**Current Focus:** Milestone v1.1 全部完成，待提交
+**Current Milestone:** v1.1 WebUI 回路流程增强 ✅ Shipped (PR #146)
+**Current Focus:** 无活动里程碑 — PR #146 待 review/merge
 
 ---
 
@@ -69,7 +69,7 @@
 ## Session Continuity
 
 **Last session:** 2026-04-02 — v1.1 milestone 全部完成
-**Next action:** git commit all changes
+**Next action:** PR #146 待 review/merge
 **Key files:**
 - `packages/openclaw-plugin/src/service/health-query-service.ts` — 统一查询服务 (836 lines)
 - `packages/openclaw-plugin/src/http/principles-console-route.ts` — 7 个新 API 路由
