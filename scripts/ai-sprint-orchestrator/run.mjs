@@ -83,6 +83,7 @@ function loadOrInitState(args) {
     const state = reconcileRunState(runDir, readJson(sprintFile));
     if (state.status === 'halted' || state.status === 'aborted') {
       // Validate: if halted mid-stage, the previous stage must have advanced
+      // Special case: implement-pass-1 revise → implement-pass-2 is valid routing
       if (state.currentStageIndex > 0) {
         const prevStageName = loadSpec(state, args).stages[state.currentStageIndex - 1];
         const prevDecisionPath = path.join(runDir, 'stages', `${String(state.currentStageIndex).padStart(2, '0')}-${prevStageName}`, 'decision.md');
@@ -90,7 +91,11 @@ function loadOrInitState(args) {
           const prevDecisionText = fs.readFileSync(prevDecisionPath, 'utf8');
           const outcomeMatch = prevDecisionText.match(/Outcome:\s*(\w+)/);
           if (outcomeMatch && outcomeMatch[1] !== 'advance') {
-            throw new Error(`Cannot resume: previous stage "${prevStageName}" outcome was "${outcomeMatch[1]}" (expected "advance"). Fix the previous stage first.`);
+            // Check for special routing: implement-pass-1 revise → implement-pass-2
+            const isSpecialRoute = state.currentStage === 'implement-pass-2' && prevStageName === 'implement-pass-1' && outcomeMatch[1] === 'revise';
+            if (!isSpecialRoute) {
+              throw new Error(`Cannot resume: previous stage "${prevStageName}" outcome was "${outcomeMatch[1]}" (expected "advance"). Fix the previous stage first.`);
+            }
           }
         }
       }
