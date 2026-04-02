@@ -90,6 +90,7 @@ export interface SubagentRunParams {
     lane?: string;
     deliver?: boolean;
     idempotencyKey?: string;
+    expectsCompletionMessage?: boolean; // Plugin extension for completion signaling
 }
 
 export interface SubagentRunResult {

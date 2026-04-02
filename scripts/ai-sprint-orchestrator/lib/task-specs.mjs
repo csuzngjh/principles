@@ -79,6 +79,24 @@ export function buildStageBrief(spec, stage, round, previousDecision, handoff = 
     `## Constraints`,
     ...spec.context.map((line) => `- ${line}`),
     '',
+    ...(stageCriteria?.requiredReviewerSections?.length
+      ? [
+          `## Required Reviewer Sections`,
+          `Your report MUST use exactly these section headings (markdown format):`,
+          ...stageCriteria.requiredReviewerSections.map((s) => `- ## ${s}`),
+          `Examples of valid headings: ## VERDICT, ## BLOCKERS, ## FINDINGS, ## TRANSPORT_ASSESSMENT, ## OPENCLAW_ASSUMPTION_REVIEW, ## NEXT_FOCUS, ## CHECKS, ## DIMENSIONS`,
+          `You MUST include ALL sections listed above. Omitting any section will cause the sprint to halt.`,
+          '',
+        ]
+      : []),
+    ...(stageCriteria?.requiredProducerSections?.length
+      ? [
+          `## Required Producer Sections`,
+          `The producer report MUST use exactly these section headings (markdown format):`,
+          ...stageCriteria.requiredProducerSections.map((s) => `- ## ${s}`),
+          '',
+        ]
+      : []),
     ...(scoringDimensions.length > 0
       ? [
         `## Scoring Dimensions`,

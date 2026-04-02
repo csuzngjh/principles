@@ -1,6 +1,5 @@
 import fs from 'fs';
 import path from 'path';
-import { spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { ensureDir, readJson, writeJson, writeText, fileExists } from './state-store.mjs';
 
@@ -11,6 +10,23 @@ const archiveRoot = path.join(sprintRoot, 'archive');
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function shouldArchiveEntry(srcPath, runDir) {
+  const relative = path.relative(runDir, srcPath);
+  if (!relative || relative === '') return true;
+
+  const normalized = relative.split(path.sep).join('/');
+  const base = path.basename(srcPath);
+
+  if (base === 'orchestrator.lock') return false;
+  if (base.startsWith('.ai-sprint-prompt-')) return false;
+  if (normalized.includes('/worktrees/')) return false;
+  if (normalized.startsWith('worktrees/')) return false;
+  if (normalized.includes('/runtime/')) return false;
+  if (normalized.startsWith('runtime/')) return false;
+
+  return true;
 }
 
 /**
@@ -59,11 +75,11 @@ export function archiveRun(runDir, runId) {
   try {
     fs.cpSync(runDir, destDir, {
       recursive: true,
-      filter: (src) => !src.endsWith('orchestrator.lock'),
+      filter: (src) => shouldArchiveEntry(src, runDir),
     });
   } catch {
     // Fallback for Node < 16.7: manual recursive copy
-    copyDirRecursive(runDir, destDir);
+    copyDirRecursive(runDir, destDir, runDir);
   }
 
   // Step 2: Capture git info
@@ -90,30 +106,46 @@ export function archiveRun(runDir, runId) {
 function captureGitInfo(destDir, state) {
   const gitDir = path.join(destDir, 'git');
   ensureDir(gitDir);
+  const latestGitStatus = findLatestStageGitStatus(destDir);
 
-  const created = state.createdAt || '';
-  const updated = state.updatedAt || nowIso();
+  if (!latestGitStatus) {
+    writeText(path.join(gitDir, 'branch.txt'), '# No stage git-status.json found in archive\n');
+    writeText(path.join(gitDir, 'status.txt'), '# No stage git-status.json found in archive\n');
+    writeText(path.join(gitDir, 'modified-files.txt'), '# No stage git-status.json found in archive\n');
+    writeText(path.join(gitDir, 'diff.patch'), '# Diff omitted from archive; inspect archived stage artifacts instead.\n');
+    writeText(path.join(gitDir, 'log.txt'), '# Git log omitted from archive; inspect archived stage artifacts instead.\n');
+    return;
+  }
 
-  const commands = [
-    { file: 'branch.txt', args: ['rev-parse', '--abbrev-ref', 'HEAD'] },
-    { file: 'status.txt', args: ['status', '--short'] },
-    { file: 'modified-files.txt', args: ['diff', '--name-only', 'HEAD'] },
-    { file: 'diff.patch', args: ['diff', 'HEAD'] },
-    { file: 'log.txt', args: ['log', '--oneline', `--since=${created}`, `--until=${updated}`] },
-  ];
+  const dirtyLines = Array.isArray(latestGitStatus.dirtyFiles) ? latestGitStatus.dirtyFiles : [];
+  const modifiedFiles = dirtyLines
+    .map((line) => String(line).replace(/^[ MARCUD?!]+/, '').trim())
+    .filter(Boolean);
 
-  for (const { file, args } of commands) {
-    try {
-      const result = spawnSync('git', args, {
-        cwd: repoRoot,
-        encoding: 'utf8',
-        timeout: 10_000,
-      });
-      writeText(path.join(gitDir, file), (result.stdout || '').trim() + '\n');
-    } catch {
-      writeText(path.join(gitDir, file), `# Git command failed: git ${args.join(' ')}\n`);
+  writeText(path.join(gitDir, 'branch.txt'), `${latestGitStatus.branch || 'unknown'}\n`);
+  writeText(path.join(gitDir, 'status.txt'), `${dirtyLines.length ? dirtyLines.join('\n') : '# clean'}\n`);
+  writeText(path.join(gitDir, 'modified-files.txt'), `${modifiedFiles.length ? modifiedFiles.join('\n') : '# none'}\n`);
+  writeText(path.join(gitDir, 'diff.patch'), '# Diff omitted from archive; inspect archived stage artifacts and git-status.json.\n');
+  writeText(path.join(gitDir, 'log.txt'), [
+    `headSha: ${latestGitStatus.headSha || 'unknown'}`,
+    `baseBranch: ${latestGitStatus.baseBranch || 'unknown'}`,
+    `remoteBranch: ${latestGitStatus.remoteBranch || 'unknown'}`,
+    `capturedAt: ${state.updatedAt || nowIso()}`,
+  ].join('\n') + '\n');
+}
+
+function findLatestStageGitStatus(destDir) {
+  const stagesDir = path.join(destDir, 'stages');
+  if (!fileExists(stagesDir)) return null;
+
+  const stageDirs = fs.readdirSync(stagesDir).sort().reverse();
+  for (const dir of stageDirs) {
+    const gitStatusPath = path.join(stagesDir, dir, 'git-status.json');
+    if (fileExists(gitStatusPath)) {
+      return readJson(gitStatusPath);
     }
   }
+  return null;
 }
 
 /**
@@ -252,14 +284,14 @@ function extractSection(text, heading) {
 /**
  * Fallback recursive directory copy for Node < 16.7.
  */
-function copyDirRecursive(src, dest) {
+function copyDirRecursive(src, dest, rootDir = src) {
   ensureDir(dest);
   for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
     const srcPath = path.join(src, entry.name);
     const destPath = path.join(dest, entry.name);
-    if (entry.name === 'orchestrator.lock') continue;
+    if (!shouldArchiveEntry(srcPath, rootDir)) continue;
     if (entry.isDirectory()) {
-      copyDirRecursive(srcPath, destPath);
+      copyDirRecursive(srcPath, destPath, rootDir);
     } else {
       fs.copyFileSync(srcPath, destPath);
     }

@@ -1,14 +1,19 @@
 const VERDICT_RE = /(?:VERDICT:\s*\*{0,2}|##\s*VERDICT\s*\n+\*{0,2}\s*)(APPROVE|REVISE|BLOCK)\b/i;
-const DIMENSIONS_RE = /^DIMENSIONS:\s*(.+)$/im;
-const CONTRACT_RE = /CONTRACT:\s*([\s\S]*?)(?:\n[A-Z_ ]+:|$)/i;
-const CODE_EVIDENCE_RE = /CODE_EVIDENCE:\s*([\s\S]*?)(?:\n[A-Z_ ]+:|$)/i;
+const DIMENSIONS_RE = /^\*{0,2}DIMENSIONS\*{0,2}:\s*(.+)$/im;
+// Match both "SECTION:" and "## SECTION" markdown heading formats
+// Section terminator matches either "SECTION:" or "## SECTION" (with optional colon)
+const CONTRACT_RE = /(?:##\s*)?CONTRACT:?\s*\n([\s\S]*?)(?=\n(?:##\s+)?[A-Z][A-Z_ ]+:\s|\n##\s+[A-Z]|\n[A-Z][A-Z_ ]+:\s|$)/i;
+const CODE_EVIDENCE_RE = /(?:##\s*)?CODE_EVIDENCE:?\s*\n([\s\S]*?)(?=\n(?:##\s+)?[A-Z][A-Z_ ]+:\s|\n##\s+[A-Z]|\n[A-Z][A-Z_ ]+:\s|$)/i;
+// Support both bracket format [a, b] and plain comma list a, b
 const FILES_CHECKED_RE = /files_check(?:ed|es):\s*\[([^\]]*)\]/i;
+const FILES_CHECKED_FLAT_RE = /files_check(?:ed|es):\s*([^\n]+)/i;
 const FILES_VERIFIED_RE = /files_verified:\s*\[([^\]]*)\]/i;
+const FILES_VERIFIED_FLAT_RE = /files_verified:\s*([^\n]+)/i;
 const EVIDENCE_SOURCE_RE = /evidence_source:\s*(local|remote|both)/i;
 const SHA_RE = /sha:\s*([a-f0-9]+)/i;
 const BRANCH_RE = /branch\/worktree:\s*([^\n]+)/i;
 const EVIDENCE_SCOPE_RE = /evidence_scope:\s*(principles|openclaw|both)/i;
-const MACRO_ANSWERS_RE = /MACRO_ANSWERS:\s*([\s\S]*?)(?:\n[A-Z_ ]+:|$)/i;
+const MACRO_ANSWERS_RE = /(?:##\s*)?MACRO_ANSWERS:?\s*\n?([\s\S]*?)(?:\n(?:##\s*)?[A-Z_ ]+:|$)/i;
 
 export function normalizeVerdict(text) {
   const match = String(text ?? '').match(VERDICT_RE);
@@ -79,11 +84,12 @@ export function checkDimensionThresholds(dimensionScores, requiredDimensions, th
 }
 
 export function extractContractItems(text) {
-  const source = String(text ?? '');
+  // Strip markdown code fences so inner sections are visible to regex
+  const source = String(text ?? '').replace(/```[\s\S]*?```/g, (m) => m.replace(/```\w*\n?/g, ''));
   const match = source.match(CONTRACT_RE);
   if (!match) return [];
   const items = [];
-  const blocks = match[1].split(/\r?\n/).filter((l) => l.trim().startsWith('-'));
+  const blocks = match[1].split(/\r?\n/).filter((l) => l.trim().startsWith('-') && !/^[-*_]{3,}\s*$/.test(l.trim()));
   for (const block of blocks) {
     const deliverable = block.replace(/^-\s*/, '').trim();
     const statusMatch = deliverable.match(/status:\s*(DONE|PARTIAL|TODO)/i);
@@ -112,7 +118,9 @@ export function extractCodeEvidence(text) {
 
   const body = match[1];
   // Try files_checked (producer style) or files_verified (reviewer style)
-  const filesCheckedMatch = body.match(FILES_CHECKED_RE) || body.match(FILES_VERIFIED_RE);
+  // Support both [a, b] bracket format and plain comma list format
+  const filesCheckedMatch = body.match(FILES_CHECKED_RE) || body.match(FILES_CHECKED_FLAT_RE)
+    || body.match(FILES_VERIFIED_RE) || body.match(FILES_VERIFIED_FLAT_RE);
   const evidenceSourceMatch = body.match(EVIDENCE_SOURCE_RE);
   const shaMatch = body.match(SHA_RE);
   const branchMatch = body.match(BRANCH_RE);
@@ -138,9 +146,20 @@ export function hasCodeEvidence(text) {
 
 export function extractMacroAnswers(text, requiredQuestions = []) {
   const source = String(text ?? '');
-  const match = source.match(MACRO_ANSWERS_RE);
-  if (!match) return { found: [], satisfied: [], allSatisfied: false };
-  const body = match[1];
+
+  // Step 1: Find MACRO_ANSWERS section header (case-insensitive)
+  const headerMatch = source.match(/(?:##\s*)?MACRO_ANSWERS:?\s*\n/i);
+  if (!headerMatch) return { found: [], satisfied: [], allSatisfied: false };
+
+  const bodyStart = headerMatch.index + headerMatch[0].length;
+  const afterHeader = source.slice(bodyStart);
+
+  // Step 2: Capture until next ## heading (case-sensitive: only ALL-CAPS words are terminators).
+  // Section headings are ## BLOCKERS, ## FINDINGS — always ALL-CAPS after ##.
+  // Regular prose with colons (e.g., "State transitions are complete:") must NOT terminate.
+  const endMatch = afterHeader.match(/\n##\s+[A-Z]{2,}[A-Z_ ]*/);
+  const body = endMatch ? afterHeader.slice(0, endMatch.index) : afterHeader;
+
   const found = [];
   const satisfied = [];
   for (const q of requiredQuestions) {
@@ -192,7 +211,7 @@ export function buildHandoff({ reviewerA, reviewerB, globalReviewer, producer, m
   };
 }
 
-export function buildStageMetrics({ stageCriteria, producer, reviewerA, reviewerB, globalReviewer }) {
+export function buildStageMetrics({ stageCriteria, producer, reviewerA, reviewerB, globalReviewer, reviewerADimensionsFallback, reviewerBDimensionsFallback }) {
   const reviewerAVerdict = normalizeVerdict(reviewerA);
   const reviewerBVerdict = normalizeVerdict(reviewerB);
   const globalReviewerVerdict = globalReviewer ? normalizeVerdict(globalReviewer) : null;
@@ -227,8 +246,11 @@ export function buildStageMetrics({ stageCriteria, producer, reviewerA, reviewer
 
   const scoringDimensions = stageCriteria?.scoringDimensions ?? [];
   const dimensionThreshold = stageCriteria?.dimensionThreshold ?? 3;
-  const reviewerADimensions = parseDimensions(reviewerA);
-  const reviewerBDimensions = parseDimensions(reviewerB);
+  const parsedADims = parseDimensions(reviewerA);
+  const parsedBDims = parseDimensions(reviewerB);
+  // Fallback to reviewer state JSON dimensions when report text parsing returns empty
+  const reviewerADimensions = Object.keys(parsedADims).length > 0 ? parsedADims : (reviewerADimensionsFallback ?? {});
+  const reviewerBDimensions = Object.keys(parsedBDims).length > 0 ? parsedBDims : (reviewerBDimensionsFallback ?? {});
   const dimensionCheckA = checkDimensionThresholds(reviewerADimensions, scoringDimensions, dimensionThreshold);
   const dimensionCheckB = checkDimensionThresholds(reviewerBDimensions, scoringDimensions, dimensionThreshold);
 
@@ -276,11 +298,11 @@ export function buildStageMetrics({ stageCriteria, producer, reviewerA, reviewer
   };
 }
 
-export function decideStage({ stageCriteria, producer, reviewerA, reviewerB, globalReviewer, currentRound, maxRoundsPerStage }) {
+export function decideStage({ stageCriteria, producer, reviewerA, reviewerB, globalReviewer, currentRound, maxRoundsPerStage, reviewerViolations = null, reviewerADimensionsFallback = null, reviewerBDimensionsFallback = null }) {
   const verdictA = normalizeVerdict(reviewerA);
   const verdictB = normalizeVerdict(reviewerB);
   const globalReviewerRequired = stageCriteria?.globalReviewerRequired === true;
-  const metrics = buildStageMetrics({ stageCriteria, producer, reviewerA, reviewerB, globalReviewer });
+  const metrics = buildStageMetrics({ stageCriteria, producer, reviewerA, reviewerB, globalReviewer, reviewerADimensionsFallback, reviewerBDimensionsFallback });
   const blockers = metrics.blockers;
   const producerSectionsSatisfied = Object.values(metrics.producerSectionChecks).every(Boolean);
   const reviewerSectionsSatisfied = Object.values(metrics.reviewerSectionChecks).every(Boolean);
@@ -312,10 +334,15 @@ export function decideStage({ stageCriteria, producer, reviewerA, reviewerB, glo
 
   // Contract completion check: if requiredDeliverables are defined, all contract items must be DONE
   if (metrics.requiredDeliverables.length > 0 && !metrics.contractCheck.allDone) {
-    const incomplete = metrics.contractCheck.incompleteItems
-      .map((item) => `"${item.deliverable}" is ${item.status}`)
-      .join('; ');
-    structuralBlockers.push(`Contract not fulfilled: ${incomplete}`);
+    if (metrics.contractCheck.incompleteItems.length > 0) {
+      const incomplete = metrics.contractCheck.incompleteItems
+        .map((item) => `"${item.deliverable}" is ${item.status}`)
+        .join('; ');
+      structuralBlockers.push(`Contract not fulfilled: ${incomplete}`);
+    } else {
+      // No contract items extracted at all — CONTRACT section missing or unparsable
+      structuralBlockers.push(`Contract not fulfilled: no contract items extracted (required: ${metrics.requiredDeliverables.join(', ')})`);
+    }
   }
 
   // Global reviewer macro answers check
@@ -339,6 +366,13 @@ export function decideStage({ stageCriteria, producer, reviewerA, reviewerB, glo
       structuralBlockers.push(...globalBlockers.map((b) => `[GLOBAL] ${b}`));
     } else {
       structuralBlockers.push('Global reviewer BLOCKED with no specific blockers listed.');
+    }
+  }
+
+  // Protected file violations by reviewers/global_reviewer are structural blockers
+  if (reviewerViolations && reviewerViolations.length > 0) {
+    for (const v of reviewerViolations) {
+      structuralBlockers.push(`${v.role} violated protected file ${v.violatedFile} — report invalidated`);
     }
   }
 
