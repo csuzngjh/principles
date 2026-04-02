@@ -14,13 +14,22 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const runMjsPath = path.join(__dirname, '..', 'run.mjs');
+const archiveMjsPath = path.join(__dirname, '..', 'lib', 'archive.mjs');
 const SOURCE = fs.readFileSync(runMjsPath, 'utf8');
+const ARCHIVE_SOURCE = fs.readFileSync(archiveMjsPath, 'utf8');
 
 function getFuncBody(funcName) {
   const start = SOURCE.indexOf(`function ${funcName}`);
   if (start === -1) throw new Error(`Function ${funcName} not found`);
   const end = SOURCE.indexOf('\nfunction ', start + 1);
   return SOURCE.slice(start, end === -1 ? SOURCE.length : end);
+}
+
+function getArchiveFuncBody(funcName) {
+  const start = ARCHIVE_SOURCE.indexOf(`function ${funcName}`);
+  if (start === -1) throw new Error(`Archive function ${funcName} not found`);
+  const end = ARCHIVE_SOURCE.indexOf('\nfunction ', start + 1);
+  return ARCHIVE_SOURCE.slice(start, end === -1 ? ARCHIVE_SOURCE.length : end);
 }
 
 // ---------------------------------------------------------------------------
@@ -223,4 +232,99 @@ test('captureGitStatus: remoteBranch derived from worktree.branchName, not hardc
   const hasHardcodedNull = /remoteBranch:\s*null(?!,)/.test(infoStr);
   assert.equal(hasHardcodedNull, false,
     'remoteBranch should be set from worktree.branchName, not hardcoded null');
+});
+
+// ---------------------------------------------------------------------------
+// Process tree cleanup and role state bookkeeping
+// ---------------------------------------------------------------------------
+
+test('process cleanup: timeout path uses terminateProcessTree instead of proc.kill', () => {
+  const body = getFuncBody('runAgentAsync');
+  assert.ok(/terminateProcessTree\(proc\?\.pid/.test(body),
+    'runAgentAsync timeout must terminate the full process tree');
+  assert.equal(/proc\?\.kill\(\)/.test(body), false,
+    'runAgentAsync timeout must not rely on proc.kill() only');
+});
+
+test('process cleanup: terminateProcessTree uses taskkill /T /F on Windows', () => {
+  const body = getFuncBody('terminateProcessTree');
+  assert.ok(/taskkill/.test(body), 'terminateProcessTree must use taskkill on Windows');
+  assert.ok(/\/T/.test(body) && /\/F/.test(body),
+    'terminateProcessTree must kill the full descendant tree with /T /F');
+});
+
+test('role bookkeeping: reviewer path records spawned pid into role state', () => {
+  const body = getFuncBody('runReviewerRole');
+  assert.ok(/onSpawn:\s*\(pid\)\s*=>\s*updateRoleState\(paths,\s*role,\s*\{\s*lastPid:\s*pid\s*\}\)/.test(body),
+    'runReviewerRole must persist reviewer pid for stale cleanup');
+});
+
+test('stale and abort cleanup: recorded role processes are cleaned up', () => {
+  const reconcileBody = getFuncBody('reconcileRunState');
+  const abortBody = getFuncBody('abortRun');
+  assert.ok(/cleanupRecordedRoleProcesses/.test(reconcileBody),
+    'reconcileRunState must clean up recorded role processes');
+  assert.ok(/cleanupRecordedRoleProcesses/.test(abortBody),
+    'abortRun must clean up recorded role processes');
+});
+
+test('global reviewer: required report must be non-empty, not just present', () => {
+  const body = getFuncBody('decideAndPersist');
+  assert.ok(/reportExistsAndNonEmpty\(globalReviewerPath\)/.test(body),
+    'required global reviewer report must be validated as non-empty');
+});
+
+test('global reviewer: empty report must not be read as decision input', () => {
+  const body = getFuncBody('decideAndPersist');
+  assert.ok(/reportExistsAndNonEmpty\(globalReviewerPath\)/.test(body),
+    'decision input must only load non-empty global reviewer reports');
+});
+
+test('global reviewer runtime: failed reviewer does not get auto-promoted to completed without a report', () => {
+  const body = getFuncBody('executeStage');
+  assert.ok(/if \(reportExistsAndNonEmpty\(grReportPath\)\) \{\s*updateRoleState\(paths, 'global_reviewer', \{\s*status: 'completed'/.test(body.replace(/\r?\n/g, ' ')),
+    'global reviewer should only be marked completed when a non-empty report exists');
+});
+
+test('resume path reconciles stale runs before switching back to running', () => {
+  const body = getFuncBody('loadOrInitState');
+  assert.ok(/const state = reconcileRunState\(runDir, readJson\(sprintFile\)\)/.test(body),
+    'resume should reconcile stale state before changing status to running');
+});
+
+test('main loop reconciles loaded runs before starting execution', () => {
+  const body = getFuncBody('main');
+  assert.ok(/reconcileRunState\(runDir, state\)/.test(body),
+    'main should reconcile stale runs before entering the execution loop');
+});
+
+test('cleanup bookkeeping: recorded role pids are only cleared after successful termination', () => {
+  const body = getFuncBody('cleanupRecordedRoleProcesses');
+  assert.ok(/const terminated = terminateProcessTree/.test(body),
+    'cleanup should capture termination success');
+  assert.ok(/if \(terminated\)/.test(body),
+    'cleanup should only clear pid bookkeeping after successful termination');
+});
+
+test('cleanup bookkeeping: worktree is only cleared after successful git removal', () => {
+  const body = getFuncBody('cleanupWorktree');
+  assert.ok(/if \(result\.status === 0\)/.test(body),
+    'cleanupWorktree should check git exit status');
+  assert.ok(/state\.worktree = null/.test(body),
+    'cleanupWorktree must still clear state on success');
+});
+
+test('archive filter excludes prompt scratch, runtime scratch, and worktrees', () => {
+  const body = getArchiveFuncBody('shouldArchiveEntry');
+  assert.ok(/\.ai-sprint-prompt-/.test(body), 'archive filter must exclude prompt scratch files');
+  assert.ok(/worktrees/.test(body), 'archive filter must exclude worktree directories');
+  assert.ok(/runtime/.test(body), 'archive filter should exclude runtime scratch directories');
+});
+
+test('archive capture uses latest stage git-status.json instead of repo-wide git diff', () => {
+  const body = getArchiveFuncBody('captureGitInfo');
+  assert.ok(/findLatestStageGitStatus/.test(body),
+    'archive capture should read stage-local git-status.json');
+  assert.equal(/spawnSync\('git'/.test(body), false,
+    'archive capture should not shell out to repo-wide git commands anymore');
 });

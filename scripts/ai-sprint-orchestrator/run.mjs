@@ -79,7 +79,7 @@ function loadOrInitState(args) {
     if (!fileExists(sprintFile)) {
       throw new Error(`Run not found: ${args.resume}`);
     }
-    const state = readJson(sprintFile);
+    const state = reconcileRunState(runDir, readJson(sprintFile));
     if (state.status === 'halted' || state.status === 'aborted') {
       // Validate: if halted mid-stage, the previous stage must have advanced
       if (state.currentStageIndex > 0) {
@@ -96,6 +96,8 @@ function loadOrInitState(args) {
       const previousStatus = state.status;
       state.status = 'running';
       state.haltReason = null;
+      state.orchestratorPid = process.pid;
+      state.lastHeartbeatAt = nowIso();
       state.updatedAt = nowIso();
       writeJson(sprintFile, state);
       appendTimeline(runDir, `Sprint resumed from ${previousStatus} by operator`);
@@ -155,7 +157,7 @@ function appendTimeline(runDir, line) {
   }
 }
 
-function runAgent({ cwd, agent, model, prompt, timeoutSeconds = 1800, failLogPath = null, promptDir = cwd }) {
+function runAgent({ cwd, agent, model, prompt, timeoutSeconds = 1800, failLogPath = null, promptDir = cwd, runDir = null, roleLabel = agent }) {
   // promptDir (default=cwd) is where we write the prompt file; must exist and be writable.
   // On Windows, avoid os.tmpdir() (short ~ paths) and non-existent branchWorkspace dirs.
   const promptFile = path.join(promptDir, `.ai-sprint-prompt-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`);
@@ -207,6 +209,9 @@ function runAgent({ cwd, agent, model, prompt, timeoutSeconds = 1800, failLogPat
   const stderr = result.stderr ?? '';
 
   if (result.error || result.status !== 0) {
+    if ((result.error?.code === 'ETIMEDOUT' || result.signal === 'SIGTERM') && result.pid) {
+      terminateProcessTree(result.pid, { runDir, label: roleLabel });
+    }
     if (failLogPath) {
       ensureDir(path.dirname(failLogPath));
       writeText(failLogPath, `# Agent Failure Log\n\n- agent: ${agent}\n- model: ${model}\n- exitStatus: ${result.status ?? 'N/A'}\n- error: ${result.error?.message ?? 'none'}\n\n## stdout\n\n${stdout}\n\n## stderr\n\n${stderr}\n`);
@@ -222,7 +227,7 @@ function runAgent({ cwd, agent, model, prompt, timeoutSeconds = 1800, failLogPat
  * Async agent runner using spawn (non-blocking) — used for parallel reviewer execution.
  * Returns a Promise that resolves with { stdout, stderr, status } or rejects on error.
  */
-function runAgentAsync({ cwd, agent, model, prompt, timeoutSeconds = 1800, promptDir = cwd }) {
+function runAgentAsync({ cwd, agent, model, prompt, timeoutSeconds = 1800, promptDir = cwd, runDir = null, roleLabel = agent, onSpawn = null }) {
   return new Promise((resolve, reject) => {
     const promptFile = path.join(promptDir, `.ai-sprint-prompt-${process.pid}-${crypto.randomUUID()}.txt`);
 
@@ -246,8 +251,9 @@ function runAgentAsync({ cwd, agent, model, prompt, timeoutSeconds = 1800, promp
     const timer = setTimeout(() => {
       if (!settled) {
         settled = true;
+        clearTimeout(timer);
         cleanup();
-        try { proc?.kill(); } catch {}
+        terminateProcessTree(proc?.pid, { runDir, label: roleLabel });
         reject(new Error(`Agent ${agent} timed out after ${timeoutSeconds}s`));
       }
     }, timeoutMs);
@@ -281,6 +287,7 @@ function runAgentAsync({ cwd, agent, model, prompt, timeoutSeconds = 1800, promp
           shell: false,
         });
       }
+      if (proc?.pid && onSpawn) onSpawn(proc.pid);
     } catch (spawnErr) {
       settled = true;
       clearTimeout(timer);
@@ -393,6 +400,12 @@ function ensureStagePaths(runDir, stageIndex, stageName) {
         stage: stageName,
         round: 0,
         status: 'idle',
+        lastPid: null,
+        startedAt: null,
+        finishedAt: null,
+        terminatedAt: null,
+        timeoutSeconds: null,
+        lastError: null,
         checklist: [],
         updatedAt: nowIso(),
       });
@@ -418,6 +431,71 @@ function roleArtifactPaths(paths, role) {
   throw new Error(`Unknown role: ${role}`);
 }
 
+function roleStatePath(paths, role) {
+  if (role === 'producer') return paths.producerStatePath;
+  if (role === 'reviewer_a') return paths.reviewerAStatePath;
+  if (role === 'reviewer_b') return paths.reviewerBStatePath;
+  if (role === 'global_reviewer') return paths.globalReviewerStatePath;
+  throw new Error(`Unknown role: ${role}`);
+}
+
+function updateRoleState(paths, role, patch) {
+  const statePath = roleStatePath(paths, role);
+  const previous = fileExists(statePath) ? readJson(statePath) : { role };
+  writeJson(statePath, {
+    ...previous,
+    ...patch,
+    role,
+    updatedAt: nowIso(),
+  });
+}
+
+function terminateProcessTree(pid, { runDir = null, label = 'process' } = {}) {
+  if (!pid) return false;
+  try {
+    if (process.platform === 'win32') {
+      const result = spawnSync('taskkill', ['/T', '/F', '/PID', String(pid)], {
+        encoding: 'utf8',
+        timeout: 30_000,
+        shell: false,
+      });
+      const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`.trim();
+      const success = result.status === 0 || /not found|no running instance|not found/i.test(output);
+      if (runDir) appendTimeline(runDir, `${success ? 'Terminated' : 'Failed to terminate'} ${label} process tree pid=${pid}${output ? ` (${output})` : ''}`);
+      return success;
+    }
+    process.kill(pid, 'SIGKILL');
+    if (runDir) appendTimeline(runDir, `Terminated ${label} pid=${pid}`);
+    return true;
+  } catch (err) {
+    if (runDir) appendTimeline(runDir, `Failed to terminate ${label} pid=${pid}: ${err.message}`);
+    return false;
+  }
+}
+
+function cleanupRecordedRoleProcesses(paths, runDir) {
+  const roles = ['producer', 'reviewer_a', 'reviewer_b', 'global_reviewer'];
+  for (const role of roles) {
+    const statePath = roleStatePath(paths, role);
+    if (!fileExists(statePath)) continue;
+    const roleState = readJson(statePath);
+    if (roleState.lastPid) {
+      const terminated = terminateProcessTree(roleState.lastPid, { runDir, label: role });
+      if (terminated) {
+        updateRoleState(paths, role, {
+          status: roleState.status === 'completed' ? roleState.status : 'terminated',
+          terminatedAt: nowIso(),
+          lastPid: null,
+        });
+      } else {
+        updateRoleState(paths, role, {
+          lastError: roleState.lastError ?? `Failed to terminate recorded ${role} pid ${roleState.lastPid}`,
+        });
+      }
+    }
+  }
+}
+
 function readRoleOutput({ reportPath, stdout }) {
   if (fileExists(reportPath)) {
     const report = fs.readFileSync(reportPath, 'utf8').trim();
@@ -426,6 +504,10 @@ function readRoleOutput({ reportPath, stdout }) {
     }
   }
   return String(stdout ?? '').trim();
+}
+
+function reportExistsAndNonEmpty(reportPath) {
+  return fileExists(reportPath) && Boolean(fs.readFileSync(reportPath, 'utf8').trim());
 }
 
 function protectedArtifacts(runDir, paths) {
@@ -456,28 +538,28 @@ function detectProtectedWriteViolation(files, snapshot) {
   return null;
 }
 
-function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecardPath, producerPath, reviewerAPath, reviewerBPath, globalReviewerPath, state, reviewerTimeouts = null }) {
+function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecardPath, producerPath, reviewerAPath, reviewerBPath, globalReviewerPath, state, reviewerTimeouts = null, reviewerViolations = null }) {
   // Build lookup maps for reviewer timeout/error state
   const timeoutMap = new Map((reviewerTimeouts ?? []).map((r) => [r.role, r]));
   const missingFiles = [];
-  if (!fileExists(producerPath)) missingFiles.push(`producer: ${producerPath}`);
-  if (!fileExists(reviewerAPath)) {
+  if (!reportExistsAndNonEmpty(producerPath)) missingFiles.push(`producer: ${producerPath}${fileExists(producerPath) ? ' (empty)' : ''}`);
+  if (!reportExistsAndNonEmpty(reviewerAPath)) {
     const info = timeoutMap.get('reviewer_a');
     if (info?.timedOut) missingFiles.push(`reviewer_a: ${reviewerAPath} (timed out, no report)`);
     else if (info) missingFiles.push(`reviewer_a: ${reviewerAPath} (error, no report)`);
-    else missingFiles.push(`reviewer_a: ${reviewerAPath} (missing)`);
+    else missingFiles.push(`reviewer_a: ${reviewerAPath}${fileExists(reviewerAPath) ? ' (empty)' : ' (missing)'}`);
   }
-  if (!fileExists(reviewerBPath)) {
+  if (!reportExistsAndNonEmpty(reviewerBPath)) {
     const info = timeoutMap.get('reviewer_b');
     if (info?.timedOut) missingFiles.push(`reviewer_b: ${reviewerBPath} (timed out, no report)`);
     else if (info) missingFiles.push(`reviewer_b: ${reviewerBPath} (error, no report)`);
-    else missingFiles.push(`reviewer_b: ${reviewerBPath} (missing)`);
+    else missingFiles.push(`reviewer_b: ${reviewerBPath}${fileExists(reviewerBPath) ? ' (empty)' : ' (missing)'}`);
   }
 
   const stageCriteria = loadSpec(state).stageCriteria?.[stageName] ?? {};
   const globalReviewerRequired = stageCriteria.globalReviewerRequired === true;
-  if (globalReviewerRequired && globalReviewerPath && !fileExists(globalReviewerPath)) {
-    missingFiles.push(`global_reviewer: ${globalReviewerPath} (missing — required for this stage)`);
+  if (globalReviewerRequired && globalReviewerPath && !reportExistsAndNonEmpty(globalReviewerPath)) {
+    missingFiles.push(`global_reviewer: ${globalReviewerPath}${fileExists(globalReviewerPath) ? ' (empty — required for this stage)' : ' (missing — required for this stage)'}`);
   }
 
   if (missingFiles.length > 0) {
@@ -517,9 +599,28 @@ function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecard
   const producer = fs.readFileSync(producerPath, 'utf8');
   const reviewerA = fs.readFileSync(reviewerAPath, 'utf8');
   const reviewerB = fs.readFileSync(reviewerBPath, 'utf8');
-  const globalReviewer = (globalReviewerRequired && globalReviewerPath && fileExists(globalReviewerPath))
+  const globalReviewer = (globalReviewerRequired && globalReviewerPath && reportExistsAndNonEmpty(globalReviewerPath))
     ? fs.readFileSync(globalReviewerPath, 'utf8')
     : null;
+
+  // Read reviewer state JSON for dimensions fallback (agent may write dimensions to state but not report text)
+  const reviewerAStatePath = path.join(stageDir, 'reviewer-a-state.json');
+  const reviewerBStatePath = path.join(stageDir, 'reviewer-b-state.json');
+  let reviewerADimensionsFallback = null;
+  let reviewerBDimensionsFallback = null;
+  try {
+    if (fileExists(reviewerAStatePath)) {
+      const aState = readJson(reviewerAStatePath);
+      if (aState.dimensions && typeof aState.dimensions === 'object') reviewerADimensionsFallback = aState.dimensions;
+    }
+  } catch {}
+  try {
+    if (fileExists(reviewerBStatePath)) {
+      const bState = readJson(reviewerBStatePath);
+      if (bState.dimensions && typeof bState.dimensions === 'object') reviewerBDimensionsFallback = bState.dimensions;
+    }
+  } catch {}
+
   const decision = decideStage({
     stageCriteria: loadSpec(state).stageCriteria?.[stageName],
     producer,
@@ -528,6 +629,9 @@ function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecard
     globalReviewer: globalReviewerRequired ? globalReviewer : null,
     currentRound: state.currentRound,
     maxRoundsPerStage: state.maxRoundsPerStage,
+    reviewerViolations,
+    reviewerADimensionsFallback,
+    reviewerBDimensionsFallback,
   });
 
   const content = [
@@ -814,11 +918,11 @@ function reconcileRunState(runDir, state) {
   const stageDirName = `${String(state.currentStageIndex + 1).padStart(2, '0')}-${state.currentStage}`;
   const stageDir = path.join(runDir, 'stages', stageDirName);
   const artifacts = {
-    producer: fileExists(path.join(stageDir, 'producer.md')),
-    reviewerA: fileExists(path.join(stageDir, 'reviewer-a.md')),
-    reviewerB: fileExists(path.join(stageDir, 'reviewer-b.md')),
-    globalReviewer: fileExists(path.join(stageDir, 'global-reviewer.md')),
-    decision: fileExists(path.join(stageDir, 'decision.md')),
+    producer: reportExistsAndNonEmpty(path.join(stageDir, 'producer.md')),
+    reviewerA: reportExistsAndNonEmpty(path.join(stageDir, 'reviewer-a.md')),
+    reviewerB: reportExistsAndNonEmpty(path.join(stageDir, 'reviewer-b.md')),
+    globalReviewer: reportExistsAndNonEmpty(path.join(stageDir, 'global-reviewer.md')),
+    decision: reportExistsAndNonEmpty(path.join(stageDir, 'decision.md')),
   };
 
   const roleLabel = state.currentRole ?? 'unknown';
@@ -845,6 +949,8 @@ function reconcileRunState(runDir, state) {
     `Disk artifacts: ${diskSummary}`,
   ]);
   appendTimeline(runDir, `Sprint reconciled to halted: ${state.haltReason.details}`);
+  const paths = ensureStagePaths(runDir, state.currentStageIndex, state.currentStage);
+  cleanupRecordedRoleProcesses(paths, runDir);
   cleanupWorktree({ state, runDir });
   return state;
 }
@@ -861,6 +967,15 @@ async function runReviewerRole({ runDir, state, spec, paths, role, worktreeInfo 
 
   // Skip if report already exists
   if (fileExists(reportPath) && fs.readFileSync(reportPath, 'utf8').trim()) {
+    updateRoleState(paths, role, {
+      stage: stageName,
+      round: state.currentRound,
+      status: 'completed',
+      lastPid: null,
+      finishedAt: nowIso(),
+      timeoutSeconds: stageRoleTimeout(spec, stageName, role),
+      lastError: null,
+    });
     return { role, output: fs.readFileSync(reportPath, 'utf8').trim(), timedOut: false, reportExisted: true, violatedFile: null };
   }
 
@@ -888,8 +1003,30 @@ async function runReviewerRole({ runDir, state, spec, paths, role, worktreeInfo 
   let timedOut = false;
   let violatedFile = null;
 
+  updateRoleState(paths, role, {
+    stage: stageName,
+    round: state.currentRound,
+    status: 'running',
+    startedAt: nowIso(),
+    finishedAt: null,
+    terminatedAt: null,
+    lastPid: null,
+    timeoutSeconds,
+    lastError: null,
+  });
+
   try {
-    const result = await runAgentAsync({ cwd, agent: config.agent, model: config.model, prompt, timeoutSeconds, promptDir: runDir });
+    const result = await runAgentAsync({
+      cwd,
+      agent: config.agent,
+      model: config.model,
+      prompt,
+      timeoutSeconds,
+      promptDir: runDir,
+      runDir,
+      roleLabel: role,
+      onSpawn: (pid) => updateRoleState(paths, role, { lastPid: pid }),
+    });
     const stdout = result.stdout ?? '';
     const stderr = result.stderr ?? '';
 
@@ -902,19 +1039,44 @@ async function runReviewerRole({ runDir, state, spec, paths, role, worktreeInfo 
 
     output = stdout.trim();
     if (output) writeText(stdoutPath, `${output}\n`);
+    updateRoleState(paths, role, {
+      status: 'completed',
+      lastPid: null,
+      finishedAt: nowIso(),
+      lastError: null,
+    });
   } catch (err) {
     // Check if the agent wrote its report despite the error
     if (fileExists(reportPath) && fs.readFileSync(reportPath, 'utf8').trim()) {
       output = null;
       timedOut = true;
+      updateRoleState(paths, role, {
+        status: 'completed_after_timeout',
+        lastPid: null,
+        finishedAt: nowIso(),
+        lastError: err.message ?? String(err),
+      });
     } else if (err.message?.includes('timed out')) {
       timedOut = true;
       ensureDir(path.dirname(failLog));
       writeText(failLog, `# Agent Timeout Log\n\n- agent: ${config.agent}\n- model: ${config.model}\n- timeout: ${timeoutSeconds}s\n- error: ${err.message}\n`);
+      updateRoleState(paths, role, {
+        status: 'timed_out',
+        lastPid: null,
+        finishedAt: nowIso(),
+        terminatedAt: nowIso(),
+        lastError: err.message,
+      });
     } else {
       // Re-throw unexpected errors (but don't lose the fail log)
       ensureDir(path.dirname(failLog));
       writeText(failLog, `# Agent Failure Log\n\n- agent: ${config.agent}\n- model: ${config.model}\n- error: ${err.message}\n`);
+      updateRoleState(paths, role, {
+        status: 'error',
+        lastPid: null,
+        finishedAt: nowIso(),
+        lastError: err.message ?? String(err),
+      });
       throw err;
     }
   }
@@ -1053,13 +1215,18 @@ function cleanupWorktree({ state, runDir }) {
   // Use the git repo root (baseWorkspace) as cwd, not the worktree's parent dir
   const gitCwd = baseWorkspace ?? runDir;
   try {
-    spawnSync('git', ['worktree', 'remove', '--force', worktreePath], {
+    const result = spawnSync('git', ['worktree', 'remove', '--force', worktreePath], {
       cwd: gitCwd,
       encoding: 'utf8',
       timeout: 30_000,
     });
-    appendTimeline(runDir, `Cleaned up worktree at ${worktreePath}`);
-    state.worktree = null;
+    if (result.status === 0) {
+      appendTimeline(runDir, `Cleaned up worktree at ${worktreePath}`);
+      state.worktree = null;
+      return;
+    }
+    const errMsg = result.stderr?.trim() || result.stdout?.trim() || `git exited ${result.status}`;
+    appendTimeline(runDir, `Worktree cleanup failed for ${worktreePath}: ${errMsg} — manual cleanup may be required`);
   } catch (cleanupErr) {
     appendTimeline(runDir, `Worktree cleanup failed for ${worktreePath}: ${cleanupErr.message} — manual cleanup may be required`);
   }
@@ -1137,10 +1304,12 @@ async function executeStage(runDir, state, spec) {
       `Round: ${state.currentRound}`,
       `Halt reason: ${state.haltReason.details}`,
     ]);
+    cleanupRecordedRoleProcesses(paths, runDir);
     return { outcome: 'halt', summary: state.haltReason.details, blockers: state.haltReason.blockers, metrics: {} };
   }
 
   const producerConfig = roleConfig(spec, 'producer');
+  const producerTimeoutSeconds = stageRoleTimeout(spec, stageName, 'producer');
   const producerPrompt = buildRolePrompt({
     spec,
     stage: stageName,
@@ -1162,12 +1331,32 @@ async function executeStage(runDir, state, spec) {
 
   if (fileExists(producerReportPath) && fs.readFileSync(producerReportPath, 'utf8').trim()) {
     outputs.producer = fs.readFileSync(producerReportPath, 'utf8').trim();
+    updateRoleState(paths, 'producer', {
+      stage: stageName,
+      round: state.currentRound,
+      status: 'completed',
+      lastPid: null,
+      finishedAt: nowIso(),
+      timeoutSeconds: producerTimeoutSeconds,
+      lastError: null,
+    });
     appendTimeline(runDir, `producer skipped (report already exists) stage ${stageName} round ${state.currentRound}`);
     // Capture git status even for skipped producer (worktree may have changed)
     if (worktreeInfo?.worktreePath) {
       captureGitStatus({ worktreePath: worktreeInfo.worktreePath, runDir, stageDir, state });
     }
   } else {
+    updateRoleState(paths, 'producer', {
+      stage: stageName,
+      round: state.currentRound,
+      status: 'running',
+      startedAt: nowIso(),
+      finishedAt: null,
+      terminatedAt: null,
+      lastPid: null,
+      timeoutSeconds: producerTimeoutSeconds,
+      lastError: null,
+    });
     const protectedSnapshot = snapshotProtectedFiles(protectedFiles);
     const producerFailLog = path.join(stageDir, 'producer-failure.log');
     let producerOutput;
@@ -1178,16 +1367,32 @@ async function executeStage(runDir, state, spec) {
         agent: producerConfig.agent,
         model: producerConfig.model,
         prompt: producerPrompt,
-        timeoutSeconds: stageRoleTimeout(spec, stageName, 'producer'),
+        timeoutSeconds: producerTimeoutSeconds,
         failLogPath: producerFailLog,
         promptDir: runDir,
+        runDir,
+        roleLabel: 'producer',
       });
     } catch (agentErr) {
       if (fileExists(producerReportPath) && fs.readFileSync(producerReportPath, 'utf8').trim()) {
         appendTimeline(runDir, `producer spawnSync timed out but report exists — recovering stage ${stageName} round ${state.currentRound}`);
         producerOutput = null;
         producerTimedOut = true;
+        updateRoleState(paths, 'producer', {
+          status: 'completed_after_timeout',
+          lastPid: null,
+          finishedAt: nowIso(),
+          terminatedAt: nowIso(),
+          lastError: agentErr.message ?? String(agentErr),
+        });
       } else {
+        updateRoleState(paths, 'producer', {
+          status: agentErr.message?.includes('timed out') ? 'timed_out' : 'error',
+          lastPid: null,
+          finishedAt: nowIso(),
+          terminatedAt: agentErr.message?.includes('timed out') ? nowIso() : null,
+          lastError: agentErr.message ?? String(agentErr),
+        });
         throw agentErr;
       }
     }
@@ -1196,6 +1401,12 @@ async function executeStage(runDir, state, spec) {
     if (!fileExists(producerReportPath) || !fs.readFileSync(producerReportPath, 'utf8').trim()) {
       writeText(producerReportPath, `${outputs.producer}\n`);
     }
+    updateRoleState(paths, 'producer', {
+      status: producerTimedOut ? 'completed_after_timeout' : 'completed',
+      lastPid: null,
+      finishedAt: nowIso(),
+      lastError: producerTimedOut ? 'Recovered after timeout because report existed on disk.' : null,
+    });
     // Skip mtime-based violation check during timeout recovery — the producer may have
     // been mid-write when interrupted, causing spurious mtime changes on protected files.
     const producerViolated = producerTimedOut ? null : detectProtectedWriteViolation(protectedFiles, protectedSnapshot);
@@ -1216,6 +1427,7 @@ async function executeStage(runDir, state, spec) {
         `Round: ${state.currentRound}`,
         `Halt reason: ${state.haltReason.details}`,
       ]);
+      cleanupRecordedRoleProcesses(paths, runDir);
       cleanupWorktree({ state, runDir });
       throw new Error(state.haltReason.details);
     }
@@ -1250,6 +1462,7 @@ async function executeStage(runDir, state, spec) {
       `Round: ${state.currentRound}`,
       `Halt reason: ${state.haltReason.details}`,
     ]);
+    cleanupRecordedRoleProcesses(paths, runDir);
     cleanupWorktree({ state, runDir });
     return { outcome: 'halt', summary: state.haltReason.details, blockers: state.haltReason.blockers, metrics: {} };
   }
@@ -1278,6 +1491,7 @@ async function executeStage(runDir, state, spec) {
 
   // Collect outputs and timeout flags
   const reviewerTimeouts = [];
+  const reviewerViolations = [];
   for (const result of reviewerResults) {
     if (result.error) {
       appendTimeline(runDir, `${result.role} error: ${result.error}`);
@@ -1288,7 +1502,8 @@ async function executeStage(runDir, state, spec) {
       reviewerTimeouts.push({ role: result.role, timedOut: true, hadReport: result.reportExisted });
     }
     if (result.violatedFile) {
-      appendTimeline(runDir, `${result.role} modified protected file ${result.violatedFile}`);
+      appendTimeline(runDir, `${result.role} modified protected file ${result.violatedFile} — report invalidated`);
+      reviewerViolations.push({ role: result.role, violatedFile: result.violatedFile });
     }
   }
   heartbeatState(runDir, state, { currentRole: null });
@@ -1325,8 +1540,28 @@ async function executeStage(runDir, state, spec) {
 
       if (fileExists(grReportPath) && fs.readFileSync(grReportPath, 'utf8').trim()) {
         globalReviewerOutput = fs.readFileSync(grReportPath, 'utf8').trim();
+        updateRoleState(paths, 'global_reviewer', {
+          stage: stageName,
+          round: state.currentRound,
+          status: 'completed',
+          lastPid: null,
+          finishedAt: nowIso(),
+          timeoutSeconds: stageRoleTimeout(spec, stageName, 'global_reviewer'),
+          lastError: null,
+        });
         appendTimeline(runDir, `global_reviewer skipped (report already exists) stage ${stageName} round ${state.currentRound}`);
       } else {
+        updateRoleState(paths, 'global_reviewer', {
+          stage: stageName,
+          round: state.currentRound,
+          status: 'running',
+          startedAt: nowIso(),
+          finishedAt: null,
+          terminatedAt: null,
+          lastPid: null,
+          timeoutSeconds: stageRoleTimeout(spec, stageName, 'global_reviewer'),
+          lastError: null,
+        });
         const protectedSnapshot = snapshotProtectedFiles(protectedFiles);
         const grFailLog = path.join(stageDir, 'global-reviewer-failure.log');
         let grOutput;
@@ -1339,21 +1574,43 @@ async function executeStage(runDir, state, spec) {
             timeoutSeconds: stageRoleTimeout(spec, stageName, 'global_reviewer'),
             failLogPath: grFailLog,
             promptDir: runDir,
+            runDir,
+            roleLabel: 'global_reviewer',
           });
         } catch (grErr) {
           appendTimeline(runDir, `global_reviewer error: ${grErr.message}`);
           grOutput = null;
+          updateRoleState(paths, 'global_reviewer', {
+            status: grErr.message?.includes('timed out') ? 'timed_out' : 'error',
+            lastPid: null,
+            finishedAt: nowIso(),
+            terminatedAt: grErr.message?.includes('timed out') ? nowIso() : null,
+            lastError: grErr.message ?? String(grErr),
+          });
         }
         if (grOutput) writeText(grStdoutPath, `${grOutput}\n`);
         globalReviewerOutput = readRoleOutput({ reportPath: grReportPath, stdout: grOutput ?? '' });
-        if (!fileExists(grReportPath) || !fs.readFileSync(grReportPath, 'utf8').trim()) {
+        if (globalReviewerOutput && !reportExistsAndNonEmpty(grReportPath)) {
           writeText(grReportPath, `${globalReviewerOutput}\n`);
+        }
+        if (reportExistsAndNonEmpty(grReportPath)) {
+          updateRoleState(paths, 'global_reviewer', {
+            status: 'completed',
+            lastPid: null,
+            finishedAt: nowIso(),
+            lastError: null,
+          });
         }
         const grViolated = detectProtectedWriteViolation(protectedFiles, protectedSnapshot);
         if (grViolated) {
-          appendTimeline(runDir, `global_reviewer modified protected file ${grViolated} — continuing anyway`);
+          appendTimeline(runDir, `global_reviewer modified protected file ${grViolated} — report invalidated`);
+          reviewerViolations.push({ role: 'global_reviewer', violatedFile: grViolated });
         }
-        appendTimeline(runDir, `global_reviewer completed stage ${stageName} round ${state.currentRound}`);
+        if (reportExistsAndNonEmpty(grReportPath)) {
+          appendTimeline(runDir, `global_reviewer completed stage ${stageName} round ${state.currentRound}`);
+        } else {
+          appendTimeline(runDir, `global_reviewer produced no report for stage ${stageName} round ${state.currentRound}`);
+        }
       }
     }
     heartbeatState(runDir, state, { currentRole: null });
@@ -1371,6 +1628,7 @@ async function executeStage(runDir, state, spec) {
     globalReviewerPath,
     state,
     reviewerTimeouts: reviewerTimeouts.length > 0 ? reviewerTimeouts : null,
+    reviewerViolations: reviewerViolations.length > 0 ? reviewerViolations : null,
   });
 }
 
@@ -1396,6 +1654,10 @@ function abortRun(runId) {
     `Round: ${state.currentRound}`,
     'Operator aborted this sprint.',
   ]);
+  const paths = ensureStagePaths(runDir, state.currentStageIndex, state.currentStage);
+  cleanupRecordedRoleProcesses(paths, runDir);
+  terminateProcessTree(state.orchestratorPid, { runDir, label: 'orchestrator' });
+  cleanupWorktree({ state, runDir });
 }
 
 function pauseRun(runId) {
@@ -1420,6 +1682,8 @@ function pauseRun(runId) {
     `Round: ${state.currentRound}`,
     'Operator paused this sprint.',
   ]);
+  const paths = ensureStagePaths(runDir, state.currentStageIndex, state.currentStage);
+  cleanupRecordedRoleProcesses(paths, runDir);
 }
 
 function listRuns() {
@@ -1640,6 +1904,7 @@ async function main() {
   }
 
   const { runDir, state } = loadOrInitState(args);
+  reconcileRunState(runDir, state);
   const spec = loadSpec(state, args);
   const sprintStartedAt = Date.parse(state.createdAt) || Date.now();
 
@@ -1686,6 +1951,8 @@ async function main() {
           `Round: ${state.currentRound}`,
           `Halt reason: ${state.haltReason.details}`,
         ]);
+        const paths = ensureStagePaths(runDir, state.currentStageIndex, state.currentStage);
+        cleanupRecordedRoleProcesses(paths, runDir);
         break;
       }
 
@@ -1703,6 +1970,8 @@ async function main() {
         ]);
       }
       if (state.status === 'halted') {
+        const paths = ensureStagePaths(runDir, state.currentStageIndex, state.currentStage);
+        cleanupRecordedRoleProcesses(paths, runDir);
         cleanupWorktree({ state, runDir });
         appendTimeline(runDir, `Sprint halted: ${state.haltReason?.details ?? 'unknown reason'}`);
         updateSummary(runDir, [
@@ -1723,6 +1992,8 @@ async function main() {
         details: String(error),
         blockers: [String(error)],
       };
+      const paths = ensureStagePaths(runDir, state.currentStageIndex, state.currentStage);
+      cleanupRecordedRoleProcesses(paths, runDir);
       cleanupWorktree({ state, runDir });
       saveState(runDir, state);
       appendTimeline(runDir, `Sprint halted by orchestrator error: ${String(error)}`);

@@ -932,3 +932,172 @@ test('extractContractItems strips markdown code fences before parsing', () => {
   assert.equal(items[3].deliverable, 'failure_mode_inventory');
   assert.equal(items[3].status, 'DONE');
 });
+
+// --- Parser robustness: DIMENSIONS markdown bold ---
+
+test('parseDimensions extracts from **DIMENSIONS**: markdown bold', () => {
+  const text = 'VERDICT: APPROVE\n**DIMENSIONS**: decision_quality=4; openclaw_verification_completeness=4; interface_soundness=5; extensibility=4\nBLOCKERS:\n- None.';
+  const dims = parseDimensions(text);
+  assert.deepEqual(dims, {
+    decision_quality: 4,
+    openclaw_verification_completeness: 4,
+    interface_soundness: 5,
+    extensibility: 4,
+  });
+});
+
+test('parseDimensions still extracts from plain DIMENSIONS:', () => {
+  const text = 'DIMENSIONS: correctness=5; scope=3';
+  const dims = parseDimensions(text);
+  assert.deepEqual(dims, { correctness: 5, scope: 3 });
+});
+
+// --- Parser robustness: MACRO_ANSWERS with markdown headings and prose colons ---
+
+test('extractMacroAnswers finds Q5 in markdown ### Q5 format', () => {
+  const text = [
+    '## MACRO_ANSWERS',
+    '',
+    '### Q1: Is migration architecturally sound?',
+    '**Yes.** Single transport model.',
+    '',
+    '### Q2: Are assumptions verified?',
+    '**Yes.** Cross-repo verification done.',
+    '',
+    '### Q3: Are sidecar boundaries explicit?',
+    '**Yes.** Four boundaries enforced.',
+    '',
+    '### Q4: Is business flow closed?',
+    '**Yes.** State transitions are complete:',
+    '- pending -> active -> wait_result -> completed',
+    '',
+    '### Q5: Does this serve the end goal?',
+    '**Yes.** End goal achieved.',
+    '',
+    '---',
+    '',
+    '## BLOCKERS',
+    '',
+    '**None.**',
+  ].join('\n');
+  const result = extractMacroAnswers(text, ['Q1', 'Q2', 'Q3', 'Q4', 'Q5']);
+  assert.deepEqual(result.found, ['Q1', 'Q2', 'Q3', 'Q4', 'Q5']);
+  assert.deepEqual(result.satisfied, ['Q1', 'Q2', 'Q3', 'Q4', 'Q5']);
+  assert.equal(result.allSatisfied, true);
+});
+
+// --- Dimensions fallback from state JSON ---
+
+test('buildStageMetrics uses reviewerADimensionsFallback when report has no DIMENSIONS', () => {
+  const metrics = buildStageMetrics({
+    stageCriteria: {
+      requiredProducerSections: ['SUMMARY'],
+      requiredReviewerSections: ['VERDICT'],
+      scoringDimensions: ['correctness', 'scope_control'],
+      dimensionThreshold: 3,
+    },
+    producer: 'SUMMARY:\nDone',
+    reviewerA: 'VERDICT: APPROVE\nBLOCKERS:\n- None.',
+    reviewerB: 'VERDICT: APPROVE\nBLOCKERS:\n- None.',
+    reviewerADimensionsFallback: { correctness: 4, scope_control: 5 },
+    reviewerBDimensionsFallback: { correctness: 5, scope_control: 4 },
+  });
+  assert.deepEqual(metrics.reviewerADimensions, { correctness: 4, scope_control: 5 });
+  assert.deepEqual(metrics.reviewerBDimensions, { correctness: 5, scope_control: 4 });
+  assert.equal(metrics.dimensionFailures.length, 0);
+});
+
+test('decideStage advances with dimensions from fallback', () => {
+  const result = decideStage({
+    stageCriteria: {
+      requiredApprovals: 2,
+      requiredProducerSections: ['SUMMARY'],
+      requiredReviewerSections: ['VERDICT', 'BLOCKERS'],
+      scoringDimensions: ['correctness'],
+      dimensionThreshold: 3,
+    },
+    producer: 'SUMMARY:\nDone',
+    reviewerA: 'VERDICT: APPROVE\nBLOCKERS:\n- None.',
+    reviewerB: 'VERDICT: APPROVE\nBLOCKERS:\n- None.',
+    currentRound: 1,
+    maxRoundsPerStage: 3,
+    reviewerADimensionsFallback: { correctness: 4 },
+    reviewerBDimensionsFallback: { correctness: 5 },
+  });
+  assert.equal(result.outcome, 'advance');
+});
+
+test('decideStage prefers report DIMENSIONS over fallback', () => {
+  const result = decideStage({
+    stageCriteria: {
+      requiredApprovals: 2,
+      requiredProducerSections: ['SUMMARY'],
+      requiredReviewerSections: ['VERDICT', 'BLOCKERS'],
+      scoringDimensions: ['correctness'],
+      dimensionThreshold: 3,
+    },
+    producer: 'SUMMARY:\nDone',
+    reviewerA: 'VERDICT: APPROVE\nDIMENSIONS: correctness=2\nBLOCKERS:\n- None.',
+    reviewerB: 'VERDICT: APPROVE\nBLOCKERS:\n- None.',
+    currentRound: 1,
+    maxRoundsPerStage: 3,
+    reviewerADimensionsFallback: { correctness: 5 },
+    reviewerBDimensionsFallback: { correctness: 5 },
+  });
+  // Report says correctness=2 (below threshold), fallback says 5 — report should win
+  assert.equal(result.outcome, 'revise');
+  assert.ok(result.blockers.some((b) => b.includes('correctness')));
+});
+
+// --- Round 3 replay: 3 APPROVE + 6/6 contract + Q1-Q5 should advance ---
+
+test('decideStage advances when all 3 reviewers approve, contract done, Q1-Q5 satisfied, dimensions from **DIMENSIONS**', () => {
+  const result = decideStage({
+    stageCriteria: {
+      requiredApprovals: 3,
+      requiredProducerSections: ['SUMMARY', 'ARCHITECTURE_DECISION', 'INTERFACE_DESIGN', 'CHECKS'],
+      requiredReviewerSections: ['VERDICT', 'BLOCKERS', 'FINDINGS', 'CHECKS'],
+      requiredGlobalReviewerSections: ['VERDICT', 'MACRO_ANSWERS'],
+      globalReviewerRequired: true,
+      globalReviewerMustAnswer: ['Q1', 'Q2', 'Q3', 'Q4', 'Q5'],
+      scoringDimensions: ['decision_quality', 'openclaw_verification_completeness', 'interface_soundness', 'extensibility'],
+      dimensionThreshold: 3,
+      requiredDeliverables: ['architecture_decision', 'openclaw_cross_repo_verification', 'helper_interface_draft', 'shadow_run_plan', 'runtime_direct_subagent_ended_verified', 'surface_degrade_policy'],
+    },
+    producer: 'SUMMARY:\nDone\nARCHITECTURE_DECISION:\nDecided\nINTERFACE_DESIGN:\nDesigned\nCHECKS: ok\nCONTRACT:\n- architecture_decision status: DONE\n- openclaw_cross_repo_verification status: DONE\n- helper_interface_draft status: DONE\n- shadow_run_plan status: DONE\n- runtime_direct_subagent_ended_verified status: DONE\n- surface_degrade_policy status: DONE',
+    reviewerA: 'VERDICT: APPROVE\nBLOCKERS:\n- None.\nFINDINGS:\n- Good\nCHECKS: ok\n**DIMENSIONS**: decision_quality=4; openclaw_verification_completeness=4; interface_soundness=5; extensibility=4',
+    reviewerB: 'VERDICT: APPROVE\nBLOCKERS:\n- None.\nFINDINGS:\n- Good\nCHECKS: ok\n**DIMENSIONS**: decision_quality=4; openclaw_verification_completeness=4; interface_soundness=5; extensibility=4',
+    globalReviewer: [
+      'VERDICT: APPROVE',
+      '## MACRO_ANSWERS',
+      '',
+      '### Q1: Is migration architecturally sound?',
+      '**Yes.** Single transport model verified.',
+      '',
+      '### Q2: Are assumptions verified?',
+      '**Yes.** Cross-repo verification done.',
+      '',
+      '### Q3: Are sidecar boundaries explicit?',
+      '**Yes.** Four boundaries enforced.',
+      '',
+      '### Q4: Is business flow closed?',
+      '**Yes.** State transitions are complete:',
+      '- pending -> active -> completed',
+      '',
+      '### Q5: Does this serve the end goal?',
+      '**Yes.** End goal achieved.',
+      '',
+      '---',
+      '',
+      '## BLOCKERS',
+      '',
+      '**None.**',
+    ].join('\n'),
+    currentRound: 3,
+    maxRoundsPerStage: 3,
+  });
+  assert.equal(result.outcome, 'advance');
+  assert.equal(result.metrics.approvalCount, 3);
+  assert.equal(result.metrics.dimensionFailures.length, 0);
+  assert.equal(result.metrics.contractCheck.allDone, true);
+});

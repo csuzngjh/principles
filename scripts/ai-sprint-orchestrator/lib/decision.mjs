@@ -1,5 +1,5 @@
 const VERDICT_RE = /(?:VERDICT:\s*\*{0,2}|##\s*VERDICT\s*\n+\*{0,2}\s*)(APPROVE|REVISE|BLOCK)\b/i;
-const DIMENSIONS_RE = /^DIMENSIONS:\s*(.+)$/im;
+const DIMENSIONS_RE = /^\*{0,2}DIMENSIONS\*{0,2}:\s*(.+)$/im;
 // Match both "SECTION:" and "## SECTION" markdown heading formats
 // Section terminator matches either "SECTION:" or "## SECTION" (with optional colon)
 const CONTRACT_RE = /(?:##\s*)?CONTRACT:?\s*\n([\s\S]*?)(?=\n(?:##\s+)?[A-Z][A-Z_ ]+:\s|\n##\s+[A-Z]|\n[A-Z][A-Z_ ]+:\s|$)/i;
@@ -146,9 +146,20 @@ export function hasCodeEvidence(text) {
 
 export function extractMacroAnswers(text, requiredQuestions = []) {
   const source = String(text ?? '');
-  const match = source.match(MACRO_ANSWERS_RE);
-  if (!match) return { found: [], satisfied: [], allSatisfied: false };
-  const body = match[1];
+
+  // Step 1: Find MACRO_ANSWERS section header (case-insensitive)
+  const headerMatch = source.match(/(?:##\s*)?MACRO_ANSWERS:?\s*\n/i);
+  if (!headerMatch) return { found: [], satisfied: [], allSatisfied: false };
+
+  const bodyStart = headerMatch.index + headerMatch[0].length;
+  const afterHeader = source.slice(bodyStart);
+
+  // Step 2: Capture until next ## heading (case-sensitive: only ALL-CAPS words are terminators).
+  // Section headings are ## BLOCKERS, ## FINDINGS — always ALL-CAPS after ##.
+  // Regular prose with colons (e.g., "State transitions are complete:") must NOT terminate.
+  const endMatch = afterHeader.match(/\n##\s+[A-Z]{2,}[A-Z_ ]*/);
+  const body = endMatch ? afterHeader.slice(0, endMatch.index) : afterHeader;
+
   const found = [];
   const satisfied = [];
   for (const q of requiredQuestions) {
@@ -200,7 +211,7 @@ export function buildHandoff({ reviewerA, reviewerB, globalReviewer, producer, m
   };
 }
 
-export function buildStageMetrics({ stageCriteria, producer, reviewerA, reviewerB, globalReviewer }) {
+export function buildStageMetrics({ stageCriteria, producer, reviewerA, reviewerB, globalReviewer, reviewerADimensionsFallback, reviewerBDimensionsFallback }) {
   const reviewerAVerdict = normalizeVerdict(reviewerA);
   const reviewerBVerdict = normalizeVerdict(reviewerB);
   const globalReviewerVerdict = globalReviewer ? normalizeVerdict(globalReviewer) : null;
@@ -235,8 +246,11 @@ export function buildStageMetrics({ stageCriteria, producer, reviewerA, reviewer
 
   const scoringDimensions = stageCriteria?.scoringDimensions ?? [];
   const dimensionThreshold = stageCriteria?.dimensionThreshold ?? 3;
-  const reviewerADimensions = parseDimensions(reviewerA);
-  const reviewerBDimensions = parseDimensions(reviewerB);
+  const parsedADims = parseDimensions(reviewerA);
+  const parsedBDims = parseDimensions(reviewerB);
+  // Fallback to reviewer state JSON dimensions when report text parsing returns empty
+  const reviewerADimensions = Object.keys(parsedADims).length > 0 ? parsedADims : (reviewerADimensionsFallback ?? {});
+  const reviewerBDimensions = Object.keys(parsedBDims).length > 0 ? parsedBDims : (reviewerBDimensionsFallback ?? {});
   const dimensionCheckA = checkDimensionThresholds(reviewerADimensions, scoringDimensions, dimensionThreshold);
   const dimensionCheckB = checkDimensionThresholds(reviewerBDimensions, scoringDimensions, dimensionThreshold);
 
@@ -284,11 +298,11 @@ export function buildStageMetrics({ stageCriteria, producer, reviewerA, reviewer
   };
 }
 
-export function decideStage({ stageCriteria, producer, reviewerA, reviewerB, globalReviewer, currentRound, maxRoundsPerStage }) {
+export function decideStage({ stageCriteria, producer, reviewerA, reviewerB, globalReviewer, currentRound, maxRoundsPerStage, reviewerViolations = null, reviewerADimensionsFallback = null, reviewerBDimensionsFallback = null }) {
   const verdictA = normalizeVerdict(reviewerA);
   const verdictB = normalizeVerdict(reviewerB);
   const globalReviewerRequired = stageCriteria?.globalReviewerRequired === true;
-  const metrics = buildStageMetrics({ stageCriteria, producer, reviewerA, reviewerB, globalReviewer });
+  const metrics = buildStageMetrics({ stageCriteria, producer, reviewerA, reviewerB, globalReviewer, reviewerADimensionsFallback, reviewerBDimensionsFallback });
   const blockers = metrics.blockers;
   const producerSectionsSatisfied = Object.values(metrics.producerSectionChecks).every(Boolean);
   const reviewerSectionsSatisfied = Object.values(metrics.reviewerSectionChecks).every(Boolean);
@@ -320,10 +334,15 @@ export function decideStage({ stageCriteria, producer, reviewerA, reviewerB, glo
 
   // Contract completion check: if requiredDeliverables are defined, all contract items must be DONE
   if (metrics.requiredDeliverables.length > 0 && !metrics.contractCheck.allDone) {
-    const incomplete = metrics.contractCheck.incompleteItems
-      .map((item) => `"${item.deliverable}" is ${item.status}`)
-      .join('; ');
-    structuralBlockers.push(`Contract not fulfilled: ${incomplete}`);
+    if (metrics.contractCheck.incompleteItems.length > 0) {
+      const incomplete = metrics.contractCheck.incompleteItems
+        .map((item) => `"${item.deliverable}" is ${item.status}`)
+        .join('; ');
+      structuralBlockers.push(`Contract not fulfilled: ${incomplete}`);
+    } else {
+      // No contract items extracted at all — CONTRACT section missing or unparsable
+      structuralBlockers.push(`Contract not fulfilled: no contract items extracted (required: ${metrics.requiredDeliverables.join(', ')})`);
+    }
   }
 
   // Global reviewer macro answers check
@@ -347,6 +366,13 @@ export function decideStage({ stageCriteria, producer, reviewerA, reviewerB, glo
       structuralBlockers.push(...globalBlockers.map((b) => `[GLOBAL] ${b}`));
     } else {
       structuralBlockers.push('Global reviewer BLOCKED with no specific blockers listed.');
+    }
+  }
+
+  // Protected file violations by reviewers/global_reviewer are structural blockers
+  if (reviewerViolations && reviewerViolations.length > 0) {
+    for (const v of reviewerViolations) {
+      structuralBlockers.push(`${v.role} violated protected file ${v.violatedFile} — report invalidated`);
     }
   }
 
