@@ -1,281 +1,249 @@
 # Codebase Concerns
 
-**Analysis Date:** 2026-03-26
+**Analysis Date:** 2026-04-02
 
 ## Tech Debt
 
-**Large File Complexity:**
-- Issue: Multiple source files exceed 1000 lines, making them difficult to navigate, test, and maintain
-- Files: `packages/openclaw-plugin/src/core/focus-history.ts` (1457 lines), `packages/openclaw-plugin/src/core/trajectory.ts` (1396 lines), `packages/openclaw-plugin/src/hooks/gate.ts` (1015 lines), `packages/openclaw-plugin/src/hooks/prompt.ts` (924 lines), `packages/openclaw-plugin/src/service/control-ui-query-service.ts` (888 lines), `packages/openclaw-plugin/src/service/evolution-worker.ts` (747 lines)
-- Impact: Increased cognitive load for developers, harder to isolate bugs, reduced testability, higher risk of introducing errors when modifying
-- Fix approach: Split large files into smaller modules by responsibility (e.g., extract database operations from trajectory.ts, separate gate logic tiers in gate.ts, split focus-history.ts into distinct functional modules)
+**1. Pervasive `as any` Type Assertions**
+- Issue: 18 occurrences of `as any` across 6 source files, violating the project's own anti-pattern rule ("Never suppress type errors — no `as any`").
+- Files:
+  - `packages/openclaw-plugin/src/hooks/prompt.ts` (line 620: `subagent: api.runtime.subagent as any`)
+  - `packages/openclaw-plugin/src/commands/pain.ts` (line 92: `(ctx as any).sessionId`)
+  - `packages/openclaw-plugin/src/hooks/pain.ts` (lines 53, 117: workspace dir and exitCode casts)
+  - `packages/openclaw-plugin/src/tools/deep-reflect.ts` (lines 307-308: `rawMessages as any`)
+  - `packages/openclaw-plugin/src/core/event-log.ts` (lines 448, 483: event data casts)
+  - `packages/openclaw-plugin/src/service/evolution-worker.ts` (lines 130-150, 936, 983, 996: queue item and candidate data casts)
+- Impact: Type safety is compromised at key integration boundaries; runtime errors may surface only in production.
+- Fix approach: Define proper interfaces for the SDK types being cast (especially `api.runtime.subagent`, hook context extensions, and queue item schemas).
 
-**Type Safety Bypass:**
-- Issue: Widespread use of `as any` type assertions that bypass TypeScript's type checking
-- Files: `packages/openclaw-plugin/src/commands/pain.ts:92`, `packages/openclaw-plugin/src/commands/rollback.ts:18`, `packages/openclaw-plugin/src/core/event-log.ts:453,488`, `packages/openclaw-plugin/src/core/trust-engine.ts:184,313`, `packages/openclaw-plugin/src/hooks/gate.ts:923,947`, `packages/openclaw-plugin/src/hooks/llm.ts:331`, `packages/openclaw-plugin/src/hooks/message-sanitize.ts:29,41`, `packages/openclaw-plugin/src/hooks/pain.ts:52,117`, `packages/openclaw-plugin/src/service/evolution-query-service.ts:397`, `packages/openclaw-plugin/src/service/evolution-worker.ts:549,596,609`, `packages/openclaw-plugin/src/tools/deep-reflect.ts:306,307`, `packages/openclaw-plugin/src/utils/subagent-probe.ts:24`
-- Impact: Runtime errors could go undetected during development, reduced confidence in type safety, harder refactoring
-- Fix approach: Define proper TypeScript interfaces/types for unknown data structures, use type guards instead of assertions, replace `as any` with specific types or unknown followed by validation
+**2. Unbounded In-Memory Event Log in EvolutionReducer**
+- Issue: `EvolutionReducerImpl.memoryEvents` is a plain `[]` array that grows with every event and is never trimmed.
+- Files: `packages/openclaw-plugin/src/core/evolution-reducer.ts` (line 68: `private readonly memoryEvents: EvolutionLoopEvent[] = []`)
+- Impact: For long-running processes, this array grows without bound. Each event contains full data payloads. After weeks of uptime, this could consume significant heap.
+- Fix approach: Apply a cap (e.g., last 1000 events) or switch to a ring buffer. The `getEventLog()` method already returns a copy, so truncation is safe.
 
-**Database Schema Migration:**
-- Issue: Schema versioning is minimal with only SCHEMA_VERSION = 1 and no comprehensive migration strategy
-- Files: `packages/openclaw-plugin/src/core/trajectory.ts:11,1043-1045`
-- Impact: Future schema changes may require manual intervention, potential data loss during upgrades, no automated rollforward/rollback paths
-- Fix approach: Implement proper schema version tracking with migration scripts for each version change, add data migration tests, document schema evolution history
+**3. No Linter or Formatter Configured**
+- Issue: The project relies solely on `tsc` for code quality enforcement. No ESLint, Prettier, or Biome config exists.
+- Files: Missing `.eslintrc*`, `.prettierrc*`, `eslint.config.*`, `biome.json` in `packages/openclaw-plugin/`
+- Impact: Inconsistent formatting, no enforcement of naming conventions, no automatic detection of `as any` or unused imports.
+- Fix approach: Add ESLint with TypeScript strict rules + Prettier. Start with `eslint:recommended` + `@typescript-eslint/strict` and incrementally tighten.
 
-**Lock Timeout Behavior:**
-- Issue: When lock acquisition times out after `LOCK_MAX_RETRIES`, operation fails silently or throws. There's no graceful degradation path.
-- Files: `packages/openclaw-plugin/src/utils/file-lock.ts`
-- Impact: Critical operations (evolution writes, trajectory logging) can fail during concurrent access.
-- Fix approach: Consider implementing a queuing mechanism or dead-letter queue for failed lock operations.
+**4. Deprecated API Still in Use**
+- Issue: `model_id` parameter in `deep-reflect.ts` is deprecated but still accepted.
+- Files: `packages/openclaw-plugin/src/tools/deep-reflect.ts` (line 254: deprecation warning logged but parameter not removed)
+- Impact: Dead code path that adds maintenance burden.
+- Fix approach: Remove the parameter and the deprecation log in a major version bump.
 
-**Event Log Flush Timing:**
-- Issue: EventLog buffers 20 entries OR flushes every 30 seconds. On crash, up to 30 seconds of events may be lost.
-- Files: `packages/openclaw-plugin/src/core/event-log.ts:35-37,215`
-- Impact: Pain signals or evolution events could be lost before being persisted.
-- Fix approach: Consider async flush on process exit signals or more aggressive flushing for critical events.
+**5. CentralDatabase Hardcoded Home Directory Path**
+- Issue: `CentralDatabase` constructor uses `os.homedir()` directly to locate `~/.openclaw/.central/`.
+- Files: `packages/openclaw-plugin/src/service/central-database.ts` (lines 26-27)
+- Impact: No way to override for testing, CI, or custom OpenClaw installations. Breaks if OpenClaw stores data elsewhere.
+- Fix approach: Accept base directory as constructor parameter with `os.homedir()` as default. Use `api.resolvePath()` for consistency.
 
-**Trajectory Database Growth:**
-- Issue: SQLite database grows indefinitely. No archival or cleanup policy visible.
-- Files: `packages/openclaw-plugin/src/core/trajectory.ts`
-- Impact: Over time, trajectory queries may become slow; disk usage increases.
-- Fix approach: Implement retention policy (e.g., archive data older than 90 days).
+## Known Issues
 
-## Known Bugs
+**1. Pre-existing Test Failures (17 tests)**
+- Issue: `.planning/STATE.md` documents "800 passed, 17 failed (pre-existing failures)" from Phase 3B.
+- Files: `.planning/STATE.md` (line 86)
+- Impact: Test regressions may go undetected if the baseline failure count is not tracked.
+- Workaround: Run `cd packages/openclaw-plugin && npm test` and compare failure count against 17.
 
-**None explicitly documented.** Bug comments found (BUGFIX #84, BUGFIX #90) indicate resolved issues, not outstanding bugs.
+**2. TODO: Type Extraction Between Modules**
+- Issue: `bash-risk.ts` has an outstanding TODO to extract shared types from `gate.ts`.
+- Files: `packages/openclaw-plugin/src/hooks/bash-risk.ts` (line 18)
+- Impact: Duplicated or inconsistent type definitions between gate modules.
+- Fix approach: Create a shared types file at `src/hooks/types.ts` or `src/types/gate.ts`.
 
-## Security Considerations
+**3. Gate Hook Bash Mutation Detection is Heuristic**
+- Issue: The bash mutation detection regex in `gate.ts` uses pattern matching that can be bypassed with creative command formatting.
+- Files: `packages/openclaw-plugin/src/hooks/gate.ts` (lines 128-142)
+- Impact: Commands using pipes, subshells, or encoding tricks may evade detection. The zero-width character detection in `bash-risk.ts` is a partial mitigation but not comprehensive.
+- Workaround: None — this is a fundamental limitation of regex-based command analysis.
 
-**Bash Command Parsing Risk:**
-- Risk: Complex regex-based bash command analysis in gate hook could potentially miss edge cases or be bypassed
-- Files: `packages/openclaw-plugin/src/hooks/gate.ts:34-82`
-- Current mitigation: Cyrillic de-obfuscation, command tokenization, fail-closed on invalid regex, comprehensive dangerous/safe pattern lists
-- Recommendations: Add unit tests for known bypass patterns, consider using a dedicated shell parser library instead of regex, regularly audit dangerous command patterns
+## Security
 
-**JSON Parsing Without Validation:**
-- Risk: 87 instances of JSON.parse/stringify without explicit validation could lead to injection or malformed data issues
-- Files: Throughout codebase
-- Current mitigation: TypeScript provides basic type checking, try-catch blocks around parse operations
-- Recommendations: Add schema validation for critical JSON data (config files, user input), implement JSON sanitization for untrusted sources
+**1. Static File Serving Path Traversal (Mitigated)**
+- Risk: HTTP route handler serves static files from disk.
+- Files: `packages/openclaw-plugin/src/http/principles-console-route.ts` (function `safeStaticPath`, lines 59-72)
+- Current mitigation: `path.normalize()` + `path.relative()` check prevents `..` traversal. This is correctly implemented.
+- Recommendations: Add a test specifically for path traversal vectors (e.g., `%2e%2e`, `....//`).
 
-**Gate Hook Complexity:**
-- Risk: 1015-line gate hook contains critical security logic - complexity increases likelihood of security vulnerabilities
-- Files: `packages/openclaw-plugin/src/hooks/gate.ts`
-- Current mitigation: Comprehensive test coverage (gate.test.ts, gfi-gate.test.ts, gate-edit-verification-*.test.ts), fail-closed patterns
-- Recommendations: Consider extracting security-critical logic into smaller, well-tested modules, implement security audit reviews for gate changes, add automated security scanning
+**2. SQLite Database Concurrency**
+- Risk: Multiple `better-sqlite3` databases (trajectory, workflow store, central DB) may encounter concurrent access from the evolution worker's `setInterval` and hook handlers.
+- Files:
+  - `packages/openclaw-plugin/src/core/trajectory.ts` (line 314: WAL mode)
+  - `packages/openclaw-plugin/src/service/subagent-workflow/workflow-store.ts` (line 27: `new Database`)
+  - `packages/openclaw-plugin/src/service/central-database.ts` (line 32: `new Database`)
+- Current mitigation: WAL mode enabled on trajectory DB. File locking via `withLock()` / `withLockAsync()` for state writes. `busy_timeout` set to 5000ms.
+- Recommendations: Workflow store does not appear to set `busy_timeout` — add it. Central database should use the same locking pattern as trajectory.
 
-**Risk Path Protection:**
-- Observation: Stage 1-2 users cannot modify risk paths unless `PLAN.md` has `STATUS: READY`. This is a good guardrail.
-- Files: `packages/openclaw-plugin/src/core/risk-calculator.ts`, `packages/openclaw-plugin/src/core/paths.ts`
-- Potential gap: Risk paths are defined statically; no runtime validation that `PLAN.md` content actually matches the change being attempted.
+**3. Error Message Information Leakage**
+- Risk: Error messages in HTTP routes and gate blocks may reveal internal paths or system state.
+- Files: `packages/openclaw-plugin/src/http/principles-console-route.ts` (line 55: `'invalid_json'` error thrown)
+- Current mitigation: Most error paths return generic messages. The gate block messages are intentionally descriptive for agent consumption.
+- Recommendations: Ensure HTTP error responses never include file system paths or stack traces in production.
 
-**Trust Stage GFI Score Dependency:**
-- Observation: GFI (General Failure Index) score affects gate decisions. If GFI calculation has bias, it could unfairly penalize or reward certain workspaces.
-- Files: `packages/openclaw-plugin/src/core/trust-engine.ts`
-- Current: No visible mechanism to audit or appeal GFI calculations.
+**4. Pain Flag File Race Condition**
+- Risk: The pain hook writes `.pain_flag` files, and the evolution worker reads and deletes them. Between the read and unlink, another hook invocation could write a new flag.
+- Files:
+  - `packages/openclaw-plugin/src/hooks/pain.ts` (writes pain flag)
+  - `packages/openclaw-plugin/src/hooks/subagent.ts` (reads pain flag at lines 73-92)
+  - `packages/openclaw-plugin/src/service/evolution-worker.ts` (processes pain flags)
+- Current mitigation: File locking for queue writes, but the `.pain_flag` file itself is not locked.
+- Recommendations: Use atomic rename (write to temp, rename) for pain flag creation, and use `withLock()` for flag consumption.
 
-**Positive Security Patterns:**
-- No eval or Function constructor usage
-- Fail-closed patterns implemented (invalid regex → block, not allow)
-- Input validation with type guards in many locations
-- File locking for concurrent access protection
+## Performance
 
-## Performance Bottlenecks
+**1. EvolutionReducer Loads Entire Event Stream on Construction**
+- Problem: `loadFromStream()` reads the entire `evolution.jsonl` file into memory and parses every line.
+- Files: `packages/openclaw-plugin/src/core/evolution-reducer.ts` (lines 363-378)
+- Cause: Event sourcing pattern requires full replay to reconstruct state. For workspaces with months of history, this file could be megabytes.
+- Improvement path: Implement snapshot + incremental replay. Periodically write a compact snapshot of current state, then only replay events after the snapshot.
 
-**Large File Loading:**
-- Problem: focus-history.ts (1457 lines) and trajectory.ts (1396 lines) loaded frequently could impact startup time and memory usage
-- Files: `packages/openclaw-plugin/src/core/focus-history.ts`, `packages/openclaw-plugin/src/core/trajectory.ts`
-- Cause: Monolithic modules with many exported functions and classes loaded into memory even when unused
-- Improvement path: Code splitting, lazy loading of non-critical modules, evaluate bundler/tree-shaking effectiveness
+**2. Synchronous File I/O in Hot Paths**
+- Problem: Multiple `fs.readFileSync()`, `fs.readdirSync()`, `fs.statSync()` calls in code that runs on every prompt build or tool call.
+- Files:
+  - `packages/openclaw-plugin/src/hooks/prompt.ts` (lines 327, 512, 635, 691, 702, 715, 755: multiple `readFileSync`)
+  - `packages/openclaw-plugin/src/core/trajectory.ts` (line 1696: `readdirSync` in blob cleanup)
+  - `packages/openclaw-plugin/src/core/evolution-reducer.ts` (line 91: `appendFileSync` on every event)
+- Cause: Plugin runs in Node.js single-threaded environment; synchronous I/O blocks the event loop.
+- Improvement path: Cache frequently-read files (profile, config) with file watchers for invalidation. Batch `appendFileSync` writes like EventLog's buffer pattern (20 entries or 30s flush).
 
-**Complex Parsing Operations:**
-- Problem: Bash command analysis and path normalization in gate.ts executed on every tool call
-- Files: `packages/openclaw-plugin/src/hooks/gate.ts:34-398`
-- Cause: Regex matching, Unicode de-obfuscation, string tokenization performed synchronously on hot path
-- Improvement path: Cache regex compilation results, consider pre-processing known-safe commands, add performance benchmarks to detect regressions
+**3. Blob Cleanup on Every TrajectoryDB Construction**
+- Problem: `pruneUnreferencedBlobs()` scans all blob files and all database rows on every `new TrajectoryDatabase()`.
+- Files: `packages/openclaw-plugin/src/core/trajectory.ts` (line 320, called from constructor)
+- Cause: The singleton pattern (`TrajectoryRegistry.get()`) mitigates repeated construction, but first construction for each workspace runs the full scan.
+- Improvement path: Run blob cleanup on a scheduled basis (e.g., once per day) rather than on construction. Check a timestamp file to decide if cleanup is needed.
 
-**Event Log Buffer Flushing:**
-- Problem: Buffered event writes (20 entries or 30s interval) could lose data on abrupt termination
-- Files: `packages/openclaw-plugin/src/core/event-log.ts:35-37,215`
-- Cause: In-memory event buffer not guaranteed to flush before process exit
-- Improvement path: Implement emergency flush on process exit signals, consider immediate flush for critical events, add data loss metrics
+**4. CentralDatabase Full Workspace Discovery on Construction**
+- Problem: `discoverWorkspaces()` scans the filesystem for all OpenClaw workspace directories on construction.
+- Files: `packages/openclaw-plugin/src/service/central-database.ts` (line 37, called from constructor)
+- Cause: No caching of workspace list; every request to the central DB triggers a fresh scan if the singleton is recreated.
+- Improvement path: Cache workspace list with a TTL (e.g., 5 minutes). Only rescan when TTL expires.
 
-**Evolution Worker Polling Interval:**
-- Current: Polls every 15 minutes for pain queue.
-- Files: `packages/openclaw-plugin/src/service/evolution-worker.ts`
-- Observation: For active users, 15 minutes between evolution cycles could feel slow. For inactive users, it's unnecessary resource usage.
-- Recommendation: Consider adaptive polling (more frequent when pain queue has items, less when empty).
-
-**SQLite in Web UI:**
-- Observation: Each web UI page load queries SQLite. For multiple workspaces with large datasets, this could be slow.
-- Files: `packages/openclaw-plugin/src/core/control-ui-db.ts`, `packages/openclaw-plugin/src/service/control-ui-query-service.ts`
-- Current: No visible caching layer between SQLite and HTTP responses.
-
-**Large `evolution.jsonl` Rebuild:**
-- Observation: On plugin load, `evolution.jsonl` is fully replayed to rebuild in-memory state. With many evolution events, this could cause startup delays.
-- Files: `packages/openclaw-plugin/src/core/evolution-reducer.ts`
-- Recommendation: Consider periodic state snapshots to limit replay length.
+**5. Prompt Hook String Concatenation**
+- Problem: The prompt hook builds large injection strings through repeated `+=` concatenation on `prependContext` and `appendParts`.
+- Files: `packages/openclaw-plugin/src/hooks/prompt.ts` (lines 600-940)
+- Cause: Multiple context layers (identity, trust, evolution, principles, thinking OS, routing guidance, heartbeat, attitude) are all concatenated into the prompt.
+- Improvement path: Use array join pattern (collect parts in array, join once at the end). This is partially done with `appendParts` but `prependContext` still uses `+=`.
 
 ## Fragile Areas
 
-**focus-history.ts:**
-- Files: `packages/openclaw-plugin/src/core/focus-history.ts`
-- Why fragile: 1457-line monolith with multiple responsibilities (file history management, working memory extraction, artifact tracking, compression), many null return paths without clear error propagation (lines 109, 122, 130, 134, 661, 997, 1041), complex regex-based content extraction
-- Safe modification: Extract separate modules for history management, artifact tracking, and compression logic; add comprehensive test coverage for edge cases; implement proper error handling instead of silent null returns
-- Test coverage: Has dedicated test file (focus-history.test.ts) but may not cover all edge cases in large codebase
+**1. Gate Hook — Bash Command Parsing**
+- Files: `packages/openclaw-plugin/src/hooks/gate.ts` (lines 128-142), `packages/openclaw-plugin/src/hooks/bash-risk.ts`
+- Why fragile: Regex-based command analysis (`/(!>|>>|sed\s+-i|rm|mv|mkdir|touch|cp)\s+/...`) can be defeated by:
+  - Command substitution `$(...)` with encoded payloads
+  - Environment variable expansion `${VAR}`
+  - Newline-separated commands
+  - Shell builtins not in the regex
+- Safe modification: Any changes to bash detection must be tested against the full test suite in `tests/hooks/bash-risk.test.ts`. Add new test cases for each bypass vector before modifying the regex.
+- Test coverage: Partial — the STATE.md notes pre-existing test failures that may be in this area.
 
-**gate.ts:**
-- Files: `packages/openclaw-plugin/src/hooks/gate.ts`
-- Why fragile: 1015 lines of critical security logic with multiple nested conditionals, complex bash command parsing, GFI calculation with dynamic thresholds, trust stage multipliers, Chinese/English dual-language error messages
-- Safe modification: Extract bash security analysis into separate module, isolate GFI calculation logic, use state machines for gate flow, add property-based tests for threshold calculations
-- Test coverage: Excellent with 4 dedicated test files (gate.test.ts, gfi-gate.test.ts, gate-edit-verification-p1.test.ts, gate-edit-verification.test.ts)
+**2. EvolutionReducer — Event Stream Corruption**
+- Files: `packages/openclaw-plugin/src/core/evolution-reducer.ts` (lines 363-378)
+- Why fragile: If `evolution.jsonl` gets partially written (process crash during `appendFileSync`), the last line will be malformed. The `loadFromStream()` silently skips malformed lines, which means silently losing events.
+- Safe modification: Add a CRC or length prefix to each event line. Or use a write-ahead log pattern.
+- Test coverage: The malformed line skip is tested, but recovery from partial writes is not.
 
-**evolution-worker.ts:**
-- Files: `packages/openclaw-plugin/src/service/evolution-worker.ts`
-- Why fragile: 747-line background worker with complex pain queue processing, timer management, evolution task orchestration, uses setInterval with manual cleanup
-- Safe modification: Implement explicit state machine for worker lifecycle, add comprehensive error recovery with backoff, improve timer cleanup handling on worker restart
-- Test coverage: Has test coverage but background worker concurrency issues may not be fully covered
+**3. 59 Silent `catch {}` Blocks**
+- Files: Spread across 23 source files (see grep results)
+- Why fragile: Error context is completely lost. When something goes wrong in these code paths, there is no log, no metric, no way to diagnose.
+- Key locations:
+  - `packages/openclaw-plugin/src/core/nocturnal-trinity.ts` (7 bare catches)
+  - `packages/openclaw-plugin/src/commands/nocturnal-train.ts` (6 bare catches)
+  - `packages/openclaw-plugin/src/core/trajectory.ts` (5 bare catches)
+  - `packages/openclaw-plugin/src/core/nocturnal-export.ts` (5 bare catches)
+  - `packages/openclaw-plugin/src/service/evolution-worker.ts` (4 bare catches, including one with comment `/* empty queue if corrupted */`)
+- Safe modification: Add at minimum `logger?.debug?.()` to each catch block. For critical paths (evolution, trajectory), use `logger?.error?.()`.
+- Test coverage: These silent catches hide test failures — errors in tests may be swallowed without failing the test.
 
-**Path Resolution Initialization Order:**
-- Critical: `PathResolver.setExtensionRoot(api.rootDir)` must be called before any service that uses path resolution.
-- Files: `packages/openclaw-plugin/src/index.ts`, `packages/openclaw-plugin/src/core/path-resolver.ts`
-- Risk: If initialization order is disrupted (e.g., by plugin reload), path resolution could fail silently.
-- Current safeguard: `PathResolver` throws if root not set.
+**4. Singleton Cache with No Eviction**
+- Files:
+  - `packages/openclaw-plugin/src/core/workspace-context.ts` (line 17: `static instances = new Map<string, WorkspaceContext>()`)
+  - `packages/openclaw-plugin/src/core/trajectory.ts` (line 1721: `static instances = new Map<string, TrajectoryDatabase>()`)
+  - `packages/openclaw-plugin/src/core/event-log.ts` (line 507: `private static instances: Map<string, EventLog>`)
+- Why fragile: Static Maps hold references to all workspace instances forever. In multi-workspace scenarios (the central DB supports 10+ workspaces), each instance holds SQLite connections, file handles, and cached data. No `dispose()` is called on process exit.
+- Safe modification: Add a `disposeAll()` method called from the plugin's `stop()` lifecycle. Consider LRU eviction for long-running processes.
+- Test coverage: `TrajectoryRegistry.dispose()` and `WorkspaceContext.dispose()` exist but are only called explicitly, never automatically on shutdown.
 
-**Lock Acquisition During Async Operations:**
-- Observation: File locks are synchronous (`withLock`) but some critical sections have async operations inside.
-- Files: `packages/openclaw-plugin/src/utils/file-lock.ts`
-- Risk: If async operations hold the lock too long, other waiters may timeout.
-
-**Multi-Workspace Central Database:**
-- Observation: Central database aggregates from multiple workspaces. If one workspace has corrupted data, it could affect aggregation queries.
-- Files: `packages/openclaw-plugin/src/service/central-database.ts`
-- Current: No visible data validation at sync time.
+**5. Prompt Hook — Multi-Layer Context Injection**
+- Files: `packages/openclaw-plugin/src/hooks/prompt.ts` (889 lines total)
+- Why fragile: 7+ context layers are injected into every prompt, each with its own file reads and conditionals. Any layer failing silently causes degraded behavior that is hard to diagnose. The routing guidance injection (lines 880-940) adds non-authoritative suggestions that may confuse the agent.
+- Safe modification: Each injection layer should be independently toggleable via config. Add telemetry for which layers were actually injected.
+- Test coverage: Integration tests exist for prompt building but may not cover all layer combinations.
 
 ## Scaling Limits
 
-**Trajectory Database:**
-- Current capacity: SQLite with better-sqlite3, WAL mode, 5-second busy timeout
-- Limit: Single-file SQLite database not designed for high-concurrency write scenarios, potential performance degradation as database grows beyond several GB
-- Scaling path: Consider migration to PostgreSQL or MySQL for multi-workspace deployments with heavy write loads, implement database connection pooling, add database sharding by workspace ID
+**Evolution Event Stream Size:**
+- Current capacity: Unbounded file growth. Tested with ~1000 events in practice.
+- Limit: At ~100K+ events, `loadFromStream()` replay time becomes noticeable. Memory usage for `memoryEvents` array grows linearly.
+- Scaling path: Implement periodic compaction — write a snapshot, truncate the stream, start fresh from snapshot.
 
-**Event Log File Size:**
-- Current capacity: JSONL files with 20-entry or 30-second buffering, no explicit rotation or size limits
-- Limit: Unbounded growth could lead to disk space exhaustion, degraded performance on large file reads
-- Scaling path: Implement log rotation (daily or size-based), add log archival/compression for old entries, implement log retention policies
+**SQLite Database Size:**
+- Current capacity: Trajectory DB at `~/.openclaw/workspace/memory/.state/trajectory.db`. No size limits enforced.
+- Limit: SQLite handles multi-GB databases, but blob storage (`trajectory_blobs/`) is unbounded with only lazy orphan cleanup.
+- Scaling path: Add configurable retention policies (e.g., delete sessions older than N days). Implement WAL checkpoint scheduling.
 
 **Central Database Aggregation:**
-- Current capacity: Single SQLite database aggregating 10 workspaces (builder, diagnostician, explorer, hr, main, pm, repair, research, resource-scout, verification)
-- Limit: Single database may become bottleneck with many workspaces and frequent writes
-- Scaling path: Implement per-workspace databases with aggregation query, add database federation layer, consider moving to distributed database for large deployments
-
-**Large `WorkspaceContext` Class:**
-- Observation: `WorkspaceContext` is a central facade with many responsibilities:
-  - Singleton cache management
-  - Lazy service initialization
-  - Path resolution coordination
-- Files: `packages/openclaw-plugin/src/core/workspace-context.ts`
-- Risk: As more services are added, this class could become a "god object."
-- Positive: Well-organized with clear getter methods.
-
-**4-Stage Trust Model Complexity:**
-- Observation: Trust calculation involves:
-  - Base EP score
-  - Success/failure streaks
-  - Cold-start grace period
-  - Stage thresholds
-- Files: `packages/openclaw-plugin/src/core/trust-engine.ts`
-- Risk: Hard to reason about exact EP requirements for stage transitions.
-- Recommendation: Add clear documentation with examples for each stage transition.
-
-**Event Sourcing Schema Evolution:**
-- Observation: Evolution events are append-only, but schema may need to evolve. Current migration approach handles version upgrades.
-- Files: `packages/openclaw-plugin/src/core/evolution-migration.ts`
-- Risk: Schema changes require careful backward compatibility consideration.
+- Current capacity: Supports 10 predefined workspaces.
+- Limit: Full resync on every query — no incremental sync mechanism.
+- Scaling path: Add incremental sync based on timestamps. Only pull new data since last sync.
 
 ## Dependencies at Risk
 
-**better-sqlite3:**
-- Risk: Native dependency requiring compilation, may have compatibility issues with different Node.js versions or operating systems
-- Impact: Could break plugin installation or cause runtime errors
-- Migration plan: Consider alternatives like sql.js (WASM-based) or pg-lite for cross-platform compatibility, maintain fallback detection with helpful error messages
+**better-sqlite3 (native addon):**
+- Risk: Native C++ addon requires compilation. Can fail on alpine Linux, ARM architectures, or when build tools are missing.
+- Impact: Plugin fails to install on these platforms.
+- Migration plan: Consider `sql.js` (WASM-based SQLite) as a fallback for platforms where native compilation fails.
+
+**openclaw (peer dependency):**
+- Risk: Marked as optional peer dependency. Plugin type definitions (`openclaw-sdk.ts`) are maintained locally rather than imported from the package.
+- Impact: API drift between the local SDK types and actual OpenClaw runtime.
+- Migration plan: Import types directly from the `openclaw` package when it publishes stable type definitions.
 
 ## Missing Critical Features
 
-**Automated Schema Migrations:**
-- Problem: No automated migration path for database schema changes, only version checking with simple override
-- Blocks: Safe upgrades between plugin versions without manual intervention
-- Impact: Users could lose data or encounter runtime errors on upgrades
+**Graceful Shutdown:**
+- Problem: No cleanup of singleton instances, SQLite connections, or timer handles on process exit.
+- Impact: Potential data loss if event buffers are not flushed. SQLite WAL files may not be checkpointed.
+- Files: `packages/openclaw-plugin/src/index.ts` (the plugin `stop()` method exists but does not call `WorkspaceContext.dispose()` or `TrajectoryRegistry.clear()`)
 
-**Comprehensive Error Recovery:**
-- Problem: Some silent error handling (try-catch blocks without rethrow or logging) could hide critical failures
-- Blocks: Reliable operation in production environments
-- Impact: Harder to diagnose production issues, potential data corruption
+**Structured Logging:**
+- Problem: Logging is ad-hoc — `logger?.info?.()` with string interpolation. No structured log levels, no log rotation, no structured JSON output.
+- Impact: Hard to debug production issues. No way to filter logs by severity or module.
+- Files: `SystemLogger` at `packages/openclaw-plugin/src/core/system-logger.ts` writes to plain text files.
+
+**Health Check Endpoint:**
+- Problem: No `/health` or `/status` HTTP endpoint for monitoring.
+- Impact: External monitoring tools cannot verify plugin health. The `/pd-status` command exists but requires an agent session.
+- Files: HTTP routes defined in `packages/openclaw-plugin/src/http/principles-console-route.ts`
 
 ## Test Coverage Gaps
 
-**Large Complex Modules:**
-- What's not tested: Edge cases in 1457-line focus-history.ts may not be fully covered, concurrent access scenarios in trajectory.ts, error recovery in evolution-worker.ts
-- Files: `packages/openclaw-plugin/src/core/focus-history.ts`, `packages/openclaw-plugin/src/core/trajectory.ts`, `packages/openclaw-plugin/src/service/evolution-worker.ts`
-- Risk: Bugs in edge cases could slip through to production
-- Priority: Medium (existing test coverage is good but large modules increase risk)
+**Nocturnal Trinity Chain (Phase 6):**
+- What's not tested: End-to-end Trinity chain with real subagent execution (`useStubs=false`). All tests use synchronous stubs.
+- Files: `packages/openclaw-plugin/src/core/nocturnal-trinity.ts` (1384 lines)
+- Risk: Runtime adapter failures or malformed subagent responses may not be caught until production.
+- Priority: High
 
-**Integration Tests:**
-- What's not tested: Full workflow from pain detection to principle generation and application, multi-session state management, database migration scenarios
-- Risk: Integration failures between components could occur in production
-- Priority: Low (component-level tests are comprehensive, add E2E tests as needed)
+**HTTP Route Security:**
+- What's not tested: Path traversal vectors against `safeStaticPath()`, malformed JSON body handling, concurrent request handling.
+- Files: `packages/openclaw-plugin/src/http/principles-console-route.ts`
+- Risk: Security regressions in the web UI.
+- Priority: High
 
-**Notable Strengths:**
-- 72 test files provide excellent coverage across the codebase
-- Comprehensive test coverage for critical security gate (4 dedicated test files)
-- Well-structured test utilities (`tests/test-utils.ts` with `createTestContext()`)
-- Test directory structure mirrors source structure for easy navigation
+**Evolution Worker Edge Cases:**
+- What's not tested: Queue corruption recovery (bare `catch {}` at line 819 with `/* empty queue if corrupted */`), concurrent pain flag writes, max retry exhaustion.
+- Files: `packages/openclaw-plugin/src/service/evolution-worker.ts`
+- Risk: Silent data loss during error conditions.
+- Priority: Medium
 
-## Positive Patterns (Working Well)
-
-**Resource Management:**
-- Proper dispose() patterns implemented across services (event-log, evolution-engine, trajectory, control-ui-db)
-- Timer cleanup with clearTimeout/clearInterval in all timeout/interval usage
-- File locking with withLock() and withLockAsync() for critical state writes
-
-**Error Handling:**
-- Extensive try-catch blocks throughout the codebase
-- Fail-closed security patterns (invalid regex blocks operation rather than allowing)
-- Event logging for tracking errors and debugging
-
-**Code Organization:**
-- Clear directory structure (src/core/, src/hooks/, src/commands/, src/service/)
-- Singleton factory pattern for services (XxxService.get(stateDir))
-- WorkspaceContext facade pattern for dependency injection
-
-**Type Safety:**
-- TypeScript strict mode enabled
-- Well-defined interfaces and types throughout
-- Type guards used for validation in many places
-
-**Security:**
-- No eval or Function constructor usage
-- Input validation for bash commands
-- Fail-closed patterns implemented
-- File locking for concurrent access protection
-
-**Clean Hook Architecture:**
-The hook layer is well-separated:
-- `gate.ts` handles security
-- `pain.ts` handles failure detection
-- `prompt.ts` handles context injection
-
-Each hook has a single responsibility and uses `WorkspaceContext` for all state access.
-
-**Event Sourcing for Evolution:**
-Using append-only `evolution.jsonl` with reducer pattern provides:
-- Complete audit trail
-- Easy debugging
-- Simple migration between versions
-
-**Comprehensive Test Coverage:**
-72 test files with good coverage of core logic. Integration tests verify cross-module interactions.
+**Central Database Sync:**
+- What's not tested: Sync with missing/corrupted workspace databases, race conditions between sync and query.
+- Files: `packages/openclaw-plugin/src/service/central-database.ts`
+- Risk: Incomplete or incorrect data in the aggregated view.
+- Priority: Medium
 
 ---
 
-*Concerns audit: 2026-03-26*
+*Concerns audit: 2026-04-02*
