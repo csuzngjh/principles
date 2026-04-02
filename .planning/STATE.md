@@ -1,5 +1,13 @@
 # State
 
+## 2026-04-02 Milestone v1.1 Started
+
+**Initiative:** WebUI 回路流程增强
+**Status:** Defining requirements → roadmap creation
+**Last activity:** 2026-04-02 — Milestone v1.1 started
+
+---
+
 ## 2026-03-27 Nocturnal Reflection Program
 
 **Initiative:** Sleep-Mode Reflection System
