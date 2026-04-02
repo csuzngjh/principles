@@ -1111,6 +1111,8 @@ function ensureWorktree({ spec, runDir, state, stageName }) {
 
   const baseWorkspace = spec.workspace;
   const baseBranch = spec.branch ?? 'main';
+  const branchName = `sprint/${state.runId.slice(0, 12)}/${stageName}`;
+  const worktreePath = path.join(runDir, 'worktrees', stageName);
   
   // Verify baseRef exists; fallback to 'main' if branch not found
   let baseRef = baseBranch;
@@ -1160,9 +1162,6 @@ function ensureWorktree({ spec, runDir, state, stageName }) {
     appendTimeline(runDir, `Removing invalid worktree directory at ${worktreePath}`);
     try { fs.rmSync(worktreePath, { recursive: true, force: true }); } catch {}
   }
-
-  const branchName = `sprint/${state.runId.slice(0, 12)}/${stageName}`;
-  const worktreePath = path.join(runDir, 'worktrees', stageName);
 
   try {
     ensureDir(path.dirname(worktreePath));
@@ -1420,6 +1419,8 @@ async function executeStage(runDir, state, spec) {
       // Track consecutive timeouts for fuse mechanism
       const isTimeout = agentErr.message?.includes('timed out') || agentErr.message?.includes('ETIMEDOUT');
       if (isTimeout) {
+        // Initialize consecutiveTimeouts if not present (resume from old state)
+        if (!state.consecutiveTimeouts) state.consecutiveTimeouts = {};
         state.consecutiveTimeouts[stageName] = (state.consecutiveTimeouts[stageName] || 0) + 1;
         appendTimeline(runDir, `Producer timeout #${state.consecutiveTimeouts[stageName]} for stage ${stageName}`);
         
@@ -1512,7 +1513,7 @@ async function executeStage(runDir, state, spec) {
     }
     appendTimeline(runDir, `producer completed stage ${stageName} round ${state.currentRound}`);
     // Reset consecutive timeout counter on successful completion
-    if (state.consecutiveTimeouts[stageName]) {
+    if (state.consecutiveTimeouts?.[stageName]) {
       state.consecutiveTimeouts[stageName] = 0;
     }
     // Capture git status after producer completes for reviewers to reference
