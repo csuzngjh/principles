@@ -8,6 +8,13 @@ import type {
   EvolutionEventsResponse,
   EvolutionTraceResponse,
   EvolutionStatsResponse,
+  OverviewHealthResponse,
+  EvolutionPrinciplesResponse,
+  FeedbackGfiResponse,
+  EmpathyEvent,
+  FeedbackGateBlock,
+  GateStatsResponse,
+  GateBlockItem,
 } from './types';
 
 const GATEWAY_TOKEN_KEY = 'pd_gateway_token';
@@ -180,5 +187,30 @@ export const api = {
   getEvolutionStats(days?: number): Promise<EvolutionStatsResponse> {
     const params = days ? `?days=${days}` : '';
     return requestJson(`/plugins/principles/api/evolution/stats${params}`);
+  },
+  // Health & Circuit API (Phase 5)
+  getOverviewHealth(): Promise<OverviewHealthResponse> {
+    return requestJson('/plugins/principles/api/overview/health');
+  },
+  getEvolutionPrinciples(): Promise<EvolutionPrinciplesResponse> {
+    return requestJson('/plugins/principles/api/evolution/principles');
+  },
+  getFeedbackGfi(): Promise<FeedbackGfiResponse> {
+    return requestJson('/plugins/principles/api/feedback/gfi');
+  },
+  getEmpathyEvents(limit?: number): Promise<EmpathyEvent[]> {
+    const params = limit ? `?limit=${limit}` : '';
+    return requestJson(`/plugins/principles/api/feedback/empathy-events${params}`);
+  },
+  getFeedbackGateBlocks(limit?: number): Promise<FeedbackGateBlock[]> {
+    const params = limit ? `?limit=${limit}` : '';
+    return requestJson(`/plugins/principles/api/feedback/gate-blocks${params}`);
+  },
+  getGateStats(): Promise<GateStatsResponse> {
+    return requestJson('/plugins/principles/api/gate/stats');
+  },
+  getGateBlocks(limit?: number): Promise<GateBlockItem[]> {
+    const params = limit ? `?limit=${limit}` : '';
+    return requestJson(`/plugins/principles/api/gate/blocks${params}`);
   },
 };
