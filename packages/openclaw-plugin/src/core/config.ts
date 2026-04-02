@@ -84,6 +84,8 @@ export interface PainSettings {
     deep_reflection?: DeepReflectionSettings;
     empathy_engine?: {
         enabled?: boolean;
+        /** Shadow mode: also run EmpathyObserverWorkflowManager alongside legacy path */
+        helper_empathy_enabled?: boolean;
         dedupe_window_ms?: number;
         penalties?: {
             mild?: number;
