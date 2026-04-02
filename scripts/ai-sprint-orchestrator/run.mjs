@@ -325,6 +325,246 @@ function runAgentAsync({ cwd, agent, model, prompt, timeoutSeconds = 1800, promp
   });
 }
 
+/**
+ * Check if there's progress evidence in the last N seconds.
+ * Progress signals:
+ * 1. Worklog file updated recently
+ * 2. Target directory has file modifications
+ * 3. Stdout has new content (tracked externally)
+ */
+function checkProgressEvidence({ worktreePath, worklogPath, lastStdoutLength, currentStdout, lookbackSeconds = 120 }) {
+  const now = Date.now();
+  const lookbackMs = lookbackSeconds * 1000;
+  const signals = [];
+
+  // Check worklog file mtime
+  if (worklogPath && fileExists(worklogPath)) {
+    try {
+      const stat = fs.statSync(worklogPath);
+      if (now - stat.mtimeMs < lookbackMs) {
+        signals.push({ type: 'worklog_updated', age: Math.round((now - stat.mtimeMs) / 1000) });
+      }
+    } catch {}
+  }
+
+  // Check for new stdout content
+  if (lastStdoutLength !== undefined && currentStdout !== undefined) {
+    if (currentStdout.length > lastStdoutLength) {
+      signals.push({ type: 'stdout_grew', delta: currentStdout.length - lastStdoutLength });
+    }
+  }
+
+  // Check target directory for recent modifications
+  if (worktreePath && fileExists(worktreePath)) {
+    try {
+      const result = spawnSync('git', ['diff', '--name-only', '--since', `${lookbackSeconds}.seconds.ago`], {
+        cwd: worktreePath,
+        encoding: 'utf8',
+        timeout: 10_000,
+      });
+      const changedFiles = (result.stdout ?? '').trim().split('\n').filter(Boolean);
+      if (changedFiles.length > 0) {
+        signals.push({ type: 'files_changed', count: changedFiles.length, files: changedFiles.slice(0, 3) });
+      }
+    } catch {}
+  }
+
+  return {
+    hasProgress: signals.length > 0,
+    signals,
+  };
+}
+
+/**
+ * Async agent runner with progress-based timeout extension.
+ * 
+ * Implements soft/hard timeout model:
+ * - softTimeout: check for progress, extend if evidence found
+ * - hardTimeout: force terminate regardless of progress
+ * - maxExtensions: limit total extensions to prevent infinite loops
+ */
+function runAgentWithProgressCheck({
+  cwd,
+  agent,
+  model,
+  prompt,
+  timeoutSeconds = 1800,
+  promptDir = cwd,
+  runDir = null,
+  roleLabel = agent,
+  worktreePath = null,
+  worklogPath = null,
+  softTimeoutRatio = 0.67,  // soft timeout at 67% of hard timeout
+  extensionSeconds = 300,   // extend by 5 min when progress detected
+  maxExtensions = 2,        // max 2 extensions (total +10 min)
+  progressCheckIntervalSeconds = 60,
+}) {
+  return new Promise((resolve, reject) => {
+    const hardTimeoutSeconds = timeoutSeconds + (extensionSeconds * maxExtensions);
+    const softTimeoutSeconds = Math.floor(timeoutSeconds * softTimeoutRatio);
+    
+    let extensionsUsed = 0;
+    let lastStdoutLength = 0;
+    let lastProgressCheck = Date.now();
+    let settled = false;
+    let proc = null;
+    let stdout = '';
+    let stderr = '';
+
+    const promptFile = path.join(promptDir, `.ai-sprint-prompt-${process.pid}-${crypto.randomUUID()}.txt`);
+
+    const cleanup = () => {
+      try { fs.rmSync(promptFile, { force: true }); } catch {}
+    };
+
+    try {
+      fs.writeFileSync(promptFile, prompt, 'utf8');
+    } catch (writeErr) {
+      reject(new Error(`Failed to write prompt file: ${writeErr.message}`));
+      return;
+    }
+
+    // Hard timeout - absolute maximum
+    const hardTimer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(softTimer);
+        clearTimeout(progressTimer);
+        cleanup();
+        terminateProcessTree(proc?.pid, { runDir, label: roleLabel });
+        reject(new Error(`Agent ${agent} hard timeout after ${hardTimeoutSeconds}s (extended ${extensionsUsed} times)`));
+      }
+    }, hardTimeoutSeconds * 1000);
+
+    // Soft timeout - check progress and maybe extend
+    let softTimer;
+    const setupSoftTimeout = (seconds) => {
+      clearTimeout(softTimer);
+      softTimer = setTimeout(() => {
+        if (settled) return;
+        
+        const progress = checkProgressEvidence({
+          worktreePath,
+          worklogPath,
+          lastStdoutLength,
+          currentStdout: stdout,
+          lookbackSeconds: 120,
+        });
+
+        if (progress.hasProgress && extensionsUsed < maxExtensions) {
+          extensionsUsed++;
+          lastStdoutLength = stdout.length;
+          if (runDir) {
+            appendTimeline(runDir, `Soft timeout: progress detected for ${roleLabel}, extending by ${extensionSeconds}s (${progress.signals.map(s => s.type).join(', ')})`);
+          }
+          setupSoftTimeout(extensionSeconds);
+        } else {
+          // No progress or max extensions reached - this becomes effective timeout
+          // But don't terminate yet - let hard timeout handle it
+          if (runDir && extensionsUsed >= maxExtensions) {
+            appendTimeline(runDir, `Soft timeout: max extensions (${maxExtensions}) reached for ${roleLabel}, waiting for hard timeout`);
+          } else if (runDir) {
+            appendTimeline(runDir, `Soft timeout: no progress detected for ${roleLabel}, waiting for hard timeout`);
+          }
+        }
+      }, seconds * 1000);
+    };
+
+    // Progress monitoring timer
+    let progressTimer;
+    const setupProgressMonitor = () => {
+      clearTimeout(progressTimer);
+      progressTimer = setTimeout(() => {
+        if (settled) return;
+        
+        const progress = checkProgressEvidence({
+          worktreePath,
+          worklogPath,
+          lastStdoutLength,
+          currentStdout: stdout,
+          lookbackSeconds: 60,
+        });
+        
+        if (progress.hasProgress) {
+          lastStdoutLength = stdout.length;
+        }
+        
+        if (!settled) setupProgressMonitor();
+      }, progressCheckIntervalSeconds * 1000);
+    };
+
+    // Spawn the agent process
+    try {
+      if (process.platform === 'win32') {
+        proc = spawn('powershell.exe', [
+          '-NoProfile', '-Command',
+          `acpx --cwd $env:AI_SPRINT_CWD --approve-all --model $env:AI_SPRINT_MODEL --timeout $env:AI_SPRINT_TIMEOUT ${agent} exec -f $env:AI_SPRINT_PROMPT`,
+        ], {
+          cwd,
+          encoding: 'utf8',
+          maxBuffer: 10 * 1024 * 1024,
+          shell: false,
+          env: {
+            ...process.env,
+            AI_SPRINT_CWD: cwd,
+            AI_SPRINT_MODEL: model,
+            AI_SPRINT_TIMEOUT: String(hardTimeoutSeconds),
+            AI_SPRINT_PROMPT: promptFile,
+          },
+        });
+      } else {
+        proc = spawn('acpx', [
+          '--cwd', cwd, '--approve-all', '--model', model,
+          '--timeout', String(hardTimeoutSeconds), agent, 'exec', '-f', promptFile,
+        ], {
+          cwd,
+          encoding: 'utf8',
+          maxBuffer: 10 * 1024 * 1024,
+          shell: false,
+        });
+      }
+    } catch (spawnErr) {
+      settled = true;
+      clearTimeout(hardTimer);
+      clearTimeout(softTimer);
+      clearTimeout(progressTimer);
+      cleanup();
+      reject(new Error(`Failed to spawn agent ${agent}: ${spawnErr.message}`));
+      return;
+    }
+
+    proc.stdout.on('data', (data) => { stdout += data; });
+    proc.stderr.on('data', (data) => { stderr += data; });
+
+    proc.on('exit', (code) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(hardTimer);
+        clearTimeout(softTimer);
+        clearTimeout(progressTimer);
+        resolve({ stdout: stdout.trim(), stderr: stderr.trim(), status: code, extensionsUsed });
+      }
+    });
+
+    proc.on('close', () => { cleanup(); });
+
+    proc.on('error', (err) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(hardTimer);
+        clearTimeout(softTimer);
+        clearTimeout(progressTimer);
+        cleanup();
+        reject(err);
+      }
+    });
+
+    // Start timers
+    setupSoftTimeout(softTimeoutSeconds);
+    setupProgressMonitor();
+  });
+}
+
 function roleConfig(spec, role) {
   if (role === 'producer') return spec.producer;
   if (role === 'reviewer_a') return spec.reviewerA;
@@ -1401,20 +1641,28 @@ async function executeStage(runDir, state, spec) {
     });
     const protectedSnapshot = snapshotProtectedFiles(protectedFiles);
     const producerFailLog = path.join(stageDir, 'producer-failure.log');
+    const producerWorklogPath = paths.producerWorklogPath;
     let producerOutput;
     let producerTimedOut = false;
+    let extensionsUsed = 0;
     try {
-      producerOutput = runAgent({
+      const result = await runAgentWithProgressCheck({
         cwd: producerWorkspace,
         agent: producerConfig.agent,
         model: producerConfig.model,
         prompt: producerPrompt,
         timeoutSeconds: producerTimeoutSeconds,
-        failLogPath: producerFailLog,
         promptDir: runDir,
         runDir,
         roleLabel: 'producer',
+        worktreePath: worktreeInfo?.worktreePath,
+        worklogPath: producerWorklogPath,
       });
+      producerOutput = result.stdout;
+      extensionsUsed = result.extensionsUsed ?? 0;
+      if (extensionsUsed > 0) {
+        appendTimeline(runDir, `Producer used ${extensionsUsed} timeout extensions`);
+      }
     } catch (agentErr) {
       // Track consecutive timeouts for fuse mechanism
       const isTimeout = agentErr.message?.includes('timed out') || agentErr.message?.includes('ETIMEDOUT');
@@ -1452,6 +1700,12 @@ async function executeStage(runDir, state, spec) {
       } else {
         // Reset counter on non-timeout error
         state.consecutiveTimeouts[stageName] = 0;
+      }
+      
+      // Write failure log
+      if (producerFailLog) {
+        ensureDir(path.dirname(producerFailLog));
+        writeText(producerFailLog, `# Agent Failure Log\n\n- agent: ${producerConfig.agent}\n- model: ${producerConfig.model}\n- error: ${agentErr.message ?? String(agentErr)}\n- extensionsUsed: ${extensionsUsed}\n\n`);
       }
       
       if (fileExists(producerReportPath) && fs.readFileSync(producerReportPath, 'utf8').trim()) {
