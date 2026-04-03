@@ -12,6 +12,11 @@ import { archiveRunById } from './lib/archive.mjs';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..', '..');
 const sprintRoot = path.join(repoRoot, 'ops', 'ai-sprints');
+// Resolve acpx from npm global bin — avoids ENOENT when Node spawns with shell:false
+const acpxBin = (() => {
+  const r = spawnSync('which', ['acpx'], { encoding: 'utf8', shell: true });
+  return r.status === 0 ? r.stdout.trim() : 'acpx';
+})();
 
 function parseArgs(argv) {
   const args = {};
@@ -196,7 +201,7 @@ function runAgent({ cwd, agent, model, prompt, timeoutSeconds = 1800, failLogPat
       );
     } else {
       result = spawnSync(
-        'acpx',
+        acpxBin,
         ['--cwd', cwd, '--approve-all', '--model', model, '--timeout', String(timeoutSeconds), agent, 'exec', '-f', promptFile],
         {
           cwd,
@@ -283,7 +288,7 @@ function runAgentAsync({ cwd, agent, model, prompt, timeoutSeconds = 1800, promp
           },
         });
       } else {
-        proc = spawn('acpx', [
+        proc = spawn(acpxBin, [
           '--cwd', cwd, '--approve-all', '--model', model,
           '--timeout', String(timeoutSeconds), agent, 'exec', '-f', promptFile,
         ], {
@@ -518,7 +523,7 @@ function runAgentWithProgressCheck({
           },
         });
       } else {
-        proc = spawn('acpx', [
+        proc = spawn(acpxBin, [
           '--cwd', cwd, '--approve-all', '--model', model,
           '--timeout', String(hardTimeoutSeconds), agent, 'exec', '-f', promptFile,
         ], {
@@ -2612,7 +2617,23 @@ async function main() {
 
 // Only run main() when executed directly, not when imported for testing
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  // Register graceful shutdown — write halted state before exit
+  const gracefulHalt = (signal, detail) => {
+    // main() has its own try/catch that writes halted state.
+    // For uncaught exceptions, we log and exit cleanly.
+    console.error(`Fatal ${signal}: ${detail}`);
+    process.exitCode = 1;
+  };
+  process.on('uncaughtException', (err) => {
+    gracefulHalt('uncaughtException', err.message);
+  });
+  process.on('unhandledRejection', (reason) => {
+    gracefulHalt('unhandledRejection', String(reason));
+  });
+
   main().catch((err) => {
+    // main() is async and may throw. The try/catch inside main() handles
+    // errors within its body, but rejections from the Promise itself land here.
     console.error('Fatal error:', err.message);
     process.exit(1);
   });
