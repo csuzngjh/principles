@@ -331,7 +331,7 @@ input, select {
   font-size: 26px;
   font-weight: 400;
   color: var(--text-primary);
-  margin: var(--space-2) 0 0;
+  margin: 0;
 }
 
 .page-header .meta {

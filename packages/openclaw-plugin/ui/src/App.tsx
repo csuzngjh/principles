@@ -463,8 +463,7 @@ function OverviewPage() {
     <div className="page">
       <header className="page-header">
         <div>
-          <span className="eyebrow">Overview</span>
-          <h2>Workspace health and queue pressure</h2>
+          <h2>工作区健康度</h2>
         </div>
         <div className="meta">
           <TimeRangeSelector value={days} onChange={setDays} />
@@ -645,8 +644,7 @@ function SamplesPage() {
     <div className="page">
       <header className="page-header">
         <div>
-          <span className="eyebrow">Samples</span>
-          <h2>Review correction samples and export-ready training candidates</h2>
+          <h2>样本审核</h2>
         </div>
         <div className="filters">
           <label>
@@ -779,8 +777,7 @@ function ThinkingModelsPage() {
     <div className="page">
       <header className="page-header">
         <div>
-          <span className="eyebrow">Thinking Models</span>
-          <h2>Event-level usage, scenario coverage, and downstream outcomes</h2>
+          <h2>思维模型</h2>
         </div>
         <div className="pill-row">
           <span className="badge">Coverage {formatPercent(data.summary.coverageRate)}</span>
@@ -941,8 +938,7 @@ function EvolutionPage() {
     <div className="page">
       <header className="page-header">
         <div>
-          <span className="eyebrow">Evolution</span>
-          <h2>进化流程追踪 - 从痛点到原则生成</h2>
+          <h2>进化流程追踪</h2>
         </div>
         <div className="meta">
           <TimeRangeSelector value={days} onChange={setDays} />
