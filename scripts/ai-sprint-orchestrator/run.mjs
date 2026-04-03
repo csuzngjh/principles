@@ -223,6 +223,22 @@ function runAgent({ cwd, agent, model, prompt, timeoutSeconds = 1800, failLogPat
           stdio: ['pipe', 'pipe', 'pipe'],
         },
       );
+      // Fallback if resolved path is stale (e.g., npm package updated between module load and spawn)
+      if (result.error && result.error.code === 'ENOENT') {
+        result = spawnSync(
+          'acpx',
+          ['--cwd', cwd, '--approve-all', '--model', model, '--timeout', String(timeoutSeconds), agent, 'exec', '-f', promptFile],
+          {
+            cwd,
+            encoding: 'utf8',
+            maxBuffer: 10 * 1024 * 1024,
+            timeout: (timeoutSeconds + 60) * 1000,
+            shell: false,
+            detached: true,
+            stdio: ['pipe', 'pipe', 'pipe'],
+          },
+        );
+      }
     }
   } finally {
     fs.rmSync(promptFile, { force: true });
@@ -300,17 +316,36 @@ function runAgentAsync({ cwd, agent, model, prompt, timeoutSeconds = 1800, promp
           },
         });
       } else {
-        proc = spawn(acpxBin, [
-          '--cwd', cwd, '--approve-all', '--model', model,
-          '--timeout', String(timeoutSeconds), agent, 'exec', '-f', promptFile,
-        ], {
-          cwd,
-          encoding: 'utf8',
-          maxBuffer: 10 * 1024 * 1024,
-          shell: false,
-          detached: true,
-          stdio: ['pipe', 'pipe', 'pipe'],
-        });
+        try {
+          proc = spawn(acpxBin, [
+            '--cwd', cwd, '--approve-all', '--model', model,
+            '--timeout', String(timeoutSeconds), agent, 'exec', '-f', promptFile,
+          ], {
+            cwd,
+            encoding: 'utf8',
+            maxBuffer: 10 * 1024 * 1024,
+            shell: false,
+            detached: true,
+            stdio: ['pipe', 'pipe', 'pipe'],
+          });
+        } catch (enoentErr) {
+          // Fallback if resolved path is stale
+          if (enoentErr.code === 'ENOENT') {
+            proc = spawn('acpx', [
+              '--cwd', cwd, '--approve-all', '--model', model,
+              '--timeout', String(timeoutSeconds), agent, 'exec', '-f', promptFile,
+            ], {
+              cwd,
+              encoding: 'utf8',
+              maxBuffer: 10 * 1024 * 1024,
+              shell: false,
+              detached: true,
+              stdio: ['pipe', 'pipe', 'pipe'],
+            });
+          } else {
+            throw enoentErr;
+          }
+        }
       }
       if (proc?.pid && onSpawn) onSpawn(proc.pid);
     } catch (spawnErr) {
@@ -537,17 +572,35 @@ function runAgentWithProgressCheck({
           },
         });
       } else {
-        proc = spawn(acpxBin, [
-          '--cwd', cwd, '--approve-all', '--model', model,
-          '--timeout', String(hardTimeoutSeconds), agent, 'exec', '-f', promptFile,
-        ], {
-          cwd,
-          encoding: 'utf8',
-          maxBuffer: 10 * 1024 * 1024,
-          shell: false,
-          detached: true,
-          stdio: ['pipe', 'pipe', 'pipe'],
-        });
+        try {
+          proc = spawn(acpxBin, [
+            '--cwd', cwd, '--approve-all', '--model', model,
+            '--timeout', String(hardTimeoutSeconds), agent, 'exec', '-f', promptFile,
+          ], {
+            cwd,
+            encoding: 'utf8',
+            maxBuffer: 10 * 1024 * 1024,
+            shell: false,
+            detached: true,
+            stdio: ['pipe', 'pipe', 'pipe'],
+          });
+        } catch (enoentErr) {
+          if (enoentErr.code === 'ENOENT') {
+            proc = spawn('acpx', [
+              '--cwd', cwd, '--approve-all', '--model', model,
+              '--timeout', String(hardTimeoutSeconds), agent, 'exec', '-f', promptFile,
+            ], {
+              cwd,
+              encoding: 'utf8',
+              maxBuffer: 10 * 1024 * 1024,
+              shell: false,
+              detached: true,
+              stdio: ['pipe', 'pipe', 'pipe'],
+            });
+          } else {
+            throw enoentErr;
+          }
+        }
       }
     } catch (spawnErr) {
       settled = true;
