@@ -130,7 +130,9 @@ export class EvolutionLogger {
           createdAt: entry.timestamp,
         });
       } catch (err) {
-        // 数据库写入失败不影响主流程
+        // Database write failure doesn't affect main flow, but log for diagnostics
+        // eslint-disable-next-line no-console
+        console.error(`[EvolutionLogger] Failed to write to trajectory: ${String(err)}`);
       }
     }
   }

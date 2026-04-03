@@ -56,7 +56,8 @@ export interface WorkingMemorySnapshot {
 function logError(message: string, error?: unknown): void {
   const timestamp = new Date().toISOString();
   const errorStr = error instanceof Error ? error.message : String(error);
-  // Error logging without console
+  // eslint-disable-next-line no-console
+  console.error(`[focus-history] ${timestamp} ERROR: ${message}${errorStr ? ' - ' + errorStr : ''}`);
 }
 
 /** 历史版本保留数量 */

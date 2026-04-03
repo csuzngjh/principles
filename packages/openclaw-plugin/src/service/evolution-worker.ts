@@ -955,7 +955,9 @@ export async function trackPainCandidate(text: string, wctx: WorkspaceContext) {
             try {
                 data = JSON.parse(fs.readFileSync(candidatePath, 'utf8'));
             } catch (e) {
-                // Keep going with empty data if parse fails
+                // Keep going with empty data if parse fails, but log it
+                // eslint-disable-next-line no-console
+                console.warn(`[PD:EvolutionWorker] Failed to parse pain candidates: ${String(e)}`);
             }
         }
 

@@ -336,7 +336,9 @@ export function loadContextInjectionConfig(workspaceDir: string): ContextInjecti
       }
     }
   } catch (e) {
-    // Failed to load config — continue with defaults
+    // Failed to load config — continue with defaults, but log for diagnostics
+    // eslint-disable-next-line no-console
+    console.warn(`[PD:Prompt] Failed to load contextInjection config: ${String(e)}`);
   }
   
   return { ...defaultContextConfig };
