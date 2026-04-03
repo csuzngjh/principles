@@ -24,6 +24,67 @@ import { listSessions } from '../core/session-tracker.js';
 import { withLockAsync } from '../utils/file-lock.js';
 
 // ---------------------------------------------------------------------------
+// Session Key Parsing (replicated from openclaw/src/sessions/session-key-utils.ts)
+// ---------------------------------------------------------------------------
+
+/** Parse an agent-scoped session key. Returns null for non-agent keys. */
+function parseAgentSessionKey(sessionKey: string): { agentId: string; rest: string } | null {
+    const raw = (sessionKey ?? '').trim().toLowerCase();
+    if (!raw) return null;
+    const parts = raw.split(':').filter(Boolean);
+    if (parts.length < 3 || parts[0] !== 'agent') return null;
+    const agentId = parts[1]?.trim();
+    const rest = parts.slice(2).join(':');
+    if (!agentId || !rest) return null;
+    return { agentId, rest };
+}
+
+/**
+ * Returns true if the session was created by a system process (cron, boot, probe, subagent, acp).
+ * Uses OpenClaw's native session key patterns to avoid false positives.
+ *
+ * System patterns:
+ * - boot- prefix: boot sessions (e.g. boot-2026-04-02_10-43-45)
+ * - probe- prefix: probe sessions (e.g. probe-glm-4.9-xxx)
+ * - cron:<...> rest: cron run sessions (agent:<id>:cron:...)
+ * - subagent: prefix: subagent sessions
+ * - acp: prefix: acp sessions
+ *
+ * Excluded (NOT system sessions):
+ * - User sessions like agent:main:feishu:user:xxx — third component is channel type, NOT cron/subagent/acp
+ */
+function isSystemSession(sessionId: string): boolean {
+    const raw = (sessionId ?? '').trim();
+    if (!raw) return false;
+
+    // Pattern 1: boot- prefix (boot sessions have UUID-like IDs with boot- prefix)
+    if (raw.startsWith('boot-')) return true;
+
+    // Pattern 2: probe- prefix (probe sessions from list.probe.ts)
+    if (raw.startsWith('probe-')) return true;
+
+    // Parse as agent-scoped key for the remaining patterns
+    const parsed = parseAgentSessionKey(raw);
+    if (!parsed) return false;
+
+    const { agentId, rest } = parsed;
+
+    // Pattern 3: cron run sessions (agent:<id>:cron:<jobId>:run:<runId>)
+    if (/^cron:[^:]+:run:[^:]+$/.test(rest)) return true;
+
+    // Pattern 4: cron prefix (any session whose rest starts with cron:)
+    if (rest.toLowerCase().startsWith('cron:')) return true;
+
+    // Pattern 5: subagent sessions
+    if (rest.toLowerCase().startsWith('subagent:')) return true;
+
+    // Pattern 6: acp sessions
+    if (rest.toLowerCase().startsWith('acp:')) return true;
+
+    return false;
+}
+
+// ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
@@ -237,6 +298,9 @@ export function checkWorkspaceIdle(
     let userActiveSessions = 0;
 
     for (const session of sessions) {
+        // Skip system sessions (cron, boot, probe, subagent, acp) from idle determination
+        if (isSystemSession(session.sessionId)) continue;
+
         const inactiveFor = now - session.lastActivityAt;
         if (inactiveFor > abandonedThresholdMs) {
             abandonedSessions.push(session.sessionId);
