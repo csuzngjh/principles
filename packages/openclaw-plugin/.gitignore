@@ -10,6 +10,16 @@ coverage-report.json
 !esbuild.config.js
 *.d.ts
 
+# 历史遗留编译产物目录（已清理，防止再次生成）
+/core/
+/commands/
+/hooks/
+/types/
+/utils/
+/service/
+/http/
+/i18n/
+
 # 打包文件
 *.tgz
 

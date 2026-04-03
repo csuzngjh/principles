@@ -98,8 +98,8 @@ function tryAcquireLock(lockPath: string, pid: number): boolean {
     fs.closeSync(fd);
     
     return true;
-  } catch (err: any) {
-    if (err.code === 'EEXIST') {
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
       return false;  // 锁已被占用
     }
     // 其他错误（权限、磁盘满等）向上抛出

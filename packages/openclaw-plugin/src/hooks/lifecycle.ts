@@ -40,7 +40,7 @@ export async function handleBeforeReset(
     try {
       fs.appendFileSync(memoryPath, summary, 'utf8');
     } catch (_e) {
-      console.error(`[PD:Lifecycle] Failed to write session reset summary: ${String(_e)}`);
+      ctx.logger?.error?.(`[PD:Lifecycle] Failed to write session reset summary: ${String(_e)}`);
     }
   }
 }
@@ -116,7 +116,7 @@ export async function extractPainFromSessionFile(sessionFile: string, ctx: Plugi
           painPoints.push(`[SEMANTIC CONFUSION] ${text.substring(0, 150)}...`);
         }
       } catch (e) {
-        console.error(`[PD:Lifecycle] Error parsing message: ${String(e)}`);
+        ctx.logger?.error?.(`[PD:Lifecycle] Error parsing message: ${String(e)}`);
       }
     }
   } finally {
@@ -164,7 +164,7 @@ export async function extractPainFromSessionFile(sessionFile: string, ctx: Plugi
         });
       }
     } catch (err) {
-      console.error(`[PD:Lifecycle] Failed to write pain signals: ${String(err)}`);
+      ctx.logger?.error?.(`[PD:Lifecycle] Failed to write pain signals: ${String(err)}`);
     }
   }
 }
@@ -188,7 +188,7 @@ export async function handleBeforeCompaction(
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.appendFileSync(checkpointPath, log, 'utf8');
   } catch (_e) {
-    console.error(`[PD:Lifecycle] Failed to write pre-compaction checkpoint: ${String(_e)}`);
+    ctx.logger?.error?.(`[PD:Lifecycle] Failed to write pre-compaction checkpoint: ${String(_e)}`);
   }
 
   // 提取工作记忆（从 sessionFile）
@@ -292,7 +292,7 @@ async function extractAndSaveWorkingMemory(
         `${snapshot.nextActions.length} next actions to CURRENT_FOCUS.md`);
     }
   } catch (err) {
-    console.error(`[PD:Lifecycle] Failed to save working memory: ${String(err)}`);
+    ctx.logger?.error?.(`[PD:Lifecycle] Failed to save working memory: ${String(err)}`);
     
     // 尝试恢复备份
     const backupPath = `${focusPath}.wm-backup`;
@@ -321,6 +321,6 @@ export async function handleAfterCompaction(
   try {
     fs.appendFileSync(checkpointPath, log, 'utf8');
   } catch (_e) {
-    console.error(`[PD:Lifecycle] Failed to write post-compaction checkpoint: ${String(_e)}`);
+    ctx.logger?.error?.(`[PD:Lifecycle] Failed to write post-compaction checkpoint: ${String(_e)}`);
   }
 }

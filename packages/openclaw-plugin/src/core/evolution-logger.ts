@@ -131,7 +131,6 @@ export class EvolutionLogger {
         });
       } catch (err) {
         // 数据库写入失败不影响主流程
-        console.error(`[EvolutionLogger] Failed to write to trajectory: ${String(err)}`);
       }
     }
   }
