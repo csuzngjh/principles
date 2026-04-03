@@ -680,19 +680,19 @@ select:focus {
 
 .timeline-item {
   position: relative;
-  padding: var(--space-3) 0;
+  padding: var(--space-3) 0 var(--space-3) 28px;
   display: grid;
   gap: var(--space-1);
 }
 
 .timeline-marker {
   position: absolute;
-  left: -24px;
+  left: 0;
   top: 16px;
-  width: 24px;
-  height: 24px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
-  border: 4px solid white;
+  border: 3px solid white;
   box-shadow: var(--shadow-sm);
   z-index: 1;
 }
