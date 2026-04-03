@@ -112,8 +112,8 @@ export class WorkspaceContext {
      */
     static fromHookContext(ctx: any): WorkspaceContext {
         const logger = ctx.logger;
-        const log = (msg: string) => logger?.info?.(msg) ?? console.log(msg);
-        const logWarn = (msg: string) => logger?.warn?.(msg) ?? console.warn(msg);
+        const log = (msg: string) => logger?.info?.(msg);
+        const logWarn = (msg: string) => logger?.warn?.(msg);
 
         let workspaceDir = ctx.workspaceDir;
         

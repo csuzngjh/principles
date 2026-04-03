@@ -53,8 +53,8 @@ export function recordGateBlockAndReturn(
   const { filePath, reason, toolName, sessionId, blockSource } = blockCtx;
 
   // Default logger if not provided
-  const logWarn = logger.warn?.bind(logger) ?? ((msg: string) => console.warn(msg));
-  const logError = logger.error?.bind(logger) ?? ((msg: string) => console.error(msg));
+  const logWarn = (msg: string) => logger.warn?.(msg);
+  const logError = (msg: string) => logger.error?.(msg);
 
   // Log the block event
   const sourceTag = blockSource ? `[${blockSource}]` : '';

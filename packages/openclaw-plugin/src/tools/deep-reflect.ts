@@ -134,7 +134,7 @@ function safeLog(
             api.logger[level](message);
         }
     } catch (e) {
-        console.error(`[PD:DeepReflect] Logging failed: ${String(e)}`);
+        safeLog(api, 'error', `[PD:DeepReflect] Logging failed: ${String(e)}`);
     }
 }
 

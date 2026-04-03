@@ -3,16 +3,16 @@
 ## Project Reference
 
 **Core Value:** 自演化 AI 代理通过痛点信号学习并通过显式原则表达实现自我改进。
-**Current Milestone:** v1.1 WebUI 回路流程增强 ✅ Shipped (PR #146)
-**Current Focus:** 无活动里程碑 — PR #146 待 review/merge
+**Current Milestone:** v1.2 代码质量提升 ✅ ALL PHASES COMPLETE
+**Current Focus:** 等待 review/merge
 
 ---
 
 ## Current Position
 
-**Phase:** v1.1 complete (Phases 4-6)
-**Plan:** —
-**Status:** All 3 phases implemented, build verified
+**Phase:** v1.2 Complete
+**Plan:** All 4 phases executed
+**Status:** v1.2 milestone complete — 6/6 requirements met
 **Progress:** ██████████ 100%
 
 ---
@@ -21,8 +21,8 @@
 
 | Metric | Value |
 |--------|-------|
-| Phases completed (v1.1) | 3/3 |
-| Requirements completed | 24/24 |
+| Phases completed (v1.2) | 4/4 |
+| Requirements completed | 6/6 |
 | Tests status | 800 passed, 17 pre-existing failures |
 
 ---
@@ -40,6 +40,10 @@
 | **Phase 4 (v1.1)** | **✅ Complete** | **100%** |
 | Phase 5 (v1.1) | ✅ Complete | 100% |
 | Phase 6 (v1.1) | ✅ Complete | 100% |
+| **Phase 7 (v1.2)** | **✅ Complete** | **100%** |
+| **Phase 8 (v1.2)** | **✅ Complete** | **100%** |
+| **Phase 9 (v1.2)** | **✅ Complete** | **100%** |
+| **Phase 10 (v1.2)** | **✅ Complete** | **100%** |
 
 ---
 
@@ -50,6 +54,8 @@
 - 夜间训练纳入增强回路（自然延伸，非独立回路）
 - 本里程碑仅做可视化，不改后端训练管线
 - Phase 5 和 Phase 6 共享 Phase 4 的 API 基础，但互相独立
+- v1.2 聚焦 Quick Wins，不做大重构
+- 编译产物统一输出到 `dist/`，`core/` 目录废弃
 
 ### Todos
 - [x] 计划 Phase 4 (Backend API Layer)

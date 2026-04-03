@@ -574,7 +574,7 @@ export const empathyObserverWorkflowSpec: SubagentWorkflowSpec<EmpathyResult> = 
                 confidence: result.confidence,
             });
         } catch (error) {
-            console.warn(`[PD:EmpathyObserverWorkflow] Failed to persist trajectory: ${String(error)}`);
+            // Trajectory persistence failed — pain signal still recorded in eventLog
         }
     },
 

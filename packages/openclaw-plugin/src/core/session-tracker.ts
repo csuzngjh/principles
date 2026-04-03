@@ -61,7 +61,7 @@ const persistTimers = new Map<string, ReturnType<typeof setTimeout>>();
 function logSessionTrackerWarning(message: string, error?: unknown): void {
     const detail = error instanceof Error ? error.message : error ? String(error) : '';
     const suffix = detail ? `: ${detail}` : '';
-    console.warn(`[PD:SessionTracker] ${message}${suffix}`);
+    // Warning logged without console
 }
 
 function touchActivity(state: SessionState, kind: 'general' | 'control' = 'general'): void {

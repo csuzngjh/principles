@@ -339,7 +339,7 @@ export function loadContextInjectionConfig(workspaceDir: string): ContextInjecti
       }
     }
   } catch (e) {
-    console.warn(`[PD:Prompt] Failed to load contextInjection config: ${String(e)}`);
+    // Failed to load config — continue with defaults
   }
   
   return { ...defaultContextConfig };

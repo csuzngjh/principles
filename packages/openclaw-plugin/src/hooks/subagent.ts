@@ -91,8 +91,8 @@ function cleanupPainFlagForTask(wctx: WorkspaceContext, completedTaskId: string,
         if (!hasRemainingActiveTasks) {
             fs.unlinkSync(painFlagPath);
         }
-    } catch (e: any) {
-        if (e.code === 'ENOENT') return; // File doesn't exist, nothing to clean up
+    } catch (e: unknown) {
+        if ((e as NodeJS.ErrnoException).code === 'ENOENT') return; // File doesn't exist, nothing to clean up
         logger.error(`[PD:Subagent] Failed to cleanup pain flag: ${String(e)}`);
     }
 }

@@ -8,21 +8,23 @@ AI agent self-evolution framework as an OpenClaw plugin. Drives AI agent self-im
 
 Self-evolving AI agents that learn from pain signals and improve through explicit principle articulation.
 
-## Current Milestone: v1.1 WebUI 回路流程增强
+## Current Milestone: v1.2 代码质量提升
 
-**Goal:** 将 WebUI 从"功能视角"重构为"流程视角"，按回路组织页面，直观展示增强回路、反馈回路和 Gate 系统的完整流程。
+**Goal:** 系统性清理技术债务，建立自动化质量门禁，提升代码可维护性和类型安全性。
 
-**Target features:**
-- 📊 系统概览增强 — GFI/PainFlag/Trust/EP 健康度卡片 + Mini 流程图
-- 🔄 增强回路页面 — 完整"痛点→内化"链路（含夜间训练延伸）
-- 📡 反馈回路页面 — GFI 仪表盘 + 同理心检测 + Gate 拦截关联
-- 🔐 Gate 监控页面 — 拦截统计 + Trust & EP 双轨仪表盘
+**Target improvements:**
+- 🔧 修复编译产物路径混乱 — 清理 `core/` 目录中的编译产物
+- 🛡️ 消除 `any` 类型滥用 — 生产代码从 160+ 处降至 <80 处
+- 📝 统一日志系统 — 替换 84 处 `console.log` 为 `plugin-logger`
+- 🚪 添加 ESLint 质量门禁 — 自动化代码审查
+- 🪤 修复空 catch 块 — 消除静默错误吞噬
+- 📦 测试质量提升 — 减少 600+ 处 `as any` mock
 
 ## Current State
 
-**Version:** v1.0-alpha (shipped 2026-03-26)
-**Milestone:** Control Plane Cleanup → v1.1 WebUI 回路流程增强
-**Focus:** Phase 3 shadow capability work → WebUI 回路可视化
+**Version:** v1.1 (shipped 2026-04-02)
+**Milestone:** v1.1 WebUI 回路流程增强 ✅ → v1.2 代码质量提升
+**Focus:** 技术债清理 + 质量门禁建立
 
 ## Phase 3 Foundation (v1.0-alpha)
 
@@ -46,9 +48,7 @@ Completed foundational control plane architecture:
 
 ### Active
 
-- [ ] v1.1: WebUI 回路流程增强 — 按回路组织页面，覆盖增强/反馈/Gate 完整链路
-- [ ] Phase 4: Shadow capability enablement
-- [ ] Phase 5: Trust stage visualization
+- [ ] v1.2: 代码质量提升 — 技术债清理 + 质量门禁建立
 
 ### Out of Scope
 
