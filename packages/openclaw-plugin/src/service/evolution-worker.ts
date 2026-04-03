@@ -253,7 +253,7 @@ function isPendingPainCandidate(status: string | undefined): boolean {
     return status === undefined || status === 'pending';
 }
 
-export async function acquireQueueLock(resourcePath: string, logger: PluginLogger, lockSuffix: string = EVOLUTION_QUEUE_LOCK_SUFFIX): Promise<() => void> {
+export async function acquireQueueLock(resourcePath: string, logger: PluginLogger | { warn?: (message: string) => void; info?: (message: string) => void } | undefined, lockSuffix: string = EVOLUTION_QUEUE_LOCK_SUFFIX): Promise<() => void> {
     try {
         const ctx: LockContext = await acquireLockAsync(resourcePath, {
             lockSuffix,
@@ -263,14 +263,15 @@ export async function acquireQueueLock(resourcePath: string, logger: PluginLogge
         });
         return () => releaseLock(ctx);
     } catch (error: unknown) {
-        logger?.warn?.(`[PD:EvolutionWorker] Failed to acquire lock for ${resourcePath}: ${String(error)}`);
+        const warn = logger?.warn;
+        warn?.(`[PD:EvolutionWorker] Failed to acquire lock for ${resourcePath}: ${String(error)}`);
         throw error;
     }
 }
 
 async function requireQueueLock(resourcePath: string, logger: PluginLogger | { warn?: (message: string) => void; info?: (message: string) => void } | undefined, scope: string, lockSuffix: string = EVOLUTION_QUEUE_LOCK_SUFFIX): Promise<() => void> {
     try {
-        return await acquireQueueLock(resourcePath, logger as PluginLogger, lockSuffix);
+        return await acquireQueueLock(resourcePath, logger, lockSuffix);
     } catch (err) {
         throw new LockUnavailableError(resourcePath, scope, { cause: err });
     }
