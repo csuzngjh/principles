@@ -363,7 +363,7 @@ function WorkspaceConfig() {
   };
 
   if (error) return <div className="panel error">{error}</div>;
-  if (!wsData) return <div className="panel muted">Loading workspaces...</div>;
+  if (!wsData) return <Loading />;
 
   return (
     <CollapsiblePanel
