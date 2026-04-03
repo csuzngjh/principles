@@ -491,7 +491,7 @@ interface GroupedBarChartProps {
 export function GroupedBarChart({
   data,
   colors = ['var(--accent)', 'var(--earth-tan)'],
-  width = 200,
+  width = 280,
   height = 60,
   barWidth = 4,
   groupGap = 8,
@@ -510,9 +510,10 @@ export function GroupedBarChart({
   return (
     <svg
       className="grouped-bar-chart"
-      width={width}
+      width="100%"
       height={height}
       viewBox={`0 0 ${width} ${height}`}
+      preserveAspectRatio="xMidYMid meet"
     >
       {data.map((group, groupIndex) => {
         const groupX = startX + groupIndex * (groupWidth + groupGap);
