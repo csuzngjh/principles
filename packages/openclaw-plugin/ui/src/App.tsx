@@ -179,7 +179,7 @@ function LoginPage() {
                 {t('auth.validatingButton')}
               </>
             ) : (
-              '{t('auth.loginButton')}'
+              t('auth.loginButton')
             )}
           </button>
         </form>
@@ -262,13 +262,13 @@ function Shell({ children }: { children: React.ReactNode }) {
             <span className="nav-icon">
               <Radio strokeWidth={1.75} />
             </span>
-            <span>反馈回路</span>
+            <span>{t('nav.feedback')}</span>
           </NavLink>
           <NavLink to="/gate" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
             <span className="nav-icon">
               <Lock strokeWidth={1.75} />
             </span>
-            <span>Gate 监控</span>
+            <span>{t('nav.gateMonitor')}</span>
           </NavLink>
         </nav>
         <div className="sidebar-footer">
@@ -516,34 +516,34 @@ function OverviewPage() {
       {health && (
         <section className="kpi-grid" style={{ marginBottom: 'var(--space-5)' }}>
           <article className="panel kpi" style={{ borderLeft: `3px solid ${health.gfi.current >= health.gfi.threshold ? 'var(--error)' : 'var(--success)'}` }}>
-            <span className="label"><svg width="10" height="10" viewBox="0 0 10 10" style={{marginRight: '6px', verticalAlign: 'middle'}}><circle cx="5" cy="5" r="5" fill={health.gfi.current >= health.gfi.threshold ? 'var(--error)' : 'var(--success)'}/></svg>GFI 疲劳指数</span>
+            <span className="label"><svg width="10" height="10" viewBox="0 0 10 10" style={{marginRight: '6px', verticalAlign: 'middle'}}><circle cx="5" cy="5" r="5" fill={health.gfi.current >= health.gfi.threshold ? 'var(--error)' : 'var(--success)'}/></svg>{t('overview.health.gfi')}</span>
             <span className="value">{health.gfi.current}</span>
-            <span>阈值: {health.gfi.threshold} | 今日峰值: {health.gfi.peakToday}</span>
+            <span>{t('overview.health.threshold')}: {health.gfi.threshold} | {t('overview.health.peakToday')}: {health.gfi.peakToday}</span>
           </article>
           <article className="panel kpi" style={{ borderLeft: `3px solid ${health.painFlag.active ? 'var(--warning)' : 'var(--success)'}` }}>
-            <span className="label"><svg width="10" height="10" viewBox="0 0 10 10" style={{marginRight: '6px', verticalAlign: 'middle'}}><circle cx="5" cy="5" r="5" fill={health.painFlag.active ? 'var(--warning)' : 'var(--success)'}/></svg>PainFlag</span>
-            <span className="value">{health.painFlag.active ? '活跃' : '正常'}</span>
-            <span>{health.painFlag.source ? `来源: ${health.painFlag.source}` : '无活跃痛点'}</span>
+            <span className="label"><svg width="10" height="10" viewBox="0 0 10 10" style={{marginRight: '6px', verticalAlign: 'middle'}}><circle cx="5" cy="5" r="5" fill={health.painFlag.active ? 'var(--warning)' : 'var(--success)'}/></svg>{t('overview.health.painFlag')}</span>
+            <span className="value">{health.painFlag.active ? t('overview.health.active') : t('overview.health.normal')}</span>
+            <span>{health.painFlag.source ? `${t('overview.health.source')}: ${health.painFlag.source}` : t('overview.health.noActivePain')}</span>
           </article>
           <article className="panel kpi" style={{ borderLeft: '3px solid var(--info)' }}>
-            <span className="label"><svg width="10" height="10" viewBox="0 0 10 10" style={{marginRight: '6px', verticalAlign: 'middle'}}><circle cx="5" cy="5" r="5" fill="var(--info)"/></svg>Trust Stage</span>
+            <span className="label"><svg width="10" height="10" viewBox="0 0 10 10" style={{marginRight: '6px', verticalAlign: 'middle'}}><circle cx="5" cy="5" r="5" fill="var(--info)"/></svg>{t('overview.health.trustStage')}</span>
             <span className="value">{health.trust.stageLabel}</span>
-            <span>Stage {health.trust.stage} | 分数: {health.trust.score}</span>
+            <span>{t('overview.health.stage')} {health.trust.stage} | {t('overview.health.score')}: {health.trust.score}</span>
           </article>
           <article className="panel kpi" style={{ borderLeft: '3px solid var(--accent)' }}>
-            <span className="label"><svg width="10" height="10" viewBox="0 0 10 10" style={{marginRight: '6px', verticalAlign: 'middle'}}><circle cx="5" cy="5" r="5" fill="var(--accent)"/></svg>EP Tier</span>
+            <span className="label"><svg width="10" height="10" viewBox="0 0 10 10" style={{marginRight: '6px', verticalAlign: 'middle'}}><circle cx="5" cy="5" r="5" fill="var(--accent)"/></svg>{t('overview.health.epTier')}</span>
             <span className="value">{health.evolution.tier}</span>
-            <span>积分: {health.evolution.points}</span>
+            <span>{t('overview.health.points')}: {health.evolution.points}</span>
           </article>
           <article className="panel kpi" style={{ borderLeft: '3px solid var(--success)' }}>
-            <span className="label"><svg width="10" height="10" viewBox="0 0 10 10" style={{marginRight: '6px', verticalAlign: 'middle'}}><circle cx="5" cy="5" r="5" fill="var(--success)"/></svg>原则总数</span>
+            <span className="label"><svg width="10" height="10" viewBox="0 0 10 10" style={{marginRight: '6px', verticalAlign: 'middle'}}><circle cx="5" cy="5" r="5" fill="var(--success)"/></svg>{t('overview.health.principlesTotal')}</span>
             <span className="value">{health.principles.candidate + health.principles.probation + health.principles.active + health.principles.deprecated}</span>
-            <span>候: {health.principles.candidate} | 试: {health.principles.probation} | 活: {health.principles.active} | 废: {health.principles.deprecated}</span>
+            <span>{t('overview.health.candidate')}: {health.principles.candidate} | {t('overview.health.probation')}: {health.principles.probation} | {t('overview.health.active2')}: {health.principles.active} | {t('overview.health.deprecated')}: {health.principles.deprecated}</span>
           </article>
           <article className="panel kpi" style={{ borderLeft: `3px solid ${health.queue.pending > 5 ? 'var(--warning)' : 'var(--success)'}` }}>
-            <span className="label"><svg width="10" height="10" viewBox="0 0 10 10" style={{marginRight: '6px', verticalAlign: 'middle'}}><circle cx="5" cy="5" r="5" fill={health.queue.pending > 5 ? 'var(--warning)' : 'var(--success)'}/></svg>队列积压</span>
+            <span className="label"><svg width="10" height="10" viewBox="0 0 10 10" style={{marginRight: '6px', verticalAlign: 'middle'}}><circle cx="5" cy="5" r="5" fill={health.queue.pending > 5 ? 'var(--warning)' : 'var(--success)'}/></svg>{t('overview.health.queueBacklog')}</span>
             <span className="value">{health.queue.pending}</span>
-            <span>待处理: {health.queue.pending} | 处理中: {health.queue.inProgress} | 已完成: {health.queue.completed}</span>
+            <span>{t('overview.health.pending')}: {health.queue.pending} | {t('overview.health.inProgress')}: {health.queue.inProgress} | {t('overview.health.completed')}: {health.queue.completed}</span>
           </article>
         </section>
       )}
@@ -1054,13 +1054,13 @@ function EvolutionPage() {
               color: '#fff',
               border: '2px solid var(--accent)',
             }}>
-              {evoPrinciples.activeStage === 'pending' ? <><Clock size={16} style={{marginRight: 6, verticalAlign: 'middle'}}/>等待中</> :
-               evoPrinciples.activeStage === 'in_progress' ? <><Activity size={16} style={{marginRight: 6, verticalAlign: 'middle'}}/>进行中</> :
-               evoPrinciples.activeStage === 'completed' ? <><Shield size={16} style={{marginRight: 6, verticalAlign: 'middle'}}/>已完成</> :
-               evoPrinciples.activeStage === 'idle' ? <><Zap size={16} style={{marginRight: 6, verticalAlign: 'middle'}}/>空闲</> : evoPrinciples.activeStage}
+              {evoPrinciples.activeStage === 'pending' ? <><Clock size={16} style={{marginRight: 6, verticalAlign: 'middle'}}/>{t('evolution.activeStage.pending')}</> :
+               evoPrinciples.activeStage === 'in_progress' ? <><Activity size={16} style={{marginRight: 6, verticalAlign: 'middle'}}/>{t('evolution.activeStage.in_progress')}</> :
+               evoPrinciples.activeStage === 'completed' ? <><Shield size={16} style={{marginRight: 6, verticalAlign: 'middle'}}/>{t('evolution.activeStage.completed')}</> :
+               evoPrinciples.activeStage === 'idle' ? <><Zap size={16} style={{marginRight: 6, verticalAlign: 'middle'}}/>{t('evolution.activeStage.idle')}</> : evoPrinciples.activeStage}
             </span>
             <span style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>
-              增强回路当前状态
+              {t('evolution.enhancementLoopStatus')}
             </span>
           </div>
         </section>
@@ -1311,26 +1311,26 @@ function FeedbackPage() {
     <div className="page">
       <header className="page-header">
         <div>
-          <span className="eyebrow">Feedback Loop</span>
-          <h2>反馈回路 — GFI 监控与同理心检测</h2>
+          <span className="eyebrow">{t('feedback.pageTitle')}</span>
+          <h2>{t('feedback.pageSubtitle')}</h2>
         </div>
       </header>
 
       {/* GFI Dashboard */}
       <section className="panel" style={{ marginBottom: 'var(--space-5)' }}>
-        <h3>GFI 实时仪表盘</h3>
+        <h3>{t('feedback.gfiDashboard')}</h3>
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-5)', padding: 'var(--space-4) 0' }}>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: '48px', fontWeight: 700, color: gfiColor }}>{gfi.current}</div>
             <div style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>
-              阈值: {gfi.threshold} | 今日峰值: {gfi.peakToday}
+              {t('feedback.threshold')}: {gfi.threshold} | {t('feedback.peakToday')}: {gfi.peakToday}
             </div>
             <div style={{ marginTop: 'var(--space-2)', width: '100%', height: '8px', background: 'var(--bg-sunken)', borderRadius: '4px' }}>
               <div style={{ width: `${gfiPercent}%`, height: '100%', background: gfiColor, borderRadius: '4px', transition: 'width 0.3s' }} />
             </div>
           </div>
           <div style={{ flex: 2 }}>
-            <h4 style={{ marginBottom: 'var(--space-2)' }}>小时趋势</h4>
+            <h4 style={{ marginBottom: 'var(--space-2)' }}>{t('feedback.hourlyTrend')}</h4>
             {gfi.trend.length > 0 && (
               <GroupedBarChart
                 data={gfi.trend.slice(-12).map((item) => ({
@@ -1349,7 +1349,7 @@ function FeedbackPage() {
       <div className="grid two-columns">
         {/* Empathy Events */}
         <section className="panel">
-          <h3>同理心检测事件</h3>
+          <h3>{t('feedback.empathyEvents')}</h3>
           {empathyEvents.length === 0 ? (
             <EmptyState title={t('feedback.noEmpathyEvents')} description={t('feedback.noEmpathyEventsDesc')} />
           ) : (
@@ -1375,7 +1375,7 @@ function FeedbackPage() {
 
         {/* GFI → Gate Blocks */}
         <section className="panel">
-          <h3>GFI → Gate 拦截关联</h3>
+          <h3>{t('feedback.gateBlocks')}</h3>
           {gateBlocks.length === 0 ? (
             <EmptyState title={t('feedback.noGateBlocks')} description={t('feedback.noGateBlocksDesc')} />
           ) : (
@@ -1402,6 +1402,7 @@ function FeedbackPage() {
 
 // ===== Phase 6: Gate Monitor Page =====
 function GateMonitorPage() {
+  const { t } = useI18n();
   const [gateStats, setGateStats] = useState<GateStatsResponse | null>(null);
   const [gateBlocks, setGateBlocks] = useState<GateBlockItem[]>([]);
   const [error, setError] = useState('');
@@ -1424,33 +1425,33 @@ function GateMonitorPage() {
     <div className="page">
       <header className="page-header">
         <div>
-          <span className="eyebrow">Gate Monitor</span>
-          <h2>Gate 监控 — 拦截统计与 Trust/EP 双轨</h2>
+          <span className="eyebrow">{t('gate.pageTitle')}</span>
+          <h2>{t('gate.pageSubtitle')}</h2>
         </div>
       </header>
 
       {/* Today's Block Stats */}
       <section className="panel" style={{ marginBottom: 'var(--space-5)' }}>
-        <h3>今日拦截统计</h3>
+        <h3>{t('gate.todayStats')}</h3>
         <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(5, 1fr)' }}>
           <article className="panel kpi">
-            <span className="label">GFI 拦截</span>
+            <span className="label">{t('gate.gfiBlocks')}</span>
             <span className="value">{gateStats.today.gfiBlocks}</span>
           </article>
           <article className="panel kpi">
-            <span className="label">Stage 限制</span>
+            <span className="label">{t('gate.stageBlocks')}</span>
             <span className="value">{gateStats.today.stageBlocks}</span>
           </article>
           <article className="panel kpi">
-            <span className="label">P-03 不匹配</span>
+            <span className="label">{t('gate.p03Blocks')}</span>
             <span className="value">{gateStats.today.p03Blocks}</span>
           </article>
           <article className="panel kpi">
-            <span className="label">绕过尝试</span>
+            <span className="label">{t('gate.bypassAttempts')}</span>
             <span className="value" style={{ color: 'var(--error)' }}>{gateStats.today.bypassAttempts}</span>
           </article>
           <article className="panel kpi">
-            <span className="label">P-16 豁免</span>
+            <span className="label">{t('gate.p16Exemptions')}</span>
             <span className="value">{gateStats.today.p16Exemptions}</span>
           </article>
         </div>
@@ -1459,26 +1460,26 @@ function GateMonitorPage() {
       {/* Trust & EP Dual Track */}
       <div className="grid two-columns" style={{ marginBottom: 'var(--space-5)' }}>
         <section className="panel">
-          <h3>🔐 Trust Engine</h3>
+          <h3>🔐 {t('gate.trustEngine')}</h3>
           <div style={{ padding: 'var(--space-3) 0' }}>
             <div style={{ fontSize: '24px', fontWeight: 700 }}>Stage {gateStats.trust.stage}: {gateStats.trust.status}</div>
             <div style={{ marginTop: 'var(--space-2)', width: '100%', height: '12px', background: 'var(--bg-sunken)', borderRadius: '6px' }}>
               <div style={{ width: `${gateStats.trust.score}%`, height: '100%', background: 'var(--info)', borderRadius: '6px' }} />
             </div>
             <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: 'var(--space-1)' }}>
-              分数: {gateStats.trust.score}/100
+              {t('gate.score')}: {gateStats.trust.score}/100
             </div>
           </div>
         </section>
         <section className="panel">
-          <h3>🌱 Evolution Engine</h3>
+          <h3>🌱 {t('gate.evolutionEngine')}</h3>
           <div style={{ padding: 'var(--space-3) 0' }}>
             <div style={{ fontSize: '24px', fontWeight: 700 }}>{gateStats.evolution.tier} ({gateStats.evolution.status})</div>
             <div style={{ marginTop: 'var(--space-2)', width: '100%', height: '12px', background: 'var(--bg-sunken)', borderRadius: '6px' }}>
               <div style={{ width: `${Math.min(100, gateStats.evolution.points / 10)}%`, height: '100%', background: 'var(--success)', borderRadius: '6px' }} />
             </div>
             <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: 'var(--space-1)' }}>
-              积分: {gateStats.evolution.points}
+              {t('gate.points')}: {gateStats.evolution.points}
             </div>
           </div>
         </section>
@@ -1486,9 +1487,9 @@ function GateMonitorPage() {
 
       {/* Block History */}
       <section className="panel">
-        <h3>拦截历史</h3>
+        <h3>{t('gate.blockHistory')}</h3>
         {gateBlocks.length === 0 ? (
-          <EmptyState title={t('feedback.noGateBlocks')} description={t('feedback.noGateBlocksDesc')} />
+          <EmptyState title={t('gate.noGateBlocks')} description={t('gate.noGateBlocksDesc')} />
         ) : (
           <div className="list-table">
             {gateBlocks.map((block, i) => (
