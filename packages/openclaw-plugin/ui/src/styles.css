@@ -359,7 +359,7 @@ input, select {
 
 .kpi-grid {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--space-4);
 }
 
@@ -1016,6 +1016,28 @@ pre {
 .muted {
   color: var(--text-tertiary);
   font-size: 13px;
+}
+
+/* ==========================================================================
+   Back Button
+   ========================================================================== */
+
+.back-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  background: var(--bg-sunken);
+  color: var(--text-secondary);
+  transition: all var(--duration-fast) var(--ease-out);
+  flex-shrink: 0;
+}
+
+.back-button:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 /* ==========================================================================
