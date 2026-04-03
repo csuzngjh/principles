@@ -24,48 +24,20 @@ import { listSessions, SessionState } from '../core/session-tracker.js';
 import { withLockAsync } from '../utils/file-lock.js';
 
 // ---------------------------------------------------------------------------
-// Session Key Parsing (replicated from openclaw/src/sessions/session-key-utils.ts)
+// System Session Detection
 // ---------------------------------------------------------------------------
 
-/** Parse an agent-scoped session key. Returns null for non-agent keys. */
-function parseAgentSessionKey(sessionKey: string): { agentId: string; rest: string } | null {
-    const raw = (sessionKey ?? '').trim().toLowerCase();
-    if (!raw) return null;
-    const parts = raw.split(':').filter(Boolean);
-    if (parts.length < 3 || parts[0] !== 'agent') return null;
-    const agentId = parts[1]?.trim();
-    const rest = parts.slice(2).join(':');
-    if (!agentId || !rest) return null;
-    return { agentId, rest };
-}
-
-/**
- * Returns true if the session was created by a system process (cron, boot, probe, subagent, acp).
- * Uses OpenClaw's native session key patterns to avoid false positives.
- *
- * System patterns:
- * - boot- prefix: boot sessions (e.g. boot-2026-04-02_10-43-45)
- * - probe- prefix: probe sessions (e.g. probe-glm-4.9-xxx)
- * - cron:<...> rest: cron run sessions (agent:<id>:cron:...)
- * - subagent: prefix: subagent sessions
- * - acp: prefix: acp sessions
- *
- * Excluded (NOT system sessions):
- * - User sessions like agent:main:feishu:user:xxx — third component is channel type, NOT cron/subagent/acp
- */
 /**
  * Returns true if the session was created by a system process (cron, boot, probe, subagent, acp).
  * Uses OpenClaw's native session key patterns to avoid false positives.
  *
  * Detection priority (most reliable first):
- * 1. trigger field: Most reliable - explicitly set by OpenClaw ("cron", "heartbeat", "subagent")
+ * 1. trigger field: Most reliable — explicitly set by OpenClaw ("cron", "heartbeat", "subagent")
  * 2. sessionKey patterns: Secondary confirmation via structured key (agent:main:cron:...)
  * 3. sessionId prefix: Fallback for boot-, probe- prefixed IDs
  *
- * System patterns:
- * - trigger === 'cron' | 'heartbeat' | 'subagent'
- * - sessionKey contains: cron:, subagent:, acp:
- * - sessionId starts with: boot-, probe-
+ * Excluded (NOT system sessions):
+ * - User sessions like agent:main:feishu:user:xxx — third component is channel type
  */
 function isSystemSession(state: SessionState): boolean {
     const { sessionId, sessionKey, trigger } = state;
