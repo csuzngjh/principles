@@ -20,7 +20,7 @@ import type {
   EvolutionTraceResponse,
   EvolutionStatsResponse,
 } from './types';
-import { Sparkline, DonutChart, GroupedBarChart, TimeRangeSelector, CollapsiblePanel } from './charts';
+import { Sparkline, DonutChart, GroupedBarChart, TimeRangeSelector, CollapsiblePanel, StatusBadge, EmptyState } from './charts';
 
 // Auth Context
 interface AuthContextType {
@@ -942,10 +942,10 @@ function EvolutionPage() {
         <div className="meta">
           <TimeRangeSelector value={days} onChange={setDays} />
           <div className="pill-row">
-            <span className="badge" style={{ background: '#f59e0b' }}>待处理 {stats.pending}</span>
-            <span className="badge" style={{ background: '#3b82f6' }}>处理中 {stats.inProgress}</span>
-            <span className="badge" style={{ background: '#22c55e' }}>已完成 {stats.completed}</span>
-            <span className="badge" style={{ background: '#ef4444' }}>失败 {stats.failed}</span>
+            <StatusBadge variant="warning">待处理 {stats.pending}</StatusBadge>
+            <StatusBadge variant="info">处理中 {stats.inProgress}</StatusBadge>
+            <StatusBadge variant="success">已完成 {stats.completed}</StatusBadge>
+            <StatusBadge variant="error">失败 {stats.failed}</StatusBadge>
           </div>
         </div>
       </header>
@@ -996,9 +996,9 @@ function EvolutionPage() {
           <h3>阶段分布</h3>
           <div className="stack" style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
             {stats.stageDistribution.map((stage) => (
-              <span key={stage.stage} className="badge" style={{ background: STAGE_COLORS[stage.stage] || 'var(--accent-soft)', color: 'var(--text-primary)' }}>
+              <StatusBadge key={stage.stage} variant="neutral">
                 {stage.stageLabel}: {stage.count}
-              </span>
+              </StatusBadge>
             ))}
           </div>
         </section>
@@ -1030,9 +1030,7 @@ function EvolutionPage() {
                   <span>{task.source}</span>
                 </div>
                 <div>
-                  <span className="badge" style={{ background: STAGE_COLORS[task.status] || '#6b7280' }}>
-                    {task.status}
-                  </span>
+                  <StatusBadge variant="neutral">{task.status}</StatusBadge>
                   <span>分数: {task.score}</span>
                 </div>
                 <div className="align-right">
@@ -1060,9 +1058,7 @@ function EvolutionPage() {
                   <p>来源: {trace.task.source} | 分数: {trace.task.score}</p>
                   <p style={{ fontSize: '0.85em', color: '#6b7280' }}>{trace.task.reason}</p>
                 </div>
-                <span className="badge" style={{ background: STAGE_COLORS[trace.task.status] || '#6b7280' }}>
-                  {trace.task.status}
-                </span>
+                <StatusBadge variant="neutral">{trace.task.status}</StatusBadge>
               </div>
 
               <article>
