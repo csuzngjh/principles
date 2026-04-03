@@ -1,0 +1,28 @@
+{
+  "runId": "2026-04-01T08-03-32-238Z-subagent-helper-empathy",
+  "taskId": "subagent-helper-empathy",
+  "title": "Subagent Helper: migrate empathy observer to workflow helper",
+  "specPath": null,
+  "status": "halted",
+  "currentStageIndex": 0,
+  "currentStage": "investigate",
+  "currentRound": 1,
+  "maxRoundsPerStage": 3,
+  "maxRuntimeMinutes": 360,
+  "staleAfterMs": 300000,
+  "orchestratorPid": 44816,
+  "lastHeartbeatAt": "2026-04-01T08:03:32.260Z",
+  "currentRole": "producer",
+  "haltReason": {
+    "type": "orchestrator_error",
+    "stage": "investigate",
+    "round": 1,
+    "details": "Error: spawnSync cmd.exe ENOENT",
+    "blockers": [
+      "Error: spawnSync cmd.exe ENOENT"
+    ]
+  },
+  "worktree": null,
+  "createdAt": "2026-04-01T08:03:32.238Z",
+  "updatedAt": "2026-04-01T08:03:32.263Z"
+}

@@ -1,0 +1,17 @@
+{
+  "role": "producer",
+  "stage": "implement-pass-1",
+  "round": 1,
+  "status": "in_progress",
+  "checklist": [
+    "Create RuntimeDirectDriver in runtime-direct-driver.ts",
+    "Create WorkflowStore for SQLite persistence",
+    "Create EmpathyObserverWorkflowManager implementing WorkflowManager interface",
+    "Implement startWorkflow() with idempotency",
+    "Implement notifyWaitResult() for runtime_direct path",
+    "Implement finalizeOnce() with idempotency",
+    "Integrate with existing EmpathyObserverManager (shadow mode)",
+    "Write tests for core functionality"
+  ],
+  "updatedAt": "2026-04-02T01:30:00.000Z"
+}

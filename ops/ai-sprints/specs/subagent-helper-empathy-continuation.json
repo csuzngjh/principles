@@ -1,0 +1,141 @@
+{
+  "id": "subagent-helper-empathy-continuation",
+  "title": "Subagent Helper: implement empathy workflow (continuation v2)",
+  "workspace": "D:/Code/principles",
+  "branchWorkspace": "D:/Code/principles-subagent-helper-empathy",
+  "branch": "feat/subagent-workflow-helper-impl",
+  "maxRoundsPerStage": 3,
+  "maxRuntimeMinutes": 720,
+  "stageTimeoutMinutes": 30,
+  "stages": ["implement-pass-1", "implement-pass-2", "verify"],
+  "producer": {
+    "agent": "opencode",
+    "model": "minimax-cn-coding-plan/MiniMax-M2.7",
+    "timeoutSeconds": 1800
+  },
+  "reviewerA": {
+    "agent": "iflow",
+    "model": "zhipuai-coding-plan/glm-5.1",
+    "timeoutSeconds": 900,
+    "role": "code_and_local_correctness",
+    "focus": "empathy observer patch correctness, test coverage, CODE_EVIDENCE"
+  },
+  "reviewerB": {
+    "agent": "opencode",
+    "model": "minimax-cn-coding-plan/MiniMax-M2.7",
+    "timeoutSeconds": 900,
+    "role": "runtime_and_compatibility",
+    "focus": "OpenClaw runtime semantics, subagent lifecycle boundaries, cross-repo assumptions"
+  },
+  "escalationReviewer": {
+    "agent": "iflow",
+    "model": "zhipuai-coding-plan/glm-5.1",
+    "timeoutSeconds": 900,
+    "role": "global_reviewer",
+    "focus": "macro: business flow, data flow, architecture, OpenClaw compatibility"
+  },
+  "context": [
+    "=== CONTINUATION CONTEXT ===",
+    "This is a continuation sprint. Previous sprint 2026-04-02T01-36-53-756Z-subagent-helper-empathy ran out of runtime.",
+    "Sprint 2026-04-02T10-41-31-097Z-subagent-helper-empathy-continuation halted at implement-pass-2 round 3.",
+    "",
+    "=== HALT ROOT CAUSE ANALYSIS ===",
+    "Previous sprint halted because shadow_run_parity requirement was inappropriate for PR2:",
+    "- PR2 introduces NEW runtime_direct boundary - NO legacy path exists for comparison",
+    "- shadow parity验收标准与PR2目标不匹配",
+    "- This spec version REMOVES shadow parity, replaces with new path self-evidence",
+    "",
+    "=== PREREQUISITES SATISFIED ===",
+    "Stages completed in previous sprints:",
+    "- investigate: COMPLETED",
+    "- architecture-cut: COMPLETED",
+    "- patch-plan: COMPLETED",
+    "- implement-pass-1: COMPLETED (code exists, commit eb1f90c)",
+    "",
+    "Key design decisions:",
+    "- Helper lives in packages/openclaw-plugin/src/service/subagent-workflow/",
+    "- Empathy is treated as runtime_direct only (no registry_backed semantics)",
+    "- subagent_ended is fallback/observation only, NOT primary completion contract",
+    "",
+    "=== THIS SPRINT'S TASK ===",
+    "Focus on implement-pass-2 and verify stages.",
+    "",
+    "implement-pass-2 goals (UPDATED - no shadow parity):",
+    "- Address any remaining review findings",
+    "- Provide WORKFLOW_TRACE evidence showing new path closure",
+    "- Verify degrade_on_unavailable behavior",
+    "- Confirm fallback behavior is explicit",
+    "",
+    "=== CRITICAL: COMMIT REQUIREMENT ===",
+    "Code existing in files is NOT sufficient. Producer MUST:",
+    "1. Create files with actual implementation",
+    "2. Run npm run build to verify TypeScript compiles",
+    "3. Run npm test to verify tests pass",
+    "4. git add the new files",
+    "5. git commit with descriptive message",
+    "6. Provide SHA in CODE_EVIDENCE section",
+    "",
+    "=== CONSTRAINTS ===",
+    "Use PD-only changes; do not modify D:/Code/openclaw.",
+    "PR2 scope: empathy observer + deep-reflect ONLY. Diagnostician/Nocturnal NOT migrated.",
+    "Treat empathy as plugin-owned runtime_direct only.",
+    "subagent_ended may be used only as fallback, observation, or UNPROVEN signal.",
+    "All OpenClaw compatibility assumptions must be verified by reviewer_b."
+  ],
+  "stageGoals": {
+    "implement-pass-1": [
+      "CREATE THE DIRECTORY: packages/openclaw-plugin/src/service/subagent-workflow/",
+      "Implement EmpathyObserverWorkflowManager with RuntimeDirectDriver.",
+      "Implement startWorkflow(), notifyWaitResult(), finalizeOnce() with idempotency.",
+      "Add workflow store integration (subagent_workflows table plus workflow events).",
+      "Provide WORKFLOW_TRACE evidence: show state transitions and event persistence.",
+      "DO NOT claim DONE without actual file creation and git commit."
+    ],
+    "implement-pass-2": [
+      "Address review findings from implement-pass-1.",
+      "Provide NEW_PATH_SELF_EVIDENCE: runtime_direct path is closed and observable.",
+      "Verify degrade_on_unavailable_surface behavior.",
+      "Confirm fallback behavior is explicit and documented.",
+      "Do not expand scope beyond EmpathyObserverManager and its RuntimeDirectDriver."
+    ],
+    "verify": [
+      "Verify empathy persistence via workflow store queries.",
+      "Confirm merge gate: local SHA == remote/feat/subagent-helper-empathy SHA.",
+      "global_reviewer must confirm: OpenClaw assumptions verified? Business flow closed? Architecture improved? Degrade boundaries explicit?",
+      "Confirm no regression in other subagent modules."
+    ]
+  },
+  "stageCriteria": {
+    "implement-pass-1": {
+      "requiredApprovals": 2,
+      "requiredProducerSections": ["SUMMARY", "CHANGES", "CODE_EVIDENCE", "EVIDENCE", "KEY_EVENTS", "WORKFLOW_TRACE", "CHECKS"],
+      "requiredReviewerSections": ["VERDICT", "BLOCKERS", "FINDINGS", "CODE_EVIDENCE", "INTERFACE_COMPLIANCE", "NEXT_FOCUS", "CHECKS"],
+      "scoringDimensions": ["correctness", "scope_control", "interface_adherence", "runtime_path_closure", "git_commit_evidence"],
+      "dimensionThreshold": 3,
+      "requiredDeliverables": ["empathy_observer_manager_impl", "runtime_direct_driver", "workflow_store_integration", "workflow_event_trace", "git_commit_sha"]
+    },
+    "implement-pass-2": {
+      "requiredApprovals": 2,
+      "requiredProducerSections": ["SUMMARY", "CHANGES", "CODE_EVIDENCE", "EVIDENCE", "KEY_EVENTS", "NEW_PATH_SELF_EVIDENCE", "CHECKS"],
+      "requiredReviewerSections": ["VERDICT", "BLOCKERS", "FINDINGS", "CODE_EVIDENCE", "NEXT_FOCUS", "CHECKS"],
+      "scoringDimensions": ["correctness", "scope_control", "new_path_closure", "regression_risk", "git_commit_evidence"],
+      "dimensionThreshold": 3,
+      "requiredDeliverables": ["review_findings_addressed", "runtime_direct_path_closed", "degrade_behavior_verified", "fallback_behavior_explicit", "git_commit_sha"]
+    },
+    "verify": {
+      "requiredApprovals": 3,
+      "requiredProducerSections": ["SUMMARY", "EVIDENCE", "CODE_EVIDENCE", "EMPATHY_CHECK", "FINAL_WORKFLOW_VERIFICATION", "CHECKS"],
+      "requiredReviewerSections": ["VERDICT", "BLOCKERS", "FINDINGS", "CODE_EVIDENCE", "NEXT_FOCUS", "CHECKS"],
+      "scoringDimensions": ["verification_thoroughness", "gap_analysis", "production_readiness", "architecture_improvement", "git_commit_evidence"],
+      "dimensionThreshold": 3,
+      "requiredDeliverables": ["empathy_persistence_verified", "openclaw_assumptions_final_review", "deployment_checklist", "global_reviewer_final_assessment", "git_commit_sha"],
+      "globalReviewerRequired": true,
+      "globalReviewerMustAnswer": ["Q1", "Q2", "Q3", "Q4", "Q5"]
+    }
+  },
+  "stageRoleTimeouts": {
+    "implement-pass-1": { "producer": 1800, "reviewer_a": 900, "reviewer_b": 900 },
+    "implement-pass-2": { "producer": 600, "reviewer_a": 480, "reviewer_b": 480 },
+    "verify": { "producer": 720, "reviewer_a": 480, "reviewer_b": 480 }
+  }
+}

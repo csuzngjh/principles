@@ -77,6 +77,12 @@ interface PromptHookApi {
       enabled?: boolean;
       /** Shadow mode: also run EmpathyObserverWorkflowManager alongside legacy path */
       helper_empathy_enabled?: boolean;
+      /** PR2.1 Task 4: Empathy mode switching
+       * - legacy: Only legacy path (empathyObserverManager.spawn)
+       * - shadow: Legacy + helper in parallel
+       * - helper_primary: Only helper path, skip legacy
+       */
+      empathy_mode?: 'legacy' | 'shadow' | 'helper_primary';
     };
   };
   runtime: EmpathyObserverApi['runtime'];
@@ -610,11 +616,21 @@ REQUIRED ACTION:
 
   if (isUserInteraction && sessionId && api && !isAgentToAgent) {
     prependContext = '### BEHAVIORAL_CONSTRAINTS\n' + empathySilenceConstraint + '\n\n' + prependContext;
-    empathyObserverManager.spawn(api, sessionId, latestUserMessage, workspaceDir).catch((err) => api.logger.warn(String(err)));
 
-    if (api.config?.empathy_engine?.helper_empathy_enabled === true && workspaceDir) {
-      // Cast required because SDK SubagentRunParams lacks expectsCompletionMessage
-      // which is supported by the actual OpenClaw runtime
+    // PR2.1 Task 4: Empathy mode switching (legacy/shadow/helper_primary)
+    // - legacy: Only run legacy path (empathyObserverManager.spawn)
+    // - shadow: Legacy is primary, helper runs as shadow (both paths run in parallel)
+    // - helper_primary: Only run helper path, skip legacy
+    const empathyMode = (api.config?.empathy_engine?.empathy_mode as string) || 'legacy';
+    const helperEnabled = api.config?.empathy_engine?.helper_empathy_enabled === true;
+
+    if (empathyMode === 'legacy' || empathyMode === 'shadow') {
+      // Legacy path runs in these modes
+      empathyObserverManager.spawn(api, sessionId, latestUserMessage, workspaceDir).catch((err) => api.logger.warn(String(err)));
+    }
+
+    if ((empathyMode === 'shadow' && helperEnabled && workspaceDir) || (empathyMode === 'helper_primary' && workspaceDir)) {
+      // Helper path runs in shadow mode (when helper_empathy_enabled) or helper_primary mode
       const shadowManager = new EmpathyObserverWorkflowManager({
         workspaceDir,
         logger: api.logger,
@@ -625,7 +641,11 @@ REQUIRED ACTION:
         parentSessionId: sessionId,
         workspaceDir,
         taskInput: latestUserMessage,
-      }).catch((err) => api.logger.warn(`[PD:ShadowEmpathy] workflow failed: ${String(err)}`));
+      }).catch((err) => api.logger.warn(`[PD:HelperEmpathy] workflow failed: ${String(err)}`));
+
+      if (empathyMode === 'helper_primary') {
+        logger?.info(`[PD:Prompt] Empathy mode: helper_primary (legacy path skipped)`);
+      }
     }
   }
 

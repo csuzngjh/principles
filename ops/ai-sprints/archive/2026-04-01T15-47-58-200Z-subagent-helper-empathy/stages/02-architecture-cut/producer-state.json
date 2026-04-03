@@ -1,0 +1,13 @@
+{
+  "role": "producer",
+  "stage": "architecture-cut",
+  "round": 1,
+  "status": "in_progress",
+  "checklist": [
+    "architecture_decision: TODO",
+    "openclaw_cross_repo_verification: TODO",
+    "helper_interface_draft: TODO",
+    "shadow_run_plan: TODO"
+  ],
+  "updatedAt": "2026-04-01T16:05:00.000Z"
+}

@@ -1,0 +1,95 @@
+{
+  "blockers": [],
+  "focusForNextRound": null,
+  "producerChecks": "evidence=ok;tests=reviewed;scope=pd-only;prompt-isolation=confirmed;hook-timing=deferred;hypothesis-corrected=yes",
+  "dimensionScores": {
+    "reviewerA": {
+      "evidence_quality": 4,
+      "assumption_coverage": 4,
+      "transport_audit_completeness": 4
+    },
+    "reviewerB": {
+      "evidence_quality": 4,
+      "assumption_coverage": 4,
+      "transport_audit_completeness": 5
+    },
+    "globalReviewer": null
+  },
+  "contractItems": [
+    {
+      "deliverable": "transport_audit",
+      "status": "DONE"
+    },
+    {
+      "deliverable": "lifecycle_hook_map",
+      "status": "DONE"
+    },
+    {
+      "deliverable": "openclaw_assumptions_documented",
+      "status": "DONE"
+    },
+    {
+      "deliverable": "failure_mode_inventory",
+      "status": "DONE"
+    }
+  ],
+  "producerCodeEvidence": {
+    "filesChecked": [
+      "empathy-observer-manager.ts",
+      "index.ts",
+      "hooks/subagent.ts",
+      "deep-reflect.ts",
+      "nocturnal-trinity.ts",
+      "openclaw-sdk.d.ts",
+      "subagent-probe.ts",
+      "subagent-registry-lifecycle.ts",
+      "subagent-registry-completion.ts",
+      "subagent-registry.ts",
+      "subagent-registry-run-manager.ts"
+    ],
+    "evidenceSource": "both",
+    "sha": "d83c95af2f5a7be08fc42b7b82c80c46824e9cf7",
+    "branchWorktree": "feat/subagent-workflow-helper-impl",
+    "evidenceScope": "principles"
+  },
+  "reviewerACodeEvidence": {
+    "filesChecked": [
+      "empathy-observer-manager.ts (lines 40-120",
+      "191-320",
+      "350-470)",
+      "index.ts (lines 195-265)",
+      "hooks/subagent.ts (lines 171-220)",
+      "deep-reflect.ts (lines 271-320)",
+      "nocturnal-trinity.ts (lines 181-302)",
+      "openclaw-sdk.d.ts (lines 386-455)",
+      "tests/service/empathy-observer-manager.test.ts (lines 100-250)"
+    ],
+    "evidenceSource": "local",
+    "sha": "d83c95af2f5a7be08fc42b7b82c80c46824e9cf7",
+    "branchWorktree": null,
+    "evidenceScope": "principles"
+  },
+  "reviewerBCodeEvidence": {
+    "filesChecked": [
+      "empathy-observer-manager.ts",
+      "index.ts",
+      "hooks/subagent.ts",
+      "deep-reflect.ts",
+      "nocturnal-trinity.ts",
+      "openclaw-sdk.d.ts",
+      "tests/service/empathy-observer-manager.test.ts",
+      "subagent-registry-lifecycle.ts",
+      "subagent-registry-completion.ts",
+      "subagent-registry.ts",
+      "subagent-registry.types.ts"
+    ],
+    "evidenceSource": "both",
+    "sha": "d83c95af2f5a7be08fc42b7b82c80c46824e9cf7",
+    "branchWorktree": null,
+    "evidenceScope": "principles"
+  },
+  "globalReviewerCodeEvidence": null,
+  "stageName": "investigate",
+  "round": 2,
+  "generatedAt": "2026-04-01T15:26:13.301Z"
+}

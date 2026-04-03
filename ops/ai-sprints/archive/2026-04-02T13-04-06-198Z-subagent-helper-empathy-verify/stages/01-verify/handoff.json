@@ -1,0 +1,61 @@
+{
+  "blockers": [],
+  "focusForNextRound": null,
+  "producerChecks": null,
+  "dimensionScores": {
+    "reviewerA": {},
+    "reviewerB": {},
+    "globalReviewer": "APPROVE"
+  },
+  "contractItems": [
+    {
+      "deliverable": "- ## SUMMARY",
+      "status": "UNKNOWN"
+    },
+    {
+      "deliverable": "- ## EVIDENCE",
+      "status": "UNKNOWN"
+    },
+    {
+      "deliverable": "- ## CODE_EVIDENCE",
+      "status": "UNKNOWN"
+    },
+    {
+      "deliverable": "- ## EMPATHY_CHECK",
+      "status": "UNKNOWN"
+    },
+    {
+      "deliverable": "-...",
+      "status": "UNKNOWN"
+    }
+  ],
+  "producerCodeEvidence": {
+    "filesChecked": [],
+    "evidenceSource": null,
+    "sha": null,
+    "branchWorktree": null,
+    "evidenceScope": null
+  },
+  "reviewerACodeEvidence": null,
+  "reviewerBCodeEvidence": null,
+  "globalReviewerCodeEvidence": {
+    "filesChecked": [
+      "empathy-observer-workflow-manager.ts",
+      "types.ts",
+      "workflow-store.ts",
+      "runtime-direct-driver.ts",
+      "index.ts",
+      "subagent-probe.ts",
+      "prompt.ts",
+      "config.ts",
+      "openclaw-sdk.d.ts"
+    ],
+    "evidenceSource": "local",
+    "sha": "eb1f90cfa476e3cc60abcd533a3534ccbac2e0ae",
+    "branchWorktree": null,
+    "evidenceScope": "both"
+  },
+  "stageName": "verify",
+  "round": 1,
+  "generatedAt": "2026-04-02T13:29:03.417Z"
+}

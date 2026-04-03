@@ -1,0 +1,28 @@
+{
+  "runId": "2026-04-01T14-11-10-385Z-subagent-helper-empathy",
+  "taskId": "subagent-helper-empathy",
+  "title": "Subagent Helper: migrate empathy observer to workflow helper",
+  "specPath": null,
+  "status": "halted",
+  "currentStageIndex": 0,
+  "currentStage": "investigate",
+  "currentRound": 3,
+  "maxRoundsPerStage": 3,
+  "maxRuntimeMinutes": 360,
+  "staleAfterMs": 300000,
+  "orchestratorPid": 59108,
+  "lastHeartbeatAt": "2026-04-01T14:46:14.943Z",
+  "currentRole": null,
+  "haltReason": {
+    "type": "max_rounds_exceeded",
+    "stage": "investigate",
+    "round": 3,
+    "details": "Stage exceeded maximum rounds without all required approvals.",
+    "blockers": [
+      "Contract not fulfilled: "
+    ]
+  },
+  "worktree": null,
+  "createdAt": "2026-04-01T14:11:10.385Z",
+  "updatedAt": "2026-04-01T14:46:14.949Z"
+}

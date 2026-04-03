@@ -47,6 +47,7 @@ import { handleSamplesCommand } from './commands/samples.js';
 import { handleNocturnalReviewCommand } from './commands/nocturnal-review.js';
 import { handleNocturnalTrainCommand } from './commands/nocturnal-train.js';
 import { handleNocturnalRolloutCommand } from './commands/nocturnal-rollout.js';
+import { handleWorkflowDebugCommand } from './commands/workflow-debug.js';
 import { EvolutionWorkerService } from './service/evolution-worker.js';
 import { TrajectoryService } from './service/trajectory-service.js';
 import { ensureWorkspaceTemplates } from './core/init.js';
@@ -672,6 +673,22 @@ const plugin = {
         } catch (err) {
           api.logger.error(`[PD] Command /nocturnal-rollout failed: ${String(err)}`);
           return { text: language === 'zh' ? "Nocturnal rollout 命令执行失败，请检查日志。" : "Nocturnal rollout command failed. Check logs." };
+        }
+      }
+    });
+
+    api.registerCommand({
+      name: "pd-workflow-debug",
+      description: 'Debug helper workflow state and events [workflowId]',
+      acceptsArgs: true,
+      handler: (ctx) => {
+        try {
+          const workspaceDir = api.resolvePath('.');
+          if (ctx.config) ctx.config.workspaceDir = workspaceDir;
+          return handleWorkflowDebugCommand(ctx);
+        } catch (err) {
+          api.logger.error(`[PD] Command /pd-workflow-debug failed: ${String(err)}`);
+          return { text: `Workflow debug command failed: ${String(err)}` };
         }
       }
     });

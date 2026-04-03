@@ -1,0 +1,163 @@
+{
+  "stage": "implement-pass-1",
+  "round": 1,
+  "outcome": "revise",
+  "summary": "At least one reviewer requested revision or blocked progress.",
+  "approvalCount": 0,
+  "blockerCount": 0,
+  "reviewerAVerdict": "REVISE",
+  "reviewerBVerdict": "REVISE",
+  "producerSectionChecks": {
+    "SUMMARY": false,
+    "CHANGES": false,
+    "CODE_EVIDENCE": false,
+    "EVIDENCE": false,
+    "KEY_EVENTS": false,
+    "SHADOW_RUN_COMPARISON": false,
+    "CHECKS": false
+  },
+  "reviewerSectionChecks": {
+    "VERDICT": true,
+    "BLOCKERS": true,
+    "FINDINGS": true,
+    "CODE_EVIDENCE": true,
+    "INTERFACE_COMPLIANCE": true,
+    "NEXT_FOCUS": true,
+    "CHECKS": true
+  },
+  "producerChecks": null,
+  "reviewerAChecks": "criteria=not_met; blockers=4; verification=partial",
+  "reviewerBChecks": "helper_empathy_enabled, sidecar_allowed, active workflow, boot sessions",
+  "blockers": [
+    "Dimension \"shadow_run_validity\" scored 1/5 (below threshold 3).",
+    "Dimension \"git_commit_evidence\" scored 1/5 (below threshold 3).",
+    "Dimension \"correctness\" not scored by reviewer.",
+    "Dimension \"scope_control\" not scored by reviewer.",
+    "Dimension \"interface_adherence\" not scored by reviewer.",
+    "Dimension \"shadow_run_validity\" not scored by reviewer.",
+    "Dimension \"git_commit_evidence\" not scored by reviewer.",
+    "Contract not fulfilled: \"- Run shadow mode alongside existing empathy observer path only ...\" is UNKNOWN; \"- [completed] Explore codebase structure and existing patterns\" is UNKNOWN; \"- [in_progress] Create packages/openclaw-plugin/src/service/subagent-workflow/ directory\" is UNKNOWN; \"- [pending] Create types.ts with workflow type definitions\" is UNKNOWN; \"- [pending] Create workflow-store.ts with SQLite persistence\" is UNKNOWN; \"- [pending] Create runtime-direct-driver.ts for subagent transport\" is UNKNOWN; \"- [pending] Create empathy-observer-workflow-manager.ts with idempotent state machine\" is UNKNOWN; \"- [pending] Integrate shadow mode in prompt.ts (helper_empathy_enabled config)\" is UNKNOWN; \"- [pending] Update openclaw-sdk.d.ts if needed\" is UNKNOWN; \"- [pending] Write tests and verify build passes\" is UNKNOWN; \"- [pending] Git commit with descriptive message\" is UNKNOWN"
+  ],
+  "scoringDimensions": [
+    "correctness",
+    "scope_control",
+    "interface_adherence",
+    "shadow_run_validity",
+    "git_commit_evidence"
+  ],
+  "reviewerADimensions": {
+    "correctness": 4,
+    "scope_control": 3,
+    "interface_adherence": 4,
+    "shadow_run_validity": 1,
+    "git_commit_evidence": 1
+  },
+  "reviewerBDimensions": {},
+  "dimensionFailures": [
+    "Dimension \"shadow_run_validity\" scored 1/5 (below threshold 3).",
+    "Dimension \"git_commit_evidence\" scored 1/5 (below threshold 3).",
+    "Dimension \"correctness\" not scored by reviewer.",
+    "Dimension \"scope_control\" not scored by reviewer.",
+    "Dimension \"interface_adherence\" not scored by reviewer.",
+    "Dimension \"shadow_run_validity\" not scored by reviewer.",
+    "Dimension \"git_commit_evidence\" not scored by reviewer."
+  ],
+  "contractItems": [
+    {
+      "deliverable": "- Run shadow mode alongside existing empathy observer path only ...",
+      "status": "UNKNOWN"
+    },
+    {
+      "deliverable": "- [completed] Explore codebase structure and existing patterns",
+      "status": "UNKNOWN"
+    },
+    {
+      "deliverable": "- [in_progress] Create packages/openclaw-plugin/src/service/subagent-workflow/ directory",
+      "status": "UNKNOWN"
+    },
+    {
+      "deliverable": "- [pending] Create types.ts with workflow type definitions",
+      "status": "UNKNOWN"
+    },
+    {
+      "deliverable": "- [pending] Create workflow-store.ts with SQLite persistence",
+      "status": "UNKNOWN"
+    },
+    {
+      "deliverable": "- [pending] Create runtime-direct-driver.ts for subagent transport",
+      "status": "UNKNOWN"
+    },
+    {
+      "deliverable": "- [pending] Create empathy-observer-workflow-manager.ts with idempotent state machine",
+      "status": "UNKNOWN"
+    },
+    {
+      "deliverable": "- [pending] Integrate shadow mode in prompt.ts (helper_empathy_enabled config)",
+      "status": "UNKNOWN"
+    },
+    {
+      "deliverable": "- [pending] Update openclaw-sdk.d.ts if needed",
+      "status": "UNKNOWN"
+    },
+    {
+      "deliverable": "- [pending] Write tests and verify build passes",
+      "status": "UNKNOWN"
+    },
+    {
+      "deliverable": "- [pending] Git commit with descriptive message",
+      "status": "UNKNOWN"
+    }
+  ],
+  "contractCheck": {
+    "allDone": false,
+    "incompleteItems": [
+      {
+        "deliverable": "- Run shadow mode alongside existing empathy observer path only ...",
+        "status": "UNKNOWN"
+      },
+      {
+        "deliverable": "- [completed] Explore codebase structure and existing patterns",
+        "status": "UNKNOWN"
+      },
+      {
+        "deliverable": "- [in_progress] Create packages/openclaw-plugin/src/service/subagent-workflow/ directory",
+        "status": "UNKNOWN"
+      },
+      {
+        "deliverable": "- [pending] Create types.ts with workflow type definitions",
+        "status": "UNKNOWN"
+      },
+      {
+        "deliverable": "- [pending] Create workflow-store.ts with SQLite persistence",
+        "status": "UNKNOWN"
+      },
+      {
+        "deliverable": "- [pending] Create runtime-direct-driver.ts for subagent transport",
+        "status": "UNKNOWN"
+      },
+      {
+        "deliverable": "- [pending] Create empathy-observer-workflow-manager.ts with idempotent state machine",
+        "status": "UNKNOWN"
+      },
+      {
+        "deliverable": "- [pending] Integrate shadow mode in prompt.ts (helper_empathy_enabled config)",
+        "status": "UNKNOWN"
+      },
+      {
+        "deliverable": "- [pending] Update openclaw-sdk.d.ts if needed",
+        "status": "UNKNOWN"
+      },
+      {
+        "deliverable": "- [pending] Write tests and verify build passes",
+        "status": "UNKNOWN"
+      },
+      {
+        "deliverable": "- [pending] Git commit with descriptive message",
+        "status": "UNKNOWN"
+      }
+    ],
+    "totalItems": 11,
+    "doneItems": 0
+  },
+  "updatedAt": "2026-04-02T09:26:33.077Z"
+}
