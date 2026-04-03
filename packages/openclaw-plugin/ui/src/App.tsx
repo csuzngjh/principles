@@ -759,6 +759,13 @@ function SamplesPage() {
           {selected && (
             <div className="detail-stack">
               <div className="detail-header">
+                <button
+                  className="back-button"
+                  onClick={() => setSelected(null)}
+                  title={t('common.back') || 'Back'}
+                >
+                  <ChevronLeft strokeWidth={1.75} size={18} />
+                </button>
                 <div>
                   <h3>{selected.sampleId}</h3>
                   <p>{selected.sessionId} | {selected.reviewStatus} | score {selected.qualityScore}</p>
@@ -883,6 +890,13 @@ function ThinkingModelsPage() {
           {detail && (
             <div className="detail-stack">
               <div className="detail-header">
+                <button
+                  className="back-button"
+                  onClick={() => setDetail(null)}
+                  title={t('common.back') || 'Back'}
+                >
+                  <ChevronLeft strokeWidth={1.75} size={18} />
+                </button>
                 <div>
                   <h3>{detail.modelMeta.name}</h3>
                   <p>{detail.modelMeta.description}</p>
