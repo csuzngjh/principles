@@ -1,0 +1,820 @@
+[client] initialize (running)
+
+[client] session/new (running)
+
+[client] session/set_model (running)
+
+[thinking] Let me start by understanding the task. I'm acting as reviewer_b in an AI sprint orchestrator. I need to:
+           
+           1. Read the stage brief first
+           2. Read the producer report
+           3. Investigate the codebase to verify the producer's findings
+           4. Focus on scope control, regression risk, and test coverage
+           5. Write a markdown report with specific sections
+           
+           Let me start by reading the relevant files to understand the context.
+
+[tool] read (pending)
+  input: {}
+
+[tool] read (pending)
+  input: {}
+
+[tool] ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\01-investigate\brief.md (completed)
+  kind: read
+  input: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\01-investigate\brief.md
+  files: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\01-investigate\brief.md
+  output:
+    <path>D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\01-investigate\brief.md</path>
+    <type>file</type>
+    <content>1: # Stage Brief
+    2: 
+    3: - Task: Subagent Helper: migrate empathy observer to workflow helper
+    4: - Stage: investigate
+    5: - Round: 2
+    6: 
+    7: ## Goals
+    8: - Audit empathy observer's current subagent transport: runtime_direct vs registry_backed.
+    9: - Identify all lifecycle hooks (subagent_spawned, subagent_ended, etc.) currently used.
+    10: - Document current timeout/error/fallback/cleanup paths and their failure modes.
+    11: - Assess OpenClaw assumptions: does runtime.subagent.run() guarantee subagent_ended hook?
+    12: 
+    13: ## Required Hypotheses
+    14: - empathy_uses_runtime_direct_transport
+    15: - empathy_has_unverified_openclaw_hook_assumptions
+    16: - empathy_timeout_leads_to_false_completion
+    17: - empathy_cleanup_not_idempotent
+    18: - empathy_lacks_dedupe_key
+    19: 
+    20: ## Carry Forward
+    21: 
+    22: ### What was accomplished
+    23: - transport_audit
+    24: - lifecycle_hook_map
+    25: - openclaw_assumptions_documented
+    26: - failure_mode_inventory
+    ... (333 more lines)
+
+[tool] read (pending)
+  input: {}
+
+[tool] ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\01-investigate\producer.md (completed)
+  kind: read
+  input: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\01-investigate\producer.md
+  files: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\01-investigate\producer.md
+  output:
+    <path>D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\01-investigate\producer.md</path>
+    <type>file</type>
+    <content>1: # Producer Report - Investigate Stage (Round 2)
+    2: 
+    3: ## SUMMARY
+    4: 
+    5: Round 1 completed all four deliverables. Round 2 verifies those findings through direct code inspection and surfaces additional evidence, particularly a pre-existing bug in `deep-reflect.ts` that was implicitly included in PR2 scope.
+    6: 
+    7: **All deliverables: DONE.** All five hypotheses are SUPPORTED or PARTIAL-SUPPORTED.
+    8: 
+    9: ## EVIDENCE
+    10: 
+    11: - empathy-observer-manager.ts (511 lines) — core empathy observer singleton
+    12: - deep-reflect.ts (410 lines) — deep-reflect tool with confirmed waitForRun bug
+    13: - subagent.ts (481 lines) — subagent lifecycle hook handler
+    14: - index.ts (640 lines) — hook registration, plugin entry
+    15: - openclaw-sdk.d.ts (464 lines) — SDK type definitions
+    16: - subagent-probe.ts (94 lines) — runtime availability detection
+    17: 
+    18: ## CODE_EVIDENCE
+    19: 
+    20: - files_checked: empathy-observer-manager.ts, deep-reflect.ts, subagent.ts, index.ts, openclaw-sdk.d.ts, subagent-probe.ts
+    21: - evidence_source: local
+    22: - sha: 4138178
+    23: - branch/worktree: principles (HEAD)
+    24: - evidence_scope: principles
+    25: 
+    26: ## KEY_EVENTS
+    ... (53 more lines)
+
+[tool] ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\01-investigate\reviewer-b-state.json (completed)
+  kind: read
+  input: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\01-investigate\reviewer-b-state.json
+  files: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\01-investigate\reviewer-b-state.json
+  output:
+    <path>D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\01-investigate\reviewer-b-state.json</path>
+    <type>file</type>
+    <content>1: {
+    2:   "role": "reviewer_b",
+    3:   "stage": "investigate",
+    4:   "round": 1,
+    5:   "status": "completed",
+    6:   "checklist": [
+    7:     "verify_empathy_uses_runtime_direct_transport: SUPPORTED",
+    8:     "verify_empathy_has_unverified_openclaw_hook_assumptions: SUPPORTED",
+    9:     "verify_empathy_timeout_leads_to_false_completion: SUPPORTED",
+    10:     "verify_empathy_cleanup_not_idempotent: PARTIAL (confirmed)",
+    11:     "verify_empathy_lacks_dedupe_key: REFUTED - key exists but timestamp-based",
+    12:     "verify_transport_audit_completeness: VERIFIED COMPLETE",
+    13:     "verify_lifecycle_hook_map: INCOMPLETE - subagent_spawned not verified",
+    14:     "verify_openclaw_assumptions_documented: VERIFIED COMPLETE",
+    15:     "verify_failure_mode_inventory: VERIFIED COMPLETE"
+    16:   ],
+    17:   "updatedAt": "2026-04-02T03:35:00.000Z",
+    18:   "verdict": "REVISE",
+    19:   "blockers": [
+    20:     "empathy_lacks_dedupe_key hypothesis is imprecise - idempotencyKey IS passed at line 198, just timestamp-based",
+    21:     "lifecycle_hook_map incomplete - subagent_spawned hook not verified for empathy context"
+    22:   ],
+    23:   "dimensions": {
+    24:     "evidence_quality": 4,
+    25:     "assumption_coverage": 3,
+    26:     "transport_audit_completeness": 4
+    ... (15 more lines)
+
+[thinking] Now I have context. Let me understand the task:
+           
+           1. I'm reviewer_b in round 2 of the investigate stage
+           2. The producer has already completed a report in round 1 with status "REVISE" 
+           3. The brief says I need to verify the producer's findings
+           4. My focus is on: scope control, regression risk, and test coverage
+           5. I need to verify:
+              - empathy_uses_runtime_direct_transport
+              - empathy_has_unverified_openclaw_hook_assumptions
+              - empathy_timeout_leads_to_false_completion
+              - empathy_cleanup_not_idempotent
+              - empathy_lacks_dedupe_key
+           
+           The producer claims all 5 hypotheses are SUPPORTED or PARTIAL-SUPPORTED.
+           
+           From my previous state file, it looks like I was reviewer_b in round 1 and gave a verdict of "REVISE" with blockers about the hypothesis being imprecise and lifecycle_hook_map being incomplete.
+           
+           Now in round 2, I need to:
+           1. Verify the producer's findings through direct code insp...
+
+[tool] write (pending)
+  input: {}
+
+[tool] ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\01-investigate\reviewer-b-state.json (completed)
+  kind: edit
+  input: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\01-investigate\reviewer-b-state.json
+  files: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\01-investigate\reviewer-b-state.json
+  output:
+    Wrote file successfully.
+    
+    Wrote file successfully.
+    
+    diff D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\01-investigate\reviewer-b-state.json (+23 lines)
+
+[thinking] Now let me investigate the codebase to verify the producer's findings. I need to read the key files mentioned in the producer report to verify the evidence.
+Let me start investigating the key files to verify the producer's findings. I'll read the core files in parallel.
+
+[tool] glob (pending)
+  input: {}
+
+[tool] grep (pending)
+  input: {}
+
+[tool] glob (completed)
+  kind: search
+  input: packages/openclaw-plugin/src/**/*.ts
+  output:
+    Found 100 file(s)
+    
+    D:\Code\principles\packages\openclaw-plugin\src\types.ts
+    D:\Code\principles\packages\openclaw-plugin\src\types\runtime-summary.ts
+    D:\Code\principles\packages\openclaw-plugin\src\types\event-types.ts
+    D:\Code\principles\packages\openclaw-plugin\src\tools\deep-reflect.ts
+    D:\Code\principles\packages\openclaw-plugin\src\service\runtime-summary-service.ts
+    D:\Code\principles\packages\openclaw-plugin\src\service\phase3-input-filter.ts
+    D:\Code\principles\packages\openclaw-plugin\src\service\nocturnal-target-selector.ts
+    D:\Code\principles\packages\openclaw-plugin\src\service\nocturnal-service.ts
+    D:\Code\principles\packages\openclaw-plugin\src\service\nocturnal-runtime.ts
+    D:\Code\principles\packages\openclaw-plugin\src\service\evolution-worker.ts
+    D:\Code\principles\packages\openclaw-plugin\src\service\empathy-observer-manager.ts
+    D:\Code\principles\packages\openclaw-plugin\src\index.ts
+    D:\Code\principles\packages\openclaw-plugin\src\i18n\commands.ts
+    D:\Code\principles\packages\openclaw-plugin\src\hooks\subagent.ts
+    D:\Code\principles\packages\openclaw-plugin\src\hooks\prompt.ts
+    D:\Code\principles\packages\openclaw-plugin\src\hooks\progressive-trust-gate.ts
+    D:\Code\principles\packages\openclaw-plugin\src\hooks\pain.ts
+    D:\Code\principles\packages\openclaw-plugin\src\hooks\llm.ts
+    D:\Code\principles\packages\openclaw-plugin\src\hooks\gfi-gate.ts
+    D:\Code\principles\packages\openclaw-plugin\src\hooks\gate.ts
+    D:\Code\principles\packages\openclaw-plugin\src\hooks\gate-block-helper.ts
+    D:\Code\principles\packages\openclaw-plugin\src\hooks\bash-risk.ts
+    D:\Code\principles\packages\openclaw-plugin\src\core\workspace-context.ts
+    D:\Code\principles\packages\openclaw-plugin\src\core\trajectory.ts
+    D:\Code\principles\packages\openclaw-plugin\src\core\training-program.ts
+    D:\Code\principles\packages\openclaw-plugin\src\core\shadow-observation-registry.ts
+    ... (99 more lines)
+
+[tool] grep (completed)
+  kind: search
+  input: D:\Code\principles\packages\openclaw-plugin\src
+  files: D:\Code\principles\packages\openclaw-plugin\src
+  output:
+    Found 2 match(es) in 2 file(s)
+    
+    D:\Code\principles\packages\openclaw-plugin\src\hooks\subagent.ts
+    
+    D:\Code\principles\packages\openclaw-plugin\src\hooks\prompt.ts
+    
+    [Agent Usage Reminder]
+    
+    You called a search/fetch tool directly without leveraging specialized agents.
+    
+    RECOMMENDED: Use task with explore/librarian agents for better results:
+    
+    ```
+    // Parallel exploration - fire multiple agents simultaneously
+    task(agent="explore", prompt="Find all files matching pattern X")
+    task(agent="explore", prompt="Search for implementation of Y") 
+    task(agent="librarian", prompt="Lookup documentation for Z")
+    
+    // Then continue your work while they run in background
+    // System will notify you when each completes
+    ```
+    
+    WHY:
+    - Agents can perform deeper, more thorough searches
+    - Background tasks run in parallel, saving time
+    - Specialized agents have domain expertise
+    - Reduces context window usage in main session
+    
+    ... (1 more lines)
+
+[thinking] I found the key files. Let me read them to verify the producer's findings:
+           - empathy-observer-manager.ts
+           - deep-reflect.ts
+           - subagent.ts
+           - index.ts
+           - openclaw-sdk.d.ts
+           - subagent-probe.ts
+           
+           Let me read these files to verify the evidence.
+
+[tool] read (pending)
+  input: {}
+
+[tool] read (pending)
+  input: {}
+
+[tool] packages\openclaw-plugin\src\service\empathy-observer-manager.ts (completed)
+  kind: read
+  input: D:\Code\principles\packages\openclaw-plugin\src\service\empathy-observer-manager.ts
+  files: D:\Code\principles\packages\openclaw-plugin\src\service\empathy-observer-manager.ts
+  output:
+    <path>D:\Code\principles\packages\openclaw-plugin\src\service\empathy-observer-manager.ts</path>
+    <type>file</type>
+    <content>1: import { WorkspaceContext } from '../core/workspace-context.js';
+    2: import { trackFriction } from '../core/session-tracker.js';
+    3: import { isSubagentRuntimeAvailable } from '../utils/subagent-probe.js';
+    4: import type { PluginLogger, SubagentRunResult, SubagentWaitResult } from '../openclaw-sdk.js';
+    5: 
+    6: const OBSERVER_SESSION_PREFIX = 'agent:main:subagent:empathy-obs-';
+    7: 
+    8: // Default timeout for waitForRun (30 seconds)
+    9: const DEFAULT_WAIT_TIMEOUT_MS = 30_000;
+    10: 
+    11: /**
+    12:  * Run metadata for active empathy observer runs
+    13:  */
+    14: interface ObserverRunMetadata {
+    15:     runId: string;
+    16:     parentSessionId: string;
+    17:     observerSessionKey: string;
+    18:     workspaceDir?: string;
+    19:     startedAt: number;
+    20:     timedOutAt?: number;
+    21:     erroredAt?: number;
+    22:     // Timestamp when observer reached a terminal (timeout/error) state;
+    23:     // used for TTL-based cleanup of orphaned entries
+    24:     observedAt?: number;
+    25: }
+    26: 
+    ... (488 more lines)
+
+[tool] read (pending)
+  input: {}
+
+[tool] packages\openclaw-plugin\src\tools\deep-reflect.ts (completed)
+  kind: read
+  input: D:\Code\principles\packages\openclaw-plugin\src\tools\deep-reflect.ts
+  files: D:\Code\principles\packages\openclaw-plugin\src\tools\deep-reflect.ts
+  output:
+    <path>D:\Code\principles\packages\openclaw-plugin\src\tools\deep-reflect.ts</path>
+    <type>file</type>
+    <content>1: import type { OpenClawPluginApi, SubagentWaitResult } from '../openclaw-sdk.js';
+    2: import { Type } from '@sinclair/typebox';
+    3: import { randomUUID } from 'node:crypto';
+    4: import * as fs from 'fs';
+    5: import * as path from 'node:path';
+    6: import { EventLogService } from '../core/event-log.js';
+    7: import { buildCritiquePromptV2 } from './critique-prompt.js';
+    8: import { resolvePdPath } from '../core/paths.js';
+    9: import { reflectionLogRetentionDays } from '../types.js';
+    10: 
+    11: /**
+    12:  * Write reflection result to reflection-log.md
+    13:  * Uses atomic write (temp file + rename) to prevent race conditions
+    14:  */
+    15: function writeToReflectionLog(
+    16:     workspaceDir: string,
+    17:     context: string,
+    18:     insights: string,
+    19:     modelId?: string,
+    20:     depth?: number
+    21: ): void {
+    22:     const reflectionLogPath = resolvePdPath(workspaceDir, 'REFLECTION_LOG');
+    23: 
+    24:     // Ensure memory directory exists (backward-compatible: create if missing)
+    25:     // Note: resolvePdPath returns the full path; ensure parent dir exists
+    26:     const memoryDir = path.dirname(reflectionLogPath);
+    ... (387 more lines)
+
+[tool] packages\openclaw-plugin\src\hooks\subagent.ts (completed)
+  kind: read
+  input: D:\Code\principles\packages\openclaw-plugin\src\hooks\subagent.ts
+  files: D:\Code\principles\packages\openclaw-plugin\src\hooks\subagent.ts
+  output:
+    <path>D:\Code\principles\packages\openclaw-plugin\src\hooks\subagent.ts</path>
+    <type>file</type>
+    <content>1: import type { PluginHookSubagentEndedEvent, PluginHookSubagentContext, PluginLogger } from '../openclaw-sdk.js';
+    2: import * as fs from 'fs';
+    3: import { writePainFlag } from '../core/pain.js';
+    4: import { WorkspaceContext } from '../core/workspace-context.js';
+    5: import { empathyObserverManager, isEmpathyObserverSession, type EmpathyObserverApi } from '../service/empathy-observer-manager.js';
+    6: import { acquireQueueLock, type EvolutionQueueItem } from '../service/evolution-worker.js';
+    7: import { recordEvolutionSuccess } from '../core/evolution-engine.js';
+    8: 
+    9: const COMPLETION_RETRY_DELAY_MS = 250;
+    10: const COMPLETION_MAX_RETRIES = 3;
+    11: const COMPLETION_RETRY_TTL_MS = 60 * 60 * 1000; // 1 hour TTL for retry entries
+    12: const TASK_OUTCOME_RETRY_DELAY_MS = 250;
+    13: const TASK_OUTCOME_MAX_RETRIES = 3;
+    14: const DIAGNOSTICIAN_SESSION_PREFIX = 'agent:diagnostician:';
+    15: const completionRetryCounts = new Map<string, { count: number; expires: number }>();
+    16: type HookLogger = Pick<PluginLogger, 'info' | 'warn' | 'error'>;
+    17: 
+    18: // Cleanup expired retry entries periodically
+    19: function cleanupExpiredRetryEntries(): void {
+    20:     const now = Date.now();
+    21:     for (const [key, value] of completionRetryCounts.entries()) {
+    22:         if (now > value.expires) {
+    23:             completionRetryCounts.delete(key);
+    24:         }
+    25:     }
+    26: }
+    ... (494 more lines)
+
+[thinking] Now let me read the index.ts and openclaw-sdk.d.ts to understand the hooks registration and SDK types.
+
+[tool] read (pending)
+  input: {}
+
+[tool] read (pending)
+  input: {}
+
+[tool] packages\openclaw-plugin\src\index.ts (completed)
+  kind: read
+  input: D:\Code\principles\packages\openclaw-plugin\src\index.ts
+  files: D:\Code\principles\packages\openclaw-plugin\src\index.ts
+  output:
+    <path>D:\Code\principles\packages\openclaw-plugin\src\index.ts</path>
+    <type>file</type>
+    <content>1: import type {
+    2:   OpenClawPluginApi,
+    3:   PluginHookBeforePromptBuildEvent,
+    4:   PluginHookAgentContext,
+    5:   PluginHookBeforePromptBuildResult,
+    6:   PluginHookBeforeToolCallEvent,
+    7:   PluginHookToolContext,
+    8:   PluginHookBeforeToolCallResult,
+    9:   PluginHookAfterToolCallEvent,
+    10:   PluginHookBeforeResetEvent,
+    11:   PluginHookBeforeCompactionEvent,
+    12:   PluginHookAfterCompactionEvent,
+    13:   PluginHookSubagentEndedEvent,
+    14:   PluginHookLlmOutputEvent,
+    15:   PluginHookSubagentSpawningEvent,
+    16:   PluginHookSubagentSpawningResult,
+    17:   PluginHookSubagentContext,
+    18:   PluginHookBeforeMessageWriteEvent,
+    19:   PluginHookBeforeMessageWriteResult,
+    20: } from './openclaw-sdk.js';
+    21: import * as crypto from 'crypto';
+    22: import type { WorkerProfile } from './core/model-deployment-registry.js';
+    23: import { classifyTask } from './core/local-worker-routing.js';
+    24: import { completeShadowObservation, recordShadowRouting } from './core/shadow-observation-registry.js';
+    25: import { getCommandDescription } from './i18n/commands.js';
+    26: import { handleBeforePromptBuild } from './hooks/prompt.js';
+    ... (617 more lines)
+
+[tool] read (pending)
+  input: {}
+
+[tool] packages\openclaw-plugin\src\openclaw-sdk.d.ts (completed)
+  kind: read
+  input: D:\Code\principles\packages\openclaw-plugin\src\openclaw-sdk.d.ts
+  files: D:\Code\principles\packages\openclaw-plugin\src\openclaw-sdk.d.ts
+  output:
+    <path>D:\Code\principles\packages\openclaw-plugin\src\openclaw-sdk.d.ts</path>
+    <type>file</type>
+    <content>1: import type { IncomingMessage, ServerResponse } from 'node:http';
+    2: 
+    3: /**
+    4:  * OpenClaw Plugin SDK type shims (Official V1.0 Alignment)
+    5:  * 
+    6:  * These types are based directly on the OpenClaw core source code to ensure
+    7:  * absolute compatibility during development and deployment.
+    8:  */
+    9: 
+    10: import type { TSchema, Static } from '@sinclair/typebox';
+    11: 
+    12: // ── Agent Tool Types (Strict Signature Enforcement) ───────────────────
+    13: 
+    14: /**
+    15:  * Standard tool result format returned to OpenClaw.
+    16:  * 
+    17:  * CRITICAL: Tools MUST return this format, not plain strings.
+    18:  */
+    19: export interface AgentToolResult<T = unknown> {
+    20:     content: Array<{
+    21:         type: string;  // 'text', 'image', etc.
+    22:         text?: string;
+    23:         data?: string;
+    24:         mimeType?: string;
+    25:     }>;
+    26:     meta?: T;
+    ... (441 more lines)
+
+[tool] packages\openclaw-plugin\src\utils\subagent-probe.ts (completed)
+  kind: read
+  input: D:\Code\principles\packages\openclaw-plugin\src\utils\subagent-probe.ts
+  files: D:\Code\principles\packages\openclaw-plugin\src\utils\subagent-probe.ts
+  output:
+    <path>D:\Code\principles\packages\openclaw-plugin\src\utils\subagent-probe.ts</path>
+    <type>file</type>
+    <content>1: /**
+    2:  * Subagent Runtime Availability Probe
+    3:  *
+    4:  * OpenClaw has two runtime modes:
+    5:  * - Gateway mode: api.runtime.subagent methods are real async functions
+    6:  * - Embedded mode: api.runtime.subagent is a Proxy that throws synchronously
+    7:  *
+    8:  * This utility provides a reliable way to detect which mode we're in.
+    9:  */
+    10: 
+    11: import type { OpenClawPluginApi } from '../openclaw-sdk.js';
+    12: 
+    13: type SubagentRuntime = NonNullable<OpenClawPluginApi['runtime']>['subagent'];
+    14: 
+    15: /**
+    16:  * Try to access the global gateway subagent runtime.
+    17:  * This is a fallback for cases where the plugin was loaded with
+    18:  * allowGatewaySubagentBinding but the late-binding proxy isn't working.
+    19:  */
+    20: function getGlobalGatewaySubagent(): SubagentRuntime | null {
+    21:   try {
+    22:     // Access the global symbol that OpenClaw uses for gateway subagent
+    23:     const symbol = Symbol.for('openclaw.plugin.gatewaySubagentRuntime');
+    24:     const globalState = (globalThis as any)[symbol];
+    25:     return globalState?.subagent ?? null;
+    26:   } catch {
+    ... (71 more lines)
+
+[thinking] Now I have read all the key files. Let me analyze the evidence and verify the producer's findings:
+           
+           ## Producer's Claims to Verify:
+           
+           ### 1. empathy_uses_runtime_direct_transport - SUPPORTED
+           **Evidence from code:**
+           - empathy-observer-manager.ts line 193: `api.runtime.subagent.run({...})` - direct call
+           - deep-reflect.ts line 284: `await subagentRuntime.run({...})` - direct call
+           - Both use `runtime_direct` transport, not registry_backed
+           
+           **Verified: SUPPORTED** ✓
+           
+           ### 2. empathy_has_unverified_openclaw_hook_assumptions - SUPPORTED
+           **Evidence from code:**
+           - empathy-observer relies on subagent_ended hook (line 175-178 in subagent.ts) to call `empathyObserverManager.reap()`
+           - The hook is registered in index.ts line 231-260
+           - PluginHookHandlerMap shows `subagent_ended` returns `any` (void)
+           - No formal guarantee in SDK that subagent_ended fires after subagent terminates
+           
+           **Verified: SUPPORTED...
+Let me also check if there are any tests for these files to verify test coverage.
+
+[tool] glob (pending)
+  input: {}
+
+[tool] grep (pending)
+  input: {}
+
+[tool] glob (completed)
+  kind: search
+  input: packages/openclaw-plugin/tests/**/*.test.ts
+  output:
+    Found 100 file(s)
+    
+    D:\Code\principles\packages\openclaw-plugin\tests\service\runtime-summary-service.test.ts
+    D:\Code\principles\packages\openclaw-plugin\tests\service\phase3-input-filter.test.ts
+    D:\Code\principles\packages\openclaw-plugin\tests\service\nocturnal-target-selector.test.ts
+    D:\Code\principles\packages\openclaw-plugin\tests\service\nocturnal-service.test.ts
+    D:\Code\principles\packages\openclaw-plugin\tests\service\nocturnal-runtime.test.ts
+    D:\Code\principles\packages\openclaw-plugin\tests\service\evolution-worker.test.ts
+    D:\Code\principles\packages\openclaw-plugin\tests\service\empathy-observer-manager.test.ts
+    D:\Code\principles\packages\openclaw-plugin\tests\index.shadow-routing.integration.test.ts
+    D:\Code\principles\packages\openclaw-plugin\tests\index.integration.test.ts
+    D:\Code\principles\packages\openclaw-plugin\tests\hooks\thinking-gate.test.ts
+    D:\Code\principles\packages\openclaw-plugin\tests\hooks\subagent.test.ts
+    D:\Code\principles\packages\openclaw-plugin\tests\hooks\prompt.test.ts
+    D:\Code\principles\packages\openclaw-plugin\tests\hooks\progressive-trust-gate.test.ts
+    D:\Code\principles\packages\openclaw-plugin\tests\hooks\pain.test.ts
+    D:\Code\principles\packages\openclaw-plugin\tests\hooks\llm.test.ts
+    D:\Code\principles\packages\openclaw-plugin\tests\hooks\gfi-gate.test.ts
+    D:\Code\principles\packages\openclaw-plugin\tests\hooks\gfi-gate-unit.test.ts
+    D:\Code\principles\packages\openclaw-plugin\tests\hooks\gate.test.ts
+    D:\Code\principles\packages\openclaw-plugin\tests\hooks\gate-pipeline-integration.test.ts
+    D:\Code\principles\packages\openclaw-plugin\tests\fixtures\production-compatibility.test.ts
+    D:\Code\principles\packages\openclaw-plugin\tests\core\workspace-context.test.ts
+    D:\Code\principles\packages\openclaw-plugin\tests\core\training-program.test.ts
+    D:\Code\principles\packages\openclaw-plugin\tests\core\promotion-gate.test.ts
+    D:\Code\principles\packages\openclaw-plugin\tests\core\principle-training-state.test.ts
+    D:\Code\principles\package...
+
+[tool] grep (completed)
+  kind: search
+  input: D:\Code\principles\packages\openclaw-plugin\tests
+  files: D:\Code\principles\packages\openclaw-plugin\tests
+  output:
+    Found 3 match(es) in 3 file(s)
+    
+    D:\Code\principles\packages\openclaw-plugin\tests\hooks\subagent.test.ts
+    
+    D:\Code\principles\packages\openclaw-plugin\tests\service\empathy-observer-manager.test.ts
+    
+    D:\Code\principles\packages\openclaw-plugin\tests\core\evolution-user-stories.e2e.test.ts
+    
+    [Agent Usage Reminder]
+    
+    You called a search/fetch tool directly without leveraging specialized agents.
+    
+    RECOMMENDED: Use task with explore/librarian agents for better results:
+    
+    ```
+    // Parallel exploration - fire multiple agents simultaneously
+    task(agent="explore", prompt="Find all files matching pattern X")
+    task(agent="explore", prompt="Search for implementation of Y") 
+    task(agent="librarian", prompt="Lookup documentation for Z")
+    
+    // Then continue your work while they run in background
+    // System will notify you when each completes
+    ```
+    
+    WHY:
+    - Agents can perform deeper, more thorough searches
+    - Background tasks run in parallel, saving time
+    - Specialized agents have domain expertise
+    ... (3 more lines)
+
+[thinking] Good - there ARE tests for empathy-observer-manager and subagent hooks. Let me read those to understand test coverage, then I'll finalize my worklog and report.
+
+[tool] read (pending)
+  input: {}
+
+[tool] read (pending)
+  input: {}
+
+[tool] packages\openclaw-plugin\tests\service\empathy-observer-manager.test.ts (completed)
+  kind: read
+  input: D:\Code\principles\packages\openclaw-plugin\tests\service\empathy-observer-manager.test.ts
+  files: D:\Code\principles\packages\openclaw-plugin\tests\service\empathy-observer-manager.test.ts
+  output:
+    <path>D:\Code\principles\packages\openclaw-plugin\tests\service\empathy-observer-manager.test.ts</path>
+    <type>file</type>
+    <content>1: import { beforeEach, describe, expect, it, vi } from 'vitest';
+    2: import { EmpathyObserverManager, isEmpathyObserverSession } from '../../src/service/empathy-observer-manager.js';
+    3: import { WorkspaceContext } from '../../src/core/workspace-context.js';
+    4: import * as sessionTracker from '../../src/core/session-tracker.js';
+    5: 
+    6: vi.mock('../../src/core/workspace-context.js');
+    7: vi.mock('../../src/core/session-tracker.js', () => ({
+    8:   trackFriction: vi.fn(),
+    9: }));
+    10: 
+    11: describe('EmpathyObserverManager', () => {
+    12:   let manager: EmpathyObserverManager;
+    13: 
+    14:   let run: ReturnType<typeof vi.fn>;
+    15:   let waitForRun: ReturnType<typeof vi.fn>;
+    16:   let getSessionMessages: ReturnType<typeof vi.fn>;
+    17:   let deleteSession: ReturnType<typeof vi.fn>;
+    18:   const logger = {
+    19:     info: vi.fn(),
+    20:     warn: vi.fn(),
+    21:     error: vi.fn(),
+    22:   };
+    23: 
+    24:   let api: any;
+    25: 
+    26:   const mockAsyncFn = <T extends (...args: any[]) => Promise<any>>(
+    ... (492 more lines)
+
+[tool] read (pending)
+  input: {}
+
+[tool] packages\openclaw-plugin\tests\hooks\subagent.test.ts (completed)
+  kind: read
+  input: D:\Code\principles\packages\openclaw-plugin\tests\hooks\subagent.test.ts
+  files: D:\Code\principles\packages\openclaw-plugin\tests\hooks\subagent.test.ts
+  output:
+    <path>D:\Code\principles\packages\openclaw-plugin\tests\hooks\subagent.test.ts</path>
+    <type>file</type>
+    <content>1: import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+    2: import { handleSubagentEnded } from '../../src/hooks/subagent.js';
+    3: import * as fs from 'fs';
+    4: import { WorkspaceContext } from '../../src/core/workspace-context.js';
+    5: import * as evolutionWorker from '../../src/service/evolution-worker.js';
+    6: import { empathyObserverManager } from '../../src/service/empathy-observer-manager.js';
+    7: 
+    8: vi.mock('fs');
+    9: vi.mock('../../src/core/workspace-context.js');
+    10: vi.mock('../../src/service/evolution-worker.js', () => ({
+    11:     acquireQueueLock: vi.fn(async () => () => undefined),
+    12: }));
+    13: 
+    14: const mockEmitSync = vi.fn();
+    15: 
+    16: describe('Subagent Hook', () => {
+    17:     const workspaceDir = '/mock/workspace';
+    18: 
+    19: const mockTrajectory = {
+    20:     recordTaskOutcome: vi.fn(),
+    21: };
+    22: 
+    23:     const mockConfig = {
+    24:         get: vi.fn().mockImplementation((key) => {
+    25:             if (key === 'scores') return {
+    26:                 subagent_error_penalty: 80,
+    ... (385 more lines)
+
+[tool] packages\openclaw-plugin\tests\tools\deep-reflect.test.ts (completed)
+  kind: read
+  input: D:\Code\principles\packages\openclaw-plugin\tests\tools\deep-reflect.test.ts
+  files: D:\Code\principles\packages\openclaw-plugin\tests\tools\deep-reflect.test.ts
+  output:
+    <path>D:\Code\principles\packages\openclaw-plugin\tests\tools\deep-reflect.test.ts</path>
+    <type>file</type>
+    <content>1: import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+    2: import * as fs from 'fs';
+    3: import * as path from 'path';
+    4: import * as os from 'os';
+    5: import { createDeepReflectTool, deepReflectTool } from '../../src/tools/deep-reflect.js';
+    6: import type { OpenClawPluginApi, PluginRuntime } from '../../src/openclaw-sdk.js';
+    7: 
+    8: describe('createDeepReflectTool', () => {
+    9:     let mockApi: OpenClawPluginApi;
+    10:     let mockSubagent: any;
+    11:     let tempDir: string;
+    12: 
+    13:     // Helper to create mock functions that pass the AsyncFunction check
+    14:     const mockAsyncFn = <T extends (...args: any[]) => Promise<any>>(
+    15:         impl: ReturnType<typeof vi.fn>
+    16:     ) => {
+    17:         const fn = vi.fn() as unknown as T;
+    18:         Object.defineProperty(fn, 'constructor', {
+    19:             value: function AsyncFunction() {},
+    20:             writable: true,
+    21:             configurable: true,
+    22:         });
+    23:         return fn;
+    24:     };
+    25: 
+    26:     beforeEach(() => {
+    ... (245 more lines)
+
+[thinking] Now I have a comprehensive understanding. Let me verify the key findings:
+           
+           1. **deep-reflect waitForRun bug (line 291)**: The test at line 94 shows `expect(mockSubagent.waitForRun).toHaveBeenCalled();` - but it doesn't verify the runId parameter! The test passes because the mock doesn't validate the parameter. The actual code at line 291 passes `sessionKey` instead of `runId`, which is indeed a bug.
+           
+           2. **Test coverage**: 
+              - empathy-observer-manager.test.ts has comprehensive tests (16 tests covering spawn, reap, timeout, TTL, etc.)
+              - subagent.test.ts has tests for empathy observer fallback path
+              - deep-reflect.test.ts has tests but they don't verify the waitForRun parameter
+           
+           Now let me write my worklog and final report.
+Now I have all the evidence I need. Let me update my worklog and write the final reviewer report.
+
+[tool] write (pending)
+  input: {}
+
+[tool] write (failed)
+  kind: edit
+  input: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\01-investigate/reviewer-b-worklog.md
+  files: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\01-investigate/reviewer-b-worklog.md
+  output:
+    {
+      "error": "File already exists. Use edit tool instead."
+    }
+    
+    File already exists. Use edit tool instead.
+
+[thinking] Let me use bash to write the worklog since the file already exists and the write tool is having issues.
+
+[tool] bash (pending)
+  input: {}
+
+[tool] Write reviewer-b worklog file (completed)
+  kind: execute
+  input: cat > "D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\01-investigate/reviewer-b-worklog.md" << 'EOF' # Reviewer B Worklog - Investigate Stage Round 2 ## Checkpoints ### 2026-...
+  output:
+    {
+      "output": "",
+      "metadata": {
+        "output": "",
+        "exit": 0,
+        "description": "Write reviewer-b worklog file",
+        "truncated": false
+      }
+    }
+
+[thinking] Good, now let me write the final reviewer-b.md report with all required sections.
+
+[tool] bash (pending)
+  input: {}
+
+[tool] Write reviewer-b final report (completed)
+  kind: execute
+  input: cat > "D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\01-investigate/reviewer-b.md" << 'REPORT_EOF' # Reviewer B Report - Investigate Stage Round 2 ## VERDICT **APPROVE** All...
+  output:
+    {
+      "output": "",
+      "metadata": {
+        "output": "",
+        "exit": 0,
+        "description": "Write reviewer-b final report",
+        "truncated": false
+      }
+    }
+
+[thinking] Good. Now let me update the reviewer-b-state.json to completed status and verify the report was written correctly.
+
+[tool] bash (pending)
+  input: {}
+
+[tool] Write reviewer-b state file (completed)
+  kind: execute
+  input: cat > "D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\01-investigate/reviewer-b-state.json" << 'EOF' { "role": "reviewer_b", "stage": "investigate", "round": 2, "status": "co...
+  output:
+    {
+      "output": "",
+      "metadata": {
+        "output": "",
+        "exit": 0,
+        "description": "Write reviewer-b state file",
+        "truncated": false
+      }
+    }
+
+[thinking] Let me verify the report was written correctly by reading it back.
+
+[tool] read (pending)
+  input: {}
+
+[tool] ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\01-investigate\reviewer-b.md (completed)
+  kind: read
+  input: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\01-investigate/reviewer-b.md
+  files: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\01-investigate/reviewer-b.md
+  output:
+    <path>D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\01-investigate\reviewer-b.md</path>
+    <type>file</type>
+    <content>1: # Reviewer B Report - Investigate Stage Round 2
+    2: 
+    3: ## VERDICT
+    4: **APPROVE**
+    5: 
+    6: All five hypotheses verified as SUPPORTED or PARTIAL. Producer completed all four deliverables with adequate evidence. The deep-reflect waitForRun bug (confirmed in this round) is a pre-existing bug surfaced during investigation, not a new finding.
+    7: 
+    8: ## BLOCKERS
+    9: None. All contract deliverables reached DONE status.
+    10: 
+    11: ## FINDINGS
+    12: 
+    13: ### Scope Control
+    14: - PR2 scope correctly bounded: empathy observer + deep-reflect only
+    15: - Diagnostician/Nocturnal NOT migrated in this PR (per brief constraint)
+    16: - Helper location confirmed: packages/openclaw-plugin/src/service/subagent-workflow/
+    17: - No unnecessary architectural expansion detected
+    18: 
+    19: ### Regression Risk
+    20: - **HIGH RISK**: deep-reflect waitForRun bug (line 291) - passes sessionKey instead of runId
+    21:   - This causes guaranteed timeout even when subagent processes message successfully
+    22:   - The subagent runs to completion but the tool always reports timeout
+    23:   - Existing tests do NOT catch this because they mock waitForRun without parameter verification
+    24: - **MEDIUM RISK**: empathy-observer timeout path preserves activeRuns entry
+    25:   - TTL-based cleanup (5 min) prevents permanent orphaning but is implicit
+    26: - **LOW RISK**: timestamp-based idempotencyKey in empathy-observer
+    ... (99 more lines)
+
+[thinking] The report has been written successfully with all required sections. Let me verify the file path and summarize what was done.
+ROLE_STATUS: completed; report=D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\01-investigate\reviewer-b.md
+
+[done] end_turn

@@ -1,0 +1,19 @@
+diff --git a/scripts/ai-sprint-orchestrator/run.mjs b/scripts/ai-sprint-orchestrator/run.mjs
+index 62d90e8..c135a97 100644
+--- a/scripts/ai-sprint-orchestrator/run.mjs
++++ b/scripts/ai-sprint-orchestrator/run.mjs
+@@ -163,11 +163,10 @@ function runAgent({ cwd, agent, model, prompt, timeoutSeconds = 1800, failLogPat
+   try {
+     if (process.platform === 'win32') {
+       result = spawnSync(
+-        'powershell.exe',
++        'cmd.exe',
+         [
+-          '-NoProfile',
+-          '-Command',
+-          `acpx --cwd $env:AI_SPRINT_CWD --approve-all --model $env:AI_SPRINT_MODEL --timeout $env:AI_SPRINT_TIMEOUT ${agent} exec -f $env:AI_SPRINT_PROMPT`,
++          '/c',
++          `acpx --cwd %AI_SPRINT_CWD% --approve-all --model %AI_SPRINT_MODEL% --timeout %AI_SPRINT_TIMEOUT% ${agent} exec -f %AI_SPRINT_PROMPT%`,
+         ],
+         {
+           cwd,

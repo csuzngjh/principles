@@ -1,0 +1,66 @@
+{
+  "stage": "implement-pass-2",
+  "round": 3,
+  "outcome": "halt",
+  "summary": "Stage exceeded maximum rounds without all required approvals.",
+  "approvalCount": 0,
+  "blockerCount": 0,
+  "reviewerAVerdict": "REVISE",
+  "reviewerBVerdict": "REVISE",
+  "producerSectionChecks": {
+    "SUMMARY": false,
+    "CHANGES": false,
+    "CODE_EVIDENCE": false,
+    "EVIDENCE": false,
+    "KEY_EVENTS": false,
+    "SHADOW_COMPARISON_UPDATED": false,
+    "CHECKS": false
+  },
+  "reviewerSectionChecks": {
+    "VERDICT": false,
+    "BLOCKERS": false,
+    "FINDINGS": false,
+    "CODE_EVIDENCE": false,
+    "NEXT_FOCUS": false,
+    "CHECKS": false
+  },
+  "producerChecks": null,
+  "reviewerAChecks": null,
+  "reviewerBChecks": null,
+  "blockers": [
+    "Reviewer A did not emit a strict VERDICT: APPROVE|REVISE|BLOCK line.",
+    "Dimension \"correctness\" not scored by reviewer.",
+    "Dimension \"scope_control\" not scored by reviewer.",
+    "Dimension \"shadow_run_parity\" not scored by reviewer.",
+    "Dimension \"regression_risk\" not scored by reviewer.",
+    "Dimension \"git_commit_evidence\" not scored by reviewer.",
+    "Dimension \"correctness\" not scored by reviewer.",
+    "Dimension \"scope_control\" not scored by reviewer.",
+    "Dimension \"shadow_run_parity\" not scored by reviewer.",
+    "Dimension \"regression_risk\" not scored by reviewer.",
+    "Dimension \"git_commit_evidence\" not scored by reviewer.",
+    "Contract not fulfilled: no contract items extracted (required: review_findings_addressed, shadow_parity_confirmed, no_scope_creep, git_commit_sha)"
+  ],
+  "scoringDimensions": [
+    "correctness",
+    "scope_control",
+    "shadow_run_parity",
+    "regression_risk",
+    "git_commit_evidence"
+  ],
+  "reviewerADimensions": {},
+  "reviewerBDimensions": {},
+  "dimensionFailures": [
+    "Dimension \"correctness\" not scored by reviewer.",
+    "Dimension \"scope_control\" not scored by reviewer.",
+    "Dimension \"shadow_run_parity\" not scored by reviewer.",
+    "Dimension \"regression_risk\" not scored by reviewer.",
+    "Dimension \"git_commit_evidence\" not scored by reviewer.",
+    "Dimension \"correctness\" not scored by reviewer.",
+    "Dimension \"scope_control\" not scored by reviewer.",
+    "Dimension \"shadow_run_parity\" not scored by reviewer.",
+    "Dimension \"regression_risk\" not scored by reviewer.",
+    "Dimension \"git_commit_evidence\" not scored by reviewer."
+  ],
+  "updatedAt": "2026-04-02T12:22:03.004Z"
+}
