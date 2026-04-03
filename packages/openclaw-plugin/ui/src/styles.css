@@ -84,11 +84,34 @@
 }
 
 /* ==========================================================================
-   Dark Mode
+   Dark Mode — system preference + manual toggle via [data-theme]
    ========================================================================== */
 
+[data-theme="dark"] {
+  --bg-base: #1A1917;
+  --bg-elevated: #242220;
+  --bg-sunken: #131311;
+  --accent: #6BA394;
+  --accent-hover: #7DB5A8;
+  --accent-soft: rgba(107, 163, 148, 0.15);
+  --accent-muted: rgba(107, 163, 148, 0.08);
+  --earth-brown: #A08E74;
+  --earth-tan: #9A8A70;
+  --earth-cream: #3D3830;
+  --earth-warm: #4A4238;
+  --text-primary: #F5F2ED;
+  --text-secondary: #A8A29A;
+  --text-tertiary: #706B65;
+  --border: rgba(160, 142, 116, 0.2);
+  --border-hover: rgba(160, 142, 116, 0.35);
+  --card-bg: #242220;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.2);
+  --shadow-md: 0 2px 8px rgba(0,0,0,0.25), 0 4px 16px rgba(0,0,0,0.12);
+  --shadow-lg: 0 4px 12px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.15);
+}
+
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg-base: #1A1917;
     --bg-elevated: #242220;
     --bg-sunken: #131311;
@@ -401,6 +424,24 @@ input, select {
   font-size: 13px;
   color: var(--text-tertiary);
   text-align: right;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.refresh-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent);
+  font-size: 12px;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }
 
 /* ==========================================================================
@@ -1284,8 +1325,13 @@ pre {
   }
 
   .export-link span:last-child,
-  .logout-button span:last-child {
+  .logout-button span:last-child,
+  .theme-toggle span:last-child {
     display: none;
+  }
+
+  .theme-toggle {
+    padding: var(--space-2) var(--space-3);
   }
 
   .content {
