@@ -1,0 +1,947 @@
+[client] initialize (running)
+
+[client] session/new (running)
+
+[client] session/set_model (running)
+
+[thinking] Let me start by reading all the required documents to understand the context of this review task.
+I'll read all the required documents in parallel to understand the context.
+
+[tool] read (pending)
+  input: {}
+
+[tool] read (pending)
+  input: {}
+
+[tool] ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\brief.md (completed)
+  kind: read
+  input: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\brief.md
+  files: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\brief.md
+  output:
+    <path>D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\brief.md</path>
+    <type>file</type>
+    <content>1: # Stage Brief
+    2: 
+    3: - Task: Subagent Helper: migrate empathy observer to workflow helper
+    4: - Stage: architecture-cut
+    5: - Round: 2
+    6: 
+    7: ## Goals
+    8: - Decide: migrate empathy to helper (runtime_direct transport) or keep existing?
+    9: - Define the EmpathyObserverManager interface: startWorkflow(), finalizeOnce(), etc.
+    10: - Document OpenClaw compatibility assumptions and cross-repo verification results.
+    11: - global_reviewer must explicitly answer: Is migration architecturally sound? Are assumptions verified?
+    12: 
+    13: ## Carry Forward
+    14: 
+    15: ### What was accomplished
+    16: - architecture_decision
+    17: - openclaw_cross_repo_verification
+    18: - helper_interface_draft
+    19: - shadow_run_plan
+    20: 
+    21: ### What needs to change
+    22: - No blockers from previous round.
+    23: 
+    24: ### Focus for this round
+    25: - Follow stage goals.
+    26: 
+    ... (328 more lines)
+
+[tool] read (pending)
+  input: {}
+
+[tool] ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\producer.md (completed)
+  kind: read
+  input: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\producer.md
+  files: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\producer.md
+  output:
+    <path>D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\producer.md</path>
+    <type>file</type>
+    <content>1: # Producer Report — Stage 02-architecture-cut, Round 2
+    2: 
+    3: ## SUMMARY
+    4: 
+    5: **Task**: Subagent Helper: migrate empathy observer to workflow helper  
+    6: **Stage**: architecture-cut  
+    7: **Round**: 2  
+    8: **Status**: Complete — all contract deliverables reached DONE
+    9: 
+    10: Round 2 addresses Reviewer B's blockers from Round 1:
+    11: 1. **Blocker 1 (shadow_run_plan)**: Previously a high-level outline. Now enhanced with concrete quantitative metrics, phase thresholds, rollback triggers, and shadow result collection schema.
+    12: 2. **Blocker 2 (helper_interface_draft)**: Previously prose in markdown. Now created as actual TypeScript code artifact at `packages/openclaw-plugin/src/service/subagent-workflow/types.ts`.
+    13: 
+    14: ---
+    15: 
+    16: ## ARCHITECTURE_DECISION
+    17: 
+    18: ### Decision: MIGRATE empathy observer to workflow helper
+    19: 
+    20: **Transport**: `runtime_direct` (unchanged from Round 1)
+    21: 
+    22: ### Rationale (from Round 1, unchanged)
+    23: 
+    24: 1. **Design doc alignment**: Section 12.1 of `2026-03-31-subagent-workflow-helper-design.md` explicitly designates empathy observer as the first candidate for helper migration.
+    25: 2. **Workflow boundaries clear**: Empathy observer has well-defined lifecycle: spawn → wait → parse → persist → cleanup.
+    26: 3. **Structured JSON result**: Child result is machine-parseable, enabling consistent `parseResult` implementation.
+    ... (164 more lines)
+
+[tool] read (pending)
+  input: {}
+
+[tool] ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\reviewer-a.md (completed)
+  kind: read
+  input: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\reviewer-a.md
+  files: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\reviewer-a.md
+  output:
+    <path>D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\reviewer-a.md</path>
+    <type>file</type>
+    <content>1: # Reviewer A Report — Architecture Cut Round 2
+    2: 
+    3: ## VERDICT
+    4: **APPROVE**
+    5: 
+    6: All four contract deliverables reached DONE status with verified evidence. The architecture decision to migrate empathy observer to workflow helper using runtime_direct transport is sound. Interface definitions are comprehensive and the shadow run plan includes quantitative metrics.
+    7: 
+    8: ## BLOCKERS
+    9: None.
+    10: 
+    11: ## FINDINGS
+    12: 
+    13: ### 1. Contract Deliverables Verified
+    14: 
+    15: | Deliverable | Status | Evidence |
+    16: |-------------|--------|----------|
+    17: | architecture_decision | DONE | Decision documented, rationale aligned with design doc |
+    18: | openclaw_cross_repo_verification | DONE | Verified via shell commands (files outside workspace) |
+    19: | helper_interface_draft | DONE | types.ts created at correct location |
+    20: | shadow_run_plan | DONE | Enhanced with quantitative metrics, rollback triggers |
+    21: 
+    22: ### 2. OpenClaw Compatibility Verification
+    23: 
+    24: Cross-repo verification confirmed all claims via shell commands:
+    25: 
+    26: - **subagent_ended hook**: Fires when `expectsCompletionMessage: true` (subagent-registry-lifecycle.ts:135-154)
+    ... (127 more lines)
+
+[tool] ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\reviewer-b.md (completed)
+  kind: read
+  input: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\reviewer-b.md
+  files: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\reviewer-b.md
+  output:
+    <path>D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\reviewer-b.md</path>
+    <type>file</type>
+    <content>1: # Reviewer B Report — Stage 02-architecture-cut, Round 2
+    2: 
+    3: ## VERDICT
+    4: 
+    5: **APPROVE**
+    6: 
+    7: Round 2 successfully addressed the 2 blockers from Round 1:
+    8: 1. **shadow_run_plan**: Previously "outline_only" → Now concrete with quantitative metrics, phase thresholds, rollback triggers, and shadow result schema
+    9: 2. **helper_interface_draft**: Previously prose in markdown → Now actual TypeScript code artifact at `packages/openclaw-plugin/src/service/subagent-workflow/types.ts`
+    10: 
+    11: All contract deliverables are DONE. No remaining blockers.
+    12: 
+    13: ---
+    14: 
+    15: ## BLOCKERS
+    16: 
+    17: None.
+    18: 
+    19: Round 1 blockers were:
+    20: 1. `shadow_run_plan` was outline-only — **RESOLVED** in Round 2 with concrete metrics
+    21: 2. `helper_interface_draft` was prose — **RESOLVED** in Round 2 with `types.ts` code artifact
+    22: 
+    23: ---
+    24: 
+    25: ## FINDINGS
+    26: 
+    ... (155 more lines)
+
+[thinking] Let me now read the additional files that are referenced — specifically the types.ts file, the shadow_run_plan.md, and the design doc to understand the full context.
+Now let me read the key artifact files to verify the claims.
+
+[tool] read (pending)
+  input: {}
+
+[tool] glob (pending)
+  input: {}
+
+[tool] read (failed)
+  kind: read
+  input: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\types.ts
+  files: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\types.ts
+  output:
+    {
+      "error": "File not found: D:\\Code\\principles\\ops\\ai-sprints\\2026-04-01T16-10-19-112Z-subagent-helper-empathy\\stages\\02-architecture-cut\\types.ts"
+    }
+    
+    File not found: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\types.ts
+
+[tool] glob (pending)
+  input: {}
+
+[tool] glob (completed)
+  kind: search
+  input: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut
+  files: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut
+  output:
+    Found 1 file(s)
+    
+    D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\shadow_run_plan.md
+    [Agent Usage Reminder]
+    
+    You called a search/fetch tool directly without leveraging specialized agents.
+    
+    RECOMMENDED: Use task with explore/librarian agents for better results:
+    
+    ```
+    // Parallel exploration - fire multiple agents simultaneously
+    task(agent="explore", prompt="Find all files matching pattern X")
+    task(agent="explore", prompt="Search for implementation of Y") 
+    task(agent="librarian", prompt="Lookup documentation for Z")
+    
+    // Then continue your work while they run in background
+    // System will notify you when each completes
+    ```
+    
+    WHY:
+    - Agents can perform deeper, more thorough searches
+    - Background tasks run in parallel, saving time
+    - Specialized agents have domain expertise
+    - Reduces context window usage in main session
+    
+    ALWAYS prefer: Multiple parallel task calls > Direct tool calls
+
+[tool] glob (completed)
+  kind: search
+  input: D:\Code\principles\packages\openclaw-plugin\src
+  files: D:\Code\principles\packages\openclaw-plugin\src
+  output:
+    Found 1 file(s)
+    
+    D:\Code\principles\packages\openclaw-plugin\src\service\subagent-workflow\types.ts
+    [Agent Usage Reminder]
+    
+    You called a search/fetch tool directly without leveraging specialized agents.
+    
+    RECOMMENDED: Use task with explore/librarian agents for better results:
+    
+    ```
+    // Parallel exploration - fire multiple agents simultaneously
+    task(agent="explore", prompt="Find all files matching pattern X")
+    task(agent="explore", prompt="Search for implementation of Y") 
+    task(agent="librarian", prompt="Lookup documentation for Z")
+    
+    // Then continue your work while they run in background
+    // System will notify you when each completes
+    ```
+    
+    WHY:
+    - Agents can perform deeper, more thorough searches
+    - Background tasks run in parallel, saving time
+    - Specialized agents have domain expertise
+    - Reduces context window usage in main session
+    
+    ALWAYS prefer: Multiple parallel task calls > Direct tool calls
+
+[thinking] The types.ts file exists at `D:\Code\principles\packages\openclaw-plugin\src\service\subagent-workflow\types.ts`. Let me read that and the shadow_run_plan.md file.
+
+[tool] read (pending)
+  input: {}
+
+[tool] read (pending)
+  input: {}
+
+[tool] packages\openclaw-plugin\src\service\subagent-workflow\types.ts (completed)
+  kind: read
+  input: D:\Code\principles\packages\openclaw-plugin\src\service\subagent-workflow\types.ts
+  files: D:\Code\principles\packages\openclaw-plugin\src\service\subagent-workflow\types.ts
+  output:
+    <path>D:\Code\principles\packages\openclaw-plugin\src\service\subagent-workflow\types.ts</path>
+    <type>file</type>
+    <content>1: /**
+    2:  * Subagent Workflow Helper - Type Definitions
+    3:  * 
+    4:  * This file defines the TypeScript interfaces for the workflow helper system
+    5:  * that manages subagent lifecycle (empathy observer, deep-reflect, etc.).
+    6:  * 
+    7:  * Design reference: docs/design/2026-03-31-subagent-workflow-helper-design.md
+    8:  * 
+    9:  * @module subagent-workflow/types
+    10:  */
+    11: 
+    12: // ── Workflow Transport ────────────────────────────────────────────────────────
+    13: 
+    14: /**
+    15:  * Transport type determines how the subagent is invoked and managed.
+    16:  * - `runtime_direct`: Plugin directly calls runtime.subagent.run() and manages lifecycle
+    17:  * - `registry_backed`: OpenClaw registry manages lifecycle via hooks (subagent_ended, etc.)
+    18:  */
+    19: export type WorkflowTransport = 'runtime_direct' | 'registry_backed';
+    20: 
+    21: // ── Workflow State Machine ───────────────────────────────────────────────────
+    22: 
+    23: /**
+    24:  * States in the workflow state machine.
+    25:  * 
+    26:  * State transitions:
+    ... (269 more lines)
+
+[tool] ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\shadow_run_plan.md (completed)
+  kind: read
+  input: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\shadow_run_plan.md
+  files: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\shadow_run_plan.md
+  output:
+    <path>D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\shadow_run_plan.md</path>
+    <type>file</type>
+    <content>1: # Shadow Run Plan — Empathy Observer Migration to Workflow Helper
+    2: 
+    3: ## Overview
+    4: 
+    5: This plan defines the shadow mode validation approach for migrating empathy observer from direct `EmpathyObserverManager` to the `WorkflowHelper` system.
+    6: 
+    7: **Scope**: Empathy Observer only. Deep Reflect is separate PR.
+    8: **Environment**: Shadow mode (new + old code run in parallel) → Canary → Full rollout.
+    9: 
+    10: ---
+    11: 
+    12: ## Phase 1: Shadow Mode (Weeks 1-2)
+    13: 
+    14: ### 1.1 Infrastructure
+    15: 
+    16: - [ ] Create `packages/openclaw-plugin/src/service/subagent-workflow/workflow-manager.ts`
+    17: - [ ] Create `packages/openclaw-plugin/src/service/subagent-workflow/runtime-direct-driver.ts`
+    18: - [ ] Implement `WorkflowManager.startWorkflow()` with state machine
+    19: - [ ] Implement `WorkflowManager.finalizeOnce()` with deduplication
+    20: - [ ] Implement `WorkflowManager.sweepExpiredWorkflows()` for orphan cleanup
+    21: - [ ] Wire empathy observer to use helper (both paths active)
+    22: 
+    23: ### 1.2 Shadow Mode Execution
+    24: 
+    25: Both old and new code paths execute on every empathy observer trigger:
+    26: 
+    ... (226 more lines)
+
+[thinking] Now let me also look at the existing EmpathyObserverManager and the design doc to understand the context better. Let me also check the decision.md and scorecard.json files, which are protected orchestrator-owned files but I should read them for context.
+
+Now let me check the existing EmpathyObserverManager implementation and the design doc for cross-reference.
+
+[tool] glob (pending)
+  input: {}
+
+[tool] glob (pending)
+  input: {}
+
+[tool] glob (completed)
+  kind: search
+  input: D:\Code\principles\packages\openclaw-plugin\src
+  files: D:\Code\principles\packages\openclaw-plugin\src
+  output:
+    Found 1 file(s)
+    
+    D:\Code\principles\packages\openclaw-plugin\src\service\empathy-observer-manager.ts
+    [Agent Usage Reminder]
+    
+    You called a search/fetch tool directly without leveraging specialized agents.
+    
+    RECOMMENDED: Use task with explore/librarian agents for better results:
+    
+    ```
+    // Parallel exploration - fire multiple agents simultaneously
+    task(agent="explore", prompt="Find all files matching pattern X")
+    task(agent="explore", prompt="Search for implementation of Y") 
+    task(agent="librarian", prompt="Lookup documentation for Z")
+    
+    // Then continue your work while they run in background
+    // System will notify you when each completes
+    ```
+    
+    WHY:
+    - Agents can perform deeper, more thorough searches
+    - Background tasks run in parallel, saving time
+    - Specialized agents have domain expertise
+    - Reduces context window usage in main session
+    
+    ALWAYS prefer: Multiple parallel task calls > Direct tool calls
+
+[tool] read (pending)
+  input: {}
+
+[tool] glob (completed)
+  kind: search
+  input: D:\Code\principles\docs
+  files: D:\Code\principles\docs
+  output:
+    Found 1 file(s)
+    
+    D:\Code\principles\docs\design\2026-03-31-subagent-workflow-helper-design.md
+    [Agent Usage Reminder]
+    
+    You called a search/fetch tool directly without leveraging specialized agents.
+    
+    RECOMMENDED: Use task with explore/librarian agents for better results:
+    
+    ```
+    // Parallel exploration - fire multiple agents simultaneously
+    task(agent="explore", prompt="Find all files matching pattern X")
+    task(agent="explore", prompt="Search for implementation of Y") 
+    task(agent="librarian", prompt="Lookup documentation for Z")
+    
+    // Then continue your work while they run in background
+    // System will notify you when each completes
+    ```
+    
+    WHY:
+    - Agents can perform deeper, more thorough searches
+    - Background tasks run in parallel, saving time
+    - Specialized agents have domain expertise
+    - Reduces context window usage in main session
+    
+    ALWAYS prefer: Multiple parallel task calls > Direct tool calls
+
+[tool] read (pending)
+  input: {}
+
+[tool] ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\decision.md (completed)
+  kind: read
+  input: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\decision.md
+  files: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\decision.md
+  output:
+    <path>D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\decision.md</path>
+    <type>file</type>
+    <content>1: # Decision
+    2: 
+    3: - Stage: architecture-cut
+    4: - Round: 1
+    5: - Outcome: revise
+    6: 
+    7: ## Summary
+    8: At least one reviewer requested revision or blocked progress.
+    9: 
+    10: ## Blockers
+    11: - None.
+    12: 
+    13: ## Metrics
+    14: - approvalCount: 2
+    15: - blockerCount: 0
+    16: - reviewerAVerdict: APPROVE
+    17: - reviewerBVerdict: REVISE
+    18: - producerSectionChecks: {"SUMMARY":true,"ARCHITECTURE_DECISION":true,"OPENCLAW_ASSUMPTIONS_VERIFIED":true,"INTERFACE_DESIGN":true,"TRADE_OFFS":true,"CHECKS":true}
+    19: - reviewerSectionChecks: {"VERDICT":true,"BLOCKERS":true,"FINDINGS":true,"OPENCLAW_COMPATIBILITY_REVIEW":true,"ARCHITECTURE_ASSESSMENT":true,"NEXT_FOCUS":true,"CHECKS":true}
+    20: - producerChecks: evidence=ok;tests=not-run;scope=pd-only;prompt-isolation=confirmed;openclaw-verification=done-cross-repo;architecture-decision=migrated;interface-draft=complete;shadow-plan=complete
+    21: - reviewerAChecks: criteria=met;blockers=0;verification=complete
+    22: - reviewerBChecks: criteria=partial;blockers=2;verification=cross-repo-done;openclaw_verification=complete;scope=clear;tests=existing_coverage_good;shadow_plan=outline_only
+    23: - globalReviewerVerdict: APPROVE
+    24: - globalReviewerRequired: true
+    25: - globalReviewerChecks: [object Object]
+    26: - macroAnswersSatisfied: Q1,Q2,Q3,Q4,Q5
+    ... (14 more lines)
+
+[tool] ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\scorecard.json (completed)
+  kind: read
+  input: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\scorecard.json
+  files: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\scorecard.json
+  output:
+    <path>D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\scorecard.json</path>
+    <type>file</type>
+    <content>1: {
+    2:   "stage": "architecture-cut",
+    3:   "round": 1,
+    4:   "outcome": "revise",
+    5:   "summary": "At least one reviewer requested revision or blocked progress.",
+    6:   "approvalCount": 2,
+    7:   "blockerCount": 0,
+    8:   "reviewerAVerdict": "APPROVE",
+    9:   "reviewerBVerdict": "REVISE",
+    10:   "producerSectionChecks": {
+    11:     "SUMMARY": true,
+    12:     "ARCHITECTURE_DECISION": true,
+    13:     "OPENCLAW_ASSUMPTIONS_VERIFIED": true,
+    14:     "INTERFACE_DESIGN": true,
+    15:     "TRADE_OFFS": true,
+    16:     "CHECKS": true
+    17:   },
+    18:   "reviewerSectionChecks": {
+    19:     "VERDICT": true,
+    20:     "BLOCKERS": true,
+    21:     "FINDINGS": true,
+    22:     "OPENCLAW_COMPATIBILITY_REVIEW": true,
+    23:     "ARCHITECTURE_ASSESSMENT": true,
+    24:     "NEXT_FOCUS": true,
+    25:     "CHECKS": true
+    26:   },
+    ... (77 more lines)
+
+[thinking] Now let me read the EmpathyObserverManager to understand the existing implementation and how the migration would work.
+
+[tool] read (pending)
+  input: {}
+
+[tool] glob (pending)
+  input: {}
+
+[tool] packages\openclaw-plugin\src\service\empathy-observer-manager.ts (completed)
+  kind: read
+  input: D:\Code\principles\packages\openclaw-plugin\src\service\empathy-observer-manager.ts
+  files: D:\Code\principles\packages\openclaw-plugin\src\service\empathy-observer-manager.ts
+  output:
+    <path>D:\Code\principles\packages\openclaw-plugin\src\service\empathy-observer-manager.ts</path>
+    <type>file</type>
+    <content>1: import { WorkspaceContext } from '../core/workspace-context.js';
+    2: import { trackFriction } from '../core/session-tracker.js';
+    3: import { isSubagentRuntimeAvailable } from '../utils/subagent-probe.js';
+    4: import type { PluginLogger, SubagentRunResult, SubagentWaitResult } from '../openclaw-sdk.js';
+    5: 
+    6: const OBSERVER_SESSION_PREFIX = 'agent:main:subagent:empathy-obs-';
+    7: 
+    8: // Default timeout for waitForRun (30 seconds)
+    9: const DEFAULT_WAIT_TIMEOUT_MS = 30_000;
+    10: 
+    11: /**
+    12:  * Run metadata for active empathy observer runs
+    13:  */
+    14: interface ObserverRunMetadata {
+    15:     runId: string;
+    16:     parentSessionId: string;
+    17:     observerSessionKey: string;
+    18:     workspaceDir?: string;
+    19:     startedAt: number;
+    20:     timedOutAt?: number;
+    21:     erroredAt?: number;
+    22:     // Timestamp when observer reached a terminal (timeout/error) state;
+    23:     // used for TTL-based cleanup of orphaned entries
+    24:     observedAt?: number;
+    25: }
+    26: 
+    ... (488 more lines)
+
+[tool] glob (completed)
+  kind: search
+  input: D:\Code\principles\packages\openclaw-plugin\src
+  files: D:\Code\principles\packages\openclaw-plugin\src
+  output:
+    No files found
+    [Agent Usage Reminder]
+    
+    You called a search/fetch tool directly without leveraging specialized agents.
+    
+    RECOMMENDED: Use task with explore/librarian agents for better results:
+    
+    ```
+    // Parallel exploration - fire multiple agents simultaneously
+    task(agent="explore", prompt="Find all files matching pattern X")
+    task(agent="explore", prompt="Search for implementation of Y") 
+    task(agent="librarian", prompt="Lookup documentation for Z")
+    
+    // Then continue your work while they run in background
+    // System will notify you when each completes
+    ```
+    
+    WHY:
+    - Agents can perform deeper, more thorough searches
+    - Background tasks run in parallel, saving time
+    - Specialized agents have domain expertise
+    - Reduces context window usage in main session
+    
+    ALWAYS prefer: Multiple parallel task calls > Direct tool calls
+
+[thinking] Now I have a comprehensive picture. Let me also look at the openclaw-sdk to understand the types being re-exported from types.ts.
+Let me check the openclaw-sdk types and the design doc.
+
+[tool] glob (pending)
+  input: {}
+
+[tool] read (pending)
+  input: {}
+
+[tool] glob (completed)
+  kind: search
+  input: D:\Code\principles\packages\openclaw-plugin\src
+  files: D:\Code\principles\packages\openclaw-plugin\src
+  output:
+    Found 1 file(s)
+    
+    D:\Code\principles\packages\openclaw-plugin\src\openclaw-sdk.d.ts
+    [Agent Usage Reminder]
+    
+    You called a search/fetch tool directly without leveraging specialized agents.
+    
+    RECOMMENDED: Use task with explore/librarian agents for better results:
+    
+    ```
+    // Parallel exploration - fire multiple agents simultaneously
+    task(agent="explore", prompt="Find all files matching pattern X")
+    task(agent="explore", prompt="Search for implementation of Y") 
+    task(agent="librarian", prompt="Lookup documentation for Z")
+    
+    // Then continue your work while they run in background
+    // System will notify you when each completes
+    ```
+    
+    WHY:
+    - Agents can perform deeper, more thorough searches
+    - Background tasks run in parallel, saving time
+    - Specialized agents have domain expertise
+    - Reduces context window usage in main session
+    
+    ALWAYS prefer: Multiple parallel task calls > Direct tool calls
+
+[tool] docs\design\2026-03-31-subagent-workflow-helper-design.md (completed)
+  kind: read
+  input: D:\Code\principles\docs\design\2026-03-31-subagent-workflow-helper-design.md
+  files: D:\Code\principles\docs\design\2026-03-31-subagent-workflow-helper-design.md
+  output:
+    <path>D:\Code\principles\docs\design\2026-03-31-subagent-workflow-helper-design.md</path>
+    <type>file</type>
+    <content>1: # Subagent Workflow Helper 设计方案
+    2: 
+    3: **日期**: 2026-03-31  
+    4: **状态**: Proposed  
+    5: **适用范围**: `packages/openclaw-plugin`  
+    6: **目标读者**: PD 核心维护者、OpenClaw 插件开发者、AI 编码助手
+    7: 
+    8: ## 1. 背景
+    9: 
+    10: Principles Disciple 在多个核心能力上大量依赖子代理，包括但不限于：
+    11: 
+    12: - 共情观察器（Empathy Observer）
+    13: - 深度反思（Deep Reflect）
+    14: - 诊断与演化恢复（Diagnostician / Evolution）
+    15: - 夜间演化 / 睡眠模式相关 worker
+    16: - 路由观察与影子分析类子任务
+    17: 
+    18: 这些能力都不是“边缘附属功能”，而是 PD 的核心智能化能力。一旦子代理生命周期处理不稳定，PD 会出现：
+    19: 
+    20: - 误判完成、提前清理
+    21: - 重复回收、重复写入
+    22: - 子代理 session 泄漏
+    23: - 结果丢失、假阴性
+    24: - 依赖 hook 的链路在 OpenClaw 升级后悄悄失效
+    25: - 难以定位的业务断裂点
+    26: 
+    ... (77 more lines)
+
+[thinking] Now I have a comprehensive picture of the context. Let me also read a few more sections of the design doc to understand the empathy observer migration specifically (section 12.1).
+Let me read the key section 12.1 of the design doc about empathy observer migration.
+
+[tool] grep (pending)
+  input: {}
+
+[tool] grep (pending)
+  input: {}
+
+[tool] grep (completed)
+  kind: search
+  input: D:\Code\principles\docs\design\2026-03-31-subagent-workflow-helper-design.md
+  files: D:\Code\principles\docs\design\2026-03-31-subagent-workflow-helper-design.md
+  output:
+    Found 1 match(es) in 1 file(s)
+    
+    D:\Code\principles\docs\design\2026-03-31-subagent-workflow-helper-design.md
+      558: ### 12.1 Empathy Observer
+    
+    [Agent Usage Reminder]
+    
+    You called a search/fetch tool directly without leveraging specialized agents.
+    
+    RECOMMENDED: Use task with explore/librarian agents for better results:
+    
+    ```
+    // Parallel exploration - fire multiple agents simultaneously
+    task(agent="explore", prompt="Find all files matching pattern X")
+    task(agent="explore", prompt="Search for implementation of Y") 
+    task(agent="librarian", prompt="Lookup documentation for Z")
+    
+    // Then continue your work while they run in background
+    // System will notify you when each completes
+    ```
+    
+    WHY:
+    - Agents can perform deeper, more thorough searches
+    - Background tasks run in parallel, saving time
+    - Specialized agents have domain expertise
+    - Reduces context window usage in main session
+    
+    ALWAYS prefer: Multiple parallel task calls > Direct tool calls
+
+[tool] grep (completed)
+  kind: search
+  input: D:\Code\principles\docs\design\2026-03-31-subagent-workflow-helper-design.md
+  files: D:\Code\principles\docs\design\2026-03-31-subagent-workflow-helper-design.md
+  output:
+    Found 14 match(es) in 1 file(s)
+    
+    D:\Code\principles\docs\design\2026-03-31-subagent-workflow-helper-design.md
+      127: - empathy observer
+      215: - 不承载 empathy / diagnostician / reflect 的业务字段语义
+      289: - `empathy_observer`
+      405: - empathy observer
+      572: - 业务模块只负责 parse empathy payload 与 persistence
+      591: - 待 helper 内核在 empathy + deep-reflect 上验证后，再以 diagnosed 方式迁移
+      621: | `subagent-helper-empathy` | 迁移 empathy observer 到 helper | EmpathyObserverManager |
+      624: 两者可以顺序执行（先 empathy，再 deep-reflect），也可以按优先级并行。
+      632: 2. **业务流闭环**：helper 接管后，empathy/deep-reflect 的结果持久化路径是否明确？是否有丢失窗口？
+      638: 5. **与 Diagnostician/Nocturnal 的边界**：PR2 仅处理 empathy 和 deep-reflect，当前对 Diagnostician/Nocturnal 不做迁移。helper 内核的接口设计是否保留了对 `registry_backed` transport 的扩展能力？
+      666: > **推荐用 ai sprint orchestrator 执行 Phase A**（任务 ID: `subagent-helper-empathy` 的 `investigate` 阶段）。Phase A 本质上是调查 + 架构决策任务，适合 orchestrator 的 6 阶段模型。
+      672: - empathy observer 改为通过 helper 启动和 finalize
+      745: - 先 empathy，再 deep-reflect，再 diagnostician
+      776: 如果后续要进入实施阶段，建议先从 **Phase A helper 内核** 和 **Phase B empathy 接入** 开始。
+    
+    [Agent Usage Reminder]
+    
+    You called a search/fetch tool directly without leveraging specialized agents.
+    
+    RECOMMENDED: Use task with explore/librarian agents for better results:
+    
+    ```
+    // Parallel exploration - fire multiple agents simultaneously
+    task(agent="explore", prompt="Find all files matching pattern X")
+    task(agent="explore", prompt="Search for implementation of Y") 
+    ... (13 more lines)
+
+[thinking] Now let me read section 12.1 of the design doc and surrounding context.
+
+[tool] read (pending)
+  input: {}
+
+[tool] docs\design\2026-03-31-subagent-workflow-helper-design.md (completed)
+  kind: read
+  input: D:\Code\principles\docs\design\2026-03-31-subagent-workflow-helper-design.md
+  files: D:\Code\principles\docs\design\2026-03-31-subagent-workflow-helper-design.md
+  output:
+    <path>D:\Code\principles\docs\design\2026-03-31-subagent-workflow-helper-design.md</path>
+    <type>file</type>
+    <content>555: 
+    556: > **PR2 范围声明**：PR2 仅接入 Empathy Observer 和 Deep Reflect。Diagnostician / Evolution / Nocturnal / Routing Shadow Observation 不在 PR2 范围内，留待后续阶段。
+    557: 
+    558: ### 12.1 Empathy Observer
+    559: 
+    560: 最适合作为 helper 第一批接入对象。
+    561: 
+    562: 原因：
+    563: 
+    564: - workflow 边界清晰
+    565: - child result 是结构化 JSON
+    566: - 强依赖幂等和 cleanup
+    567: - 已经暴露出 timeout / fallback / cleanup 相关问题
+    568: 
+    569: helper 接入后：
+    570: 
+    571: - transport 使用 `runtime_direct`
+    572: - 业务模块只负责 parse empathy payload 与 persistence
+    573: - timeout / fallback / cleanup 由 helper 接管
+    574: 
+    575: ### 12.2 Deep Reflect
+    576: 
+    577: 第二批必须接入。
+    578: 
+    579: 原因：
+    580: 
+    ... (57 more lines)
+
+[thinking] Now let me read a bit more of the design doc to see the global reviewer questions.
+
+[tool] read (pending)
+  input: {}
+
+[tool] docs\design\2026-03-31-subagent-workflow-helper-design.md (completed)
+  kind: read
+  input: D:\Code\principles\docs\design\2026-03-31-subagent-workflow-helper-design.md
+  files: D:\Code\principles\docs\design\2026-03-31-subagent-workflow-helper-design.md
+  output:
+    <path>D:\Code\principles\docs\design\2026-03-31-subagent-workflow-helper-design.md</path>
+    <type>file</type>
+    <content>634: 3. **架构收敛性**：引入 helper 后，PD 子代理调用是更统一了，还是引入了新的隐式协议？
+    635: 
+    636: 4. **数据流闭环**：子代理的 `sessionKey / runId / parentSessionId` 链是否在 helper 层被正确归因？是否存在双重 finalize 风险？
+    637: 
+    638: 5. **与 Diagnostician/Nocturnal 的边界**：PR2 仅处理 empathy 和 deep-reflect，当前对 Diagnostician/Nocturnal 不做迁移。helper 内核的接口设计是否保留了对 `registry_backed` transport 的扩展能力？
+    639: 
+    640: ### 12B.4 OpenClaw 跨仓库假设核验清单
+    641: 
+    642: PR2 开始前，必须在 ai sprint orchestrator 的 `investigate` 阶段核验以下假设（由 reviewer_b 负责）：
+    643: 
+    644: | 假设 | 验证方法 | 如果不成立 |
+    645: |------|---------|-----------|
+    646: | `subagent_ended` hook 在 `registry_backed` transport 下由 `subagent-registry-completion.ts` 触发 | 读 `D:/Code/openclaw/src/agents/subagent-registry-completion.ts` | 需重新设计 lifecycle hook 假设 |
+    647: | `runtime.subagent.run()` 不等价于进入 subagent registry | 读 `D:/Code/openclaw/src/gateway/server-plugins.ts` | 需在 helper 层区分 transport 类型 |
+    648: | `sessions_spawn` 的 child session key 生成逻辑在 `subagent-spawn.ts` | 读 `D:/Code/openclaw/src/agents/subagent-spawn.ts` | 需在 helper 层重做 session key 归因 |
+    649: | 子代理结果在 `waitForRun` 超时后仍可能在 `getSessionMessages` 中出现 | 需要确认是否有 OpenClaw 侧的 retry/backfill 机制 | 需在 helper 层调整 finalize 策略 |
+    650: 
+    651: ---
+    652: 
+    653: ## 13. 实施计划
+    654: 
+    655: ### Phase A：建立 helper 内核，不接业务（可选：ai sprint orchestrator 驱动）
+    656: 
+    657: 交付：
+    658: 
+    659: - `subagent-workflow/` 模块
+    ... (27 more lines)
+
+[thinking] Now I have a comprehensive understanding of the task. Let me now analyze all the evidence I've gathered and write the global reviewer report.
+           
+           Key things I need to verify as the global reviewer:
+           1. Does the architecture decision actually serve the end goal?
+           2. Is the business flow closed?
+           3. Is the architecture converging?
+           4. OpenClaw compatibility - all assumptions verified?
+           5. Macro questions Q1-Q5
+           
+           Let me check what the Q1-Q5 questions are. The brief says:
+           - Q1: OpenClaw compatibility (Q1 from design doc line 630)
+           - Q2: Business flow closure (Q2 from design doc line 632)
+           
+           
+           - Q3: Architecture convergence (Q3 from design doc line 634)
+           - Q4: Data flow closure (Q4 from design doc line 636)
+           - Q5: Extensibility for Diagnostician/Nocturnal (Q5 from design doc line 638)
+           
+           Looking at the Round 1 scorecard, global_reviewer actually approved in Round 1, which is interesting given the REVISE ou...
+Now I have all the context I need. Let me synthesize and write the global reviewer report.
+
+[tool] write (pending)
+  input: {}
+
+[tool] ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\global-reviewer.md (completed)
+  kind: edit
+  input: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\global-reviewer.md
+  files: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\global-reviewer.md
+  output:
+    Wrote file successfully.
+    
+    Wrote file successfully.
+    
+    diff D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\global-reviewer.md (+142 lines)
+
+[thinking] Now let me update the role state file with my findings and mark it as complete.
+Now update the role state file.
+
+[tool] write (pending)
+  input: {}
+
+[tool] write (failed)
+  kind: edit
+  input: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\global-reviewer-state.json
+  files: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\global-reviewer-state.json
+  output:
+    {
+      "error": "File already exists. Use edit tool instead."
+    }
+    
+    File already exists. Use edit tool instead.
+
+[thinking] The file already exists, I need to read it first then update it.
+
+[tool] read (pending)
+  input: {}
+
+[tool] ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\global-reviewer-state.json (completed)
+  kind: read
+  input: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\global-reviewer-state.json
+  files: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\global-reviewer-state.json
+  output:
+    <path>D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\global-reviewer-state.json</path>
+    <type>file</type>
+    <content>1: {
+    2:   "role": "global_reviewer",
+    3:   "stage": "architecture-cut",
+    4:   "round": 1,
+    5:   "status": "completed",
+    6:   "checklist": [
+    7:     "Read all stage artifacts (brief, producer, reviewer-a, reviewer-b)",
+    8:     "Verified empathy-observer-manager.ts transport (runtime_direct, expectsCompletionMessage: true)",
+    9:     "Verified design doc section 12.1 confirms empathy as first migration candidate",
+    10:     "Verified OpenClaw cross-repo evidence (subagent-registry-lifecycle.ts, server-plugins.ts)",
+    11:     "Assessed macro goal alignment — CONFIRMED",
+    12:     "Assessed business flow closure — CONFIRMED",
+    13:     "Assessed architecture convergence — CONFIRMED",
+    14:     "Weighed Reviewer B blockers vs. architecture-cut stage scope — non-blocking",
+    15:     "Wrote global-reviewer.md with VERDICT: APPROVE"
+    16:   ],
+    17:   "updatedAt": "2026-04-02T01:15:00Z",
+    18:   "report": "D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\global-reviewer.md"
+    19: }
+    
+    (End of file - total 19 lines)
+    </content>
+
+[thinking] Now I'll update the state file for Round 2.
+
+[tool] write (pending)
+  input: {}
+
+[tool] ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\global-reviewer-state.json (completed)
+  kind: edit
+  input: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\global-reviewer-state.json
+  files: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\global-reviewer-state.json
+  output:
+    Wrote file successfully.
+    
+    Wrote file successfully.
+    
+    diff D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\global-reviewer-state.json (+22 lines)
+
+[thinking] Now let me also append a checkpoint to the worklog file.
+Now append to the worklog.
+
+[tool] read (pending)
+  input: {}
+
+[tool] ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\global-reviewer-worklog.md (completed)
+  kind: read
+  input: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\global-reviewer-worklog.md
+  files: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\global-reviewer-worklog.md
+  output:
+    <path>D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\global-reviewer-worklog.md</path>
+    <type>file</type>
+    <content>1: # Global Reviewer Worklog
+    2: 
+    3: ## Round 1 Checkpoints
+    4: 
+    5: - [x] CP-1: Read all stage artifacts (brief, producer, reviewer-a, reviewer-b)
+    6: - [x] CP-2: Verified empathy-observer-manager.ts transport at line 193-200 (runtime_direct, expectsCompletionMessage: true)
+    7: - [x] CP-3: Verified design doc §12.1 at line 558-573 confirms empathy as first migration candidate
+    8: - [x] CP-4: Verified design doc PR2 scope declaration at line 556
+    9: - [x] CP-5: Verified OpenClaw cross-repo evidence claims (subagent-registry-lifecycle.ts, server-plugins.ts, subagent-registry-completion.ts)
+    10: - [x] CP-6: Assessed macro goal alignment — CONFIRMED
+    11: - [x] CP-7: Assessed business flow closure — CONFIRMED
+    12: - [x] CP-8: Assessed architecture convergence — CONFIRMED
+    13: - [x] CP-9: Weighed Reviewer B blockers vs. architecture-cut stage scope — non-blocking
+    14: - [x] CP-10: Wrote global-reviewer.md with VERDICT: APPROVE
+    15: 
+    16: ## Key Decisions
+    17: 
+    18: 1. APPROVE despite Reviewer B REVISE because: (a) architecture is sound, (b) Reviewer B blockers are spec-level not architecture-level, (c) shadow_run_plan gap is fillable in Round 2, (d) interface draft as prose is acceptable for architecture-cut
+    19: 2. Noted: shadow_run_plan quantitative criteria must be resolved in next round
+    20: 3. Noted: PD SDK type gap is known pre-existing issue
+    21: 
+    22: ## Evidence Examined
+    23: 
+    24: - `D:\Code\principles\packages\openclaw-plugin\src\service\empathy-observer-manager.ts` (511 lines)
+    25: - `D:\Code\principles\docs\design\2026-03-31-subagent-workflow-helper-design.md` (§12.1 at lines 558-573)
+    26: - Producer report (all sections)
+    ... (6 more lines)
+
+[thinking] Now I'll append the Round 2 worklog.
+
+[tool] edit (pending)
+  input: {}
+
+[tool] ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\global-reviewer-worklog.md (completed)
+  kind: edit
+  input: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\global-reviewer-worklog.md
+  files: D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\global-reviewer-worklog.md
+  output:
+    Edit applied successfully.
+    
+    Edit applied successfully.
+    
+    diff D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\global-reviewer-worklog.md (+34 lines)
+
+[thinking] Everything is complete. Let me now write a brief completion line to stdout as required.
+ROLE_STATUS: completed; report=D:\Code\principles\ops\ai-sprints\2026-04-01T16-10-19-112Z-subagent-helper-empathy\stages\02-architecture-cut\global-reviewer.md
+
+[done] end_turn

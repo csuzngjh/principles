@@ -1,0 +1,5 @@
+# Agent Failure Log
+
+- agent: iflow
+- model: glm-5
+- error: spawn powershell.exe ENOENT

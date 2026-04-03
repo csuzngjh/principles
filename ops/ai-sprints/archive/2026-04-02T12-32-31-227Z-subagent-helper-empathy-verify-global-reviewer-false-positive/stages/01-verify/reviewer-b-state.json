@@ -1,0 +1,14 @@
+{
+  "role": "reviewer_b",
+  "stage": "verify",
+  "round": 2,
+  "status": "running",
+  "lastPid": 38604,
+  "startedAt": "2026-04-02T13:01:10.581Z",
+  "finishedAt": null,
+  "terminatedAt": null,
+  "timeoutSeconds": 600,
+  "lastError": null,
+  "checklist": [],
+  "updatedAt": "2026-04-02T13:01:10.586Z"
+}

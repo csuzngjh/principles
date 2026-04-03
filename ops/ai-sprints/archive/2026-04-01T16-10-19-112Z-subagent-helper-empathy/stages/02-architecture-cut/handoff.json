@@ -1,0 +1,98 @@
+{
+  "blockers": [],
+  "focusForNextRound": null,
+  "producerChecks": "evidence=ok;tests=not-run;scope=pd-only;prompt-isolation=confirmed;openclaw-verification=done-cross-repo;architecture-decision=migrated;interface-draft=complete;shadow-plan=complete",
+  "dimensionScores": {
+    "reviewerA": {
+      "decision_quality": 4,
+      "openclaw_verification_completeness": 5,
+      "interface_soundness": 4,
+      "extensibility": 4
+    },
+    "reviewerB": {
+      "decision_quality": 4,
+      "openclaw_verification_completeness": 5,
+      "interface_soundness": 3,
+      "extensibility": 3
+    },
+    "globalReviewer": "APPROVE"
+  },
+  "contractItems": [
+    {
+      "deliverable": "architecture_decision",
+      "status": "DONE"
+    },
+    {
+      "deliverable": "openclaw_cross_repo_verification",
+      "status": "DONE"
+    },
+    {
+      "deliverable": "helper_interface_draft",
+      "status": "DONE"
+    },
+    {
+      "deliverable": "shadow_run_plan",
+      "status": "DONE"
+    }
+  ],
+  "producerCodeEvidence": {
+    "filesChecked": [
+      "empathy-observer-manager.ts",
+      "hooks/subagent.ts",
+      "openclaw-sdk.d.ts",
+      "subagent-probe.ts",
+      "subagent-registry-lifecycle.ts",
+      "server-plugins.ts",
+      "subagent-registry.ts",
+      "subagent-registry-completion.ts"
+    ],
+    "evidenceSource": "both",
+    "sha": "4138178581043646365326ee42dad4eab4037899",
+    "branchWorktree": "feat/subagent-workflow-helper-impl (principles repo)",
+    "evidenceScope": "both"
+  },
+  "reviewerACodeEvidence": {
+    "filesChecked": [
+      "empathy-observer-manager.ts",
+      "hooks/subagent.ts",
+      "openclaw-sdk.d.ts",
+      "deep-reflect.ts",
+      "subagent-probe.ts",
+      "subagent-registry-lifecycle.ts",
+      "subagent-registry-completion.ts",
+      "server-plugins.ts"
+    ],
+    "evidenceSource": "both",
+    "sha": "4138178581043646365326ee42dad4eab4037899",
+    "branchWorktree": null,
+    "evidenceScope": "both"
+  },
+  "reviewerBCodeEvidence": {
+    "filesChecked": [
+      "empathy-observer-manager.ts",
+      "hooks/subagent.ts",
+      "openclaw-sdk.d.ts",
+      "subagent-registry-lifecycle.ts",
+      "server-plugins.ts",
+      "subagent-registry-completion.ts",
+      "empathy-observer-manager.test.ts"
+    ],
+    "evidenceSource": "both",
+    "sha": "4138178581043646365326ee42dad4eab4037899",
+    "branchWorktree": null,
+    "evidenceScope": "both"
+  },
+  "globalReviewerCodeEvidence": {
+    "filesChecked": [
+      "empathy-observer-manager.ts (runtime_direct at line 199)",
+      "2026-03-31-subagent-workflow-helper-design.md (��12.1 at line 558-573)"
+    ],
+    "evidenceSource": "local",
+    "sha": "4138178581043646365326ee42dad4eab4037899",
+    "branchWorktree": null,
+    "evidenceScope": "both"
+  },
+  "stageName": "architecture-cut",
+  "round": 1,
+  "generatedAt": "2026-04-01T16:48:14.215Z"
+}

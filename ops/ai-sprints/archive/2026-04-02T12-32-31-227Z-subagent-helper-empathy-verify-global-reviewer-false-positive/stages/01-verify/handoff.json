@@ -1,0 +1,30 @@
+{
+  "blockers": [],
+  "focusForNextRound": null,
+  "producerChecks": null,
+  "dimensionScores": {
+    "reviewerA": {},
+    "reviewerB": {},
+    "globalReviewer": "APPROVE"
+  },
+  "contractItems": [],
+  "producerCodeEvidence": {
+    "filesChecked": [],
+    "evidenceSource": null,
+    "sha": null,
+    "branchWorktree": null,
+    "evidenceScope": null
+  },
+  "reviewerACodeEvidence": null,
+  "reviewerBCodeEvidence": null,
+  "globalReviewerCodeEvidence": {
+    "filesChecked": [],
+    "evidenceSource": null,
+    "sha": null,
+    "branchWorktree": null,
+    "evidenceScope": null
+  },
+  "stageName": "verify",
+  "round": 1,
+  "generatedAt": "2026-04-02T12:57:11.118Z"
+}

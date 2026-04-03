@@ -1,0 +1,26 @@
+{
+  "blockers": [],
+  "focusForNextRound": null,
+  "producerChecks": "evidence=ok;tests=ok;scope=pd-only;prompt-isolation=confirmed;openclaw-assumptions=verified",
+  "dimensionScores": {
+    "reviewerA": {
+      "evidence_quality": 5,
+      "assumption_coverage": 5,
+      "transport_audit_completeness": 5
+    },
+    "reviewerB": {
+      "evidence_quality": 4,
+      "assumption_coverage": 4,
+      "transport_audit_completeness": 4
+    },
+    "globalReviewer": null
+  },
+  "contractItems": [],
+  "producerCodeEvidence": null,
+  "reviewerACodeEvidence": null,
+  "reviewerBCodeEvidence": null,
+  "globalReviewerCodeEvidence": null,
+  "stageName": "investigate",
+  "round": 2,
+  "generatedAt": "2026-04-01T12:16:35.658Z"
+}

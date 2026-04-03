@@ -1,0 +1,26 @@
+{
+  "runId": "2026-04-01T13-24-29-622Z-subagent-helper-empathy",
+  "taskId": "subagent-helper-empathy",
+  "title": "Subagent Helper: migrate empathy observer to workflow helper",
+  "specPath": null,
+  "status": "aborted",
+  "currentStageIndex": 0,
+  "currentStage": "investigate",
+  "currentRound": 1,
+  "maxRoundsPerStage": 3,
+  "maxRuntimeMinutes": 360,
+  "staleAfterMs": 300000,
+  "orchestratorPid": 57756,
+  "lastHeartbeatAt": "2026-04-01T13:24:29.648Z",
+  "currentRole": "producer",
+  "haltReason": {
+    "type": "operator_abort",
+    "stage": "investigate",
+    "round": 1,
+    "details": "Aborted by operator",
+    "blockers": []
+  },
+  "worktree": null,
+  "createdAt": "2026-04-01T13:24:29.622Z",
+  "updatedAt": "2026-04-01T13:25:20.351Z"
+}

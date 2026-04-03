@@ -1,0 +1,69 @@
+diff --git a/scripts/ai-sprint-orchestrator/run.mjs b/scripts/ai-sprint-orchestrator/run.mjs
+index 62d90e8..bb4bc6f 100644
+--- a/scripts/ai-sprint-orchestrator/run.mjs
++++ b/scripts/ai-sprint-orchestrator/run.mjs
+@@ -159,29 +159,33 @@ function runAgent({ cwd, agent, model, prompt, timeoutSeconds = 1800, failLogPat
+   const promptFile = path.join(os.tmpdir(), `ai-sprint-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`);
+   fs.writeFileSync(promptFile, prompt, 'utf8');
+ 
++  // Ensure cwd exists - spawn fails with ENOENT on Windows if cwd doesn't exist
++  const effectiveCwd = fs.existsSync(cwd) ? cwd : (process.cwd() || os.tmpdir());
++  const envCwd = fs.existsSync(cwd) ? cwd : process.cwd();
++
+   let result;
++  let spawnError;
+   try {
+     if (process.platform === 'win32') {
++      // Normalize COMSPEC path for Windows - convert to backslashes for CreateProcess
++      const comspec = (process.env.COMSPEC || 'C:\\Windows\\System32\\cmd.exe').replace(/\//g, '\\');
++      const spawnEnv = {
++        ...process.env,
++        AI_SPRINT_CWD: envCwd,
++        AI_SPRINT_MODEL: model,
++        AI_SPRINT_TIMEOUT: String(timeoutSeconds),
++        AI_SPRINT_PROMPT: promptFile,
++      };
+       result = spawnSync(
+-        'powershell.exe',
+-        [
+-          '-NoProfile',
+-          '-Command',
+-          `acpx --cwd $env:AI_SPRINT_CWD --approve-all --model $env:AI_SPRINT_MODEL --timeout $env:AI_SPRINT_TIMEOUT ${agent} exec -f $env:AI_SPRINT_PROMPT`,
+-        ],
++        comspec,
++        ['/c', `acpx --cwd %AI_SPRINT_CWD% --approve-all --model %AI_SPRINT_MODEL% --timeout %AI_SPRINT_TIMEOUT% ${agent} exec -f %AI_SPRINT_PROMPT%`],
+         {
+-          cwd,
++          cwd: effectiveCwd,
+           encoding: 'utf8',
+           maxBuffer: 10 * 1024 * 1024,
+           timeout: (timeoutSeconds + 60) * 1000,
+-          shell: false,
+-          env: {
+-            ...process.env,
+-            AI_SPRINT_CWD: cwd,
+-            AI_SPRINT_MODEL: model,
+-            AI_SPRINT_TIMEOUT: String(timeoutSeconds),
+-            AI_SPRINT_PROMPT: promptFile,
+-          },
++          shell: true,
++          env: spawnEnv,
+         },
+       );
+     } else {
+@@ -197,10 +201,16 @@ function runAgent({ cwd, agent, model, prompt, timeoutSeconds = 1800, failLogPat
+         },
+       );
+     }
++  } catch (e) {
++    spawnError = e;
+   } finally {
+     fs.rmSync(promptFile, { force: true });
+   }
+ 
++  if (spawnError) {
++    throw new Error(`Failed to spawn agent ${agent}: ${spawnError.message}`);
++  }
++
+   const stdout = result.stdout ?? '';
+   const stderr = result.stderr ?? '';

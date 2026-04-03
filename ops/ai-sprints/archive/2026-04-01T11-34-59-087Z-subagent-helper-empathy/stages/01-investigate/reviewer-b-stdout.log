@@ -1,0 +1,1373 @@
+[client] initialize (running)
+
+[client] session/new (running)
+
+[client] session/set_model (running)
+
+[thinking] Let me start by understanding the task. I'm acting as reviewer_b in an AI sprint orchestrator. I need to:
+           
+           1. Read the stage brief first
+           2. Read the producer report
+           3. Review the changes for scope control, regression risk, and test coverage
+           4. Focus on whether the producer's changes are the smallest sufficient fix
+           5. Identify missing tests, insufficient coverage, and potential side effects
+           6. Flag any unnecessary architectural expansion or gold-plating
+           
+           Let me start by reading the necessary files to understand the context.
+
+[tool] read (pending)
+  input: {}
+
+[tool] read (pending)
+  input: {}
+
+[tool] ops\ai-sprints\2026-04-01T11-34-59-087Z-subagent-helper-empathy\stages\01-investigate\brief.md (completed)
+  kind: read
+  input: D:\Code\principles\ops\ai-sprints\2026-04-01T11-34-59-087Z-subagent-helper-empathy\stages\01-investigate\brief.md
+  files: D:\Code\principles\ops\ai-sprints\2026-04-01T11-34-59-087Z-subagent-helper-empathy\stages\01-investigate\brief.md
+  output:
+    <path>D:\Code\principles\ops\ai-sprints\2026-04-01T11-34-59-087Z-subagent-helper-empathy\stages\01-investigate\brief.md</path>
+    <type>file</type>
+    <content>1: # Stage Brief
+    2: 
+    3: - Task: Subagent Helper: migrate empathy observer to workflow helper
+    4: - Stage: investigate
+    5: - Round: 2
+    6: 
+    7: ## Goals
+    8: - Audit empathy observer's current subagent transport: runtime_direct vs registry_backed.
+    9: - Identify all lifecycle hooks (subagent_spawned, subagent_ended, etc.) currently used.
+    10: - Document current timeout/error/fallback/cleanup paths and their failure modes.
+    11: - Assess OpenClaw assumptions: does runtime.subagent.run() guarantee subagent_ended hook?
+    12: 
+    13: ## Required Hypotheses
+    14: - empathy_uses_runtime_direct_transport
+    15: - empathy_has_unverified_openclaw_hook_assumptions
+    16: - empathy_timeout_leads_to_false_completion
+    17: - empathy_cleanup_not_idempotent
+    18: - empathy_lacks_dedupe_key
+    19: 
+    20: ## Carry Forward
+    21: 
+    22: ### What was accomplished
+    23: - None.
+    24: 
+    25: ### What needs to change
+    26: - No blockers from previous round.
+    ... (307 more lines)
+
+[tool] read (pending)
+  input: {}
+
+[tool] ops\ai-sprints\2026-04-01T11-34-59-087Z-subagent-helper-empathy\stages\01-investigate\producer.md (completed)
+  kind: read
+  input: D:\Code\principles\ops\ai-sprints\2026-04-01T11-34-59-087Z-subagent-helper-empathy\stages\01-investigate\producer.md
+  files: D:\Code\principles\ops\ai-sprints\2026-04-01T11-34-59-087Z-subagent-helper-empathy\stages\01-investigate\producer.md
+  output:
+    <path>D:\Code\principles\ops\ai-sprints\2026-04-01T11-34-59-087Z-subagent-helper-empathy\stages\01-investigate\producer.md</path>
+    <type>file</type>
+    <content>1: # Producer Report - Round 2
+    2: 
+    3: ## SUMMARY
+    4: 
+    5: Round 2 investigation confirms and **VERIFIES** the critical architectural finding from round 1. The empathy observer's `subagent_ended` fallback is architecturally **DEAD CODE** for `runtime_direct` transport. This is not an unverified assumption—it is confirmed via cross-repo source reading by Reviewer B.
+    6: 
+    7: **Key Verification Source**: D:/Code/openclaw/src/gateway/server-plugins.ts, subagent-spawn.ts, subagent-registry-completion.ts
+    8: 
+    9: **Impact on Migration**: The workflow helper must implement its own TTL-based cleanup instead of relying on `subagent_ended` hook for `runtime_direct` transports.
+    10: 
+    11: ## CHANGES
+    12: 
+    13: ### From Round 1
+    14: - Round 1 marked `openclaw_assumptions_documented` as PARTIAL (UNVERIFIED)
+    15: - Round 2: **VERIFIED** via Reviewer B cross-repo source reading
+    16: 
+    17: ### Key Evidence Updates
+    18: | Assumption | Round 1 Status | Round 2 Status |
+    19: |------------|-----------------|----------------|
+    20: | `runtime.subagent.run()` → `registerSubagentRun()` | UNVERIFIED | **REFUTED** - NO registerSubagentRun() call |
+    21: | `subagent_ended` fires for `runtime_direct` | UNVERIFIED | **REFUTED** - Dead code confirmed |
+    22: | `expectsCompletionMessage` triggers completion | UNVERIFIED | **REFUTED** - Not part of SubagentRunParams |
+    23: 
+    24: ## EVIDENCE
+    25: 
+    26: ### OpenClaw Source Verification (Reviewer B)
+    ... (113 more lines)
+
+[tool] ops\ai-sprints\2026-04-01T11-34-59-087Z-subagent-helper-empathy\stages\01-investigate\reviewer-b-state.json (completed)
+  kind: read
+  input: D:\Code\principles\ops\ai-sprints\2026-04-01T11-34-59-087Z-subagent-helper-empathy\stages\01-investigate\reviewer-b-state.json
+  files: D:\Code\principles\ops\ai-sprints\2026-04-01T11-34-59-087Z-subagent-helper-empathy\stages\01-investigate\reviewer-b-state.json
+  output:
+    <path>D:\Code\principles\ops\ai-sprints\2026-04-01T11-34-59-087Z-subagent-helper-empathy\stages\01-investigate\reviewer-b-state.json</path>
+    <type>file</type>
+    <content>1: {
+    2:   "role": "reviewer_b",
+    3:   "stage": "investigate",
+    4:   "round": 1,
+    5:   "status": "completed",
+    6:   "checklist": [
+    7:     "transport_verification: completed - runtime_direct confirmed via source reading",
+    8:     "openclaw_assumptions_verified: completed - subagent_ended hook will NEVER fire for runtime_direct transport",
+    9:     "lifecycle_hook_map: completed - subagent_spawning (shadow-only), subagent_ended (dead fallback for empathy)",
+    10:     "failure_mode_inventory: completed - FM-6 is worse than documented: dead code, not just unverified",
+    11:     "test_coverage_assessment: completed - gap: no hook firing verification in tests",
+    12:     "hypothesis_matrix: all 5 hypotheses addressed with evidence"
+    13:   ],
+    14:   "updatedAt": "2026-04-01T12:15:00.000Z",
+    15:   "blockers": [
+    16:     "CRITICAL: subagent_ended fallback is dead code for runtime_direct transport",
+    17:     "HIGH: No test verifies hook triggering for empathy sessions",
+    18:     "MEDIUM: expectsCompletionMessage has no effect on runtime_direct lifecycle"
+    19:   ]
+    20: }
+    
+    (End of file - total 20 lines)
+    </content>
+    [Category+Skill Reminder]
+    
+    **Built-in**: playwright, frontend-ui-ux, git-master, dev-browser
+    ... (7 more lines)
+
+[thinking] Let me understand the task:
+           
+           1. I'm reviewer_b in round 2 of an AI sprint
+           2. The stage brief requires me to review the producer's investigation work
+           3. I need to verify the OpenClaw assumptions and check test coverage
+           4. I need to produce a report with specific sections
+           
+           Let me first look at the state - it says round 1 was completed, but I'm in round 2. Let me update my state and continue the review work.
+           
+           The producer report claims:
+           - Round 2 investigation confirms and VERIFIES critical architectural finding
+           - The empathy observer's `subagent_ended` fallback is DEAD CODE for `runtime_direct` transport
+           - Evidence from OpenClaw source files
+           
+           I need to:
+           1. Verify the evidence the producer is citing
+           2. Check if there are any remaining gaps
+           3. Make sure the hypothesis matrix is accurate
+           4. Validate the contract deliverables
+           
+           Let me look at the producer's evidence more carefully and verify...
+Let me update my role state and start the review process by verifying the producer's evidence.
+
+[tool] write (pending)
+  input: {}
+
+[tool] read (pending)
+  input: {}
+
+[tool] ops\ai-sprints\2026-04-01T11-34-59-087Z-subagent-helper-empathy\stages\01-investigate\reviewer-b-state.json (completed)
+  kind: edit
+  input: D:\Code\principles\ops\ai-sprints\2026-04-01T11-34-59-087Z-subagent-helper-empathy\stages\01-investigate\reviewer-b-state.json
+  files: D:\Code\principles\ops\ai-sprints\2026-04-01T11-34-59-087Z-subagent-helper-empathy\stages\01-investigate\reviewer-b-state.json
+  output:
+    Wrote file successfully.
+    
+    Wrote file successfully.
+    
+    diff D:\Code\principles\ops\ai-sprints\2026-04-01T11-34-59-087Z-subagent-helper-empathy\stages\01-investigate\reviewer-b-state.json (+22 lines)
+
+[tool] read (pending)
+  input: {}
+
+[client] session/request_permission (running)
+
+[tool] ..\openclaw\src\gateway\server-plugins.ts (completed)
+  kind: read
+  input: D:\Code\openclaw\src\gateway\server-plugins.ts
+  files: D:\Code\openclaw\src\gateway\server-plugins.ts
+  output:
+    <path>D:\Code\openclaw\src\gateway\server-plugins.ts</path>
+    <type>file</type>
+    <content>290:   if (!result.ok) {
+    291:     throw new Error(result.error?.message ?? `Gateway method "${method}" failed.`);
+    292:   }
+    293:   return result.payload as T;
+    294: }
+    295: 
+    296: export function createGatewaySubagentRuntime(): PluginRuntime["subagent"] {
+    297:   const getSessionMessages: PluginRuntime["subagent"]["getSessionMessages"] = async (params) => {
+    298:     const payload = await dispatchGatewayMethod<{ messages?: unknown[] }>("sessions.get", {
+    299:       key: params.sessionKey,
+    300:       ...(params.limit != null && { limit: params.limit }),
+    301:     });
+    302:     return { messages: Array.isArray(payload?.messages) ? payload.messages : [] };
+    303:   };
+    304: 
+    305:   return {
+    306:     async run(params) {
+    307:       const scope = getPluginRuntimeGatewayRequestScope();
+    308:       const overrideRequested = Boolean(params.provider || params.model);
+    309:       const hasRequestScopeClient = Boolean(scope?.client);
+    310:       let allowOverride = hasRequestScopeClient && canClientUseModelOverride(scope?.client ?? null);
+    311:       let allowSyntheticModelOverride = false;
+    312:       if (overrideRequested && !allowOverride && !hasRequestScopeClient) {
+    313:         const fallbackAuth = authorizeFallbackModelOverride({
+    314:           pluginId: scope?.pluginId,
+    315:           provider: params.provider,
+    ... (27 more lines)
+
+[tool] read (pending)
+  input: {}
+
+[client] session/request_permission (running)
+
+[tool] ..\openclaw\src\agents\subagent-registry-completion.ts (completed)
+  kind: read
+  input: D:\Code\openclaw\src\agents\subagent-registry-completion.ts
+  files: D:\Code\openclaw\src\agents\subagent-registry-completion.ts
+  output:
+    <path>D:\Code\openclaw\src\agents\subagent-registry-completion.ts</path>
+    <type>file</type>
+    <content>1: import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
+    2: import type { SubagentRunOutcome } from "./subagent-announce.js";
+    3: import {
+    4:   SUBAGENT_ENDED_OUTCOME_ERROR,
+    5:   SUBAGENT_ENDED_OUTCOME_OK,
+    6:   SUBAGENT_ENDED_OUTCOME_TIMEOUT,
+    7:   SUBAGENT_TARGET_KIND_SUBAGENT,
+    8:   type SubagentLifecycleEndedOutcome,
+    9:   type SubagentLifecycleEndedReason,
+    10: } from "./subagent-lifecycle-events.js";
+    11: import type { SubagentRunRecord } from "./subagent-registry.types.js";
+    12: 
+    13: export function runOutcomesEqual(
+    14:   a: SubagentRunOutcome | undefined,
+    15:   b: SubagentRunOutcome | undefined,
+    16: ): boolean {
+    17:   if (!a && !b) {
+    18:     return true;
+    19:   }
+    20:   if (!a || !b) {
+    21:     return false;
+    22:   }
+    23:   if (a.status !== b.status) {
+    24:     return false;
+    25:   }
+    26:   if (a.status === "error" && b.status === "error") {
+    ... (76 more lines)
+
+[client] session/request_permission (running)
+
+[tool] ..\openclaw\src\agents\subagent-spawn.ts (completed)
+  kind: read
+  input: D:\Code\openclaw\src\agents\subagent-spawn.ts
+  files: D:\Code\openclaw\src\agents\subagent-spawn.ts
+  output:
+    <path>D:\Code\openclaw\src\agents\subagent-spawn.ts</path>
+    <type>file</type>
+    <content>780:           emitLifecycleHooks,
+    781:         },
+    782:         timeoutMs: 10_000,
+    783:       });
+    784:     } catch {
+    785:       // Best-effort only.
+    786:     }
+    787:     const messageText = summarizeError(err);
+    788:     return {
+    789:       status: "error",
+    790:       error: messageText,
+    791:       childSessionKey,
+    792:       runId: childRunId,
+    793:     };
+    794:   }
+    795: 
+    796:   try {
+    797:     registerSubagentRun({
+    798:       runId: childRunId,
+    799:       childSessionKey,
+    800:       controllerSessionKey: requesterInternalKey,
+    801:       requesterSessionKey: requesterInternalKey,
+    802:       requesterOrigin,
+    803:       requesterDisplayKey,
+    804:       task,
+    805:       cleanup,
+    ... (27 more lines)
+
+[thinking] Good, I can see the evidence. Let me continue reading to confirm the producer's claims:
+           
+           1. `server-plugins.ts` line 306 - shows `async run(params)` dispatches to "agent" gateway method. I need to see if `registerSubagentRun` is called.
+           
+           2. `subagent-registry-completion.ts` line 44 - confirms `emitSubagentEndedHookOnce` requires a `SubagentRunRecord` entry - which requires a registry entry.
+           
+           3. `subagent-spawn.ts` line 797 - shows `registerSubagentRun` is called INSIDE `spawnSubagentDirect()`, AFTER the agent call.
+           
+           Let me continue reading the server-plugins.ts to understand the full path of `runtime.subagent.run()`.
+
+[tool] read (pending)
+  input: {}
+
+[tool] grep (pending)
+  input: {}
+
+[client] session/request_permission (running)
+
+[tool] ..\openclaw\src\gateway\server-plugins.ts (completed)
+  kind: read
+  input: D:\Code\openclaw\src\gateway\server-plugins.ts
+  files: D:\Code\openclaw\src\gateway\server-plugins.ts
+  output:
+    <path>D:\Code\openclaw\src\gateway\server-plugins.ts</path>
+    <type>file</type>
+    <content>340:           allowSyntheticModelOverride,
+    341:         },
+    342:       );
+    343:       const runId = payload?.runId;
+    344:       if (typeof runId !== "string" || !runId) {
+    345:         throw new Error("Gateway agent method returned an invalid runId.");
+    346:       }
+    347:       return { runId };
+    348:     },
+    349:     async waitForRun(params) {
+    350:       const payload = await dispatchGatewayMethod<{ status?: string; error?: string }>(
+    351:         "agent.wait",
+    352:         {
+    353:           runId: params.runId,
+    354:           ...(params.timeoutMs != null && { timeoutMs: params.timeoutMs }),
+    355:         },
+    356:       );
+    357:       const status = payload?.status;
+    358:       if (status !== "ok" && status !== "error" && status !== "timeout") {
+    359:         throw new Error(`Gateway agent.wait returned unexpected status: ${status}`);
+    360:       }
+    361:       return {
+    362:         status,
+    363:         ...(typeof payload?.error === "string" && payload.error && { error: payload.error }),
+    364:       };
+    365:     },
+    ... (27 more lines)
+
+[tool] grep (pending)
+  input: {}
+
+[tool] grep (completed)
+  kind: search
+  input: D:\Code\openclaw\src\gateway
+  files: D:\Code\openclaw\src\gateway
+  output:
+    No matches found
+    [Agent Usage Reminder]
+    
+    You called a search/fetch tool directly without leveraging specialized agents.
+    
+    RECOMMENDED: Use task with explore/librarian agents for better results:
+    
+    ```
+    // Parallel exploration - fire multiple agents simultaneously
+    task(agent="explore", prompt="Find all files matching pattern X")
+    task(agent="explore", prompt="Search for implementation of Y") 
+    task(agent="librarian", prompt="Lookup documentation for Z")
+    
+    // Then continue your work while they run in background
+    // System will notify you when each completes
+    ```
+    
+    WHY:
+    - Agents can perform deeper, more thorough searches
+    - Background tasks run in parallel, saving time
+    - Specialized agents have domain expertise
+    - Reduces context window usage in main session
+    
+    ALWAYS prefer: Multiple parallel task calls > Direct tool calls
+
+[tool] grep (completed)
+  kind: search
+  input: D:\Code\openclaw\src\gateway
+  files: D:\Code\openclaw\src\gateway
+  output:
+    No matches found
+    [Agent Usage Reminder]
+    
+    You called a search/fetch tool directly without leveraging specialized agents.
+    
+    RECOMMENDED: Use task with explore/librarian agents for better results:
+    
+    ```
+    // Parallel exploration - fire multiple agents simultaneously
+    task(agent="explore", prompt="Find all files matching pattern X")
+    task(agent="explore", prompt="Search for implementation of Y") 
+    task(agent="librarian", prompt="Lookup documentation for Z")
+    
+    // Then continue your work while they run in background
+    // System will notify you when each completes
+    ```
+    
+    WHY:
+    - Agents can perform deeper, more thorough searches
+    - Background tasks run in parallel, saving time
+    - Specialized agents have domain expertise
+    - Reduces context window usage in main session
+    
+    ALWAYS prefer: Multiple parallel task calls > Direct tool calls
+
+[thinking] I can see from `server-plugins.ts`:
+           - Lines 327-347: `runtime.subagent.run()` calls `dispatchGatewayMethod("agent", ...)` and returns `{ runId }`
+           - There's NO call to `registerSubagentRun()` in this path
+           
+           This confirms the producer's claim that `runtime.subagent.run()` does NOT call `registerSubagentRun()`. The `subagent_ended` hook requires a registry entry via `registerSubagentRun()` to be created, and then `emitSubagentEndedHookOnce()` to fire.
+           
+           Let me verify this more completely by checking where `registerSubagentRun` IS called - it appears to be in `subagent-spawn.ts` at line 797 which is in `spawnSubagentDirect()`.
+           
+           Now let me check the empathy-observer code to understand the actual transport being used.
+
+[tool] grep (pending)
+  input: {}
+
+[tool] grep (pending)
+  input: {}
+
+[tool] grep (completed)
+  kind: search
+  input: D:\Code\principles\packages\openclaw-plugin\src
+  files: D:\Code\principles\packages\openclaw-plugin\src
+  output:
+    Found 4 match(es) in 2 file(s)
+    
+    D:\Code\principles\packages\openclaw-plugin\src\service\empathy-observer-manager.ts
+      193: const result = await api.runtime.subagent.run({
+    
+    D:\Code\principles\packages\openclaw-plugin\src\core\nocturnal-trinity.ts
+      181: const { runId } = await this.api.runtime.subagent.run({
+      227: const { runId } = await this.api.runtime.subagent.run({
+      278: const { runId } = await this.api.runtime.subagent.run({
+    
+    [Agent Usage Reminder]
+    
+    You called a search/fetch tool directly without leveraging specialized agents.
+    
+    RECOMMENDED: Use task with explore/librarian agents for better results:
+    
+    ```
+    // Parallel exploration - fire multiple agents simultaneously
+    task(agent="explore", prompt="Find all files matching pattern X")
+    task(agent="explore", prompt="Search for implementation of Y") 
+    task(agent="librarian", prompt="Lookup documentation for Z")
+    
+    // Then continue your work while they run in background
+    // System will notify you when each completes
+    ```
+    
+    WHY:
+    - Agents can perform deeper, more thorough searches
+    ... (5 more lines)
+
+[tool] grep (pending)
+  input: {}
+
+[tool] grep (completed)
+  kind: search
+  input: D:\Code\principles\packages\openclaw-plugin\src
+  files: D:\Code\principles\packages\openclaw-plugin\src
+  output:
+    No matches found
+    [Agent Usage Reminder]
+    
+    You called a search/fetch tool directly without leveraging specialized agents.
+    
+    RECOMMENDED: Use task with explore/librarian agents for better results:
+    
+    ```
+    // Parallel exploration - fire multiple agents simultaneously
+    task(agent="explore", prompt="Find all files matching pattern X")
+    task(agent="explore", prompt="Search for implementation of Y") 
+    task(agent="librarian", prompt="Lookup documentation for Z")
+    
+    // Then continue your work while they run in background
+    // System will notify you when each completes
+    ```
+    
+    WHY:
+    - Agents can perform deeper, more thorough searches
+    - Background tasks run in parallel, saving time
+    - Specialized agents have domain expertise
+    - Reduces context window usage in main session
+    
+    ALWAYS prefer: Multiple parallel task calls > Direct tool calls
+
+[tool] grep (completed)
+  kind: search
+  input: D:\Code\principles\packages\openclaw-plugin\src
+  files: D:\Code\principles\packages\openclaw-plugin\src
+  output:
+    No matches found
+    [Agent Usage Reminder]
+    
+    You called a search/fetch tool directly without leveraging specialized agents.
+    
+    RECOMMENDED: Use task with explore/librarian agents for better results:
+    
+    ```
+    // Parallel exploration - fire multiple agents simultaneously
+    task(agent="explore", prompt="Find all files matching pattern X")
+    task(agent="explore", prompt="Search for implementation of Y") 
+    task(agent="librarian", prompt="Lookup documentation for Z")
+    
+    // Then continue your work while they run in background
+    // System will notify you when each completes
+    ```
+    
+    WHY:
+    - Agents can perform deeper, more thorough searches
+    - Background tasks run in parallel, saving time
+    - Specialized agents have domain expertise
+    - Reduces context window usage in main session
+    
+    ALWAYS prefer: Multiple parallel task calls > Direct tool calls
+
+[thinking] Good, I found that `api.runtime.subagent.run` is used in:
+           1. `empathy-observer-manager.ts` line 193 - the empathy observer
+           2. `nocturnal-trinity.ts` lines 181, 227, 278 - but the brief says Nocturnal is NOT migrated in this PR
+           
+           Let me look at the empathy-observer-manager.ts to understand the code path and verify the producer's findings.
+
+[tool] read (pending)
+  input: {}
+
+[tool] read (pending)
+  input: {}
+
+[tool] packages\openclaw-plugin\src\service\empathy-observer-manager.ts (completed)
+  kind: read
+  input: D:\Code\principles\packages\openclaw-plugin\src\service\empathy-observer-manager.ts
+  files: D:\Code\principles\packages\openclaw-plugin\src\service\empathy-observer-manager.ts
+  output:
+    <path>D:\Code\principles\packages\openclaw-plugin\src\service\empathy-observer-manager.ts</path>
+    <type>file</type>
+    <content>180:         const sessionKey = this.buildEmpathyObserverSessionKey(sessionId);
+    181:         this.sessionLocks.set(sessionId, sessionKey);
+    182:         api.logger.info(`[PD:EmpathyObserver] Spawn starting for session ${sessionId}, key=${sessionKey}`);
+    183: 
+    184:         const prompt = [
+    185:             'You are an empathy observer.',
+    186:             'Analyze ONLY the user message and return strict JSON (no markdown):',
+    187:             '{"damageDetected": boolean, "severity": "mild|moderate|severe", "confidence": number, "reason": string}',
+    188:             `User message: ${JSON.stringify(userMessage.trim())}`,
+    189:         ].join('\n');
+    190: 
+    191:         let runId: string;
+    192:         try {
+    193:             const result = await api.runtime.subagent.run({
+    194:                 sessionKey,
+    195:                 message: prompt,
+    196:                 lane: 'subagent',
+    197:                 deliver: false,
+    198:                 idempotencyKey: `${sessionId}:${Date.now()}`,
+    199:                 expectsCompletionMessage: true,
+    200:             }) as SubagentRunResult;
+    201:             runId = result.runId;
+    202:             api.logger.info(`[PD:EmpathyObserver] Spawn succeeded for ${sessionKey}, runId=${runId}`);
+    203:         } catch (error) {
+    204:             this.sessionLocks.delete(sessionId);
+    205:             api.logger.warn(`[PD:EmpathyObserver] Spawn failed for ${sessionId}: ${String(error)}`);
+    ... (57 more lines)
+
+[tool] read (failed)
+  kind: read
+  input: D:\Code\principles\packages\openclaw-plugin\src\service\subagent-workflow
+  files: D:\Code\principles\packages\openclaw-plugin\src\service\subagent-workflow
+  output:
+    {
+      "error": "File not found: D:\\Code\\principles\\packages\\openclaw-plugin\\src\\service\\subagent-workflow"
+    }
+    
+    File not found: D:\Code\principles\packages\openclaw-plugin\src\service\subagent-workflow
+
+[thinking] Good, I can see:
+           1. The empathy observer at line 193 uses `api.runtime.subagent.run({...})` - this is the `runtime_direct` transport
+           2. There's no `registerSubagentRun()` call in the empathy observer code path
+           3. The subagent-workflow directory doesn't exist yet - this is the target location for the migration
+           
+           Let me check if there's a subagent-workflow folder or if the brief is talking about a planned location.
+
+[tool] glob (pending)
+  input: {}
+
+[tool] read (pending)
+  input: {}
+
+[tool] glob (completed)
+  kind: search
+  input: D:\Code\principles\packages\openclaw-plugin\src
+  files: D:\Code\principles\packages\openclaw-plugin\src
+  output:
+    No files found
+    [Agent Usage Reminder]
+    
+    You called a search/fetch tool directly without leveraging specialized agents.
+    
+    RECOMMENDED: Use task with explore/librarian agents for better results:
+    
+    ```
+    // Parallel exploration - fire multiple agents simultaneously
+    task(agent="explore", prompt="Find all files matching pattern X")
+    task(agent="explore", prompt="Search for implementation of Y") 
+    task(agent="librarian", prompt="Lookup documentation for Z")
+    
+    // Then continue your work while they run in background
+    // System will notify you when each completes
+    ```
+    
+    WHY:
+    - Agents can perform deeper, more thorough searches
+    - Background tasks run in parallel, saving time
+    - Specialized agents have domain expertise
+    - Reduces context window usage in main session
+    
+    ALWAYS prefer: Multiple parallel task calls > Direct tool calls
+
+[tool] packages\openclaw-plugin\src\service\empathy-observer-manager.ts (completed)
+  kind: read
+  input: D:\Code\principles\packages\openclaw-plugin\src\service\empathy-observer-manager.ts
+  files: D:\Code\principles\packages\openclaw-plugin\src\service\empathy-observer-manager.ts
+  output:
+    <path>D:\Code\principles\packages\openclaw-plugin\src\service\empathy-observer-manager.ts</path>
+    <type>file</type>
+    <content>1: import { WorkspaceContext } from '../core/workspace-context.js';
+    2: import { trackFriction } from '../core/session-tracker.js';
+    3: import { isSubagentRuntimeAvailable } from '../utils/subagent-probe.js';
+    4: import type { PluginLogger, SubagentRunResult, SubagentWaitResult } from '../openclaw-sdk.js';
+    5: 
+    6: const OBSERVER_SESSION_PREFIX = 'agent:main:subagent:empathy-obs-';
+    7: 
+    8: // Default timeout for waitForRun (30 seconds)
+    9: const DEFAULT_WAIT_TIMEOUT_MS = 30_000;
+    10: 
+    11: /**
+    12:  * Run metadata for active empathy observer runs
+    13:  */
+    14: interface ObserverRunMetadata {
+    15:     runId: string;
+    16:     parentSessionId: string;
+    17:     observerSessionKey: string;
+    18:     workspaceDir?: string;
+    19:     startedAt: number;
+    20:     timedOutAt?: number;
+    21:     erroredAt?: number;
+    22:     // Timestamp when observer reached a terminal (timeout/error) state;
+    23:     // used for TTL-based cleanup of orphaned entries
+    24:     observedAt?: number;
+    25: }
+    26: 
+    ... (37 more lines)
+
+[thinking] The `subagent-workflow` directory doesn't exist yet - this is the migration TARGET mentioned in the brief. The brief says the PR2 scope is empathy observer + deep-reflect ONLY, and the helper should live in `packages/openclaw-plugin/src/service/subagent-workflow/`.
+           
+           Let me now check the lifecycle hook registration in the empathy observer to verify the producer's claims about `subagent_ended`.
+
+[tool] grep (pending)
+  input: {}
+
+[tool] read (pending)
+  input: {}
+
+[tool] grep (completed)
+  kind: search
+  input: D:\Code\principles\packages\openclaw-plugin\src
+  files: D:\Code\principles\packages\openclaw-plugin\src
+  output:
+    Found 7 match(es) in 4 file(s)
+    
+    D:\Code\principles\packages\openclaw-plugin\src\index.ts
+      232: 'subagent_ended',
+      257: api.logger.error(`[PD] Error in subagent_ended: ${String(err)}`);
+    
+    D:\Code\principles\packages\openclaw-plugin\src\service\evolution-worker.ts
+      723: // Use placeholder instead of deleting - allows subagent_ended hook to match
+    
+    D:\Code\principles\packages\openclaw-plugin\src\service\empathy-observer-manager.ts
+      382: // the subagent_ended fallback can retry or the TTL expiry can unblock the parent.
+      393: // Only delete from activeRuns if finalized; otherwise preserve entry for subagent_ended fallback
+      398: * Fallback回收: 由 subagent_ended 触发
+    
+    D:\Code\principles\packages\openclaw-plugin\src\hooks\prompt.ts
+      836: // Shadow evidence comes from real runtime hooks (subagent_spawning/subagent_ended).
+    
+    [Agent Usage Reminder]
+    
+    You called a search/fetch tool directly without leveraging specialized agents.
+    
+    RECOMMENDED: Use task with explore/librarian agents for better results:
+    
+    ```
+    // Parallel exploration - fire multiple agents simultaneously
+    task(agent="explore", prompt="Find all files matching pattern X")
+    task(agent="explore", prompt="Search for implementation of Y") 
+    task(agent="librarian", prompt="Lookup documentation for Z")
+    ... (12 more lines)
+
+[tool] packages\openclaw-plugin\src\index.ts (completed)
+  kind: read
+  input: D:\Code\principles\packages\openclaw-plugin\src\index.ts
+  files: D:\Code\principles\packages\openclaw-plugin\src\index.ts
+  output:
+    <path>D:\Code\principles\packages\openclaw-plugin\src\index.ts</path>
+    <type>file</type>
+    <content>220:             });
+    221:             pendingShadowObservations.set(childSessionKey, observation.observationId);
+    222:           }
+    223:           return { status: 'ok' };
+    224:         } catch (err) {
+    225:           api.logger.error(`[PD] Error in subagent_spawning shadow routing: ${String(err)}`);
+    226:           return { status: 'ok' }; // Don't block spawn on shadow observation errors
+    227:         }
+    228:       }
+    229:     );
+    230: 
+    231:     api.on(
+    232:       'subagent_ended',
+    233:       (event: PluginHookSubagentEndedEvent, ctx: PluginHookSubagentContext): void => {
+    234:         try {
+    235:           const workspaceDir = api.resolvePath('.');
+    236:           // Complete any pending shadow observation for this subagent session
+    237:           const shadowObsId = pendingShadowObservations.get(event.targetSessionKey);
+    238:           if (shadowObsId && workspaceDir) {
+    239:             try {
+    240:               const outcome = event.outcome === 'ok'
+    241:                 ? 'accepted'
+    242:                 : event.outcome === 'error'
+    243:                   ? 'rejected'
+    244:                   : 'escalated';
+    245:               completeShadowObservation(workspaceDir, {
+    ... (37 more lines)
+
+[thinking] Good, I can see:
+           
+           1. Line 232: `subagent_ended` hook is registered in `index.ts`
+           2. Line 255: It calls `handleSubagentEnded(event, {...ctx, workspaceDir, api})`
+           
+           Now let me check the `handleSubagentEnded` function to understand how it routes to the empathy observer's `reap()` method.
+
+[tool] grep (pending)
+  input: {}
+
+[tool] grep (completed)
+  kind: search
+  input: D:\Code\principles\packages\openclaw-plugin\src
+  files: D:\Code\principles\packages\openclaw-plugin\src
+  output:
+    Found 4 match(es) in 2 file(s)
+    
+    D:\Code\principles\packages\openclaw-plugin\src\index.ts
+      31: import { handleSubagentEnded } from './hooks/subagent.js';
+      255: handleSubagentEnded(event, { ...ctx, workspaceDir, api });
+    
+    D:\Code\principles\packages\openclaw-plugin\src\hooks\subagent.ts
+      122: void handleSubagentEnded(event, ctx).finally(() => {
+      164: export async function handleSubagentEnded(
+    
+    [Agent Usage Reminder]
+    
+    You called a search/fetch tool directly without leveraging specialized agents.
+    
+    RECOMMENDED: Use task with explore/librarian agents for better results:
+    
+    ```
+    // Parallel exploration - fire multiple agents simultaneously
+    task(agent="explore", prompt="Find all files matching pattern X")
+    task(agent="explore", prompt="Search for implementation of Y") 
+    task(agent="librarian", prompt="Lookup documentation for Z")
+    
+    // Then continue your work while they run in background
+    // System will notify you when each completes
+    ```
+    
+    WHY:
+    - Agents can perform deeper, more thorough searches
+    ... (5 more lines)
+
+[thinking] Let me look at the `handleSubagentEnded` function in `hooks/subagent.ts` to see if it routes to empathy observer's `reap()` method.
+
+[tool] read (pending)
+  input: {}
+
+[tool] packages\openclaw-plugin\src\hooks\subagent.ts (completed)
+  kind: read
+  input: D:\Code\principles\packages\openclaw-plugin\src\hooks\subagent.ts
+  files: D:\Code\principles\packages\openclaw-plugin\src\hooks\subagent.ts
+  output:
+    <path>D:\Code\principles\packages\openclaw-plugin\src\hooks\subagent.ts</path>
+    <type>file</type>
+    <content>160:     sessionId?: string;
+    161:     agentId?: string;
+    162: };
+    163: 
+    164: export async function handleSubagentEnded(
+    165:     event: PluginHookSubagentEndedEvent,
+    166:     ctx: SubagentEndedHookContext
+    167: ): Promise<void> {
+    168:     const { outcome, targetSessionKey } = event;
+    169:     const workspaceDir = ctx.workspaceDir;
+    170: 
+    171:     if (!workspaceDir) return;
+    172: 
+    173:     const wctx = WorkspaceContext.fromHookContext(ctx);
+    174:     const logger: HookLogger = ctx.api?.logger ?? console;
+    175:     if (isEmpathyObserverSession(targetSessionKey || '')) {
+    176:         await empathyObserverManager.reap(ctx.api, targetSessionKey!, workspaceDir);
+    177:         return;
+    178:     }
+    179: 
+    180:     const config = wctx.config;
+    181: 
+    182:     // ── Outcome-based EP and Pain Signal handling ──
+    183:     // OpenClaw v2026.3.23 fixes: timeout may be false positive (fast-finishing workers)
+    184:     // Only penalize actual errors, not timeout/killed/reset
+    185:     
+    ... (63 more lines)
+
+[thinking] Good, I can confirm:1. At line 175-178: `handleSubagentEnded` checks if the session is an empathy observer session and if so, calls `empathyObserverManager.reap()`
+           
+           This confirms the producer's claim that when `subagent_ended` fires, it routes to the empathy observer's `reap()` method for empathy sessions.
+           
+           Now let me verify that `reap()` exists in the empathy observer and understand the TTL-based cleanup mechanism.
+
+[tool] grep (pending)
+  input: {}
+
+[tool] read (pending)
+  input: {}
+
+[tool] grep (completed)
+  kind: search
+  input: D:\Code\principles\packages\openclaw-plugin\src\service\empathy-observer-manager.ts
+  files: D:\Code\principles\packages\openclaw-plugin\src\service\empathy-observer-manager.ts
+  output:
+    Found 1 match(es) in 1 file(s)
+    
+    D:\Code\principles\packages\openclaw-plugin\src\service\empathy-observer-manager.ts
+      401: async reap(
+    
+    [Agent Usage Reminder]
+    
+    You called a search/fetch tool directly without leveraging specialized agents.
+    
+    RECOMMENDED: Use task with explore/librarian agents for better results:
+    
+    ```
+    // Parallel exploration - fire multiple agents simultaneously
+    task(agent="explore", prompt="Find all files matching pattern X")
+    task(agent="explore", prompt="Search for implementation of Y") 
+    task(agent="librarian", prompt="Lookup documentation for Z")
+    
+    // Then continue your work while they run in background
+    // System will notify you when each completes
+    ```
+    
+    WHY:
+    - Agents can perform deeper, more thorough searches
+    - Background tasks run in parallel, saving time
+    - Specialized agents have domain expertise
+    - Reduces context window usage in main session
+    
+    ALWAYS prefer: Multiple parallel task calls > Direct tool calls
+
+[tool] packages\openclaw-plugin\src\service\empathy-observer-manager.ts (completed)
+  kind: read
+  input: D:\Code\principles\packages\openclaw-plugin\src\service\empathy-observer-manager.ts
+  files: D:\Code\principles\packages\openclaw-plugin\src\service\empathy-observer-manager.ts
+  output:
+    <path>D:\Code\principles\packages\openclaw-plugin\src\service\empathy-observer-manager.ts</path>
+    <type>file</type>
+    <content>365:                         origin: 'system_infer',
+    366:                         confidence: this.normalizeConfidence(parsed.confidence),
+    367:                     });
+    368:                 } catch (error) {
+    369:                     api.logger.warn(`[PD:EmpathyObserver] Failed to persist observer pain event for ${sessionId}: ${String(error)}`);
+    370:                 }
+    371:                 api.logger.info(`[PD:EmpathyObserver] Applied GFI +${score} for ${sessionId}`);
+    372:             } else {
+    373:                 api.logger.info(`[PD:EmpathyObserver] No damage detected or no sessionId for ${observerSessionKey}`);
+    374:             }
+    375:             finalized = true;
+    376:         } catch (error) {
+    377:             api.logger.warn(`[PD:EmpathyObserver] reapBySession failed to read messages for ${observerSessionKey}: ${String(error)}`);
+    378:         }
+    379: 
+    380:         // Only delete the session if we successfully read messages (finalized=true).
+    381:         // When finalized=false (getSessionMessages failed), preserve the session so
+    382:         // the subagent_ended fallback can retry or the TTL expiry can unblock the parent.
+    383:         if (finalized) {
+    384:             try {
+    385:                 await api.runtime.subagent.deleteSession({ sessionKey: observerSessionKey });
+    386:                 api.logger.info(`[PD:EmpathyObserver] deleteSession succeeded for ${observerSessionKey}`);
+    387:             } catch (error) {
+    388:                 api.logger.warn(`[PD:EmpathyObserver] deleteSession failed for ${observerSessionKey}: ${String(error)}`);
+    389:             }
+    390:             this.markCompleted(observerSessionKey);
+    ... (37 more lines)
+
+[thinking] Now I understand the architecture better:
+           
+           1. **Main recovery path** (`finalizeRun`): Uses `waitForRun` with a 30s timeout, then `getSessionMessages`, then `deleteSession`. This is the happy path.
+           
+           2. **Fallback path** (`reap`): Triggered by `subagent_ended` hook. The comment at line 398-399 says "Fallback回收: 由 subagent_ended 触发" (Fallback recovery: triggered by subagent_ended)
+           
+           3. **TTL-based cleanup**: The comment at line 381-382 mentions "the TTL expiry can unblock the parent"
+           
+           Let me check the TTL mechanism to understand how it works.
+
+[tool] read (pending)
+  input: {}
+
+[tool] packages\openclaw-plugin\src\service\empathy-observer-manager.ts (completed)
+  kind: read
+  input: D:\Code\principles\packages\openclaw-plugin\src\service\empathy-observer-manager.ts
+  files: D:\Code\principles\packages\openclaw-plugin\src\service\empathy-observer-manager.ts
+  output:
+    <path>D:\Code\principles\packages\openclaw-plugin\src\service\empathy-observer-manager.ts</path>
+    <type>file</type>
+    <content>100:             this.completedSessions.delete(observerSessionKey);
+    101:             return false;
+    102:         }
+    103:         return true;
+    104:     }
+    105: 
+    106:     private isActive(parentSessionId: string): boolean {
+    107:         const metadata = this.activeRuns.get(parentSessionId);
+    108:         if (!metadata) return false;
+    109:         if (metadata.timedOutAt || metadata.erroredAt) {
+    110:             if (!metadata.observedAt) return true;
+    111:             // TTL-based cleanup of orphaned timed-out/error entries:
+    112:             // if fallback never fired, expire the block so parent session recovers
+    113:             if (Date.now() - metadata.observedAt > 5 * 60 * 1000) {
+    114:                 this.activeRuns.delete(parentSessionId);
+    115:                 if (this.sessionLocks.get(parentSessionId) === metadata.observerSessionKey) {
+    116:                     this.sessionLocks.delete(parentSessionId);
+    117:                 }
+    118:                 return false;
+    119:             }
+    120:             return true;
+    121:         }
+    122:         if (Date.now() - metadata.startedAt > 5 * 60 * 1000) {
+    123:             this.activeRuns.delete(parentSessionId);
+    124:             if (this.sessionLocks.get(parentSessionId) === metadata.observerSessionKey) {
+    125:                 this.sessionLocks.delete(parentSessionId);
+    ... (37 more lines)
+
+[thinking] Good, I can see the TTL-based cleanup mechanism:1. Lines 111-118: If a session has `timedOutAt` or `erroredAt` set, and `observedAt` is set, and `Date.now() - metadata.observedAt > 5 * 60 * 1000` (5 minutes), the entry is deleted.
+           
+           2. Lines 122-127: If a session has been running for more than 5 minutes (`Date.now() - metadata.startedAt > 5 * 60 * 1000`), it's cleaned up.This confirms the producer's claim that the TTL-based cleanup is the ONLY recovery mechanism for orphaned sessions when using `runtime_direct` transport.Now let me verify the producer's claims about `expectsCompletionMessage` - the producer says it's not part of SubagentRunParams.
+
+[tool] grep (pending)
+  input: {}
+
+[tool] grep (pending)
+  input: {}
+
+[tool] grep (completed)
+  kind: search
+  input: D:\Code\openclaw\src
+  files: D:\Code\openclaw\src
+  output:
+    Found 3 match(es) in 2 file(s)
+    
+    D:\Code\openclaw\src\plugins\runtime\types.ts
+      8: export type SubagentRunParams = {
+      56: run: (params: SubagentRunParams) => Promise<SubagentRunResult>;
+    
+    D:\Code\openclaw\src\plugin-sdk\index.ts
+      59: SubagentRunParams,
+    
+    [Agent Usage Reminder]
+    
+    You called a search/fetch tool directly without leveraging specialized agents.
+    
+    RECOMMENDED: Use task with explore/librarian agents for better results:
+    
+    ```
+    // Parallel exploration - fire multiple agents simultaneously
+    task(agent="explore", prompt="Find all files matching pattern X")
+    task(agent="explore", prompt="Search for implementation of Y") 
+    task(agent="librarian", prompt="Lookup documentation for Z")
+    
+    // Then continue your work while they run in background
+    // System will notify you when each completes
+    ```
+    
+    WHY:
+    - Agents can perform deeper, more thorough searches
+    - Background tasks run in parallel, saving time
+    ... (4 more lines)
+
+[tool] grep (completed)
+  kind: search
+  input: D:\Code\openclaw\src
+  files: D:\Code\openclaw\src
+  output:
+    Found 132 match(es) in 25 file(s)
+    
+    D:\Code\openclaw\src\auto-reply\reply\commands-subagents-spawn.test.ts
+      118: expect(spawnParams.expectsCompletionMessage).toBe(true);
+    
+    D:\Code\openclaw\src\auto-reply\reply\commands-subagents\action-spawn.ts
+      46: expectsCompletionMessage: true,
+    
+    D:\Code\openclaw\src\plugins\wired-hooks-subagent.test.ts
+      94: expectsCompletionMessage: true,
+      147: expectsCompletionMessage: true,
+    
+    D:\Code\openclaw\src\plugins\types.ts
+      2311: expectsCompletionMessage: boolean;
+    
+    D:\Code\openclaw\src\agents\tools\sessions-spawn-tool.ts
+      269: expectsCompletionMessage: true,
+      299: expectsCompletionMessage: true,
+    
+    D:\Code\openclaw\src\agents\subagent-spawn.ts
+      81: expectsCompletionMessage?: boolean;
+      374: const expectsCompletionMessage = params.expectsCompletionMessage !== false;
+      810: expectsCompletionMessage,
+    
+    D:\Code\openclaw\src\agents\subagent-spawn.test.ts
+      137: expectsCompletionMessage: true,
+    
+    D:\Code\openclaw\src\agents\subagent-registry.types.ts
+    ... (179 more lines)
+
+[thinking] Interesting! `expectsCompletionMessage` DOES exist in the OpenClaw codebase - it's used in `RegisterSubagentRunInput` and various subagent-related types. Let me check the `SubagentRunParams` type more closely to see if `expectsCompletionMessage` is part of it.
+
+[tool] read (pending)
+  input: {}
+
+[client] session/request_permission (running)
+
+[tool] ..\openclaw\src\plugins\runtime\types.ts (completed)
+  kind: read
+  input: D:\Code\openclaw\src\plugins\runtime\types.ts
+  files: D:\Code\openclaw\src\plugins\runtime\types.ts
+  output:
+    <path>D:\Code\openclaw\src\plugins\runtime\types.ts</path>
+    <type>file</type>
+    <content>1: import type { PluginRuntimeChannel } from "./types-channel.js";
+    2: import type { PluginRuntimeCore, RuntimeLogger } from "./types-core.js";
+    3: 
+    4: export type { RuntimeLogger };
+    5: 
+    6: // ── Subagent runtime types ──────────────────────────────────────────
+    7: 
+    8: export type SubagentRunParams = {
+    9:   sessionKey: string;
+    10:   message: string;
+    11:   provider?: string;
+    12:   model?: string;
+    13:   extraSystemPrompt?: string;
+    14:   lane?: string;
+    15:   deliver?: boolean;
+    16:   idempotencyKey?: string;
+    17: };
+    18: 
+    19: export type SubagentRunResult = {
+    20:   runId: string;
+    21: };
+    22: 
+    23: export type SubagentWaitParams = {
+    24:   runId: string;
+    25:   timeoutMs?: number;
+    26: };
+    ... (37 more lines)
+
+[thinking] This confirms the producer's claim! Looking at `SubagentRunParams` (lines 8-17):```typescript
+           export type SubagentRunParams = {
+             sessionKey: string;
+             message: string;
+             provider?: string;
+             model?: string;
+             extraSystemPrompt?: string;
+             lane?: string;
+             deliver?: boolean;
+             idempotencyKey?: string;
+           };```
+           
+           There is NO `expectsCompletionMessage` in `SubagentRunParams`! The empathy observer is passing `expectsCompletionMessage: true` in its call to `api.runtime.subagent.run()`, but this property is NOT part of the `SubagentRunParams` interface. This means it's being passed but ignored!
+           
+           The `expectsCompletionMessage` exists in `RegisterSubagentRunInput` (subagent-registry.types.ts line 33) but NOT in the plugin runtime's `SubagentRunParams`.
+           
+           This confirms the producer's finding that the empathy observer's call is passing an unrecognized parameter that has no effect on the subagent li...
+Let me log my verification progress and continue examining key areas:
+
+[tool] bash (pending)
+  input: {}
+
+[tool] Append verification checkpoints to worklog (completed)
+  kind: execute
+  input: cat >> "D:\Code\principles\ops\ai-sprints\2026-04-01T11-34-59-087Z-subagent-helper-empathy\stages\01-investigate/reviewer-b-worklog.md" << 'EOF' ## Checkpoint 1: OpenClaw Source Verification **Producer Claims Verified...
+  output:
+    {
+      "output": "",
+      "metadata": {
+        "output": "",
+        "exit": 0,
+        "description": "Append verification checkpoints to worklog",
+        "truncated": false
+      }
+    }
+
+[thinking] Now let me check the test coverage gaps and any other remaining issues.
+
+[tool] glob (pending)
+  input: {}
+
+[tool] glob (pending)
+  input: {}
+
+[tool] glob (completed)
+  kind: search
+  input: D:\Code\principles\packages\openclaw-plugin
+  files: D:\Code\principles\packages\openclaw-plugin
+  output:
+    Found 1 file(s)
+    
+    D:\Code\principles\packages\openclaw-plugin\tests\service\empathy-observer-manager.test.ts
+    [Agent Usage Reminder]
+    
+    You called a search/fetch tool directly without leveraging specialized agents.
+    
+    RECOMMENDED: Use task with explore/librarian agents for better results:
+    
+    ```
+    // Parallel exploration - fire multiple agents simultaneously
+    task(agent="explore", prompt="Find all files matching pattern X")
+    task(agent="explore", prompt="Search for implementation of Y") 
+    task(agent="librarian", prompt="Lookup documentation for Z")
+    
+    // Then continue your work while they run in background
+    // System will notify you when each completes
+    ```
+    
+    WHY:
+    - Agents can perform deeper, more thorough searches
+    - Background tasks run in parallel, saving time
+    - Specialized agents have domain expertise
+    - Reduces context window usage in main session
+    
+    ALWAYS prefer: Multiple parallel task calls > Direct tool calls
+
+[tool] glob (completed)
+  kind: search
+  input: D:\Code\principles\packages\openclaw-plugin
+  files: D:\Code\principles\packages\openclaw-plugin
+  output:
+    Found 1 file(s)
+    
+    D:\Code\principles\packages\openclaw-plugin\tests\hooks\subagent.test.ts
+    [Agent Usage Reminder]
+    
+    You called a search/fetch tool directly without leveraging specialized agents.
+    
+    RECOMMENDED: Use task with explore/librarian agents for better results:
+    
+    ```
+    // Parallel exploration - fire multiple agents simultaneously
+    task(agent="explore", prompt="Find all files matching pattern X")
+    task(agent="explore", prompt="Search for implementation of Y") 
+    task(agent="librarian", prompt="Lookup documentation for Z")
+    
+    // Then continue your work while they run in background
+    // System will notify you when each completes
+    ```
+    
+    WHY:
+    - Agents can perform deeper, more thorough searches
+    - Background tasks run in parallel, saving time
+    - Specialized agents have domain expertise
+    - Reduces context window usage in main session
+    
+    ALWAYS prefer: Multiple parallel task calls > Direct tool calls
+
+[thinking] Good, there are test files for empathy-observer-manager and subagent hooks. Let me check if these tests cover the key scenarios the producer mentioned.
+
+[tool] read (pending)
+  input: {}
+
+[tool] packages\openclaw-plugin\tests\service\empathy-observer-manager.test.ts (completed)
+  kind: read
+  input: D:\Code\principles\packages\openclaw-plugin\tests\service\empathy-observer-manager.test.ts
+  files: D:\Code\principles\packages\openclaw-plugin\tests\service\empathy-observer-manager.test.ts
+  output:
+    <path>D:\Code\principles\packages\openclaw-plugin\tests\service\empathy-observer-manager.test.ts</path>
+    <type>file</type>
+    <content>1: import { beforeEach, describe, expect, it, vi } from 'vitest';
+    2: import { EmpathyObserverManager, isEmpathyObserverSession } from '../../src/service/empathy-observer-manager.js';
+    3: import { WorkspaceContext } from '../../src/core/workspace-context.js';
+    4: import * as sessionTracker from '../../src/core/session-tracker.js';
+    5: 
+    6: vi.mock('../../src/core/workspace-context.js');
+    7: vi.mock('../../src/core/session-tracker.js', () => ({
+    8:   trackFriction: vi.fn(),
+    9: }));
+    10: 
+    11: describe('EmpathyObserverManager', () => {
+    12:   let manager: EmpathyObserverManager;
+    13: 
+    14:   let run: ReturnType<typeof vi.fn>;
+    15:   let waitForRun: ReturnType<typeof vi.fn>;
+    16:   let getSessionMessages: ReturnType<typeof vi.fn>;
+    17:   let deleteSession: ReturnType<typeof vi.fn>;
+    18:   const logger = {
+    19:     info: vi.fn(),
+    20:     warn: vi.fn(),
+    21:     error: vi.fn(),
+    22:   };
+    23: 
+    24:   let api: any;
+    25: 
+    26:   const mockAsyncFn = <T extends (...args: any[]) => Promise<any>>(
+    ... (199 more lines)
+
+[thinking] Let me check if there are any tests that verify the subagent_ended hook behavior specifically, and whether the producer's concerns about test coverage gaps are valid.
+
+[tool] read (pending)
+  input: {}
+
+[tool] grep (pending)
+  input: {}
+
+[tool] packages\openclaw-plugin\tests\hooks\subagent.test.ts (completed)
+  kind: read
+  input: D:\Code\principles\packages\openclaw-plugin\tests\hooks\subagent.test.ts
+  files: D:\Code\principles\packages\openclaw-plugin\tests\hooks\subagent.test.ts
+  output:
+    <path>D:\Code\principles\packages\openclaw-plugin\tests\hooks\subagent.test.ts</path>
+    <type>file</type>
+    <content>1: import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+    2: import { handleSubagentEnded } from '../../src/hooks/subagent.js';
+    3: import * as fs from 'fs';
+    4: import { WorkspaceContext } from '../../src/core/workspace-context.js';
+    5: import * as evolutionWorker from '../../src/service/evolution-worker.js';
+    6: import { empathyObserverManager } from '../../src/service/empathy-observer-manager.js';
+    7: 
+    8: vi.mock('fs');
+    9: vi.mock('../../src/core/workspace-context.js');
+    10: vi.mock('../../src/service/evolution-worker.js', () => ({
+    11:     acquireQueueLock: vi.fn(async () => () => undefined),
+    12: }));
+    13: 
+    14: const mockEmitSync = vi.fn();
+    15: 
+    16: describe('Subagent Hook', () => {
+    17:     const workspaceDir = '/mock/workspace';
+    18: 
+    19: const mockTrajectory = {
+    20:     recordTaskOutcome: vi.fn(),
+    21: };
+    22: 
+    23:     const mockConfig = {
+    24:         get: vi.fn().mockImplementation((key) => {
+    25:             if (key === 'scores') return {
+    26:                 subagent_error_penalty: 80,
+    ... (77 more lines)
+
+[tool] grep (completed)
+  kind: search
+  input: D:\Code\principles\packages\openclaw-plugin\tests
+  files: D:\Code\principles\packages\openclaw-plugin\tests
+  output:
+    No matches found
+    [Agent Usage Reminder]
+    
+    You called a search/fetch tool directly without leveraging specialized agents.
+    
+    RECOMMENDED: Use task with explore/librarian agents for better results:
+    
+    ```
+    // Parallel exploration - fire multiple agents simultaneously
+    task(agent="explore", prompt="Find all files matching pattern X")
+    task(agent="explore", prompt="Search for implementation of Y") 
+    task(agent="librarian", prompt="Lookup documentation for Z")
+    
+    // Then continue your work while they run in background
+    // System will notify you when each completes
+    ```
+    
+    WHY:
+    - Agents can perform deeper, more thorough searches
+    - Background tasks run in parallel, saving time
+    - Specialized agents have domain expertise
+    - Reduces context window usage in main session
+    
+    ALWAYS prefer: Multiple parallel task calls > Direct tool calls
+
+[thinking] I can see that the subagent.test.ts tests `handleSubagentEnded` and mocks `empathyObserverManager.reap`. However, these tests do NOT verify whether `subagent_ended` actually fires for `runtime_direct` transport - they just test the routing logic.
+           
+           The producer is correct: there's no integration test that verifies `subagent_ended` CAN or CANNOT fire for `runtime_direct` transport. The tests mock everything.
+           
+           Let me now check if there are any tests for the workflow helper that don't exist yet (since it's a planned migration).
+           
+           Let me also verify the failure_mode_inventory by checking if FM-5 (subagent_ended never fires) is correctly documented as "CONFIRMED DEAD CODE" rather than just "UNVERIFIED".
+           
+           Now let me finalize my review and write the report.
+
+[tool] bash (pending)
+  input: {}
+
+[tool] Append test coverage and scope review checkpoints (completed)
+  kind: execute
+  input: cat >> "D:\Code\principles\ops\ai-sprints\2026-04-01T11-34-59-087Z-subagent-helper-empathy\stages\01-investigate/reviewer-b-worklog.md" << 'EOF' ## Checkpoint 4: Test Coverage Assessment **Test Files Found:** - tests/...
+  output:
+    {
+      "output": "",
+      "metadata": {
+        "output": "",
+        "exit": 0,
+        "description": "Append test coverage and scope review checkpoints",
+        "truncated": false
+      }
+    }
+
+[thinking] Now let me write the final report to the reviewer-b.md file.
+
+[tool] write (pending)
+  input: {}
+
+[tool] ops\ai-sprints\2026-04-01T11-34-59-087Z-subagent-helper-empathy\stages\01-investigate\reviewer-b.md (completed)
+  kind: edit
+  input: D:\Code\principles\ops\ai-sprints\2026-04-01T11-34-59-087Z-subagent-helper-empathy\stages\01-investigate\reviewer-b.md
+  files: D:\Code\principles\ops\ai-sprints\2026-04-01T11-34-59-087Z-subagent-helper-empathy\stages\01-investigate\reviewer-b.md
+  output:
+    Wrote file successfully.
+    
+    Wrote file successfully.
+    
+    diff D:\Code\principles\ops\ai-sprints\2026-04-01T11-34-59-087Z-subagent-helper-empathy\stages\01-investigate\reviewer-b.md (+106 lines)
+
+[thinking] Now let me update my role state file to mark it as completed.
+
+[tool] write (pending)
+  input: {}
+
+[tool] write (failed)
+  kind: edit
+  input: D:\Code\principles\ops\ai-sprints\2026-04-01T11-34-59-087Z-subagent-helper-empathy\stages\01-investigate\reviewer-b-state.json
+  files: D:\Code\principles\ops\ai-sprints\2026-04-01T11-34-59-087Z-subagent-helper-empathy\stages\01-investigate\reviewer-b-state.json
+  output:
+    {
+      "error": "File already exists. Use edit tool instead."
+    }
+    
+    File already exists. Use edit tool instead.
+
+[thinking] Let me use bash to write this file directly since the write tool is being difficult.
+
+[tool] bash (pending)
+  input: {}
+
+[tool] Update reviewer state to completed (completed)
+  kind: execute
+  input: cat > "D:\Code\principles\ops\ai-sprints\2026-04-01T11-34-59-087Z-subagent-helper-empathy\stages\01-investigate\reviewer-b-state.json" << 'EOF' { "role": "reviewer_b", "stage": "investigate", "round": 2, "status": "co...
+  output:
+    {
+      "output": "",
+      "metadata": {
+        "output": "",
+        "exit": 0,
+        "description": "Update reviewer state to completed",
+        "truncated": false
+      }
+    }
+
+[thinking] Good. Now let me verify my worklog has all the checkpoints and then output the completion line.
+ROLE_STATUS: completed; report=D:\Code\principles\ops\ai-sprints\2026-04-01T11-34-59-087Z-subagent-helper-empathy\stages\01-investigate\reviewer-b.md
+
+[done] end_turn

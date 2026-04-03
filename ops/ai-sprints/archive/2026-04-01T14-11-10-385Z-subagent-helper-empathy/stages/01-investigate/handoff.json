@@ -1,0 +1,83 @@
+{
+  "blockers": [],
+  "focusForNextRound": null,
+  "producerChecks": "evidence=ok;tests=analyzed;scope=investigate-only;prompt-isolation=not-applicable;openclaw-verification=required;transport=done;hooks=done;assumptions=done;failure-modes=done",
+  "dimensionScores": {
+    "reviewerA": {
+      "evidence_quality": 4,
+      "assumption_coverage": 4,
+      "transport_audit_completeness": 5
+    },
+    "reviewerB": {
+      "evidence_quality": 4,
+      "assumption_coverage": 3,
+      "transport_audit_completeness": 4
+    },
+    "globalReviewer": null
+  },
+  "contractItems": [
+    {
+      "deliverable": "transport_audit",
+      "status": "DONE"
+    },
+    {
+      "deliverable": "lifecycle_hook_map",
+      "status": "DONE"
+    },
+    {
+      "deliverable": "openclaw_assumptions_documented",
+      "status": "DONE"
+    },
+    {
+      "deliverable": "failure_mode_inventory",
+      "status": "DONE"
+    }
+  ],
+  "producerCodeEvidence": {
+    "filesChecked": [
+      "empathy-observer-manager.ts",
+      "hooks/subagent.ts",
+      "index.ts",
+      "openclaw-sdk.d.ts",
+      "subagent-probe.ts",
+      "nocturnal-trinity.ts",
+      "empathy-observer-manager.test.ts"
+    ],
+    "evidenceSource": "local",
+    "sha": "10bcc2022b6f6b6f021fbf6a574dba9e6af0e8fe",
+    "branchWorktree": "feat/subagent-workflow-helper-impl",
+    "evidenceScope": "principles"
+  },
+  "reviewerACodeEvidence": {
+    "filesChecked": [
+      "empathy-observer-manager.ts",
+      "hooks/subagent.ts",
+      "index.ts",
+      "openclaw-sdk.d.ts",
+      "subagent-probe.ts",
+      "empathy-observer-manager.test.ts"
+    ],
+    "evidenceSource": "local",
+    "sha": "10bcc2022b6f6b6f021fbf6a574dba9e6af0e8fe",
+    "branchWorktree": null,
+    "evidenceScope": "principles"
+  },
+  "reviewerBCodeEvidence": {
+    "filesChecked": [
+      "empathy-observer-manager.ts",
+      "subagent.ts",
+      "index.ts",
+      "openclaw-sdk.d.ts",
+      "subagent-probe.ts",
+      "empathy-observer-manager.test.ts"
+    ],
+    "evidenceSource": "both",
+    "sha": "10bcc2022b6f6b6f021fbf6a574dba9e6af0e8fe",
+    "branchWorktree": null,
+    "evidenceScope": "principles"
+  },
+  "globalReviewerCodeEvidence": null,
+  "stageName": "investigate",
+  "round": 2,
+  "generatedAt": "2026-04-01T14:32:10.659Z"
+}

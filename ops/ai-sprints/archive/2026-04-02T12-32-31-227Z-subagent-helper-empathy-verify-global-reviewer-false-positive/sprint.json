@@ -1,0 +1,21 @@
+{
+  "runId": "2026-04-02T12-32-31-227Z-subagent-helper-empathy-verify",
+  "taskId": "subagent-helper-empathy-verify",
+  "title": "Subagent Helper: verify empathy workflow implementation",
+  "specPath": null,
+  "status": "running",
+  "currentStageIndex": 0,
+  "currentStage": "verify",
+  "currentRound": 2,
+  "maxRoundsPerStage": 2,
+  "maxRuntimeMinutes": 180,
+  "staleAfterMs": 300000,
+  "orchestratorPid": 49056,
+  "lastHeartbeatAt": "2026-04-02T13:01:10.569Z",
+  "currentRole": "reviewer_a || reviewer_b",
+  "haltReason": null,
+  "worktree": null,
+  "consecutiveTimeouts": {},
+  "createdAt": "2026-04-02T12:32:31.228Z",
+  "updatedAt": "2026-04-02T13:01:10.569Z"
+}
