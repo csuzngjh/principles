@@ -687,7 +687,7 @@ select:focus {
 
 .timeline-marker {
   position: absolute;
-  left: 0;
+  left: 5px;
   top: 16px;
   width: 12px;
   height: 12px;
