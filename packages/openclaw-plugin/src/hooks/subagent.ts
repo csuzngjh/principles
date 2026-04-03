@@ -94,8 +94,8 @@ function cleanupPainFlagForTask(wctx: WorkspaceContext, completedTaskId: string,
         if (!hasRemainingActiveTasks) {
             fs.unlinkSync(painFlagPath);
         }
-    } catch (e: any) {
-        if (e.code === 'ENOENT') return; // File doesn't exist, nothing to clean up
+    } catch (e: unknown) {
+        if ((e as NodeJS.ErrnoException).code === 'ENOENT') return; // File doesn't exist, nothing to clean up
         logger.error(`[PD:Subagent] Failed to cleanup pain flag: ${String(e)}`);
     }
 }
@@ -150,7 +150,7 @@ function scheduleTaskOutcomeRetry(
     setTimeout(() => {
         try {
             wctx.trajectory?.recordTaskOutcome?.(payload);
-        } catch (error) {
+        } catch (error: unknown) {
             logger.warn(`[PD:Subagent] Retrying task outcome persistence for ${payload.taskId}: ${String(error)}`);
             scheduleTaskOutcomeRetry(wctx, payload, attempt + 1, logger);
         }
@@ -298,11 +298,11 @@ export async function handleSubagentEnded(
                     return true;
                 }
                 // Backward compatibility: match tasks with no assigned_session_key (legacy behavior)
-                // Only match tasks started within 2 hours to avoid stale task matching
+                // Only match tasks started within 30 minutes to avoid stale task matching
                 if (taskSessionKey === undefined || taskSessionKey === null) {
                     const taskStartedAt = task?.started_at ? new Date(task.started_at).getTime() : 0;
                     const taskAge = taskStartedAt > 0 ? Date.now() - taskStartedAt : Infinity;
-                    const LEGACY_FALLBACK_MAX_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours
+                    const LEGACY_FALLBACK_MAX_AGE_MS = 30 * 60 * 1000; // 30 minutes
                     if (taskAge < LEGACY_FALLBACK_MAX_AGE_MS) {
                         return true;
                     }
@@ -352,7 +352,7 @@ export async function handleSubagentEnded(
         if (taskOutcomePayload) {
             try {
                 wctx.trajectory?.recordTaskOutcome?.(taskOutcomePayload);
-            } catch (error) {
+            } catch (error: unknown) {
                 logger.warn(`[PD:Subagent] Failed to persist task outcome for ${taskOutcomePayload.taskId}: ${String(error)}`);
                 scheduleTaskOutcomeRetry(wctx, taskOutcomePayload, 1, logger);
             }

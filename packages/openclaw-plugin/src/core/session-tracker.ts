@@ -61,6 +61,7 @@ const persistTimers = new Map<string, ReturnType<typeof setTimeout>>();
 function logSessionTrackerWarning(message: string, error?: unknown): void {
     const detail = error instanceof Error ? error.message : error ? String(error) : '';
     const suffix = detail ? `: ${detail}` : '';
+    // eslint-disable-next-line no-console
     console.warn(`[PD:SessionTracker] ${message}${suffix}`);
 }
 

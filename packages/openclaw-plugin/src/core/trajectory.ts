@@ -5,6 +5,61 @@ import crypto from 'crypto';
 import { withLock } from '../utils/file-lock.js';
 import { resolvePdPath } from './paths.js';
 import { SampleNotFoundError } from '../config/index.js';
+import type {
+  CorrectionSampleReviewStatus,
+  CorrectionExportMode,
+  TrajectoryDataStats,
+  TrajectoryAssistantTurnInput,
+  TrajectoryUserTurnInput,
+  TrajectoryToolCallInput,
+  TrajectoryPainEventInput,
+  TrajectoryGateBlockInput,
+  DailyMetricRow,
+  TrajectoryTrustChangeInput,
+  TrajectoryPrincipleEventInput,
+  TrajectoryTaskOutcomeInput,
+  TrajectorySessionInput,
+  TaskKind,
+  TaskPriority,
+  EvolutionTaskInput,
+  EvolutionTaskInputV2,
+  EvolutionEventInput,
+  EvolutionTaskRecord,
+  EvolutionEventRecord,
+  EvolutionTaskFilters,
+  AssistantTurnRecord,
+  CorrectionSampleRecord,
+  TrajectoryExportResult,
+  TrajectoryDatabaseOptions,
+} from './trajectory-types.js';
+
+export type {
+  CorrectionSampleReviewStatus,
+  CorrectionExportMode,
+  TrajectoryDataStats,
+  TrajectoryAssistantTurnInput,
+  TrajectoryUserTurnInput,
+  TrajectoryToolCallInput,
+  TrajectoryPainEventInput,
+  TrajectoryGateBlockInput,
+  DailyMetricRow,
+  TrajectoryTrustChangeInput,
+  TrajectoryPrincipleEventInput,
+  TrajectoryTaskOutcomeInput,
+  TrajectorySessionInput,
+  TaskKind,
+  TaskPriority,
+  EvolutionTaskInput,
+  EvolutionTaskInputV2,
+  EvolutionEventInput,
+  EvolutionTaskRecord,
+  EvolutionEventRecord,
+  EvolutionTaskFilters,
+  AssistantTurnRecord,
+  CorrectionSampleRecord,
+  TrajectoryExportResult,
+  TrajectoryDatabaseOptions,
+} from './trajectory-types.js';
 
 /**
  * Trajectory database stores HISTORICAL and ANALYTICS data.
@@ -20,244 +75,6 @@ const DEFAULT_INLINE_THRESHOLD = 16 * 1024;
 const DEFAULT_BUSY_TIMEOUT_MS = 5000;
 const DEFAULT_ORPHAN_BLOB_GRACE_DAYS = 7;
 const SCHEMA_VERSION = 1;
-
-export type CorrectionSampleReviewStatus = 'pending' | 'approved' | 'rejected';
-export type CorrectionExportMode = 'raw' | 'redacted';
-
-export interface TrajectoryDataStats {
-  dbPath: string;
-  dbSizeBytes: number;
-  assistantTurns: number;
-  userTurns: number;
-  toolCalls: number;
-  painEvents: number;
-  pendingSamples: number;
-  approvedSamples: number;
-  blobBytes: number;
-  lastIngestAt: string | null;
-}
-
-export interface TrajectoryAssistantTurnInput {
-  sessionId: string;
-  runId: string;
-  provider: string;
-  model: string;
-  rawText: string;
-  sanitizedText: string;
-  usageJson: unknown;
-  empathySignalJson: unknown;
-  createdAt?: string;
-}
-
-export interface TrajectoryUserTurnInput {
-  sessionId: string;
-  turnIndex: number;
-  rawText: string;
-  correctionDetected: boolean;
-  correctionCue?: string | null;
-  referencesAssistantTurnId?: number | null;
-  createdAt?: string;
-}
-
-export interface TrajectoryToolCallInput {
-  sessionId: string;
-  toolName: string;
-  outcome: 'success' | 'failure' | 'blocked';
-  durationMs?: number | null;
-  exitCode?: number | null;
-  errorType?: string | null;
-  errorMessage?: string | null;
-  gfiBefore?: number | null;
-  gfiAfter?: number | null;
-  paramsJson?: unknown;
-  createdAt?: string;
-}
-
-export interface TrajectoryPainEventInput {
-  sessionId: string;
-  source: string;
-  score: number;
-  reason?: string | null;
-  severity?: string | null;
-  origin?: string | null;
-  confidence?: number | null;
-  createdAt?: string;
-}
-
-export interface TrajectoryGateBlockInput {
-  sessionId?: string | null;
-  toolName: string;
-  filePath?: string | null;
-  reason: string;
-  planStatus?: string | null;
-  createdAt?: string;
-}
-
-type DailyMetricRow = {
-  day: string;
-  tool_calls: number;
-  failures: number;
-  user_corrections: number;
-};
-
-export interface TrajectoryTrustChangeInput {
-  sessionId?: string | null;
-  previousScore: number;
-  newScore: number;
-  delta: number;
-  reason: string;
-  createdAt?: string;
-}
-
-export interface TrajectoryPrincipleEventInput {
-  principleId?: string | null;
-  eventType: string;
-  payload: unknown;
-  createdAt?: string;
-}
-
-export interface TrajectoryTaskOutcomeInput {
-  sessionId: string;
-  taskId?: string | null;
-  outcome: string;
-  summary?: string | null;
-  principleIdsJson?: unknown;
-  createdAt?: string;
-}
-
-export interface TrajectorySessionInput {
-  sessionId: string;
-  startedAt?: string;
-}
-
-// V2: Task kind and priority types for queue schema
-export type TaskKind = 'pain_diagnosis' | 'sleep_reflection' | 'model_eval';
-// V2: Task priority for scheduling
-export type TaskPriority = 'high' | 'medium' | 'low';
-
-// V2: EvolutionTaskInput with all V2 fields
-interface EvolutionTaskInputBase {
-  taskId: string;
-  traceId: string;
-  source: string;
-  reason?: string | null;
-  score?: number;
-  status?: string;
-  enqueuedAt?: string | null;
-  startedAt?: string | null;
-  completedAt?: string | null;
-  resolution?: string | null;
-  createdAt?: string;
-  updatedAt?: string;
-}
-
-// V2: Full EvolutionTaskInput with queue schema extensions
-interface EvolutionTaskInputV2 extends EvolutionTaskInputBase {
-  taskKind?: TaskKind;
-  priority?: TaskPriority;
-  retryCount?: number;
-  maxRetries?: number;
-  lastError?: string | null;
-  resultRef?: string | null;
-}
-
-// V2: recordEvolutionTask and updateEvolutionTask accept the V2 schema
-export type EvolutionTaskInput = EvolutionTaskInputV2;
-export { EvolutionTaskInputV2 };
-
-export interface EvolutionEventInput {
-  traceId: string;
-  taskId?: string | null;
-  stage: string;
-  level?: string;
-  message: string;
-  summary?: string | null;
-  metadata?: unknown;
-  createdAt?: string;
-}
-
-export interface EvolutionTaskRecord {
-  id: number;
-  taskId: string;
-  traceId: string;
-  source: string;
-  reason: string | null;
-  score: number;
-  status: string;
-  enqueuedAt: string | null;
-  startedAt: string | null;
-  completedAt: string | null;
-  resolution: string | null;
-  createdAt: string;
-  updatedAt: string;
-  // V2 fields
-  taskKind: TaskKind | null;
-  priority: TaskPriority | null;
-  retryCount: number | null;
-  maxRetries: number | null;
-  lastError: string | null;
-  resultRef: string | null;
-}
-
-export interface EvolutionEventRecord {
-  id: number;
-  traceId: string;
-  taskId: string | null;
-  stage: string;
-  level: string;
-  message: string;
-  summary: string | null;
-  metadata: Record<string, unknown>;
-  createdAt: string;
-}
-
-export interface EvolutionTaskFilters {
-  status?: string;
-  dateFrom?: string;
-  dateTo?: string;
-  limit?: number;
-  offset?: number;
-}
-
-export interface AssistantTurnRecord {
-  id: number;
-  sessionId: string;
-  runId: string;
-  provider: string;
-  model: string;
-  rawText: string;
-  sanitizedText: string;
-  blobRef: string | null;
-  createdAt: string;
-}
-
-export interface CorrectionSampleRecord {
-  sampleId: string;
-  sessionId: string;
-  badAssistantTurnId: number;
-  userCorrectionTurnId: number;
-  recoveryToolSpanJson: string;
-  diffExcerpt: string;
-  principleIdsJson: string;
-  qualityScore: number;
-  reviewStatus: CorrectionSampleReviewStatus;
-  exportMode: CorrectionExportMode;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface TrajectoryExportResult {
-  filePath: string;
-  count: number;
-  mode?: CorrectionExportMode;
-}
-
-export interface TrajectoryDatabaseOptions {
-  workspaceDir: string;
-  blobInlineThresholdBytes?: number;
-  busyTimeoutMs?: number;
-  orphanBlobGraceDays?: number;
-}
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -282,7 +99,7 @@ function summarizeForDiff(text: string): string {
 function redactText(text: string): string {
   return text
     .replace(/[A-Za-z]:\\[^\s"'`]+/g, '<WINDOWS_PATH>')
-    .replace(/\/(?:[A-Za-z0-9._-]+\/){1,}[A-Za-z0-9._-]+(?:\.[A-Za-z0-9._-]+)?/g, '<PATH>')
+    .replace(/\/[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+/g, '<PATH>')
     .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '<EMAIL>')
     .replace(/\b(sk|rk|pk)_[A-Za-z0-9]+\b/g, '<TOKEN>');
 }

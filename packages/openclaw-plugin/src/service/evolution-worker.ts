@@ -1,16 +1,19 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { createHash } from 'crypto';
-import type { OpenClawPluginServiceContext, OpenClawPluginApi } from '../openclaw-sdk.js';
+import type { OpenClawPluginServiceContext, OpenClawPluginApi, PluginLogger } from '../openclaw-sdk.js';
 import { DictionaryService } from '../core/dictionary-service.js';
 import { DetectionService } from '../core/detection-service.js';
 import { ensureStateTemplates } from '../core/init.js';
 import { extractCommonSubstring } from '../utils/nlp.js';
 import { SystemLogger } from '../core/system-logger.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
+import { EventLog } from '../core/event-log.js';
 import { initPersistence, flushAllSessions } from '../core/session-tracker.js';
 import { acquireLockAsync, releaseLock, type LockContext } from '../utils/file-lock.js';
 import { getEvolutionLogger, type EvolutionStage } from '../core/evolution-logger.js';
+import type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
+export type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 import { DIAGNOSTICIAN_PROTOCOL_SUMMARY } from '../constants/diagnostician.js';
 import { LockUnavailableError } from '../config/index.js';
 import { checkWorkspaceIdle, checkCooldown } from './nocturnal-runtime.js';
@@ -25,15 +28,13 @@ let timeoutId: NodeJS.Timeout | null = null;
 
 /**
  * Queue V2 Schema - Supports multiple task kinds while preserving pain_diagnosis semantics.
- * 
+ *
  * taskKind semantics:
  * - pain_diagnosis: User-adjacent, triggers HEARTBEAT, injects into user prompts
  * - sleep_reflection: Background-only, never injects into user prompts, no HEARTBEAT
- * 
+ *
  * Old queue items (without taskKind) are migrated to pain_diagnosis for compatibility.
  */
-export type TaskKind = 'pain_diagnosis' | 'sleep_reflection' | 'model_eval';
-export type TaskPriority = 'high' | 'medium' | 'low';
 export type QueueStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'canceled';
 export type TaskResolution = 'marker_detected' | 'auto_completed_timeout' | 'failed_max_retries' | 'canceled';
 
@@ -114,6 +115,20 @@ interface LegacyEvolutionQueueItem {
     session_id?: string;
     agent_id?: string;
     traceId?: string;
+    taskKind?: string;
+    priority?: string;
+    retryCount?: number;
+    maxRetries?: number;
+    lastError?: string;
+    resultRef?: string;
+}
+
+interface PainCandidateEntry {
+    count: number;
+    status: string;
+    firstSeen: string;
+    lastSeen: string;
+    samples: string[];
 }
 
 /**
@@ -130,8 +145,8 @@ const DEFAULT_MAX_RETRIES = 3;
 function migrateToV2(item: LegacyEvolutionQueueItem): EvolutionQueueItem {
     return {
         id: item.id,
-        taskKind: (item as any).taskKind || DEFAULT_TASK_KIND,
-        priority: (item as any).priority || DEFAULT_PRIORITY,
+        taskKind: (item.taskKind as TaskKind) || DEFAULT_TASK_KIND,
+        priority: (item.priority as TaskPriority) || DEFAULT_PRIORITY,
         source: item.source,
         traceId: item.traceId,
         task: item.task,
@@ -147,17 +162,19 @@ function migrateToV2(item: LegacyEvolutionQueueItem): EvolutionQueueItem {
         resolution: item.resolution as TaskResolution | undefined,
         session_id: item.session_id,
         agent_id: item.agent_id,
-        retryCount: (item as any).retryCount || 0,
-        maxRetries: (item as any).maxRetries || DEFAULT_MAX_RETRIES,
-        lastError: (item as any).lastError,
-        resultRef: (item as any).resultRef,
+        retryCount: item.retryCount || 0,
+        maxRetries: item.maxRetries || DEFAULT_MAX_RETRIES,
+        lastError: item.lastError,
+        resultRef: item.resultRef,
     };
 }
+
+type RawQueueItem = Record<string, unknown>;
 
 /**
  * Check if an item is a legacy (pre-V2) queue item.
  */
-function isLegacyQueueItem(item: any): boolean {
+function isLegacyQueueItem(item: RawQueueItem): boolean {
     return item && typeof item === 'object' && !('taskKind' in item);
 }
 
@@ -165,8 +182,8 @@ function isLegacyQueueItem(item: any): boolean {
  * Migrate entire queue to V2 schema if needed.
  * Returns a new array with all items migrated to V2 format.
  */
-function migrateQueueToV2(queue: any[]): EvolutionQueueItem[] {
-    return queue.map(item => isLegacyQueueItem(item) ? migrateToV2(item) : item);
+function migrateQueueToV2(queue: RawQueueItem[]): EvolutionQueueItem[] {
+    return queue.map(item => isLegacyQueueItem(item) ? migrateToV2(item as unknown as LegacyEvolutionQueueItem) : item as unknown as EvolutionQueueItem);
 }
 
 const PAIN_QUEUE_DEDUP_WINDOW_MS = 30 * 60 * 1000;
@@ -239,7 +256,7 @@ function isPendingPainCandidate(status: string | undefined): boolean {
     return status === undefined || status === 'pending';
 }
 
-export async function acquireQueueLock(resourcePath: string, logger: any, lockSuffix: string = EVOLUTION_QUEUE_LOCK_SUFFIX): Promise<() => void> {
+export async function acquireQueueLock(resourcePath: string, logger: PluginLogger | { warn?: (message: string) => void; info?: (message: string) => void } | undefined, lockSuffix: string = EVOLUTION_QUEUE_LOCK_SUFFIX): Promise<() => void> {
     try {
         const ctx: LockContext = await acquireLockAsync(resourcePath, {
             lockSuffix,
@@ -248,13 +265,14 @@ export async function acquireQueueLock(resourcePath: string, logger: any, lockSu
             lockStaleMs: LOCK_STALE_MS,
         });
         return () => releaseLock(ctx);
-    } catch (error) {
-        logger?.warn?.(`[PD:EvolutionWorker] Failed to acquire lock for ${resourcePath}: ${String(error)}`);
+    } catch (error: unknown) {
+        const warn = logger?.warn;
+        warn?.(`[PD:EvolutionWorker] Failed to acquire lock for ${resourcePath}: ${String(error)}`);
         throw error;
     }
 }
 
-async function requireQueueLock(resourcePath: string, logger: any, scope: string, lockSuffix: string = EVOLUTION_QUEUE_LOCK_SUFFIX): Promise<() => void> {
+async function requireQueueLock(resourcePath: string, logger: PluginLogger | { warn?: (message: string) => void; info?: (message: string) => void } | undefined, scope: string, lockSuffix: string = EVOLUTION_QUEUE_LOCK_SUFFIX): Promise<() => void> {
     try {
         return await acquireQueueLock(resourcePath, logger, lockSuffix);
     } catch (err) {
@@ -356,13 +374,13 @@ function readRecentPainContext(wctx: WorkspaceContext): RecentPainContext {
  */
 async function enqueueSleepReflectionTask(
     wctx: WorkspaceContext,
-    logger: any
+    logger: PluginLogger
 ): Promise<void> {
     const queuePath = wctx.resolve('EVOLUTION_QUEUE');
     const releaseLock = await requireQueueLock(queuePath, logger, 'enqueueSleepReflection', EVOLUTION_QUEUE_LOCK_SUFFIX);
 
     try {
-        let rawQueue: any[] = [];
+        let rawQueue: RawQueueItem[] = [];
         try {
             rawQueue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
         } catch {
@@ -412,7 +430,7 @@ async function enqueueSleepReflectionTask(
     }
 }
 
-async function checkPainFlag(wctx: WorkspaceContext, logger: any) {
+async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger) {
     try {
         const painFlagPath = wctx.resolve('PAIN_FLAG');
         if (!fs.existsSync(painFlagPath)) return;
@@ -525,7 +543,7 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: any) {
     }
 }
 
-async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventLog: any, api?: OpenClawPluginApi) {
+async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogger, eventLog: EventLog, api?: OpenClawPluginApi) {
     const queuePath = wctx.resolve('EVOLUTION_QUEUE');
     if (!fs.existsSync(queuePath)) return;
 
@@ -534,7 +552,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
     let lockReleased = false;
 
     try {
-        let rawQueue: any[] = [];
+        let rawQueue: RawQueueItem[] = [];
         try {
             rawQueue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
         } catch (e) {
@@ -816,14 +834,14 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
                 const resultLock = await requireQueueLock(queuePath, logger, 'sleepReflectionResult');
                 try {
                     // Re-read queue to merge with any changes made while lock was released
-                    let freshQueue: any[] = [];
+                    let freshQueue: (RawQueueItem | EvolutionQueueItem)[] = [];
                     try {
                         freshQueue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
                     } catch { /* empty queue if corrupted */ }
 
                     // Merge: update tasks by ID
                     for (const sleepTask of sleepReflectionTasks) {
-                        const idx = freshQueue.findIndex((t: any) => t.id === sleepTask.id);
+                        const idx = freshQueue.findIndex((t) => (t as { id?: string }).id === sleepTask.id);
                         if (idx >= 0) {
                             freshQueue[idx] = sleepTask;
                         }
@@ -871,7 +889,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: any, eventL
     }
 }
 
-async function processDetectionQueue(wctx: WorkspaceContext, api: OpenClawPluginApi, eventLog: any) {
+async function processDetectionQueue(wctx: WorkspaceContext, api: OpenClawPluginApi, eventLog: EventLog) {
     const logger = api.logger;
     try {
         const funnel = DetectionService.get(wctx.stateDir);
@@ -936,13 +954,14 @@ export async function trackPainCandidate(text: string, wctx: WorkspaceContext) {
     const releaseLock = await requireQueueLock(candidatePath, console, 'trackPainCandidate', PAIN_CANDIDATES_LOCK_SUFFIX);
 
     try {
-        let data = { candidates: {} as any };
+        let data: { candidates: Record<string, PainCandidateEntry> } = { candidates: {} };
         if (fs.existsSync(candidatePath)) {
             try {
                 data = JSON.parse(fs.readFileSync(candidatePath, 'utf8'));
             } catch (e) {
                 // Keep going with empty data if parse fails, but log it
-                console.error(`[PD:EvolutionWorker] Failed to parse pain candidates: ${String(e)}`);
+                // eslint-disable-next-line no-console
+                console.warn(`[PD:EvolutionWorker] Failed to parse pain candidates: ${String(e)}`);
             }
         }
 
@@ -968,7 +987,7 @@ export async function trackPainCandidate(text: string, wctx: WorkspaceContext) {
     }
 }
 
-export async function processPromotion(wctx: WorkspaceContext, logger: any, eventLog: any) {
+export async function processPromotion(wctx: WorkspaceContext, logger: PluginLogger, eventLog: EventLog) {
     const candidatePath = wctx.resolve('PAIN_CANDIDATES');
     if (!fs.existsSync(candidatePath)) return;
 
@@ -977,13 +996,13 @@ export async function processPromotion(wctx: WorkspaceContext, logger: any, even
     try {
         const config = wctx.config;
         const dictionary = wctx.dictionary;
-        const data = JSON.parse(fs.readFileSync(candidatePath, 'utf8'));
+        const data: { candidates: Record<string, PainCandidateEntry> } = JSON.parse(fs.readFileSync(candidatePath, 'utf8'));
         const countThreshold = config.get('thresholds.promotion_count_threshold') || 3;
 
         let promotedCount = 0;
         let changed = false;
 
-        for (const [fingerprint, cand] of Object.entries(data.candidates) as any) {
+        for (const [fingerprint, cand] of Object.entries(data.candidates)) {
             if (isPendingPainCandidate(cand.status) && cand.count >= countThreshold) {
                 // Normalize undefined status to 'pending'
                 if (cand.status !== 'pending') {
@@ -996,7 +1015,7 @@ export async function processPromotion(wctx: WorkspaceContext, logger: any, even
                     const phrase = commonPhrases[0];
                     const ruleId = `P_PROMOTED_${fingerprint.toUpperCase()}`;
 
-                    if (hasEquivalentPromotedRule(dictionary as any, phrase)) {
+                    if (hasEquivalentPromotedRule(dictionary, phrase)) {
                         cand.status = 'duplicate';
                         changed = true;
                         logger?.info?.(`[PD:EvolutionWorker] Skipping duplicate promoted rule for candidate ${fingerprint}: ${phrase}`);
@@ -1042,7 +1061,7 @@ export async function registerEvolutionTaskSession(
     const releaseLock = await requireQueueLock(queuePath, logger, 'registerEvolutionTaskSession');
 
     try {
-        let rawQueue: any[];
+        let rawQueue: RawQueueItem[];
         try {
             rawQueue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
         } catch (parseErr) {
