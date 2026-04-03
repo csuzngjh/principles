@@ -12,7 +12,8 @@ import { EventLog } from '../core/event-log.js';
 import { initPersistence, flushAllSessions } from '../core/session-tracker.js';
 import { acquireLockAsync, releaseLock, type LockContext } from '../utils/file-lock.js';
 import { getEvolutionLogger, type EvolutionStage } from '../core/evolution-logger.js';
-export { TaskKind, TaskPriority } from '../core/trajectory-types.js';
+import type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
+export type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 import { DIAGNOSTICIAN_PROTOCOL_SUMMARY } from '../constants/diagnostician.js';
 import { LockUnavailableError } from '../config/index.js';
 import { checkWorkspaceIdle, checkCooldown } from './nocturnal-runtime.js';
@@ -31,7 +32,6 @@ let timeoutId: NodeJS.Timeout | null = null;
  *
  * Old queue items (without taskKind) are migrated to pain_diagnosis for compatibility.
  */
-export type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 export type QueueStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'canceled';
 export type TaskResolution = 'marker_detected' | 'auto_completed_timeout' | 'failed_max_retries' | 'canceled';
 
