@@ -174,6 +174,12 @@ function runAgent({ cwd, agent, model, prompt, timeoutSeconds = 1800, failLogPat
   const promptFile = path.join(promptDir, `.ai-sprint-prompt-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`);
   fs.writeFileSync(promptFile, prompt, 'utf8');
 
+  // On Linux, ignore SIGHUP so SSH disconnect doesn't kill the orchestrator
+  // or its child agent processes.
+  if (process.platform !== 'win32') {
+    process.on('SIGHUP', () => { /* ignored — survive SSH disconnect */ });
+  }
+
   let result;
   try {
     if (process.platform === 'win32') {
@@ -209,6 +215,10 @@ function runAgent({ cwd, agent, model, prompt, timeoutSeconds = 1800, failLogPat
           maxBuffer: 10 * 1024 * 1024,
           timeout: (timeoutSeconds + 60) * 1000,
           shell: false,
+          // Detach child process into its own session group so SIGHUP
+          // from SSH disconnect doesn't propagate to agent processes.
+          detached: true,
+          stdio: ['pipe', 'pipe', 'pipe'],
         },
       );
     }
@@ -296,6 +306,8 @@ function runAgentAsync({ cwd, agent, model, prompt, timeoutSeconds = 1800, promp
           encoding: 'utf8',
           maxBuffer: 10 * 1024 * 1024,
           shell: false,
+          detached: true,
+          stdio: ['pipe', 'pipe', 'pipe'],
         });
       }
       if (proc?.pid && onSpawn) onSpawn(proc.pid);
@@ -531,6 +543,8 @@ function runAgentWithProgressCheck({
           encoding: 'utf8',
           maxBuffer: 10 * 1024 * 1024,
           shell: false,
+          detached: true,
+          stdio: ['pipe', 'pipe', 'pipe'],
         });
       }
     } catch (spawnErr) {
