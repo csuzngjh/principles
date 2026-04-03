@@ -154,9 +154,23 @@ export function extractContractItems(text) {
   const blocks = match[1].split(/\r?\n/).filter((l) => l.trim().startsWith('-') && !/^[-*_]{3,}\s*$/.test(l.trim()));
   for (const block of blocks) {
     const deliverable = block.replace(/^-\s*/, '').trim();
-    const statusMatch = deliverable.match(/status:\s*(DONE|PARTIAL|TODO)/i);
+    // Primary format: "<description> status: DONE|PARTIAL|TODO"
+    let statusMatch = deliverable.match(/status:\s*(DONE|PARTIAL|TODO)/i);
+    // Fallback: "<key>: DONE — <description>" (agent deviation from spec format)
+    if (!statusMatch) {
+      statusMatch = deliverable.match(/:\s*(DONE|PARTIAL|TODO)\s*[—–-]/i);
+    }
+    // Extract deliverable name: remove status field for primary format, or key prefix for fallback
+    let cleaned = deliverable;
+    if (statusMatch && statusMatch[0].startsWith('status:')) {
+      cleaned = deliverable.replace(/\s*status:\s*\w+\s*/i, '').replace(/evidence:\s*"[^"]*"/i, '').trim();
+    } else if (statusMatch) {
+      // Fallback: take everything before the ": DONE" colon as the deliverable name
+      const nameMatch = deliverable.match(/^(.+?):\s*(?:DONE|PARTIAL|TODO)\s*[—–-]/i);
+      if (nameMatch) cleaned = nameMatch[1].trim();
+    }
     items.push({
-      deliverable: deliverable.replace(/\s*status:\s*\w+\s*/i, '').replace(/evidence:\s*"[^"]*"/i, '').trim(),
+      deliverable: cleaned,
       status: statusMatch ? statusMatch[1].toUpperCase() : 'UNKNOWN',
     });
   }
