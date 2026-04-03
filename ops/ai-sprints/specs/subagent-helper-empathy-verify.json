@@ -1,0 +1,115 @@
+{
+  "id": "subagent-helper-empathy-verify",
+  "title": "Subagent Helper: verify empathy workflow implementation",
+  "workspace": "D:/Code/principles",
+  "branchWorkspace": "D:/Code/principles-subagent-helper-empathy",
+  "branch": "feat/subagent-workflow-helper-impl",
+  "integrationPhase": "shadow",
+  "maxRoundsPerStage": 2,
+  "maxRuntimeMinutes": 180,
+  "stageTimeoutMinutes": 60,
+  "stages": ["verify"],
+  "producer": {
+    "agent": "opencode",
+    "model": "minimax-cn-coding-plan/MiniMax-M2.7",
+    "timeoutSeconds": 1200
+  },
+  "reviewerA": {
+    "agent": "iflow",
+    "model": "zhipuai-coding-plan/glm-5.1",
+    "timeoutSeconds": 600,
+    "role": "code_and_local_correctness",
+    "focus": "empathy observer patch correctness, test coverage, CODE_EVIDENCE"
+  },
+  "reviewerB": {
+    "agent": "opencode",
+    "model": "minimax-cn-coding-plan/MiniMax-M2.7",
+    "timeoutSeconds": 600,
+    "role": "runtime_and_compatibility",
+    "focus": "OpenClaw runtime semantics, subagent lifecycle boundaries, cross-repo assumptions"
+  },
+  "escalationReviewer": {
+    "agent": "iflow",
+    "model": "zhipuai-coding-plan/glm-5.1",
+    "timeoutSeconds": 600,
+    "role": "global_reviewer",
+    "focus": "macro: business flow, data flow, architecture, OpenClaw compatibility"
+  },
+  "context": [
+    "=== VERIFY-ONLY SPRINT ===",
+    "This sprint ONLY runs the verify stage.",
+    "",
+    "Previous sprint 2026-04-02T10-41-31-097Z-subagent-helper-empathy-continuation was halted due to",
+    "inappropriate shadow_run_parity requirement. Code implementation exists and is committed.",
+    "",
+    "=== INTEGRATION PHASE: SHADOW ===",
+    "This is a NEW runtime_direct boundary - no legacy path exists for comparison.",
+    "Required evidence: workflow_trace, runtime_path_closure, new_path_self_evidence",
+    "Legacy comparison: NOT REQUIRED.",
+    "",
+    "=== IMPLEMENTATION STATUS ===",
+    "The following files should exist in packages/openclaw-plugin/src/service/subagent-workflow/:",
+    "- types.ts: Workflow type definitions",
+    "- workflow-store.ts: SQLite persistence",
+    "- runtime-direct-driver.ts: Subagent transport",
+    "- empathy-observer-workflow-manager.ts: Idempotent state machine",
+    "- index.ts: Module exports",
+    "",
+    "Integration changes in:",
+    "- prompt.ts: helper_empathy_enabled config",
+    "- config.ts: helper_empathy_enabled field",
+    "- openclaw-sdk.d.ts: expectsCompletionMessage type",
+    "",
+    "=== VERIFICATION GOALS ===",
+    "1. Confirm all expected files exist and have content",
+    "2. Run npm run build - must pass",
+    "3. Run npm test - empathy workflow tests must pass",
+    "4. Verify workflow store creates tables correctly",
+    "5. Check state machine transitions are valid",
+    "6. Confirm fallback/degrade behavior is explicit",
+    "",
+    "=== NO SHADOW PARITY ===",
+    "This sprint does NOT require shadow_run_parity verification.",
+    "PR2 introduces NEW runtime_direct boundary - no legacy path exists for comparison.",
+    "Focus on: new path self-evidence, closure, observability.",
+    "",
+    "=== CRITICAL: WHAT TO VERIFY ===",
+    "Producer should:",
+    "1. List all files in subagent-workflow/ directory",
+    "2. Show git log for recent commits on this branch",
+    "3. Run npm run build and capture output",
+    "4. Run npm test and capture output (focus on empathy tests)",
+    "5. Provide WORKFLOW_TRACE showing state transitions",
+    "6. Confirm degrade_on_unavailable_surface behavior",
+    "",
+    "Reviewers should verify:",
+    "- Code exists and is committed",
+    "- Build passes",
+    "- Tests pass",
+    "- No obvious bugs or regressions",
+    "- Architecture is sound"
+  ],
+  "stageGoals": {
+    "verify": [
+      "Verify empathy persistence via workflow store queries.",
+      "Confirm merge gate: local SHA == remote/feat/subagent-helper-empathy SHA.",
+      "global_reviewer provides macro assessment (advisory mode - timeout does not block).",
+      "Confirm no regression in other subagent modules."
+    ]
+  },
+  "stageCriteria": {
+    "verify": {
+      "requiredApprovals": 2,
+      "requiredProducerSections": ["SUMMARY", "EVIDENCE", "CODE_EVIDENCE", "EMPATHY_CHECK", "FINAL_WORKFLOW_VERIFICATION", "CHECKS"],
+      "requiredReviewerSections": ["VERDICT", "BLOCKERS", "FINDINGS", "CODE_EVIDENCE", "NEXT_FOCUS", "CHECKS"],
+      "scoringDimensions": ["verification_thoroughness", "gap_analysis", "production_readiness", "architecture_improvement", "git_commit_evidence"],
+      "dimensionThreshold": 3,
+      "requiredDeliverables": ["empathy_persistence_verified", "openclaw_assumptions_final_review", "deployment_checklist", "git_commit_sha"],
+      "globalReviewerMode": "advisory",
+      "globalReviewerMustAnswer": ["Q1", "Q2", "Q3", "Q4", "Q5"]
+    }
+  },
+  "stageRoleTimeouts": {
+    "verify": { "producer": 1200, "reviewer_a": 600, "reviewer_b": 600, "global_reviewer": 300 }
+  }
+}
