@@ -1054,12 +1054,12 @@ function EvolutionPage() {
       {evoPrinciples && (
         <div className="grid two-columns" style={{ marginBottom: 'var(--space-5)' }}>
           <section className="panel">
-            <h3>📝 原则生命周期</h3>
+            <h3><BookOpen size={16} style={{marginRight: 6, verticalAlign: 'middle'}}/>原则生命周期</h3>
             <div className="pill-row" style={{ marginBottom: 'var(--space-3)' }}>
-              <span className="badge" style={{ background: '#f59e0b' }}>候选: {evoPrinciples.principles.summary.candidate}</span>
-              <span className="badge" style={{ background: '#3b82f6' }}>试用: {evoPrinciples.principles.summary.probation}</span>
-              <span className="badge" style={{ background: '#22c55e' }}>活跃: {evoPrinciples.principles.summary.active}</span>
-              <span className="badge" style={{ background: '#ef4444' }}>废弃: {evoPrinciples.principles.summary.deprecated}</span>
+              <StatusBadge variant="warning">候选: {evoPrinciples.principles.summary.candidate}</StatusBadge>
+              <StatusBadge variant="info">试用: {evoPrinciples.principles.summary.probation}</StatusBadge>
+              <StatusBadge variant="success">活跃: {evoPrinciples.principles.summary.active}</StatusBadge>
+              <StatusBadge variant="error">废弃: {evoPrinciples.principles.summary.deprecated}</StatusBadge>
             </div>
             {evoPrinciples.principles.recent.length > 0 && (
               <div className="stack">
