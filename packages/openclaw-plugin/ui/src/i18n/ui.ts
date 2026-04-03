@@ -45,6 +45,7 @@ export const i18n = {
     cancel: { zh: '取消', en: 'Cancel' },
     confirm: { zh: '确认', en: 'Confirm' },
     refresh: { zh: '刷新', en: 'Refresh' },
+    back: { zh: '返回', en: 'Back' },
     lastUpdated: { zh: '最后更新', en: 'Last updated' },
     timeRange: { zh: '时间范围', en: 'Time Range' },
     total: { zh: '共', en: 'Total' },

@@ -8,6 +8,7 @@ import {
   Download,
   LogOut,
   Hexagon,
+  ChevronLeft,
 } from 'lucide-react';
 import { api, getGatewayToken, setGatewayToken, clearGatewayToken } from './api';
 import type {
@@ -1061,6 +1062,13 @@ function EvolutionPage() {
           {trace && (
             <div className="detail-stack">
               <div className="detail-header">
+                <button
+                  className="back-button"
+                  onClick={() => setSelectedId('')}
+                  title={t('common.back') || 'Back'}
+                >
+                  <ChevronLeft strokeWidth={1.75} size={18} />
+                </button>
                 <div>
                   <h3>{t('evolution.taskLabel')} {trace.task.taskId}</h3>
                   <p>{t('evolution.source')}: {trace.task.source} | {t('evolution.score')}: {trace.task.score}</p>
