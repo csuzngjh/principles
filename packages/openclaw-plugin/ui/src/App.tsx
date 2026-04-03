@@ -8,7 +8,7 @@ import {
   Download,
   LogOut,
   Hexagon,
-ChevronLeft,
+  ChevronLeft,
   Activity,
   Shield,
   Zap,
@@ -17,6 +17,7 @@ ChevronLeft,
   ListTodo,
   Radio,
   Lock,
+  Clock,
 } from 'lucide-react';
 import { api, getGatewayToken, setGatewayToken, clearGatewayToken } from './api';
 import type {
@@ -1023,40 +1024,28 @@ function EvolutionPage() {
         </div>
       </header>
 
-      {/* Circuit Flow Indicator (Phase 5) */}
+      {/* Current Stage Indicator */}
       {evoPrinciples && (
         <section className="panel" style={{ marginBottom: 'var(--space-5)' }}>
-          <h3>🔄 增强回路流程</h3>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-1)', padding: 'var(--space-3) 0', flexWrap: 'wrap' }}>
-            {['痛点检测', '诊断', '原则生成', '晋升', '活跃', '夜间反思', '训练', '内化'].map((step, i) => {
-              // Backend returns 'pending'/'in_progress'/'completed'/'idle' — map to circuit step names
-              const currentStep = (() => {
-                switch (evoPrinciples.activeStage) {
-                  case 'pending': return '痛点检测';
-                  case 'in_progress': return '诊断';
-                  case 'completed': return '内化';
-                  case 'idle': return '痛点检测';
-                  default: return '痛点检测';
-                }
-              })();
-              const isActive = currentStep === step;
-              return (
-                <React.Fragment key={step}>
-                  <span style={{
-                    padding: 'var(--space-1) var(--space-2)',
-                    borderRadius: 'var(--radius-md)',
-                    fontSize: '13px',
-                    fontWeight: isActive ? 700 : 400,
-                    background: isActive ? 'var(--accent)' : 'var(--bg-sunken)',
-                    color: isActive ? '#fff' : 'var(--text-secondary)',
-                    border: isActive ? '2px solid var(--accent)' : '1px solid var(--border)',
-                  }}>
-                    {step}
-                  </span>
-                  {i < 7 && <span style={{ color: 'var(--text-tertiary)', fontSize: '12px' }}>→</span>}
-                </React.Fragment>
-              );
-            })}
+          <h3>当前阶段</h3>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', padding: 'var(--space-3) 0' }}>
+            <span style={{
+              padding: 'var(--space-2) var(--space-4)',
+              borderRadius: 'var(--radius-lg)',
+              fontSize: '15px',
+              fontWeight: 600,
+              background: 'var(--accent)',
+              color: '#fff',
+              border: '2px solid var(--accent)',
+            }}>
+              {evoPrinciples.activeStage === 'pending' ? <><Clock size={16} style={{marginRight: 6, verticalAlign: 'middle'}}/>等待中</> :
+               evoPrinciples.activeStage === 'in_progress' ? <><Activity size={16} style={{marginRight: 6, verticalAlign: 'middle'}}/>进行中</> :
+               evoPrinciples.activeStage === 'completed' ? <><Shield size={16} style={{marginRight: 6, verticalAlign: 'middle'}}/>已完成</> :
+               evoPrinciples.activeStage === 'idle' ? <><Zap size={16} style={{marginRight: 6, verticalAlign: 'middle'}}/>空闲</> : evoPrinciples.activeStage}
+            </span>
+            <span style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>
+              增强回路当前状态
+            </span>
           </div>
         </section>
       )}
