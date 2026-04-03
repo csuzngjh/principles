@@ -15,6 +15,8 @@ export interface TokenUsage {
 
 export interface SessionState {
     sessionId: string;
+    sessionKey?: string;   // Structured session key from OpenClaw (e.g., agent:main:cron:job-1:run:xxx)
+    trigger?: string;      // Trigger source: "user" | "cron" | "heartbeat" | "memory" | "subagent"
     workspaceDir?: string;
     toolReadsByFile: Record<string, number>;
     llmTurns: number;
@@ -169,11 +171,13 @@ export function flushAllSessions(): void {
     }
 }
 
-function getOrCreateSession(sessionId: string, workspaceDir?: string): SessionState {
+function getOrCreateSession(sessionId: string, workspaceDir?: string, sessionKey?: string, trigger?: string): SessionState {
     let state = sessions.get(sessionId);
     if (!state) {
         state = {
             sessionId,
+            sessionKey,
+            trigger,
             workspaceDir,
             toolReadsByFile: {},
             llmTurns: 0,
@@ -202,6 +206,13 @@ function getOrCreateSession(sessionId: string, workspaceDir?: string): SessionSt
     if (workspaceDir && !state.workspaceDir) {
         state.workspaceDir = workspaceDir;
     }
+    // Update sessionKey and trigger if provided (they may be more recent)
+    if (sessionKey && !state.sessionKey) {
+        state.sessionKey = sessionKey;
+    }
+    if (trigger && !state.trigger) {
+        state.trigger = trigger;
+    }
     return state;
 }
 
@@ -220,8 +231,8 @@ export function trackToolRead(sessionId: string, filePath: string, workspaceDir?
     return state;
 }
 
-export function trackLlmOutput(sessionId: string, usage: TokenUsage | undefined, config?: PainConfig, workspaceDir?: string): SessionState {
-    const state = getOrCreateSession(sessionId, workspaceDir);
+export function trackLlmOutput(sessionId: string, usage: TokenUsage | undefined, config?: PainConfig, workspaceDir?: string, sessionKey?: string, trigger?: string): SessionState {
+    const state = getOrCreateSession(sessionId, workspaceDir, sessionKey, trigger);
     state.llmTurns += 1;
     touchActivity(state);
 
