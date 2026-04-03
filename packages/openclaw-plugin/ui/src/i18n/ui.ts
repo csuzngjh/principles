@@ -258,15 +258,14 @@ export function t<K extends string>(
   path: K
 ): string {
   const keys = path.split('.');
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let value: any = i18n;
+  let value: unknown = i18n;
   for (const key of keys) {
     if (value == null || typeof value !== 'object') return path;
-    value = value[key];
+    value = (value as Record<string, unknown>)[key];
   }
   if (typeof value === 'object' && value !== null) {
     const lang = getLanguage();
-    return String(value[lang] ?? value.en ?? path);
+    return String((value as Record<string, unknown>)[lang] ?? (value as Record<string, unknown>).en ?? path);
   }
   return typeof value === 'string' ? value : path;
 }
