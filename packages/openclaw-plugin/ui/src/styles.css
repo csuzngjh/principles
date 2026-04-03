@@ -132,7 +132,7 @@ input, select {
 .app-shell {
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr);
-  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 /* ==========================================================================
@@ -459,7 +459,6 @@ input, select {
 .table-row:hover {
   background: var(--accent-muted);
   border-color: var(--border-hover);
-  transform: translateY(-1px);
 }
 
 .table-row {
@@ -570,11 +569,7 @@ button,
 
 .button-primary:hover {
   background: var(--accent-hover);
-  transform: translateY(-1px);
-}
-
-.button-primary:active {
-  transform: scale(0.97);
+  box-shadow: var(--shadow-lg);
 }
 
 .button-secondary {
@@ -1021,7 +1016,7 @@ pre {
 
 @media (max-width: 1200px) {
   .kpi-grid {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
@@ -1075,7 +1070,7 @@ pre {
   }
 
   .kpi-grid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .page-header {
