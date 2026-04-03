@@ -340,7 +340,9 @@ export function getEvolutionLogger(
  * 清理指定 workspace 的 logger 缓存
  */
 export function disposeEvolutionLogger(workspaceDir: string): boolean {
-  return loggerCache.delete(workspaceDir);
+  const plain = loggerCache.delete(workspaceDir);
+  const withTrajectory = loggerCache.delete(`${workspaceDir}::with_trajectory`);
+  return plain || withTrajectory;
 }
 
 /**

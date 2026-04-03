@@ -82,14 +82,14 @@ export function recordGateBlockAndReturn(
       reason,
       blockSource: blockSource ?? 'gate',
     });
-  } catch (error) {
+  } catch (error: unknown) {
     logWarn(`[PD_GATE] Failed to record gate block event: ${String(error)}`);
   }
 
   // 4. Record to trajectory (secondary persistence with retry)
   try {
     wctx.trajectory?.recordGateBlock?.(trajectoryPayload);
-  } catch (error) {
+  } catch (error: unknown) {
     logWarn(`[PD_GATE] Failed to record trajectory gate block: ${String(error)}`);
     scheduleTrajectoryGateBlockRetry(wctx, trajectoryPayload, 1, logWarn, logError);
   }
@@ -152,7 +152,7 @@ function scheduleTrajectoryGateBlockRetry(
     try {
       wctx.trajectory?.recordGateBlock?.(payload);
       logWarn(`[PD_GATE] Trajectory gate block persisted on retry ${attempt}`);
-    } catch (error) {
+    } catch (error: unknown) {
       logWarn(`[PD_GATE] Retrying trajectory gate block persistence (attempt ${attempt + 1}): ${String(error)}`);
       scheduleTrajectoryGateBlockRetry(wctx, payload, attempt + 1, logWarn, logError);
     }

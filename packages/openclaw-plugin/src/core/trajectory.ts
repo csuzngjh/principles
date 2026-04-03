@@ -42,6 +42,7 @@ export type {
   TrajectoryToolCallInput,
   TrajectoryPainEventInput,
   TrajectoryGateBlockInput,
+  DailyMetricRow,
   TrajectoryTrustChangeInput,
   TrajectoryPrincipleEventInput,
   TrajectoryTaskOutcomeInput,
@@ -98,7 +99,7 @@ function summarizeForDiff(text: string): string {
 function redactText(text: string): string {
   return text
     .replace(/[A-Za-z]:\\[^\s"'`]+/g, '<WINDOWS_PATH>')
-    .replace(/\/(?:[A-Za-z0-9._-]+\/){1,}[A-Za-z0-9._-]+(?:\.[A-Za-z0-9._-]+)?/g, '<PATH>')
+    .replace(/\/[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+/g, '<PATH>')
     .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '<EMAIL>')
     .replace(/\b(sk|rk|pk)_[A-Za-z0-9]+\b/g, '<TOKEN>');
 }
