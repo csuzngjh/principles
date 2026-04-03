@@ -315,20 +315,18 @@ export function TrendIndicator({
   const isPositive = change > 0;
   const isNegative = change < 0;
 
+  const direction = isPositive ? '↑' : isNegative ? '↓' : '→';
+  const percentText = showPercent ? `${Math.abs(percentChange).toFixed(1)}%` : '';
+
   return (
     <span
       className={`trend-indicator ${
         isPositive ? 'trend-up' : isNegative ? 'trend-down' : 'trend-neutral'
       }`}
+      aria-label={`${isPositive ? 'Increase' : isNegative ? 'Decrease' : 'No change'} of ${percentText}`}
     >
-      {isPositive && '↑'}
-      {isNegative && '↓'}
-      {!isPositive && !isNegative && '→'}
-      {showPercent && (
-        <span className="trend-percent">
-          {Math.abs(percentChange).toFixed(1)}%
-        </span>
-      )}
+      <span className="trend-direction">{direction}</span>
+      {percentText && <span className="trend-percent">{percentText}</span>}
     </span>
   );
 }
