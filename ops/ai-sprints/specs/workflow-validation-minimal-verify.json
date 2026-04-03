@@ -1,0 +1,73 @@
+{
+  "id": "workflow-validation-minimal-verify",
+  "title": "Verify: Workflow v1 infrastructure validation",
+  "workspace": "D:/Code/principles",
+  "branchWorkspace": "D:/Code/principles-workflow-validation",
+  "branch": "main",
+  "integrationPhase": "shadow",
+  "maxRoundsPerStage": 1,
+  "maxRuntimeMinutes": 30,
+  "stageTimeoutMinutes": 15,
+  "stages": ["verify"],
+  "producer": {
+    "agent": "iflow",
+    "model": "glm-5",
+    "timeoutSeconds": 300
+  },
+  "reviewerA": {
+    "agent": "iflow",
+    "model": "glm-5",
+    "timeoutSeconds": 180,
+    "role": "artifact_checker",
+    "focus": "Verify decision.md and scorecard.json contain expected fields"
+  },
+  "reviewerB": {
+    "agent": "iflow",
+    "model": "glm-5",
+    "timeoutSeconds": 180,
+    "role": "recommendation_checker",
+    "focus": "Verify nextRunRecommendation is computed and reasonable"
+  },
+  "context": [
+    "=== VERIFY RUN ===",
+    "This run verifies the output of workflow-validation-minimal sprint.",
+    "",
+    "=== VERIFICATION CHECKLIST ===",
+    "1. Check sprint directory exists: ops/ai-sprints/<run-id>/",
+    "2. Check decision.md exists and contains:",
+    "   - Outcome: (advance|revise|halt)",
+    "   - outputQuality: (shadow_complete|production_ready|needs_work)",
+    "   - qualityReasons: (list of strings)",
+    "3. Check scorecard.json exists and contains:",
+    "   - outputQuality field",
+    "   - qualityReasons array",
+    "   - validation object with errorSummary",
+    "4. Check nextRunRecommendation is recorded if outputQuality != production_ready",
+    "",
+    "=== PRODUCER TASK ===",
+    "Read the sprint directory from the previous run and report findings.",
+    "Use the run-id provided in the stage brief."
+  ],
+  "stageGoals": {
+    "verify": [
+      "Verify previous run produced valid artifacts.",
+      "Confirm outputQuality was persisted correctly.",
+      "Confirm nextRunRecommendation was computed."
+    ]
+  },
+  "stageCriteria": {
+    "verify": {
+      "requiredApprovals": 2,
+      "requiredProducerSections": ["SUMMARY", "EVIDENCE", "CODE_EVIDENCE", "CHECKS"],
+      "requiredReviewerSections": ["VERDICT", "BLOCKERS", "FINDINGS", "CODE_EVIDENCE", "NEXT_FOCUS", "CHECKS"],
+      "scoringDimensions": ["artifact_verification", "field_correctness"],
+      "dimensionThreshold": 3,
+      "requiredDeliverables": ["artifacts_verified", "fields_correct"]
+    }
+  },
+  "stageRoleTimeouts": {
+    "verify": { "producer": 300, "reviewer_a": 180, "reviewer_b": 180 }
+  },
+  "continuationSpec": null,
+  "recoverySpec": null
+}
