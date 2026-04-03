@@ -7,6 +7,7 @@ import { EventLogService } from '../core/event-log.js';
 import { buildCritiquePromptV2 } from './critique-prompt.js';
 import { resolvePdPath } from '../core/paths.js';
 import { reflectionLogRetentionDays } from '../types.js';
+import { isSubagentRuntimeAvailable } from '../utils/subagent-probe.js';
 
 /**
  * Write reflection result to reflection-log.md
@@ -256,7 +257,9 @@ export function createDeepReflectTool(api: OpenClawPluginApi) {
 
             const agentId = 'main';
             const sessionKey = `agent:${agentId}:reflection:${randomUUID()}`;
-            const sessionId = sessionKey.split(':').pop();
+            // Use full sessionKey as sessionId for event log correlation
+            // (previously: sessionKey.split(':').pop() which lost the prefix)
+            const sessionId = sessionKey;
 
             const stateDir = resolvePdPath(effectiveWorkspaceDir, 'STATE_DIR');
             const eventLog = EventLogService.get(stateDir, api.logger);
@@ -271,8 +274,10 @@ export function createDeepReflectTool(api: OpenClawPluginApi) {
                 });
 
                 const startTime = Date.now();
-                const subagentRuntime = api.runtime.subagent;
-                if (!subagentRuntime) {
+
+                // Surface degrade checks: prevent runtime failures with clean early returns
+                // 1. Check if subagent runtime is actually functional (gateway mode vs embedded mode)
+                if (!isSubagentRuntimeAvailable(api.runtime?.subagent)) {
                     return {
                         content: [{
                             type: 'text',
@@ -280,6 +285,8 @@ export function createDeepReflectTool(api: OpenClawPluginApi) {
                         }]
                     };
                 }
+
+                const subagentRuntime = api.runtime.subagent!;
 
                 const runResult = await subagentRuntime.run({
                     sessionKey,
@@ -392,7 +399,13 @@ ${insights}
                     }]
                 };
             } finally {
-                if (api.runtime.subagent) await api.runtime.subagent.deleteSession({ sessionKey }).catch(() => {});
+                try {
+                    if (api.runtime.subagent?.deleteSession) {
+                        await api.runtime.subagent.deleteSession({ sessionKey });
+                    }
+                } catch {
+                    // Cleanup best-effort; never throw from finally
+                }
             }
         }
     };

@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { createDeepReflectTool, deepReflectTool } from '../../src/tools/deep-reflect.js';
+import { EventLogService } from '../../src/core/event-log.js';
 import type { OpenClawPluginApi, PluginRuntime } from '../../src/openclaw-sdk.js';
 
 describe('createDeepReflectTool', () => {
@@ -10,7 +11,6 @@ describe('createDeepReflectTool', () => {
     let mockSubagent: any;
     let tempDir: string;
 
-    // Helper to create mock functions that pass the AsyncFunction check
     const mockAsyncFn = <T extends (...args: any[]) => Promise<any>>(
         impl: ReturnType<typeof vi.fn>
     ) => {
@@ -25,7 +25,7 @@ describe('createDeepReflectTool', () => {
 
     beforeEach(() => {
         tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'deep-reflect-test-'));
-        
+
         mockSubagent = {
             run: mockAsyncFn().mockResolvedValue({ runId: 'test-run-123' }),
             waitForRun: mockAsyncFn().mockResolvedValue({ status: 'ok' }),
@@ -68,7 +68,6 @@ describe('createDeepReflectTool', () => {
         fs.rmSync(tempDir, { recursive: true, force: true });
     });
 
-    // Helper to create tool and extract text result
     const executeTool = async (rawParams: Record<string, unknown>) => {
         const tool = createDeepReflectTool(mockApi);
         const result = await tool.execute('test-call-id', rawParams);
@@ -150,7 +149,6 @@ describe('createDeepReflectTool', () => {
             await expect(tool.execute('test-call-id', { context: 'Testing failure.' }))
                 .rejects.toThrow('API throw');
 
-            // Expected to be called in the finally block
             expect(mockSubagent.deleteSession).toHaveBeenCalled();
         });
     });
@@ -167,8 +165,7 @@ describe('createDeepReflectTool', () => {
             await executeTool({ context: 'Marketing plan for Q4.' });
 
             const callArgs = mockSubagent.run.mock.calls[0][0];
-            
-            // 应包含模型选择指南
+
             expect(callArgs.extraSystemPrompt).toContain('Model Selection Guidelines');
             expect(callArgs.extraSystemPrompt).toContain('Step 1');
             expect(callArgs.extraSystemPrompt).toContain('Step 2');
@@ -186,12 +183,10 @@ describe('createDeepReflectTool', () => {
             await executeTool({ context: 'Test context.' });
 
             const callArgs = mockSubagent.run.mock.calls[0][0];
-            
-            // 不应重复列出具体的元认知模型
+
             expect(callArgs.extraSystemPrompt).not.toContain('T-01: Map Before Territory');
             expect(callArgs.extraSystemPrompt).not.toContain('T-09: Divide and Conquer');
-            
-            // 应说明元认知模型已继承
+
             expect(callArgs.extraSystemPrompt).toContain('Meta-Cognitive Models');
             expect(callArgs.extraSystemPrompt).toContain('inherited');
         });
@@ -199,7 +194,7 @@ describe('createDeepReflectTool', () => {
         it('当有模型索引时，应注入索引内容', async () => {
             const modelsDir = path.join(tempDir, '.principles', 'models');
             fs.mkdirSync(modelsDir, { recursive: true });
-            
+
             const indexContent = `# 扩展思维模型索引
 | ID | 名称 | 适用场景 |
 |----|------|----------|
@@ -217,7 +212,7 @@ describe('createDeepReflectTool', () => {
             await executeTool({ context: 'Marketing plan.' });
 
             const callArgs = mockSubagent.run.mock.calls[0][0];
-            
+
             expect(callArgs.extraSystemPrompt).toContain('MARKETING_4P');
         });
     });
@@ -249,8 +244,7 @@ describe('createDeepReflectTool', () => {
             await executeTool({ model_id: 'T-05', context: 'Test.' });
 
             const callArgs = mockSubagent.run.mock.calls[0][0];
-            
-            // 应使用新的提示词格式
+
             expect(callArgs.extraSystemPrompt).toContain('Model Selection Guidelines');
         });
     });
@@ -258,13 +252,8 @@ describe('createDeepReflectTool', () => {
     describe('工具参数定义', () => {
         it('model_id 应为可选参数', () => {
             const schema = deepReflectTool.parameters;
-            
-            // 检查 model_id 是否在 schema 中（可能是可选的）
             const hasModelId = 'model_id' in schema.properties;
-            
-            // 如果存在 model_id，检查它是否是可选的
             if (hasModelId) {
-                // model_id 应该是可选的（不在 required 数组中）
                 const required = (schema as any).required || [];
                 expect(required).not.toContain('model_id');
             }
@@ -273,15 +262,101 @@ describe('createDeepReflectTool', () => {
         it('context 应为必需参数', () => {
             const schema = deepReflectTool.parameters;
             const required = (schema as any).required || [];
-            
             expect(required).toContain('context');
         });
 
         it('depth 应为可选参数', () => {
             const schema = deepReflectTool.parameters;
             const required = (schema as any).required || [];
-            
             expect(required).not.toContain('depth');
+        });
+    });
+
+    describe('Bug 修复：sessionId 使用完整 sessionKey', () => {
+        it('sessionKey 应包含完整前缀而非纯 UUID', async () => {
+            mockSubagent.run.mockResolvedValue({ runId: 'test-run-123' });
+            mockSubagent.waitForRun.mockResolvedValue({ status: 'ok' });
+            mockSubagent.getSessionMessages.mockResolvedValue({
+                messages: [],
+                assistantTexts: ['Insight']
+            });
+
+            await executeTool({ context: 'Testing session key fix.' });
+
+            const runCall = mockSubagent.run.mock.calls[0][0];
+            expect(runCall.sessionKey).toMatch(/^agent:main:reflection:/);
+            expect(runCall.sessionKey.split(':').length).toBeGreaterThan(1);
+        });
+
+        it('eventLog 应记录完整 sessionKey 而非纯 UUID', async () => {
+            mockSubagent.run.mockResolvedValue({ runId: 'test-run-123' });
+            mockSubagent.waitForRun.mockResolvedValue({ status: 'ok' });
+            mockSubagent.getSessionMessages.mockResolvedValue({
+                messages: [],
+                assistantTexts: ['Analysis complete. Found 2 issues.']
+            });
+
+            await executeTool({ context: 'Testing event log sessionId.' });
+
+            EventLogService.flushAll();
+
+            const stateDir = path.join(tempDir, '.state');
+            const eventsFile = path.join(stateDir, 'logs', 'events.jsonl');
+
+            expect(fs.existsSync(eventsFile)).toBe(true);
+
+            const lines = fs.readFileSync(eventsFile, 'utf8').trim().split('\n');
+            const deepReflectionEvents = lines
+                .filter((l) => l.includes('deep_reflection'))
+                .map((l) => JSON.parse(l));
+
+            expect(deepReflectionEvents.length).toBeGreaterThan(0);
+
+            const event = deepReflectionEvents[0];
+            expect(event.sessionId).toMatch(/^agent:main:reflection:/);
+            expect(event.sessionId.split(':').length).toBeGreaterThan(1);
+
+            const isBareUuid = !event.sessionId.includes(':');
+            expect(isBareUuid).toBe(false);
+        });
+    });
+
+    describe('Surface degrade 检查', () => {
+        it('当 subagent runtime 不可用时（embedded 模式），应返回错误而非抛出', async () => {
+            const embeddedSubagent = {
+                run: vi.fn(),
+                waitForRun: vi.fn(),
+                getSessionMessages: vi.fn(),
+                deleteSession: vi.fn(),
+            };
+
+            const embeddedApi = {
+                ...mockApi,
+                runtime: {
+                    subagent: embeddedSubagent,
+                } as unknown as PluginRuntime,
+            };
+
+            const tool = createDeepReflectTool(embeddedApi);
+            const result = await tool.execute('test-call-id', { context: 'Testing embedded mode.' });
+
+            expect(result.content[0].text).toContain('Subagent runtime 不可用');
+            expect(result.content[0].text).toContain('embedded');
+            expect(embeddedSubagent.run).not.toHaveBeenCalled();
+        });
+
+        it('当 subagent 为 undefined 时，应返回错误', async () => {
+            const noSubagentApi = {
+                ...mockApi,
+                runtime: {
+                    subagent: undefined,
+                } as unknown as PluginRuntime,
+            };
+
+            const tool = createDeepReflectTool(noSubagentApi);
+            const result = await tool.execute('test-call-id', { context: 'Testing no subagent.' });
+
+            expect(result.content[0].text).toContain('Subagent runtime 不可用');
         });
     });
 });
