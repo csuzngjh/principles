@@ -1,3 +1,5 @@
+import { determineOutputQuality, OUTPUT_QUALITY, validateStageReports, determineNextRunRecommendation, NEXT_RUN_TYPE } from './contract-enforcement.mjs';
+
 const VERDICT_RE = /(?:VERDICT:\s*\*{0,2}|##\s*VERDICT\s*\n+\*{0,2}\s*)(APPROVE|REVISE|BLOCK)\b/i;
 const DIMENSIONS_RE = /^\*{0,2}DIMENSIONS\*{0,2}:\s*(.+)$/im;
 // Match both "SECTION:" and "## SECTION" markdown heading formats
@@ -14,6 +16,57 @@ const SHA_RE = /sha:\s*([a-f0-9]+)/i;
 const BRANCH_RE = /branch\/worktree:\s*([^\n]+)/i;
 const EVIDENCE_SCOPE_RE = /evidence_scope:\s*(principles|openclaw|both)/i;
 const MACRO_ANSWERS_RE = /(?:##\s*)?MACRO_ANSWERS:?\s*\n?([\s\S]*?)(?:\n(?:##\s*)?[A-Z_ ]+:|$)/i;
+
+// ============================================================================
+// Decision Schema Definitions
+// ============================================================================
+
+/**
+ * Decision Input Schema
+ * Structured input for the decision gate.
+ */
+export const DECISION_INPUT_SCHEMA = {
+  stageCriteria: {
+    requiredApprovals: 'number (default: 2 or 3 if globalReviewerRequired)',
+    requiredProducerSections: 'string[]',
+    requiredReviewerSections: 'string[]',
+    requiredGlobalReviewerSections: 'string[] (optional)',
+    scoringDimensions: 'string[] (optional)',
+    dimensionThreshold: 'number (default: 3)',
+    requiredDeliverables: 'string[] (optional)',
+    globalReviewerRequired: 'boolean (optional)',
+    globalReviewerMustAnswer: 'string[] (optional)',
+  },
+  reports: {
+    producer: 'string (markdown report)',
+    reviewerA: 'string (markdown report)',
+    reviewerB: 'string (markdown report)',
+    globalReviewer: 'string | null (markdown report)',
+  },
+  state: {
+    currentRound: 'number',
+    maxRoundsPerStage: 'number',
+  },
+  metadata: {
+    reviewerViolations: 'Array<{role, violatedFile}> | null',
+    reviewerADimensionsFallback: 'Object | null',
+    reviewerBDimensionsFallback: 'Object | null',
+  },
+};
+
+/**
+ * Decision Output Schema
+ * Structured output from the decision gate.
+ */
+export const DECISION_OUTPUT_SCHEMA = {
+  outcome: 'advance | revise | halt',
+  outputQuality: 'shadow_complete | production_ready | needs_work',
+  blockers: 'string[]',
+  metrics: 'StageMetrics object',
+  validation: 'ContractValidationResult',
+  summary: 'string (human-readable)',
+  qualityReasons: 'string[] (reasons for outputQuality)',
+};
 
 export function normalizeVerdict(text) {
   const match = String(text ?? '').match(VERDICT_RE);
@@ -298,11 +351,25 @@ export function buildStageMetrics({ stageCriteria, producer, reviewerA, reviewer
   };
 }
 
-export function decideStage({ stageCriteria, producer, reviewerA, reviewerB, globalReviewer, currentRound, maxRoundsPerStage, reviewerViolations = null, reviewerADimensionsFallback = null, reviewerBDimensionsFallback = null }) {
+export function decideStage({ stageCriteria, producer, reviewerA, reviewerB, globalReviewer, currentRound, maxRoundsPerStage, reviewerViolations = null, reviewerADimensionsFallback = null, reviewerBDimensionsFallback = null, skipContractValidation = false, spec = null }) {
   const verdictA = normalizeVerdict(reviewerA);
   const verdictB = normalizeVerdict(reviewerB);
   const globalReviewerRequired = stageCriteria?.globalReviewerRequired === true;
   const metrics = buildStageMetrics({ stageCriteria, producer, reviewerA, reviewerB, globalReviewer, reviewerADimensionsFallback, reviewerBDimensionsFallback });
+
+  // Perform contract validation
+  const validation = skipContractValidation ? { valid: true } : validateStageReports({
+    producer,
+    reviewerA,
+    reviewerB,
+    globalReviewer,
+  }, {
+    requiredDeliverables: stageCriteria?.requiredDeliverables,
+    scoringDimensions: stageCriteria?.scoringDimensions,
+    requiredMacroQuestions: stageCriteria?.globalReviewerMustAnswer,
+    globalReviewerRequired,
+  });
+
   const blockers = metrics.blockers;
   const producerSectionsSatisfied = Object.values(metrics.producerSectionChecks).every(Boolean);
   const reviewerSectionsSatisfied = Object.values(metrics.reviewerSectionChecks).every(Boolean);
@@ -376,9 +443,43 @@ export function decideStage({ stageCriteria, producer, reviewerA, reviewerB, glo
     }
   }
 
+  // Contract validation failures become structural blockers (cannot advance with invalid reports)
+  if (!validation.valid) {
+    if (validation.producer && !validation.producer.valid) {
+      const issues = [
+        ...(validation.producer.missingSections || []).map((s) => `missing section: ${s}`),
+        ...(validation.producer.invalidFields || []),
+      ];
+      if (issues.length > 0) structuralBlockers.push(`Producer report contract violation: ${issues.join('; ')}`);
+    }
+    if (validation.reviewerA && !validation.reviewerA.valid) {
+      const issues = [
+        ...(validation.reviewerA.missingSections || []).map((s) => `missing section: ${s}`),
+        ...(validation.reviewerA.invalidFields || []),
+      ];
+      if (issues.length > 0) structuralBlockers.push(`Reviewer A report contract violation: ${issues.join('; ')}`);
+    }
+    if (validation.reviewerB && !validation.reviewerB.valid) {
+      const issues = [
+        ...(validation.reviewerB.missingSections || []).map((s) => `missing section: ${s}`),
+        ...(validation.reviewerB.invalidFields || []),
+      ];
+      if (issues.length > 0) structuralBlockers.push(`Reviewer B report contract violation: ${issues.join('; ')}`);
+    }
+    if (validation.globalReviewer && !validation.globalReviewer.valid) {
+      const issues = [
+        ...(validation.globalReviewer.missingSections || []).map((s) => `missing section: ${s}`),
+        ...(validation.globalReviewer.invalidFields || []),
+      ];
+      if (issues.length > 0) structuralBlockers.push(`Global reviewer report contract violation: ${issues.join('; ')}`);
+    }
+  }
+
   const allBlockers = [...structuralBlockers, ...blockers];
 
+  // Contract validation must be valid AND all other conditions met
   if (
+    validation.valid &&
     verdictA === 'APPROVE' &&
     verdictB === 'APPROVE' &&
     (!globalReviewerRequired || metrics.globalReviewerVerdict === 'APPROVE') &&
@@ -389,27 +490,62 @@ export function decideStage({ stageCriteria, producer, reviewerA, reviewerB, glo
     globalReviewerSectionsSatisfied &&
     allBlockers.length === 0
   ) {
+    // Determine output quality (shadow_complete vs production_ready)
+    const qualityResult = determineOutputQuality(validation, metrics);
+    const nextRunRecommendation = determineNextRunRecommendation(
+      qualityResult.quality,
+      'advance',
+      spec,
+      { qualityReasons: qualityResult.reasons }
+    );
+    
     return {
       outcome: 'advance',
+      outputQuality: qualityResult.quality,
       blockers: allBlockers,
       metrics,
-      summary: 'All reviewers approved the stage output.',
+      validation,
+      summary: qualityResult.quality === OUTPUT_QUALITY.PRODUCTION_READY
+        ? 'All reviewers approved. Output is production-ready.'
+        : 'All reviewers approved. Output is shadow-complete.',
+      qualityReasons: qualityResult.reasons,
+      nextRunRecommendation,
     };
   }
 
   if (currentRound >= maxRoundsPerStage) {
+    const nextRunRecommendation = determineNextRunRecommendation(
+      OUTPUT_QUALITY.NEEDS_WORK,
+      'halt',
+      spec,
+      { qualityReasons: ['Max rounds exceeded'] }
+    );
     return {
       outcome: 'halt',
+      outputQuality: OUTPUT_QUALITY.NEEDS_WORK,
       blockers: [...structuralBlockers, ...blockers],
       metrics,
+      validation,
       summary: 'Stage exceeded maximum rounds without all required approvals.',
+      qualityReasons: ['Max rounds exceeded'],
+      nextRunRecommendation,
     };
   }
 
+  const nextRunRecommendation = determineNextRunRecommendation(
+    OUTPUT_QUALITY.NEEDS_WORK,
+    'revise',
+    spec,
+    { qualityReasons: ['Reviewers did not approve'] }
+  );
   return {
     outcome: 'revise',
+    outputQuality: OUTPUT_QUALITY.NEEDS_WORK,
     blockers: [...structuralBlockers, ...blockers],
     metrics,
+    validation,
     summary: 'At least one reviewer requested revision or blocked progress.',
+    qualityReasons: ['Reviewers did not approve'],
+    nextRunRecommendation,
   };
 }
