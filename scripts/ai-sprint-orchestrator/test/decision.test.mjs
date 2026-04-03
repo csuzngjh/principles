@@ -15,6 +15,7 @@ import {
   hasCodeEvidence,
   extractMacroAnswers,
 } from '../lib/decision.mjs';
+import { OUTPUT_QUALITY } from '../lib/contract-enforcement.mjs';
 
 test('normalizeVerdict extracts explicit verdict', () => {
   assert.equal(normalizeVerdict('VERDICT: approve'), 'APPROVE');
@@ -50,6 +51,7 @@ test('decideStage advances only when both reviewers approve', () => {
     reviewerB: 'VERDICT: APPROVE\nBLOCKERS:\n- None.',
     currentRound: 1,
     maxRoundsPerStage: 3,
+    skipContractValidation: true,
   });
   assert.equal(result.outcome, 'advance');
 });
@@ -66,6 +68,7 @@ test('decideStage halts when max rounds reached without approval', () => {
     reviewerB: 'VERDICT: BLOCK\nBLOCKERS:\n- two',
     currentRound: 3,
     maxRoundsPerStage: 3,
+    skipContractValidation: true,
   });
   assert.equal(result.outcome, 'halt');
   assert.deepEqual(result.blockers, ['one', 'two']);
@@ -206,6 +209,7 @@ test('decideStage advances when all dimension scores meet threshold', () => {
     reviewerB: 'VERDICT: APPROVE\nDIMENSIONS: evidence_quality=5;scope_control=4\nBLOCKERS:\n- None.',
     currentRound: 1,
     maxRoundsPerStage: 3,
+    skipContractValidation: true,
   });
 
   assert.equal(result.outcome, 'advance');
@@ -304,6 +308,7 @@ test('decideStage advances when all contract items are DONE', () => {
     reviewerB: 'VERDICT: APPROVE\nBLOCKERS:\n- None.',
     currentRound: 1,
     maxRoundsPerStage: 3,
+    skipContractValidation: true,
   });
 
   assert.equal(result.outcome, 'advance');
@@ -364,6 +369,7 @@ test('decideStage with dimensions, contract, and blockers all passing advances',
     reviewerB: 'VERDICT: APPROVE\nDIMENSIONS: correctness=5;scope_control=4\nBLOCKERS:\n- None.',
     currentRound: 1,
     maxRoundsPerStage: 3,
+    skipContractValidation: true,
   });
 
   assert.equal(result.outcome, 'advance');
@@ -603,10 +609,213 @@ test('decideStage with globalReviewerRequired — advances when all three APPROV
     ].join('\n'),
     currentRound: 1,
     maxRoundsPerStage: 3,
+    skipContractValidation: true,
   });
 
   assert.equal(result.outcome, 'advance');
   assert.equal(result.metrics.approvalCount, 3);
+});
+
+// ============================================================================
+// Output Quality Tests (Task 3: Shadow-Complete vs Production-Ready)
+// ============================================================================
+
+test('decideStage returns outputQuality: needs_work when revise required', () => {
+  const result = decideStage({
+    stageCriteria: {
+      requiredApprovals: 1,
+      requiredProducerSections: ['SUMMARY'],
+      requiredReviewerSections: ['VERDICT', 'BLOCKERS'],
+    },
+    producer: 'SUMMARY:\nDone',
+    reviewerA: 'VERDICT: REVISE\nBLOCKERS:\n- Need more tests',
+    reviewerB: 'VERDICT: APPROVE\nBLOCKERS:\n- None.',
+    currentRound: 1,
+    maxRoundsPerStage: 3,
+  });
+  assert.equal(result.outcome, 'revise');
+  assert.equal(result.outputQuality, OUTPUT_QUALITY.NEEDS_WORK);
+});
+
+test('decideStage returns outputQuality: needs_work when halt', () => {
+  const result = decideStage({
+    stageCriteria: {
+      requiredApprovals: 1,
+      requiredProducerSections: ['SUMMARY'],
+      requiredReviewerSections: ['VERDICT', 'BLOCKERS'],
+    },
+    producer: 'SUMMARY:\nDone',
+    reviewerA: 'VERDICT: REVISE\nBLOCKERS:\n- Issue',
+    reviewerB: 'VERDICT: BLOCK\nBLOCKERS:\n- Cannot proceed',
+    currentRound: 3,
+    maxRoundsPerStage: 3,
+  });
+  assert.equal(result.outcome, 'halt');
+  assert.equal(result.outputQuality, OUTPUT_QUALITY.NEEDS_WORK);
+  assert.ok(result.qualityReasons.some(r => r.includes('Max rounds')));
+});
+
+test('decideStage returns outputQuality: shadow_complete on basic advance', () => {
+  const result = decideStage({
+    stageCriteria: {
+      requiredApprovals: 1,
+      requiredProducerSections: ['SUMMARY'],
+      requiredReviewerSections: ['VERDICT', 'BLOCKERS'],
+    },
+    producer: 'SUMMARY:\nDone',
+    reviewerA: 'VERDICT: APPROVE\nBLOCKERS:\n- None.',
+    reviewerB: 'VERDICT: APPROVE\nBLOCKERS:\n- None.',
+    currentRound: 1,
+    maxRoundsPerStage: 3,
+    skipContractValidation: true, // Skip contract validation for this legacy test
+  });
+  assert.equal(result.outcome, 'advance');
+  // Without cross-repo evidence scope, it should be shadow_complete
+  assert.equal(result.outputQuality, OUTPUT_QUALITY.SHADOW_COMPLETE);
+});
+
+test('decideStage returns outputQuality: production_ready when all criteria met', () => {
+  const result = decideStage({
+    stageCriteria: {
+      requiredApprovals: 1,
+      requiredProducerSections: ['SUMMARY'],
+      requiredReviewerSections: ['VERDICT', 'BLOCKERS'],
+      scoringDimensions: ['correctness', 'scope_control'],
+      dimensionThreshold: 3,
+    },
+    producer: 'SUMMARY:\nDone\nCODE_EVIDENCE:\n- files_checked: [src/a.ts]\n- evidence_scope: both\n- sha: abc123',
+    reviewerA: 'VERDICT: APPROVE\nBLOCKERS:\n- None.\nDIMENSIONS: correctness=4;scope_control=5\nCODE_EVIDENCE:\n- files_verified: [src/a.ts]\n- sha: abc123',
+    reviewerB: 'VERDICT: APPROVE\nBLOCKERS:\n- None.\nDIMENSIONS: correctness=5;scope_control=4\nCODE_EVIDENCE:\n- files_verified: [src/a.ts]\n- sha: abc123',
+    currentRound: 1,
+    maxRoundsPerStage: 3,
+    skipContractValidation: true,
+  });
+  assert.equal(result.outcome, 'advance');
+  // With evidence_scope: both and all dimensions >= 4, should be production_ready
+  assert.equal(result.outputQuality, OUTPUT_QUALITY.PRODUCTION_READY);
+});
+
+test('decideStage returns shadow_complete when dimensions below production threshold', () => {
+  const result = decideStage({
+    stageCriteria: {
+      requiredApprovals: 1,
+      requiredProducerSections: ['SUMMARY'],
+      requiredReviewerSections: ['VERDICT', 'BLOCKERS'],
+      scoringDimensions: ['correctness'],
+      dimensionThreshold: 3,
+    },
+    producer: 'SUMMARY:\nDone\nCODE_EVIDENCE:\n- files_checked: [src/a.ts]\n- evidence_scope: both\n- sha: abc123',
+    reviewerA: 'VERDICT: APPROVE\nBLOCKERS:\n- None.\nDIMENSIONS: correctness=3\nCODE_EVIDENCE:\n- files_verified: [src/a.ts]\n- sha: abc123',
+    reviewerB: 'VERDICT: APPROVE\nBLOCKERS:\n- None.\nDIMENSIONS: correctness=3\nCODE_EVIDENCE:\n- files_verified: [src/a.ts]\n- sha: abc123',
+    currentRound: 1,
+    maxRoundsPerStage: 3,
+    skipContractValidation: true,
+  });
+  assert.equal(result.outcome, 'advance');
+  // Dimensions pass threshold (3) but below production threshold (4)
+  assert.equal(result.outputQuality, OUTPUT_QUALITY.SHADOW_COMPLETE);
+  assert.ok(result.qualityReasons.some(r => r.includes('below production threshold')));
+});
+
+test('decideStage includes validation field', () => {
+  const result = decideStage({
+    stageCriteria: {
+      requiredApprovals: 1,
+      requiredProducerSections: ['SUMMARY'],
+      requiredReviewerSections: ['VERDICT', 'BLOCKERS'],
+    },
+    producer: 'SUMMARY:\nDone',
+    reviewerA: 'VERDICT: APPROVE\nBLOCKERS:\n- None.',
+    reviewerB: 'VERDICT: APPROVE\nBLOCKERS:\n- None.',
+    currentRound: 1,
+    maxRoundsPerStage: 3,
+  });
+  assert.ok(result.validation);
+  assert.equal(typeof result.validation.valid, 'boolean');
+});
+
+// Regression test: invalid contract should block advance even if reviewers approve
+test('decideStage does NOT advance when contract validation fails', () => {
+  // Producer missing required sections for contract compliance
+  const result = decideStage({
+    stageCriteria: {
+      requiredApprovals: 1,
+      requiredProducerSections: ['SUMMARY'],
+      requiredReviewerSections: ['VERDICT', 'BLOCKERS'],
+    },
+    producer: 'SUMMARY:\nDone',  // Missing CHANGES, EVIDENCE, etc. required by PRODUCER_SCHEMA
+    reviewerA: 'VERDICT: APPROVE\nBLOCKERS:\n- None.',  // Missing FINDINGS, CODE_EVIDENCE, etc.
+    reviewerB: 'VERDICT: APPROVE\nBLOCKERS:\n- None.',
+    currentRound: 1,
+    maxRoundsPerStage: 3,
+    // NOT skipping contract validation
+  });
+
+  // Should NOT advance because validation.valid is false
+  assert.equal(result.validation.valid, false);
+  assert.notEqual(result.outcome, 'advance');
+  assert.ok(result.blockers.length > 0, 'Should have blockers from contract validation');
+  assert.ok(result.blockers.some((b) => b.includes('contract violation') || b.includes('missing required section')),
+    `Blockers should mention contract violation, got: ${result.blockers.join('; ')}`);
+});
+
+test('decideStage outputQuality is shadow_complete for PR2-like case', () => {
+  // Simulate PR2 scenario: advance with local-only evidence (no cross-repo verification)
+  const result = decideStage({
+    stageCriteria: {
+      requiredApprovals: 1,
+      requiredProducerSections: ['SUMMARY', 'CHANGES', 'EVIDENCE', 'CODE_EVIDENCE', 'KEY_EVENTS', 'HYPOTHESIS_MATRIX', 'CHECKS', 'OPEN_RISKS'],
+      requiredReviewerSections: ['VERDICT', 'BLOCKERS', 'FINDINGS', 'CODE_EVIDENCE', 'HYPOTHESIS_MATRIX', 'NEXT_FOCUS', 'CHECKS'],
+    },
+    producer: [
+      'SUMMARY:\nImplementation complete.',
+      'CHANGES:\nModified src/helper.ts',
+      'EVIDENCE:\nTests pass locally.',
+      'CODE_EVIDENCE:',
+      '- files_checked: [src/helper.ts]',
+      '- evidence_source: local',
+      '- sha: abc123',
+      '- evidence_scope: principles',
+      'KEY_EVENTS:\n- Code changes made',
+      'HYPOTHESIS_MATRIX:\n- H1: SUPPORTED',
+      'CHECKS: evidence=ok;tests=passed;scope=pd-only',
+      'OPEN_RISKS:\n- None',
+    ].join('\n'),
+    reviewerA: [
+      'VERDICT: APPROVE',
+      'BLOCKERS:\n- None',
+      'FINDINGS:\n- Implementation looks correct',
+      'CODE_EVIDENCE:',
+      '- files_verified: [src/helper.ts]',
+      '- evidence_source: local',
+      '- evidence_scope: principles',
+      '- sha: abc123',
+      'HYPOTHESIS_MATRIX:\n- H1: SUPPORTED',
+      'NEXT_FOCUS: Consider production deployment',
+      'CHECKS: criteria=met',
+    ].join('\n'),
+    reviewerB: [
+      'VERDICT: APPROVE',
+      'BLOCKERS:\n- None',
+      'FINDINGS:\n- Scope is controlled',
+      'CODE_EVIDENCE:',
+      '- files_verified: [src/helper.ts]',
+      '- evidence_source: local',
+      '- evidence_scope: principles',
+      '- sha: abc123',
+      'HYPOTHESIS_MATRIX:\n- H1: SUPPORTED',
+      'NEXT_FOCUS: Ready for production',
+      'CHECKS: criteria=met',
+    ].join('\n'),
+    currentRound: 1,
+    maxRoundsPerStage: 3,
+    skipContractValidation: true,
+  });
+  
+  assert.equal(result.outcome, 'advance');
+  // PR2 scenario: evidence_scope: principles (not both) -> shadow_complete
+  assert.equal(result.outputQuality, OUTPUT_QUALITY.SHADOW_COMPLETE);
+  assert.ok(result.qualityReasons.some(r => r.includes('both')));
 });
 
 test('decideStage with globalReviewerRequired — cannot advance when global reviewer missing', () => {
@@ -721,6 +930,7 @@ test('decideStage without globalReviewerRequired — ignores global_reviewer eve
     globalReviewer: 'VERDICT: BLOCK\nBLOCKERS:\n- Should be ignored',
     currentRound: 1,
     maxRoundsPerStage: 3,
+    skipContractValidation: true,
   });
 
   assert.equal(result.outcome, 'advance');
@@ -855,6 +1065,7 @@ test('decideStage advances with ## CONTRACT and ## CODE_EVIDENCE', () => {
     reviewerB: 'VERDICT: APPROVE\nBLOCKERS:\n- None.',
     currentRound: 1,
     maxRoundsPerStage: 3,
+    skipContractValidation: true,
   });
 
   assert.equal(result.outcome, 'advance');
@@ -1023,6 +1234,7 @@ test('decideStage advances with dimensions from fallback', () => {
     maxRoundsPerStage: 3,
     reviewerADimensionsFallback: { correctness: 4 },
     reviewerBDimensionsFallback: { correctness: 5 },
+    skipContractValidation: true,
   });
   assert.equal(result.outcome, 'advance');
 });
@@ -1095,6 +1307,7 @@ test('decideStage advances when all 3 reviewers approve, contract done, Q1-Q5 sa
     ].join('\n'),
     currentRound: 3,
     maxRoundsPerStage: 3,
+    skipContractValidation: true,
   });
   assert.equal(result.outcome, 'advance');
   assert.equal(result.metrics.approvalCount, 3);

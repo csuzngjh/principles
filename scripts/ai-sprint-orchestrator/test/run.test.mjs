@@ -10,7 +10,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import { fileURLToPath } from 'url';
+import { decideAndPersist, formatRoleValidation, getIsolationDir, findIsolationReport, collectIsolationArtifacts, isIsolationCollectAllowed, ISOLATION_COLLECT_ALLOWLIST } from '../run.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const runMjsPath = path.join(__dirname, '..', 'run.mjs');
@@ -412,4 +414,743 @@ test('dynamic timeout: respects maxExtensions limit', () => {
   const body = getFuncBody('runAgentWithProgressCheck');
   assert.ok(/extensionsUsed\s*<\s*maxExtensions|extensionsUsed.*>=.*maxExtensions/.test(body),
     'must check extensionsUsed against maxExtensions');
+});
+
+// ---------------------------------------------------------------------------
+// Isolation Report: iflow writes to tmp/sprint-agent/{runId}/{stage}-{role}/
+// Phase 2: Uses runId directly, not fragile timestamp extraction
+// ---------------------------------------------------------------------------
+
+test('isolation: getIsolationDir uses runId for unique isolation path', () => {
+  const runId = '2026-04-03T12-34-56-789Z-test-task';
+  const isolationDir = getIsolationDir(runId, 'implement', 'producer');
+  assert.ok(isolationDir.includes('tmp'), 'must include tmp');
+  assert.ok(isolationDir.includes('sprint-agent'), 'must include sprint-agent');
+  assert.ok(isolationDir.includes(runId), 'must include runId');
+  assert.ok(isolationDir.includes('implement-producer'), 'must include stage-role');
+});
+
+test('isolation: different runs have different isolation directories', () => {
+  const runId1 = '2026-04-03T12-34-56-789Z-task-a';
+  const runId2 = '2026-04-03T12-34-56-789Z-task-b';
+  const dir1 = getIsolationDir(runId1, 'implement', 'producer');
+  const dir2 = getIsolationDir(runId2, 'implement', 'producer');
+  assert.notEqual(dir1, dir2, 'different runIds must produce different isolation dirs');
+});
+
+test('isolation: findIsolationReport returns null when runId is null', () => {
+  const result = findIsolationReport({ runId: null, stageName: 'implement', role: 'producer', reportFilename: 'producer.md' });
+  assert.equal(result, null, 'must return null when runId is null');
+});
+
+test('isolation: findIsolationReport returns null for non-existent isolation', () => {
+  const result = findIsolationReport({ runId: 'nonexistent-run-id', stageName: 'implement', role: 'producer', reportFilename: 'producer.md' });
+  assert.equal(result, null, 'must return null for non-existent isolation dir');
+});
+
+test('isolation: findIsolationReport finds report in isolation directory', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'isolation-test-'));
+  try {
+    const runId = 'test-run-id';
+    const stageName = 'implement';
+    const role = 'producer';
+    const isolationDir = getIsolationDir(runId, stageName, role);
+
+    // Create isolation directory with report
+    fs.mkdirSync(isolationDir, { recursive: true });
+    const reportContent = `# Report\n\n## SUMMARY\nTask completed.\n`;
+    fs.writeFileSync(path.join(isolationDir, 'producer.md'), reportContent);
+
+    const result = findIsolationReport({ runId, stageName, role, reportFilename: 'producer.md' });
+    assert.ok(result, 'must find report in isolation dir');
+    assert.ok(result.includes('producer.md'), 'result path must include report filename');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('isolation: isIsolationCollectAllowed respects allowlist', () => {
+  assert.equal(isIsolationCollectAllowed('producer.md'), true, 'producer.md must be allowed');
+  assert.equal(isIsolationCollectAllowed('reviewer-a.md'), true, 'reviewer-a.md must be allowed');
+  assert.equal(isIsolationCollectAllowed('reviewer-b.md'), true, 'reviewer-b.md must be allowed');
+  assert.equal(isIsolationCollectAllowed('global-reviewer.md'), true, 'global-reviewer.md must be allowed');
+  assert.equal(isIsolationCollectAllowed('report.md'), true, 'report.md must be allowed');
+  // Non-allowlist files
+  assert.equal(isIsolationCollectAllowed('session.log'), false, 'session.log must NOT be allowed');
+  assert.equal(isIsolationCollectAllowed('state.json'), false, 'state.json must NOT be allowed');
+  assert.equal(isIsolationCollectAllowed('tmp.txt'), false, 'tmp.txt must NOT be allowed');
+});
+
+test('isolation: collectIsolationArtifacts only collects allowed files', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'isolation-test-'));
+  try {
+    const runId = 'test-collect-allowed';
+    const stageName = 'implement';
+    const role = 'producer';
+    const isolationDir = getIsolationDir(runId, stageName, role);
+    const stageDir = path.join(tmp, 'stages', 'implement');
+
+    fs.mkdirSync(isolationDir, { recursive: true });
+    fs.mkdirSync(stageDir, { recursive: true });
+
+    // Create isolation report
+    const reportContent = `# Report\n\n## SUMMARY\nTask completed.\n`;
+    fs.writeFileSync(path.join(isolationDir, 'producer.md'), reportContent);
+
+    const result = collectIsolationArtifacts({
+      runId,
+      stageName,
+      role,
+      stageDir,
+      reportFilename: 'producer.md',
+      runDir: tmp,
+    });
+
+    assert.deepEqual(result.collected, ['producer.md'], 'producer.md must be collected');
+    assert.ok(fs.existsSync(path.join(stageDir, 'producer.md')), 'report must exist in stage dir');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('isolation: collectIsolationArtifacts skips non-allowlist files', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'isolation-test-'));
+  try {
+    const runId = 'test-collect-skip';
+    const stageName = 'implement';
+    const role = 'producer';
+    const isolationDir = getIsolationDir(runId, stageName, role);
+    const stageDir = path.join(tmp, 'stages', 'implement');
+
+    fs.mkdirSync(isolationDir, { recursive: true });
+    fs.mkdirSync(stageDir, { recursive: true });
+
+    // Try to collect a non-allowlist file
+    const result = collectIsolationArtifacts({
+      runId,
+      stageName,
+      role,
+      stageDir,
+      reportFilename: 'session.log', // NOT in allowlist
+      runDir: tmp,
+    });
+
+    assert.deepEqual(result.collected, [], 'session.log must NOT be collected');
+    assert.deepEqual(result.skipped, ['session.log'], 'session.log must be in skipped list');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('isolation: different runs do NOT share isolation lookup', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'isolation-test-'));
+  try {
+    const runId1 = 'run-1';
+    const runId2 = 'run-2';
+    const stageName = 'implement';
+    const role = 'producer';
+
+    // Create isolation for run-1 only
+    const isolationDir1 = getIsolationDir(runId1, stageName, role);
+    fs.mkdirSync(isolationDir1, { recursive: true });
+    fs.writeFileSync(path.join(isolationDir1, 'producer.md'), `# Report\n\n## SUMMARY\nRun 1 report.\n`);
+
+    // run-1 should find the report
+    const result1 = findIsolationReport({ runId: runId1, stageName, role, reportFilename: 'producer.md' });
+    assert.ok(result1, 'run-1 must find its isolation report');
+
+    // run-2 should NOT find any report
+    const result2 = findIsolationReport({ runId: runId2, stageName, role, reportFilename: 'producer.md' });
+    assert.equal(result2, null, 'run-2 must NOT find run-1 isolation report');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('isolation: ISOLATION_COLLECT_ALLOWLIST contains expected files', () => {
+  assert.ok(Array.isArray(ISOLATION_COLLECT_ALLOWLIST), 'allowlist must be an array');
+  assert.ok(ISOLATION_COLLECT_ALLOWLIST.includes('producer.md'), 'must include producer.md');
+  assert.ok(ISOLATION_COLLECT_ALLOWLIST.includes('reviewer-a.md'), 'must include reviewer-a.md');
+  assert.ok(ISOLATION_COLLECT_ALLOWLIST.includes('reviewer-b.md'), 'must include reviewer-b.md');
+  assert.ok(ISOLATION_COLLECT_ALLOWLIST.includes('global-reviewer.md'), 'must include global-reviewer.md');
+  assert.ok(ISOLATION_COLLECT_ALLOWLIST.includes('report.md'), 'must include report.md');
+  // Should NOT include non-report files
+  assert.equal(ISOLATION_COLLECT_ALLOWLIST.includes('session.log'), false, 'must NOT include session.log');
+  assert.equal(ISOLATION_COLLECT_ALLOWLIST.includes('state.json'), false, 'must NOT include state.json');
+});
+
+// ---------------------------------------------------------------------------
+// Validation Schema & Persistence Regression Tests
+// ---------------------------------------------------------------------------
+
+test('validation schema: decision.md uses role-level errorSummary, not .errors', () => {
+  const body = getFuncBody('decideAndPersist');
+  // Must NOT access .errors on role objects (field doesn't exist)
+  assert.equal(/producer\.errors|reviewerA\.errors|reviewerB\.errors/.test(body), false,
+    'decision.md must NOT read non-existent .errors field on role validation objects');
+  // Must use formatRoleValidation helper or direct errorSummary access
+  assert.ok(/formatRoleValidation|errorSummary|missingSections|invalidFields/.test(body),
+    'decision.md must use canonical validation fields: errorSummary, missingSections, invalidFields');
+});
+
+test('validation schema: scorecard.json uses errorSummary not errors array', () => {
+  const body = getFuncBody('decideAndPersist');
+  // Check the validation object in scorecard
+  const validationMatch = body.match(/validation:\s*\{[^}]+\}/);
+  assert.ok(validationMatch, 'scorecard must have validation object');
+  // Must have errorSummary at top level
+  assert.ok(/errorSummary:\s*decision\.validation\?\.\errorSummary/.test(body),
+    'scorecard validation must include top-level errorSummary');
+  // Must NOT have legacy errors array as primary source
+  assert.equal(/errors:\s*decision\.validation\?\.\errors\s*\?\?/.test(body), false,
+    'scorecard should not use legacy errors array as validation source');
+});
+
+test('validation schema: scorecard includes role-level validation objects', () => {
+  const body = getFuncBody('decideAndPersist');
+  // Each role must be included with full validation object
+  // Use [?] character class to match literal question mark in optional chaining
+  assert.ok(/producer:\s*decision\.validation[?]\.producer/.test(body),
+    'scorecard must include producer validation');
+  assert.ok(/reviewerA:\s*decision\.validation[?]\.reviewerA/.test(body),
+    'scorecard must include reviewerA validation');
+  assert.ok(/reviewerB:\s*decision\.validation[?]\.reviewerB/.test(body),
+    'scorecard must include reviewerB validation');
+  assert.ok(/globalReviewer:\s*decision\.validation[?]\.globalReviewer/.test(body),
+    'scorecard must include globalReviewer validation');
+});
+
+test('persistence: outputQuality written to decision.md and scorecard.json', () => {
+  const body = getFuncBody('decideAndPersist');
+  // decision.md must include Output Quality
+  assert.ok(/Output Quality.*decision\.outputQuality/.test(body),
+    'decision.md must include Output Quality field');
+  // scorecard must include outputQuality
+  assert.ok(/outputQuality:\s*decision\.outputQuality/.test(body),
+    'scorecard must include outputQuality field');
+});
+
+test('persistence: qualityReasons written to decision.md and scorecard.json', () => {
+  const body = getFuncBody('decideAndPersist');
+  // decision.md must include Quality Reasons section
+  assert.ok(/qualityReasons|Quality Reasons/.test(body),
+    'decision.md must include Quality Reasons section');
+  // scorecard must include qualityReasons
+  assert.ok(/qualityReasons:\s*decision\.qualityReasons/.test(body),
+    'scorecard must include qualityReasons field');
+});
+
+test('formatRoleValidation: helper function exists and uses canonical fields', () => {
+  const body = getFuncBody('formatRoleValidation');
+  assert.ok(/missingSections/.test(body), 'formatRoleValidation must use missingSections');
+  assert.ok(/invalidFields/.test(body), 'formatRoleValidation must use invalidFields');
+  assert.ok(/valid/.test(body), 'formatRoleValidation must check valid status');
+});
+
+// ---------------------------------------------------------------------------
+// BEHAVIOR-LEVEL PERSISTENCE TESTS
+// Tests that verify actual file writes, not source structure
+// ---------------------------------------------------------------------------
+
+function createTempDir() {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'run-test-'));
+  return tmp;
+}
+
+function cleanupTempDir(tmp) {
+  try {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  } catch {}
+}
+
+function createMockState(currentRound = 1, maxRoundsPerStage = 3, taskId = 'test-task') {
+  return {
+    currentRound,
+    maxRoundsPerStage,
+    status: 'running',
+    taskId,
+  };
+}
+
+function createTempSpec(tmp, taskId = 'test-task') {
+  const specDir = path.join(tmp, 'specs');
+  fs.mkdirSync(specDir, { recursive: true });
+  const specPath = path.join(specDir, `${taskId}.json`);
+  const spec = {
+    taskId,
+    stageCriteria: {
+      implement: {
+        requiredProducerSections: ['SUMMARY', 'CHANGES'],
+        requiredReviewerSections: ['VERDICT', 'BLOCKERS'],
+      },
+    },
+  };
+  fs.writeFileSync(specPath, JSON.stringify(spec));
+  return specPath;
+}
+
+function createValidProducer() {
+  return `# Producer Report
+
+## SUMMARY
+Task completed successfully.
+
+## CHANGES
+- Fixed bug in validation logic
+- Added new test cases
+
+## EVIDENCE
+- All tests pass
+- Code review completed
+
+## CODE_EVIDENCE
+- src/fix.ts: Fixed validation schema
+
+## KEY_EVENTS
+- Bug identified and fixed
+- Tests added
+
+## HYPOTHESIS_MATRIX
+| Hypothesis | Status | Evidence |
+|------------|--------|----------|
+| Bug in validation | Confirmed | Fixed in src/fix.ts |
+
+## CONTRACT
+- [x] DONE: fix-validation: Fix validation schema issues
+- [x] DONE: add-tests: Add regression tests
+
+CHECKS: evidence=gathered;tests=passing
+
+## OPEN_RISKS
+- None identified`;
+}
+
+function createValidReviewer(verdict = 'APPROVE') {
+  return `# Reviewer Report
+
+## VERDICT
+VERDICT: ${verdict}
+
+## BLOCKERS
+${verdict === 'APPROVE' ? '- None.' : '- Issue found in implementation'}
+
+## FINDINGS
+- Code quality is good
+- Tests are comprehensive
+
+## CODE_EVIDENCE
+- Reviewed src/fix.ts
+
+## HYPOTHESIS_MATRIX
+| Hypothesis | Status | Evidence |
+|------------|--------|----------|
+| Bug fixed | Confirmed | Tests pass |
+
+## NEXT_FOCUS
+Continue with next task
+
+CHECKS: criteria=met;blockers=0`;
+}
+
+function createInvalidProducer() {
+  return `# Producer Report
+
+## CHANGES
+- Some changes made
+
+## CONTRACT
+- [ ] TODO: missing-deliverable: This deliverable is not done
+`;
+  // Missing SUMMARY, EVIDENCE, CODE_EVIDENCE, KEY_EVENTS, HYPOTHESIS_MATRIX, CHECKS, OPEN_RISKS
+}
+
+function createInvalidReviewer() {
+  return `# Reviewer Report
+
+## FINDINGS
+- Found some issues
+`;
+  // Missing VERDICT, BLOCKERS, CODE_EVIDENCE, HYPOTHESIS_MATRIX, NEXT_FOCUS, CHECKS
+}
+
+test('behavior: decision.md contains validation details when report is invalid', () => {
+  const tmp = createTempDir();
+  try {
+    const stageDir = path.join(tmp, 'stages', 'implement');
+    fs.mkdirSync(stageDir, { recursive: true });
+
+    const specPath = createTempSpec(tmp);
+    const producerPath = path.join(stageDir, 'producer.md');
+    const reviewerAPath = path.join(stageDir, 'reviewer-a.md');
+    const reviewerBPath = path.join(stageDir, 'reviewer-b.md');
+    const decisionPath = path.join(stageDir, 'decision.md');
+    const scorecardPath = path.join(stageDir, 'scorecard.json');
+
+    // Write invalid producer and valid reviewers
+    fs.writeFileSync(producerPath, createInvalidProducer());
+    fs.writeFileSync(reviewerAPath, createValidReviewer('APPROVE'));
+    fs.writeFileSync(reviewerBPath, createValidReviewer('APPROVE'));
+
+    decideAndPersist({
+      runDir: tmp,
+      stageName: 'implement',
+      stageDir,
+      decisionPath,
+      scorecardPath,
+      producerPath,
+      reviewerAPath,
+      reviewerBPath,
+      globalReviewerPath: null,
+      state: { ...createMockState(), specPath },
+    });
+
+    // Verify decision.md was written
+    assert.ok(fs.existsSync(decisionPath), 'decision.md should be written');
+    const decision = fs.readFileSync(decisionPath, 'utf8');
+
+    // Verify Validation section contains proper role-level details
+    assert.ok(/## Validation/.test(decision), 'decision.md must have Validation section');
+    assert.ok(/Contract Valid: false/.test(decision), 'decision.md must show Contract Valid: false for invalid reports');
+    assert.ok(/Producer: \[FAIL\]/.test(decision), 'decision.md must show Producer validation failed');
+    assert.ok(/missing: SUMMARY/.test(decision), 'decision.md must show missing SUMMARY section');
+  } finally {
+    cleanupTempDir(tmp);
+  }
+});
+
+test('behavior: scorecard.json validation.errorSummary matches role-level validation', () => {
+  const tmp = createTempDir();
+  try {
+    const stageDir = path.join(tmp, 'stages', 'implement');
+    fs.mkdirSync(stageDir, { recursive: true });
+
+    const specPath = createTempSpec(tmp);
+    const producerPath = path.join(stageDir, 'producer.md');
+    const reviewerAPath = path.join(stageDir, 'reviewer-a.md');
+    const reviewerBPath = path.join(stageDir, 'reviewer-b.md');
+    const decisionPath = path.join(stageDir, 'decision.md');
+    const scorecardPath = path.join(stageDir, 'scorecard.json');
+
+    // Write invalid producer and valid reviewers
+    fs.writeFileSync(producerPath, createInvalidProducer());
+    fs.writeFileSync(reviewerAPath, createValidReviewer('APPROVE'));
+    fs.writeFileSync(reviewerBPath, createValidReviewer('APPROVE'));
+
+    decideAndPersist({
+      runDir: tmp,
+      stageName: 'implement',
+      stageDir,
+      decisionPath,
+      scorecardPath,
+      producerPath,
+      reviewerAPath,
+      reviewerBPath,
+      globalReviewerPath: null,
+      state: { ...createMockState(), specPath },
+    });
+
+    // Verify scorecard.json was written
+    assert.ok(fs.existsSync(scorecardPath), 'scorecard.json should be written');
+    const scorecard = JSON.parse(fs.readFileSync(scorecardPath, 'utf8'));
+
+    // Verify validation structure
+    assert.ok(scorecard.validation, 'scorecard must have validation object');
+    assert.equal(scorecard.validation.valid, false, 'validation.valid must be false for invalid reports');
+    assert.ok(scorecard.validation.errorSummary, 'validation must have errorSummary when invalid');
+    assert.ok(scorecard.validation.producer, 'validation must have producer object');
+    assert.equal(scorecard.validation.producer.valid, false, 'producer validation must be false');
+    assert.ok(Array.isArray(scorecard.validation.producer.missingSections), 'producer must have missingSections array');
+    assert.ok(scorecard.validation.producer.missingSections.includes('SUMMARY'), 'missingSections must include SUMMARY');
+
+    // Verify errorSummary consistency
+    assert.ok(
+      scorecard.validation.errorSummary.includes('SUMMARY') || scorecard.validation.producer.errorSummary?.includes('SUMMARY'),
+      'errorSummary must reference the missing section'
+    );
+  } finally {
+    cleanupTempDir(tmp);
+  }
+});
+
+test('behavior: outputQuality and qualityReasons persisted to files', () => {
+  const tmp = createTempDir();
+  try {
+    const stageDir = path.join(tmp, 'stages', 'implement');
+    fs.mkdirSync(stageDir, { recursive: true });
+
+    const specPath = createTempSpec(tmp);
+    const producerPath = path.join(stageDir, 'producer.md');
+    const reviewerAPath = path.join(stageDir, 'reviewer-a.md');
+    const reviewerBPath = path.join(stageDir, 'reviewer-b.md');
+    const decisionPath = path.join(stageDir, 'decision.md');
+    const scorecardPath = path.join(stageDir, 'scorecard.json');
+
+    // Write valid reports
+    fs.writeFileSync(producerPath, createValidProducer());
+    fs.writeFileSync(reviewerAPath, createValidReviewer('APPROVE'));
+    fs.writeFileSync(reviewerBPath, createValidReviewer('APPROVE'));
+
+    decideAndPersist({
+      runDir: tmp,
+      stageName: 'implement',
+      stageDir,
+      decisionPath,
+      scorecardPath,
+      producerPath,
+      reviewerAPath,
+      reviewerBPath,
+      globalReviewerPath: null,
+      state: { ...createMockState(), specPath },
+    });
+
+    // Verify decision.md has Output Quality
+    const decision = fs.readFileSync(decisionPath, 'utf8');
+    assert.ok(/Output Quality:/.test(decision), 'decision.md must have Output Quality field');
+
+    // Verify scorecard.json has outputQuality and qualityReasons
+    const scorecard = JSON.parse(fs.readFileSync(scorecardPath, 'utf8'));
+    assert.ok('outputQuality' in scorecard, 'scorecard must have outputQuality field');
+    assert.ok(Array.isArray(scorecard.qualityReasons), 'scorecard must have qualityReasons array');
+  } finally {
+    cleanupTempDir(tmp);
+  }
+});
+
+test('behavior: handoff.json generated when outcome is revise', () => {
+  const tmp = createTempDir();
+  try {
+    const stageDir = path.join(tmp, 'stages', 'implement');
+    fs.mkdirSync(stageDir, { recursive: true });
+
+    const specPath = createTempSpec(tmp);
+    const producerPath = path.join(stageDir, 'producer.md');
+    const reviewerAPath = path.join(stageDir, 'reviewer-a.md');
+    const reviewerBPath = path.join(stageDir, 'reviewer-b.md');
+    const decisionPath = path.join(stageDir, 'decision.md');
+    const scorecardPath = path.join(stageDir, 'scorecard.json');
+    const handoffPath = path.join(stageDir, 'handoff.json');
+
+    // Write valid producer but reviewers request revise
+    fs.writeFileSync(producerPath, createValidProducer());
+    fs.writeFileSync(reviewerAPath, createValidReviewer('REVISE'));
+    fs.writeFileSync(reviewerBPath, createValidReviewer('REVISE'));
+
+    decideAndPersist({
+      runDir: tmp,
+      stageName: 'implement',
+      stageDir,
+      decisionPath,
+      scorecardPath,
+      producerPath,
+      reviewerAPath,
+      reviewerBPath,
+      globalReviewerPath: null,
+      state: { ...createMockState(), specPath },
+    });
+
+    // Verify handoff.json was written
+    assert.ok(fs.existsSync(handoffPath), 'handoff.json should be written when outcome is revise');
+
+    const handoff = JSON.parse(fs.readFileSync(handoffPath, 'utf8'));
+    assert.ok(Array.isArray(handoff.blockers), 'handoff must have blockers array');
+    assert.equal(handoff.stageName, 'implement', 'handoff must have correct stageName');
+    assert.equal(handoff.round, 1, 'handoff must have correct round');
+    assert.ok(handoff.generatedAt, 'handoff must have generatedAt timestamp');
+  } finally {
+    cleanupTempDir(tmp);
+  }
+});
+
+test('behavior: handoff.json NOT generated when outcome is advance', () => {
+  const tmp = createTempDir();
+  try {
+    const stageDir = path.join(tmp, 'stages', 'implement');
+    fs.mkdirSync(stageDir, { recursive: true });
+
+    const specPath = createTempSpec(tmp);
+    const producerPath = path.join(stageDir, 'producer.md');
+    const reviewerAPath = path.join(stageDir, 'reviewer-a.md');
+    const reviewerBPath = path.join(stageDir, 'reviewer-b.md');
+    const decisionPath = path.join(stageDir, 'decision.md');
+    const scorecardPath = path.join(stageDir, 'scorecard.json');
+    const handoffPath = path.join(stageDir, 'handoff.json');
+
+    // Write valid reports with approvals
+    fs.writeFileSync(producerPath, createValidProducer());
+    fs.writeFileSync(reviewerAPath, createValidReviewer('APPROVE'));
+    fs.writeFileSync(reviewerBPath, createValidReviewer('APPROVE'));
+
+    decideAndPersist({
+      runDir: tmp,
+      stageName: 'implement',
+      stageDir,
+      decisionPath,
+      scorecardPath,
+      producerPath,
+      reviewerAPath,
+      reviewerBPath,
+      globalReviewerPath: null,
+      state: { ...createMockState(), specPath },
+    });
+
+    // Verify handoff.json was NOT written
+    assert.equal(fs.existsSync(handoffPath), false, 'handoff.json should NOT be written when outcome is advance');
+  } finally {
+    cleanupTempDir(tmp);
+  }
+});
+
+test('behavior: formatRoleValidation produces correct output', () => {
+  // Test valid case
+  const validResult = formatRoleValidation('Producer', { valid: true });
+  assert.deepEqual(validResult, ['- Producer: [OK]']);
+
+  // Test invalid case with missing sections
+  const invalidResult = formatRoleValidation('Producer', {
+    valid: false,
+    missingSections: ['SUMMARY', 'CHANGES'],
+    invalidFields: ['CHECKS: invalid format'],
+  });
+  assert.ok(invalidResult.length > 0, 'should produce output for invalid result');
+  assert.ok(invalidResult[0].includes('[FAIL]'), 'should show failure marker');
+  assert.ok(invalidResult[0].includes('missing: SUMMARY, CHANGES'), 'should show missing sections');
+  assert.ok(invalidResult[0].includes('invalid: CHECKS: invalid format'), 'should show invalid fields');
+});
+
+test('behavior: decision.md has correct structure with all sections', () => {
+  const tmp = createTempDir();
+  try {
+    const stageDir = path.join(tmp, 'stages', 'implement');
+    fs.mkdirSync(stageDir, { recursive: true });
+
+    const specPath = createTempSpec(tmp);
+    const producerPath = path.join(stageDir, 'producer.md');
+    const reviewerAPath = path.join(stageDir, 'reviewer-a.md');
+    const reviewerBPath = path.join(stageDir, 'reviewer-b.md');
+    const decisionPath = path.join(stageDir, 'decision.md');
+    const scorecardPath = path.join(stageDir, 'scorecard.json');
+
+    fs.writeFileSync(producerPath, createValidProducer());
+    fs.writeFileSync(reviewerAPath, createValidReviewer('APPROVE'));
+    fs.writeFileSync(reviewerBPath, createValidReviewer('APPROVE'));
+
+    decideAndPersist({
+      runDir: tmp,
+      stageName: 'implement',
+      stageDir,
+      decisionPath,
+      scorecardPath,
+      producerPath,
+      reviewerAPath,
+      reviewerBPath,
+      globalReviewerPath: null,
+      state: { ...createMockState(), specPath },
+    });
+
+    const decision = fs.readFileSync(decisionPath, 'utf8');
+
+    // Verify all expected sections exist
+    assert.ok(/^# Decision/m.test(decision), 'must have Decision header');
+    assert.ok(/## Summary/.test(decision), 'must have Summary section');
+    assert.ok(/## Validation/.test(decision), 'must have Validation section');
+    assert.ok(/## Blockers/.test(decision), 'must have Blockers section');
+    assert.ok(/## Metrics/.test(decision), 'must have Metrics section');
+    assert.ok(/## Files/.test(decision), 'must have Files section');
+  } finally {
+    cleanupTempDir(tmp);
+  }
+});
+
+test('persistence: nextRunRecommendation written to decision.md', () => {
+  const tmp = createTempDir();
+  try {
+    const stageDir = path.join(tmp, 'stages', 'implement');
+    fs.mkdirSync(stageDir, { recursive: true });
+
+    const specPath = createTempSpec(tmp);
+    const producerPath = path.join(stageDir, 'producer.md');
+    const reviewerAPath = path.join(stageDir, 'reviewer-a.md');
+    const reviewerBPath = path.join(stageDir, 'reviewer-b.md');
+    const decisionPath = path.join(stageDir, 'decision.md');
+    const scorecardPath = path.join(stageDir, 'scorecard.json');
+
+    fs.writeFileSync(producerPath, createValidProducer());
+    fs.writeFileSync(reviewerAPath, createValidReviewer('REVISE')); // Will produce NEEDS_WORK
+    fs.writeFileSync(reviewerBPath, createValidReviewer('APPROVE'));
+
+    decideAndPersist({
+      runDir: tmp,
+      stageName: 'implement',
+      stageDir,
+      decisionPath,
+      scorecardPath,
+      producerPath,
+      reviewerAPath,
+      reviewerBPath,
+      globalReviewerPath: null,
+      state: { ...createMockState(), specPath },
+    });
+
+    const decision = fs.readFileSync(decisionPath, 'utf8');
+    // For NEEDS_WORK outcome, nextRunRecommendation should be present
+    assert.ok(/## Next Run Recommendation/.test(decision), 'must have Next Run Recommendation section');
+    assert.ok(/Type:/.test(decision), 'must have recommendation type');
+  } finally {
+    cleanupTempDir(tmp);
+  }
+});
+
+test('persistence: nextRunRecommendation written to scorecard.json', () => {
+  const tmp = createTempDir();
+  try {
+    const stageDir = path.join(tmp, 'stages', 'implement');
+    fs.mkdirSync(stageDir, { recursive: true });
+
+    const specPath = createTempSpec(tmp);
+    const producerPath = path.join(stageDir, 'producer.md');
+    const reviewerAPath = path.join(stageDir, 'reviewer-a.md');
+    const reviewerBPath = path.join(stageDir, 'reviewer-b.md');
+    const decisionPath = path.join(stageDir, 'decision.md');
+    const scorecardPath = path.join(stageDir, 'scorecard.json');
+
+    fs.writeFileSync(producerPath, createValidProducer());
+    fs.writeFileSync(reviewerAPath, createValidReviewer('REVISE'));
+    fs.writeFileSync(reviewerBPath, createValidReviewer('APPROVE'));
+
+    decideAndPersist({
+      runDir: tmp,
+      stageName: 'implement',
+      stageDir,
+      decisionPath,
+      scorecardPath,
+      producerPath,
+      reviewerAPath,
+      reviewerBPath,
+      globalReviewerPath: null,
+      state: { ...createMockState(), specPath },
+    });
+
+    const scorecard = JSON.parse(fs.readFileSync(scorecardPath, 'utf8'));
+    assert.ok(scorecard.nextRunRecommendation !== undefined, 'scorecard must have nextRunRecommendation field');
+    assert.ok(scorecard.nextRunRecommendation !== null, 'nextRunRecommendation should not be null');
+    assert.ok(scorecard.nextRunRecommendation.type, 'nextRunRecommendation must have type');
+    assert.ok(Array.isArray(scorecard.nextRunRecommendation.reasons), 'nextRunRecommendation must have reasons array');
+  } finally {
+    cleanupTempDir(tmp);
+  }
+});
+
+test('acceptance checklist: file exists and has correct content', () => {
+  const repoRoot = path.resolve(__dirname, '..', '..', '..');
+  const checklistPath = path.resolve(repoRoot, 'docs/design/workflow-v1-acceptance-checklist.md');
+  assert.ok(fs.existsSync(checklistPath), 'acceptance checklist file must exist');
+  
+  const content = fs.readFileSync(checklistPath, 'utf8');
+  // Check for ASCII-safe markers instead of emoji
+  assert.ok(content.includes('[PASS]'), 'must have ASCII-friendly PASS markers');
+  assert.ok(content.includes('[HIGH]'), 'must have ASCII-friendly HIGH risk markers');
+  assert.ok(content.includes('[MED]'), 'must have ASCII-friendly MED risk markers');
+  // Check for key content
+  assert.ok(content.includes('nextRunRecommendation'), 'must mention nextRunRecommendation');
+  assert.ok(content.includes('outputQuality'), 'must mention outputQuality');
 });
