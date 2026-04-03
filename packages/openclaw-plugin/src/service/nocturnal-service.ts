@@ -393,7 +393,7 @@ export function executeNocturnalReflection(
       diagnostics,
     };
   }
-  diagnostics.idle = { isIdle: true, mostRecentActivityAt: 0, idleForMs: 0, activeSessionCount: 0, abandonedSessionIds: [], trajectoryGuardrailConfirmsIdle: true, reason: 'preflight passed' };
+  diagnostics.idle = { isIdle: true, mostRecentActivityAt: 0, idleForMs: 0, userActiveSessions: 0, abandonedSessionIds: [], trajectoryGuardrailConfirmsIdle: true, reason: 'preflight passed' };
 
   // -------------------------------------------------------------------------
   // Step 4: Record run start (begin cooldown window)
@@ -812,7 +812,7 @@ async function executeNocturnalReflectionWithAdapter(
       diagnostics,
     };
   }
-  diagnostics.idle = { isIdle: true, mostRecentActivityAt: 0, idleForMs: 0, activeSessionCount: 0, abandonedSessionIds: [], trajectoryGuardrailConfirmsIdle: true, reason: 'preflight passed' };
+  diagnostics.idle = { isIdle: true, mostRecentActivityAt: 0, idleForMs: 0, userActiveSessions: 0, abandonedSessionIds: [], trajectoryGuardrailConfirmsIdle: true, reason: 'preflight passed' };
 
   // Step 3: Record run start
   void recordRunStart(stateDir, selectedPrincipleId).catch((err) => {
