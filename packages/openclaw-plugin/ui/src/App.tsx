@@ -513,32 +513,32 @@ function OverviewPage() {
       {health && (
         <section className="kpi-grid" style={{ marginBottom: 'var(--space-5)' }}>
           <article className="panel kpi" style={{ borderLeft: `3px solid ${health.gfi.current >= health.gfi.threshold ? 'var(--error)' : 'var(--success)'}` }}>
-            <span className="label">🟢 GFI 疲劳指数</span>
+            <span className="label"><svg width="10" height="10" viewBox="0 0 10 10" style={{marginRight: '6px', verticalAlign: 'middle'}}><circle cx="5" cy="5" r="5" fill={health.gfi.current >= health.gfi.threshold ? 'var(--error)' : 'var(--success)'}/></svg>GFI 疲劳指数</span>
             <span className="value">{health.gfi.current}</span>
             <span>阈值: {health.gfi.threshold} | 今日峰值: {health.gfi.peakToday}</span>
           </article>
           <article className="panel kpi" style={{ borderLeft: `3px solid ${health.painFlag.active ? 'var(--warning)' : 'var(--success)'}` }}>
-            <span className="label">🟡 PainFlag</span>
+            <span className="label"><svg width="10" height="10" viewBox="0 0 10 10" style={{marginRight: '6px', verticalAlign: 'middle'}}><circle cx="5" cy="5" r="5" fill={health.painFlag.active ? 'var(--warning)' : 'var(--success)'}/></svg>PainFlag</span>
             <span className="value">{health.painFlag.active ? '活跃' : '正常'}</span>
             <span>{health.painFlag.source ? `来源: ${health.painFlag.source}` : '无活跃痛点'}</span>
           </article>
           <article className="panel kpi" style={{ borderLeft: '3px solid var(--info)' }}>
-            <span className="label">🔵 Trust Stage</span>
+            <span className="label"><svg width="10" height="10" viewBox="0 0 10 10" style={{marginRight: '6px', verticalAlign: 'middle'}}><circle cx="5" cy="5" r="5" fill="var(--info)"/></svg>Trust Stage</span>
             <span className="value">{health.trust.stageLabel}</span>
             <span>Stage {health.trust.stage} | 分数: {health.trust.score}</span>
           </article>
           <article className="panel kpi" style={{ borderLeft: '3px solid var(--accent)' }}>
-            <span className="label">🟣 EP Tier</span>
+            <span className="label"><svg width="10" height="10" viewBox="0 0 10 10" style={{marginRight: '6px', verticalAlign: 'middle'}}><circle cx="5" cy="5" r="5" fill="var(--accent)"/></svg>EP Tier</span>
             <span className="value">{health.evolution.tier}</span>
             <span>积分: {health.evolution.points}</span>
           </article>
           <article className="panel kpi" style={{ borderLeft: '3px solid var(--success)' }}>
-            <span className="label">📊 原则总数</span>
+            <span className="label"><svg width="10" height="10" viewBox="0 0 10 10" style={{marginRight: '6px', verticalAlign: 'middle'}}><circle cx="5" cy="5" r="5" fill="var(--success)"/></svg>原则总数</span>
             <span className="value">{health.principles.candidate + health.principles.probation + health.principles.active + health.principles.deprecated}</span>
             <span>候: {health.principles.candidate} | 试: {health.principles.probation} | 活: {health.principles.active} | 废: {health.principles.deprecated}</span>
           </article>
           <article className="panel kpi" style={{ borderLeft: `3px solid ${health.queue.pending > 5 ? 'var(--warning)' : 'var(--success)'}` }}>
-            <span className="label">⏱️ 队列积压</span>
+            <span className="label"><svg width="10" height="10" viewBox="0 0 10 10" style={{marginRight: '6px', verticalAlign: 'middle'}}><circle cx="5" cy="5" r="5" fill={health.queue.pending > 5 ? 'var(--warning)' : 'var(--success)'}/></svg>队列积压</span>
             <span className="value">{health.queue.pending}</span>
             <span>待处理: {health.queue.pending} | 处理中: {health.queue.inProgress} | 已完成: {health.queue.completed}</span>
           </article>
