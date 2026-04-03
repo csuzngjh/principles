@@ -16,7 +16,7 @@
 
 ---
 
-# Principles Disciple: 进化智能体框架 (v1.7.8)
+# Principles Disciple: 进化智能体框架 (v1.8.1)
 
 > **可进化编程智能体框架 (Evolutionary Programming Agent Framework)**
 
