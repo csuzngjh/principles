@@ -103,7 +103,7 @@ describe('NocturnalService', () => {
       isIdle: true,
       mostRecentActivityAt: Date.now() - 2 * 60 * 60 * 1000, // 2 hours ago
       idleForMs: 2 * 60 * 60 * 1000,
-      activeSessionCount: 0,
+      userActiveSessions: 0,
       abandonedSessionIds: [],
       trajectoryGuardrailConfirmsIdle: true,
       reason: 'test override — workspace considered idle',
