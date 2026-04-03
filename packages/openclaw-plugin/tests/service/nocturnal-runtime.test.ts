@@ -54,7 +54,7 @@ describe('NocturnalRuntime', () => {
         it('should return isIdle=true when no sessions exist', () => {
             const result = checkWorkspaceIdle(workspaceDir);
             expect(result.isIdle).toBe(true);
-            expect(result.activeSessionCount).toBe(0);
+            expect(result.userActiveSessions).toBe(0);
             expect(result.abandonedSessionIds).toEqual([]);
             expect(result.reason).toContain('No active sessions');
         });
@@ -65,7 +65,7 @@ describe('NocturnalRuntime', () => {
 
             const result = checkWorkspaceIdle(workspaceDir, { idleThresholdMs: 30 * 60 * 1000 });
             expect(result.isIdle).toBe(false);
-            expect(result.activeSessionCount).toBe(1);
+            expect(result.userActiveSessions).toBe(1);
             expect(result.abandonedSessionIds).toEqual([]);
         });
 
@@ -93,7 +93,7 @@ describe('NocturnalRuntime', () => {
 
             expect(result.isIdle).toBe(true); // No active sessions, so idle
             expect(result.abandonedSessionIds).toContain('session-abandoned');
-            expect(result.activeSessionCount).toBe(0);
+            expect(result.userActiveSessions).toBe(0);
             expect(result.reason).toContain('abandoned session(s) ignored');
         });
 
@@ -115,7 +115,7 @@ describe('NocturnalRuntime', () => {
 
             expect(result.isIdle).toBe(false); // Recent activity 5 min ago
             expect(result.abandonedSessionIds).toContain('session-ancient');
-            expect(result.activeSessionCount).toBe(1);
+            expect(result.userActiveSessions).toBe(1);
         });
 
         it('should use trajectory timestamp as secondary guardrail', () => {
@@ -397,7 +397,7 @@ describe('NocturnalRuntime', () => {
 
             // Workspace should be considered idle (all sessions abandoned = effectively no sessions)
             expect(result.isIdle).toBe(true);
-            expect(result.activeSessionCount).toBe(0);
+            expect(result.userActiveSessions).toBe(0);
         });
 
         it('should not incorrectly block when there are abandoned AND active sessions', () => {
@@ -417,7 +417,7 @@ describe('NocturnalRuntime', () => {
 
             // Should NOT be idle because there's a recent active session
             expect(idleResult.isIdle).toBe(false);
-            expect(idleResult.activeSessionCount).toBe(1);
+            expect(idleResult.userActiveSessions).toBe(1);
             expect(idleResult.abandonedSessionIds).toContain('session-abandoned');
         });
 
