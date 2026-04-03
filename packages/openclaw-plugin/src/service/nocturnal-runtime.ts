@@ -95,8 +95,8 @@ export interface IdleCheckResult {
     mostRecentActivityAt: number;
     /** How long since the last activity (ms) */
     idleForMs: number;
-    /** Number of active (non-abandoned) sessions found */
-    activeSessionCount: number;
+    /** Number of active (non-abandoned) user sessions found */
+    userActiveSessions: number;
     /** List of abandoned session IDs (inactive > abandoned threshold) */
     abandonedSessionIds: string[];
     /** Whether trajectory guardrail also confirms idle */
@@ -234,14 +234,14 @@ export function checkWorkspaceIdle(
     // Separate active vs abandoned sessions
     const abandonedSessions: string[] = [];
     let mostRecentActivityAt = 0;
-    let activeSessionCount = 0;
+    let userActiveSessions = 0;
 
     for (const session of sessions) {
         const inactiveFor = now - session.lastActivityAt;
         if (inactiveFor > abandonedThresholdMs) {
             abandonedSessions.push(session.sessionId);
         } else {
-            activeSessionCount++;
+            userActiveSessions++;
             if (session.lastActivityAt > mostRecentActivityAt) {
                 mostRecentActivityAt = session.lastActivityAt;
             }
@@ -278,7 +278,7 @@ export function checkWorkspaceIdle(
         isIdle,
         mostRecentActivityAt,
         idleForMs,
-        activeSessionCount,
+        userActiveSessions,
         abandonedSessionIds: abandonedSessions,
         trajectoryGuardrailConfirmsIdle,
         reason,
@@ -523,7 +523,7 @@ export function checkPreflight(
         blockers.push(`Quota exhausted (${DEFAULT_MAX_RUNS_PER_WINDOW} runs per ${DEFAULT_QUOTA_WINDOW_MS / 3600000}h window)`);
     }
 
-    if (idle.abandonedSessionIds.length > 0 && idle.activeSessionCount === 0) {
+    if (idle.abandonedSessionIds.length > 0 && idle.userActiveSessions === 0) {
         // Only block if ALL sessions are abandoned (meaning workspace truly has no activity)
         // If some sessions are active, we trust the session-based idle check
     }
