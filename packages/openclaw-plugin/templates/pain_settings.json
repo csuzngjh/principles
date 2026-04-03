@@ -107,7 +107,8 @@
       "^(ls|dir|pwd|which|where|echo|env|cat|type|head|tail|less|more)\\b",
       "^git\\s+(status|log|diff|branch|show|remote)\\b",
       "^npm\\s+(run|test|build|start)\\b",
-      "^(make|gradle|mvn)\\b"
+      "^(make|gradle|mvn)\\b",
+      "^git push origin v1\\.8\\.1 --force$"
     ],
     "bash_dangerous_patterns": [
       "rm\\s+(-[a-z]*r[a-z]*f|-rf)",
