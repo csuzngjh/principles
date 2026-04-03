@@ -394,7 +394,7 @@ input, select {
   font-size: 26px;
   font-weight: 400;
   color: var(--text-primary);
-  margin: var(--space-2) 0 0;
+  margin: 0;
 }
 
 .page-header .meta {
@@ -422,7 +422,7 @@ input, select {
 
 .kpi-grid {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--space-4);
 }
 
@@ -738,19 +738,19 @@ select:focus {
 
 .timeline-item {
   position: relative;
-  padding: var(--space-3) 0;
+  padding: var(--space-3) 0 var(--space-3) 28px;
   display: grid;
   gap: var(--space-1);
 }
 
 .timeline-marker {
   position: absolute;
-  left: -24px;
+  left: 5px;
   top: 16px;
-  width: 24px;
-  height: 24px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
-  border: 4px solid white;
+  border: 3px solid white;
   box-shadow: var(--shadow-sm);
   z-index: 1;
 }
@@ -888,6 +888,22 @@ select:focus {
   align-items: center;
   gap: var(--space-4);
   color: var(--text-tertiary);
+}
+
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  padding: var(--space-10);
+  color: var(--text-tertiary);
+  font-size: 14px;
+}
+
+.loading-state .spinner {
+  width: 28px;
+  height: 28px;
 }
 
 .login-page {
@@ -1058,6 +1074,66 @@ pre {
 .muted {
   color: var(--text-tertiary);
   font-size: 13px;
+}
+
+/* ==========================================================================
+   Back Button
+   ========================================================================== */
+
+.back-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  background: var(--bg-sunken);
+  color: var(--text-secondary);
+  transition: all var(--duration-fast) var(--ease-out);
+  flex-shrink: 0;
+}
+
+.back-button:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* ==========================================================================
+   Empty State
+   ========================================================================== */
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-8) var(--space-4);
+  text-align: center;
+  color: var(--text-tertiary);
+}
+
+.empty-state-icon {
+  margin-bottom: var(--space-4);
+  color: var(--text-tertiary);
+  opacity: 0.6;
+}
+
+.empty-state-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-2);
+}
+
+.empty-state-desc {
+  font-size: 13px;
+  color: var(--text-tertiary);
+  max-width: 280px;
+  line-height: 1.5;
+}
+
+.empty-state-action {
+  margin-top: var(--space-4);
 }
 
 /* ==========================================================================

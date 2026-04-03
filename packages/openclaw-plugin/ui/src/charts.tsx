@@ -1,6 +1,66 @@
 import React from 'react';
 
 /**
+ * StatusBadge - 统一颜色的状态徽章
+ */
+
+type BadgeVariant = 'success' | 'warning' | 'error' | 'info' | 'neutral';
+
+interface StatusBadgeProps {
+  variant: BadgeVariant;
+  children: React.ReactNode;
+  className?: string;
+}
+
+const BADGE_COLORS: Record<BadgeVariant, { bg: string; text: string }> = {
+  success: { bg: 'rgba(74, 124, 111, 0.12)', text: 'var(--success)' },
+  warning: { bg: 'rgba(184, 134, 11, 0.12)', text: 'var(--warning)' },
+  error: { bg: 'rgba(196, 92, 74, 0.12)', text: 'var(--error)' },
+  info: { bg: 'rgba(91, 139, 160, 0.12)', text: 'var(--info)' },
+  neutral: { bg: 'var(--bg-sunken)', text: 'var(--text-secondary)' },
+};
+
+export function StatusBadge({ variant, children, className = '' }: StatusBadgeProps) {
+  const { bg, text } = BADGE_COLORS[variant];
+  return (
+    <span
+      className={`badge ${variant !== 'neutral' ? variant : ''} ${className}`}
+      style={variant !== 'neutral' ? undefined : { background: bg, color: text }}
+    >
+      {children}
+    </span>
+  );
+}
+
+/**
+ * EmptyState - 空状态插图组件
+ */
+
+interface EmptyStateProps {
+  title: string;
+  description?: string;
+  action?: React.ReactNode;
+}
+
+export function EmptyState({ title, description, action }: EmptyStateProps) {
+  return (
+    <div className="empty-state">
+      <div className="empty-state-icon">
+        <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="8" y="12" width="32" height="24" rx="3" stroke="currentColor" strokeWidth="1.5" strokeDasharray="3 2"/>
+          <path d="M16 20h16M16 26h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+          <circle cx="38" cy="10" r="6" fill="var(--bg-sunken)" stroke="currentColor" strokeWidth="1.5"/>
+          <path d="M36 10h4M38 8v4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+        </svg>
+      </div>
+      <p className="empty-state-title">{title}</p>
+      {description && <p className="empty-state-desc">{description}</p>}
+      {action && <div className="empty-state-action">{action}</div>}
+    </div>
+  );
+}
+
+/**
  * Sparkline - 轻量级迷你趋势图
  * 用于 KPI 卡片展示趋势
  */
@@ -429,7 +489,7 @@ interface GroupedBarChartProps {
 export function GroupedBarChart({
   data,
   colors = ['var(--accent)', 'var(--earth-tan)'],
-  width = 200,
+  width = 280,
   height = 60,
   barWidth = 4,
   groupGap = 8,
@@ -448,9 +508,10 @@ export function GroupedBarChart({
   return (
     <svg
       className="grouped-bar-chart"
-      width={width}
+      width="100%"
       height={height}
       viewBox={`0 0 ${width} ${height}`}
+      preserveAspectRatio="xMidYMid meet"
     >
       {data.map((group, groupIndex) => {
         const groupX = startX + groupIndex * (groupWidth + groupGap);
