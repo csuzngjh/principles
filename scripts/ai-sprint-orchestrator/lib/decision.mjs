@@ -156,25 +156,30 @@ export function extractContractItems(text) {
     const deliverable = block.replace(/^-\s*/, '').trim();
     // Primary format: "<description> status: DONE|PARTIAL|TODO"
     let statusMatch = deliverable.match(/status:\s*(DONE|PARTIAL|TODO)/i);
-    // Fallback 1: "<key>: DONE — <description>" (agent deviation with em dash)
+    let statusGroup = 1; // group index for DONE/PARTIAL/TODO capture
+    // Fallback 1: "<key>: DONE — <description>" — greedy .+ captures name,
+    // group 2 captures status keyword.
     if (!statusMatch) {
-      statusMatch = deliverable.match(/:\s*(DONE|PARTIAL|TODO)\s*[—–-]/i);
+      statusMatch = deliverable.match(/^(.+):\s*(DONE|PARTIAL|TODO)\s*(?:[—–-].*)?$/i);
+      if (statusMatch) statusGroup = 2;
     }
-    // Fallback 2: "<key>: DONE" (agent deviation, no description after)
+    // Fallback 2: "<key>: DONE" (no description after)
     if (!statusMatch) {
-      statusMatch = deliverable.match(/:\s*(DONE|PARTIAL|TODO)\s*$/i);
+      statusMatch = deliverable.match(/^(.+):\s*(DONE|PARTIAL|TODO)\s*$/i);
+      if (statusMatch) statusGroup = 2;
     }
     // Extract deliverable name
     let cleaned = deliverable;
     if (statusMatch && statusMatch[0].startsWith('status:')) {
       cleaned = deliverable.replace(/\s*status:\s*\w+\s*/i, '').replace(/evidence:\s*"[^"]*"/i, '').trim();
     } else if (statusMatch) {
-      const nameMatch = deliverable.match(/^(.+?):\s*(?:DONE|PARTIAL|TODO)/i);
+      // Fallback: group 1 captures everything before the last colon
+      const nameMatch = deliverable.match(/^(.+):\s*(?:DONE|PARTIAL|TODO)/i);
       if (nameMatch) cleaned = nameMatch[1].trim();
     }
     items.push({
       deliverable: cleaned,
-      status: statusMatch ? statusMatch[1].toUpperCase() : 'UNKNOWN',
+      status: statusMatch ? statusMatch[statusGroup].toUpperCase() : 'UNKNOWN',
     });
   }
   return items;

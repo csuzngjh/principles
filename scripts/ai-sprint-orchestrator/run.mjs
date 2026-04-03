@@ -14,9 +14,17 @@ const repoRoot = path.resolve(__dirname, '..', '..');
 const sprintRoot = path.join(repoRoot, 'ops', 'ai-sprints');
 // Resolve acpx from npm global bin — avoids ENOENT when Node spawns with shell:false
 const acpxBin = (() => {
-  const r = spawnSync('which', ['acpx'], { encoding: 'utf8', shell: true });
+  const r = spawnSync('which', ['acpx'], { encoding: 'utf8' });
   return r.status === 0 ? r.stdout.trim() : 'acpx';
 })();
+
+// On Linux, ignore SIGHUP so SSH disconnect doesn't kill the orchestrator.
+// Registered once at module load — covers all code paths including setup
+// before the first agent spawn. Child processes are protected separately
+// via `detached: true` in spawn options.
+if (process.platform !== 'win32') {
+  process.on('SIGHUP', () => { /* ignored — survive SSH disconnect */ });
+}
 
 function parseArgs(argv) {
   const args = {};
@@ -173,12 +181,6 @@ function runAgent({ cwd, agent, model, prompt, timeoutSeconds = 1800, failLogPat
   // On Windows, avoid os.tmpdir() (short ~ paths) and non-existent branchWorkspace dirs.
   const promptFile = path.join(promptDir, `.ai-sprint-prompt-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`);
   fs.writeFileSync(promptFile, prompt, 'utf8');
-
-  // On Linux, ignore SIGHUP so SSH disconnect doesn't kill the orchestrator
-  // or its child agent processes.
-  if (process.platform !== 'win32') {
-    process.on('SIGHUP', () => { /* ignored — survive SSH disconnect */ });
-  }
 
   let result;
   try {
@@ -729,8 +731,16 @@ function terminateProcessTree(pid, { runDir = null, label = 'process' } = {}) {
       if (runDir) appendTimeline(runDir, `${success ? 'Terminated' : 'Failed to terminate'} ${label} process tree pid=${pid}${output ? ` (${output})` : ''}`);
       return success;
     }
-    process.kill(pid, 'SIGKILL');
-    if (runDir) appendTimeline(runDir, `Terminated ${label} pid=${pid}`);
+    // Kill entire process group — negative pid sends signal to all processes
+    // in the same process group. Fallback to direct pid kill if group kill
+    // fails (e.g., process group already destroyed).
+    try {
+      process.kill(-pid, 'SIGKILL');
+      if (runDir) appendTimeline(runDir, `Terminated ${label} process group pgid=${pid}`);
+    } catch (groupErr) {
+      process.kill(pid, 'SIGKILL');
+      if (runDir) appendTimeline(runDir, `Terminated ${label} pid=${pid} (group kill failed: ${groupErr.message})`);
+    }
     return true;
   } catch (err) {
     if (runDir) appendTimeline(runDir, `Failed to terminate ${label} pid=${pid}: ${err.message}`);
