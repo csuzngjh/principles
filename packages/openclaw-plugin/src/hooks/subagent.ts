@@ -5,6 +5,9 @@ import { WorkspaceContext } from '../core/workspace-context.js';
 import { empathyObserverManager, isEmpathyObserverSession, type EmpathyObserverApi } from '../service/empathy-observer-manager.js';
 import { acquireQueueLock, type EvolutionQueueItem } from '../service/evolution-worker.js';
 import { recordEvolutionSuccess } from '../core/evolution-engine.js';
+import { WorkflowStore } from '../service/subagent-workflow/workflow-store.js';
+
+const HELPER_WORKFLOW_SESSION_PREFIX = 'agent:main:subagent:workflow-';
 
 const COMPLETION_RETRY_DELAY_MS = 250;
 const COMPLETION_MAX_RETRIES = 3;
@@ -175,6 +178,33 @@ export async function handleSubagentEnded(
     if (isEmpathyObserverSession(targetSessionKey || '')) {
         await empathyObserverManager.reap(ctx.api, targetSessionKey!, workspaceDir);
         return;
+    }
+
+    // ── Helper Workflow Lifecycle Notification (PR2.1) ──
+    // When a helper workflow's subagent ends, notify the workflow manager
+    // This is a fallback recovery path, not the primary completion contract
+    if (targetSessionKey?.startsWith(HELPER_WORKFLOW_SESSION_PREFIX)) {
+        try {
+            const store = new WorkflowStore({ workspaceDir });
+            const workflow = store.getWorkflowByChildSession(targetSessionKey);
+            if (workflow && workflow.state !== 'completed' && workflow.state !== 'terminal_error' && workflow.state !== 'expired') {
+                logger.info(`[PD:Subagent] Helper workflow lifecycle event: workflowId=${workflow.workflow_id}, outcome=${outcome}`);
+                // Map outcome to notifyLifecycleEvent expected format
+                const mappedOutcome = outcome === 'deleted' ? 'deleted' :
+                                      outcome === 'killed' ? 'killed' :
+                                      outcome === 'reset' ? 'reset' :
+                                      outcome === 'error' ? 'error' :
+                                      outcome === 'timeout' ? 'timeout' : 'ok';
+                // Use WorkflowStore directly to update state (simpler than creating manager instance)
+                store.recordEvent(workflow.workflow_id, 'subagent_ended', workflow.state, workflow.state, `subagent ended with outcome: ${outcome}`, { outcome: mappedOutcome });
+                store.touchWorkflow(workflow.workflow_id);
+                store.dispose();
+                return;
+            }
+            store.dispose();
+        } catch (e) {
+            logger.warn(`[PD:Subagent] Failed to notify helper workflow lifecycle: ${String(e)}`);
+        }
     }
 
     const config = wctx.config;
