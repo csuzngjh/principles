@@ -130,7 +130,8 @@ export class EvolutionLogger {
           createdAt: entry.timestamp,
         });
       } catch (err) {
-        // 数据库写入失败不影响主流程
+        // Database write failure doesn't affect main flow, but log for diagnostics
+        // eslint-disable-next-line no-console
         console.error(`[EvolutionLogger] Failed to write to trajectory: ${String(err)}`);
       }
     }
@@ -339,7 +340,9 @@ export function getEvolutionLogger(
  * 清理指定 workspace 的 logger 缓存
  */
 export function disposeEvolutionLogger(workspaceDir: string): boolean {
-  return loggerCache.delete(workspaceDir);
+  const plain = loggerCache.delete(workspaceDir);
+  const withTrajectory = loggerCache.delete(`${workspaceDir}::with_trajectory`);
+  return plain || withTrajectory;
 }
 
 /**

@@ -133,8 +133,8 @@ function safeLog(
         if (api?.logger && typeof api.logger[level] === 'function') {
             api.logger[level](message);
         }
-    } catch (e) {
-        console.error(`[PD:DeepReflect] Logging failed: ${String(e)}`);
+    } catch {
+        // Never recurse on logger failures — one-time fallback only
     }
 }
 

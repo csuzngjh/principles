@@ -404,15 +404,15 @@ Hardware tiers:
 
               proc.on('error', (err) => {
                 clearTimeout(timer);
-                reject(new Error(`Trainer spawn failed: ${err.message}`));
+                reject(new Error(`Trainer spawn failed: ${err instanceof Error ? err.message : String(err)}`));
               });
             });
           }
-        } catch (err: any) {
+        } catch (err: unknown) {
           return {
             text: zh
-              ? `❌ 训练执行失败: ${err.message}\n\n训练 Run ID: ${createResult.trainRunId}\n请检查 trainer 输出或使用 dry-run 后端重试。`
-              : `❌ Trainer execution failed: ${err.message}\n\nTraining Run ID: ${createResult.trainRunId}\nCheck trainer output or retry with --backend=dry-run.`,
+              ? `❌ 训练执行失败: ${err instanceof Error ? err.message : String(err)}\n\n训练 Run ID: ${createResult.trainRunId}\n请检查 trainer 输出或使用 dry-run 后端重试。`
+              : `❌ Trainer execution failed: ${err instanceof Error ? err.message : String(err)}\n\nTraining Run ID: ${createResult.trainRunId}\nCheck trainer output or retry with --backend=dry-run.`,
           };
         } finally {
           // Clean up spec file
@@ -430,11 +430,11 @@ Hardware tiers:
             trainRunId: createResult.trainRunId,
             result: trainerResult,
           });
-        } catch (err: any) {
+        } catch (err: unknown) {
           return {
             text: zh
-              ? `❌ 结果导入失败: ${err.message}`
-              : `❌ Result import failed: ${err.message}`,
+              ? `❌ 结果导入失败: ${err instanceof Error ? err.message : String(err)}`
+              : `❌ Result import failed: ${err instanceof Error ? err.message : String(err)}`,
           };
         }
 
@@ -601,11 +601,11 @@ Next steps:
           trainRunId: run.trainRunId,
           result,
         });
-      } catch (err: any) {
+      } catch (err: unknown) {
         return {
           text: zh
-            ? `❌ 导入失败: ${err.message}`
-            : `❌ Import failed: ${err.message}`,
+            ? `❌ 导入失败: ${err instanceof Error ? err.message : String(err)}`
+            : `❌ Import failed: ${err instanceof Error ? err.message : String(err)}`,
         };
       }
 
@@ -762,13 +762,13 @@ Next steps:
           } catch {
             benchmarkError = `Failed to parse benchmark output: ${stdout.substring(0, 200)}`;
           }
-        } catch (err: any) {
+        } catch (err: unknown) {
           // execSync throws on non-zero exit code; stdout may contain partial data
-          const stdout = (err.stdout as string) ?? '';
+          const stdout = ((err as { stdout?: string }).stdout) ?? '';
           try {
             benchmarkResult = JSON.parse(stdout.trim());
           } catch {
-            benchmarkError = `Benchmark failed: ${err.message}. stdout: ${stdout.substring(0, 200)}`;
+            benchmarkError = `Benchmark failed: ${err instanceof Error ? err.message : String(err)}. stdout: ${stdout.substring(0, 200)}`;
           }
         }
 
@@ -844,11 +844,11 @@ Next steps:
 1. Evaluate promotion: /nocturnal-rollout evaluate-promotion ${checkpointId}
 2. Bind deployment: /nocturnal-rollout bind ${checkpointId} --profile=local-reader`,
         };
-      } catch (err: any) {
+      } catch (err: unknown) {
         return {
           text: zh
-            ? `❌ 附加评估失败: ${err.message}`
-            : `❌ Attach eval failed: ${err.message}`,
+            ? `❌ 附加评估失败: ${err instanceof Error ? err.message : String(err)}`
+            : `❌ Attach eval failed: ${err instanceof Error ? err.message : String(err)}`,
         };
       }
     }
@@ -992,11 +992,11 @@ Failing: ${stats.failingEvals}`,
         ? `未知子命令: ${subcommand}。运行 /nocturnal-train help 查看帮助。`
         : `Unknown subcommand: ${subcommand}. Run /nocturnal-train help for usage.`,
     };
-  } catch (err: any) {
+  } catch (err: unknown) {
     return {
       text: zh
-        ? `❌ 命令失败: ${err.message}`
-        : `❌ Command failed: ${err.message}`,
+        ? `❌ 命令失败: ${err instanceof Error ? err.message : String(err)}`
+        : `❌ Command failed: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
 }

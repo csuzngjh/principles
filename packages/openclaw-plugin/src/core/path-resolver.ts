@@ -95,6 +95,7 @@ function findConfigFile(): string | null {
     return null;
 }
 
+/* eslint-disable no-console */
 function loadConfigFromFile(): PDConfig | null {
     const configPath = findConfigFile();
     if (!configPath) {
@@ -111,6 +112,7 @@ function loadConfigFromFile(): PDConfig | null {
         return null;
     }
 }
+/* eslint-enable no-console */
 
 export class PathResolver {
     private static extensionRoot: string | null = null;
@@ -154,7 +156,7 @@ export class PathResolver {
         const fullMsg = `${prefix} ${msg}`;
         
         if (process.env.DEBUG === 'true') {
-            console.debug(fullMsg);
+            this.logger?.debug?.(fullMsg);
         }
         
         switch (level) {
@@ -162,13 +164,13 @@ export class PathResolver {
                 this.logger?.debug?.(fullMsg);
                 break;
             case 'info':
-                this.logger?.info?.(fullMsg) || console.log(fullMsg);
+                this.logger?.info?.(fullMsg);
                 break;
             case 'warn':
-                this.logger?.warn?.(fullMsg) || console.warn(fullMsg);
+                this.logger?.warn?.(fullMsg);
                 break;
             case 'error':
-                this.logger?.error?.(fullMsg) || console.error(fullMsg);
+                this.logger?.error?.(fullMsg);
                 break;
         }
     }

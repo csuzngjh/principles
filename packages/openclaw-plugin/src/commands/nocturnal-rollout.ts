@@ -315,11 +315,11 @@ ${promotion.state === 'shadow_ready'
               : 'Waiting for further review.'}
 ${promotion.shadowStartedAt ? `Shadow started: ${new Date(promotion.shadowStartedAt).toLocaleString()}` : ''}`,
         };
-      } catch (err: any) {
+      } catch (err: unknown) {
         return {
           text: zh
-            ? `❌ 晋升失败: ${err.message}`
-            : `❌ Advance promotion failed: ${err.message}`,
+            ? `❌ 晋升失败: ${err instanceof Error ? err.message : String(err)}`
+            : `❌ Advance promotion failed: ${err instanceof Error ? err.message : String(err)}`,
         };
       }
     }
@@ -358,11 +358,11 @@ Next steps:
 1. Enable routing: /nocturnal-rollout enable-routing ${profile}
 2. Or keep disabled for testing`,
         };
-      } catch (err: any) {
+      } catch (err: unknown) {
         return {
           text: zh
-            ? `❌ 绑定失败: ${err.message}`
-            : `❌ Bind failed: ${err.message}`,
+            ? `❌ 绑定失败: ${err instanceof Error ? err.message : String(err)}`
+            : `❌ Bind failed: ${err instanceof Error ? err.message : String(err)}`,
         };
       }
     }
@@ -385,11 +385,11 @@ Profile: ${profile}
 Checkpoint: ${deployment.activeCheckpointId?.substring(0, 8) || 'none'}...
 Routing: ${deployment.routingEnabled ? 'Enabled' : 'Disabled'}`,
         };
-      } catch (err: any) {
+      } catch (err: unknown) {
         return {
           text: zh
-            ? `❌ 启用路由失败: ${err.message}`
-            : `❌ Enable routing failed: ${err.message}`,
+            ? `❌ 启用路由失败: ${err instanceof Error ? err.message : String(err)}`
+            : `❌ Enable routing failed: ${err instanceof Error ? err.message : String(err)}`,
         };
       }
     }
@@ -416,11 +416,11 @@ Routing: ${deployment.routingEnabled ? 'Enabled' : 'Disabled'}
 
 Note: After disabling routing, traffic for this profile will return to the main agent.`,
         };
-      } catch (err: any) {
+      } catch (err: unknown) {
         return {
           text: zh
-            ? `❌ 禁用路由失败: ${err.message}`
-            : `❌ Disable routing failed: ${err.message}`,
+            ? `❌ 禁用路由失败: ${err instanceof Error ? err.message : String(err)}`
+            : `❌ Disable routing failed: ${err instanceof Error ? err.message : String(err)}`,
         };
       }
     }
@@ -446,11 +446,11 @@ New Checkpoint: ${deployment.activeCheckpointId?.substring(0, 8) || 'none'}...
 Previous Checkpoint: ${deployment.previousCheckpointId?.substring(0, 8) || 'none'}...
 Routing: ${deployment.routingEnabled ? 'Enabled' : 'Disabled'}`,
         };
-      } catch (err: any) {
+      } catch (err: unknown) {
         return {
           text: zh
-            ? `❌ 回滚失败: ${err.message}`
-            : `❌ Rollback failed: ${err.message}`,
+            ? `❌ 回滚失败: ${err instanceof Error ? err.message : String(err)}`
+            : `❌ Rollback failed: ${err instanceof Error ? err.message : String(err)}`,
         };
       }
     }
@@ -754,11 +754,11 @@ Completed At: ${observation.completedAt}`,
         ? `未知子命令: ${subcommand}。运行 /nocturnal-rollout help 查看帮助。`
         : `Unknown subcommand: ${subcommand}. Run /nocturnal-rollout help for usage.`,
     };
-  } catch (err: any) {
+  } catch (err: unknown) {
     return {
       text: zh
-        ? `❌ 命令失败: ${err.message}`
-        : `❌ Command failed: ${err.message}`,
+        ? `❌ 命令失败: ${err instanceof Error ? err.message : String(err)}`
+        : `❌ Command failed: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
 }
