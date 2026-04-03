@@ -264,7 +264,12 @@ function Shell({ children }: { children: React.ReactNode }) {
 }
 
 function Loading() {
-  return <div className="panel muted">Loading...</div>;
+  return (
+    <div className="loading-state">
+      <div className="spinner"></div>
+      <span>加载中...</span>
+    </div>
+  );
 }
 
 function ErrorState({ error }: { error: string }) {

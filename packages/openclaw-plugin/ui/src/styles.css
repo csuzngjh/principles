@@ -832,6 +832,22 @@ select:focus {
   color: var(--text-tertiary);
 }
 
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  padding: var(--space-10);
+  color: var(--text-tertiary);
+  font-size: 14px;
+}
+
+.loading-state .spinner {
+  width: 28px;
+  height: 28px;
+}
+
 .login-page {
   min-height: 100vh;
   display: flex;
