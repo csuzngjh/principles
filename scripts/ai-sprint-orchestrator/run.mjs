@@ -742,9 +742,140 @@ function cleanupRecordedRoleProcesses(paths, runDir) {
   }
 }
 
-function readRoleOutput({ reportPath, stdout }) {
+/**
+ * ISOLATION ARTIFACT ALLOWLIST
+ * Only these files can be collected from isolation directory to stage directory.
+ * This prevents accidental collection of logs, temp files, or other runtime artifacts.
+ */
+export const ISOLATION_COLLECT_ALLOWLIST = [
+  // Report files - the primary artifacts we want to collect
+  'report.md',
+  // Stage-specific report filenames
+  'producer.md',
+  'reviewer-a.md',
+  'reviewer-b.md',
+  'global-reviewer.md',
+];
+
+/**
+ * Check if a filename is allowed to be collected from isolation directory.
+ * @param {string} filename - The filename to check (basename only, no path)
+ * @returns {boolean} True if the file is in the allowlist
+ */
+export function isIsolationCollectAllowed(filename) {
+  return ISOLATION_COLLECT_ALLOWLIST.includes(filename);
+}
+
+/**
+ * Get the isolation directory path for a specific run/stage/role.
+ * This is the canonical isolation directory format: tmp/sprint-agent/{runId}/{stage}-{role}/
+ *
+ * @param {string} runId - The unique run identifier (e.g., "2026-04-02T14-24-34-009Z-task-name")
+ * @param {string} stageName - The stage name (e.g., "implement", "verify")
+ * @param {string} role - The role name (e.g., "producer", "reviewer_a")
+ * @returns {string} The isolation directory path
+ */
+export function getIsolationDir(runId, stageName, role) {
+  const roleDir = `${stageName}-${role}`;
+  return path.join(repoRoot, 'tmp', 'sprint-agent', runId, roleDir);
+}
+
+/**
+ * Find report in iflow isolation directory.
+ * iflow writes to tmp/sprint-agent/{runId}/{stage}-{role}/{report}.md
+ *
+ * IMPORTANT: Uses runId directly for isolation lookup, not fragile timestamp extraction.
+ * This ensures different runs have unique isolation directories and prevents cross-contamination.
+ *
+ * @param {object} options
+ * @param {string} options.runId - The unique run identifier
+ * @param {string} options.stageName - The stage name
+ * @param {string} options.role - The role name
+ * @param {string} options.reportFilename - The report filename to look for
+ * @returns {string|null} The isolation report path if found and valid, null otherwise
+ */
+export function findIsolationReport({ runId, stageName, role, reportFilename }) {
+  if (!runId) return null;
+
+  const isolationDir = getIsolationDir(runId, stageName, role);
+  const isolationReportPath = path.join(isolationDir, reportFilename);
+
+  if (fileExists(isolationReportPath)) {
+    const content = fs.readFileSync(isolationReportPath, 'utf8').trim();
+    // Only return if it contains actual report content (not just session log)
+    if (content && (content.includes('## VERDICT') || content.includes('## SUMMARY'))) {
+      return isolationReportPath;
+    }
+  }
+  return null;
+}
+
+/**
+ * Collect allowed artifacts from isolation directory to stage directory.
+ * Only files in ISOLATION_COLLECT_ALLOWLIST will be collected.
+ *
+ * @param {object} options
+ * @param {string} options.runId - The unique run identifier
+ * @param {string} options.stageName - The stage name
+ * @param {string} options.role - The role name
+ * @param {string} options.stageDir - The stage directory to collect to
+ * @param {string} options.reportFilename - The expected report filename
+ * @param {string} options.runDir - The run directory (for timeline logging)
+ * @returns {{collected: string[], skipped: string[], isolationReportPath: string|null}} Lists of collected and skipped files, plus the isolation report path if valid
+ */
+export function collectIsolationArtifacts({ runId, stageName, role, stageDir, reportFilename, runDir }) {
+  const result = { collected: [], skipped: [], isolationReportPath: null };
+
+  if (!runId) return result;
+
+  const isolationDir = getIsolationDir(runId, stageName, role);
+  if (!fileExists(isolationDir)) return result;
+
+  // Only collect the specific report file if it's in the allowlist
+  if (!isIsolationCollectAllowed(reportFilename)) {
+    result.skipped.push(reportFilename);
+    return result;
+  }
+
+  const isolationReportPath = path.join(isolationDir, reportFilename);
+  const stageReportPath = path.join(stageDir, reportFilename);
+
+  if (!fileExists(isolationReportPath)) return result;
+
+  const isolationContent = fs.readFileSync(isolationReportPath, 'utf8').trim();
+  const stageContent = fileExists(stageReportPath) ? fs.readFileSync(stageReportPath, 'utf8').trim() : '';
+
+  // Only collect if isolation report has actual content and stage report is missing or empty
+  const isolationHasReport = isolationContent && (isolationContent.includes('## VERDICT') || isolationContent.includes('## SUMMARY'));
+  const stageHasReport = stageContent && (stageContent.includes('## VERDICT') || stageContent.includes('## SUMMARY'));
+
+  if (isolationHasReport) {
+    result.isolationReportPath = isolationReportPath; // Always return path when valid content exists
+    if (!stageHasReport) {
+      writeText(stageReportPath, `${isolationContent}\n`);
+      appendTimeline(runDir, `Collected isolation artifact: ${reportFilename}`);
+      result.collected.push(reportFilename);
+    } else {
+      result.skipped.push(reportFilename);
+    }
+  } else {
+    result.skipped.push(reportFilename);
+  }
+
+  return result;
+}
+
+function readRoleOutput({ reportPath, stdout, isolationReportPath = null }) {
+  // First try the expected report path
   if (fileExists(reportPath)) {
     const report = fs.readFileSync(reportPath, 'utf8').trim();
+    if (report) {
+      return report;
+    }
+  }
+  // Fallback to isolation directory if provided
+  if (isolationReportPath && fileExists(isolationReportPath)) {
+    const report = fs.readFileSync(isolationReportPath, 'utf8').trim();
     if (report) {
       return report;
     }
@@ -784,7 +915,35 @@ function detectProtectedWriteViolation(files, snapshot) {
   return null;
 }
 
-function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecardPath, producerPath, reviewerAPath, reviewerBPath, globalReviewerPath, state, reviewerTimeouts = null, reviewerViolations = null }) {
+/**
+ * Format a role-level validation result for decision.md.
+ * @param {string} roleName - Display name (e.g., "Producer", "Reviewer A")
+ * @param {{valid: boolean, missingSections?: string[], invalidFields?: string[], errorSummary?: string|null}} roleResult
+ * @returns {string[]} Lines for decision.md
+ */
+export function formatRoleValidation(roleName, roleResult) {
+  if (!roleResult) return [];
+  const lines = [];
+  const status = roleResult.valid ? '[OK]' : '[FAIL]';
+  const mainLine = `- ${roleName}: ${status}`;
+  
+  if (roleResult.valid) {
+    lines.push(mainLine);
+  } else {
+    // Show error summary if available
+    const details = [];
+    if (roleResult.missingSections?.length) {
+      details.push(`missing: ${roleResult.missingSections.join(', ')}`);
+    }
+    if (roleResult.invalidFields?.length) {
+      details.push(`invalid: ${roleResult.invalidFields.join(', ')}`);
+    }
+    lines.push(`${mainLine} ${details.join('; ')}`);
+  }
+  return lines;
+}
+
+export function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecardPath, producerPath, reviewerAPath, reviewerBPath, globalReviewerPath, state, reviewerTimeouts = null, reviewerViolations = null }) {
   // Build lookup maps for reviewer timeout/error state
   const timeoutMap = new Map((reviewerTimeouts ?? []).map((r) => [r.role, r]));
   const missingFiles = [];
@@ -886,9 +1045,48 @@ function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecard
     `- Stage: ${stageName}`,
     `- Round: ${state.currentRound}`,
     `- Outcome: ${decision.outcome}`,
+    `- Output Quality: ${decision.outputQuality}`,
     '',
     `## Summary`,
     decision.summary,
+    '',
+    ...(decision.qualityReasons?.length
+      ? [
+        `## Quality Reasons`,
+        ...decision.qualityReasons.map((r) => `- ${r}`),
+        '',
+      ]
+      : []),
+    ...(decision.nextRunRecommendation
+      ? [
+        `## Next Run Recommendation`,
+        `- Type: ${decision.nextRunRecommendation.type}`,
+        ...(decision.nextRunRecommendation.spec
+          ? [`- Spec: ${decision.nextRunRecommendation.spec}`]
+          : []),
+        ...(decision.nextRunRecommendation.reasons?.length
+          ? ['', 'Reasons:', ...decision.nextRunRecommendation.reasons.map((r) => `- ${r}`)]
+          : []),
+        '',
+      ]
+      : []),
+    `## Validation`,
+    `- Contract Valid: ${decision.validation?.valid ?? 'n/a'}`,
+    ...(decision.validation?.producer
+      ? formatRoleValidation('Producer', decision.validation.producer)
+      : []),
+    ...(decision.validation?.reviewerA
+      ? formatRoleValidation('Reviewer A', decision.validation.reviewerA)
+      : []),
+    ...(decision.validation?.reviewerB
+      ? formatRoleValidation('Reviewer B', decision.validation.reviewerB)
+      : []),
+    ...(decision.validation?.globalReviewer
+      ? formatRoleValidation('Global Reviewer', decision.validation.globalReviewer)
+      : []),
+    ...(decision.validation?.errorSummary
+      ? ['', `### Error Summary`, decision.validation.errorSummary]
+      : []),
     '',
     `## Blockers`,
     ...(decision.blockers.length ? decision.blockers.map((b) => `- ${b}`) : ['- None.']),
@@ -938,6 +1136,17 @@ function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecard
     stage: stageName,
     round: state.currentRound,
     outcome: decision.outcome,
+    outputQuality: decision.outputQuality,
+    qualityReasons: decision.qualityReasons ?? [],
+    nextRunRecommendation: decision.nextRunRecommendation ?? null,
+    validation: {
+      valid: decision.validation?.valid ?? true,
+      errorSummary: decision.validation?.errorSummary ?? null,
+      producer: decision.validation?.producer ?? null,
+      reviewerA: decision.validation?.reviewerA ?? null,
+      reviewerB: decision.validation?.reviewerB ?? null,
+      globalReviewer: decision.validation?.globalReviewer ?? null,
+    },
     summary: decision.summary,
     approvalCount: decision.metrics.approvalCount,
     blockerCount: decision.metrics.blockerCount,
@@ -1327,7 +1536,18 @@ async function runReviewerRole({ runDir, state, spec, paths, role, worktreeInfo 
     }
   }
 
-  const text = readRoleOutput({ reportPath, stdout: output ?? '' });
+  // Collect isolation artifacts using runId for unique isolation directory
+  const reportFilename = path.basename(reportPath);
+  const { collected, isolationReportPath } = collectIsolationArtifacts({
+    runId: state.runId,
+    stageName,
+    role,
+    stageDir: paths.stageDir,
+    reportFilename,
+    runDir,
+  });
+
+  const text = readRoleOutput({ reportPath, stdout: output ?? '', isolationReportPath });
   if (!text && output) {
     writeText(reportPath, `${output}\n`);
   } else if (text) {
@@ -2390,7 +2610,10 @@ async function main() {
   console.log(runDir);
 }
 
-main().catch((err) => {
-  console.error('Fatal error:', err.message);
-  process.exit(1);
-});
+// Only run main() when executed directly, not when imported for testing
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch((err) => {
+    console.error('Fatal error:', err.message);
+    process.exit(1);
+  });
+}
