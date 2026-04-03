@@ -14,6 +14,9 @@ import { getEvolutionLogger, type EvolutionStage } from '../core/evolution-logge
 import { DIAGNOSTICIAN_PROTOCOL_SUMMARY } from '../constants/diagnostician.js';
 import { LockUnavailableError } from '../config/index.js';
 import { checkWorkspaceIdle, checkCooldown } from './nocturnal-runtime.js';
+import { WorkflowStore } from './subagent-workflow/workflow-store.js';
+
+const WORKFLOW_TTL_MS = 5 * 60 * 1000; // 5 minutes default TTL for helper workflows
 import { executeNocturnalReflectionAsync } from './nocturnal-service.js';
 import { OpenClawTrinityRuntimeAdapter } from '../core/nocturnal-trinity.js';
 
@@ -1138,6 +1141,23 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                     await processDetectionQueue(wctx, api, eventLog);
                 }
                 await processPromotion(wctx, logger, eventLog);
+
+                // PR2.1 Task 2: Sweep expired helper workflows
+                // Uses WorkflowStore directly to update state; session cleanup is handled
+                // separately by the workflow manager when it has access to subagent runtime.
+                try {
+                    const workflowStore = new WorkflowStore({ workspaceDir: wctx.workspaceDir });
+                    const expiredWorkflows = workflowStore.getExpiredWorkflows(WORKFLOW_TTL_MS);
+                    for (const wf of expiredWorkflows) {
+                        workflowStore.updateWorkflowState(wf.workflow_id, 'expired');
+                        workflowStore.recordEvent(wf.workflow_id, 'swept', wf.state, 'expired', 'TTL expired by worker', {});
+                        logger?.debug?.(`[PD:EvolutionWorker] Swept expired workflow: ${wf.workflow_id}`);
+                    }
+                    workflowStore.dispose();
+                } catch (sweepErr) {
+                    logger?.warn?.(`[PD:EvolutionWorker] Failed to sweep expired workflows: ${String(sweepErr)}`);
+                }
+
                 wctx.dictionary.flush();
                 flushAllSessions();
             })().catch((err) => {
