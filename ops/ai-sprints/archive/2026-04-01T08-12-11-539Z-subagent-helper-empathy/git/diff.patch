@@ -1,0 +1,13 @@
+diff --git a/scripts/ai-sprint-orchestrator/run.mjs b/scripts/ai-sprint-orchestrator/run.mjs
+index 62d90e8..88e4280 100644
+--- a/scripts/ai-sprint-orchestrator/run.mjs
++++ b/scripts/ai-sprint-orchestrator/run.mjs
+@@ -174,7 +174,7 @@ function runAgent({ cwd, agent, model, prompt, timeoutSeconds = 1800, failLogPat
+           encoding: 'utf8',
+           maxBuffer: 10 * 1024 * 1024,
+           timeout: (timeoutSeconds + 60) * 1000,
+-          shell: false,
++          shell: true,
+           env: {
+             ...process.env,
+             AI_SPRINT_CWD: cwd,

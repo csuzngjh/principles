@@ -1,0 +1,59 @@
+{
+  "stage": "investigate",
+  "round": 2,
+  "outcome": "revise",
+  "summary": "At least one reviewer requested revision or blocked progress.",
+  "approvalCount": 2,
+  "blockerCount": 0,
+  "reviewerAVerdict": "APPROVE",
+  "reviewerBVerdict": "APPROVE",
+  "producerSectionChecks": {
+    "SUMMARY": true,
+    "EVIDENCE": true,
+    "CODE_EVIDENCE": true,
+    "KEY_EVENTS": true,
+    "TRANSPORT_AUDIT": true,
+    "OPENCLAW_ASSUMPTIONS": true,
+    "CHECKS": true
+  },
+  "reviewerSectionChecks": {
+    "VERDICT": true,
+    "BLOCKERS": true,
+    "FINDINGS": true,
+    "TRANSPORT_ASSESSMENT": false,
+    "OPENCLAW_ASSUMPTION_REVIEW": false,
+    "NEXT_FOCUS": true,
+    "CHECKS": true,
+    "DIMENSIONS": true
+  },
+  "producerChecks": "evidence=ok;tests=ok;scope=pd-only;prompt-isolation=confirmed;openclaw-assumptions=verified",
+  "reviewerAChecks": "criteria=met;blockers=0;verification=complete",
+  "reviewerBChecks": "criteria=met;blockers=0;verification=complete",
+  "blockers": [
+    "Contract not fulfilled: "
+  ],
+  "scoringDimensions": [
+    "evidence_quality",
+    "assumption_coverage",
+    "transport_audit_completeness"
+  ],
+  "reviewerADimensions": {
+    "evidence_quality": 5,
+    "assumption_coverage": 5,
+    "transport_audit_completeness": 5
+  },
+  "reviewerBDimensions": {
+    "evidence_quality": 4,
+    "assumption_coverage": 4,
+    "transport_audit_completeness": 4
+  },
+  "dimensionFailures": [],
+  "reviewerTimeouts": [
+    {
+      "role": "reviewer_a",
+      "timedOut": true,
+      "hadReport": false
+    }
+  ],
+  "updatedAt": "2026-04-01T12:16:35.658Z"
+}

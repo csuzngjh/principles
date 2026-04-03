@@ -1,0 +1,1 @@
+# Git log omitted from archive; inspect archived stage artifacts instead.

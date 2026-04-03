@@ -1,0 +1,5 @@
+# Agent Failure Log
+
+- agent: claude
+- model: GLM-5.1
+- error: spawn powershell.exe ENOENT
