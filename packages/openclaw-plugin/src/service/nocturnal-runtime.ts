@@ -20,8 +20,75 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { listSessions } from '../core/session-tracker.js';
+import { listSessions, SessionState } from '../core/session-tracker.js';
 import { withLockAsync } from '../utils/file-lock.js';
+
+// ---------------------------------------------------------------------------
+// Session Key Parsing (replicated from openclaw/src/sessions/session-key-utils.ts)
+// ---------------------------------------------------------------------------
+
+/** Parse an agent-scoped session key. Returns null for non-agent keys. */
+function parseAgentSessionKey(sessionKey: string): { agentId: string; rest: string } | null {
+    const raw = (sessionKey ?? '').trim().toLowerCase();
+    if (!raw) return null;
+    const parts = raw.split(':').filter(Boolean);
+    if (parts.length < 3 || parts[0] !== 'agent') return null;
+    const agentId = parts[1]?.trim();
+    const rest = parts.slice(2).join(':');
+    if (!agentId || !rest) return null;
+    return { agentId, rest };
+}
+
+/**
+ * Returns true if the session was created by a system process (cron, boot, probe, subagent, acp).
+ * Uses OpenClaw's native session key patterns to avoid false positives.
+ *
+ * System patterns:
+ * - boot- prefix: boot sessions (e.g. boot-2026-04-02_10-43-45)
+ * - probe- prefix: probe sessions (e.g. probe-glm-4.9-xxx)
+ * - cron:<...> rest: cron run sessions (agent:<id>:cron:...)
+ * - subagent: prefix: subagent sessions
+ * - acp: prefix: acp sessions
+ *
+ * Excluded (NOT system sessions):
+ * - User sessions like agent:main:feishu:user:xxx — third component is channel type, NOT cron/subagent/acp
+ */
+/**
+ * Returns true if the session was created by a system process (cron, boot, probe, subagent, acp).
+ * Uses OpenClaw's native session key patterns to avoid false positives.
+ *
+ * Detection priority (most reliable first):
+ * 1. trigger field: Most reliable - explicitly set by OpenClaw ("cron", "heartbeat", "subagent")
+ * 2. sessionKey patterns: Secondary confirmation via structured key (agent:main:cron:...)
+ * 3. sessionId prefix: Fallback for boot-, probe- prefixed IDs
+ *
+ * System patterns:
+ * - trigger === 'cron' | 'heartbeat' | 'subagent'
+ * - sessionKey contains: cron:, subagent:, acp:
+ * - sessionId starts with: boot-, probe-
+ */
+function isSystemSession(state: SessionState): boolean {
+    const { sessionId, sessionKey, trigger } = state;
+
+    // Primary: trigger field is explicitly set by OpenClaw - most reliable
+    if (trigger === 'cron' || trigger === 'heartbeat' || trigger === 'subagent') {
+        return true;
+    }
+
+    // Secondary: sessionKey pattern matching
+    if (sessionKey) {
+        const raw = sessionKey.toLowerCase();
+        if (raw.includes('cron:')) return true;
+        if (raw.includes('subagent:')) return true;
+        if (raw.includes('acp:')) return true;
+    }
+
+    // Fallback: sessionId prefix patterns (boot-, probe-)
+    if (sessionId?.startsWith('boot-')) return true;
+    if (sessionId?.startsWith('probe-')) return true;
+
+    return false;
+}
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -95,8 +162,8 @@ export interface IdleCheckResult {
     mostRecentActivityAt: number;
     /** How long since the last activity (ms) */
     idleForMs: number;
-    /** Number of active (non-abandoned) sessions found */
-    activeSessionCount: number;
+    /** Number of active (non-abandoned) user sessions found */
+    userActiveSessions: number;
     /** List of abandoned session IDs (inactive > abandoned threshold) */
     abandonedSessionIds: string[];
     /** Whether trajectory guardrail also confirms idle */
@@ -234,14 +301,17 @@ export function checkWorkspaceIdle(
     // Separate active vs abandoned sessions
     const abandonedSessions: string[] = [];
     let mostRecentActivityAt = 0;
-    let activeSessionCount = 0;
+    let userActiveSessions = 0;
 
     for (const session of sessions) {
+        // Skip system sessions (cron, boot, probe, subagent, acp) from idle determination
+        if (isSystemSession(session)) continue;
+
         const inactiveFor = now - session.lastActivityAt;
         if (inactiveFor > abandonedThresholdMs) {
             abandonedSessions.push(session.sessionId);
         } else {
-            activeSessionCount++;
+            userActiveSessions++;
             if (session.lastActivityAt > mostRecentActivityAt) {
                 mostRecentActivityAt = session.lastActivityAt;
             }
@@ -278,7 +348,7 @@ export function checkWorkspaceIdle(
         isIdle,
         mostRecentActivityAt,
         idleForMs,
-        activeSessionCount,
+        userActiveSessions,
         abandonedSessionIds: abandonedSessions,
         trajectoryGuardrailConfirmsIdle,
         reason,
@@ -523,7 +593,7 @@ export function checkPreflight(
         blockers.push(`Quota exhausted (${DEFAULT_MAX_RUNS_PER_WINDOW} runs per ${DEFAULT_QUOTA_WINDOW_MS / 3600000}h window)`);
     }
 
-    if (idle.abandonedSessionIds.length > 0 && idle.activeSessionCount === 0) {
+    if (idle.abandonedSessionIds.length > 0 && idle.userActiveSessions === 0) {
         // Only block if ALL sessions are abandoned (meaning workspace truly has no activity)
         // If some sessions are active, we trust the session-based idle check
     }

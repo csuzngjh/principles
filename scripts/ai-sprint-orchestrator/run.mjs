@@ -65,6 +65,7 @@ function createSprintState(spec, runId, specPath) {
     currentRole: null,
     haltReason: null,
     worktree: null,  // { worktreePath, branchName, headSha, baseBranch } — set by ensureWorktree
+    consecutiveTimeouts: {}, // { stageName: count } — tracks consecutive timeouts per stage
     createdAt: nowIso(),
     updatedAt: nowIso(),
   };
@@ -79,9 +80,10 @@ function loadOrInitState(args) {
     if (!fileExists(sprintFile)) {
       throw new Error(`Run not found: ${args.resume}`);
     }
-    const state = readJson(sprintFile);
+    const state = reconcileRunState(runDir, readJson(sprintFile));
     if (state.status === 'halted' || state.status === 'aborted') {
       // Validate: if halted mid-stage, the previous stage must have advanced
+      // Special case: implement-pass-1 revise → implement-pass-2 is valid routing
       if (state.currentStageIndex > 0) {
         const prevStageName = loadSpec(state, args).stages[state.currentStageIndex - 1];
         const prevDecisionPath = path.join(runDir, 'stages', `${String(state.currentStageIndex).padStart(2, '0')}-${prevStageName}`, 'decision.md');
@@ -89,13 +91,19 @@ function loadOrInitState(args) {
           const prevDecisionText = fs.readFileSync(prevDecisionPath, 'utf8');
           const outcomeMatch = prevDecisionText.match(/Outcome:\s*(\w+)/);
           if (outcomeMatch && outcomeMatch[1] !== 'advance') {
-            throw new Error(`Cannot resume: previous stage "${prevStageName}" outcome was "${outcomeMatch[1]}" (expected "advance"). Fix the previous stage first.`);
+            // Check for special routing: implement-pass-1 revise → implement-pass-2
+            const isSpecialRoute = state.currentStage === 'implement-pass-2' && prevStageName === 'implement-pass-1' && outcomeMatch[1] === 'revise';
+            if (!isSpecialRoute) {
+              throw new Error(`Cannot resume: previous stage "${prevStageName}" outcome was "${outcomeMatch[1]}" (expected "advance"). Fix the previous stage first.`);
+            }
           }
         }
       }
       const previousStatus = state.status;
       state.status = 'running';
       state.haltReason = null;
+      state.orchestratorPid = process.pid;
+      state.lastHeartbeatAt = nowIso();
       state.updatedAt = nowIso();
       writeJson(sprintFile, state);
       appendTimeline(runDir, `Sprint resumed from ${previousStatus} by operator`);
@@ -155,8 +163,10 @@ function appendTimeline(runDir, line) {
   }
 }
 
-function runAgent({ cwd, agent, model, prompt, timeoutSeconds = 1800, failLogPath = null }) {
-  const promptFile = path.join(os.tmpdir(), `ai-sprint-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`);
+function runAgent({ cwd, agent, model, prompt, timeoutSeconds = 1800, failLogPath = null, promptDir = cwd, runDir = null, roleLabel = agent }) {
+  // promptDir (default=cwd) is where we write the prompt file; must exist and be writable.
+  // On Windows, avoid os.tmpdir() (short ~ paths) and non-existent branchWorkspace dirs.
+  const promptFile = path.join(promptDir, `.ai-sprint-prompt-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`);
   fs.writeFileSync(promptFile, prompt, 'utf8');
 
   let result;
@@ -205,6 +215,9 @@ function runAgent({ cwd, agent, model, prompt, timeoutSeconds = 1800, failLogPat
   const stderr = result.stderr ?? '';
 
   if (result.error || result.status !== 0) {
+    if ((result.error?.code === 'ETIMEDOUT' || result.signal === 'SIGTERM') && result.pid) {
+      terminateProcessTree(result.pid, { runDir, label: roleLabel });
+    }
     if (failLogPath) {
       ensureDir(path.dirname(failLogPath));
       writeText(failLogPath, `# Agent Failure Log\n\n- agent: ${agent}\n- model: ${model}\n- exitStatus: ${result.status ?? 'N/A'}\n- error: ${result.error?.message ?? 'none'}\n\n## stdout\n\n${stdout}\n\n## stderr\n\n${stderr}\n`);
@@ -220,9 +233,9 @@ function runAgent({ cwd, agent, model, prompt, timeoutSeconds = 1800, failLogPat
  * Async agent runner using spawn (non-blocking) — used for parallel reviewer execution.
  * Returns a Promise that resolves with { stdout, stderr, status } or rejects on error.
  */
-function runAgentAsync({ cwd, agent, model, prompt, timeoutSeconds = 1800 }) {
+function runAgentAsync({ cwd, agent, model, prompt, timeoutSeconds = 1800, promptDir = cwd, runDir = null, roleLabel = agent, onSpawn = null }) {
   return new Promise((resolve, reject) => {
-    const promptFile = path.join(os.tmpdir(), `ai-sprint-${process.pid}-${crypto.randomUUID()}.txt`);
+    const promptFile = path.join(promptDir, `.ai-sprint-prompt-${process.pid}-${crypto.randomUUID()}.txt`);
 
     const cleanup = () => {
       try { fs.rmSync(promptFile, { force: true }); } catch {}
@@ -244,8 +257,9 @@ function runAgentAsync({ cwd, agent, model, prompt, timeoutSeconds = 1800 }) {
     const timer = setTimeout(() => {
       if (!settled) {
         settled = true;
+        clearTimeout(timer);
         cleanup();
-        try { proc?.kill(); } catch {}
+        terminateProcessTree(proc?.pid, { runDir, label: roleLabel });
         reject(new Error(`Agent ${agent} timed out after ${timeoutSeconds}s`));
       }
     }, timeoutMs);
@@ -279,6 +293,7 @@ function runAgentAsync({ cwd, agent, model, prompt, timeoutSeconds = 1800 }) {
           shell: false,
         });
       }
+      if (proc?.pid && onSpawn) onSpawn(proc.pid);
     } catch (spawnErr) {
       settled = true;
       clearTimeout(timer);
@@ -289,13 +304,20 @@ function runAgentAsync({ cwd, agent, model, prompt, timeoutSeconds = 1800 }) {
 
     proc.stdout.on('data', (data) => { stdout += data; });
     proc.stderr.on('data', (data) => { stderr += data; });
-    proc.on('close', (code) => {
+    // Use 'exit' instead of 'close' — on Windows, powershell.exe child process chains
+    // may keep stdio pipes open after exit, causing 'close' to never fire.
+    // 'exit' fires when the process exits regardless of stdio pipe state.
+    proc.on('exit', (code) => {
       if (!settled) {
         settled = true;
         clearTimeout(timer);
-        cleanup();
+        // Read any remaining buffered stdout/stderr before resolving
         resolve({ stdout: stdout.trim(), stderr: stderr.trim(), status: code });
       }
+    });
+    // Cleanup prompt file on close (stdio fully drained) — separate from resolve
+    proc.on('close', () => {
+      cleanup();
     });
     proc.on('error', (err) => {
       if (!settled) {
@@ -305,6 +327,246 @@ function runAgentAsync({ cwd, agent, model, prompt, timeoutSeconds = 1800 }) {
         reject(err);
       }
     });
+  });
+}
+
+/**
+ * Check if there's progress evidence in the last N seconds.
+ * Progress signals:
+ * 1. Worklog file updated recently
+ * 2. Target directory has file modifications
+ * 3. Stdout has new content (tracked externally)
+ */
+function checkProgressEvidence({ worktreePath, worklogPath, lastStdoutLength, currentStdout, lookbackSeconds = 120 }) {
+  const now = Date.now();
+  const lookbackMs = lookbackSeconds * 1000;
+  const signals = [];
+
+  // Check worklog file mtime
+  if (worklogPath && fileExists(worklogPath)) {
+    try {
+      const stat = fs.statSync(worklogPath);
+      if (now - stat.mtimeMs < lookbackMs) {
+        signals.push({ type: 'worklog_updated', age: Math.round((now - stat.mtimeMs) / 1000) });
+      }
+    } catch {}
+  }
+
+  // Check for new stdout content
+  if (lastStdoutLength !== undefined && currentStdout !== undefined) {
+    if (currentStdout.length > lastStdoutLength) {
+      signals.push({ type: 'stdout_grew', delta: currentStdout.length - lastStdoutLength });
+    }
+  }
+
+  // Check target directory for recent modifications
+  if (worktreePath && fileExists(worktreePath)) {
+    try {
+      const result = spawnSync('git', ['diff', '--name-only', '--since', `${lookbackSeconds}.seconds.ago`], {
+        cwd: worktreePath,
+        encoding: 'utf8',
+        timeout: 10_000,
+      });
+      const changedFiles = (result.stdout ?? '').trim().split('\n').filter(Boolean);
+      if (changedFiles.length > 0) {
+        signals.push({ type: 'files_changed', count: changedFiles.length, files: changedFiles.slice(0, 3) });
+      }
+    } catch {}
+  }
+
+  return {
+    hasProgress: signals.length > 0,
+    signals,
+  };
+}
+
+/**
+ * Async agent runner with progress-based timeout extension.
+ * 
+ * Implements soft/hard timeout model:
+ * - softTimeout: check for progress, extend if evidence found
+ * - hardTimeout: force terminate regardless of progress
+ * - maxExtensions: limit total extensions to prevent infinite loops
+ */
+function runAgentWithProgressCheck({
+  cwd,
+  agent,
+  model,
+  prompt,
+  timeoutSeconds = 1800,
+  promptDir = cwd,
+  runDir = null,
+  roleLabel = agent,
+  worktreePath = null,
+  worklogPath = null,
+  softTimeoutRatio = 0.67,  // soft timeout at 67% of hard timeout
+  extensionSeconds = 300,   // extend by 5 min when progress detected
+  maxExtensions = 2,        // max 2 extensions (total +10 min)
+  progressCheckIntervalSeconds = 60,
+}) {
+  return new Promise((resolve, reject) => {
+    const hardTimeoutSeconds = timeoutSeconds + (extensionSeconds * maxExtensions);
+    const softTimeoutSeconds = Math.floor(timeoutSeconds * softTimeoutRatio);
+    
+    let extensionsUsed = 0;
+    let lastStdoutLength = 0;
+    let lastProgressCheck = Date.now();
+    let settled = false;
+    let proc = null;
+    let stdout = '';
+    let stderr = '';
+
+    const promptFile = path.join(promptDir, `.ai-sprint-prompt-${process.pid}-${crypto.randomUUID()}.txt`);
+
+    const cleanup = () => {
+      try { fs.rmSync(promptFile, { force: true }); } catch {}
+    };
+
+    try {
+      fs.writeFileSync(promptFile, prompt, 'utf8');
+    } catch (writeErr) {
+      reject(new Error(`Failed to write prompt file: ${writeErr.message}`));
+      return;
+    }
+
+    // Hard timeout - absolute maximum
+    const hardTimer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(softTimer);
+        clearTimeout(progressTimer);
+        cleanup();
+        terminateProcessTree(proc?.pid, { runDir, label: roleLabel });
+        reject(new Error(`Agent ${agent} hard timeout after ${hardTimeoutSeconds}s (extended ${extensionsUsed} times)`));
+      }
+    }, hardTimeoutSeconds * 1000);
+
+    // Soft timeout - check progress and maybe extend
+    let softTimer;
+    const setupSoftTimeout = (seconds) => {
+      clearTimeout(softTimer);
+      softTimer = setTimeout(() => {
+        if (settled) return;
+        
+        const progress = checkProgressEvidence({
+          worktreePath,
+          worklogPath,
+          lastStdoutLength,
+          currentStdout: stdout,
+          lookbackSeconds: 120,
+        });
+
+        if (progress.hasProgress && extensionsUsed < maxExtensions) {
+          extensionsUsed++;
+          lastStdoutLength = stdout.length;
+          if (runDir) {
+            appendTimeline(runDir, `Soft timeout: progress detected for ${roleLabel}, extending by ${extensionSeconds}s (${progress.signals.map(s => s.type).join(', ')})`);
+          }
+          setupSoftTimeout(extensionSeconds);
+        } else {
+          // No progress or max extensions reached - this becomes effective timeout
+          // But don't terminate yet - let hard timeout handle it
+          if (runDir && extensionsUsed >= maxExtensions) {
+            appendTimeline(runDir, `Soft timeout: max extensions (${maxExtensions}) reached for ${roleLabel}, waiting for hard timeout`);
+          } else if (runDir) {
+            appendTimeline(runDir, `Soft timeout: no progress detected for ${roleLabel}, waiting for hard timeout`);
+          }
+        }
+      }, seconds * 1000);
+    };
+
+    // Progress monitoring timer
+    let progressTimer;
+    const setupProgressMonitor = () => {
+      clearTimeout(progressTimer);
+      progressTimer = setTimeout(() => {
+        if (settled) return;
+        
+        const progress = checkProgressEvidence({
+          worktreePath,
+          worklogPath,
+          lastStdoutLength,
+          currentStdout: stdout,
+          lookbackSeconds: 60,
+        });
+        
+        if (progress.hasProgress) {
+          lastStdoutLength = stdout.length;
+        }
+        
+        if (!settled) setupProgressMonitor();
+      }, progressCheckIntervalSeconds * 1000);
+    };
+
+    // Spawn the agent process
+    try {
+      if (process.platform === 'win32') {
+        proc = spawn('powershell.exe', [
+          '-NoProfile', '-Command',
+          `acpx --cwd $env:AI_SPRINT_CWD --approve-all --model $env:AI_SPRINT_MODEL --timeout $env:AI_SPRINT_TIMEOUT ${agent} exec -f $env:AI_SPRINT_PROMPT`,
+        ], {
+          cwd,
+          encoding: 'utf8',
+          maxBuffer: 10 * 1024 * 1024,
+          shell: false,
+          env: {
+            ...process.env,
+            AI_SPRINT_CWD: cwd,
+            AI_SPRINT_MODEL: model,
+            AI_SPRINT_TIMEOUT: String(hardTimeoutSeconds),
+            AI_SPRINT_PROMPT: promptFile,
+          },
+        });
+      } else {
+        proc = spawn('acpx', [
+          '--cwd', cwd, '--approve-all', '--model', model,
+          '--timeout', String(hardTimeoutSeconds), agent, 'exec', '-f', promptFile,
+        ], {
+          cwd,
+          encoding: 'utf8',
+          maxBuffer: 10 * 1024 * 1024,
+          shell: false,
+        });
+      }
+    } catch (spawnErr) {
+      settled = true;
+      clearTimeout(hardTimer);
+      clearTimeout(softTimer);
+      clearTimeout(progressTimer);
+      cleanup();
+      reject(new Error(`Failed to spawn agent ${agent}: ${spawnErr.message}`));
+      return;
+    }
+
+    proc.stdout.on('data', (data) => { stdout += data; });
+    proc.stderr.on('data', (data) => { stderr += data; });
+
+    proc.on('exit', (code) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(hardTimer);
+        clearTimeout(softTimer);
+        clearTimeout(progressTimer);
+        resolve({ stdout: stdout.trim(), stderr: stderr.trim(), status: code, extensionsUsed });
+      }
+    });
+
+    proc.on('close', () => { cleanup(); });
+
+    proc.on('error', (err) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(hardTimer);
+        clearTimeout(softTimer);
+        clearTimeout(progressTimer);
+        cleanup();
+        reject(err);
+      }
+    });
+
+    // Start timers
+    setupSoftTimeout(softTimeoutSeconds);
+    setupProgressMonitor();
   });
 }
 
@@ -384,6 +646,12 @@ function ensureStagePaths(runDir, stageIndex, stageName) {
         stage: stageName,
         round: 0,
         status: 'idle',
+        lastPid: null,
+        startedAt: null,
+        finishedAt: null,
+        terminatedAt: null,
+        timeoutSeconds: null,
+        lastError: null,
         checklist: [],
         updatedAt: nowIso(),
       });
@@ -409,6 +677,71 @@ function roleArtifactPaths(paths, role) {
   throw new Error(`Unknown role: ${role}`);
 }
 
+function roleStatePath(paths, role) {
+  if (role === 'producer') return paths.producerStatePath;
+  if (role === 'reviewer_a') return paths.reviewerAStatePath;
+  if (role === 'reviewer_b') return paths.reviewerBStatePath;
+  if (role === 'global_reviewer') return paths.globalReviewerStatePath;
+  throw new Error(`Unknown role: ${role}`);
+}
+
+function updateRoleState(paths, role, patch) {
+  const statePath = roleStatePath(paths, role);
+  const previous = fileExists(statePath) ? readJson(statePath) : { role };
+  writeJson(statePath, {
+    ...previous,
+    ...patch,
+    role,
+    updatedAt: nowIso(),
+  });
+}
+
+function terminateProcessTree(pid, { runDir = null, label = 'process' } = {}) {
+  if (!pid) return false;
+  try {
+    if (process.platform === 'win32') {
+      const result = spawnSync('taskkill', ['/T', '/F', '/PID', String(pid)], {
+        encoding: 'utf8',
+        timeout: 30_000,
+        shell: false,
+      });
+      const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`.trim();
+      const success = result.status === 0 || /not found|no running instance|not found/i.test(output);
+      if (runDir) appendTimeline(runDir, `${success ? 'Terminated' : 'Failed to terminate'} ${label} process tree pid=${pid}${output ? ` (${output})` : ''}`);
+      return success;
+    }
+    process.kill(pid, 'SIGKILL');
+    if (runDir) appendTimeline(runDir, `Terminated ${label} pid=${pid}`);
+    return true;
+  } catch (err) {
+    if (runDir) appendTimeline(runDir, `Failed to terminate ${label} pid=${pid}: ${err.message}`);
+    return false;
+  }
+}
+
+function cleanupRecordedRoleProcesses(paths, runDir) {
+  const roles = ['producer', 'reviewer_a', 'reviewer_b', 'global_reviewer'];
+  for (const role of roles) {
+    const statePath = roleStatePath(paths, role);
+    if (!fileExists(statePath)) continue;
+    const roleState = readJson(statePath);
+    if (roleState.lastPid) {
+      const terminated = terminateProcessTree(roleState.lastPid, { runDir, label: role });
+      if (terminated) {
+        updateRoleState(paths, role, {
+          status: roleState.status === 'completed' ? roleState.status : 'terminated',
+          terminatedAt: nowIso(),
+          lastPid: null,
+        });
+      } else {
+        updateRoleState(paths, role, {
+          lastError: roleState.lastError ?? `Failed to terminate recorded ${role} pid ${roleState.lastPid}`,
+        });
+      }
+    }
+  }
+}
+
 function readRoleOutput({ reportPath, stdout }) {
   if (fileExists(reportPath)) {
     const report = fs.readFileSync(reportPath, 'utf8').trim();
@@ -417,6 +750,10 @@ function readRoleOutput({ reportPath, stdout }) {
     }
   }
   return String(stdout ?? '').trim();
+}
+
+function reportExistsAndNonEmpty(reportPath) {
+  return fileExists(reportPath) && Boolean(fs.readFileSync(reportPath, 'utf8').trim());
 }
 
 function protectedArtifacts(runDir, paths) {
@@ -447,28 +784,28 @@ function detectProtectedWriteViolation(files, snapshot) {
   return null;
 }
 
-function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecardPath, producerPath, reviewerAPath, reviewerBPath, globalReviewerPath, state, reviewerTimeouts = null }) {
+function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecardPath, producerPath, reviewerAPath, reviewerBPath, globalReviewerPath, state, reviewerTimeouts = null, reviewerViolations = null }) {
   // Build lookup maps for reviewer timeout/error state
   const timeoutMap = new Map((reviewerTimeouts ?? []).map((r) => [r.role, r]));
   const missingFiles = [];
-  if (!fileExists(producerPath)) missingFiles.push(`producer: ${producerPath}`);
-  if (!fileExists(reviewerAPath)) {
+  if (!reportExistsAndNonEmpty(producerPath)) missingFiles.push(`producer: ${producerPath}${fileExists(producerPath) ? ' (empty)' : ''}`);
+  if (!reportExistsAndNonEmpty(reviewerAPath)) {
     const info = timeoutMap.get('reviewer_a');
     if (info?.timedOut) missingFiles.push(`reviewer_a: ${reviewerAPath} (timed out, no report)`);
     else if (info) missingFiles.push(`reviewer_a: ${reviewerAPath} (error, no report)`);
-    else missingFiles.push(`reviewer_a: ${reviewerAPath} (missing)`);
+    else missingFiles.push(`reviewer_a: ${reviewerAPath}${fileExists(reviewerAPath) ? ' (empty)' : ' (missing)'}`);
   }
-  if (!fileExists(reviewerBPath)) {
+  if (!reportExistsAndNonEmpty(reviewerBPath)) {
     const info = timeoutMap.get('reviewer_b');
     if (info?.timedOut) missingFiles.push(`reviewer_b: ${reviewerBPath} (timed out, no report)`);
     else if (info) missingFiles.push(`reviewer_b: ${reviewerBPath} (error, no report)`);
-    else missingFiles.push(`reviewer_b: ${reviewerBPath} (missing)`);
+    else missingFiles.push(`reviewer_b: ${reviewerBPath}${fileExists(reviewerBPath) ? ' (empty)' : ' (missing)'}`);
   }
 
   const stageCriteria = loadSpec(state).stageCriteria?.[stageName] ?? {};
   const globalReviewerRequired = stageCriteria.globalReviewerRequired === true;
-  if (globalReviewerRequired && globalReviewerPath && !fileExists(globalReviewerPath)) {
-    missingFiles.push(`global_reviewer: ${globalReviewerPath} (missing — required for this stage)`);
+  if (globalReviewerRequired && globalReviewerPath && !reportExistsAndNonEmpty(globalReviewerPath)) {
+    missingFiles.push(`global_reviewer: ${globalReviewerPath}${fileExists(globalReviewerPath) ? ' (empty — required for this stage)' : ' (missing — required for this stage)'}`);
   }
 
   if (missingFiles.length > 0) {
@@ -508,9 +845,28 @@ function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecard
   const producer = fs.readFileSync(producerPath, 'utf8');
   const reviewerA = fs.readFileSync(reviewerAPath, 'utf8');
   const reviewerB = fs.readFileSync(reviewerBPath, 'utf8');
-  const globalReviewer = (globalReviewerRequired && globalReviewerPath && fileExists(globalReviewerPath))
+  const globalReviewer = (globalReviewerRequired && globalReviewerPath && reportExistsAndNonEmpty(globalReviewerPath))
     ? fs.readFileSync(globalReviewerPath, 'utf8')
     : null;
+
+  // Read reviewer state JSON for dimensions fallback (agent may write dimensions to state but not report text)
+  const reviewerAStatePath = path.join(stageDir, 'reviewer-a-state.json');
+  const reviewerBStatePath = path.join(stageDir, 'reviewer-b-state.json');
+  let reviewerADimensionsFallback = null;
+  let reviewerBDimensionsFallback = null;
+  try {
+    if (fileExists(reviewerAStatePath)) {
+      const aState = readJson(reviewerAStatePath);
+      if (aState.dimensions && typeof aState.dimensions === 'object') reviewerADimensionsFallback = aState.dimensions;
+    }
+  } catch {}
+  try {
+    if (fileExists(reviewerBStatePath)) {
+      const bState = readJson(reviewerBStatePath);
+      if (bState.dimensions && typeof bState.dimensions === 'object') reviewerBDimensionsFallback = bState.dimensions;
+    }
+  } catch {}
+
   const decision = decideStage({
     stageCriteria: loadSpec(state).stageCriteria?.[stageName],
     producer,
@@ -519,6 +875,9 @@ function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecard
     globalReviewer: globalReviewerRequired ? globalReviewer : null,
     currentRound: state.currentRound,
     maxRoundsPerStage: state.maxRoundsPerStage,
+    reviewerViolations,
+    reviewerADimensionsFallback,
+    reviewerBDimensionsFallback,
   });
 
   const content = [
@@ -801,13 +1160,31 @@ function reconcileRunState(runDir, state) {
   if (state.status !== 'running') return state;
   if (pidExists(state.orchestratorPid)) return state;
 
+  // Detect which artifacts already exist on disk for the current stage/round
+  const stageDirName = `${String(state.currentStageIndex + 1).padStart(2, '0')}-${state.currentStage}`;
+  const stageDir = path.join(runDir, 'stages', stageDirName);
+  const artifacts = {
+    producer: reportExistsAndNonEmpty(path.join(stageDir, 'producer.md')),
+    reviewerA: reportExistsAndNonEmpty(path.join(stageDir, 'reviewer-a.md')),
+    reviewerB: reportExistsAndNonEmpty(path.join(stageDir, 'reviewer-b.md')),
+    globalReviewer: reportExistsAndNonEmpty(path.join(stageDir, 'global-reviewer.md')),
+    decision: reportExistsAndNonEmpty(path.join(stageDir, 'decision.md')),
+  };
+
+  const roleLabel = state.currentRole ?? 'unknown';
+  const diskSummary = Object.entries(artifacts)
+    .filter(([, v]) => v)
+    .map(([k]) => k)
+    .join(', ') || 'none';
+
   state.status = 'halted';
   state.haltReason = {
     type: 'stale_orchestrator',
     stage: state.currentStage,
     round: state.currentRound,
-    details: `Orchestrator pid ${state.orchestratorPid ?? 'unknown'} is no longer alive.`,
-    blockers: ['The sprint process ended before stage completion. Resume or restart the run.'],
+    details: `Orchestrator pid ${state.orchestratorPid ?? 'unknown'} is no longer alive (was: ${roleLabel}). Artifacts on disk: ${diskSummary}.`,
+    blockers: ['The sprint process ended before stage completion. Resume to continue.'],
+    artifacts,
   };
   saveState(runDir, state);
   updateSummary(runDir, [
@@ -815,8 +1192,11 @@ function reconcileRunState(runDir, state) {
     `Stage: ${state.currentStage}`,
     `Round: ${state.currentRound}`,
     `Halt reason: ${state.haltReason.details}`,
+    `Disk artifacts: ${diskSummary}`,
   ]);
   appendTimeline(runDir, `Sprint reconciled to halted: ${state.haltReason.details}`);
+  const paths = ensureStagePaths(runDir, state.currentStageIndex, state.currentStage);
+  cleanupRecordedRoleProcesses(paths, runDir);
   cleanupWorktree({ state, runDir });
   return state;
 }
@@ -833,6 +1213,15 @@ async function runReviewerRole({ runDir, state, spec, paths, role, worktreeInfo 
 
   // Skip if report already exists
   if (fileExists(reportPath) && fs.readFileSync(reportPath, 'utf8').trim()) {
+    updateRoleState(paths, role, {
+      stage: stageName,
+      round: state.currentRound,
+      status: 'completed',
+      lastPid: null,
+      finishedAt: nowIso(),
+      timeoutSeconds: stageRoleTimeout(spec, stageName, role),
+      lastError: null,
+    });
     return { role, output: fs.readFileSync(reportPath, 'utf8').trim(), timedOut: false, reportExisted: true, violatedFile: null };
   }
 
@@ -853,14 +1242,37 @@ async function runReviewerRole({ runDir, state, spec, paths, role, worktreeInfo 
   });
   const timeoutSeconds = stageRoleTimeout(spec, stageName, role);
   // Reviewers must verify code in the same workspace where producer made changes
-  const cwd = worktreeInfo?.worktreePath ?? (spec.branchWorkspace || spec.workspace);
+  // branchWorkspace may not exist — fall back to spec.workspace (always valid)
+  const cwd = worktreeInfo?.worktreePath ?? (fileExists(spec.branchWorkspace) ? spec.branchWorkspace : spec.workspace);
 
   let output = null;
   let timedOut = false;
   let violatedFile = null;
 
+  updateRoleState(paths, role, {
+    stage: stageName,
+    round: state.currentRound,
+    status: 'running',
+    startedAt: nowIso(),
+    finishedAt: null,
+    terminatedAt: null,
+    lastPid: null,
+    timeoutSeconds,
+    lastError: null,
+  });
+
   try {
-    const result = await runAgentAsync({ cwd, agent: config.agent, model: config.model, prompt, timeoutSeconds });
+    const result = await runAgentAsync({
+      cwd,
+      agent: config.agent,
+      model: config.model,
+      prompt,
+      timeoutSeconds,
+      promptDir: runDir,
+      runDir,
+      roleLabel: role,
+      onSpawn: (pid) => updateRoleState(paths, role, { lastPid: pid }),
+    });
     const stdout = result.stdout ?? '';
     const stderr = result.stderr ?? '';
 
@@ -873,19 +1285,44 @@ async function runReviewerRole({ runDir, state, spec, paths, role, worktreeInfo 
 
     output = stdout.trim();
     if (output) writeText(stdoutPath, `${output}\n`);
+    updateRoleState(paths, role, {
+      status: 'completed',
+      lastPid: null,
+      finishedAt: nowIso(),
+      lastError: null,
+    });
   } catch (err) {
     // Check if the agent wrote its report despite the error
     if (fileExists(reportPath) && fs.readFileSync(reportPath, 'utf8').trim()) {
       output = null;
       timedOut = true;
+      updateRoleState(paths, role, {
+        status: 'completed_after_timeout',
+        lastPid: null,
+        finishedAt: nowIso(),
+        lastError: err.message ?? String(err),
+      });
     } else if (err.message?.includes('timed out')) {
       timedOut = true;
       ensureDir(path.dirname(failLog));
       writeText(failLog, `# Agent Timeout Log\n\n- agent: ${config.agent}\n- model: ${config.model}\n- timeout: ${timeoutSeconds}s\n- error: ${err.message}\n`);
+      updateRoleState(paths, role, {
+        status: 'timed_out',
+        lastPid: null,
+        finishedAt: nowIso(),
+        terminatedAt: nowIso(),
+        lastError: err.message,
+      });
     } else {
       // Re-throw unexpected errors (but don't lose the fail log)
       ensureDir(path.dirname(failLog));
       writeText(failLog, `# Agent Failure Log\n\n- agent: ${config.agent}\n- model: ${config.model}\n- error: ${err.message}\n`);
+      updateRoleState(paths, role, {
+        status: 'error',
+        lastPid: null,
+        finishedAt: nowIso(),
+        lastError: err.message ?? String(err),
+      });
       throw err;
     }
   }
@@ -919,16 +1356,78 @@ function ensureWorktree({ spec, runDir, state, stageName }) {
 
   const baseWorkspace = spec.workspace;
   const baseBranch = spec.branch ?? 'main';
-  const baseRef = baseBranch; // Must be a git ref, not a path
+  const branchName = `sprint/${state.runId.slice(0, 12)}/${stageName}`;
+  const worktreePath = path.join(runDir, 'worktrees', stageName);
+  
+  // Resolve baseRef with robust fallback chain:
+  // 1. spec.branch (local branch)
+  // 2. origin/{spec.branch} (remote branch)
+  // 3. HEAD (current checkout)
+  // 4. main (default branch)
+  const resolveBaseRef = () => {
+    const candidates = [
+      { ref: baseBranch, label: `spec.branch '${baseBranch}'` },
+      { ref: `origin/${baseBranch}`, label: `remote branch 'origin/${baseBranch}'` },
+      { ref: 'HEAD', label: 'current HEAD' },
+      { ref: 'main', label: 'default branch main' },
+    ];
+    
+    for (const candidate of candidates) {
+      const result = spawnSync('git', ['rev-parse', '--verify', candidate.ref], {
+        cwd: baseWorkspace,
+        encoding: 'utf8',
+        timeout: 10_000,
+      });
+      if (result.status === 0 && result.stdout?.trim()) {
+        if (candidate.ref !== baseBranch) {
+          appendTimeline(runDir, `Base ref resolved to ${candidate.label}`);
+        }
+        return candidate.ref;
+      }
+    }
+    // Last resort: return 'main' even if verification failed
+    appendTimeline(runDir, `Warning: Could not verify any base ref, using 'main'`);
+    return 'main';
+  };
+  
+  const baseRef = resolveBaseRef();
 
   // Reuse existing worktree if already created for this stage
   if (state.worktree?.worktreePath && fileExists(state.worktree.worktreePath)) {
     appendTimeline(runDir, `Reusing existing worktree at ${state.worktree.worktreePath}`);
     return state.worktree;
   }
-
-  const branchName = `sprint/${state.runId.slice(0, 12)}/${stageName}`;
-  const worktreePath = path.join(runDir, 'worktrees', stageName);
+  
+  // Also check if worktree directory exists on disk (state may have been lost)
+  // This handles resume scenarios where sprint.json lost worktree state
+  if (fileExists(worktreePath)) {
+    // Verify it's a valid worktree by checking for .git file
+    const gitFile = path.join(worktreePath, '.git');
+    if (fileExists(gitFile)) {
+      const headSha = (spawnSync('git', ['rev-parse', 'HEAD'], {
+        cwd: worktreePath,
+        encoding: 'utf8',
+        timeout: 10_000,
+      }).stdout ?? '').trim();
+      
+      if (headSha) {
+        const recoveredWorktree = {
+          worktreePath,
+          branchName,
+          headSha,
+          baseBranch,
+          baseWorkspace,
+          dirtyFiles: [],
+        };
+        state.worktree = recoveredWorktree;
+        appendTimeline(runDir, `Recovered existing worktree at ${worktreePath} (branch: ${branchName}, sha: ${headSha})`);
+        return recoveredWorktree;
+      }
+    }
+    // Invalid worktree directory - remove it
+    appendTimeline(runDir, `Removing invalid worktree directory at ${worktreePath}`);
+    try { fs.rmSync(worktreePath, { recursive: true, force: true }); } catch {}
+  }
 
   try {
     ensureDir(path.dirname(worktreePath));
@@ -1024,13 +1523,18 @@ function cleanupWorktree({ state, runDir }) {
   // Use the git repo root (baseWorkspace) as cwd, not the worktree's parent dir
   const gitCwd = baseWorkspace ?? runDir;
   try {
-    spawnSync('git', ['worktree', 'remove', '--force', worktreePath], {
+    const result = spawnSync('git', ['worktree', 'remove', '--force', worktreePath], {
       cwd: gitCwd,
       encoding: 'utf8',
       timeout: 30_000,
     });
-    appendTimeline(runDir, `Cleaned up worktree at ${worktreePath}`);
-    state.worktree = null;
+    if (result.status === 0) {
+      appendTimeline(runDir, `Cleaned up worktree at ${worktreePath}`);
+      state.worktree = null;
+      return;
+    }
+    const errMsg = result.stderr?.trim() || result.stdout?.trim() || `git exited ${result.status}`;
+    appendTimeline(runDir, `Worktree cleanup failed for ${worktreePath}: ${errMsg} — manual cleanup may be required`);
   } catch (cleanupErr) {
     appendTimeline(runDir, `Worktree cleanup failed for ${worktreePath}: ${cleanupErr.message} — manual cleanup may be required`);
   }
@@ -1108,10 +1612,12 @@ async function executeStage(runDir, state, spec) {
       `Round: ${state.currentRound}`,
       `Halt reason: ${state.haltReason.details}`,
     ]);
+    cleanupRecordedRoleProcesses(paths, runDir);
     return { outcome: 'halt', summary: state.haltReason.details, blockers: state.haltReason.blockers, metrics: {} };
   }
 
   const producerConfig = roleConfig(spec, 'producer');
+  const producerTimeoutSeconds = stageRoleTimeout(spec, stageName, 'producer');
   const producerPrompt = buildRolePrompt({
     spec,
     stage: stageName,
@@ -1128,33 +1634,126 @@ async function executeStage(runDir, state, spec) {
 
   // Worktree setup for mutating stages
   const worktreeInfo = ensureWorktree({ spec, runDir, state, stageName });
-  const producerWorkspace = worktreeInfo?.worktreePath ?? (spec.branchWorkspace || spec.workspace);
+  // branchWorkspace may not exist — fall back to spec.workspace (always valid)
+  const producerWorkspace = worktreeInfo?.worktreePath ?? (fileExists(spec.branchWorkspace) ? spec.branchWorkspace : spec.workspace);
 
   if (fileExists(producerReportPath) && fs.readFileSync(producerReportPath, 'utf8').trim()) {
     outputs.producer = fs.readFileSync(producerReportPath, 'utf8').trim();
+    updateRoleState(paths, 'producer', {
+      stage: stageName,
+      round: state.currentRound,
+      status: 'completed',
+      lastPid: null,
+      finishedAt: nowIso(),
+      timeoutSeconds: producerTimeoutSeconds,
+      lastError: null,
+    });
     appendTimeline(runDir, `producer skipped (report already exists) stage ${stageName} round ${state.currentRound}`);
     // Capture git status even for skipped producer (worktree may have changed)
     if (worktreeInfo?.worktreePath) {
       captureGitStatus({ worktreePath: worktreeInfo.worktreePath, runDir, stageDir, state });
     }
   } else {
+    updateRoleState(paths, 'producer', {
+      stage: stageName,
+      round: state.currentRound,
+      status: 'running',
+      startedAt: nowIso(),
+      finishedAt: null,
+      terminatedAt: null,
+      lastPid: null,
+      timeoutSeconds: producerTimeoutSeconds,
+      lastError: null,
+    });
     const protectedSnapshot = snapshotProtectedFiles(protectedFiles);
     const producerFailLog = path.join(stageDir, 'producer-failure.log');
+    const producerWorklogPath = paths.producerWorklogPath;
     let producerOutput;
+    let producerTimedOut = false;
+    let extensionsUsed = 0;
     try {
-      producerOutput = runAgent({
+      const result = await runAgentWithProgressCheck({
         cwd: producerWorkspace,
         agent: producerConfig.agent,
         model: producerConfig.model,
         prompt: producerPrompt,
-        timeoutSeconds: stageRoleTimeout(spec, stageName, 'producer'),
-        failLogPath: producerFailLog,
+        timeoutSeconds: producerTimeoutSeconds,
+        promptDir: runDir,
+        runDir,
+        roleLabel: 'producer',
+        worktreePath: worktreeInfo?.worktreePath,
+        worklogPath: producerWorklogPath,
       });
+      producerOutput = result.stdout;
+      extensionsUsed = result.extensionsUsed ?? 0;
+      if (extensionsUsed > 0) {
+        appendTimeline(runDir, `Producer used ${extensionsUsed} timeout extensions`);
+      }
     } catch (agentErr) {
+      // Track consecutive timeouts for fuse mechanism
+      const isTimeout = agentErr.message?.includes('timed out') || agentErr.message?.includes('ETIMEDOUT');
+      if (isTimeout) {
+        // Initialize consecutiveTimeouts if not present (resume from old state)
+        if (!state.consecutiveTimeouts) state.consecutiveTimeouts = {};
+        state.consecutiveTimeouts[stageName] = (state.consecutiveTimeouts[stageName] || 0) + 1;
+        appendTimeline(runDir, `Producer timeout #${state.consecutiveTimeouts[stageName]} for stage ${stageName}`);
+        
+        // Fuse: halt after 2 consecutive timeouts on same stage
+        if (state.consecutiveTimeouts[stageName] >= 2) {
+          state.status = 'halted';
+          state.haltReason = {
+            type: 'repeated_timeout',
+            stage: stageName,
+            round: state.currentRound,
+            details: `Producer timed out ${state.consecutiveTimeouts[stageName]} times on stage ${stageName}. Timeout may be too short or task too complex.`,
+            blockers: [
+              'Repeated timeout suggests insufficient timeout or overly complex task.',
+              'Consider: 1) Increase timeout in stageRoleTimeouts, 2) Simplify task scope, 3) Check for infinite loops in agent.',
+            ],
+          };
+          saveState(runDir, state);
+          appendTimeline(runDir, `Sprint halted: repeated timeout on stage ${stageName}`);
+          updateSummary(runDir, [
+            `Status: ${state.status}`,
+            `Stage: ${stageName}`,
+            `Round: ${state.currentRound}`,
+            `Halt reason: ${state.haltReason.details}`,
+          ]);
+          cleanupRecordedRoleProcesses(paths, runDir);
+          cleanupWorktree({ state, runDir });
+          throw new Error(state.haltReason.details);
+        }
+      } else {
+        // Reset counter on non-timeout error
+        if (!state.consecutiveTimeouts) state.consecutiveTimeouts = {};
+        state.consecutiveTimeouts[stageName] = 0;
+      }
+      
+      // Write failure log
+      if (producerFailLog) {
+        ensureDir(path.dirname(producerFailLog));
+        writeText(producerFailLog, `# Agent Failure Log\n\n- agent: ${producerConfig.agent}\n- model: ${producerConfig.model}\n- error: ${agentErr.message ?? String(agentErr)}\n- extensionsUsed: ${extensionsUsed}\n\n`);
+      }
+      
       if (fileExists(producerReportPath) && fs.readFileSync(producerReportPath, 'utf8').trim()) {
         appendTimeline(runDir, `producer spawnSync timed out but report exists — recovering stage ${stageName} round ${state.currentRound}`);
         producerOutput = null;
+        producerTimedOut = true;
+        updateRoleState(paths, 'producer', {
+          status: 'completed_after_timeout',
+          lastPid: null,
+          finishedAt: nowIso(),
+          terminatedAt: nowIso(),
+          lastError: agentErr.message ?? String(agentErr),
+        });
       } else {
+        updateRoleState(paths, 'producer', {
+          status: isTimeout ? 'timed_out' : 'error',
+          lastPid: null,
+          finishedAt: nowIso(),
+          terminatedAt: isTimeout ? nowIso() : null,
+          lastError: agentErr.message ?? String(agentErr),
+        });
         throw agentErr;
       }
     }
@@ -1163,7 +1762,15 @@ async function executeStage(runDir, state, spec) {
     if (!fileExists(producerReportPath) || !fs.readFileSync(producerReportPath, 'utf8').trim()) {
       writeText(producerReportPath, `${outputs.producer}\n`);
     }
-    const producerViolated = detectProtectedWriteViolation(protectedFiles, protectedSnapshot);
+    updateRoleState(paths, 'producer', {
+      status: producerTimedOut ? 'completed_after_timeout' : 'completed',
+      lastPid: null,
+      finishedAt: nowIso(),
+      lastError: producerTimedOut ? 'Recovered after timeout because report existed on disk.' : null,
+    });
+    // Skip mtime-based violation check during timeout recovery — the producer may have
+    // been mid-write when interrupted, causing spurious mtime changes on protected files.
+    const producerViolated = producerTimedOut ? null : detectProtectedWriteViolation(protectedFiles, protectedSnapshot);
     if (producerViolated) {
       state.status = 'halted';
       state.haltReason = {
@@ -1181,10 +1788,16 @@ async function executeStage(runDir, state, spec) {
         `Round: ${state.currentRound}`,
         `Halt reason: ${state.haltReason.details}`,
       ]);
+      cleanupRecordedRoleProcesses(paths, runDir);
       cleanupWorktree({ state, runDir });
       throw new Error(state.haltReason.details);
     }
     appendTimeline(runDir, `producer completed stage ${stageName} round ${state.currentRound}`);
+    // Reset consecutive timeout counter on successful completion
+    if (!state.consecutiveTimeouts) state.consecutiveTimeouts = {};
+    if (state.consecutiveTimeouts[stageName]) {
+      state.consecutiveTimeouts[stageName] = 0;
+    }
     // Capture git status after producer completes for reviewers to reference
     if (worktreeInfo?.worktreePath) {
       captureGitStatus({ worktreePath: worktreeInfo.worktreePath, runDir, stageDir, state });
@@ -1215,6 +1828,7 @@ async function executeStage(runDir, state, spec) {
       `Round: ${state.currentRound}`,
       `Halt reason: ${state.haltReason.details}`,
     ]);
+    cleanupRecordedRoleProcesses(paths, runDir);
     cleanupWorktree({ state, runDir });
     return { outcome: 'halt', summary: state.haltReason.details, blockers: state.haltReason.blockers, metrics: {} };
   }
@@ -1243,6 +1857,7 @@ async function executeStage(runDir, state, spec) {
 
   // Collect outputs and timeout flags
   const reviewerTimeouts = [];
+  const reviewerViolations = [];
   for (const result of reviewerResults) {
     if (result.error) {
       appendTimeline(runDir, `${result.role} error: ${result.error}`);
@@ -1253,7 +1868,8 @@ async function executeStage(runDir, state, spec) {
       reviewerTimeouts.push({ role: result.role, timedOut: true, hadReport: result.reportExisted });
     }
     if (result.violatedFile) {
-      appendTimeline(runDir, `${result.role} modified protected file ${result.violatedFile}`);
+      appendTimeline(runDir, `${result.role} modified protected file ${result.violatedFile} — report invalidated`);
+      reviewerViolations.push({ role: result.role, violatedFile: result.violatedFile });
     }
   }
   heartbeatState(runDir, state, { currentRole: null });
@@ -1290,34 +1906,77 @@ async function executeStage(runDir, state, spec) {
 
       if (fileExists(grReportPath) && fs.readFileSync(grReportPath, 'utf8').trim()) {
         globalReviewerOutput = fs.readFileSync(grReportPath, 'utf8').trim();
+        updateRoleState(paths, 'global_reviewer', {
+          stage: stageName,
+          round: state.currentRound,
+          status: 'completed',
+          lastPid: null,
+          finishedAt: nowIso(),
+          timeoutSeconds: stageRoleTimeout(spec, stageName, 'global_reviewer'),
+          lastError: null,
+        });
         appendTimeline(runDir, `global_reviewer skipped (report already exists) stage ${stageName} round ${state.currentRound}`);
       } else {
+        updateRoleState(paths, 'global_reviewer', {
+          stage: stageName,
+          round: state.currentRound,
+          status: 'running',
+          startedAt: nowIso(),
+          finishedAt: null,
+          terminatedAt: null,
+          lastPid: null,
+          timeoutSeconds: stageRoleTimeout(spec, stageName, 'global_reviewer'),
+          lastError: null,
+        });
         const protectedSnapshot = snapshotProtectedFiles(protectedFiles);
         const grFailLog = path.join(stageDir, 'global-reviewer-failure.log');
         let grOutput;
         try {
           grOutput = runAgent({
-            cwd: worktreeInfo?.worktreePath ?? (spec.branchWorkspace || spec.workspace),
+            cwd: worktreeInfo?.worktreePath ?? (fileExists(spec.branchWorkspace) ? spec.branchWorkspace : spec.workspace),
             agent: globalReviewerConfig.agent,
             model: globalReviewerConfig.model,
             prompt: globalReviewerPrompt,
             timeoutSeconds: stageRoleTimeout(spec, stageName, 'global_reviewer'),
             failLogPath: grFailLog,
+            promptDir: runDir,
+            runDir,
+            roleLabel: 'global_reviewer',
           });
         } catch (grErr) {
           appendTimeline(runDir, `global_reviewer error: ${grErr.message}`);
           grOutput = null;
+          updateRoleState(paths, 'global_reviewer', {
+            status: grErr.message?.includes('timed out') ? 'timed_out' : 'error',
+            lastPid: null,
+            finishedAt: nowIso(),
+            terminatedAt: grErr.message?.includes('timed out') ? nowIso() : null,
+            lastError: grErr.message ?? String(grErr),
+          });
         }
         if (grOutput) writeText(grStdoutPath, `${grOutput}\n`);
         globalReviewerOutput = readRoleOutput({ reportPath: grReportPath, stdout: grOutput ?? '' });
-        if (!fileExists(grReportPath) || !fs.readFileSync(grReportPath, 'utf8').trim()) {
+        if (globalReviewerOutput && !reportExistsAndNonEmpty(grReportPath)) {
           writeText(grReportPath, `${globalReviewerOutput}\n`);
+        }
+        if (reportExistsAndNonEmpty(grReportPath)) {
+          updateRoleState(paths, 'global_reviewer', {
+            status: 'completed',
+            lastPid: null,
+            finishedAt: nowIso(),
+            lastError: null,
+          });
         }
         const grViolated = detectProtectedWriteViolation(protectedFiles, protectedSnapshot);
         if (grViolated) {
-          appendTimeline(runDir, `global_reviewer modified protected file ${grViolated} — continuing anyway`);
+          appendTimeline(runDir, `global_reviewer modified protected file ${grViolated} — report invalidated`);
+          reviewerViolations.push({ role: 'global_reviewer', violatedFile: grViolated });
         }
-        appendTimeline(runDir, `global_reviewer completed stage ${stageName} round ${state.currentRound}`);
+        if (reportExistsAndNonEmpty(grReportPath)) {
+          appendTimeline(runDir, `global_reviewer completed stage ${stageName} round ${state.currentRound}`);
+        } else {
+          appendTimeline(runDir, `global_reviewer produced no report for stage ${stageName} round ${state.currentRound}`);
+        }
       }
     }
     heartbeatState(runDir, state, { currentRole: null });
@@ -1335,6 +1994,7 @@ async function executeStage(runDir, state, spec) {
     globalReviewerPath,
     state,
     reviewerTimeouts: reviewerTimeouts.length > 0 ? reviewerTimeouts : null,
+    reviewerViolations: reviewerViolations.length > 0 ? reviewerViolations : null,
   });
 }
 
@@ -1360,6 +2020,10 @@ function abortRun(runId) {
     `Round: ${state.currentRound}`,
     'Operator aborted this sprint.',
   ]);
+  const paths = ensureStagePaths(runDir, state.currentStageIndex, state.currentStage);
+  cleanupRecordedRoleProcesses(paths, runDir);
+  terminateProcessTree(state.orchestratorPid, { runDir, label: 'orchestrator' });
+  cleanupWorktree({ state, runDir });
 }
 
 function pauseRun(runId) {
@@ -1384,6 +2048,8 @@ function pauseRun(runId) {
     `Round: ${state.currentRound}`,
     'Operator paused this sprint.',
   ]);
+  const paths = ensureStagePaths(runDir, state.currentStageIndex, state.currentStage);
+  cleanupRecordedRoleProcesses(paths, runDir);
 }
 
 function listRuns() {
@@ -1604,6 +2270,7 @@ async function main() {
   }
 
   const { runDir, state } = loadOrInitState(args);
+  reconcileRunState(runDir, state);
   const spec = loadSpec(state, args);
   const sprintStartedAt = Date.parse(state.createdAt) || Date.now();
 
@@ -1650,6 +2317,8 @@ async function main() {
           `Round: ${state.currentRound}`,
           `Halt reason: ${state.haltReason.details}`,
         ]);
+        const paths = ensureStagePaths(runDir, state.currentStageIndex, state.currentStage);
+        cleanupRecordedRoleProcesses(paths, runDir);
         break;
       }
 
@@ -1667,6 +2336,8 @@ async function main() {
         ]);
       }
       if (state.status === 'halted') {
+        const paths = ensureStagePaths(runDir, state.currentStageIndex, state.currentStage);
+        cleanupRecordedRoleProcesses(paths, runDir);
         cleanupWorktree({ state, runDir });
         appendTimeline(runDir, `Sprint halted: ${state.haltReason?.details ?? 'unknown reason'}`);
         updateSummary(runDir, [
@@ -1687,6 +2358,8 @@ async function main() {
         details: String(error),
         blockers: [String(error)],
       };
+      const paths = ensureStagePaths(runDir, state.currentStageIndex, state.currentStage);
+      cleanupRecordedRoleProcesses(paths, runDir);
       cleanupWorktree({ state, runDir });
       saveState(runDir, state);
       appendTimeline(runDir, `Sprint halted by orchestrator error: ${String(error)}`);

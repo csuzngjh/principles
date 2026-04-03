@@ -1,174 +1,189 @@
 # External Integrations
 
-**Analysis Date:** 2026-03-26
+**Analysis Date:** 2026-04-02
 
-## APIs & External Services
+## External APIs
 
-**Package Registry:**
-- npm registry (https://registry.npmjs.org) - Package distribution
-  - Auth: NPM_TOKEN secret in GitHub Actions
-  - Packages: principles-disciple, create-principles-disciple
+**No external REST/HTTP API integrations exist.** The plugin operates entirely within the OpenClaw Gateway runtime. All API calls are internal to the Gateway's plugin host system.
 
-**GitHub:**
-- GitHub API (via actions/setup-node@v4, actions/checkout@v6) - CI/CD
-  - Auth: GITHUB_TOKEN (automatically provided)
-  - Used for: Repository checkout, Node.js setup, releases
+**Internal HTTP Routes (provided BY the plugin, not consumed):**
+- The plugin registers HTTP routes via `api.registerHttpRoute()` in `packages/openclaw-plugin/src/index.ts`
+- Route handler: `packages/openclaw-plugin/src/http/principles-console-route.ts`
+- Route prefix: `/plugins/principles/`
+- API prefix: `/plugins/principles/api/`
+- Static assets: `/plugins/principles/assets/`
+- These serve the Principles Console web UI and provide JSON API endpoints for the React dashboard
 
-**OpenClaw Ecosystem:**
-- OpenClaw Gateway - Plugin runtime environment
-  - SDK: openclaw >= 1.0.0 (peer dependency, optional)
-  - SDK types: @openclaw/sdk, @openclaw/plugin-kit (external, bundled by esbuild)
-  - Integration: Plugin hooks (before_prompt_build, before_tool_call, after_tool_call, subagent_spawning, before_compaction)
+**Gateway Token Auth:**
+- The web UI uses Bearer token authentication with the OpenClaw Gateway
+- Token management in `packages/openclaw-plugin/ui/src/api.ts`
+- Token sources (priority order): URL parameter → PD localStorage → OpenClaw shared settings
+- Authorization header: `Authorization: Bearer {token}`
 
-## Data Storage
+## Databases
 
-**Databases:**
-- SQLite (better-sqlite3 12.8.0)
-  - Connection: Local file-based databases
-  - Client: better-sqlite3 (synchronous API)
-  - Locations:
-    - Workspace trajectory DB: `{stateDir}/trajectory.db` (per workspace)
-    - Control UI DB: `{stateDir}/control-ui.db` (per workspace)
-    - Central aggregation DB: Centralized multi-workspace database (in `src/service/central-database.ts`)
-  - Schema: Tables for events, principles, pain samples, evolution tasks
-  - Query service: `EvolutionQueryService`, `ControlUiQueryService`
+**SQLite via better-sqlite3 (embedded, local only):**
 
-**File Storage:**
-- Local filesystem only
-  - Templates: `templates/` directory (bundled with plugin)
-  - Workspace state: `.state/` directory in each workspace
-  - Principles files: `.principles/` directory (PLAN.md, DECISION_POLICY.json, etc.)
-  - No cloud storage, no S3, no external file services
+All data is stored in local SQLite databases — no remote database connections, no database servers required.
 
-**Caching:**
-- None detected (no Redis, no external cache)
+### 1. Trajectory Database
+- **Purpose:** Historical task outcomes, trust changes, evolution progress analytics
+- **Location:** `{workspaceDir}/.state/trajectory.db`
+- **Client:** `better-sqlite3` (^12.8.0)
+- **Implementation:** `packages/openclaw-plugin/src/core/trajectory.ts`
+- **Schema:** sessions, assistant_turns, user_turns, tool_calls, pain_events, gate_blocks, correction_samples, blobs
+- **WAL mode:** Enabled (`journal_mode = WAL`)
+- **Busy timeout:** 5000ms
+- **File locking:** `withLock()` for critical writes
+
+### 2. Control UI Database
+- **Purpose:** Analytics read models for dashboard visualization
+- **Location:** `{workspaceDir}/.state/control_ui.db`
+- **Implementation:** `packages/openclaw-plugin/src/core/control-ui-db.ts`
+- **Schema:** thinking_model_events, daily model usage aggregates
+
+### 3. Central Aggregation Database
+- **Purpose:** Aggregates data from ALL agent workspaces into unified view
+- **Location:** `~/.openclaw/.central/aggregated.db`
+- **Implementation:** `packages/openclaw-plugin/src/service/central-database.ts`
+- **Schema:** workspaces, daily_stats (cross-workspace), various aggregated tables
+- **Auto-discovery:** Discovers up to 10 default workspaces (builder, diagnostician, explorer, hr, main, pm, repair, research, resource-scout, verification)
+- **Sync:** On-demand via `/api/central/sync` POST endpoint
+
+### 4. Subagent Workflow Database
+- **Purpose:** Persistent workflow state for multi-step subagent orchestration
+- **Location:** `{workspaceDir}/.state/subagent_workflows.db`
+- **Implementation:** `packages/openclaw-plugin/src/service/subagent-workflow/workflow-store.ts`
+- **Schema:** workflows, workflow_events
+- **Foreign keys:** Enabled
+
+## File-Based Data Storage
+
+**JSON/JSONL Files (no external services):**
+
+| File | Location | Purpose |
+|------|----------|---------|
+| Evolution queue | `.state/evolution_queue.json` | Task queue for evolution worker |
+| Evolution state | `.state/evolution.jsonl` | Event-sourced evolution state stream |
+| Event log | `memory/logs/events.jsonl` | Structured event log (buffered, 20 entries or 30s flush) |
+| Daily stats | `memory/logs/daily-stats.json` | Aggregated daily statistics |
+| Plugin log | `memory/logs/plugin.log` | Runtime log file |
+| Trust scorecard | `.state/trust_scorecard.json` | Trust stage and score |
+| Config | `.state/pain_config.json` | Runtime configuration |
+| Pain dictionary | `.state/pain_dictionary.json` | Pain detection rules |
+| Session state | `.state/sessions/*.json` | Per-session GFI and token tracking |
+| Profile | `.principles/PROFILE.json` | User expertise profile |
+| Decision policy | `.principles/DECISION_POLICY.json` | Decision rules |
+| Deployment registry | `.state/nocturnal/deployment-registry.json` | Model deployment bindings |
+
+**No remote file storage.** Everything is local filesystem only.
 
 ## Authentication & Identity
 
-**Auth Provider:**
-- None (plugin runs locally, no user authentication)
-  - Implementation: No auth logic in codebase
-  - OpenClaw Gateway handles authentication at gateway level
-  - Plugin trusts gateway-provided context
+**No external auth providers.** Authentication is handled entirely within the OpenClaw ecosystem:
 
-## Monitoring & Observability
+**Trust Engine (Internal):**
+- Implementation: `packages/openclaw-plugin/src/core/trust-engine.ts`
+- 4-stage model: Observer → Editor → Developer → Architect
+- Score range: 30-100 (floor of 30, cold-start grace period)
+- Stage determines file modification permissions and risk path access
+- NOT an external identity provider — this is an internal permission model
 
-**Error Tracking:**
-- None (no Sentry, no external error tracking)
-  - Errors logged to local files in `{stateDir}/logs/`
-  - Runtime logs: `plugin.log`
-  - Event logs: `events.jsonl` (structured JSONL format)
-  - Daily stats: `daily-stats.json`
+**Gateway Token (OpenClaw):**
+- The web UI reuses OpenClaw Gateway authentication tokens
+- Token stored in browser localStorage (`pd_gateway_token`)
+- Cross-origin token sharing from OpenClaw main control panel
+- No OAuth, no JWT, no external identity service
 
-**Logs:**
-- Local file-based logging
-  - Location: Workspace `.state/logs/` directory
-  - Format: Plain text (plugin.log), JSONL (events.jsonl)
-  - No remote logging service (no ELK, no CloudWatch, no Papertrail)
+**Plugin Security Gate:**
+- Implementation: `packages/openclaw-plugin/src/hooks/gate.ts`
+- `before_tool_call` hook intercepts risky operations
+- Requires `PLAN.md` with `STATUS: READY` for protected path modifications
+- Progressive gating based on trust stage and audit level
+- Bash command risk assessment: `packages/openclaw-plugin/src/hooks/bash-risk.ts`
 
-## CI/CD & Deployment
+## Third-party Services
 
-**Hosting:**
-- GitHub (https://github.com/csuzngjh/principles)
-  - Repository hosting
-  - Release management via GitHub Releases
+**No third-party cloud services.** The plugin has zero external service dependencies:
 
-**CI Pipeline:**
-- GitHub Actions (`.github/workflows/`)
-  - `ci.yml` - Continuous integration (lint, test, build)
-  - `publish-npm.yml` - Automated publishing to npm
-  - `pr-checks.yml` - Pull request validation
-  - `ai-review.yml` - AI code review
-  - `stale.yml` - Issue management
-  - `issue-management.yml` - Issue automation
-  - Test matrix: Node.js 18, 20, 22
-  - OS: ubuntu-latest
+- No email/SMS/notification services
+- No payment processing
+- No cloud storage (S3, GCS, etc.)
+- No monitoring/observability (Datadog, Sentry, etc.)
+- No CI/CD webhooks
+- No social media integrations
+- No analytics platforms (Google Analytics, Mixpanel, etc.)
+- No caching layer (Redis, Memcached, etc.)
 
-**Deployment:**
-- npm registry (public packages)
-  - Packages: principles-disciple (plugin), create-principles-disciple (CLI)
-  - Access: public (npm publish --access public)
-  - Versioning: semantic-release (Conventional Commits)
-  - Trigger: Merged PRs, manual workflow dispatch, tag pushes
-  - Provenance: Enabled (npm publish --provenance)
+**All computation is local.** The plugin runs entirely within the OpenClaw Gateway process on the developer's machine.
 
-## Environment Configuration
+## Internal Event System
 
-**Required env vars:**
-- None (plugin uses file-based configuration)
-- Runtime: OpenClaw Gateway provides plugin context
-- Build: GitHub Actions injects NPM_TOKEN, GITHUB_TOKEN
+**OpenClaw Plugin Hooks (Lifecycle Events):**
 
-**Secrets location:**
-- GitHub Secrets (for CI/CD only)
-  - NPM_TOKEN - npm registry authentication
-  - GITHUB_TOKEN - GitHub API authentication (auto-provided)
-- No local secrets in repository
-- No .env files (forbidden)
+The plugin subscribes to these OpenClaw runtime hooks:
 
-## Webhooks & Callbacks
+| Hook | Handler | Purpose |
+|------|---------|---------|
+| `before_prompt_build` | `src/hooks/prompt.ts` | Inject Thinking OS, OKR, pain context into AI prompts |
+| `before_tool_call` | `src/hooks/gate.ts` | Security gate — block risky operations without approved plan |
+| `after_tool_call` | `src/hooks/pain.ts` | Detect tool failures, record pain signals |
+| `llm_output` | `src/hooks/llm.ts` | Analyze LLM output for empathy signals, corrections |
+| `before_message_write` | `src/hooks/message-sanitize.ts` | Sanitize messages before writing |
+| `subagent_spawning` | `src/index.ts` | Shadow routing observation recording |
+| `subagent_ended` | `src/hooks/subagent.ts` | Complete shadow observations, cleanup |
+| `before_reset` | `src/hooks/lifecycle.ts` | Checkpoint before session reset |
+| `before_compaction` | `src/hooks/lifecycle.ts` | Checkpoint before context compaction |
+| `after_compaction` | `src/hooks/lifecycle.ts` | Restore state after compaction |
 
-**Incoming:**
-- Plugin HTTP routes (via OpenClaw Gateway)
-  - Route: `/plugins/principles/` - Principles Console UI
-  - API: `/plugins/principles/api/*` - REST API for console
-  - Assets: `/plugins/principles/assets/*` - Static assets
-  - Implementation: `src/http/principles-console-route.ts`
-  - Framework: Node.js native http module (IncomingMessage, ServerResponse)
+**Background Services (registered via `api.registerService()`):**
 
-**Outgoing:**
-- None (no external webhook calls)
-  - Plugin does not make HTTP requests to external services
-  - No webhooks to third-party services
-  - No outbound API calls (except npm registry for dependencies)
+| Service | Implementation | Purpose |
+|---------|---------------|---------|
+| Evolution Worker | `src/service/evolution-worker.ts` | Polls pain queue, processes evolution tasks, runs nocturnal reflection |
+| Trajectory Service | `src/service/trajectory-service.ts` | Manages trajectory DB lifecycle |
 
-## CLI Tools & Scripts
+**Custom Tools (registered via `api.registerTool()`):**
 
-**Root Scripts:**
-- `scripts/release.sh` - Manual release helper
-- `scripts/sync-version.sh` - Version synchronization
-- `scripts/cleanup_backups.sh` - Backup cleanup
-- `scripts/collect-control-plane-snapshot.sh` - Data collection for control plane
-- `scripts/migrate-to-evolution-points.ts` - Migration script
-- `scripts/evolution_daemon.py` - Legacy evolution daemon (Python)
+| Tool | Implementation | Purpose |
+|------|---------------|---------|
+| Deep Reflect | `src/tools/deep-reflect.ts` | Triggered before complex tasks for structured self-reflection |
 
-**Plugin Scripts:**
-- `packages/openclaw-plugin/scripts/build-web.mjs` - UI bundling (esbuild)
-- `packages/openclaw-plugin/scripts/install-dependencies.cjs` - Post-install dependency setup
-- `packages/openclaw-plugin/scripts/sync-plugin.mjs` - Plugin file synchronization
-- `packages/openclaw-plugin/scripts/verify-build.mjs` - Build verification
+## External Training Integration (Nocturnal)
 
-**CLI:**
-- `create-principles-disciple` (npm package)
-  - Interactive installer: `npx create-principles-disciple`
-  - Non-interactive: `npx create-principles-disciple --yes`
-  - Uninstaller: `create-principles-disciple uninstall`
-  - Status check: `create-principles-disciple status`
+**Architecture: Plugin produces training artifacts; external backends consume them.**
 
-## Build Output Targets
+The Nocturnal system generates training data and experiment specs for ORPO fine-tuning, but the plugin does NOT execute training itself.
 
-**Plugin Package:**
-- `dist/index.js` - Main entry point (ESM)
-- `dist/index.d.ts` - TypeScript declarations
-- `dist/bundle.js` - Production bundle (esbuild, minified)
-- `dist/types.js`, `dist/types.d.ts` - Type exports
-- `dist/web/assets/app.js` - Bundled React UI
-- `dist/web/assets/app.js.map` - Source maps (dev)
-- `dist/templates/` - Workspace templates (copied)
-- `dist/agents/` - Agent definitions (copied if exists)
-- `dist/openclaw.plugin.json` - Plugin manifest
+**Contract:** `packages/openclaw-plugin/src/core/external-training-contract.ts`
+- Defines experiment spec schema (backend-agnostic)
+- Supported backends: `peft-trl-orpo`, `unsloth-orpo`, `dry-run`
+- Training mode: ORPO (Orthogonal Preference Optimization) for production
 
-**CLI Package:**
-- `dist/index.js` - CLI entry point (ESM)
-- `dist/**/*.d.ts` - TypeScript declarations
-- `plugin/` - Plugin files bundled with CLI
+**Data Flow:**
+1. Plugin extracts trajectory samples → `src/core/nocturnal-trajectory-extractor.ts`
+2. Nocturnal Trinity (Dreamer → Philosopher → Scribe) generates reflection artifacts → `src/core/nocturnal-trinity.ts`
+3. Arbiter validates executability → `src/core/nocturnal-arbiter.ts`, `src/core/nocturnal-executability.ts`
+4. Approved samples exported as ORPO dataset → `src/core/nocturnal-export.ts`
+5. External trainer (Python script) consumes the dataset — `scripts/nocturnal/trainer/` (separate process, no npm dependencies)
+6. Training results imported back via `/nocturnal-train import-result` command
+7. Promotion gate evaluates checkpoints → `src/core/promotion-gate.ts`
+8. Deployment registry binds checkpoints to worker profiles → `src/core/model-deployment-registry.ts`
 
-**Distribution:**
-- npm packages: principles-disciple, create-principles-disciple
-- No Docker images
-- No serverless deployments
-- No CDN distribution
+**Shadow Routing (Phase 5):**
+- Runtime shadow observation recording: `src/core/shadow-observation-registry.ts`
+- Task classification for routing: `src/core/local-worker-routing.ts`
+- Worker profiles: `local-reader`, `local-editor`
+
+## Webhooks & Events
+
+**No incoming or outgoing webhooks.** All events are internal to the OpenClaw runtime.
+
+**Internal Event Flow:**
+- Event sourcing via `EvolutionReducerImpl` — appends events to `.state/evolution.jsonl`
+- Buffered event logging — batches 20 entries or flushes every 30 seconds
+- Daily statistics aggregation in `EventLog` class
 
 ---
 
-*Integration audit: 2026-03-26*
+*Integration audit: 2026-04-02*

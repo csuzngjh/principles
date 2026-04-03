@@ -281,14 +281,14 @@ export function createDeepReflectTool(api: OpenClawPluginApi) {
                     };
                 }
 
-                await subagentRuntime.run({
+                const runResult = await subagentRuntime.run({
                     sessionKey,
                     message: `请对我当前的任务进行深层次反思。\n\n上下文：${context}`,
                     extraSystemPrompt,
                     deliver: false
                 });
 
-                const finalStatus: SubagentWaitResult = await subagentRuntime.waitForRun({ runId: sessionKey });
+                const finalStatus: SubagentWaitResult = await subagentRuntime.waitForRun({ runId: runResult.runId });
                 const duration = Date.now() - startTime;
 
                 if (finalStatus.status === 'timeout') {
