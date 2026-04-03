@@ -240,7 +240,7 @@ export function handleLlmOutput(
     const eventLog = wctx.eventLog;
 
     // Track this turn in the core session memory
-    const state = trackLlmOutput(ctx.sessionId, event.usage, config, ctx.workspaceDir);
+    const state = trackLlmOutput(ctx.sessionId, event.usage, config, ctx.workspaceDir, ctx.sessionKey, ctx.trigger);
 
     // We need actual assistant text to analyze
     if (!event.assistantTexts || event.assistantTexts.length === 0) return;
