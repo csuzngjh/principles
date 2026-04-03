@@ -216,6 +216,7 @@ function Shell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="app-shell">
+      <a href="#main-content" className="skip-link">跳过导航，直接访问内容</a>
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-logo">
@@ -280,7 +281,7 @@ function Shell({ children }: { children: React.ReactNode }) {
           </button>
         </div>
       </aside>
-      <main className="content">{children}</main>
+      <main className="content" id="main-content">{children}</main>
     </div>
   );
 }
