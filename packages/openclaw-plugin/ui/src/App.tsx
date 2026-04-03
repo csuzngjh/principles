@@ -127,7 +127,7 @@ function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!token.trim()) {
-      setError('t('auth.errorEmpty')');
+      setError(t('auth.errorEmpty'));
       return;
     }
     setLoading(true);
@@ -137,7 +137,7 @@ function LoginPage() {
     if (success) {
       navigate('/overview');
     } else {
-      setError('t('auth.errorInvalid')');
+      setError(t('auth.errorInvalid'));
     }
   };
 
@@ -217,6 +217,7 @@ function formatDate(value: string | null): string {
 
 function Shell({ children }: { children: React.ReactNode }) {
   const { logout, token } = useAuth();
+  const { t } = useI18n();
 
   return (
     <div className="app-shell">
@@ -291,6 +292,7 @@ function Shell({ children }: { children: React.ReactNode }) {
 }
 
 function Loading() {
+  const { t } = useI18n();
   return (
     <div className="loading-state">
       <div className="spinner"></div>
@@ -399,7 +401,7 @@ function WorkspaceConfig() {
               />
             </div>
             <button type="submit" className="button-primary" disabled={adding || !newWsName.trim() || !newWsPath.trim()}>
-              {adding ? 't('workspace.adding')' : 't('workspace.addWorkspace')'}
+              {adding ? t('workspace.adding') : t('workspace.addWorkspace')}
             </button>
           </div>
         </form>
