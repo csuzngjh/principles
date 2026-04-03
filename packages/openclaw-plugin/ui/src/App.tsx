@@ -473,11 +473,11 @@ function OverviewPage() {
         <div className="meta">
           <TimeRangeSelector value={days} onChange={setDays} />
           {centralInfo && (
-            <div>{centralInfo.enabledWorkspaceCount} / {centralInfo.workspaceCount} t('overview.workspacesEnabled')</div>
+            <div>{centralInfo.enabledWorkspaceCount} / {centralInfo.workspaceCount} {t('overview.workspacesEnabled')}</div>
           )}
-          <div>t('overview.freshness') + ':' {formatDate(data.dataFreshness)}</div>
+          <div>{t('overview.freshness')}: {formatDate(data.dataFreshness)}</div>
           <button className="button-secondary" onClick={handleSync} disabled={syncing}>
-            {syncing ? 't('overview.syncing')' : 't('overview.syncAll')'}
+            {syncing ? t('overview.syncing') : t('overview.syncAll')}
           </button>
         </div>
       </header>
