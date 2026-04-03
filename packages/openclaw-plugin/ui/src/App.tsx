@@ -1282,6 +1282,7 @@ function EvolutionPage() {
 
 // ===== Phase 6: Feedback Loop Page =====
 function FeedbackPage() {
+  const { t } = useI18n();
   const [gfi, setGfi] = useState<FeedbackGfiResponse | null>(null);
   const [empathyEvents, setEmpathyEvents] = useState<EmpathyEvent[]>([]);
   const [gateBlocks, setGateBlocks] = useState<FeedbackGateBlock[]>([]);
@@ -1350,7 +1351,7 @@ function FeedbackPage() {
         <section className="panel">
           <h3>同理心检测事件</h3>
           {empathyEvents.length === 0 ? (
-            <div className="muted">暂无同理心事件</div>
+            <EmptyState title={t('feedback.noEmpathyEvents')} description={t('feedback.noEmpathyEventsDesc')} />
           ) : (
             <div className="stack">
               {empathyEvents.map((event, i) => (
@@ -1376,7 +1377,7 @@ function FeedbackPage() {
         <section className="panel">
           <h3>GFI → Gate 拦截关联</h3>
           {gateBlocks.length === 0 ? (
-            <div className="muted">暂无拦截记录</div>
+            <EmptyState title={t('feedback.noGateBlocks')} description={t('feedback.noGateBlocksDesc')} />
           ) : (
             <div className="stack">
               {gateBlocks.map((block, i) => (
@@ -1487,7 +1488,7 @@ function GateMonitorPage() {
       <section className="panel">
         <h3>拦截历史</h3>
         {gateBlocks.length === 0 ? (
-          <div className="muted">暂无拦截记录</div>
+          <EmptyState title={t('feedback.noGateBlocks')} description={t('feedback.noGateBlocksDesc')} />
         ) : (
           <div className="list-table">
             {gateBlocks.map((block, i) => (

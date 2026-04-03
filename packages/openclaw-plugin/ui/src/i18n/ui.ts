@@ -23,7 +23,7 @@ export const i18n = {
   // Shell / Navigation
   // ========================================================================
   nav: {
-    overview: { zh: '概览', en: 'Overview' },
+    overview: { zh: '工作区健康度', en: 'Workspace Health' },
     evolution: { zh: '进化追踪', en: 'Evolution' },
     samples: { zh: '样本审核', en: 'Samples' },
     thinkingModels: { zh: '思维模型', en: 'Thinking Models' },
@@ -244,6 +244,16 @@ export const i18n = {
       name: { zh: 'workspace-custom', en: 'workspace-custom' },
       path: { zh: '/home/user/.openclaw/workspace-custom', en: '/home/user/.openclaw/workspace-custom' },
     },
+  },
+
+  // ========================================================================
+  // Feedback / Gate Monitor
+  // ========================================================================
+  feedback: {
+    noEmpathyEvents: { zh: '暂无同理心事件', en: 'No Empathy Events' },
+    noEmpathyEventsDesc: { zh: '尚未检测到同理心偏移事件', en: 'No empathy deviation events detected yet' },
+    noGateBlocks: { zh: '暂无拦截记录', en: 'No Gate Blocks' },
+    noGateBlocksDesc: { zh: '尚未有 GFI 拦截记录', en: 'No GFI gate blocks recorded yet' },
   },
 } as const;
 
