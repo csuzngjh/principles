@@ -27,6 +27,8 @@ export const i18n = {
     evolution: { zh: '进化追踪', en: 'Evolution' },
     samples: { zh: '样本审核', en: 'Samples' },
     thinkingModels: { zh: '思维模型', en: 'Thinking Models' },
+    feedback: { zh: '反馈回路', en: 'Feedback Loop' },
+    gateMonitor: { zh: 'Gate 监控', en: 'Gate Monitor' },
     exportSamples: { zh: '导出样本', en: 'Export Samples' },
     logout: { zh: '退出登录', en: 'Logout' },
   },
@@ -89,6 +91,32 @@ export const i18n = {
     syncAll: { zh: '同步全部', en: 'Sync All' },
     syncing: { zh: '同步中...', en: 'Syncing...' },
     workspacesEnabled: { zh: '个工作区已启用', en: 'workspaces enabled' },
+
+    // Health Cards (Phase 5)
+    health: {
+      gfi: { zh: 'GFI 疲劳指数', en: 'GFI Fatigue Index' },
+      threshold: { zh: '阈值', en: 'Threshold' },
+      peakToday: { zh: '今日峰值', en: 'Peak Today' },
+      painFlag: { zh: 'PainFlag', en: 'PainFlag' },
+      active: { zh: '活跃', en: 'Active' },
+      normal: { zh: '正常', en: 'Normal' },
+      noActivePain: { zh: '无活跃痛点', en: 'No active pain' },
+      source: { zh: '来源', en: 'Source' },
+      trustStage: { zh: 'Trust Stage', en: 'Trust Stage' },
+      stage: { zh: 'Stage', en: 'Stage' },
+      score: { zh: '分数', en: 'Score' },
+      epTier: { zh: 'EP Tier', en: 'EP Tier' },
+      points: { zh: '积分', en: 'Points' },
+      principlesTotal: { zh: '原则总数', en: 'Total Principles' },
+      candidate: { zh: '候', en: 'Cand' },
+      probation: { zh: '试', en: 'Prob' },
+      active2: { zh: '活', en: 'Act' },
+      deprecated: { zh: '废', en: 'Dep' },
+      queueBacklog: { zh: '队列积压', en: 'Queue Backlog' },
+      pending: { zh: '待处理', en: 'Pending' },
+      inProgress: { zh: '处理中', en: 'In Progress' },
+      completed: { zh: '已完成', en: 'Completed' },
+    },
 
     // KPI labels
     repeatErrorRate: { zh: '重复错误率', en: 'Repeat Error Rate' },
@@ -198,6 +226,25 @@ export const i18n = {
     completed: { zh: '已完成', en: 'Completed' },
     failed: { zh: '失败', en: 'Failed' },
 
+    // Active stage labels
+    activeStage: {
+      pending: { zh: '等待中', en: 'Pending' },
+      in_progress: { zh: '进行中', en: 'In Progress' },
+      completed: { zh: '已完成', en: 'Completed' },
+      idle: { zh: '空闲', en: 'Idle' },
+    },
+    enhancementLoopStatus: { zh: '增强回路当前状态', en: 'Enhancement Loop Status' },
+
+    // Stage labels (used in STAGE_LABELS)
+    stageLabels: {
+      pain_detected: { zh: '痛点检测', en: 'Pain Detected' },
+      queued: { zh: '已入队', en: 'Queued' },
+      started: { zh: '开始处理', en: 'Started' },
+      analyzing: { zh: '分析中', en: 'Analyzing' },
+      principle_generated: { zh: '原则生成', en: 'Principle Generated' },
+      completed: { zh: '已完成', en: 'Completed' },
+    },
+
     // Status filter
     filterAll: { zh: '全部', en: 'All' },
     statusFilter: { zh: '状态筛选', en: 'Status Filter' },
@@ -250,8 +297,34 @@ export const i18n = {
   // Feedback / Gate Monitor
   // ========================================================================
   feedback: {
+    pageTitle: { zh: '反馈回路', en: 'Feedback Loop' },
+    pageSubtitle: { zh: 'GFI 监控与同理心检测', en: 'GFI Monitoring & Empathy Detection' },
+    gfiDashboard: { zh: 'GFI 实时仪表盘', en: 'GFI Real-time Dashboard' },
+    threshold: { zh: '阈值', en: 'Threshold' },
+    peakToday: { zh: '今日峰值', en: 'Peak Today' },
+    hourlyTrend: { zh: '小时趋势', en: 'Hourly Trend' },
+    empathyEvents: { zh: '同理心检测事件', en: 'Empathy Events' },
+    gateBlocks: { zh: 'GFI 拦截关联', en: 'GFI Gate Blocks' },
     noEmpathyEvents: { zh: '暂无同理心事件', en: 'No Empathy Events' },
     noEmpathyEventsDesc: { zh: '尚未检测到同理心偏移事件', en: 'No empathy deviation events detected yet' },
+    noGateBlocks: { zh: '暂无拦截记录', en: 'No Gate Blocks' },
+    noGateBlocksDesc: { zh: '尚未有 GFI 拦截记录', en: 'No GFI gate blocks recorded yet' },
+  },
+
+  gate: {
+    pageTitle: { zh: 'Gate 监控', en: 'Gate Monitor' },
+    pageSubtitle: { zh: '拦截统计与 Trust/EP 双轨', en: 'Block Statistics & Trust/EP Dual Track' },
+    todayStats: { zh: '今日拦截统计', en: "Today's Block Statistics" },
+    gfiBlocks: { zh: 'GFI 拦截', en: 'GFI Blocks' },
+    stageBlocks: { zh: 'Stage 限制', en: 'Stage Limits' },
+    p03Blocks: { zh: 'P-03 不匹配', en: 'P-03 Mismatch' },
+    bypassAttempts: { zh: '绕过尝试', en: 'Bypass Attempts' },
+    p16Exemptions: { zh: 'P-16 豁免', en: 'P-16 Exemptions' },
+    trustEngine: { zh: 'Trust Engine', en: 'Trust Engine' },
+    evolutionEngine: { zh: 'Evolution Engine', en: 'Evolution Engine' },
+    blockHistory: { zh: '拦截历史', en: 'Block History' },
+    score: { zh: '分数', en: 'Score' },
+    points: { zh: '积分', en: 'Points' },
     noGateBlocks: { zh: '暂无拦截记录', en: 'No Gate Blocks' },
     noGateBlocksDesc: { zh: '尚未有 GFI 拦截记录', en: 'No GFI gate blocks recorded yet' },
   },
