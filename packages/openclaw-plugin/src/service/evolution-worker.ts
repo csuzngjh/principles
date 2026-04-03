@@ -1118,6 +1118,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                 // This makes nocturnal-runtime a visible part of the worker lifecycle.
                 // Phase 2.4: Enqueue sleep_reflection when workspace is idle and not in cooldown.
                 const idleResult = checkWorkspaceIdle(wctx.workspaceDir, {});
+                logger?.info?.(`[PD:EvolutionWorker] HEARTBEAT cycle=${new Date().toISOString()} idle=${idleResult.isIdle} idleForMs=${idleResult.idleForMs} userActiveSessions=${idleResult.userActiveSessions} abandonedSessions=${idleResult.abandonedSessionIds.length} lastActivityEpoch=${idleResult.mostRecentActivityAt}`);
                 if (idleResult.isIdle) {
                     logger?.debug?.(`[PD:EvolutionWorker] Workspace idle (${idleResult.idleForMs}ms since last activity)`);
                     // Phase 2.4: Enqueue sleep_reflection task if not in global cooldown
