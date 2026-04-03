@@ -3,8 +3,8 @@ import { determineOutputQuality, OUTPUT_QUALITY, validateStageReports, determine
 const VERDICT_RE = /(?:VERDICT:\s*\*{0,2}|##\s*VERDICT\s*\n+\*{0,2}\s*)(APPROVE|REVISE|BLOCK)\b/i;
 const DIMENSIONS_RE = /^\*{0,2}DIMENSIONS\*{0,2}:\s*(.+)$/im;
 // Match both "SECTION:" and "## SECTION" markdown heading formats
-// Section terminator matches either "SECTION:" or "## SECTION" (with optional colon)
-const CONTRACT_RE = /(?:##\s*)?CONTRACT:?\s*\n([\s\S]*?)(?=\n(?:##\s+)?[A-Z][A-Z_ ]+:\s|\n##\s+[A-Z]|\n[A-Z][A-Z_ ]+:\s|$)/i;
+// Section terminator: only matches next level-2 heading (## HEADING) or ALLCAPS: at line start.
+// Does NOT match ### subheadings or arbitrary Word: patterns inside section content.
 const CODE_EVIDENCE_RE = /(?:##\s*)?CODE_EVIDENCE:?\s*\n([\s\S]*?)(?=\n(?:##\s+)?[A-Z][A-Z_ ]+:\s|\n##\s+[A-Z]|\n[A-Z][A-Z_ ]+:\s|$)/i;
 // Support both bracket format [a, b] and plain comma list a, b
 const FILES_CHECKED_RE = /files_check(?:ed|es):\s*\[([^\]]*)\]/i;
@@ -139,7 +139,16 @@ export function checkDimensionThresholds(dimensionScores, requiredDimensions, th
 export function extractContractItems(text) {
   // Strip markdown code fences so inner sections are visible to regex
   const source = String(text ?? '').replace(/```[\s\S]*?```/g, (m) => m.replace(/```\w*\n?/g, ''));
-  const match = source.match(CONTRACT_RE);
+
+  // Use ## CONTRACT (markdown heading) to anchor the section start.
+  // Capture content until next ## HEADING or end of file.
+  // This prevents the old regex from matching arbitrary "WORD:" patterns
+  // in prose (e.g., "primary completion contract") as section boundaries.
+  // Falls back to legacy CONTRACT: pattern (no heading) for backwards compat.
+  let match = source.match(/##\s+CONTRACT\s*\n([\s\S]*?)(?=\n##\s+[A-Z]|$)/i);
+  if (!match) {
+    match = source.match(/(?:##\s*)?CONTRACT:?\s*\n([\s\S]*?)(?=\n##\s+[A-Z]|\n[A-Z]{2,}[A-Z_ ]+:\s|$)/i);
+  }
   if (!match) return [];
   const items = [];
   const blocks = match[1].split(/\r?\n/).filter((l) => l.trim().startsWith('-') && !/^[-*_]{3,}\s*$/.test(l.trim()));
