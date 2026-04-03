@@ -21,6 +21,7 @@ import type {
   EvolutionStatsResponse,
 } from './types';
 import { Sparkline, DonutChart, GroupedBarChart, TimeRangeSelector, CollapsiblePanel, StatusBadge, EmptyState } from './charts';
+import { useI18n } from './i18n/ui';
 
 // Auth Context
 interface AuthContextType {
@@ -89,7 +90,7 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
       <div className="auth-checking">
         <div className="auth-checking-content">
           <div className="spinner"></div>
-          <span>正在验证身份...</span>
+          <span>{t('auth.checking')}</span>
         </div>
       </div>
     );
@@ -104,6 +105,7 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
 
 // Login Page
 function LoginPage() {
+  const { t } = useI18n();
   const [token, setToken] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -113,7 +115,7 @@ function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!token.trim()) {
-      setError('请输入 Gateway Token');
+      setError('t('auth.errorEmpty')');
       return;
     }
     setLoading(true);
@@ -123,7 +125,7 @@ function LoginPage() {
     if (success) {
       navigate('/overview');
     } else {
-      setError('Token 无效或已过期，请检查后重试');
+      setError('t('auth.errorInvalid')');
     }
   };
 
@@ -135,9 +137,9 @@ function LoginPage() {
             <span className="logo-icon">
               <Hexagon strokeWidth={1.5} />
             </span>
-            <h1>Principles Console</h1>
+            <h1>{t('brand.title')}</h1>
           </div>
-          <p className="login-subtitle">AI Agent 进化流程监控平台</p>
+          <p className="login-subtitle">{t('auth.loginSubtitle')}</p>
         </div>
 
         <form className="login-form" onSubmit={handleSubmit}>
@@ -148,11 +150,11 @@ function LoginPage() {
               type="password"
               value={token}
               onChange={(e) => setToken(e.target.value)}
-              placeholder="请输入您的 Gateway Token"
+              placeholder={t('auth.tokenPlaceholder')}
               autoComplete="off"
             />
             <span className="form-hint">
-              在服务器上运行 <code>openclaw config get gateway.auth.token</code> 获取 Token
+              {t('auth.tokenHint')}
             </span>
           </div>
 
@@ -162,20 +164,20 @@ function LoginPage() {
             {loading ? (
               <>
                 <span className="spinner-small"></span>
-                正在验证...
+                {t('auth.validatingButton')}
               </>
             ) : (
-              '登 录'
+              '{t('auth.loginButton')}'
             )}
           </button>
         </form>
 
         <div className="login-footer">
-          <h4>如何获取 Token？</h4>
+          <h4>{t('auth.howToGetToken')}</h4>
           <ol>
-            <li>SSH 登录到运行 OpenClaw Gateway 的服务器</li>
-            <li>运行命令查看配置：<code>cat ~/.openclaw/openclaw.json</code></li>
-            <li>复制 <code>gateway.auth.token</code> 的值</li>
+            <li>{t('auth.step1')}</li>
+            <li>{t('auth.step2')}</li>
+            <li>{t('auth.step3')}</li>
           </ol>
         </div>
       </div>
@@ -213,34 +215,34 @@ function Shell({ children }: { children: React.ReactNode }) {
               <Hexagon strokeWidth={1.5} />
             </span>
           </div>
-          <span className="eyebrow">Principles Console</span>
-          <h1>进化控制台</h1>
-          <p>AI Agent 自主进化监控平台</p>
+          <span className="eyebrow">{t('brand.title')}</span>
+          <h1>{t('brand.title')}</h1>
+          <p>{t('brand.subtitle')}</p>
         </div>
         <nav className="nav">
           <NavLink to="/overview" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
             <span className="nav-icon">
               <BarChart3 strokeWidth={1.75} />
             </span>
-            <span>概览</span>
+            <span>{t('nav.overview')}</span>
           </NavLink>
           <NavLink to="/evolution" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
             <span className="nav-icon">
               <GitBranch strokeWidth={1.75} />
             </span>
-            <span>进化追踪</span>
+            <span>{t('nav.evolution')}</span>
           </NavLink>
           <NavLink to="/samples" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
             <span className="nav-icon">
               <FileCheck strokeWidth={1.75} />
             </span>
-            <span>样本审核</span>
+            <span>{t('nav.samples')}</span>
           </NavLink>
           <NavLink to="/thinking-models" className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>
             <span className="nav-icon">
               <Brain strokeWidth={1.75} />
             </span>
-            <span>思维模型</span>
+            <span>{t('nav.thinkingModels')}</span>
           </NavLink>
         </nav>
         <div className="sidebar-footer">
@@ -248,13 +250,13 @@ function Shell({ children }: { children: React.ReactNode }) {
             <span className="nav-icon">
               <Download strokeWidth={1.75} />
             </span>
-            <span>导出样本</span>
+            <span>{t('nav.exportSamples')}</span>
           </a>
           <button className="logout-button" onClick={logout}>
             <span className="nav-icon">
               <LogOut strokeWidth={1.75} />
             </span>
-            <span>退出登录</span>
+            <span>{t('nav.logout')}</span>
           </button>
         </div>
       </aside>
@@ -267,7 +269,7 @@ function Loading() {
   return (
     <div className="loading-state">
       <div className="spinner"></div>
-      <span>加载中...</span>
+      <span>{t('common.loading')}</span>
     </div>
   );
 }
@@ -277,6 +279,7 @@ function ErrorState({ error }: { error: string }) {
 }
 
 function WorkspaceConfig() {
+  const { t } = useI18n();
   const [wsData, setWsData] = useState<{
     configs: Array<{ workspaceName: string; enabled: boolean; displayName: string | null; syncEnabled: boolean }>;
     workspaces: Array<{ name: string; path: string; lastSync: string | null; config: null | { workspaceName: string; enabled: boolean; displayName: string | null; syncEnabled: boolean } }>;
@@ -343,7 +346,7 @@ function WorkspaceConfig() {
     >
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 'var(--space-4)' }}>
         <button className="button-secondary" onClick={() => setShowAddForm(!showAddForm)}>
-          {showAddForm ? '取消' : '+ 添加'}
+          {showAddForm ? t('workspace.cancel') : '+ ' + t('workspace.addWorkspace')}
         </button>
       </div>
 
@@ -351,27 +354,27 @@ function WorkspaceConfig() {
         <form className="add-workspace-form" onSubmit={handleAddWorkspace} style={{ marginBottom: 'var(--space-4)', padding: 'var(--space-3)', background: 'var(--bg-sunken)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
           <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-end' }}>
             <div style={{ flex: 1 }}>
-              <label style={{ display: 'block', fontSize: '12px', marginBottom: '4px', color: 'var(--text-secondary)' }}>Workspace Name</label>
+              <label style={{ display: 'block', fontSize: '12px', marginBottom: '4px', color: 'var(--text-secondary)' }}>{t('workspace.workspaceName')}</label>
               <input
                 type="text"
                 value={newWsName}
                 onChange={(e) => setNewWsName(e.target.value)}
-                placeholder="workspace-custom"
+                placeholder={t('workspace.placeholder.name')}
                 style={{ width: '100%', padding: 'var(--space-2)', fontSize: '13px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)' }}
               />
             </div>
             <div style={{ flex: 2 }}>
-              <label style={{ display: 'block', fontSize: '12px', marginBottom: '4px', color: 'var(--text-secondary)' }}>Path</label>
+              <label style={{ display: 'block', fontSize: '12px', marginBottom: '4px', color: 'var(--text-secondary)' }}>{t('workspace.path')}</label>
               <input
                 type="text"
                 value={newWsPath}
                 onChange={(e) => setNewWsPath(e.target.value)}
-                placeholder="/home/user/.openclaw/workspace-custom"
+                placeholder={t('workspace.placeholder.path')}
                 style={{ width: '100%', padding: 'var(--space-2)', fontSize: '13px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)' }}
               />
             </div>
             <button type="submit" className="button-primary" disabled={adding || !newWsName.trim() || !newWsPath.trim()}>
-              {adding ? '添加中...' : '添加'}
+              {adding ? 't('workspace.adding')' : 't('workspace.addWorkspace')'}
             </button>
           </div>
         </form>
@@ -395,7 +398,7 @@ function WorkspaceConfig() {
                     onChange={() => handleToggle(ws.name, 'enabled', config.enabled)}
                     disabled={isSaving}
                   />
-                  <span style={{ fontSize: '13px' }}>Include</span>
+                  <span style={{ fontSize: '13px' }}>{t('workspace.include')}</span>
                 </label>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', cursor: 'pointer' }}>
                   <input
@@ -404,7 +407,7 @@ function WorkspaceConfig() {
                     onChange={() => handleToggle(ws.name, 'syncEnabled', config.syncEnabled)}
                     disabled={isSaving || !config.enabled}
                   />
-                  <span style={{ fontSize: '13px' }}>Sync</span>
+                  <span style={{ fontSize: '13px' }}>{t('workspace.sync')}</span>
                 </label>
               </div>
             </div>
@@ -416,6 +419,7 @@ function WorkspaceConfig() {
 }
 
 function OverviewPage() {
+  const { t } = useI18n();
   const [data, setData] = useState<OverviewResponse | null>(null);
   const [error, setError] = useState('');
   const [syncing, setSyncing] = useState(false);
@@ -463,16 +467,16 @@ function OverviewPage() {
     <div className="page">
       <header className="page-header">
         <div>
-          <h2>工作区健康度</h2>
+          <h2>{t('overview.pageTitle')}</h2>
         </div>
         <div className="meta">
           <TimeRangeSelector value={days} onChange={setDays} />
           {centralInfo && (
-            <div>{centralInfo.enabledWorkspaceCount} / {centralInfo.workspaceCount} workspaces enabled</div>
+            <div>{centralInfo.enabledWorkspaceCount} / {centralInfo.workspaceCount} t('overview.workspacesEnabled')</div>
           )}
-          <div>Freshness: {formatDate(data.dataFreshness)}</div>
+          <div>t('overview.freshness') + ':' {formatDate(data.dataFreshness)}</div>
           <button className="button-secondary" onClick={handleSync} disabled={syncing}>
-            {syncing ? 'Syncing...' : 'Sync All'}
+            {syncing ? 't('overview.syncing')' : 't('overview.syncAll')'}
           </button>
         </div>
       </header>
@@ -481,43 +485,43 @@ function OverviewPage() {
 
       <section className="kpi-grid">
         <article className="panel kpi">
-          <span className="label">Repeat Error Rate</span>
+          <span className="label">{t('overview.repeatErrorRate')}</span>
           <span className="value">{formatPercent(data.summary.repeatErrorRate)}</span>
           {failuresTrend.length >= 2 && (
             <div className="stat-sparkline"><Sparkline data={failuresTrend} width={50} height={16} color="var(--error)" /></div>
           )}
         </article>
         <article className="panel kpi">
-          <span className="label">User Correction Rate</span>
+          <span className="label">{t('overview.userCorrectionRate')}</span>
           <span className="value">{formatPercent(data.summary.userCorrectionRate)}</span>
           {correctionsTrend.length >= 2 && (
             <div className="stat-sparkline"><Sparkline data={correctionsTrend} width={50} height={16} color="var(--warning)" /></div>
           )}
         </article>
         <article className="panel kpi">
-          <span className="label">Pending Samples</span>
+          <span className="label">{t('overview.pendingSamples')}</span>
           <span className="value">{data.summary.pendingSamples}</span>
         </article>
         <article className="panel kpi">
-          <span className="label">Approved Samples</span>
+          <span className="label">{t('overview.approvedSamples')}</span>
           <span className="value">{data.summary.approvedSamples}</span>
         </article>
         <article className="panel kpi">
-          <span className="label">Thinking Coverage</span>
+          <span className="label">{t('overview.thinkingCoverage')}</span>
           <span className="value">{formatPercent(data.summary.thinkingCoverageRate)}</span>
           {thinkingTrend.length >= 2 && (
             <div className="stat-sparkline"><Sparkline data={thinkingTrend} width={50} height={16} color="var(--info)" /></div>
           )}
         </article>
         <article className="panel kpi">
-          <span className="label">Pain Events</span>
+          <span className="label">{t('overview.painEvents')}</span>
           <span className="value">{data.summary.painEvents}</span>
         </article>
       </section>
 
       <div className="grid two-columns">
         <section className="panel">
-          <h3>Recent Trend</h3>
+          <h3>{t('overview.recentTrend')}</h3>
           {dailyTrend.length > 0 && (
             <div style={{ marginBottom: 'var(--space-4)' }}>
               <GroupedBarChart
@@ -536,15 +540,15 @@ function OverviewPage() {
               <div className="trend-row" key={item.day}>
                 <div>
                   <strong>{item.day}</strong>
-                  <span>{item.toolCalls} calls / {item.failures} failures / {item.userCorrections} corrections</span>
+                  <span>{item.toolCalls} {t('overview.calls')} / {item.failures} {t('overview.failures')} / {item.userCorrections} {t('overview.corrections')}</span>
                 </div>
-                <span className="badge">{item.thinkingTurns} thinking turns</span>
+                <span className="badge">{item.thinkingTurns} {t('overview.thinkingTurns')}</span>
               </div>
             ))}
           </div>
         </section>
         <section className="panel">
-          <h3>Top Regressions</h3>
+          <h3>{t('overview.topRegressions')}</h3>
           <div className="stack">
             {data.topRegressions.map((row) => (
               <div className="row-card" key={`${row.toolName}-${row.errorType}`}>
@@ -561,7 +565,7 @@ function OverviewPage() {
 
       <div className="grid two-columns">
         <section className="panel">
-          <h3>Sample Queue</h3>
+          <h3>{t('overview.sampleQueue')}</h3>
           <div className="pill-row">
             {Object.entries(data.sampleQueue.counters).map(([status, count]) => (
               <span className="badge" key={status}>{status}: {count}</span>
@@ -580,13 +584,13 @@ function OverviewPage() {
           </div>
         </section>
         <section className="panel">
-          <h3>Thinking Summary</h3>
+          <h3>{t('overview.thinkingSummary')}</h3>
           <div className="stack">
-            <div className="row-card"><strong>Active Models</strong><span>{data.thinkingSummary.activeModels}</span></div>
-            <div className="row-card"><strong>Dormant Models</strong><span>{data.thinkingSummary.dormantModels}</span></div>
-            <div className="row-card"><strong>Effective Models</strong><span>{data.thinkingSummary.effectiveModels}</span></div>
-            <div className="row-card"><strong>Coverage</strong><span>{formatPercent(data.thinkingSummary.coverageRate)}</span></div>
-            <div className="row-card"><strong>Principle Events</strong><span>{data.summary.principleEventCount}</span></div>
+            <div className="row-card"><strong>{t('overview.activeModels')}</strong><span>{data.thinkingSummary.activeModels}</span></div>
+            <div className="row-card"><strong>{t('overview.dormantModels')}</strong><span>{data.thinkingSummary.dormantModels}</span></div>
+            <div className="row-card"><strong>{t('overview.effectiveModels')}</strong><span>{data.thinkingSummary.effectiveModels}</span></div>
+            <div className="row-card"><strong>{t('overview.coverage')}</strong><span>{formatPercent(data.thinkingSummary.coverageRate)}</span></div>
+            <div className="row-card"><strong>{t('overview.principleEvents')}</strong><span>{data.summary.principleEventCount}</span></div>
           </div>
         </section>
       </div>
@@ -595,6 +599,7 @@ function OverviewPage() {
 }
 
 function SamplesPage() {
+  const { t } = useI18n();
   const [status, setStatus] = useState('all');
   const [data, setData] = useState<SamplesResponse | null>(null);
   const [selected, setSelected] = useState<SampleDetailResponse | null>(null);
@@ -644,16 +649,16 @@ function SamplesPage() {
     <div className="page">
       <header className="page-header">
         <div>
-          <h2>样本审核</h2>
+          <h2>{t('samples.pageTitle')}</h2>
         </div>
         <div className="filters">
           <label>
-            Status
+            {t('samples.statusFilter')}
             <select value={status} onChange={(event) => setStatus(event.target.value)}>
-              <option value="all">All</option>
-              <option value="pending">Pending</option>
-              <option value="approved">Approved</option>
-              <option value="rejected">Rejected</option>
+              <option value="all">{t('samples.statusAll')}</option>
+              <option value="pending">{t('samples.statusPending')}</option>
+              <option value="approved">{t('samples.statusApproved')}</option>
+              <option value="rejected">{t('samples.statusRejected')}</option>
             </select>
           </label>
         </div>
@@ -687,7 +692,7 @@ function SamplesPage() {
         </section>
 
         <section className="panel">
-          {!selected && <EmptyState title="选择一条样本" description="点击左侧列表中的样本，查看bad attempt、纠正内容和相关思维命中" />}
+          {!selected && <EmptyState title={t('samples.emptyTitle')} description={t('samples.emptyDesc')} />}
           {selected && (
             <div className="detail-stack">
               <div className="detail-header">
@@ -696,20 +701,20 @@ function SamplesPage() {
                   <p>{selected.sessionId} | {selected.reviewStatus} | score {selected.qualityScore}</p>
                 </div>
                 <div className="button-row">
-                  <button className="button-primary" onClick={() => review('approved')}>Approve</button>
-                  <button className="button-ghost" onClick={() => review('rejected')}>Reject</button>
+                  <button className="button-primary" onClick={() => review('approved')}>{t('samples.approve')}</button>
+                  <button className="button-ghost" onClick={() => review('rejected')}>{t('samples.reject')}</button>
                 </div>
               </div>
               <article>
-                <h4>Bad Attempt</h4>
+                <h4>{t('samples.badAttempt')}</h4>
                 <pre>{selected.badAttempt.rawText || selected.badAttempt.sanitizedText}</pre>
               </article>
               <article>
-                <h4>User Correction</h4>
+                <h4>{t('samples.userCorrection')}</h4>
                 <pre>{selected.userCorrection.rawText}</pre>
               </article>
               <article>
-                <h4>Recovery Tool Span</h4>
+                <h4>{t('samples.recoveryToolSpan')}</h4>
                 <div className="pill-row">
                   {selected.recoveryToolSpan.map((item) => (
                     <span className="badge" key={item.id}>{item.toolName} #{item.id}</span>
@@ -717,7 +722,7 @@ function SamplesPage() {
                 </div>
               </article>
               <article>
-                <h4>Related Thinking Hits</h4>
+                <h4>{t('samples.relatedThinkingHits')}</h4>
                 <div className="stack">
                   {selected.relatedThinkingHits.map((item) => (
                     <div className="row-card" key={item.id}>
@@ -731,7 +736,7 @@ function SamplesPage() {
                 </div>
               </article>
               <article>
-                <h4>Review History</h4>
+                <h4>{t('samples.reviewHistory')}</h4>
                 <div className="stack">
                   {selected.reviewHistory.map((item, index) => (
                     <div className="row-card" key={`${item.createdAt}-${index}`}>
@@ -753,6 +758,7 @@ function SamplesPage() {
 }
 
 function ThinkingModelsPage() {
+  const { t } = useI18n();
   const [data, setData] = useState<ThinkingOverviewResponse | null>(null);
   const [detail, setDetail] = useState<ThinkingModelDetailResponse | null>(null);
   const [selectedModel, setSelectedModel] = useState('');
@@ -777,13 +783,13 @@ function ThinkingModelsPage() {
     <div className="page">
       <header className="page-header">
         <div>
-          <h2>思维模型</h2>
+          <h2>{t('thinkingModels.pageTitle')}</h2>
         </div>
         <div className="pill-row">
-          <span className="badge">Coverage {formatPercent(data.summary.coverageRate)}</span>
-          <span className="badge">Active {data.summary.activeModels}</span>
-          <span className="badge">Dormant {data.summary.dormantModels}</span>
-          <span className="badge">Effective {data.summary.effectiveModels}</span>
+          <span className="badge">{t('thinkingModels.coverage')} {formatPercent(data.summary.coverageRate)}</span>
+          <span className="badge">{t('thinkingModels.active')} {data.summary.activeModels}</span>
+          <span className="badge">{t('thinkingModels.dormant')} {data.summary.dormantModels}</span>
+          <span className="badge">{t('thinkingModels.effective')} {data.summary.effectiveModels}</span>
         </div>
       </header>
 
@@ -810,7 +816,7 @@ function ThinkingModelsPage() {
         </section>
 
         <section className="panel">
-          {!detail && <EmptyState title="选择一个思维模型" description="点击左侧列表中的模型，查看场景分布和最近事件" />}
+          {!detail && <EmptyState title={t('thinkingModels.emptyTitle')} description={t('thinkingModels.emptyDesc')} />}
           {detail && (
             <div className="detail-stack">
               <div className="detail-header">
@@ -821,16 +827,16 @@ function ThinkingModelsPage() {
                 <span className="badge">{detail.modelMeta.recommendation}</span>
               </div>
               <article>
-                <h4>Outcome Stats</h4>
+                <h4>{t('thinkingModels.outcomeStats')}</h4>
                 <div className="pill-row">
-                  <span className="badge">Success {formatPercent(detail.outcomeStats.successRate)}</span>
-                  <span className="badge">Failure {formatPercent(detail.outcomeStats.failureRate)}</span>
-                  <span className="badge">Pain {formatPercent(detail.outcomeStats.painRate)}</span>
-                  <span className="badge">Correction {formatPercent(detail.outcomeStats.correctionRate)}</span>
+                  <span className="badge">{t('thinkingModels.success')} {formatPercent(detail.outcomeStats.successRate)}</span>
+                  <span className="badge">{t('thinkingModels.failure')} {formatPercent(detail.outcomeStats.failureRate)}</span>
+                  <span className="badge">{t('thinkingModels.pain')} {formatPercent(detail.outcomeStats.painRate)}</span>
+                  <span className="badge">{t('thinkingModels.correction')} {formatPercent(detail.outcomeStats.correctionRate)}</span>
                 </div>
               </article>
               <article>
-                <h4>Scenario Distribution</h4>
+                <h4>{t('thinkingModels.scenarioDistribution')}</h4>
                 <div className="stack">
                   {detail.scenarioDistribution.map((item) => (
                     <div className="row-card" key={item.scenario}>
@@ -841,7 +847,7 @@ function ThinkingModelsPage() {
                 </div>
               </article>
               <article>
-                <h4>Recent Events</h4>
+                <h4>{t('thinkingModels.recentEvents')}</h4>
                 <div className="stack">
                   {detail.recentEvents.map((event) => (
                     <div className="row-card vertical" key={event.id}>
@@ -888,6 +894,7 @@ const STAGE_LABELS: Record<string, string> = {
 };
 
 function EvolutionPage() {
+  const { t } = useI18n();
   const [tasks, setTasks] = useState<EvolutionTasksResponse | null>(null);
   const [stats, setStats] = useState<EvolutionStatsResponse | null>(null);
   const [trace, setTrace] = useState<EvolutionTraceResponse | null>(null);
@@ -928,25 +935,25 @@ function EvolutionPage() {
 
   // Prepare donut chart data
   const statusSegments = [
-    { label: '待处理', value: stats.pending, color: '#f59e0b' },
-    { label: '处理中', value: stats.inProgress, color: '#3b82f6' },
-    { label: '已完成', value: stats.completed, color: '#22c55e' },
-    { label: '失败', value: stats.failed, color: '#ef4444' },
+    { label: t('evolution.pending'), value: stats.pending, color: '#f59e0b' },
+    { label: t('evolution.inProgress'), value: stats.inProgress, color: '#3b82f6' },
+    { label: t('evolution.completed'), value: stats.completed, color: '#22c55e' },
+    { label: t('evolution.failed'), value: stats.failed, color: '#ef4444' },
   ].filter(s => s.value > 0);
 
   return (
     <div className="page">
       <header className="page-header">
         <div>
-          <h2>进化流程追踪</h2>
+          <h2>{t('evolution.pageTitle')}</h2>
         </div>
         <div className="meta">
           <TimeRangeSelector value={days} onChange={setDays} />
           <div className="pill-row">
-            <StatusBadge variant="warning">待处理 {stats.pending}</StatusBadge>
-            <StatusBadge variant="info">处理中 {stats.inProgress}</StatusBadge>
-            <StatusBadge variant="success">已完成 {stats.completed}</StatusBadge>
-            <StatusBadge variant="error">失败 {stats.failed}</StatusBadge>
+            <StatusBadge variant="warning">{t('evolution.pending')} {stats.pending}</StatusBadge>
+            <StatusBadge variant="info">{t('evolution.inProgress')} {stats.inProgress}</StatusBadge>
+            <StatusBadge variant="success">{t('evolution.completed')} {stats.completed}</StatusBadge>
+            <StatusBadge variant="error">{t('evolution.failed')} {stats.failed}</StatusBadge>
           </div>
         </div>
       </header>
@@ -954,13 +961,13 @@ function EvolutionPage() {
       {/* Status Distribution & Recent Activity */}
       <div className="grid two-columns" style={{ marginBottom: 'var(--space-5)' }}>
         <section className="panel">
-          <h3>状态分布</h3>
+          <h3>{t('evolution.statusDistribution')}</h3>
           <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--space-4) 0' }}>
             <DonutChart segments={statusSegments} size={100} strokeWidth={10} />
           </div>
         </section>
         <section className="panel">
-          <h3>近期活动</h3>
+          <h3>{t('evolution.recentActivity')}</h3>
           {stats.recentActivity && stats.recentActivity.length > 0 && (
             <>
               <div style={{ marginBottom: 'var(--space-3)' }}>
@@ -974,15 +981,15 @@ function EvolutionPage() {
                   height={60}
                 />
                 <div style={{ display: 'flex', justifyContent: 'center', gap: 'var(--space-4)', marginTop: 'var(--space-2)', fontSize: '11px', color: 'var(--text-tertiary)' }}>
-                  <span><span style={{ display: 'inline-block', width: '10px', height: '10px', background: 'var(--accent)', borderRadius: '2px', marginRight: '4px' }}></span>新增</span>
-                  <span><span style={{ display: 'inline-block', width: '10px', height: '10px', background: 'var(--success)', borderRadius: '2px', marginRight: '4px' }}></span>完成</span>
+                  <span><span style={{ display: 'inline-block', width: '10px', height: '10px', background: 'var(--accent)', borderRadius: '2px', marginRight: '4px' }}></span>{t('evolution.created')}</span>
+                  <span><span style={{ display: 'inline-block', width: '10px', height: '10px', background: 'var(--success)', borderRadius: '2px', marginRight: '4px' }}></span>{t('evolution.finished')}</span>
                 </div>
               </div>
               <div className="stack">
                 {stats.recentActivity.slice(-7).reverse().map((item) => (
                   <div className="row-card" key={item.day}>
                     <strong>{item.day}</strong>
-                    <span>+{item.created} 完成 {item.completed}</span>
+                    <span>+{item.created} {t('evolution.created')} {item.completed} {t('evolution.finished')}</span>
                   </div>
                 ))}
               </div>
@@ -994,7 +1001,7 @@ function EvolutionPage() {
       {/* Stage Distribution */}
       {stats.stageDistribution && stats.stageDistribution.length > 0 && (
         <section className="panel" style={{ marginBottom: 'var(--space-5)' }}>
-          <h3>阶段分布</h3>
+          <h3>{t('evolution.stageDistribution')}</h3>
           <div className="stack" style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 'var(--space-2)' }}>
             {stats.stageDistribution.map((stage) => (
               <StatusBadge key={stage.stage} variant="neutral">
@@ -1009,12 +1016,12 @@ function EvolutionPage() {
         <section className="panel">
           <div className="filters">
             <label>
-              状态筛选
+              {t('evolution.statusFilter')}
               <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-                <option value="all">全部</option>
-                <option value="pending">待处理</option>
-                <option value="in_progress">处理中</option>
-                <option value="completed">已完成</option>
+                <option value="all">{t('evolution.filterAll')}</option>
+                <option value="pending">{t('evolution.pending')}</option>
+                <option value="in_progress">{t('evolution.inProgress')}</option>
+                <option value="completed">{t('evolution.completed')}</option>
               </select>
             </label>
           </div>
@@ -1032,38 +1039,38 @@ function EvolutionPage() {
                 </div>
                 <div>
                   <StatusBadge variant="neutral">{task.status}</StatusBadge>
-                  <span>分数: {task.score}</span>
+                  <span>{t('evolution.score')}: {task.score}</span>
                 </div>
                 <div className="align-right">
                   <strong>{formatDuration(task.duration)}</strong>
-                  <span>{task.eventCount} 事件</span>
+                  <span>{task.eventCount} {t('evolution.events')}</span>
                 </div>
               </button>
             ))}
           </div>
 
           <div className="pagination">
-            共 {tasks.pagination.total} 条
+            {t('common.total')} {tasks.pagination.total} {t('common.items')}
           </div>
         </section>
 
         <section className="panel">
           {!selectedId && (
-            <EmptyState title="选择一个任务" description="点击左侧列表中的任务，查看进化时间线和详细事件" />
+            <EmptyState title={t('evolution.emptyTitle')} description={t('evolution.emptyDesc')} />
           )}
           {trace && (
             <div className="detail-stack">
               <div className="detail-header">
                 <div>
-                  <h3>任务 {trace.task.taskId}</h3>
-                  <p>来源: {trace.task.source} | 分数: {trace.task.score}</p>
+                  <h3>{t('evolution.taskLabel')} {trace.task.taskId}</h3>
+                  <p>{t('evolution.source')}: {trace.task.source} | {t('evolution.score')}: {trace.task.score}</p>
                   <p style={{ fontSize: '0.85em', color: '#6b7280' }}>{trace.task.reason}</p>
                 </div>
                 <StatusBadge variant="neutral">{trace.task.status}</StatusBadge>
               </div>
 
               <article>
-                <h4>进化时间线</h4>
+                <h4>{t('evolution.evolutionTimeline')}</h4>
                 <div className="timeline">
                   {trace.timeline.map((item, index) => (
                     <div className="timeline-item" key={`${item.stage}-${index}`}>
@@ -1085,7 +1092,7 @@ function EvolutionPage() {
 
               {trace.events.length > 0 && (
                 <article>
-                  <h4>详细事件 ({trace.events.length})</h4>
+                  <h4>{t('evolution.detailedEvents')} ({trace.events.length})</h4>
                   <div className="stack">
                     {trace.events.slice(0, 10).map((event) => (
                       <div className="row-card vertical" key={event.id}>
