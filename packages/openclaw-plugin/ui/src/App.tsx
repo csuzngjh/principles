@@ -687,7 +687,7 @@ function SamplesPage() {
         </section>
 
         <section className="panel">
-          {!selected && <div className="muted">Select a sample to inspect the bad attempt, correction, related thinking hits, and review history.</div>}
+          {!selected && <EmptyState title="选择一条样本" description="点击左侧列表中的样本，查看bad attempt、纠正内容和相关思维命中" />}
           {selected && (
             <div className="detail-stack">
               <div className="detail-header">
@@ -810,7 +810,7 @@ function ThinkingModelsPage() {
         </section>
 
         <section className="panel">
-          {!detail && <div className="muted">Select a thinking model to inspect scenarios and recent events.</div>}
+          {!detail && <EmptyState title="选择一个思维模型" description="点击左侧列表中的模型，查看场景分布和最近事件" />}
           {detail && (
             <div className="detail-stack">
               <div className="detail-header">
@@ -1049,7 +1049,7 @@ function EvolutionPage() {
 
         <section className="panel">
           {!selectedId && (
-            <div className="muted">选择一个任务查看进化时间线详情</div>
+            <EmptyState title="选择一个任务" description="点击左侧列表中的任务，查看进化时间线和详细事件" />
           )}
           {trace && (
             <div className="detail-stack">
