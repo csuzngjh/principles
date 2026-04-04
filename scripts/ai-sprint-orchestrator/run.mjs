@@ -1548,16 +1548,12 @@ function cleanupAcpxOrphans(runDir, state) {
   // Derive workspace from known-good sources only:
   // 1. worktree (most reliable — we created it)
   // 2. spec.workspace (loaded fresh, has clear semantic meaning)
-  // 3. runDir parent directory (last resort — runDir is inside ops/ai-sprints/
-  //    so we walk up to repo root)
+  const spec = state.taskId ? (() => {
+    try { return getTaskSpec(state.taskId, state.specPath); } catch { return null; }
+  })() : null;
+
   const workspace = state.worktree?.worktreePath
-    ?? (() => {
-        try {
-          const spec = getTaskSpec(state.taskId, state.specPath);
-          if (spec?.workspace && spec.workspace !== state.specPath) return spec.workspace;
-        } catch {}
-        return null;
-      })();
+    ?? (spec?.workspace && spec.workspace !== state.specPath ? spec.workspace : null);
 
   if (!workspace) {
     appendTimeline(runDir, 'acpx session cleanup skipped: no trusted workspace available');
@@ -1565,16 +1561,13 @@ function cleanupAcpxOrphans(runDir, state) {
   }
 
   // Try to close any active acpx sessions for the workspace+agent combo
-  const spec = state.taskId ? (() => {
-    try { return getTaskSpec(state.taskId, state.specPath); } catch { return null; }
-  })() : null;
   const agent = spec?.producer?.agent ?? null;
 
   if (agent) {
     try {
       // acpx <agent> sessions close — this removes the queue-owner lease
-      const closeResult = spawnSync(acpxBin !== 'acpx' ? nodeBin : 'acpx',
-        acpxBin !== 'acpx' ? [acpxBin, agent, 'sessions', 'close'] : [agent, 'sessions', 'close'],
+      // Use nodeBin + [acpxBin, ...] for consistency with runAgent spawn pattern
+      const closeResult = spawnSync(nodeBin, [acpxBin, agent, 'sessions', 'close'],
         { cwd: workspace, encoding: 'utf8', timeout: 10_000, env: acpxEnv, shell: false });
       if (closeResult.status === 0) {
         appendTimeline(runDir, `Cleaned up acpx ${agent} sessions for stale run recovery`);
@@ -2674,8 +2667,8 @@ async function main() {
   // own registry (npx, built-in commands, etc.). Checking agent binaries directly
   // would cause false positives and is Linux-only.
   if (!args.status && !args.list && !args.archive && !args.abort && !args.pause) {
-    const acpxCheck = spawnSync(acpxBin !== 'acpx' ? nodeBin : 'acpx',
-      acpxBin !== 'acpx' ? [acpxBin, '--version'] : ['--version'],
+    // Use nodeBin + [acpxBin, ...] for consistency with runAgent spawn pattern
+    const acpxCheck = spawnSync(nodeBin, [acpxBin, '--version'],
       { encoding: 'utf8', shell: false, timeout: 10_000 });
     if (acpxCheck.status !== 0) {
       appendTimeline(runDir, `Pre-flight check FAILED: acpx not available`);
