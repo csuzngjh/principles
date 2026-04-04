@@ -6,6 +6,51 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..', '..', '..');
 const SPECS_DIR = path.join(repoRoot, 'ops', 'ai-sprints', 'specs');
+const REGISTRY_PATH = path.join(repoRoot, 'ops', 'ai-sprints', 'agent-registry.json');
+
+/** Load the agent registry, or return null if unavailable. */
+function loadAgentRegistry() {
+  try {
+    if (!fs.existsSync(REGISTRY_PATH)) return null;
+    return JSON.parse(fs.readFileSync(REGISTRY_PATH, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/** Validate spec agent/model entries against the registry. Throws on mismatch. */
+function validateSpecAgents(spec) {
+  const registry = loadAgentRegistry();
+  if (!registry?.agents) return; // Registry unavailable — skip validation
+
+  const roles = [
+    { name: 'producer', config: spec.producer },
+    { name: 'reviewerA', config: spec.reviewerA },
+    { name: 'reviewerB', config: spec.reviewerB },
+  ];
+  if (spec.escalationReviewer) {
+    roles.push({ name: 'escalationReviewer', config: spec.escalationReviewer });
+  }
+
+  for (const { name, config } of roles) {
+    if (!config) continue;
+    const { agent, model } = config;
+    if (!agent) throw new Error(`Spec role '${name}' is missing 'agent' field.`);
+    if (!model) throw new Error(`Spec role '${name}' is missing 'model' field.`);
+
+    const agentEntry = registry.agents[agent];
+    if (!agentEntry) {
+      const available = Object.keys(registry.agents).join(', ');
+      throw new Error(`Spec role '${name}' uses unknown agent '${agent}'. Available: ${available}.`);
+    }
+
+    const modelEntry = agentEntry.models[model];
+    if (!modelEntry) {
+      const available = Object.keys(agentEntry.models).join(', ');
+      throw new Error(`Spec role '${name}' uses unknown model '${model}' for agent '${agent}'. Available: ${available}.`);
+    }
+  }
+}
 
 // ============================================================================
 // Cross-environment path normalization
@@ -65,7 +110,9 @@ export function getTaskSpec(taskId, specPath) {
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) {
       const raw = JSON.parse(fs.readFileSync(candidate, 'utf8'));
-      return normalizeSpecPaths(raw);
+      const spec = normalizeSpecPaths(raw);
+      validateSpecAgents(spec); // Strict validation — throws on unknown agent/model
+      return spec;
     }
   }
 
