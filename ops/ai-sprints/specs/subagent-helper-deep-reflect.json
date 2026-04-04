@@ -15,7 +15,7 @@
   },
   "reviewerA": {
     "agent": "iflow",
-    "model": "zhipuai-coding-plan/glm-5.1",
+    "model": "glm-5",
     "timeoutSeconds": 900,
     "role": "code_and_local_correctness",
     "focus": "deep reflect lifecycle correctness, session cleanup, CODE_EVIDENCE"
@@ -29,7 +29,7 @@
   },
   "escalationReviewer": {
     "agent": "iflow",
-    "model": "zhipuai-coding-plan/glm-5.1",
+    "model": "glm-5",
     "timeoutSeconds": 900,
     "role": "global_reviewer",
     "focus": "macro: business flow, data flow, architecture, OpenClaw compatibility"
