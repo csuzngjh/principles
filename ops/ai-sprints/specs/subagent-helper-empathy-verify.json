@@ -17,7 +17,7 @@
   "reviewerA": {
     "agent": "iflow",
     "model": "zhipuai-coding-plan/glm-5.1",
-    "timeoutSeconds": 600,
+    "timeoutSeconds": 1800,
     "role": "code_and_local_correctness",
     "focus": "empathy observer patch correctness, test coverage, CODE_EVIDENCE"
   },
@@ -31,7 +31,7 @@
   "escalationReviewer": {
     "agent": "iflow",
     "model": "zhipuai-coding-plan/glm-5.1",
-    "timeoutSeconds": 600,
+    "timeoutSeconds": 1800,
     "role": "global_reviewer",
     "focus": "macro: business flow, data flow, architecture, OpenClaw compatibility"
   },
@@ -110,6 +110,6 @@
     }
   },
   "stageRoleTimeouts": {
-    "verify": { "producer": 1200, "reviewer_a": 600, "reviewer_b": 600, "global_reviewer": 300 }
+    "verify": { "producer": 1200, "reviewer_a": 1800, "reviewer_b": 600, "global_reviewer": 1800 }
   }
 }
