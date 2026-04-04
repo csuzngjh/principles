@@ -1,12 +1,11 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import type { PluginHookBeforePromptBuildEvent, PluginHookAgentContext, PluginHookBeforePromptBuildResult, PluginLogger } from '../openclaw-sdk.js';
+import type { PluginHookBeforePromptBuildEvent, PluginHookAgentContext, PluginHookBeforePromptBuildResult, PluginLogger, OpenClawPluginApi } from '../openclaw-sdk.js';
 import { clearInjectedProbationIds, getSession, resetFriction, setInjectedProbationIds } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { ContextInjectionConfig, defaultContextConfig } from '../types.js';
 import { classifyTask, type RoutingInput } from '../core/local-worker-routing.js';
 import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection, autoCompressFocus, safeReadCurrentFocus } from '../core/focus-history.js';
-import { empathyObserverManager, isEmpathyObserverSession, type EmpathyObserverApi } from '../service/empathy-observer-manager.js';
 import { EmpathyObserverWorkflowManager, empathyObserverWorkflowSpec } from '../service/subagent-workflow/index.js';
 import { PathResolver } from '../core/path-resolver.js';
 
@@ -75,17 +74,9 @@ interface PromptHookApi {
     };
     empathy_engine?: {
       enabled?: boolean;
-      /** Shadow mode: also run EmpathyObserverWorkflowManager alongside legacy path */
-      helper_empathy_enabled?: boolean;
-      /** PR2.1 Task 4: Empathy mode switching
-       * - legacy: Only legacy path (empathyObserverManager.spawn)
-       * - shadow: Legacy + helper in parallel
-       * - helper_primary: Only helper path, skip legacy
-       */
-      empathy_mode?: 'legacy' | 'shadow' | 'helper_primary';
     };
   };
-  runtime: EmpathyObserverApi['runtime'];
+  runtime: OpenClawPluginApi['runtime'];
   logger: PluginLogger;
 }
 
@@ -619,35 +610,19 @@ REQUIRED ACTION:
   if (isUserInteraction && sessionId && api && !isAgentToAgent) {
     prependContext = '### BEHAVIORAL_CONSTRAINTS\n' + empathySilenceConstraint + '\n\n' + prependContext;
 
-    // PR2.1 Task 4: Empathy mode switching (legacy/shadow/helper_primary)
-    // - legacy: Only run legacy path (empathyObserverManager.spawn)
-    // - shadow: Legacy is primary, helper runs as shadow (both paths run in parallel)
-    // - helper_primary: Only run helper path, skip legacy
-    const empathyMode = (api.config?.empathy_engine?.empathy_mode as string) || 'legacy';
-    const helperEnabled = api.config?.empathy_engine?.helper_empathy_enabled === true;
-
-    if (empathyMode === 'legacy' || empathyMode === 'shadow') {
-      // Legacy path runs in these modes
-      empathyObserverManager.spawn(api, sessionId, latestUserMessage, workspaceDir).catch((err) => api.logger.warn(String(err)));
-    }
-
-    if ((empathyMode === 'shadow' && helperEnabled && workspaceDir) || (empathyMode === 'helper_primary' && workspaceDir)) {
-      // Helper path runs in shadow mode (when helper_empathy_enabled) or helper_primary mode
-      const shadowManager = new EmpathyObserverWorkflowManager({
+    // Empathy Observer: analyze user message for frustration signals
+    if (workspaceDir) {
+      const empathyManager = new EmpathyObserverWorkflowManager({
         workspaceDir,
         logger: api.logger,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         subagent: api.runtime.subagent as any,
       });
-      shadowManager.startWorkflow(empathyObserverWorkflowSpec, {
+      empathyManager.startWorkflow(empathyObserverWorkflowSpec, {
         parentSessionId: sessionId,
         workspaceDir,
         taskInput: latestUserMessage,
-      }).catch((err) => api.logger.warn(`[PD:HelperEmpathy] workflow failed: ${String(err)}`));
-
-      if (empathyMode === 'helper_primary') {
-        logger?.info(`[PD:Prompt] Empathy mode: helper_primary (legacy path skipped)`);
-      }
+      }).catch((err) => api.logger.warn(`[PD:Empathy] workflow failed: ${String(err)}`));
     }
   }
 

@@ -1,8 +1,8 @@
 {
   "id": "subagent-helper-deep-reflect",
   "title": "Subagent Helper: migrate deep reflect to workflow helper",
-  "workspace": "D:/Code/principles",
-  "branchWorkspace": "D:/Code/principles-subagent-helper-deep-reflect",
+  "workspace": "/home/csuzngjh/code/principles",
+  "branchWorkspace": "/home/csuzngjh/code/principles-subagent-helper-deep-reflect",
   "branch": "feat/subagent-helper-deep-reflect",
   "maxRoundsPerStage": 3,
   "maxRuntimeMinutes": 360,
@@ -15,7 +15,7 @@
   },
   "reviewerA": {
     "agent": "iflow",
-    "model": "zhipuai-coding-plan/glm-5.1",
+    "model": "glm-5",
     "timeoutSeconds": 900,
     "role": "code_and_local_correctness",
     "focus": "deep reflect lifecycle correctness, session cleanup, CODE_EVIDENCE"
@@ -29,13 +29,13 @@
   },
   "escalationReviewer": {
     "agent": "iflow",
-    "model": "zhipuai-coding-plan/glm-5.1",
+    "model": "glm-5",
     "timeoutSeconds": 900,
     "role": "global_reviewer",
     "focus": "macro: business flow, data flow, architecture, OpenClaw compatibility"
   },
   "context": [
-    "Use PD-only changes; do not modify D:/Code/openclaw.",
+    "Use PD-only changes; do not modify /home/csuzngjh/code/openclaw.",
     "PR2 scope: empathy observer + deep-reflect ONLY. Diagnostician/Nocturnal NOT migrated in this PR.",
     "DeepReflect currently has sessionKey/runId semantic confusion and must be resolved in this PR.",
     "Helper lives in packages/openclaw-plugin/src/service/subagent-workflow/.",

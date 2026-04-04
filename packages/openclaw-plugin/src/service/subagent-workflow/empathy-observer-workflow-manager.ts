@@ -557,7 +557,7 @@ export const empathyObserverWorkflowSpec: SubagentWorkflowSpec<EmpathyResult> = 
             confidence: result.confidence,
             detection_mode: 'structured',
             deduped: false,
-            trigger_text_excerpt: '',
+            trigger_text_excerpt: String(metadata.taskInput ?? '').substring(0, 120),
             raw_score: painScore,
             calibrated_score: painScore,
             eventId,

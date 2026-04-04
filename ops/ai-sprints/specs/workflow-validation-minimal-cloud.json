@@ -1,8 +1,8 @@
 {
   "id": "workflow-validation-minimal",
-  "title": "Workflow v1 Minimal Validation - Test workflow infrastructure without product binding",
+  "title": "Workflow v1 Minimal Validation - Cloud/Linux variant",
   "workspace": "/home/csuzngjh/code/principles",
-  "branchWorkspace": "/home/csuzngjh/code/principles-workflow-validation",
+  "branchWorkspace": "/home/csuzngjh/code/principles-worktree",
   "branch": "main",
   "integrationPhase": "shadow",
   "maxRoundsPerStage": 2,
@@ -29,7 +29,7 @@
     "focus": "Verify outputQuality is computed correctly, qualityReasons are meaningful"
   },
   "context": [
-    "=== WORKFLOW VALIDATION SPRINT ===",
+    "=== WORKFLOW VALIDATION SPRINT (Linux Cloud) ===",
     "This sprint validates the workflow infrastructure itself, NOT any product feature.",
     "",
     "=== VALIDATION GOALS ===",
@@ -69,7 +69,7 @@
   "stageRoleTimeouts": {
     "validate": { "producer": 600, "reviewer_a": 300, "reviewer_b": 300 }
   },
-  "verificationSpec": "workflow-validation-minimal-verify",
+  "verificationSpec": "workflow-validation-minimal-verify-cloud",
   "continuationSpec": null,
   "recoverySpec": null,
   "requireVerify": false
