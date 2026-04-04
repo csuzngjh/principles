@@ -1,8 +1,8 @@
 {
   "id": "workflow-validation-minimal-verify",
-  "title": "Verify: Workflow v1 infrastructure validation",
+  "title": "Verify: Workflow v1 infrastructure validation - Cloud/Linux variant",
   "workspace": "/home/csuzngjh/code/principles",
-  "branchWorkspace": "/home/csuzngjh/code/principles-workflow-validation",
+  "branchWorkspace": "/home/csuzngjh/code/principles-worktree",
   "branch": "main",
   "integrationPhase": "shadow",
   "maxRoundsPerStage": 1,
@@ -29,7 +29,7 @@
     "focus": "Verify nextRunRecommendation is computed and reasonable"
   },
   "context": [
-    "=== VERIFY RUN ===",
+    "=== VERIFY RUN (Linux Cloud) ===",
     "This run verifies the output of workflow-validation-minimal sprint.",
     "",
     "=== VERIFICATION CHECKLIST ===",

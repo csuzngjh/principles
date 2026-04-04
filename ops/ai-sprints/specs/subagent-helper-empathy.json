@@ -1,8 +1,8 @@
 {
   "id": "subagent-helper-empathy",
   "title": "Subagent Helper: migrate empathy observer to workflow helper",
-  "workspace": "D:/Code/principles",
-  "branchWorkspace": "D:/Code/principles-subagent-helper-empathy",
+  "workspace": "/home/csuzngjh/code/principles",
+  "branchWorkspace": "/home/csuzngjh/code/principles-subagent-helper-empathy",
   "branch": "feat/subagent-workflow-helper-impl",
   "maxRoundsPerStage": 3,
   "maxRuntimeMinutes": 360,
@@ -35,7 +35,7 @@
     "focus": "macro: business flow, data flow, architecture, OpenClaw compatibility"
   },
   "context": [
-    "Use PD-only changes; do not modify D:/Code/openclaw.",
+    "Use PD-only changes; do not modify /home/csuzngjh/code/openclaw.",
     "PR2 scope: empathy observer + deep-reflect ONLY. Diagnostician/Nocturnal NOT migrated in this PR.",
     "Helper lives in packages/openclaw-plugin/src/service/subagent-workflow/.",
     "Treat empathy as plugin-owned runtime_direct only. Do not mix registry_backed semantics into the main model.",

@@ -1,8 +1,8 @@
 {
   "id": "subagent-helper-empathy-verify",
   "title": "Subagent Helper: verify empathy workflow implementation",
-  "workspace": "D:/Code/principles",
-  "branchWorkspace": "D:/Code/principles-subagent-helper-empathy",
+  "workspace": "/home/csuzngjh/code/principles",
+  "branchWorkspace": "/home/csuzngjh/code/principles-subagent-helper-empathy",
   "branch": "feat/subagent-workflow-helper-impl",
   "integrationPhase": "shadow",
   "maxRoundsPerStage": 2,
