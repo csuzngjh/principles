@@ -69,6 +69,12 @@ const PATH_MAP = [
   { win: 'D:/Code/principles-workflow-validation', linux: '/home/csuzngjh/code/principles-workflow-validation' },
 ];
 
+/** Spec fields that contain paths and should be normalized. */
+const PATH_FIELDS = new Set([
+  'workspace', 'branchWorkspace', 'openclaw', 'specPath',
+  'principlesRoot', 'branch', 'baseBranch',
+]);
+
 /** Normalize a single path for the current OS. */
 function normalizePath(str) {
   if (typeof str !== 'string') return str;
@@ -84,14 +90,19 @@ function normalizePath(str) {
   return result;
 }
 
-/** Recursively normalize all string values in a spec object. */
-function normalizeSpecPaths(obj) {
-  if (typeof obj === 'string') return normalizePath(obj);
-  if (Array.isArray(obj)) return obj.map(normalizeSpecPaths);
+/** Recursively normalize path values in a spec object — only for known path fields. */
+function normalizeSpecPaths(obj, key = null) {
+  if (typeof obj === 'string') {
+    // Only normalize if this is a known path field or looks like an absolute path
+    if (key && PATH_FIELDS.has(key)) return normalizePath(obj);
+    if (/^(\/|[A-Z]:[\\/])/i.test(obj)) return normalizePath(obj);
+    return obj;
+  }
+  if (Array.isArray(obj)) return obj.map((item) => normalizeSpecPaths(item, key));
   if (obj && typeof obj === 'object') {
     const normalized = {};
-    for (const [key, value] of Object.entries(obj)) {
-      normalized[key] = normalizeSpecPaths(value);
+    for (const [k, value] of Object.entries(obj)) {
+      normalized[k] = normalizeSpecPaths(value, k);
     }
     return normalized;
   }

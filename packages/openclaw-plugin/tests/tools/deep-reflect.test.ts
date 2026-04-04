@@ -6,246 +6,204 @@ import { createDeepReflectTool, deepReflectTool } from '../../src/tools/deep-ref
 import { EventLogService } from '../../src/core/event-log.js';
 import type { OpenClawPluginApi, PluginRuntime } from '../../src/openclaw-sdk.js';
 
-describe('createDeepReflectTool', () => {
-    let mockApi: OpenClawPluginApi;
-    let mockSubagent: any;
-    let tempDir: string;
+vi.mock('../../src/service/subagent-workflow/deep-reflect-workflow-manager.js', () => ({
+    DeepReflectWorkflowManager: vi.fn().mockImplementation(function() {
+        return globalThis.__DR_MOCK_MANAGER;
+    }),
+    deepReflectWorkflowSpec: { workflowType: 'deep_reflect' },
+}));
 
-    const mockAsyncFn = <T extends (...args: any[]) => Promise<any>>(
-        impl: ReturnType<typeof vi.fn>
-    ) => {
-        const fn = vi.fn() as unknown as T;
-        Object.defineProperty(fn, 'constructor', {
-            value: function AsyncFunction() {},
-            writable: true,
-            configurable: true,
-        });
-        return fn;
-    };
+vi.mock('../../src/core/config.js', () => ({
+    loadConfig: vi.fn(() => ({ mode: 'enabled', enabled: true, timeout_ms: 300 })),
+}));
+
+vi.mock('../../src/core/paths.js', () => ({
+    resolvePdPath: vi.fn((_dir: string, key: string) => {
+        const base = globalThis.__TEST_TEMP_DIR || '/tmp';
+        if (key === 'STATE_DIR') return path.join(base, '.state');
+        if (key === 'REFLECTION_LOG') return path.join(base, 'memory', 'REFLECTION_LOG.md');
+        if (key === 'PAIN_SETTINGS') return path.join(base, '.principles', 'PAIN_SETTINGS.json');
+        return path.join(base, key);
+    }),
+}));
+
+declare global {
+    var __TEST_TEMP_DIR: string | undefined;
+    var __DR_MOCK_MANAGER: any;
+}
+
+describe('createDeepReflectTool (workflow helper path)', () => {
+    let mockApi: OpenClawPluginApi;
+    let tempDir: string;
 
     beforeEach(() => {
         tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'deep-reflect-test-'));
+        globalThis.__TEST_TEMP_DIR = tempDir;
 
-        mockSubagent = {
-            run: mockAsyncFn().mockResolvedValue({ runId: 'test-run-123' }),
-            waitForRun: mockAsyncFn().mockResolvedValue({ status: 'ok' }),
-            getSessionMessages: mockAsyncFn().mockResolvedValue({
-                messages: [],
-                assistantTexts: ['Insight 1', 'Insight 2']
-            }),
-            deleteSession: mockAsyncFn().mockResolvedValue(undefined),
+        fs.mkdirSync(path.join(tempDir, '.state', 'logs'), { recursive: true });
+        fs.mkdirSync(path.join(tempDir, 'memory'), { recursive: true });
+
+        const mockSubagent = {
+            run: vi.fn().mockResolvedValue({ runId: 'test-run-123' }),
+            waitForRun: vi.fn().mockResolvedValue({ status: 'ok' }),
+            getSessionMessages: vi.fn().mockResolvedValue({ messages: [], assistantTexts: [] }),
+            deleteSession: vi.fn().mockResolvedValue(undefined),
         };
 
         mockApi = {
             id: "test-plugin",
             name: "Test Plugin",
             source: "local",
+            workspaceDir: tempDir,
             config: { workspaceDir: tempDir },
-            runtime: {
-                subagent: mockSubagent,
-            } as unknown as PluginRuntime,
-            logger: {
-                info: vi.fn(),
-                error: vi.fn(),
-                warn: vi.fn(),
-                debug: vi.fn(),
-            },
+            runtime: { subagent: mockSubagent } as unknown as PluginRuntime,
+            logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
             registerTool: vi.fn(),
             registerHook: vi.fn(),
             registerHttpRoute: vi.fn(),
-            registerChannel: vi.fn(),
-            registerGatewayMethod: vi.fn(),
-            registerCli: vi.fn(),
             registerService: vi.fn(),
-            registerProvider: vi.fn(),
             registerCommand: vi.fn(),
             resolvePath: vi.fn((p: string) => path.join(tempDir, p)),
             on: vi.fn(),
+        };
+
+        globalThis.__DR_MOCK_MANAGER = {
+            startWorkflow: vi.fn().mockResolvedValue({
+                workflowId: 'wf-test-123',
+                childSessionKey: 'agent:main:subagent:workflow-test-123',
+                state: 'active',
+            }),
+            dispose: vi.fn(),
+            store: {
+                getWorkflow: vi.fn().mockReturnValue({
+                    workflow_id: 'wf-test-123',
+                    state: 'completed',
+                    child_session_key: 'agent:main:subagent:workflow-test-123',
+                }),
+            },
         };
     });
 
     afterEach(() => {
         fs.rmSync(tempDir, { recursive: true, force: true });
+        globalThis.__TEST_TEMP_DIR = undefined;
+        globalThis.__DR_MOCK_MANAGER = undefined;
+        vi.clearAllMocks();
     });
 
     const executeTool = async (rawParams: Record<string, unknown>) => {
         const tool = createDeepReflectTool(mockApi);
-        const result = await tool.execute('test-call-id', rawParams);
-        return result.content[0]?.text || '';
+        return tool.execute('test-call-id', rawParams);
     };
 
-    describe('基本功能', () => {
-        it('should execute reflection and return insights', async () => {
-            mockSubagent.run.mockResolvedValue({ runId: 'test-run-123' });
-            mockSubagent.waitForRun.mockResolvedValue({ status: 'ok' });
-            mockSubagent.getSessionMessages.mockResolvedValue({
-                messages: [],
-                assistantTexts: ['Insight 1', 'Insight 2']
-            });
+    describe('参数验证', () => {
+        it('context 为空时应返回错误', async () => {
+            const result = await executeTool({ context: '' });
+            expect(result.content[0].text).toContain('必须提供反思上下文');
+        });
+
+        it('workspaceDir 缺失时应返回错误', async () => {
+            const noWsApi = {
+                ...mockApi,
+                workspaceDir: undefined,
+                config: {},
+                resolvePath: vi.fn(() => undefined),
+            };
+            const tool = createDeepReflectTool(noWsApi as any);
+            const result = await tool.execute('test-call-id', { context: 'test' });
+            // effectiveWorkspaceDir resolves to undefined, tool should fail gracefully
+            expect(result.content[0].text).toMatch(/失败|required|Workspace/i);
+        });
+    });
+
+    describe('workflow 执行', () => {
+        it('应创建 DeepReflectWorkflowManager 并调用 startWorkflow', async () => {
+            const { DeepReflectWorkflowManager } = await import('../../src/service/subagent-workflow/deep-reflect-workflow-manager.js');
+            const reflectionLogPath = path.join(tempDir, 'memory', 'REFLECTION_LOG.md');
+            fs.writeFileSync(reflectionLogPath, `# Reflection Log\n\n### Insights\nTest insight here\n\n`);
 
             const result = await executeTool({ context: 'Need to improve caching.' });
 
-            expect(mockSubagent.run).toHaveBeenCalledWith(expect.objectContaining({
-                extraSystemPrompt: expect.stringContaining('Critical Analysis Engine'),
-                deliver: false,
-            }));
-
-            expect(mockSubagent.waitForRun).toHaveBeenCalledWith({ runId: 'test-run-123' });
-            expect(mockSubagent.getSessionMessages).toHaveBeenCalled();
-            expect(mockSubagent.deleteSession).toHaveBeenCalled();
-
-            expect(result).toContain('Insight 1');
-            expect(result).toContain('Insight 2');
+            expect(DeepReflectWorkflowManager).toHaveBeenCalledWith({
+                workspaceDir: tempDir,
+                logger: mockApi.logger,
+                subagent: mockApi.runtime.subagent,
+            });
+            expect(globalThis.__DR_MOCK_MANAGER.startWorkflow).toHaveBeenCalled();
+            expect(result.content[0].text).toContain('Test insight here');
         });
 
-        it('should keep sessionKey for message fetch and cleanup while waiting by runId', async () => {
-            mockSubagent.run.mockResolvedValue({ runId: 'run-from-runtime' });
-            mockSubagent.waitForRun.mockResolvedValue({ status: 'ok' });
-            mockSubagent.getSessionMessages.mockResolvedValue({
-                messages: [],
-                assistantTexts: ['Insight']
+        it('应传递正确的 taskInput 给 startWorkflow', async () => {
+            const { DeepReflectWorkflowManager } = await import('../../src/service/subagent-workflow/deep-reflect-workflow-manager.js');
+            const reflectionLogPath = path.join(tempDir, 'memory', 'REFLECTION_LOG.md');
+            fs.writeFileSync(reflectionLogPath, `# Reflection Log\n\n### Insights\nDone\n\n`);
+
+            await executeTool({ context: 'Test context', depth: 3 });
+
+            expect(DeepReflectWorkflowManager).toHaveBeenCalledWith(
+                expect.objectContaining({ workspaceDir: tempDir })
+            );
+            const startArgs = globalThis.__DR_MOCK_MANAGER.startWorkflow.mock.calls[0][1];
+            expect(startArgs.taskInput).toEqual({
+                context: 'Test context',
+                depth: 3,
+                model_id: undefined,
             });
-
-            await executeTool({ context: 'Need clearer workflow tracing.' });
-
-            expect(mockSubagent.waitForRun).toHaveBeenCalledWith({ runId: 'run-from-runtime' });
-            expect(mockSubagent.getSessionMessages).toHaveBeenCalledWith({
-                sessionKey: expect.stringMatching(/^agent:main:reflection:/)
-            });
-            expect(mockSubagent.deleteSession).toHaveBeenCalledWith({
-                sessionKey: expect.stringMatching(/^agent:main:reflection:/)
-            });
-        });
-
-        it('should return a timeout warning cleanly without throwing', async () => {
-            mockSubagent.run.mockResolvedValue({ runId: 'test-run-123' });
-            mockSubagent.waitForRun.mockResolvedValue({ status: 'timeout' });
-
-            const result = await executeTool({ context: 'Timeout testing.' });
-
-            expect(result).toContain('超时');
-            expect(mockSubagent.deleteSession).toHaveBeenCalled();
-        });
-
-        it('should handle REFLECTION_OK and return quick success', async () => {
-            mockSubagent.run.mockResolvedValue({ runId: 'test-run-123' });
-            mockSubagent.waitForRun.mockResolvedValue({ status: 'ok' });
-            mockSubagent.getSessionMessages.mockResolvedValue({
-                messages: [],
-                assistantTexts: ['I have reviewed the plan. REFLECTION_OK.']
-            });
-
-            const result = await executeTool({ context: 'Testing OK.' });
-
-            expect(result).toContain('未发现显著问题');
-            expect(mockSubagent.deleteSession).toHaveBeenCalled();
-        });
-
-        it('should enforce deleteSession even if a system level exception occurs', async () => {
-            mockSubagent.run.mockResolvedValue({ runId: 'error-run' });
-            mockSubagent.waitForRun.mockRejectedValue(new Error('API throw'));
-
-            const tool = createDeepReflectTool(mockApi);
-            await expect(tool.execute('test-call-id', { context: 'Testing failure.' }))
-                .rejects.toThrow('API throw');
-
-            expect(mockSubagent.deleteSession).toHaveBeenCalled();
         });
     });
 
-    describe('新功能：子智能体自主选择模型', () => {
-        it('extraSystemPrompt 应包含模型选择指南', async () => {
-            mockSubagent.run.mockResolvedValue({ runId: 'test-run-123' });
-            mockSubagent.waitForRun.mockResolvedValue({ status: 'ok' });
-            mockSubagent.getSessionMessages.mockResolvedValue({
-                messages: [],
-                assistantTexts: ['Analysis complete.']
+    describe('超时处理', () => {
+        it('workflow 超时应返回超时提示', async () => {
+            // Create PAIN_SETTINGS.json to override default 60s timeout
+            const settingsPath = path.join(tempDir, '.principles', 'PAIN_SETTINGS.json');
+            fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+            fs.writeFileSync(settingsPath, JSON.stringify({ deep_reflection: { timeout_ms: 300 } }));
+
+            globalThis.__DR_MOCK_MANAGER.store.getWorkflow.mockReturnValue({
+                workflow_id: 'wf-test-123',
+                state: 'active',
             });
 
-            await executeTool({ context: 'Marketing plan for Q4.' });
+            const result = await executeTool({ context: 'Timeout test.' });
 
-            const callArgs = mockSubagent.run.mock.calls[0][0];
+            expect(result.content[0].text).toContain('超时');
+            expect(globalThis.__DR_MOCK_MANAGER.dispose).toHaveBeenCalled();
+        }, 10000);
+    });
 
-            expect(callArgs.extraSystemPrompt).toContain('Model Selection Guidelines');
-            expect(callArgs.extraSystemPrompt).toContain('Step 1');
-            expect(callArgs.extraSystemPrompt).toContain('Step 2');
-            expect(callArgs.extraSystemPrompt).toContain('Step 3');
+    describe('错误处理', () => {
+        it('workflow terminal_error 应返回错误信息', async () => {
+            globalThis.__DR_MOCK_MANAGER.store.getWorkflow.mockReturnValue({
+                workflow_id: 'wf-test-123',
+                state: 'terminal_error',
+            });
+
+            const result = await executeTool({ context: 'Error test.' });
+
+            expect(result.content[0].text).toContain('失败');
+            expect(globalThis.__DR_MOCK_MANAGER.dispose).toHaveBeenCalled();
         });
 
-        it('extraSystemPrompt 不应重复列出元认知模型', async () => {
-            mockSubagent.run.mockResolvedValue({ runId: 'test-run-123' });
-            mockSubagent.waitForRun.mockResolvedValue({ status: 'ok' });
-            mockSubagent.getSessionMessages.mockResolvedValue({
-                messages: [],
-                assistantTexts: ['Analysis complete.']
-            });
+        it('startWorkflow 抛出异常应返回友好错误', async () => {
+            globalThis.__DR_MOCK_MANAGER.startWorkflow.mockRejectedValue(new Error('Network error'));
 
-            await executeTool({ context: 'Test context.' });
+            const result = await executeTool({ context: 'Crash test.' });
 
-            const callArgs = mockSubagent.run.mock.calls[0][0];
-
-            expect(callArgs.extraSystemPrompt).not.toContain('T-01: Map Before Territory');
-            expect(callArgs.extraSystemPrompt).not.toContain('T-09: Divide and Conquer');
-
-            expect(callArgs.extraSystemPrompt).toContain('Meta-Cognitive Models');
-            expect(callArgs.extraSystemPrompt).toContain('inherited');
-        });
-
-        it('当有模型索引时，应注入索引内容', async () => {
-            const modelsDir = path.join(tempDir, '.principles', 'models');
-            fs.mkdirSync(modelsDir, { recursive: true });
-
-            const indexContent = `# 扩展思维模型索引
-| ID | 名称 | 适用场景 |
-|----|------|----------|
-| MARKETING_4P | 营销4P | 营销策略 |
-`;
-            fs.writeFileSync(path.join(modelsDir, '_INDEX.md'), indexContent);
-
-            mockSubagent.run.mockResolvedValue({ runId: 'test-run-123' });
-            mockSubagent.waitForRun.mockResolvedValue({ status: 'ok' });
-            mockSubagent.getSessionMessages.mockResolvedValue({
-                messages: [],
-                assistantTexts: ['Analysis complete.']
-            });
-
-            await executeTool({ context: 'Marketing plan.' });
-
-            const callArgs = mockSubagent.run.mock.calls[0][0];
-
-            expect(callArgs.extraSystemPrompt).toContain('MARKETING_4P');
+            expect(result.content[0].text).toContain('失败');
+            expect(result.content[0].text).toContain('Network error');
         });
     });
 
-    describe('向后兼容：model_id 参数（deprecated）', () => {
+    describe('向后兼容：model_id 参数', () => {
         it('当传入 model_id 时，应输出警告日志', async () => {
-            mockSubagent.run.mockResolvedValue({ runId: 'test-run-123' });
-            mockSubagent.waitForRun.mockResolvedValue({ status: 'ok' });
-            mockSubagent.getSessionMessages.mockResolvedValue({
-                messages: [],
-                assistantTexts: ['Analysis complete.']
-            });
+            const reflectionLogPath = path.join(tempDir, 'memory', 'REFLECTION_LOG.md');
+            fs.writeFileSync(reflectionLogPath, `# Reflection Log\n\n### Insights\nDone\n\n`);
 
             await executeTool({ model_id: 'T-01', context: 'Test.' });
 
             expect(mockApi.logger!.warn).toHaveBeenCalledWith(
                 expect.stringContaining('deprecated')
             );
-        });
-
-        it('当传入 model_id 时，仍应使用新的提示词格式', async () => {
-            mockSubagent.run.mockResolvedValue({ runId: 'test-run-123' });
-            mockSubagent.waitForRun.mockResolvedValue({ status: 'ok' });
-            mockSubagent.getSessionMessages.mockResolvedValue({
-                messages: [],
-                assistantTexts: ['Analysis complete.']
-            });
-
-            await executeTool({ model_id: 'T-05', context: 'Test.' });
-
-            const callArgs = mockSubagent.run.mock.calls[0][0];
-
-            expect(callArgs.extraSystemPrompt).toContain('Model Selection Guidelines');
         });
     });
 
@@ -269,94 +227,6 @@ describe('createDeepReflectTool', () => {
             const schema = deepReflectTool.parameters;
             const required = (schema as any).required || [];
             expect(required).not.toContain('depth');
-        });
-    });
-
-    describe('Bug 修复：sessionId 使用完整 sessionKey', () => {
-        it('sessionKey 应包含完整前缀而非纯 UUID', async () => {
-            mockSubagent.run.mockResolvedValue({ runId: 'test-run-123' });
-            mockSubagent.waitForRun.mockResolvedValue({ status: 'ok' });
-            mockSubagent.getSessionMessages.mockResolvedValue({
-                messages: [],
-                assistantTexts: ['Insight']
-            });
-
-            await executeTool({ context: 'Testing session key fix.' });
-
-            const runCall = mockSubagent.run.mock.calls[0][0];
-            expect(runCall.sessionKey).toMatch(/^agent:main:reflection:/);
-            expect(runCall.sessionKey.split(':').length).toBeGreaterThan(1);
-        });
-
-        it('eventLog 应记录完整 sessionKey 而非纯 UUID', async () => {
-            mockSubagent.run.mockResolvedValue({ runId: 'test-run-123' });
-            mockSubagent.waitForRun.mockResolvedValue({ status: 'ok' });
-            mockSubagent.getSessionMessages.mockResolvedValue({
-                messages: [],
-                assistantTexts: ['Analysis complete. Found 2 issues.']
-            });
-
-            await executeTool({ context: 'Testing event log sessionId.' });
-
-            EventLogService.flushAll();
-
-            const stateDir = path.join(tempDir, '.state');
-            const eventsFile = path.join(stateDir, 'logs', 'events.jsonl');
-
-            expect(fs.existsSync(eventsFile)).toBe(true);
-
-            const lines = fs.readFileSync(eventsFile, 'utf8').trim().split('\n');
-            const deepReflectionEvents = lines
-                .filter((l) => l.includes('deep_reflection'))
-                .map((l) => JSON.parse(l));
-
-            expect(deepReflectionEvents.length).toBeGreaterThan(0);
-
-            const event = deepReflectionEvents[0];
-            expect(event.sessionId).toMatch(/^agent:main:reflection:/);
-            expect(event.sessionId.split(':').length).toBeGreaterThan(1);
-
-            const isBareUuid = !event.sessionId.includes(':');
-            expect(isBareUuid).toBe(false);
-        });
-    });
-
-    describe('Surface degrade 检查', () => {
-        it('当 subagent runtime 不可用时（embedded 模式），应返回错误而非抛出', async () => {
-            const embeddedSubagent = {
-                run: vi.fn(),
-                waitForRun: vi.fn(),
-                getSessionMessages: vi.fn(),
-                deleteSession: vi.fn(),
-            };
-
-            const embeddedApi = {
-                ...mockApi,
-                runtime: {
-                    subagent: embeddedSubagent,
-                } as unknown as PluginRuntime,
-            };
-
-            const tool = createDeepReflectTool(embeddedApi);
-            const result = await tool.execute('test-call-id', { context: 'Testing embedded mode.' });
-
-            expect(result.content[0].text).toContain('Subagent runtime 不可用');
-            expect(result.content[0].text).toContain('embedded');
-            expect(embeddedSubagent.run).not.toHaveBeenCalled();
-        });
-
-        it('当 subagent 为 undefined 时，应返回错误', async () => {
-            const noSubagentApi = {
-                ...mockApi,
-                runtime: {
-                    subagent: undefined,
-                } as unknown as PluginRuntime,
-            };
-
-            const tool = createDeepReflectTool(noSubagentApi);
-            const result = await tool.execute('test-call-id', { context: 'Testing no subagent.' });
-
-            expect(result.content[0].text).toContain('Subagent runtime 不可用');
         });
     });
 });

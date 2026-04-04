@@ -1,2 +1,0 @@
-ops/ai-sprints/.gitignore
-scripts/ai-sprint-orchestrator/run.mjs

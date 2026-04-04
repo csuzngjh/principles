@@ -1,8 +1,0 @@
-M scripts/ai-sprint-orchestrator/run.mjs
-?? ops/ai-sprints/archive/2026-04-01T08-01-34-003Z-subagent-helper-empathy/
-?? ops/ai-sprints/archive/2026-04-01T08-02-23-845Z-subagent-helper-empathy/
-?? ops/ai-sprints/archive/2026-04-01T08-03-32-238Z-subagent-helper-empathy/
-?? ops/ai-sprints/archive/2026-04-01T08-04-21-766Z-subagent-helper-empathy/
-?? ops/ai-sprints/archive/2026-04-01T08-10-42-687Z-subagent-helper-empathy/
-?? ops/ai-sprints/archive/2026-04-01T08-12-11-539Z-subagent-helper-empathy/
-?? ops/ai-sprints/archive/2026-04-01T08-14-57-831Z-subagent-helper-empathy/

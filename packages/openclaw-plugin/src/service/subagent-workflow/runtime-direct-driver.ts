@@ -90,7 +90,12 @@ export class RuntimeDirectDriver implements TransportDriver {
     }
     
     async run(params: RunParams): Promise<RunResult> {
-        this.logger.info(`[PD:RuntimeDirectDriver] Spawning subagent: sessionKey=${params.sessionKey}`);
+        // DEFENSIVE: Gateway AgentParamsSchema requires idempotencyKey as NonEmptyString (required).
+        // server-plugins.ts uses conditional spread: ...(v && { v }), so falsy = omitted = validation failure.
+        // Always guarantee a non-empty value even if caller forgets.
+        const idempotencyKey = params.idempotencyKey || `pd:${params.sessionKey}:${Date.now()}`;
+
+        this.logger.info(`[PD:RuntimeDirectDriver] Spawning subagent: sessionKey=${params.sessionKey}, idemKey=${idempotencyKey.substring(0, 40)}`);
         
         try {
             const result = await this.subagent.run({
@@ -98,7 +103,7 @@ export class RuntimeDirectDriver implements TransportDriver {
                 message: params.message,
                 lane: params.lane ?? 'subagent',
                 deliver: params.deliver ?? false,
-                idempotencyKey: params.idempotencyKey,
+                idempotencyKey,
                 expectsCompletionMessage: params.expectsCompletionMessage ?? true,
                 extraSystemPrompt: params.extraSystemPrompt,
             });

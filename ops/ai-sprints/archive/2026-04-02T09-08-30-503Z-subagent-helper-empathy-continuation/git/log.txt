@@ -1,4 +1,0 @@
-headSha: bb44012d6bf1661c262e1bc676910848a75c668c
-baseBranch: feat/subagent-workflow-helper-impl
-remoteBranch: origin/sprint/2026-04-02T09-08-30-503Z-subagent-helper-empathy-continuation/implement-pass-1
-capturedAt: 2026-04-02T09:31:41.612Z

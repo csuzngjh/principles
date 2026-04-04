@@ -1,1 +1,0 @@
-# No stage git-status.json found in archive

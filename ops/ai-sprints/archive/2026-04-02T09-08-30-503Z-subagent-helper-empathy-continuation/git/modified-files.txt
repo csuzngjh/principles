@@ -1,3 +1,0 @@
-packages/openclaw-plugin/src/hooks/prompt.ts
-packages/openclaw-plugin/src/openclaw-sdk.d.ts
-packages/openclaw-plugin/src/service/subagent-workflow/

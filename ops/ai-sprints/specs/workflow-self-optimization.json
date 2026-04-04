@@ -1,0 +1,116 @@
+{
+  "id": "workflow-self-optimization",
+  "title": "Workflow v1 Self-Optimization — fix issues found by Observer",
+  "workspace": "/home/csuzngjh/code/principles",
+  "branchWorkspace": "/home/csuzngjh/code/principles-workflow-self-optimization",
+  "branch": "feat/workflow-self-optimization",
+  "maxRoundsPerStage": 3,
+  "maxRuntimeMinutes": 360,
+  "stageTimeoutMinutes": 60,
+  "stages": [
+    "investigate",
+    "patch-plan",
+    "implement-pass-1",
+    "implement-pass-2",
+    "verify"
+  ],
+  "producer": {
+    "agent": "opencode",
+    "model": "minimax-cn-coding-plan/MiniMax-M2.7",
+    "timeoutSeconds": 1200
+  },
+  "reviewerA": {
+    "agent": "opencode",
+    "model": "minimax-cn-coding-plan/MiniMax-M2.7",
+    "timeoutSeconds": 1200,
+    "role": "code_and_local_correctness",
+    "focus": "orchestrator logic correctness, test coverage, no regression"
+  },
+  "reviewerB": {
+    "agent": "opencode",
+    "model": "minimax-cn-coding-plan/MiniMax-M2.7",
+    "timeoutSeconds": 1200,
+    "role": "runtime_and_compatibility",
+    "focus": "cron job integration, state persistence, operational reliability"
+  },
+  "escalationReviewer": {
+    "agent": "claude",
+    "model": "GLM-5.1",
+    "timeoutSeconds": 1800,
+    "role": "global_reviewer",
+    "focus": "architecture, data flow, sprint orchestration compatibility"
+  },
+  "context": [
+    "=== SELf-OPTIMIZATION SPRINT ===",
+    "This sprint fixes the AI Sprint Orchestrator's own workflow infrastructure.",
+    "The goal is to close the broken loop: Observer finds issues → this sprint fixes them.",
+    "",
+    "=== SOURCE OF TRUTH ===",
+    "Read ops/ai-sprints/self-optimization-status.json for the list of pending fixes.",
+    "Each pending fix has: id, issue, category, severity, description, status.",
+    "",
+    "=== RECENT OBSERVER REPORTS (for context) ===",
+    "~/.hermes/cron/output/6cb6476462c5/ — all observer reports with Failure Classification and Next Action sections.",
+    "",
+    "=== CODE TO MODIFY ===",
+    "scripts/ai-sprint-orchestrator/run.mjs — main orchestrator",
+    "scripts/ai-sprint-orchestrator/lib/decision.mjs — decision engine",
+    "scripts/ai-sprint-orchestrator/lib/task-specs.mjs — spec loading + path mapping",
+    "",
+    "=== CRON JOBS TO UPDATE ===",
+    "The cron job 'workflow-v1-high-frequency-observer' (6cb6476462c5) prompt needs update to write to self-optimization-status.json.",
+    "The cron job 'workflow-v1-low-frequency-executor' (b408d24259a5) prompt needs to read self-optimization-status.json.",
+    "Use 'hermes cron' CLI or update the cron job via the Hermes agent.",
+    "",
+    "=== SCOPE BOUNDARIES ===",
+    "Fix orchestrator infrastructure and cron job coordination ONLY.",
+    "Do NOT fix agent behavior (model output, prompt quality, etc.).",
+    "Do NOT modify OpenClaw or openclaw-plugin.",
+    "Do NOT change product features — only workflow reliability.",
+    "Do NOT re-architect beyond what's needed.",
+    "",
+    "=== VERIFICATION ===",
+    "After each fix: run `node --test scripts/ai-sprint-orchestrator/test/` — must pass.",
+    "Update self-optimization-status.json: mark resolved fixes, record sprint outcome."
+  ],
+  "stageGoals": {
+    "investigate": [
+      "Read self-optimization-status.json pendingFixes list.",
+      "For each open issue, confirm it still exists on current HEAD.",
+      "Classify: confirmed / resolved / not reproducible.",
+      "Prioritize: which fix gives most reliability improvement per line of code changed?"
+    ],
+    "patch-plan": [
+      "Produce minimal repair plan for top 1-2 confirmed issues.",
+      "Define exact file paths, lines, and test updates.",
+      "Define rollback boundary for each fix."
+    ],
+    "implement-pass-1": [
+      "Implement the planned fixes.",
+      "Run all 3 test suites — must pass.",
+      "Update self-optimization-status.json: mark in-progress."
+    ],
+    "implement-pass-2": [
+      "Address reviewer findings from pass 1.",
+      "Do not expand scope beyond patch-plan."
+    ],
+    "verify": [
+      "Verify fixes with evidence: test output, code diffs, state machine behavior.",
+      "Update self-optimization-status.json: write result to lastSprintResult, mark fixes as resolved.",
+      "Merge gate: confirm local SHA matches remote branch."
+    ]
+  },
+  "stageRoleTimeouts": {
+    "investigate": { "producer": 900, "reviewer_a": 600, "reviewer_b": 600 },
+    "patch-plan": { "producer": 720, "reviewer_a": 480, "reviewer_b": 480 },
+    "implement-pass-1": { "producer": 1200, "reviewer_a": 900, "reviewer_b": 900 },
+    "implement-pass-2": { "producer": 720, "reviewer_a": 600, "reviewer_b": 600 },
+    "verify": { "producer": 900, "reviewer_a": 600, "reviewer_b": 600 }
+  },
+  "investigateHypotheses": [
+    "Observer and Executor share no state — fixable by writing structured issues to self-optimization-status.json",
+    "Executor iteration budget (50) is insufficient for diagnose+fix+test cycle — fixable by changing cron job prompt to do only one thing per run",
+    "Scheduler blindly retries without backoff — fixable by adding consecutive failure counter and auto-pause logic",
+    "No verification mechanism after fix — fixable by having next Observer run verify the specific pending fix"
+  ]
+}

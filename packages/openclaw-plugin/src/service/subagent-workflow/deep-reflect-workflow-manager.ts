@@ -5,45 +5,46 @@ import type {
     SubagentWorkflowSpec,
     WorkflowMetadata,
     WorkflowDebugSummary,
-    EmpathyObserverPayload,
-    EmpathyResult,
+    DeepReflectResult,
     WorkflowResultContext,
     WorkflowPersistContext,
 } from './types.js';
+
+// Re-export DeepReflectResult so index.ts can re-export it
+export type { DeepReflectResult } from './types.js';
 import { RuntimeDirectDriver, type RunParams } from './runtime-direct-driver.js';
 import { WorkflowStore } from './workflow-store.js';
 import { isSubagentRuntimeAvailable } from '../../utils/subagent-probe.js';
-import { WorkspaceContext } from '../../core/workspace-context.js';
-import { trackFriction } from '../../core/session-tracker.js';
+import { buildCritiquePromptV2 } from '../../tools/critique-prompt.js';
 
 const WORKFLOW_SESSION_PREFIX = 'agent:main:subagent:workflow-';
 
-const DEFAULT_TIMEOUT_MS = 30_000;
-const DEFAULT_TTL_MS = 5 * 60 * 1000;
+const DEFAULT_TIMEOUT_MS = 60_000; // Deep-reflect needs more time than empathy
+const DEFAULT_TTL_MS = 10 * 60 * 1000;
 
-export interface EmpathyObserverWorkflowOptions {
+export interface DeepReflectWorkflowOptions {
     workspaceDir: string;
     logger: PluginLogger;
     subagent: RuntimeDirectDriver['subagent'];
 }
 
-export class EmpathyObserverWorkflowManager implements WorkflowManager {
+export class DeepReflectWorkflowManager implements WorkflowManager {
     private readonly store: WorkflowStore;
     private readonly driver: RuntimeDirectDriver;
     private readonly logger: PluginLogger;
     private readonly workspaceDir: string;
-    
+
     private activeWorkflows = new Map<string, NodeJS.Timeout>();
     private completedWorkflows = new Map<string, number>();
     private workflowSpecs = new Map<string, SubagentWorkflowSpec<unknown>>();
-    
-    constructor(opts: EmpathyObserverWorkflowOptions) {
+
+    constructor(opts: DeepReflectWorkflowOptions) {
         this.workspaceDir = opts.workspaceDir;
         this.logger = opts.logger;
         this.store = new WorkflowStore({ workspaceDir: opts.workspaceDir });
         this.driver = new RuntimeDirectDriver({ subagent: opts.subagent, logger: opts.logger });
     }
-    
+
     async startWorkflow<TResult>(
         spec: SubagentWorkflowSpec<TResult>,
         options: {
@@ -56,7 +57,7 @@ export class EmpathyObserverWorkflowManager implements WorkflowManager {
         const workflowId = this.generateWorkflowId();
         const childSessionKey = this.buildChildSessionKey(options.parentSessionId);
         const now = Date.now();
-        
+
         const metadata: WorkflowMetadata = {
             parentSessionId: options.parentSessionId,
             workspaceDir: options.workspaceDir,
@@ -65,28 +66,28 @@ export class EmpathyObserverWorkflowManager implements WorkflowManager {
             workflowType: spec.workflowType,
             ...options.metadata,
         };
-        
-        this.logger.info(`[PD:EmpathyObserverWorkflow] Starting workflow: workflowId=${workflowId}, type=${spec.workflowType}`);
-        
-        // Surface degrade: skip boot sessions (they run outside gateway request context)
+
+        this.logger.info(`[PD:DeepReflectWorkflow] Starting workflow: workflowId=${workflowId}, type=${spec.workflowType}`);
+
+        // Surface degrade: skip boot sessions
         if (options.parentSessionId.startsWith('boot-')) {
-            this.logger.info(`[PD:EmpathyObserverWorkflow] Skipping workflow: boot session (gateway request context unavailable)`);
-            throw new Error(`EmpathyObserverWorkflowManager: cannot start workflow for boot session`);
+            this.logger.info(`[PD:DeepReflectWorkflow] Skipping workflow: boot session`);
+            throw new Error(`DeepReflectWorkflowManager: cannot start workflow for boot session`);
         }
-        
-        // Surface degrade: check subagent runtime availability before calling run()
+
+        // Surface degrade: check subagent runtime availability
         if (!isSubagentRuntimeAvailable(this.driver.getSubagent())) {
-            this.logger.info(`[PD:EmpathyObserverWorkflow] Skipping workflow: subagent runtime unavailable`);
-            throw new Error(`EmpathyObserverWorkflowManager: subagent runtime unavailable`);
+            this.logger.info(`[PD:DeepReflectWorkflow] Skipping workflow: subagent runtime unavailable`);
+            throw new Error(`DeepReflectWorkflowManager: subagent runtime unavailable`);
         }
-        
+
         if (spec.transport !== 'runtime_direct') {
-            throw new Error(`EmpathyObserverWorkflowManager only supports runtime_direct transport`);
+            throw new Error(`DeepReflectWorkflowManager only supports runtime_direct transport`);
         }
-        
+
         const runParams = this.buildRunParams(spec, options, childSessionKey);
         const runResult = await this.driver.run(runParams);
-        
+
         this.store.createWorkflow({
             workflow_id: workflowId,
             workflow_type: spec.workflowType,
@@ -101,9 +102,9 @@ export class EmpathyObserverWorkflowManager implements WorkflowManager {
         });
         this.store.recordEvent(workflowId, 'spawned', null, 'active', 'subagent spawned', { runId: runResult.runId });
         this.workflowSpecs.set(workflowId, spec as SubagentWorkflowSpec<unknown>);
-        
+
         this.scheduleWaitPoll(workflowId, spec.timeoutMs ?? DEFAULT_TIMEOUT_MS, runResult.runId);
-        
+
         return {
             workflowId,
             childSessionKey,
@@ -111,7 +112,7 @@ export class EmpathyObserverWorkflowManager implements WorkflowManager {
             state: 'active',
         };
     }
-    
+
     private buildRunParams<TResult>(
         spec: SubagentWorkflowSpec<TResult>,
         options: {
@@ -130,7 +131,7 @@ export class EmpathyObserverWorkflowManager implements WorkflowManager {
             workflowType: spec.workflowType,
             ...(options.metadata ?? {}),
         });
-        
+
         return {
             sessionKey: childSessionKey,
             message,
@@ -142,36 +143,27 @@ export class EmpathyObserverWorkflowManager implements WorkflowManager {
             expectsCompletionMessage: true,
         };
     }
-    
-    static buildEmpathyPrompt(userMessage: string): string {
-        return [
-            'You are an empathy observer.',
-            'Analyze ONLY the user message and return strict JSON (no markdown):',
-            '{"damageDetected": boolean, "severity": "mild|moderate|severe", "confidence": number, "reason": string}',
-            `User message: ${JSON.stringify(userMessage.trim())}`,
-        ].join('\n');
-    }
-    
+
     private scheduleWaitPoll(
         workflowId: string,
         timeoutMs: number,
         runId: string
     ): void {
         const effectiveTimeoutMs = timeoutMs ?? DEFAULT_TIMEOUT_MS;
-        
+
         const timeout = setTimeout(async () => {
             try {
                 const result = await this.driver.wait({ runId, timeoutMs: effectiveTimeoutMs });
                 await this.notifyWaitResult(workflowId, result.status, result.error);
             } catch (error) {
-                this.logger.error(`[PD:EmpathyObserverWorkflow] Wait poll failed: ${String(error)}`);
+                this.logger.error(`[PD:DeepReflectWorkflow] Wait poll failed: ${String(error)}`);
                 await this.notifyWaitResult(workflowId, 'error', String(error));
             }
         }, 100);
-        
+
         this.activeWorkflows.set(workflowId, timeout);
     }
-    
+
     async notifyWaitResult(
         workflowId: string,
         status: 'ok' | 'error' | 'timeout',
@@ -179,17 +171,17 @@ export class EmpathyObserverWorkflowManager implements WorkflowManager {
     ): Promise<void> {
         const workflow = this.store.getWorkflow(workflowId);
         if (!workflow) {
-            this.logger.warn(`[PD:EmpathyObserverWorkflow] notifyWaitResult: workflow not found: ${workflowId}`);
+            this.logger.warn(`[PD:DeepReflectWorkflow] notifyWaitResult: workflow not found: ${workflowId}`);
             return;
         }
 
         if (workflow.state === 'completed' || workflow.state === 'terminal_error' || workflow.state === 'expired') {
-            this.logger.info(`[PD:EmpathyObserverWorkflow] notifyWaitResult: ignoring terminal workflow: ${workflowId}, state=${workflow.state}`);
+            this.logger.info(`[PD:DeepReflectWorkflow] notifyWaitResult: ignoring terminal workflow: ${workflowId}, state=${workflow.state}`);
             return;
         }
-        
-        this.logger.info(`[PD:EmpathyObserverWorkflow] notifyWaitResult: workflowId=${workflowId}, status=${status}`);
-        
+
+        this.logger.info(`[PD:DeepReflectWorkflow] notifyWaitResult: workflowId=${workflowId}, status=${status}`);
+
         const previousState = workflow.state;
         this.store.updateWorkflowState(workflowId, 'wait_result');
         this.store.recordEvent(workflowId, 'wait_result', previousState, 'wait_result', `wait completed: ${status}`, { error });
@@ -204,23 +196,23 @@ export class EmpathyObserverWorkflowManager implements WorkflowManager {
             this.store.recordEvent(workflowId, 'finalize_skipped', 'wait_result', 'terminal_error', `wait status: ${status}`, { error });
         }
     }
-    
+
     async notifyLifecycleEvent(
         workflowId: string,
         event: 'subagent_spawned' | 'subagent_ended',
         data?: { outcome?: 'ok' | 'error' | 'timeout' | 'killed' | 'reset' | 'deleted'; error?: string }
     ): Promise<void> {
-        this.logger.info(`[PD:EmpathyObserverWorkflow] notifyLifecycleEvent: workflowId=${workflowId}, event=${event}`);
-        
+        this.logger.info(`[PD:DeepReflectWorkflow] notifyLifecycleEvent: workflowId=${workflowId}, event=${event}`);
+
         if (event === 'subagent_ended' && data?.outcome) {
             await this.notifyWaitResult(workflowId, data.outcome === 'ok' ? 'ok' : data.outcome === 'error' ? 'error' : 'timeout', data.error);
         }
     }
-    
+
     async finalizeOnce(workflowId: string): Promise<void> {
         const workflow = this.store.getWorkflow(workflowId);
         if (!workflow) {
-            this.logger.warn(`[PD:EmpathyObserverWorkflow] finalizeOnce: workflow not found: ${workflowId}`);
+            this.logger.warn(`[PD:DeepReflectWorkflow] finalizeOnce: workflow not found: ${workflowId}`);
             return;
         }
 
@@ -228,16 +220,16 @@ export class EmpathyObserverWorkflowManager implements WorkflowManager {
         if (!spec) {
             throw new Error(`Workflow spec not registered for ${workflowId}`);
         }
-        
+
         if (this.isCompleted(workflowId)) {
-            this.logger.info(`[PD:EmpathyObserverWorkflow] finalizeOnce: already completed: ${workflowId}`);
+            this.logger.info(`[PD:DeepReflectWorkflow] finalizeOnce: already completed: ${workflowId}`);
             return;
         }
-        
-        this.logger.info(`[PD:EmpathyObserverWorkflow] Finalizing workflow: ${workflowId}`);
-        
+
+        this.logger.info(`[PD:DeepReflectWorkflow] Finalizing workflow: ${workflowId}`);
+
         this.store.updateWorkflowState(workflowId, 'finalizing');
-        
+
         try {
             const result = await this.driver.getResult({ sessionKey: workflow.child_session_key, limit: 20 });
 
@@ -267,7 +259,7 @@ export class EmpathyObserverWorkflowManager implements WorkflowManager {
                     await this.driver.cleanup({ sessionKey: workflow.child_session_key });
                     this.store.updateCleanupState(workflowId, 'completed');
                 } catch (cleanupError) {
-                    this.logger.error(`[PD:EmpathyObserverWorkflow] cleanup failed after persistence: ${String(cleanupError)}`);
+                    this.logger.error(`[PD:DeepReflectWorkflow] cleanup failed after persistence: ${String(cleanupError)}`);
                     this.store.updateCleanupState(workflowId, 'failed');
                     this.store.updateWorkflowState(workflowId, 'cleanup_pending');
                     this.store.recordEvent(workflowId, 'cleanup_failed', 'finalizing', 'cleanup_pending', String(cleanupError), {});
@@ -279,23 +271,23 @@ export class EmpathyObserverWorkflowManager implements WorkflowManager {
             this.store.updateWorkflowState(workflowId, 'completed');
             this.store.recordEvent(workflowId, 'finalized', 'finalizing', 'completed', 'success', {});
             this.markCompleted(workflowId);
-            
+
         } catch (error) {
-            this.logger.error(`[PD:EmpathyObserverWorkflow] finalizeOnce failed: ${String(error)}`);
+            this.logger.error(`[PD:DeepReflectWorkflow] finalizeOnce failed: ${String(error)}`);
             this.store.updateWorkflowState(workflowId, 'terminal_error');
             this.store.recordEvent(workflowId, 'finalize_error', 'finalizing', 'terminal_error', String(error), {});
             throw error;
         }
     }
-    
+
     async sweepExpiredWorkflows(maxAgeMs = DEFAULT_TTL_MS): Promise<number> {
         const expired = this.store.getExpiredWorkflows(maxAgeMs);
 
-        this.logger.info(`[PD:EmpathyObserverWorkflow] sweepExpiredWorkflows: found ${expired.length} expired`);
+        this.logger.info(`[PD:DeepReflectWorkflow] sweepExpiredWorkflows: found ${expired.length} expired`);
 
         for (const workflow of expired) {
             try {
-                this.logger.info(`[PD:EmpathyObserverWorkflow] Sweeping expired workflow: ${workflow.workflow_id}`);
+                this.logger.info(`[PD:DeepReflectWorkflow] Sweeping expired workflow: ${workflow.workflow_id}`);
 
                 await this.driver.cleanup({ sessionKey: workflow.child_session_key });
                 this.store.updateCleanupState(workflow.workflow_id, 'completed');
@@ -303,13 +295,13 @@ export class EmpathyObserverWorkflowManager implements WorkflowManager {
                 this.store.recordEvent(workflow.workflow_id, 'swept', workflow.state, 'expired', 'TTL expired', {});
 
             } catch (error) {
-                this.logger.error(`[PD:EmpathyObserverWorkflow] Sweep cleanup failed for ${workflow.workflow_id}: ${String(error)}`);
+                this.logger.error(`[PD:DeepReflectWorkflow] Sweep cleanup failed for ${workflow.workflow_id}: ${String(error)}`);
                 this.store.updateCleanupState(workflow.workflow_id, 'failed');
             }
         }
 
         // Clean up memory Maps to prevent leaks
-        const cutoff = Date.now() - 60_000; // 1 minute dedup window
+        const cutoff = Date.now() - 60_000;
         for (const [id, timestamp] of this.completedWorkflows) {
             if (timestamp < cutoff) {
                 this.completedWorkflows.delete(id);
@@ -357,11 +349,11 @@ export class EmpathyObserverWorkflowManager implements WorkflowManager {
             recentEvents,
         };
     }
-    
+
     private generateWorkflowId(): string {
-        return `wf_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+        return `wf_dr_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
     }
-    
+
     private buildChildSessionKey(parentSessionId: string): string {
         const safeParentSessionId = parentSessionId
             .replace(/[^a-zA-Z0-9_-]/g, '_')
@@ -369,233 +361,153 @@ export class EmpathyObserverWorkflowManager implements WorkflowManager {
         const timestamp = Date.now();
         return `${WORKFLOW_SESSION_PREFIX}${safeParentSessionId}-${timestamp}`;
     }
-    
-    private extractAssistantText(messages: unknown[], assistantTexts?: string[]): string {
-        if (assistantTexts && assistantTexts.length > 0) {
-            return assistantTexts[assistantTexts.length - 1] || '';
-        }
-        
-        for (let i = messages.length - 1; i >= 0; i--) {
-            const msg = messages[i] as { role?: string; content?: unknown };
-            if (msg?.role !== 'assistant') continue;
-            if (typeof msg.content === 'string') return msg.content;
-            if (Array.isArray(msg.content)) {
-                const txt = msg.content
-                    .filter((part: any) => part?.type === 'text' && typeof part.text === 'string')
-                    .map((part: any) => part.text)
-                    .join('\n');
-                if (txt) return txt;
-            }
-        }
-        
-        return '';
-    }
-    
-    parseEmpathyPayload(rawText: string): EmpathyObserverPayload | null {
-        if (!rawText?.trim()) return null;
-        
-        try {
-            return JSON.parse(rawText.trim()) as EmpathyObserverPayload;
-        } catch {
-            const match = rawText.match(/\{[\s\S]*\}/);
-            if (!match) {
-                this.logger.warn('[PD:EmpathyObserverWorkflow] Observer payload is not valid JSON');
-                return null;
-            }
-            try {
-                return JSON.parse(match[0]) as EmpathyObserverPayload;
-            } catch {
-                this.logger.warn('[PD:EmpathyObserverWorkflow] Failed to parse observer JSON payload');
-                return null;
-            }
-        }
-    }
-    
+
     private isCompleted(workflowId: string): boolean {
         const timestamp = this.completedWorkflows.get(workflowId);
         if (!timestamp) return false;
-        if (Date.now() - timestamp > 5 * 60 * 1000) {
-            this.completedWorkflows.delete(workflowId);
-            return false;
-        }
-        return true;
+        return Date.now() - timestamp < 60_000; // 1 minute dedup window
     }
-    
+
     private markCompleted(workflowId: string): void {
-        this.completedWorkflows.set(workflowId, Date.now());
-        this.workflowSpecs.delete(workflowId);
-        
         const timeout = this.activeWorkflows.get(workflowId);
         if (timeout) {
             clearTimeout(timeout);
             this.activeWorkflows.delete(workflowId);
         }
+        this.completedWorkflows.set(workflowId, Date.now());
     }
-    
+
     dispose(): void {
-        for (const timeout of this.activeWorkflows.values()) {
+        for (const [workflowId, timeout] of this.activeWorkflows) {
             clearTimeout(timeout);
+            this.logger.info(`[PD:DeepReflectWorkflow] Disposed active workflow: ${workflowId}`);
         }
         this.activeWorkflows.clear();
+        this.completedWorkflows.clear();
+        this.workflowSpecs.clear();
         this.store.dispose();
     }
 }
 
-export function createEmpathyObserverWorkflowManager(
-    opts: EmpathyObserverWorkflowOptions
-): EmpathyObserverWorkflowManager {
-    return new EmpathyObserverWorkflowManager(opts);
+// ─── Workflow Spec ───────────────────────────────────────────────
+
+export interface DeepReflectTaskInput {
+    context: string;
+    depth: number;
+    model_id?: string;
 }
 
-/**
- * Extract raw assistant text from messages or assistantTexts array.
- */
-function extractAssistantTextForSpec(messages: unknown[], assistantTexts?: string[]): string {
-    if (assistantTexts && assistantTexts.length > 0) {
-        return assistantTexts[assistantTexts.length - 1] || '';
-    }
-    for (let i = messages.length - 1; i >= 0; i--) {
-        const msg = messages[i] as { role?: string; content?: unknown };
-        if (msg?.role !== 'assistant') continue;
-        if (typeof msg.content === 'string') return msg.content;
-        if (Array.isArray(msg.content)) {
-            const txt = msg.content
-                .filter((part: any) => part?.type === 'text' && typeof part.text === 'string')
-                .map((part: any) => part.text)
-                .join('\n');
-            if (txt) return txt;
-        }
-    }
-    return '';
+export interface DeepReflectBuildPromptContext {
+    parentSessionId: string;
+    workspaceDir?: string;
+    taskInput: unknown;
+    startedAt: number;
+    workflowType: string;
 }
 
-/**
- * Parse empathy observer JSON payload from raw text.
- */
-function parseEmpathyPayloadForSpec(rawText: string): EmpathyObserverPayload | null {
-    if (!rawText?.trim()) return null;
-    try {
-        return JSON.parse(rawText.trim()) as EmpathyObserverPayload;
-    } catch {
-        const match = rawText.match(/\{[\s\S]*\}/);
-        if (!match) return null;
-        try {
-            return JSON.parse(match[0]) as EmpathyObserverPayload;
-        } catch {
-            return null;
-        }
-    }
-}
-
-/**
- * Normalize severity to valid enum.
- */
-function normalizeSeverityForSpec(severity: string | undefined): 'mild' | 'moderate' | 'severe' {
-    if (severity === 'severe') return 'severe';
-    if (severity === 'moderate') return 'moderate';
-    return 'mild';
-}
-
-/**
- * Normalize confidence to [0, 1] range.
- */
-function normalizeConfidenceForSpec(value: number | undefined): number {
-    if (!Number.isFinite(value)) return 1;
-    return Math.max(0, Math.min(1, Number(value)));
-}
-
-/**
- * Calculate pain score from severity using config.
- */
-function scoreFromSeverityForSpec(severity: string | undefined, wctx: WorkspaceContext): number {
-    if (severity === 'severe') return Number(wctx.config.get('empathy_engine.penalties.severe') ?? 40);
-    if (severity === 'moderate') return Number(wctx.config.get('empathy_engine.penalties.moderate') ?? 25);
-    return Number(wctx.config.get('empathy_engine.penalties.mild') ?? 10);
-}
-
-/**
- * EmpathyObserver workflow specification.
- * This spec drives EmpathyObserverWorkflowManager for the empathy observer workflow.
- */
-export const empathyObserverWorkflowSpec: SubagentWorkflowSpec<EmpathyResult> = {
-    workflowType: 'empathy-observer',
+export const deepReflectWorkflowSpec: SubagentWorkflowSpec<DeepReflectResult> = {
+    workflowType: 'deep-reflect',
     transport: 'runtime_direct',
-    timeoutMs: 30_000,
-    ttlMs: 300_000,
+    timeoutMs: 60_000,
+    ttlMs: 10 * 60 * 1000,
     shouldDeleteSessionAfterFinalize: true,
 
-    buildPrompt(taskInput: unknown, _metadata: WorkflowMetadata): string {
-        const userMessage = String(taskInput).trim();
-        return [
-            'You are an empathy observer.',
-            'Analyze ONLY the user message and return strict JSON (no markdown):',
-            '{"damageDetected": boolean, "severity": "mild|moderate|severe", "confidence": number, "reason": string}',
-            `User message: ${JSON.stringify(userMessage)}`,
-        ].join('\n');
-    },
-
-    async parseResult(ctx: WorkflowResultContext): Promise<EmpathyResult | null> {
-        const rawText = extractAssistantTextForSpec(ctx.messages, ctx.assistantTexts);
-        const payload = parseEmpathyPayloadForSpec(rawText);
-        if (!payload) return null;
-
-        return {
-            damageDetected: payload.damageDetected ?? false,
-            severity: normalizeSeverityForSpec(payload.severity),
-            confidence: normalizeConfidenceForSpec(payload.confidence),
-            reason: payload.reason ?? '',
-            painScore: 0,
-        };
-    },
-
-    async persistResult(ctx: WorkflowPersistContext<EmpathyResult>): Promise<void> {
-        const { result, metadata, workspaceDir } = ctx;
-        if (!result.damageDetected) return;
-
-        const wctx = WorkspaceContext.fromHookContext({ workspaceDir });
-        const painScore = scoreFromSeverityForSpec(result.severity, wctx);
-
-        trackFriction(
-            metadata.parentSessionId,
-            painScore,
-            `observer_empathy_${result.severity}`,
-            workspaceDir,
-            { source: 'user_empathy' }
-        );
-
-        const eventId = `emp_obs_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-        wctx.eventLog.recordPainSignal(metadata.parentSessionId, {
-            score: painScore,
-            source: 'user_empathy',
-            reason: result.reason || 'Empathy observer detected likely user frustration.',
-            isRisky: false,
-            origin: 'system_infer',
-            severity: result.severity,
-            confidence: result.confidence,
-            detection_mode: 'structured',
-            deduped: false,
-            trigger_text_excerpt: String(metadata.taskInput ?? '').substring(0, 120),
-            raw_score: painScore,
-            calibrated_score: painScore,
-            eventId,
+    buildPrompt(taskInput: unknown, ctx: DeepReflectBuildPromptContext): string {
+        const input = taskInput as DeepReflectTaskInput;
+        // Use the existing critique prompt builder
+        return buildCritiquePromptV2({
+            context: input.context,
+            depth: input.depth,
+            model_id: input.model_id,
+            api: undefined, // Not available in workflow context
+            workspaceDir: ctx.workspaceDir,
         });
-
-        try {
-            wctx.trajectory?.recordPainEvent?.({
-                sessionId: metadata.parentSessionId,
-                source: 'user_empathy',
-                score: painScore,
-                reason: result.reason || 'Empathy observer detected likely user frustration.',
-                severity: result.severity,
-                origin: 'system_infer',
-                confidence: result.confidence,
-            });
-        } catch (error) {
-            console.warn(`[PD:EmpathyObserverWorkflow] Failed to persist trajectory: ${String(error)}`);
-        }
     },
 
     shouldFinalizeOnWaitStatus(status: 'ok' | 'error' | 'timeout'): boolean {
         return status === 'ok';
+    },
+
+    async parseResult(ctx: WorkflowResultContext): Promise<DeepReflectResult | null> {
+        const { assistantTexts, messages } = ctx;
+
+        let insights = '';
+        if (assistantTexts && assistantTexts.length > 0) {
+            insights = assistantTexts[assistantTexts.length - 1] || '';
+        } else if (messages && messages.length > 0) {
+            const lastMessage = messages[messages.length - 1] as { role?: string; content?: unknown };
+            if (typeof lastMessage?.content === 'string') {
+                insights = lastMessage.content;
+            } else if (Array.isArray(lastMessage?.content)) {
+                insights = (lastMessage.content as Array<{ type?: string; text?: string }>)
+                    .filter((c) => c?.type === 'text' && typeof c.text === 'string')
+                    .map((c) => c.text!)
+                    .join('\n');
+            }
+        }
+
+        if (!insights?.trim()) {
+            return null;
+        }
+
+        const taskInput = ctx.metadata.taskInput as DeepReflectTaskInput | undefined;
+
+        return {
+            insights,
+            context: taskInput?.context ?? '',
+            depth: taskInput?.depth ?? 2,
+            modelId: taskInput?.model_id ?? 'auto-select',
+            passed: !insights.includes('REFLECTION_FAIL'),
+        };
+    },
+
+    async persistResult(ctx: WorkflowPersistContext<DeepReflectResult>): Promise<void> {
+        const { result, metadata, workspaceDir } = ctx;
+
+        if (!result || !result.insights) return;
+
+        try {
+            const fs = await import('fs');
+            const pathMod = await import('path');
+            const { resolvePdPath } = await import('../../core/paths.js');
+
+            const reflectionLogPath = resolvePdPath(workspaceDir, 'REFLECTION_LOG');
+            const memoryDir = pathMod.default.dirname(reflectionLogPath);
+            if (!fs.default.existsSync(memoryDir)) {
+                fs.default.mkdirSync(memoryDir, { recursive: true });
+            }
+
+            const timestamp = new Date().toISOString();
+            const taskInput = metadata.taskInput as DeepReflectTaskInput | undefined;
+            const entry = `
+---
+## Reflection at ${timestamp}
+**Model**: ${result.modelId || 'auto-select'}
+**Depth**: ${result.depth || 2}
+
+### Context
+${(taskInput?.context ?? '').substring(0, 500)}${(taskInput?.context ?? '').length > 500 ? '...' : ''}
+
+### Insights
+${result.insights}
+
+`;
+
+            const header = `# Reflection Log\n\n> Auto-generated by Deep Reflection Tool\n> Retention: 30 days\n`;
+
+            let existingContent = '';
+            if (fs.default.existsSync(reflectionLogPath)) {
+                existingContent = fs.default.readFileSync(reflectionLogPath, 'utf8');
+            }
+
+            const newContent = header + entry + existingContent.replace(header, '');
+
+            const tempPath = `${reflectionLogPath}.tmp`;
+            fs.default.writeFileSync(tempPath, newContent, 'utf8');
+            fs.default.renameSync(tempPath, reflectionLogPath);
+        } catch (err) {
+            // Let the error propagate to finalizeOnce for proper event logging
+            throw new Error(`DeepReflectWorkflow persistResult failed: ${String(err)}`);
+        }
     },
 };

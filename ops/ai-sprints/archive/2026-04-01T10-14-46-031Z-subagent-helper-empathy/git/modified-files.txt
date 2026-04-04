@@ -1,1 +1,0 @@
-ops/ai-sprints/specs/subagent-helper-empathy.json
