@@ -84,14 +84,6 @@ export interface PainSettings {
     deep_reflection?: DeepReflectionSettings;
     empathy_engine?: {
         enabled?: boolean;
-        /** Shadow mode: also run EmpathyObserverWorkflowManager alongside legacy path */
-        helper_empathy_enabled?: boolean;
-        /** PR2.1 Task 4: Empathy mode switching
-         * - legacy: Only legacy path (empathyObserverManager.spawn)
-         * - shadow: Legacy + helper in parallel
-         * - helper_primary: Only helper path, skip legacy
-         */
-        empathy_mode?: 'legacy' | 'shadow' | 'helper_primary';
         dedupe_window_ms?: number;
         penalties?: {
             mild?: number;
