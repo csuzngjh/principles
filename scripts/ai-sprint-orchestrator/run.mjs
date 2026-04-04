@@ -267,15 +267,34 @@ function runAgent({ cwd, agent, model, prompt, timeoutSeconds = 1800, failLogPat
   const stderr = result.stderr ?? '';
 
   if (result.error || result.status !== 0) {
+    // Map acpx exit codes to semantic error types for better error classification:
+    //   0  = success
+    //   1  = runtime error (agent crash, ACP failure)
+    //   2  = usage error (bad flags, missing prompt)
+    //   3  = timeout (acpx --timeout exceeded)
+    //   4  = no session (session lost/closed)
+    //   5  = permission denied (agent approval rejected)
+    //   130 = interrupted (SIGINT/SIGHUP — SSH disconnect)
+    const exitCode = result.status ?? 1;
+    const errorType = exitCode === 3 ? 'timeout'
+      : exitCode === 4 ? 'no_session'
+        : exitCode === 5 ? 'permission_denied'
+          : exitCode === 130 ? 'interrupted'
+            : exitCode === 2 ? 'usage_error'
+              : 'runtime_error';
+
     if ((result.error?.code === 'ETIMEDOUT' || result.signal === 'SIGTERM') && result.pid) {
       terminateProcessTree(result.pid, { runDir, label: roleLabel });
     }
     if (failLogPath) {
       ensureDir(path.dirname(failLogPath));
-      writeText(failLogPath, `# Agent Failure Log\n\n- agent: ${agent}\n- model: ${model}\n- exitStatus: ${result.status ?? 'N/A'}\n- error: ${result.error?.message ?? 'none'}\n\n## stdout\n\n${stdout}\n\n## stderr\n\n${stderr}\n`);
+      writeText(failLogPath, `# Agent Failure Log\n\n- agent: ${agent}\n- model: ${model}\n- exitStatus: ${result.status ?? 'N/A'}\n- exitCode: ${exitCode}\n- errorType: ${errorType}\n- error: ${result.error?.message ?? 'none'}\n\n## stdout\n\n${stdout}\n\n## stderr\n\n${stderr}\n`);
     }
     if (result.error) throw result.error;
-    throw new Error(`Agent ${agent} failed with status ${result.status}\n${stdout.slice(0, 2000)}\n${stderr.slice(0, 2000)}`);
+    throw Object.assign(new Error(`Agent ${agent} failed with status ${result.status} (${errorType})\n${stdout.slice(0, 2000)}\n${stderr.slice(0, 2000)}`), {
+      acpxExitCode: exitCode,
+      acpxErrorType: errorType,
+    });
   }
 
   return stdout.trim();
@@ -1474,6 +1493,11 @@ function reconcileRunState(runDir, state) {
   if (state.status !== 'running') return state;
   if (pidExists(state.orchestratorPid)) return state;
 
+  // Clean up any orphaned acpx queue-owner daemons and agent processes
+  // from the previous orchestrator run. acpx queue-owners are detached
+  // processes that may outlive their parent acpx invocation.
+  cleanupAcpxOrphans(runDir, state);
+
   // Detect which artifacts already exist on disk for the current stage/round
   const stageDirName = `${String(state.currentStageIndex + 1).padStart(2, '0')}-${state.currentStage}`;
   const stageDir = path.join(runDir, 'stages', stageDirName);
@@ -1513,6 +1537,39 @@ function reconcileRunState(runDir, state) {
   cleanupRecordedRoleProcesses(paths, runDir);
   cleanupWorktree({ state, runDir });
   return state;
+}
+
+/**
+ * Clean up orphaned acpx queue-owner daemons and agent processes.
+ * acpx spawns detached queue-owner processes that may outlive the acpx CLI
+ * that created them. On stale-run reconciliation, these should be cleaned up.
+ */
+function cleanupAcpxOrphans(runDir, state) {
+  const workspace = state.worktree?.worktreePath ?? (state.specPath
+    ? path.dirname(state.specPath)
+    : null);
+  if (!workspace) return;
+
+  // Try to close any active acpx sessions for the workspace+agent combo
+  const spec = state.taskId ? (() => {
+    try { return getTaskSpec(state.taskId, state.specPath); } catch { return null; }
+  })() : null;
+  const agent = spec?.producer?.agent ?? null;
+
+  if (agent) {
+    try {
+      // acpx <agent> sessions close — this removes the queue-owner lease
+      const closeResult = spawnSync(acpxBin !== 'acpx' ? nodeBin : 'acpx',
+        acpxBin !== 'acpx' ? [acpxBin, agent, 'sessions', 'close'] : [agent, 'sessions', 'close'],
+        { cwd: workspace, encoding: 'utf8', timeout: 10_000, env: acpxEnv, shell: false });
+      if (closeResult.status === 0) {
+        appendTimeline(runDir, `Cleaned up acpx ${agent} sessions for stale run recovery`);
+      }
+    } catch (closeErr) {
+      // Non-fatal — queue-owner may already be gone
+      appendTimeline(runDir, `acpx session cleanup skipped: ${closeErr.message}`);
+    }
+  }
 }
 
 /**
@@ -2597,6 +2654,24 @@ async function main() {
   const { runDir, state } = loadOrInitState(args);
   reconcileRunState(runDir, state);
   const spec = loadSpec(state, args);
+
+  // Pre-flight check: verify agent binaries are available before starting
+  if (!args.status && !args.list && !args.archive && !args.abort && !args.pause) {
+    const agentsToCheck = new Set();
+    if (spec.producer?.agent) agentsToCheck.add(spec.producer.agent);
+    if (spec.reviewerA?.agent) agentsToCheck.add(spec.reviewerA.agent);
+    if (spec.reviewerB?.agent) agentsToCheck.add(spec.reviewerB.agent);
+
+    for (const agentName of agentsToCheck) {
+      const checkResult = spawnSync('which', [agentName], { encoding: 'utf8', shell: false });
+      if (checkResult.status !== 0) {
+        appendTimeline(runDir, `Pre-flight check FAILED: agent '${agentName}' not found in PATH`);
+        throw new Error(`Agent '${agentName}' not found in PATH. Install it or update the spec.`);
+      }
+      appendTimeline(runDir, `Pre-flight check OK: ${agentName} -> ${(checkResult.stdout ?? '').trim()}`);
+    }
+  }
+
   const sprintStartedAt = Date.parse(state.createdAt) || Date.now();
 
   // Acquire exclusive lock to prevent concurrent orchestrators
