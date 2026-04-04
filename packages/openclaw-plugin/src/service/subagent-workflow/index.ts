@@ -19,6 +19,14 @@ export {
     type EmpathyObserverWorkflowOptions,
 } from './empathy-observer-workflow-manager.js';
 
+export {
+    DeepReflectWorkflowManager,
+    deepReflectWorkflowSpec,
+    type DeepReflectWorkflowOptions,
+    type DeepReflectTaskInput,
+    type DeepReflectResult,
+} from './deep-reflect-workflow-manager.js';
+
 export type {
     WorkflowState,
     WorkflowTransport,

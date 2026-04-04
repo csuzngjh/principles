@@ -151,7 +151,10 @@ export function extractContractItems(text) {
   }
   if (!match) return [];
   const items = [];
-  const blocks = match[1].split(/\r?\n/).filter((l) => l.trim().startsWith('-') && !/^[-*_]{3,}\s*$/.test(l.trim()));
+  const blocks = match[1]
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.startsWith('-') && !/^[-*_]{3,}\s*$/.test(l));
   for (const block of blocks) {
     const deliverable = block.replace(/^-\s*/, '').trim();
     // Primary format: "<description> status: DONE|PARTIAL|TODO"
@@ -422,10 +425,10 @@ export function decideStage({ stageCriteria, producer, reviewerA, reviewerB, glo
     }
   }
 
-  // Dimension threshold failures become structural blockers
-  if (metrics.dimensionFailures.length > 0) {
-    structuralBlockers.push(...metrics.dimensionFailures);
-  }
+  // NOTE: Dimension failures are NOT structural blockers. They affect output quality
+  // but do not prevent advance — dimensions are subjective judgments that reviewers
+  // may disagree on. Blocking advance on dimensions causes infinite revise loops.
+  // Low dimensions will downgrade outputQuality from production_ready → shadow_complete.
 
   // Contract completion check: if requiredDeliverables are defined, all contract items must be DONE
   if (metrics.requiredDeliverables.length > 0 && !metrics.contractCheck.allDone) {

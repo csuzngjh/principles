@@ -1,5 +1,0 @@
-# Agent Failure Log
-
-- agent: claude
-- model: GLM-5.1
-- error: Agent claude failed with status 1

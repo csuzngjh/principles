@@ -7,21 +7,31 @@
   "maxRoundsPerStage": 3,
   "maxRuntimeMinutes": 360,
   "stageTimeoutMinutes": 30,
-  "stages": ["investigate", "patch-plan", "implement-pass-1", "implement-pass-2", "verify"],
+  "stages": [
+    "investigate",
+    "patch-plan",
+    "implement-pass-1",
+    "implement-pass-2",
+    "verify"
+  ],
   "producer": {
     "agent": "opencode",
     "model": "minimax-cn-coding-plan/MiniMax-M2.7",
     "timeoutSeconds": 120
-    },
+  },
   "reviewerA": {
-    "agent": "iflow",
-    "model": "glm-5",
-    "timeoutSeconds": 900
+    "agent": "opencode",
+    "model": "minimax-cn-coding-plan/MiniMax-M2.7",
+    "timeoutSeconds": 1200,
+    "role": "code_and_local_correctness",
+    "focus": "empathy observer runtime correctness"
   },
   "reviewerB": {
-    "agent": "iflow",
-    "model": "glm-5",
-    "timeoutSeconds": 900
+    "agent": "opencode",
+    "model": "minimax-cn-coding-plan/MiniMax-M2.7",
+    "timeoutSeconds": 1200,
+    "role": "runtime_and_compatibility",
+    "focus": "OpenClaw runtime semantics, subagent lifecycle"
   },
   "escalationReviewer": {
     "agent": "claude",
@@ -60,51 +70,181 @@
   "stageCriteria": {
     "investigate": {
       "requiredApprovals": 2,
-      "requiredProducerSections": ["SUMMARY", "EVIDENCE", "CODE_EVIDENCE", "KEY_EVENTS", "HYPOTHESIS_MATRIX", "CHECKS"],
-      "requiredReviewerSections": ["VERDICT", "BLOCKERS", "FINDINGS", "CODE_EVIDENCE", "HYPOTHESIS_MATRIX", "NEXT_FOCUS", "CHECKS"],
-      "scoringDimensions": ["evidence_quality", "hypothesis_coverage", "root_cause_confidence"],
+      "requiredProducerSections": [
+        "SUMMARY",
+        "EVIDENCE",
+        "CODE_EVIDENCE",
+        "KEY_EVENTS",
+        "HYPOTHESIS_MATRIX",
+        "CHECKS"
+      ],
+      "requiredReviewerSections": [
+        "VERDICT",
+        "BLOCKERS",
+        "FINDINGS",
+        "CODE_EVIDENCE",
+        "HYPOTHESIS_MATRIX",
+        "NEXT_FOCUS",
+        "CHECKS"
+      ],
+      "scoringDimensions": [
+        "evidence_quality",
+        "hypothesis_coverage",
+        "root_cause_confidence"
+      ],
       "dimensionThreshold": 3,
-      "requiredDeliverables": ["root_cause_identified", "reproduction_steps", "failure_mode_analysis"]
+      "requiredDeliverables": [
+        "root_cause_identified",
+        "reproduction_steps",
+        "failure_mode_analysis"
+      ]
     },
     "patch-plan": {
       "requiredApprovals": 2,
-      "requiredProducerSections": ["SUMMARY", "CHANGES", "CODE_EVIDENCE", "EVIDENCE", "CHECKS"],
-      "requiredReviewerSections": ["VERDICT", "BLOCKERS", "FINDINGS", "CODE_EVIDENCE", "NEXT_FOCUS", "CHECKS"],
-      "scoringDimensions": ["plan_completeness", "risk_assessment", "rollback_safety"],
+      "requiredProducerSections": [
+        "SUMMARY",
+        "CHANGES",
+        "CODE_EVIDENCE",
+        "EVIDENCE",
+        "CHECKS"
+      ],
+      "requiredReviewerSections": [
+        "VERDICT",
+        "BLOCKERS",
+        "FINDINGS",
+        "CODE_EVIDENCE",
+        "NEXT_FOCUS",
+        "CHECKS"
+      ],
+      "scoringDimensions": [
+        "plan_completeness",
+        "risk_assessment",
+        "rollback_safety"
+      ],
       "dimensionThreshold": 3,
-      "requiredDeliverables": ["minimal_fix_plan", "test_outline", "rollback_steps"]
+      "requiredDeliverables": [
+        "minimal_fix_plan",
+        "test_outline",
+        "rollback_steps"
+      ]
     },
     "implement-pass-1": {
       "requiredApprovals": 2,
-      "requiredProducerSections": ["SUMMARY", "CHANGES", "CODE_EVIDENCE", "EVIDENCE", "KEY_EVENTS", "CHECKS"],
-      "requiredReviewerSections": ["VERDICT", "BLOCKERS", "FINDINGS", "CODE_EVIDENCE", "NEXT_FOCUS", "CHECKS"],
-      "scoringDimensions": ["correctness", "scope_control", "test_coverage", "regression_risk"],
+      "requiredProducerSections": [
+        "SUMMARY",
+        "CHANGES",
+        "CODE_EVIDENCE",
+        "EVIDENCE",
+        "KEY_EVENTS",
+        "CHECKS"
+      ],
+      "requiredReviewerSections": [
+        "VERDICT",
+        "BLOCKERS",
+        "FINDINGS",
+        "CODE_EVIDENCE",
+        "NEXT_FOCUS",
+        "CHECKS"
+      ],
+      "scoringDimensions": [
+        "correctness",
+        "scope_control",
+        "test_coverage",
+        "regression_risk"
+      ],
       "dimensionThreshold": 3,
-      "requiredDeliverables": ["targeted_fix", "focused_tests", "verification_evidence"]
+      "requiredDeliverables": [
+        "targeted_fix",
+        "focused_tests",
+        "verification_evidence"
+      ]
     },
     "implement-pass-2": {
       "requiredApprovals": 2,
-      "requiredProducerSections": ["SUMMARY", "CHANGES", "CODE_EVIDENCE", "EVIDENCE", "KEY_EVENTS", "CHECKS"],
-      "requiredReviewerSections": ["VERDICT", "BLOCKERS", "FINDINGS", "CODE_EVIDENCE", "NEXT_FOCUS", "CHECKS"],
-      "scoringDimensions": ["correctness", "scope_control", "test_coverage", "regression_risk"],
+      "requiredProducerSections": [
+        "SUMMARY",
+        "CHANGES",
+        "CODE_EVIDENCE",
+        "EVIDENCE",
+        "KEY_EVENTS",
+        "CHECKS"
+      ],
+      "requiredReviewerSections": [
+        "VERDICT",
+        "BLOCKERS",
+        "FINDINGS",
+        "CODE_EVIDENCE",
+        "NEXT_FOCUS",
+        "CHECKS"
+      ],
+      "scoringDimensions": [
+        "correctness",
+        "scope_control",
+        "test_coverage",
+        "regression_risk"
+      ],
       "dimensionThreshold": 3,
-      "requiredDeliverables": ["review_findings_addressed", "no_scope_creep", "targeted_verification"]
+      "requiredDeliverables": [
+        "review_findings_addressed",
+        "no_scope_creep",
+        "targeted_verification"
+      ]
     },
     "verify": {
       "requiredApprovals": 2,
-      "requiredProducerSections": ["SUMMARY", "EVIDENCE", "CODE_EVIDENCE", "CHECKS"],
-      "requiredReviewerSections": ["VERDICT", "BLOCKERS", "FINDINGS", "CODE_EVIDENCE", "NEXT_FOCUS", "CHECKS"],
-      "scoringDimensions": ["verification_thoroughness", "gap_analysis", "production_readiness"],
+      "requiredProducerSections": [
+        "SUMMARY",
+        "EVIDENCE",
+        "CODE_EVIDENCE",
+        "CHECKS"
+      ],
+      "requiredReviewerSections": [
+        "VERDICT",
+        "BLOCKERS",
+        "FINDINGS",
+        "CODE_EVIDENCE",
+        "NEXT_FOCUS",
+        "CHECKS"
+      ],
+      "scoringDimensions": [
+        "verification_thoroughness",
+        "gap_analysis",
+        "production_readiness"
+      ],
       "dimensionThreshold": 3,
-      "requiredDeliverables": ["verification_report", "remaining_gaps", "deployment_checklist"]
+      "requiredDeliverables": [
+        "verification_report",
+        "remaining_gaps",
+        "deployment_checklist"
+      ]
     }
   },
   "stageRoleTimeouts": {
-    "investigate": { "producer": 720, "reviewer_a": 600, "reviewer_b": 600 },
-    "patch-plan": { "producer": 600, "reviewer_a": 480, "reviewer_b": 480 },
-    "implement-pass-1": { "producer": 900, "reviewer_a": 600, "reviewer_b": 600 },
-    "implement-pass-2": { "producer": 600, "reviewer_a": 480, "reviewer_b": 480 },
-    "verify": { "producer": 720, "reviewer_a": 480, "reviewer_b": 480 }
+    "investigate": {
+      "producer": 720,
+      "reviewer_a": 600,
+      "reviewer_b": 600
+    },
+    "patch-plan": {
+      "producer": 600,
+      "reviewer_a": 480,
+      "reviewer_b": 480
+    },
+    "implement-pass-1": {
+      "producer": 900,
+      "reviewer_a": 600,
+      "reviewer_b": 600
+    },
+    "implement-pass-2": {
+      "producer": 600,
+      "reviewer_a": 480,
+      "reviewer_b": 480
+    },
+    "verify": {
+      "producer": 720,
+      "reviewer_a": 480,
+      "reviewer_b": 480
+    }
   },
   "investigateHypotheses": [
     "prompt_contamination_from_prompt_ts",
