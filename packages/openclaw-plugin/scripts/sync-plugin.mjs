@@ -224,9 +224,9 @@ function installDependencies() {
 
 /**
  * Build the plugin.
- * Always runs build:production to ensure dist/bundle.js (the actual shipped artifact)
+ * Always runs build:production to ensure dist/bundle.mjs (the actual shipped artifact)
  * is always fresh. We no longer compare timestamps because:
- *   1. tsc alone updates index.js without updating bundle.js
+ *   1. tsc alone updates index.js without updating bundle.mjs
  *   2. Comparing index.js vs src files falsely claims "up to date"
  *   3. The cost of a extra ~10s build is far cheaper than shipping stale bundles
  *
@@ -246,7 +246,7 @@ function buildPlugin() {
         process.exit(1);
     }
 
-    // Post-build verification: ensure critical symbols made it into bundle.js
+    // Post-build verification: ensure critical symbols made it into bundle.mjs
     verifyBundleContents();
 }
 
@@ -439,7 +439,7 @@ function verifyInstalledFingerprint() {
 function verifyBuild() {
     const distDir = join(SOURCE_DIR, 'dist');
     const indexJs = join(distDir, 'index.js');
-    const bundleJs = join(distDir, 'bundle.js');
+    const bundleMjs = join(distDir, 'bundle.mjs');
 
     if (!existsSync(distDir)) {
         console.error('❌ dist/ directory not found.');
@@ -447,8 +447,8 @@ function verifyBuild() {
         process.exit(1);
     }
 
-    if (!existsSync(indexJs) && !existsSync(bundleJs)) {
-        console.error('❌ dist/index.js or dist/bundle.js not found.');
+    if (!existsSync(indexJs) && !existsSync(bundleMjs)) {
+        console.error('❌ dist/index.js or dist/bundle.mjs not found.');
         console.error('   Run without --skip-build to build automatically.');
         process.exit(1);
     }
