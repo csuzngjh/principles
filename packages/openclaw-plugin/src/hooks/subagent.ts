@@ -1,8 +1,7 @@
-import type { PluginHookSubagentEndedEvent, PluginHookSubagentContext, PluginLogger } from '../openclaw-sdk.js';
+import type { PluginHookSubagentEndedEvent, PluginHookSubagentContext, PluginLogger, OpenClawPluginApi } from '../openclaw-sdk.js';
 import * as fs from 'fs';
 import { writePainFlag } from '../core/pain.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
-import { empathyObserverManager, isEmpathyObserverSession, type EmpathyObserverApi } from '../service/empathy-observer-manager.js';
 import { acquireQueueLock, type EvolutionQueueItem } from '../service/evolution-worker.js';
 import { recordEvolutionSuccess } from '../core/evolution-engine.js';
 import { WorkflowStore } from '../service/subagent-workflow/workflow-store.js';
@@ -158,7 +157,7 @@ function scheduleTaskOutcomeRetry(
 }
 
 type SubagentEndedHookContext = PluginHookSubagentContext & {
-    api?: EmpathyObserverApi;
+    api?: OpenClawPluginApi;
     workspaceDir?: string;
     sessionId?: string;
     agentId?: string;
@@ -175,12 +174,7 @@ export async function handleSubagentEnded(
 
     const wctx = WorkspaceContext.fromHookContext(ctx);
     const logger: HookLogger = ctx.api?.logger ?? console;
-    if (isEmpathyObserverSession(targetSessionKey || '')) {
-        await empathyObserverManager.reap(ctx.api, targetSessionKey!, workspaceDir);
-        return;
-    }
-
-    // ── Helper Workflow Lifecycle Notification (PR2.1) ──
+    // ── Helper Workflow Lifecycle Notification ──
     // When a helper workflow's subagent ends, notify the workflow manager
     // This is a fallback recovery path, not the primary completion contract
     if (targetSessionKey?.startsWith(HELPER_WORKFLOW_SESSION_PREFIX)) {

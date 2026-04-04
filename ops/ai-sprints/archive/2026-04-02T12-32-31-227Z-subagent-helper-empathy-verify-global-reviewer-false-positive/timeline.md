@@ -15,3 +15,11 @@
 - 2026-04-02T12:57:11.129Z Stage verify round 2 started (producer)
 - 2026-04-02T13:01:10.559Z producer completed stage verify round 2
 - 2026-04-02T13:01:10.569Z Stage verify round 2 reviewers launching in parallel
+- 2026-04-03T21:21:28.592Z Sprint reconciled to halted: Orchestrator pid 49056 is no longer alive (was: reviewer_a || reviewer_b). Artifacts on disk: producer, decision.
+- 2026-04-03T21:21:28.593Z Failed to terminate reviewer_a pid=39948: kill ESRCH
+- 2026-04-03T21:21:28.594Z Failed to terminate reviewer_b pid=38604: kill ESRCH
+- 2026-04-03T21:21:28.595Z Sprint resumed from halted by operator
+- 2026-04-03T21:21:28.595Z Sprint resumed
+- 2026-04-03T21:21:28.596Z Sprint halted: Sprint exceeded 180 minutes (elapsed: 1969.0min)
+- 2026-04-03T21:21:28.598Z Failed to terminate reviewer_a pid=39948: kill ESRCH
+- 2026-04-03T21:21:28.598Z Failed to terminate reviewer_b pid=38604: kill ESRCH

@@ -12,6 +12,36 @@ import { archiveRunById } from './lib/archive.mjs';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..', '..');
 const sprintRoot = path.join(repoRoot, 'ops', 'ai-sprints');
+// Resolve acpx binary path and node executable — spawn directly via node to avoid
+// shebang/env resolution issues when cron/nohup has a minimal PATH.
+const acpxBin = (() => {
+  const r = spawnSync('which', ['acpx'], { encoding: 'utf8' });
+  if (r.status === 0) {
+    const symlink = r.stdout.trim();
+    try {
+      return fs.realpathSync(symlink);
+    } catch {
+      return symlink;
+    }
+  }
+  return 'acpx';
+})();
+const nodeBin = process.execPath; // e.g. /usr/bin/node — reliable, no PATH search needed
+// Extended env for detached child processes — includes /usr/bin so the Node.js
+// shebang (#!/usr/bin/env node) resolves correctly even when cron/nohup has
+// a minimal PATH that omits standard system bin directories.
+const acpxEnv = {
+  ...process.env,
+  PATH: `/usr/local/bin:/usr/bin:/bin:${process.env.PATH ?? ''}`,
+};
+
+// On Linux, ignore SIGHUP so SSH disconnect doesn't kill the orchestrator.
+// Registered once at module load — covers all code paths including setup
+// before the first agent spawn. Child processes are protected separately
+// via `detached: true` in spawn options.
+if (process.platform !== 'win32') {
+  process.on('SIGHUP', () => { /* ignored — survive SSH disconnect */ });
+}
 
 function parseArgs(argv) {
   const args = {};
@@ -196,16 +226,38 @@ function runAgent({ cwd, agent, model, prompt, timeoutSeconds = 1800, failLogPat
       );
     } else {
       result = spawnSync(
-        'acpx',
-        ['--cwd', cwd, '--approve-all', '--model', model, '--timeout', String(timeoutSeconds), agent, 'exec', '-f', promptFile],
+        nodeBin,
+        [acpxBin, '--cwd', cwd, '--approve-all', '--model', model, '--timeout', String(timeoutSeconds), '--prompt-retries', '2', '--suppress-reads', agent, 'exec', '-f', promptFile],
         {
           cwd,
           encoding: 'utf8',
           maxBuffer: 10 * 1024 * 1024,
           timeout: (timeoutSeconds + 60) * 1000,
           shell: false,
+          // Detach child process into its own session group so SIGHUP
+          // from SSH disconnect doesn't propagate to agent processes.
+          detached: true,
+          stdio: ['pipe', 'pipe', 'pipe'],
+          env: acpxEnv,
         },
       );
+      // Fallback if resolved path is stale (e.g., npm package updated between module load and spawn)
+      if (result.error && result.error.code === 'ENOENT') {
+        result = spawnSync(
+          nodeBin,
+          [acpxBin, '--cwd', cwd, '--approve-all', '--model', model, '--timeout', String(timeoutSeconds), '--prompt-retries', '2', '--suppress-reads', agent, 'exec', '-f', promptFile],
+          {
+            cwd,
+            encoding: 'utf8',
+            maxBuffer: 10 * 1024 * 1024,
+            timeout: (timeoutSeconds + 60) * 1000,
+            shell: false,
+            detached: true,
+            stdio: ['pipe', 'pipe', 'pipe'],
+            env: acpxEnv,
+          },
+        );
+      }
     }
   } finally {
     fs.rmSync(promptFile, { force: true });
@@ -215,15 +267,34 @@ function runAgent({ cwd, agent, model, prompt, timeoutSeconds = 1800, failLogPat
   const stderr = result.stderr ?? '';
 
   if (result.error || result.status !== 0) {
+    // Map acpx exit codes to semantic error types for better error classification:
+    //   0  = success
+    //   1  = runtime error (agent crash, ACP failure)
+    //   2  = usage error (bad flags, missing prompt)
+    //   3  = timeout (acpx --timeout exceeded)
+    //   4  = no session (session lost/closed)
+    //   5  = permission denied (agent approval rejected)
+    //   130 = interrupted (SIGINT/SIGHUP — SSH disconnect)
+    const exitCode = result.status ?? 1;
+    const errorType = exitCode === 3 ? 'timeout'
+      : exitCode === 4 ? 'no_session'
+        : exitCode === 5 ? 'permission_denied'
+          : exitCode === 130 ? 'interrupted'
+            : exitCode === 2 ? 'usage_error'
+              : 'runtime_error';
+
     if ((result.error?.code === 'ETIMEDOUT' || result.signal === 'SIGTERM') && result.pid) {
       terminateProcessTree(result.pid, { runDir, label: roleLabel });
     }
     if (failLogPath) {
       ensureDir(path.dirname(failLogPath));
-      writeText(failLogPath, `# Agent Failure Log\n\n- agent: ${agent}\n- model: ${model}\n- exitStatus: ${result.status ?? 'N/A'}\n- error: ${result.error?.message ?? 'none'}\n\n## stdout\n\n${stdout}\n\n## stderr\n\n${stderr}\n`);
+      writeText(failLogPath, `# Agent Failure Log\n\n- agent: ${agent}\n- model: ${model}\n- exitStatus: ${result.status ?? 'N/A'}\n- exitCode: ${exitCode}\n- errorType: ${errorType}\n- error: ${result.error?.message ?? 'none'}\n\n## stdout\n\n${stdout}\n\n## stderr\n\n${stderr}\n`);
     }
     if (result.error) throw result.error;
-    throw new Error(`Agent ${agent} failed with status ${result.status}\n${stdout.slice(0, 2000)}\n${stderr.slice(0, 2000)}`);
+    throw Object.assign(new Error(`Agent ${agent} failed with status ${result.status} (${errorType})\n${stdout.slice(0, 2000)}\n${stderr.slice(0, 2000)}`), {
+      acpxExitCode: exitCode,
+      acpxErrorType: errorType,
+    });
   }
 
   return stdout.trim();
@@ -283,15 +354,38 @@ function runAgentAsync({ cwd, agent, model, prompt, timeoutSeconds = 1800, promp
           },
         });
       } else {
-        proc = spawn('acpx', [
-          '--cwd', cwd, '--approve-all', '--model', model,
-          '--timeout', String(timeoutSeconds), agent, 'exec', '-f', promptFile,
-        ], {
-          cwd,
-          encoding: 'utf8',
-          maxBuffer: 10 * 1024 * 1024,
-          shell: false,
-        });
+        try {
+          proc = spawn(nodeBin, [acpxBin,
+            '--cwd', cwd, '--approve-all', '--model', model,
+            '--timeout', String(timeoutSeconds), '--prompt-retries', '2', '--suppress-reads', agent, 'exec', '-f', promptFile,
+          ], {
+            cwd,
+            encoding: 'utf8',
+            maxBuffer: 10 * 1024 * 1024,
+            shell: false,
+            detached: true,
+            stdio: ['pipe', 'pipe', 'pipe'],
+            env: acpxEnv,
+          });
+        } catch (enoentErr) {
+          // Fallback if resolved path is stale
+          if (enoentErr.code === 'ENOENT') {
+            proc = spawn(nodeBin, [acpxBin,
+              '--cwd', cwd, '--approve-all', '--model', model,
+              '--timeout', String(timeoutSeconds), '--prompt-retries', '2', '--suppress-reads', agent, 'exec', '-f', promptFile,
+            ], {
+              cwd,
+              encoding: 'utf8',
+              maxBuffer: 10 * 1024 * 1024,
+              shell: false,
+              detached: true,
+              stdio: ['pipe', 'pipe', 'pipe'],
+              env: acpxEnv,
+            });
+          } else {
+            throw enoentErr;
+          }
+        }
       }
       if (proc?.pid && onSpawn) onSpawn(proc.pid);
     } catch (spawnErr) {
@@ -518,15 +612,37 @@ function runAgentWithProgressCheck({
           },
         });
       } else {
-        proc = spawn('acpx', [
-          '--cwd', cwd, '--approve-all', '--model', model,
-          '--timeout', String(hardTimeoutSeconds), agent, 'exec', '-f', promptFile,
-        ], {
-          cwd,
-          encoding: 'utf8',
-          maxBuffer: 10 * 1024 * 1024,
-          shell: false,
-        });
+        try {
+          proc = spawn(nodeBin, [acpxBin,
+            '--cwd', cwd, '--approve-all', '--model', model,
+            '--timeout', String(hardTimeoutSeconds), '--prompt-retries', '2', '--suppress-reads', agent, 'exec', '-f', promptFile,
+          ], {
+            cwd,
+            encoding: 'utf8',
+            maxBuffer: 10 * 1024 * 1024,
+            shell: false,
+            detached: true,
+            stdio: ['pipe', 'pipe', 'pipe'],
+            env: acpxEnv,
+          });
+        } catch (enoentErr) {
+          if (enoentErr.code === 'ENOENT') {
+            proc = spawn(nodeBin, [acpxBin,
+              '--cwd', cwd, '--approve-all', '--model', model,
+              '--timeout', String(hardTimeoutSeconds), '--prompt-retries', '2', '--suppress-reads', agent, 'exec', '-f', promptFile,
+            ], {
+              cwd,
+              encoding: 'utf8',
+              maxBuffer: 10 * 1024 * 1024,
+              shell: false,
+              detached: true,
+              stdio: ['pipe', 'pipe', 'pipe'],
+              env: acpxEnv,
+            });
+          } else {
+            throw enoentErr;
+          }
+        }
       }
     } catch (spawnErr) {
       settled = true;
@@ -710,8 +826,16 @@ function terminateProcessTree(pid, { runDir = null, label = 'process' } = {}) {
       if (runDir) appendTimeline(runDir, `${success ? 'Terminated' : 'Failed to terminate'} ${label} process tree pid=${pid}${output ? ` (${output})` : ''}`);
       return success;
     }
-    process.kill(pid, 'SIGKILL');
-    if (runDir) appendTimeline(runDir, `Terminated ${label} pid=${pid}`);
+    // Kill entire process group — negative pid sends signal to all processes
+    // in the same process group. Fallback to direct pid kill if group kill
+    // fails (e.g., process group already destroyed).
+    try {
+      process.kill(-pid, 'SIGKILL');
+      if (runDir) appendTimeline(runDir, `Terminated ${label} process group pgid=${pid}`);
+    } catch (groupErr) {
+      process.kill(pid, 'SIGKILL');
+      if (runDir) appendTimeline(runDir, `Terminated ${label} pid=${pid} (group kill failed: ${groupErr.message})`);
+    }
     return true;
   } catch (err) {
     if (runDir) appendTimeline(runDir, `Failed to terminate ${label} pid=${pid}: ${err.message}`);
@@ -1369,6 +1493,11 @@ function reconcileRunState(runDir, state) {
   if (state.status !== 'running') return state;
   if (pidExists(state.orchestratorPid)) return state;
 
+  // Clean up any orphaned acpx queue-owner daemons and agent processes
+  // from the previous orchestrator run. acpx queue-owners are detached
+  // processes that may outlive their parent acpx invocation.
+  cleanupAcpxOrphans(runDir, state);
+
   // Detect which artifacts already exist on disk for the current stage/round
   const stageDirName = `${String(state.currentStageIndex + 1).padStart(2, '0')}-${state.currentStage}`;
   const stageDir = path.join(runDir, 'stages', stageDirName);
@@ -1408,6 +1537,46 @@ function reconcileRunState(runDir, state) {
   cleanupRecordedRoleProcesses(paths, runDir);
   cleanupWorktree({ state, runDir });
   return state;
+}
+
+/**
+ * Clean up orphaned acpx queue-owner daemons and agent processes.
+ * acpx spawns detached queue-owner processes that may outlive the acpx CLI
+ * that created them. On stale-run reconciliation, these should be cleaned up.
+ */
+function cleanupAcpxOrphans(runDir, state) {
+  // Derive workspace from known-good sources only:
+  // 1. worktree (most reliable — we created it)
+  // 2. spec.workspace (loaded fresh, has clear semantic meaning)
+  const spec = state.taskId ? (() => {
+    try { return getTaskSpec(state.taskId, state.specPath); } catch { return null; }
+  })() : null;
+
+  const workspace = state.worktree?.worktreePath
+    ?? (spec?.workspace && spec.workspace !== state.specPath ? spec.workspace : null);
+
+  if (!workspace) {
+    appendTimeline(runDir, 'acpx session cleanup skipped: no trusted workspace available');
+    return;
+  }
+
+  // Try to close any active acpx sessions for the workspace+agent combo
+  const agent = spec?.producer?.agent ?? null;
+
+  if (agent) {
+    try {
+      // acpx <agent> sessions close — this removes the queue-owner lease
+      // Use nodeBin + [acpxBin, ...] for consistency with runAgent spawn pattern
+      const closeResult = spawnSync(nodeBin, [acpxBin, agent, 'sessions', 'close'],
+        { cwd: workspace, encoding: 'utf8', timeout: 10_000, env: acpxEnv, shell: false });
+      if (closeResult.status === 0) {
+        appendTimeline(runDir, `Cleaned up acpx ${agent} sessions for stale run recovery`);
+      }
+    } catch (closeErr) {
+      // Non-fatal — queue-owner may already be gone
+      appendTimeline(runDir, `acpx session cleanup skipped: ${closeErr.message}`);
+    }
+  }
 }
 
 /**
@@ -2492,6 +2661,52 @@ async function main() {
   const { runDir, state } = loadOrInitState(args);
   reconcileRunState(runDir, state);
   const spec = loadSpec(state, args);
+
+  // Register graceful shutdown handlers now that state and runDir are available.
+  // This ensures uncaught exceptions during the sprint loop write the halted state
+  // to disk instead of leaving it stuck at 'running'.
+  const gracefulHalt = (signal, detail) => {
+    if (state.status === 'running') {
+      state.status = 'halted';
+      state.haltReason = {
+        type: 'uncaught_exception',
+        stage: state.currentStage,
+        round: state.currentRound,
+        details: String(detail),
+        blockers: [String(detail)],
+      };
+      try {
+        saveState(runDir, state);
+        appendTimeline(runDir, `Sprint halted by uncaught ${signal}: ${String(detail)}`);
+      } catch (saveErr) {
+        console.error(`Failed to write halted state: ${saveErr.message}`);
+      }
+    }
+    console.error(`Fatal ${signal}: ${detail}`);
+    process.exitCode = 1;
+  };
+  process.on('uncaughtException', (err) => {
+    gracefulHalt('uncaughtException', err.stack ?? err.message);
+  });
+  process.on('unhandledRejection', (reason) => {
+    gracefulHalt('unhandledRejection', String(reason));
+  });
+
+  // Pre-flight check: verify acpx is available (the actual execution entry point).
+  // We do NOT check agent names with 'which' because acpx resolves agents via its
+  // own registry (npx, built-in commands, etc.). Checking agent binaries directly
+  // would cause false positives and is Linux-only.
+  if (!args.status && !args.list && !args.archive && !args.abort && !args.pause) {
+    // Use nodeBin + [acpxBin, ...] for consistency with runAgent spawn pattern
+    const acpxCheck = spawnSync(nodeBin, [acpxBin, '--version'],
+      { encoding: 'utf8', shell: false, timeout: 10_000 });
+    if (acpxCheck.status !== 0) {
+      appendTimeline(runDir, `Pre-flight check FAILED: acpx not available`);
+      throw new Error(`acpx not available. Install it first: npm install -g acpx`);
+    }
+    appendTimeline(runDir, `Pre-flight check OK: acpx available`);
+  }
+
   const sprintStartedAt = Date.parse(state.createdAt) || Date.now();
 
   // Acquire exclusive lock to prevent concurrent orchestrators
@@ -2613,6 +2828,8 @@ async function main() {
 // Only run main() when executed directly, not when imported for testing
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   main().catch((err) => {
+    // main() is async and may throw. The try/catch inside main() handles
+    // errors within its body, but rejections from the Promise itself land here.
     console.error('Fatal error:', err.message);
     process.exit(1);
   });

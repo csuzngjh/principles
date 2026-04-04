@@ -1144,13 +1144,42 @@ test('acceptance checklist: file exists and has correct content', () => {
   const repoRoot = path.resolve(__dirname, '..', '..', '..');
   const checklistPath = path.resolve(repoRoot, 'docs/design/workflow-v1-acceptance-checklist.md');
   assert.ok(fs.existsSync(checklistPath), 'acceptance checklist file must exist');
-  
+
   const content = fs.readFileSync(checklistPath, 'utf8');
-  // Check for ASCII-safe markers instead of emoji
-  assert.ok(content.includes('[PASS]'), 'must have ASCII-friendly PASS markers');
-  assert.ok(content.includes('[HIGH]'), 'must have ASCII-friendly HIGH risk markers');
-  assert.ok(content.includes('[MED]'), 'must have ASCII-friendly MED risk markers');
-  // Check for key content
-  assert.ok(content.includes('nextRunRecommendation'), 'must mention nextRunRecommendation');
+  // Must not contain the deprecated --spec flag (replaced by --task / --task-spec)
+  assert.ok(!content.includes('--spec '), 'must NOT use deprecated --spec flag');
+  // Must contain the correct command patterns
+  assert.ok(content.includes('--task'), 'must use --task flag');
+  // Must have run result recording structure
+  assert.ok(content.includes('runId') || content.includes('run-id') || content.includes('Run ID'), 'must have run-id field');
   assert.ok(content.includes('outputQuality'), 'must mention outputQuality');
+  assert.ok(content.includes('nextRunRecommendation'), 'must mention nextRunRecommendation');
+  // Must have complete failure classification
+  assert.ok(content.includes('workflow bug'), 'must classify workflow bug');
+  assert.ok(content.includes('agent behavior'), 'must classify agent behavior');
+  assert.ok(content.includes('environment'), 'must classify environment issues');
+  assert.ok(content.includes('sample-spec') || content.includes('spec issue'), 'must classify spec issues');
+});
+
+test('preflight check validates acpx not agent names', () => {
+  // The preflight code in run.mjs should check that acpx is available,
+  // NOT that agent names like "iflow" or "claude" exist as shell binaries.
+  const runPath = path.resolve(__dirname, '..', 'run.mjs');
+  const content = fs.readFileSync(runPath, 'utf8');
+  // Should NOT use "which" with agent names
+  assert.ok(!content.includes("'which', [agentName]"), 'preflight must not check agent names with which');
+  assert.ok(!content.includes("'which', [agent"), 'preflight must not check agent binary with which');
+  // Should check acpx availability instead
+  assert.ok(content.includes('acpx'), 'preflight should reference acpx');
+});
+
+test('cleanupAcpxOrphans does not fallback to spec directory', () => {
+  const runPath = path.resolve(__dirname, '..', 'run.mjs');
+  const content = fs.readFileSync(runPath, 'utf8');
+  // Must NOT use path.dirname(state.specPath) as workspace fallback
+  assert.ok(!content.includes('path.dirname(state.specPath)'),
+    'cleanupAcpxOrphans must not fallback to spec file directory');
+  // Must use workspace or worktree only
+  assert.ok(content.includes('spec.workspace') || content.includes('spec?.workspace'),
+    'cleanupAcpxOrphans should reference spec.workspace');
 });

@@ -154,10 +154,29 @@ export function extractContractItems(text) {
   const blocks = match[1].split(/\r?\n/).filter((l) => l.trim().startsWith('-') && !/^[-*_]{3,}\s*$/.test(l.trim()));
   for (const block of blocks) {
     const deliverable = block.replace(/^-\s*/, '').trim();
-    const statusMatch = deliverable.match(/status:\s*(DONE|PARTIAL|TODO)/i);
+    // Primary format: "<description> status: DONE|PARTIAL|TODO"
+    let statusMatch = deliverable.match(/status:\s*(DONE|PARTIAL|TODO)/i);
+    let statusGroup = 1; // group index for DONE/PARTIAL/TODO capture
+    // Fallback: "<key>: DONE" or "<key>: DONE — <description>"
+    // Single regex with optional trailing dash-content avoids redundant second match attempt
+    if (!statusMatch) {
+      statusMatch = deliverable.match(/^(.+):\s*(DONE|PARTIAL|TODO)\s*(?:[—–-]\s*.*)?$/i);
+      if (statusMatch) statusGroup = 2;
+    }
+    // Extract deliverable name
+    let cleaned = deliverable;
+    if (statusMatch) {
+      if (statusMatch[0].startsWith('status:')) {
+        cleaned = deliverable.replace(/\s*status:\s*\w+\s*/i, '' ).replace(/evidence:\s*"[^"]*"/i, '' ).trim();
+      } else {
+        // Fallback: group 1 captures everything before the last colon
+        const nameMatch = deliverable.match(/^(.+):\s*(DONE|PARTIAL|TODO)/i);
+        if (nameMatch) cleaned = nameMatch[1].trim();
+      }
+    }
     items.push({
-      deliverable: deliverable.replace(/\s*status:\s*\w+\s*/i, '').replace(/evidence:\s*"[^"]*"/i, '').trim(),
-      status: statusMatch ? statusMatch[1].toUpperCase() : 'UNKNOWN',
+      deliverable: cleaned,
+      status: statusMatch ? statusMatch[statusGroup].toUpperCase() : 'UNKNOWN',
     });
   }
   return items;

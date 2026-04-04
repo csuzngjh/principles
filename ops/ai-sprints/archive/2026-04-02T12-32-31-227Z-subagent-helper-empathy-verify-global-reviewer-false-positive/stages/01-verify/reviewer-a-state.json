@@ -8,7 +8,7 @@
   "finishedAt": null,
   "terminatedAt": null,
   "timeoutSeconds": 600,
-  "lastError": null,
+  "lastError": "Failed to terminate recorded reviewer_a pid 39948",
   "checklist": [],
-  "updatedAt": "2026-04-02T13:01:10.580Z"
+  "updatedAt": "2026-04-03T21:21:28.598Z"
 }

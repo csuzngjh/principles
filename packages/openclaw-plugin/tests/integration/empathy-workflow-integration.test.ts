@@ -1,14 +1,13 @@
 /**
- * Integration tests for Empathy Observer Workflow (PR2)
+ * Integration tests for Empathy Observer Workflow
  *
  * These tests verify the complete chain from hook entry to workflow state/events.
  * Unlike unit tests, these use real file system and SQLite for WorkflowStore.
  *
  * Coverage:
- * 1. helper_empathy_enabled=true triggers workflow helper
- * 2. Legacy path and helper path relationship (parallel execution)
- * 3. WorkflowStore records spawn/wait/finalize events
- * 4. Lifecycle cleanup (sweepExpiredWorkflows) works when wired
+ * 1. EmpathyObserverWorkflowManager startWorkflow triggers workflow helper
+ * 2. WorkflowStore records spawn/wait/finalize events
+ * 3. Lifecycle cleanup (sweepExpiredWorkflows) works when wired
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -241,15 +240,10 @@ describe('Empathy Workflow Integration (PR2)', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Test 4: Integration phase semantics (parallel execution)
+  // Test 4: Workflow isolation
   // ---------------------------------------------------------------------------
-  describe('Integration phase semantics', () => {
-    it('helper path is independent of legacy path (parallel execution)', async () => {
-      // This test documents the current PR2 state:
-      // - Legacy path (empathyObserverManager.spawn) runs independently
-      // - Helper path (shadowManager.startWorkflow) runs when helper_empathy_enabled=true
-      // - Both can run in parallel (shadow mode)
-
+  describe('Workflow isolation', () => {
+    it('each workflow is recorded independently in WorkflowStore', async () => {
       store = new WorkflowStore({ workspaceDir: tempDir });
 
       const subagent = {
@@ -259,29 +253,24 @@ describe('Empathy Workflow Integration (PR2)', () => {
         deleteSession: mockAsyncFn(async () => {}),
       };
 
-      // Helper path manager
-      const helperManager = new EmpathyObserverWorkflowManager({
+      const manager = new EmpathyObserverWorkflowManager({
         workspaceDir: tempDir,
         logger,
         subagent,
       });
 
-      // Start helper workflow
-      const handle = await helperManager.startWorkflow(empathyObserverWorkflowSpec, {
+      // Start workflow
+      const handle = await manager.startWorkflow(empathyObserverWorkflowSpec, {
         parentSessionId: 'session-005',
         taskInput: 'user message',
       });
 
-      // Verify helper workflow is recorded independently
+      // Verify workflow is recorded independently
       const workflow = store.getWorkflow(handle.workflowId);
       expect(workflow).not.toBeNull();
       expect(workflow?.workflow_type).toBe('empathy-observer');
 
-      // Legacy path would use its own EmpathyObserverManager singleton
-      // with in-memory state (activeRuns, completedSessions)
-      // This test confirms the two are independent
-
-      helperManager.dispose();
+      manager.dispose();
     });
   });
 
@@ -635,78 +624,4 @@ describe('Empathy Workflow Integration (PR2)', () => {
     });
   });
 
-  // ---------------------------------------------------------------------------
-  // Test 9: PR2.1 Task 4 - empathy_mode switching logic
-  // ---------------------------------------------------------------------------
-  describe('PR2.1: empathy_mode switching', () => {
-    it('helper_primary mode skips legacy path and only runs helper', async () => {
-      // This test documents the mode behavior:
-      // - legacy: Only empathyObserverManager.spawn
-      // - shadow: Both paths (legacy + helper)
-      // - helper_primary: Only helper path
-
-      store = new WorkflowStore({ workspaceDir: tempDir });
-
-      const subagent = {
-        run: mockAsyncFn(async () => ({ runId: 'run-mode-001' })),
-        waitForRun: mockAsyncFn(async () => ({ status: 'ok' as const })),
-        getSessionMessages: mockAsyncFn(async () => ({ messages: [], assistantTexts: ['{}'] })),
-        deleteSession: mockAsyncFn(async () => {}),
-      };
-
-      const manager = new EmpathyObserverWorkflowManager({
-        workspaceDir: tempDir,
-        logger,
-        subagent,
-      });
-
-      // In helper_primary mode, only helper workflow runs
-      const handle = await manager.startWorkflow(empathyObserverWorkflowSpec, {
-        parentSessionId: 'session-mode-001',
-        taskInput: 'test',
-      });
-
-      // Verify workflow was created (helper path worked)
-      const workflow = store.getWorkflow(handle.workflowId);
-      expect(workflow).not.toBeNull();
-      expect(workflow?.workflow_type).toBe('empathy-observer');
-
-      manager.dispose();
-    });
-
-    it('shadow mode runs both legacy and helper in parallel', async () => {
-      // In shadow mode, both paths should run
-      // This is documented by the existing tests that verify
-      // helper workflow creation alongside legacy manager
-
-      store = new WorkflowStore({ workspaceDir: tempDir });
-
-      const subagent = {
-        run: mockAsyncFn(async () => ({ runId: 'run-mode-002' })),
-        waitForRun: mockAsyncFn(async () => ({ status: 'ok' as const })),
-        getSessionMessages: mockAsyncFn(async () => ({ messages: [], assistantTexts: ['{}'] })),
-        deleteSession: mockAsyncFn(async () => {}),
-      };
-
-      const manager = new EmpathyObserverWorkflowManager({
-        workspaceDir: tempDir,
-        logger,
-        subagent,
-      });
-
-      const handle = await manager.startWorkflow(empathyObserverWorkflowSpec, {
-        parentSessionId: 'session-mode-002',
-        taskInput: 'test',
-      });
-
-      // Helper workflow is recorded independently
-      const workflow = store.getWorkflow(handle.workflowId);
-      expect(workflow).not.toBeNull();
-
-      // Legacy path would use empathyObserverManager singleton
-      // (not tested here as it's in-memory and independent)
-
-      manager.dispose();
-    });
-  });
 });

@@ -1,6 +1,6 @@
 # Latest Summary
 
-- Status: running
+- Status: halted
 - Stage: verify
 - Round: 2
-- Reviewers are running in parallel.
+- Halt reason: Sprint exceeded 180 minutes (elapsed: 1969.0min)

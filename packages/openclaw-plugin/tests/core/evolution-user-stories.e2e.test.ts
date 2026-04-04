@@ -12,12 +12,6 @@ import { EvolutionReducerImpl } from '../../src/core/evolution-reducer.js';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
 
 vi.mock('../../src/core/workspace-context.js');
-vi.mock('../../src/service/empathy-observer-manager.js', () => ({
-  empathyObserverManager: {
-    reap: vi.fn(async () => void 0),
-  },
-}));
-
 const tempDirs: string[] = [];
 const reducerCache = new Map<string, EvolutionReducerImpl>();
 
