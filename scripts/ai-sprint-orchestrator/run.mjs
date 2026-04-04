@@ -2662,6 +2662,36 @@ async function main() {
   reconcileRunState(runDir, state);
   const spec = loadSpec(state, args);
 
+  // Register graceful shutdown handlers now that state and runDir are available.
+  // This ensures uncaught exceptions during the sprint loop write the halted state
+  // to disk instead of leaving it stuck at 'running'.
+  const gracefulHalt = (signal, detail) => {
+    if (state.status === 'running') {
+      state.status = 'halted';
+      state.haltReason = {
+        type: 'uncaught_exception',
+        stage: state.currentStage,
+        round: state.currentRound,
+        details: String(detail),
+        blockers: [String(detail)],
+      };
+      try {
+        saveState(runDir, state);
+        appendTimeline(runDir, `Sprint halted by uncaught ${signal}: ${String(detail)}`);
+      } catch (saveErr) {
+        console.error(`Failed to write halted state: ${saveErr.message}`);
+      }
+    }
+    console.error(`Fatal ${signal}: ${detail}`);
+    process.exitCode = 1;
+  };
+  process.on('uncaughtException', (err) => {
+    gracefulHalt('uncaughtException', err.stack ?? err.message);
+  });
+  process.on('unhandledRejection', (reason) => {
+    gracefulHalt('unhandledRejection', String(reason));
+  });
+
   // Pre-flight check: verify acpx is available (the actual execution entry point).
   // We do NOT check agent names with 'which' because acpx resolves agents via its
   // own registry (npx, built-in commands, etc.). Checking agent binaries directly
@@ -2797,20 +2827,6 @@ async function main() {
 
 // Only run main() when executed directly, not when imported for testing
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  // Register graceful shutdown — write halted state before exit
-  const gracefulHalt = (signal, detail) => {
-    // main() has its own try/catch that writes halted state.
-    // For uncaught exceptions, we log and exit cleanly.
-    console.error(`Fatal ${signal}: ${detail}`);
-    process.exitCode = 1;
-  };
-  process.on('uncaughtException', (err) => {
-    gracefulHalt('uncaughtException', err.message);
-  });
-  process.on('unhandledRejection', (reason) => {
-    gracefulHalt('unhandledRejection', String(reason));
-  });
-
   main().catch((err) => {
     // main() is async and may throw. The try/catch inside main() handles
     // errors within its body, but rejections from the Promise itself land here.
