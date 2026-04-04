@@ -1545,10 +1545,24 @@ function reconcileRunState(runDir, state) {
  * that created them. On stale-run reconciliation, these should be cleaned up.
  */
 function cleanupAcpxOrphans(runDir, state) {
-  const workspace = state.worktree?.worktreePath ?? (state.specPath
-    ? path.dirname(state.specPath)
-    : null);
-  if (!workspace) return;
+  // Derive workspace from known-good sources only:
+  // 1. worktree (most reliable — we created it)
+  // 2. spec.workspace (loaded fresh, has clear semantic meaning)
+  // 3. runDir parent directory (last resort — runDir is inside ops/ai-sprints/
+  //    so we walk up to repo root)
+  const workspace = state.worktree?.worktreePath
+    ?? (() => {
+        try {
+          const spec = getTaskSpec(state.taskId, state.specPath);
+          if (spec?.workspace && spec.workspace !== state.specPath) return spec.workspace;
+        } catch {}
+        return null;
+      })();
+
+  if (!workspace) {
+    appendTimeline(runDir, 'acpx session cleanup skipped: no trusted workspace available');
+    return;
+  }
 
   // Try to close any active acpx sessions for the workspace+agent combo
   const spec = state.taskId ? (() => {
@@ -2655,21 +2669,19 @@ async function main() {
   reconcileRunState(runDir, state);
   const spec = loadSpec(state, args);
 
-  // Pre-flight check: verify agent binaries are available before starting
+  // Pre-flight check: verify acpx is available (the actual execution entry point).
+  // We do NOT check agent names with 'which' because acpx resolves agents via its
+  // own registry (npx, built-in commands, etc.). Checking agent binaries directly
+  // would cause false positives and is Linux-only.
   if (!args.status && !args.list && !args.archive && !args.abort && !args.pause) {
-    const agentsToCheck = new Set();
-    if (spec.producer?.agent) agentsToCheck.add(spec.producer.agent);
-    if (spec.reviewerA?.agent) agentsToCheck.add(spec.reviewerA.agent);
-    if (spec.reviewerB?.agent) agentsToCheck.add(spec.reviewerB.agent);
-
-    for (const agentName of agentsToCheck) {
-      const checkResult = spawnSync('which', [agentName], { encoding: 'utf8', shell: false });
-      if (checkResult.status !== 0) {
-        appendTimeline(runDir, `Pre-flight check FAILED: agent '${agentName}' not found in PATH`);
-        throw new Error(`Agent '${agentName}' not found in PATH. Install it or update the spec.`);
-      }
-      appendTimeline(runDir, `Pre-flight check OK: ${agentName} -> ${(checkResult.stdout ?? '').trim()}`);
+    const acpxCheck = spawnSync(acpxBin !== 'acpx' ? nodeBin : 'acpx',
+      acpxBin !== 'acpx' ? [acpxBin, '--version'] : ['--version'],
+      { encoding: 'utf8', shell: false, timeout: 10_000 });
+    if (acpxCheck.status !== 0) {
+      appendTimeline(runDir, `Pre-flight check FAILED: acpx not available`);
+      throw new Error(`acpx not available. Install it first: npm install -g acpx`);
     }
+    appendTimeline(runDir, `Pre-flight check OK: acpx available`);
   }
 
   const sprintStartedAt = Date.parse(state.createdAt) || Date.now();

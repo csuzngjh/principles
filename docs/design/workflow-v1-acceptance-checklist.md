@@ -83,37 +83,93 @@
 
 ---
 
-## 五、快速验证命令
+## 五、运行命令
 
+### 前置检查
 ```bash
-# Run 1
-node scripts/ai-sprint-orchestrator/run.mjs --spec ops/ai-sprints/specs/workflow-validation-minimal.json
+# Confirm spec files exist
+ls ops/ai-sprints/specs/workflow-validation-minimal.json
+ls ops/ai-sprints/specs/workflow-validation-minimal-verify.json
 
-# Run 2 (手动提供 run-id)
-node scripts/ai-sprint-orchestrator/run.mjs --spec ops/ai-sprints/specs/workflow-validation-minimal-verify.json
-
-# 检查产物
-cat ops/ai-sprints/<run-id>/stages/01-validate/decision.md | grep outputQuality
-cat ops/ai-sprints/<run-id>/stages/01-validate/scorecard.json | grep outputQuality
+# Confirm acpx is available
+which acpx
 ```
+
+### Run 1: 最小验证
+```bash
+cd /home/csuzngjh/code/principles
+npm run ai-sprint -- --task workflow-validation-minimal
+```
+
+### Run 2: 验证产物
+```bash
+cd /home/csuzngjh/code/principles
+npm run ai-sprint -- --task workflow-validation-minimal-verify
+```
+
+### 检查产物
+```bash
+# 替换 <run-id> 为实际 run ID
+cat ops/ai-sprints/<run-id>/stages/01-validate/decision.md
+cat ops/ai-sprints/<run-id>/stages/01-validate/scorecard.json | python3 -m json.tool
+```
+
+关键字段：
+- `decision.md` → `Output Quality:` 行
+- `scorecard.json` → `.outputQuality`, `.qualityReasons`, `.validation.errorSummary`, `.nextRunRecommendation.type`
 
 ---
 
-## 六、不算 workflow 问题的情况
+## 六、Run Result 记录
 
-以下问题属于 **agent 行为**，不算 workflow bug：
+每次运行后填写下表。
 
-| 问题 | 归因 | 处理 |
-|------|------|------|
-| Agent 产生格式错误的报告 | Agent 质量 | Schema validation 拒绝 |
-| Agent 超时未响应 | Agent 速度/网络 | Dynamic timeout extension |
-| Agent 理解任务错误 | Agent 能力 | Reviewer 拒绝，revise |
+### Run 1: workflow-validation-minimal
 
-以下问题属于 **workflow bug**：
+| 字段 | 值 |
+|------|-----|
+| run-id | _(填写)_ |
+| status | `completed` / `halted` / `error` |
+| outcome | `advance` / `revise` / `halt` |
+| outputQuality | `shadow_complete` / `production_ready` / `needs_work` |
+| validation.valid | `true` / `false` |
+| nextRunRecommendation.type | `none` / `continuation` / `verify` / `handoff` |
+| failure classification | _(见下方分类)_ |
+| 备注 | _(自由文本)_ |
 
-| 问题 | 归因 | 处理 |
-|------|------|------|
-| 文件写入失败 | Workflow I/O | 修复 run.mjs |
-| Schema 检查逻辑错误 | Workflow validation | 修复 contract-enforcement.mjs |
-| outputQuality 未落盘 | Workflow persistence | 修复 decision.mjs |
-| nextRunRecommendation 空指针 | Workflow logic | 已修复（Phase 3）|
+### Run 2: workflow-validation-minimal-verify
+
+| 字段 | 值 |
+|------|-----|
+| run-id | _(填写)_ |
+| status | `completed` / `halted` / `error` |
+| outcome | `advance` / `revise` / `halt` |
+| 验证 Run 1 outputQuality | `是` / `否` |
+| 验证 Run 1 nextRunRecommendation | `是` / `否` |
+| failure classification | _(见下方分类)_ |
+| 备注 | _(自由文本)_ |
+
+---
+
+## 七、Failure Classification
+
+每次运行失败时，必须归入以下四类之一。**只有 workflow bug 需要立即修复。**
+
+| 类别 | 描述 | 示例 | 处理 |
+|------|------|------|------|
+| **workflow bug** | 编排器逻辑错误 | 文件写入失败、outputQuality 未落盘、merge gate 逻辑错误、nextRunRecommendation 空指针 | 立即修复 run.mjs / decision.mjs / contract-enforcement.mjs |
+| **agent behavior issue** | AI agent 产生不合规输出 | 缺少 required sections、VERDICT 格式错误、无 DIMENSIONS 行 | Schema validation 拦截 → revise。不修改 workflow 代码 |
+| **environment issue** | 本地机器或网络条件 | agent 超时、acpx 不可用、git 网络失败、磁盘满 | 重试或修复环境。不修改 workflow 代码 |
+| **sample-spec issue** | 验证 spec 配置错误 | required sections 引用了不存在的章节名、超时太短、requiredDeliverables 与 prompt 不匹配 | 修复 spec 文件。不修改 workflow 代码 |
+
+### 快速判断表
+
+| 现象 | 类别 |
+|------|------|
+| `validation.valid = false` + `missing sections` | agent behavior issue |
+| `outputQuality` 字段在 scorecard.json 中不存在 | **workflow bug** |
+| `nextRunRecommendation` 为 null 或 undefined | **workflow bug** |
+| agent 超时（如 600s 后超时） | environment issue |
+| spec 要求了不存在的 section `NONEXISTENT` | sample-spec issue |
+| `errorSummary` 存在且描述清晰 | 正常工作（不是 bug） |
+| `halt` with `repeated_timeout` 连续 2 次超时 | 正常工作（熔断机制触发） |
