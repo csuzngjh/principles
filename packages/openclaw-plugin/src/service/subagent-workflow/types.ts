@@ -182,6 +182,17 @@ export interface EmpathyResult {
 }
 
 /**
+ * Deep-reflect workflow result.
+ */
+export interface DeepReflectResult {
+    insights: string;
+    context: string;
+    depth: number;
+    modelId: string;
+    passed: boolean;
+}
+
+/**
  * Empathy observer workflow specification.
  * This is the concrete spec for PR2 migration.
  */

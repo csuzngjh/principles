@@ -175,7 +175,7 @@ test('checkDimensionThresholds reports failure when dimension not scored', () =>
   assert.equal(result.checks.missing_dim, null);
 });
 
-test('decideStage does not advance when dimension scores below threshold', () => {
+test('decideStage advances when dimension scores below threshold but reviewers approve', () => {
   const result = decideStage({
     stageCriteria: {
       requiredApprovals: 2,
@@ -184,15 +184,18 @@ test('decideStage does not advance when dimension scores below threshold', () =>
       scoringDimensions: ['evidence_quality', 'scope_control'],
       dimensionThreshold: 3,
     },
-    producer: 'SUMMARY:\nDone',
-    reviewerA: 'VERDICT: APPROVE\nDIMENSIONS: evidence_quality=2;scope_control=4\nBLOCKERS:\n- None.',
-    reviewerB: 'VERDICT: APPROVE\nDIMENSIONS: evidence_quality=4;scope_control=5\nBLOCKERS:\n- None.',
+    producer: 'SUMMARY:\nDone\nCHANGES:\nNone\nEVIDENCE:\nFound\nCODE_EVIDENCE:\nfiles_checked: a.ts\nKEY_EVENTS:\nEvent1\nHYPOTHESIS_MATRIX:\nH1: SUPPORTED\nCHECKS: all=ok\nOPEN_RISKS:\nNone',
+    reviewerA: 'VERDICT: APPROVE\nBLOCKERS:\n- None.\nFINDINGS:\nGood\nCODE_EVIDENCE:\nfiles_verified: a.ts\nHYPOTHESIS_MATRIX:\nH1: SUPPORTED\nNEXT_FOCUS:\nNone\nCHECKS: all=ok\nDIMENSIONS: evidence_quality=2;scope_control=4',
+    reviewerB: 'VERDICT: APPROVE\nBLOCKERS:\n- None.\nFINDINGS:\nGood\nCODE_EVIDENCE:\nfiles_verified: a.ts\nHYPOTHESIS_MATRIX:\nH1: SUPPORTED\nNEXT_FOCUS:\nNone\nCHECKS: all=ok\nDIMENSIONS: evidence_quality=4;scope_control=5',
     currentRound: 1,
     maxRoundsPerStage: 3,
   });
 
-  assert.equal(result.outcome, 'revise');
-  assert.ok(result.blockers.some((b) => b.includes('evidence_quality')));
+  // Dimension failures no longer block advance — they are subjective judgments.
+  // Both reviewers APPROVE → advance. Low dimensions affect outputQuality.
+  assert.equal(result.outcome, 'advance');
+  assert.ok(result.metrics.dimensionFailures.length > 0, 'dimension failures should still be recorded');
+  assert.equal(result.outputQuality, 'needs_work', 'low dimensions downgrade quality');
 });
 
 test('decideStage advances when all dimension scores meet threshold', () => {
@@ -377,7 +380,7 @@ test('decideStage with dimensions, contract, and blockers all passing advances',
   assert.equal(result.metrics.contractCheck.allDone, true);
 });
 
-test('decideStage with dimension failure AND contract failure reports both as blockers', () => {
+test('decideStage with dimension failure AND contract failure — contract blocks but dimensions do not', () => {
   const result = decideStage({
     stageCriteria: {
       requiredApprovals: 2,
@@ -394,11 +397,11 @@ test('decideStage with dimension failure AND contract failure reports both as bl
     maxRoundsPerStage: 3,
   });
 
+  // Dimension failures no longer block advance. Contract failures still do.
   assert.equal(result.outcome, 'revise');
-  const hasDimensionBlocker = result.blockers.some((b) => b.includes('correctness'));
   const hasContractBlocker = result.blockers.some((b) => b.includes('Contract not fulfilled'));
-  assert.ok(hasDimensionBlocker, 'should have dimension blocker');
   assert.ok(hasContractBlocker, 'should have contract blocker');
+  assert.ok(result.metrics.dimensionFailures.length > 0, 'dimension failures should still be recorded');
 });
 
 // --- CODE_EVIDENCE tests ---
@@ -1239,7 +1242,7 @@ test('decideStage advances with dimensions from fallback', () => {
   assert.equal(result.outcome, 'advance');
 });
 
-test('decideStage prefers report DIMENSIONS over fallback', () => {
+test('decideStage prefers report DIMENSIONS over fallback for quality downgrade', () => {
   const result = decideStage({
     stageCriteria: {
       requiredApprovals: 2,
@@ -1248,17 +1251,19 @@ test('decideStage prefers report DIMENSIONS over fallback', () => {
       scoringDimensions: ['correctness'],
       dimensionThreshold: 3,
     },
-    producer: 'SUMMARY:\nDone',
-    reviewerA: 'VERDICT: APPROVE\nDIMENSIONS: correctness=2\nBLOCKERS:\n- None.',
-    reviewerB: 'VERDICT: APPROVE\nBLOCKERS:\n- None.',
+    producer: 'SUMMARY:\nDone\nCHANGES:\nNone\nEVIDENCE:\nFound\nCODE_EVIDENCE:\nfiles_checked: a.ts\nKEY_EVENTS:\nEvent1\nHYPOTHESIS_MATRIX:\nH1: SUPPORTED\nCHECKS: all=ok\nOPEN_RISKS:\nNone',
+    reviewerA: 'VERDICT: APPROVE\nBLOCKERS:\n- None.\nFINDINGS:\nGood\nCODE_EVIDENCE:\nfiles_verified: a.ts\nHYPOTHESIS_MATRIX:\nH1: SUPPORTED\nNEXT_FOCUS:\nNone\nCHECKS: all=ok\nDIMENSIONS: correctness=2',
+    reviewerB: 'VERDICT: APPROVE\nBLOCKERS:\n- None.\nFINDINGS:\nGood\nCODE_EVIDENCE:\nfiles_verified: a.ts\nHYPOTHESIS_MATRIX:\nH1: SUPPORTED\nNEXT_FOCUS:\nNone\nCHECKS: all=ok\nDIMENSIONS: correctness=5',
     currentRound: 1,
     maxRoundsPerStage: 3,
     reviewerADimensionsFallback: { correctness: 5 },
     reviewerBDimensionsFallback: { correctness: 5 },
   });
-  // Report says correctness=2 (below threshold), fallback says 5 — report should win
-  assert.equal(result.outcome, 'revise');
-  assert.ok(result.blockers.some((b) => b.includes('correctness')));
+  // Report says correctness=2 (below threshold), fallback says 5 — report should win.
+  // Dimension failures no longer block advance but they still affect output quality.
+  assert.equal(result.outcome, 'advance');
+  assert.ok(result.metrics.dimensionFailures.length > 0, 'dimension failures from report should be recorded');
+  assert.equal(result.metrics.reviewerADimensions.correctness, 2, 'report value should win over fallback');
 });
 
 // --- Round 3 replay: 3 APPROVE + 6/6 contract + Q1-Q5 should advance ---

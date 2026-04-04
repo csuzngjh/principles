@@ -2,6 +2,4 @@
 !.gitignore
 !specs/
 !specs/*.json
-!archive/
-!archive/**
 !agent-registry.json

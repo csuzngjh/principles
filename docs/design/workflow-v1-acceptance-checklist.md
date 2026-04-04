@@ -91,8 +91,10 @@
 ls ops/ai-sprints/specs/workflow-validation-minimal.json
 ls ops/ai-sprints/specs/workflow-validation-minimal-verify.json
 
-# Confirm acpx is available
-which acpx
+# Confirm acpx is available (cross-platform)
+# Linux/macOS: which acpx
+# Windows: where acpx
+node -e "const {spawnSync}=require('child_process');const cmd=process.platform==='win32'?'where':'which';const r=spawnSync(cmd,['acpx'],{encoding:'utf8'});console.log(r.status===0?'acpx OK: '+r.stdout.trim():'acpx NOT found')"
 ```
 
 ### Run 1: 最小验证

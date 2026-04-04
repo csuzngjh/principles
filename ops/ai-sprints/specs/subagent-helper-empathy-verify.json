@@ -5,19 +5,21 @@
   "branchWorkspace": "/home/csuzngjh/code/principles-subagent-helper-empathy",
   "branch": "feat/subagent-workflow-helper-impl",
   "integrationPhase": "shadow",
-  "maxRoundsPerStage": 2,
+  "maxRoundsPerStage": 5,
   "maxRuntimeMinutes": 180,
   "stageTimeoutMinutes": 60,
-  "stages": ["verify"],
+  "stages": [
+    "verify"
+  ],
   "producer": {
     "agent": "opencode",
     "model": "minimax-cn-coding-plan/MiniMax-M2.7",
     "timeoutSeconds": 1200
   },
   "reviewerA": {
-    "agent": "iflow",
-    "model": "glm-5",
-    "timeoutSeconds": 1800,
+    "agent": "opencode",
+    "model": "minimax-cn-coding-plan/MiniMax-M2.7",
+    "timeoutSeconds": 1200,
     "role": "code_and_local_correctness",
     "focus": "empathy observer patch correctness, test coverage, CODE_EVIDENCE"
   },
@@ -100,16 +102,52 @@
   "stageCriteria": {
     "verify": {
       "requiredApprovals": 2,
-      "requiredProducerSections": ["SUMMARY", "EVIDENCE", "CODE_EVIDENCE", "EMPATHY_CHECK", "FINAL_WORKFLOW_VERIFICATION", "CHECKS"],
-      "requiredReviewerSections": ["VERDICT", "BLOCKERS", "FINDINGS", "CODE_EVIDENCE", "NEXT_FOCUS", "CHECKS"],
-      "scoringDimensions": ["verification_thoroughness", "gap_analysis", "production_readiness", "architecture_improvement", "git_commit_evidence"],
+      "requiredProducerSections": [
+        "SUMMARY",
+        "EVIDENCE",
+        "CODE_EVIDENCE",
+        "EMPATHY_CHECK",
+        "FINAL_WORKFLOW_VERIFICATION",
+        "CHECKS"
+      ],
+      "requiredReviewerSections": [
+        "VERDICT",
+        "BLOCKERS",
+        "FINDINGS",
+        "CODE_EVIDENCE",
+        "NEXT_FOCUS",
+        "CHECKS"
+      ],
+      "scoringDimensions": [
+        "verification_thoroughness",
+        "gap_analysis",
+        "production_readiness",
+        "architecture_improvement",
+        "git_commit_evidence"
+      ],
       "dimensionThreshold": 3,
-      "requiredDeliverables": ["empathy_persistence_verified", "openclaw_assumptions_final_review", "deployment_checklist", "git_commit_sha"],
+      "requiredDeliverables": [
+        "empathy_persistence_verified",
+        "openclaw_assumptions_final_review",
+        "deployment_checklist",
+        "git_commit_sha"
+      ],
       "globalReviewerMode": "advisory",
-      "globalReviewerMustAnswer": ["Q1", "Q2", "Q3", "Q4", "Q5"]
+      "globalReviewerMustAnswer": [
+        "Q1",
+        "Q2",
+        "Q3",
+        "Q4",
+        "Q5"
+      ]
     }
   },
   "stageRoleTimeouts": {
-    "verify": { "producer": 1200, "reviewer_a": 1800, "reviewer_b": 600, "global_reviewer": 1800 }
+    "verify": {
+      "producer": 1200,
+      "reviewer_a": 1800,
+      "reviewer_b": 600,
+      "global_reviewer": 1800
+    }
   }
 }

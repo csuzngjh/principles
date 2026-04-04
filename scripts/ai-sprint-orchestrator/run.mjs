@@ -15,9 +15,11 @@ const sprintRoot = path.join(repoRoot, 'ops', 'ai-sprints');
 // Resolve acpx binary path and node executable — spawn directly via node to avoid
 // shebang/env resolution issues when cron/nohup has a minimal PATH.
 const acpxBin = (() => {
-  const r = spawnSync('which', ['acpx'], { encoding: 'utf8' });
+  const cmd = process.platform === 'win32' ? 'where' : 'which';
+  const r = spawnSync(cmd, ['acpx'], { encoding: 'utf8' });
   if (r.status === 0) {
-    const symlink = r.stdout.trim();
+    const lines = r.stdout.trim().split(/\r?\n/);
+    const symlink = lines[0].trim();
     try {
       return fs.realpathSync(symlink);
     } catch {
@@ -27,19 +29,20 @@ const acpxBin = (() => {
   return 'acpx';
 })();
 const nodeBin = process.execPath; // e.g. /usr/bin/node — reliable, no PATH search needed
-// Extended env for detached child processes — includes /usr/bin so the Node.js
-// shebang (#!/usr/bin/env node) resolves correctly even when cron/nohup has
-// a minimal PATH that omits standard system bin directories.
-const acpxEnv = {
-  ...process.env,
-  PATH: `/usr/local/bin:/usr/bin:/bin:${process.env.PATH ?? ''}`,
-};
+// Extended env for detached child processes.
+// Linux: includes /usr/bin so the Node.js shebang (#!/usr/bin/env node) resolves
+// correctly even when cron/nohup has a minimal PATH.
+// Windows: inherit PATH as-is — nodeBin is absolute, no PATH search needed.
+const acpxEnv = process.platform === 'win32'
+  ? { ...process.env }
+  : {
+      ...process.env,
+      PATH: `${process.env.PATH ?? ''}:/usr/local/bin:/usr/bin:/bin`,
+    };
 
 // On Linux, ignore SIGHUP so SSH disconnect doesn't kill the orchestrator.
-// Registered once at module load — covers all code paths including setup
-// before the first agent spawn. Child processes are protected separately
-// via `detached: true` in spawn options.
-if (process.platform !== 'win32') {
+// Skip in test environments to avoid interfering with test signal handling.
+if (process.platform !== 'win32' && !process.env.VITEST && process.env.NODE_ENV !== 'test') {
   process.on('SIGHUP', () => { /* ignored — survive SSH disconnect */ });
 }
 
@@ -135,6 +138,12 @@ function loadOrInitState(args) {
       state.orchestratorPid = process.pid;
       state.lastHeartbeatAt = nowIso();
       state.updatedAt = nowIso();
+      // Refresh maxRoundsPerStage from spec in case spec was updated since the sprint started
+      const spec = loadSpec(state, args);
+      if (spec.maxRoundsPerStage !== undefined && spec.maxRoundsPerStage !== state.maxRoundsPerStage) {
+        appendTimeline(runDir, `maxRoundsPerStage updated from spec: ${state.maxRoundsPerStage} → ${spec.maxRoundsPerStage}`);
+        state.maxRoundsPerStage = spec.maxRoundsPerStage;
+      }
       writeJson(sprintFile, state);
       appendTimeline(runDir, `Sprint resumed from ${previousStatus} by operator`);
     }
@@ -833,11 +842,21 @@ function terminateProcessTree(pid, { runDir = null, label = 'process' } = {}) {
       process.kill(-pid, 'SIGKILL');
       if (runDir) appendTimeline(runDir, `Terminated ${label} process group pgid=${pid}`);
     } catch (groupErr) {
+      if (groupErr.code === 'ESRCH') {
+        // Process already dead — expected during normal cleanup
+        if (runDir) appendTimeline(runDir, `${label} process already exited pid=${pid}`);
+        return true;
+      }
       process.kill(pid, 'SIGKILL');
       if (runDir) appendTimeline(runDir, `Terminated ${label} pid=${pid} (group kill failed: ${groupErr.message})`);
     }
     return true;
   } catch (err) {
+    if (err.code === 'ESRCH') {
+      // Process already dead — expected during normal cleanup
+      if (runDir) appendTimeline(runDir, `${label} process already exited pid=${pid}`);
+      return true;
+    }
     if (runDir) appendTimeline(runDir, `Failed to terminate ${label} pid=${pid}: ${err.message}`);
     return false;
   }
@@ -1745,7 +1764,7 @@ function ensureWorktree({ spec, runDir, state, stageName }) {
 
   const baseWorkspace = spec.workspace;
   const baseBranch = spec.branch ?? 'main';
-  const branchName = `sprint/${state.runId.slice(0, 12)}/${stageName}`;
+  const branchName = `sprint/${state.runId.slice(0, 25)}/${stageName}`;
   const worktreePath = path.join(runDir, 'worktrees', stageName);
   
   // Resolve baseRef with robust fallback chain:
