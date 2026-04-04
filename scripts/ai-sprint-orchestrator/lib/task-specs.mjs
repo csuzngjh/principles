@@ -7,6 +7,52 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..', '..', '..');
 const SPECS_DIR = path.join(repoRoot, 'ops', 'ai-sprints', 'specs');
 
+// ============================================================================
+// Cross-environment path normalization
+// Converts Windows paths (D:/Code/xxx) to Linux (/home/xxx) and vice versa.
+// This allows specs created on one OS to work on another.
+// ============================================================================
+
+/** Mapping of known Windows → Linux path equivalents. */
+const PATH_MAP = [
+  { win: 'D:/Code/principles',          linux: '/home/csuzngjh/code/principles' },
+  { win: 'D:/Code/openclaw',            linux: '/home/csuzngjh/code/openclaw' },
+  { win: 'D:/Code/principles-arch-docs',linux: '/home/csuzngjh/code/principles-arch-docs' },
+  { win: 'D:/Code/principles-empathy-fix', linux: '/home/csuzngjh/code/principles-empathy-fix' },
+  { win: 'D:/Code/principles-subagent-helper-deep-reflect', linux: '/home/csuzngjh/code/principles-subagent-helper-deep-reflect' },
+  { win: 'D:/Code/principles-subagent-helper-empathy', linux: '/home/csuzngjh/code/principles-subagent-helper-empathy' },
+  { win: 'D:/Code/principles-workflow-validation', linux: '/home/csuzngjh/code/principles-workflow-validation' },
+];
+
+/** Normalize a single path for the current OS. */
+function normalizePath(str) {
+  if (typeof str !== 'string') return str;
+  const isWin = process.platform === 'win32';
+  let result = str;
+  for (const mapping of PATH_MAP) {
+    const from = isWin ? mapping.linux : mapping.win;
+    const to = isWin ? mapping.win : mapping.linux;
+    // Replace both forward-slash and back-slash variants
+    result = result.split(from).join(to);
+    result = result.split(from.replace(/\//g, '\\\\')).join(to);
+  }
+  return result;
+}
+
+/** Recursively normalize all string values in a spec object. */
+function normalizeSpecPaths(obj) {
+  if (typeof obj === 'string') return normalizePath(obj);
+  if (Array.isArray(obj)) return obj.map(normalizeSpecPaths);
+  if (obj && typeof obj === 'object') {
+    const normalized = {};
+    for (const [key, value] of Object.entries(obj)) {
+      normalized[key] = normalizeSpecPaths(value);
+    }
+    return normalized;
+  }
+  return obj;
+}
+
 export function getTaskSpec(taskId, specPath) {
   // Priority: explicit path > filesystem spec > error
   const candidates = specPath
@@ -18,7 +64,8 @@ export function getTaskSpec(taskId, specPath) {
 
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) {
-      return JSON.parse(fs.readFileSync(candidate, 'utf8'));
+      const raw = JSON.parse(fs.readFileSync(candidate, 'utf8'));
+      return normalizeSpecPaths(raw);
     }
   }
 
