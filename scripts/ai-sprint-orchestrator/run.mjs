@@ -227,7 +227,7 @@ function runAgent({ cwd, agent, model, prompt, timeoutSeconds = 1800, failLogPat
     } else {
       result = spawnSync(
         nodeBin,
-        [acpxBin, '--cwd', cwd, '--approve-all', '--model', model, '--timeout', String(timeoutSeconds), agent, 'exec', '-f', promptFile],
+        [acpxBin, '--cwd', cwd, '--approve-all', '--model', model, '--timeout', String(timeoutSeconds), '--prompt-retries', '2', '--suppress-reads', agent, 'exec', '-f', promptFile],
         {
           cwd,
           encoding: 'utf8',
@@ -245,7 +245,7 @@ function runAgent({ cwd, agent, model, prompt, timeoutSeconds = 1800, failLogPat
       if (result.error && result.error.code === 'ENOENT') {
         result = spawnSync(
           nodeBin,
-          [acpxBin, '--cwd', cwd, '--approve-all', '--model', model, '--timeout', String(timeoutSeconds), agent, 'exec', '-f', promptFile],
+          [acpxBin, '--cwd', cwd, '--approve-all', '--model', model, '--timeout', String(timeoutSeconds), '--prompt-retries', '2', '--suppress-reads', agent, 'exec', '-f', promptFile],
           {
             cwd,
             encoding: 'utf8',
@@ -357,7 +357,7 @@ function runAgentAsync({ cwd, agent, model, prompt, timeoutSeconds = 1800, promp
         try {
           proc = spawn(nodeBin, [acpxBin,
             '--cwd', cwd, '--approve-all', '--model', model,
-            '--timeout', String(timeoutSeconds), agent, 'exec', '-f', promptFile,
+            '--timeout', String(timeoutSeconds), '--prompt-retries', '2', '--suppress-reads', agent, 'exec', '-f', promptFile,
           ], {
             cwd,
             encoding: 'utf8',
@@ -372,7 +372,7 @@ function runAgentAsync({ cwd, agent, model, prompt, timeoutSeconds = 1800, promp
           if (enoentErr.code === 'ENOENT') {
             proc = spawn(nodeBin, [acpxBin,
               '--cwd', cwd, '--approve-all', '--model', model,
-              '--timeout', String(timeoutSeconds), agent, 'exec', '-f', promptFile,
+              '--timeout', String(timeoutSeconds), '--prompt-retries', '2', '--suppress-reads', agent, 'exec', '-f', promptFile,
             ], {
               cwd,
               encoding: 'utf8',
@@ -615,7 +615,7 @@ function runAgentWithProgressCheck({
         try {
           proc = spawn(nodeBin, [acpxBin,
             '--cwd', cwd, '--approve-all', '--model', model,
-            '--timeout', String(hardTimeoutSeconds), agent, 'exec', '-f', promptFile,
+            '--timeout', String(hardTimeoutSeconds), '--prompt-retries', '2', '--suppress-reads', agent, 'exec', '-f', promptFile,
           ], {
             cwd,
             encoding: 'utf8',
@@ -629,7 +629,7 @@ function runAgentWithProgressCheck({
           if (enoentErr.code === 'ENOENT') {
             proc = spawn(nodeBin, [acpxBin,
               '--cwd', cwd, '--approve-all', '--model', model,
-              '--timeout', String(hardTimeoutSeconds), agent, 'exec', '-f', promptFile,
+              '--timeout', String(hardTimeoutSeconds), '--prompt-retries', '2', '--suppress-reads', agent, 'exec', '-f', promptFile,
             ], {
               cwd,
               encoding: 'utf8',
