@@ -12,11 +12,28 @@ import { archiveRunById } from './lib/archive.mjs';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..', '..');
 const sprintRoot = path.join(repoRoot, 'ops', 'ai-sprints');
-// Resolve acpx from npm global bin — avoids ENOENT when Node spawns with shell:false
+// Resolve acpx binary path and node executable — spawn directly via node to avoid
+// shebang/env resolution issues when cron/nohup has a minimal PATH.
 const acpxBin = (() => {
   const r = spawnSync('which', ['acpx'], { encoding: 'utf8' });
-  return r.status === 0 ? r.stdout.trim() : 'acpx';
+  if (r.status === 0) {
+    const symlink = r.stdout.trim();
+    try {
+      return fs.realpathSync(symlink);
+    } catch {
+      return symlink;
+    }
+  }
+  return 'acpx';
 })();
+const nodeBin = process.execPath; // e.g. /usr/bin/node — reliable, no PATH search needed
+// Extended env for detached child processes — includes /usr/bin so the Node.js
+// shebang (#!/usr/bin/env node) resolves correctly even when cron/nohup has
+// a minimal PATH that omits standard system bin directories.
+const acpxEnv = {
+  ...process.env,
+  PATH: `/usr/local/bin:/usr/bin:/bin:${process.env.PATH ?? ''}`,
+};
 
 // On Linux, ignore SIGHUP so SSH disconnect doesn't kill the orchestrator.
 // Registered once at module load — covers all code paths including setup
@@ -209,8 +226,8 @@ function runAgent({ cwd, agent, model, prompt, timeoutSeconds = 1800, failLogPat
       );
     } else {
       result = spawnSync(
-        acpxBin,
-        ['--cwd', cwd, '--approve-all', '--model', model, '--timeout', String(timeoutSeconds), agent, 'exec', '-f', promptFile],
+        nodeBin,
+        [acpxBin, '--cwd', cwd, '--approve-all', '--model', model, '--timeout', String(timeoutSeconds), agent, 'exec', '-f', promptFile],
         {
           cwd,
           encoding: 'utf8',
@@ -221,13 +238,14 @@ function runAgent({ cwd, agent, model, prompt, timeoutSeconds = 1800, failLogPat
           // from SSH disconnect doesn't propagate to agent processes.
           detached: true,
           stdio: ['pipe', 'pipe', 'pipe'],
+          env: acpxEnv,
         },
       );
       // Fallback if resolved path is stale (e.g., npm package updated between module load and spawn)
       if (result.error && result.error.code === 'ENOENT') {
         result = spawnSync(
-          'acpx',
-          ['--cwd', cwd, '--approve-all', '--model', model, '--timeout', String(timeoutSeconds), agent, 'exec', '-f', promptFile],
+          nodeBin,
+          [acpxBin, '--cwd', cwd, '--approve-all', '--model', model, '--timeout', String(timeoutSeconds), agent, 'exec', '-f', promptFile],
           {
             cwd,
             encoding: 'utf8',
@@ -236,6 +254,7 @@ function runAgent({ cwd, agent, model, prompt, timeoutSeconds = 1800, failLogPat
             shell: false,
             detached: true,
             stdio: ['pipe', 'pipe', 'pipe'],
+            env: acpxEnv,
           },
         );
       }
@@ -317,7 +336,7 @@ function runAgentAsync({ cwd, agent, model, prompt, timeoutSeconds = 1800, promp
         });
       } else {
         try {
-          proc = spawn(acpxBin, [
+          proc = spawn(nodeBin, [acpxBin,
             '--cwd', cwd, '--approve-all', '--model', model,
             '--timeout', String(timeoutSeconds), agent, 'exec', '-f', promptFile,
           ], {
@@ -327,11 +346,12 @@ function runAgentAsync({ cwd, agent, model, prompt, timeoutSeconds = 1800, promp
             shell: false,
             detached: true,
             stdio: ['pipe', 'pipe', 'pipe'],
+            env: acpxEnv,
           });
         } catch (enoentErr) {
           // Fallback if resolved path is stale
           if (enoentErr.code === 'ENOENT') {
-            proc = spawn('acpx', [
+            proc = spawn(nodeBin, [acpxBin,
               '--cwd', cwd, '--approve-all', '--model', model,
               '--timeout', String(timeoutSeconds), agent, 'exec', '-f', promptFile,
             ], {
@@ -341,6 +361,7 @@ function runAgentAsync({ cwd, agent, model, prompt, timeoutSeconds = 1800, promp
               shell: false,
               detached: true,
               stdio: ['pipe', 'pipe', 'pipe'],
+              env: acpxEnv,
             });
           } else {
             throw enoentErr;
@@ -573,7 +594,7 @@ function runAgentWithProgressCheck({
         });
       } else {
         try {
-          proc = spawn(acpxBin, [
+          proc = spawn(nodeBin, [acpxBin,
             '--cwd', cwd, '--approve-all', '--model', model,
             '--timeout', String(hardTimeoutSeconds), agent, 'exec', '-f', promptFile,
           ], {
@@ -583,10 +604,11 @@ function runAgentWithProgressCheck({
             shell: false,
             detached: true,
             stdio: ['pipe', 'pipe', 'pipe'],
+            env: acpxEnv,
           });
         } catch (enoentErr) {
           if (enoentErr.code === 'ENOENT') {
-            proc = spawn('acpx', [
+            proc = spawn(nodeBin, [acpxBin,
               '--cwd', cwd, '--approve-all', '--model', model,
               '--timeout', String(hardTimeoutSeconds), agent, 'exec', '-f', promptFile,
             ], {
@@ -596,6 +618,7 @@ function runAgentWithProgressCheck({
               shell: false,
               detached: true,
               stdio: ['pipe', 'pipe', 'pipe'],
+              env: acpxEnv,
             });
           } else {
             throw enoentErr;
