@@ -25,10 +25,9 @@ AI agents that improve their own behavior through structured principle evolution
 
 <!-- Current scope. Building toward these. -->
 
-- [ ] Workflow acceptance checklist readable, executable, handoff-ready
-- [ ] Minimal validation runs prove workflow stability (2 runs non-halt)
-- [ ] Skill/operator package for ai-sprint-orchestrator in skills/ai-sprint-orchestration/
-- [ ] Unified entry point for agents using the orchestrator
+- [ ] 验收清单可读、可执行、可交接，命令和字段统一
+- [ ] 基线测试全绿，两次最小验证运行完成并分类失败
+- [ ] 技能包 skills/ai-sprint-orchestration/ 完成（SKILL.md 复用现有 run.mjs，REFERENCE.md，EXAMPLES.md）
 
 ### Out of Scope
 
@@ -88,9 +87,9 @@ This document evolves at phase transitions and milestone boundaries.
 
 **Target features:**
 - Fix acceptance checklist to readable/executable/handoff-ready
-- Prove workflow stability via minimal validation runs
-- Create skills/ai-sprint-orchestration/ package (SKILL.md + 3 PROMPTS)
-- Unified agent entry point
+- Prove workflow stability via minimal validation runs (baseline + 2 runs)
+- Create skills/ai-sprint-orchestration/ skill package (SKILL.md + REFERENCE.md + EXAMPLES.md), reusing existing run.mjs as execution engine
+- Validation run 遇到 sample-side/product-side issue 只分类不修产品
 
 ---
 *Last updated: 2026-04-05 after milestone v1.2 initialization*
