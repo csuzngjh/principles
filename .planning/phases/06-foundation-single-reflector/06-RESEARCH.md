@@ -179,11 +179,11 @@ store.recordEvent(workflowId, 'nocturnal_expired', workflow.state, 'expired',
 - On sweep: iterate stateDir for files matching `nocturnal/samples/${workflowId}*`
 - TrinityRuntimeAdapter handles its own internal session cleanup (no external session cleanup needed)
 
-### Pattern 5: No-Op notifyWaitResult
+### Pattern 5: No-Op notifyWaitResult and notifyLifecycleEvent
 
-**What:** notifyWaitResult is a no-op for nocturnal because TrinityRuntimeAdapter manages its own session lifecycle synchronously within its invoke* methods
+**What:** Both notifyWaitResult and notifyLifecycleEvent are no-ops for nocturnal because TrinityRuntimeAdapter manages its own session lifecycle synchronously within its invoke* methods
 
-**Why:** Unlike EmpathyObserverWorkflowManager which uses RuntimeDirectDriver with async wait polling, NocturnalWorkflowManager calls executeNocturnalReflectionAsync which is synchronous within its own session management
+**Why:** Unlike EmpathyObserverWorkflowManager which uses RuntimeDirectDriver with async wait polling, NocturnalWorkflowManager calls executeNocturnalReflectionAsync which is synchronous within its own session management. There is no wait-on-run pattern and no external subagent lifecycle to track.
 
 ### Anti-Patterns to Avoid
 
@@ -350,22 +350,22 @@ recordEvent(
 | A3 | executeNocturnalReflectionAsync is synchronous within the async wrapper | Single-reflector path | CONFIRMED: nocturnal-service.ts uses invokeStubReflector for useTrinity=false path |
 | A4 | NocturnalWorkflowManager doesn't need to track runId | startWorkflow return | CONFIRMED: TrinityRuntimeAdapter manages own sessions; runId not applicable |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Where are partial artifact files stored?**
+1. **Where are partial artifact files stored?** (RESOLVED)
    - What we know: NocturnalPathResolver.samplePath stores approved artifacts at `nocturnal/samples/{artifactId}.json`
    - What's unclear: Where does executeNocturnalReflectionAsync write partial artifacts during execution?
-   - Recommendation: Check if artifacts are written atomically (only on success) or if partial files exist during execution. If atomic, no cleanup needed during sweep.
+   - Resolution: Check if artifacts are written atomically (only on success) or if partial files exist during execution. If atomic, no cleanup needed during sweep. For sweep, clean partial artifacts by workflowId prefix in the samples directory.
 
-2. **What is the childSessionKey for nocturnal workflows?**
+2. **What is the childSessionKey for nocturnal workflows?** (RESOLVED)
    - What we know: NocturnalWorkflowManager doesn't use RuntimeDirectDriver, so WORKFLOW_SESSION_PREFIX may not apply
    - What's unclear: What key should be stored in WorkflowStore.child_session_key?
-   - Recommendation: Generate a placeholder key (e.g., `nocturnal:internal:${workflowId}`) since TrinityRuntimeAdapter manages its own sessions internally
+   - Resolution: Generate a placeholder key (e.g., `nocturnal:internal:${workflowId}`) since TrinityRuntimeAdapter manages its own sessions internally.
 
-3. **Should nocturnal workflows appear in getActiveWorkflows?**
+3. **Should nocturnal workflows appear in getActiveWorkflows?** (RESOLVED)
    - What we know: WorkflowStore tracks active workflows
    - What's unclear: Since execution is synchronous, does 'active' state even apply?
-   - Recommendation: Set state to 'active' when starting, then transition to 'finalizing' when executeNocturnalReflectionAsync returns, matching EmpathyObserver pattern
+   - Resolution: Set state to 'active' when starting, then transition to 'completed' or 'terminal_error' when executeNocturnalReflectionAsync returns, matching EmpathyObserver pattern. The 'active' state is a brief transitional state during execution.
 
 ## Environment Availability
 
@@ -386,30 +386,30 @@ No security-sensitive operations in Phase 6. NocturnalWorkflowManager:
 |----------|-------|
 | Framework | Vitest |
 | Config file | packages/openclaw-plugin/vitest.config.ts |
-| Quick run command | `vitest run --dir packages/openclaw-plugin/src/service/subagent-workflow --testNamePattern "nocturnal"` |
+| Quick run command | `vitest run packages/openclaw-plugin/src/service/subagent-workflow/nocturnal-workflow-manager.test.ts` |
 | Full suite command | `vitest run packages/openclaw-plugin` |
 
 ### Phase Requirements to Test Map
 
 | Req ID | Behavior | Test Type | Automated Command | File Exists? |
 |--------|----------|-----------|-------------------|-------------|
-| NOC-01 | NocturnalWorkflowManager implements WorkflowManager interface | unit | `vitest run --testNamePattern "NOC-01"` | TBD: nocturnal-workflow-manager.test.ts |
-| NOC-02 | startWorkflow calls executeNocturnalReflectionAsync with useTrinity=false | unit | `vitest run --testNamePattern "NOC-02"` | TBD |
-| NOC-03 | WorkflowStore records nocturnal_started/completed/failed events | unit | `vitest run --testNamePattern "NOC-03"` | TBD |
-| NOC-04 | NocturnalWorkflowSpec fields match D-07, D-08, D-09 | unit | `vitest run --testNamePattern "NOC-04"` | TBD |
-| NOC-05 | sweepExpiredWorkflows marks expired and cleans partial artifacts | unit | `vitest run --testNamePattern "NOC-05"` | TBD |
+| NOC-01 | NocturnalWorkflowManager implements WorkflowManager interface (all 7 methods) | unit | `vitest run --testNamePattern "NOC-01"` | nocturnal-workflow-manager.test.ts |
+| NOC-02 | startWorkflow calls executeNocturnalReflectionAsync with useTrinity=false | unit | `vitest run --testNamePattern "NOC-02"` | nocturnal-workflow-manager.test.ts |
+| NOC-03 | WorkflowStore records nocturnal_started/completed/failed events | unit | `vitest run --testNamePattern "NOC-03"` | nocturnal-workflow-manager.test.ts |
+| NOC-04 | NocturnalWorkflowSpec fields match D-07, D-08, D-09 | unit | `vitest run --testNamePattern "NOC-04"` | nocturnal-workflow-manager.test.ts |
+| NOC-05 | sweepExpiredWorkflows marks expired and cleans partial artifacts | unit | `vitest run --testNamePattern "NOC-05"` | nocturnal-workflow-manager.test.ts |
 
 ### Sampling Rate
-- **Per task commit:** `vitest run packages/openclaw-plugin/src/service/subagent-workflow`
+- **Per task commit:** `vitest run packages/openclaw-plugin/src/service/subagent-workflow/nocturnal-workflow-manager.test.ts`
 - **Per wave merge:** Full suite
 - **Phase gate:** All nocturnal-workflow-manager tests green before `/gsd-verify-work`
 
 ### Wave 0 Gaps
-- [ ] `packages/openclaw-plugin/src/service/subagent-workflow/nocturnal-workflow-manager.test.ts` -- covers NOC-01 through NOC-05
-- [ ] `packages/openclaw-plugin/src/service/subagent-workflow/nocturnal-workflow-manager.ts` -- implementation
-- [ ] Framework install: Already using vitest, no new framework needed
+- [x] `packages/openclaw-plugin/src/service/subagent-workflow/nocturnal-workflow-manager.test.ts` -- covers NOC-01 through NOC-05
+- [x] `packages/openclaw-plugin/src/service/subagent-workflow/nocturnal-workflow-manager.ts` -- implementation
+- [x] Framework install: Already using vitest, no new framework needed
 
-*(If no gaps: "None -- existing test infrastructure covers all phase requirements")*
+*(No gaps remaining -- all Wave 0 items completed)*
 
 ## Sources
 
