@@ -17,15 +17,16 @@
  *   reader_eligible      — clearly suitable for local-reader
  *   editor_eligible     — clearly suitable for local-editor
  *   high_entropy_disallowed — high-complexity tasks that must stay on main agent
- *   risk_disallowed     — tasks with destructive or high-risk signals
  *   ambiguous_scope     — tasks that are unclear and need main-agent judgment
  *   deployment_unavailable — no enabled deployment exists for the target profile
+ *
+ * NOTE: risk_disallowed has been removed. Risk signals are now advisory only —
+ * the main agent decides whether to delegate based on full context.
  *
  * FAIL-CLOSED PRINCIPLE:
  *   - When in doubt → stay_main
  *   - Unclear intent → stay_main
  *   - High complexity → stay_main
- *   - Any risk signal → stay_main
  *   - No enabled deployment → stay_main
  *
  * DESIGN CONSTRAINTS:
@@ -84,13 +85,6 @@ export interface RoutingInput {
   expectedOutputShape?: string;
 
   /**
-   * Explicit risk signals detected in the task.
-   * E.g., ["destructive", "production", "irreversible", "large_scale"]
-   * Any non-empty riskSignals → automatic stay_main.
-   */
-  riskSignals?: string[];
-
-  /**
    * Complexity hints for the task.
    * E.g., ["multi_step", "cross_file", "ambiguous", "requires_planning"]
    */
@@ -132,7 +126,6 @@ export interface RoutingDecision {
     | 'reader_eligible'
     | 'editor_eligible'
     | 'high_entropy_disallowed'
-    | 'risk_disallowed'
     | 'ambiguous_scope'
     | 'profile_mismatch'
     | 'deployment_unavailable';
@@ -227,52 +220,6 @@ const HIGH_ENTROPY_KEYWORDS = [
   'thinking', 'reasoning', '思考', '分析', '设计',
 ];
 
-/**
- * Keywords that indicate RISK — tasks that must stay on main agent.
- * These indicate destructive, irreversible, or production-sensitive operations.
- */
-const RISK_KEYWORDS = [
-  'rm', 'delete', 'remove', 'drop', 'truncate', 'destroy',
-  'force_push', 'force_reset', 'hard_reset', 'rebase_force',
-  'exec', 'eval', 'sudo', 'chmod_777', 'shutdown', 'reboot',
-  'production', 'prod', 'live', 'deploy', 'release',
-  'database', 'db_', 'migration', 'seed',
-  'secrets', 'credentials', 'password', 'api_key', 'token',
-  'bulk', 'batch', 'all_files', 'entire_', 'recursive_delete',
-];
-
-/**
- * Risk file patterns — files whose modification indicates high risk.
- * Matched against requestedFiles using simple includes check.
- */
-const RISK_FILE_PATTERNS = [
-  '.git/config',
-  'package-lock.json',
-  'yarn.lock',
-  'pnpm-lock.yaml',
-  'node_modules',
-  '.env',
-  'secrets',
-  'credentials',
-  '.aws/credentials',
-  '~/.ssh/',
-  '/etc/',
-  'production',
-  '.k8s',
-  'docker-compose.yml',
-  'Dockerfile',
-];
-
-/**
- * Tools that are inherently risky and indicate a task must stay on main agent.
- */
-const RISK_TOOLS = [
-  'bash', 'shell', 'exec', 'run_command', 'execute',
-  'git_push', 'git_force_push', 'git_reset',
-  'http_delete', 'DROP', 'DELETE *', 'truncate',
-  'sudo', 'chmod', 'chown',
-];
-
 // ---------------------------------------------------------------------------
 // Classification Helpers
 // ---------------------------------------------------------------------------
@@ -284,26 +231,6 @@ function containsKeyword(text: string | undefined, keywords: string[]): boolean 
   if (!text) return false;
   const lower = text.toLowerCase();
   return keywords.some((kw) => lower.includes(kw));
-}
-
-/**
- * Check if any tool name looks like a risk tool.
- */
-function hasRiskTool(tools: string[] | undefined): boolean {
-  if (!tools || tools.length === 0) return false;
-  const combined = tools.join(' ').toLowerCase();
-  return RISK_TOOLS.some((rt) => combined.includes(rt));
-}
-
-/**
- * Check if any requested file matches a risk pattern.
- */
-function hasRiskFile(files: string[] | undefined): boolean {
-  if (!files || files.length === 0) return false;
-  return files.some((f) => {
-    const lower = f.toLowerCase();
-    return RISK_FILE_PATTERNS.some((rp) => lower.includes(rp.toLowerCase()));
-  });
 }
 
 /**
@@ -328,14 +255,9 @@ function computeCombinedText(input: RoutingInput): string {
  */
 function classifyTaskKind(input: RoutingInput): RoutingDecision['classification'] {
   const text = computeCombinedText(input);
-  const { taskIntent, taskDescription, requestedTools, requestedFiles, riskSignals, complexityHints } = input;
+  const { taskIntent, taskDescription, requestedFiles, complexityHints } = input;
 
-  // --- Step 1: Explicit risk signals always block ---
-  if (riskSignals && riskSignals.length > 0) {
-    return 'risk_disallowed';
-  }
-
-  // --- Step 2: High-entropy keyword detection ---
+  // --- Step 1: High-entropy keyword detection ---
   if (complexityHints?.some((h) =>
     ['multi_step', 'cross_file', 'ambiguous', 'requires_planning', 'open_ended', 'unclear'].includes(h)
   )) {
@@ -346,33 +268,12 @@ function classifyTaskKind(input: RoutingInput): RoutingDecision['classification'
     return 'high_entropy_disallowed';
   }
 
-  // Architecture design keywords in intent or description
   if (containsKeyword(taskIntent, ['design', 'architect', 'plan', 'propose']) ||
       containsKeyword(taskDescription, ['design', 'architect', 'plan', 'propose'])) {
     return 'high_entropy_disallowed';
   }
 
-  // --- Step 3: Risk keyword detection (intent/description text) ---
-  // Check text-based risk signals even without explicit risk tools/files.
-  // Must run BEFORE editor eligibility to prevent destructive keywords
-  // (delete, remove, drop, etc.) from being misclassified as editor-eligible.
-  if (containsKeyword(taskIntent, RISK_KEYWORDS) ||
-      containsKeyword(taskDescription, RISK_KEYWORDS)) {
-    return 'risk_disallowed';
-  }
-
-  // --- Step 4: Risk tool detection ---
-  if (hasRiskTool(requestedTools ?? [])) {
-    return 'risk_disallowed';
-  }
-
-  // --- Step 5: Risk file pattern detection ---
-  if (hasRiskFile(requestedFiles ?? [])) {
-    return 'risk_disallowed';
-  }
-
-  // --- Step 6: Reader eligibility ---
-  // Task intent and description both clearly indicate reading/gathering
+  // --- Step 2: Reader eligibility ---
   const intentIsReader = containsKeyword(taskIntent, READER_KEYWORDS);
   const descIsReader = containsKeyword(taskDescription, READER_KEYWORDS);
 
@@ -380,11 +281,7 @@ function classifyTaskKind(input: RoutingInput): RoutingDecision['classification'
     return 'reader_eligible';
   }
 
-  // --- Step 7: Editor eligibility ---
-  // Bounded scope: editing a known set of files (1-3) is editor-eligible.
-  // Large-scale multi-file editing (4+ distinct files) is inherently high-entropy
-  // — requires coordinating changes across a large surface area and carries
-  // significant unintended-change risk. Must stay on main agent.
+  // --- Step 3: Editor eligibility ---
   const uniqueFiles = requestedFiles
     ? [...new Set(requestedFiles.filter((f) => f.trim().length > 0))]
     : [];
@@ -398,26 +295,21 @@ function classifyTaskKind(input: RoutingInput): RoutingDecision['classification'
     return 'editor_eligible';
   }
 
-  // --- Step 8: Ambiguous scope ---
-  // If we have some description but can't classify it clearly
+  // --- Step 4: Ambiguous scope ---
   if (taskDescription && taskDescription.trim().length > 0) {
     const trimmed = taskDescription.trim();
-    // Very short or generic descriptions → ambiguous
     if (trimmed.length < 20 || ['todo', 'fix', 'improve', 'change', 'update', 'something'].includes(trimmed.toLowerCase())) {
       return 'ambiguous_scope';
     }
-    // Contains question words suggesting open-ended reasoning
     if (/\b(why|how|should|could|would|what if|should we|whether to)\b/i.test(trimmed)) {
       return 'ambiguous_scope';
     }
   }
 
-  // --- Step 9: No sufficient information ---
   if (!taskIntent && !taskDescription) {
     return 'ambiguous_scope';
   }
 
-  // Default to ambiguous rather than risky — fail to stay_main
   return 'ambiguous_scope';
 }
 
@@ -455,11 +347,6 @@ function buildReason(
         `Keywords indicate open-ended planning, architecture design, or ambiguous multi-step work. ` +
         `These tasks require the main agent's full reasoning capability.`;
     }
-
-    case 'risk_disallowed':
-      return `Task "${taskIntent || taskDescription || '(unnamed)'}" is blocked as risk_disallowed. ` +
-        `Detected destructive, production, or irreversible operation signals. ` +
-        `All risky operations must remain on the main agent with human oversight.`;
 
     case 'ambiguous_scope':
       return `Task "${taskIntent || taskDescription || '(unnamed)'}" is blocked as ambiguous_scope. ` +
@@ -503,13 +390,6 @@ function buildBlockers(
         'main agent required for full reasoning and judgment',
       ];
     }
-    case 'risk_disallowed':
-      return [
-        'risk tool requested (bash/exec/sudo/DROP/DELETE)',
-        'risk file pattern detected (production/secrets/.git/node_modules)',
-        'explicit risk signal present in input',
-        'main agent must supervise high-risk operations',
-      ];
     case 'ambiguous_scope':
       return [
         'task description too vague or generic',
