@@ -38,10 +38,10 @@ packages/openclaw-plugin/skills
 # create-principles-disciple: bundled plugin (build artifact)
 packages/create-principles-disciple/plugin/
 
-# Local environment and state (DO NOT COMMIT)
+# Local environment and state
 .claude/
 claude/
-.planning/
+.planning/  # GSD workflow files tracked in git for multi-env sync
 conductor/
 .principles/
 .state/
