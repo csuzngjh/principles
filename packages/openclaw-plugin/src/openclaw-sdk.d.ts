@@ -90,7 +90,6 @@ export interface SubagentRunParams {
     lane?: string;
     deliver?: boolean;
     idempotencyKey?: string;
-    expectsCompletionMessage?: boolean; // Plugin extension for completion signaling
 }
 
 export interface SubagentRunResult {
@@ -131,10 +130,6 @@ export interface PluginRuntime {
         waitForRun: (params: SubagentWaitParams) => Promise<SubagentWaitResult>;
         getSessionMessages: (params: SubagentGetSessionMessagesParams) => Promise<SubagentGetSessionMessagesResult>;
         deleteSession: (params: SubagentDeleteSessionParams) => Promise<void>;
-    };
-    tools: {
-        createMemoryGetTool: (params: any) => any;
-        createMemorySearchTool: (params: any) => any;
     };
     system: {
         enqueueSystemEvent: (event: any) => void;
@@ -261,7 +256,6 @@ export type PluginHookSubagentContext = {
     runId?: string;
     childSessionKey?: string;
     requesterSessionKey?: string;
-    workspaceDir?: string; // CommonPD extension
 };
 
 

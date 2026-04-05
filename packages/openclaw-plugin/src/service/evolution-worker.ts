@@ -973,33 +973,8 @@ async function processDetectionQueue(wctx: WorkspaceContext, api: OpenClawPlugin
                     });
                 }
             } else {
-                try {
-                    const searchTool = api.runtime.tools?.createMemorySearchTool?.({ config: api.config });
-                    if (searchTool) {
-                        const searchResult = await searchTool.execute('pre-emptive-pain-check', {
-                            query: text,
-                            limit: 1,
-                            threshold: 0.85
-                        });
-
-                        if (searchResult && searchResult.results?.length > 0) {
-                            const hit = searchResult.results[0];
-                            if (logger) logger.info?.(`[PD:EvolutionWorker] L3 Semantic Hit: ${hit.id} (Score: ${hit.score})`);
-                            
-                            funnel.updateCache(text, { detected: true, severity: 40 });
-                            if (eventLog) {
-                                eventLog.recordRuleMatch(undefined, {
-                                    ruleId: 'SEMANTIC_HIT',
-                                    layer: 'L3',
-                                    severity: 40,
-                                    textPreview: text.substring(0, 100)
-                                });
-                            }
-                        }
-                    }
-                } catch (e) {
-                    if (logger) logger.debug?.(`[PD:EvolutionWorker] L3 Semantic search failed: ${String(e)}`);
-                }
+                // L3 semantic search via createMemorySearchTool is not available in the OpenClaw SDK.
+                // Fall through to L2 rule-based detection only.
                 await trackPainCandidate(text, wctx);
             }
         }

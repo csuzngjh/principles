@@ -239,7 +239,7 @@ const plugin = {
       'subagent_spawning',
       (event: PluginHookSubagentSpawningEvent, ctx: PluginHookSubagentContext): void | PluginHookSubagentSpawningResult => {
         try {
-          const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
+          const workspaceDir = api.workspaceDir || api.resolvePath('.');
           const { agentId, childSessionKey } = event;
           // Only handle PD local worker profiles
           if (!PD_LOCAL_PROFILES.has(agentId as WorkerProfile)) {
