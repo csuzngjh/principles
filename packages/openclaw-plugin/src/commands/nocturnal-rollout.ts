@@ -628,7 +628,7 @@ ${lines.join('\n')}`,
       const toolsArg = parts.find((p) => p.startsWith('--tools='))?.slice('--tools='.length) ?? '';
       const filesArg = parts.find((p) => p.startsWith('--files='))?.slice('--files='.length) ?? '';
       const outputArg = parts.find((p) => p.startsWith('--output='))?.slice('--output='.length) ?? '';
-      const riskArg = parts.find((p) => p.startsWith('--risk='))?.slice('--risk='.length) ?? '';
+      // Note: --risk= flag is deprecated (risk gating removed from routing)
       const complexityArg = parts.find((p) => p.startsWith('--complexity='))?.slice('--complexity='.length) ?? '';
 
       const routingInput: RoutingInput = {
