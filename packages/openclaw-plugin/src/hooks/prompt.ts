@@ -628,7 +628,8 @@ REQUIRED ACTION:
 
   const isUserInteraction = trigger === 'user' || trigger === 'api' || !trigger;
 
-  if (isUserInteraction && sessionId && api && !isAgentToAgent) {
+  const empathyEnabled = wctx.config.get('empathy_engine.enabled') !== false;
+  if (empathyEnabled && isUserInteraction && sessionId && api && !isAgentToAgent) {
     prependContext = '### BEHAVIORAL_CONSTRAINTS\n' + empathySilenceConstraint + '\n\n' + prependContext;
 
     // Empathy Observer: analyze user message for frustration signals
