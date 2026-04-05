@@ -265,6 +265,11 @@ export interface WorkflowManager {
      * Return a compact workflow-centric debug view for operators.
      */
     getWorkflowDebugSummary: (workflowId: string, eventLimit?: number) => Promise<WorkflowDebugSummary | null>;
+
+    /**
+     * Release resources (DB connections, timers).
+     */
+    dispose: () => void;
 }
 
 // ── Workflow Store (for SQLite persistence) ──────────────────────────────────

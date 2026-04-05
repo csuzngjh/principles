@@ -18,6 +18,8 @@ import { DIAGNOSTICIAN_PROTOCOL_SUMMARY } from '../constants/diagnostician.js';
 import { LockUnavailableError } from '../config/index.js';
 import { checkWorkspaceIdle, checkCooldown } from './nocturnal-runtime.js';
 import { WorkflowStore } from './subagent-workflow/workflow-store.js';
+import { EmpathyObserverWorkflowManager } from './subagent-workflow/empathy-observer-workflow-manager.js';
+import { DeepReflectWorkflowManager } from './subagent-workflow/deep-reflect-workflow-manager.js';
 
 const WORKFLOW_TTL_MS = 5 * 60 * 1000; // 5 minutes default TTL for helper workflows
 import { executeNocturnalReflectionAsync } from './nocturnal-service.js';
@@ -430,6 +432,53 @@ async function enqueueSleepReflectionTask(
     }
 }
 
+interface ParsedPainValues {
+    score: number; source: string; reason: string; preview: string;
+    traceId: string; sessionId: string; agentId: string;
+}
+
+async function doEnqueuePainTask(
+    wctx: WorkspaceContext, logger: PluginLogger, painFlagPath: string,
+    result: WorkerStatusReport['pain_flag'], v: ParsedPainValues,
+): Promise<WorkerStatusReport['pain_flag']> {
+    result.exists = true;
+    result.score = v.score;
+    result.source = v.source;
+
+    const queuePath = wctx.resolve('EVOLUTION_QUEUE');
+    const releaseLock = await requireQueueLock(queuePath, logger, 'checkPainFlag');
+    try {
+        let queue: EvolutionQueueItem[] = [];
+        if (fs.existsSync(queuePath)) {
+            try { queue = JSON.parse(fs.readFileSync(queuePath, 'utf8')); } catch {}
+        }
+        const now = Date.now();
+        const dup = findRecentDuplicateTask(queue, v.source, v.preview, now, v.reason);
+        if (dup) {
+            fs.appendFileSync(painFlagPath, `\nstatus: queued\ntask_id: ${dup.id}\n`, 'utf8');
+            result.enqueued = true;
+            result.skipped_reason = 'duplicate';
+            return result;
+        }
+        const taskId = createEvolutionTaskId(v.source, v.score, v.preview, v.reason, now);
+        const nowIso = new Date(now).toISOString();
+        queue.push({
+            id: taskId, taskKind: 'pain_diagnosis',
+            priority: v.score >= 70 ? 'high' : v.score >= 40 ? 'medium' : 'low',
+            score: v.score, source: v.source, reason: v.reason,
+            trigger_text_preview: v.preview, timestamp: nowIso, enqueued_at: nowIso,
+            status: 'pending', session_id: v.sessionId || undefined,
+            agent_id: v.agentId || undefined, traceId: v.traceId || taskId,
+            retryCount: 0, maxRetries: 3,
+        });
+        fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+        fs.appendFileSync(painFlagPath, `\nstatus: queued\ntask_id: ${taskId}\n`, 'utf8');
+        result.enqueued = true;
+        logger?.info?.(`[PD:EvolutionWorker] Enqueued pain task ${taskId} (score=${v.score})`);
+    } finally { releaseLock(); }
+    return result;
+}
+
 async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Promise<WorkerStatusReport['pain_flag']> {
     const result: WorkerStatusReport['pain_flag'] = { exists: false, score: null, source: null, enqueued: false, skipped_reason: null };
     try {
@@ -437,6 +486,23 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
         if (!fs.existsSync(painFlagPath)) return result;
 
         const rawPain = fs.readFileSync(painFlagPath, 'utf8');
+
+        // Try JSON format first (pain skill structured output)
+        try {
+            const jsonPain = JSON.parse(rawPain);
+            if (typeof jsonPain === 'object' && jsonPain !== null && jsonPain.pain_score !== undefined) {
+                const jsonScore = typeof jsonPain.pain_score === 'number' ? jsonPain.pain_score :
+                                  typeof jsonPain.score === 'number' ? jsonPain.score : 50;
+                const jsonSource = jsonPain.source || 'human';
+                const jsonReason = jsonPain.reason || jsonPain.requested_action || 'Systemic pain detected';
+                const jsonPreview = (jsonPain.symptoms || []).slice(0, 2).join('; ');
+                return doEnqueuePainTask(wctx, logger, painFlagPath, result, {
+                    score: jsonScore, source: jsonSource, reason: jsonReason,
+                    preview: jsonPreview, traceId: '', sessionId: '', agentId: '',
+                });
+            }
+        } catch { /* Not JSON — fall through to KV/Markdown parsing */ }
+
         const lines = rawPain.split('\n');
 
         let score = 0;
@@ -1335,14 +1401,49 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                 await processPromotion(wctx, logger, eventLog);
 
                 try {
-                    const workflowStore = new WorkflowStore({ workspaceDir: wctx.workspaceDir });
-                    const expiredWorkflows = workflowStore.getExpiredWorkflows(WORKFLOW_TTL_MS);
-                    for (const wf of expiredWorkflows) {
-                        workflowStore.updateWorkflowState(wf.workflow_id, 'expired');
-                        workflowStore.recordEvent(wf.workflow_id, 'swept', wf.state, 'expired', 'TTL expired by worker', {});
-                        logger?.debug?.(`[PD:EvolutionWorker] Swept expired workflow: ${wf.workflow_id}`);
+                    // Delegate to workflow managers' sweepExpiredWorkflows so that
+                    // session/transcript cleanup runs via driver.deleteSession().
+                    const subagentRuntime = api?.runtime?.subagent;
+                    if (subagentRuntime) {
+                        const empathyMgr = new EmpathyObserverWorkflowManager({
+                            workspaceDir: wctx.workspaceDir,
+                            logger: api.logger,
+                            subagent: subagentRuntime,
+                        });
+                        let swept = 0;
+                        try {
+                            swept += await empathyMgr.sweepExpiredWorkflows(WORKFLOW_TTL_MS);
+                        } finally {
+                            empathyMgr.dispose();
+                        }
+
+                        const deepReflectMgr = new DeepReflectWorkflowManager({
+                            workspaceDir: wctx.workspaceDir,
+                            logger: api.logger,
+                            subagent: subagentRuntime,
+                        });
+                        try {
+                            swept += await deepReflectMgr.sweepExpiredWorkflows(WORKFLOW_TTL_MS);
+                        } finally {
+                            deepReflectMgr.dispose();
+                        }
+
+                        if (swept > 0) {
+                            logger?.info?.(`[PD:EvolutionWorker] Swept ${swept} expired workflows (with session cleanup)`);
+                        }
+                    } else {
+                        // Fallback: if subagent runtime unavailable, mark as expired
+                        // but log that session cleanup was skipped.
+                        const workflowStore = new WorkflowStore({ workspaceDir: wctx.workspaceDir });
+                        const expiredWorkflows = workflowStore.getExpiredWorkflows(WORKFLOW_TTL_MS);
+                        for (const wf of expiredWorkflows) {
+                            workflowStore.updateWorkflowState(wf.workflow_id, 'expired');
+                            workflowStore.updateCleanupState(wf.workflow_id, 'failed');
+                            workflowStore.recordEvent(wf.workflow_id, 'swept', wf.state, 'expired', 'TTL expired (no runtime for session cleanup)', {});
+                            logger?.warn?.(`[PD:EvolutionWorker] Marked workflow ${wf.workflow_id} as expired but could not cleanup session (subagent runtime unavailable)`);
+                        }
+                        workflowStore.dispose();
                     }
-                    workflowStore.dispose();
                 } catch (sweepErr) {
                     const errMsg = `Failed to sweep expired workflows: ${String(sweepErr)}`;
                     cycleResult.errors.push(errMsg);

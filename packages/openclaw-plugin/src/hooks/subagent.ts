@@ -5,6 +5,44 @@ import { WorkspaceContext } from '../core/workspace-context.js';
 import { acquireQueueLock, type EvolutionQueueItem } from '../service/evolution-worker.js';
 import { recordEvolutionSuccess } from '../core/evolution-engine.js';
 import { WorkflowStore } from '../service/subagent-workflow/workflow-store.js';
+import { EmpathyObserverWorkflowManager } from '../service/subagent-workflow/empathy-observer-workflow-manager.js';
+import { DeepReflectWorkflowManager } from '../service/subagent-workflow/deep-reflect-workflow-manager.js';
+import type { WorkflowManager } from '../service/subagent-workflow/types.js';
+
+/**
+ * Factory to create the appropriate WorkflowManager by workflow_type string.
+ * Used by the subagent_ended hook to dispatch lifecycle recovery to the right manager.
+ */
+function createWorkflowManagerForType(
+    workflowType: string,
+    workspaceDir: string,
+    logger: HookLogger,
+    subagent: NonNullable<OpenClawPluginApi['runtime']>['subagent'],
+): WorkflowManager | null {
+    const loggerAdapter: PluginLogger = {
+        info: (m: string) => logger.info(String(m)),
+        warn: (m: string) => logger.warn(String(m)),
+        error: (m: string) => logger.error(String(m)),
+        debug: () => {},
+    } as unknown as PluginLogger;
+
+    switch (workflowType) {
+        case 'empathy-observer':
+            return new EmpathyObserverWorkflowManager({
+                workspaceDir,
+                logger: loggerAdapter,
+                subagent,
+            });
+        case 'deep-reflect':
+            return new DeepReflectWorkflowManager({
+                workspaceDir,
+                logger: loggerAdapter,
+                subagent,
+            });
+        default:
+            return null;
+    }
+}
 
 const HELPER_WORKFLOW_SESSION_PREFIX = 'agent:main:subagent:workflow-';
 
@@ -20,7 +58,8 @@ type HookLogger = Pick<PluginLogger, 'info' | 'warn' | 'error'>;
 // Cleanup expired retry entries periodically
 function cleanupExpiredRetryEntries(): void {
     const now = Date.now();
-    for (const [key, value] of completionRetryCounts.entries()) {
+    const entries = Array.from(completionRetryCounts.entries());
+    for (const [key, value] of entries) {
         if (now > value.expires) {
             completionRetryCounts.delete(key);
         }
@@ -176,22 +215,36 @@ export async function handleSubagentEnded(
     const logger: HookLogger = ctx.api?.logger ?? console;
     // ── Helper Workflow Lifecycle Notification ──
     // When a helper workflow's subagent ends, notify the workflow manager
-    // This is a fallback recovery path, not the primary completion contract
+    // so that it can trigger fallback recovery (notifyWaitResult → finalizeOnce)
     if (targetSessionKey?.startsWith(HELPER_WORKFLOW_SESSION_PREFIX)) {
         try {
             const store = new WorkflowStore({ workspaceDir });
             const workflow = store.getWorkflowByChildSession(targetSessionKey);
             if (workflow && workflow.state !== 'completed' && workflow.state !== 'terminal_error' && workflow.state !== 'expired') {
-                logger.info(`[PD:Subagent] Helper workflow lifecycle event: workflowId=${workflow.workflow_id}, outcome=${outcome}`);
-                // Map outcome to notifyLifecycleEvent expected format
+                logger.info(`[PD:Subagent] Helper workflow lifecycle event: workflowId=${workflow.workflow_id}, workflowType=${workflow.workflow_type}, outcome=${outcome}`);
+
                 const mappedOutcome = outcome === 'deleted' ? 'deleted' :
                                       outcome === 'killed' ? 'killed' :
                                       outcome === 'reset' ? 'reset' :
                                       outcome === 'error' ? 'error' :
                                       outcome === 'timeout' ? 'timeout' : 'ok';
-                // Use WorkflowStore directly to update state (simpler than creating manager instance)
-                store.recordEvent(workflow.workflow_id, 'subagent_ended', workflow.state, workflow.state, `subagent ended with outcome: ${outcome}`, { outcome: mappedOutcome });
-                store.touchWorkflow(workflow.workflow_id);
+
+                // Call notifyLifecycleEvent on the appropriate manager so it
+                // triggers notifyWaitResult → finalizeOnce / terminal transition.
+                const subagentRuntime = ctx.api?.runtime?.subagent;
+                if (subagentRuntime) {
+                    const mgr = createWorkflowManagerForType(workflow.workflow_type, workspaceDir, logger, subagentRuntime);
+                    if (mgr) {
+                        await mgr.notifyLifecycleEvent(workflow.workflow_id, 'subagent_ended', { outcome: mappedOutcome });
+                        mgr.dispose();
+                    } else {
+                        logger.warn(`[PD:Subagent] Unknown workflow type ${workflow.workflow_type} — falling back to store-only event`);
+                        store.recordEvent(workflow.workflow_id, 'subagent_ended', workflow.state, workflow.state, `subagent ended with outcome: ${outcome}`, { outcome: mappedOutcome });
+                    }
+                } else {
+                    logger.warn(`[PD:Subagent] Subagent runtime not available — cannot notify manager, falling back to store event`);
+                    store.recordEvent(workflow.workflow_id, 'subagent_ended', workflow.state, workflow.state, `subagent ended with outcome: ${outcome}`, { outcome: mappedOutcome });
+                }
                 store.dispose();
                 return;
             }
