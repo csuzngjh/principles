@@ -239,7 +239,11 @@ const plugin = {
       'subagent_spawning',
       (event: PluginHookSubagentSpawningEvent, ctx: PluginHookSubagentContext): void | PluginHookSubagentSpawningResult => {
         try {
-          const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
+          // Fallback chain: plugin workspaceDir → default
+          const workspaceDir =
+            api.workspaceDir
+            || api.resolvePath?.('.') || '.';
+          api.logger?.debug?.(`[PD] workspaceDir resolved for subagent_spawning: ${workspaceDir}`);
           const { agentId, childSessionKey } = event;
           // Only handle PD local worker profiles
           if (!PD_LOCAL_PROFILES.has(agentId as WorkerProfile)) {
@@ -276,7 +280,11 @@ const plugin = {
       'subagent_ended',
       (event: PluginHookSubagentEndedEvent, ctx: PluginHookSubagentContext): void => {
         try {
-          const workspaceDir = api.resolvePath('.');
+          // Fallback chain: plugin workspaceDir → default
+          const workspaceDir =
+            api.workspaceDir
+            || api.resolvePath?.('.') || '.';
+          api.logger?.debug?.(`[PD] workspaceDir resolved for subagent_ended: ${workspaceDir}`);
           // Complete any pending shadow observation for this subagent session
           const shadowObsId = pendingShadowObservations.get(event.targetSessionKey);
           if (shadowObsId && workspaceDir) {

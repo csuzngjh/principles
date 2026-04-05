@@ -66,6 +66,7 @@ export interface TrajectoryPainEventInput {
   severity?: string | null;
   origin?: string | null;
   confidence?: number | null;
+  text?: string;
   createdAt?: string;
 }
 

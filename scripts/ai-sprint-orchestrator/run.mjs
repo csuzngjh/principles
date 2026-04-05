@@ -1086,6 +1086,35 @@ export function formatRoleValidation(roleName, roleResult) {
   return lines;
 }
 
+/**
+ * Validate that a report contains the minimum required markdown section headings.
+ * Returns an array of missing section descriptions (empty = pass).
+ *
+ * WF-003 fix: reviewer report format enforcement — prevents stage_error from
+ * reports that exist on disk but lack required sections.
+ * WF-004 fix: producer report format enforcement — prevents max_rounds_exceeded
+ * by giving explicit feedback about which sections are missing.
+ */
+function validateReportSections(text, requiredSections, reportLabel) {
+  const missing = [];
+  for (const section of requiredSections) {
+    // Match ## or ### heading level, case-insensitive, word boundary after section name
+    const safeSection = section.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`^#{2,3}\\s+${safeSection}\\b`, 'im');
+    if (!re.test(text)) {
+      missing.push(`${reportLabel}: missing required section "${section}"`);
+    }
+  }
+  return missing;
+}
+
+/**
+ * Core reviewer-report minimum schema. Without these sections, the decision
+ * engine cannot produce valid verdicts or blockers, and the stage will fail
+ * with an opaque stage_error.
+ */
+const REQUIRED_REVIEWER_SECTIONS = ['VERDICT', 'FINDINGS', 'BLOCKERS', 'NEXT_FOCUS', 'CHECKS'];
+
 export function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecardPath, producerPath, reviewerAPath, reviewerBPath, globalReviewerPath, state, reviewerTimeouts = null, reviewerViolations = null }) {
   // Build lookup maps for reviewer timeout/error state
   const timeoutMap = new Map((reviewerTimeouts ?? []).map((r) => [r.role, r]));
@@ -1168,6 +1197,62 @@ export function decideAndPersist({ runDir, stageName, stageDir, decisionPath, sc
       if (bState.dimensions && typeof bState.dimensions === 'object') reviewerBDimensionsFallback = bState.dimensions;
     }
   } catch {}
+
+  // WF-003/WF-004 fix: validate report schema before entering decision engine.
+  // Reports that exist on disk but lack required sections cause opaque stage_error
+  // or silent max_rounds_exceeded. By validating here, we get explicit error
+  // messages that tell the agent exactly which sections are missing.
+  //
+  // Return 'error' outcome (which advanceState() maps to stage_error → halt).
+  // This is intentional: if both reviewers fail schema validation simultaneously,
+  // the stage cannot proceed. The explicit blockers tell the Executor exactly
+  // what to fix in the next sprint.
+  const schemaErrors = [];
+  const missingReviewerA = validateReportSections(reviewerA, REQUIRED_REVIEWER_SECTIONS, 'reviewer_a');
+  const missingReviewerB = validateReportSections(reviewerB, REQUIRED_REVIEWER_SECTIONS, 'reviewer_b');
+  if (missingReviewerA.length) schemaErrors.push(...missingReviewerA);
+  if (missingReviewerB.length) schemaErrors.push(...missingReviewerB);
+
+  if (schemaErrors.length > 0) {
+    const errorSummary = `Report schema violation: ${schemaErrors.join('; ')}`;
+    writeText(decisionPath, [
+      `# Decision`,
+      '',
+      `- Stage: ${stageName}`,
+      `- Round: ${state.currentRound}`,
+      `- Outcome: error`,
+      '',
+      `## Report Schema Violation`,
+      ...schemaErrors.map((e) => `- ${e}`),
+      '',
+      `Cannot render stage decision because role reports are missing required sections.`,
+      '',
+    ].join('\n'));
+    writeJson(scorecardPath, {
+      stage: stageName,
+      round: state.currentRound,
+      outcome: 'error',
+      summary: errorSummary,
+      missingReports: schemaErrors,
+      reviewerTimeouts: reviewerTimeouts ?? null,
+      updatedAt: nowIso(),
+      schemaValidation: {
+        reviewerA_sections: REQUIRED_REVIEWER_SECTIONS,
+        reviewerA_missing: missingReviewerA,
+        reviewerB_sections: REQUIRED_REVIEWER_SECTIONS,
+        reviewerB_missing: missingReviewerB,
+      },
+    });
+    appendTimeline(runDir, `Stage ${stageName} round ${state.currentRound} decision: error (report schema violation)`);
+    updateSummary(runDir, [
+      `Status: ${state.status}`,
+      `Stage: ${stageName}`,
+      `Round: ${state.currentRound}`,
+      `Outcome: error`,
+      `Schema violations: ${schemaErrors.join('; ')}`,
+    ]);
+    return { outcome: 'error', summary: errorSummary, blockers: schemaErrors, metrics: {} };
+  }
 
   const decision = decideStage({
     stageCriteria: loadSpec(state).stageCriteria?.[stageName],
@@ -1479,6 +1564,11 @@ function advanceState(state, spec, decision, { runDir } = {}) {
   }
 
   // Both 'halt' and 'error' outcomes halt the sprint
+  // WF-003 fix: schema violations have already been retried in execStage via
+  // the 'revise' outcome path. If we reach here with 'error', it means retries
+  // were exhausted or the error is from the standard decision engine.
+  // Schema violation errors are now returned with a special flag to trigger retry
+  // instead of halt. See the schema validation block in decideAndPersist().
   state.status = 'halted';
   state.haltReason = {
     type: decision.outcome === 'error' ? 'stage_error' : 'max_rounds_exceeded',

@@ -36,7 +36,7 @@ let timeoutId: NodeJS.Timeout | null = null;
  * Old queue items (without taskKind) are migrated to pain_diagnosis for compatibility.
  */
 export type QueueStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'canceled';
-export type TaskResolution = 'marker_detected' | 'auto_completed_timeout' | 'failed_max_retries' | 'canceled';
+export type TaskResolution = 'marker_detected' | 'auto_completed_timeout' | 'failed_max_retries' | 'canceled' | 'late_marker_principle_created' | 'late_marker_no_principle';
 
 /**
  * Recent pain context attached to sleep_reflection tasks.
@@ -430,10 +430,11 @@ async function enqueueSleepReflectionTask(
     }
 }
 
-async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger) {
+async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Promise<WorkerStatusReport['pain_flag']> {
+    const result: WorkerStatusReport['pain_flag'] = { exists: false, score: null, source: null, enqueued: false, skipped_reason: null };
     try {
         const painFlagPath = wctx.resolve('PAIN_FLAG');
-        if (!fs.existsSync(painFlagPath)) return;
+        if (!fs.existsSync(painFlagPath)) return result;
 
         const rawPain = fs.readFileSync(painFlagPath, 'utf8');
         const lines = rawPain.split('\n');
@@ -456,9 +457,34 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger) {
             if (line.startsWith('trace_id:')) traceId = line.split(':', 2)[1].trim();
             if (line.startsWith('session_id:')) sessionId = line.slice('session_id:'.length).trim();
             if (line.startsWith('agent_id:')) agentId = line.slice('agent_id:'.length).trim();
+
+            // Markdown format support (pain skill writes **Source**: xxx format)
+            const mdSource = line.match(/\*\*Source\*\*:\s*(.+)/);
+            if (mdSource) source = mdSource[1].trim();
+            const mdReason = line.match(/\*\*Reason\*\*:\s*(.+)/);
+            if (mdReason) reason = mdReason[1].trim();
+            const mdTime = line.match(/\*\*Time\*\*:\s*(.+)/);
+            if (mdTime) preview = `Human intervention at ${mdTime[1].trim()}`;
         }
 
-        if (isQueued || score < 30) return;
+        // Markdown format has no score — default to 50 for human intervention
+        if (score === 0 && source !== 'unknown') score = 50;
+
+        result.exists = true;
+        result.score = score;
+        result.source = source;
+        result.enqueued = isQueued;
+
+        if (isQueued) {
+            result.skipped_reason = 'already_queued';
+            if (logger) logger.info(`[PD:EvolutionWorker] Pain flag already queued (score=${score}, source=${source})`);
+            return result;
+        }
+        if (score < 30) {
+            result.skipped_reason = `score_too_low (${score} < 30)`;
+            if (logger) logger.info(`[PD:EvolutionWorker] Pain flag score too low: ${score} (source=${source})`);
+            return result;
+        }
 
         if (logger) logger.info(`[PD:EvolutionWorker] Detected pain flag (score: ${score}, source: ${source}). Enqueueing evolution task.`);
 
@@ -484,18 +510,19 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger) {
                     `\nstatus: queued\ntask_id: ${duplicateTask.id}\n`,
                     'utf8'
                 );
-                return;
+                result.enqueued = true;
+                result.skipped_reason = 'duplicate';
+                return result;
             }
 
             const taskId = createEvolutionTaskId(source, score, preview, reason, now);
             const nowIso = new Date(now).toISOString();
             const effectiveTraceId = traceId || taskId;
-            
-            // V2: New queue items include all V2 fields with pain_diagnosis defaults
+
             queue.push({
                 id: taskId,
-                taskKind: 'pain_diagnosis',   // V2: All pain-flag triggered tasks are pain_diagnosis
-                priority: score >= 70 ? 'high' : score >= 40 ? 'medium' : 'low',  // V2: Priority based on score
+                taskKind: 'pain_diagnosis',
+                priority: score >= 70 ? 'high' : score >= 40 ? 'medium' : 'low',
                 score,
                 source,
                 reason,
@@ -506,14 +533,13 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger) {
                 session_id: sessionId || undefined,
                 agent_id: agentId || undefined,
                 traceId: effectiveTraceId,
-                retryCount: 0,               // V2: No retries yet
-                maxRetries: 3,                // V2: Default max retries
+                retryCount: 0,
+                maxRetries: 3,
             });
 
             fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
             fs.appendFileSync(painFlagPath, `\nstatus: queued\ntask_id: ${taskId}\n`, 'utf8');
 
-            // Log to EvolutionLogger
             const evoLogger = getEvolutionLogger(wctx.workspaceDir, wctx.trajectory);
             evoLogger.logQueued({
                 traceId: traceId || taskId,
@@ -523,7 +549,6 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger) {
                 reason,
             });
 
-            // Record to evolution_tasks table
             wctx.trajectory?.recordEvolutionTask?.({
                 taskId,
                 traceId: traceId || taskId,
@@ -534,13 +559,17 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger) {
                 enqueuedAt: nowIso,
             });
 
+            result.enqueued = true;
+
         } finally {
             releaseLock();
         }
 
     } catch (err) {
         if (logger) logger.warn(`[PD:EvolutionWorker] Error processing pain flag: ${String(err)}`);
+        result.skipped_reason = `error: ${String(err)}`;
     }
+    return result;
 }
 
 async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogger, eventLog: EventLog, api?: OpenClawPluginApi) {
@@ -612,14 +641,43 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
             const completeMarker = path.join(wctx.stateDir, `.evolution_complete_${task.id}`);
             if (fs.existsSync(completeMarker)) {
                 if (logger) logger.info(`[PD:EvolutionWorker] Task ${task.id} completed - marker file detected`);
+
+                const reportPath = path.join(wctx.stateDir, `.diagnostician_report_${task.id}.json`);
+                if (fs.existsSync(reportPath)) {
+                    try {
+                        const reportData = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+                        const principle = reportData?.diagnosis_report?.principle || reportData?.principle;
+                        if (principle?.trigger_pattern && principle?.action) {
+                            const principleId = wctx.evolutionReducer.createPrincipleFromDiagnosis({
+                                painId: task.id,
+                                painType: task.source === 'Human Intervention' ? 'user_frustration' : 'tool_failure',
+                                triggerPattern: principle.trigger_pattern,
+                                action: principle.action,
+                                source: task.source || 'heartbeat_diagnostician',
+                                evaluability: principle.evaluability || 'manual_only',
+                                abstractedPrinciple: principle.abstracted_principle,
+                            });
+                            if (principleId) {
+                                logger.info(`[PD:EvolutionWorker] Created principle ${principleId} from heartbeat diagnostician report for task ${task.id}`);
+                            } else {
+                                logger.warn(`[PD:EvolutionWorker] createPrincipleFromDiagnosis returned null for task ${task.id}`);
+                            }
+                        } else {
+                            logger.warn(`[PD:EvolutionWorker] Diagnostician report for task ${task.id} missing principle fields`);
+                        }
+                    } catch (err) {
+                        logger.warn(`[PD:EvolutionWorker] Failed to parse diagnostician report for task ${task.id}: ${String(err)}`);
+                    }
+                } else {
+                    logger.warn(`[PD:EvolutionWorker] No diagnostician report found for completed task ${task.id} (expected: .diagnostician_report_${task.id}.json)`);
+                }
+
                 task.status = 'completed';
                 task.completed_at = new Date().toISOString();
                 task.resolution = 'marker_detected';
                 try {
-                    fs.unlinkSync(completeMarker); // Clean up marker file
-                } catch {
-                    // Best effort cleanup
-                }
+                    fs.unlinkSync(completeMarker);
+                } catch {}
 
                 // Log to EvolutionLogger
                 const durationMs = task.started_at
@@ -649,14 +707,43 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                 continue;
             }
 
-            // Condition 2: Timeout auto-complete
             const age = Date.now() - startedAt.getTime();
             if (age > timeout) {
                 const timeoutMinutes = Math.round(timeout / 60000);
-                if (logger) logger.info(`[PD:EvolutionWorker] Task ${task.id} auto-completed after ${timeoutMinutes} minute timeout`);
-                task.status = 'completed';
-                task.completed_at = new Date().toISOString();
-                task.resolution = 'auto_completed_timeout';
+
+                const completeMarker = path.join(wctx.stateDir, `.evolution_complete_${task.id}`);
+                const reportPath = path.join(wctx.stateDir, `.diagnostician_report_${task.id}.json`);
+
+                if (fs.existsSync(completeMarker) && fs.existsSync(reportPath)) {
+                    if (logger) logger.info(`[PD:EvolutionWorker] Task ${task.id} timed out but marker found — creating principle anyway`);
+                    let principleCreated = false;
+                    try {
+                        const reportData = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+                        const principle = reportData?.diagnosis_report?.principle || reportData?.principle;
+                        if (principle?.trigger_pattern && principle?.action) {
+                            const principleId = wctx.evolutionReducer.createPrincipleFromDiagnosis({
+                                painId: task.id,
+                                painType: task.source === 'Human Intervention' ? 'user_frustration' : 'tool_failure',
+                                triggerPattern: principle.trigger_pattern,
+                                action: principle.action,
+                                source: task.source || 'heartbeat_diagnostician',
+                                evaluability: principle.evaluability || 'manual_only',
+                                abstractedPrinciple: principle.abstracted_principle,
+                            });
+                            if (principleId) {
+                                logger.info(`[PD:EvolutionWorker] Created principle ${principleId} from late marker for task ${task.id}`);
+                                principleCreated = true;
+                            }
+                        }
+                    } catch (err) {
+                        logger.warn(`[PD:EvolutionWorker] Failed to parse late diagnostician report for task ${task.id}: ${String(err)}`);
+                    }
+                    try { fs.unlinkSync(completeMarker); } catch {}
+                    task.resolution = principleCreated ? 'late_marker_principle_created' : 'late_marker_no_principle';
+                } else {
+                    if (logger) logger.info(`[PD:EvolutionWorker] Task ${task.id} auto-completed after ${timeoutMinutes} minute timeout`);
+                    task.resolution = 'auto_completed_timeout';
+                }
 
                 // Log to EvolutionLogger
                 evoLogger.logCompleted({
@@ -707,6 +794,20 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
             // Use shared diagnostician protocol (consistent with pd-diagnostician skill)
             const heartbeatPath = wctx.resolve('HEARTBEAT');
             const markerFilePath = path.join(wctx.stateDir, `.evolution_complete_${highestScoreTask.id}`);
+            const reportFilePath = path.join(wctx.stateDir, `.diagnostician_report_${highestScoreTask.id}.json`);
+
+            let existingPrinciplesRef = '';
+            try {
+                const principlesPath = wctx.resolve('PRINCIPLES');
+                if (fs.existsSync(principlesPath)) {
+                    const principlesContent = fs.readFileSync(principlesPath, 'utf8');
+                    const principleBlocks = principlesContent.match(/### P-[\w-]+:[^\n]*\n(?:-[^\n]*\n)*/g);
+                    if (principleBlocks && principleBlocks.length > 0) {
+                        existingPrinciplesRef = `\n**Existing Principles for Style Reference**:\n${principleBlocks.slice(-3).join('\n')}`;
+                    }
+                }
+            } catch {}
+
             const heartbeatContent = [
                 `## Evolution Task [ID: ${highestScoreTask.id}]`,
                 ``,
@@ -725,9 +826,17 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                 `---`,
                 ``,
                 `After completing the analysis:`,
-                `1. Write the resulting principle(s) to PRINCIPLES.md`,
-                `2. Mark the task complete by creating an empty file: ${markerFilePath}`,
+                `1. Write your JSON diagnosis report to: ${reportFilePath}`,
+                `   The JSON must include:`,
+                `   - "principle.trigger_pattern": regex pattern for when this situation occurs`,
+                `   - "principle.action": what to do differently`,
+                `   - "principle.abstracted_principle": a HIGHLY ABSTRACTED principle statement`,
+                `     suitable for PRINCIPLES.md (not an operational rule, but a general principle`,
+                `     that captures the underlying wisdom). Max 40 chars. Cross-scenario applicable.`,
+                `2. Mark the task complete by creating a marker file: ${markerFilePath}`,
+                `   The marker file should contain: "diagnostic_completed: <timestamp>\\noutcome: <summary>"`,
                 `3. Replace this HEARTBEAT.md content with "HEARTBEAT_OK"`,
+                existingPrinciplesRef,
             ].join('\n');
 
             // Try to write HEARTBEAT.md FIRST
@@ -912,33 +1021,27 @@ async function processDetectionQueue(wctx: WorkspaceContext, api: OpenClawPlugin
                     });
                 }
             } else {
-                try {
-                    const searchTool = api.runtime.tools?.createMemorySearchTool?.({ config: api.config });
-                    if (searchTool) {
-                        const searchResult = await searchTool.execute('pre-emptive-pain-check', {
-                            query: text,
-                            limit: 1,
-                            threshold: 0.85
-                        });
-
-                        if (searchResult && searchResult.results?.length > 0) {
-                            const hit = searchResult.results[0];
-                            if (logger) logger.info?.(`[PD:EvolutionWorker] L3 Semantic Hit: ${hit.id} (Score: ${hit.score})`);
-                            
-                            funnel.updateCache(text, { detected: true, severity: 40 });
-                            if (eventLog) {
-                                eventLog.recordRuleMatch(undefined, {
-                                    ruleId: 'SEMANTIC_HIT',
-                                    layer: 'L3',
-                                    severity: 40,
-                                    textPreview: text.substring(0, 100)
-                                });
-                            }
+                // L3 semantic search via trajectory database FTS5 (MEM-04)
+                if (wctx.trajectory) {
+                    const searchResults = wctx.trajectory.searchPainEvents(text, 5);
+                    if (searchResults.length > 0) {
+                        // Found similar pain events - record as L3 semantic hit
+                        if (eventLog) {
+                            eventLog.recordRuleMatch(undefined, {
+                                ruleId: 'l3_semantic',
+                                layer: 'L3',
+                                severity: searchResults[0].score,
+                                textPreview: text.substring(0, 100)
+                            });
                         }
+                        // Update detection funnel cache with L3 hit result
+                        funnel.updateCache(text, { detected: true, severity: searchResults[0].score });
+                        // Don't track as candidate - this is a confirmed L3 hit
+                        if (logger) logger.info(`[PD:EvolutionWorker] L3 semantic hit: found ${searchResults.length} similar pain events for "${text.substring(0, 50)}..."`);
+                        continue;
                     }
-                } catch (e) {
-                    if (logger) logger.debug?.(`[PD:EvolutionWorker] L3 Semantic search failed: ${String(e)}`);
                 }
+                // No L3 hit - fall through to track as pain candidate
                 await trackPainCandidate(text, wctx);
             }
         }
@@ -1107,6 +1210,58 @@ export interface ExtendedEvolutionWorkerService {
     stop?: (ctx: OpenClawPluginServiceContext) => void | Promise<void>;
 }
 
+interface WorkerStatusReport {
+    timestamp: string;
+    cycle_start_ms: number;
+    duration_ms: number;
+    pain_flag: { exists: boolean; score: number | null; source: string | null; enqueued: boolean; skipped_reason: string | null };
+    queue: { total: number; pending: number; in_progress: number; completed_this_cycle: number; failed_this_cycle: number };
+    errors: string[];
+}
+
+function writeWorkerStatus(stateDir: string, report: WorkerStatusReport): void {
+    try {
+        const statusPath = path.join(stateDir, 'worker-status.json');
+        fs.writeFileSync(statusPath, JSON.stringify(report, null, 2), 'utf8');
+    } catch {}
+}
+
+async function processEvolutionQueueWithResult(
+    wctx: WorkspaceContext,
+    logger: PluginLogger,
+    eventLog: EventLog,
+    api?: OpenClawPluginApi | undefined
+): Promise<{ queue: WorkerStatusReport['queue']; errors: string[] }> {
+    const queueResult: WorkerStatusReport['queue'] = { total: 0, pending: 0, in_progress: 0, completed_this_cycle: 0, failed_this_cycle: 0 };
+    const errors: string[] = [];
+
+    try {
+        const queuePath = wctx.resolve('EVOLUTION_QUEUE');
+        if (!fs.existsSync(queuePath)) {
+            return { queue: queueResult, errors };
+        }
+
+        const queue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
+        queueResult.total = queue.length;
+        queueResult.pending = queue.filter((t: any) => t.status === 'pending').length;
+        queueResult.in_progress = queue.filter((t: any) => t.status === 'in_progress').length;
+
+        for (const task of queue) {
+            if (task?.taskKind !== 'sleep_reflection') continue;
+            if (task?.status === 'completed') queueResult.completed_this_cycle++;
+            if (task?.status === 'failed') queueResult.failed_this_cycle++;
+        }
+
+        await processEvolutionQueue(wctx, logger, eventLog, api);
+    } catch (err) {
+        const errMsg = `processEvolutionQueue failed: ${String(err)}`;
+        errors.push(errMsg);
+        logger.error(`[PD:EvolutionWorker] ${errMsg}`);
+    }
+
+    return { queue: queueResult, errors };
+}
+
 export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
     id: 'principles-evolution-worker',
     api: null,
@@ -1134,16 +1289,29 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
         const initialDelay = 5000;
         const interval = config.get('intervals.worker_poll_ms') || (15 * 60 * 1000);
 
-        intervalId = setInterval(() => {
-            void (async () => {
-                // V2: Nocturnal idle check — logs workspace idle state on each cycle.
-                // This makes nocturnal-runtime a visible part of the worker lifecycle.
-                // Phase 2.4: Enqueue sleep_reflection when workspace is idle and not in cooldown.
+        async function runCycle(): Promise<void> {
+            const cycleStart = Date.now();
+            const cycleResult: {
+                timestamp: string;
+                cycle_start_ms: number;
+                duration_ms: number;
+                pain_flag: { exists: boolean; score: number | null; source: string | null; enqueued: boolean; skipped_reason: string | null };
+                queue: { total: number; pending: number; in_progress: number; completed_this_cycle: number; failed_this_cycle: number };
+                errors: string[];
+            } = {
+                timestamp: new Date().toISOString(),
+                cycle_start_ms: cycleStart,
+                duration_ms: 0,
+                pain_flag: { exists: false, score: null, source: null, enqueued: false, skipped_reason: null },
+                queue: { total: 0, pending: 0, in_progress: 0, completed_this_cycle: 0, failed_this_cycle: 0 },
+                errors: [],
+            };
+
+            try {
                 const idleResult = checkWorkspaceIdle(wctx.workspaceDir, {});
                 logger?.info?.(`[PD:EvolutionWorker] HEARTBEAT cycle=${new Date().toISOString()} idle=${idleResult.isIdle} idleForMs=${idleResult.idleForMs} userActiveSessions=${idleResult.userActiveSessions} abandonedSessions=${idleResult.abandonedSessionIds.length} lastActivityEpoch=${idleResult.mostRecentActivityAt}`);
                 if (idleResult.isIdle) {
                     logger?.debug?.(`[PD:EvolutionWorker] Workspace idle (${idleResult.idleForMs}ms since last activity)`);
-                    // Phase 2.4: Enqueue sleep_reflection task if not in global cooldown
                     const cooldown = checkCooldown(wctx.stateDir);
                     if (!cooldown.globalCooldownActive && !cooldown.quotaExhausted) {
                         enqueueSleepReflectionTask(wctx, logger).catch((err) => {
@@ -1154,16 +1322,18 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                     logger?.debug?.(`[PD:EvolutionWorker] Workspace active (last activity ${idleResult.idleForMs}ms ago)`);
                 }
 
-                await checkPainFlag(wctx, logger);
-                await processEvolutionQueue(wctx, logger, eventLog, api ?? undefined);
+                const painCheckResult = await checkPainFlag(wctx, logger);
+                cycleResult.pain_flag = painCheckResult;
+
+                const queueResult = await processEvolutionQueueWithResult(wctx, logger, eventLog, api ?? undefined);
+                cycleResult.queue = queueResult.queue;
+                if (queueResult.errors) cycleResult.errors.push(...queueResult.errors);
+
                 if (api) {
                     await processDetectionQueue(wctx, api, eventLog);
                 }
                 await processPromotion(wctx, logger, eventLog);
 
-                // PR2.1 Task 2: Sweep expired helper workflows
-                // Uses WorkflowStore directly to update state; session cleanup is handled
-                // separately by the workflow manager when it has access to subagent runtime.
                 try {
                     const workflowStore = new WorkflowStore({ workspaceDir: wctx.workspaceDir });
                     const expiredWorkflows = workflowStore.getExpiredWorkflows(WORKFLOW_TTL_MS);
@@ -1174,15 +1344,31 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                     }
                     workflowStore.dispose();
                 } catch (sweepErr) {
-                    logger?.warn?.(`[PD:EvolutionWorker] Failed to sweep expired workflows: ${String(sweepErr)}`);
+                    const errMsg = `Failed to sweep expired workflows: ${String(sweepErr)}`;
+                    cycleResult.errors.push(errMsg);
+                    logger?.warn?.(`[PD:EvolutionWorker] ${errMsg}`);
                 }
 
                 wctx.dictionary.flush();
                 flushAllSessions();
-            })().catch((err) => {
-                if (logger) logger.error(`[PD:EvolutionWorker] Error in worker interval: ${String(err)}`);
-            });
-        }, interval);
+
+                cycleResult.duration_ms = Date.now() - cycleStart;
+                writeWorkerStatus(wctx.stateDir, cycleResult);
+            } catch (err) {
+                const errMsg = `Error in worker interval: ${String(err)}`;
+                if (logger) logger.error(`[PD:EvolutionWorker] ${errMsg}`);
+                writeWorkerStatus(wctx.stateDir, {
+                    timestamp: new Date().toISOString(),
+                    cycle_start_ms: cycleStart,
+                    duration_ms: Date.now() - cycleStart,
+                    pain_flag: { exists: false, score: null, source: null, enqueued: false, skipped_reason: null },
+                    queue: { total: 0, pending: 0, in_progress: 0, completed_this_cycle: 0, failed_this_cycle: 0 },
+                    errors: [errMsg],
+                });
+            }
+
+            timeoutId = setTimeout(runCycle, interval);
+        }
 
         timeoutId = setTimeout(() => {
             void (async () => {
@@ -1192,8 +1378,10 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                     await processDetectionQueue(wctx, api, eventLog);
                 }
                 await processPromotion(wctx, logger, eventLog);
+                timeoutId = setTimeout(runCycle, interval);
             })().catch((err) => {
                 if (logger) logger.error(`[PD:EvolutionWorker] Startup worker cycle failed: ${String(err)}`);
+                timeoutId = setTimeout(runCycle, interval);
             });
         }, initialDelay);
     },

@@ -244,8 +244,8 @@ export class TrajectoryDatabase {
     this.withWrite(() => {
       this.db.prepare(`
         INSERT INTO pain_events (
-          session_id, source, score, reason, severity, origin, confidence, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          session_id, source, score, reason, severity, origin, confidence, text, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         input.sessionId,
         input.source,
@@ -254,9 +254,81 @@ export class TrajectoryDatabase {
         input.severity ?? null,
         input.origin ?? null,
         input.confidence ?? null,
+        input.text ?? null,
         input.createdAt ?? nowIso(),
       );
+
+      // Maintain FTS5 index: insert text into pain_events_fts if text is provided (MEM-03, MEM-04)
+      if (input.text) {
+        const lastId = this.db.prepare('SELECT last_insert_rowid() as id').get() as { id: number };
+        this.db.prepare(`
+          INSERT INTO pain_events_fts (text, pain_event_id) VALUES (?, ?)
+        `).run(input.text, lastId.id);
+      }
     });
+  }
+
+  /**
+   * Search pain_events using FTS5 full-text search (MEM-04).
+   * Returns pain events matching the query, ordered by relevance.
+   */
+  searchPainEvents(query: string, limit: number = 10): Array<{
+    id: number;
+    sessionId: string;
+    source: string;
+    score: number;
+    reason: string | null;
+    severity: string | null;
+    origin: string | null;
+    confidence: number | null;
+    text: string | null;
+    createdAt: string;
+  }> {
+    if (!query || query.trim().length === 0) {
+      return [];
+    }
+
+    // Escape FTS5 special characters and format query for porter tokenizer
+    const ftsQuery = query.trim().split(/\s+/).map(term => `"${term.replace(/"/g, '""')}"`).join(' ');
+
+    try {
+      const results = this.db.prepare(`
+        SELECT pe.*
+        FROM pain_events_fts pf
+        JOIN pain_events pe ON pe.id = pf.pain_event_id
+        WHERE pain_events_fts MATCH ?
+        ORDER BY bm25(pain_events_fts) DESC
+        LIMIT ?
+      `).all(ftsQuery, limit) as Array<{
+        id: number;
+        session_id: string;
+        source: string;
+        score: number;
+        reason: string | null;
+        severity: string | null;
+        origin: string | null;
+        confidence: number | null;
+        text: string | null;
+        created_at: string;
+      }>;
+
+      return results.map(row => ({
+        id: row.id,
+        sessionId: row.session_id,
+        source: row.source,
+        score: row.score,
+        reason: row.reason,
+        severity: row.severity,
+        origin: row.origin,
+        confidence: row.confidence,
+        text: row.text,
+        createdAt: row.created_at,
+      }));
+    } catch (err) {
+      // If FTS5 query fails (e.g., syntax error), return empty results
+      console.warn(`[PD:TrajectoryDatabase] FTS5 search failed: ${String(err)}`);
+      return [];
+    }
   }
 
   recordGateBlock(input: TrajectoryGateBlockInput): void {
@@ -1070,6 +1142,7 @@ export class TrajectoryDatabase {
         severity TEXT,
         origin TEXT,
         confidence REAL,
+        text TEXT,
         created_at TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS gate_blocks (
@@ -1162,6 +1235,26 @@ export class TrajectoryDatabase {
         metadata_json TEXT,
         created_at TEXT NOT NULL
       );
+    `);
+
+    // Migration: Add text column to pain_events if it doesn't exist (MEM-01)
+    // SQLite doesn't support IF NOT EXISTS for ADD COLUMN, so we use try/catch
+    try {
+      this.db.exec(`ALTER TABLE pain_events ADD COLUMN text TEXT`);
+    } catch (err: any) {
+      // Ignore if column already exists (error code 1: table has no column named 'text')
+      if (!err.message?.includes('duplicate column name')) {
+        // Only throw if it's a different error
+      }
+    }
+
+    // Create FTS5 virtual table for pain_events text search (MEM-04)
+    this.db.exec(`
+      CREATE VIRTUAL TABLE IF NOT EXISTS pain_events_fts USING fts5(
+        text,
+        pain_event_id UNINDEXED,
+        tokenize='porter unicode61'
+      )
     `);
 
     // V2 migration: Add V2 columns to evolution_tasks if they don't exist

@@ -749,7 +749,10 @@ ${verdict === 'APPROVE' ? '- None.' : '- Issue found in implementation'}
 ## NEXT_FOCUS
 Continue with next task
 
-CHECKS: criteria=met;blockers=0`;
+CHECKS: criteria=met;blockers=0
+
+## CHECKS
+- All checks passed`;
 }
 
 function createInvalidProducer() {
