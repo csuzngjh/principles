@@ -641,14 +641,42 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
             const completeMarker = path.join(wctx.stateDir, `.evolution_complete_${task.id}`);
             if (fs.existsSync(completeMarker)) {
                 if (logger) logger.info(`[PD:EvolutionWorker] Task ${task.id} completed - marker file detected`);
+
+                const reportPath = path.join(wctx.stateDir, `.diagnostician_report_${task.id}.json`);
+                if (fs.existsSync(reportPath)) {
+                    try {
+                        const reportData = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+                        const principle = reportData?.diagnosis_report?.principle || reportData?.principle;
+                        if (principle?.trigger_pattern && principle?.action) {
+                            const principleId = wctx.evolutionReducer.createPrincipleFromDiagnosis({
+                                painId: task.id,
+                                painType: task.source === 'Human Intervention' ? 'user_frustration' : 'tool_failure',
+                                triggerPattern: principle.trigger_pattern,
+                                action: principle.action,
+                                source: task.source || 'heartbeat_diagnostician',
+                                evaluability: principle.evaluability || 'manual_only',
+                            });
+                            if (principleId) {
+                                logger.info(`[PD:EvolutionWorker] Created principle ${principleId} from heartbeat diagnostician report for task ${task.id}`);
+                            } else {
+                                logger.warn(`[PD:EvolutionWorker] createPrincipleFromDiagnosis returned null for task ${task.id}`);
+                            }
+                        } else {
+                            logger.warn(`[PD:EvolutionWorker] Diagnostician report for task ${task.id} missing principle fields`);
+                        }
+                    } catch (err) {
+                        logger.warn(`[PD:EvolutionWorker] Failed to parse diagnostician report for task ${task.id}: ${String(err)}`);
+                    }
+                } else {
+                    logger.warn(`[PD:EvolutionWorker] No diagnostician report found for completed task ${task.id} (expected: .diagnostician_report_${task.id}.json)`);
+                }
+
                 task.status = 'completed';
                 task.completed_at = new Date().toISOString();
                 task.resolution = 'marker_detected';
                 try {
-                    fs.unlinkSync(completeMarker); // Clean up marker file
-                } catch {
-                    // Best effort cleanup
-                }
+                    fs.unlinkSync(completeMarker);
+                } catch {}
 
                 // Log to EvolutionLogger
                 const durationMs = task.started_at
@@ -736,6 +764,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
             // Use shared diagnostician protocol (consistent with pd-diagnostician skill)
             const heartbeatPath = wctx.resolve('HEARTBEAT');
             const markerFilePath = path.join(wctx.stateDir, `.evolution_complete_${highestScoreTask.id}`);
+            const reportFilePath = path.join(wctx.stateDir, `.diagnostician_report_${highestScoreTask.id}.json`);
             const heartbeatContent = [
                 `## Evolution Task [ID: ${highestScoreTask.id}]`,
                 ``,
@@ -754,9 +783,12 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                 `---`,
                 ``,
                 `After completing the analysis:`,
-                `1. Write the resulting principle(s) to PRINCIPLES.md`,
-                `2. Mark the task complete by creating an empty file: ${markerFilePath}`,
-                `3. Replace this HEARTBEAT.md content with "HEARTBEAT_OK"`,
+                `1. Write your JSON diagnosis report to: ${reportFilePath}`,
+                `   The JSON must include a "principle" field with "trigger_pattern" and "action".`,
+                `2. Write the resulting principle(s) to PRINCIPLES.md`,
+                `3. Mark the task complete by creating a marker file: ${markerFilePath}`,
+                `   The marker file should contain: "diagnostic_completed: <timestamp>\\noutcome: <summary>"`,
+                `4. Replace this HEARTBEAT.md content with "HEARTBEAT_OK"`,
             ].join('\n');
 
             // Try to write HEARTBEAT.md FIRST
