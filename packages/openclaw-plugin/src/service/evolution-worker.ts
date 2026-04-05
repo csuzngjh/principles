@@ -795,6 +795,19 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
             const heartbeatPath = wctx.resolve('HEARTBEAT');
             const markerFilePath = path.join(wctx.stateDir, `.evolution_complete_${highestScoreTask.id}`);
             const reportFilePath = path.join(wctx.stateDir, `.diagnostician_report_${highestScoreTask.id}.json`);
+
+            let existingPrinciplesRef = '';
+            try {
+                const principlesPath = wctx.resolve('PRINCIPLES');
+                if (fs.existsSync(principlesPath)) {
+                    const principlesContent = fs.readFileSync(principlesPath, 'utf8');
+                    const principleBlocks = principlesContent.match(/### P-[\w-]+:[^\n]*\n(?:-[^\n]*\n)*/g);
+                    if (principleBlocks && principleBlocks.length > 0) {
+                        existingPrinciplesRef = `\n**Existing Principles for Style Reference**:\n${principleBlocks.slice(-3).join('\n')}`;
+                    }
+                }
+            } catch {}
+
             const heartbeatContent = [
                 `## Evolution Task [ID: ${highestScoreTask.id}]`,
                 ``,
@@ -819,10 +832,11 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                 `   - "principle.action": what to do differently`,
                 `   - "principle.abstracted_principle": a HIGHLY ABSTRACTED principle statement`,
                 `     suitable for PRINCIPLES.md (not an operational rule, but a general principle`,
-                `     that captures the underlying wisdom). Example: "代码修改必须经过 Issue 流程，确保可追踪和可回退"`,
+                `     that captures the underlying wisdom). Max 40 chars. Cross-scenario applicable.`,
                 `2. Mark the task complete by creating a marker file: ${markerFilePath}`,
                 `   The marker file should contain: "diagnostic_completed: <timestamp>\\noutcome: <summary>"`,
                 `3. Replace this HEARTBEAT.md content with "HEARTBEAT_OK"`,
+                existingPrinciplesRef,
             ].join('\n');
 
             // Try to write HEARTBEAT.md FIRST

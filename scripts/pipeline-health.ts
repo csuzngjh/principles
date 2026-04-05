@@ -372,7 +372,7 @@ function collectDiagnostician(stateDir: string): Record<string, unknown> {
   let completionMarkers24h = 0;
   let completionMarkers7d = 0;
   let lastCompletionTime = '';
-  let diagnosticianReports: Array<{ task_id: string; exists: boolean; has_principle: boolean; size: number }> = [];
+  let diagnosticianReports: Array<{ task_id: string; exists: boolean; has_principle: boolean; has_abstracted_principle: boolean; size: number }> = [];
 
   try {
     const entries = fs.readdirSync(stateDir);
@@ -395,14 +395,18 @@ function collectDiagnostician(stateDir: string): Record<string, unknown> {
         const stat = fileStat(reportPath);
         const taskId = entry.replace('.diagnostician_report_', '').replace('.json', '');
         let hasPrinciple = false;
+        let hasAbstractedPrinciple = false;
         try {
           const reportData = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
-          hasPrinciple = !!(reportData?.diagnosis_report?.principle || reportData?.principle);
+          const principle = reportData?.diagnosis_report?.principle || reportData?.principle;
+          hasPrinciple = !!(principle?.trigger_pattern && principle?.action);
+          hasAbstractedPrinciple = !!principle?.abstracted_principle;
         } catch {}
         diagnosticianReports.push({
           task_id: taskId,
           exists: !!stat,
           has_principle: hasPrinciple,
+          has_abstracted_principle: hasAbstractedPrinciple,
           size: stat?.size ?? 0,
         });
       }
