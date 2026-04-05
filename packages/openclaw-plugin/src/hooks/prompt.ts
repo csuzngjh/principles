@@ -594,9 +594,12 @@ REQUIRED ACTION:
   }
 
   // Inject queue-derived evolution task at the front of prependContext
-  // Skip for minimal mode (heartbeat / subagent / observer sessions) to avoid
-  // polluting empathy observer prompts and other internal subagent sessions.
-  if (activeEvolutionTaskPrompt && !isMinimalMode) {
+  // Skip for subagent/observer sessions to avoid polluting their prompts.
+  // Heartbeat sessions MUST receive evolution tasks — that's how the
+  // pain→diagnostician→principle chain works. The original minimal mode
+  // skip was for empathy observers, not heartbeat sessions.
+  const isSubagentSession = sessionId?.includes(':subagent:') === true;
+  if (activeEvolutionTaskPrompt && !isSubagentSession) {
     prependContext = activeEvolutionTaskPrompt + prependContext;
   }
 
