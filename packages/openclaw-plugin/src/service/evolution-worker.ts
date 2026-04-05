@@ -36,7 +36,7 @@ let timeoutId: NodeJS.Timeout | null = null;
  * Old queue items (without taskKind) are migrated to pain_diagnosis for compatibility.
  */
 export type QueueStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'canceled';
-export type TaskResolution = 'marker_detected' | 'auto_completed_timeout' | 'failed_max_retries' | 'canceled';
+export type TaskResolution = 'marker_detected' | 'auto_completed_timeout' | 'failed_max_retries' | 'canceled' | 'late_marker_principle_created' | 'late_marker_no_principle';
 
 /**
  * Recent pain context attached to sleep_reflection tasks.
@@ -716,6 +716,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
 
                 if (fs.existsSync(completeMarker) && fs.existsSync(reportPath)) {
                     if (logger) logger.info(`[PD:EvolutionWorker] Task ${task.id} timed out but marker found — creating principle anyway`);
+                    let principleCreated = false;
                     try {
                         const reportData = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
                         const principle = reportData?.diagnosis_report?.principle || reportData?.principle;
@@ -731,18 +732,18 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             });
                             if (principleId) {
                                 logger.info(`[PD:EvolutionWorker] Created principle ${principleId} from late marker for task ${task.id}`);
+                                principleCreated = true;
                             }
                         }
                     } catch (err) {
                         logger.warn(`[PD:EvolutionWorker] Failed to parse late diagnostician report for task ${task.id}: ${String(err)}`);
                     }
                     try { fs.unlinkSync(completeMarker); } catch {}
+                    task.resolution = principleCreated ? 'late_marker_principle_created' : 'late_marker_no_principle';
+                } else {
+                    if (logger) logger.info(`[PD:EvolutionWorker] Task ${task.id} auto-completed after ${timeoutMinutes} minute timeout`);
+                    task.resolution = 'auto_completed_timeout';
                 }
-
-                if (logger) logger.info(`[PD:EvolutionWorker] Task ${task.id} auto-completed after ${timeoutMinutes} minute timeout`);
-                task.status = 'completed';
-                task.completed_at = new Date().toISOString();
-                task.resolution = task.resolution || 'auto_completed_timeout';
 
                 // Log to EvolutionLogger
                 evoLogger.logCompleted({

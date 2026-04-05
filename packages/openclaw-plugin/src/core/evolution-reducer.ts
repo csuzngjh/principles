@@ -352,11 +352,13 @@ export class EvolutionReducerImpl implements EvolutionReducer {
 
         const header = `### ${principle.id}:`;
         const existingIdx = content.indexOf(header);
-        const formatted = this.formatPrincipleForFile(principle);
+        const formatted = this.formatPrincipleForFile(principle, content);
 
         if (existingIdx >= 0) {
-          const nextIdx = content.indexOf('\n### ', existingIdx + 1);
-          const endIdx = nextIdx >= 0 ? nextIdx : content.length;
+          const nextPrincipleRe = /\n### [A-Za-z0-9_-]+:/g;
+          nextPrincipleRe.lastIndex = existingIdx + header.length;
+          const nextMatch = nextPrincipleRe.exec(content);
+          const endIdx = nextMatch ? nextMatch.index : content.length;
           content = content.slice(0, existingIdx) + formatted + content.slice(endIdx);
         } else {
           const separator = content.trim().endsWith('<!-- 原则从这里开始记录 -->') ? '\n' : '\n\n';
@@ -371,19 +373,44 @@ export class EvolutionReducerImpl implements EvolutionReducer {
     }
   }
 
-  private formatPrincipleForFile(principle: Principle): string {
+  private detectPrincipleLanguage(content: string): 'zh' | 'en' {
+    if (!content) return 'zh';
+    const zhMarkers = ['原则', '触发', '必须', '禁止', '验证', '例外', '来源'];
+    const enMarkers = ['Trigger', 'Constraint', 'Must', 'Forbidden', 'Verification', 'Exceptions', 'Source'];
+    let zhCount = 0;
+    let enCount = 0;
+    for (const m of zhMarkers) { if (content.includes(m)) zhCount++; }
+    for (const m of enMarkers) { if (content.includes(m)) enCount++; }
+    return zhCount >= enCount ? 'zh' : 'en';
+  }
+
+  private formatPrincipleForFile(principle: Principle, existingContent: string): string {
+    const lang = this.detectPrincipleLanguage(existingContent);
     const title = principle.abstractedPrinciple
       ? (principle.abstractedPrinciple.length > 60 ? principle.abstractedPrinciple.slice(0, 57) + '...' : principle.abstractedPrinciple)
       : (principle.text.length > 60 ? principle.text.slice(0, 57) + '...' : principle.text);
     const source = principle.source.painId ? `pain_id: ${principle.source.painId} / ${principle.source.timestamp?.slice(0, 10) ?? 'unknown'}` : 'unknown';
 
+    if (lang === 'zh') {
+      return [
+        `### ${principle.id}: ${title}`,
+        `- **Trigger**: ${principle.trigger}`,
+        `- **Constraint (Must)**: ${principle.action}`,
+        `- **Constraint (Forbidden)**: 禁止违反此原则的行为`,
+        `- **Verification**: 操作前检查是否遵循此原则`,
+        `- **Exceptions**: 无`,
+        `- **Source**: ${source}`,
+        '',
+      ].join('\n');
+    }
+
     return [
       `### ${principle.id}: ${title}`,
       `- **Trigger**: ${principle.trigger}`,
       `- **Constraint (Must)**: ${principle.action}`,
-      `- **Constraint (Forbidden)**: 禁止违反此原则的行为`,
-      `- **Verification**: 操作前检查是否遵循此原则`,
-      `- **Exceptions**: 无`,
+      `- **Constraint (Forbidden)**: Do not violate this principle`,
+      `- **Verification**: Check compliance before acting`,
+      `- **Exceptions**: None`,
       `- **Source**: ${source}`,
       '',
     ].join('\n');
