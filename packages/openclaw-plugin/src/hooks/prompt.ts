@@ -601,6 +601,9 @@ REQUIRED ACTION:
   const isSubagentSession = sessionId?.includes(':subagent:') === true;
   if (activeEvolutionTaskPrompt && !isSubagentSession) {
     prependContext = activeEvolutionTaskPrompt + prependContext;
+    logger?.info(`[PD:Prompt] Evolution task injected into ${trigger} session (was minimalMode=${isMinimalMode}, now included)`);
+  } else if (activeEvolutionTaskPrompt && isSubagentSession) {
+    logger?.info(`[PD:Prompt] Evolution task SKIPPED for subagent session`);
   }
 
   // ─────────────────────────────────────────────────4. Empathy Observer Spawn (async sidecar)
