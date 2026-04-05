@@ -263,14 +263,15 @@ function verifyBundleContents() {
 
     const content = readFileSync(bundleJs, 'utf-8');
 
-    // Critical symbols that must exist in the bundled plugin (post #159 empathy migration).
-    // The new empathy system uses EmpathyObserverWorkflowManager + workflow spec pattern.
-    // NOTE: esbuild minifies class names, so we check for string references
-    // (error messages, log strings) that survive minification.
+    // Critical symbols that must exist in the bundled plugin.
+    // After minification, class names may be mangled but string literals survive.
     const requiredSymbols = [
-        { name: 'EmpathyObserverWorkflowManager', reason: 'empathy observer workflow manager class (error messages survive minification)' },
-        { name: 'empathyObserverWorkflowSpec', reason: 'empathy workflow spec definition' },
-        { name: 'empathySignalJson', reason: 'empathy signal JSON serialization' },
+        { name: 'EmpathyObserverWorkflowManager', reason: 'empathy observer workflow manager' },
+        { name: 'empathy-observer',             reason: 'empathy observer module identifier' },
+        { name: 'empathySignal',                reason: 'empathy signal data structure' },
+        { name: 'EvolutionWorkerService',       reason: 'evolution worker background service' },
+        { name: 'syncPrincipleToFile',          reason: 'principle persistence to PRINCIPLES.md' },
+        { name: 'checkPainFlag',                reason: 'pain flag detection and ingestion' },
     ];
 
     const missing = [];
