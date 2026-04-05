@@ -424,7 +424,17 @@ export async function handleSubagentEnded(
                     const action = report.principle.action;
                     if (typeof triggerPattern !== 'string' || typeof action !== 'string') {
                         logger.warn(`[PD:Subagent] Invalid principle fields for task ${completedTaskId}: trigger_pattern=${typeof triggerPattern}, action=${typeof action}`);
+                    } else if (triggerPattern.length < 3) {
+                        logger.warn(`[PD:Subagent] Principle trigger_pattern too short (${triggerPattern.length} chars) for task ${completedTaskId}`);
+                    } else if (action.length < 10) {
+                        logger.warn(`[PD:Subagent] Principle action too short (${action.length} chars) for task ${completedTaskId}`);
                     } else {
+                        const abstracted = report.principle.abstracted_principle;
+                        if (abstracted && abstracted.length > 80) {
+                            logger.warn(`[PD:Subagent] abstracted_principle too long (${abstracted.length} chars, max 80) for task ${completedTaskId}. Truncating.`);
+                            report.principle.abstracted_principle = abstracted.slice(0, 77) + '...';
+                        }
+
                         logger.info(`[PD:Subagent] Parsed principle from diagnostician for task ${completedTaskId}: trigger="${triggerPattern.slice(0, 60)}..."`);
 
                         // Principles default to 'manual_only' evaluability unless detector metadata
