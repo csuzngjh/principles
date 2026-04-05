@@ -1,13 +1,29 @@
 /**
  * Subagent Workflow Helper - Type Definitions
- * 
+ *
  * This file defines the TypeScript interfaces for the workflow helper system
  * that manages subagent lifecycle (empathy observer, deep-reflect, etc.).
- * 
+ *
  * Design reference: docs/design/2026-03-31-subagent-workflow-helper-design.md
- * 
+ *
  * @module subagent-workflow/types
  */
+
+import type {
+    NocturnalArtifact,
+} from '../../core/nocturnal-arbiter.js';
+import type {
+    BoundedAction,
+} from '../../core/nocturnal-executability.js';
+import type {
+    NocturnalSessionSnapshot,
+} from '../../core/nocturnal-trajectory-extractor.js';
+import type {
+    NocturnalRunDiagnostics,
+} from '../nocturnal-service.js';
+import type {
+    TrinityResult,
+} from '../../core/nocturnal-trinity.js';
 
 // ── Workflow Transport ────────────────────────────────────────────────────────
 
@@ -344,12 +360,12 @@ export type { PluginLogger } from '../../openclaw-sdk.js';
  */
 export type NocturnalResult = {
     success: boolean;
-    artifact?: import('../core/nocturnal-arbiter.js').NocturnalArtifact & { boundedAction?: import('../core/nocturnal-executability.js').BoundedAction };
+    artifact?: NocturnalArtifact & { boundedAction?: BoundedAction };
     skipReason?: string;
     noTargetSelected: boolean;
     validationFailed: boolean;
     validationFailures: string[];
-    snapshot?: import('../core/nocturnal-trajectory-extractor.js').NocturnalSessionSnapshot;
-    diagnostics: import('../service/nocturnal-service.js').NocturnalRunDiagnostics;
-    trinityTelemetry?: import('../core/nocturnal-trinity.js').TrinityResult['telemetry'];
+    snapshot?: NocturnalSessionSnapshot;
+    diagnostics: NocturnalRunDiagnostics;
+    trinityTelemetry?: TrinityResult['telemetry'];
 };

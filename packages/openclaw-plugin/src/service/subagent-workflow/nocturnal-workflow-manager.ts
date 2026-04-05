@@ -28,7 +28,7 @@ import type {
     WorkflowPersistContext,
 } from './types.js';
 import { WorkflowStore } from './workflow-store.js';
-import { NocturnalPathResolver } from '../../core/nocturnal-paths.js';
+import { resolveNocturnalDir } from '../../core/nocturnal-paths.js';
 import {
     executeNocturnalReflectionAsync,
     type NocturnalRunResult,
@@ -309,7 +309,7 @@ export class NocturnalWorkflowManager implements WorkflowManager {
                 this.store.recordEvent(workflow.workflow_id, 'nocturnal_expired', workflow.state, 'expired', 'TTL expired', { workflowId: workflow.workflow_id });
 
                 // D-06: Clean partial artifact files by workflowId prefix
-                const samplesDir = NocturnalPathResolver.resolveNocturnalDir(this.workspaceDir, 'SAMPLES');
+                const samplesDir = resolveNocturnalDir(this.workspaceDir, 'SAMPLES');
                 if (fs.existsSync(samplesDir)) {
                     const files = fs.readdirSync(samplesDir).filter(f => f.includes(workflow.workflow_id));
                     for (const file of files) {

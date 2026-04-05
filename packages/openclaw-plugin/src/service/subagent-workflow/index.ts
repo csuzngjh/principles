@@ -45,7 +45,6 @@ export type {
     EmpathyObserverWorkflowSpec,
     EmpathyObserverPayload,
     EmpathyResult,
-    NocturnalResult,
     WorkflowRow,
     WorkflowEventRow,
     WorkflowDebugSummary,
