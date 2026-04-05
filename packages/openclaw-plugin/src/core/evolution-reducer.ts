@@ -361,6 +361,25 @@ export class EvolutionReducerImpl implements EvolutionReducer {
         let content = '';
         if (fs.existsSync(this.principlesPath)) {
           content = fs.readFileSync(this.principlesPath, 'utf8');
+        } else {
+          // Auto-create from template if missing
+          const extensionRoot = PathResolver.getExtensionRoot();
+          if (extensionRoot) {
+            const templatePath = path.join(extensionRoot, 'templates', 'workspace', '.principles', 'PRINCIPLES.md');
+            if (fs.existsSync(templatePath)) {
+              content = fs.readFileSync(templatePath, 'utf8');
+            }
+          }
+          if (!content) {
+            SystemLogger.log(this.workspaceDir, 'PRINCIPLES_TEMPLATE_MISSING', `PRINCIPLES.md not found and no template available at ${this.principlesPath}`);
+            return false;
+          }
+          const parentDir = path.dirname(this.principlesPath);
+          if (!fs.existsSync(parentDir)) {
+            fs.mkdirSync(parentDir, { recursive: true });
+          }
+          fs.writeFileSync(this.principlesPath, content, 'utf8');
+          SystemLogger.log(this.workspaceDir, 'PRINCIPLES_CREATED', `Created PRINCIPLES.md from template`);
         }
 
         const header = `### ${principle.id}:`;
