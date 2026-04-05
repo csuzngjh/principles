@@ -430,10 +430,11 @@ async function enqueueSleepReflectionTask(
     }
 }
 
-async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger) {
+async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Promise<WorkerStatusReport['pain_flag']> {
+    const result: WorkerStatusReport['pain_flag'] = { exists: false, score: null, source: null, enqueued: false, skipped_reason: null };
     try {
         const painFlagPath = wctx.resolve('PAIN_FLAG');
-        if (!fs.existsSync(painFlagPath)) return;
+        if (!fs.existsSync(painFlagPath)) return result;
 
         const rawPain = fs.readFileSync(painFlagPath, 'utf8');
         const lines = rawPain.split('\n');
@@ -469,7 +470,21 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger) {
         // Markdown format has no score — default to 50 for human intervention
         if (score === 0 && source !== 'unknown') score = 50;
 
-        if (isQueued || score < 30) return;
+        result.exists = true;
+        result.score = score;
+        result.source = source;
+        result.enqueued = isQueued;
+
+        if (isQueued) {
+            result.skipped_reason = 'already_queued';
+            if (logger) logger.info(`[PD:EvolutionWorker] Pain flag already queued (score=${score}, source=${source})`);
+            return result;
+        }
+        if (score < 30) {
+            result.skipped_reason = `score_too_low (${score} < 30)`;
+            if (logger) logger.info(`[PD:EvolutionWorker] Pain flag score too low: ${score} (source=${source})`);
+            return result;
+        }
 
         if (logger) logger.info(`[PD:EvolutionWorker] Detected pain flag (score: ${score}, source: ${source}). Enqueueing evolution task.`);
 
@@ -495,18 +510,19 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger) {
                     `\nstatus: queued\ntask_id: ${duplicateTask.id}\n`,
                     'utf8'
                 );
-                return;
+                result.enqueued = true;
+                result.skipped_reason = 'duplicate';
+                return result;
             }
 
             const taskId = createEvolutionTaskId(source, score, preview, reason, now);
             const nowIso = new Date(now).toISOString();
             const effectiveTraceId = traceId || taskId;
-            
-            // V2: New queue items include all V2 fields with pain_diagnosis defaults
+
             queue.push({
                 id: taskId,
-                taskKind: 'pain_diagnosis',   // V2: All pain-flag triggered tasks are pain_diagnosis
-                priority: score >= 70 ? 'high' : score >= 40 ? 'medium' : 'low',  // V2: Priority based on score
+                taskKind: 'pain_diagnosis',
+                priority: score >= 70 ? 'high' : score >= 40 ? 'medium' : 'low',
                 score,
                 source,
                 reason,
@@ -517,14 +533,13 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger) {
                 session_id: sessionId || undefined,
                 agent_id: agentId || undefined,
                 traceId: effectiveTraceId,
-                retryCount: 0,               // V2: No retries yet
-                maxRetries: 3,                // V2: Default max retries
+                retryCount: 0,
+                maxRetries: 3,
             });
 
             fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
             fs.appendFileSync(painFlagPath, `\nstatus: queued\ntask_id: ${taskId}\n`, 'utf8');
 
-            // Log to EvolutionLogger
             const evoLogger = getEvolutionLogger(wctx.workspaceDir, wctx.trajectory);
             evoLogger.logQueued({
                 traceId: traceId || taskId,
@@ -534,7 +549,6 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger) {
                 reason,
             });
 
-            // Record to evolution_tasks table
             wctx.trajectory?.recordEvolutionTask?.({
                 taskId,
                 traceId: traceId || taskId,
@@ -545,13 +559,17 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger) {
                 enqueuedAt: nowIso,
             });
 
+            result.enqueued = true;
+
         } finally {
             releaseLock();
         }
 
     } catch (err) {
         if (logger) logger.warn(`[PD:EvolutionWorker] Error processing pain flag: ${String(err)}`);
+        result.skipped_reason = `error: ${String(err)}`;
     }
+    return result;
 }
 
 async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogger, eventLog: EventLog, api?: OpenClawPluginApi) {
@@ -1118,6 +1136,58 @@ export interface ExtendedEvolutionWorkerService {
     stop?: (ctx: OpenClawPluginServiceContext) => void | Promise<void>;
 }
 
+interface WorkerStatusReport {
+    timestamp: string;
+    cycle_start_ms: number;
+    duration_ms: number;
+    pain_flag: { exists: boolean; score: number | null; source: string | null; enqueued: boolean; skipped_reason: string | null };
+    queue: { total: number; pending: number; in_progress: number; completed_this_cycle: number; failed_this_cycle: number };
+    errors: string[];
+}
+
+function writeWorkerStatus(stateDir: string, report: WorkerStatusReport): void {
+    try {
+        const statusPath = path.join(stateDir, 'worker-status.json');
+        fs.writeFileSync(statusPath, JSON.stringify(report, null, 2), 'utf8');
+    } catch {}
+}
+
+async function processEvolutionQueueWithResult(
+    wctx: WorkspaceContext,
+    logger: PluginLogger,
+    eventLog: EventLog,
+    api?: OpenClawPluginApi | undefined
+): Promise<{ queue: WorkerStatusReport['queue']; errors: string[] }> {
+    const queueResult: WorkerStatusReport['queue'] = { total: 0, pending: 0, in_progress: 0, completed_this_cycle: 0, failed_this_cycle: 0 };
+    const errors: string[] = [];
+
+    try {
+        const queuePath = wctx.resolve('EVOLUTION_QUEUE');
+        if (!fs.existsSync(queuePath)) {
+            return { queue: queueResult, errors };
+        }
+
+        const queue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
+        queueResult.total = queue.length;
+        queueResult.pending = queue.filter((t: any) => t.status === 'pending').length;
+        queueResult.in_progress = queue.filter((t: any) => t.status === 'in_progress').length;
+
+        for (const task of queue) {
+            if (task?.taskKind !== 'sleep_reflection') continue;
+            if (task?.status === 'completed') queueResult.completed_this_cycle++;
+            if (task?.status === 'failed') queueResult.failed_this_cycle++;
+        }
+
+        await processEvolutionQueue(wctx, logger, eventLog, api);
+    } catch (err) {
+        const errMsg = `processEvolutionQueue failed: ${String(err)}`;
+        errors.push(errMsg);
+        logger.error(`[PD:EvolutionWorker] ${errMsg}`);
+    }
+
+    return { queue: queueResult, errors };
+}
+
 export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
     id: 'principles-evolution-worker',
     api: null,
@@ -1147,6 +1217,23 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
 
         intervalId = setInterval(() => {
             void (async () => {
+                const cycleStart = Date.now();
+                const cycleResult: {
+                    timestamp: string;
+                    cycle_start_ms: number;
+                    duration_ms: number;
+                    pain_flag: { exists: boolean; score: number | null; source: string | null; enqueued: boolean; skipped_reason: string | null };
+                    queue: { total: number; pending: number; in_progress: number; completed_this_cycle: number; failed_this_cycle: number };
+                    errors: string[];
+                } = {
+                    timestamp: new Date().toISOString(),
+                    cycle_start_ms: cycleStart,
+                    duration_ms: 0,
+                    pain_flag: { exists: false, score: null, source: null, enqueued: false, skipped_reason: null },
+                    queue: { total: 0, pending: 0, in_progress: 0, completed_this_cycle: 0, failed_this_cycle: 0 },
+                    errors: [],
+                };
+
                 // V2: Nocturnal idle check — logs workspace idle state on each cycle.
                 // This makes nocturnal-runtime a visible part of the worker lifecycle.
                 // Phase 2.4: Enqueue sleep_reflection when workspace is idle and not in cooldown.
@@ -1165,8 +1252,13 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                     logger?.debug?.(`[PD:EvolutionWorker] Workspace active (last activity ${idleResult.idleForMs}ms ago)`);
                 }
 
-                await checkPainFlag(wctx, logger);
-                await processEvolutionQueue(wctx, logger, eventLog, api ?? undefined);
+                const painCheckResult = await checkPainFlag(wctx, logger);
+                cycleResult.pain_flag = painCheckResult;
+
+                const queueResult = await processEvolutionQueueWithResult(wctx, logger, eventLog, api ?? undefined);
+                cycleResult.queue = queueResult.queue;
+                if (queueResult.errors) cycleResult.errors.push(...queueResult.errors);
+
                 if (api) {
                     await processDetectionQueue(wctx, api, eventLog);
                 }
@@ -1185,13 +1277,27 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                     }
                     workflowStore.dispose();
                 } catch (sweepErr) {
-                    logger?.warn?.(`[PD:EvolutionWorker] Failed to sweep expired workflows: ${String(sweepErr)}`);
+                    const errMsg = `Failed to sweep expired workflows: ${String(sweepErr)}`;
+                    cycleResult.errors.push(errMsg);
+                    logger?.warn?.(`[PD:EvolutionWorker] ${errMsg}`);
                 }
 
                 wctx.dictionary.flush();
                 flushAllSessions();
+
+                cycleResult.duration_ms = Date.now() - cycleStart;
+                writeWorkerStatus(wctx.stateDir, cycleResult);
             })().catch((err) => {
-                if (logger) logger.error(`[PD:EvolutionWorker] Error in worker interval: ${String(err)}`);
+                const errMsg = `Error in worker interval: ${String(err)}`;
+                if (logger) logger.error(`[PD:EvolutionWorker] ${errMsg}`);
+                writeWorkerStatus(wctx.stateDir, {
+                    timestamp: new Date().toISOString(),
+                    cycle_start_ms: Date.now(),
+                    duration_ms: 0,
+                    pain_flag: { exists: false, score: null, source: null, enqueued: false, skipped_reason: null },
+                    queue: { total: 0, pending: 0, in_progress: 0, completed_this_cycle: 0, failed_this_cycle: 0 },
+                    errors: [errMsg],
+                });
             });
         }, interval);
 
