@@ -1,6 +1,22 @@
 # Milestones
 
-## 1.0 v1.0-alpha MVP (Shipped: 2026-04-05)
+## v1.4 OpenClaw v2026.4.3 Compatibility (Shipped: 2026-04-05)
+
+**Phases completed:** 3 (Phase 1, 2, 5)
+
+**Key accomplishments:**
+
+- SDK Type Cleanup: Removed false type declarations, aligned SDK shim with v2026.4.4 types
+- Memory Search (FTS5): Replaced deprecated createMemorySearchTool with native FTS5 search on pain_events
+- Integration Testing: TEST-01~03 pass; TEST-04/05 pending runtime verification via Feishu
+
+**Known gaps:**
+- TEST-04: deep_reflect tool runtime verification pending (Feishu session routing — fix applied but not re-tested)
+- TEST-05: Hook triggering verification pending (same Feishu session routing)
+
+---
+
+## 1.0 v1.0-alpha MVP (Shipped: 2026-03-26)
 
 **Phases completed:** 6 phases, shipped 2026-03-26
 
