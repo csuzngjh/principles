@@ -412,6 +412,7 @@ export async function handleSubagentEnded(
                         source: matchedTask?.source || 'diagnostician',
                         evaluability,
                         detectorMetadata,
+                        abstractedPrinciple: report.principle.abstracted_principle,
                     });
 
                     if (principleId) {
@@ -483,6 +484,7 @@ function parseDiagnosticianReport(
     principle?: {
         trigger_pattern: string;
         action: string;
+        abstracted_principle?: string;
         evaluability?: 'deterministic' | 'weak_heuristic' | 'manual_only';
         detector_metadata?: {
             applicabilityTags?: string[];

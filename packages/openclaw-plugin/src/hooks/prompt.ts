@@ -540,6 +540,21 @@ The empathy observer subagent handles pain detection independently.
 
         const escapedTask = JSON.stringify(resolvedTask);
 
+        let existingPrinciplesRef = '';
+        try {
+          const principlesPath = wctx.resolve('PRINCIPLES');
+          if (fs.existsSync(principlesPath)) {
+            const principlesContent = fs.readFileSync(principlesPath, 'utf8');
+            const principleBlocks = principlesContent.match(/### P-[\w-]+:[^\n]*\n(?:-[^\n]*\n)*/g);
+            if (principleBlocks && principleBlocks.length > 0) {
+              existingPrinciplesRef = `\n\n**Existing Principles for Style Reference**:\n${principleBlocks.slice(-3).join('\n')}`;
+            }
+          }
+        } catch {}
+
+        const spawnTask = `使用 pd-diagnostician skill 执行诊断任务。\n\n任务: ${escapedTask}${existingPrinciplesRef}`;
+        const escapedSpawnTask = JSON.stringify(spawnTask);
+
         logger?.info(`[PD:Prompt] Injecting EVOLUTION TASK for: ${inProgressTask.id}`);
 
         if (trigger === 'user') {
@@ -553,7 +568,7 @@ REQUIRED ACTION (两阶段回复):
 "我注意到刚才的操作遇到了一些问题（简述问题），我已安排诊断代理在后台分析根因。分析完成后会继续告诉你结果。"
 
 然后调用：
-  sessions_spawn(task="使用 pd-diagnostician skill 执行诊断任务。\n\n任务: ${escapedTask}")
+  sessions_spawn(task=${escapedSpawnTask})
 
 **阶段 2 - 收到子代理结果后:**
 当收到诊断代理的完成消息后，用以下格式回复用户：
@@ -577,7 +592,7 @@ TASK: ${escapedTask}
 
 REQUIRED ACTION:
 - Start diagnostics immediately by calling:
-  sessions_spawn(task="使用 pd-diagnostician skill 执行诊断任务。\n\n任务: ${escapedTask}")
+  sessions_spawn(task=${escapedSpawnTask})
 - Do NOT reply with "[EVOLUTION_ACK]".
 </evolution_task>\n`;
         }
