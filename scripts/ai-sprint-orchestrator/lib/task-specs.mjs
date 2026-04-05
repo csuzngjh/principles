@@ -341,12 +341,40 @@ export function buildRolePrompt({ spec, stage, round, role, runDir, stageDir, br
       `You may inspect and modify repository code when the stage requires implementation.`,
       `You are expected to work autonomously within this stage until you either satisfy the stage goals or hit a concrete blocker.`,
       `Persist your intermediate findings frequently so a future agent can resume without relying on chat context.`,
-      `At the end, write a markdown report to ${outputPath} with exactly these sections: SUMMARY, CHANGES, EVIDENCE, CODE_EVIDENCE, KEY_EVENTS, HYPOTHESIS_MATRIX, CHECKS, OPEN_RISKS${requiredDeliverables.length > 0 ? ', CONTRACT' : ''}.`,
-      `KEY_EVENTS should be bullets describing concrete completed milestones or validated events.`,
-      stage === 'investigate'
-        ? `HYPOTHESIS_MATRIX must include one bullet per required hypothesis in this exact shape: - <hypothesis_id>: SUPPORTED|REFUTED|UNPROVEN — <brief evidence>.`
-        : `HYPOTHESIS_MATRIX should capture any remaining competing explanations or risk assumptions.`,
-      `CHECKS should be a single-line machine-readable summary such as: CHECKS: evidence=ok;tests=not-run;scope=pd-only;prompt-isolation=confirmed`,
+      // WF-004 fix: Inject a Markdown skeleton template so the agent cannot forget required sections.
+      // Each section title must appear verbatim in the output; the agent fills content under each heading.
+      `At the end, write a markdown report to ${outputPath} using EXACTLY this skeleton. Every section heading below MUST appear verbatim — if you have nothing to say for a section, write "None" under the heading.`,
+      `
+## SUMMARY
+<brief overview of what was done and found>
+
+## CHANGES
+<list of files created/modified with brief descriptions, or "No changes in this stage">
+
+## EVIDENCE
+<supporting evidence — git log, test output, file contents, sprint state>
+
+## CODE_EVIDENCE
+- files_checked: <comma-separated list>
+- evidence_source: local|remote|both
+- sha: <HEAD SHA>
+<add evidence_scope: principles|openclaw|both if applicable>
+
+## KEY_EVENTS
+<bullets describing concrete completed milestones or validated events>
+
+## HYPOTHESIS_MATRIX
+${stage === 'investigate' ? '<one bullet per hypothesis: - H1: SUPPORTED|REFUTED|UNPROVEN — <evidence>.' : '<any remaining competing explanations or risk assumptions>'}
+
+## CHECKS
+CHECKS: evidence=<ok/fail>;tests=<pass-count>-pass;scope=pd-only
+
+## OPEN_RISKS
+<remaining risks, uncertainties, or items requiring human attention, or "None at this time">
+${requiredDeliverables.length > 0 ? `
+## CONTRACT
+<contract compliance statement, one line per required deliverable>` : ''}`,
+      `IMPORTANT: You MUST emit every section heading shown above verbatim. Do NOT rename, skip, or merge any sections.`,
       codeEvidenceInstruction,
       ...contractInstruction,
       `Do not dump long reasoning logs to stdout. Stdout should only contain a short completion line such as: ROLE_STATUS: completed; report=${outputPath}`,
