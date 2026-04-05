@@ -1393,43 +1393,28 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                 const painCheckResult = await checkPainFlag(wctx, logger);
                 cycleResult.pain_flag = painCheckResult;
 
-                // If pain flag was enqueued, immediately trigger a heartbeat cycle
-                // to start the diagnostician without waiting for the next interval.
-                if (painCheckResult.enqueued && api?.runtime?.system?.runHeartbeatOnce) {
-                    logger.info(`[PD:EvolutionWorker] Pain flag enqueued — triggering immediate heartbeat to start diagnostician`);
-                    try {
-                        const hbResult = await api.runtime.system.runHeartbeatOnce({
-                            reason: `pd-pain-diagnosis: pain flag detected, starting diagnostician`,
-                        });
-                        logger.info(`[PD:EvolutionWorker] Immediate heartbeat result: status=${hbResult.status}${hbResult.status === 'ran' ? ` duration=${hbResult.durationMs}ms` : ''}${hbResult.status === 'skipped' || hbResult.status === 'failed' ? ` reason=${hbResult.reason}` : ''}`);
-                        if (hbResult.status === 'skipped' || hbResult.status === 'failed') {
-                            logger.warn(`[PD:EvolutionWorker] Immediate heartbeat was ${hbResult.status} (${hbResult.reason}). Diagnostician will start on next regular heartbeat cycle.`);
-                        }
-                    } catch (hbErr) {
-                        logger.warn(`[PD:EvolutionWorker] Failed to trigger immediate heartbeat: ${String(hbErr)}. Diagnostician will start on next regular heartbeat cycle.`);
-                    }
-                }
-
-                // If pain flag was enqueued, immediately trigger a heartbeat cycle
-                // to start the diagnostician without waiting for the next interval.
-                if (painCheckResult.enqueued && api?.runtime?.system?.runHeartbeatOnce) {
-                    logger.info(`[PD:EvolutionWorker] Pain flag enqueued — triggering immediate heartbeat to start diagnostician`);
-                    try {
-                        const hbResult = await api.runtime.system.runHeartbeatOnce({
-                            reason: `pd-pain-diagnosis: pain flag detected, starting diagnostician`,
-                        });
-                        logger.info(`[PD:EvolutionWorker] Immediate heartbeat result: status=${hbResult.status}${hbResult.status === 'ran' ? ` duration=${hbResult.durationMs}ms` : ''}${hbResult.status === 'skipped' || hbResult.status === 'failed' ? ` reason=${hbResult.reason}` : ''}`);
-                        if (hbResult.status === 'skipped' || hbResult.status === 'failed') {
-                            logger.warn(`[PD:EvolutionWorker] Immediate heartbeat was ${hbResult.status} (${hbResult.reason}). Diagnostician will start on next regular heartbeat cycle.`);
-                        }
-                    } catch (hbErr) {
-                        logger.warn(`[PD:EvolutionWorker] Failed to trigger immediate heartbeat: ${String(hbErr)}. Diagnostician will start on next regular heartbeat cycle.`);
-                    }
-                }
-
                 const queueResult = await processEvolutionQueueWithResult(wctx, logger, eventLog, api ?? undefined);
                 cycleResult.queue = queueResult.queue;
                 if (queueResult.errors) cycleResult.errors.push(...queueResult.errors);
+
+                // If pain flag was enqueued AND processEvolutionQueue wrote HEARTBEAT.md
+                // with a diagnostician task, immediately trigger a heartbeat to start
+                // the diagnostician without waiting for the next 15-minute interval.
+                // Must run AFTER processEvolutionQueue — HEARTBEAT.md must be written first.
+                if (painCheckResult.enqueued && api?.runtime?.system?.runHeartbeatOnce) {
+                    logger.info(`[PD:EvolutionWorker] Pain flag enqueued — triggering immediate heartbeat to start diagnostician`);
+                    try {
+                        const hbResult = await api.runtime.system.runHeartbeatOnce({
+                            reason: `pd-pain-diagnosis: pain flag detected, starting diagnostician`,
+                        });
+                        logger.info(`[PD:EvolutionWorker] Immediate heartbeat result: status=${hbResult.status}${hbResult.status === 'ran' ? ` duration=${hbResult.durationMs}ms` : ''}${hbResult.status === 'skipped' || hbResult.status === 'failed' ? ` reason=${hbResult.reason}` : ''}`);
+                        if (hbResult.status === 'skipped' || hbResult.status === 'failed') {
+                            logger.warn(`[PD:EvolutionWorker] Immediate heartbeat was ${hbResult.status} (${hbResult.reason}). Diagnostician will start on next regular heartbeat cycle.`);
+                        }
+                    } catch (hbErr) {
+                        logger.warn(`[PD:EvolutionWorker] Failed to trigger immediate heartbeat: ${String(hbErr)}. Diagnostician will start on next regular heartbeat cycle.`);
+                    }
+                }
 
                 if (api) {
                     await processDetectionQueue(wctx, api, eventLog);
