@@ -27,7 +27,7 @@ AI agents that improve their own behavior through structured principle evolution
 
 - [ ] 验收清单可读、可执行、可交接，命令和字段统一
 - [ ] 基线测试全绿，两次最小验证运行完成并分类失败
-- [ ] 技能包 skills/ai-sprint-orchestration/ 完成（SKILL.md 复用现有 run.mjs，REFERENCE.md，EXAMPLES.md）
+- [ ] 完整 skill 包 skills/ai-sprint-orchestration/ 交付（SKILL.md + REFERENCE.md + EXAMPLES.md + scripts/ 独立可运行副本），智能体从 skill 包进入，不依赖项目根下原始脚本路径
 
 ### Out of Scope
 
@@ -60,9 +60,11 @@ AI agents that improve their own behavior through structured principle evolution
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Skill package at skills/ai-sprint-orchestration/ | Standard location, discoverable by other agents | — Pending |
+| Plan B: skill 包自带独立脚本副本 | 完整可打包可复用，agent 从 skill 包进入不依赖项目根原始路径 | — Pending |
+| 只迁移最小必要闭包到 skill 包 | 约 5050 行（run.mjs + 5 lib/），不带 archive/test/实验代码 | — Pending |
 | Only minimal validation specs for acceptance | Avoid scope creep, prove workflow stability not product completeness | — Pending |
 | Failure classification fixed to 4 categories | Prevents ambiguous "not sure what went wrong" situations | — Pending |
+| Validation run 遇 sample-side/product-side issue 只分类不修 | 停止边界清晰，不扩 scope 修产品 | — Pending |
 
 ## Evolution
 
@@ -88,7 +90,8 @@ This document evolves at phase transitions and milestone boundaries.
 **Target features:**
 - Fix acceptance checklist to readable/executable/handoff-ready
 - Prove workflow stability via minimal validation runs (baseline + 2 runs)
-- Create skills/ai-sprint-orchestration/ skill package (SKILL.md + REFERENCE.md + EXAMPLES.md), reusing existing run.mjs as execution engine
+- Create complete skill package at skills/ai-sprint-orchestration/ with independent script copies (SKILL.md + REFERENCE.md + EXAMPLES.md + scripts/)
+- Skill package contains minimal runnable closure: run.mjs + 5 lib modules (~5050 lines)
 - Validation run 遇到 sample-side/product-side issue 只分类不修产品
 
 ---

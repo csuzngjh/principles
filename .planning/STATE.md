@@ -18,5 +18,6 @@ See: .planning/PROJECT.md (updated 2026-04-05)
 - ai-sprint-orchestrator has 3 test suites: contract-enforcement, decision, run
 - Validation specs: workflow-validation-minimal.json, workflow-validation-minimal-verify.json
 - Known OpenClaw plugin issues (helper fallback, expired cleanup) — documented, not blocking
-- v1.2 停止边界：validation run 遇到 sample-side/product-side issue 只分类不修产品
-- Skill 包复用现有 run.mjs，不新增脚本，不改 workflow 核心逻辑
+- v1.2 Plan B: skill 包自带独立脚本副本（最小闭包 run.mjs + 5 lib，~5050 行）
+- 停止边界：validation run 遇到 sample-side/product-side issue 只分类不修产品
+- Skill 包目标：智能体从 skill 包进入，不依赖项目根下原始脚本路径
