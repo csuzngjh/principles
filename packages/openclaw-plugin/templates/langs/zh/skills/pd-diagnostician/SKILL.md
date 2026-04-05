@@ -300,6 +300,7 @@ Diagnose systemic pain [ID: abc123].
           "id": "P_20260324_dircheck",
           "trigger_pattern": "fs\\.writeFileSync|writeFile|mkdirSync",
           "action": "写入前检查目标目录是否存在，不存在则先创建",
+          "abstracted_principle": "任何写入操作必须确保目标环境的完整性",
           "rationale": "防止在目录不存在时写入失败",
           "implementation": {
             "type": "hook",

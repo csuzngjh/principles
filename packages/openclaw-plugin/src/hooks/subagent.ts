@@ -419,59 +419,66 @@ export async function handleSubagentEnded(
                 const report = parseDiagnosticianReport(assistantText);
 
                 if (report?.principle) {
-                    logger.info(`[PD:Subagent] Parsed principle from diagnostician for task ${completedTaskId}: trigger="${report.principle.trigger_pattern.slice(0, 60)}..."`);
-
-                    // Principles default to 'manual_only' evaluability unless detector metadata
-                    // is explicitly provided. Only deterministic / weak_heuristic evaluability
-                    // can enter automatic nocturnal targeting.
-                    const evaluability = report.principle.evaluability;
-
-                    // Only pass detector metadata if ALL required fields are present and valid.
-                    // Incomplete metadata → 'manual_only' — the principle stays prompt-only.
-                    // Defense in depth: also validate in reducer, but subagent should not pass
-                    // malformed data in the first place.
-                    const rawMeta = report.principle.detector_metadata;
-                    // Require confidence (valid enum) + ALL THREE signal arrays non-empty.
-                    // toolSequenceHints is optional (may be empty or absent).
-                    const VALID_CONFIDENCE = ['high', 'medium', 'low'] as const;
-                    const hasValidConfidence =
-                        typeof rawMeta?.confidence === 'string' &&
-                        (VALID_CONFIDENCE as readonly string[]).includes(rawMeta.confidence);
-                    const signalArrays = [
-                        rawMeta?.applicabilityTags,
-                        rawMeta?.positiveSignals,
-                        rawMeta?.negativeSignals,
-                    ];
-                    const allSignalsNonEmpty = signalArrays.every(
-                        (arr) => Array.isArray(arr) && arr.length > 0 && arr.every((s) => typeof s === 'string' && s.length > 0)
-                    );
-                    const hasCompleteMetadata = hasValidConfidence && allSignalsNonEmpty;
-                    const detectorMetadata: import('../core/evolution-types.js').PrincipleDetectorSpec | undefined =
-                        hasCompleteMetadata && rawMeta.confidence
-                            ? {
-                                  applicabilityTags: rawMeta.applicabilityTags ?? [],
-                                  positiveSignals: rawMeta.positiveSignals ?? [],
-                                  negativeSignals: rawMeta.negativeSignals ?? [],
-                                  toolSequenceHints: rawMeta.toolSequenceHints ?? [],
-                                  confidence: rawMeta.confidence as 'high' | 'medium' | 'low',
-                              }
-                            : undefined;
-
-                    const principleId = wctx.evolutionReducer.createPrincipleFromDiagnosis({
-                        painId: matchedTask?.id || completedTaskId,
-                        painType: 'tool_failure',  // Default, could be extracted from task
-                        triggerPattern: report.principle.trigger_pattern,
-                        action: report.principle.action,
-                        source: matchedTask?.source || 'diagnostician',
-                        evaluability,
-                        detectorMetadata,
-                        abstractedPrinciple: report.principle.abstracted_principle,
-                    });
-
-                    if (principleId) {
-                        logger.info(`[PD:Subagent] Created principle ${principleId} from diagnostician analysis for task ${completedTaskId}`);
+                    // Validate field types before using them
+                    const triggerPattern = report.principle.trigger_pattern;
+                    const action = report.principle.action;
+                    if (typeof triggerPattern !== 'string' || typeof action !== 'string') {
+                        logger.warn(`[PD:Subagent] Invalid principle fields for task ${completedTaskId}: trigger_pattern=${typeof triggerPattern}, action=${typeof action}`);
                     } else {
-                        logger.warn(`[PD:Subagent] createPrincipleFromDiagnosis returned null for task ${completedTaskId} (possibly blacklisted or duplicate)`);
+                        logger.info(`[PD:Subagent] Parsed principle from diagnostician for task ${completedTaskId}: trigger="${triggerPattern.slice(0, 60)}..."`);
+
+                        // Principles default to 'manual_only' evaluability unless detector metadata
+                        // is explicitly provided. Only deterministic / weak_heuristic evaluability
+                        // can enter automatic nocturnal targeting.
+                        const evaluability = report.principle.evaluability;
+
+                        // Only pass detector metadata if ALL required fields are present and valid.
+                        // Incomplete metadata → 'manual_only' — the principle stays prompt-only.
+                        // Defense in depth: also validate in reducer, but subagent should not pass
+                        // malformed data in the first place.
+                        const rawMeta = report.principle.detector_metadata;
+                        // Require confidence (valid enum) + ALL THREE signal arrays non-empty.
+                        // toolSequenceHints is optional (may be empty or absent).
+                        const VALID_CONFIDENCE = ['high', 'medium', 'low'] as const;
+                        const hasValidConfidence =
+                            typeof rawMeta?.confidence === 'string' &&
+                            (VALID_CONFIDENCE as readonly string[]).includes(rawMeta.confidence);
+                        const signalArrays = [
+                            rawMeta?.applicabilityTags,
+                            rawMeta?.positiveSignals,
+                            rawMeta?.negativeSignals,
+                        ];
+                        const allSignalsNonEmpty = signalArrays.every(
+                            (arr) => Array.isArray(arr) && arr.length > 0 && arr.every((s) => typeof s === 'string' && s.length > 0)
+                        );
+                        const hasCompleteMetadata = hasValidConfidence && allSignalsNonEmpty;
+                        const detectorMetadata: import('../core/evolution-types.js').PrincipleDetectorSpec | undefined =
+                            hasCompleteMetadata && rawMeta.confidence
+                                ? {
+                                      applicabilityTags: rawMeta.applicabilityTags ?? [],
+                                      positiveSignals: rawMeta.positiveSignals ?? [],
+                                      negativeSignals: rawMeta.negativeSignals ?? [],
+                                      toolSequenceHints: rawMeta.toolSequenceHints ?? [],
+                                      confidence: rawMeta.confidence as 'high' | 'medium' | 'low',
+                                  }
+                                : undefined;
+
+                        const principleId = wctx.evolutionReducer.createPrincipleFromDiagnosis({
+                            painId: matchedTask?.id || completedTaskId,
+                            painType: 'tool_failure',  // Default, could be extracted from task
+                            triggerPattern,
+                            action,
+                            source: matchedTask?.source || 'diagnostician',
+                            evaluability,
+                            detectorMetadata,
+                            abstractedPrinciple: report.principle.abstracted_principle,
+                        });
+
+                        if (principleId) {
+                            logger.info(`[PD:Subagent] Created principle ${principleId} from diagnostician analysis for task ${completedTaskId}`);
+                        } else {
+                            logger.warn(`[PD:Subagent] createPrincipleFromDiagnosis returned null for task ${completedTaskId} (possibly blacklisted or duplicate)`);
+                        }
                     }
                 } else {
                     logger.warn(`[PD:Subagent] Diagnostician output for task ${completedTaskId} did not contain parseable principle JSON. Output length: ${assistantText.length} chars. First 200 chars: ${assistantText.slice(0, 200)}`);

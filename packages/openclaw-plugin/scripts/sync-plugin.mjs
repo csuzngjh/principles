@@ -578,9 +578,13 @@ function installTargetDependencies() {
         });
         console.log('✅ Dependencies installed');
     } catch (error) {
-        console.error('⚠️  Failed to install dependencies. Run manually:');
-        console.error(`   cd ${INSTALL_DIR} && npm install --production`);
+        console.error('\n❌ FAILED to install production dependencies in target directory.');
+        console.error(`   ${error.message}`);
+        console.error('\n   Without these dependencies, the plugin will fail to load at runtime.');
+        console.error(`   Run manually: cd ${INSTALL_DIR} && npm install --production`);
+        process.exit(1);
     }
+}
 }
 
 /**
@@ -638,12 +642,26 @@ function main() {
     // Step 7: Sync skills
     syncSkills(args.lang);
 
-    // Step 8: Install production dependencies
-    if (!args.skipDeps) {
-        installTargetDependencies();
+    // Step 8: Install production dependencies in target (ALWAYS — cleanTargetDir wiped node_modules)
+    // --skip-deps only applies to SOURCE directory deps, not the installed plugin.
+    installTargetDependencies();
+
+    // Step 9: Verify installed bundle can load its native dependencies
+    console.log('\n🔍 Verifying installed plugin can load native dependencies...');
+    try {
+        execSync(`node -e "require('better-sqlite3')"`, {
+            cwd: INSTALL_DIR,
+            stdio: 'pipe'
+        });
+        console.log('✅ Native dependencies verified (better-sqlite3 loads correctly)');
+    } catch {
+        console.error('\n❌ Installed plugin cannot load native dependencies!');
+        console.error('   This usually means npm install failed to compile better-sqlite3.');
+        console.error(`   Fix: cd ${INSTALL_DIR} && npm rebuild better-sqlite3`);
+        process.exit(1);
     }
 
-    // Step 9: Verify installation
+    // Step 10: Verify installation
     const installedVersion = getVersion(INSTALL_DIR);
     if (installedVersion !== sourceVersion) {
         console.error('\n❌ VERSION MISMATCH after sync!');
@@ -678,27 +696,46 @@ function main() {
     if (args.restart) {
         console.log('\n🔄 Restarting OpenClaw Gateway...');
         try {
-            // 1. Find and kill existing gateway
+            // Try systemd first (most common deployment)
             try {
-                const pids = execSync('pgrep -f "openclaw gateway"', { encoding: 'utf-8' }).trim().split('\n');
-                if (pids.length > 0 && pids[0] !== '') {
-                    console.log(`   Found active gateway(s) (PIDs: ${pids.join(', ')}). Terminating...`);
-                    execSync('pgrep -f "openclaw gateway" | xargs kill -9 2>/dev/null || true');
-                    // Small wait for ports to release
-                    execSync('sleep 2');
-                }
-            } catch (e) {
-                console.log('   No active gateway found to terminate.');
+                execSync('systemctl --user is-active openclaw-gateway.service', { stdio: 'pipe' });
+                console.log('   Detected systemd service. Restarting via systemctl...');
+                execSync('systemctl --user restart openclaw-gateway.service', { stdio: 'inherit' });
+                console.log('✅ Gateway restarted via systemctl.');
+                // Verify it started successfully
+                setTimeout(() => {
+                    try {
+                        const status = execSync('systemctl --user is-active openclaw-gateway.service', { encoding: 'utf-8' }).trim();
+                        if (status === 'active') {
+                            console.log('✅ Gateway is running.');
+                        } else {
+                            console.error(`❌ Gateway status: ${status}. Check logs: journalctl --user -u openclaw-gateway.service --since "1 min ago"`);
+                        }
+                    } catch { /* ignore */ }
+                }, 3000);
+                return;
+            } catch {
+                // Not a systemd service — fall through to manual restart
             }
 
-            // 2. Start new gateway in background
+            // Manual restart: find and kill existing gateway processes
+            const pids = execSync('pgrep -f "openclaw-gateway|openclaw gateway"', { encoding: 'utf-8' }).trim();
+            if (pids) {
+                console.log(`   Found gateway process(es). Terminating...`);
+                execSync(`echo "${pids}" | xargs kill -TERM 2>/dev/null || true`);
+                execSync('sleep 3');
+            }
+
+            // Start new gateway
             const logPath = '/tmp/openclaw-auto-restart.log';
             console.log(`   Starting new gateway (logs: ${logPath})...`);
-            // We use nohup to ensure it persists after the script exits
             execSync(`nohup openclaw gateway --force > ${logPath} 2>&1 &`, { stdio: 'ignore' });
-            console.log('✅ Gateway restart triggered successfully.');
+            console.log('✅ Gateway restart triggered.');
+            console.log(`   Check logs: tail -f ${logPath}`);
         } catch (error) {
-            console.error(`❌ Failed to restart gateway: ${error.message}`);
+            console.error(`\n❌ Failed to restart gateway: ${error.message}`);
+            console.error('   Manual restart: systemctl --user restart openclaw-gateway.service');
+            process.exit(1);
         }
     } else {
         console.log('\n💡 Restart OpenClaw Gateway to load the new version.');

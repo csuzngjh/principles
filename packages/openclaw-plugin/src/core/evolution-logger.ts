@@ -260,14 +260,14 @@ export class EvolutionLogger {
   logCompleted(params: {
     traceId: string;
     taskId: string;
-    resolution: 'marker_detected' | 'auto_completed_timeout' | 'manual';
+    resolution: 'marker_detected' | 'auto_completed_timeout' | 'manual' | 'late_marker_principle_created' | 'late_marker_no_principle';
     durationMs?: number;
     principlesGenerated?: number;
   }): void {
     let summary: string;
-    if (params.resolution === 'marker_detected') {
+    if (params.resolution === 'marker_detected' || params.resolution === 'late_marker_principle_created') {
       summary = `任务 ${params.taskId} 完成，已生成 ${params.principlesGenerated || 0} 条原则`;
-    } else if (params.resolution === 'auto_completed_timeout') {
+    } else if (params.resolution === 'auto_completed_timeout' || params.resolution === 'late_marker_no_principle') {
       summary = `任务 ${params.taskId} 超时自动完成`;
     } else {
       summary = `任务 ${params.taskId} 已完成`;
