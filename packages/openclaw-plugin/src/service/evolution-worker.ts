@@ -14,7 +14,6 @@ import { acquireLockAsync, releaseLock, type LockContext } from '../utils/file-l
 import { getEvolutionLogger, type EvolutionStage } from '../core/evolution-logger.js';
 import type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 export type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
-import { DIAGNOSTICIAN_PROTOCOL_SUMMARY } from '../constants/diagnostician.js';
 import { LockUnavailableError } from '../config/index.js';
 import { checkWorkspaceIdle, checkCooldown } from './nocturnal-runtime.js';
 import { WorkflowStore } from './subagent-workflow/workflow-store.js';
@@ -871,7 +870,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                 const principlesPath = wctx.resolve('PRINCIPLES');
                 if (fs.existsSync(principlesPath)) {
                     const principlesContent = fs.readFileSync(principlesPath, 'utf8');
-                    const principleBlocks = principlesContent.match(/### P-[\w-]+:[^\n]*\n(?:-[^\n]*\n)*/g);
+                    const principleBlocks = principlesContent.match(/### P_[\w-]+:[^\n]*\n(?:-[^\n]*\n)*/g);
                     if (principleBlocks && principleBlocks.length > 0) {
                         existingPrinciplesRef = `\n**Existing Principles for Style Reference**:\n${principleBlocks.slice(-3).join('\n')}`;
                     }
@@ -891,18 +890,17 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                 ``,
                 `---`,
                 ``,
-                DIAGNOSTICIAN_PROTOCOL_SUMMARY,
+                `## Diagnostician Protocol`,
+                ``,
+                `You MUST use the **pd-diagnostician** skill for this task.`,
+                `Read the full skill definition and follow the 4-phase protocol (Evidence → Causal Chain → Classification → Principle Extraction) EXACTLY as specified.`,
+                `The skill defines the complete output contract — your JSON report MUST match the format specified in the skill.`,
                 ``,
                 `---`,
                 ``,
                 `After completing the analysis:`,
                 `1. Write your JSON diagnosis report to: ${reportFilePath}`,
-                `   The JSON must include:`,
-                `   - "principle.trigger_pattern": regex pattern for when this situation occurs`,
-                `   - "principle.action": what to do differently`,
-                `   - "principle.abstracted_principle": a HIGHLY ABSTRACTED principle statement`,
-                `     suitable for PRINCIPLES.md (not an operational rule, but a general principle`,
-                `     that captures the underlying wisdom). Max 40 chars. Cross-scenario applicable.`,
+                `   The JSON structure MUST match the output format defined in the pd-diagnostician skill.`,
                 `2. Mark the task complete by creating a marker file: ${markerFilePath}`,
                 `   The marker file should contain: "diagnostic_completed: <timestamp>\\noutcome: <summary>"`,
                 `3. Replace this HEARTBEAT.md content with "HEARTBEAT_OK"`,
