@@ -487,14 +487,31 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
         const rawPain = fs.readFileSync(painFlagPath, 'utf8');
 
         // Try JSON format first (pain skill structured output)
+        // The file may have 'status: queued' and 'task_id: xxx' appended after the JSON object.
+        // Extract just the JSON portion by finding the last '}' and parsing up to that point.
         try {
-            const jsonPain = JSON.parse(rawPain);
+            const jsonEndIdx = rawPain.lastIndexOf('}');
+            const jsonPortion = jsonEndIdx >= 0 ? rawPain.slice(0, jsonEndIdx + 1) : rawPain;
+            const jsonPain = JSON.parse(jsonPortion);
             if (typeof jsonPain === 'object' && jsonPain !== null && jsonPain.pain_score !== undefined) {
                 const jsonScore = typeof jsonPain.pain_score === 'number' ? jsonPain.pain_score :
                                   typeof jsonPain.score === 'number' ? jsonPain.score : 50;
                 const jsonSource = jsonPain.source || 'human';
                 const jsonReason = jsonPain.reason || jsonPain.requested_action || 'Systemic pain detected';
                 const jsonPreview = (jsonPain.symptoms || []).slice(0, 2).join('; ');
+
+                // Check if already queued by looking for 'status: queued' in the full file
+                const alreadyQueued = rawPain.includes('status: queued');
+                if (alreadyQueued) {
+                    result.exists = true;
+                    result.score = jsonScore;
+                    result.source = jsonSource;
+                    result.enqueued = true;
+                    result.skipped_reason = 'already_queued';
+                    if (logger) logger.info(`[PD:EvolutionWorker] Pain flag already queued (score=${jsonScore}, source=${jsonSource})`);
+                    return result;
+                }
+
                 return doEnqueuePainTask(wctx, logger, painFlagPath, result, {
                     score: jsonScore, source: jsonSource, reason: jsonReason,
                     preview: jsonPreview, traceId: '', sessionId: '', agentId: '',
@@ -1401,18 +1418,23 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                 // with a diagnostician task, immediately trigger a heartbeat to start
                 // the diagnostician without waiting for the next 15-minute interval.
                 // Must run AFTER processEvolutionQueue — HEARTBEAT.md must be written first.
-                if (painCheckResult.enqueued && api?.runtime?.system?.runHeartbeatOnce) {
-                    logger.info(`[PD:EvolutionWorker] Pain flag enqueued — triggering immediate heartbeat to start diagnostician`);
-                    try {
-                        const hbResult = await api.runtime.system.runHeartbeatOnce({
-                            reason: `pd-pain-diagnosis: pain flag detected, starting diagnostician`,
-                        });
-                        logger.info(`[PD:EvolutionWorker] Immediate heartbeat result: status=${hbResult.status}${hbResult.status === 'ran' ? ` duration=${hbResult.durationMs}ms` : ''}${hbResult.status === 'skipped' || hbResult.status === 'failed' ? ` reason=${hbResult.reason}` : ''}`);
-                        if (hbResult.status === 'skipped' || hbResult.status === 'failed') {
-                            logger.warn(`[PD:EvolutionWorker] Immediate heartbeat was ${hbResult.status} (${hbResult.reason}). Diagnostician will start on next regular heartbeat cycle.`);
+                if (painCheckResult.enqueued) {
+                    const canTrigger = !!api?.runtime?.system?.runHeartbeatOnce;
+                    logger.info(`[PD:EvolutionWorker] Pain flag enqueued — runHeartbeatOnce available: ${canTrigger} (api=${!!api}, runtime=${!!api?.runtime}, system=${!!api?.runtime?.system})`);
+                    if (canTrigger) {
+                        try {
+                            const hbResult = await api.runtime.system.runHeartbeatOnce({
+                                reason: `pd-pain-diagnosis: pain flag detected, starting diagnostician`,
+                            });
+                            logger.info(`[PD:EvolutionWorker] Immediate heartbeat result: status=${hbResult.status}${hbResult.status === 'ran' ? ` duration=${hbResult.durationMs}ms` : ''}${hbResult.status === 'skipped' || hbResult.status === 'failed' ? ` reason=${hbResult.reason}` : ''}`);
+                            if (hbResult.status === 'skipped' || hbResult.status === 'failed') {
+                                logger.warn(`[PD:EvolutionWorker] Immediate heartbeat was ${hbResult.status} (${hbResult.reason}). Diagnostician will start on next regular heartbeat cycle.`);
+                            }
+                        } catch (hbErr) {
+                            logger.warn(`[PD:EvolutionWorker] Failed to trigger immediate heartbeat: ${String(hbErr)}. Diagnostician will start on next regular heartbeat cycle.`);
                         }
-                    } catch (hbErr) {
-                        logger.warn(`[PD:EvolutionWorker] Failed to trigger immediate heartbeat: ${String(hbErr)}. Diagnostician will start on next regular heartbeat cycle.`);
+                    } else {
+                        logger.warn(`[PD:EvolutionWorker] runHeartbeatOnce not available. Diagnostician will start on next regular heartbeat cycle.`);
                     }
                 }
 

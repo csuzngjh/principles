@@ -20,7 +20,7 @@ function copyRecursive(src, dest) {
 async function bundlePlugin() {
   try {
     await build({
-      entryPoints: ['dist/index.js'],
+      entryPoints: ['src/index.ts'],
       outfile: 'dist/bundle.js',
       bundle: true,
       platform: 'node',
