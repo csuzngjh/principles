@@ -107,6 +107,29 @@
     "implement-pass-2": { "producer": 720, "reviewer_a": 600, "reviewer_b": 600 },
     "verify": { "producer": 900, "reviewer_a": 600, "reviewer_b": 600 }
   },
+  "stageCriteria": {
+    "investigate": {
+      "requiredApprovals": 2,
+      "requiredProducerSections": [
+        "SUMMARY", "EVIDENCE", "CODE_EVIDENCE",
+        "KEY_EVENTS", "HYPOTHESIS_MATRIX",
+        "CHECKS", "OPEN_RISKS"
+      ],
+      "requiredReviewerSections": [
+        "VERDICT", "BLOCKERS", "FINDINGS",
+        "CODE_EVIDENCE", "NEXT_FOCUS", "CHECKS"
+      ],
+      "scoringDimensions": [
+        "completeness", "classification_accuracy",
+        "evidence_quality", "prioritization", "scope_control"
+      ],
+      "dimensionThreshold": 3,
+      "requiredDeliverables": [
+        "issue_classification", "priority_ranking",
+        "resolution_strategy"
+      ]
+    }
+  },
   "investigateHypotheses": [
     "Observer and Executor share no state — fixable by writing structured issues to self-optimization-status.json",
     "Executor iteration budget (50) is insufficient for diagnose+fix+test cycle — fixable by changing cron job prompt to do only one thing per run",
