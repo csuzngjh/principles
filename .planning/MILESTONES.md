@@ -1,5 +1,19 @@
 # Milestones
 
+## v1.5 Nocturnal Helper 重构 (Planned)
+
+**Target:** Migrate Nocturnal's TrinityRuntimeAdapter to WorkflowManager interface
+
+**Goals:**
+- NocturnalWorkflowManager — wrap `OpenClawTrinityRuntimeAdapter` in WorkflowManager interface
+- Unified subagent lifecycle for all helper workflows (Empathy, DeepReflect, Nocturnal)
+- WorkflowStore event tracking for Trinity 3-stage chain (Dreamer → Philosopher → Scribe)
+- Surface degrade checks and idempotency guarantees
+
+**Not included:** Diagnostician migration (刚跑通，风险极高)
+
+---
+
 ## v1.4 OpenClaw v2026.4.3 Compatibility (Shipped: 2026-04-05)
 
 **Phases completed:** 3 (Phase 1, 2, 5)
