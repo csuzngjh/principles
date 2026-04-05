@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import { EventLogService } from '../core/event-log.js';
 import { buildCritiquePromptV2 } from './critique-prompt.js';
 import { resolvePdPath } from '../core/paths.js';
-import { PathResolver } from '../core/path-resolver.js';
+import { resolveWorkspaceDirFromApi } from '../core/path-resolver.js';
 import { reflectionLogRetentionDays } from '../types.js';
 import {
     DeepReflectWorkflowManager,
@@ -163,26 +163,6 @@ function readNumberParam(rawParams: Record<string, unknown>, key: string): numbe
     return undefined;
 }
 
-/**
- * Resolve workspace directory via official OpenClaw API.
- * Replaces the removed api.workspaceDir field.
- */
-function resolveWorkspaceDir(api: OpenClawPluginApi): string | undefined {
-    const officialAgent = (api.runtime as { agent?: { resolveAgentWorkspaceDir?: (cfg: unknown, id: string) => string } }).agent;
-    if (officialAgent?.resolveAgentWorkspaceDir) {
-        try {
-            return officialAgent.resolveAgentWorkspaceDir(api.config, 'main');
-        } catch {
-            // Fall through
-        }
-    }
-    try {
-        return new PathResolver().getWorkspaceDir();
-    } catch {
-        return undefined;
-    }
-}
-
 export function createDeepReflectTool(api: OpenClawPluginApi) {
     return {
         name: 'deep_reflect',
@@ -212,7 +192,7 @@ export function createDeepReflectTool(api: OpenClawPluginApi) {
 
             const effectiveWorkspaceDir =
                 (api.config?.workspaceDir as string)
-                || resolveWorkspaceDir(api)
+                || resolveWorkspaceDirFromApi(api)
                 || api.resolvePath?.('.');
 
             if (!effectiveWorkspaceDir) {
