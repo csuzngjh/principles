@@ -1289,33 +1289,29 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
         const initialDelay = 5000;
         const interval = config.get('intervals.worker_poll_ms') || (15 * 60 * 1000);
 
-        intervalId = setInterval(() => {
-            void (async () => {
-                const cycleStart = Date.now();
-                const cycleResult: {
-                    timestamp: string;
-                    cycle_start_ms: number;
-                    duration_ms: number;
-                    pain_flag: { exists: boolean; score: number | null; source: string | null; enqueued: boolean; skipped_reason: string | null };
-                    queue: { total: number; pending: number; in_progress: number; completed_this_cycle: number; failed_this_cycle: number };
-                    errors: string[];
-                } = {
-                    timestamp: new Date().toISOString(),
-                    cycle_start_ms: cycleStart,
-                    duration_ms: 0,
-                    pain_flag: { exists: false, score: null, source: null, enqueued: false, skipped_reason: null },
-                    queue: { total: 0, pending: 0, in_progress: 0, completed_this_cycle: 0, failed_this_cycle: 0 },
-                    errors: [],
-                };
+        async function runCycle(): Promise<void> {
+            const cycleStart = Date.now();
+            const cycleResult: {
+                timestamp: string;
+                cycle_start_ms: number;
+                duration_ms: number;
+                pain_flag: { exists: boolean; score: number | null; source: string | null; enqueued: boolean; skipped_reason: string | null };
+                queue: { total: number; pending: number; in_progress: number; completed_this_cycle: number; failed_this_cycle: number };
+                errors: string[];
+            } = {
+                timestamp: new Date().toISOString(),
+                cycle_start_ms: cycleStart,
+                duration_ms: 0,
+                pain_flag: { exists: false, score: null, source: null, enqueued: false, skipped_reason: null },
+                queue: { total: 0, pending: 0, in_progress: 0, completed_this_cycle: 0, failed_this_cycle: 0 },
+                errors: [],
+            };
 
-                // V2: Nocturnal idle check — logs workspace idle state on each cycle.
-                // This makes nocturnal-runtime a visible part of the worker lifecycle.
-                // Phase 2.4: Enqueue sleep_reflection when workspace is idle and not in cooldown.
+            try {
                 const idleResult = checkWorkspaceIdle(wctx.workspaceDir, {});
                 logger?.info?.(`[PD:EvolutionWorker] HEARTBEAT cycle=${new Date().toISOString()} idle=${idleResult.isIdle} idleForMs=${idleResult.idleForMs} userActiveSessions=${idleResult.userActiveSessions} abandonedSessions=${idleResult.abandonedSessionIds.length} lastActivityEpoch=${idleResult.mostRecentActivityAt}`);
                 if (idleResult.isIdle) {
                     logger?.debug?.(`[PD:EvolutionWorker] Workspace idle (${idleResult.idleForMs}ms since last activity)`);
-                    // Phase 2.4: Enqueue sleep_reflection task if not in global cooldown
                     const cooldown = checkCooldown(wctx.stateDir);
                     if (!cooldown.globalCooldownActive && !cooldown.quotaExhausted) {
                         enqueueSleepReflectionTask(wctx, logger).catch((err) => {
@@ -1338,9 +1334,6 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                 }
                 await processPromotion(wctx, logger, eventLog);
 
-                // PR2.1 Task 2: Sweep expired helper workflows
-                // Uses WorkflowStore directly to update state; session cleanup is handled
-                // separately by the workflow manager when it has access to subagent runtime.
                 try {
                     const workflowStore = new WorkflowStore({ workspaceDir: wctx.workspaceDir });
                     const expiredWorkflows = workflowStore.getExpiredWorkflows(WORKFLOW_TTL_MS);
@@ -1361,19 +1354,21 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
 
                 cycleResult.duration_ms = Date.now() - cycleStart;
                 writeWorkerStatus(wctx.stateDir, cycleResult);
-            })().catch((err) => {
+            } catch (err) {
                 const errMsg = `Error in worker interval: ${String(err)}`;
                 if (logger) logger.error(`[PD:EvolutionWorker] ${errMsg}`);
                 writeWorkerStatus(wctx.stateDir, {
                     timestamp: new Date().toISOString(),
-                    cycle_start_ms: Date.now(),
-                    duration_ms: 0,
+                    cycle_start_ms: cycleStart,
+                    duration_ms: Date.now() - cycleStart,
                     pain_flag: { exists: false, score: null, source: null, enqueued: false, skipped_reason: null },
                     queue: { total: 0, pending: 0, in_progress: 0, completed_this_cycle: 0, failed_this_cycle: 0 },
                     errors: [errMsg],
                 });
-            });
-        }, interval);
+            }
+
+            timeoutId = setTimeout(runCycle, interval);
+        }
 
         timeoutId = setTimeout(() => {
             void (async () => {
@@ -1383,8 +1378,10 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                     await processDetectionQueue(wctx, api, eventLog);
                 }
                 await processPromotion(wctx, logger, eventLog);
+                timeoutId = setTimeout(runCycle, interval);
             })().catch((err) => {
                 if (logger) logger.error(`[PD:EvolutionWorker] Startup worker cycle failed: ${String(err)}`);
+                timeoutId = setTimeout(runCycle, interval);
             });
         }, initialDelay);
     },

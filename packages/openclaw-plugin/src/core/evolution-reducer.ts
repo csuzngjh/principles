@@ -331,7 +331,10 @@ export class EvolutionReducerImpl implements EvolutionReducer {
     });
 
     this.promote(principleId, 'diagnostician_generalized');
-    this.syncPrincipleToFile(principle);
+    const synced = this.syncPrincipleToFile(principle);
+    if (!synced) {
+      SystemLogger.log(this.workspaceDir, 'PRINCIPLE_SYNC_WARN', `Principle ${principleId} created in memory but NOT synced to file`);
+    }
 
     SystemLogger.log(
       this.workspaceDir,
@@ -342,7 +345,7 @@ export class EvolutionReducerImpl implements EvolutionReducer {
     return principleId;
   }
 
-  private syncPrincipleToFile(principle: Principle): void {
+  private syncPrincipleToFile(principle: Principle): boolean {
     try {
       withLock(this.principlesPath + '.lock', () => {
         let content = '';
@@ -368,8 +371,10 @@ export class EvolutionReducerImpl implements EvolutionReducer {
         fs.writeFileSync(this.principlesPath, content, 'utf8');
         SystemLogger.log(this.workspaceDir, 'PRINCIPLE_SYNCED', `Principle ${principle.id} synced to PRINCIPLES.md`);
       }, { lockStaleMs: 10000 });
+      return true;
     } catch (e) {
       SystemLogger.log(this.workspaceDir, 'PRINCIPLE_SYNC_ERROR', `Failed to sync ${principle.id} to PRINCIPLES.md: ${String(e)}`);
+      return false;
     }
   }
 
