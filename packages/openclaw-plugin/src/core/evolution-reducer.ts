@@ -276,11 +276,18 @@ export class EvolutionReducerImpl implements EvolutionReducer {
         // Malformed metadata provided — clear any existing metadata
         existingPrinciple.detectorMetadata = undefined;
       }
+      if (params.abstractedPrinciple !== undefined) {
+        existingPrinciple.abstractedPrinciple = params.abstractedPrinciple;
+      }
       SystemLogger.log(
         this.workspaceDir,
         'PRINCIPLE_UPDATED',
         `Principle ${existingPrinciple.id} updated from diagnostician: "${params.triggerPattern.slice(0, 50)}..." [evaluability: ${existingPrinciple.evaluability}]`
       );
+      const synced = this.syncPrincipleToFile(existingPrinciple);
+      if (!synced) {
+        SystemLogger.log(this.workspaceDir, 'PRINCIPLE_SYNC_WARN', `Principle ${existingPrinciple.id} updated in memory but NOT synced to file`);
+      }
       return existingPrinciple.id;
     }
 

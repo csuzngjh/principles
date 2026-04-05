@@ -545,7 +545,7 @@ The empathy observer subagent handles pain detection independently.
           const principlesPath = wctx.resolve('PRINCIPLES');
           if (fs.existsSync(principlesPath)) {
             const principlesContent = fs.readFileSync(principlesPath, 'utf8');
-            const principleBlocks = principlesContent.match(/### P-[\w-]+:[^\n]*\n(?:-[^\n]*\n)*/g);
+            const principleBlocks = principlesContent.match(/### P_[\w-]+:[^\n]*\n(?:-[^\n]*\n)*/g);
             if (principleBlocks && principleBlocks.length > 0) {
               existingPrinciplesRef = `\n\n**Existing Principles for Style Reference**:\n${principleBlocks.slice(-3).join('\n')}`;
             }

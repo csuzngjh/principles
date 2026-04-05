@@ -315,6 +315,15 @@ function writeBuildFingerprint() {
         console.warn('⚠️  Could not get git SHA, fingerprint will be incomplete');
     }
 
+    // Compute MD5 of bundle.js
+    let bundleMd5 = 'unknown';
+    try {
+        const bundleContent = readFileSyncRaw(bundleJs);
+        bundleMd5 = createHash('md5').update(bundleContent).digest('hex');
+    } catch {
+        console.warn('⚠️  Could not compute bundle MD5, fingerprint will be incomplete');
+    }
+
     // Read manifest
     let manifest;
     try {

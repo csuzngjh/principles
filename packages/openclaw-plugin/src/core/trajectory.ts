@@ -242,29 +242,33 @@ export class TrajectoryDatabase {
   recordPainEvent(input: TrajectoryPainEventInput): void {
     this.recordSession({ sessionId: input.sessionId, startedAt: input.createdAt });
     this.withWrite(() => {
-      this.db.prepare(`
-        INSERT INTO pain_events (
-          session_id, source, score, reason, severity, origin, confidence, text, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        input.sessionId,
-        input.source,
-        input.score,
-        input.reason ?? null,
-        input.severity ?? null,
-        input.origin ?? null,
-        input.confidence ?? null,
-        input.text ?? null,
-        input.createdAt ?? nowIso(),
-      );
-
-      // Maintain FTS5 index: insert text into pain_events_fts if text is provided (MEM-03, MEM-04)
-      if (input.text) {
-        const lastId = this.db.prepare('SELECT last_insert_rowid() as id').get() as { id: number };
+      // Wrap both inserts in a database transaction for atomicity.
+      // If the main table insert succeeds but FTS fails, we'd have divergent state.
+      this.db.transaction(() => {
         this.db.prepare(`
-          INSERT INTO pain_events_fts (text, pain_event_id) VALUES (?, ?)
-        `).run(input.text, lastId.id);
-      }
+          INSERT INTO pain_events (
+            session_id, source, score, reason, severity, origin, confidence, text, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          input.sessionId,
+          input.source,
+          input.score,
+          input.reason ?? null,
+          input.severity ?? null,
+          input.origin ?? null,
+          input.confidence ?? null,
+          input.text ?? null,
+          input.createdAt ?? nowIso(),
+        );
+
+        // Maintain FTS5 index: insert text into pain_events_fts if text is provided (MEM-03, MEM-04)
+        if (input.text) {
+          const lastId = this.db.prepare('SELECT last_insert_rowid() as id').get() as { id: number };
+          this.db.prepare(`
+            INSERT INTO pain_events_fts (text, pain_event_id) VALUES (?, ?)
+          `).run(input.text, lastId.id);
+        }
+      })();
     });
   }
 
@@ -297,7 +301,7 @@ export class TrajectoryDatabase {
         FROM pain_events_fts pf
         JOIN pain_events pe ON pe.id = pf.pain_event_id
         WHERE pain_events_fts MATCH ?
-        ORDER BY bm25(pain_events_fts) DESC
+        ORDER BY bm25(pain_events_fts) ASC
         LIMIT ?
       `).all(ftsQuery, limit) as Array<{
         id: number;
@@ -1241,11 +1245,9 @@ export class TrajectoryDatabase {
     // SQLite doesn't support IF NOT EXISTS for ADD COLUMN, so we use try/catch
     try {
       this.db.exec(`ALTER TABLE pain_events ADD COLUMN text TEXT`);
-    } catch (err: any) {
-      // Ignore if column already exists (error code 1: table has no column named 'text')
-      if (!err.message?.includes('duplicate column name')) {
-        // Only throw if it's a different error
-      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!message.includes('duplicate column')) throw err;
     }
 
     // Create FTS5 virtual table for pain_events text search (MEM-04)

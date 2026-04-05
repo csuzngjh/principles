@@ -143,10 +143,12 @@ const DEFAULT_MAX_RETRIES = 3;
  * Old items without taskKind are assumed to be pain_diagnosis for backward compatibility.
  */
 function migrateToV2(item: LegacyEvolutionQueueItem): EvolutionQueueItem {
+    const taskKind = ('taskKind' in item && typeof item.taskKind === 'string' ? item.taskKind : undefined) as TaskKind | undefined;
+    const priority = ('priority' in item && typeof item.priority === 'string' ? item.priority : undefined) as TaskPriority | undefined;
     return {
         id: item.id,
-        taskKind: (item.taskKind as TaskKind) || DEFAULT_TASK_KIND,
-        priority: (item.priority as TaskPriority) || DEFAULT_PRIORITY,
+        taskKind: taskKind || DEFAULT_TASK_KIND,
+        priority: priority || DEFAULT_PRIORITY,
         source: item.source,
         traceId: item.traceId,
         task: item.task,
@@ -739,9 +741,13 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         logger.warn(`[PD:EvolutionWorker] Failed to parse late diagnostician report for task ${task.id}: ${String(err)}`);
                     }
                     try { fs.unlinkSync(completeMarker); } catch {}
+                    task.status = 'completed';
+                    task.completed_at = new Date().toISOString();
                     task.resolution = principleCreated ? 'late_marker_principle_created' : 'late_marker_no_principle';
                 } else {
                     if (logger) logger.info(`[PD:EvolutionWorker] Task ${task.id} auto-completed after ${timeoutMinutes} minute timeout`);
+                    task.status = 'completed';
+                    task.completed_at = new Date().toISOString();
                     task.resolution = 'auto_completed_timeout';
                 }
 
@@ -801,7 +807,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                 const principlesPath = wctx.resolve('PRINCIPLES');
                 if (fs.existsSync(principlesPath)) {
                     const principlesContent = fs.readFileSync(principlesPath, 'utf8');
-                    const principleBlocks = principlesContent.match(/### P-[\w-]+:[^\n]*\n(?:-[^\n]*\n)*/g);
+                    const principleBlocks = principlesContent.match(/### P_[\w-]+:[^\n]*\n(?:-[^\n]*\n)*/g);
                     if (principleBlocks && principleBlocks.length > 0) {
                         existingPrinciplesRef = `\n**Existing Principles for Style Reference**:\n${principleBlocks.slice(-3).join('\n')}`;
                     }
@@ -1246,13 +1252,19 @@ async function processEvolutionQueueWithResult(
         queueResult.pending = queue.filter((t: any) => t.status === 'pending').length;
         queueResult.in_progress = queue.filter((t: any) => t.status === 'in_progress').length;
 
-        for (const task of queue) {
-            if (task?.taskKind !== 'sleep_reflection') continue;
-            if (task?.status === 'completed') queueResult.completed_this_cycle++;
-            if (task?.status === 'failed') queueResult.failed_this_cycle++;
-        }
+        const completedBefore = queue.filter((t: any) => t?.taskKind === 'sleep_reflection' && t?.status === 'completed').length;
+        const failedBefore = queue.filter((t: any) => t?.taskKind === 'sleep_reflection' && t?.status === 'failed').length;
 
         await processEvolutionQueue(wctx, logger, eventLog, api);
+
+        try {
+            const postQueue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
+            const completedAfter = postQueue.filter((t: any) => t?.taskKind === 'sleep_reflection' && t?.status === 'completed').length;
+            const failedAfter = postQueue.filter((t: any) => t?.taskKind === 'sleep_reflection' && t?.status === 'failed').length;
+            queueResult.completed_this_cycle = Math.max(0, completedAfter - completedBefore);
+            queueResult.failed_this_cycle = Math.max(0, failedAfter - failedBefore);
+        } catch {
+        }
     } catch (err) {
         const errMsg = `processEvolutionQueue failed: ${String(err)}`;
         errors.push(errMsg);
