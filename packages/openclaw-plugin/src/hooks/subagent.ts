@@ -491,7 +491,8 @@ export async function handleSubagentEnded(
                         }
                     }
                 } else {
-                    logger.warn(`[PD:Subagent] Diagnostician output for task ${completedTaskId} did not contain parseable principle JSON. Output length: ${assistantText.length} chars. First 200 chars: ${assistantText.slice(0, 200)}`);
+                    const structureInfo = report?.rawStructure ? ` (found at: ${report.rawStructure})` : '';
+                    logger.warn(`[PD:Subagent] Diagnostician output for task ${completedTaskId} did not contain parseable principle JSON${structureInfo}. Output length: ${assistantText.length} chars. First 200 chars: ${assistantText.slice(0, 200)}`);
 
                     // Fallback: try to extract principle from raw text even without JSON
                     const extractedPrinciple = extractPrincipleFromRawText(assistantText, matchedTask);
@@ -564,21 +565,17 @@ function parseDiagnosticianReport(
             confidence?: 'high' | 'medium' | 'low';
         };
     };
+    rawStructure?: string;
 } | null {
     // Try to find JSON in markdown code block
     const jsonMatch = text.match(/```json\n([\s\S]*?)\n```/);
     if (jsonMatch) {
         try {
             const parsed = JSON.parse(jsonMatch[1]);
-            // Support both direct principle and nested phases.principle_extraction structure
-            if (parsed?.principle) {
-                return { principle: parsed.principle };
-            }
-            if (parsed?.phases?.principle_extraction?.principle) {
-                return { principle: parsed.phases.principle_extraction.principle };
-            }
+            const principle = extractPrincipleFromParsed(parsed);
+            if (principle) return { principle, rawStructure: getStructurePath(parsed) };
         } catch {
-            // Fall through to return null
+            // Fall through
         }
     }
 
@@ -587,18 +584,41 @@ function parseDiagnosticianReport(
     if (objectMatch) {
         try {
             const parsed = JSON.parse(objectMatch[0]);
-            if (parsed?.principle) {
-                return { principle: parsed.principle };
-            }
-            if (parsed?.phases?.principle_extraction?.principle) {
-                return { principle: parsed.phases.principle_extraction.principle };
-            }
+            const principle = extractPrincipleFromParsed(parsed);
+            if (principle) return { principle, rawStructure: getStructurePath(parsed) };
         } catch {
-            // Fall through to return null
+            // Fall through
         }
     }
 
     return null;
+}
+
+/**
+ * Extract principle from any known nesting path.
+ * Supports: top-level, phases.principle_extraction, diagnosis_report
+ */
+function extractPrincipleFromParsed(parsed: any): any {
+    // Path 1: { principle: ... } (flat)
+    if (parsed?.principle) return parsed.principle;
+    // Path 2: { phases: { principle_extraction: { principle: ... } } }
+    if (parsed?.phases?.principle_extraction?.principle) return parsed.phases.principle_extraction.principle;
+    // Path 3: { diagnosis_report: { principle: ... } } (actual output from diagnostician)
+    if (parsed?.diagnosis_report?.principle) return parsed.diagnosis_report.principle;
+    // Path 4: { diagnosis_report: { phases: { principle_extraction: { principle: ... } } } }
+    if (parsed?.diagnosis_report?.phases?.principle_extraction?.principle) return parsed.diagnosis_report.phases.principle_extraction.principle;
+    return null;
+}
+
+/**
+ * Return a human-readable description of where principle was found.
+ */
+function getStructurePath(parsed: any): string {
+    if (parsed?.principle) return 'top-level';
+    if (parsed?.phases?.principle_extraction?.principle) return 'phases.principle_extraction.principle';
+    if (parsed?.diagnosis_report?.principle) return 'diagnosis_report.principle';
+    if (parsed?.diagnosis_report?.phases?.principle_extraction?.principle) return 'diagnosis_report.phases.principle_extraction.principle';
+    return 'unknown';
 }
 
 function extractPrincipleFromRawText(
