@@ -1030,6 +1030,12 @@ function reportExistsAndNonEmpty(reportPath) {
   return fileExists(reportPath) && Boolean(fs.readFileSync(reportPath, 'utf8').trim());
 }
 
+// Classification of protected files by severity.
+// Critical files: modifying them corrupts sprint truth state — must halt.
+// Non-critical files: nice-to-have state that can be restored or skipped — warn only.
+const PROTECTED_CRITICAL = ['sprint.json', 'timeline.md', 'latest-summary.md'];
+const PROTECTED_STAGE_CRITICAL = ['decision.md', 'scorecard.json'];
+
 function protectedArtifacts(runDir, paths) {
   // Roles must not modify orchestrator-owned run-level and stage-level truth sources.
   // mtime checks are still useful to catch accidental writes by producer/reviewer roles.
@@ -1041,6 +1047,45 @@ function protectedArtifacts(runDir, paths) {
   ];
 }
 
+function classifyProtectedFile(filePath, runDir) {
+  const basename = path.basename(filePath);
+  const stageDir = path.join(runDir, 'stages');
+  if (filePath.startsWith(stageDir)) {
+    return PROTECTED_STAGE_CRITICAL.includes(basename) ? 'critical' : 'warn';
+  }
+  return PROTECTED_CRITICAL.includes(basename) ? 'critical' : 'warn';
+}
+
+/**
+ * Backup protected files before spawning an agent. Called once per role invocation.
+ * Returns a map of {filePath: backupContent | null} for later restoration.
+ */
+function backupProtectedFiles(files) {
+  const backups = {};
+  for (const file of files) {
+    backups[file] = fileExists(file) ? fs.readFileSync(file, 'utf8') : null;
+  }
+  return backups;
+}
+
+/**
+ * Restore protected files from backup if they were modified.
+ * Returns a list of restored file paths.
+ */
+function restoreProtectedFiles(backups) {
+  const restored = [];
+  for (const [file, content] of Object.entries(backups)) {
+    if (content !== null) {
+      fs.writeFileSync(file, content, 'utf8');
+      restored.push(file);
+    } else if (fileExists(file)) {
+      // File was created (didn't exist before) — delete it
+      try { fs.unlinkSync(file); restored.push(file); } catch {}
+    }
+  }
+  return restored;
+}
+
 function snapshotProtectedFiles(files) {
   const snapshot = {};
   for (const file of files) {
@@ -1049,11 +1094,18 @@ function snapshotProtectedFiles(files) {
   return snapshot;
 }
 
-function detectProtectedWriteViolation(files, snapshot) {
+/**
+ * Detect protected file write violations. Returns { file, severity } for the
+ * first violation found, or null if none.
+ * severity: 'critical' (must halt) or 'warn' (restore + continue).
+ */
+function detectProtectedWriteViolation(files, snapshot, runDir) {
   for (const file of files) {
     const previous = snapshot[file] ?? null;
     const current = fileExists(file) ? fs.statSync(file).mtimeMs : null;
-    if (previous !== current) return file;
+    if (previous !== current) {
+      return { file, severity: classifyProtectedFile(file, runDir) };
+    }
   }
   return null;
 }

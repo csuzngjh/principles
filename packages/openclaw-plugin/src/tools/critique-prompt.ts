@@ -1,22 +1,5 @@
-import type { OpenClawPluginApi } from '../openclaw-sdk.js';
 import { loadModelIndex } from './model-index.js';
-
-/**
- * Resolve workspace directory via official OpenClaw API.
- * Replaces the removed api.workspaceDir field.
- */
-function resolveWorkspaceDirFromApi(api: OpenClawPluginApi | undefined): string | undefined {
-    if (!api) return undefined;
-    const officialAgent = (api.runtime as { agent?: { resolveAgentWorkspaceDir?: (cfg: unknown, id: string) => string } }).agent;
-    if (officialAgent?.resolveAgentWorkspaceDir) {
-        try {
-            return officialAgent.resolveAgentWorkspaceDir(api.config, 'main');
-        } catch {
-            // Fall through
-        }
-    }
-    return undefined;
-}
+import { resolveWorkspaceDirFromApi } from '../core/path-resolver.js';
 
 /**
  * 深度指令模板 (必须与测试用例中的 quick/balanced/thorough 关键字对齐)
