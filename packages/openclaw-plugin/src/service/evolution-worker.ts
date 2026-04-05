@@ -456,7 +456,18 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger) {
             if (line.startsWith('trace_id:')) traceId = line.split(':', 2)[1].trim();
             if (line.startsWith('session_id:')) sessionId = line.slice('session_id:'.length).trim();
             if (line.startsWith('agent_id:')) agentId = line.slice('agent_id:'.length).trim();
+
+            // Markdown format support (pain skill writes **Source**: xxx format)
+            const mdSource = line.match(/\*\*Source\*\*:\s*(.+)/);
+            if (mdSource) source = mdSource[1].trim();
+            const mdReason = line.match(/\*\*Reason\*\*:\s*(.+)/);
+            if (mdReason) reason = mdReason[1].trim();
+            const mdTime = line.match(/\*\*Time\*\*:\s*(.+)/);
+            if (mdTime) preview = `Human intervention at ${mdTime[1].trim()}`;
         }
+
+        // Markdown format has no score — default to 50 for human intervention
+        if (score === 0 && source !== 'unknown') score = 50;
 
         if (isQueued || score < 30) return;
 
