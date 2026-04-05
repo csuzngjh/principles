@@ -973,8 +973,27 @@ async function processDetectionQueue(wctx: WorkspaceContext, api: OpenClawPlugin
                     });
                 }
             } else {
-                // L3 semantic search via createMemorySearchTool is not available in the OpenClaw SDK.
-                // Fall through to L2 rule-based detection only.
+                // L3 semantic search via trajectory database FTS5 (MEM-04)
+                if (wctx.trajectory) {
+                    const searchResults = wctx.trajectory.searchPainEvents(text, 5);
+                    if (searchResults.length > 0) {
+                        // Found similar pain events - record as L3 semantic hit
+                        if (eventLog) {
+                            eventLog.recordRuleMatch(undefined, {
+                                ruleId: 'l3_semantic',
+                                layer: 'L3',
+                                severity: searchResults[0].score,
+                                textPreview: text.substring(0, 100)
+                            });
+                        }
+                        // Update detection funnel cache with L3 hit result
+                        funnel.updateCache(text, { detected: true, severity: searchResults[0].score });
+                        // Don't track as candidate - this is a confirmed L3 hit
+                        if (logger) logger.info(`[PD:EvolutionWorker] L3 semantic hit: found ${searchResults.length} similar pain events for "${text.substring(0, 50)}..."`);
+                        continue;
+                    }
+                }
+                // No L3 hit - fall through to track as pain candidate
                 await trackPainCandidate(text, wctx);
             }
         }
