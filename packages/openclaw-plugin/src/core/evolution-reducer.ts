@@ -276,6 +276,15 @@ export class EvolutionReducerImpl implements EvolutionReducer {
         // Malformed metadata provided — clear any existing metadata
         existingPrinciple.detectorMetadata = undefined;
       }
+      // Refresh abstractedPrinciple if provided
+      if (params.abstractedPrinciple) {
+        existingPrinciple.abstractedPrinciple = params.abstractedPrinciple;
+      }
+      // Sync to file to ensure PRINCIPLES.md stays up to date
+      const synced = this.syncPrincipleToFile(existingPrinciple);
+      if (!synced) {
+        SystemLogger.log(this.workspaceDir, 'PRINCIPLE_SYNC_WARN', `Principle ${existingPrinciple.id} updated in memory but NOT synced to file`);
+      }
       SystemLogger.log(
         this.workspaceDir,
         'PRINCIPLE_UPDATED',
@@ -327,6 +336,7 @@ export class EvolutionReducerImpl implements EvolutionReducer {
         detectorMetadata: isCompleteDetectorMetadata(params.detectorMetadata)
           ? structuredClone(params.detectorMetadata)
           : undefined,
+        abstractedPrinciple: params.abstractedPrinciple,
       },
     });
 
@@ -501,6 +511,10 @@ export class EvolutionReducerImpl implements EvolutionReducer {
       if (data.detectorMetadata) {
         existing.detectorMetadata = structuredClone(data.detectorMetadata);
       }
+      // Restore abstractedPrinciple from event if present
+      if (data.abstractedPrinciple) {
+        existing.abstractedPrinciple = data.abstractedPrinciple;
+      }
       return;
     }
 
@@ -526,6 +540,8 @@ export class EvolutionReducerImpl implements EvolutionReducer {
       detectorMetadata: data.detectorMetadata
         ? structuredClone(data.detectorMetadata)
         : undefined,
+      // Restore abstractedPrinciple from event if present
+      abstractedPrinciple: data.abstractedPrinciple,
     };
     this.principles.set(principle.id, principle);
   }

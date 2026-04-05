@@ -347,6 +347,8 @@ export interface CandidateCreatedData {
   evaluability?: PrincipleEvaluatorLevel;
   /** Optional detector metadata — absent = manual_only */
   detectorMetadata?: PrincipleDetectorSpec;
+  /** Optional abstracted principle title (≤40 chars) — preserved on replay */
+  abstractedPrinciple?: string;
 }
 
 export interface PrinciplePromotedData {

@@ -811,19 +811,23 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     task.resolution = 'auto_completed_timeout';
                 }
 
-                // Log to EvolutionLogger
+                // Critical: mark task as completed so it doesn't get re-processed
+                task.status = 'completed';
+                task.completed_at = new Date().toISOString();
+
+                // Log to EvolutionLogger - use task.resolution, not hardcoded value
                 evoLogger.logCompleted({
                     traceId: task.traceId || task.id,
                     taskId: task.id,
-                    resolution: 'auto_completed_timeout',
+                    resolution: task.resolution,
                     durationMs: age,
                 });
 
-                // Update evolution_tasks table
+                // Update evolution_tasks table - use task.resolution, not hardcoded value
                 wctx.trajectory?.updateEvolutionTask?.(task.id, {
                     status: 'completed',
                     completedAt: task.completed_at,
-                    resolution: 'auto_completed_timeout',
+                    resolution: task.resolution,
                 });
 
                 wctx.trajectory?.recordTaskOutcome({
