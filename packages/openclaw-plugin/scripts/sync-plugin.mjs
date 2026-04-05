@@ -134,7 +134,6 @@ function compareVersions(a, b) {
         if (partsA[i] < partsB[i]) return -1;
     }
     return 0;
-    return 0;
 }
 
 /**
