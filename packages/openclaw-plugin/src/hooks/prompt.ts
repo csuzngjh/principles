@@ -540,6 +540,21 @@ The empathy observer subagent handles pain detection independently.
 
         const escapedTask = JSON.stringify(resolvedTask);
 
+        let existingPrinciplesRef = '';
+        try {
+          const principlesPath = wctx.resolve('PRINCIPLES');
+          if (fs.existsSync(principlesPath)) {
+            const principlesContent = fs.readFileSync(principlesPath, 'utf8');
+            const principleBlocks = principlesContent.match(/### P-[\w-]+:[^\n]*\n(?:-[^\n]*\n)*/g);
+            if (principleBlocks && principleBlocks.length > 0) {
+              existingPrinciplesRef = `\n\n**Existing Principles for Style Reference**:\n${principleBlocks.slice(-3).join('\n')}`;
+            }
+          }
+        } catch {}
+
+        const spawnTask = `使用 pd-diagnostician skill 执行诊断任务。\n\n任务: ${escapedTask}${existingPrinciplesRef}`;
+        const escapedSpawnTask = JSON.stringify(spawnTask);
+
         logger?.info(`[PD:Prompt] Injecting EVOLUTION TASK for: ${inProgressTask.id}`);
 
         if (trigger === 'user') {
@@ -553,7 +568,7 @@ REQUIRED ACTION (两阶段回复):
 "我注意到刚才的操作遇到了一些问题（简述问题），我已安排诊断代理在后台分析根因。分析完成后会继续告诉你结果。"
 
 然后调用：
-  sessions_spawn(task="使用 pd-diagnostician skill 执行诊断任务。\n\n任务: ${escapedTask}")
+  sessions_spawn(task=${escapedSpawnTask})
 
 **阶段 2 - 收到子代理结果后:**
 当收到诊断代理的完成消息后，用以下格式回复用户：
@@ -577,7 +592,7 @@ TASK: ${escapedTask}
 
 REQUIRED ACTION:
 - Start diagnostics immediately by calling:
-  sessions_spawn(task="使用 pd-diagnostician skill 执行诊断任务。\n\n任务: ${escapedTask}")
+  sessions_spawn(task=${escapedSpawnTask})
 - Do NOT reply with "[EVOLUTION_ACK]".
 </evolution_task>\n`;
         }
@@ -594,10 +609,16 @@ REQUIRED ACTION:
   }
 
   // Inject queue-derived evolution task at the front of prependContext
-  // Skip for minimal mode (heartbeat / subagent / observer sessions) to avoid
-  // polluting empathy observer prompts and other internal subagent sessions.
-  if (activeEvolutionTaskPrompt && !isMinimalMode) {
+  // Skip for subagent/observer sessions to avoid polluting their prompts.
+  // Heartbeat sessions MUST receive evolution tasks — that's how the
+  // pain→diagnostician→principle chain works. The original minimal mode
+  // skip was for empathy observers, not heartbeat sessions.
+  const isSubagentSession = sessionId?.includes(':subagent:') === true;
+  if (activeEvolutionTaskPrompt && !isSubagentSession) {
     prependContext = activeEvolutionTaskPrompt + prependContext;
+    logger?.info(`[PD:Prompt] Evolution task injected into ${trigger} session (was minimalMode=${isMinimalMode}, now included)`);
+  } else if (activeEvolutionTaskPrompt && isSubagentSession) {
+    logger?.info(`[PD:Prompt] Evolution task SKIPPED for subagent session`);
   }
 
   // ─────────────────────────────────────────────────4. Empathy Observer Spawn (async sidecar)
@@ -607,7 +628,8 @@ REQUIRED ACTION:
 
   const isUserInteraction = trigger === 'user' || trigger === 'api' || !trigger;
 
-  if (isUserInteraction && sessionId && api && !isAgentToAgent) {
+  const empathyEnabled = wctx.config.get('empathy_engine.enabled') !== false;
+  if (empathyEnabled && isUserInteraction && sessionId && api && !isAgentToAgent) {
     prependContext = '### BEHAVIORAL_CONSTRAINTS\n' + empathySilenceConstraint + '\n\n' + prependContext;
 
     // Empathy Observer: analyze user message for frustration signals

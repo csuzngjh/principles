@@ -309,7 +309,9 @@ export interface Principle {
    * may be auto-trainable (deterministic / weak_heuristic).
    * Absent or malformed = 'manual_only' evaluability.
    */
-  detectorMetadata?: PrincipleDetectorSpec;
+   detectorMetadata?: PrincipleDetectorSpec;
+  /** Highly abstracted principle text suitable for PRINCIPLES.md */
+  abstractedPrinciple?: string;
 }
 
 export type EvolutionLoopEventType =

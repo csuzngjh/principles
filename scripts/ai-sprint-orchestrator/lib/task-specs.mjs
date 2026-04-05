@@ -341,12 +341,64 @@ export function buildRolePrompt({ spec, stage, round, role, runDir, stageDir, br
       `You may inspect and modify repository code when the stage requires implementation.`,
       `You are expected to work autonomously within this stage until you either satisfy the stage goals or hit a concrete blocker.`,
       `Persist your intermediate findings frequently so a future agent can resume without relying on chat context.`,
-      `At the end, write a markdown report to ${outputPath} with exactly these sections: SUMMARY, CHANGES, EVIDENCE, CODE_EVIDENCE, KEY_EVENTS, HYPOTHESIS_MATRIX, CHECKS, OPEN_RISKS${requiredDeliverables.length > 0 ? ', CONTRACT' : ''}.`,
-      `KEY_EVENTS should be bullets describing concrete completed milestones or validated events.`,
-      stage === 'investigate'
-        ? `HYPOTHESIS_MATRIX must include one bullet per required hypothesis in this exact shape: - <hypothesis_id>: SUPPORTED|REFUTED|UNPROVEN — <brief evidence>.`
-        : `HYPOTHESIS_MATRIX should capture any remaining competing explanations or risk assumptions.`,
-      `CHECKS should be a single-line machine-readable summary such as: CHECKS: evidence=ok;tests=not-run;scope=pd-only;prompt-isolation=confirmed`,
+      // WF-004 fix v2: Enforce schema compliance with hard constraints.
+      // Agents that omit required sections get their stage REJECTED — this wastes
+      // rounds and triggers orchestrator retries. Tell the agent explicitly.
+      ``,
+      `### 📋 REPORT SCHEMA — HARD CONSTRAINT (read this BEFORE writing your report)`,
+      ``,
+      `The orchestrator validates your report against a REQUIRED SECTIONS checklist.`,
+      `If ANY section below is missing, your stage will be REJECTED and you will be forced to retry.`,
+      `This has already cost multiple sprints their max_rounds budget — do NOT let it happen again.`,
+      ``,
+      `REQUIRED SECTIONS (MUST appear verbatim as ## headings, in this order):`,
+      `  1. ## SUMMARY`,
+      `  2. ## CHANGES`,
+      `  3. ## EVIDENCE`,
+      `  4. ## CODE_EVIDENCE`,
+      `  5. ## KEY_EVENTS`,
+      `  6. ## HYPOTHESIS_MATRIX`,
+      `  7. ## CHECKS`,
+      `  8. ## OPEN_RISKS`,
+      `${requiredDeliverables.length > 0 ? `  9. ## CONTRACT` : ''}`,
+      ``,
+      `### SELF-CHECK — before you finish:`,
+      `Scan your report for EACH of the headings above. If any is missing, add it NOW.`,
+      `If you have nothing to say for a section, write "None" under the heading — NEVER skip it.`,
+      ``,
+      `Write your markdown report to ${outputPath} using EXACTLY the skeleton below:`,
+      ``,
+      `--- PRODUCER REPORT TEMPLATE ---
+## SUMMARY
+<brief overview of what was done and found>
+
+## CHANGES
+<list of files created/modified with brief descriptions, or "No changes in this stage">
+
+## EVIDENCE
+<supporting evidence — git log, test output, file contents, sprint state>
+
+## CODE_EVIDENCE
+- files_checked: <comma-separated list>
+- evidence_source: local|remote|both
+- sha: <HEAD SHA>
+<add evidence_scope: principles|openclaw|both if applicable>
+
+## KEY_EVENTS
+<bullets describing concrete completed milestones or validated events>
+
+## HYPOTHESIS_MATRIX
+${stage === 'investigate' ? '<one bullet per hypothesis: - H1: SUPPORTED|REFUTED|UNPROVEN — <evidence>.' : '<any remaining competing explanations or risk assumptions>'}
+
+## CHECKS
+CHECKS: evidence=<ok/fail>;tests=<pass-count>-pass;scope=pd-only
+
+## OPEN_RISKS
+<remaining risks, uncertainties, or items requiring human attention, or "None at this time">
+${requiredDeliverables.length > 0 ? `
+## CONTRACT
+<contract compliance statement, one line per required deliverable>` : ''}`,
+      `--- END TEMPLATE — every heading above MUST appear in your report ---`,
       codeEvidenceInstruction,
       ...contractInstruction,
       `Do not dump long reasoning logs to stdout. Stdout should only contain a short completion line such as: ROLE_STATUS: completed; report=${outputPath}`,

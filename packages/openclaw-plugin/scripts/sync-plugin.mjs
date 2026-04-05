@@ -263,16 +263,14 @@ function verifyBundleContents() {
 
     const content = readFileSync(bundleJs, 'utf-8');
 
-    // Critical symbols that must exist in the bundled plugin.
-    // These are functions/classes that were previously silently dropped from the bundle.
-    // NOTE: esbuild minifies class names (EmpathyObserverManager -> EmpathyObserver) and
-    // inlines const values (OBSERVER_SESSION_PREFIX -> "empathy-obs-"), so check for
-    // the actual bundled forms, not the source-level names.
+    // Critical symbols that must exist in the bundled plugin (post #159 empathy migration).
+    // The new empathy system uses EmpathyObserverWorkflowManager + workflow spec pattern.
+    // NOTE: esbuild minifies class names, so we check for string references
+    // (error messages, log strings) that survive minification.
     const requiredSymbols = [
-        { name: 'finalizeRun',       reason: 'main empathy observer回收链路 (waitForRun驱动)' },
-        { name: 'reapBySession',      reason: '统一回收入口 (reap + deleteSession + 清理状态)' },
-        { name: 'EmpathyObserver',    reason: 'EmpathyObserverManager class (minified name in bundle)' },
-        { name: 'empathy-obs-',       reason: 'OBSERVER_SESSION_PREFIX value (inlined by esbuild)' },
+        { name: 'EmpathyObserverWorkflowManager', reason: 'empathy observer workflow manager class (error messages survive minification)' },
+        { name: 'empathyObserverWorkflowSpec', reason: 'empathy workflow spec definition' },
+        { name: 'empathySignalJson', reason: 'empathy signal JSON serialization' },
     ];
 
     const missing = [];
@@ -315,15 +313,6 @@ function writeBuildFingerprint() {
         }).trim().slice(0, 12);
     } catch {
         console.warn('⚠️  Could not get git SHA, fingerprint will be incomplete');
-    }
-
-    // Compute MD5 of bundle.js
-    let bundleMd5 = 'unknown';
-    try {
-        const bundleContent = readFileSyncRaw(bundleJs);
-        bundleMd5 = createHash('md5').update(bundleContent).digest('hex');
-    } catch {
-        console.warn('⚠️  Could not compute bundle MD5, fingerprint will be incomplete');
     }
 
     // Read manifest

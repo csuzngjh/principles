@@ -42,10 +42,10 @@ export interface EvolutionReducer {
     triggerPattern: string;
     action: string;
     source: string;
-    /** Evaluability level — defaults to 'manual_only' if omitted */
     evaluability?: PrincipleEvaluatorLevel;
-    /** Detector metadata — absent or malformed = 'manual_only' evaluability */
     detectorMetadata?: PrincipleDetectorSpec;
+    /** Highly abstracted principle text — if absent, falls back to action-based title */
+    abstractedPrinciple?: string;
   }): string | null;
   getStats(): {
     candidateCount: number;
@@ -64,6 +64,7 @@ export class EvolutionReducerImpl implements EvolutionReducer {
   private readonly streamPath: string;
   private readonly lockTargetPath: string;
   private readonly blacklistPath: string;
+  private readonly principlesPath: string;
   private readonly workspaceDir: string;
   private readonly memoryEvents: EvolutionLoopEvent[] = [];
   private readonly principles = new Map<string, Principle>();
@@ -77,6 +78,7 @@ export class EvolutionReducerImpl implements EvolutionReducer {
     this.streamPath = resolver.resolve('EVOLUTION_STREAM');
     this.lockTargetPath = resolver.resolve('EVOLUTION_LOCK');
     this.blacklistPath = resolver.resolve('PRINCIPLE_BLACKLIST');
+    this.principlesPath = resolver.resolve('PRINCIPLES');
     this.ensureDirs();
     this.loadFromStream();
     this.sweepExpiredProbation();
@@ -213,6 +215,7 @@ export class EvolutionReducerImpl implements EvolutionReducer {
     source: string;
     evaluability?: PrincipleEvaluatorLevel;
     detectorMetadata?: PrincipleDetectorSpec;
+    abstractedPrinciple?: string;
   }): string | null {
     // Check blacklist first
     if (this.isBlacklisted(params.painId, params.triggerPattern)) {
@@ -305,6 +308,7 @@ export class EvolutionReducerImpl implements EvolutionReducer {
       detectorMetadata: isCompleteDetectorMetadata(params.detectorMetadata)
         ? structuredClone(params.detectorMetadata)
         : undefined,
+      abstractedPrinciple: params.abstractedPrinciple,
     };
 
     this.principles.set(principleId, principle);
@@ -326,8 +330,11 @@ export class EvolutionReducerImpl implements EvolutionReducer {
       },
     });
 
-    // Auto-promote since it's already generalized
     this.promote(principleId, 'diagnostician_generalized');
+    const synced = this.syncPrincipleToFile(principle);
+    if (!synced) {
+      SystemLogger.log(this.workspaceDir, 'PRINCIPLE_SYNC_WARN', `Principle ${principleId} created in memory but NOT synced to file`);
+    }
 
     SystemLogger.log(
       this.workspaceDir,
@@ -336,6 +343,82 @@ export class EvolutionReducerImpl implements EvolutionReducer {
     );
 
     return principleId;
+  }
+
+  private syncPrincipleToFile(principle: Principle): boolean {
+    try {
+      withLock(this.principlesPath + '.lock', () => {
+        let content = '';
+        if (fs.existsSync(this.principlesPath)) {
+          content = fs.readFileSync(this.principlesPath, 'utf8');
+        }
+
+        const header = `### ${principle.id}:`;
+        const existingIdx = content.indexOf(header);
+        const formatted = this.formatPrincipleForFile(principle, content);
+
+        if (existingIdx >= 0) {
+          const nextPrincipleRe = /\n### [A-Za-z0-9_-]+:/g;
+          nextPrincipleRe.lastIndex = existingIdx + header.length;
+          const nextMatch = nextPrincipleRe.exec(content);
+          const endIdx = nextMatch ? nextMatch.index : content.length;
+          content = content.slice(0, existingIdx) + formatted + content.slice(endIdx);
+        } else {
+          const separator = content.trim().endsWith('<!-- 原则从这里开始记录 -->') ? '\n' : '\n\n';
+          content = content + separator + formatted;
+        }
+
+        fs.writeFileSync(this.principlesPath, content, 'utf8');
+        SystemLogger.log(this.workspaceDir, 'PRINCIPLE_SYNCED', `Principle ${principle.id} synced to PRINCIPLES.md`);
+      }, { lockStaleMs: 10000 });
+      return true;
+    } catch (e) {
+      SystemLogger.log(this.workspaceDir, 'PRINCIPLE_SYNC_ERROR', `Failed to sync ${principle.id} to PRINCIPLES.md: ${String(e)}`);
+      return false;
+    }
+  }
+
+  private detectPrincipleLanguage(content: string): 'zh' | 'en' {
+    if (!content) return 'zh';
+    const zhMarkers = ['原则', '触发', '必须', '禁止', '验证', '例外', '来源'];
+    const enMarkers = ['Trigger', 'Constraint', 'Must', 'Forbidden', 'Verification', 'Exceptions', 'Source'];
+    let zhCount = 0;
+    let enCount = 0;
+    for (const m of zhMarkers) { if (content.includes(m)) zhCount++; }
+    for (const m of enMarkers) { if (content.includes(m)) enCount++; }
+    return zhCount >= enCount ? 'zh' : 'en';
+  }
+
+  private formatPrincipleForFile(principle: Principle, existingContent: string): string {
+    const lang = this.detectPrincipleLanguage(existingContent);
+    const title = principle.abstractedPrinciple
+      ? (principle.abstractedPrinciple.length > 60 ? principle.abstractedPrinciple.slice(0, 57) + '...' : principle.abstractedPrinciple)
+      : (principle.text.length > 60 ? principle.text.slice(0, 57) + '...' : principle.text);
+    const source = principle.source.painId ? `pain_id: ${principle.source.painId} / ${principle.source.timestamp?.slice(0, 10) ?? 'unknown'}` : 'unknown';
+
+    if (lang === 'zh') {
+      return [
+        `### ${principle.id}: ${title}`,
+        `- **Trigger**: ${principle.trigger}`,
+        `- **Constraint (Must)**: ${principle.action}`,
+        `- **Constraint (Forbidden)**: 禁止违反此原则的行为`,
+        `- **Verification**: 操作前检查是否遵循此原则`,
+        `- **Exceptions**: 无`,
+        `- **Source**: ${source}`,
+        '',
+      ].join('\n');
+    }
+
+    return [
+      `### ${principle.id}: ${title}`,
+      `- **Trigger**: ${principle.trigger}`,
+      `- **Constraint (Must)**: ${principle.action}`,
+      `- **Constraint (Forbidden)**: Do not violate this principle`,
+      `- **Verification**: Check compliance before acting`,
+      `- **Exceptions**: None`,
+      `- **Source**: ${source}`,
+      '',
+    ].join('\n');
   }
 
   getStats(): {

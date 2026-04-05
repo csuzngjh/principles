@@ -83,6 +83,7 @@ export function handleAfterToolCall(
       score: 100,
       reason: `User intervention: ${reason}`,
       origin: 'user_manual',
+      text: reason,  // Store the intervention reason as text
     });
 
     // Log to EvolutionLogger
@@ -291,14 +292,15 @@ export function handleAfterToolCall(
     reason: `Tool ${event.toolName} failed on ${relPath}`,
     isRisky: isRisk,
   });
-  wctx.trajectory?.recordPainEvent?.({
-    sessionId,
-    source: 'tool_failure',
-    score: painScore,
-    reason: `Tool ${event.toolName} failed on ${relPath}`,
-    severity: painScore >= 70 ? 'severe' : painScore >= 40 ? 'moderate' : 'mild',
-    origin: 'system_infer',
-  });
+    wctx.trajectory?.recordPainEvent?.({
+      sessionId,
+      source: 'tool_failure',
+      score: painScore,
+      reason: `Tool ${event.toolName} failed on ${relPath}`,
+      severity: painScore >= 70 ? 'severe' : painScore >= 40 ? 'moderate' : 'mild',
+      origin: 'system_infer',
+      text: params.text ?? params.content ?? undefined,  // Store original text/content that failed
+    });
 
   // Log to EvolutionLogger
   const evoLogger = getEvolutionLogger(effectiveWorkspaceDir, wctx.trajectory);

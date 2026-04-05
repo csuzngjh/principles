@@ -361,9 +361,13 @@ export async function handleSubagentEnded(
                 });
 
                 const assistantText = extractAssistantText(messages);
+                logger.info(`[PD:Subagent] Diagnostician output for task ${completedTaskId}: ${assistantText.length} chars`);
+
                 const report = parseDiagnosticianReport(assistantText);
 
                 if (report?.principle) {
+                    logger.info(`[PD:Subagent] Parsed principle from diagnostician for task ${completedTaskId}: trigger="${report.principle.trigger_pattern.slice(0, 60)}..."`);
+
                     // Principles default to 'manual_only' evaluability unless detector metadata
                     // is explicitly provided. Only deterministic / weak_heuristic evaluability
                     // can enter automatic nocturnal targeting.
@@ -408,10 +412,32 @@ export async function handleSubagentEnded(
                         source: matchedTask?.source || 'diagnostician',
                         evaluability,
                         detectorMetadata,
+                        abstractedPrinciple: report.principle.abstracted_principle,
                     });
 
                     if (principleId) {
-                        logger.warn(`[PD:Subagent] Created principle ${principleId} from diagnostician analysis for task ${completedTaskId}`);
+                        logger.info(`[PD:Subagent] Created principle ${principleId} from diagnostician analysis for task ${completedTaskId}`);
+                    } else {
+                        logger.warn(`[PD:Subagent] createPrincipleFromDiagnosis returned null for task ${completedTaskId} (possibly blacklisted or duplicate)`);
+                    }
+                } else {
+                    logger.warn(`[PD:Subagent] Diagnostician output for task ${completedTaskId} did not contain parseable principle JSON. Output length: ${assistantText.length} chars. First 200 chars: ${assistantText.slice(0, 200)}`);
+
+                    // Fallback: try to extract principle from raw text even without JSON
+                    const extractedPrinciple = extractPrincipleFromRawText(assistantText, matchedTask);
+                    if (extractedPrinciple) {
+                        logger.info(`[PD:Subagent] Fallback: extracted principle from raw text for task ${completedTaskId}`);
+                        const principleId = wctx.evolutionReducer.createPrincipleFromDiagnosis({
+                            painId: matchedTask?.id || completedTaskId,
+                            painType: 'tool_failure',
+                            triggerPattern: extractedPrinciple.triggerPattern,
+                            action: extractedPrinciple.action,
+                            source: matchedTask?.source || 'diagnostician',
+                            evaluability: 'manual_only',
+                        });
+                        if (principleId) {
+                            logger.info(`[PD:Subagent] Created principle ${principleId} via fallback extraction for task ${completedTaskId}`);
+                        }
                     }
                 }
             } catch (e) {
@@ -458,6 +484,7 @@ function parseDiagnosticianReport(
     principle?: {
         trigger_pattern: string;
         action: string;
+        abstracted_principle?: string;
         evaluability?: 'deterministic' | 'weak_heuristic' | 'manual_only';
         detector_metadata?: {
             applicabilityTags?: string[];
@@ -499,6 +526,44 @@ function parseDiagnosticianReport(
         } catch {
             // Fall through to return null
         }
+    }
+
+    return null;
+}
+
+function extractPrincipleFromRawText(
+    text: string,
+    matchedTask?: any
+): { triggerPattern: string; action: string } | null {
+    const patterns = [
+        /(?:When|如果|当)\s*(.+?)\s*(?:时|的时候|，|,)\s*(?:应该|必须|要|then|should|must)\s*(.+)/i,
+        /(?:trigger_pattern|触发条件)[:：]\s*(.+?)[\n,](?:action|行动|操作)[:：]\s*(.+)/i,
+        /(?:principle|原则)[:：]\s*(.+)/i,
+    ];
+
+    for (const pattern of patterns) {
+        const match = text.match(pattern);
+        if (match) {
+            if (match.length >= 3) {
+                return {
+                    triggerPattern: match[1].trim().slice(0, 200),
+                    action: match[2].trim().slice(0, 500),
+                };
+            } else if (match.length === 2) {
+                return {
+                    triggerPattern: matchedTask?.reason || 'detected issue',
+                    action: match[1].trim().slice(0, 500),
+                };
+            }
+        }
+    }
+
+    const paragraphs = text.split(/\n\n+/).filter(p => p.trim().length > 50);
+    if (paragraphs.length > 0) {
+        return {
+            triggerPattern: matchedTask?.reason || 'detected issue',
+            action: paragraphs[0].trim().slice(0, 500),
+        };
     }
 
     return null;

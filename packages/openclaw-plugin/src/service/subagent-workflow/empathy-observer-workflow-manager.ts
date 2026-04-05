@@ -589,6 +589,7 @@ export const empathyObserverWorkflowSpec: SubagentWorkflowSpec<EmpathyResult> = 
                 severity: result.severity,
                 origin: 'system_infer',
                 confidence: result.confidence,
+                text: metadata.taskInput as string ?? null,  // Store the text where frustration was detected
             });
         } catch (error) {
             console.warn(`[PD:EmpathyObserverWorkflow] Failed to persist trajectory: ${String(error)}`);
