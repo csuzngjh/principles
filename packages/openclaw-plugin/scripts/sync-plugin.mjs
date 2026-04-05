@@ -133,11 +133,10 @@ function compareVersions(a, b) {
         if (partsA[i] > partsB[i]) return 1;
         if (partsA[i] < partsB[i]) return -1;
     }
-    return 0;
 }
 
 /**
- * Check prerequisites
+ * Main function
  */
 function checkPrerequisites() {
     // Check Node.js version
@@ -584,7 +583,6 @@ function installTargetDependencies() {
         console.error(`   Run manually: cd ${INSTALL_DIR} && npm install --production`);
         process.exit(1);
     }
-}
 }
 
 /**
