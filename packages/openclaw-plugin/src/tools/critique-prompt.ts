@@ -1,3 +1,4 @@
+import type { OpenClawPluginApi } from '../openclaw-sdk.js';
 import { loadModelIndex } from './model-index.js';
 import { resolveWorkspaceDirFromApi } from '../core/path-resolver.js';
 
