@@ -122,7 +122,7 @@ export interface PluginRuntimeSystem {
         agentId?: string;
         sessionKey?: string;
         heartbeat?: { target?: string };
-    }) => Promise<{ ok: boolean }>;
+    }) => Promise<{ ok: boolean; status: string; durationMs?: number; reason?: string }>;
     runCommandWithTimeout: (cmd: string, args: string[], timeout: number) => Promise<unknown>;
     formatNativeDependencyHint: (deps: unknown[]) => string;
 }
