@@ -60,6 +60,36 @@ import { createPrinciplesConsoleRoute } from './http/principles-console-route.js
 // Track initialization to avoid repeated calls
 let workspaceInitialized = false;
 
+/**
+ * Resolve workspace directory via official OpenClaw API.
+ *
+ * Priority: api.runtime.agent.resolveAgentWorkspaceDir(agentId) → api.resolvePath('.') → default
+ *
+ * This replaces the removed api.workspaceDir field.
+ *
+ * @param api - Plugin API instance
+ * @param agentId - Agent ID (defaults to 'main' if not provided)
+ * @returns Resolved workspace directory path
+ */
+function resolveWorkspaceDirFromApi(api: OpenClawPluginApi, agentId?: string): string {
+    // Try official API first
+    const officialAgent = (api.runtime as { agent?: { resolveAgentWorkspaceDir?: (cfg: unknown, id: string) => string } }).agent;
+    if (officialAgent?.resolveAgentWorkspaceDir) {
+        try {
+            return officialAgent.resolveAgentWorkspaceDir(api.config, agentId || 'main');
+        } catch {
+            // Fall through to PathResolver
+        }
+    }
+    // Fallback to PathResolver (handles PD_WORKSPACE_DIR env, config file, default)
+    try {
+        const pr = new PathResolver();
+        return pr.getWorkspaceDir();
+    } catch {
+        return '.';
+    }
+}
+
 // Map from childSessionKey → shadowObservationId
 // Used to complete shadow observations when subagent ends
 const pendingShadowObservations = new Map<string, string>();
@@ -85,8 +115,8 @@ const plugin = {
   description: "Evolutionary programming agent framework with strategic guardrails and reflection loops.",
 
   register(api: OpenClawPluginApi) {
-    api.logger.info(`Principles Disciple Plugin registered. (Path: ${api.rootDir})`);
-    PathResolver.setExtensionRoot(api.rootDir);
+    api.logger.info(`Principles Disciple Plugin registered. (Path: ${api.rootDir ?? '(unknown)'})`);
+    PathResolver.setExtensionRoot(api.rootDir ?? '.');
     api.registerHttpRoute(createPrinciplesConsoleRoute(api));
 
     const language = (api.pluginConfig?.language as string) || 'en';
@@ -239,10 +269,8 @@ const plugin = {
       'subagent_spawning',
       (event: PluginHookSubagentSpawningEvent, ctx: PluginHookSubagentContext): void | PluginHookSubagentSpawningResult => {
         try {
-          // Fallback chain: plugin workspaceDir → default
-          const workspaceDir =
-            api.workspaceDir
-            || api.resolvePath?.('.') || '.';
+          // Resolve workspace via official API, falling back to PathResolver
+          const workspaceDir = resolveWorkspaceDirFromApi(api, event.agentId);
           api.logger?.debug?.(`[PD] workspaceDir resolved for subagent_spawning: ${workspaceDir}`);
           const { agentId, childSessionKey } = event;
           // Only handle PD local worker profiles
@@ -280,10 +308,8 @@ const plugin = {
       'subagent_ended',
       (event: PluginHookSubagentEndedEvent, ctx: PluginHookSubagentContext): void => {
         try {
-          // Fallback chain: plugin workspaceDir → default
-          const workspaceDir =
-            api.workspaceDir
-            || api.resolvePath?.('.') || '.';
+          // Resolve workspace via official API, falling back to PathResolver
+          const workspaceDir = resolveWorkspaceDirFromApi(api, undefined);
           api.logger?.debug?.(`[PD] workspaceDir resolved for subagent_ended: ${workspaceDir}`);
           // Complete any pending shadow observation for this subagent session
           const shadowObsId = pendingShadowObservations.get(event.targetSessionKey);
