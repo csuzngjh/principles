@@ -655,6 +655,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                                 action: principle.action,
                                 source: task.source || 'heartbeat_diagnostician',
                                 evaluability: principle.evaluability || 'manual_only',
+                                abstractedPrinciple: principle.abstracted_principle,
                             });
                             if (principleId) {
                                 logger.info(`[PD:EvolutionWorker] Created principle ${principleId} from heartbeat diagnostician report for task ${task.id}`);
@@ -706,14 +707,42 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                 continue;
             }
 
-            // Condition 2: Timeout auto-complete
             const age = Date.now() - startedAt.getTime();
             if (age > timeout) {
                 const timeoutMinutes = Math.round(timeout / 60000);
+
+                const completeMarker = path.join(wctx.stateDir, `.evolution_complete_${task.id}`);
+                const reportPath = path.join(wctx.stateDir, `.diagnostician_report_${task.id}.json`);
+
+                if (fs.existsSync(completeMarker) && fs.existsSync(reportPath)) {
+                    if (logger) logger.info(`[PD:EvolutionWorker] Task ${task.id} timed out but marker found — creating principle anyway`);
+                    try {
+                        const reportData = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+                        const principle = reportData?.diagnosis_report?.principle || reportData?.principle;
+                        if (principle?.trigger_pattern && principle?.action) {
+                            const principleId = wctx.evolutionReducer.createPrincipleFromDiagnosis({
+                                painId: task.id,
+                                painType: task.source === 'Human Intervention' ? 'user_frustration' : 'tool_failure',
+                                triggerPattern: principle.trigger_pattern,
+                                action: principle.action,
+                                source: task.source || 'heartbeat_diagnostician',
+                                evaluability: principle.evaluability || 'manual_only',
+                                abstractedPrinciple: principle.abstracted_principle,
+                            });
+                            if (principleId) {
+                                logger.info(`[PD:EvolutionWorker] Created principle ${principleId} from late marker for task ${task.id}`);
+                            }
+                        }
+                    } catch (err) {
+                        logger.warn(`[PD:EvolutionWorker] Failed to parse late diagnostician report for task ${task.id}: ${String(err)}`);
+                    }
+                    try { fs.unlinkSync(completeMarker); } catch {}
+                }
+
                 if (logger) logger.info(`[PD:EvolutionWorker] Task ${task.id} auto-completed after ${timeoutMinutes} minute timeout`);
                 task.status = 'completed';
                 task.completed_at = new Date().toISOString();
-                task.resolution = 'auto_completed_timeout';
+                task.resolution = task.resolution || 'auto_completed_timeout';
 
                 // Log to EvolutionLogger
                 evoLogger.logCompleted({
@@ -784,11 +813,15 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                 ``,
                 `After completing the analysis:`,
                 `1. Write your JSON diagnosis report to: ${reportFilePath}`,
-                `   The JSON must include a "principle" field with "trigger_pattern" and "action".`,
-                `2. Write the resulting principle(s) to PRINCIPLES.md`,
-                `3. Mark the task complete by creating a marker file: ${markerFilePath}`,
+                `   The JSON must include:`,
+                `   - "principle.trigger_pattern": regex pattern for when this situation occurs`,
+                `   - "principle.action": what to do differently`,
+                `   - "principle.abstracted_principle": a HIGHLY ABSTRACTED principle statement`,
+                `     suitable for PRINCIPLES.md (not an operational rule, but a general principle`,
+                `     that captures the underlying wisdom). Example: "代码修改必须经过 Issue 流程，确保可追踪和可回退"`,
+                `2. Mark the task complete by creating a marker file: ${markerFilePath}`,
                 `   The marker file should contain: "diagnostic_completed: <timestamp>\\noutcome: <summary>"`,
-                `4. Replace this HEARTBEAT.md content with "HEARTBEAT_OK"`,
+                `3. Replace this HEARTBEAT.md content with "HEARTBEAT_OK"`,
             ].join('\n');
 
             // Try to write HEARTBEAT.md FIRST
