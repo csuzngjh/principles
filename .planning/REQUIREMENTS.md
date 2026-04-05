@@ -52,22 +52,22 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| NOC-01 | Phase 1 | Pending |
-| NOC-02 | Phase 1 | Pending |
-| NOC-03 | Phase 1 | Pending |
-| NOC-04 | Phase 1 | Pending |
-| NOC-05 | Phase 1 | Pending |
-| NOC-06 | Phase 2 | Pending |
-| NOC-07 | Phase 2 | Pending |
-| NOC-08 | Phase 2 | Pending |
-| NOC-09 | Phase 2 | Pending |
-| NOC-10 | Phase 2 | Pending |
-| NOC-11 | Phase 3 | Pending |
-| NOC-12 | Phase 3 | Pending |
-| NOC-13 | Phase 3 | Pending |
-| NOC-14 | Phase 4 | Pending |
-| NOC-15 | Phase 4 | Pending |
-| NOC-16 | Phase 4 | Pending |
+| NOC-01 | Phase 6 | Pending |
+| NOC-02 | Phase 6 | Pending |
+| NOC-03 | Phase 6 | Pending |
+| NOC-04 | Phase 6 | Pending |
+| NOC-05 | Phase 6 | Pending |
+| NOC-06 | Phase 7 | Pending |
+| NOC-07 | Phase 7 | Pending |
+| NOC-08 | Phase 7 | Pending |
+| NOC-09 | Phase 7 | Pending |
+| NOC-10 | Phase 7 | Pending |
+| NOC-11 | Phase 8 | Pending |
+| NOC-12 | Phase 8 | Pending |
+| NOC-13 | Phase 8 | Pending |
+| NOC-14 | Phase 9 | Pending |
+| NOC-15 | Phase 9 | Pending |
+| NOC-16 | Phase 9 | Pending |
 
 **Coverage:**
 - v1.5 requirements: 16 total

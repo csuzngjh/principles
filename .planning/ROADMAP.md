@@ -33,7 +33,10 @@
 
 ### 📋 v1.5 (Planned)
 
-- [ ] Phase 6: [TBD]
+- [ ] Phase 6: Foundation and Single-Reflector Mode
+- [ ] Phase 7: Trinity Integration with Event Recording
+- [ ] Phase 8: Intermediate Persistence and Idempotency
+- [ ] Phase 9: Fallback and Evolution Worker Integration
 
 ## Progress
 
@@ -48,3 +51,7 @@
 | 1 | v1.4 | 2/2 | Complete | 2026-04-05 |
 | 2 | v1.4 | 1/1 | Complete | 2026-04-05 |
 | 5 | v1.4 | 1/1 | Partial | 2026-04-05 |
+| 6 | v1.5 | 5/5 | Planned | — |
+| 7 | v1.5 | 5/5 | Planned | — |
+| 8 | v1.5 | 3/3 | Planned | — |
+| 9 | v1.5 | 3/3 | Planned | — |
