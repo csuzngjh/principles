@@ -335,3 +335,21 @@ export type {
 } from '../../openclaw-sdk.js';
 
 export type { PluginLogger } from '../../openclaw-sdk.js';
+
+// ── Nocturnal Workflow Types ───────────────────────────────────────────────────
+
+/**
+ * Nocturnal workflow result type.
+ * Mirrors NocturnalRunResult from nocturnal-service.ts (per D-02).
+ */
+export type NocturnalResult = {
+    success: boolean;
+    artifact?: import('../core/nocturnal-arbiter.js').NocturnalArtifact & { boundedAction?: import('../core/nocturnal-executability.js').BoundedAction };
+    skipReason?: string;
+    noTargetSelected: boolean;
+    validationFailed: boolean;
+    validationFailures: string[];
+    snapshot?: import('../core/nocturnal-trajectory-extractor.js').NocturnalSessionSnapshot;
+    diagnostics: import('../service/nocturnal-service.js').NocturnalRunDiagnostics;
+    trinityTelemetry?: import('../core/nocturnal-trinity.js').TrinityResult['telemetry'];
+};

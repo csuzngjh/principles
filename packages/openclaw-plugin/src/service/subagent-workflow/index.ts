@@ -27,6 +27,13 @@ export {
     type DeepReflectResult,
 } from './deep-reflect-workflow-manager.js';
 
+export {
+    NocturnalWorkflowManager,
+    nocturnalWorkflowSpec,
+    type NocturnalWorkflowOptions,
+    type NocturnalResult,
+} from './nocturnal-workflow-manager.js';
+
 export type {
     WorkflowState,
     WorkflowTransport,
@@ -38,6 +45,7 @@ export type {
     EmpathyObserverWorkflowSpec,
     EmpathyObserverPayload,
     EmpathyResult,
+    NocturnalResult,
     WorkflowRow,
     WorkflowEventRow,
     WorkflowDebugSummary,
