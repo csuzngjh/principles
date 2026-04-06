@@ -53,9 +53,9 @@
     "~/.hermes/cron/output/6cb6476462c5/ — all observer reports with Failure Classification and Next Action sections.",
     "",
     "=== CODE TO MODIFY ===",
-    "scripts/ai-sprint-orchestrator/run.mjs — main orchestrator",
-    "scripts/ai-sprint-orchestrator/lib/decision.mjs — decision engine",
-    "scripts/ai-sprint-orchestrator/lib/task-specs.mjs — spec loading + path mapping",
+    "packages/openclaw-plugin/templates/langs/zh/skills/ai-sprint-orchestration/scripts/run.mjs — main orchestrator",
+    "packages/openclaw-plugin/templates/langs/zh/skills/ai-sprint-orchestration/scripts/lib/decision.mjs — decision engine",
+    "packages/openclaw-plugin/templates/langs/zh/skills/ai-sprint-orchestration/scripts/lib/task-specs.mjs — spec loading + path mapping",
     "",
     "=== CRON JOBS TO UPDATE ===",
     "The cron job 'workflow-v1-high-frequency-observer' (6cb6476462c5) prompt needs update to write to self-optimization-status.json.",
@@ -70,7 +70,7 @@
     "Do NOT re-architect beyond what's needed.",
     "",
     "=== VERIFICATION ===",
-    "After each fix: run `node --test scripts/ai-sprint-orchestrator/test/` — must pass.",
+    "After each fix: run `node --test packages/openclaw-plugin/templates/langs/zh/skills/ai-sprint-orchestration/test/*.mjs` — must pass.",
     "Update self-optimization-status.json: mark resolved fixes, record sprint outcome."
   ],
   "stageGoals": {

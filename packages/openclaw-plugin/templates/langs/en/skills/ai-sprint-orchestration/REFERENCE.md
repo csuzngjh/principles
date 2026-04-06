@@ -13,7 +13,7 @@
 
 Default runtime root:
 
-- `skills/ai-sprint-orchestration/runtime`
+- `packages/openclaw-plugin/templates/langs/<lang>/skills/ai-sprint-orchestration/runtime`
 
 Subdirectories:
 
@@ -110,7 +110,7 @@ The producer should declare `PLANNED_FILES`, `PLANNED_CHECKS`, and `DELIVERABLES
 
 Source of truth remains:
 
-- the source repository copy of `scripts/ai-sprint-orchestrator`
+- the repository copy at `packages/openclaw-plugin/templates/langs/zh/skills/ai-sprint-orchestration`
 
 Sync the packaged copy only when the change affects:
 
@@ -121,9 +121,9 @@ Sync the packaged copy only when the change affects:
 
 Do not blindly mirror every upstream orchestrator edit into this package.
 
-## Next architecture direction
+## Current work-unit direction
 
-This package currently resets context at stage/round/role boundaries. The next planned upgrade is a finer-grained `work-unit/tasklet` layer with forced context reload between bounded units:
+This package now supports a finer-grained `work-unit` layer to force tighter context boundaries between bounded units:
 
 - `workUnitId`
 - `workUnitGoal`
@@ -133,4 +133,4 @@ This package currently resets context at stage/round/role boundaries. The next p
 - `unitSummary`
 - `carryForwardSummary`
 
-That architecture is not implemented in v1.3. The current package focuses on internal usability first.
+Continuation should prefer the shorter `carryForwardSummary` before falling back to a full prior decision or handoff. The goal is to minimize cross-unit context while preserving the smallest necessary state for the next unit.

@@ -40,7 +40,7 @@
     "5. nextRunRecommendation is computed and recorded",
     "",
     "=== NO PRODUCT LOGIC ===",
-    "Producer task: List 3 files in scripts/ai-sprint-orchestrator/ and describe their purpose.",
+    "Producer task: List 3 files in packages/openclaw-plugin/templates/langs/zh/skills/ai-sprint-orchestration/scripts/ and describe their purpose.",
     "This is intentionally trivial - we are testing the workflow, not the task.",
     "",
     "=== SUCCESS CRITERIA FOR THIS RUN ===",
