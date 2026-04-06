@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import * as fs from 'fs';
 import * as path from 'path';
 import type { WorkflowRow, WorkflowEventRow, WorkflowState, WorkflowTransport } from './types.js';
+import type { DreamerOutput, PhilosopherOutput } from '../../core/nocturnal-trinity.js';
 
 const SCHEMA_VERSION = 1;
 
@@ -72,6 +73,18 @@ export class WorkflowStore {
             CREATE INDEX IF NOT EXISTS idx_workflows_child_session ON subagent_workflows(child_session_key);
             CREATE INDEX IF NOT EXISTS idx_workflows_state ON subagent_workflows(state);
             CREATE INDEX IF NOT EXISTS idx_workflows_type ON subagent_workflows(workflow_type);
+            CREATE TABLE IF NOT EXISTS subagent_workflow_stage_outputs (
+                workflow_id TEXT NOT NULL,
+                stage TEXT NOT NULL CHECK (stage IN ('dreamer', 'philosopher')),
+                output_json TEXT NOT NULL,
+                idempotency_key TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                FOREIGN KEY (workflow_id) REFERENCES subagent_workflows(workflow_id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_stage_outputs_workflow ON subagent_workflow_stage_outputs(workflow_id);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_stage_outputs_idempotency ON subagent_workflow_stage_outputs(idempotency_key);
+
             CREATE INDEX IF NOT EXISTS idx_events_workflow ON subagent_workflow_events(workflow_id);
         `);
         
@@ -219,6 +232,96 @@ export class WorkflowStore {
         `).all(workflowId) as WorkflowEventRow[];
     }
     
+    /**
+     * Record a Trinity stage output to the database (NOC-11).
+     * idempotencyKey must be unique per (workflow_id, stage). If a row with the
+     * same idempotency_key already exists, this is a no-op (idempotent).
+     */
+    recordStageOutput(
+        workflowId: string,
+        stage: 'dreamer' | 'philosopher',
+        output: DreamerOutput | PhilosopherOutput,
+        idempotencyKey: string
+    ): void {
+        const now = Date.now();
+        // Use INSERT OR IGNORE for idempotency — if idempotency_key already exists, silently skip
+        this.db.prepare(`
+            INSERT OR IGNORE INTO subagent_workflow_stage_outputs (
+                workflow_id, stage, output_json, idempotency_key, created_at
+            ) VALUES (?, ?, ?, ?, ?)
+        `).run(
+            workflowId,
+            stage,
+            JSON.stringify(output),
+            idempotencyKey,
+            now
+        );
+    }
+
+    /**
+     * Get all stage outputs for a workflow (NOC-13 crash recovery).
+     * Returns outputs ordered by created_at ascending.
+     */
+    getStageOutputs(workflowId: string): Array<{
+        stage: string;
+        output: DreamerOutput | PhilosopherOutput;
+        idempotencyKey: string;
+        createdAt: number;
+    }> {
+        const rows = this.db.prepare(`
+            SELECT workflow_id, stage, output_json, idempotency_key, created_at
+            FROM subagent_workflow_stage_outputs
+            WHERE workflow_id = ?
+            ORDER BY created_at ASC
+        `).all(workflowId) as Array<{
+            workflow_id: string;
+            stage: string;
+            output_json: string;
+            idempotency_key: string;
+            created_at: number;
+        }>;
+
+        return rows.map(row => ({
+            workflowId: row.workflow_id,
+            stage: row.stage,
+            output: JSON.parse(row.output_json) as DreamerOutput | PhilosopherOutput,
+            idempotencyKey: row.idempotency_key,
+            createdAt: row.created_at,
+        }));
+    }
+
+    /**
+     * Get a stage output by its idempotency key (NOC-12 idempotency check).
+     * Returns null if not found.
+     */
+    getStageOutputByKey(idempotencyKey: string): {
+        stage: string;
+        output: DreamerOutput | PhilosopherOutput;
+        workflowId: string;
+        createdAt: number;
+    } | null {
+        const row = this.db.prepare(`
+            SELECT workflow_id, stage, output_json, idempotency_key, created_at
+            FROM subagent_workflow_stage_outputs
+            WHERE idempotency_key = ?
+        `).get(idempotencyKey) as {
+            workflow_id: string;
+            stage: string;
+            output_json: string;
+            idempotency_key: string;
+            created_at: number;
+        } | undefined;
+
+        if (!row) return null;
+
+        return {
+            workflowId: row.workflow_id,
+            stage: row.stage,
+            output: JSON.parse(row.output_json) as DreamerOutput | PhilosopherOutput,
+            createdAt: row.created_at,
+        };
+    }
+
     deleteWorkflow(workflowId: string): void {
         this.db.prepare('DELETE FROM subagent_workflows WHERE workflow_id = ?').run(workflowId);
     }
