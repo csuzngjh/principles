@@ -26,6 +26,7 @@ import type {
     WorkflowDebugSummary,
     WorkflowResultContext,
     WorkflowPersistContext,
+    WorkflowEventRow,
 } from './types.js';
 import { WorkflowStore } from './workflow-store.js';
 import { resolveNocturnalDir } from '../../core/nocturnal-paths.js';
@@ -35,6 +36,7 @@ import {
 } from '../nocturnal-service.js';
 import { type TrinityStageFailure, type TrinityResult } from '../../core/nocturnal-trinity.js';
 import type { TrinityRuntimeAdapter, TrinityConfig, DreamerOutput, PhilosopherOutput, TrinityTelemetry } from '../../core/nocturnal-trinity.js';
+import type { NocturnalSessionSnapshot } from '../../core/nocturnal-trajectory-extractor.js';
 import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -153,6 +155,53 @@ export const nocturnalWorkflowSpec: SubagentWorkflowSpec<NocturnalResult> = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Stub Fallback Runtime Adapter (NOC-15)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Stub fallback runtime adapter for Trinity.
+ * Wraps a real adapter and provides stub implementations for fallback when stages fail.
+ * Per NOC-15: Fallback degrades to stub, NOT to EmpathyObserver/DeepReflect.
+ */
+class StubFallbackRuntimeAdapter implements TrinityRuntimeAdapter {
+    constructor(
+        private realAdapter: TrinityRuntimeAdapter,
+        private snapshot: NocturnalSessionSnapshot,
+        private principleId: string,
+        private maxCandidates: number
+    ) {}
+
+    async invokeDreamer(): Promise<DreamerOutput> {
+        // Use stub Dreamer from nocturnal-trinity.ts
+        const { invokeStubDreamer } = await import('../../core/nocturnal-trinity.js');
+        return invokeStubDreamer(this.snapshot, this.principleId, this.maxCandidates);
+    }
+
+    async invokePhilosopher(dreamerOutput: DreamerOutput): Promise<PhilosopherOutput> {
+        // Use stub Philosopher
+        const { invokeStubPhilosopher } = await import('../../core/nocturnal-trinity.js');
+        return invokeStubPhilosopher(dreamerOutput, this.principleId);
+    }
+
+    async invokeScribe(
+        dreamerOutput: DreamerOutput,
+        philosopherOutput: PhilosopherOutput,
+        snapshot: NocturnalSessionSnapshot,
+        principleId: string,
+        telemetry: TrinityTelemetry,
+        config: TrinityConfig
+    ): Promise<import('../../core/nocturnal-trinity.js').TrinityDraftArtifact | null> {
+        // Use stub Scribe
+        const { invokeStubScribe } = await import('../../core/nocturnal-trinity.js');
+        return invokeStubScribe(dreamerOutput, philosopherOutput, snapshot, principleId, telemetry, config);
+    }
+
+    async close(): Promise<void> {
+        // No-op for stubs
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // NocturnalWorkflowManager
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -265,6 +314,9 @@ export class NocturnalWorkflowManager implements WorkflowManager {
         // This offloads the async chain so startWorkflow returns immediately with state='active'
         Promise.resolve().then(async () => {
             try {
+                // NOC-15: Track if stub fallback was used
+                let fallbackUsed = false;
+
                 // Step 1: Crash recovery — check for existing stage outputs (NOC-13)
                 // Query WorkflowStore for any existing outputs for this workflowId
                 const existingOutputs = this.store.getStageOutputs(workflowId);
@@ -289,6 +341,18 @@ export class NocturnalWorkflowManager implements WorkflowManager {
                         dreamerOutput = existingDreamerByKey.output as DreamerOutput;
                     } else {
                         dreamerOutput = await this.runtimeAdapter.invokeDreamer(snapshot, principleId, trinityConfig.maxCandidates);
+                        // NOC-15: Fallback to stub Dreamer if real Dreamer failed
+                        if (!dreamerOutput.valid || dreamerOutput.candidates.length === 0) {
+                            this.logger.info(`[PD:NocturnalWorkflow] Dreamer failed (${dreamerOutput.reason}), falling back to stub`);
+                            fallbackUsed = true;
+                            const stubAdapter = new StubFallbackRuntimeAdapter(
+                                this.runtimeAdapter,
+                                snapshot,
+                                principleId,
+                                trinityConfig.maxCandidates
+                            );
+                            dreamerOutput = await stubAdapter.invokeDreamer();
+                        }
                         // Persist Dreamer output (NOC-11)
                         if (dreamerOutput.valid) {
                             this.store.recordStageOutput(workflowId, 'dreamer', dreamerOutput, dreamerIdemKey);
@@ -311,6 +375,18 @@ export class NocturnalWorkflowManager implements WorkflowManager {
                         philosopherOutput = existingPhilosopherByKey.output as PhilosopherOutput;
                     } else {
                         philosopherOutput = await this.runtimeAdapter.invokePhilosopher(dreamerOutput, principleId);
+                        // NOC-15: Fallback to stub Philosopher if real Philosopher failed
+                        if (!philosopherOutput.valid || philosopherOutput.judgments.length === 0) {
+                            this.logger.info(`[PD:NocturnalWorkflow] Philosopher failed (${philosopherOutput.reason}), falling back to stub`);
+                            fallbackUsed = true;
+                            const stubAdapter = new StubFallbackRuntimeAdapter(
+                                this.runtimeAdapter,
+                                snapshot,
+                                principleId,
+                                trinityConfig.maxCandidates
+                            );
+                            philosopherOutput = await stubAdapter.invokePhilosopher(dreamerOutput);
+                        }
                         // Persist Philosopher output (NOC-11)
                         if (philosopherOutput.valid) {
                             this.store.recordStageOutput(workflowId, 'philosopher', philosopherOutput, philosopherIdemKey);
@@ -345,7 +421,7 @@ export class NocturnalWorkflowManager implements WorkflowManager {
                     artifact: draftArtifact ?? undefined,
                     telemetry: {
                         chainMode: 'trinity',
-                        usedStubs: false,
+                        usedStubs: fallbackUsed,  // NOC-15: reflect actual stub usage
                         dreamerPassed: dreamerOutput.valid && dreamerOutput.candidates.length > 0,
                         philosopherPassed: philosopherOutput.valid && philosopherOutput.judgments.length > 0,
                         scribePassed: !!draftArtifact,
@@ -354,7 +430,7 @@ export class NocturnalWorkflowManager implements WorkflowManager {
                         stageFailures: failures.map(f => `${f.stage}: ${f.reason}`),
                     },
                     failures,
-                    fallbackOccurred: false,
+                    fallbackOccurred: fallbackUsed,  // NOC-15: mark when fallback was triggered
                 };
 
                 // Store for notifyWaitResult and proceed with existing flow
@@ -532,8 +608,8 @@ export class NocturnalWorkflowManager implements WorkflowManager {
         if (!workflow) return null;
 
         const metadata = JSON.parse(workflow.metadata_json) as WorkflowMetadata;
-        const recentEvents = this.store
-            .getEvents(workflowId)
+        const allEvents = this.store.getEvents(workflowId);
+        const recentEvents = allEvents
             .slice(-eventLimit)
             .map((event) => ({
                 eventType: event.event_type,
@@ -543,6 +619,9 @@ export class NocturnalWorkflowManager implements WorkflowManager {
                 createdAt: event.created_at,
                 payload: JSON.parse(event.payload_json || '{}') as Record<string, unknown>,
             }));
+
+        // NOC-16: Compute Trinity stage states from events
+        const trinityStageStates = this.computeTrinityStageStates(allEvents);
 
         return {
             workflowId: workflow.workflow_id,
@@ -556,6 +635,7 @@ export class NocturnalWorkflowManager implements WorkflowManager {
             lastObservedAt: workflow.last_observed_at ?? null,
             metadata,
             recentEvents,
+            trinityStageStates,  // NOC-16
         };
     }
 
@@ -591,6 +671,58 @@ export class NocturnalWorkflowManager implements WorkflowManager {
         this.executionResults.delete(workflowId);
         this.pendingTrinityFailures.delete(workflowId);
         this.pendingTrinityResults.delete(workflowId);
+    }
+
+    /**
+     * Compute Trinity stage states from workflow events (NOC-16).
+     * Derives current/completed/failed state for each Trinity stage.
+     */
+    private computeTrinityStageStates(events: WorkflowEventRow[]): Array<{
+        stage: 'dreamer' | 'philosopher' | 'scribe';
+        status: 'pending' | 'running' | 'completed' | 'failed';
+        reason?: string;
+        completedAt?: number;
+    }> {
+        const stages: Array<'dreamer' | 'philosopher' | 'scribe'> = ['dreamer', 'philosopher', 'scribe'];
+        const result: Array<{
+            stage: 'dreamer' | 'philosopher' | 'scribe';
+            status: 'pending' | 'running' | 'completed' | 'failed';
+            reason?: string;
+            completedAt?: number;
+        }> = [];
+
+        for (const stage of stages) {
+            const startEvent = events.find(e => e.event_type === `trinity_${stage}_start`);
+            const completeEvent = events.find(e => e.event_type === `trinity_${stage}_complete`);
+            const failedEvent = events.find(e => e.event_type === `trinity_${stage}_failed`);
+
+            if (!startEvent) {
+                // Stage never ran
+                result.push({ stage, status: 'pending' });
+            } else if (failedEvent) {
+                // Stage ran and failed
+                const payload = JSON.parse(failedEvent.payload_json || '{}') as Record<string, unknown>;
+                const failures = payload.failures as Array<{ reason?: string }> | undefined;
+                result.push({
+                    stage,
+                    status: 'failed',
+                    reason: failures?.[0]?.reason ?? failedEvent.reason,
+                    completedAt: failedEvent.created_at,
+                });
+            } else if (completeEvent) {
+                // Stage ran and completed
+                result.push({
+                    stage,
+                    status: 'completed',
+                    completedAt: completeEvent.created_at,
+                });
+            } else {
+                // Stage started but not completed or failed — currently running
+                result.push({ stage, status: 'running' });
+            }
+        }
+
+        return result;
     }
 
     /**

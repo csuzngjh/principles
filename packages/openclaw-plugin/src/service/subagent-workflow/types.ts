@@ -340,6 +340,13 @@ export interface WorkflowDebugSummary {
         createdAt: number;
         payload: Record<string, unknown>;
     }>;
+    // NOC-16: Trinity stage states
+    trinityStageStates?: Array<{
+        stage: 'dreamer' | 'philosopher' | 'scribe';
+        status: 'pending' | 'running' | 'completed' | 'failed';
+        reason?: string;
+        completedAt?: number;
+    }>;
 }
 
 // ── Convenience Re-exports ────────────────────────────────────────────────────
