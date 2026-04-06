@@ -12,7 +12,7 @@ disable-model-invocation: true
 
 ## 🔴 执行协议（必须按顺序执行）
 
-### Phase 0: 对话上下文获取 [可选]
+### Phase 0: 对话上下文获取 [必须尝试]
 
 **目标**: 获取疼痛发生时的对话上下文，帮助诊断分析。
 
@@ -51,8 +51,11 @@ disable-model-invocation: true
      - 每条消息截断到 500 字符
 
 4. **P3: 检查 task 内嵌上下文**:
-   - 查找 `**Recent Conversation Context**:` 标记
-   - 如果存在，提取并使用，记录 `context_source: "task_embedded"`
+   - 在 task 字符串中查找以下标记之一：
+     - `## Recent Conversation Context (pre-extracted JSONL fallback)`
+     - `## Pre-extracted Context (P2 - JSONL Fallback)`
+     - `**Recent Conversation Context**:`
+   - 如果找到，提取后续内容并记录 `context_source: "task_embedded"`
 
 5. **降级处理**（当以上都不可用时）:
    - 不要停止！继续执行 Phase 1
@@ -271,7 +274,7 @@ disable-model-invocation: true
 
 **自检方法**: 输出前在脑中过一遍：每个 `"` 后面必须有匹配的 `"`，中间的内容如果包含 `"` 必须转义为 `\"`。
 
-将四个阶段的输出合并为一个 JSON 对象：
+将五个阶段的输出合并为一个 JSON 对象：
 
 ```json
 {
@@ -280,6 +283,7 @@ disable-model-invocation: true
     "timestamp": "2026-03-24T...",
     "summary": "一句话总结根本原因",
     "phases": {
+      "context_extraction": { "session_id": "...", "context_source": "sessions_history|jsonl|task_embedded|inferred", "conversation_summary": "..." },
       "evidence_gathering": { ... },
       "causal_chain": { ... },
       "root_cause_classification": { ... },
@@ -293,7 +297,7 @@ disable-model-invocation: true
 
 ## ⚠️ 执行约束
 
-1. **禁止跳过阶段**: 必须按 Phase 1 → 2 → 3 → 4 顺序执行
+1. **禁止跳过阶段**: 必须尝试 Phase 0，然后按 Phase 1 → 2 → 3 → 4 顺序执行
 2. **禁止无证据推理**: 每个 Why 的 answer 必须有 evidence 字段
 3. **禁止模糊结论**: 根因必须是具体的、可修复的
 4. **禁止遗漏原则提炼**: 即使问题很简单，也要提炼原则

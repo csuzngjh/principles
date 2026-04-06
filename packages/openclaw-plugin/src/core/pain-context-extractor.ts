@@ -238,17 +238,23 @@ export async function extractFailedToolContext(
     if (messages.length === 0) return '';
 
     // Build toolCallId → arguments map
-    const toolArgsById = new Map<string, { name: string; args: string }>();
+    // Keep both full args (for matching) and truncated (for display)
+    const toolArgsById = new Map<string, { name: string; fullArgs: string; previewArgs: string }>();
     for (const msg of messages) {
       for (const tc of msg.toolCalls) {
         if (tc.id && tc.name) {
           const args = tc.arguments || {};
+          const fullArgs = JSON.stringify(args);
           const truncated: Record<string, unknown> = {};
           for (const [k, v] of Object.entries(args)) {
             const s = typeof v === 'string' ? v : JSON.stringify(v);
             truncated[k] = s.length > 150 ? s.substring(0, 150) + '...' : s;
           }
-          toolArgsById.set(tc.id, { name: tc.name, args: JSON.stringify(truncated, null, 2) });
+          toolArgsById.set(tc.id, {
+            name: tc.name,
+            fullArgs,
+            previewArgs: JSON.stringify(truncated, null, 2),
+          });
         }
       }
     }
@@ -262,10 +268,10 @@ export async function extractFailedToolContext(
 
         const toolCallId = msg.toolCallId;
         const correlated = toolCallId ? toolArgsById.get(toolCallId) : null;
-        if (filePath && correlated && !correlated.args.includes(filePath)) continue;
+        if (filePath && correlated && !correlated.fullArgs.includes(filePath)) continue;
 
         parts.push(`[Tool Call: ${correlated?.name || toolName}]`);
-        if (correlated) parts.push(`Arguments: ${correlated.args.substring(0, 300)}`);
+        if (correlated) parts.push(`Arguments: ${correlated.previewArgs.substring(0, 300)}`);
         parts.push(`Exit Code: ${exitCode ?? 'N/A'}`);
         const errorText = msg.textParts.join(' ').trim();
         if (errorText) parts.push(`Error: ${errorText.substring(0, 500)}`);
