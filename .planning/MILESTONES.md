@@ -1,16 +1,21 @@
 # Milestones
 
-## v1.5 Nocturnal Helper 重构 (Planned)
+## v1.5 Nocturnal Helper 重构 (Shipped: 2026-04-06)
 
-**Target:** Migrate Nocturnal's TrinityRuntimeAdapter to WorkflowManager interface
+**Phases completed:** 5 (Phase 6, 7, 8, 9, 10)
 
-**Goals:**
-- NocturnalWorkflowManager — wrap `OpenClawTrinityRuntimeAdapter` in WorkflowManager interface
-- Unified subagent lifecycle for all helper workflows (Empathy, DeepReflect, Nocturnal)
-- WorkflowStore event tracking for Trinity 3-stage chain (Dreamer → Philosopher → Scribe)
-- Surface degrade checks and idempotency guarantees
+**Key accomplishments:**
 
-**Not included:** Diagnostician migration (刚跑通，风险极高)
+- NocturnalWorkflowManager implementing WorkflowManager interface with single-reflector path and Trinity chain support
+- WorkflowStore extended with stage_outputs table for Trinity stage persistence and idempotency (NOC-11/12/13)
+- evolution-worker integrated with NocturnalWorkflowManager — stub-based fallback on Trinity failure
+- StubFallbackRuntimeAdapter method signatures fixed to match TrinityRuntimeAdapter interface (NOC-15)
+- Phase 8 architectural shift: direct stage-by-stage invocation for fine-grained persistence control
+
+**Known gaps:**
+- Phases 07, 08 missing VERIFICATION.md (implementations exist, low priority)
+- NOC requirements not formally defined in REQUIREMENTS.md (tracked in milestone audit)
+- Pre-existing TypeScript errors in evolution-reducer.ts and prompt.ts (unrelated to v1.5)
 
 ---
 
