@@ -42,6 +42,8 @@
   - [x] 08-02-PLAN.md — NocturnalWorkflowManager idempotency + crash recovery (NOC-11, NOC-12, NOC-13)
 - [x] Phase 9: Fallback and Evolution Worker Integration
   - [x] 09-01-PLAN.md — NOC-14, NOC-15, NOC-16
+- [ ] Phase 10: Fix NOC-15 Stub Parameters
+  - Gap closure: Fix StubFallbackRuntimeAdapter passing zero params to stub functions
 
 ## Progress
 
@@ -58,5 +60,6 @@
 | 5 | v1.4 | 1/1 | Partial | 2026-04-05 |
 | 6 | v1.5 | 1/1 | Complete | — |
 | 7 | v1.5 | 2/2 | Complete | — |
-| 8 | v1.5 | 2/2 | Planned | — |
-| 9 | v1.5 | 1/1 | Planned | —
+| 8 | v1.5 | 2/2 | Complete | — | |
+| 9 | v1.5 | 1/1 | Complete | — |
+| 10 | v1.5 | 0/1 | Planned | — |

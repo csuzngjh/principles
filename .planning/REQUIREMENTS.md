@@ -66,7 +66,7 @@
 | NOC-12 | Phase 8 | Pending |
 | NOC-13 | Phase 8 | Pending |
 | NOC-14 | Phase 9 | Pending |
-| NOC-15 | Phase 9 | Pending |
+| NOC-15 | Phase 10 | Pending |
 | NOC-16 | Phase 9 | Pending |
 
 **Coverage:**
