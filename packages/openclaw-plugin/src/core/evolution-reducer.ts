@@ -283,7 +283,7 @@ export class EvolutionReducerImpl implements EvolutionReducer {
       // Sync to file to ensure PRINCIPLES.md stays up to date
       const synced = this.syncPrincipleToFile(existingPrinciple);
       if (!synced) {
-        SystemLogger.log(this.workspaceDir, 'PRINCIPLE_SYNC_WARN', `Principle ${existingPrinciple.id} updated in memory but NOT synced to file`);
+        SystemLogger.log(this.workspaceDir, 'PRINCIPLE_SYNC_WARN', `Principle ${existingPrinciple.id} updated in memory but failed to sync to PRINCIPLES.md — manual file check required`);
       }
       SystemLogger.log(
         this.workspaceDir,
@@ -343,7 +343,7 @@ export class EvolutionReducerImpl implements EvolutionReducer {
     this.promote(principleId, 'diagnostician_generalized');
     const synced = this.syncPrincipleToFile(principle);
     if (!synced) {
-      SystemLogger.log(this.workspaceDir, 'PRINCIPLE_SYNC_WARN', `Principle ${principleId} created in memory but NOT synced to file`);
+      SystemLogger.log(this.workspaceDir, 'PRINCIPLE_SYNC_WARN', `Principle ${principleId} created in memory but failed to sync to PRINCIPLES.md — manual file check required`);
     }
 
     SystemLogger.log(
@@ -371,15 +371,15 @@ export class EvolutionReducerImpl implements EvolutionReducer {
             }
           }
           if (!content) {
-            SystemLogger.log(this.workspaceDir, 'PRINCIPLES_TEMPLATE_MISSING', `PRINCIPLES.md not found and no template available at ${this.principlesPath}`);
-            return false;
+            // Create a minimal PRINCIPLES.md with just the header
+            content = '# Principles\n\n<!-- 原则从这里开始记录 -->\n';
           }
           const parentDir = path.dirname(this.principlesPath);
           if (!fs.existsSync(parentDir)) {
             fs.mkdirSync(parentDir, { recursive: true });
           }
           fs.writeFileSync(this.principlesPath, content, 'utf8');
-          SystemLogger.log(this.workspaceDir, 'PRINCIPLES_CREATED', `Created PRINCIPLES.md from template`);
+          SystemLogger.log(this.workspaceDir, 'PRINCIPLES_CREATED', `Created PRINCIPLES.md`);
         }
 
         const header = `### ${principle.id}:`;

@@ -284,7 +284,11 @@ export function handleAfterToolCall(
     agent_id: ctx.agentId || '',
   };
 
-  writePainFlag(effectiveWorkspaceDir, painData);
+  try {
+    writePainFlag(effectiveWorkspaceDir, painData);
+  } catch (e) {
+    SystemLogger.log(effectiveWorkspaceDir, 'WRITE_PAIN_FLAG_WARN', `Failed to write pain flag: ${String(e)}`);
+  }
 
   eventLog.recordPainSignal(sessionId, {
     score: painScore,
