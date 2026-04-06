@@ -1,18 +1,22 @@
 /**
  * Pain Context Extractor
  *
- * Extracts conversation context from OpenClaw JSONL session files
- * to provide rich diagnostic context for the pd-diagnostician skill.
+ * Extracts conversation context from OpenClaw session JSONL files
+ * to provide diagnostic context beyond the pain reason.
  *
- * OpenClaw stores sessions as JSONL files at:
- *   ~/.openclaw/agents/{agent_id}/sessions/{session_id}.jsonl
+ * DESIGN PRINCIPLES (from real data analysis):
+ * - JSONL files can be 6 lines (HEARTBEAT injection) to 632+ lines (full conversation)
+ * - Large files: one line can be 11MB (system prompt) — MUST skip oversized lines
+ * - Assistant text appears ONLY in final replies (~3% of assistant messages)
+ * - Most assistant messages contain toolCall blocks (what operations were performed)
+ * - toolResult contains tool output (success AND failure) — both are useful for diagnosis
+ * - Always read from END of file to get most recent context
  *
- * Each line is a JSON object with types: session, model_change, message
- * Message roles: user, assistant, toolResult
- *
- * This module extracts:
- * - Recent conversation (last N turns, user + assistant text only)
- * - Failed tool call context (tool name, arguments, error output)
+ * SAFETY:
+ * - Never load entire file (tail-only, max 512KB)
+ * - Skip lines > 100KB (real files have 11MB single lines)
+ * - Cap total output at 1500 chars
+ * - All errors caught silently — return empty string on failure
  */
 
 import * as fs from 'fs';
@@ -20,178 +24,197 @@ import * as path from 'path';
 import * as os from 'os';
 
 // =========================================================================
-// Types
+// Safety Limits
 // =========================================================================
 
-interface JsonlMessage {
-  type: string;
-  id?: string;
-  parentId?: string;
-  timestamp?: string;
-  message?: {
-    role: 'user' | 'assistant' | 'toolResult';
-    content: Array<{
-      type: string;
-      text?: string;
-      thinking?: string;
-      name?: string;
-      arguments?: Record<string, unknown>;
-      toolCallId?: string;
-    }>;
-    toolCallId?: string;
-    toolName?: string;
-    details?: {
-      exitCode?: number;
-      durationMs?: number;
-      isError?: boolean;
-      aggregated?: string;
-    };
-  };
-}
+/** Skip JSONL lines larger than this */
+const MAX_LINE_BYTES = 100_000; // 100KB
+/** Only read last portion of file */
+const TAIL_READ_SIZE = 512_000; // 512KB
+/** Max turns to extract */
+const MAX_TURNS = 8;
+/** Max chars per turn entry */
+const MAX_TURN_CHARS = 250;
+/** Max total output */
+const MAX_OUTPUT_CHARS = 1500;
 
-interface ConversationTurn {
-  role: 'user' | 'assistant' | 'tool' | 'error';
-  content: string;
-  toolName?: string;
-  isError?: boolean;
-}
-
-// =========================================================================
-// Constants
-// =========================================================================
-
-const MAX_TURNS_DEFAULT = 5;
-const MAX_MESSAGE_LENGTH = 500;
-const MAX_OUTPUT_LENGTH = 2000;
-
-/**
- * Resolves the agents directory. Can be overridden via environment variable for testing.
- */
 function getAgentsDir(): string {
-  const envOverride = process.env.PD_TEST_AGENTS_DIR;
-  if (envOverride) return envOverride;
-  return path.join(os.homedir(), '.openclaw', 'agents');
+  return process.env.PD_TEST_AGENTS_DIR || path.join(os.homedir(), '.openclaw', 'agents');
 }
 
 // =========================================================================
-// JSONL Parsing
+// Safe File Reading
 // =========================================================================
 
-/**
- * Parses a JSONL session file into an array of message objects.
- * Skips non-message lines (session, model_change, etc.)
- */
-export async function parseJsonlMessages(filePath: string): Promise<JsonlMessage[]> {
-  if (!fs.existsSync(filePath)) {
+function safeTail(filePath: string): string[] {
+  try {
+    if (!fs.existsSync(filePath)) return [];
+    const stat = fs.statSync(filePath);
+    if (stat.size === 0) return [];
+
+    const readSize = Math.min(stat.size, TAIL_READ_SIZE);
+    const buffer = Buffer.alloc(readSize);
+    const fd = fs.openSync(filePath, 'r');
+    try {
+      fs.readSync(fd, buffer, 0, readSize, stat.size - readSize);
+      const content = buffer.toString('utf8');
+      const firstNewline = content.indexOf('\n');
+      const validContent = firstNewline > 0 ? content.slice(firstNewline + 1) : content;
+      return validContent.split('\n').filter(l => l.trim().length > 0);
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
     return [];
   }
+}
 
-  const content = await fs.promises.readFile(filePath, 'utf8');
-  const messages: JsonlMessage[] = [];
+// =========================================================================
+// Safe JSONL Parsing
+// =========================================================================
 
-  for (const line of content.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
+interface ParsedMessage {
+  role: string;
+  textParts: string[];
+  toolCalls: Array<{ id?: string; name?: string; arguments?: Record<string, unknown> }>;
+  toolCallId?: string;
+  toolName?: string;
+  details?: { exitCode?: number; isError?: boolean; aggregated?: string };
+}
 
+function parseSafeMessages(lines: string[]): ParsedMessage[] {
+  const messages: ParsedMessage[] = [];
+  for (const line of lines) {
+    if (line.length > MAX_LINE_BYTES) continue;
     try {
-      const parsed = JSON.parse(trimmed) as JsonlMessage;
-      if (parsed.type === 'message' && parsed.message) {
-        messages.push(parsed);
-      }
-    } catch {
-      // Skip malformed lines
-    }
+      const parsed = JSON.parse(line);
+      if (parsed.type !== 'message' || !parsed.message) continue;
+      const msg = parsed.message;
+      const content = Array.isArray(msg.content) ? msg.content : [];
+      messages.push({
+        role: msg.role || '',
+        textParts: content.filter((c: { type: string }) => c.type === 'text').map((c: { text?: string }) => c.text || ''),
+        toolCalls: content.filter((c: { type: string }) => c.type === 'toolCall').map((c: { id?: string; name?: string; arguments?: Record<string, unknown> }) => ({ id: c.id, name: c.name, arguments: c.arguments })),
+        toolCallId: msg.toolCallId,
+        toolName: msg.toolName,
+        details: msg.details,
+      });
+    } catch { /* skip */ }
   }
-
   return messages;
 }
 
 // =========================================================================
-// Conversation Extraction
+// Turn Extraction
 // =========================================================================
 
 /**
- * Extracts recent conversation turns from a JSONL session file.
- *
- * @param sessionId - OpenClaw session ID
- * @param agentId - Agent ID (e.g., 'main', 'builder')
- * @param maxTurns - Maximum number of turns to extract (default: 5)
- * @returns Formatted conversation string, or empty string if extraction fails
+ * Extracts a concise turn representation from a message.
+ * Returns null if nothing useful to extract.
  */
-export async function extractRecentConversation(
-  sessionId: string,
-  agentId: string = 'main',
-  maxTurns: number = MAX_TURNS_DEFAULT,
-): Promise<string> {
-  if (!sessionId) return '';
-
-  const jsonlPath = path.join(getAgentsDir(), agentId, 'sessions', `${sessionId}.jsonl`);
-  const messages = await parseJsonlMessages(jsonlPath);
-
-  if (messages.length === 0) return '';
-
-  // Convert messages to conversation turns
-  const turns: ConversationTurn[] = [];
-
-  for (const msg of messages) {
-    const role = msg.message?.role;
-    if (!role || !msg.message?.content) continue;
-
-    if (role === 'user') {
-      const text = extractTextContent(msg.message.content);
-      if (text) {
-        turns.push({
-          role: 'user',
-          content: truncate(text, MAX_MESSAGE_LENGTH),
-        });
+function extractTurn(msg: ParsedMessage): string | null {
+  if (msg.role === 'user' && msg.textParts.length > 0) {
+    // For user messages, skip system prompt injection patterns
+    const text = msg.textParts.join(' ').trim();
+    if (!text) return null;
+    // Skip if it looks like a system injection
+    if (text.startsWith('<evolution_task') || text.startsWith('<system_override') ||
+        text.startsWith('You are an empathy observer') || text.startsWith('Analyze ONLY') ||
+        text.startsWith('{"damageDetected"')) return null;
+    // Find the last meaningful user input line
+    const lines = text.split('\n');
+    let lastInput = '';
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed.length > 3 && trimmed.length < 500 &&
+          !trimmed.startsWith('<') && !trimmed.startsWith('{') &&
+          !trimmed.startsWith('Trust Score:') && !trimmed.startsWith('Hygiene:')) {
+        lastInput = trimmed;
       }
-    } else if (role === 'assistant') {
-      // Only extract text content, skip thinking and toolCall
-      const textContent = extractTextContent(msg.message.content);
-      if (textContent) {
-        turns.push({
-          role: 'assistant',
-          content: truncate(textContent, MAX_MESSAGE_LENGTH),
-        });
-      }
-    } else if (role === 'toolResult') {
-      // Only include error results
-      if (msg.message.details?.isError || (msg.message.details?.exitCode !== undefined && msg.message.details.exitCode !== 0)) {
-        const errorText = extractTextContent(msg.message.content);
-        if (errorText) {
-          turns.push({
-            role: 'error',
-            content: truncate(errorText, MAX_MESSAGE_LENGTH),
-            toolName: msg.message.toolName,
-            isError: true,
-          });
-        }
+    }
+    const userInput = lastInput || text;
+    return `[User]: ${userInput.substring(0, MAX_TURN_CHARS)}`;
+  }
+
+  if (msg.role === 'assistant') {
+    // Priority 1: final text reply
+    if (msg.textParts.length > 0) {
+      const text = msg.textParts.join(' ').trim();
+      if (text) return `[Assistant]: ${text.substring(0, MAX_TURN_CHARS)}`;
+    }
+    // Priority 2: tool call summary (what operations were performed)
+    if (msg.toolCalls.length > 0) {
+      const tools = msg.toolCalls.map(tc => tc.name).filter(Boolean);
+      const uniqueTools = [...new Set(tools)];
+      if (uniqueTools.length > 0) {
+        return `[Assistant → ${uniqueTools.join(', ')}]`;
       }
     }
   }
 
-  // Take the last N turns
-  const recentTurns = turns.slice(-maxTurns);
+  if (msg.role === 'toolResult') {
+    const exitCode = msg.details?.exitCode;
+    const isError = msg.details?.isError || (exitCode !== undefined && exitCode !== 0);
+    const text = msg.textParts.join(' ').trim();
+    const toolLabel = msg.toolName || 'tool';
 
-  if (recentTurns.length === 0) return '';
+    if (isError) {
+      // Failed tool call — important for diagnosis
+      const errorPreview = text ? text.substring(0, MAX_TURN_CHARS) : `(exit ${exitCode ?? '?'})`;
+      return `[${toolLabel} FAILED]: ${errorPreview}`;
+    }
 
-  // Format as readable conversation
-  return formatConversation(recentTurns);
+    // Successful tool call — include brief result
+    if (text) {
+      // For successful results, show first meaningful line
+      const lines = text.split('\n').filter(l => l.trim());
+      const firstLine = lines[0]?.substring(0, MAX_TURN_CHARS) || '';
+      if (firstLine) return `[${toolLabel}]: ${firstLine}`;
+    }
+  }
+
+  return null;
 }
 
 // =========================================================================
-// Failed Tool Context Extraction
+// Public API
 // =========================================================================
 
 /**
- * Extracts context around a failed tool call from a JSONL session file.
- * Correlates tool calls with their results using toolCallId.
+ * Extracts recent conversation context from a session's JSONL file.
  *
- * @param sessionId - OpenClaw session ID
- * @param agentId - Agent ID
- * @param toolName - Name of the failed tool (e.g., 'write', 'bash')
- * @param filePath - File path involved in the failure (optional)
- * @returns Formatted tool call context string, or empty string if not found
+ * SAFETY: Tail-only read, skip oversized lines, cap output.
+ * Returns empty string on any failure — caller should use pain reason as fallback.
+ */
+export async function extractRecentConversation(
+  sessionId: string,
+  agentId: string = 'main',
+  _maxTurns: number = MAX_TURNS,
+): Promise<string> {
+  if (!sessionId || sessionId.length < 5) return '';
+  try {
+    const jsonlPath = path.join(getAgentsDir(), agentId, 'sessions', `${sessionId}.jsonl`);
+    const lines = safeTail(jsonlPath);
+    const messages = parseSafeMessages(lines);
+    if (messages.length === 0) return '';
+
+    const turns: string[] = [];
+    for (const msg of messages) {
+      const turn = extractTurn(msg);
+      if (turn) turns.push(turn);
+    }
+
+    const recent = turns.slice(-_maxTurns);
+    if (recent.length === 0) return '';
+    const result = recent.join('\n');
+    return result.length > MAX_OUTPUT_CHARS ? result.substring(0, MAX_OUTPUT_CHARS - 3) + '...' : result;
+  } catch {
+    return ''; // Fail silently
+  }
+}
+
+/**
+ * Extracts failed tool call context with argument correlation.
  */
 export async function extractFailedToolContext(
   sessionId: string,
@@ -199,137 +222,50 @@ export async function extractFailedToolContext(
   toolName: string,
   filePath?: string,
 ): Promise<string> {
-  if (!sessionId || !toolName) return '';
+  if (!sessionId || sessionId.length < 5 || !toolName) return '';
+  try {
+    const jsonlPath = path.join(getAgentsDir(), agentId, 'sessions', `${sessionId}.jsonl`);
+    const lines = safeTail(jsonlPath);
+    const messages = parseSafeMessages(lines);
+    if (messages.length === 0) return '';
 
-  const jsonlPath = path.join(getAgentsDir(), agentId, 'sessions', `${sessionId}.jsonl`);
-  const messages = await parseJsonlMessages(jsonlPath);
-
-  if (messages.length === 0) return '';
-
-  // Build a map of tool calls by toolCallId for correlation
-  const toolCallsById = new Map<string, JsonlMessage>();
-  let lastAssistantMsg: JsonlMessage | null = null;
-
-  for (const msg of messages) {
-    if (msg.message?.role === 'assistant') {
-      lastAssistantMsg = msg;
-      for (const content of msg.message.content) {
-        if (content.type === 'toolCall' && content.id) {
-          toolCallsById.set(content.id, msg);
-        }
-      }
-    }
-  }
-
-  // Find the failed tool result by toolCallId
-  let failedToolCall: JsonlMessage | null = null;
-  let failedResult: JsonlMessage | null = null;
-
-  for (const msg of messages) {
-    if (msg.message?.role === 'toolResult' && msg.message.toolName === toolName) {
-      if (msg.message.details?.isError || (msg.message.details?.exitCode !== undefined && msg.message.details.exitCode !== 0)) {
-        // Check toolCallId correlation
-        const toolCallId = msg.message.toolCallId;
-        if (toolCallId && toolCallsById.has(toolCallId)) {
-          const callMsg = toolCallsById.get(toolCallId);
-          // If filePath is provided, verify it matches the tool call arguments
-          if (filePath) {
-            const callContent = callMsg?.message?.content?.filter(c => c.type === 'toolCall' && c.name === toolName) || [];
-            const hasFileMatch = callContent.some(tc => {
-              const args = tc.arguments || {};
-              return Object.values(args).some(v => typeof v === 'string' && v.includes(filePath));
-            });
-            if (hasFileMatch) {
-              failedToolCall = callMsg;
-            }
-          } else {
-            failedToolCall = callMsg;
-          }
-        }
-        failedResult = msg;
-      }
-    }
-  }
-
-  // Fallback: if no correlated tool call found, find last matching tool call
-  if (!failedToolCall && failedResult) {
+    // Build toolCallId → arguments map
+    const toolArgsById = new Map<string, { name: string; args: string }>();
     for (const msg of messages) {
-      if (msg.message?.role === 'assistant') {
-        for (const content of msg.message.content) {
-          if (content.type === 'toolCall' && content.name === toolName) {
-            failedToolCall = msg;
+      for (const tc of msg.toolCalls) {
+        if (tc.id && tc.name) {
+          const args = tc.arguments || {};
+          const truncated: Record<string, unknown> = {};
+          for (const [k, v] of Object.entries(args)) {
+            const s = typeof v === 'string' ? v : JSON.stringify(v);
+            truncated[k] = s.length > 150 ? s.substring(0, 150) + '...' : s;
           }
+          toolArgsById.set(tc.id, { name: tc.name, args: JSON.stringify(truncated, null, 2) });
         }
       }
     }
-  }
 
-  if (!failedToolCall && !failedResult) return '';
+    const parts: string[] = [];
+    for (const msg of messages) {
+      if (msg.role === 'toolResult' && msg.toolName === toolName) {
+        const exitCode = msg.details?.exitCode;
+        const isError = msg.details?.isError || (exitCode !== undefined && exitCode !== 0);
+        if (!isError) continue;
 
-  // Format the failed tool context
-  const parts: string[] = [];
+        const toolCallId = msg.toolCallId;
+        const correlated = toolCallId ? toolArgsById.get(toolCallId) : null;
+        if (filePath && correlated && !correlated.args.includes(filePath)) continue;
 
-  if (failedToolCall?.message) {
-    const toolCallContent = failedToolCall.message.content
-      .filter(c => c.type === 'toolCall' && c.name === toolName);
-
-    for (const tc of toolCallContent) {
-      parts.push(`[Tool Call: ${tc.name}]`);
-      if (tc.arguments) {
-        parts.push(`Arguments: ${JSON.stringify(tc.arguments, null, 2)}`);
+        parts.push(`[Tool Call: ${correlated?.name || toolName}]`);
+        if (correlated) parts.push(`Arguments: ${correlated.args.substring(0, 300)}`);
+        parts.push(`Exit Code: ${exitCode ?? 'N/A'}`);
+        const errorText = msg.textParts.join(' ').trim();
+        if (errorText) parts.push(`Error: ${errorText.substring(0, 500)}`);
+        break;
       }
     }
+    return parts.length > 0 ? parts.join('\n') : '';
+  } catch {
+    return '';
   }
-
-  if (failedResult?.message) {
-    parts.push(`\n[Tool Result: ${failedResult.message.toolName || 'unknown'}]`);
-    if (failedResult.message.details) {
-      parts.push(`Exit Code: ${failedResult.message.details.exitCode ?? 'N/A'}`);
-      parts.push(`Duration: ${failedResult.message.details.durationMs ?? 'N/A'}ms`);
-    }
-    const errorText = failedResult.message.content
-      .filter(c => c.type === 'text')
-      .map(c => c.text)
-      .join('\n');
-    if (errorText) {
-      parts.push(`Error Output:\n${truncate(errorText, 1000)}`);
-    }
-  }
-
-  return parts.join('\n');
-}
-
-// =========================================================================
-// Formatting
-// =========================================================================
-
-function formatConversation(turns: ConversationTurn[]): string {
-  const parts: string[] = [];
-
-  for (const turn of turns) {
-    if (turn.role === 'user') {
-      parts.push(`[User]: ${turn.content}`);
-    } else if (turn.role === 'assistant') {
-      parts.push(`[Assistant]: ${turn.content}`);
-    } else if (turn.role === 'error') {
-      const toolLabel = turn.toolName ? `[Tool: ${turn.toolName}]` : '[Tool Error]';
-      parts.push(`${toolLabel} (FAILED): ${turn.content}`);
-    }
-  }
-
-  const result = parts.join('\n\n');
-  return truncate(result, MAX_OUTPUT_LENGTH);
-}
-
-function truncate(text: string, maxLength: number): string {
-  if (text.length <= maxLength) return text;
-  return text.substring(0, maxLength - 3) + '...';
-}
-
-function extractTextContent(content: Array<{ type: string; text?: string }>): string {
-  return content
-    .filter(c => c.type === 'text' && typeof c.text === 'string')
-    .map(c => c.text!)
-    .join('\n')
-    .trim();
 }
