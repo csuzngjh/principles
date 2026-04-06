@@ -378,17 +378,33 @@ The empathy observer subagent handles pain detection independently.
   if (empathyEnabled && isUserInteraction && sessionId && api && !isAgentToAgent) {
     prependContext = '### BEHAVIORAL_CONSTRAINTS\n' + empathySilenceConstraint + '\n\n' + prependContext;
 
-    // ── Empathy Keyword Matching (fast, < 1ms) ──
-    // Analyze user message for frustration signals using keyword matching.
-    // This replaces the previous LLM subagent-per-turn approach.
+    // ── Empathy Hybrid Matching (keyword + subagent sampling) ──
+    // Fast keyword scan on every turn, with strategic subagent sampling
+    // for boundary cases and random discovery of new expressions.
     if (workspaceDir && latestUserMessage) {
       try {
         const lang = (wctx.config.get('language') as 'zh' | 'en') || 'zh';
         const keywordStore = loadKeywordStore(wctx.stateDir, lang);
         const matchResult = matchEmpathyKeywords(latestUserMessage, keywordStore);
 
+        // Decision: should we call subagent?
+        let shouldCallSubagent = false;
+        let samplingReason = '';
+
+        if (matchResult.score >= 0.8) {
+          // High confidence — keyword match is reliable, no subagent needed
+          shouldCallSubagent = false;
+        } else if (matchResult.score >= 0.3) {
+          // Boundary case — 30% sampling for subagent verification
+          shouldCallSubagent = Math.random() < 0.3;
+          samplingReason = 'boundary_verification';
+        } else {
+          // No keyword hit — 5% random sampling to discover new expressions
+          shouldCallSubagent = Math.random() < 0.05;
+          samplingReason = 'random_discovery';
+        }
+
         if (matchResult.matched) {
-          // Track friction based on keyword match severity
           const penalty = severityToPenalty(matchResult.severity, DEFAULT_EMPATHY_KEYWORD_CONFIG);
           trackFriction(sessionId, workspaceDir, {
             source: 'user_empathy',
@@ -396,9 +412,9 @@ The empathy observer subagent handles pain detection independently.
             reason: `Empathy keywords matched: ${matchResult.matchedTerms.join(', ')} (severity: ${matchResult.severity}, score: ${matchResult.score.toFixed(2)})`,
           });
 
-          logger.info(`[PD:Empathy] MATCH: "${matchResult.matchedTerms.join(', ')}" → severity=${matchResult.severity}, score=${matchResult.score.toFixed(2)}, penalty=${penalty}`);
+          logger.info(`[PD:Empathy] MATCH: "${matchResult.matchedTerms.join(', ')}" → severity=${matchResult.severity}, score=${matchResult.score.toFixed(2)}, penalty=${penalty}, subagent=${shouldCallSubagent ? samplingReason : 'skipped(high_confidence)'}`);
         } else {
-          // Log unmatched messages periodically (every 50th turn) for coverage analysis
+          // Log unmatched messages periodically for coverage analysis
           const turnCount = session?.turnCount || 0;
           if (turnCount > 0 && turnCount % 50 === 0) {
             const sampleMsg = latestUserMessage.substring(0, 80).replace(/\n/g, ' ');
@@ -406,7 +422,23 @@ The empathy observer subagent handles pain detection independently.
           }
         }
 
-        // Check if subagent optimization should be triggered
+        // Trigger subagent for sampling cases
+        if (shouldCallSubagent && api?.runtime?.subagent) {
+          logger.info(`[PD:Empathy] SUBAGENT_SAMPLE: reason=${samplingReason}, score=${matchResult.score.toFixed(2)}, matched=[${matchResult.matchedTerms.join(',')}]`);
+
+          const empathyManager = new EmpathyObserverWorkflowManager({
+            workspaceDir,
+            logger: api.logger,
+            subagent: api.runtime.subagent as any,
+          });
+          empathyManager.startWorkflow(empathyObserverWorkflowSpec, {
+            parentSessionId: sessionId,
+            workspaceDir,
+            taskInput: latestUserMessage,
+          }).catch((err) => api.logger?.warn(`[PD:Empathy] subagent sample failed: ${String(err)}`));
+        }
+
+        // Check if keyword optimization should be triggered
         const turnsSinceLastOpt = session?.turnCount || 0;
         if (shouldTriggerOptimization(keywordStore, turnsSinceLastOpt)) {
           const termCount = Object.keys(keywordStore.terms).length;
@@ -419,8 +451,7 @@ The empathy observer subagent handles pain detection independently.
 
           logger.info(`[PD:Empathy] OPTIMIZATION_TRIGGER: turns=${turnsSinceLastOpt}, last_optimized=${keywordStore.lastOptimizedAt}`);
           logger.info(`[PD:Empathy] STATS: total_terms=${termCount}, total_hits=${totalHits}, zero_hit_terms=${zeroHit}, high_fp_terms=[${highFP}]`);
-          // TODO: Start keyword optimization subagent
-          // This will analyze recent conversations and update keyword weights
+          // TODO: Start keyword optimization subagent to update weights and discover new terms
         }
 
         // Periodic summary (every 100 turns)
