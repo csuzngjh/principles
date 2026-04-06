@@ -609,6 +609,7 @@ export function createPrinciplesConsoleRoutes(api: OpenClawPluginApi): OpenClawP
     auth: 'plugin',
     match: 'prefix',
     async handler(req, res) {
+      if (!api.rootDir) { text(res, 500, 'Plugin rootDir not available'); return true; }
       const url = new URL(req.url || ROUTE_PREFIX, 'http://127.0.0.1');
       const pathname = url.pathname;
       const method = (req.method || 'GET').toUpperCase();
@@ -669,6 +670,7 @@ export function createPrinciplesConsoleRoute(api: OpenClawPluginApi): OpenClawPl
     auth: 'plugin',
     match: 'prefix',
     async handler(req, res) {
+      if (!api.rootDir) { text(res, 500, 'Plugin rootDir not available'); return true; }
       const url = new URL(req.url || ROUTE_PREFIX, 'http://127.0.0.1');
       const pathname = url.pathname;
       const method = (req.method || 'GET').toUpperCase();

@@ -1241,10 +1241,11 @@ export class TrajectoryDatabase {
     // SQLite doesn't support IF NOT EXISTS for ADD COLUMN, so we use try/catch
     try {
       this.db.exec(`ALTER TABLE pain_events ADD COLUMN text TEXT`);
-    } catch (err: any) {
-      // Ignore if column already exists (error code 1: table has no column named 'text')
-      if (!err.message?.includes('duplicate column name')) {
-        // Only throw if it's a different error
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!message.includes('duplicate column name') && !message.includes('no column named')) {
+        // Re-throw unexpected errors — silently swallowing migration failures is dangerous
+        throw err;
       }
     }
 

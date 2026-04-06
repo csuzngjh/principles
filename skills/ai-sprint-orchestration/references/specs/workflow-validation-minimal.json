@@ -1,0 +1,86 @@
+{
+  "id": "workflow-validation-minimal",
+  "title": "Workflow v1 Minimal Validation - Test workflow infrastructure without product binding",
+  "workspace": "__SKILL_PACKAGE_ROOT__",
+  "branchWorkspace": "__SKILL_PACKAGE_ROOT__",
+  "branch": "main",
+  "integrationPhase": "shadow",
+  "maxRoundsPerStage": 2,
+  "maxRuntimeMinutes": 20,
+  "stageTimeoutMinutes": 4,
+  "stages": ["validate"],
+  "producer": {
+    "agent": "opencode",
+    "model": "minimax-cn-coding-plan/MiniMax-M2.7",
+    "timeoutSeconds": 60
+  },
+  "reviewerA": {
+    "agent": "opencode",
+    "model": "minimax-cn-coding-plan/MiniMax-M2.7",
+    "timeoutSeconds": 45,
+    "fallback": {
+      "agent": "iflow",
+      "model": "glm-4.7",
+      "timeoutSeconds": 75
+    },
+    "role": "schema_checker",
+    "focus": "Verify report has all required sections, VERDICT format, DIMENSIONS format"
+  },
+  "reviewerB": {
+    "agent": "opencode",
+    "model": "minimax-cn-coding-plan/MiniMax-M2.7",
+    "timeoutSeconds": 45,
+    "fallback": {
+      "agent": "iflow",
+      "model": "glm-4.7",
+      "timeoutSeconds": 75
+    },
+    "role": "quality_checker",
+    "focus": "Verify outputQuality is computed correctly, qualityReasons are meaningful"
+  },
+  "context": [
+    "=== WORKFLOW VALIDATION SPRINT ===",
+    "This sprint validates the workflow infrastructure itself, NOT any product feature.",
+    "",
+    "=== VALIDATION GOALS ===",
+    "1. Producer produces a valid report with all required sections",
+    "2. Reviewers produce valid reports with VERDICT, DIMENSIONS",
+    "3. Orchestrator computes outputQuality correctly",
+    "4. outputQuality and qualityReasons are persisted to decision.md and scorecard.json",
+    "5. nextRunRecommendation is computed and recorded",
+    "",
+    "=== NO PRODUCT LOGIC ===",
+    "Producer task: List 3 files in skills/ai-sprint-orchestration/scripts/ and describe their purpose.",
+    "This is intentionally trivial - we are testing the workflow package, not any product task.",
+    "",
+    "=== SUCCESS CRITERIA FOR THIS RUN ===",
+    "- No halt due to workflow infrastructure issues (timeout handling, file I/O, validation)",
+    "- decision.md contains outputQuality field",
+    "- scorecard.json contains outputQuality and qualityReasons",
+    "- If outputQuality is shadow_complete, nextRunRecommendation suggests CONTINUATION or VERIFY"
+  ],
+  "stageGoals": {
+    "validate": [
+      "Produce a minimal valid producer report.",
+      "Reviewers verify schema compliance.",
+      "Orchestrator computes and persists outputQuality."
+    ]
+  },
+  "stageCriteria": {
+    "validate": {
+      "requiredApprovals": 2,
+      "requiredProducerSections": ["SUMMARY", "CHANGES", "EVIDENCE", "CODE_EVIDENCE", "KEY_EVENTS", "HYPOTHESIS_MATRIX", "CHECKS", "OPEN_RISKS"],
+      "requiredReviewerSections": ["VERDICT", "BLOCKERS", "FINDINGS", "CODE_EVIDENCE", "HYPOTHESIS_MATRIX", "NEXT_FOCUS", "CHECKS"],
+      "scoringDimensions": ["schema_compliance", "report_completeness"],
+      "dimensionThreshold": 3,
+      "requiredDeliverables": ["valid_producer_report", "valid_reviewer_reports"]
+    }
+  },
+  "stageRoleTimeouts": {
+    "validate": { "producer": 60, "reviewer_a": 45, "reviewer_b": 45 }
+  },
+  "verificationSpec": "workflow-validation-minimal-verify",
+  "continuationSpec": null,
+  "recoverySpec": null,
+  "requireVerify": false
+}

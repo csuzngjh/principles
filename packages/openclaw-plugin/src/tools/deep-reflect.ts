@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import { EventLogService } from '../core/event-log.js';
 import { buildCritiquePromptV2 } from './critique-prompt.js';
 import { resolvePdPath } from '../core/paths.js';
+import { resolveWorkspaceDirFromApi } from '../core/path-resolver.js';
 import { reflectionLogRetentionDays } from '../types.js';
 import {
     DeepReflectWorkflowManager,
@@ -191,7 +192,7 @@ export function createDeepReflectTool(api: OpenClawPluginApi) {
 
             const effectiveWorkspaceDir =
                 (api.config?.workspaceDir as string)
-                || api.workspaceDir
+                || resolveWorkspaceDirFromApi(api)
                 || api.resolvePath?.('.');
 
             if (!effectiveWorkspaceDir) {

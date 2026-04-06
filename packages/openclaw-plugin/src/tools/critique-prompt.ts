@@ -1,5 +1,6 @@
 import type { OpenClawPluginApi } from '../openclaw-sdk.js';
 import { loadModelIndex } from './model-index.js';
+import { resolveWorkspaceDirFromApi } from '../core/path-resolver.js';
 
 /**
  * 深度指令模板 (必须与测试用例中的 quick/balanced/thorough 关键字对齐)
@@ -27,10 +28,10 @@ export function buildCritiquePromptV2(
 ): string {
     const { context, depth = 2, model_id, workspaceDir, api } = params;
     
-    // 1. 确定工作区目录 (优先级：显式传入 > api.config > api.workspaceDir > api.resolvePath)
-    const effectiveWorkspaceDir = workspaceDir 
-        || (api?.config?.workspaceDir as string) 
-        || api?.workspaceDir 
+    // 1. 确定工作区目录 (优先级：显式传入 > api.config > official API > api.resolvePath)
+    const effectiveWorkspaceDir = workspaceDir
+        || (api?.config?.workspaceDir as string)
+        || resolveWorkspaceDirFromApi(api)
         || api?.resolvePath?.('.');
     
     if (!effectiveWorkspaceDir) {

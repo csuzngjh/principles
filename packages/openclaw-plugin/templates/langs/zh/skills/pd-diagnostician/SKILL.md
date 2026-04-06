@@ -183,6 +183,7 @@ disable-model-invocation: true
 2. **可复用**：原则应适用于多个场景，不只解决当前这一个问题
 3. **简洁**：一句话能说清楚，不超过 40 字
 4. **可验证**：能明确判断是否遵循了此原则
+5. **去重检查**（关键）：提炼后必须与 HEARTBEAT.md 中提供的 **Existing Principles** 对比。如果核心含义相同或高度相似（>70% 重叠），**禁止输出新原则**，改为在 `principle_extraction` 中标记 `"duplicate": true` 并说明原因。
 
 **原则结构**:
 ```json
@@ -194,6 +195,24 @@ disable-model-invocation: true
     "action": "具体的检查/拦截/提醒动作",
     "abstracted_principle": "高度抽象的原则陈述（40字以内，跨场景适用）",
     "rationale": "为什么这个原则能防止问题",
+    "duplicate": false,
+    "duplicate_of": "如果发现已有原则与此相似，填写已有原则的 ID 和名称",
+
+    "priority": "P0|P1|P2 (可选，默认 P1。P0=关键安全/数据，P1=流程/质量，P2=风格/偏好)",
+    "scope": "general|domain (可选，默认 general。domain 时需填写 domain 字段)",
+    "domain": "如果 scope=domain，填写领域名如 file_operations, api_calls, config_management",
+
+    "suggested_rules": [
+      {
+        "name": "规则简短名称",
+        "type": "hook|gate|skill|test",
+        "trigger_condition": "何时触发此规则",
+        "enforcement": "block|warn|log",
+        "action": "具体执行什么动作",
+        "implementation_hint": "建议实现到的文件路径或模块"
+      }
+    ],
+
     "implementation": {
       "type": "hook|rule|template",
       "target_file": "建议添加到的文件路径",
@@ -202,6 +221,11 @@ disable-model-invocation: true
   }
 }
 ```
+
+**字段说明**：
+- `priority`, `scope`, `domain`, `suggested_rules` 为**可选字段**，如果你不确定可以省略
+- `suggested_rules` 是原则落地为具体规则的**建议**，每条规则应足够具体，能被直接实现
+- 一条原则通常对应 1-3 条规则，不要过多（过于琐碎）或过少（原则太空泛）
 
 **`abstracted_principle` 编写指南**：
 
@@ -223,6 +247,19 @@ disable-model-invocation: true
 ---
 
 ## 📤 最终输出格式
+
+### ⚠️ JSON 格式强制约束（违反 = 输出无效）
+
+你的诊断报告将被**自动解析为 JSON**。任何格式错误都会导致分析结果被丢弃。
+
+**必须遵守**:
+1. **所有字符串必须使用 ASCII 双引号 `"`（U+0022）** — 禁止使用中文引号 `"` `"`（U+201C/U+201D）、单引号 `'`、或其他替代符号
+2. **禁止在 JSON 中使用未转义的控制字符** — 换行用 `\n`，制表用 `\t`
+3. **禁止在 JSON 外添加任何额外文本** — 不要写 "好的，以下是..." 之类的引导语
+4. **禁止使用注释** — JSON 不支持 `//` 或 `/* */`
+5. **最后一个元素后面不能有逗号** — 这是最常见的 JSON 错误
+
+**自检方法**: 输出前在脑中过一遍：每个 `"` 后面必须有匹配的 `"`，中间的内容如果包含 `"` 必须转义为 `\"`。
 
 将四个阶段的输出合并为一个 JSON 对象：
 
@@ -300,6 +337,7 @@ Diagnose systemic pain [ID: abc123].
           "id": "P_20260324_dircheck",
           "trigger_pattern": "fs\\.writeFileSync|writeFile|mkdirSync",
           "action": "写入前检查目标目录是否存在，不存在则先创建",
+          "abstracted_principle": "任何写入操作必须确保目标环境的完整性",
           "rationale": "防止在目录不存在时写入失败",
           "implementation": {
             "type": "hook",

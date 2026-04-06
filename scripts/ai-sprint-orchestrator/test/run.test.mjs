@@ -78,10 +78,10 @@ test('P1-1: merge gate result includes targetBranch, not worktree branchName', (
     'result field should be targetBranch, not the internal worktree branchName');
 });
 
-test('P1-1: merge gate halt reason uses targetBranch, not worktree branchName', () => {
-  const haltIdx = SOURCE.indexOf("type: fetchFailed ? 'merge_gate_branch_not_on_remote'");
-  assert.ok(haltIdx !== -1, 'halt reason must use targetBranch');
-  const section = SOURCE.slice(haltIdx, haltIdx + 600);
+test('P1-1: merge gate sha-mismatch halt reason uses targetBranch, not worktree branchName', () => {
+  const haltIdx = SOURCE.indexOf("type: 'merge_gate_sha_mismatch'");
+  assert.ok(haltIdx !== -1, 'sha-mismatch halt reason must use targetBranch');
+  const section = SOURCE.slice(haltIdx, haltIdx + 500);
 
   // Must use targetBranch in details, not worktree's internal branchName
   assert.ok(/targetBranch/.test(section) || /mergeGate\.targetBranch/.test(section),
@@ -99,13 +99,11 @@ test('P1-1: merge gate fetches specific targetBranch refspec', () => {
   assert.ok(fetchWithTargetBranch, 'git fetch must use targetBranch in refspec');
 });
 
-test('P1-1: merge gate distinct halt types for fetch-failed vs sha-mismatch', () => {
-  const haltMatch = SOURCE.match(/type:\s*fetchFailed\s*\?\s*'([^']+)'\s*:\s*'([^']+)'/);
-  assert.ok(haltMatch, 'should find distinct halt type expression');
-  const [, fetchFailedType, mismatchType] = haltMatch;
-  assert.notEqual(fetchFailedType, mismatchType, 'types must be distinct');
-  assert.equal(fetchFailedType, 'merge_gate_branch_not_on_remote');
-  assert.equal(mismatchType, 'merge_gate_sha_mismatch');
+test('P1-1: fetch-failed merge gate uses mergePending, not a halt type', () => {
+  const advanceBody = getFuncBody('advanceState');
+  assert.ok(/mergePending/.test(advanceBody), 'fetch-failed path should record mergePending');
+  assert.equal(/merge_gate_branch_not_on_remote/.test(advanceBody), false,
+    'fetch-failed path should no longer assign a halt type');
 });
 
 test('P1-1: merge gate halt does not mention "remote HEAD"', () => {
@@ -140,6 +138,14 @@ test('P1-1 NEW: targetBranch missing from remote → fetchFailed=true', () => {
   // Must set fetchFailed: true in that case
   const hasFetchFailedFlag = /fetchFailed:\s*true/.test(body);
   assert.ok(hasFetchFailedFlag, 'missing remote branch must set fetchFailed: true');
+});
+
+test('P1-1 NEW: missing remote branch completes with mergePending instead of halting', () => {
+  const body = getFuncBody('advanceState');
+  assert.ok(/mergePending/.test(body),
+    'advanceState must mark mergePending for fetchFailed merge gate results');
+  assert.equal(/state\.status\s*=\s*'halted'[\s\S]{0,200}fetchFailed/.test(body), false,
+    'fetchFailed merge gate path must not halt the sprint');
 });
 
 test('P1-1 NEW: targetBranch defaults to main when spec.branch absent', () => {
@@ -256,6 +262,22 @@ test('protectedArtifacts: still protects decision.md and scorecard.json', () => 
     'protectedArtifacts must continue protecting decision.md');
   assert.ok(/paths\.scorecardPath/.test(body),
     'protectedArtifacts must continue protecting scorecard.json');
+});
+
+test('protectedArtifacts: still protects sprint.json run state', () => {
+  const body = getFuncBody('protectedArtifacts');
+  assert.ok(/sprint\.json/.test(body),
+    'protectedArtifacts must continue protecting sprint.json');
+});
+
+test('protected write detection call sites pass runDir for severity classification', () => {
+  const runReviewerBody = getFuncBody('runReviewerRole');
+  assert.ok(/detectProtectedWriteViolation\(protectedFiles,\s*protectedSnapshot,\s*runDir\)/.test(runReviewerBody),
+    'reviewer protected write detection must pass runDir');
+
+  const executeStageBody = getFuncBody('executeStage');
+  assert.ok(/detectProtectedWriteViolation\(protectedFiles,\s*protectedSnapshot,\s*runDir\)/.test(executeStageBody),
+    'stage-level protected write detection must pass runDir');
 });
 
 // ---------------------------------------------------------------------------

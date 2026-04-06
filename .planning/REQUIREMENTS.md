@@ -1,77 +1,68 @@
-# Requirements: v1.2 Workflow v1 最终收口与技能化
+# Requirements: v1.3 Workflow Skill Internal Usability
 
-**Defined:** 2026-04-05
-**Core Value:** 把 ai-sprint-orchestrator 收口到"智能体可稳定使用"的程度，做成完整可打包可复用的 skill 包
+**Defined:** 2026-04-06  
+**Core Value:** make `ai-sprint-orchestrator` usable as a packaged internal skill before introducing the next work-unit architecture layer.
 
-## v1.2 Requirements
+## v1.3 Requirements
 
-### 文档收口 (DOCS)
+### Skill Stability
 
-- [ ] **DOCS-01**: 验收清单可读、可执行、可交接（UTF-8 无乱码，命令统一为 --task / --task-spec）
-- [ ] **DOCS-02**: 记录区固定包含 runId、outcome、outputQuality、validation、nextRunRecommendation、failure classification 六个字段
-- [ ] **DOCS-03**: 失败分类固定为四类：workflow bug / agent behavior issue / environment issue / sample-spec issue
-- [ ] **DOCS-04**: 澄清 branchWorkspace 和 integrationPhase 的当前语义与限制，消除误导
+- [ ] **STAB-01**: package-local self-check passes in the packaged skill entrypoint
+- [ ] **STAB-02**: `workflow-validation-minimal` runs through the packaged skill entrypoint and produces a structured halt or decision
+- [ ] **STAB-03**: `workflow-validation-minimal-verify` runs through the packaged skill entrypoint and produces a structured halt or decision
+- [ ] **STAB-04**: failure classification is persisted to both `latest-summary.md` and `scorecard.json`
+- [ ] **STAB-05**: validation failures are explicitly classified as `workflow bug`, `agent behavior issue`, `environment issue`, or `sample-spec issue`
 
-### 验证运行 (VAL)
+### Complex Task Readiness
 
-- [ ] **VAL-01**: 三组基线测试（contract-enforcement / decision / run）全部通过
-- [ ] **VAL-02**: workflow-validation-minimal 运行完成，产出 decision.md 和 scorecard.json，包含 outputQuality 和 nextRunRecommendation
-- [ ] **VAL-03**: workflow-validation-minimal-verify 运行完成，验证前一 run 的产出物
-- [ ] **VAL-04**: 所有失败被明确分类到四类 failure classification 中的一类
+- [ ] **TASK-01**: package-local complex bugfix template exists and loads
+- [ ] **TASK-02**: package-local complex feature template exists and loads
+- [ ] **TASK-03**: complex specs require a minimum task contract: `Goal`, `In scope`, `Out of scope`, `Validation commands`, `Expected artifacts`
+- [ ] **TASK-04**: unfilled template specs are rejected before sprint start
+- [ ] **TASK-05**: reviewer prompts explicitly judge behavioral value and unverified risks, not only report structure
 
-### 技能包 (SKILL)
+### Continuation Discipline
 
-- [ ] **SKILL-01**: 创建 skill 包目录 skills/ai-sprint-orchestration/，包含完整可交付结构：SKILL.md、REFERENCE.md、EXAMPLES.md、scripts/ 独立脚本副本
-- [ ] **SKILL-02**: 将 orchestrator 最小必要模块整理迁移到 skill 包 scripts/ 内，形成独立可运行的闭包：run.mjs 入口 + lib/decision.mjs + lib/contract-enforcement.mjs + lib/state-store.mjs + lib/task-specs.mjs + lib/archive.mjs（约 5050 行，不含测试和 archive 历史代码）。迁移时修正路径引用使其相对于 skill 包内部运行
-- [ ] **SKILL-03**: SKILL.md 按 write-a-skill 标准格式创作，教 agent：什么时候用、什么时候不用、怎么启动 scripts/ 入口、怎么看结果、怎么分类失败、什么时候停止。有效 YAML frontmatter，100 行以内
-- [ ] **SKILL-04**: REFERENCE.md 提供 stage 生命周期、评分标准、spec 格式、CLI 命令、产出物路径、failure classification 详细说明
-- [ ] **SKILL-05**: EXAMPLES.md 提供最小验证运行示例、失败分类案例、恢复操作示例、复杂任务如何套用 workflow 示例
+- [ ] **FLOW-01**: stage carry-forward prefers `checkpoint-summary.md` over full prior decision text
+- [ ] **FLOW-02**: complex specs can declare execution scope limits for files, checks, and deliverables
+- [ ] **FLOW-03**: producer prompt requires a scoped execution declaration before edits
+- [ ] **FLOW-04**: validation and complex task flows classify-and-stop on product-side or sample-side gaps
 
-## 停止边界
+### Documentation
 
-validation run 遇到以下情况时，**只分类记录，不继续修产品**：
+- [ ] **DOC-01**: `SKILL.md` reflects internal smoke standards and complex task entry rules
+- [ ] **DOC-02**: `REFERENCE.md` documents failure classification, minimum task contract, execution scope limits, checkpoint summary, and next architecture direction
+- [ ] **DOC-03**: `EXAMPLES.md` shows validation, failure classification, complex templates, and continuation via checkpoint summary
 
-| 分类 | 动作 | 不做什么 |
-|------|------|----------|
-| workflow bug | 修 skill 包内脚本或原 orchestrator | — |
-| agent behavior issue | 不改代码，依赖 schema validation 拦截 | 不改 workflow 适应 agent |
-| environment issue | 记录，需人工介入 | 不自动修复环境 |
-| sample-spec issue / product-side issue | 记录，停止该 run | 不改 packages/openclaw-plugin，不改 D:/Code/openclaw |
+## Stop Boundaries
+
+If a validation run or complex task attempt hits one of the following, classify it and stop instead of expanding scope:
+
+| Category | Allowed action | Stop action |
+|----------|----------------|-------------|
+| workflow bug | fix packaged workflow plumbing or source orchestrator plumbing | do not expand into product closure |
+| agent behavior issue | adjust agent profile, fallback, or prompt discipline | do not special-case behavior in product code |
+| environment issue | classify and require operator intervention | do not auto-repair the environment |
+| sample-spec issue | classify and stop the run | do not edit `packages/openclaw-plugin` or `D:/Code/openclaw` |
 
 ## Out of Scope
 
 | Feature | Reason |
 |---------|--------|
-| packages/openclaw-plugin 修复 | 已知缺口，不阻塞 skill 化 |
-| D:/Code/openclaw 修改 | 不在 repo 范围内 |
-| dashboard / stageGraph / 自优化 sprint / 多任务并行 | 未来扩展，本里程碑不做 |
-| PR2/PD 产品闭环收尾 | 今日完成 = workflow 稳定 + 完整 skill 包 |
-| 全量复制 scripts/ai-sprint-orchestrator | 只迁移最小必要闭包，不带 archive/test/实验代码 |
-| 重写 orchestrator | 迁移整理，不改核心逻辑 |
+| `packages/openclaw-plugin` fixes | known sample-side gaps; not part of workflow-skill internalization |
+| `D:/Code/openclaw` changes | outside this repo |
+| dashboard / stageGraph / self-optimizing sprint / multi-task parallelism | future work, not v1.3 |
+| full work-unit/tasklet engine | next milestone, not this round |
+| orchestrator redesign | v1.3 is internal usability hardening, not a rewrite |
 
 ## Traceability
 
-| Requirement | Phase | Status |
-|-------------|-------|--------|
-| DOCS-01 | Phase 7 | Pending |
-| DOCS-02 | Phase 7 | Pending |
-| DOCS-03 | Phase 7 | Pending |
-| DOCS-04 | Phase 7 | Pending |
-| VAL-01 | Phase 8 | Pending |
-| VAL-02 | Phase 8 | Pending |
-| VAL-03 | Phase 8 | Pending |
-| VAL-04 | Phase 8 | Pending |
-| SKILL-01 | Phase 9 | Pending |
-| SKILL-02 | Phase 9 | Pending |
-| SKILL-03 | Phase 9 | Pending |
-| SKILL-04 | Phase 9 | Pending |
-| SKILL-05 | Phase 9 | Pending |
-
-**Coverage:**
-- v1.2 requirements: 13 total
-- Mapped to phases: 13
-- Unmapped: 0
+| Requirement group | Phase | Status |
+|-------------------|-------|--------|
+| STAB-01 to STAB-05 | Phase 1 | In progress |
+| TASK-01 to TASK-05 | Phase 2 | In progress |
+| FLOW-01 to FLOW-04 | Phase 3 | In progress |
+| DOC-01 to DOC-03 | Cross-cutting | In progress |
 
 ---
-*Requirements defined: 2026-04-05*
-*Last updated: 2026-04-05 after Plan B alignment*
+*Last updated: 2026-04-06*

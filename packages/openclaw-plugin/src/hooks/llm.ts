@@ -325,14 +325,18 @@ export function handleLlmOutput(
         // Inject the actual text snippet that triggered this for the diagnostician to read later
         const snippet = text.length > 200 ? text.substring(0, 100) + '...' + text.substring(text.length - 100) : text;
 
-        writePainFlag(ctx.workspaceDir, {
-            source,
-            score: String(painScore),
-            time: new Date().toISOString(),
-            reason: matchedReason,
-            is_risky: 'false',
-            trigger_text_preview: snippet
-        });
+        try {
+            writePainFlag(ctx.workspaceDir, {
+                source,
+                score: String(painScore),
+                time: new Date().toISOString(),
+                reason: matchedReason,
+                is_risky: 'false',
+                trigger_text_preview: snippet
+            });
+        } catch (e) {
+            ctx.logger?.warn?.(`[PD:LLM] Failed to write pain flag: ${String(e)}`);
+        }
 
         eventLog.recordPainSignal(ctx.sessionId, {
             score: painScore,

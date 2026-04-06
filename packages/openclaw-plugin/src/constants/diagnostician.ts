@@ -13,14 +13,18 @@
 export const DIAGNOSTICIAN_PROTOCOL_SUMMARY = `## Diagnostic Protocol (5 Whys)
 
 **Phase 1 - Evidence Gathering**:
-- Read logs: .state/logs/events.jsonl, SYSTEM.log
-- Search code for error patterns from Reason field
-- Record evidence sources
+- Read .state/.pain_flag for full pain context
+- Read .state/logs/events.jsonl recent entries
+- Search codebase for error patterns from Reason field
+- Record all evidence sources (file:line)
 
-**Phase 2 - Causal Chain**:
-- Each Why must have evidence support
-- Maximum 5 layers
-- Stop when reaching actionable root cause
+**Phase 2 - Causal Chain (5 Whys)**:
+- Why 1: Surface symptom (what you can see)
+- Why 2: Direct cause (what triggered it)
+- Why 3: Process gap (what should have caught it)
+- Why 4: Design flaw (why the gap exists)
+- Why 5: Root cause (systemic issue to fix)
+- Each Why MUST have evidence. Stop at actionable root cause.
 
 **Phase 3 - Root Cause Classification**:
 Classify into one of:
@@ -28,20 +32,24 @@ Classify into one of:
 - **Design**: Architecture flaw, missing validation, poor abstraction
 - **Assumption**: Invalid assumption, outdated context, edge case
 - **Tooling**: Tool limitation, environment issue, dependency problem
+- For Design: analyze why existing hooks/rules didn't catch this
 
 **Phase 4 - Principle Extraction**:
-Extract protection principle with:
-- **trigger_pattern**: When this situation occurs
-- **action**: What to do differently
+Extract a HIGHLY ABSTRACTED principle (not an operational rule):
+- **trigger_pattern**: regex/keywords for when this occurs
+- **action**: what to do differently
+- **abstracted_principle**: ONE sentence, max 40 chars, cross-scenario applicable
+  - ❌ Bad: "写入前检查目录是否存在" (too specific)
+  - ✅ Good: "任何写入操作必须确保目标环境的完整性" (abstract, reusable)
 
-**Output Format**:
+**Output Format** (single JSON object):
 \`\`\`json
 {
   "diagnosis_report": {
     "task_id": "pain-xxx",
     "summary": "One-line root cause",
     "causal_chain": [
-      { "why": 1, "answer": "...", "evidence": "..." }
+      { "why": 1, "answer": "...", "evidence": "file:line" }
     ],
     "root_cause": {
       "category": "Design|People|Assumption|Tooling",
@@ -49,7 +57,8 @@ Extract protection principle with:
     },
     "principle": {
       "trigger_pattern": "...",
-      "action": "..."
+      "action": "...",
+      "abstracted_principle": "高度抽象的一句话原则"
     }
   }
 }

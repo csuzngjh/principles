@@ -18,6 +18,11 @@ to:
 
 ## Documents
 
+- `PRINCIPLE-TREE-ARCHITECTURE.md`
+  **核心架构文档**：原则树设计（原则 → 规则 → 实现三层结构），生命周期管理，
+  价值量化，以及从概念到落地的路线图。
+  类型定义：`packages/openclaw-plugin/src/types/principle-tree-schema.ts`
+
 - `ARCHITECTURE_GUARDRAILS.md`
   The top-level architectural rules for workflow-heavy code.
 - `GRADUAL_ROADMAP.md`
