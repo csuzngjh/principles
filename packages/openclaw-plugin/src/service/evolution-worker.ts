@@ -19,9 +19,9 @@ import { checkWorkspaceIdle, checkCooldown } from './nocturnal-runtime.js';
 import { WorkflowStore } from './subagent-workflow/workflow-store.js';
 import { EmpathyObserverWorkflowManager } from './subagent-workflow/empathy-observer-workflow-manager.js';
 import { DeepReflectWorkflowManager } from './subagent-workflow/deep-reflect-workflow-manager.js';
+import { NocturnalWorkflowManager, nocturnalWorkflowSpec } from './subagent-workflow/nocturnal-workflow-manager.js';
 
 const WORKFLOW_TTL_MS = 5 * 60 * 1000; // 5 minutes default TTL for helper workflows
-import { executeNocturnalReflectionAsync } from './nocturnal-service.js';
 import { OpenClawTrinityRuntimeAdapter } from '../core/nocturnal-trinity.js';
 
 let timeoutId: NodeJS.Timeout | null = null;
@@ -1002,29 +1002,70 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                 try {
                     logger?.info?.(`[PD:EvolutionWorker] Processing sleep_reflection task ${sleepTask.id}`);
 
-                    // Build runtime adapter for real Trinity execution if api is available
-                    const runtimeAdapter = api ? new OpenClawTrinityRuntimeAdapter(api) : undefined;
-
-                    // Call the nocturnal reflection service
-                    const result = await executeNocturnalReflectionAsync(wctx.workspaceDir, wctx.stateDir, {
-                        runtimeAdapter,
-                    });
-
-                    if (result.success && result.artifact) {
-                        sleepTask.status = 'completed';
-                        sleepTask.completed_at = new Date().toISOString();
-                        sleepTask.resolution = 'marker_detected';
-                        sleepTask.resultRef = result.diagnostics.persistedPath;
-                        logger?.info?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} completed successfully`);
+                    // NOC-14: Use NocturnalWorkflowManager for sleep_reflection tasks
+                    // Lazy-create manager (needs runtimeAdapter from api)
+                    let nocturnalManager: NocturnalWorkflowManager | undefined;
+                    if (api) {
+                        nocturnalManager = new NocturnalWorkflowManager({
+                            workspaceDir: wctx.workspaceDir,
+                            stateDir: wctx.stateDir,
+                            logger: api.logger,
+                            runtimeAdapter: new OpenClawTrinityRuntimeAdapter(api),
+                        });
                     } else {
-                        // Record failure with skip reason
-                        const skipReason = result.skipReason || (result.noTargetSelected ? 'no_target' : 'validation_failed');
+                        // Cannot create manager without api (runtimeAdapter required)
                         sleepTask.status = 'failed';
                         sleepTask.completed_at = new Date().toISOString();
                         sleepTask.resolution = 'failed_max_retries';
-                        sleepTask.lastError = `Nocturnal reflection failed: ${result.validationFailures.join('; ') || skipReason}`;
+                        sleepTask.lastError = 'No API available to create NocturnalWorkflowManager';
                         sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
-                        logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} failed: ${sleepTask.lastError}`);
+                        logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} skipped: no API`);
+                        continue;
+                    }
+
+                    // Start workflow via NocturnalWorkflowManager instead of direct executeNocturnalReflectionAsync
+                    // Pass taskId in metadata for correlation
+                    const workflowHandle = await nocturnalManager.startWorkflow(nocturnalWorkflowSpec, {
+                        parentSessionId: `sleep_reflection:${sleepTask.id}`,
+                        workspaceDir: wctx.workspaceDir,
+                        taskInput: {},
+                        metadata: {
+                            snapshot: sleepTask.recentPainContext ? {
+                                sessionId: sleepTask.id,
+                                sessionStart: sleepTask.timestamp,
+                                stats: { totalAssistantTurns: 0, totalToolCalls: 0, failureCount: 0, totalPainEvents: sleepTask.recentPainContext.recentPainCount, totalGateBlocks: 0 },
+                                recentPain: sleepTask.recentPainContext.mostRecent ? [sleepTask.recentPainContext.mostRecent] : [],
+                            } : undefined,
+                            principleId: 'default',
+                            taskId: sleepTask.id,  // NOC-14: correlation ID for evolution worker
+                        },
+                    });
+
+                    // Store workflowId on task for polling on subsequent cycles
+                    sleepTask.resultRef = workflowHandle.workflowId;
+
+                    // Workflow is running asynchronously. Check if it completed in this cycle
+                    // by polling getWorkflowDebugSummary.
+                    const summary = await nocturnalManager.getWorkflowDebugSummary(workflowHandle.workflowId);
+                    if (summary) {
+                        if (summary.state === 'completed') {
+                            sleepTask.status = 'completed';
+                            sleepTask.completed_at = new Date().toISOString();
+                            sleepTask.resolution = 'marker_detected';
+                            sleepTask.resultRef = summary.metadata?.nocturnalResult ? 'trinity-draft' : workflowHandle.workflowId;
+                            logger?.info?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} workflow completed`);
+                        } else if (summary.state === 'terminal_error') {
+                            sleepTask.status = 'failed';
+                            sleepTask.completed_at = new Date().toISOString();
+                            sleepTask.resolution = 'failed_max_retries';
+                            const lastEvent = summary.recentEvents[summary.recentEvents.length - 1];
+                            sleepTask.lastError = `Workflow terminal_error: ${lastEvent?.reason ?? 'unknown'}`;
+                            sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
+                            logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} workflow failed: ${sleepTask.lastError}`);
+                        } else {
+                            // Workflow still active, keep task in_progress for next cycle
+                            logger?.info?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} workflow ${summary.state}, will poll again next cycle`);
+                        }
                     }
                 } catch (taskErr) {
                     sleepTask.status = 'failed';
