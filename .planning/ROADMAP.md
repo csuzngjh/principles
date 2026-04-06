@@ -40,7 +40,8 @@
 - [ ] Phase 8: Intermediate Persistence and Idempotency
   - [x] 08-01-PLAN.md — WorkflowStore stage_outputs table and methods (NOC-11, NOC-12, NOC-13)
   - [x] 08-02-PLAN.md — NocturnalWorkflowManager idempotency + crash recovery (NOC-11, NOC-12, NOC-13)
-- [ ] Phase 9: Fallback and Evolution Worker Integration
+- [x] Phase 9: Fallback and Evolution Worker Integration
+  - [x] 09-01-PLAN.md — NOC-14, NOC-15, NOC-16
 
 ## Progress
 
@@ -58,4 +59,4 @@
 | 6 | v1.5 | 1/1 | Complete | — |
 | 7 | v1.5 | 2/2 | Complete | — |
 | 8 | v1.5 | 2/2 | Planned | — |
-| 9 | v1.5 | 3/3 | Planned | — |
+| 9 | v1.5 | 1/1 | Planned | —
