@@ -1,0 +1,214 @@
+{
+  "$schema": "agent-registry-v1",
+  "description": "Registry of available agents and their supported models for AI sprint orchestrator. All models are FREE. Updated: 2026-04-04.",
+  "lastUpdated": "2026-04-04",
+
+  "agents": {
+    "iflow": {
+      "command": "iflow --experimental-acp",
+      "description": "iFlow CLI with ACP support (智谱 Code Plan / MiniMax Code Plan 付费套餐更稳定，但以下模型全部免费)",
+      "version": "0.5.18",
+      "models": {
+        "glm-4.7": {
+          "description": "GLM-4.7 — official recommended model, fast",
+          "pricing": "free",
+          "recommendedTimeoutSeconds": 1200,
+          "features": ["recommended", "fast"],
+          "notes": "官方推荐模型，速度快"
+        },
+        "glm-5": {
+          "description": "GLM-5 — 744B parameters, long-context",
+          "pricing": "free",
+          "recommendedTimeoutSeconds": 1800,
+          "features": ["slow", "needs-extra-time"],
+          "notes": "744B 参数，运行明显较慢。Review 任务超时必须 ≥ 1800s"
+        },
+        "qwen3-coder-plus": {
+          "description": "Qwen3-Coder-Plus — efficient coding model",
+          "pricing": "free",
+          "recommendedTimeoutSeconds": 1200,
+          "features": ["fast", "coding-optimized"],
+          "notes": "通义编码模型"
+        },
+        "deepseek-v3.2": {
+          "description": "DeepSeek V3.2",
+          "pricing": "free",
+          "recommendedTimeoutSeconds": 1200,
+          "features": ["fast"],
+          "notes": ""
+        },
+        "minimax-m2.5": {
+          "description": "MiniMax M2.5",
+          "pricing": "free",
+          "recommendedTimeoutSeconds": 1200,
+          "features": ["fast"],
+          "notes": ""
+        },
+        "kimi-k2-thinking": {
+          "description": "Kimi K2 Thinking",
+          "pricing": "free",
+          "recommendedTimeoutSeconds": 1800,
+          "features": ["reasoning"],
+          "notes": "推理型模型"
+        },
+        "kimi-k2.5": {
+          "description": "Kimi K2.5",
+          "pricing": "free",
+          "recommendedTimeoutSeconds": 1200,
+          "features": ["fast"],
+          "notes": ""
+        },
+        "kimi-k2-0905": {
+          "description": "Kimi K2 0905",
+          "pricing": "free",
+          "recommendedTimeoutSeconds": 1200,
+          "features": ["fast"],
+          "notes": ""
+        },
+        "iflow-rome-30ba3b": {
+          "description": "iFlow ROME 30BA3B",
+          "pricing": "free",
+          "recommendedTimeoutSeconds": 1200,
+          "features": ["preview"],
+          "notes": "预览版本"
+        }
+      }
+    },
+
+    "opencode": {
+      "command": "npx -y opencode-ai acp",
+      "description": "OpenCode ACP adapter",
+      "version": "1.3.13",
+      "models": {
+        "minimax-cn-coding-plan/MiniMax-M2.7": {
+          "description": "MiniMax M2.7 (Chinese coding plan)",
+          "pricing": "free",
+          "recommendedTimeoutSeconds": 1200,
+          "features": ["fast", "coding-optimized", "stable"],
+          "notes": "最稳定的模型，默认 producer 选择"
+        },
+        "minimax-cn-coding-plan/MiniMax-M2.5": {
+          "description": "MiniMax M2.5 (Chinese coding plan)",
+          "pricing": "free",
+          "recommendedTimeoutSeconds": 1200,
+          "features": ["fast", "coding-optimized"],
+          "notes": "能力略弱于 M2.7"
+        },
+        "minimax-cn-coding-plan/MiniMax-M2.7-highspeed": {
+          "description": "MiniMax M2.7 highspeed variant",
+          "pricing": "free",
+          "recommendedTimeoutSeconds": 900,
+          "features": ["fast", "highspeed"],
+          "notes": "高速变体"
+        },
+        "minimax-cn-coding-plan/MiniMax-M2": {
+          "description": "MiniMax M2 (Chinese coding plan)",
+          "pricing": "free",
+          "recommendedTimeoutSeconds": 1200,
+          "features": ["fast"],
+          "notes": "旧版本"
+        },
+        "minimax-cn-coding-plan/MiniMax-M2.1": {
+          "description": "MiniMax M2.1 (Chinese coding plan)",
+          "pricing": "free",
+          "recommendedTimeoutSeconds": 1200,
+          "features": ["fast"],
+          "notes": "旧版本"
+        }
+      }
+    },
+
+    "gemini": {
+      "command": "gemini --acp",
+      "description": "Gemini CLI with ACP support (全部免费)",
+      "models": {
+        "gemini-2.5-pro": {
+          "description": "Gemini 2.5 Pro — high reasoning capability",
+          "pricing": "free",
+          "recommendedTimeoutSeconds": 1800,
+          "features": ["high-reasoning"],
+          "notes": "高推理能力"
+        },
+        "gemini-2.5-flash": {
+          "description": "Gemini 2.5 Flash — fast response",
+          "pricing": "free",
+          "recommendedTimeoutSeconds": 1200,
+          "features": ["fast"],
+          "notes": "快速响应"
+        },
+        "gemini-2.5-flash-lite": {
+          "description": "Gemini 2.5 Flash Lite — lightweight",
+          "pricing": "free",
+          "recommendedTimeoutSeconds": 900,
+          "features": ["fast", "lite"],
+          "notes": "轻量版本"
+        },
+        "gemini-3-pro-preview": {
+          "description": "Gemini 3 Pro Preview — high reasoning, limited quota",
+          "pricing": "free",
+          "recommendedTimeoutSeconds": 1800,
+          "features": ["high-reasoning", "slow", "limited-quota"],
+          "notes": "高推理，但额度有限、很慢"
+        },
+        "gemini-3-flash-preview": {
+          "description": "Gemini 3 Flash Preview",
+          "pricing": "free",
+          "recommendedTimeoutSeconds": 1200,
+          "features": ["fast", "preview"],
+          "notes": "预览版本"
+        },
+        "gemini-3.1-pro-preview": {
+          "description": "Gemini 3.1 Pro Preview — high reasoning, limited quota",
+          "pricing": "free",
+          "recommendedTimeoutSeconds": 1800,
+          "features": ["high-reasoning", "slow", "limited-quota"],
+          "notes": "高推理，但额度有限、很慢"
+        },
+        "gemini-3.1-flash-lite-preview": {
+          "description": "Gemini 3.1 Flash Lite Preview — lightweight preview",
+          "pricing": "free",
+          "recommendedTimeoutSeconds": 900,
+          "features": ["fast", "lite", "preview"],
+          "notes": "轻量预览版本"
+        }
+      }
+    },
+
+    "qwen": {
+      "command": "qwen --acp",
+      "description": "Qwen Code CLI with ACP support (全部免费)",
+      "models": {
+        "qwen3.6-plus": {
+          "description": "Qwen 3.6 Plus — efficient hybrid model with leading coding performance, 1M context window",
+          "pricing": "free",
+          "recommendedTimeoutSeconds": 1200,
+          "features": ["fast", "coding-optimized", "long-context"],
+          "notes": "高效混合模型，领先编码性能，100 万 token 上下文窗口"
+        }
+      }
+    },
+
+    "claude": {
+      "command": "claude",
+      "description": "Claude Code (Anthropic)",
+      "version": "2.1.81",
+      "models": {
+        "GLM-5.1": {
+          "description": "GLM-5.1 via Claude Code adapter",
+          "pricing": "free",
+          "recommendedTimeoutSeconds": 1800,
+          "features": ["slow"],
+          "notes": "保留给 escalation/global-reviewer 角色。注意：智谱 Code Plan 限额较高，容易触发限流"
+        }
+      }
+    }
+  },
+
+  "_notes": {
+    "paid_plans": "智谱 Code Plan 和 MiniMax Code Plan 是付费套餐，但本 registry 只登记免费可用的模型。付费套餐更稳定但不改变模型列表。",
+    "codex": "codex-acp 在当前环境无法使用，不登记。",
+    "kilocode": "kilocode ACP 是 server 模式（监听端口），不是 headless prompt-response，不兼容 acpx，不登记。",
+    "qodercli": "qodercli 没有 --acp 标志，不登记。",
+    "model_discovery": "opencode 可通过 'opencode models' 自动列出模型。其他 agent（iflow, gemini, qwen）没有 CLI 列表命令，需手动维护。"
+  }
+}

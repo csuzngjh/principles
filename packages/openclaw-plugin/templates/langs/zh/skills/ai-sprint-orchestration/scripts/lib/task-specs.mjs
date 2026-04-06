@@ -4,9 +4,22 @@ import os from 'os';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(__dirname, '..', '..', '..');
-const SPECS_DIR = path.join(repoRoot, 'ops', 'ai-sprints', 'specs');
-const REGISTRY_PATH = path.join(repoRoot, 'ops', 'ai-sprints', 'agent-registry.json');
+const packageRoot = path.resolve(__dirname, '..', '..');
+const REFERENCES_DIR = path.join(packageRoot, 'references');
+const SPECS_DIR = path.join(REFERENCES_DIR, 'specs');
+const REGISTRY_PATH = path.join(REFERENCES_DIR, 'agent-registry.json');
+const DEFAULT_RUNTIME_ROOT = path.join(packageRoot, 'runtime');
+
+function resolveSkillPlaceholder(str) {
+  if (typeof str !== 'string') return str;
+  const runtimeRoot = process.env.AI_SPRINT_RUNTIME_ROOT
+    ? path.resolve(process.env.AI_SPRINT_RUNTIME_ROOT)
+    : DEFAULT_RUNTIME_ROOT;
+  return str
+    .replaceAll('__SKILL_PACKAGE_ROOT__', packageRoot)
+    .replaceAll('__SKILL_REFERENCES_ROOT__', REFERENCES_DIR)
+    .replaceAll('__SKILL_RUNTIME_ROOT__', runtimeRoot);
+}
 
 /** Load the agent registry, or return null if unavailable. */
 function loadAgentRegistry() {
@@ -52,6 +65,101 @@ function validateSpecAgents(spec) {
   }
 }
 
+function isPlaceholderValue(value) {
+  return typeof value === 'string' && /<[^>]+>|TBD|REPLACE_ME/i.test(value);
+}
+
+function normalizeStringList(value) {
+  return Array.isArray(value)
+    ? value.map((item) => String(item ?? '').trim()).filter(Boolean)
+    : [];
+}
+
+function validateTaskContract(spec) {
+  if (spec.requiresTaskContract !== true) return;
+  const contract = spec.taskContract ?? {};
+  const errors = [];
+
+  if (!contract.goal || isPlaceholderValue(contract.goal)) errors.push('taskContract.goal');
+  if (!Array.isArray(contract.inScope) || contract.inScope.length === 0 || contract.inScope.some(isPlaceholderValue)) errors.push('taskContract.inScope');
+  if (!Array.isArray(contract.outOfScope) || contract.outOfScope.length === 0 || contract.outOfScope.some(isPlaceholderValue)) errors.push('taskContract.outOfScope');
+  if (!Array.isArray(contract.validationCommands) || contract.validationCommands.length === 0 || contract.validationCommands.some(isPlaceholderValue)) errors.push('taskContract.validationCommands');
+  if (!Array.isArray(contract.expectedArtifacts) || contract.expectedArtifacts.length === 0 || contract.expectedArtifacts.some(isPlaceholderValue)) errors.push('taskContract.expectedArtifacts');
+
+  if (errors.length > 0) {
+    throw new Error(`Spec '${spec.id}' is missing the minimum task contract. Fill these fields before running: ${errors.join(', ')}.`);
+  }
+}
+
+function validateWorkUnitField(stage, unit, key, errors) {
+  const value = unit?.[key];
+  if (typeof value === 'string') {
+    if (!value.trim() || isPlaceholderValue(value)) {
+      errors.push(`workUnits.${stage}.${unit.workUnitId ?? '<missing-id>'}.${key}`);
+    }
+    return;
+  }
+
+  const list = normalizeStringList(value);
+  if (list.length === 0 || list.some(isPlaceholderValue)) {
+    errors.push(`workUnits.${stage}.${unit.workUnitId ?? '<missing-id>'}.${key}`);
+  }
+}
+
+function validateWorkUnits(spec) {
+  const stageMap = spec.workUnits;
+  if (!stageMap || typeof stageMap !== 'object' || Array.isArray(stageMap)) return;
+
+  const errors = [];
+  for (const [stage, units] of Object.entries(stageMap)) {
+    if (!Array.isArray(units) || units.length === 0) {
+      errors.push(`workUnits.${stage}`);
+      continue;
+    }
+    for (const unit of units) {
+      if (!unit || typeof unit !== 'object') {
+        errors.push(`workUnits.${stage}[]`);
+        continue;
+      }
+      validateWorkUnitField(stage, unit, 'workUnitId', errors);
+      validateWorkUnitField(stage, unit, 'workUnitGoal', errors);
+      validateWorkUnitField(stage, unit, 'allowedFiles', errors);
+      validateWorkUnitField(stage, unit, 'unitChecks', errors);
+      validateWorkUnitField(stage, unit, 'unitDeliverables', errors);
+      validateWorkUnitField(stage, unit, 'unitSummary', errors);
+      validateWorkUnitField(stage, unit, 'carryForwardSummary', errors);
+    }
+  }
+
+  if (errors.length > 0) {
+    throw new Error(`Spec '${spec.id}' is missing the minimum work-unit contract. Fill these fields before running: ${errors.join(', ')}.`);
+  }
+}
+
+export function getStageWorkUnits(spec, stage) {
+  const units = spec?.workUnits?.[stage];
+  if (!Array.isArray(units)) return [];
+  return units.map((unit, index) => ({
+    workUnitId: String(unit.workUnitId ?? '').trim(),
+    workUnitGoal: String(unit.workUnitGoal ?? '').trim(),
+    allowedFiles: normalizeStringList(unit.allowedFiles),
+    unitChecks: normalizeStringList(unit.unitChecks),
+    unitDeliverables: normalizeStringList(unit.unitDeliverables),
+    unitSummary: String(unit.unitSummary ?? '').trim(),
+    carryForwardSummary: String(unit.carryForwardSummary ?? '').trim(),
+    stage,
+    order: index,
+  }));
+}
+
+export function getActiveWorkUnit(spec, stage, options = {}) {
+  const { workUnitIndex = 0 } = options;
+  const units = getStageWorkUnits(spec, stage);
+  if (units.length === 0) return null;
+  const safeIndex = Math.max(0, Math.min(workUnitIndex, units.length - 1));
+  return units[safeIndex];
+}
+
 // ============================================================================
 // Cross-environment path normalization
 // Converts Windows paths (D:/Code/xxx) to Linux (/home/xxx) and vice versa.
@@ -78,8 +186,8 @@ const PATH_FIELDS = new Set([
 /** Normalize a single path for the current OS. */
 function normalizePath(str) {
   if (typeof str !== 'string') return str;
+  let result = resolveSkillPlaceholder(str);
   const isWin = process.platform === 'win32';
-  let result = str;
   for (const mapping of PATH_MAP) {
     const from = isWin ? mapping.linux : mapping.win;
     const to = isWin ? mapping.win : mapping.linux;
@@ -123,6 +231,8 @@ export function getTaskSpec(taskId, specPath) {
       const raw = JSON.parse(fs.readFileSync(candidate, 'utf8'));
       const spec = normalizeSpecPaths(raw);
       validateSpecAgents(spec); // Strict validation — throws on unknown agent/model
+      validateTaskContract(spec);
+      validateWorkUnits(spec);
       return spec;
     }
   }
@@ -130,17 +240,37 @@ export function getTaskSpec(taskId, specPath) {
   throw new Error(`Unknown task spec: ${taskId}. Place a spec file in ${SPECS_DIR}/<task-id>.json or pass --task-spec <path>.`);
 }
 
-export function buildStageBrief(spec, stage, round, previousDecision, handoff = null) {
+export function buildStageBrief(spec, stage, round, previousDecision, handoff = null, checkpointSummary = null, options = {}) {
+  const { workUnitIndex = 0, runDir = '<runDir>', stageDir = '<stageDir>' } = options;
   const goals = spec.stageGoals[stage] ?? [];
   const hypotheses = stage === 'investigate' ? (spec.investigateHypotheses ?? []) : [];
   const stageCriteria = spec.stageCriteria?.[stage];
   const scoringDimensions = stageCriteria?.scoringDimensions ?? [];
   const dimensionThreshold = stageCriteria?.dimensionThreshold ?? 3;
   const requiredDeliverables = stageCriteria?.requiredDeliverables ?? [];
+  const workUnit = getActiveWorkUnit(spec, stage, { workUnitIndex });
 
   // Build structured carry forward from handoff or fall back to raw decision text
   let carryForward;
-  if (handoff) {
+  if (handoff?.carryForwardSummary) {
+    carryForward = [
+      '## Carry Forward',
+      '',
+      handoff.carryForwardSummary.trim(),
+      '',
+      'Use this compact carry-forward summary as the default continuation context. Consult the full prior decision only if this summary is insufficient.',
+      '',
+    ].join('\n');
+  } else if (checkpointSummary) {
+    carryForward = [
+      '## Carry Forward',
+      '',
+      checkpointSummary.trim(),
+      '',
+      'Use this checkpoint summary as the primary carry-forward context. Only consult the full prior decision or handoff if the checkpoint is insufficient.',
+      '',
+    ].join('\n');
+  } else if (handoff) {
     const accomplished = handoff.contractItems?.filter((i) => i.status === 'DONE') ?? [];
     const incomplete = handoff.contractItems?.filter((i) => i.status !== 'DONE') ?? [];
     carryForward = [
@@ -172,6 +302,19 @@ export function buildStageBrief(spec, stage, round, previousDecision, handoff = 
     `## Goals`,
     ...goals.map((goal) => `- ${goal}`),
     '',
+    ...(workUnit
+      ? [
+          `## Active Work Unit`,
+          `- workUnitId: ${workUnit.workUnitId}`,
+          `- workUnitGoal: ${workUnit.workUnitGoal}`,
+          `- allowedFiles: ${workUnit.allowedFiles.join(', ')}`,
+          `- unitChecks: ${workUnit.unitChecks.join(' | ')}`,
+          `- unitDeliverables: ${workUnit.unitDeliverables.join(' | ')}`,
+          `- unitSummary: ${handoff?.unitSummary ?? workUnit.unitSummary}`,
+          `- carryForwardSummary: ${handoff?.carryForwardSummary ?? workUnit.carryForwardSummary}`,
+          '',
+        ]
+      : []),
     ...(hypotheses.length
       ? [
         `## Required Hypotheses`,
@@ -184,16 +327,27 @@ export function buildStageBrief(spec, stage, round, previousDecision, handoff = 
     `## Constraints`,
     ...spec.context.map((line) => `- ${line}`),
     '',
-    // WF-001 fix (v2, 2026-04-05): always inject protected files into brief
-    // constraints so agents see them regardless of spec.context content.
-    `**PROTECTED FILES — DO NOT MODIFY THESE**`,
-    `- ${runDir}/sprint.json`,
-    `- ${runDir}/timeline.md`,
-    `- ${runDir}/latest-summary.md`,
-    `- ${stageDir}/decision.md`,
-    `- ${stageDir}/scorecard.json`,
-    `Modifying any of these files will cause the sprint to halt with protected_file_modified.`,
-    '',
+    ...(spec.taskContract
+      ? [
+          `## Task Contract`,
+          `- Goal: ${spec.taskContract.goal ?? 'n/a'}`,
+          `- In scope: ${(spec.taskContract.inScope ?? []).join('; ') || 'n/a'}`,
+          `- Out of scope: ${(spec.taskContract.outOfScope ?? []).join('; ') || 'n/a'}`,
+          `- Validation commands: ${(spec.taskContract.validationCommands ?? []).join('; ') || 'n/a'}`,
+          `- Expected artifacts: ${(spec.taskContract.expectedArtifacts ?? []).join('; ') || 'n/a'}`,
+          '',
+        ]
+      : []),
+    ...(spec.executionScope
+      ? [
+          `## Execution Scope Limits`,
+          ...(spec.executionScope.maxFiles ? [`- Max files to modify in one round: ${spec.executionScope.maxFiles}`] : []),
+          ...(spec.executionScope.maxChecks ? [`- Max checks to run in one round: ${spec.executionScope.maxChecks}`] : []),
+          ...(spec.executionScope.maxDeliverables ? [`- Max deliverables to claim in one round: ${spec.executionScope.maxDeliverables}`] : []),
+          `- If the round needs more scope than the limits above, revise or continue with a narrower next round instead of forcing it through.`,
+          '',
+        ]
+      : []),
     ...(stageCriteria?.requiredReviewerSections?.length
       ? [
           `## Required Reviewer Sections`,
@@ -277,7 +431,7 @@ export function buildStageBrief(spec, stage, round, previousDecision, handoff = 
   ].join('\n');
 }
 
-export function buildRolePrompt({ spec, stage, round, role, runDir, stageDir, briefPath, producerPath, reviewerAPath, reviewerBPath, globalReviewerPath }) {
+export function buildRolePrompt({ spec, stage, round, role, runDir, stageDir, briefPath, producerPath, reviewerAPath, reviewerBPath, globalReviewerPath, workUnit = null }) {
   const outputPathMap = {
     producer: producerPath,
     reviewer_a: reviewerAPath,
@@ -325,6 +479,18 @@ export function buildRolePrompt({ spec, stage, round, role, runDir, stageDir, br
     `If you get stuck, record the concrete blocker and next best action in both the role state file and worklog before ending.`,
     `Prefer shell commands for file updates when direct write/edit tools are flaky in long sessions.`,
     `When your final report is complete, stop immediately: do not keep exploring, do not retry extra reads, and do not update state/worklog again after the final report is written.`,
+    ...(workUnit
+      ? [
+          `Work-unit execution is mandatory for this run.`,
+          `Current workUnitId: ${workUnit.workUnitId}`,
+          `Current workUnitGoal: ${workUnit.workUnitGoal}`,
+          `Allowed files: ${workUnit.allowedFiles.join(', ')}`,
+          `Expected checks: ${workUnit.unitChecks.join(' | ')}`,
+          `Expected deliverables: ${workUnit.unitDeliverables.join(' | ')}`,
+          `Prior carry-forward summary: ${workUnit.carryForwardSummary}`,
+          `Stay within the allowed files unless the work-unit contract is insufficient; if it is insufficient, stop and explain why.`,
+        ]
+      : []),
   ];
 
   if (role === 'producer') {
@@ -352,6 +518,15 @@ export function buildRolePrompt({ spec, stage, round, role, runDir, stageDir, br
       `You may inspect and modify repository code when the stage requires implementation.`,
       `You are expected to work autonomously within this stage until you either satisfy the stage goals or hit a concrete blocker.`,
       `Persist your intermediate findings frequently so a future agent can resume without relying on chat context.`,
+      `Before modifying code, write a short execution declaration in your worklog with: PLANNED_FILES, PLANNED_CHECKS, and DELIVERABLES for this round.`,
+      ...(spec.executionScope
+        ? [
+            `Do not exceed the declared execution scope for this round.`,
+            ...(spec.executionScope.maxFiles ? [`If you need to modify more than ${spec.executionScope.maxFiles} files, stop and explain why the work should be split into another round.`] : []),
+            ...(spec.executionScope.maxChecks ? [`If you need more than ${spec.executionScope.maxChecks} checks, reduce scope or move the rest to the next round.`] : []),
+            ...(spec.executionScope.maxDeliverables ? [`If you need to claim more than ${spec.executionScope.maxDeliverables} deliverables, split the work instead of overloading one round.`] : []),
+          ]
+        : []),
       // WF-004 fix v2: Enforce schema compliance with hard constraints.
       // Agents that omit required sections get their stage REJECTED — this wastes
       // rounds and triggers orchestrator retries. Tell the agent explicitly.
@@ -475,6 +650,7 @@ ${requiredDeliverables.length > 0 ? `
   const scoringDimensions = stageCriteria?.scoringDimensions ?? [];
   const dimensionThreshold = stageCriteria?.dimensionThreshold ?? 3;
   const requiredDeliverables = stageCriteria?.requiredDeliverables ?? [];
+  const config = role === 'reviewer_a' ? spec.reviewerA : spec.reviewerB;
 
   const reviewerFocus = role === 'reviewer_a'
     ? [
@@ -490,6 +666,13 @@ ${requiredDeliverables.length > 0 ? `
         `Flag any unnecessary architectural expansion or gold-plating.`,
       ];
 
+  const reviewerValueChecks = [
+    `Your review must explicitly judge whether the producer changed real system behavior or only produced plausible-looking text.`,
+    `State whether the verification evidence actually proves the claimed behavior change.`,
+    `Call out any risk that remains unverified even if the report structure is complete.`,
+    config?.focus ? `Additional reviewer focus: ${config.focus}` : null,
+  ].filter(Boolean);
+
   const codeEvidenceReviewerInstruction = [
     `Your report must include a CODE_EVIDENCE section. Format:`,
     `- files_verified: <comma-separated list of files you read or checked for evidence>`,
@@ -502,6 +685,7 @@ ${requiredDeliverables.length > 0 ? `
     ...base,
     `Read the producer report: ${counterpart}`,
     ...reviewerFocus,
+    ...reviewerValueChecks,
     `Review independently. Do not modify repository files unless explicitly needed for evidence collection.`,
     `You are expected to challenge weak assumptions and record checkpoints while reviewing, not just emit a final verdict.`,
     `At the end, write a markdown report to ${outputPath} with exactly these sections: VERDICT, BLOCKERS, FINDINGS, CODE_EVIDENCE, HYPOTHESIS_MATRIX, NEXT_FOCUS, CHECKS.`,

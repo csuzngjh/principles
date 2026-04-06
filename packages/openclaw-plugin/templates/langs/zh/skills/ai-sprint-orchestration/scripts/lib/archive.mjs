@@ -4,9 +4,18 @@ import { fileURLToPath } from 'url';
 import { ensureDir, readJson, writeJson, writeText, fileExists } from './state-store.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(__dirname, '..', '..', '..');
-const sprintRoot = path.join(repoRoot, 'ops', 'ai-sprints');
-const archiveRoot = path.join(sprintRoot, 'archive');
+const packageRoot = path.resolve(__dirname, '..', '..');
+
+function resolveRoots() {
+  const runtimeRoot = process.env.AI_SPRINT_RUNTIME_ROOT
+    ? path.resolve(process.env.AI_SPRINT_RUNTIME_ROOT)
+    : path.join(packageRoot, 'runtime');
+  return {
+    runtimeRoot,
+    sprintRoot: path.join(runtimeRoot, 'runs'),
+    archiveRoot: path.join(runtimeRoot, 'archive'),
+  };
+}
 
 function nowIso() {
   return new Date().toISOString();
@@ -34,6 +43,7 @@ function shouldArchiveEntry(srcPath, runDir) {
  * CLI entry point for --archive <run-id>.
  */
 export function archiveRunById(runId) {
+  const { sprintRoot } = resolveRoots();
   const runDir = path.join(sprintRoot, runId);
   const sprintFile = path.join(runDir, 'sprint.json');
   if (!fileExists(sprintFile)) {
@@ -49,6 +59,7 @@ export function archiveRunById(runId) {
  * @returns {string} Path to the archive directory
  */
 export function archiveRun(runDir, runId) {
+  const { archiveRoot } = resolveRoots();
   const destDir = path.join(archiveRoot, runId);
 
   // Idempotency: check if already successfully archived
@@ -56,7 +67,7 @@ export function archiveRun(runDir, runId) {
   if (fileExists(metaPath)) {
     const meta = readJson(metaPath);
     if (meta.status === 'completed') {
-      throw new Error(`Already archived: ops/ai-sprints/archive/${runId}/`);
+      throw new Error(`Already archived: ${destDir}`);
     }
     // Partial/failed archive — clean up and re-run
     fs.rmSync(destDir, { recursive: true, force: true });

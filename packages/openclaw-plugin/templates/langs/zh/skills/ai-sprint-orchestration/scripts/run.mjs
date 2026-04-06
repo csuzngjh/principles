@@ -1,3 +1,7 @@
+// Packaged AI sprint orchestrator entrypoint.
+// Canonical repo copy lives at packages/openclaw-plugin/templates/langs/zh/skills/ai-sprint-orchestration/scripts/run.mjs.
+// Keep this package-local copy in sync only for package CLI, validation, and runtime-layout changes.
+
 import { spawnSync, spawn } from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
@@ -6,12 +10,18 @@ import os from 'os';
 import { fileURLToPath } from 'url';
 import { decideStage, buildStageMetrics, buildHandoff } from './lib/decision.mjs';
 import { ensureDir, appendText, fileExists, readJson, writeJson, writeText } from './lib/state-store.mjs';
-import { buildRolePrompt, buildStageBrief, getTaskSpec } from './lib/task-specs.mjs';
+import { buildRolePrompt, buildStageBrief, getTaskSpec, getActiveWorkUnit } from './lib/task-specs.mjs';
 import { archiveRunById } from './lib/archive.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(__dirname, '..', '..');
-const sprintRoot = path.join(repoRoot, 'ops', 'ai-sprints');
+const packageRoot = path.resolve(__dirname, '..');
+const referencesRoot = path.join(packageRoot, 'references');
+const defaultRuntimeRoot = path.join(packageRoot, 'runtime');
+let runtimeRoot = process.env.AI_SPRINT_RUNTIME_ROOT
+  ? path.resolve(process.env.AI_SPRINT_RUNTIME_ROOT)
+  : defaultRuntimeRoot;
+let sprintRoot = path.join(runtimeRoot, 'runs');
+let tempRoot = path.join(runtimeRoot, 'tmp');
 // Resolve acpx binary path and node executable — spawn directly via node to avoid
 // shebang/env resolution issues when cron/nohup has a minimal PATH.
 const acpxBin = (() => {
@@ -67,6 +77,82 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function configureRuntimeRoots(rootPath) {
+  runtimeRoot = path.resolve(rootPath);
+  sprintRoot = path.join(runtimeRoot, 'runs');
+  tempRoot = path.join(runtimeRoot, 'tmp');
+  process.env.AI_SPRINT_RUNTIME_ROOT = runtimeRoot;
+}
+
+function checkAcpxAvailable() {
+  return process.platform === 'win32'
+    ? spawnSync('powershell.exe', ['-NoProfile', '-Command', 'acpx --version'], {
+        encoding: 'utf8',
+        shell: false,
+        timeout: 10_000,
+      })
+    : spawnSync(nodeBin, [acpxBin, '--version'], {
+        encoding: 'utf8',
+        shell: false,
+        timeout: 10_000,
+      });
+}
+
+function runSelfCheck() {
+  ensureDir(runtimeRoot);
+  ensureDir(sprintRoot);
+  ensureDir(tempRoot);
+
+  const checks = [];
+  const record = (name, ok, details) => {
+    checks.push({ name, ok, details });
+  };
+
+  record('package_root_exists', fileExists(packageRoot), packageRoot);
+  record('references_root_exists', fileExists(referencesRoot), referencesRoot);
+  record('runtime_root_exists', fileExists(runtimeRoot), runtimeRoot);
+  record('agent_registry_exists', fileExists(path.join(referencesRoot, 'agent-registry.json')), path.join(referencesRoot, 'agent-registry.json'));
+
+  const builtInSpecs = [
+    'workflow-validation-minimal',
+    'workflow-validation-minimal-verify',
+  ];
+  for (const specId of builtInSpecs) {
+    try {
+      const spec = getTaskSpec(specId, null);
+      record(`spec:${specId}`, true, spec.title);
+    } catch (err) {
+      record(`spec:${specId}`, false, err.message);
+    }
+  }
+
+  const acpxCheck = checkAcpxAvailable();
+  record('acpx_available', acpxCheck.status === 0, (acpxCheck.stdout || acpxCheck.stderr || '').trim() || `status=${acpxCheck.status}`);
+
+  const probePath = path.join(runtimeRoot, '.self-check-write-probe.tmp');
+  try {
+    fs.writeFileSync(probePath, 'ok', 'utf8');
+    fs.rmSync(probePath, { force: true });
+    record('runtime_root_writable', true, runtimeRoot);
+  } catch (err) {
+    record('runtime_root_writable', false, err.message);
+  }
+
+  const failed = checks.filter((check) => !check.ok);
+  const lines = [
+    'AI Sprint Orchestrator Self Check',
+    '',
+    `Package root: ${packageRoot}`,
+    `Runtime root: ${runtimeRoot}`,
+    '',
+    ...checks.map((check) => `${check.ok ? '[OK]' : '[FAIL]'} ${check.name}: ${check.details}`),
+  ];
+  console.log(lines.join('\n'));
+  if (failed.length > 0) {
+    process.exitCode = 1;
+  }
+}
+
 function slugify(value) {
   return String(value)
     .toLowerCase()
@@ -89,6 +175,7 @@ function createSprintState(spec, runId, specPath) {
     status: 'running',
     currentStageIndex: 0,
     currentStage: spec.stages[0],
+    currentWorkUnitIndex: 0,
     currentRound: 1,
     maxRoundsPerStage: spec.maxRoundsPerStage,
     maxRuntimeMinutes: spec.maxRuntimeMinutes,
@@ -181,6 +268,146 @@ function heartbeatState(runDir, state, patch = {}) {
 
 function updateSummary(runDir, lines) {
   writeText(path.join(runDir, 'latest-summary.md'), `# Latest Summary\n\n${lines.map((line) => `- ${line}`).join('\n')}\n`);
+}
+
+function inferFailureClassification({ summary = '', blockers = [], reviewerTimeouts = null, reviewerViolations = null }) {
+  const combined = [summary, ...(blockers ?? [])].join(' ').toLowerCase();
+
+  if (/acpx|path|enoent|eacces|eprem|permission|writable|runtime root|command not found|not available/.test(combined)) {
+    return {
+      failureClassification: 'environment issue',
+      failureSource: 'runtime environment',
+      recommendedNextAction: 'Repair the environment or required binaries, then rerun self-check and validation.',
+    };
+  }
+
+  if (/sample-spec|product-side|sample-side|openclaw-plugin|d:\\code\\openclaw|integrationphase|branchworkspace/.test(combined)) {
+    return {
+      failureClassification: 'sample-spec issue',
+      failureSource: 'sample/spec contract',
+      recommendedNextAction: 'Classify and stop. Do not reopen product-side closure work in this workflow milestone.',
+    };
+  }
+
+  if ((reviewerTimeouts?.length ?? 0) > 0 || (reviewerViolations?.length ?? 0) > 0 || /missing reports|schema violation|report invalidated|timed out|agent .*failed|verdict|dimensions/.test(combined)) {
+    return {
+      failureClassification: 'agent behavior issue',
+      failureSource: 'role execution or report quality',
+      recommendedNextAction: 'Adjust agent profile, fallback, or prompt discipline; do not treat this as a product-side bug.',
+    };
+  }
+
+  return {
+    failureClassification: 'workflow bug',
+    failureSource: 'orchestrator runtime',
+    recommendedNextAction: 'Fix the workflow plumbing, persistence, or artifact layout before retrying.',
+  };
+}
+
+function updateSummaryWithClassification(runDir, lines, classification = null) {
+  const enriched = [...lines];
+  if (classification?.failureClassification) {
+    enriched.push(`Failure classification: ${classification.failureClassification}`);
+    enriched.push(`Failure source: ${classification.failureSource}`);
+    enriched.push(`Recommended next action: ${classification.recommendedNextAction}`);
+  }
+  updateSummary(runDir, enriched);
+}
+
+function readStageFailureClassification(runDir, state) {
+  try {
+    const stageDirName = `${String(state.currentStageIndex + 1).padStart(2, '0')}-${state.currentStage}`;
+    const scorecardPath = path.join(runDir, 'stages', stageDirName, 'scorecard.json');
+    if (!fileExists(scorecardPath)) return null;
+    const scorecard = readJson(scorecardPath);
+    if (!scorecard?.failureClassification) return null;
+    return {
+      failureClassification: scorecard.failureClassification,
+      failureSource: scorecard.failureSource ?? 'n/a',
+      recommendedNextAction: scorecard.recommendedNextAction ?? 'n/a',
+    };
+  } catch {
+    return null;
+  }
+}
+
+function extractEvidenceFiles(reportText) {
+  if (!reportText) return [];
+  const matches = [
+    ...reportText.matchAll(/files_(?:checked|verified):\s*([^\n]+)/gi),
+  ];
+  return matches
+    .flatMap((match) => match[1].split(','))
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+function writeCheckpointSummary(stageDir, { decision, handoff = null, producer = '', reviewerA = '', reviewerB = '', globalReviewer = '' }) {
+  const verifiedFiles = Array.from(new Set([
+    ...extractEvidenceFiles(producer),
+    ...extractEvidenceFiles(reviewerA),
+    ...extractEvidenceFiles(reviewerB),
+    ...extractEvidenceFiles(globalReviewer),
+  ]));
+  const accomplished = handoff?.contractItems?.filter((item) => item.status === 'DONE').map((item) => item.deliverable) ?? [];
+  const blockers = decision.blockers?.length ? decision.blockers : ['None.'];
+  const nextFocus = handoff?.focusForNextRound
+    ?? decision.nextRunRecommendation?.reasons?.[0]
+    ?? decision.summary;
+  const lines = [
+    '## Accomplished',
+    ...(accomplished.length ? accomplished.map((item) => `- ${item}`) : ['- No contract deliverables were marked DONE in this round.']),
+    '',
+    '## Blockers',
+    ...blockers.map((item) => `- ${item}`),
+    '',
+    '## Next Focus',
+    nextFocus,
+    '',
+    '## Verified Files',
+    ...(verifiedFiles.length ? verifiedFiles.map((item) => `- ${item}`) : ['- None recorded.']),
+  ];
+  writeText(path.join(stageDir, 'checkpoint-summary.md'), `${lines.join('\n')}\n`);
+}
+
+function writeStageFailureArtifacts({ runDir, state, stageName, stageDir, decisionPath, scorecardPath, summary, blockers = [] }) {
+  const failure = inferFailureClassification({ summary, blockers });
+  writeText(decisionPath, [
+    '# Decision',
+    '',
+    `- Stage: ${stageName}`,
+    `- Round: ${state.currentRound}`,
+    '- Outcome: error',
+    '',
+    '## Summary',
+    summary,
+    '',
+    '## Blockers',
+    ...(blockers.length ? blockers.map((item) => `- ${item}`) : ['- None.']),
+    '',
+    '## Failure Classification',
+    `- Type: ${failure.failureClassification}`,
+    `- Source: ${failure.failureSource}`,
+    `- Recommended Next Action: ${failure.recommendedNextAction}`,
+    '',
+  ].join('\n'));
+  writeJson(scorecardPath, {
+    stage: stageName,
+    round: state.currentRound,
+    outcome: 'error',
+    summary,
+    blockers,
+    failureClassification: failure.failureClassification,
+    failureSource: failure.failureSource,
+    recommendedNextAction: failure.recommendedNextAction,
+    updatedAt: nowIso(),
+  });
+  updateSummaryWithClassification(runDir, [
+    `Status: ${state.status}`,
+    `Stage: ${stageName}`,
+    `Round: ${state.currentRound}`,
+    `Halt reason: ${summary}`,
+  ], failure);
 }
 
 const MAX_TIMELINE_LINES = 500;
@@ -705,6 +932,29 @@ function roleConfig(spec, role) {
   throw new Error(`Unknown role: ${role}`);
 }
 
+function roleAttemptConfigs(config) {
+  if (!config) return [];
+  const primary = { ...config, fallback: undefined, attemptLabel: 'primary' };
+  const attempts = [primary];
+
+  if (config.fallback?.agent && config.fallback?.model) {
+    attempts.push({
+      ...config,
+      ...config.fallback,
+      fallback: undefined,
+      attemptLabel: 'fallback',
+    });
+  } else if (config.retryOnce === true) {
+    attempts.push({
+      ...config,
+      fallback: undefined,
+      attemptLabel: 'retry',
+    });
+  }
+
+  return attempts;
+}
+
 function loadSpec(state, args) {
   const specPath = (args && args.taskSpec) || (state && state.specPath) || null;
   return getTaskSpec(state.taskId, specPath);
@@ -913,7 +1163,7 @@ export function isIsolationCollectAllowed(filename) {
 
 /**
  * Get the isolation directory path for a specific run/stage/role.
- * This is the canonical isolation directory format: tmp/sprint-agent/{runId}/{stage}-{role}/
+ * This is the canonical isolation directory format: runtime/tmp/sprint-agent/{runId}/{stage}-{role}/
  *
  * @param {string} runId - The unique run identifier (e.g., "2026-04-02T14-24-34-009Z-task-name")
  * @param {string} stageName - The stage name (e.g., "implement", "verify")
@@ -922,12 +1172,12 @@ export function isIsolationCollectAllowed(filename) {
  */
 export function getIsolationDir(runId, stageName, role) {
   const roleDir = `${stageName}-${role}`;
-  return path.join(repoRoot, 'tmp', 'sprint-agent', runId, roleDir);
+  return path.join(tempRoot, 'sprint-agent', runId, roleDir);
 }
 
 /**
  * Find report in iflow isolation directory.
- * iflow writes to tmp/sprint-agent/{runId}/{stage}-{role}/{report}.md
+ * iflow writes to runtime/tmp/sprint-agent/{runId}/{stage}-{role}/{report}.md
  *
  * IMPORTANT: Uses runId directly for isolation lookup, not fragile timestamp extraction.
  * This ensures different runs have unique isolation directories and prevents cross-contamination.
@@ -1032,9 +1282,6 @@ function reportExistsAndNonEmpty(reportPath) {
   return fileExists(reportPath) && Boolean(fs.readFileSync(reportPath, 'utf8').trim());
 }
 
-// Classification of protected files by severity.
-// Critical files: modifying them corrupts sprint truth state — must halt.
-// Non-critical files: nice-to-have state that can be restored or skipped — warn only.
 const PROTECTED_CRITICAL = ['sprint.json', 'timeline.md', 'latest-summary.md'];
 const PROTECTED_STAGE_CRITICAL = ['decision.md', 'scorecard.json'];
 
@@ -1065,36 +1312,6 @@ function classifyProtectedFile(filePath, runDir) {
   return PROTECTED_CRITICAL.includes(basename) ? 'critical' : 'warn';
 }
 
-/**
- * Backup protected files before spawning an agent. Called once per role invocation.
- * Returns a map of {filePath: backupContent | null} for later restoration.
- */
-function backupProtectedFiles(files) {
-  const backups = {};
-  for (const file of files) {
-    backups[file] = fileExists(file) ? fs.readFileSync(file, 'utf8') : null;
-  }
-  return backups;
-}
-
-/**
- * Restore protected files from backup if they were modified.
- * Returns a list of restored file paths.
- */
-function restoreProtectedFiles(backups) {
-  const restored = [];
-  for (const [file, content] of Object.entries(backups)) {
-    if (content !== null) {
-      fs.writeFileSync(file, content, 'utf8');
-      restored.push(file);
-    } else if (fileExists(file)) {
-      // File was created (didn't exist before) — delete it
-      try { fs.unlinkSync(file); restored.push(file); } catch {}
-    }
-  }
-  return restored;
-}
-
 function snapshotProtectedFiles(files) {
   const snapshot = {};
   for (const file of files) {
@@ -1103,11 +1320,6 @@ function snapshotProtectedFiles(files) {
   return snapshot;
 }
 
-/**
- * Detect protected file write violations. Returns { file, severity } for the
- * first violation found, or null if none.
- * severity: 'critical' (must halt) or 'warn' (restore + continue).
- */
 function detectProtectedWriteViolation(files, snapshot, runDir) {
   for (const file of files) {
     const previous = snapshot[file] ?? null;
@@ -1176,31 +1388,44 @@ function validateReportSections(text, requiredSections, reportLabel) {
  */
 const REQUIRED_REVIEWER_SECTIONS = ['VERDICT', 'FINDINGS', 'BLOCKERS', 'NEXT_FOCUS', 'CHECKS'];
 
-export function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecardPath, producerPath, reviewerAPath, reviewerBPath, globalReviewerPath, state, reviewerTimeouts = null, reviewerViolations = null }) {
+export function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecardPath, producerPath, reviewerAPath, reviewerBPath, globalReviewerPath, state, reviewerTimeouts = null, reviewerViolations = null, reviewerFailures = null }) {
+  const spec = loadSpec(state);
+  const workUnit = getActiveWorkUnit(spec, stageName, {
+    workUnitIndex: state.currentWorkUnitIndex ?? 0,
+  });
   // Build lookup maps for reviewer timeout/error state
   const timeoutMap = new Map((reviewerTimeouts ?? []).map((r) => [r.role, r]));
+  const failureMap = new Map((reviewerFailures ?? []).map((r) => [r.role, r]));
   const missingFiles = [];
   if (!reportExistsAndNonEmpty(producerPath)) missingFiles.push(`producer: ${producerPath}${fileExists(producerPath) ? ' (empty)' : ''}`);
   if (!reportExistsAndNonEmpty(reviewerAPath)) {
     const info = timeoutMap.get('reviewer_a');
-    if (info?.timedOut) missingFiles.push(`reviewer_a: ${reviewerAPath} (timed out, no report)`);
-    else if (info) missingFiles.push(`reviewer_a: ${reviewerAPath} (error, no report)`);
+    const failure = failureMap.get('reviewer_a');
+    if (info?.timedOut) missingFiles.push(`reviewer_a: ${reviewerAPath} (timed out, no report${failure?.summary ? `; ${failure.summary}` : ''})`);
+    else if (info || failure) missingFiles.push(`reviewer_a: ${reviewerAPath} (error, no report${failure?.summary ? `; ${failure.summary}` : ''})`);
     else missingFiles.push(`reviewer_a: ${reviewerAPath}${fileExists(reviewerAPath) ? ' (empty)' : ' (missing)'}`);
   }
   if (!reportExistsAndNonEmpty(reviewerBPath)) {
     const info = timeoutMap.get('reviewer_b');
-    if (info?.timedOut) missingFiles.push(`reviewer_b: ${reviewerBPath} (timed out, no report)`);
-    else if (info) missingFiles.push(`reviewer_b: ${reviewerBPath} (error, no report)`);
+    const failure = failureMap.get('reviewer_b');
+    if (info?.timedOut) missingFiles.push(`reviewer_b: ${reviewerBPath} (timed out, no report${failure?.summary ? `; ${failure.summary}` : ''})`);
+    else if (info || failure) missingFiles.push(`reviewer_b: ${reviewerBPath} (error, no report${failure?.summary ? `; ${failure.summary}` : ''})`);
     else missingFiles.push(`reviewer_b: ${reviewerBPath}${fileExists(reviewerBPath) ? ' (empty)' : ' (missing)'}`);
   }
 
-  const stageCriteria = loadSpec(state).stageCriteria?.[stageName] ?? {};
+  const stageCriteria = spec.stageCriteria?.[stageName] ?? {};
   const globalReviewerRequired = stageCriteria.globalReviewerRequired === true;
   if (globalReviewerRequired && globalReviewerPath && !reportExistsAndNonEmpty(globalReviewerPath)) {
     missingFiles.push(`global_reviewer: ${globalReviewerPath}${fileExists(globalReviewerPath) ? ' (empty — required for this stage)' : ' (missing — required for this stage)'}`);
   }
 
   if (missingFiles.length > 0) {
+    const failure = inferFailureClassification({
+      summary: `Missing reports: ${missingFiles.join('; ')}`,
+      blockers: missingFiles,
+      reviewerTimeouts,
+      reviewerViolations,
+    });
     writeText(decisionPath, [
       `# Decision`,
       '',
@@ -1220,17 +1445,21 @@ export function decideAndPersist({ runDir, stageName, stageDir, decisionPath, sc
       outcome: 'error',
       summary: `Missing reports: ${missingFiles.join('; ')}`,
       missingReports: missingFiles,
+      failureClassification: failure.failureClassification,
+      failureSource: failure.failureSource,
+      recommendedNextAction: failure.recommendedNextAction,
       reviewerTimeouts: reviewerTimeouts ?? null,
+      reviewerFailures: reviewerFailures ?? null,
       updatedAt: nowIso(),
     });
     appendTimeline(runDir, `Stage ${stageName} round ${state.currentRound} decision: error (missing reports)`);
-    updateSummary(runDir, [
+    updateSummaryWithClassification(runDir, [
       `Status: ${state.status}`,
       `Stage: ${stageName}`,
       `Round: ${state.currentRound}`,
       `Outcome: error`,
       `Missing: ${missingFiles.join('; ')}`,
-    ]);
+    ], failure);
     return { outcome: 'error', summary: `Missing reports: ${missingFiles.join('; ')}`, blockers: missingFiles, metrics: {} };
   }
 
@@ -1276,6 +1505,12 @@ export function decideAndPersist({ runDir, stageName, stageDir, decisionPath, sc
 
   if (schemaErrors.length > 0) {
     const errorSummary = `Report schema violation: ${schemaErrors.join('; ')}`;
+    const failure = inferFailureClassification({
+      summary: errorSummary,
+      blockers: schemaErrors,
+      reviewerTimeouts,
+      reviewerViolations,
+    });
     writeText(decisionPath, [
       `# Decision`,
       '',
@@ -1295,6 +1530,9 @@ export function decideAndPersist({ runDir, stageName, stageDir, decisionPath, sc
       outcome: 'error',
       summary: errorSummary,
       missingReports: schemaErrors,
+      failureClassification: failure.failureClassification,
+      failureSource: failure.failureSource,
+      recommendedNextAction: failure.recommendedNextAction,
       reviewerTimeouts: reviewerTimeouts ?? null,
       updatedAt: nowIso(),
       schemaValidation: {
@@ -1305,18 +1543,18 @@ export function decideAndPersist({ runDir, stageName, stageDir, decisionPath, sc
       },
     });
     appendTimeline(runDir, `Stage ${stageName} round ${state.currentRound} decision: error (report schema violation)`);
-    updateSummary(runDir, [
+    updateSummaryWithClassification(runDir, [
       `Status: ${state.status}`,
       `Stage: ${stageName}`,
       `Round: ${state.currentRound}`,
       `Outcome: error`,
       `Schema violations: ${schemaErrors.join('; ')}`,
-    ]);
+    ], failure);
     return { outcome: 'error', summary: errorSummary, blockers: schemaErrors, metrics: {} };
   }
 
   const decision = decideStage({
-    stageCriteria: loadSpec(state).stageCriteria?.[stageName],
+    stageCriteria: spec.stageCriteria?.[stageName],
     producer,
     reviewerA,
     reviewerB,
@@ -1335,6 +1573,12 @@ export function decideAndPersist({ runDir, stageName, stageDir, decisionPath, sc
     `- Round: ${state.currentRound}`,
     `- Outcome: ${decision.outcome}`,
     `- Output Quality: ${decision.outputQuality}`,
+    ...(workUnit
+      ? [
+          `- Work Unit: ${workUnit.workUnitId}`,
+          `- Work Unit Goal: ${workUnit.workUnitGoal}`,
+        ]
+      : []),
     '',
     `## Summary`,
     decision.summary,
@@ -1421,9 +1665,20 @@ export function decideAndPersist({ runDir, stageName, stageDir, decisionPath, sc
 
   writeText(decisionPath, `${content}\n`);
 
+  const failure = decision.outcome === 'error'
+    ? inferFailureClassification({
+        summary: decision.summary,
+        blockers: decision.blockers,
+        reviewerTimeouts,
+        reviewerViolations,
+      })
+    : null;
+
   const scorecard = {
     stage: stageName,
     round: state.currentRound,
+    workUnitId: workUnit?.workUnitId ?? null,
+    workUnitGoal: workUnit?.workUnitGoal ?? null,
     outcome: decision.outcome,
     outputQuality: decision.outputQuality,
     qualityReasons: decision.qualityReasons ?? [],
@@ -1437,6 +1692,9 @@ export function decideAndPersist({ runDir, stageName, stageDir, decisionPath, sc
       globalReviewer: decision.validation?.globalReviewer ?? null,
     },
     summary: decision.summary,
+    failureClassification: failure?.failureClassification ?? null,
+    failureSource: failure?.failureSource ?? null,
+    recommendedNextAction: failure?.recommendedNextAction ?? null,
     approvalCount: decision.metrics.approvalCount,
     blockerCount: decision.metrics.blockerCount,
     reviewerAVerdict: decision.metrics.reviewerAVerdict,
@@ -1474,6 +1732,9 @@ export function decideAndPersist({ runDir, stageName, stageDir, decisionPath, sc
     ...(reviewerTimeouts
       ? { reviewerTimeouts }
       : {}),
+    ...(reviewerFailures
+      ? { reviewerFailures }
+      : {}),
     updatedAt: nowIso(),
   };
   writeJson(scorecardPath, scorecard);
@@ -1488,12 +1749,30 @@ export function decideAndPersist({ runDir, stageName, stageDir, decisionPath, sc
       metrics: decision.metrics,
       stageName,
       round: state.currentRound,
+      workUnit,
     });
     const handoffPath = path.join(stageDir, 'handoff.json');
     writeJson(handoffPath, handoff);
+    writeCheckpointSummary(stageDir, {
+      decision,
+      handoff,
+      producer,
+      reviewerA,
+      reviewerB,
+      globalReviewer: globalReviewer ?? '',
+    });
+  } else {
+    writeCheckpointSummary(stageDir, {
+      decision,
+      handoff: null,
+      producer,
+      reviewerA,
+      reviewerB,
+      globalReviewer: globalReviewer ?? '',
+    });
   }
   appendTimeline(runDir, `Stage ${stageName} round ${state.currentRound} decision: ${decision.outcome}`);
-  updateSummary(runDir, [
+  updateSummaryWithClassification(runDir, [
     `Status: ${state.status}`,
     `Stage: ${stageName}`,
     `Round: ${state.currentRound}`,
@@ -1501,7 +1780,7 @@ export function decideAndPersist({ runDir, stageName, stageDir, decisionPath, sc
     `Approval count: ${decision.metrics.approvalCount}/2${decision.metrics.globalReviewerVerdict ? ` + global_reviewer: ${decision.metrics.globalReviewerVerdict}` : ''}`,
     `Blocker count: ${decision.metrics.blockerCount}`,
     ...(decision.blockers.length ? [`Top blocker: ${decision.blockers[0]}`] : ['Top blocker: none']),
-  ]);
+  ], failure);
   return decision;
 }
 
@@ -1616,6 +1895,7 @@ function advanceState(state, spec, decision, { runDir } = {}) {
     }
     state.currentStageIndex += 1;
     state.currentStage = spec.stages[state.currentStageIndex];
+    state.currentWorkUnitIndex = 0;
     state.currentRound = 1;
     return;
   }
@@ -1625,6 +1905,7 @@ function advanceState(state, spec, decision, { runDir } = {}) {
     if (state.currentStage === 'implement-pass-1') {
       state.currentStage = 'implement-pass-2';
       state.currentStageIndex = spec.stages.indexOf('implement-pass-2');
+      state.currentWorkUnitIndex = 0;
       state.currentRound = 1;
       return;
     }
@@ -1763,9 +2044,12 @@ function cleanupAcpxOrphans(runDir, state) {
  */
 async function runReviewerRole({ runDir, state, spec, paths, role, worktreeInfo }) {
   const stageName = state.currentStage;
+  const workUnit = getActiveWorkUnit(spec, stageName, {
+    workUnitIndex: state.currentWorkUnitIndex ?? 0,
+  });
   const config = roleConfig(spec, role);
   const { reportPath, stdoutPath } = roleArtifactPaths(paths, role);
-  const failLog = path.join(paths.stageDir, `${role.replace('_', '-')}-failure.log`);
+  const failLogBase = path.join(paths.stageDir, `${role.replace('_', '-')}-failure`);
 
   // Skip if report already exists
   if (fileExists(reportPath) && fs.readFileSync(reportPath, 'utf8').trim()) {
@@ -1795,6 +2079,7 @@ async function runReviewerRole({ runDir, state, spec, paths, role, worktreeInfo 
     reviewerAPath: paths.reviewerAPath,
     reviewerBPath: paths.reviewerBPath,
     globalReviewerPath: paths.globalReviewerPath,
+    workUnit,
   });
   const timeoutSeconds = stageRoleTimeout(spec, stageName, role);
   // Reviewers must verify code in the same workspace where producer made changes
@@ -1804,82 +2089,138 @@ async function runReviewerRole({ runDir, state, spec, paths, role, worktreeInfo 
   let output = null;
   let timedOut = false;
   let violatedFile = null;
+  let reportExisted = false;
+  const attemptErrors = [];
+  const attempts = roleAttemptConfigs(config);
 
-  updateRoleState(paths, role, {
-    stage: stageName,
-    round: state.currentRound,
-    status: 'running',
-    startedAt: nowIso(),
-    finishedAt: null,
-    terminatedAt: null,
-    lastPid: null,
-    timeoutSeconds,
-    lastError: null,
-  });
+  for (let index = 0; index < attempts.length; index += 1) {
+    const attemptConfig = attempts[index];
+    const attemptLabel = attemptConfig.attemptLabel ?? `attempt_${index + 1}`;
+    const attemptTimeoutSeconds = stageRoleTimeout(
+      {
+        ...spec,
+        reviewerA: role === 'reviewer_a' ? attemptConfig : spec.reviewerA,
+        reviewerB: role === 'reviewer_b' ? attemptConfig : spec.reviewerB,
+      },
+      stageName,
+      role
+    );
+    const failLog = `${failLogBase}-${attemptLabel}.log`;
 
-  try {
-    const result = await runAgentAsync({
-      cwd,
-      agent: config.agent,
-      model: config.model,
-      prompt,
-      timeoutSeconds,
-      promptDir: runDir,
-      runDir,
-      roleLabel: role,
-      onSpawn: (pid) => updateRoleState(paths, role, { lastPid: pid }),
-    });
-    const stdout = result.stdout ?? '';
-    const stderr = result.stderr ?? '';
-
-    if (result.status !== 0) {
-      // Agent returned non-zero exit
-      ensureDir(path.dirname(failLog));
-      writeText(failLog, `# Agent Failure Log\n\n- agent: ${config.agent}\n- model: ${config.model}\n- exitStatus: ${result.status}\n\n## stdout\n\n${stdout.slice(0, 2000)}\n\n## stderr\n\n${stderr.slice(0, 2000)}\n`);
-      throw new Error(`Agent ${config.agent} failed with status ${result.status}`);
-    }
-
-    output = stdout.trim();
-    if (output) writeText(stdoutPath, `${output}\n`);
     updateRoleState(paths, role, {
-      status: 'completed',
+      stage: stageName,
+      round: state.currentRound,
+      status: index === 0 ? 'running' : 'retrying',
+      startedAt: nowIso(),
+      finishedAt: null,
+      terminatedAt: null,
       lastPid: null,
-      finishedAt: nowIso(),
+      timeoutSeconds: attemptTimeoutSeconds,
       lastError: null,
     });
-  } catch (err) {
-    // Check if the agent wrote its report despite the error
-    if (fileExists(reportPath) && fs.readFileSync(reportPath, 'utf8').trim()) {
-      output = null;
-      timedOut = true;
+
+    if (index > 0) {
+      appendTimeline(
+        runDir,
+        `${role} retrying with ${attemptConfig.agent}/${attemptConfig.model} (${attemptLabel})`
+      );
+    }
+
+    try {
+      const result = await runAgentAsync({
+        cwd,
+        agent: attemptConfig.agent,
+        model: attemptConfig.model,
+        prompt,
+        timeoutSeconds: attemptTimeoutSeconds,
+        promptDir: runDir,
+        runDir,
+        roleLabel: role,
+        onSpawn: (pid) => updateRoleState(paths, role, { lastPid: pid }),
+      });
+      const stdout = result.stdout ?? '';
+      const stderr = result.stderr ?? '';
+
+      if (result.status !== 0) {
+        ensureDir(path.dirname(failLog));
+        writeText(
+          failLog,
+          `# Agent Failure Log\n\n- attempt: ${attemptLabel}\n- agent: ${attemptConfig.agent}\n- model: ${attemptConfig.model}\n- exitStatus: ${result.status}\n\n## stdout\n\n${stdout.slice(0, 2000)}\n\n## stderr\n\n${stderr.slice(0, 2000)}\n`
+        );
+        throw new Error(`Agent ${attemptConfig.agent} failed with status ${result.status}`);
+      }
+
+      output = stdout.trim();
+      if (output) writeText(stdoutPath, `${output}\n`);
       updateRoleState(paths, role, {
-        status: 'completed_after_timeout',
+        status: 'completed',
         lastPid: null,
         finishedAt: nowIso(),
-        lastError: err.message ?? String(err),
+        lastError: null,
       });
-    } else if (err.message?.includes('timed out')) {
-      timedOut = true;
+      break;
+    } catch (err) {
+      const errorMessage = err.message ?? String(err);
+      const hasReport = fileExists(reportPath) && fs.readFileSync(reportPath, 'utf8').trim();
+
+      if (hasReport) {
+        output = null;
+        timedOut = errorMessage.includes('timed out');
+        reportExisted = true;
+        updateRoleState(paths, role, {
+          status: 'completed_after_timeout',
+          lastPid: null,
+          finishedAt: nowIso(),
+          lastError: errorMessage,
+        });
+        break;
+      }
+
+      const isTimedOut = errorMessage.includes('timed out');
+      attemptErrors.push({
+        label: attemptLabel,
+        agent: attemptConfig.agent,
+        model: attemptConfig.model,
+        error: errorMessage,
+        timedOut: isTimedOut,
+      });
+
       ensureDir(path.dirname(failLog));
-      writeText(failLog, `# Agent Timeout Log\n\n- agent: ${config.agent}\n- model: ${config.model}\n- timeout: ${timeoutSeconds}s\n- error: ${err.message}\n`);
-      updateRoleState(paths, role, {
-        status: 'timed_out',
-        lastPid: null,
-        finishedAt: nowIso(),
-        terminatedAt: nowIso(),
-        lastError: err.message,
-      });
-    } else {
-      // Re-throw unexpected errors (but don't lose the fail log)
-      ensureDir(path.dirname(failLog));
-      writeText(failLog, `# Agent Failure Log\n\n- agent: ${config.agent}\n- model: ${config.model}\n- error: ${err.message}\n`);
-      updateRoleState(paths, role, {
-        status: 'error',
-        lastPid: null,
-        finishedAt: nowIso(),
-        lastError: err.message ?? String(err),
-      });
-      throw err;
+      if (isTimedOut) {
+        timedOut = true;
+        writeText(
+          failLog,
+          `# Agent Timeout Log\n\n- attempt: ${attemptLabel}\n- agent: ${attemptConfig.agent}\n- model: ${attemptConfig.model}\n- timeout: ${attemptTimeoutSeconds}s\n- error: ${errorMessage}\n`
+        );
+        updateRoleState(paths, role, {
+          status: 'timed_out',
+          lastPid: null,
+          finishedAt: nowIso(),
+          terminatedAt: nowIso(),
+          lastError: errorMessage,
+        });
+      } else {
+        writeText(
+          failLog,
+          `# Agent Failure Log\n\n- attempt: ${attemptLabel}\n- agent: ${attemptConfig.agent}\n- model: ${attemptConfig.model}\n- error: ${errorMessage}\n`
+        );
+        updateRoleState(paths, role, {
+          status: 'error',
+          lastPid: null,
+          finishedAt: nowIso(),
+          lastError: errorMessage,
+        });
+      }
+
+      if (index < attempts.length - 1) {
+        continue;
+      }
+
+      if (!isTimedOut) {
+        throw new Error(
+          `${role} failed after ${attemptErrors.length} attempt(s): ${attemptErrors.map((item) => `${item.label}=${item.agent}/${item.model}: ${item.error}`).join(' | ')}`
+        );
+      }
     }
   }
 
@@ -1906,7 +2247,7 @@ async function runReviewerRole({ runDir, state, spec, paths, role, worktreeInfo 
     violatedFile = violated.file;
   }
 
-  return { role, output: text || output || null, timedOut, reportExisted: false, violatedFile };
+  return { role, output: text || output || null, timedOut, reportExisted, violatedFile, attemptErrors };
 }
 
 const MUTATING_STAGES = ['implement-pass-1', 'implement-pass-2'];
@@ -2109,6 +2450,9 @@ function cleanupWorktree({ state, runDir }) {
 
 async function executeStage(runDir, state, spec) {
   const stageName = state.currentStage;
+  const workUnit = getActiveWorkUnit(spec, stageName, {
+    workUnitIndex: state.currentWorkUnitIndex ?? 0,
+  });
   const previousDecisionPath = path.join(
     runDir,
     'stages',
@@ -2130,8 +2474,16 @@ async function executeStage(runDir, state, spec) {
   // Read handoff data for structured carry forward
   const handoffPath = path.join(stageDir, 'handoff.json');
   const handoff = fileExists(handoffPath) ? readJson(handoffPath) : null;
+  const checkpointSummaryPath = path.join(stageDir, 'checkpoint-summary.md');
+  const checkpointSummary = fileExists(checkpointSummaryPath)
+    ? fs.readFileSync(checkpointSummaryPath, 'utf8')
+    : null;
 
-  writeText(briefPath, `${buildStageBrief(spec, stageName, state.currentRound, previousDecision, handoff)}\n`);
+  writeText(briefPath, `${buildStageBrief(spec, stageName, state.currentRound, previousDecision, handoff, checkpointSummary, {
+    workUnitIndex: state.currentWorkUnitIndex ?? 0,
+    runDir,
+    stageDir,
+  })}\n`);
 
   // On round > 1, clear previous round's role reports so agents must regenerate them
   if (state.currentRound > 1) {
@@ -2173,12 +2525,16 @@ async function executeStage(runDir, state, spec) {
     };
     saveState(runDir, state);
     appendTimeline(runDir, `Sprint halted: ${state.haltReason.details}`);
-    updateSummary(runDir, [
-      `Status: ${state.status}`,
-      `Stage: ${stageName}`,
-      `Round: ${state.currentRound}`,
-      `Halt reason: ${state.haltReason.details}`,
-    ]);
+    writeStageFailureArtifacts({
+      runDir,
+      state,
+      stageName,
+      stageDir,
+      decisionPath,
+      scorecardPath,
+      summary: state.haltReason.details,
+      blockers: state.haltReason.blockers,
+    });
     cleanupRecordedRoleProcesses(paths, runDir);
     return { outcome: 'halt', summary: state.haltReason.details, blockers: state.haltReason.blockers, metrics: {} };
   }
@@ -2196,6 +2552,7 @@ async function executeStage(runDir, state, spec) {
     producerPath,
     reviewerAPath,
     reviewerBPath,
+    workUnit,
   });
   const { reportPath: producerReportPath, stdoutPath: producerStdoutPath } = roleArtifactPaths(paths, 'producer');
 
@@ -2280,12 +2637,16 @@ async function executeStage(runDir, state, spec) {
           };
           saveState(runDir, state);
           appendTimeline(runDir, `Sprint halted: repeated timeout on stage ${stageName}`);
-          updateSummary(runDir, [
-            `Status: ${state.status}`,
-            `Stage: ${stageName}`,
-            `Round: ${state.currentRound}`,
-            `Halt reason: ${state.haltReason.details}`,
-          ]);
+          writeStageFailureArtifacts({
+            runDir,
+            state,
+            stageName,
+            stageDir,
+            decisionPath,
+            scorecardPath,
+            summary: state.haltReason.details,
+            blockers: state.haltReason.blockers,
+          });
           cleanupRecordedRoleProcesses(paths, runDir);
           cleanupWorktree({ state, runDir });
           throw new Error(state.haltReason.details);
@@ -2349,12 +2710,16 @@ async function executeStage(runDir, state, spec) {
       };
       saveState(runDir, state);
       appendTimeline(runDir, `Sprint halted: producer modified protected file ${producerViolated.file}`);
-      updateSummary(runDir, [
-        `Status: ${state.status}`,
-        `Stage: ${stageName}`,
-        `Round: ${state.currentRound}`,
-        `Halt reason: ${state.haltReason.details}`,
-      ]);
+      writeStageFailureArtifacts({
+        runDir,
+        state,
+        stageName,
+        stageDir,
+        decisionPath,
+        scorecardPath,
+        summary: state.haltReason.details,
+        blockers: state.haltReason.blockers,
+      });
       cleanupRecordedRoleProcesses(paths, runDir);
       cleanupWorktree({ state, runDir });
       throw new Error(state.haltReason.details);
@@ -2389,12 +2754,16 @@ async function executeStage(runDir, state, spec) {
     };
     saveState(runDir, state);
     appendTimeline(runDir, `Sprint halted: ${state.haltReason.details}`);
-    updateSummary(runDir, [
-      `Status: ${state.status}`,
-      `Stage: ${stageName}`,
-      `Round: ${state.currentRound}`,
-      `Halt reason: ${state.haltReason.details}`,
-    ]);
+    writeStageFailureArtifacts({
+      runDir,
+      state,
+      stageName,
+      stageDir,
+      decisionPath,
+      scorecardPath,
+      summary: state.haltReason.details,
+      blockers: state.haltReason.blockers,
+    });
     cleanupRecordedRoleProcesses(paths, runDir);
     cleanupWorktree({ state, runDir });
     return { outcome: 'halt', summary: state.haltReason.details, blockers: state.haltReason.blockers, metrics: {} };
@@ -2424,12 +2793,21 @@ async function executeStage(runDir, state, spec) {
 
   // Collect outputs and timeout flags
   const reviewerTimeouts = [];
+  const reviewerFailures = [];
   const reviewerViolations = [];
   for (const result of reviewerResults) {
     if (result.error) {
       appendTimeline(runDir, `${result.role} error: ${result.error}`);
     }
     outputs[result.role] = result.output;
+    if (result.attemptErrors?.length) {
+      reviewerFailures.push({
+        role: result.role,
+        summary: result.attemptErrors.map((item) => `${item.label}=${item.agent}/${item.model}: ${item.error}`).join(' | '),
+        attempts: result.attemptErrors,
+      });
+      appendTimeline(runDir, `${result.role} failed attempts: ${result.attemptErrors.map((item) => `${item.label}=${item.agent}/${item.model}`).join(', ')}`);
+    }
     if (result.timedOut) {
       appendTimeline(runDir, `${result.role} timed out stage ${stageName} round ${state.currentRound}`);
       reviewerTimeouts.push({ role: result.role, timedOut: true, hadReport: result.reportExisted });
@@ -2468,6 +2846,7 @@ async function executeStage(runDir, state, spec) {
         reviewerAPath,
         reviewerBPath,
         globalReviewerPath: paths.globalReviewerPath,
+        workUnit,
       });
       const { reportPath: grReportPath, stdoutPath: grStdoutPath } = roleArtifactPaths(paths, 'global_reviewer');
 
@@ -2562,6 +2941,7 @@ async function executeStage(runDir, state, spec) {
     state,
     reviewerTimeouts: reviewerTimeouts.length > 0 ? reviewerTimeouts : null,
     reviewerViolations: reviewerViolations.length > 0 ? reviewerViolations : null,
+    reviewerFailures: reviewerFailures.length > 0 ? reviewerFailures : null,
   });
 }
 
@@ -2751,6 +3131,10 @@ function showStatus(runId) {
     lines.push(`    reviewer_a: ${scorecard.reviewerAVerdict ?? '?'}`);
     lines.push(`    reviewer_b: ${scorecard.reviewerBVerdict ?? '?'}`);
     lines.push(`    approvals:  ${scorecard.approvalCount ?? 0} / 2 required`);
+    if (scorecard.failureClassification) {
+      lines.push(`    failure:    ${scorecard.failureClassification}`);
+      lines.push(`    source:     ${scorecard.failureSource ?? 'n/a'}`);
+    }
     if (scorecard.blockerCount > 0) {
       lines.push(`    blockers:   ${scorecard.blockerCount}`);
       for (const b of (scorecard.blockers ?? []).slice(0, 3)) {
@@ -2788,6 +3172,7 @@ async function main() {
       'AI Sprint Orchestrator',
       '',
       'Usage:',
+      '  node run.mjs --self-check                            Validate package-local environment',
       '  node run.mjs --task <task-id> [--task-spec <path>]   Start a new sprint',
       '  node run.mjs --resume <run-id>                        Resume a halted/aborted sprint',
       '  node run.mjs --status <run-id>                        Show sprint dashboard',
@@ -2795,11 +3180,23 @@ async function main() {
       '  node run.mjs --pause <run-id>                         Pause a running sprint',
       '  node run.mjs --abort <run-id>                         Abort a sprint',
       '  node run.mjs --archive <run-id>                       Archive a completed/halted sprint',
+      '  node run.mjs --task <task-id> --runtime-root <path>  Override runtime output root',
       '',
       'Sprints auto-archive on completion or halt.',
-      'Task specs are loaded from ops/ai-sprints/specs/<task-id>.json',
+      `Task specs are loaded from ${path.relative(packageRoot, path.join(referencesRoot, 'specs'))}/<task-id>.json`,
+      `Runtime output defaults to ${defaultRuntimeRoot}`,
       'Override with --task-spec <path> to use a custom spec file.',
     ].join('\n'));
+    return;
+  }
+
+  if (args['self-check']) {
+    if (args.runtimeRoot) {
+      configureRuntimeRoots(args.runtimeRoot);
+    } else {
+      configureRuntimeRoots(runtimeRoot);
+    }
+    runSelfCheck();
     return;
   }
 
@@ -2834,6 +3231,12 @@ async function main() {
   if (args.status) {
     showStatus(args.status);
     return;
+  }
+
+  if (args.runtimeRoot) {
+    configureRuntimeRoots(args.runtimeRoot);
+  } else {
+    configureRuntimeRoots(runtimeRoot);
   }
 
   const { runDir, state } = loadOrInitState(args);
@@ -2874,9 +3277,7 @@ async function main() {
   // own registry (npx, built-in commands, etc.). Checking agent binaries directly
   // would cause false positives and is Linux-only.
   if (!args.status && !args.list && !args.archive && !args.abort && !args.pause) {
-    // Use nodeBin + [acpxBin, ...] for consistency with runAgent spawn pattern
-    const acpxCheck = spawnSync(nodeBin, [acpxBin, '--version'],
-      { encoding: 'utf8', shell: false, timeout: 10_000 });
+    const acpxCheck = checkAcpxAvailable();
     if (acpxCheck.status !== 0) {
       appendTimeline(runDir, `Pre-flight check FAILED: acpx not available`);
       throw new Error(`acpx not available. Install it first: npm install -g acpx`);
@@ -2923,12 +3324,12 @@ async function main() {
         };
         saveState(runDir, state);
         appendTimeline(runDir, `Sprint halted: ${state.haltReason.details}`);
-        updateSummary(runDir, [
+        updateSummaryWithClassification(runDir, [
           `Status: ${state.status}`,
           `Stage: ${state.currentStage}`,
           `Round: ${state.currentRound}`,
           `Halt reason: ${state.haltReason.details}`,
-        ]);
+        ], readStageFailureClassification(runDir, state));
         const paths = ensureStagePaths(runDir, state.currentStageIndex, state.currentStage);
         cleanupRecordedRoleProcesses(paths, runDir);
         break;
@@ -2954,12 +3355,12 @@ async function main() {
         cleanupRecordedRoleProcesses(paths, runDir);
         cleanupWorktree({ state, runDir });
         appendTimeline(runDir, `Sprint halted: ${state.haltReason?.details ?? 'unknown reason'}`);
-        updateSummary(runDir, [
+        updateSummaryWithClassification(runDir, [
           `Status: ${state.status}`,
           `Stage: ${state.currentStage}`,
           `Round: ${state.currentRound}`,
           `Halt reason: ${state.haltReason?.details ?? 'unknown reason'}`,
-        ]);
+        ], readStageFailureClassification(runDir, state));
       }
     }
   } catch (error) {
@@ -2977,12 +3378,15 @@ async function main() {
       cleanupWorktree({ state, runDir });
       saveState(runDir, state);
       appendTimeline(runDir, `Sprint halted by orchestrator error: ${String(error)}`);
-      updateSummary(runDir, [
+      updateSummaryWithClassification(runDir, [
         `Status: ${state.status}`,
         `Stage: ${state.currentStage}`,
         `Round: ${state.currentRound}`,
         `Halt reason: ${String(error)}`,
-      ]);
+      ], readStageFailureClassification(runDir, state) ?? inferFailureClassification({
+        summary: String(error),
+        blockers: [String(error)],
+      }));
     }
   }
 
@@ -2990,7 +3394,7 @@ async function main() {
   if (state.status === 'completed' || state.status === 'halted') {
     try {
       const archiveDir = archiveRunById(args.resume || path.basename(runDir));
-      appendTimeline(runDir, `Auto-archived to ${path.relative(path.join(repoRoot, 'ops', 'ai-sprints'), archiveDir)}`);
+      appendTimeline(runDir, `Auto-archived to ${path.relative(runtimeRoot, archiveDir)}`);
       console.log(`Archived: ${archiveDir}`);
     } catch (archiveErr) {
       // Archive failure must not block orchestrator exit

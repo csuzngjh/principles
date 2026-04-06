@@ -12,11 +12,12 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { fileURLToPath } from 'url';
-import { decideAndPersist, formatRoleValidation, getIsolationDir, findIsolationReport, collectIsolationArtifacts, isIsolationCollectAllowed, ISOLATION_COLLECT_ALLOWLIST } from '../run.mjs';
+import { decideAndPersist, formatRoleValidation, getIsolationDir, findIsolationReport, collectIsolationArtifacts, isIsolationCollectAllowed, ISOLATION_COLLECT_ALLOWLIST } from '../scripts/run.mjs';
+import { getTaskSpec, buildStageBrief } from '../scripts/lib/task-specs.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const runMjsPath = path.join(__dirname, '..', 'run.mjs');
-const archiveMjsPath = path.join(__dirname, '..', 'lib', 'archive.mjs');
+const runMjsPath = path.join(__dirname, '..', 'scripts', 'run.mjs');
+const archiveMjsPath = path.join(__dirname, '..', 'scripts', 'lib', 'archive.mjs');
 const SOURCE = fs.readFileSync(runMjsPath, 'utf8');
 const ARCHIVE_SOURCE = fs.readFileSync(archiveMjsPath, 'utf8');
 
@@ -722,7 +723,7 @@ function createMockState(currentRound = 1, maxRoundsPerStage = 3, taskId = 'test
   };
 }
 
-function createTempSpec(tmp, taskId = 'test-task') {
+function createTempSpec(tmp, taskId = 'test-task', extra = {}) {
   const specDir = path.join(tmp, 'specs');
   fs.mkdirSync(specDir, { recursive: true });
   const specPath = path.join(specDir, `${taskId}.json`);
@@ -734,6 +735,7 @@ function createTempSpec(tmp, taskId = 'test-task') {
         requiredReviewerSections: ['VERDICT', 'BLOCKERS'],
       },
     },
+    ...extra,
   };
   fs.writeFileSync(specPath, JSON.stringify(spec));
   return specPath;
@@ -866,6 +868,58 @@ test('behavior: decision.md contains validation details when report is invalid',
     assert.ok(/Contract Valid: false/.test(decision), 'decision.md must show Contract Valid: false for invalid reports');
     assert.ok(/Producer: \[FAIL\]/.test(decision), 'decision.md must show Producer validation failed');
     assert.ok(/missing: SUMMARY/.test(decision), 'decision.md must show missing SUMMARY section');
+  } finally {
+    cleanupTempDir(tmp);
+  }
+});
+
+test('behavior: missing reviewer report persists reviewerFailures details', () => {
+  const tmp = createTempDir();
+  try {
+    const stageDir = path.join(tmp, 'stages', 'implement');
+    fs.mkdirSync(stageDir, { recursive: true });
+
+    const specPath = createTempSpec(tmp);
+    const producerPath = path.join(stageDir, 'producer.md');
+    const reviewerAPath = path.join(stageDir, 'reviewer-a.md');
+    const reviewerBPath = path.join(stageDir, 'reviewer-b.md');
+    const decisionPath = path.join(stageDir, 'decision.md');
+    const scorecardPath = path.join(stageDir, 'scorecard.json');
+
+    fs.writeFileSync(producerPath, createValidProducer());
+    fs.writeFileSync(reviewerAPath, createValidReviewer('APPROVE'));
+
+    decideAndPersist({
+      runDir: tmp,
+      stageName: 'implement',
+      stageDir,
+      decisionPath,
+      scorecardPath,
+      producerPath,
+      reviewerAPath,
+      reviewerBPath,
+      globalReviewerPath: null,
+      reviewerFailures: [
+        {
+          role: 'reviewer_b',
+          summary: 'primary=opencode/test-model: Agent opencode failed with status 1 | fallback=iflow/glm-4.7: timed out',
+          attempts: [
+            { label: 'primary', agent: 'opencode', model: 'test-model', error: 'Agent opencode failed with status 1', timedOut: false },
+            { label: 'fallback', agent: 'iflow', model: 'glm-4.7', error: 'Agent iflow timed out', timedOut: true },
+          ],
+        },
+      ],
+      state: { ...createMockState(), specPath },
+    });
+
+    const decision = fs.readFileSync(decisionPath, 'utf8');
+    const scorecard = JSON.parse(fs.readFileSync(scorecardPath, 'utf8'));
+
+    assert.ok(decision.includes('reviewer_b'), 'decision should mention missing reviewer_b');
+    assert.ok(decision.includes('primary=opencode/test-model'), 'decision should include reviewer failure summary');
+    assert.ok(Array.isArray(scorecard.reviewerFailures), 'scorecard should persist reviewerFailures');
+    assert.equal(scorecard.reviewerFailures[0].role, 'reviewer_b');
+    assert.ok(scorecard.reviewerFailures[0].summary.includes('fallback=iflow/glm-4.7'));
   } finally {
     cleanupTempDir(tmp);
   }
@@ -1012,6 +1066,134 @@ test('behavior: handoff.json generated when outcome is revise', () => {
   } finally {
     cleanupTempDir(tmp);
   }
+});
+
+test('behavior: handoff.json includes work-unit metadata and compact carry-forward summary', () => {
+  const tmp = createTempDir();
+  try {
+    const stageDir = path.join(tmp, 'stages', 'implement');
+    fs.mkdirSync(stageDir, { recursive: true });
+
+    const specPath = createTempSpec(tmp, 'work-unit-task', {
+      id: 'work-unit-task',
+      title: 'Work unit task',
+      workUnits: {
+        implement: [
+          {
+            workUnitId: 'wu-1',
+            workUnitGoal: 'Tighten continuation context',
+            allowedFiles: ['scripts/ai-sprint-orchestrator/run.mjs'],
+            unitChecks: ['node --test run.test.mjs'],
+            unitDeliverables: ['carry-forward summary'],
+            unitSummary: 'Initial unit summary',
+            carryForwardSummary: 'Initial carry-forward summary',
+          },
+        ],
+      },
+    });
+    const producerPath = path.join(stageDir, 'producer.md');
+    const reviewerAPath = path.join(stageDir, 'reviewer-a.md');
+    const reviewerBPath = path.join(stageDir, 'reviewer-b.md');
+    const decisionPath = path.join(stageDir, 'decision.md');
+    const scorecardPath = path.join(stageDir, 'scorecard.json');
+    const handoffPath = path.join(stageDir, 'handoff.json');
+
+    fs.writeFileSync(producerPath, createValidProducer());
+    fs.writeFileSync(reviewerAPath, createValidReviewer('REVISE'));
+    fs.writeFileSync(reviewerBPath, createValidReviewer('REVISE'));
+
+    decideAndPersist({
+      runDir: tmp,
+      stageName: 'implement',
+      stageDir,
+      decisionPath,
+      scorecardPath,
+      producerPath,
+      reviewerAPath,
+      reviewerBPath,
+      globalReviewerPath: null,
+      state: { ...createMockState(), specPath, currentWorkUnitIndex: 0 },
+    });
+
+    const handoff = JSON.parse(fs.readFileSync(handoffPath, 'utf8'));
+    assert.equal(handoff.workUnitId, 'wu-1');
+    assert.equal(handoff.workUnitGoal, 'Tighten continuation context');
+    assert.deepEqual(handoff.allowedFiles, ['scripts/ai-sprint-orchestrator/run.mjs']);
+    assert.ok(typeof handoff.unitSummary === 'string' && handoff.unitSummary.length > 0);
+    assert.ok(typeof handoff.carryForwardSummary === 'string' && handoff.carryForwardSummary.includes('Goal: Tighten continuation context'));
+  } finally {
+    cleanupTempDir(tmp);
+  }
+});
+
+test('work-unit contract: getTaskSpec rejects missing minimum work-unit fields', () => {
+  const tmp = createTempDir();
+  try {
+    const specPath = createTempSpec(tmp, 'invalid-work-unit', {
+      id: 'invalid-work-unit',
+      title: 'Invalid work unit',
+      workUnits: {
+        implement: [
+          {
+            workUnitId: 'wu-1',
+            workUnitGoal: 'Incomplete unit',
+            allowedFiles: ['scripts/ai-sprint-orchestrator/run.mjs'],
+            unitChecks: ['node --test run.test.mjs'],
+            unitDeliverables: ['handoff'],
+            unitSummary: '',
+            carryForwardSummary: '',
+          },
+        ],
+      },
+    });
+
+    assert.throws(
+      () => getTaskSpec('invalid-work-unit', specPath),
+      /minimum work-unit contract/i,
+    );
+  } finally {
+    cleanupTempDir(tmp);
+  }
+});
+
+test('work-unit brief prefers compact carry-forward summary over prior decision text', () => {
+  const spec = {
+    title: 'Workflow v1.4 foundation',
+    stageGoals: { implement: ['Connect work-unit brief'] },
+    stageCriteria: { implement: {} },
+    context: ['Stay within workflow-only scope.'],
+    workUnits: {
+      implement: [
+        {
+          workUnitId: 'wu-brief',
+          workUnitGoal: 'Use compact carry-forward first',
+          allowedFiles: ['scripts/ai-sprint-orchestrator/lib/task-specs.mjs'],
+          unitChecks: ['node --test decision.test.mjs'],
+          unitDeliverables: ['brief update'],
+          unitSummary: 'Default unit summary',
+          carryForwardSummary: 'Default compact carry-forward',
+        },
+      ],
+    },
+  };
+
+  const brief = buildStageBrief(
+    spec,
+    'implement',
+    2,
+    'VERY LONG PRIOR DECISION SHOULD NOT BE PRIMARY',
+    {
+      carryForwardSummary: 'Compact carry-forward summary wins.',
+      unitSummary: 'Unit summary from previous unit.',
+    },
+    { workUnitIndex: 0 },
+  );
+
+  assert.ok(brief.includes('## Active Work Unit'));
+  assert.ok(brief.includes('workUnitId: wu-brief'));
+  assert.ok(brief.includes('Compact carry-forward summary wins.'));
+  assert.ok(brief.includes('Use this compact carry-forward summary as the default continuation context.'));
+  assert.equal(brief.includes('VERY LONG PRIOR DECISION SHOULD NOT BE PRIMARY'), false);
 });
 
 test('behavior: handoff.json NOT generated when outcome is advance', () => {
@@ -1194,8 +1376,7 @@ test('persistence: nextRunRecommendation written to scorecard.json', () => {
 });
 
 test('acceptance checklist: file exists and has correct content', () => {
-  const repoRoot = path.resolve(__dirname, '..', '..', '..');
-  const checklistPath = path.resolve(repoRoot, 'docs/design/workflow-v1-acceptance-checklist.md');
+  const checklistPath = path.resolve(__dirname, '..', 'references', 'workflow-v1-acceptance-checklist.md');
   assert.ok(fs.existsSync(checklistPath), 'acceptance checklist file must exist');
 
   const content = fs.readFileSync(checklistPath, 'utf8');
@@ -1217,7 +1398,7 @@ test('acceptance checklist: file exists and has correct content', () => {
 test('preflight check validates acpx not agent names', () => {
   // The preflight code in run.mjs should check that acpx is available,
   // NOT that agent names like "iflow" or "claude" exist as shell binaries.
-  const runPath = path.resolve(__dirname, '..', 'run.mjs');
+  const runPath = path.resolve(__dirname, '..', 'scripts', 'run.mjs');
   const content = fs.readFileSync(runPath, 'utf8');
   // Should NOT use "which" with agent names
   assert.ok(!content.includes("'which', [agentName]"), 'preflight must not check agent names with which');
@@ -1227,7 +1408,7 @@ test('preflight check validates acpx not agent names', () => {
 });
 
 test('cleanupAcpxOrphans does not fallback to spec directory', () => {
-  const runPath = path.resolve(__dirname, '..', 'run.mjs');
+  const runPath = path.resolve(__dirname, '..', 'scripts', 'run.mjs');
   const content = fs.readFileSync(runPath, 'utf8');
   // Must NOT use path.dirname(state.specPath) as workspace fallback
   assert.ok(!content.includes('path.dirname(state.specPath)'),

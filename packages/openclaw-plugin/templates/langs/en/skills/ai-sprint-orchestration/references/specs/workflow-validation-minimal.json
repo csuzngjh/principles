@@ -10,9 +10,9 @@
   "stageTimeoutMinutes": 4,
   "stages": ["validate"],
   "producer": {
-    "agent": "opencode",
-    "model": "minimax-cn-coding-plan/MiniMax-M2.7",
-    "timeoutSeconds": 60
+    "agent": "iflow",
+    "model": "glm-4.7",
+    "timeoutSeconds": 90
   },
   "reviewerA": {
     "agent": "opencode",
@@ -50,7 +50,7 @@
     "5. nextRunRecommendation is computed and recorded",
     "",
     "=== NO PRODUCT LOGIC ===",
-    "Producer task: List 3 files in skills/ai-sprint-orchestration/scripts/ and describe their purpose.",
+    "Producer task: List 3 files in packages/openclaw-plugin/templates/langs/zh/skills/ai-sprint-orchestration/scripts/ and describe their purpose.",
     "This is intentionally trivial - we are testing the workflow package, not any product task.",
     "",
     "=== SUCCESS CRITERIA FOR THIS RUN ===",
@@ -66,6 +66,28 @@
       "Orchestrator computes and persists outputQuality."
     ]
   },
+  "workUnits": {
+    "validate": [
+      {
+        "workUnitId": "validate-contract-slice",
+        "workUnitGoal": "Validate the minimal workflow package using a single compact work unit.",
+        "allowedFiles": [
+          "scripts/run.mjs",
+          "scripts/lib/task-specs.mjs",
+          "references/specs/workflow-validation-minimal.json"
+        ],
+        "unitChecks": [
+          "node scripts/run.mjs --self-check"
+        ],
+        "unitDeliverables": [
+          "producer report drafted",
+          "self-check executed"
+        ],
+        "unitSummary": "Use one small work unit to validate package workflow behavior.",
+        "carryForwardSummary": "Prefer compact workflow-only context. Do not expand into product-side closure."
+      }
+    ]
+  },
   "stageCriteria": {
     "validate": {
       "requiredApprovals": 2,
@@ -73,7 +95,7 @@
       "requiredReviewerSections": ["VERDICT", "BLOCKERS", "FINDINGS", "CODE_EVIDENCE", "HYPOTHESIS_MATRIX", "NEXT_FOCUS", "CHECKS"],
       "scoringDimensions": ["schema_compliance", "report_completeness"],
       "dimensionThreshold": 3,
-      "requiredDeliverables": ["valid_producer_report", "valid_reviewer_reports"]
+      "requiredDeliverables": ["producer_report_complete", "self_check_passed"]
     }
   },
   "stageRoleTimeouts": {

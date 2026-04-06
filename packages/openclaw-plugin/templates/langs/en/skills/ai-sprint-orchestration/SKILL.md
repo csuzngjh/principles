@@ -40,12 +40,12 @@ Internal smoke standard:
 - `workflow-validation-minimal` reaches producer completion and produces a structured decision or classified halt
 - `workflow-validation-minimal-verify` reaches producer completion and any reviewer failure is classified, not left opaque
 
-If you also have the source repository available, you may additionally run the source baseline tests from the repo copy of `scripts/ai-sprint-orchestrator/test/`.
+If you also have the source repository available, you may additionally run the source baseline tests from `packages/openclaw-plugin/templates/langs/zh/skills/ai-sprint-orchestration/test/`.
 
 ## Execution rules
 
-- Treat `scripts/ai-sprint-orchestrator` as source of truth, but run through this package.
-- Treat the repo copy of `scripts/ai-sprint-orchestrator` as source of truth when the source repository is available, but run through this packaged copy.
+- Treat `packages/openclaw-plugin/templates/langs/zh/skills/ai-sprint-orchestration` as the canonical code source.
+- Treat this English package as a mirrored delivery copy of that canonical implementation.
 - If a run fails, classify it as exactly one of:
   - `workflow bug`
   - `agent behavior issue`

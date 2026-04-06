@@ -1,35 +1,45 @@
 {
   "id": "workflow-validation-minimal",
-  "title": "Workflow v1 Minimal Validation - Cloud/Linux variant",
-  "workspace": "/home/csuzngjh/code/principles",
-  "branchWorkspace": "/home/csuzngjh/code/principles-worktree",
+  "title": "Workflow v1 Minimal Validation - Test workflow infrastructure without product binding",
+  "workspace": "__SKILL_PACKAGE_ROOT__",
+  "branchWorkspace": "__SKILL_PACKAGE_ROOT__",
   "branch": "main",
   "integrationPhase": "shadow",
   "maxRoundsPerStage": 2,
-  "maxRuntimeMinutes": 60,
-  "stageTimeoutMinutes": 20,
+  "maxRuntimeMinutes": 20,
+  "stageTimeoutMinutes": 4,
   "stages": ["validate"],
   "producer": {
     "agent": "iflow",
-    "model": "glm-5",
-    "timeoutSeconds": 600
+    "model": "glm-4.7",
+    "timeoutSeconds": 90
   },
   "reviewerA": {
-    "agent": "iflow",
-    "model": "glm-5",
-    "timeoutSeconds": 300,
+    "agent": "opencode",
+    "model": "minimax-cn-coding-plan/MiniMax-M2.7",
+    "timeoutSeconds": 45,
+    "fallback": {
+      "agent": "iflow",
+      "model": "glm-4.7",
+      "timeoutSeconds": 75
+    },
     "role": "schema_checker",
     "focus": "Verify report has all required sections, VERDICT format, DIMENSIONS format"
   },
   "reviewerB": {
-    "agent": "iflow",
-    "model": "glm-5",
-    "timeoutSeconds": 300,
+    "agent": "opencode",
+    "model": "minimax-cn-coding-plan/MiniMax-M2.7",
+    "timeoutSeconds": 45,
+    "fallback": {
+      "agent": "iflow",
+      "model": "glm-4.7",
+      "timeoutSeconds": 75
+    },
     "role": "quality_checker",
     "focus": "Verify outputQuality is computed correctly, qualityReasons are meaningful"
   },
   "context": [
-    "=== WORKFLOW VALIDATION SPRINT (Linux Cloud) ===",
+    "=== WORKFLOW VALIDATION SPRINT ===",
     "This sprint validates the workflow infrastructure itself, NOT any product feature.",
     "",
     "=== VALIDATION GOALS ===",
@@ -41,7 +51,7 @@
     "",
     "=== NO PRODUCT LOGIC ===",
     "Producer task: List 3 files in packages/openclaw-plugin/templates/langs/zh/skills/ai-sprint-orchestration/scripts/ and describe their purpose.",
-    "This is intentionally trivial - we are testing the workflow, not the task.",
+    "This is intentionally trivial - we are testing the workflow package, not any product task.",
     "",
     "=== SUCCESS CRITERIA FOR THIS RUN ===",
     "- No halt due to workflow infrastructure issues (timeout handling, file I/O, validation)",
@@ -56,6 +66,28 @@
       "Orchestrator computes and persists outputQuality."
     ]
   },
+  "workUnits": {
+    "validate": [
+      {
+        "workUnitId": "validate-contract-slice",
+        "workUnitGoal": "Validate the minimal workflow package using a single compact work unit.",
+        "allowedFiles": [
+          "scripts/run.mjs",
+          "scripts/lib/task-specs.mjs",
+          "references/specs/workflow-validation-minimal.json"
+        ],
+        "unitChecks": [
+          "node scripts/run.mjs --self-check"
+        ],
+        "unitDeliverables": [
+          "producer report drafted",
+          "self-check executed"
+        ],
+        "unitSummary": "Use one small work unit to validate package workflow behavior.",
+        "carryForwardSummary": "Prefer compact workflow-only context. Do not expand into product-side closure."
+      }
+    ]
+  },
   "stageCriteria": {
     "validate": {
       "requiredApprovals": 2,
@@ -63,13 +95,13 @@
       "requiredReviewerSections": ["VERDICT", "BLOCKERS", "FINDINGS", "CODE_EVIDENCE", "HYPOTHESIS_MATRIX", "NEXT_FOCUS", "CHECKS"],
       "scoringDimensions": ["schema_compliance", "report_completeness"],
       "dimensionThreshold": 3,
-      "requiredDeliverables": ["valid_producer_report", "valid_reviewer_reports"]
+      "requiredDeliverables": ["producer_report_complete", "self_check_passed"]
     }
   },
   "stageRoleTimeouts": {
-    "validate": { "producer": 600, "reviewer_a": 300, "reviewer_b": 300 }
+    "validate": { "producer": 60, "reviewer_a": 45, "reviewer_b": 45 }
   },
-  "verificationSpec": "workflow-validation-minimal-verify-cloud",
+  "verificationSpec": "workflow-validation-minimal-verify",
   "continuationSpec": null,
   "recoverySpec": null,
   "requireVerify": false

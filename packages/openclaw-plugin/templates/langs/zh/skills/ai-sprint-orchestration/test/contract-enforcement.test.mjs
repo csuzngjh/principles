@@ -16,7 +16,7 @@ import {
   PRODUCER_SCHEMA,
   REVIEWER_SCHEMA,
   GLOBAL_REVIEWER_SCHEMA,
-} from '../lib/contract-enforcement.mjs';
+} from '../scripts/lib/contract-enforcement.mjs';
 
 // ============================================================================
 // Schema Definition Tests
