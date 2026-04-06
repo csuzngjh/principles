@@ -383,7 +383,8 @@ The empathy observer subagent handles pain detection independently.
     // This replaces the previous LLM subagent-per-turn approach.
     if (workspaceDir && latestUserMessage) {
       try {
-        const keywordStore = loadKeywordStore(wctx.stateDir);
+        const lang = (wctx.config.get('language') as 'zh' | 'en') || 'zh';
+        const keywordStore = loadKeywordStore(wctx.stateDir, lang);
         const matchResult = matchEmpathyKeywords(latestUserMessage, keywordStore);
 
         if (matchResult.matched) {

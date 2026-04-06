@@ -34,18 +34,25 @@ const KEYWORD_STORE_FILE = 'empathy_keywords.json';
 
 /**
  * Creates a default keyword store from seed keywords.
+ * Supports both Chinese and English keywords.
  */
-export function createDefaultKeywordStore(): EmpathyKeywordStore {
+export function createDefaultKeywordStore(language: 'zh' | 'en' = 'zh'): EmpathyKeywordStore {
   const now = new Date().toISOString();
   const terms: Record<string, EmpathyKeywordEntry> = {};
 
+  // Include all seed keywords (both zh and en)
   for (const seed of EMPATHY_SEED_KEYWORDS) {
-    terms[seed.term] = {
-      weight: seed.weight,
-      source: 'seed',
-      hitCount: 0,
-      falsePositiveRate: 0.1, // Conservative initial estimate
-    };
+    // For Chinese language, include all keywords
+    // For English language, include only English keywords
+    const isChinese = /[\u4e00-\u9fa5]/.test(seed.term);
+    if (language === 'zh' || !isChinese) {
+      terms[seed.term] = {
+        weight: seed.weight,
+        source: 'seed',
+        hitCount: 0,
+        falsePositiveRate: 0.1, // Conservative initial estimate
+      };
+    }
   }
 
   const stats: EmpathyKeywordStats = {
@@ -65,13 +72,14 @@ export function createDefaultKeywordStore(): EmpathyKeywordStore {
 
 /**
  * Loads the keyword store from disk, or creates a default one if not found.
+ * Respects the configured language setting.
  */
-export function loadKeywordStore(stateDir: string): EmpathyKeywordStore {
+export function loadKeywordStore(stateDir: string, language?: 'zh' | 'en'): EmpathyKeywordStore {
   const filePath = path.join(stateDir, KEYWORD_STORE_FILE);
   
   try {
     if (!fs.existsSync(filePath)) {
-      const store = createDefaultKeywordStore();
+      const store = createDefaultKeywordStore(language);
       saveKeywordStore(stateDir, store);
       return store;
     }
@@ -82,7 +90,7 @@ export function loadKeywordStore(stateDir: string): EmpathyKeywordStore {
     // Validate structure
     if (!parsed.terms || !parsed.stats || !parsed.version) {
       console.warn('[PD:Empathy] Invalid keyword store format, creating default');
-      const store = createDefaultKeywordStore();
+      const store = createDefaultKeywordStore(language);
       saveKeywordStore(stateDir, store);
       return store;
     }
@@ -90,7 +98,7 @@ export function loadKeywordStore(stateDir: string): EmpathyKeywordStore {
     return parsed as EmpathyKeywordStore;
   } catch (e) {
     console.warn(`[PD:Empathy] Failed to load keyword store: ${e}`);
-    const store = createDefaultKeywordStore();
+    const store = createDefaultKeywordStore(language);
     saveKeywordStore(stateDir, store);
     return store;
   }
