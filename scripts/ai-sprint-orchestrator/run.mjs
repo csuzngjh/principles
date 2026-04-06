@@ -503,12 +503,13 @@ function runAgentWithProgressCheck({
   worktreePath = null,
   worklogPath = null,
   softTimeoutRatio = 0.67,  // soft timeout at 67% of hard timeout
-  extensionSeconds = 300,   // extend by 5 min when progress detected
-  maxExtensions = 2,        // max 2 extensions (total +10 min)
+  extensionSeconds = null,  // defaults to a timeout-scaled extension window
+  maxExtensions = 2,        // max 2 extensions unless caller overrides
   progressCheckIntervalSeconds = 60,
 }) {
   return new Promise((resolve, reject) => {
-    const hardTimeoutSeconds = timeoutSeconds + (extensionSeconds * maxExtensions);
+    const scaledExtensionSeconds = extensionSeconds ?? Math.max(30, Math.min(300, Math.floor(timeoutSeconds / 2)));
+    const hardTimeoutSeconds = timeoutSeconds + (scaledExtensionSeconds * maxExtensions);
     const softTimeoutSeconds = Math.floor(timeoutSeconds * softTimeoutRatio);
     
     let extensionsUsed = 0;
@@ -563,9 +564,9 @@ function runAgentWithProgressCheck({
           extensionsUsed++;
           lastStdoutLength = stdout.length;
           if (runDir) {
-            appendTimeline(runDir, `Soft timeout: progress detected for ${roleLabel}, extending by ${extensionSeconds}s (${progress.signals.map(s => s.type).join(', ')})`);
+            appendTimeline(runDir, `Soft timeout: progress detected for ${roleLabel}, extending by ${scaledExtensionSeconds}s (${progress.signals.map(s => s.type).join(', ')})`);
           }
-          setupSoftTimeout(extensionSeconds);
+          setupSoftTimeout(scaledExtensionSeconds);
         } else {
           // No progress or max extensions reached - this becomes effective timeout
           // But don't terminate yet - let hard timeout handle it
@@ -1031,11 +1032,11 @@ function reportExistsAndNonEmpty(reportPath) {
 }
 
 function protectedArtifacts(runDir, paths) {
-  // Roles must not modify orchestrator-owned run-level and stage-level truth sources.
-  // mtime checks are still useful to catch accidental writes by producer/reviewer roles.
+  // Roles must not modify stage-level truth sources that are written only after role execution.
+  // Do not include run-level timeline/latest-summary here: the orchestrator itself updates those
+  // while roles are still running (timeouts, progress signals, state transitions), which would
+  // create false protected-file violations.
   return [
-    path.join(runDir, 'latest-summary.md'),
-    path.join(runDir, 'timeline.md'),
     paths.decisionPath,
     paths.scorecardPath,
   ];
@@ -2768,7 +2769,6 @@ async function main() {
   }
 
   const { runDir, state } = loadOrInitState(args);
-  reconcileRunState(runDir, state);
   const spec = loadSpec(state, args);
 
   // Register graceful shutdown handlers now that state and runDir are available.

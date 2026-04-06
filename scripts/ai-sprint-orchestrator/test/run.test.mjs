@@ -239,6 +239,26 @@ test('captureGitStatus: remoteBranch derived from worktree.branchName, not hardc
 });
 
 // ---------------------------------------------------------------------------
+// Protected file validation
+// ---------------------------------------------------------------------------
+
+test('protectedArtifacts: excludes run-level timeline and latest-summary to avoid orchestrator self-writes', () => {
+  const body = getFuncBody('protectedArtifacts');
+  assert.equal(/latest-summary\.md/.test(body), false,
+    'protectedArtifacts must not include latest-summary.md');
+  assert.equal(/timeline\.md/.test(body), false,
+    'protectedArtifacts must not include timeline.md');
+});
+
+test('protectedArtifacts: still protects decision.md and scorecard.json', () => {
+  const body = getFuncBody('protectedArtifacts');
+  assert.ok(/paths\.decisionPath/.test(body),
+    'protectedArtifacts must continue protecting decision.md');
+  assert.ok(/paths\.scorecardPath/.test(body),
+    'protectedArtifacts must continue protecting scorecard.json');
+});
+
+// ---------------------------------------------------------------------------
 // Process tree cleanup and role state bookkeeping
 // ---------------------------------------------------------------------------
 
@@ -296,10 +316,10 @@ test('resume path reconciles stale runs before switching back to running', () =>
     'resume should reconcile stale state before changing status to running');
 });
 
-test('main loop reconciles loaded runs before starting execution', () => {
+test('main loop does not redundantly reconcile after loadOrInitState', () => {
   const body = getFuncBody('main');
-  assert.ok(/reconcileRunState\(runDir, state\)/.test(body),
-    'main should reconcile stale runs before entering the execution loop');
+  assert.equal(/reconcileRunState\(runDir, state\)/.test(body), false,
+    'main should rely on loadOrInitState reconciliation instead of repeating it');
 });
 
 test('cleanup bookkeeping: recorded role pids are only cleared after successful termination', () => {
@@ -414,6 +434,14 @@ test('dynamic timeout: respects maxExtensions limit', () => {
   const body = getFuncBody('runAgentWithProgressCheck');
   assert.ok(/extensionsUsed\s*<\s*maxExtensions|extensionsUsed.*>=.*maxExtensions/.test(body),
     'must check extensionsUsed against maxExtensions');
+});
+
+test('dynamic timeout: extension window scales with timeoutSeconds instead of fixed 300s', () => {
+  const body = getFuncBody('runAgentWithProgressCheck');
+  assert.ok(/scaledExtensionSeconds/.test(body),
+    'runAgentWithProgressCheck should derive a scaled extension window');
+  assert.ok(/Math\.max\(30,\s*Math\.min\(300,\s*Math\.floor\(timeoutSeconds \/ 2\)\)\)/.test(body),
+    'extension window should scale from timeoutSeconds with bounded defaults');
 });
 
 // ---------------------------------------------------------------------------

@@ -307,13 +307,14 @@ export function buildRolePrompt({ spec, stage, round, role, runDir, stageDir, br
     `Your final report file: ${outputPath}`,
     `Your worklog file: ${worklogPath}`,
     `Your role state file: ${roleStatePath}`,
-    `Protected orchestrator-owned files that you must NOT modify: ${runDir}/sprint.json, ${runDir}/timeline.md, ${runDir}/latest-summary.md, ${stageDir}/decision.md, ${stageDir}/scorecard.json`,
+    `Protected orchestrator-owned files that you must NOT modify: ${runDir}/sprint.json, ${stageDir}/decision.md, ${stageDir}/scorecard.json`,
     `Shared skill references are available at:`,
     ...sharedSkills.map((skill) => `- ${skill}`),
     `Before substantial work, create or update your role state file with: role, stage, round, status, checklist, updatedAt.`,
     `During work, append short checkpoints to your worklog whenever you complete a meaningful investigation step, code change, review finding, or verification step.`,
     `If you get stuck, record the concrete blocker and next best action in both the role state file and worklog before ending.`,
     `Prefer shell commands for file updates when direct write/edit tools are flaky in long sessions.`,
+    `When your final report is complete, stop immediately: do not keep exploring, do not retry extra reads, and do not update state/worklog again after the final report is written.`,
   ];
 
   if (role === 'producer') {
@@ -402,6 +403,7 @@ ${requiredDeliverables.length > 0 ? `
       codeEvidenceInstruction,
       ...contractInstruction,
       `Do not dump long reasoning logs to stdout. Stdout should only contain a short completion line such as: ROLE_STATUS: completed; report=${outputPath}`,
+      `After writing ${outputPath}, emit the completion line and exit the session immediately.`,
       `Stay within Principles. Do not modify OpenClaw.`,
     ].join('\n');
   }
@@ -455,6 +457,7 @@ ${requiredDeliverables.length > 0 ? `
       `BLOCK means: the macro goal is not served, or critical architecture/business flow risks exist even if local correctness is fine.`,
       `CHECKS should be a single-line machine-readable summary such as: CHECKS: macro=aligned;business_flow=closed;architecture=converging`,
       `Do not dump long reasoning logs to stdout. Stdout should only contain a short completion line such as: ROLE_STATUS: completed; report=${outputPath}`,
+      `After writing ${outputPath}, emit the completion line and exit the session immediately.`,
     ].join('\n');
   }
 
@@ -505,5 +508,6 @@ ${requiredDeliverables.length > 0 ? `
     codeEvidenceReviewerInstruction,
     `VERDICT must be exactly one of: APPROVE, REVISE, BLOCK.`,
     `Do not dump long reasoning logs to stdout. Stdout should only contain a short completion line such as: ROLE_STATUS: completed; report=${outputPath}`,
+    `After writing ${outputPath}, emit the completion line and exit the session immediately.`,
   ].filter(Boolean).join('\n');
 }
