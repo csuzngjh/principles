@@ -17,6 +17,7 @@ import type {
   PrinciplePromotedData,
   PrincipleRolledBackData,
   PrincipleStatus,
+  PrincipleSuggestedRule,
 } from './evolution-types.js';
 import { isCompleteDetectorMetadata } from './evolution-types.js';
 
@@ -46,6 +47,11 @@ export interface EvolutionReducer {
     detectorMetadata?: PrincipleDetectorSpec;
     /** Highly abstracted principle text — if absent, falls back to action-based title */
     abstractedPrinciple?: string;
+    // ── Principle-Tree metadata (Phase 1, optional) ──
+    priority?: 'P0' | 'P1' | 'P2';
+    scope?: 'general' | 'domain';
+    domain?: string;
+    suggestedRules?: PrincipleSuggestedRule[];
   }): string | null;
   getStats(): {
     candidateCount: number;
@@ -216,6 +222,10 @@ export class EvolutionReducerImpl implements EvolutionReducer {
     evaluability?: PrincipleEvaluatorLevel;
     detectorMetadata?: PrincipleDetectorSpec;
     abstractedPrinciple?: string;
+    priority?: 'P0' | 'P1' | 'P2';
+    scope?: 'general' | 'domain';
+    domain?: string;
+    suggestedRules?: PrincipleSuggestedRule[];
   }): string | null {
     // Check blacklist first
     if (this.isBlacklisted(params.painId, params.triggerPattern)) {
@@ -276,6 +286,15 @@ export class EvolutionReducerImpl implements EvolutionReducer {
         // Malformed metadata provided — clear any existing metadata
         existingPrinciple.detectorMetadata = undefined;
       }
+      // Refresh abstractedPrinciple if provided
+      if (params.abstractedPrinciple) {
+        existingPrinciple.abstractedPrinciple = params.abstractedPrinciple;
+      }
+      // Sync to file to ensure PRINCIPLES.md stays up to date
+      const synced = this.syncPrincipleToFile(existingPrinciple);
+      if (!synced) {
+        SystemLogger.log(this.workspaceDir, 'PRINCIPLE_SYNC_WARN', `Principle ${existingPrinciple.id} updated in memory but failed to sync to PRINCIPLES.md — manual file check required`);
+      }
       SystemLogger.log(
         this.workspaceDir,
         'PRINCIPLE_UPDATED',
@@ -309,6 +328,12 @@ export class EvolutionReducerImpl implements EvolutionReducer {
         ? structuredClone(params.detectorMetadata)
         : undefined,
       abstractedPrinciple: params.abstractedPrinciple,
+
+      // ── Principle-Tree metadata (Phase 1, optional) ──
+      priority: params.priority ?? 'P1',
+      scope: params.scope ?? 'general',
+      domain: params.domain,
+      suggestedRules: params.suggestedRules?.length ? params.suggestedRules : undefined,
     };
 
     this.principles.set(principleId, principle);
@@ -327,13 +352,14 @@ export class EvolutionReducerImpl implements EvolutionReducer {
         detectorMetadata: isCompleteDetectorMetadata(params.detectorMetadata)
           ? structuredClone(params.detectorMetadata)
           : undefined,
+        abstractedPrinciple: params.abstractedPrinciple,
       },
     });
 
     this.promote(principleId, 'diagnostician_generalized');
     const synced = this.syncPrincipleToFile(principle);
     if (!synced) {
-      SystemLogger.log(this.workspaceDir, 'PRINCIPLE_SYNC_WARN', `Principle ${principleId} created in memory but NOT synced to file`);
+      SystemLogger.log(this.workspaceDir, 'PRINCIPLE_SYNC_WARN', `Principle ${principleId} created in memory but failed to sync to PRINCIPLES.md — manual file check required`);
     }
 
     SystemLogger.log(
@@ -351,6 +377,25 @@ export class EvolutionReducerImpl implements EvolutionReducer {
         let content = '';
         if (fs.existsSync(this.principlesPath)) {
           content = fs.readFileSync(this.principlesPath, 'utf8');
+        } else {
+          // Auto-create from template if missing
+          const extensionRoot = PathResolver.getExtensionRoot();
+          if (extensionRoot) {
+            const templatePath = path.join(extensionRoot, 'templates', 'workspace', '.principles', 'PRINCIPLES.md');
+            if (fs.existsSync(templatePath)) {
+              content = fs.readFileSync(templatePath, 'utf8');
+            }
+          }
+          if (!content) {
+            // Create a minimal PRINCIPLES.md with just the header
+            content = '# Principles\n\n<!-- 原则从这里开始记录 -->\n';
+          }
+          const parentDir = path.dirname(this.principlesPath);
+          if (!fs.existsSync(parentDir)) {
+            fs.mkdirSync(parentDir, { recursive: true });
+          }
+          fs.writeFileSync(this.principlesPath, content, 'utf8');
+          SystemLogger.log(this.workspaceDir, 'PRINCIPLES_CREATED', `Created PRINCIPLES.md`);
         }
 
         const header = `### ${principle.id}:`;
@@ -501,6 +546,10 @@ export class EvolutionReducerImpl implements EvolutionReducer {
       if (data.detectorMetadata) {
         existing.detectorMetadata = structuredClone(data.detectorMetadata);
       }
+      // Restore abstractedPrinciple from event if present
+      if (data.abstractedPrinciple) {
+        existing.abstractedPrinciple = data.abstractedPrinciple;
+      }
       return;
     }
 
@@ -526,6 +575,8 @@ export class EvolutionReducerImpl implements EvolutionReducer {
       detectorMetadata: data.detectorMetadata
         ? structuredClone(data.detectorMetadata)
         : undefined,
+      // Restore abstractedPrinciple from event if present
+      abstractedPrinciple: data.abstractedPrinciple,
     };
     this.principles.set(principle.id, principle);
   }

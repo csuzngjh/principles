@@ -772,7 +772,7 @@ interface EnrichedCandidate extends DreamerCandidate {
  * In production, this would call the actual Dreamer subagent.
  * The stub generates plausible candidates based on snapshot signals.
  */
-function invokeStubDreamer(
+export function invokeStubDreamer(
   snapshot: NocturnalSessionSnapshot,
   principleId: string,
   maxCandidates: number
@@ -893,7 +893,7 @@ function invokeStubDreamer(
  * In production, this would call the actual Philosopher subagent.
  * The stub applies principle alignment heuristics.
  */
-function invokeStubPhilosopher(
+export function invokeStubPhilosopher(
   dreamerOutput: DreamerOutput,
   principleId: string
 ): PhilosopherOutput {
@@ -969,7 +969,7 @@ function invokeStubPhilosopher(
  * In production, this would call the actual Scribe subagent.
  * The stub uses tournament selection (scoring + thresholds) to pick the winner.
  */
-function invokeStubScribe(
+export function invokeStubScribe(
   dreamerOutput: DreamerOutput,
   philosopherOutput: PhilosopherOutput,
   snapshot: NocturnalSessionSnapshot,

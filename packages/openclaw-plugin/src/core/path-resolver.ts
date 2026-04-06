@@ -1,6 +1,7 @@
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
+import type { OpenClawPluginApi } from '../openclaw-sdk.js';
 import { PathResolutionError } from '../config/index.js';
 
 export interface PathResolverOptions {
@@ -395,6 +396,45 @@ export function createDefaultConfig(targetPath?: string): string {
     
     console.log(`✅ Created default config at: ${target}`);
     console.log(`   You can edit this file to customize paths.`);
-    
+
     return target;
+}
+
+// ── OpenClaw API Workspace Resolution ────────────────────────────
+
+/**
+ * Resolve workspace directory via OpenClaw's official API.
+ *
+ * Replaces the removed `api.workspaceDir` field.
+ *
+ * Priority: api.runtime.agent.resolveAgentWorkspaceDir(agentId)
+ *           → PathResolver.getWorkspaceDir() (PD env vars, config file, default)
+ *
+ * @param api - Plugin API instance
+ * @param agentId - Agent ID (defaults to 'main' if not provided)
+ * @returns Resolved workspace directory, or `undefined` if all resolution paths fail
+ */
+export function resolveWorkspaceDirFromApi(
+    api: OpenClawPluginApi | undefined,
+    agentId?: string,
+): string | undefined {
+    if (!api) return undefined;
+
+    // 1. Official API: api.runtime.agent.resolveAgentWorkspaceDir
+    const officialAgent = (api.runtime as { agent?: { resolveAgentWorkspaceDir?: (cfg: unknown, id: string) => string } }).agent;
+    if (officialAgent?.resolveAgentWorkspaceDir) {
+        try {
+            return officialAgent.resolveAgentWorkspaceDir(api.config, agentId ?? 'main');
+        } catch {
+            // Fall through to PathResolver
+        }
+    }
+
+    // 2. Fallback: PathResolver (PD_WORKSPACE_DIR env, config file, default)
+    try {
+        const pr = new PathResolver();
+        return pr.getWorkspaceDir();
+    } catch {
+        return undefined;
+    }
 }

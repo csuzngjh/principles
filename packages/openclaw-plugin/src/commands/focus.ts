@@ -41,7 +41,7 @@ function stripMarkdownFence(content: string): string {
  * 获取工作区目录
  */
 function getWorkspaceDir(ctx: PluginCommandContext): string {
-  const workspaceDir = ctx.config?.workspaceDir;
+  const workspaceDir = ctx.config?.workspaceDir as string | undefined;
   if (!workspaceDir) {
     throw new Error('[PD:Focus] workspaceDir is required but not provided');
   }

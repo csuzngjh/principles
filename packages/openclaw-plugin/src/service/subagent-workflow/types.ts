@@ -1,13 +1,29 @@
 /**
  * Subagent Workflow Helper - Type Definitions
- * 
+ *
  * This file defines the TypeScript interfaces for the workflow helper system
  * that manages subagent lifecycle (empathy observer, deep-reflect, etc.).
- * 
+ *
  * Design reference: docs/design/2026-03-31-subagent-workflow-helper-design.md
- * 
+ *
  * @module subagent-workflow/types
  */
+
+import type {
+    NocturnalArtifact,
+} from '../../core/nocturnal-arbiter.js';
+import type {
+    BoundedAction,
+} from '../../core/nocturnal-executability.js';
+import type {
+    NocturnalSessionSnapshot,
+} from '../../core/nocturnal-trajectory-extractor.js';
+import type {
+    NocturnalRunDiagnostics,
+} from '../nocturnal-service.js';
+import type {
+    TrinityResult,
+} from '../../core/nocturnal-trinity.js';
 
 // ── Workflow Transport ────────────────────────────────────────────────────────
 
@@ -265,6 +281,11 @@ export interface WorkflowManager {
      * Return a compact workflow-centric debug view for operators.
      */
     getWorkflowDebugSummary: (workflowId: string, eventLimit?: number) => Promise<WorkflowDebugSummary | null>;
+
+    /**
+     * Release resources (DB connections, timers).
+     */
+    dispose: () => void;
 }
 
 // ── Workflow Store (for SQLite persistence) ──────────────────────────────────
@@ -319,6 +340,13 @@ export interface WorkflowDebugSummary {
         createdAt: number;
         payload: Record<string, unknown>;
     }>;
+    // NOC-16: Trinity stage states
+    trinityStageStates?: Array<{
+        stage: 'dreamer' | 'philosopher' | 'scribe';
+        status: 'pending' | 'running' | 'completed' | 'failed';
+        reason?: string;
+        completedAt?: number;
+    }>;
 }
 
 // ── Convenience Re-exports ────────────────────────────────────────────────────
@@ -330,3 +358,21 @@ export type {
 } from '../../openclaw-sdk.js';
 
 export type { PluginLogger } from '../../openclaw-sdk.js';
+
+// ── Nocturnal Workflow Types ───────────────────────────────────────────────────
+
+/**
+ * Nocturnal workflow result type.
+ * Mirrors NocturnalRunResult from nocturnal-service.ts (per D-02).
+ */
+export type NocturnalResult = {
+    success: boolean;
+    artifact?: NocturnalArtifact & { boundedAction?: BoundedAction };
+    skipReason?: string;
+    noTargetSelected: boolean;
+    validationFailed: boolean;
+    validationFailures: string[];
+    snapshot?: NocturnalSessionSnapshot;
+    diagnostics: NocturnalRunDiagnostics;
+    trinityTelemetry?: TrinityResult['telemetry'];
+};

@@ -37,10 +37,6 @@ export const commandDescriptions: Record<string, Record<SupportedLanguage, strin
     zh: '管理思维模型 [status|propose|audit]',
     en: 'Manage Thinking OS [status|propose|audit]'
   },
-  'pd-evolve': {
-    zh: '执行进化循环处理 Pain 信号',
-    en: 'Run evolution loop to process Pain signals'
-  },
   'pd-daily': {
     zh: '配置并发送进化日报',
     en: 'Configure and send daily evolution report'

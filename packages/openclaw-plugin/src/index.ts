@@ -35,7 +35,6 @@ import * as TrajectoryCollector from './hooks/trajectory-collector.js';
 import { handleInitStrategy, handleManageOkr } from './commands/strategy.js';
 import { handleBootstrapTools, handleResearchTools } from './commands/capabilities.js';
 import { handleThinkingOs } from './commands/thinking-os.js';
-import { handleEvolveTask } from './commands/evolver.js';
 import { handlePainCommand } from './commands/pain.js';
 import { handleContextCommand } from './commands/context.js';
 import { handleFocusCommand } from './commands/focus.js';
@@ -54,7 +53,7 @@ import { ensureWorkspaceTemplates } from './core/init.js';
 import { migrateDirectoryStructure } from './core/migration.js';
 import { SystemLogger } from './core/system-logger.js';
 import { createDeepReflectTool } from './tools/deep-reflect.js';
-import { PathResolver } from './core/path-resolver.js';
+import { PathResolver, resolveWorkspaceDirFromApi } from './core/path-resolver.js';
 import { createPrinciplesConsoleRoute } from './http/principles-console-route.js';
 
 // Track initialization to avoid repeated calls
@@ -85,8 +84,8 @@ const plugin = {
   description: "Evolutionary programming agent framework with strategic guardrails and reflection loops.",
 
   register(api: OpenClawPluginApi) {
-    api.logger.info(`Principles Disciple Plugin registered. (Path: ${api.rootDir})`);
-    PathResolver.setExtensionRoot(api.rootDir);
+    api.logger.info(`Principles Disciple Plugin registered. (Path: ${api.rootDir ?? '(unknown)'})`);
+    PathResolver.setExtensionRoot(api.rootDir ?? '.');
     api.registerHttpRoute(createPrinciplesConsoleRoute(api));
 
     const language = (api.pluginConfig?.language as string) || 'en';
@@ -239,10 +238,8 @@ const plugin = {
       'subagent_spawning',
       (event: PluginHookSubagentSpawningEvent, ctx: PluginHookSubagentContext): void | PluginHookSubagentSpawningResult => {
         try {
-          // Fallback chain: plugin workspaceDir → default
-          const workspaceDir =
-            api.workspaceDir
-            || api.resolvePath?.('.') || '.';
+          // Resolve workspace via official API, falling back to PathResolver
+          const workspaceDir = resolveWorkspaceDirFromApi(api, event.agentId) || '.';
           api.logger?.debug?.(`[PD] workspaceDir resolved for subagent_spawning: ${workspaceDir}`);
           const { agentId, childSessionKey } = event;
           // Only handle PD local worker profiles
@@ -280,10 +277,8 @@ const plugin = {
       'subagent_ended',
       (event: PluginHookSubagentEndedEvent, ctx: PluginHookSubagentContext): void => {
         try {
-          // Fallback chain: plugin workspaceDir → default
-          const workspaceDir =
-            api.workspaceDir
-            || api.resolvePath?.('.') || '.';
+          // Resolve workspace via official API, falling back to PathResolver
+          const workspaceDir = resolveWorkspaceDirFromApi(api, undefined) || '.';
           api.logger?.debug?.(`[PD] workspaceDir resolved for subagent_ended: ${workspaceDir}`);
           // Complete any pending shadow observation for this subagent session
           const shadowObsId = pendingShadowObservations.get(event.targetSessionKey);
@@ -369,13 +364,6 @@ const plugin = {
     });
 
     api.registerCommand({
-      name: "pd-evolve",
-      description: getCommandDescription('pd-evolve', language),
-      acceptsArgs: true,
-      handler: (ctx) => handleEvolveTask(ctx)
-    });
-
-    api.registerCommand({
       name: "pd-daily",
       description: getCommandDescription('pd-daily', language),
       handler: (_ctx) => {
@@ -427,7 +415,6 @@ const plugin = {
 ## 🧠 进化相关
 | 命令 | 用途 | 使用时机 |
 |------|------|----------|
-| \`/pd-evolve\` | 执行进化循环 | 有 Pain 需要处理时 |
 | \`/pd-thinking\` | 思维模型管理 | 更新 Thinking OS |
 | \`/pd-daily\` | 进化日报 | 每日回顾时 |
 | \`/pd-grooming\` | 工作区大扫除 | 定期清理 |
@@ -479,7 +466,6 @@ const plugin = {
 ## 🧠 Evolution
 | Command | Purpose | When to Use |
 |---------|---------|-------------|
-| \`/pd-evolve\` | Run evolution loop | Process Pain signals |
 | \`/pd-thinking\` | Mental model management | Update Thinking OS |
 | \`/pd-daily\` | Evolution report | Daily review |
 | \`/pd-grooming\` | Workspace cleanup | Periodic cleanup |

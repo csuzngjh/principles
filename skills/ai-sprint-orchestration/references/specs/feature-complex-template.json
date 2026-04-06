@@ -1,0 +1,107 @@
+{
+  "id": "feature-complex-template",
+  "title": "Complex Feature Template - Replace before use",
+  "workspace": "__SKILL_PACKAGE_ROOT__",
+  "branchWorkspace": "__SKILL_PACKAGE_ROOT__",
+  "branch": "main",
+  "requiresTaskContract": true,
+  "taskContract": {
+    "goal": "<describe the feature to implement and the user-visible behavior>",
+    "inScope": [
+      "<allowed modules or files>"
+    ],
+    "outOfScope": [
+      "<forbidden scope, unrelated refactors, external product-side work>"
+    ],
+    "validationCommands": [
+      "<command 1>",
+      "<command 2>"
+    ],
+    "expectedArtifacts": [
+      "decision.md",
+      "scorecard.json",
+      "<optional feature artifact>"
+    ]
+  },
+  "executionScope": {
+    "maxFiles": 8,
+    "maxChecks": 5,
+    "maxDeliverables": 4
+  },
+  "maxRoundsPerStage": 2,
+  "maxRuntimeMinutes": 75,
+  "stageTimeoutMinutes": 20,
+  "stages": ["investigate", "implement-pass-1", "verify"],
+  "producer": {
+    "agent": "iflow",
+    "model": "glm-4.7",
+    "timeoutSeconds": 240
+  },
+  "reviewerA": {
+    "agent": "iflow",
+    "model": "glm-4.7",
+    "timeoutSeconds": 120,
+    "focus": "Validate feature behavior, acceptance criteria coverage, and architecture fit."
+  },
+  "reviewerB": {
+    "agent": "iflow",
+    "model": "glm-4.7",
+    "timeoutSeconds": 120,
+    "focus": "Validate implementation scope, verification evidence, and regression risk."
+  },
+  "context": [
+    "This is a generic complex feature sprint template.",
+    "Replace all placeholder contract values before running.",
+    "Use it for bounded feature delivery with explicit acceptance criteria and verification commands."
+  ],
+  "stageGoals": {
+    "investigate": [
+      "Clarify feature scope and constraints.",
+      "Identify the smallest valuable slice that can be implemented now.",
+      "Produce a verification plan aligned with acceptance criteria."
+    ],
+    "implement-pass-1": [
+      "Implement the smallest valuable feature slice within the declared scope.",
+      "Run the planned verification commands.",
+      "Record evidence that the new behavior exists and is bounded."
+    ],
+    "verify": [
+      "Verify the feature behaves as intended.",
+      "Check whether the acceptance criteria are actually covered by evidence.",
+      "Decide whether the feature is ready, needs continuation, or revise."
+    ]
+  },
+  "stageCriteria": {
+    "investigate": {
+      "requiredApprovals": 2,
+      "requiredProducerSections": ["SUMMARY", "CHANGES", "EVIDENCE", "CODE_EVIDENCE", "KEY_EVENTS", "HYPOTHESIS_MATRIX", "CHECKS", "OPEN_RISKS"],
+      "requiredReviewerSections": ["VERDICT", "BLOCKERS", "FINDINGS", "CODE_EVIDENCE", "HYPOTHESIS_MATRIX", "NEXT_FOCUS", "CHECKS"],
+      "scoringDimensions": ["scope_definition", "acceptance_alignment"],
+      "dimensionThreshold": 3,
+      "requiredDeliverables": ["feature_slice", "acceptance_plan", "verification_plan"]
+    },
+    "implement-pass-1": {
+      "requiredApprovals": 2,
+      "requiredProducerSections": ["SUMMARY", "CHANGES", "EVIDENCE", "CODE_EVIDENCE", "KEY_EVENTS", "HYPOTHESIS_MATRIX", "CHECKS", "OPEN_RISKS", "CONTRACT"],
+      "requiredReviewerSections": ["VERDICT", "BLOCKERS", "FINDINGS", "CODE_EVIDENCE", "HYPOTHESIS_MATRIX", "NEXT_FOCUS", "CHECKS"],
+      "scoringDimensions": ["behavior_delivery", "verification_quality", "scope_control"],
+      "dimensionThreshold": 3,
+      "requiredDeliverables": ["feature_implementation", "evidence_of_behavior", "risk_summary"]
+    },
+    "verify": {
+      "requiredApprovals": 2,
+      "requiredProducerSections": ["SUMMARY", "CHANGES", "EVIDENCE", "CODE_EVIDENCE", "KEY_EVENTS", "HYPOTHESIS_MATRIX", "CHECKS", "OPEN_RISKS"],
+      "requiredReviewerSections": ["VERDICT", "BLOCKERS", "FINDINGS", "CODE_EVIDENCE", "HYPOTHESIS_MATRIX", "NEXT_FOCUS", "CHECKS"],
+      "scoringDimensions": ["artifact_verification", "acceptance_coverage"],
+      "dimensionThreshold": 3,
+      "requiredDeliverables": ["acceptance_verified", "residual_risk_assessment"]
+    }
+  },
+  "stageRoleTimeouts": {
+    "investigate": { "producer": 180, "reviewer_a": 120, "reviewer_b": 120 },
+    "implement-pass-1": { "producer": 300, "reviewer_a": 120, "reviewer_b": 120 },
+    "verify": { "producer": 120, "reviewer_a": 90, "reviewer_b": 90 }
+  },
+  "continuationSpec": null,
+  "recoverySpec": null
+}

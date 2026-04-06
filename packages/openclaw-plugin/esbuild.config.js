@@ -1,8 +1,14 @@
 import { build } from 'esbuild';
-import { copyFileSync, mkdirSync, existsSync, statSync, readdirSync } from 'fs';
+import { copyFileSync, mkdirSync, existsSync, statSync, readdirSync, rmSync } from 'fs';
 import { join } from 'path';
 
 const isProduction = process.argv.includes('--production');
+
+// Clean dist/ before build to prevent tsc artifacts from coexisting with bundle
+if (existsSync('dist')) {
+  console.log('🧹 Cleaning dist/...');
+  rmSync('dist', { recursive: true, force: true });
+}
 
 function copyRecursive(src, dest) {
   const stats = statSync(src);
@@ -20,7 +26,7 @@ function copyRecursive(src, dest) {
 async function bundlePlugin() {
   try {
     await build({
-      entryPoints: ['dist/index.js'],
+      entryPoints: ['src/index.ts'],
       outfile: 'dist/bundle.js',
       bundle: true,
       platform: 'node',
