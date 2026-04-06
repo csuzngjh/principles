@@ -111,29 +111,43 @@ function cleanupPainFlagForTask(wctx: WorkspaceContext, completedTaskId: string,
     const painFlagPath = wctx.resolve('PAIN_FLAG');
 
     try {
-        const painData = fs.readFileSync(painFlagPath, 'utf8');
-        const taskIdMatch = painData.match(/^task_id:\s*(.+)$/m);
-        const painTaskId = taskIdMatch?.[1]?.trim();
-        const hasQueuedStatus = painData.includes('status: queued');
-        const hasRemainingActiveTasks = queue.some((task) => task?.status === 'pending' || task?.status === 'in_progress');
+        if (!fs.existsSync(painFlagPath)) return;
 
+        const painData = fs.readFileSync(painFlagPath, 'utf8');
+        const hasQueuedStatus = painData.includes('status: queued');
         if (!hasQueuedStatus) return;
 
-        if (painTaskId) {
-            if (painTaskId === completedTaskId) {
-                fs.unlinkSync(painFlagPath);
-            }
+        // Extract the task_id that was queued for this pain flag
+        const taskIdMatch = painData.match(/^task_id:\s*(.+)$/m);
+        const painTaskId = taskIdMatch?.[1]?.trim();
+
+        if (painTaskId && painTaskId !== completedTaskId) {
+            // This pain flag belongs to a different task — do NOT delete.
+            // Prevents race condition where a new pain flag was written
+            // between our read and this cleanup.
+            logger.debug(`[PD:Subagent] Pain flag task_id=${painTaskId} ≠ completed ${completedTaskId}, skipping cleanup`);
             return;
         }
 
-        // Legacy fallback: only clear an untagged queued pain flag when there are
-        // no active queue entries left. This avoids unrelated diagnostician runs
-        // from deleting a queued flag that belongs to another task.
+        // Mark this task as completed in the pain flag file (atomic append)
+        // This avoids the race where unlinkSync could delete a new pain flag
+        // that was written between our read and the delete.
+        fs.appendFileSync(painFlagPath, `\ncompleted: ${completedTaskId}\n`, 'utf8');
+
+        // Only delete the file if no active tasks remain AND the current task
+        // has been marked as completed. This ensures we never lose a new pain signal.
+        const hasRemainingActiveTasks = queue.some(
+            (task) => task?.status === 'pending' || task?.status === 'in_progress'
+        );
         if (!hasRemainingActiveTasks) {
-            fs.unlinkSync(painFlagPath);
+            // Verify our completed marker is still there (atomicity check)
+            const currentData = fs.readFileSync(painFlagPath, 'utf8');
+            if (currentData.includes(`completed: ${completedTaskId}`)) {
+                fs.unlinkSync(painFlagPath);
+            }
         }
     } catch (e: unknown) {
-        if ((e as NodeJS.ErrnoException).code === 'ENOENT') return; // File doesn't exist, nothing to clean up
+        if ((e as NodeJS.ErrnoException).code === 'ENOENT') return;
         logger.error(`[PD:Subagent] Failed to cleanup pain flag: ${String(e)}`);
     }
 }
@@ -325,37 +339,40 @@ export async function handleSubagentEnded(
         // This fixes task_outcomes being empty for HEARTBEAT-triggered diagnostician runs
         const matchedTask = queue.find((task: any) => {
             // V2: Skip non-pain_diagnosis tasks - they don't use HEARTBEAT completion flow
-            // pain_diagnosis: routed through subagent completion matcher (this block)
-            // sleep_reflection: handled by nocturnal service (separate flow, no HEARTBEAT)
-            // model_eval: handled separately (no HEARTBEAT completion)
             if (task?.taskKind !== 'pain_diagnosis' && task?.taskKind !== undefined) return false;
-            
+
             const taskSessionKey = task?.assigned_session_key;
-            
+
             // 1. Exact match: direct session key assignment
             if (typeof taskSessionKey === 'string' && taskSessionKey === targetSessionKey) {
                 return true;
             }
-            
-            // 2. HEARTBEAT placeholder match: for diagnostician sessions
-            // Tasks started via HEARTBEAT have placeholder like "heartbeat:diagnostician:{taskId}"
+
+            // 2. HEARTBEAT placeholder match: extract task ID from placeholder
+            // Format: "heartbeat:diagnostician:{taskId}" — match the specific task ID,
+            // not just any task with the prefix. This prevents non-deterministic matching
+            // when multiple diagnostician sessions are running concurrently.
             if (isDiagnosticianSession(targetSessionKey)) {
-                // Match tasks with HEARTBEAT placeholder
-                if (typeof taskSessionKey === 'string' && taskSessionKey.startsWith('heartbeat:diagnostician')) {
-                    return true;
+                if (typeof taskSessionKey === 'string' && taskSessionKey.startsWith('heartbeat:diagnostician:')) {
+                    // Extract task ID from placeholder and verify it matches
+                    const placeholderTaskId = taskSessionKey.split(':').pop();
+                    if (placeholderTaskId && task.id === placeholderTaskId) {
+                        return true;
+                    }
+                    // If task ID doesn't match, skip — another diagnostician owns this session
+                    return false;
                 }
-                // Backward compatibility: match tasks with no assigned_session_key (legacy behavior)
-                // Only match tasks started within 30 minutes to avoid stale task matching
+                // Legacy fallback: match tasks with no assigned_session_key
+                // Only match tasks started within 30 minutes to avoid stale matching
                 if (taskSessionKey === undefined || taskSessionKey === null) {
                     const taskStartedAt = task?.started_at ? new Date(task.started_at).getTime() : 0;
                     const taskAge = taskStartedAt > 0 ? Date.now() - taskStartedAt : Infinity;
-                    const LEGACY_FALLBACK_MAX_AGE_MS = 30 * 60 * 1000; // 30 minutes
                     if (taskAge < LEGACY_FALLBACK_MAX_AGE_MS) {
                         return true;
                     }
                 }
             }
-            
+
             return false;
         });
 
@@ -418,7 +435,21 @@ export async function handleSubagentEnded(
 
                 const report = parseDiagnosticianReport(assistantText);
 
-                if (report?.principle) {
+                if (!report) {
+                    logger.warn(`[PD:Subagent] Diagnostician report for task ${completedTaskId} could not be parsed (${assistantText.length} chars). Raw output preview: ${assistantText.slice(0, 300).replace(/\n/g, '\\n')}`);
+                    // Fallback: try raw text extraction as last resort
+                    const fallback = extractPrincipleFromRawText(assistantText, matchedTask);
+                    if (fallback) {
+                        const pid = wctx.evolutionReducer.createPrincipleFromDiagnosis({
+                            painId: matchedTask?.id || completedTaskId, painType: 'tool_failure',
+                            triggerPattern: fallback.triggerPattern, action: fallback.action,
+                            source: matchedTask?.source || 'diagnostician', evaluability: 'manual_only',
+                        });
+                        if (pid) logger.info(`[PD:Subagent] Created principle ${pid} via raw text fallback for task ${completedTaskId}`);
+                    } else {
+                        logger.warn(`[PD:Subagent] All parsing paths failed for task ${completedTaskId}. No principle created.`);
+                    }
+                } else if (report?.principle) {
                     const triggerPattern = report.principle.trigger_pattern;
                     const action = report.principle.action;
                     const isValid = typeof triggerPattern === 'string' && typeof action === 'string'
@@ -557,6 +588,20 @@ function extractAssistantText(messages: unknown): string {
 }
 
 /**
+ * Sanitize LLM output for JSON parsing.
+ * Common issues: Chinese quotes "" → ", trailing commas, unescaped newlines.
+ */
+function sanitizeForJson(text: string): string {
+    return text
+        // Chinese/Unicode quotes → ASCII double quote
+        .replace(/[\u201C\u201D\u2018\u2019]/g, '"')
+        // CJK fullwidth quotes → ASCII
+        .replace(/[\uFF02]/g, '"')
+        // Remove trailing commas before } or ]
+        .replace(/,(\s*[}\]])/g, '$1');
+}
+
+/**
  * Parse diagnostician JSON report from text
  */
 function parseDiagnosticianReport(
@@ -585,7 +630,15 @@ function parseDiagnosticianReport(
             const principle = extractPrincipleFromParsed(parsed);
             if (principle) return { principle, rawStructure: getStructurePath(parsed) };
         } catch {
-            // Fall through
+            // Try sanitizing (Chinese quotes, trailing commas)
+            try {
+                const sanitized = sanitizeForJson(jsonMatch[1]);
+                const parsed = JSON.parse(sanitized);
+                const principle = extractPrincipleFromParsed(parsed);
+                if (principle) return { principle, rawStructure: getStructurePath(parsed) };
+            } catch {
+                // Fall through
+            }
         }
     }
 
@@ -597,7 +650,28 @@ function parseDiagnosticianReport(
             const principle = extractPrincipleFromParsed(parsed);
             if (principle) return { principle, rawStructure: getStructurePath(parsed) };
         } catch {
-            // Fall through
+            // Try sanitizing
+            try {
+                const sanitized = sanitizeForJson(objectMatch[0]);
+                const parsed = JSON.parse(sanitized);
+                const principle = extractPrincipleFromParsed(parsed);
+                if (principle) return { principle, rawStructure: getStructurePath(parsed) };
+            } catch {
+                // Fall through
+            }
+        }
+    }
+
+    // Last resort: try to find any JSON-like block with principle fields
+    const looseMatch = text.match(/\{[\s\S]*\}/);
+    if (looseMatch) {
+        try {
+            const sanitized = sanitizeForJson(looseMatch[0]);
+            const parsed = JSON.parse(sanitized);
+            const principle = extractPrincipleFromParsed(parsed);
+            if (principle) return { principle, rawStructure: getStructurePath(parsed) };
+        } catch {
+            // Truly unparseable
         }
     }
 

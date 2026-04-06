@@ -24,7 +24,6 @@ const WORKFLOW_TTL_MS = 5 * 60 * 1000; // 5 minutes default TTL for helper workf
 import { executeNocturnalReflectionAsync } from './nocturnal-service.js';
 import { OpenClawTrinityRuntimeAdapter } from '../core/nocturnal-trinity.js';
 
-let intervalId: NodeJS.Timeout | null = null;
 let timeoutId: NodeJS.Timeout | null = null;
 
 /**
@@ -303,6 +302,48 @@ function findRecentDuplicateTask(
     });
 }
 
+/**
+ * Purge stale failed tasks from the queue.
+ * Failed tasks older than the threshold are noise — they won't auto-recover
+ * and they bloat the queue, slowing every cycle.
+ *
+ * Called at the start of each cycle to keep the queue lean.
+ */
+const STALE_FAILED_TASK_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+function purgeStaleFailedTasks(
+    queue: EvolutionQueueItem[],
+    logger: PluginLogger,
+): { purged: number; remaining: number; byReason: Record<string, number> } {
+    const beforeCount = queue.length;
+    const cutoff = Date.now() - STALE_FAILED_TASK_MAX_AGE_MS;
+    const byReason: Record<string, number> = {};
+
+    const purged = queue.filter((t) => {
+        if (t.status !== 'failed') return false;
+        const taskTime = new Date(t.timestamp || t.enqueued_at || 0).getTime();
+        if (!Number.isFinite(taskTime) || taskTime > cutoff) return false;
+        const reason = t.lastError || t.resolution || 'unknown';
+        byReason[reason] = (byReason[reason] || 0) + 1;
+        return true;
+    });
+
+    if (purged.length === 0) return { purged: 0, remaining: queue.length, byReason };
+
+    // Remove purged items from the queue (mutates in place)
+    const purgedIds = new Set(purged.map((t) => t.id));
+    for (let i = queue.length - 1; i >= 0; i--) {
+        if (purgedIds.has(queue[i].id)) queue.splice(i, 1);
+    }
+
+    const summary = Object.entries(byReason)
+        .map(([r, c]) => `${c}x ${r}`)
+        .join('; ');
+    logger?.info?.(`[PD:EvolutionWorker] Purged ${purged.length} stale failed tasks (>24h): ${summary}`);
+
+    return { purged: purged.length, remaining: queue.length, byReason };
+}
+
 function normalizePainDedupKey(source: string, preview: string, reason?: string): string {
     // Include reason in dedup key to match createEvolutionTaskId() behavior
     // Different reasons for the same source/preview should create different tasks
@@ -444,6 +485,12 @@ async function doEnqueuePainTask(
     result.score = v.score;
     result.source = v.source;
 
+    if (v.score < 30) {
+        result.skipped_reason = `score_too_low (${v.score} < 30)`;
+        if (logger) logger.info(`[PD:EvolutionWorker] Pain flag score too low: ${v.score} (source=${v.source})`);
+        return result;
+    }
+
     const queuePath = wctx.resolve('EVOLUTION_QUEUE');
     const releaseLock = await requireQueueLock(queuePath, logger, 'checkPainFlag');
     try {
@@ -457,23 +504,48 @@ async function doEnqueuePainTask(
             fs.appendFileSync(painFlagPath, `\nstatus: queued\ntask_id: ${dup.id}\n`, 'utf8');
             result.enqueued = true;
             result.skipped_reason = 'duplicate';
+            if (logger) logger.info(`[PD:EvolutionWorker] Duplicate pain task skipped for source=${v.source} preview=${v.preview || 'N/A'}`);
             return result;
         }
+
         const taskId = createEvolutionTaskId(v.source, v.score, v.preview, v.reason, now);
         const nowIso = new Date(now).toISOString();
+        const effectiveTraceId = v.traceId || taskId;
+
         queue.push({
             id: taskId, taskKind: 'pain_diagnosis',
             priority: v.score >= 70 ? 'high' : v.score >= 40 ? 'medium' : 'low',
             score: v.score, source: v.source, reason: v.reason,
             trigger_text_preview: v.preview, timestamp: nowIso, enqueued_at: nowIso,
             status: 'pending', session_id: v.sessionId || undefined,
-            agent_id: v.agentId || undefined, traceId: v.traceId || taskId,
+            agent_id: v.agentId || undefined, traceId: effectiveTraceId,
             retryCount: 0, maxRetries: 3,
         });
+
         fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
         fs.appendFileSync(painFlagPath, `\nstatus: queued\ntask_id: ${taskId}\n`, 'utf8');
         result.enqueued = true;
-        logger?.info?.(`[PD:EvolutionWorker] Enqueued pain task ${taskId} (score=${v.score})`);
+
+        if (logger) logger.info(`[PD:EvolutionWorker] Enqueued pain task ${taskId} (score=${v.score})`);
+
+        const evoLogger = getEvolutionLogger(wctx.workspaceDir, wctx.trajectory);
+        evoLogger.logQueued({
+            traceId: effectiveTraceId,
+            taskId,
+            score: v.score,
+            source: v.source,
+            reason: v.reason,
+        });
+
+        wctx.trajectory?.recordEvolutionTask?.({
+            taskId,
+            traceId: effectiveTraceId,
+            source: v.source,
+            reason: v.reason,
+            score: v.score,
+            status: 'pending',
+            enqueuedAt: nowIso,
+        });
     } finally { releaseLock(); }
     return result;
 }
@@ -562,90 +634,13 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
             if (logger) logger.info(`[PD:EvolutionWorker] Pain flag already queued (score=${score}, source=${source})`);
             return result;
         }
-        if (score < 30) {
-            result.skipped_reason = `score_too_low (${score} < 30)`;
-            if (logger) logger.info(`[PD:EvolutionWorker] Pain flag score too low: ${score} (source=${source})`);
-            return result;
-        }
 
         if (logger) logger.info(`[PD:EvolutionWorker] Detected pain flag (score: ${score}, source: ${source}). Enqueueing evolution task.`);
 
-        const queuePath = wctx.resolve('EVOLUTION_QUEUE');
-        const releaseLock = await requireQueueLock(queuePath, logger, 'checkPainFlag');
-
-        try {
-            let queue: EvolutionQueueItem[] = [];
-            if (fs.existsSync(queuePath)) {
-                try {
-                    queue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
-                } catch (e) {
-                    if (logger) logger.error(`[PD:EvolutionWorker] Failed to parse evolution queue: ${String(e)}`);
-                }
-            }
-
-            const now = Date.now();
-            const duplicateTask = findRecentDuplicateTask(queue, source, preview, now, reason);
-            if (duplicateTask) {
-                logger?.info?.(`[PD:EvolutionWorker] Duplicate pain task skipped for source=${source} preview=${preview || 'N/A'}`);
-                fs.appendFileSync(
-                    painFlagPath,
-                    `\nstatus: queued\ntask_id: ${duplicateTask.id}\n`,
-                    'utf8'
-                );
-                result.enqueued = true;
-                result.skipped_reason = 'duplicate';
-                return result;
-            }
-
-            const taskId = createEvolutionTaskId(source, score, preview, reason, now);
-            const nowIso = new Date(now).toISOString();
-            const effectiveTraceId = traceId || taskId;
-
-            queue.push({
-                id: taskId,
-                taskKind: 'pain_diagnosis',
-                priority: score >= 70 ? 'high' : score >= 40 ? 'medium' : 'low',
-                score,
-                source,
-                reason,
-                trigger_text_preview: preview,
-                timestamp: nowIso,
-                enqueued_at: nowIso,
-                status: 'pending',
-                session_id: sessionId || undefined,
-                agent_id: agentId || undefined,
-                traceId: effectiveTraceId,
-                retryCount: 0,
-                maxRetries: 3,
-            });
-
-            fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
-            fs.appendFileSync(painFlagPath, `\nstatus: queued\ntask_id: ${taskId}\n`, 'utf8');
-
-            const evoLogger = getEvolutionLogger(wctx.workspaceDir, wctx.trajectory);
-            evoLogger.logQueued({
-                traceId: traceId || taskId,
-                taskId,
-                score,
-                source,
-                reason,
-            });
-
-            wctx.trajectory?.recordEvolutionTask?.({
-                taskId,
-                traceId: traceId || taskId,
-                source,
-                reason,
-                score,
-                status: 'pending',
-                enqueuedAt: nowIso,
-            });
-
-            result.enqueued = true;
-
-        } finally {
-            releaseLock();
-        }
+        return doEnqueuePainTask(wctx, logger, painFlagPath, result, {
+            score, source, reason, preview,
+            traceId, sessionId, agentId,
+        });
 
     } catch (err) {
         if (logger) logger.warn(`[PD:EvolutionWorker] Error processing pain flag: ${String(err)}`);
@@ -656,7 +651,10 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
 
 async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogger, eventLog: EventLog, api?: OpenClawPluginApi) {
     const queuePath = wctx.resolve('EVOLUTION_QUEUE');
-    if (!fs.existsSync(queuePath)) return;
+    if (!fs.existsSync(queuePath)) {
+        logger?.debug?.('[PD:EvolutionWorker] No evolution queue file — nothing to process');
+        return;
+    }
 
     const releaseLock = await requireQueueLock(queuePath, logger, 'processEvolutionQueue');
     const evoLogger = getEvolutionLogger(wctx.workspaceDir, wctx.trajectory);
@@ -716,20 +714,28 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
         }
 
         // Check in_progress tasks for completion (only pain_diagnosis gets HEARTBEAT treatment)
+        // This marker file path is a FALLBACK — the primary completion detector is the
+        // subagent_ended hook, which creates principles from the diagnostician's output.
+        // Here we only create principles if the hook path didn't already do so.
         for (const task of queue.filter(t => t.status === 'in_progress' && t.taskKind === 'pain_diagnosis')) {
             const startedAt = new Date(task.started_at || task.timestamp);
 
             // Condition 1: Check for marker file (created by diagnostician on completion)
             const completeMarker = path.join(wctx.stateDir, `.evolution_complete_${task.id}`);
             if (fs.existsSync(completeMarker)) {
-                if (logger) logger.info(`[PD:EvolutionWorker] Task ${task.id} completed - marker file detected`);
+                if (logger) logger.info(`[PD:EvolutionWorker] Task ${task.id} completed - marker file detected (fallback path)`);
 
+                // Fallback: try to create principle from report file only if the
+                // subagent_ended hook didn't already process this task.
+                // Heuristic: if the report has principle fields, the hook likely didn't
+                // parse it (hook failure or session messages unavailable).
                 const reportPath = path.join(wctx.stateDir, `.diagnostician_report_${task.id}.json`);
                 if (fs.existsSync(reportPath)) {
                     try {
                         const reportData = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
                         const principle = reportData?.diagnosis_report?.principle || reportData?.principle;
                         if (principle?.trigger_pattern && principle?.action) {
+                            logger.info(`[PD:EvolutionWorker] Marker fallback: creating principle from report for task ${task.id} (hook may have missed it)`);
                             const principleId = wctx.evolutionReducer.createPrincipleFromDiagnosis({
                                 painId: task.id,
                                 painType: task.source === 'Human Intervention' ? 'user_frustration' : 'tool_failure',
@@ -740,12 +746,12 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                                 abstractedPrinciple: principle.abstracted_principle,
                             });
                             if (principleId) {
-                                logger.info(`[PD:EvolutionWorker] Created principle ${principleId} from heartbeat diagnostician report for task ${task.id}`);
+                                logger.info(`[PD:EvolutionWorker] Created principle ${principleId} from marker fallback for task ${task.id}`);
                             } else {
-                                logger.warn(`[PD:EvolutionWorker] createPrincipleFromDiagnosis returned null for task ${task.id}`);
+                                logger.warn(`[PD:EvolutionWorker] createPrincipleFromDiagnosis returned null for task ${task.id} (may be duplicate or blacklisted)`);
                             }
                         } else {
-                            logger.warn(`[PD:EvolutionWorker] Diagnostician report for task ${task.id} missing principle fields`);
+                            logger.warn(`[PD:EvolutionWorker] Diagnostician report for task ${task.id} missing principle fields — diagnostician did not produce a principle`);
                         }
                     } catch (err) {
                         logger.warn(`[PD:EvolutionWorker] Failed to parse diagnostician report for task ${task.id}: ${String(err)}`);
@@ -1074,6 +1080,21 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
         if (queueChanged) {
             fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
         }
+
+        // Pipeline observability: log stage-level summary at end of cycle
+        const pendingPain = queue.filter((t) => t.status === 'pending' && t.taskKind === 'pain_diagnosis').length;
+        const inProgressPain = queue.filter((t) => t.status === 'in_progress' && t.taskKind === 'pain_diagnosis').length;
+        if (inProgressPain > 0) {
+            const stuck = queue
+                .filter((t) => t.status === 'in_progress' && t.taskKind === 'pain_diagnosis')
+                .map((t) => `${t.id} (since ${t.started_at || 'unknown'})`);
+            logger?.info?.(`[PD:EvolutionWorker] Pipeline: ${inProgressPain} pain_diagnosis task(s) in_progress — awaiting agent response: ${stuck.join(', ')}`);
+        }
+        if (pendingPain > 0) {
+            logger?.info?.(`[PD:EvolutionWorker] Pipeline: ${pendingPain} pain_diagnosis task(s) pending — HEARTBEAT.md will trigger next cycle`);
+        }
+        const painCompleted = queue.filter((t) => t.status === 'completed' && t.taskKind === 'pain_diagnosis').length;
+        logger?.info?.(`[PD:EvolutionWorker] Pipeline summary: pain_completed=${painCompleted} pain_pending=${pendingPain} pain_in_progress=${inProgressPain}`);
     } catch (err) {
         if (logger) logger.warn(`[PD:EvolutionWorker] Error processing evolution queue: ${String(err)}`);
     } finally {
@@ -1327,15 +1348,22 @@ async function processEvolutionQueueWithResult(
         }
 
         const queue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
+
+        // Purge stale failed tasks before processing (keeps queue lean)
+        const purgeResult = purgeStaleFailedTasks(queue, logger);
+        if (purgeResult.purged > 0) {
+            // Write back the cleaned queue
+            fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+        }
+
         queueResult.total = queue.length;
         queueResult.pending = queue.filter((t: any) => t.status === 'pending').length;
         queueResult.in_progress = queue.filter((t: any) => t.status === 'in_progress').length;
+        queueResult.failed_this_cycle = queue.filter((t: any) => t.status === 'failed').length;
+        queueResult.completed_this_cycle = queue.filter((t: any) => t.status === 'completed').length;
 
-        for (const task of queue) {
-            if (task?.taskKind !== 'sleep_reflection') continue;
-            if (task?.status === 'completed') queueResult.completed_this_cycle++;
-            if (task?.status === 'failed') queueResult.failed_this_cycle++;
-        }
+        // Log queue health snapshot every cycle
+        logger.info(`[PD:EvolutionWorker] Queue snapshot: total=${queueResult.total} pending=${queueResult.pending} in_progress=${queueResult.in_progress} completed=${queueResult.completed_this_cycle} failed=${queueResult.failed_this_cycle} purged=${purgeResult.purged}`);
 
         await processEvolutionQueue(wctx, logger, eventLog, api);
     } catch (err) {
@@ -1517,7 +1545,11 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
         timeoutId = setTimeout(() => {
             void (async () => {
                 await checkPainFlag(wctx, logger);
-                await processEvolutionQueue(wctx, logger, eventLog, api ?? undefined);
+                // Use the same pipeline as regular cycles (includes purge + observability)
+                const queueResult = await processEvolutionQueueWithResult(wctx, logger, eventLog, api ?? undefined);
+                if (queueResult.errors.length > 0) {
+                    queueResult.errors.forEach((e) => logger?.error?.(`[PD:EvolutionWorker] Startup cycle error: ${e}`));
+                }
                 if (api) {
                     await processDetectionQueue(wctx, api, eventLog);
                 }
@@ -1532,7 +1564,6 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
 
     stop(ctx: OpenClawPluginServiceContext): void {
         if (ctx?.logger) ctx.logger.info('[PD:EvolutionWorker] Stopping background service...');
-        if (intervalId) clearInterval(intervalId);
         if (timeoutId) clearTimeout(timeoutId);
         flushAllSessions();
     }
