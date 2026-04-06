@@ -165,22 +165,26 @@ export const nocturnalWorkflowSpec: SubagentWorkflowSpec<NocturnalResult> = {
  */
 class StubFallbackRuntimeAdapter implements TrinityRuntimeAdapter {
     constructor(
-        private realAdapter: TrinityRuntimeAdapter,
         private snapshot: NocturnalSessionSnapshot,
         private principleId: string,
         private maxCandidates: number
     ) {}
 
-    async invokeDreamer(): Promise<DreamerOutput> {
-        // Use stub Dreamer from nocturnal-trinity.ts
+    async invokeDreamer(
+        snapshot: NocturnalSessionSnapshot,
+        principleId: string,
+        maxCandidates: number
+    ): Promise<DreamerOutput> {
         const { invokeStubDreamer } = await import('../../core/nocturnal-trinity.js');
-        return invokeStubDreamer(this.snapshot, this.principleId, this.maxCandidates);
+        return invokeStubDreamer(snapshot, principleId, maxCandidates);
     }
 
-    async invokePhilosopher(dreamerOutput: DreamerOutput): Promise<PhilosopherOutput> {
-        // Use stub Philosopher
+    async invokePhilosopher(
+        dreamerOutput: DreamerOutput,
+        principleId: string
+    ): Promise<PhilosopherOutput> {
         const { invokeStubPhilosopher } = await import('../../core/nocturnal-trinity.js');
-        return invokeStubPhilosopher(dreamerOutput, this.principleId);
+        return invokeStubPhilosopher(dreamerOutput, principleId);
     }
 
     async invokeScribe(
@@ -346,12 +350,11 @@ export class NocturnalWorkflowManager implements WorkflowManager {
                             this.logger.info(`[PD:NocturnalWorkflow] Dreamer failed (${dreamerOutput.reason}), falling back to stub`);
                             fallbackUsed = true;
                             const stubAdapter = new StubFallbackRuntimeAdapter(
-                                this.runtimeAdapter,
                                 snapshot,
                                 principleId,
                                 trinityConfig.maxCandidates
                             );
-                            dreamerOutput = await stubAdapter.invokeDreamer();
+                            dreamerOutput = await stubAdapter.invokeDreamer(snapshot, principleId, trinityConfig.maxCandidates);
                         }
                         // Persist Dreamer output (NOC-11)
                         if (dreamerOutput.valid) {
@@ -380,12 +383,11 @@ export class NocturnalWorkflowManager implements WorkflowManager {
                             this.logger.info(`[PD:NocturnalWorkflow] Philosopher failed (${philosopherOutput.reason}), falling back to stub`);
                             fallbackUsed = true;
                             const stubAdapter = new StubFallbackRuntimeAdapter(
-                                this.runtimeAdapter,
                                 snapshot,
                                 principleId,
                                 trinityConfig.maxCandidates
                             );
-                            philosopherOutput = await stubAdapter.invokePhilosopher(dreamerOutput);
+                            philosopherOutput = await stubAdapter.invokePhilosopher(dreamerOutput, principleId);
                         }
                         // Persist Philosopher output (NOC-11)
                         if (philosopherOutput.valid) {
