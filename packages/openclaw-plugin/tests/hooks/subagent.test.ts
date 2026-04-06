@@ -348,4 +348,120 @@ const mockTrajectory = {
         });
     });
 
+    // ── P0-2: Precise HEARTBEAT matching ──
+
+    it('should match HEARTBEAT task by EXACT task ID extracted from placeholder', async () => {
+        // P0-2: Extract task ID from "heartbeat:diagnostician:{taskId}" and match precisely.
+        // Two concurrent tasks with different IDs should NOT cross-match.
+        const mockCtx = { workspaceDir, sessionId: 's1' };
+        const mockEvent = {
+            targetSessionKey: 'agent:diagnostician:session-456',
+            outcome: 'ok'
+        };
+
+        vi.mocked(fs.existsSync).mockImplementation((p) => {
+            const pathStr = p.toString();
+            return pathStr.includes('evolution_queue.json') || pathStr.includes('.pain_flag');
+        });
+
+        vi.mocked(fs.readFileSync).mockImplementation((p) => {
+            const pathStr = p.toString();
+            if (pathStr.includes('evolution_queue.json')) {
+                return JSON.stringify([
+                    { id: 'task-correct', status: 'in_progress', assigned_session_key: 'heartbeat:diagnostician:task-correct', started_at: new Date().toISOString() },
+                    { id: 'task-wrong', status: 'in_progress', assigned_session_key: 'heartbeat:diagnostician:task-wrong', started_at: new Date().toISOString() }
+                ]);
+            }
+            if (pathStr.includes('.pain_flag')) {
+                return 'score: 50\nstatus: queued\ntask_id: task-correct\n';
+            }
+            return '';
+        });
+
+        const writeSpy = vi.mocked(fs.writeFileSync);
+
+        await handleSubagentEnded(mockEvent as any, mockCtx as any);
+
+        expect(writeSpy).toHaveBeenCalled();
+        const [, queuePayload] = writeSpy.mock.calls.find((args) => args[0].toString().includes('evolution_queue.json'))!;
+        const savedQueue = JSON.parse(queuePayload as string);
+        expect(savedQueue.find((t: any) => t.id === 'task-correct').status).toBe('completed');
+        expect(savedQueue.find((t: any) => t.id === 'task-wrong').status).toBe('in_progress');
+    });
+
+    it('should NOT match HEARTBEAT task when task ID does NOT match', async () => {
+        // P0-2: Two concurrent diagnostician sessions should NOT cross-match.
+        // Session "unrelated" does not match either task's ID in the placeholder.
+        const mockCtx = { workspaceDir, sessionId: 's1' };
+        const mockEvent = {
+            targetSessionKey: 'agent:diagnostician:session-unrelated',
+            outcome: 'ok'
+        };
+
+        vi.mocked(fs.existsSync).mockImplementation((p) => {
+            const pathStr = p.toString();
+            return pathStr.includes('evolution_queue.json');
+        });
+
+        vi.mocked(fs.readFileSync).mockImplementation((p) => {
+            const pathStr = p.toString();
+            if (pathStr.includes('evolution_queue.json')) {
+                return JSON.stringify([
+                    { id: 'task-A', status: 'in_progress', assigned_session_key: 'heartbeat:diagnostician:task-A', started_at: new Date().toISOString() },
+                    { id: 'task-B', status: 'in_progress', assigned_session_key: 'heartbeat:diagnostician:task-B', started_at: new Date().toISOString() }
+                ]);
+            }
+            return '';
+        });
+
+        const writeSpy = vi.mocked(fs.writeFileSync);
+
+        await handleSubagentEnded(mockEvent as any, mockCtx as any);
+
+        // No task should be matched — session-unrelated doesn't match either placeholder
+        expect(writeSpy).not.toHaveBeenCalled();
+    });
+
+    // ── P0-4: Safe pain flag cleanup ──
+
+    it('should NOT delete pain flag when task_id does NOT match completed task', async () => {
+        // P0-4: Prevent race condition where a new pain flag gets deleted by old task completion.
+        // The pain flag file now has task_id for a DIFFERENT task (simulates race).
+        const mockCtx = { workspaceDir, sessionId: 's1' };
+        const mockEvent = {
+            targetSessionKey: 'agent:diagnostician:session-old',
+            outcome: 'ok'
+        };
+
+        vi.mocked(fs.existsSync).mockImplementation((p) => {
+            const pathStr = p.toString();
+            return pathStr.includes('evolution_queue.json') || pathStr.includes('.pain_flag');
+        });
+
+        vi.mocked(fs.readFileSync).mockImplementation((p) => {
+            const pathStr = p.toString();
+            if (pathStr.includes('evolution_queue.json')) {
+                return JSON.stringify([
+                    { id: 'task-old', status: 'in_progress', assigned_session_key: 'agent:diagnostician:session-old', started_at: new Date().toISOString() }
+                ]);
+            }
+            if (pathStr.includes('.pain_flag')) {
+                // This pain flag belongs to a DIFFERENT task (new signal written during race window)
+                return 'score: 80\nstatus: queued\ntask_id: task-new\n';
+            }
+            return '';
+        });
+
+        const writeSpy = vi.mocked(fs.writeFileSync);
+        const appendSpy = vi.mocked(fs.appendFileSync);
+        const unlinkSpy = vi.mocked(fs.unlinkSync);
+
+        await handleSubagentEnded(mockEvent as any, mockCtx as any);
+
+        // Pain flag should NOT be modified — task_id mismatch protects the new signal
+        expect(appendSpy).not.toHaveBeenCalled();
+        expect(unlinkSpy).not.toHaveBeenCalled();
+        // Queue should still be written (task completion)
+        expect(writeSpy).toHaveBeenCalled();
+    });
 });

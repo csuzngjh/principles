@@ -311,7 +311,7 @@ function findRecentDuplicateTask(
  */
 const STALE_FAILED_TASK_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
 
-function purgeStaleFailedTasks(
+export function purgeStaleFailedTasks(
     queue: EvolutionQueueItem[],
     logger: PluginLogger,
 ): { purged: number; remaining: number; byReason: Record<string, number> } {

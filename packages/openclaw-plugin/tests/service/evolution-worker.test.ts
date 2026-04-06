@@ -516,3 +516,70 @@ describe('EvolutionWorkerService', () => {
         });
     });
 });
+
+// ── P0-3 / P1: purgeStaleFailedTasks tests ──
+
+import { purgeStaleFailedTasks } from '../../src/service/evolution-worker.js';
+
+describe('purgeStaleFailedTasks', () => {
+    const makeTask = (id: string, status: string, hoursAgo: number) => ({
+        id,
+        taskKind: 'sleep_reflection' as const,
+        status,
+        timestamp: new Date(Date.now() - hoursAgo * 60 * 60 * 1000).toISOString(),
+        enqueued_at: new Date(Date.now() - hoursAgo * 60 * 60 * 1000).toISOString(),
+        source: 'test',
+        score: 50,
+        reason: 'test',
+        retryCount: 1,
+        maxRetries: 1,
+        lastError: 'Nocturnal reflection failed: no_evaluable_principles',
+        resolution: 'failed_max_retries' as const,
+    });
+
+    it('should purge failed tasks older than 24 hours', () => {
+        const queue: any[] = [
+            makeTask('old-1', 'failed', 30),  // 30h old — should be purged
+            makeTask('old-2', 'failed', 48),  // 48h old — should be purged
+            makeTask('recent', 'failed', 12), // 12h old — should be kept
+            makeTask('pending', 'pending', 1),
+        ];
+
+        const result = purgeStaleFailedTasks(queue, console as any);
+
+        expect(result.purged).toBe(2);
+        expect(result.remaining).toBe(2);
+        expect(queue.length).toBe(2);
+        expect(queue.find((t) => t.id === 'old-1')).toBeUndefined();
+        expect(queue.find((t) => t.id === 'recent')).toBeDefined();
+        expect(queue.find((t) => t.id === 'pending')).toBeDefined();
+    });
+
+    it('should not purge non-failed tasks regardless of age', () => {
+        const queue: any[] = [
+            makeTask('old-completed', 'completed', 72),
+            makeTask('old-pending', 'pending', 72),
+            makeTask('old-in-progress', 'in_progress', 72),
+        ];
+
+        const result = purgeStaleFailedTasks(queue, console as any);
+
+        expect(result.purged).toBe(0);
+        expect(result.remaining).toBe(3);
+        expect(queue.length).toBe(3);
+    });
+
+    it('should group purge results by failure reason', () => {
+        const queue: any[] = [
+            { ...makeTask('fail-1', 'failed', 30), lastError: 'Nocturnal reflection failed: no_evaluable_principles' },
+            { ...makeTask('fail-2', 'failed', 30), lastError: 'Nocturnal reflection failed: no_evaluable_principles' },
+            { ...makeTask('fail-3', 'failed', 30), lastError: 'Nocturnal reflection failed: validation_failed' },
+        ];
+
+        const result = purgeStaleFailedTasks(queue, console as any);
+
+        expect(result.purged).toBe(3);
+        expect(result.byReason['Nocturnal reflection failed: no_evaluable_principles']).toBe(2);
+        expect(result.byReason['Nocturnal reflection failed: validation_failed']).toBe(1);
+    });
+});
