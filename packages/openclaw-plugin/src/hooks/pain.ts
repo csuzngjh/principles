@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { isRisky, normalizePath } from '../utils/io.js';
 import { normalizeProfile } from '../core/profile.js';
-import { computePainScore, writePainFlag } from '../core/pain.js';
+import { computePainScore, writePainFlag, trackPrincipleValue } from '../core/pain.js';
 import { getSession, trackFriction, resetFriction, getInjectedProbationIds, clearInjectedProbationIds } from '../core/session-tracker.js';
 import { denoiseError, computeHash } from '../utils/hashing.js';
 import { SystemLogger } from '../core/system-logger.js';
@@ -288,6 +288,40 @@ export function handleAfterToolCall(
     writePainFlag(effectiveWorkspaceDir, painData);
   } catch (e) {
     SystemLogger.log(effectiveWorkspaceDir, 'WRITE_PAIN_FLAG_WARN', `Failed to write pain flag: ${String(e)}`);
+  }
+
+  // Observe: track which principles would have prevented this pain (Phase 1, observation-only)
+  try {
+    trackPrincipleValue(
+      effectiveWorkspaceDir,
+      { reason: painData.reason, source: painData.source, score: painData.score },
+      () => wctx.evolutionReducer.getActivePrinciples().map((p) => ({
+        id: p.id,
+        trigger: p.trigger,
+        valueMetrics: p.valueMetrics,
+      })),
+      (id, metrics) => {
+        const principle = wctx.evolutionReducer.getPrincipleById(id);
+        if (principle) {
+          principle.valueMetrics = metrics;
+          // Persist to training state (best-effort, non-critical)
+          try {
+            const storePath = path.join(wctx.stateDir, 'principle_training_state.json');
+            if (fs.existsSync(storePath)) {
+              const store = JSON.parse(fs.readFileSync(storePath, 'utf8'));
+              if (store[id]) {
+                store[id].valueMetrics = metrics;
+                fs.writeFileSync(storePath, JSON.stringify(store, null, 2), 'utf8');
+              }
+            }
+          } catch {
+            // Non-critical — metrics tracked in memory
+          }
+        }
+      },
+    );
+  } catch {
+    // Observation only — never disrupt the pain pipeline
   }
 
   eventLog.recordPainSignal(sessionId, {

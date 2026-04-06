@@ -916,8 +916,22 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     const included = activePrinciples.length > maxPrinciples
                         ? activePrinciples.slice(-maxPrinciples)
                         : activePrinciples;
-                    const formatted = included.map((p) => `### ${p.id}: ${p.text}`).join('\n');
-                    existingPrinciplesRef = `\n**Existing Principles for Duplicate Detection** (showing ${included.length}/${activePrinciples.length}):\n${formatted}`;
+                    const lines = included.map((p) => {
+                        let line = `### ${p.id}: ${p.text}`;
+                        if (p.priority && p.priority !== 'P1') line += ` [${p.priority}]`;
+                        if (p.scope === 'domain' && p.domain) line += ` (domain: ${p.domain})`;
+                        return line;
+                    });
+                    existingPrinciplesRef = `\n**Existing Principles for Duplicate Detection** (showing ${included.length}/${activePrinciples.length}):\n${lines.join('\n')}`;
+
+                    // Also inject suggested rules from existing principles (if any)
+                    const rulesByPrinciple = included.filter((p) => p.suggestedRules?.length);
+                    if (rulesByPrinciple.length > 0) {
+                        const ruleLines = rulesByPrinciple.flatMap((p) =>
+                            (p.suggestedRules ?? []).map((r) => `- [${p.id}] **${r.name}**: ${r.action} (type: ${r.type}, enforce: ${r.enforcement})`),
+                        );
+                        existingPrinciplesRef += `\n\n**Suggested Rules from Existing Principles**:\n${ruleLines.join('\n')}`;
+                    }
                 }
             } catch {}
 

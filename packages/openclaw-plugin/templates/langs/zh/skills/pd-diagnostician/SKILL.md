@@ -197,6 +197,22 @@ disable-model-invocation: true
     "rationale": "为什么这个原则能防止问题",
     "duplicate": false,
     "duplicate_of": "如果发现已有原则与此相似，填写已有原则的 ID 和名称",
+
+    "priority": "P0|P1|P2 (可选，默认 P1。P0=关键安全/数据，P1=流程/质量，P2=风格/偏好)",
+    "scope": "general|domain (可选，默认 general。domain 时需填写 domain 字段)",
+    "domain": "如果 scope=domain，填写领域名如 file_operations, api_calls, config_management",
+
+    "suggested_rules": [
+      {
+        "name": "规则简短名称",
+        "type": "hook|gate|skill|test",
+        "trigger_condition": "何时触发此规则",
+        "enforcement": "block|warn|log",
+        "action": "具体执行什么动作",
+        "implementation_hint": "建议实现到的文件路径或模块"
+      }
+    ],
+
     "implementation": {
       "type": "hook|rule|template",
       "target_file": "建议添加到的文件路径",
@@ -205,6 +221,11 @@ disable-model-invocation: true
   }
 }
 ```
+
+**字段说明**：
+- `priority`, `scope`, `domain`, `suggested_rules` 为**可选字段**，如果你不确定可以省略
+- `suggested_rules` 是原则落地为具体规则的**建议**，每条规则应足够具体，能被直接实现
+- 一条原则通常对应 1-3 条规则，不要过多（过于琐碎）或过少（原则太空泛）
 
 **`abstracted_principle` 编写指南**：
 

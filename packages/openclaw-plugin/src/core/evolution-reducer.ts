@@ -17,6 +17,7 @@ import type {
   PrinciplePromotedData,
   PrincipleRolledBackData,
   PrincipleStatus,
+  PrincipleSuggestedRule,
 } from './evolution-types.js';
 import { isCompleteDetectorMetadata } from './evolution-types.js';
 
@@ -46,6 +47,11 @@ export interface EvolutionReducer {
     detectorMetadata?: PrincipleDetectorSpec;
     /** Highly abstracted principle text — if absent, falls back to action-based title */
     abstractedPrinciple?: string;
+    // ── Principle-Tree metadata (Phase 1, optional) ──
+    priority?: 'P0' | 'P1' | 'P2';
+    scope?: 'general' | 'domain';
+    domain?: string;
+    suggestedRules?: PrincipleSuggestedRule[];
   }): string | null;
   getStats(): {
     candidateCount: number;
@@ -318,6 +324,12 @@ export class EvolutionReducerImpl implements EvolutionReducer {
         ? structuredClone(params.detectorMetadata)
         : undefined,
       abstractedPrinciple: params.abstractedPrinciple,
+
+      // ── Principle-Tree metadata (Phase 1, optional) ──
+      priority: params.priority ?? 'P1',
+      scope: params.scope ?? 'general',
+      domain: params.domain,
+      suggestedRules: params.suggestedRules?.length ? params.suggestedRules : undefined,
     };
 
     this.principles.set(principleId, principle);
