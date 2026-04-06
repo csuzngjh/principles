@@ -35,8 +35,11 @@
 
 - [ ] Phase 6: Foundation and Single-Reflector Mode
   - [x] 06-01-PLAN.md — NocturnalWorkflowManager class implementing WorkflowManager interface (NOC-01 through NOC-05)
-- [ ] Phase 7: Trinity Integration with Event Recording
+- [x] Phase 7: Trinity Integration with Event Recording
+  - [x] 07-01-PLAN.md, 07-02-PLAN.md — Trinity async path, stage events, state machine (NOC-06 through NOC-10)
 - [ ] Phase 8: Intermediate Persistence and Idempotency
+  - [ ] 08-01-PLAN.md — WorkflowStore stage_outputs table and methods (NOC-11, NOC-12, NOC-13)
+  - [ ] 08-02-PLAN.md — NocturnalWorkflowManager idempotency + crash recovery (NOC-11, NOC-12, NOC-13)
 - [ ] Phase 9: Fallback and Evolution Worker Integration
 
 ## Progress
@@ -52,7 +55,7 @@
 | 1 | v1.4 | 2/2 | Complete | 2026-04-05 |
 | 2 | v1.4 | 1/1 | Complete | 2026-04-05 |
 | 5 | v1.4 | 1/1 | Partial | 2026-04-05 |
-| 6 | v1.5 | 1/1 | Planned | — |
-| 7 | v1.5 | 5/5 | Planned | — |
-| 8 | v1.5 | 3/3 | Planned | — |
+| 6 | v1.5 | 1/1 | Complete | — |
+| 7 | v1.5 | 2/2 | Complete | — |
+| 8 | v1.5 | 2/2 | Planned | — |
 | 9 | v1.5 | 3/3 | Planned | — |
