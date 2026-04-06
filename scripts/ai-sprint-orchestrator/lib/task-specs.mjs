@@ -109,6 +109,101 @@ function normalizeSpecPaths(obj, key = null) {
   return obj;
 }
 
+function isPlaceholderValue(value) {
+  return typeof value === 'string' && /<[^>]+>|TBD|REPLACE_ME/i.test(value);
+}
+
+function normalizeStringList(value) {
+  return Array.isArray(value)
+    ? value.map((item) => String(item ?? '').trim()).filter(Boolean)
+    : [];
+}
+
+function validateTaskContract(spec) {
+  if (spec.requiresTaskContract !== true) return;
+  const contract = spec.taskContract ?? {};
+  const errors = [];
+
+  if (!contract.goal || isPlaceholderValue(contract.goal)) errors.push('taskContract.goal');
+  if (!Array.isArray(contract.inScope) || contract.inScope.length === 0 || contract.inScope.some(isPlaceholderValue)) errors.push('taskContract.inScope');
+  if (!Array.isArray(contract.outOfScope) || contract.outOfScope.length === 0 || contract.outOfScope.some(isPlaceholderValue)) errors.push('taskContract.outOfScope');
+  if (!Array.isArray(contract.validationCommands) || contract.validationCommands.length === 0 || contract.validationCommands.some(isPlaceholderValue)) errors.push('taskContract.validationCommands');
+  if (!Array.isArray(contract.expectedArtifacts) || contract.expectedArtifacts.length === 0 || contract.expectedArtifacts.some(isPlaceholderValue)) errors.push('taskContract.expectedArtifacts');
+
+  if (errors.length > 0) {
+    throw new Error(`Spec '${spec.id}' is missing the minimum task contract. Fill these fields before running: ${errors.join(', ')}.`);
+  }
+}
+
+function validateWorkUnitField(stage, unit, key, errors) {
+  const value = unit?.[key];
+  if (typeof value === 'string') {
+    if (!value.trim() || isPlaceholderValue(value)) {
+      errors.push(`workUnits.${stage}.${unit.workUnitId ?? '<missing-id>'}.${key}`);
+    }
+    return;
+  }
+
+  const list = normalizeStringList(value);
+  if (list.length === 0 || list.some(isPlaceholderValue)) {
+    errors.push(`workUnits.${stage}.${unit.workUnitId ?? '<missing-id>'}.${key}`);
+  }
+}
+
+function validateWorkUnits(spec) {
+  const stageMap = spec.workUnits;
+  if (!stageMap || typeof stageMap !== 'object' || Array.isArray(stageMap)) return;
+
+  const errors = [];
+  for (const [stage, units] of Object.entries(stageMap)) {
+    if (!Array.isArray(units) || units.length === 0) {
+      errors.push(`workUnits.${stage}`);
+      continue;
+    }
+    for (const unit of units) {
+      if (!unit || typeof unit !== 'object') {
+        errors.push(`workUnits.${stage}[]`);
+        continue;
+      }
+      validateWorkUnitField(stage, unit, 'workUnitId', errors);
+      validateWorkUnitField(stage, unit, 'workUnitGoal', errors);
+      validateWorkUnitField(stage, unit, 'allowedFiles', errors);
+      validateWorkUnitField(stage, unit, 'unitChecks', errors);
+      validateWorkUnitField(stage, unit, 'unitDeliverables', errors);
+      validateWorkUnitField(stage, unit, 'unitSummary', errors);
+      validateWorkUnitField(stage, unit, 'carryForwardSummary', errors);
+    }
+  }
+
+  if (errors.length > 0) {
+    throw new Error(`Spec '${spec.id}' is missing the minimum work-unit contract. Fill these fields before running: ${errors.join(', ')}.`);
+  }
+}
+
+export function getStageWorkUnits(spec, stage) {
+  const units = spec?.workUnits?.[stage];
+  if (!Array.isArray(units)) return [];
+  return units.map((unit, index) => ({
+    workUnitId: String(unit.workUnitId ?? '').trim(),
+    workUnitGoal: String(unit.workUnitGoal ?? '').trim(),
+    allowedFiles: normalizeStringList(unit.allowedFiles),
+    unitChecks: normalizeStringList(unit.unitChecks),
+    unitDeliverables: normalizeStringList(unit.unitDeliverables),
+    unitSummary: String(unit.unitSummary ?? '').trim(),
+    carryForwardSummary: String(unit.carryForwardSummary ?? '').trim(),
+    stage,
+    order: index,
+  }));
+}
+
+export function getActiveWorkUnit(spec, stage, options = {}) {
+  const { workUnitIndex = 0 } = options;
+  const units = getStageWorkUnits(spec, stage);
+  if (units.length === 0) return null;
+  const safeIndex = Math.max(0, Math.min(workUnitIndex, units.length - 1));
+  return units[safeIndex];
+}
+
 export function getTaskSpec(taskId, specPath) {
   // Priority: explicit path > filesystem spec > error
   const candidates = specPath
@@ -123,6 +218,8 @@ export function getTaskSpec(taskId, specPath) {
       const raw = JSON.parse(fs.readFileSync(candidate, 'utf8'));
       const spec = normalizeSpecPaths(raw);
       validateSpecAgents(spec); // Strict validation — throws on unknown agent/model
+      validateTaskContract(spec);
+      validateWorkUnits(spec);
       return spec;
     }
   }
@@ -130,17 +227,28 @@ export function getTaskSpec(taskId, specPath) {
   throw new Error(`Unknown task spec: ${taskId}. Place a spec file in ${SPECS_DIR}/<task-id>.json or pass --task-spec <path>.`);
 }
 
-export function buildStageBrief(spec, stage, round, previousDecision, handoff = null) {
+export function buildStageBrief(spec, stage, round, previousDecision, handoff = null, options = {}) {
+  const { workUnitIndex = 0, runDir = '<runDir>', stageDir = '<stageDir>' } = options;
   const goals = spec.stageGoals[stage] ?? [];
   const hypotheses = stage === 'investigate' ? (spec.investigateHypotheses ?? []) : [];
   const stageCriteria = spec.stageCriteria?.[stage];
   const scoringDimensions = stageCriteria?.scoringDimensions ?? [];
   const dimensionThreshold = stageCriteria?.dimensionThreshold ?? 3;
   const requiredDeliverables = stageCriteria?.requiredDeliverables ?? [];
+  const workUnit = getActiveWorkUnit(spec, stage, { workUnitIndex });
 
   // Build structured carry forward from handoff or fall back to raw decision text
   let carryForward;
-  if (handoff) {
+  if (handoff?.carryForwardSummary) {
+    carryForward = [
+      '## Carry Forward',
+      '',
+      handoff.carryForwardSummary.trim(),
+      '',
+      'Use this compact carry-forward summary as the default continuation context. Consult the full prior decision only if this summary is insufficient.',
+      '',
+    ].join('\n');
+  } else if (handoff) {
     const accomplished = handoff.contractItems?.filter((i) => i.status === 'DONE') ?? [];
     const incomplete = handoff.contractItems?.filter((i) => i.status !== 'DONE') ?? [];
     carryForward = [
@@ -172,6 +280,19 @@ export function buildStageBrief(spec, stage, round, previousDecision, handoff = 
     `## Goals`,
     ...goals.map((goal) => `- ${goal}`),
     '',
+    ...(workUnit
+      ? [
+          `## Active Work Unit`,
+          `- workUnitId: ${workUnit.workUnitId}`,
+          `- workUnitGoal: ${workUnit.workUnitGoal}`,
+          `- allowedFiles: ${workUnit.allowedFiles.join(', ')}`,
+          `- unitChecks: ${workUnit.unitChecks.join(' | ')}`,
+          `- unitDeliverables: ${workUnit.unitDeliverables.join(' | ')}`,
+          `- unitSummary: ${handoff?.unitSummary ?? workUnit.unitSummary}`,
+          `- carryForwardSummary: ${handoff?.carryForwardSummary ?? workUnit.carryForwardSummary}`,
+          '',
+        ]
+      : []),
     ...(hypotheses.length
       ? [
         `## Required Hypotheses`,
@@ -277,7 +398,7 @@ export function buildStageBrief(spec, stage, round, previousDecision, handoff = 
   ].join('\n');
 }
 
-export function buildRolePrompt({ spec, stage, round, role, runDir, stageDir, briefPath, producerPath, reviewerAPath, reviewerBPath, globalReviewerPath }) {
+export function buildRolePrompt({ spec, stage, round, role, runDir, stageDir, briefPath, producerPath, reviewerAPath, reviewerBPath, globalReviewerPath, workUnit = null }) {
   const outputPathMap = {
     producer: producerPath,
     reviewer_a: reviewerAPath,
@@ -325,6 +446,18 @@ export function buildRolePrompt({ spec, stage, round, role, runDir, stageDir, br
     `If you get stuck, record the concrete blocker and next best action in both the role state file and worklog before ending.`,
     `Prefer shell commands for file updates when direct write/edit tools are flaky in long sessions.`,
     `When your final report is complete, stop immediately: do not keep exploring, do not retry extra reads, and do not update state/worklog again after the final report is written.`,
+    ...(workUnit
+      ? [
+          `Work-unit execution is mandatory for this run.`,
+          `Current workUnitId: ${workUnit.workUnitId}`,
+          `Current workUnitGoal: ${workUnit.workUnitGoal}`,
+          `Allowed files: ${workUnit.allowedFiles.join(', ')}`,
+          `Expected checks: ${workUnit.unitChecks.join(' | ')}`,
+          `Expected deliverables: ${workUnit.unitDeliverables.join(' | ')}`,
+          `Prior carry-forward summary: ${workUnit.carryForwardSummary}`,
+          `Stay within the allowed files unless the work-unit contract is insufficient; if it is insufficient, stop and explain why.`,
+        ]
+      : []),
   ];
 
   if (role === 'producer') {

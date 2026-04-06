@@ -6,7 +6,7 @@ import os from 'os';
 import { fileURLToPath } from 'url';
 import { decideStage, buildStageMetrics, buildHandoff } from './lib/decision.mjs';
 import { ensureDir, appendText, fileExists, readJson, writeJson, writeText } from './lib/state-store.mjs';
-import { buildRolePrompt, buildStageBrief, getTaskSpec } from './lib/task-specs.mjs';
+import { buildRolePrompt, buildStageBrief, getTaskSpec, getActiveWorkUnit } from './lib/task-specs.mjs';
 import { archiveRunById } from './lib/archive.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -89,6 +89,7 @@ function createSprintState(spec, runId, specPath) {
     status: 'running',
     currentStageIndex: 0,
     currentStage: spec.stages[0],
+    currentWorkUnitIndex: 0,
     currentRound: 1,
     maxRoundsPerStage: spec.maxRoundsPerStage,
     maxRuntimeMinutes: spec.maxRuntimeMinutes,
@@ -705,6 +706,29 @@ function roleConfig(spec, role) {
   throw new Error(`Unknown role: ${role}`);
 }
 
+function roleAttemptConfigs(config) {
+  if (!config) return [];
+  const primary = { ...config, fallback: undefined, attemptLabel: 'primary' };
+  const attempts = [primary];
+
+  if (config.fallback?.agent && config.fallback?.model) {
+    attempts.push({
+      ...config,
+      ...config.fallback,
+      fallback: undefined,
+      attemptLabel: 'fallback',
+    });
+  } else if (config.retryOnce === true) {
+    attempts.push({
+      ...config,
+      fallback: undefined,
+      attemptLabel: 'retry',
+    });
+  }
+
+  return attempts;
+}
+
 function loadSpec(state, args) {
   const specPath = (args && args.taskSpec) || (state && state.specPath) || null;
   return getTaskSpec(state.taskId, specPath);
@@ -1176,25 +1200,32 @@ function validateReportSections(text, requiredSections, reportLabel) {
  */
 const REQUIRED_REVIEWER_SECTIONS = ['VERDICT', 'FINDINGS', 'BLOCKERS', 'NEXT_FOCUS', 'CHECKS'];
 
-export function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecardPath, producerPath, reviewerAPath, reviewerBPath, globalReviewerPath, state, reviewerTimeouts = null, reviewerViolations = null }) {
+export function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecardPath, producerPath, reviewerAPath, reviewerBPath, globalReviewerPath, state, reviewerTimeouts = null, reviewerViolations = null, reviewerFailures = null }) {
+  const spec = loadSpec(state);
+  const workUnit = getActiveWorkUnit(spec, stageName, {
+    workUnitIndex: state.currentWorkUnitIndex ?? 0,
+  });
   // Build lookup maps for reviewer timeout/error state
   const timeoutMap = new Map((reviewerTimeouts ?? []).map((r) => [r.role, r]));
+  const failureMap = new Map((reviewerFailures ?? []).map((r) => [r.role, r]));
   const missingFiles = [];
   if (!reportExistsAndNonEmpty(producerPath)) missingFiles.push(`producer: ${producerPath}${fileExists(producerPath) ? ' (empty)' : ''}`);
   if (!reportExistsAndNonEmpty(reviewerAPath)) {
     const info = timeoutMap.get('reviewer_a');
-    if (info?.timedOut) missingFiles.push(`reviewer_a: ${reviewerAPath} (timed out, no report)`);
-    else if (info) missingFiles.push(`reviewer_a: ${reviewerAPath} (error, no report)`);
+    const failure = failureMap.get('reviewer_a');
+    if (info?.timedOut) missingFiles.push(`reviewer_a: ${reviewerAPath} (timed out, no report${failure?.summary ? `; ${failure.summary}` : ''})`);
+    else if (info || failure) missingFiles.push(`reviewer_a: ${reviewerAPath} (error, no report${failure?.summary ? `; ${failure.summary}` : ''})`);
     else missingFiles.push(`reviewer_a: ${reviewerAPath}${fileExists(reviewerAPath) ? ' (empty)' : ' (missing)'}`);
   }
   if (!reportExistsAndNonEmpty(reviewerBPath)) {
     const info = timeoutMap.get('reviewer_b');
-    if (info?.timedOut) missingFiles.push(`reviewer_b: ${reviewerBPath} (timed out, no report)`);
-    else if (info) missingFiles.push(`reviewer_b: ${reviewerBPath} (error, no report)`);
+    const failure = failureMap.get('reviewer_b');
+    if (info?.timedOut) missingFiles.push(`reviewer_b: ${reviewerBPath} (timed out, no report${failure?.summary ? `; ${failure.summary}` : ''})`);
+    else if (info || failure) missingFiles.push(`reviewer_b: ${reviewerBPath} (error, no report${failure?.summary ? `; ${failure.summary}` : ''})`);
     else missingFiles.push(`reviewer_b: ${reviewerBPath}${fileExists(reviewerBPath) ? ' (empty)' : ' (missing)'}`);
   }
 
-  const stageCriteria = loadSpec(state).stageCriteria?.[stageName] ?? {};
+  const stageCriteria = spec.stageCriteria?.[stageName] ?? {};
   const globalReviewerRequired = stageCriteria.globalReviewerRequired === true;
   if (globalReviewerRequired && globalReviewerPath && !reportExistsAndNonEmpty(globalReviewerPath)) {
     missingFiles.push(`global_reviewer: ${globalReviewerPath}${fileExists(globalReviewerPath) ? ' (empty — required for this stage)' : ' (missing — required for this stage)'}`);
@@ -1221,6 +1252,7 @@ export function decideAndPersist({ runDir, stageName, stageDir, decisionPath, sc
       summary: `Missing reports: ${missingFiles.join('; ')}`,
       missingReports: missingFiles,
       reviewerTimeouts: reviewerTimeouts ?? null,
+      reviewerFailures: reviewerFailures ?? null,
       updatedAt: nowIso(),
     });
     appendTimeline(runDir, `Stage ${stageName} round ${state.currentRound} decision: error (missing reports)`);
@@ -1316,7 +1348,7 @@ export function decideAndPersist({ runDir, stageName, stageDir, decisionPath, sc
   }
 
   const decision = decideStage({
-    stageCriteria: loadSpec(state).stageCriteria?.[stageName],
+    stageCriteria: spec.stageCriteria?.[stageName],
     producer,
     reviewerA,
     reviewerB,
@@ -1335,6 +1367,12 @@ export function decideAndPersist({ runDir, stageName, stageDir, decisionPath, sc
     `- Round: ${state.currentRound}`,
     `- Outcome: ${decision.outcome}`,
     `- Output Quality: ${decision.outputQuality}`,
+    ...(workUnit
+      ? [
+          `- Work Unit: ${workUnit.workUnitId}`,
+          `- Work Unit Goal: ${workUnit.workUnitGoal}`,
+        ]
+      : []),
     '',
     `## Summary`,
     decision.summary,
@@ -1424,6 +1462,8 @@ export function decideAndPersist({ runDir, stageName, stageDir, decisionPath, sc
   const scorecard = {
     stage: stageName,
     round: state.currentRound,
+    workUnitId: workUnit?.workUnitId ?? null,
+    workUnitGoal: workUnit?.workUnitGoal ?? null,
     outcome: decision.outcome,
     outputQuality: decision.outputQuality,
     qualityReasons: decision.qualityReasons ?? [],
@@ -1474,6 +1514,9 @@ export function decideAndPersist({ runDir, stageName, stageDir, decisionPath, sc
     ...(reviewerTimeouts
       ? { reviewerTimeouts }
       : {}),
+    ...(reviewerFailures
+      ? { reviewerFailures }
+      : {}),
     updatedAt: nowIso(),
   };
   writeJson(scorecardPath, scorecard);
@@ -1488,6 +1531,7 @@ export function decideAndPersist({ runDir, stageName, stageDir, decisionPath, sc
       metrics: decision.metrics,
       stageName,
       round: state.currentRound,
+      workUnit,
     });
     const handoffPath = path.join(stageDir, 'handoff.json');
     writeJson(handoffPath, handoff);
@@ -1616,6 +1660,7 @@ function advanceState(state, spec, decision, { runDir } = {}) {
     }
     state.currentStageIndex += 1;
     state.currentStage = spec.stages[state.currentStageIndex];
+    state.currentWorkUnitIndex = 0;
     state.currentRound = 1;
     return;
   }
@@ -1625,6 +1670,7 @@ function advanceState(state, spec, decision, { runDir } = {}) {
     if (state.currentStage === 'implement-pass-1') {
       state.currentStage = 'implement-pass-2';
       state.currentStageIndex = spec.stages.indexOf('implement-pass-2');
+      state.currentWorkUnitIndex = 0;
       state.currentRound = 1;
       return;
     }
@@ -1763,9 +1809,12 @@ function cleanupAcpxOrphans(runDir, state) {
  */
 async function runReviewerRole({ runDir, state, spec, paths, role, worktreeInfo }) {
   const stageName = state.currentStage;
+  const workUnit = getActiveWorkUnit(spec, stageName, {
+    workUnitIndex: state.currentWorkUnitIndex ?? 0,
+  });
   const config = roleConfig(spec, role);
   const { reportPath, stdoutPath } = roleArtifactPaths(paths, role);
-  const failLog = path.join(paths.stageDir, `${role.replace('_', '-')}-failure.log`);
+  const failLogBase = path.join(paths.stageDir, `${role.replace('_', '-')}-failure`);
 
   // Skip if report already exists
   if (fileExists(reportPath) && fs.readFileSync(reportPath, 'utf8').trim()) {
@@ -1795,6 +1844,7 @@ async function runReviewerRole({ runDir, state, spec, paths, role, worktreeInfo 
     reviewerAPath: paths.reviewerAPath,
     reviewerBPath: paths.reviewerBPath,
     globalReviewerPath: paths.globalReviewerPath,
+    workUnit,
   });
   const timeoutSeconds = stageRoleTimeout(spec, stageName, role);
   // Reviewers must verify code in the same workspace where producer made changes
@@ -1804,82 +1854,120 @@ async function runReviewerRole({ runDir, state, spec, paths, role, worktreeInfo 
   let output = null;
   let timedOut = false;
   let violatedFile = null;
+  let reportExisted = false;
+  const attemptErrors = [];
+  const attempts = roleAttemptConfigs(config);
 
-  updateRoleState(paths, role, {
-    stage: stageName,
-    round: state.currentRound,
-    status: 'running',
-    startedAt: nowIso(),
-    finishedAt: null,
-    terminatedAt: null,
-    lastPid: null,
-    timeoutSeconds,
-    lastError: null,
-  });
+  for (let index = 0; index < attempts.length; index += 1) {
+    const attemptConfig = attempts[index];
+    const attemptLabel = attemptConfig.attemptLabel ?? `attempt_${index + 1}`;
+    const attemptTimeoutSeconds = stageRoleTimeout(
+      {
+        ...spec,
+        reviewerA: role === 'reviewer_a' ? attemptConfig : spec.reviewerA,
+        reviewerB: role === 'reviewer_b' ? attemptConfig : spec.reviewerB,
+      },
+      stageName,
+      role,
+    );
+    const failLog = `${failLogBase}-${attemptLabel}.log`;
 
-  try {
-    const result = await runAgentAsync({
-      cwd,
-      agent: config.agent,
-      model: config.model,
-      prompt,
-      timeoutSeconds,
-      promptDir: runDir,
-      runDir,
-      roleLabel: role,
-      onSpawn: (pid) => updateRoleState(paths, role, { lastPid: pid }),
-    });
-    const stdout = result.stdout ?? '';
-    const stderr = result.stderr ?? '';
-
-    if (result.status !== 0) {
-      // Agent returned non-zero exit
-      ensureDir(path.dirname(failLog));
-      writeText(failLog, `# Agent Failure Log\n\n- agent: ${config.agent}\n- model: ${config.model}\n- exitStatus: ${result.status}\n\n## stdout\n\n${stdout.slice(0, 2000)}\n\n## stderr\n\n${stderr.slice(0, 2000)}\n`);
-      throw new Error(`Agent ${config.agent} failed with status ${result.status}`);
-    }
-
-    output = stdout.trim();
-    if (output) writeText(stdoutPath, `${output}\n`);
     updateRoleState(paths, role, {
-      status: 'completed',
+      stage: stageName,
+      round: state.currentRound,
+      status: index === 0 ? 'running' : 'retrying',
+      startedAt: nowIso(),
+      finishedAt: null,
+      terminatedAt: null,
       lastPid: null,
-      finishedAt: nowIso(),
+      timeoutSeconds: attemptTimeoutSeconds,
       lastError: null,
     });
-  } catch (err) {
-    // Check if the agent wrote its report despite the error
-    if (fileExists(reportPath) && fs.readFileSync(reportPath, 'utf8').trim()) {
-      output = null;
-      timedOut = true;
+
+    if (index > 0) {
+      appendTimeline(runDir, `${role} retrying with ${attemptConfig.agent}/${attemptConfig.model} (${attemptLabel})`);
+    }
+
+    try {
+      const result = await runAgentAsync({
+        cwd,
+        agent: attemptConfig.agent,
+        model: attemptConfig.model,
+        prompt,
+        timeoutSeconds: attemptTimeoutSeconds,
+        promptDir: runDir,
+        runDir,
+        roleLabel: role,
+        onSpawn: (pid) => updateRoleState(paths, role, { lastPid: pid }),
+      });
+      const stdout = result.stdout ?? '';
+      const stderr = result.stderr ?? '';
+
+      if (result.status !== 0) {
+        ensureDir(path.dirname(failLog));
+        writeText(failLog, `# Agent Failure Log\n\n- attempt: ${attemptLabel}\n- agent: ${attemptConfig.agent}\n- model: ${attemptConfig.model}\n- exitStatus: ${result.status}\n\n## stdout\n\n${stdout.slice(0, 2000)}\n\n## stderr\n\n${stderr.slice(0, 2000)}\n`);
+        throw new Error(`Agent ${attemptConfig.agent} failed with status ${result.status}`);
+      }
+
+      output = stdout.trim();
+      if (output) writeText(stdoutPath, `${output}\n`);
       updateRoleState(paths, role, {
-        status: 'completed_after_timeout',
+        status: 'completed',
         lastPid: null,
         finishedAt: nowIso(),
-        lastError: err.message ?? String(err),
+        lastError: null,
       });
-    } else if (err.message?.includes('timed out')) {
-      timedOut = true;
+      break;
+    } catch (err) {
+      const errorMessage = err.message ?? String(err);
+      const hasReport = fileExists(reportPath) && fs.readFileSync(reportPath, 'utf8').trim();
+
+      if (hasReport) {
+        output = null;
+        timedOut = errorMessage.includes('timed out');
+        reportExisted = true;
+        updateRoleState(paths, role, {
+          status: 'completed_after_timeout',
+          lastPid: null,
+          finishedAt: nowIso(),
+          lastError: errorMessage,
+        });
+        break;
+      }
+
+      const isTimedOut = errorMessage.includes('timed out');
+      attemptErrors.push({
+        label: attemptLabel,
+        agent: attemptConfig.agent,
+        model: attemptConfig.model,
+        error: errorMessage,
+        timedOut: isTimedOut,
+      });
+
       ensureDir(path.dirname(failLog));
-      writeText(failLog, `# Agent Timeout Log\n\n- agent: ${config.agent}\n- model: ${config.model}\n- timeout: ${timeoutSeconds}s\n- error: ${err.message}\n`);
-      updateRoleState(paths, role, {
-        status: 'timed_out',
-        lastPid: null,
-        finishedAt: nowIso(),
-        terminatedAt: nowIso(),
-        lastError: err.message,
-      });
-    } else {
-      // Re-throw unexpected errors (but don't lose the fail log)
-      ensureDir(path.dirname(failLog));
-      writeText(failLog, `# Agent Failure Log\n\n- agent: ${config.agent}\n- model: ${config.model}\n- error: ${err.message}\n`);
-      updateRoleState(paths, role, {
-        status: 'error',
-        lastPid: null,
-        finishedAt: nowIso(),
-        lastError: err.message ?? String(err),
-      });
-      throw err;
+      if (isTimedOut) {
+        timedOut = true;
+        writeText(failLog, `# Agent Timeout Log\n\n- attempt: ${attemptLabel}\n- agent: ${attemptConfig.agent}\n- model: ${attemptConfig.model}\n- timeout: ${attemptTimeoutSeconds}s\n- error: ${errorMessage}\n`);
+        updateRoleState(paths, role, {
+          status: 'timed_out',
+          lastPid: null,
+          finishedAt: nowIso(),
+          terminatedAt: nowIso(),
+          lastError: errorMessage,
+        });
+      } else {
+        writeText(failLog, `# Agent Failure Log\n\n- attempt: ${attemptLabel}\n- agent: ${attemptConfig.agent}\n- model: ${attemptConfig.model}\n- error: ${errorMessage}\n`);
+        updateRoleState(paths, role, {
+          status: 'error',
+          lastPid: null,
+          finishedAt: nowIso(),
+          lastError: errorMessage,
+        });
+      }
+
+      if (index < attempts.length - 1) {
+        continue;
+      }
     }
   }
 
@@ -1906,7 +1994,7 @@ async function runReviewerRole({ runDir, state, spec, paths, role, worktreeInfo 
     violatedFile = violated.file;
   }
 
-  return { role, output: text || output || null, timedOut, reportExisted: false, violatedFile };
+  return { role, output: text || output || null, timedOut, reportExisted, violatedFile, attemptErrors };
 }
 
 const MUTATING_STAGES = ['implement-pass-1', 'implement-pass-2'];
@@ -2109,6 +2197,9 @@ function cleanupWorktree({ state, runDir }) {
 
 async function executeStage(runDir, state, spec) {
   const stageName = state.currentStage;
+  const workUnit = getActiveWorkUnit(spec, stageName, {
+    workUnitIndex: state.currentWorkUnitIndex ?? 0,
+  });
   const previousDecisionPath = path.join(
     runDir,
     'stages',
@@ -2131,7 +2222,11 @@ async function executeStage(runDir, state, spec) {
   const handoffPath = path.join(stageDir, 'handoff.json');
   const handoff = fileExists(handoffPath) ? readJson(handoffPath) : null;
 
-  writeText(briefPath, `${buildStageBrief(spec, stageName, state.currentRound, previousDecision, handoff)}\n`);
+  writeText(briefPath, `${buildStageBrief(spec, stageName, state.currentRound, previousDecision, handoff, {
+    workUnitIndex: state.currentWorkUnitIndex ?? 0,
+    runDir,
+    stageDir,
+  })}\n`);
 
   // On round > 1, clear previous round's role reports so agents must regenerate them
   if (state.currentRound > 1) {
@@ -2196,6 +2291,7 @@ async function executeStage(runDir, state, spec) {
     producerPath,
     reviewerAPath,
     reviewerBPath,
+    workUnit,
   });
   const { reportPath: producerReportPath, stdoutPath: producerStdoutPath } = roleArtifactPaths(paths, 'producer');
 
@@ -2424,12 +2520,21 @@ async function executeStage(runDir, state, spec) {
 
   // Collect outputs and timeout flags
   const reviewerTimeouts = [];
+  const reviewerFailures = [];
   const reviewerViolations = [];
   for (const result of reviewerResults) {
     if (result.error) {
       appendTimeline(runDir, `${result.role} error: ${result.error}`);
     }
     outputs[result.role] = result.output;
+    if (result.attemptErrors?.length) {
+      reviewerFailures.push({
+        role: result.role,
+        summary: result.attemptErrors.map((item) => `${item.label}=${item.agent}/${item.model}: ${item.error}`).join(' | '),
+        attempts: result.attemptErrors,
+      });
+      appendTimeline(runDir, `${result.role} failed attempts: ${result.attemptErrors.map((item) => `${item.label}=${item.agent}/${item.model}`).join(', ')}`);
+    }
     if (result.timedOut) {
       appendTimeline(runDir, `${result.role} timed out stage ${stageName} round ${state.currentRound}`);
       reviewerTimeouts.push({ role: result.role, timedOut: true, hadReport: result.reportExisted });
@@ -2468,6 +2573,7 @@ async function executeStage(runDir, state, spec) {
         reviewerAPath,
         reviewerBPath,
         globalReviewerPath: paths.globalReviewerPath,
+        workUnit,
       });
       const { reportPath: grReportPath, stdoutPath: grStdoutPath } = roleArtifactPaths(paths, 'global_reviewer');
 
@@ -2562,6 +2668,7 @@ async function executeStage(runDir, state, spec) {
     state,
     reviewerTimeouts: reviewerTimeouts.length > 0 ? reviewerTimeouts : null,
     reviewerViolations: reviewerViolations.length > 0 ? reviewerViolations : null,
+    reviewerFailures: reviewerFailures.length > 0 ? reviewerFailures : null,
   });
 }
 
