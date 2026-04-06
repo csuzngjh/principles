@@ -1,6 +1,10 @@
 ---
 name: pd-mentor
-description: 麻辣导师 - 为用户提供交互式命令引导和场景化推荐
+description: >
+  麻辣导师 — 交互式命令引导和场景化推荐。帮助用户理解和使用 Principles Disciple 的各项功能。
+  当用户问"怎么用"、"有什么功能"、"我该做什么"、"帮我看看"、"介绍一下"时使用。
+  通过交互式问答识别用户当前场景（新项目/修 Bug/日常维护/清理/安全/升级），
+  推荐对应的命令流程和 SOP。
 disable-model-invocation: true
 ---
 
