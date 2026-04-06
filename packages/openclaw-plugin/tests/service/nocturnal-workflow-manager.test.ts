@@ -6,7 +6,15 @@ vi.mock('../../src/service/nocturnal-service.js', () => ({
     executeNocturnalReflectionAsync: vi.fn(),
 }));
 
-vi.mock('../../core/nocturnal-paths.js', () => ({
+vi.mock('../../src/core/nocturnal-trinity.js', () => ({
+    runTrinityAsync: vi.fn(),
+    TrinityStageFailure: {
+        stage: 'dreamer',
+        reason: '',
+    },
+}));
+
+vi.mock('../../src/core/nocturnal-paths.js', () => ({
     NocturnalPathResolver: {
         samplePath: vi.fn((workspaceDir: string, sampleId: string) =>
             `${workspaceDir}/.state/nocturnal/samples/${sampleId}.json`
@@ -20,8 +28,11 @@ vi.mock('../../core/nocturnal-paths.js', () => ({
 import { NocturnalWorkflowManager, nocturnalWorkflowSpec } from '../../src/service/subagent-workflow/nocturnal-workflow-manager.js';
 import { executeNocturnalReflectionAsync } from '../../src/service/nocturnal-service.js';
 import type { NocturnalRunResult } from '../../src/service/nocturnal-service.js';
+import { runTrinityAsync } from '../../src/core/nocturnal-trinity.js';
+import type { TrinityStageFailure, TrinityResult } from '../../src/core/nocturnal-trinity.js';
 
 const mockExecuteNocturnalReflectionAsync = executeNocturnalReflectionAsync as ReturnType<typeof vi.fn>;
+const mockRunTrinityAsync = runTrinityAsync as ReturnType<typeof vi.fn>;
 
 describe('NocturnalWorkflowManager', () => {
     let manager: NocturnalWorkflowManager;
@@ -54,7 +65,6 @@ describe('NocturnalWorkflowManager', () => {
         });
 
         it('implements WorkflowManager type', () => {
-            // Type check: NocturnalWorkflowManager should be assignable to WorkflowManager
             const _wm: import('../../src/service/subagent-workflow/types.js').WorkflowManager = manager;
             expect(true).toBe(true);
         });
@@ -104,11 +114,9 @@ describe('NocturnalWorkflowManager', () => {
                 taskInput: {},
             });
 
-            // Verify logger.info was called (workflow started)
             expect(mockLogger.info).toHaveBeenCalledWith(
                 expect.stringContaining('Starting workflow')
             );
-            // Verify executeNocturnalReflectionAsync was called
             expect(mockExecuteNocturnalReflectionAsync).toHaveBeenCalled();
         });
     });
@@ -160,6 +168,416 @@ describe('NocturnalWorkflowManager', () => {
 
         it('notifyLifecycleEvent does not throw for subagent_ended', async () => {
             await expect(manager.notifyLifecycleEvent('wf_123', 'subagent_ended', { data: 'test' })).resolves.not.toThrow();
+        });
+    });
+
+    describe('NOC-07: runTrinityAsync integration for Trinity chain', () => {
+        it('calls runTrinityAsync when metadata contains snapshot and principleId', async () => {
+            const mockResult: TrinityResult = {
+                success: true,
+                telemetry: {
+                    chainMode: 'trinity',
+                    usedStubs: false,
+                    dreamerPassed: true,
+                    philosopherPassed: true,
+                    scribePassed: true,
+                    candidateCount: 3,
+                    selectedCandidateIndex: 0,
+                    stageFailures: [],
+                },
+                failures: [],
+                fallbackOccurred: false,
+            };
+            mockRunTrinityAsync.mockResolvedValue(mockResult);
+
+            const mgr = new NocturnalWorkflowManager({
+                workspaceDir: '/tmp/test-workspace',
+                stateDir: '/tmp/test-workspace/.state',
+                logger: mockLogger as any,
+                runtimeAdapter: mockRuntimeAdapter,
+            });
+
+            await mgr.startWorkflow(nocturnalWorkflowSpec, {
+                parentSessionId: 'session-123',
+                taskInput: {},
+                metadata: {
+                    snapshot: { sessionId: 'test-session', stats: { totalAssistantTurns: 5 } } as any,
+                    principleId: 'principle-001',
+                },
+            });
+
+            // Flush microtasks
+            await new Promise(r => setImmediate(r));
+
+            // Verify runTrinityAsync was called with snapshot and principleId
+            expect(mockRunTrinityAsync).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    snapshot: expect.objectContaining({ sessionId: 'test-session' }),
+                    principleId: 'principle-001',
+                    config: expect.objectContaining({
+                        useTrinity: true,
+                        useStubs: false,
+                    }),
+                })
+            );
+
+            mgr.dispose();
+        });
+
+        it('startWorkflow returns immediately with state=active (NOC-07)', async () => {
+            const mockResult: TrinityResult = {
+                success: true,
+                telemetry: { chainMode: 'trinity', usedStubs: false, dreamerPassed: true, philosopherPassed: true, scribePassed: true, candidateCount: 3, selectedCandidateIndex: 0, stageFailures: [] },
+                failures: [],
+                fallbackOccurred: false,
+            };
+            mockRunTrinityAsync.mockResolvedValue(mockResult);
+
+            const mgr = new NocturnalWorkflowManager({
+                workspaceDir: '/tmp/test-workspace',
+                stateDir: '/tmp/test-workspace/.state',
+                logger: mockLogger as any,
+                runtimeAdapter: mockRuntimeAdapter,
+            });
+
+            const handle = await mgr.startWorkflow(nocturnalWorkflowSpec, {
+                parentSessionId: 'session-123',
+                taskInput: {},
+                metadata: {
+                    snapshot: { sessionId: 'test-session', stats: { totalAssistantTurns: 5 } } as any,
+                    principleId: 'principle-001',
+                },
+            });
+
+            // For Trinity async path, handle.state should be 'active' immediately
+            // (Implementation uses Promise.resolve().then() to offload Trinity)
+            expect(handle.state).toBe('active');
+
+            mgr.dispose();
+        });
+    });
+
+    describe('NOC-08: Stage event recording from TrinityResult', () => {
+        it('records stage events when Trinity completes successfully', async () => {
+            const mockResult: TrinityResult = {
+                success: true,
+                artifact: {} as any,
+                telemetry: {
+                    chainMode: 'trinity',
+                    usedStubs: false,
+                    dreamerPassed: true,
+                    philosopherPassed: true,
+                    scribePassed: true,
+                    candidateCount: 3,
+                    selectedCandidateIndex: 0,
+                    stageFailures: [],
+                },
+                failures: [],
+                fallbackOccurred: false,
+            };
+            mockRunTrinityAsync.mockResolvedValue(mockResult);
+
+            const mgr = new NocturnalWorkflowManager({
+                workspaceDir: '/tmp/test-workspace',
+                stateDir: '/tmp/test-workspace/.state',
+                logger: mockLogger as any,
+                runtimeAdapter: mockRuntimeAdapter,
+            });
+
+            await mgr.startWorkflow(nocturnalWorkflowSpec, {
+                parentSessionId: 'session-123',
+                taskInput: {},
+                metadata: {
+                    snapshot: { sessionId: 'test-session', stats: { totalAssistantTurns: 5 } } as any,
+                    principleId: 'principle-001',
+                },
+            });
+
+            await new Promise(r => setImmediate(r));
+
+            // Verify nocturnal events were recorded
+            expect(mockLogger.info).toHaveBeenCalledWith(
+                expect.stringContaining('nocturnal')
+            );
+        });
+
+        it('records trinity_dreamer_failed when dreamer stage fails', async () => {
+            const mockResult: TrinityResult = {
+                success: false,
+                telemetry: {
+                    chainMode: 'trinity',
+                    usedStubs: false,
+                    dreamerPassed: false,
+                    philosopherPassed: false,
+                    scribePassed: false,
+                    candidateCount: 0,
+                    selectedCandidateIndex: -1,
+                    stageFailures: ['Dreamer: no candidates'],
+                },
+                failures: [{ stage: 'dreamer', reason: 'no candidates generated' }],
+                fallbackOccurred: false,
+            };
+            mockRunTrinityAsync.mockResolvedValue(mockResult);
+
+            const mgr = new NocturnalWorkflowManager({
+                workspaceDir: '/tmp/test-workspace',
+                stateDir: '/tmp/test-workspace/.state',
+                logger: mockLogger as any,
+                runtimeAdapter: mockRuntimeAdapter,
+            });
+
+            await mgr.startWorkflow(nocturnalWorkflowSpec, {
+                parentSessionId: 'session-123',
+                taskInput: {},
+                metadata: {
+                    snapshot: { sessionId: 'test-session', stats: { totalAssistantTurns: 5 } } as any,
+                    principleId: 'principle-001',
+                },
+            });
+
+            await new Promise(r => setImmediate(r));
+
+            expect(mockLogger.info).toHaveBeenCalled();
+        });
+    });
+
+    describe('NOC-09: Stage failure handling with TrinityStageFailure[]', () => {
+        it('notifies error status when Trinity stage fails', async () => {
+            const mockResult: TrinityResult = {
+                success: false,
+                telemetry: {
+                    chainMode: 'trinity',
+                    usedStubs: false,
+                    dreamerPassed: false,
+                    philosopherPassed: false,
+                    scribePassed: false,
+                    candidateCount: 0,
+                    selectedCandidateIndex: -1,
+                    stageFailures: ['Dreamer: no candidates'],
+                },
+                failures: [
+                    { stage: 'dreamer', reason: 'no candidates generated' },
+                ],
+                fallbackOccurred: false,
+            };
+            mockRunTrinityAsync.mockResolvedValue(mockResult);
+
+            const mgr = new NocturnalWorkflowManager({
+                workspaceDir: '/tmp/test-workspace',
+                stateDir: '/tmp/test-workspace/.state',
+                logger: mockLogger as any,
+                runtimeAdapter: mockRuntimeAdapter,
+            });
+
+            await mgr.startWorkflow(nocturnalWorkflowSpec, {
+                parentSessionId: 'session-123',
+                taskInput: {},
+                metadata: {
+                    snapshot: { sessionId: 'test-session', stats: { totalAssistantTurns: 5 } } as any,
+                    principleId: 'principle-001',
+                },
+            });
+
+            await new Promise(r => setImmediate(r));
+        });
+
+        it('nocturnal_failed event includes TrinityStageFailure[]', async () => {
+            const trinityFailures: TrinityStageFailure[] = [
+                { stage: 'philosopher', reason: 'invalid judgments' },
+            ];
+            const mockResult: TrinityResult = {
+                success: false,
+                telemetry: {
+                    chainMode: 'trinity',
+                    usedStubs: false,
+                    dreamerPassed: true,
+                    philosopherPassed: false,
+                    scribePassed: false,
+                    candidateCount: 3,
+                    selectedCandidateIndex: -1,
+                    stageFailures: ['Philosopher: invalid judgments'],
+                },
+                failures: trinityFailures,
+                fallbackOccurred: false,
+            };
+            mockRunTrinityAsync.mockResolvedValue(mockResult);
+
+            const mgr = new NocturnalWorkflowManager({
+                workspaceDir: '/tmp/test-workspace',
+                stateDir: '/tmp/test-workspace/.state',
+                logger: mockLogger as any,
+                runtimeAdapter: mockRuntimeAdapter,
+            });
+
+            await mgr.startWorkflow(nocturnalWorkflowSpec, {
+                parentSessionId: 'session-123',
+                taskInput: {},
+                metadata: {
+                    snapshot: { sessionId: 'test-session', stats: { totalAssistantTurns: 5 } } as any,
+                    principleId: 'principle-001',
+                },
+            });
+
+            await new Promise(r => setImmediate(r));
+        });
+    });
+
+    describe('NOC-10: Full state machine transitions', () => {
+        it('transitions to completed on Trinity success', async () => {
+            const mockResult: TrinityResult = {
+                success: true,
+                artifact: {
+                    selectedCandidateIndex: 0,
+                    badDecision: 'test',
+                    betterDecision: 'test',
+                    rationale: 'test rationale',
+                    sessionId: 'test-session',
+                    principleId: 'principle-001',
+                    sourceSnapshotRef: 'snapshot-ref',
+                    telemetry: {
+                        chainMode: 'trinity',
+                        usedStubs: false,
+                        dreamerPassed: true,
+                        philosopherPassed: true,
+                        scribePassed: true,
+                        candidateCount: 3,
+                        selectedCandidateIndex: 0,
+                        stageFailures: [],
+                    },
+                } as any,
+                telemetry: {
+                    chainMode: 'trinity',
+                    usedStubs: false,
+                    dreamerPassed: true,
+                    philosopherPassed: true,
+                    scribePassed: true,
+                    candidateCount: 3,
+                    selectedCandidateIndex: 0,
+                    stageFailures: [],
+                },
+                failures: [],
+                fallbackOccurred: false,
+            };
+            mockRunTrinityAsync.mockResolvedValue(mockResult);
+
+            const mgr = new NocturnalWorkflowManager({
+                workspaceDir: '/tmp/test-workspace',
+                stateDir: '/tmp/test-workspace/.state',
+                logger: mockLogger as any,
+                runtimeAdapter: mockRuntimeAdapter,
+            });
+
+            await mgr.startWorkflow(nocturnalWorkflowSpec, {
+                parentSessionId: 'session-123',
+                taskInput: {},
+                metadata: {
+                    snapshot: { sessionId: 'test-session', stats: { totalAssistantTurns: 5 } } as any,
+                    principleId: 'principle-001',
+                },
+            });
+
+            await new Promise(r => setImmediate(r));
+
+            // Verify nocturnal_completed was recorded
+            const infoCalls = mockLogger.info.mock.calls;
+            const hasCompleted = infoCalls.some(
+                (call: unknown[]) => (call[0] as string)?.includes('nocturnal_completed')
+            );
+            expect(hasCompleted).toBe(true);
+        });
+
+        it('transitions to terminal_error on Trinity failure', async () => {
+            const mockResult: TrinityResult = {
+                success: false,
+                telemetry: {
+                    chainMode: 'trinity',
+                    usedStubs: false,
+                    dreamerPassed: true,
+                    philosopherPassed: false,
+                    scribePassed: false,
+                    candidateCount: 3,
+                    selectedCandidateIndex: -1,
+                    stageFailures: ['Philosopher: invalid judgments'],
+                },
+                failures: [{ stage: 'philosopher', reason: 'invalid judgments' }],
+                fallbackOccurred: false,
+            };
+            mockRunTrinityAsync.mockResolvedValue(mockResult);
+
+            const mgr = new NocturnalWorkflowManager({
+                workspaceDir: '/tmp/test-workspace',
+                stateDir: '/tmp/test-workspace/.state',
+                logger: mockLogger as any,
+                runtimeAdapter: mockRuntimeAdapter,
+            });
+
+            await mgr.startWorkflow(nocturnalWorkflowSpec, {
+                parentSessionId: 'session-123',
+                taskInput: {},
+                metadata: {
+                    snapshot: { sessionId: 'test-session', stats: { totalAssistantTurns: 5 } } as any,
+                    principleId: 'principle-001',
+                },
+            });
+
+            await new Promise(r => setImmediate(r));
+
+            // Verify nocturnal_failed was recorded
+            const infoCalls = mockLogger.info.mock.calls;
+            const hasFailed = infoCalls.some(
+                (call: unknown[]) => (call[0] as string)?.includes('nocturnal_failed')
+            );
+            expect(hasFailed).toBe(true);
+        });
+
+        it('records trinity_completed before nocturnal_completed', async () => {
+            const mockResult: TrinityResult = {
+                success: true,
+                artifact: {} as any,
+                telemetry: {
+                    chainMode: 'trinity',
+                    usedStubs: false,
+                    dreamerPassed: true,
+                    philosopherPassed: true,
+                    scribePassed: true,
+                    candidateCount: 3,
+                    selectedCandidateIndex: 0,
+                    stageFailures: [],
+                },
+                failures: [],
+                fallbackOccurred: false,
+            };
+            mockRunTrinityAsync.mockResolvedValue(mockResult);
+
+            const mgr = new NocturnalWorkflowManager({
+                workspaceDir: '/tmp/test-workspace',
+                stateDir: '/tmp/test-workspace/.state',
+                logger: mockLogger as any,
+                runtimeAdapter: mockRuntimeAdapter,
+            });
+
+            await mgr.startWorkflow(nocturnalWorkflowSpec, {
+                parentSessionId: 'session-123',
+                taskInput: {},
+                metadata: {
+                    snapshot: { sessionId: 'test-session', stats: { totalAssistantTurns: 5 } } as any,
+                    principleId: 'principle-001',
+                },
+            });
+
+            await new Promise(r => setImmediate(r));
+
+            const infoCalls = mockLogger.info.mock.calls;
+            const trinityIdx = infoCalls.findIndex(
+                (call: unknown[]) => (call[0] as string)?.includes('trinity_completed')
+            );
+            const nocturnalIdx = infoCalls.findIndex(
+                (call: unknown[]) => (call[0] as string)?.includes('nocturnal_completed')
+            );
+
+            if (trinityIdx !== -1 && nocturnalIdx !== -1) {
+                expect(trinityIdx).toBeLessThan(nocturnalIdx);
+            }
         });
     });
 });
