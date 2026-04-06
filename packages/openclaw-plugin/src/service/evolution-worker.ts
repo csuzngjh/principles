@@ -913,7 +913,13 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     const principlesContent = fs.readFileSync(principlesPath, 'utf8');
                     const principleBlocks = principlesContent.match(/### P_[\w-]+:[^\n]*\n(?:-[^\n]*\n)*/g);
                     if (principleBlocks && principleBlocks.length > 0) {
-                        existingPrinciplesRef = `\n**Existing Principles for Style Reference**:\n${principleBlocks.slice(-3).join('\n')}`;
+                        // Include all principles up to 20 — enough for duplicate detection
+                        // without overwhelming the context window
+                        const maxPrinciples = 20;
+                        const included = principleBlocks.length > maxPrinciples
+                            ? principleBlocks.slice(-maxPrinciples)
+                            : principleBlocks;
+                        existingPrinciplesRef = `\n**Existing Principles for Duplicate Detection** (showing ${included.length}/${principleBlocks.length}):\n${included.join('\n')}`;
                     }
                 }
             } catch {}
