@@ -744,24 +744,77 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                                 task.completed_at = new Date().toISOString();
                                 task.resolution = 'marker_detected';
                             } else {
-                                logger.info(`[PD:EvolutionWorker] Creating principle from report for task ${task.id}`);
-                                const principleId = wctx.evolutionReducer.createPrincipleFromDiagnosis({
-                                    painId: task.id,
-                                    painType: task.source === 'Human Intervention' ? 'user_frustration' : 'tool_failure',
-                                    triggerPattern: principle.trigger_pattern,
-                                    action: principle.action,
-                                    source: task.source || 'heartbeat_diagnostician',
-                                    evaluability: principle.evaluability || 'manual_only',
-                                    abstractedPrinciple: principle.abstracted_principle,
-                                });
-                                if (principleId) {
-                                    logger.info(`[PD:EvolutionWorker] Created principle ${principleId} from marker fallback for task ${task.id}`);
-                                } else {
-                                    logger.warn(`[PD:EvolutionWorker] createPrincipleFromDiagnosis returned null for task ${task.id} (may be duplicate or blacklisted)`);
+                                // ── Server-side dedup guard (defense against LLM ignoring duplicate check) ──
+                                const existingPrinciples = wctx.evolutionReducer.getActivePrinciples();
+                                let serverDuplicate: string | null = null;
+                                if (existingPrinciples.length > 0) {
+                                    const newTrigger = (principle.trigger_pattern || '').toLowerCase();
+                                    const newAction = (principle.action || '').toLowerCase();
+                                    const newAbstracted = (principle.abstracted_principle || '').toLowerCase();
+                                    for (const ep of existingPrinciples) {
+                                        const epTrigger = (ep.trigger || '').toLowerCase();
+                                        const epAction = (ep.action || '').toLowerCase();
+                                        const epAbstracted = (ep.abstractedPrinciple || '').toLowerCase();
+                                        const epText = (ep.text || '').toLowerCase();
+
+                                        // Check 1: abstracted principle overlap (>70% keyword match)
+                                        const newKeywords = newAbstracted.split(/\s+/).filter((w: string) => w.length > 3);
+                                        const epKeywords = epAbstracted.split(/\s+/).filter((w: string) => w.length > 3);
+                                        if (newKeywords.length > 0 && epKeywords.length > 0) {
+                                            const overlap = newKeywords.filter((k: string) => epKeywords.includes(k)).length;
+                                            const overlapRatio = overlap / Math.max(newKeywords.length, epKeywords.length);
+                                            if (overlapRatio > 0.7) {
+                                                serverDuplicate = ep.id;
+                                                break;
+                                            }
+                                        }
+
+                                        // Check 2: trigger pattern contains same key terms
+                                        if (newTrigger.length > 10 && epTrigger.length > 10) {
+                                            const sharedTerms = newTrigger.split(/[\s|\\.+*?()[\]{}^$-]+/).filter((t: string) => t.length > 3);
+                                            if (sharedTerms.length > 0 && sharedTerms.every((t: string) => epTrigger.includes(t))) {
+                                                serverDuplicate = ep.id;
+                                                break;
+                                            }
+                                        }
+
+                                        // Check 3: text overlap (LLM often reuses text from existing principle)
+                                        if (epText.length > 20 && newTrigger.length > 20) {
+                                            const sharedPhrases = epText.split(/\s+/).filter(w => w.length > 5);
+                                            const matchCount = sharedPhrases.filter(w => newTrigger.includes(w)).length;
+                                            if (matchCount >= 3) {
+                                                serverDuplicate = ep.id;
+                                                break;
+                                            }
+                                        }
+                                    }
                                 }
-                                task.status = 'completed';
-                                task.completed_at = new Date().toISOString();
-                                task.resolution = 'marker_detected';
+
+                                if (serverDuplicate) {
+                                    logger.info(`[PD:EvolutionWorker] Server-side dedup: new principle overlaps with existing ${serverDuplicate} — skipping creation for task ${task.id}`);
+                                    task.status = 'completed';
+                                    task.completed_at = new Date().toISOString();
+                                    task.resolution = 'marker_detected';
+                                } else {
+                                    logger.info(`[PD:EvolutionWorker] Creating principle from report for task ${task.id}`);
+                                    const principleId = wctx.evolutionReducer.createPrincipleFromDiagnosis({
+                                        painId: task.id,
+                                        painType: task.source === 'Human Intervention' ? 'user_frustration' : 'tool_failure',
+                                        triggerPattern: principle.trigger_pattern,
+                                        action: principle.action,
+                                        source: task.source || 'heartbeat_diagnostician',
+                                        evaluability: principle.evaluability || 'manual_only',
+                                        abstractedPrinciple: principle.abstracted_principle,
+                                    });
+                                    if (principleId) {
+                                        logger.info(`[PD:EvolutionWorker] Created principle ${principleId} from marker fallback for task ${task.id}`);
+                                    } else {
+                                        logger.warn(`[PD:EvolutionWorker] createPrincipleFromDiagnosis returned null for task ${task.id} (may be duplicate or blacklisted)`);
+                                    }
+                                    task.status = 'completed';
+                                    task.completed_at = new Date().toISOString();
+                                    task.resolution = 'marker_detected';
+                                }
                             }
                         } else {
                             logger.warn(`[PD:EvolutionWorker] Diagnostician report for task ${task.id} missing principle fields — diagnostician did not produce a principle`);
