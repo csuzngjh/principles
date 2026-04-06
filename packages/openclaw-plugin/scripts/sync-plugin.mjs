@@ -17,7 +17,7 @@
  *   --help             Show help message
  */
 
-import { copyFileSync, cpSync, existsSync, rmSync, readFileSync, readFileSync as readFileSyncRaw, mkdirSync, writeFileSync } from 'fs';
+import { copyFileSync, cpSync, existsSync, rmSync, readFileSync, readFileSync as readFileSyncRaw, mkdirSync, writeFileSync, readdirSync } from 'fs';
 import { createHash } from 'crypto';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -53,6 +53,7 @@ function parseArgs() {
         skipDeps: false,
         force: false,
         restart: false,
+        dev: false,
         help: false,
     };
 
@@ -70,6 +71,12 @@ function parseArgs() {
                 args.skipDeps = true;
                 break;
             case '--restart':
+                args.restart = true;
+                break;
+            case '--dev':
+            case '-d':
+                args.dev = true;
+                args.force = true;
                 args.restart = true;
                 break;
             case '--force':
@@ -105,6 +112,7 @@ Options:
   --skip-build       Skip build step (use existing dist/)
   --skip-deps        Skip dependency installation
   --restart          Automatically restart OpenClaw gateway after installation
+  --dev, -d          Developer mode: --force + --restart + clean stale backups (default for local dev)
   --force, -f        Force overwrite without prompts
   --help, -h         Show this help message
 
@@ -114,6 +122,9 @@ Examples:
 
   # Install with English skills
   node scripts/sync-plugin.mjs --lang en
+
+  # Developer mode: build, deploy, restart, clean up (recommended for debugging)
+  node scripts/sync-plugin.mjs --dev
 
   # Quick sync after local build
   node scripts/sync-plugin.mjs --skip-deps --skip-build
@@ -594,6 +605,80 @@ function installTargetDependencies() {
 }
 
 /**
+ * Clean stale backup directories in extensions/
+ * These are left behind from old sync runs and can confuse OpenClaw's
+ * extension loader (it scans all directories by name).
+ */
+function cleanStaleBackups() {
+    const extensionsDir = join(OPENCLAW_DIR, 'extensions');
+    if (!existsSync(extensionsDir)) return;
+
+    const entries = readdirSync(extensionsDir);
+    const backups = entries.filter(e =>
+        e.startsWith('principles-disciple.backup') ||
+        e.startsWith('principles-disciple.old')
+    );
+
+    if (backups.length === 0) return;
+
+    console.log('\n🧹 Cleaning stale backup directories...');
+    for (const backup of backups) {
+        const path = join(extensionsDir, backup);
+        rmSync(path, { recursive: true, force: true });
+        console.log(`   Removed: ${backup}`);
+    }
+}
+
+/**
+ * Restart OpenClaw Gateway via systemctl, with verification.
+ */
+function restartGateway() {
+    console.log('\n🔄 Restarting OpenClaw Gateway...');
+    try {
+        // Try systemd first (most common deployment)
+        try {
+            execSync('systemctl --user is-active openclaw-gateway.service', { stdio: 'pipe' });
+            console.log('   Detected systemd service. Restarting via systemctl...');
+            execSync('systemctl --user restart openclaw-gateway.service', { stdio: 'inherit' });
+            console.log('✅ Gateway restarted via systemctl.');
+            // Verify it started successfully
+            setTimeout(() => {
+                try {
+                    const status = execSync('systemctl --user is-active openclaw-gateway.service', { encoding: 'utf-8' }).trim();
+                    if (status === 'active') {
+                        console.log('✅ Gateway is running.');
+                    } else {
+                        console.error(`❌ Gateway status: ${status}. Check logs: journalctl --user -u openclaw-gateway.service --since "1 min ago"`);
+                    }
+                } catch { /* ignore */ }
+            }, 3000);
+            return;
+        } catch {
+            // Not a systemd service — fall through to manual restart
+        }
+
+        // Manual restart: find and kill existing gateway processes
+        const pids = execSync('pgrep -f "openclaw-gateway|openclaw gateway"', { encoding: 'utf-8' }).trim();
+        if (pids) {
+            console.log(`   Found gateway process(es). Terminating...`);
+            execSync(`echo "${pids}" | xargs kill -TERM 2>/dev/null || true`);
+            execSync('sleep 3');
+        }
+
+        // Start new gateway
+        const logPath = '/tmp/openclaw-auto-restart.log';
+        console.log(`   Starting new gateway (logs: ${logPath})...`);
+        execSync(`nohup openclaw gateway --force > ${logPath} 2>&1 &`, { stdio: 'ignore' });
+        console.log('✅ Gateway restart triggered.');
+        console.log(`   Check logs: tail -f ${logPath}`);
+    } catch (error) {
+        console.error(`\n❌ Failed to restart gateway: ${error.message}`);
+        console.error('   Manual restart: systemctl --user restart openclaw-gateway.service');
+        process.exit(1);
+    }
+}
+
+/**
  * Main function
  */
 function main() {
@@ -607,6 +692,11 @@ function main() {
     console.log('╔════════════════════════════════════════════════════════════╗');
     console.log('║     Principles Disciple Plugin Installer                   ║');
     console.log('╚════════════════════════════════════════════════════════════╝\n');
+
+    // Dev mode: auto-force, auto-restart, clean stale backups
+    if (args.dev) {
+        console.log('🛠️  DEV MODE: force + restart + stale backup cleanup\n');
+    }
 
     // Get source version
     const sourceVersion = getVersion(SOURCE_DIR);
@@ -677,6 +767,11 @@ function main() {
     // Step 10: Verify installed fingerprint matches current source
     verifyInstalledFingerprint();
 
+    // Step 11: Clean stale backup directories (dev mode or explicit restart)
+    if (args.dev || args.restart) {
+        cleanStaleBackups();
+    }
+
     // Build fingerprint info for report
     let fpReport = '';
     try {
@@ -698,49 +793,7 @@ function main() {
 
     // Handle automatic restart if requested
     if (args.restart) {
-        console.log('\n🔄 Restarting OpenClaw Gateway...');
-        try {
-            // Try systemd first (most common deployment)
-            try {
-                execSync('systemctl --user is-active openclaw-gateway.service', { stdio: 'pipe' });
-                console.log('   Detected systemd service. Restarting via systemctl...');
-                execSync('systemctl --user restart openclaw-gateway.service', { stdio: 'inherit' });
-                console.log('✅ Gateway restarted via systemctl.');
-                // Verify it started successfully
-                setTimeout(() => {
-                    try {
-                        const status = execSync('systemctl --user is-active openclaw-gateway.service', { encoding: 'utf-8' }).trim();
-                        if (status === 'active') {
-                            console.log('✅ Gateway is running.');
-                        } else {
-                            console.error(`❌ Gateway status: ${status}. Check logs: journalctl --user -u openclaw-gateway.service --since "1 min ago"`);
-                        }
-                    } catch { /* ignore */ }
-                }, 3000);
-                return;
-            } catch {
-                // Not a systemd service — fall through to manual restart
-            }
-
-            // Manual restart: find and kill existing gateway processes
-            const pids = execSync('pgrep -f "openclaw-gateway|openclaw gateway"', { encoding: 'utf-8' }).trim();
-            if (pids) {
-                console.log(`   Found gateway process(es). Terminating...`);
-                execSync(`echo "${pids}" | xargs kill -TERM 2>/dev/null || true`);
-                execSync('sleep 3');
-            }
-
-            // Start new gateway
-            const logPath = '/tmp/openclaw-auto-restart.log';
-            console.log(`   Starting new gateway (logs: ${logPath})...`);
-            execSync(`nohup openclaw gateway --force > ${logPath} 2>&1 &`, { stdio: 'ignore' });
-            console.log('✅ Gateway restart triggered.');
-            console.log(`   Check logs: tail -f ${logPath}`);
-        } catch (error) {
-            console.error(`\n❌ Failed to restart gateway: ${error.message}`);
-            console.error('   Manual restart: systemctl --user restart openclaw-gateway.service');
-            process.exit(1);
-        }
+        restartGateway();
     } else {
         console.log('\n💡 Restart OpenClaw Gateway to load the new version.');
     }

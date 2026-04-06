@@ -735,20 +735,31 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             || reportData?.diagnosis_report?.principle
                             || reportData?.diagnosis_report?.phases?.principle_extraction?.principle;
                         if (principle?.trigger_pattern && principle?.action) {
-                            logger.info(`[PD:EvolutionWorker] Marker fallback: creating principle from report for task ${task.id} (hook may have missed it)`);
-                            const principleId = wctx.evolutionReducer.createPrincipleFromDiagnosis({
-                                painId: task.id,
-                                painType: task.source === 'Human Intervention' ? 'user_frustration' : 'tool_failure',
-                                triggerPattern: principle.trigger_pattern,
-                                action: principle.action,
-                                source: task.source || 'heartbeat_diagnostician',
-                                evaluability: principle.evaluability || 'manual_only',
-                                abstractedPrinciple: principle.abstracted_principle,
-                            });
-                            if (principleId) {
-                                logger.info(`[PD:EvolutionWorker] Created principle ${principleId} from marker fallback for task ${task.id}`);
+                            // Check for duplicate principle (diagnostician may output existing principle)
+                            if (principle.duplicate === true) {
+                                logger.info(`[PD:EvolutionWorker] Diagnostician marked principle as duplicate: ${principle.duplicate_of || 'unknown'} — skipping creation for task ${task.id}`);
+                                task.status = 'completed';
+                                task.completed_at = new Date().toISOString();
+                                task.resolution = 'marker_detected';
                             } else {
-                                logger.warn(`[PD:EvolutionWorker] createPrincipleFromDiagnosis returned null for task ${task.id} (may be duplicate or blacklisted)`);
+                                logger.info(`[PD:EvolutionWorker] Creating principle from report for task ${task.id}`);
+                                const principleId = wctx.evolutionReducer.createPrincipleFromDiagnosis({
+                                    painId: task.id,
+                                    painType: task.source === 'Human Intervention' ? 'user_frustration' : 'tool_failure',
+                                    triggerPattern: principle.trigger_pattern,
+                                    action: principle.action,
+                                    source: task.source || 'heartbeat_diagnostician',
+                                    evaluability: principle.evaluability || 'manual_only',
+                                    abstractedPrinciple: principle.abstracted_principle,
+                                });
+                                if (principleId) {
+                                    logger.info(`[PD:EvolutionWorker] Created principle ${principleId} from marker fallback for task ${task.id}`);
+                                } else {
+                                    logger.warn(`[PD:EvolutionWorker] createPrincipleFromDiagnosis returned null for task ${task.id} (may be duplicate or blacklisted)`);
+                                }
+                                task.status = 'completed';
+                                task.completed_at = new Date().toISOString();
+                                task.resolution = 'marker_detected';
                             }
                         } else {
                             logger.warn(`[PD:EvolutionWorker] Diagnostician report for task ${task.id} missing principle fields — diagnostician did not produce a principle`);
@@ -812,18 +823,22 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             || reportData?.diagnosis_report?.principle
                             || reportData?.diagnosis_report?.phases?.principle_extraction?.principle;
                         if (principle?.trigger_pattern && principle?.action) {
-                            const principleId = wctx.evolutionReducer.createPrincipleFromDiagnosis({
-                                painId: task.id,
-                                painType: task.source === 'Human Intervention' ? 'user_frustration' : 'tool_failure',
-                                triggerPattern: principle.trigger_pattern,
-                                action: principle.action,
-                                source: task.source || 'heartbeat_diagnostician',
-                                evaluability: principle.evaluability || 'manual_only',
-                                abstractedPrinciple: principle.abstracted_principle,
-                            });
-                            if (principleId) {
-                                logger.info(`[PD:EvolutionWorker] Created principle ${principleId} from late marker for task ${task.id}`);
-                                principleCreated = true;
+                            if (principle.duplicate === true) {
+                                logger.info(`[PD:EvolutionWorker] Diagnostician marked principle as duplicate: ${principle.duplicate_of || 'unknown'} — skipping for task ${task.id}`);
+                            } else {
+                                const principleId = wctx.evolutionReducer.createPrincipleFromDiagnosis({
+                                    painId: task.id,
+                                    painType: task.source === 'Human Intervention' ? 'user_frustration' : 'tool_failure',
+                                    triggerPattern: principle.trigger_pattern,
+                                    action: principle.action,
+                                    source: task.source || 'heartbeat_diagnostician',
+                                    evaluability: principle.evaluability || 'manual_only',
+                                    abstractedPrinciple: principle.abstracted_principle,
+                                });
+                                if (principleId) {
+                                    logger.info(`[PD:EvolutionWorker] Created principle ${principleId} from late marker for task ${task.id}`);
+                                    principleCreated = true;
+                                }
                             }
                         }
                     } catch (err) {
