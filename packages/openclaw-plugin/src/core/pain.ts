@@ -4,6 +4,88 @@ import { serializeKvLines, parseKvLines } from '../utils/io.js';
 import { resolvePdPath } from './paths.js';
 import { ConfigService } from './config-service.js';
 
+// =========================================================================
+// Pain Flag Contract (Single Source of Truth)
+//
+// All pain flag writers MUST use buildPainFlag() below.
+// If you need to add a new field, update this type AND buildPainFlag().
+// This prevents format drift across the 5+ pain signal sources.
+// =========================================================================
+
+/**
+ * Required fields — every pain flag MUST have these.
+ */
+export interface PainFlagData {
+  /** What triggered this pain signal (e.g., tool_failure, human_intervention, intercept_extraction) */
+  source: string;
+  /** Pain score 0-100 */
+  score: string;
+  /** ISO 8601 timestamp */
+  time: string;
+  /** Human-readable reason / error description */
+  reason: string;
+  /** Session ID — identifies which conversation this happened in */
+  session_id: string;
+  /** Agent ID — identifies which agent (main, builder, diagnostician, etc.) */
+  agent_id: string;
+  /** Whether this involves risky operation ('true' / 'false') */
+  is_risky: string;
+  /** Correlation trace ID (for linking events across the pipeline) */
+  trace_id?: string;
+  /** Short preview of text that triggered this pain signal */
+  trigger_text_preview?: string;
+}
+
+/**
+ * Factory function — the ONLY way to construct pain flag data.
+ *
+ * All callers (hooks/pain.ts, hooks/subagent.ts, hooks/lifecycle.ts,
+ * hooks/llm.ts, skills/pain/SKILL.md) must go through this function.
+ *
+ * Required fields are enforced by TypeScript — you can't compile
+ * without providing source, score, time, reason, session_id, agent_id.
+ *
+ * Optional fields (trace_id, trigger_text_preview) default to empty string.
+ */
+export function buildPainFlag(input: {
+  source: string;
+  score: string;
+  time?: string;
+  reason: string;
+  session_id?: string;
+  agent_id?: string;
+  is_risky?: boolean;
+  trace_id?: string;
+  trigger_text_preview?: string;
+}): PainFlagData {
+  return {
+    source: input.source,
+    score: input.score,
+    time: input.time || new Date().toISOString(),
+    reason: input.reason,
+    session_id: input.session_id || '',
+    agent_id: input.agent_id || '',
+    is_risky: input.is_risky ? 'true' : 'false',
+    trace_id: input.trace_id || '',
+    trigger_text_preview: input.trigger_text_preview || '',
+  };
+}
+
+/**
+ * Validates a pain flag read from disk.
+ * Returns list of missing required fields — empty string means all present.
+ */
+export function validatePainFlag(data: Record<string, string>): string[] {
+  const missing: string[] = [];
+  const required = ['source', 'score', 'time', 'reason', 'session_id', 'agent_id'] as const;
+  for (const field of required) {
+    if (!data[field] || data[field].trim() === '') {
+      missing.push(field);
+    }
+  }
+  return missing;
+}
+
 export function computePainScore(rc: number, isSpiral: boolean, missingTestCommand: boolean, softScore: number, projectDir?: string): number {
   let score = Math.max(0, softScore || 0);
   
@@ -54,7 +136,7 @@ export function painSeverityLabel(painScore: number, isSpiral: boolean = false, 
   }
 }
 
-export function writePainFlag(projectDir: string, painData: Record<string, string>): void {
+export function writePainFlag(projectDir: string, painData: PainFlagData): void {
   const painFlagPath = resolvePdPath(projectDir, 'PAIN_FLAG');
   const dir = path.dirname(painFlagPath);
   if (!fs.existsSync(dir)) {
