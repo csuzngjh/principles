@@ -14,8 +14,8 @@ import {
   extractCodeEvidence,
   hasCodeEvidence,
   extractMacroAnswers,
-} from '../lib/decision.mjs';
-import { OUTPUT_QUALITY } from '../lib/contract-enforcement.mjs';
+} from '../scripts/lib/decision.mjs';
+import { OUTPUT_QUALITY } from '../scripts/lib/contract-enforcement.mjs';
 
 test('normalizeVerdict extracts explicit verdict', () => {
   assert.equal(normalizeVerdict('VERDICT: approve'), 'APPROVE');

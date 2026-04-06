@@ -1,5 +1,5 @@
 // Packaged AI sprint orchestrator entrypoint.
-// Source of truth remains D:/Code/principles/scripts/ai-sprint-orchestrator/run.mjs.
+// Canonical repo copy lives at packages/openclaw-plugin/templates/langs/zh/skills/ai-sprint-orchestration/scripts/run.mjs.
 // Keep this package-local copy in sync only for package CLI, validation, and runtime-layout changes.
 
 import { spawnSync, spawn } from 'child_process';
@@ -10,7 +10,7 @@ import os from 'os';
 import { fileURLToPath } from 'url';
 import { decideStage, buildStageMetrics, buildHandoff } from './lib/decision.mjs';
 import { ensureDir, appendText, fileExists, readJson, writeJson, writeText } from './lib/state-store.mjs';
-import { buildRolePrompt, buildStageBrief, getTaskSpec } from './lib/task-specs.mjs';
+import { buildRolePrompt, buildStageBrief, getTaskSpec, getActiveWorkUnit } from './lib/task-specs.mjs';
 import { archiveRunById } from './lib/archive.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -175,6 +175,7 @@ function createSprintState(spec, runId, specPath) {
     status: 'running',
     currentStageIndex: 0,
     currentStage: spec.stages[0],
+    currentWorkUnitIndex: 0,
     currentRound: 1,
     maxRoundsPerStage: spec.maxRoundsPerStage,
     maxRuntimeMinutes: spec.maxRuntimeMinutes,
@@ -1387,25 +1388,32 @@ function validateReportSections(text, requiredSections, reportLabel) {
  */
 const REQUIRED_REVIEWER_SECTIONS = ['VERDICT', 'FINDINGS', 'BLOCKERS', 'NEXT_FOCUS', 'CHECKS'];
 
-export function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecardPath, producerPath, reviewerAPath, reviewerBPath, globalReviewerPath, state, reviewerTimeouts = null, reviewerViolations = null }) {
+export function decideAndPersist({ runDir, stageName, stageDir, decisionPath, scorecardPath, producerPath, reviewerAPath, reviewerBPath, globalReviewerPath, state, reviewerTimeouts = null, reviewerViolations = null, reviewerFailures = null }) {
+  const spec = loadSpec(state);
+  const workUnit = getActiveWorkUnit(spec, stageName, {
+    workUnitIndex: state.currentWorkUnitIndex ?? 0,
+  });
   // Build lookup maps for reviewer timeout/error state
   const timeoutMap = new Map((reviewerTimeouts ?? []).map((r) => [r.role, r]));
+  const failureMap = new Map((reviewerFailures ?? []).map((r) => [r.role, r]));
   const missingFiles = [];
   if (!reportExistsAndNonEmpty(producerPath)) missingFiles.push(`producer: ${producerPath}${fileExists(producerPath) ? ' (empty)' : ''}`);
   if (!reportExistsAndNonEmpty(reviewerAPath)) {
     const info = timeoutMap.get('reviewer_a');
-    if (info?.timedOut) missingFiles.push(`reviewer_a: ${reviewerAPath} (timed out, no report)`);
-    else if (info) missingFiles.push(`reviewer_a: ${reviewerAPath} (error, no report)`);
+    const failure = failureMap.get('reviewer_a');
+    if (info?.timedOut) missingFiles.push(`reviewer_a: ${reviewerAPath} (timed out, no report${failure?.summary ? `; ${failure.summary}` : ''})`);
+    else if (info || failure) missingFiles.push(`reviewer_a: ${reviewerAPath} (error, no report${failure?.summary ? `; ${failure.summary}` : ''})`);
     else missingFiles.push(`reviewer_a: ${reviewerAPath}${fileExists(reviewerAPath) ? ' (empty)' : ' (missing)'}`);
   }
   if (!reportExistsAndNonEmpty(reviewerBPath)) {
     const info = timeoutMap.get('reviewer_b');
-    if (info?.timedOut) missingFiles.push(`reviewer_b: ${reviewerBPath} (timed out, no report)`);
-    else if (info) missingFiles.push(`reviewer_b: ${reviewerBPath} (error, no report)`);
+    const failure = failureMap.get('reviewer_b');
+    if (info?.timedOut) missingFiles.push(`reviewer_b: ${reviewerBPath} (timed out, no report${failure?.summary ? `; ${failure.summary}` : ''})`);
+    else if (info || failure) missingFiles.push(`reviewer_b: ${reviewerBPath} (error, no report${failure?.summary ? `; ${failure.summary}` : ''})`);
     else missingFiles.push(`reviewer_b: ${reviewerBPath}${fileExists(reviewerBPath) ? ' (empty)' : ' (missing)'}`);
   }
 
-  const stageCriteria = loadSpec(state).stageCriteria?.[stageName] ?? {};
+  const stageCriteria = spec.stageCriteria?.[stageName] ?? {};
   const globalReviewerRequired = stageCriteria.globalReviewerRequired === true;
   if (globalReviewerRequired && globalReviewerPath && !reportExistsAndNonEmpty(globalReviewerPath)) {
     missingFiles.push(`global_reviewer: ${globalReviewerPath}${fileExists(globalReviewerPath) ? ' (empty — required for this stage)' : ' (missing — required for this stage)'}`);
@@ -1441,6 +1449,7 @@ export function decideAndPersist({ runDir, stageName, stageDir, decisionPath, sc
       failureSource: failure.failureSource,
       recommendedNextAction: failure.recommendedNextAction,
       reviewerTimeouts: reviewerTimeouts ?? null,
+      reviewerFailures: reviewerFailures ?? null,
       updatedAt: nowIso(),
     });
     appendTimeline(runDir, `Stage ${stageName} round ${state.currentRound} decision: error (missing reports)`);
@@ -1545,7 +1554,7 @@ export function decideAndPersist({ runDir, stageName, stageDir, decisionPath, sc
   }
 
   const decision = decideStage({
-    stageCriteria: loadSpec(state).stageCriteria?.[stageName],
+    stageCriteria: spec.stageCriteria?.[stageName],
     producer,
     reviewerA,
     reviewerB,
@@ -1564,6 +1573,12 @@ export function decideAndPersist({ runDir, stageName, stageDir, decisionPath, sc
     `- Round: ${state.currentRound}`,
     `- Outcome: ${decision.outcome}`,
     `- Output Quality: ${decision.outputQuality}`,
+    ...(workUnit
+      ? [
+          `- Work Unit: ${workUnit.workUnitId}`,
+          `- Work Unit Goal: ${workUnit.workUnitGoal}`,
+        ]
+      : []),
     '',
     `## Summary`,
     decision.summary,
@@ -1662,6 +1677,8 @@ export function decideAndPersist({ runDir, stageName, stageDir, decisionPath, sc
   const scorecard = {
     stage: stageName,
     round: state.currentRound,
+    workUnitId: workUnit?.workUnitId ?? null,
+    workUnitGoal: workUnit?.workUnitGoal ?? null,
     outcome: decision.outcome,
     outputQuality: decision.outputQuality,
     qualityReasons: decision.qualityReasons ?? [],
@@ -1715,6 +1732,9 @@ export function decideAndPersist({ runDir, stageName, stageDir, decisionPath, sc
     ...(reviewerTimeouts
       ? { reviewerTimeouts }
       : {}),
+    ...(reviewerFailures
+      ? { reviewerFailures }
+      : {}),
     updatedAt: nowIso(),
   };
   writeJson(scorecardPath, scorecard);
@@ -1729,6 +1749,7 @@ export function decideAndPersist({ runDir, stageName, stageDir, decisionPath, sc
       metrics: decision.metrics,
       stageName,
       round: state.currentRound,
+      workUnit,
     });
     const handoffPath = path.join(stageDir, 'handoff.json');
     writeJson(handoffPath, handoff);
@@ -1874,6 +1895,7 @@ function advanceState(state, spec, decision, { runDir } = {}) {
     }
     state.currentStageIndex += 1;
     state.currentStage = spec.stages[state.currentStageIndex];
+    state.currentWorkUnitIndex = 0;
     state.currentRound = 1;
     return;
   }
@@ -1883,6 +1905,7 @@ function advanceState(state, spec, decision, { runDir } = {}) {
     if (state.currentStage === 'implement-pass-1') {
       state.currentStage = 'implement-pass-2';
       state.currentStageIndex = spec.stages.indexOf('implement-pass-2');
+      state.currentWorkUnitIndex = 0;
       state.currentRound = 1;
       return;
     }
@@ -2021,6 +2044,9 @@ function cleanupAcpxOrphans(runDir, state) {
  */
 async function runReviewerRole({ runDir, state, spec, paths, role, worktreeInfo }) {
   const stageName = state.currentStage;
+  const workUnit = getActiveWorkUnit(spec, stageName, {
+    workUnitIndex: state.currentWorkUnitIndex ?? 0,
+  });
   const config = roleConfig(spec, role);
   const { reportPath, stdoutPath } = roleArtifactPaths(paths, role);
   const failLogBase = path.join(paths.stageDir, `${role.replace('_', '-')}-failure`);
@@ -2053,6 +2079,7 @@ async function runReviewerRole({ runDir, state, spec, paths, role, worktreeInfo 
     reviewerAPath: paths.reviewerAPath,
     reviewerBPath: paths.reviewerBPath,
     globalReviewerPath: paths.globalReviewerPath,
+    workUnit,
   });
   const timeoutSeconds = stageRoleTimeout(spec, stageName, role);
   // Reviewers must verify code in the same workspace where producer made changes
@@ -2423,6 +2450,9 @@ function cleanupWorktree({ state, runDir }) {
 
 async function executeStage(runDir, state, spec) {
   const stageName = state.currentStage;
+  const workUnit = getActiveWorkUnit(spec, stageName, {
+    workUnitIndex: state.currentWorkUnitIndex ?? 0,
+  });
   const previousDecisionPath = path.join(
     runDir,
     'stages',
@@ -2449,7 +2479,11 @@ async function executeStage(runDir, state, spec) {
     ? fs.readFileSync(checkpointSummaryPath, 'utf8')
     : null;
 
-  writeText(briefPath, `${buildStageBrief(spec, stageName, state.currentRound, previousDecision, handoff, checkpointSummary)}\n`);
+  writeText(briefPath, `${buildStageBrief(spec, stageName, state.currentRound, previousDecision, handoff, checkpointSummary, {
+    workUnitIndex: state.currentWorkUnitIndex ?? 0,
+    runDir,
+    stageDir,
+  })}\n`);
 
   // On round > 1, clear previous round's role reports so agents must regenerate them
   if (state.currentRound > 1) {
@@ -2518,6 +2552,7 @@ async function executeStage(runDir, state, spec) {
     producerPath,
     reviewerAPath,
     reviewerBPath,
+    workUnit,
   });
   const { reportPath: producerReportPath, stdoutPath: producerStdoutPath } = roleArtifactPaths(paths, 'producer');
 
@@ -2758,12 +2793,21 @@ async function executeStage(runDir, state, spec) {
 
   // Collect outputs and timeout flags
   const reviewerTimeouts = [];
+  const reviewerFailures = [];
   const reviewerViolations = [];
   for (const result of reviewerResults) {
     if (result.error) {
       appendTimeline(runDir, `${result.role} error: ${result.error}`);
     }
     outputs[result.role] = result.output;
+    if (result.attemptErrors?.length) {
+      reviewerFailures.push({
+        role: result.role,
+        summary: result.attemptErrors.map((item) => `${item.label}=${item.agent}/${item.model}: ${item.error}`).join(' | '),
+        attempts: result.attemptErrors,
+      });
+      appendTimeline(runDir, `${result.role} failed attempts: ${result.attemptErrors.map((item) => `${item.label}=${item.agent}/${item.model}`).join(', ')}`);
+    }
     if (result.timedOut) {
       appendTimeline(runDir, `${result.role} timed out stage ${stageName} round ${state.currentRound}`);
       reviewerTimeouts.push({ role: result.role, timedOut: true, hadReport: result.reportExisted });
@@ -2802,6 +2846,7 @@ async function executeStage(runDir, state, spec) {
         reviewerAPath,
         reviewerBPath,
         globalReviewerPath: paths.globalReviewerPath,
+        workUnit,
       });
       const { reportPath: grReportPath, stdoutPath: grStdoutPath } = roleArtifactPaths(paths, 'global_reviewer');
 
@@ -2896,6 +2941,7 @@ async function executeStage(runDir, state, spec) {
     state,
     reviewerTimeouts: reviewerTimeouts.length > 0 ? reviewerTimeouts : null,
     reviewerViolations: reviewerViolations.length > 0 ? reviewerViolations : null,
+    reviewerFailures: reviewerFailures.length > 0 ? reviewerFailures : null,
   });
 }
 

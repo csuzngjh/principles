@@ -65,6 +65,28 @@
       "Confirm nextRunRecommendation was computed."
     ]
   },
+  "workUnits": {
+    "verify": [
+      {
+        "workUnitId": "verify-artifact-slice",
+        "workUnitGoal": "Verify the prior validation run using compact artifact-focused context.",
+        "allowedFiles": [
+          "runtime/runs",
+          "scripts/run.mjs",
+          "references/specs/workflow-validation-minimal-verify.json"
+        ],
+        "unitChecks": [
+          "node scripts/run.mjs --task workflow-validation-minimal"
+        ],
+        "unitDeliverables": [
+          "artifacts verified",
+          "fields checked"
+        ],
+        "unitSummary": "Verify persisted workflow artifacts without reopening broad stage history.",
+        "carryForwardSummary": "Use prior run id and compact artifact checklist first; avoid long historical replay."
+      }
+    ]
+  },
   "stageCriteria": {
     "verify": {
       "requiredApprovals": 2,

@@ -265,7 +265,7 @@ export function extractMacroAnswers(text, requiredQuestions = []) {
   };
 }
 
-export function buildHandoff({ reviewerA, reviewerB, globalReviewer, producer, metrics, stageName, round }) {
+export function buildHandoff({ reviewerA, reviewerB, globalReviewer, producer, metrics, stageName, round, workUnit = null }) {
   const blockersA = extractBullets(reviewerA, 'BLOCKERS');
   const blockersB = extractBullets(reviewerB, 'BLOCKERS');
   const blockersGlobal = globalReviewer ? extractBullets(globalReviewer, 'BLOCKERS') : [];
@@ -275,8 +275,23 @@ export function buildHandoff({ reviewerA, reviewerB, globalReviewer, producer, m
   const producerChecks = extractMetricValue(producer, 'CHECKS');
   const contractItems = extractContractItems(producer);
 
+  const allBlockers = [...blockersA, ...blockersB, ...blockersGlobal];
+  const accomplished = contractItems.filter((item) => item.status === 'DONE').map((item) => item.deliverable);
+  const pending = contractItems.filter((item) => item.status !== 'DONE').map((item) => item.deliverable);
+  const unitSummaryParts = [
+    accomplished.length > 0 ? `Accomplished: ${accomplished.join(', ')}` : null,
+    pending.length > 0 ? `Pending: ${pending.join(', ')}` : null,
+    allBlockers.length > 0 ? `Blockers: ${allBlockers.join('; ')}` : null,
+  ].filter(Boolean);
+  const carryForwardSummaryParts = [
+    workUnit?.workUnitGoal ? `Goal: ${workUnit.workUnitGoal}` : null,
+    focusA || focusB || focusGlobal ? `Next focus: ${[focusA, focusB, focusGlobal].filter(Boolean).join('; ')}` : null,
+    allBlockers.length > 0 ? `Blockers: ${allBlockers.join('; ')}` : 'Blockers: none',
+    workUnit?.allowedFiles?.length ? `Files: ${workUnit.allowedFiles.join(', ')}` : null,
+  ].filter(Boolean);
+
   return {
-    blockers: [...blockersA, ...blockersB, ...blockersGlobal],
+    blockers: allBlockers,
     focusForNextRound: [focusA, focusB, focusGlobal].filter(Boolean).join('; ') || null,
     producerChecks,
     dimensionScores: {
@@ -289,6 +304,13 @@ export function buildHandoff({ reviewerA, reviewerB, globalReviewer, producer, m
     reviewerACodeEvidence: extractCodeEvidence(reviewerA),
     reviewerBCodeEvidence: extractCodeEvidence(reviewerB),
     globalReviewerCodeEvidence: globalReviewer ? extractCodeEvidence(globalReviewer) : null,
+    workUnitId: workUnit?.workUnitId ?? null,
+    workUnitGoal: workUnit?.workUnitGoal ?? null,
+    allowedFiles: workUnit?.allowedFiles ?? [],
+    unitChecks: workUnit?.unitChecks ?? [],
+    unitDeliverables: workUnit?.unitDeliverables ?? [],
+    unitSummary: unitSummaryParts.join(' | ') || workUnit?.unitSummary || null,
+    carryForwardSummary: carryForwardSummaryParts.join(' | ') || workUnit?.carryForwardSummary || null,
     stageName,
     round,
     generatedAt: new Date().toISOString(),

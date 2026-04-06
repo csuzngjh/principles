@@ -4,7 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { fileURLToPath } from 'url';
-import { archiveRunById } from '../lib/archive.mjs';
+import { archiveRunById } from '../scripts/lib/archive.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 

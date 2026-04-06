@@ -23,7 +23,7 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 
 - acceptance checklist is readable and handoff-ready
 - baseline tests and package-local validation runs define workflow readiness
-- `skills/ai-sprint-orchestration/` is the packaged delivery target
+- `packages/openclaw-plugin/templates/langs/{zh,en}/skills/ai-sprint-orchestration/` is the packaged delivery target
 - another agent can start from the skill package instead of repo-root orchestrator paths
 - validation runs stop after classification when they hit sample-side or product-side gaps
 - workflow v1.3 focuses on internal usability first, then finer-grained work-unit architecture
@@ -37,8 +37,8 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 
 ## Context
 
-- main workflow source of truth: `scripts/ai-sprint-orchestrator`
-- packaged release target: `skills/ai-sprint-orchestration`
+- main workflow source of truth: `packages/openclaw-plugin/templates/langs/zh/skills/ai-sprint-orchestration`
+- packaged release target: `packages/openclaw-plugin/templates/langs/{zh,en}/skills/ai-sprint-orchestration`
 - baseline tests: `contract-enforcement`, `decision`, `run`
 - package-local validation specs: `workflow-validation-minimal`, `workflow-validation-minimal-verify`
 - complex task templates: `bugfix-complex-template`, `feature-complex-template`
