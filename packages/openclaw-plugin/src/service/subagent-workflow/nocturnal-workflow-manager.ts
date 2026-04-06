@@ -296,24 +296,20 @@ export class NocturnalWorkflowManager implements WorkflowManager {
 
         // Validate required metadata (prevent runtime crashes from undefined snapshot)
         if (!snapshot?.sessionId) {
-            this.logger.warn(`[PD:NocturnalWorkflow] Missing snapshot.sessionId in metadata for workflow=${workflowId}, using fallback`);
-            this.store.updateWorkflow(workflowId, { state: 'terminal_error', updated_at: now });
+            this.logger.warn(`[PD:NocturnalWorkflow] Missing snapshot.sessionId in metadata for workflow=${workflowId}, terminating`);
             this.store.recordEvent(workflowId, 'nocturnal_failed', null, 'terminal_error', 'Missing required metadata: snapshot.sessionId', { workflowId });
             return {
                 workflowId,
                 childSessionKey: `nocturnal:internal:${workflowId}`,
-                runId: null,
                 state: 'terminal_error' as const,
             };
         }
         if (!principleId) {
-            this.logger.warn(`[PD:NocturnalWorkflow] Missing principleId in metadata for workflow=${workflowId}, using fallback`);
-            this.store.updateWorkflow(workflowId, { state: 'terminal_error', updated_at: now });
+            this.logger.warn(`[PD:NocturnalWorkflow] Missing principleId in metadata for workflow=${workflowId}, terminating`);
             this.store.recordEvent(workflowId, 'nocturnal_failed', null, 'terminal_error', 'Missing required metadata: principleId', { workflowId });
             return {
                 workflowId,
                 childSessionKey: `nocturnal:internal:${workflowId}`,
-                runId: null,
                 state: 'terminal_error' as const,
             };
         }

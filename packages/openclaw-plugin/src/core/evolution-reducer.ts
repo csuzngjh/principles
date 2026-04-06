@@ -222,6 +222,10 @@ export class EvolutionReducerImpl implements EvolutionReducer {
     evaluability?: PrincipleEvaluatorLevel;
     detectorMetadata?: PrincipleDetectorSpec;
     abstractedPrinciple?: string;
+    priority?: 'P0' | 'P1' | 'P2';
+    scope?: 'general' | 'domain';
+    domain?: string;
+    suggestedRules?: PrincipleSuggestedRule[];
   }): string | null {
     // Check blacklist first
     if (this.isBlacklisted(params.painId, params.triggerPattern)) {
