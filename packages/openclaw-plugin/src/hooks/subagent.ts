@@ -1,6 +1,6 @@
 import type { PluginHookSubagentEndedEvent, PluginHookSubagentContext, PluginLogger, OpenClawPluginApi } from '../openclaw-sdk.js';
 import * as fs from 'fs';
-import { writePainFlag } from '../core/pain.js';
+import { buildPainFlag, writePainFlag } from '../core/pain.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 // No longer needed — diagnostician runs via HEARTBEAT, not subagent
 import { recordEvolutionSuccess } from '../core/evolution-engine.js';
@@ -163,15 +163,14 @@ export async function handleSubagentEnded(
         const score = scoreSettings.subagent_error_penalty;
         const reason = `Subagent session ${targetSessionKey} ended with error`;
 
-        writePainFlag(workspaceDir, {
-            source: `subagent_error`,
+        writePainFlag(workspaceDir, buildPainFlag({
+            source: 'subagent_error',
             score: String(score),
-            time: new Date().toISOString(),
             reason,
-            is_risky: 'true',
+            is_risky: true,
             session_id: ctx.sessionId || '',
             agent_id: ctx.agentId || extractAgentIdFromSessionKey(targetSessionKey) || '',
-        });
+        }));
 
         emitSubagentPainEvent(wctx, {
             source: `subagent_error`,

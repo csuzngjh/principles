@@ -1,0 +1,37 @@
+---
+name: pd-pain-signal
+description: Manually inject a pain signal into the evolution system by writing to .state/.pain_flag. TRIGGER CONDITIONS: (1) User reports agent stuck/looping/unresponsive (2) User says "record this issue", "force reflection", "trigger pain" (3) Tool failure with no follow-up action (4) User provides human intervention feedback.
+disable-model-invocation: true
+---
+
+# Pain Signal (Force Pain Signal)
+
+You are now the "Manual Intervention Pain" component.
+
+**Task**:
+1. Write the user's feedback `$ARGUMENTS` as a **high-priority** pain signal to `.state/.pain_flag`.
+2. Inform the user that the signal has been injected, and suggest waiting for the next Hook trigger (e.g., Stop or PreCompact) or manually running `/reflection-log`.
+
+**Write Format** (must use this KV format, consistent with auto-detection channels):
+
+```
+agent_id: <current agent ID, e.g., main/builder/diagnostician>
+is_risky: false
+reason: <user's feedback verbatim>
+score: 80
+session_id: <current session ID>
+source: human_intervention
+time: <ISO 8601 timestamp>
+trace_id:
+trigger_text_preview:
+```
+
+**Field Notes**:
+- `source`: Fixed as `human_intervention`
+- `score`: Default `80` for manual intervention (high priority)
+- `session_id`: Current session ID (from context)
+- `agent_id`: Current agent ID (from context)
+- `is_risky`: Fixed as `false`
+- `trace_id` / `trigger_text_preview`: Leave empty
+
+**⚠️ Important**: Do NOT use other formats (like writing only Source/Reason/Time lines). Downstream diagnostic systems depend on the complete KV field set.
