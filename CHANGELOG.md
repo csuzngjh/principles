@@ -1,3 +1,42 @@
+# [1.8.2](https://github.com/csuzngjh/principles/compare/v1.8.1...v1.8.2) (2026-04-06)
+
+### Features
+
+* **orchestrator:** merge gate — autonomous sprints no longer halt when PR branch is not on remote; branch absence now sets `mergePending: true` so sprints complete cleanly and the operator pushes later ([ed5a6eb](https://github.com/csuzngjh/principles/commit/ed5a6eb))
+* **orchestrator:** report schema validation — `validateReportSections()` checks reviewer reports for required headings (VERDICT, FINDINGS, BLOCKERS, NEXT_FOCUS, CHECKS) before the decision engine; violations produce explicit blocker listings ([787ed1c](https://github.com/csuzngjh/principles/commit/787ed1c))
+* **orchestrator:** producer prompt hardened — numbered checklist + self-check instruction + template delimiters in task-specs.mjs prevent agents from omitting required sections ([787ed1c](https://github.com/csuzngjh/principles/commit/787ed1c))
+* **orchestrator:** dynamic timeout scaling + protectedArtifacts false positive fix ([ed5a6eb](https://github.com/csuzngjh/principles/commit/ed5a6eb))
+* **orchestrator:** contract parser fixes + SIGHUP immunity ([9050cfb](https://github.com/csuzngjh/principles/commit/9050cfb))
+* **pain/principle pipeline:** pain→principle pipeline fixes from v1.2-v1.3 boundary ([f696b45](https://github.com/csuzngjh/principles/commit/f696b45))
+* **pain/principle pipeline:** improved pain event detection, task queuing, workflow resource cleanup and robust disposal ([f696b45](https://github.com/csuzngjh/principles/commit/f696b45))
+* **pain/principle pipeline:** trajectory FTS5 index backfill for existing pain_events ([f696b45](https://github.com/csuzngjh/principles/commit/f696b45))
+* **empathy/deep-reflect:** unified subagent-workflow helper migrating empathy + deep-reflect into a single cohesive workflow manager ([e85d7c8](https://github.com/csuzngjh/principles/commit/e85d7c8))
+* **empathy:** keyword-based empathy detection replacing per-turn subagent sampling; hybrid keyword + subagent mode ([e85d7c8](https://github.com/csuzngjh/principles/commit/e85d7c8))
+* **empathy:** surface degrade checks and sessionId format fixes ([18eb5bc](https://github.com/csuzngjh/principles/commit/18eb5bc))
+* **workflow:** add outputQuality and nextRunRecommendation fields + contract enforcement improvements ([7187a63](https://github.com/csuzngjh/principles/commit/7187a63))
+* **plugin sync:** enhanced dependency verification, workspace dir resolution priority, native dependency handling, and improved lock file management ([787ed1c](https://github.com/csuzngjh/principles/commit/787ed1c))
+
+### Bug Fixes
+
+* **orchestrator:** fix merge gate fetch failure path — do not mark completed when fetch fails for reasons other than missing remote ref ([9050cfb](https://github.com/csuzngjh/principles/commit/9050cfb))
+* **deep-reflect:** fix sessionId format and add surface degrade checks ([18eb5bc](https://github.com/csuzngjh/principles/commit/18eb5bc))
+* **ui:** resolve critical syntax error and i18n all hardcoded Chinese strings ([8da1623](https://github.com/csuzngjh/principles/commit/8da1623))
+* **ui:** fix untranslated i18n template strings and missing useI18n hooks ([7ecc15e](https://github.com/csuzngjh/principles/commit/7ecc15e))
+* **ui:** timeline-marker overflow, GroupedBarChart responsiveness, back button navigation, StatusBadge and EmptyState components ([1195626](https://github.com/csuzngjh/principles/commit/1195626), [a5f7a42](https://github.com/csuzngjh/principles/commit/a5f7a42), [d73d9ec](https://github.com/csuzngjh/principles/commit/d73d9ec))
+* **security:** update security gate whitelist patterns ([8e84872](https://github.com/csuzngjh/principles/commit/8e84872))
+
+### Code Refactoring
+
+* **technical debt:** comprehensive God file refactoring — split gate.ts into 6 sub-modules (thinking-checkpoint, bash-risk, progressive-trust-gate, edit-verification, gfi-gate, gate-block-helper) ([7afeaab](https://github.com/csuzngjh/principles/commit/7afeaab))
+* **technical debt:** remove unused parseAgentSessionKey and deduplicate JSDoc ([c667059](https://github.com/csuzngjh/principles/commit/c667059))
+* **empathy:** migrate from pd_run_worker to sessions_spawn for subagent spawning ([e85d7c8](https://github.com/csuzngjh/principles/commit/e85d7c8))
+
+### Documentation
+
+* **planning:** milestone v1.2/v1.4/v1.5 planning — ROADMAP, MILESTONES, STATE, 1.0-ROADMAP, phases 06-10 research docs ([d44ad53](https://github.com/csuzngjh/principles/commit/d44ad53), [7b4f55a](https://github.com/csuzngjh/principles/commit/7b4f55a), [37fdc9b](https://github.com/csuzngjh/principles/commit/37fdc9b))
+* **docs:** workflow v1 cloud handoff guide, PR2 runtime boundary checklist, empathy sprint specs ([421dc69](https://github.com/csuzngjh/principles/commit/421dc69), [fc21dde](https://github.com/csuzngjh/principles/commit/fc21dde))
+
+
 # [1.7.6](https://github.com/csuzngjh/principles/compare/v1.7.5...v1.7.6) (2026-03-26)
 
 ### Features
