@@ -12,61 +12,77 @@ disable-model-invocation: true
 
 ## 🔴 执行协议（必须按顺序执行）
 
-### Phase 0: 对话上下文获取 [可选]
+### Phase 0: 渐进式上下文获取 [必执行]
 
-**目标**: 获取疼痛发生时的对话上下文，帮助诊断分析。
+**目标**: 使用可用工具获取足够上下文，辅助诊断分析。
 
 **输入**: 从 task 字符串解析以下参数：
-- `session_id`: 当前会话 ID
+- `session_id`: 当前会话 ID（可能为 'N/A'）
 - `agent_id`: 智能体 ID（如 main, builder, diagnostician 等）
-- `pain_timestamp`: 疼痛发生时间
+- `reason`: 疼痛原因描述
+- `trigger_text_preview`: 触发文本预览
 
-**🔄 渐进式信息获取策略**（按优先级执行，任一成功即可）:
+**🔧 可用工具**:
 
-| 优先级 | 数据源 | 条件 | 操作 |
-|--------|--------|------|------|
-| P1 | JSONL 会话文件 | session_id 存在且文件可读 | 读取完整对话 |
-| P2 | task 内嵌上下文 | task 包含 "Recent Conversation Context" | 直接使用 |
-| P3 | 主动证据收集 | 以上都不可用 | 跳到 Phase 1 增强 |
+| 工具 | 能力 | 限制 |
+|------|------|------|
+| `sessions_list` | 列出会话元数据 | **不支持内容搜索**，只搜索 displayName/label/subject |
+| `sessions_history` | 获取完整消息历史 | 需要 sessionKey，返回所有消息（截断到 80KB） |
+| `read_file` / `search_file_content` | 搜索代码库 | 无 |
+
+**⚠️ 关键**: sessions_list.search **不搜索消息内容**。要找到相关消息，你必须：
+1. 用 sessions_list 找到候选会话
+2. 用 sessions_history 获取消息
+3. **自己扫描消息找相关内容**（LLM 擅长语义理解）
+
+**渐进式获取策略**:
+
+| 优先级 | 条件 | 操作 |
+|--------|------|------|
+| P1 | session_id 已知 | `sessions_history(sessionKey, limit=30)` |
+| P2 | session_id 未知 | `sessions_list(messageLimit=10)` → 找到相关 session → `sessions_history` |
+| P3 | reason 提到文件 | `read_file` 或 `search_file_content` 搜索代码 |
 
 **执行步骤**:
 
-1. **解析 task 字符串**，提取 `session_id` 和 `agent_id`（如果存在）
-2. **尝试读取 JSONL**（仅当 session_id 存在时）:
-   - 路径: `~/.openclaw/agents/{agent_id}/sessions/{session_id}.jsonl`
-   - 如果文件不存在或不可读，记录 `jsonl_available: false`
-3. **检查 task 内嵌上下文**:
-   - 查找 `**Recent Conversation Context**:` 标记
-   - 如果存在，提取并使用
-4. **降级处理**（当以上都不可用时）:
-   - 不要停止！继续执行 Phase 1
-   - 在 Phase 1 中 **主动扩展证据收集范围**：
-     - 搜索 `.state/logs/events.jsonl` 中与 pain 相关的事件
-     - 根据 `reason` 字段中的关键词搜索代码库
-     - 读取 `reason` 中提到的文件路径
-   - 在输出中标注 `context_source: "inferred"`
+1. **评估已有信息**:
+   - Reason 是否已足够清晰？→ 跳到 Phase 1
+   - 需要更多上下文？→ 继续
 
-**智能过滤**（JSONL 读取成功时）:
-- 忽略 `toolResult` 类型（数据太大）
-- 忽略 `thinking` 类型
-- 只保留 `user` 和 `assistant` 的 `text` 内容
-- 每条消息截断到 500 字符
+2. **如果 session_id 已知**:
+   ```
+   → sessions_history(sessionKey="agent:{agentId}:run:{sessionId}", limit=30)
+   ```
 
-**输出字段**:
-```json
-{
-  "phase": "context_extraction",
-  "session_id": "xxx或null",
-  "agent_id": "main",
-  "context_source": "jsonl|task_embedded|inferred",
-  "jsonl_available": true,
-  "conversation_summary": "[用户]: ...\n[助手]: ... 或 基于推断的上下文描述"
-}
-```
+3. **如果 session_id 未知**:
+   ```
+   → sessions_list(messageLimit=10)  # 获取最近 10 个会话 + 最后 10 条消息
+   → 分析返回的消息，找出与 pain reason 相关的会话
+   → sessions_history(sessionKey="相关 session key", limit=30)  # 获取完整历史
+   ```
 
-**⚠️ 重要提示**: 
+4. **如果 reason 提到具体文件**:
+   ```
+   → read_file("文件路径") 或 search_file_content("关键词")
+   ```
+
+5. **记录上下文来源**:
+   ```json
+   {
+     "phase": "context_acquisition",
+     "context_source": "sessions_history|code_search|inferred",
+     "evidence_quality": "strong|moderate|weak"
+   }
+   ```
+
+**停止条件**:
+- 找到明确错误原因 → 跳到 Phase 1
+- 搜索 3-5 个会话无果 → 标注 "evidence_quality: weak"
+- 完全无法获取 → 标注 "evidence_quality: none"，跳到 Phase 1 增强
+
+**⚠️ 重要提示**:
 - 即使完全没有对话上下文，也要继续诊断！
-- 利用 `reason` 字段中的错误信息进行代码搜索
+- 利用 reason 字段中的错误信息进行代码搜索
 - 发挥你的智能，从代码和日志中推断问题背景
 
 ---
