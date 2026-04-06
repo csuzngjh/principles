@@ -196,14 +196,24 @@ disable-model-invocation: true
 2. **可复用**：原则应适用于多个场景，不只解决当前这一个问题
 3. **简洁**：一句话能说清楚，不超过 40 字
 4. **可验证**：能明确判断是否遵循了此原则
-5. **去重检查**（关键）：提炼后必须与 HEARTBEAT.md 中提供的 **Existing Principles** 对比。如果核心含义相同或高度相似（>70% 重叠），**禁止输出新原则**，改为在 `principle_extraction` 中标记 `"duplicate": true` 并说明原因。
+5. **去重检查**（必执行，不可跳过）：
+   a. **逐条阅读** HEARTBEAT.md 中的 `**Existing Principles for Duplicate Detection**` 部分
+   b. 对每条现有原则，比较其 trigger/action/abstracted 与你提炼的原则
+   c. **如果核心含义相同或高度相似（>70% 重叠）** → 设置 `"duplicate": true`，`"duplicate_of"` 填写已有原则 ID
+   d. 如果完全不同 → 设置 `"duplicate": false`
+   e. **`duplicate` 字段必须在输出中出现，不能省略**
+
+**去重判断示例**：
+- 现有 P_060: "Documented intent without operational feedback is not evolution"
+- 你要提炼: "Documentation alone does not produce operational feedback"
+- 判断: 核心含义相同（都是文档不等于执行反馈）→ `"duplicate": true`, `"duplicate_of": "P_060"`
 
 **原则结构**:
 ```json
 {
   "phase": "principle_extraction",
   "principle": {
-    "id": "P_YYYYMMDD_HASH",
+    "id": "系统会自动分配 P_XXX 格式 ID，不要自己编",
     "trigger_pattern": "regex 或关键词，用于自动匹配",
     "action": "具体的检查/拦截/提醒动作",
     "abstracted_principle": "高度抽象的原则陈述（40字以内，跨场景适用）",
@@ -297,10 +307,11 @@ disable-model-invocation: true
 
 ## ⚠️ 执行约束
 
-1. **禁止跳过阶段**: 必须尝试 Phase 0，然后按 Phase 1 → 2 → 3 → 4 顺序执行
+1. **禁止跳过阶段**: 必须尝试 Phase 0（上下文获取），然后按 Phase 1 → 2 → 3 → 4 顺序执行
 2. **禁止无证据推理**: 每个 Why 的 answer 必须有 evidence 字段
 3. **禁止模糊结论**: 根因必须是具体的、可修复的
 4. **禁止遗漏原则提炼**: 即使问题很简单，也要提炼原则
+5. **禁止遗漏去重检查**: `duplicate` 字段必须在 principle_extraction 输出中出现，不能省略
 
 ---
 
@@ -348,10 +359,11 @@ Diagnose systemic pain [ID: abc123].
       },
       "principle_extraction": {
         "principle": {
-          "id": "P_20260324_dircheck",
+          "id": "系统会自动分配",
           "trigger_pattern": "fs\\.writeFileSync|writeFile|mkdirSync",
           "action": "写入前检查目标目录是否存在，不存在则先创建",
           "abstracted_principle": "任何写入操作必须确保目标环境的完整性",
+          "duplicate": false,
           "rationale": "防止在目录不存在时写入失败",
           "implementation": {
             "type": "hook",
