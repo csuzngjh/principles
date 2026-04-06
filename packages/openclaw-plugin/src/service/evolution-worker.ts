@@ -935,6 +935,41 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                 }
             } catch {}
 
+            // ── Context Enrichment (CTX-01): Pre-extract conversation context ──
+            // Extract recent conversation from JSONL so diagnostician has full context
+            // instead of just the 100-char trigger_text_preview.
+            let contextSection = '';
+            if (highestScoreTask.session_id && highestScoreTask.agent_id) {
+                try {
+                    const { extractRecentConversation, extractFailedToolContext } = await import('../core/pain-context-extractor.js');
+                    const conversation = await extractRecentConversation(highestScoreTask.session_id, highestScoreTask.agent_id, 5);
+                    
+                    if (conversation) {
+                        contextSection = `\n## Recent Conversation Context (pre-extracted)\n\n${conversation}\n`;
+                        
+                        // Also try to extract failed tool context if this is a tool failure
+                        if (highestScoreTask.source === 'tool_failure') {
+                            // Extract tool name from reason (e.g., "Tool write failed on src/foo.ts")
+                            const toolMatch = highestScoreTask.reason?.match(/Tool ([\w-]+) failed/);
+                            const fileMatch = highestScoreTask.reason?.match(/on (.+?)(?=\s*Error:|$)/i);
+                            if (toolMatch) {
+                                const toolContext = await extractFailedToolContext(
+                                    highestScoreTask.session_id,
+                                    highestScoreTask.agent_id,
+                                    toolMatch[1],
+                                    fileMatch?.[1]?.trim(),
+                                );
+                                if (toolContext) {
+                                    contextSection += `\n## Failed Tool Call Context\n\n${toolContext}\n`;
+                                }
+                            }
+                        }
+                    }
+                } catch (e) {
+                    logger?.debug?.(`[PD:EvolutionWorker] Failed to extract conversation context: ${String(e)}`);
+                }
+            }
+
             const heartbeatContent = [
                 `## Evolution Task [ID: ${highestScoreTask.id}]`,
                 ``,
@@ -945,7 +980,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                 `**Queued At**: ${highestScoreTask.enqueued_at || nowIso}`,
                 `**Session ID**: ${highestScoreTask.session_id || 'N/A'}`,
                 `**Agent ID**: ${highestScoreTask.agent_id || 'main'}`,
-                ``,
+                ...(contextSection ? [contextSection] : ['']),
                 `---`,
                 ``,
                 `## Diagnostician Protocol`,
