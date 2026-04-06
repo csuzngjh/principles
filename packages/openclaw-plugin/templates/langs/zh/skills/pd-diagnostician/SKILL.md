@@ -21,25 +21,40 @@ disable-model-invocation: true
 - `agent_id`: 智能体 ID（如 main, builder, diagnostician 等）
 - `pain_timestamp`: 疼痛发生时间
 
-**🔄 渐进式信息获取策略**（按优先级执行，任一成功即可）:
+**🔄 双通路信息获取策略**（按优先级执行，P1 失败后自动降级到 P2）:
 
 | 优先级 | 数据源 | 条件 | 操作 |
 |--------|--------|------|------|
 | P1 | OpenClaw 内置工具 | session_id 存在 | 使用 sessions_history 获取消息 |
-| P2 | task 内嵌上下文 | task 包含 "Recent Conversation Context" 或工具使用说明 | 直接使用 |
-| P3 | 主动证据收集 | 以上都不可用 | 跳到 Phase 1 增强 |
+| P2 | JSONL 会话文件 | P1 失败或无可见 session | 直接读取 JSONL 文件 |
+| P3 | task 内嵌上下文 | task 包含 "Recent Conversation Context" | 直接使用 |
+| P4 | 主动证据收集 | 以上都不可用 | 跳到 Phase 1 增强 |
 
 **执行步骤**:
 
 1. **解析 task 字符串**，提取 `session_id` 和 `agent_id`（如果存在）
-2. **尝试使用 OpenClaw 内置工具**（仅当 session_id 存在时）:
+
+2. **P1: 尝试 OpenClaw 内置工具**（优先）:
    - 使用 `sessions_history` 工具获取会话消息历史
    - sessionKey 格式: `agent:{agent_id}:run:{session_id}` 或从 task 中的 Session ID 字段获取
-   - 如果工具调用失败或 session_id 不存在，记录 `jsonl_available: false`
-3. **检查 task 内嵌上下文**:
-   - 查找 `**Recent Conversation Context**:` 或工具使用说明标记
-   - 如果存在，提取并使用
-4. **降级处理**（当以上都不可用时）:
+   - 如果工具调用成功，记录 `context_source: "sessions_history"`，跳到步骤 4
+   - **如果失败**（可见性限制、工具不可用等），记录失败原因，继续到 P2
+
+3. **P2: 降级到 JSONL 直接读取**（备份）:
+   - 路径: `~/.openclaw/agents/{agent_id}/sessions/{session_id}.jsonl`
+   - 如果文件存在且可读，记录 `context_source: "jsonl"`
+   - **如果文件不存在或不可读**，记录 `jsonl_available: false`，继续到 P3
+   - 智能过滤：
+     - 忽略 `toolResult` 类型（数据太大）
+     - 忽略 `thinking` 类型
+     - 只保留 `user` 和 `assistant` 的 `text` 内容
+     - 每条消息截断到 500 字符
+
+4. **P3: 检查 task 内嵌上下文**:
+   - 查找 `**Recent Conversation Context**:` 标记
+   - 如果存在，提取并使用，记录 `context_source: "task_embedded"`
+
+5. **降级处理**（当以上都不可用时）:
    - 不要停止！继续执行 Phase 1
    - 在 Phase 1 中 **主动扩展证据收集范围**：
      - 搜索 `.state/logs/events.jsonl` 中与 pain 相关的事件
@@ -47,19 +62,13 @@ disable-model-invocation: true
      - 读取 `reason` 中提到的文件路径
    - 在输出中标注 `context_source: "inferred"`
 
-**智能过滤**（获取消息成功时）:
-- 忽略 `toolResult` 类型（数据太大）
-- 忽略 `thinking` 类型
-- 只保留 `user` 和 `assistant` 的 `text` 内容
-- 每条消息截断到 500 字符
-
 **输出字段**:
 ```json
 {
   "phase": "context_extraction",
   "session_id": "xxx或null",
   "agent_id": "main",
-  "context_source": "sessions_history|task_embedded|inferred",
+  "context_source": "sessions_history|jsonl|task_embedded|inferred",
   "jsonl_available": true,
   "conversation_summary": "[用户]: ...\n[助手]: ... 或 基于推断的上下文描述"
 }

@@ -935,16 +935,43 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                 }
             } catch {}
 
-            // ── Context Enrichment (CTX-01): Progressive loading via OpenClaw tools ──
-            // The diagnostician agent has access to sessions_list and sessions_history tools.
-            // Instead of pre-extracting context here (which may fail or be irrelevant),
-            // we inject the basic info and let the agent decide what to search for.
+            // ── Context Enrichment (CTX-01): Dual-path strategy ──
+            // P1: OpenClaw built-in tools (sessions_history) - safe, visibility-limited
+            // P2: JSONL direct read - fallback when tools fail or session not visible
+            // The diagnostician skill implements both paths (Phase 0 protocol).
             //
-            // Available tools for the diagnostician:
-            // 1. sessions_list(messageLimit: 0-20) — List sessions with recent messages
-            // 2. sessions_history(sessionKey, limit?) — Full message history for a session
-            //
-            // ⚠️ Neither tool supports content search. The agent must scan messages itself.
+            // Here we pre-extract JSONL context as backup and inject tool instructions.
+
+            let contextSection = '';
+            if (highestScoreTask.session_id && highestScoreTask.agent_id) {
+                try {
+                    const { extractRecentConversation, extractFailedToolContext } = await import('../core/pain-context-extractor.js');
+                    const conversation = await extractRecentConversation(highestScoreTask.session_id, highestScoreTask.agent_id, 5);
+                    
+                    if (conversation) {
+                        contextSection = `\n## Recent Conversation Context (pre-extracted JSONL fallback)\n\n${conversation}\n`;
+                        
+                        // Also try to extract failed tool context if this is a tool failure
+                        if (highestScoreTask.source === 'tool_failure') {
+                            const toolMatch = highestScoreTask.reason?.match(/Tool ([\w-]+) failed/);
+                            const fileMatch = highestScoreTask.reason?.match(/on (.+?)(?=\s*Error:|$)/i);
+                            if (toolMatch) {
+                                const toolContext = await extractFailedToolContext(
+                                    highestScoreTask.session_id,
+                                    highestScoreTask.agent_id,
+                                    toolMatch[1],
+                                    fileMatch?.[1]?.trim(),
+                                );
+                                if (toolContext) {
+                                    contextSection += `\n## Failed Tool Call Context\n\n${toolContext}\n`;
+                                }
+                            }
+                        }
+                    }
+                } catch (e) {
+                    logger?.debug?.(`[PD:EvolutionWorker] Failed to extract conversation context: ${String(e)}`);
+                }
+            }
 
             const heartbeatContent = [
                 `## Evolution Task [ID: ${highestScoreTask.id}]`,
@@ -957,28 +984,18 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                 `**Session ID**: ${highestScoreTask.session_id || 'N/A'}`,
                 `**Agent ID**: ${highestScoreTask.agent_id || 'main'}`,
                 ``,
-                `## Available Tools for Context Search`,
+                `## Available Tools for Context Search (P1 - Preferred)`,
                 ``,
-                `1. **sessions_list** — List sessions (searches metadata only, NOT message content)`,
-                `2. **sessions_history** — Get full message history (requires sessionKey)`,
+                `1. **sessions_history** — Get full message history (requires sessionKey)`,
+                `2. **sessions_list** — List sessions (searches metadata only, NOT message content)`,
                 `3. **read_file / search_file_content** — Search codebase`,
                 ``,
-                `⚠️ sessions_list.search does NOT search message content.`,
-                `To find relevant messages, you must:`,
-                `  a. Use sessions_list to find candidate sessions`,
-                `  b. Use sessions_history to get their messages`,
-                `  c. Analyze the messages yourself for relevance`,
+                `**P1 SOP**: sessions_history(sessionKey="agent:{agentId}:run:{sessionId}", limit=30)`,
                 ``,
-                `## Progressive Context Loading SOP`,
-                ``,
-                `1. **Check basic info** — Do you have enough from the Reason field?`,
-                `2. **If Session ID known**:`,
-                `   → sessions_history(sessionKey="agent:{agentId}:run:{sessionId}", limit=30)`,
-                `3. **If no Session ID**:`,
-                `   a. sessions_list(last=10, agentId="main") to find candidates`,
-                `   b. sessions_history(sessionKey=...) for promising sessions`,
-                `4. **Search codebase** if reason mentions specific files`,
-                `5. **Stop when** you have enough evidence for diagnosis`,
+                `## Pre-extracted Context (P2 - JSONL Fallback)`,
+                `If OpenClaw tools cannot access the session (visibility limits),`,
+                `use this pre-extracted context below:`,
+                contextSection || `*(No JSONL context available — use P1 tools first)*`,
                 ``,
                 `---`,
                 ``,
