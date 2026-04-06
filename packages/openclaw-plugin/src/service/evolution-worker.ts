@@ -586,7 +586,9 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
 
                 return doEnqueuePainTask(wctx, logger, painFlagPath, result, {
                     score: jsonScore, source: jsonSource, reason: jsonReason,
-                    preview: jsonPreview, traceId: '', sessionId: '', agentId: '',
+                    preview: jsonPreview, traceId: '',
+                    sessionId: jsonPain.session_id || '',
+                    agentId: jsonPain.agent_id || '',
                 });
             }
         } catch { /* Not JSON — fall through to KV/Markdown parsing */ }
@@ -970,7 +972,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     }
                     if (logger) {
                         const turns = contextSection ? contextSection.split('\n').filter(l => l.startsWith('[User]') || l.startsWith('[Assistant]')).length : 0;
-                        logger.debug(`[PD:EvolutionWorker] Pre-extracted ${turns} conversation turns for task ${highestScoreTask.id}`);
+                        logger?.debug?.(`[PD:EvolutionWorker] Pre-extracted ${turns} conversation turns for task ${highestScoreTask.id}`);
                     }
                 } catch (e) {
                     if (logger) logger.warn(`[PD:EvolutionWorker] Failed to extract conversation context for task ${highestScoreTask.id}: ${String(e)}. Diagnostician will use P1 tools or fallback.`);
