@@ -33,6 +33,7 @@ import {
     executeNocturnalReflectionAsync,
     type NocturnalRunResult,
 } from '../nocturnal-service.js';
+import { runTrinityAsync, type TrinityStageFailure, type TrinityResult } from '../../core/nocturnal-trinity.js';
 import type { TrinityRuntimeAdapter, TrinityConfig } from '../../core/nocturnal-trinity.js';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -136,6 +137,10 @@ export class NocturnalWorkflowManager implements WorkflowManager {
     private workflowSpecs = new Map<string, SubagentWorkflowSpec<unknown>>();
     /** Maps workflowId → result (needed for finalizeOnce) */
     private executionResults = new Map<string, NocturnalResult>();
+    /** Maps workflowId → TrinityStageFailure[] (stored before async launch, used in notifyWaitResult) */
+    private pendingTrinityFailures = new Map<string, TrinityStageFailure[]>();
+    /** Maps workflowId → TrinityResult (needed by notifyWaitResult for artifact persistence) */
+    private pendingTrinityResults = new Map<string, TrinityResult>();
 
     constructor(opts: NocturnalWorkflowOptions) {
         this.workspaceDir = opts.workspaceDir;
@@ -187,56 +192,72 @@ export class NocturnalWorkflowManager implements WorkflowManager {
         });
         this.store.recordEvent(workflowId, 'nocturnal_started', null, 'active', 'TrinityRuntimeAdapter invoked', { workflowType: 'nocturnal' });
 
-        // Execute single-reflector path (NOC-02): useTrinity=false
-        const trinityConfig: Partial<TrinityConfig> = {
-            useTrinity: false,  // D-10: single-reflector only in Phase 6
+        // Extract snapshot and principleId from taskInput.metadata (NOC-07: Trinity async path)
+        const snapshot = options.metadata?.snapshot as import('../../core/nocturnal-trajectory-extractor.js').NocturnalSessionSnapshot;
+        const principleId = options.metadata?.principleId as string;
+
+        // Configure Trinity for async execution (NOC-06, NOC-07)
+        const trinityConfig: TrinityConfig = {
+            useTrinity: true,  // NOC-07: Trinity chain, not single-reflector
             maxCandidates: 3,
             useStubs: false,
             runtimeAdapter: this.runtimeAdapter,
+            stateDir: this.stateDir,
         };
 
-        const result = await executeNocturnalReflectionAsync(
-            this.workspaceDir,
-            this.stateDir,
-            { trinityConfig, runtimeAdapter: this.runtimeAdapter }
-        );
+        // NOC-07: Store initial empty pending state BEFORE launching async
+        // This is critical: we need these available when notifyWaitResult is called
+        this.pendingTrinityFailures.set(workflowId, []);
+        this.pendingTrinityResults.set(workflowId, {
+            success: false,
+            telemetry: {
+                chainMode: 'trinity',
+                usedStubs: false,
+                dreamerPassed: false,
+                philosopherPassed: false,
+                scribePassed: false,
+                candidateCount: 0,
+                selectedCandidateIndex: -1,
+                stageFailures: [],
+            },
+            failures: [],
+            fallbackOccurred: false,
+        });
 
-        // Store execution result and spec for finalizeOnce
-        this.executionResults.set(workflowId, result);
-        this.workflowSpecs.set(workflowId, spec as SubagentWorkflowSpec<unknown>);
+        // NOC-07: Launch Trinity async via Promise.resolve().then() WITHOUT awaiting
+        // This offloads the async chain so startWorkflow returns immediately with state='active'
+        Promise.resolve().then(async () => {
+            try {
+                const result = await runTrinityAsync({ snapshot, principleId, config: trinityConfig });
 
-        const previousState = 'active';
+                // Store failures and result for notifyWaitResult
+                this.pendingTrinityFailures.set(workflowId, result.failures);
+                this.pendingTrinityResults.set(workflowId, result);
 
-        if (result.success && result.artifact) {
-            // Record nocturnal_completed event (NOC-03, D-05)
-            this.store.updateWorkflowState(workflowId, 'completed');
-            this.store.recordEvent(workflowId, 'nocturnal_completed', previousState, 'completed', 'artifact persisted', {
-                persistedPath: result.diagnostics.persistedPath,
-            });
-            this.markCompleted(workflowId);
-        } else if (result.noTargetSelected || result.skipReason) {
-            // Record nocturnal_fallback event (NOC-03, D-05)
-            this.store.updateWorkflowState(workflowId, 'completed');
-            this.store.recordEvent(workflowId, 'nocturnal_fallback', previousState, 'completed', `skip: ${result.skipReason ?? 'no target'}`, {
-                skipReason: result.skipReason,
-                noTargetSelected: result.noTargetSelected,
-            });
-            this.markCompleted(workflowId);
-        } else {
-            // Record nocturnal_failed event (NOC-03, D-05)
-            this.store.updateWorkflowState(workflowId, 'terminal_error');
-            this.store.recordEvent(workflowId, 'nocturnal_failed', previousState, 'terminal_error', 'validation failed', {
-                validationFailures: result.validationFailures,
-                success: result.success,
-            });
-            this.markCompleted(workflowId);
-        }
+                // Record all Trinity stage events in batch (NOC-08)
+                this.recordStageEvents(workflowId, result);
 
+                // Drive state transitions via notifyWaitResult (NOC-10)
+                if (result.success) {
+                    await this.notifyWaitResult(workflowId, 'ok');
+                } else {
+                    const errorMsg = result.failures.map(f => `${f.stage}: ${f.reason}`).join('; ');
+                    await this.notifyWaitResult(workflowId, 'error', errorMsg);
+                }
+            } catch (err) {
+                // Unexpected error - treat as Trinity failure
+                const errorMsg = err instanceof Error ? err.message : String(err);
+                this.pendingTrinityFailures.set(workflowId, [{ stage: 'dreamer' as const, reason: errorMsg }]);
+                await this.notifyWaitResult(workflowId, 'error', errorMsg);
+            }
+        });
+
+        // Return immediately with state='active' (NOC-07)
         return {
             workflowId,
             childSessionKey: `nocturnal:internal:${workflowId}`,
             runId: undefined,
-            state: 'completed',
+            state: 'active',
         };
     }
 
@@ -245,13 +266,49 @@ export class NocturnalWorkflowManager implements WorkflowManager {
     // ─────────────────────────────────────────────────────────────────────────
 
     async notifyWaitResult(
-        _workflowId: string,
-        _status: 'ok' | 'error' | 'timeout',
-        _error?: string
+        workflowId: string,
+        status: 'ok' | 'error' | 'timeout',
+        error?: string
     ): Promise<void> {
-        // D-10: No-op. NocturnalWorkflowManager calls executeNocturnalReflectionAsync
-        // synchronously in startWorkflow. There is no wait polling path.
-        // The execution completes within startWorkflow; no separate wait phase exists.
+        const workflow = this.store.getWorkflow(workflowId);
+        if (!workflow) {
+            this.logger.warn(`[PD:NocturnalWorkflow] notifyWaitResult: workflow not found: ${workflowId}`);
+            return;
+        }
+
+        // Only handle workflows in 'active' state (Trinity async path)
+        if (workflow.state !== 'active') {
+            this.logger.info(`[PD:NocturnalWorkflow] notifyWaitResult: workflow ${workflowId} not in active state: ${workflow.state}`);
+            return;
+        }
+
+        const trinityFailures = this.pendingTrinityFailures.get(workflowId) ?? [];
+        const trinityResult = this.pendingTrinityResults.get(workflowId);
+
+        if (status === 'ok') {
+            // Trinity succeeded: active -> finalizing -> completed (NOC-10)
+            this.store.updateWorkflowState(workflowId, 'finalizing');
+            this.store.recordEvent(workflowId, 'trinity_completed', 'active', 'finalizing', 'Trinity chain completed successfully', {
+                trinityTelemetry: trinityResult?.telemetry,
+            });
+
+            this.store.updateWorkflowState(workflowId, 'completed');
+            this.store.recordEvent(workflowId, 'nocturnal_completed', 'finalizing', 'completed', 'artifact persisted', {
+                persistedPath: trinityResult?.artifact ? 'trinity-draft' : undefined,
+            });
+        } else {
+            // Any stage failure: -> terminal_error immediately (NOC-09, NOC-10)
+            this.store.updateWorkflowState(workflowId, 'terminal_error');
+            this.store.recordEvent(workflowId, 'nocturnal_failed', 'active', 'terminal_error', error ?? 'Trinity stage failed', {
+                failures: trinityFailures,  // NOC-09: TrinityStageFailure[] in payload
+                trinityTelemetry: trinityResult?.telemetry,
+            });
+        }
+
+        // Clean up pending state (idempotent - also cleaned in markCompleted)
+        this.pendingTrinityFailures.delete(workflowId);
+        this.pendingTrinityResults.delete(workflowId);
+        this.markCompleted(workflowId);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -405,5 +462,113 @@ export class NocturnalWorkflowManager implements WorkflowManager {
         this.completedWorkflows.set(workflowId, Date.now());
         this.workflowSpecs.delete(workflowId);
         this.executionResults.delete(workflowId);
+        this.pendingTrinityFailures.delete(workflowId);
+        this.pendingTrinityResults.delete(workflowId);
+    }
+
+    /**
+     * Record Trinity stage events in batch after the chain completes (per NOC-08).
+     * Derives stage events from TrinityResult.telemetry and TrinityResult.failures.
+     * Always records _start event for each stage that ran, plus _complete or _failed based on outcome.
+     */
+    private recordStageEvents(workflowId: string, result: TrinityResult): void {
+        const { telemetry, failures } = result;
+
+        // Dreamer events (always runs if we reach here)
+        this.store.recordEvent(
+            workflowId,
+            'trinity_dreamer_start',
+            null,  // fromState: null for first event
+            'active',
+            'Trinity Dreamer stage began',
+            {}
+        );
+
+        if (telemetry.dreamerPassed) {
+            this.store.recordEvent(
+                workflowId,
+                'trinity_dreamer_complete',
+                'active',
+                'active',
+                'Dreamer completed successfully',
+                { candidateCount: telemetry.candidateCount }
+            );
+        } else {
+            const dreamerFailure = failures.find(f => f.stage === 'dreamer');
+            this.store.recordEvent(
+                workflowId,
+                'trinity_dreamer_failed',
+                'active',
+                'active',
+                dreamerFailure?.reason ?? 'Dreamer stage failed',
+                { failures: failures.filter(f => f.stage === 'dreamer') }
+            );
+        }
+
+        // Philosopher events (only if Dreamer passed)
+        if (telemetry.dreamerPassed) {
+            this.store.recordEvent(
+                workflowId,
+                'trinity_philosopher_start',
+                'active',
+                'active',
+                'Trinity Philosopher stage began',
+                {}
+            );
+
+            if (telemetry.philosopherPassed) {
+                this.store.recordEvent(
+                    workflowId,
+                    'trinity_philosopher_complete',
+                    'active',
+                    'active',
+                    'Philosopher completed successfully',
+                    {}
+                );
+            } else {
+                const philosopherFailure = failures.find(f => f.stage === 'philosopher');
+                this.store.recordEvent(
+                    workflowId,
+                    'trinity_philosopher_failed',
+                    'active',
+                    'active',
+                    philosopherFailure?.reason ?? 'Philosopher stage failed',
+                    { failures: failures.filter(f => f.stage === 'philosopher') }
+                );
+            }
+        }
+
+        // Scribe events (only if Philosopher passed)
+        if (telemetry.philosopherPassed) {
+            this.store.recordEvent(
+                workflowId,
+                'trinity_scribe_start',
+                'active',
+                'active',
+                'Trinity Scribe stage began',
+                {}
+            );
+
+            if (telemetry.scribePassed) {
+                this.store.recordEvent(
+                    workflowId,
+                    'trinity_scribe_complete',
+                    'active',
+                    'finalizing',  // NOC-10: scribe complete -> finalizing state
+                    'Scribe completed successfully',
+                    { selectedCandidateIndex: telemetry.selectedCandidateIndex }
+                );
+            } else {
+                const scribeFailure = failures.find(f => f.stage === 'scribe');
+                this.store.recordEvent(
+                    workflowId,
+                    'trinity_scribe_failed',
+                    'active',
+                    'terminal_error',  // NOC-10: scribe failure -> terminal_error immediately
+                    scribeFailure?.reason ?? 'Scribe stage failed',
+                    { failures: failures.filter(f => f.stage === 'scribe') }
+                );
+            }
+        }
     }
 }
