@@ -714,21 +714,17 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
         }
 
         // Check in_progress tasks for completion (only pain_diagnosis gets HEARTBEAT treatment)
-        // This marker file path is a FALLBACK — the primary completion detector is the
-        // subagent_ended hook, which creates principles from the diagnostician's output.
-        // Here we only create principles if the hook path didn't already do so.
+        // Diagnostician runs via HEARTBEAT (main session LLM), not as a subagent.
+        // Marker file detection is the ONLY completion path for HEARTBEAT diagnostics.
         for (const task of queue.filter(t => t.status === 'in_progress' && t.taskKind === 'pain_diagnosis')) {
             const startedAt = new Date(task.started_at || task.timestamp);
 
             // Condition 1: Check for marker file (created by diagnostician on completion)
             const completeMarker = path.join(wctx.stateDir, `.evolution_complete_${task.id}`);
             if (fs.existsSync(completeMarker)) {
-                if (logger) logger.info(`[PD:EvolutionWorker] Task ${task.id} completed - marker file detected (fallback path)`);
+                if (logger) logger.info(`[PD:EvolutionWorker] Task ${task.id} completed - marker file detected`);
 
-                // Fallback: try to create principle from report file only if the
-                // subagent_ended hook didn't already process this task.
-                // Heuristic: if the report has principle fields, the hook likely didn't
-                // parse it (hook failure or session messages unavailable).
+                // Create principle from the diagnostician's JSON report.
                 const reportPath = path.join(wctx.stateDir, `.diagnostician_report_${task.id}.json`);
                 if (fs.existsSync(reportPath)) {
                     try {
@@ -948,7 +944,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                 highestScoreTask.status = 'in_progress';
                 highestScoreTask.started_at = nowIso;
                 delete highestScoreTask.completed_at;
-                // Use placeholder instead of deleting - allows subagent_ended hook to match
+                // Use placeholder so marker path can correlate task (no subagent spawned for HEARTBEAT)
                 // This fixes task_outcomes being empty for HEARTBEAT-triggered diagnostician runs
                 highestScoreTask.assigned_session_key = `heartbeat:diagnostician:${highestScoreTask.id}`;
                 queueChanged = true;

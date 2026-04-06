@@ -35,7 +35,6 @@ import * as TrajectoryCollector from './hooks/trajectory-collector.js';
 import { handleInitStrategy, handleManageOkr } from './commands/strategy.js';
 import { handleBootstrapTools, handleResearchTools } from './commands/capabilities.js';
 import { handleThinkingOs } from './commands/thinking-os.js';
-import { handleEvolveTask } from './commands/evolver.js';
 import { handlePainCommand } from './commands/pain.js';
 import { handleContextCommand } from './commands/context.js';
 import { handleFocusCommand } from './commands/focus.js';
@@ -365,13 +364,6 @@ const plugin = {
     });
 
     api.registerCommand({
-      name: "pd-evolve",
-      description: getCommandDescription('pd-evolve', language),
-      acceptsArgs: true,
-      handler: (ctx) => handleEvolveTask(ctx)
-    });
-
-    api.registerCommand({
       name: "pd-daily",
       description: getCommandDescription('pd-daily', language),
       handler: (_ctx) => {
@@ -423,7 +415,6 @@ const plugin = {
 ## 🧠 进化相关
 | 命令 | 用途 | 使用时机 |
 |------|------|----------|
-| \`/pd-evolve\` | 执行进化循环 | 有 Pain 需要处理时 |
 | \`/pd-thinking\` | 思维模型管理 | 更新 Thinking OS |
 | \`/pd-daily\` | 进化日报 | 每日回顾时 |
 | \`/pd-grooming\` | 工作区大扫除 | 定期清理 |
@@ -475,7 +466,6 @@ const plugin = {
 ## 🧠 Evolution
 | Command | Purpose | When to Use |
 |---------|---------|-------------|
-| \`/pd-evolve\` | Run evolution loop | Process Pain signals |
 | \`/pd-thinking\` | Mental model management | Update Thinking OS |
 | \`/pd-daily\` | Evolution report | Daily review |
 | \`/pd-grooming\` | Workspace cleanup | Periodic cleanup |

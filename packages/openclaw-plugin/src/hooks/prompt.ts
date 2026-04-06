@@ -80,50 +80,6 @@ interface PromptHookApi {
   logger: PluginLogger;
 }
 
-function extractRecentConversationContext(
-  messages: unknown[] | undefined,
-  maxMessages = 4,
-  maxCharsPerMessage = 200
-): string {
-  if (!Array.isArray(messages) || messages.length === 0) return '';
-
-  const relevantMessages: Array<{ role: 'user' | 'assistant'; text: string }> = [];
-
-  for (let i = messages.length - 1; i >= 0 && relevantMessages.length < maxMessages; i--) {
-    const msg = messages[i] as { role?: string; content?: unknown };
-    if (msg?.role !== 'user' && msg?.role !== 'assistant') continue;
-
-    let text = '';
-    if (typeof msg.content === 'string') {
-      text = msg.content;
-    } else if (Array.isArray(msg.content)) {
-      text = msg.content
-        .filter((part: unknown) => {
-          if (!part || typeof part !== 'object') return false;
-          const record = part as { type?: unknown; text?: unknown };
-          return record.type === 'text' && typeof record.text === 'string';
-        })
-        .map((part) => (part as { text: string }).text)
-        .join('\n')
-        .trim();
-    }
-
-    if (!text) continue;
-
-    const normalized = text.length > maxCharsPerMessage
-      ? `${text.slice(0, maxCharsPerMessage)}...`
-      : text;
-
-    relevantMessages.unshift({ role: msg.role, text: normalized });
-  }
-
-  if (relevantMessages.length === 0) return '';
-
-  return relevantMessages
-    .map((message) => `[${message.role.toUpperCase()}]: ${message.text}`)
-    .join('\n\n');
-}
-
 function getTextContent(message: unknown): string {
   if (!message || typeof message !== 'object') return '';
   const record = message as { content?: unknown };
@@ -162,100 +118,6 @@ function detectCorrectionCue(text: string): string | null {
     'please try again',
   ];
   return cues.find((cue) => normalized.includes(cue)) ?? null;
-}
-
-function resolveEvolutionTask(
-  inProgressTask: any,
-  messages?: unknown[],
-  maxContextMessages = 4,
-  maxCharsPerMsg = 200,
-  includeConversationContext = true
-): string | null {
-  if (!inProgressTask || typeof inProgressTask !== 'object') return null;
-
-  const rawTask = typeof inProgressTask.task === 'string' ? inProgressTask.task.trim() : '';
-  if (rawTask && rawTask.toLowerCase() !== 'undefined') return rawTask;
-
-  if (typeof inProgressTask.id !== 'string' || !inProgressTask.id.trim()) return null;
-
-  const source = typeof inProgressTask.source === 'string' ? inProgressTask.source.trim() : 'unknown';
-  const reason = typeof inProgressTask.reason === 'string' ? inProgressTask.reason.trim() : 'Systemic pain detected';
-  const preview = typeof inProgressTask.trigger_text_preview === 'string' && inProgressTask.trigger_text_preview.trim()
-    ? inProgressTask.trigger_text_preview.trim()
-    : 'N/A';
-  const sessionId = typeof inProgressTask.session_id === 'string' ? inProgressTask.session_id.trim() : '';
-  const agentId = typeof inProgressTask.agent_id === 'string' ? inProgressTask.agent_id.trim() : '';
-
-  const conversationContext = includeConversationContext
-    ? extractRecentConversationContext(messages, maxContextMessages, maxCharsPerMsg)
-    : '';
-
-  let taskDescription = `Diagnose systemic pain [ID: ${inProgressTask.id}].
-
-`;
-  taskDescription += `**Source**: ${source}
-`;
-  taskDescription += `**Reason**: ${reason}
-`;
-  taskDescription += `**Trigger Text**: "${preview}"
-`;
-  if (sessionId) {
-    taskDescription += `**Session ID**: ${sessionId}
-`;
-  }
-  if (agentId) {
-    taskDescription += `**Agent ID**: ${agentId}
-`;
-  }
-
-  if (conversationContext) {
-    taskDescription += `
----
-**Recent Conversation Context**:
-${conversationContext}`;
-  } else if (!sessionId) {
-    taskDescription += `
----
-**Note**: 对话上下文不可用。请主动收集证据：
-1. 从 Reason 字段提取关键词，搜索相关代码
-2. 读取 .state/logs/events.jsonl 最近日志
-3. 基于 Reason 中的文件路径定位问题`;
-  }
-
-  taskDescription += `
-
----
-## 执行指令
-
-使用 5 Whys 方法进行根因分析，输出 JSON 格式结果。
-
-### 必执行步骤：
-1. **Phase 1 - 证据收集**: 读取日志、搜索代码，记录证据来源
-2. **Phase 2 - 因果链构建**: 每个 Why 必须有证据支撑，最多 5 层
-3. **Phase 3 - 根因分类**: 归类为 People/Design/Assumption/Tooling
-4. **Phase 4 - 原则提炼**: 提炼可复用的防护原则
-
-### 终止条件（满足任一即停止）:
-- 找到可修改代码直接解决的问题
-- 找到缺失的门禁规则或检查机制
-- 连续 2 个 Why 无法提出更深假设
-
-### 输出格式：
-\`\`\`json
-{
-  "diagnosis_report": {
-    "task_id": "...",
-    "summary": "一句话总结根因",
-    "causal_chain": [...],
-    "root_cause": { "category": "Design", "description": "..." },
-    "principle": { "trigger_pattern": "...", "action": "..." }
-  }
-}
-\`\`\`
-
-详细执行协议请参考你的系统提示词。`;
-
-  return taskDescription;
 }
 
 /**
@@ -488,16 +350,14 @@ You are a **self-evolving AI agent** powered by Principles Disciple.
 **Tool Routing Rules**:
 - Use the current session for the normal user reply.
 - Use sessions_send for cross-session messaging.
-- Use agents_list / sessions_list / sessions_spawn for peer-agent or peer-session orchestration.
-- Use sessions_spawn with pd-diagnostician/pd-explorer/etc skills for internal worker tasks.
+- Use agents_list / sessions_list for peer-agent or peer-session orchestration.
 
 ## 🔧 INTERNAL SYSTEM LAYOUT
 - Your core plugin logic is rooted at: ${PathResolver.getExtensionRoot() || 'EXTENSION_ROOT (unresolved)'}
 - If you need self-inspection, prioritize the worker entry pointed by PathResolver key: EVOLUTION_WORKER
 `;
 
-  // ──── 2. Evolution Directive (always on, highest priority) - stays in prependContext ────
-  let activeEvolutionTaskPrompt = '';
+  // ──── 2. Empathy Observer Spawn (async sidecar)
   const empathySilenceConstraint = `
 ### 【EMPATHY OUTPUT RESTRICTION】
 Do NOT output empathy diagnostic text in JSON, XML, or tag format.
@@ -505,123 +365,7 @@ Do NOT include "damageDetected", "severity", "confidence", or "empathy" fields i
 The empathy observer subagent handles pain detection independently.
 `.trim();
 
-  const queuePath = wctx.resolve('EVOLUTION_QUEUE');
-  if (fs.existsSync(queuePath)) {
-    try {
-      const queue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
-      // V2: Filter to only in_progress pain_diagnosis tasks
-      // This ensures sleep_reflection tasks never get injected into user prompts
-      const inProgressTasks = [...queue]
-        .filter((t: any) => t.status === 'in_progress' && (t.taskKind === 'pain_diagnosis' || !t.taskKind))
-        .sort((a: any, b: any) => {
-          // V2: Prioritize by taskKind first (pain_diagnosis before others), then by score
-          if (a.taskKind !== b.taskKind) {
-            const kindPriority: Record<string, number> = { pain_diagnosis: 0, model_eval: 1, sleep_reflection: 2 };
-            const aPriority = kindPriority[String(a.taskKind ?? '')] ?? 3;
-            const bPriority = kindPriority[String(b.taskKind ?? '')] ?? 3;
-            if (aPriority !== bPriority) return aPriority - bPriority;
-          }
-          const scoreA = Number.isFinite(a?.score) ? Number(a.score) : 0;
-          const scoreB = Number.isFinite(b?.score) ? Number(b.score) : 0;
-          return scoreB - scoreA;
-        });
-
-      for (const inProgressTask of inProgressTasks) {
-        const resolvedTask = resolveEvolutionTask(
-          inProgressTask,
-          event.messages,
-          contextConfig.evolutionContext.maxMessages,
-          contextConfig.evolutionContext.maxCharsPerMessage,
-          contextConfig.evolutionContext.enabled
-        );
-        if (!resolvedTask) {
-          continue;
-        }
-
-        const escapedTask = JSON.stringify(resolvedTask);
-
-        let existingPrinciplesRef = '';
-        try {
-          const principlesPath = wctx.resolve('PRINCIPLES');
-          if (fs.existsSync(principlesPath)) {
-            const principlesContent = fs.readFileSync(principlesPath, 'utf8');
-            const principleBlocks = principlesContent.match(/### P-[\w-]+:[^\n]*\n(?:-[^\n]*\n)*/g);
-            if (principleBlocks && principleBlocks.length > 0) {
-              existingPrinciplesRef = `\n\n**Existing Principles for Style Reference**:\n${principleBlocks.slice(-3).join('\n')}`;
-            }
-          }
-        } catch {}
-
-        const spawnTask = `使用 pd-diagnostician skill 执行诊断任务。\n\n任务: ${escapedTask}${existingPrinciplesRef}`;
-        const escapedSpawnTask = JSON.stringify(spawnTask);
-
-        logger?.info(`[PD:Prompt] Injecting EVOLUTION TASK for: ${inProgressTask.id}`);
-
-        if (trigger === 'user') {
-          activeEvolutionTaskPrompt = `<evolution_task priority="high">
-TASK: ${escapedTask}
-
-REQUIRED ACTION (两阶段回复):
-
-**阶段 1 - 立即回复用户:**
-简要告知用户你检测到的问题，例如：
-"我注意到刚才的操作遇到了一些问题（简述问题），我已安排诊断代理在后台分析根因。分析完成后会继续告诉你结果。"
-
-然后调用：
-  sessions_spawn(task=${escapedSpawnTask})
-
-**阶段 2 - 收到子代理结果后:**
-当收到诊断代理的完成消息后，用以下格式回复用户：
-
-"**诊断完成** 🔍
-
-基于后台分析结果：
-- **根因**: [一句话总结]
-- **分类**: [People/Design/Assumption/Tooling]
-- **建议**: [可执行的改进建议]
-
-相关原则已记录到 PRINCIPLES.md。"
-
-IMPORTANT:
-- Do NOT reply with "[EVOLUTION_ACK]".
-- 子代理结果会作为新消息到达，届时再进行阶段2的回复。
-</evolution_task>\n`;
-        } else {
-          activeEvolutionTaskPrompt = `<evolution_task priority="critical">
-TASK: ${escapedTask}
-
-REQUIRED ACTION:
-- Start diagnostics immediately by calling:
-  sessions_spawn(task=${escapedSpawnTask})
-- Do NOT reply with "[EVOLUTION_ACK]".
-</evolution_task>\n`;
-        }
-
-        break;
-      }
-
-      if (!activeEvolutionTaskPrompt && inProgressTasks.length > 0) {
-        logger?.warn('[PD:Prompt] Skipping evolution task injection because task payload is invalid.');
-      }
-    } catch (e) {
-      logger?.error(`[PD:Prompt] Failed to parse EVOLUTION_QUEUE: ${String(e)}`);
-    }
-  }
-
-  // Inject queue-derived evolution task at the front of prependContext
-  // Skip for subagent/observer sessions to avoid polluting their prompts.
-  // Heartbeat sessions MUST receive evolution tasks — that's how the
-  // pain→diagnostician→principle chain works. The original minimal mode
-  // skip was for empathy observers, not heartbeat sessions.
-  const isSubagentSession = sessionId?.includes(':subagent:') === true;
-  if (activeEvolutionTaskPrompt && !isSubagentSession) {
-    prependContext = activeEvolutionTaskPrompt + prependContext;
-    logger?.info(`[PD:Prompt] Evolution task injected into ${trigger} session (was minimalMode=${isMinimalMode}, now included)`);
-  } else if (activeEvolutionTaskPrompt && isSubagentSession) {
-    logger?.info(`[PD:Prompt] Evolution task SKIPPED for subagent session`);
-  }
-
-  // ─────────────────────────────────────────────────4. Empathy Observer Spawn (async sidecar)
+  // ─────────────────────────────────────────────────3. Empathy Observer Spawn
   // Skip if this is a subagent session or if the message indicates agent-to-agent communication
   const latestUserMessage = extractLatestUserMessage(event.messages);
   const isAgentToAgent = latestUserMessage.includes('sourceSession=agent:') || sessionId?.includes(':subagent:') === true;
@@ -648,7 +392,7 @@ REQUIRED ACTION:
     }
   }
 
-  // ──── 5. Heartbeat-specific checklist ────
+  // ──── 4. Heartbeat-specific checklist ────
   if (trigger === 'heartbeat') {
     const heartbeatPath = wctx.resolve('HEARTBEAT');
     if (fs.existsSync(heartbeatPath)) {
