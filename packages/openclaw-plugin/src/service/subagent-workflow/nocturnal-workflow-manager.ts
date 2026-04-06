@@ -67,11 +67,12 @@ function computeDreamerIdempotencyKey(
   principleId: string,
   maxCandidates: number
 ): string {
+  // Use delimiters to prevent collision (e.g., "sess10"+"2"+"3" vs "sess1"+"02"+"3")
   const inputDigest = createHash('sha256')
-    .update(snapshot.sessionId + principleId + maxCandidates)
+    .update(`${snapshot.sessionId}::${principleId}::${maxCandidates}`)
     .digest('hex');
   return createHash('sha256')
-    .update(workflowId + 'dreamer' + inputDigest)
+    .update(`${workflowId}::dreamer::${inputDigest}`)
     .digest('hex');
 }
 
@@ -290,8 +291,32 @@ export class NocturnalWorkflowManager implements WorkflowManager {
         this.store.recordEvent(workflowId, 'nocturnal_started', null, 'active', 'TrinityRuntimeAdapter invoked', { workflowType: 'nocturnal' });
 
         // Extract snapshot and principleId from taskInput.metadata (NOC-07: Trinity async path)
-        const snapshot = options.metadata?.snapshot as import('../../core/nocturnal-trajectory-extractor.js').NocturnalSessionSnapshot;
-        const principleId = options.metadata?.principleId as string;
+        const snapshot = options.metadata?.snapshot as import('../../core/nocturnal-trajectory-extractor.js').NocturnalSessionSnapshot | undefined;
+        const principleId = options.metadata?.principleId as string | undefined;
+
+        // Validate required metadata (prevent runtime crashes from undefined snapshot)
+        if (!snapshot?.sessionId) {
+            this.logger.warn(`[PD:NocturnalWorkflow] Missing snapshot.sessionId in metadata for workflow=${workflowId}, using fallback`);
+            this.store.updateWorkflow(workflowId, { state: 'terminal_error', updated_at: now });
+            this.store.recordEvent(workflowId, 'nocturnal_failed', null, 'terminal_error', 'Missing required metadata: snapshot.sessionId', { workflowId });
+            return {
+                workflowId,
+                childSessionKey: `nocturnal:internal:${workflowId}`,
+                runId: null,
+                state: 'terminal_error' as const,
+            };
+        }
+        if (!principleId) {
+            this.logger.warn(`[PD:NocturnalWorkflow] Missing principleId in metadata for workflow=${workflowId}, using fallback`);
+            this.store.updateWorkflow(workflowId, { state: 'terminal_error', updated_at: now });
+            this.store.recordEvent(workflowId, 'nocturnal_failed', null, 'terminal_error', 'Missing required metadata: principleId', { workflowId });
+            return {
+                workflowId,
+                childSessionKey: `nocturnal:internal:${workflowId}`,
+                runId: null,
+                state: 'terminal_error' as const,
+            };
+        }
 
         // Configure Trinity for async execution (NOC-06, NOC-07)
         const trinityConfig: TrinityConfig = {
