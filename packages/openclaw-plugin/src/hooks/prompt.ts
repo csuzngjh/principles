@@ -426,10 +426,9 @@ The empathy observer subagent handles pain detection independently.
 
         if (matchResult.matched) {
           const penalty = severityToPenalty(matchResult.severity, DEFAULT_EMPATHY_KEYWORD_CONFIG);
-          trackFriction(sessionId, workspaceDir, {
+          // trackFriction signature: (sessionId, deltaF: number, hash: string, workspaceDir?, options?)
+          trackFriction(sessionId, penalty, 'empathy_keyword_match', workspaceDir, {
             source: 'user_empathy',
-            amount: penalty,
-            reason: `Empathy keywords matched: ${matchResult.matchedTerms.join(', ')} (severity: ${matchResult.severity}, score: ${matchResult.score.toFixed(2)})`,
           });
 
           logger?.info?.(`[PD:Empathy] MATCH: "${matchResult.matchedTerms.join(', ')}" → severity=${matchResult.severity}, score=${matchResult.score.toFixed(2)}, penalty=${penalty}, subagent=${shouldCallSubagent ? samplingReason : 'skipped(high_confidence)'}`);
