@@ -183,6 +183,7 @@ function createSprintState(spec, runId, specPath) {
     lastHeartbeatAt: nowIso(),
     currentRole: null,
     haltReason: null,
+    mergePending: null,
     worktree: null,  // { worktreePath, branchName, headSha, baseBranch } — set by ensureWorktree
     consecutiveTimeouts: {}, // { stageName: count } — tracks consecutive timeouts per stage
     createdAt: nowIso(),
@@ -1280,15 +1281,34 @@ function reportExistsAndNonEmpty(reportPath) {
   return fileExists(reportPath) && Boolean(fs.readFileSync(reportPath, 'utf8').trim());
 }
 
+const PROTECTED_CRITICAL = ['sprint.json', 'timeline.md', 'latest-summary.md'];
+const PROTECTED_STAGE_CRITICAL = ['decision.md', 'scorecard.json'];
+
 function protectedArtifacts(runDir, paths) {
   // Roles must not modify stage-level truth sources that are written only after role execution.
   // Do not include run-level timeline/latest-summary here: the orchestrator itself updates those
   // while roles are still running (timeouts, progress signals, state transitions), which would
   // create false protected-file violations.
   return [
+    path.join(runDir, 'sprint.json'),
     paths.decisionPath,
     paths.scorecardPath,
   ];
+}
+
+function classifyProtectedFile(filePath, runDir) {
+  const basename = path.basename(filePath);
+  if (!runDir) {
+    if (PROTECTED_CRITICAL.includes(basename) || PROTECTED_STAGE_CRITICAL.includes(basename)) {
+      return 'critical';
+    }
+    return 'warn';
+  }
+  const stageDir = path.join(runDir, 'stages');
+  if (filePath.startsWith(stageDir)) {
+    return PROTECTED_STAGE_CRITICAL.includes(basename) ? 'critical' : 'warn';
+  }
+  return PROTECTED_CRITICAL.includes(basename) ? 'critical' : 'warn';
 }
 
 function snapshotProtectedFiles(files) {
@@ -1299,11 +1319,13 @@ function snapshotProtectedFiles(files) {
   return snapshot;
 }
 
-function detectProtectedWriteViolation(files, snapshot) {
+function detectProtectedWriteViolation(files, snapshot, runDir) {
   for (const file of files) {
     const previous = snapshot[file] ?? null;
     const current = fileExists(file) ? fs.statSync(file).mtimeMs : null;
-    if (previous !== current) return file;
+    if (previous !== current) {
+      return { file, severity: classifyProtectedFile(file, runDir) };
+    }
   }
   return null;
 }
@@ -1821,24 +1843,32 @@ function advanceState(state, spec, decision, { runDir } = {}) {
         const mergeGatePath = path.join(runDir, 'stages', finalStageDir, 'merge-gate.json');
         const mergeGate = runMergeGateCheck({ runDir, state, spec, mergeGatePath });
         if (!mergeGate.shaMatch) {
-          state.status = 'halted';
           const fetchFailed = Boolean(mergeGate.fetchFailed);
+          if (fetchFailed) {
+            state.status = 'completed';
+            state.mergePending = {
+              targetBranch: mergeGate.targetBranch,
+              reason: mergeGate.error,
+              mergeGate,
+              updatedAt: nowIso(),
+            };
+            state.haltReason = null;
+            return;
+          }
+          state.status = 'halted';
           state.haltReason = {
-            type: fetchFailed ? 'merge_gate_branch_not_on_remote' : 'merge_gate_sha_mismatch',
+            type: 'merge_gate_sha_mismatch',
             stage: state.currentStage,
             round: state.currentRound,
             targetBranch: mergeGate.targetBranch,
-            details: fetchFailed
-              ? `Merge gate failed: target branch '${mergeGate.targetBranch}' does not exist on remote. Has it been pushed? Error: ${mergeGate.error}`
-              : `Merge gate failed: local SHA ${mergeGate.localHeadSha?.slice(0, 7) ?? '?'} != remote/${mergeGate.targetBranch} SHA ${mergeGate.remoteHeadSha?.slice(0, 7) ?? '?'}. Push or rebase before completing.`,
-            blockers: [fetchFailed
-              ? `Remote branch '${mergeGate.targetBranch}' not found. Run: git push -u origin ${mergeGate.targetBranch}`
-              : 'Local SHA does not match remote target branch head. Push or rebase before completing.'],
+            details: `Merge gate failed: local SHA ${mergeGate.localHeadSha?.slice(0, 7) ?? '?'} != remote/${mergeGate.targetBranch} SHA ${mergeGate.remoteHeadSha?.slice(0, 7) ?? '?'}. Push or rebase before completing.`,
+            blockers: ['Local SHA does not match remote target branch head. Push or rebase before completing.'],
             mergeGate,
           };
           return;
         }
       }
+      state.mergePending = null;
       state.status = 'completed';
       return;
     }
@@ -2185,9 +2215,9 @@ async function runReviewerRole({ runDir, state, spec, paths, role, worktreeInfo 
     if (!fileExists(reportPath)) writeText(reportPath, `${text}\n`);
   }
 
-  const violated = detectProtectedWriteViolation(protectedFiles, protectedSnapshot);
+  const violated = detectProtectedWriteViolation(protectedFiles, protectedSnapshot, runDir);
   if (violated) {
-    violatedFile = violated;
+    violatedFile = violated.file;
   }
 
   return { role, output: text || output || null, timedOut, reportExisted, violatedFile, attemptErrors };
@@ -2633,18 +2663,18 @@ async function executeStage(runDir, state, spec) {
     });
     // Skip mtime-based violation check during timeout recovery — the producer may have
     // been mid-write when interrupted, causing spurious mtime changes on protected files.
-    const producerViolated = producerTimedOut ? null : detectProtectedWriteViolation(protectedFiles, protectedSnapshot);
+    const producerViolated = producerTimedOut ? null : detectProtectedWriteViolation(protectedFiles, protectedSnapshot, runDir);
     if (producerViolated) {
       state.status = 'halted';
       state.haltReason = {
         type: 'protected_file_modified',
         stage: stageName,
         round: state.currentRound,
-        details: `producer modified orchestrator-owned file ${producerViolated}`,
-        blockers: [`Protected file modified: ${producerViolated}`],
+        details: `producer modified orchestrator-owned file ${producerViolated.file}`,
+        blockers: [`Protected file modified: ${producerViolated.file}`],
       };
       saveState(runDir, state);
-      appendTimeline(runDir, `Sprint halted: producer modified protected file ${producerViolated}`);
+      appendTimeline(runDir, `Sprint halted: producer modified protected file ${producerViolated.file}`);
       writeStageFailureArtifacts({
         runDir,
         state,
@@ -2838,10 +2868,10 @@ async function executeStage(runDir, state, spec) {
             lastError: null,
           });
         }
-        const grViolated = detectProtectedWriteViolation(protectedFiles, protectedSnapshot);
+        const grViolated = detectProtectedWriteViolation(protectedFiles, protectedSnapshot, runDir);
         if (grViolated) {
-          appendTimeline(runDir, `global_reviewer modified protected file ${grViolated} — report invalidated`);
-          reviewerViolations.push({ role: 'global_reviewer', violatedFile: grViolated });
+          appendTimeline(runDir, `global_reviewer modified protected file ${grViolated.file} — report invalidated`);
+          reviewerViolations.push({ role: 'global_reviewer', violatedFile: grViolated.file });
         }
         if (reportExistsAndNonEmpty(grReportPath)) {
           appendTimeline(runDir, `global_reviewer completed stage ${stageName} round ${state.currentRound}`);
@@ -3164,7 +3194,6 @@ async function main() {
   }
 
   const { runDir, state } = loadOrInitState(args);
-  reconcileRunState(runDir, state);
   const spec = loadSpec(state, args);
 
   // Register graceful shutdown handlers now that state and runDir are available.
@@ -3270,7 +3299,9 @@ async function main() {
           `Status: ${state.status}`,
           `Stage: ${state.currentStage}`,
           `Round: ${state.currentRound}`,
-          'All stages finished.',
+          ...(state.mergePending
+            ? [`Merge pending: push branch '${state.mergePending.targetBranch}' before merge.`]
+            : ['All stages finished.']),
         ]);
       }
       if (state.status === 'halted') {
