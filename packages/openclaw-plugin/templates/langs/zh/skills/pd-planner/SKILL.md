@@ -1,6 +1,6 @@
 ---
 name: pd-planner
-description: 制定电影剧本式计划的智能体。将复杂任务分解为可执行的步骤。当需要制定实施计划时使用。
+description: 电影剧本式计划制定，将复杂任务分解为可执行的步骤。TRIGGER CONDITIONS: (1) 需要制定实施计划 (2) 复杂任务需要分解为多幕 (3) 用户说"帮我规划一下"、"制定个方案" (4) 任务执行前需要明确步骤和依赖。
 disable-model-invocation: true
 ---
 

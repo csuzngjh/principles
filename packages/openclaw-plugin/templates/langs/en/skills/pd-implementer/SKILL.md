@@ -1,6 +1,6 @@
 ---
 name: pd-implementer
-description: Agent that executes code modifications according to a plan. Implements code changes step by step. Use when executing code changes.
+description: Execute code modifications according to a plan, implementing changes step by step. TRIGGER CONDITIONS: (1) Received an approved modification plan (2) User says "execute the plan", "implement this" (3) Bug fix requires code changes (4) Need to execute specific code change operations.
 disable-model-invocation: true
 ---
 

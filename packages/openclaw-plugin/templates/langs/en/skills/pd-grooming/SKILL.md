@@ -1,10 +1,6 @@
 ---
 name: pd-grooming
-description: >
-  Perform a "Workspace Grooming" to archive or clean up scattered temporary files, maintaining digital cleanliness.
-  Use when user says "project is messy", "too many files", "need to organize", "clean up".
-  Strictly follows safety red lines: never touch business code, project configs, version control, or build outputs.
-  Only handles scattered temp files, draft notes, and poorly-named documents in the root directory.
+description: Perform a "Workspace Grooming" to archive or clean up scattered temporary files. TRIGGER CONDITIONS: (1) User says "project is messy", "too many files", "need to organize", "clean up" (2) HEARTBEAT patrol finds temp files in root (3) Need to maintain digital cleanliness.
 ---
 
 # 🧹 Skill: Workspace Grooming

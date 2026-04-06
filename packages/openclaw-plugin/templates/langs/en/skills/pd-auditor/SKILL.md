@@ -1,6 +1,6 @@
 ---
 name: pd-auditor
-description: Deductive audit agent. Uses axiom verification, system audit, and via negativa methods to verify system consistency. Use when auditing systems or processes.
+description: Deductive audit using axiom verification, system audit, and via negativa methods. TRIGGER CONDITIONS: (1) Need to audit system or process consistency (2) Verify core assumptions are self-consistent (3) Check component interactions are correct (4) Need to identify design flaws or logical contradictions.
 disable-model-invocation: true
 ---
 

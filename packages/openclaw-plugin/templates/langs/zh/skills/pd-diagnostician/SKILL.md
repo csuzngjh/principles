@@ -1,6 +1,6 @@
 ---
 name: pd-diagnostician
-description: 根因分析智能体。使用 verb/adjective + 5 Whys 方法进行系统性诊断。当需要分析 Pain 信号、工具失败、或系统性问题根因时使用。
+description: 根因分析，使用 verb/adjective + 5 Whys 方法进行系统性诊断。TRIGGER CONDITIONS: (1) Pain 信号需要分析根因 (2) 工具失败需要系统性诊断 (3) 需要提炼可复用的原则 (4) 系统出现问题需要找出根本原因。
 disable-model-invocation: true
 ---
 

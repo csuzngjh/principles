@@ -1,6 +1,6 @@
 ---
 name: pd-explorer
-description: Agent for rapid evidence collection. Used to locate and collect files, logs, and reproduction steps related to an issue. Use when quickly gathering information.
+description: Rapid evidence collection to locate files, logs, and reproduction steps related to an issue. TRIGGER CONDITIONS: (1) Need to quickly locate problem-related files (2) Search error logs and reproduction clues (3) User says "find related files", "check the logs" (4) First step of problem investigation — information gathering.
 disable-model-invocation: true
 ---
 

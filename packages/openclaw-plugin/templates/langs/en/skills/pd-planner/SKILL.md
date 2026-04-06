@@ -1,6 +1,6 @@
 ---
 name: pd-planner
-description: Agent that creates movie-script-style plans. Breaks complex tasks into executable steps. Use when creating implementation plans.
+description: Movie-script-style planning to break complex tasks into executable steps. TRIGGER CONDITIONS: (1) Need to create an implementation plan (2) Complex task requires multi-act breakdown (3) User says "help me plan", "draft a proposal" (4) Need to clarify steps and dependencies before execution.
 disable-model-invocation: true
 ---
 

@@ -1,11 +1,6 @@
 ---
 name: pain
-description: >
-  Manually inject a pain signal into the evolution system by writing to .state/.pain_flag.
-  Use when user reports the agent is stuck, repeating errors, heading wrong direction, or unresponsive for extended time,
-  or requests manual system reflection. Trigger scenarios: user says "you're stuck", "looping again", "wrong direction",
-  "no response", "force reflection", "record this issue", or provides human intervention feedback.
-  This is an executable skill — write pain flag immediately on trigger, do NOT say "no such skill" or look for other skill lists.
+description: Manually inject a pain signal into the evolution system by writing to .state/.pain_flag. TRIGGER CONDITIONS: (1) User reports agent stuck/looping/unresponsive (2) User says "record this issue", "force reflection", "trigger pain" (3) Tool failure with no follow-up action (4) User provides human intervention feedback.
 disable-model-invocation: true
 ---
 

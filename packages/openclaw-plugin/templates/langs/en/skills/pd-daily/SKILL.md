@@ -1,10 +1,6 @@
 ---
 name: pd-daily
-description: >
-  Configure and send daily evolution reports so users perceive "the system improves every day".
-  Use when user asks "what did you do today", "check progress", "give me a report", "send daily report".
-  Supports scheduled delivery (Feishu/email/IM), generates reports with growth highlights, pain signals, and trend comparisons.
-  If first run, guide through configuration; if already configured, generate and send the report directly.
+description: Configure and send daily evolution reports. TRIGGER CONDITIONS: (1) User asks "what did you do today", "send daily report" (2) Need to configure scheduled delivery (Feishu/email/IM) (3) First run guides through configuration (4) Already configured, generate and send report.
 disable-model-invocation: true
 ---
 

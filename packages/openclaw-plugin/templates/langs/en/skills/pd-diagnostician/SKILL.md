@@ -1,6 +1,6 @@
 ---
 name: pd-diagnostician
-description: Root cause analysis agent. Uses verb/adjective + 5 Whys method for systematic diagnosis. Use when analyzing pain signals, tool failures, or systemic issue root causes.
+description: Root cause analysis using verb/adjective + 5 Whys method for systematic diagnosis. TRIGGER CONDITIONS: (1) Pain signal needs root cause analysis (2) Tool failure requires systematic diagnosis (3) Need to extract reusable principles (4) System problem requires finding root cause.
 disable-model-invocation: true
 ---
 
