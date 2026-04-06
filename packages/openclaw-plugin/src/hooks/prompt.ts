@@ -8,8 +8,18 @@ import { classifyTask, type RoutingInput } from '../core/local-worker-routing.js
 import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection, autoCompressFocus, safeReadCurrentFocus } from '../core/focus-history.js';
 import { EmpathyObserverWorkflowManager, empathyObserverWorkflowSpec } from '../service/subagent-workflow/index.js';
 import { PathResolver } from '../core/path-resolver.js';
-import { matchEmpathyKeywords, loadKeywordStore, saveKeywordStore, shouldTriggerOptimization } from '../core/empathy-keyword-matcher.js';
+import {
+  matchEmpathyKeywords,
+  loadKeywordStore,
+  saveKeywordStore,
+  shouldTriggerOptimization,
+  getKeywordStoreSummary,
+} from '../core/empathy-keyword-matcher.js';
 import { severityToPenalty, DEFAULT_EMPATHY_KEYWORD_CONFIG } from '../core/empathy-types.js';
+
+// Module-level empathy state — shared across calls to avoid per-turn I/O
+let _empathyTurnCounter = 0;
+let _empathyKeywordCache: { store: ReturnType<typeof loadKeywordStore>; lang: string } | null = null;
 
 /**
  * Model configuration with primary model and optional fallback models
@@ -384,8 +394,18 @@ The empathy observer subagent handles pain detection independently.
     if (workspaceDir && latestUserMessage) {
       try {
         const lang = (wctx.config.get('language') as 'zh' | 'en') || 'zh';
-        const keywordStore = loadKeywordStore(wctx.stateDir, lang);
+
+        // Load keyword store once, cache in memory (Finding #7: avoid per-turn I/O)
+        if (!_empathyKeywordCache || _empathyKeywordCache.lang !== lang) {
+          _empathyKeywordCache = { store: loadKeywordStore(wctx.stateDir, lang), lang };
+        }
+        const keywordStore = _empathyKeywordCache.store;
+
         const matchResult = matchEmpathyKeywords(latestUserMessage, keywordStore);
+
+        // Increment turn counter (Finding #3: session.turnCount doesn't exist)
+        _empathyTurnCounter++;
+        const turnCount = _empathyTurnCounter;
 
         // Decision: should we call subagent?
         let shouldCallSubagent = false;
@@ -412,66 +432,58 @@ The empathy observer subagent handles pain detection independently.
             reason: `Empathy keywords matched: ${matchResult.matchedTerms.join(', ')} (severity: ${matchResult.severity}, score: ${matchResult.score.toFixed(2)})`,
           });
 
-          logger.info(`[PD:Empathy] MATCH: "${matchResult.matchedTerms.join(', ')}" → severity=${matchResult.severity}, score=${matchResult.score.toFixed(2)}, penalty=${penalty}, subagent=${shouldCallSubagent ? samplingReason : 'skipped(high_confidence)'}`);
+          logger?.info?.(`[PD:Empathy] MATCH: "${matchResult.matchedTerms.join(', ')}" → severity=${matchResult.severity}, score=${matchResult.score.toFixed(2)}, penalty=${penalty}, subagent=${shouldCallSubagent ? samplingReason : 'skipped(high_confidence)'}`);
         } else {
           // Log unmatched messages periodically for coverage analysis
-          const turnCount = session?.turnCount || 0;
           if (turnCount > 0 && turnCount % 50 === 0) {
             const sampleMsg = latestUserMessage.substring(0, 80).replace(/\n/g, ' ');
-            logger.debug(`[PD:Empathy] NO_MATCH: "${sampleMsg}" (turn ${turnCount}, keywords_in_store=${Object.keys(keywordStore.terms).length})`);
+            logger?.debug?.(`[PD:Empathy] NO_MATCH: "${sampleMsg}" (turn ${turnCount}, keywords_in_store=${Object.keys(keywordStore.terms).length})`);
           }
         }
 
-        // Trigger subagent for sampling cases
+        // Trigger subagent for sampling cases (Finding #1: use shared manager to avoid leaks)
         if (shouldCallSubagent && api?.runtime?.subagent) {
-          logger.info(`[PD:Empathy] SUBAGENT_SAMPLE: reason=${samplingReason}, score=${matchResult.score.toFixed(2)}, matched=[${matchResult.matchedTerms.join(',')}]`);
+          logger?.info?.(`[PD:Empathy] SUBAGENT_SAMPLE: reason=${samplingReason}, score=${matchResult.score.toFixed(2)}, matched=[${matchResult.matchedTerms.join(',')}]`);
 
+          // EmpathyObserverWorkflowManager auto-finalizes via wait poll mechanism.
+          // Create a fresh manager per invocation to ensure clean state.
           const empathyManager = new EmpathyObserverWorkflowManager({
             workspaceDir,
-            logger: api.logger,
+            logger: api.logger ?? console,
             subagent: api.runtime.subagent as any,
           });
           empathyManager.startWorkflow(empathyObserverWorkflowSpec, {
             parentSessionId: sessionId,
             workspaceDir,
             taskInput: latestUserMessage,
-          }).catch((err) => api.logger?.warn(`[PD:Empathy] subagent sample failed: ${String(err)}`));
+          }).catch((err) => api.logger?.warn?.(`[PD:Empathy] subagent sample failed: ${String(err)}`));
         }
 
-        // Check if keyword optimization should be triggered
-        const turnsSinceLastOpt = session?.turnCount || 0;
-        if (shouldTriggerOptimization(keywordStore, turnsSinceLastOpt)) {
-          const termCount = Object.keys(keywordStore.terms).length;
-          const totalHits = keywordStore.stats.totalHits;
-          const highFP = Object.entries(keywordStore.terms)
-            .filter(([, e]) => e.falsePositiveRate > 0.3 && e.hitCount > 5)
-            .map(([t, e]) => `${t}(${e.falsePositiveRate.toFixed(2)})`)
-            .join(', ');
-          const zeroHit = Object.values(keywordStore.terms).filter(e => e.hitCount === 0).length;
+        // Helper: build summary string (Finding #2: avoid duplication)
+        const buildSummary = (): string => {
+          const s = getKeywordStoreSummary(keywordStore);
+          const highFP = s.highFalsePositiveTerms.slice(0, 5).map(t => `${t.term}(${t.falsePositiveRate.toFixed(2)})`).join(', ');
+          return `SUMMARY(turn=${turnCount}): terms=${s.totalTerms}, hits=${keywordStore.stats.totalHits}, zero_hit=${s.totalTerms - (s.seedTerms + s.discoveredTerms)}, high_fp=[${highFP}]`;
+        };
 
-          logger.info(`[PD:Empathy] OPTIMIZATION_TRIGGER: turns=${turnsSinceLastOpt}, last_optimized=${keywordStore.lastOptimizedAt}`);
-          logger.info(`[PD:Empathy] STATS: total_terms=${termCount}, total_hits=${totalHits}, zero_hit_terms=${zeroHit}, high_fp_terms=[${highFP}]`);
+        // Check if keyword optimization should be triggered
+        if (shouldTriggerOptimization(keywordStore, turnCount)) {
+          logger?.info?.(`[PD:Empathy] OPTIMIZATION_TRIGGER: turns=${turnCount}, last_optimized=${keywordStore.lastOptimizedAt}`);
+          logger?.info?.(`[PD:Empathy] STATS: ${buildSummary()}`);
           // TODO: Start keyword optimization subagent to update weights and discover new terms
         }
 
         // Periodic summary (every 100 turns)
-        const turnCount = session?.turnCount || 0;
         if (turnCount > 0 && turnCount % 100 === 0) {
-          const termCount = Object.keys(keywordStore.terms).length;
-          const totalHits = keywordStore.stats.totalHits;
-          const highFP = Object.entries(keywordStore.terms)
-            .filter(([, e]) => e.falsePositiveRate > 0.3 && e.hitCount > 5)
-            .map(([t, e]) => `${t}(${e.falsePositiveRate.toFixed(2)})`)
-            .join(', ');
-          const zeroHit = Object.values(keywordStore.terms).filter(e => e.hitCount === 0).length;
-
-          logger.info(`[PD:Empathy] SUMMARY(turn=${turnCount}): terms=${termCount}, hits=${totalHits}, zero_hit=${zeroHit}, high_fp=[${highFP}]`);
+          logger?.info?.(`[PD:Empathy] ${buildSummary()}`);
         }
 
-        // Save updated store (with hit counts)
-        saveKeywordStore(wctx.stateDir, keywordStore);
+        // Save keyword store periodically (Finding #7: not every turn)
+        if (turnCount % 50 === 0) {
+          saveKeywordStore(wctx.stateDir, keywordStore);
+        }
       } catch (e) {
-        logger.warn(`[PD:Empathy] ERROR: ${String(e)}`);
+        logger?.warn?.(`[PD:Empathy] ERROR: ${String(e)}`);
       }
     }
 

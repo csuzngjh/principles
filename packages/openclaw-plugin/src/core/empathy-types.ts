@@ -95,6 +95,8 @@ export interface SeedKeywordEntry {
   term: string;
   weight: number;
   category: 'negation' | 'anger' | 'disappointment' | 'escalation';
+  /** Initial false positive rate — higher for generic words, lower for specific anger signals */
+  initialFalsePositiveRate?: number;
 }
 
 /**
@@ -102,48 +104,48 @@ export interface SeedKeywordEntry {
  * These are the initial keywords before the LLM starts discovering new ones.
  */
 export const EMPATHY_SEED_KEYWORDS: SeedKeywordEntry[] = [
-  // 否定词 (Negation)
-  { term: '不对', weight: 0.5, category: 'negation' },
-  { term: '错了', weight: 0.5, category: 'negation' },
-  { term: '搞错了', weight: 0.5, category: 'negation' },
-  { term: '不行', weight: 0.4, category: 'negation' },
-  { term: '没用', weight: 0.4, category: 'negation' },
-  { term: '重做', weight: 0.6, category: 'negation' },
-  { term: '重写', weight: 0.6, category: 'negation' },
-  { term: 'not right', weight: 0.5, category: 'negation' },
-  { term: 'wrong', weight: 0.5, category: 'negation' },
-  { term: 'redo', weight: 0.6, category: 'negation' },
-  { term: 'start over', weight: 0.6, category: 'negation' },
-  
-  // 愤怒表达 (Anger)
-  { term: '垃圾', weight: 0.9, category: 'anger' },
-  { term: '蠢', weight: 0.8, category: 'anger' },
-  { term: '废物', weight: 0.9, category: 'anger' },
-  { term: '白做', weight: 0.7, category: 'anger' },
-  { term: '浪费时间', weight: 0.8, category: 'anger' },
-  { term: 'garbage', weight: 0.9, category: 'anger' },
-  { term: 'stupid', weight: 0.8, category: 'anger' },
-  { term: 'useless', weight: 0.7, category: 'anger' },
-  { term: 'waste of time', weight: 0.8, category: 'anger' },
-  
-  // 失望信号 (Disappointment)
-  { term: '不行啊', weight: 0.5, category: 'disappointment' },
-  { term: '还是不对', weight: 0.6, category: 'disappointment' },
-  { term: '没解决', weight: 0.5, category: 'disappointment' },
-  { term: '没用上', weight: 0.5, category: 'disappointment' },
-  { term: '不能用', weight: 0.5, category: 'disappointment' },
-  { term: 'still not working', weight: 0.6, category: 'disappointment' },
-  { term: "doesn't help", weight: 0.5, category: 'disappointment' },
-  { term: 'not useful', weight: 0.5, category: 'disappointment' },
-  
-  // 升级信号 (Escalation)
-  { term: '你自己看', weight: 0.8, category: 'escalation' },
-  { term: '你确定吗', weight: 0.7, category: 'escalation' },
-  { term: '你是不是没理解', weight: 0.8, category: 'escalation' },
-  { term: '你到底在干什么', weight: 0.9, category: 'escalation' },
-  { term: 'are you sure', weight: 0.7, category: 'escalation' },
-  { term: 'did you even read', weight: 0.8, category: 'escalation' },
-  { term: 'what are you doing', weight: 0.8, category: 'escalation' },
+  // 否定词 (Negation) — generic, higher FPR
+  { term: '不对', weight: 0.5, category: 'negation', initialFalsePositiveRate: 0.3 },
+  { term: '错了', weight: 0.5, category: 'negation', initialFalsePositiveRate: 0.3 },
+  { term: '搞错了', weight: 0.5, category: 'negation', initialFalsePositiveRate: 0.25 },
+  { term: '不行', weight: 0.4, category: 'negation', initialFalsePositiveRate: 0.35 },
+  { term: '没用', weight: 0.4, category: 'negation', initialFalsePositiveRate: 0.3 },
+  { term: '重做', weight: 0.6, category: 'negation', initialFalsePositiveRate: 0.15 },
+  { term: '重写', weight: 0.6, category: 'negation', initialFalsePositiveRate: 0.15 },
+  { term: 'not right', weight: 0.5, category: 'negation', initialFalsePositiveRate: 0.3 },
+  { term: 'wrong', weight: 0.5, category: 'negation', initialFalsePositiveRate: 0.3 },
+  { term: 'redo', weight: 0.6, category: 'negation', initialFalsePositiveRate: 0.15 },
+  { term: 'start over', weight: 0.6, category: 'negation', initialFalsePositiveRate: 0.15 },
+
+  // 愤怒表达 (Anger) — specific, lower FPR
+  { term: '垃圾', weight: 0.9, category: 'anger', initialFalsePositiveRate: 0.05 },
+  { term: '蠢', weight: 0.8, category: 'anger', initialFalsePositiveRate: 0.1 },
+  { term: '废物', weight: 0.9, category: 'anger', initialFalsePositiveRate: 0.05 },
+  { term: '白做', weight: 0.7, category: 'anger', initialFalsePositiveRate: 0.15 },
+  { term: '浪费时间', weight: 0.8, category: 'anger', initialFalsePositiveRate: 0.1 },
+  { term: 'garbage', weight: 0.9, category: 'anger', initialFalsePositiveRate: 0.05 },
+  { term: 'stupid', weight: 0.8, category: 'anger', initialFalsePositiveRate: 0.1 },
+  { term: 'useless', weight: 0.7, category: 'anger', initialFalsePositiveRate: 0.15 },
+  { term: 'waste of time', weight: 0.8, category: 'anger', initialFalsePositiveRate: 0.1 },
+
+  // 失望信号 (Disappointment) — moderate FPR
+  { term: '不行啊', weight: 0.5, category: 'disappointment', initialFalsePositiveRate: 0.25 },
+  { term: '还是不对', weight: 0.6, category: 'disappointment', initialFalsePositiveRate: 0.2 },
+  { term: '没解决', weight: 0.5, category: 'disappointment', initialFalsePositiveRate: 0.25 },
+  { term: '没用上', weight: 0.5, category: 'disappointment', initialFalsePositiveRate: 0.25 },
+  { term: '不能用', weight: 0.5, category: 'disappointment', initialFalsePositiveRate: 0.25 },
+  { term: 'still not working', weight: 0.6, category: 'disappointment', initialFalsePositiveRate: 0.2 },
+  { term: "doesn't help", weight: 0.5, category: 'disappointment', initialFalsePositiveRate: 0.25 },
+  { term: 'not useful', weight: 0.5, category: 'disappointment', initialFalsePositiveRate: 0.25 },
+
+  // 升级信号 (Escalation) — specific context, lower FPR
+  { term: '你自己看', weight: 0.8, category: 'escalation', initialFalsePositiveRate: 0.1 },
+  { term: '你确定吗', weight: 0.7, category: 'escalation', initialFalsePositiveRate: 0.15 },
+  { term: '你是不是没理解', weight: 0.8, category: 'escalation', initialFalsePositiveRate: 0.1 },
+  { term: '你到底在干什么', weight: 0.9, category: 'escalation', initialFalsePositiveRate: 0.05 },
+  { term: 'are you sure', weight: 0.7, category: 'escalation', initialFalsePositiveRate: 0.15 },
+  { term: 'did you even read', weight: 0.8, category: 'escalation', initialFalsePositiveRate: 0.1 },
+  { term: 'what are you doing', weight: 0.8, category: 'escalation', initialFalsePositiveRate: 0.1 },
 ];
 
 // =========================================================================

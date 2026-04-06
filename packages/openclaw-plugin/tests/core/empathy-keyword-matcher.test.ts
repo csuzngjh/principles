@@ -31,19 +31,37 @@ describe('Empathy Keyword Matcher', () => {
   describe('createDefaultKeywordStore', () => {
     it('should create store with Chinese keywords', () => {
       const store = createDefaultKeywordStore('zh');
-      
+
       expect(store.version).toBe(1);
       expect(Object.keys(store.terms).length).toBeGreaterThan(0);
-      
+
       const chineseTerms = Object.keys(store.terms).filter(t => /[\u4e00-\u9fa5]/.test(t));
       expect(chineseTerms.length).toBeGreaterThan(0);
     });
 
     it('should create store with only English keywords', () => {
       const store = createDefaultKeywordStore('en');
-      
+
       const chineseTerms = Object.keys(store.terms).filter(t => /[\u4e00-\u9fa5]/.test(t));
       expect(chineseTerms.length).toBe(0);
+    });
+
+    it('should differentiate FPR based on keyword specificity', () => {
+      const store = createDefaultKeywordStore('zh');
+
+      // Strong anger keywords should have low FPR
+      expect(store.terms['垃圾'].falsePositiveRate).toBe(0.05);
+      expect(store.terms['废物'].falsePositiveRate).toBe(0.05);
+
+      // Generic negation should have higher FPR
+      expect(store.terms['不对'].falsePositiveRate).toBe(0.3);
+      expect(store.terms['不行'].falsePositiveRate).toBe(0.35);
+
+      // All FPR values should be in reasonable range
+      for (const entry of Object.values(store.terms)) {
+        expect(entry.falsePositiveRate).toBeGreaterThanOrEqual(0.05);
+        expect(entry.falsePositiveRate).toBeLessThanOrEqual(0.35);
+      }
     });
   });
 

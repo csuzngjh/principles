@@ -50,7 +50,7 @@ export function createDefaultKeywordStore(language: 'zh' | 'en' = 'zh'): Empathy
         weight: seed.weight,
         source: 'seed',
         hitCount: 0,
-        falsePositiveRate: 0.1, // Conservative initial estimate
+        falsePositiveRate: seed.initialFalsePositiveRate ?? 0.15, // Differentiated FPR (Finding #6)
       };
     }
   }
