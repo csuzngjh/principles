@@ -396,21 +396,51 @@ The empathy observer subagent handles pain detection independently.
             reason: `Empathy keywords matched: ${matchResult.matchedTerms.join(', ')} (severity: ${matchResult.severity}, score: ${matchResult.score.toFixed(2)})`,
           });
 
-          logger?.info?.(`[PD:Empathy] Keyword match in user message: ${matchResult.matchedTerms.join(', ')} → severity=${matchResult.severity}, penalty=${penalty}`);
+          logger.info(`[PD:Empathy] MATCH: "${matchResult.matchedTerms.join(', ')}" → severity=${matchResult.severity}, score=${matchResult.score.toFixed(2)}, penalty=${penalty}`);
+        } else {
+          // Log unmatched messages periodically (every 50th turn) for coverage analysis
+          const turnCount = session?.turnCount || 0;
+          if (turnCount > 0 && turnCount % 50 === 0) {
+            const sampleMsg = latestUserMessage.substring(0, 80).replace(/\n/g, ' ');
+            logger.debug(`[PD:Empathy] NO_MATCH: "${sampleMsg}" (turn ${turnCount}, keywords_in_store=${Object.keys(keywordStore.terms).length})`);
+          }
         }
 
         // Check if subagent optimization should be triggered
-        const turnsSinceLastOpt = session?.turnCount || 0; // Approximate
+        const turnsSinceLastOpt = session?.turnCount || 0;
         if (shouldTriggerOptimization(keywordStore, turnsSinceLastOpt)) {
-          logger?.info?.(`[PD:Empathy] Triggering keyword optimization subagent`);
+          const termCount = Object.keys(keywordStore.terms).length;
+          const totalHits = keywordStore.stats.totalHits;
+          const highFP = Object.entries(keywordStore.terms)
+            .filter(([, e]) => e.falsePositiveRate > 0.3 && e.hitCount > 5)
+            .map(([t, e]) => `${t}(${e.falsePositiveRate.toFixed(2)})`)
+            .join(', ');
+          const zeroHit = Object.values(keywordStore.terms).filter(e => e.hitCount === 0).length;
+
+          logger.info(`[PD:Empathy] OPTIMIZATION_TRIGGER: turns=${turnsSinceLastOpt}, last_optimized=${keywordStore.lastOptimizedAt}`);
+          logger.info(`[PD:Empathy] STATS: total_terms=${termCount}, total_hits=${totalHits}, zero_hit_terms=${zeroHit}, high_fp_terms=[${highFP}]`);
           // TODO: Start keyword optimization subagent
-          // This will be implemented in a future step
+          // This will analyze recent conversations and update keyword weights
+        }
+
+        // Periodic summary (every 100 turns)
+        const turnCount = session?.turnCount || 0;
+        if (turnCount > 0 && turnCount % 100 === 0) {
+          const termCount = Object.keys(keywordStore.terms).length;
+          const totalHits = keywordStore.stats.totalHits;
+          const highFP = Object.entries(keywordStore.terms)
+            .filter(([, e]) => e.falsePositiveRate > 0.3 && e.hitCount > 5)
+            .map(([t, e]) => `${t}(${e.falsePositiveRate.toFixed(2)})`)
+            .join(', ');
+          const zeroHit = Object.values(keywordStore.terms).filter(e => e.hitCount === 0).length;
+
+          logger.info(`[PD:Empathy] SUMMARY(turn=${turnCount}): terms=${termCount}, hits=${totalHits}, zero_hit=${zeroHit}, high_fp=[${highFP}]`);
         }
 
         // Save updated store (with hit counts)
         saveKeywordStore(wctx.stateDir, keywordStore);
       } catch (e) {
-        logger?.warn?.(`[PD:Empathy] Keyword matching failed: ${String(e)}`);
+        logger.warn(`[PD:Empathy] ERROR: ${String(e)}`);
       }
     }
 
