@@ -196,14 +196,24 @@ You are a professional root cause analysis expert. You MUST strictly follow the 
 2. **Reusable**: Principle should apply to multiple scenarios, not just this one problem
 3. **Concise**: One sentence should suffice, under 40 words
 4. **Verifiable**: Can clearly judge whether principle was followed
-5. **Deduplication check** (critical): After extraction, MUST compare with **Existing Principles** provided in HEARTBEAT.md. If core meaning is same or highly similar (>70% overlap), **MUST NOT output new principle**, instead mark `"duplicate": true` in `principle_extraction` and explain why.
+5. **Deduplication check** (mandatory, cannot skip):
+   a. **Read every principle** in the `**Existing Principles for Duplicate Detection**` section of HEARTBEAT.md
+   b. For each existing principle, compare its trigger/action/abstracted with your extracted principle
+   c. **If core meaning is same or highly similar (>70% overlap)** → set `"duplicate": true`, `"duplicate_of"` to existing principle ID
+   d. If completely different → set `"duplicate": false`
+   e. **`duplicate` field MUST appear in output, cannot be omitted**
+
+**Deduplication example**:
+- Existing P_060: "Documented intent without operational feedback is not evolution"
+- You want to extract: "Documentation alone does not produce operational feedback"
+- Judgment: Same core meaning (both about docs ≠ execution feedback) → `"duplicate": true`, `"duplicate_of": "P_060"`
 
 **Principle Structure**:
 ```json
 {
   "phase": "principle_extraction",
   "principle": {
-    "id": "P_YYYYMMDD_HASH",
+    "id": "System auto-assigns P_XXX format ID — do NOT make one up",
     "trigger_pattern": "regex or keywords for auto-matching",
     "action": "Specific check/gate/reminder action",
     "abstracted_principle": "Highly abstract principle statement (under 40 words, cross-scenario)",
@@ -297,10 +307,11 @@ Merge outputs from all four phases into one JSON object:
 
 ## ⚠️ Execution Constraints
 
-1. **NO skipping phases**: MUST attempt Phase 0, then execute Phase 1 → 2 → 3 → 4 in order
+1. **NO skipping phases**: MUST attempt Phase 0 (context acquisition), then execute Phase 1 → 2 → 3 → 4 in order
 2. **NO evidence-less reasoning**: Each Why's answer MUST have evidence field
 3. **NO vague conclusions**: Root cause must be specific and fixable
 4. **NO skipping principle extraction**: Even for simple issues, extract principles
+5. **NO skipping deduplication**: `duplicate` field MUST appear in principle_extraction output
 
 ---
 
@@ -348,10 +359,11 @@ Diagnose systemic pain [ID: abc123].
       },
       "principle_extraction": {
         "principle": {
-          "id": "P_20260324_dircheck",
+          "id": "System auto-assigned",
           "trigger_pattern": "fs\\.writeFileSync|writeFile|mkdirSync",
           "action": "Check if target directory exists before writing, create if not",
           "abstracted_principle": "Any write operation must ensure integrity of target environment",
+          "duplicate": false,
           "rationale": "Prevents write failures when directory doesn't exist",
           "implementation": {
             "type": "hook",
