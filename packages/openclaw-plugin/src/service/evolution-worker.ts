@@ -733,7 +733,11 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                 if (fs.existsSync(reportPath)) {
                     try {
                         const reportData = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
-                        const principle = reportData?.diagnosis_report?.principle || reportData?.principle;
+                        // Check ALL known nesting paths — matches subagent.ts parseDiagnosticianReport
+                        const principle = reportData?.principle
+                            || reportData?.phases?.principle_extraction?.principle
+                            || reportData?.diagnosis_report?.principle
+                            || reportData?.diagnosis_report?.phases?.principle_extraction?.principle;
                         if (principle?.trigger_pattern && principle?.action) {
                             logger.info(`[PD:EvolutionWorker] Marker fallback: creating principle from report for task ${task.id} (hook may have missed it)`);
                             const principleId = wctx.evolutionReducer.createPrincipleFromDiagnosis({
@@ -807,7 +811,10 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     let principleCreated = false;
                     try {
                         const reportData = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
-                        const principle = reportData?.diagnosis_report?.principle || reportData?.principle;
+                        const principle = reportData?.principle
+                            || reportData?.phases?.principle_extraction?.principle
+                            || reportData?.diagnosis_report?.principle
+                            || reportData?.diagnosis_report?.phases?.principle_extraction?.principle;
                         if (principle?.trigger_pattern && principle?.action) {
                             const principleId = wctx.evolutionReducer.createPrincipleFromDiagnosis({
                                 painId: task.id,
