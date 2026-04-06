@@ -27,12 +27,11 @@ The agent must be able to: detect pain → diagnose root cause → extract princ
 - **Gate Split** — Separate gate module into independent concerns (gate.ts → gate-block-helper.ts, gfi-gate.ts) — v1.0
 - **Input Quarantine** — PD-specific input isolation layer — v1.0
 - **Defaults & Errors** — Centralized configuration and error handling — v1.0
+- **NocturnalWorkflowManager** — Migrated `OpenClawTrinityRuntimeAdapter` to WorkflowManager interface; unified subagent lifecycle with stub-based fallback and enhanced debug summary — v1.5
 
 ### Active
 
 <!-- Current scope. Building toward these. -->
-
-- [ ] **NocturnalWorkflowManager** — Migrate `OpenClawTrinityRuntimeAdapter` to WorkflowManager interface; unified subagent lifecycle for all helper workflows — v1.5
 
 ### Out of Scope
 
@@ -97,4 +96,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-05 after v1.5 milestone started*
+*Last updated: 2026-04-06 after Phase 09 (v1.5) complete*
