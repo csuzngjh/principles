@@ -102,6 +102,24 @@ describe('Pain Context Extractor', () => {
       expect(result).toBe('');
     });
 
+    it('rejects path traversal session IDs', async () => {
+      const { extractRecentConversation } = await import(
+        '../../src/core/pain-context-extractor.js'
+      );
+      const result1 = await extractRecentConversation('../../etc/passwd', 'main');
+      expect(result1).toBe('');
+      const result2 = await extractRecentConversation('sess/../../../etc/shadow', 'main');
+      expect(result2).toBe('');
+    });
+
+    it('rejects path traversal agent IDs', async () => {
+      const { extractRecentConversation } = await import(
+        '../../src/core/pain-context-extractor.js'
+      );
+      const result = await extractRecentConversation('sess1', '../../etc');
+      expect(result).toBe('');
+    });
+
     it('extracts user and assistant messages', async () => {
       createSessionFile('sess1', [
         makeMessage('user', ['Hello, please help me']),

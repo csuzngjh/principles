@@ -38,6 +38,9 @@ const MAX_TURN_CHARS = 250;
 /** Max total output */
 const MAX_OUTPUT_CHARS = 1500;
 
+/** Valid characters for session IDs and agent IDs — prevents path traversal */
+const SAFE_ID_REGEX = /^[a-zA-Z0-9_-]+$/;
+
 function getAgentsDir(): string {
   return process.env.PD_TEST_AGENTS_DIR || path.join(os.homedir(), '.openclaw', 'agents');
 }
@@ -52,14 +55,15 @@ function safeTail(filePath: string): string[] {
     const stat = fs.statSync(filePath);
     if (stat.size === 0) return [];
 
+    const isTruncated = stat.size > TAIL_READ_SIZE;
     const readSize = Math.min(stat.size, TAIL_READ_SIZE);
     const buffer = Buffer.alloc(readSize);
     const fd = fs.openSync(filePath, 'r');
     try {
       fs.readSync(fd, buffer, 0, readSize, stat.size - readSize);
       const content = buffer.toString('utf8');
-      const firstNewline = content.indexOf('\n');
-      const validContent = firstNewline > 0 ? content.slice(firstNewline + 1) : content;
+      // Only strip first line if file was actually truncated (started mid-line)
+      const validContent = isTruncated ? content.slice(content.indexOf('\n') + 1) : content;
       return validContent.split('\n').filter(l => l.trim().length > 0);
     } finally {
       fs.closeSync(fd);
@@ -190,9 +194,10 @@ function extractTurn(msg: ParsedMessage): string | null {
 export async function extractRecentConversation(
   sessionId: string,
   agentId: string = 'main',
-  _maxTurns: number = MAX_TURNS,
+  maxTurns: number = MAX_TURNS,
 ): Promise<string> {
-  if (!sessionId || sessionId.length < 5) return '';
+  if (!sessionId || sessionId.length < 5 || !SAFE_ID_REGEX.test(sessionId)) return '';
+  if (agentId && !SAFE_ID_REGEX.test(agentId)) return '';
   try {
     const jsonlPath = path.join(getAgentsDir(), agentId, 'sessions', `${sessionId}.jsonl`);
     const lines = safeTail(jsonlPath);
@@ -205,7 +210,7 @@ export async function extractRecentConversation(
       if (turn) turns.push(turn);
     }
 
-    const recent = turns.slice(-_maxTurns);
+    const recent = turns.slice(-maxTurns);
     if (recent.length === 0) return '';
     const result = recent.join('\n');
     return result.length > MAX_OUTPUT_CHARS ? result.substring(0, MAX_OUTPUT_CHARS - 3) + '...' : result;
@@ -224,7 +229,8 @@ export async function extractFailedToolContext(
   toolName: string,
   filePath?: string,
 ): Promise<string> {
-  if (!sessionId || sessionId.length < 5 || !toolName) return '';
+  if (!sessionId || sessionId.length < 5 || !SAFE_ID_REGEX.test(sessionId) || !toolName) return '';
+  if (agentId && !SAFE_ID_REGEX.test(agentId)) return '';
   try {
     const jsonlPath = path.join(getAgentsDir(), agentId, 'sessions', `${sessionId}.jsonl`);
     const lines = safeTail(jsonlPath);
