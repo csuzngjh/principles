@@ -23,18 +23,27 @@ vi.mock('../../src/core/nocturnal-paths.js', () => ({
 
 import { NocturnalWorkflowManager, nocturnalWorkflowSpec } from '../../src/service/subagent-workflow/nocturnal-workflow-manager.js';
 import { runTrinityAsync } from '../../src/core/nocturnal-trinity.js';
-import type { TrinityStageFailure, TrinityResult } from '../../src/core/nocturnal-trinity.js';
+import type { TrinityStageFailure, TrinityResult, DreamerOutput, PhilosopherOutput, TrinityDraftArtifact, TrinityTelemetry, TrinityConfig } from '../../src/core/nocturnal-trinity.js';
 
 const mockRunTrinityAsync = runTrinityAsync as ReturnType<typeof vi.fn>;
+
+function createMockRuntimeAdapter() {
+    return {
+        invokeDreamer: vi.fn<() => Promise<DreamerOutput>>(),
+        invokePhilosopher: vi.fn<() => Promise<PhilosopherOutput>>(),
+        invokeScribe: vi.fn<() => Promise<TrinityDraftArtifact | null>>(),
+    } as unknown as TrinityRuntimeAdapter;
+}
 
 describe('NocturnalWorkflowManager', () => {
     let manager: NocturnalWorkflowManager;
     const mockLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
-    const mockRuntimeAdapter = {} as TrinityRuntimeAdapter;
+    let mockRuntimeAdapter: ReturnType<typeof createMockRuntimeAdapter>;
 
     beforeEach(() => {
         vi.useFakeTimers({ shouldAdvanceTime: true });
         vi.clearAllMocks();
+        mockRuntimeAdapter = createMockRuntimeAdapter();
         manager = new NocturnalWorkflowManager({
             workspaceDir: '/tmp/test-workspace',
             stateDir: '/tmp/test-workspace/.state',
@@ -65,15 +74,22 @@ describe('NocturnalWorkflowManager', () => {
         });
     });
 
-    describe('NOC-02: Trinity async path (useTrinity=true)', () => {
-        it('calls runTrinityAsync with snapshot and principleId', async () => {
-            const mockResult: TrinityResult = {
-                success: true,
-                telemetry: { chainMode: 'trinity', usedStubs: false, dreamerPassed: true, philosopherPassed: true, scribePassed: true, candidateCount: 3, selectedCandidateIndex: 0, stageFailures: [] },
-                failures: [],
-                fallbackOccurred: false,
+    describe('NOC-02: Trinity async path via runtimeAdapter (useTrinity=true)', () => {
+        it('calls invokeDreamer with snapshot and principleId', async () => {
+            const mockDreamerOutput: DreamerOutput = {
+                valid: true,
+                candidates: [],
+                generatedAt: new Date().toISOString(),
             };
-            mockRunTrinityAsync.mockResolvedValue(mockResult);
+            const mockPhilosopherOutput: PhilosopherOutput = {
+                valid: true,
+                judgments: [],
+                overallAssessment: '',
+                generatedAt: new Date().toISOString(),
+            };
+            mockRuntimeAdapter.invokeDreamer.mockResolvedValue(mockDreamerOutput);
+            mockRuntimeAdapter.invokePhilosopher.mockResolvedValue(mockPhilosopherOutput);
+            mockRuntimeAdapter.invokeScribe.mockResolvedValue({} as TrinityDraftArtifact);
 
             await manager.startWorkflow(nocturnalWorkflowSpec, {
                 parentSessionId: 'session-123',
@@ -87,12 +103,10 @@ describe('NocturnalWorkflowManager', () => {
             // Flush microtasks so the Promise.resolve().then() callback runs
             vi.runAllTicks();
 
-            expect(mockRunTrinityAsync).toHaveBeenCalledWith(
-                expect.objectContaining({
-                    snapshot: expect.objectContaining({ sessionId: 'test-session' }),
-                    principleId: 'principle-001',
-                    config: expect.objectContaining({ useTrinity: true }),
-                })
+            expect(mockRuntimeAdapter.invokeDreamer).toHaveBeenCalledWith(
+                expect.objectContaining({ sessionId: 'test-session' }),
+                'principle-001',
+                expect.any(Number)
             );
         });
     });
@@ -175,76 +189,65 @@ describe('NocturnalWorkflowManager', () => {
         });
     });
 
-    describe('NOC-07: runTrinityAsync integration for Trinity chain', () => {
-        it('calls runTrinityAsync when metadata contains snapshot and principleId', async () => {
-            const mockResult: TrinityResult = {
-                success: true,
-                telemetry: {
-                    chainMode: 'trinity',
-                    usedStubs: false,
-                    dreamerPassed: true,
-                    philosopherPassed: true,
-                    scribePassed: true,
-                    candidateCount: 3,
-                    selectedCandidateIndex: 0,
-                    stageFailures: [],
-                },
-                failures: [],
-                fallbackOccurred: false,
-            };
-            mockRunTrinityAsync.mockResolvedValue(mockResult);
+    describe('NOC-07: Trinity chain via runtimeAdapter', () => {
+        it('calls runtimeAdapter stage methods when metadata contains snapshot and principleId', async () => {
+            vi.useRealTimers(); // Disable fake timers for this async test
+            try {
+                const mockDreamerOutput: DreamerOutput = {
+                    valid: true,
+                    candidates: [],
+                    generatedAt: new Date().toISOString(),
+                };
+                const mockPhilosopherOutput: PhilosopherOutput = {
+                    valid: true,
+                    judgments: [],
+                    overallAssessment: 'ok',
+                    generatedAt: new Date().toISOString(),
+                };
+                mockRuntimeAdapter.invokeDreamer.mockResolvedValue(mockDreamerOutput);
+                mockRuntimeAdapter.invokePhilosopher.mockResolvedValue(mockPhilosopherOutput);
+                mockRuntimeAdapter.invokeScribe.mockResolvedValue({ selectedCandidateIndex: 0 } as TrinityDraftArtifact);
 
-            const mgr = new NocturnalWorkflowManager({
-                workspaceDir: '/tmp/test-workspace',
-                stateDir: '/tmp/test-workspace/.state',
-                logger: mockLogger as any,
-                runtimeAdapter: mockRuntimeAdapter,
-            });
+                await manager.startWorkflow(nocturnalWorkflowSpec, {
+                    parentSessionId: 'session-123',
+                    taskInput: {},
+                    metadata: {
+                        snapshot: { sessionId: 'test-session', stats: { totalAssistantTurns: 5 } } as any,
+                        principleId: 'principle-001',
+                    },
+                });
 
-            await mgr.startWorkflow(nocturnalWorkflowSpec, {
-                parentSessionId: 'session-123',
-                taskInput: {},
-                metadata: {
-                    snapshot: { sessionId: 'test-session', stats: { totalAssistantTurns: 5 } } as any,
-                    principleId: 'principle-001',
-                },
-            });
+                // Give async chain time to complete
+                await new Promise(resolve => setTimeout(resolve, 10));
 
-            // Flush microtasks
-            vi.runAllTicks();
-
-            // Verify runTrinityAsync was called with snapshot and principleId
-            expect(mockRunTrinityAsync).toHaveBeenCalledWith(
-                expect.objectContaining({
-                    snapshot: expect.objectContaining({ sessionId: 'test-session' }),
-                    principleId: 'principle-001',
-                    config: expect.objectContaining({
-                        useTrinity: true,
-                        useStubs: false,
-                    }),
-                })
-            );
-
-            mgr.dispose();
+                // Verify invokeDreamer was called (Stage 1 of Trinity chain)
+                expect(mockRuntimeAdapter.invokeDreamer).toHaveBeenCalled();
+                // Verify invokePhilosopher was called (Stage 2)
+                expect(mockRuntimeAdapter.invokePhilosopher).toHaveBeenCalled();
+                // Verify invokeScribe was called (Stage 3)
+                expect(mockRuntimeAdapter.invokeScribe).toHaveBeenCalled();
+            } finally {
+                vi.useFakeTimers({ shouldAdvanceTime: true });
+            }
         });
 
         it('startWorkflow returns immediately with state=active (NOC-07)', async () => {
-            const mockResult: TrinityResult = {
-                success: true,
-                telemetry: { chainMode: 'trinity', usedStubs: false, dreamerPassed: true, philosopherPassed: true, scribePassed: true, candidateCount: 3, selectedCandidateIndex: 0, stageFailures: [] },
-                failures: [],
-                fallbackOccurred: false,
+            const mockDreamerOutput: DreamerOutput = {
+                valid: true,
+                candidates: [],
+                generatedAt: new Date().toISOString(),
             };
-            mockRunTrinityAsync.mockResolvedValue(mockResult);
+            const mockPhilosopherOutput: PhilosopherOutput = {
+                valid: true,
+                judgments: [],
+                overallAssessment: '',
+                generatedAt: new Date().toISOString(),
+            };
+            mockRuntimeAdapter.invokeDreamer.mockResolvedValue(mockDreamerOutput);
+            mockRuntimeAdapter.invokePhilosopher.mockResolvedValue(mockPhilosopherOutput);
+            mockRuntimeAdapter.invokeScribe.mockResolvedValue({ selectedCandidateIndex: 0 } as TrinityDraftArtifact);
 
-            const mgr = new NocturnalWorkflowManager({
-                workspaceDir: '/tmp/test-workspace',
-                stateDir: '/tmp/test-workspace/.state',
-                logger: mockLogger as any,
-                runtimeAdapter: mockRuntimeAdapter,
-            });
-
-            const handle = await mgr.startWorkflow(nocturnalWorkflowSpec, {
+            const handle = await manager.startWorkflow(nocturnalWorkflowSpec, {
                 parentSessionId: 'session-123',
                 taskInput: {},
                 metadata: {
@@ -256,8 +259,6 @@ describe('NocturnalWorkflowManager', () => {
             // For Trinity async path, handle.state should be 'active' immediately
             // (Implementation uses Promise.resolve().then() to offload Trinity)
             expect(handle.state).toBe('active');
-
-            mgr.dispose();
         });
     });
 
