@@ -1,99 +1,80 @@
-# Principles Disciple (PD)
+# Principles - AI Agent Principle Evolution System
 
 ## What This Is
 
-OpenClaw plugin for self-evolving AI agents. Learns from pain signals (tool failures, user friction), performs root-cause diagnosis, extracts explicit principles, and continuously improves behavior through a structured evolution loop. The agent gets "smarter" by internalizing lessons as reusable principles.
+Principles is a principle-evolution system for AI coding agents. It detects pain signals, proposes candidate principles, gates them through trust and scoring, and promotes validated principles into active use. The repo also contains `ai-sprint-orchestrator`, a long-running multi-stage task runner.
 
 ## Core Value
 
-自演化 AI 代理通过痛点信号学习并通过显式原则表达实现自我改进。
+AI agents improve their own behavior through a structured loop:
 
-The agent must be able to: detect pain → diagnose root cause → extract principle → apply it future. Every failure is a learning opportunity.
+pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
 
----
+## Validated
 
-## Requirements
+- WebUI dashboard with overview, loop, feedback, and gate pages
+- System health, evolution, feedback, and gate-monitoring APIs
+- `ai-sprint-orchestrator` producer/reviewer/decision pipeline
+- Contract enforcement and schema validation
+- `outputQuality` decision scoring
+- Nocturnal background reflection pipeline
 
-### Validated
+## Active
 
-<!-- Shipped and confirmed valuable. -->
+- acceptance checklist is readable and handoff-ready
+- baseline tests and package-local validation runs define workflow readiness
+- `skills/ai-sprint-orchestration/` is the packaged delivery target
+- another agent can start from the skill package instead of repo-root orchestrator paths
+- validation runs stop after classification when they hit sample-side or product-side gaps
+- workflow v1.3 focuses on internal usability first, then finer-grained work-unit architecture
 
-- **SDK Integration** — OpenClaw v2026.4.x compatibility, factory-pattern tool registration — v1.0
-- **Memory Search (FTS5)** — Native FTS5 search on pain_events table, replacing deprecated createMemorySearchTool — v1.4
-- **Empathy Observer Workflow** — `EmpathyObserverWorkflowManager` + `RuntimeDirectDriver` + `WorkflowStore`, runtime_direct only — v1.4
-- **Deep Reflect Workflow** — `DeepReflectWorkflowManager` + `RuntimeDirectDriver` + `WorkflowStore` — v1.4
-- **Workflow Event Trace** — SQLite-based `WorkflowStore` with full state transition audit trail — v1.4
-- **Pain Detection & Evolution Queue** — Pain flag → queue → diagnosis → principle creation pipeline — v1.0
-- **Gate Split** — Separate gate module into independent concerns (gate.ts → gate-block-helper.ts, gfi-gate.ts) — v1.0
-- **Input Quarantine** — PD-specific input isolation layer — v1.0
-- **Defaults & Errors** — Centralized configuration and error handling — v1.0
-- **NocturnalWorkflowManager** — Migrated `OpenClawTrinityRuntimeAdapter` to WorkflowManager interface; unified subagent lifecycle with stub-based fallback and enhanced debug summary — v1.5
+## Out of Scope
 
-### Active
-
-<!-- Current scope. Building toward these. -->
-
-### Out of Scope
-
-<!-- Explicit boundaries. Includes reasoning to prevent re-adding. -->
-
-- **Diagnostician helper migration** —刚跑通，风险极高，短期内不动 — 2026-04-05
-- **Mobile UI / 伙伴体验 (Companion Experience)** — V1.4 预研草案，完成核心进化闭环后再做 — 2026-03-07
-- **Real-time chat / 实时对话** — 不是核心价值，高复杂度，defer — 2026-03-07
-- **Video posts** — Storage/bandwidth 成本，defer — 2026-03-07
-- **Auto-deployment of principles** — Phase 3+ only, not in current roadmap — 2026-03-07
-
----
+- `packages/openclaw-plugin` product-side fixes
+- `D:/Code/openclaw` changes
+- dashboard / stageGraph / self-optimizing sprint / parallel task scheduling
+- PR2 / PD product loop closure
 
 ## Context
 
-**Technical environment**: OpenClaw v2026.4.x plugin, TypeScript, SQLite (via workflow store), Node.js
-
-**Architecture**: Helper workflows (Empathy/DeepReflect) use `WorkflowManager` + `RuntimeDirectDriver` + `WorkflowStore`. Diagnostician uses queue + HEARTBEAT.md + file signaling (different pattern, not migrating).
-
-**Subagent helper pattern**: All helper subagents go through `WorkflowManager` interface with `RuntimeDirectDriver`. This provides: idempotent lifecycle, SQLite event persistence, TTL-based orphan cleanup, surface degrade checks.
-
-**Key interface**: `SubagentWorkflowSpec<T>` + `WorkflowManager` + `TransportDriver` (defined in `subagent-workflow/types.ts`).
-
----
-
-## Constraints
-
-- **Tech Stack**: TypeScript, OpenClaw plugin API, SQLite for persistence, no external databases
-- **OpenClaw Compatibility**: Plugin must maintain compatibility with OpenClaw v2026.4.x API surface
-- **No Shadow Parity**: PR2 introduced runtime_direct boundary — no legacy path to compare against
-- **PD-Only Changes**: Modifies only `packages/openclaw-plugin`, no changes to `~/code/openclaw`
-
----
+- main workflow source of truth: `scripts/ai-sprint-orchestrator`
+- packaged release target: `skills/ai-sprint-orchestration`
+- baseline tests: `contract-enforcement`, `decision`, `run`
+- package-local validation specs: `workflow-validation-minimal`, `workflow-validation-minimal-verify`
+- complex task templates: `bugfix-complex-template`, `feature-complex-template`
+- known product-side gaps remain documented but excluded from this milestone
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Empathy as runtime_direct only | No registry_backed semantics needed for empathy observer | ✓ Good |
-| subagent_ended as fallback only | Not a reliable primary contract; observation/fallback signal | ✓ Good |
-| Nocturnal uses TrinityRuntimeAdapter | Phase 6 already implemented with adapter pattern | ✓ Good |
-| Diagnostician not migrated to helper |刚跑通，dual-path (subagent_ended + heartbeat) 重构风险极高 | ⚠️ Revisit |
-| WorkflowStore over in-memory | Persistence needed for audit trail and orphan cleanup | ✓ Good |
+| Package-local script closure | released agents will not have the full repo layout | Active |
+| Package-local runtime root | packaged runs must not depend on `ops/ai-sprints` | Active |
+| Minimal validation specs only | prove workflow behavior without product-side scope creep | Active |
+| Classify-and-stop on sample-side issues | keep workflow-first boundary intact | Active |
+| v1.3 prioritizes internal usability | use the skill ourselves before redesigning the orchestrator | Active |
+| next architecture step is work-unit/tasklet | stage/round/role resets are not enough for very complex long tasks | Planned |
+
+## Current Milestone
+
+### v1.3 Workflow Skill Internal Usability
+
+Goal:
+
+- make the packaged orchestrator skill usable for internal complex tasks
+- persist structured failure classification into run artifacts
+- provide complex bugfix/feature templates with a minimum task contract
+- tighten continuation carry-forward with checkpoint summaries
+- define the next work-unit architecture direction without implementing it yet
+
+Target features:
+
+- readable package-local acceptance checklist
+- package-local references and validation specs
+- runnable package-local `scripts/run.mjs`
+- baseline plus package-local validation runs
+- package-local complex task templates
+- checkpoint-based carry-forward
 
 ---
-
-## Evolution
-
-This document evolves at phase transitions and milestone boundaries.
-
-**After each phase transition** (via `/gsd-transition`):
-1. Requirements invalidated? → Move to Out of Scope with reason
-2. Requirements validated? → Move to Validated with phase reference
-3. New requirements emerged? → Add to Active
-4. Decisions to log? → Add to Key Decisions
-5. "What This Is" still accurate? → Update if drifted
-
-**After each milestone** (via `/gsd-complete-milestone`):
-1. Full review of all sections
-2. Core Value check — still the right priority?
-3. Audit Out of Scope — reasons still valid?
-4. Update Context with current state
-
----
-*Last updated: 2026-04-06 after Phase 09 (v1.5) complete*
+*Last updated: 2026-04-06*
