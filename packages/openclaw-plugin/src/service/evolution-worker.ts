@@ -908,19 +908,16 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
 
             let existingPrinciplesRef = '';
             try {
-                const principlesPath = wctx.resolve('PRINCIPLES');
-                if (fs.existsSync(principlesPath)) {
-                    const principlesContent = fs.readFileSync(principlesPath, 'utf8');
-                    const principleBlocks = principlesContent.match(/### P_[\w-]+:[^\n]*\n(?:-[^\n]*\n)*/g);
-                    if (principleBlocks && principleBlocks.length > 0) {
-                        // Include all principles up to 20 — enough for duplicate detection
-                        // without overwhelming the context window
-                        const maxPrinciples = 20;
-                        const included = principleBlocks.length > maxPrinciples
-                            ? principleBlocks.slice(-maxPrinciples)
-                            : principleBlocks;
-                        existingPrinciplesRef = `\n**Existing Principles for Duplicate Detection** (showing ${included.length}/${principleBlocks.length}):\n${included.join('\n')}`;
-                    }
+                const activePrinciples = wctx.evolutionReducer.getActivePrinciples();
+                if (activePrinciples.length > 0) {
+                    // Include all principles up to 20 — enough for duplicate detection
+                    // without overwhelming the context window
+                    const maxPrinciples = 20;
+                    const included = activePrinciples.length > maxPrinciples
+                        ? activePrinciples.slice(-maxPrinciples)
+                        : activePrinciples;
+                    const formatted = included.map((p) => `### ${p.id}: ${p.text}`).join('\n');
+                    existingPrinciplesRef = `\n**Existing Principles for Duplicate Detection** (showing ${included.length}/${activePrinciples.length}):\n${formatted}`;
                 }
             } catch {}
 

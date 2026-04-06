@@ -449,14 +449,16 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
   // Thinking OS, reflection_log, project_context are configurable
   // All these go into System Prompt (WebUI-hidden, Prompt Cacheable)
 
+  // Core principles: use structured data from evolution-reducer instead of reading PRINCIPLES.md
   let principlesContent = '';
-  const principlesPath = wctx.resolve('PRINCIPLES');
-  if (fs.existsSync(principlesPath)) {
-    try {
-      principlesContent = fs.readFileSync(principlesPath, 'utf8').trim();
-    } catch (e) {
-      logger?.error(`[PD:Prompt] Failed to read PRINCIPLES: ${String(e)}`);
+  try {
+    const activePrinciples = wctx.evolutionReducer.getActivePrinciples();
+    if (activePrinciples.length > 0) {
+      const lines = activePrinciples.map((p) => `- [${escapeXml(p.id)}] ${escapeXml(p.text)}`);
+      principlesContent = lines.join('\n');
     }
+  } catch (e) {
+    logger?.warn?.(`[PD:Prompt] Failed to load core principles from reducer: ${String(e)}`);
   }
 
   let thinkingOsContent = '';
