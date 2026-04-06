@@ -13,7 +13,7 @@
 
 Default runtime root:
 
-- `skills/ai-sprint-orchestration/runtime`
+- `packages/openclaw-plugin/templates/langs/<lang>/skills/ai-sprint-orchestration/runtime`
 
 Subdirectories:
 
@@ -110,7 +110,7 @@ The producer should declare `PLANNED_FILES`, `PLANNED_CHECKS`, and `DELIVERABLES
 
 Source of truth remains:
 
-- the source repository copy of `scripts/ai-sprint-orchestrator`
+- the repository copy at `packages/openclaw-plugin/templates/langs/zh/skills/ai-sprint-orchestration`
 
 Sync the packaged copy only when the change affects:
 

@@ -1,5 +1,5 @@
 // Packaged AI sprint orchestrator entrypoint.
-// Source of truth remains D:/Code/principles/scripts/ai-sprint-orchestrator/run.mjs.
+// Canonical repo copy lives at packages/openclaw-plugin/templates/langs/zh/skills/ai-sprint-orchestration/scripts/run.mjs.
 // Keep this package-local copy in sync only for package CLI, validation, and runtime-layout changes.
 
 import { spawnSync, spawn } from 'child_process';

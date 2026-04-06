@@ -12,12 +12,12 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { fileURLToPath } from 'url';
-import { decideAndPersist, formatRoleValidation, getIsolationDir, findIsolationReport, collectIsolationArtifacts, isIsolationCollectAllowed, ISOLATION_COLLECT_ALLOWLIST } from '../run.mjs';
-import { getTaskSpec, buildStageBrief } from '../lib/task-specs.mjs';
+import { decideAndPersist, formatRoleValidation, getIsolationDir, findIsolationReport, collectIsolationArtifacts, isIsolationCollectAllowed, ISOLATION_COLLECT_ALLOWLIST } from '../scripts/run.mjs';
+import { getTaskSpec, buildStageBrief } from '../scripts/lib/task-specs.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const runMjsPath = path.join(__dirname, '..', 'run.mjs');
-const archiveMjsPath = path.join(__dirname, '..', 'lib', 'archive.mjs');
+const runMjsPath = path.join(__dirname, '..', 'scripts', 'run.mjs');
+const archiveMjsPath = path.join(__dirname, '..', 'scripts', 'lib', 'archive.mjs');
 const SOURCE = fs.readFileSync(runMjsPath, 'utf8');
 const ARCHIVE_SOURCE = fs.readFileSync(archiveMjsPath, 'utf8');
 
@@ -1376,8 +1376,7 @@ test('persistence: nextRunRecommendation written to scorecard.json', () => {
 });
 
 test('acceptance checklist: file exists and has correct content', () => {
-  const repoRoot = path.resolve(__dirname, '..', '..', '..');
-  const checklistPath = path.resolve(repoRoot, 'docs/design/workflow-v1-acceptance-checklist.md');
+  const checklistPath = path.resolve(__dirname, '..', 'references', 'workflow-v1-acceptance-checklist.md');
   assert.ok(fs.existsSync(checklistPath), 'acceptance checklist file must exist');
 
   const content = fs.readFileSync(checklistPath, 'utf8');
@@ -1399,7 +1398,7 @@ test('acceptance checklist: file exists and has correct content', () => {
 test('preflight check validates acpx not agent names', () => {
   // The preflight code in run.mjs should check that acpx is available,
   // NOT that agent names like "iflow" or "claude" exist as shell binaries.
-  const runPath = path.resolve(__dirname, '..', 'run.mjs');
+  const runPath = path.resolve(__dirname, '..', 'scripts', 'run.mjs');
   const content = fs.readFileSync(runPath, 'utf8');
   // Should NOT use "which" with agent names
   assert.ok(!content.includes("'which', [agentName]"), 'preflight must not check agent names with which');
@@ -1409,7 +1408,7 @@ test('preflight check validates acpx not agent names', () => {
 });
 
 test('cleanupAcpxOrphans does not fallback to spec directory', () => {
-  const runPath = path.resolve(__dirname, '..', 'run.mjs');
+  const runPath = path.resolve(__dirname, '..', 'scripts', 'run.mjs');
   const content = fs.readFileSync(runPath, 'utf8');
   // Must NOT use path.dirname(state.specPath) as workspace fallback
   assert.ok(!content.includes('path.dirname(state.specPath)'),

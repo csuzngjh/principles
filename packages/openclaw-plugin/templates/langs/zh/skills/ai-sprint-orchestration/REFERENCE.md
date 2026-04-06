@@ -110,7 +110,7 @@ producer 在改代码前，应先在 worklog 里声明 `PLANNED_FILES`、`PLANNE
 
 事实来源仍然是：
 
-- the source repository copy of `scripts/ai-sprint-orchestrator`
+- the repository copy at `packages/openclaw-plugin/templates/langs/zh/skills/ai-sprint-orchestration`
 
 只有当变更影响以下内容时，才同步 packaged copy：
 

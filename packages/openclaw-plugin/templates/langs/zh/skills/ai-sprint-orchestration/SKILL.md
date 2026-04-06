@@ -41,11 +41,11 @@ description: 使用打包好的 AI 冲刺编排器推进多阶段开发任务，
 - `workflow-validation-minimal` 至少推进到 producer 完成，并产出结构化 decision 或明确分类的 halt
 - `workflow-validation-minimal-verify` 至少推进到 producer 完成，任何 reviewer 失败都必须被分类，不能保持不透明
 
-如果你同时持有源码仓库，也可以额外运行仓库里 `scripts/ai-sprint-orchestrator/test/` 的 source baseline tests。
+如果你同时持有源码仓库，也可以额外运行仓库里 `packages/openclaw-plugin/templates/langs/zh/skills/ai-sprint-orchestration/test/` 的 source baseline tests。
 
 ## 执行规则
 
-- 当源码仓库可用时，以仓库中的 `scripts/ai-sprint-orchestrator` 为事实来源，但执行入口仍然走当前 packaged copy。
+- 以仓库中的 `packages/openclaw-plugin/templates/langs/zh/skills/ai-sprint-orchestration` 作为代码事实来源；英文目录是分发镜像，不是独立实现分支。
 - 如果一次运行失败，只能归类成以下四类之一：
   - `workflow bug`
   - `agent behavior issue`

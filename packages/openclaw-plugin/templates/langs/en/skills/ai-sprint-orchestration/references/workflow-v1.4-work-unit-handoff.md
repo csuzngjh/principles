@@ -23,7 +23,7 @@ The key design goal is:
 The packaged skill is already usable as an internal tool:
 
 - package path:
-  - `D:/Code/principles/skills/ai-sprint-orchestration`
+  - `D:/Code/principles/packages/openclaw-plugin/templates/langs/zh/skills/ai-sprint-orchestration`
 - installed path:
   - `C:/Users/Administrator/.agents/skills/ai-sprint-orchestration`
 - self-check works
@@ -70,8 +70,8 @@ The next upgrade should add a smaller unit below stage:
 
 ### In scope
 
-- `scripts/ai-sprint-orchestrator`
-- `skills/ai-sprint-orchestration`
+- `packages/openclaw-plugin/templates/langs/zh/skills/ai-sprint-orchestration`
+- `packages/openclaw-plugin/templates/langs/en/skills/ai-sprint-orchestration`
 - workflow docs, specs, prompts, state shape, and summary artifacts
 - package-local validation and workflow-only tests
 
