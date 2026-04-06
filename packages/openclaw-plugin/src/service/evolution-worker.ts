@@ -586,7 +586,9 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
 
                 return doEnqueuePainTask(wctx, logger, painFlagPath, result, {
                     score: jsonScore, source: jsonSource, reason: jsonReason,
-                    preview: jsonPreview, traceId: '', sessionId: '', agentId: '',
+                    preview: jsonPreview, traceId: '',
+                    sessionId: jsonPain.session_id || '',
+                    agentId: jsonPain.agent_id || '',
                 });
             }
         } catch { /* Not JSON — fall through to KV/Markdown parsing */ }
@@ -935,6 +937,48 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                 }
             } catch {}
 
+            // ── Context Enrichment (CTX-01): Dual-path strategy ──
+            // P1: OpenClaw built-in tools (sessions_history) - safe, visibility-limited
+            // P2: JSONL direct read - fallback when tools fail or session not visible
+            // The diagnostician skill implements both paths (Phase 0 protocol).
+            //
+            // Here we pre-extract JSONL context as backup and inject tool instructions.
+
+            let contextSection = '';
+            if (highestScoreTask.session_id && highestScoreTask.agent_id) {
+                try {
+                    const { extractRecentConversation, extractFailedToolContext } = await import('../core/pain-context-extractor.js');
+                    const conversation = await extractRecentConversation(highestScoreTask.session_id, highestScoreTask.agent_id, 5);
+                    
+                    if (conversation) {
+                        contextSection = `\n## Recent Conversation Context (pre-extracted JSONL fallback)\n\n${conversation}\n`;
+                        
+                        // Also try to extract failed tool context if this is a tool failure
+                        if (highestScoreTask.source === 'tool_failure') {
+                            const toolMatch = highestScoreTask.reason?.match(/Tool ([\w-]+) failed/);
+                            const fileMatch = highestScoreTask.reason?.match(/on (.+?)(?=\s*Error:|$)/i);
+                            if (toolMatch) {
+                                const toolContext = await extractFailedToolContext(
+                                    highestScoreTask.session_id,
+                                    highestScoreTask.agent_id,
+                                    toolMatch[1],
+                                    fileMatch?.[1]?.trim(),
+                                );
+                                if (toolContext) {
+                                    contextSection += `\n## Failed Tool Call Context\n\n${toolContext}\n`;
+                                }
+                            }
+                        }
+                    }
+                    if (logger) {
+                        const turns = contextSection ? contextSection.split('\n').filter(l => l.startsWith('[User]') || l.startsWith('[Assistant]')).length : 0;
+                        logger?.debug?.(`[PD:EvolutionWorker] Pre-extracted ${turns} conversation turns for task ${highestScoreTask.id}`);
+                    }
+                } catch (e) {
+                    if (logger) logger.warn(`[PD:EvolutionWorker] Failed to extract conversation context for task ${highestScoreTask.id}: ${String(e)}. Diagnostician will use P1 tools or fallback.`);
+                }
+            }
+
             const heartbeatContent = [
                 `## Evolution Task [ID: ${highestScoreTask.id}]`,
                 ``,
@@ -946,12 +990,25 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                 `**Session ID**: ${highestScoreTask.session_id || 'N/A'}`,
                 `**Agent ID**: ${highestScoreTask.agent_id || 'main'}`,
                 ``,
+                `## Available Tools for Context Search (P1 - Preferred)`,
+                ``,
+                `1. **sessions_history** — Get full message history (requires sessionKey)`,
+                `2. **sessions_list** — List sessions (searches metadata only, NOT message content)`,
+                `3. **read_file / search_file_content** — Search codebase`,
+                ``,
+                `**P1 SOP**: sessions_history(sessionKey="agent:${highestScoreTask.agent_id || 'main'}:run:${highestScoreTask.session_id || 'N/A'}", limit=30)`,
+                ``,
+                `## Pre-extracted Context (P2 - JSONL Fallback)`,
+                `If OpenClaw tools cannot access the session (visibility limits),`,
+                `use this pre-extracted context below:`,
+                contextSection || `*(No JSONL context available — use P1 tools first)*`,
+                ``,
                 `---`,
                 ``,
                 `## Diagnostician Protocol`,
                 ``,
                 `You MUST use the **pd-diagnostician** skill for this task.`,
-                `Read the full skill definition and follow the 4-phase protocol (Evidence → Causal Chain → Classification → Principle Extraction) EXACTLY as specified.`,
+                `Read the full skill definition and follow the protocol EXACTLY as specified: Phase 0 (context extraction, optional) → Phase 1 (Evidence) → Phase 2 (Causal Chain) → Phase 3 (Classification) → Phase 4 (Principle Extraction).`,
                 `The skill defines the complete output contract — your JSON report MUST match the format specified in the skill.`,
                 ``,
                 `---`,

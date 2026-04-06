@@ -1,6 +1,6 @@
 ---
 name: pd-mentor
-description: Spicy Mentor - Interactive command guidance and scenario-based recommendations
+description: Interactive command guidance and scenario-based recommendations to help users understand Principles Disciple features. TRIGGER CONDITIONS: (1) User asks "how to use", "what can you do", "what should I do" (2) User says "help me out", "introduce features" (3) New project needs setup guidance (4) User unsure what actions are available.
 disable-model-invocation: true
 ---
 
