@@ -33,8 +33,9 @@ import {
     executeNocturnalReflectionAsync,
     type NocturnalRunResult,
 } from '../nocturnal-service.js';
-import { runTrinityAsync, type TrinityStageFailure, type TrinityResult } from '../../core/nocturnal-trinity.js';
-import type { TrinityRuntimeAdapter, TrinityConfig } from '../../core/nocturnal-trinity.js';
+import { type TrinityStageFailure, type TrinityResult } from '../../core/nocturnal-trinity.js';
+import type { TrinityRuntimeAdapter, TrinityConfig, DreamerOutput, PhilosopherOutput, TrinityTelemetry } from '../../core/nocturnal-trinity.js';
+import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -47,6 +48,49 @@ import * as path from 'path';
  * This is the result type returned by executeNocturnalReflectionAsync.
  */
 export type NocturnalResult = NocturnalRunResult;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Idempotency Key Computation (D-18)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Compute idempotency key for the Dreamer stage (D-18).
+ * Key = SHA-256(workflowId + stage + inputDigest)
+ * inputDigest = SHA-256(snapshot.sessionId + principleId + maxCandidates)
+ * Uses simple concatenation (no delimiters) per D-18 spec.
+ */
+function computeDreamerIdempotencyKey(
+  workflowId: string,
+  snapshot: import('../../core/nocturnal-trajectory-extractor.js').NocturnalSessionSnapshot,
+  principleId: string,
+  maxCandidates: number
+): string {
+  const inputDigest = createHash('sha256')
+    .update(snapshot.sessionId + principleId + maxCandidates)
+    .digest('hex');
+  return createHash('sha256')
+    .update(workflowId + 'dreamer' + inputDigest)
+    .digest('hex');
+}
+
+/**
+ * Compute idempotency key for the Philosopher stage (D-18).
+ * Key = SHA-256(workflowId + stage + inputDigest)
+ * inputDigest = SHA-256(workflowId + dreamerOutputJson)
+ * Uses simple concatenation (no delimiters) per D-18 spec.
+ */
+function computePhilosopherIdempotencyKey(
+  workflowId: string,
+  dreamerOutput: import('../../core/nocturnal-trinity.js').DreamerOutput
+): string {
+  const dreamerOutputJson = JSON.stringify(dreamerOutput);
+  const inputDigest = createHash('sha256')
+    .update(workflowId + dreamerOutputJson)
+    .digest('hex');
+  return createHash('sha256')
+    .update(workflowId + 'philosopher' + inputDigest)
+    .digest('hex');
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // NocturnalWorkflowOptions
@@ -205,43 +249,126 @@ export class NocturnalWorkflowManager implements WorkflowManager {
             stateDir: this.stateDir,
         };
 
-        // NOC-07: Store initial empty pending state BEFORE launching async
-        // This is critical: we need these available when notifyWaitResult is called
-        this.pendingTrinityFailures.set(workflowId, []);
-        this.pendingTrinityResults.set(workflowId, {
-            success: false,
-            telemetry: {
-                chainMode: 'trinity',
-                usedStubs: false,
-                dreamerPassed: false,
-                philosopherPassed: false,
-                scribePassed: false,
-                candidateCount: 0,
-                selectedCandidateIndex: -1,
-                stageFailures: [],
-            },
-            failures: [],
-            fallbackOccurred: false,
-        });
+        // Create mutable telemetry object (passed to invokeScribe and mutated)
+        const telemetry: TrinityTelemetry = {
+            chainMode: 'trinity',
+            usedStubs: false,
+            dreamerPassed: false,
+            philosopherPassed: false,
+            scribePassed: false,
+            candidateCount: 0,
+            selectedCandidateIndex: -1,
+            stageFailures: [],
+        };
 
         // NOC-07: Launch Trinity async via Promise.resolve().then() WITHOUT awaiting
         // This offloads the async chain so startWorkflow returns immediately with state='active'
         Promise.resolve().then(async () => {
             try {
-                const result = await runTrinityAsync({ snapshot, principleId, config: trinityConfig });
+                // Step 1: Crash recovery — check for existing stage outputs (NOC-13)
+                // Query WorkflowStore for any existing outputs for this workflowId
+                const existingOutputs = this.store.getStageOutputs(workflowId);
+                const recoveredDreamerOutput = existingOutputs.find(o => o.stage === 'dreamer')?.output as DreamerOutput | undefined;
+                const recoveredPhilosopherOutput = existingOutputs.find(o => o.stage === 'philosopher')?.output as PhilosopherOutput | undefined;
 
-                // Store failures and result for notifyWaitResult
-                this.pendingTrinityFailures.set(workflowId, result.failures);
-                this.pendingTrinityResults.set(workflowId, result);
+                let dreamerOutput: DreamerOutput;
+                let philosopherOutput: PhilosopherOutput;
 
-                // Record all Trinity stage events in batch (NOC-08)
-                this.recordStageEvents(workflowId, result);
+                // Step 2: Dreamer — skip if recovered (NOC-12 idempotency)
+                if (recoveredDreamerOutput) {
+                    this.logger.info(`[PD:NocturnalWorkflow] Recovered Dreamer output for workflow=${workflowId}, skipping Dreamer stage`);
+                    dreamerOutput = recoveredDreamerOutput;
+                } else {
+                    // Compute idempotency key BEFORE calling invokeDreamer
+                    const dreamerIdemKey = computeDreamerIdempotencyKey(workflowId, snapshot, principleId, trinityConfig.maxCandidates);
 
-                // Drive state transitions via notifyWaitResult (NOC-10)
-                if (result.success) {
+                    // Check idempotency — another concurrent run may have completed this stage
+                    const existingDreamerByKey = this.store.getStageOutputByKey(dreamerIdemKey);
+                    if (existingDreamerByKey) {
+                        this.logger.info(`[PD:NocturnalWorkflow] Found existing Dreamer output by idempotency key for workflow=${workflowId}`);
+                        dreamerOutput = existingDreamerByKey.output as DreamerOutput;
+                    } else {
+                        dreamerOutput = await this.runtimeAdapter.invokeDreamer(snapshot, principleId, trinityConfig.maxCandidates);
+                        // Persist Dreamer output (NOC-11)
+                        if (dreamerOutput.valid) {
+                            this.store.recordStageOutput(workflowId, 'dreamer', dreamerOutput, dreamerIdemKey);
+                        }
+                    }
+                }
+
+                // Step 3: Philosopher — skip if recovered (NOC-12 idempotency)
+                if (recoveredPhilosopherOutput) {
+                    this.logger.info(`[PD:NocturnalWorkflow] Recovered Philosopher output for workflow=${workflowId}, skipping Philosopher stage`);
+                    philosopherOutput = recoveredPhilosopherOutput;
+                } else {
+                    // Compute idempotency key BEFORE calling invokePhilosopher
+                    const philosopherIdemKey = computePhilosopherIdempotencyKey(workflowId, dreamerOutput);
+
+                    // Check idempotency
+                    const existingPhilosopherByKey = this.store.getStageOutputByKey(philosopherIdemKey);
+                    if (existingPhilosopherByKey) {
+                        this.logger.info(`[PD:NocturnalWorkflow] Found existing Philosopher output by idempotency key for workflow=${workflowId}`);
+                        philosopherOutput = existingPhilosopherByKey.output as PhilosopherOutput;
+                    } else {
+                        philosopherOutput = await this.runtimeAdapter.invokePhilosopher(dreamerOutput, principleId);
+                        // Persist Philosopher output (NOC-11)
+                        if (philosopherOutput.valid) {
+                            this.store.recordStageOutput(workflowId, 'philosopher', philosopherOutput, philosopherIdemKey);
+                        }
+                    }
+                }
+
+                // Step 4: Scribe — always runs (no intermediate Scribe output to persist)
+                const draftArtifact = await this.runtimeAdapter.invokeScribe(
+                    dreamerOutput,
+                    philosopherOutput,
+                    snapshot,
+                    principleId,
+                    telemetry,
+                    trinityConfig
+                );
+
+                // Step 5: Build TrinityResult from stage outcomes
+                const failures: TrinityStageFailure[] = [];
+                if (!dreamerOutput.valid || dreamerOutput.candidates.length === 0) {
+                    failures.push({ stage: 'dreamer', reason: dreamerOutput.reason ?? 'no valid candidates' });
+                }
+                if (!philosopherOutput.valid || philosopherOutput.judgments.length === 0) {
+                    failures.push({ stage: 'philosopher', reason: philosopherOutput.reason ?? 'no judgments produced' });
+                }
+                if (!draftArtifact) {
+                    failures.push({ stage: 'scribe', reason: 'Failed to synthesize artifact' });
+                }
+
+                const trinityResult: TrinityResult = {
+                    success: failures.length === 0 && !!draftArtifact,
+                    artifact: draftArtifact ?? undefined,
+                    telemetry: {
+                        chainMode: 'trinity',
+                        usedStubs: false,
+                        dreamerPassed: dreamerOutput.valid && dreamerOutput.candidates.length > 0,
+                        philosopherPassed: philosopherOutput.valid && philosopherOutput.judgments.length > 0,
+                        scribePassed: !!draftArtifact,
+                        candidateCount: dreamerOutput.candidates.length,
+                        selectedCandidateIndex: draftArtifact?.selectedCandidateIndex ?? -1,
+                        stageFailures: failures.map(f => `${f.stage}: ${f.reason}`),
+                    },
+                    failures,
+                    fallbackOccurred: false,
+                };
+
+                // Store for notifyWaitResult and proceed with existing flow
+                this.pendingTrinityResults.set(workflowId, trinityResult);
+                this.pendingTrinityFailures.set(workflowId, failures);
+
+                // Record stage events (NOC-08, already implemented in Phase 07)
+                this.recordStageEvents(workflowId, trinityResult);
+
+                // Drive state transitions (NOC-10)
+                if (trinityResult.success) {
                     await this.notifyWaitResult(workflowId, 'ok');
                 } else {
-                    const errorMsg = result.failures.map(f => `${f.stage}: ${f.reason}`).join('; ');
+                    const errorMsg = failures.map(f => `${f.stage}: ${f.reason}`).join('; ');
                     await this.notifyWaitResult(workflowId, 'error', errorMsg);
                 }
             } catch (err) {
