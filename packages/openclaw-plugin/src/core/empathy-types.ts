@@ -1,0 +1,216 @@
+/**
+ * Empathy Keyword Matching Types
+ * 
+ * Types for the dynamic keyword-based empathy detection system.
+ * Replaces the previous LLM subagent-per-turn approach with fast keyword
+ * matching + periodic subagent optimization of the keyword store.
+ */
+
+// =========================================================================
+// Keyword Store
+// =========================================================================
+
+export interface EmpathyKeywordStore {
+  version: number;
+  lastUpdated: string;
+  lastOptimizedAt: string;
+  terms: Record<string, EmpathyKeywordEntry>;
+  stats: EmpathyKeywordStats;
+}
+
+export interface EmpathyKeywordEntry {
+  /** 0-1, contribution to GFI when matched */
+  weight: number;
+  
+  /** How this keyword was discovered */
+  source: 'seed' | 'llm_discovered' | 'user_reported';
+  
+  /** Total times this keyword has matched */
+  hitCount: number;
+  
+  /** Last time this keyword matched */
+  lastHitAt?: string;
+  
+  /** 0-1, false positive rate calculated from subagent validation */
+  falsePositiveRate: number;
+  
+  /** Example contexts where this keyword appeared */
+  examples?: string[];
+  
+  /** When LLM first discovered this keyword */
+  discoveredAt?: string;
+}
+
+export interface EmpathyKeywordStats {
+  totalHits: number;
+  totalFalsePositives: number;
+  optimizationCount: number;
+}
+
+// =========================================================================
+// Match Result
+// =========================================================================
+
+export interface EmpathyMatchResult {
+  /** Whether any keywords matched */
+  matched: boolean;
+  
+  /** Weighted total score (0-1) */
+  score: number;
+  
+  /** List of matched keyword terms */
+  matchedTerms: string[];
+  
+  /** Derived severity level */
+  severity: 'mild' | 'moderate' | 'severe';
+  
+  /** Confidence in the result (0-1) */
+  confidence: number;
+}
+
+// =========================================================================
+// Keyword Update (from subagent optimization)
+// =========================================================================
+
+export interface EmpathyKeywordUpdate {
+  action: 'add' | 'update' | 'remove';
+  weight?: number;
+  falsePositiveRate?: number;
+  examples?: string[];
+  reasoning?: string;
+}
+
+export interface EmpathyOptimizationResult {
+  updates: Record<string, EmpathyKeywordUpdate>;
+  reasoning: string;
+  analyzedTurns: number;
+  newPatternsDiscovered: number;
+}
+
+// =========================================================================
+// Seed Keywords (preset list)
+// =========================================================================
+
+export interface SeedKeywordEntry {
+  term: string;
+  weight: number;
+  category: 'negation' | 'anger' | 'disappointment' | 'escalation';
+}
+
+/**
+ * Preset seed keywords for empathy detection.
+ * These are the initial keywords before the LLM starts discovering new ones.
+ */
+export const EMPATHY_SEED_KEYWORDS: SeedKeywordEntry[] = [
+  // 否定词 (Negation)
+  { term: '不对', weight: 0.5, category: 'negation' },
+  { term: '错了', weight: 0.5, category: 'negation' },
+  { term: '搞错了', weight: 0.5, category: 'negation' },
+  { term: '不行', weight: 0.4, category: 'negation' },
+  { term: '没用', weight: 0.4, category: 'negation' },
+  { term: '重做', weight: 0.6, category: 'negation' },
+  { term: '重写', weight: 0.6, category: 'negation' },
+  { term: 'not right', weight: 0.5, category: 'negation' },
+  { term: 'wrong', weight: 0.5, category: 'negation' },
+  { term: 'redo', weight: 0.6, category: 'negation' },
+  { term: 'start over', weight: 0.6, category: 'negation' },
+  
+  // 愤怒表达 (Anger)
+  { term: '垃圾', weight: 0.9, category: 'anger' },
+  { term: '蠢', weight: 0.8, category: 'anger' },
+  { term: '废物', weight: 0.9, category: 'anger' },
+  { term: '白做', weight: 0.7, category: 'anger' },
+  { term: '浪费时间', weight: 0.8, category: 'anger' },
+  { term: 'garbage', weight: 0.9, category: 'anger' },
+  { term: 'stupid', weight: 0.8, category: 'anger' },
+  { term: 'useless', weight: 0.7, category: 'anger' },
+  { term: 'waste of time', weight: 0.8, category: 'anger' },
+  
+  // 失望信号 (Disappointment)
+  { term: '不行啊', weight: 0.5, category: 'disappointment' },
+  { term: '还是不对', weight: 0.6, category: 'disappointment' },
+  { term: '没解决', weight: 0.5, category: 'disappointment' },
+  { term: '没用上', weight: 0.5, category: 'disappointment' },
+  { term: '不能用', weight: 0.5, category: 'disappointment' },
+  { term: 'still not working', weight: 0.6, category: 'disappointment' },
+  { term: "doesn't help", weight: 0.5, category: 'disappointment' },
+  { term: 'not useful', weight: 0.5, category: 'disappointment' },
+  
+  // 升级信号 (Escalation)
+  { term: '你自己看', weight: 0.8, category: 'escalation' },
+  { term: '你确定吗', weight: 0.7, category: 'escalation' },
+  { term: '你是不是没理解', weight: 0.8, category: 'escalation' },
+  { term: '你到底在干什么', weight: 0.9, category: 'escalation' },
+  { term: 'are you sure', weight: 0.7, category: 'escalation' },
+  { term: 'did you even read', weight: 0.8, category: 'escalation' },
+  { term: 'what are you doing', weight: 0.8, category: 'escalation' },
+];
+
+// =========================================================================
+// Configuration
+// =========================================================================
+
+export interface EmpathyKeywordConfig {
+  /** Minimum score to consider a match (0-1) */
+  matchThreshold: number;
+  
+  /** Maximum number of terms to match per message */
+  maxTermsPerMessage: number;
+  
+  /** How often to trigger subagent optimization (number of turns) */
+  optimizationIntervalTurns: number;
+  
+  /** How often to trigger subagent optimization (time-based, ms) */
+  optimizationIntervalMs: number;
+  
+  /** GFI penalty for mild severity */
+  penaltyMild: number;
+  
+  /** GFI penalty for moderate severity */
+  penaltyModerate: number;
+  
+  /** GFI penalty for severe severity */
+  penaltySevere: number;
+}
+
+export const DEFAULT_EMPATHY_KEYWORD_CONFIG: EmpathyKeywordConfig = {
+  matchThreshold: 0.3,
+  maxTermsPerMessage: 5,
+  optimizationIntervalTurns: 100,
+  optimizationIntervalMs: 24 * 60 * 60 * 1000, // 24 hours
+  penaltyMild: 10,
+  penaltyModerate: 25,
+  penaltySevere: 40,
+};
+
+// =========================================================================
+// Severity Mapping
+// =========================================================================
+
+/**
+ * Maps a weighted score to a severity level.
+ * 
+ * Score ranges:
+ * - 0.0 - 0.3: mild (single low-weight keyword)
+ * - 0.3 - 0.6: moderate (multiple keywords or high-weight keyword)
+ * - 0.6 - 1.0: severe (multiple high-weight keywords)
+ */
+export function scoreToSeverity(score: number): 'mild' | 'moderate' | 'severe' {
+  if (score >= 0.6) return 'severe';
+  if (score >= 0.3) return 'moderate';
+  return 'mild';
+}
+
+/**
+ * Maps severity to GFI penalty value.
+ */
+export function severityToPenalty(
+  severity: 'mild' | 'moderate' | 'severe',
+  config: EmpathyKeywordConfig = DEFAULT_EMPATHY_KEYWORD_CONFIG
+): number {
+  switch (severity) {
+    case 'mild': return config.penaltyMild;
+    case 'moderate': return config.penaltyModerate;
+    case 'severe': return config.penaltySevere;
+  }
+}

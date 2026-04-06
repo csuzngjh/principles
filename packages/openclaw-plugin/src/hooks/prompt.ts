@@ -1,13 +1,15 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { PluginHookBeforePromptBuildEvent, PluginHookAgentContext, PluginHookBeforePromptBuildResult, PluginLogger, OpenClawPluginApi } from '../openclaw-sdk.js';
-import { clearInjectedProbationIds, getSession, resetFriction, setInjectedProbationIds } from '../core/session-tracker.js';
+import { clearInjectedProbationIds, getSession, resetFriction, setInjectedProbationIds, trackFriction } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { ContextInjectionConfig, defaultContextConfig } from '../types.js';
 import { classifyTask, type RoutingInput } from '../core/local-worker-routing.js';
 import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection, autoCompressFocus, safeReadCurrentFocus } from '../core/focus-history.js';
 import { EmpathyObserverWorkflowManager, empathyObserverWorkflowSpec } from '../service/subagent-workflow/index.js';
 import { PathResolver } from '../core/path-resolver.js';
+import { matchEmpathyKeywords, loadKeywordStore, saveKeywordStore, shouldTriggerOptimization } from '../core/empathy-keyword-matcher.js';
+import { severityToPenalty, DEFAULT_EMPATHY_KEYWORD_CONFIG } from '../core/empathy-types.js';
 
 /**
  * Model configuration with primary model and optional fallback models
@@ -376,20 +378,56 @@ The empathy observer subagent handles pain detection independently.
   if (empathyEnabled && isUserInteraction && sessionId && api && !isAgentToAgent) {
     prependContext = '### BEHAVIORAL_CONSTRAINTS\n' + empathySilenceConstraint + '\n\n' + prependContext;
 
-    // Empathy Observer: analyze user message for frustration signals
-    if (workspaceDir) {
-      const empathyManager = new EmpathyObserverWorkflowManager({
-        workspaceDir,
-        logger: api.logger,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        subagent: api.runtime.subagent as any,
-      });
-      empathyManager.startWorkflow(empathyObserverWorkflowSpec, {
-        parentSessionId: sessionId,
-        workspaceDir,
-        taskInput: latestUserMessage,
-      }).catch((err) => api.logger.warn(`[PD:Empathy] workflow failed: ${String(err)}`));
+    // ── Empathy Keyword Matching (fast, < 1ms) ──
+    // Analyze user message for frustration signals using keyword matching.
+    // This replaces the previous LLM subagent-per-turn approach.
+    if (workspaceDir && latestUserMessage) {
+      try {
+        const keywordStore = loadKeywordStore(wctx.stateDir);
+        const matchResult = matchEmpathyKeywords(latestUserMessage, keywordStore);
+
+        if (matchResult.matched) {
+          // Track friction based on keyword match severity
+          const penalty = severityToPenalty(matchResult.severity, DEFAULT_EMPATHY_KEYWORD_CONFIG);
+          trackFriction(sessionId, workspaceDir, {
+            source: 'user_empathy',
+            amount: penalty,
+            reason: `Empathy keywords matched: ${matchResult.matchedTerms.join(', ')} (severity: ${matchResult.severity}, score: ${matchResult.score.toFixed(2)})`,
+          });
+
+          logger?.info?.(`[PD:Empathy] Keyword match in user message: ${matchResult.matchedTerms.join(', ')} → severity=${matchResult.severity}, penalty=${penalty}`);
+        }
+
+        // Check if subagent optimization should be triggered
+        const turnsSinceLastOpt = session?.turnCount || 0; // Approximate
+        if (shouldTriggerOptimization(keywordStore, turnsSinceLastOpt)) {
+          logger?.info?.(`[PD:Empathy] Triggering keyword optimization subagent`);
+          // TODO: Start keyword optimization subagent
+          // This will be implemented in a future step
+        }
+
+        // Save updated store (with hit counts)
+        saveKeywordStore(wctx.stateDir, keywordStore);
+      } catch (e) {
+        logger?.warn?.(`[PD:Empathy] Keyword matching failed: ${String(e)}`);
+      }
     }
+
+    // Empathy Observer: analyze user message for frustration signals (legacy, disabled)
+    // The keyword matching approach above is now the primary empathy detection method.
+    // The subagent-based observer is kept for periodic keyword optimization only.
+    // if (workspaceDir) {
+    //   const empathyManager = new EmpathyObserverWorkflowManager({
+    //     workspaceDir,
+    //     logger: api.logger,
+    //     subagent: api.runtime.subagent as any,
+    //   });
+    //   empathyManager.startWorkflow(empathyObserverWorkflowSpec, {
+    //     parentSessionId: sessionId,
+    //     workspaceDir,
+    //     taskInput: latestUserMessage,
+    //   }).catch((err) => api.logger.warn(`[PD:Empathy] workflow failed: ${String(err)}`));
+    // }
   }
 
   // ──── 4. Heartbeat-specific checklist ────
