@@ -1,6 +1,6 @@
 ---
 name: pd-daily
-description: Configure and send daily evolution reports (supports email/IM/voice notifications)
+description: Configure and send daily evolution reports. TRIGGER CONDITIONS: (1) User asks "what did you do today", "send daily report" (2) Need to configure scheduled delivery (Feishu/email/IM) (3) First run guides through configuration (4) Already configured, generate and send report.
 disable-model-invocation: true
 ---
 

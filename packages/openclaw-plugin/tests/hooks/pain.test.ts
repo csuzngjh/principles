@@ -86,7 +86,7 @@ describe('Post-Write Checks & Pain Hook', () => {
     const callArgs = vi.mocked(fs.writeFileSync).mock.calls[0];
     expect(callArgs[0]).toContain('.pain_flag');
 
-    expect(mockEmitSync.toHaveBeenCalledWith(expect.objectContaining({
+    expect(mockEmitSync).toHaveBeenCalledWith(expect.objectContaining({
       type: 'pain_detected',
       data: expect.objectContaining({
         painType: 'tool_failure',

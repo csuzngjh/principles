@@ -1,6 +1,6 @@
 ---
 name: pd-daily
-description: 配置并发送每日进化日报（支持邮件/即时通讯/飞书/语音通知）
+description: 配置并发送每日进化日报。TRIGGER CONDITIONS: (1) 用户问"今天做了什么"、"汇报一下"、"发个日报" (2) 需要配置定时发送渠道 (3) 首次运行引导配置 (4) 已配置时直接生成发送日报。
 disable-model-invocation: true
 ---
 

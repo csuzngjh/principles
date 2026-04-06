@@ -1,6 +1,6 @@
 ---
 name: pd-auditor
-description: 演绎审计智能体。使用公理验证、系统审计、否定论证方法验证系统一致性。当需要审计系统或流程时使用。
+description: 演绎审计，使用公理验证、系统审计、否定论证方法验证系统一致性。TRIGGER CONDITIONS: (1) 需要审计系统或流程的一致性 (2) 验证核心假设是否自洽 (3) 检查组件交互是否正确 (4) 需要识别设计缺陷或逻辑矛盾。
 disable-model-invocation: true
 ---
 

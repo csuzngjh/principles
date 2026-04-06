@@ -1,6 +1,6 @@
 ---
 name: pd-explorer
-description: 快速收集证据的智能体。用于定位和收集问题相关的文件、日志、复现步骤。当需要快速收集信息时使用。
+description: 快速证据收集，定位和收集问题相关的文件、日志、复现步骤。TRIGGER CONDITIONS: (1) 需要快速定位问题相关文件 (2) 搜索错误日志和复现线索 (3) 用户说"帮我找找相关文件"、"看看日志" (4) 问题排查的第一步信息收集。
 disable-model-invocation: true
 ---
 

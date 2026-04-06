@@ -1,6 +1,6 @@
 ---
 name: pd-implementer
-description: 按计划执行代码修改的智能体。按照计划逐步实施代码修改。当需要执行代码变更时使用。
+description: 按计划执行代码修改，逐步实施代码变更。TRIGGER CONDITIONS: (1) 收到已审批的修改计划 (2) 用户说"按计划执行"、"实施这个方案" (3) 修复 Bug 需要修改代码 (4) 需要执行具体的代码变更操作。
 disable-model-invocation: true
 ---
 

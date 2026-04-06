@@ -1,6 +1,6 @@
 ---
 name: pd-grooming
-description: 执行工作区“大扫除” (Workspace Grooming)，将散落的临时文件归档或清理，维持项目的数字洁癖。
+description: 执行工作区"大扫除"，将散落的临时文件归档或清理。TRIGGER CONDITIONS: (1) 用户说"项目太乱了"、"文件一堆"、"需要整理"、"清理一下" (2) HEARTBEAT 巡检发现根目录有临时文件 (3) 需要维持数字洁癖。
 ---
 
 # 🧹 技能：工作区大扫除 (Workspace Grooming)

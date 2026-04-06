@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { PluginHookLlmOutputEvent, PluginHookAgentContext } from '../openclaw-sdk.js';
 import { trackFriction, trackLlmOutput, recordThinkingCheckpoint, resetFriction } from '../core/session-tracker.js';
-import { writePainFlag } from '../core/pain.js';
+import { buildPainFlag, writePainFlag } from '../core/pain.js';
 import { ControlUiDatabase } from '../core/control-ui-db.js';
 import { DetectionService } from '../core/detection-service.js';
 import { detectThinkingModelMatches, deriveThinkingScenarios } from '../core/thinking-models.js';
@@ -326,14 +326,15 @@ export function handleLlmOutput(
         const snippet = text.length > 200 ? text.substring(0, 100) + '...' + text.substring(text.length - 100) : text;
 
         try {
-            writePainFlag(ctx.workspaceDir, {
+            writePainFlag(ctx.workspaceDir, buildPainFlag({
                 source,
                 score: String(painScore),
-                time: new Date().toISOString(),
                 reason: matchedReason,
-                is_risky: 'false',
-                trigger_text_preview: snippet
-            });
+                is_risky: false,
+                trigger_text_preview: snippet,
+                session_id: ctx.sessionId || '',
+                agent_id: ctx.agentId || '',
+            }));
         } catch (e) {
             ctx.logger?.warn?.(`[PD:LLM] Failed to write pain flag: ${String(e)}`);
         }

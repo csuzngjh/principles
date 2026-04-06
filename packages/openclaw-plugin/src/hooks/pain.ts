@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { isRisky, normalizePath } from '../utils/io.js';
 import { normalizeProfile } from '../core/profile.js';
-import { computePainScore, writePainFlag, trackPrincipleValue } from '../core/pain.js';
+import { computePainScore, buildPainFlag, writePainFlag, trackPrincipleValue } from '../core/pain.js';
 import { getSession, trackFriction, resetFriction, getInjectedProbationIds, clearInjectedProbationIds } from '../core/session-tracker.js';
 import { denoiseError, computeHash } from '../utils/hashing.js';
 import { SystemLogger } from '../core/system-logger.js';
@@ -273,16 +273,15 @@ export function handleAfterToolCall(
   const painScore = computePainScore(1, false, false, isRisk ? 20 : 0, effectiveWorkspaceDir);
   const traceId = createTraceId();
 
-  const painData = {
-    score: String(painScore),
+  const painData = buildPainFlag({
     source: 'tool_failure',
-    time: new Date().toISOString(),
+    score: String(painScore),
     reason: `Tool ${event.toolName} failed on ${relPath}. Error: ${event.error ?? 'Non-zero exit code'}`,
-    is_risky: String(isRisk),
+    is_risky: isRisk,
     trace_id: traceId,
     session_id: sessionId,
     agent_id: ctx.agentId || '',
-  };
+  });
 
   try {
     writePainFlag(effectiveWorkspaceDir, painData);
