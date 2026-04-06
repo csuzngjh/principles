@@ -38,8 +38,8 @@
 - [x] Phase 7: Trinity Integration with Event Recording
   - [x] 07-01-PLAN.md, 07-02-PLAN.md — Trinity async path, stage events, state machine (NOC-06 through NOC-10)
 - [ ] Phase 8: Intermediate Persistence and Idempotency
-  - [ ] 08-01-PLAN.md — WorkflowStore stage_outputs table and methods (NOC-11, NOC-12, NOC-13)
-  - [ ] 08-02-PLAN.md — NocturnalWorkflowManager idempotency + crash recovery (NOC-11, NOC-12, NOC-13)
+  - [x] 08-01-PLAN.md — WorkflowStore stage_outputs table and methods (NOC-11, NOC-12, NOC-13)
+  - [x] 08-02-PLAN.md — NocturnalWorkflowManager idempotency + crash recovery (NOC-11, NOC-12, NOC-13)
 - [ ] Phase 9: Fallback and Evolution Worker Integration
 
 ## Progress
