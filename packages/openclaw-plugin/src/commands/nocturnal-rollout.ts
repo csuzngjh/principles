@@ -628,7 +628,7 @@ ${lines.join('\n')}`,
       const toolsArg = parts.find((p) => p.startsWith('--tools='))?.slice('--tools='.length) ?? '';
       const filesArg = parts.find((p) => p.startsWith('--files='))?.slice('--files='.length) ?? '';
       const outputArg = parts.find((p) => p.startsWith('--output='))?.slice('--output='.length) ?? '';
-      const riskArg = parts.find((p) => p.startsWith('--risk='))?.slice('--risk='.length) ?? '';
+      // Note: --risk= flag is deprecated (risk gating removed from routing)
       const complexityArg = parts.find((p) => p.startsWith('--complexity='))?.slice('--complexity='.length) ?? '';
 
       const routingInput: RoutingInput = {
@@ -637,7 +637,6 @@ ${lines.join('\n')}`,
         requestedTools: toolsArg ? toolsArg.split(',').map((t) => t.trim()) : undefined,
         requestedFiles: filesArg ? filesArg.split(',').map((f) => f.trim()) : undefined,
         expectedOutputShape: outputArg || undefined,
-        riskSignals: riskArg ? riskArg.split(',').map((r) => r.trim()) : undefined,
         complexityHints: complexityArg ? complexityArg.split(',').map((c) => c.trim()) : undefined,
         targetProfile: parseProfile(profileArg),
       };

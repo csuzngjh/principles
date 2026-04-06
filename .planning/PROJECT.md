@@ -1,98 +1,80 @@
-# Principles — AI Agent Principle Evolution System
+# Principles - AI Agent Principle Evolution System
 
 ## What This Is
 
-A principle evolution system for AI coding agents: detects pain points (tool failures, user friction, empathy signals), generates candidate principles, gates them through a trust/scoring pipeline, and promotes validated principles to active use. Includes a WebUI dashboard, OpenClaw plugin for hook integration, and an ai-sprint-orchestrator for complex multi-stage tasks.
+Principles is a principle-evolution system for AI coding agents. It detects pain signals, proposes candidate principles, gates them through trust and scoring, and promotes validated principles into active use. The repo also contains `ai-sprint-orchestrator`, a long-running multi-stage task runner.
 
 ## Core Value
 
-AI agents that improve their own behavior through structured principle evolution — pain → diagnosis → principle → gate → active → reflection → training → internalization.
+AI agents improve their own behavior through a structured loop:
 
-## Requirements
+pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
 
-### Validated
+## Validated
 
-<!-- Shipped and confirmed valuable. -->
+- WebUI dashboard with overview, loop, feedback, and gate pages
+- System health, evolution, feedback, and gate-monitoring APIs
+- `ai-sprint-orchestrator` producer/reviewer/decision pipeline
+- Contract enforcement and schema validation
+- `outputQuality` decision scoring
+- Nocturnal background reflection pipeline
 
-- ✓ WebUI dashboard with overview/loop/feedback/gate pages — v1.1
-- ✓ 7 API endpoints for system health, evolution, feedback, gate monitoring — v1.1
-- ✓ ai-sprint-orchestrator with producer/reviewer/decision pipeline — v1.0-v1.1
-- ✓ Contract enforcement schema validation — v1.1
-- ✓ Decision engine with outputQuality scoring — v1.1
-- ✓ Nocturnal background reflection pipeline (phases 0-6) — v1.0
+## Active
 
-### Active
+- acceptance checklist is readable and handoff-ready
+- baseline tests and package-local validation runs define workflow readiness
+- `skills/ai-sprint-orchestration/` is the packaged delivery target
+- another agent can start from the skill package instead of repo-root orchestrator paths
+- validation runs stop after classification when they hit sample-side or product-side gaps
+- workflow v1.3 focuses on internal usability first, then finer-grained work-unit architecture
 
-<!-- Current scope. Building toward these. -->
+## Out of Scope
 
-- [ ] 验收清单可读、可执行、可交接，命令和字段统一
-- [ ] 基线测试全绿，两次最小验证运行完成并分类失败
-- [ ] 完整 skill 包 skills/ai-sprint-orchestration/ 交付（SKILL.md + REFERENCE.md + EXAMPLES.md + scripts/ 独立可运行副本），智能体从 skill 包进入，不依赖项目根下原始脚本路径
-
-### Out of Scope
-
-<!-- Explicit boundaries. Includes reasoning to prevent re-adding. -->
-
-- packages/openclaw-plugin fixes (helper fallback lifecycle, expired cleanup) — known sample-side gaps, not blocking skill packaging
-- D:/Code/openclaw modifications — out of repo scope
-- Dashboard / stageGraph / self-optimizing sprint / multi-task parallelism — future, not this milestone
-- PR2/PD product loop closure — today's done = workflow stable + skill packaged
+- `packages/openclaw-plugin` product-side fixes
+- `D:/Code/openclaw` changes
+- dashboard / stageGraph / self-optimizing sprint / parallel task scheduling
+- PR2 / PD product loop closure
 
 ## Context
 
-- ai-sprint-orchestrator is a multi-stage task runner: producer generates, reviewers evaluate, decision engine scores and advances/revises/halts
-- Key modules: run.mjs (orchestrator), decision.mjs (scoring), contract-enforcement.mjs (schema validation), state-store.mjs (persistence)
-- Tests exist: contract-enforcement.test.mjs, decision.test.mjs, run.test.mjs
-- Validation specs exist: workflow-validation-minimal.json, workflow-validation-minimal-verify.json
-- OpenClaw plugin has known issues (session routing, hook lifecycle) documented separately
-- WebUI v1.1 complete with all 24 requirements done
-
-## Constraints
-
-- **Scope boundary**: Only ai-sprint-orchestrator workflow plumbing; no product-side changes
-- **Test gate**: All 3 baseline test suites must pass before validation runs
-- **Failure classification**: Fixed to 4 categories — workflow bug / agent behavior issue / environment issue / sample-spec issue
-- **Platform**: Windows (D:\Code\principles), cross-platform scripts preferred
+- main workflow source of truth: `scripts/ai-sprint-orchestrator`
+- packaged release target: `skills/ai-sprint-orchestration`
+- baseline tests: `contract-enforcement`, `decision`, `run`
+- package-local validation specs: `workflow-validation-minimal`, `workflow-validation-minimal-verify`
+- complex task templates: `bugfix-complex-template`, `feature-complex-template`
+- known product-side gaps remain documented but excluded from this milestone
 
 ## Key Decisions
 
-<!-- Decisions that constrain future work. Add throughout project lifecycle. -->
-
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Plan B: skill 包自带独立脚本副本 | 完整可打包可复用，agent 从 skill 包进入不依赖项目根原始路径 | — Pending |
-| 只迁移最小必要闭包到 skill 包 | 约 5050 行（run.mjs + 5 lib/），不带 archive/test/实验代码 | — Pending |
-| Only minimal validation specs for acceptance | Avoid scope creep, prove workflow stability not product completeness | — Pending |
-| Failure classification fixed to 4 categories | Prevents ambiguous "not sure what went wrong" situations | — Pending |
-| Validation run 遇 sample-side/product-side issue 只分类不修 | 停止边界清晰，不扩 scope 修产品 | — Pending |
+| Package-local script closure | released agents will not have the full repo layout | Active |
+| Package-local runtime root | packaged runs must not depend on `ops/ai-sprints` | Active |
+| Minimal validation specs only | prove workflow behavior without product-side scope creep | Active |
+| Classify-and-stop on sample-side issues | keep workflow-first boundary intact | Active |
+| v1.3 prioritizes internal usability | use the skill ourselves before redesigning the orchestrator | Active |
+| next architecture step is work-unit/tasklet | stage/round/role resets are not enough for very complex long tasks | Planned |
 
-## Evolution
+## Current Milestone
 
-This document evolves at phase transitions and milestone boundaries.
+### v1.3 Workflow Skill Internal Usability
 
-**After each phase transition** (via `/gsd:transition`):
-1. Requirements invalidated? → Move to Out of Scope with reason
-2. Requirements validated? → Move to Validated with phase reference
-3. New requirements emerged? → Add to Active
-4. Decisions to log? → Add to Key Decisions
-5. "What This Is" still accurate? → Update if drifted
+Goal:
 
-**After each milestone** (via `/gsd:complete-milestone`):
-1. Full review of all sections
-2. Core Value check — still the right priority?
-3. Audit Out of Scope — reasons still valid?
-4. Update Context with current state
+- make the packaged orchestrator skill usable for internal complex tasks
+- persist structured failure classification into run artifacts
+- provide complex bugfix/feature templates with a minimum task contract
+- tighten continuation carry-forward with checkpoint summaries
+- define the next work-unit architecture direction without implementing it yet
 
-## Current Milestone: v1.2 Workflow v1 最终收口与技能化
+Target features:
 
-**Goal:** 把 ai-sprint-orchestrator 收口到"智能体可稳定使用"的程度，并做成 repo 内可复用 skill/operator 包。
-
-**Target features:**
-- Fix acceptance checklist to readable/executable/handoff-ready
-- Prove workflow stability via minimal validation runs (baseline + 2 runs)
-- Create complete skill package at skills/ai-sprint-orchestration/ with independent script copies (SKILL.md + REFERENCE.md + EXAMPLES.md + scripts/)
-- Skill package contains minimal runnable closure: run.mjs + 5 lib modules (~5050 lines)
-- Validation run 遇到 sample-side/product-side issue 只分类不修产品
+- readable package-local acceptance checklist
+- package-local references and validation specs
+- runnable package-local `scripts/run.mjs`
+- baseline plus package-local validation runs
+- package-local complex task templates
+- checkpoint-based carry-forward
 
 ---
-*Last updated: 2026-04-05 after milestone v1.2 initialization*
+*Last updated: 2026-04-06*

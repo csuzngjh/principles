@@ -312,6 +312,63 @@ export interface Principle {
    detectorMetadata?: PrincipleDetectorSpec;
   /** Highly abstracted principle text suitable for PRINCIPLES.md */
   abstractedPrinciple?: string;
+
+  // ── Principle-Tree metadata (Phase 1, optional) ──
+
+  /**
+   * Principle priority level.
+   * P0 = critical safety/data integrity, P1 = process/quality, P2 = style/preference.
+   * Defaults to 'P1' if not set.
+   */
+  priority?: 'P0' | 'P1' | 'P2';
+
+  /**
+   * Principle scope: 'general' applies everywhere, 'domain' is area-specific.
+   * Defaults to 'general' if not set.
+   */
+  scope?: 'general' | 'domain';
+
+  /**
+   * Domain name when scope === 'domain'.
+   * Examples: 'file_operations', 'api_calls', 'config_management'.
+   */
+  domain?: string;
+
+  /**
+   * Suggested rules that would concretely implement this principle.
+   * Populated by diagnostician analysis, stored for future Rule layer implementation.
+   */
+  suggestedRules?: PrincipleSuggestedRule[];
+
+  /**
+   * Value metrics — auto-calculated from pain prevention tracking.
+   * Only populated when metrics have been computed.
+   */
+  valueMetrics?: PrincipleValueMetricsSnapshot;
+}
+
+/**
+ * A suggested rule that could implement a principle.
+ * Populated by the diagnostician during principle extraction.
+ * This is advisory only — no enforcement until Rule layer is implemented.
+ */
+export interface PrincipleSuggestedRule {
+  name: string;
+  type: 'hook' | 'gate' | 'skill' | 'test' | 'prompt';
+  triggerCondition: string;
+  enforcement: 'block' | 'warn' | 'log';
+  action: string;
+  implementationHint?: string;
+}
+
+/**
+ * Snapshot of value metrics for a principle.
+ * Calculated periodically from pain signal matching.
+ */
+export interface PrincipleValueMetricsSnapshot {
+  painPreventedCount: number;
+  lastPainPreventedAt?: string;
+  calculatedAt: string;
 }
 
 export type EvolutionLoopEventType =
@@ -347,6 +404,8 @@ export interface CandidateCreatedData {
   evaluability?: PrincipleEvaluatorLevel;
   /** Optional detector metadata — absent = manual_only */
   detectorMetadata?: PrincipleDetectorSpec;
+  /** Optional abstracted principle title (≤40 chars) — preserved on replay */
+  abstractedPrinciple?: string;
 }
 
 export interface PrinciplePromotedData {

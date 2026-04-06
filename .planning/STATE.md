@@ -1,23 +1,65 @@
-## Current Position
+---
+gsd_state_version: 1.0
+milestone: v1.5
+milestone_name: Nocturnal Helper 重构
+status: Milestone complete
+last_updated: "2026-04-06T04:45:00.000Z"
+last_activity: 2026-04-06
+progress:
+  total_phases: 10
+  completed_phases: 10
+  total_plans: 7
+  completed_plans: 7
+  percent: 100
+---
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-04-05 — Milestone v1.2 started
+# State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-04-05)
+See `.planning/PROJECT.md` (updated 2026-04-06 after v1.5 milestone).
 
-**Core value:** AI agents that improve their own behavior through structured principle evolution
-**Current focus:** Workflow v1 收口与技能化
+**Core value:** 自演化 AI 代理通过痛点信号学习并通过显式原则表达实现自我改进。
+**Current Milestone:** v1.5 — Complete (shipped 2026-04-06)
+**Current Focus:** Planning next milestone
+
+---
+
+## v1.5 Milestone Summary
+
+**Shipped:** 2026-04-06
+**Phases:** 6-10 (5 phases, 7 plans)
+
+Key deliverables:
+- NocturnalWorkflowManager with WorkflowManager interface
+- Trinity chain (Dreamer → Philosopher → Scribe) with event recording
+- WorkflowStore stage_outputs for persistence and idempotency
+- Stub-based fallback on Trinity failure (NOC-15)
+- evolution-worker integrated with NocturnalWorkflowManager
+
+---
 
 ## Accumulated Context
 
-- v1.1 WebUI milestone complete (24/24 requirements done)
-- ai-sprint-orchestrator has 3 test suites: contract-enforcement, decision, run
-- Validation specs: workflow-validation-minimal.json, workflow-validation-minimal-verify.json
-- Known OpenClaw plugin issues (helper fallback, expired cleanup) — documented, not blocking
-- v1.2 Plan B: skill 包自带独立脚本副本（最小闭包 run.mjs + 5 lib，~5050 行）
-- 停止边界：validation run 遇到 sample-side/product-side issue 只分类不修产品
-- Skill 包目标：智能体从 skill 包进入，不依赖项目根下原始脚本路径
+- Nocturnal uses `OpenClawTrinityRuntimeAdapter` directly (not via WorkflowManager)
+- Trinity has 3 stages: Dreamer → Philosopher → Scribe
+- Each stage: run subagent → wait → getSessionMessages → parse output
+- Empathy/DeepReflect migrated to helper pattern
+- Diagnostician: DO NOT TOUCH (刚跑通)
+- NocturnalWorkflowManager is in `subagent-workflow/`
+- Trinity bypasses WorkflowManager state machine — fixed in v1.5
+- Stub fallback degrades to stub (not EmpathyObserver/DeepReflect)
+- Do NOT add `'trinity'` to `WorkflowTransport` union type
+
+---
+
+## Key Constraints
+
+- No new dependencies — all existing modules
+- NocturnalWorkflowManager does NOT extend EmpathyObserverWorkflowManager
+- Manager composes `TrinityRuntimeAdapter` directly, not via TransportDriver
+- Fallback degrades to stub (not EmpathyObserver/DeepReflect)
+
+---
+
+*Last updated: 2026-04-06 after v1.5 milestone completion*

@@ -184,6 +184,16 @@ export function buildStageBrief(spec, stage, round, previousDecision, handoff = 
     `## Constraints`,
     ...spec.context.map((line) => `- ${line}`),
     '',
+    // WF-001 fix (v2, 2026-04-05): always inject protected files into brief
+    // constraints so agents see them regardless of spec.context content.
+    `**PROTECTED FILES — DO NOT MODIFY THESE**`,
+    `- ${runDir}/sprint.json`,
+    `- ${runDir}/timeline.md`,
+    `- ${runDir}/latest-summary.md`,
+    `- ${stageDir}/decision.md`,
+    `- ${stageDir}/scorecard.json`,
+    `Modifying any of these files will cause the sprint to halt with protected_file_modified.`,
+    '',
     ...(stageCriteria?.requiredReviewerSections?.length
       ? [
           `## Required Reviewer Sections`,
