@@ -64,7 +64,8 @@ function safeTail(filePath: string): string[] {
     } finally {
       fs.closeSync(fd);
     }
-  } catch {
+  } catch (err) {
+    console.debug(`[pain-context-extractor] safeTail failed: ${String(err)}`);
     return [];
   }
 }
@@ -99,7 +100,7 @@ function parseSafeMessages(lines: string[]): ParsedMessage[] {
         toolName: msg.toolName,
         details: msg.details,
       });
-    } catch { /* skip */ }
+    } catch { /* malformed JSON line, skip silently — expected with corrupted files */ }
   }
   return messages;
 }
@@ -208,7 +209,8 @@ export async function extractRecentConversation(
     if (recent.length === 0) return '';
     const result = recent.join('\n');
     return result.length > MAX_OUTPUT_CHARS ? result.substring(0, MAX_OUTPUT_CHARS - 3) + '...' : result;
-  } catch {
+  } catch (err) {
+    console.debug(`[pain-context-extractor] extractRecentConversation failed for session=${sessionId}, agent=${agentId}: ${String(err)}`);
     return ''; // Fail silently
   }
 }
@@ -265,7 +267,8 @@ export async function extractFailedToolContext(
       }
     }
     return parts.length > 0 ? parts.join('\n') : '';
-  } catch {
+  } catch (err) {
+    console.debug(`[pain-context-extractor] extractFailedToolContext failed for tool=${toolName}, session=${sessionId}: ${String(err)}`);
     return '';
   }
 }
