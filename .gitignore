@@ -19,6 +19,8 @@ scripts/nocturnal/trainer/experiment-*.json
 # Node.js packages
 packages/*/node_modules/
 packages/*/dist/
+packages/*/coverage/
+packages/*/*.tgz
 node_modules/
 dist/
 
