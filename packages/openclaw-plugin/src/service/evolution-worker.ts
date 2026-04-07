@@ -627,6 +627,7 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
         let agentId = '';
 
         for (const line of lines) {
+            // KV format: "key: value"
             if (line.startsWith('score:')) score = parseInt(line.split(':', 2)[1].trim(), 10) || 0;
             if (line.startsWith('source:')) source = line.split(':', 2)[1].trim();
             if (line.startsWith('reason:')) reason = line.slice('reason:'.length).trim();
@@ -635,6 +636,12 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
             if (line.startsWith('trace_id:')) traceId = line.split(':', 2)[1].trim();
             if (line.startsWith('session_id:')) sessionId = line.slice('session_id:'.length).trim();
             if (line.startsWith('agent_id:')) agentId = line.slice('agent_id:'.length).trim();
+
+            // Key=Value fallback format: "Key=Value" (pain skill manual output)
+            if (line.startsWith('Source=')) source = line.slice('Source='.length).trim();
+            if (line.startsWith('Reason=')) reason = line.slice('Reason='.length).trim();
+            if (line.startsWith('Score=')) score = parseInt(line.slice('Score='.length).trim(), 10) || 0;
+            if (line.startsWith('Time=')) preview = `Human intervention at ${line.slice('Time='.length).trim()}`;
 
             // Markdown format support (pain skill writes **Source**: xxx format)
             const mdSource = line.match(/\*\*Source\*\*:\s*(.+)/);
