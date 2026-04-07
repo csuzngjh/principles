@@ -6,11 +6,15 @@ import * as ioUtils from '../../src/utils/io';
 import { WorkspaceContext } from '../../src/core/workspace-context';
 import { EventLogService } from '../../src/core/event-log';
 import { setInjectedProbationIds, clearSession } from '../../src/core/session-tracker';
+import * as principleTreeLedger from '../../src/core/principle-tree-ledger';
 
 vi.mock('fs');
 vi.mock('../../src/utils/io.js');
 vi.mock('../../src/core/workspace-context');
 vi.mock('../../src/core/event-log');
+vi.mock('../../src/core/principle-tree-ledger.js', () => ({
+  updatePrincipleValueMetrics: vi.fn(),
+}));
 
 const mockEmitSync = vi.fn();
 const mockRecordProbationFeedback = vi.fn();
@@ -136,6 +140,54 @@ describe('Post-Write Checks & Pain Hook', () => {
         source: 'pain',
       }),
     }));
+  });
+
+  it('should persist matched principle valueMetrics through the locked ledger owner without raw training-state writes', () => {
+    const mockCtx = { workspaceDir, sessionId: 's-metrics', api: { logger: {} } };
+    const mockEvent = {
+      toolName: 'write',
+      params: { file_path: 'src/main.ts' },
+      error: 'Delete failed for src/main.ts',
+      result: { exitCode: 1 },
+    };
+
+    vi.mocked(ioUtils.normalizePath).mockReturnValue('src/main.ts');
+    vi.mocked(ioUtils.isRisky).mockReturnValue(false);
+    vi.mocked(ioUtils.serializeKvLines).mockReturnValue('mocked-pain-flag-content');
+    vi.mocked(fs.existsSync).mockImplementation((filePath: fs.PathLike) => {
+      const normalizedPath = String(filePath).replace(/\\/g, '/');
+      return normalizedPath.includes('.principles/PROFILE.json');
+    });
+
+    mockWctx.evolutionReducer.getActivePrinciples = vi.fn().mockReturnValue([
+      {
+        id: 'p-match',
+        trigger: 'delete src main',
+        valueMetrics: undefined,
+      },
+    ]);
+    mockWctx.evolutionReducer.getPrincipleById = vi.fn().mockReturnValue({
+      id: 'p-match',
+      trigger: 'delete src main',
+      contextTags: ['write'],
+    });
+
+    handleAfterToolCall(mockEvent as any, mockCtx as any);
+
+    expect(principleTreeLedger.updatePrincipleValueMetrics).toHaveBeenCalledWith(
+      '/mock/state',
+      'p-match',
+      expect.objectContaining({
+        painPreventedCount: 1,
+      }),
+    );
+
+    const trainingStateWrites = vi
+      .mocked(fs.writeFileSync)
+      .mock.calls
+      .filter(([targetPath]) => String(targetPath).includes('principle_training_state.json'));
+
+    expect(trainingStateWrites).toEqual([]);
   });
 
 });
