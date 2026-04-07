@@ -94,7 +94,6 @@ const plugin = {
     api.on(
       'before_prompt_build',
       async (event: PluginHookBeforePromptBuildEvent, ctx: PluginHookAgentContext): Promise<PluginHookBeforePromptBuildResult | void> => {
-        console.info(`[PD:HookEntry] before_prompt_build fired: agentId=${ctx.agentId}, sessionId=${ctx.sessionId?.substring(0,20)}`);
         try {
           const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
           if (!workspaceInitialized && workspaceDir) {

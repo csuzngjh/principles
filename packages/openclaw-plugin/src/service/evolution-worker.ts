@@ -1031,6 +1031,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                 `3. **read_file / search_file_content** — Search codebase`,
                 ``,
                 `**P1 SOP**: sessions_history(sessionKey="agent:${highestScoreTask.agent_id || 'main'}:run:${highestScoreTask.session_id || 'N/A'}", limit=30)`,
+                highestScoreTask.session_id === 'N/A' || !highestScoreTask.session_id ? `\n\n**⚠️ IMPORTANT**: session_id is N/A — P1 sessions_history tool CANNOT be used. You MUST rely on P2 pre-extracted context below, the pain reason, and your own reasoning. Do NOT hallucinate session details.` : '',
                 ``,
                 `## Pre-extracted Context (P2 - JSONL Fallback)`,
                 `If OpenClaw tools cannot access the session (visibility limits),`,

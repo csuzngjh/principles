@@ -279,81 +279,6 @@ function extractLatestUserMessage(messages: unknown[] | undefined): string {
 }
 
 /**
- * Find the original user message, skipping system injections.
- * Multiple plugins prepend content to user messages. We look for
- * the actual user text by filtering out known injection patterns.
- */
-function extractOriginalUserMessage(messages: unknown[] | undefined): string {
-  if (!Array.isArray(messages)) return '';
-
-  // Known injection prefixes/markers to skip
-  const INJECTION_MARKERS = [
-    '<relevant-memories>',
-    '<ingest-reply-assist>',
-    '### BEHAVIORAL_CONSTRAINTS',
-    '【EMPATHY OUTPUT RESTRICTION】',
-    'sourceSession=agent:',
-  ];
-
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i] as { role?: string; content?: unknown };
-    if (msg?.role !== 'user') continue;
-
-    let content = '';
-    if (typeof msg.content === 'string') {
-      content = msg.content;
-    } else if (Array.isArray(msg.content)) {
-      content = msg.content
-        .filter((part: any) => part && part.type === 'text' && typeof part.text === 'string')
-        .map((part: any) => part.text)
-        .join('\n')
-        .trim();
-    }
-    if (!content) continue;
-
-    // Check if this message is purely a system injection
-    const isInjection = INJECTION_MARKERS.some(m => content.includes(m));
-    if (isInjection) {
-      // Try to extract actual user text after injection markers
-      let userText = content;
-      for (const marker of INJECTION_MARKERS) {
-        if (userText.includes(marker)) {
-          // Remove everything from the marker onward
-          const idx = userText.indexOf(marker);
-          if (idx === 0) {
-            // Marker is at the start, look for text after it
-            const afterMarker = userText.slice(idx + marker.length);
-            // Try to find closing tag or double newline
-            const closeIdx = afterMarker.indexOf('>');
-            if (closeIdx !== -1) {
-              const afterTag = afterMarker.slice(closeIdx + 1).trim();
-              if (afterTag.length > 3) userText = afterTag;
-            }
-            const blankIdx = userText.indexOf('\n\n');
-            if (blankIdx !== -1) {
-              const afterBlank = userText.slice(blankIdx + 2).trim();
-              if (afterBlank.length > 3) userText = afterBlank;
-            }
-          }
-        }
-      }
-      // If we found something meaningful, return it
-      const cleaned = userText.replace(/<[^>]*>/g, '').replace(/#{3,}.*\n?/g, '').trim();
-      if (cleaned.length > 3 && !INJECTION_MARKERS.some(m => cleaned.includes(m))) {
-        return cleaned.substring(0, 500);
-      }
-      // Skip this message entirely, look for previous user message
-      continue;
-    }
-
-    // This is a clean user message — return it
-    return content.substring(0, 500);
-  }
-
-  return '';
-}
-
-/**
  * Extract recent user messages for keyword optimization context.
  */
 function extractRecentMessages(messages: unknown[] | undefined, limit: number): string[] {
@@ -520,18 +445,32 @@ The empathy observer subagent handles pain detection independently.
 
   // ─────────────────────────────────────────────────3. Empathy Observer Spawn
   // event.prompt contains the full prompt text, which may include system/boot instructions
-  // The actual user message from Feishu is embedded in the prompt with format:
-  // "System: [timestamp] Feishu[default] DM | user_id [msg:msg_id]  Conversation info... user_message_text"
+  // The actual user message from Feishu is embedded in the prompt with various formats:
+  // Format 1: "Sender (untrusted metadata): ```json {...}```  user_message_text"
+  // Format 2: "You are running a boot check. Follow BOOT.md..." (boot check, skip empathy)
+  // Format 3: Clean user message text
   let latestUserMessage = event.prompt || '';
-  
-  // Try to extract actual user message from Feishu wrapper
-  if (latestUserMessage.includes('Feishu[')) {
-    // Find the conversation info JSON block and extract user message after it
-    const convInfoMatch = latestUserMessage.match(/Conversation info[\s\S]*?```json\s*\{[\s\S]*?\}\s*```[\s\n]*/);
-    if (convInfoMatch) {
-      const afterConvInfo = latestUserMessage.slice(convInfoMatch.index! + convInfoMatch[0].length).trim();
-      if (afterConvInfo.length > 3) {
-        latestUserMessage = afterConvInfo;
+
+  // Skip boot check messages — these are system instructions, not real user messages
+  if (latestUserMessage.includes('boot check') && latestUserMessage.includes('BOOT.md')) {
+    latestUserMessage = '';
+  }
+
+  // Try to extract actual user message from Feishu wrapper formats
+  if (latestUserMessage.length > 50) {
+    // Format 1: "Sender (untrusted metadata): ```json {...}```  user_message_text"
+    const senderMatch = latestUserMessage.match(/Sender \(untrusted metadata\):[\s\S]*?```json[\s\S]*?```\s*/);
+    if (senderMatch) {
+      const afterSender = latestUserMessage.slice(senderMatch.index! + senderMatch[0].length).trim();
+      if (afterSender.length > 3) latestUserMessage = afterSender;
+    }
+
+    // Format 2: "Conversation info (untrusted metadata): ```json {...}```  user_message_text"
+    if (latestUserMessage.length > 200 && latestUserMessage.includes('Conversation info')) {
+      const convInfoMatch = latestUserMessage.match(/Conversation info[\s\S]*?```json[\s\S]*?```\s*/);
+      if (convInfoMatch) {
+        const afterConvInfo = latestUserMessage.slice(convInfoMatch.index! + convInfoMatch[0].length).trim();
+        if (afterConvInfo.length > 3) latestUserMessage = afterConvInfo;
       }
     }
   }

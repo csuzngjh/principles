@@ -327,10 +327,17 @@ export const empathyOptimizerWorkflowSpec: SubagentWorkflowSpec<{ added: number;
         const rawText = extractAssistantTextForSpec(ctx.messages, ctx.assistantTexts);
         if (!rawText) return null;
 
+        // Strip markdown code fences — LLM often wraps JSON in ```json ... ```
+        let cleanedText = rawText;
+        const fenceMatch = cleanedText.match(/```(?:json)?\s*([\s\S]*?)```/);
+        if (fenceMatch) {
+            cleanedText = fenceMatch[1].trim();
+        }
+
         // Extract JSON from the response
-        const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+        const jsonMatch = cleanedText.match(/\{[\s\S]*\}/);
         if (!jsonMatch) {
-            console.warn(`[PD:EmpathyOptimizer] No JSON found in subagent response`);
+            console.warn(`[PD:EmpathyOptimizer] No JSON found in subagent response (raw_len=${rawText.length})`);
             return null;
         }
 
