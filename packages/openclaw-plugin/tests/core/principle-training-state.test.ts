@@ -188,6 +188,92 @@ describe('PrincipleTrainingState', () => {
       const parsed = JSON.parse(raw);
       expect(parsed).toEqual(store);
     });
+
+    it('preserves the reserved _tree ledger namespace when saving legacy top-level principle records', () => {
+      const filePath = path.join(stateDir, PRINCIPLE_TRAINING_FILE);
+      const initial = {
+        _tree: {
+          principles: {
+            'P-001': {
+              id: 'P-001',
+              version: 1,
+              text: 'Write before delete',
+              triggerPattern: 'delete',
+              action: 'write replacement content first',
+              status: 'active',
+              priority: 'P1',
+              scope: 'general',
+              evaluability: 'deterministic',
+              valueScore: 0,
+              adherenceRate: 0,
+              painPreventedCount: 0,
+              derivedFromPainIds: [],
+              ruleIds: ['R-001'],
+              conflictsWithPrincipleIds: [],
+              createdAt: '2026-04-07T00:00:00.000Z',
+              updatedAt: '2026-04-07T00:00:00.000Z',
+            },
+          },
+          rules: {
+            'R-001': {
+              id: 'R-001',
+              version: 1,
+              name: 'Protect deletes',
+              description: 'Require safe replacement first',
+              type: 'hook',
+              triggerCondition: 'tool=delete',
+              enforcement: 'warn',
+              action: 'block unsafe delete',
+              principleId: 'P-001',
+              status: 'proposed',
+              coverageRate: 0,
+              falsePositiveRate: 0,
+              implementationIds: ['IMPL-001'],
+              createdAt: '2026-04-07T00:00:00.000Z',
+              updatedAt: '2026-04-07T00:00:00.000Z',
+            },
+          },
+          implementations: {
+            'IMPL-001': {
+              id: 'IMPL-001',
+              ruleId: 'R-001',
+              type: 'skill',
+              path: 'agents/write-before-delete',
+              version: 'v1',
+              coversCondition: 'delete protection',
+              coveragePercentage: 100,
+              createdAt: '2026-04-07T00:00:00.000Z',
+              updatedAt: '2026-04-07T00:00:00.000Z',
+            },
+          },
+          metrics: {},
+          lastUpdated: '2026-04-07T00:00:00.000Z',
+        },
+      };
+      fs.writeFileSync(filePath, JSON.stringify(initial, null, 2), 'utf-8');
+
+      const store = {
+        'T-01': {
+          principleId: 'T-01',
+          evaluability: 'deterministic',
+          applicableOpportunityCount: 10,
+          observedViolationCount: 1,
+          complianceRate: 0.9,
+          violationTrend: 0,
+          generatedSampleCount: 2,
+          approvedSampleCount: 2,
+          includedTrainRunIds: ['run-001'],
+          deployedCheckpointIds: [],
+          internalizationStatus: 'needs_training',
+        },
+      };
+
+      saveStore(stateDir, store);
+
+      const raw = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as Record<string, unknown>;
+      expect(raw['T-01']).toEqual(store['T-01']);
+      expect(raw['_tree']).toEqual(initial._tree);
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -509,6 +595,119 @@ describe('PrincipleTrainingState', () => {
       expect(loaded1.internalizationStatus).toBe('needs_training');
       expect(loaded2.internalizationStatus).toBe('internalized');
     });
+
+    it('ignores _tree as a top-level principle entry during mixed-shape migration', () => {
+      const filePath = path.join(stateDir, PRINCIPLE_TRAINING_FILE);
+      fs.writeFileSync(filePath, JSON.stringify({
+        _tree: {
+          principles: {
+            'P-001': {
+              id: 'P-001',
+              version: 1,
+              text: 'Write before delete',
+              triggerPattern: 'delete',
+              action: 'write replacement content first',
+              status: 'active',
+              priority: 'P1',
+              scope: 'general',
+              evaluability: 'deterministic',
+              valueScore: 0,
+              adherenceRate: 0,
+              painPreventedCount: 0,
+              derivedFromPainIds: [],
+              ruleIds: ['R-001'],
+              conflictsWithPrincipleIds: [],
+              createdAt: '2026-04-07T00:00:00.000Z',
+              updatedAt: '2026-04-07T00:00:00.000Z',
+            },
+          },
+          rules: {},
+          implementations: {},
+          metrics: {},
+          lastUpdated: '2026-04-07T00:00:00.000Z',
+        },
+        'T-01': createDefaultPrincipleState('T-01'),
+      }, null, 2), 'utf-8');
+
+      const loaded = loadStore(stateDir);
+
+      expect(loaded['_tree']).toBeUndefined();
+      expect(Object.keys(loaded)).toEqual(['T-01']);
+      expect(getPrincipleState(stateDir, '_tree')).toEqual(createDefaultPrincipleState('_tree'));
+    });
+
+    it('setPrincipleState survives a mixed-shape file without dropping the subtree ledger', () => {
+      const filePath = path.join(stateDir, PRINCIPLE_TRAINING_FILE);
+      fs.writeFileSync(filePath, JSON.stringify({
+        _tree: {
+          principles: {
+            'P-001': {
+              id: 'P-001',
+              version: 1,
+              text: 'Write before delete',
+              triggerPattern: 'delete',
+              action: 'write replacement content first',
+              status: 'active',
+              priority: 'P1',
+              scope: 'general',
+              evaluability: 'deterministic',
+              valueScore: 0,
+              adherenceRate: 0,
+              painPreventedCount: 0,
+              derivedFromPainIds: [],
+              ruleIds: ['R-001'],
+              conflictsWithPrincipleIds: [],
+              createdAt: '2026-04-07T00:00:00.000Z',
+              updatedAt: '2026-04-07T00:00:00.000Z',
+            },
+          },
+          rules: {
+            'R-001': {
+              id: 'R-001',
+              version: 1,
+              name: 'Protect deletes',
+              description: 'Require safe replacement first',
+              type: 'hook',
+              triggerCondition: 'tool=delete',
+              enforcement: 'warn',
+              action: 'block unsafe delete',
+              principleId: 'P-001',
+              status: 'proposed',
+              coverageRate: 0,
+              falsePositiveRate: 0,
+              implementationIds: ['IMPL-001'],
+              createdAt: '2026-04-07T00:00:00.000Z',
+              updatedAt: '2026-04-07T00:00:00.000Z',
+            },
+          },
+          implementations: {
+            'IMPL-001': {
+              id: 'IMPL-001',
+              ruleId: 'R-001',
+              type: 'test',
+              path: 'tests/delete-safety.test.ts',
+              version: 'v1',
+              coversCondition: 'delete protection',
+              coveragePercentage: 100,
+              createdAt: '2026-04-07T00:00:00.000Z',
+              updatedAt: '2026-04-07T00:00:00.000Z',
+            },
+          },
+          metrics: {},
+          lastUpdated: '2026-04-07T00:00:00.000Z',
+        },
+      }, null, 2), 'utf-8');
+
+      const nextState = createDefaultPrincipleState('T-02');
+      nextState.evaluability = 'weak_heuristic';
+      nextState.internalizationStatus = 'in_training';
+
+      setPrincipleState(stateDir, nextState);
+
+      const raw = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as Record<string, unknown>;
+      expect(raw['T-02']).toEqual(nextState);
+      expect((raw['_tree'] as { implementations: Record<string, { type: string }> }).implementations['IMPL-001']?.type).toBe('test');
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -552,6 +751,21 @@ describe('PrincipleTrainingState', () => {
       expect(ids).toContain('T-05');
       expect(ids).toContain('P_foo');
       expect(ids).toContain('P_bar');
+    });
+
+    it('does not list _tree as a principle ID in the hybrid file shape', () => {
+      fs.writeFileSync(path.join(stateDir, PRINCIPLE_TRAINING_FILE), JSON.stringify({
+        _tree: {
+          principles: {},
+          rules: {},
+          implementations: {},
+          metrics: {},
+          lastUpdated: '2026-04-07T00:00:00.000Z',
+        },
+        'T-01': createDefaultPrincipleState('T-01'),
+      }, null, 2), 'utf-8');
+
+      expect(listPrincipleIds(stateDir)).toEqual(['T-01']);
     });
   });
 
