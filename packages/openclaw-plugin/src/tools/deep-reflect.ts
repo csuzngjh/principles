@@ -3,7 +3,6 @@ import { Type } from '@sinclair/typebox';
 import * as fs from 'fs';
 import * as path from 'node:path';
 import { EventLogService } from '../core/event-log.js';
-import { buildCritiquePromptV2 } from './critique-prompt.js';
 import { resolvePdPath } from '../core/paths.js';
 import { resolveWorkspaceDirFromApi } from '../core/path-resolver.js';
 import { reflectionLogRetentionDays } from '../types.js';
@@ -182,105 +181,148 @@ export function createDeepReflectTool(api: OpenClawPluginApi) {
             const model_id = readStringParam(rawParams, 'model_id');
 
             if (!context) {
-                return {
-                    content: [{
-                        type: 'text',
-                        text: '❌ 错误: 必须提供反思上下文 (context)。'
-                    }]
-                };
+                return { content: [{ type: 'text', text: '❌ 错误: 必须提供反思上下文 (context)。' }] };
             }
 
-            const effectiveWorkspaceDir =
-                (api.config?.workspaceDir as string)
-                || resolveWorkspaceDirFromApi(api)
-                || api.resolvePath?.('.');
-
+            const effectiveWorkspaceDir = resolveReflectionWorkspace(api);
             if (!effectiveWorkspaceDir) {
-                return {
-                    content: [{
-                        type: 'text',
-                        text: '❌ 反思执行失败: Workspace directory is required for deep reflection。请检查 API 配置或网络连接。'
-                    }]
-                };
+                return { content: [{ type: 'text', text: '❌ 反思执行失败: Workspace directory is required for deep reflection。请检查 API 配置或网络连接。' }] };
             }
 
             const config = loadConfig(effectiveWorkspaceDir, api);
             if (config.mode === 'disabled' || !config.enabled) {
-                return {
-                    content: [{
-                        type: 'text',
-                        text: '⏭️ Deep Reflection 已禁用。'
-                    }]
-                };
+                return { content: [{ type: 'text', text: '⏭️ Deep Reflection 已禁用。' }] };
             }
 
             if (model_id) {
                 safeLog(api, 'warn', `[DeepReflect] The 'model_id' parameter is deprecated. The agent will now auto-select models based on the context index.`);
             }
 
-            const stateDir = resolvePdPath(effectiveWorkspaceDir, 'STATE_DIR');
-            const eventLog = EventLogService.get(stateDir, api.logger);
-
             try {
-                // Use workspaceDir as parentSessionId proxy (OpenClaw does not expose sessionId to tools)
-                const parentSessionId = effectiveWorkspaceDir.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 64);
+                return await executeReflectionWorkflow(effectiveWorkspaceDir, config, context, depth, model_id, api);
+            } catch (err) {
+                return handleReflectionError(err, context, depth, model_id, effectiveWorkspaceDir, api);
+            }
+        }
+    };
+}
 
-                const manager = new DeepReflectWorkflowManager({
-                    workspaceDir: effectiveWorkspaceDir,
-                    logger: api.logger,
-                    subagent: api.runtime.subagent as any,
-                });
+/**
+ * Resolve workspace directory for deep reflection tool.
+ */
+function resolveReflectionWorkspace(api: OpenClawPluginApi): string | undefined {
+    return (api.config?.workspaceDir as string)
+        || resolveWorkspaceDirFromApi(api)
+        || api.resolvePath?.('.');
+}
 
-                const taskInput: DeepReflectTaskInput = { context, depth, model_id };
+/**
+ * Execute the deep reflection workflow: start, poll, collect results.
+ */
+async function executeReflectionWorkflow(
+    effectiveWorkspaceDir: string,
+    config: DeepReflectionConfig,
+    context: string,
+    depth: number,
+    model_id: string | undefined,
+    api: OpenClawPluginApi,
+): Promise<{ content: Array<{ type: string; text: string }> }> {
+    const stateDir = resolvePdPath(effectiveWorkspaceDir, 'STATE_DIR');
+    const eventLog = EventLogService.get(stateDir, api.logger);
+    const parentSessionId = effectiveWorkspaceDir.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 64);
 
-                const handle = await manager.startWorkflow(deepReflectWorkflowSpec, {
-                    parentSessionId,
-                    workspaceDir: effectiveWorkspaceDir,
-                    taskInput,
-                });
+    const manager = new DeepReflectWorkflowManager({
+        workspaceDir: effectiveWorkspaceDir,
+        logger: api.logger,
+        subagent: api.runtime.subagent as any,
+    });
 
-                // Wait for workflow completion via polling
-                const startTime = Date.now();
-                const timeoutMs = config.timeout_ms ?? 60000;
-                const pollInterval = 500;
+    try {
+        const taskInput: DeepReflectTaskInput = { context, depth, model_id };
+        const handle = await manager.startWorkflow(deepReflectWorkflowSpec, {
+            parentSessionId,
+            workspaceDir: effectiveWorkspaceDir,
+            taskInput,
+        });
 
-                while (Date.now() - startTime < timeoutMs) {
-                    await new Promise(resolve => setTimeout(resolve, pollInterval));
-                    const workflow = (manager as any).store.getWorkflow(handle.workflowId);
-                    if (!workflow) break;
+        const startTime = Date.now();
+        const timeoutMs = config.timeout_ms ?? 60000;
+        return await pollReflectionCompletion(manager, handle, timeoutMs, startTime, eventLog, effectiveWorkspaceDir, context, model_id, depth);
+    } finally {
+        manager.dispose();
+    }
+}
 
-                    if (workflow.state === 'completed') {
-                        // Extract insights from reflection log (written by persistResult)
-                        const reflectionLogPath = resolvePdPath(effectiveWorkspaceDir, 'REFLECTION_LOG');
-                        let insights = '';
-                        if (fs.existsSync(reflectionLogPath)) {
-                            const content = fs.readFileSync(reflectionLogPath, 'utf8');
-                            // Extract most recent entry
-                            const match = content.match(/### Insights\n([\s\S]*?)(?=---|$)/);
-                            if (match) {
-                                insights = match[1].trim();
-                            }
-                        }
+/**
+ * Poll the reflection workflow until completion, timeout, or error.
+ */
+async function pollReflectionCompletion(
+    manager: DeepReflectWorkflowManager,
+    handle: { workflowId: string; childSessionKey: string },
+    timeoutMs: number,
+    startTime: number,
+    eventLog: ReturnType<typeof EventLogService.get>,
+    workspaceDir: string,
+    context: string,
+    model_id: string | undefined,
+    depth: number,
+): Promise<{ content: Array<{ type: string; text: string }> }> {
+    const pollInterval = 500;
 
-                        if (eventLog) {
-                            eventLog.recordDeepReflection(handle.childSessionKey, {
-                                modelId: model_id || 'auto-select',
-                                modelSelectionMode: model_id ? 'manual' : 'auto',
-                                depth,
-                                contextPreview: context.substring(0, 200),
-                                resultPreview: insights.substring(0, 300),
-                                durationMs: Date.now() - startTime,
-                                passed: true,
-                                timeout: false
-                            });
-                        }
+    while (Date.now() - startTime < timeoutMs) {
+        await new Promise(resolve => setTimeout(resolve, pollInterval));
+        const workflowState = manager.getWorkflowState(handle.workflowId);
+        if (!workflowState) break;
 
-                        manager.dispose();
+        if (workflowState === 'completed') {
+            return formatReflectionSuccess(handle, context, depth, model_id, startTime, eventLog, workspaceDir);
+        }
 
-                        return {
-                            content: [{
-                                type: 'text',
-                                text: `
+        if (workflowState === 'terminal_error' || workflowState === 'expired') {
+            throw new Error(`Deep-reflect workflow failed: ${workflowState}`);
+        }
+    }
+
+    return { content: [{ type: 'text', text: '⚠️ 反思任务执行超时。你可以尝试减少上下文长度或增加深度。' }] };
+}
+
+/**
+ * Format the success response from a completed reflection.
+ */
+function formatReflectionSuccess(
+    handle: { childSessionKey: string },
+    context: string,
+    depth: number,
+    model_id: string | undefined,
+    startTime: number,
+    eventLog: ReturnType<typeof EventLogService.get>,
+    workspaceDir: string,
+): { content: Array<{ type: string; text: string }> } {
+    const reflectionLogPath = resolvePdPath(workspaceDir, 'REFLECTION_LOG');
+    let insights = '';
+    if (fs.existsSync(reflectionLogPath)) {
+        const content = fs.readFileSync(reflectionLogPath, 'utf8');
+        const match = content.match(/### Insights\n([\s\S]*?)(?=---|$)/);
+        if (match) insights = match[1].trim();
+    }
+
+    if (eventLog) {
+        eventLog.recordDeepReflection(handle.childSessionKey, {
+            modelId: model_id || 'auto-select',
+            modelSelectionMode: model_id ? 'manual' : 'auto',
+            depth,
+            contextPreview: context.substring(0, 200),
+            resultPreview: insights.substring(0, 300),
+            durationMs: Date.now() - startTime,
+            passed: true,
+            timeout: false,
+        });
+    }
+
+    return {
+        content: [{
+            type: 'text',
+            text: `
 # 💎 Deep Reflection Insights
 ---
 **Selected Model(s)**: ${model_id || 'auto-select'}
@@ -291,51 +333,42 @@ ${insights || '反思完成，详见 REFLECTION_LOG。'}
 
 ---
 *Generated by Principles Disciple Meta-Cognitive Engine*
-`.trim()
-                            }]
-                        };
-                    }
-
-                    if (workflow.state === 'terminal_error' || workflow.state === 'expired') {
-                        manager.dispose();
-                        throw new Error(`Deep-reflect workflow failed: ${workflow.state}`);
-                    }
-                }
-
-                manager.dispose();
-                return {
-                    content: [{
-                        type: 'text',
-                        text: '⚠️ 反思任务执行超时。你可以尝试减少上下文长度或增加深度。'
-                    }]
-                };
-
-            } catch (err) {
-                const errorMsg = err instanceof Error ? err.message : String(err);
-                safeLog(api, 'error', `[DeepReflect] Reflection failed: ${errorMsg}`);
-
-                if (eventLog) {
-                    eventLog.recordDeepReflection('deep-reflect-error', {
-                        modelId: model_id || 'auto-select',
-                        modelSelectionMode: model_id ? 'manual' : 'auto',
-                        depth,
-                        contextPreview: context.substring(0, 200),
-                        durationMs: 0,
-                        passed: false,
-                        timeout: errorMsg.toLowerCase().includes('timeout'),
-                        error: errorMsg
-                    });
-                }
-
-                return {
-                    content: [{
-                        type: 'text',
-                        text: `❌ 反思执行失败: ${errorMsg}。请检查 API 配置或网络连接。`
-                    }]
-                };
-            }
-        }
+`.trim(),
+        }],
     };
+}
+
+/**
+ * Handle reflection errors and format error response.
+ */
+function handleReflectionError(
+    err: unknown,
+    context: string,
+    depth: number,
+    model_id: string | undefined,
+    workspaceDir: string,
+    api: OpenClawPluginApi,
+): { content: Array<{ type: string; text: string }> } {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    safeLog(api, 'error', `[DeepReflect] Reflection failed: ${errorMsg}`);
+
+    const stateDir = resolvePdPath(workspaceDir, 'STATE_DIR');
+    const eventLog = EventLogService.get(stateDir, api.logger);
+
+    if (eventLog) {
+        eventLog.recordDeepReflection('deep-reflect-error', {
+            modelId: model_id || 'auto-select',
+            modelSelectionMode: model_id ? 'manual' : 'auto',
+            depth,
+            contextPreview: context.substring(0, 200),
+            durationMs: 0,
+            passed: false,
+            timeout: errorMsg.toLowerCase().includes('timeout'),
+            error: errorMsg,
+        });
+    }
+
+    return { content: [{ type: 'text', text: `❌ 反思执行失败: ${errorMsg}。请检查 API 配置或网络连接。` }] };
 }
 
 export const deepReflectTool = {

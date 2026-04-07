@@ -10,7 +10,6 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { randomUUID } from 'node:crypto';
 import type { PluginCommandContext, PluginCommandResult, OpenClawPluginApi } from '../openclaw-sdk.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import {
@@ -23,19 +22,6 @@ import {
   archiveMilestonesToDaily,
   cleanupStaleInfo,
 } from '../core/focus-history.js';
-
-/**
- * 清理 Markdown 代码块围栏
- * 移除开头的 ```lang 和结尾的 ```
- */
-function stripMarkdownFence(content: string): string {
-  let result = content.trim();
-  // 移除开头的代码块标记（如 ```markdown, ```text 等）
-  result = result.replace(/^```[\w]*\n?/, '');
-  // 移除结尾的代码块标记
-  result = result.replace(/\n?```$/, '');
-  return result.trim();
-}
 
 /**
  * 获取工作区目录

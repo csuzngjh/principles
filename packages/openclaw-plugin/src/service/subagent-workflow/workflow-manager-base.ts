@@ -24,8 +24,6 @@ import type {
     SubagentWorkflowSpec,
     WorkflowMetadata,
     WorkflowDebugSummary,
-    WorkflowResultContext,
-    WorkflowPersistContext,
 } from './types.js';
 import { RuntimeDirectDriver, type RunParams } from './runtime-direct-driver.js';
 import { WorkflowStore } from './workflow-store.js';
@@ -530,6 +528,15 @@ export abstract class WorkflowManagerBase implements WorkflowManager {
         const timestamp = this.completedWorkflows.get(workflowId);
         if (!timestamp) return false;
         return Date.now() - timestamp < 60_000; // 1 minute dedup window
+    }
+
+    /**
+     * Get the current state of a workflow by ID.
+     * Returns null if the workflow doesn't exist.
+     */
+    getWorkflowState(workflowId: string): string | null {
+        const workflow = this.store.getWorkflow(workflowId);
+        return workflow?.state ?? null;
     }
 
     protected markCompleted(workflowId: string): void {
