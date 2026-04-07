@@ -164,8 +164,9 @@ export class DeepReflectWorkflowManager implements WorkflowManager {
         const baseTimeout = computeDynamicTimeout(this.store, spec?.workflowType ?? 'deep-reflect', staticTimeout);
         const schedule = computeRetrySchedule(baseTimeout, MAX_TIMEOUT_RETRIES);
         const timeoutMs = schedule[Math.min(attempt, schedule.length - 1)];
+        const historyCount = this.store.getCompletionDurations(spec?.workflowType ?? 'deep-reflect', 50).length;
 
-        this.logger.info(`[PD:DeepReflectWorkflow] Wait attempt ${attempt + 1}/${schedule.length}: timeout=${timeoutMs}ms (base=${baseTimeout}ms) for ${workflowId}`);
+        this.logger.info(`[PD:DeepReflectWorkflow] Wait attempt ${attempt + 1}/${schedule.length}: timeout=${timeoutMs}ms (base=${baseTimeout}ms, static=${staticTimeout}ms, samples=${historyCount}) for ${workflowId}`);
 
         const timeout = setTimeout(async () => {
             try {
@@ -307,6 +308,7 @@ export class DeepReflectWorkflowManager implements WorkflowManager {
             // Record actual completion duration for adaptive timeout learning
             const durationMs = Date.now() - workflow.created_at;
             this.store.recordDuration(workflowId, durationMs);
+            this.logger.info(`[PD:DeepReflectWorkflow] Duration recorded: workflowId=${workflowId}, durationMs=${durationMs}ms (${(durationMs / 1000).toFixed(1)}s), type=${spec.workflowType}`);
 
             this.store.updateWorkflowState(workflowId, 'completed');
             this.store.recordEvent(workflowId, 'finalized', 'finalizing', 'completed', 'success', { durationMs });

@@ -69,18 +69,18 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CLEAN-01 | TBD | Pending |
-| CLEAN-02 | TBD | Pending |
-| CLEAN-03 | TBD | Pending |
-| CLEAN-04 | TBD | Pending |
-| CLEAN-05 | TBD | Pending |
-| CLEAN-06 | TBD | Pending |
+| CLEAN-01 | Phase 11 | Pending |
+| CLEAN-02 | Phase 11 | Pending |
+| CLEAN-03 | Phase 12 | Pending |
+| CLEAN-04 | Phase 12 | Pending |
+| CLEAN-05 | Phase 13 | Pending |
+| CLEAN-06 | Phase 13 | Pending |
 
 **Coverage:**
 - v1.6 requirements: 6 total
-- Mapped to phases: 0
-- Unmapped: 6 ⚠️
+- Mapped to phases: 6
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-04-07*
-*Last updated: 2026-04-07 after v1.6 milestone started*
+*Last updated: 2026-04-07 after v1.6 roadmap created*

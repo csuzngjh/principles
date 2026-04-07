@@ -105,6 +105,7 @@ export class WorkflowStore {
             // v1 → v2: Add duration_ms column for adaptive timeout tracking
             try {
                 this.db.exec('ALTER TABLE subagent_workflows ADD COLUMN duration_ms INTEGER');
+                console.info(`[PD:WorkflowStore] Schema migration v${fromVersion} → v${toVersion}: added duration_ms column`);
             } catch {
                 // Column may already exist if migration was partially applied
             }

@@ -482,6 +482,8 @@ The empathy observer subagent handles pain detection independently.
         // module-level state resets on plugin reload before reaching turn 50.
         if (matchResult.matched) {
           saveKeywordStore(wctx.stateDir, keywordStore);
+          const totalHits = keywordStore.stats.totalHits;
+          logger?.info?.(`[PD:Empathy] Keyword store saved after match: terms=${matchResult.matchedTerms.join(',')}, totalHits=${totalHits}`);
         }
       } catch (e) {
         logger?.warn?.(`[PD:Empathy] ERROR: ${String(e)}`);
