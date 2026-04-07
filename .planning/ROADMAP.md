@@ -83,7 +83,7 @@
 | 9 | v1.5 | 1/1 | Complete | 2026-04-06 |
 | 10 | v1.5 | 1/1 | Complete | 2026-04-06 |
 | 11 | v1.9.0 | 3/3 | Complete    | 2026-04-07 |
-| 12 | v1.9.0 | 0/2 | Pending | - |
+| 12 | v1.9.0 | 2/2 | Complete    | 2026-04-07 |
 | 13 | v1.9.0 | 1/1 | Complete   | 2026-04-07 |
 | 14 | v1.9.0 | 0/1 | Pending | - |
 | 15 | v1.9.0 | 0/1 | Pending | - |
@@ -116,11 +116,11 @@ Success criteria:
 
 Goal: add the constrained runtime host for `Implementation(type=code)` and store code implementations as versioned assets.
 
-**Plans:** 2 plans
+**Plans:** 2/2 plans complete
 
 Plans:
-- [ ] 12-01-PLAN.md - Build Rule Host types, helper whitelist, evaluator, and wire into gate.ts between GFI and Progressive Gate
-- [ ] 12-02-PLAN.md - Build versioned code implementation storage with manifest, entry file, and PD path extensions
+- [x] 12-01-PLAN.md - Build Rule Host types, helper whitelist, evaluator, and wire into gate.ts between GFI and Progressive Gate
+- [x] 12-02-PLAN.md - Build versioned code implementation storage with manifest, entry file, and PD path extensions
 
 Requirements:
 - HOST-01
