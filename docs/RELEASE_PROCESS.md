@@ -40,7 +40,7 @@ PR → main → Actions → npm → 5-file sync → tag
 
 - **Auto**: PR merged to main with `packages/**` changes
 - **Manual**: Actions → Publish to npm → Run
-- **Tag**: `git push origin v1.5.6`
+- **Tag**: `git push origin v1.8.2`
 
 ### Smart Version Bump
 

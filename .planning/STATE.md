@@ -2,11 +2,10 @@
 gsd_state_version: 1.0
 milestone: v1.6
 milestone_name: 代码质量清理
-status: Milestone complete
-last_updated: "2026-04-07T00:00:00.000Z"
-last_activity: 2026-04-07
+status: Milestone in progress
+last_updated: "2026-04-07"
 progress:
-  total_phases: 0
+  total_phases: 3
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -17,27 +16,36 @@ progress:
 
 ## Project Reference
 
-See `.planning/PROJECT.md` (updated 2026-04-07 after v1.6 milestone).
+See `.planning/PROJECT.md` (updated 2026-04-07)
 
-**Core value:** 自演化 AI 代理通过痛点信号学习并通过显式原则表达实现自我改进。
+**Core value:** AI agents improve their own behavior through a structured loop: pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
+
 **Current Milestone:** v1.6 — 代码质量清理
-**Current Focus:** Defining requirements
+**Current Focus:** Phase 11 - Critical Safety Fixes
 
----
+## Current Position
 
-## v1.6 Milestone Summary
+Phase: 11 of 13 (Critical Safety Fixes)
+Plan: 0 of TBD in current phase
+Status: Ready to plan
+Last activity: 2026-04-07 — Roadmap created for v1.6
 
-**Target:** 代码质量与架构清理
+Progress: [░░░░░░░░░░] 0%
 
-Target features:
-- CLEAN-01: 修复 `normalizePath` 命名冲突
-- CLEAN-02: 解决 PAIN_CANDIDATES 遗留路径
-- CLEAN-03: 提取 WorkflowManager 基类
-- CLEAN-04: 统一重复类型定义
-- CLEAN-05: 调查 empathy-observer-workflow-manager 引用
-- CLEAN-06: 添加 build artifacts 到 .gitignore
+## v1.6 Phase Structure
 
----
+| Phase | Name | Requirements | Status |
+|-------|------|--------------|--------|
+| 11 | Critical Safety Fixes | CLEAN-01, CLEAN-02 | Not started |
+| 12 | Code Deduplication | CLEAN-03, CLEAN-04 | Not started |
+| 13 | Cleanup and Investigation | CLEAN-05, CLEAN-06 | Not started |
+
+## Key Constraints
+
+- No new features — only cleanup and refactor
+- Must not break existing functionality
+- Diagnostician: DO NOT TOUCH (刚跑通)
+- Nocturnal: 保持现状，只做清理不改变行为
 
 ## Accumulated Context
 
@@ -53,15 +61,26 @@ Key findings:
 - trajectory.ts (1673 lines) — core doesn't read it
 - Workflow Manager 70% code duplication (~1200 lines)
 
----
+## Performance Metrics
 
-## Key Constraints
+**Velocity:**
+- Total plans completed: 0 (v1.6 just started)
+- Average duration: N/A
+- Total execution time: 0 hours
 
-- No new features — only cleanup and refactor
-- Must not break existing functionality
-- Diagnostician: DO NOT TOUCH (刚跑通)
-- Nocturnal: 保持现状，只做清理不改变行为
+**By Phase:**
 
----
+| Phase | Plans | Total | Avg/Plan |
+|-------|-------|-------|----------|
+| - | - | - | - |
 
-*Last updated: 2026-04-07 after v1.6 milestone started*
+**Recent Trend:**
+- v1.6 just started, no execution data yet
+
+*Updated after each plan completion*
+
+## Session Continuity
+
+Last session: 2026-04-07
+Stopped at: Roadmap created, ready to plan Phase 11
+Resume file: None
