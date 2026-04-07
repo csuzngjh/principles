@@ -1,68 +1,86 @@
-# Requirements: v1.3 Workflow Skill Internal Usability
+# Requirements: Principles Disciple
 
-**Defined:** 2026-04-06  
-**Core Value:** make `ai-sprint-orchestrator` usable as a packaged internal skill before introducing the next work-unit architecture layer.
+**Defined:** 2026-04-07
+**Core Value:** 自演化 AI 代理通过痛点信号学习并通过显式原则表达实现自我改进。
 
-## v1.3 Requirements
+## v1.6 Requirements
 
-### Skill Stability
+代码质量清理。本里程碑不添加新功能，只做清理和重构。
 
-- [ ] **STAB-01**: package-local self-check passes in the packaged skill entrypoint
-- [ ] **STAB-02**: `workflow-validation-minimal` runs through the packaged skill entrypoint and produces a structured halt or decision
-- [ ] **STAB-03**: `workflow-validation-minimal-verify` runs through the packaged skill entrypoint and produces a structured halt or decision
-- [ ] **STAB-04**: failure classification is persisted to both `latest-summary.md` and `scorecard.json`
-- [ ] **STAB-05**: validation failures are explicitly classified as `workflow bug`, `agent behavior issue`, `environment issue`, or `sample-spec issue`
+### Code Quality
 
-### Complex Task Readiness
+- [ ] **CLEAN-01**: 修复 `normalizePath` 命名冲突
+  - `utils/io.ts` 和 `nocturnal-compliance.ts` 有同名函数但不同签名
+  - 重命名 `nocturnal-compliance.ts` 中的函数为 `normalizePathPosix` 或类似
+  - 验证无其他调用方受影响
 
-- [ ] **TASK-01**: package-local complex bugfix template exists and loads
-- [ ] **TASK-02**: package-local complex feature template exists and loads
-- [ ] **TASK-03**: complex specs require a minimum task contract: `Goal`, `In scope`, `Out of scope`, `Validation commands`, `Expected artifacts`
-- [ ] **TASK-04**: unfilled template specs are rejected before sprint start
-- [ ] **TASK-05**: reviewer prompts explicitly judge behavioral value and unverified risks, not only report structure
+- [ ] **CLEAN-02**: 解决 PAIN_CANDIDATES 遗留路径
+  - 调查 `trackPainCandidate()` 和 `processPromotion()` 的完整调用链
+  - 确定是集成进 evolution-reducer 还是删除
+  - 确保只有一条 pain→principle 处理路径
 
-### Continuation Discipline
+- [ ] **CLEAN-03**: 提取 WorkflowManager 基类
+  - EmpathyObserver / DeepReflect / Nocturnal 三个 manager 提取公共基类
+  - 减少约 1200 行重复代码
+  - 基类包含：workflow 生命周期、状态转换、store 操作
 
-- [ ] **FLOW-01**: stage carry-forward prefers `checkpoint-summary.md` over full prior decision text
-- [ ] **FLOW-02**: complex specs can declare execution scope limits for files, checks, and deliverables
-- [ ] **FLOW-03**: producer prompt requires a scoped execution declaration before edits
-- [ ] **FLOW-04**: validation and complex task flows classify-and-stop on product-side or sample-side gaps
+- [ ] **CLEAN-04**: 统一重复类型定义
+  - `PrincipleStatus` 合并到单一数据源（优先 `core/evolution-types.ts`）
+  - `PrincipleDetectorSpec` 合并到单一数据源
+  - 更新所有引用
 
-### Documentation
+- [ ] **CLEAN-05**: 调查 empathy-observer-workflow-manager 引用
+  - 确认是否有活跃引用
+  - 如果无引用，标记为 deprecated 或删除
+  - 如果有引用，确保其与新架构兼容
 
-- [ ] **DOC-01**: `SKILL.md` reflects internal smoke standards and complex task entry rules
-- [ ] **DOC-02**: `REFERENCE.md` documents failure classification, minimum task contract, execution scope limits, checkpoint summary, and next architecture direction
-- [ ] **DOC-03**: `EXAMPLES.md` shows validation, failure classification, complex templates, and continuation via checkpoint summary
+- [ ] **CLEAN-06**: 添加 build artifacts 到 .gitignore
+  - `packages/*/dist/`
+  - `packages/*/coverage/`
+  - `packages/*/*.tgz`
+  - 验证不影响现有构建流程
 
-## Stop Boundaries
+## v2 Requirements
 
-If a validation run or complex task attempt hits one of the following, classify it and stop instead of expanding scope:
+Deferred to future release.
 
-| Category | Allowed action | Stop action |
-|----------|----------------|-------------|
-| workflow bug | fix packaged workflow plumbing or source orchestrator plumbing | do not expand into product closure |
-| agent behavior issue | adjust agent profile, fallback, or prompt discipline | do not special-case behavior in product code |
-| environment issue | classify and require operator intervention | do not auto-repair the environment |
-| sample-spec issue | classify and stop the run | do not edit `packages/openclaw-plugin` or `D:/Code/openclaw` |
+### Architecture Refactor
+
+- **ARCH-01**: 拆分 evolution-worker.ts (1785 行) — 拆分为 pain-detection-service, queue-manager, workflow-coordinator
+- **ARCH-02**: 拆分 trajectory.ts (1673 行) — 精简为核心必需，或标记为可选
+
+### Optional Modules
+
+- **OPT-01**: 评估 Nocturnal Trinity 是否可拆分为可选插件
+- **OPT-02**: 评估 trajectory 是否可标记为可选（仅当日志用）
 
 ## Out of Scope
 
 | Feature | Reason |
 |---------|--------|
-| `packages/openclaw-plugin` fixes | known sample-side gaps; not part of workflow-skill internalization |
-| `D:/Code/openclaw` changes | outside this repo |
-| dashboard / stageGraph / self-optimizing sprint / multi-task parallelism | future work, not v1.3 |
-| full work-unit/tasklet engine | next milestone, not this round |
-| orchestrator redesign | v1.3 is internal usability hardening, not a rewrite |
+| 新功能开发 | 本里程碑专注代码质量 |
+| Nocturnal 行为改变 | 保持现状，只做清理 |
+| Diagnostician 修改 | 刚跑通，勿动 |
+| trajectory.ts 大拆 | P2，仅标记可选或精简 |
 
 ## Traceability
 
-| Requirement group | Phase | Status |
-|-------------------|-------|--------|
-| STAB-01 to STAB-05 | Phase 1 | In progress |
-| TASK-01 to TASK-05 | Phase 2 | In progress |
-| FLOW-01 to FLOW-04 | Phase 3 | In progress |
-| DOC-01 to DOC-03 | Cross-cutting | In progress |
+Which phases cover which requirements. Updated during roadmap creation.
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| CLEAN-01 | TBD | Pending |
+| CLEAN-02 | TBD | Pending |
+| CLEAN-03 | TBD | Pending |
+| CLEAN-04 | TBD | Pending |
+| CLEAN-05 | TBD | Pending |
+| CLEAN-06 | TBD | Pending |
+
+**Coverage:**
+- v1.6 requirements: 6 total
+- Mapped to phases: 0
+- Unmapped: 6 ⚠️
 
 ---
-*Last updated: 2026-04-06*
+*Requirements defined: 2026-04-07*
+*Last updated: 2026-04-07 after v1.6 milestone started*
