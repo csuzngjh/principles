@@ -1,23 +1,28 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { handleAfterToolCall } from '../../src/hooks/pain';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { handleAfterToolCall } from '../../src/hooks/pain.js';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as ioUtils from '../../src/utils/io';
-import { WorkspaceContext } from '../../src/core/workspace-context';
-import { EventLogService } from '../../src/core/event-log';
-import { setInjectedProbationIds, clearSession } from '../../src/core/session-tracker';
-import * as principleTreeLedger from '../../src/core/principle-tree-ledger';
+import * as ioUtils from '../../src/utils/io.js';
+import { WorkspaceContext } from '../../src/core/workspace-context.js';
+import { EventLogService } from '../../src/core/event-log.js';
+import { setInjectedProbationIds, clearSession } from '../../src/core/session-tracker.js';
 
 vi.mock('fs');
 vi.mock('../../src/utils/io.js');
-vi.mock('../../src/core/workspace-context');
-vi.mock('../../src/core/event-log');
-vi.mock('../../src/core/principle-tree-ledger.js', () => ({
-  updatePrincipleValueMetrics: vi.fn(),
+vi.mock('../../src/core/evolution-engine.js', () => ({
+  recordEvolutionSuccess: vi.fn(),
+  recordEvolutionFailure: vi.fn(),
+}));
+vi.mock('../../src/core/evolution-logger.js', () => ({
+  createTraceId: vi.fn(() => 'trace-123'),
+  getEvolutionLogger: vi.fn(() => ({
+    logPainDetected: vi.fn(),
+  })),
 }));
 
 const mockEmitSync = vi.fn();
 const mockRecordProbationFeedback = vi.fn();
+const mockUpdatePrincipleValueMetrics = vi.fn();
 
 describe('Post-Write Checks & Pain Hook', () => {
   const workspaceDir = '/mock/workspace';
@@ -38,6 +43,9 @@ describe('Post-Write Checks & Pain Hook', () => {
       recordToolCall: vi.fn(),
       recordPainEvent: vi.fn(),
     },
+    principleTreeLedger: {
+      updatePrincipleValueMetrics: mockUpdatePrincipleValueMetrics,
+    },
     evolutionReducer: {
       emitSync: mockEmitSync,
       recordProbationFeedback: mockRecordProbationFeedback,
@@ -53,9 +61,14 @@ describe('Post-Write Checks & Pain Hook', () => {
     vi.clearAllMocks();
     mockEmitSync.mockReset();
     mockRecordProbationFeedback.mockReset();
-    vi.mocked(WorkspaceContext.fromHookContext).mockReturnValue(mockWctx as any);
-    vi.mocked(EventLogService.get).mockReturnValue(mockEventLog as any);
+    mockUpdatePrincipleValueMetrics.mockReset();
+    vi.spyOn(WorkspaceContext, 'fromHookContext').mockReturnValue(mockWctx as any);
+    vi.spyOn(EventLogService, 'get').mockReturnValue(mockEventLog as any);
     clearSession('s-success');
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it('should ignore non-write tools', () => {
@@ -174,8 +187,7 @@ describe('Post-Write Checks & Pain Hook', () => {
 
     handleAfterToolCall(mockEvent as any, mockCtx as any);
 
-    expect(principleTreeLedger.updatePrincipleValueMetrics).toHaveBeenCalledWith(
-      '/mock/state',
+    expect(mockUpdatePrincipleValueMetrics).toHaveBeenCalledWith(
       'p-match',
       expect.objectContaining({
         painPreventedCount: 1,

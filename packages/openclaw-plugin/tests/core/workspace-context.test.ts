@@ -148,7 +148,7 @@ describe('WorkspaceContext', () => {
     });
 
     it('should retrieve active principle subtrees through the workspace boundary', () => {
-        const mockCtx = { workspaceDir };
+        const mockCtx = { workspaceDir, stateDir };
         const wctx = WorkspaceContext.fromHookContext(mockCtx);
         const activePrinciples = [
             {
