@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import type { PDTaskSpec, PDTaskExecutionRecord } from './pd-task-types.js';
+import type { PDTaskSpec } from './pd-task-types.js';
 import { BUILTIN_PD_TASKS } from './pd-task-types.js';
 import { readTasks, writeTasks } from './pd-task-store.js';
 import { withLockAsync } from '../utils/file-lock.js';
@@ -27,6 +27,7 @@ export interface CronJobState {
 export interface CronJob {
   id: string;
   name: string;
+  agentId?: string;
   description?: string;
   enabled: boolean;
   deleteAfterRun?: boolean;
@@ -336,53 +337,7 @@ export async function trigger(
   task.meta.lastTriggeredAtMs = nowMs;
   task.meta.lastTriggerStatus = 'pending';
 
-  // NOTE: executionHistory tracking requires CronService callback on job completion.
-  // Currently only lastTriggeredAtMs/lastTriggerStatus are updated.
-  // TODO: Implement CronService webhook to call recordExecution() on job completion.
-
   await writeCronStore(cronStore);
   await writeTasks(workspaceDir, tasks);
   return { ok: true };
-}
-
-export function getExecutionHistory(
-  taskId: string,
-  workspaceDir: string,
-  options?: { limit?: number; status?: string },
-): PDTaskExecutionRecord[] {
-  const tasks = readTasks(workspaceDir);
-  const task = tasks.find((t) => t.id === taskId);
-  if (!task?.meta?.executionHistory) return [];
-
-  let records = [...task.meta.executionHistory];
-  if (options?.status) {
-    records = records.filter((r) => r.status === options.status);
-  }
-  records.sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
-  if (options?.limit) {
-    records = records.slice(0, options.limit);
-  }
-  return records;
-}
-
-export function recordExecution(
-  task: PDTaskSpec,
-  runId: string,
-  status: PDTaskExecutionRecord['status'],
-  startedAt: number,
-  error?: string,
-): PDTaskSpec {
-  if (!task.meta) task.meta = {};
-  if (!task.meta.executionHistory) task.meta.executionHistory = [];
-  task.meta.executionHistory.push({
-    runId,
-    status,
-    startedAt,
-    endedAt: Date.now(),
-    error,
-  });
-  if (task.meta.executionHistory.length > 100) {
-    task.meta.executionHistory = task.meta.executionHistory.slice(-100);
-  }
-  return task;
 }

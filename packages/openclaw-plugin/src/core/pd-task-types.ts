@@ -35,16 +35,7 @@ export interface PDTaskDelivery {
   to?: string;
 }
 
-/** Single execution record stored in meta.executionHistory */
-export interface PDTaskExecutionRecord {
-  runId: string;
-  status: 'succeeded' | 'failed' | 'timed_out' | 'cancelled' | 'lost';
-  startedAt?: number;
-  endedAt?: number;
-  error?: string;
-}
-
-/** Metadata — not synced to cron, used for health tracking and history */
+/** Metadata — not synced to cron, used for health tracking */
 export interface PDTaskMeta {
   /** When this task was first declared */
   createdAtMs?: number;
@@ -66,8 +57,6 @@ export interface PDTaskMeta {
   autoDisabledAt?: number;
   /** Reason for auto-disable */
   autoDisabledReason?: string;
-  /** Execution history (recent runs) */
-  executionHistory?: PDTaskExecutionRecord[];
   /** Last manual trigger timestamp */
   lastTriggeredAtMs?: number;
   /** Last manual trigger status */
