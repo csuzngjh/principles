@@ -49,6 +49,7 @@ import { handleNocturnalRolloutCommand } from './commands/nocturnal-rollout.js';
 import { handleWorkflowDebugCommand } from './commands/workflow-debug.js';
 import { EvolutionWorkerService } from './service/evolution-worker.js';
 import { TrajectoryService } from './service/trajectory-service.js';
+import { PDTaskService } from './core/pd-task-service.js';
 import { ensureWorkspaceTemplates } from './core/init.js';
 import { migrateDirectoryStructure } from './core/migration.js';
 import { SystemLogger } from './core/system-logger.js';
@@ -100,12 +101,6 @@ const plugin = {
             migrateDirectoryStructure(api, workspaceDir);
             ensureWorkspaceTemplates(api, workspaceDir, language);
             SystemLogger.log(workspaceDir, 'SYSTEM_BOOT', `Principles Disciple online. Language: ${language}`);
-            // Auto-create PD cron jobs (empathy optimizer, etc.) — idempotent
-            const { ensurePDCronJobs } = await import('./core/cron-initializer.js');
-            const cronResult = ensurePDCronJobs();
-            if (cronResult.created.length > 0) {
-              api.logger?.info?.(`[PD] Auto-created cron jobs: ${cronResult.created.join(', ')}`);
-            }
             workspaceInitialized = true;
           }
           const result = await handleBeforePromptBuild(event, { ...ctx, api, workspaceDir });
@@ -333,6 +328,8 @@ const plugin = {
       EvolutionWorkerService.api = api;
       api.registerService(EvolutionWorkerService);
       api.registerService(TrajectoryService);
+      PDTaskService.api = api;
+      api.registerService(PDTaskService);
     } catch (err) {
       api.logger.error(`[PD] Failed to register EvolutionWorkerService: ${String(err)}`);
     }
