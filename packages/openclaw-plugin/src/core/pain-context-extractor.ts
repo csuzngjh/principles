@@ -20,6 +20,7 @@
  */
 
 import * as fs from 'fs';
+import * as fsPromises from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
 
@@ -46,27 +47,37 @@ function getAgentsDir(): string {
 }
 
 // =========================================================================
-// Safe File Reading
+// Safe File Reading (Async)
 // =========================================================================
 
-function safeTail(filePath: string): string[] {
+async function safeTail(filePath: string): Promise<string[]> {
   try {
-    if (!fs.existsSync(filePath)) return [];
-    const stat = fs.statSync(filePath);
+    // Check existence and stats asynchronously
+    let stat: fs.Stats;
+    try {
+      stat = await fsPromises.stat(filePath);
+    } catch {
+      return []; // File doesn't exist or can't be accessed
+    }
     if (stat.size === 0) return [];
 
     const isTruncated = stat.size > TAIL_READ_SIZE;
     const readSize = Math.min(stat.size, TAIL_READ_SIZE);
     const buffer = Buffer.alloc(readSize);
-    const fd = fs.openSync(filePath, 'r');
+    
+    // Use async file read
+    const fileHandle = await fsPromises.open(filePath, 'r');
     try {
-      fs.readSync(fd, buffer, 0, readSize, stat.size - readSize);
+      await fileHandle.read(buffer, 0, readSize, stat.size - readSize);
+      await fileHandle.close();
       const content = buffer.toString('utf8');
       // Only strip first line if file was actually truncated (started mid-line)
       const validContent = isTruncated ? content.slice(content.indexOf('\n') + 1) : content;
       return validContent.split('\n').filter(l => l.trim().length > 0);
-    } finally {
-      fs.closeSync(fd);
+    } catch (err) {
+      // Ensure file handle is closed even on error
+      try { await fileHandle.close(); } catch { /* ignore close error */ }
+      throw err;
     }
   } catch (err) {
     console.debug(`[pain-context-extractor] safeTail failed: ${String(err)}`);
@@ -200,7 +211,7 @@ export async function extractRecentConversation(
   if (agentId && !SAFE_ID_REGEX.test(agentId)) return '';
   try {
     const jsonlPath = path.join(getAgentsDir(), agentId, 'sessions', `${sessionId}.jsonl`);
-    const lines = safeTail(jsonlPath);
+    const lines = await safeTail(jsonlPath);
     const messages = parseSafeMessages(lines);
     if (messages.length === 0) return '';
 
@@ -233,7 +244,7 @@ export async function extractFailedToolContext(
   if (agentId && !SAFE_ID_REGEX.test(agentId)) return '';
   try {
     const jsonlPath = path.join(getAgentsDir(), agentId, 'sessions', `${sessionId}.jsonl`);
-    const lines = safeTail(jsonlPath);
+    const lines = await safeTail(jsonlPath);
     const messages = parseSafeMessages(lines);
     if (messages.length === 0) return '';
 
