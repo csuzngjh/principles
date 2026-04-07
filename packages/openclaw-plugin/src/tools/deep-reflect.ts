@@ -237,19 +237,20 @@ async function executeReflectionWorkflow(
         subagent: api.runtime.subagent as any,
     });
 
-    const taskInput: DeepReflectTaskInput = { context, depth, model_id };
-    const handle = await manager.startWorkflow(deepReflectWorkflowSpec, {
-        parentSessionId,
-        workspaceDir: effectiveWorkspaceDir,
-        taskInput,
-    });
+    try {
+        const taskInput: DeepReflectTaskInput = { context, depth, model_id };
+        const handle = await manager.startWorkflow(deepReflectWorkflowSpec, {
+            parentSessionId,
+            workspaceDir: effectiveWorkspaceDir,
+            taskInput,
+        });
 
-    const startTime = Date.now();
-    const timeoutMs = config.timeout_ms ?? 60000;
-    const result = await pollReflectionCompletion(manager, handle, timeoutMs, startTime, eventLog, context, model_id, depth);
-
-    manager.dispose();
-    return result;
+        const startTime = Date.now();
+        const timeoutMs = config.timeout_ms ?? 60000;
+        return await pollReflectionCompletion(manager, handle, timeoutMs, startTime, eventLog, effectiveWorkspaceDir, context, model_id, depth);
+    } finally {
+        manager.dispose();
+    }
 }
 
 /**
@@ -261,6 +262,7 @@ async function pollReflectionCompletion(
     timeoutMs: number,
     startTime: number,
     eventLog: ReturnType<typeof EventLogService.get>,
+    workspaceDir: string,
     context: string,
     model_id: string | undefined,
     depth: number,
@@ -273,7 +275,7 @@ async function pollReflectionCompletion(
         if (!workflow) break;
 
         if (workflow.state === 'completed') {
-            return formatReflectionSuccess(handle, context, depth, model_id, startTime, eventLog);
+            return formatReflectionSuccess(handle, context, depth, model_id, startTime, eventLog, workspaceDir);
         }
 
         if (workflow.state === 'terminal_error' || workflow.state === 'expired') {
@@ -294,8 +296,9 @@ function formatReflectionSuccess(
     model_id: string | undefined,
     startTime: number,
     eventLog: ReturnType<typeof EventLogService.get>,
+    workspaceDir: string,
 ): { content: Array<{ type: string; text: string }> } {
-    const reflectionLogPath = resolvePdPath(handle.childSessionKey, 'REFLECTION_LOG');
+    const reflectionLogPath = resolvePdPath(workspaceDir, 'REFLECTION_LOG');
     let insights = '';
     if (fs.existsSync(reflectionLogPath)) {
         const content = fs.readFileSync(reflectionLogPath, 'utf8');
