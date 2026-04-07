@@ -1,5 +1,4 @@
 import type { PluginHookSubagentEndedEvent, PluginHookSubagentContext, PluginLogger, OpenClawPluginApi } from '../openclaw-sdk.js';
-import * as fs from 'fs';
 import { buildPainFlag, writePainFlag } from '../core/pain.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 // No longer needed — diagnostician runs via HEARTBEAT, not subagent

@@ -24,8 +24,6 @@ import type {
     SubagentWorkflowSpec,
     WorkflowMetadata,
     WorkflowDebugSummary,
-    WorkflowResultContext,
-    WorkflowPersistContext,
 } from './types.js';
 import { RuntimeDirectDriver, type RunParams } from './runtime-direct-driver.js';
 import { WorkflowStore } from './workflow-store.js';

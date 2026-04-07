@@ -5,7 +5,6 @@ import type { OpenClawPluginServiceContext, OpenClawPluginApi, PluginLogger } fr
 import { DictionaryService } from '../core/dictionary-service.js';
 import { DetectionService } from '../core/detection-service.js';
 import { ensureStateTemplates } from '../core/init.js';
-import { extractCommonSubstring } from '../utils/nlp.js';
 import { SystemLogger } from '../core/system-logger.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { EventLog } from '../core/event-log.js';
