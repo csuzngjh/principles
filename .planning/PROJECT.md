@@ -18,6 +18,12 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 - Contract enforcement and schema validation
 - `outputQuality` decision scoring
 - Nocturnal background reflection pipeline
+- CLEAN-01: normalizePath naming collision eliminated (→ normalizePathPosix)
+- CLEAN-02: PAIN_CANDIDATES legacy path removed (165 lines deleted)
+- CLEAN-03: WorkflowManager base class extracted (~750 lines duplication removed)
+- CLEAN-04: PrincipleStatus and PrincipleDetectorSpec unified to single source
+- CLEAN-05: empathy-observer-workflow-manager confirmed LIVE (3 active imports)
+- CLEAN-06: build artifacts (coverage/, *.tgz) added to .gitignore
 
 ## Active
 
@@ -27,6 +33,7 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 - another agent can start from the skill package instead of repo-root orchestrator paths
 - validation runs stop after classification when they hit sample-side or product-side gaps
 - workflow v1.3 focuses on internal usability first, then finer-grained work-unit architecture
+- ARCH-01/ARCH-02: evolution-worker.ts and trajectory.ts splitting (P2, deferred)
 
 ## Out of Scope
 
@@ -57,18 +64,11 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 
 ## Current Milestone
 
-### v1.6 代码质量清理
+### v1.7 (Next)
 
-**Goal:** 清理代码膨胀、修复危险命名冲突、解决遗留路径断裂问题
+**Status:** Planning next milestone
 
-**Target features:**
-
-- [ ] **CLEAN-01**: 修复 `normalizePath` 命名冲突 — 重命名 `nocturnal-compliance.ts` 中的函数避免同名不同签名
-- [ ] **CLEAN-02**: 解决 PAIN_CANDIDATES 遗留路径 — 集成进 evolution-reducer 或删除
-- [ ] **CLEAN-03**: 提取 WorkflowManager 基类 — EmpathyObserver/DeepReflect/Nocturnal 三个 manager 提取公共基类，减少 ~1200 行重复
-- [ ] **CLEAN-04**: 统一重复类型定义 — `PrincipleStatus` 和 `PrincipleDetectorSpec` 合并到单一数据源
-- [ ] **CLEAN-05**: 调查 empathy-observer-workflow-manager 引用情况 — 确认是死代码还是仍在使用
-- [ ] **CLEAN-06**: 添加 build artifacts 到 .gitignore — dist/, coverage/, *.tgz
+**Next steps:** Run `/gsd-new-milestone` to start planning v1.7
 
 ---
-*Last updated: 2026-04-07*
+*Last updated: 2026-04-07 after v1.6 milestone shipped*

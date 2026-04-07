@@ -1,24 +1,21 @@
 # Milestones
 
-## v1.6 代码质量清理 (In Progress: 2026-04-07)
+## v1.6 代码质量清理 (Shipped: 2026-04-07)
 
-**Goal:** 清理代码膨胀、修复危险命名冲突、解决遗留路径断裂问题
+**Phases completed:** 3 (Phase 11, 12, 13) | **Plans:** 6
 
-**Target features:**
+**Key accomplishments:**
 
-- CLEAN-01: 修复 `normalizePath` 命名冲突
-- CLEAN-02: 解决 PAIN_CANDIDATES 遗留路径
-- CLEAN-03: 提取 WorkflowManager 基类
-- CLEAN-04: 统一重复类型定义
-- CLEAN-05: 调查 empathy-observer-workflow-manager 引用
-- CLEAN-06: 添加 build artifacts 到 .gitignore
+- normalizePath collision eliminated — renamed to normalizePathPosix in nocturnal-compliance.ts; utils/io.ts unaffected
+- PAIN_CANDIDATES dead code removed — 165 lines deleted from evolution-worker.ts
+- WorkflowManager duplication reduced — ~750 lines removed via base class extraction (555 lines base + 307 + 197)
+- Type deduplication — PrincipleStatus and PrincipleDetectorSpec unified to evolution-types.ts
+- empathy-observer-workflow-manager status confirmed LIVE — 3 active imports verified
+- Build artifacts excluded — coverage/ and .tgz entries added to .gitignore
 
-**Key analysis findings:**
-- `normalizePath` naming collision — DIFFERENT signatures in utils/io.ts vs nocturnal-compliance.ts
-- PAIN_CANDIDATES legacy path — two parallel disconnected pain processing systems
-- Workflow Manager ~1200 lines duplicated across 3 files
-- trajectory.ts (1673 lines) — core doesn't consume it
-- Nocturnal Trinity (~6000 lines) — optional training data pipeline
+**Stats:** 19 commits | 22 files | +2,401 / -986 LOC
+
+**Tech debt:** None accumulated — all work was verified cleanup with no TODOs or placeholders
 
 ---
 
