@@ -478,6 +478,28 @@ The empathy observer subagent handles pain detection independently.
         _empathyTurnCounter++;
         const turnCount = _empathyTurnCounter;
 
+        // ── Adaptive LLM sampling — inverse to keyword effectiveness ──
+        // When keyword coverage is poor → high LLM probability to discover new terms
+        // As keyword store matures → LLM probability naturally decreases
+        const totalTerms = Object.keys(keywordStore.terms).length;
+        const hitTerms = Object.values(keywordStore.terms).filter((e) => e.hitCount > 0).length;
+        const zeroHitTerms = totalTerms - hitTerms;
+        const llmDiscoveredTerms = Object.values(keywordStore.terms).filter((e) => e.source === 'llm_discovered').length;
+
+        // Adaptive sampling probability:
+        // High when: coverage is poor, no LLM-discovered terms yet, zero-hit terms are many
+        // Low when: high coverage, many LLM discoveries, good keyword health
+        const coverageRatio = totalTerms > 0 ? hitTerms / totalTerms : 0;
+        const discoveryRatio = totalTerms > 0 ? llmDiscoveredTerms / totalTerms : 0;
+        const zeroHitRatio = totalTerms > 0 ? zeroHitTerms / totalTerms : 0;
+
+        // Base: start high (80%), decrease as store matures
+        // Formula: 0.8 - (coverage * 0.3) - (discovery * 0.3) + (zeroHit * 0.2)
+        // Range: ~0.1 (mature store) to ~1.0 (empty/new store)
+        const baseSamplingProb = Math.max(0.1, Math.min(1.0,
+          0.8 - (coverageRatio * 0.3) - (discoveryRatio * 0.3) + (zeroHitRatio * 0.2),
+        ));
+
         // Decision: should we call subagent?
         let shouldCallSubagent = false;
         let samplingReason = '';
@@ -486,13 +508,14 @@ The empathy observer subagent handles pain detection independently.
           // High confidence — keyword match is reliable, no subagent needed
           shouldCallSubagent = false;
         } else if (matchResult.score >= 0.3) {
-          // Boundary case — 30% sampling for subagent verification
-          shouldCallSubagent = Math.random() < 0.3;
-          samplingReason = 'boundary_verification';
+          // Boundary case — adaptive sampling
+          shouldCallSubagent = Math.random() < baseSamplingProb;
+          samplingReason = `boundary_adaptive(p=${baseSamplingProb.toFixed(2)})`;
         } else {
-          // No keyword hit — 5% random sampling to discover new expressions
-          shouldCallSubagent = Math.random() < 0.05;
-          samplingReason = 'random_discovery';
+          // No keyword hit — HIGH adaptive sampling to discover new expressions
+          // This is the discovery path: when keywords miss, LLM should investigate
+          shouldCallSubagent = Math.random() < baseSamplingProb;
+          samplingReason = `discovery_adaptive(p=${baseSamplingProb.toFixed(2)})`;
         }
 
         if (matchResult.matched) {
