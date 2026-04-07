@@ -14,6 +14,7 @@ import { isSubagentRuntimeAvailable } from '../../utils/subagent-probe.js';
 import { WorkflowManagerBase } from './workflow-manager-base.js';
 import { applyKeywordUpdates } from '../../core/empathy-keyword-matcher.js';
 import { loadKeywordStore, saveKeywordStore } from '../../core/empathy-keyword-matcher.js';
+import { normalizeSeverity } from '../../core/empathy-types.js';
 import * as path from 'path';
 
 const WORKFLOW_SESSION_PREFIX = 'agent:main:subagent:workflow-';
@@ -197,15 +198,6 @@ function parseEmpathyPayloadForSpec(rawText: string): EmpathyObserverPayload | n
 }
 
 /**
- * Normalize severity to valid enum.
- */
-function normalizeSeverityForSpec(severity: string | undefined): 'mild' | 'moderate' | 'severe' {
-    if (severity === 'severe') return 'severe';
-    if (severity === 'moderate') return 'moderate';
-    return 'mild';
-}
-
-/**
  * Normalize confidence to [0, 1] range.
  */
 function normalizeConfidenceForSpec(value: number | undefined): number {
@@ -248,7 +240,7 @@ export const empathyObserverWorkflowSpec: SubagentWorkflowSpec<EmpathyResult> = 
 
         return {
             damageDetected: payload.damageDetected ?? false,
-            severity: normalizeSeverityForSpec(payload.severity),
+            severity: normalizeSeverity(payload.severity),
             confidence: normalizeConfidenceForSpec(payload.confidence),
             reason: payload.reason ?? '',
             painScore: 0,
