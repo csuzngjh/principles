@@ -123,14 +123,6 @@ interface LegacyEvolutionQueueItem {
     resultRef?: string;
 }
 
-interface PainCandidateEntry {
-    count: number;
-    status: string;
-    firstSeen: string;
-    lastSeen: string;
-    samples: string[];
-}
-
 /**
  * Default values for new V2 fields when migrating legacy items.
  */
@@ -190,14 +182,9 @@ const PAIN_QUEUE_DEDUP_WINDOW_MS = 30 * 60 * 1000;
 
 // P0 fix: File lock constants and helper for queue operations (prevents TOCTOU race)
 export const EVOLUTION_QUEUE_LOCK_SUFFIX = '.lock';
-export const PAIN_CANDIDATES_LOCK_SUFFIX = '.candidates.lock';
 export const LOCK_MAX_RETRIES = 50;
 export const LOCK_RETRY_DELAY_MS = 50;
 export const LOCK_STALE_MS = 30_000;
-const PAIN_CANDIDATE_MAX_SAMPLES = 5;
-const PAIN_CANDIDATE_SAMPLE_LEN = 1000;
-const PAIN_CANDIDATE_FINGERPRINT_HEAD_LEN = 160;
-const PAIN_CANDIDATE_FINGERPRINT_TAIL_LEN = 80;
 
 export function createEvolutionTaskId(
     source: string,
@@ -212,48 +199,6 @@ export function createEvolutionTaskId(
         .update(`${source}:${score}:${preview}:${reason}:${now}`)
         .digest('hex')
         .substring(0, 8);
-}
-
-function normalizePainCandidateText(text: string): string {
-    return text.replace(/\s+/g, ' ').trim();
-}
-
-export function shouldTrackPainCandidate(text: string): boolean {
-    const normalized = normalizePainCandidateText(text);
-    if (!normalized) return false;
-    if (normalized === 'NO_REPLY') return false;
-
-    // Skip empathy observer payloads: they are classifier telemetry, not user/system pain patterns.
-    if (
-        normalized.startsWith('{')
-        && normalized.endsWith('}')
-        && normalized.includes('"damageDetected"')
-        && normalized.includes('"severity"')
-        && normalized.includes('"confidence"')
-    ) {
-        return false;
-    }
-
-    return true;
-}
-
-export function createPainCandidateFingerprint(text: string): string {
-    const normalized = normalizePainCandidateText(text);
-    const head = normalized.substring(0, PAIN_CANDIDATE_FINGERPRINT_HEAD_LEN);
-    const tail = normalized.slice(-PAIN_CANDIDATE_FINGERPRINT_TAIL_LEN);
-
-    return createHash('md5')
-        .update(`${normalized.length}:${head}:${tail}`)
-        .digest('hex')
-        .substring(0, 8);
-}
-
-export function summarizePainCandidateSample(text: string): string {
-    return normalizePainCandidateText(text).substring(0, PAIN_CANDIDATE_SAMPLE_LEN);
-}
-
-function isPendingPainCandidate(status: string | undefined): boolean {
-    return status === undefined || status === 'pending';
 }
 
 export async function acquireQueueLock(resourcePath: string, logger: PluginLogger | { warn?: (message: string) => void; info?: (message: string) => void } | undefined, lockSuffix: string = EVOLUTION_QUEUE_LOCK_SUFFIX): Promise<() => void> {
@@ -637,11 +582,18 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
             if (line.startsWith('session_id:')) sessionId = line.slice('session_id:'.length).trim();
             if (line.startsWith('agent_id:')) agentId = line.slice('agent_id:'.length).trim();
 
-            // Key=Value fallback format: "Key=Value" (pain skill manual output)
-            if (line.startsWith('Source=')) source = line.slice('Source='.length).trim();
-            if (line.startsWith('Reason=')) reason = line.slice('Reason='.length).trim();
-            if (line.startsWith('Score=')) score = parseInt(line.slice('Score='.length).trim(), 10) || 0;
-            if (line.startsWith('Time=')) preview = `Human intervention at ${line.slice('Time='.length).trim()}`;
+            // Key=Value fallback format: "key=value" (pain skill manual output)
+            // Handles both uppercase (Source=X) and lowercase (source=x) variants
+            if (line.startsWith('Source=') || line.startsWith('source=')) source = line.includes('Source=') ? line.slice('Source='.length).trim() : line.slice('source='.length).trim();
+            if (line.startsWith('Reason=') || line.startsWith('reason=')) reason = line.includes('Reason=') ? line.slice('Reason='.length).trim() : line.slice('reason='.length).trim();
+            if (line.startsWith('Score=') || line.startsWith('score=')) {
+                const scoreStr = line.includes('Score=') ? line.slice('Score='.length).trim() : line.slice('score='.length).trim();
+                score = parseInt(scoreStr, 10) || 0;
+            }
+            if (line.startsWith('Time=') || line.startsWith('time=')) {
+                const timeStr = line.includes('Time=') ? line.slice('Time='.length).trim() : line.slice('time='.length).trim();
+                preview = `Human intervention at ${timeStr}`;
+            }
 
             // Markdown format support (pain skill writes **Source**: xxx format)
             const mdSource = line.match(/\*\*Source\*\*:\s*(.+)/);
@@ -1362,8 +1314,7 @@ async function processDetectionQueue(wctx: WorkspaceContext, api: OpenClawPlugin
                         continue;
                     }
                 }
-                // No L3 hit - fall through to track as pain candidate
-                await trackPainCandidate(text, wctx);
+                // No L3 hit — pain candidate tracking removed (D-05)
             }
         }
     } catch (err) {
@@ -1371,107 +1322,8 @@ async function processDetectionQueue(wctx: WorkspaceContext, api: OpenClawPlugin
     }
 }
 
-export async function trackPainCandidate(text: string, wctx: WorkspaceContext) {
-    if (!shouldTrackPainCandidate(text)) return;
-
-    const candidatePath = wctx.resolve('PAIN_CANDIDATES');
-    const releaseLock = await requireQueueLock(candidatePath, console, 'trackPainCandidate', PAIN_CANDIDATES_LOCK_SUFFIX);
-
-    try {
-        let data: { candidates: Record<string, PainCandidateEntry> } = { candidates: {} };
-        if (fs.existsSync(candidatePath)) {
-            try {
-                data = JSON.parse(fs.readFileSync(candidatePath, 'utf8'));
-            } catch (e) {
-                // Keep going with empty data if parse fails, but log it
-                // eslint-disable-next-line no-console
-                console.warn(`[PD:EvolutionWorker] Failed to parse pain candidates: ${String(e)}`);
-            }
-        }
-
-        const fingerprint = createPainCandidateFingerprint(text);
-        const now = new Date().toISOString();
-        if (!data.candidates[fingerprint]) {
-            data.candidates[fingerprint] = { count: 0, status: 'pending', firstSeen: now, lastSeen: now, samples: [] };
-        }
-
-        const cand = data.candidates[fingerprint];
-        cand.status = cand.status || 'pending';
-        cand.count++;
-        cand.lastSeen = now;
-
-        const sample = summarizePainCandidateSample(text);
-        if (cand.samples.length < PAIN_CANDIDATE_MAX_SAMPLES && !cand.samples.includes(sample)) {
-            cand.samples.push(sample);
-        }
-        
-        fs.writeFileSync(candidatePath, JSON.stringify(data, null, 2), 'utf8');
-    } finally {
-        releaseLock();
-    }
-}
-
-export async function processPromotion(wctx: WorkspaceContext, logger: PluginLogger, eventLog: EventLog) {
-    const candidatePath = wctx.resolve('PAIN_CANDIDATES');
-    if (!fs.existsSync(candidatePath)) return;
-
-    const releaseLock = await requireQueueLock(candidatePath, logger, 'processPromotion', PAIN_CANDIDATES_LOCK_SUFFIX);
-
-    try {
-        const config = wctx.config;
-        const dictionary = wctx.dictionary;
-        const data: { candidates: Record<string, PainCandidateEntry> } = JSON.parse(fs.readFileSync(candidatePath, 'utf8'));
-        const countThreshold = config.get('thresholds.promotion_count_threshold') || 3;
-
-        let promotedCount = 0;
-        let changed = false;
-
-        for (const [fingerprint, cand] of Object.entries(data.candidates)) {
-            if (isPendingPainCandidate(cand.status) && cand.count >= countThreshold) {
-                // Normalize undefined status to 'pending'
-                if (cand.status !== 'pending') {
-                    cand.status = 'pending';
-                    changed = true;
-                }
-                const commonPhrases = extractCommonSubstring(cand.samples);
-
-                if (commonPhrases.length > 0) {
-                    const phrase = commonPhrases[0];
-                    const ruleId = `P_PROMOTED_${fingerprint.toUpperCase()}`;
-
-                    if (hasEquivalentPromotedRule(dictionary, phrase)) {
-                        cand.status = 'duplicate';
-                        changed = true;
-                        logger?.info?.(`[PD:EvolutionWorker] Skipping duplicate promoted rule for candidate ${fingerprint}: ${phrase}`);
-                        continue;
-                    }
-
-                    if (logger) logger.info(`[PD:EvolutionWorker] Promoting candidate ${fingerprint} to formal rule: ${ruleId}`);
-                    SystemLogger.log(wctx.workspaceDir, 'RULE_PROMOTED', `Candidate ${fingerprint} promoted to rule ${ruleId}`);
-
-                    dictionary.addRule(ruleId, {
-                        type: 'exact_match',
-                        phrases: [phrase],
-                        severity: config.get('scores.default_confusion') || 35,
-                        status: 'active'
-                    });
-
-                    cand.status = 'promoted';
-                    promotedCount++;
-                    changed = true;
-                }
-            }
-        }
-
-        if (changed) {
-            fs.writeFileSync(candidatePath, JSON.stringify(data, null, 2), 'utf8');
-        }
-    } catch (err) {
-        if (logger) logger.warn(`[PD:EvolutionWorker] Error during rule promotion: ${String(err)}`);
-    } finally {
-        releaseLock();
-    }
-}
+// PAIN_CANDIDATES system removed (D-05, D-06): trackPainCandidate and processPromotion deleted
+// Evolution queue is now the single active pain→principle path
 
 export async function registerEvolutionTaskSession(
     workspaceResolve: (key: string) => string,
@@ -1684,7 +1536,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                 if (api) {
                     await processDetectionQueue(wctx, api, eventLog);
                 }
-                await processPromotion(wctx, logger, eventLog);
+                // processPromotion removed (D-06) — promotion via PAIN_CANDIDATES no longer needed
 
                 try {
                     // Delegate to workflow managers' sweepExpiredWorkflows so that
@@ -1768,7 +1620,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                 if (api) {
                     await processDetectionQueue(wctx, api, eventLog);
                 }
-                await processPromotion(wctx, logger, eventLog);
+                // processPromotion removed (D-06)
                 timeoutId = setTimeout(runCycle, interval);
             })().catch((err) => {
                 if (logger) logger.error(`[PD:EvolutionWorker] Startup worker cycle failed: ${String(err)}`);
