@@ -67,6 +67,44 @@ gh pr create --title "feat: your feature" --body "Description"
 | 合并 PR | 碳基（Wesley） |
 | 战略方向 | 碳基（Wesley） |
 
+## 代码风格
+
+本项目使用 ESLint 和 TypeScript 进行代码风格检查：
+
+- **工具**: ESLint + @typescript-eslint
+- **配置文件**: `packages/openclaw-plugin/eslint.config.js`
+- **运行检查**: `npm run lint`（在 `packages/openclaw-plugin` 目录下）
+- **主要规则**:
+  - `no-empty`: error
+  - `no-console`: warn
+  - `complexity`: max 10
+  - `@typescript-eslint/no-explicit-any`: warn
+  - `@typescript-eslint/no-unused-vars`: warn（以下划线开头的参数除外）
+
+提交前请确保 `npm run lint` 无错误。
+
+## 问题反馈
+
+### 报告 Bug
+
+请通过 GitHub Issues 反馈问题，包含以下信息：
+
+- **问题描述**: 简明描述问题现象
+- **复现步骤**: 1、2、3...
+- **预期行为**: 应该如何工作
+- **实际行为**: 实际发生了什么
+- **环境信息**: Node.js 版本、操作系统等
+
+### 功能请求
+
+欢迎提交功能请求，请说明：
+
+- **使用场景**: 这个功能解决什么问题
+- **建议方案**: 你期望的解决方案
+- **替代方案**: 你考虑过的其他方案
+
+Issue 链接: https://github.com/csuzngjh/principles/issues
+
 ## 信任系统
 
 本项目使用 Evolution Points (EP) 成长系统：
