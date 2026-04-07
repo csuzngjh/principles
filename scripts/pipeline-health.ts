@@ -159,7 +159,7 @@ function parseKvLines(text: string): Record<string, string> {
 }
 
 function countPrinciplesInMarkdown(text: string): number {
-  const matches = text.match(/^### P-\d+/gm);
+  const matches = text.match(/^### P[_-]\d+/gm);
   return matches ? matches.length : 0;
 }
 
@@ -828,7 +828,7 @@ function generateMarkdown(report: HealthReport, prevReport: HealthReport | null)
     const prevStages = prevReport.stages;
     const currStages = report.stages;
 
-    const trends: string[][] = [];
+    const trends: Array<[string, string|number, string|number]> = [];
 
     // Pain events
     const currPain = (currStages.pain_signal as any)?.trajectory_db;
@@ -863,7 +863,7 @@ function generateMarkdown(report: HealthReport, prevReport: HealthReport | null)
     }
 
     for (const [label, curr, prev] of trends) {
-      const diff = (curr as number) - (prev as number);
+      const diff = Number(curr) - Number(prev);
       const arrow = diff > 0 ? '↑' : diff < 0 ? '↓' : '→';
       lines.push(`- **${label}**: ${curr} ${arrow} (上次: ${prev})`);
     }
@@ -985,7 +985,7 @@ function runSingleWorkspace(workspace: string, prevReport: HealthReport | null):
   const timestamp = now.toISOString();
 
   const scan = carpetScan(stateDir);
-  const painSignal = collectPainSignal(stateDir);
+  const painSignal = collectPainSignal(stateDir, workspace);
   const evolutionQueue = collectEvolutionQueue(stateDir);
   const diagnostician = collectDiagnostician(stateDir);
   const principles = collectPrinciples(stateDir, workspace);
@@ -1011,6 +1011,7 @@ function runSingleWorkspace(workspace: string, prevReport: HealthReport | null):
     },
     unknown_files: scan.unknown,
     anomalies: [],
+    inferred_breakpoints: [],
   };
 
   report.anomalies = detectAnomalies(report);
