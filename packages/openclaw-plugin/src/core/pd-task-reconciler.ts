@@ -74,15 +74,18 @@ export interface ReconcileOptions {
   logger?: { info?: (msg: string) => void; warn?: (msg: string) => void };
 }
 
-async function readCronStore(): Promise<CronStoreFile> {
+async function readCronStore(logger?: { info?: (msg: string) => void; warn?: (msg: string) => void }): Promise<CronStoreFile> {
   if (!fs.existsSync(CRON_STORE_PATH)) {
+    logger?.info?.(`[PD:Reconciler] cron/jobs.json not found, starting with empty store`);
     return { version: 1, jobs: [] };
   }
   try {
     const raw = fs.readFileSync(CRON_STORE_PATH, 'utf-8');
-    return JSON.parse(raw) as CronStoreFile;
+    const store = JSON.parse(raw) as CronStoreFile;
+    logger?.info?.(`[PD:Reconciler] Loaded cron/jobs.json: ${store.jobs.length} jobs`);
+    return store;
   } catch (err) {
-    console.warn(`[PD:Reconciler] Failed to parse cron/jobs.json: ${String(err)}`);
+    logger?.warn?.(`[PD:Reconciler] Failed to parse cron/jobs.json: ${String(err)}`);
     return { version: 1, jobs: [] };
   }
 }
@@ -132,7 +135,12 @@ function diff(declared: PDTaskSpec[], actual: CronJob[]): DiffAction[] {
   return actions;
 }
 
-function buildCronJob(task: PDTaskSpec, nowMs: number): CronJob {
+function buildCronJob(
+  task: PDTaskSpec,
+  nowMs: number,
+  logger?: { info?: (msg: string) => void },
+): CronJob {
+  logger?.info?.(`[PD:Reconciler] Building cron job: ${task.name} (id=${task.id}, interval=${task.schedule.everyMs}ms)`);
   return {
     id: `pd-${task.id}-${nowMs}`,
     name: task.name,
@@ -144,7 +152,7 @@ function buildCronJob(task: PDTaskSpec, nowMs: number): CronJob {
     wakeMode: 'now',
     payload: {
       kind: 'agentTurn',
-      message: buildTaskPrompt(task),
+      message: buildTaskPrompt(task, logger),
       lightContext: task.execution.lightContext ?? true,
       timeoutSeconds: task.execution.timeoutSeconds ?? 120,
       toolsAllow: task.execution.toolsAllow,
@@ -162,33 +170,95 @@ function buildCronJob(task: PDTaskSpec, nowMs: number): CronJob {
   };
 }
 
-function buildTaskPrompt(task: PDTaskSpec): string {
+function buildTaskPrompt(task: PDTaskSpec, logger?: { info?: (msg: string) => void }): string {
   if (task.id === 'empathy-optimizer') {
+    logger?.info?.(`[PD:Reconciler] Building empathy optimizer prompt`);
     return `You are the Principles Disciple Empathy Keyword Optimizer.
 
 ## TASK
-Analyze the current empathy keyword store and recent user messages.
-Return STRICT JSON only (no markdown, no explanation):
+Analyze the current empathy keyword store and recent user message logs to:
+1. Discover NEW frustration expressions not in the current store
+2. ADJUST weights of existing terms based on actual hit frequency
+3. REMOVE terms that produce too many false positives
 
-{"updates": {"TERM": {"action": "add|update|remove", "weight": 0.1-0.9, "falsePositiveRate": 0.05-0.5, "reasoning": "brief reason"}}}
+## WORKFLOW (execute in order)
 
-## DATA ACCESS
-- Read keyword store: read_file tool on ~/.openclaw/workspace-main/.state/empathy_keywords.json
-- Read recent events: search_file_content tool on ~/.openclaw/workspace-main/.state/logs/events.jsonl
-- Find frustration patterns in recent messages using search_file_content
+### Step 1: Read current keyword store
+Use read_file to load:
+\`~/.openclaw/workspace-main/.state/empathy_keywords.json\`
+
+Examine the "terms" object. For each term note:
+- weight (0.1-0.9): higher = stronger frustration signal
+- hitCount: how many times it matched
+- falsePositiveRate (0.05-0.5): how often it's a false alarm
+
+### Step 2: Read recent message logs
+Use search_file_content to scan:
+\`~/.openclaw/workspace-main/.state/logs/events.jsonl\`
+
+Look for user messages containing frustration signals:
+- Negation: "不对", "错了", "不行", "重做"
+- Anger: "垃圾", "蠢", "废物", "白做"
+- Disappointment: "不行啊", "还是不对", "没解决"
+- Escalation: "你到底在干什么", "你确定吗", "what are you doing"
+
+### Step 3: Write updated keyword store
+Use write_file to save the updated store back to:
+\`~/.openclaw/workspace-main/.state/empathy_keywords.json\`
+
+The file format is:
+\`\`\`json
+{
+  "version": 1,
+  "lastUpdated": "ISO timestamp",
+  "lastOptimizedAt": "ISO timestamp",
+  "terms": {
+    "TERM": {
+      "weight": 0.5,
+      "source": "seed|llm_discovered|user_reported",
+      "hitCount": 0,
+      "falsePositiveRate": 0.15
+    }
+  },
+  "stats": {
+    "totalHits": 0,
+    "totalFalsePositives": 0,
+    "optimizationCount": 1
+  }
+}
+\`\`\`
+
+**IMPORTANT**: You MUST use the write_file tool. Do NOT just return JSON in your response.
+
+### Step 4: Report summary
+After writing the file, reply with a brief summary:
+\`\`\`
+Empathy keyword optimization complete:
+- Added: N new terms (list them)
+- Updated: M terms (list changes)
+- Removed: K terms (list them)
+- Total terms in store: X
+\`\`\`
 
 ## RULES
-- ADD: If user messages contain frustration signals NOT in current terms
-- UPDATE: If a term has high hits → increase weight; low hits + high fp_rate → decrease
-- REMOVE: If a term has 0 hits AND high false positive rate (>0.3)
-- Weight: 0.1 (weak signal) to 0.9 (strong signal)
-- falsePositiveRate: 0.05 (rare false alarm) to 0.5 (often wrong)
-- Keep reasoning concise (max 80 chars)
+- ADD: If you find frustration expressions in logs NOT in current terms
+  - source = "llm_discovered", discoveredAt = current ISO timestamp
+  - weight: 0.5-0.7 for new terms (start conservative)
+  - falsePositiveRate: 0.2-0.3 (uncertain until validated)
+- UPDATE: Adjust based on evidence
+  - High hitCount + low FPR → increase weight
+  - Low hitCount + high FPR → decrease weight
+  - Keep weight in 0.1-0.9, FPR in 0.05-0.5
+- REMOVE: If hitCount=0 AND falsePositiveRate > 0.3 AND term is clearly generic
+  - Don't remove terms that might be valid but rare
+- PRESERVE: Keep existing hitCount, lastHitAt, discoveredAt for existing terms
+- Bump stats.optimizationCount by 1
+- Set lastOptimizedAt to current ISO timestamp
 
 ## EXAMPLES
-- User says "搞什么呀" → ADD "搞什么呀" weight=0.7
-- "不对" has 50 hits → UPDATE weight=0.9
-- "呵呵" has 0 hits and fp_rate=0.4 → REMOVE`;
+- "不对" has hitCount=50 → increase weight from 0.5 to 0.7
+- "呵呵" has hitCount=0, FPR=0.4, generic term → REMOVE
+- User says "烦死了" in logs, not in store → ADD weight=0.6, FPR=0.25`;
   }
   return task.description;
 }
@@ -213,7 +283,7 @@ export async function reconcilePDTasks(
     return { ...t, meta: { createdAtMs: nowMs } };
   });
 
-  const cronStore = await readCronStore();
+  const cronStore = await readCronStore(logger);
   const healthUpdated = healthCheck(declared, cronStore, logger);
   const actions = diff(healthUpdated, cronStore.jobs);
 
@@ -222,7 +292,7 @@ export async function reconcilePDTasks(
       case 'CREATE':
         if (action.task) {
           if (!dryRun) {
-            const job = buildCronJob(action.task, nowMs);
+            const job = buildCronJob(action.task, nowMs, logger);
             cronStore.jobs.push(job);
             logger.info?.(`[PD:Reconciler] Created job: ${action.task.name}`);
           }
@@ -233,7 +303,7 @@ export async function reconcilePDTasks(
         if (action.task && action.job) {
           if (!dryRun) {
             const idx = cronStore.jobs.indexOf(action.job);
-            const newJob = buildCronJob(action.task, nowMs);
+            const newJob = buildCronJob(action.task, nowMs, logger);
             newJob.id = action.job.id;
             // Preserve original state — only CronService should recalculate nextRunAtMs
             newJob.state = {
@@ -271,6 +341,12 @@ export async function reconcilePDTasks(
 
   if (!dryRun && (result.created.length > 0 || result.updated.length > 0)) {
     await writeCronStore(cronStore);
+    logger.info?.(`[PD:Reconciler] Wrote cron/jobs.json: ${cronStore.jobs.length} total jobs`);
+    for (const job of cronStore.jobs) {
+      if (job.name.startsWith('PD ')) {
+        logger.info?.(`[PD:Reconciler] PD job: name=${job.name}, enabled=${job.enabled}, schedule=${JSON.stringify(job.schedule)}, nextRun=${job.state.nextRunAtMs ? new Date(job.state.nextRunAtMs).toISOString() : 'TBD'}`);
+      }
+    }
   }
 
   if (!dryRun && declared.length > 0) {
@@ -317,17 +393,20 @@ export async function trigger(
     return { ok: false, error: 'Task is auto-disabled. Use force=true to override.' };
   }
 
-  const cronStore = await readCronStore();
+  const log = (msg: string) => console.info(`[PD:Trigger] ${msg}`);
+  const cronStore = await readCronStore({ info: log, warn: log });
   const nowMs = Date.now();
   const existingJob = cronStore.jobs.find((j) => j.name === task.name);
 
   if (existingJob) {
+    log(`Manually triggering existing job: ${task.name} (id=${existingJob.id})`);
     existingJob.enabled = true;
     existingJob.updatedAtMs = nowMs;
     existingJob.state.nextRunAtMs = nowMs;
     existingJob.deleteAfterRun = undefined;
   } else {
-    const newJob = buildCronJob(task, nowMs);
+    log(`Creating new job for manual trigger: ${task.name}`);
+    const newJob = buildCronJob(task, nowMs, { info: log });
     newJob.enabled = true;
     newJob.state.nextRunAtMs = nowMs;
     cronStore.jobs.push(newJob);
@@ -339,5 +418,6 @@ export async function trigger(
 
   await writeCronStore(cronStore);
   await writeTasks(workspaceDir, tasks);
+  log(`Trigger complete: nextRunAt=${nowMs}, will run on next cron cycle`);
   return { ok: true };
 }

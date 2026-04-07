@@ -18,7 +18,23 @@ import { severityToPenalty, DEFAULT_EMPATHY_KEYWORD_CONFIG } from '../core/empat
 
 // Module-level empathy state — shared across calls to avoid per-turn I/O
 let _empathyTurnCounter = 0;
-let _empathyKeywordCache: { store: ReturnType<typeof loadKeywordStore>; lang: string } | null = null;
+let _empathyKeywordCache: { store: ReturnType<typeof loadKeywordStore>; lang: string; fileMtimeMs: number } | null = null;
+
+/**
+ * Check if the keyword store file on disk has been modified since we cached it.
+ * This detects updates from the cron optimizer subagent.
+ */
+function isKeywordStoreModified(stateDir: string, cachedMtimeMs: number): boolean {
+  const KEYWORD_STORE_FILE = 'empathy_keywords.json';
+  const filePath = path.join(stateDir, KEYWORD_STORE_FILE);
+  try {
+    if (!fs.existsSync(filePath)) return false;
+    const stat = fs.statSync(filePath);
+    return stat.mtimeMs > cachedMtimeMs;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Model configuration with primary model and optional fallback models
@@ -436,9 +452,23 @@ The empathy observer subagent handles pain detection independently.
         logger?.info?.(`[PD:Empathy] Processing user message: "${msgPreview}" (trigger=${trigger}, promptLen=${latestUserMessage.length})`);
         const lang = (wctx.config.get('language') as 'zh' | 'en') || 'zh';
 
-        // Load keyword store once, cache in memory (Finding #7: avoid per-turn I/O)
+        // Cache invalidation: check if cron optimizer modified the file since we cached it
+        let cacheInvalidated = false;
+        if (_empathyKeywordCache && _empathyKeywordCache.lang === lang) {
+          if (isKeywordStoreModified(wctx.stateDir, _empathyKeywordCache.fileMtimeMs)) {
+            cacheInvalidated = true;
+            logger?.info?.(`[PD:Empathy] Cache invalidated — cron optimizer modified store on disk`);
+            _empathyKeywordCache = null;
+          }
+        }
+
+        // Load keyword store (cache miss or language change)
         if (!_empathyKeywordCache || _empathyKeywordCache.lang !== lang) {
-          _empathyKeywordCache = { store: loadKeywordStore(wctx.stateDir, lang), lang };
+          const storePath = path.join(wctx.stateDir, 'empathy_keywords.json');
+          _empathyKeywordCache = { store: loadKeywordStore(wctx.stateDir, lang), lang, fileMtimeMs: fs.existsSync(storePath) ? fs.statSync(storePath).mtimeMs : 0 };
+          if (cacheInvalidated) {
+            logger?.info?.(`[PD:Empathy] Reloaded store: ${Object.keys(_empathyKeywordCache.store.terms).length} terms, totalHits=${_empathyKeywordCache.store.stats.totalHits}, lastOptimizedAt=${_empathyKeywordCache.store.lastOptimizedAt}`);
+          }
         }
         const keywordStore = _empathyKeywordCache.store;
 
@@ -517,6 +547,11 @@ The empathy observer subagent handles pain detection independently.
         if (matchResult.matched) {
           saveKeywordStore(wctx.stateDir, keywordStore);
           const totalHits = keywordStore.stats.totalHits;
+          // Update cache mtime so we don't immediately invalidate our own write
+          const storePath = path.join(wctx.stateDir, 'empathy_keywords.json');
+          if (_empathyKeywordCache) {
+            _empathyKeywordCache.fileMtimeMs = fs.statSync(storePath).mtimeMs;
+          }
           logger?.info?.(`[PD:Empathy] Keyword store saved after match: terms=${matchResult.matchedTerms.join(',')}, totalHits=${totalHits}`);
         }
       } catch (e) {
