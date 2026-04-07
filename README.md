@@ -54,7 +54,6 @@ openclaw gateway --force
 > **For AI Agents:** See [Agent Installation Guide](packages/openclaw-plugin/AGENT_INSTALL_EN.md) for step-by-step instructions on first install and updates.
 
 ---
-```
 
 **For AI Agents (Non-interactive):**
 ```bash
@@ -265,3 +264,13 @@ A: Check `{stateDir}/logs/`:
 This framework encodes evolutionary logic into AI. By transforming errors into principles, we're building digital teammates that learn and grow alongside you.
 
 **[Report Issues](https://github.com/csuzngjh/principles/issues)** | **[Join Discord](https://discord.gg/)** | **[Documentation](docs/)**
+
+---
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+## License
+
+[MIT License](LICENSE) — Copyright (c) 2026 Principles Disciple Contributors
