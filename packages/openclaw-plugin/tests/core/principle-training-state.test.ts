@@ -186,7 +186,14 @@ describe('PrincipleTrainingState', () => {
       saveStore(stateDir, store);
       const raw = fs.readFileSync(path.join(stateDir, PRINCIPLE_TRAINING_FILE), 'utf-8');
       const parsed = JSON.parse(raw);
-      expect(parsed).toEqual(store);
+      expect(parsed['T-01']).toEqual(store['T-01']);
+      expect(parsed['_tree']).toEqual({
+        principles: {},
+        rules: {},
+        implementations: {},
+        metrics: {},
+        lastUpdated: expect.any(String),
+      });
     });
 
     it('preserves the reserved _tree ledger namespace when saving legacy top-level principle records', () => {
@@ -272,7 +279,13 @@ describe('PrincipleTrainingState', () => {
 
       const raw = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as Record<string, unknown>;
       expect(raw['T-01']).toEqual(store['T-01']);
-      expect(raw['_tree']).toEqual(initial._tree);
+      expect(raw['_tree']).toMatchObject({
+        principles: initial._tree.principles,
+        rules: initial._tree.rules,
+        implementations: initial._tree.implementations,
+        metrics: initial._tree.metrics,
+      });
+      expect((raw['_tree'] as { lastUpdated: string }).lastUpdated).toEqual(expect.any(String));
     });
   });
 
