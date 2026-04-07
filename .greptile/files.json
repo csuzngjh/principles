@@ -1,8 +1,0 @@
-{
-  "files": [
-    "README.md",
-    "CLAUDE.md",
-    "packages/openclaw-plugin/README.md",
-    "packages/openclaw-plugin/tsconfig.json"
-  ]
-}
