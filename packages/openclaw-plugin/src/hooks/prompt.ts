@@ -859,8 +859,8 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
   // Shadow evidence comes from real runtime hooks (subagent_spawning/subagent_ended).
   if (!isMinimalMode && sessionId) {
     try {
-      // Extract RoutingInput from the current user message
-      const latestUserText = event.prompt || '';
+      // Use the already extracted and cleaned user message
+      const latestUserText = latestUserMessage || '';
 
       if (latestUserText && latestUserText.trim().length > 0) {
         // Infer requestedTools and requestedFiles from message content

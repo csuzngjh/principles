@@ -530,6 +530,15 @@ export abstract class WorkflowManagerBase implements WorkflowManager {
         return Date.now() - timestamp < 60_000; // 1 minute dedup window
     }
 
+    /**
+     * Get the current state of a workflow by ID.
+     * Returns null if the workflow doesn't exist.
+     */
+    getWorkflowState(workflowId: string): string | null {
+        const workflow = this.store.getWorkflow(workflowId);
+        return workflow?.state ?? null;
+    }
+
     protected markCompleted(workflowId: string): void {
         const timeout = this.activeWorkflows.get(workflowId);
         if (timeout) {

@@ -201,7 +201,7 @@ export function createDeepReflectTool(api: OpenClawPluginApi) {
             try {
                 return await executeReflectionWorkflow(effectiveWorkspaceDir, config, context, depth, model_id, api);
             } catch (err) {
-                return handleReflectionError(err, context, depth, model_id, api);
+                return handleReflectionError(err, context, depth, model_id, effectiveWorkspaceDir, api);
             }
         }
     };
@@ -271,15 +271,15 @@ async function pollReflectionCompletion(
 
     while (Date.now() - startTime < timeoutMs) {
         await new Promise(resolve => setTimeout(resolve, pollInterval));
-        const workflow = (manager as any).store.getWorkflow(handle.workflowId);
-        if (!workflow) break;
+        const workflowState = manager.getWorkflowState(handle.workflowId);
+        if (!workflowState) break;
 
-        if (workflow.state === 'completed') {
+        if (workflowState === 'completed') {
             return formatReflectionSuccess(handle, context, depth, model_id, startTime, eventLog, workspaceDir);
         }
 
-        if (workflow.state === 'terminal_error' || workflow.state === 'expired') {
-            throw new Error(`Deep-reflect workflow failed: ${workflow.state}`);
+        if (workflowState === 'terminal_error' || workflowState === 'expired') {
+            throw new Error(`Deep-reflect workflow failed: ${workflowState}`);
         }
     }
 
@@ -346,12 +346,13 @@ function handleReflectionError(
     context: string,
     depth: number,
     model_id: string | undefined,
+    workspaceDir: string,
     api: OpenClawPluginApi,
 ): { content: Array<{ type: string; text: string }> } {
     const errorMsg = err instanceof Error ? err.message : String(err);
     safeLog(api, 'error', `[DeepReflect] Reflection failed: ${errorMsg}`);
 
-    const stateDir = resolvePdPath(resolveReflectionWorkspace(api) || '', 'STATE_DIR');
+    const stateDir = resolvePdPath(workspaceDir, 'STATE_DIR');
     const eventLog = EventLogService.get(stateDir, api.logger);
 
     if (eventLog) {

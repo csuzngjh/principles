@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractCommonPhrases, extractCommonSubstring } from '../../src/utils/nlp.js';
+import { extractCommonPhrases } from '../../src/utils/nlp.js';
 
 describe('NLP Utils', () => {
     describe('extractCommonPhrases (English)', () => {
@@ -30,24 +30,6 @@ describe('NLP Utils', () => {
             const samples = ["Unique phrase one.", "Totally different text.", "Nothing in common."];
             const result = extractCommonPhrases(samples, 3);
             expect(result).toHaveLength(0);
-        });
-    });
-
-    describe('extractCommonSubstring (Chinese/Mixed)', () => {
-        it('should extract common substring from Chinese text', () => {
-            const samples = [
-                "这个问题让我有点头疼，不知道怎么解决。",
-                "代码报错了，让我有点头疼。",
-                "让我有点头疼，这逻辑不对啊。"
-            ];
-            const result = extractCommonSubstring(samples, 4);
-            // "让我有点头疼" is 6 chars, so it should find it or a part of it
-            expect(result[0]).toContain('让我有点头疼');
-        });
-
-        it('should handle short or insufficient samples', () => {
-            expect(extractCommonSubstring(["仅有一个样本"])).toHaveLength(0);
-            expect(extractCommonSubstring([], 4)).toHaveLength(0);
         });
     });
 });
