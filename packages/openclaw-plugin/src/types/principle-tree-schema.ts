@@ -135,6 +135,12 @@ export interface Rule {
 // 3. IMPLEMENTATION (Tree Leaf) — Concrete, executable
 // =========================================================================
 
+export type ImplementationLifecycleState =
+  | 'candidate'    // Newly created, awaiting replay evaluation
+  | 'active'       // Currently active for this rule
+  | 'disabled'     // Manually disabled (e.g., regression)
+  | 'archived';    // Permanently archived
+
 export type ImplementationType = 'code' | 'skill' | 'lora' | 'test' | 'prompt';
 
 export interface Implementation {
@@ -150,6 +156,20 @@ export interface Implementation {
   // Coverage
   coversCondition: string;        // What condition this implementation covers
   coveragePercentage: number;     // 0-100, how much of the rule this covers
+
+  // Lifecycle state
+  lifecycleState: ImplementationLifecycleState;
+
+  // Rollback support: tracks which implementation was active before this one
+  previousActive?: string;        // Implementation ID that was active before promotion
+
+  // Disable metadata
+  disabledAt?: string;            // ISO timestamp of disable
+  disabledBy?: string;            // Who disabled (session/user)
+  disabledReason?: string;        // Human-readable reason
+
+  // Archive metadata
+  archivedAt?: string;            // ISO timestamp of archive
 
   // Metadata
   createdAt: string;
