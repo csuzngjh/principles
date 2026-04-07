@@ -1,5 +1,27 @@
 # Milestones
 
+## v1.6 代码质量清理 (In Progress: 2026-04-07)
+
+**Goal:** 清理代码膨胀、修复危险命名冲突、解决遗留路径断裂问题
+
+**Target features:**
+
+- CLEAN-01: 修复 `normalizePath` 命名冲突
+- CLEAN-02: 解决 PAIN_CANDIDATES 遗留路径
+- CLEAN-03: 提取 WorkflowManager 基类
+- CLEAN-04: 统一重复类型定义
+- CLEAN-05: 调查 empathy-observer-workflow-manager 引用
+- CLEAN-06: 添加 build artifacts 到 .gitignore
+
+**Key analysis findings:**
+- `normalizePath` naming collision — DIFFERENT signatures in utils/io.ts vs nocturnal-compliance.ts
+- PAIN_CANDIDATES legacy path — two parallel disconnected pain processing systems
+- Workflow Manager ~1200 lines duplicated across 3 files
+- trajectory.ts (1673 lines) — core doesn't consume it
+- Nocturnal Trinity (~6000 lines) — optional training data pipeline
+
+---
+
 ## v1.5 Nocturnal Helper 重构 (Shipped: 2026-04-06)
 
 **Phases completed:** 5 (Phase 6, 7, 8, 9, 10)
