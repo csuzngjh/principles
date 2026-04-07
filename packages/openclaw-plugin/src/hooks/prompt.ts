@@ -393,6 +393,8 @@ The empathy observer subagent handles pain detection independently.
     // for boundary cases and random discovery of new expressions.
     if (workspaceDir && latestUserMessage) {
       try {
+        const msgPreview = latestUserMessage.substring(0, 60).replace(/\n/g, ' ');
+        logger?.debug?.(`[PD:Empathy] Processing user message: "${msgPreview}" (trigger=${trigger})`);
         const lang = (wctx.config.get('language') as 'zh' | 'en') || 'zh';
 
         // Load keyword store once, cache in memory (Finding #7: avoid per-turn I/O)

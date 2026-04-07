@@ -1,12 +1,12 @@
 /**
  * Principle-Tree Schema Design
- * 
+ *
  * Concept: Principles are the root of a tree that branches into Rules
  * and eventually into concrete Implementations (code, skills, LoRA weights).
- * 
+ *
  * A principle without supporting rules is an empty concept — LLM may ignore it.
  * A rule without a parent principle lacks strategic direction.
- * 
+ *
  * Lifecycle:
  *   Pain Signal → Diagnosis → Principle (root)
  *                              ↓
@@ -15,22 +15,19 @@
  *                    Implementation (leaf)
  *                              ↓
  *                    Rule 100% covered → Principle deprecated
- * 
+ *
  * User Focus:
  *   - Monitor new principles added by diagnostician
  *   - Monitor principles deprecated (solidified into code/weights)
  *   - Track principle value ranking (pain prevented, adherence rate)
  */
 
+import type { PrincipleStatus } from '../core/evolution-types.js';
+import type { PrincipleDetectorSpec } from '../core/evolution-types.js';
+
 // =========================================================================
 // 1. PRINCIPLE (Tree Root) — Highly abstract, cross-scenario, value-driven
 // =========================================================================
-
-export type PrincipleStatus =
-  | 'candidate'    // Just created, needs validation
-  | 'probation'    // Partially validated, under observation
-  | 'active'       // Fully validated, actively enforced
-  | 'deprecated';  // Solidified into code/weights, no longer needed as a principle
 
 export type PrinciplePriority = 'P0' | 'P1' | 'P2';
 
@@ -193,19 +190,7 @@ export interface PrincipleValueMetrics {
 }
 
 // =========================================================================
-// 6. DETECTOR METADATA (For auto-training eligibility)
-// =========================================================================
-
-export interface PrincipleDetectorSpec {
-  applicabilityTags: string[];    // Tags that identify when this principle applies
-  positiveSignals: string[];      // Indicators that the principle should activate
-  negativeSignals: string[];      // Indicators that the principle should NOT activate
-  toolSequenceHints?: string[][]; // Expected tool call sequences
-  confidence: 'high' | 'medium' | 'low';
-}
-
-// =========================================================================
-// 7. LIFECYCLE EVENTS (Event stream format for evolution.jsonl)
+// 6. LIFECYCLE EVENTS (Event stream format for evolution.jsonl)
 // =========================================================================
 
 export type PrincipleEventType =
