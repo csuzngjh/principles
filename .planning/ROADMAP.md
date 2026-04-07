@@ -5,7 +5,7 @@
 - ✅ **v1.0-alpha MVP** - Phases 1-3 (shipped 2026-03-26)
 - ✅ **v1.4 OpenClaw v2026.4.3 Compatibility** - Phases 1, 2, 5 (shipped 2026-04-05)
 - ✅ **v1.5 Nocturnal Helper 重构** - Phases 6-10 (shipped 2026-04-06)
-- 🟡 **v1.9.0 Principle Internalization System** - Phases 11-15 (planned)
+- 🚧 **v1.9.0 Principle Internalization System** - Phases 11-15 (planned)
 
 ## Phases
 
@@ -46,9 +46,9 @@
 </details>
 
 <details open>
-<summary>🟡 v1.9.0 Principle Internalization System (Phases 11-15) - PLANNED</summary>
+<summary>🚧 v1.9.0 Principle Internalization System (Phases 11-15) - PLANNED</summary>
 
-- [ ] Phase 11: Principle Tree Ledger Entities
+- [x] Phase 11: Principle Tree Ledger Entities (3 plans) - completed 2026-04-07
 - [ ] Phase 12: Runtime Rule Host and Code Implementation Storage
 - [ ] Phase 13: Replay Evaluation and Manual Promotion Loop
 - [ ] Phase 14: Nocturnal RuleImplementationArtifact Factory
@@ -62,7 +62,7 @@
 
 ### Next Milestone (Current)
 
-**v1.9.0 Principle Internalization System** is now initialized. Next step: start Phase 11.
+**v1.9.0 Principle Internalization System** is in progress. Next step: start Phase 12.
 
 ## Progress
 
@@ -82,9 +82,9 @@
 | 8 | v1.5 | 2/2 | Complete | 2026-04-05 |
 | 9 | v1.5 | 1/1 | Complete | 2026-04-06 |
 | 10 | v1.5 | 1/1 | Complete | 2026-04-06 |
-| 11 | v1.9.0 | 0/1 | Pending | - |
-| 12 | v1.9.0 | 0/1 | Pending | - |
-| 13 | v1.9.0 | 0/1 | Pending | - |
+| 11 | v1.9.0 | 3/3 | Complete    | 2026-04-07 |
+| 12 | v1.9.0 | 0/2 | Pending | - |
+| 13 | v1.9.0 | 1/1 | Complete   | 2026-04-07 |
 | 14 | v1.9.0 | 0/1 | Pending | - |
 | 15 | v1.9.0 | 0/1 | Pending | - |
 
@@ -93,6 +93,13 @@
 ### Phase 11: Principle Tree Ledger Entities
 
 Goal: make `Rule` and `Implementation` first-class principle-tree records instead of schema-only concepts.
+
+**Plans:** 3/3 plans complete
+
+Plans:
+- [x] 11-01-PLAN.md - Build the hybrid `_tree` ledger, CRUD/query surface, and backward-compatible training-state adapter
+- [x] 11-02-PLAN.md - Wire the ledger into `WorkspaceContext` and remove raw unlocked pain-path writes
+- [x] 11-03-PLAN.md - Close the CRUD gap with Rule/Implementation update-delete helpers and integrity-preserving tests
 
 Requirements:
 - TREE-01
@@ -108,6 +115,12 @@ Success criteria:
 ### Phase 12: Runtime Rule Host and Code Implementation Storage
 
 Goal: add the constrained runtime host for `Implementation(type=code)` and store code implementations as versioned assets.
+
+**Plans:** 2 plans
+
+Plans:
+- [ ] 12-01-PLAN.md - Build Rule Host types, helper whitelist, evaluator, and wire into gate.ts between GFI and Progressive Gate
+- [ ] 12-02-PLAN.md - Build versioned code implementation storage with manifest, entry file, and PD path extensions
 
 Requirements:
 - HOST-01
@@ -125,6 +138,11 @@ Success criteria:
 ### Phase 13: Replay Evaluation and Manual Promotion Loop
 
 Goal: require offline replay before any code implementation can become active.
+
+**Plans:** 1/1 plan complete
+
+Plans:
+- [x] 13-01-PLAN.md - ReplayEngine, structured evaluation reports, manual promotion/disable/rollback commands, and natural language routing
 
 Requirements:
 - IMPL-03
@@ -168,4 +186,4 @@ Requirements:
 Success criteria:
 1. Rule coverage and false-positive metrics reflect replay and live behavior rather than implementation presence alone
 2. Principle adherence and deprecation eligibility are computed from lower-layer implementation outcomes
-3. system can represent “cheapest viable implementation first” as an explicit routing policy
+3. system can represent "cheapest viable implementation first" as an explicit routing policy
