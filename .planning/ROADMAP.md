@@ -83,11 +83,15 @@ Plans:
 
 **Success Criteria** (what must be TRUE):
   1. WorkflowManager base class extracted containing shared lifecycle, state transitions, and store operations
-  2. EmpathyObserverWorkflowManager, DeepReflectWorkflowManager, and NocturnalWorkflowManager extend the base class
+  2. EmpathyObserverWorkflowManager and DeepReflectWorkflowManager extend the base class (NocturnalWorkflowManager unchanged — different architecture using TrinityRuntimeAdapter)
   3. `PrincipleStatus` type defined in single location (`core/evolution-types.ts`) with all references updated
   4. `PrincipleDetectorSpec` type defined in single location with all references updated
 
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 12-01-PLAN.md — CLEAN-03: Extract WorkflowManager base class (empathy-observer + deep-reflect)
+- [ ] 12-02-PLAN.md — CLEAN-04: Unify PrincipleStatus and PrincipleDetectorSpec types
 
 #### Phase 13: Cleanup and Investigation
 
@@ -124,5 +128,5 @@ Plans:
 | 9 | v1.5 | 1/1 | Complete | 2026-04-06 |
 | 10 | v1.5 | 1/1 | Complete | 2026-04-06 |
 | 11 | v1.6 | 2/2 | Complete    | 2026-04-07 |
-| 12 | v1.6 | 0/TBD | Not started | - |
+| 12 | v1.6 | 2/2 | Not started | - |
 | 13 | v1.6 | 0/TBD | Not started | - |
