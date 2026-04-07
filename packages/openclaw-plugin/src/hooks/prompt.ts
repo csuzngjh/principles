@@ -6,13 +6,12 @@ import { WorkspaceContext } from '../core/workspace-context.js';
 import { ContextInjectionConfig, defaultContextConfig } from '../types.js';
 import { classifyTask, type RoutingInput } from '../core/local-worker-routing.js';
 import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection, autoCompressFocus, safeReadCurrentFocus } from '../core/focus-history.js';
-import { EmpathyObserverWorkflowManager, empathyObserverWorkflowSpec, empathyOptimizerWorkflowSpec } from '../service/subagent-workflow/index.js';
+import { EmpathyObserverWorkflowManager, empathyObserverWorkflowSpec } from '../service/subagent-workflow/index.js';
 import { PathResolver } from '../core/path-resolver.js';
 import {
   matchEmpathyKeywords,
   loadKeywordStore,
   saveKeywordStore,
-  shouldTriggerOptimization,
   getKeywordStoreSummary,
 } from '../core/empathy-keyword-matcher.js';
 import { severityToPenalty, DEFAULT_EMPATHY_KEYWORD_CONFIG } from '../core/empathy-types.js';
@@ -278,67 +277,7 @@ function extractLatestUserMessage(messages: unknown[] | undefined): string {
   return '';
 }
 
-/**
- * Extract recent user messages for keyword optimization context.
- */
-function extractRecentMessages(messages: unknown[] | undefined, limit: number): string[] {
-  if (!Array.isArray(messages)) return [];
-  const userMessages: string[] = [];
-  
-  for (let i = messages.length - 1; i >= 0 && userMessages.length < limit; i--) {
-    const msg = messages[i] as { role?: string; content?: unknown };
-    if (msg?.role !== 'user') continue;
-    
-    let text = '';
-    if (typeof msg.content === 'string') {
-      text = msg.content;
-    } else if (Array.isArray(msg.content)) {
-      text = msg.content
-        .filter((part: any) => part && part.type === 'text' && typeof part.text === 'string')
-        .map((part: any) => part.text)
-        .join('\n')
-        .trim();
-    }
-    if (text) userMessages.unshift(text.substring(0, 500));
-  }
-  
-  return userMessages;
-}
 
-/**
- * Build prompt for keyword optimization subagent.
- */
-function buildOptimizationPrompt(
-  keywordStore: ReturnType<typeof loadKeywordStore>,
-  recentMessages: string[],
-): string {
-  const currentTerms = Object.entries(keywordStore.terms)
-    .map(([term, entry]) => `  - "${term}": weight=${entry.weight}, hits=${entry.hitCount || 0}, fp_rate=${entry.falsePositiveRate?.toFixed(2) || '0.10'}`)
-    .join('\n');
-
-  return `You are an empathy keyword optimizer.
-
-## TASK
-Analyze recent user messages and the current empathy keyword store.
-Return STRICT JSON (no markdown):
-
-{"updates": {"TERM": {"action": "add|update|remove", "weight": number, "falsePositiveRate": number, "reasoning": "string"}}}
-
-## Current Keyword Store (${Object.keys(keywordStore.terms).length} terms):
-${currentTerms}
-
-## Recent User Messages (${recentMessages.length} messages):
-${recentMessages.map((m, i) => `${i + 1}. "${m}"`).join('\n')}
-
-## Rules:
-- ADD: If a message contains frustration/empathy signals not in current terms
-- UPDATE: If a term's weight should change (high hits → increase weight, low hits → decrease)
-- REMOVE: If a term has 0 hits after many turns AND high false positive rate (>0.3)
-- Keep reasoning concise (max 100 chars)
-- Weight range: 0.1-0.9
-- falsePositiveRate range: 0.05-0.5
-`;
-}
 
 export async function handleBeforePromptBuild(
   event: PluginHookBeforePromptBuildEvent,
@@ -566,34 +505,6 @@ The empathy observer subagent handles pain detection independently.
           const highFP = s.highFalsePositiveTerms.slice(0, 5).map(t => `${t.term}(${t.falsePositiveRate.toFixed(2)})`).join(', ');
           return `SUMMARY(turn=${turnCount}): terms=${s.totalTerms}, hits=${keywordStore.stats.totalHits}, zero_hit=${s.totalTerms - (s.seedTerms + s.discoveredTerms)}, high_fp=[${highFP}]`;
         };
-
-        // Check if keyword optimization should be triggered
-        if (shouldTriggerOptimization(keywordStore, turnCount)) {
-          logger?.info?.(`[PD:Empathy] OPTIMIZATION_TRIGGER: turns=${turnCount}, last_optimized=${keywordStore.lastOptimizedAt}`);
-          logger?.info?.(`[PD:Empathy] STATS: ${buildSummary()}`);
-
-          // Start keyword optimization subagent to update weights and discover new terms
-          try {
-            const recentMessages = extractRecentMessages(event.messages, 10);
-            const optimizationPrompt = buildOptimizationPrompt(keywordStore, recentMessages);
-            
-            logger?.info?.(`[PD:Empathy] Starting optimization subagent with ${recentMessages.length} recent messages`);
-            
-            const empathyManager = new EmpathyObserverWorkflowManager({
-              workspaceDir,
-              logger: api.logger ?? console,
-              subagent: api.runtime.subagent as any,
-            });
-            
-            empathyManager.startWorkflow(empathyOptimizerWorkflowSpec, {
-              parentSessionId: sessionId,
-              workspaceDir,
-              taskInput: { prompt: optimizationPrompt },
-            }).catch((err) => api.logger?.warn?.(`[PD:Empathy] optimization subagent failed: ${String(err)}`));
-          } catch (optErr) {
-            logger?.warn?.(`[PD:Empathy] Failed to start optimization subagent: ${String(optErr)}`);
-          }
-        }
 
         // Periodic summary (every 100 turns)
         if (turnCount > 0 && turnCount % 100 === 0) {

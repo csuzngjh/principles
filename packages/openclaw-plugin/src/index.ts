@@ -328,7 +328,6 @@ const plugin = {
       EvolutionWorkerService.api = api;
       api.registerService(EvolutionWorkerService);
       api.registerService(TrajectoryService);
-      PDTaskService.api = api;
       api.registerService(PDTaskService);
     } catch (err) {
       api.logger.error(`[PD] Failed to register EvolutionWorkerService: ${String(err)}`);

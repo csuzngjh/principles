@@ -232,6 +232,11 @@ export async function reconcilePDTasks(
             const idx = cronStore.jobs.indexOf(action.job);
             const newJob = buildCronJob(action.task, nowMs);
             newJob.id = action.job.id;
+            // Preserve original state — only CronService should recalculate nextRunAtMs
+            newJob.state = {
+              ...action.job.state,
+              nextRunAtMs: undefined, // Let CronService recalculate
+            };
             cronStore.jobs[idx] = newJob;
             logger.info?.(`[PD:Reconciler] Updated job: ${action.task.name}`);
           }
@@ -357,6 +362,7 @@ export function recordExecution(
   task: PDTaskSpec,
   runId: string,
   status: PDTaskExecutionRecord['status'],
+  startedAt: number,
   error?: string,
 ): PDTaskSpec {
   if (!task.meta) task.meta = {};
@@ -364,7 +370,7 @@ export function recordExecution(
   task.meta.executionHistory.push({
     runId,
     status,
-    startedAt: Date.now(),
+    startedAt,
     endedAt: Date.now(),
     error,
   });

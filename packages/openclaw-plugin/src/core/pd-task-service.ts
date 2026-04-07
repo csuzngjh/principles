@@ -1,11 +1,7 @@
-import type { OpenClawPluginService, OpenClawPluginServiceContext, OpenClawPluginApi } from '../openclaw-sdk.js';
+import type { OpenClawPluginService, OpenClawPluginServiceContext } from '../openclaw-sdk.js';
 import { reconcilePDTasks } from './pd-task-reconciler.js';
 
-interface ExtendedPDTaskService extends OpenClawPluginService {
-  api?: OpenClawPluginApi | null;
-}
-
-export const PDTaskService: ExtendedPDTaskService = {
+export const PDTaskService: OpenClawPluginService = {
   id: 'principles-disciple-task-manager',
 
   async start(ctx: OpenClawPluginServiceContext): Promise<void> {
@@ -30,6 +26,5 @@ export const PDTaskService: ExtendedPDTaskService = {
   },
 
   stop(_ctx: OpenClawPluginServiceContext): void {
-    // No cleanup needed — cron jobs persist in jobs.json
   },
 };
