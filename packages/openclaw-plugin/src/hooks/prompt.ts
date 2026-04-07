@@ -477,8 +477,10 @@ The empathy observer subagent handles pain detection independently.
           logger?.info?.(`[PD:Empathy] ${buildSummary()}`);
         }
 
-        // Save keyword store periodically (Finding #7: not every turn)
-        if (turnCount % 50 === 0) {
+        // Save keyword store on every match to prevent data loss on restart.
+        // Previously used turnCount % 50 gate which caused hitCount loss because
+        // module-level state resets on plugin reload before reaching turn 50.
+        if (matchResult.matched) {
           saveKeywordStore(wctx.stateDir, keywordStore);
         }
       } catch (e) {
