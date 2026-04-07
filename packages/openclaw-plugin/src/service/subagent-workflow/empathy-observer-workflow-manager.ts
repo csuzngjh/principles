@@ -101,47 +101,6 @@ export class EmpathyObserverWorkflowManager extends WorkflowManagerBase {
         ].join('\n');
     }
 
-    private extractAssistantText(messages: unknown[], assistantTexts?: string[]): string {
-        if (assistantTexts && assistantTexts.length > 0) {
-            return assistantTexts[assistantTexts.length - 1] || '';
-        }
-
-        for (let i = messages.length - 1; i >= 0; i--) {
-            const msg = messages[i] as { role?: string; content?: unknown };
-            if (msg?.role !== 'assistant') continue;
-            if (typeof msg.content === 'string') return msg.content;
-            if (Array.isArray(msg.content)) {
-                const txt = msg.content
-                    .filter((part: any) => part?.type === 'text' && typeof part.text === 'string')
-                    .map((part: any) => part.text)
-                    .join('\n');
-                if (txt) return txt;
-            }
-        }
-
-        return '';
-    }
-
-    parseEmpathyPayload(rawText: string): EmpathyObserverPayload | null {
-        if (!rawText?.trim()) return null;
-
-        try {
-            return JSON.parse(rawText.trim()) as EmpathyObserverPayload;
-        } catch {
-            const match = rawText.match(/\{[\s\S]*\}/);
-            if (!match) {
-                this.logger.warn('[PD:EmpathyObserverWorkflow] Observer payload is not valid JSON');
-                return null;
-            }
-            try {
-                return JSON.parse(match[0]) as EmpathyObserverPayload;
-            } catch {
-                this.logger.warn('[PD:EmpathyObserverWorkflow] Failed to parse observer JSON payload');
-                return null;
-            }
-        }
-    }
-
     protected override generateWorkflowId(): string {
         return `wf_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
     }
