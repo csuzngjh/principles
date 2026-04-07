@@ -57,24 +57,18 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 
 ## Current Milestone
 
-### v1.3 Workflow Skill Internal Usability
+### v1.6 代码质量清理
 
-Goal:
+**Goal:** 清理代码膨胀、修复危险命名冲突、解决遗留路径断裂问题
 
-- make the packaged orchestrator skill usable for internal complex tasks
-- persist structured failure classification into run artifacts
-- provide complex bugfix/feature templates with a minimum task contract
-- tighten continuation carry-forward with checkpoint summaries
-- define the next work-unit architecture direction without implementing it yet
+**Target features:**
 
-Target features:
-
-- readable package-local acceptance checklist
-- package-local references and validation specs
-- runnable package-local `scripts/run.mjs`
-- baseline plus package-local validation runs
-- package-local complex task templates
-- checkpoint-based carry-forward
+- [ ] **CLEAN-01**: 修复 `normalizePath` 命名冲突 — 重命名 `nocturnal-compliance.ts` 中的函数避免同名不同签名
+- [ ] **CLEAN-02**: 解决 PAIN_CANDIDATES 遗留路径 — 集成进 evolution-reducer 或删除
+- [ ] **CLEAN-03**: 提取 WorkflowManager 基类 — EmpathyObserver/DeepReflect/Nocturnal 三个 manager 提取公共基类，减少 ~1200 行重复
+- [ ] **CLEAN-04**: 统一重复类型定义 — `PrincipleStatus` 和 `PrincipleDetectorSpec` 合并到单一数据源
+- [ ] **CLEAN-05**: 调查 empathy-observer-workflow-manager 引用情况 — 确认是死代码还是仍在使用
+- [ ] **CLEAN-06**: 添加 build artifacts 到 .gitignore — dist/, coverage/, *.tgz
 
 ---
-*Last updated: 2026-04-06*
+*Last updated: 2026-04-07*
