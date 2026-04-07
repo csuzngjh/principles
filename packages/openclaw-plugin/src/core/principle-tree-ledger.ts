@@ -3,6 +3,7 @@ import * as path from 'path';
 import { withLock, withLockAsync } from '../utils/file-lock.js';
 import type {
   Implementation,
+  ImplementationLifecycleState,
   Principle,
   PrincipleTreeStore,
   PrincipleValueMetrics,
@@ -555,4 +556,112 @@ export function updatePrincipleValueMetrics(
     store.tree.metrics[principleId] = nextMetrics;
     return nextMetrics;
   });
+}
+
+// ---------------------------------------------------------------------------
+// Implementation Lifecycle State Transitions
+// ---------------------------------------------------------------------------
+
+/**
+ * Valid lifecycle state transitions (per Phase 13 context D-15):
+ *   candidate -> active      (promote)
+ *   active -> disabled       (disable)
+ *   disabled -> active       (re-enable via promote)
+ *   disabled -> archived     (permanent disable)
+ *   active -> archived       (direct archive)
+ *   candidate -> archived    (rejected candidate cleanup)
+ */
+const VALID_LIFECYCLE_TRANSITIONS: Record<ImplementationLifecycleState, ImplementationLifecycleState[]> = {
+  candidate: ['active', 'archived'],
+  active: ['disabled', 'archived'],
+  disabled: ['active', 'archived'],
+  archived: [],
+};
+
+/**
+ * Validate a lifecycle state transition.
+ * Returns true if the transition is valid, false otherwise.
+ */
+export function isValidLifecycleTransition(
+  from: ImplementationLifecycleState,
+  to: ImplementationLifecycleState
+): boolean {
+  return VALID_LIFECYCLE_TRANSITIONS[from]?.includes(to) ?? false;
+}
+
+/**
+ * Get allowed transitions for a given lifecycle state.
+ */
+export function getAllowedTransitions(from: ImplementationLifecycleState): ImplementationLifecycleState[] {
+  return VALID_LIFECYCLE_TRANSITIONS[from] ?? [];
+}
+
+/**
+ * Transition an implementation's lifecycle state with validation.
+ * Throws on invalid transitions */
+export function transitionImplementationState(
+  stateDir: string,
+  implementationId: string,
+  newState: ImplementationLifecycleState
+): Implementation {
+  return mutateLedger(stateDir, (store) => {
+    const impl = store.tree.implementations[implementationId];
+    if (!impl) {
+      throw new Error(`Implementation not found: ${implementationId}`);
+    }
+
+    const currentState = (impl as any).lifecycleState ?? 'candidate';
+    if (!isValidLifecycleTransition(currentState as ImplementationLifecycleState, newState)) {
+      const allowed = getAllowedTransitions(currentState as ImplementationLifecycleState);
+      throw new Error(
+        `Invalid lifecycle transition: ${currentState} -> ${newState}. ` +
+          `Allowed: ${allowed.length > 0 ? allowed.join(', ') : 'none (terminal state)'}`
+      );
+    }
+
+    const updated: Implementation = {
+      ...impl,
+      lifecycleState: newState,
+      updatedAt: new Date().toISOString(),
+    };
+
+    store.tree.implementations[implementationId] = updated;
+    return updated;
+  });
+}
+
+/**
+ * Get all implementations for a specific lifecycle state across all rules.
+ */
+export function listImplementationsByLifecycleState(
+  stateDir: string,
+  state: ImplementationLifecycleState
+): Implementation[] {
+  const ledger = loadLedger(stateDir);
+  return Object.values(ledger.tree.implementations).filter(
+    (impl) => (impl as any).lifecycleState === state
+  );
+}
+
+/**
+ * Get implementations in a specific lifecycle state for a given rule.
+ */
+export function listRuleImplementationsByState(
+  stateDir: string,
+  ruleId: string,
+  state: ImplementationLifecycleState
+): Implementation[] {
+  const implementations = listImplementationsForRule(stateDir, ruleId);
+  return implementations.filter((impl) => (impl as any).lifecycleState === state);
+}
+
+/**
+ * Find active implementation for a rule (helper for rule host lookup).
+ */
+export function findActiveImplementation(
+  stateDir: string,
+  ruleId: string
+): Implementation | null {
+  const implementations = listImplementationsForRule(stateDir, ruleId);
+  return implementations.find((impl) => (impl as any).lifecycleState === 'active') ?? null;
 }
