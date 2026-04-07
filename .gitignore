@@ -72,3 +72,7 @@ tests/archive/reports-2026-03-11/
 myagents/
 docs/design/gfi-trust-capability-simplification-2026-03-20.md
 .kiro
+# AI tool state and temp files
+.tmp-trainer/
+.bg-shell/
+.greptile/
