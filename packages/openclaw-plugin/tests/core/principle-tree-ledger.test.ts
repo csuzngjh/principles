@@ -3,6 +3,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import {
+  type LedgerPrinciple,
+  type LedgerRule,
   TREE_NAMESPACE,
   createImplementation,
   createRule,
@@ -13,10 +15,10 @@ import {
   saveLedger,
 } from '../../src/core/principle-tree-ledger.js';
 import { createDefaultPrincipleState, type PrincipleTrainingStore } from '../../src/core/principle-training-state.js';
-import type { Principle, PrincipleTreeStore, Rule } from '../../src/types/principle-tree-schema.js';
+import type { PrincipleTreeStore } from '../../src/types/principle-tree-schema.js';
 import { safeRmDir } from '../test-utils.js';
 
-function createLedgerPrinciple(overrides: Partial<Principle> = {}): Principle {
+function createLedgerPrinciple(overrides: Partial<LedgerPrinciple> = {}): LedgerPrinciple {
   return {
     id: 'P-001',
     version: 1,
@@ -39,7 +41,7 @@ function createLedgerPrinciple(overrides: Partial<Principle> = {}): Principle {
   };
 }
 
-function createLedgerRule(overrides: Partial<Rule> = {}): Rule {
+function createLedgerRule(overrides: Partial<LedgerRule> = {}): LedgerRule {
   return {
     id: 'R-001',
     version: 1,
