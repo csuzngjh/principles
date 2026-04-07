@@ -2,7 +2,7 @@
 
 ## What This Is
 
-Principles is a principle-evolution system for AI coding agents. It detects pain signals, proposes candidate principles, gates them through trust and scoring, and promotes validated principles into active use. The repo also contains `ai-sprint-orchestrator`, a long-running multi-stage task runner.
+Principles is a principle-evolution system for AI coding agents. It detects pain signals, derives principles, and turns those principles into enforceable behavior through gates, nocturnal reflection, and implementation artifacts. The repo also contains `ai-sprint-orchestrator`, but the current milestone centers on the Principles Disciple product loop rather than orchestrator packaging work.
 
 ## Core Value
 
@@ -10,7 +10,9 @@ AI agents improve their own behavior through a structured loop:
 
 pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
 
-## Validated
+## Requirements
+
+### Validated
 
 - WebUI dashboard with overview, loop, feedback, and gate pages
 - System health, evolution, feedback, and gate-monitoring APIs
@@ -19,62 +21,81 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 - `outputQuality` decision scoring
 - Nocturnal background reflection pipeline
 
-## Active
+### Active
 
-- acceptance checklist is readable and handoff-ready
-- baseline tests and package-local validation runs define workflow readiness
-- `packages/openclaw-plugin/templates/langs/{zh,en}/skills/ai-sprint-orchestration/` is the packaged delivery target
-- another agent can start from the skill package instead of repo-root orchestrator paths
-- validation runs stop after classification when they hit sample-side or product-side gaps
-- workflow v1.3 focuses on internal usability first, then finer-grained work-unit architecture
+- [ ] principle tree supports first-class Rule and Implementation entities
+- [ ] code implementations can be stored, evaluated, promoted, and rolled back as principle-tree leaves
+- [ ] runtime gate chain includes a Rule Host between GFI and Progressive Gate
+- [ ] nocturnal reflection can generate code implementation candidates in addition to behavioral training artifacts
+- [ ] coverage, false positive, adherence, and deprecation eligibility are computed from real implementation outcomes
+- [ ] principle internalization chooses the cheapest viable implementation path before escalating to heavier forms
 
-## Out of Scope
+### Out of Scope
 
-- `packages/openclaw-plugin` product-side fixes
-- `D:/Code/openclaw` changes
-- dashboard / stageGraph / self-optimizing sprint / parallel task scheduling
-- PR2 / PD product loop closure
+- `packages/openclaw-plugin` product-side fixes - outside this milestone’s architectural scope
+- `D:/Code/openclaw` changes - outside this repo
+- dashboard / stageGraph / self-optimizing sprint / parallel task scheduling - not part of the internalization foundation
+- automatic code implementation deployment without replay validation - unsafe before replay and rollback loops are proven
+- deleting `Progressive Gate` during v1.9.0 - host hard-boundary layer must remain until the new Rule Host path is trusted
+- forcing every principle into code implementation - violates the “cheapest viable internalization first” strategy
+- LoRA or full fine-tune pipeline execution buildout - reserved for later milestones after the code branch proves itself
 
 ## Context
 
-- main workflow source of truth: `packages/openclaw-plugin/templates/langs/zh/skills/ai-sprint-orchestration`
-- packaged release target: `packages/openclaw-plugin/templates/langs/{zh,en}/skills/ai-sprint-orchestration`
-- baseline tests: `contract-enforcement`, `decision`, `run`
-- package-local validation specs: `workflow-validation-minimal`, `workflow-validation-minimal-verify`
-- complex task templates: `bugfix-complex-template`, `feature-complex-template`
-- known product-side gaps remain documented but excluded from this milestone
+- principle tree architecture is now the semantic source of truth: `Principle -> Rule -> Implementation`
+- nocturnal reflection already has target selection, snapshot extraction, arbiter validation, executability checks, and artifact persistence
+- new design docs define a Principle Internalization System with DHSE narrowed to the code implementation route
+- current gate chain already has Thinking Checkpoint, GFI, Progressive Gate, and Edit Verification; this milestone inserts Rule Host without removing the hard boundaries
+- `message-sanitize.ts` is the first planned simplification because it is peripheral to the internalization loop and conflicts with trajectory collection
+
+## Constraints
+
+- **Safety**: Preserve existing host hard boundaries (`Thinking`, `GFI`, `Progressive`, `Edit Verification`) until the new code implementation path is proven
+- **Architecture**: Do not collapse Principle / Rule / Implementation into a single code-script layer
+- **Execution Model**: Code implementations must run through a fixed host contract and helper whitelist, not arbitrary workspace IO
+- **Promotion**: No automatic deployment before offline replay over negative, positive, and anchor samples
+- **Scope**: Focus this milestone on `Implementation(type=code)` and its supporting ledger, replay, and nocturnal candidate flow
+- **Versioning**: Milestone planning aligns to product version `v1.9.0`
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Package-local script closure | released agents will not have the full repo layout | Active |
-| Package-local runtime root | packaged runs must not depend on `ops/ai-sprints` | Active |
-| Minimal validation specs only | prove workflow behavior without product-side scope creep | Active |
-| Classify-and-stop on sample-side issues | keep workflow-first boundary intact | Active |
-| v1.3 prioritizes internal usability | use the skill ourselves before redesigning the orchestrator | Active |
-| next architecture step is work-unit/tasklet | stage/round/role resets are not enough for very complex long tasks | Planned |
+| Principle Internalization System is the new top-level framing | principles must be routed into the cheapest viable implementation form, not defaulted to code | Active |
+| DHSE is narrowed to the code implementation route | prevents code-generation logic from replacing the whole principle tree | Active |
+| Progressive Gate stays during v1.9.0 | new Rule Host path is not mature enough to carry all capability boundaries alone | Active |
+| Nocturnal becomes a multi-artifact research factory | behavioral samples and code implementation candidates require different output contracts | Active |
+| Replay before promotion is mandatory | code implementations cannot be trusted without negative, positive, and anchor replay evidence | Active |
 
-## Current Milestone
+## Current Milestone: v1.9.0 Principle Internalization System
 
-### v1.3 Workflow Skill Internal Usability
+**Goal:** turn the current principle / nocturnal / gate architecture into a real Principle Internalization System with first-class Rule and Implementation entities, a constrained runtime Rule Host, replay-based code implementation promotion, and nocturnal code candidate generation.
 
-Goal:
+**Target features:**
+- Rule and Implementation CRUD in the principle tree store
+- runtime Rule Host between GFI and Progressive Gate
+- versioned code implementation storage with manifest, entry, tests, and eval artifacts
+- offline replay over `pain-negative`, `success-positive`, and `principle-anchor` samples
+- manual candidate promotion / disable / rollback loop
+- nocturnal `RuleImplementationArtifact` pipeline
+- first-pass coverage, false-positive, adherence, and deprecation accounting
 
-- make the packaged orchestrator skill usable for internal complex tasks
-- persist structured failure classification into run artifacts
-- provide complex bugfix/feature templates with a minimum task contract
-- tighten continuation carry-forward with checkpoint summaries
-- define the next work-unit architecture direction without implementing it yet
+## Evolution
 
-Target features:
+This document evolves at phase transitions and milestone boundaries.
 
-- readable package-local acceptance checklist
-- package-local references and validation specs
-- runnable package-local `scripts/run.mjs`
-- baseline plus package-local validation runs
-- package-local complex task templates
-- checkpoint-based carry-forward
+**After each phase transition**:
+1. Requirements invalidated? -> Move to Out of Scope with reason
+2. Requirements validated? -> Move to Validated with phase reference
+3. New requirements emerged? -> Add to Active
+4. Decisions to log? -> Add to Key Decisions
+5. "What This Is" still accurate? -> Update if drifted
+
+**After each milestone**:
+1. Full review of all sections
+2. Core Value check -> still the right priority?
+3. Audit Out of Scope -> reasons still valid?
+4. Update Context with current state
 
 ---
-*Last updated: 2026-04-06*
+*Last updated: 2026-04-07 after starting milestone v1.9.0*
