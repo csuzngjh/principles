@@ -200,7 +200,7 @@ const READ_TOOLS: Set<string> = new Set([
  * Normalizes a file path to POSIX forward-slash format for consistent matching.
  * Handles Windows backslash paths on any platform.
  */
-function normalizePath(filePath: string): string {
+function normalizePathPosix(filePath: string): string {
   return filePath.replace(/\\/g, '/');
 }
 
@@ -209,7 +209,7 @@ function normalizePath(filePath: string): string {
  */
 function pathMatches(filePath: string | undefined, patterns: RegExp[]): boolean {
   if (!filePath) return false;
-  const normalized = normalizePath(filePath);
+  const normalized = normalizePathPosix(filePath);
   return patterns.some((p) => p.test(normalized));
 }
 
@@ -276,7 +276,7 @@ function detectT01Opportunity(session: SessionEvents): OpportunityMatch {
 function detectT02Opportunity(session: SessionEvents): OpportunityMatch {
   const hasConstraintInteraction = session.toolCalls.some((call) => {
     if (!call.filePath) return false;
-    const normalized = normalizePath(call.filePath);
+    const normalized = normalizePathPosix(call.filePath);
     return (
       /\.(ts|tsx|js|jsx)$/.test(normalized) || // type-aware files
       /\b(test|spec|contract|schema|interface|type)\b/i.test(normalized)
@@ -411,7 +411,7 @@ function detectT06Opportunity(session: SessionEvents): OpportunityMatch {
 function detectT07Opportunity(session: SessionEvents): OpportunityMatch {
   const filePaths = session.toolCalls
     .filter((call) => call.filePath !== undefined)
-    .map((call) => normalizePath(call.filePath!));
+    .map((call) => normalizePathPosix(call.filePath!));
   const uniqueFiles = new Set(filePaths);
   if (uniqueFiles.size >= 3) {
     return {
@@ -456,7 +456,7 @@ function detectT09Opportunity(session: SessionEvents): OpportunityMatch {
   const uniqueFiles = new Set(
     session.toolCalls
       .filter((call) => call.filePath !== undefined)
-      .map((call) => normalizePath(call.filePath!))
+      .map((call) => normalizePathPosix(call.filePath!))
   );
   const hasComplexity = toolCallCount >= 5 || uniqueFiles.size >= 3;
 
@@ -529,7 +529,7 @@ function detectT01Violation(session: SessionEvents): ViolationMatch {
   const readFiles = new Set(
     session.toolCalls
       .filter((call) => READ_TOOLS.has(call.toolName) && call.filePath !== undefined)
-      .map((call) => normalizePath(call.filePath!))
+      .map((call) => normalizePathPosix(call.filePath!))
   );
 
   // Find edits to files that were NOT read first
@@ -537,7 +537,7 @@ function detectT01Violation(session: SessionEvents): ViolationMatch {
     (call) =>
       EDIT_TOOLS.has(call.toolName) &&
       call.filePath !== undefined &&
-      !readFiles.has(normalizePath(call.filePath!))
+      !readFiles.has(normalizePathPosix(call.filePath!))
   );
 
   // If there were edits to unread files AND pain/failure followed → T-01 likely violated
@@ -722,7 +722,7 @@ function detectT07Violation(session: SessionEvents): ViolationMatch {
   const modifiedFiles = new Set(
     session.toolCalls
       .filter((call) => EDIT_TOOLS.has(call.toolName) && call.filePath !== undefined)
-      .map((call) => normalizePath(call.filePath!))
+      .map((call) => normalizePathPosix(call.filePath!))
   );
 
   const failures = session.toolCalls.filter((call) => call.outcome === 'failure');
@@ -778,7 +778,7 @@ function detectT09Violation(session: SessionEvents): ViolationMatch {
   const uniqueFiles = new Set(
     session.toolCalls
       .filter((call) => call.filePath !== undefined)
-      .map((call) => normalizePath(call.filePath!))
+      .map((call) => normalizePathPosix(call.filePath!))
   );
 
   // Only applies if the session was complex
