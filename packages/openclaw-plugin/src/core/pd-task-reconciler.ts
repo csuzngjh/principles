@@ -1,12 +1,13 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import type { PDTaskSpec, PDTaskExecutionRecord } from './pd-task-types.js';
 import { BUILTIN_PD_TASKS } from './pd-task-types.js';
 import { readTasks, writeTasks } from './pd-task-store.js';
 import { withLockAsync } from '../utils/file-lock.js';
 
 const CRON_STORE_PATH = path.join(
-  process.env.HOME || '~',
+  os.homedir(),
   '.openclaw',
   'cron',
   'jobs.json',
@@ -171,8 +172,8 @@ Return STRICT JSON only (no markdown, no explanation):
 
 ## DATA ACCESS
 - Read keyword store: read_file tool on ~/.openclaw/workspace-main/.state/empathy_keywords.json
-- Read recent user turns: read_file tool on trajectory DB (~/.openclaw/workspace-main/.state/trajectory.db is SQLite)
-- Use search_file_content to find frustration patterns in recent messages
+- Read recent events: search_file_content tool on ~/.openclaw/workspace-main/.state/logs/events.jsonl
+- Find frustration patterns in recent messages using search_file_content
 
 ## RULES
 - ADD: If user messages contain frustration signals NOT in current terms
@@ -325,7 +326,7 @@ export async function trigger(
   } else {
     const newJob = buildCronJob(task, nowMs);
     newJob.enabled = true;
-    newJob.deleteAfterRun = true;
+    newJob.state.nextRunAtMs = nowMs;
     cronStore.jobs.push(newJob);
   }
 
