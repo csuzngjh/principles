@@ -15,6 +15,7 @@ import { WorkflowStore } from './workflow-store.js';
 import { isSubagentRuntimeAvailable } from '../../utils/subagent-probe.js';
 import { WorkspaceContext } from '../../core/workspace-context.js';
 import { trackFriction } from '../../core/session-tracker.js';
+import { computeDynamicTimeout, computeRetrySchedule, MAX_TIMEOUT_RETRIES } from './dynamic-timeout.js';
 
 const WORKFLOW_SESSION_PREFIX = 'agent:main:subagent:workflow-';
 
@@ -97,12 +98,13 @@ export class EmpathyObserverWorkflowManager implements WorkflowManager {
             state: 'active',
             created_at: now,
             updated_at: now,
+            duration_ms: null,
             metadata_json: JSON.stringify(metadata),
         });
         this.store.recordEvent(workflowId, 'spawned', null, 'active', 'subagent spawned', { runId: runResult.runId });
         this.workflowSpecs.set(workflowId, spec as SubagentWorkflowSpec<unknown>);
-        
-        this.scheduleWaitPoll(workflowId, spec.timeoutMs ?? DEFAULT_TIMEOUT_MS, runResult.runId);
+
+        this.scheduleWaitPollWithRetry(workflowId, runResult.runId);
         
         return {
             workflowId,
@@ -151,24 +153,52 @@ export class EmpathyObserverWorkflowManager implements WorkflowManager {
             `User message: ${JSON.stringify(userMessage.trim())}`,
         ].join('\n');
     }
-    
-    private scheduleWaitPoll(
+
+    /**
+     * Schedule wait polling with dynamic timeout and automatic retry.
+     *
+     * Learns from historical completion times for this workflow type.
+     * On timeout, retries with exponential backoff (1x → 2x → 4x base timeout).
+     */
+    private scheduleWaitPollWithRetry(
         workflowId: string,
-        timeoutMs: number,
-        runId: string
+        runId: string,
+        attempt: number = 0,
     ): void {
-        const effectiveTimeoutMs = timeoutMs ?? DEFAULT_TIMEOUT_MS;
-        
+        const spec = this.workflowSpecs.get(workflowId);
+        const staticTimeout = spec?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+
+        // Compute dynamic timeout from historical data
+        const baseTimeout = computeDynamicTimeout(this.store, spec?.workflowType ?? 'empathy-observer', staticTimeout);
+        const schedule = computeRetrySchedule(baseTimeout, MAX_TIMEOUT_RETRIES);
+        const timeoutMs = schedule[Math.min(attempt, schedule.length - 1)];
+
+        this.logger.info(`[PD:EmpathyObserverWorkflow] Wait attempt ${attempt + 1}/${schedule.length}: timeout=${timeoutMs}ms (base=${baseTimeout}ms) for ${workflowId}`);
+
         const timeout = setTimeout(async () => {
             try {
-                const result = await this.driver.wait({ runId, timeoutMs: effectiveTimeoutMs });
+                const result = await this.driver.wait({ runId, timeoutMs });
+                if (result.status === 'timeout' && attempt < MAX_TIMEOUT_RETRIES) {
+                    this.logger.info(`[PD:EmpathyObserverWorkflow] Timeout on attempt ${attempt + 1}, retrying for ${workflowId}`);
+                    this.store.recordEvent(workflowId, 'wait_timeout_retry', 'active', 'active', `timeout on attempt ${attempt + 1}, scheduling retry ${attempt + 2}`, { attempt });
+                    // Clean up current timeout handle before scheduling next
+                    this.activeWorkflows.delete(workflowId);
+                    this.scheduleWaitPollWithRetry(workflowId, runId, attempt + 1);
+                    return;
+                }
                 await this.notifyWaitResult(workflowId, result.status, result.error);
             } catch (error) {
                 this.logger.error(`[PD:EmpathyObserverWorkflow] Wait poll failed: ${String(error)}`);
+                if (attempt < MAX_TIMEOUT_RETRIES) {
+                    this.logger.info(`[PD:EmpathyObserverWorkflow] Error on attempt ${attempt + 1}, retrying for ${workflowId}`);
+                    this.activeWorkflows.delete(workflowId);
+                    this.scheduleWaitPollWithRetry(workflowId, runId, attempt + 1);
+                    return;
+                }
                 await this.notifyWaitResult(workflowId, 'error', String(error));
             }
         }, 100);
-        
+
         this.activeWorkflows.set(workflowId, timeout);
     }
     
@@ -189,13 +219,22 @@ export class EmpathyObserverWorkflowManager implements WorkflowManager {
         }
         
         this.logger.info(`[PD:EmpathyObserverWorkflow] notifyWaitResult: workflowId=${workflowId}, status=${status}`);
-        
+
         const previousState = workflow.state;
         this.store.updateWorkflowState(workflowId, 'wait_result');
         this.store.recordEvent(workflowId, 'wait_result', previousState, 'wait_result', `wait completed: ${status}`, { error });
 
         const spec = this.workflowSpecs.get(workflowId);
-        const shouldFinalize = spec ? spec.shouldFinalizeOnWaitStatus(status) : status === 'ok';
+        if (!spec) {
+            // Spec not registered — this happens when notifyWaitResult is called from
+            // a lifecycle event notification (subagent.ts) rather than the primary
+            // scheduleWaitPollWithRetry path. The original manager instance will handle
+            // finalization via its wait poll. Just record the event and return.
+            this.logger.info(`[PD:EmpathyObserverWorkflow] notifyWaitResult: spec not registered for ${workflowId} — skipping finalization (primary path will handle)`);
+            return;
+        }
+
+        const shouldFinalize = spec.shouldFinalizeOnWaitStatus(status);
 
         if (shouldFinalize) {
             await this.finalizeOnce(workflowId);
@@ -276,10 +315,14 @@ export class EmpathyObserverWorkflowManager implements WorkflowManager {
                 }
             }
 
+            // Record actual completion duration for adaptive timeout learning
+            const durationMs = Date.now() - workflow.created_at;
+            this.store.recordDuration(workflowId, durationMs);
+
             this.store.updateWorkflowState(workflowId, 'completed');
-            this.store.recordEvent(workflowId, 'finalized', 'finalizing', 'completed', 'success', {});
+            this.store.recordEvent(workflowId, 'finalized', 'finalizing', 'completed', 'success', { durationMs });
             this.markCompleted(workflowId);
-            
+
         } catch (error) {
             this.logger.error(`[PD:EmpathyObserverWorkflow] finalizeOnce failed: ${String(error)}`);
             this.store.updateWorkflowState(workflowId, 'terminal_error');

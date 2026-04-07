@@ -305,6 +305,7 @@ export interface WorkflowRow {
     created_at: number;
     updated_at: number;
     last_observed_at?: number | null;
+    duration_ms: number | null;
     metadata_json: string;
 }
 
