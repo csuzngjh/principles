@@ -561,11 +561,25 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
         // Try JSON format first (pain skill structured output)
         // The file may have 'status: queued' and 'task_id: xxx' appended after the JSON object.
         // Extract just the JSON portion by finding the last '}' and parsing up to that point.
+        let parsedAsJson = false;
         try {
             const jsonEndIdx = rawPain.lastIndexOf('}');
             const jsonPortion = jsonEndIdx >= 0 ? rawPain.slice(0, jsonEndIdx + 1) : rawPain;
             const jsonPain = JSON.parse(jsonPortion);
-            if (typeof jsonPain === 'object' && jsonPain !== null && jsonPain.pain_score !== undefined) {
+
+            // Detect if this is a pain flag JSON object: has any of the known pain flag fields
+            const isPainJson = typeof jsonPain === 'object' && jsonPain !== null && (
+                jsonPain.pain_score !== undefined ||
+                jsonPain.score !== undefined ||
+                jsonPain.source !== undefined ||
+                jsonPain.reason !== undefined ||
+                jsonPain.session_id !== undefined ||
+                jsonPain.agent_id !== undefined
+            );
+
+            if (isPainJson) {
+                parsedAsJson = true;
+                // Score resolution: pain_score > score > default 50
                 const jsonScore = typeof jsonPain.pain_score === 'number' ? jsonPain.pain_score :
                                   typeof jsonPain.score === 'number' ? jsonPain.score : 50;
                 const jsonSource = jsonPain.source || 'human';
@@ -592,6 +606,14 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
                 });
             }
         } catch { /* Not JSON — fall through to KV/Markdown parsing */ }
+
+        // If we successfully parsed JSON but it didn't match pain flag fields,
+        // don't fall through to KV parsing — it's not a valid pain flag
+        if (parsedAsJson) {
+            if (logger) logger.warn('[PD:EvolutionWorker] Pain flag parsed as JSON but missing all expected fields — ignoring');
+            result.skipped_reason = 'invalid_json_format';
+            return result;
+        }
 
         const lines = rawPain.split('\n');
 
