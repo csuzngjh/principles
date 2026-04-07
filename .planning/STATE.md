@@ -2,7 +2,7 @@
 gsd_state_version: 1.0
 milestone: v1.9.0
 milestone_name: Principle Internalization System
-status: Defining requirements
+status: Phase 11 context gathered
 last_updated: "2026-04-07T00:00:00.000Z"
 last_activity: 2026-04-07
 progress:
@@ -21,15 +21,15 @@ See `.planning/PROJECT.md` (updated 2026-04-07 after starting v1.9.0 milestone).
 
 **Core value:** AI agents improve their own behavior through a structured loop: pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
 **Current Milestone:** v1.9.0 - Principle Internalization System
-**Current Focus:** Defining requirements and roadmap for rule / implementation ledger, Rule Host, replay-based promotion, and nocturnal code artifacts
+**Current Focus:** Phase 11 context captured for principle tree ledger entities; ready to move into planning
 
 ---
 
 ## Current Position
 
-Phase: Not started (defining requirements)  
-Plan: - Status: Defining requirements  
-Last activity: 2026-04-07 - Milestone v1.9.0 started
+Phase: 11 - Principle Tree Ledger Entities  
+Plan: - Status: Context gathered  
+Last activity: 2026-04-07 - Phase 11 context captured
 
 ---
 
@@ -47,9 +47,9 @@ Turn the current principle / nocturnal / gate concepts into a concrete Principle
 
 ## Immediate Next Steps
 
-1. Define milestone requirements in `.planning/REQUIREMENTS.md`
-2. Create roadmap phases 11-15 in `.planning/ROADMAP.md`
-3. Begin with principle tree ledger entity support and host-boundary cleanup
+1. Create Phase 11 plan from `.planning/phases/11-principle-tree-ledger-entities/11-CONTEXT.md`
+2. Keep Phase 11 scoped to Rule / Implementation ledger persistence only
+3. Defer Rule Host, replay, and nocturnal code artifacts to later phases
 
 ---
 
