@@ -178,16 +178,28 @@ export class DeepReflectWorkflowManager implements WorkflowManager {
                     this.scheduleWaitPollWithRetry(workflowId, runId, attempt + 1);
                     return;
                 }
+                // Log retry success if we got here after a timeout
+                if (result.status === 'ok' && attempt > 0) {
+                    this.logger.info(`[PD:DeepReflectWorkflow] Retry succeeded on attempt ${attempt + 1} after timeout for ${workflowId}`);
+                }
                 await this.notifyWaitResult(workflowId, result.status, result.error);
             } catch (error) {
-                this.logger.error(`[PD:DeepReflectWorkflow] Wait poll failed: ${String(error)}`);
+                const errMsg = String(error);
+                // Don't retry on database errors — the connection was closed
+                // (typically by lifecycle notification dispose). The subagent
+                // may have completed successfully.
+                if (errMsg.includes('not open') || errMsg.includes('database')) {
+                    this.logger.warn(`[PD:DeepReflectWorkflow] Database error during wait poll for ${workflowId}: ${errMsg} — not retrying`);
+                    return;
+                }
+                this.logger.error(`[PD:DeepReflectWorkflow] Wait poll failed: ${errMsg}`);
                 if (attempt < MAX_TIMEOUT_RETRIES) {
                     this.logger.info(`[PD:DeepReflectWorkflow] Error on attempt ${attempt + 1}, retrying for ${workflowId}`);
                     this.activeWorkflows.delete(workflowId);
                     this.scheduleWaitPollWithRetry(workflowId, runId, attempt + 1);
                     return;
                 }
-                await this.notifyWaitResult(workflowId, 'error', String(error));
+                await this.notifyWaitResult(workflowId, 'error', errMsg);
             }
         }, 100);
 
@@ -199,7 +211,20 @@ export class DeepReflectWorkflowManager implements WorkflowManager {
         status: 'ok' | 'error' | 'timeout',
         error?: string
     ): Promise<void> {
-        const workflow = this.store.getWorkflow(workflowId);
+        let workflow;
+        try {
+            workflow = this.store.getWorkflow(workflowId);
+        } catch (dbError) {
+            // Database connection closed (e.g., by lifecycle notification dispose).
+            // If subagent succeeded, this is a known race condition — the workflow
+            // will be handled by the original manager's finalizeOnce path.
+            if (status === 'ok') {
+                this.logger.info(`[PD:DeepReflectWorkflow] notifyWaitResult: database unavailable for ${workflowId}, status=ok — skipping (original manager will finalize)`);
+                return;
+            }
+            this.logger.warn(`[PD:DeepReflectWorkflow] notifyWaitResult: database unavailable for ${workflowId}, status=${status}`);
+            return;
+        }
         if (!workflow) {
             this.logger.warn(`[PD:DeepReflectWorkflow] notifyWaitResult: workflow not found: ${workflowId}`);
             return;
