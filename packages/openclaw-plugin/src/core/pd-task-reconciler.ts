@@ -135,6 +135,7 @@ function buildCronJob(task: PDTaskSpec, nowMs: number): CronJob {
   return {
     id: `pd-${task.id}-${nowMs}`,
     name: task.name,
+    agentId: task.agentId || 'main',
     description: task.description,
     enabled: task.enabled,
     schedule: { kind: 'every', everyMs: task.schedule.everyMs },
@@ -323,6 +324,7 @@ export async function trigger(
     existingJob.enabled = true;
     existingJob.updatedAtMs = nowMs;
     existingJob.state.nextRunAtMs = nowMs;
+    existingJob.deleteAfterRun = undefined;
   } else {
     const newJob = buildCronJob(task, nowMs);
     newJob.enabled = true;
@@ -333,6 +335,10 @@ export async function trigger(
   if (!task.meta) task.meta = {};
   task.meta.lastTriggeredAtMs = nowMs;
   task.meta.lastTriggerStatus = 'pending';
+
+  // NOTE: executionHistory tracking requires CronService callback on job completion.
+  // Currently only lastTriggeredAtMs/lastTriggerStatus are updated.
+  // TODO: Implement CronService webhook to call recordExecution() on job completion.
 
   await writeCronStore(cronStore);
   await writeTasks(workspaceDir, tasks);
