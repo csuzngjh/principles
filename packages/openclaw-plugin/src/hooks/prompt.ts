@@ -451,8 +451,12 @@ The empathy observer subagent handles pain detection independently.
   // Format 3: Clean user message text
   let latestUserMessage = event.prompt || '';
 
-  // Skip boot check messages — these are system instructions, not real user messages
-  if (latestUserMessage.includes('boot check') && latestUserMessage.includes('BOOT.md')) {
+  // Skip boot check messages — these are system-generated, not real user messages.
+  // buildBootPrompt() in OpenClaw src/gateway/boot.ts always starts with:
+  // "You are running a boot check. Follow BOOT.md instructions exactly."
+  // This exact phrase will never appear in a real user message.
+  if (latestUserMessage.startsWith('You are running a boot check.') ||
+      latestUserMessage.includes('You are running a boot check. Follow BOOT.md')) {
     latestUserMessage = '';
   }
 
