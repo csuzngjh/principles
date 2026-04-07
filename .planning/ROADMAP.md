@@ -90,8 +90,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 12-01-PLAN.md — CLEAN-03: Extract WorkflowManager base class (empathy-observer + deep-reflect)
-- [ ] 12-02-PLAN.md — CLEAN-04: Unify PrincipleStatus and PrincipleDetectorSpec types
+- [x] 12-01-PLAN.md — CLEAN-03: Extract WorkflowManager base class (empathy-observer + deep-reflect)
+- [x] 12-02-PLAN.md — CLEAN-04: Unify PrincipleStatus and PrincipleDetectorSpec types
 
 #### Phase 13: Cleanup and Investigation
 
@@ -107,7 +107,11 @@ Plans:
   3. Build artifacts correctly excluded from git tracking
   4. Existing build and test processes unaffected by .gitignore changes
 
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 13-01-PLAN.md — CLEAN-05: Verify EmpathyObserverWorkflowManager extends WorkflowManagerBase correctly
+- [ ] 13-02-PLAN.md — CLEAN-06: Add coverage and tgz entries to .gitignore
 
 ## Progress
 
@@ -127,6 +131,6 @@ Plans:
 | 8 | v1.5 | 2/2 | Complete | 2026-04-05 |
 | 9 | v1.5 | 1/1 | Complete | 2026-04-06 |
 | 10 | v1.5 | 1/1 | Complete | 2026-04-06 |
-| 11 | v1.6 | 2/2 | Complete    | 2026-04-07 |
-| 12 | v1.6 | 2/2 | Not started | - |
-| 13 | v1.6 | 0/TBD | Not started | - |
+| 11 | v1.6 | 2/2 | Complete | 2026-04-07 |
+| 12 | v1.6 | 2/2 | Complete | 2026-04-07 |
+| 13 | v1.6 | 2/2 | Not started | - |
