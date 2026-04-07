@@ -14,6 +14,7 @@ import { isSubagentRuntimeAvailable } from '../../utils/subagent-probe.js';
 import { WorkflowManagerBase } from './workflow-manager-base.js';
 import { applyKeywordUpdates } from '../../core/empathy-keyword-matcher.js';
 import { loadKeywordStore, saveKeywordStore } from '../../core/empathy-keyword-matcher.js';
+import { normalizeSeverity } from '../../core/empathy-types.js';
 import * as path from 'path';
 
 const WORKFLOW_SESSION_PREFIX = 'agent:main:subagent:workflow-';
@@ -100,47 +101,6 @@ export class EmpathyObserverWorkflowManager extends WorkflowManagerBase {
         ].join('\n');
     }
 
-    private extractAssistantText(messages: unknown[], assistantTexts?: string[]): string {
-        if (assistantTexts && assistantTexts.length > 0) {
-            return assistantTexts[assistantTexts.length - 1] || '';
-        }
-
-        for (let i = messages.length - 1; i >= 0; i--) {
-            const msg = messages[i] as { role?: string; content?: unknown };
-            if (msg?.role !== 'assistant') continue;
-            if (typeof msg.content === 'string') return msg.content;
-            if (Array.isArray(msg.content)) {
-                const txt = msg.content
-                    .filter((part: any) => part?.type === 'text' && typeof part.text === 'string')
-                    .map((part: any) => part.text)
-                    .join('\n');
-                if (txt) return txt;
-            }
-        }
-
-        return '';
-    }
-
-    parseEmpathyPayload(rawText: string): EmpathyObserverPayload | null {
-        if (!rawText?.trim()) return null;
-
-        try {
-            return JSON.parse(rawText.trim()) as EmpathyObserverPayload;
-        } catch {
-            const match = rawText.match(/\{[\s\S]*\}/);
-            if (!match) {
-                this.logger.warn('[PD:EmpathyObserverWorkflow] Observer payload is not valid JSON');
-                return null;
-            }
-            try {
-                return JSON.parse(match[0]) as EmpathyObserverPayload;
-            } catch {
-                this.logger.warn('[PD:EmpathyObserverWorkflow] Failed to parse observer JSON payload');
-                return null;
-            }
-        }
-    }
-
     protected override generateWorkflowId(): string {
         return `wf_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
     }
@@ -197,15 +157,6 @@ function parseEmpathyPayloadForSpec(rawText: string): EmpathyObserverPayload | n
 }
 
 /**
- * Normalize severity to valid enum.
- */
-function normalizeSeverityForSpec(severity: string | undefined): 'mild' | 'moderate' | 'severe' {
-    if (severity === 'severe') return 'severe';
-    if (severity === 'moderate') return 'moderate';
-    return 'mild';
-}
-
-/**
  * Normalize confidence to [0, 1] range.
  */
 function normalizeConfidenceForSpec(value: number | undefined): number {
@@ -248,7 +199,7 @@ export const empathyObserverWorkflowSpec: SubagentWorkflowSpec<EmpathyResult> = 
 
         return {
             damageDetected: payload.damageDetected ?? false,
-            severity: normalizeSeverityForSpec(payload.severity),
+            severity: normalizeSeverity(payload.severity),
             confidence: normalizeConfidenceForSpec(payload.confidence),
             reason: payload.reason ?? '',
             painScore: 0,
@@ -327,10 +278,17 @@ export const empathyOptimizerWorkflowSpec: SubagentWorkflowSpec<{ added: number;
         const rawText = extractAssistantTextForSpec(ctx.messages, ctx.assistantTexts);
         if (!rawText) return null;
 
+        // Strip markdown code fences — LLM often wraps JSON in ```json ... ```
+        let cleanedText = rawText;
+        const fenceMatch = cleanedText.match(/```(?:json)?\s*([\s\S]*?)```/);
+        if (fenceMatch) {
+            cleanedText = fenceMatch[1].trim();
+        }
+
         // Extract JSON from the response
-        const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+        const jsonMatch = cleanedText.match(/\{[\s\S]*\}/);
         if (!jsonMatch) {
-            console.warn(`[PD:EmpathyOptimizer] No JSON found in subagent response`);
+            console.warn(`[PD:EmpathyOptimizer] No JSON found in subagent response (raw_len=${rawText.length})`);
             return null;
         }
 

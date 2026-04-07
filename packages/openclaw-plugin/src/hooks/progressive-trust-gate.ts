@@ -23,7 +23,6 @@
 
 import type { PluginHookBeforeToolCallEvent, PluginHookBeforeToolCallResult } from '../openclaw-sdk.js';
 import type { WorkspaceContext } from '../core/workspace-context.js';
-import { normalizePath } from '../utils/io.js';
 import { checkEvolutionGate } from '../core/evolution-engine.js';
 import { recordGateBlockAndReturn } from './gate-block-helper.js';
 

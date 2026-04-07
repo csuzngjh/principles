@@ -3,6 +3,7 @@ import * as path from 'path';
 import { PluginHookLlmOutputEvent, PluginHookAgentContext } from '../openclaw-sdk.js';
 import { trackFriction, trackLlmOutput, recordThinkingCheckpoint, resetFriction } from '../core/session-tracker.js';
 import { buildPainFlag, writePainFlag } from '../core/pain.js';
+import { normalizeSeverity } from '../core/empathy-types.js';
 import { ControlUiDatabase } from '../core/control-ui-db.js';
 import { DetectionService } from '../core/detection-service.js';
 import { detectThinkingModelMatches, deriveThinkingScenarios } from '../core/thinking-models.js';
@@ -29,13 +30,6 @@ const empathyRateState = new Map<string, EmpathyRateState>();
 
 function clamp(value: number, min: number, max: number): number {
     return Math.max(min, Math.min(max, value));
-}
-
-function normalizeSeverity(input?: string): 'mild' | 'moderate' | 'severe' {
-    const normalized = (input || '').toLowerCase();
-    if (normalized === 'severe' || normalized === 'high') return 'severe';
-    if (normalized === 'moderate' || normalized === 'medium') return 'moderate';
-    return 'mild';
 }
 
 function parseConfidence(raw?: string): number {

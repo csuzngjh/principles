@@ -444,8 +444,41 @@ The empathy observer subagent handles pain detection independently.
 `.trim();
 
   // ─────────────────────────────────────────────────3. Empathy Observer Spawn
-  // Skip if this is a subagent session or if the message indicates agent-to-agent communication
-  const latestUserMessage = extractLatestUserMessage(event.messages);
+  // event.prompt contains the full prompt text, which may include system/boot instructions
+  // The actual user message from Feishu is embedded in the prompt with various formats:
+  // Format 1: "Sender (untrusted metadata): ```json {...}```  user_message_text"
+  // Format 2: "You are running a boot check. Follow BOOT.md..." (boot check, skip empathy)
+  // Format 3: Clean user message text
+  let latestUserMessage = event.prompt || '';
+
+  // Skip boot check messages — these are system-generated, not real user messages.
+  // buildBootPrompt() in OpenClaw src/gateway/boot.ts always starts with:
+  // "You are running a boot check. Follow BOOT.md instructions exactly."
+  // This exact phrase will never appear in a real user message.
+  if (latestUserMessage.startsWith('You are running a boot check.') ||
+      latestUserMessage.includes('You are running a boot check. Follow BOOT.md')) {
+    latestUserMessage = '';
+  }
+
+  // Try to extract actual user message from Feishu wrapper formats
+  if (latestUserMessage.length > 50) {
+    // Format 1: "Sender (untrusted metadata): ```json {...}```  user_message_text"
+    const senderMatch = latestUserMessage.match(/Sender \(untrusted metadata\):[\s\S]*?```json[\s\S]*?```\s*/);
+    if (senderMatch) {
+      const afterSender = latestUserMessage.slice(senderMatch.index! + senderMatch[0].length).trim();
+      if (afterSender.length > 3) latestUserMessage = afterSender;
+    }
+
+    // Format 2: "Conversation info (untrusted metadata): ```json {...}```  user_message_text"
+    if (latestUserMessage.length > 200 && latestUserMessage.includes('Conversation info')) {
+      const convInfoMatch = latestUserMessage.match(/Conversation info[\s\S]*?```json[\s\S]*?```\s*/);
+      if (convInfoMatch) {
+        const afterConvInfo = latestUserMessage.slice(convInfoMatch.index! + convInfoMatch[0].length).trim();
+        if (afterConvInfo.length > 3) latestUserMessage = afterConvInfo;
+      }
+    }
+  }
+  
   const isAgentToAgent = latestUserMessage.includes('sourceSession=agent:') || sessionId?.includes(':subagent:') === true;
 
   const isUserInteraction = trigger === 'user' || trigger === 'api' || !trigger;
@@ -460,8 +493,8 @@ The empathy observer subagent handles pain detection independently.
     // for boundary cases and random discovery of new expressions.
     if (workspaceDir && latestUserMessage) {
       try {
-        const msgPreview = latestUserMessage.substring(0, 60).replace(/\n/g, ' ');
-        logger?.info?.(`[PD:Empathy] Processing user message: "${msgPreview}" (trigger=${trigger})`);
+        const msgPreview = latestUserMessage.substring(0, 200).replace(/\n/g, ' ');
+        logger?.info?.(`[PD:Empathy] Processing user message: "${msgPreview}" (trigger=${trigger}, promptLen=${latestUserMessage.length})`);
         const lang = (wctx.config.get('language') as 'zh' | 'en') || 'zh';
 
         // Load keyword store once, cache in memory (Finding #7: avoid per-turn I/O)
@@ -826,8 +859,8 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
   // Shadow evidence comes from real runtime hooks (subagent_spawning/subagent_ended).
   if (!isMinimalMode && sessionId) {
     try {
-      // Extract RoutingInput from the latest user message
-      const latestUserText = extractLatestUserMessage(event.messages);
+      // Use the already extracted and cleaned user message
+      const latestUserText = latestUserMessage || '';
 
       if (latestUserText && latestUserText.trim().length > 0) {
         // Infer requestedTools and requestedFiles from message content

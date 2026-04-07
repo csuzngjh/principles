@@ -216,3 +216,14 @@ export function severityToPenalty(
     case 'severe': return config.penaltySevere;
   }
 }
+
+/**
+ * Normalizes various severity string inputs to the canonical empathy severity type.
+ * Handles common aliases: 'high' → 'severe', 'medium' → 'moderate'.
+ */
+export function normalizeSeverity(input?: string): 'mild' | 'moderate' | 'severe' {
+  const normalized = (input || '').toLowerCase();
+  if (normalized === 'severe' || normalized === 'high') return 'severe';
+  if (normalized === 'moderate' || normalized === 'medium') return 'moderate';
+  return 'mild';
+}
