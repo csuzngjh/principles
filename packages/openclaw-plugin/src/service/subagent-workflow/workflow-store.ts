@@ -4,7 +4,7 @@ import * as path from 'path';
 import type { WorkflowRow, WorkflowEventRow, WorkflowState, WorkflowTransport } from './types.js';
 import type { DreamerOutput, PhilosopherOutput } from '../../core/nocturnal-trinity.js';
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 const DEFAULT_BUSY_TIMEOUT_MS = 5000;
 
@@ -42,7 +42,7 @@ export class WorkflowStore {
             CREATE TABLE IF NOT EXISTS schema_version (
                 version INTEGER NOT NULL
             );
-            
+
             CREATE TABLE IF NOT EXISTS subagent_workflows (
                 workflow_id TEXT PRIMARY KEY,
                 workflow_type TEXT NOT NULL,
@@ -55,6 +55,7 @@ export class WorkflowStore {
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
                 last_observed_at INTEGER,
+                duration_ms INTEGER,
                 metadata_json TEXT NOT NULL DEFAULT '{}'
             );
             
@@ -89,13 +90,27 @@ export class WorkflowStore {
         `);
         
         const row = this.db.prepare('SELECT version FROM schema_version LIMIT 1').get() as { version?: number } | undefined;
-        if (!row) {
+        const currentVersion = row?.version ?? 0;
+        if (currentVersion === 0) {
             this.db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(SCHEMA_VERSION);
-        } else if (row.version !== SCHEMA_VERSION) {
+        } else if (currentVersion < SCHEMA_VERSION) {
+            // Run migrations for existing databases
+            this.runMigrations(currentVersion, SCHEMA_VERSION);
             this.db.prepare('UPDATE schema_version SET version = ?').run(SCHEMA_VERSION);
         }
     }
-    
+
+    private runMigrations(fromVersion: number, toVersion: number): void {
+        if (fromVersion < 2 && toVersion >= 2) {
+            // v1 → v2: Add duration_ms column for adaptive timeout tracking
+            try {
+                this.db.exec('ALTER TABLE subagent_workflows ADD COLUMN duration_ms INTEGER');
+            } catch {
+                // Column may already exist if migration was partially applied
+            }
+        }
+    }
+
     createWorkflow(row: Omit<WorkflowRow, 'cleanup_state'>): void {
         const now = Date.now();
         this.db.prepare(`
@@ -324,5 +339,33 @@ export class WorkflowStore {
 
     deleteWorkflow(workflowId: string): void {
         this.db.prepare('DELETE FROM subagent_workflows WHERE workflow_id = ?').run(workflowId);
+    }
+
+    /**
+     * Record the actual completion duration for a workflow.
+     * Used by adaptive timeout learning.
+     */
+    recordDuration(workflowId: string, durationMs: number): void {
+        this.db.prepare(`
+            UPDATE subagent_workflows SET duration_ms = ?, updated_at = ? WHERE workflow_id = ?
+        `).run(durationMs, Date.now(), workflowId);
+    }
+
+    /**
+     * Get completion durations for a specific workflow type, ordered by most recent first.
+     * Returns an array of duration_ms values for adaptive timeout calculation.
+     */
+    getCompletionDurations(workflowType: string, limit: number = 50): number[] {
+        const rows = this.db.prepare(`
+            SELECT duration_ms FROM subagent_workflows
+            WHERE workflow_type = ?
+            AND state = 'completed'
+            AND duration_ms IS NOT NULL
+            AND duration_ms > 0
+            ORDER BY created_at DESC
+            LIMIT ?
+        `).all(workflowType, limit) as Array<{ duration_ms: number }>;
+
+        return rows.map(r => r.duration_ms);
     }
 }

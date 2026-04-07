@@ -286,6 +286,7 @@ export class NocturnalWorkflowManager implements WorkflowManager {
             state: 'active',
             created_at: now,
             updated_at: now,
+            duration_ms: null,
             metadata_json: JSON.stringify(metadata),
         });
         this.store.recordEvent(workflowId, 'nocturnal_started', null, 'active', 'TrinityRuntimeAdapter invoked', { workflowType: 'nocturnal' });
