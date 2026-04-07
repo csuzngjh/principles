@@ -16,7 +16,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { withLock } from '../utils/file-lock.js';
-import { WorkspaceContext } from '../core/workspace-context.js';
 import {
   loadLedger,
 } from '../core/principle-tree-ledger.js';
