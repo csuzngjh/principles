@@ -178,8 +178,8 @@ export interface EmpathyKeywordConfig {
 export const DEFAULT_EMPATHY_KEYWORD_CONFIG: EmpathyKeywordConfig = {
   matchThreshold: 0.3,
   maxTermsPerMessage: 5,
-  optimizationIntervalTurns: 100,
-  optimizationIntervalMs: 24 * 60 * 60 * 1000, // 24 hours
+  optimizationIntervalTurns: 50,
+  optimizationIntervalMs: 6 * 60 * 60 * 1000, // 6 hours
   penaltyMild: 10,
   penaltyModerate: 25,
   penaltySevere: 40,
