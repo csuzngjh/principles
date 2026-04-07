@@ -100,6 +100,12 @@ const plugin = {
             migrateDirectoryStructure(api, workspaceDir);
             ensureWorkspaceTemplates(api, workspaceDir, language);
             SystemLogger.log(workspaceDir, 'SYSTEM_BOOT', `Principles Disciple online. Language: ${language}`);
+            // Auto-create PD cron jobs (empathy optimizer, etc.) — idempotent
+            const { ensurePDCronJobs } = await import('./core/cron-initializer.js');
+            const cronResult = ensurePDCronJobs();
+            if (cronResult.created.length > 0) {
+              api.logger?.info?.(`[PD] Auto-created cron jobs: ${cronResult.created.join(', ')}`);
+            }
             workspaceInitialized = true;
           }
           const result = await handleBeforePromptBuild(event, { ...ctx, api, workspaceDir });
