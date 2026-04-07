@@ -1,0 +1,66 @@
+<!-- generated-by: gsd-doc-writer -->
+# principles-disciple
+
+Native OpenClaw plugin for Principles Disciple: an evolutionary programming agent framework with strategic guardrails and reflection loops.
+
+## Installation
+
+```bash
+npm install principles-disciple
+```
+
+Requires OpenClaw `>=2026.4.4` as a peer dependency.
+
+## Usage
+
+This plugin integrates with OpenClaw to provide an evolutionary programming framework. It intercepts agent operations through hooks to enforce security guardrails, track pain points, collect trajectory data, and enable deep reflection capabilities.
+
+### Slash Commands
+
+| Command | Description |
+|---------|-------------|
+| `/pd-init` | Initialize workspace |
+| `/pd-bootstrap` | Scan environment tools |
+| `/pd-research` | Research tools and capabilities |
+| `/pd-thinking` | Manage thinking models |
+| `/pd-status` | View evolution status |
+| `/pd-context` | Control context injection |
+| `/pd-focus` | Focus file management |
+| `/pd-evolution-status` | View evolution state |
+| `/pd-rollback` | Rollback to previous state |
+| `/pd-export` | Export trajectory/correction data |
+| `/pd-samples` | Review correction samples |
+| `/pd-nocturnal-review` | Review nocturnal training samples |
+| `/nocturnal-train` | Nocturnal training operations |
+| `/nocturnal-rollout` | Nocturnal rollout and promotion |
+| `/pd-workflow-debug` | Debug workflow state |
+| `/pd-help` | Show command reference |
+
+### Tools
+
+**`deep_reflect`** - Executes deep meta-cognitive reflection to analyze potential risks, logical gaps, or architectural improvements in the current task.
+
+Parameters:
+- `context` (required): Task context, code snippet, or current difficulty
+- `depth` (optional): Reflection depth 1-3 (default: 2)
+- `model_id` (optional): Force specific thinking model
+
+### Configuration
+
+The plugin accepts the following configuration options:
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `language` | `zh` | Interaction language (`en` or `zh`) |
+| `auditLevel` | `medium` | Security guardrail level (`low`, `medium`, `high`) |
+| `riskPaths` | `[]` | High-risk directories requiring explicit authorization |
+| `deep_reflection.enabled` | `true` | Enable AI deep reflection |
+| `deep_reflection.mode` | `auto` | Reflection trigger mode (`auto` or `forced`) |
+
+## Part of the principles monorepo
+
+See the root [README.md](https://github.com/csuzngjh/principles#readme) for the full project overview.
+
+## License
+
+MIT License - [LICENSE](https://github.com/csuzngjh/principles/blob/main/LICENSE)
