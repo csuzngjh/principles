@@ -92,6 +92,7 @@ export function computeDynamicTimeout(
     if (history.length < MIN_SAMPLES) {
         // Not enough data — use the spec's static timeout
         const fallback = clampTimeout(defaultTimeout);
+        // Use console.info since we don't have logger access here; this appears in journalctl
         console.info(`[PD:DynamicTimeout] Insufficient samples (${history.length} < ${MIN_SAMPLES}) for '${workflowType}', falling back to static timeout: ${fallback}ms`);
         return fallback;
     }
