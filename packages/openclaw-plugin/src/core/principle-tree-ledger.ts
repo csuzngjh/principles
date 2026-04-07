@@ -94,6 +94,10 @@ function stringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
 }
 
+function uniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values));
+}
+
 function createEmptyTree(): LedgerTreeStore {
   return {
     principles: {},
@@ -363,10 +367,10 @@ export function createRule(stateDir: string, rule: LedgerRule): LedgerRule {
 
     const nextRule: LedgerRule = {
       ...rule,
-      implementationIds: Array.from(new Set(rule.implementationIds)),
+      implementationIds: uniqueStrings(rule.implementationIds),
     };
     store.tree.rules[nextRule.id] = nextRule;
-    principle.ruleIds = Array.from(new Set([...principle.ruleIds, nextRule.id]));
+    principle.ruleIds = uniqueStrings([...principle.ruleIds, nextRule.id]);
     return nextRule;
   });
 }
@@ -379,8 +383,129 @@ export function createImplementation(stateDir: string, implementation: Implement
     }
 
     store.tree.implementations[implementation.id] = implementation;
-    rule.implementationIds = Array.from(new Set([...rule.implementationIds, implementation.id]));
+    rule.implementationIds = uniqueStrings([...rule.implementationIds, implementation.id]);
     return implementation;
+  });
+}
+
+export function updateRule(stateDir: string, ruleId: string, updates: Partial<LedgerRule>): LedgerRule {
+  return mutateLedger(stateDir, (store) => {
+    const existingRule = store.tree.rules[ruleId];
+    if (!existingRule) {
+      throw new Error(`Cannot update missing rule "${ruleId}".`);
+    }
+
+    const nextPrincipleId = updates.principleId ?? existingRule.principleId;
+    const nextPrinciple = store.tree.principles[nextPrincipleId];
+    if (!nextPrinciple) {
+      throw new Error(`Cannot move rule "${ruleId}" to missing principle "${nextPrincipleId}".`);
+    }
+
+    const nextRule: LedgerRule = {
+      ...existingRule,
+      ...updates,
+      id: ruleId,
+      principleId: nextPrincipleId,
+      implementationIds: updates.implementationIds
+        ? uniqueStrings(updates.implementationIds)
+        : existingRule.implementationIds,
+    };
+
+    if (existingRule.principleId !== nextPrincipleId) {
+      const previousPrinciple = store.tree.principles[existingRule.principleId];
+      if (previousPrinciple) {
+        previousPrinciple.ruleIds = previousPrinciple.ruleIds.filter((candidateId) => candidateId !== ruleId);
+      }
+      nextPrinciple.ruleIds = uniqueStrings([...nextPrinciple.ruleIds, ruleId]);
+    }
+
+    store.tree.rules[ruleId] = nextRule;
+    return nextRule;
+  });
+}
+
+export function deleteRule(stateDir: string, ruleId: string): LedgerRule | undefined {
+  return mutateLedger(stateDir, (store) => {
+    const existingRule = store.tree.rules[ruleId];
+    if (!existingRule) {
+      return undefined;
+    }
+
+    const parentPrinciple = store.tree.principles[existingRule.principleId];
+    if (parentPrinciple) {
+      parentPrinciple.ruleIds = parentPrinciple.ruleIds.filter((candidateId) => candidateId !== ruleId);
+    }
+
+    const implementationIds = uniqueStrings([
+      ...existingRule.implementationIds,
+      ...Object.values(store.tree.implementations)
+        .filter((implementation) => implementation.ruleId === ruleId)
+        .map((implementation) => implementation.id),
+    ]);
+    for (const implementationId of implementationIds) {
+      delete store.tree.implementations[implementationId];
+    }
+
+    delete store.tree.rules[ruleId];
+    return existingRule;
+  });
+}
+
+export function updateImplementation(
+  stateDir: string,
+  implementationId: string,
+  updates: Partial<Implementation>,
+): Implementation {
+  return mutateLedger(stateDir, (store) => {
+    const existingImplementation = store.tree.implementations[implementationId];
+    if (!existingImplementation) {
+      throw new Error(`Cannot update missing implementation "${implementationId}".`);
+    }
+
+    const nextRuleId = updates.ruleId ?? existingImplementation.ruleId;
+    const nextRule = store.tree.rules[nextRuleId];
+    if (!nextRule) {
+      throw new Error(`Cannot move implementation "${implementationId}" to missing rule "${nextRuleId}".`);
+    }
+
+    const nextImplementation: Implementation = {
+      ...existingImplementation,
+      ...updates,
+      id: implementationId,
+      ruleId: nextRuleId,
+    };
+
+    if (existingImplementation.ruleId !== nextRuleId) {
+      const previousRule = store.tree.rules[existingImplementation.ruleId];
+      if (previousRule) {
+        previousRule.implementationIds = previousRule.implementationIds.filter(
+          (candidateId) => candidateId !== implementationId,
+        );
+      }
+      nextRule.implementationIds = uniqueStrings([...nextRule.implementationIds, implementationId]);
+    }
+
+    store.tree.implementations[implementationId] = nextImplementation;
+    return nextImplementation;
+  });
+}
+
+export function deleteImplementation(stateDir: string, implementationId: string): Implementation | undefined {
+  return mutateLedger(stateDir, (store) => {
+    const existingImplementation = store.tree.implementations[implementationId];
+    if (!existingImplementation) {
+      return undefined;
+    }
+
+    const parentRule = store.tree.rules[existingImplementation.ruleId];
+    if (parentRule) {
+      parentRule.implementationIds = parentRule.implementationIds.filter(
+        (candidateId) => candidateId !== implementationId,
+      );
+    }
+
+    delete store.tree.implementations[implementationId];
+    return existingImplementation;
   });
 }
 
