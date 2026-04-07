@@ -67,7 +67,11 @@ No new features — only cleanup and refactor. Must not break existing functiona
   3. PAIN_CANDIDATES processing has single unified path (either integrated into evolution-reducer or removed)
   4. No broken `trackPainCandidate()` or `processPromotion()` calls remain in codebase
 
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 11-01-PLAN.md — CLEAN-01: Rename normalizePath to normalizePathPosix in nocturnal-compliance.ts
+- [ ] 11-02-PLAN.md — CLEAN-02: Delete entire PAIN_CANDIDATES system from evolution-worker.ts
 
 #### Phase 12: Code Deduplication
 
@@ -119,6 +123,6 @@ No new features — only cleanup and refactor. Must not break existing functiona
 | 8 | v1.5 | 2/2 | Complete | 2026-04-05 |
 | 9 | v1.5 | 1/1 | Complete | 2026-04-06 |
 | 10 | v1.5 | 1/1 | Complete | 2026-04-06 |
-| 11 | v1.6 | 0/TBD | Not started | - |
+| 11 | v1.6 | 2/2 | Planned | - |
 | 12 | v1.6 | 0/TBD | Not started | - |
 | 13 | v1.6 | 0/TBD | Not started | - |
