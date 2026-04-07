@@ -20,16 +20,20 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 - Contract enforcement and schema validation
 - `outputQuality` decision scoring
 - Nocturnal background reflection pipeline
+- Principle tree supports first-class Rule and Implementation entities (validated in Phase 11)
 
 ### Active
 
-- [ ] principle tree supports first-class Rule and Implementation entities
 - [ ] code implementations can be stored, evaluated, promoted, and rolled back as principle-tree leaves
-- [ ] runtime gate chain includes a Rule Host between GFI and Progressive Gate
 - [ ] nocturnal reflection can generate code implementation candidates in addition to behavioral training artifacts
 - [ ] coverage, false positive, adherence, and deprecation eligibility are computed from real implementation outcomes
 - [ ] principle internalization chooses the cheapest viable implementation path before escalating to heavier forms
 
+### Validated in Phase 12
+
+- [x] runtime gate chain includes a Rule Host between GFI and Progressive Gate (HOST-01 through HOST-04)
+- [x] versioned code implementation storage with manifest, entry, and asset directory management (IMPL-01)
+- [x] lifecycle states queryable from ledger, active code implementations run through fixed host contract (IMPL-02)
 ### Out of Scope
 
 - `packages/openclaw-plugin` product-side fixes - outside this milestone’s architectural scope
@@ -98,4 +102,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-07 after starting milestone v1.9.0*
+*Last updated: 2026-04-07 after completing Phase 12*
