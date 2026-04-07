@@ -416,3 +416,18 @@ export function getPrincipleSubtree(stateDir: string, principleId: string): Prin
       })),
   };
 }
+
+export function updatePrincipleValueMetrics(
+  stateDir: string,
+  principleId: string,
+  metrics: PrincipleValueMetrics,
+): PrincipleValueMetrics {
+  return mutateLedger(stateDir, (store) => {
+    const nextMetrics: PrincipleValueMetrics = {
+      ...metrics,
+      principleId,
+    };
+    store.tree.metrics[principleId] = nextMetrics;
+    return nextMetrics;
+  });
+}

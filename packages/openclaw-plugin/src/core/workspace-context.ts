@@ -8,6 +8,17 @@ import { PainDictionary } from './dictionary.js';
 import { HygieneTracker } from './hygiene/tracker.js';
 import { EvolutionReducerImpl } from './evolution-reducer.js';
 import { TrajectoryDatabase, TrajectoryRegistry, TrajectoryDatabaseOptions } from './trajectory.js';
+import {
+    getPrincipleSubtree,
+    updatePrincipleValueMetrics,
+    type PrincipleSubtree,
+} from './principle-tree-ledger.js';
+import type { Principle, PrincipleValueMetrics } from '../types/principle-tree-schema.js';
+
+interface PrincipleTreeLedgerAccessor {
+    getPrincipleSubtree(principleId: string): PrincipleSubtree | undefined;
+    updatePrincipleValueMetrics(principleId: string, metrics: PrincipleValueMetrics): PrincipleValueMetrics;
+}
 
 /**
  * WorkspaceContext - Centralized management of workspace-specific paths and services.
@@ -26,6 +37,7 @@ export class WorkspaceContext {
     private _hygiene?: HygieneTracker;
     private _evolutionReducer?: EvolutionReducerImpl;
     private _trajectory?: TrajectoryDatabase;
+    private _principleTreeLedger?: PrincipleTreeLedgerAccessor;
 
     private constructor(workspaceDir: string, stateDir: string) {
         this.workspaceDir = workspaceDir;
@@ -91,6 +103,33 @@ export class WorkspaceContext {
             this._trajectory = TrajectoryRegistry.get(this.workspaceDir, this.getTrajectoryOptions());
         }
         return this._trajectory;
+    }
+
+    /**
+     * Locked ledger access for principle tree reads and metric writes in this workspace.
+     */
+    get principleTreeLedger(): PrincipleTreeLedgerAccessor {
+        if (!this._principleTreeLedger) {
+            this._principleTreeLedger = {
+                getPrincipleSubtree: (principleId: string) => getPrincipleSubtree(this.stateDir, principleId),
+                updatePrincipleValueMetrics: (principleId: string, metrics: PrincipleValueMetrics) =>
+                    updatePrincipleValueMetrics(this.stateDir, principleId, metrics),
+            };
+        }
+        return this._principleTreeLedger;
+    }
+
+    /**
+     * Retrieve active Principle -> Rule -> Implementation subtrees without bypassing reducer authority.
+     */
+    getActivePrincipleSubtrees(): Array<{ principle: Principle; subtree: PrincipleSubtree }> {
+        return this.evolutionReducer
+            .getActivePrinciples()
+            .map((principle) => {
+                const subtree = this.principleTreeLedger.getPrincipleSubtree(principle.id);
+                return subtree ? { principle, subtree } : null;
+            })
+            .filter((entry): entry is { principle: Principle; subtree: PrincipleSubtree } => entry !== null);
     }
 
     private getTrajectoryOptions(): Omit<TrajectoryDatabaseOptions, 'workspaceDir'> {
@@ -162,6 +201,7 @@ export class WorkspaceContext {
         this._dictionary = undefined;
         this._evolutionReducer = undefined;
         this._trajectory = undefined;
+        this._principleTreeLedger = undefined;
     }
 
     /**
