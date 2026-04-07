@@ -1,68 +1,116 @@
-# Requirements: v1.3 Workflow Skill Internal Usability
+# Requirements: v1.9.0 Principle Internalization System
 
-**Defined:** 2026-04-06  
-**Core Value:** make `ai-sprint-orchestrator` usable as a packaged internal skill before introducing the next work-unit architecture layer.
+**Defined:** 2026-04-07  
+**Core Value:** AI agents improve their own behavior through a structured loop: pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
 
-## v1.3 Requirements
+## v1.9.0 Requirements
 
-### Skill Stability
+### Principle Tree Ledger
 
-- [ ] **STAB-01**: package-local self-check passes in the packaged skill entrypoint
-- [ ] **STAB-02**: `workflow-validation-minimal` runs through the packaged skill entrypoint and produces a structured halt or decision
-- [ ] **STAB-03**: `workflow-validation-minimal-verify` runs through the packaged skill entrypoint and produces a structured halt or decision
-- [ ] **STAB-04**: failure classification is persisted to both `latest-summary.md` and `scorecard.json`
-- [ ] **STAB-05**: validation failures are explicitly classified as `workflow bug`, `agent behavior issue`, `environment issue`, or `sample-spec issue`
+- [ ] **TREE-01**: system can persist `Rule` entities as first-class principle-tree records rather than document-only concepts
+- [ ] **TREE-02**: system can persist `Implementation` entities as first-class principle-tree leaves linked to a parent `Rule`
+- [ ] **TREE-03**: system can query `Principle -> Rule -> Implementation` relationships for any active principle
+- [ ] **TREE-04**: one Rule can reference multiple Implementations without collapsing semantic and runtime layers
 
-### Complex Task Readiness
+### Runtime Code Host
 
-- [ ] **TASK-01**: package-local complex bugfix template exists and loads
-- [ ] **TASK-02**: package-local complex feature template exists and loads
-- [ ] **TASK-03**: complex specs require a minimum task contract: `Goal`, `In scope`, `Out of scope`, `Validation commands`, `Expected artifacts`
-- [ ] **TASK-04**: unfilled template specs are rejected before sprint start
-- [ ] **TASK-05**: reviewer prompts explicitly judge behavioral value and unverified risks, not only report structure
+- [ ] **HOST-01**: runtime gate chain executes a `Rule Host` between `GFI Gate` and `Progressive Gate`
+- [ ] **HOST-02**: active code implementations execute through a fixed host contract and helper whitelist instead of arbitrary workspace access
+- [ ] **HOST-03**: a code implementation can return `allow`, `block`, or `requireApproval` plus structured diagnostics
+- [ ] **HOST-04**: host failure degrades conservatively without disabling existing hard-boundary gates
 
-### Continuation Discipline
+### Implementation Storage
 
-- [ ] **FLOW-01**: stage carry-forward prefers `checkpoint-summary.md` over full prior decision text
-- [ ] **FLOW-02**: complex specs can declare execution scope limits for files, checks, and deliverables
-- [ ] **FLOW-03**: producer prompt requires a scoped execution declaration before edits
-- [ ] **FLOW-04**: validation and complex task flows classify-and-stop on product-side or sample-side gaps
+- [ ] **IMPL-01**: `Implementation(type=code)` is stored as a versioned asset with manifest, entry file, replay samples, and latest evaluation report
+- [ ] **IMPL-02**: code implementations support lifecycle states `candidate`, `active`, `disabled`, and `archived`
+- [ ] **IMPL-03**: a promoted implementation can be disabled or rolled back without corrupting the principle tree ledger
 
-### Documentation
+### Replay and Promotion
 
-- [ ] **DOC-01**: `SKILL.md` reflects internal smoke standards and complex task entry rules
-- [ ] **DOC-02**: `REFERENCE.md` documents failure classification, minimum task contract, execution scope limits, checkpoint summary, and next architecture direction
-- [ ] **DOC-03**: `EXAMPLES.md` shows validation, failure classification, complex templates, and continuation via checkpoint summary
+- [ ] **EVAL-01**: system can replay `pain-negative` samples against a candidate code implementation
+- [ ] **EVAL-02**: system can replay `success-positive` samples and detect newly introduced false positives
+- [ ] **EVAL-03**: system can replay `principle-anchor` samples so principles constrain forward behavior rather than only memorizing past pain
+- [ ] **EVAL-04**: replay produces a structured evaluation report that determines whether a candidate can be promoted
+- [ ] **EVAL-05**: promotion of code implementations is manual until replay and rollback loops are stable
 
-## Stop Boundaries
+### Nocturnal Code Candidate Factory
 
-If a validation run or complex task attempt hits one of the following, classify it and stop instead of expanding scope:
+- [ ] **NOC-01**: nocturnal reflection can emit `RuleImplementationArtifact` candidates distinct from behavioral training artifacts
+- [ ] **NOC-02**: a code implementation artifact records its originating principle, rule, snapshot, and source pain / gate-block context
+- [ ] **NOC-03**: nocturnal code candidate generation reuses existing selection, snapshot extraction, and validation skeletons without conflating artifact types
 
-| Category | Allowed action | Stop action |
-|----------|----------------|-------------|
-| workflow bug | fix packaged workflow plumbing or source orchestrator plumbing | do not expand into product closure |
-| agent behavior issue | adjust agent profile, fallback, or prompt discipline | do not special-case behavior in product code |
-| environment issue | classify and require operator intervention | do not auto-repair the environment |
-| sample-spec issue | classify and stop the run | do not edit `packages/openclaw-plugin` or `D:/Code/openclaw` |
+### Coverage and Lifecycle
+
+- [ ] **COV-01**: system computes `Rule.coverageRate` from replay and live implementation behavior rather than implementation existence alone
+- [ ] **COV-02**: system computes `Rule.falsePositiveRate` from `success-positive` replay and live misfires
+- [ ] **COV-03**: system updates `Principle.adherenceRate` from rule coverage and repeated error reduction
+- [ ] **COV-04**: system can mark a principle as a `deprecated` candidate only when stable lower-layer implementations genuinely absorb it
+
+### Internalization Strategy
+
+- [ ] **ROUT-01**: system can represent “cheapest viable implementation first” as an explicit internalization strategy
+- [ ] **ROUT-02**: system does not default every principle failure to code implementation when a cheaper skill or prompt route would suffice
+
+## v2 Requirements
+
+### Multi-Form Internalization
+
+- **MULTI-01**: system routes principle failures between skill, code, LoRA, and heavier optimization paths using explicit policy
+- **MULTI-02**: code, skill, and LoRA implementations can contribute jointly to rule coverage accounting
+- **MULTI-03**: system can escalate an inadequately internalized principle from one implementation form to a heavier one using measured evidence
+
+### Automation and Review
+
+- **AUTO-01**: nocturnal code implementation candidates can enter a review queue with confidence scoring and operator triage
+- **AUTO-02**: promotion can move from manual to supervised automation once false-positive and rollback metrics are stable
 
 ## Out of Scope
 
 | Feature | Reason |
 |---------|--------|
-| `packages/openclaw-plugin` fixes | known sample-side gaps; not part of workflow-skill internalization |
+| removing `Progressive Gate` in v1.9.0 | existing host hard-boundary layer must remain until the new code implementation path is proven |
+| auto-deploying code implementations directly from nocturnal output | replay and rollback loops must be stable before automation |
+| forcing every principle into code implementation | the system must prefer the cheapest viable internalization path |
+| LoRA or full fine-tune execution pipeline buildout | this milestone focuses on the code implementation branch only |
+| dashboard-first work for internalization analytics | ledger, host, replay, and nocturnal candidate flow come first |
+| `packages/openclaw-plugin` product-side fixes unrelated to internalization architecture | outside this milestone’s scope |
 | `D:/Code/openclaw` changes | outside this repo |
-| dashboard / stageGraph / self-optimizing sprint / multi-task parallelism | future work, not v1.3 |
-| full work-unit/tasklet engine | next milestone, not this round |
-| orchestrator redesign | v1.3 is internal usability hardening, not a rewrite |
 
 ## Traceability
 
-| Requirement group | Phase | Status |
-|-------------------|-------|--------|
-| STAB-01 to STAB-05 | Phase 1 | In progress |
-| TASK-01 to TASK-05 | Phase 2 | In progress |
-| FLOW-01 to FLOW-04 | Phase 3 | In progress |
-| DOC-01 to DOC-03 | Cross-cutting | In progress |
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| TREE-01 | Phase 11 | Pending |
+| TREE-02 | Phase 11 | Pending |
+| TREE-03 | Phase 11 | Pending |
+| TREE-04 | Phase 11 | Pending |
+| HOST-01 | Phase 12 | Pending |
+| HOST-02 | Phase 12 | Pending |
+| HOST-03 | Phase 12 | Pending |
+| HOST-04 | Phase 12 | Pending |
+| IMPL-01 | Phase 12 | Pending |
+| IMPL-02 | Phase 12 | Pending |
+| IMPL-03 | Phase 13 | Pending |
+| EVAL-01 | Phase 13 | Pending |
+| EVAL-02 | Phase 13 | Pending |
+| EVAL-03 | Phase 13 | Pending |
+| EVAL-04 | Phase 13 | Pending |
+| EVAL-05 | Phase 13 | Pending |
+| NOC-01 | Phase 14 | Pending |
+| NOC-02 | Phase 14 | Pending |
+| NOC-03 | Phase 14 | Pending |
+| COV-01 | Phase 15 | Pending |
+| COV-02 | Phase 15 | Pending |
+| COV-03 | Phase 15 | Pending |
+| COV-04 | Phase 15 | Pending |
+| ROUT-01 | Phase 15 | Pending |
+| ROUT-02 | Phase 15 | Pending |
+
+**Coverage:**
+- v1.9.0 requirements: 25 total
+- Mapped to phases: 25
+- Unmapped: 0 ✅
 
 ---
-*Last updated: 2026-04-06*
+*Requirements defined: 2026-04-07*
+*Last updated: 2026-04-07 after milestone v1.9.0 definition*
