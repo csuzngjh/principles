@@ -76,3 +76,6 @@ docs/design/gfi-trust-capability-simplification-2026-03-20.md
 .tmp-trainer/
 .bg-shell/
 .greptile/
+
+.qwen/
+gha-creds-*.json
