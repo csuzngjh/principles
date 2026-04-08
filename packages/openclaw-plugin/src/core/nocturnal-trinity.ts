@@ -431,7 +431,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
 
   constructor(
     api: OpenClawTrinityRuntimeAdapter['api'],
-    stageTimeoutMs = 180_000
+    stageTimeoutMs = 300_000  // 5 min — increased from 3 min to accommodate slower LLM responses
   ) {
     this.api = api;
     this.stageTimeoutMs = stageTimeoutMs;

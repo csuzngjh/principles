@@ -1208,14 +1208,24 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
         // then re-acquire the lock to write results. This prevents the long-running
         // nocturnal reflection from blocking all other queue consumers.
         // Safe to return early here because pain_diagnosis was already handled above.
-        const sleepReflectionTasks = queue.filter(t => t.status === 'pending' && t.taskKind === 'sleep_reflection');
+
+        // FIX: Also poll in_progress tasks that were started in a previous cycle.
+        // Previously only 'pending' tasks were filtered, so an in_progress task from
+        // a previous heartbeat cycle would never be re-polled until the 1-hour
+        // stuck task recovery kicked in.
+        const pendingSleepTasks = queue.filter(t => t.status === 'pending' && t.taskKind === 'sleep_reflection');
+        const pollingSleepTasks = queue.filter(t =>
+            t.status === 'in_progress' && t.taskKind === 'sleep_reflection' && t.resultRef && !t.resultRef.startsWith('trinity-draft')
+        );
+        const sleepReflectionTasks = [...pendingSleepTasks, ...pollingSleepTasks];
         if (sleepReflectionTasks.length > 0) {
-            // --- Phase 1: Claim tasks (inside lock) ---
-            for (const sleepTask of sleepReflectionTasks) {
+            // --- Phase 1: Claim only pending tasks (inside lock) ---
+            // in_progress tasks from previous cycles are already claimed, don't re-claim them
+            for (const sleepTask of pendingSleepTasks) {
                 sleepTask.status = 'in_progress';
                 sleepTask.started_at = new Date().toISOString();
             }
-            queueChanged = true;
+            queueChanged = pendingSleepTasks.length > 0;
 
             // Write claimed state (includes any pain changes from above) and release lock
             if (queueChanged) {
@@ -1224,7 +1234,15 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
             releaseLock();
             for (const sleepTask of sleepReflectionTasks) {
                 try {
-                    logger?.info?.(`[PD:EvolutionWorker] Processing sleep_reflection task ${sleepTask.id}`);
+                    // FIX: For in_progress tasks from a previous cycle, just poll the workflow.
+                    // Don't start a new workflow — that was already done when the task was first claimed.
+                    const isPollingTask = !!sleepTask.resultRef && !sleepTask.resultRef.startsWith('trinity-draft');
+
+                    if (isPollingTask) {
+                        logger?.debug?.(`[PD:EvolutionWorker] Polling existing sleep_reflection task ${sleepTask.id} (workflowId: ${sleepTask.resultRef})`);
+                    } else {
+                        logger?.info?.(`[PD:EvolutionWorker] Processing sleep_reflection task ${sleepTask.id}`);
+                    }
 
                     // NOC-14: Use NocturnalWorkflowManager for sleep_reflection tasks
                     // Lazy-create manager (needs runtimeAdapter from api)
@@ -1247,66 +1265,74 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         continue;
                     }
 
-                    // Start workflow via NocturnalWorkflowManager instead of direct executeNocturnalReflectionAsync
-                    // Pass taskId in metadata for correlation
+                    let workflowId: string;
 
-                    // #181: Build a proper snapshot from trajectory.db instead of hardcoded zeros
-                    let snapshotData: Record<string, unknown> | undefined;
-                    if (sleepTask.recentPainContext) {
-                        try {
-                            const extractor = createNocturnalTrajectoryExtractor(wctx.workspaceDir);
-                            const fullSnapshot = extractor.getNocturnalSessionSnapshot(sleepTask.id);
-                            if (fullSnapshot) {
-                                snapshotData = {
-                                    sessionId: fullSnapshot.sessionId,
-                                    sessionStart: fullSnapshot.startedAt,
-                                    stats: fullSnapshot.stats,
-                                    recentPain: fullSnapshot.painEvents.slice(-5), // last 5
-                                };
+                    if (isPollingTask) {
+                        // Poll-only path: skip workflow start, use existing workflowId
+                        workflowId = sleepTask.resultRef!;
+                    } else {
+                        // Start workflow via NocturnalWorkflowManager instead of direct executeNocturnalReflectionAsync
+                        // Pass taskId in metadata for correlation
+
+                        // #181: Build a proper snapshot from trajectory.db instead of hardcoded zeros
+                        let snapshotData: Record<string, unknown> | undefined;
+                        if (sleepTask.recentPainContext) {
+                            try {
+                                const extractor = createNocturnalTrajectoryExtractor(wctx.workspaceDir);
+                                const fullSnapshot = extractor.getNocturnalSessionSnapshot(sleepTask.id);
+                                if (fullSnapshot) {
+                                    snapshotData = {
+                                        sessionId: fullSnapshot.sessionId,
+                                        sessionStart: fullSnapshot.startedAt,
+                                        stats: fullSnapshot.stats,
+                                        recentPain: fullSnapshot.painEvents.slice(-5), // last 5
+                                    };
+                                }
+                            } catch (snapErr) {
+                                logger?.warn?.(`[PD:EvolutionWorker] Failed to build trajectory snapshot for ${sleepTask.id}: ${String(snapErr)}`);
                             }
-                        } catch (snapErr) {
-                            logger?.warn?.(`[PD:EvolutionWorker] Failed to build trajectory snapshot for ${sleepTask.id}: ${String(snapErr)}`);
                         }
-                    }
-                    // Fallback: use pain context only if trajectory extractor failed
-                    if (!snapshotData && sleepTask.recentPainContext) {
-                        snapshotData = {
-                            sessionId: sleepTask.id,
-                            sessionStart: sleepTask.timestamp,
-                            stats: {
-                                totalAssistantTurns: 0,
-                                totalToolCalls: 0,
-                                failureCount: 0,
-                                totalPainEvents: sleepTask.recentPainContext.recentPainCount,
-                                totalGateBlocks: 0,
+                        // Fallback: use pain context only if trajectory extractor failed
+                        if (!snapshotData && sleepTask.recentPainContext) {
+                            snapshotData = {
+                                sessionId: sleepTask.id,
+                                sessionStart: sleepTask.timestamp,
+                                stats: {
+                                    totalAssistantTurns: 0,
+                                    totalToolCalls: 0,
+                                    failureCount: 0,
+                                    totalPainEvents: sleepTask.recentPainContext.recentPainCount,
+                                    totalGateBlocks: 0,
+                                },
+                                recentPain: sleepTask.recentPainContext.mostRecent ? [sleepTask.recentPainContext.mostRecent] : [],
+                            };
+                        }
+
+                        const workflowHandle = await nocturnalManager.startWorkflow(nocturnalWorkflowSpec, {
+                            parentSessionId: `sleep_reflection:${sleepTask.id}`,
+                            workspaceDir: wctx.workspaceDir,
+                            taskInput: {},
+                            metadata: {
+                                snapshot: snapshotData,
+                                principleId: 'default',
+                                taskId: sleepTask.id,  // NOC-14: correlation ID for evolution worker
                             },
-                            recentPain: sleepTask.recentPainContext.mostRecent ? [sleepTask.recentPainContext.mostRecent] : [],
-                        };
+                        });
+
+                        // Store workflowId on task for polling on subsequent cycles
+                        sleepTask.resultRef = workflowHandle.workflowId;
+                        workflowId = workflowHandle.workflowId;
                     }
-
-                    const workflowHandle = await nocturnalManager.startWorkflow(nocturnalWorkflowSpec, {
-                        parentSessionId: `sleep_reflection:${sleepTask.id}`,
-                        workspaceDir: wctx.workspaceDir,
-                        taskInput: {},
-                        metadata: {
-                            snapshot: snapshotData,
-                            principleId: 'default',
-                            taskId: sleepTask.id,  // NOC-14: correlation ID for evolution worker
-                        },
-                    });
-
-                    // Store workflowId on task for polling on subsequent cycles
-                    sleepTask.resultRef = workflowHandle.workflowId;
 
                     // Workflow is running asynchronously. Check if it completed in this cycle
                     // by polling getWorkflowDebugSummary.
-                    const summary = await nocturnalManager.getWorkflowDebugSummary(workflowHandle.workflowId);
+                    const summary = await nocturnalManager.getWorkflowDebugSummary(workflowId);
                     if (summary) {
                         if (summary.state === 'completed') {
                             sleepTask.status = 'completed';
                             sleepTask.completed_at = new Date().toISOString();
                             sleepTask.resolution = 'marker_detected';
-                            sleepTask.resultRef = summary.metadata?.nocturnalResult ? 'trinity-draft' : workflowHandle.workflowId;
+                            sleepTask.resultRef = summary.metadata?.nocturnalResult ? 'trinity-draft' : workflowId;
                             logger?.info?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} workflow completed`);
                         } else if (summary.state === 'terminal_error') {
                             sleepTask.status = 'failed';
