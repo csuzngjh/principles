@@ -52,7 +52,7 @@
 - [x] Phase 12: Runtime Rule Host and Code Implementation Storage (2 plans) - completed 2026-04-07
 - [x] Phase 13: Replay Evaluation and Manual Promotion Loop (1 plan) - completed 2026-04-07
 - [x] Phase 14: Nocturnal RuleImplementationArtifact Factory (2 plans) - completed 2026-04-08
-- [ ] Phase 15: Coverage, Adherence, and Internalization Routing
+- [ ] Phase 15: Coverage, Adherence, and Internalization Routing (1/2 plans complete)
 
 **Milestone goal:** turn the current principle / nocturnal / gate architecture into a real Principle Internalization System with first-class Rule and Implementation entities, a constrained runtime Rule Host, replay-based code implementation promotion, and nocturnal code candidate generation.
 
@@ -62,7 +62,7 @@
 
 ### Next Milestone (Current)
 
-**v1.9.0 Principle Internalization System** is in progress. Next step: start Phase 15.
+**v1.9.0 Principle Internalization System** is in progress. Next step: execute Phase 15-02.
 
 ## Progress
 
@@ -85,8 +85,8 @@
 | 11 | v1.9.0 | 3/3 | Complete    | 2026-04-07 |
 | 12 | v1.9.0 | 2/2 | Complete    | 2026-04-07 |
 | 13 | v1.9.0 | 1/1 | Complete   | 2026-04-07 |
-| 14 | v1.9.0 | 2/2 | Complete   | 2026-04-08 |
-| 15 | v1.9.0 | 0/1 | Pending | - |
+| 14 | v1.9.0 | 2/2 | Complete    | 2026-04-08 |
+| 15 | v1.9.0 | 1/2 | In Progress | 2026-04-08 |
 
 ## Phase Details
 
@@ -180,6 +180,12 @@ Success criteria:
 ### Phase 15: Coverage, Adherence, and Internalization Routing
 
 Goal: turn implementation outcomes into real coverage and internalization decisions.
+
+**Plans:** 1/2 plans complete
+
+Plans:
+- [x] 15-01-PLAN.md - Build the deterministic evidence reader, metrics service, and deprecated-candidate assessment without changing replay or nocturnal semantics
+- [ ] 15-02-PLAN.md - Build the explicit `skill | code | defer` routing policy and read-only command/report surface on top of Phase 15 metrics
 
 Requirements:
 - COV-01
