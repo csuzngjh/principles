@@ -55,27 +55,27 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| TRACE-01 | — | Pending |
-| TRACE-02 | — | Pending |
-| OVER-01 | — | Pending |
-| OVER-02 | — | Pending |
-| OVER-03 | — | Pending |
-| LOOP-01 | — | Pending |
-| LOOP-02 | — | Pending |
-| FB-01 | — | Pending |
-| FB-02 | — | Pending |
-| FB-03 | — | Pending |
-| GATE-01 | — | Pending |
-| GATE-02 | — | Pending |
-| FE-01 | — | Pending |
-| FE-02 | — | Pending |
-| E2E-01 | — | Pending |
-| E2E-02 | — | Pending |
+| TRACE-01 | 16 | Pending |
+| TRACE-02 | 16 | Pending |
+| OVER-01 | 17 | Pending |
+| OVER-02 | 17 | Pending |
+| OVER-03 | 17 | Pending |
+| LOOP-01 | 18 | Pending |
+| LOOP-02 | 18 | Pending |
+| FB-01 | 18 | Pending |
+| FB-02 | 18 | Pending |
+| FB-03 | 18 | Pending |
+| GATE-01 | 19 | Pending |
+| GATE-02 | 19 | Pending |
+| FE-01 | 19 | Pending |
+| FE-02 | 19 | Pending |
+| E2E-01 | 20 | Pending |
+| E2E-02 | 20 | Pending |
 
 **Coverage:**
 - v1.9.1 requirements: 16 total
-- Mapped to phases: 0
-- Unmapped: 16 ⚠️
+- Mapped to phases: 16 (100%)
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-04-08*
