@@ -20,6 +20,10 @@ import { getPendingDiagnosticianTasks } from '../core/diagnostician-task-store.j
 // Module-level empathy state — shared across calls to avoid per-turn I/O
 let _empathyTurnCounter = 0;
 let _empathyKeywordCache: { store: ReturnType<typeof loadKeywordStore>; lang: string; fileMtimeMs: number } | null = null;
+// Daily LLM sampling limit — prevents runaway costs for new/empty keyword stores
+const DAILY_LLM_SAMPLE_LIMIT = 50;
+let _empathyLlmSampleCount = 0;
+let _empathyLlmSampleDate = new Date().toDateString();
 
 /**
  * Check if the keyword store file on disk has been modified since we cached it.
@@ -524,6 +528,17 @@ The empathy observer subagent handles pain detection independently.
           samplingReason = `discovery_adaptive(p=${baseSamplingProb.toFixed(2)})`;
         }
 
+        // M5: Daily LLM sampling limit — prevents runaway costs for new/empty keyword stores
+        const today = new Date().toDateString();
+        if (today !== _empathyLlmSampleDate) {
+          _empathyLlmSampleCount = 0;
+          _empathyLlmSampleDate = today;
+        }
+        if (shouldCallSubagent && _empathyLlmSampleCount >= DAILY_LLM_SAMPLE_LIMIT) {
+          shouldCallSubagent = false;
+          samplingReason = `daily_limit_reached(${_empathyLlmSampleCount}/${DAILY_LLM_SAMPLE_LIMIT})`;
+        }
+
         if (matchResult.matched) {
           const penalty = severityToPenalty(matchResult.severity, DEFAULT_EMPATHY_KEYWORD_CONFIG);
           // trackFriction signature: (sessionId, deltaF: number, hash: string, workspaceDir?, options?)
@@ -542,7 +557,8 @@ The empathy observer subagent handles pain detection independently.
 
         // Trigger subagent for sampling cases (Finding #1: use shared manager to avoid leaks)
         if (shouldCallSubagent && api?.runtime?.subagent) {
-          logger?.info?.(`[PD:Empathy] SUBAGENT_SAMPLE: reason=${samplingReason}, score=${matchResult.score.toFixed(2)}, matched=[${matchResult.matchedTerms.join(',')}]`);
+          _empathyLlmSampleCount++;
+          logger?.info?.(`[PD:Empathy] SUBAGENT_SAMPLE: reason=${samplingReason}, score=${matchResult.score.toFixed(2)}, matched=[${matchResult.matchedTerms.join(",")}] (daily: ${_empathyLlmSampleCount}/${DAILY_LLM_SAMPLE_LIMIT})`);
 
           // EmpathyObserverWorkflowManager auto-finalizes via wait poll mechanism.
           // Create a fresh manager per invocation to ensure clean state.
