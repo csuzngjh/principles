@@ -1,81 +1,33 @@
-# Roadmap
+# Roadmap: v1.7 — PD Task Manager
 
-## Milestones
-
-- ✅ **v1.0-alpha MVP** — Phases 1-3 (shipped 2026-03-26)
-- ✅ **v1.4 OpenClaw v2026.4.3 Compatibility** — Phases 1, 2, 5 (shipped 2026-04-05)
-- ✅ **v1.5 Nocturnal Helper 重构** — Phases 6-10 (shipped 2026-04-06)
-- ✅ **v1.6 代码质量清理** — Phases 11-13 (shipped 2026-04-07)
+**Milestone:** v1.7
+**Status:** Planning
+**Architecture Doc:** `docs/architecture/pd-task-manager.md`
+**Date:** 2026-04-07
 
 ## Phases
 
-<details>
-<summary>✅ v1.0-alpha MVP (Phases 1-3) — SHIPPED 2026-03-26</summary>
+Phase numbering continues from v1.6 (Phase 14).
 
-- [x] Phase 1: SDK Integration (1/1 plan) — completed 2026-03-26
-- [x] Phase 2: Memory Search (1/1 plan) — completed 2026-03-26
-- [x] Phase 2.5: SDK Refinement (1/1 plan) — completed 2026-03-26
-- [x] Phase 3A: Input Quarantine (1/1 plan) — completed 2026-03-26
-- [x] Phase 3B: Gate Split (1/1 plan) — completed 2026-03-26
-- [x] Phase 3C: Defaults & Errors (1/1 plan) — completed 2026-03-26
+| Phase | Name | Description | Requirements | Depends on | Status |
+|-------|------|-------------|--------------|------------|--------|
+| 14 | Core Infrastructure | PDTaskSpec 类型定义 + PDTaskStore + builtin tasks | TYPE-01~03, STORE-01~03 | None | Pending |
+| 15 | Reconciler & Advanced Features | Reconcile 算法 + dry-run + health + prefetch + trigger + history | RECON-01~08, HLTH-01~07, PREF-01~05, TRIG-01~04, HIST-01~07 | Phase 14 | Pending |
+| 16 | Integration & Migration | PDTaskService 注册 + index.ts 更新 + 删除 cron-initializer.ts | SVC-01~06 | Phase 15 | Pending |
 
-</details>
+## Dependencies (from v1.6)
 
-<details>
-<summary>✅ v1.4 OpenClaw v2026.4.3 Compatibility — SHIPPED 2026-04-05</summary>
+None — v1.7 is self-contained within the plugin package.
 
-- [x] Phase 1: SDK Type Cleanup (2 plans) — completed 2026-04-05
-- [x] Phase 2: Memory Search (FTS5) (1 plan) — completed 2026-04-05
-- [x] Phase 5: Integration Testing (partial — TEST-04/05 pending)
+## Risks
 
-**Known gaps:** TEST-04/05 runtime verification pending via Feishu
+**Low** — isolated change, backward compatible, no new dependencies. All new files follow existing file-lock.ts + atomic write patterns.
 
-</details>
+## v2 (Future)
 
-<details>
-<summary>✅ v1.5 Nocturnal Helper 重构 (Phases 6-10) — SHIPPED 2026-04-06</summary>
+- Nocturnal Review — daily 21:00 pain signal analysis
+- Weekly Governance — Friday OKR alignment + system health report
 
-- [x] Phase 6: Foundation and Single-Reflector Mode (1/1) — completed 2026-04-03
-- [x] Phase 7: Trinity Integration with Event Recording (2/2) — completed 2026-04-04
-- [x] Phase 8: Intermediate Persistence and Idempotency (2/2) — completed 2026-04-05
-- [x] Phase 9: Fallback and Evolution Worker Integration (1/1) — completed 2026-04-06
-- [x] Phase 10: Fix NOC-15 Stub Parameters (1/1) — completed 2026-04-06
+---
 
-**Key accomplishments:** NocturnalWorkflowManager with WorkflowManager interface, Trinity chain (Dreamer→Philosopher→Scribe), WorkflowStore stage_outputs for persistence/idempotency, stub-based fallback on Trinity failure
-
-**Known gaps:** Phases 07/08 missing VERIFICATION.md; NOC requirements not in REQUIREMENTS.md
-
-</details>
-
-<details>
-<summary>✅ v1.6 代码质量清理 (Phases 11-13) — SHIPPED 2026-04-07</summary>
-
-- [x] Phase 11: Critical Safety Fixes (2/2) — completed 2026-04-07
-- [x] Phase 12: Code Deduplication (2/2) — completed 2026-04-07
-- [x] Phase 13: Cleanup and Investigation (2/2) — completed 2026-04-07
-
-**Key accomplishments:** normalizePath collision eliminated; PAIN_CANDIDATES removed (165 lines); WorkflowManager duplication reduced ~750 lines via base class; types unified
-
-</details>
-
-## Progress
-
-| Phase | Milestone | Plans | Status | Completed |
-|-------|-----------|-------|--------|-----------|
-| 1 | v1.0-alpha | 1/1 | Complete | 2026-03-26 |
-| 2 | v1.0-alpha | 1/1 | Complete | 2026-03-26 |
-| 2.5 | v1.0-alpha | 1/1 | Complete | 2026-03-26 |
-| 3A | v1.0-alpha | 1/1 | Complete | 2026-03-26 |
-| 3B | v1.0-alpha | 1/1 | Complete | 2026-03-26 |
-| 3C | v1.0-alpha | 1/1 | Complete | 2026-03-26 |
-| 1 | v1.4 | 2/2 | Complete | 2026-04-05 |
-| 2 | v1.4 | 1/1 | Complete | 2026-04-05 |
-| 5 | v1.4 | 1/1 | Partial | 2026-04-05 |
-| 6 | v1.5 | 1/1 | Complete | 2026-04-03 |
-| 7 | v1.5 | 2/2 | Complete | 2026-04-04 |
-| 8 | v1.5 | 2/2 | Complete | 2026-04-05 |
-| 9 | v1.5 | 1/1 | Complete | 2026-04-06 |
-| 10 | v1.5 | 1/1 | Complete | 2026-04-06 |
-| 11 | v1.6 | 2/2 | Complete | 2026-04-07 |
-| 12 | v1.6 | 2/2 | Complete | 2026-04-07 |
-| 13 | v1.6 | 2/2 | Complete    | 2026-04-07 |
+*Last updated: 2026-04-07 after roadmap creation*
