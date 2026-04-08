@@ -368,11 +368,16 @@ export class EvolutionReducerImpl implements EvolutionReducer {
     // #204: Write to training store so listEvaluablePrinciples() can find this principle
     if (this.stateDir) {
       try {
+        // Determine initial internalization status based on evaluability:
+        // - manual_only: prompt_only (can only be evaluated manually)
+        // - deterministic/weak_heuristic: needs_training (auto-evaluable, ready for training)
+        const initialStatus = evaluability === 'manual_only' ? 'prompt_only' : 'needs_training';
+        
         updateTrainingStore(this.stateDir, (trainingStore) => {
           trainingStore[principleId] = {
             principleId,
             evaluability,
-            internalizationStatus: 'prompt_only',
+            internalizationStatus: initialStatus,
             applicableOpportunityCount: 0,
             observedViolationCount: 0,
             complianceRate: 0,
@@ -383,7 +388,7 @@ export class EvolutionReducerImpl implements EvolutionReducer {
             deployedCheckpointIds: [],
           };
         });
-        SystemLogger.log(this.workspaceDir, 'TRAINING_STORE_UPDATED', `Principle ${principleId} added to training store with evaluability=${evaluability}`);
+        SystemLogger.log(this.workspaceDir, 'TRAINING_STORE_UPDATED', `Principle ${principleId} added to training store with evaluability=${evaluability}, internalizationStatus=${initialStatus}`);
       } catch (err) {
         SystemLogger.log(this.workspaceDir, 'TRAINING_STORE_UPDATE_FAILED', `Failed to update training store for ${principleId}: ${String(err)}`);
       }

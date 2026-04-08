@@ -44,7 +44,7 @@ describe('Principle Lifecycle E2E', () => {
   });
 
   describe('Training Store Integration (#204)', () => {
-    it('should write to training store when principle is created', () => {
+    it('should set needs_training for auto-evaluable principles', () => {
       // Arrange: Create EvolutionReducer with stateDir
       const reducer = new EvolutionReducerImpl({ workspaceDir, stateDir });
 
@@ -65,21 +65,44 @@ describe('Principle Lifecycle E2E', () => {
         },
       });
 
-      // Assert: Principle should exist in training store
+      // Assert: Principle should exist in training store with needs_training status
       expect(principleId).not.toBeNull();
 
       const store = loadStore(stateDir);
       expect(store[principleId!]).toBeDefined();
       expect(store[principleId!].evaluability).toBe('weak_heuristic');
+      expect(store[principleId!].internalizationStatus).toBe('needs_training');
+    });
+
+    it('should set prompt_only for manual_only principles', () => {
+      // Arrange: Create EvolutionReducer with stateDir
+      const reducer = new EvolutionReducerImpl({ workspaceDir, stateDir });
+
+      // Act: Create a manual_only principle
+      const principleId = reducer.createPrincipleFromDiagnosis({
+        painId: 'pain-manual',
+        painType: 'user_frustration',
+        triggerPattern: 'user is confused',
+        action: 'ask clarifying question',
+        source: 'test',
+        evaluability: 'manual_only', // Cannot be auto-evaluated
+      });
+
+      // Assert: Principle should have prompt_only status
+      expect(principleId).not.toBeNull();
+
+      const store = loadStore(stateDir);
+      expect(store[principleId!]).toBeDefined();
+      expect(store[principleId!].evaluability).toBe('manual_only');
       expect(store[principleId!].internalizationStatus).toBe('prompt_only');
     });
 
-    it('should list newly created principle as evaluable after status upgrade', () => {
-      // Arrange: Create reducer and principle with complete detectorMetadata
+    it('should list auto-evaluable principles immediately after creation', () => {
+      // Arrange: Create reducer and auto-evaluable principle
       const reducer = new EvolutionReducerImpl({ workspaceDir, stateDir });
       const principleId = reducer.createPrincipleFromDiagnosis({
-        painId: 'pain-002',
-        painType: 'subagent_error',
+        painId: 'pain-auto',
+        painType: 'tool_failure',
         triggerPattern: 'timeout exceeded',
         action: 'implement retry with backoff',
         source: 'test',
@@ -93,25 +116,10 @@ describe('Principle Lifecycle E2E', () => {
         },
       });
 
-      // Assert: Principle is in store with prompt_only status
-      const store = loadStore(stateDir);
-      expect(store[principleId!]).toBeDefined();
-      expect(store[principleId!].internalizationStatus).toBe('prompt_only');
-
-      // Assert: prompt_only principles are NOT evaluable yet
-      let evaluablePrinciples = listEvaluablePrinciples(stateDir);
-      expect(evaluablePrinciples).toHaveLength(0);
-
-      // Act: Upgrade status to needs_training using updateTrainingStore
-      updateTrainingStore(stateDir, (trainingStore) => {
-        trainingStore[principleId!].internalizationStatus = 'needs_training';
-      });
-
-      // Assert: Now listEvaluablePrinciples should return the principle
-      evaluablePrinciples = listEvaluablePrinciples(stateDir);
-      expect(evaluablePrinciples).toHaveLength(1);
-      expect(evaluablePrinciples[0].principleId).toBe(principleId);
-      expect(evaluablePrinciples[0].internalizationStatus).toBe('needs_training');
+      // Assert: Principle should be immediately evaluable (no status upgrade needed)
+      const evaluablePrinciples = listEvaluablePrinciples(stateDir);
+      expect(evaluablePrinciples.length).toBeGreaterThan(0);
+      expect(evaluablePrinciples.some(p => p.principleId === principleId)).toBe(true);
     });
 
     it('should NOT list manual_only principles as evaluable', () => {
@@ -173,18 +181,17 @@ describe('Principle Lifecycle E2E', () => {
         }),
       ];
 
-      // Assert: All should be in training store
+      // Assert: All should be in training store with needs_training (auto-evaluable)
       const store = loadStore(stateDir);
       ids.forEach(id => {
         expect(id).not.toBeNull();
         expect(store[id!]).toBeDefined();
-        expect(store[id!].internalizationStatus).toBe('prompt_only');
+        expect(store[id!].internalizationStatus).toBe('needs_training');
       });
 
-      // Note: listEvaluablePrinciples filters out prompt_only,
-      // so these principles won't appear until they graduate
+      // Assert: Auto-evaluable principles are immediately available
       const evaluablePrinciples = listEvaluablePrinciples(stateDir);
-      expect(evaluablePrinciples).toHaveLength(0);
+      expect(evaluablePrinciples).toHaveLength(2);
     });
   });
 });
