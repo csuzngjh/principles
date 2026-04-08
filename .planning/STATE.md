@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.9.0
 milestone_name: Principle Internalization System
-status: in_progress
-last_updated: "2026-04-08T02:23:53.115Z"
-last_activity: 2026-04-08 -- Phase 15-01 execution complete
+status: complete
+last_updated: "2026-04-08T02:37:52.658Z"
+last_activity: 2026-04-08 -- completed 15-02 internalization routing execution
 progress:
   total_phases: 5
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 10
-  completed_plans: 9
-  percent: 90
+  completed_plans: 10
+  percent: 100
 ---
 
 # State
@@ -21,15 +21,15 @@ See `.planning/PROJECT.md` (updated 2026-04-07 after starting v1.9.0 milestone).
 
 **Core value:** AI agents improve their own behavior through a structured loop: pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
 **Current Milestone:** v1.9.0 - Principle Internalization System
-**Current Focus:** Phase 15-02 routing policy remains after shipping the lifecycle metrics foundation in 15-01
+**Current Focus:** v1.9.0 milestone complete after shipping Phase 15-02 routing policy and lifecycle integration
 
 ---
 
 ## Current Position
 
 Phase: 15
-Plan: 15-02 pending
-Last activity: 2026-04-08 -- completed 15-01 lifecycle evidence and metrics execution
+Plan: 15-02 complete
+Last activity: 2026-04-08 -- completed 15-02 internalization routing execution
 
 ---
 
@@ -47,9 +47,9 @@ Turn the current principle / nocturnal / gate concepts into a concrete Principle
 
 ## Immediate Next Steps
 
-1. Execute `15-02-PLAN.md` to build the explicit `skill | code | defer` routing policy and lifecycle integration surface
-2. Reuse the 15-01 lifecycle service outputs instead of recomputing raw replay and lineage evidence ad hoc
-3. Preserve regression checks for replay classification and Phase 14 nocturnal candidate semantics while completing Phase 15
+1. Start milestone closeout for `v1.9.0 Principle Internalization System`
+2. Decide the next milestone scope after shipping lifecycle metrics plus routing
+3. Reuse `WorkspaceContext.principleLifecycle` for any future reporting or command surfaces
 
 ---
 
@@ -97,6 +97,8 @@ Key deliverables:
 - `15-02` builds explicit internalization route recommendations without executing routes or adding auto-promotion
 - `15-01` shipped a lifecycle read-model that joins ledger entities, latest replay reports, and nocturnal lineage without mutating state
 - `15-01` shipped replay-first `coverageRate` / `falsePositiveRate` calculators, principle adherence persistence, and structured deprecated-readiness scoring
+- `15-02` shipped a deterministic `skill | code | defer` recommendation policy with confidence, reasons, evidence summary, and next-action guidance
+- `15-02` extended `PrincipleLifecycleService` and `WorkspaceContext` so metrics, readiness, and routing are available from one stable read-only surface
 
 ---
 
@@ -111,4 +113,4 @@ Key deliverables:
 
 ---
 
-*Last updated: 2026-04-08 after completing Phase 15-01*
+*Last updated: 2026-04-08 after completing Phase 15-02*
