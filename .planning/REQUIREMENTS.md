@@ -48,8 +48,8 @@
 
 ### Internalization Strategy
 
-- [ ] **ROUT-01**: system can represent “cheapest viable implementation first” as an explicit internalization strategy
-- [ ] **ROUT-02**: system does not default every principle failure to code implementation when a cheaper skill or prompt route would suffice
+- [x] **ROUT-01**: system can represent “cheapest viable implementation first” as an explicit internalization strategy
+- [x] **ROUT-02**: system does not default every principle failure to code implementation when a cheaper skill or prompt route would suffice
 
 ## v2 Requirements
 
@@ -103,8 +103,8 @@
 | COV-02 | Phase 15 | Complete |
 | COV-03 | Phase 15 | Complete |
 | COV-04 | Phase 15 | Complete |
-| ROUT-01 | Phase 15 | Pending |
-| ROUT-02 | Phase 15 | Pending |
+| ROUT-01 | Phase 15 | Complete |
+| ROUT-02 | Phase 15 | Complete |
 
 **Coverage:**
 - v1.9.0 requirements: 25 total
@@ -113,4 +113,4 @@
 
 ---
 *Requirements defined: 2026-04-07*
-*Last updated: 2026-04-08 after completing Phase 15-01*
+*Last updated: 2026-04-08 after completing Phase 15-02*
