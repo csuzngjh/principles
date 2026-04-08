@@ -315,12 +315,50 @@ export class NocturnalWorkflowManager implements WorkflowManager {
             };
         }
         if (!principleId) {
-            this.logger.warn(`[PD:NocturnalWorkflow] Missing principleId in metadata for workflow=${workflowId}, terminating`);
-            this.store.recordEvent(workflowId, 'nocturnal_failed', null, 'terminal_error', 'Missing required metadata: principleId', { workflowId });
+            // #205: When no principleId is provided, call executeNocturnalReflectionAsync
+            // which will use NocturnalTargetSelector to select a principle and execute
+            // the full pipeline: Selector → Trinity → Arbiter → Executability → Persist → Register
+            this.logger.info(`[PD:NocturnalWorkflow] No principleId provided, calling executeNocturnalReflectionAsync for full pipeline`);
+
+            Promise.resolve().then(async () => {
+                try {
+                    const result = await executeNocturnalReflectionAsync(
+                        this.workspaceDir,
+                        this.stateDir,
+                        {
+                            runtimeAdapter: this.runtimeAdapter,
+                            trinityConfig: {
+                                useTrinity: true,
+                                maxCandidates: 3,
+                                useStubs: false,
+                                runtimeAdapter: this.runtimeAdapter,
+                                stateDir: this.stateDir,
+                            },
+                        }
+                    );
+
+                    if (result.success) {
+                        this.store.recordEvent(workflowId, 'nocturnal_completed', null, 'completed', 'Full pipeline completed via executeNocturnalReflectionAsync', {
+                            artifactId: result.diagnostics?.persistedPath,
+                        });
+                        this.completedWorkflows.set(workflowId, Date.now());
+                    } else {
+                        const reason = result.noTargetSelected ? 'no_target_selected' : 'validation_failed';
+                        this.store.recordEvent(workflowId, 'nocturnal_failed', null, 'terminal_error', reason, {
+                            failures: result.validationFailures,
+                            skipReason: result.skipReason,
+                        });
+                    }
+                } catch (err) {
+                    this.logger.error(`[PD:NocturnalWorkflow] executeNocturnalReflectionAsync threw: ${String(err)}`);
+                    this.store.recordEvent(workflowId, 'nocturnal_failed', null, 'terminal_error', String(err), { workflowId });
+                }
+            });
+
             return {
                 workflowId,
                 childSessionKey: `nocturnal:internal:${workflowId}`,
-                state: 'terminal_error' as const,
+                state: 'active' as const,
             };
         }
 

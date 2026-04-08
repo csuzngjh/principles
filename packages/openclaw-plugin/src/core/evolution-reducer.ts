@@ -20,6 +20,7 @@ import type {
   PrincipleSuggestedRule,
 } from './evolution-types.js';
 import { isCompleteDetectorMetadata } from './evolution-types.js';
+import { updateTrainingStore } from './principle-tree-ledger.js';
 
 export interface EvolutionReducer {
   emit(event: EvolutionLoopEvent): void;
@@ -72,14 +73,16 @@ export class EvolutionReducerImpl implements EvolutionReducer {
   private readonly blacklistPath: string;
   private readonly principlesPath: string;
   private readonly workspaceDir: string;
+  private readonly stateDir: string | undefined;
   private readonly memoryEvents: EvolutionLoopEvent[] = [];
   private readonly principles = new Map<string, Principle>();
   private readonly failureStreak = new Map<string, number>();
   private lastPromotedAt: string | null = null;
   private isReplaying = false;
 
-  constructor(opts: { workspaceDir: string }) {
+  constructor(opts: { workspaceDir: string; stateDir?: string }) {
     this.workspaceDir = opts.workspaceDir;
+    this.stateDir = opts.stateDir;
     const resolver = new PathResolver({ workspaceDir: opts.workspaceDir });
     this.streamPath = resolver.resolve('EVOLUTION_STREAM');
     this.lockTargetPath = resolver.resolve('EVOLUTION_LOCK');
@@ -360,6 +363,30 @@ export class EvolutionReducerImpl implements EvolutionReducer {
     const synced = this.syncPrincipleToFile(principle);
     if (!synced) {
       SystemLogger.log(this.workspaceDir, 'PRINCIPLE_SYNC_WARN', `Principle ${principleId} created in memory but failed to sync to PRINCIPLES.md — manual file check required`);
+    }
+
+    // #204: Write to training store so listEvaluablePrinciples() can find this principle
+    if (this.stateDir) {
+      try {
+        updateTrainingStore(this.stateDir, (trainingStore) => {
+          trainingStore[principleId] = {
+            principleId,
+            evaluability,
+            internalizationStatus: 'prompt_only',
+            applicableOpportunityCount: 0,
+            observedViolationCount: 0,
+            complianceRate: 0,
+            violationTrend: 0,
+            generatedSampleCount: 0,
+            approvedSampleCount: 0,
+            includedTrainRunIds: [],
+            deployedCheckpointIds: [],
+          };
+        });
+        SystemLogger.log(this.workspaceDir, 'TRAINING_STORE_UPDATED', `Principle ${principleId} added to training store with evaluability=${evaluability}`);
+      } catch (err) {
+        SystemLogger.log(this.workspaceDir, 'TRAINING_STORE_UPDATE_FAILED', `Failed to update training store for ${principleId}: ${String(err)}`);
+      }
     }
 
     SystemLogger.log(
