@@ -303,6 +303,8 @@ export class NocturnalWorkflowManager implements WorkflowManager {
         // Extract snapshot and principleId from taskInput.metadata (NOC-07: Trinity async path)
         const snapshot = options.metadata?.snapshot as import('../../core/nocturnal-trajectory-extractor.js').NocturnalSessionSnapshot | undefined;
         const principleId = options.metadata?.principleId as string | undefined;
+        // Extract painContext for Selector ranking bias
+        const painContext = options.metadata?.painContext as import('../evolution-worker.js').RecentPainContext | undefined;
 
         // Validate required metadata (prevent runtime crashes from undefined snapshot)
         if (!snapshot?.sessionId) {
@@ -336,6 +338,8 @@ export class NocturnalWorkflowManager implements WorkflowManager {
                             runtimeAdapter: this.runtimeAdapter,
                             stateDir: this.stateDir,
                         },
+                        // Pass painContext for Selector ranking bias
+                        painContext,
                         // Skip Selector if principleId and snapshot are provided
                         ...(principleId && snapshot ? {
                             principleIdOverride: principleId,

@@ -1371,6 +1371,8 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                                 // #205: Remove hardcoded 'default' - let NocturnalTargetSelector choose
                                 // via executeNocturnalReflectionAsync when no principleId is provided
                                 taskId: sleepTask.id,  // NOC-14: correlation ID for evolution worker
+                                // Pass painContext to Selector for principle ranking bias
+                                painContext: sleepTask.recentPainContext,
                             },
                         });
 
