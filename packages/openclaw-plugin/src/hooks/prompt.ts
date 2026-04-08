@@ -8,6 +8,7 @@ import { classifyTask, type RoutingInput } from '../core/local-worker-routing.js
 import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection, autoCompressFocus, safeReadCurrentFocus } from '../core/focus-history.js';
 import { EmpathyObserverWorkflowManager, empathyObserverWorkflowSpec } from '../service/subagent-workflow/index.js';
 import { PathResolver } from '../core/path-resolver.js';
+import { isSubagentRuntimeAvailable } from '../utils/subagent-probe.js';
 import {
   matchEmpathyKeywords,
   loadKeywordStore,
@@ -20,6 +21,23 @@ import { severityToPenalty, DEFAULT_EMPATHY_KEYWORD_CONFIG } from '../core/empat
 // Module-level empathy state — shared across calls to avoid per-turn I/O
 let _empathyTurnCounter = 0;
 let _empathyKeywordCache: { store: ReturnType<typeof loadKeywordStore>; lang: string } | null = null;
+
+function logSubagentWorkflowError(
+  err: unknown,
+  context: string,
+  logger?: PluginLogger
+): void {
+  const errMsg = String(err);
+  const isExpectedGatewayRuntimeError =
+    errMsg.includes('Plugin runtime subagent methods are only available during a gateway request');
+
+  if (isExpectedGatewayRuntimeError) {
+    logger?.debug?.(`[PD:Empathy] ${context} skipped (subagent runtime unavailable in this session)`);
+    return;
+  }
+
+  logger?.warn?.(`[PD:Empathy] ${context} failed: ${errMsg}`);
+}
 
 /**
  * Model configuration with primary model and optional fallback models
@@ -543,7 +561,12 @@ The empathy observer subagent handles pain detection independently.
         }
 
         // Trigger subagent for sampling cases (Finding #1: use shared manager to avoid leaks)
-        if (shouldCallSubagent && api?.runtime?.subagent) {
+        const runtimeSubagent =
+          isSubagentRuntimeAvailable(api?.runtime?.subagent)
+            ? api.runtime.subagent
+            : undefined;
+
+        if (shouldCallSubagent && runtimeSubagent) {
           logger?.info?.(`[PD:Empathy] SUBAGENT_SAMPLE: reason=${samplingReason}, score=${matchResult.score.toFixed(2)}, matched=[${matchResult.matchedTerms.join(',')}]`);
 
           // EmpathyObserverWorkflowManager auto-finalizes via wait poll mechanism.
@@ -551,13 +574,13 @@ The empathy observer subagent handles pain detection independently.
           const empathyManager = new EmpathyObserverWorkflowManager({
             workspaceDir,
             logger: api.logger ?? console,
-            subagent: api.runtime.subagent as any,
+            subagent: runtimeSubagent as any,
           });
           empathyManager.startWorkflow(empathyObserverWorkflowSpec, {
             parentSessionId: sessionId,
             workspaceDir,
             taskInput: latestUserMessage,
-          }).catch((err) => api.logger?.warn?.(`[PD:Empathy] subagent sample failed: ${String(err)}`));
+          }).catch((err) => logSubagentWorkflowError(err, 'subagent sample', api.logger));
         }
 
         // Helper: build summary string (Finding #2: avoid duplication)
@@ -589,7 +612,13 @@ The empathy observer subagent handles pain detection independently.
               parentSessionId: sessionId,
               workspaceDir,
               taskInput: { prompt: optimizationPrompt },
-            }).catch((err) => api.logger?.warn?.(`[PD:Empathy] optimization subagent failed: ${String(err)}`));
+            }).catch((err) => {
+              // NB1: Suppress "gateway request" error during cron jobs.
+              const errMsg = String(err);
+              if (!errMsg.includes('Plugin runtime subagent methods are only available during a gateway request')) {
+                api.logger?.warn?.(`[PD:Empathy] optimization subagent failed: ${errMsg}`);
+              }
+            });
           } catch (optErr) {
             logger?.warn?.(`[PD:Empathy] Failed to start optimization subagent: ${String(optErr)}`);
           }
@@ -1044,4 +1073,3 @@ ${attitudeDirective}
     appendSystemContext
   };
 }
-

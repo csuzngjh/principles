@@ -4,7 +4,10 @@ import * as path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { handleEvolutionStatusCommand } from '../../src/commands/evolution-status.js';
 import { handlePrincipleRollbackCommand } from '../../src/commands/principle-rollback.js';
+import { appendCandidateArtifactLineageRecord } from '../../src/core/nocturnal-artifact-lineage.js';
+import { getImplementationAssetRoot } from '../../src/core/code-implementation-storage.js';
 import { EvolutionReducerImpl } from '../../src/core/evolution-reducer.js';
+import { saveLedger } from '../../src/core/principle-tree-ledger.js';
 
 const tempDirs: string[] = [];
 
@@ -87,6 +90,7 @@ describe('evolution commands', () => {
     expect(result.text).toContain('Phase 3: ready');
     expect(result.text).toContain('queueTruthReady');
     expect(result.text).toContain('probation principles: 1');
+    expect(result.text).toContain('internalization routes: --');
     expect(result.text).not.toContain('.state/principles');
   });
 
@@ -218,5 +222,120 @@ describe('evolution commands', () => {
 
     expect(result.text).toContain('reference_only 1');
     expect(result.text).toContain('timeout_only');
+  });
+
+  it('includes internalization route recommendations when principle lifecycle evidence exists', () => {
+    const workspace = makeTempDir();
+    const stateDir = path.join(workspace, '.state');
+
+    saveLedger(stateDir, {
+      trainingStore: {
+        'P-001': {
+          principleId: 'P-001',
+          evaluability: 'weak_heuristic',
+          applicableOpportunityCount: 5,
+          observedViolationCount: 2,
+          complianceRate: 0.6,
+          violationTrend: -0.2,
+          generatedSampleCount: 0,
+          approvedSampleCount: 0,
+          includedTrainRunIds: [],
+          deployedCheckpointIds: [],
+          internalizationStatus: 'internalized',
+        },
+      },
+      tree: {
+        principles: {
+          'P-001': {
+            id: 'P-001',
+            version: 1,
+            text: 'Prefer cheap safe internalization',
+            triggerPattern: 'write',
+            action: 'prefer the cheapest viable fix',
+            status: 'active',
+            priority: 'P1',
+            scope: 'general',
+            evaluability: 'weak_heuristic',
+            valueScore: 0,
+            adherenceRate: 0,
+            painPreventedCount: 0,
+            derivedFromPainIds: [],
+            ruleIds: ['R-001'],
+            conflictsWithPrincipleIds: [],
+            createdAt: '2026-04-08T00:00:00.000Z',
+            updatedAt: '2026-04-08T00:00:00.000Z',
+          },
+        },
+        rules: {
+          'R-001': {
+            id: 'R-001',
+            version: 1,
+            name: 'Coach cautious writes',
+            description: 'Encourage safer writes before escalating to hard boundaries.',
+            type: 'skill',
+            triggerCondition: 'tool=write',
+            enforcement: 'warn',
+            action: 'warn before risky write',
+            principleId: 'P-001',
+            status: 'implemented',
+            coverageRate: 0,
+            falsePositiveRate: 0,
+            implementationIds: ['IMPL-001'],
+            createdAt: '2026-04-08T00:00:00.000Z',
+            updatedAt: '2026-04-08T00:00:00.000Z',
+          },
+        },
+        implementations: {
+          'IMPL-001': {
+            id: 'IMPL-001',
+            ruleId: 'R-001',
+            type: 'code',
+            path: 'implementations/IMPL-001/entry.js',
+            version: 'v1',
+            coversCondition: 'risky write',
+            coveragePercentage: 60,
+            lifecycleState: 'candidate',
+            createdAt: '2026-04-08T00:00:00.000Z',
+            updatedAt: '2026-04-08T00:00:00.000Z',
+          },
+        },
+        metrics: {},
+        lastUpdated: '2026-04-08T00:00:00.000Z',
+      },
+    });
+
+    const replayDir = path.join(getImplementationAssetRoot(stateDir, 'IMPL-001'), 'replays');
+    fs.mkdirSync(replayDir, { recursive: true });
+    writeJson(path.join(replayDir, '2026-04-08T00-00-00-000Z.json'), {
+      implementationId: 'IMPL-001',
+      generatedAt: '2026-04-08T00:00:00.000Z',
+      overallDecision: 'needs-review',
+      blockers: [],
+      sampleFingerprints: ['sample-1', 'sample-2', 'sample-3'],
+      replayResults: {
+        painNegative: { total: 2, passed: 2, failed: 0, details: [] },
+        successPositive: { total: 2, passed: 1, failed: 1, details: [] },
+        principleAnchor: { total: 1, passed: 1, failed: 0, details: [] },
+      },
+    });
+
+    appendCandidateArtifactLineageRecord(workspace, {
+      artifactId: 'artifact-1',
+      principleId: 'P-001',
+      ruleId: 'R-001',
+      sessionId: 'session-1',
+      sourceSnapshotRef: 'snapshot-1',
+      sourcePainIds: ['pain-1'],
+      sourceGateBlockIds: ['gate-1'],
+      storagePath: getImplementationAssetRoot(stateDir, 'IMPL-001'),
+      implementationId: 'IMPL-001',
+      createdAt: '2026-04-08T00:00:00.000Z',
+    });
+
+    const result = handleEvolutionStatusCommand({
+      config: { workspaceDir: workspace, language: 'en' },
+    } as any);
+
+    expect(result.text).toContain('internalization routes: P-001:skill@');
   });
 });
