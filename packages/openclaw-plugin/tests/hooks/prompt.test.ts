@@ -5,9 +5,34 @@ import { WorkspaceContext } from '../../src/core/workspace-context';
 import fs from 'fs';
 import path from 'path';
 
+const promptHookMocks = vi.hoisted(() => ({
+  empathyManagerCtor: vi.fn(),
+  startWorkflow: vi.fn(),
+  isSubagentRuntimeAvailable: vi.fn(() => false),
+}));
+
 vi.mock('fs');
 vi.mock('../../src/core/session-tracker.js');
 vi.mock('../../src/core/workspace-context.js');
+vi.mock('../../src/service/subagent-workflow/index.js', () => {
+  class MockEmpathyObserverWorkflowManager {
+    constructor(...args: unknown[]) {
+      promptHookMocks.empathyManagerCtor(...args);
+    }
+
+    startWorkflow(...args: unknown[]) {
+      return promptHookMocks.startWorkflow(...args);
+    }
+  }
+
+  return {
+    EmpathyObserverWorkflowManager: MockEmpathyObserverWorkflowManager,
+    empathyObserverWorkflowSpec: { name: 'mock-empathy-workflow' },
+  };
+});
+vi.mock('../../src/utils/subagent-probe.js', () => ({
+  isSubagentRuntimeAvailable: promptHookMocks.isSubagentRuntimeAvailable,
+}));
 
 // 🎭️Test Group: Model Resolution Functions 🎭️
 describe('resolveModelFromConfig', () => {
@@ -184,6 +209,8 @@ describe('Prompt Context Injection Hook', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    promptHookMocks.startWorkflow.mockResolvedValue(undefined);
+    promptHookMocks.isSubagentRuntimeAvailable.mockReturnValue(false);
     vi.mocked(sessionTracker.getSession).mockReturnValue(undefined);
     mockWctx.evolutionReducer.getActivePrinciples.mockReturnValue([]);
     mockWctx.evolutionReducer.getProbationPrinciples.mockReturnValue([]);
@@ -224,6 +251,42 @@ describe('Prompt Context Injection Hook', () => {
     // (evolutionDirective and other content may be injected)
     // The key assertion: the call path goes through the empathy-enabled branch
     expect(mockConfig.get).toHaveBeenCalledWith('empathy_engine.enabled');
+  });
+
+  it('does not start empathy workflow when subagent runtime probe fails', async () => {
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.01);
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    mockConfig.get.mockReturnValue(undefined);
+    promptHookMocks.isSubagentRuntimeAvailable.mockReturnValue(false);
+
+    await handleBeforePromptBuild({
+      messages: [{ role: 'user', content: 'hello there' }],
+    } as any, {
+      workspaceDir,
+      trigger: 'user',
+      sessionId: 'session-empathy-probe',
+      api: {
+        logger: {
+          info: vi.fn(),
+          warn: vi.fn(),
+          error: vi.fn(),
+          debug: vi.fn(),
+        },
+        runtime: {
+          subagent: {
+            run: () => {
+              throw new Error('Plugin runtime subagent methods are only available during a gateway request');
+            },
+          },
+        },
+      },
+    } as any);
+
+    expect(promptHookMocks.isSubagentRuntimeAvailable).toHaveBeenCalled();
+    expect(promptHookMocks.empathyManagerCtor).not.toHaveBeenCalled();
+    expect(promptHookMocks.startWorkflow).not.toHaveBeenCalled();
+
+    randomSpy.mockRestore();
   });
 
   it('records latest user turn and flags explicit corrections', async () => {
@@ -1408,4 +1471,3 @@ describe('Prompt Context Injection Hook', () => {
     });
   });
 });
-
