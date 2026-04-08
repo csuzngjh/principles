@@ -389,6 +389,40 @@ export function createImplementation(stateDir: string, implementation: Implement
   });
 }
 
+export function updatePrinciple(
+  stateDir: string,
+  principleId: string,
+  updates: Partial<LedgerPrinciple>,
+): LedgerPrinciple {
+  return mutateLedger(stateDir, (store) => {
+    const existingPrinciple = store.tree.principles[principleId];
+    if (!existingPrinciple) {
+      throw new Error(`Cannot update missing principle "${principleId}".`);
+    }
+
+    const nextPrinciple: LedgerPrinciple = {
+      ...existingPrinciple,
+      ...updates,
+      id: principleId,
+      ruleIds: updates.ruleIds ? uniqueStrings(updates.ruleIds) : existingPrinciple.ruleIds,
+      conflictsWithPrincipleIds: updates.conflictsWithPrincipleIds
+        ? uniqueStrings(updates.conflictsWithPrincipleIds)
+        : existingPrinciple.conflictsWithPrincipleIds,
+      derivedFromPainIds: updates.derivedFromPainIds
+        ? uniqueStrings(updates.derivedFromPainIds)
+        : existingPrinciple.derivedFromPainIds,
+      ...(Object.prototype.hasOwnProperty.call(updates, 'suggestedRules')
+        ? { suggestedRules: uniqueStrings(updates.suggestedRules ?? []) }
+        : Object.prototype.hasOwnProperty.call(existingPrinciple, 'suggestedRules')
+          ? { suggestedRules: existingPrinciple.suggestedRules }
+          : {}),
+    };
+
+    store.tree.principles[principleId] = nextPrinciple;
+    return nextPrinciple;
+  });
+}
+
 export function updateRule(stateDir: string, ruleId: string, updates: Partial<LedgerRule>): LedgerRule {
   return mutateLedger(stateDir, (store) => {
     const existingRule = store.tree.rules[ruleId];
