@@ -5,6 +5,7 @@ import type {
     SubagentGetSessionMessagesResult,
     PluginLogger,
 } from '../../openclaw-sdk.js';
+import { isExpectedSubagentError } from './subagent-error-utils.js';
 
 export interface TransportDriver {
     run(params: RunParams): Promise<RunResult>;
@@ -133,7 +134,11 @@ export class RuntimeDirectDriver implements TransportDriver {
             this.logger.info(`[PD:RuntimeDirectDriver] Spawn succeeded: runId=${result.runId}`);
             return { runId: result.runId };
         } catch (error) {
-            this.logger.error(`[PD:RuntimeDirectDriver] Spawn failed: ${String(error)}`);
+            // Suppress expected errors during cron jobs, boot sessions, or isolated sessions.
+            // These are not real failures — subagent runtime is only available in gateway requests.
+            if (!isExpectedSubagentError(error)) {
+                this.logger.error(`[PD:RuntimeDirectDriver] Spawn failed: ${String(error)}`);
+            }
             throw error;
         }
     }

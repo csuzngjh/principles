@@ -46,7 +46,7 @@ async function bundlePlugin() {
 
     console.log('Bundle created: dist/bundle.js');
 
-    const staticFiles = ['templates', 'agents', 'openclaw.plugin.json'];
+    const staticFiles = ['templates', 'openclaw.plugin.json'];
     const distDir = 'dist';
 
     for (const file of staticFiles) {
