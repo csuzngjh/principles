@@ -82,6 +82,14 @@ const KNOWN_FILES = new Set([
   'HEARTBEAT.md',
   'empathy-fix-plan.md',
   'ep_simulation.jsonl',
+  'subagent_workflows.db',
+  'subagent_workflows.db-shm',
+  'subagent_workflows.db-wal',
+  'empathy_keywords.json',
+  'pd_tasks.json',
+  'pipeline-watch',
+  'pipeline-watch/PIPELINE_MAP.md',
+  'pipeline-watch/PIPELINE_WATCH_PLAN.md',
   'hygiene-stats.json',
   '.TRUST_SYSTEM_RESIDUALS_2026-04-04',
   'WEEK_EVENTS.jsonl',
@@ -806,6 +814,47 @@ function detectAnomalies(report: HealthReport): Array<{ severity: 'warning' | 'c
     });
   }
 
+  // 9. Stale active workflows
+  const workflows = report.stages.workflows as Record<string, any>;
+  if (workflows?.exists && workflows.db_accessible) {
+    const staleActive = workflows.stale_active || [];
+    if (staleActive.length > 0) {
+      for (const wf of staleActive) {
+        anomalies.push({
+          severity: 'warning',
+          message: `Stale active workflow: ${wf.id} (${wf.type}, ${wf.age_min}min old)`,
+        });
+      }
+    }
+    const uncleared = workflows.uncleared_terminal ?? 0;
+    if (uncleared > 0) {
+      anomalies.push({
+        severity: 'warning',
+        message: `${uncleared} terminal/expired workflows without cleanup`,
+      });
+    }
+  }
+
+  // 10. PD cron job failures
+  const pdTasks = report.stages.pd_tasks as Record<string, any>;
+  if (pdTasks?.total_jobs > 0) {
+    const errorJobs = pdTasks.error_jobs || [];
+    for (const job of errorJobs) {
+      const errDetail = job.last_error ? `: ${job.last_error}` : '';
+      anomalies.push({
+        severity: job.consecutive_errors > 2 ? 'critical' : 'warning',
+        message: `PD cron job error: ${job.name} (errors=${job.consecutive_errors}${errDetail})`,
+      });
+    }
+    const enabledJobs = pdTasks.enabled_jobs ?? 0;
+    if (enabledJobs === 0 && pdTasks.total_jobs > 0) {
+      anomalies.push({
+        severity: 'warning',
+        message: 'All PD cron jobs disabled',
+      });
+    }
+  }
+
   return anomalies;
 }
 
@@ -919,6 +968,37 @@ function generateMarkdown(report: HealthReport, prevReport: HealthReport | null)
   const nocturnalDetail = nocturnal?.exists ? `samples=${nocturnal.samples?.file_count ?? 0}, memory=${nocturnal.memory?.file_count ?? 0}` : '未启用';
   lines.push(`| Nocturnal 系统 | ${nocturnalStatus} | ${nocturnalDetail} |`);
 
+  // Workflows
+  const workflows = report.stages.workflows as any;
+  if (workflows?.exists && workflows.db_accessible) {
+    const wfStale = workflows.stale_active?.length ?? 0;
+    const wfUncleared = workflows.uncleared_terminal ?? 0;
+    const wfTotal = workflows.total_workflows ?? 0;
+    const wfStatus = wfStale > 0 ? '⚠️' : '✅';
+    const wfDetail = `total=${wfTotal}, stale=${wfStale}, uncleared=${wfUncleared}`;
+    lines.push(`| 子代理工作流 | ${wfStatus} | ${wfDetail} |`);
+    if (wfStale > 0) {
+      for (const wf of workflows.stale_active) {
+        lines.push(`|   ↳ | | ${wf.type} (${wf.id}) ${wf.age_min}min |`);
+      }
+    }
+  }
+
+  // PD Tasks / Cron
+  const pdTasks = report.stages.pd_tasks as any;
+  if (pdTasks?.total_jobs > 0) {
+    const pdErrors = pdTasks.error_jobs?.length ?? 0;
+    const pdEnabled = pdTasks.enabled_jobs ?? 0;
+    const pdStatus = pdErrors > 0 ? '⚠️' : '✅';
+    const pdDetail = `total=${pdTasks.total_jobs}, enabled=${pdEnabled}, errors=${pdErrors}`;
+    lines.push(`| PD 定时任务 | ${pdStatus} | ${pdDetail} |`);
+    for (const job of pdTasks.pd_cron_jobs || []) {
+      const icon = job.status === 'error' ? '❌' : job.status === 'ok' ? '✅' : '⏳';
+      const errInfo = job.last_error ? ` (err: ${job.last_error.substring(0, 40)})` : '';
+      lines.push(`|   ↳ ${icon} | | ${job.name} [${job.interval_minutes}min] next=${job.next_run_min}min |`);
+    }
+  }
+
   lines.push('');
 
   // Anomalies
@@ -991,6 +1071,8 @@ function runSingleWorkspace(workspace: string, prevReport: HealthReport | null):
   const principles = collectPrinciples(stateDir, workspace);
   const evolutionState = collectEvolutionState(stateDir);
   const nocturnal = collectNocturnal(stateDir);
+  const workflows = collectWorkflowHealth(stateDir);
+  const pdTasks = collectPDTaskHealth(workspace);
 
   const report: HealthReport = {
     timestamp,
@@ -1008,6 +1090,8 @@ function runSingleWorkspace(workspace: string, prevReport: HealthReport | null):
       principles,
       evolution_state: evolutionState,
       nocturnal,
+      workflows,
+      pd_tasks: pdTasks,
     },
     unknown_files: scan.unknown,
     anomalies: [],
@@ -1104,6 +1188,100 @@ function generateAggregateMarkdown(reports: Array<{ workspace: string; report: H
   lines.push('');
 
   return lines.join('\n');
+}
+
+// ─── Workflow Health (subagent_workflows.db) ───────────────────────
+
+function collectWorkflowHealth(stateDir: string): Record<string, unknown> {
+  const dbPath = path.join(stateDir, 'subagent_workflows.db');
+  if (!fileExists(dbPath)) {
+    return { exists: false };
+  }
+
+  // Try to load better-sqlite3
+  let dbModule: any;
+  try { dbModule = require('better-sqlite3'); } catch {}
+  if (!dbModule) return { exists: true, db_accessible: false };
+
+  try {
+    const db = new dbModule(dbPath, { readonly: true });
+    const now = Date.now();
+    const ms10m = 10 * 60 * 1000;
+    const ms30m = 30 * 60 * 1000;
+
+    // Count by state
+    const stateCounts = db.prepare("SELECT state, COUNT(*) as cnt FROM subagent_workflows GROUP BY state").all() as any[];
+    const stateMap: Record<string, number> = {};
+    for (const row of stateCounts) stateMap[(row as any).state] = (row as any).cnt;
+
+    // Stale active (>10min)
+    const staleActive = db.prepare("SELECT workflow_id, workflow_type, created_at FROM subagent_workflows WHERE state='active' AND created_at < ?").all(now - ms10m) as any[];
+
+    // Terminal/expired without cleanup
+    const uncleared = db.prepare("SELECT COUNT(*) as cnt FROM subagent_workflows WHERE state IN ('terminal_error', 'expired') AND (cleanup_state='pending' OR cleanup_state IS NULL)").get() as any;
+
+    // Total workflows
+    const total = db.prepare("SELECT COUNT(*) as cnt FROM subagent_workflows").get() as any;
+
+    // Recent events (last 30min)
+    const recentEvents = db.prepare("SELECT event_type, COUNT(*) as cnt FROM subagent_workflow_events WHERE created_at > ? GROUP BY event_type").all(now - ms30m) as any[];
+    const eventMap: Record<string, number> = {};
+    for (const row of recentEvents) eventMap[(row as any).event_type] = (row as any).cnt;
+
+    db.close();
+
+    return {
+      exists: true,
+      db_accessible: true,
+      total_workflows: total?.cnt ?? 0,
+      state_distribution: stateMap,
+      stale_active: staleActive.map(w => ({ id: w.workflow_id, type: w.workflow_type, age_min: Math.round((now - w.created_at) / 60000) })),
+      uncleared_terminal: uncleared?.cnt ?? 0,
+      recent_events_30m: eventMap,
+    };
+  } catch (err) {
+    return { exists: true, db_accessible: false, error: String(err) };
+  }
+}
+
+// ─── PD Task Health (cron/jobs.json + pd_tasks.json) ───────────────
+
+function collectPDTaskHealth(workspaceDir: string): Record<string, unknown> {
+  // PD tasks spec
+  const pdTasksPath = path.join(workspaceDir, '.state', 'pd_tasks.json');
+  const pdTasks = safeReadJson<any[]>(pdTasksPath) || [];
+
+  // Cron jobs
+  const cronPath = path.join(process.env.HOME || '', '.openclaw', 'cron', 'jobs.json');
+  const cronStore = safeReadJson<any>(cronPath);
+  const pdJobs = (cronStore?.jobs || []).filter((j: any) => j.name?.startsWith('PD '));
+
+  const now = Date.now();
+  const jobDetails = pdJobs.map((j: any) => {
+    const state = j.state || {};
+    const lastStatus = state.lastStatus || (state.nextRunAtMs && state.nextRunAtMs > now ? 'scheduled' : 'never');
+    const nextRunInMin = state.nextRunAtMs ? Math.round((state.nextRunAtMs - now) / 60000) : null;
+    const lastRunInMin = state.lastRunAtMs ? Math.round((now - state.lastRunAtMs) / 60000) : null;
+    return {
+      name: j.name,
+      enabled: j.enabled,
+      status: lastStatus,
+      consecutive_errors: state.consecutiveErrors ?? 0,
+      last_error: state.lastError ? state.lastError.substring(0, 100) : null,
+      timeout_seconds: j.payload?.timeoutSeconds ?? null,
+      interval_minutes: j.schedule?.everyMs ? j.schedule.everyMs / 60000 : null,
+      next_run_min: nextRunInMin,
+      last_run_min_ago: lastRunInMin,
+    };
+  });
+
+  return {
+    pd_tasks_spec: pdTasks.map((t: any) => ({ id: t.id, name: t.name, enabled: t.enabled, version: t.version })),
+    pd_cron_jobs: jobDetails,
+    total_jobs: jobDetails.length,
+    enabled_jobs: jobDetails.filter((j: any) => j.enabled).length,
+    error_jobs: jobDetails.filter((j: any) => j.status === 'error' || j.consecutive_errors > 0),
+  };
 }
 
 // ─── Main ───────────────────────────────────────────────────────────
