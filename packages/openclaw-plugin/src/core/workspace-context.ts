@@ -8,6 +8,7 @@ import { PainDictionary } from './dictionary.js';
 import { HygieneTracker } from './hygiene/tracker.js';
 import { EvolutionReducerImpl } from './evolution-reducer.js';
 import { TrajectoryDatabase, TrajectoryRegistry, TrajectoryDatabaseOptions } from './trajectory.js';
+import { PrincipleLifecycleService } from './principle-internalization/principle-lifecycle-service.js';
 import {
     getPrincipleSubtree,
     updatePrinciple,
@@ -41,6 +42,7 @@ export class WorkspaceContext {
     private _evolutionReducer?: EvolutionReducerImpl;
     private _trajectory?: TrajectoryDatabase;
     private _principleTreeLedger?: PrincipleTreeLedgerAccessor;
+    private _principleLifecycle?: PrincipleLifecycleService;
 
     private constructor(workspaceDir: string, stateDir: string) {
         this.workspaceDir = workspaceDir;
@@ -122,6 +124,16 @@ export class WorkspaceContext {
             };
         }
         return this._principleTreeLedger;
+    }
+
+    /**
+     * Phase 15 lifecycle/read-model surface for metrics, assessments, and route recommendations.
+     */
+    get principleLifecycle(): PrincipleLifecycleService {
+        if (!this._principleLifecycle) {
+            this._principleLifecycle = new PrincipleLifecycleService(this.workspaceDir, this.stateDir);
+        }
+        return this._principleLifecycle;
     }
 
     /**
@@ -209,6 +221,7 @@ export class WorkspaceContext {
         this._evolutionReducer = undefined;
         this._trajectory = undefined;
         this._principleTreeLedger = undefined;
+        this._principleLifecycle = undefined;
     }
 
     /**

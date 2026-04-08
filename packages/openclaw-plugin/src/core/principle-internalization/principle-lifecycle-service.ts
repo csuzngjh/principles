@@ -12,11 +12,30 @@ import {
   type PrincipleAdherenceResult,
   type RuleMetricResult,
 } from './lifecycle-metrics.js';
+import {
+  assessDeprecatedReadiness,
+  type DeprecatedReadinessAssessment,
+} from './deprecated-readiness.js';
+import {
+  recommendInternalizationRoute,
+  type InternalizationRouteRecommendation,
+} from './internalization-routing-policy.js';
 
 export interface RecomputedPrincipleLifecycle {
   principleId: string;
   ruleMetrics: Record<string, RuleMetricResult>;
   adherence: PrincipleAdherenceResult;
+  deprecatedReadiness: DeprecatedReadinessAssessment;
+  routeRecommendation: InternalizationRouteRecommendation;
+}
+
+export interface PrincipleLifecycleAssessment {
+  principle: PrincipleLifecycleEvidence['principle'];
+  summary: PrincipleLifecycleEvidence['summary'];
+  ruleMetrics: Record<string, RuleMetricResult>;
+  adherence: PrincipleAdherenceResult;
+  deprecatedReadiness: DeprecatedReadinessAssessment;
+  routeRecommendation: InternalizationRouteRecommendation;
 }
 
 function createValueMetrics(
@@ -61,27 +80,64 @@ export class PrincipleLifecycleService {
     return buildLifecycleReadModel(this.workspaceDir, this.stateDir);
   }
 
+  listAssessments(readModel = this.buildReadModel()): PrincipleLifecycleAssessment[] {
+    return readModel.principles.map((principleEvidence) => {
+      const ruleMetrics = Object.fromEntries(
+        principleEvidence.rules.map((ruleEvidence) => [
+          ruleEvidence.rule.id,
+          computeRuleMetrics(ruleEvidence),
+        ]),
+      ) as Record<string, RuleMetricResult>;
+      const adherence = computePrincipleAdherence(principleEvidence, ruleMetrics);
+      const deprecatedReadiness = assessDeprecatedReadiness(
+        principleEvidence,
+        ruleMetrics,
+        adherence,
+      );
+      const routeRecommendation = recommendInternalizationRoute(
+        principleEvidence,
+        ruleMetrics,
+        adherence,
+      );
+
+      return {
+        principle: principleEvidence.principle,
+        summary: principleEvidence.summary,
+        ruleMetrics,
+        adherence,
+        deprecatedReadiness,
+        routeRecommendation,
+      };
+    });
+  }
+
+  listRouteRecommendations(readModel = this.buildReadModel()): InternalizationRouteRecommendation[] {
+    return this.listAssessments(readModel).map((assessment) => assessment.routeRecommendation);
+  }
+
   recomputeAll(): RecomputedPrincipleLifecycle[] {
     const ledger = loadLedger(this.stateDir);
     const readModel = this.buildReadModel();
+    const assessments = this.listAssessments(readModel);
 
-    return readModel.principles.map((principleEvidence) => {
-      const ruleMetrics = Object.fromEntries(
-        principleEvidence.rules.map((ruleEvidence) => {
-          const metrics = computeRuleMetrics(ruleEvidence);
-          updateRule(this.stateDir, ruleEvidence.rule.id, {
+    return assessments.map((assessment) => {
+      const principleEvidence = readModel.principles.find(
+        (principle) => principle.principle.id === assessment.principle.id,
+      );
+      if (!principleEvidence) {
+        throw new Error(`Missing lifecycle evidence for principle "${assessment.principle.id}".`);
+      }
+
+      for (const [ruleId, metrics] of Object.entries(assessment.ruleMetrics)) {
+        updateRule(this.stateDir, ruleId, {
             coverageRate: metrics.coverageRate,
             falsePositiveRate: metrics.falsePositiveRate,
             updatedAt: readModel.generatedAt,
           });
-          return [ruleEvidence.rule.id, metrics];
-        }),
-      ) as Record<string, RuleMetricResult>;
-
-      const adherence = computePrincipleAdherence(principleEvidence, ruleMetrics);
+      }
 
       updatePrinciple(this.stateDir, principleEvidence.principle.id, {
-        adherenceRate: adherence.adherenceRate,
+        adherenceRate: assessment.adherence.adherenceRate,
         updatedAt: readModel.generatedAt,
       });
       updatePrincipleValueMetrics(
@@ -89,15 +145,17 @@ export class PrincipleLifecycleService {
         principleEvidence.principle.id,
         createValueMetrics(
           principleEvidence,
-          adherence,
+          assessment.adherence,
           ledger.tree.metrics[principleEvidence.principle.id],
         ),
       );
 
       return {
         principleId: principleEvidence.principle.id,
-        ruleMetrics,
-        adherence,
+        ruleMetrics: assessment.ruleMetrics,
+        adherence: assessment.adherence,
+        deprecatedReadiness: assessment.deprecatedReadiness,
+        routeRecommendation: assessment.routeRecommendation,
       };
     });
   }
