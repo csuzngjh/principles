@@ -1,198 +1,249 @@
-# Principles Disciple 用户指南
+# Principles Disciple 用户操作手册
 
-> 当前版本重点不是"继续堆机制"，而是让控制面更少、更清楚、更可观察。  
-> 现在系统处于 `Phase 1 + Phase 2a + Phase 2b` 完成后的生产观察窗口。
+这份手册只写当前 `v1.9.0` 里真正需要用到的操作，不讲过时设计。
 
----
+## 这个系统现在负责什么
 
-## 可视化控制台 (Principles Console)
+当前系统主要做两件事：
 
-### 如何访问？
+1. 在智能体执行任务时保护工作区。
+2. 把反复出现的错误沉淀成原则、实现和回放评估结果，逐步内化成更稳定的行为。
 
-1. 确保 OpenClaw Gateway 正在运行
-2. 在浏览器打开：`http://localhost:18789/plugins/principles/`
-3. 输入 Gateway Token 登录
+你不需要理解全部架构，日常只要掌握下面这些命令。
 
-### 如何获取 Token？
+## 日常命令
 
-**方法一：查看配置文件**
-```bash
-# SSH 登录到运行 OpenClaw Gateway 的服务器
-cat ~/.openclaw/openclaw.json
-# 复制 gateway.auth.token 的值
-```
+### `/pd-status`
 
-**方法二：使用命令行**
-```bash
-openclaw config get gateway.auth.token
-```
+当 AI 明显卡住、误解你、或者一直重复同样错误时，用这个命令先看状态。
 
-**方法三：通过 URL 参数传递**
-```
-http://localhost:18789/plugins/principles/?token=your_token_here
-```
+- `/pd-status`：查看当前疲劳/摩擦状态
+- `/pd-status reset`：清空当前会话摩擦值，让 AI 重新判断
+- `/pd-status empathy`：查看情绪事件统计
+- `/pd-status empathy --week`：查看周趋势
+- `/pd-status empathy --session`：只看当前会话
 
-### 控制台功能
-
-#### 📊 概览 (Overview)
-- **健康指标**：重复错误率、用户纠正率、待处理样本数
-- **每日趋势**：工具调用、失败次数、用户纠正的 7 天图表
-- **回归告警**：发现最常失败的工具和错误类型
-- **思维覆盖**：显示 AI 使用思维模型的频率
-
-#### 🔄 进化追踪 (Evolution) ✨ 新功能
-- **时间线视图**：查看完整的进化流程，从痛点检测到原则生成
-- **任务状态**：待处理、处理中、已完成、失败的进化任务
-- **详细事件**：每个进化阶段的中文摘要和技术日志
-- **统计概览**：进化成功率和效率指标
-
-#### 📋 样本审核 (Samples)
-- **样本队列**：查看所有自动收集的用户纠正场景
-- **审核操作**：批准或拒绝样本（决定是否用于训练）
-- **详情查看**：展开查看完整的"错误尝试 → 用户纠正"对比
-- **筛选器**：按状态、质量分数、日期、失败模式筛选
-
-#### 🧠 思维模型 (Thinking Models)
-- **模型列表**：查看 10 个核心思维模型及其使用频率
-- **场景分析**：了解每个模型的触发条件
-- **健康审计**：发现被忽略或过度触发的模型
-
-### 为什么使用控制台？
-
-- **可视化**：一目了然地查看系统状态，比 CLI 更直观
-- **批量审核**：一次处理多个纠正样本
-- **趋势分析**：观察 AI 的进化轨迹，发现改进机会
-- **进化追踪**：实时了解 AI 是否在真正进化，从痛点到原则的完整链路
-
----
-
-## 你现在最需要知道的 4 件事
-
-1. `legacy trust` 还在，但已经冻结。
-   现在它主要用于兼容旧逻辑，不再因为普通成功自动上涨。
-
-2. `GFI` 代表短期摩擦和风险。
-   当系统不断失败、误解、卡住时，GFI 会升高，Gate 会更谨慎。
-
-3. `rollback` 只回滚情绪误判那一部分。
-   现在撤销的是 `user_empathy` 对应的 GFI slice，不会再把整段会话 GFI 一起清掉。
-
-4. `Evolution` 仍然存在，但它是学习面，不是当前唯一控制权来源。
-
----
-
-## 常用命令
-
-### `/pd-evolution-status`
-
-看当前控制面和进化面的综合状态，包括：
-
-- frozen 的 legacy trust
-- 当前 session GFI 和峰值
-- 已知 GFI 来源
-- pain flag
-- gate block / bypass
-- evolution queue / directive
-
-如果某些数据还不完全可靠，它会明确显示 `partial` 或 warning，不会假装是 0。
-
-### `/pd-trust`
-
-看 frozen 的 legacy trust 兼容视图。
-
-请注意：
-
-- 这不是未来的 capability 模型
-- `tool_success` 和 `subagent_success` 不再自动加 trust
-- 它主要用于兼容和解释旧控制面
-
-### `/pd-status empathy`
-
-看情绪/共情事件统计，用来检查：
-
-- `user_empathy` 是否被记录
-- `system_infer` 是否被记录
-- 当前观察窗口里 empathy 事件是否稳定落日志
+如果 AI 在同一个错误上打转，优先用 `reset`。
 
 ### `/pd-rollback last`
 
-撤销最近一次情绪惩罚。
+当情绪系统误判了你的语气或意图时，用它撤销最近一次惩罚。
 
-当前行为：
+- `/pd-rollback last`：回滚当前会话最近一次情绪惩罚
+- `/pd-rollback <eventId>`：回滚指定事件
 
-- 只回滚 `user_empathy` 对应的那部分 GFI
-- 不再清空整段 session GFI
+它只影响 empathy 相关的 GFI，不会把整段会话状态全部清空。
 
----
+### `/pd-evolution-status`
 
-## 什么时候该用这些命令
+这是当前原则内化系统最重要的观察命令。
 
-### AI 明显误解你、让你很烦
+它会显示：
 
-先正常指出问题，必要时再看：
+- 当前和峰值 GFI
+- 最近 pain 信号
+- 最近 gate block / bypass
+- evolution 队列状态
+- 原则数量统计
+- 当前的内化路线建议，例如 `skill`、`code`、`defer`
 
-- `/pd-status empathy`
-- `/pd-rollback last`
+如果你不确定现在是被疲劳状态卡住、被 pain 卡住，还是被 code implementation 策略卡住，先看这个命令。
 
-### AI 连续失败、像在原地打转
+## 代码实现运维流程
 
-先看：
+这部分是给需要操作 code implementation 的人看的，不是每次都要用。
 
-- `/pd-evolution-status`
+### 什么时候需要用
+
+在下面这些场景里使用：
+
+- 系统产生了新的 candidate implementation
+- 你想先跑 replay，再决定要不要 promote
+- 当前 active implementation 出现回归，要禁用或回滚
+- 老实现已经废弃，需要归档
+
+### 第一步：列出候选实现
+
+```text
+/pd-promote-impl list
+```
+
+它会列出当前 candidate implementation，并标记哪些已经有通过的 replay report。
+
+### 第二步：执行 replay 评估
+
+```text
+/pd-promote-impl eval <implId>
+```
+
+它会针对目标 implementation 运行 replay evaluation，并写出 replay report。
+
+以下情况建议先跑一次：
+
+- 新 candidate 刚生成
+- 之前没有 replay report
+- replay 数据集已经变化，你想重新评估
+
+### 第三步：查看 replay 报告
+
+```text
+/pd-promote-impl show <implId>
+```
 
 重点看：
 
-- GFI 是否升高
-- Gate 是否在拦
-- 最近 pain signal 是什么
+- 样本总数
+- pass / fail 结论
+- 覆盖了哪些 classification
+- 是否因为没有 replay 样本导致报告为空
 
-### 你想知道系统现在到底信不信任它
+### 第四步：正式 promote
 
-用：
+```text
+/pd-promote-impl <implId>
+```
 
-- `/pd-trust`
+promote 的前提：
 
-但要记住：
+- implementation 当前必须是 `candidate` 或 `disabled`
+- 必须已经有通过的 replay report
+- 如果同一个 rule 已经有 active implementation，旧的 active 会自动变成 disabled
 
-- 这是 frozen 的 legacy trust，不是未来能力模型
+这是 candidate 进入 active 的标准路径。
 
----
+### 第五步：禁用异常实现
 
-## 当前阶段不要误解的地方
+```text
+/pd-disable-impl list
+/pd-disable-impl <implId> --reason "原因"
+```
 
-### 不是所有旧文档里的 Trust 描述都还有效
+当某个实现在线上表现不好、需要立刻停用时，用这个命令。
 
-如果你看到某些历史文档还写着：
+disable 会保留账本记录，但停止它继续参与运行。
 
-- "成功会持续涨 trust"
-- "trust score 决定未来一切"
+### 第六步：回滚到上一个 active 实现
 
-请以当前命令输出和观察窗口文档为准。
+```text
+/pd-rollback-impl list
+/pd-rollback-impl <implId> --reason "原因"
+```
 
-### 现在不该直接进入 Phase 3 主切换
+当当前 active implementation 需要撤回，并恢复到上一个 active 版本时，用这个命令。
 
-正确顺序是：
+如果没有 previous active implementation，系统会退回到宿主硬边界继续保护：
 
-1. 先观察生产数据 3 到 7 天
-2. 确认 trust freeze、empathy eventing、rollback 行为、summary 可解释性都稳定
-3. 再考虑进入 `Capability shadow`
-4. 不是立刻切 Gate 主权
+- GFI
+- Progressive Gate
+- 其他已有硬约束
 
----
+### 第七步：归档实现
 
-## 生产观察期重点
+```text
+/pd-archive-impl list
+/pd-archive-impl <implId>
+```
 
-每天优先看这几件事：
+当某个 implementation 已经过时、不应该再参与后续 promote 时，用归档。
 
-1. trust 有没有继续偷偷上涨
-2. `user_empathy` / `system_infer` 有没有进入 `events.jsonl`
-3. rollback 后有没有误伤无关 GFI
-4. `evolution_queue.json`、`evolution_directive.json` 和 status 是否一致
-5. status 的 warning 是否能真实解释当前数据质量
+archive 比 disable 更彻底，适合做永久清理。
 
----
+## 推荐操作顺序
 
-## 一句话总结
+当系统出现新的 code candidate 时，推荐按这个顺序操作：
 
-现在的 Principles Disciple，更像一个"先把仪表盘修好、再决定怎么换引擎"的系统。  
-先看清，再切换；先观察，再进第三阶段。
+1. `/pd-evolution-status`
+2. `/pd-promote-impl list`
+3. `/pd-promote-impl eval <implId>`
+4. `/pd-promote-impl show <implId>`
+5. `/pd-promote-impl <implId>`
+
+如果 promote 后发现它有回归：
+
+1. `/pd-disable-impl <implId> --reason "原因"`
+2. 如果要恢复旧版本，再执行 `/pd-rollback-impl <implId> --reason "原因"`
+3. 如果这个实现已经彻底废弃，再执行 `/pd-archive-impl <implId>`
+
+## 如何理解内化路线建议
+
+`/pd-evolution-status` 可能会显示：
+
+- `skill`
+- `code`
+- `defer`
+
+它们的含义是：
+
+- `skill`：这个原则更适合先通过提示词 / SOP / 工作流来内化
+- `code`：这个原则更确定、风险更高，适合变成 code implementation
+- `defer`：当前证据还不够，先不要强行内化
+
+这些只是建议，不会自动执行。
+
+## 常见问题
+
+### “Promotion rejected: no passing replay report”
+
+先执行：
+
+```text
+/pd-promote-impl eval <implId>
+```
+
+再查看：
+
+```text
+/pd-promote-impl show <implId>
+```
+
+### “Replay report 是空的”
+
+说明当前没有找到已分类的 replay 样本。
+
+检查：
+
+- 工作区里是否已经产生 nocturnal / replay 数据
+- implementation 是否挂到了正确的 rule 上
+- 最近会话里是否产出了可用样本
+
+### “明明 disable 了，实现为什么还像被限制住？”
+
+这是正常现象。disable code implementation 以后，系统的宿主硬边界仍然存在，例如：
+
+- Thinking checkpoint
+- GFI
+- Progressive Gate
+- Edit verification
+
+### “我只是想知道系统健不健康”
+
+直接用：
+
+```text
+/pd-status
+/pd-evolution-status
+```
+
+这对大多数日常使用已经够了。
+
+## 可视化控制台
+
+如果你的部署暴露了插件 UI，可以打开：
+
+```text
+http://localhost:18789/plugins/principles/
+```
+
+控制台适合做：
+
+- 看趋势和队列
+- 看 evolution 事件
+- 看 correction samples
+- 看 principle / implementation 的整体活动情况
+
+## 最后只记住这四件事
+
+1. AI 卡住了，用 `/pd-status`
+2. empathy 误判了，用 `/pd-rollback last`
+3. 想看原则内化系统状态，用 `/pd-evolution-status`
+4. 只有在你要操作 code implementation 时，才去用 `/pd-promote-impl`、`/pd-disable-impl`、`/pd-rollback-impl`、`/pd-archive-impl`

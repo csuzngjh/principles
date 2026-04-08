@@ -1,173 +1,249 @@
-# 🧬 Principles Disciple Beginner's Survival Guide (v1.6.0)
+# Principles Disciple User Guide
 
-> **In one sentence for non-technical users:**
-> This is a plugin that gives your AI assistant a "brain" and a sense of "pain". When it makes a mistake in your code or writing, it feels "pain" and remembers the lesson so it won't happen again. More importantly, it hits the brakes when the AI tries to make massive changes, protecting your hard work from being ruined.
+This guide focuses on the commands and workflows that are actually useful in the current `v1.9.0` milestone.
 
----
+## What The System Does
 
-## 🐣 Step 1: Do nothing, just use it!
+Principles Disciple now has two main responsibilities:
 
-If you just want the AI to do its job, **you don't even need to know this plugin exists.**
+1. Protect the workspace while the agent is working.
+2. Turn repeated mistakes into reusable internalized behavior through principles, rule implementations, and replay evaluation.
 
-Once installed in OpenClaw, it runs silently in the background. You just need to:
-1. **Chat with your AI as usual.**
-2. **Ask your AI to code or write as usual.**
+You do not need to understand the full architecture to use it. Most people only need the commands below.
 
-It will help you invisibly by:
-* 🛡️ **Guarding**: If the AI tries to delete or modify hundreds of lines of code at once, the system will automatically intercept it.
-* 🎓 **Learning**: If the AI writes bad code that fails to run, the system will write this error in its "little notebook" so the AI avoids it next time.
+## Daily Commands
 
----
+### `/pd-status`
 
-## 🚑 Step 2: When you encounter these "frustrating" situations...
+Use this when the assistant seems stuck or confused.
 
-Although the system is fully automatic, in the process of protecting you, the AI might sometimes appear "dumb" or "timid". If you encounter the following scenarios, here is how to solve them:
+- `/pd-status` shows the current fatigue/friction state.
+- `/pd-status reset` clears the current session friction so the assistant can try again with a fresh state.
+- `/pd-status empathy` shows emotion-event statistics.
+- `/pd-status empathy --week` shows weekly trends.
+- `/pd-status empathy --session` limits the view to the current session.
 
-### 🚨 Scenario A: AI tells you "I am blocked, I need to write a PLAN.md"
-* **Why did this happen?** The AI tried to modify a protected core directory. The system stopped it to prevent unauthorized changes.
-* **What should I do?** 
-  Simply tell the AI in the chat:
-  > **"Please write a plan first, set STATUS to READY, and wait for my approval before proceeding."**
-  Once the AI writes the plan, the block is automatically lifted.
+Use `reset` when the assistant is looping on the same mistake.
 
-### 🌀 Scenario B: AI is "Spinning in circles" on the same error
-* **Why did this happen?** The AI is stuck in an infinite loop, trying the same wrong approach. Its "fatigue level" is maxed out.
-* **What should I do?**
-  Type this command in the chat to clear its head:
-  > **`/pd-status reset`**
-  The system will instantly calm the AI down and force it to re-evaluate your request.
+### `/pd-rollback last`
 
-### 😡 Scenario C: The AI is talking nonsense, and I am angry
-* **Why did this happen?** The AI has completely misunderstood your intent.
-* **What should I do?**
-  Give it a direct "pain injection" to force reflection. Type:
-  > **`/pain You completely misunderstood me, read the error carefully!`**
-  The AI will instantly feel the "pain", sincerely apologize, and correct its direction.
+Use this when the empathy system penalized the wrong thing.
 
-### 🐠 Scenario D: The AI acts like a "Goldfish" and forgets everything we just discussed
-* **Why did this happen?** When a conversation gets too long, the AI's "short-term memory (context window)" fills up, and it is forced to compress or drop earlier messages.
-* **What should I do?**
-  Whenever you finish a deep debugging session or plan to take a break, proactively ask the AI to take notes. Tell it:
-  > **"Write down the clues you found and our next steps into `memory/.scratchpad.md`."**
-  When you return tomorrow, you can say: "Read your scratchpad and pick up where we left off."
+- `/pd-rollback last` rolls back the most recent empathy penalty in the current session.
+- `/pd-rollback <eventId>` rolls back a specific empathy event.
 
-### 🫀 Scenario E: The AI misjudged my emotions and penalized me
-* **Why did this happen?** Sometimes the AI interprets your jokes or sarcasm as "frustration" and automatically deducts fatigue points.
-* **What should I do?**
-  Just tell the AI directly:
-  > **"Undo the last penalty"** or **"Rollback the last one"**
-  The AI will automatically reverse the misjudged penalty and restore your fatigue index.
+This affects empathy-related GFI only. It does not erase the whole session state.
 
-  Or use the command:
-  > **`/pd-rollback last`**
+### `/pd-evolution-status`
 
-  If you want to see exactly how many points were deducted and why:
-  > **`/pd-status empathy`** —— View emotion event statistics
+Use this as the main operator dashboard for the new internalization pipeline.
 
----
+It shows:
 
-## 🎮 Step 3: Your Commander Dashboard
+- current and peak session GFI
+- recent pain signals
+- recent gate blocks and bypasses
+- evolution queue state
+- principle counts
+- internalization route recommendations such as `skill`, `code`, or `defer`
 
-If you want to see what state the AI is currently in, or give it specific directives, you can type these magic commands in the chat at any time:
+Read this command first if you are unsure whether the system is blocked by fatigue, pain, or code-implementation policy.
 
-1. **`/pd-status`** —— **Check Health**
-   * See if the AI is currently "Critically Fatigued". It will also tell you how many invalid operations the system has blocked for you.
-2. **`/pd-status empathy`** —— **View Emotion Events** ✨
-   * View emotion event statistics: points deducted today, dedupe hit rate, severity distribution.
-   * Use `--week` for 7-day trends, `--session` for current session stats.
-3. **`/pd-status data`** —— **View Trajectory Data** ✨ New
-   * View trajectory database stats: sessions, tool calls, pain events, pending correction samples, etc.
-4. **`/pd-rollback`** —— **Undo Emotion Penalty** ✨
-   * When the AI misjudges your emotions, use this command to undo the penalty.
-   * Use `last` to undo the most recent one, or specify an event ID.
-5. **`/pd-export`** —— **Export Data** ✨ New
-   * `/pd-export analytics` exports analytics snapshot (GFI trends, error clusters, principle effectiveness).
-   * `/pd-export corrections` exports correction samples, add `--redacted` to sanitize paths and keys.
-6. **`/pd-samples`** —— **Manage Correction Samples** ✨ New
-   * List pending correction samples for review.
-   * `/pd-samples review approve <id>` approves a sample.
-   * `/pd-samples review reject <id>` rejects a sample.
-7. **`/trust`** —— **Check Permissions**
-   * The AI starts with high permissions. If it does well, its permissions grow; if it keeps making errors, it gets demoted and can only make minor tweaks. This dashboard shows its current score and rank.
-8. **`/workspace-grooming`** —— **Summon the Cyber-Housekeeper (Cleanup)**
-   * When your project root gets messy with temporary files, run this command. The AI will act as a housekeeper with "digital cleanliness", helping you clean up, rename, and archive useless garbage files (rest assured, it will never touch your core code).
-9. **`/init-strategy`** —— **Set the Vision**
-   * If you want the AI to work towards a long-term goal every day (e.g., "Always write extremely concise code"), run this command. The AI will conduct a "soul-searching interview" with you and strictly remember your rules.
+## Code Implementation Workflow
 
----
+This workflow is for operators reviewing code implementations generated or maintained by the system.
 
-## 🖥️ Step 4: Visual Console (Principles Console) — **NEW**
+### When To Use It
 
-If you prefer a graphical interface, you can access **Principles Console** in your browser:
+Use these commands when:
 
-### How to Open?
+- a new candidate implementation appears
+- you want to evaluate a candidate against replay data
+- a promoted implementation regressed and needs to be disabled or rolled back
+- an old implementation should be archived
 
-1. Make sure OpenClaw Gateway is running
-2. Open in your browser: `http://localhost:18789/plugins/principles/`
-3. Enter your Gateway Token to login
+### Step 1: List Candidates
 
-### How to Get Your Token?
-
-**Method 1: Check configuration file**
-```bash
-# SSH into the server running OpenClaw Gateway
-cat ~/.openclaw/openclaw.json
-# Copy the value of gateway.auth.token
+```text
+/pd-promote-impl list
 ```
 
-**Method 2: Use command line**
-```bash
-openclaw config get gateway.auth.token
+This lists candidate implementations and tells you whether each one already has a passing replay report.
+
+### Step 2: Run Replay Evaluation
+
+```text
+/pd-promote-impl eval <implId>
 ```
 
-**Method 3: Pass via URL parameter**
+This runs replay evaluation for the target implementation and writes a replay report.
+
+Use this before promotion when:
+
+- the candidate is new
+- the previous report is missing
+- the replay dataset changed and you want a fresh report
+
+### Step 3: Inspect The Replay Report
+
+```text
+/pd-promote-impl show <implId>
 ```
-http://localhost:18789/plugins/principles/?token=your_token_here
+
+This prints the latest replay report for the implementation.
+
+Check:
+
+- total sample count
+- pass/fail decision
+- which classifications were exercised
+- whether the report is empty because no replay samples were available
+
+### Step 4: Promote The Candidate
+
+```text
+/pd-promote-impl <implId>
 ```
 
-### Console Features
+Promotion rules:
 
-#### 📊 Overview
-- **Health Metrics**: Repeat error rate, user correction rate, pending samples
-- **Daily Trends**: 7-day charts for tool calls, failures, user corrections
-- **Regression Alerts**: Discover most frequently failing tools and error types
-- **Thinking Coverage**: Shows how often AI uses thinking models
+- the implementation must be in `candidate` or `disabled`
+- it must have a passing replay report
+- if the same rule already has an active implementation, the old one is disabled automatically
 
-#### 📋 Samples (Correction Samples)
-- **Sample Queue**: View all auto-collected user correction scenarios
-- **Review Actions**: Approve or reject samples (determines if used for training)
-- **Detail View**: Expand to see full "bad attempt → user correction" comparison
-- **Filters**: Filter by status, quality score, date, failure mode
+This is the normal path from candidate to active.
 
-#### 🔄 Evolution Tracking — **NEW**
-- **Timeline View**: See the complete evolution flow from pain detection to principle generation
-- **Task Status**: View pending, in-progress, completed, and failed evolution tasks
-- **Detailed Events**: Chinese summaries and technical logs for each evolution stage
-- **Statistics Overview**: Evolution success rate and efficiency metrics
+### Step 5: Disable A Bad Implementation
 
-#### 🧠 Thinking Models
-- **Model List**: View 10 core thinking models and their usage frequency
-- **Scenario Analysis**: Understand what triggers each model
-- **Health Audit**: Find ignored or over-triggered models
+```text
+/pd-disable-impl list
+/pd-disable-impl <implId> --reason "reason"
+```
 
-### Why Use the Console?
+Use this when an implementation is causing bad runtime behavior and should stop applying immediately.
 
-- **Visualization**: See system status at a glance, more intuitive than CLI
-- **Batch Review**: Process multiple correction samples at once
-- **Trend Analysis**: Observe AI's evolution trajectory, find improvement opportunities
-- **Evolution Tracking**: Real-time visibility into whether AI is actually evolving - complete pipeline from pain signal to principle generation
+Disabling keeps the implementation in the ledger but removes it from active use.
 
----
+### Step 6: Roll Back To The Previous Active Implementation
 
-## 🤓 For the Geeks (Advanced Zone)
+```text
+/pd-rollback-impl list
+/pd-rollback-impl <implId> --reason "reason"
+```
 
-* **I want to see what lessons the AI has remembered.**
-  Open `.principles/PRINCIPLES.md` in your project root. It contains the AI's entire "history of blood and tears".
-* **I want to see what the AI is thinking.**
-  Check `memory/logs/SYSTEM.log`.
-* **I want to adjust penalty scores or security levels.**
-  Please read our exclusive guide: 👉 **[Advanced Configuration Guide (Geek Mode)](./packages/openclaw-plugin/ADVANCED_CONFIG_ZH.md)** (Currently available in Chinese).
+Use this when the current active implementation should be reverted and the previous active version restored.
 
----
-> **❤️ Final advice: Be patient.**
-> A newly installed AI is like a fresh intern. It might make mistakes at first. Give it two or three days to hit some walls in your project, and it will evolve into the most understanding personal assistant in the world.
+If there is no previous active implementation, the rule simply falls back to the hard host boundaries such as GFI and Progressive Gate.
+
+### Step 7: Archive An Implementation
+
+```text
+/pd-archive-impl list
+/pd-archive-impl <implId>
+```
+
+Use this for permanent cleanup when an implementation is no longer relevant.
+
+Archiving is stronger than disabling. It is intended for old or obsolete implementations that should not be promoted again.
+
+## Recommended Operator Sequence
+
+When the system has produced a new code candidate, use this order:
+
+1. `/pd-evolution-status`
+2. `/pd-promote-impl list`
+3. `/pd-promote-impl eval <implId>`
+4. `/pd-promote-impl show <implId>`
+5. `/pd-promote-impl <implId>`
+
+If the promoted implementation regresses:
+
+1. `/pd-disable-impl <implId> --reason "reason"`
+2. `/pd-rollback-impl <implId> --reason "reason"` if you want to restore the previous active version
+3. `/pd-archive-impl <implId>` only when the implementation is obsolete and should be retired
+
+## How To Read Internalization Routes
+
+`/pd-evolution-status` may show route recommendations like:
+
+- `skill`
+- `code`
+- `defer`
+
+Interpret them like this:
+
+- `skill`: the principle likely needs prompt/SOP shaping first
+- `code`: the principle is deterministic or high-risk enough for a code implementation
+- `defer`: there is not enough evidence yet, or forcing implementation would be premature
+
+These are recommendations, not automatic actions.
+
+## Troubleshooting
+
+### “Promotion rejected: no passing replay report”
+
+Run:
+
+```text
+/pd-promote-impl eval <implId>
+```
+
+Then inspect the report with:
+
+```text
+/pd-promote-impl show <implId>
+```
+
+### “Replay report is empty”
+
+This means the system did not find classified replay samples for that implementation yet.
+
+Check:
+
+- whether nocturnal/replay data exists for the workspace
+- whether the implementation is attached to the expected rule
+- whether recent sessions produced usable samples
+
+### “The implementation was disabled but behavior still feels restricted”
+
+That can be normal. Disabling a code implementation does not remove the host hard boundaries:
+
+- Thinking checkpoint
+- GFI
+- Progressive Gate
+- Edit verification
+
+### “I only want to know whether the system is healthy”
+
+Use:
+
+```text
+/pd-status
+/pd-evolution-status
+```
+
+That is enough for most day-to-day use.
+
+## Console
+
+If your deployment exposes the plugin UI, open:
+
+```text
+http://localhost:18789/plugins/principles/
+```
+
+Use the console for:
+
+- reviewing queue and trend data
+- checking evolution events
+- inspecting correction samples
+- watching principle and implementation activity at a glance
+
+## Bottom Line
+
+For normal use, remember only this:
+
+1. use `/pd-status` when the assistant is stuck
+2. use `/pd-rollback last` when empathy penalized the wrong thing
+3. use `/pd-evolution-status` to inspect the new internalization pipeline
+4. use `/pd-promote-impl ...` and related implementation commands only when you are operating candidate code implementations

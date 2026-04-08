@@ -1,132 +1,638 @@
-# 动态边界与自我进化引擎 (Dynamic Harness & Self-Evolution Engine) 架构设计
+# 动态 Harness 演化引擎
 
 > **日期**: 2026-04-06  
-> **状态**: 提议 (Proposed)  
-> **关联文档**: [原则树架构 (PRINCIPLE-TREE-ARCHITECTURE.md)](../architecture-governance/PRINCIPLE-TREE-ARCHITECTURE.md)  
-> **核心理念**: 将模糊的自然语言原则“降级”为绝对理性的执行脚本，构建智能体的“物理反射神经”。
+> **状态**: Proposed, Reframed on 2026-04-07  
+> **定位**: Principle Internalization System 中的 `Implementation(type=code)` 支线  
+> **GSD 对齐**: 对应 `.planning` 中 `v1.9.0 Principle Internalization System` milestone 的 Phase 12-14 核心能力  
+> **主文档**:
+> - `docs/design/2026-04-07-principle-internalization-system.md`
+> - `docs/design/2026-04-07-principle-internalization-system-technical-appendix.md`
+> **关联文档**:
+> - `docs/architecture-governance/PRINCIPLE-TREE-ARCHITECTURE.md`
+> - `docs/design/nocturnal-evolution-agent-sleep-reflection.md`
 
 ---
 
-## 1. 设计背景与痛点 (The Problem)
+## 1. 文档定位
 
-在 PD 项目中，我们通过 `PRINCIPLES.md` 约束智能体。但随着项目复杂度增加，我们面临以下挑战：
-1. **指令脱落 (Instruction Dropping)**: 随着上下文变长，智能体会“忽略”写在 Prompt 里的原则。
-2. **边界模糊**: “修改核心文件需谨慎”是主观的。多少行算谨慎？哪些文件算核心？
-3. **演化滞后**: 发现错误到修改 LoRA 或 System Prompt 的链路太长，无法实现“分钟级”的错误纠偏。
+本文档不再将 DHSE 描述为 PD 系统的总框架，而将其重新定义为：
 
-**解决方案**: 引入 **Harness (硬化拦截器)**。将原则树的“树叶（实现层）”通过动态 JS 脚本固化，在工具执行前进行“硬拦截”。借助 OpenClaw 最新的 Heartbeat 任务批处理特性，实现无缝后台验证。
+> Principle Internalization System 中，负责把抽象原则内化为 `rule-code` 的那条代码实现支线。
+
+也就是说：
+
+- DHSE 不是总调度层
+- DHSE 不是原则树的替代物
+- DHSE 不负责所有内化形式
+- DHSE 只负责 `Principle -> Rule -> Implementation(type=code)` 这条路径
+
+总调度中心已经在上层文档中被定义为：
+
+**Principle Internalization Strategy**
+
+DHSE 在该体系中的角色，是当某个原则更适合通过高确定性、可执行、可即时拦截的代码实现进行内化时，提供：
+
+- 候选生成
+- 离线验证
+- promotion
+- 在线运行
+- coverage 回写
 
 ---
 
-## 2. 核心架构：原则树的物理化
+## 2. 为什么需要 DHSE 支线
 
-DHSE 引擎将原则树的逻辑链路闭环化：
+虽然原则内化的默认优先顺序是：
 
+`skill / prompt SOP > rule-code > LoRA > full fine-tune`
+
+但仍然有一类问题更适合 code implementation：
+
+1. **高风险边界**
+   比如危险路径、危险命令、危险修改类型，不能只靠提示词提醒。
+
+2. **高确定性约束**
+   比如明确可判定的前置条件、顺序要求、审批要求、路径限制。
+
+3. **即时止血需求**
+   某类错误已经反复出现，系统不能等到 LoRA 或更长周期优化才阻断。
+
+4. **解释性要求**
+   某些边界不仅要拦，还要给出结构化 reason、evidence、suggestedFix。
+
+因此，DHSE 的存在意义不是“让 LLM 随便写 JS”，而是：
+
+> 在 Principle Internalization Strategy 判定“代码是合适内化形式”时，为系统提供可控、可验证、可回滚的代码实现通道。
+
+---
+
+## 3. 在总架构中的位置
+
+完整系统关系如下：
+
+```text
+Thinking OS
+   ↓
+Principles
+   ↓
+Principle Internalization Strategy
+   ├─ skill / prompt implementation route
+   ├─ code implementation route  ← DHSE
+   ├─ LoRA route
+   └─ full fine-tune route
+   ↓
+Rules
+   ↓
+Implementations
 ```
-[树根: Principle] -> [树干: Rule] -> [树叶: Harness Implementation]
-      抽象价值            具体逻辑           可执行的 JS 脚本
-```
 
-### 2.1 运行空间 (Runtime Space - 日间模式)
-- **HarnessGate**: 集成在 `packages/openclaw-plugin/src/hooks/gate.ts`。在任何写操作/高危操作前触发。
-- **VMSandbox**: 使用 Node.js `vm` 模块，在隔离环境中运行 `./.principles/harness/*.js`。
-- **一票否决制**: 只要有一个 P0 级别的规则脚本返回 `blocked`，动作立即停止，并向智能体返回极其具体的报错（含建议）。
+DHSE 的边界必须被严格限定：
 
-### 2.2 进化空间 (Evolution Space - 依托 HEARTBEAT 批处理调度)
-不再依赖外部操作系统的 Cron 或独立的后台进程，直接深度融合 OpenClaw 原生的 `HEARTBEAT.md` 任务批处理管线。
-- **PainAnalyzer**: 扫描 `EvolutionReducer` 记录的 `pain_detected` 事件。
-- **ScriptSynthesizer**: LLM 分析痛苦原因，自动编写、修改相关的 Harness 脚本。
-- **ShadowSandbox (并行化)**: 影子测试网。借助 Heartbeat 任务分发并发跑测。新脚本必须通过：
-    - **正样本回归**: 历史上成功的动作不被误杀。
-    - **负样本拦截**: 必须成功拦截导致本次痛苦的原始动作。
-- **GitTrajectory**: 所有的脚本变更必须 `git commit`，利用 Git Log 记录原则的演化轨迹，防止逻辑回摆。
+- 输入：Principle、Rule、pain、trajectory、gate block、snapshot
+- 输出：`Implementation(type=code)` 候选及其验证报告
+
+DHSE 不负责：
+
+- 取代 Principles
+- 取代 Rules
+- 取代 skill / LoRA 路线
+- 直接修改宿主核心源码
 
 ---
 
-## 3. 技术实现细节
+## 4. 关键概念
 
-### 3.1 目录结构
-```bash
-.principles/
-├── harness/                # 硬化脚本存放区 (独立 Git 仓库)
-│   ├── .git/               # 演化轨迹追踪
-│   ├── registry.json       # 规则 ID 与脚本路径的映射
-│   ├── rule_pkg_001.js     # 具体拦截逻辑
-│   └── rule_test_002.js
-└── tests/                  # 影子测试用例 (JSONL)
-    ├── positive_cases.jsonl
-    └── negative_cases.jsonl
-```
+### 4.1 Principle
 
-### 3.2 数据契约 (Data Contract)
-拦截脚本必须符合以下签名：
-```typescript
-/**
- * @param {Action} action - 准备执行的工具名与参数
- * @param {Context} context - 工作区状态 (files, lastDiff, currentPlan)
- * @returns {Decision} 拦截决策
- */
-function validate(action, context) {
-  // 示例逻辑
-  if (action.toolName === 'replace' && action.params.file_path === 'package.json') {
-    if (!context.files.includes('PLAN.md')) {
-      return { 
-        blocked: true, 
-        reason: "根据原则 P_102，修改核心配置必须先创建 PLAN.md。" 
-      };
-    }
-  }
-  return { blocked: false };
-}
-```
+抽象价值约束，定义“智能体应成为什么样的人”。
 
-### 3.3 单调性提升保证 (Monotonic Improvement)
-利用 Heartbeat 管线运行影子沙盒，新进化的脚本必须满足：
-1. **PassRate(Current_Positive_Dataset) == 100%**
-2. **InterceptRate(Related_Negative_Pain) == 100%**
-3. **Complexity(New_Script) < Threshold** (防止 LLM 写出过于复杂的逻辑导致沙盒崩溃)
+### 4.2 Rule
+
+原则的场景化、可验证语义，定义：
+
+> 在什么条件下，必须做什么或不能做什么。
+
+Rule 是树干层，不是代码包本身。
+
+### 4.3 Code Implementation
+
+Rule 的一种具体实现形式，记录为：
+
+> `Implementation(type=code)`
+
+这是 DHSE 的目标产物。
+
+### 4.4 Rule Host
+
+在线宿主层，负责安全地运行 active code implementations。
+
+### 4.5 RuleImplementationArtifact
+
+休眠态系统生成的代码候选工件，在离线评估通过前，不可直接进入在线执行。
 
 ---
 
-## 4. 进化工作流 (The "Internalization" Loop 结合 Heartbeat)
+## 5. DHSE 的目标
 
-1. **触发与登记**: 用户输入 `/pain` 或系统检测到 `GFI > 80`。痛苦日志被写入。
-2. **调度排队**: 系统自动在工作区 `HEARTBEAT.md` 中注入/更新待处理的硬化任务，例如 `- [ ] @HarnessSynthesizer: 分析并硬化 P_102 (every 10m)`。
-3. **合成与验证**:
-    - 当系统空闲时，OpenClaw 的 `heartbeat-runner.ts` 唤醒智能体执行待办任务。
-    - LLM 根据 `pain_detected` 记录编写拦截脚本。
-    - LLM 触发影子沙盒测试（可将海量测试用例拆分为多个并行的 Heartbeat Task 加速验证）。
-4. **部署**: 测试通过后，自动 `git commit`，热重载进入 `HarnessGate`。任务从 `HEARTBEAT.md` 剔除。
-5. **清理**: 当脚本稳定运行 7 天无冲突后，原本在 `SKILL.md` 中的对应自然语言描述将被标记为 `deprecated`，释放 LLM 的上下文带宽。
+DHSE 的目标可以概括为一句话：
 
----
+> 将适合 code implementation 的 Principle / Rule，持续蒸馏为更稳定的在线边界，并通过离线回放防止把新错误直接部署到宿主。
 
-## 5. 落地优先级 (Roadmap)
+### 5.1 成功标准
 
-### Phase 1: 基建 (1-2 days)
-- 实现 `HarnessEngine` 核心类（基于 `vm` 模块）。
-- 修改 `gate.ts` 接入 `HarnessEngine`。
-- 手动编写第一个拦截器（如 `package.json` 保护）。
+一条 DHSE 支线成功运行，不是指“写出了更多代码”，而是指：
 
-### Phase 2: HEARTBEAT 调度与自动化合成 (3-5 days)
-- 适配 OpenClaw 最新的 Heartbeat Task Batching 机制，将硬化流程注册为后台任务。
-- 实现 `HarnessSynthesizer` 的 Prompt 模板。
-- 对接 `EvolutionReducer` 获取痛苦信号。
-- 建立 `harness/.git` 轨迹管理。
+1. 相关 pain-negative 被稳定命中
+2. success-positive 不被新增误杀
+3. principle-anchor 样本得到前向覆盖
+4. Rule.coverageRate 稳定上升
+5. Principle.adherenceRate 真实改善
 
-### Phase 3: 影子测试与闭环 (1 week)
-- 自动生成正负样本测试集。
-- 利用 Heartbeat 实现“单调性校验”并发跑测逻辑。
-- 开启全自动演化模式。
+### 5.2 非目标
+
+DHSE 不追求：
+
+- 取代 skill / prompt 作为默认首选
+- 让所有原则最终都变成代码
+- 允许候选代码直接碰宿主核心
+- 让 nocturnal 产出代码后自动上线
 
 ---
 
-## 6. 设计决策记录 (ADR)
+## 6. DHSE 的输入与输出
 
-| 决策点 | 方案 | 原因 |
-|---|---|---|
-| **执行环境** | Node.js `vm` 模块 | 安全隔离，防止演化出的脚本搞崩主进程。 |
-| **规则粒度** | 一文件一原则 (Rule-per-File) | 方便热重载，避免 LLM 一次性修改超大规则文件导致的语法错误。 |
-| **任务调度** | OpenClaw `HEARTBEAT.md` 原生批处理 | 极其优雅地解决了任务状态追踪问题，避免了引入外部 cron 和进程冲突，充分利用了系统空闲期。 |
-| **冲突解决** | Git Log 轨迹分析 | LLM 通过查看脚本的历史 git log 了解过去的权衡，避免逻辑反复。 |
-| **拦截反馈** | 结构化 Reason | 拦截信息必须包含原则 ID，方便智能体在单次转念中快速学习。 |
+### 6.1 输入
+
+DHSE 消费的输入主要来自四类来源：
+
+#### 1. Principle Tree
+
+- Principle 元信息
+- Rule 元信息
+- Implementation 当前状态
+- coverage / adherence / false positive 指标
+
+#### 2. 在线态运行数据
+
+- gate block
+- tool call outcome
+- repeated error
+- GFI / EP 环境信号
+
+#### 3. 休眠态结构化快照
+
+来自 nocturnal 的：
+
+- session snapshot
+- pain events
+- gate blocks
+- tool outcome sequences
+
+#### 4. Principle Internalization Strategy 路由决策
+
+只有当上层策略判断“此原则当前更适合用 code implementation 内化”时，DHSE 才被触发。
+
+### 6.2 输出
+
+DHSE 的直接输出有两层：
+
+#### 候选层
+
+- `RuleImplementationArtifact`
+
+#### 激活层
+
+- `Implementation(type=code)` active entries
+
+以及一层回写：
+
+- Rule coverage
+- Rule false positive
+- Principle adherence
+- Principle deprecation eligibility
+
+---
+
+## 7. DHSE 工作流
+
+DHSE 工作流应分为两个大阶段：
+
+- **休眠态候选生成与验证**
+- **在线态执行**
+
+### 7.1 休眠态阶段
+
+#### Step 1: 候选触发
+
+触发来源：
+
+- 某 Rule coverage 过低
+- 某 Principle 重复失效
+- 同类 pain 反复出现
+- 现有 code implementation 误杀率升高
+- 上层策略认为 skill 实现已不足
+
+#### Step 2: 候选研究
+
+由 nocturnal 研究员基于：
+
+- Principle
+- Rule
+- snapshot
+- pain
+- gate block
+- 历史 implementations
+
+生成 `RuleImplementationArtifact`。
+
+#### Step 3: 离线评估
+
+用三类样本回放：
+
+- `pain-negative`
+- `success-positive`
+- `principle-anchor`
+
+#### Step 4: promotion 决策
+
+通过的候选写入 principle tree 对应 Rule 的 `Implementation(type=code)` 列表，并标记为 `active`。
+
+### 7.2 在线态阶段
+
+在线态运行顺序：
+
+`Thinking Checkpoint -> GFI -> Rule Host -> Progressive Gate -> Edit Verification`
+
+DHSE 在这里体现为 `Rule Host` 运行 active code implementations。
+
+---
+
+## 8. Rule Host 作为 DHSE 在线执行器
+
+DHSE 在线态不直接运行任意脚本，而由 `Rule Host` 控制。
+
+### 8.1 在线位置
+
+放在 `GFI` 后、`Progressive Gate` 前。
+
+### 8.2 原因
+
+#### 放在 GFI 后
+
+- 疲劳态不应继续执行复杂实现
+- 降低低质量状态下的判断噪声
+
+#### 放在 Progressive Gate 前
+
+- 让 code implementation 先表达原则约束
+- `Progressive Gate` 继续做能力边界保险
+
+#### 保留 Progressive Gate
+
+当前阶段必须保留，因为：
+
+- 新 code implementation 支线尚未成熟
+- 还不能承担全部能力边界
+- 直接删除会造成权限真空
+
+### 8.3 在线宿主职责
+
+Rule Host 负责：
+
+- 加载 active code implementations
+- 构造受限输入
+- 提供 helper 白名单
+- 合并多个实现的决策
+- 输出 `allow / block / requireApproval`
+- 返回结构化诊断信息
+
+---
+
+## 9. 候选代码实现的安全原则
+
+DHSE 的本质不是“自由代码搜索”，而是“受限能力的代码实现演化”。
+
+### 9.1 允许的能力
+
+第一版仅允许通过宿主 helper 获取：
+
+- tool 判断
+- path matching
+- risk path 判断
+- plan 状态
+- file exists
+- estimated line changes
+- current GFI
+- current EP tier
+- bash risk
+
+### 9.2 明确禁止
+
+候选代码不得：
+
+- 直接文件 IO
+- 遍历工作区
+- 执行命令
+- 使用网络
+- 动态 import
+- 修改宿主配置
+- 修改 principle tree 主账本
+
+### 9.3 设计原则
+
+代码实现的目标是表达复杂约束，而不是获取控制权。
+
+---
+
+## 10. RuleImplementationArtifact
+
+这是 DHSE 的核心候选工件。
+
+### 10.1 定义
+
+`RuleImplementationArtifact` 表示：
+
+> 基于 principle / rule / snapshot / pain 等上下文生成的待评估代码实现候选。
+
+### 10.2 建议字段
+
+- `artifactId`
+- `principleId`
+- `ruleId`
+- `sourceSnapshotRef`
+- `sourcePainIds`
+- `sourceGateBlockIds`
+- `sourceTrajectoryIds`
+- `candidateCode`
+- `helperUsage`
+- `expectedDecision`
+- `rationale`
+- `evaluationReport`
+- `createdAt`
+
+### 10.3 为什么必须显式绑定 Principle 和 Rule
+
+因为否则系统无法回答：
+
+- 这段代码在服务哪个原则？
+- 它在实现哪个 Rule？
+- 它为什么存在？
+- 它是否真的提升了 Principle 的 adherence？
+
+DHSE 不能产出“孤立脚本”，只能产出 principle-tree 中的合法树叶。
+
+---
+
+## 11. 样本体系
+
+DHSE 的评估必须使用三类样本。
+
+### 11.1 pain-negative
+
+表示：
+
+- 历史上真正造成 pain 或应被阻断的行为
+
+作用：
+
+- 确保 DHSE 至少能吸收已知教训
+
+### 11.2 success-positive
+
+表示：
+
+- 历史上成功且不应被误杀的行为
+
+作用：
+
+- 防止 DHSE 以“更保守”为借口无限制扩大拦截面
+
+### 11.3 principle-anchor
+
+表示：
+
+- 由 Principle / Rule 前向推导出来的锚样本
+
+作用：
+
+- 防止 DHSE 只做 pain 记忆系统
+- 让原则具有前向约束能力
+
+---
+
+## 12. 离线回放与 promotion
+
+### 12.1 必须先离线评估，再进入在线态
+
+这是用户明确要求的设计约束。
+
+### 12.2 最低门槛
+
+promotion 至少满足：
+
+1. 相关 `pain-negative` 命中
+2. 不得新增 `success-positive` 误杀
+3. `principle-anchor` 通过率达到阈值
+4. 执行耗时低于阈值
+5. 结果可复现
+
+### 12.3 状态流转
+
+推荐：
+
+- `candidate`
+- `active`
+- `disabled`
+- `archived`
+
+### 12.4 第一版不做
+
+- 自动上线
+- 自动替换旧实现
+- 无人工观察窗口的自推进部署
+
+---
+
+## 13. DHSE 与 nocturnal 的关系
+
+DHSE 不应重造后台管线，而应扩展 nocturnal 的能力边界。
+
+### 13.1 可复用 nocturnal 的部分
+
+- target selection
+- structured snapshot extraction
+- principle-aware上下文
+- 验证骨架
+- persistence 骨架
+
+### 13.2 不直接复用的部分
+
+- 当前 `NocturnalArtifact` 语义
+- ORPO 训练样本格式
+
+原因：
+
+- `behavioral-sample artifact` 和 `rule-implementation artifact` 是不同工件
+
+### 13.3 正确关系
+
+nocturnal 是候选研究工厂，DHSE 是其中 code implementation 分支的产物消费方。
+
+---
+
+## 14. DHSE 与 Principle Tree 的关系
+
+DHSE 必须服从 Principle Tree，而不是另建一套平行结构。
+
+### 14.1 正确映射
+
+- Principle：根
+- Rule：树干
+- Code Implementation：树叶
+
+### 14.2 不允许的错误设计
+
+#### 错误 1：把规则代码当 Rule 本身
+
+后果：
+
+- Rule 层语义消失
+- Principle / Rule / Implementation 三层塌缩
+
+#### 错误 2：把 DHSE 产物做成孤立文件夹，不回写原则树
+
+后果：
+
+- 无法计算覆盖率
+- 无法解释这段代码为何存在
+- 无法支撑 deprecated 生命周期
+
+### 14.3 覆盖率回写
+
+DHSE promotion 后，必须回写：
+
+- `Rule.coverageRate`
+- `Rule.falsePositiveRate`
+- `Implementation.coveragePercentage`
+- `Principle.adherenceRate`
+
+---
+
+## 15. coverage 在 DHSE 中的含义
+
+DHSE 的 coverage 不是“有代码就算覆盖”。
+
+### 15.1 Rule coverage
+
+应综合：
+
+- 相关 negative 命中率
+- principle-anchor 通过率
+- implementation 稳定性
+
+### 15.2 false positive
+
+基于 success-positive 统计。
+
+### 15.3 Principle adherence
+
+基于：
+
+- Rule coverage
+- repeated error 下降情况
+- 线上实际遵守率
+
+### 15.4 deprecated 候选
+
+某 Principle 不应仅因“有 code implementation”就 deprecated。  
+而应在：
+
+- 覆盖率稳定
+- adherence 稳定
+- prompt 依赖下降
+- 重复痛苦下降
+
+后才进入 deprecated 候选。
+
+---
+
+## 16. Progressive Gate 的位置与长期演化
+
+DHSE 的出现不意味着 `Progressive Gate` 立刻无用。
+
+### 16.1 当前阶段
+
+必须保留 `Progressive Gate` 作为：
+
+- 宿主级能力边界
+- 风险路径保险
+- 在 DHSE 成熟前的权限收口层
+
+### 16.2 长期阶段
+
+可逐步迁移部分逻辑到：
+
+- Principle Internalization Strategy
+- Rule Host code implementations
+
+但仍建议保留少量不可演化宿主硬边界。
+
+### 16.3 结论
+
+DHSE 的目标不是删除所有旧 gate，而是逐步接管“原则适合 code implementation 的那部分边界”。
+
+---
+
+## 17. 实施顺序
+
+### Phase 1: 概念重构
+
+- 将 DHSE 明确重定位为 code implementation 支线
+- 以 Principle Internalization System 作为总框架
+
+### Phase 2: Principle Tree 落地
+
+- Rule / Implementation 关系进入真实 store
+
+### Phase 3: 宿主收口
+
+- 删除 `message-sanitize.ts`
+- 保留 `Thinking / GFI / Progressive / Edit Verification`
+
+### Phase 4: Rule Host MVP
+
+- 固定接口
+- helper 白名单
+- 在线执行
+
+### Phase 5: RuleImplementationArtifact 管线
+
+- nocturnal 新工件
+- 样本回放
+- promotion 报告
+
+### Phase 6: coverage / lifecycle 闭环
+
+- coverageRate
+- falsePositiveRate
+- adherenceRate
+- deprecated eligibility
+
+---
+
+## 18. 最终结论
+
+DHSE 的正确理解不是：
+
+> “让 LLM 自动生成越来越多的规则脚本”
+
+而是：
+
+> “在 Principle Internalization Strategy 判定代码是合适载体时，为系统提供一条受限、可验证、可回滚的 code implementation 内化路径。”
+
+因此，DHSE 的价值不在脚本数量，而在于它是否真正实现了：
+
+- 从 Principle 到 Rule 的语义对齐
+- 从 Rule 到 code implementation 的可控落地
+- 从 pain 到 coverage 的闭环提升
+- 从在线止血到休眠态纠偏的稳定协作
