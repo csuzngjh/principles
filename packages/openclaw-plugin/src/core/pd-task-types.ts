@@ -109,15 +109,15 @@ export const BUILTIN_PD_TASKS: PDTaskSpec[] = [
     description:
       'Analyzes recent user messages to discover new frustration expressions and optimize keyword weights.',
     enabled: true,
-    version: '1.0.0',
+    version: '1.0.1', // Bumped to force cron job settings update
     schedule: {
       kind: 'every',
-      everyMs: 6 * 60 * 60 * 1000, // 6 hours
+      everyMs: 5 * 60 * 1000, // 5 minutes (testing); increase to 6h once stable
     },
     agentId: 'main',
     execution: {
       promptTemplate: 'empathy-optimizer',
-      timeoutSeconds: 120,
+      timeoutSeconds: 300, // 5 min — needs time to scan events.jsonl
       lightContext: true,
       toolsAllow: ['read_file', 'write_file', 'search_file_content'],
     },

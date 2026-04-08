@@ -356,19 +356,47 @@ export async function reconcilePDTasks(
   return result;
 }
 
-function healthCheck(tasks: PDTaskSpec[], cronStore: CronStoreFile, logger: { warn?: (msg: string) => void }): PDTaskSpec[] {
+function healthCheck(
+  tasks: PDTaskSpec[],
+  cronStore: CronStoreFile,
+  logger: { info?: (msg: string) => void; warn?: (msg: string) => void },
+): PDTaskSpec[] {
   const jobByName = new Map(cronStore.jobs.map((j) => [j.name, j]));
+
   for (const task of tasks) {
     const job = jobByName.get(task.name);
     if (!job) continue;
+
     const errors = job.state.consecutiveErrors ?? 0;
-    if (errors >= 3 && !task.meta?.autoDisabled) {
+    const lastError = job.state.lastError ?? '';
+    const isTimeout = lastError.includes('timed out') || lastError.includes('timeout');
+
+    // Auto-increase timeout on timeout error (exponential backoff: 2x, max 1800s)
+    if (isTimeout && errors > 0 && job.payload.kind === 'agentTurn') {
+      const currentTimeout = job.payload.timeoutSeconds ?? 120;
+      const newTimeout = Math.min(1800, currentTimeout * 2);
+      if (newTimeout > currentTimeout) {
+        job.payload.timeoutSeconds = newTimeout;
+        job.state.consecutiveErrors = 0;
+        job.state.lastError = undefined;
+        logger.info?.(`[PD:Reconciler] Auto-increased timeout for '${task.name}': ${currentTimeout}s → ${newTimeout}s (was ${errors} consecutive timeouts)`);
+      }
+    }
+
+    // Auto-disable only for non-timeout errors after 3 consecutive failures
+    if (errors >= 3 && !isTimeout && !task.meta?.autoDisabled) {
       if (!task.meta) task.meta = {};
       task.meta.autoDisabled = true;
       task.meta.autoDisabledAt = Date.now();
       task.meta.autoDisabledReason = `consecutiveErrors=${errors}`;
-      logger.warn?.(`[PD:Reconciler] Auto-disabled task '${task.id}' due to ${errors} consecutive errors`);
+      logger.warn?.(`[PD:Reconciler] Auto-disabled task '${task.id}' due to ${errors} consecutive errors: ${lastError.substring(0, 80)}`);
     }
+
+    // Reset consecutiveErrors on non-error runs
+    if (errors === 0 && task.meta?.autoDisabled) {
+      logger.info?.(`[PD:Reconciler] Task '${task.id}' was previously auto-disabled but has 0 consecutive errors now`);
+    }
+
     if (task.meta) {
       task.meta.consecutiveFailCount = errors;
       if (job.state.lastRunAtMs) {
