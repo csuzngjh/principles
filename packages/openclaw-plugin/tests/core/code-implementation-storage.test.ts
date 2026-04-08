@@ -3,11 +3,13 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import {
+  deleteImplementationAssetDir,
   getImplementationAssetRoot,
   loadManifest,
   writeManifest,
   loadEntrySource,
   createImplementationAssetDir,
+  writeEntrySource,
   type CodeImplementationManifest,
 } from '../../src/core/code-implementation-storage.js';
 import { safeRmDir } from '../test-utils.js';
@@ -33,7 +35,7 @@ describe('CodeImplementationStorage', () => {
   describe('getImplementationAssetRoot', () => {
     it('returns correct path under .state/principles/implementations/{implId}', () => {
       const result = getImplementationAssetRoot(stateDir, 'IMPL_001');
-      expect(result).toBe(path.join(stateDir, '.state', 'principles', 'implementations', 'IMPL_001'));
+      expect(result).toBe(path.join(stateDir, 'principles', 'implementations', 'IMPL_001'));
     });
 
     it('throws on implId with forward slash', () => {
@@ -277,6 +279,34 @@ describe('CodeImplementationStorage', () => {
       expect('lifecycleState' in raw).toBe(false);
     });
 
+    it('persists lineage metadata when provided for a generated candidate', () => {
+      const implId = 'IMPL_011A';
+      const manifest = createImplementationAssetDir(stateDir, implId, '1.0.0', {
+        lineage: {
+          principleId: 'P-001',
+          ruleId: 'R-001',
+          sourceSnapshotRef: 'snapshot-session-1',
+          sourcePainIds: ['pain:gate:1'],
+          sourceGateBlockIds: ['gate:write:1'],
+          sourceSessionId: 'session-1',
+          artificerArtifactId: 'artifact-1',
+        },
+      });
+
+      expect(manifest.lineage).toMatchObject({
+        principleId: 'P-001',
+        ruleId: 'R-001',
+        sourceSessionId: 'session-1',
+        artificerArtifactId: 'artifact-1',
+      });
+
+      const loaded = loadManifest(stateDir, implId);
+      expect(loaded?.lineage).toMatchObject({
+        sourcePainIds: ['pain:gate:1'],
+        sourceGateBlockIds: ['gate:write:1'],
+      });
+    });
+
     it('is idempotent: repeated calls do not overwrite existing entry.js', () => {
       const implId = 'IMPL_012';
 
@@ -332,6 +362,37 @@ describe('CodeImplementationStorage', () => {
       expect(source).not.toBeNull();
       expect(source).toContain('export const meta');
       expect(source).toContain('export function evaluate');
+    });
+
+    it('writes generated entry source when provided', () => {
+      const implId = 'IMPL_016';
+      createImplementationAssetDir(stateDir, implId, '1.0.0', {
+        entrySource: 'export const meta = { name: "x", version: "1", ruleId: "R", coversCondition: "c" }; export function evaluate() { return { decision: "allow", matched: false, reason: "ok" }; }',
+      });
+
+      const source = loadEntrySource(stateDir, implId);
+      expect(source).toContain('export const meta');
+      expect(source).not.toContain('placeholder');
+    });
+  });
+
+  describe('entry and cleanup helpers', () => {
+    it('overwrites entry source through writeEntrySource', () => {
+      const implId = 'IMPL_017';
+      createImplementationAssetDir(stateDir, implId, '1.0.0');
+
+      writeEntrySource(stateDir, implId, 'export const meta = { name: "updated", version: "1", ruleId: "R", coversCondition: "c" }; export function evaluate() { return { decision: "allow", matched: false, reason: "updated" }; }');
+
+      expect(loadEntrySource(stateDir, implId)).toContain('updated');
+    });
+
+    it('removes the asset directory through deleteImplementationAssetDir', () => {
+      const implId = 'IMPL_018';
+      createImplementationAssetDir(stateDir, implId, '1.0.0');
+
+      deleteImplementationAssetDir(stateDir, implId);
+
+      expect(fs.existsSync(getImplementationAssetRoot(stateDir, implId))).toBe(false);
     });
   });
 });
