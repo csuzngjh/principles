@@ -592,7 +592,15 @@ export class NocturnalWorkflowManager implements WorkflowManager {
     // WorkflowManager Interface: sweepExpiredWorkflows (NOC-05)
     // ─────────────────────────────────────────────────────────────────────────
 
-    async sweepExpiredWorkflows(maxAgeMs = 30 * 60 * 1000, subagentRuntime?: any): Promise<number> {
+    async sweepExpiredWorkflows(
+        maxAgeMs = 30 * 60 * 1000,
+        subagentRuntime?: any,
+        agentSession?: {
+            resolveStorePath: () => string;
+            loadSessionStore: (storePath: string, opts?: { skipCache?: boolean }) => Record<string, unknown>;
+            saveSessionStore: (storePath: string, store: Record<string, unknown>) => Promise<void>;
+        },
+    ): Promise<number> {
         const expired = this.store.getExpiredWorkflows(maxAgeMs);
 
         this.logger.info(`[PD:NocturnalWorkflow] sweepExpiredWorkflows: found ${expired.length} expired`);
@@ -605,16 +613,41 @@ export class NocturnalWorkflowManager implements WorkflowManager {
                 this.store.updateWorkflowState(workflow.workflow_id, 'expired');
                 this.store.recordEvent(workflow.workflow_id, 'nocturnal_expired', workflow.state, 'expired', 'TTL expired', { workflowId: workflow.workflow_id });
 
-                // #180: Cleanup subagent session if runtime available
-                if (subagentRuntime && workflow.child_session_key) {
+                // #180 + #188: Cleanup subagent session with gateway-safe fallback
+                if (workflow.child_session_key) {
                     try {
-                        await subagentRuntime.deleteSession({
-                            sessionKey: workflow.child_session_key,
-                            deleteTranscript: true,
-                        });
-                        this.logger.info(`[PD:NocturnalWorkflow] Cleaned up subagent session: ${workflow.child_session_key}`);
+                        if (subagentRuntime) {
+                            await subagentRuntime.deleteSession({
+                                sessionKey: workflow.child_session_key,
+                                deleteTranscript: true,
+                            });
+                            this.logger.info(`[PD:NocturnalWorkflow] Cleaned up subagent session: ${workflow.child_session_key}`);
+                        } else if (agentSession) {
+                            // Heartbeat-safe fallback: directly manipulate session store
+                            const storePath = agentSession.resolveStorePath();
+                            const store = agentSession.loadSessionStore(storePath, { skipCache: true });
+                            const normalizedKey = workflow.child_session_key.toLowerCase();
+                            if (store[normalizedKey]) {
+                                delete store[normalizedKey];
+                                await agentSession.saveSessionStore(storePath, store);
+                                this.logger.info(`[PD:NocturnalWorkflow] Cleaned up subagent session via agentSession fallback: ${workflow.child_session_key}`);
+                            }
+                        }
                     } catch (sessionErr) {
-                        this.logger.warn(`[PD:NocturnalWorkflow] Failed to cleanup session ${workflow.child_session_key}: ${String(sessionErr)}`);
+                        const errMsg = String(sessionErr);
+                        // #188: If gateway-scoped method fails, try agentSession fallback
+                        if (errMsg.includes('gateway request') && agentSession) {
+                            const storePath = agentSession.resolveStorePath();
+                            const store = agentSession.loadSessionStore(storePath, { skipCache: true });
+                            const normalizedKey = workflow.child_session_key.toLowerCase();
+                            if (store[normalizedKey]) {
+                                delete store[normalizedKey];
+                                await agentSession.saveSessionStore(storePath, store);
+                                this.logger.info(`[PD:NocturnalWorkflow] Cleaned up subagent session via agentSession fallback after gateway error: ${workflow.child_session_key}`);
+                            }
+                        } else {
+                            this.logger.warn(`[PD:NocturnalWorkflow] Failed to cleanup session ${workflow.child_session_key}: ${errMsg}`);
+                        }
                     }
                 }
 

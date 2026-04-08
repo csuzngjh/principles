@@ -48,6 +48,7 @@ async function runWorkflowWatchdog(
   const details: string[] = [];
   const now = Date.now();
   const subagentRuntime = api?.runtime?.subagent;
+  const agentSession = api?.runtime?.agent?.session;
 
   try {
     const store = new WorkflowStore({ workspaceDir: wctx.workspaceDir });
@@ -66,13 +67,36 @@ async function runWorkflowWatchdog(
           store.updateWorkflowState(wf.workflow_id, 'terminal_error');
           store.recordEvent(wf.workflow_id, 'watchdog_timeout', 'active', 'terminal_error', `Stale active > ${staleThreshold / 60000}s`, { ageMs: now - wf.created_at });
 
-          // Cleanup session if possible
-          if (subagentRuntime && wf.child_session_key) {
+          // Cleanup session if possible (#188: gateway-safe fallback)
+          if (wf.child_session_key) {
             try {
-              await subagentRuntime.deleteSession({ sessionKey: wf.child_session_key, deleteTranscript: true });
-              logger?.info?.(`[PD:Watchdog] Cleaned up stale session: ${wf.child_session_key}`);
+              if (subagentRuntime) {
+                await subagentRuntime.deleteSession({ sessionKey: wf.child_session_key, deleteTranscript: true });
+                logger?.info?.(`[PD:Watchdog] Cleaned up stale session: ${wf.child_session_key}`);
+              } else if (agentSession) {
+                const storePath = agentSession.resolveStorePath();
+                const store = agentSession.loadSessionStore(storePath, { skipCache: true });
+                const normalizedKey = wf.child_session_key.toLowerCase();
+                if (store[normalizedKey]) {
+                  delete store[normalizedKey];
+                  await agentSession.saveSessionStore(storePath, store);
+                  logger?.info?.(`[PD:Watchdog] Cleaned up stale session via agentSession fallback: ${wf.child_session_key}`);
+                }
+              }
             } catch (cleanupErr) {
-              logger?.warn?.(`[PD:Watchdog] Failed to cleanup session ${wf.child_session_key}: ${String(cleanupErr)}`);
+              const errMsg = String(cleanupErr);
+              if (errMsg.includes('gateway request') && agentSession) {
+                const storePath = agentSession.resolveStorePath();
+                const store = agentSession.loadSessionStore(storePath, { skipCache: true });
+                const normalizedKey = wf.child_session_key.toLowerCase();
+                if (store[normalizedKey]) {
+                  delete store[normalizedKey];
+                  await agentSession.saveSessionStore(storePath, store);
+                  logger?.info?.(`[PD:Watchdog] Cleaned up stale session via agentSession fallback after gateway error: ${wf.child_session_key}`);
+                }
+              } else {
+                logger?.warn?.(`[PD:Watchdog] Failed to cleanup session ${wf.child_session_key}: ${errMsg}`);
+              }
             }
           }
         }
@@ -1715,11 +1739,13 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                     // Delegate to workflow managers' sweepExpiredWorkflows so that
                     // session/transcript cleanup runs via driver.deleteSession().
                     const subagentRuntime = api?.runtime?.subagent;
+                    const agentSession = api?.runtime?.agent?.session;
                     if (subagentRuntime) {
                         const empathyMgr = new EmpathyObserverWorkflowManager({
                             workspaceDir: wctx.workspaceDir,
                             logger: api.logger,
                             subagent: subagentRuntime,
+                            agentSession,
                         });
                         let swept = 0;
                         try {
@@ -1732,6 +1758,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                             workspaceDir: wctx.workspaceDir,
                             logger: api.logger,
                             subagent: subagentRuntime,
+                            agentSession,
                         });
                         try {
                             swept += await deepReflectMgr.sweepExpiredWorkflows(WORKFLOW_TTL_MS);
@@ -1739,7 +1766,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                             deepReflectMgr.dispose();
                         }
 
-                        // #183: Sweep Nocturnal workflows too
+                        // #183 + #188: Sweep Nocturnal workflows too (with gateway-safe fallback)
                         try {
                             const nocturnalMgr = new NocturnalWorkflowManager({
                                 workspaceDir: wctx.workspaceDir,
@@ -1747,7 +1774,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                                 logger: api.logger,
                                 runtimeAdapter: new OpenClawTrinityRuntimeAdapter(api),
                             });
-                            swept += await nocturnalMgr.sweepExpiredWorkflows(WORKFLOW_TTL_MS, subagentRuntime);
+                            swept += await nocturnalMgr.sweepExpiredWorkflows(WORKFLOW_TTL_MS, subagentRuntime, agentSession);
                             nocturnalMgr.dispose();
                         } catch (noctSweepErr) {
                             logger?.warn?.(`[PD:EvolutionWorker] Nocturnal sweep failed: ${String(noctSweepErr)}`);
