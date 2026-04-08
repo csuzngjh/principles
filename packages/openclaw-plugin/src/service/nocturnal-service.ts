@@ -1138,19 +1138,24 @@ async function executeNocturnalReflectionWithAdapter(
     selectedPrincipleId = options.principleIdOverride;
     selectedSessionId = options.snapshotOverride.sessionId;
     snapshot = options.snapshotOverride;
+    // Calculate violation density from snapshot stats for meaningful diagnostics
+    const snapStats = options.snapshotOverride.stats;
+    const totalToolCalls = snapStats?.totalToolCalls ?? 0;
+    const failureCount = snapStats?.failureCount ?? 0;
+    const violationDensity = totalToolCalls > 0 ? failureCount / totalToolCalls : 0;
     diagnostics.selection = {
       decision: 'selected',
       selectedPrincipleId,
       selectedSessionId,
       skipReason: undefined,
       diagnostics: {
-        totalEvaluablePrinciples: 0,
+        totalEvaluablePrinciples: 1,  // We provided one principle via override
         filteredByCooldown: 0,
-        passedPrinciples: [],
-        violatingSessionCount: 0,
-        selectedSessionViolationDensity: null,
-        selectedPrincipleScore: null,
-        scoringBreakdown: {},
+        passedPrinciples: [selectedPrincipleId],
+        violatingSessionCount: 1,  // The session we're using
+        selectedSessionViolationDensity: violationDensity,
+        selectedPrincipleScore: 100,  // Override means high priority
+        scoringBreakdown: { override: 100 },
         idleCheckPassed: true,
         cooldownCheckPassed: true,
         quotaCheckPassed: true,

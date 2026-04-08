@@ -17,6 +17,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { EvolutionReducerImpl } from '../../src/core/evolution-reducer.js';
 import { listEvaluablePrinciples, loadStore } from '../../src/core/principle-training-state.js';
+import { updateTrainingStore } from '../../src/core/principle-tree-ledger.js';
 import { PathResolver } from '../../src/core/path-resolver.js';
 
 describe('Principle Lifecycle E2E', () => {
@@ -97,17 +98,20 @@ describe('Principle Lifecycle E2E', () => {
       expect(store[principleId!]).toBeDefined();
       expect(store[principleId!].internalizationStatus).toBe('prompt_only');
 
-      // Act: Upgrade status to needs_training (simulating lifecycle progression)
-      store[principleId!].internalizationStatus = 'needs_training';
-      // Note: In real code, this would be done via updateTrainingStore
-
-      // Assert: Now listEvaluablePrinciples should return it
-      // (But since we didn't persist, we need to re-check the logic)
-      // The key point is: prompt_only principles are NOT evaluable
-      // They must first graduate to needs_training or higher
-      const evaluablePrinciples = listEvaluablePrinciples(stateDir);
-      // Since we modified in-memory but didn't persist, it should still be empty
+      // Assert: prompt_only principles are NOT evaluable yet
+      let evaluablePrinciples = listEvaluablePrinciples(stateDir);
       expect(evaluablePrinciples).toHaveLength(0);
+
+      // Act: Upgrade status to needs_training using updateTrainingStore
+      updateTrainingStore(stateDir, (trainingStore) => {
+        trainingStore[principleId!].internalizationStatus = 'needs_training';
+      });
+
+      // Assert: Now listEvaluablePrinciples should return the principle
+      evaluablePrinciples = listEvaluablePrinciples(stateDir);
+      expect(evaluablePrinciples).toHaveLength(1);
+      expect(evaluablePrinciples[0].principleId).toBe(principleId);
+      expect(evaluablePrinciples[0].internalizationStatus).toBe('needs_training');
     });
 
     it('should NOT list manual_only principles as evaluable', () => {
