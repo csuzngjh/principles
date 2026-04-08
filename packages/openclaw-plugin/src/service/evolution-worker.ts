@@ -939,6 +939,12 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     fs.unlinkSync(completeMarker);
                 } catch { /* marker may have been deleted already, not critical */ }
 
+                // #190: Clean up diagnostician report file after processing
+                try {
+                    const reportPath = path.join(wctx.stateDir, `.diagnostician_report_${task.id}.json`);
+                    if (fs.existsSync(reportPath)) fs.unlinkSync(reportPath);
+                } catch { /* report may not exist, not critical */ }
+
                 // FIX (#187): Remove the task from the diagnostician task store
                 await completeDiagnosticianTask(wctx.stateDir, task.id);
 
@@ -1009,9 +1015,19 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         logger.warn(`[PD:EvolutionWorker] Failed to parse late diagnostician report for task ${task.id}: ${String(err)}`);
                     }
                     try { fs.unlinkSync(completeMarker); } catch { /* marker may not exist, not critical */ }
+                    // #190: Clean up diagnostician report file
+                    try {
+                        const lateReportPath = path.join(wctx.stateDir, `.diagnostician_report_${task.id}.json`);
+                        if (fs.existsSync(lateReportPath)) fs.unlinkSync(lateReportPath);
+                    } catch { /* report may not exist, not critical */ }
                     task.resolution = principleCreated ? 'late_marker_principle_created' : 'late_marker_no_principle';
                 } else {
                     if (logger) logger.info(`[PD:EvolutionWorker] Task ${task.id} auto-completed after ${timeoutMinutes} minute timeout`);
+                    // #190: Clean up diagnostician report file even on timeout (may have been written late)
+                    try {
+                        const timeoutReportPath = path.join(wctx.stateDir, `.diagnostician_report_${task.id}.json`);
+                        if (fs.existsSync(timeoutReportPath)) fs.unlinkSync(timeoutReportPath);
+                    } catch { /* report may not exist, not critical */ }
                     task.resolution = 'auto_completed_timeout';
                 }
 

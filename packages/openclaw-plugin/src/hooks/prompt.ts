@@ -420,6 +420,15 @@ The empathy observer subagent handles pain detection independently.
     latestUserMessage = '';
   }
 
+  // #189: Skip empathy observer output — prevents recursive spawning.
+  // When the empathy observer runs, its prompt starts with "You are an empathy observer."
+  // This output loops back through the prompt hook (since it runs in the parent session,
+  // not a :subagent: session), and without this check would trigger another empathy evaluation.
+  if (latestUserMessage.startsWith('You are an empathy observer.') ||
+      latestUserMessage.includes('Analyze ONLY the user message below for empathy')) {
+    latestUserMessage = '';
+  }
+
   // Try to extract actual user message from Feishu wrapper formats
   if (latestUserMessage.length > 50) {
     // Format 1: "Sender (untrusted metadata): ```json {...}```  user_message_text"
