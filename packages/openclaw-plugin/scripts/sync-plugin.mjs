@@ -54,6 +54,7 @@ function parseArgs() {
         force: false,
         restart: false,
         dev: false,
+        bump: false,
         help: false,
     };
 
@@ -78,6 +79,11 @@ function parseArgs() {
                 args.dev = true;
                 args.force = true;
                 args.restart = true;
+                args.bump = true;
+                break;
+            case '--bump':
+            case '-b':
+                args.bump = true;
                 break;
             case '--force':
             case '-f':
@@ -112,7 +118,8 @@ Options:
   --skip-build       Skip build step (use existing dist/)
   --skip-deps        Skip dependency installation
   --restart          Automatically restart OpenClaw gateway after installation
-  --dev, -d          Developer mode: --force + --restart + clean stale backups (default for local dev)
+  --dev, -d          Developer mode: --force + --restart + --bump + clean stale backups
+  --bump, -b         Auto-bump patch version if there are uncommitted source changes
   --force, -f        Force overwrite without prompts
   --help, -h         Show this help message
 
@@ -123,8 +130,11 @@ Examples:
   # Install with English skills
   node scripts/sync-plugin.mjs --lang en
 
-  # Developer mode: build, deploy, restart, clean up (recommended for debugging)
+  # Developer mode: bump version, build, deploy, restart, clean up (recommended)
   node scripts/sync-plugin.mjs --dev
+
+  # Just bump version without deploying
+  node scripts/sync-plugin.mjs --bump --skip-build --skip-deps
 
   # Quick sync after local build
   node scripts/sync-plugin.mjs --skip-deps --skip-build
@@ -203,6 +213,80 @@ function getVersion(dir) {
         return pkg.version;
     } catch {
         return null;
+    }
+}
+
+/**
+ * Auto-bump patch version if there are uncommitted source changes.
+ * Updates all version files: package.json (root + plugin), openclaw.plugin.json, README_ZH.md.
+ */
+function autoBumpVersion(sourceDir) {
+    const rootDir = join(sourceDir, '..', '..');
+    const pluginDir = sourceDir;
+
+    // Check for uncommitted changes in source files
+    try {
+        const diffOutput = execSync('git diff --name-only HEAD', {
+            cwd: rootDir,
+            encoding: 'utf-8',
+        }).trim();
+        const changedFiles = diffOutput ? diffOutput.split('\n').filter(f => {
+            return f.startsWith('packages/openclaw-plugin/src/') ||
+                   f.startsWith('packages/openclaw-plugin/skills/') ||
+                   f.startsWith('scripts/') ||
+                   f === 'packages/openclaw-plugin/package.json' ||
+                   f === 'package.json' ||
+                   f === 'README_ZH.md';
+        }) : [];
+
+        if (changedFiles.length === 0) {
+            console.log('📋 No uncommitted source changes — skipping version bump');
+            return;
+        }
+
+        console.log(`📋 Found uncommitted changes in ${changedFiles.length} file(s) — bumping version...`);
+
+        const currentVersion = getVersion(pluginDir);
+        if (!currentVersion) {
+            console.error('❌ Cannot determine current version');
+            process.exit(1);
+        }
+
+        const [major, minor, patch] = currentVersion.split('.').map(Number);
+        const newVersion = `${major}.${minor}.${patch + 1}`;
+
+        // Update package.json (plugin)
+        const pkgPath = join(pluginDir, 'package.json');
+        const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+        pkg.version = newVersion;
+        writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf-8');
+
+        // Update openclaw.plugin.json
+        const manifestPath = join(pluginDir, 'openclaw.plugin.json');
+        const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+        manifest.version = newVersion;
+        writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n', 'utf-8');
+
+        // Update root package.json
+        const rootPkgPath = join(rootDir, 'package.json');
+        if (existsSync(rootPkgPath)) {
+            const rootPkg = JSON.parse(readFileSync(rootPkgPath, 'utf-8'));
+            rootPkg.version = newVersion;
+            writeFileSync(rootPkgPath, JSON.stringify(rootPkg, null, 2) + '\n', 'utf-8');
+        }
+
+        // Update README_ZH.md
+        const readmePath = join(rootDir, 'README_ZH.md');
+        if (existsSync(readmePath)) {
+            let readme = readFileSync(readmePath, 'utf-8');
+            readme = readme.replace(/v\d+\.\d+\.\d+/g, `v${newVersion}`);
+            writeFileSync(readmePath, readme, 'utf-8');
+        }
+
+        console.log(`✅ Version bumped: ${currentVersion} → ${newVersion}`);
+    } catch (err) {
+        console.warn(`⚠️  Auto-bump failed: ${err.message}`);
+        console.warn('   Continuing with current version');
     }
 }
 
@@ -693,12 +777,17 @@ function main() {
     console.log('║     Principles Disciple Plugin Installer                   ║');
     console.log('╚════════════════════════════════════════════════════════════╝\n');
 
-    // Dev mode: auto-force, auto-restart, clean stale backups
+    // Dev mode: auto-force, auto-restart, auto-bump, clean stale backups
     if (args.dev) {
-        console.log('🛠️  DEV MODE: force + restart + stale backup cleanup\n');
+        console.log('🛠️  DEV MODE: force + restart + bump + stale backup cleanup\n');
     }
 
-    // Get source version
+    // Auto-bump version if requested
+    if (args.bump) {
+        autoBumpVersion(SOURCE_DIR);
+    }
+
+    // Get source version (after potential bump)
     const sourceVersion = getVersion(SOURCE_DIR);
     if (!sourceVersion) {
         console.error('❌ Cannot determine source version. Check package.json.');

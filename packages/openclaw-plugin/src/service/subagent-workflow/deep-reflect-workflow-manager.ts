@@ -23,6 +23,8 @@ export interface DeepReflectWorkflowOptions {
     workspaceDir: string;
     logger: PluginLogger;
     subagent: RuntimeDirectDriver['subagent'];
+    /** Pass api.runtime.agent.session to enable heartbeat-safe cleanup (#188) */
+    agentSession?: RuntimeDirectDriver['agentSession'];
 }
 
 export class DeepReflectWorkflowManager extends WorkflowManagerBase {
@@ -31,6 +33,7 @@ export class DeepReflectWorkflowManager extends WorkflowManagerBase {
             workspaceDir: opts.workspaceDir,
             logger: opts.logger,
             subagent: opts.subagent,
+            agentSession: opts.agentSession,
             workflowType: 'deep-reflect',
             sessionPrefix: WORKFLOW_SESSION_PREFIX,
             defaultTimeoutMs: DEFAULT_TIMEOUT_MS,

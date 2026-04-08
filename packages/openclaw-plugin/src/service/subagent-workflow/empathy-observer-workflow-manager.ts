@@ -12,10 +12,7 @@ import { WorkspaceContext } from '../../core/workspace-context.js';
 import { trackFriction } from '../../core/session-tracker.js';
 import { isSubagentRuntimeAvailable } from '../../utils/subagent-probe.js';
 import { WorkflowManagerBase } from './workflow-manager-base.js';
-import { applyKeywordUpdates } from '../../core/empathy-keyword-matcher.js';
-import { loadKeywordStore, saveKeywordStore } from '../../core/empathy-keyword-matcher.js';
 import { normalizeSeverity } from '../../core/empathy-types.js';
-import * as path from 'path';
 
 const WORKFLOW_SESSION_PREFIX = 'agent:main:subagent:workflow-';
 
@@ -26,6 +23,8 @@ export interface EmpathyObserverWorkflowOptions {
     workspaceDir: string;
     logger: PluginLogger;
     subagent: RuntimeDirectDriver['subagent'];
+    /** Pass api.runtime.agent.session to enable heartbeat-safe cleanup (#188) */
+    agentSession?: RuntimeDirectDriver['agentSession'];
 }
 
 export class EmpathyObserverWorkflowManager extends WorkflowManagerBase {
@@ -34,6 +33,7 @@ export class EmpathyObserverWorkflowManager extends WorkflowManagerBase {
             workspaceDir: opts.workspaceDir,
             logger: opts.logger,
             subagent: opts.subagent,
+            agentSession: opts.agentSession,
             workflowType: 'empathy-observer',
             sessionPrefix: WORKFLOW_SESSION_PREFIX,
             defaultTimeoutMs: DEFAULT_TIMEOUT_MS,
@@ -253,78 +253,6 @@ export const empathyObserverWorkflowSpec: SubagentWorkflowSpec<EmpathyResult> = 
         } catch (error) {
             console.warn(`[PD:EmpathyObserverWorkflow] Failed to persist trajectory: ${String(error)}`);
         }
-    },
-
-    shouldFinalizeOnWaitStatus(status: 'ok' | 'error' | 'timeout'): boolean {
-        return status === 'ok';
-    },
-};
-
-// ─── Keyword Optimizer Workflow Spec ────────────────────────────────────────
-
-export const empathyOptimizerWorkflowSpec: SubagentWorkflowSpec<{ added: number; updated: number; removed: number }> = {
-    workflowType: 'empathy-optimizer',
-    transport: 'runtime_direct',
-    timeoutMs: 90_000,
-    ttlMs: 300_000,
-    shouldDeleteSessionAfterFinalize: false,
-
-    buildPrompt(taskInput: unknown, _metadata: WorkflowMetadata): string {
-        const input = taskInput as { prompt: string };
-        return input.prompt || 'Optimize empathy keywords.';
-    },
-
-    async parseResult(ctx: WorkflowResultContext): Promise<{ added: number; updated: number; removed: number } | null> {
-        const rawText = extractAssistantTextForSpec(ctx.messages, ctx.assistantTexts);
-        if (!rawText) return null;
-
-        // Strip markdown code fences — LLM often wraps JSON in ```json ... ```
-        let cleanedText = rawText;
-        const fenceMatch = cleanedText.match(/```(?:json)?\s*([\s\S]*?)```/);
-        if (fenceMatch) {
-            cleanedText = fenceMatch[1].trim();
-        }
-
-        // Extract JSON from the response
-        const jsonMatch = cleanedText.match(/\{[\s\S]*\}/);
-        if (!jsonMatch) {
-            console.warn(`[PD:EmpathyOptimizer] No JSON found in subagent response (raw_len=${rawText.length})`);
-            return null;
-        }
-
-        try {
-            const updates = JSON.parse(jsonMatch[0]);
-            if (!updates.updates || typeof updates.updates !== 'object') {
-                console.warn(`[PD:EmpathyOptimizer] Invalid updates format: ${JSON.stringify(updates).substring(0, 100)}`);
-                return null;
-            }
-
-            // Get keyword store from metadata
-            const metadata = ctx.metadata;
-            const stateDir = metadata.workspaceDir ? path.join(metadata.workspaceDir as string, '.state') : '';
-            if (!stateDir) return null;
-
-            const keywordStore = loadKeywordStore(stateDir, (metadata.language as 'zh' | 'en') || 'zh');
-            const result = applyKeywordUpdates(keywordStore, updates.updates);
-
-            // Save updated store
-            saveKeywordStore(stateDir, keywordStore);
-            console.info(`[PD:EmpathyOptimizer] Applied updates: +${result.added}, ~${result.updated}, -${result.removed}`);
-
-            return result;
-        } catch (err) {
-            console.warn(`[PD:EmpathyOptimizer] Failed to parse updates JSON: ${String(err)}`);
-            return null;
-        }
-    },
-
-    async persistResult(ctx: WorkflowPersistContext<{ added: number; updated: number; removed: number }>): Promise<void> {
-        const { result } = ctx;
-        if (!result || (result.added === 0 && result.updated === 0 && result.removed === 0)) {
-            console.info(`[PD:EmpathyOptimizer] No changes applied`);
-            return;
-        }
-        console.info(`[PD:EmpathyOptimizer] Persisted optimization results: +${result.added}, ~${result.updated}, -${result.removed}`);
     },
 
     shouldFinalizeOnWaitStatus(status: 'ok' | 'error' | 'timeout'): boolean {

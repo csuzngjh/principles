@@ -10,18 +10,144 @@ import { WorkspaceContext } from '../core/workspace-context.js';
 import { EventLog } from '../core/event-log.js';
 import { initPersistence, flushAllSessions } from '../core/session-tracker.js';
 import { acquireLockAsync, releaseLock, type LockContext } from '../utils/file-lock.js';
+import { addDiagnosticianTask, completeDiagnosticianTask, getPendingDiagnosticianTasks } from '../core/diagnostician-task-store.js';
 import { getEvolutionLogger, type EvolutionStage } from '../core/evolution-logger.js';
 import type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 export type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 import { LockUnavailableError } from '../config/index.js';
 import { checkWorkspaceIdle, checkCooldown } from './nocturnal-runtime.js';
 import { WorkflowStore } from './subagent-workflow/workflow-store.js';
+import type { WorkflowRow } from './subagent-workflow/types.js';
 import { EmpathyObserverWorkflowManager } from './subagent-workflow/empathy-observer-workflow-manager.js';
 import { DeepReflectWorkflowManager } from './subagent-workflow/deep-reflect-workflow-manager.js';
 import { NocturnalWorkflowManager, nocturnalWorkflowSpec } from './subagent-workflow/nocturnal-workflow-manager.js';
+import { createNocturnalTrajectoryExtractor } from '../core/nocturnal-trajectory-extractor.js';
+import { isSubagentRuntimeAvailable } from '../utils/subagent-probe.js';
 
 const WORKFLOW_TTL_MS = 5 * 60 * 1000; // 5 minutes default TTL for helper workflows
 import { OpenClawTrinityRuntimeAdapter } from '../core/nocturnal-trinity.js';
+
+// ── Workflow Watchdog ────────────────────────────────────────────────────────
+// Detects stale/orphaned workflows, invalid results, and cleanup failures.
+// Runs every heartbeat cycle, catching bugs like:
+//   #185 — orphaned active workflows
+//   #181 — structurally invalid results (all zeros)
+//   #180/#183 — expired workflows not swept
+//   #182 — unhandled rejections leaving workflows in limbo
+
+interface WatchdogResult {
+  anomalies: number;
+  details: string[];
+}
+
+async function runWorkflowWatchdog(
+  wctx: WorkspaceContext,
+  api: OpenClawPluginApi | null,
+  logger?: PluginLogger,
+): Promise<WatchdogResult> {
+  const details: string[] = [];
+  const now = Date.now();
+  const subagentRuntime = api?.runtime?.subagent;
+  const agentSession = api?.runtime?.agent?.session;
+
+  try {
+    const store = new WorkflowStore({ workspaceDir: wctx.workspaceDir });
+    try {
+      const allWorkflows: WorkflowRow[] = store.listWorkflows();
+
+      // Check 1: Stale active workflows (active > 2x TTL)
+      const staleThreshold = WORKFLOW_TTL_MS * 2;
+      const staleActive = allWorkflows.filter(
+        (wf: WorkflowRow) => wf.state === 'active' && (now - wf.created_at) > staleThreshold,
+      );
+      if (staleActive.length > 0) {
+        for (const wf of staleActive) {
+          const ageMin = Math.round((now - wf.created_at) / 60000);
+          details.push(`stale_active: ${wf.workflow_id} (${wf.workflow_type}, ${ageMin}min old)`);
+          store.updateWorkflowState(wf.workflow_id, 'terminal_error');
+          store.recordEvent(wf.workflow_id, 'watchdog_timeout', 'active', 'terminal_error', `Stale active > ${staleThreshold / 60000}s`, { ageMs: now - wf.created_at });
+
+          // Cleanup session if possible (#188: gateway-safe fallback)
+          if (wf.child_session_key) {
+            try {
+              if (subagentRuntime) {
+                await subagentRuntime.deleteSession({ sessionKey: wf.child_session_key, deleteTranscript: true });
+                logger?.info?.(`[PD:Watchdog] Cleaned up stale session: ${wf.child_session_key}`);
+              } else if (agentSession) {
+                const storePath = agentSession.resolveStorePath();
+                const store = agentSession.loadSessionStore(storePath, { skipCache: true });
+                const normalizedKey = wf.child_session_key.toLowerCase();
+                if (store[normalizedKey]) {
+                  delete store[normalizedKey];
+                  await agentSession.saveSessionStore(storePath, store);
+                  logger?.info?.(`[PD:Watchdog] Cleaned up stale session via agentSession fallback: ${wf.child_session_key}`);
+                }
+              }
+            } catch (cleanupErr) {
+              const errMsg = String(cleanupErr);
+              if (errMsg.includes('gateway request') && agentSession) {
+                const storePath = agentSession.resolveStorePath();
+                const store = agentSession.loadSessionStore(storePath, { skipCache: true });
+                const normalizedKey = wf.child_session_key.toLowerCase();
+                if (store[normalizedKey]) {
+                  delete store[normalizedKey];
+                  await agentSession.saveSessionStore(storePath, store);
+                  logger?.info?.(`[PD:Watchdog] Cleaned up stale session via agentSession fallback after gateway error: ${wf.child_session_key}`);
+                }
+              } else {
+                logger?.warn?.(`[PD:Watchdog] Failed to cleanup session ${wf.child_session_key}: ${errMsg}`);
+              }
+            }
+          }
+        }
+      }
+
+      // Check 2: Workflows in terminal_error/expired without cleanup
+      const unclearedTerminal = allWorkflows.filter(
+        (wf: WorkflowRow) => (wf.state === 'terminal_error' || wf.state === 'expired') && wf.cleanup_state === 'pending',
+      );
+      if (unclearedTerminal.length > 0) {
+        details.push(`uncleared_terminal: ${unclearedTerminal.length} workflows (will be swept next cycle)`);
+      }
+
+      // Check 3: Nocturnal workflow result validation (#181 pattern)
+      const nocturnalCompleted = allWorkflows.filter(
+        (wf: WorkflowRow) => wf.workflow_type === 'nocturnal' && wf.state === 'completed',
+      );
+      for (const wf of nocturnalCompleted) {
+        // Check if the metadata snapshot has all zeros (invalid data)
+        try {
+          const meta = JSON.parse(wf.metadata_json) as Record<string, unknown>;
+          const snapshot = meta.snapshot as Record<string, unknown> | undefined;
+          if (snapshot) {
+            const stats = snapshot.stats as Record<string, number> | undefined;
+            if (stats && stats.totalAssistantTurns === 0 && stats.totalToolCalls === 0 && stats.totalPainEvents === 0 && stats.totalGateBlocks === 0) {
+              details.push(`empty_snapshot: nocturnal workflow ${wf.workflow_id} has all-zero stats`);
+            }
+          }
+        } catch { /* ignore malformed metadata */ }
+      }
+
+      // Summary
+      const stateCounts: Record<string, number> = {};
+      for (const wf of allWorkflows) {
+        stateCounts[wf.state] = (stateCounts[wf.state] || 0) + 1;
+      }
+      const stateSummary = Object.entries(stateCounts).map(([s, c]) => `${s}=${c}`).join(', ');
+      if (details.length === 0) {
+        logger?.debug?.(`[PD:Watchdog] OK — ${allWorkflows.length} workflows (${stateSummary})`);
+      } else {
+        logger?.info?.(`[PD:Watchdog] ${details.length} anomalies — ${allWorkflows.length} workflows (${stateSummary})`);
+      }
+    } finally {
+      store.dispose();
+    }
+  } catch (err) {
+    logger?.warn?.(`[PD:Watchdog] Failed to scan workflows: ${String(err)}`);
+  }
+
+  return { anomalies: details.length, details };
+}
 
 let timeoutId: NodeJS.Timeout | null = null;
 
@@ -440,7 +566,7 @@ async function doEnqueuePainTask(
     try {
         let queue: EvolutionQueueItem[] = [];
         if (fs.existsSync(queuePath)) {
-            try { queue = JSON.parse(fs.readFileSync(queuePath, 'utf8')); } catch {}
+            try { queue = JSON.parse(fs.readFileSync(queuePath, 'utf8')); } catch { /* corrupted queue, treat as empty — safe fallback */ }
         }
         const now = Date.now();
         const dup = findRecentDuplicateTask(queue, v.source, v.preview, now, v.reason);
@@ -811,7 +937,16 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                 task.resolution = 'marker_detected';
                 try {
                     fs.unlinkSync(completeMarker);
-                } catch {}
+                } catch { /* marker may have been deleted already, not critical */ }
+
+                // #190: Clean up diagnostician report file after processing
+                try {
+                    const reportPath = path.join(wctx.stateDir, `.diagnostician_report_${task.id}.json`);
+                    if (fs.existsSync(reportPath)) fs.unlinkSync(reportPath);
+                } catch { /* report may not exist, not critical */ }
+
+                // FIX (#187): Remove the task from the diagnostician task store
+                await completeDiagnosticianTask(wctx.stateDir, task.id);
 
                 // Log to EvolutionLogger
                 const durationMs = task.started_at
@@ -879,10 +1014,20 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     } catch (err) {
                         logger.warn(`[PD:EvolutionWorker] Failed to parse late diagnostician report for task ${task.id}: ${String(err)}`);
                     }
-                    try { fs.unlinkSync(completeMarker); } catch {}
+                    try { fs.unlinkSync(completeMarker); } catch { /* marker may not exist, not critical */ }
+                    // #190: Clean up diagnostician report file
+                    try {
+                        const lateReportPath = path.join(wctx.stateDir, `.diagnostician_report_${task.id}.json`);
+                        if (fs.existsSync(lateReportPath)) fs.unlinkSync(lateReportPath);
+                    } catch { /* report may not exist, not critical */ }
                     task.resolution = principleCreated ? 'late_marker_principle_created' : 'late_marker_no_principle';
                 } else {
                     if (logger) logger.info(`[PD:EvolutionWorker] Task ${task.id} auto-completed after ${timeoutMinutes} minute timeout`);
+                    // #190: Clean up diagnostician report file even on timeout (may have been written late)
+                    try {
+                        const timeoutReportPath = path.join(wctx.stateDir, `.diagnostician_report_${task.id}.json`);
+                        if (fs.existsSync(timeoutReportPath)) fs.unlinkSync(timeoutReportPath);
+                    } catch { /* report may not exist, not critical */ }
                     task.resolution = 'auto_completed_timeout';
                 }
 
@@ -935,9 +1080,12 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
             const taskDescription = `Diagnose systemic pain [ID: ${highestScoreTask.id}]. Source: ${highestScoreTask.source}. Reason: ${highestScoreTask.reason}. ` +
                   `Trigger text: "${highestScoreTask.trigger_text_preview || 'N/A'}"`;
 
-            // Prepare HEARTBEAT content first
-            // Use shared diagnostician protocol (consistent with pd-diagnostician skill)
-            const heartbeatPath = wctx.resolve('HEARTBEAT');
+            // Prepare diagnostician task content
+            // FIX (#187): Write diagnostician tasks to .state/diagnostician_tasks.json
+            // instead of HEARTBEAT.md. HEARTBEAT.md is a shared file that gets overwritten
+            // by the main session heartbeat, causing a race condition where the diagnostician
+            // task prompt is lost. The task store is in .state/ which is not modified by
+            // the main session.
             const markerFilePath = path.join(wctx.stateDir, `.evolution_complete_${highestScoreTask.id}`);
             const reportFilePath = path.join(wctx.stateDir, `.diagnostician_report_${highestScoreTask.id}.json`);
 
@@ -968,7 +1116,11 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         existingPrinciplesRef += `\n\n**Suggested Rules from Existing Principles**:\n${ruleLines.join('\n')}`;
                     }
                 }
-            } catch {}
+            } catch (err) {
+                // #184: Log warning instead of silently swallowing — diagnostician needs
+                // existing principles context for duplicate detection.
+                logger?.warn?.(`[PD:EvolutionWorker] Failed to load active principles for duplicate detection: ${String(err)}`);
+            }
 
             // ── Context Enrichment (CTX-01): Dual-path strategy ──
             // P1: OpenClaw built-in tools (sessions_history) - safe, visibility-limited
@@ -1052,17 +1204,19 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                 `   The JSON structure MUST match the output format defined in the pd-diagnostician skill.`,
                 `2. Mark the task complete by creating a marker file: ${markerFilePath}`,
                 `   The marker file should contain: "diagnostic_completed: <timestamp>\\noutcome: <summary>"`,
-                `3. Replace this HEARTBEAT.md content with "HEARTBEAT_OK"`,
+                `3. After writing both files, reply with "DIAGNOSTICIAN_DONE: ${highestScoreTask.id}"`,
                 existingPrinciplesRef,
             ].join('\n');
 
-            // Try to write HEARTBEAT.md FIRST
-            // Only mark task as in_progress after successful write to avoid stuck tasks
+            // FIX (#187): Write to diagnostician_tasks.json instead of HEARTBEAT.md
+            // HEARTBEAT.md is a shared file that gets overwritten by the main session
+            // heartbeat, causing a race condition. The task store is in .state/ and is
+            // not modified by the main session.
             try {
-                fs.writeFileSync(heartbeatPath, heartbeatContent, 'utf8');
-                if (logger) logger.info(`[PD:EvolutionWorker] Wrote diagnostician task to HEARTBEAT.md for task ${highestScoreTask.id}`);
+                await addDiagnosticianTask(wctx.stateDir, highestScoreTask.id, heartbeatContent);
+                if (logger) logger.info(`[PD:EvolutionWorker] Wrote diagnostician task to diagnostician_tasks.json for task ${highestScoreTask.id}`);
 
-                // HEARTBEAT write succeeded, now mark task as in_progress
+                // Task store write succeeded, now mark task as in_progress
                 highestScoreTask.task = taskDescription;
                 highestScoreTask.status = 'in_progress';
                 highestScoreTask.started_at = nowIso;
@@ -1092,9 +1246,9 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     });
                 }
             } catch (heartbeatErr) {
-                // HEARTBEAT write failed - keep task as pending for next cycle retry
-                if (logger) logger.error(`[PD:EvolutionWorker] Failed to write HEARTBEAT.md for task ${highestScoreTask.id}: ${String(heartbeatErr)}. Task will remain pending for next cycle.`);
-                SystemLogger.log(wctx.workspaceDir, 'HEARTBEAT_WRITE_FAILED', `Task ${highestScoreTask.id} HEARTBEAT write failed: ${String(heartbeatErr)}`);
+                // Diagnostician task store write failed - keep task as pending for next cycle retry
+                if (logger) logger.error(`[PD:EvolutionWorker] Failed to write diagnostician task for task ${highestScoreTask.id}: ${String(heartbeatErr)}. Task will remain pending for next cycle.`);
+                SystemLogger.log(wctx.workspaceDir, 'DIAGNOSTICIAN_TASK_WRITE_FAILED', `Task ${highestScoreTask.id} diagnostician task write failed: ${String(heartbeatErr)}`);
             }
         }
 
@@ -1103,14 +1257,24 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
         // then re-acquire the lock to write results. This prevents the long-running
         // nocturnal reflection from blocking all other queue consumers.
         // Safe to return early here because pain_diagnosis was already handled above.
-        const sleepReflectionTasks = queue.filter(t => t.status === 'pending' && t.taskKind === 'sleep_reflection');
+
+        // FIX: Also poll in_progress tasks that were started in a previous cycle.
+        // Previously only 'pending' tasks were filtered, so an in_progress task from
+        // a previous heartbeat cycle would never be re-polled until the 1-hour
+        // stuck task recovery kicked in.
+        const pendingSleepTasks = queue.filter(t => t.status === 'pending' && t.taskKind === 'sleep_reflection');
+        const pollingSleepTasks = queue.filter(t =>
+            t.status === 'in_progress' && t.taskKind === 'sleep_reflection' && t.resultRef && !t.resultRef.startsWith('trinity-draft')
+        );
+        const sleepReflectionTasks = [...pendingSleepTasks, ...pollingSleepTasks];
         if (sleepReflectionTasks.length > 0) {
-            // --- Phase 1: Claim tasks (inside lock) ---
-            for (const sleepTask of sleepReflectionTasks) {
+            // --- Phase 1: Claim only pending tasks (inside lock) ---
+            // in_progress tasks from previous cycles are already claimed, don't re-claim them
+            for (const sleepTask of pendingSleepTasks) {
                 sleepTask.status = 'in_progress';
                 sleepTask.started_at = new Date().toISOString();
             }
-            queueChanged = true;
+            queueChanged = queueChanged || pendingSleepTasks.length > 0;
 
             // Write claimed state (includes any pain changes from above) and release lock
             if (queueChanged) {
@@ -1119,7 +1283,15 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
             releaseLock();
             for (const sleepTask of sleepReflectionTasks) {
                 try {
-                    logger?.info?.(`[PD:EvolutionWorker] Processing sleep_reflection task ${sleepTask.id}`);
+                    // FIX: For in_progress tasks from a previous cycle, just poll the workflow.
+                    // Don't start a new workflow — that was already done when the task was first claimed.
+                    const isPollingTask = !!sleepTask.resultRef && !sleepTask.resultRef.startsWith('trinity-draft');
+
+                    if (isPollingTask) {
+                        logger?.debug?.(`[PD:EvolutionWorker] Polling existing sleep_reflection task ${sleepTask.id} (workflowId: ${sleepTask.resultRef})`);
+                    } else {
+                        logger?.info?.(`[PD:EvolutionWorker] Processing sleep_reflection task ${sleepTask.id}`);
+                    }
 
                     // NOC-14: Use NocturnalWorkflowManager for sleep_reflection tasks
                     // Lazy-create manager (needs runtimeAdapter from api)
@@ -1142,36 +1314,74 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         continue;
                     }
 
-                    // Start workflow via NocturnalWorkflowManager instead of direct executeNocturnalReflectionAsync
-                    // Pass taskId in metadata for correlation
-                    const workflowHandle = await nocturnalManager.startWorkflow(nocturnalWorkflowSpec, {
-                        parentSessionId: `sleep_reflection:${sleepTask.id}`,
-                        workspaceDir: wctx.workspaceDir,
-                        taskInput: {},
-                        metadata: {
-                            snapshot: sleepTask.recentPainContext ? {
+                    let workflowId: string;
+
+                    if (isPollingTask) {
+                        // Poll-only path: skip workflow start, use existing workflowId
+                        workflowId = sleepTask.resultRef!;
+                    } else {
+                        // Start workflow via NocturnalWorkflowManager instead of direct executeNocturnalReflectionAsync
+                        // Pass taskId in metadata for correlation
+
+                        // #181: Build a proper snapshot from trajectory.db instead of hardcoded zeros
+                        let snapshotData: Record<string, unknown> | undefined;
+                        if (sleepTask.recentPainContext) {
+                            try {
+                                const extractor = createNocturnalTrajectoryExtractor(wctx.workspaceDir);
+                                const fullSnapshot = extractor.getNocturnalSessionSnapshot(sleepTask.id);
+                                if (fullSnapshot) {
+                                    snapshotData = {
+                                        sessionId: fullSnapshot.sessionId,
+                                        sessionStart: fullSnapshot.startedAt,
+                                        stats: fullSnapshot.stats,
+                                        recentPain: fullSnapshot.painEvents.slice(-5), // last 5
+                                    };
+                                }
+                            } catch (snapErr) {
+                                logger?.warn?.(`[PD:EvolutionWorker] Failed to build trajectory snapshot for ${sleepTask.id}: ${String(snapErr)}`);
+                            }
+                        }
+                        // Fallback: use pain context only if trajectory extractor failed
+                        if (!snapshotData && sleepTask.recentPainContext) {
+                            snapshotData = {
                                 sessionId: sleepTask.id,
                                 sessionStart: sleepTask.timestamp,
-                                stats: { totalAssistantTurns: 0, totalToolCalls: 0, failureCount: 0, totalPainEvents: sleepTask.recentPainContext.recentPainCount, totalGateBlocks: 0 },
+                                stats: {
+                                    totalAssistantTurns: 0,
+                                    totalToolCalls: 0,
+                                    failureCount: 0,
+                                    totalPainEvents: sleepTask.recentPainContext.recentPainCount,
+                                    totalGateBlocks: 0,
+                                },
                                 recentPain: sleepTask.recentPainContext.mostRecent ? [sleepTask.recentPainContext.mostRecent] : [],
-                            } : undefined,
-                            principleId: 'default',
-                            taskId: sleepTask.id,  // NOC-14: correlation ID for evolution worker
-                        },
-                    });
+                            };
+                        }
 
-                    // Store workflowId on task for polling on subsequent cycles
-                    sleepTask.resultRef = workflowHandle.workflowId;
+                        const workflowHandle = await nocturnalManager.startWorkflow(nocturnalWorkflowSpec, {
+                            parentSessionId: `sleep_reflection:${sleepTask.id}`,
+                            workspaceDir: wctx.workspaceDir,
+                            taskInput: {},
+                            metadata: {
+                                snapshot: snapshotData,
+                                principleId: 'default',
+                                taskId: sleepTask.id,  // NOC-14: correlation ID for evolution worker
+                            },
+                        });
+
+                        // Store workflowId on task for polling on subsequent cycles
+                        sleepTask.resultRef = workflowHandle.workflowId;
+                        workflowId = workflowHandle.workflowId;
+                    }
 
                     // Workflow is running asynchronously. Check if it completed in this cycle
                     // by polling getWorkflowDebugSummary.
-                    const summary = await nocturnalManager.getWorkflowDebugSummary(workflowHandle.workflowId);
+                    const summary = await nocturnalManager.getWorkflowDebugSummary(workflowId);
                     if (summary) {
                         if (summary.state === 'completed') {
                             sleepTask.status = 'completed';
                             sleepTask.completed_at = new Date().toISOString();
                             sleepTask.resolution = 'marker_detected';
-                            sleepTask.resultRef = summary.metadata?.nocturnalResult ? 'trinity-draft' : workflowHandle.workflowId;
+                            sleepTask.resultRef = summary.metadata?.nocturnalResult ? 'trinity-draft' : workflowId;
                             logger?.info?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} workflow completed`);
                         } else if (summary.state === 'terminal_error') {
                             sleepTask.status = 'failed';
@@ -1396,7 +1606,10 @@ function writeWorkerStatus(stateDir: string, report: WorkerStatusReport): void {
     try {
         const statusPath = path.join(stateDir, 'worker-status.json');
         fs.writeFileSync(statusPath, JSON.stringify(report, null, 2), 'utf8');
-    } catch {}
+    } catch (err) {
+        // Non-critical: worker-status.json is for monitoring, not core logic
+        console.warn(`[PD:EvolutionWorker] Failed to write worker-status.json: ${String(err)}`);
+    }
 }
 
 async function processEvolutionQueueWithResult(
@@ -1542,11 +1755,13 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                     // Delegate to workflow managers' sweepExpiredWorkflows so that
                     // session/transcript cleanup runs via driver.deleteSession().
                     const subagentRuntime = api?.runtime?.subagent;
+                    const agentSession = api?.runtime?.agent?.session;
                     if (subagentRuntime) {
                         const empathyMgr = new EmpathyObserverWorkflowManager({
                             workspaceDir: wctx.workspaceDir,
                             logger: api.logger,
                             subagent: subagentRuntime,
+                            agentSession,
                         });
                         let swept = 0;
                         try {
@@ -1559,11 +1774,26 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                             workspaceDir: wctx.workspaceDir,
                             logger: api.logger,
                             subagent: subagentRuntime,
+                            agentSession,
                         });
                         try {
                             swept += await deepReflectMgr.sweepExpiredWorkflows(WORKFLOW_TTL_MS);
                         } finally {
                             deepReflectMgr.dispose();
+                        }
+
+                        // #183 + #188: Sweep Nocturnal workflows too (with gateway-safe fallback)
+                        try {
+                            const nocturnalMgr = new NocturnalWorkflowManager({
+                                workspaceDir: wctx.workspaceDir,
+                                stateDir: wctx.stateDir,
+                                logger: api.logger,
+                                runtimeAdapter: new OpenClawTrinityRuntimeAdapter(api),
+                            });
+                            swept += await nocturnalMgr.sweepExpiredWorkflows(WORKFLOW_TTL_MS, subagentRuntime, agentSession);
+                            nocturnalMgr.dispose();
+                        } catch (noctSweepErr) {
+                            logger?.warn?.(`[PD:EvolutionWorker] Nocturnal sweep failed: ${String(noctSweepErr)}`);
                         }
 
                         if (swept > 0) {
@@ -1586,6 +1816,19 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                     const errMsg = `Failed to sweep expired workflows: ${String(sweepErr)}`;
                     cycleResult.errors.push(errMsg);
                     logger?.warn?.(`[PD:EvolutionWorker] ${errMsg}`);
+                }
+
+                // ── Workflow Watchdog: detect stale active workflows ──
+                // This catches bugs like #185 (orphaned active), #181 (empty results),
+                // #180/#183 (expired without cleanup), #182 (unhandled rejection).
+                try {
+                    const watchdogResult = await runWorkflowWatchdog(wctx, api, logger);
+                    if (watchdogResult.anomalies > 0) {
+                        logger?.warn?.(`[PD:Watchdog] ${watchdogResult.anomalies} anomalies: ${watchdogResult.details.join('; ')}`);
+                        cycleResult.errors.push(...watchdogResult.details);
+                    }
+                } catch (watchdogErr) {
+                    logger?.warn?.(`[PD:Watchdog] Watchdog failed: ${String(watchdogErr)}`);
                 }
 
                 wctx.dictionary.flush();
