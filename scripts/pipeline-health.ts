@@ -87,6 +87,7 @@ const KNOWN_FILES = new Set([
   'subagent_workflows.db-wal',
   'empathy_keywords.json',
   'pd_tasks.json',
+  'diagnostician_tasks.json',
   'pipeline-watch',
   'pipeline-watch/PIPELINE_MAP.md',
   'pipeline-watch/PIPELINE_WATCH_PLAN.md',

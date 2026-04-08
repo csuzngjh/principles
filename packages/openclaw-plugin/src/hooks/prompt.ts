@@ -15,6 +15,7 @@ import {
   getKeywordStoreSummary,
 } from '../core/empathy-keyword-matcher.js';
 import { severityToPenalty, DEFAULT_EMPATHY_KEYWORD_CONFIG } from '../core/empathy-types.js';
+import { getPendingDiagnosticianTasks } from '../core/diagnostician-task-store.js';
 
 // Module-level empathy state — shared across calls to avoid per-turn I/O
 let _empathyTurnCounter = 0;
@@ -601,17 +602,32 @@ The empathy observer subagent handles pain detection independently.
 
   // ──── 4. Heartbeat-specific checklist ────
   if (trigger === 'heartbeat') {
-    const heartbeatPath = wctx.resolve('HEARTBEAT');
-    if (fs.existsSync(heartbeatPath)) {
-      try {
-        const heartbeatChecklist = fs.readFileSync(heartbeatPath, 'utf8');
-        prependContext += `<heartbeat_checklist>
+    // FIX (#187): Read diagnostician tasks from .state/diagnostician_tasks.json
+    // instead of HEARTBEAT.md. The task store is in .state/ which is not modified
+    // by the main session, avoiding the race condition where HEARTBEAT.md gets
+    // overwritten while the diagnostician is still running.
+    const pendingTasks = getPendingDiagnosticianTasks(wctx.stateDir);
+    if (pendingTasks.length > 0) {
+      // Inject all pending diagnostician tasks
+      const taskBlocks = pendingTasks.map(({ id, task }) =>
+        `## Diagnostician Task [ID: ${id}]\n\n${task.prompt}\n`,
+      ).join('\n---\n\n');
+      prependContext += `<diagnostician_tasks>\n${taskBlocks}\n</diagnostician_tasks>\n`;
+      logger?.info?.(`[PD:Prompt] Injected ${pendingTasks.length} diagnostician task(s) into heartbeat prompt`);
+    } else {
+      // Fallback: read HEARTBEAT.md for health check content (no diagnostician tasks)
+      const heartbeatPath = wctx.resolve('HEARTBEAT');
+      if (fs.existsSync(heartbeatPath)) {
+        try {
+          const heartbeatChecklist = fs.readFileSync(heartbeatPath, 'utf8');
+          prependContext += `<heartbeat_checklist>
 ${heartbeatChecklist}
 
 ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
 </heartbeat_checklist>\n`;
-      } catch (e) {
-        logger?.error(`[PD:Prompt] Failed to read HEARTBEAT: ${String(e)}`);
+        } catch (e) {
+          logger?.error(`[PD:Prompt] Failed to read HEARTBEAT: ${String(e)}`);
+        }
       }
     }
   }

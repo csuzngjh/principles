@@ -10,6 +10,7 @@ import { WorkspaceContext } from '../core/workspace-context.js';
 import { EventLog } from '../core/event-log.js';
 import { initPersistence, flushAllSessions } from '../core/session-tracker.js';
 import { acquireLockAsync, releaseLock, type LockContext } from '../utils/file-lock.js';
+import { addDiagnosticianTask, completeDiagnosticianTask, getPendingDiagnosticianTasks } from '../core/diagnostician-task-store.js';
 import { getEvolutionLogger, type EvolutionStage } from '../core/evolution-logger.js';
 import type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 export type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
@@ -914,6 +915,9 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     fs.unlinkSync(completeMarker);
                 } catch {}
 
+                // FIX (#187): Remove the task from the diagnostician task store
+                await completeDiagnosticianTask(wctx.stateDir, task.id);
+
                 // Log to EvolutionLogger
                 const durationMs = task.started_at
                     ? Date.now() - new Date(task.started_at).getTime()
@@ -1036,9 +1040,12 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
             const taskDescription = `Diagnose systemic pain [ID: ${highestScoreTask.id}]. Source: ${highestScoreTask.source}. Reason: ${highestScoreTask.reason}. ` +
                   `Trigger text: "${highestScoreTask.trigger_text_preview || 'N/A'}"`;
 
-            // Prepare HEARTBEAT content first
-            // Use shared diagnostician protocol (consistent with pd-diagnostician skill)
-            const heartbeatPath = wctx.resolve('HEARTBEAT');
+            // Prepare diagnostician task content
+            // FIX (#187): Write diagnostician tasks to .state/diagnostician_tasks.json
+            // instead of HEARTBEAT.md. HEARTBEAT.md is a shared file that gets overwritten
+            // by the main session heartbeat, causing a race condition where the diagnostician
+            // task prompt is lost. The task store is in .state/ which is not modified by
+            // the main session.
             const markerFilePath = path.join(wctx.stateDir, `.evolution_complete_${highestScoreTask.id}`);
             const reportFilePath = path.join(wctx.stateDir, `.diagnostician_report_${highestScoreTask.id}.json`);
 
@@ -1157,17 +1164,19 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                 `   The JSON structure MUST match the output format defined in the pd-diagnostician skill.`,
                 `2. Mark the task complete by creating a marker file: ${markerFilePath}`,
                 `   The marker file should contain: "diagnostic_completed: <timestamp>\\noutcome: <summary>"`,
-                `3. Replace this HEARTBEAT.md content with "HEARTBEAT_OK"`,
+                `3. After writing both files, reply with "DIAGNOSTICIAN_DONE: ${highestScoreTask.id}"`,
                 existingPrinciplesRef,
             ].join('\n');
 
-            // Try to write HEARTBEAT.md FIRST
-            // Only mark task as in_progress after successful write to avoid stuck tasks
+            // FIX (#187): Write to diagnostician_tasks.json instead of HEARTBEAT.md
+            // HEARTBEAT.md is a shared file that gets overwritten by the main session
+            // heartbeat, causing a race condition. The task store is in .state/ and is
+            // not modified by the main session.
             try {
-                fs.writeFileSync(heartbeatPath, heartbeatContent, 'utf8');
-                if (logger) logger.info(`[PD:EvolutionWorker] Wrote diagnostician task to HEARTBEAT.md for task ${highestScoreTask.id}`);
+                await addDiagnosticianTask(wctx.stateDir, highestScoreTask.id, heartbeatContent);
+                if (logger) logger.info(`[PD:EvolutionWorker] Wrote diagnostician task to diagnostician_tasks.json for task ${highestScoreTask.id}`);
 
-                // HEARTBEAT write succeeded, now mark task as in_progress
+                // Task store write succeeded, now mark task as in_progress
                 highestScoreTask.task = taskDescription;
                 highestScoreTask.status = 'in_progress';
                 highestScoreTask.started_at = nowIso;
@@ -1197,9 +1206,9 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     });
                 }
             } catch (heartbeatErr) {
-                // HEARTBEAT write failed - keep task as pending for next cycle retry
-                if (logger) logger.error(`[PD:EvolutionWorker] Failed to write HEARTBEAT.md for task ${highestScoreTask.id}: ${String(heartbeatErr)}. Task will remain pending for next cycle.`);
-                SystemLogger.log(wctx.workspaceDir, 'HEARTBEAT_WRITE_FAILED', `Task ${highestScoreTask.id} HEARTBEAT write failed: ${String(heartbeatErr)}`);
+                // Diagnostician task store write failed - keep task as pending for next cycle retry
+                if (logger) logger.error(`[PD:EvolutionWorker] Failed to write diagnostician task for task ${highestScoreTask.id}: ${String(heartbeatErr)}. Task will remain pending for next cycle.`);
+                SystemLogger.log(wctx.workspaceDir, 'DIAGNOSTICIAN_TASK_WRITE_FAILED', `Task ${highestScoreTask.id} diagnostician task write failed: ${String(heartbeatErr)}`);
             }
         }
 
