@@ -69,28 +69,6 @@ import {
   type ThresholdSignals,
 } from '../core/adaptive-thresholds.js';
 import {
-  parseArtificerOutput,
-  resolveArtificerTargetRule,
-  shouldRunArtificer,
-  type ArtificerOutput,
-  type ArtificerTargetRuleResolution,
-} from '../core/nocturnal-artificer.js';
-import { validateRuleImplementationCandidate } from '../core/nocturnal-rule-implementation-validator.js';
-import {
-  createImplementationAssetDir,
-  deleteImplementationAssetDir,
-  getImplementationAssetRoot,
-  type CodeImplementationLineageMetadata,
-} from '../core/code-implementation-storage.js';
-import {
-  appendCandidateArtifactLineageRecord,
-  appendArtifactLineageRecord,
-} from '../core/nocturnal-artifact-lineage.js';
-import {
-  createImplementation,
-  deleteImplementation,
-} from '../core/principle-tree-ledger.js';
-import {
   checkWorkspaceIdle,
   checkPreflight,
   recordRunStart,
@@ -100,7 +78,6 @@ import {
 } from './nocturnal-runtime.js';
 import { NocturnalPathResolver } from '../core/nocturnal-paths.js';
 import { registerSample } from '../core/nocturnal-dataset.js';
-import type { Implementation } from '../types/principle-tree-schema.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -154,27 +131,6 @@ export interface NocturnalRunDiagnostics {
   persisted: boolean;
   /** Persistence path (if persisted) */
   persistedPath?: string;
-  /** Code-candidate sidecar diagnostics */
-  artificer: NocturnalArtificerDiagnostics;
-}
-
-export interface NocturnalArtificerDiagnostics {
-  status: 'skipped' | 'validation_failed' | 'persisted_candidate';
-  reason?:
-    | 'behavioral_artifact_unavailable'
-    | 'no_deterministic_rule'
-    | 'insufficient_signal_density'
-    | 'missing_scribe_input'
-    | 'parse_failed'
-    | 'rule_mismatch'
-    | 'validator_rejected'
-    | 'persistence_failed';
-  ruleResolution: ArtificerTargetRuleResolution | null;
-  validationFailures: string[];
-  implementationId?: string;
-  artifactId?: string;
-  ruleId?: string;
-  persistedPath?: string;
 }
 
 /**
@@ -224,12 +180,6 @@ export interface NocturnalServiceOptions {
    * This threads recent pain signals into sleep_reflection targeting without merging task kinds.
    */
   painContext?: import('../service/evolution-worker.js').RecentPainContext;
-
-  /**
-   * Override the Artificer JSON output (for testing).
-   * When omitted, a deterministic local candidate is synthesized.
-   */
-  artificerOutputOverride?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -333,262 +283,6 @@ function persistArtifact(
   return artifactPath;
 }
 
-function buildPainRefs(snapshot: NocturnalSessionSnapshot): string[] {
-  return snapshot.painEvents.map(
-    (painEvent) =>
-      `pain:${painEvent.source}:${painEvent.createdAt}:${(painEvent.reason ?? '').trim()}`
-  );
-}
-
-function buildGateBlockRefs(snapshot: NocturnalSessionSnapshot): string[] {
-  return snapshot.gateBlocks.map(
-    (gateBlock) =>
-      `gate:${gateBlock.toolName}:${gateBlock.createdAt}:${gateBlock.reason.trim()}`
-  );
-}
-
-function buildDefaultArtificerOutput(
-  ruleId: string,
-  artifact: NocturnalArtifact,
-  sourceSnapshotRef: string,
-  sourcePainIds: string[],
-  sourceGateBlockIds: string[]
-): ArtificerOutput {
-  return {
-    ruleId,
-    implementationType: 'code',
-    candidateSource: [
-      'export const meta = {',
-      `  name: ${JSON.stringify(`nocturnal-${ruleId.toLowerCase()}`)},`,
-      '  version: "1.0.0",',
-      `  ruleId: ${JSON.stringify(ruleId)},`,
-      `  coversCondition: ${JSON.stringify(artifact.betterDecision)},`,
-      '};',
-      '',
-      'export function evaluate(input, helpers) {',
-      '  const riskPath = helpers.isRiskPath();',
-      '  const toolName = helpers.getToolName();',
-      '  const planStatus = helpers.getPlanStatus();',
-      "  if (riskPath && toolName === 'write' && planStatus !== 'READY') {",
-      '    return {',
-      "      decision: 'requireApproval',",
-      '      matched: true,',
-      `      reason: ${JSON.stringify(artifact.rationale)},`,
-      '    };',
-      '  }',
-      '  return {',
-      "    decision: 'allow',",
-      '    matched: false,',
-      "    reason: 'not-applicable',",
-      '  };',
-      '}',
-    ].join('\n'),
-    helperUsage: ['isRiskPath', 'getToolName', 'getPlanStatus'],
-    expectedDecision: 'requireApproval',
-    rationale: artifact.rationale,
-    lineage: {
-      artifactKind: 'rule-implementation-candidate',
-      sourceSnapshotRef,
-      sourcePainIds,
-      sourceGateBlockIds,
-    },
-  };
-}
-
-function persistCodeCandidate(
-  workspaceDir: string,
-  stateDir: string,
-  artifact: NocturnalArtifact,
-  selectedPrincipleId: string,
-  selectedSessionId: string,
-  parsedArtificer: ArtificerOutput
-): NocturnalArtificerDiagnostics {
-  const implementationId = `IMPL-${randomUUID()}`;
-  const artifactId = `artifact-${randomUUID()}`;
-  const now = new Date().toISOString();
-  const assetRoot = getImplementationAssetRoot(stateDir, implementationId);
-  const entryPath = path.join(assetRoot, 'entry.js');
-  const lineage: CodeImplementationLineageMetadata = {
-    principleId: selectedPrincipleId,
-    ruleId: parsedArtificer.ruleId,
-    sourceSnapshotRef: artifact.sourceSnapshotRef,
-    sourcePainIds: [...parsedArtificer.lineage.sourcePainIds],
-    sourceGateBlockIds: [...parsedArtificer.lineage.sourceGateBlockIds],
-    sourceSessionId: selectedSessionId,
-    artificerArtifactId: artifactId,
-  };
-
-  const implementation: Implementation = {
-    id: implementationId,
-    ruleId: parsedArtificer.ruleId,
-    type: 'code',
-    path: entryPath,
-    version: now,
-    coversCondition: parsedArtificer.rationale,
-    coveragePercentage: 0,
-    lifecycleState: 'candidate',
-    createdAt: now,
-    updatedAt: now,
-  };
-
-  try {
-    createImplementation(stateDir, implementation);
-    createImplementationAssetDir(stateDir, implementationId, now, {
-      entrySource: parsedArtificer.candidateSource,
-      lineage,
-    });
-    appendCandidateArtifactLineageRecord(workspaceDir, {
-      artifactId,
-      principleId: selectedPrincipleId,
-      ruleId: parsedArtificer.ruleId,
-      sessionId: selectedSessionId,
-      sourceSnapshotRef: artifact.sourceSnapshotRef,
-      sourcePainIds: lineage.sourcePainIds,
-      sourceGateBlockIds: lineage.sourceGateBlockIds,
-      storagePath: assetRoot,
-      implementationId,
-      createdAt: now,
-    });
-    return {
-      status: 'persisted_candidate',
-      ruleResolution: {
-        status: 'selected',
-        ruleId: parsedArtificer.ruleId,
-        reason: 'evidence-winner',
-        scores: [],
-      },
-      validationFailures: [],
-      implementationId,
-      artifactId,
-      ruleId: parsedArtificer.ruleId,
-      persistedPath: assetRoot,
-    };
-  } catch (error: unknown) {
-    deleteImplementationAssetDir(stateDir, implementationId);
-    try {
-      deleteImplementation(stateDir, implementationId);
-    } catch {
-      // Best effort cleanup to avoid leaving a half-created candidate discoverable.
-    }
-    return {
-      status: 'validation_failed',
-      reason: 'persistence_failed',
-      ruleResolution: {
-        status: 'selected',
-        ruleId: parsedArtificer.ruleId,
-        reason: 'evidence-winner',
-        scores: [],
-      },
-      validationFailures: [String(error)],
-      ruleId: parsedArtificer.ruleId,
-    };
-  }
-}
-
-function maybePersistArtificerCandidate(
-  workspaceDir: string,
-  stateDir: string,
-  selectedPrincipleId: string,
-  selectedSessionId: string,
-  snapshot: NocturnalSessionSnapshot,
-  artifact: NocturnalArtifact,
-  options: NocturnalServiceOptions
-): NocturnalArtificerDiagnostics {
-  const ruleResolution = resolveArtificerTargetRule(
-    stateDir,
-    selectedPrincipleId,
-    snapshot
-  );
-
-  if (ruleResolution.status !== 'selected') {
-    return {
-      status: 'skipped',
-      reason: 'no_deterministic_rule',
-      ruleResolution,
-      validationFailures: [],
-    };
-  }
-
-  if (!shouldRunArtificer(snapshot, ruleResolution)) {
-    return {
-      status: 'skipped',
-      reason: 'insufficient_signal_density',
-      ruleResolution,
-      validationFailures: [],
-      ruleId: ruleResolution.ruleId,
-    };
-  }
-
-  if (!artifact.betterDecision || !artifact.rationale) {
-    return {
-      status: 'skipped',
-      reason: 'missing_scribe_input',
-      ruleResolution,
-      validationFailures: [],
-      ruleId: ruleResolution.ruleId,
-    };
-  }
-
-  const sourcePainIds = buildPainRefs(snapshot);
-  const sourceGateBlockIds = buildGateBlockRefs(snapshot);
-  const parsedArtificer =
-    options.artificerOutputOverride !== undefined
-      ? parseArtificerOutput(options.artificerOutputOverride)
-      : buildDefaultArtificerOutput(
-          ruleResolution.ruleId,
-          artifact,
-          artifact.sourceSnapshotRef,
-          sourcePainIds,
-          sourceGateBlockIds
-        );
-
-  if (!parsedArtificer) {
-    return {
-      status: 'validation_failed',
-      reason: 'parse_failed',
-      ruleResolution,
-      validationFailures: ['Artificer output could not be parsed.'],
-      ruleId: ruleResolution.ruleId,
-    };
-  }
-
-  if (parsedArtificer.ruleId !== ruleResolution.ruleId) {
-    return {
-      status: 'validation_failed',
-      reason: 'rule_mismatch',
-      ruleResolution,
-      validationFailures: [
-        `Resolved rule ${ruleResolution.ruleId} did not match candidate rule ${parsedArtificer.ruleId}.`,
-      ],
-      ruleId: ruleResolution.ruleId,
-    };
-  }
-
-  const validation = validateRuleImplementationCandidate(parsedArtificer.candidateSource);
-  if (!validation.passed) {
-    return {
-      status: 'validation_failed',
-      reason: 'validator_rejected',
-      ruleResolution,
-      validationFailures: validation.failures.map((failure) => failure.message),
-      ruleId: ruleResolution.ruleId,
-    };
-  }
-
-  const persisted = persistCodeCandidate(
-    workspaceDir,
-    stateDir,
-    artifact,
-    selectedPrincipleId,
-    selectedSessionId,
-    parsedArtificer
-  );
-  return {
-    ...persisted,
-    ruleResolution,
-  };
-}
-
 // ---------------------------------------------------------------------------
 // Main Orchestrator
 // ---------------------------------------------------------------------------
@@ -626,11 +320,6 @@ export function executeNocturnalReflection(
     arbiterResult: null,
     executabilityResult: null,
     persisted: false,
-    artificer: {
-      status: 'skipped',
-      ruleResolution: null,
-      validationFailures: [],
-    },
   };
 
   // -------------------------------------------------------------------------
@@ -974,34 +663,6 @@ export function executeNocturnalReflection(
     console.warn(`[nocturnal-service] Failed to register sample in dataset registry: ${String(err)}`);
   }
 
-  try {
-    appendArtifactLineageRecord(workspaceDir, {
-      artifactKind: 'behavioral-sample',
-      artifactId: arbiterResult.artifact.artifactId,
-      principleId: selectedPrincipleId,
-      ruleId: null,
-      sessionId: selectedSessionId,
-      sourceSnapshotRef: arbiterResult.artifact.sourceSnapshotRef,
-      sourcePainIds: buildPainRefs(snapshot),
-      sourceGateBlockIds: buildGateBlockRefs(snapshot),
-      storagePath: persistedPath,
-      implementationId: null,
-      createdAt: arbiterResult.artifact.createdAt,
-    });
-  } catch (err) {
-    console.warn(`[nocturnal-service] Failed to append behavioral artifact lineage: ${String(err)}`);
-  }
-
-  diagnostics.artificer = maybePersistArtificerCandidate(
-    workspaceDir,
-    stateDir,
-    selectedPrincipleId,
-    selectedSessionId,
-    snapshot,
-    arbiterResult.artifact,
-    options
-  );
-
   // -------------------------------------------------------------------------
   // Step 9: Record run success
   // -------------------------------------------------------------------------
@@ -1091,11 +752,6 @@ async function executeNocturnalReflectionWithAdapter(
     arbiterResult: null,
     executabilityResult: null,
     persisted: false,
-    artificer: {
-      status: 'skipped',
-      ruleResolution: null,
-      validationFailures: [],
-    },
   };
 
   // Step 1: Pre-flight check
@@ -1291,34 +947,6 @@ async function executeNocturnalReflectionWithAdapter(
   } catch (err) {
     console.warn(`[nocturnal-service] Failed to register sample in dataset registry: ${String(err)}`);
   }
-
-  try {
-    appendArtifactLineageRecord(workspaceDir, {
-      artifactKind: 'behavioral-sample',
-      artifactId: arbiterResult.artifact.artifactId,
-      principleId: selectedPrincipleId,
-      ruleId: null,
-      sessionId: selectedSessionId,
-      sourceSnapshotRef: arbiterResult.artifact.sourceSnapshotRef,
-      sourcePainIds: buildPainRefs(snapshot),
-      sourceGateBlockIds: buildGateBlockRefs(snapshot),
-      storagePath: persistedPath,
-      implementationId: null,
-      createdAt: arbiterResult.artifact.createdAt,
-    });
-  } catch (err) {
-    console.warn(`[nocturnal-service] Failed to append behavioral artifact lineage: ${String(err)}`);
-  }
-
-  diagnostics.artificer = maybePersistArtificerCandidate(
-    workspaceDir,
-    stateDir,
-    selectedPrincipleId,
-    selectedSessionId,
-    snapshot,
-    arbiterResult.artifact,
-    options
-  );
 
   // Step 9: Record run success
   void recordRunEnd(stateDir, 'success', { sampleCount: 1 }).catch((err) => {

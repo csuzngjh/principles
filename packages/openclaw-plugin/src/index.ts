@@ -39,10 +39,6 @@ import { handlePainCommand } from './commands/pain.js';
 import { handleContextCommand } from './commands/context.js';
 import { handleFocusCommand } from './commands/focus.js';
 import { handleRollbackCommand } from './commands/rollback.js';
-import { handlePromoteImplCommand } from './commands/promote-impl.js';
-import { handleDisableImplCommand } from './commands/disable-impl.js';
-import { handleArchiveImplCommand } from './commands/archive-impl.js';
-import { handleRollbackImplCommand } from './commands/rollback-impl.js';
 import { handleEvolutionStatusCommand } from './commands/evolution-status.js';
 import { handlePrincipleRollbackCommand } from './commands/principle-rollback.js';
 import { handleExportCommand } from './commands/export.js';
@@ -689,71 +685,6 @@ const plugin = {
         } catch (err) {
           api.logger.error(`[PD] Command /pd-workflow-debug failed: ${String(err)}`);
           return { text: `Workflow debug command failed: ${String(err)}` };
-        }
-      }
-    });
-
-    // ── Implementation Lifecycle Commands (Phase 13) ──
-    api.registerCommand({
-      name: "pd-promote-impl",
-      description: 'Promote a candidate implementation to active [list|show <id>|<id>]',
-      acceptsArgs: true,
-      handler: (ctx) => {
-        try {
-          const workspaceDir = api.resolvePath('.');
-          if (ctx.config) ctx.config.workspaceDir = workspaceDir;
-          return handlePromoteImplCommand(ctx);
-        } catch (err) {
-          api.logger.error(`[PD] Command /pd-promote-impl failed: ${String(err)}`);
-          return { text: language === 'zh' ? '\u547d\u4ee4\u6267\u884c\u5931\u8d25\uff0c\u8bf7\u68c0\u67e5\u65e5\u5fd7\u3002' : 'Command failed. Check logs.' };
-        }
-      }
-    });
-
-    api.registerCommand({
-      name: "pd-disable-impl",
-      description: 'Disable an active implementation [list|<id> --reason "..."]',
-      acceptsArgs: true,
-      handler: (ctx) => {
-        try {
-          const workspaceDir = api.resolvePath('.');
-          if (ctx.config) ctx.config.workspaceDir = workspaceDir;
-          return handleDisableImplCommand(ctx);
-        } catch (err) {
-          api.logger.error(`[PD] Command /pd-disable-impl failed: ${String(err)}`);
-          return { text: language === 'zh' ? '\u547d\u4ee4\u6267\u884c\u5931\u8d25\uff0c\u8bf7\u68c0\u67e5\u65e5\u5fd7\u3002' : 'Command failed. Check logs.' };
-        }
-      }
-    });
-
-    api.registerCommand({
-      name: "pd-archive-impl",
-      description: 'Archive an implementation permanently [list|<id>]',
-      acceptsArgs: true,
-      handler: (ctx) => {
-        try {
-          const workspaceDir = api.resolvePath('.');
-          if (ctx.config) ctx.config.workspaceDir = workspaceDir;
-          return handleArchiveImplCommand(ctx);
-        } catch (err) {
-          api.logger.error(`[PD] Command /pd-archive-impl failed: ${String(err)}`);
-          return { text: language === 'zh' ? '\u547d\u4ee4\u6267\u884c\u5931\u8d25\uff0c\u8bf7\u68c0\u67e5\u65e5\u5fd7\u3002' : 'Command failed. Check logs.' };
-        }
-      }
-    });
-
-    api.registerCommand({
-      name: "pd-rollback-impl",
-      description: 'Rollback current active implementation to previous active [list|<id> --reason "..."]',
-      acceptsArgs: true,
-      handler: (ctx) => {
-        try {
-          const workspaceDir = api.resolvePath('.');
-          if (ctx.config) ctx.config.workspaceDir = workspaceDir;
-          return handleRollbackImplCommand(ctx);
-        } catch (err) {
-          api.logger.error(`[PD] Command /pd-rollback-impl failed: ${String(err)}`);
-          return { text: language === 'zh' ? '\u547d\u4ee4\u6267\u884c\u5931\u8d25\uff0c\u8bf7\u68c0\u67e5\u65e5\u5fd7\u3002' : 'Command failed. Check logs.' };
         }
       }
     });
