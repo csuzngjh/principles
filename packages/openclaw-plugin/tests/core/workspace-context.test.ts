@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as principleTreeLedger from '../../src/core/principle-tree-ledger.js';
 
 vi.mock('fs');
 vi.mock('../../src/core/trajectory.js', () => ({
@@ -14,9 +13,6 @@ vi.mock('../../src/core/trajectory.js', () => ({
         dispose: vi.fn(),
         clear: vi.fn(),
     }
-}));
-vi.mock('../../src/core/principle-tree-ledger.js', () => ({
-    getPrincipleSubtree: vi.fn(),
 }));
 
 describe('WorkspaceContext', () => {
@@ -134,54 +130,5 @@ describe('WorkspaceContext', () => {
         const dictionary = wctx.dictionary;
         expect(dictionary).toBeDefined();
         expect(wctx.dictionary).toBe(dictionary);
-    });
-
-    it('should cache a workspace-scoped principle tree ledger accessor', () => {
-        const mockCtx = { workspaceDir };
-        const wctx = WorkspaceContext.fromHookContext(mockCtx);
-
-        const principleTreeLedgerAccessor = (wctx as any).principleTreeLedger;
-
-        expect(principleTreeLedgerAccessor).toBeDefined();
-        expect((wctx as any).principleTreeLedger).toBe(principleTreeLedgerAccessor);
-        expect(typeof principleTreeLedgerAccessor.getPrincipleSubtree).toBe('function');
-    });
-
-    it('should retrieve active principle subtrees through the workspace boundary', () => {
-        const mockCtx = { workspaceDir, stateDir };
-        const wctx = WorkspaceContext.fromHookContext(mockCtx);
-        const activePrinciples = [
-            {
-                id: 'P-001',
-                trigger: 'delete',
-                contextTags: ['write'],
-                valueMetrics: undefined,
-            },
-        ];
-        const subtree = {
-            principle: { id: 'P-001', ruleIds: ['R-001'] },
-            rules: [
-                {
-                    rule: { id: 'R-001', implementationIds: ['IMPL-001'] },
-                    implementations: [{ id: 'IMPL-001', ruleId: 'R-001', type: 'prompt' }],
-                },
-            ],
-        };
-
-        vi.mocked(principleTreeLedger.getPrincipleSubtree).mockReturnValue(subtree as any);
-        (wctx as any)._evolutionReducer = {
-            getActivePrinciples: vi.fn().mockReturnValue(activePrinciples),
-        };
-
-        const activePrincipleSubtrees = (wctx as any).getActivePrincipleSubtrees();
-
-        expect((wctx as any)._evolutionReducer.getActivePrinciples).toHaveBeenCalled();
-        expect(principleTreeLedger.getPrincipleSubtree).toHaveBeenCalledWith(stateDir, 'P-001');
-        expect(activePrincipleSubtrees).toEqual([
-            {
-                principle: activePrinciples[0],
-                subtree,
-            },
-        ]);
     });
 });
