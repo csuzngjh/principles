@@ -10,13 +10,16 @@ import { EvolutionReducerImpl } from './evolution-reducer.js';
 import { TrajectoryDatabase, TrajectoryRegistry, TrajectoryDatabaseOptions } from './trajectory.js';
 import {
     getPrincipleSubtree,
+    updatePrinciple,
     updatePrincipleValueMetrics,
     type PrincipleSubtree,
 } from './principle-tree-ledger.js';
 import type { Principle, PrincipleValueMetrics } from '../types/principle-tree-schema.js';
+import type { Principle as ActivePrinciple } from './evolution-types.js';
 
 interface PrincipleTreeLedgerAccessor {
     getPrincipleSubtree(principleId: string): PrincipleSubtree | undefined;
+    updatePrinciple(principleId: string, updates: Partial<Principle>): Principle;
     updatePrincipleValueMetrics(principleId: string, metrics: PrincipleValueMetrics): PrincipleValueMetrics;
 }
 
@@ -112,6 +115,8 @@ export class WorkspaceContext {
         if (!this._principleTreeLedger) {
             this._principleTreeLedger = {
                 getPrincipleSubtree: (principleId: string) => getPrincipleSubtree(this.stateDir, principleId),
+                updatePrinciple: (principleId: string, updates: Partial<Principle>) =>
+                    updatePrinciple(this.stateDir, principleId, updates),
                 updatePrincipleValueMetrics: (principleId: string, metrics: PrincipleValueMetrics) =>
                     updatePrincipleValueMetrics(this.stateDir, principleId, metrics),
             };
@@ -122,14 +127,16 @@ export class WorkspaceContext {
     /**
      * Retrieve active Principle -> Rule -> Implementation subtrees without bypassing reducer authority.
      */
-    getActivePrincipleSubtrees(): Array<{ principle: Principle; subtree: PrincipleSubtree }> {
+    getActivePrincipleSubtrees(): Array<{ principle: ActivePrinciple; subtree: PrincipleSubtree }> {
         return this.evolutionReducer
             .getActivePrinciples()
             .map((principle) => {
                 const subtree = this.principleTreeLedger.getPrincipleSubtree(principle.id);
                 return subtree ? { principle, subtree } : null;
             })
-            .filter((entry): entry is { principle: Principle; subtree: PrincipleSubtree } => entry !== null);
+            .filter(
+                (entry): entry is { principle: ActivePrinciple; subtree: PrincipleSubtree } => entry !== null,
+            );
     }
 
     private getTrajectoryOptions(): Omit<TrajectoryDatabaseOptions, 'workspaceDir'> {
