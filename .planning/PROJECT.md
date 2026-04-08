@@ -64,32 +64,29 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 
 ## Current Milestone
 
-### v1.7: PD Task Manager
+### v1.9.1: WebUI 数据源修复
 
-**Status:** Planning
+**Status:** Defining requirements
 
-**Goal:** 用正式的 PD Task Manager 替代 cron-initializer.ts，提供安全的定时任务生命周期管理
-
-**Architecture Doc:** `docs/architecture/pd-task-manager.md`
+**Goal:** 排查并修复 WebUI 所有页面（Overview / Loop / Feedback / Gate Monitor）的数据源问题，确保展示数据正确
 
 **Key Features:**
-- PDTaskSpec 类型定义 + 内置任务声明（empathy-optimizer）
-- PDTaskStore — pd_tasks.json 读写 + meta（健康状态/执行历史）
-- PDTaskReconciler — diff + atomic write + file lock + dry-run 模式
-- PDTaskService — Plugin Service 集成，启动时自动 reconcile
-- 任务健康监控 — 连续失败 3 次自动禁用并通知
-- 手动触发 — 支持手动运行/测试某个 PD 任务
-- Prompt 数据预取 — 标准化的任务执行前数据快照注入机制
-- 执行历史查询 — 通过 Task Registry 关联查询运行记录
-- 删除旧的 cron-initializer.ts
+- 排查四个页面的数据源根因（数据库 → API → 前端字段映射）
+- 修复缺失或错误的数据链路
+- 端到端验证所有页面数据展示正确
+- 视觉层保持现状，不改动 UI 风格
 
 **Key Constraints:**
-- CronService 是 OpenClaw 内部 API，插件无法直接调用 → 使用 safe file write + own lock
-- 版本化 reconcile：当 PD 更新 prompt 时自动更新已有的 cron job
-- 向后兼容：已有 "PD Empathy Optimizer" job 会被自动采用和更新
-- 复用现有 file-lock.ts（withLockAsync）和 WorkspaceContext 模式
+- 前端页面结构和组件已存在，仅修复数据层
+- 数据源问题根因未知，需要系统性排查
+- 保持 API 向后兼容
 
-**Phase Start:** Phase 14（上一个是 Phase 13）
+**Phase Start:** 延续当前编号（上一个 Phase 15）
 
 ---
-*Last updated: 2026-04-07 after v1.7 milestone initialized*
+### v1.7: PD Task Manager（已废弃）
+
+**Status:** Superseded — 从未执行，被 v1.9.0 替代
+
+---
+*Last updated: 2026-04-08 after v1.9.1 milestone initialized*
