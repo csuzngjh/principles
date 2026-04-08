@@ -5,7 +5,7 @@
 - ✅ **v1.0-alpha MVP** - Phases 1-3 (shipped 2026-03-26)
 - ✅ **v1.4 OpenClaw v2026.4.3 Compatibility** - Phases 1, 2, 5 (shipped 2026-04-05)
 - ✅ **v1.5 Nocturnal Helper 重构** - Phases 6-10 (shipped 2026-04-06)
-- 🚧 **v1.9.0 Principle Internalization System** - Phases 11-15 (planned)
+- [x] **v1.9.0 Principle Internalization System** - Phases 11-15 (shipped 2026-04-08)
 
 ## Phases
 
@@ -46,13 +46,13 @@
 </details>
 
 <details open>
-<summary>🚧 v1.9.0 Principle Internalization System (Phases 11-15) - PLANNED</summary>
+<summary>[x] v1.9.0 Principle Internalization System (Phases 11-15) - SHIPPED 2026-04-08</summary>
 
 - [x] Phase 11: Principle Tree Ledger Entities (3 plans) - completed 2026-04-07
 - [x] Phase 12: Runtime Rule Host and Code Implementation Storage (2 plans) - completed 2026-04-07
 - [x] Phase 13: Replay Evaluation and Manual Promotion Loop (1 plan) - completed 2026-04-07
 - [x] Phase 14: Nocturnal RuleImplementationArtifact Factory (2 plans) - completed 2026-04-08
-- [ ] Phase 15: Coverage, Adherence, and Internalization Routing (1/2 plans complete)
+- [x] Phase 15: Coverage, Adherence, and Internalization Routing (2/2 plans complete) - completed 2026-04-08
 
 **Milestone goal:** turn the current principle / nocturnal / gate architecture into a real Principle Internalization System with first-class Rule and Implementation entities, a constrained runtime Rule Host, replay-based code implementation promotion, and nocturnal code candidate generation.
 
@@ -62,7 +62,7 @@
 
 ### Next Milestone (Current)
 
-**v1.9.0 Principle Internalization System** is in progress. Next step: execute Phase 15-02.
+**v1.9.0 Principle Internalization System** is complete. Next step: choose the follow-on milestone.
 
 ## Progress
 
@@ -86,7 +86,7 @@
 | 12 | v1.9.0 | 2/2 | Complete    | 2026-04-07 |
 | 13 | v1.9.0 | 1/1 | Complete   | 2026-04-07 |
 | 14 | v1.9.0 | 2/2 | Complete    | 2026-04-08 |
-| 15 | v1.9.0 | 1/2 | In Progress | 2026-04-08 |
+| 15 | v1.9.0 | 2/2 | Complete   | 2026-04-08 |
 
 ## Phase Details
 
@@ -181,11 +181,11 @@ Success criteria:
 
 Goal: turn implementation outcomes into real coverage and internalization decisions.
 
-**Plans:** 1/2 plans complete
+**Plans:** 2/2 plans complete
 
 Plans:
 - [x] 15-01-PLAN.md - Build the deterministic evidence reader, metrics service, and deprecated-candidate assessment without changing replay or nocturnal semantics
-- [ ] 15-02-PLAN.md - Build the explicit `skill | code | defer` routing policy and read-only command/report surface on top of Phase 15 metrics
+- [x] 15-02-PLAN.md - Build the explicit `skill | code | defer` routing policy and read-only command/report surface on top of Phase 15 metrics (completed 2026-04-08)
 
 Requirements:
 - COV-01
