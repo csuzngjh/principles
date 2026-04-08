@@ -1,5 +1,4 @@
 import * as fs from 'fs';
-import * as path from 'path';
 import type {
     SubagentRunResult,
     SubagentWaitResult,
@@ -86,6 +85,8 @@ export type AgentSessionAPI = {
     loadSessionStore: (storePath: string, opts?: { skipCache?: boolean }) => Record<string, unknown>;
     saveSessionStore: (storePath: string, store: Record<string, unknown>) => Promise<void>;
     resolveSessionFilePath: (sessionKey: string) => string;
+    /** Optional: OpenClaw config object needed for session path resolution */
+    config?: unknown;
 };
 
 export class RuntimeDirectDriver implements TransportDriver {
@@ -197,13 +198,14 @@ export class RuntimeDirectDriver implements TransportDriver {
     /**
      * Heartbeat-safe session cleanup by directly manipulating the session store file.
      * This bypasses the gateway request scope requirement entirely.
+     * Also removes transcript files from disk to avoid orphaned files.
      */
     private async cleanupViaAgentSession(sessionKey: string): Promise<void> {
         if (!this.agentSession) {
             throw new Error('agentSession not available for fallback cleanup');
         }
 
-        const { resolveStorePath, loadSessionStore, saveSessionStore } = this.agentSession;
+        const { resolveStorePath, loadSessionStore, saveSessionStore, resolveSessionFilePath } = this.agentSession;
 
         // Get the session store file path
         const storePath = resolveStorePath();
@@ -222,6 +224,21 @@ export class RuntimeDirectDriver implements TransportDriver {
         const normalizedKey = sessionKey.toLowerCase();
 
         if (normalizedKey in store) {
+            const entry = store[normalizedKey] as { sessionId?: string; sessionFile?: string } | undefined;
+
+            // Archive or delete transcript files before removing store entry
+            if (entry?.sessionFile) {
+                try {
+                    const transcriptPath = resolveSessionFilePath(normalizedKey);
+                    if (fs.existsSync(transcriptPath)) {
+                        fs.unlinkSync(transcriptPath);
+                        this.logger.info(`[PD:RuntimeDirectDriver] Removed transcript file: ${transcriptPath}`);
+                    }
+                } catch (unlinkErr) {
+                    this.logger.warn(`[PD:RuntimeDirectDriver] Failed to remove transcript file: ${String(unlinkErr)}`);
+                }
+            }
+
             delete store[normalizedKey];
             await saveSessionStore(storePath, store);
         }

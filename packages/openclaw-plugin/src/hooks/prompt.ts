@@ -420,19 +420,24 @@ The empathy observer subagent handles pain detection independently.
   if (latestUserMessage.length > 50) {
     // Format 1: "Sender (untrusted metadata): ```json {...}```  user_message_text"
     const senderMatch = latestUserMessage.match(/Sender \(untrusted metadata\):[\s\S]*?```json[\s\S]*?```\s*/);
-    if (senderMatch) {
-      const afterSender = latestUserMessage.slice(senderMatch.index! + senderMatch[0].length).trim();
+    if (senderMatch && senderMatch.index !== undefined) {
+      const afterSender = latestUserMessage.slice(senderMatch.index + senderMatch[0].length).trim();
       if (afterSender.length > 3) latestUserMessage = afterSender;
     }
 
     // Format 2: "Conversation info (untrusted metadata): ```json {...}```  user_message_text"
     if (latestUserMessage.length > 200 && latestUserMessage.includes('Conversation info')) {
       const convInfoMatch = latestUserMessage.match(/Conversation info[\s\S]*?```json[\s\S]*?```\s*/);
-      if (convInfoMatch) {
-        const afterConvInfo = latestUserMessage.slice(convInfoMatch.index! + convInfoMatch[0].length).trim();
+      if (convInfoMatch && convInfoMatch.index !== undefined) {
+        const afterConvInfo = latestUserMessage.slice(convInfoMatch.index + convInfoMatch[0].length).trim();
         if (afterConvInfo.length > 3) latestUserMessage = afterConvInfo;
       }
     }
+  }
+
+  // Guard: ensure we have a meaningful user message before proceeding
+  if (latestUserMessage.length < 3) {
+    latestUserMessage = '';
   }
   
   const isAgentToAgent = latestUserMessage.includes('sourceSession=agent:') || sessionId?.includes(':subagent:') === true;

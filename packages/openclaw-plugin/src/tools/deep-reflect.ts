@@ -235,6 +235,7 @@ async function executeReflectionWorkflow(
         workspaceDir: effectiveWorkspaceDir,
         logger: api.logger,
         subagent: api.runtime.subagent as any,
+        agentSession: api.runtime.agent?.session,
     });
 
     try {
