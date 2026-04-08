@@ -86,35 +86,62 @@ async function writeTaskStore(stateDir: string, store: DiagnosticianTaskStore): 
 /**
  * Add a new diagnostician task to the store.
  * Overwrites if a task with the same ID already exists.
+ * Read-modify-write is performed atomically inside the file lock.
  */
 export async function addDiagnosticianTask(
   stateDir: string,
   taskId: string,
   prompt: string,
 ): Promise<void> {
-  const store = readTaskStore(stateDir);
-  store.tasks[taskId] = {
-    prompt,
-    createdAt: new Date().toISOString(),
-    status: 'pending',
-  };
-  await writeTaskStore(stateDir, store);
+  const filePath = resolveTasksPath(stateDir);
+  await withLockAsync(filePath, async () => {
+    const store = readTaskStoreSync(filePath);
+    store.tasks[taskId] = {
+      prompt,
+      createdAt: new Date().toISOString(),
+      status: 'pending',
+    };
+    const tmpPath = filePath + '.tmp';
+    fs.writeFileSync(tmpPath, JSON.stringify(store, null, 2), 'utf8');
+    fs.renameSync(tmpPath, filePath);
+  });
 }
 
 /**
  * Mark a task as completed and remove it from the store.
+ * Read-modify-write is performed atomically inside the file lock.
  */
 export async function completeDiagnosticianTask(
   stateDir: string,
   taskId: string,
 ): Promise<void> {
-  const store = readTaskStore(stateDir);
-  if (store.tasks[taskId]) {
-    store.tasks[taskId].status = 'completed';
+  const filePath = resolveTasksPath(stateDir);
+  await withLockAsync(filePath, async () => {
+    const store = readTaskStoreSync(filePath);
+    delete store.tasks[taskId];
+    const tmpPath = filePath + '.tmp';
+    fs.writeFileSync(tmpPath, JSON.stringify(store, null, 2), 'utf8');
+    fs.renameSync(tmpPath, filePath);
+  });
+}
+
+/**
+ * Synchronous read without lock — for use INSIDE a lock context.
+ */
+function readTaskStoreSync(filePath: string): DiagnosticianTaskStore {
+  if (!fs.existsSync(filePath)) {
+    return { tasks: {} };
   }
-  // Remove completed tasks to keep the store small
-  delete store.tasks[taskId];
-  await writeTaskStore(stateDir, store);
+  try {
+    const raw = fs.readFileSync(filePath, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed.tasks === 'object') {
+      return parsed as DiagnosticianTaskStore;
+    }
+    return { tasks: {} };
+  } catch {
+    return { tasks: {} };
+  }
 }
 
 /**

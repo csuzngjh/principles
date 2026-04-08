@@ -1234,7 +1234,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                 sleepTask.status = 'in_progress';
                 sleepTask.started_at = new Date().toISOString();
             }
-            queueChanged = pendingSleepTasks.length > 0;
+            queueChanged = queueChanged || pendingSleepTasks.length > 0;
 
             // Write claimed state (includes any pain changes from above) and release lock
             if (queueChanged) {

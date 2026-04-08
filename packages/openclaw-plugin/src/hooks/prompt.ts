@@ -572,10 +572,12 @@ The empathy observer subagent handles pain detection independently.
           saveKeywordStore(wctx.stateDir, keywordStore);
           const totalHits = keywordStore.stats.totalHits;
           // Update cache mtime so we don't immediately invalidate our own write
-          const storePath = path.join(wctx.stateDir, 'empathy_keywords.json');
-          if (_empathyKeywordCache) {
-            _empathyKeywordCache.fileMtimeMs = fs.statSync(storePath).mtimeMs;
-          }
+          try {
+            const storePath = path.join(wctx.stateDir, 'empathy_keywords.json');
+            if (_empathyKeywordCache && fs.existsSync(storePath)) {
+              _empathyKeywordCache.fileMtimeMs = fs.statSync(storePath).mtimeMs;
+            }
+          } catch { /* file may not exist, will reload next turn */ }
           logger?.info?.(`[PD:Empathy] Keyword store saved after match: terms=${matchResult.matchedTerms.join(',')}, totalHits=${totalHits}`);
         }
       } catch (e) {
