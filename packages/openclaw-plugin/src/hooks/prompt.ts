@@ -6,7 +6,7 @@ import { WorkspaceContext } from '../core/workspace-context.js';
 import { ContextInjectionConfig, defaultContextConfig } from '../types.js';
 import { classifyTask, type RoutingInput } from '../core/local-worker-routing.js';
 import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection, autoCompressFocus, safeReadCurrentFocus } from '../core/focus-history.js';
-import { EmpathyObserverWorkflowManager, empathyObserverWorkflowSpec } from '../service/subagent-workflow/index.js';
+import { EmpathyObserverWorkflowManager, empathyObserverWorkflowSpec, isExpectedSubagentError } from '../service/subagent-workflow/index.js';
 import { PathResolver } from '../core/path-resolver.js';
 import { isSubagentRuntimeAvailable } from '../utils/subagent-probe.js';
 import {
@@ -497,7 +497,13 @@ The empathy observer subagent handles pain detection independently.
     }
   }
   
-  const isAgentToAgent = latestUserMessage.includes('sourceSession=agent:') || sessionId?.includes(':subagent:') === true;
+  // #189: Detect empathy observer output to prevent recursive spawn.
+  // The empathy observer runs with parentSessionId (not :subagent:), so its output
+  // would be treated as a user message and re-trigger empathy evaluation.
+  // Match distinctive patterns from the empathy observer prompt/output.
+  const isEmpathyPrompt = /empathy\s*observer/i.test(latestUserMessage) &&
+    /damageDetected|severity|confidence/i.test(latestUserMessage);
+  const isAgentToAgent = latestUserMessage.includes('sourceSession=agent:') || sessionId?.includes(':subagent:') === true || isEmpathyPrompt;
 
   const isUserInteraction = trigger === 'user' || trigger === 'api' || !trigger;
 
@@ -580,7 +586,11 @@ The empathy observer subagent handles pain detection independently.
             parentSessionId: sessionId,
             workspaceDir,
             taskInput: latestUserMessage,
-          }).catch((err) => logSubagentWorkflowError(err, 'subagent sample', api.logger));
+          }).catch((err) => {
+            if (!isExpectedSubagentError(err)) {
+              api.logger?.warn?.(`[PD:Empathy] subagent sample failed: ${String(err)}`);
+            }
+          });
         }
 
         // Helper: build summary string (Finding #2: avoid duplication)
@@ -613,14 +623,14 @@ The empathy observer subagent handles pain detection independently.
               workspaceDir,
               taskInput: { prompt: optimizationPrompt },
             }).catch((err) => {
-              // NB1: Suppress "gateway request" error during cron jobs.
-              const errMsg = String(err);
-              if (!errMsg.includes('Plugin runtime subagent methods are only available during a gateway request')) {
-                api.logger?.warn?.(`[PD:Empathy] optimization subagent failed: ${errMsg}`);
+              if (!isExpectedSubagentError(err)) {
+                api.logger?.warn?.(`[PD:Empathy] optimization subagent failed: ${String(err)}`);
               }
             });
           } catch (optErr) {
-            logger?.warn?.(`[PD:Empathy] Failed to start optimization subagent: ${String(optErr)}`);
+            if (!isExpectedSubagentError(optErr)) {
+              logger?.warn?.(`[PD:Empathy] Failed to start optimization subagent: ${String(optErr)}`);
+            }
           }
         }
 
