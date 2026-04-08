@@ -29,7 +29,6 @@
 import { randomUUID } from 'crypto';
 import type { NocturnalSessionSnapshot } from './nocturnal-trajectory-extractor.js';
 import { computeThinkingModelDelta } from './nocturnal-trajectory-extractor.js';
-import type { TrinityArtificerContext } from './nocturnal-artificer.js';
 import {
   runTournament,
   DEFAULT_SCORING_WEIGHTS,
@@ -967,8 +966,6 @@ export interface TrinityDraftArtifact {
   thinkingModelDelta?: number;
   /** Reflection quality: gain in planning ratio (-1 to 1) */
   planningRatioGain?: number;
-  /** Optional routing context for a follow-on Artificer stage */
-  artificerContext?: TrinityArtificerContext;
 }
 
 export interface TrinityTelemetry {
@@ -1022,8 +1019,6 @@ export interface TrinityResult {
   failures: TrinityStageFailure[];
   /** Whether fallback to single-reflector occurred */
   fallbackOccurred: boolean;
-  /** Optional routing context for a follow-on Artificer stage */
-  artificerContext?: TrinityArtificerContext;
 }
 
 // ---------------------------------------------------------------------------
@@ -1454,14 +1449,7 @@ export async function runTrinityAsync(options: RunTrinityOptions): Promise<Trini
       telemetry.eligibleCandidateCount = draftArtifact.telemetry.eligibleCandidateCount;
     }
 
-    return {
-      success: true,
-      artifact: draftArtifact,
-      telemetry,
-      failures: [],
-      fallbackOccurred: false,
-      artificerContext: draftArtifact.artificerContext,
-    };
+    return { success: true, artifact: draftArtifact, telemetry, failures: [], fallbackOccurred: false };
   } finally {
     if (adapter.close) {
       await adapter.close().catch(() => {});
@@ -1562,7 +1550,6 @@ function runTrinityWithStubs(
     telemetry,
     failures: [],
     fallbackOccurred: false,
-    artificerContext: draftArtifact.artificerContext,
   };
 }
 
