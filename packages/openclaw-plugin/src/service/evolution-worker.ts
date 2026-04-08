@@ -23,6 +23,7 @@ import { DeepReflectWorkflowManager } from './subagent-workflow/deep-reflect-wor
 import { NocturnalWorkflowManager, nocturnalWorkflowSpec } from './subagent-workflow/nocturnal-workflow-manager.js';
 import { createNocturnalTrajectoryExtractor } from '../core/nocturnal-trajectory-extractor.js';
 import { isSubagentRuntimeAvailable } from '../utils/subagent-probe.js';
+import { isExpectedSubagentError } from './subagent-workflow/subagent-error-utils.js';
 
 const WORKFLOW_TTL_MS = 5 * 60 * 1000; // 5 minutes default TTL for helper workflows
 import { OpenClawTrinityRuntimeAdapter } from '../core/nocturnal-trinity.js';
@@ -161,7 +162,7 @@ let timeoutId: NodeJS.Timeout | null = null;
  * Old queue items (without taskKind) are migrated to pain_diagnosis for compatibility.
  */
 export type QueueStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'canceled';
-export type TaskResolution = 'marker_detected' | 'auto_completed_timeout' | 'failed_max_retries' | 'canceled' | 'late_marker_principle_created' | 'late_marker_no_principle';
+export type TaskResolution = 'marker_detected' | 'auto_completed_timeout' | 'failed_max_retries' | 'canceled' | 'late_marker_principle_created' | 'late_marker_no_principle' | 'stub_fallback';
 
 /**
  * Recent pain context attached to sleep_reflection tasks.
@@ -1401,12 +1402,23 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         }
                     }
                 } catch (taskErr) {
-                    sleepTask.status = 'failed';
-                    sleepTask.completed_at = new Date().toISOString();
-                    sleepTask.resolution = 'failed_max_retries';
-                    sleepTask.lastError = String(taskErr);
-                    sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
-                    logger?.error?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} threw: ${taskErr}`);
+                    // #202: Handle expected subagent unavailability (e.g., process isolation in daemon mode)
+                    // When subagent is unavailable due to gateway running in separate process,
+                    // use stub fallback instead of failing the task.
+                    if (isExpectedSubagentError(taskErr)) {
+                        sleepTask.status = 'completed';
+                        sleepTask.completed_at = new Date().toISOString();
+                        sleepTask.resolution = 'stub_fallback';
+                        sleepTask.lastError = String(taskErr);
+                        logger?.info?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} completed with stub fallback (subagent unavailable)`);
+                    } else {
+                        sleepTask.status = 'failed';
+                        sleepTask.completed_at = new Date().toISOString();
+                        sleepTask.resolution = 'failed_max_retries';
+                        sleepTask.lastError = String(taskErr);
+                        sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
+                        logger?.error?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} threw: ${taskErr}`);
+                    }
                 }
             }
 
