@@ -155,7 +155,9 @@ export function deleteImplementationAssetDir(stateDir: string, implId: string): 
   if (!fs.existsSync(assetRoot)) {
     return;
   }
-  fs.rmSync(assetRoot, { recursive: true, force: true });
+  withLock(assetRoot, () => {
+    fs.rmSync(assetRoot, { recursive: true, force: true });
+  });
 }
 
 /**
@@ -198,26 +200,26 @@ export function createImplementationAssetDir(
   validateImplId(implId);
   const assetRoot = getImplementationAssetRoot(stateDir, implId);
   const replaysDir = path.join(assetRoot, REPLAYS_DIRNAME);
-
-  ensureDir(assetRoot);
-  ensureDir(replaysDir);
-
-  // Create a placeholder entry.js if it doesn't exist
   const entryPath = path.join(assetRoot, ENTRY_FILENAME);
-  if (!fs.existsSync(entryPath)) {
-    fs.writeFileSync(
-      entryPath,
-      options.entrySource ??
-        [
-          '// Code implementation entry point',
-          '// Exports: meta (RuleHostMeta), evaluate (input: RuleHostInput) => RuleHostResult',
-          '// This file will be replaced by nocturnal candidate generation (Phase 14)',
-          'export const meta = { name: "placeholder", version: "0.0.1", ruleId: "", coversCondition: "" };',
-          'export function evaluate(input) { return { decision: "allow", matched: false, reason: "placeholder" }; }',
-        ].join('\n'),
-      'utf-8',
-    );
-  } else if (options.entrySource) {
+  const entrySource =
+    options.entrySource ??
+    [
+      '// Code implementation entry point',
+      '// Exports: meta (RuleHostMeta), evaluate (input: RuleHostInput) => RuleHostResult',
+      '// This file will be replaced by nocturnal candidate generation (Phase 14)',
+      'export const meta = { name: "placeholder", version: "0.0.1", ruleId: "", coversCondition: "" };',
+      'export function evaluate(input) { return { decision: "allow", matched: false, reason: "placeholder" }; }',
+    ].join('\n');
+
+  withLock(assetRoot, () => {
+    ensureDir(assetRoot);
+    ensureDir(replaysDir);
+    if (!fs.existsSync(entryPath)) {
+      fs.writeFileSync(entryPath, entrySource, 'utf-8');
+    }
+  });
+
+  if (fs.existsSync(entryPath) && options.entrySource) {
     writeEntrySource(stateDir, implId, options.entrySource);
   }
 

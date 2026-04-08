@@ -31,23 +31,18 @@ vi.mock('fs', () => ({
   readFileSync: vi.fn(),
 }));
 
-// Mock node:vm polyfill
-vi.mock('../../src/utils/node-vm-polyfill.js', () => {
-  return {
-    nodeVm: {
-      compileFunction: vi.fn(),
-    },
-  };
-});
+vi.mock('../../src/core/rule-implementation-runtime.js', () => ({
+  loadRuleImplementationModule: vi.fn(),
+}));
 
 import { listImplementationsByLifecycleState } from '../../src/core/principle-tree-ledger.js';
 import { loadEntrySource } from '../../src/core/code-implementation-storage.js';
-import { nodeVm } from '../../src/utils/node-vm-polyfill.js';
+import { loadRuleImplementationModule } from '../../src/core/rule-implementation-runtime.js';
 import * as fs from 'fs';
 
 const mockedListImplementations = vi.mocked(listImplementationsByLifecycleState);
 const mockedLoadEntrySource = vi.mocked(loadEntrySource);
-const mockedCompileFunction = vi.mocked(nodeVm.compileFunction);
+const mockedLoadRuleImplementationModule = vi.mocked(loadRuleImplementationModule);
 const mockedExistsSync = vi.mocked(fs.existsSync);
 const mockedReadFileSync = vi.mocked(fs.readFileSync);
 
@@ -136,10 +131,10 @@ describe('RuleHost', () => {
     mockedListImplementations.mockReturnValue([mockImpl] as any);
     mockedExistsSync.mockReturnValue(true);
     mockedReadFileSync.mockReturnValue('module.exports = {}');
-    mockedCompileFunction.mockReturnValue(() => ({
+    mockedLoadRuleImplementationModule.mockReturnValue({
       meta: { name: 'block-test', version: '1.0.0', ruleId: 'RULE_BLOCK', coversCondition: 'test' },
       evaluate: (_input: any, _helpers: any) => blockResult,
-    }));
+    });
 
     const host = new RuleHost('/mock/state');
     const result = host.evaluate(makeInput());
@@ -169,18 +164,18 @@ describe('RuleHost', () => {
     mockedReadFileSync.mockReturnValue('module.exports = {}');
 
     let callCount = 0;
-    mockedCompileFunction.mockImplementation(() => {
+    mockedLoadRuleImplementationModule.mockImplementation(() => {
       callCount++;
       if (callCount === 1) {
-        return () => ({
+        return {
           meta: { name: 'block-first', version: '1.0.0', ruleId: 'RULE_01', coversCondition: 'test' },
           evaluate: () => blockResult,
-        });
+        };
       }
-      return () => ({
+      return {
         meta: { name: 'allow-second', version: '1.0.0', ruleId: 'RULE_02', coversCondition: 'test' },
         evaluate: () => allowResult,
-      });
+      };
     });
 
     const host = new RuleHost('/mock/state');
@@ -201,10 +196,10 @@ describe('RuleHost', () => {
     mockedListImplementations.mockReturnValue([mockImpl] as any);
     mockedExistsSync.mockReturnValue(true);
     mockedReadFileSync.mockReturnValue('module.exports = {}');
-    mockedCompileFunction.mockReturnValue(() => ({
+    mockedLoadRuleImplementationModule.mockReturnValue({
       meta: { name: 'approval-test', version: '1.0.0', ruleId: 'RULE_APPROVAL', coversCondition: 'test' },
       evaluate: () => approvalResult,
-    }));
+    });
 
     const host = new RuleHost('/mock/state');
     const result = host.evaluate(makeInput());
@@ -233,18 +228,18 @@ describe('RuleHost', () => {
     mockedReadFileSync.mockReturnValue('module.exports = {}');
 
     let callCount = 0;
-    mockedCompileFunction.mockImplementation(() => {
+    mockedLoadRuleImplementationModule.mockImplementation(() => {
       callCount++;
       if (callCount === 1) {
-        return () => ({
+        return {
           meta: { name: 'allow-1', version: '1.0.0', ruleId: 'RULE_01', coversCondition: 'test' },
           evaluate: () => allowResult,
-        });
+        };
       }
-      return () => ({
+      return {
         meta: { name: 'unmatched-2', version: '1.0.0', ruleId: 'RULE_02', coversCondition: 'test' },
         evaluate: () => unmatchedResult,
-      });
+      };
     });
 
     const host = new RuleHost('/mock/state');
@@ -257,7 +252,7 @@ describe('RuleHost', () => {
     mockedListImplementations.mockReturnValue([mockImpl] as any);
     mockedExistsSync.mockReturnValue(true);
     mockedReadFileSync.mockReturnValue('bad syntax {{{');
-    mockedCompileFunction.mockImplementation(() => {
+    mockedLoadRuleImplementationModule.mockImplementation(() => {
       throw new Error('Compilation failed: unexpected token');
     });
 
@@ -266,17 +261,36 @@ describe('RuleHost', () => {
     expect(result).toBeUndefined();
   });
 
+  it('should use injected logger for degradation warnings instead of direct console writes', () => {
+    const warn = vi.fn();
+    const mockImpl = makeMockImpl('IMPL_BAD');
+    mockedListImplementations.mockReturnValue([mockImpl] as any);
+    mockedExistsSync.mockReturnValue(true);
+    mockedReadFileSync.mockReturnValue('bad syntax {{{');
+    mockedLoadRuleImplementationModule.mockImplementation(() => {
+      throw new Error('Compilation failed: unexpected token');
+    });
+
+    const host = new RuleHost('/mock/state', { warn });
+    const result = host.evaluate(makeInput());
+
+    expect(result).toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to compile implementation IMPL_BAD')
+    );
+  });
+
   it('should return undefined on vm execution error (conservative degradation)', () => {
     const mockImpl = makeMockImpl('IMPL_EXEC_ERR');
     mockedListImplementations.mockReturnValue([mockImpl] as any);
     mockedExistsSync.mockReturnValue(true);
     mockedReadFileSync.mockReturnValue('module.exports = {}');
-    mockedCompileFunction.mockReturnValue(() => ({
+    mockedLoadRuleImplementationModule.mockReturnValue({
       meta: { name: 'exec-err', version: '1.0.0', ruleId: 'RULE_ERR', coversCondition: 'test' },
       evaluate: () => {
         throw new Error('Runtime error during evaluation');
       },
-    }));
+    });
 
     const host = new RuleHost('/mock/state');
     const result = host.evaluate(makeInput());
@@ -304,10 +318,10 @@ describe('RuleHost', () => {
     mockedListImplementations.mockReturnValue([mockImpl] as any);
     mockedLoadEntrySource.mockReturnValue('export const meta = {}; export function evaluate() {}');
     mockedExistsSync.mockReturnValue(false);
-    mockedCompileFunction.mockReturnValue(() => ({
+    mockedLoadRuleImplementationModule.mockReturnValue({
       meta: { name: 'storage-test', version: '1.0.0', ruleId: 'RULE_STORAGE', coversCondition: 'test' },
       evaluate: () => blockResult,
-    }));
+    });
 
     const host = new RuleHost('/mock/state');
     const result = host.evaluate(makeInput());
@@ -340,18 +354,18 @@ describe('RuleHost', () => {
     mockedReadFileSync.mockReturnValue('module.exports = {}');
 
     let callCount = 0;
-    mockedCompileFunction.mockImplementation(() => {
+    mockedLoadRuleImplementationModule.mockImplementation(() => {
       callCount++;
       if (callCount === 1) {
-        return () => ({
+        return {
           meta: { name: 'approval-1', version: '1.0.0', ruleId: 'RULE_01', coversCondition: 'test' },
           evaluate: () => approval1,
-        });
+        };
       }
-      return () => ({
+      return {
         meta: { name: 'approval-2', version: '1.0.0', ruleId: 'RULE_02', coversCondition: 'test' },
         evaluate: () => approval2,
-      });
+      };
     });
 
     const host = new RuleHost('/mock/state');

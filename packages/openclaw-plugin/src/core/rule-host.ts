@@ -7,13 +7,12 @@
  * ARCHITECTURE:
  *   - Constructor takes stateDir to access the principle-tree ledger
  *   - evaluate(input) loads active code implementations and runs them
- *   - Each implementation executes in a constrained vm with minimal helpers
+ *   - Each implementation executes in an isolated vm context with minimal helpers
  *   - Decision merge: block short-circuits, requireApproval collects, allow is implicit
  *
  * SECURITY CONSTRAINTS (T-12-01, T-12-04):
- *   - vm.compileFunction with codeGeneration: { strings: false, wasm: false }
+ *   - Candidate code loads through a dedicated vm context, not the host realm
  *   - No importModuleDynamically callback
- *   - vm context receives only { helpers: frozenHelpers } — no fs, process, require, global
  *   - Helpers are a frozen object — implementations cannot modify the helper surface
  *
  * CONSERVATIVE DEGRADATION (T-12-02, D-08):
@@ -21,13 +20,13 @@
  *   - Never throw, never bypass downstream gates (Progressive Gate, Edit Verification)
  */
 
-import { nodeVm } from '../utils/node-vm-polyfill.js';
 import * as fs from 'fs';
 import {
   listImplementationsByLifecycleState,
 } from './principle-tree-ledger.js';
 import { loadEntrySource } from './code-implementation-storage.js';
 import { createRuleHostHelpers } from './rule-host-helpers.js';
+import { loadRuleImplementationModule } from './rule-implementation-runtime.js';
 import type {
   RuleHostInput,
   RuleHostResult,
@@ -36,19 +35,17 @@ import type {
 } from './rule-host-types.js';
 import type { Implementation } from '../types/principle-tree-schema.js';
 
-function normalizeImplementationSource(sourceCode: string): string {
-  const withoutExports = sourceCode
-    .replace(/export\s+const\s+meta\s*=/, 'const meta =')
-    .replace(/export\s+function\s+evaluate\s*\(/, 'function evaluate(');
-
-  return `${withoutExports}\nreturn { meta, evaluate };`;
+export interface RuleHostLogger {
+  warn?: (message: string) => void;
 }
 
 export class RuleHost {
   private readonly stateDir: string;
+  private readonly logger: RuleHostLogger;
 
-  constructor(stateDir: string) {
+  constructor(stateDir: string, logger: RuleHostLogger = console) {
     this.stateDir = stateDir;
+    this.logger = logger;
   }
 
   /**
@@ -92,7 +89,7 @@ export class RuleHost {
           // 'allow' is implicit — no action needed
         } catch (evalError: unknown) {
           // Individual implementation error: log and continue (D-08)
-          console.warn(
+          this.logger.warn?.(
             `[RuleHost] Implementation ${impl.implId} evaluation failed: ${String(evalError)}`
           );
         }
@@ -119,7 +116,7 @@ export class RuleHost {
       return undefined;
     } catch (hostError: unknown) {
       // Conservative degradation: log and return undefined (D-08)
-      console.warn(
+      this.logger.warn?.(
         `[RuleHost] Host evaluation failed, degrading conservatively: ${String(hostError)}`
       );
       return undefined;
@@ -155,7 +152,7 @@ export class RuleHost {
           }
         } catch (loadError: unknown) {
           // Individual load failure: log and skip
-          console.warn(
+          this.logger.warn?.(
             `[RuleHost] Failed to load implementation ${impl.id}: ${String(loadError)}`
           );
         }
@@ -164,7 +161,7 @@ export class RuleHost {
       return loaded;
     } catch (ledgerError: unknown) {
       // Ledger access failure: log and return empty
-      console.warn(
+      this.logger.warn?.(
         `[RuleHost] Failed to access ledger: ${String(ledgerError)}`
       );
       return [];
@@ -178,7 +175,8 @@ export class RuleHost {
    *   - meta: { name, version, ruleId, coversCondition }
    *   - evaluate(input: RuleHostInput): RuleHostResult
    *
-   * Uses vm.compileFunction with constrained code generation settings.
+   * Uses the shared isolated runtime loader so candidate code does not execute
+   * in the host global realm.
    */
   private _loadSingleImplementation(
     impl: Implementation
@@ -198,30 +196,22 @@ export class RuleHost {
     }
 
     try {
-      // Compile in constrained vm context
-      // T-12-01: Disable eval() and new Function() via strings: false
-      // T-12-01: Disable WebAssembly via wasm: false
-      // No importModuleDynamically callback — no dynamic imports
-      const compiled = nodeVm.compileFunction(
-        normalizeImplementationSource(sourceCode),
-        [],
-        {
-          filename: impl.id,
-        }
-      );
-
-      const moduleExports = compiled();
+      const moduleExports = loadRuleImplementationModule(sourceCode, impl.id);
 
       if (!moduleExports || typeof moduleExports.evaluate !== 'function') {
         return null;
       }
 
-      const meta: RuleHostMeta = moduleExports.meta ?? {
+      const fallbackMeta: RuleHostMeta = {
         name: impl.id,
         version: impl.version,
         ruleId: impl.ruleId,
         coversCondition: impl.coversCondition,
       };
+      const meta: RuleHostMeta =
+        moduleExports.meta && typeof moduleExports.meta === 'object'
+          ? (moduleExports.meta as RuleHostMeta)
+          : fallbackMeta;
 
       // Return a loaded implementation that wraps the compiled evaluate
       // with the actual helpers from the input at evaluation time
@@ -241,7 +231,7 @@ export class RuleHost {
       };
     } catch (compileError: unknown) {
       // Compilation failure: log and skip
-      console.warn(
+      this.logger.warn?.(
         `[RuleHost] Failed to compile implementation ${impl.id}: ${String(compileError)}`
       );
       return null;

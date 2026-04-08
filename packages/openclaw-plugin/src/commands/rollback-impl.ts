@@ -17,8 +17,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { withLock } from '../utils/file-lock.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
+import { refreshPrincipleLifecycle } from '../core/principle-internalization/lifecycle-refresh.js';
 import {
   loadLedger,
+  transitionImplementationState,
 } from '../core/principle-tree-ledger.js';
 import type { Implementation } from '../types/principle-tree-schema.js';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
@@ -130,36 +132,18 @@ function _handleRollbackImpl(
   const previousActiveId = (currentActive as any).previousActive;
   const reasonText = reason || (isZh ? '\u7528\u6237\u624b\u52a8\u56de\u6eda' : 'User manual rollback');
 
-  const ledger = loadLedger(stateDir);
-
   // Step 1: Current active -> disabled
-  const current = ledger.tree.implementations[implId];
-  if (!current) {
-    return {
-      text: isZh
-        ? `\u274c \u5b9e\u73b0\u5df2\u4e0d\u5b58\u5728: ${implId}`
-        : `\u274c Implementation gone: ${implId}`,
-    };
-  }
-
-  (current as any).lifecycleState = 'disabled';
-  current.updatedAt = new Date().toISOString();
-  ledger.tree.implementations[implId] = current;
+  transitionImplementationState(stateDir, implId, 'disabled');
 
   let restoredMessage = '';
 
-  if (previousActiveId && ledger.tree.implementations[previousActiveId]) {
+  if (previousActiveId && allImpls.some((i) => i.id === previousActiveId)) {
     // Step 2: Restore previous active -> active
-    const previous = ledger.tree.implementations[previousActiveId];
-    if (previous) {
-      (previous as any).lifecycleState = 'active';
-      previous.updatedAt = new Date().toISOString();
-      ledger.tree.implementations[previousActiveId] = previous;
+    transitionImplementationState(stateDir, previousActiveId, 'active');
 
-      restoredMessage = isZh
-        ? `\n   \u5df2\u6062\u590d\u524d\u4e00\u4e2a\u6d3b\u8dc3\u5b9e\u73b0: ${previousActiveId}\n   \u72b6\u6001: disabled -> active`
-        : `\n   Restored previous active implementation: ${previousActiveId}\n   State: disabled -> active`;
-    }
+    restoredMessage = isZh
+      ? `\n   \u5df2\u6062\u590d\u524d\u4e00\u4e2a\u6d3b\u8dc3\u5b9e\u73b0: ${previousActiveId}\n   \u72b6\u6001: disabled -> active`
+      : `\n   Restored previous active implementation: ${previousActiveId}\n   State: disabled -> active`;
   } else {
     // No previous active — degrade to hard-boundary gates (per Phase 12 D-08)
     restoredMessage = isZh
@@ -168,14 +152,6 @@ function _handleRollbackImpl(
       : `\n   \u26a0\ufe0f No previous active implementation. Rule has no active code implementation.`
         + ` Existing hard-boundary gates (GFI, Progressive Gate) continue functioning normally.`;
   }
-
-  // Write ledger atomically
-  const ledgerPath = path.join(stateDir, 'principle_training_state.json');
-  withLock(ledgerPath, () => {
-    fs.writeFileSync(ledgerPath, JSON.stringify(
-      { _tree: ledger.tree }, null, 2
-    ), 'utf-8');
-  });
 
   // Store rollback record
   const rollbackDir = path.join(
@@ -194,7 +170,7 @@ function _handleRollbackImpl(
     rolledBackAt: new Date().toISOString(),
     reason: reasonText,
     previousImplementationId: previousActiveId || null,
-    restoredImplementationId: previousActiveId && ledger.tree.implementations[previousActiveId]
+    restoredImplementationId: previousActiveId && allImpls.some((i) => i.id === previousActiveId)
       ? previousActiveId
       : null,
     rolledBackImplId: implId,
@@ -205,6 +181,7 @@ function _handleRollbackImpl(
   withLock(rollbackPath, () => {
     fs.writeFileSync(rollbackPath, JSON.stringify(rollbackRecord, null, 2), 'utf-8');
   });
+  refreshPrincipleLifecycle(workspaceDir, stateDir);
 
   let output = isZh
     ? `\n\u2705 \u56de\u6eda\u5b8c\u6210: ${implId}\n   \u72b6\u6001: active -> disabled\n   \u539f\u56e0: ${reasonText}`

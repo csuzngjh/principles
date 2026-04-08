@@ -11,14 +11,12 @@
  *   4. Record disabledAt, disabledBy, disabledReason
  */
 
-import * as fs from 'fs';
-import * as path from 'path';
-import { withLock } from '../utils/file-lock.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
+import { refreshPrincipleLifecycle } from '../core/principle-internalization/lifecycle-refresh.js';
 import {
   loadLedger,
-  isValidLifecycleTransition,
-  listImplementationsForRule,
+  transitionImplementationState,
+  updateImplementation,
   getAllowedTransitions,
 } from '../core/principle-tree-ledger.js';
 import type { Implementation, ImplementationLifecycleState } from '../types/principle-tree-schema.js';
@@ -61,7 +59,7 @@ export function handleDisableImplCommand(ctx: PluginCommandContext): PluginComma
   }
 
   // Disable
-  return _handleDisableImpl(stateDir, implId, reason, isZh, ctx.sessionId);
+  return _handleDisableImpl(workspaceDir, stateDir, implId, reason, isZh, ctx.sessionId);
 }
 
 function _handleListActive(
@@ -104,6 +102,7 @@ function _handleListActive(
 }
 
 function _handleDisableImpl(
+  workspaceDir: string,
   stateDir: string,
   implId: string,
   reason: string | null,
@@ -135,31 +134,13 @@ function _handleDisableImpl(
 
   const reasonText = reason || (isZh ? '\u7528\u6237\u624b\u52a8\u7981\u7528' : 'User manual disable');
 
-  // Perform transition
-  const ledger = loadLedger(stateDir);
-  const impl = ledger.tree.implementations[implId];
-  if (!impl) {
-    return {
-      text: isZh
-        ? `\u274c \u5b9e\u73b0\u5df2\u4e0d\u5b58\u5728: ${implId}`
-        : `\u274c Implementation gone: ${implId}`,
-    };
-  }
-
-  (impl as any).lifecycleState = 'disabled';
-  (impl as any).disabledAt = new Date().toISOString();
-  (impl as any).disabledBy = sessionId || 'manual';
-  (impl as any).disabledReason = reasonText;
-  impl.updatedAt = new Date().toISOString();
-  ledger.tree.implementations[implId] = impl;
-
-  // Write ledger atomically
-  const ledgerPath = path.join(stateDir, 'principle_training_state.json');
-  withLock(ledgerPath, () => {
-    fs.writeFileSync(ledgerPath, JSON.stringify(
-      { _tree: ledger.tree }, null, 2
-    ), 'utf-8');
+  transitionImplementationState(stateDir, implId, 'disabled');
+  updateImplementation(stateDir, implId, {
+    disabledAt: new Date().toISOString(),
+    disabledBy: sessionId || 'manual',
+    disabledReason: reasonText,
   });
+  refreshPrincipleLifecycle(workspaceDir, stateDir);
 
   return {
     text: isZh

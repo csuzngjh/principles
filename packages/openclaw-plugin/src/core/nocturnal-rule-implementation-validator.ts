@@ -1,5 +1,5 @@
-import { nodeVm } from '../utils/node-vm-polyfill.js';
 import { createRuleHostHelpers, type RuleHostHelpers } from './rule-host-helpers.js';
+import { loadRuleImplementationModule } from './rule-implementation-runtime.js';
 import type {
   RuleHostDecision,
   RuleHostInput,
@@ -51,18 +51,6 @@ const HELPER_NAMES: Array<keyof RuleHostHelpers> = [
   'getPlanStatus',
   'getCurrentEpiTier',
 ];
-
-function normalizeImplementationSource(sourceCode: string): string {
-  const withoutExports = sourceCode
-    .replace(/export\s+const\s+meta\s*=/, 'const meta =')
-    .replace(/export\s+function\s+evaluate\s*\(/, 'function evaluate(');
-
-  return `${withoutExports}
-return {
-  meta: typeof meta === 'undefined' ? undefined : meta,
-  evaluate: typeof evaluate === 'undefined' ? undefined : evaluate,
-};`;
-}
 
 function createValidationInput(): RuleHostInput {
   return {
@@ -208,13 +196,10 @@ export function validateRuleImplementationCandidate(
     };
   }
 
-  const normalizedSource = normalizeImplementationSource(sourceCode);
+  const normalizedSource = sourceCode;
 
   try {
-    const compiled = nodeVm.compileFunction(normalizedSource, [], {
-      filename: 'nocturnal-candidate.js',
-    });
-    const moduleExports = compiled() as {
+    const moduleExports = loadRuleImplementationModule(normalizedSource, 'nocturnal-candidate.js') as {
       meta?: unknown;
       evaluate?: (input: RuleHostInput, helpers: RuleHostHelpers) => unknown;
     };

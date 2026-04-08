@@ -162,7 +162,7 @@ export function handleBeforeToolCall(
   // before the capability-boundary fallback. Active code implementations run
   // through a constrained vm context with minimal helpers only.
   try {
-    const ruleHost = new RuleHost(wctx.stateDir);
+    const ruleHost = new RuleHost(wctx.stateDir, logger);
     const hostInput: RuleHostInput = {
       action: {
         toolName: event.toolName,

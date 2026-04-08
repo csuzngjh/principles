@@ -15,8 +15,6 @@ import type {
   PluginHookSubagentSpawningEvent,
   PluginHookSubagentSpawningResult,
   PluginHookSubagentContext,
-  PluginHookBeforeMessageWriteEvent,
-  PluginHookBeforeMessageWriteResult,
 } from './openclaw-sdk.js';
 import * as crypto from 'crypto';
 import type { WorkerProfile } from './core/model-deployment-registry.js';
@@ -30,7 +28,6 @@ import { handleAfterToolCall } from './hooks/pain.js';
 import { handleBeforeReset, handleBeforeCompaction, handleAfterCompaction } from './hooks/lifecycle.js';
 import { handleLlmOutput } from './hooks/llm.js';
 import { handleSubagentEnded } from './hooks/subagent.js';
-import { handleBeforeMessageWrite } from './hooks/message-sanitize.js';
 import * as TrajectoryCollector from './hooks/trajectory-collector.js';
 import { handleInitStrategy, handleManageOkr } from './commands/strategy.js';
 import { handleBootstrapTools, handleResearchTools } from './commands/capabilities.js';
@@ -199,21 +196,8 @@ const plugin = {
       }
     );
 
-    // ── Hook: Message Sanitization ──
-    api.on(
-      'before_message_write',
-      (event: PluginHookBeforeMessageWriteEvent): PluginHookBeforeMessageWriteResult | void => {
-        try {
-          return handleBeforeMessageWrite(event);
-        } catch (err) {
-          api.logger.error(`[PD] Error in before_message_write: ${String(err)}`);
-        }
-      }
-    );
-
     // ── Hook: Trajectory Collection (Behavior Evolution Phase 0) ──
     // Note: after_tool_call and llm_output are safe to collect
-    // before_message_write conflicts with message-sanitize, skipping for now
     api.on(
       'after_tool_call',
       (event: PluginHookAfterToolCallEvent, ctx: PluginHookToolContext): void => {

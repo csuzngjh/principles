@@ -8,12 +8,12 @@
  * Used for permanent cleanup of implementations that are no longer relevant.
  */
 
-import * as fs from 'fs';
-import * as path from 'path';
-import { withLock } from '../utils/file-lock.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
+import { refreshPrincipleLifecycle } from '../core/principle-internalization/lifecycle-refresh.js';
 import {
   loadLedger,
+  transitionImplementationState,
+  updateImplementation,
 } from '../core/principle-tree-ledger.js';
 import type { Implementation, ImplementationLifecycleState } from '../types/principle-tree-schema.js';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
@@ -57,7 +57,7 @@ export function handleArchiveImplCommand(ctx: PluginCommandContext): PluginComma
 
   // Archive by ID
   const targetId = subcommand;
-  return _handleArchiveImpl(stateDir, targetId, isZh);
+  return _handleArchiveImpl(workspaceDir, stateDir, targetId, isZh);
 }
 
 function _handleListArchivable(
@@ -94,6 +94,7 @@ function _handleListArchivable(
 }
 
 function _handleArchiveImpl(
+  workspaceDir: string,
   stateDir: string,
   implId: string,
   isZh: boolean
@@ -119,29 +120,11 @@ function _handleArchiveImpl(
     };
   }
 
-  // Perform transition
-  const ledger = loadLedger(stateDir);
-  const impl = ledger.tree.implementations[implId];
-  if (!impl) {
-    return {
-      text: isZh
-        ? `\u274c \u5b9e\u73b0\u5df2\u4e0d\u5b58\u5728: ${implId}`
-        : `\u274c Implementation gone: ${implId}`,
-    };
-  }
-
-  (impl as any).lifecycleState = 'archived';
-  (impl as any).archivedAt = new Date().toISOString();
-  impl.updatedAt = new Date().toISOString();
-  ledger.tree.implementations[implId] = impl;
-
-  // Write ledger atomically
-  const ledgerPath = path.join(stateDir, 'principle_training_state.json');
-  withLock(ledgerPath, () => {
-    fs.writeFileSync(ledgerPath, JSON.stringify(
-      { _tree: ledger.tree }, null, 2
-    ), 'utf-8');
+  transitionImplementationState(stateDir, implId, 'archived');
+  updateImplementation(stateDir, implId, {
+    archivedAt: new Date().toISOString(),
   });
+  refreshPrincipleLifecycle(workspaceDir, stateDir);
 
   return {
     text: isZh

@@ -76,6 +76,7 @@ import {
   type ArtificerTargetRuleResolution,
 } from '../core/nocturnal-artificer.js';
 import { validateRuleImplementationCandidate } from '../core/nocturnal-rule-implementation-validator.js';
+import { refreshPrincipleLifecycle } from '../core/principle-internalization/lifecycle-refresh.js';
 import {
   createImplementationAssetDir,
   deleteImplementationAssetDir,
@@ -449,6 +450,7 @@ function persistCodeCandidate(
       implementationId,
       createdAt: now,
     });
+    refreshPrincipleLifecycle(workspaceDir, stateDir);
     return {
       status: 'persisted_candidate',
       ruleResolution: {

@@ -29,7 +29,7 @@ export interface InternalizationRouteRecommendation {
   nextAction: string;
 }
 
-function clampConfidence(value: number): number {
+function clampToPercentage(value: number): number {
   if (!Number.isFinite(value)) {
     return 0;
   }
@@ -53,7 +53,7 @@ function averageCoverageGap(ruleMetrics: Record<string, RuleMetricResult>): numb
     return 0;
   }
 
-  return clampConfidence(
+  return clampToPercentage(
     coverageGaps.reduce((sum, gap) => sum + gap, 0) / coverageGaps.length,
   );
 }
@@ -124,7 +124,7 @@ export function recommendInternalizationRoute(
     return {
       principleId: principle.principle.id,
       route: 'defer',
-      confidence: clampConfidence(78 - principle.summary.repeatedErrorSignal * 8),
+      confidence: clampToPercentage(78 - principle.summary.repeatedErrorSignal * 8),
       reasonCodes,
       evidenceSummary,
       nextAction: 'Collect more replay evidence or live violations before committing to a heavier implementation path.',
@@ -136,7 +136,7 @@ export function recommendInternalizationRoute(
     return {
       principleId: principle.principle.id,
       route: 'defer',
-      confidence: clampConfidence(70 + adherence.averageRuleCoverage * 0.2),
+      confidence: clampToPercentage(70 + adherence.averageRuleCoverage * 0.2),
       reasonCodes,
       evidenceSummary,
       nextAction: 'Defer new implementation work and keep monitoring until the lower layer proves it needs another route.',
@@ -158,7 +158,7 @@ export function recommendInternalizationRoute(
     return {
       principleId: principle.principle.id,
       route: 'skill',
-      confidence: clampConfidence(
+      confidence: clampToPercentage(
         62 + adherence.repeatedErrorReductionScore * 0.12 - adherence.averageFalsePositiveRate * 0.15,
       ),
       reasonCodes,
@@ -178,7 +178,7 @@ export function recommendInternalizationRoute(
   return {
     principleId: principle.principle.id,
     route: 'code',
-    confidence: clampConfidence(
+    confidence: clampToPercentage(
       58 +
         evidenceSummary.highestRuleCoverageGap * 0.2 +
         principle.summary.repeatedErrorSignal * 6 +

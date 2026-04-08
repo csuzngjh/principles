@@ -1,79 +1,53 @@
-/**
- * Replay Engine — Offline Stress-Testing for Code Implementation Candidates
- * ========================================================================
- *
- * PURPOSE: Run a candidate implementation against classified nocturnal samples
- * to produce a structured evaluation report for manual promotion decisions.
- *
- * ARCHITECTURE:
- *   - Reads samples from nocturnal-dataset.ts classified registry
- *   - Runs candidate evaluate() against each sample
- *   - Produces ReplayReport with per-classification breakdown
- *   - Persists report under implementations/{implId}/replays/{timestamp}.json
- *
- * DESIGN CONSTRAINTS:
- *   - Does NOT create a parallel sample system — reuses nocturnal-dataset
- *   - All writes use withLock for atomicity
- *   - Reports are machine-readable for Phase 14/15 consumption
- */
-
 import * as fs from 'fs';
 import * as path from 'path';
 import { withLock } from '../utils/file-lock.js';
+import { normalizePath, isRisky, planStatus as getPlanStatus } from '../utils/io.js';
 import {
   listSamplesByClassification,
   loadSampleContent,
-  generateSampleFingerprint,
 } from './nocturnal-dataset.js';
-import { getImplementationAssetRoot } from './code-implementation-storage.js';
-import type { NocturnalDatasetRecord, SampleClassification } from './nocturnal-dataset.js';
-import { findActiveImplementation, listImplementationsForRule } from './principle-tree-ledger.js';
+import {
+  getImplementationAssetRoot,
+  loadEntrySource,
+} from './code-implementation-storage.js';
+import type {
+  NocturnalDatasetRecord,
+  SampleClassification,
+} from './nocturnal-dataset.js';
+import { loadLedger } from './principle-tree-ledger.js';
 import type { Implementation } from '../types/principle-tree-schema.js';
+import type { RuleHostHelpers } from './rule-host-helpers.js';
+import { createRuleHostHelpers } from './rule-host-helpers.js';
+import type { RuleHostInput, RuleHostResult } from './rule-host-types.js';
+import { loadRuleImplementationModule } from './rule-implementation-runtime.js';
+import {
+  getNocturnalSessionSnapshot,
+  type NocturnalGateBlock,
+  type NocturnalSessionSnapshot,
+  type NocturnalToolCall,
+} from './nocturnal-trajectory-extractor.js';
+import { TrajectoryRegistry } from './trajectory.js';
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-/**
- * A sample prepared for replay evaluation.
- */
 export interface ReplaySample {
-  /** Unique fingerprint from the nocturnal dataset */
   fingerprint: string;
-  /** Classification: pain-negative, success-positive, or principle-anchor */
   classification: SampleClassification;
-  /** Raw artifact content from the sample file */
   content: unknown;
-  /** Expected outcome based on classification */
   expectedOutcome: {
-    /** For pain-negative: expect block/denial */
     shouldBlock?: boolean;
-    /** For success-positive: expect pass/allow */
     shouldPass?: boolean;
-    /** For principle-anchor: expect principle-adherent behavior */
     expectedPrinciple?: string;
   };
+  record: NocturnalDatasetRecord;
 }
 
-/**
- * Result of replaying a single sample.
- */
 export interface ReplayResult {
-  /** Sample fingerprint */
   sampleFingerprint: string;
-  /** Sample classification */
   classification: SampleClassification;
-  /** Whether the candidate behaved correctly on this sample */
   passed: boolean;
-  /** Reason for failure (empty if passed) */
   reason?: string;
-  /** Decision outcome: blocked, passed, adhered, leaked, misfired, violated */
   decision: string;
 }
 
-/**
- * Per-classification aggregated results.
- */
 export interface ClassificationSummary {
   total: number;
   passed: number;
@@ -81,57 +55,23 @@ export interface ClassificationSummary {
   details: ReplayResult[];
 }
 
-/**
- * Structured evaluation report produced by ReplayEngine.
- * Matches D-05 shape from Phase 13 context.
- */
 export interface ReplayReport {
-  /** Overall pass/fail/needs-review decision */
   overallDecision: 'pass' | 'fail' | 'needs-review';
-  /** Per-classification breakdown */
   replayResults: {
     painNegative: ClassificationSummary;
     successPositive: ClassificationSummary;
     principleAnchor: ClassificationSummary;
   };
-  /** Blocker reasons that contributed to fail/needs-review */
   blockers: string[];
-  /** ISO timestamp of report generation */
   generatedAt: string;
-  /** Implementation ID being evaluated */
   implementationId: string;
-  /** Fingerprints of all samples used in this replay */
   sampleFingerprints: string[];
 }
 
-// ---------------------------------------------------------------------------
-// Candidate Evaluation Interface
-// ---------------------------------------------------------------------------
-
-/**
- * Abstract interface for candidate evaluation.
- * Implementations should provide this to test against replay samples.
- */
 export interface CandidateEvaluator {
-  /**
-   * Evaluate a sample against the candidate implementation.
-   * Returns true if the candidate handled the sample correctly.
-   */
   evaluate(sample: unknown): { passed: boolean; reason?: string; decision: string };
 }
 
-// ---------------------------------------------------------------------------
-// ReplayEngine
-// ---------------------------------------------------------------------------
-
-/**
- * ReplayEngine runs candidate implementations against classified samples.
- *
- * Usage:
- *   const engine = new ReplayEngine(workspaceDir, stateDir);
- *   const report = engine.runReplay('IMPL_060_01_hook', evaluator, ['pain-negative', 'principle-anchor']);
- *   console.log(report.overallDecision); // 'pass' | 'fail' | 'needs-review'
- */
 export class ReplayEngine {
   private readonly workspaceDir: string;
   private readonly stateDir: string;
@@ -141,9 +81,6 @@ export class ReplayEngine {
     this.stateDir = stateDir;
   }
 
-  /**
-   * Load samples by classification from the nocturnal dataset.
-   */
   loadSamples(classifications: SampleClassification[]): ReplaySample[] {
     const samples: ReplaySample[] = [];
 
@@ -153,16 +90,16 @@ export class ReplayEngine {
       for (const record of records) {
         try {
           const content = loadSampleContent(this.workspaceDir, record);
-          const expectedOutcome = this._deriveExpectedOutcome(record, content);
+          const expectedOutcome = this._deriveExpectedOutcome(record);
 
           samples.push({
             fingerprint: record.sampleFingerprint,
             classification,
             content,
             expectedOutcome,
+            record,
           });
         } catch (err) {
-          // Log but continue — one bad sample shouldn't abort the entire replay
           console.warn(
             `[ReplayEngine] Skipping sample ${record.sampleFingerprint}: ${String(err)}`
           );
@@ -173,45 +110,17 @@ export class ReplayEngine {
     return samples;
   }
 
-  /**
-   * Run evaluation on a single sample.
-   */
   runSingleSample(sample: ReplaySample, evaluator: CandidateEvaluator): ReplayResult {
-    const evaluation = evaluator.evaluate(sample.content);
-
-    // Determine if the result matches the expected outcome for this classification
-    let passed: boolean;
-    const decision = evaluation.decision;
-
-    switch (sample.classification) {
-      case 'pain-negative':
-        // Pain-negative samples: candidate should BLOCK them
-        passed = evaluation.passed;
-        break;
-      case 'success-positive':
-        // Success-positive samples: candidate should PASS them (not produce false positive)
-        passed = evaluation.passed;
-        break;
-      case 'principle-anchor':
-        // Principle-anchor: candidate should adhere to principle
-        passed = evaluation.passed;
-        break;
-      default:
-        passed = evaluation.passed;
-    }
-
+    const evaluation = evaluator.evaluate(sample);
     return {
       sampleFingerprint: sample.fingerprint,
       classification: sample.classification,
-      passed,
-      reason: passed ? undefined : evaluation.reason,
-      decision,
+      passed: evaluation.passed,
+      reason: evaluation.passed ? undefined : evaluation.reason,
+      decision: evaluation.decision,
     };
   }
 
-  /**
-   * Run a full replay over selected classifications for a candidate.
-   */
   runReplay(
     candidateImplId: string,
     evaluator: CandidateEvaluator,
@@ -224,94 +133,316 @@ export class ReplayEngine {
     ];
 
     const samples = this.loadSamples(selectedClassifications);
-    const allResults: ReplayResult[] = [];
-    let failed = false;
-
-    for (const sample of samples) {
-      const result = this.runSingleSample(sample, evaluator);
-      allResults.push(result);
-      if (!result.passed) failed = true;
-    }
-
-    // Build the report
+    const allResults = samples.map((sample) => this.runSingleSample(sample, evaluator));
     const report = this._buildReport(candidateImplId, allResults);
-
-    // Persist the report
     this._persistReport(report);
-
     return report;
   }
 
-  /**
-   * Build a ReplayReport from raw results.
-   */
+  runReplayForImplementation(
+    implementationId: string,
+    classifications?: SampleClassification[],
+  ): ReplayReport {
+    const implementation = this._getImplementationById(implementationId);
+    if (!implementation) {
+      throw new Error(`Implementation not found: ${implementationId}`);
+    }
+
+    const evaluator = this._createEvaluatorForImplementation(implementation);
+    return this.runReplay(implementationId, evaluator, classifications);
+  }
+
+  listReports(implementationId: string): ReplayReport[] {
+    const reportDir = path.join(
+      getImplementationAssetRoot(this.stateDir, implementationId),
+      'replays'
+    );
+
+    if (!fs.existsSync(reportDir)) return [];
+
+    try {
+      const files = fs.readdirSync(reportDir).filter((file) => file.endsWith('.json'));
+      return files
+        .sort()
+        .reverse()
+        .map((file) => {
+          const content = fs.readFileSync(path.join(reportDir, file), 'utf-8');
+          return JSON.parse(content) as ReplayReport;
+        });
+    } catch {
+      return [];
+    }
+  }
+
+  getLatestReport(implementationId: string): ReplayReport | null {
+    const reports = this.listReports(implementationId);
+    return reports.length > 0 ? reports[0] : null;
+  }
+
+  hasPassingReport(implementationId: string): boolean {
+    return this.listReports(implementationId).some((report) => report.overallDecision === 'pass');
+  }
+
+  private _getImplementationById(implementationId: string): Implementation | null {
+    const ledger = loadLedger(this.stateDir);
+    return ledger.tree.implementations[implementationId] ?? null;
+  }
+
+  private _createEvaluatorForImplementation(implementation: Implementation): CandidateEvaluator {
+    const sourceCode = loadEntrySource(this.stateDir, implementation.id);
+    if (!sourceCode) {
+      throw new Error(`Implementation asset entry source missing: ${implementation.id}`);
+    }
+
+    const moduleExports = loadRuleImplementationModule(sourceCode, implementation.id);
+    if (typeof moduleExports.evaluate !== 'function') {
+      throw new Error(`Implementation ${implementation.id} does not export evaluate().`);
+    }
+
+    const evaluate = moduleExports.evaluate as (
+      input: RuleHostInput,
+      helpers: RuleHostHelpers,
+    ) => RuleHostResult;
+
+    return {
+      evaluate: (sample: unknown) => {
+        const replaySample = sample as ReplaySample;
+        const input = this._buildRuleHostInput(replaySample);
+        if (!input) {
+          return {
+            passed: false,
+            reason: `Could not build replay input for sample ${replaySample.fingerprint}.`,
+            decision: 'replay-input-missing',
+          };
+        }
+
+        const result = evaluate(input, createRuleHostHelpers(input));
+        return this._scoreEvaluation(replaySample, result);
+      },
+    };
+  }
+
+  private _buildRuleHostInput(sample: ReplaySample): RuleHostInput | null {
+    const snapshot = getNocturnalSessionSnapshot(
+      TrajectoryRegistry.get(this.workspaceDir),
+      sample.record.sessionId,
+    );
+    if (!snapshot) {
+      return null;
+    }
+
+    const toolCall = this._selectToolCall(snapshot, sample.classification);
+    if (!toolCall) {
+      return null;
+    }
+
+    const normalizedPath =
+      typeof toolCall.filePath === 'string' && toolCall.filePath.length > 0
+        ? normalizePath(toolCall.filePath, this.workspaceDir)
+        : null;
+    const matchedGateBlock = this._matchGateBlock(snapshot.gateBlocks, toolCall);
+
+    return {
+      action: {
+        toolName: toolCall.toolName,
+        normalizedPath,
+        paramsSummary: {
+          artifactId: sample.record.artifactId,
+          sourceSnapshotRef: sample.record.sourceSnapshotRef,
+          classification: sample.classification,
+        },
+      },
+      workspace: {
+        isRiskPath:
+          Boolean(matchedGateBlock) ||
+          (normalizedPath !== null && this._isRiskPath(normalizedPath)),
+        planStatus:
+          matchedGateBlock?.planStatus === 'READY' ||
+          matchedGateBlock?.planStatus === 'DRAFT' ||
+          matchedGateBlock?.planStatus === 'NONE'
+            ? matchedGateBlock.planStatus
+            : this._safePlanStatus(),
+        hasPlanFile: fs.existsSync(path.join(this.workspaceDir, 'PLAN.md')),
+      },
+      session: {
+        sessionId: sample.record.sessionId,
+        currentGfi: 0,
+        recentThinking: false,
+      },
+      evolution: {
+        epTier: 0,
+      },
+      derived: {
+        estimatedLineChanges: this._estimateLineChanges(toolCall),
+        bashRisk: this._inferBashRisk(toolCall),
+      },
+    };
+  }
+
+  private _selectToolCall(
+    snapshot: NocturnalSessionSnapshot,
+    classification: SampleClassification,
+  ): NocturnalToolCall | null {
+    const byNewest = [...snapshot.toolCalls].sort(
+      (left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
+    );
+
+    if (classification === 'pain-negative') {
+      return (
+        byNewest.find((toolCall) => toolCall.outcome === 'blocked') ??
+        byNewest.find((toolCall) => toolCall.outcome === 'failure') ??
+        byNewest[0] ??
+        null
+      );
+    }
+
+    if (classification === 'success-positive' || classification === 'principle-anchor') {
+      return (
+        byNewest.find((toolCall) => toolCall.outcome === 'success') ??
+        byNewest.find((toolCall) => toolCall.outcome === 'failure') ??
+        byNewest[0] ??
+        null
+      );
+    }
+
+    return byNewest[0] ?? null;
+  }
+
+  private _matchGateBlock(
+    gateBlocks: NocturnalGateBlock[],
+    toolCall: NocturnalToolCall,
+  ): NocturnalGateBlock | null {
+    return (
+      [...gateBlocks]
+        .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
+        .find((gateBlock) => gateBlock.toolName === toolCall.toolName) ?? null
+    );
+  }
+
+  private _isRiskPath(normalizedPath: string): boolean {
+    try {
+      const profilePath = path.join(this.workspaceDir, 'PROFILE.json');
+      const riskPaths =
+        fs.existsSync(profilePath)
+          ? (((JSON.parse(fs.readFileSync(profilePath, 'utf-8')) as { risk_paths?: unknown }).risk_paths as string[] | undefined) ?? [])
+          : [];
+      return isRisky(normalizedPath, riskPaths);
+    } catch {
+      return false;
+    }
+  }
+
+  private _safePlanStatus(): 'NONE' | 'DRAFT' | 'READY' | 'UNKNOWN' {
+    try {
+      const status = getPlanStatus(this.workspaceDir);
+      if (status === 'READY') return 'READY';
+      if (status === 'DRAFT') return 'DRAFT';
+      if (status === '') return 'NONE';
+      return 'UNKNOWN';
+    } catch {
+      return 'UNKNOWN';
+    }
+  }
+
+  private _estimateLineChanges(toolCall: NocturnalToolCall): number {
+    if (toolCall.toolName === 'edit' || toolCall.toolName === 'write') {
+      return 20;
+    }
+    return 0;
+  }
+
+  private _inferBashRisk(toolCall: NocturnalToolCall): 'safe' | 'normal' | 'dangerous' | 'unknown' {
+    if (toolCall.toolName !== 'bash' && toolCall.toolName !== 'run_shell_command') {
+      return 'unknown';
+    }
+    const errorText = `${toolCall.errorType ?? ''} ${toolCall.errorMessage ?? ''}`;
+    if (/\brm\s+-rf\b|\bchmod\b|\bchown\b|>\s*\/dev\//.test(errorText)) {
+      return 'dangerous';
+    }
+    return toolCall.outcome === 'success' ? 'safe' : 'normal';
+  }
+
+  private _scoreEvaluation(
+    sample: ReplaySample,
+    result: RuleHostResult,
+  ): { passed: boolean; reason?: string; decision: string } {
+    switch (sample.classification) {
+      case 'pain-negative':
+        return {
+          passed: result.decision === 'block' || result.decision === 'requireApproval',
+          reason:
+            result.decision === 'block' || result.decision === 'requireApproval'
+              ? undefined
+              : `Expected block/requireApproval but received ${result.decision}.`,
+          decision: result.decision,
+        };
+      case 'success-positive':
+        return {
+          passed: result.decision === 'allow' || !result.matched,
+          reason:
+            result.decision === 'allow' || !result.matched
+              ? undefined
+              : `Expected allow/no-match but received ${result.decision}.`,
+          decision: result.decision,
+        };
+      case 'principle-anchor':
+        return {
+          passed: result.decision !== 'block',
+          reason:
+            result.decision !== 'block'
+              ? undefined
+              : 'Principle-anchor sample should not regress to a hard block.',
+          decision: result.decision,
+        };
+      default:
+        return {
+          passed: false,
+          reason: 'Unknown replay classification.',
+          decision: result.decision,
+        };
+    }
+  }
+
   private _buildReport(
     implementationId: string,
     results: ReplayResult[]
   ): ReplayReport {
-    const painNegative: ReplayResult[] = results.filter(
-      (r) => r.classification === 'pain-negative'
-    );
-    const successPositive: ReplayResult[] = results.filter(
-      (r) => r.classification === 'success-positive'
-    );
-    const principleAnchor: ReplayResult[] = results.filter(
-      (r) => r.classification === 'principle-anchor'
-    );
+    const painNegative = results.filter((result) => result.classification === 'pain-negative');
+    const successPositive = results.filter((result) => result.classification === 'success-positive');
+    const principleAnchor = results.filter((result) => result.classification === 'principle-anchor');
 
     const toSummary = (details: ReplayResult[]): ClassificationSummary => ({
       total: details.length,
-      passed: details.filter((r) => r.passed).length,
-      failed: details.filter((r) => !r.passed).length,
+      passed: details.filter((result) => result.passed).length,
+      failed: details.filter((result) => !result.passed).length,
       details,
     });
 
     const painSummary = toSummary(painNegative);
     const successSummary = toSummary(successPositive);
     const anchorSummary = toSummary(principleAnchor);
-
-    // Build blockers list
     const blockers: string[] = [];
 
-    // Pain-negative leaks are critical failures
-    const leakedPain = painSummary.details.filter(
-      (r) => !r.passed && r.classification === 'pain-negative'
-    );
-    for (const lp of leakedPain) {
+    for (const leak of painSummary.details.filter((result) => !result.passed)) {
       blockers.push(
-        `PAIN-NEGATIVE LEAK: Sample ${lp.sampleFingerprint} was not blocked. ${lp.reason ?? ''}`
+        `PAIN-NEGATIVE LEAK: Sample ${leak.sampleFingerprint} was not blocked. ${leak.reason ?? ''}`
       );
     }
 
-    // Principle-anchor violations are critical failures
-    const violatedAnchors = anchorSummary.details.filter(
-      (r) => !r.passed && r.classification === 'principle-anchor'
-    );
-    for (const va of violatedAnchors) {
+    for (const violation of anchorSummary.details.filter((result) => !result.passed)) {
       blockers.push(
-        `PRINCIPLE-ANCHOR VIOLATION: Sample ${va.sampleFingerprint} did not adhere. ${va.reason ?? ''}`
+        `PRINCIPLE-ANCHOR VIOLATION: Sample ${violation.sampleFingerprint} did not adhere. ${violation.reason ?? ''}`
       );
     }
 
-    // Success-positive false positives
-    const falsePositives = successSummary.details.filter(
-      (r) => !r.passed && r.classification === 'success-positive'
-    );
-    for (const fp of falsePositives) {
+    for (const falsePositive of successSummary.details.filter((result) => !result.passed)) {
       blockers.push(
-        `FALSE POSITIVE: Sample ${fp.sampleFingerprint} was incorrectly blocked. ${fp.reason ?? ''}`
+        `FALSE POSITIVE: Sample ${falsePositive.sampleFingerprint} was incorrectly blocked. ${falsePositive.reason ?? ''}`
       );
     }
-
-    // Determine overall decision (D-08)
-    const overallDecision = this._determineDecision(
-      painSummary,
-      successSummary,
-      anchorSummary
-    );
 
     return {
-      overallDecision,
+      overallDecision: this._determineDecision(painSummary, successSummary, anchorSummary),
       replayResults: {
         painNegative: painSummary,
         successPositive: successSummary,
@@ -320,34 +451,21 @@ export class ReplayEngine {
       blockers,
       generatedAt: new Date().toISOString(),
       implementationId,
-      sampleFingerprints: results.map((r) => r.sampleFingerprint),
+      sampleFingerprints: results.map((result) => result.sampleFingerprint),
     };
   }
 
-  /**
-   * Determine overall replay decision per D-08:
-   * - fail: any pain-negative leaked, any principle-anchor violated
-   * - needs-review: any success-positive false positive (non-critical)
-   * - pass: everything correct
-   */
   private _determineDecision(
     pain: ClassificationSummary,
     success: ClassificationSummary,
     anchor: ClassificationSummary
   ): 'pass' | 'fail' | 'needs-review' {
-    // Critical: pain-negative leakage
     if (pain.failed > 0) return 'fail';
-    // Critical: principle-anchor violated
     if (anchor.failed > 0) return 'fail';
-    // Non-critical: success-positive false positives
     if (success.failed > 0) return 'needs-review';
-    // All clear
     return 'pass';
   }
 
-  /**
-   * Persist report as versioned JSON under implementation storage.
-   */
   private _persistReport(report: ReplayReport): void {
     const reportDir = path.join(
       getImplementationAssetRoot(this.stateDir, report.implementationId),
@@ -366,12 +484,8 @@ export class ReplayEngine {
     });
   }
 
-  /**
-   * Derive expected outcome from sample classification and content.
-   */
   private _deriveExpectedOutcome(
     record: NocturnalDatasetRecord,
-    content: unknown
   ): ReplaySample['expectedOutcome'] {
     switch (record.classification) {
       case 'pain-negative':
@@ -379,66 +493,14 @@ export class ReplayEngine {
       case 'success-positive':
         return { shouldPass: true };
       case 'principle-anchor':
-        return {
-          expectedPrinciple: record.principleId,
-        };
+        return { expectedPrinciple: record.principleId };
       default:
         return {};
     }
   }
-
-  /**
-   * List all replay reports for an implementation.
-   */
-  listReports(implementationId: string): ReplayReport[] {
-    const reportDir = path.join(
-      getImplementationAssetRoot(this.stateDir, implementationId),
-      'replays'
-    );
-
-    if (!fs.existsSync(reportDir)) return [];
-
-    try {
-      const files = fs.readdirSync(reportDir).filter((f) => f.endsWith('.json'));
-      return files
-        .sort()
-        .reverse()
-        .map((f) => {
-          const content = fs.readFileSync(path.join(reportDir, f), 'utf-8');
-          return JSON.parse(content) as ReplayReport;
-        });
-    } catch {
-      return [];
-    }
-  }
-
-  /**
-   * Get the latest replay report for an implementation.
-   */
-  getLatestReport(implementationId: string): ReplayReport | null {
-    const reports = this.listReports(implementationId);
-    return reports.length > 0 ? reports[0] : null;
-  }
-
-  /**
-   * Check if an implementation has at least one passing replay report.
-   */
-  hasPassingReport(implementationId: string): boolean {
-    const reports = this.listReports(implementationId);
-    return reports.some((r) => r.overallDecision === 'pass');
-  }
 }
 
-// ---------------------------------------------------------------------------
-// Report Formatting Helper
-// ---------------------------------------------------------------------------
-
-/**
- * Format a replay report as human-readable CLI output.
- */
 export function formatReplayReport(report: ReplayReport): string {
-  const isZh = false;
-
   const decisionEmoji =
     report.overallDecision === 'pass'
       ? 'PASS'
@@ -447,7 +509,7 @@ export function formatReplayReport(report: ReplayReport): string {
         : 'NEEDS-REVIEW';
 
   let output = '';
-  output += `${isZh ? '\n\ud83d\udccb \u56de\u653e\u8bc4\u4f30\u62a5\u544a' : '\nReplay Evaluation Report'}\n`;
+  output += '\nReplay Evaluation Report\n';
   output += `${'='.repeat(50)}\n`;
   output += `Implementation: ${report.implementationId}\n`;
   output += `Generated At:   ${report.generatedAt}\n`;
@@ -464,31 +526,22 @@ export function formatReplayReport(report: ReplayReport): string {
     section += `    Total: ${summary.total} | Passed: ${summary.passed} | Failed: ${summary.failed}\n`;
     section += `    Pass Rate: ${rate}%\n`;
     if (summary.failed > 0) {
-      section += `    Failures:\n`;
-      for (const detail of summary.details.filter((d) => !d.passed)) {
+      section += '    Failures:\n';
+      for (const detail of summary.details.filter((item) => !item.passed)) {
         section += `      - ${detail.sampleFingerprint}: ${detail.reason ?? detail.decision}\n`;
       }
     }
     return section;
   };
 
-  output += formatSection(
-    isZh ? '\u75db\u70b9\u8d1f\u9762\u6837\u672c' : 'Pain-Negative Samples',
-    report.replayResults.painNegative
-  );
-  output += formatSection(
-    isZh ? '\u6210\u529f\u6b63\u9762\u6837\u672c' : 'Success-Positive Samples',
-    report.replayResults.successPositive
-  );
-  output += formatSection(
-    isZh ? '\u539f\u5219\u951a\u70b9\u6837\u672c' : 'Principle-Anchor Samples',
-    report.replayResults.principleAnchor
-  );
+  output += formatSection('Pain-Negative Samples', report.replayResults.painNegative);
+  output += formatSection('Success-Positive Samples', report.replayResults.successPositive);
+  output += formatSection('Principle-Anchor Samples', report.replayResults.principleAnchor);
 
   if (report.blockers.length > 0) {
-    output += `\n${isZh ? '\u963b\u585e\u56e0\u7d20' : 'Blockers'}:\n`;
-    for (const b of report.blockers) {
-      output += `  - ${b}\n`;
+    output += '\nBlockers:\n';
+    for (const blocker of report.blockers) {
+      output += `  - ${blocker}\n`;
     }
   }
 
