@@ -95,7 +95,7 @@ export class WorkspaceContext {
      */
     get evolutionReducer(): EvolutionReducerImpl {
         if (!this._evolutionReducer) {
-            this._evolutionReducer = new EvolutionReducerImpl({ workspaceDir: this.workspaceDir });
+            this._evolutionReducer = new EvolutionReducerImpl({ workspaceDir: this.workspaceDir, stateDir: this.stateDir });
         }
         return this._evolutionReducer;
     }

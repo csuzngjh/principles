@@ -227,6 +227,20 @@ export interface NocturnalServiceOptions {
   painContext?: import('../service/evolution-worker.js').RecentPainContext;
 
   /**
+   * Override the principleId (skip Selector stage).
+   * When provided with snapshotOverride, the Selector stage is skipped and the provided
+   * principleId and snapshot are used directly for Trinity execution.
+   * This unifies NocturnalWorkflowManager with executeNocturnalReflectionAsync.
+   */
+  principleIdOverride?: string;
+
+  /**
+   * Override the snapshot (skip Selector stage).
+   * Must be provided together with principleIdOverride to skip Selector.
+   */
+  snapshotOverride?: NocturnalSessionSnapshot;
+
+  /**
    * Override the Artificer JSON output (for testing).
    * When omitted, a deterministic local candidate is synthesized.
    */
@@ -1114,54 +1128,91 @@ async function executeNocturnalReflectionWithAdapter(
     return { success: false, noTargetSelected: false, validationFailed: false, validationFailures: [], diagnostics };
   }
 
-  // Step 2: Target selection
-  const extractor = createNocturnalTrajectoryExtractor(workspaceDir, stateDir);
-  const selector = new NocturnalTargetSelector(workspaceDir, stateDir, extractor, {
-    idleCheckOverride: options.idleCheckOverride,
-    recentPainContext: options.painContext,
-  });
+  // Step 2: Target selection (or use override to skip)
+  let selectedPrincipleId: string | undefined;
+  let selectedSessionId: string | undefined;
+  let snapshot: NocturnalSessionSnapshot | null = null;
 
-  const selection = selector.select();
-  diagnostics.selection = selection;
-
-  if (selection.decision === 'skip') {
-    return {
-      success: false,
-      noTargetSelected: true,
-      skipReason: selection.skipReason,
-      validationFailed: false,
-      validationFailures: [],
-      diagnostics,
+  if (options.principleIdOverride && options.snapshotOverride) {
+    // Skip Selector: use provided principleId and snapshot directly
+    selectedPrincipleId = options.principleIdOverride;
+    selectedSessionId = options.snapshotOverride.sessionId;
+    snapshot = options.snapshotOverride;
+    // Calculate violation density from snapshot stats for meaningful diagnostics
+    const snapStats = options.snapshotOverride.stats;
+    const totalToolCalls = snapStats?.totalToolCalls ?? 0;
+    const failureCount = snapStats?.failureCount ?? 0;
+    const violationDensity = totalToolCalls > 0 ? failureCount / totalToolCalls : 0;
+    diagnostics.selection = {
+      decision: 'selected',
+      selectedPrincipleId,
+      selectedSessionId,
+      skipReason: undefined,
+      diagnostics: {
+        totalEvaluablePrinciples: 1,  // We provided one principle via override
+        filteredByCooldown: 0,
+        passedPrinciples: [selectedPrincipleId],
+        violatingSessionCount: 1,  // The session we're using
+        selectedSessionViolationDensity: violationDensity,
+        selectedPrincipleScore: 100,  // Override means high priority
+        scoringBreakdown: { override: 100 },
+        idleCheckPassed: true,
+        cooldownCheckPassed: true,
+        quotaCheckPassed: true,
+      },
     };
-  }
+    diagnostics.idle = { isIdle: true, mostRecentActivityAt: 0, idleForMs: 0, userActiveSessions: 0, abandonedSessionIds: [], trajectoryGuardrailConfirmsIdle: true, reason: 'selector skipped (override provided)' };
+  } else {
+    // Normal Selector path
+    const extractor = createNocturnalTrajectoryExtractor(workspaceDir, stateDir);
+    const selector = new NocturnalTargetSelector(workspaceDir, stateDir, extractor, {
+      idleCheckOverride: options.idleCheckOverride,
+      recentPainContext: options.painContext,
+    });
 
-  const { selectedPrincipleId, selectedSessionId } = selection;
+    const selection = selector.select();
+    diagnostics.selection = selection;
 
-  if (!selectedPrincipleId || !selectedSessionId) {
-    return {
-      success: false,
-      noTargetSelected: true,
-      validationFailed: false,
-      validationFailures: [],
-      diagnostics,
-    };
-  }
+    if (selection.decision === 'skip') {
+      return {
+        success: false,
+        noTargetSelected: true,
+        skipReason: selection.skipReason,
+        validationFailed: false,
+        validationFailures: [],
+        diagnostics,
+      };
+    }
 
-  const snapshot = extractor.getNocturnalSessionSnapshot(selectedSessionId);
-  if (!snapshot) {
-    return {
-      success: false,
-      noTargetSelected: true,
-      skipReason: 'insufficient_snapshot_data',
-      validationFailed: false,
-      validationFailures: [],
-      diagnostics,
-    };
+    selectedPrincipleId = selection.selectedPrincipleId;
+    selectedSessionId = selection.selectedSessionId;
+
+    if (!selectedPrincipleId || !selectedSessionId) {
+      return {
+        success: false,
+        noTargetSelected: true,
+        validationFailed: false,
+        validationFailures: [],
+        diagnostics,
+      };
+    }
+
+    snapshot = extractor.getNocturnalSessionSnapshot(selectedSessionId);
+    if (!snapshot) {
+      return {
+        success: false,
+        noTargetSelected: true,
+        skipReason: 'insufficient_snapshot_data',
+        validationFailed: false,
+        validationFailures: [],
+        diagnostics,
+      };
+    }
+    diagnostics.idle = { isIdle: true, mostRecentActivityAt: 0, idleForMs: 0, userActiveSessions: 0, abandonedSessionIds: [], trajectoryGuardrailConfirmsIdle: true, reason: 'preflight passed' };
   }
-  diagnostics.idle = { isIdle: true, mostRecentActivityAt: 0, idleForMs: 0, userActiveSessions: 0, abandonedSessionIds: [], trajectoryGuardrailConfirmsIdle: true, reason: 'preflight passed' };
 
   // Step 3: Record run start
-  void recordRunStart(stateDir, selectedPrincipleId).catch((err) => {
+  void recordRunStart(stateDir, selectedPrincipleId!).catch((err) => {
     console.warn(`[nocturnal-service] Failed to record run start: ${String(err)}`);
   });
 

@@ -1,33 +1,67 @@
-# Roadmap: v1.7 — PD Task Manager
+# Roadmap: v1.9.1 — WebUI Data Source Fixes
 
-**Milestone:** v1.7
+**Milestone:** v1.9.1
 **Status:** Planning
-**Architecture Doc:** `docs/architecture/pd-task-manager.md`
-**Date:** 2026-04-07
+**Architecture Doc:** `.planning/research/ARCHITECTURE.md`
+**Date:** 2026-04-08
 
 ## Phases
 
-Phase numbering continues from v1.6 (Phase 14).
+Phase numbering continues from v1.9.0 (ended at Phase 15).
 
 | Phase | Name | Description | Requirements | Depends on | Status |
 |-------|------|-------------|--------------|------------|--------|
-| 14 | Core Infrastructure | PDTaskSpec 类型定义 + PDTaskStore + builtin tasks | TYPE-01~03, STORE-01~03 | None | Pending |
-| 15 | Reconciler & Advanced Features | Reconcile 算法 + dry-run + health + prefetch + trigger + history | RECON-01~08, HLTH-01~07, PREF-01~05, TRIG-01~04, HIST-01~07 | Phase 14 | Pending |
-| 16 | Integration & Migration | PDTaskService 注册 + index.ts 更新 + 删除 cron-initializer.ts | SVC-01~06 | Phase 15 | Pending |
+| 16 | Data Source Tracing | Map all 4 pages to API endpoints, route handlers, service methods, and DB queries. Document actual response shapes vs TypeScript type declarations. | TRACE-01, TRACE-02 | None | Pending |
+| 17 | Overview Page Data Fix | Fix `/api/central/overview` inline route assembly, `/api/overview` ControlUiQueryService, and `/api/overview/health` HealthQueryService. Highest risk — inline assembly bypasses service layer. | OVER-01, OVER-02, OVER-03 | Phase 16 | Pending |
+| 18 | Loop/Samples + Feedback Page Fixes | Fix `/api/samples`, `/api/samples/:id`, `/api/feedback/gfi`, `/api/feedback/empathy-events`, `/api/feedback/gate-blocks` data sources and field mappings. | LOOP-01, LOOP-02, FB-01, FB-02, FB-03 | Phase 16 | Pending |
+| 19 | Gate Monitor + Frontend Field Mapping | Fix `/api/gate/stats`, `/api/gate/blocks` data sources. Fix all frontend TypeScript types and component field accessors to match actual backend responses. | GATE-01, GATE-02, FE-01, FE-02 | Phase 16 | Pending |
+| 20 | End-to-End Validation | Validate all 4 pages display correct data after fixes. Add regression tests to prevent future data source drift. | E2E-01, E2E-02 | Phases 17, 18, 19 | Pending |
 
-## Dependencies (from v1.6)
+## Dependencies (from v1.9.0)
 
-None — v1.7 is self-contained within the plugin package.
+- v1.9.0 completed Phases 11-15 (Principle Internalization System)
+- All WebUI pages and API routes exist but have data source issues
+- Dual database model: ControlUiDatabase (per-workspace) vs CentralDatabase (cross-workspace)
+- `/api/central/overview` assembles response inline in route handler — key risk area
+
+## Phase Dependency Graph
+
+```
+Phase 16 (TRACE) ─────────────────┐
+                                   ├──▶ Phase 17 (Overview) ──┐
+                                   ├──▶ Phase 18 (Loop+Feedback)├──▶ Phase 20 (E2E)
+                                   └──▶ Phase 19 (Gate+Frontend)┘
+```
+
+Phases 17, 18, 19 can run in parallel after Phase 16 completes (all depend only on tracing output). Phase 20 requires all fix phases to be done.
 
 ## Risks
 
-**Low** — isolated change, backward compatible, no new dependencies. All new files follow existing file-lock.ts + atomic write patterns.
+| Risk | Impact | Mitigation |
+|------|--------|------------|
+| `/api/central/overview` inline assembly is riskiest — no service layer abstraction | High | Phase 16 must fully document this path before any fixes |
+| Dual DB model confusion — reading from wrong database | High | Phase 16 tracing must clarify which DB each endpoint uses |
+| TypeScript type drift — frontend types don't match runtime data | Medium | TRACE-02 documents actual shapes; FE-01/FE-02 fix mismatches |
+| SQLite connection leaks from improper service disposal | Low | Existing `finally` block in route handler — verify, don't rewrite |
+| Visual regression during data fixes | Low | Explicit constraint: visual layer stays unchanged |
 
-## v2 (Future)
+## Out of Scope
 
-- Nocturnal Review — daily 21:00 pain signal analysis
-- Weekly Governance — Friday OKR alignment + system health report
+- UI visual/style changes
+- New dashboard pages
+- Performance optimization
+- API redesign/refactoring
+
+## Success Criteria
+
+| Phase | Success Criteria |
+|-------|-----------------|
+| 16 | All 4 pages traced to DB queries; response shape document matches runtime output |
+| 17 | Overview page shows correct KPIs, daily trend, regression list, and health metrics |
+| 18 | Samples page shows correct queue; Feedback page shows correct GFI, empathy events, gate blocks |
+| 19 | Gate Monitor shows correct stats and blocks; all frontend types match backend responses |
+| 20 | All 4 pages validated with correct data; regression tests pass on CI |
 
 ---
 
-*Last updated: 2026-04-07 after roadmap creation*
+*Last updated: 2026-04-08 after roadmap creation*
