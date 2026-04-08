@@ -25,6 +25,7 @@ import {
   loadSampleContent,
   generateSampleFingerprint,
 } from './nocturnal-dataset.js';
+import { getImplementationAssetRoot } from './code-implementation-storage.js';
 import type { NocturnalDatasetRecord, SampleClassification } from './nocturnal-dataset.js';
 import { findActiveImplementation, listImplementationsForRule } from './principle-tree-ledger.js';
 import type { Implementation } from '../types/principle-tree-schema.js';
@@ -349,11 +350,7 @@ export class ReplayEngine {
    */
   private _persistReport(report: ReplayReport): void {
     const reportDir = path.join(
-      this.stateDir,
-      '.state',
-      'principles',
-      'implementations',
-      report.implementationId,
+      getImplementationAssetRoot(this.stateDir, report.implementationId),
       'replays'
     );
 
@@ -395,11 +392,7 @@ export class ReplayEngine {
    */
   listReports(implementationId: string): ReplayReport[] {
     const reportDir = path.join(
-      this.stateDir,
-      '.state',
-      'principles',
-      'implementations',
-      implementationId,
+      getImplementationAssetRoot(this.stateDir, implementationId),
       'replays'
     );
 
@@ -444,8 +437,7 @@ export class ReplayEngine {
  * Format a replay report as human-readable CLI output.
  */
 export function formatReplayReport(report: ReplayReport): string {
-  const lang = 'en'; // Bilingual support — default to en for now
-  const isZh = lang === 'zh';
+  const isZh = false;
 
   const decisionEmoji =
     report.overallDecision === 'pass'

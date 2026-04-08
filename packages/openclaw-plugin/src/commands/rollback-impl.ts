@@ -16,6 +16,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { withLock } from '../utils/file-lock.js';
+import { WorkspaceContext } from '../core/workspace-context.js';
 import {
   loadLedger,
 } from '../core/principle-tree-ledger.js';
@@ -40,7 +41,7 @@ function getAllImplementations(stateDir: string): Implementation[] {
  */
 export function handleRollbackImplCommand(ctx: PluginCommandContext): PluginCommandResult {
   const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
-  const stateDir = workspaceDir;
+  const stateDir = WorkspaceContext.fromHookContext({ ...ctx, workspaceDir }).stateDir;
   const lang = (ctx.config?.language as string) || 'en';
   const isZh = lang === 'zh';
 
@@ -57,7 +58,7 @@ export function handleRollbackImplCommand(ctx: PluginCommandContext): PluginComm
     return _handleListActiveRollback(stateDir, isZh);
   }
 
-  return _handleRollbackImpl(workspaceDir, stateDir, implId, reason, isZh);
+  return _handleRollbackImpl(workspaceDir, stateDir, implId, reason, isZh, ctx.sessionId);
 }
 
 function _handleListActiveRollback(
@@ -103,7 +104,8 @@ function _handleRollbackImpl(
   stateDir: string,
   implId: string,
   reason: string | null,
-  isZh: boolean
+  isZh: boolean,
+  sessionId?: string,
 ): PluginCommandResult {
   const allImpls = getAllImplementations(stateDir);
   const currentActive = allImpls.find((i) => i.id === implId);
@@ -178,7 +180,6 @@ function _handleRollbackImpl(
   // Store rollback record
   const rollbackDir = path.join(
     stateDir,
-    '.state',
     'principles',
     'implementations',
     implId,
@@ -189,7 +190,7 @@ function _handleRollbackImpl(
   }
 
   const rollbackRecord = {
-    rolledBackBy: (ctx as any).sessionId || 'manual',
+    rolledBackBy: sessionId || 'manual',
     rolledBackAt: new Date().toISOString(),
     reason: reasonText,
     previousImplementationId: previousActiveId || null,
@@ -224,6 +225,7 @@ export function handleNaturalLanguageRollbackImpl(
   reason: string
 ): { success: boolean; message: string } {
   const isZh = reason.match(/[\u4e00-\u9fff]/) || false;
+  const stateDir = WorkspaceContext.fromHookContext({ workspaceDir }).stateDir;
 
   if (!sessionId) {
     return {
@@ -233,7 +235,7 @@ export function handleNaturalLanguageRollbackImpl(
   }
 
   // Natural language entry: get last active implementation
-  const allImpls = getAllImplementations(workspaceDir);
+  const allImpls = getAllImplementations(stateDir);
   const lastActive = allImpls.find((i) => (i as any).lifecycleState === 'active');
 
   if (!lastActive) {

@@ -47,7 +47,7 @@ function getAllImplementations(stateDir: string): Implementation[] {
  */
 export function handlePromoteImplCommand(ctx: PluginCommandContext): PluginCommandResult {
   const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
-  const stateDir = workspaceDir;
+  const stateDir = WorkspaceContext.fromHookContext({ ...ctx, workspaceDir }).stateDir;
   const lang = (ctx.config?.language as string) || 'en';
   const isZh = lang === 'zh';
 
@@ -256,7 +256,6 @@ function _handlePromoteImpl(
   // Record promotion event in ledger evolution log
   const eventsDir = path.join(
     stateDir,
-    '.state',
     'principles',
     'implementations',
     implId,

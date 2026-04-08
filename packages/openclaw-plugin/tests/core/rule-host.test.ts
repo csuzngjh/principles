@@ -21,6 +21,10 @@ vi.mock('../../src/core/principle-tree-ledger.js', () => ({
   findActiveImplementation: vi.fn(() => null),
 }));
 
+vi.mock('../../src/core/code-implementation-storage.js', () => ({
+  loadEntrySource: vi.fn(() => null),
+}));
+
 // Mock fs to avoid actual file reads
 vi.mock('fs', () => ({
   existsSync: vi.fn(() => false),
@@ -37,10 +41,12 @@ vi.mock('../../src/utils/node-vm-polyfill.js', () => {
 });
 
 import { listImplementationsByLifecycleState } from '../../src/core/principle-tree-ledger.js';
+import { loadEntrySource } from '../../src/core/code-implementation-storage.js';
 import { nodeVm } from '../../src/utils/node-vm-polyfill.js';
 import * as fs from 'fs';
 
 const mockedListImplementations = vi.mocked(listImplementationsByLifecycleState);
+const mockedLoadEntrySource = vi.mocked(loadEntrySource);
 const mockedCompileFunction = vi.mocked(nodeVm.compileFunction);
 const mockedExistsSync = vi.mocked(fs.existsSync);
 const mockedReadFileSync = vi.mocked(fs.readFileSync);
@@ -91,6 +97,7 @@ function makeMockImpl(id: string, type: string = 'code', lifecycleState: string 
 describe('RuleHost', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockedLoadEntrySource.mockReturnValue(null);
   });
 
   it('should return undefined when no active implementations exist (empty ledger)', () => {
@@ -284,6 +291,31 @@ describe('RuleHost', () => {
     const host = new RuleHost('/mock/state');
     const result = host.evaluate(makeInput());
     expect(result).toBeUndefined();
+  });
+
+  it('loads code implementations from storage assets before falling back to impl.path', () => {
+    const blockResult: RuleHostResult = {
+      decision: 'block',
+      matched: true,
+      reason: 'Loaded from storage asset',
+    };
+    const mockImpl = makeMockImpl('IMPL_STORAGE');
+
+    mockedListImplementations.mockReturnValue([mockImpl] as any);
+    mockedLoadEntrySource.mockReturnValue('export const meta = {}; export function evaluate() {}');
+    mockedExistsSync.mockReturnValue(false);
+    mockedCompileFunction.mockReturnValue(() => ({
+      meta: { name: 'storage-test', version: '1.0.0', ruleId: 'RULE_STORAGE', coversCondition: 'test' },
+      evaluate: () => blockResult,
+    }));
+
+    const host = new RuleHost('/mock/state');
+    const result = host.evaluate(makeInput());
+
+    expect(mockedLoadEntrySource).toHaveBeenCalledWith('/mock/state', 'IMPL_STORAGE');
+    expect(mockedReadFileSync).not.toHaveBeenCalled();
+    expect(result?.decision).toBe('block');
+    expect(result?.reason).toBe('Loaded from storage asset');
   });
 
   it('should merge multiple requireApproval results', () => {

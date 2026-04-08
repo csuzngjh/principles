@@ -42,7 +42,7 @@ function getAllImplementations(stateDir: string): Implementation[] {
  */
 export function handleDisableImplCommand(ctx: PluginCommandContext): PluginCommandResult {
   const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
-  const stateDir = workspaceDir;
+  const stateDir = WorkspaceContext.fromHookContext({ ...ctx, workspaceDir }).stateDir;
   const lang = (ctx.config?.language as string) || 'en';
   const isZh = lang === 'zh';
 
@@ -61,7 +61,7 @@ export function handleDisableImplCommand(ctx: PluginCommandContext): PluginComma
   }
 
   // Disable
-  return _handleDisableImpl(stateDir, implId, reason, isZh);
+  return _handleDisableImpl(stateDir, implId, reason, isZh, ctx.sessionId);
 }
 
 function _handleListActive(
@@ -107,7 +107,8 @@ function _handleDisableImpl(
   stateDir: string,
   implId: string,
   reason: string | null,
-  isZh: boolean
+  isZh: boolean,
+  sessionId?: string,
 ): PluginCommandResult {
   const allImpls = getAllImplementations(stateDir);
   const target = allImpls.find((i) => i.id === implId);
@@ -147,7 +148,7 @@ function _handleDisableImpl(
 
   (impl as any).lifecycleState = 'disabled';
   (impl as any).disabledAt = new Date().toISOString();
-  (impl as any).disabledBy = (ctx as any).sessionId || 'manual';
+  (impl as any).disabledBy = sessionId || 'manual';
   (impl as any).disabledReason = reasonText;
   impl.updatedAt = new Date().toISOString();
   ledger.tree.implementations[implId] = impl;

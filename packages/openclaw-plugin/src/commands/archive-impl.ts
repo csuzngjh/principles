@@ -11,6 +11,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { withLock } from '../utils/file-lock.js';
+import { WorkspaceContext } from '../core/workspace-context.js';
 import {
   loadLedger,
 } from '../core/principle-tree-ledger.js';
@@ -41,7 +42,7 @@ function canArchive(state: ImplementationLifecycleState): boolean {
  */
 export function handleArchiveImplCommand(ctx: PluginCommandContext): PluginCommandResult {
   const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
-  const stateDir = workspaceDir;
+  const stateDir = WorkspaceContext.fromHookContext({ ...ctx, workspaceDir }).stateDir;
   const lang = (ctx.config?.language as string) || 'en';
   const isZh = lang === 'zh';
 
