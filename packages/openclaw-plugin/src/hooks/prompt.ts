@@ -557,7 +557,15 @@ The empathy observer subagent handles pain detection independently.
             parentSessionId: sessionId,
             workspaceDir,
             taskInput: latestUserMessage,
-          }).catch((err) => api.logger?.warn?.(`[PD:Empathy] subagent sample failed: ${String(err)}`));
+          }).catch((err) => {
+            // NB1: Suppress "gateway request" error during cron jobs.
+            // Subagent runtime is only available during gateway requests.
+            // Cron jobs run in isolated sessions where this is expected to fail.
+            const errMsg = String(err);
+            if (!errMsg.includes('Plugin runtime subagent methods are only available during a gateway request')) {
+              api.logger?.warn?.(`[PD:Empathy] subagent sample failed: ${errMsg}`);
+            }
+          });
         }
 
         // Helper: build summary string (Finding #2: avoid duplication)
@@ -589,7 +597,13 @@ The empathy observer subagent handles pain detection independently.
               parentSessionId: sessionId,
               workspaceDir,
               taskInput: { prompt: optimizationPrompt },
-            }).catch((err) => api.logger?.warn?.(`[PD:Empathy] optimization subagent failed: ${String(err)}`));
+            }).catch((err) => {
+              // NB1: Suppress "gateway request" error during cron jobs.
+              const errMsg = String(err);
+              if (!errMsg.includes('Plugin runtime subagent methods are only available during a gateway request')) {
+                api.logger?.warn?.(`[PD:Empathy] optimization subagent failed: ${errMsg}`);
+              }
+            });
           } catch (optErr) {
             logger?.warn?.(`[PD:Empathy] Failed to start optimization subagent: ${String(optErr)}`);
           }
