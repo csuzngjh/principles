@@ -7,11 +7,12 @@
  * 2. Thinking OS Checkpoint (P-10): Deep reflection enforcement
  * 3. GFI Gate: Fatigue index-based blocking
  * 4. Bash Mutation Detection: Heuristic for bash file modifications
+ * 4.5. Rule Host: Active code implementation evaluation (Phase 12)
  * 5. Progressive Gate: EP tier-based access control
  * 6. Edit Verification (P-03): Exact/fuzzy match for edit operations
  *
  * IMPORTANT: This is the SINGLE AUTHORITATIVE orchestration path.
- * All policy modules (gfi-gate, progressive-trust-gate) use the shared
+ * All policy modules (gfi-gate, progressive-trust-gate, rule-host) use the shared
  * `recordGateBlockAndReturn` helper to ensure consistent block persistence.
  *
  * Zero-width character detection is handled in bash-risk.ts.
@@ -28,12 +29,17 @@ import { handleEditVerification } from './edit-verification.js';
 import { checkGfiGate } from './gfi-gate.js';
 import { checkProgressiveTrustGate } from './progressive-trust-gate.js';
 import { recordGateBlockAndReturn } from './gate-block-helper.js';
+import { RuleHost } from '../core/rule-host.js';
+import type { RuleHostInput } from '../core/rule-host-types.js';
+import { createRuleHostHelpers } from '../core/rule-host-helpers.js';
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult } from '../openclaw-sdk.js';
 import {
   AGENT_TOOLS,
   BASH_TOOLS_SET,
   WRITE_TOOLS,
 } from '../constants/tools.js';
+import { getSession, hasRecentThinking } from '../core/session-tracker.js';
+import { getEvolutionEngine } from '../core/evolution-engine.js';
 
 export function handleBeforeToolCall(
   event: PluginHookBeforeToolCallEvent,
@@ -150,6 +156,57 @@ export function handleBeforeToolCall(
     : isRisky(relPath, profile.risk_paths);
 
   // ─────────────────────────────────────────────────────────────────────────────
+  // POLICY STEP 2.5: Rule Host Evaluation (Phase 12, D-01/D-03)
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Inserted between GFI gate and Progressive Gate so principle rules can act
+  // before the capability-boundary fallback. Active code implementations run
+  // through a constrained vm context with minimal helpers only.
+  try {
+    const ruleHost = new RuleHost(wctx.stateDir);
+    const hostInput: RuleHostInput = {
+      action: {
+        toolName: event.toolName,
+        normalizedPath: relPath,
+        paramsSummary: _extractParamsSummary(event.params),
+      },
+      workspace: {
+        isRiskPath: risky,
+        planStatus: _getPlanStatus(ctx.workspaceDir),
+        hasPlanFile: _hasPlanFile(ctx.workspaceDir),
+      },
+      session: {
+        sessionId: ctx.sessionId,
+        currentGfi: _getCurrentGfi(ctx.sessionId),
+        recentThinking: _hasRecentThinking(ctx.sessionId),
+      },
+      evolution: {
+        epTier: _getEpTier(wctx.workspaceDir),
+      },
+      derived: {
+        estimatedLineChanges: estimateLineChanges({ toolName: event.toolName, params: event.params }),
+        bashRisk: _getBashRisk(event, profile),
+      },
+    };
+
+    const hostResult = ruleHost.evaluate(hostInput);
+    if (hostResult?.decision === 'block' || hostResult?.decision === 'requireApproval') {
+      const reason = hostResult.decision === 'requireApproval'
+        ? `[Rule Host] Approval required: ${hostResult.reason}`
+        : hostResult.reason;
+      return recordGateBlockAndReturn(wctx, {
+        filePath: relPath,
+        reason,
+        toolName: event.toolName,
+        sessionId: ctx.sessionId,
+        blockSource: 'rule-host',
+      }, logger);
+    }
+  } catch (hostError: unknown) {
+    // D-08: Conservative degradation — log and continue to Progressive Gate
+    logger.warn?.(`[PD_GATE:RULE_HOST] Host evaluation failed, degrading conservatively: ${String(hostError)}`);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
   // POLICY STEP 3: Progressive Trust Gate (Stage 1-4 access control)
   // ─────────────────────────────────────────────────────────────────────────────
   // IMPORTANT: This step does NOT return early on allow.
@@ -207,4 +264,85 @@ export function handleBeforeToolCall(
 
   // All checks passed - allow the operation
   return;
+}
+
+// ---------------------------------------------------------------------------
+// Private helpers for building RuleHostInput snapshot
+// These are NOT passed to hosted implementations — they only populate the
+// frozen snapshot that implementations receive.
+// ---------------------------------------------------------------------------
+
+function _extractParamsSummary(params: Record<string, unknown>): Record<string, unknown> {
+  const summary: Record<string, unknown> = {};
+  if (params.file_path) summary.file_path = params.file_path;
+  if (params.path) summary.path = params.path;
+  if (params.command) summary.command = params.command;
+  if (params.args) summary.args = params.args;
+  if (params.old_string) summary.old_string = params.old_string;
+  if (params.new_string) summary.new_string = params.new_string;
+  return summary;
+}
+
+function _getPlanStatus(workspaceDir: string): 'NONE' | 'DRAFT' | 'READY' | 'UNKNOWN' {
+  try {
+    const status = getPlanStatus(workspaceDir);
+    if (status === 'READY') return 'READY';
+    if (status === 'DRAFT') return 'DRAFT';
+    if (status === '') return 'NONE';
+    return 'UNKNOWN';
+  } catch {
+    return 'UNKNOWN';
+  }
+}
+
+function _hasPlanFile(workspaceDir: string): boolean {
+  try {
+    return fs.existsSync(path.join(workspaceDir, 'PLAN.md'));
+  } catch {
+    return false;
+  }
+}
+
+function _getCurrentGfi(sessionId?: string): number {
+  if (!sessionId) return 0;
+  try {
+    return getSession(sessionId)?.currentGfi ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+function _hasRecentThinking(sessionId?: string): boolean {
+  if (!sessionId) return false;
+  try {
+    return hasRecentThinking(sessionId);
+  } catch {
+    return false;
+  }
+}
+
+function _getEpTier(workspaceDir: string): number {
+  try {
+    const engine = getEvolutionEngine(workspaceDir);
+    return engine.getTier() as number;
+  } catch {
+    return 0;
+  }
+}
+
+function _getBashRisk(
+  event: PluginHookBeforeToolCallEvent,
+  profile: { risk_paths: string[] }
+): 'safe' | 'normal' | 'dangerous' | 'unknown' {
+  if (!BASH_TOOLS_SET.has(event.toolName)) return 'unknown';
+  try {
+    const command = String(event.params.command || event.params.args || '');
+    const isDangerous = /\brm\s+-rf\b|\bchmod\b|\bchown\b|>\s*\/dev\//.test(command);
+    if (isDangerous) return 'dangerous';
+    const isMutation = /(?:>|>>|sed|rm|mv|mkdir|touch|cp|npm|yarn|pnpm|pip|cargo)/.test(command);
+    if (isMutation) return 'normal';
+    return 'safe';
+  } catch {
+    return 'unknown';
+  }
 }

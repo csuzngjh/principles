@@ -47,6 +47,18 @@ export type NocturnalReviewStatus =
   | 'superseded';
 
 /**
+ * Sample classification for replay evaluation.
+ * Used by the ReplayEngine to select appropriate test samples.
+ * - 'pain-negative': samples that triggered pain signals or were blocked by gates
+ * - 'success-positive': samples that were successful interactions
+ * - 'principle-anchor': samples that embody core principle behavior
+ *
+ * Artifact kind is intentionally tracked outside this type so replay
+ * classification remains behavioral-only.
+ */
+export type SampleClassification = 'pain-negative' | 'success-positive' | 'principle-anchor';
+
+/**
  * A nocturnal dataset record — the immutable lineage entry for one sample.
  *
  * PRIMARY KEY: sampleFingerprint (deterministic SHA-256)
@@ -105,6 +117,13 @@ export interface NocturnalDatasetRecord {
    * Absolute path to the artifact file.
    */
   artifactPath: string;
+
+  /**
+   * Sample classification for replay evaluation.
+   * Used by ReplayEngine to select samples by category.
+   * Null means not yet classified for replay.
+   */
+  classification: SampleClassification | null;
 }
 
 /**
@@ -260,13 +279,15 @@ function withRegistryLock<T>(workspaceDir: string, fn: (records: NocturnalDatase
  * @param artifact - The approved NocturnalArtifact
  * @param artifactPath - Absolute path where the artifact file is stored
  * @param targetModelFamily - Model family binding (required for export-ready)
+ * @param classification - Optional replay classification
  * @returns RegisterSampleResult
  */
 export function registerSample(
   workspaceDir: string,
   artifact: NocturnalArtifact,
   artifactPath: string,
-  targetModelFamily: string | null = null
+  targetModelFamily: string | null = null,
+  classification: SampleClassification | null = null
 ): RegisterSampleResult {
   const fingerprint = generateFingerprintFromArtifact(artifact);
   const now = new Date().toISOString();
@@ -293,6 +314,7 @@ export function registerSample(
       createdAt: now,
       updatedAt: now,
       artifactPath: path.normalize(artifactPath),
+      classification,
     };
 
     records.push(record);
@@ -665,4 +687,72 @@ export function migrateSampleArtifacts(
   }
 
   return newCount;
+}
+
+// ---------------------------------------------------------------------------
+// Replay Classification Support
+// ---------------------------------------------------------------------------
+
+/**
+ * List samples filtered by replay classification.
+ *
+ * @param workspaceDir - Workspace directory
+ * @param classification - Classification to filter by
+ * @returns Records matching the classification, sorted by createdAt descending
+ */
+export function listSamplesByClassification(
+  workspaceDir: string,
+  classification: SampleClassification
+): NocturnalDatasetRecord[] {
+  const records = readRegistry(workspaceDir);
+  return records
+    .filter((r) => r.classification === classification)
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+/**
+ * Load and parse the artifact content for a given dataset record.
+ *
+ * @param workspaceDir - Workspace directory
+ * @param record - The dataset record whose artifact to load
+ * @returns The parsed artifact JSON content
+ * @throws Error if artifact file is missing or unreadable
+ */
+export function loadSampleContent(
+  workspaceDir: string,
+  record: NocturnalDatasetRecord
+): unknown {
+  if (!fs.existsSync(record.artifactPath)) {
+    throw new Error(`Artifact file missing for sample ${record.sampleFingerprint}: ${record.artifactPath}`);
+  }
+  const content = fs.readFileSync(record.artifactPath, 'utf-8');
+  return JSON.parse(content);
+}
+
+/**
+ * Update the classification of a dataset record.
+ *
+ * @param workspaceDir - Workspace directory
+ * @param sampleFingerprint - The fingerprint of the record to update
+ * @param classification - New classification value
+ * @returns Updated record
+ */
+export function updateSampleClassification(
+  workspaceDir: string,
+  sampleFingerprint: string,
+  classification: SampleClassification | null
+): NocturnalDatasetRecord {
+  return withRegistryLock(workspaceDir, (records) => {
+    const idx = records.findIndex((r) => r.sampleFingerprint === sampleFingerprint);
+    if (idx === -1) {
+      throw new Error(`Dataset record not found: ${sampleFingerprint}`);
+    }
+    records[idx] = {
+      ...records[idx],
+      classification,
+      updatedAt: new Date().toISOString(),
+    };
+    writeRegistry(workspaceDir, records);
+    return records[idx];
+  });
 }
