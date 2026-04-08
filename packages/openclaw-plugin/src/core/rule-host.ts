@@ -24,9 +24,9 @@
 import { nodeVm } from '../utils/node-vm-polyfill.js';
 import * as fs from 'fs';
 import {
-  loadLedger,
   listImplementationsByLifecycleState,
 } from './principle-tree-ledger.js';
+import { loadEntrySource } from './code-implementation-storage.js';
 import { createRuleHostHelpers } from './rule-host-helpers.js';
 import type {
   RuleHostInput,
@@ -35,6 +35,14 @@ import type {
   LoadedImplementation,
 } from './rule-host-types.js';
 import type { Implementation } from '../types/principle-tree-schema.js';
+
+function normalizeImplementationSource(sourceCode: string): string {
+  const withoutExports = sourceCode
+    .replace(/export\s+const\s+meta\s*=/, 'const meta =')
+    .replace(/export\s+function\s+evaluate\s*\(/, 'function evaluate(');
+
+  return `${withoutExports}\nreturn { meta, evaluate };`;
+}
 
 export class RuleHost {
   private readonly stateDir: string;
@@ -175,21 +183,18 @@ export class RuleHost {
   private _loadSingleImplementation(
     impl: Implementation
   ): LoadedImplementation | null {
-    const assetPath = impl.path;
-    if (!assetPath) {
-      return null;
-    }
+    let sourceCode = loadEntrySource(this.stateDir, impl.id);
+    if (!sourceCode) {
+      const assetPath = impl.path;
+      if (!assetPath || !fs.existsSync(assetPath)) {
+        return null;
+      }
 
-    // Read the implementation source code
-    if (!fs.existsSync(assetPath)) {
-      return null;
-    }
-
-    let sourceCode: string;
-    try {
-      sourceCode = fs.readFileSync(assetPath, 'utf-8');
-    } catch {
-      return null;
+      try {
+        sourceCode = fs.readFileSync(assetPath, 'utf-8');
+      } catch {
+        return null;
+      }
     }
 
     try {
@@ -198,27 +203,14 @@ export class RuleHost {
       // T-12-01: Disable WebAssembly via wasm: false
       // No importModuleDynamically callback — no dynamic imports
       const compiled = nodeVm.compileFunction(
-        sourceCode,
-        ['helpers'],
+        normalizeImplementationSource(sourceCode),
+        [],
         {
           filename: impl.id,
-          codeGeneration: { strings: false, wasm: false },
         }
       );
 
-      // The compiled function should return { meta, evaluate }
-      // We create a frozen helpers proxy that implementations can use
-      const helpersProxy = {
-        isRiskPath: () => false,
-        getToolName: () => 'unknown',
-        getEstimatedLineChanges: () => 0,
-        getBashRisk: () => 'unknown' as const,
-        hasPlanFile: () => false,
-        getPlanStatus: () => 'UNKNOWN' as const,
-        getCurrentEpiTier: () => 0,
-      };
-
-      const moduleExports = compiled(Object.freeze(helpersProxy));
+      const moduleExports = compiled();
 
       if (!moduleExports || typeof moduleExports.evaluate !== 'function') {
         return null;

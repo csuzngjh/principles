@@ -305,8 +305,16 @@ export function handleAfterToolCall(
           // Persist to training state (best-effort, non-critical)
           try {
             wctx.principleTreeLedger.updatePrincipleValueMetrics(id, {
-              ...metrics,
               principleId: id,
+              painPreventedCount: metrics.painPreventedCount,
+              lastPainPreventedAt: metrics.lastPainPreventedAt,
+              calculatedAt: metrics.calculatedAt,
+              avgPainSeverityPrevented: 0,
+              totalOpportunities: 0,
+              adheredCount: 0,
+              violatedCount: 0,
+              implementationCost: 0,
+              benefitScore: 0,
             });
           } catch {
             // Non-critical — metrics tracked in memory
