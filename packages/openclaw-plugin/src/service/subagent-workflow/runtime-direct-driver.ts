@@ -5,19 +5,7 @@ import type {
     SubagentGetSessionMessagesResult,
     PluginLogger,
 } from '../../openclaw-sdk.js';
-
-/**
- * Checks if an error is an expected subagent unavailability error
- * that occurs during cron jobs, boot sessions, or isolated sessions.
- */
-function isExpectedSubagentError(err: unknown): boolean {
-    const msg = String(err);
-    return (
-        msg.includes('Plugin runtime subagent methods are only available during a gateway request') ||
-        msg.includes('cannot start workflow for boot session') ||
-        msg.includes('subagent runtime unavailable')
-    );
-}
+import { isExpectedSubagentError } from './subagent-error-utils.js';
 
 export interface TransportDriver {
     run(params: RunParams): Promise<RunResult>;

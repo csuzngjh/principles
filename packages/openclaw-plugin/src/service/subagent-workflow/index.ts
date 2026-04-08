@@ -10,6 +10,8 @@ export {
     type CleanupParams,
 } from './runtime-direct-driver.js';
 
+export { isExpectedSubagentError } from './subagent-error-utils.js';
+
 export { WorkflowStore, type WorkflowStoreOptions } from './workflow-store.js';
 
 export {
