@@ -1,21 +1,34 @@
 # Milestones
 
-## v1.6 代码质量清理 (Shipped: 2026-04-07)
+## v1.9.0 Principle Internalization System (Shipped: 2026-04-08)
 
-**Phases completed:** 3 (Phase 11, 12, 13) | **Plans:** 6
+**Phases completed:** 5 (Phase 11, 12, 13, 14, 15) | **Plans:** 10
+
+**Milestone goal:**
+
+- turn the current principle / nocturnal / gate architecture into a real Principle Internalization System
+- make `Rule` and `Implementation` first-class ledger entities
+- add a constrained runtime `Rule Host`
+- require replay-based promotion for code implementations
+- extend nocturnal reflection to emit `RuleImplementationArtifact` candidates
+- compute coverage, false positive, adherence, and deprecation eligibility from real implementation outcomes
 
 **Key accomplishments:**
 
-- normalizePath collision eliminated — renamed to normalizePathPosix in nocturnal-compliance.ts; utils/io.ts unaffected
-- PAIN_CANDIDATES dead code removed — 165 lines deleted from evolution-worker.ts
-- WorkflowManager duplication reduced — ~750 lines removed via base class extraction (555 lines base + 307 + 197)
-- Type deduplication — PrincipleStatus and PrincipleDetectorSpec unified to evolution-types.ts
-- empathy-observer-workflow-manager status confirmed LIVE — 3 active imports verified
-- Build artifacts excluded — coverage/ and .tgz entries added to .gitignore
+- Principle tree ledger now ships first-class `Principle -> Rule -> Implementation` entities with lifecycle transitions
+- Runtime `Rule Host` is wired into the gate chain between `GFI` and `Progressive Gate`
+- Code implementations are stored as versioned assets with manifests and entry source
+- Replay evaluation, manual promote/disable/rollback/archive flows, and replay-backed reports are live
+- Nocturnal can emit `RuleImplementationArtifact` candidates with lineage and validation
+- Coverage, adherence, deprecated readiness, and `skill | code | defer` route recommendations are available from one lifecycle surface
+- User-facing operator docs now include the implementation workflow and replay-first promotion path
 
-**Stats:** 19 commits | 22 files | +2,401 / -986 LOC
+**Key boundaries preserved:**
 
-**Tech debt:** None accumulated — all work was verified cleanup with no TODOs or placeholders
+- `Progressive Gate` remains in place as a host hard-boundary layer
+- code implementations are not auto-promoted or auto-deployed
+- routing recommendations do not execute automatically
+- the milestone remains focused on the `Implementation(type=code)` branch, not LoRA or full fine-tune
 
 ---
 
@@ -27,14 +40,15 @@
 
 - NocturnalWorkflowManager implementing WorkflowManager interface with single-reflector path and Trinity chain support
 - WorkflowStore extended with stage_outputs table for Trinity stage persistence and idempotency (NOC-11/12/13)
-- evolution-worker integrated with NocturnalWorkflowManager — stub-based fallback on Trinity failure
+- evolution-worker integrated with NocturnalWorkflowManager through stub-based fallback on Trinity failure
 - StubFallbackRuntimeAdapter method signatures fixed to match TrinityRuntimeAdapter interface (NOC-15)
 - Phase 8 architectural shift: direct stage-by-stage invocation for fine-grained persistence control
 
 **Known gaps:**
-- Phases 07, 08 missing VERIFICATION.md (implementations exist, low priority)
-- NOC requirements not formally defined in REQUIREMENTS.md (tracked in milestone audit)
-- Pre-existing TypeScript errors in evolution-reducer.ts and prompt.ts (unrelated to v1.5)
+
+- Phases 07 and 08 are missing `VERIFICATION.md` even though implementations shipped
+- NOC requirements were not formally defined in `REQUIREMENTS.md` at the time
+- There were pre-existing TypeScript errors in `evolution-reducer.ts` and `prompt.ts` unrelated to v1.5
 
 ---
 
@@ -44,13 +58,14 @@
 
 **Key accomplishments:**
 
-- SDK Type Cleanup: Removed false type declarations, aligned SDK shim with v2026.4.4 types
-- Memory Search (FTS5): Replaced deprecated createMemorySearchTool with native FTS5 search on pain_events
-- Integration Testing: TEST-01~03 pass; TEST-04/05 pending runtime verification via Feishu
+- SDK type cleanup aligned the shim with OpenClaw v2026.4.4
+- Memory search moved from deprecated `createMemorySearchTool` to native FTS5 search on `pain_events`
+- Integration testing covered TEST-01 through TEST-03 with remaining runtime verification deferred
 
 **Known gaps:**
-- TEST-04: deep_reflect tool runtime verification pending (Feishu session routing — fix applied but not re-tested)
-- TEST-05: Hook triggering verification pending (same Feishu session routing)
+
+- TEST-04 deep_reflect runtime verification remained pending
+- TEST-05 hook triggering verification remained pending
 
 ---
 
@@ -60,13 +75,11 @@
 
 **Key accomplishments:**
 
-- SDK Integration: Removed false type declarations from openclaw-sdk.d.ts to align with OpenClaw v2026.4.3
-- Memory Search: Replaced createMemorySearchTool with FTS5 semantic search on pain_events table
-- SDK Refinement: Factory pattern adoption for tool registration
-- Input Quarantine: PD-specific input isolation layer
-- Gate Split: Gate module refactored into separate concerns (72% code reduction)
-- Defaults & Errors: Centralized configuration and error handling
+- SDK integration cleanup removed false declarations from `openclaw-sdk.d.ts`
+- Memory search moved to FTS5 semantic search on `pain_events`
+- Tool registration adopted the factory pattern
+- PD-specific input isolation layer shipped
+- Gate module was split into separate concerns
+- Defaults and error handling were centralized
 
-**Known gaps:** Phases 3A/3B/3C completed but lack GSD SUMMARY.md documentation (pre-GSD phase tracking)
-
----
+**Known gaps:** phases 3A, 3B, and 3C shipped before GSD and do not have modern phase artifacts
