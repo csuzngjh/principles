@@ -16,6 +16,7 @@ export type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 import { LockUnavailableError } from '../config/index.js';
 import { checkWorkspaceIdle, checkCooldown } from './nocturnal-runtime.js';
 import { WorkflowStore } from './subagent-workflow/workflow-store.js';
+import type { WorkflowRow } from './subagent-workflow/types.js';
 import { EmpathyObserverWorkflowManager } from './subagent-workflow/empathy-observer-workflow-manager.js';
 import { DeepReflectWorkflowManager } from './subagent-workflow/deep-reflect-workflow-manager.js';
 import { NocturnalWorkflowManager, nocturnalWorkflowSpec } from './subagent-workflow/nocturnal-workflow-manager.js';
@@ -24,6 +25,104 @@ import { isSubagentRuntimeAvailable } from '../utils/subagent-probe.js';
 
 const WORKFLOW_TTL_MS = 5 * 60 * 1000; // 5 minutes default TTL for helper workflows
 import { OpenClawTrinityRuntimeAdapter } from '../core/nocturnal-trinity.js';
+
+// ── Workflow Watchdog ────────────────────────────────────────────────────────
+// Detects stale/orphaned workflows, invalid results, and cleanup failures.
+// Runs every heartbeat cycle, catching bugs like:
+//   #185 — orphaned active workflows
+//   #181 — structurally invalid results (all zeros)
+//   #180/#183 — expired workflows not swept
+//   #182 — unhandled rejections leaving workflows in limbo
+
+interface WatchdogResult {
+  anomalies: number;
+  details: string[];
+}
+
+async function runWorkflowWatchdog(
+  wctx: WorkspaceContext,
+  api: OpenClawPluginApi | null,
+  logger?: PluginLogger,
+): Promise<WatchdogResult> {
+  const details: string[] = [];
+  const now = Date.now();
+  const subagentRuntime = api?.runtime?.subagent;
+
+  try {
+    const store = new WorkflowStore({ workspaceDir: wctx.workspaceDir });
+    try {
+      const allWorkflows: WorkflowRow[] = store.listWorkflows();
+
+      // Check 1: Stale active workflows (active > 2x TTL)
+      const staleThreshold = WORKFLOW_TTL_MS * 2;
+      const staleActive = allWorkflows.filter(
+        (wf: WorkflowRow) => wf.state === 'active' && (now - wf.created_at) > staleThreshold,
+      );
+      if (staleActive.length > 0) {
+        for (const wf of staleActive) {
+          const ageMin = Math.round((now - wf.created_at) / 60000);
+          details.push(`stale_active: ${wf.workflow_id} (${wf.workflow_type}, ${ageMin}min old)`);
+          store.updateWorkflowState(wf.workflow_id, 'terminal_error');
+          store.recordEvent(wf.workflow_id, 'watchdog_timeout', 'active', 'terminal_error', `Stale active > ${staleThreshold / 60000}s`, { ageMs: now - wf.created_at });
+
+          // Cleanup session if possible
+          if (subagentRuntime && wf.child_session_key) {
+            try {
+              await subagentRuntime.deleteSession({ sessionKey: wf.child_session_key, deleteTranscript: true });
+              logger?.info?.(`[PD:Watchdog] Cleaned up stale session: ${wf.child_session_key}`);
+            } catch (cleanupErr) {
+              logger?.warn?.(`[PD:Watchdog] Failed to cleanup session ${wf.child_session_key}: ${String(cleanupErr)}`);
+            }
+          }
+        }
+      }
+
+      // Check 2: Workflows in terminal_error/expired without cleanup
+      const unclearedTerminal = allWorkflows.filter(
+        (wf: WorkflowRow) => (wf.state === 'terminal_error' || wf.state === 'expired') && wf.cleanup_state === 'pending',
+      );
+      if (unclearedTerminal.length > 0) {
+        details.push(`uncleared_terminal: ${unclearedTerminal.length} workflows (will be swept next cycle)`);
+      }
+
+      // Check 3: Nocturnal workflow result validation (#181 pattern)
+      const nocturnalCompleted = allWorkflows.filter(
+        (wf: WorkflowRow) => wf.workflow_type === 'nocturnal' && wf.state === 'completed',
+      );
+      for (const wf of nocturnalCompleted) {
+        // Check if the metadata snapshot has all zeros (invalid data)
+        try {
+          const meta = JSON.parse(wf.metadata_json) as Record<string, unknown>;
+          const snapshot = meta.snapshot as Record<string, unknown> | undefined;
+          if (snapshot) {
+            const stats = snapshot.stats as Record<string, number> | undefined;
+            if (stats && stats.totalAssistantTurns === 0 && stats.totalToolCalls === 0 && stats.totalPainEvents === 0 && stats.totalGateBlocks === 0) {
+              details.push(`empty_snapshot: nocturnal workflow ${wf.workflow_id} has all-zero stats`);
+            }
+          }
+        } catch { /* ignore malformed metadata */ }
+      }
+
+      // Summary
+      const stateCounts: Record<string, number> = {};
+      for (const wf of allWorkflows) {
+        stateCounts[wf.state] = (stateCounts[wf.state] || 0) + 1;
+      }
+      const stateSummary = Object.entries(stateCounts).map(([s, c]) => `${s}=${c}`).join(', ');
+      if (details.length === 0) {
+        logger?.debug?.(`[PD:Watchdog] OK — ${allWorkflows.length} workflows (${stateSummary})`);
+      } else {
+        logger?.info?.(`[PD:Watchdog] ${details.length} anomalies — ${allWorkflows.length} workflows (${stateSummary})`);
+      }
+    } finally {
+      store.dispose();
+    }
+  } catch (err) {
+    logger?.warn?.(`[PD:Watchdog] Failed to scan workflows: ${String(err)}`);
+  }
+
+  return { anomalies: details.length, details };
+}
 
 let timeoutId: NodeJS.Timeout | null = null;
 
@@ -1636,6 +1735,19 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                     const errMsg = `Failed to sweep expired workflows: ${String(sweepErr)}`;
                     cycleResult.errors.push(errMsg);
                     logger?.warn?.(`[PD:EvolutionWorker] ${errMsg}`);
+                }
+
+                // ── Workflow Watchdog: detect stale active workflows ──
+                // This catches bugs like #185 (orphaned active), #181 (empty results),
+                // #180/#183 (expired without cleanup), #182 (unhandled rejection).
+                try {
+                    const watchdogResult = await runWorkflowWatchdog(wctx, api, logger);
+                    if (watchdogResult.anomalies > 0) {
+                        logger?.warn?.(`[PD:Watchdog] ${watchdogResult.anomalies} anomalies: ${watchdogResult.details.join('; ')}`);
+                        cycleResult.errors.push(...watchdogResult.details);
+                    }
+                } catch (watchdogErr) {
+                    logger?.warn?.(`[PD:Watchdog] Watchdog failed: ${String(watchdogErr)}`);
                 }
 
                 wctx.dictionary.flush();
