@@ -217,6 +217,21 @@ export class WorkflowStore {
             ORDER BY last_observed_at ASC
         `).all(cutoff) as WorkflowRow[];
     }
+
+    /** List all workflows, optionally filtered by state. */
+    listWorkflows(state?: string): WorkflowRow[] {
+        if (state) {
+            return this.db.prepare(`
+                SELECT * FROM subagent_workflows
+                WHERE state = ?
+                ORDER BY created_at DESC
+            `).all(state) as WorkflowRow[];
+        }
+        return this.db.prepare(`
+            SELECT * FROM subagent_workflows
+            ORDER BY created_at DESC
+        `).all() as WorkflowRow[];
+    }
     
     recordEvent(
         workflowId: string,

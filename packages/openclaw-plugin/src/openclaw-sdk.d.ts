@@ -157,10 +157,10 @@ export interface PluginRuntimeAgent {
     resolveAgentTimeoutMs: (config: unknown, agentId: string) => number | undefined;
     ensureAgentWorkspace: (config: unknown, agentId: string) => string;
     session: {
-        resolveStorePath: (config: unknown) => string;
-        loadSessionStore: (config: unknown, sessionKey: string) => Promise<unknown>;
-        saveSessionStore: (config: unknown, sessionKey: string, store: unknown) => Promise<void>;
-        resolveSessionFilePath: (config: unknown, sessionKey: string) => string;
+        resolveStorePath: () => string;
+        loadSessionStore: (storePath: string, opts?: { skipCache?: boolean }) => Record<string, unknown>;
+        saveSessionStore: (storePath: string, store: Record<string, unknown>) => Promise<void>;
+        resolveSessionFilePath: (sessionKey: string) => string;
     };
 }
 

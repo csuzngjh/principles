@@ -36,6 +36,8 @@ export interface WorkflowManagerBaseOptions {
     workspaceDir: string;
     logger: PluginLogger;
     subagent: RuntimeDirectDriver['subagent'];
+    /** Pass api.runtime.agent.session to enable heartbeat-safe cleanup (#188) */
+    agentSession?: RuntimeDirectDriver['agentSession'];
     /** Workflow type identifier for logging and dynamic timeout lookups (e.g. 'empathy-observer') */
     workflowType: string;
     /** Session key prefix (e.g. 'agent:main:subagent:workflow-') */
@@ -70,7 +72,11 @@ export abstract class WorkflowManagerBase implements WorkflowManager {
         this.workspaceDir = opts.workspaceDir;
         this.logger = opts.logger;
         this.store = new WorkflowStore({ workspaceDir: opts.workspaceDir });
-        this.driver = new RuntimeDirectDriver({ subagent: opts.subagent, logger: opts.logger });
+        this.driver = new RuntimeDirectDriver({
+            subagent: opts.subagent,
+            logger: opts.logger,
+            agentSession: opts.agentSession,
+        });
         this.workflowType = opts.workflowType;
         this.sessionPrefix = opts.sessionPrefix;
         this.defaultTimeoutMs = opts.defaultTimeoutMs;
