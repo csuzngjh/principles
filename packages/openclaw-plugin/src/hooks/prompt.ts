@@ -493,7 +493,8 @@ The empathy observer subagent handles pain detection independently.
     }
   }
   
-  const isAgentToAgent = latestUserMessage.includes('sourceSession=agent:') || sessionId?.includes(':subagent:') === true;
+  const isEmpathyPrompt = latestUserMessage.includes('You are an empathy observer') && latestUserMessage.includes('damageDetected');
+  const isAgentToAgent = latestUserMessage.includes('sourceSession=agent:') || sessionId?.includes(':subagent:') === true || isEmpathyPrompt;
 
   const isUserInteraction = trigger === 'user' || trigger === 'api' || !trigger;
 
