@@ -22,6 +22,20 @@ let _empathyTurnCounter = 0;
 let _empathyKeywordCache: { store: ReturnType<typeof loadKeywordStore>; lang: string } | null = null;
 
 /**
+ * Checks if an error is an expected subagent unavailability error
+ * that occurs during cron jobs, boot sessions, or isolated sessions.
+ * These errors are expected behavior and should not generate warnings.
+ */
+function isExpectedSubagentError(err: unknown): boolean {
+  const msg = String(err);
+  return (
+    msg.includes('Plugin runtime subagent methods are only available during a gateway request') ||
+    msg.includes('cannot start workflow for boot session') ||
+    msg.includes('subagent runtime unavailable')
+  );
+}
+
+/**
  * Model configuration with primary model and optional fallback models
  */
 interface ModelConfigObject {
@@ -557,7 +571,11 @@ The empathy observer subagent handles pain detection independently.
             parentSessionId: sessionId,
             workspaceDir,
             taskInput: latestUserMessage,
-          }).catch((err) => api.logger?.warn?.(`[PD:Empathy] subagent sample failed: ${String(err)}`));
+          }).catch((err) => {
+            if (!isExpectedSubagentError(err)) {
+              api.logger?.warn?.(`[PD:Empathy] subagent sample failed: ${String(err)}`);
+            }
+          });
         }
 
         // Helper: build summary string (Finding #2: avoid duplication)
@@ -589,9 +607,15 @@ The empathy observer subagent handles pain detection independently.
               parentSessionId: sessionId,
               workspaceDir,
               taskInput: { prompt: optimizationPrompt },
-            }).catch((err) => api.logger?.warn?.(`[PD:Empathy] optimization subagent failed: ${String(err)}`));
+            }).catch((err) => {
+              if (!isExpectedSubagentError(err)) {
+                api.logger?.warn?.(`[PD:Empathy] optimization subagent failed: ${String(err)}`);
+              }
+            });
           } catch (optErr) {
-            logger?.warn?.(`[PD:Empathy] Failed to start optimization subagent: ${String(optErr)}`);
+            if (!isExpectedSubagentError(optErr)) {
+              logger?.warn?.(`[PD:Empathy] Failed to start optimization subagent: ${String(optErr)}`);
+            }
           }
         }
 

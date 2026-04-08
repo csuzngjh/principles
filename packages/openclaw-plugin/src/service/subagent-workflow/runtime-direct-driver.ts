@@ -6,6 +6,19 @@ import type {
     PluginLogger,
 } from '../../openclaw-sdk.js';
 
+/**
+ * Checks if an error is an expected subagent unavailability error
+ * that occurs during cron jobs, boot sessions, or isolated sessions.
+ */
+function isExpectedSubagentError(err: unknown): boolean {
+    const msg = String(err);
+    return (
+        msg.includes('Plugin runtime subagent methods are only available during a gateway request') ||
+        msg.includes('cannot start workflow for boot session') ||
+        msg.includes('subagent runtime unavailable')
+    );
+}
+
 export interface TransportDriver {
     run(params: RunParams): Promise<RunResult>;
     wait(params: WaitParams): Promise<WaitResult>;
@@ -133,7 +146,11 @@ export class RuntimeDirectDriver implements TransportDriver {
             this.logger.info(`[PD:RuntimeDirectDriver] Spawn succeeded: runId=${result.runId}`);
             return { runId: result.runId };
         } catch (error) {
-            this.logger.error(`[PD:RuntimeDirectDriver] Spawn failed: ${String(error)}`);
+            // Suppress expected errors during cron jobs, boot sessions, or isolated sessions.
+            // These are not real failures — subagent runtime is only available in gateway requests.
+            if (!isExpectedSubagentError(error)) {
+                this.logger.error(`[PD:RuntimeDirectDriver] Spawn failed: ${String(error)}`);
+            }
             throw error;
         }
     }
