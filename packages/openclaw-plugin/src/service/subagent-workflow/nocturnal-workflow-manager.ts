@@ -40,6 +40,7 @@ import type { NocturnalSessionSnapshot } from '../../core/nocturnal-trajectory-e
 import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
+import { isSubagentRuntimeAvailable } from '../../utils/subagent-probe.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // NocturnalResult Type Alias
@@ -261,6 +262,14 @@ export class NocturnalWorkflowManager implements WorkflowManager {
             metadata?: Record<string, unknown>;
         }
     ): Promise<WorkflowHandle> {
+        // #179: Check subagent runtime availability before starting
+        // Other workflow managers (empathy, deep-reflect) have this check
+        const subagent = (this.runtimeAdapter as any).api?.runtime?.subagent;
+        if (!isSubagentRuntimeAvailable(subagent)) {
+            this.logger.warn(`[PD:NocturnalWorkflow] Subagent runtime unavailable, skipping workflow`);
+            throw new Error(`NocturnalWorkflowManager: subagent runtime unavailable`);
+        }
+
         const workflowId = this.generateWorkflowId();
         const now = Date.now();
 
@@ -477,6 +486,10 @@ export class NocturnalWorkflowManager implements WorkflowManager {
                 this.pendingTrinityFailures.set(workflowId, [{ stage: 'dreamer' as const, reason: errorMsg }]);
                 await this.notifyWaitResult(workflowId, 'error', errorMsg);
             }
+        }).catch((unhandledErr) => {
+            // #182: Prevent unhandled rejection if notifyWaitResult itself throws
+            // in the catch block (e.g., workflow not found, DB locked)
+            this.logger.error(`[PD:NocturnalWorkflow] Unhandled error in async Trinity chain for ${workflowId}: ${String(unhandledErr)}`);
         });
 
         // Return immediately with state='active' (NOC-07)
@@ -579,7 +592,7 @@ export class NocturnalWorkflowManager implements WorkflowManager {
     // WorkflowManager Interface: sweepExpiredWorkflows (NOC-05)
     // ─────────────────────────────────────────────────────────────────────────
 
-    async sweepExpiredWorkflows(maxAgeMs = 30 * 60 * 1000): Promise<number> {
+    async sweepExpiredWorkflows(maxAgeMs = 30 * 60 * 1000, subagentRuntime?: any): Promise<number> {
         const expired = this.store.getExpiredWorkflows(maxAgeMs);
 
         this.logger.info(`[PD:NocturnalWorkflow] sweepExpiredWorkflows: found ${expired.length} expired`);
@@ -591,6 +604,19 @@ export class NocturnalWorkflowManager implements WorkflowManager {
                 // D-06: Mark as expired in WorkflowStore
                 this.store.updateWorkflowState(workflow.workflow_id, 'expired');
                 this.store.recordEvent(workflow.workflow_id, 'nocturnal_expired', workflow.state, 'expired', 'TTL expired', { workflowId: workflow.workflow_id });
+
+                // #180: Cleanup subagent session if runtime available
+                if (subagentRuntime && workflow.child_session_key) {
+                    try {
+                        await subagentRuntime.deleteSession({
+                            sessionKey: workflow.child_session_key,
+                            deleteTranscript: true,
+                        });
+                        this.logger.info(`[PD:NocturnalWorkflow] Cleaned up subagent session: ${workflow.child_session_key}`);
+                    } catch (sessionErr) {
+                        this.logger.warn(`[PD:NocturnalWorkflow] Failed to cleanup session ${workflow.child_session_key}: ${String(sessionErr)}`);
+                    }
+                }
 
                 // D-06: Clean partial artifact files by workflowId prefix
                 const samplesDir = resolveNocturnalDir(this.workspaceDir, 'SAMPLES');

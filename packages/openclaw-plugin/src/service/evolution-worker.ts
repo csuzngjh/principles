@@ -19,6 +19,8 @@ import { WorkflowStore } from './subagent-workflow/workflow-store.js';
 import { EmpathyObserverWorkflowManager } from './subagent-workflow/empathy-observer-workflow-manager.js';
 import { DeepReflectWorkflowManager } from './subagent-workflow/deep-reflect-workflow-manager.js';
 import { NocturnalWorkflowManager, nocturnalWorkflowSpec } from './subagent-workflow/nocturnal-workflow-manager.js';
+import { createNocturnalTrajectoryExtractor } from '../core/nocturnal-trajectory-extractor.js';
+import { isSubagentRuntimeAvailable } from '../utils/subagent-probe.js';
 
 const WORKFLOW_TTL_MS = 5 * 60 * 1000; // 5 minutes default TTL for helper workflows
 import { OpenClawTrinityRuntimeAdapter } from '../core/nocturnal-trinity.js';
@@ -968,7 +970,11 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         existingPrinciplesRef += `\n\n**Suggested Rules from Existing Principles**:\n${ruleLines.join('\n')}`;
                     }
                 }
-            } catch {}
+            } catch (err) {
+                // #184: Log warning instead of silently swallowing — diagnostician needs
+                // existing principles context for duplicate detection.
+                logger?.warn?.(`[PD:EvolutionWorker] Failed to load active principles for duplicate detection: ${String(err)}`);
+            }
 
             // ── Context Enrichment (CTX-01): Dual-path strategy ──
             // P1: OpenClaw built-in tools (sessions_history) - safe, visibility-limited
@@ -1144,17 +1150,47 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
 
                     // Start workflow via NocturnalWorkflowManager instead of direct executeNocturnalReflectionAsync
                     // Pass taskId in metadata for correlation
+
+                    // #181: Build a proper snapshot from trajectory.db instead of hardcoded zeros
+                    let snapshotData: Record<string, unknown> | undefined;
+                    if (sleepTask.recentPainContext) {
+                        try {
+                            const extractor = createNocturnalTrajectoryExtractor(wctx.workspaceDir);
+                            const fullSnapshot = extractor.getNocturnalSessionSnapshot(sleepTask.id);
+                            if (fullSnapshot) {
+                                snapshotData = {
+                                    sessionId: fullSnapshot.sessionId,
+                                    sessionStart: fullSnapshot.startedAt,
+                                    stats: fullSnapshot.stats,
+                                    recentPain: fullSnapshot.painEvents.slice(-5), // last 5
+                                };
+                            }
+                        } catch (snapErr) {
+                            logger?.warn?.(`[PD:EvolutionWorker] Failed to build trajectory snapshot for ${sleepTask.id}: ${String(snapErr)}`);
+                        }
+                    }
+                    // Fallback: use pain context only if trajectory extractor failed
+                    if (!snapshotData && sleepTask.recentPainContext) {
+                        snapshotData = {
+                            sessionId: sleepTask.id,
+                            sessionStart: sleepTask.timestamp,
+                            stats: {
+                                totalAssistantTurns: 0,
+                                totalToolCalls: 0,
+                                failureCount: 0,
+                                totalPainEvents: sleepTask.recentPainContext.recentPainCount,
+                                totalGateBlocks: 0,
+                            },
+                            recentPain: sleepTask.recentPainContext.mostRecent ? [sleepTask.recentPainContext.mostRecent] : [],
+                        };
+                    }
+
                     const workflowHandle = await nocturnalManager.startWorkflow(nocturnalWorkflowSpec, {
                         parentSessionId: `sleep_reflection:${sleepTask.id}`,
                         workspaceDir: wctx.workspaceDir,
                         taskInput: {},
                         metadata: {
-                            snapshot: sleepTask.recentPainContext ? {
-                                sessionId: sleepTask.id,
-                                sessionStart: sleepTask.timestamp,
-                                stats: { totalAssistantTurns: 0, totalToolCalls: 0, failureCount: 0, totalPainEvents: sleepTask.recentPainContext.recentPainCount, totalGateBlocks: 0 },
-                                recentPain: sleepTask.recentPainContext.mostRecent ? [sleepTask.recentPainContext.mostRecent] : [],
-                            } : undefined,
+                            snapshot: snapshotData,
                             principleId: 'default',
                             taskId: sleepTask.id,  // NOC-14: correlation ID for evolution worker
                         },
@@ -1564,6 +1600,20 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                             swept += await deepReflectMgr.sweepExpiredWorkflows(WORKFLOW_TTL_MS);
                         } finally {
                             deepReflectMgr.dispose();
+                        }
+
+                        // #183: Sweep Nocturnal workflows too
+                        try {
+                            const nocturnalMgr = new NocturnalWorkflowManager({
+                                workspaceDir: wctx.workspaceDir,
+                                stateDir: wctx.stateDir,
+                                logger: api.logger,
+                                runtimeAdapter: new OpenClawTrinityRuntimeAdapter(api),
+                            });
+                            swept += await nocturnalMgr.sweepExpiredWorkflows(WORKFLOW_TTL_MS, subagentRuntime);
+                            nocturnalMgr.dispose();
+                        } catch (noctSweepErr) {
+                            logger?.warn?.(`[PD:EvolutionWorker] Nocturnal sweep failed: ${String(noctSweepErr)}`);
                         }
 
                         if (swept > 0) {
