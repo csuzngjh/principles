@@ -19,6 +19,19 @@ export interface ArtifactLineageRecord {
   createdAt: string;
 }
 
+export interface CandidateArtifactLineageInput {
+  artifactId: string;
+  principleId: string;
+  ruleId: string;
+  sessionId: string;
+  sourceSnapshotRef: string;
+  sourcePainIds: string[];
+  sourceGateBlockIds: string[];
+  storagePath: string;
+  implementationId: string;
+  createdAt?: string;
+}
+
 function getLineageRegistryPath(workspaceDir: string): string {
   return path.join(resolveNocturnalDir(workspaceDir, 'ROOT'), 'artifact-lineage.json');
 }
@@ -82,4 +95,23 @@ export function listArtifactLineageRecords(
     (left, right) =>
       new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
   );
+}
+
+export function appendCandidateArtifactLineageRecord(
+  workspaceDir: string,
+  input: CandidateArtifactLineageInput
+): ArtifactLineageRecord {
+  return appendArtifactLineageRecord(workspaceDir, {
+    artifactKind: 'rule-implementation-candidate',
+    artifactId: input.artifactId,
+    principleId: input.principleId,
+    ruleId: input.ruleId,
+    sessionId: input.sessionId,
+    sourceSnapshotRef: input.sourceSnapshotRef,
+    sourcePainIds: input.sourcePainIds,
+    sourceGateBlockIds: input.sourceGateBlockIds,
+    storagePath: input.storagePath,
+    implementationId: input.implementationId,
+    createdAt: input.createdAt ?? new Date().toISOString(),
+  });
 }

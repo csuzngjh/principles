@@ -8,8 +8,8 @@
  * DESIGN CONSTRAINTS (per D-09 through D-12):
  *   - Manifest is loading metadata, NOT the source of truth for lifecycle state (D-11)
  *   - The Principle Tree ledger remains canonical for lifecycle and relationships (D-11)
- *   - Asset root follows Phase 13's replay report path convention:
- *     {stateDir}/.state/principles/implementations/{implId}/
+ *   - Asset root follows the PD stateDir convention:
+ *     {stateDir}/principles/implementations/{implId}/
  *   - All writes use withLock for atomicity (matching ledger pattern)
  *   - This module does NOT implement replay execution, evaluation report generation,
  *     or promotion logic (D-12)
@@ -40,6 +40,18 @@ export interface CodeImplementationManifest {
   replaySampleRefs: string[];
   /** Relative path to most recent eval report, or null */
   lastEvalReportRef: string | null;
+  /** Provenance carried with the generated candidate assets */
+  lineage?: CodeImplementationLineageMetadata;
+}
+
+export interface CodeImplementationLineageMetadata {
+  principleId: string;
+  ruleId: string;
+  sourceSnapshotRef: string;
+  sourcePainIds: string[];
+  sourceGateBlockIds: string[];
+  sourceSessionId: string;
+  artificerArtifactId: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -84,11 +96,11 @@ function ensureDir(dir: string): void {
 
 /**
  * Get the absolute path for an implementation's asset root.
- * Convention: {stateDir}/.state/principles/implementations/{implId}/
+ * Convention: {stateDir}/principles/implementations/{implId}/
  */
 export function getImplementationAssetRoot(stateDir: string, implId: string): string {
   validateImplId(implId);
-  return path.join(stateDir, '.state', 'principles', 'implementations', implId);
+  return path.join(stateDir, 'principles', 'implementations', implId);
 }
 
 /**
@@ -120,6 +132,30 @@ export function writeManifest(
   withLock(manifestPath, () => {
     fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
   });
+}
+
+export function writeEntrySource(
+  stateDir: string,
+  implId: string,
+  sourceCode: string,
+  entryFile = ENTRY_FILENAME,
+): void {
+  validateImplId(implId);
+  const assetRoot = getImplementationAssetRoot(stateDir, implId);
+  const entryPath = path.join(assetRoot, entryFile);
+  ensureDir(assetRoot);
+  withLock(entryPath, () => {
+    fs.writeFileSync(entryPath, sourceCode, 'utf-8');
+  });
+}
+
+export function deleteImplementationAssetDir(stateDir: string, implId: string): void {
+  validateImplId(implId);
+  const assetRoot = getImplementationAssetRoot(stateDir, implId);
+  if (!fs.existsSync(assetRoot)) {
+    return;
+  }
+  fs.rmSync(assetRoot, { recursive: true, force: true });
 }
 
 /**
@@ -154,6 +190,10 @@ export function createImplementationAssetDir(
   stateDir: string,
   implId: string,
   version: string,
+  options: {
+    entrySource?: string;
+    lineage?: CodeImplementationLineageMetadata;
+  } = {},
 ): CodeImplementationManifest {
   validateImplId(implId);
   const assetRoot = getImplementationAssetRoot(stateDir, implId);
@@ -167,15 +207,18 @@ export function createImplementationAssetDir(
   if (!fs.existsSync(entryPath)) {
     fs.writeFileSync(
       entryPath,
-      [
-        '// Code implementation entry point',
-        '// Exports: meta (RuleHostMeta), evaluate (input: RuleHostInput) => RuleHostResult',
-        '// This file will be replaced by nocturnal candidate generation (Phase 14)',
-        'export const meta = { name: "placeholder", version: "0.0.1", ruleId: "", coversCondition: "" };',
-        'export function evaluate(input) { return { decision: "allow", matched: false, reason: "placeholder" }; }',
-      ].join('\n'),
+      options.entrySource ??
+        [
+          '// Code implementation entry point',
+          '// Exports: meta (RuleHostMeta), evaluate (input: RuleHostInput) => RuleHostResult',
+          '// This file will be replaced by nocturnal candidate generation (Phase 14)',
+          'export const meta = { name: "placeholder", version: "0.0.1", ruleId: "", coversCondition: "" };',
+          'export function evaluate(input) { return { decision: "allow", matched: false, reason: "placeholder" }; }',
+        ].join('\n'),
       'utf-8',
     );
+  } else if (options.entrySource) {
+    writeEntrySource(stateDir, implId, options.entrySource);
   }
 
   const now = new Date().toISOString();
@@ -186,6 +229,7 @@ export function createImplementationAssetDir(
     updatedAt: now,
     replaySampleRefs: [],
     lastEvalReportRef: null,
+    ...(options.lineage ? { lineage: options.lineage } : {}),
   };
 
   writeManifest(stateDir, implId, manifest);
