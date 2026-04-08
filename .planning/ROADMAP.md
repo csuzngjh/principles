@@ -49,9 +49,9 @@
 <summary>🚧 v1.9.0 Principle Internalization System (Phases 11-15) - PLANNED</summary>
 
 - [x] Phase 11: Principle Tree Ledger Entities (3 plans) - completed 2026-04-07
-- [ ] Phase 12: Runtime Rule Host and Code Implementation Storage
-- [ ] Phase 13: Replay Evaluation and Manual Promotion Loop
-- [ ] Phase 14: Nocturnal RuleImplementationArtifact Factory
+- [x] Phase 12: Runtime Rule Host and Code Implementation Storage (2 plans) - completed 2026-04-07
+- [x] Phase 13: Replay Evaluation and Manual Promotion Loop (1 plan) - completed 2026-04-07
+- [x] Phase 14: Nocturnal RuleImplementationArtifact Factory (2 plans) - completed 2026-04-08
 - [ ] Phase 15: Coverage, Adherence, and Internalization Routing
 
 **Milestone goal:** turn the current principle / nocturnal / gate architecture into a real Principle Internalization System with first-class Rule and Implementation entities, a constrained runtime Rule Host, replay-based code implementation promotion, and nocturnal code candidate generation.
@@ -62,7 +62,7 @@
 
 ### Next Milestone (Current)
 
-**v1.9.0 Principle Internalization System** is in progress. Next step: start Phase 12.
+**v1.9.0 Principle Internalization System** is in progress. Next step: start Phase 15.
 
 ## Progress
 
@@ -85,7 +85,7 @@
 | 11 | v1.9.0 | 3/3 | Complete    | 2026-04-07 |
 | 12 | v1.9.0 | 2/2 | Complete    | 2026-04-07 |
 | 13 | v1.9.0 | 1/1 | Complete   | 2026-04-07 |
-| 14 | v1.9.0 | 0/1 | Pending | - |
+| 14 | v1.9.0 | 2/2 | Complete   | 2026-04-08 |
 | 15 | v1.9.0 | 0/1 | Pending | - |
 
 ## Phase Details
@@ -160,6 +160,12 @@ Success criteria:
 ### Phase 14: Nocturnal RuleImplementationArtifact Factory
 
 Goal: extend nocturnal reflection so it can research and emit code implementation candidates without conflating them with training samples.
+
+**Plans:** 2/2 plans complete
+
+Plans:
+- [x] 14-01-PLAN.md - Define Artificer contracts, deterministic principle->rule routing, and RuleHost-compatible code-candidate validation
+- [x] 14-02-PLAN.md - Wire candidate persistence, parallel lineage registration, and nocturnal-service integration without changing behavioral artifact semantics
 
 Requirements:
 - NOC-01
