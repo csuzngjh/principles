@@ -76,8 +76,8 @@
     }
   },
   "buildFingerprint": {
-    "gitSha": "f9d6c71d9441",
-    "bundleMd5": "07965da33c87f8b705372f55d9b0554d",
-    "builtAt": "2026-04-07T15:40:11.599Z"
+    "gitSha": "de8a3106c1b4",
+    "bundleMd5": "9cfa3bb8dea1bee4a9cf65dc994b0b13",
+    "builtAt": "2026-04-08T00:23:34.641Z"
   }
 }
