@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.9.0
 milestone_name: Principle Internalization System
 status: in_progress
-last_updated: "2026-04-08T01:39:58.080Z"
-last_activity: 2026-04-08 -- Completed Phase 14 Plan 02
+last_updated: "2026-04-08T02:23:53.115Z"
+last_activity: 2026-04-08 -- Phase 15-01 execution complete
 progress:
   total_phases: 5
   completed_phases: 4
-  total_plans: 8
-  completed_plans: 8
-  percent: 100
+  total_plans: 10
+  completed_plans: 9
+  percent: 90
 ---
 
 # State
@@ -21,15 +21,15 @@ See `.planning/PROJECT.md` (updated 2026-04-07 after starting v1.9.0 milestone).
 
 **Core value:** AI agents improve their own behavior through a structured loop: pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
 **Current Milestone:** v1.9.0 - Principle Internalization System
-**Current Focus:** Phase 14 is complete; Phase 15 planning/execution is next
+**Current Focus:** Phase 15-02 routing policy remains after shipping the lifecycle metrics foundation in 15-01
 
 ---
 
 ## Current Position
 
 Phase: 15
-Plan: 0/1 complete
-Last activity: 2026-04-08 -- Completed 14-02-PLAN.md
+Plan: 15-02 pending
+Last activity: 2026-04-08 -- completed 15-01 lifecycle evidence and metrics execution
 
 ---
 
@@ -47,9 +47,9 @@ Turn the current principle / nocturnal / gate concepts into a concrete Principle
 
 ## Immediate Next Steps
 
-1. Start Phase 15 to compute coverage, adherence, and internalization routing from replay and live implementation outcomes
-2. Reuse Phase 14 candidate lineage metadata and candidate persistence flow as the provenance source for coverage accounting
-3. Keep auto-promotion deferred while Phase 15 stabilizes metrics and routing
+1. Execute `15-02-PLAN.md` to build the explicit `skill | code | defer` routing policy and lifecycle integration surface
+2. Reuse the 15-01 lifecycle service outputs instead of recomputing raw replay and lineage evidence ad hoc
+3. Preserve regression checks for replay classification and Phase 14 nocturnal candidate semantics while completing Phase 15
 
 ---
 
@@ -92,6 +92,11 @@ Key deliverables:
 - `14-02` shipped nocturnal-service sidecar persistence so one nocturnal run can keep a behavioral artifact and optionally emit a `candidate` code implementation
 - `14-02` writes candidate provenance into both implementation manifests and append-only nocturnal lineage records, including principle, rule, snapshot, pain, gate, and session refs
 - `14-02` cleans up ledger plus storage deterministically if candidate asset persistence fails after ledger creation
+- Phase 15 planning is complete with a two-wave split:
+- `15-01` builds deterministic lifecycle evidence, rule/principle metrics, and deprecated-readiness assessment
+- `15-02` builds explicit internalization route recommendations without executing routes or adding auto-promotion
+- `15-01` shipped a lifecycle read-model that joins ledger entities, latest replay reports, and nocturnal lineage without mutating state
+- `15-01` shipped replay-first `coverageRate` / `falsePositiveRate` calculators, principle adherence persistence, and structured deprecated-readiness scoring
 
 ---
 
@@ -106,4 +111,4 @@ Key deliverables:
 
 ---
 
-*Last updated: 2026-04-08 after completing Phase 14 Plan 02*
+*Last updated: 2026-04-08 after completing Phase 15-01*
