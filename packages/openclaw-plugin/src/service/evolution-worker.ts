@@ -1343,6 +1343,8 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         }
                         // Fallback: use pain context only if trajectory extractor failed
                         if (!snapshotData && sleepTask.recentPainContext) {
+                            // #200: Log fallback usage to make data gaps visible
+                            logger?.warn?.(`[PD:EvolutionWorker] Using pain-context fallback for ${sleepTask.id}: trajectory stats unavailable (stats will be partial)`);
                             snapshotData = {
                                 sessionId: sleepTask.id,
                                 sessionStart: sleepTask.timestamp,
@@ -1354,6 +1356,8 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                                     totalGateBlocks: 0,
                                 },
                                 recentPain: sleepTask.recentPainContext.mostRecent ? [sleepTask.recentPainContext.mostRecent] : [],
+                                // #200: Mark data source so downstream can handle appropriately
+                                _dataSource: 'pain_context_fallback',
                             };
                         }
 
