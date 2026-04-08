@@ -46,7 +46,6 @@ conductor/
 .principles/
 .state/
 memory/
-MEMORY.md
 .agent/
 spec/
 _scratchpad/
@@ -54,7 +53,6 @@ _scratchpad/
 # Private AI agent files (DO NOT COMMIT)
 GEMINI.md
 CLAUDE.md
-AGENTS.md
 .iflow/
 code-concise/
 
