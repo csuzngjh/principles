@@ -542,7 +542,7 @@ async function doEnqueuePainTask(
     try {
         let queue: EvolutionQueueItem[] = [];
         if (fs.existsSync(queuePath)) {
-            try { queue = JSON.parse(fs.readFileSync(queuePath, 'utf8')); } catch {}
+            try { queue = JSON.parse(fs.readFileSync(queuePath, 'utf8')); } catch { /* corrupted queue, treat as empty — safe fallback */ }
         }
         const now = Date.now();
         const dup = findRecentDuplicateTask(queue, v.source, v.preview, now, v.reason);
@@ -913,7 +913,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                 task.resolution = 'marker_detected';
                 try {
                     fs.unlinkSync(completeMarker);
-                } catch {}
+                } catch { /* marker may have been deleted already, not critical */ }
 
                 // FIX (#187): Remove the task from the diagnostician task store
                 await completeDiagnosticianTask(wctx.stateDir, task.id);
@@ -984,7 +984,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     } catch (err) {
                         logger.warn(`[PD:EvolutionWorker] Failed to parse late diagnostician report for task ${task.id}: ${String(err)}`);
                     }
-                    try { fs.unlinkSync(completeMarker); } catch {}
+                    try { fs.unlinkSync(completeMarker); } catch { /* marker may not exist, not critical */ }
                     task.resolution = principleCreated ? 'late_marker_principle_created' : 'late_marker_no_principle';
                 } else {
                     if (logger) logger.info(`[PD:EvolutionWorker] Task ${task.id} auto-completed after ${timeoutMinutes} minute timeout`);
@@ -1566,7 +1566,10 @@ function writeWorkerStatus(stateDir: string, report: WorkerStatusReport): void {
     try {
         const statusPath = path.join(stateDir, 'worker-status.json');
         fs.writeFileSync(statusPath, JSON.stringify(report, null, 2), 'utf8');
-    } catch {}
+    } catch (err) {
+        // Non-critical: worker-status.json is for monitoring, not core logic
+        console.warn(`[PD:EvolutionWorker] Failed to write worker-status.json: ${String(err)}`);
+    }
 }
 
 async function processEvolutionQueueWithResult(
