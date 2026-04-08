@@ -52,6 +52,9 @@ export type NocturnalReviewStatus =
  * - 'pain-negative': samples that triggered pain signals or were blocked by gates
  * - 'success-positive': samples that were successful interactions
  * - 'principle-anchor': samples that embody core principle behavior
+ *
+ * Artifact kind is intentionally tracked outside this type so replay
+ * classification remains behavioral-only.
  */
 export type SampleClassification = 'pain-negative' | 'success-positive' | 'principle-anchor';
 
