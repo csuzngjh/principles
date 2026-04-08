@@ -6,7 +6,7 @@ import { WorkspaceContext } from '../core/workspace-context.js';
 import { ContextInjectionConfig, defaultContextConfig } from '../types.js';
 import { classifyTask, type RoutingInput } from '../core/local-worker-routing.js';
 import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection, autoCompressFocus, safeReadCurrentFocus } from '../core/focus-history.js';
-import { EmpathyObserverWorkflowManager, empathyObserverWorkflowSpec, empathyOptimizerWorkflowSpec } from '../service/subagent-workflow/index.js';
+import { EmpathyObserverWorkflowManager, empathyObserverWorkflowSpec } from '../service/subagent-workflow/index.js';
 import { PathResolver } from '../core/path-resolver.js';
 import {
   matchEmpathyKeywords,
@@ -585,7 +585,7 @@ The empathy observer subagent handles pain detection independently.
               subagent: api.runtime.subagent as any,
             });
             
-            empathyManager.startWorkflow(empathyOptimizerWorkflowSpec, {
+            empathyManager.startWorkflow(empathyObserverWorkflowSpec, {
               parentSessionId: sessionId,
               workspaceDir,
               taskInput: { prompt: optimizationPrompt },

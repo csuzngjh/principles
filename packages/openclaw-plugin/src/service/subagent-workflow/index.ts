@@ -16,7 +16,6 @@ export {
     EmpathyObserverWorkflowManager,
     createEmpathyObserverWorkflowManager,
     empathyObserverWorkflowSpec,
-    empathyOptimizerWorkflowSpec,
     type EmpathyObserverWorkflowOptions,
 } from './empathy-observer-workflow-manager.js';
 
