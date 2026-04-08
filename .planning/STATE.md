@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.9.0
 milestone_name: Principle Internalization System
-status: unknown
-last_updated: "2026-04-07T12:37:08.784Z"
-last_activity: 2026-04-07
+status: in_progress
+last_updated: "2026-04-08T01:39:58.080Z"
+last_activity: 2026-04-08 -- Completed Phase 14 Plan 02
 progress:
   total_phases: 5
-  completed_phases: 3
-  total_plans: 6
-  completed_plans: 6
+  completed_phases: 4
+  total_plans: 8
+  completed_plans: 8
   percent: 100
 ---
 
@@ -21,15 +21,15 @@ See `.planning/PROJECT.md` (updated 2026-04-07 after starting v1.9.0 milestone).
 
 **Core value:** AI agents improve their own behavior through a structured loop: pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
 **Current Milestone:** v1.9.0 - Principle Internalization System
-**Current Focus:** Phase 11 context captured for principle tree ledger entities; ready to move into planning
+**Current Focus:** Phase 14 is complete; Phase 15 planning/execution is next
 
 ---
 
 ## Current Position
 
-Phase: 13
-Plan: Not started
-Last activity: 2026-04-07
+Phase: 15
+Plan: 0/1 complete
+Last activity: 2026-04-08 -- Completed 14-02-PLAN.md
 
 ---
 
@@ -47,9 +47,9 @@ Turn the current principle / nocturnal / gate concepts into a concrete Principle
 
 ## Immediate Next Steps
 
-1. Create Phase 11 plan from `.planning/phases/11-principle-tree-ledger-entities/11-CONTEXT.md`
-2. Keep Phase 11 scoped to Rule / Implementation ledger persistence only
-3. Defer Rule Host, replay, and nocturnal code artifacts to later phases
+1. Start Phase 15 to compute coverage, adherence, and internalization routing from replay and live implementation outcomes
+2. Reuse Phase 14 candidate lineage metadata and candidate persistence flow as the provenance source for coverage accounting
+3. Keep auto-promotion deferred while Phase 15 stabilizes metrics and routing
 
 ---
 
@@ -83,6 +83,15 @@ Key deliverables:
 - Principle Tree Architecture and Principle Internalization System design docs are now the framing for the next milestone
 - Progressive Gate remains in place for v1.9.0 as a host hard-boundary layer
 - `message-sanitize.ts` is the planned first simplification target before Rule Host integration
+- Phase 14 planning is complete with a two-wave split:
+- `14-01` locks Artificer semantics, deterministic `principle -> rule` targeting, and pure validation
+- `14-02` wires candidate persistence and nocturnal-service integration while preserving behavioral artifact semantics
+- `14-01` shipped deterministic Artificer routing that skips ambiguous rule resolution instead of guessing
+- `14-01` shipped a pure local validator that reuses RuleHost-compatible export and result semantics
+- `14-01` introduced a separate nocturnal artifact-kind lineage registry so replay classifications stay behavioral-only
+- `14-02` shipped nocturnal-service sidecar persistence so one nocturnal run can keep a behavioral artifact and optionally emit a `candidate` code implementation
+- `14-02` writes candidate provenance into both implementation manifests and append-only nocturnal lineage records, including principle, rule, snapshot, pain, gate, and session refs
+- `14-02` cleans up ledger plus storage deterministically if candidate asset persistence fails after ledger creation
 
 ---
 
@@ -97,4 +106,4 @@ Key deliverables:
 
 ---
 
-*Last updated: 2026-04-07 after starting v1.9.0 milestone*
+*Last updated: 2026-04-08 after completing Phase 14 Plan 02*

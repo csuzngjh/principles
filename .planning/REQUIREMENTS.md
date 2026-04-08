@@ -7,10 +7,10 @@
 
 ### Principle Tree Ledger
 
-- [ ] **TREE-01**: system can persist `Rule` entities as first-class principle-tree records rather than document-only concepts
-- [ ] **TREE-02**: system can persist `Implementation` entities as first-class principle-tree leaves linked to a parent `Rule`
-- [ ] **TREE-03**: system can query `Principle -> Rule -> Implementation` relationships for any active principle
-- [ ] **TREE-04**: one Rule can reference multiple Implementations without collapsing semantic and runtime layers
+- [x] **TREE-01**: system can persist `Rule` entities as first-class principle-tree records rather than document-only concepts
+- [x] **TREE-02**: system can persist `Implementation` entities as first-class principle-tree leaves linked to a parent `Rule`
+- [x] **TREE-03**: system can query `Principle -> Rule -> Implementation` relationships for any active principle
+- [x] **TREE-04**: one Rule can reference multiple Implementations without collapsing semantic and runtime layers
 
 ### Runtime Code Host
 
@@ -35,9 +35,9 @@
 
 ### Nocturnal Code Candidate Factory
 
-- [ ] **NOC-01**: nocturnal reflection can emit `RuleImplementationArtifact` candidates distinct from behavioral training artifacts
-- [ ] **NOC-02**: a code implementation artifact records its originating principle, rule, snapshot, and source pain / gate-block context
-- [ ] **NOC-03**: nocturnal code candidate generation reuses existing selection, snapshot extraction, and validation skeletons without conflating artifact types
+- [x] **NOC-01**: nocturnal reflection can emit `RuleImplementationArtifact` candidates distinct from behavioral training artifacts
+- [x] **NOC-02**: a code implementation artifact records its originating principle, rule, snapshot, and source pain / gate-block context
+- [x] **NOC-03**: nocturnal code candidate generation reuses existing selection, snapshot extraction, and validation skeletons without conflating artifact types
 
 ### Coverage and Lifecycle
 
@@ -80,10 +80,10 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| TREE-01 | Phase 11 | Pending |
-| TREE-02 | Phase 11 | Pending |
-| TREE-03 | Phase 11 | Pending |
-| TREE-04 | Phase 11 | Pending |
+| TREE-01 | Phase 11 | Complete |
+| TREE-02 | Phase 11 | Complete |
+| TREE-03 | Phase 11 | Complete |
+| TREE-04 | Phase 11 | Complete |
 | HOST-01 | Phase 12 | Pending |
 | HOST-02 | Phase 12 | Pending |
 | HOST-03 | Phase 12 | Pending |
@@ -96,9 +96,9 @@
 | EVAL-03 | Phase 13 | Pending |
 | EVAL-04 | Phase 13 | Pending |
 | EVAL-05 | Phase 13 | Pending |
-| NOC-01 | Phase 14 | Pending |
-| NOC-02 | Phase 14 | Pending |
-| NOC-03 | Phase 14 | Pending |
+| NOC-01 | Phase 14 | Complete |
+| NOC-02 | Phase 14 | Complete |
+| NOC-03 | Phase 14 | Complete |
 | COV-01 | Phase 15 | Pending |
 | COV-02 | Phase 15 | Pending |
 | COV-03 | Phase 15 | Pending |
