@@ -8,19 +8,43 @@ import { WorkspaceConfig } from '../components/WorkspaceConfig';
 import { Loading, ErrorState } from '../components';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 
-/**
- * WorkspaceHealthPanel - Full health dashboard for a single workspace
- * Uses real chart components (Bullet, Gauge, Stacked Bar, Donut) instead of text-only cards.
- */
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function getHealthStatus(current: number, threshold: number): 'excellent' | 'good' | 'warning' | 'danger' {
+  if (current === 0) return 'excellent';
+  if (current < threshold * 0.5) return 'good';
+  if (current < threshold) return 'warning';
+  return 'danger';
+}
+
+const HEALTH_LABELS: Record<string, { zh: string; en: string; emoji: string }> = {
+  excellent: { zh: '优秀', en: 'Excellent', emoji: '🟢' },
+  good: { zh: '良好', en: 'Good', emoji: '🟡' },
+  warning: { zh: '警告', en: 'Warning', emoji: '🟠' },
+  danger: { zh: '危险', en: 'Critical', emoji: '🔴' },
+};
+
+const TRUST_COLORS = ['var(--text-secondary)', 'var(--info)', 'var(--accent)', 'var(--success)'];
+const TRUST_DESC_KEYS = ['observer', 'editor', 'developer', 'architect'];
+
+const TIER_DESC_KEYS = ['seed', 'sprout', 'sapling', 'tree', 'forest'];
+
+// ---------------------------------------------------------------------------
+// WorkspaceHealthPanel — redesigned for clarity
+// ---------------------------------------------------------------------------
 
 function WorkspaceHealthPanel({ entry }: { entry: WorkspaceHealthEntry }) {
   const { t } = useI18n();
   const h = entry.health;
   const totalPrinciples = h.principles.candidate + h.principles.probation + h.principles.active + h.principles.deprecated;
-  const totalQueue = h.queue.pending + h.queue.inProgress + h.queue.completed;
-
-  const gfiStatus: 'success' | 'warning' | 'error' =
-    h.gfi.current >= h.gfi.threshold ? 'error' : h.gfi.current >= h.gfi.threshold * 0.7 ? 'warning' : 'success';
+  const status = getHealthStatus(h.gfi.current, h.gfi.threshold);
+  const statusLabel = HEALTH_LABELS[status];
+  const trustIdx = Math.max(0, Math.min(3, h.trust.stage - 1));
+  const trustDescKey = TRUST_DESC_KEYS[trustIdx] ?? 'observer';
+  const tierIdx = Math.max(0, Math.min(4, parseInt(h.evolution.tier.replace(/\D/g, ''), 10) - 1));
+  const tierDescKey = TIER_DESC_KEYS[tierIdx] ?? 'seed';
 
   return (
     <section className="panel" style={{ marginBottom: 'var(--space-5)' }}>
@@ -28,18 +52,35 @@ function WorkspaceHealthPanel({ entry }: { entry: WorkspaceHealthEntry }) {
         <div className="panel-header-left">
           <h3 style={{ fontSize: '0.95rem', fontWeight: 600 }}>{entry.workspaceName}</h3>
           <StatusBadge variant={h.painFlag.active ? 'warning' : 'success'}>
-            {h.painFlag.active ? `${h.painFlag.source}` : 'Healthy'}
+            {h.painFlag.active ? `${t('overview.health.source')}: ${h.painFlag.source}` : t('overview.health.normal')}
           </StatusBadge>
         </div>
       </div>
       <div className="panel-content">
-        {/* Row 1: GFI (wide) | Trust Gauge | Evolution */}
+
+        {/* Row 1: Health Status (wide) | Trust | Evolution */}
         <div className="grid" style={{ gridTemplateColumns: '2fr 1fr 1fr', gap: 'var(--space-4)', marginBottom: 'var(--space-4)' }}>
-          {/* GFI Bullet Chart + Trend */}
+
+          {/* 今日健康度 */}
           <div>
-            <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              {t('overview.health.gfi')}
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
+              <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                {t('overview.health.gfi')}
+              </span>
+              <StatusBadge variant={status === 'danger' ? 'error' : status === 'warning' ? 'warning' : 'success'}>
+                {statusLabel.emoji} {statusLabel.zh}
+              </StatusBadge>
             </div>
+            {/* Big number */}
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 8 }}>
+              <span style={{ fontSize: '2.5rem', fontWeight: 700, color: `var(--${status === 'danger' ? 'error' : status === 'warning' ? 'warning' : 'success'})`, lineHeight: 1 }}>
+                {h.gfi.current}
+              </span>
+              <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                / {h.gfi.threshold} {t('overview.health.threshold')}
+              </span>
+            </div>
+            {/* Bullet Chart */}
             <BulletChart
               value={h.gfi.current}
               target={h.gfi.threshold}
@@ -47,20 +88,17 @@ function WorkspaceHealthPanel({ entry }: { entry: WorkspaceHealthEntry }) {
               max={Math.max(h.gfi.threshold * 2, 150)}
               width={280}
             />
-            <div style={{ display: 'flex', gap: 'var(--space-3)', marginTop: 4, fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
-              <span>当前: <strong style={{ color: `var(--${gfiStatus})` }}>{h.gfi.current}</strong></span>
-              <span>阈值: {h.gfi.threshold}</span>
-              <span>峰值: {h.gfi.peakToday}</span>
-            </div>
             {/* GFI Trend sparkline */}
             {h.gfi.trend.length >= 2 && (
               <div style={{ marginTop: 8 }}>
-                <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)', marginBottom: 2 }}>今日趋势 (按小时)</div>
+                <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)', marginBottom: 2 }}>
+                  {t('overview.health.gfi')} · {t('overview.health.peakToday')}: {h.gfi.peakToday}
+                </div>
                 <Sparkline
                   data={h.gfi.trend.map(d => d.value)}
                   width={280}
                   height={32}
-                  color={gfiStatus === 'error' ? 'var(--error)' : gfiStatus === 'warning' ? 'var(--warning)' : 'var(--success)'}
+                  color={status === 'danger' ? 'var(--error)' : status === 'warning' ? 'var(--warning)' : 'var(--success)'}
                   fillOpacity={0.1}
                 />
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.6rem', color: 'var(--text-secondary)', marginTop: 1 }}>
@@ -71,7 +109,7 @@ function WorkspaceHealthPanel({ entry }: { entry: WorkspaceHealthEntry }) {
             )}
           </div>
 
-          {/* Trust Gauge */}
+          {/* 权限等级 */}
           <div style={{ textAlign: 'center' }}>
             <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
               {t('overview.health.trustStage')}
@@ -79,24 +117,39 @@ function WorkspaceHealthPanel({ entry }: { entry: WorkspaceHealthEntry }) {
             <GaugeChart
               value={h.trust.score}
               label={h.trust.stageLabel}
-              sublabel={`${t('overview.health.stage')} ${h.trust.stage}`}
+              sublabel={t(`overview.health.trustDesc.${trustDescKey}`)}
               size={90}
+              segments={[
+                { label: 'Observer', color: 'var(--text-secondary)', max: 30 },
+                { label: 'Editor', color: 'var(--info)', max: 60 },
+                { label: 'Developer', color: 'var(--accent)', max: 80 },
+                { label: 'Architect', color: 'var(--success)', max: 100 },
+              ]}
             />
+            <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginTop: 4 }}>
+              {t('overview.health.stage')} {h.trust.stage} · {t('overview.health.score')} {h.trust.score}
+            </div>
           </div>
 
-          {/* Evolution */}
+          {/* 进化等级 */}
           <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
             <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
               {t('overview.health.epTier')}
             </div>
             <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--accent)' }}>{h.evolution.tier}</div>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{h.evolution.points} pts</div>
+            <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginTop: 2 }}>
+              {h.evolution.points} {t('overview.health.points')}
+            </div>
+            <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)', marginTop: 4, textAlign: 'center', maxWidth: 100 }}>
+              {t(`overview.health.tierDesc.${tierDescKey}`)}
+            </div>
           </div>
         </div>
 
         {/* Row 2: Principles | Queue | PainFlag */}
         <div className="grid" style={{ gridTemplateColumns: '1fr 1fr 1fr', gap: 'var(--space-4)' }}>
-          {/* Principles Distribution */}
+
+          {/* 原则分布 */}
           <div>
             <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
               {t('overview.health.principlesTotal')}: {totalPrinciples}
@@ -109,7 +162,7 @@ function WorkspaceHealthPanel({ entry }: { entry: WorkspaceHealthEntry }) {
             />
           </div>
 
-          {/* Queue Status */}
+          {/* 任务队列 */}
           <div>
             <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
               {t('overview.health.queueBacklog')}: {h.queue.pending}
@@ -121,26 +174,26 @@ function WorkspaceHealthPanel({ entry }: { entry: WorkspaceHealthEntry }) {
             />
           </div>
 
-          {/* PainFlag Detail */}
+          {/* 问题检测 */}
           <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
             <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Pain Flag
+              {t('overview.health.painFlag')}
             </div>
             {h.painFlag.active ? (
               <div style={{ padding: 'var(--space-2)', backgroundColor: 'rgba(184, 134, 11, 0.08)', borderRadius: 6, borderLeft: '3px solid var(--warning)' }}>
-                <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--warning)' }}>⚠ Active</div>
+                <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--warning)' }}>⚠ {t('overview.health.active')}</div>
                 <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: 2 }}>
-                  Source: {h.painFlag.source ?? 'unknown'}
+                  {t('overview.health.source')}: {h.painFlag.source}
                 </div>
                 {h.painFlag.score !== null && (
                   <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                    Score: {h.painFlag.score}
+                    {t('overview.health.score')}: {h.painFlag.score}
                   </div>
                 )}
               </div>
             ) : (
               <div style={{ padding: 'var(--space-2)', backgroundColor: 'rgba(74, 124, 111, 0.08)', borderRadius: 6, borderLeft: '3px solid var(--success)' }}>
-                <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--success)' }}>✓ Normal</div>
+                <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--success)' }}>✓ {t('overview.health.normal')}</div>
                 <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: 2 }}>
                   {t('overview.health.noActivePain')}
                 </div>
@@ -152,6 +205,10 @@ function WorkspaceHealthPanel({ entry }: { entry: WorkspaceHealthEntry }) {
     </section>
   );
 }
+
+// ---------------------------------------------------------------------------
+// OverviewPage
+// ---------------------------------------------------------------------------
 
 export function OverviewPage() {
   const { t } = useI18n();
@@ -211,7 +268,6 @@ export function OverviewPage() {
   const centralInfo = (data as OverviewResponse & { centralInfo?: { workspaceCount: number; enabledWorkspaceCount: number; workspaces: string[]; enabledWorkspaces: string[] } }).centralInfo;
   const dailyTrend = data.dailyTrend ?? [];
 
-  // Prepare sparkline data
   const failuresTrend = dailyTrend.map(d => d.failures);
   const correctionsTrend = dailyTrend.map(d => d.userCorrections);
   const thinkingTrend = dailyTrend.map(d => d.thinkingTurns);
@@ -237,7 +293,7 @@ export function OverviewPage() {
 
       <WorkspaceConfig />
 
-      {/* Per-Workspace Health Panels with Real Charts */}
+      {/* Per-Workspace Health Panels */}
       {centralHealth && centralHealth.workspaces.length > 0 ? (
         centralHealth.workspaces.map((entry) => (
           <WorkspaceHealthPanel key={entry.workspaceName} entry={entry} />
