@@ -62,17 +62,39 @@ Phases 17, 18, 19 can run in parallel after Phase 16 completes (all depend only 
 | 19 | Gate Monitor shows correct stats and blocks; all frontend types match backend responses |
 | 20 | All 4 pages validated with correct data; regression tests pass on CI |
 
-### Phase 1: --help
+### Phase 16: Data Source Tracing
 
-**Goal:** [To be planned]
-**Requirements**: TBD
-**Depends on:** Phase 0
-**Plans:** 0 plans
+**Goal:** Map all 4 pages to API endpoints, route handlers, service methods, and DB queries. Document actual response shapes vs TypeScript type declarations.
+**Requirements**: TRACE-01, TRACE-02
+**Depends on:** None
+**Plans:** 1 plan
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 1 to break down)
+- [x] 16-01-PLAN.md — Map all 4 pages to API endpoints and DB queries
 
-### Phase 5: Gate Monitor + Frontend Field Mapping
+### Phase 17: Overview Page Data Fix
+
+**Goal:** Fix `/api/central/overview` inline route assembly, `/api/overview` ControlUiQueryService, and `/api/overview/health` HealthQueryService.
+**Requirements**: OVER-01, OVER-02, OVER-03
+**Depends on:** Phase 16
+**Plans:** 2 plans
+
+Plans:
+- [x] 17-01-PLAN.md — Fix /api/central/overview with CentralOverviewService
+- [x] 17-02-PLAN.md — Fix /api/overview/health GFI persistence
+
+### Phase 18: Loop/Samples + Feedback Page Fixes
+
+**Goal:** Fix `/api/samples`, `/api/samples/:id`, `/api/feedback/gfi`, `/api/feedback/empathy-events`, `/api/feedback/gate-blocks` data sources and field mappings.
+**Requirements**: LOOP-01, LOOP-02, FB-01, FB-02, FB-03
+**Depends on:** Phase 16
+**Plans:** 2 plans
+
+Plans:
+- [x] 18-01-PLAN.md — Verify /api/samples and /api/samples/:id data flows
+- [x] 18-02-PLAN.md — Verify /api/feedback/gfi, empathy-events, gate-blocks data flows
+
+### Phase 19: Gate Monitor + Frontend Field Mapping
 
 **Goal:** Fix `/api/gate/stats`, `/api/gate/blocks` data sources. Fix all frontend TypeScript types and component field accessors to match actual backend responses.
 **Requirements**: GATE-01, GATE-02, FE-01, FE-02
@@ -83,6 +105,16 @@ Plans:
 - [x] 19-01-PLAN.md — Verify /api/gate/stats and /api/gate/blocks backend service layer
 - [x] 19-02-PLAN.md — Verify frontend TypeScript types and component field accessors
 
+### Phase 20: End-to-End Validation
+
+**Goal:** Validate all 4 pages display correct data after fixes. Add regression tests to prevent future data source drift.
+**Requirements**: E2E-01, E2E-02
+**Depends on:** Phases 17, 18, 19
+**Plans:** 1 plan
+
+Plans:
+- [ ] 20-01-PLAN.md — Create regression tests for all 4 pages' API endpoints
+
 ---
 
-*Last updated: 2026-04-09 after Phase 19 planning*
+*Last updated: 2026-04-09 after Phase 20 planning*
