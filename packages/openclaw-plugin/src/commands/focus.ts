@@ -292,10 +292,9 @@ async function compressFocus(
   }
 
   // 6. 更新版本号和日期
-  const versionParts = oldVersion.split('.');
-  const majorVersion = parseInt(versionParts[0], 10) || 1;
-  const newVersion = `${majorVersion + 1}`;
-  const today = new Date().toISOString().split('T')[0];
+  const [majorVersion] = oldVersion.split('.');
+  const newVersion = `${(parseInt(majorVersion, 10) || 1) + 1}`;
+  const [today] = new Date().toISOString().split('T');
   const newContent = compressedContent
     .replace(/\*\*版本\*\*:\s*v[\d.]+/i, `**版本**: v${newVersion}`)
     .replace(/\*\*更新\*\*:\s*\d{4}-\d{2}-\d{2}/, `**更新**: ${today}`);
@@ -385,7 +384,7 @@ function rollbackFocus(workspaceDir: string, index: number, isZh: boolean): stri
   // 恢复历史版本
   const restoredVersion = extractVersion(historyContent);
   const restoredDate = extractDate(historyContent);
-  const today = new Date().toISOString().split('T')[0];
+  const [today] = new Date().toISOString().split('T');
 
   // 获取最大版本号（从当前文件或历史文件中）
   let maxVersion = parseFloat(restoredVersion) || 1;
@@ -494,7 +493,7 @@ export async function handleFocusCommand(
       result = await compressFocus(workspaceDir, isZh, api);
       break;
     case 'rollback':
-    case 'rb':
+    case 'rb': {
       const index = parseInt(args[1], 10);
       if (isNaN(index)) {
         result = isZh
@@ -504,6 +503,7 @@ export async function handleFocusCommand(
         result = rollbackFocus(workspaceDir, index, isZh);
       }
       break;
+    }
     case 'help':
     case '--help':
     case '-h':
