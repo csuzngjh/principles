@@ -52,11 +52,12 @@ describe('createPrincipleFromDiagnosis — evaluability defaults', () => {
     });
 
     const p = reducer.getPrincipleById(id!);
-    expect(p?.evaluability).toBe('manual_only');
+    // #212: Default is weak_heuristic (not manual_only) — allows basic pattern-matching evaluation
+    expect(p?.evaluability).toBe('weak_heuristic');
     expect(p?.detectorMetadata).toBeUndefined();
   });
 
-  it('accepts deterministic evaluability when provided', () => {
+  it('downgrades deterministic to weak_heuristic when no detectorMetadata provided', () => {
     const workspace = makeTempDir();
     const reducer = new EvolutionReducerImpl({ workspaceDir: workspace });
 
@@ -70,9 +71,8 @@ describe('createPrincipleFromDiagnosis — evaluability defaults', () => {
     });
 
     const p = reducer.getPrincipleById(id!);
-    // Implementation contract: deterministic/weak_heuristic without detectorMetadata
-    // is automatically downgraded to manual_only (defense in depth).
-    expect(p?.evaluability).toBe('manual_only');
+    // #212: deterministic without detectorMetadata → downgraded to weak_heuristic (not manual_only)
+    expect(p?.evaluability).toBe('weak_heuristic');
     expect(p?.detectorMetadata).toBeUndefined();
   });
 
@@ -90,9 +90,8 @@ describe('createPrincipleFromDiagnosis — evaluability defaults', () => {
     });
 
     const p = reducer.getPrincipleById(id!);
-    // Implementation contract: deterministic/weak_heuristic without detectorMetadata
-    // is automatically downgraded to manual_only.
-    expect(p?.evaluability).toBe('manual_only');
+    // #212: weak_heuristic does not require detectorMetadata — no downgrade
+    expect(p?.evaluability).toBe('weak_heuristic');
   });
 
   it('stores detectorMetadata when provided', () => {
@@ -131,14 +130,14 @@ describe('createPrincipleFromDiagnosis — evaluability defaults', () => {
       triggerPattern: 'file write fails',
       action: 'check permissions first',
       source: 'diagnostician',
-      // evaluability omitted — defaults to manual_only
+      // evaluability omitted — defaults to weak_heuristic (#212)
       detectorMetadata: VALID_DETECTOR_METADATA,
     });
 
     const p = reducer.getPrincipleById(id!);
-    // Without explicit evaluability, detectorMetadata alone is stored but evaluability defaults
-    expect(p?.evaluability).toBe('manual_only'); // default — detectorMetadata is stored
-    expect(p?.detectorMetadata).toEqual(VALID_DETECTOR_METADATA); // but stored for reference
+    // #212: Default is weak_heuristic — detectorMetadata stored and used
+    expect(p?.evaluability).toBe('weak_heuristic');
+    expect(p?.detectorMetadata).toEqual(VALID_DETECTOR_METADATA);
   });
 });
 
@@ -334,14 +333,14 @@ describe('candidate_created event — evaluability in event data', () => {
       triggerPattern: 'file write fails',
       action: 'check permissions',
       source: 'diagnostician',
-      // no evaluability
+      // no evaluability — defaults to weak_heuristic (#212)
     });
 
     const events = reducer.getEventLog();
     const candidateEvent = events.find(e => e.type === 'candidate_created');
     expect(candidateEvent).toBeDefined();
-    // Defaults to 'manual_only' in event data
-    expect((candidateEvent!.data as any).evaluability).toBe('manual_only');
+    // #212: Defaults to 'weak_heuristic' (not manual_only)
+    expect((candidateEvent!.data as any).evaluability).toBe('weak_heuristic');
   });
 
   it('emits candidate_created event with detectorMetadata when provided', () => {
@@ -370,7 +369,7 @@ describe('candidate_created event — evaluability in event data', () => {
 // ---------------------------------------------------------------------------
 
 describe('manual_only classification — no automatic targeting', () => {
-  it('principle without detectorMetadata has manual_only evaluability', () => {
+  it('principle without detectorMetadata has weak_heuristic evaluability', () => {
     const workspace = makeTempDir();
     const reducer = new EvolutionReducerImpl({ workspaceDir: workspace });
 
@@ -380,12 +379,13 @@ describe('manual_only classification — no automatic targeting', () => {
       triggerPattern: 'generic error',
       action: 'be careful',
       source: 'diagnostician',
-      // no evaluability, no detectorMetadata
+      // no evaluability, no detectorMetadata — defaults to weak_heuristic (#212)
     });
 
     // Principle auto-promotes to probation (not active)
     const p = reducer.getProbationPrinciples()[0];
-    expect(p?.evaluability).toBe('manual_only');
+    // #212: Default is weak_heuristic (not manual_only)
+    expect(p?.evaluability).toBe('weak_heuristic');
     expect(p?.detectorMetadata).toBeUndefined();
   });
 
@@ -463,7 +463,7 @@ describe('getActivePrinciples / getProbationPrinciples — evaluability field', 
 // ---------------------------------------------------------------------------
 
 describe('Malformed detectorMetadata — defense in depth', () => {
-  it('downgrades to manual_only when confidence is not a valid enum value', () => {
+  it('downgrades to weak_heuristic when confidence is not a valid enum value', () => {
     const workspace = makeTempDir();
     const reducer = new EvolutionReducerImpl({ workspaceDir: workspace });
 
@@ -485,12 +485,11 @@ describe('Malformed detectorMetadata — defense in depth', () => {
     });
 
     const p = reducer.getPrincipleById(id!);
-    // Subagent should not pass invalid confidence, but reducer also defends:
-    // invalid confidence = no real auto-trainability
-    expect(p?.evaluability).toBe('manual_only');
+    // #212: deterministic with invalid metadata → downgraded to weak_heuristic (not manual_only)
+    expect(p?.evaluability).toBe('weak_heuristic');
   });
 
-  it('downgrades to manual_only when applicabilityTags is empty', () => {
+  it('weak_heuristic accepts malformed metadata without downgrade', () => {
     const workspace = makeTempDir();
     const reducer = new EvolutionReducerImpl({ workspaceDir: workspace });
 
@@ -511,10 +510,11 @@ describe('Malformed detectorMetadata — defense in depth', () => {
     });
 
     const p = reducer.getPrincipleById(id!);
-    expect(p?.evaluability).toBe('manual_only');
+    // #212: weak_heuristic does not require detectorMetadata — no downgrade needed
+    expect(p?.evaluability).toBe('weak_heuristic');
   });
 
-  it('downgrades to manual_only when positiveSignals is empty', () => {
+  it('weak_heuristic accepts empty positiveSignals without downgrade', () => {
     const workspace = makeTempDir();
     const reducer = new EvolutionReducerImpl({ workspaceDir: workspace });
 
@@ -535,10 +535,10 @@ describe('Malformed detectorMetadata — defense in depth', () => {
     });
 
     const p = reducer.getPrincipleById(id!);
-    expect(p?.evaluability).toBe('manual_only');
+    expect(p?.evaluability).toBe('weak_heuristic');
   });
 
-  it('downgrades to manual_only when negativeSignals is empty', () => {
+  it('weak_heuristic accepts empty negativeSignals without downgrade', () => {
     const workspace = makeTempDir();
     const reducer = new EvolutionReducerImpl({ workspaceDir: workspace });
 
@@ -559,7 +559,7 @@ describe('Malformed detectorMetadata — defense in depth', () => {
     });
 
     const p = reducer.getPrincipleById(id!);
-    expect(p?.evaluability).toBe('manual_only');
+    expect(p?.evaluability).toBe('weak_heuristic');
   });
 
   it('accepts valid detectorMetadata with all three signal arrays non-empty', () => {

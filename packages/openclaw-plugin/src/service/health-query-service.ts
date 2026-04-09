@@ -75,6 +75,11 @@ export class HealthQueryService {
   private readonly evolutionReducer;
   private readonly uiDb: ControlUiDatabase;
   private readonly tableColumnCache = new Map<string, Set<string>>();
+  private gfiState: { currentGfi: number; dailyGfiPeak: number; lastReadDate: string } = {
+    currentGfi: 0,
+    dailyGfiPeak: 0,
+    lastReadDate: '',
+  };
 
   constructor(workspaceDir: string) {
     this.workspaceDir = workspaceDir;
@@ -85,6 +90,7 @@ export class HealthQueryService {
     this.eventLog = wctx.eventLog;
     this.evolutionReducer = wctx.evolutionReducer;
     this.uiDb = new ControlUiDatabase({ workspaceDir });
+    this.initGfiState();
   }
 
   dispose(): void {
@@ -111,10 +117,23 @@ export class HealthQueryService {
     const currentGfi = this.asNumber(session?.currentGfi, 0);
     const peakToday = this.asNumber(session?.dailyGfiPeak, currentGfi);
 
+    // Merge with persisted state: use session value if available, otherwise use persisted
+    const today = new Date().toISOString().slice(0, 10);
+    if (today !== this.gfiState.lastReadDate) {
+      // New day: reset peak tracking
+      this.gfiState.lastReadDate = today;
+      this.gfiState.dailyGfiPeak = currentGfi;
+    }
+    const effectiveCurrentGfi = currentGfi > 0 ? currentGfi : this.gfiState.currentGfi;
+    const effectivePeak = Math.max(this.gfiState.dailyGfiPeak, peakToday, effectiveCurrentGfi);
+    this.gfiState.currentGfi = effectiveCurrentGfi;
+    this.gfiState.dailyGfiPeak = effectivePeak;
+    this.writeGfiState();
+
     return {
       gfi: {
-        current: currentGfi,
-        peakToday,
+        current: effectiveCurrentGfi,
+        peakToday: effectivePeak,
         threshold,
       },
       trust,
@@ -203,9 +222,23 @@ export class HealthQueryService {
       ORDER BY total DESC
     `, today);
 
+    // Merge with persisted GFI state (same logic as getOverviewHealth)
+    const current = this.asNumber(session?.currentGfi, 0);
+    const peakTodayRaw = this.asNumber(session?.dailyGfiPeak, current);
+    const today2 = new Date().toISOString().slice(0, 10);
+    if (today2 !== this.gfiState.lastReadDate) {
+      this.gfiState.lastReadDate = today2;
+      this.gfiState.dailyGfiPeak = current;
+    }
+    const effectiveCurrent = current > 0 ? current : this.gfiState.currentGfi;
+    const effectivePeakGfi = Math.max(this.gfiState.dailyGfiPeak, peakTodayRaw, effectiveCurrent);
+    this.gfiState.currentGfi = effectiveCurrent;
+    this.gfiState.dailyGfiPeak = effectivePeakGfi;
+    this.writeGfiState();
+
     return {
-      current: this.asNumber(session?.currentGfi, 0),
-      peakToday: this.asNumber(session?.dailyGfiPeak, this.asNumber(session?.currentGfi, 0)),
+      current: effectiveCurrent,
+      peakToday: effectivePeakGfi,
       threshold,
       trend: trendRows.map((row) => ({ hour: row.hour, value: this.asNumber(row.value, 0) })),
       sources: Object.fromEntries(sourceRows.map((row) => [row.source, this.asNumber(row.total, 0)])),
@@ -832,5 +865,82 @@ export class HealthQueryService {
       return Number.isFinite(n) ? n : null;
     }
     return null;
+  }
+
+  /**
+   * Initialize GFI state from persisted storage.
+   * Called once in constructor. Falls back to 0 if no persisted state exists.
+   */
+  private initGfiState(): void {
+    const today = new Date().toISOString().slice(0, 10);
+    const persisted = this.readGfiState();
+    if (persisted) {
+      // If persisted date is today, restore the peak; otherwise reset for new day
+      if (persisted.date === today) {
+        this.gfiState = {
+          currentGfi: persisted.currentGfi,
+          dailyGfiPeak: persisted.dailyGfiPeak,
+          lastReadDate: today,
+        };
+      } else {
+        // New day: reset peak but keep current GFI
+        this.gfiState = {
+          currentGfi: persisted.currentGfi,
+          dailyGfiPeak: persisted.currentGfi, // reset peak to current on new day
+          lastReadDate: today,
+        };
+      }
+    } else {
+      this.gfiState = { currentGfi: 0, dailyGfiPeak: 0, lastReadDate: today };
+    }
+  }
+
+  /**
+   * Read persisted GFI state from trajectory.db gfi_state table.
+   * Returns null if table/row does not exist.
+   */
+  private readGfiState(): { currentGfi: number; dailyGfiPeak: number; date: string } | null {
+    try {
+      const row = this.uiDb.get<{ current_gfi: number; daily_gfi_peak: number; gfi_date: string }>(
+        'SELECT current_gfi, daily_gfi_peak, gfi_date FROM gfi_state WHERE id = 1',
+      );
+      if (!row) return null;
+      return {
+        currentGfi: row.current_gfi ?? 0,
+        dailyGfiPeak: row.daily_gfi_peak ?? 0,
+        date: row.gfi_date ?? '',
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Write current GFI state to trajectory.db gfi_state table.
+   * Creates the table if it does not exist (first write).
+   */
+  private writeGfiState(): void {
+    const today = new Date().toISOString().slice(0, 10);
+    try {
+      // Ensure table exists (CREATE TABLE IF NOT EXISTS)
+      this.uiDb.execute(`
+        CREATE TABLE IF NOT EXISTS gfi_state (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          current_gfi REAL NOT NULL DEFAULT 0,
+          daily_gfi_peak REAL NOT NULL DEFAULT 0,
+          gfi_date TEXT NOT NULL DEFAULT ''
+        )
+      `);
+      // Use run() for the parameterized INSERT (run() wraps withWrite + db.prepare().run())
+      this.uiDb.run(
+        'INSERT OR REPLACE INTO gfi_state (id, current_gfi, daily_gfi_peak, gfi_date) VALUES (1, ?, ?, ?)',
+        this.gfiState.currentGfi,
+        this.gfiState.dailyGfiPeak,
+        today,
+      );
+    } catch (err) {
+      // Non-fatal: GFI persistence failure should not break the endpoint
+      console.warn('[HealthQueryService] Failed to persist GFI state:', err);
+    }
   }
 }

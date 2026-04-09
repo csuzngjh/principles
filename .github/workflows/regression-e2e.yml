@@ -1,0 +1,30 @@
+name: E2E Regression Test
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  regression-test:
+    name: Nocturnal Pipeline Regression Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        working-directory: packages/openclaw-plugin
+        run: npm install
+
+      - name: Run regression tests
+        working-directory: packages/openclaw-plugin
+        run: npx vitest run tests/core/regression-v1-9-1.test.ts --reporter=verbose
+
+      - name: Run full test suite (sanity)
+        working-directory: packages/openclaw-plugin
+        run: npm test

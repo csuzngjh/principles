@@ -20,6 +20,7 @@ import type {
   PrincipleSuggestedRule,
 } from './evolution-types.js';
 import { isCompleteDetectorMetadata } from './evolution-types.js';
+import { updateTrainingStore } from './principle-tree-ledger.js';
 
 export interface EvolutionReducer {
   emit(_event: EvolutionLoopEvent): void;
@@ -72,14 +73,16 @@ export class EvolutionReducerImpl implements EvolutionReducer {
   private readonly blacklistPath: string;
   private readonly principlesPath: string;
   private readonly workspaceDir: string;
+  private readonly stateDir: string | undefined;
   private readonly memoryEvents: EvolutionLoopEvent[] = [];
   private readonly principles = new Map<string, Principle>();
   private readonly failureStreak = new Map<string, number>();
   private lastPromotedAt: string | null = null;
   private isReplaying = false;
 
-  constructor(opts: { workspaceDir: string }) {
+  constructor(opts: { workspaceDir: string; stateDir?: string }) {
     this.workspaceDir = opts.workspaceDir;
+    this.stateDir = opts.stateDir;
     const resolver = new PathResolver({ workspaceDir: opts.workspaceDir });
     this.streamPath = resolver.resolve('EVOLUTION_STREAM');
     this.lockTargetPath = resolver.resolve('EVOLUTION_LOCK');
@@ -237,17 +240,18 @@ export class EvolutionReducerImpl implements EvolutionReducer {
       return null;
     }
 
-    // Evaluability defaults to 'manual_only' — the only way to get auto-trainable
-    // is to explicitly provide valid detectorMetadata.
-    // Enforce: deterministic/weak_heuristic requires complete detectorMetadata to be present.
-    let evaluability: PrincipleEvaluatorLevel = params.evaluability ?? 'manual_only';
-    if (evaluability !== 'manual_only' && !isCompleteDetectorMetadata(params.detectorMetadata)) {
+    // Evaluability defaults to 'weak_heuristic' — allows basic pattern-matching
+    // evaluation without requiring full detectorMetadata.
+    // #212: Only 'deterministic' requires complete detectorMetadata.
+    // 'weak_heuristic' can work with just the trigger pattern.
+    let evaluability: PrincipleEvaluatorLevel = params.evaluability ?? 'weak_heuristic';
+    if (evaluability === 'deterministic' && !isCompleteDetectorMetadata(params.detectorMetadata)) {
       SystemLogger.log(
         this.workspaceDir,
         'EVALUABILITY_DOWNGRADED',
-        `Principle for painId "${params.painId}" requested evaluability="${evaluability}" without detectorMetadata — downgrading to "manual_only". Provide valid detectorMetadata to enable auto-training.`
+        `Principle for painId "${params.painId}" requested evaluability="deterministic" without detectorMetadata — downgrading to "weak_heuristic". Provide valid detectorMetadata for deterministic evaluation.`
       );
-      evaluability = 'manual_only';
+      evaluability = 'weak_heuristic';
     }
 
     // Check if a principle already exists for this painId
@@ -265,16 +269,17 @@ export class EvolutionReducerImpl implements EvolutionReducer {
       existingPrinciple.version += 1;
       if (params.evaluability !== undefined) {
         // Apply normalization (params.evaluability may be invalid without complete metadata)
+        // #212: Only 'deterministic' requires detectorMetadata; 'weak_heuristic' does not.
         const normalizedEvaluability = (() => {
-          if (params.evaluability === 'manual_only' || isCompleteDetectorMetadata(params.detectorMetadata)) {
-            return params.evaluability;
+          if (params.evaluability === 'deterministic' && !isCompleteDetectorMetadata(params.detectorMetadata)) {
+            SystemLogger.log(
+              this.workspaceDir,
+              'EVALUABILITY_DOWNGRADED',
+              `Principle update for painId "${params.painId}" requested evaluability="deterministic" without detectorMetadata — downgrading to "weak_heuristic".`
+            );
+            return 'weak_heuristic';
           }
-          SystemLogger.log(
-            this.workspaceDir,
-            'EVALUABILITY_DOWNGRADED',
-            `Principle update for painId "${params.painId}" requested evaluability="${params.evaluability}" without detectorMetadata — downgrading to "manual_only".`
-          );
-          return 'manual_only';
+          return params.evaluability;
         })();
         existingPrinciple.evaluability = normalizedEvaluability;
       }
@@ -360,6 +365,35 @@ export class EvolutionReducerImpl implements EvolutionReducer {
     const synced = this.syncPrincipleToFile(principle);
     if (!synced) {
       SystemLogger.log(this.workspaceDir, 'PRINCIPLE_SYNC_WARN', `Principle ${principleId} created in memory but failed to sync to PRINCIPLES.md — manual file check required`);
+    }
+
+    // #204: Write to training store so listEvaluablePrinciples() can find this principle
+    if (this.stateDir) {
+      try {
+        // Determine initial internalization status based on evaluability:
+        // - manual_only: prompt_only (can only be evaluated manually)
+        // - deterministic/weak_heuristic: needs_training (auto-evaluable, ready for training)
+        const initialStatus = evaluability === 'manual_only' ? 'prompt_only' : 'needs_training';
+        
+        updateTrainingStore(this.stateDir, (trainingStore) => {
+          trainingStore[principleId] = {
+            principleId,
+            evaluability,
+            internalizationStatus: initialStatus,
+            applicableOpportunityCount: 0,
+            observedViolationCount: 0,
+            complianceRate: 0,
+            violationTrend: 0,
+            generatedSampleCount: 0,
+            approvedSampleCount: 0,
+            includedTrainRunIds: [],
+            deployedCheckpointIds: [],
+          };
+        });
+        SystemLogger.log(this.workspaceDir, 'TRAINING_STORE_UPDATED', `Principle ${principleId} added to training store with evaluability=${evaluability}, internalizationStatus=${initialStatus}`);
+      } catch (err) {
+        SystemLogger.log(this.workspaceDir, 'TRAINING_STORE_UPDATE_FAILED', `Failed to update training store for ${principleId}: ${String(err)}`);
+      }
     }
 
     SystemLogger.log(
