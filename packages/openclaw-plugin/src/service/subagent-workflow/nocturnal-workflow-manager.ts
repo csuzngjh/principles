@@ -35,10 +35,9 @@ import {
     type NocturnalRunResult,
 } from '../nocturnal-service.js';
 import { type TrinityStageFailure, type TrinityResult } from '../../core/nocturnal-trinity.js';
-import type { TrinityRuntimeAdapter, TrinityConfig, DreamerOutput, PhilosopherOutput, TrinityTelemetry, TrinityDraftArtifact } from '../../core/nocturnal-trinity.js';
+import type { TrinityRuntimeAdapter } from '../../core/nocturnal-trinity.js';
 import type { NocturnalSessionSnapshot } from '../../core/nocturnal-trajectory-extractor.js';
 import type { RecentPainContext } from '../evolution-worker.js';
-import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { isSubagentRuntimeAvailable } from '../../utils/subagent-probe.js';
@@ -52,50 +51,6 @@ import { isSubagentRuntimeAvailable } from '../../utils/subagent-probe.js';
  * This is the result type returned by executeNocturnalReflectionAsync.
  */
 export type NocturnalResult = NocturnalRunResult;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Idempotency Key Computation (D-18)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Compute idempotency key for the Dreamer stage (D-18).
- * Key = SHA-256(workflowId + stage + inputDigest)
- * inputDigest = SHA-256(snapshot.sessionId + principleId + maxCandidates)
- * Uses simple concatenation (no delimiters) per D-18 spec.
- */
-function computeDreamerIdempotencyKey(
-  workflowId: string,
-  snapshot: NocturnalSessionSnapshot,
-  principleId: string,
-  maxCandidates: number
-): string {
-  // Use delimiters to prevent collision (e.g., "sess10"+"2"+"3" vs "sess1"+"02"+"3")
-  const inputDigest = createHash('sha256')
-    .update(`${snapshot.sessionId}::${principleId}::${maxCandidates}`)
-    .digest('hex');
-  return createHash('sha256')
-    .update(`${workflowId}::dreamer::${inputDigest}`)
-    .digest('hex');
-}
-
-/**
- * Compute idempotency key for the Philosopher stage (D-18).
- * Key = SHA-256(workflowId + stage + inputDigest)
- * inputDigest = SHA-256(workflowId + dreamerOutputJson)
- * Uses simple concatenation (no delimiters) per D-18 spec.
- */
-function computePhilosopherIdempotencyKey(
-  workflowId: string,
-  dreamerOutput: DreamerOutput
-): string {
-  const dreamerOutputJson = JSON.stringify(dreamerOutput);
-  const inputDigest = createHash('sha256')
-    .update(workflowId + dreamerOutputJson)
-    .digest('hex');
-  return createHash('sha256')
-    .update(workflowId + 'philosopher' + inputDigest)
-    .digest('hex');
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // NocturnalWorkflowOptions
@@ -127,6 +82,7 @@ export interface NocturnalWorkflowOptions {
  * - timeoutMs: 15 minutes (900000ms)
  * - ttlMs: 30 minutes (1800000ms)
  */
+/* eslint-disable no-unused-vars, @typescript-eslint/no-unused-vars -- Reason: spec methods intentionally receive unused params per interface contract */
 export const nocturnalWorkflowSpec: SubagentWorkflowSpec<NocturnalResult> = {
     workflowType: 'nocturnal',
     transport: 'runtime_direct',
@@ -134,7 +90,10 @@ export const nocturnalWorkflowSpec: SubagentWorkflowSpec<NocturnalResult> = {
     ttlMs: 30 * 60 * 1000,            // D-04: 30 minutes
     shouldDeleteSessionAfterFinalize: false,  // D-09: no external session to delete
 
-    buildPrompt(_taskInput: unknown, _metadata: WorkflowMetadata): string {
+    buildPrompt(
+        _taskInput: unknown,
+        _metadata: WorkflowMetadata
+    ): string {
         // NocturnalWorkflowManager does not use prompt injection.
         // Execution is driven by executeNocturnalReflectionAsync.
         return '';
@@ -156,57 +115,7 @@ export const nocturnalWorkflowSpec: SubagentWorkflowSpec<NocturnalResult> = {
         return status === 'ok';
     },
 };
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Stub Fallback Runtime Adapter (NOC-15)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Stub fallback runtime adapter for Trinity.
- * Wraps a real adapter and provides stub implementations for fallback when stages fail.
- * Per NOC-15: Fallback degrades to stub, NOT to EmpathyObserver/DeepReflect.
- */
-class StubFallbackRuntimeAdapter implements TrinityRuntimeAdapter {
-    constructor(
-        private readonly snapshot: NocturnalSessionSnapshot,
-        private readonly principleId: string,
-        private readonly maxCandidates: number
-    ) {}
-
-    async invokeDreamer(
-        snapshot: NocturnalSessionSnapshot,
-        principleId: string,
-        maxCandidates: number
-    ): Promise<DreamerOutput> {
-        const { invokeStubDreamer } = await import('../../core/nocturnal-trinity.js');
-        return invokeStubDreamer(snapshot, principleId, maxCandidates);
-    }
-
-    async invokePhilosopher(
-        dreamerOutput: DreamerOutput,
-        principleId: string
-    ): Promise<PhilosopherOutput> {
-        const { invokeStubPhilosopher } = await import('../../core/nocturnal-trinity.js');
-        return invokeStubPhilosopher(dreamerOutput, principleId);
-    }
-
-    async invokeScribe(
-        dreamerOutput: DreamerOutput,
-        philosopherOutput: PhilosopherOutput,
-        snapshot: NocturnalSessionSnapshot,
-        principleId: string,
-        telemetry: TrinityTelemetry,
-        config: TrinityConfig
-    ): Promise<TrinityDraftArtifact | null> {
-        // Use stub Scribe
-        const { invokeStubScribe } = await import('../../core/nocturnal-trinity.js');
-        return invokeStubScribe(dreamerOutput, philosopherOutput, snapshot, principleId, telemetry, config);
-    }
-
-    async close(): Promise<void> {
-        // No-op for stubs
-    }
-}
+/* eslint-enable no-unused-vars */
 
 // ─────────────────────────────────────────────────────────────────────────────
 // NocturnalWorkflowManager
@@ -272,7 +181,7 @@ export class NocturnalWorkflowManager implements WorkflowManager {
             throw new Error(`NocturnalWorkflowManager: subagent runtime unavailable`);
         }
 
-        const workflowId = this.generateWorkflowId();
+        const workflowId = NocturnalWorkflowManager.generateWorkflowId();
         const now = Date.now();
 
         const metadata: WorkflowMetadata = {
@@ -433,13 +342,13 @@ export class NocturnalWorkflowManager implements WorkflowManager {
         this.markCompleted(workflowId);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // WorkflowManager Interface: notifyLifecycleEvent (NOC-01, D-10: no-op)
-    // ─────────────────────────────────────────────────────────────────────────
-
+    // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: interface contract requires this method signature, implementation is a no-op per D-10
     async notifyLifecycleEvent(
+        // eslint-disable-next-line no-unused-vars -- Reason: interface contract requires these params but NocturnalWorkflowManager is a no-op per D-10
         _workflowId: string,
+        // eslint-disable-next-line no-unused-vars -- Reason: interface contract requires these params but NocturnalWorkflowManager is a no-op per D-10
         _event: 'subagent_spawned' | 'subagent_ended',
+        // eslint-disable-next-line no-unused-vars -- Reason: interface contract requires these params but NocturnalWorkflowManager is a no-op per D-10
         _data?: Record<string, unknown>
     ): Promise<void> {
         // D-10: No-op. NocturnalWorkflowManager does not use the wait-on-run pattern.
@@ -494,11 +403,13 @@ export class NocturnalWorkflowManager implements WorkflowManager {
         maxAgeMs = 30 * 60 * 1000,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: subagentRuntime param is intentionally any for backward compatibility with callers
         subagentRuntime?: any,
+        /* eslint-disable no-unused-vars -- Reason: type parameter names are documentation, not actual variables */
         agentSession?: {
             resolveStorePath: () => string;
             loadSessionStore: (storePath: string, opts?: { skipCache?: boolean }) => Record<string, unknown>;
             saveSessionStore: (storePath: string, store: Record<string, unknown>) => Promise<void>;
         },
+        /* eslint-enable no-unused-vars */
     ): Promise<number> {
         const expired = this.store.getExpiredWorkflows(maxAgeMs);
 
@@ -603,7 +514,7 @@ export class NocturnalWorkflowManager implements WorkflowManager {
             }));
 
         // NOC-16: Compute Trinity stage states from events
-        const trinityStageStates = this.computeTrinityStageStates(allEvents);
+        const trinityStageStates = NocturnalWorkflowManager.computeTrinityStageStates(allEvents);
 
         return {
             workflowId: workflow.workflow_id,
@@ -633,7 +544,7 @@ export class NocturnalWorkflowManager implements WorkflowManager {
     // Helper Methods
     // ─────────────────────────────────────────────────────────────────────────
 
-    private generateWorkflowId(): string {
+    private static generateWorkflowId(): string {
         return `wf_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
     }
 
@@ -659,7 +570,7 @@ export class NocturnalWorkflowManager implements WorkflowManager {
      * Compute Trinity stage states from workflow events (NOC-16).
      * Derives current/completed/failed state for each Trinity stage.
      */
-    private computeTrinityStageStates(events: WorkflowEventRow[]): {
+    private static computeTrinityStageStates(events: WorkflowEventRow[]): {
         stage: 'dreamer' | 'philosopher' | 'scribe';
         status: 'pending' | 'running' | 'completed' | 'failed';
         reason?: string;
