@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ControlUiQueryService } from '../../src/service/control-ui-query-service.js';
 import { CentralOverviewService } from '../../src/service/central-overview-service.js';
 import { HealthQueryService } from '../../src/service/health-query-service.js';
+import type { ControlUiDatabase } from '../../src/core/control-ui-db.js';
 
 // ---------------------------------------------------------------------------
 // Shared mock infrastructure
@@ -48,8 +49,8 @@ const evolutionReducerMock = vi.hoisted(() => ({
 }));
 
 const controlUiDbMock = vi.hoisted(() => ({
-  all: vi.fn((_sql?: string) => []),
-  get: vi.fn((_sql?: string) => null),
+  all: vi.fn((..._args: unknown[]) => []) as unknown as ControlUiDatabase['all'],
+  get: vi.fn((..._args: unknown[]) => null) as unknown as ControlUiDatabase['get'],
   run: vi.fn(),
   execute: vi.fn(),
   dispose: vi.fn(),
