@@ -199,10 +199,10 @@ function WorkspaceHealthPanel({ entry }: { entry: WorkspaceHealthEntry }) {
         <section style={{ marginTop: 'var(--space-4)', borderTop: '1px solid var(--border)', paddingTop: 'var(--space-4)' }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
             <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-              📈 {t('overview.health.gfi')} · 24h 趋势
+              📈 {t('overview.health.gfi')} · 今日趋势
             </span>
             <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
-              峰值: {h.gfi.peakToday}
+              今日峰值: {h.gfi.peakToday}
             </span>
           </div>
           {h.gfi.trend.length >= 2 ? (
