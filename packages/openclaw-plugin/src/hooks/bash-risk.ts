@@ -38,11 +38,12 @@ export type BashRiskLevel = 'safe' | 'dangerous' | 'normal';
  * @param logger - Optional logger for warnings about invalid patterns
  * @returns The risk level: 'safe', 'dangerous', or 'normal'
  */
+// eslint-disable-next-line @typescript-eslint/max-params -- Reason: Bash risk analysis requires command + pattern lists - refactoring to options object would be breaking API change
 export function analyzeBashCommand(
   command: string,
   safePatterns: string[],
   dangerousPatterns: string[],
-  logger?: { warn?: (message: string) => void }
+  logger?: { warn?: (_message: string) => void }
 ): BashRiskLevel {
   let normalizedCmd = command.trim().toLowerCase();
 
@@ -64,6 +65,7 @@ export function analyzeBashCommand(
   // - Zero-width joiner (U+200D)
   // - Word joiner (U+2060)
   // - Zero-width invisible separator (U+FEFF)
+  // eslint-disable-next-line no-misleading-character-class -- Reason: zero-width character class ranges are intentional - documented in comment above
   const ZERO_WIDTH_CHARS = /[\u200B\u200C\u200D\u2060\uFEFF]/g;
   if (ZERO_WIDTH_CHARS.test(command)) {
     logger?.warn?.(`[PD_GATE] Bash command contains zero-width characters — blocking as dangerous`);
@@ -151,6 +153,7 @@ export interface DynamicThresholdConfig {
  * @param config - Configuration with large_change_lines and ep_tier_multipliers
  * @returns The adjusted threshold (minimum 0)
  */
+// eslint-disable-next-line @typescript-eslint/max-params -- Reason: Threshold calculation requires all parameters - refactoring to options object would be breaking API change
 export function calculateDynamicThreshold(
   baseThreshold: number,
   epTier: number,
