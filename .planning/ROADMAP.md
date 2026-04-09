@@ -62,6 +62,27 @@ Phases 17, 18, 19 can run in parallel after Phase 16 completes (all depend only 
 | 19 | Gate Monitor shows correct stats and blocks; all frontend types match backend responses |
 | 20 | All 4 pages validated with correct data; regression tests pass on CI |
 
+### Phase 1: --help
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 0
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 1 to break down)
+
+### Phase 5: Gate Monitor + Frontend Field Mapping
+
+**Goal:** Fix `/api/gate/stats`, `/api/gate/blocks` data sources. Fix all frontend TypeScript types and component field accessors to match actual backend responses.
+**Requirements**: GATE-01, GATE-02, FE-01, FE-02
+**Depends on:** Phase 16
+**Plans:** 2 plans
+
+Plans:
+- [ ] 19-01-PLAN.md — Verify /api/gate/stats and /api/gate/blocks backend service layer
+- [ ] 19-02-PLAN.md — Verify frontend TypeScript types and component field accessors
+
 ---
 
-*Last updated: 2026-04-08 after roadmap creation*
+*Last updated: 2026-04-09 after Phase 19 planning*
