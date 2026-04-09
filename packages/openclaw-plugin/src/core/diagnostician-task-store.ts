@@ -115,6 +115,7 @@ export async function completeDiagnosticianTask(
 /**
  * Synchronous read without lock — for use INSIDE a lock context.
  */
+// eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between read/write helpers - reordering would break logical grouping
 function readTaskStoreSync(filePath: string): DiagnosticianTaskStore {
   if (!fs.existsSync(filePath)) {
     return { tasks: {} };
