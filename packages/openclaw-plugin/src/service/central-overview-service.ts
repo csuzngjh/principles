@@ -23,7 +23,10 @@ export class CentralOverviewService {
   }
 
   dispose(): void {
-    this.centralDb.dispose();
+    // Do NOT dispose centralDb — it's a singleton shared across all requests.
+    // Individual services that open per-request connections (e.g. HealthQueryService)
+    // must dispose their own connections, but the central aggregated DB lives for
+    // the lifetime of the process.
   }
 
   getOverview(days: number = 30): CentralOverviewResponse {
