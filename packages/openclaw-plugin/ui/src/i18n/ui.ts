@@ -225,6 +225,40 @@ export const i18n = {
     dormant: { zh: '休眠', en: 'Dormant' },
     effective: { zh: '有效', en: 'Effective' },
 
+    // Charts and sections
+    coverageTrend: { zh: '覆盖率趋势', en: 'Coverage Trend' },
+    emptyCoverageTrend: { zh: '今日暂无覆盖率记录', en: 'No coverage data yet' },
+    emptyCoverageTrendDesc: { zh: '当 AI 开始执行任务后，覆盖率会自动记录。', en: 'Coverage is tracked automatically once AI starts working.' },
+    scenarioHeatmap: { zh: '场景热力图', en: 'Scenario Heatmap' },
+    emptyScenarioMatrix: { zh: '暂无场景数据', en: 'No scenario data yet' },
+    emptyScenarioMatrixDesc: { zh: '模型触发场景后会在此显示。', en: 'Scenarios will appear here when models are triggered.' },
+    emptyAllActive: { zh: '所有模型都在使用中', en: 'All models are active' },
+    emptyAllActiveDesc: { zh: '没有休眠模型。', en: 'No dormant models.' },
+    noModelsYet: { zh: '暂无思维模型数据', en: 'No thinking model data yet' },
+    noModelsYetDesc: { zh: 'AI 开始使用后，这里会显示思维模型的使用情况。', en: 'Thinking model usage will appear here once AI starts working.' },
+
+    // Recommendations
+    dormantModels: { zh: '休眠模型', en: 'Dormant Models' },
+    reinforce: { zh: '保持', en: 'Reinforce' },
+    rework: { zh: '重构', en: 'Rework' },
+    archive: { zh: '归档', en: 'Archive' },
+    filterByRec: { zh: '按推荐过滤', en: 'Filter by Rec' },
+
+    // Detail sections
+    outcomeStats: { zh: '效果统计', en: 'Outcome Stats' },
+    success: { zh: '成功', en: 'Success' },
+    failure: { zh: '失败', en: 'Failure' },
+    pain: { zh: '痛点', en: 'Pain' },
+    correction: { zh: '纠正', en: 'Correction' },
+    scenarioDistribution: { zh: '场景分布', en: 'Scenario Distribution' },
+    recentEvents: { zh: '最近事件', en: 'Recent Events' },
+    toolContext: { zh: '工具上下文', en: 'Tool Context' },
+    painContext: { zh: '痛点上下文', en: 'Pain Context' },
+    principleContext: { zh: '原则上下文', en: 'Principle Context' },
+    trigger: { zh: '触发条件', en: 'Trigger' },
+    antiPattern: { zh: '禁止行为', en: 'Anti-Pattern' },
+    thinkingOsSource: { zh: '思维模型定义来源', en: 'Thinking Model Source' },
+
     // Empty state
     emptyTitle: { zh: '选择一个思维模型', en: 'Select a thinking model' },
     emptyDesc: { zh: '点击左侧列表中的模型，查看场景分布和最近事件', en: 'Click a model from the list to inspect scenario coverage and recent events' },
