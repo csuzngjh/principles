@@ -150,7 +150,9 @@ function buildChineseOutput(
 export function handleEvolutionStatusCommand(ctx: PluginCommandContext): { text: string } {
   const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
   const sessionId = (ctx as { sessionId?: string | null }).sessionId ?? null;
-  const reducer = new EvolutionReducerImpl({ workspaceDir });
+  // #207/#210: Use WorkspaceContext to get evolutionReducer with stateDir
+  const wctx = WorkspaceContext.fromHookContext({ workspaceDir });
+  const reducer = wctx.evolutionReducer;
   const stats = reducer.getStats();
   const summary = RuntimeSummaryService.getSummary(workspaceDir, { sessionId });
   const recommendations = WorkspaceContext.fromHookContext({ workspaceDir })
