@@ -9,46 +9,6 @@ import { Loading, ErrorState } from '../components';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 
 // ---------------------------------------------------------------------------
-// Tooltip component for metric explanations
-// ---------------------------------------------------------------------------
-
-function MetricTooltip({ children }: { children: React.ReactNode }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <span
-      style={{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
-      onClick={() => setOpen(!open)}
-    >
-      {children}
-      {open && (
-        <span
-          style={{
-            position: 'absolute',
-            bottom: '100%',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            background: 'var(--bg-sunken)',
-            border: '1px solid var(--border)',
-            borderRadius: 'var(--radius-sm)',
-            padding: '6px 10px',
-            fontSize: '0.75rem',
-            color: 'var(--text-secondary)',
-            whiteSpace: 'normal',
-            maxWidth: 260,
-            zIndex: 100,
-            boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-          }}
-        >
-          {children}
-        </span>
-      )}
-    </span>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Helper: get health status
 // ---------------------------------------------------------------------------
 
@@ -623,9 +583,9 @@ export function OverviewPage() {
         </section>
         {/* AI 思维使用分布 */}
         <section className="panel">
-          <h3>AI 思维使用分布</h3>
+          <h3>{t('overview.thinkingDistribution')}</h3>
           <p style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginTop: -4, marginBottom: 10 }}>
-            AI 使用了哪些思维模型来思考问题？柱状越高表示用得越多。
+            {t('overview.thinkingDistributionDesc')}
           </p>
           <ThinkingModelDistribution
             modelBreakdown={(data.thinkingSummary as { modelBreakdown?: Array<{ modelId: string; hits: number }> }).modelBreakdown}

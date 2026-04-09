@@ -48,32 +48,63 @@ export function validateWorkspaceDir(dir: string | undefined): string | null {
 }
 
 /**
+ * Try to resolve workspaceDir from agentId.
+ * Returns the resolved path if successful and valid, or null.
+ */
+function tryResolveFromAgentId(
+  agentId: string,
+  api: {
+    runtime: { agent: { resolveAgentWorkspaceDir: (config: unknown, agentId: string) => string } };
+    config: unknown;
+  },
+  onWarning: (msg: string) => void,
+): string | null {
+  try {
+    const resolved = api.runtime.agent.resolveAgentWorkspaceDir(api.config, agentId);
+    const issue = validateWorkspaceDir(resolved);
+    if (issue) {
+      onWarning(`agentId resolution returned invalid: "${resolved}" (${issue})`);
+      return null;
+    }
+    return resolved;
+  } catch (err) {
+    onWarning(`failed to resolve from agentId: ${String(err)}`);
+    return null;
+  }
+}
+
+/**
+ * Validate a fallback workspaceDir and warn if invalid.
+ * Returns the path regardless (it's the last resort).
+ */
+function validateFallback(path: string, onWarning: (msg: string) => void): string {
+  const issue = validateWorkspaceDir(path);
+  if (issue) {
+    onWarning(`FINAL FALLBACK "${path}" is also invalid: ${issue}. Events will be written to wrong location!`);
+  }
+  return path;
+}
+
+/**
  * Resolve workspaceDir with validation and warning.
- * 
- * Usage pattern:
- *   const workspaceDir = resolveValidWorkspaceDir(ctx, api, {
- *     source: 'after_tool_call',
- *     logger: api.logger,
- *   });
- * 
- * @returns A validated workspaceDir, with fallback chain
+ *
+ * Usage:
+ *   const workspaceDir = resolveValidWorkspaceDir(ctx, api, { source: 'after_tool_call' });
+ *
+ * Fallback chain:
+ *   1. ctx.workspaceDir (validated)
+ *   2. api.runtime.agent.resolveAgentWorkspaceDir(config, ctx.agentId)
+ *   3. api.resolvePath('.') (last resort, warns loudly)
  */
 export function resolveValidWorkspaceDir(
   ctx: { workspaceDir?: string; agentId?: string },
   api: {
-    runtime: {
-      agent: {
-        resolveAgentWorkspaceDir: (config: unknown, agentId: string) => string;
-      };
-    };
+    runtime: { agent: { resolveAgentWorkspaceDir: (config: unknown, agentId: string) => string } };
     config: unknown;
     resolvePath: (input: string) => string;
     logger: PluginLogger;
   },
-  options?: {
-    source?: string;
-    onWarning?: (msg: string) => void;
-  },
+  options?: { source?: string; onWarning?: (msg: string) => void },
 ): string {
   const source = options?.source || 'unknown';
   const onWarning = options?.onWarning || ((msg: string) => api.logger.warn(`[PD:workspaceDir] ${msg}`));
@@ -90,27 +121,12 @@ export function resolveValidWorkspaceDir(
 
   // 2. Try agentId resolution
   if (ctx.agentId) {
-    try {
-      const resolved = api.runtime.agent.resolveAgentWorkspaceDir(api.config, ctx.agentId);
-      const issue = validateWorkspaceDir(resolved);
-      if (issue) {
-        onWarning(`${source}: agentId resolution returned invalid: "${resolved}" (${issue})`);
-      } else {
-        return resolved;
-      }
-    } catch (err) {
-      onWarning(`${source}: failed to resolve from agentId: ${String(err)}`);
-    }
+    const fromAgent = tryResolveFromAgentId(ctx.agentId, api, onWarning);
+    if (fromAgent) return fromAgent;
   }
 
-  // 3. Final fallback - warn but continue
-  const fallback = api.resolvePath('.');
-  const issue = validateWorkspaceDir(fallback);
-  if (issue) {
-    onWarning(`${source}: FINAL FALLBACK "${fallback}" is also invalid: ${issue}. Events will be written to wrong location!`);
-  }
-
-  return fallback;
+  // 3. Final fallback
+  return validateFallback(api.resolvePath('.'), onWarning);
 }
 
 /**

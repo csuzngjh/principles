@@ -156,6 +156,14 @@ export const i18n = {
     topRegressions: { zh: '高频退化', en: 'Top Regressions' },
     sampleQueue: { zh: '样本队列', en: 'Sample Queue' },
     thinkingSummary: { zh: '思维摘要', en: 'Thinking Summary' },
+    thinkingDistribution: {
+      zh: 'AI 思维使用分布',
+      en: 'AI Thinking Model Usage',
+    },
+    thinkingDistributionDesc: {
+      zh: 'AI 使用了哪些思维模型来思考问题？柱状越高表示用得越多。',
+      en: 'Which thinking models does the AI use? Higher bars mean more usage.',
+    },
 
     // Thinking summary fields
     activeModels: { zh: '活跃模型', en: 'Active Models' },

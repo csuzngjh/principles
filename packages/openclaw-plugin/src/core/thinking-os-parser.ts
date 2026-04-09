@@ -17,10 +17,6 @@ import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { resolvePdPath } from './paths.js';
 
-// ES Module compatible __dirname
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 export interface ThinkingOsDirective {
   id: string;         // "T-01"
   name: string;       // "MAP_BEFORE_TERRITORY"

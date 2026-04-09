@@ -76,7 +76,6 @@ const BUILTIN_PATTERNS: BuiltinPatternEntry[] = [
     patterns: [
       /(type|test|contract|schema|interface) (constraint|requirement|check|validation)/i,
       /(必须|需要).*(遵守|符合|满足).*(类型|测试|契约|接口|规范)/i,
-      /memory.*persist/i,
     ],
     baselineScenarios: ['constraint-check', 'contract-verification'],
   },
@@ -148,7 +147,7 @@ const BUILTIN_PATTERNS: BuiltinPatternEntry[] = [
     id: 'T-10',
     patterns: [
       /let me (write|save|record|note down|document)/i,
-      /memory.*scratchpad|write.*plan\.md|write.*memory/i,
+      /memory.*scratchpad|write.*plan\.md|write.*memory|memory.*persist/i,
       /(让我.*写入|写入.*memory|记录.*scratchpad)/i,
     ],
     baselineScenarios: ['memory-persistence', 'state-externalization'],

@@ -203,7 +203,7 @@ const plugin = {
     api.on(
       'llm_output',
       (event: PluginHookLlmOutputEvent, ctx: PluginHookAgentContext): void => {
-        const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
+        const workspaceDir = resolveToolHookWorkspaceDir(ctx as any, api, 'llm_output');
         try {
           handleLlmOutput(event, { ...ctx, workspaceDir });
 
@@ -240,7 +240,7 @@ const plugin = {
       'llm_output',
       (event: PluginHookLlmOutputEvent, ctx: PluginHookAgentContext): void => {
         try {
-          const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
+          const workspaceDir = resolveToolHookWorkspaceDir(ctx as any, api, 'trajectory.llm_output');
           TrajectoryCollector.handleLlmOutput(event, { ...ctx, workspaceDir });
         } catch (err) {
           // Non-critical: don't log, just skip
