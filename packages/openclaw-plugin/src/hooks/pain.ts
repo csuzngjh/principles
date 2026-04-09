@@ -49,7 +49,7 @@ export function handleAfterToolCall(
   ctx: PluginHookToolContext & { workspaceDir?: string; pluginConfig?: Record<string, unknown> },
   api?: OpenClawPluginApi
 ): void {
-  const effectiveWorkspaceDir = ctx.workspaceDir || (api as any)?.workspaceDir || api?.resolvePath?.('.');
+  const effectiveWorkspaceDir = ctx.workspaceDir || (api as unknown as { workspaceDir?: string })?.workspaceDir || api?.resolvePath?.('.');
   if (!effectiveWorkspaceDir) {
     return;
   }
