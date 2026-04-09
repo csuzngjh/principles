@@ -51,6 +51,7 @@ import { handleWorkflowDebugCommand } from './commands/workflow-debug.js';
 import { EvolutionWorkerService } from './service/evolution-worker.js';
 import { TrajectoryService } from './service/trajectory-service.js';
 import { PDTaskService } from './core/pd-task-service.js';
+import { CentralSyncService } from './service/central-sync-service.js';
 import { ensureWorkspaceTemplates } from './core/init.js';
 import { migrateDirectoryStructure } from './core/migration.js';
 import { SystemLogger } from './core/system-logger.js';
@@ -343,6 +344,7 @@ const plugin = {
       api.registerService(EvolutionWorkerService);
       api.registerService(TrajectoryService);
       api.registerService(PDTaskService);
+      api.registerService(CentralSyncService);
     } catch (err) {
       api.logger.error(`[PD] Failed to register EvolutionWorkerService: ${String(err)}`);
     }
