@@ -126,6 +126,7 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
     const gfiBar = createProgressBar(gfi, 100, 15);
     
     // Determine Mental Mode (aligned with prompt.ts logic)
+    // eslint-disable-next-line no-useless-assignment -- Reason: initial value unused due to immediate reassignment - keeping for type inference compatibility
     let mentalMode = '';
     if (isZh) {
         if (gfi >= 70) mentalMode = '🚑 救赎模式 (HUMBLE_RECOVERY)';
@@ -138,6 +139,7 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
     }
     
     // Determine health status based on GFI
+    // eslint-disable-next-line no-useless-assignment -- Reason: initial values unused due to immediate reassignment in all branches
     let healthLabel = 'Healthy';
     let suggestionText = '';
 

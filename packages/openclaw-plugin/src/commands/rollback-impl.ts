@@ -138,6 +138,7 @@ function _handleRollbackImpl(
   // Step 1: Current active -> disabled
   transitionImplementationState(stateDir, implId, 'disabled');
 
+  // eslint-disable-next-line @typescript-eslint/init-declarations -- Reason: assigned immediately in if/else branches before use
   let restoredMessage: string;
 
   if (previousActiveId && allImpls.some((i) => i.id === previousActiveId)) {

@@ -135,7 +135,7 @@ export async function runPrompts(
 
   // 2. 安装模式选择（如果 CLI 未指定）
   // 如果已检测到安装类型，提示用户
-  let mode = cliOptions.mode;
+  let {mode} = cliOptions;
   if (!mode) {
     // 显示自动检测结果，让用户确认或修改
     const defaultMode = wsInfo.isFirstInstall ? 'force' : 'smart';

@@ -23,23 +23,23 @@ import { isCompleteDetectorMetadata } from './evolution-types.js';
 import { updateTrainingStore } from './principle-tree-ledger.js';
 
 export interface EvolutionReducer {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Reason: interface method signature requires parameter names for public API documentation
+   
   emit(_event: EvolutionLoopEvent): void;
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Reason: interface method signature requires parameter names for public API documentation
+   
   emitSync(_event: EvolutionLoopEvent): void;
   getEventLog(): EvolutionLoopEvent[];
   getCandidatePrinciples(): Principle[];
   getProbationPrinciples(): Principle[];
   getActivePrinciples(): Principle[];
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Reason: interface method signature requires parameter names for public API documentation
+   
   getPrincipleById(_id: string): Principle | null;
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Reason: interface method signature requires parameter names for public API documentation
+   
   promote(_principleId: string, _reason?: string): void;
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Reason: interface method signature requires parameter names for public API documentation
+   
   deprecate(_principleId: string, _reason: string): void;
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Reason: interface method signature requires parameter names for public API documentation
+   
   rollbackPrinciple(_principleId: string, _reason: string): void;
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Reason: interface method signature requires parameter names for public API documentation
+   
   recordProbationFeedback(_principleId: string, _success: boolean): void;
   /**
    * Creates a new principle with generalized trigger/action from diagnostician.

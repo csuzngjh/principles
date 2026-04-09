@@ -15,7 +15,7 @@ function getModels(wctx: WorkspaceContext): Record<string, string> {
         const content = fs.readFileSync(modelsPath, 'utf8');
         const lines = content.split('\n');
         for (const line of lines) {
-            const match = line.match(/^###\s*(T-\d+):\s*(.*)/);
+            const match = /^###\s*(T-\d+):\s*(.*)/.exec(line);
             if (match) {
                 models[match[1]] = match[2].trim();
             }

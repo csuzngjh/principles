@@ -425,7 +425,7 @@ export class NocturnalTargetSelector {
     diagnostics.passedPrinciples = activeCandidates.map((p) => p.principleId);
 
     // Select the top candidate
-    const selected = activeCandidates[0];
+    const [selected] = activeCandidates;
     diagnostics.selectedPrincipleScore = selected.score;
 
     // Step 5: Find violating sessions for the selected principle
@@ -500,7 +500,7 @@ export class NocturnalTargetSelector {
 
     // Sort by violation severity descending (most violating first)
     violating.sort((a, b) => b.violationSeverity - a.violationSeverity);
-    const selectedSession = violating[0];
+    const [selectedSession] = violating;
     diagnostics.selectedSessionViolationDensity = selectedSession.violationSeverity;
 
     return {

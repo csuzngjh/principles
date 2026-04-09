@@ -235,6 +235,7 @@ export async function extractRecentConversation(
 /**
  * Extracts failed tool call context with argument correlation.
  */
+/* eslint-disable @typescript-eslint/default-param-last */ // Reason: breaking API change - default param must precede required params for type inference compatibility
 // eslint-disable-next-line @typescript-eslint/max-params -- Reason: context extraction requires session + agent + tool + path - refactoring would break API
 export async function extractFailedToolContext(
   sessionId: string,

@@ -371,7 +371,7 @@ export function checkCooldown(
         if (cooldownEnd > now) {
             globalCooldownActive = true;
             globalCooldownRemainingMs = cooldownEnd - now;
-            globalCooldownUntil = state.globalCooldownUntil;
+            globalCooldownUntil = state.globalCooldownUntil; // eslint-disable-line @typescript-eslint/prefer-destructuring -- Reason: globalCooldownUntil is reassignable outer let - destructuring would shadow
         }
     }
 

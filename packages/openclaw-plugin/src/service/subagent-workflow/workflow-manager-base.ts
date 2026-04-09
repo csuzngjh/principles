@@ -16,7 +16,7 @@
  *
  * @module subagent-workflow/workflow-manager-base
  */
-
+/* global NodeJS */
 import type { PluginLogger } from '../../openclaw-sdk.js';
 import type {
     WorkflowManager,

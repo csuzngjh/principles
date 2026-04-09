@@ -355,7 +355,7 @@ export function completeShadowObservationByTask(
       return null;
     }
 
-    const observation = pendingObs[0];
+    const [observation] = pendingObs;
     observation.completedAt = new Date().toISOString();
     observation.outcome = outcome;
     observation.failureSignals = failureSignals ?? {

@@ -68,7 +68,7 @@ export interface ReconcileResult {
   errors: ReconcileError[];
 }
 
-// eslint-disable-next-line no-unused-vars -- logger callbacks have unused param names in type
+ 
 export interface ReconcileOptions {
   dryRun?: boolean;
   workspaceDir: string;
@@ -360,7 +360,7 @@ export async function reconcilePDTasks(
   return result;
 }
 
-// eslint-disable-next-line no-unused-vars -- logger callback params unused in type
+ 
 function healthCheck(
   tasks: PDTaskSpec[],
   cronStore: CronStoreFile,
