@@ -35,7 +35,7 @@ function WorkspaceHealthPanel({ entry }: { entry: WorkspaceHealthEntry }) {
       <div className="panel-content">
         {/* Row 1: GFI (wide) | Trust Gauge | Evolution */}
         <div className="grid" style={{ gridTemplateColumns: '2fr 1fr 1fr', gap: 'var(--space-4)', marginBottom: 'var(--space-4)' }}>
-          {/* GFI Bullet Chart */}
+          {/* GFI Bullet Chart + Trend */}
           <div>
             <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
               {t('overview.health.gfi')}
@@ -52,6 +52,23 @@ function WorkspaceHealthPanel({ entry }: { entry: WorkspaceHealthEntry }) {
               <span>阈值: {h.gfi.threshold}</span>
               <span>峰值: {h.gfi.peakToday}</span>
             </div>
+            {/* GFI Trend sparkline */}
+            {h.gfi.trend.length >= 2 && (
+              <div style={{ marginTop: 8 }}>
+                <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)', marginBottom: 2 }}>今日趋势 (按小时)</div>
+                <Sparkline
+                  data={h.gfi.trend.map(d => d.value)}
+                  width={280}
+                  height={32}
+                  color={gfiStatus === 'error' ? 'var(--error)' : gfiStatus === 'warning' ? 'var(--warning)' : 'var(--success)'}
+                  fillOpacity={0.1}
+                />
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.6rem', color: 'var(--text-secondary)', marginTop: 1 }}>
+                  <span>{h.gfi.trend[0]?.hour.slice(11, 16)}</span>
+                  <span>{h.gfi.trend[h.gfi.trend.length - 1]?.hour.slice(11, 16)}</span>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Trust Gauge */}

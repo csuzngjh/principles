@@ -287,7 +287,7 @@ export interface EvolutionStatsResponse {
 // ===== Phase 5: Health & Circuit API Types =====
 
 export interface OverviewHealthResponse {
-  gfi: { current: number; peakToday: number; threshold: number };
+  gfi: { current: number; peakToday: number; threshold: number; trend: Array<{ hour: string; value: number }> };
   trust: { stage: number; stageLabel: string; score: number };
   evolution: { tier: string; points: number };
   painFlag: { active: boolean; source: string | null; score: number | null };

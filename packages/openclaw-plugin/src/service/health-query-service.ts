@@ -98,7 +98,7 @@ export class HealthQueryService {
   }
 
   getOverviewHealth(): {
-    gfi: { current: number; peakToday: number; threshold: number };
+    gfi: { current: number; peakToday: number; threshold: number; trend: Array<{ hour: string; value: number }> };
     trust: { stage: number; stageLabel: string; score: number };
     evolution: { tier: string; points: number };
     painFlag: { active: boolean; source: string | null; score: number | null };
@@ -130,11 +130,15 @@ export class HealthQueryService {
     this.gfiState.dailyGfiPeak = effectivePeak;
     this.writeGfiState();
 
+    // GFI history trend: aggregate pain_events by hour (same logic as getFeedbackGfi)
+    const gfiTrend = this.readGfiTrend(today);
+
     return {
       gfi: {
         current: effectiveCurrentGfi,
         peakToday: effectivePeak,
         threshold,
+        trend: gfiTrend,
       },
       trust,
       evolution,
@@ -193,6 +197,22 @@ export class HealthQueryService {
       painSourceDistribution,
       activeStage,
     };
+  }
+
+  /**
+   * Read GFI trend for a specific day by aggregating pain_events by hour.
+   * Used by getOverviewHealth() to provide historical GFI context.
+   */
+  private readGfiTrend(date: string): Array<{ hour: string; value: number }> {
+    const rows = this.uiDb.all<{ hour: string; value: number }>(`
+      SELECT substr(created_at, 1, 13) || ':00:00Z' AS hour, ROUND(SUM(score), 2) AS value
+      FROM pain_events
+      WHERE substr(created_at, 1, 10) = ?
+      GROUP BY substr(created_at, 1, 13)
+      ORDER BY hour ASC
+    `, date);
+
+    return rows.map(row => ({ hour: row.hour, value: this.asNumber(row.value, 0) }));
   }
 
   getFeedbackGfi(): {
@@ -430,14 +450,57 @@ export class HealthQueryService {
   }
 
   private getCurrentSession(): SessionState | null {
+    // First, try in-memory sessions (live sessions from session-tracker)
     const sessions = listSessions(this.workspaceDir);
-    if (sessions.length === 0) return null;
-    const sorted = [...sessions].sort((a, b) => {
-      const aTs = Number(a.lastControlActivityAt ?? a.lastActivityAt ?? 0);
-      const bTs = Number(b.lastControlActivityAt ?? b.lastActivityAt ?? 0);
-      return bTs - aTs;
-    });
-    return sorted[0] ?? null;
+    if (sessions.length > 0) {
+      const sorted = [...sessions].sort((a, b) => {
+        const aTs = Number(a.lastControlActivityAt ?? a.lastActivityAt ?? 0);
+        const bTs = Number(b.lastControlActivityAt ?? b.lastActivityAt ?? 0);
+        return bTs - aTs;
+      });
+      return sorted[0] ?? null;
+    }
+
+    // Fallback: read session JSON files directly (handles process restarts where
+    // loadAllSessions may not have reloaded all sessions, or workspaceDir mismatch)
+    return this.readLatestSessionFromFile();
+  }
+
+  /**
+   * Read the most recent session JSON file from disk.
+   * Used as fallback when in-memory session map is empty (e.g., after restart).
+   */
+  private readLatestSessionFromFile(): SessionState | null {
+    const sessionsDir = path.join(this.stateDir, 'sessions');
+    if (!fs.existsSync(sessionsDir)) return null;
+
+    try {
+      const files = fs.readdirSync(sessionsDir).filter(f => f.endsWith('.json'));
+      if (files.length === 0) return null;
+
+      let latest: SessionState | null = null;
+      let latestTs = 0;
+
+      for (const file of files) {
+        try {
+          const content = fs.readFileSync(path.join(sessionsDir, file), 'utf-8');
+          const state = JSON.parse(content) as SessionState;
+          // Only match sessions from this workspace
+          if (state.workspaceDir && state.workspaceDir !== this.workspaceDir) continue;
+          const ts = Number(state.lastControlActivityAt ?? state.lastActivityAt ?? 0);
+          if (ts > latestTs) {
+            latestTs = ts;
+            latest = state;
+          }
+        } catch {
+          // Skip corrupted files
+        }
+      }
+
+      return latest;
+    } catch {
+      return null;
+    }
   }
 
   private getGfiThreshold(): number {
