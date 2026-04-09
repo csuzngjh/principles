@@ -85,11 +85,59 @@ export class HealthQueryService {
     this.eventLog = wctx.eventLog;
     this.evolutionReducer = wctx.evolutionReducer;
     this.uiDb = new ControlUiDatabase({ workspaceDir });
+    this.ensureTables();
     this.syncGfiFromSession();
   }
 
   dispose(): void {
     this.uiDb.dispose();
+  }
+
+  /**
+   * Ensure all tables required by HealthQueryService exist.
+   * This is a safety net for workspaces created before TrajectoryDatabase
+   * had full schema initialization, or where initSchema() was never called.
+   * Uses CREATE TABLE IF NOT EXISTS so it's idempotent.
+   */
+  private ensureTables(): void {
+    try {
+      this.uiDb.execute(`
+        CREATE TABLE IF NOT EXISTS pain_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id TEXT NOT NULL,
+          source TEXT NOT NULL,
+          score REAL NOT NULL DEFAULT 0,
+          reason TEXT DEFAULT '',
+          severity TEXT DEFAULT 'mild',
+          origin TEXT DEFAULT '',
+          confidence REAL DEFAULT 0,
+          text TEXT DEFAULT '',
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+      `);
+      this.uiDb.execute(`
+        CREATE INDEX IF NOT EXISTS idx_pain_events_created_at ON pain_events(created_at)
+      `);
+      this.uiDb.execute(`
+        CREATE TABLE IF NOT EXISTS gate_blocks (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id TEXT NOT NULL,
+          tool_name TEXT NOT NULL,
+          file_path TEXT,
+          reason TEXT NOT NULL,
+          gfi REAL,
+          gfi_after REAL,
+          trust_stage INTEGER,
+          gate_type TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+      `);
+      this.uiDb.execute(`
+        CREATE INDEX IF NOT EXISTS idx_gate_blocks_created_at ON gate_blocks(created_at)
+      `);
+    } catch (err) {
+      console.warn('[HealthQueryService] Table ensure failed (non-fatal):', err);
+    }
   }
 
   getOverviewHealth(): {
