@@ -241,6 +241,7 @@ export function checkThresholds(
  * @param weights - Scoring weights
  * @returns All scored and ranked candidates
  */
+// eslint-disable-next-line @typescript-eslint/max-params -- Reason: candidate ranking requires candidates + judgments + thresholds + weights - refactoring would break API
 export function rankCandidates(
   candidates: DreamerCandidate[],
   judgments: PhilosopherJudgment[],
@@ -327,6 +328,7 @@ export function rankCandidates(
  * @param weights - Scoring weights
  * @returns Tournament result with winner
  */
+// eslint-disable-next-line @typescript-eslint/max-params -- Reason: tournament requires candidates + judgments + thresholds + weights - refactoring would break API
 export function runTournament(
   candidates: DreamerCandidate[],
   judgments: PhilosopherJudgment[],

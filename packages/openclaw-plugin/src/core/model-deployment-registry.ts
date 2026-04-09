@@ -348,6 +348,7 @@ export function assertPromotionGatePassed(stateDir: string, checkpointId: string
  * @throws Error if checkpoint is not found or not deployable
  * @throws Error if checkpoint's targetModelFamily violates profile constraints
  */
+// eslint-disable-next-line @typescript-eslint/max-params -- Reason: checkpoint binding requires state + profile + checkpoint - refactoring would break API
 export function bindCheckpointToWorkerProfile(
   stateDir: string,
   workerProfile: WorkerProfile,
