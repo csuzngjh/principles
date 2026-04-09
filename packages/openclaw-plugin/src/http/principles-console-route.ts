@@ -93,6 +93,7 @@ function createService(api: OpenClawPluginApi): ControlUiQueryService {
   return new ControlUiQueryService(workspaceDir);
 }
 
+/* eslint-disable @typescript-eslint/max-params -- Reason: Route handler requires api, pathname, req, and res */
 function handleApiRoute(
   api: OpenClawPluginApi,
   pathname: string,
@@ -100,6 +101,7 @@ function handleApiRoute(
   res: ServerResponse,
 ): Promise<boolean> | boolean {
   // Check authentication for API routes
+  /* eslint-disable @typescript-eslint/no-use-before-define -- Reason: validateGatewayAuth is defined later in the file */
   if (!validateGatewayAuth(req)) {
     json(res, 401, { error: 'unauthorized', message: 'Valid Gateway token required.' });
     return true;
@@ -615,7 +617,8 @@ export function createPrinciplesConsoleRoutes(api: OpenClawPluginApi): OpenClawP
 
 // Legacy export for backwards compatibility
 export function createPrinciplesConsoleRoute(api: OpenClawPluginApi): OpenClawPluginHttpRouteParams {
-  const routes = createPrinciplesConsoleRoutes(api);
+  /* eslint-disable @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: createPrinciplesConsoleRoutes called for side effects but result not needed here */
+  const _routes = createPrinciplesConsoleRoutes(api);
   // Return the combined behavior - this will be called from index.ts
   return {
     path: ROUTE_PREFIX,

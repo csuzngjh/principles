@@ -359,9 +359,9 @@ export class NocturnalTrajectoryExtractor {
  *   const sessions = extractor.listRecentNocturnalCandidateSessions({ limit: 10 });
  *   const snapshot = extractor.getNocturnalSessionSnapshot(sessionId);
  */
+/* eslint-disable @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: _stateDir parameter kept for API compatibility but unused in implementation */
 export function createNocturnalTrajectoryExtractor(
   workspaceDir: string,
-  // eslint-disable-next-line no-unused-vars -- kept for API compatibility with existing call sites
   _stateDir?: string
 ): NocturnalTrajectoryExtractor {
   // Use the registry to get or create the TrajectoryDatabase instance

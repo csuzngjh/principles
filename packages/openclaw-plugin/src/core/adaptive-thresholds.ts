@@ -440,7 +440,7 @@ export function adjustThresholdsFromSignals(
       currentThresholds.principleAlignmentMin + adjustment,
       `High arbiter reject rate (${signals.arbiterRejectRate.toFixed(2)}) → tightening alignment threshold`
     );
-    if (result.changed && (!bestResult.changed || (result.newValue! - result.oldValue!) > 0)) {
+    if (result.changed && (!bestResult.changed || ((result.newValue! - result.oldValue!) > 0))) { // eslint-disable-line @typescript-eslint/no-non-null-assertion -- Reason: changed flag guarantees newValue/oldValue are defined
       bestResult = result;
     }
   }
@@ -454,7 +454,7 @@ export function adjustThresholdsFromSignals(
       currentThresholds.executabilityMin + adjustment,
       `High executability reject rate (${signals.executabilityRejectRate.toFixed(2)}) → tightening executability threshold`
     );
-    if (result.changed && (!bestResult.changed || (result.newValue! - result.oldValue!) > 0)) {
+    if (result.changed && (!bestResult.changed || ((result.newValue! - result.oldValue!) > 0))) { // eslint-disable-line @typescript-eslint/no-non-null-assertion -- Reason: changed flag guarantees newValue/oldValue are defined
       bestResult = result;
     }
   }
@@ -468,7 +468,7 @@ export function adjustThresholdsFromSignals(
       Math.max(currentThresholds.aggregateMin - reward, THRESHOLD_MIN),
       `Positive quality delta (${signals.qualityDelta.toFixed(2)}) → rewarding with slightly lower aggregate threshold`
     );
-    if (result.changed && (!bestResult.changed || (result.oldValue! - result.newValue!) > 0)) {
+    if (result.changed && (!bestResult.changed || ((result.oldValue! - result.newValue!) > 0))) { // eslint-disable-line @typescript-eslint/no-non-null-assertion -- Reason: changed flag guarantees newValue/oldValue are defined
       bestResult = result;
     }
   }

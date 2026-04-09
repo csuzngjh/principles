@@ -47,21 +47,9 @@ import { withLock } from '../utils/file-lock.js';
 import {
   getCheckpoint,
   getEvalSummary,
-  listEvalSummaries,
-  getCheckpointLineage,
 } from './model-training-registry.js';
-import {
-  getDeployment,
-  getActiveCheckpointForProfile,
-  rollbackDeployment,
-} from './model-deployment-registry.js';
-import {
-  type TrainableWorkerProfile,
-} from './external-training-contract.js';
-import {
-  computeShadowStats,
-  type ShadowStats,
-} from './shadow-observation-registry.js';
+import { type TrainableWorkerProfile } from './external-training-contract.js';
+import { computeShadowStats } from './shadow-observation-registry.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -82,6 +70,7 @@ export const DEFAULT_ALLOWED_MARGIN = 0.05;
  * Allowed worker profiles for Phase 7 shadow rollout.
  * Only bounded local workers eligible. local-reader first, local-editor deferred.
  */
+// eslint-disable-next-line no-unused-vars, @typescript-eslint/no-unused-vars -- Reason: reserved for Phase 7 shadow rollout profile validation
 const ALLOWED_ROLLOUT_PROFILES: readonly TrainableWorkerProfile[] = ['local-reader'];
 
 /**
@@ -244,7 +233,8 @@ function writeRegistry(stateDir: string, registry: PromotionRegistry): void {
  */
 function withPromotionRegistryLock<T>(
   stateDir: string,
-  fn: (registry: PromotionRegistry) => T
+  // eslint-disable-next-line no-unused-vars -- Reason: callback parameter name is type documentation, actual value passed at call site
+  fn: (_registry: PromotionRegistry) => T
 ): T {
   const registryPath = getRegistryPath(stateDir);
   return withLock(registryPath, () => {
@@ -328,7 +318,8 @@ export function evaluatePromotionGate(
 ): PromotionGateResult {
   const {
     checkpointId,
-    targetProfile,
+    // eslint-disable-next-line no-unused-vars, @typescript-eslint/no-unused-vars -- Reason: reserved for Phase 7 profile-based targeting
+    targetProfile: _targetProfile,
     baselineMetrics,
     minDelta = DEFAULT_MIN_DELTA,
     allowedMargin = DEFAULT_ALLOWED_MARGIN,

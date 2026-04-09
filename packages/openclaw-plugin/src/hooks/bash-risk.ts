@@ -38,12 +38,12 @@ export type BashRiskLevel = 'safe' | 'dangerous' | 'normal';
  * @param logger - Optional logger for warnings about invalid patterns
  * @returns The risk level: 'safe', 'dangerous', or 'normal'
  */
-// eslint-disable-next-line @typescript-eslint/max-params -- Reason: Bash risk analysis requires command + pattern lists - refactoring to options object would be breaking API change
+/* eslint-disable @typescript-eslint/max-params -- Reason: Bash risk analysis requires command + pattern lists - refactoring to options object would be breaking API change */
 export function analyzeBashCommand(
   command: string,
   safePatterns: string[],
   dangerousPatterns: string[],
-  logger?: { warn?: (_message: string) => void }
+  logger?: { warn?: (/* eslint-disable-line no-unused-vars -- Reason: callback parameter, unused by design */_message: string) => void }
 ): BashRiskLevel {
   let normalizedCmd = command.trim().toLowerCase();
 
@@ -153,7 +153,6 @@ export interface DynamicThresholdConfig {
  * @param config - Configuration with large_change_lines and ep_tier_multipliers
  * @returns The adjusted threshold (minimum 0)
  */
-// eslint-disable-next-line @typescript-eslint/max-params -- Reason: Threshold calculation requires all parameters - refactoring to options object would be breaking API change
 export function calculateDynamicThreshold(
   baseThreshold: number,
   epTier: number,

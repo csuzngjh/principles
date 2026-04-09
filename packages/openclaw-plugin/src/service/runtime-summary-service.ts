@@ -5,7 +5,7 @@ import { listSessions } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { evaluatePhase3Inputs } from './phase3-input-filter.js';
 import { TrajectoryRegistry } from '../core/trajectory.js';
-import type { RuntimeTruth, AnalyticsTruth, TrendMetrics } from '../types/runtime-summary.js';
+import type { RuntimeTruth, AnalyticsTruth } from '../types/runtime-summary.js';
 
 export type RuntimeDataQuality = 'authoritative' | 'partial';
 export type RuntimeRewardPolicy =
@@ -418,6 +418,7 @@ export class RuntimeSummaryService {
    * NOT a truth source for Phase 3 eligibility or decisions.
    * Queue is the only authoritative execution truth source.
    */
+  /* eslint-disable @typescript-eslint/max-params -- Reason: Directive summary requires queue, directive, timestamp, and warnings */
   private static buildDirectiveSummary(
     queue: QueueItem[] | null,
     directive: DirectiveFile | null,

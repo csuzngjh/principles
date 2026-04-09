@@ -10,9 +10,9 @@ import { SystemLogger } from '../core/system-logger.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import type { EventLog } from '../core/event-log.js';
 import { initPersistence, flushAllSessions } from '../core/session-tracker.js';
-import { acquireLockAsync, releaseLock, type LockContext } from '../utils/file-lock.js';
+import { acquireLockAsync, releaseLock as releaseImportedLock, type LockContext } from '../utils/file-lock.js';
 import { addDiagnosticianTask, completeDiagnosticianTask } from '../core/diagnostician-task-store.js';
-import { getEvolutionLogger, type EvolutionStage } from '../core/evolution-logger.js';
+import { getEvolutionLogger } from '../core/evolution-logger.js';
 import type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 export type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 import { LockUnavailableError } from '../config/index.js';
@@ -23,7 +23,6 @@ import { EmpathyObserverWorkflowManager } from './subagent-workflow/empathy-obse
 import { DeepReflectWorkflowManager } from './subagent-workflow/deep-reflect-workflow-manager.js';
 import { NocturnalWorkflowManager, nocturnalWorkflowSpec } from './subagent-workflow/nocturnal-workflow-manager.js';
 import { createNocturnalTrajectoryExtractor } from '../core/nocturnal-trajectory-extractor.js';
-import { isSubagentRuntimeAvailable } from '../utils/subagent-probe.js';
 import { isExpectedSubagentError } from './subagent-workflow/subagent-error-utils.js';
 
 const WORKFLOW_TTL_MS = 5 * 60 * 1000; // 5 minutes default TTL for helper workflows
@@ -77,11 +76,11 @@ async function runWorkflowWatchdog(
                 logger?.info?.(`[PD:Watchdog] Cleaned up stale session: ${wf.child_session_key}`);
               } else if (agentSession) {
                 const storePath = agentSession.resolveStorePath();
-                const store = agentSession.loadSessionStore(storePath, { skipCache: true });
+                const sessionStore = agentSession.loadSessionStore(storePath, { skipCache: true });
                 const normalizedKey = wf.child_session_key.toLowerCase();
-                if (store[normalizedKey]) {
-                  delete store[normalizedKey];
-                  await agentSession.saveSessionStore(storePath, store);
+                if (sessionStore[normalizedKey]) {
+                  delete sessionStore[normalizedKey];
+                  await agentSession.saveSessionStore(storePath, sessionStore);
                   logger?.info?.(`[PD:Watchdog] Cleaned up stale session via agentSession fallback: ${wf.child_session_key}`);
                 }
               }
@@ -89,11 +88,11 @@ async function runWorkflowWatchdog(
               const errMsg = String(cleanupErr);
               if (errMsg.includes('gateway request') && agentSession) {
                 const storePath = agentSession.resolveStorePath();
-                const store = agentSession.loadSessionStore(storePath, { skipCache: true });
+                const sessionStore = agentSession.loadSessionStore(storePath, { skipCache: true });
                 const normalizedKey = wf.child_session_key.toLowerCase();
-                if (store[normalizedKey]) {
-                  delete store[normalizedKey];
-                  await agentSession.saveSessionStore(storePath, store);
+                if (sessionStore[normalizedKey]) {
+                  delete sessionStore[normalizedKey];
+                  await agentSession.saveSessionStore(storePath, sessionStore);
                   logger?.info?.(`[PD:Watchdog] Cleaned up stale session via agentSession fallback after gateway error: ${wf.child_session_key}`);
                 }
               } else {
@@ -313,6 +312,7 @@ export const LOCK_MAX_RETRIES = 50;
 export const LOCK_RETRY_DELAY_MS = 50;
 export const LOCK_STALE_MS = 30_000;
 
+/* eslint-disable @typescript-eslint/max-params -- Reason: Function requires all parameters for unique task ID generation */
 export function createEvolutionTaskId(
     source: string,
     score: number,
@@ -328,6 +328,7 @@ export function createEvolutionTaskId(
         .substring(0, 8);
 }
 
+/* eslint-disable no-unused-vars -- Reason: type-level function parameter names in logger union type are documentation */
 export async function acquireQueueLock(resourcePath: string, logger: PluginLogger | { warn?: (message: string) => void; info?: (message: string) => void } | undefined, lockSuffix: string = EVOLUTION_QUEUE_LOCK_SUFFIX): Promise<() => void> {
     try {
         const ctx: LockContext = await acquireLockAsync(resourcePath, {
@@ -336,7 +337,7 @@ export async function acquireQueueLock(resourcePath: string, logger: PluginLogge
             baseRetryDelayMs: LOCK_RETRY_DELAY_MS,
             lockStaleMs: LOCK_STALE_MS,
         });
-        return () => releaseLock(ctx);
+        return () => releaseImportedLock(ctx);
     } catch (error: unknown) {
         const warn = logger?.warn;
         warn?.(`[PD:EvolutionWorker] Failed to acquire lock for ${resourcePath}: ${String(error)}`);
@@ -344,6 +345,7 @@ export async function acquireQueueLock(resourcePath: string, logger: PluginLogge
     }
 }
 
+/* eslint-disable no-unused-vars, @typescript-eslint/max-params -- Reason: type-level function parameter names in logger union type are documentation */
 async function requireQueueLock(resourcePath: string, logger: PluginLogger | { warn?: (message: string) => void; info?: (message: string) => void } | undefined, scope: string, lockSuffix: string = EVOLUTION_QUEUE_LOCK_SUFFIX): Promise<() => void> {
     try {
         return await acquireQueueLock(resourcePath, logger, lockSuffix);
@@ -358,6 +360,7 @@ export function extractEvolutionTaskId(task: string): string | null {
     return match?.[1] || null;
 }
 
+/* eslint-disable @typescript-eslint/max-params -- Reason: Function requires all parameters for duplicate detection */
 function findRecentDuplicateTask(
     queue: EvolutionQueueItem[],
     source: string,
@@ -365,11 +368,13 @@ function findRecentDuplicateTask(
     now: number,
     reason?: string
 ): EvolutionQueueItem | undefined {
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: function is defined later in file but used in helper for consistency
     const key = normalizePainDedupKey(source, preview, reason);
     return queue.find((task) => {
         if (task.status === 'completed') return false;
         const taskTime = new Date(task.enqueued_at || task.timestamp).getTime();
         if (!Number.isFinite(taskTime) || (now - taskTime) > PAIN_QUEUE_DEDUP_WINDOW_MS) return false;
+        // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: function is defined later in file but used in helper for consistency
         return normalizePainDedupKey(task.source, task.trigger_text_preview || '', task.reason) === key;
     });
 }
@@ -387,7 +392,6 @@ export function purgeStaleFailedTasks(
     queue: EvolutionQueueItem[],
     logger: PluginLogger,
 ): { purged: number; remaining: number; byReason: Record<string, number> } {
-    const beforeCount = queue.length;
     const cutoff = Date.now() - STALE_FAILED_TASK_MAX_AGE_MS;
     const byReason: Record<string, number> = {};
 
@@ -423,6 +427,7 @@ function normalizePainDedupKey(source: string, preview: string, reason?: string)
     return `${source.trim().toLowerCase()}::${preview.trim().toLowerCase()}::${normalizedReason}`;
 }
 
+/* eslint-disable @typescript-eslint/max-params -- Reason: Function requires all parameters for duplicate detection */
 export function hasRecentDuplicateTask(queue: EvolutionQueueItem[], source: string, preview: string, now: number, reason?: string): boolean {
     return !!findRecentDuplicateTask(queue, source, preview, now, reason);
 }
@@ -549,6 +554,7 @@ interface ParsedPainValues {
     traceId: string; sessionId: string; agentId: string;
 }
 
+/* eslint-disable @typescript-eslint/max-params -- Reason: Function requires all parameters for task enqueue */
 async function doEnqueuePainTask(
     wctx: WorkspaceContext, logger: PluginLogger, painFlagPath: string,
     result: WorkerStatusReport['pain_flag'], v: ParsedPainValues,
@@ -759,6 +765,7 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
     return result;
 }
 
+/* eslint-disable @typescript-eslint/max-params -- Reason: Function requires all parameters for queue processing */
 async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogger, eventLog: EventLog, api?: OpenClawPluginApi) {
     const queuePath = wctx.resolve('EVOLUTION_QUEUE');
     if (!fs.existsSync(queuePath)) {
@@ -830,6 +837,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             workspaceDir: wctx.workspaceDir,
                             stateDir: wctx.stateDir,
                             logger: api?.logger || logger,
+                            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Reason: api is guaranteed non-null in this recovery path where runtimeAdapter is required
                             runtimeAdapter: new OpenClawTrinityRuntimeAdapter(api!),
                         });
                         try {
@@ -883,11 +891,9 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                                 let serverDuplicate: string | null = null;
                                 if (existingPrinciples.length > 0) {
                                     const newTrigger = (principle.trigger_pattern || '').toLowerCase();
-                                    const newAction = (principle.action || '').toLowerCase();
                                     const newAbstracted = (principle.abstracted_principle || '').toLowerCase();
                                     for (const ep of existingPrinciples) {
                                         const epTrigger = (ep.trigger || '').toLowerCase();
-                                        const epAction = (ep.action || '').toLowerCase();
                                         const epAbstracted = (ep.abstractedPrinciple || '').toLowerCase();
                                         const epText = (ep.text || '').toLowerCase();
 
@@ -974,8 +980,8 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
 
                 // #190: Clean up diagnostician report file after processing
                 try {
-                    const reportPath = path.join(wctx.stateDir, `.diagnostician_report_${task.id}.json`);
-                    if (fs.existsSync(reportPath)) fs.unlinkSync(reportPath);
+                    const cleanupReportPath = path.join(wctx.stateDir, `.diagnostician_report_${task.id}.json`);
+                    if (fs.existsSync(cleanupReportPath)) fs.unlinkSync(cleanupReportPath);
                 } catch { /* report may not exist, not critical */ }
 
                 // FIX (#187): Remove the task from the diagnostician task store
@@ -1013,14 +1019,14 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
             if (age > timeout) {
                 const timeoutMinutes = Math.round(timeout / 60000);
 
-                const completeMarker = path.join(wctx.stateDir, `.evolution_complete_${task.id}`);
-                const reportPath = path.join(wctx.stateDir, `.diagnostician_report_${task.id}.json`);
+                const timeoutCompleteMarker = path.join(wctx.stateDir, `.evolution_complete_${task.id}`);
+                const timeoutReportPath = path.join(wctx.stateDir, `.diagnostician_report_${task.id}.json`);
 
-                if (fs.existsSync(completeMarker) && fs.existsSync(reportPath)) {
+                if (fs.existsSync(timeoutCompleteMarker) && fs.existsSync(timeoutReportPath)) {
                     if (logger) logger.info(`[PD:EvolutionWorker] Task ${task.id} timed out but marker found — creating principle anyway`);
                     let principleCreated = false;
                     try {
-                        const reportData = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+                        const reportData = JSON.parse(fs.readFileSync(timeoutReportPath, 'utf8'));
                         const principle = reportData?.principle
                             || reportData?.phases?.principle_extraction?.principle
                             || reportData?.diagnosis_report?.principle
@@ -1062,8 +1068,8 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     if (logger) logger.info(`[PD:EvolutionWorker] Task ${task.id} auto-completed after ${timeoutMinutes} minute timeout`);
                     // #190: Clean up diagnostician report file even on timeout (may have been written late)
                     try {
-                        const timeoutReportPath = path.join(wctx.stateDir, `.diagnostician_report_${task.id}.json`);
-                        if (fs.existsSync(timeoutReportPath)) fs.unlinkSync(timeoutReportPath);
+                        const autoTimeoutReportPath = path.join(wctx.stateDir, `.diagnostician_report_${task.id}.json`);
+                        if (fs.existsSync(autoTimeoutReportPath)) fs.unlinkSync(autoTimeoutReportPath);
                     } catch { /* report may not exist, not critical */ }
                     task.resolution = 'auto_completed_timeout';
                 }
@@ -1357,6 +1363,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
 
                     if (isPollingTask) {
                         // Poll-only path: skip workflow start, use existing workflowId
+                        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Reason: isPollingTask flag is only set when resultRef is expected to be present
                         workflowId = sleepTask.resultRef!;
                     } else {
                         // Start workflow via NocturnalWorkflowManager instead of direct executeNocturnalReflectionAsync
@@ -1608,6 +1615,7 @@ async function processDetectionQueue(wctx: WorkspaceContext, api: OpenClawPlugin
 // PAIN_CANDIDATES system removed (D-05, D-06): trackPainCandidate and processPromotion deleted
 // Evolution queue is now the single active pain→principle path
 
+/* eslint-disable no-unused-vars, @typescript-eslint/max-params -- Reason: type-level function parameter names in logger union type and unused workspaceResolve key are documentation/signature */
 export async function registerEvolutionTaskSession(
     workspaceResolve: (key: string) => string,
     taskId: string,
@@ -1660,12 +1668,14 @@ export async function registerEvolutionTaskSession(
  * Production evidence shows directive stopped updating on 2026-03-22 and is stale.
  */
 
+/* eslint-disable no-unused-vars -- Reason: interface method parameters are type signatures */
 export interface ExtendedEvolutionWorkerService {
     id: string;
     api: OpenClawPluginApi | null;
     start: (ctx: OpenClawPluginServiceContext) => void | Promise<void>;
     stop?: (ctx: OpenClawPluginServiceContext) => void | Promise<void>;
 }
+/* eslint-enable no-unused-vars */
 
 interface WorkerStatusReport {
     timestamp: string;
@@ -1686,6 +1696,7 @@ function writeWorkerStatus(stateDir: string, report: WorkerStatusReport): void {
     }
 }
 
+/* eslint-disable @typescript-eslint/max-params -- Reason: Function requires all parameters for queue processing */
 async function processEvolutionQueueWithResult(
     wctx: WorkspaceContext,
     logger: PluginLogger,
@@ -1701,7 +1712,7 @@ async function processEvolutionQueueWithResult(
             return { queue: queueResult, errors };
         }
 
-        const queue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
+        const queue: EvolutionQueueItem[] = JSON.parse(fs.readFileSync(queuePath, 'utf8')) as EvolutionQueueItem[];
 
         // Purge stale failed tasks before processing (keeps queue lean)
         const purgeResult = purgeStaleFailedTasks(queue, logger);
@@ -1711,10 +1722,10 @@ async function processEvolutionQueueWithResult(
         }
 
         queueResult.total = queue.length;
-        queueResult.pending = queue.filter((t: any) => t.status === 'pending').length;
-        queueResult.in_progress = queue.filter((t: any) => t.status === 'in_progress').length;
-        queueResult.failed_this_cycle = queue.filter((t: any) => t.status === 'failed').length;
-        queueResult.completed_this_cycle = queue.filter((t: any) => t.status === 'completed').length;
+        queueResult.pending = queue.filter((t) => t.status === 'pending').length;
+        queueResult.in_progress = queue.filter((t) => t.status === 'in_progress').length;
+        queueResult.failed_this_cycle = queue.filter((t) => t.status === 'failed').length;
+        queueResult.completed_this_cycle = queue.filter((t) => t.status === 'completed').length;
 
         // Log queue health snapshot every cycle
         logger.info(`[PD:EvolutionWorker] Queue snapshot: total=${queueResult.total} pending=${queueResult.pending} in_progress=${queueResult.in_progress} completed=${queueResult.completed_this_cycle} failed=${queueResult.failed_this_cycle} purged=${purgeResult.purged}`);

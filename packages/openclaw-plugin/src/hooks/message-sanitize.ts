@@ -26,18 +26,20 @@ export function handleBeforeMessageWrite(
   if (typeof msg.content === 'string') {
     const sanitized = sanitizeAssistantText(msg.content);
     if (sanitized !== msg.content) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: message content is dynamically modified, type preserved from event.message union
       return { message: { ...msg, content: sanitized } as any };
     }
     return;
   }
 
   if (Array.isArray(msg.content)) {
-    const next = msg.content.map((part: any) => {
-      if (part && typeof part === 'object' && part.type === 'text' && typeof part.text === 'string') {
-        return { ...part, text: sanitizeAssistantText(part.text) };
+    const next = msg.content.map((part: unknown) => {
+      if (part && typeof part === 'object' && (part as { type?: string }).type === 'text' && typeof (part as { text?: unknown }).text === 'string') {
+        return { ...part, text: sanitizeAssistantText((part as { text: string }).text) };
       }
       return part;
     });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: message content is dynamically modified, type preserved from event.message union
     return { message: { ...msg, content: next } as any };
   }
 

@@ -33,19 +33,16 @@ import * as path from 'path';
 import { randomUUID } from 'crypto';
 import type { RecentPainContext } from './evolution-worker.js';
 import {
-  NocturnalTrajectoryExtractor,
   createNocturnalTrajectoryExtractor,
   computeThinkingModelDelta,
   type NocturnalSessionSnapshot,
 } from '../core/nocturnal-trajectory-extractor.js';
 import {
   NocturnalTargetSelector,
-  selectNocturnalTarget,
   type NocturnalSelectionResult,
   type SkipReason,
 } from './nocturnal-target-selector.js';
 import {
-  validateArtifact,
   parseAndValidateArtifact,
   validateTrinityDraft,
   type NocturnalArtifact,
@@ -93,7 +90,6 @@ import {
   deleteImplementation,
 } from '../core/principle-tree-ledger.js';
 import {
-  checkWorkspaceIdle,
   checkPreflight,
   recordRunStart,
   recordRunEnd,
@@ -366,6 +362,7 @@ function buildGateBlockRefs(snapshot: NocturnalSessionSnapshot): string[] {
   );
 }
 
+/* eslint-disable @typescript-eslint/max-params -- Reason: Function signature requires all parameters for type-safe artifact construction */
 function buildDefaultArtificerOutput(
   ruleId: string,
   artifact: NocturnalArtifact,
@@ -414,6 +411,7 @@ function buildDefaultArtificerOutput(
   };
 }
 
+/* eslint-disable @typescript-eslint/max-params -- Reason: Function signature requires all parameters for type-safe candidate persistence */
 function persistCodeCandidate(
   workspaceDir: string,
   stateDir: string,
@@ -505,6 +503,7 @@ function persistCodeCandidate(
   }
 }
 
+/* eslint-disable @typescript-eslint/max-params -- Reason: Function signature requires all parameters for type-safe candidate persistence */
 function maybePersistArtificerCandidate(
   workspaceDir: string,
   stateDir: string,
@@ -743,7 +742,6 @@ export function executeNocturnalReflection(
   let trinityResult: TrinityResult | null = null;
   // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in all branches before use at line 884
   let rawJson: string;
-  let chainModeUsed: 'trinity' | 'single-reflector' = 'single-reflector';
 
   if (options.skipReflector) {
     // Caller provided explicit artifact — used for testing arbiter/executability
@@ -763,7 +761,6 @@ export function executeNocturnalReflection(
     diagnostics.trinityAttempted = true;
     diagnostics.trinityResult = trinityResult;
     diagnostics.chainModeUsed = trinityResult.success ? 'trinity' : 'single-reflector';
-    chainModeUsed = trinityResult.success ? 'trinity' : 'single-reflector';
 
     if (!trinityResult.success) {
       // Trinity failed — fail closed (same semantics as production)
@@ -810,7 +807,7 @@ export function executeNocturnalReflection(
           diagnostics,
         };
       }
-      trinityArtifact = trinityResult.artifact!;
+      trinityArtifact = trinityResult.artifact!; // eslint-disable-line @typescript-eslint/no-non-null-assertion -- Reason: artifact is validated by validateTrinityDraft which returns valid: true when artifact exists
       // Convert Trinity draft to arbiter-compatible artifact
       const artifactData = draftToArtifact(trinityArtifact);
       rawJson = JSON.stringify(artifactData);
@@ -835,7 +832,6 @@ export function executeNocturnalReflection(
       trinityResult = runTrinity({ snapshot, principleId: selectedPrincipleId, config: effectiveConfig });
       diagnostics.trinityResult = trinityResult;
       diagnostics.chainModeUsed = trinityResult.success ? 'trinity' : 'single-reflector';
-      chainModeUsed = trinityResult.success ? 'trinity' : 'single-reflector';
 
       if (trinityResult.success) {
         // Validate Trinity draft
@@ -862,7 +858,7 @@ export function executeNocturnalReflection(
             diagnostics,
           };
         }
-        trinityArtifact = trinityResult.artifact!;
+        trinityArtifact = trinityResult.artifact!; // eslint-disable-line @typescript-eslint/no-non-null-assertion -- Reason: artifact is validated by validateTrinityDraft which returns valid: true when artifact exists
         // Convert Trinity draft to arbiter-compatible artifact
         const artifactData = draftToArtifact(trinityArtifact);
         rawJson = JSON.stringify(artifactData);
@@ -1088,6 +1084,7 @@ export async function executeNocturnalReflectionAsync(
 
   // If runtime adapter is provided, use async Trinity path
   if (options.runtimeAdapter) {
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between helper functions - reordering would break logical grouping
     return executeNocturnalReflectionWithAdapter(workspaceDir, stateDir, options);
   }
 
@@ -1234,7 +1231,6 @@ async function executeNocturnalReflectionWithAdapter(
   let trinityResult: TrinityResult | null = null;
   // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in all branches before use
   let rawJson: string;
-  let chainModeUsed: 'trinity' | 'single-reflector' = 'single-reflector';
 
   if (options.skipReflector) {
     if (!options.reflectorOutputOverride) {
@@ -1252,7 +1248,6 @@ async function executeNocturnalReflectionWithAdapter(
     diagnostics.trinityAttempted = true;
     diagnostics.trinityResult = trinityResult;
     diagnostics.chainModeUsed = trinityResult.success ? 'trinity' : 'single-reflector';
-    chainModeUsed = trinityResult.success ? 'trinity' : 'single-reflector';
 
     if (!trinityResult.success) {
       const failures = trinityResult.failures.map((f) => `${f.stage}: ${f.reason}`);
@@ -1262,7 +1257,7 @@ async function executeNocturnalReflectionWithAdapter(
       adjustThresholdsFromSignals(stateDir, { malformedRate: 1.0, arbiterRejectRate: 0.0, executabilityRejectRate: 0.0, qualityDelta: 0.0 });
       return { success: false, noTargetSelected: false, validationFailed: true, validationFailures: [`Trinity override failed: ${failures.join('; ')}`], snapshot, diagnostics };
     }
-    trinityArtifact = trinityResult.artifact!;
+    trinityArtifact = trinityResult.artifact!; // eslint-disable-line @typescript-eslint/no-non-null-assertion -- Reason: artifact is validated by validateTrinityDraft which returns valid: true when artifact exists
     const artifactData = draftToArtifact(trinityArtifact);
     rawJson = JSON.stringify(artifactData);
   } else {
@@ -1278,7 +1273,6 @@ async function executeNocturnalReflectionWithAdapter(
       trinityResult = await runTrinityAsync({ snapshot, principleId: selectedPrincipleId, config: trinityConfig });
       diagnostics.trinityResult = trinityResult;
       diagnostics.chainModeUsed = trinityResult.success ? 'trinity' : 'single-reflector';
-      chainModeUsed = trinityResult.success ? 'trinity' : 'single-reflector';
 
       if (trinityResult.success) {
         const draftValidation = validateTrinityDraft(trinityResult.artifact);
@@ -1290,7 +1284,7 @@ async function executeNocturnalReflectionWithAdapter(
           adjustThresholdsFromSignals(stateDir, { malformedRate: 1.0, arbiterRejectRate: 0.0, executabilityRejectRate: 0.0, qualityDelta: 0.0 });
           return { success: false, noTargetSelected: false, validationFailed: true, validationFailures: failures, snapshot, diagnostics };
         }
-        trinityArtifact = trinityResult.artifact!;
+        trinityArtifact = trinityResult.artifact!; // eslint-disable-line @typescript-eslint/no-non-null-assertion -- Reason: artifact is validated by validateTrinityDraft which returns valid: true when artifact exists
         const artifactData = draftToArtifact(trinityArtifact);
         rawJson = JSON.stringify(artifactData);
       } else {

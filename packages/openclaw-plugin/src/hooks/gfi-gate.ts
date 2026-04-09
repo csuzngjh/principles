@@ -47,13 +47,16 @@ export interface GfiGateConfig {
 /**
  * Internal helper to call the shared block helper with gfi-gate source tag.
  */
+/* eslint-disable @typescript-eslint/max-params -- Reason: Helper function requires all params for block recording */
 function block(
   wctx: WorkspaceContext,
   filePath: string,
   reason: string,
   toolName: string,
   sessionId: string | undefined,
+  /* eslint-disable no-unused-vars -- Reason: type-only callback params in logger type */
   logger?: { info?: (message: string) => void; warn?: (message: string) => void; error?: (message: string) => void }
+  /* eslint-enable no-unused-vars */
 ): PluginHookBeforeToolCallResult {
   return recordGateBlockAndReturn(wctx, {
     filePath,
@@ -65,12 +68,15 @@ function block(
   { warn: () => {}, error: () => {} } as const);
 }
 
+/* eslint-disable @typescript-eslint/max-params -- Reason: Gate function requires all params for comprehensive checks */
 export function checkGfiGate(
   event: PluginHookBeforeToolCallEvent,
   wctx: WorkspaceContext,
   sessionId: string | undefined,
   config: GfiGateConfig,
+  /* eslint-disable no-unused-vars -- Reason: type-only callback params in logger type */
   logger?: { info?: (message: string) => void; warn?: (message: string) => void }
+  /* eslint-enable no-unused-vars */
 ): PluginHookBeforeToolCallResult | undefined {
   if (!config || config.enabled === false || !sessionId) {
     return undefined;

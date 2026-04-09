@@ -69,7 +69,9 @@ export interface ReplayReport {
 }
 
 export interface CandidateEvaluator {
+  /* eslint-disable no-unused-vars -- Reason: interface method params are type signatures */
   evaluate(sample: unknown): { passed: boolean; reason?: string; decision: string };
+  /* eslint-enable no-unused-vars */
 }
 
 export class ReplayEngine {
@@ -110,6 +112,7 @@ export class ReplayEngine {
     return samples;
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: Public API method that delegates to evaluator, no instance state needed
   runSingleSample(sample: ReplaySample, evaluator: CandidateEvaluator): ReplayResult {
     const evaluation = evaluator.evaluate(sample);
     return {
@@ -199,10 +202,12 @@ export class ReplayEngine {
       throw new Error(`Implementation ${implementation.id} does not export evaluate().`);
     }
 
+    /* eslint-disable no-unused-vars -- Reason: type-only parameters in type cast, not used at runtime */
     const evaluate = moduleExports.evaluate as (
-      input: RuleHostInput,
-      helpers: RuleHostHelpers,
+      _input: RuleHostInput,
+      _helpers: RuleHostHelpers,
     ) => RuleHostResult;
+    /* eslint-enable no-unused-vars */
 
     return {
       evaluate: (sample: unknown) => {
@@ -279,6 +284,7 @@ export class ReplayEngine {
     };
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: Private helper doesn't use instance state
   private _selectToolCall(
     snapshot: NocturnalSessionSnapshot,
     classification: SampleClassification,
@@ -308,6 +314,7 @@ export class ReplayEngine {
     return byNewest[0] ?? null;
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: Private helper doesn't use instance state
   private _matchGateBlock(
     gateBlocks: NocturnalGateBlock[],
     toolCall: NocturnalToolCall,
@@ -344,6 +351,7 @@ export class ReplayEngine {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: Private helper doesn't use instance state
   private _estimateLineChanges(toolCall: NocturnalToolCall): number {
     if (toolCall.toolName === 'edit' || toolCall.toolName === 'write') {
       return 20;
@@ -351,6 +359,7 @@ export class ReplayEngine {
     return 0;
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: Private helper doesn't use instance state
   private _inferBashRisk(toolCall: NocturnalToolCall): 'safe' | 'normal' | 'dangerous' | 'unknown' {
     if (toolCall.toolName !== 'bash' && toolCall.toolName !== 'run_shell_command') {
       return 'unknown';
@@ -362,6 +371,7 @@ export class ReplayEngine {
     return toolCall.outcome === 'success' ? 'safe' : 'normal';
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: Private helper doesn't use instance state
   private _scoreEvaluation(
     sample: ReplaySample,
     result: RuleHostResult,
@@ -455,6 +465,7 @@ export class ReplayEngine {
     };
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: Private helper doesn't use instance state
   private _determineDecision(
     pain: ClassificationSummary,
     success: ClassificationSummary,
@@ -484,6 +495,7 @@ export class ReplayEngine {
     });
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: Private helper doesn't use instance state
   private _deriveExpectedOutcome(
     record: NocturnalDatasetRecord,
   ): ReplaySample['expectedOutcome'] {

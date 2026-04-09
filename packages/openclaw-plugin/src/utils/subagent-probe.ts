@@ -21,7 +21,7 @@ function getGlobalGatewaySubagent(): SubagentRuntime | null {
   try {
     // Access the global symbol that OpenClaw uses for gateway subagent
     const symbol = Symbol.for('openclaw.plugin.gatewaySubagentRuntime');
-    const globalState = (globalThis as any)[symbol];
+    const globalState = (globalThis as Record<string, unknown>)[symbol as unknown as string];
     return globalState?.subagent ?? null;
   } catch {
     return null;

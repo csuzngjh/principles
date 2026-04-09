@@ -70,6 +70,7 @@ export class EmpathyObserverWorkflowManager extends WorkflowManagerBase {
         return super.startWorkflow(spec, options);
     }
 
+    /* eslint-disable @typescript-eslint/class-methods-use-this -- Reason: Subclass stores metadata via spec, not class fields */
     protected override createWorkflowMetadata<TResult>(
         spec: SubagentWorkflowSpec<TResult>,
         options: {
@@ -102,6 +103,7 @@ export class EmpathyObserverWorkflowManager extends WorkflowManagerBase {
         ].join('\n');
     }
 
+    /* eslint-disable @typescript-eslint/class-methods-use-this -- Reason: Subclass overrides id generation pattern */
     protected override generateWorkflowId(): string {
         return `wf_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
     }
@@ -130,8 +132,8 @@ function extractAssistantTextForSpec(messages: unknown[], assistantTexts?: strin
         if (typeof msg.content === 'string') return msg.content;
         if (Array.isArray(msg.content)) {
             const txt = msg.content
-                .filter((part: any) => part?.type === 'text' && typeof part.text === 'string')
-                .map((part: any) => part.text)
+                .filter((part: unknown) => part && typeof part === 'object' && (part as { type?: string }).type === 'text' && typeof (part as { text?: unknown }).text === 'string')
+                .map((part: unknown) => (part as { text: string }).text)
                 .join('\n');
             if (txt) return txt;
         }
@@ -183,6 +185,7 @@ export const empathyObserverWorkflowSpec: SubagentWorkflowSpec<EmpathyResult> = 
     ttlMs: 300_000,
     shouldDeleteSessionAfterFinalize: true,
 
+    /* eslint-disable @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: interface method signature, unused parameter for spec compliance */
     buildPrompt(taskInput: unknown, _metadata: WorkflowMetadata): string {
         const userMessage = String(taskInput).trim();
         return [
