@@ -239,6 +239,7 @@ export function detectOpportunity(principleId: string, session: SessionEvents): 
   }
 
   // T-xx principles — specific deterministic detection
+  // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between detection helpers - reordering would break logical grouping
   switch (principleId) {
     case 'T-01':
       return detectT01Opportunity(session);
@@ -518,7 +519,7 @@ export function detectViolation(principleId: string, session: SessionEvents): Vi
     // A principle was violated if the bad outcome recurred after it was created.
     const painSignals = session.painSignals.filter((p) => p.score >= 50);
     const toolFailures = session.toolCalls.filter((tc) => tc.outcome === 'failure');
-    const gateBlocks = session.gateBlocks;
+    const {gateBlocks} = session;
 
     if (painSignals.length > 0) {
       return { violated: true, reason: `P_* principle — ${painSignals.length} pain signal(s) detected (max score: ${Math.max(...painSignals.map(p => p.score))})` };
