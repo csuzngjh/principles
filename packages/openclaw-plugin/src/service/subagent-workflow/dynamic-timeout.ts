@@ -64,8 +64,9 @@ function percentile(values: number[], p: number): number {
  * Interface for a data source that provides historical workflow durations.
  * Decoupled from WorkflowStore for testability.
  */
+/* eslint-disable no-unused-vars -- Reason: Interface params are part of contract, unused in concrete implementations */
 export interface DurationDataSource {
-    getCompletionDurations(workflowType: string, limit: number): number[];
+    getCompletionDurations(_workflowType: string, _limit: number): number[];
 }
 
 /**
@@ -82,6 +83,7 @@ export interface DurationDataSource {
  * @param defaultTimeout - Fallback when insufficient data (from spec)
  * @returns Computed timeout in milliseconds
  */
+/* eslint-disable @typescript-eslint/no-use-before-define -- Reason: clampTimeout is defined after computeDynamicTimeout but they are logically related helper functions */
 export function computeDynamicTimeout(
     dataSource: DurationDataSource,
     workflowType: string,

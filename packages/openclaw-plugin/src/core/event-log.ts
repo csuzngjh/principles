@@ -157,7 +157,8 @@ export class EventLog {
     }
 
     if (entry.type === 'tool_call') {
-      const data = entry.data as unknown as ToolCallEventData;
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: data used for type narrowing only, actual fields accessed via stats
+      const _data = entry.data as unknown as ToolCallEventData;
       stats.tools.total++;
       if (entry.category === 'success') stats.tools.success++;
       else stats.tools.failure++;
@@ -239,6 +240,7 @@ export class EventLog {
     return this.eventBuffer.map((entry) => ({ ...entry, data: { ...entry.data } }));
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: getEventDedupKey is a pure key-generation function, no this reference needed
   private getEventDedupKey(entry: EventLogEntry): string {
     const eventId = typeof (entry.data as { eventId?: unknown } | undefined)?.eventId === 'string'
       ? String((entry.data as { eventId?: string }).eventId)
@@ -462,7 +464,7 @@ export class EventLog {
     for (const entry of allEvents) {
       if (entry.type === 'pain_signal') {
         const data = entry.data as unknown as PainSignalEventData;
-        if ((entry.data as any).eventId === eventId && data.source === 'user_empathy') {
+        if (data.eventId === eventId && data.source === 'user_empathy') {
           foundEvent = { entry, data };
           break;
         }
@@ -497,7 +499,7 @@ export class EventLog {
       if (entry.sessionId === sessionId && entry.type === 'pain_signal') {
         const data = entry.data as unknown as PainSignalEventData;
         if (data.source === 'user_empathy' && !data.deduped) {
-          return (entry.data as any).eventId || null;
+          return data.eventId || null;
         }
       }
     }
