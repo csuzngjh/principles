@@ -130,6 +130,7 @@ export class EventLog {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: utility method doesn't require this - pure function
   private formatDate(date: Date): string {
     return date.toISOString().split('T')[0];
   }
