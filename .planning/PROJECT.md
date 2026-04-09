@@ -24,6 +24,8 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 - CLEAN-04: PrincipleStatus and PrincipleDetectorSpec unified to single source
 - CLEAN-05: empathy-observer-workflow-manager confirmed LIVE (3 active imports)
 - CLEAN-06: build artifacts (coverage/, *.tgz) added to .gitignore
+- GATE-01/GATE-02: Gate Monitor `/api/gate/stats` and `/api/gate/blocks` data flows verified correct (getGateStats and getGateBlocks align with gate_blocks table)
+- FE-01/FE-02: Gate Monitor frontend types (GateStatsResponse, GateBlockItem) and field accessors verified matching backend responses
 
 ## Active
 
