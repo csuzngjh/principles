@@ -18,6 +18,16 @@ export interface EmpathySignal {
     mode?: 'structured' | 'legacy_tag';
 }
 
+type EmpathyRateState = {
+    turnScore: number;
+    hourScore: number;
+    hourWindowStart: number;
+    lastRunId?: string;
+};
+
+const empathyDedupState = new Map<string, number>();
+const empathyRateState = new Map<string, EmpathyRateState>();
+
 function clamp(value: number, min: number, max: number): number {
     return Math.max(min, Math.min(max, value));
 }
@@ -126,6 +136,83 @@ export function extractEmpathySignal(text: string): EmpathySignal {
 
     return { detected: false, severity: 'mild', confidence: 1 };
 }
+
+function mapSeverityToPenalty(severity: 'mild' | 'moderate' | 'severe', config: ReturnType<typeof WorkspaceContext.fromHookContext>['config']): number {
+    const mild = Number(config.get('empathy_engine.penalties.mild') ?? 10);
+    const moderate = Number(config.get('empathy_engine.penalties.moderate') ?? 25);
+    const severe = Number(config.get('empathy_engine.penalties.severe') ?? 40);
+
+    if (severity === 'severe') return severe;
+    if (severity === 'moderate') return moderate;
+    return mild;
+}
+
+function dedupeKey(sessionId: string, runId: string, signal: EmpathySignal): string {
+    return `${sessionId}:${runId}:${signal.severity}:${(signal.reason || '').slice(0, 80)}`;
+}
+
+function shouldDedupe(sessionId: string, runId: string, signal: EmpathySignal, windowMs: number): boolean {
+    const key = dedupeKey(sessionId, runId, signal);
+    const now = Date.now();
+    const last = empathyDedupState.get(key);
+    if (typeof last === 'number' && now - last <= windowMs) {
+        return true;
+    }
+    empathyDedupState.set(key, now);
+    return false;
+}
+
+function resolveCalibrationFactor(
+    event: PluginHookLlmOutputEvent,
+    config: ReturnType<typeof WorkspaceContext.fromHookContext>['config']
+): number {
+    const table = config.get('empathy_engine.model_calibration') as Record<string, number> | undefined;
+    if (!table || typeof table !== 'object') return 1;
+
+    const modelKey = `${event.provider}/${event.model}`;
+    const factor = Number(table[modelKey] ?? 1);
+    if (!Number.isFinite(factor)) return 1;
+    return clamp(factor, 0.1, 3);
+}
+
+function applyRateLimit(
+    sessionId: string,
+    runId: string,
+    score: number,
+    config: ReturnType<typeof WorkspaceContext.fromHookContext>['config']
+): number {
+    const maxPerTurn = Number(config.get('empathy_engine.rate_limit.max_per_turn') ?? 40);
+    const maxPerHour = Number(config.get('empathy_engine.rate_limit.max_per_hour') ?? 120);
+    const now = Date.now();
+
+    const prev = empathyRateState.get(sessionId) ?? {
+        turnScore: 0,
+        hourScore: 0,
+        hourWindowStart: now,
+        lastRunId: runId,
+    };
+
+    if (prev.lastRunId !== runId) {
+        prev.turnScore = 0;
+        prev.lastRunId = runId;
+    }
+
+    if (now - prev.hourWindowStart >= 60 * 60 * 1000) {
+        prev.hourScore = 0;
+        prev.hourWindowStart = now;
+    }
+
+    const byTurn = Math.max(0, maxPerTurn - prev.turnScore);
+    const byHour = Math.max(0, maxPerHour - prev.hourScore);
+    const allowed = Math.max(0, Math.min(score, byTurn, byHour));
+
+    prev.turnScore += allowed;
+    prev.hourScore += allowed;
+    empathyRateState.set(sessionId, prev);
+
+    return allowed;
+}
+
 
 export function isEmpathyAuditPayload(text: string): boolean {
     if (!text || typeof text !== 'string') return false;

@@ -129,7 +129,6 @@ export const deepReflectWorkflowSpec: SubagentWorkflowSpec<DeepReflectResult> = 
             } else if (Array.isArray(lastMessage?.content)) {
                 insights = (lastMessage.content as { type?: string; text?: string }[])
                     .filter((c) => c?.type === 'text' && typeof c.text === 'string')
-                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Reason: filter ensures c.text is a string
                     .map((c) => c.text!)
                     .join('\n');
             }
