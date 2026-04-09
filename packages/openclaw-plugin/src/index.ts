@@ -161,14 +161,23 @@ const plugin = {
           // Pass api separately to handleAfterToolCall to maintain type safety
           handleAfterToolCall(event, { ...ctx, workspaceDir, pluginConfig }, api);
 
-          WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
+          const wctx = WorkspaceContext.fromHookContext({ workspaceDir });
+          api.logger.info(`[PD:DEBUG] eventLog instance: ${wctx.eventLog ? 'exists' : 'null'}`);
+          wctx.eventLog.recordHookExecution({
             hook: 'after_tool_call'
           });
+          api.logger.info(`[PD:DEBUG] recordHookExecution called for after_tool_call`);
         } catch (err) {
-          WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
-            hook: 'after_tool_call',
-            error: String(err)
-          });
+          api.logger.error(`[PD:DEBUG] Exception in after_tool_call: ${String(err)}`);
+          try {
+            const wctx = WorkspaceContext.fromHookContext({ workspaceDir });
+            wctx.eventLog.recordHookExecution({
+              hook: 'after_tool_call',
+              error: String(err)
+            });
+          } catch {
+            // Silent fail for error logging
+          }
           api.logger.error(`[PD:EmpathyObserver] Error in after_tool_call: ${String(err)}`);
         }
       }
