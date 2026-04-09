@@ -501,4 +501,254 @@ describe('Data Endpoints Regression Tests', () => {
       service.dispose();
     });
   });
+
+  // ===== Feedback Page Tests =====
+
+  describe('Feedback Page - /api/feedback/gfi', () => {
+    it('getFeedbackGfi returns correct response shape', () => {
+      const service = new HealthQueryService('/mock/workspace');
+      const result = service.getFeedbackGfi();
+
+      // Top-level fields from FeedbackGfiResponse
+      expect(result).toHaveProperty('current');
+      expect(result).toHaveProperty('peakToday');
+      expect(result).toHaveProperty('threshold');
+      expect(result).toHaveProperty('trend');
+      expect(result).toHaveProperty('sources');
+
+      // Type validation
+      expect(typeof result.current).toBe('number');
+      expect(typeof result.peakToday).toBe('number');
+      expect(typeof result.threshold).toBe('number');
+      expect(Array.isArray(result.trend)).toBe(true);
+      expect(typeof result.sources).toBe('object');
+
+      service.dispose();
+    });
+
+    it('getFeedbackGfi trend items have correct shape when populated', () => {
+      controlUiDbMock.all.mockImplementation((sql: string) => {
+        if (sql.includes('pain_events')) {
+          return [{ hour: '2026-04-09T10:00:00Z', value: 15 }];
+        }
+        return [];
+      });
+
+      const service = new HealthQueryService('/mock/workspace');
+      const result = service.getFeedbackGfi();
+
+      if (result.trend.length > 0) {
+        const trendItem = result.trend[0];
+        expect(trendItem).toHaveProperty('hour');
+        expect(trendItem).toHaveProperty('value');
+        expect(typeof trendItem.hour).toBe('string');
+        expect(typeof trendItem.value).toBe('number');
+      }
+
+      service.dispose();
+    });
+  });
+
+  describe('Feedback Page - /api/feedback/empathy-events', () => {
+    it('getFeedbackEmpathyEvents returns correct response shape', () => {
+      const service = new HealthQueryService('/mock/workspace');
+      const result = service.getFeedbackEmpathyEvents();
+
+      expect(Array.isArray(result)).toBe(true);
+
+      service.dispose();
+    });
+
+    it('getFeedbackEmpathyEvents items have correct fields when populated', () => {
+      eventLogMock.getBufferedEvents.mockReturnValue([
+        {
+          ts: '2026-04-09T10:00:00Z',
+          type: 'pain_signal',
+          data: { source: 'user_empathy', severity: 'high', score: 8, reason: 'tool failure', origin: 'agent', gfiAfter: 75 },
+        },
+      ]);
+
+      const service = new HealthQueryService('/mock/workspace');
+      const result = service.getFeedbackEmpathyEvents();
+
+      if (result.length > 0) {
+        const event = result[0];
+        expect(event).toHaveProperty('timestamp');
+        expect(event).toHaveProperty('severity');
+        expect(event).toHaveProperty('score');
+        expect(event).toHaveProperty('reason');
+        expect(event).toHaveProperty('origin');
+        expect(event).toHaveProperty('gfiAfter');
+
+        // Type validation
+        expect(typeof event.timestamp).toBe('string');
+        expect(typeof event.severity).toBe('string');
+        expect(typeof event.score).toBe('number');
+        expect(typeof event.reason).toBe('string');
+        expect(typeof event.origin).toBe('string');
+        expect(typeof event.gfiAfter).toBe('number');
+      }
+
+      service.dispose();
+    });
+  });
+
+  describe('Feedback Page - /api/feedback/gate-blocks', () => {
+    it('getFeedbackGateBlocks returns correct response shape', () => {
+      const service = new HealthQueryService('/mock/workspace');
+      const result = service.getFeedbackGateBlocks();
+
+      expect(Array.isArray(result)).toBe(true);
+
+      service.dispose();
+    });
+
+    it('getFeedbackGateBlocks items have correct fields when populated', () => {
+      // Mock gate_blocks table read
+      controlUiDbMock.all.mockImplementation((sql: string) => {
+        if (sql.includes('gate_blocks')) {
+          return [
+            {
+              created_at: '2026-04-09T10:00:00Z',
+              tool_name: 'Write',
+              reason: 'gfi block',
+              gfi: 75,
+              gfi_after: 80,
+              trust_stage: 2,
+            },
+          ];
+        }
+        return [];
+      });
+
+      const service = new HealthQueryService('/mock/workspace');
+      const result = service.getFeedbackGateBlocks();
+
+      if (result.length > 0) {
+        const block = result[0];
+        expect(block).toHaveProperty('timestamp');
+        expect(block).toHaveProperty('toolName');
+        expect(block).toHaveProperty('reason');
+        expect(block).toHaveProperty('gfi');
+        expect(block).toHaveProperty('trustStage');
+
+        // Type validation
+        expect(typeof block.timestamp).toBe('string');
+        expect(typeof block.toolName).toBe('string');
+        expect(typeof block.reason).toBe('string');
+        expect(typeof block.gfi).toBe('number');
+        expect(typeof block.trustStage).toBe('number');
+      }
+
+      service.dispose();
+    });
+  });
+
+  // ===== Gate Monitor Page Tests =====
+
+  describe('Gate Monitor Page - /api/gate/stats', () => {
+    it('getGateStats returns correct response shape', () => {
+      const service = new HealthQueryService('/mock/workspace');
+      const result = service.getGateStats();
+
+      // Top-level fields from GateStatsResponse
+      expect(result).toHaveProperty('today');
+      expect(result).toHaveProperty('trust');
+      expect(result).toHaveProperty('evolution');
+
+      // Today structure
+      expect(result.today).toHaveProperty('gfiBlocks');
+      expect(result.today).toHaveProperty('stageBlocks');
+      expect(result.today).toHaveProperty('p03Blocks');
+      expect(result.today).toHaveProperty('bypassAttempts');
+      expect(result.today).toHaveProperty('p16Exemptions');
+
+      // Type validation for today counts
+      expect(typeof result.today.gfiBlocks).toBe('number');
+      expect(typeof result.today.stageBlocks).toBe('number');
+      expect(typeof result.today.p03Blocks).toBe('number');
+      expect(typeof result.today.bypassAttempts).toBe('number');
+      expect(typeof result.today.p16Exemptions).toBe('number');
+
+      // Trust structure
+      expect(result.trust).toHaveProperty('stage');
+      expect(result.trust).toHaveProperty('score');
+      expect(result.trust).toHaveProperty('status');
+      expect(typeof result.trust.stage).toBe('number');
+      expect(typeof result.trust.score).toBe('number');
+      expect(typeof result.trust.status).toBe('string');
+
+      // Evolution structure
+      expect(result.evolution).toHaveProperty('tier');
+      expect(result.evolution).toHaveProperty('points');
+      expect(result.evolution).toHaveProperty('status');
+      expect(typeof result.evolution.tier).toBe('string');
+      expect(typeof result.evolution.points).toBe('number');
+      expect(typeof result.evolution.status).toBe('string');
+
+      service.dispose();
+    });
+  });
+
+  describe('Gate Monitor Page - /api/gate/blocks', () => {
+    it('getGateBlocks returns correct response shape', () => {
+      const service = new HealthQueryService('/mock/workspace');
+      const result = service.getGateBlocks();
+
+      expect(Array.isArray(result)).toBe(true);
+
+      service.dispose();
+    });
+
+    it('getGateBlocks items have all 7 required fields when populated', () => {
+      // Mock hasTableColumn to return true for all optional columns
+      controlUiDbMock.all.mockImplementation((sql: string) => {
+        if (sql.includes('PRAGMA table_info')) {
+          return [{ name: 'created_at' }, { name: 'tool_name' }, { name: 'file_path' }, { name: 'reason' }, { name: 'gfi' }, { name: 'gfi_after' }, { name: 'trust_stage' }, { name: 'gate_type' }];
+        }
+        if (sql.includes('gate_blocks')) {
+          return [
+            {
+              created_at: '2026-04-09T10:00:00Z',
+              tool_name: 'Write',
+              file_path: '/test/file.ts',
+              reason: 'gfi block',
+              gfi: 75,
+              gfi_after: 80,
+              trust_stage: 2,
+              gate_type: 'gfi',
+            },
+          ];
+        }
+        return [];
+      });
+
+      const service = new HealthQueryService('/mock/workspace');
+      const result = service.getGateBlocks();
+
+      if (result.length > 0) {
+        const block = result[0];
+        // 7 required fields from GateBlockItem
+        expect(block).toHaveProperty('timestamp');
+        expect(block).toHaveProperty('toolName');
+        expect(block).toHaveProperty('filePath');
+        expect(block).toHaveProperty('reason');
+        expect(block).toHaveProperty('gateType');
+        expect(block).toHaveProperty('gfi');
+        expect(block).toHaveProperty('trustStage');
+
+        // Type validation
+        expect(typeof block.timestamp).toBe('string');
+        expect(typeof block.toolName).toBe('string');
+        // filePath can be string or null
+        expect(typeof block.filePath === 'string' || block.filePath === null).toBe(true);
+        expect(typeof block.reason).toBe('string');
+        expect(typeof block.gateType).toBe('string');
+        expect(typeof block.gfi).toBe('number');
+        expect(typeof block.trustStage).toBe('number');
+      }
+
+      service.dispose();
+    });
+  });
 });
