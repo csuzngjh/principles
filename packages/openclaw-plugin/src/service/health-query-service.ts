@@ -75,11 +75,6 @@ export class HealthQueryService {
   private readonly evolutionReducer;
   private readonly uiDb: ControlUiDatabase;
   private readonly tableColumnCache = new Map<string, Set<string>>();
-  private gfiState: { currentGfi: number; dailyGfiPeak: number; lastReadDate: string } = {
-    currentGfi: 0,
-    dailyGfiPeak: 0,
-    lastReadDate: '',
-  };
 
   constructor(workspaceDir: string) {
     this.workspaceDir = workspaceDir;
@@ -90,7 +85,7 @@ export class HealthQueryService {
     this.eventLog = wctx.eventLog;
     this.evolutionReducer = wctx.evolutionReducer;
     this.uiDb = new ControlUiDatabase({ workspaceDir });
-    this.initGfiState();
+    this.syncGfiFromSession();
   }
 
   dispose(): void {
@@ -106,7 +101,6 @@ export class HealthQueryService {
     queue: { pending: number; inProgress: number; completed: number };
     activeStage: HealthStage;
   } {
-    const session = this.getCurrentSession();
     const threshold = this.getGfiThreshold();
     const trust = this.readTrust();
     const evolution = this.readEvolutionScore();
@@ -114,29 +108,19 @@ export class HealthQueryService {
     const queue = this.readQueueStats();
     const painFlag = this.readPainFlag();
 
-    const currentGfi = this.asNumber(session?.currentGfi, 0);
-    const peakToday = this.asNumber(session?.dailyGfiPeak, currentGfi);
+    // GFI: always read from SQLite (synced from session JSON at construction time)
+    const gfiData = this.readGfiFromDb();
+    const currentGfi = gfiData.currentGfi;
+    const peakToday = gfiData.dailyGfiPeak;
 
-    // Merge with persisted state: use session value if available, otherwise use persisted
+    // GFI history trend: aggregate pain_events by hour
     const today = new Date().toISOString().slice(0, 10);
-    if (today !== this.gfiState.lastReadDate) {
-      // New day: reset peak tracking
-      this.gfiState.lastReadDate = today;
-      this.gfiState.dailyGfiPeak = currentGfi;
-    }
-    const effectiveCurrentGfi = currentGfi > 0 ? currentGfi : this.gfiState.currentGfi;
-    const effectivePeak = Math.max(this.gfiState.dailyGfiPeak, peakToday, effectiveCurrentGfi);
-    this.gfiState.currentGfi = effectiveCurrentGfi;
-    this.gfiState.dailyGfiPeak = effectivePeak;
-    this.writeGfiState();
-
-    // GFI history trend: aggregate pain_events by hour (same logic as getFeedbackGfi)
     const gfiTrend = this.readGfiTrend(today);
 
     return {
       gfi: {
-        current: effectiveCurrentGfi,
-        peakToday: effectivePeak,
+        current: currentGfi,
+        peakToday,
         threshold,
         trend: gfiTrend,
       },
@@ -222,7 +206,6 @@ export class HealthQueryService {
     trend: { hour: string; value: number }[];
     sources: Record<string, number>;
   } {
-    const session = this.getCurrentSession();
     const threshold = this.getGfiThreshold();
     const today = new Date().toISOString().slice(0, 10);
 
@@ -242,23 +225,12 @@ export class HealthQueryService {
       ORDER BY total DESC
     `, today);
 
-    // Merge with persisted GFI state (same logic as getOverviewHealth)
-    const current = this.asNumber(session?.currentGfi, 0);
-    const peakTodayRaw = this.asNumber(session?.dailyGfiPeak, current);
-    const today2 = new Date().toISOString().slice(0, 10);
-    if (today2 !== this.gfiState.lastReadDate) {
-      this.gfiState.lastReadDate = today2;
-      this.gfiState.dailyGfiPeak = current;
-    }
-    const effectiveCurrent = current > 0 ? current : this.gfiState.currentGfi;
-    const effectivePeakGfi = Math.max(this.gfiState.dailyGfiPeak, peakTodayRaw, effectiveCurrent);
-    this.gfiState.currentGfi = effectiveCurrent;
-    this.gfiState.dailyGfiPeak = effectivePeakGfi;
-    this.writeGfiState();
+    // GFI: read from SQLite (synced from session JSON at construction time)
+    const gfiData = this.readGfiFromDb();
 
     return {
-      current: effectiveCurrent,
-      peakToday: effectivePeakGfi,
+      current: gfiData.currentGfi,
+      peakToday: gfiData.dailyGfiPeak,
       threshold,
       trend: trendRows.map((row) => ({ hour: row.hour, value: this.asNumber(row.value, 0) })),
       sources: Object.fromEntries(sourceRows.map((row) => [row.source, this.asNumber(row.total, 0)])),
@@ -464,43 +436,6 @@ export class HealthQueryService {
     // Fallback: read session JSON files directly (handles process restarts where
     // loadAllSessions may not have reloaded all sessions, or workspaceDir mismatch)
     return this.readLatestSessionFromFile();
-  }
-
-  /**
-   * Read the most recent session JSON file from disk.
-   * Used as fallback when in-memory session map is empty (e.g., after restart).
-   */
-  private readLatestSessionFromFile(): SessionState | null {
-    const sessionsDir = path.join(this.stateDir, 'sessions');
-    if (!fs.existsSync(sessionsDir)) return null;
-
-    try {
-      const files = fs.readdirSync(sessionsDir).filter(f => f.endsWith('.json'));
-      if (files.length === 0) return null;
-
-      let latest: SessionState | null = null;
-      let latestTs = 0;
-
-      for (const file of files) {
-        try {
-          const content = fs.readFileSync(path.join(sessionsDir, file), 'utf-8');
-          const state = JSON.parse(content) as SessionState;
-          // Only match sessions from this workspace
-          if (state.workspaceDir && state.workspaceDir !== this.workspaceDir) continue;
-          const ts = Number(state.lastControlActivityAt ?? state.lastActivityAt ?? 0);
-          if (ts > latestTs) {
-            latestTs = ts;
-            latest = state;
-          }
-        } catch {
-          // Skip corrupted files
-        }
-      }
-
-      return latest;
-    } catch {
-      return null;
-    }
   }
 
   private getGfiThreshold(): number {
@@ -931,61 +866,16 @@ export class HealthQueryService {
   }
 
   /**
-   * Initialize GFI state from persisted storage.
-   * Called once in constructor. Falls back to 0 if no persisted state exists.
+   * Sync GFI from the latest session JSON file into SQLite.
+   * Called at construction time so all queries read from a single source (SQLite).
    */
-  private initGfiState(): void {
+  private syncGfiFromSession(): void {
+    const session = this.readLatestSessionFromFile();
+    const currentGfi = this.asNumber(session?.currentGfi, 0);
+    const dailyGfiPeak = this.asNumber(session?.dailyGfiPeak, currentGfi);
     const today = new Date().toISOString().slice(0, 10);
-    const persisted = this.readGfiState();
-    if (persisted) {
-      // If persisted date is today, restore the peak; otherwise reset for new day
-      if (persisted.date === today) {
-        this.gfiState = {
-          currentGfi: persisted.currentGfi,
-          dailyGfiPeak: persisted.dailyGfiPeak,
-          lastReadDate: today,
-        };
-      } else {
-        // New day: reset peak but keep current GFI
-        this.gfiState = {
-          currentGfi: persisted.currentGfi,
-          dailyGfiPeak: persisted.currentGfi, // reset peak to current on new day
-          lastReadDate: today,
-        };
-      }
-    } else {
-      this.gfiState = { currentGfi: 0, dailyGfiPeak: 0, lastReadDate: today };
-    }
-  }
 
-  /**
-   * Read persisted GFI state from trajectory.db gfi_state table.
-   * Returns null if table/row does not exist.
-   */
-  private readGfiState(): { currentGfi: number; dailyGfiPeak: number; date: string } | null {
     try {
-      const row = this.uiDb.get<{ current_gfi: number; daily_gfi_peak: number; gfi_date: string }>(
-        'SELECT current_gfi, daily_gfi_peak, gfi_date FROM gfi_state WHERE id = 1',
-      );
-      if (!row) return null;
-      return {
-        currentGfi: row.current_gfi ?? 0,
-        dailyGfiPeak: row.daily_gfi_peak ?? 0,
-        date: row.gfi_date ?? '',
-      };
-    } catch {
-      return null;
-    }
-  }
-
-  /**
-   * Write current GFI state to trajectory.db gfi_state table.
-   * Creates the table if it does not exist (first write).
-   */
-  private writeGfiState(): void {
-    const today = new Date().toISOString().slice(0, 10);
-    try {
-      // Ensure table exists (CREATE TABLE IF NOT EXISTS)
       this.uiDb.execute(`
         CREATE TABLE IF NOT EXISTS gfi_state (
           id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -994,16 +884,68 @@ export class HealthQueryService {
           gfi_date TEXT NOT NULL DEFAULT ''
         )
       `);
-      // Use run() for the parameterized INSERT (run() wraps withWrite + db.prepare().run())
       this.uiDb.run(
         'INSERT OR REPLACE INTO gfi_state (id, current_gfi, daily_gfi_peak, gfi_date) VALUES (1, ?, ?, ?)',
-        this.gfiState.currentGfi,
-        this.gfiState.dailyGfiPeak,
+        currentGfi,
+        dailyGfiPeak,
         today,
       );
     } catch (err) {
-      // Non-fatal: GFI persistence failure should not break the endpoint
-      console.warn('[HealthQueryService] Failed to persist GFI state:', err);
+      console.warn('[HealthQueryService] Failed to sync GFI from session:', err);
+    }
+  }
+
+  /**
+   * Read current GFI state from SQLite.
+   */
+  private readGfiFromDb(): { currentGfi: number; dailyGfiPeak: number } {
+    try {
+      const row = this.uiDb.get<{ current_gfi: number; daily_gfi_peak: number }>(
+        'SELECT current_gfi, daily_gfi_peak FROM gfi_state WHERE id = 1',
+      );
+      if (!row) return { currentGfi: 0, dailyGfiPeak: 0 };
+      return {
+        currentGfi: row.current_gfi ?? 0,
+        dailyGfiPeak: row.daily_gfi_peak ?? 0,
+      };
+    } catch {
+      return { currentGfi: 0, dailyGfiPeak: 0 };
+    }
+  }
+
+  /**
+   * Read the most recent session JSON file from disk.
+   * Used to sync GFI from session-tracker's persistence into SQLite.
+   */
+  private readLatestSessionFromFile(): SessionState | null {
+    const sessionsDir = path.join(this.stateDir, 'sessions');
+    if (!fs.existsSync(sessionsDir)) return null;
+
+    try {
+      const files = fs.readdirSync(sessionsDir).filter(f => f.endsWith('.json'));
+      if (files.length === 0) return null;
+
+      let latest: SessionState | null = null;
+      let latestTs = 0;
+
+      for (const file of files) {
+        try {
+          const content = fs.readFileSync(path.join(sessionsDir, file), 'utf-8');
+          const state = JSON.parse(content) as SessionState;
+          if (state.workspaceDir && state.workspaceDir !== this.workspaceDir) continue;
+          const ts = Number(state.lastControlActivityAt ?? state.lastActivityAt ?? 0);
+          if (ts > latestTs) {
+            latestTs = ts;
+            latest = state;
+          }
+        } catch {
+          // Skip corrupted files
+        }
+      }
+
+      return latest;
+    } catch {
+      return null;
     }
   }
 }
