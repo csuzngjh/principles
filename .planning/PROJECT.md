@@ -26,6 +26,7 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 - CLEAN-06: build artifacts (coverage/, *.tgz) added to .gitignore
 - GATE-01/GATE-02: Gate Monitor `/api/gate/stats` and `/api/gate/blocks` data flows verified correct (getGateStats and getGateBlocks align with gate_blocks table)
 - FE-01/FE-02: Gate Monitor frontend types (GateStatsResponse, GateBlockItem) and field accessors verified matching backend responses
+- v1.9.1: WebUI数据源修复 — Phase 16-20完成，数据端点回归测试已添加
 
 ## Active
 
