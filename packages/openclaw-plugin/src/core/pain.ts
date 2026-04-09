@@ -165,6 +165,7 @@ export function readPainFlagData(projectDir: string): Record<string, string> {
  * If any principle matches the pain signal, its painPreventedCount is incremented.
  * Errors are silently ignored to avoid disrupting the pain pipeline.
  */
+// eslint-disable-next-line @typescript-eslint/max-params -- Reason: principle value tracking requires workspace + data + getters + updaters - refactoring would break API
 export function trackPrincipleValue(
   workspaceDir: string,
   painData: { reason?: string; source?: string; score?: string },

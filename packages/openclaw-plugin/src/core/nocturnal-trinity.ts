@@ -1184,6 +1184,7 @@ export function invokeStubPhilosopher(
  * In production, this would call the actual Scribe subagent.
  * The stub uses tournament selection (scoring + thresholds) to pick the winner.
  */
+// eslint-disable-next-line @typescript-eslint/max-params -- Reason: stub scribe requires all context parameters - refactoring would break API
 export function invokeStubScribe(
   dreamerOutput: DreamerOutput,
   philosopherOutput: PhilosopherOutput,
