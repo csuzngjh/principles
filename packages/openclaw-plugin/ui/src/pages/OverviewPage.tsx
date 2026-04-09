@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
 import type { OverviewResponse, CentralHealthResponse, WorkspaceHealthEntry } from '../types';
-import { Sparkline, GroupedBarChart, TimeRangeSelector, DonutChart, BulletChart, GaugeChart, PrincipleStack, QueueBar, StatusBadge } from '../charts';
+import { Sparkline, GroupedBarChart, TimeRangeSelector, DonutChart, BulletChart, GaugeChart, PrincipleStack, QueueBar, StatusBadge, LineChart } from '../charts';
 import { useI18n } from '../i18n/ui';
 import { formatPercent, formatDate } from '../utils/format';
 import { WorkspaceConfig } from '../components/WorkspaceConfig';
@@ -88,23 +88,16 @@ function WorkspaceHealthPanel({ entry }: { entry: WorkspaceHealthEntry }) {
               max={Math.max(h.gfi.threshold * 2, 150)}
               width={280}
             />
-            {/* GFI Trend sparkline */}
+            {/* GFI Trend — mini sparkline for quick glance */}
             {h.gfi.trend.length >= 2 && (
-              <div style={{ marginTop: 8 }}>
-                <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)', marginBottom: 2 }}>
-                  {t('overview.health.gfi')} · {t('overview.health.peakToday')}: {h.gfi.peakToday}
-                </div>
+              <div style={{ marginTop: 4 }}>
                 <Sparkline
                   data={h.gfi.trend.map(d => d.value)}
                   width={280}
-                  height={32}
+                  height={20}
                   color={status === 'danger' ? 'var(--error)' : status === 'warning' ? 'var(--warning)' : 'var(--success)'}
                   fillOpacity={0.1}
                 />
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.6rem', color: 'var(--text-secondary)', marginTop: 1 }}>
-                  <span>{h.gfi.trend[0]?.hour.slice(11, 16)}</span>
-                  <span>{h.gfi.trend[h.gfi.trend.length - 1]?.hour.slice(11, 16)}</span>
-                </div>
               </div>
             )}
           </div>
@@ -201,6 +194,33 @@ function WorkspaceHealthPanel({ entry }: { entry: WorkspaceHealthEntry }) {
             )}
           </div>
         </div>
+
+        {/* Full-width GFI trend chart */}
+        <section style={{ marginTop: 'var(--space-4)', borderTop: '1px solid var(--border)', paddingTop: 'var(--space-4)' }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
+            <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+              📈 {t('overview.health.gfi')} · 24h 趋势
+            </span>
+            <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
+              峰值: {h.gfi.peakToday}
+            </span>
+          </div>
+          {h.gfi.trend.length >= 2 ? (
+            <LineChart
+              data={h.gfi.trend.map(d => ({
+                label: d.hour.slice(11, 16),
+                value: d.value,
+              }))}
+              width={560}
+              height={160}
+              color={status === 'danger' ? 'var(--error)' : status === 'warning' ? 'var(--warning)' : 'var(--success)'}
+            />
+          ) : (
+            <div style={{ height: 160, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+              今日暂无 GFI 记录
+            </div>
+          )}
+        </section>
       </div>
     </section>
   );

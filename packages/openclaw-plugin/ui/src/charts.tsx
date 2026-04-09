@@ -846,3 +846,107 @@ export function QueueBar({ pending, inProgress, completed }: QueueBarProps) {
     </div>
   );
 }
+
+/**
+ * LineChart - 全尺寸折线图
+ * 用于展示 GFI 等时间序列数据的完整趋势
+ */
+
+interface LineChartProps {
+  data: Array<{ label: string; value: number }>;
+  width?: number;
+  height?: number;
+  color?: string;
+  showGrid?: boolean;
+  showDots?: boolean;
+  showArea?: boolean;
+  unit?: string;
+}
+
+export function LineChart({
+  data,
+  width = 560,
+  height = 180,
+  color = 'var(--accent)',
+  showGrid = true,
+  showDots = true,
+  showArea = true,
+  unit = '',
+}: LineChartProps) {
+  if (!data || data.length === 0) {
+    return (
+      <div style={{ height, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+        暂无数据
+      </div>
+    );
+  }
+
+  const padding = { top: 16, right: 16, bottom: 28, left: 44 };
+  const chartW = width - padding.left - padding.right;
+  const chartH = height - padding.top - padding.bottom;
+
+  const values = data.map(d => d.value);
+  const maxVal = Math.max(...values, 1);
+  const minVal = Math.min(...values, 0);
+  const range = maxVal - minVal || 1;
+
+  // Y-axis ticks (5 ticks)
+  const yTicks = Array.from({ length: 5 }, (_, i) => minVal + (range * i) / 4);
+
+  const xStep = data.length > 1 ? chartW / (data.length - 1) : 0;
+
+  const points = data.map((d, i) => ({
+    x: padding.left + (data.length > 1 ? i * xStep : chartW / 2),
+    y: padding.top + chartH - ((d.value - minVal) / range) * chartH,
+    label: d.label,
+    value: d.value,
+  }));
+
+  const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
+  const areaPath = linePath + ` L ${points[points.length - 1].x} ${padding.top + chartH} L ${points[0].x} ${padding.top + chartH} Z`;
+
+  return (
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ display: 'block' }}>
+      {/* Grid lines */}
+      {showGrid && yTicks.map((tick, i) => {
+        const y = padding.top + chartH - ((tick - minVal) / range) * chartH;
+        return (
+          <g key={i}>
+            <line x1={padding.left} y1={y} x2={padding.left + chartW} y2={y} stroke="var(--border)" strokeWidth={0.5} strokeDasharray="3 3" />
+            <text x={padding.left - 6} y={y + 4} textAnchor="end" fontSize="10" fill="var(--text-secondary)">
+              {Math.round(tick)}
+            </text>
+          </g>
+        );
+      })}
+
+      {/* Area fill */}
+      {showArea && points.length > 1 && (
+        <path d={areaPath} fill={color} fillOpacity={0.08} />
+      )}
+
+      {/* Line */}
+      <path d={linePath} fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+
+      {/* Dots */}
+      {showDots && points.map((p, i) => (
+        <g key={i}>
+          <circle cx={p.x} cy={p.y} r={3} fill={color} stroke="var(--bg-raised)" strokeWidth={1.5} />
+          <title>{p.label}: {p.value}{unit}</title>
+        </g>
+      ))}
+
+      {/* X-axis labels */}
+      {points.map((p, i) => {
+        // Skip some labels if too many
+        const skipCount = data.length > 12 ? 2 : data.length > 8 ? 1 : 0;
+        if (i % (skipCount + 1) !== 0 && i !== points.length - 1) return null;
+        return (
+          <text key={i} x={p.x} y={height - 4} textAnchor="middle" fontSize="9" fill="var(--text-secondary)">
+            {p.label}
+          </text>
+        );
+      })}
+    </svg>
+  );
+}

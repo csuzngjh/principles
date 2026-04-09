@@ -188,15 +188,19 @@ export class HealthQueryService {
    * Used by getOverviewHealth() to provide historical GFI context.
    */
   private readGfiTrend(date: string): Array<{ hour: string; value: number }> {
-    const rows = this.uiDb.all<{ hour: string; value: number }>(`
-      SELECT substr(created_at, 1, 13) || ':00:00Z' AS hour, ROUND(SUM(score), 2) AS value
-      FROM pain_events
-      WHERE substr(created_at, 1, 10) = ?
-      GROUP BY substr(created_at, 1, 13)
-      ORDER BY hour ASC
-    `, date);
-
-    return rows.map(row => ({ hour: row.hour, value: this.asNumber(row.value, 0) }));
+    try {
+      const rows = this.uiDb.all<{ hour: string; value: number }>(`
+        SELECT substr(created_at, 1, 13) || ':00:00Z' AS hour, ROUND(SUM(score), 2) AS value
+        FROM pain_events
+        WHERE substr(created_at, 1, 10) = ?
+        GROUP BY substr(created_at, 1, 13)
+        ORDER BY hour ASC
+      `, date);
+      return rows.map(row => ({ hour: row.hour, value: this.asNumber(row.value, 0) }));
+    } catch {
+      // pain_events table may not exist in this workspace — return empty trend
+      return [];
+    }
   }
 
   getFeedbackGfi(): {
