@@ -9,7 +9,47 @@ import { Loading, ErrorState } from '../components';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Tooltip component for metric explanations
+// ---------------------------------------------------------------------------
+
+function MetricTooltip({ children }: { children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+      onClick={() => setOpen(!open)}
+    >
+      {children}
+      {open && (
+        <span
+          style={{
+            position: 'absolute',
+            bottom: '100%',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            background: 'var(--bg-sunken)',
+            border: '1px solid var(--border)',
+            borderRadius: 'var(--radius-sm)',
+            padding: '6px 10px',
+            fontSize: '0.75rem',
+            color: 'var(--text-secondary)',
+            whiteSpace: 'normal',
+            maxWidth: 260,
+            zIndex: 100,
+            boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+          }}
+        >
+          {children}
+        </span>
+      )}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Helper: get health status
 // ---------------------------------------------------------------------------
 
 function getHealthStatus(current: number, threshold: number): 'excellent' | 'good' | 'warning' | 'danger' {
@@ -26,9 +66,7 @@ const HEALTH_LABELS: Record<string, { zh: string; en: string; emoji: string }> =
   danger: { zh: '危险', en: 'Critical', emoji: '🔴' },
 };
 
-const TRUST_COLORS = ['var(--text-secondary)', 'var(--info)', 'var(--accent)', 'var(--success)'];
 const TRUST_DESC_KEYS = ['observer', 'editor', 'developer', 'architect'];
-
 const TIER_DESC_KEYS = ['seed', 'sprout', 'sapling', 'tree', 'forest'];
 
 // ---------------------------------------------------------------------------
@@ -88,7 +126,7 @@ function WorkspaceHealthPanel({ entry }: { entry: WorkspaceHealthEntry }) {
               max={Math.max(h.gfi.threshold * 2, 150)}
               width={280}
             />
-            {/* GFI Trend — mini sparkline for quick glance */}
+            {/* Mini sparkline for quick glance */}
             {h.gfi.trend.length >= 2 && (
               <div style={{ marginTop: 4 }}>
                 <Sparkline
@@ -227,6 +265,64 @@ function WorkspaceHealthPanel({ entry }: { entry: WorkspaceHealthEntry }) {
 }
 
 // ---------------------------------------------------------------------------
+// KPI Card with explanation
+// ---------------------------------------------------------------------------
+
+interface KpiCardProps {
+  label: string;
+  value: string | number;
+  explain: { zh: string; en: string };
+  trend?: number[];
+  trendColor?: string;
+}
+
+function ExplainKpiCard({ label, value, explain, trend, trendColor }: KpiCardProps) {
+  const { t } = useI18n();
+  const [showExplain, setShowExplain] = useState(false);
+
+  return (
+    <article className="panel kpi" style={{ position: 'relative' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <span
+          className="label"
+          style={{ cursor: 'help' }}
+          onClick={() => setShowExplain(!showExplain)}
+        >
+          {label} <span style={{ fontSize: '0.7em', opacity: 0.6 }}>ℹ</span>
+        </span>
+        {trend && trend.length >= 2 && (
+          <div className="stat-sparkline">
+            <Sparkline data={trend} width={50} height={16} color={trendColor} />
+          </div>
+        )}
+      </div>
+      <span className="value">{value}</span>
+      {showExplain && (
+        <div
+          style={{
+            position: 'absolute',
+            top: '100%',
+            left: 0,
+            right: 0,
+            background: 'var(--bg-sunken)',
+            border: '1px solid var(--border)',
+            borderRadius: 'var(--radius-sm)',
+            padding: '6px 10px',
+            fontSize: '0.72rem',
+            color: 'var(--text-secondary)',
+            zIndex: 50,
+            lineHeight: 1.4,
+            boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
+          }}
+        >
+          {t(explain.zh) || explain.zh}
+        </div>
+      )}
+    </article>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // OverviewPage
 // ---------------------------------------------------------------------------
 
@@ -332,41 +428,44 @@ export function OverviewPage() {
         </section>
       )}
 
-      {/* Aggregate KPI Grid */}
+      {/* Aggregate KPI Grid with explanations */}
       <section className="kpi-grid">
-        <article className="panel kpi">
-          <span className="label">{t('overview.repeatErrorRate')}</span>
-          <span className="value">{formatPercent(data.summary.repeatErrorRate)}</span>
-          {failuresTrend.length >= 2 && (
-            <div className="stat-sparkline"><Sparkline data={failuresTrend} width={50} height={16} color="var(--error)" /></div>
-          )}
-        </article>
-        <article className="panel kpi">
-          <span className="label">{t('overview.userCorrectionRate')}</span>
-          <span className="value">{formatPercent(data.summary.userCorrectionRate)}</span>
-          {correctionsTrend.length >= 2 && (
-            <div className="stat-sparkline"><Sparkline data={correctionsTrend} width={50} height={16} color="var(--warning)" /></div>
-          )}
-        </article>
-        <article className="panel kpi">
-          <span className="label">{t('overview.pendingSamples')}</span>
-          <span className="value">{data.summary.pendingSamples}</span>
-        </article>
-        <article className="panel kpi">
-          <span className="label">{t('overview.approvedSamples')}</span>
-          <span className="value">{data.summary.approvedSamples}</span>
-        </article>
-        <article className="panel kpi">
-          <span className="label">{t('overview.thinkingCoverage')}</span>
-          <span className="value">{formatPercent(data.summary.thinkingCoverageRate)}</span>
-          {thinkingTrend.length >= 2 && (
-            <div className="stat-sparkline"><Sparkline data={thinkingTrend} width={50} height={16} color="var(--info)" /></div>
-          )}
-        </article>
-        <article className="panel kpi">
-          <span className="label">{t('overview.painEvents')}</span>
-          <span className="value">{data.summary.painEvents}</span>
-        </article>
+        <ExplainKpiCard
+          label={t('overview.repeatErrorRate')}
+          value={formatPercent(data.summary.repeatErrorRate)}
+          explain={{ zh: 'AI 重复犯同样错误的比例。如果这个值高，说明 AI 没有从之前的错误中学习。', en: 'Percentage of times AI repeats the same mistake.' }}
+          trend={failuresTrend}
+          trendColor="var(--error)"
+        />
+        <ExplainKpiCard
+          label={t('overview.userCorrectionRate')}
+          value={formatPercent(data.summary.userCorrectionRate)}
+          explain={{ zh: '用户手动纠正 AI 操作的比例。如果这个值高，说明 AI 经常做错了需要你介入。', en: 'How often you had to manually correct AI actions.' }}
+          trend={correctionsTrend}
+          trendColor="var(--warning)"
+        />
+        <ExplainKpiCard
+          label={t('overview.pendingSamples')}
+          value={data.summary.pendingSamples}
+          explain={{ zh: '等待你审核的纠正样本。审核后 AI 会从中学习。', en: 'Correction samples waiting for your review. Reviewing them helps AI learn.' }}
+        />
+        <ExplainKpiCard
+          label={t('overview.approvedSamples')}
+          value={data.summary.approvedSamples}
+          explain={{ zh: '你已批准的高质量纠正样本。这些是 AI 的学习素材。', en: 'High-quality corrections you approved. These become AI training data.' }}
+        />
+        <ExplainKpiCard
+          label={t('overview.thinkingCoverage')}
+          value={formatPercent(data.summary.thinkingCoverageRate)}
+          explain={{ zh: 'AI 使用"深度思考"模式的任务比例。这个值太低可能说明 AI 在跳过思考直接执行。', en: 'Percentage of tasks where AI used deep thinking mode instead of acting immediately.' }}
+          trend={thinkingTrend}
+          trendColor="var(--info)"
+        />
+        <ExplainKpiCard
+          label={t('overview.painEvents')}
+          value={data.summary.painEvents}
+          explain={{ zh: '系统检测到的"痛苦信号"总数。包括工具失败、用户抱怨、AI 行为异常等。', en: 'Total pain signals detected: tool failures, user complaints, AI anomalies.' }}
+        />
       </section>
 
       <div className="grid two-columns">
