@@ -13,16 +13,18 @@ const TOOLS_TO_SCAN = [
   { name: 'shellcheck', cmd: ['shellcheck', '--version'] },
 ];
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: third-party API execSync returns dynamic output - type structure unknown at call site
 function scanEnvironment(wctx: WorkspaceContext): any {
   const tools: Record<string, { available: boolean; version?: string }> = {};
 
   for (const tool of TOOLS_TO_SCAN) {
     try {
-      const output = execSync(tool.cmd.join(' '), { stdio: ['ignore', 'pipe', 'ignore'] }).toString();
+      const [versionLine] = execSync(tool.cmd.join(' '), { stdio: ['ignore', 'pipe', 'ignore'] }).toString().split('\n');
       tools[tool.name] = {
         available: true,
-        version: output.split('\n')[0].trim(),
+        version: versionLine.trim(),
       };
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Reason: catch parameter intentionally unused - we only care that the command failed
     } catch (_e) {
       tools[tool.name] = { available: false };
     }
