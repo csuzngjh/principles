@@ -110,7 +110,7 @@ Plans:
 **Goal:** Validate all 4 pages display correct data after fixes. Add regression tests to prevent future data source drift.
 **Requirements**: E2E-01, E2E-02
 **Depends on:** Phases 17, 18, 19
-**Plans:** 1 plan
+**Plans:** 0/1 plans complete
 
 Plans:
 - [ ] 20-01-PLAN.md — Create regression tests for all 4 pages' API endpoints
