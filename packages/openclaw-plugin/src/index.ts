@@ -54,6 +54,7 @@ import { PDTaskService } from './core/pd-task-service.js';
 import { CentralSyncService } from './service/central-sync-service.js';
 import { ensureWorkspaceTemplates } from './core/init.js';
 import { migrateDirectoryStructure } from './core/migration.js';
+import { runMigrationIfNeeded } from './core/principle-tree-migration.js';
 import { SystemLogger } from './core/system-logger.js';
 import { createDeepReflectTool } from './tools/deep-reflect.js';
 import { PathResolver, resolveWorkspaceDirFromApi } from './core/path-resolver.js';
@@ -125,6 +126,9 @@ const plugin = {
           const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
           if (!workspaceInitialized && workspaceDir) {
             migrateDirectoryStructure(api, workspaceDir);
+            // Phase 11: Migrate trainingStore principles to tree.principles
+            const { stateDir } = WorkspaceContext.fromHookContext({ workspaceDir });
+            runMigrationIfNeeded(stateDir, workspaceDir);
             ensureWorkspaceTemplates(api, workspaceDir, language);
             SystemLogger.log(workspaceDir, 'SYSTEM_BOOT', `Principles Disciple online. Language: ${language}`);
             workspaceInitialized = true;

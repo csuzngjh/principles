@@ -20,7 +20,8 @@ import type {
   PrincipleSuggestedRule,
 } from './evolution-types.js';
 import { isCompleteDetectorMetadata } from './evolution-types.js';
-import { updateTrainingStore } from './principle-tree-ledger.js';
+import { updateTrainingStore, createPrinciple } from './principle-tree-ledger.js';
+import type { LedgerPrinciple } from './principle-tree-ledger.js';
 
 export interface EvolutionReducer {
    
@@ -379,6 +380,7 @@ export class EvolutionReducerImpl implements EvolutionReducer {
     }
 
     // #204: Write to training store so listEvaluablePrinciples() can find this principle
+    // Phase 11: Also write to tree.principles for Rule/Implementation layer support
     if (this.stateDir) {
       try {
         // Determine initial internalization status based on evaluability:
@@ -402,6 +404,31 @@ export class EvolutionReducerImpl implements EvolutionReducer {
           };
         });
         SystemLogger.log(this.workspaceDir, 'TRAINING_STORE_UPDATED', `Principle ${principleId} added to training store with evaluability=${evaluability}, internalizationStatus=${initialStatus}`);
+
+        // Phase 11: Also create principle in tree.principles for Rule/Implementation layer
+        const treePrinciple: LedgerPrinciple = {
+          id: principleId,
+          version: 1,
+          text: principle.text,
+          coreAxiomId: principle.coreAxiomId,
+          triggerPattern: params.triggerPattern,
+          action: params.action,
+          status: principle.status,
+          priority: principle.priority ?? 'P1',
+          scope: principle.scope ?? 'general',
+          domain: principle.domain,
+          evaluability,
+          valueScore: 0,
+          adherenceRate: 0,
+          painPreventedCount: 0,
+          derivedFromPainIds: [params.painId],
+          ruleIds: [],
+          conflictsWithPrincipleIds: [],
+          createdAt: now,
+          updatedAt: now,
+        };
+        createPrinciple(this.stateDir, treePrinciple);
+        SystemLogger.log(this.workspaceDir, 'TREE_PRINCIPLE_CREATED', `Principle ${principleId} added to tree.principles`);
       } catch (err) {
         SystemLogger.log(this.workspaceDir, 'TRAINING_STORE_UPDATE_FAILED', `Failed to update training store for ${principleId}: ${String(err)}`);
       }

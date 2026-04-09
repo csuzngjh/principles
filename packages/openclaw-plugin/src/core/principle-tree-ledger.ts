@@ -364,6 +364,26 @@ export function updateTrainingStore(
   });
 }
 
+export function createPrinciple(stateDir: string, principle: LedgerPrinciple): LedgerPrinciple {
+  return mutateLedger(stateDir, (store) => {
+    const existing = store.tree.principles[principle.id];
+    if (existing) {
+      // Principle already exists, return existing (idempotent)
+      return existing;
+    }
+
+    const nextPrinciple: LedgerPrinciple = {
+      ...principle,
+      ruleIds: uniqueStrings(principle.ruleIds ?? []),
+      conflictsWithPrincipleIds: uniqueStrings(principle.conflictsWithPrincipleIds ?? []),
+      derivedFromPainIds: uniqueStrings(principle.derivedFromPainIds ?? []),
+    };
+
+    store.tree.principles[principle.id] = nextPrinciple;
+    return nextPrinciple;
+  });
+}
+
 export function createRule(stateDir: string, rule: LedgerRule): LedgerRule {
   return mutateLedger(stateDir, (store) => {
     const principle = store.tree.principles[rule.principleId];
