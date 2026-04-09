@@ -119,6 +119,55 @@ export function listEvaluablePrinciples(stateDir: string): PrincipleTrainingStat
   );
 }
 
+// ── #212: Status transition mechanism ───────────────────────────────────────
+
+/**
+ * Valid transitions in the internalization lifecycle:
+ *
+ * prompt_only → needs_training    (after manual validation or detectorMetadata upgrade)
+ * needs_training → in_training    (training run started)
+ * in_training → deployed_pending_eval  (checkpoint deployed for evaluation)
+ * deployed_pending_eval → internalized (evaluation passed)
+ * any → regressed                 (compliance dropped below threshold)
+ * regressed → needs_training      (retraining triggered)
+ */
+const VALID_TRANSITIONS: Record<InternalizationStatus, InternalizationStatus[]> = {
+  prompt_only: ['needs_training', 'regressed'],
+  needs_training: ['in_training', 'regressed'],
+  in_training: ['deployed_pending_eval', 'regressed'],
+  deployed_pending_eval: ['internalized', 'regressed'],
+  internalized: ['regressed'],
+  regressed: ['needs_training'],
+};
+
+/**
+ * Transition a principle's internalization status to the next valid state.
+ * Throws if the transition is not allowed.
+ *
+ * #212: This enables principles created as `prompt_only` to eventually
+ * become `needs_training` and enter the nocturnal evaluation pipeline.
+ */
+export function transitionInternalizationStatus(
+  stateDir: string,
+  principleId: string,
+  nextStatus: InternalizationStatus,
+): void {
+  updateTrainingStore(stateDir, (store) => {
+    const state = store[principleId];
+    if (!state) {
+      throw new Error(`Cannot transition: principle ${principleId} not found in training store`);
+    }
+    const allowed = VALID_TRANSITIONS[state.internalizationStatus] ?? [];
+    if (!allowed.includes(nextStatus)) {
+      throw new Error(
+        `Invalid transition: ${state.internalizationStatus} → ${nextStatus}. ` +
+        `Allowed: ${allowed.join(', ') || 'none (terminal state)'}`
+      );
+    }
+    state.internalizationStatus = nextStatus;
+  });
+}
+
 function ledgerTrainingStore(stateDir: string): PrincipleTrainingStore {
   return loadLedger(stateDir).trainingStore as PrincipleTrainingStore;
 }

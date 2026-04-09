@@ -324,6 +324,9 @@ export class NocturnalWorkflowManager implements WorkflowManager {
         // When principleId is missing, Selector will choose a principle from training store.
         this.logger.info(`[PD:NocturnalWorkflow] Calling executeNocturnalReflectionAsync for full pipeline (principleId=${principleId ?? 'auto-select'})`);
 
+        // #213: Wrap fire-and-forget Promise with .catch() to prevent
+        // unhandled promise rejections if anything throws outside the try-catch
+        // (e.g., during parameter construction or environment errors).
         Promise.resolve().then(async () => {
             try {
                 const result = await executeNocturnalReflectionAsync(
@@ -364,6 +367,11 @@ export class NocturnalWorkflowManager implements WorkflowManager {
                 this.logger.error(`[PD:NocturnalWorkflow] executeNocturnalReflectionAsync threw: ${String(err)}`);
                 this.store.recordEvent(workflowId, 'nocturnal_failed', null, 'terminal_error', String(err), { workflowId });
             }
+        }).catch((err) => {
+            // #213: Outer catch — catches errors from the fire-and-forget promise
+            // itself (e.g., if the async callback throws before entering try).
+            this.logger.error(`[PD:NocturnalWorkflow] Unhandled error in async pipeline for ${workflowId}: ${String(err)}`);
+            this.store.recordEvent(workflowId, 'nocturnal_failed', null, 'terminal_error', String(err), { workflowId });
         });
 
         return {

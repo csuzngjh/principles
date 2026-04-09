@@ -1,4 +1,4 @@
-import { EvolutionReducerImpl } from '../core/evolution-reducer.js';
+import { WorkspaceContext } from '../core/workspace-context.js';
 import type { PluginCommandContext } from '../openclaw-sdk.js';
 
 export function handlePrincipleRollbackCommand(ctx: PluginCommandContext): { text: string } {
@@ -12,7 +12,9 @@ export function handlePrincipleRollbackCommand(ctx: PluginCommandContext): { tex
     return { text: isZh ? '用法: /pd-principle-rollback <principleId> [reason]' : 'Usage: /pd-principle-rollback <principleId> [reason]' };
   }
 
-  const reducer = new EvolutionReducerImpl({ workspaceDir });
+  // #207/#210: Use WorkspaceContext to get evolutionReducer with stateDir
+  const wctx = WorkspaceContext.fromHookContext({ workspaceDir });
+  const reducer = wctx.evolutionReducer;
   const principle = reducer.getPrincipleById(principleId);
   if (!principle) {
     return { text: isZh ? `未找到原则: ${principleId}` : `Principle not found: ${principleId}` };
