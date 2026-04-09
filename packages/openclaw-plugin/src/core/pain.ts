@@ -174,7 +174,7 @@ export function trackPrincipleValue(
     trigger: string;
     valueMetrics?: { painPreventedCount: number; lastPainPreventedAt?: string; calculatedAt: string };
   }[],
-  updatePrincipleMetrics: (_id: string, _metrics: { painPreventedCount: number; lastPainPreventedAt: string; calculatedAt: string }) => void, // eslint-disable-line @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: callback params required by interface, actual values accessed via principle.id and principle.valueMetrics
+  updatePrincipleMetrics: (_id: string, _metrics: { painPreventedCount: number; lastPainPreventedAt: string; calculatedAt: string }) => void, // eslint-disable-line no-unused-vars -- Reason: callback params required by interface, actual values accessed via principle.id and principle.valueMetrics
 ): void {
   try {
     const activePrinciples = getActivePrinciples();

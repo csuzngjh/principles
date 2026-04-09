@@ -1660,8 +1660,9 @@ export class TrajectoryRegistry {
     this.instances.clear();
   }
 
-  /* eslint-disable @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: db parameter name in callback type signature */
+  /* eslint-disable no-unused-vars -- Reason: db parameter name in callback type signature */
   static use<T>(workspaceDir: string, fn: (_db: TrajectoryDatabase) => T, opts: Omit<TrajectoryDatabaseOptions, 'workspaceDir'> = {}): T {
+  /* eslint-enable no-unused-vars */
     const normalized = path.resolve(workspaceDir);
     const existing = this.instances.get(normalized);
     if (existing) {

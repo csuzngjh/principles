@@ -76,6 +76,7 @@ export interface LoadedImplementation {
   implId: string;
   ruleId: string;
   meta: RuleHostMeta;
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: _input parameter name in interface type definition intentionally unused - actual implementation uses different param names
+  /* eslint-disable no-unused-vars -- Reason: _input parameter name in interface type definition intentionally unused - actual implementation uses different param names */
   evaluate: (_input: RuleHostInput) => RuleHostResult;
+  /* eslint-enable no-unused-vars */
 }

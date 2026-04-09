@@ -36,8 +36,9 @@ import type {
 import type { Implementation } from '../types/principle-tree-schema.js';
 
 export interface RuleHostLogger {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: logger callback param name intentionally unused - callback only invoked for side effects
+  /* eslint-disable no-unused-vars -- Reason: logger callback param name intentionally unused - callback only invoked for side effects */
   warn?: (_message: string) => void;
+  /* eslint-enable no-unused-vars */
 }
 
 export class RuleHost {
@@ -217,11 +218,12 @@ export class RuleHost {
 
       // Return a loaded implementation that wraps the compiled evaluate
       // with the actual helpers from the input at evaluation time
-      /* eslint-disable @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: type cast params intentionally unused - they're just type annotations, actual function uses different params */
+      /* eslint-disable no-unused-vars -- Reason: type cast params intentionally unused - they're just type annotations, actual function uses different params */
       const rawEvaluate = moduleExports.evaluate as (
         _input: RuleHostInput,
         _helpers: ReturnType<typeof createRuleHostHelpers>
       ) => RuleHostResult;
+      /* eslint-enable no-unused-vars */
 
       return {
         implId: impl.id,
