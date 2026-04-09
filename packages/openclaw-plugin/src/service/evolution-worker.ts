@@ -829,17 +829,13 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             workspaceDir: wctx.workspaceDir,
                             stateDir: wctx.stateDir,
                             logger: api?.logger || logger,
+                            runtimeAdapter: new OpenClawTrinityRuntimeAdapter(api!),
                         });
                         try {
                             // Force-expire this specific workflow regardless of TTL
-                            nocturnalMgr.store.updateWorkflowState(task.resultRef, 'expired');
-                            nocturnalMgr.store.recordEvent(
+                            nocturnalMgr.expireWorkflow(
                                 task.resultRef,
-                                'nocturnal_expired',
-                                'active',
-                                'expired',
                                 `Sleep reflection task ${task.id} timed out after ${Math.round(age / 60000)} min`,
-                                { parentTaskId: task.id, timeoutMs: timeout }
                             );
                             logger?.info?.(`[PD:EvolutionWorker] Expired nocturnal workflow ${task.resultRef} for timed-out sleep task ${task.id}`);
                         } finally {
@@ -946,6 +942,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                                         // Review fix: Accept both snake_case and camelCase from LLM output
                                         detectorMetadata: principle.detector_metadata || principle.detectorMetadata,
                                         abstractedPrinciple: principle.abstracted_principle,
+                                        coreAxiomId: principle.core_axiom_id || principle.coreAxiomId,
                                     });
                                     if (principleId) {
                                         logger.info(`[PD:EvolutionWorker] Created principle ${principleId} from marker fallback for task ${task.id}`);
@@ -1042,7 +1039,8 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                                     // Review fix: Accept both snake_case and camelCase from LLM output
                                     detectorMetadata: principle.detector_metadata || principle.detectorMetadata,
                                     abstractedPrinciple: principle.abstracted_principle,
-                                });
+                                        coreAxiomId: principle.core_axiom_id || principle.coreAxiomId,
+                                    });
                                 if (principleId) {
                                     logger.info(`[PD:EvolutionWorker] Created principle ${principleId} from late marker for task ${task.id}`);
                                     principleCreated = true;

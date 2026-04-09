@@ -335,27 +335,33 @@ async function copyCoreTemplates(options: CopyCoreTemplatesOptions): Promise<num
  */
 async function copyPrinciplesLayer(
   pluginDir: string,
+  language: string,
   workspaceDir: string,
   mode: 'smart' | 'force'
 ): Promise<number> {
   logger.step('复制身份层文件');
-  
+
   let count = 0;
   const principlesSrc = path.join(pluginDir, 'templates', 'workspace', '.principles');
   const principlesDest = path.join(workspaceDir, '.principles');
-  
+
   if (!existsSync(principlesSrc)) {
     logger.warn('身份层模板目录不存在');
     return 0;
   }
-  
+
   // 复制所有文件
   const files = readdirSync(principlesSrc);
-  
+
+  // Custom logic for THINKING_OS.md language support
+  const langThinkingOsSrc = path.join(pluginDir, 'templates', 'langs', language, 'principles', 'THINKING_OS.md');
+
   for (const file of files) {
-    const srcPath = path.join(principlesSrc, file);
-    const destPath = path.join(principlesDest, file);
-    
+    let srcPath = path.join(principlesSrc, file);
+    if (file === 'THINKING_OS.md' && existsSync(langThinkingOsSrc)) {
+      srcPath = langThinkingOsSrc;
+    }
+    const destPath = path.join(principlesDest, file);    
     // 跳过目录（models 目录单独处理）
     if (statSync(srcPath).isDirectory()) {
       continue;
@@ -538,6 +544,7 @@ export async function install(options: InstallOptions, pluginDir: string): Promi
     spinner.text = '复制身份层...';
     const principlesCount = await copyPrinciplesLayer(
       pluginDir,
+      options.language,
       options.workspaceDir,
       options.mode
     );

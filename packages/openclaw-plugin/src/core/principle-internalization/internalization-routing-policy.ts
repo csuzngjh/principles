@@ -95,7 +95,20 @@ export function recommendInternalizationRoute(
   );
   const adherence = precomputedAdherence ?? computePrincipleAdherence(principle, ruleMetrics);
   const evidenceSummary = buildEvidenceSummary(principle, adherence, ruleMetrics);
-  const reasonCodes: string[] = [];
+    const reasonCodes: string[] = [];
+  
+  // ── Axiom-based heuristic modifiers ──
+  const axiomId = principle.principle.coreAxiomId;
+  let codeBoost = 0;
+  let skillBoost = 0;
+  if (axiomId === 'T-05' || axiomId === 'T-08') {
+    codeBoost = 15;
+    reasonCodes.push('axiom_governance_enforcement');
+  } else if (axiomId === 'T-01' || axiomId === 'T-03' || axiomId === 'T-04') {
+    skillBoost = 15;
+    reasonCodes.push('axiom_knowledge_guidance');
+  }
+
   const highRisk = isHighRisk(principle.principle.priority, principle.principle.evaluability);
   const hasSparseEvidence =
     principle.summary.replayReportCount < Math.max(1, principle.rules.length) &&
@@ -145,9 +158,12 @@ export function recommendInternalizationRoute(
 
   const prefersSkillRoute =
     supportsSkillRoute(principle) &&
-    !highRisk &&
-    principle.principle.evaluability !== 'deterministic' &&
-    principle.summary.repeatedErrorSignal <= 2;
+    (
+      (!highRisk &&
+      principle.principle.evaluability !== 'deterministic' &&
+      principle.summary.repeatedErrorSignal <= 2) ||
+      (skillBoost > 0 && codeBoost === 0)
+    ) && codeBoost === 0;
 
   if (prefersSkillRoute) {
     reasonCodes.push('cheapest_viable_skill');
@@ -159,7 +175,7 @@ export function recommendInternalizationRoute(
       principleId: principle.principle.id,
       route: 'skill',
       confidence: clampToPercentage(
-        62 + adherence.repeatedErrorReductionScore * 0.12 - adherence.averageFalsePositiveRate * 0.15,
+        62 + adherence.repeatedErrorReductionScore * 0.12 - adherence.averageFalsePositiveRate * 0.15 + skillBoost,
       ),
       reasonCodes,
       evidenceSummary,
@@ -182,7 +198,8 @@ export function recommendInternalizationRoute(
       58 +
         evidenceSummary.highestRuleCoverageGap * 0.2 +
         principle.summary.repeatedErrorSignal * 6 +
-        (highRisk ? 8 : 0),
+        (highRisk ? 8 : 0) +
+        codeBoost,
     ),
     reasonCodes,
     evidenceSummary,
