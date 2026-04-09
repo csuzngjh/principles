@@ -7,6 +7,7 @@ import { getEvolutionQueryService } from '../service/evolution-query-service.js'
 import { HealthQueryService } from '../service/health-query-service.js';
 import { TrajectoryRegistry } from '../core/trajectory.js';
 import { getCentralDatabase } from '../service/central-database.js';
+import { CentralOverviewService } from '../service/central-overview-service.js';
 
 const ROUTE_PREFIX = '/plugins/principles';
 const API_PREFIX = `${ROUTE_PREFIX}/api`;
@@ -137,61 +138,12 @@ function handleApiRoute(
   if (pathname === `${API_PREFIX}/central/overview` && method === 'GET') {
     const days = parseDays(url.searchParams.get('days'));
     return done(() => {
-      const centralDb = getCentralDatabase();
-      const stats = centralDb.getOverviewStats();
-      const trend = centralDb.getDailyTrend(days);
-      const regressions = centralDb.getTopRegressions(5);
-      const thinkingStats = centralDb.getThinkingModelStats();
-      const workspaces = centralDb.getWorkspaces();
-      
-      return {
-        workspaceDir: 'central',
-        generatedAt: new Date().toISOString(),
-        dataFreshness: workspaces.length > 0 ? (workspaces[0].lastSync ?? null) : null,
-        dataSource: 'central_aggregated_db',
-        runtimeControlPlaneSource: 'all_workspaces',
-        summary: {
-          repeatErrorRate: stats.totalToolCalls > 0 
-            ? stats.totalFailures / stats.totalToolCalls 
-            : 0,
-          userCorrectionRate: stats.totalToolCalls > 0 
-            ? stats.totalCorrections / stats.totalToolCalls 
-            : 0,
-          pendingSamples: stats.pendingSamples,
-          approvedSamples: stats.approvedSamples,
-          thinkingCoverageRate: stats.totalToolCalls > 0 
-            ? stats.totalThinkingEvents / stats.totalToolCalls 
-            : 0,
-          painEvents: stats.totalPainEvents,
-          principleEventCount: 0,
-          gateBlocks: 0,
-          taskOutcomes: 0,
-        },
-        dailyTrend: trend,
-        topRegressions: regressions,
-        sampleQueue: {
-          counters: {
-            pending: stats.pendingSamples,
-            approved: stats.approvedSamples,
-            rejected: stats.rejectedSamples,
-          },
-          preview: [],
-        },
-        thinkingSummary: {
-          activeModels: thinkingStats.activeModels,
-          dormantModels: thinkingStats.totalModels - thinkingStats.activeModels,
-          effectiveModels: thinkingStats.models.filter(m => m.coverageRate > 0.1).length,
-          coverageRate: stats.totalToolCalls > 0 
-            ? stats.totalThinkingEvents / stats.totalToolCalls 
-            : 0,
-        },
-        centralInfo: {
-          workspaceCount: stats.workspaceCount,
-          enabledWorkspaceCount: stats.enabledWorkspaceCount,
-          workspaces: stats.workspaceNames,
-          enabledWorkspaces: stats.enabledWorkspaceNames,
-        },
-      };
+      const centralOverviewService = new CentralOverviewService();
+      try {
+        return centralOverviewService.getOverview(days);
+      } finally {
+        centralOverviewService.dispose();
+      }
     });
   }
 
@@ -566,129 +518,6 @@ function handleApiRoute(
     } finally {
       service.dispose();
     }
-  }
-
-  // Temporary debug endpoint for data source tracing (Phase 16)
-  // Guarded by PD_DEBUG env var — MUST be removed before production
-  if (pathname === `${API_PREFIX}/debug/shapes` && method === 'GET') {
-    if (process.env.PD_DEBUG !== '1') {
-      json(res, 404, { error: 'not_found' });
-      return true;
-    }
-
-    function extractShape(obj: unknown, prefix = ''): Record<string, string> {
-      const result: Record<string, string> = {};
-      if (obj === null) { result[prefix || '(root)'] = 'null'; return result; }
-      if (typeof obj !== 'object') { result[prefix || '(root)'] = typeof obj; return result; }
-      if (Array.isArray(obj)) {
-        result[prefix || '(root)'] = 'array';
-        if (obj.length > 0) {
-          const elem = obj[0];
-          if (typeof elem === 'object' && elem !== null) {
-            Object.assign(result, extractShape(elem, prefix ? `${prefix}[0]` : '[0]'));
-          } else {
-            result[prefix ? `${prefix}[0]` : '[0]'] = typeof elem;
-          }
-        }
-        return result;
-      }
-      for (const [key, val] of Object.entries(obj as Record<string, unknown>)) {
-        const path = prefix ? `${prefix}.${key}` : key;
-        if (val === null) {
-          result[path] = 'null';
-        } else if (Array.isArray(val)) {
-          result[path] = `array<${val.length}>`;
-          if (val.length > 0 && typeof val[0] === 'object' && val[0] !== null) {
-            Object.assign(result, extractShape(val[0], `${path}[0]`));
-          } else if (val.length > 0) {
-            result[`${path}[0]`] = typeof val[0];
-          }
-        } else if (typeof val === 'object') {
-          Object.assign(result, extractShape(val, path));
-        } else {
-          result[path] = typeof val;
-        }
-      }
-      return result;
-    }
-
-    const shapes: Record<string, unknown> = {};
-    const days = 30;
-
-    // Overview endpoints
-    try {
-      shapes['/api/overview'] = { fields: extractShape(service.getOverview(days)), topLevelKeys: Object.keys(service.getOverview(days)) };
-    } catch (e) { shapes['/api/overview'] = { error: String(e) }; }
-
-    try {
-      const dbgWorkspaceDir2 = api.resolvePath('.');
-      const hs2 = new (require('../service/health-query-service.js').HealthQueryService)(dbgWorkspaceDir2);
-      shapes['/api/overview/health'] = { fields: extractShape(hs2.getOverviewHealth()), topLevelKeys: Object.keys(hs2.getOverviewHealth()) };
-      hs2.dispose();
-    } catch (e) { shapes['/api/overview/health'] = { error: String(e) }; }
-
-    try {
-      shapes['/api/samples'] = { fields: extractShape(service.listSamples({ page: 1, pageSize: 5 })), topLevelKeys: Object.keys(service.listSamples({ page: 1, pageSize: 5 })) };
-    } catch (e) { shapes['/api/samples'] = { error: String(e) }; }
-
-    try {
-      shapes['/api/thinking'] = { fields: extractShape(service.getThinkingOverview()), topLevelKeys: Object.keys(service.getThinkingOverview()) };
-    } catch (e) { shapes['/api/thinking'] = { error: String(e) }; }
-
-    try {
-      const dbgWorkspaceDir = api.resolvePath('.');
-      const hs = new (require('../service/health-query-service.js').HealthQueryService)(dbgWorkspaceDir);
-      shapes['/api/feedback/gfi'] = { fields: extractShape(hs.getFeedbackGfi()), topLevelKeys: Object.keys(hs.getFeedbackGfi()) };
-      shapes['/api/feedback/empathy-events'] = { fields: extractShape(hs.getFeedbackEmpathyEvents(5)), topLevelKeys: Object.keys(hs.getFeedbackEmpathyEvents(5)) };
-      shapes['/api/feedback/gate-blocks'] = { fields: extractShape(hs.getFeedbackGateBlocks(5)), topLevelKeys: Object.keys(hs.getFeedbackGateBlocks(5)) };
-      shapes['/api/gate/stats'] = { fields: extractShape(hs.getGateStats()), topLevelKeys: Object.keys(hs.getGateStats()) };
-      shapes['/api/gate/blocks'] = { fields: extractShape(hs.getGateBlocks(5)), topLevelKeys: Object.keys(hs.getGateBlocks(5)) };
-      hs.dispose();
-    } catch (e) { shapes['/api/feedback/*'] = { error: String(e) }; }
-
-    try {
-      const es = require('../service/evolution-query-service.js').getEvolutionQueryService(api);
-      shapes['/api/evolution/tasks'] = { fields: extractShape(es.getTasks({ page: 1, pageSize: 3 })), topLevelKeys: Object.keys(es.getTasks({ page: 1, pageSize: 3 })) };
-      shapes['/api/evolution/events'] = { fields: extractShape(es.getEvents({ limit: 3 })), topLevelKeys: Object.keys(es.getEvents({ limit: 3 })) };
-      shapes['/api/evolution/stats'] = { fields: extractShape(es.getStats(days)), topLevelKeys: Object.keys(es.getStats(days)) };
-    } catch (e) { shapes['/api/evolution/*'] = { error: String(e) }; }
-
-    // Central overview (inline assembly, same as production route)
-    try {
-      const centralDb = getCentralDatabase();
-      const stats = centralDb.getOverviewStats();
-      const trend = centralDb.getDailyTrend(days);
-      const regressions = centralDb.getTopRegressions(5);
-      const thinkingStats = centralDb.getThinkingModelStats();
-      const workspaces = centralDb.getWorkspaces();
-      const centralOverview = {
-        workspaceDir: 'central',
-        generatedAt: new Date().toISOString(),
-        dataFreshness: workspaces.length > 0 ? (workspaces[0].lastSync ?? null) : null,
-        dataSource: 'central_aggregated_db',
-        runtimeControlPlaneSource: 'all_workspaces',
-        summary: {
-          repeatErrorRate: stats.totalToolCalls > 0 ? stats.totalFailures / stats.totalToolCalls : 0,
-          userCorrectionRate: stats.totalToolCalls > 0 ? stats.totalCorrections / stats.totalToolCalls : 0,
-          pendingSamples: stats.pendingSamples,
-          approvedSamples: stats.approvedSamples,
-          thinkingCoverageRate: stats.totalToolCalls > 0 ? stats.totalThinkingEvents / stats.totalToolCalls : 0,
-          painEvents: stats.totalPainEvents,
-          principleEventCount: 0,
-          gateBlocks: 0,
-          taskOutcomes: 0,
-        },
-        dailyTrend: trend,
-        topRegressions: regressions,
-        sampleQueue: { counters: { pending: stats.pendingSamples, approved: stats.approvedSamples, rejected: stats.rejectedSamples }, preview: [] },
-        thinkingSummary: { activeModels: thinkingStats.activeModels, dormantModels: thinkingStats.totalModels - thinkingStats.activeModels, effectiveModels: thinkingStats.models.filter((m: any) => m.coverageRate > 0.1).length, coverageRate: stats.totalToolCalls > 0 ? stats.totalThinkingEvents / stats.totalToolCalls : 0 },
-        centralInfo: { workspaceCount: stats.workspaceCount, enabledWorkspaceCount: stats.enabledWorkspaceCount, workspaces: stats.workspaceNames, enabledWorkspaces: stats.enabledWorkspaceNames },
-      };
-      shapes['/api/central/overview'] = { fields: extractShape(centralOverview), topLevelKeys: Object.keys(centralOverview), hasCentralInfo: true };
-    } catch (e) { shapes['/api/central/overview'] = { error: String(e) }; }
-
-    json(res, 200, { generatedAt: new Date().toISOString(), shapes });
-    return true;
   }
 
   service.dispose();
