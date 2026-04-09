@@ -240,17 +240,18 @@ export class EvolutionReducerImpl implements EvolutionReducer {
       return null;
     }
 
-    // Evaluability defaults to 'manual_only' — the only way to get auto-trainable
-    // is to explicitly provide valid detectorMetadata.
-    // Enforce: deterministic/weak_heuristic requires complete detectorMetadata to be present.
-    let evaluability: PrincipleEvaluatorLevel = params.evaluability ?? 'manual_only';
-    if (evaluability !== 'manual_only' && !isCompleteDetectorMetadata(params.detectorMetadata)) {
+    // Evaluability defaults to 'weak_heuristic' — allows basic pattern-matching
+    // evaluation without requiring full detectorMetadata.
+    // #212: Only 'deterministic' requires complete detectorMetadata.
+    // 'weak_heuristic' can work with just the trigger pattern.
+    let evaluability: PrincipleEvaluatorLevel = params.evaluability ?? 'weak_heuristic';
+    if (evaluability === 'deterministic' && !isCompleteDetectorMetadata(params.detectorMetadata)) {
       SystemLogger.log(
         this.workspaceDir,
         'EVALUABILITY_DOWNGRADED',
-        `Principle for painId "${params.painId}" requested evaluability="${evaluability}" without detectorMetadata — downgrading to "manual_only". Provide valid detectorMetadata to enable auto-training.`
+        `Principle for painId "${params.painId}" requested evaluability="deterministic" without detectorMetadata — downgrading to "weak_heuristic". Provide valid detectorMetadata for deterministic evaluation.`
       );
-      evaluability = 'manual_only';
+      evaluability = 'weak_heuristic';
     }
 
     // Check if a principle already exists for this painId
@@ -268,16 +269,17 @@ export class EvolutionReducerImpl implements EvolutionReducer {
       existingPrinciple.version += 1;
       if (params.evaluability !== undefined) {
         // Apply normalization (params.evaluability may be invalid without complete metadata)
+        // #212: Only 'deterministic' requires detectorMetadata; 'weak_heuristic' does not.
         const normalizedEvaluability = (() => {
-          if (params.evaluability === 'manual_only' || isCompleteDetectorMetadata(params.detectorMetadata)) {
-            return params.evaluability;
+          if (params.evaluability === 'deterministic' && !isCompleteDetectorMetadata(params.detectorMetadata)) {
+            SystemLogger.log(
+              this.workspaceDir,
+              'EVALUABILITY_DOWNGRADED',
+              `Principle update for painId "${params.painId}" requested evaluability="deterministic" without detectorMetadata — downgrading to "weak_heuristic".`
+            );
+            return 'weak_heuristic';
           }
-          SystemLogger.log(
-            this.workspaceDir,
-            'EVALUABILITY_DOWNGRADED',
-            `Principle update for painId "${params.painId}" requested evaluability="${params.evaluability}" without detectorMetadata — downgrading to "manual_only".`
-          );
-          return 'manual_only';
+          return params.evaluability;
         })();
         existingPrinciple.evaluability = normalizedEvaluability;
       }
