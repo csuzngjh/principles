@@ -107,6 +107,7 @@ export function loadKeywordStore(stateDir: string, language?: 'zh' | 'en'): Empa
 /**
  * Saves the keyword store to disk.
  */
+// eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between read/write helpers - reordering would break logical grouping
 export function saveKeywordStore(stateDir: string, store: EmpathyKeywordStore): void {
   const filePath = path.join(stateDir, KEYWORD_STORE_FILE);
   const dir = path.dirname(filePath);

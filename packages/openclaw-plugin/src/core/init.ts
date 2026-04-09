@@ -108,6 +108,7 @@ export function ensureWorkspaceTemplates(api: OpenClawPluginApi, workspaceDir: s
  * Standard recursive copy that preserves directory structure.
  * Special handling: maps 'okr' directory to 'memory/okr' for runtime compatibility.
  */
+// eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between copy helpers - reordering would break logical grouping
 function copyRecursiveSync(srcDir: string, destDir: string, api: OpenClawPluginApi | { logger: PluginLogger }) {
     const items = fs.readdirSync(srcDir);
 
