@@ -81,7 +81,7 @@ function computeRuntimeShadowTaskFingerprint(event: PluginHookSubagentSpawningEv
   return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex').slice(0, 16);
 }
 
-import { resolveValidWorkspaceDir } from './core/workspace-dir-validation.js';
+import { resolveValidWorkspaceDir, validateWorkspaceDir } from './core/workspace-dir-validation.js';
 
 function resolveToolHookWorkspaceDir(
   ctx: { workspaceDir?: string; agentId?: string },
@@ -99,6 +99,20 @@ const plugin = {
     api.logger.info(`Principles Disciple Plugin registered. (Path: ${api.rootDir ?? '(unknown)'})`);
     PathResolver.setExtensionRoot(api.rootDir ?? '.');
     api.registerHttpRoute(createPrinciplesConsoleRoute(api));
+
+    // ── Startup Health Check: Verify workspaceDir resolution ──
+    // Catches OpenClaw context bugs early (e.g., missing workspaceDir in tool hooks)
+    setTimeout(() => {
+      const testCtx = { agentId: 'main' };
+      const toolWorkspaceDir = resolveToolHookWorkspaceDir(testCtx, api, 'startup.health_check');
+      const toolIssue = validateWorkspaceDir(toolWorkspaceDir);
+      if (toolIssue) {
+        api.logger.error(`[PD:health] Tool hook workspaceDir is INVALID: "${toolWorkspaceDir}" - ${toolIssue}`);
+        api.logger.error(`[PD:health] Tool hook events will be written to the WRONG .state directory!`);
+      } else {
+        api.logger.info(`[PD:health] Tool hook workspaceDir OK: "${toolWorkspaceDir}"`);
+      }
+    }, 1000);
 
     const language = (api.pluginConfig?.language as string) || 'en';
 
