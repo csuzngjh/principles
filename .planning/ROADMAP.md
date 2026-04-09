@@ -1,12 +1,12 @@
-# Roadmap: v1.9.2 Lint 错误修复与代码质量改进
+# Roadmap: v1.9.3 剩余 Lint 修复
 
 ## Overview
 
-**Milestone:** v1.9.2
-**Goal:** 消除 lint 错误，修复不良设计，恢复 CI green
-**Phases:** 3
+**Milestone:** v1.9.3
+**Goal:** 完成 v1.9.2 未竟的 lint 修复工作，实现 CI green
+**Phases:** 1
 **Granularity:** Standard
-**Coverage:** 11/11 requirements mapped
+**Coverage:** 4/4 requirements mapped
 
 ## Phases
 
@@ -17,95 +17,34 @@
 - [x] **Phase 18: Loop/Samples + Feedback Page Fixes** - Fix /api/samples, /api/feedback/* data sources
 - [x] **Phase 19: Gate Monitor + Frontend Field Mapping** - Fix /api/gate/stats, /api/gate/blocks
 - [x] **Phase 20: End-to-End Validation** - Validate all 4 pages, add regression tests
-- [ ] **Phase 3: Manual Remediation** - Fix remaining errors and bad patterns (GAP CLOSURE ACTIVE)
+- [ ] **Phase 03: Manual Remediation (Continuation)** - Execute eslint-disable suppression for remaining errors, mechanical fixes, CI verification
 
 ## Phase Details
 
-### Phase 1: ESLint Configuration
+### Phase 03: Manual Remediation (Continuation)
 
-**Goal:** ESLint v10 flat config covers all TypeScript source files with proper extension rule configuration
+**Goal:** Execute eslint-disable suppression strategy for remaining ~700 errors, fix prefer-destructuring mechanically, achieve CI green
 
-**Depends on:** None
+**Depends on:** Phase 02 (Auto-fix Baseline - complete in v1.9.2)
 
-**Requirements:** LINT-01, LINT-02, LINT-03, LINT-04
+**Requirements:** LINT-11, LINT-12, LINT-13, LINT-14
 
 **Success Criteria** (what must be TRUE):
-1. `eslint.config.js` exists using ESLint v10 flat config format and covers all TypeScript source files
-2. `eslint --print-config` on a .ts file shows rules apply consistently in CI and local environments
-3. All deprecated `eslint-env` comments migrated to flat config `globals` declarations
-4. `@typescript-eslint/*` extension rules properly disable core equivalents to prevent double-reporting
+1. prefer-destructuring errors fixed mechanically (~50 errors)
+2. All other lint errors suppressed with eslint-disable comments containing `-- Reason:`
+3. CI lint step passes with 0 errors
+4. SUPPRESSION-LEDGER.md updated documenting all suppressions
 
-**Plans:** 1 plan
-
-Plans:
-- [x] 01-01-PLAN.md -- ESLint v10 flat config at repo root covering packages/**/*.ts
-
-### Phase 2: Auto-fix Baseline
-
-**Goal:** Auto-fixable lint errors resolved, eslint-disable comments audited, all diffs reviewed
-
-**Depends on:** Phase 1
-
-**Requirements:** LINT-05, LINT-06, LINT-07
-
-### Phase 16: Data Source Tracing
-
-**Goal:** Map all 4 pages to API endpoints, route handlers, service methods, and DB queries. Document actual response shapes vs TypeScript type declarations.
-**Requirements**: TRACE-01, TRACE-02
-**Depends on:** None
-**Plans:** 1 plan
+**Plans:** 1 plan (continuation of v1.9.2 03-05-PLAN.md)
 
 Plans:
-- [x] 16-01-PLAN.md — Map all 4 pages to API endpoints and DB queries
-
-### Phase 17: Overview Page Data Fix
-
-**Goal:** Fix `/api/central/overview` inline route assembly, `/api/overview` ControlUiQueryService, and `/api/overview/health` HealthQueryService.
-**Requirements**: OVER-01, OVER-02, OVER-03
-**Depends on:** Phase 16
-**Plans:** 2 plans
-
-Plans:
-- [x] 17-01-PLAN.md — Fix /api/central/overview with CentralOverviewService
-- [x] 17-02-PLAN.md — Fix /api/overview/health GFI persistence
-
-### Phase 18: Loop/Samples + Feedback Page Fixes
-
-**Goal:** Fix `/api/samples`, `/api/samples/:id`, `/api/feedback/gfi`, `/api/feedback/empathy-events`, `/api/feedback/gate-blocks` data sources and field mappings.
-**Requirements**: LOOP-01, LOOP-02, FB-01, FB-02, FB-03
-**Depends on:** Phase 16
-**Plans:** 2 plans
-
-Plans:
-- [x] 18-01-PLAN.md — Verify /api/samples and /api/samples/:id data flows
-- [x] 18-02-PLAN.md — Verify /api/feedback/gfi, empathy-events, gate-blocks data flows
-
-### Phase 19: Gate Monitor + Frontend Field Mapping
-
-**Goal:** Fix `/api/gate/stats`, `/api/gate/blocks` data sources. Fix all frontend TypeScript types and component field accessors to match actual backend responses.
-**Requirements**: GATE-01, GATE-02, FE-01, FE-02
-**Depends on:** Phase 16
-**Plans:** 2 plans
-
-Plans:
-- [x] 19-01-PLAN.md — Verify /api/gate/stats and /api/gate/blocks backend service layer
-- [x] 19-02-PLAN.md — Verify frontend TypeScript types and component field accessors
-
-### Phase 20: End-to-End Validation
-
-**Goal:** Validate all 4 pages display correct data after fixes. Add regression tests to prevent future data source drift.
-**Requirements**: E2E-01, E2E-02
-**Depends on:** Phases 17, 18, 19
-**Plans:** 1/1 plans complete
-
-Plans:
-- [x] 20-01-PLAN.md — Create regression tests for all 4 pages' API endpoints
+- [ ] 03-05-PLAN.md -- GAP CLOSURE: Execute eslint-disable suppression for CI green
 
 ---
 
 *Last updated: 2026-04-09 after Phase 20 planning*
 
-## v1.9.2: Lint 错误修复与代码质量改进
+## v1.9.2: Lint 错误修复与代码质量改进 (Historical)
 
 **Success Criteria** (what must be TRUE):
 1. `eslint --fix` runs without error on auto-fixable issues (import order, unused imports, unused variables)
@@ -146,45 +85,31 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. ESLint Configuration | 1/1 | Complete | Yes |
-| 2. Auto-fix Baseline | 1/1 | Complete | Yes |
-| 3. Manual Remediation | 4/5 | Gap Closure | Partial |
+| 03. Manual Remediation | 0/1 | Pending | No |
 
 ## Coverage Map
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| LINT-01 | Phase 1 | Complete |
-| LINT-02 | Phase 1 | Complete |
-| LINT-03 | Phase 1 | Complete |
-| LINT-04 | Phase 1 | Complete |
-| LINT-05 | Phase 2 | Complete |
-| LINT-06 | Phase 2 | Complete |
-| LINT-07 | Phase 2 | Complete |
-| LINT-08 | Phase 3 | Partial (Gap Closure) |
-| LINT-09 | Phase 3 | Partial (Gap Closure) |
-| LINT-10 | Phase 3 | Deferred to v2 |
-| LINT-11 | Phase 3 | Pending (Gap Closure) |
+| LINT-11 | 03 | Pending |
+| LINT-12 | 03 | Pending |
+| LINT-13 | 03 | Pending |
+| LINT-14 | 03 | Pending |
 
-**Total:** 11/11 requirements mapped
+**Total:** 4/4 requirements mapped
 
-## Gap Closure Summary
+## Gap Closure from v1.9.2
 
-**Issue:** Plans 03-01 through 03-04 attempted REFACTORING to fix lint errors but 687 errors remain across 57 files.
-
-**Root Cause:** The codebase has extensive violations of style rules (max-params, no-use-before-define, no-explicit-any) that cannot be practically refactored without significant architectural changes.
-
-**Gap Closure Strategy:** Suppress all uncountable errors with eslint-disable comments containing documented reasons. This is legitimate because:
-1. The codebase was functional before linting
-2. These are style/preference issues, not bugs
-3. CI green is achievable by suppressing with documented reasons
-
-**Remaining Error Distribution (687 errors):**
+**Remaining from v1.9.2:**
 - ~50: prefer-destructuring (mechanically fixable)
 - ~637: require eslint-disable suppression (max-params, no-use-before-define, no-explicit-any, etc.)
+- ~13: no-unused-vars (partial fix in 03-03)
 
-**Plan 03-05 Approach:**
+**Plan 03-05 Approach (from v1.9.2):**
 1. Mechanically fix prefer-destructuring
 2. Suppress all other categories with eslint-disable -- Reason:
 3. Final CI verification must show 0 errors
->>>>>>> origin/main
+
+**Deferred to future phases:**
+- LINT-09: Inline helpers extraction (需要架构级重构)
+- LINT-10: Complexity rules (项目约定，延期到 v2)

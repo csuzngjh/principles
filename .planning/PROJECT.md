@@ -67,9 +67,34 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 
 ## Current Milestone
 
-### v1.9.1: WebUI 数据源修复
+### v1.9.3: 剩余 Lint 修复
 
 **Status:** Defining requirements
+
+**Goal:** 完成 v1.9.2 未竟的 lint 修复工作，实现 CI green
+
+**Key Features:**
+- 执行 eslint-disable suppression 策略，消除 ~700 个剩余 lint 错误
+- prefer-destructuring 机械化修复 (~50 errors)
+- 最终 CI lint 验证通过
+
+**Key Context from v1.9.2:**
+- eslint.config.js 已配置完成 (Phase 1)
+- eslint --fix 自动化修复已完成 (Phase 2)
+- 03-01 到 03-04 refactoring 尝试完成但 gap closure 放弃
+- 03-05-PLAN.md suppression 策略已规划但未执行
+- ~700 errors remain across 57 files
+
+**Deferred to future:**
+- LINT-09 (inline helpers extraction)
+- LINT-10 (complexity rules)
+
+**Phase Start:** 延续 v1.9.2 编号 (Phase 03 继续)
+
+---
+### v1.9.1: WebUI 数据源修复
+
+**Status:** Deferred
 
 **Goal:** 排查并修复 WebUI 所有页面（Overview / Loop / Feedback / Gate Monitor）的数据源问题，确保展示数据正确
 
@@ -84,12 +109,10 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 - 数据源问题根因未知，需要系统性排查
 - 保持 API 向后兼容
 
-**Phase Start:** 延续当前编号（上一个 Phase 15）
-
 ---
 ### v1.7: PD Task Manager（已废弃）
 
 **Status:** Superseded — 从未执行，被 v1.9.0 替代
 
 ---
-*Last updated: 2026-04-08 after v1.9.1 milestone initialized*
+*Last updated: 2026-04-09 after v1.9.3 milestone initialized*
