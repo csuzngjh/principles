@@ -24,7 +24,7 @@ function scanEnvironment(wctx: WorkspaceContext): any {
         available: true,
         version: versionLine.trim(),
       };
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Reason: catch parameter intentionally unused - we only care that the command failed
+      // eslint-disable-next-line no-unused-vars -- Reason: catch parameter intentionally unused - we only care that the command failed
     } catch (_e) {
       tools[tool.name] = { available: false };
     }

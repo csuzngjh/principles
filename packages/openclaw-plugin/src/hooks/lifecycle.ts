@@ -4,9 +4,10 @@ import * as readline from 'readline';
 import { buildPainFlag, writePainFlag } from '../core/pain.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { PD_DIRS } from '../core/paths.js';
-import {
-  extractWorkingMemory,
-  mergeWorkingMemory,
+import { 
+  extractWorkingMemory, 
+  mergeWorkingMemory, 
+  type WorkingMemorySnapshot 
 } from '../core/focus-history.js';
 import type { PluginHookBeforeResetEvent, PluginHookBeforeCompactionEvent, PluginHookAfterCompactionEvent, PluginHookAgentContext } from '../openclaw-sdk.js';
 
@@ -122,7 +123,7 @@ export async function extractPainFromSessionFile(sessionFile: string, ctx: Plugi
     try {
       rl.close();
       fileStream.destroy();
-    } catch (_e) { // eslint-disable-line @typescript-eslint/no-unused-vars -- Reason: intentionally unused - cleanup errors ignored
+    } catch (_e) {
       // Ignore cleanup errors
     }
   }
@@ -176,7 +177,7 @@ export async function handleBeforeCompaction(
   if (!ctx.workspaceDir) return;
 
   const wctx = WorkspaceContext.fromHookContext(ctx);
-  const [dateStr] = new Date().toISOString().split('T');
+  const dateStr = new Date().toISOString().split('T')[0];
   const checkpointPath = path.join(ctx.workspaceDir, PD_DIRS.MEMORY, `${dateStr}.md`);
   const log =
     `\n## [${new Date().toISOString()}] Pre-Compaction Checkpoint\n` +
@@ -313,8 +314,8 @@ export async function handleAfterCompaction(
 ): Promise<void> {
   if (!ctx.workspaceDir) return;
 
-  const [dateStrPost] = new Date().toISOString().split('T');
-  const checkpointPath = path.join(ctx.workspaceDir, PD_DIRS.MEMORY, `${dateStrPost}.md`);
+  const dateStr = new Date().toISOString().split('T')[0];
+  const checkpointPath = path.join(ctx.workspaceDir, PD_DIRS.MEMORY, `${dateStr}.md`);
   const log =
     `- Post-Compaction Complete. Reduced active context to ${event.messageCount} messages.\n`;
 

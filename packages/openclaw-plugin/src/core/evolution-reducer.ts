@@ -661,8 +661,7 @@ export class EvolutionReducerImpl implements EvolutionReducer {
     });
   }
 
-  private onPainDetected(data: PainDetectedData, _eventTs: string): void { // eslint-disable-line @typescript-eslint/no-unused-vars -- Reason: event timestamp intentionally unused
-    const trigger = String(data.reason ?? data.source ?? 'unknown trigger');
+  private onPainDetected(data: PainDetectedData, _eventTs: string): void {
     const trigger = String(data.reason ?? data.source ?? 'unknown trigger');
 
     // Defense in depth: protocol/system tokens must never become principles,

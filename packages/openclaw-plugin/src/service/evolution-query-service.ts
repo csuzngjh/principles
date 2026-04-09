@@ -340,21 +340,21 @@ export class EvolutionQueryService {
     const activityByDay = new Map<string, { created: number; completed: number }>();
     for (let i = 0; i < days; i++) {
       const day = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
-      const [dayStr] = day.toISOString().split('T');
+      const dayStr = day.toISOString().split('T')[0];
       activityByDay.set(dayStr, { created: 0, completed: 0 });
     }
 
     for (const task of recentTasks) {
       const [createdDay] = task.createdAt.split('T');
       if (activityByDay.has(createdDay)) {
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Reason: has() check guarantees entry exists
-        activityByDay.get(createdDay)!.created++;
+        const entry = activityByDay.get(createdDay)!;
+        entry.created++;
       }
       if (task.completedAt) {
         const [completedDay] = task.completedAt.split('T');
         if (activityByDay.has(completedDay)) {
-          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Reason: has() check guarantees entry exists
-          activityByDay.get(completedDay)!.completed++;
+          const entry = activityByDay.get(completedDay)!;
+          entry.completed++;
         }
       }
     }
@@ -394,7 +394,7 @@ const serviceCache = new Map<string, EvolutionQueryService>();
  */
 export function getEvolutionQueryService(trajectory: TrajectoryDatabase): EvolutionQueryService {
   // 使用 trajectory 的 dbPath 作为缓存键
-  const cacheKey = (trajectory as unknown as { dbPath?: string }).dbPath || 'default';
+  const cacheKey = (trajectory as any).dbPath || 'default';
   const cached = serviceCache.get(cacheKey);
   if (cached) {
     return cached;

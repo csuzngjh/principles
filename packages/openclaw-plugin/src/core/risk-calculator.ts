@@ -6,7 +6,7 @@ export type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 
 export interface FileModification {
     toolName: string;
-    params: Record<string, unknown>;
+    params: any;
 }
 
 export function estimateLineChanges(modification: FileModification): number {

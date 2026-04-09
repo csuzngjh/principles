@@ -970,6 +970,13 @@ export interface TrinityResult {
 // Internal Types for Trinity Execution
 // ---------------------------------------------------------------------------
 
+/**
+ * Enriched candidate after Philosopher judgment.
+ */
+interface EnrichedCandidate extends DreamerCandidate {
+  judgment: PhilosopherJudgment;
+}
+
 // ---------------------------------------------------------------------------
 // Stub Stage Implementations (Phase 2 — no real subagent calls)
 // ---------------------------------------------------------------------------

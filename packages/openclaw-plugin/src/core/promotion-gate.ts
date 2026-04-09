@@ -47,7 +47,21 @@ import { withLock } from '../utils/file-lock.js';
 import {
   getCheckpoint,
   getEvalSummary,
+  listEvalSummaries,
+  getCheckpointLineage,
 } from './model-training-registry.js';
+import {
+  getDeployment,
+  getActiveCheckpointForProfile,
+  rollbackDeployment,
+} from './model-deployment-registry.js';
+import {
+  type TrainableWorkerProfile,
+} from './external-training-contract.js';
+import {
+  computeShadowStats,
+  type ShadowStats,
+} from './shadow-observation-registry.js';
 
 // ---------------------------------------------------------------------------
 // Constants

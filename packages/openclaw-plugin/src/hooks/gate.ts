@@ -31,7 +31,7 @@ import { checkProgressiveTrustGate } from './progressive-trust-gate.js';
 import { recordGateBlockAndReturn } from './gate-block-helper.js';
 import { RuleHost } from '../core/rule-host.js';
 import type { RuleHostInput } from '../core/rule-host-types.js';
-import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult, PluginLogger } from '../openclaw-sdk.js';
+import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult } from '../openclaw-sdk.js';
 import {
   AGENT_TOOLS,
   BASH_TOOLS_SET,
@@ -42,7 +42,7 @@ import { getEvolutionEngine } from '../core/evolution-engine.js';
 
 export function handleBeforeToolCall(
   event: PluginHookBeforeToolCallEvent,
-  ctx: PluginHookToolContext & { workspaceDir?: string; pluginConfig?: Record<string, unknown>; logger?: Partial<PluginLogger> }
+  ctx: PluginHookToolContext & { workspaceDir?: string; pluginConfig?: Record<string, unknown>; logger?: any }
 ): PluginHookBeforeToolCallResult | void {
   const logger = ctx.logger || console;
 
