@@ -1,53 +1,136 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
 import type { OverviewResponse, CentralHealthResponse, WorkspaceHealthEntry } from '../types';
-import { Sparkline, GroupedBarChart, TimeRangeSelector, StatusBadge } from '../charts';
+import { Sparkline, GroupedBarChart, TimeRangeSelector, DonutChart, BulletChart, GaugeChart, PrincipleStack, QueueBar, StatusBadge } from '../charts';
 import { useI18n } from '../i18n/ui';
 import { formatPercent, formatDate } from '../utils/format';
 import { WorkspaceConfig } from '../components/WorkspaceConfig';
 import { Loading, ErrorState } from '../components';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 
-function WorkspaceHealthCard({ entry }: { entry: WorkspaceHealthEntry }) {
+/**
+ * WorkspaceHealthPanel - Full health dashboard for a single workspace
+ * Uses real chart components (Bullet, Gauge, Stacked Bar, Donut) instead of text-only cards.
+ */
+
+function WorkspaceHealthPanel({ entry }: { entry: WorkspaceHealthEntry }) {
   const { t } = useI18n();
   const h = entry.health;
+  const totalPrinciples = h.principles.candidate + h.principles.probation + h.principles.active + h.principles.deprecated;
+  const totalQueue = h.queue.pending + h.queue.inProgress + h.queue.completed;
+
+  const gfiStatus: 'success' | 'warning' | 'error' =
+    h.gfi.current >= h.gfi.threshold ? 'error' : h.gfi.current >= h.gfi.threshold * 0.7 ? 'warning' : 'success';
 
   return (
-    <section style={{ marginBottom: 'var(--space-4)' }}>
-      <h4 style={{ margin: '0 0 var(--space-2) 0', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-        {entry.workspaceName}
-      </h4>
-      <div className="kpi-grid">
-        <article className="panel kpi" style={{ borderLeft: `3px solid ${h.gfi.current >= h.gfi.threshold ? 'var(--error)' : 'var(--success)'}` }}>
-          <span className="label"><svg width="10" height="10" viewBox="0 0 10 10" style={{marginRight: '6px', verticalAlign: 'middle'}}><circle cx="5" cy="5" r="5" fill={h.gfi.current >= h.gfi.threshold ? 'var(--error)' : 'var(--success)'}/></svg>{t('overview.health.gfi')}</span>
-          <span className="value">{h.gfi.current}</span>
-          <span>{t('overview.health.threshold')}: {h.gfi.threshold} | {t('overview.health.peakToday')}: {h.gfi.peakToday}</span>
-        </article>
-        <article className="panel kpi" style={{ borderLeft: `3px solid ${h.painFlag.active ? 'var(--warning)' : 'var(--success)'}` }}>
-          <span className="label"><svg width="10" height="10" viewBox="0 0 10 10" style={{marginRight: '6px', verticalAlign: 'middle'}}><circle cx="5" cy="5" r="5" fill={h.painFlag.active ? 'var(--warning)' : 'var(--success)'}/></svg>{t('overview.health.painFlag')}</span>
-          <span className="value">{h.painFlag.active ? t('overview.health.active') : t('overview.health.normal')}</span>
-          <span>{h.painFlag.source ? `${t('overview.health.source')}: ${h.painFlag.source}` : t('overview.health.noActivePain')}</span>
-        </article>
-        <article className="panel kpi" style={{ borderLeft: '3px solid var(--info)' }}>
-          <span className="label"><svg width="10" height="10" viewBox="0 0 10 10" style={{marginRight: '6px', verticalAlign: 'middle'}}><circle cx="5" cy="5" r="5" fill="var(--info)"/></svg>{t('overview.health.trustStage')}</span>
-          <span className="value">{h.trust.stageLabel}</span>
-          <span>{t('overview.health.stage')} {h.trust.stage} | {t('overview.health.score')}: {h.trust.score}</span>
-        </article>
-        <article className="panel kpi" style={{ borderLeft: '3px solid var(--accent)' }}>
-          <span className="label"><svg width="10" height="10" viewBox="0 0 10 10" style={{marginRight: '6px', verticalAlign: 'middle'}}><circle cx="5" cy="5" r="5" fill="var(--accent)"/></svg>{t('overview.health.epTier')}</span>
-          <span className="value">{h.evolution.tier}</span>
-          <span>{t('overview.health.points')}: {h.evolution.points}</span>
-        </article>
-        <article className="panel kpi" style={{ borderLeft: '3px solid var(--success)' }}>
-          <span className="label"><svg width="10" height="10" viewBox="0 0 10 10" style={{marginRight: '6px', verticalAlign: 'middle'}}><circle cx="5" cy="5" r="5" fill="var(--success)"/></svg>{t('overview.health.principlesTotal')}</span>
-          <span className="value">{h.principles.candidate + h.principles.probation + h.principles.active + h.principles.deprecated}</span>
-          <span>{t('overview.health.candidate')}: {h.principles.candidate} | {t('overview.health.probation')}: {h.principles.probation} | {t('overview.health.active2')}: {h.principles.active} | {t('overview.health.deprecated')}: {h.principles.deprecated}</span>
-        </article>
-        <article className="panel kpi" style={{ borderLeft: `3px solid ${h.queue.pending > 5 ? 'var(--warning)' : 'var(--success)'}` }}>
-          <span className="label"><svg width="10" height="10" viewBox="0 0 10 10" style={{marginRight: '6px', verticalAlign: 'middle'}}><circle cx="5" cy="5" r="5" fill={h.queue.pending > 5 ? 'var(--warning)' : 'var(--success)'}/></svg>{t('overview.health.queueBacklog')}</span>
-          <span className="value">{h.queue.pending}</span>
-          <span>{t('overview.health.pending')}: {h.queue.pending} | {t('overview.health.inProgress')}: {h.queue.inProgress} | {t('overview.health.completed')}: {h.queue.completed}</span>
-        </article>
+    <section className="panel" style={{ marginBottom: 'var(--space-5)' }}>
+      <div className="panel-header">
+        <div className="panel-header-left">
+          <h3 style={{ fontSize: '0.95rem', fontWeight: 600 }}>{entry.workspaceName}</h3>
+          <StatusBadge variant={h.painFlag.active ? 'warning' : 'success'}>
+            {h.painFlag.active ? `${h.painFlag.source}` : 'Healthy'}
+          </StatusBadge>
+        </div>
+      </div>
+      <div className="panel-content">
+        {/* Row 1: GFI (wide) | Trust Gauge | Evolution */}
+        <div className="grid" style={{ gridTemplateColumns: '2fr 1fr 1fr', gap: 'var(--space-4)', marginBottom: 'var(--space-4)' }}>
+          {/* GFI Bullet Chart */}
+          <div>
+            <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              {t('overview.health.gfi')}
+            </div>
+            <BulletChart
+              value={h.gfi.current}
+              target={h.gfi.threshold}
+              peak={h.gfi.peakToday}
+              max={Math.max(h.gfi.threshold * 2, 150)}
+              width={280}
+            />
+            <div style={{ display: 'flex', gap: 'var(--space-3)', marginTop: 4, fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
+              <span>当前: <strong style={{ color: `var(--${gfiStatus})` }}>{h.gfi.current}</strong></span>
+              <span>阈值: {h.gfi.threshold}</span>
+              <span>峰值: {h.gfi.peakToday}</span>
+            </div>
+          </div>
+
+          {/* Trust Gauge */}
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              {t('overview.health.trustStage')}
+            </div>
+            <GaugeChart
+              value={h.trust.score}
+              label={h.trust.stageLabel}
+              sublabel={`${t('overview.health.stage')} ${h.trust.stage}`}
+              size={90}
+            />
+          </div>
+
+          {/* Evolution */}
+          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
+            <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              {t('overview.health.epTier')}
+            </div>
+            <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--accent)' }}>{h.evolution.tier}</div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{h.evolution.points} pts</div>
+          </div>
+        </div>
+
+        {/* Row 2: Principles | Queue | PainFlag */}
+        <div className="grid" style={{ gridTemplateColumns: '1fr 1fr 1fr', gap: 'var(--space-4)' }}>
+          {/* Principles Distribution */}
+          <div>
+            <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              {t('overview.health.principlesTotal')}: {totalPrinciples}
+            </div>
+            <PrincipleStack
+              candidate={h.principles.candidate}
+              probation={h.principles.probation}
+              active={h.principles.active}
+              deprecated={h.principles.deprecated}
+            />
+          </div>
+
+          {/* Queue Status */}
+          <div>
+            <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              {t('overview.health.queueBacklog')}: {h.queue.pending}
+            </div>
+            <QueueBar
+              pending={h.queue.pending}
+              inProgress={h.queue.inProgress}
+              completed={h.queue.completed}
+            />
+          </div>
+
+          {/* PainFlag Detail */}
+          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+            <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Pain Flag
+            </div>
+            {h.painFlag.active ? (
+              <div style={{ padding: 'var(--space-2)', backgroundColor: 'rgba(184, 134, 11, 0.08)', borderRadius: 6, borderLeft: '3px solid var(--warning)' }}>
+                <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--warning)' }}>⚠ Active</div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: 2 }}>
+                  Source: {h.painFlag.source ?? 'unknown'}
+                </div>
+                {h.painFlag.score !== null && (
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                    Score: {h.painFlag.score}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div style={{ padding: 'var(--space-2)', backgroundColor: 'rgba(74, 124, 111, 0.08)', borderRadius: 6, borderLeft: '3px solid var(--success)' }}>
+                <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--success)' }}>✓ Normal</div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: 2 }}>
+                  {t('overview.health.noActivePain')}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </section>
   );
@@ -57,6 +140,7 @@ export function OverviewPage() {
   const { t } = useI18n();
   const [data, setData] = useState<OverviewResponse | null>(null);
   const [centralHealth, setCentralHealth] = useState<CentralHealthResponse | null>(null);
+  const [healthError, setHealthError] = useState('');
   const [error, setError] = useState('');
   const [syncing, setSyncing] = useState(false);
   const [days, setDays] = useState(30);
@@ -73,7 +157,14 @@ export function OverviewPage() {
 
   const loadAll = useCallback(async () => {
     await loadCentralOverview();
-    api.getCentralHealth().then(setCentralHealth).catch(() => {});
+    try {
+      const health = await api.getCentralHealth();
+      setCentralHealth(health);
+      setHealthError('');
+    } catch (err) {
+      console.error('[OverviewPage] Failed to load central health:', err);
+      setHealthError(String(err));
+    }
   }, [loadCentralOverview]);
 
   const { lastRefresh, isRefreshing, refresh } = useAutoRefresh(loadAll, {
@@ -104,7 +195,6 @@ export function OverviewPage() {
   const dailyTrend = data.dailyTrend ?? [];
 
   // Prepare sparkline data
-  const toolCallsTrend = dailyTrend.map(d => d.toolCalls);
   const failuresTrend = dailyTrend.map(d => d.failures);
   const correctionsTrend = dailyTrend.map(d => d.userCorrections);
   const thinkingTrend = dailyTrend.map(d => d.thinkingTurns);
@@ -130,19 +220,26 @@ export function OverviewPage() {
 
       <WorkspaceConfig />
 
-      {/* Per-Workspace Health Cards */}
+      {/* Per-Workspace Health Panels with Real Charts */}
       {centralHealth && centralHealth.workspaces.length > 0 ? (
         centralHealth.workspaces.map((entry) => (
-          <WorkspaceHealthCard key={entry.workspaceName} entry={entry} />
+          <WorkspaceHealthPanel key={entry.workspaceName} entry={entry} />
         ))
+      ) : healthError ? (
+        <section className="panel" style={{ marginBottom: 'var(--space-4)', borderColor: 'var(--error)' }}>
+          <div style={{ textAlign: 'center', padding: 'var(--space-4)', color: 'var(--error)' }}>
+            Failed to load health data: {healthError}
+          </div>
+        </section>
       ) : (
-        <section style={{ marginBottom: 'var(--space-4)' }}>
-          <div className="panel" style={{ textAlign: 'center', color: 'var(--text-secondary)' }}>
+        <section className="panel" style={{ marginBottom: 'var(--space-4)' }}>
+          <div style={{ textAlign: 'center', padding: 'var(--space-4)', color: 'var(--text-secondary)' }}>
             {t('overview.health.noWorkspaces') || 'No enabled workspaces found'}
           </div>
         </section>
       )}
 
+      {/* Aggregate KPI Grid */}
       <section className="kpi-grid">
         <article className="panel kpi">
           <span className="label">{t('overview.repeatErrorRate')}</span>

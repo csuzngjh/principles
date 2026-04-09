@@ -1659,3 +1659,46 @@ pre {
 .collapsible-panel.collapsed .panel-header {
   border-bottom: none;
 }
+
+/* ========================================================================
+ * New Chart Components (Phase: WebUI Redesign)
+ * BulletChart, GaugeChart, PrincipleStack, QueueBar
+ * ======================================================================== */
+
+/* BulletChart - GFI with threshold zones */
+.bullet-chart {
+  display: flex;
+  flex-direction: column;
+}
+
+.bullet-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 2px;
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  user-select: none;
+}
+
+/* GaugeChart - Trust semi-circle arc */
+.gauge-chart svg text {
+  font-family: inherit;
+}
+
+/* Panel header improvements */
+.panel-header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.panel-header-left h3 {
+  margin: 0;
+}
+
+/* Responsive grid for health panels */
+@media (max-width: 768px) {
+  .grid {
+    grid-template-columns: 1fr !important;
+  }
+}

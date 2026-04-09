@@ -584,3 +584,265 @@ export function CollapsiblePanel({
     </section>
   );
 }
+
+/**
+ * BulletChart - 子弹图（Performance vs Target）
+ * 用于展示 GFI vs 阈值，带安全/警告/危险分区
+ */
+
+interface BulletChartProps {
+  value: number;
+  target: number;
+  peak?: number;
+  max?: number;
+  width?: number;
+  height?: number;
+  unit?: string;
+}
+
+export function BulletChart({
+  value,
+  target,
+  peak,
+  max = 150,
+  width = 200,
+  height = 28,
+  unit = '',
+}: BulletChartProps) {
+  const pct = Math.min(value / max, 1);
+  const targetPct = Math.min(target / max, 1);
+  const peakPct = peak ? Math.min(peak / max, 1) : 0;
+
+  // Zones
+  const safeEnd = 0.47;  // 70/150
+  const warnEnd = 0.73;  // 110/150
+
+  const barH = height * 0.5;
+  const barY = (height - barH) / 2;
+
+  return (
+    <div className="bullet-chart">
+      <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
+        {/* Background zones */}
+        <rect x={0} y={barY} width={width * safeEnd} height={barH} fill="var(--success)" opacity={0.15} rx={3} />
+        <rect x={width * safeEnd} y={barY} width={width * (warnEnd - safeEnd)} height={barH} fill="var(--warning)" opacity={0.15} />
+        <rect x={width * warnEnd} y={barY} width={width * (1 - warnEnd)} height={barH} fill="var(--error)" opacity={0.15} rx={3} />
+
+        {/* Value bar */}
+        <rect
+          x={0} y={barY}
+          width={Math.max(width * pct, 2)}
+          height={barH}
+          fill={value >= target ? 'var(--error)' : value >= target * 0.7 ? 'var(--warning)' : 'var(--success)'}
+          rx={3}
+        >
+          <title>{`GFI: ${value}${unit} | 阈值: ${target}${unit}`}{peak ? ` | 今日峰值: ${peak}${unit}` : ''}</title>
+        </rect>
+
+        {/* Target marker */}
+        <line
+          x1={width * targetPct} y1={barY - 2}
+          x2={width * targetPct} y2={barY + barH + 2}
+          stroke="var(--text-primary)" strokeWidth={2} opacity={0.7}
+        />
+
+        {/* Peak marker */}
+        {peakPct > pct && (
+          <circle cx={width * peakPct} cy={height / 2} r={3} fill="var(--warning)" opacity={0.8} />
+        )}
+      </svg>
+      <div className="bullet-labels" style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2, fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
+        <span>0</span>
+        <span style={{ position: 'relative', left: `-${width * targetPct * 0.3}px` }}>阈值 {target}</span>
+        <span>{max}</span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * GaugeChart - 半圆仪表盘
+ * 用于展示 Trust Score (0-100)
+ */
+
+interface GaugeChartProps {
+  value: number;
+  max?: number;
+  label: string;
+  sublabel?: string;
+  size?: number;
+  segments?: Array<{ label: string; color: string; max: number }>;
+}
+
+export function GaugeChart({
+  value,
+  max = 100,
+  label,
+  sublabel,
+  size = 100,
+  segments = [
+    { label: 'Observer', color: 'var(--text-secondary)', max: 30 },
+    { label: 'Editor', color: 'var(--info)', max: 60 },
+    { label: 'Developer', color: 'var(--accent)', max: 80 },
+    { label: 'Architect', color: 'var(--success)', max: 100 },
+  ],
+}: GaugeChartProps) {
+  const pct = Math.min(value / max, 1);
+  const radius = (size - 16) / 2;
+  const center = size / 2;
+  const circumference = Math.PI * radius;
+  const arcLength = circumference * pct;
+
+  // Find current segment
+  const currentSeg = segments.find(s => value <= s.max) ?? segments[segments.length - 1];
+
+  return (
+    <div className="gauge-chart" style={{ textAlign: 'center' }}>
+      <svg width={size} height={size / 2 + 20} viewBox={`0 0 ${size} ${size / 2 + 20}`}>
+        {/* Background arc */}
+        <path
+          d={`M ${center - radius} ${center} A ${radius} ${radius} 0 0 1 ${center + radius} ${center}`}
+          fill="none"
+          stroke="var(--bg-sunken)"
+          strokeWidth={8}
+          strokeLinecap="round"
+        />
+        {/* Value arc */}
+        <path
+          d={`M ${center - radius} ${center} A ${radius} ${radius} 0 0 1 ${center + radius} ${center}`}
+          fill="none"
+          stroke={currentSeg.color}
+          strokeWidth={8}
+          strokeLinecap="round"
+          strokeDasharray={`${arcLength} ${circumference}`}
+          style={{ transition: 'stroke-dasharray 0.5s ease' }}
+        />
+        {/* Value text */}
+        <text
+          x={center} y={center - 4}
+          textAnchor="middle"
+          fontSize="18"
+          fontWeight="600"
+          fill="var(--text-primary)"
+        >
+          {value}
+        </text>
+      </svg>
+      <div style={{ fontSize: '0.75rem', color: currentSeg.color, fontWeight: 500 }}>{label}</div>
+      {sublabel && <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>{sublabel}</div>}
+    </div>
+  );
+}
+
+/**
+ * PrincipleStack - 原则状态堆叠
+ * 展示原则分布
+ */
+
+interface PrincipleStackProps {
+  candidate: number;
+  probation: number;
+  active: number;
+  deprecated: number;
+}
+
+export function PrincipleStack({ candidate, probation, active, deprecated }: PrincipleStackProps) {
+  const total = candidate + probation + active + deprecated;
+  const segs = [
+    { label: 'Active', value: active, color: 'var(--success)' },
+    { label: 'Probation', value: probation, color: 'var(--warning)' },
+    { label: 'Candidate', value: candidate, color: 'var(--info)' },
+    { label: 'Deprecated', value: deprecated, color: 'var(--text-secondary)' },
+  ].filter(s => s.value > 0);
+
+  if (total === 0) {
+    return (
+      <div className="principle-stack" style={{ textAlign: 'center', padding: 'var(--space-3)', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+        No principles yet
+      </div>
+    );
+  }
+
+  return (
+    <div className="principle-stack">
+      {/* Stacked bar */}
+      <div style={{ display: 'flex', height: 8, borderRadius: 4, overflow: 'hidden', marginBottom: 8 }}>
+        {segs.map(seg => (
+          <div
+            key={seg.label}
+            style={{
+              width: `${(seg.value / total) * 100}%`,
+              backgroundColor: seg.color,
+              transition: 'width 0.3s ease',
+            }}
+            title={`${seg.label}: ${seg.value}`}
+          />
+        ))}
+      </div>
+      {/* Legend */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, fontSize: '0.7rem' }}>
+        {segs.map(seg => (
+          <span key={seg.label} style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: seg.color, display: 'inline-block' }} />
+            <span style={{ color: 'var(--text-secondary)' }}>{seg.label}</span>
+            <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{seg.value}</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * QueueBar - 队列状态条
+ * 展示 pending/in-progress/completed
+ */
+
+interface QueueBarProps {
+  pending: number;
+  inProgress: number;
+  completed: number;
+}
+
+export function QueueBar({ pending, inProgress, completed }: QueueBarProps) {
+  const total = pending + inProgress + completed;
+  const items = [
+    { label: 'Pending', value: pending, color: 'var(--warning)' },
+    { label: 'In Progress', value: inProgress, color: 'var(--info)' },
+    { label: 'Completed', value: completed, color: 'var(--success)' },
+  ];
+
+  if (total === 0) {
+    return (
+      <div className="queue-bar" style={{ textAlign: 'center', padding: 'var(--space-3)', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+        Queue empty
+      </div>
+    );
+  }
+
+  return (
+    <div className="queue-bar">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {items.map(item => (
+          <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: item.color, flexShrink: 0 }} />
+            <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', minWidth: 55 }}>{item.label}</span>
+            <div style={{ flex: 1, height: 6, backgroundColor: 'var(--bg-sunken)', borderRadius: 3, overflow: 'hidden' }}>
+              <div
+                style={{
+                  width: `${(item.value / total) * 100}%`,
+                  height: '100%',
+                  backgroundColor: item.color,
+                  borderRadius: 3,
+                  minWidth: item.value > 0 ? 4 : 0,
+                  transition: 'width 0.3s ease',
+                }}
+              />
+            </div>
+            <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-primary)', minWidth: 20, textAlign: 'right' }}>{item.value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
