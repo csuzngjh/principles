@@ -14,7 +14,12 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
 import { resolvePdPath } from './paths.js';
+
+// ES Module compatible __dirname
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 export interface ThinkingOsDirective {
   id: string;         // "T-01"
@@ -88,9 +93,12 @@ export function loadThinkingOsFromWorkspace(
     }
   }
 
+  // ES Module compatible __dirname (must be inside function for bundler)
+  const currentDir = path.dirname(fileURLToPath(import.meta.url));
+
   // Priority 2: plugin template for the given language
   const templatePath = path.join(
-    path.dirname(path.dirname(path.dirname(__dirname))),
+    path.dirname(path.dirname(path.dirname(currentDir))),
     'templates',
     'langs',
     language,
@@ -109,7 +117,7 @@ export function loadThinkingOsFromWorkspace(
 
   // Priority 3: zh template as ultimate fallback
   const zhPath = path.join(
-    path.dirname(path.dirname(path.dirname(__dirname))),
+    path.dirname(path.dirname(path.dirname(currentDir))),
     'templates',
     'langs',
     'zh',

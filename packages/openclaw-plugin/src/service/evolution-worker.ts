@@ -1470,12 +1470,12 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             // #219: Include payload details for better diagnostics
                             let detailedError = `Workflow terminal_error: ${errorReason}`;
                             try {
-                                const payload = lastEvent?.payload_json ? JSON.parse(lastEvent.payload_json) : {};
+                                const payload = lastEvent?.payload ?? {};
                                 if (payload.skipReason) {
                                     detailedError += ` (skipReason: ${payload.skipReason})`;
                                 }
-                                if (payload.failures && payload.failures.length > 0) {
-                                    detailedError += ` | failures: ${payload.failures.slice(0, 3).join(', ')}`;
+                                if (payload.failures && Array.isArray(payload.failures) && payload.failures.length > 0) {
+                                    detailedError += ` | failures: ${(payload.failures as string[]).slice(0, 3).join(', ')}`;
                                 }
                             } catch { /* ignore parse errors */ }
                             sleepTask.lastError = detailedError;

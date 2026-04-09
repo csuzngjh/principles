@@ -154,12 +154,13 @@ const plugin = {
     api.on(
       'after_tool_call',
       (event: PluginHookAfterToolCallEvent, ctx: PluginHookToolContext): void => {
+        api.logger.info(`[PD:DEBUG] after_tool_call fired: tool=${event.toolName} toolCallId=${event.toolCallId}`);
         const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
         try {
           const pluginConfig = api.pluginConfig ?? {};
           // Pass api separately to handleAfterToolCall to maintain type safety
           handleAfterToolCall(event, { ...ctx, workspaceDir, pluginConfig }, api);
-          
+
           WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
             hook: 'after_tool_call'
           });
