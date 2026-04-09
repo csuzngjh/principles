@@ -12,7 +12,7 @@ import type { EventLog } from '../core/event-log.js';
 import { initPersistence, flushAllSessions } from '../core/session-tracker.js';
 import { acquireLockAsync, releaseLock as releaseImportedLock, type LockContext } from '../utils/file-lock.js';
 import { addDiagnosticianTask, completeDiagnosticianTask } from '../core/diagnostician-task-store.js';
-import { getEvolutionLogger, type EvolutionStage } from '../core/evolution-logger.js';
+import { getEvolutionLogger } from '../core/evolution-logger.js';
 import type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 export type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 import { LockUnavailableError } from '../config/index.js';
@@ -23,7 +23,6 @@ import { EmpathyObserverWorkflowManager } from './subagent-workflow/empathy-obse
 import { DeepReflectWorkflowManager } from './subagent-workflow/deep-reflect-workflow-manager.js';
 import { NocturnalWorkflowManager, nocturnalWorkflowSpec } from './subagent-workflow/nocturnal-workflow-manager.js';
 import { createNocturnalTrajectoryExtractor } from '../core/nocturnal-trajectory-extractor.js';
-import { isSubagentRuntimeAvailable } from '../utils/subagent-probe.js';
 import { isExpectedSubagentError } from './subagent-workflow/subagent-error-utils.js';
 
 const WORKFLOW_TTL_MS = 5 * 60 * 1000; // 5 minutes default TTL for helper workflows
@@ -328,6 +327,7 @@ export function createEvolutionTaskId(
         .substring(0, 8);
 }
 
+/* eslint-disable no-unused-vars -- Reason: type-level function parameter names in logger union type are documentation */
 export async function acquireQueueLock(resourcePath: string, logger: PluginLogger | { warn?: (message: string) => void; info?: (message: string) => void } | undefined, lockSuffix: string = EVOLUTION_QUEUE_LOCK_SUFFIX): Promise<() => void> {
     try {
         const ctx: LockContext = await acquireLockAsync(resourcePath, {
@@ -344,6 +344,7 @@ export async function acquireQueueLock(resourcePath: string, logger: PluginLogge
     }
 }
 
+/* eslint-disable no-unused-vars -- Reason: type-level function parameter names in logger union type are documentation */
 async function requireQueueLock(resourcePath: string, logger: PluginLogger | { warn?: (message: string) => void; info?: (message: string) => void } | undefined, scope: string, lockSuffix: string = EVOLUTION_QUEUE_LOCK_SUFFIX): Promise<() => void> {
     try {
         return await acquireQueueLock(resourcePath, logger, lockSuffix);
@@ -365,11 +366,13 @@ function findRecentDuplicateTask(
     now: number,
     reason?: string
 ): EvolutionQueueItem | undefined {
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: function is defined later in file but used in helper for consistency
     const key = normalizePainDedupKey(source, preview, reason);
     return queue.find((task) => {
         if (task.status === 'completed') return false;
         const taskTime = new Date(task.enqueued_at || task.timestamp).getTime();
         if (!Number.isFinite(taskTime) || (now - taskTime) > PAIN_QUEUE_DEDUP_WINDOW_MS) return false;
+        // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: function is defined later in file but used in helper for consistency
         return normalizePainDedupKey(task.source, task.trigger_text_preview || '', task.reason) === key;
     });
 }
@@ -387,7 +390,6 @@ export function purgeStaleFailedTasks(
     queue: EvolutionQueueItem[],
     logger: PluginLogger,
 ): { purged: number; remaining: number; byReason: Record<string, number> } {
-    const beforeCount = queue.length;
     const cutoff = Date.now() - STALE_FAILED_TASK_MAX_AGE_MS;
     const byReason: Record<string, number> = {};
 
@@ -830,6 +832,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             workspaceDir: wctx.workspaceDir,
                             stateDir: wctx.stateDir,
                             logger: api?.logger || logger,
+                            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Reason: api is guaranteed non-null in this recovery path where runtimeAdapter is required
                             runtimeAdapter: new OpenClawTrinityRuntimeAdapter(api!),
                         });
                         try {
@@ -883,11 +886,9 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                                 let serverDuplicate: string | null = null;
                                 if (existingPrinciples.length > 0) {
                                     const newTrigger = (principle.trigger_pattern || '').toLowerCase();
-                                    const newAction = (principle.action || '').toLowerCase();
                                     const newAbstracted = (principle.abstracted_principle || '').toLowerCase();
                                     for (const ep of existingPrinciples) {
                                         const epTrigger = (ep.trigger || '').toLowerCase();
-                                        const epAction = (ep.action || '').toLowerCase();
                                         const epAbstracted = (ep.abstractedPrinciple || '').toLowerCase();
                                         const epText = (ep.text || '').toLowerCase();
 
@@ -1609,6 +1610,7 @@ async function processDetectionQueue(wctx: WorkspaceContext, api: OpenClawPlugin
 // PAIN_CANDIDATES system removed (D-05, D-06): trackPainCandidate and processPromotion deleted
 // Evolution queue is now the single active pain→principle path
 
+/* eslint-disable no-unused-vars -- Reason: type-level function parameter names in logger union type and unused workspaceResolve key are documentation/signature */
 export async function registerEvolutionTaskSession(
     workspaceResolve: (key: string) => string,
     taskId: string,
@@ -1661,12 +1663,14 @@ export async function registerEvolutionTaskSession(
  * Production evidence shows directive stopped updating on 2026-03-22 and is stale.
  */
 
+/* eslint-disable no-unused-vars -- Reason: interface method parameters are type signatures */
 export interface ExtendedEvolutionWorkerService {
     id: string;
     api: OpenClawPluginApi | null;
     start: (ctx: OpenClawPluginServiceContext) => void | Promise<void>;
     stop?: (ctx: OpenClawPluginServiceContext) => void | Promise<void>;
 }
+/* eslint-enable no-unused-vars */
 
 interface WorkerStatusReport {
     timestamp: string;
