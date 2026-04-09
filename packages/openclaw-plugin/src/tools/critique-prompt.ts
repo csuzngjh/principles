@@ -26,7 +26,7 @@ export function buildCritiquePromptV2(
         api?: OpenClawPluginApi;
     }
 ): string {
-    const { context, depth = 2, model_id, workspaceDir, api } = params;
+    const { context, depth = 2, model_id: _model_id, workspaceDir, api } = params;
     
     // 1. 确定工作区目录 (优先级：显式传入 > api.config > official API > api.resolvePath)
     const effectiveWorkspaceDir = workspaceDir

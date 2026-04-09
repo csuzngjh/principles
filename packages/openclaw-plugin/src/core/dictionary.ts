@@ -62,10 +62,10 @@ const DEFAULT_RULES: Record<string, PainRule> = {
 
 export class PainDictionary {
     private data: PainDictionaryData = { rules: {} };
-    private filePath: string;
-    private compiledRegex: Map<string, RegExp> = new Map();
+    private readonly filePath: string;
+    private readonly compiledRegex: Map<string, RegExp> = new Map();
 
-    constructor(private stateDir: string) {
+    constructor(private readonly stateDir: string) {
         this.filePath = path.join(stateDir, 'pain_dictionary.json');
     }
 
@@ -73,7 +73,7 @@ export class PainDictionary {
         if (fs.existsSync(this.filePath)) {
             try {
                 this.data = JSON.parse(fs.readFileSync(this.filePath, 'utf8'));
-            } catch (e) {
+            } catch {
                 console.error('[PD] Failed to parse pain_dictionary.json, using defaults.');
                 this.data = { rules: { ...DEFAULT_RULES } };
             }

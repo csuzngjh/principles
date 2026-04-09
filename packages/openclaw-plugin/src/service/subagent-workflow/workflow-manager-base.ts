@@ -251,7 +251,7 @@ export abstract class WorkflowManagerBase implements WorkflowManager {
     protected scheduleWaitPollWithRetry(
         workflowId: string,
         runId: string,
-        attempt: number = 0,
+        attempt = 0,
     ): void {
         const spec = this.workflowSpecs.get(workflowId);
         const staticTimeout = spec?.timeoutMs ?? this.defaultTimeoutMs;
@@ -308,6 +308,7 @@ export abstract class WorkflowManagerBase implements WorkflowManager {
         status: 'ok' | 'error' | 'timeout',
         error?: string
     ): Promise<void> {
+        // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in try, catch has early returns
         let workflow;
         try {
             workflow = this.store.getWorkflow(workflowId);

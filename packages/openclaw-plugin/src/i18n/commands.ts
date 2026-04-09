@@ -99,7 +99,7 @@ export function getCommandDescription(name: string, lang: string): string {
   if (!descriptions) {
     return name;
   }
-  return descriptions[normalizedLang] || descriptions['en'] || name;
+  return descriptions[normalizedLang] || descriptions.en || name;
 }
 
 /**
@@ -111,7 +111,7 @@ export function getAllCommandDescriptions(lang: string): Record<string, string> 
   const normalizedLang = normalizeLanguage(lang);
   const result: Record<string, string> = {};
   for (const [name, descriptions] of Object.entries(commandDescriptions)) {
-    result[name] = descriptions[normalizedLang] || descriptions['en'] || name;
+    result[name] = descriptions[normalizedLang] || descriptions.en || name;
   }
   return result;
 }

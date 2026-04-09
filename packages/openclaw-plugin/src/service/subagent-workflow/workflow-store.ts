@@ -293,24 +293,24 @@ export class WorkflowStore {
      * Get all stage outputs for a workflow (NOC-13 crash recovery).
      * Returns outputs ordered by created_at ascending.
      */
-    getStageOutputs(workflowId: string): Array<{
+    getStageOutputs(workflowId: string): {
         stage: string;
         output: DreamerOutput | PhilosopherOutput;
         idempotencyKey: string;
         createdAt: number;
-    }> {
+    }[] {
         const rows = this.db.prepare(`
             SELECT workflow_id, stage, output_json, idempotency_key, created_at
             FROM subagent_workflow_stage_outputs
             WHERE workflow_id = ?
             ORDER BY created_at ASC
-        `).all(workflowId) as Array<{
+        `).all(workflowId) as {
             workflow_id: string;
             stage: string;
             output_json: string;
             idempotency_key: string;
             created_at: number;
-        }>;
+        }[];
 
         return rows.map(row => ({
             workflowId: row.workflow_id,
@@ -371,7 +371,7 @@ export class WorkflowStore {
      * Get completion durations for a specific workflow type, ordered by most recent first.
      * Returns an array of duration_ms values for adaptive timeout calculation.
      */
-    getCompletionDurations(workflowType: string, limit: number = 50): number[] {
+    getCompletionDurations(workflowType: string, limit = 50): number[] {
         const rows = this.db.prepare(`
             SELECT duration_ms FROM subagent_workflows
             WHERE workflow_type = ?
@@ -380,7 +380,7 @@ export class WorkflowStore {
             AND duration_ms > 0
             ORDER BY created_at DESC
             LIMIT ?
-        `).all(workflowType, limit) as Array<{ duration_ms: number }>;
+        `).all(workflowType, limit) as { duration_ms: number }[];
 
         return rows.map(r => r.duration_ms);
     }

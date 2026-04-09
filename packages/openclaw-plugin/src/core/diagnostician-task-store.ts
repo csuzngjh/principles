@@ -71,19 +71,6 @@ function readTaskStore(stateDir: string): DiagnosticianTaskStore {
 }
 
 /**
- * Write the diagnostician task store to disk (atomic, with lock).
- */
-async function writeTaskStore(stateDir: string, store: DiagnosticianTaskStore): Promise<void> {
-  const filePath = resolveTasksPath(stateDir);
-
-  await withLockAsync(filePath, async () => {
-    const tmpPath = filePath + '.tmp';
-    fs.writeFileSync(tmpPath, JSON.stringify(store, null, 2), 'utf8');
-    fs.renameSync(tmpPath, filePath);
-  });
-}
-
-/**
  * Add a new diagnostician task to the store.
  * Overwrites if a task with the same ID already exists.
  * Read-modify-write is performed atomically inside the file lock.
@@ -150,7 +137,7 @@ function readTaskStoreSync(filePath: string): DiagnosticianTaskStore {
  */
 export function getPendingDiagnosticianTasks(
   stateDir: string,
-): Array<{ id: string; task: DiagnosticianTask }> {
+): { id: string; task: DiagnosticianTask }[] {
   const store = readTaskStore(stateDir);
   return Object.entries(store.tasks)
     .filter(([, task]) => task.status === 'pending')

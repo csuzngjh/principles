@@ -230,7 +230,7 @@ export const DEFAULT_SETTINGS: PainSettings = {
 
 export class PainConfig {
     private settings: PainSettings = { ...DEFAULT_SETTINGS };
-    private filePath: string;
+    private readonly filePath: string;
 
     constructor(stateDir: string) {
         this.filePath = path.join(stateDir, 'pain_settings.json');
@@ -242,7 +242,7 @@ export class PainConfig {
                 const loaded = JSON.parse(fs.readFileSync(this.filePath, 'utf8'));
                 this.settings = this.deepMerge(DEFAULT_SETTINGS, loaded);
                 this.validate(this.settings);
-            } catch (e) {
+            } catch {
                 console.error('[PD] Failed to parse pain_settings.json, using defaults.');
             }
         } else {

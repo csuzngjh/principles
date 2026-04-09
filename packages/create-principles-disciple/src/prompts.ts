@@ -103,16 +103,6 @@ async function promptFeatures(): Promise<string[]> {
 }
 
 /**
- * 确认覆盖配置
- */
-async function promptOverwriteConfig(): Promise<boolean> {
-  return await confirm({
-    message: '检测到已有配置，是否覆盖？',
-    default: false,
-  });
-}
-
-/**
  * 最终确认
  */
 async function promptConfirm(options: Partial<InstallOptions>): Promise<boolean> {

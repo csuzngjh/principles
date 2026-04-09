@@ -248,10 +248,7 @@ export function parseArtificerOutput(payload: string): ArtificerOutput | null {
       helperUsage: parsed.helperUsage.filter(
         (value): value is string => typeof value === 'string'
       ),
-      expectedDecision: parsed.expectedDecision as
-        | 'allow'
-        | 'block'
-        | 'requireApproval',
+      expectedDecision: parsed.expectedDecision,
       rationale: parsed.rationale,
       lineage: parsed.lineage,
     };

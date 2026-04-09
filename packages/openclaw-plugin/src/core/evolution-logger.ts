@@ -10,7 +10,7 @@
  * 2. evolution_events 表 (SQLite) - 结构化查询
  */
 
-import { createHash, randomBytes } from 'crypto';
+import { randomBytes } from 'crypto';
 import type { TrajectoryDatabase } from './trajectory.js';
 import { SystemLogger } from './system-logger.js';
 
@@ -131,7 +131,7 @@ export class EvolutionLogger {
         });
       } catch (err) {
         // Database write failure doesn't affect main flow, but log for diagnostics
-        // eslint-disable-next-line no-console
+         
         console.error(`[EvolutionLogger] Failed to write to trajectory: ${String(err)}`);
       }
     }
@@ -264,6 +264,7 @@ export class EvolutionLogger {
     durationMs?: number;
     principlesGenerated?: number;
   }): void {
+    // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in all if/else branches
     let summary: string;
     if (params.resolution === 'marker_detected' || params.resolution === 'late_marker_principle_created') {
       summary = `任务 ${params.taskId} 完成，已生成 ${params.principlesGenerated || 0} 条原则`;

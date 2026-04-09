@@ -5,13 +5,13 @@ export const PDTaskService: OpenClawPluginService = {
   id: 'principles-disciple-task-manager',
 
   async start(ctx: OpenClawPluginServiceContext): Promise<void> {
-    const workspaceDir = ctx.workspaceDir;
+    const {workspaceDir} = ctx;
     if (!workspaceDir) {
       ctx.logger?.warn?.(`[PD:TaskManager] No workspaceDir, skipping PD task reconciliation`);
       return;
     }
 
-    const logger = ctx.logger;
+    const {logger} = ctx;
     logger.info?.(`[PD:TaskManager] Starting PD task reconciliation...`);
 
     try {
@@ -35,6 +35,7 @@ export const PDTaskService: OpenClawPluginService = {
     }
   },
 
+  // eslint-disable-next-line no-unused-vars -- stop method required by service interface but no cleanup needed
   stop(_ctx: OpenClawPluginServiceContext): void {
   },
 };

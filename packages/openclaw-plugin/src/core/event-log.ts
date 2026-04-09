@@ -29,7 +29,7 @@ export class EventLog {
   private readonly statsFile: string;
   private readonly logger?: PluginLogger;
   
-  private statsCache: Map<string, DailyStats> = new Map();
+  private readonly statsCache: Map<string, DailyStats> = new Map();
   private eventBuffer: EventLogEntry[] = [];
   private readonly maxBufferSize = 20;
   private readonly flushIntervalMs = 30000;
@@ -518,7 +518,7 @@ export class EventLog {
  * Service to manage multiple EventLog instances by stateDir.
  */
 export class EventLogService {
-  private static instances: Map<string, EventLog> = new Map();
+  private static readonly instances: Map<string, EventLog> = new Map();
   
   static get(stateDir: string, logger?: PluginLogger): EventLog {
     let instance = this.instances.get(stateDir);

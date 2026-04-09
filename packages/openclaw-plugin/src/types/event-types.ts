@@ -245,11 +245,11 @@ export interface EmpathyEventStats {
     low: number;   // confidence < 0.5
   };
   /** Daily trend (last 7 days) */
-  dailyTrend: Array<{
+  dailyTrend: {
     date: string;
     count: number;
     score: number;
-  }>;
+  }[];
 }
 
 export interface GfiStats {

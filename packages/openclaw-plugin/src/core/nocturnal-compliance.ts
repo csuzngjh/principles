@@ -204,15 +204,6 @@ function normalizePathPosix(filePath: string): string {
   return filePath.replace(/\\/g, '/');
 }
 
-/**
- * Returns true if the file path matches any of the given patterns when normalized.
- */
-function pathMatches(filePath: string | undefined, patterns: RegExp[]): boolean {
-  if (!filePath) return false;
-  const normalized = normalizePathPosix(filePath);
-  return patterns.some((p) => p.test(normalized));
-}
-
 // ---------------------------------------------------------------------------
 // Opportunity Detection
 // ---------------------------------------------------------------------------
@@ -584,14 +575,14 @@ function detectT01Violation(session: SessionEvents): ViolationMatch {
     (call) =>
       EDIT_TOOLS.has(call.toolName) &&
       call.filePath !== undefined &&
-      !readFiles.has(normalizePathPosix(call.filePath!))
+      !readFiles.has(normalizePathPosix(call.filePath))
   );
 
   // If there were edits to unread files AND pain/failure followed → T-01 likely violated
   if (unreadEdits.length > 0) {
     const painOnUnreadEdit = session.painSignals.some(
       (p) =>
-        unreadEdits.some((e) => e.filePath !== undefined && p.source.includes(e.filePath!)) ||
+        unreadEdits.some((e) => e.filePath !== undefined && p.source.includes(e.filePath)) ||
         /structure|architecture|dependency|context|before.*edit|survey/i.test(p.reason ?? '')
     );
 

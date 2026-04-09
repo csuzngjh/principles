@@ -333,21 +333,21 @@ export interface WorkflowDebugSummary {
     cleanupState: 'none' | 'pending' | 'failed' | 'completed';
     lastObservedAt: number | null;
     metadata: WorkflowMetadata;
-    recentEvents: Array<{
+    recentEvents: {
         eventType: string;
         fromState: WorkflowState | null;
         toState: WorkflowState;
         reason: string;
         createdAt: number;
         payload: Record<string, unknown>;
-    }>;
+    }[];
     // NOC-16: Trinity stage states
-    trinityStageStates?: Array<{
+    trinityStageStates?: {
         stage: 'dreamer' | 'philosopher' | 'scribe';
         status: 'pending' | 'running' | 'completed' | 'failed';
         reason?: string;
         completedAt?: number;
-    }>;
+    }[];
 }
 
 // ── Convenience Re-exports ────────────────────────────────────────────────────

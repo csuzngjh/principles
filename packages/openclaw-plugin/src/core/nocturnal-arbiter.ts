@@ -22,8 +22,6 @@
  * - No LLM involvement — all checks are algorithmic
  */
 
-import type { NocturnalSessionSnapshot } from './nocturnal-trajectory-extractor.js';
-
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -218,7 +216,7 @@ export function validateDreamerOutput(output: unknown): TrinityStageValidationRe
     });
 
     // Check for duplicate candidateIndices
-    const indices = (obj.candidates as Array<Record<string, unknown>>)
+    const indices = (obj.candidates as Record<string, unknown>[])
       .map((c) => c.candidateIndex)
       .filter((i) => typeof i === 'number');
     const uniqueIndices = new Set(indices);
@@ -287,7 +285,7 @@ export function validatePhilosopherOutput(output: unknown): TrinityStageValidati
     });
 
     // Check ranks are unique and sequential (1, 2, 3...)
-    const ranks = (obj.judgments as Array<Record<string, unknown>>)
+    const ranks = (obj.judgments as Record<string, unknown>[])
       .map((j) => j.rank)
       .filter((r) => typeof r === 'number')
       .sort((a, b) => a - b);
@@ -495,7 +493,7 @@ export function validateArtifact(
   }
 
   // Rule 3: Required string fields must be present and non-empty
-  const requiredFields: Array<{ key: keyof RawReflectionArtifact; label: string }> = [
+  const requiredFields: { key: keyof RawReflectionArtifact; label: string }[] = [
     { key: 'artifactId', label: 'artifactId' },
     { key: 'sessionId', label: 'sessionId' },
     { key: 'principleId', label: 'principleId' },
@@ -522,7 +520,7 @@ export function validateArtifact(
 
   // Rule 4: Cross-validate principleId
   if (options.expectedPrincipleId !== undefined) {
-    const principleId = obj.principleId;
+    const {principleId} = obj;
     if (!isNonEmptyString(principleId)) {
       failures.push({ reason: 'principleId is required but missing', field: 'principleId' });
     } else if (String(principleId) !== options.expectedPrincipleId) {
@@ -535,7 +533,7 @@ export function validateArtifact(
 
   // Rule 5: Cross-validate sessionId
   if (options.expectedSessionId !== undefined) {
-    const sessionId = obj.sessionId;
+    const {sessionId} = obj;
     if (!isNonEmptyString(sessionId)) {
       failures.push({ reason: 'sessionId is required but missing', field: 'sessionId' });
     } else if (String(sessionId) !== options.expectedSessionId) {
@@ -547,7 +545,7 @@ export function validateArtifact(
   }
 
   // Rule 6: Check for placeholder values in text fields
-  const textFields: Array<keyof RawReflectionArtifact> = [
+  const textFields: (keyof RawReflectionArtifact)[] = [
     'badDecision',
     'betterDecision',
     'rationale',
@@ -569,14 +567,14 @@ export function validateArtifact(
   }
 
   // Rule 7: Check sourceSnapshotRef if present
-  const sourceSnapshotRef = obj.sourceSnapshotRef;
+  const {sourceSnapshotRef} = obj;
   if (sourceSnapshotRef !== undefined && !isNonEmptyString(sourceSnapshotRef)) {
     failures.push({ reason: 'Field "sourceSnapshotRef" must be a non-empty string if present', field: 'sourceSnapshotRef' });
   }
 
   // Rule 8: badDecision should not be identical to betterDecision
-  const badDecision = obj.badDecision;
-  const betterDecision = obj.betterDecision;
+  const {badDecision} = obj;
+  const {betterDecision} = obj;
   if (isNonEmptyString(badDecision) && isNonEmptyString(betterDecision)) {
     if (String(badDecision).trim() === String(betterDecision).trim()) {
       failures.push({
@@ -587,7 +585,7 @@ export function validateArtifact(
   }
 
   // Rule 9: Rationale should not be too short (needs explanation)
-  const rationale = obj.rationale;
+  const {rationale} = obj;
   if (isNonEmptyString(rationale) && String(rationale).trim().length < 20) {
     failures.push({
       reason: 'rationale is too short — must provide meaningful explanation',
@@ -596,7 +594,7 @@ export function validateArtifact(
   }
 
   // Rule 10: Validate optional reflection quality metrics (if present)
-  const thinkingModelDelta = obj.thinkingModelDelta;
+  const {thinkingModelDelta} = obj;
   if (thinkingModelDelta !== undefined && typeof thinkingModelDelta !== 'number') {
     failures.push({
       reason: 'thinkingModelDelta must be a number if present',
@@ -609,7 +607,7 @@ export function validateArtifact(
     });
   }
 
-  const planningRatioGain = obj.planningRatioGain;
+  const {planningRatioGain} = obj;
   if (planningRatioGain !== undefined && typeof planningRatioGain !== 'number') {
     failures.push({
       reason: 'planningRatioGain must be a number if present',
