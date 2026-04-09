@@ -4,6 +4,9 @@
   "description": "Principles Disciple - OpenClaw Plugin Monorepo",
   "private": true,
   "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "lint": "eslint packages/**/*.ts --ignore-pattern '**/*.test.ts' --ignore-pattern '**/*.spec.ts'",
     "ai-sprint": "node packages/openclaw-plugin/templates/langs/zh/skills/ai-sprint-orchestration/scripts/run.mjs",
