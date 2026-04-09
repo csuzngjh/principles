@@ -755,9 +755,7 @@ Next steps:
         }
 
         ({
-          delta,
-          baselineScore,
-          candidateScore,
+          delta: { delta, baselineScore, candidateScore },
           benchmarkId,
           verdict,
         } = benchmarkResult);

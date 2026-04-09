@@ -263,18 +263,6 @@ export const i18n = {
     emptyTitle: { zh: '选择一个思维模型', en: 'Select a thinking model' },
     emptyDesc: { zh: '点击左侧列表中的模型，查看场景分布和最近事件', en: 'Click a model from the list to inspect scenario coverage and recent events' },
 
-    // Detail sections
-    outcomeStats: { zh: '结果统计', en: 'Outcome Stats' },
-    scenarioDistribution: { zh: '场景分布', en: 'Scenario Distribution' },
-    recentEvents: { zh: '最近事件', en: 'Recent Events' },
-    noScenariosYet: { zh: '暂无场景', en: 'No scenarios yet' },
-
-    // Outcome stats
-    success: { zh: '成功', en: 'Success' },
-    failure: { zh: '失败', en: 'Failure' },
-    pain: { zh: '痛点', en: 'Pain' },
-    correction: { zh: '纠正', en: 'Correction' },
-
     // Table
     hits: { zh: '命中', en: 'Hits' },
     successRate: { zh: '成功率', en: 'Success Rate' },
