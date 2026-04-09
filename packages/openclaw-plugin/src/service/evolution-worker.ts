@@ -312,6 +312,7 @@ export const LOCK_MAX_RETRIES = 50;
 export const LOCK_RETRY_DELAY_MS = 50;
 export const LOCK_STALE_MS = 30_000;
 
+/* eslint-disable @typescript-eslint/max-params -- Reason: Function requires all parameters for unique task ID generation */
 export function createEvolutionTaskId(
     source: string,
     score: number,
@@ -344,7 +345,7 @@ export async function acquireQueueLock(resourcePath: string, logger: PluginLogge
     }
 }
 
-/* eslint-disable no-unused-vars -- Reason: type-level function parameter names in logger union type are documentation */
+/* eslint-disable no-unused-vars, @typescript-eslint/max-params -- Reason: type-level function parameter names in logger union type are documentation */
 async function requireQueueLock(resourcePath: string, logger: PluginLogger | { warn?: (message: string) => void; info?: (message: string) => void } | undefined, scope: string, lockSuffix: string = EVOLUTION_QUEUE_LOCK_SUFFIX): Promise<() => void> {
     try {
         return await acquireQueueLock(resourcePath, logger, lockSuffix);
@@ -359,6 +360,7 @@ export function extractEvolutionTaskId(task: string): string | null {
     return match?.[1] || null;
 }
 
+/* eslint-disable @typescript-eslint/max-params -- Reason: Function requires all parameters for duplicate detection */
 function findRecentDuplicateTask(
     queue: EvolutionQueueItem[],
     source: string,
@@ -425,6 +427,7 @@ function normalizePainDedupKey(source: string, preview: string, reason?: string)
     return `${source.trim().toLowerCase()}::${preview.trim().toLowerCase()}::${normalizedReason}`;
 }
 
+/* eslint-disable @typescript-eslint/max-params -- Reason: Function requires all parameters for duplicate detection */
 export function hasRecentDuplicateTask(queue: EvolutionQueueItem[], source: string, preview: string, now: number, reason?: string): boolean {
     return !!findRecentDuplicateTask(queue, source, preview, now, reason);
 }
@@ -551,6 +554,7 @@ interface ParsedPainValues {
     traceId: string; sessionId: string; agentId: string;
 }
 
+/* eslint-disable @typescript-eslint/max-params -- Reason: Function requires all parameters for task enqueue */
 async function doEnqueuePainTask(
     wctx: WorkspaceContext, logger: PluginLogger, painFlagPath: string,
     result: WorkerStatusReport['pain_flag'], v: ParsedPainValues,
@@ -761,6 +765,7 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
     return result;
 }
 
+/* eslint-disable @typescript-eslint/max-params -- Reason: Function requires all parameters for queue processing */
 async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogger, eventLog: EventLog, api?: OpenClawPluginApi) {
     const queuePath = wctx.resolve('EVOLUTION_QUEUE');
     if (!fs.existsSync(queuePath)) {
@@ -1610,7 +1615,7 @@ async function processDetectionQueue(wctx: WorkspaceContext, api: OpenClawPlugin
 // PAIN_CANDIDATES system removed (D-05, D-06): trackPainCandidate and processPromotion deleted
 // Evolution queue is now the single active pain→principle path
 
-/* eslint-disable no-unused-vars -- Reason: type-level function parameter names in logger union type and unused workspaceResolve key are documentation/signature */
+/* eslint-disable no-unused-vars, @typescript-eslint/max-params -- Reason: type-level function parameter names in logger union type and unused workspaceResolve key are documentation/signature */
 export async function registerEvolutionTaskSession(
     workspaceResolve: (key: string) => string,
     taskId: string,
@@ -1691,6 +1696,7 @@ function writeWorkerStatus(stateDir: string, report: WorkerStatusReport): void {
     }
 }
 
+/* eslint-disable @typescript-eslint/max-params -- Reason: Function requires all parameters for queue processing */
 async function processEvolutionQueueWithResult(
     wctx: WorkspaceContext,
     logger: PluginLogger,

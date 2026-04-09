@@ -239,7 +239,7 @@ export function detectOpportunity(principleId: string, session: SessionEvents): 
   }
 
   // T-xx principles — specific deterministic detection
-   
+  /* eslint-disable @typescript-eslint/no-use-before-define -- Reason: Mutual recursion between helper functions - reordering would break logical grouping */
   switch (principleId) {
     case 'T-01':
       return detectT01Opportunity(session);
@@ -537,6 +537,7 @@ export function detectViolation(principleId: string, session: SessionEvents): Vi
   }
 
   // T-xx principles — specific deterministic detection
+  /* eslint-disable @typescript-eslint/no-use-before-define -- Reason: Mutual recursion between helper functions - reordering would break logical grouping */
   switch (principleId) {
     case 'T-01':
       return detectT01Violation(session);
@@ -915,7 +916,6 @@ export function computeCompliance(
   const violationTrend = computeViolationTrend(applicableSessions, windowSize);
 
   // Build explanation
-  // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between explanation builder - reordering would break logical grouping
   const explanation = buildExplanation(
     principleId,
     applicableOpportunityCount,

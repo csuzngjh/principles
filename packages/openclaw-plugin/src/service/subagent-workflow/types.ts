@@ -145,6 +145,7 @@ export interface WorkflowHandle {
  * ```
  */
 export interface SubagentWorkflowSpec<TResult> {
+    /* eslint-disable no-unused-vars -- Reason: interface method params are type signatures, implementations use actual values */
     /** Unique identifier for this workflow type */
     workflowType: string;
     /** Which transport mechanism to use */
@@ -171,6 +172,7 @@ export interface SubagentWorkflowSpec<TResult> {
      * For runtime_direct: typically finalize only on 'ok', skip on 'timeout'/'error'.
      */
     shouldFinalizeOnWaitStatus: (status: 'ok' | 'error' | 'timeout') => boolean;
+    /* eslint-enable no-unused-vars */
 }
 
 // ── Empathy Observer Specific Types ──────────────────────────────────────────
@@ -227,6 +229,7 @@ export interface EmpathyObserverWorkflowSpec extends SubagentWorkflowSpec<Empath
  * This is what the helper exposes to business modules.
  */
 export interface WorkflowManager {
+    /* eslint-disable no-unused-vars -- Reason: interface method params are type signatures, implementations use actual values */
     /**
      * Start a new workflow.
      * Creates workflow state, spawns subagent, and returns handle.
@@ -286,6 +289,7 @@ export interface WorkflowManager {
      * Release resources (DB connections, timers).
      */
     dispose: () => void;
+    /* eslint-enable no-unused-vars */
 }
 
 // ── Workflow Store (for SQLite persistence) ──────────────────────────────────

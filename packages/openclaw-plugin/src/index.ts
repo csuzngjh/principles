@@ -204,7 +204,8 @@ const plugin = {
         try {
           const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
           TrajectoryCollector.handleAfterToolCall(event, { ...ctx, workspaceDir });
-        } catch (err) {
+          // eslint-disable-next-line no-unused-vars, @typescript-eslint/no-unused-vars -- Reason: catch binding intentionally unused
+        } catch (_err) {
           // Non-critical: don't log, just skip
         }
       }
@@ -216,7 +217,8 @@ const plugin = {
         try {
           const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
           TrajectoryCollector.handleLlmOutput(event, { ...ctx, workspaceDir });
-        } catch (err) {
+          // eslint-disable-next-line no-unused-vars, @typescript-eslint/no-unused-vars -- Reason: catch binding intentionally unused
+        } catch (_err) {
           // Non-critical: don't log, just skip
         }
       }
@@ -225,7 +227,8 @@ const plugin = {
     // ── Hook: Subagent Loop Closure ──
     api.on(
       'subagent_spawning',
-      (event: PluginHookSubagentSpawningEvent, ctx: PluginHookSubagentContext): void | PluginHookSubagentSpawningResult => {
+      // eslint-disable-next-line no-unused-vars, @typescript-eslint/no-unused-vars -- Reason: ctx param required by hook callback signature but not used in this handler
+      (event: PluginHookSubagentSpawningEvent, _ctx: PluginHookSubagentContext): void | PluginHookSubagentSpawningResult => {
         try {
           // Resolve workspace via official API, falling back to PathResolver
           const workspaceDir = resolveWorkspaceDirFromApi(api, event.agentId) || '.';
@@ -356,8 +359,8 @@ const plugin = {
     api.registerCommand({
       name: "pd-daily",
       description: getCommandDescription('pd-daily', language),
-      handler: (_ctx) => {
-        return { text: language === 'zh' 
+      handler: () => {
+        return { text: language === 'zh'
           ? "请执行 pd-daily 技能来配置并发送进化日报。系统将引导你完成配置流程，包括发送时间、渠道和报告风格偏好。"
           : "Please execute the pd-daily skill to configure and send your daily evolution report. The system will guide you through the configuration process." };
       }
@@ -366,7 +369,7 @@ const plugin = {
     api.registerCommand({
       name: "pd-grooming",
       description: getCommandDescription('pd-grooming', language),
-      handler: (_ctx) => {
+      handler: () => {
         return { text: language === 'zh'
           ? "请执行 pd-grooming 技能来执行大扫除。例如输入: '执行 pd-grooming 技能'"
           : "Please execute the pd-grooming skill to clean up. For example: 'Execute pd-grooming skill'" };
@@ -376,7 +379,7 @@ const plugin = {
     api.registerCommand({
       name: "pd-help",
       description: getCommandDescription('pd-help', language),
-      handler: (_ctx) => {
+      handler: () => {
         if (language === 'zh') {
           return { text: `
 📖 **Principles Disciple 命令大全**
