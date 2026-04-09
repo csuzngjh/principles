@@ -92,30 +92,55 @@ export const i18n = {
     syncing: { zh: '同步中...', en: 'Syncing...' },
     workspacesEnabled: { zh: '个工作区已启用', en: 'workspaces enabled' },
 
-    // Health Cards (Phase 5)
+    // Health Cards — Plain language (Phase 5 rewritten)
     health: {
-      gfi: { zh: 'GFI 疲劳指数', en: 'GFI Fatigue Index' },
-      threshold: { zh: '阈值', en: 'Threshold' },
-      peakToday: { zh: '今日峰值', en: 'Peak Today' },
-      painFlag: { zh: 'PainFlag', en: 'PainFlag' },
-      active: { zh: '活跃', en: 'Active' },
-      normal: { zh: '正常', en: 'Normal' },
-      noActivePain: { zh: '无活跃痛点', en: 'No active pain' },
-      source: { zh: '来源', en: 'Source' },
-      trustStage: { zh: 'Trust Stage', en: 'Trust Stage' },
-      stage: { zh: 'Stage', en: 'Stage' },
-      score: { zh: '分数', en: 'Score' },
-      epTier: { zh: 'EP Tier', en: 'EP Tier' },
-      points: { zh: '积分', en: 'Points' },
+      // GFI → 今日健康度
+      gfi: { zh: '今日健康度', en: 'Health Status' },
+      gfiExplain: { zh: 'AI 今天的整体表现状态', en: 'AI performance state today' },
+      threshold: { zh: '警戒线', en: 'Warning Line' },
+      peakToday: { zh: '今日最高', en: 'Today\'s Peak' },
+      // PainFlag → 问题检测
+      painFlag: { zh: '问题检测', en: 'Issue Detection' },
+      active: { zh: '发现问题', en: 'Issues Found' },
+      normal: { zh: '一切正常', en: 'All Clear' },
+      noActivePain: { zh: '未检测到异常', en: 'No anomalies detected' },
+      source: { zh: '问题类型', en: 'Issue Type' },
+      // Trust Stage → 权限等级
+      trustStage: { zh: '权限等级', en: 'Permission Level' },
+      stage: { zh: '等级', en: 'Level' },
+      score: { zh: '信任分', en: 'Trust Score' },
+      trustDesc: {
+        observer: { zh: '只能观察，不能修改代码', en: 'Can observe but cannot modify code' },
+        editor: { zh: '可以编辑，高风险操作需确认', en: 'Can edit, high-risk ops need approval' },
+        developer: { zh: '可以执行大多数操作', en: 'Can perform most operations' },
+        architect: { zh: '完全信任，可自主决策', en: 'Full trust, can act autonomously' },
+      },
+      // EP Tier → 进化等级
+      epTier: { zh: '进化等级', en: 'Evolution Level' },
+      points: { zh: '进化值', en: 'Evolution XP' },
+      tierDesc: {
+        seed: { zh: '初始阶段，刚开始学习', en: 'Just starting, still learning' },
+        sprout: { zh: '萌芽阶段，有了基础认知', en: 'Sprouting, building basic understanding' },
+        sapling: { zh: '成长阶段，能处理常见场景', en: 'Growing, handling common scenarios' },
+        tree: { zh: '成熟阶段，经验丰富', en: 'Mature, experienced' },
+        forest: { zh: '专家阶段，高度自主', en: 'Expert level, highly autonomous' },
+      },
+      // Principles → 原则管理
       principlesTotal: { zh: '原则总数', en: 'Total Principles' },
-      candidate: { zh: '候', en: 'Cand' },
-      probation: { zh: '试', en: 'Prob' },
-      active2: { zh: '活', en: 'Act' },
-      deprecated: { zh: '废', en: 'Dep' },
-      queueBacklog: { zh: '队列积压', en: 'Queue Backlog' },
-      pending: { zh: '待处理', en: 'Pending' },
-      inProgress: { zh: '处理中', en: 'In Progress' },
-      completed: { zh: '已完成', en: 'Completed' },
+      candidate: { zh: '候选', en: 'Candidate' },
+      probation: { zh: '试用中', en: 'Probation' },
+      active2: { zh: '已激活', en: 'Active' },
+      deprecated: { zh: '已废弃', en: 'Deprecated' },
+      // Queue → 任务队列
+      queueBacklog: { zh: '任务队列', en: 'Task Queue' },
+      pending: { zh: '等待中', en: 'Waiting' },
+      inProgress: { zh: '执行中', en: 'Running' },
+      completed: { zh: '已完成', en: 'Done' },
+      // Summary card
+      todaySummary: { zh: '今日摘要', en: 'Today\'s Summary' },
+      totalCalls: { zh: '总调用', en: 'Total Calls' },
+      successRate: { zh: '成功率', en: 'Success Rate' },
+      blockedOps: { zh: '拦截操作', en: 'Blocked Ops' },
     },
 
     // KPI labels
@@ -131,6 +156,14 @@ export const i18n = {
     topRegressions: { zh: '高频退化', en: 'Top Regressions' },
     sampleQueue: { zh: '样本队列', en: 'Sample Queue' },
     thinkingSummary: { zh: '思维摘要', en: 'Thinking Summary' },
+    thinkingDistribution: {
+      zh: 'AI 思维使用分布',
+      en: 'AI Thinking Model Usage',
+    },
+    thinkingDistributionDesc: {
+      zh: 'AI 使用了哪些思维模型来思考问题？柱状越高表示用得越多。',
+      en: 'Which thinking models does the AI use? Higher bars mean more usage.',
+    },
 
     // Thinking summary fields
     activeModels: { zh: '活跃模型', en: 'Active Models' },

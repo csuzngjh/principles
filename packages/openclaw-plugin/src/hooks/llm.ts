@@ -377,7 +377,7 @@ function trackThinkingModelUsage(args: {
         }
     }
 
-    const matches = detectThinkingModelMatches(text);
+    const matches = detectThinkingModelMatches(text, wctx.workspaceDir);
     for (const match of matches) {
         usageLog[match.modelId] = (usageLog[match.modelId] || 0) + 1;
     }

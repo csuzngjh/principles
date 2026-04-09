@@ -1,4 +1,5 @@
 import { getCentralDatabase, type CentralDatabase } from './central-database.js';
+import { getThinkingModelDefinitions } from '../core/thinking-models.js';
 import type { OverviewResponse } from './control-ui-query-service.js';
 
 export { OverviewResponse };
@@ -23,7 +24,10 @@ export class CentralOverviewService {
   }
 
   dispose(): void {
-    this.centralDb.dispose();
+    // Do NOT dispose centralDb — it's a singleton shared across all requests.
+    // Individual services that open per-request connections (e.g. HealthQueryService)
+    // must dispose their own connections, but the central aggregated DB lives for
+    // the lifetime of the process.
   }
 
   getOverview(days = 30): CentralOverviewResponse {
@@ -112,6 +116,11 @@ export class CentralOverviewService {
         coverageRate: stats.totalToolCalls > 0
           ? stats.totalThinkingEvents / stats.totalToolCalls
           : 0,
+        modelBreakdown: thinkingStats.models.map(m => ({
+          modelId: m.modelId,
+          hits: m.hits,
+        })),
+        modelDefinitions: getThinkingModelDefinitions(),
       },
       centralInfo: {
         workspaceCount: stats.workspaceCount,

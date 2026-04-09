@@ -42,6 +42,12 @@ export interface OverviewResponse {
     dormantModels: number;
     effectiveModels: number;
     coverageRate: number;
+    modelBreakdown?: Array<{ modelId: string; hits: number }>;
+    modelDefinitions?: Array<{
+      modelId: string;
+      name: string;
+      description: string;
+    }>;
   };
 }
 
@@ -287,13 +293,23 @@ export interface EvolutionStatsResponse {
 // ===== Phase 5: Health & Circuit API Types =====
 
 export interface OverviewHealthResponse {
-  gfi: { current: number; peakToday: number; threshold: number };
+  gfi: { current: number; peakToday: number; threshold: number; trend: Array<{ hour: string; value: number }> };
   trust: { stage: number; stageLabel: string; score: number };
   evolution: { tier: string; points: number };
   painFlag: { active: boolean; source: string | null; score: number | null };
   principles: { candidate: number; probation: number; active: number; deprecated: number };
   queue: { pending: number; inProgress: number; completed: number };
   activeStage: string;
+}
+
+export interface WorkspaceHealthEntry {
+  workspaceName: string;
+  health: OverviewHealthResponse;
+}
+
+export interface CentralHealthResponse {
+  workspaces: WorkspaceHealthEntry[];
+  generatedAt: string;
 }
 
 export interface EvolutionPrinciplesResponse {

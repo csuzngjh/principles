@@ -1,17 +1,385 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
-import type { OverviewResponse, OverviewHealthResponse } from '../types';
-import { Sparkline, GroupedBarChart, TimeRangeSelector, StatusBadge } from '../charts';
+import type { OverviewResponse, CentralHealthResponse, WorkspaceHealthEntry } from '../types';
+import { Sparkline, GroupedBarChart, TimeRangeSelector, DonutChart, BulletChart, GaugeChart, PrincipleStack, QueueBar, StatusBadge, LineChart } from '../charts';
 import { useI18n } from '../i18n/ui';
 import { formatPercent, formatDate } from '../utils/format';
 import { WorkspaceConfig } from '../components/WorkspaceConfig';
 import { Loading, ErrorState } from '../components';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 
+// ---------------------------------------------------------------------------
+// Helper: get health status
+// ---------------------------------------------------------------------------
+
+function getHealthStatus(current: number, threshold: number): 'excellent' | 'good' | 'warning' | 'danger' {
+  if (current === 0) return 'excellent';
+  if (current < threshold * 0.5) return 'good';
+  if (current < threshold) return 'warning';
+  return 'danger';
+}
+
+const HEALTH_LABELS: Record<string, { zh: string; en: string; emoji: string }> = {
+  excellent: { zh: '优秀', en: 'Excellent', emoji: '🟢' },
+  good: { zh: '良好', en: 'Good', emoji: '🟡' },
+  warning: { zh: '警告', en: 'Warning', emoji: '🟠' },
+  danger: { zh: '危险', en: 'Critical', emoji: '🔴' },
+};
+
+const TRUST_DESC_KEYS = ['observer', 'editor', 'developer', 'architect'];
+const TIER_DESC_KEYS = ['seed', 'sprout', 'sapling', 'tree', 'forest'];
+
+// ---------------------------------------------------------------------------
+// WorkspaceHealthPanel — redesigned for clarity
+// ---------------------------------------------------------------------------
+
+function WorkspaceHealthPanel({ entry }: { entry: WorkspaceHealthEntry }) {
+  const { t } = useI18n();
+  const h = entry.health;
+  const totalPrinciples = h.principles.candidate + h.principles.probation + h.principles.active + h.principles.deprecated;
+  const status = getHealthStatus(h.gfi.current, h.gfi.threshold);
+  const statusLabel = HEALTH_LABELS[status];
+  const trustIdx = Math.max(0, Math.min(3, h.trust.stage - 1));
+  const trustDescKey = TRUST_DESC_KEYS[trustIdx] ?? 'observer';
+  const tierIdx = Math.max(0, Math.min(4, parseInt(h.evolution.tier.replace(/\D/g, ''), 10) - 1));
+  const tierDescKey = TIER_DESC_KEYS[tierIdx] ?? 'seed';
+
+  return (
+    <section className="panel" style={{ marginBottom: 'var(--space-5)' }}>
+      <div className="panel-header">
+        <div className="panel-header-left">
+          <h3 style={{ fontSize: '0.95rem', fontWeight: 600 }}>{entry.workspaceName}</h3>
+          <StatusBadge variant={h.painFlag.active ? 'warning' : 'success'}>
+            {h.painFlag.active ? `${t('overview.health.source')}: ${h.painFlag.source}` : t('overview.health.normal')}
+          </StatusBadge>
+        </div>
+      </div>
+      <div className="panel-content">
+
+        {/* Row 1: Health Status (wide) | Trust | Evolution */}
+        <div className="grid" style={{ gridTemplateColumns: '2fr 1fr 1fr', gap: 'var(--space-4)', marginBottom: 'var(--space-4)' }}>
+
+          {/* 今日健康度 */}
+          <div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
+              <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                {t('overview.health.gfi')}
+              </span>
+              <StatusBadge variant={status === 'danger' ? 'error' : status === 'warning' ? 'warning' : 'success'}>
+                {statusLabel.emoji} {statusLabel.zh}
+              </StatusBadge>
+            </div>
+            {/* Big number */}
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 8 }}>
+              <span style={{ fontSize: '2.5rem', fontWeight: 700, color: `var(--${status === 'danger' ? 'error' : status === 'warning' ? 'warning' : 'success'})`, lineHeight: 1 }}>
+                {h.gfi.current}
+              </span>
+              <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                / {h.gfi.threshold} {t('overview.health.threshold')}
+              </span>
+            </div>
+            {/* Bullet Chart */}
+            <BulletChart
+              value={h.gfi.current}
+              target={h.gfi.threshold}
+              peak={h.gfi.peakToday}
+              max={Math.max(h.gfi.threshold * 2, 150)}
+              width={280}
+            />
+            {/* Mini sparkline for quick glance */}
+            {h.gfi.trend.length >= 2 && (
+              <div style={{ marginTop: 4 }}>
+                <Sparkline
+                  data={h.gfi.trend.map(d => d.value)}
+                  width={280}
+                  height={20}
+                  color={status === 'danger' ? 'var(--error)' : status === 'warning' ? 'var(--warning)' : 'var(--success)'}
+                  fillOpacity={0.1}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* 权限等级 */}
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              {t('overview.health.trustStage')}
+            </div>
+            <GaugeChart
+              value={h.trust.score}
+              label={h.trust.stageLabel}
+              sublabel={t(`overview.health.trustDesc.${trustDescKey}`)}
+              size={90}
+              segments={[
+                { label: 'Observer', color: 'var(--text-secondary)', max: 30 },
+                { label: 'Editor', color: 'var(--info)', max: 60 },
+                { label: 'Developer', color: 'var(--accent)', max: 80 },
+                { label: 'Architect', color: 'var(--success)', max: 100 },
+              ]}
+            />
+            <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginTop: 4 }}>
+              {t('overview.health.stage')} {h.trust.stage} · {t('overview.health.score')} {h.trust.score}
+            </div>
+          </div>
+
+          {/* 进化等级 */}
+          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
+            <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              {t('overview.health.epTier')}
+            </div>
+            <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--accent)' }}>{h.evolution.tier}</div>
+            <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginTop: 2 }}>
+              {h.evolution.points} {t('overview.health.points')}
+            </div>
+            <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)', marginTop: 4, textAlign: 'center', maxWidth: 100 }}>
+              {t(`overview.health.tierDesc.${tierDescKey}`)}
+            </div>
+          </div>
+        </div>
+
+        {/* Row 2: Principles | Queue | PainFlag */}
+        <div className="grid" style={{ gridTemplateColumns: '1fr 1fr 1fr', gap: 'var(--space-4)' }}>
+
+          {/* 原则分布 */}
+          <div>
+            <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              {t('overview.health.principlesTotal')}: {totalPrinciples}
+            </div>
+            <PrincipleStack
+              candidate={h.principles.candidate}
+              probation={h.principles.probation}
+              active={h.principles.active}
+              deprecated={h.principles.deprecated}
+            />
+          </div>
+
+          {/* 任务队列 */}
+          <div>
+            <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              {t('overview.health.queueBacklog')}: {h.queue.pending}
+            </div>
+            <QueueBar
+              pending={h.queue.pending}
+              inProgress={h.queue.inProgress}
+              completed={h.queue.completed}
+            />
+          </div>
+
+          {/* 问题检测 */}
+          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+            <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              {t('overview.health.painFlag')}
+            </div>
+            {h.painFlag.active ? (
+              <div style={{ padding: 'var(--space-2)', backgroundColor: 'rgba(184, 134, 11, 0.08)', borderRadius: 6, borderLeft: '3px solid var(--warning)' }}>
+                <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--warning)' }}>⚠ {t('overview.health.active')}</div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: 2 }}>
+                  {t('overview.health.source')}: {h.painFlag.source}
+                </div>
+                {h.painFlag.score !== null && (
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                    {t('overview.health.score')}: {h.painFlag.score}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div style={{ padding: 'var(--space-2)', backgroundColor: 'rgba(74, 124, 111, 0.08)', borderRadius: 6, borderLeft: '3px solid var(--success)' }}>
+                <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--success)' }}>✓ {t('overview.health.normal')}</div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: 2 }}>
+                  {t('overview.health.noActivePain')}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Full-width GFI trend chart */}
+        <section style={{ marginTop: 'var(--space-4)', borderTop: '1px solid var(--border)', paddingTop: 'var(--space-4)' }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
+            <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+              📈 {t('overview.health.gfi')} · 今日趋势
+            </span>
+            <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
+              今日峰值: {h.gfi.peakToday}
+            </span>
+          </div>
+          {h.gfi.trend.length >= 2 ? (
+            <LineChart
+              data={h.gfi.trend.map(d => ({
+                label: d.hour.slice(11, 16),
+                value: d.value,
+              }))}
+              width={560}
+              height={160}
+              color={status === 'danger' ? 'var(--error)' : status === 'warning' ? 'var(--warning)' : 'var(--success)'}
+            />
+          ) : (
+            <div style={{ height: 160, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+              今日暂无 GFI 记录
+            </div>
+          )}
+        </section>
+      </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Thinking Model Distribution — shows each model's usage count
+// Dynamically rendered from API modelDefinitions (no hardcoding!)
+// ---------------------------------------------------------------------------
+
+function ThinkingModelDistribution({
+  modelBreakdown,
+  definitions,
+}: {
+  modelBreakdown?: Array<{ modelId: string; hits: number }>;
+  definitions?: Array<{ modelId: string; name: string; description: string }>;
+}) {
+  if (!definitions || definitions.length === 0) {
+    return (
+      <div style={{ textAlign: 'center', padding: 'var(--space-3)', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+        暂无思维模型定义
+      </div>
+    );
+  }
+
+  const hitsMap = new Map(modelBreakdown?.map(m => [m.modelId, m.hits]) ?? []);
+  const hasAnyHits = [...hitsMap.values()].some(v => v > 0);
+
+  if (!hasAnyHits) {
+    return (
+      <div style={{ textAlign: 'center', padding: 'var(--space-3)', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+        暂无思维模型使用记录。AI 开始使用后这里会显示数据。
+      </div>
+    );
+  }
+
+  const maxHits = Math.max(...definitions.map(d => hitsMap.get(d.modelId) ?? 0), 1);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {definitions.map(def => {
+        const hits = hitsMap.get(def.modelId) ?? 0;
+        const pct = (hits / maxHits) * 100;
+        return (
+          <div key={def.modelId} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ minWidth: 90, fontSize: '0.72rem', fontWeight: 500, color: 'var(--text-primary)' }}>
+              {def.name}
+            </div>
+            <div style={{ flex: 1, height: 10, backgroundColor: 'var(--bg-sunken)', borderRadius: 5, overflow: 'hidden' }}>
+              <div
+                style={{
+                  width: `${pct}%`,
+                  height: '100%',
+                  backgroundColor: hits > 0 ? 'var(--accent)' : 'transparent',
+                  borderRadius: 5,
+                  minWidth: hits > 0 ? 4 : 0,
+                  transition: 'width 0.3s ease',
+                }}
+              />
+            </div>
+            <div style={{ minWidth: 24, textAlign: 'right', fontSize: '0.72rem', color: hits > 0 ? 'var(--text-primary)' : 'var(--text-secondary)', fontWeight: 600 }}>
+              {hits}
+            </div>
+            <div style={{ minWidth: 100, fontSize: '0.65rem', color: 'var(--text-secondary)' }}>
+              {def.description}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// KPI Card with explanation
+// ---------------------------------------------------------------------------
+
+interface KpiCardProps {
+  label: string;
+  value: string | number;
+  explain: { zh: string; en: string };
+  trend?: number[];
+  trendColor?: string;
+}
+
+function ExplainKpiCard({ label, value, explain, trend, trendColor }: KpiCardProps) {
+  const { t } = useI18n();
+  const [showExplain, setShowExplain] = useState(false);
+
+  return (
+    <article className="panel kpi" style={{ position: 'relative' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span
+              className="label"
+              onClick={() => setShowExplain(!showExplain)}
+              style={{ cursor: 'pointer', userSelect: 'none' }}
+            >
+              {label}
+            </span>
+            <button
+              onClick={() => setShowExplain(!showExplain)}
+              style={{
+                background: 'none',
+                border: '1px solid var(--border)',
+                borderRadius: 4,
+                cursor: 'pointer',
+                color: 'var(--text-secondary)',
+                width: 22,
+                height: 22,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '0.75rem',
+                lineHeight: 1,
+                padding: 0,
+                flexShrink: 0,
+              }}
+              title="查看说明"
+            >
+              ?
+            </button>
+          </div>
+          <span className="value">{value}</span>
+        </div>
+        {trend && trend.length >= 2 && (
+          <div className="stat-sparkline" style={{ flexShrink: 0, alignSelf: 'center' }}>
+            <Sparkline data={trend} width={50} height={16} color={trendColor} />
+          </div>
+        )}
+      </div>
+      {showExplain && (
+        <div
+          style={{
+            marginTop: 6,
+            padding: '8px 10px',
+            background: 'var(--bg-sunken)',
+            border: '1px solid var(--border)',
+            borderRadius: 'var(--radius-sm)',
+            fontSize: '0.78rem',
+            color: 'var(--text-secondary)',
+            lineHeight: 1.5,
+          }}
+        >
+          💡 {t(explain.zh) || explain.zh}
+        </div>
+      )}
+    </article>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// OverviewPage
+// ---------------------------------------------------------------------------
+
 export function OverviewPage() {
   const { t } = useI18n();
   const [data, setData] = useState<OverviewResponse | null>(null);
-  const [health, setHealth] = useState<OverviewHealthResponse | null>(null);
+  const [centralHealth, setCentralHealth] = useState<CentralHealthResponse | null>(null);
+  const [healthError, setHealthError] = useState('');
   const [error, setError] = useState('');
   const [syncing, setSyncing] = useState(false);
   const [days, setDays] = useState(30);
@@ -28,7 +396,14 @@ export function OverviewPage() {
 
   const loadAll = useCallback(async () => {
     await loadCentralOverview();
-    api.getOverviewHealth().then(setHealth).catch(() => {});
+    try {
+      const health = await api.getCentralHealth();
+      setCentralHealth(health);
+      setHealthError('');
+    } catch (err) {
+      console.error('[OverviewPage] Failed to load central health:', err);
+      setHealthError(String(err));
+    }
   }, [loadCentralOverview]);
 
   const { lastRefresh, isRefreshing, refresh } = useAutoRefresh(loadAll, {
@@ -58,8 +433,6 @@ export function OverviewPage() {
   const centralInfo = (data as OverviewResponse & { centralInfo?: { workspaceCount: number; enabledWorkspaceCount: number; workspaces: string[]; enabledWorkspaces: string[] } }).centralInfo;
   const dailyTrend = data.dailyTrend ?? [];
 
-  // Prepare sparkline data
-  const toolCallsTrend = dailyTrend.map(d => d.toolCalls);
   const failuresTrend = dailyTrend.map(d => d.failures);
   const correctionsTrend = dailyTrend.map(d => d.userCorrections);
   const thinkingTrend = dailyTrend.map(d => d.thinkingTurns);
@@ -85,76 +458,63 @@ export function OverviewPage() {
 
       <WorkspaceConfig />
 
-      {/* System Health Cards (Phase 5) */}
-      {health && (
-        <section className="kpi-grid" style={{ marginBottom: 'var(--space-5)' }}>
-          <article className="panel kpi" style={{ borderLeft: `3px solid ${health.gfi.current >= health.gfi.threshold ? 'var(--error)' : 'var(--success)'}` }}>
-            <span className="label"><svg width="10" height="10" viewBox="0 0 10 10" style={{marginRight: '6px', verticalAlign: 'middle'}}><circle cx="5" cy="5" r="5" fill={health.gfi.current >= health.gfi.threshold ? 'var(--error)' : 'var(--success)'}/></svg>{t('overview.health.gfi')}</span>
-            <span className="value">{health.gfi.current}</span>
-            <span>{t('overview.health.threshold')}: {health.gfi.threshold} | {t('overview.health.peakToday')}: {health.gfi.peakToday}</span>
-          </article>
-          <article className="panel kpi" style={{ borderLeft: `3px solid ${health.painFlag.active ? 'var(--warning)' : 'var(--success)'}` }}>
-            <span className="label"><svg width="10" height="10" viewBox="0 0 10 10" style={{marginRight: '6px', verticalAlign: 'middle'}}><circle cx="5" cy="5" r="5" fill={health.painFlag.active ? 'var(--warning)' : 'var(--success)'}/></svg>{t('overview.health.painFlag')}</span>
-            <span className="value">{health.painFlag.active ? t('overview.health.active') : t('overview.health.normal')}</span>
-            <span>{health.painFlag.source ? `${t('overview.health.source')}: ${health.painFlag.source}` : t('overview.health.noActivePain')}</span>
-          </article>
-          <article className="panel kpi" style={{ borderLeft: '3px solid var(--info)' }}>
-            <span className="label"><svg width="10" height="10" viewBox="0 0 10 10" style={{marginRight: '6px', verticalAlign: 'middle'}}><circle cx="5" cy="5" r="5" fill="var(--info)"/></svg>{t('overview.health.trustStage')}</span>
-            <span className="value">{health.trust.stageLabel}</span>
-            <span>{t('overview.health.stage')} {health.trust.stage} | {t('overview.health.score')}: {health.trust.score}</span>
-          </article>
-          <article className="panel kpi" style={{ borderLeft: '3px solid var(--accent)' }}>
-            <span className="label"><svg width="10" height="10" viewBox="0 0 10 10" style={{marginRight: '6px', verticalAlign: 'middle'}}><circle cx="5" cy="5" r="5" fill="var(--accent)"/></svg>{t('overview.health.epTier')}</span>
-            <span className="value">{health.evolution.tier}</span>
-            <span>{t('overview.health.points')}: {health.evolution.points}</span>
-          </article>
-          <article className="panel kpi" style={{ borderLeft: '3px solid var(--success)' }}>
-            <span className="label"><svg width="10" height="10" viewBox="0 0 10 10" style={{marginRight: '6px', verticalAlign: 'middle'}}><circle cx="5" cy="5" r="5" fill="var(--success)"/></svg>{t('overview.health.principlesTotal')}</span>
-            <span className="value">{health.principles.candidate + health.principles.probation + health.principles.active + health.principles.deprecated}</span>
-            <span>{t('overview.health.candidate')}: {health.principles.candidate} | {t('overview.health.probation')}: {health.principles.probation} | {t('overview.health.active2')}: {health.principles.active} | {t('overview.health.deprecated')}: {health.principles.deprecated}</span>
-          </article>
-          <article className="panel kpi" style={{ borderLeft: `3px solid ${health.queue.pending > 5 ? 'var(--warning)' : 'var(--success)'}` }}>
-            <span className="label"><svg width="10" height="10" viewBox="0 0 10 10" style={{marginRight: '6px', verticalAlign: 'middle'}}><circle cx="5" cy="5" r="5" fill={health.queue.pending > 5 ? 'var(--warning)' : 'var(--success)'}/></svg>{t('overview.health.queueBacklog')}</span>
-            <span className="value">{health.queue.pending}</span>
-            <span>{t('overview.health.pending')}: {health.queue.pending} | {t('overview.health.inProgress')}: {health.queue.inProgress} | {t('overview.health.completed')}: {health.queue.completed}</span>
-          </article>
+      {/* Per-Workspace Health Panels */}
+      {centralHealth && centralHealth.workspaces.length > 0 ? (
+        centralHealth.workspaces.map((entry) => (
+          <WorkspaceHealthPanel key={entry.workspaceName} entry={entry} />
+        ))
+      ) : healthError ? (
+        <section className="panel" style={{ marginBottom: 'var(--space-4)', borderColor: 'var(--error)' }}>
+          <div style={{ textAlign: 'center', padding: 'var(--space-4)', color: 'var(--error)' }}>
+            Failed to load health data: {healthError}
+          </div>
+        </section>
+      ) : (
+        <section className="panel" style={{ marginBottom: 'var(--space-4)' }}>
+          <div style={{ textAlign: 'center', padding: 'var(--space-4)', color: 'var(--text-secondary)' }}>
+            {t('overview.health.noWorkspaces') || 'No enabled workspaces found'}
+          </div>
         </section>
       )}
 
+      {/* Aggregate KPI Grid with explanations */}
       <section className="kpi-grid">
-        <article className="panel kpi">
-          <span className="label">{t('overview.repeatErrorRate')}</span>
-          <span className="value">{formatPercent(data.summary.repeatErrorRate)}</span>
-          {failuresTrend.length >= 2 && (
-            <div className="stat-sparkline"><Sparkline data={failuresTrend} width={50} height={16} color="var(--error)" /></div>
-          )}
-        </article>
-        <article className="panel kpi">
-          <span className="label">{t('overview.userCorrectionRate')}</span>
-          <span className="value">{formatPercent(data.summary.userCorrectionRate)}</span>
-          {correctionsTrend.length >= 2 && (
-            <div className="stat-sparkline"><Sparkline data={correctionsTrend} width={50} height={16} color="var(--warning)" /></div>
-          )}
-        </article>
-        <article className="panel kpi">
-          <span className="label">{t('overview.pendingSamples')}</span>
-          <span className="value">{data.summary.pendingSamples}</span>
-        </article>
-        <article className="panel kpi">
-          <span className="label">{t('overview.approvedSamples')}</span>
-          <span className="value">{data.summary.approvedSamples}</span>
-        </article>
-        <article className="panel kpi">
-          <span className="label">{t('overview.thinkingCoverage')}</span>
-          <span className="value">{formatPercent(data.summary.thinkingCoverageRate)}</span>
-          {thinkingTrend.length >= 2 && (
-            <div className="stat-sparkline"><Sparkline data={thinkingTrend} width={50} height={16} color="var(--info)" /></div>
-          )}
-        </article>
-        <article className="panel kpi">
-          <span className="label">{t('overview.painEvents')}</span>
-          <span className="value">{data.summary.painEvents}</span>
-        </article>
+        <ExplainKpiCard
+          label={t('overview.repeatErrorRate')}
+          value={formatPercent(data.summary.repeatErrorRate)}
+          explain={{ zh: 'AI 重复犯同样错误的比例。如果这个值高，说明 AI 没有从之前的错误中学习。', en: 'Percentage of times AI repeats the same mistake.' }}
+          trend={failuresTrend}
+          trendColor="var(--error)"
+        />
+        <ExplainKpiCard
+          label={t('overview.userCorrectionRate')}
+          value={formatPercent(data.summary.userCorrectionRate)}
+          explain={{ zh: '用户手动纠正 AI 操作的比例。如果这个值高，说明 AI 经常做错了需要你介入。', en: 'How often you had to manually correct AI actions.' }}
+          trend={correctionsTrend}
+          trendColor="var(--warning)"
+        />
+        <ExplainKpiCard
+          label={t('overview.pendingSamples')}
+          value={data.summary.pendingSamples}
+          explain={{ zh: '等待你审核的纠正样本。审核后 AI 会从中学习。', en: 'Correction samples waiting for your review. Reviewing them helps AI learn.' }}
+        />
+        <ExplainKpiCard
+          label={t('overview.approvedSamples')}
+          value={data.summary.approvedSamples}
+          explain={{ zh: '你已批准的高质量纠正样本。这些是 AI 的学习素材。', en: 'High-quality corrections you approved. These become AI training data.' }}
+        />
+        <ExplainKpiCard
+          label={t('overview.thinkingCoverage')}
+          value={formatPercent(data.summary.thinkingCoverageRate)}
+          explain={{ zh: 'AI 使用"深度思考"模式的任务比例。这个值太低可能说明 AI 在跳过思考直接执行。', en: 'Percentage of tasks where AI used deep thinking mode instead of acting immediately.' }}
+          trend={thinkingTrend}
+          trendColor="var(--info)"
+        />
+        <ExplainKpiCard
+          label={t('overview.painEvents')}
+          value={data.summary.painEvents}
+          explain={{ zh: '系统检测到的"痛苦信号"总数。包括工具失败、用户抱怨、AI 行为异常等。', en: 'Total pain signals detected: tool failures, user complaints, AI anomalies.' }}
+        />
       </section>
 
       <div className="grid two-columns">
@@ -221,18 +581,18 @@ export function OverviewPage() {
             ))}
           </div>
         </section>
+        {/* AI 思维使用分布 */}
         <section className="panel">
-          <h3>{t('overview.thinkingSummary')}</h3>
-          <div className="stack">
-            <div className="row-card"><strong>{t('overview.activeModels')}</strong><span>{data.thinkingSummary.activeModels}</span></div>
-            <div className="row-card"><strong>{t('overview.dormantModels')}</strong><span>{data.thinkingSummary.dormantModels}</span></div>
-            <div className="row-card"><strong>{t('overview.effectiveModels')}</strong><span>{data.thinkingSummary.effectiveModels}</span></div>
-            <div className="row-card"><strong>{t('overview.coverage')}</strong><span>{formatPercent(data.thinkingSummary.coverageRate)}</span></div>
-            <div className="row-card"><strong>{t('overview.principleEvents')}</strong><span>{data.summary.principleEventCount}</span></div>
-          </div>
+          <h3>{t('overview.thinkingDistribution')}</h3>
+          <p style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginTop: -4, marginBottom: 10 }}>
+            {t('overview.thinkingDistributionDesc')}
+          </p>
+          <ThinkingModelDistribution
+            modelBreakdown={(data.thinkingSummary as { modelBreakdown?: Array<{ modelId: string; hits: number }> }).modelBreakdown}
+            definitions={data.thinkingSummary.modelDefinitions}
+          />
         </section>
       </div>
     </div>
   );
 }
-

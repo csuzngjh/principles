@@ -1,5 +1,5 @@
 import { ControlUiDatabase } from '../core/control-ui-db.js';
-import { getThinkingModel, listThinkingModels } from '../core/thinking-models.js';
+import { getThinkingModel, listThinkingModels, getThinkingModelDefinitions } from '../core/thinking-models.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 
 /** Time window (in minutes) for querying principle events related to a sample */
@@ -49,6 +49,8 @@ export interface OverviewResponse {
     dormantModels: number;
     effectiveModels: number;
     coverageRate: number;
+    modelBreakdown?: Array<{ modelId: string; hits: number }>;
+    modelDefinitions?: Array<{ modelId: string; name: string; description: string }>;
   };
 }
 
@@ -313,6 +315,12 @@ export class ControlUiQueryService {
         painRate: roundRate(Number(row.pain_windows), Number(row.events)),
         correctionRate: roundRate(Number(row.correction_windows), Number(row.events)),
       }) === 'reinforce').length;
+    const modelBreakdown = this.uiDb.all<{ modelId: string; hits: number }>(`
+      SELECT model_id as modelId, COUNT(*) as hits
+      FROM thinking_model_events
+      GROUP BY model_id
+      ORDER BY hits DESC
+    `).map(row => ({ modelId: row.modelId, hits: Number(row.hits) }));
     const dailyTrend = this.uiDb.all<{
       day: string;
       tool_calls: number;
@@ -385,6 +393,8 @@ export class ControlUiQueryService {
         dormantModels: Math.max(0, listThinkingModels().length - activeModels),
         effectiveModels: effectiveCount,
         coverageRate: roundRate(coverageRow.thinking_turns, coverageRow.assistant_turns),
+        modelBreakdown,
+        modelDefinitions: getThinkingModelDefinitions(),
       },
     };
   }

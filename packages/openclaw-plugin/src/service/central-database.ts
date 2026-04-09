@@ -21,6 +21,12 @@ export class CentralDatabase {
   private readonly dbPath: string;
   private readonly db: Database.Database;
   private readonly workspaces: WorkspaceInfo[] = [];
+  private _closed = false;
+
+  /** Whether this connection has been closed. Used by the singleton to auto-reopen. */
+  get isClosed(): boolean {
+    return this._closed;
+  }
 
   constructor() {
     const openClawDir = os.homedir();
@@ -39,6 +45,7 @@ export class CentralDatabase {
 
   dispose(): void {
     this.db.close();
+    this._closed = true;
   }
 
   private static tableExists(db: Database.Database, tableName: string): boolean {
@@ -909,7 +916,7 @@ export class CentralDatabase {
 let centralDbInstance: CentralDatabase | null = null;
 
 export function getCentralDatabase(): CentralDatabase {
-  if (!centralDbInstance) {
+  if (!centralDbInstance || centralDbInstance.isClosed) {
     centralDbInstance = new CentralDatabase();
   }
   return centralDbInstance;
