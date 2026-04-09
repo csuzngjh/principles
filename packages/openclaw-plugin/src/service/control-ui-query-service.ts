@@ -1,5 +1,5 @@
 import { ControlUiDatabase } from '../core/control-ui-db.js';
-import { getThinkingModel, listThinkingModels } from '../core/thinking-models.js';
+import { getThinkingModel, listThinkingModels, getThinkingModelDefinitions } from '../core/thinking-models.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 
 /** Time window (in minutes) for querying principle events related to a sample */
@@ -50,6 +50,7 @@ export interface OverviewResponse {
     effectiveModels: number;
     coverageRate: number;
     modelBreakdown?: Array<{ modelId: string; hits: number }>;
+    modelDefinitions?: Array<{ modelId: string; name: string; description: string }>;
   };
 }
 
@@ -386,6 +387,8 @@ export class ControlUiQueryService {
         dormantModels: Math.max(0, listThinkingModels().length - activeModels),
         effectiveModels: effectiveCount,
         coverageRate: roundRate(coverageRow.thinking_turns, coverageRow.assistant_turns),
+        modelBreakdown: [],
+        modelDefinitions: getThinkingModelDefinitions(),
       },
     };
   }

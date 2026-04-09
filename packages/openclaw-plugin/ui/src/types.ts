@@ -42,6 +42,12 @@ export interface OverviewResponse {
     dormantModels: number;
     effectiveModels: number;
     coverageRate: number;
+    modelBreakdown?: Array<{ modelId: string; hits: number }>;
+    modelDefinitions?: Array<{
+      modelId: string;
+      name: string;
+      description: string;
+    }>;
   };
 }
 

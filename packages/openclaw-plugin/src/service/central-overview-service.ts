@@ -1,4 +1,5 @@
 import { getCentralDatabase, type CentralDatabase } from './central-database.js';
+import { getThinkingModelDefinitions } from '../core/thinking-models.js';
 import type { OverviewResponse } from './control-ui-query-service.js';
 
 export { OverviewResponse };
@@ -118,6 +119,7 @@ export class CentralOverviewService {
           modelId: m.modelId,
           hits: m.hits,
         })),
+        modelDefinitions: getThinkingModelDefinitions(),
       },
       centralInfo: {
         workspaceCount: stats.workspaceCount,
