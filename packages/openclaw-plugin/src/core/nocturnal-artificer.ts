@@ -183,8 +183,7 @@ export function resolveArtificerTargetRule(
     }
     return left.ruleId.localeCompare(right.ruleId);
   });
-  const winner = sorted[0];
-  const runnerUp = sorted[1];
+  const [winner, runnerUp] = sorted;
 
   if (!winner || winner.score === 0) {
     return {

@@ -689,6 +689,7 @@ export function parseAndValidateArtifact(
   options: ArbiterOptions = {}
 ): ArbiterResult {
   // Step 1: Parse JSON
+  // eslint-disable-next-line @typescript-eslint/init-declarations -- Reason: assigned in try block immediately after declaration
   let parsed: unknown;
   try {
     parsed = JSON.parse(jsonString);
