@@ -176,7 +176,7 @@ function handleApiRoute(
     });
   }
 
-  const workspaceConfigMatch = pathname.match(/^\/plugins\/principles\/api\/central\/workspaces\/([^/]+)$/);
+  const workspaceConfigMatch = /^\/plugins\/principles\/api\/central\/workspaces\/([^/]+)$/.exec(pathname);
   if (workspaceConfigMatch && method === 'GET') {
     return done(() => {
       const centralDb = getCentralDatabase();
@@ -190,7 +190,7 @@ function handleApiRoute(
   if (workspaceConfigMatch && method === 'PATCH') {
     return (async () => {
       try {
-        const body = await readJsonBody(req) as Record<string, unknown>;
+        const body = await readJsonBody(req);
         const centralDb = getCentralDatabase();
         const workspaceName = decodeURIComponent(workspaceConfigMatch[1]);
         centralDb.updateWorkspaceConfig(workspaceName, {
@@ -216,7 +216,7 @@ function handleApiRoute(
   if (pathname === `${API_PREFIX}/central/workspaces` && method === 'POST') {
     return (async () => {
       try {
-        const body = await readJsonBody(req) as Record<string, unknown>;
+        const body = await readJsonBody(req);
         const name = typeof body.name === 'string' ? body.name : '';
         const workspacePath = typeof body.path === 'string' ? body.path : '';
         if (!name || !workspacePath) {
@@ -251,7 +251,7 @@ function handleApiRoute(
     }));
   }
 
-  const sampleDetailMatch = pathname.match(/^\/plugins\/principles\/api\/samples\/([^/]+)$/);
+  const sampleDetailMatch = /^\/plugins\/principles\/api\/samples\/([^/]+)$/.exec(pathname);
   if (sampleDetailMatch && method === 'GET') {
     try {
       const detail = service.getSampleDetail(decodeURIComponent(sampleDetailMatch[1]));
@@ -270,7 +270,7 @@ function handleApiRoute(
     }
   }
 
-  const sampleReviewMatch = pathname.match(/^\/plugins\/principles\/api\/samples\/([^/]+)\/review$/);
+  const sampleReviewMatch = /^\/plugins\/principles\/api\/samples\/([^/]+)\/review$/.exec(pathname);
   if (sampleReviewMatch && method === 'POST') {
     return (async () => {
       try {
@@ -307,7 +307,7 @@ function handleApiRoute(
     return done(() => service.getThinkingOverview());
   }
 
-  const thinkingDetailMatch = pathname.match(/^\/plugins\/principles\/api\/thinking\/models\/([^/]+)$/);
+  const thinkingDetailMatch = /^\/plugins\/principles\/api\/thinking\/models\/([^/]+)$/.exec(pathname);
   if (thinkingDetailMatch && method === 'GET') {
     try {
       const detail = service.getThinkingModelDetail(decodeURIComponent(thinkingDetailMatch[1]));
@@ -366,7 +366,7 @@ function handleApiRoute(
     });
   }
 
-  const evolutionTraceMatch = pathname.match(/^\/plugins\/principles\/api\/evolution\/trace\/([^/]+)$/);
+  const evolutionTraceMatch = /^\/plugins\/principles\/api\/evolution\/trace\/([^/]+)$/.exec(pathname);
   if (evolutionTraceMatch && method === 'GET') {
     const evoService = evolutionService();
     try {
@@ -542,8 +542,8 @@ function validateGatewayAuth(req: IncomingMessage): boolean {
     // No token configured, allow all requests
     return true;
   }
-  const authHeader = (req.headers?.['authorization'] as string) || '';
-  const tokenMatch = authHeader.match(/^Bearer\s+(.+)$/i);
+  const authHeader = (req.headers?.authorization as string) || '';
+  const tokenMatch = /^Bearer\s+(.+)$/i.exec(authHeader);
   const providedToken = tokenMatch?.[1];
   return providedToken === gatewayToken;
 }
@@ -563,7 +563,7 @@ export function createPrinciplesConsoleRoutes(api: OpenClawPluginApi): OpenClawP
     async handler(req, res) {
       if (!api.rootDir) { text(res, 500, 'Plugin rootDir not available'); return true; }
       const url = new URL(req.url || ROUTE_PREFIX, 'http://127.0.0.1');
-      const pathname = url.pathname;
+      const {pathname} = url;
       const method = (req.method || 'GET').toUpperCase();
 
       // Skip API routes - they'll be handled by the API route
@@ -605,7 +605,7 @@ export function createPrinciplesConsoleRoutes(api: OpenClawPluginApi): OpenClawP
     match: 'prefix',
     async handler(req, res) {
       const url = new URL(req.url || API_PREFIX, 'http://127.0.0.1');
-      const pathname = url.pathname;
+      const {pathname} = url;
       return handleApiRoute(api, pathname, req, res);
     },
   };
@@ -624,7 +624,7 @@ export function createPrinciplesConsoleRoute(api: OpenClawPluginApi): OpenClawPl
     async handler(req, res) {
       if (!api.rootDir) { text(res, 500, 'Plugin rootDir not available'); return true; }
       const url = new URL(req.url || ROUTE_PREFIX, 'http://127.0.0.1');
-      const pathname = url.pathname;
+      const {pathname} = url;
       const method = (req.method || 'GET').toUpperCase();
 
       if (!pathname.startsWith(ROUTE_PREFIX)) {

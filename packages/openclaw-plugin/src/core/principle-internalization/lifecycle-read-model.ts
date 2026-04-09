@@ -101,7 +101,7 @@ function hasRollbackEvidence(implementation: Implementation): boolean {
   return typeof implementation.previousActive === 'string' && implementation.previousActive.length > 0;
 }
 
-function createRuleReplayEvidence(reports: Array<{ implementationId: string; report: ReplayReport }>): RuleReplayEvidence {
+function createRuleReplayEvidence(reports: { implementationId: string; report: ReplayReport }[]): RuleReplayEvidence {
   return {
     reportCount: reports.length,
     latestReports: reports.map((entry) => entry.report),

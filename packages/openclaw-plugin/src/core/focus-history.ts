@@ -41,10 +41,10 @@ export interface WorkingMemorySnapshot {
   };
   
   // 活动问题
-  activeProblems: Array<{
+  activeProblems: {
     problem: string;
     approach?: string;
-  }>;
+  }[];
   
   // 下一步行动
   nextActions: string[];
@@ -56,7 +56,7 @@ export interface WorkingMemorySnapshot {
 function logError(message: string, error?: unknown): void {
   const timestamp = new Date().toISOString();
   const errorStr = error instanceof Error ? error.message : String(error);
-  // eslint-disable-next-line no-console
+  // eslint-disable-next-line no-console -- Reason: File-system error logging must use console.error for visibility in background task context
   console.error(`[focus-history] ${timestamp} ERROR: ${message}${errorStr ? ' - ' + errorStr : ''}`);
 }
 
@@ -78,7 +78,7 @@ export function getHistoryDir(focusPath: string): string {
  * 支持整数和小数版本（如 v1, v1.1, v1.2）
  */
 export function extractVersion(content: string): string {
-  const match = content.match(/\*\*版本\*\*:\s*v([\d.]+)/i);
+  const match = /\*\*版本\*\*:\s*v([\d.]+)/i.exec(content);
   return match ? match[1] : '1';
 }
 
@@ -86,7 +86,7 @@ export function extractVersion(content: string): string {
  * 从 CURRENT_FOCUS.md 提取更新日期
  */
 export function extractDate(content: string): string {
-  const match = content.match(/\*\*更新\*\*:\s*(\d{4}-\d{2}-\d{2})/);
+  const match = /\*\*更新\*\*:\s*(\d{4}-\d{2}-\d{2})/.exec(content);
   return match ? match[1] : new Date().toISOString().split('T')[0];
 }
 
@@ -265,7 +265,7 @@ export function compressFocus(focusPath: string, newContent: string): {
  * @param content CURRENT_FOCUS.md 内容
  * @param maxLines 最大行数
  */
-export function extractSummary(content: string, maxLines: number = 30): string {
+export function extractSummary(content: string, maxLines = 30): string {
   const lines = content.split('\n');
   const sections: { [key: string]: string[] } = {
     header: [],      // 标题和元数据
@@ -361,7 +361,7 @@ const MAX_NEXT_ACTIONS = 5;
  * @returns 提取的工作记忆快照
  */
 export function extractWorkingMemory(
-  messages: Array<{ role?: string; content?: string | unknown[] }>,
+  messages: { role?: string; content?: string | unknown[] }[],
   workspaceDir?: string
 ): WorkingMemorySnapshot {
   const snapshot: WorkingMemorySnapshot = {
@@ -378,7 +378,7 @@ export function extractWorkingMemory(
 
   for (const msg of recentMessages) {
     let text = '';
-    const toolUses: Array<{ name: string; input: Record<string, unknown> }> = [];
+    const toolUses: { name: string; input: Record<string, unknown> }[] = [];
     
     if (typeof msg.content === 'string') {
       text = msg.content;
@@ -575,7 +575,7 @@ function extractDescription(text: string, filePath: string): string {
  */
 function extractProblems(
   text: string,
-  problems: Array<{ problem: string; approach?: string }>
+  problems: { problem: string; approach?: string }[]
 ): void {
   // 问题模式（匹配问题描述）
   const problemPattern = /(?:问题|problem|error|错误|失败|failed)[:：]\s*([^\n]{5,100})/gi;
@@ -671,7 +671,7 @@ export function parseWorkingMemorySection(content: string): WorkingMemorySnapsho
   };
 
   // 解析 last updated
-  const updatedMatch = wmContent.match(/Last updated:\s*([^\n]+)/i);
+  const updatedMatch = /Last updated:\s*([^\n]+)/i.exec(wmContent);
   if (updatedMatch) {
     snapshot.lastUpdated = updatedMatch[1].trim();
   }
@@ -727,7 +727,7 @@ export function mergeWorkingMemory(content: string, snapshot: WorkingMemorySnaps
     const beforeWm = content.substring(0, wmIndex);
     // 查找下一个 ## 标题（如果有的话）
     const afterWm = content.substring(wmIndex);
-    const nextSectionMatch = afterWm.substring(WORKING_MEMORY_SECTION.length).match(/\n##\s/);
+    const nextSectionMatch = /\n##\s/.exec(afterWm.substring(WORKING_MEMORY_SECTION.length));
     
     if (nextSectionMatch && nextSectionMatch.index !== undefined) {
       const nextSectionStart = WORKING_MEMORY_SECTION.length + nextSectionMatch.index;
@@ -973,7 +973,7 @@ export function extractMilestones(content: string): {
 
     // 提取文件引用（从工作记忆）
     if (inWorkingMemory) {
-      const fileMatch = trimmed.match(/^\|\s*`?([^`|\n]+)`?\s*\|/);
+      const fileMatch = /^\|\s*`?([^`|\n]+)`?\s*\|/.exec(trimmed);
       if (fileMatch && !fileMatch[1].includes('文件路径')) {
         fileArtifacts.push(fileMatch[1].trim());
       }
@@ -1088,7 +1088,7 @@ export function cleanupStaleInfo(
       }
 
       // 提取文件路径
-      const match = trimmed.match(/^\|\s*`?([^`|\n]+)`?\s*\|/);
+      const match = /^\|\s*`?([^`|\n]+)`?\s*\|/.exec(trimmed);
       if (match) {
         const filePath = match[1].trim();
         artifactCount++;

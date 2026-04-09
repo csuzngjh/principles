@@ -19,7 +19,7 @@
  * - All errors caught silently — return empty string on failure
  */
 
-import * as fs from 'fs';
+import type * as fs from 'fs';
 import * as fsPromises from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
@@ -53,6 +53,7 @@ function getAgentsDir(): string {
 async function safeTail(filePath: string): Promise<string[]> {
   try {
     // Check existence and stats asynchronously
+    // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in try, catch has early return
     let stat: fs.Stats;
     try {
       stat = await fsPromises.stat(filePath);
@@ -92,7 +93,7 @@ async function safeTail(filePath: string): Promise<string[]> {
 interface ParsedMessage {
   role: string;
   textParts: string[];
-  toolCalls: Array<{ id?: string; name?: string; arguments?: Record<string, unknown> }>;
+  toolCalls: { id?: string; name?: string; arguments?: Record<string, unknown> }[];
   toolCallId?: string;
   toolName?: string;
   details?: { exitCode?: number; isError?: boolean; aggregated?: string };
@@ -204,7 +205,7 @@ function extractTurn(msg: ParsedMessage): string | null {
  */
 export async function extractRecentConversation(
   sessionId: string,
-  agentId: string = 'main',
+  agentId = 'main',
   maxTurns: number = MAX_TURNS,
 ): Promise<string> {
   if (!sessionId || sessionId.length < 5 || !SAFE_ID_REGEX.test(sessionId)) return '';
@@ -236,7 +237,7 @@ export async function extractRecentConversation(
  */
 export async function extractFailedToolContext(
   sessionId: string,
-  agentId: string = 'main',
+  agentId = 'main',
   toolName: string,
   filePath?: string,
 ): Promise<string> {
@@ -277,7 +278,7 @@ export async function extractFailedToolContext(
         const isError = msg.details?.isError || (exitCode !== undefined && exitCode !== 0);
         if (!isError) continue;
 
-        const toolCallId = msg.toolCallId;
+        const {toolCallId} = msg;
         const correlated = toolCallId ? toolArgsById.get(toolCallId) : null;
         if (filePath && correlated && !correlated.fullArgs.includes(filePath)) continue;
 

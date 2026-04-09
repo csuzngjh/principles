@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { PluginHookLlmOutputEvent, PluginHookAgentContext } from '../openclaw-sdk.js';
-import { trackFriction, trackLlmOutput, recordThinkingCheckpoint, resetFriction } from '../core/session-tracker.js';
+import type { PluginHookLlmOutputEvent, PluginHookAgentContext } from '../openclaw-sdk.js';
+import { trackLlmOutput, recordThinkingCheckpoint, resetFriction } from '../core/session-tracker.js';
 import { buildPainFlag, writePainFlag } from '../core/pain.js';
 import { normalizeSeverity } from '../core/empathy-types.js';
 import { ControlUiDatabase } from '../core/control-ui-db.js';
@@ -39,7 +39,7 @@ function parseConfidence(raw?: string): number {
 }
 
 function parseTrustedLegacyTag(text: string): RegExpMatchArray | null {
-    return text.match(/^\s*\[EMOTIONAL_DAMAGE_DETECTED(?::(mild|moderate|severe))?\]\s*$/i);
+    return /^\s*\[EMOTIONAL_DAMAGE_DETECTED(?::(mild|moderate|severe))?\]\s*$/i.exec(text);
 }
 
 /**
@@ -88,19 +88,19 @@ export function extractEmpathySignal(text: string): EmpathySignal {
         return { detected: false, severity: 'mild', confidence: 1 };
     }
 
-    const xmlMatch = text.match(/<empathy\s+([^>]*)\/?>(?:<\/empathy>)?/i);
+    const xmlMatch = /<empathy\s+([^>]*)\/?>(?:<\/empathy>)?/i.exec(text);
     if (xmlMatch?.[1]) {
         const attrs = xmlMatch[1];
-        const signal = attrs.match(/signal\s*=\s*"([^"]+)"/i)?.[1]?.toLowerCase();
+        const signal = (/signal\s*=\s*"([^"]+)"/i.exec(attrs))?.[1]?.toLowerCase();
         if (signal === 'damage' || signal === 'pain' || signal === 'frustration') {
-            const severity = normalizeSeverity(attrs.match(/severity\s*=\s*"([^"]+)"/i)?.[1]);
-            const confidence = parseConfidence(attrs.match(/confidence\s*=\s*"([^"]+)"/i)?.[1]);
-            const reason = attrs.match(/reason\s*=\s*"([^"]+)"/i)?.[1];
+            const severity = normalizeSeverity((/severity\s*=\s*"([^"]+)"/i.exec(attrs))?.[1]);
+            const confidence = parseConfidence((/confidence\s*=\s*"([^"]+)"/i.exec(attrs))?.[1]);
+            const reason = (/reason\s*=\s*"([^"]+)"/i.exec(attrs))?.[1];
             return { detected: true, severity, confidence, reason, mode: 'structured' };
         }
     }
 
-    const jsonMatch = text.match(/"empathy"\s*:\s*\{[\s\S]*?\}/i);
+    const jsonMatch = /"empathy"\s*:\s*\{[\s\S]*?\}/i.exec(text);
     if (jsonMatch) {
         const jsonText = `{${jsonMatch[0]}}`;
         try {
@@ -230,8 +230,8 @@ export function handleLlmOutput(
     if (!ctx.workspaceDir || !ctx.sessionId) return;
 
     const wctx = WorkspaceContext.fromHookContext(ctx);
-    const config = wctx.config;
-    const eventLog = wctx.eventLog;
+    const {config} = wctx;
+    const {eventLog} = wctx;
 
     // Track this turn in the core session memory
     const state = trackLlmOutput(ctx.sessionId, event.usage, config, ctx.workspaceDir, ctx.sessionKey, ctx.trigger);
@@ -282,7 +282,7 @@ export function handleLlmOutput(
         : '';
 
     // ═══ Natural Language Rollback Detection ═══
-    const rollbackMatch = text.match(/^\s*\[EMPATHY_ROLLBACK_REQUEST\]\s*$/m);
+    const rollbackMatch = /^\s*\[EMPATHY_ROLLBACK_REQUEST\]\s*$/m.exec(text);
     if (rollbackMatch) {
         const eventId = eventLog.getLastEmpathyEventId(ctx.sessionId);
         if (eventId) {
@@ -382,7 +382,7 @@ function trackThinkingModelUsage(args: {
         usageLog[match.modelId] = (usageLog[match.modelId] || 0) + 1;
     }
 
-    usageLog['_total_turns'] = (usageLog['_total_turns'] || 0) + 1;
+    usageLog._total_turns = (usageLog._total_turns || 0) + 1;
 
     try {
         fs.writeFileSync(logPath, JSON.stringify(usageLog, null, 2), 'utf8');

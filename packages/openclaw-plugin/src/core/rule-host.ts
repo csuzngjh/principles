@@ -36,7 +36,7 @@ import type {
 import type { Implementation } from '../types/principle-tree-schema.js';
 
 export interface RuleHostLogger {
-  warn?: (message: string) => void;
+  warn?: (_message: string) => void;
 }
 
 export class RuleHost {
@@ -67,6 +67,7 @@ export class RuleHost {
       }
 
       // Merge decisions from all active implementations
+      // eslint-disable-next-line @typescript-eslint/init-declarations -- undefined is valid zero value, checked before use
       let blocked: RuleHostResult | undefined;
       const approvals: RuleHostResult[] = [];
 

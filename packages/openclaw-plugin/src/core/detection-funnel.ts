@@ -12,9 +12,11 @@ export interface DetectionResult {
  * A simple LRU Cache implementation using Map.
  */
 class SimpleLRU<K, V> {
-    private cache: Map<K, V>;
-    constructor(private maxSize: number = 100) {
+    private readonly cache: Map<K, V>;
+    private readonly maxSize: number;
+    constructor(maxSize = 100) {
         this.cache = new Map();
+        this.maxSize = maxSize;
     }
 
     get(key: K): V | undefined {
@@ -45,10 +47,13 @@ class SimpleLRU<K, V> {
  * Orchestrates the three-layer detection funnel for pain signals.
  */
 export class DetectionFunnel {
-    private cache = new SimpleLRU<string, { detected: boolean; severity?: number }>(100);
+    private readonly cache = new SimpleLRU<string, { detected: boolean; severity?: number }>(100);
     private asyncQueue: string[] = [];
+    private readonly dictionary: PainDictionary;
 
-    constructor(private dictionary: PainDictionary) {}
+    constructor(dictionary: PainDictionary) {
+        this.dictionary = dictionary;
+    }
 
     /**
      * Detects pain in the given text using L1 (Exact), L2 (Cache), and L3 (Async).
@@ -70,7 +75,7 @@ export class DetectionFunnel {
         }
 
         // --- Layer 2: LRU Cache (Sync) ---
-        const hash = this.computeHash(text);
+        const hash = DetectionFunnel.computeHash(text);
         const cached = this.cache.get(hash);
         if (cached) {
             return {
@@ -89,7 +94,7 @@ export class DetectionFunnel {
         };
     }
 
-    private computeHash(text: string): string {
+    private static computeHash(text: string): string {
         return createHash('sha256').update(text).digest('hex');
     }
 
@@ -104,7 +109,7 @@ export class DetectionFunnel {
      * Internal method for the worker to update the cache after a semantic hit.
      */
     updateCache(text: string, result: { detected: boolean; severity?: number }): void {
-        const hash = this.computeHash(text);
+        const hash = DetectionFunnel.computeHash(text);
         this.cache.set(hash, result);
     }
 

@@ -27,7 +27,7 @@ export interface EventFilters {
 }
 
 export interface TasksResponse {
-  items: Array<{
+  items: {
     taskId: string;
     traceId: string;
     source: string;
@@ -41,7 +41,7 @@ export interface TasksResponse {
     resolution: string | null;
     eventCount: number;
     createdAt: string;
-  }>;
+  }[];
   pagination: {
     page: number;
     pageSize: number;
@@ -51,7 +51,7 @@ export interface TasksResponse {
 }
 
 export interface EventsResponse {
-  items: Array<{
+  items: {
     id: number;
     traceId: string;
     taskId: string | null;
@@ -63,7 +63,7 @@ export interface EventsResponse {
     summary: string | null;
     metadata: Record<string, unknown>;
     createdAt: string;
-  }>;
+  }[];
   pagination: {
     limit: number;
     offset: number;
@@ -88,7 +88,7 @@ export interface TraceDetailResponse {
     createdAt: string;
     updatedAt: string;
   };
-  events: Array<{
+  events: {
     id: number;
     traceId: string;
     taskId: string | null;
@@ -100,15 +100,15 @@ export interface TraceDetailResponse {
     summary: string | null;
     metadata: Record<string, unknown>;
     createdAt: string;
-  }>;
-  timeline: Array<{
+  }[];
+  timeline: {
     stage: string;
     stageLabel: string;
     stageColor: string;
     timestamp: string;
     message: string;
     summary: string | null;
-  }>;
+  }[];
 }
 
 export interface EvolutionStatsResponse {
@@ -117,16 +117,16 @@ export interface EvolutionStatsResponse {
   inProgress: number;
   completed: number;
   failed: number;
-  recentActivity: Array<{
+  recentActivity: {
     day: string;
     created: number;
     completed: number;
-  }>;
-  stageDistribution: Array<{
+  }[];
+  stageDistribution: {
     stage: string;
     stageLabel: string;
     count: number;
-  }>;
+  }[];
 }
 
 /**
@@ -324,7 +324,7 @@ export class EvolutionQueryService {
   /**
    * 获取统计数据
    */
-  getStats(days: number = 30): EvolutionStatsResponse {
+  getStats(days = 30): EvolutionStatsResponse {
     // 获取基础统计
     const stats = this.trajectory.getEvolutionStats();
 

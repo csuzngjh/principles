@@ -237,7 +237,7 @@ function tryAcquireWithStaleCleanup(filePath: string, opts: Required<LockOptions
  */
 export function acquireLock(filePath: string, options: LockOptions = {}): LockContext {
   const opts = { ...DEFAULT_OPTIONS, ...options };
-  const pid = process.pid;
+  const {pid} = process;
 
   for (let attempt = 0; attempt < opts.maxRetries; attempt++) {
     const ctx = tryAcquireWithStaleCleanup(filePath, opts, pid);
@@ -256,7 +256,7 @@ export function acquireLock(filePath: string, options: LockOptions = {}): LockCo
 
 export async function acquireLockAsync(filePath: string, options: LockOptions = {}): Promise<LockContext> {
   const opts = { ...DEFAULT_OPTIONS, ...options };
-  const pid = process.pid;
+  const {pid} = process;
 
   for (let attempt = 0; attempt < opts.maxRetries; attempt++) {
     const ctx = tryAcquireWithStaleCleanup(filePath, opts, pid);
@@ -334,6 +334,7 @@ export async function withAsyncLock<T>(
   let queue = asyncLockQueues.get(lockPath);
   
   // 创建新的 Promise 链
+  // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in Promise executor before use
   let resolveRelease: () => void;
   const releasePromise = new Promise<void>(resolve => {
     resolveRelease = resolve;

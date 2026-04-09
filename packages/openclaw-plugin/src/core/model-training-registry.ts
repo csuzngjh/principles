@@ -249,7 +249,8 @@ function writeRegistry(stateDir: string, registry: ModelTrainingRegistry): void 
  */
 function withRegistryLock<T>(
   stateDir: string,
-  fn: (registry: ModelTrainingRegistry) => T
+  // eslint-disable-next-line no-unused-vars -- parameter type annotation requires name
+  fn: (_: ModelTrainingRegistry) => T
 ): T {
   const registryPath = getRegistryPath(stateDir);
   return withLock(registryPath, () => {
@@ -498,7 +499,7 @@ export function listCheckpoints(
   }
 ): Checkpoint[] {
   const registry = readRegistry(stateDir);
-  let checkpoints = registry.checkpoints;
+  let {checkpoints} = registry;
 
   if (filter?.trainRunId) {
     checkpoints = checkpoints.filter((c) => c.trainRunId === filter.trainRunId);
@@ -795,7 +796,7 @@ export function getTrainingRegistryStats(
   const registry = readRegistry(stateDir);
 
   const runs = registry.trainingRuns;
-  const checkpoints = registry.checkpoints;
+  const {checkpoints} = registry;
   const evals = registry.evalSummaries;
 
   return {

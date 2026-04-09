@@ -63,7 +63,7 @@ function scrubSensitive(obj: unknown, depth = 0): unknown {
  * 异步写入队列 - 确保有序、非阻塞写入
  */
 class AsyncWriteQueue {
-  private queue: Array<() => Promise<void>> = [];
+  private readonly queue: (() => Promise<void>)[] = [];
   private processing = false;
   
   async enqueue(task: () => Promise<void>): Promise<void> {
@@ -151,7 +151,7 @@ export function handleAfterToolCall(
   event: PluginHookAfterToolCallEvent,
   ctx: PluginHookToolContext & { workspaceDir?: string }
 ): void {
-  const workspaceDir = ctx.workspaceDir;
+  const {workspaceDir} = ctx;
   if (!workspaceDir) return;
 
   // 递归脱敏处理所有字段
@@ -186,7 +186,7 @@ export function handleLlmOutput(
   event: PluginHookLlmOutputEvent,
   ctx: PluginHookAgentContext & { workspaceDir?: string }
 ): void {
-  const workspaceDir = ctx.workspaceDir;
+  const {workspaceDir} = ctx;
   if (!workspaceDir) return;
 
   const totalTextLength = event.assistantTexts?.reduce((sum, text) => sum + (text?.length || 0), 0) || 0;
@@ -211,7 +211,7 @@ export function handleBeforeMessageWrite(
   event: PluginHookBeforeMessageWriteEvent,
   ctx: PluginHookAgentContext & { workspaceDir?: string }
 ): void {
-  const workspaceDir = ctx.workspaceDir;
+  const {workspaceDir} = ctx;
   if (!workspaceDir) return;
 
   const msg = event.message;

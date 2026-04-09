@@ -12,26 +12,26 @@ export interface ThinkingModelMatch {
 }
 
 export interface ThinkingScenarioContext {
-  recentToolCalls?: Array<{
+  recentToolCalls?: {
     toolName: string;
     outcome: 'success' | 'failure' | 'blocked';
     errorType?: string | null;
-  }>;
-  recentPainEvents?: Array<{
+  }[];
+  recentPainEvents?: {
     source: string;
     score: number;
-  }>;
-  recentGateBlocks?: Array<{
+  }[];
+  recentGateBlocks?: {
     toolName: string;
     reason: string;
-  }>;
-  recentUserCorrections?: Array<{
+  }[];
+  recentUserCorrections?: {
     correctionCue?: string | null;
-  }>;
-  recentPrincipleEvents?: Array<{
+  }[];
+  recentPrincipleEvents?: {
     eventType: string;
     principleId?: string | null;
-  }>;
+  }[];
 }
 
 const THINKING_MODELS: ThinkingModelDefinition[] = [

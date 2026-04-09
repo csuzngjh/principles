@@ -44,7 +44,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { withLock } from '../utils/file-lock.js';
-import type { WorkerProfile } from './model-deployment-registry.js';
 import {
   getCheckpoint,
   getEvalSummary,
@@ -380,7 +379,7 @@ export function evaluatePromotionGate(
   }
 
   // --- Check 4: Delta must be positive and above threshold ---
-  const delta = evalSummary.delta;
+  const {delta} = evalSummary;
   const deltaCheck = {
     actual: delta,
     threshold: minDelta,
@@ -398,7 +397,9 @@ export function evaluatePromotionGate(
   // PREFER real shadow evidence over eval verdict proxy
   // Shadow evidence comes from actual runtime routing decisions
   const shadowStats = computeShadowStats(stateDir, { checkpointId });
+  // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in both if/else branches
   let arbiterRejectRate: number;
+  // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in both if/else branches
   let arbiterRejectSource: 'shadow' | 'eval-proxy';
 
   if (shadowStats && shadowStats.isStatisticallySignificant) {
@@ -432,7 +433,9 @@ export function evaluatePromotionGate(
 
   // --- Check 6: Executability reject rate constraint ---
   // PREFER real shadow evidence: escalation rate + profile rejection rate
+  // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in both if/else branches
   let executabilityRejectRate: number;
+  // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in both if/else branches
   let executabilityRejectSource: 'shadow' | 'eval-proxy';
 
   if (shadowStats && shadowStats.isStatisticallySignificant) {
@@ -490,6 +493,7 @@ export function evaluatePromotionGate(
     qualityCheck.passed;
 
   // --- Suggest state based on checks ---
+  // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in all branches
   let suggestedState: PromotionState | undefined;
   if (allPassed) {
     suggestedState = 'candidate_only';
@@ -590,6 +594,7 @@ export function advancePromotion(
     // - rejected → candidate_only/shadow_ready: allowed via re-evaluation
     //   (new eval data may reverse a previous rejection)
     //
+    // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in all branches
     let targetState: PromotionState;
     if (!gateResult.passes) {
       targetState = 'rejected';

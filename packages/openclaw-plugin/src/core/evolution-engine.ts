@@ -21,19 +21,17 @@ import {
   HIGH_RISK_TOOLS,
 } from '../constants/tools.js';
 
-import {
-  EvolutionTier,
+import type {
   EvolutionEvent,
   EvolutionScorecard,
   EvolutionStats,
   EvolutionConfig,
-  EvolutionStorage,
   TaskDifficulty,
   TierDefinition,
-  TierPermissions,
   GateDecision,
-  ToolCallContext,
-  TierPromotionEvent,
+  ToolCallContext} from './evolution-types.js';
+import {
+  EvolutionTier,
   DEFAULT_EVOLUTION_CONFIG,
   TIER_DEFINITIONS,
   TASK_DIFFICULTY_CONFIG,
@@ -44,11 +42,11 @@ import {
 // ===== 主引擎 =====
 
 export class EvolutionEngine {
-  private scorecard: EvolutionScorecard;
-  private workspaceDir: string;
-  private stateDir: string;
-  private config: EvolutionConfig;
-  private storagePath: string;
+  private readonly scorecard: EvolutionScorecard;
+  private readonly workspaceDir: string;
+  private readonly stateDir: string;
+  private readonly config: EvolutionConfig;
+  private readonly storagePath: string;
 
   constructor(workspaceDir: string, config?: Partial<EvolutionConfig>) {
     this.workspaceDir = workspaceDir;
@@ -123,14 +121,14 @@ export class EvolutionEngine {
   ): { pointsAwarded: number; isDoubleReward: boolean; newTier?: EvolutionTier } {
     // 探索性工具成功不给积分，只重置失败记录
     if (EXPLORATORY_TOOLS.has(toolName)) {
-      const taskHash = this.computeTaskHash(toolName, options?.filePath);
+      const taskHash = EvolutionEngine.computeTaskHash(toolName, options?.filePath);
       this.scorecard.recentFailureHashes.delete(taskHash);
       this.saveScorecard();
       return { pointsAwarded: 0, isDoubleReward: false };
     }
 
-    const difficulty = options?.difficulty || this.inferDifficulty(toolName);
-    const taskHash = this.computeTaskHash(toolName, options?.filePath);
+    const difficulty = options?.difficulty || EvolutionEngine.inferDifficulty(toolName);
+    const taskHash = EvolutionEngine.computeTaskHash(toolName, options?.filePath);
     
     // 计算积分
     let points = this.calculatePoints(difficulty, taskHash);
@@ -178,14 +176,14 @@ export class EvolutionEngine {
   ): { pointsAwarded: number; lessonRecorded: boolean } {
     // 探索性工具失败：记录但几乎不影响
     if (EXPLORATORY_TOOLS.has(toolName)) {
-      const event = this.createEvent('failure', this.computeTaskHash(toolName, options?.filePath), 'trivial', toolName, options?.filePath, options?.reason, 0, false, options?.sessionId);
+      const event = this.createEvent('failure', EvolutionEngine.computeTaskHash(toolName, options?.filePath), 'trivial', toolName, options?.filePath, options?.reason, 0, false, options?.sessionId);
       this.addEvent(event);
       this.saveScorecard();
       return { pointsAwarded: 0, lessonRecorded: true };
     }
 
-    const difficulty = options?.difficulty || this.inferDifficulty(toolName);
-    const taskHash = this.computeTaskHash(toolName, options?.filePath);
+    const difficulty = options?.difficulty || EvolutionEngine.inferDifficulty(toolName);
+    const taskHash = EvolutionEngine.computeTaskHash(toolName, options?.filePath);
 
     // 失败不扣分，但记录教训（用于后续双倍奖励）
     this.scorecard.recentFailureHashes.set(taskHash, new Date().toISOString());
@@ -244,7 +242,7 @@ export class EvolutionEngine {
   // ===== 积分计算 =====
 
   private calculatePoints(difficulty: TaskDifficulty, taskHash: string): number {
-    const basePoints = TASK_DIFFICULTY_CONFIG[difficulty].basePoints;
+    const {basePoints} = TASK_DIFFICULTY_CONFIG[difficulty];
     
     // 难度衰减
     const penalty = this.getDifficultyPenalty(difficulty);
@@ -300,15 +298,6 @@ export class EvolutionEngine {
       this.scorecard.currentTier = newTier;
       this.scorecard.stats.tierPromotions++;
 
-      // 记录升级事件
-      const promotionEvent: TierPromotionEvent = {
-        previousTier,
-        newTier,
-        totalPoints: this.scorecard.totalPoints,
-        timestamp: new Date().toISOString(),
-        newPermissions: getTierDefinition(newTier).permissions,
-      };
-
       console.log(`[Evolution] 🎉 Tier promotion: ${previousTier} → ${newTier} (${getTierDefinition(newTier).name})`);
       
       return newTier;
@@ -319,7 +308,7 @@ export class EvolutionEngine {
 
   // ===== 任务难度推断 =====
 
-  private inferDifficulty(toolName: string): TaskDifficulty {
+  private static inferDifficulty(toolName: string): TaskDifficulty {
     if (HIGH_RISK_TOOLS.has(toolName)) return 'hard';
     if (CONSTRUCTIVE_TOOLS.has(toolName)) return 'normal';
     return 'trivial';
@@ -327,7 +316,7 @@ export class EvolutionEngine {
 
   // ===== 任务哈希 =====
 
-  private computeTaskHash(toolName: string, filePath?: string): string {
+  private static computeTaskHash(toolName: string, filePath?: string): string {
     const normalizedPath = filePath ? path.normalize(filePath) : '_nofile';
     return `${toolName}:${normalizedPath}`;
   }
@@ -458,7 +447,7 @@ export class EvolutionEngine {
   }
 
   /** Per-instance retry queue (P0 fix: was static, causing cross-instance race) */
-  private retryQueue: Array<{ engine: EvolutionEngine; data: Partial<EvolutionScorecard> }> = [];
+  private retryQueue: { engine: EvolutionEngine; data: Partial<EvolutionScorecard> }[] = [];
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** 调度重试保存 */

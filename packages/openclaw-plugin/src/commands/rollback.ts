@@ -15,7 +15,7 @@ export function handleRollbackCommand(ctx: PluginCommandContext): PluginCommandR
     const wctx = WorkspaceContext.fromHookContext({ workspaceDir, ...ctx.config });
     const lang = (ctx.config?.language as string) || 'en';
     const isZh = lang === 'zh';
-    const sessionId = (ctx as any).sessionId;
+    const {sessionId} = (ctx as any);
 
     const args = (ctx.args || '').trim();
 

@@ -68,13 +68,15 @@ export interface ReconcileResult {
   errors: ReconcileError[];
 }
 
+// eslint-disable-next-line no-unused-vars -- logger callbacks have unused param names in type
 export interface ReconcileOptions {
   dryRun?: boolean;
   workspaceDir: string;
-  logger?: { info?: (msg: string) => void; warn?: (msg: string) => void };
+  logger?: { info?: (_: string) => void; warn?: (_: string) => void };
 }
 
-async function readCronStore(logger?: { info?: (msg: string) => void; warn?: (msg: string) => void }): Promise<CronStoreFile> {
+// eslint-disable-next-line no-unused-vars -- logger callbacks have unused param names in type
+async function readCronStore(logger?: { info?: (_: string) => void; warn?: (_: string) => void }): Promise<CronStoreFile> {
   if (!fs.existsSync(CRON_STORE_PATH)) {
     logger?.info?.(`[PD:Reconciler] cron/jobs.json not found, starting with empty store`);
     return { version: 1, jobs: [] };
@@ -138,7 +140,8 @@ function diff(declared: PDTaskSpec[], actual: CronJob[]): DiffAction[] {
 function buildCronJob(
   task: PDTaskSpec,
   nowMs: number,
-  logger?: { info?: (msg: string) => void },
+  // eslint-disable-next-line no-unused-vars -- logger callback param unused in type
+  logger?: { info?: (_: string) => void },
 ): CronJob {
   logger?.info?.(`[PD:Reconciler] Building cron job: ${task.name} (id=${task.id}, interval=${task.schedule.everyMs}ms)`);
   return {
@@ -170,7 +173,8 @@ function buildCronJob(
   };
 }
 
-function buildTaskPrompt(task: PDTaskSpec, logger?: { info?: (msg: string) => void }): string {
+// eslint-disable-next-line no-unused-vars -- logger callback param unused in type
+function buildTaskPrompt(task: PDTaskSpec, logger?: { info?: (_: string) => void }): string {
   if (task.id === 'empathy-optimizer') {
     logger?.info?.(`[PD:Reconciler] Building empathy optimizer prompt`);
     return `You are the Principles Disciple Empathy Keyword Optimizer.
@@ -356,10 +360,11 @@ export async function reconcilePDTasks(
   return result;
 }
 
+// eslint-disable-next-line no-unused-vars -- logger callback params unused in type
 function healthCheck(
   tasks: PDTaskSpec[],
   cronStore: CronStoreFile,
-  logger: { info?: (msg: string) => void; warn?: (msg: string) => void },
+  logger: { info?: (_: string) => void; warn?: (_: string) => void },
 ): PDTaskSpec[] {
   const jobByName = new Map(cronStore.jobs.map((j) => [j.name, j]));
 

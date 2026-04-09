@@ -29,7 +29,8 @@
  * FILE: {stateDir}/nocturnal/snapshots/  (cached snapshots if needed, optional)
  */
 
-import { TrajectoryDatabase, TrajectoryRegistry } from './trajectory.js';
+import type { TrajectoryDatabase} from './trajectory.js';
+import { TrajectoryRegistry } from './trajectory.js';
 import { detectThinkingModelMatches, listThinkingModels } from './thinking-models.js';
 
 // ---------------------------------------------------------------------------
@@ -360,7 +361,8 @@ export class NocturnalTrajectoryExtractor {
  */
 export function createNocturnalTrajectoryExtractor(
   workspaceDir: string,
-  _stateDir?: string // Ignored; kept for API compatibility with existing call sites
+  // eslint-disable-next-line no-unused-vars -- kept for API compatibility with existing call sites
+  _stateDir?: string
 ): NocturnalTrajectoryExtractor {
   // Use the registry to get or create the TrajectoryDatabase instance
   const trajectory = TrajectoryRegistry.get(workspaceDir);
@@ -424,7 +426,7 @@ export function computeThinkingModelActivation(text: string): number {
  * @returns Planning ratio (0-1), or 0 if no write operations
  */
 export function computePlanningRatio(snapshot: NocturnalSessionSnapshot): number {
-  const toolCalls = snapshot.toolCalls;
+  const {toolCalls} = snapshot;
 
   let totalWrites = 0;
   let writesWithPrecedingRead = 0;

@@ -34,40 +34,40 @@ export interface ControlUiDatabaseOptions {
 }
 
 export interface RecentThinkingContext {
-  toolCalls: Array<{
+  toolCalls: {
     id: number;
     toolName: string;
     outcome: 'success' | 'failure' | 'blocked';
     errorType: string | null;
     errorMessage: string | null;
     createdAt: string;
-  }>;
-  painEvents: Array<{
+  }[];
+  painEvents: {
     id: number;
     source: string;
     score: number;
     reason: string | null;
     createdAt: string;
-  }>;
-  gateBlocks: Array<{
+  }[];
+  gateBlocks: {
     id: number;
     toolName: string;
     reason: string;
     filePath: string | null;
     createdAt: string;
-  }>;
-  userCorrections: Array<{
+  }[];
+  userCorrections: {
     id: number;
     correctionCue: string | null;
     rawExcerpt: string | null;
     createdAt: string;
-  }>;
-  principleEvents: Array<{
+  }[];
+  principleEvents: {
     id: number;
     principleId: string | null;
     eventType: string;
     createdAt: string;
-  }>;
+  }[];
 }
 
 const DEFAULT_BUSY_TIMEOUT_MS = 5000;

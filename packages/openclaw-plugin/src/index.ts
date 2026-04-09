@@ -132,7 +132,7 @@ const plugin = {
         const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
         try {
           const pluginConfig = api.pluginConfig ?? {};
-          const logger = api.logger;
+          const {logger} = api;
           const result = handleBeforeToolCall(event, { ...ctx, workspaceDir, pluginConfig, logger });
           
           WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({

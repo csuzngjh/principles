@@ -1,7 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { OpenClawPluginApi } from '../openclaw-sdk.js';
-import { PD_DIRS, PD_FILES, resolvePdPath } from './paths.js';
+import type { PD_FILES} from './paths.js';
+import { resolvePdPath } from './paths.js';
 
 /**
  * Handles migration of Principles Disciple files from legacy directories
@@ -13,7 +14,7 @@ export function migrateDirectoryStructure(api: OpenClawPluginApi, workspaceDir: 
         const legacyStateDir = path.join(workspaceDir, 'memory', '.state');
         
         // Comprehensive migration map covering ALL legacy locations
-        const migrationMap: Array<{ legacy: string; newKey: keyof typeof PD_FILES }> = [
+        const migrationMap: { legacy: string; newKey: keyof typeof PD_FILES }[] = [
             // From docs/
             { legacy: path.join(legacyDocsDir, 'PRINCIPLES.md'), newKey: 'PRINCIPLES' },
             { legacy: path.join(legacyDocsDir, 'THINKING_OS.md'), newKey: 'THINKING_OS' },
