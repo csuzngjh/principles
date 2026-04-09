@@ -96,7 +96,6 @@ function findConfigFile(): string | null {
     return null;
 }
 
- 
 function loadConfigFromFile(): PDConfig | null {
     const configPath = findConfigFile();
     if (!configPath) {
@@ -113,7 +112,6 @@ function loadConfigFromFile(): PDConfig | null {
         return null;
     }
 }
- 
 
 export class PathResolver {
     private static extensionRoot: string | null = null;

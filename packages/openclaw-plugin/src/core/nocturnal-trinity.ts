@@ -268,53 +268,6 @@ If you cannot synthesize an artifact:
   }
 }`;
 
-// Orphaned prompt content - wrapped in constant to fix parsing error
-// This content was added in commit d9aec3fa but missing its variable declaration
-const NOCTURNAL_SINGLE_REFLECTION_PROMPT = `## Task
-
-Analyze the session and generate a **decision-point sample** that captures:
-1. **The bad decision**: What the agent decided or did that violated the target principle
-2. **The better decision**: What the agent should have done instead
-3. **The rationale**: Why the better decision would have been correct
-
-## Output Format
-
-You MUST respond with ONLY a valid JSON object. No markdown, no explanation, no preamble.
-
-{
-  "artifactId": "<uuid>",
-  "sessionId": "<source session ID>",
-  "principleId": "<principle ID>",
-  "sourceSnapshotRef": "<snapshot reference>",
-  "badDecision": "<what the agent did wrong>",
-  "betterDecision": "<what the agent should have done>",
-  "rationale": "<why this is better>",
-  "createdAt": "<ISO timestamp>"
-}
-
-## Constraints
-- All fields must be non-empty strings
-- badDecision should identify the specific point of failure
-- betterDecision should be an actionable next step
-- rationale should explicitly reference the target principle
-- Must NOT include raw user text or vague moralizing
-
-## Validation
-
-If you cannot generate a valid sample:
-
-{
-  "invalid": true,
-  "reason": "<why a valid sample cannot be generated>",
-  "artifactId": "<placeholder>",
-  "sessionId": "<source session ID>",
-  "principleId": "<principle ID>",
-  "badDecision": "",
-  "betterDecision": "",
-  "rationale": "",
-  "createdAt": "<ISO timestamp>"
-}`;
-
 // ---------------------------------------------------------------------------
 // Trinity Runtime Adapter
 // ---------------------------------------------------------------------------
