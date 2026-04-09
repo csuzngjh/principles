@@ -9,6 +9,7 @@ import type {
   EvolutionTraceResponse,
   EvolutionStatsResponse,
   OverviewHealthResponse,
+  CentralHealthResponse,
   EvolutionPrinciplesResponse,
   FeedbackGfiResponse,
   EmpathyEvent,
@@ -191,6 +192,9 @@ export const api = {
   // Health & Circuit API (Phase 5)
   getOverviewHealth(): Promise<OverviewHealthResponse> {
     return requestJson('/plugins/principles/api/overview/health');
+  },
+  getCentralHealth(): Promise<CentralHealthResponse> {
+    return requestJson('/plugins/principles/api/central/health');
   },
   getEvolutionPrinciples(): Promise<EvolutionPrinciplesResponse> {
     return requestJson('/plugins/principles/api/evolution/principles');

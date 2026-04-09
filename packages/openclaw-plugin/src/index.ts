@@ -81,6 +81,16 @@ function computeRuntimeShadowTaskFingerprint(event: PluginHookSubagentSpawningEv
   return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex').slice(0, 16);
 }
 
+import { resolveValidWorkspaceDir, validateWorkspaceDir } from './core/workspace-dir-validation.js';
+
+function resolveToolHookWorkspaceDir(
+  ctx: { workspaceDir?: string; agentId?: string },
+  api: OpenClawPluginApi,
+  source: string,
+): string {
+  return resolveValidWorkspaceDir(ctx, api, { source });
+}
+
 const plugin = {
   name: "Principles Disciple",
   description: "Evolutionary programming agent framework with strategic guardrails and reflection loops.",
@@ -89,6 +99,20 @@ const plugin = {
     api.logger.info(`Principles Disciple Plugin registered. (Path: ${api.rootDir ?? '(unknown)'})`);
     PathResolver.setExtensionRoot(api.rootDir ?? '.');
     api.registerHttpRoute(createPrinciplesConsoleRoute(api));
+
+    // ── Startup Health Check: Verify workspaceDir resolution ──
+    // Catches OpenClaw context bugs early (e.g., missing workspaceDir in tool hooks)
+    setTimeout(() => {
+      const testCtx = { agentId: 'main' };
+      const toolWorkspaceDir = resolveToolHookWorkspaceDir(testCtx, api, 'startup.health_check');
+      const toolIssue = validateWorkspaceDir(toolWorkspaceDir);
+      if (toolIssue) {
+        api.logger.error(`[PD:health] Tool hook workspaceDir is INVALID: "${toolWorkspaceDir}" - ${toolIssue}`);
+        api.logger.error(`[PD:health] Tool hook events will be written to the WRONG .state directory!`);
+      } else {
+        api.logger.info(`[PD:health] Tool hook workspaceDir OK: "${toolWorkspaceDir}"`);
+      }
+    }, 1000);
 
     const language = (api.pluginConfig?.language as string) || 'en';
 
@@ -129,22 +153,23 @@ const plugin = {
     api.on(
       'before_tool_call',
       (event: PluginHookBeforeToolCallEvent, ctx: PluginHookToolContext): PluginHookBeforeToolCallResult | void => {
-        const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
+        const workspaceDir = resolveToolHookWorkspaceDir(ctx, api, 'before_tool_call');
         try {
           const pluginConfig = api.pluginConfig ?? {};
           const {logger} = api;
           const result = handleBeforeToolCall(event, { ...ctx, workspaceDir, pluginConfig, logger });
-          
+
           WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
             hook: 'before_tool_call'
-          });
-          
+          }, { flushImmediately: true });
+
           return result;
         } catch (err) {
-          WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
+          const fallbackDir = resolveToolHookWorkspaceDir(ctx, api, 'before_tool_call');
+          WorkspaceContext.fromHookContext({ workspaceDir: fallbackDir }).eventLog.recordHookExecution({
             hook: 'before_tool_call',
             error: String(err)
-          });
+          }, { flushImmediately: true });
           api.logger.error(`[PD] Error in before_tool_call: ${String(err)}`);
         }
       }
@@ -154,20 +179,21 @@ const plugin = {
     api.on(
       'after_tool_call',
       (event: PluginHookAfterToolCallEvent, ctx: PluginHookToolContext): void => {
-        const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
+        const workspaceDir = resolveToolHookWorkspaceDir(ctx, api, 'after_tool_call');
         try {
           const pluginConfig = api.pluginConfig ?? {};
           // Pass api separately to handleAfterToolCall to maintain type safety
           handleAfterToolCall(event, { ...ctx, workspaceDir, pluginConfig }, api);
-          
+
           WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
             hook: 'after_tool_call'
-          });
+          }, { flushImmediately: true });
         } catch (err) {
-          WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
+          const fallbackDir = resolveToolHookWorkspaceDir(ctx, api, 'after_tool_call');
+          WorkspaceContext.fromHookContext({ workspaceDir: fallbackDir }).eventLog.recordHookExecution({
             hook: 'after_tool_call',
             error: String(err)
-          });
+          }, { flushImmediately: true });
           api.logger.error(`[PD:EmpathyObserver] Error in after_tool_call: ${String(err)}`);
         }
       }
@@ -177,10 +203,10 @@ const plugin = {
     api.on(
       'llm_output',
       (event: PluginHookLlmOutputEvent, ctx: PluginHookAgentContext): void => {
-        const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
+        const workspaceDir = resolveToolHookWorkspaceDir(ctx as any, api, 'llm_output');
         try {
           handleLlmOutput(event, { ...ctx, workspaceDir });
-          
+
           WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
             hook: 'llm_output',
             sessionId: ctx.sessionId
@@ -202,7 +228,7 @@ const plugin = {
       'after_tool_call',
       (event: PluginHookAfterToolCallEvent, ctx: PluginHookToolContext): void => {
         try {
-          const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
+          const workspaceDir = resolveToolHookWorkspaceDir(ctx, api, 'trajectory.after_tool_call');
           TrajectoryCollector.handleAfterToolCall(event, { ...ctx, workspaceDir });
         } catch (err) {
           // Non-critical: don't log, just skip
@@ -214,7 +240,7 @@ const plugin = {
       'llm_output',
       (event: PluginHookLlmOutputEvent, ctx: PluginHookAgentContext): void => {
         try {
-          const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
+          const workspaceDir = resolveToolHookWorkspaceDir(ctx as any, api, 'trajectory.llm_output');
           TrajectoryCollector.handleLlmOutput(event, { ...ctx, workspaceDir });
         } catch (err) {
           // Non-critical: don't log, just skip

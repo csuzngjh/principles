@@ -8,6 +8,7 @@ import { HealthQueryService } from '../service/health-query-service.js';
 import { TrajectoryRegistry } from '../core/trajectory.js';
 import { getCentralDatabase } from '../service/central-database.js';
 import { CentralOverviewService } from '../service/central-overview-service.js';
+import { CentralHealthService } from '../service/central-health-service.js';
 
 const ROUTE_PREFIX = '/plugins/principles';
 const API_PREFIX = `${ROUTE_PREFIX}/api`;
@@ -173,6 +174,13 @@ function handleApiRoute(
           config: configs.find(c => c.workspaceName === ws.name) ?? null,
         })),
       };
+    });
+  }
+
+  // === Central Health: per-workspace health indicators ===
+  if (pathname === `${API_PREFIX}/central/health` && method === 'GET') {
+    return done(() => {
+      return new CentralHealthService().getAllWorkspaceHealth();
     });
   }
 
