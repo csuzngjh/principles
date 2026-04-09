@@ -15,6 +15,7 @@ export function handleRollbackCommand(ctx: PluginCommandContext): PluginCommandR
     const wctx = WorkspaceContext.fromHookContext({ workspaceDir, ...ctx.config });
     const lang = (ctx.config?.language as string) || 'en';
     const isZh = lang === 'zh';
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: sessionId injected by OpenClaw plugin framework - type not available in PluginCommandContext
     const {sessionId} = (ctx as any);
 
     const args = (ctx.args || '').trim();
@@ -43,7 +44,8 @@ Usage:
         };
     }
 
-    let eventId: string | null = null;
+    let eventId: string | null;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Reason: triggerMethod is reserved for future extension - tracking rollback trigger source
     let triggerMethod: 'user_command' = 'user_command';
 
     if (args === 'last') {

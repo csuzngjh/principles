@@ -138,7 +138,7 @@ function _handleRollbackImpl(
   // Step 1: Current active -> disabled
   transitionImplementationState(stateDir, implId, 'disabled');
 
-  let restoredMessage = '';
+  let restoredMessage: string;
 
   if (previousActiveId && allImpls.some((i) => i.id === previousActiveId)) {
     // Step 2: Restore previous active -> active

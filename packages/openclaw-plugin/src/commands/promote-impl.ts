@@ -43,6 +43,7 @@ function _handleListCandidates(
   const engine = new ReplayEngine('', stateDir);
   const allImpls = getAllImplementations(stateDir);
   const candidates = allImpls.filter(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: lifecycleState is a dynamic property added by the system - type not in official interface
     (impl) => (impl as any).lifecycleState === 'candidate',
   );
 
@@ -139,6 +140,7 @@ function _handlePromoteImpl(options: PromoteImplOptions): PluginCommandResult {
     };
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: lifecycleState is a dynamic property added by the system - type not in official interface
   const currentState = (candidate as any).lifecycleState || 'candidate';
 
   if (currentState !== 'candidate' && currentState !== 'disabled') {
