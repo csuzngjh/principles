@@ -23,7 +23,6 @@ disable-model-invocation: true
 ### 2. `repair` (系统修复)
 **动作**: 
 - **配置恢复**: 如果 `PROFILE.json` 缺失或损坏，尝试从 `.claude/templates/PROFILE.json` 恢复。
-- **规则恢复**: 如果 `00-kernel.md` 缺失，从 `.claude/templates/00-kernel.md` 恢复。
 - **结构补全**: 确保 `PLAN.md` 包含 `## Target Files` 标题。
 - **强制清理**: 删除 `.pain_flag`, `.verdict.json`, `.user_verdict.json`, `.pending_reflection` 等临时标记。
 

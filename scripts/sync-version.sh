@@ -34,6 +34,7 @@ if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
 fi
 
 PLUGIN_DIR="$PROJECT_ROOT/packages/openclaw-plugin"
+CREATE_PKG_DIR="$PROJECT_ROOT/packages/create-principles-disciple"
 ROOT_DIR="$PROJECT_ROOT"
 
 echo ""
@@ -46,7 +47,14 @@ if [ -f "$PACKAGE_JSON" ]; then
     echo "✅ packages/openclaw-plugin/package.json → $VERSION"
 fi
 
-# 2. 更新 packages/openclaw-plugin/openclaw.plugin.json (插件清单)
+# 2. 更新 packages/create-principles-disciple/package.json (installer 包)
+CREATE_PACKAGE_JSON="$CREATE_PKG_DIR/package.json"
+if [ -f "$CREATE_PACKAGE_JSON" ]; then
+    $SED_INPLACE "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" "$CREATE_PACKAGE_JSON"
+    echo "✅ packages/create-principles-disciple/package.json → $VERSION"
+fi
+
+# 3. 更新 packages/openclaw-plugin/openclaw.plugin.json (插件清单)
 PLUGIN_JSON="$PLUGIN_DIR/openclaw.plugin.json"
 if [ -f "$PLUGIN_JSON" ]; then
     $SED_INPLACE "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" "$PLUGIN_JSON"
@@ -79,7 +87,7 @@ echo "🎉 版本号同步完成！"
 echo ""
 echo "📊 同步摘要:"
 echo "  • 版本号: $VERSION"
-echo "  • 已同步 5 个文件"
+echo "  • 已同步 6 个文件"
 echo ""
 echo "💡 下一步:"
 echo "   git add -A && git commit -m 'chore: sync version to $VERSION'"
