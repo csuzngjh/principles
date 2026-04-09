@@ -282,40 +282,61 @@ function ExplainKpiCard({ label, value, explain, trend, trendColor }: KpiCardPro
 
   return (
     <article className="panel kpi" style={{ position: 'relative' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <span
-          className="label"
-          style={{ cursor: 'help' }}
-          onClick={() => setShowExplain(!showExplain)}
-        >
-          {label} <span style={{ fontSize: '0.7em', opacity: 0.6 }}>ℹ</span>
-        </span>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span
+              className="label"
+              onClick={() => setShowExplain(!showExplain)}
+              style={{ cursor: 'pointer', userSelect: 'none' }}
+            >
+              {label}
+            </span>
+            <button
+              onClick={() => setShowExplain(!showExplain)}
+              style={{
+                background: 'none',
+                border: '1px solid var(--border)',
+                borderRadius: 4,
+                cursor: 'pointer',
+                color: 'var(--text-secondary)',
+                width: 22,
+                height: 22,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '0.75rem',
+                lineHeight: 1,
+                padding: 0,
+                flexShrink: 0,
+              }}
+              title="查看说明"
+            >
+              ?
+            </button>
+          </div>
+          <span className="value">{value}</span>
+        </div>
         {trend && trend.length >= 2 && (
-          <div className="stat-sparkline">
+          <div className="stat-sparkline" style={{ flexShrink: 0, alignSelf: 'center' }}>
             <Sparkline data={trend} width={50} height={16} color={trendColor} />
           </div>
         )}
       </div>
-      <span className="value">{value}</span>
       {showExplain && (
         <div
           style={{
-            position: 'absolute',
-            top: '100%',
-            left: 0,
-            right: 0,
+            marginTop: 6,
+            padding: '8px 10px',
             background: 'var(--bg-sunken)',
             border: '1px solid var(--border)',
             borderRadius: 'var(--radius-sm)',
-            padding: '6px 10px',
-            fontSize: '0.72rem',
+            fontSize: '0.78rem',
             color: 'var(--text-secondary)',
-            zIndex: 50,
-            lineHeight: 1.4,
-            boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
+            lineHeight: 1.5,
           }}
         >
-          {t(explain.zh) || explain.zh}
+          💡 {t(explain.zh) || explain.zh}
         </div>
       )}
     </article>
