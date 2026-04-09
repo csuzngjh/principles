@@ -829,17 +829,13 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             workspaceDir: wctx.workspaceDir,
                             stateDir: wctx.stateDir,
                             logger: api?.logger || logger,
+                            runtimeAdapter: new OpenClawTrinityRuntimeAdapter(api!),
                         });
                         try {
                             // Force-expire this specific workflow regardless of TTL
-                            nocturnalMgr.store.updateWorkflowState(task.resultRef, 'expired');
-                            nocturnalMgr.store.recordEvent(
+                            nocturnalMgr.expireWorkflow(
                                 task.resultRef,
-                                'nocturnal_expired',
-                                'active',
-                                'expired',
                                 `Sleep reflection task ${task.id} timed out after ${Math.round(age / 60000)} min`,
-                                { parentTaskId: task.id, timeoutMs: timeout }
                             );
                             logger?.info?.(`[PD:EvolutionWorker] Expired nocturnal workflow ${task.resultRef} for timed-out sleep task ${task.id}`);
                         } finally {
