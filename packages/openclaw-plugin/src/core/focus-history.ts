@@ -56,7 +56,7 @@ export interface WorkingMemorySnapshot {
 function logError(message: string, error?: unknown): void {
   const timestamp = new Date().toISOString();
   const errorStr = error instanceof Error ? error.message : String(error);
-  // eslint-disable-next-line no-console -- Reason: File-system error logging must use console.error for visibility in background task context
+   
   console.error(`[focus-history] ${timestamp} ERROR: ${message}${errorStr ? ' - ' + errorStr : ''}`);
 }
 
@@ -86,8 +86,8 @@ export function extractVersion(content: string): string {
  * 从 CURRENT_FOCUS.md 提取更新日期
  */
 export function extractDate(content: string): string {
-  const match = /\*\*更新\*\*:\s*(\d{4}-\d{2}-\d{2})/.exec(content);
-  return match ? match[1] : new Date().toISOString().split('T')[0];
+  const [, dateStr] = /\*\*更新\*\*:\s*(\d{4}-\d{2}-\d{2})/.exec(content) ?? [];
+  return dateStr ?? new Date().toISOString().split('T')[0];
 }
 
 /**
@@ -228,7 +228,7 @@ export function compressFocus(focusPath: string, newContent: string): {
   const versionParts = oldVersion.split('.');
   const majorVersion = parseInt(versionParts[0], 10) || 1;
   const newVersion = `${majorVersion + 1}`;
-  const today = new Date().toISOString().split('T')[0];
+  const [today] = new Date().toISOString().split('T');
 
   // 更新版本号和日期
   const updatedContent = newContent
@@ -428,6 +428,7 @@ export function extractWorkingMemory(
             toolUse.name === 'write_file' || toolUse.name === 'create_file' ? 'created' : 'modified';
           
           // 尝试从文本中提取描述
+          // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between helper functions - reordering would break logical grouping
           const description = extractDescription(text, filePath);
           
           snapshot.artifacts.push({
@@ -1211,7 +1212,7 @@ export function autoCompressFocus(
 
   // 5. 递增版本号和日期
   const newVersion = `${parseInt(version, 10) + 1}`;
-  const today = new Date().toISOString().split('T')[0];
+  const [today] = new Date().toISOString().split('T');
   newContent = newContent
     .replace(/\*\*版本\*\*:\s*v[\d.]+/i, `**版本**: v${newVersion}`)
     .replace(/\*\*更新\*\*:\s*\d{4}-\d{2}-\d{2}/, `**更新**: ${today}`);
@@ -1350,7 +1351,7 @@ export function recoverFromTemplate(
     let template = fs.readFileSync(templatePath, 'utf-8');
 
     // 替换日期占位符
-    const today = new Date().toISOString().split('T')[0];
+    const [today] = new Date().toISOString().split('T');
     template = template.replace(/{YYYY-MM-DD}/g, today);
 
     // 备份损坏的文件（如果存在）
