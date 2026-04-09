@@ -644,9 +644,9 @@ export function transitionImplementationState(
       throw new Error(`Implementation not found: ${implementationId}`);
     }
 
-    const currentState = (impl as any).lifecycleState ?? 'candidate';
-    if (!isValidLifecycleTransition(currentState as ImplementationLifecycleState, newState)) {
-      const allowed = getAllowedTransitions(currentState as ImplementationLifecycleState);
+    const currentState = impl.lifecycleState ?? 'candidate';
+    if (!isValidLifecycleTransition(currentState, newState)) {
+      const allowed = getAllowedTransitions(currentState);
       throw new Error(
         `Invalid lifecycle transition: ${currentState} -> ${newState}. ` +
           `Allowed: ${allowed.length > 0 ? allowed.join(', ') : 'none (terminal state)'}`
@@ -673,7 +673,7 @@ export function listImplementationsByLifecycleState(
 ): Implementation[] {
   const ledger = loadLedger(stateDir);
   return Object.values(ledger.tree.implementations).filter(
-    (impl) => (impl as any).lifecycleState === state
+    (impl) => impl.lifecycleState === state
   );
 }
 
@@ -686,7 +686,7 @@ export function listRuleImplementationsByState(
   state: ImplementationLifecycleState
 ): Implementation[] {
   const implementations = listImplementationsForRule(stateDir, ruleId);
-  return implementations.filter((impl) => (impl as any).lifecycleState === state);
+  return implementations.filter((impl) => impl.lifecycleState === state);
 }
 
 /**
@@ -697,5 +697,5 @@ export function findActiveImplementation(
   ruleId: string
 ): Implementation | null {
   const implementations = listImplementationsForRule(stateDir, ruleId);
-  return implementations.find((impl) => (impl as any).lifecycleState === 'active') ?? null;
+  return implementations.find((impl) => impl.lifecycleState === 'active') ?? null;
 }

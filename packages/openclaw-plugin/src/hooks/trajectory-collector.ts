@@ -81,9 +81,14 @@ class AsyncWriteQueue {
     
     this.processing = true;
     const task = this.queue.shift();
-    
+
+    if (!task) {
+      this.processing = false;
+      return;
+    }
+
     try {
-      await task!();
+      await task();
     } catch {
       // Silently fail - trajectory collection should not block main functionality
     }
@@ -223,11 +228,13 @@ export function handleBeforeMessageWrite(
   // 提取文本内容
   let content = '';
   if (typeof msg.content === 'string') {
+    /* eslint-disable @typescript-eslint/prefer-destructuring */
+    // Reason: msg.content is string | ContentPart[]; destructuring would require renaming in the else branch
     content = msg.content;
   } else if (Array.isArray(msg.content)) {
     content = msg.content
-      .filter((part: any) => part?.type === 'text')
-      .map((part: any) => part.text)
+      .filter((part: unknown) => part && typeof part === 'object' && (part as { type?: string }).type === 'text')
+      .map((part: unknown) => (part as { text: string }).text)
       .join('\n');
   }
 
@@ -249,10 +256,6 @@ export function handleBeforeMessageWrite(
  * 脱敏处理：移除敏感参数（保留旧函数签名以兼容）
  * @deprecated 使用 scrubSensitive 替代
  */
-function sanitizeParams(params: Record<string, any>): Record<string, any> {
-  return scrubSensitive(params) as Record<string, any>;
-}
-
 /**
  * 轨迹汇总统计（供 cron 任务调用）
  */

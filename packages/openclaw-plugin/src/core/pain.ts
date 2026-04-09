@@ -154,7 +154,7 @@ export function readPainFlagData(projectDir: string): Record<string, string> {
     }
     const content = fs.readFileSync(painFlagPath, "utf-8");
     return parseKvLines(content);
-  } catch (e) {
+  } catch (e) { // eslint-disable-line @typescript-eslint/no-unused-vars -- Reason: intentionally unused - returning empty object on error
     return {};
   }
 }
