@@ -67,7 +67,7 @@ function _handleListArchivable(
 ): PluginCommandResult {
   const allImpls = getAllImplementations(stateDir);
   const archivable = allImpls.filter(
-    (impl) => canArchive(impl.lifecycleState || 'candidate' as ImplementationLifecycleState)
+    (impl) => canArchive(impl.lifecycleState || 'candidate')
   );
 
   if (archivable.length === 0) {
@@ -112,7 +112,7 @@ function _handleArchiveImpl(
     };
   }
 
-  const currentState = target.lifecycleState || 'candidate' as ImplementationLifecycleState;
+  const currentState = target.lifecycleState || 'candidate';
 
   if (!canArchive(currentState)) {
     return {

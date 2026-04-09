@@ -12,7 +12,6 @@ export default defineConfig(
       '**/node_modules/**',
       '**/dist/**',
       '**/*.d.ts',
-      '**/node_modules/**/*',
       '**/vitest.config.ts',
       '**/vitest.config.mts',
       '**/ui/src/**',
