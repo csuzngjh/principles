@@ -22,8 +22,8 @@ import type { Principle, PrincipleValueMetrics } from '../types/principle-tree-s
 import type { Principle as ActivePrinciple } from './evolution-types.js';
 
 interface PrincipleTreeLedgerAccessor {
-    getPrincipleSubtree(principleId: string): PrincipleSubtree | undefined;
-    updatePrinciple(principleId: string, updates: Partial<Principle>): Principle;
+    getPrincipleSubtree(_principleId: string): PrincipleSubtree | undefined;
+    updatePrinciple(_principleId: string, updates: Partial<Principle>): Principle;
     updatePrincipleValueMetrics(principleId: string, metrics: PrincipleValueMetrics): PrincipleValueMetrics;
 }
 
@@ -171,6 +171,7 @@ export class WorkspaceContext {
      * Uses PathResolver to handle path normalization and fallback logic.
      * @throws Error if workspaceDir is missing and no fallback available.
      */
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: OpenClaw plugin framework hook context has dynamic shape - type not available
     static fromHookContext(ctx: any): WorkspaceContext {
         const {logger} = ctx;
         const log = (msg: string) => logger?.info?.(msg);
