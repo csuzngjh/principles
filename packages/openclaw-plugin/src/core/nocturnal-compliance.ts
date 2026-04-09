@@ -909,6 +909,7 @@ export function computeCompliance(
   const violationTrend = computeViolationTrend(applicableSessions, windowSize);
 
   // Build explanation
+  // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between explanation builder - reordering would break logical grouping
   const explanation = buildExplanation(
     principleId,
     applicableOpportunityCount,
@@ -979,6 +980,7 @@ function computeViolationTrend(
 /**
  * Builds a human-readable explanation for the compliance result.
  */
+// eslint-disable-next-line @typescript-eslint/max-params -- Reason: explanation builder requires all context parameters - refactoring would break API
 function buildExplanation(
   principleId: string,
   applicableOpportunityCount: number,
