@@ -468,6 +468,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/max-params -- Reason: scribe invocation requires all context parameters - refactoring would break API
   async invokeScribe(
     dreamerOutput: DreamerOutput,
     philosopherOutput: PhilosopherOutput,
@@ -553,6 +554,7 @@ Please analyze this session and generate ${maxCandidates} candidate corrections.
 Respond with ONLY a valid JSON object matching the DreamerOutput contract.`;
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: utility method doesn't require this - pure prompt building function
   private buildPhilosopherPrompt(
     dreamerOutput: DreamerOutput,
     principleId: string
@@ -566,6 +568,7 @@ ${candidatesJson}
 Please evaluate each candidate and rank them by principle alignment, specificity, and actionability. Respond with ONLY a valid JSON object matching the PhilosopherOutput contract.`;
   }
 
+  // eslint-disable-next-line @typescript-eslint/max-params -- Reason: prompt building requires all context parameters - refactoring would break API
   private buildScribePrompt(
     dreamerOutput: DreamerOutput,
     philosopherOutput: PhilosopherOutput,
@@ -682,6 +685,7 @@ Select the best candidate (Philosopher's rank 1) and synthesize it into a final 
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/max-params -- Reason: output parsing requires text + snapshot + principleId + telemetry - refactoring would break API
   private parseScribeOutput(
     text: string,
     snapshot: NocturnalSessionSnapshot,
