@@ -296,6 +296,16 @@ export interface OverviewHealthResponse {
   activeStage: string;
 }
 
+export interface WorkspaceHealthEntry {
+  workspaceName: string;
+  health: OverviewHealthResponse;
+}
+
+export interface CentralHealthResponse {
+  workspaces: WorkspaceHealthEntry[];
+  generatedAt: string;
+}
+
 export interface EvolutionPrinciplesResponse {
   principles: {
     summary: { candidate: number; probation: number; active: number; deprecated: number };

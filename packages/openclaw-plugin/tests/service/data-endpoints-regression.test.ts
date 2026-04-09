@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ControlUiQueryService } from '../../src/service/control-ui-query-service.js';
 import { CentralOverviewService } from '../../src/service/central-overview-service.js';
+import { CentralHealthService } from '../../src/service/central-health-service.js';
 import { HealthQueryService } from '../../src/service/health-query-service.js';
 
 // ---------------------------------------------------------------------------
@@ -117,6 +118,10 @@ const centralDbMethods = {
     activeModels: 2,
     models: [],
   })),
+  getEnabledWorkspaces: vi.fn(() => [
+    { name: 'ws1', path: '/mock/workspace1', lastSync: '2026-04-09T00:00:00Z' },
+    { name: 'ws2', path: '/mock/workspace2', lastSync: '2026-04-09T00:00:00Z' },
+  ]),
   getSamplePreview: vi.fn(() => []),
   getMostRecentSync: vi.fn(() => '2026-04-09T00:00:00Z'),
   getTaskOutcomes: vi.fn(() => 0),
@@ -749,6 +754,81 @@ describe('Data Endpoints Regression Tests', () => {
       }
 
       service.dispose();
+    });
+  });
+
+  // ===== Central Health Page - /api/central/health =====
+
+  describe('Central Health - /api/central/health', () => {
+    it('CentralHealthService returns response with workspaces array and generatedAt', () => {
+      const service = new CentralHealthService();
+      const result = service.getAllWorkspaceHealth();
+
+      expect(result).toHaveProperty('workspaces');
+      expect(result).toHaveProperty('generatedAt');
+      expect(Array.isArray(result.workspaces)).toBe(true);
+    });
+
+    it('CentralHealthService returns one entry per enabled workspace', () => {
+      const service = new CentralHealthService();
+      const result = service.getAllWorkspaceHealth();
+
+      const enabledWorkspaces = centralDbMethods.getEnabledWorkspaces();
+      expect(result.workspaces.length).toBe(enabledWorkspaces.length);
+
+      // Each entry has workspaceName and health
+      for (const entry of result.workspaces) {
+        expect(entry).toHaveProperty('workspaceName');
+        expect(entry).toHaveProperty('health');
+        expect(typeof entry.workspaceName).toBe('string');
+      }
+    });
+
+    it('CentralHealthService health entries have all required OverviewHealthResponse fields', () => {
+      const service = new CentralHealthService();
+      const result = service.getAllWorkspaceHealth();
+
+      for (const entry of result.workspaces) {
+        const h = entry.health;
+        // GFI fields
+        expect(h.gfi).toHaveProperty('current');
+        expect(h.gfi).toHaveProperty('peakToday');
+        expect(h.gfi).toHaveProperty('threshold');
+        expect(typeof h.gfi.current).toBe('number');
+        expect(typeof h.gfi.threshold).toBe('number');
+
+        // Trust fields
+        expect(h.trust).toHaveProperty('stage');
+        expect(h.trust).toHaveProperty('stageLabel');
+        expect(h.trust).toHaveProperty('score');
+        expect(typeof h.trust.stage).toBe('number');
+        expect(typeof h.trust.stageLabel).toBe('string');
+
+        // Evolution fields
+        expect(h.evolution).toHaveProperty('tier');
+        expect(h.evolution).toHaveProperty('points');
+        expect(typeof h.evolution.points).toBe('number');
+
+        // PainFlag fields
+        expect(h.painFlag).toHaveProperty('active');
+        expect(h.painFlag).toHaveProperty('source');
+        expect(typeof h.painFlag.active).toBe('boolean');
+
+        // Principles fields
+        expect(h.principles).toHaveProperty('candidate');
+        expect(h.principles).toHaveProperty('probation');
+        expect(h.principles).toHaveProperty('active');
+        expect(h.principles).toHaveProperty('deprecated');
+
+        // Queue fields
+        expect(h.queue).toHaveProperty('pending');
+        expect(h.queue).toHaveProperty('inProgress');
+        expect(h.queue).toHaveProperty('completed');
+
+        // activeStage
+        expect(h).toHaveProperty('activeStage');
+        expect(typeof h.activeStage).toBe('string');
+      }
     });
   });
 });
