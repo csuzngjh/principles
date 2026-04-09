@@ -95,8 +95,8 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
     const args = (ctx.args || '').trim();
 
     // Handle empathy subcommand
-    // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between main handler and empathy subcommand handler - reordering would break logical grouping
     if (args.startsWith('empathy')) {
+        // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between main handler and empathy subcommand handler - reordering would break logical grouping
         return handleEmpathySubcommand(wctx, args, sessionId, isZh);
     }
 
