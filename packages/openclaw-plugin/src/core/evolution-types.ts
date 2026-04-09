@@ -10,7 +10,7 @@
 
 // ===== 等级定义 =====
 
-// eslint-disable-next-line no-unused-vars -- enum members used externally by name
+ 
 export enum EvolutionTier {
   Seed = 1,      // 起步：150行 + 3文件 + 子智能体（现代 AI 能力已足够强）
   Sprout = 2,    // 成长：300行 + 5文件
