@@ -29,7 +29,7 @@ export class HygieneTracker {
   }
 
   private loadStats(): HygieneStats {
-    const today = new Date().toISOString().split('T')[0];
+    const [today] = new Date().toISOString().split('T');
     if (fs.existsSync(this.statsFile)) {
       try {
         const content = fs.readFileSync(this.statsFile, 'utf-8');
@@ -46,6 +46,7 @@ export class HygieneTracker {
           const backupPath = `${this.statsFile}.bak`;
           fs.renameSync(this.statsFile, backupPath);
           this.logger?.warn(`[PD] Corrupted hygiene stats backed up to ${backupPath}`);
+        // eslint-disable-next-line no-unused-vars -- Reason: catch parameter intentionally unused - error handling only
         } catch (_renameErr) {}
       }
     }
@@ -56,7 +57,7 @@ export class HygieneTracker {
     let allStats: Record<string, HygieneStats> = {};
     
     // Check if we need to rotate date (reset currentStats if date changed)
-    const today = new Date().toISOString().split('T')[0];
+    const [today] = new Date().toISOString().split('T');
     if (this.currentStats.date !== today) {
       this.currentStats = createEmptyHygieneStats(today);
     }
@@ -109,7 +110,7 @@ export class HygieneTracker {
 
   getStats(): HygieneStats {
     // Check for date change on every get
-    const today = new Date().toISOString().split('T')[0];
+    const [today] = new Date().toISOString().split('T');
     if (this.currentStats.date !== today) {
       this.currentStats = createEmptyHygieneStats(today);
     }
