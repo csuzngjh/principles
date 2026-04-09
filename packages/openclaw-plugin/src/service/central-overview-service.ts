@@ -26,7 +26,7 @@ export class CentralOverviewService {
     this.centralDb.dispose();
   }
 
-  getOverview(days: number = 30): CentralOverviewResponse {
+  getOverview(days = 30): CentralOverviewResponse {
     const stats = this.centralDb.getOverviewStats();
     const trend = this.centralDb.getDailyTrend(days);
     const regressions = this.centralDb.getTopRegressions(5);
@@ -54,6 +54,7 @@ export class CentralOverviewService {
     // gate_blocks: no equivalent in aggregated DB schema; hardcode to 0
 
     // D-06: sampleQueue.counters from aggregated_correction_samples GROUP BY review_status
+    // eslint-disable-next-line no-useless-assignment -- Reason: initial value unused due to immediate reassignment in try/catch
     let sampleCounters: Record<string, number> = {};
     try {
       sampleCounters = this.centralDb.getSampleCountersByStatus();

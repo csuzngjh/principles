@@ -43,7 +43,7 @@ export function handleExportCommand(ctx: PluginCommandContext): PluginCommandRes
       }
 
        
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Reason: Type narrowing impractical - caller guarantees manifest exists via success check above
+       
       return {
         text: zh
           ? `已导出 ORPO 决策点样本到 ${result.manifest!.exportPath}，` + // eslint-disable-line @typescript-eslint/no-non-null-assertion -- Reason: caller guarantees manifest exists via success check

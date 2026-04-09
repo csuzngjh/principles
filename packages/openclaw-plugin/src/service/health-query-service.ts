@@ -501,6 +501,7 @@ export class HealthQueryService {
     const streamPath = resolvePdPath(this.workspaceDir, 'EVOLUTION_STREAM');
     if (!fs.existsSync(streamPath)) return [];
 
+    // eslint-disable-next-line no-useless-assignment -- Reason: initial value unused due to immediate reassignment
     let lines: string[] = [];
     try {
       const raw = fs.readFileSync(streamPath, 'utf8').trim();
@@ -512,6 +513,7 @@ export class HealthQueryService {
 
     const records: RecentPrincipleChange[] = [];
     for (const line of lines) {
+      // eslint-disable-next-line no-useless-assignment -- Reason: initial value unused due to immediate reassignment in try/catch
       let event: EvolutionStreamRecord | null = null;
       try {
         event = JSON.parse(line) as EvolutionStreamRecord;

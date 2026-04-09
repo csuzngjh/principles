@@ -66,7 +66,7 @@ function cleanupReflectionLog(workspaceDir: string): void {
     const entryPattern = /---\n## Reflection at (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})/g;
     const parts = content.split(entryPattern);
 
-    const header = parts[0];
+    const [header] = parts;
     const validEntries: string[] = [];
 
     for (let i = 1; i < parts.length; i += 2) {
@@ -303,7 +303,7 @@ function formatReflectionSuccess(
     let insights = '';
     if (fs.existsSync(reflectionLogPath)) {
         const content = fs.readFileSync(reflectionLogPath, 'utf8');
-        const match = content.match(/### Insights\n([\s\S]*?)(?=---|$)/);
+        const match = /### Insights\n([\s\S]*?)(?=---|$)/.exec(content);
         if (match) insights = match[1].trim();
     }
 

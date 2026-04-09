@@ -90,7 +90,7 @@ export function extractEmpathySignal(text: string): EmpathySignal {
 
     const xmlMatch = /<empathy\s+([^>]*)\/?>(?:<\/empathy>)?/i.exec(text);
     if (xmlMatch?.[1]) {
-        const attrs = xmlMatch[1];
+        const [, attrs] = xmlMatch;
         const signal = (/signal\s*=\s*"([^"]+)"/i.exec(attrs))?.[1]?.toLowerCase();
         if (signal === 'damage' || signal === 'pain' || signal === 'frustration') {
             const severity = normalizeSeverity((/severity\s*=\s*"([^"]+)"/i.exec(attrs))?.[1]);

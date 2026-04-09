@@ -417,7 +417,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
       await this.api.runtime.subagent.deleteSession({
         sessionKey,
         deleteTranscript: true,
-      }).catch(() => {});
+      }).catch(() => { /* intentionally empty - fire-and-forget session cleanup */ });
     }
   }
 
@@ -464,7 +464,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
       await this.api.runtime.subagent.deleteSession({
         sessionKey,
         deleteTranscript: true,
-      }).catch(() => {});
+      }).catch(() => { /* intentionally empty - fire-and-forget session cleanup */ });
     }
   }
 
@@ -510,7 +510,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
       await this.api.runtime.subagent.deleteSession({
         sessionKey,
         deleteTranscript: true,
-      }).catch(() => {});
+      }).catch(() => { /* intentionally empty - fire-and-forget session cleanup */ });
     }
   }
 
@@ -1168,7 +1168,7 @@ export function invokeStubPhilosopher(
     j.rank = idx + 1;
   });
 
-  const topJudgment = judgments[0];
+  const [topJudgment] = judgments;
 
   return {
     valid: true,
@@ -1405,7 +1405,7 @@ export async function runTrinityAsync(options: RunTrinityOptions): Promise<Trini
     };
   } finally {
     if (adapter.close) {
-      await adapter.close().catch(() => {});
+      await adapter.close().catch(() => { /* intentionally empty - adapter cleanup error ignored */ });
     }
   }
 }

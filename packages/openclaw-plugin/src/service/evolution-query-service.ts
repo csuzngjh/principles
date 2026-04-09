@@ -345,13 +345,13 @@ export class EvolutionQueryService {
     }
 
     for (const task of recentTasks) {
-      const createdDay = task.createdAt.split('T')[0];
+      const [createdDay] = task.createdAt.split('T');
       if (activityByDay.has(createdDay)) {
         const entry = activityByDay.get(createdDay)!;
         entry.created++;
       }
       if (task.completedAt) {
-        const completedDay = task.completedAt.split('T')[0];
+        const [completedDay] = task.completedAt.split('T');
         if (activityByDay.has(completedDay)) {
           const entry = activityByDay.get(completedDay)!;
           entry.completed++;

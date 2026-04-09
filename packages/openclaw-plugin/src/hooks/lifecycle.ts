@@ -129,7 +129,7 @@ export async function extractPainFromSessionFile(sessionFile: string, ctx: Plugi
   }
 
   if (painPoints.length > 0) {
-    const dateStr = new Date().toISOString().split('T')[0];
+    const [dateStr] = new Date().toISOString().split('T');
     const dailyLogPath = path.join(workspaceDir, PD_DIRS.MEMORY, `${dateStr}.md`);
     const timestamp = new Date().toISOString();
     

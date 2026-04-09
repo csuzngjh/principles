@@ -782,6 +782,7 @@ export class TrajectoryDatabase {
         try {
           const params = JSON.parse(row.params_json);
           if (params && typeof params.filePath === 'string') {
+            // eslint-disable-next-line @typescript-eslint/prefer-destructuring -- Reason: filePath is a reassignable outer let variable - destructuring would lose the assignment semantics
             filePath = params.filePath;
           }
         } catch {
