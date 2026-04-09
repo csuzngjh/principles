@@ -65,7 +65,7 @@ function getWorkspacePath(): string | null {
   
   if (existsSync(configPath)) {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports -- CommonJS require for synchronous JSON loading
+      // eslint-disable-next-line @typescript-eslint/no-var-requires -- Reason: CommonJS require for synchronous JSON loading - ESM import() would require async refactoring
       const config = require(configPath);
       return config.workspace || null;
     } catch {

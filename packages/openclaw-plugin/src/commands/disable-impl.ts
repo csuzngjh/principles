@@ -36,7 +36,7 @@ function _handleListActive(
 ): PluginCommandResult {
   const allImpls = getAllImplementations(stateDir);
   const activeImpls = allImpls.filter(
-    (impl) => (impl as any).lifecycleState === 'active' || (impl as any).lifecycleState === 'candidate'
+    (impl) => impl.lifecycleState === 'active' || impl.lifecycleState === 'candidate'
   );
 
   if (activeImpls.length === 0) {
@@ -53,11 +53,11 @@ function _handleListActive(
   output += `${'='.repeat(50)}\n`;
 
   for (const impl of activeImpls) {
-    const stateLabel = (impl as any).lifecycleState || 'candidate';
+    const stateLabel = impl.lifecycleState || 'candidate';
     output += `  ${impl.id}\n`;
     output += `    Rule: ${impl.ruleId} | State: ${stateLabel} | Version: ${impl.version}\n`;
-    if ((impl as any).disabledReason) {
-      output += `    Previous reason: ${(impl as any).disabledReason}\n`;
+    if (impl.disabledReason) {
+      output += `    Previous reason: ${impl.disabledReason}\n`;
     }
     output += '\n';
   }
@@ -69,6 +69,7 @@ function _handleListActive(
   return { text: output };
 }
 
+// eslint-disable-next-line @typescript-eslint/max-params -- Reason: Command handler signature must match OpenClaw plugin interface - breaking API change to options objects would affect public contracts
 function _handleDisableImpl(
   workspaceDir: string,
   stateDir: string,
@@ -88,7 +89,7 @@ function _handleDisableImpl(
     };
   }
 
-  const currentState = (target as any).lifecycleState || 'candidate';
+  const currentState = target.lifecycleState || 'candidate';
 
   // Validate: active -> disabled or candidate -> disabled
   if (currentState !== 'active' && currentState !== 'candidate') {

@@ -5,6 +5,7 @@ import { existsSync, readdirSync, statSync, readFileSync, writeFileSync } from '
 import fse from 'fs-extra';
 import * as path from 'path';
 import { execSync } from 'child_process';
+import type { ExecSyncOptions } from 'child_process';
 import ora from 'ora';
 import { logger } from './utils/logger.js';
 import { getOpenClawConfigDir, getPluginExtDir } from './utils/env.js';

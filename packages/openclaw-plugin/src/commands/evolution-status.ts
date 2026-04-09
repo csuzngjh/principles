@@ -45,6 +45,7 @@ function formatRouteRecommendations(
     .join(', ');
 }
 
+// eslint-disable-next-line @typescript-eslint/max-params -- Reason: Command handler signature must match OpenClaw plugin interface - breaking API change to options objects would affect public contracts
 function buildEnglishOutput(
   workspaceDir: string,
   sessionId: string | null,
@@ -96,6 +97,7 @@ function buildEnglishOutput(
   return lines.join('\n');
 }
 
+// eslint-disable-next-line @typescript-eslint/max-params -- Reason: Command handler signature must match OpenClaw plugin interface - breaking API change to options objects would affect public contracts
 function buildChineseOutput(
   workspaceDir: string,
   sessionId: string | null,

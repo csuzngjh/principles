@@ -268,7 +268,9 @@ If you cannot synthesize an artifact:
   }
 }`;
 
-## Task
+// Orphaned prompt content - wrapped in constant to fix parsing error
+// This content was added in commit d9aec3fa but missing its variable declaration
+const NOCTURNAL_SINGLE_REFLECTION_PROMPT = `## Task
 
 Analyze the session and generate a **decision-point sample** that captures:
 1. **The bad decision**: What the agent decided or did that violated the target principle

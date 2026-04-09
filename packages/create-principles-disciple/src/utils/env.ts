@@ -59,7 +59,8 @@ export function checkEnvironment(): EnvCheckResult {
 
   // 检测 Python
   try {
-    result.pythonVersion = execSync('python3 --version', { encoding: 'utf-8' }).trim().split(' ')[1];
+    const [, pythonVersion] = execSync('python3 --version', { encoding: 'utf-8' }).trim().split(' ');
+    result.pythonVersion = pythonVersion;
     result.hasPython = true;
   } catch {
     result.hasPython = false;
