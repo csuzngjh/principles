@@ -37,6 +37,8 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 - validation runs stop after classification when they hit sample-side or product-side gaps
 - workflow v1.3 focuses on internal usability first, then finer-grained work-unit architecture
 - ARCH-01/ARCH-02: evolution-worker.ts and trajectory.ts splitting (P2, deferred)
+- **THINKING_OS.md** is the single source of truth for thinking model definitions (10 directives T-01~T-10)
+- WebUI thinking-models page (`/plugins/principles/thinking-models`) is the analysis UI for thinking model data
 
 ## Out of Scope
 
@@ -44,6 +46,9 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 - `D:/Code/openclaw` changes
 - dashboard / stageGraph / self-optimizing sprint / parallel task scheduling
 - PR2 / PD product loop closure
+- Mobile responsive redesign (desktop-only admin tool)
+- Real-time WebSocket updates (polling is sufficient)
+- Backend schema changes (all needed data already exists)
 
 ## Context
 
@@ -67,9 +72,37 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 
 ## Current Milestone
 
-### v1.9.3: 剩余 Lint 修复
+### v1.10: Thinking Models 页面优化
 
 **Status:** Defining requirements
+
+**Goal:** 将 Thinking Models 页面从简单的列表/详情视图重构为功能完整的思维模型分析面板
+
+**Key Features:**
+- 数据可视化：覆盖率趋势图、使用趋势图、场景热力图
+- 休眠模型可见性：展示从未触发的模型及其定义
+- 推荐标签色彩编码 + 按类型过滤
+- 事件上下文详情：toolContext、painContext、principleContext
+- THINKING_OS.md 内容展示：trigger、must、antiPattern
+- 模型对比模式：选择 2+ 模型并排比较
+- 列表搜索/过滤
+- THINKING_OS.md 模板补齐 10 个 directive
+
+**Key Context:**
+- 后端已有完整数据（scenarioMatrix、coverageTrend、usageTrend、事件上下文），前端从未渲染
+- 当前页面是 2 列布局（左侧模型列表 + 右侧详情面板），无图表、无过滤、无分页
+- 页面路由：`/plugins/principles/thinking-models`
+- 页面组件：`ThinkingModelsPage.tsx`
+- 已有 `charts.tsx` 基础组件（Sparkline、LineChart、BulletChart 等）可复用
+- THINKING_OS.md 是 thinking model 定义的唯一真相源（10 directives T-01~T-10）
+
+**Phases:** 8 (Phase 1~8)
+
+---
+
+### v1.9.3: 剩余 Lint 修复
+
+**Status:** Deferred
 
 **Goal:** 完成 v1.9.2 未竟的 lint 修复工作，实现 CI green
 

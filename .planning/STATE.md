@@ -1,67 +1,87 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.9.3
-milestone_name: 剩余 Lint 修复
+milestone: v1.10
+milestone_name: Thinking Models 页面优化
 status: defining
 last_updated: "2026-04-09"
 progress:
-  total_phases: 1
+  total_phases: 8
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
   percent: 0
 ---
 
-# State: v1.9.3 剩余 Lint 修复
+# State: v1.10 Thinking Models 页面优化
 
 ## Project Reference
 
 See `.planning/PROJECT.md` (updated 2026-04-09)
 
-**Milestone:** v1.9.3
-**Name:** 剩余 Lint 修复
+**Milestone:** v1.10
+**Name:** Thinking Models 页面优化
 **Core Value:** AI agents improve their own behavior through a structured evolution loop. pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
-**Current Focus:** Phase 03 — Manual Remediation (continuing from v1.9.2)
+**Current Focus:** Phase 01 — 基础可视化 (覆盖率趋势图、场景热力图、空状态优化)
 
 ## Current Position
 
 Phase: Not started (defining requirements)
 Plan: —
 Status: Defining requirements
-Last activity: 2026-04-09 — Milestone v1.9.3 started, conflicts resolved with origin/main
-
-## Context from v1.9.2
-
-- eslint.config.js configured (Phase 1: ESLint Configuration - complete)
-- eslint --fix baseline done (Phase 2: Auto-fix Baseline - complete)
-- Phase 3 manual remediation: 4/5 plans complete, gap closure abandoned
-- ~700 lint errors remain across 57 files
-- 03-05-PLAN.md suppression strategy ready to execute
+Last activity: 2026-04-09 — Milestone v1.10 started, all 50 prior issues closed
 
 ## Accumulated Context
 
-- WebUI dashboard exists with 4 pages: Overview, Loop, Feedback, Gate Monitor
-- All 4 pages' data sources traced, fixed, and regression-tested (v1.9.1, Phases 16-20)
-- 19 regression tests added for API endpoints
-- Architecture: React frontend (ui/src/pages/) -> api.ts -> principles-console-route.ts -> service layer -> SQLite
-- Dual database model: ControlUiDatabase (per-workspace) vs CentralDatabase (cross-workspace aggregation)
-- Previous milestone v1.9.0 shipped Principle Internalization System (Phases 11-15)
-- Principle tree axiom integration completed (coreAxiomId, THINKING_OS.md updates)
+### Architecture
+- Frontend: React + TypeScript (`ui/src/pages/ThinkingModelsPage.tsx`)
+- API client: `ui/src/api.ts` (getThinkingOverview, getThinkingModelDetail)
+- Backend service: `src/service/control-ui-query-service.ts`
+- HTTP routes: `src/http/principles-console-route.ts`
+- Database: SQLite trajectory DB with views (v_thinking_model_usage, v_thinking_model_effectiveness, v_thinking_model_scenarios, v_thinking_model_daily_trend)
+- Chart components available: `ui/src/charts.tsx` (Sparkline, LineChart, BulletChart, BarChart, etc.)
+
+### Existing Data (Backend → Frontend Gap Analysis)
+- ✅ `scenarioMatrix` (model × scenario cross-tab) — fetched but NOT rendered
+- ✅ `coverageTrend` (daily coverage rate) — fetched but NOT rendered
+- ✅ `usageTrend` (daily hits per model) — fetched but NOT rendered
+- ✅ `dormantModels` (zero-hit models) — fetched but NOT rendered
+- ✅ `recentEvents.toolContext`, `painContext`, `principleContext` — fetched but NOT rendered
+- ✅ `recentEvents.matchedPattern` — fetched but NOT rendered
+- ✅ `modelDefinitions` — fetched but NOT rendered on this page
+- ✅ `correctionSampleRate` — in summary but NOT rendered
+
+### Current Page Limitations
+- No pagination, filtering, or search on model list
+- No loading states for detail transitions
+- "Back" button clears detail but doesn't deselect model (inconsistent UX)
+- Recommendation badges are plain text (no color coding)
+- Scenario list can overflow (no truncation)
+- Events are plain `<pre>` cards (no context display)
+
+### THINKING_OS.md
+- Single source of truth for 10 thinking model definitions (T-01~T-10)
+- Template currently has 8 directives, builtin has 10 — mismatch needs fixing
+- `antiPattern` (forbidden field) is lost in API response type
+- `trigger` text is used only for regex generation, never displayed
+
+### Previous Milestone
+- v1.9.1: WebUI 数据源修复 — 4 pages fixed (Overview, Loop, Feedback, Gate Monitor)
+- v1.9.3: 剩余 Lint 修复 — deferred to after this milestone
+- All 50 open issues verified fixed and closed
 
 ### Key Decisions
 
-- ESLint v10 flat config must be verified before measuring error baseline
-- Auto-fixable errors (prefer-destructuring ~50) mechanically fixable
-- Remaining errors require eslint-disable suppression with documented reasons
-- LINT-09 (inline helpers) and LINT-10 (complexity) deferred to future
+- All needed data already exists in backend — no new API endpoints needed
+- Existing chart components in charts.tsx should be reused
+- Desktop-only admin tool — no mobile responsive redesign needed
+- Polling-based refresh is sufficient — no WebSocket needed
 
 ### Blockers
 
-- None identified yet
+- None identified
 
 ## Session Continuity
 
-**Last milestone:** v1.9.0 (Principle Internalization System - shipped 2026-04-08)
-**Previous milestone:** v1.9.2 (Lint gap closure - partial, abandoned)
-**Current milestone:** v1.9.3 — continuing lint work
-**Ready for:** `/gsd-plan-phase 03 ${GSD_WS}`
+**Previous milestone:** v1.9.1 (WebUI 数据源修复)
+**Current milestone:** v1.10 — Thinking Models 页面优化
+**Ready for:** `/gsd-plan-phase 1` to start Phase 01
