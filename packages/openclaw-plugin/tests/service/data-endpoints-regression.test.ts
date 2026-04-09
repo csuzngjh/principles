@@ -48,8 +48,8 @@ const evolutionReducerMock = vi.hoisted(() => ({
 }));
 
 const controlUiDbMock = vi.hoisted(() => ({
-  all: vi.fn(() => []),
-  get: vi.fn(() => null),
+  all: vi.fn((_sql?: string) => []),
+  get: vi.fn((_sql?: string) => null),
   run: vi.fn(),
   execute: vi.fn(),
   dispose: vi.fn(),

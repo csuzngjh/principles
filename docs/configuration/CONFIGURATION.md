@@ -259,7 +259,6 @@ The `PathResolver` resolves the following symbolic keys to actual paths:
 | `PROFILE` | `/{workspace}/.principles/PROFILE.json` |
 | `PRINCIPLES` | `/{workspace}/.principles/PRINCIPLES.md` |
 | `THINKING_OS` | `/{workspace}/.principles/THINKING_OS.md` |
-| `KERNEL` | `/{workspace}/.principles/00-kernel.md` |
 | `DECISION_POLICY` | `/{workspace}/.principles/DECISION_POLICY.json` |
 | `MODELS_DIR` | `/{workspace}/.principles/models` |
 | `PLAN` | `/{workspace}/PLAN.md` |

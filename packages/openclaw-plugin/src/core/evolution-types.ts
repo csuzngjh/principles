@@ -312,6 +312,8 @@ export interface Principle {
    detectorMetadata?: PrincipleDetectorSpec;
   /** Highly abstracted principle text suitable for PRINCIPLES.md */
   abstractedPrinciple?: string;
+  /** Associated core axiom (e.g., "T-01") */
+  coreAxiomId?: string;
 
   // ── Principle-Tree metadata (Phase 1, optional) ──
 
@@ -406,6 +408,8 @@ export interface CandidateCreatedData {
   detectorMetadata?: PrincipleDetectorSpec;
   /** Optional abstracted principle title (≤40 chars) — preserved on replay */
   abstractedPrinciple?: string;
+  /** Associated core axiom (e.g., "T-01") */
+  coreAxiomId?: string;
 }
 
 export interface PrinciplePromotedData {

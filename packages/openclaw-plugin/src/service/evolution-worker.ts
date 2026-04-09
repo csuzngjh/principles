@@ -946,6 +946,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                                         // Review fix: Accept both snake_case and camelCase from LLM output
                                         detectorMetadata: principle.detector_metadata || principle.detectorMetadata,
                                         abstractedPrinciple: principle.abstracted_principle,
+                                        coreAxiomId: principle.core_axiom_id || principle.coreAxiomId,
                                     });
                                     if (principleId) {
                                         logger.info(`[PD:EvolutionWorker] Created principle ${principleId} from marker fallback for task ${task.id}`);
@@ -1042,7 +1043,8 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                                     // Review fix: Accept both snake_case and camelCase from LLM output
                                     detectorMetadata: principle.detector_metadata || principle.detectorMetadata,
                                     abstractedPrinciple: principle.abstracted_principle,
-                                });
+                                        coreAxiomId: principle.core_axiom_id || principle.coreAxiomId,
+                                    });
                                 if (principleId) {
                                     logger.info(`[PD:EvolutionWorker] Created principle ${principleId} from late marker for task ${task.id}`);
                                     principleCreated = true;

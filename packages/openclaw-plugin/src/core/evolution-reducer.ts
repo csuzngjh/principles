@@ -48,6 +48,8 @@ export interface EvolutionReducer {
     detectorMetadata?: PrincipleDetectorSpec;
     /** Highly abstracted principle text — if absent, falls back to action-based title */
     abstractedPrinciple?: string;
+    /** Associated core axiom (e.g., "T-01") */
+    coreAxiomId?: string;
     // ── Principle-Tree metadata (Phase 1, optional) ──
     priority?: 'P0' | 'P1' | 'P2';
     scope?: 'general' | 'domain';
@@ -225,6 +227,7 @@ export class EvolutionReducerImpl implements EvolutionReducer {
     evaluability?: PrincipleEvaluatorLevel;
     detectorMetadata?: PrincipleDetectorSpec;
     abstractedPrinciple?: string;
+    coreAxiomId?: string;
     priority?: 'P0' | 'P1' | 'P2';
     scope?: 'general' | 'domain';
     domain?: string;
@@ -333,6 +336,7 @@ export class EvolutionReducerImpl implements EvolutionReducer {
         ? structuredClone(params.detectorMetadata)
         : undefined,
       abstractedPrinciple: params.abstractedPrinciple,
+      coreAxiomId: params.coreAxiomId,
 
       // ── Principle-Tree metadata (Phase 1, optional) ──
       priority: params.priority ?? 'P1',
@@ -584,6 +588,9 @@ export class EvolutionReducerImpl implements EvolutionReducer {
       if (data.abstractedPrinciple) {
         existing.abstractedPrinciple = data.abstractedPrinciple;
       }
+      if (data.coreAxiomId) {
+        existing.coreAxiomId = data.coreAxiomId;
+      }
       return;
     }
 
@@ -611,6 +618,7 @@ export class EvolutionReducerImpl implements EvolutionReducer {
         : undefined,
       // Restore abstractedPrinciple from event if present
       abstractedPrinciple: data.abstractedPrinciple,
+      coreAxiomId: data.coreAxiomId,
     };
     this.principles.set(principle.id, principle);
   }

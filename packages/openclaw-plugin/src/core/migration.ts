@@ -17,7 +17,6 @@ export function migrateDirectoryStructure(api: OpenClawPluginApi, workspaceDir: 
             // From docs/
             { legacy: path.join(legacyDocsDir, 'PRINCIPLES.md'), newKey: 'PRINCIPLES' },
             { legacy: path.join(legacyDocsDir, 'THINKING_OS.md'), newKey: 'THINKING_OS' },
-            { legacy: path.join(legacyDocsDir, '00-kernel.md'), newKey: 'KERNEL' },
             { legacy: path.join(legacyDocsDir, 'DECISION_POLICY.json'), newKey: 'DECISION_POLICY' },
             { legacy: path.join(legacyDocsDir, 'PLAN.md'), newKey: 'PLAN' },
             { legacy: path.join(legacyDocsDir, 'evolution_queue.json'), newKey: 'EVOLUTION_QUEUE' },

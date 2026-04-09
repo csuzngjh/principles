@@ -302,7 +302,6 @@ export class PathResolver {
             'PROFILE': workspacePath.join(workspace, '.principles', 'PROFILE.json'),
             'PRINCIPLES': workspacePath.join(workspace, '.principles', 'PRINCIPLES.md'),
             'THINKING_OS': workspacePath.join(workspace, '.principles', 'THINKING_OS.md'),
-            'KERNEL': workspacePath.join(workspace, '.principles', '00-kernel.md'),
             'DECISION_POLICY': workspacePath.join(workspace, '.principles', 'DECISION_POLICY.json'),
             'MODELS_DIR': workspacePath.join(workspace, '.principles', 'models'),
             'PLAN': workspacePath.join(workspace, 'PLAN.md'),
