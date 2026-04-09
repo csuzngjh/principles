@@ -444,7 +444,7 @@ async function generateUpdateSummary(
   
   // 生成更新摘要
   const summaryPath = path.join(workspaceDir, '.principles', 'UPDATE_SUMMARY.md');
-  const timestamp = new Date().toISOString().split('T')[0];
+  const [timestamp] = new Date().toISOString().split('T');
   
   let content = `# 更新摘要 (${timestamp})
 
