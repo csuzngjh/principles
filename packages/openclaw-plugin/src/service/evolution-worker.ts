@@ -121,6 +121,11 @@ async function runWorkflowWatchdog(
           const meta = JSON.parse(wf.metadata_json) as Record<string, unknown>;
           const snapshot = meta.snapshot as Record<string, unknown> | undefined;
           if (snapshot) {
+            // #219: Check for fallback data source (partial stats from pain context)
+            const dataSource = snapshot._dataSource as string | undefined;
+            if (dataSource === 'pain_context_fallback') {
+              details.push(`fallback_snapshot: nocturnal workflow ${wf.workflow_id} uses pain-context fallback (stats may be incomplete)`);
+            }
             const stats = snapshot.stats as Record<string, number> | undefined;
             if (stats && stats.totalAssistantTurns === 0 && stats.totalToolCalls === 0 && stats.totalPainEvents === 0 && stats.totalGateBlocks === 0) {
               details.push(`empty_snapshot: nocturnal workflow ${wf.workflow_id} has all-zero stats`);
@@ -810,10 +815,36 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                 task.status = 'failed';
                 task.completed_at = new Date().toISOString();
                 task.resolution = 'failed_max_retries';
-                task.lastError = `sleep_reflection timed out after ${Math.round(timeout / 60000)} minutes`;
                 task.retryCount = (task.retryCount ?? 0) + 1;
                 queueChanged = true;
-                logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${task.id} timed out after ${Math.round(age / 60000)} minutes, marking as failed`);
+
+                // #219: Fetch real failure reason from workflow events for better diagnostics
+                let detailedError = `sleep_reflection timed out after ${Math.round(timeout / 60000)} minutes`;
+                if (task.resultRef && !task.resultRef.startsWith('trinity-draft')) {
+                    try {
+                        const wfStore = new WorkflowStore({ workspaceDir: wctx.workspaceDir });
+                        const events = wfStore.getEvents(task.resultRef);
+                        // Find the most recent failure event
+                        const failureEvent = events.filter(e => 
+                            e.event_type.includes('failed') || e.event_type.includes('error')
+                        ).pop();
+                        if (failureEvent) {
+                            const payload = failureEvent.payload_json ? JSON.parse(failureEvent.payload_json) : {};
+                            detailedError = `sleep_reflection failed: ${failureEvent.reason}`;
+                            if (payload.skipReason) {
+                                detailedError += ` (skipReason: ${payload.skipReason})`;
+                            }
+                            if (payload.failures && payload.failures.length > 0) {
+                                detailedError += ` | failures: ${payload.failures.slice(0, 3).join(', ')}`;
+                            }
+                        }
+                    } catch (fetchErr) {
+                        logger?.debug?.(`[PD:EvolutionWorker] Could not fetch workflow events for ${task.resultRef}: ${String(fetchErr)}`);
+                    }
+                }
+                task.lastError = detailedError;
+                
+                logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${task.id} timed out after ${Math.round(age / 60000)} minutes, marking as failed. Reason: ${detailedError}`);
                 evoLogger.logCompleted({
                     traceId: task.traceId || task.id,
                     taskId: task.id,
@@ -1436,7 +1467,18 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             // (daemon mode, process isolation) would always become failed_max_retries.
                             const lastEvent = summary.recentEvents[summary.recentEvents.length - 1];
                             const errorReason = lastEvent?.reason ?? 'unknown';
-                            sleepTask.lastError = `Workflow terminal_error: ${errorReason}`;
+                            // #219: Include payload details for better diagnostics
+                            let detailedError = `Workflow terminal_error: ${errorReason}`;
+                            try {
+                                const payload = lastEvent?.payload_json ? JSON.parse(lastEvent.payload_json) : {};
+                                if (payload.skipReason) {
+                                    detailedError += ` (skipReason: ${payload.skipReason})`;
+                                }
+                                if (payload.failures && payload.failures.length > 0) {
+                                    detailedError += ` | failures: ${payload.failures.slice(0, 3).join(', ')}`;
+                                }
+                            } catch { /* ignore parse errors */ }
+                            sleepTask.lastError = detailedError;
                             sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
 
                             if (isExpectedSubagentError(errorReason)) {

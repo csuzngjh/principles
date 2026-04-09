@@ -992,6 +992,10 @@ export function invokeStubDreamer(
   const hasPain = snapshot.stats.totalPainEvents > 0;
   const hasGateBlocks = snapshot.stats.totalGateBlocks > 0;
 
+  // #219: Detect fallback data source - stats may be incomplete
+  const isFallback = snapshot._dataSource === 'pain_context_fallback';
+  const fallbackWarning = isFallback ? ' [fallback data: stats may be incomplete]' : '';
+
   const candidates: DreamerCandidate[] = [];
 
   // Generate candidates based on available signals
@@ -1090,11 +1094,19 @@ export function invokeStubDreamer(
   // Ensure we don't exceed maxCandidates
   const limitedCandidates = candidates.slice(0, Math.min(candidates.length, maxCandidates));
 
+  // #219: Add fallback warning to rationales if data source is fallback
+  const annotatedCandidates = isFallback
+    ? limitedCandidates.map((c) => ({
+        ...c,
+        rationale: c.rationale + fallbackWarning,
+      }))
+    : limitedCandidates;
+
   return {
-    valid: limitedCandidates.length > 0,
-    candidates: limitedCandidates,
+    valid: annotatedCandidates.length > 0,
+    candidates: annotatedCandidates,
     generatedAt: new Date().toISOString(),
-    reason: limitedCandidates.length === 0 ? 'No signal available for candidate generation' : undefined,
+    reason: annotatedCandidates.length === 0 ? 'No signal available for candidate generation' : undefined,
   };
 }
 

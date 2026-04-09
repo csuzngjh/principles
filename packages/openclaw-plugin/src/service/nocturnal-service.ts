@@ -528,12 +528,18 @@ function maybePersistArtificerCandidate(
     };
   }
 
+  // #219: Detect fallback data source and warn about potential signal inaccuracy
+  const validationFailures: string[] = [];
+  if (snapshot._dataSource === 'pain_context_fallback') {
+    validationFailures.push('fallback_snapshot: stats derived from pain context only (trajectory extractor failed) - signal counts may be undercounted');
+  }
+
   if (!shouldRunArtificer(snapshot, ruleResolution)) {
     return {
       status: 'skipped',
       reason: 'insufficient_signal_density',
       ruleResolution,
-      validationFailures: [],
+      validationFailures,
       ruleId: ruleResolution.ruleId,
     };
   }

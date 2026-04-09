@@ -187,10 +187,17 @@ export class RuntimeDirectDriver implements TransportDriver {
             this.logger.info(`[PD:RuntimeDirectDriver] Cleanup succeeded`);
         } catch (error) {
             const errMsg = String(error);
-            // #188: runtime.subagent.deleteSession() only works during gateway requests.
+            // #188/#219: runtime.subagent.deleteSession() only works during gateway requests.
             // Fall back to agent.session API which is always available (not gateway-scoped).
-            if (errMsg.includes('gateway request') && this.agentSession) {
-                this.logger.info(`[PD:RuntimeDirectDriver] Gateway-scoped cleanup unavailable, falling back to agent.session`);
+            // Handle multiple error patterns that indicate non-gateway context:
+            // - 'gateway request' - Not in a gateway request scope
+            // - 'missing scope' - Missing required scope (e.g., operator.admin)
+            const isNonGatewayContext =
+                errMsg.includes('gateway request') ||
+                errMsg.includes('missing scope');
+
+            if (isNonGatewayContext && this.agentSession) {
+                this.logger.info(`[PD:RuntimeDirectDriver] Gateway-scoped cleanup unavailable (${errMsg.split(':')[0]}), falling back to agent.session`);
                 await this.cleanupViaAgentSession(params.sessionKey);
                 this.logger.info(`[PD:RuntimeDirectDriver] Fallback cleanup succeeded`);
             } else {

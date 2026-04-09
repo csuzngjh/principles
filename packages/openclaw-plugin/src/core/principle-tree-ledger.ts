@@ -291,9 +291,14 @@ function readLedgerFromFile(filePath: string): HybridLedgerStore {
   try {
     const parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as unknown;
     const raw = isRecord(parsed) ? parsed : {};
+    // #219: Handle both formats:
+    // - New format: { trainingStore: {...}, tree: {...} }
+    // - Legacy format: { P_xxx: {...}, _tree: {...} }
+    const trainingStoreRaw = raw['trainingStore'] ?? raw;
+    const treeRaw = raw[TREE_NAMESPACE] ?? raw['tree'];
     return {
-      trainingStore: parseLegacyTrainingStore(raw),
-      tree: parseTree(raw[TREE_NAMESPACE]),
+      trainingStore: parseLegacyTrainingStore(trainingStoreRaw),
+      tree: parseTree(treeRaw),
     };
   } catch {
     return {
