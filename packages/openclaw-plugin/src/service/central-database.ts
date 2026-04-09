@@ -818,6 +818,91 @@ export class CentralDatabase {
       DELETE FROM sync_log;
     `);
   }
+
+  /**
+   * Get total task outcomes count across enabled workspaces (D-02)
+   */
+  getTaskOutcomes(): number {
+    const filter = this.getEnabledWorkspaceFilter();
+    const row = this.db.prepare(`
+      SELECT COUNT(*) as count FROM aggregated_task_outcomes
+      WHERE workspace IN (${filter})
+    `).get() as { count: number } | undefined;
+    return row?.count ?? 0;
+  }
+
+  /**
+   * Get total principle events count across enabled workspaces (D-03)
+   */
+  getPrincipleEventCount(): number {
+    const filter = this.getEnabledWorkspaceFilter();
+    const row = this.db.prepare(`
+      SELECT COUNT(*) as count FROM aggregated_principle_events
+      WHERE workspace IN (${filter})
+    `).get() as { count: number } | undefined;
+    return row?.count ?? 0;
+  }
+
+  /**
+   * Get sample counts grouped by review_status across enabled workspaces (D-06)
+   */
+  getSampleCountersByStatus(): Record<string, number> {
+    const filter = this.getEnabledWorkspaceFilter();
+    const rows = this.db.prepare(`
+      SELECT review_status, COUNT(*) as count
+      FROM aggregated_correction_samples
+      WHERE workspace IN (${filter})
+      GROUP BY review_status
+    `).all() as Array<{ review_status: string; count: number }>;
+    return Object.fromEntries(rows.map(r => [r.review_status, r.count]));
+  }
+
+  /**
+   * Get top N most recent pending/approved samples across all enabled workspaces (D-04)
+   */
+  getSamplePreview(limit: number = 5): Array<{
+    sampleId: string;
+    sessionId: string;
+    workspace: string;
+    qualityScore: number;
+    reviewStatus: string;
+    createdAt: string;
+  }> {
+    const filter = this.getEnabledWorkspaceFilter();
+    const rows = this.db.prepare(`
+      SELECT sample_id, session_id, workspace, quality_score, review_status, created_at
+      FROM aggregated_correction_samples
+      WHERE workspace IN (${filter})
+        AND review_status IN ('pending', 'approved')
+      ORDER BY created_at DESC
+      LIMIT ?
+    `).all(limit) as Array<{
+      sample_id: string;
+      session_id: string;
+      workspace: string;
+      quality_score: number;
+      review_status: string;
+      created_at: string;
+    }>;
+    return rows.map(r => ({
+      sampleId: r.sample_id,
+      sessionId: r.session_id,
+      workspace: r.workspace,
+      qualityScore: r.quality_score ?? 0,
+      reviewStatus: r.review_status ?? 'pending',
+      createdAt: r.created_at,
+    }));
+  }
+
+  /**
+   * Get the most recent lastSync timestamp across all workspaces (D-05)
+   */
+  getMostRecentSync(): string | null {
+    const row = this.db.prepare(`
+      SELECT MAX(last_sync) as lastSync FROM workspaces
+    `).get() as { lastSync: string | null } | undefined;
+    return row?.lastSync ?? null;
+  }
 }
 
 // Singleton instance

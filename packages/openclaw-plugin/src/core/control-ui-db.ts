@@ -274,6 +274,25 @@ export class ControlUiDatabase {
     return this.db.prepare(sql).get(...params) as T | undefined;
   }
 
+  /**
+   * Execute SQL statement that does not return rows (DDL, CREATE TABLE, etc.).
+   *
+   * Returns: void (executes directly)
+   * Not for: SELECT queries (use all() or get() instead)
+   */
+  execute(sql: string): void {
+    this.db.exec(sql);
+  }
+
+  /**
+   * Execute a parameterized write statement (INSERT, UPDATE, DELETE).
+   */
+  run(sql: string, ...params: unknown[]): void {
+    this.withWrite(() => {
+      this.db.prepare(sql).run(...params);
+    });
+  }
+
   restoreRawText(inlineText?: string | null, blobRef?: string | null): string {
     if (inlineText) return inlineText;
     if (!blobRef) return '';
