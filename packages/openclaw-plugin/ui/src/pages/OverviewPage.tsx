@@ -265,6 +265,74 @@ function WorkspaceHealthPanel({ entry }: { entry: WorkspaceHealthEntry }) {
 }
 
 // ---------------------------------------------------------------------------
+// Thinking Model Distribution — shows each model's usage count
+// ---------------------------------------------------------------------------
+
+const THINKING_MODEL_LABELS: Record<string, { name: string; desc: string }> = {
+  'T-01': { name: 'T-01 地图先于领土', desc: '先理解结构再动手' },
+  'T-02': { name: 'T-02 约束即灯塔', desc: '遵守类型、测试、契约' },
+  'T-03': { name: 'T-03 证据先于直觉', desc: '用日志和代码说话' },
+  'T-04': { name: 'T-04 可逆性决定速度', desc: '可逆的操作快，不可逆的慢行' },
+  'T-05': { name: 'T-05 否定优于肯定', desc: '先排除不能做的事' },
+  'T-06': { name: 'T-06 奥卡姆剃刀', desc: '最简单的方案优先' },
+  'T-07': { name: 'T-07 最小必要干预', desc: '改得越少越好' },
+  'T-08': { name: 'T-08 痛苦即信号', desc: '遇到失败就停下来反思' },
+  'T-09': { name: 'T-09 分而治之', desc: '超过 3 步的任务必须分解' },
+  'T-10': { name: 'T-10 记忆外包', desc: '用文件记录中间推导' },
+};
+
+function ThinkingModelDistribution({ modelBreakdown }: { modelBreakdown?: Array<{ modelId: string; hits: number }> }) {
+  if (!modelBreakdown || modelBreakdown.length === 0) {
+    return (
+      <div style={{ textAlign: 'center', padding: 'var(--space-3)', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+        暂无思维模型使用记录
+      </div>
+    );
+  }
+
+  // Include all models from THINKING_OS, even if hits=0
+  const allModelIds = Object.keys(THINKING_MODEL_LABELS);
+  const hitsMap = new Map(modelBreakdown.map(m => [m.modelId, m.hits]));
+
+  const maxHits = Math.max(...modelBreakdown.map(m => m.hits), 1);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {allModelIds.map(modelId => {
+        const info = THINKING_MODEL_LABELS[modelId];
+        const hits = hitsMap.get(modelId) ?? 0;
+        const pct = (hits / maxHits) * 100;
+        return (
+          <div key={modelId} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ minWidth: 90, fontSize: '0.72rem', fontWeight: 500, color: 'var(--text-primary)' }}>
+              {info.name}
+            </div>
+            <div style={{ flex: 1, height: 10, backgroundColor: 'var(--bg-sunken)', borderRadius: 5, overflow: 'hidden' }}>
+              <div
+                style={{
+                  width: `${pct}%`,
+                  height: '100%',
+                  backgroundColor: hits > 0 ? 'var(--accent)' : 'transparent',
+                  borderRadius: 5,
+                  minWidth: hits > 0 ? 4 : 0,
+                  transition: 'width 0.3s ease',
+                }}
+              />
+            </div>
+            <div style={{ minWidth: 24, textAlign: 'right', fontSize: '0.72rem', color: hits > 0 ? 'var(--text-primary)' : 'var(--text-secondary)', fontWeight: 600 }}>
+              {hits}
+            </div>
+            <div style={{ minWidth: 100, fontSize: '0.65rem', color: 'var(--text-secondary)' }}>
+              {info.desc}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // KPI Card with explanation
 // ---------------------------------------------------------------------------
 
@@ -553,15 +621,13 @@ export function OverviewPage() {
             ))}
           </div>
         </section>
+        {/* AI 思维使用分布 */}
         <section className="panel">
-          <h3>{t('overview.thinkingSummary')}</h3>
-          <div className="stack">
-            <div className="row-card"><strong>{t('overview.activeModels')}</strong><span>{data.thinkingSummary.activeModels}</span></div>
-            <div className="row-card"><strong>{t('overview.dormantModels')}</strong><span>{data.thinkingSummary.dormantModels}</span></div>
-            <div className="row-card"><strong>{t('overview.effectiveModels')}</strong><span>{data.thinkingSummary.effectiveModels}</span></div>
-            <div className="row-card"><strong>{t('overview.coverage')}</strong><span>{formatPercent(data.thinkingSummary.coverageRate)}</span></div>
-            <div className="row-card"><strong>{t('overview.principleEvents')}</strong><span>{data.summary.principleEventCount}</span></div>
-          </div>
+          <h3>AI 思维使用分布</h3>
+          <p style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginTop: -4, marginBottom: 10 }}>
+            AI 使用了哪些思维模型来思考问题？柱状越高表示用得越多。
+          </p>
+          <ThinkingModelDistribution modelBreakdown={(data.thinkingSummary as { modelBreakdown?: Array<{ modelId: string; hits: number }> }).modelBreakdown} />
         </section>
       </div>
     </div>

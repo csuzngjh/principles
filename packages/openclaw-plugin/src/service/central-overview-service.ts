@@ -114,6 +114,10 @@ export class CentralOverviewService {
         coverageRate: stats.totalToolCalls > 0
           ? stats.totalThinkingEvents / stats.totalToolCalls
           : 0,
+        modelBreakdown: thinkingStats.models.map(m => ({
+          modelId: m.modelId,
+          hits: m.hits,
+        })),
       },
       centralInfo: {
         workspaceCount: stats.workspaceCount,
