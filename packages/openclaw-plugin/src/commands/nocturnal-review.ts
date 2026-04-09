@@ -121,7 +121,7 @@ export function handleNocturnalReviewCommand(ctx: PluginCommandContext): PluginC
     }
 
     if (action === 'show') {
-      const fingerprint = parts[1];
+      const [, fingerprint] = parts;
       if (!fingerprint) {
         return {
           text: zh
@@ -148,7 +148,7 @@ export function handleNocturnalReviewCommand(ctx: PluginCommandContext): PluginC
     }
 
     if (action === 'approve') {
-      const fingerprint = parts[1];
+      const [, fingerprint] = parts;
       const reason = parts.slice(2).join(' ') || (zh ? 'Approved by human reviewer' : 'Approved by human reviewer');
 
       if (!fingerprint) {
@@ -202,7 +202,7 @@ export function handleNocturnalReviewCommand(ctx: PluginCommandContext): PluginC
     }
 
     if (action === 'reject') {
-      const fingerprint = parts[1];
+      const [, fingerprint] = parts;
       const reason = parts.slice(2).join(' ') || (zh ? 'Rejected by human reviewer' : 'Rejected by human reviewer');
 
       if (!fingerprint) {
@@ -248,8 +248,7 @@ export function handleNocturnalReviewCommand(ctx: PluginCommandContext): PluginC
     }
 
     if (action === 'set-family') {
-      const fingerprint = parts[1];
-      const family = parts[2];
+      const [, fingerprint, family] = parts;
 
       if (!fingerprint || !family) {
         return {
