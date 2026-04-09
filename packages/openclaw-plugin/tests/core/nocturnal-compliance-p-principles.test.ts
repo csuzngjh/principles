@@ -33,7 +33,7 @@ describe('#216: P_* principle detection', () => {
 
     it('returns applicable=true when session has tool failures', () => {
       const session = makeSession({
-        toolCalls: [{ toolName: 'write_to_file', filePath: 'test.txt', outcome: 'failure', errorMessage: 'disk full' }],
+        toolCalls: [{ toolName: 'write', filePath: 'test.txt', outcome: 'failure', errorMessage: 'disk full' }],
       });
       const result = detectOpportunity('P_042', session);
       expect(result.applicable).toBe(true);
@@ -51,7 +51,7 @@ describe('#216: P_* principle detection', () => {
 
     it('returns applicable=false when session has no negative signals', () => {
       const session = makeSession({
-        toolCalls: [{ toolName: 'read_file', filePath: 'test.txt', outcome: 'success' }],
+        toolCalls: [{ toolName: 'read', filePath: 'test.txt', outcome: 'success' }],
       });
       const result = detectOpportunity('P_001', session);
       expect(result.applicable).toBe(false);
@@ -72,7 +72,7 @@ describe('#216: P_* principle detection', () => {
     it('returns violated=false when pain signals are low (score < 50)', () => {
       const session = makeSession({
         painSignals: [{ source: 'minor_issue', score: 30, reason: 'cosmetic' }],
-        toolCalls: [{ toolName: 'read_file', filePath: 'test.txt', outcome: 'success' }],
+        toolCalls: [{ toolName: 'read', filePath: 'test.txt', outcome: 'success' }],
       });
       const result = detectViolation('P_001', session);
       expect(result.violated).toBe(false);
@@ -82,7 +82,7 @@ describe('#216: P_* principle detection', () => {
     it('returns violated=true when session has tool failures', () => {
       const session = makeSession({
         toolCalls: [
-          { toolName: 'write_to_file', filePath: 'test.txt', outcome: 'failure', errorMessage: 'disk full' },
+          { toolName: 'write', filePath: 'test.txt', outcome: 'failure', errorMessage: 'disk full' },
         ],
       });
       const result = detectViolation('P_042', session);
@@ -101,7 +101,7 @@ describe('#216: P_* principle detection', () => {
 
     it('returns violated=false for clean session with no negative signals', () => {
       const session = makeSession({
-        toolCalls: [{ toolName: 'read_file', filePath: 'test.txt', outcome: 'success' }],
+        toolCalls: [{ toolName: 'read', filePath: 'test.txt', outcome: 'success' }],
       });
       const result = detectViolation('P_001', session);
       expect(result.violated).toBe(false);
@@ -126,6 +126,7 @@ describe('#216: P_* principle detection', () => {
         painSignals: [{ source: 'test.ts edit failed', score: 70, reason: 'Did not survey structure before editing' }],
       });
       const result = detectViolation('T-01', session);
+      // T-01 violation: edit without prior read, with pain signal matching file or pattern
       expect(result.violated).toBe(true);
     });
   });

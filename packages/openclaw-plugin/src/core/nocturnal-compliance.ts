@@ -228,13 +228,16 @@ function pathMatches(filePath: string | undefined, patterns: RegExp[]): boolean 
  * IMPORTANT: This does NOT assess compliance. It only answers:
  *   "Could the principle have applied here?"
  *
- * #216: For P_* principles (pain-derived), generic detection based on
- * pain events and tool calls — any session with negative signals is
- * considered an opportunity for a pain-derived principle.
+ * #216: For P_* principles (not T-xx), uses generic detection based on
+ * pain events and tool calls — any session with a pain signal is considered
+ * an opportunity for a pain-derived principle.
  */
 export function detectOpportunity(principleId: string, session: SessionEvents): OpportunityMatch {
   // #216: P_* principles (pain-derived) — generic opportunity detection
   if (principleId.startsWith('P_')) {
+    // Any session with pain signals, tool failures, or gate blocks is an opportunity
+    // for a pain-derived principle. This is conservative: better to over-count
+    // opportunities than to miss real violations.
     const hasPainSignal = session.painSignals.length > 0;
     const hasToolFailure = session.toolCalls.some((tc) => tc.outcome === 'failure');
     const hasGateBlock = session.gateBlocks.length > 0;
@@ -244,6 +247,7 @@ export function detectOpportunity(principleId: string, session: SessionEvents): 
     return { applicable: false, reason: `P_* principle — no pain/tool-failure/gate-block in session` };
   }
 
+  // T-xx principles — specific deterministic detection
   switch (principleId) {
     case 'T-01':
       return detectT01Opportunity(session);
@@ -510,11 +514,17 @@ function detectT09Opportunity(session: SessionEvents): OpportunityMatch {
  * Returns a ViolationMatch with violated=true if violation signals are present.
  *
  * #216: For P_* principles (pain-derived), violation is detected when the session
- * has pain signals (score>=50), tool failures, or gate blocks.
+ * has pain signals, tool failures, or gate blocks that match the principle's
+ * trigger pattern. Since P_* principles don't have T-xx specific detectors,
+ * we use the presence of negative signals as violation evidence.
  */
 export function detectViolation(principleId: string, session: SessionEvents): ViolationMatch {
   // #216: P_* principles (pain-derived) — generic violation detection
   if (principleId.startsWith('P_')) {
+    // For pain-derived principles, a violation is indicated when the session
+    // contains pain signals, tool failures, or gate blocks — these are the
+    // same signals that triggered principle creation in the first place.
+    // A principle was violated if the bad outcome recurred after it was created.
     const painSignals = session.painSignals.filter((p) => p.score >= 50);
     const toolFailures = session.toolCalls.filter((tc) => tc.outcome === 'failure');
     const gateBlocks = session.gateBlocks;
@@ -531,6 +541,7 @@ export function detectViolation(principleId: string, session: SessionEvents): Vi
     return { violated: false, reason: `P_* principle — no violation signals in session` };
   }
 
+  // T-xx principles — specific deterministic detection
   switch (principleId) {
     case 'T-01':
       return detectT01Violation(session);
