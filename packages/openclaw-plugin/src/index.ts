@@ -156,17 +156,18 @@ const plugin = {
       (event: PluginHookAfterToolCallEvent, ctx: PluginHookToolContext): void => {
         api.logger.info(`[PD:DEBUG] after_tool_call fired: tool=${event.toolName} toolCallId=${event.toolCallId}`);
         const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
+        api.logger.info(`[PD:DEBUG] workspaceDir=${workspaceDir}`);
         try {
           const pluginConfig = api.pluginConfig ?? {};
           // Pass api separately to handleAfterToolCall to maintain type safety
           handleAfterToolCall(event, { ...ctx, workspaceDir, pluginConfig }, api);
 
           const wctx = WorkspaceContext.fromHookContext({ workspaceDir });
-          api.logger.info(`[PD:DEBUG] eventLog instance: ${wctx.eventLog ? 'exists' : 'null'}`);
+          api.logger.info(`[PD:DEBUG] eventLog stateDir=${wctx.stateDir} buffer=${wctx.eventLog.getBufferedEvents().length}`);
           wctx.eventLog.recordHookExecution({
             hook: 'after_tool_call'
           });
-          api.logger.info(`[PD:DEBUG] recordHookExecution called for after_tool_call`);
+          api.logger.info(`[PD:DEBUG] recordHookExecution called, buffer now=${wctx.eventLog.getBufferedEvents().length}`);
         } catch (err) {
           api.logger.error(`[PD:DEBUG] Exception in after_tool_call: ${String(err)}`);
           try {
