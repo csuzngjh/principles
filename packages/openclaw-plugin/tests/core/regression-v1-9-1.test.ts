@@ -53,14 +53,18 @@ describe('#208/#209: isExpectedSubagentError daemon-mode coverage', () => {
     expect(isExpectedSubagentError('subagent is not available')).toBe(true);
     expect(isExpectedSubagentError('gateway is not running')).toBe(true);
     expect(isExpectedSubagentError('process isolation error: ECONNREFUSED')).toBe(true);
-    expect(isExpectedSubagentError('connection refused')).toBe(true);
-    expect(isExpectedSubagentError('connection reset by peer')).toBe(true);
+    // #3 review fix: connection errors now require 'subagent' in message to reduce false positives
+    expect(isExpectedSubagentError('subagent connection refused')).toBe(true);
+    expect(isExpectedSubagentError('subagent connection reset by peer')).toBe(true);
   });
 
   it('does not match unrelated errors', () => {
     expect(isExpectedSubagentError('file not found')).toBe(false);
     expect(isExpectedSubagentError('syntax error in config')).toBe(false);
     expect(isExpectedSubagentError('network timeout to external API')).toBe(false);
+    // #3 review fix: generic connection errors without 'subagent' should NOT match
+    expect(isExpectedSubagentError('connection refused')).toBe(false);
+    expect(isExpectedSubagentError('connection reset by peer')).toBe(false);
   });
 });
 

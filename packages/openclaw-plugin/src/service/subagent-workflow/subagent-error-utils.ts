@@ -19,7 +19,7 @@ export function isExpectedSubagentError(err: unknown): boolean {
         msg.includes('gateway is not running') ||
         // Process isolation in cron jobs
         msg.includes('process isolation') ||
-        // Connection dropped in daemon mode
-        (msg.toLowerCase().includes('connection') && (msg.includes('refused') || msg.includes('reset') || msg.includes('econnrefused')))
+        // Review fix: Subagent connection issues in daemon mode (more specific to reduce false positives)
+        (msg.includes('subagent') && msg.toLowerCase().includes('connection') && (msg.includes('refused') || msg.includes('reset') || msg.includes('econnrefused')))
     );
 }

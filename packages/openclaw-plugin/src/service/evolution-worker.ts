@@ -943,7 +943,8 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                                         // #212: Default to weak_heuristic so principles are auto-evaluable
                                         // without requiring full detectorMetadata from the diagnostician.
                                         evaluability: principle.evaluability || 'weak_heuristic',
-                                        detectorMetadata: principle.detector_metadata,
+                                        // Review fix: Accept both snake_case and camelCase from LLM output
+                                        detectorMetadata: principle.detector_metadata || principle.detectorMetadata,
                                         abstractedPrinciple: principle.abstracted_principle,
                                     });
                                     if (principleId) {
@@ -1038,7 +1039,8 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                                     source: task.source || 'heartbeat_diagnostician',
                                     // #212: Default to weak_heuristic so principles are auto-evaluable.
                                     evaluability: principle.evaluability || 'weak_heuristic',
-                                    detectorMetadata: principle.detector_metadata,
+                                    // Review fix: Accept both snake_case and camelCase from LLM output
+                                    detectorMetadata: principle.detector_metadata || principle.detectorMetadata,
                                     abstractedPrinciple: principle.abstracted_principle,
                                 });
                                 if (principleId) {
