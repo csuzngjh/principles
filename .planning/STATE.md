@@ -27,7 +27,7 @@ See `.planning/PROJECT.md` (updated 2026-04-08)
 
 ## Current Position
 
-Phase: 16 (not started — roadmap complete)
+Phase: 18 (planning — 2 plans created)
 Plan: —
 Status: Planning complete, ready to execute
 Last activity: 2026-04-08 — Roadmap created for v1.9.1
