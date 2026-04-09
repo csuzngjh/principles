@@ -83,7 +83,7 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
   }
 
   // 5. 运行交互式问答
-  let installOptions: InstallOptions | null = null;
+  let installOptions: InstallOptions;
 
   // 检查是否是非交互模式
   const nonInteractive = options.nonInteractive || options.yes;

@@ -86,6 +86,7 @@ export function validatePainFlag(data: Record<string, string>): string[] {
   return missing;
 }
 
+// eslint-disable-next-line @typescript-eslint/max-params -- Reason: Score computation requires all 5 parameters - refactoring to options object would be breaking API change
 export function computePainScore(rc: number, isSpiral: boolean, missingTestCommand: boolean, softScore: number, projectDir?: string): number {
   let score = Math.max(0, softScore || 0);
   
