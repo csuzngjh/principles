@@ -6,6 +6,7 @@ import type {
     EmpathyResult,
     WorkflowResultContext,
     WorkflowPersistContext,
+    WorkflowHandle,
 } from './types.js';
 import type { RuntimeDirectDriver } from './runtime-direct-driver.js';
 import { WorkspaceContext } from '../../core/workspace-context.js';
@@ -49,7 +50,7 @@ export class EmpathyObserverWorkflowManager extends WorkflowManagerBase {
             taskInput: unknown;
             metadata?: Record<string, unknown>;
         }
-    ): Promise<import('./types.js').WorkflowHandle> {
+    ): Promise<WorkflowHandle> {
         // Surface degrade: skip boot sessions (they run outside gateway request context)
         if (options.parentSessionId.startsWith('boot-')) {
             this.logger.info(`[PD:EmpathyObserverWorkflow] Skipping workflow: boot session (gateway request context unavailable)`);

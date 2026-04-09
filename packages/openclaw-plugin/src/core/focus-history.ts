@@ -471,10 +471,11 @@ function extractFileArtifacts(
   // 匹配 write_file, replace 工具调用
   // 格式: file_path: "/path/to/file" 或 absolute_path: "/path/to/file"
   const filePathRegex = /(?:file_path|absolute_path)["']?\s*[:=]\s*["']([^"']+\.(ts|js|json|md|yaml|yml|py|sh|mjs|cjs))["']/gi;
-  
+
+  // eslint-disable-next-line @typescript-eslint/init-declarations -- Reason: assigned immediately in while loop condition before use
   let match;
   while ((match = filePathRegex.exec(text)) !== null) {
-    const filePath = match[1];
+    const [, filePath] = match;
     
     // 跳过 node_modules 和配置文件
     if (filePath.includes('node_modules') || 
@@ -513,10 +514,10 @@ function extractFileArtifacts(
   // 匹配更通用的文件路径格式（如代码块中的路径）
   // 格式: `path/to/file.ts` 或 "path/to/file.ts"
   // 只匹配明确的代码相关路径
-  const genericPathRegex = /[`"']([a-zA-Z0-9_\-\/]+\.(ts|js|mjs|cjs|py))[`"']/g;
+  const genericPathRegex = /[`"']([a-zA-Z0-9_./]+\.(ts|js|mjs|cjs|py))[`"']/g;
   
   while ((match = genericPathRegex.exec(text)) !== null) {
-    const filePath = match[1];
+    const [, filePath] = match;
     
     // 跳过太短、node_modules、配置文件
     if (filePath.length < 10 || 
@@ -580,6 +581,7 @@ function extractProblems(
 ): void {
   // 问题模式（匹配问题描述）
   const problemPattern = /(?:问题|problem|error|错误|失败|failed)[:：]\s*([^\n]{5,100})/gi;
+  // eslint-disable-next-line @typescript-eslint/init-declarations -- Reason: assigned immediately in while loop condition before use
   let match;
   while ((match = problemPattern.exec(text)) !== null) {
     const content = match[1].trim();
@@ -622,6 +624,7 @@ function extractNextActions(text: string, actions: string[]): void {
   ];
 
   for (const pattern of patterns) {
+    // eslint-disable-next-line @typescript-eslint/init-declarations -- Reason: assigned immediately in while loop condition before use
     let match;
     while ((match = pattern.exec(text)) !== null) {
       const action = match[1].trim();
@@ -680,6 +683,7 @@ export function parseWorkingMemorySection(content: string): WorkingMemorySnapsho
   // 解析文件记录表格
   // | 文件路径 | 操作 | 描述 |
   const tableRegex = /\|\s*`?([^`|\n]+)`?\s*\|\s*(created|modified|deleted)\s*\|\s*([^|\n]*)\s*\|/gi;
+  // eslint-disable-next-line @typescript-eslint/init-declarations -- Reason: assigned immediately in while loop condition before use
   let match;
   while ((match = tableRegex.exec(wmContent)) !== null) {
     snapshot.artifacts.push({
@@ -999,7 +1003,7 @@ export function archiveMilestonesToDaily(
     return null;
   }
 
-  const dateStr = new Date().toISOString().split('T')[0];
+  const [dateStr] = new Date().toISOString().split('T');
   const memoryDir = path.join(workspaceDir, 'memory');
   const dailyLogPath = path.join(memoryDir, `${dateStr}.md`);
   const timestamp = new Date().toISOString();

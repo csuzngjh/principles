@@ -404,6 +404,7 @@ export async function handleBeforePromptBuild(
   // appendSystemContext: Principles + Thinking OS + reflection_log + project_context (cacheable, WebUI-hidden)
   // prependContext: Only short dynamic directives: evolutionDirective + heartbeat
 
+  // eslint-disable-next-line no-useless-assignment -- Reason: initial value unused due to immediate reassignment
   let prependSystemContext = '';
   let prependContext = '';
   let appendSystemContext = '';
@@ -671,6 +672,7 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
   }
 
   // ──── 6. Dynamic Attitude Matrix (based on GFI) ────
+  // eslint-disable-next-line no-useless-assignment -- Reason: initial value unused due to immediate reassignment
   let attitudeDirective = '';
   const currentGfi = session?.currentGfi || 0;
   

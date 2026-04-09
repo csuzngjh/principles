@@ -278,7 +278,7 @@ export interface ExecuteTrainerParams {
 export async function executeTrainer(
   spec: TrainingExperimentSpec,
   scriptsDir?: string
-): Promise<import('./external-training-contract.js').TrainingExperimentResult> {
+): Promise<TrainingExperimentResult> {
   const baseDir = scriptsDir ?? path.join(REPO_ROOT, TRAINER_SCRIPTS_DIR);
 
   // Map backend to script name
@@ -340,7 +340,7 @@ export async function executeTrainer(
     const MAX_STDOUT_BUFFER = 1 * 1024 * 1024; // 1MB cap
 
     const trainerResult = await new Promise<
-      import('./external-training-contract.js').TrainingExperimentResult
+      TrainingExperimentResult
     >((resolve, reject) => {
       const proc = spawn(pythonExecutable, [scriptPath, '--spec', specPath, '--output-dir', spec.outputDir]);
 
@@ -371,7 +371,7 @@ export async function executeTrainer(
           const trimmed = stdout.trim();
           if (trimmed) {
             try {
-              resolve(JSON.parse(trimmed) as import('./external-training-contract.js').TrainingExperimentResult);
+              resolve(JSON.parse(trimmed) as TrainingExperimentResult);
               return;
             } catch {
               // fall through to result file
@@ -381,7 +381,7 @@ export async function executeTrainer(
           if (fs.existsSync(resultFilePath)) {
             try {
               const content = fs.readFileSync(resultFilePath, 'utf-8');
-              resolve(JSON.parse(content) as import('./external-training-contract.js').TrainingExperimentResult);
+              resolve(JSON.parse(content) as TrainingExperimentResult);
               return;
             } catch {
               // fall through to error
@@ -398,7 +398,7 @@ export async function executeTrainer(
           if (fs.existsSync(resultFilePath)) {
             try {
               const content = fs.readFileSync(resultFilePath, 'utf-8');
-              resolve(JSON.parse(content) as import('./external-training-contract.js').TrainingExperimentResult);
+              resolve(JSON.parse(content) as TrainingExperimentResult);
             } catch {
               reject(new Error(`Trainer exited with code ${code} and result file was invalid: ${resultFilePath}`));
             }

@@ -88,7 +88,7 @@ export function handleWorkflowDebugCommand(
     
     // Parse workflow ID from args
     const args = (ctx as { args?: string }).args?.trim() || '';
-    const workflowId = args.split(/\s+/)[0];
+    const [workflowId] = args.split(/\s+/);
 
     if (!workflowId) {
         return {

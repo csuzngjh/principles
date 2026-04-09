@@ -158,7 +158,7 @@ export function scoreCandidate(
   let boundedness = 0.5;
   // Specific: mentions specific targets (files, tools, etc.)
   const betterDecisionStr = candidate.betterDecision ?? '';
-  const hasSpecificTarget = /[a-zA-Z0-9_\-]+\.(ts|js|json|md|yml|yaml|sh|py|go|rs)/.test(betterDecisionStr);
+  const hasSpecificTarget = /[a-zA-Z0-9_.]+\.(ts|js|json|md|yml|yaml|sh|py|go|rs)/.test(betterDecisionStr);
   if (hasSpecificTarget) boundedness += 0.2;
   // Not too generic
   const genericPatterns = [
@@ -378,7 +378,7 @@ export function runTournament(
   }
 
   // Winner is rank 1
-  const winner = eligible[0];
+  const [winner] = eligible;
 
   trace.push({
     step: 'Winner Selected',

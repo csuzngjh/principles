@@ -8,7 +8,7 @@
  * 4. 锁获取后二次验证
  * 5. 数据不丢失：失败时抛出异常而非静默返回
  */
-
+/* global NodeJS */
 import * as fs from 'fs';
 import * as path from 'path';
 

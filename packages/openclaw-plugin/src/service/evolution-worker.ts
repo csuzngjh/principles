@@ -1,3 +1,4 @@
+/* global NodeJS */
 import * as fs from 'fs';
 import * as path from 'path';
 import { createHash } from 'crypto';
@@ -1108,11 +1109,11 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
         if (pendingTasks.length > 0) {
             // V2: Also sort by priority within same score
             const priorityWeight = { high: 3, medium: 2, low: 1 };
-            const highestScoreTask = pendingTasks.sort((a, b) => {
+            const [highestScoreTask] = pendingTasks.sort((a, b) => {
                 const scoreDiff = b.score - a.score;
                 if (scoreDiff !== 0) return scoreDiff;
                 return (priorityWeight[b.priority] || 2) - (priorityWeight[a.priority] || 2);
-            })[0];
+            });
             const nowIso = new Date().toISOString();
 
             const taskDescription = `Diagnose systemic pain [ID: ${highestScoreTask.id}]. Source: ${highestScoreTask.source}. Reason: ${highestScoreTask.reason}. ` +
@@ -1418,6 +1419,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
 
                         // Store workflowId on task for polling on subsequent cycles
                         sleepTask.resultRef = workflowHandle.workflowId;
+                        // eslint-disable-next-line @typescript-eslint/prefer-destructuring -- Reason: workflowId is reassignable outer let - destructuring would shadow
                         workflowId = workflowHandle.workflowId;
                     }
 

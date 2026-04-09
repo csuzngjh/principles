@@ -134,6 +134,7 @@ export function handleBeforeToolCall(
     const mutationMatch = /(?:>|>>|sed\s+-i|rm|mv|mkdir|touch|cp)\s+(?:-[a-zA-Z]+\s+)*([^\s;&|<>]+)/.exec(command);
 
     if (mutationMatch) {
+      // eslint-disable-next-line @typescript-eslint/prefer-destructuring -- Reason: mutationMatch[1] assigned to reassignable outer let - destructuring would shadow outer variable
       filePath = mutationMatch[1];
     } else {
       const hasRiskPath = profile.risk_paths.some(rp => command.includes(rp));
