@@ -1,115 +1,141 @@
-# Roadmap: v1.9.3 剩余 Lint 修复
+# Roadmap: v1.10 Thinking Models 页面优化
 
 ## Overview
 
-**Milestone:** v1.9.3
-**Goal:** 完成 v1.9.2 未竟的 lint 修复工作，实现 CI green
-**Phases:** 1
+**Milestone:** v1.10
+**Goal:** 将 Thinking Models 页面从简单的列表/详情视图重构为功能完整的思维模型分析面板
+**Phases:** 8
 **Granularity:** Standard
-**Coverage:** 4/4 requirements mapped
+**Coverage:** 22/22 requirements mapped
 
 ## Phases
 
-- [x] **Phase 1: ESLint Configuration** - Set up ESLint v10 flat config with TypeScript coverage
-- [x] **Phase 2: Auto-fix Baseline** - Run auto-fix and audit disable comments
-- [x] **Phase 16: Data Source Tracing** - Map all 4 pages to API endpoints and DB queries
-- [x] **Phase 17: Overview Page Data Fix** - Fix /api/central/overview, /api/overview, /api/overview/health
-- [x] **Phase 18: Loop/Samples + Feedback Page Fixes** - Fix /api/samples, /api/feedback/* data sources
-- [x] **Phase 19: Gate Monitor + Frontend Field Mapping** - Fix /api/gate/stats, /api/gate/blocks
-- [x] **Phase 20: End-to-End Validation** - Validate all 4 pages, add regression tests
-- [ ] **Phase 03: Manual Remediation (Continuation)** - Execute eslint-disable suppression for remaining errors, mechanical fixes, CI verification
+- [ ] **Phase 1: 基础可视化** - 覆盖率趋势图、场景热力图、空状态优化 (VIZ-01, VIZ-03, VIZ-04)
+- [ ] **Phase 2: 模型详情可视化** - 使用趋势图、事件上下文展开 (VIZ-02)
+- [ ] **Phase 3: 休眠模型与推荐标签** - 休眠模型列表、推荐标签色彩编码、过滤 (DORM-01, DORM-02, REC-01, REC-02, REC-03)
+- [ ] **Phase 4: 事件上下文详情** - toolContext、painContext、principleContext、matchedPattern (EVT-01, EVT-02, EVT-03, EVT-04)
+- [ ] **Phase 5: THINKING_OS.md 内容展示** - trigger、antiPattern、workspace 路径 (TOS-01, TOS-02, TOS-03)
+- [ ] **Phase 6: 模型对比模式** - 多模型选择、并排比较、趋势叠加 (CMP-01, CMP-02, CMP-03)
+- [ ] **Phase 7: 搜索与过滤** - 文本搜索、排序切换 (SRCH-01, SRCH-02)
+- [ ] **Phase 8: THINKING_OS.md 一致性** - 模板补齐 10 个 directive (SYNC-01)
 
 ## Phase Details
 
-### Phase 03: Manual Remediation (Continuation)
+### Phase 1: 基础可视化
 
-**Goal:** Execute eslint-disable suppression strategy for remaining ~700 errors, fix prefer-destructuring mechanically, achieve CI green
+**Goal:** 添加覆盖率趋势图、场景热力图、优化空状态
 
-**Depends on:** Phase 02 (Auto-fix Baseline - complete in v1.9.2)
+**Requirements:** VIZ-01, VIZ-03, VIZ-04
 
-**Requirements:** LINT-11, LINT-12, LINT-13, LINT-14
+**Depends on:** 后端数据已就绪（coverageTrend、scenarioMatrix 已有）
 
-**Success Criteria** (what must be TRUE):
-1. prefer-destructuring errors fixed mechanically (~50 errors)
-2. All other lint errors suppressed with eslint-disable comments containing `-- Reason:`
-3. CI lint step passes with 0 errors
-4. SUPPRESSION-LEDGER.md updated documenting all suppressions
-
-**Plans:** 1 plan (continuation of v1.9.2 03-05-PLAN.md)
-
-Plans:
-- [ ] 03-05-PLAN.md -- GAP CLOSURE: Execute eslint-disable suppression for CI green
+**UAT:**
+- 覆盖率趋势图正确显示每日数据
+- 场景热力图显示模型×场景交叉数据
+- 空数据时显示友好提示
 
 ---
 
-*Last updated: 2026-04-09 after Phase 20 planning*
+### Phase 2: 模型详情可视化
 
-## v1.9.2: Lint 错误修复与代码质量改进 (Historical)
+**Goal:** 为选中的模型添加使用趋势图
 
-**Success Criteria** (what must be TRUE):
-1. `eslint --fix` runs without error on auto-fixable issues (import order, unused imports, unused variables)
-2. Every `eslint-disable` comment has a documented reason in code explaining why it exists
-3. All `eslint --fix` diffs reviewed before commit -- no blind auto-fixes applied
+**Requirements:** VIZ-02
 
-**Plans:** 1 plan
+**Depends on:** Phase 1（图表组件复用）
 
-Plans:
-- [x] 02-01-PLAN.md -- Auto-fix baseline: eslint --fix, disable comment audit, lint script
+**UAT:**
+- 切换模型时显示对应模型的使用趋势
+- 趋势图有适当的加载状态
 
-### Phase 3: Manual Remediation
+---
 
-**Goal:** Remaining ~1327 ESLint errors resolved, bad design patterns eliminated, CI lint passes green
+### Phase 3: 休眠模型与推荐标签
 
-**Depends on:** Phase 2
+**Goal:** 展示从未触发的模型，优化推荐标签视觉
 
-**Requirements:** LINT-08, LINT-09, LINT-10, LINT-11
+**Requirements:** DORM-01, DORM-02, REC-01, REC-02, REC-03
 
-**Success Criteria** (what must be TRUE):
-1. Remaining manual-fix errors fixed (D-01: no-undef via globals.node, D-02: any→unknown, no-use-before-define, max-params, no-unused-vars, etc.)
-2. Bad design patterns identified and fixed (inline helpers extracted, barrel export issues resolved)
-3. Complexity tracking deferred to v2 (D-03) - NOT adding complexity rule in Phase 3
-4. CI lint step passes green -- all ~1327 lint errors resolved (LINT-11)
+**Depends on:** 无
 
-**Plans:** 5 plans (GAP CLOSURE MODE)
+**UAT:**
+- 休眠模型列表可折叠显示
+- 推荐标签有颜色区分（reinforce 绿、rework 黄、archive 灰）
+- 可按推荐类型过滤模型列表
 
-Plans:
-- [x] 03-01-PLAN.md -- Critical config fixes: eslint.config.js (globals.node + ignore patterns) + D-02 (any→unknown)
-- [x] 03-02-PLAN.md -- no-use-before-define + max-params fixes
-- [x] 03-03-PLAN.md -- no-unused-vars (433 errors - largest category)
-- [x] 03-04-PLAN.md -- Remaining categories + Final CI green verification
-- [ ] 03-05-PLAN.md -- GAP CLOSURE: Suppress all remaining 687 errors with eslint-disable to achieve CI green
+---
 
-**Gap Closure Status:** Plans 03-01 through 03-04 reduced errors from ~1327 to 687 but did not achieve CI green. Gap closure plan 03-05 addresses remaining errors via eslint-disable suppression strategy.
+### Phase 4: 事件上下文详情
 
-## Progress Table
+**Goal:** 在最近事件中展示 toolContext、painContext、principleContext
 
-| Phase | Plans Complete | Status | Completed |
-|-------|----------------|--------|-----------|
-| 03. Manual Remediation | 0/1 | Pending | No |
+**Requirements:** EVT-01, EVT-02, EVT-03, EVT-04
 
-## Coverage Map
+**Depends on:** 无（后端已返回这些数据）
 
-| Requirement | Phase | Status |
-|-------------|-------|--------|
-| LINT-11 | 03 | Pending |
-| LINT-12 | 03 | Pending |
-| LINT-13 | 03 | Pending |
-| LINT-14 | 03 | Pending |
+**UAT:**
+- 每个事件卡片显示工具名称、结果、错误类型
+- painContext 和 principleContext 在存在时展示
+- matchedPattern 显示触发的正则模式
 
-**Total:** 4/4 requirements mapped
+---
 
-## Gap Closure from v1.9.2
+### Phase 5: THINKING_OS.md 内容展示
 
-**Remaining from v1.9.2:**
-- ~50: prefer-destructuring (mechanically fixable)
-- ~637: require eslint-disable suppression (max-params, no-use-before-define, no-explicit-any, etc.)
-- ~13: no-unused-vars (partial fix in 03-03)
+**Goal:** 在详情页展示 trigger、antiPattern、workspace 路径
 
-**Plan 03-05 Approach (from v1.9.2):**
-1. Mechanically fix prefer-destructuring
-2. Suppress all other categories with eslint-disable -- Reason:
-3. Final CI verification must show 0 errors
+**Requirements:** TOS-01, TOS-02, TOS-03
 
-**Deferred to future phases:**
-- LINT-09: Inline helpers extraction (需要架构级重构)
-- LINT-10: Complexity rules (项目约定，延期到 v2)
+**Depends on:** Phase 4（详情页布局优化）
+
+**UAT:**
+- 详情页显示该模型的触发条件
+- 详情页显示禁止行为（anti-pattern）
+- 页面头部显示 THINKING_OS.md 来源路径
+
+---
+
+### Phase 6: 模型对比模式
+
+**Goal:** 支持选择 2+ 模型进行并排比较
+
+**Requirements:** CMP-01, CMP-02, CMP-03
+
+**Depends on:** Phase 3（推荐标签可视化完成）
+
+**UAT:**
+- 可选择多个模型进入对比模式
+- 对比视图显示关键指标并排对比
+- 使用趋势叠加显示
+
+---
+
+### Phase 7: 搜索与过滤
+
+**Goal:** 模型列表支持搜索和排序
+
+**Requirements:** SRCH-01, SRCH-02
+
+**Depends on:** Phase 3（过滤基础）
+
+**UAT:**
+- 搜索框可按名称或场景过滤模型
+- 排序切换按钮支持按 hits/成功率/名称排序
+
+---
+
+### Phase 8: THINKING_OS.md 一致性
+
+**Goal:** 确保 THINKING_OS.md 模板包含全部 10 个 directive
+
+**Requirements:** SYNC-01
+
+**Depends on:** 无（独立任务）
+
+**UAT:**
+- 模板文件包含 T-01 到 T-10 全部 directive
+- builtin patterns 与 THINKING_OS.md 内容一致
+
+---
+*Roadmap created: 2026-04-09*
+*Last updated: 2026-04-09 after v1.10 milestone started*
