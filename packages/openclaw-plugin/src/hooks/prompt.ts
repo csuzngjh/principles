@@ -32,6 +32,16 @@ interface ModelConfigObject {
 }
 
 /**
+ * OpenClaw agents model configuration with subagent model override support
+ */
+interface AgentsModelConfig {
+  model?: unknown;
+  subagents?: {
+    model?: unknown;
+  };
+}
+
+/**
  * Default model configuration for OpenClaw agents
  */
 interface AgentsDefaultsConfig {
@@ -54,6 +64,21 @@ function escapeXml(input: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&apos;');
+}
+
+function extractContextSignals(context: { toolName?: string; filePath?: string; userMessage?: string; }): string[] {
+  const signals: string[] = [];
+  if (context.filePath?.endsWith('.ts')) signals.push('typescript');
+  if (context.filePath?.endsWith('.md')) signals.push('markdown');
+  if (context.toolName && ['edit', 'replace', 'write', 'write_file', 'apply_patch'].includes(context.toolName)) signals.push('edit');
+  if (context.toolName && ['run_shell_command', 'bash'].includes(context.toolName)) signals.push('shell');
+  if (context.toolName) signals.push(context.toolName);
+  const msg = (context.userMessage || '').toLowerCase();
+  if (msg.includes('.ts') || msg.includes('typescript')) signals.push('typescript');
+  if (msg.includes('.md') || msg.includes('markdown')) signals.push('markdown');
+  if (msg.includes('edit') || msg.includes('write') || msg.includes('patch')) signals.push('edit');
+  if (msg.includes('shell') || msg.includes('bash')) signals.push('shell');
+  return signals;
 }
 
 interface PromptHookApi {
@@ -234,6 +259,27 @@ export function getDiagnosticianModel(api: PromptHookApi | null, logger?: Plugin
   throw new Error(errorMsg);
 }
 
+function extractLatestUserMessage(messages: unknown[] | undefined): string {
+  if (!Array.isArray(messages)) return '';
+
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i] as { role?: string; content?: unknown };
+    if (msg?.role !== 'user') continue;
+
+    if (typeof msg.content === 'string') return msg.content;
+    if (Array.isArray(msg.content)) {
+      const text = msg.content
+        .filter((part: any) => part && part.type === 'text' && typeof part.text === 'string')
+        .map((part: any) => part.text)
+        .join('\n')
+        .trim();
+      if (text) return text;
+    }
+  }
+
+  return '';
+}
+
 /**
  * Extract recent user messages for keyword optimization context.
  */
@@ -250,8 +296,8 @@ function extractRecentMessages(messages: unknown[] | undefined, limit: number): 
       text = msg.content;
     } else if (Array.isArray(msg.content)) {
       text = msg.content
-        .filter((part: unknown) => part && typeof part === 'object' && (part as { type?: string }).type === 'text' && typeof (part as { text?: unknown }).text === 'string')
-        .map((part: unknown) => (part as { text: string }).text)
+        .filter((part: any) => part && part.type === 'text' && typeof part.text === 'string')
+        .map((part: any) => part.text)
         .join('\n')
         .trim();
     }
@@ -519,7 +565,6 @@ The empathy observer subagent handles pain detection independently.
           const empathyManager = new EmpathyObserverWorkflowManager({
             workspaceDir,
             logger: api.logger ?? console,
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: runtimeSubagent has structurally compatible shape but differs from workflow manager's subagent type
             subagent: runtimeSubagent as any,
           });
           empathyManager.startWorkflow(empathyObserverWorkflowSpec, {
@@ -555,7 +600,6 @@ The empathy observer subagent handles pain detection independently.
             const empathyManager = new EmpathyObserverWorkflowManager({
               workspaceDir,
               logger: api.logger ?? console,
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: api.runtime.subagent has structurally compatible shape but differs from workflow manager's subagent type
               subagent: api.runtime.subagent as any,
             });
             

@@ -41,6 +41,7 @@ import {
   type TrainingBudget,
   validateTrainerResult,
   computeConfigFingerprint,
+  computeDatasetFingerprint,
   computeCodeHash,
   generateExperimentId,
   validateHardwareTier,
