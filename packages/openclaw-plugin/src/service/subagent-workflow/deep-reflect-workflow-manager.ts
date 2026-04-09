@@ -5,6 +5,7 @@ import type {
     DeepReflectResult,
     WorkflowResultContext,
     WorkflowPersistContext,
+    WorkflowHandle,
 } from './types.js';
 
 // Re-export DeepReflectResult so index.ts can re-export it
@@ -49,7 +50,7 @@ export class DeepReflectWorkflowManager extends WorkflowManagerBase {
             taskInput: unknown;
             metadata?: Record<string, unknown>;
         }
-    ): Promise<import('./types.js').WorkflowHandle> {
+    ): Promise<WorkflowHandle> {
         // Surface degrade: skip boot sessions
         if (options.parentSessionId.startsWith('boot-')) {
             this.logger.info(`[PD:DeepReflectWorkflow] Skipping workflow: boot session`);
@@ -194,7 +195,7 @@ ${result.insights}
             fs.default.renameSync(tempPath, reflectionLogPath);
         } catch (err) {
             // Let the error propagate to finalizeOnce for proper event logging
-            throw new Error(`DeepReflectWorkflow persistResult failed: ${String(err)}`);
+            throw new Error(`DeepReflectWorkflow persistResult failed: ${String(err)}`, { cause: err });
         }
     },
 };

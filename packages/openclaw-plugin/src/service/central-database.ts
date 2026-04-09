@@ -510,7 +510,7 @@ export class CentralDatabase {
   }[] {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - days);
-    const cutoffStr = cutoffDate.toISOString().split('T')[0];
+    const [cutoffStr] = cutoffDate.toISOString().split('T');
 
     const toolDaily = this.db.prepare(`
       SELECT 
@@ -853,21 +853,21 @@ export class CentralDatabase {
       FROM aggregated_correction_samples
       WHERE workspace IN (${filter})
       GROUP BY review_status
-    `).all() as Array<{ review_status: string; count: number }>;
+    `).all() as { review_status: string; count: number }[];
     return Object.fromEntries(rows.map(r => [r.review_status, r.count]));
   }
 
   /**
    * Get top N most recent pending/approved samples across all enabled workspaces (D-04)
    */
-  getSamplePreview(limit: number = 5): Array<{
+  getSamplePreview(limit = 5): {
     sampleId: string;
     sessionId: string;
     workspace: string;
     qualityScore: number;
     reviewStatus: string;
     createdAt: string;
-  }> {
+  }[] {
     const filter = this.getEnabledWorkspaceFilter();
     const rows = this.db.prepare(`
       SELECT sample_id, session_id, workspace, quality_score, review_status, created_at
@@ -876,14 +876,14 @@ export class CentralDatabase {
         AND review_status IN ('pending', 'approved')
       ORDER BY created_at DESC
       LIMIT ?
-    `).all(limit) as Array<{
+    `).all(limit) as {
       sample_id: string;
       session_id: string;
       workspace: string;
       quality_score: number;
       review_status: string;
       created_at: string;
-    }>;
+    }[];
     return rows.map(r => ({
       sampleId: r.sample_id,
       sessionId: r.session_id,

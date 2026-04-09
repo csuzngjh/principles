@@ -239,7 +239,7 @@ export function detectOpportunity(principleId: string, session: SessionEvents): 
   }
 
   // T-xx principles — specific deterministic detection
-  // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between detection helpers - reordering would break logical grouping
+   
   switch (principleId) {
     case 'T-01':
       return detectT01Opportunity(session);

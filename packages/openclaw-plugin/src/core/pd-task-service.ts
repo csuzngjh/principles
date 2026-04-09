@@ -37,5 +37,6 @@ export const PDTaskService: OpenClawPluginService = {
 
   // eslint-disable-next-line no-unused-vars -- stop method required by service interface but no cleanup needed
   stop(_ctx: OpenClawPluginServiceContext): void {
+    /* intentionally empty - no cleanup required for this service */
   },
 };

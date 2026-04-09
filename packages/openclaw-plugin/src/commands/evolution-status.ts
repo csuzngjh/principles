@@ -1,4 +1,4 @@
-import { EvolutionReducerImpl } from '../core/evolution-reducer.js';
+import type { EvolutionReducerImpl } from '../core/evolution-reducer.js';
 import type { InternalizationRouteRecommendation } from '../core/principle-internalization/internalization-routing-policy.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { normalizeLanguage } from '../i18n/commands.js';

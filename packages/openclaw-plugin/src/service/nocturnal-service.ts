@@ -31,6 +31,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
+import type { RecentPainContext } from './evolution-worker.js';
 import {
   NocturnalTrajectoryExtractor,
   createNocturnalTrajectoryExtractor,
@@ -224,7 +225,7 @@ export interface NocturnalServiceOptions {
    * When provided, the target selector uses it for ranking bias and diagnostics enrichment.
    * This threads recent pain signals into sleep_reflection targeting without merging task kinds.
    */
-  painContext?: import('../service/evolution-worker.js').RecentPainContext;
+  painContext?: RecentPainContext;
 
   /**
    * Override the principleId (skip Selector stage).
@@ -737,6 +738,7 @@ export function executeNocturnalReflection(
   // -------------------------------------------------------------------------
   // Step 5: Artifact generation (Trinity or single-reflector)
   // -------------------------------------------------------------------------
+  // eslint-disable-next-line no-useless-assignment -- Reason: initial value unused due to immediate reassignment in all branches
   let trinityArtifact: TrinityDraftArtifact | null = null;
   let trinityResult: TrinityResult | null = null;
   // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in all branches before use at line 884
@@ -1134,8 +1136,11 @@ async function executeNocturnalReflectionWithAdapter(
   }
 
   // Step 2: Target selection (or use override to skip)
+  // eslint-disable-next-line @typescript-eslint/init-declarations -- Reason: assigned immediately in all branches before use
   let selectedPrincipleId: string | undefined;
+  // eslint-disable-next-line @typescript-eslint/init-declarations -- Reason: assigned immediately in all branches before use
   let selectedSessionId: string | undefined;
+  // eslint-disable-next-line no-useless-assignment -- Reason: initial value unused due to immediate reassignment in all branches
   let snapshot: NocturnalSessionSnapshot | null = null;
 
   if (options.principleIdOverride && options.snapshotOverride) {
@@ -1189,7 +1194,9 @@ async function executeNocturnalReflectionWithAdapter(
       };
     }
 
+    // eslint-disable-next-line @typescript-eslint/prefer-destructuring -- Reason: selectedPrincipleId/selectedSessionId are reassignable outer lets - destructuring would shadow
     selectedPrincipleId = selection.selectedPrincipleId;
+    // eslint-disable-next-line @typescript-eslint/prefer-destructuring -- Reason: selectedPrincipleId/selectedSessionId are reassignable outer lets - destructuring would shadow
     selectedSessionId = selection.selectedSessionId;
 
     if (!selectedPrincipleId || !selectedSessionId) {
@@ -1217,11 +1224,12 @@ async function executeNocturnalReflectionWithAdapter(
   }
 
   // Step 3: Record run start
-  void recordRunStart(stateDir, selectedPrincipleId!).catch((err) => {
+  void recordRunStart(stateDir, selectedPrincipleId).catch((err) => {
     console.warn(`[nocturnal-service] Failed to record run start: ${String(err)}`);
   });
 
   // Step 4: Trinity execution via adapter (async)
+  // eslint-disable-next-line no-useless-assignment -- Reason: initial value unused due to immediate reassignment in all branches
   let trinityArtifact: TrinityDraftArtifact | null = null;
   let trinityResult: TrinityResult | null = null;
   // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in all branches before use

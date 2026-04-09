@@ -228,7 +228,7 @@ function readRegistry(stateDir: string): ModelDeploymentRegistry {
     return registry;
   } catch (err) {
     if (err instanceof SyntaxError || err instanceof Error) {
-      throw new Error(`Failed to read deployment registry from "${registryPath}": ${err.message}`);
+      throw new Error(`Failed to read deployment registry from "${registryPath}": ${err.message}`, { cause: err });
     }
     throw err;
   }

@@ -83,6 +83,7 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
   }
 
   // 5. 运行交互式问答
+  // eslint-disable-next-line @typescript-eslint/init-declarations -- Reason: assigned immediately in switch cases before use
   let installOptions: InstallOptions;
 
   // 检查是否是非交互模式

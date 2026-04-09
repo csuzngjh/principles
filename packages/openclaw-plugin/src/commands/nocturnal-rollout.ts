@@ -572,7 +572,7 @@ ${promotion.previousPromotionId ? `Previous Promotion: ${promotion.previousPromo
 
     // ── List by State ─────────────────────────────────────────────────────
     if (subcommand === 'list-by-state') {
-      const stateArg = parts[1];
+      const [, stateArg] = parts;
       if (!stateArg) {
         return { text: zh ? '错误: 需要状态参数' : 'Error: state argument required' };
       }
