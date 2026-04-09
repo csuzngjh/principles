@@ -265,6 +265,7 @@ export class NocturnalWorkflowManager implements WorkflowManager {
     ): Promise<WorkflowHandle> {
         // #179: Check subagent runtime availability before starting
         // Other workflow managers (empathy, deep-reflect) have this check
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: TrinityRuntimeAdapter interface doesn't expose api.runtime.subagent, but OpenClawTrinityRuntimeAdapter has it
         const subagent = (this.runtimeAdapter as any).api?.runtime?.subagent;
         if (!isSubagentRuntimeAvailable(subagent)) {
             this.logger.warn(`[PD:NocturnalWorkflow] Subagent runtime unavailable, skipping workflow`);
@@ -491,6 +492,7 @@ export class NocturnalWorkflowManager implements WorkflowManager {
 
     async sweepExpiredWorkflows(
         maxAgeMs = 30 * 60 * 1000,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: subagentRuntime param is intentionally any for backward compatibility with callers
         subagentRuntime?: any,
         agentSession?: {
             resolveStorePath: () => string;

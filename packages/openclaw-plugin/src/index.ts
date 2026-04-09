@@ -248,7 +248,7 @@ const plugin = {
 
           if (shouldRecordShadow) {
             const observation = recordShadowRouting(workspaceDir, {
-              checkpointId: decision.activeCheckpointId!,
+              checkpointId: decision.activeCheckpointId!, // eslint-disable-line @typescript-eslint/no-non-null-assertion -- Reason: !!decision.activeCheckpointId guard above ensures truthiness
               workerProfile: agentId as WorkerProfile,
               taskFingerprint: computeRuntimeShadowTaskFingerprint(event),
             });

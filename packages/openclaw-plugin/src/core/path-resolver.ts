@@ -352,25 +352,25 @@ export class PathResolver {
         }
     }
 
-    static createFromHookContext(ctx: any): PathResolver {
+    static createFromHookContext(ctx: Record<string, unknown>): PathResolver {
         const resolver = new PathResolver();
-        
+
         if (ctx?.workspaceDir) {
-            let {workspaceDir} = ctx;
-            
+            let workspaceDir = String(ctx.workspaceDir);
+
             if (resolver.normalizeWorkspace) {
                 workspaceDir = resolver.normalizePath(workspaceDir);
             }
-            
+
             resolver.workspaceDir = workspaceDir;
             resolver.initialized = true;
             resolver.log('info', `Created from hook context with workspace: ${workspaceDir}`);
         }
-        
+
         if (ctx?.stateDir) {
-            resolver.stateDir = ctx.stateDir;
+            resolver.stateDir = String(ctx.stateDir);
         }
-        
+
         return resolver;
     }
 }

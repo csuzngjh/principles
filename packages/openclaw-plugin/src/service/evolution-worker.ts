@@ -10,7 +10,7 @@ import { SystemLogger } from '../core/system-logger.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import type { EventLog } from '../core/event-log.js';
 import { initPersistence, flushAllSessions } from '../core/session-tracker.js';
-import { acquireLockAsync, releaseLock, type LockContext } from '../utils/file-lock.js';
+import { acquireLockAsync, releaseLock as releaseImportedLock, type LockContext } from '../utils/file-lock.js';
 import { addDiagnosticianTask, completeDiagnosticianTask } from '../core/diagnostician-task-store.js';
 import { getEvolutionLogger, type EvolutionStage } from '../core/evolution-logger.js';
 import type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
@@ -77,11 +77,11 @@ async function runWorkflowWatchdog(
                 logger?.info?.(`[PD:Watchdog] Cleaned up stale session: ${wf.child_session_key}`);
               } else if (agentSession) {
                 const storePath = agentSession.resolveStorePath();
-                const store = agentSession.loadSessionStore(storePath, { skipCache: true });
+                const sessionStore = agentSession.loadSessionStore(storePath, { skipCache: true });
                 const normalizedKey = wf.child_session_key.toLowerCase();
-                if (store[normalizedKey]) {
-                  delete store[normalizedKey];
-                  await agentSession.saveSessionStore(storePath, store);
+                if (sessionStore[normalizedKey]) {
+                  delete sessionStore[normalizedKey];
+                  await agentSession.saveSessionStore(storePath, sessionStore);
                   logger?.info?.(`[PD:Watchdog] Cleaned up stale session via agentSession fallback: ${wf.child_session_key}`);
                 }
               }
@@ -89,11 +89,11 @@ async function runWorkflowWatchdog(
               const errMsg = String(cleanupErr);
               if (errMsg.includes('gateway request') && agentSession) {
                 const storePath = agentSession.resolveStorePath();
-                const store = agentSession.loadSessionStore(storePath, { skipCache: true });
+                const sessionStore = agentSession.loadSessionStore(storePath, { skipCache: true });
                 const normalizedKey = wf.child_session_key.toLowerCase();
-                if (store[normalizedKey]) {
-                  delete store[normalizedKey];
-                  await agentSession.saveSessionStore(storePath, store);
+                if (sessionStore[normalizedKey]) {
+                  delete sessionStore[normalizedKey];
+                  await agentSession.saveSessionStore(storePath, sessionStore);
                   logger?.info?.(`[PD:Watchdog] Cleaned up stale session via agentSession fallback after gateway error: ${wf.child_session_key}`);
                 }
               } else {
@@ -336,7 +336,7 @@ export async function acquireQueueLock(resourcePath: string, logger: PluginLogge
             baseRetryDelayMs: LOCK_RETRY_DELAY_MS,
             lockStaleMs: LOCK_STALE_MS,
         });
-        return () => releaseLock(ctx);
+        return () => releaseImportedLock(ctx);
     } catch (error: unknown) {
         const warn = logger?.warn;
         warn?.(`[PD:EvolutionWorker] Failed to acquire lock for ${resourcePath}: ${String(error)}`);
@@ -974,8 +974,8 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
 
                 // #190: Clean up diagnostician report file after processing
                 try {
-                    const reportPath = path.join(wctx.stateDir, `.diagnostician_report_${task.id}.json`);
-                    if (fs.existsSync(reportPath)) fs.unlinkSync(reportPath);
+                    const cleanupReportPath = path.join(wctx.stateDir, `.diagnostician_report_${task.id}.json`);
+                    if (fs.existsSync(cleanupReportPath)) fs.unlinkSync(cleanupReportPath);
                 } catch { /* report may not exist, not critical */ }
 
                 // FIX (#187): Remove the task from the diagnostician task store
@@ -1013,14 +1013,14 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
             if (age > timeout) {
                 const timeoutMinutes = Math.round(timeout / 60000);
 
-                const completeMarker = path.join(wctx.stateDir, `.evolution_complete_${task.id}`);
-                const reportPath = path.join(wctx.stateDir, `.diagnostician_report_${task.id}.json`);
+                const timeoutCompleteMarker = path.join(wctx.stateDir, `.evolution_complete_${task.id}`);
+                const timeoutReportPath = path.join(wctx.stateDir, `.diagnostician_report_${task.id}.json`);
 
-                if (fs.existsSync(completeMarker) && fs.existsSync(reportPath)) {
+                if (fs.existsSync(timeoutCompleteMarker) && fs.existsSync(timeoutReportPath)) {
                     if (logger) logger.info(`[PD:EvolutionWorker] Task ${task.id} timed out but marker found — creating principle anyway`);
                     let principleCreated = false;
                     try {
-                        const reportData = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+                        const reportData = JSON.parse(fs.readFileSync(timeoutReportPath, 'utf8'));
                         const principle = reportData?.principle
                             || reportData?.phases?.principle_extraction?.principle
                             || reportData?.diagnosis_report?.principle
@@ -1062,8 +1062,8 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     if (logger) logger.info(`[PD:EvolutionWorker] Task ${task.id} auto-completed after ${timeoutMinutes} minute timeout`);
                     // #190: Clean up diagnostician report file even on timeout (may have been written late)
                     try {
-                        const timeoutReportPath = path.join(wctx.stateDir, `.diagnostician_report_${task.id}.json`);
-                        if (fs.existsSync(timeoutReportPath)) fs.unlinkSync(timeoutReportPath);
+                        const autoTimeoutReportPath = path.join(wctx.stateDir, `.diagnostician_report_${task.id}.json`);
+                        if (fs.existsSync(autoTimeoutReportPath)) fs.unlinkSync(autoTimeoutReportPath);
                     } catch { /* report may not exist, not critical */ }
                     task.resolution = 'auto_completed_timeout';
                 }
@@ -1357,6 +1357,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
 
                     if (isPollingTask) {
                         // Poll-only path: skip workflow start, use existing workflowId
+                        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Reason: isPollingTask flag is only set when resultRef is expected to be present
                         workflowId = sleepTask.resultRef!;
                     } else {
                         // Start workflow via NocturnalWorkflowManager instead of direct executeNocturnalReflectionAsync
@@ -1701,7 +1702,7 @@ async function processEvolutionQueueWithResult(
             return { queue: queueResult, errors };
         }
 
-        const queue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
+        const queue: EvolutionQueueItem[] = JSON.parse(fs.readFileSync(queuePath, 'utf8')) as EvolutionQueueItem[];
 
         // Purge stale failed tasks before processing (keeps queue lean)
         const purgeResult = purgeStaleFailedTasks(queue, logger);
@@ -1711,10 +1712,10 @@ async function processEvolutionQueueWithResult(
         }
 
         queueResult.total = queue.length;
-        queueResult.pending = queue.filter((t: any) => t.status === 'pending').length;
-        queueResult.in_progress = queue.filter((t: any) => t.status === 'in_progress').length;
-        queueResult.failed_this_cycle = queue.filter((t: any) => t.status === 'failed').length;
-        queueResult.completed_this_cycle = queue.filter((t: any) => t.status === 'completed').length;
+        queueResult.pending = queue.filter((t) => t.status === 'pending').length;
+        queueResult.in_progress = queue.filter((t) => t.status === 'in_progress').length;
+        queueResult.failed_this_cycle = queue.filter((t) => t.status === 'failed').length;
+        queueResult.completed_this_cycle = queue.filter((t) => t.status === 'completed').length;
 
         // Log queue health snapshot every cycle
         logger.info(`[PD:EvolutionWorker] Queue snapshot: total=${queueResult.total} pending=${queueResult.pending} in_progress=${queueResult.in_progress} completed=${queueResult.completed_this_cycle} failed=${queueResult.failed_this_cycle} purged=${purgeResult.purged}`);
