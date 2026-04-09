@@ -25,7 +25,7 @@ export const SystemLogger = {
             const logEntry = `[${timestamp}] [${eventType.padEnd(15)}] ${message}\n`;
             
             // Use fire-and-forget async append to prevent blocking
-            fs.appendFile(logFile, logEntry, 'utf8', (err) => {
+            fs.appendFile(logFile, logEntry, 'utf8', (_err) => {
                 // Silently drop errors (e.g. disk full) to not crash the gateway
             });
         } catch (e) {

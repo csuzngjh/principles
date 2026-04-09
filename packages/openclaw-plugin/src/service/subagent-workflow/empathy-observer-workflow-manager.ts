@@ -7,7 +7,7 @@ import type {
     WorkflowResultContext,
     WorkflowPersistContext,
 } from './types.js';
-import { RuntimeDirectDriver } from './runtime-direct-driver.js';
+import type { RuntimeDirectDriver } from './runtime-direct-driver.js';
 import { WorkspaceContext } from '../../core/workspace-context.js';
 import { trackFriction } from '../../core/session-tracker.js';
 import { isSubagentRuntimeAvailable } from '../../utils/subagent-probe.js';
@@ -146,7 +146,7 @@ function parseEmpathyPayloadForSpec(rawText: string): EmpathyObserverPayload | n
     try {
         return JSON.parse(rawText.trim()) as EmpathyObserverPayload;
     } catch {
-        const match = rawText.match(/\{[\s\S]*\}/);
+        const match = /\{[\s\S]*\}/.exec(rawText);
         if (!match) return null;
         try {
             return JSON.parse(match[0]) as EmpathyObserverPayload;

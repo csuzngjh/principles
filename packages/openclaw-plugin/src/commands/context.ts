@@ -1,7 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
-import { ContextInjectionConfig, defaultContextConfig } from '../types.js';
+import type { ContextInjectionConfig} from '../types.js';
+import { defaultContextConfig } from '../types.js';
 import { loadContextInjectionConfig } from '../hooks/prompt.js';
 
 /**

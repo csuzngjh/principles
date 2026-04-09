@@ -24,15 +24,12 @@
  *   /nocturnal-rollout show-promotion <checkpointId>
  */
 
-import { WorkspaceContext } from '../core/workspace-context.js';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
-import type { TrainableWorkerProfile } from '../core/external-training-contract.js';
 import {
   evaluatePromotionGate,
   advancePromotion,
   getPromotionRecord,
   listPromotionsByState,
-  rejectCheckpoint,
   DEFAULT_BASELINE_METRICS,
   DEFAULT_MIN_DELTA,
   DEFAULT_ALLOWED_MARGIN,
@@ -44,9 +41,6 @@ import {
   disableRoutingForProfile,
   rollbackDeployment,
   getDeployment,
-  getDeploymentLineage,
-  listDeployments,
-  getFullDeploymentRegistry,
   isRoutingEnabledForProfile,
   type WorkerProfile,
 } from '../core/model-deployment-registry.js';
@@ -61,7 +55,6 @@ import {
 } from '../core/shadow-observation-registry.js';
 import {
   getCheckpoint,
-  listCheckpoints,
 } from '../core/model-training-registry.js';
 
 function isZh(ctx: PluginCommandContext): boolean {
@@ -471,10 +464,6 @@ Routing: ${deployment.routingEnabled ? 'Enabled' : 'Disabled'}`,
 
         const checkpoint = deployment.activeCheckpointId
           ? getCheckpoint(workspaceDir, deployment.activeCheckpointId)
-          : null;
-
-        const lineage = deployment.activeCheckpointId
-          ? getDeploymentLineage(workspaceDir, profile)
           : null;
 
         return {

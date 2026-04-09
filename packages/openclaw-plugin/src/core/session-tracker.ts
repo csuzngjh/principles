@@ -1,7 +1,6 @@
-import { PluginHookLlmOutputEvent } from '../openclaw-sdk.js';
 import * as path from 'path';
 import * as fs from 'fs';
-import { PainConfig } from './config.js';
+import type { PainConfig } from './config.js';
 import { SystemLogger } from './system-logger.js';
 import { EventLogService } from './event-log.js';
 
@@ -61,7 +60,7 @@ const persistTimers = new Map<string, ReturnType<typeof setTimeout>>();
 function logSessionTrackerWarning(message: string, error?: unknown): void {
     const detail = error instanceof Error ? error.message : error ? String(error) : '';
     const suffix = detail ? `: ${detail}` : '';
-    // eslint-disable-next-line no-console
+    // eslint-disable-next-line no-console -- Reason: Session tracker warning must use console.warn for visibility in background service context
     console.warn(`[PD:SessionTracker] ${message}${suffix}`);
 }
 

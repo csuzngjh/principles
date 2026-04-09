@@ -30,38 +30,6 @@ function getAllImplementations(stateDir: string): Implementation[] {
   return Object.values(ledger.tree.implementations);
 }
 
-/**
- * Handle the /pd-disable-impl command.
- *
- * Usage:
- *   /pd-disable-impl list                        - List active implementations
- *   /pd-disable-impl <implId>                    - Disable an implementation
- *   /pd-disable-impl <implId> --reason "<reason>" - Disable with reason
- */
-export function handleDisableImplCommand(ctx: PluginCommandContext): PluginCommandResult {
-  const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
-  const stateDir = WorkspaceContext.fromHookContext({ ...ctx, workspaceDir }).stateDir;
-  const lang = (ctx.config?.language as string) || 'en';
-  const isZh = lang === 'zh';
-
-  const args = (ctx.args || '').trim();
-
-  // Parse args: [implId] [--reason "..."]
-  const parts = args.split(/\s+/);
-  const subcommand = parts[0] || '';
-  const implId = subcommand === 'list' ? '' : subcommand;
-  const reasonMatch = args.match(/--reason\s+"([^"]+)"/) || args.match(/--reason\s+(\S+)/);
-  const reason = reasonMatch ? reasonMatch[1] : null;
-
-  // Subcommand: list
-  if (subcommand === 'list' || subcommand === '') {
-    return _handleListActive(stateDir, isZh);
-  }
-
-  // Disable
-  return _handleDisableImpl(workspaceDir, stateDir, implId, reason, isZh, ctx.sessionId);
-}
-
 function _handleListActive(
   stateDir: string,
   isZh: boolean
@@ -147,4 +115,36 @@ function _handleDisableImpl(
       ? `\n\u2705 \u5b9e\u73b0\u5df2\u7981\u7528: ${implId}\n   \u72b6\u6001: ${currentState} -> disabled\n   \u539f\u56e0: ${reasonText}`
       : `\n\u2705 Implementation disabled: ${implId}\n   State: ${currentState} -> disabled\n   Reason: ${reasonText}`,
   };
+}
+
+/**
+ * Handle the /pd-disable-impl command.
+ *
+ * Usage:
+ *   /pd-disable-impl list                        - List active implementations
+ *   /pd-disable-impl <implId>                    - Disable an implementation
+ *   /pd-disable-impl <implId> --reason "<reason>" - Disable with reason
+ */
+export function handleDisableImplCommand(ctx: PluginCommandContext): PluginCommandResult {
+  const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
+  const {stateDir} = WorkspaceContext.fromHookContext({ ...ctx, workspaceDir });
+  const lang = (ctx.config?.language as string) || 'en';
+  const isZh = lang === 'zh';
+
+  const args = (ctx.args || '').trim();
+
+  // Parse args: [implId] [--reason "..."]
+  const parts = args.split(/\s+/);
+  const subcommand = parts[0] || '';
+  const implId = subcommand === 'list' ? '' : subcommand;
+  const reasonMatch = (/--reason\s+"([^"]+)"/.exec(args)) || (/--reason\s+(\S+)/.exec(args));
+  const reason = reasonMatch ? reasonMatch[1] : null;
+
+  // Subcommand: list
+  if (subcommand === 'list' || subcommand === '') {
+    return _handleListActive(stateDir, isZh);
+  }
+
+  // Disable
+  return _handleDisableImpl(workspaceDir, stateDir, implId, reason, isZh, ctx.sessionId);
 }

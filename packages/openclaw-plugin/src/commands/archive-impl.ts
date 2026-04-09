@@ -42,13 +42,12 @@ function canArchive(state: ImplementationLifecycleState): boolean {
  */
 export function handleArchiveImplCommand(ctx: PluginCommandContext): PluginCommandResult {
   const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
-  const stateDir = WorkspaceContext.fromHookContext({ ...ctx, workspaceDir }).stateDir;
+  const {stateDir} = WorkspaceContext.fromHookContext({ ...ctx, workspaceDir });
   const lang = (ctx.config?.language as string) || 'en';
   const isZh = lang === 'zh';
 
   const args = (ctx.args || '').trim().split(/\s+/);
   const subcommand = args[0] || '';
-  const implId = args[1] || '';
 
   // Subcommand: list
   if (subcommand === 'list') {

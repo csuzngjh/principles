@@ -54,7 +54,7 @@ export const PROFILE_DEFAULTS = {
     window_ms: 5 * 60 * 1000, // 5 minute window
   high_risk_tools: ['run_shell_command', 'delete_file', 'move_file'],
   },
-  custom_guards: [] as Array<{ pattern: string; message: string; severity: string }>,
+  custom_guards: [] as { pattern: string; message: string; severity: string }[],
 };
 
 export function normalizeProfile(rawProfile: any): any {

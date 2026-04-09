@@ -13,7 +13,6 @@
 import { existsSync } from 'fs';
 import fse from 'fs-extra';
 import * as path from 'path';
-import * as os from 'os';
 import { confirm } from '@inquirer/prompts';
 import { logger } from './utils/logger.js';
 import { getOpenClawConfigDir, getPluginExtDir } from './utils/env.js';
@@ -66,6 +65,7 @@ function getWorkspacePath(): string | null {
   
   if (existsSync(configPath)) {
     try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports -- CommonJS require for synchronous JSON loading
       const config = require(configPath);
       return config.workspace || null;
     } catch {

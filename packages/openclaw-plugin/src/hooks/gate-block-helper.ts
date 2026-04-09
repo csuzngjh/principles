@@ -48,7 +48,7 @@ export interface BlockContext {
 export function recordGateBlockAndReturn(
   wctx: WorkspaceContext,
   blockCtx: BlockContext,
-  logger: { warn?: (message: string) => void; error?: (message: string) => void; info?: (message: string) => void }
+  logger: { warn?: (_message: string) => void; error?: (_message: string) => void; info?: (_message: string) => void }
 ): PluginHookBeforeToolCallResult {
   const { filePath, reason, toolName, sessionId, blockSource } = blockCtx;
 

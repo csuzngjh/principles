@@ -1,4 +1,4 @@
-import { trackFriction, resetFriction, getSession } from '../core/session-tracker.js';
+import { resetFriction, getSession } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
 import type { EmpathyEventStats } from '../types/event-types.js';
@@ -6,7 +6,7 @@ import type { EmpathyEventStats } from '../types/event-types.js';
 /**
  * Creates a visual progress bar (e.g., [██████░░░░])
  */
-function createProgressBar(value: number, max: number, length: number = 10): string {
+function createProgressBar(value: number, max: number, length = 10): string {
     const filledLength = Math.round((value / max) * length);
     const emptyLength = length - filledLength;
     return `[${'█'.repeat(filledLength)}${'░'.repeat(emptyLength)}]`;
@@ -15,7 +15,7 @@ function createProgressBar(value: number, max: number, length: number = 10): str
 /**
  * Creates a mini bar for daily trends
  */
-function createMiniBar(count: number, max: number, length: number = 6): string {
+function createMiniBar(count: number, max: number, length = 6): string {
     const filledLength = Math.round((count / max) * length);
     return '█'.repeat(filledLength) + '░'.repeat(length - filledLength);
 }
@@ -89,7 +89,7 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
     const wctx = WorkspaceContext.fromHookContext({ workspaceDir, ...ctx.config });
     const lang = (ctx.config?.language as string) || 'en';
     const isZh = lang === 'zh';
-    const sessionId = (ctx as any).sessionId;
+    const {sessionId} = (ctx as any);
 
     const args = (ctx.args || '').trim();
 
@@ -118,7 +118,7 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
     // Default: Show status
     const session = sessionId ? getSession(sessionId) : undefined;
     const gfi = session ? session.currentGfi : 0;
-    const dictionary = wctx.dictionary;
+    const {dictionary} = wctx;
     const stats = dictionary.getStats();
     
     const gfiBar = createProgressBar(gfi, 100, 15);

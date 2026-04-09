@@ -127,14 +127,14 @@ export class HealthQueryService {
         deprecated: reducerStats.deprecatedCount,
       },
       queue,
-      activeStage: this.computeHealthStage(currentGfi, threshold, painFlag.active),
+      activeStage: HealthQueryService.computeHealthStage(currentGfi, threshold, painFlag.active),
     };
   }
 
   getEvolutionPrinciples(): {
     principles: {
       summary: { candidate: number; probation: number; active: number; deprecated: number };
-      recent: Array<{
+      recent: {
         principleId: string;
         status: string;
         triggerPattern: string;
@@ -142,14 +142,14 @@ export class HealthQueryService {
         fromStatus: string;
         toStatus: string;
         timestamp: string;
-      }>;
+      }[];
     };
     nocturnalTraining: {
       queue: { pending: number; inProgress: number; completed: number };
-      trinityRecords: Array<{ artifactId: string; status: string; createdAt: string }>;
+      trinityRecords: { artifactId: string; status: string; createdAt: string }[];
       arbiterPassRate: number;
       orpoSampleCount: number;
-      deployments: Array<{ modelId: string; status: string; checkpointPath: string | null }>;
+      deployments: { modelId: string; status: string; checkpointPath: string | null }[];
     };
     painSourceDistribution: Record<string, number>;
     activeStage: string;
@@ -180,7 +180,7 @@ export class HealthQueryService {
     current: number;
     peakToday: number;
     threshold: number;
-    trend: Array<{ hour: string; value: number }>;
+    trend: { hour: string; value: number }[];
     sources: Record<string, number>;
   } {
     const session = this.getCurrentSession();
@@ -212,14 +212,14 @@ export class HealthQueryService {
     };
   }
 
-  getFeedbackEmpathyEvents(limit: number = 50): Array<{
+  getFeedbackEmpathyEvents(limit = 50): {
     timestamp: string;
     severity: string;
     score: number;
     reason: string;
     origin: string;
     gfiAfter: number;
-  }> {
+  }[] {
     const safeLimit = Math.max(1, Math.min(500, Math.floor(limit)));
     const events = this.readMergedEvents()
       .filter((entry) => entry.type === 'pain_signal' && String(entry.data?.source ?? '') === 'user_empathy')
@@ -239,13 +239,13 @@ export class HealthQueryService {
     });
   }
 
-  getFeedbackGateBlocks(limit: number = 50): Array<{
+  getFeedbackGateBlocks(limit = 50): {
     timestamp: string;
     toolName: string;
     reason: string;
     gfi: number;
     trustStage: number;
-  }> {
+  }[] {
     const trust = this.readTrust();
     const rows = this.readGateBlocksRaw(limit);
 
@@ -315,7 +315,7 @@ export class HealthQueryService {
     };
   }
 
-  getGateBlocks(limit: number = 50): Array<{
+  getGateBlocks(limit = 50): {
     timestamp: string;
     toolName: string;
     filePath: string | null;
@@ -323,7 +323,7 @@ export class HealthQueryService {
     gateType: string;
     gfi: number;
     trustStage: number;
-  }> {
+  }[] {
     const trust = this.readTrust();
     const rows = this.readGateBlocksRaw(limit);
 
@@ -347,13 +347,13 @@ export class HealthQueryService {
     );
     const rawStage = this.asNumber(
       scorecard.trustStage ?? scorecard.trust_stage ?? scorecard.stage,
-      this.inferTrustStageFromScore(score),
+      HealthQueryService.inferTrustStageFromScore(score),
     );
     const stage = Math.max(1, Math.min(4, Math.round(rawStage)));
 
     return {
       stage,
-      stageLabel: this.getTrustStageLabel(stage),
+      stageLabel: HealthQueryService.getTrustStageLabel(stage),
       score,
     };
   }
@@ -418,7 +418,7 @@ export class HealthQueryService {
     return fallback ?? 70;
   }
 
-  private computeHealthStage(currentGfi: number, threshold: number, painFlagActive: boolean): HealthStage {
+  private static computeHealthStage(currentGfi: number, threshold: number, painFlagActive: boolean): HealthStage {
     if (painFlagActive || currentGfi >= threshold) {
       return 'critical';
     }
@@ -428,7 +428,7 @@ export class HealthQueryService {
     return 'healthy';
   }
 
-  private getTrustStageLabel(stage: number): string {
+  private static getTrustStageLabel(stage: number): string {
     switch (stage) {
       case 1:
         return 'Observer';
@@ -443,7 +443,7 @@ export class HealthQueryService {
     }
   }
 
-  private inferTrustStageFromScore(score: number): number {
+  private static inferTrustStageFromScore(score: number): number {
     if (score >= 80) return 4;
     if (score >= 60) return 3;
     if (score >= 30) return 2;
@@ -572,10 +572,10 @@ export class HealthQueryService {
 
   private readNocturnalTraining(): {
     queue: { pending: number; inProgress: number; completed: number };
-    trinityRecords: Array<{ artifactId: string; status: string; createdAt: string }>;
+    trinityRecords: { artifactId: string; status: string; createdAt: string }[];
     arbiterPassRate: number;
     orpoSampleCount: number;
-    deployments: Array<{ modelId: string; status: string; checkpointPath: string | null }>;
+    deployments: { modelId: string; status: string; checkpointPath: string | null }[];
   } {
     const sampleDir = resolvePdPath(this.workspaceDir, 'NOCTURNAL_SAMPLES_DIR');
     const exportDir = resolvePdPath(this.workspaceDir, 'NOCTURNAL_EXPORTS_DIR');
@@ -743,7 +743,7 @@ export class HealthQueryService {
     if (direct !== null) return direct;
 
     const reason = String(row.reason ?? '');
-    const match = reason.match(/gfi\s*[:=]\s*(-?\d+(?:\.\d+)?)/i);
+    const match = /gfi\s*[:=]\s*(-?\d+(?:\.\d+)?)/i.exec(reason);
     if (match) {
       return this.asNumber(Number(match[1]), 0);
     }
@@ -757,7 +757,7 @@ export class HealthQueryService {
     if (direct !== null) return Math.max(1, Math.min(4, Math.round(direct)));
 
     const reason = String(row.reason ?? '').toLowerCase();
-    const match = reason.match(/stage\s*(\d+)/i);
+    const match = /stage\s*(\d+)/i.exec(reason);
     if (match) {
       return Math.max(1, Math.min(4, Math.round(this.asNumber(Number(match[1]), fallbackStage))));
     }

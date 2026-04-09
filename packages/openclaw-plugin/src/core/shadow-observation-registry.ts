@@ -224,7 +224,7 @@ function writeRegistry(stateDir: string, registry: ShadowRegistry): void {
  */
 function withShadowRegistryLock<T>(
   stateDir: string,
-  fn: (registry: ShadowRegistry) => T
+  fn: (_registry: ShadowRegistry) => T
 ): T {
   const registryPath = getRegistryPath(stateDir);
   return withLock(registryPath, () => {
@@ -477,7 +477,7 @@ export function computeShadowStats(
 export function queryShadowObservations(
   stateDir: string,
   checkpointId: string,
-  limit: number = 100
+  limit = 100
 ): ShadowObservation[] {
   return withShadowRegistryLock(stateDir, (registry) => {
     return registry.observations

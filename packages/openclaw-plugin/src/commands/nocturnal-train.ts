@@ -26,18 +26,13 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { execFileSync, spawn } from 'child_process';
 import { fileURLToPath } from 'url';
-import { WorkspaceContext } from '../core/workspace-context.js';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
 import {
   type TrainerBackendKind,
   type HardwareTier,
-  generateExperimentId,
-  computeDatasetFingerprint,
 } from '../core/external-training-contract.js';
 import {
   TrainingProgram,
-  DEFAULT_ORPO_HYPERPARAMETERS,
-  type CreateExperimentParams,
 } from '../core/training-program.js';
 import {
   listTrainingRuns,
@@ -48,18 +43,9 @@ import {
   getTrainingRegistryStats,
 } from '../core/model-training-registry.js';
 import { getDeployment } from '../core/model-deployment-registry.js';
-import {
-  DEFAULT_MIN_DELTA,
-  DEFAULT_ALLOWED_MARGIN,
-  DEFAULT_BASELINE_METRICS,
-} from '../core/promotion-gate.js';
 
 function isZh(ctx: PluginCommandContext): boolean {
   return String(ctx.config?.language || 'en').startsWith('zh');
-}
-
-function zh(cond: string): string {
-  return cond;
 }
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -107,24 +93,6 @@ function formatTrainingRun(run: ReturnType<typeof getTrainingRun>, zh: boolean):
   if (run.failureReason) lines.push(`Failure: ${run.failureReason}`);
   if (run.checkpointIds.length > 0) {
     lines.push(`Checkpoints: ${run.checkpointIds.length}`);
-  }
-  return lines.join('\n  ');
-}
-
-/**
- * Format checkpoint for display.
- */
-function formatCheckpoint(cp: ReturnType<typeof getCheckpoint>, zh: boolean): string {
-  if (!cp) return zh ? '未找到' : 'Not found';
-  const lines = [
-    `ID: ${cp.checkpointId.substring(0, 8)}...`,
-    `Family: ${cp.targetModelFamily}`,
-    `Artifact: ${cp.artifactPath}`,
-    `Deployable: ${cp.deployable ? (zh ? '是' : 'Yes') : (zh ? '否' : 'No')}`,
-    `Created: ${new Date(cp.createdAt).toLocaleString()}`,
-  ];
-  if (cp.lastEvalSummaryRef) {
-    lines.push(`Eval: ${cp.lastEvalSummaryRef.substring(0, 12)}...`);
   }
   return lines.join('\n  ');
 }
@@ -284,7 +252,7 @@ Hardware tiers:
       // The trainer reads spec from scripts/nocturnal/trainer/experiment-<id>.json.
       // import-result reads spec from .state/nocturnal/checkpoints/experiment-<id>.json.
       // Both must be written so the manual create-experiment -> trainer -> import-result chain works.
-      const spec = createResult.spec;
+      const {spec} = createResult;
       const trainerSpecPath = path.join(TRAINER_SCRIPTS_DIR, `experiment-${spec.experimentId}.json`);
       const workspaceSpecPath = path.join(workspaceDir, '.state', 'nocturnal', 'checkpoints', `experiment-${spec.experimentId}.json`);
       const trainerSpecDir = path.dirname(trainerSpecPath);
@@ -302,11 +270,11 @@ Hardware tiers:
       // This closes the gap in the create-experiment -> trainer -> import-result chain.
       // NOTE: This blocks until training completes (could be minutes).
       if (runNow) {
-        const spec = createResult.spec;
+        const {spec} = createResult;
         const baseDir = TRAINER_SCRIPTS_DIR;
         const scriptPath = path.join(baseDir, 'main.py');
         const specPath = path.join(baseDir, `experiment-${spec.experimentId}.json`);
-        const outputDir = spec.outputDir;
+        const {outputDir} = spec;
         const resultFilePath = path.join(outputDir, `result-${spec.experimentId}.json`);
 
         // Write spec file
@@ -673,11 +641,11 @@ Next steps:
       let benchmarkId = benchmarkIdArg || `bench-${Date.now()}`;
       let delta = deltaArg ? parseFloat(deltaArg) : NaN;
       let verdict: 'fail' | 'pass' | 'compare_only' = verdictArg === 'pass' || verdictArg === 'fail' || verdictArg === 'compare_only'
-        ? (verdictArg as 'fail' | 'pass' | 'compare_only')
+        ? (verdictArg)
         : 'compare_only';
       let baselineScore = baselineScoreArg ? parseFloat(baselineScoreArg) : 0.5;
       let candidateScore = candidateScoreArg ? parseFloat(candidateScoreArg) : 0.5;
-      const mode = (modeArg === 'prompt_assisted' ? 'prompt_assisted' : 'reduced_prompt') as 'prompt_assisted' | 'reduced_prompt';
+      const mode = (modeArg === 'prompt_assisted' ? 'prompt_assisted' : 'reduced_prompt');
 
       // --- Run benchmark mode: execute real benchmark to get scores ---
       // This closes the gap in the attach-eval command chain.

@@ -57,10 +57,10 @@ export interface HybridLedgerStore {
 
 export interface PrincipleSubtree {
   principle: LedgerPrinciple;
-  rules: Array<{
+  rules: {
     rule: LedgerRule;
     implementations: Implementation[];
-  }>;
+  }[];
 }
 
 const VALID_EVALUABILITIES = ['deterministic', 'weak_heuristic', 'manual_only'] as const;

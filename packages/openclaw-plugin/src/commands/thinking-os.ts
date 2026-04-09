@@ -1,5 +1,4 @@
 import * as fs from 'fs';
-import * as path from 'path';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 
@@ -36,7 +35,7 @@ function formatUsageReport(wctx: WorkspaceContext): string {
 
     try {
         const usage: Record<string, number> = JSON.parse(fs.readFileSync(logPath, 'utf8'));
-        const totalTurns = usage['_total_turns'] || 1;
+        const totalTurns = usage._total_turns || 1;
         const models = getModels(wctx);
 
         let report = `# 🧠 Thinking OS — Usage Report\n\n`;
@@ -121,7 +120,7 @@ function formatAuditReport(wctx: WorkspaceContext): string {
 
     try {
         const usage: Record<string, number> = JSON.parse(fs.readFileSync(logPath, 'utf8'));
-        const totalTurns = usage['_total_turns'] || 1;
+        const totalTurns = usage._total_turns || 1;
 
         const overused: string[] = [];
         const underused: string[] = [];

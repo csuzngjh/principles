@@ -31,7 +31,6 @@ import { checkProgressiveTrustGate } from './progressive-trust-gate.js';
 import { recordGateBlockAndReturn } from './gate-block-helper.js';
 import { RuleHost } from '../core/rule-host.js';
 import type { RuleHostInput } from '../core/rule-host-types.js';
-import { createRuleHostHelpers } from '../core/rule-host-helpers.js';
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult } from '../openclaw-sdk.js';
 import {
   AGENT_TOOLS,
@@ -132,7 +131,7 @@ export function handleBeforeToolCall(
   // Heuristic for bash mutation detection
   if (isBash && !filePath) {
     const command = String(event.params.command || event.params.args || "");
-    const mutationMatch = command.match(/(?:>|>>|sed\s+-i|rm|mv|mkdir|touch|cp)\s+(?:-[a-zA-Z]+\s+)*([^\s;&|<>]+)/);
+    const mutationMatch = /(?:>|>>|sed\s+-i|rm|mv|mkdir|touch|cp)\s+(?:-[a-zA-Z]+\s+)*([^\s;&|<>]+)/.exec(command);
 
     if (mutationMatch) {
       filePath = mutationMatch[1];

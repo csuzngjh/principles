@@ -260,8 +260,11 @@ function invokeStubReflector(
   const hasGateBlocks = snapshot.stats.totalGateBlocks > 0;
 
   // Detect what kind of signal is available and craft appropriate artifact
+  // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in all if/else branches
   let badDecision: string;
+  // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in all if/else branches
   let betterDecision: string;
+  // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in all if/else branches
   let rationale: string;
 
   if (hasGateBlocks) {
@@ -722,6 +725,7 @@ export function executeNocturnalReflection(
   // -------------------------------------------------------------------------
   let trinityArtifact: TrinityDraftArtifact | null = null;
   let trinityResult: TrinityResult | null = null;
+  // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in all branches before use at line 884
   let rawJson: string;
   let chainModeUsed: 'trinity' | 'single-reflector' = 'single-reflector';
 
@@ -770,7 +774,7 @@ export function executeNocturnalReflection(
       // Validate Trinity draft
       const draftValidation = validateTrinityDraft(trinityResult.artifact);
       if (!draftValidation.valid) {
-        const failures = draftValidation.failures;
+        const {failures} = draftValidation;
         void recordRunEnd(stateDir, 'failed', { reason: `Trinity draft invalid: ${failures.join('; ')}` }).catch((err) => {
           console.warn(`[nocturnal-service] Failed to record run end: ${String(err)}`);
         });
@@ -822,7 +826,7 @@ export function executeNocturnalReflection(
         const draftValidation = validateTrinityDraft(trinityResult.artifact);
         if (!draftValidation.valid) {
           // Trinity draft invalid — fail closed
-          const failures = draftValidation.failures;
+          const {failures} = draftValidation;
           void recordRunEnd(stateDir, 'failed', { reason: `Trinity draft invalid: ${failures.join('; ')}` }).catch((err) => {
             console.warn(`[nocturnal-service] Failed to record run end: ${String(err)}`);
           });
@@ -944,6 +948,7 @@ export function executeNocturnalReflection(
     boundedAction: execResult.boundedAction,
   };
 
+  // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in try, catch has early return
   let persistedPath: string;
   try {
     persistedPath = persistArtifact(workspaceDir, artifactWithBoundedAction);
@@ -1168,6 +1173,7 @@ async function executeNocturnalReflectionWithAdapter(
   // Step 4: Trinity execution via adapter (async)
   let trinityArtifact: TrinityDraftArtifact | null = null;
   let trinityResult: TrinityResult | null = null;
+  // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in all branches before use
   let rawJson: string;
   let chainModeUsed: 'trinity' | 'single-reflector' = 'single-reflector';
 
@@ -1218,7 +1224,7 @@ async function executeNocturnalReflectionWithAdapter(
       if (trinityResult.success) {
         const draftValidation = validateTrinityDraft(trinityResult.artifact);
         if (!draftValidation.valid) {
-          const failures = draftValidation.failures;
+          const {failures} = draftValidation;
           void recordRunEnd(stateDir, 'failed', { reason: `Trinity draft invalid: ${failures.join('; ')}` }).catch((err) => {
             console.warn(`[nocturnal-service] Failed to record run end: ${String(err)}`);
           });
@@ -1275,6 +1281,7 @@ async function executeNocturnalReflectionWithAdapter(
 
   // Step 7: Persist artifact
   const artifactWithBoundedAction = { ...arbiterResult.artifact, boundedAction: execResult.boundedAction };
+  // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in try, catch has early return
   let persistedPath: string;
   try {
     persistedPath = persistArtifact(workspaceDir, artifactWithBoundedAction);
@@ -1356,9 +1363,9 @@ async function executeNocturnalReflectionWithAdapter(
  */
 export function listApprovedNocturnalArtifacts(
   workspaceDir: string
-): Array<NocturnalArtifact & { persistedAt: string; boundedAction?: BoundedAction }> {
+): (NocturnalArtifact & { persistedAt: string; boundedAction?: BoundedAction })[] {
   const samplePaths = NocturnalPathResolver.listApprovedSamples(workspaceDir);
-  const artifacts: Array<NocturnalArtifact & { persistedAt: string; boundedAction?: BoundedAction }> = [];
+  const artifacts: (NocturnalArtifact & { persistedAt: string; boundedAction?: BoundedAction })[] = [];
 
   for (const samplePath of samplePaths) {
     try {

@@ -1,7 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { HygieneStats, createEmptyHygieneStats, PersistenceAction } from '../../types/hygiene-types.js';
-import { PluginLogger } from '../../openclaw-sdk.js';
+import type { HygieneStats, PersistenceAction } from '../../types/hygiene-types.js';
+import { createEmptyHygieneStats } from '../../types/hygiene-types.js';
+import type { PluginLogger } from '../../openclaw-sdk.js';
 
 /**
  * HygieneTracker - Tracks agent behavior regarding workspace organization and persistence.

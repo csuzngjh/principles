@@ -142,7 +142,7 @@ export const nocturnalWorkflowSpec: SubagentWorkflowSpec<NocturnalResult> = {
     async parseResult(ctx: WorkflowResultContext): Promise<NocturnalResult | null> {
         // NocturnalWorkflowManager handles execution directly in startWorkflow.
         // This is not called via the standard subagent message path.
-        return (ctx.metadata['nocturnalResult'] as NocturnalResult) ?? null;
+        return (ctx.metadata.nocturnalResult as NocturnalResult) ?? null;
     },
 
     async persistResult(_ctx: WorkflowPersistContext<NocturnalResult>): Promise<void> {
@@ -167,9 +167,9 @@ export const nocturnalWorkflowSpec: SubagentWorkflowSpec<NocturnalResult> = {
  */
 class StubFallbackRuntimeAdapter implements TrinityRuntimeAdapter {
     constructor(
-        private snapshot: NocturnalSessionSnapshot,
-        private principleId: string,
-        private maxCandidates: number
+        private readonly snapshot: NocturnalSessionSnapshot,
+        private readonly principleId: string,
+        private readonly maxCandidates: number
     ) {}
 
     async invokeDreamer(
@@ -231,15 +231,15 @@ export class NocturnalWorkflowManager implements WorkflowManager {
     private readonly store: WorkflowStore;
 
     /** Tracks completion timestamps for idempotency */
-    private completedWorkflows = new Map<string, number>();
+    private readonly completedWorkflows = new Map<string, number>();
     /** Maps workflowId → spec (needed for finalizeOnce) */
-    private workflowSpecs = new Map<string, SubagentWorkflowSpec<unknown>>();
+    private readonly workflowSpecs = new Map<string, SubagentWorkflowSpec<unknown>>();
     /** Maps workflowId → result (needed for finalizeOnce) */
-    private executionResults = new Map<string, NocturnalResult>();
+    private readonly executionResults = new Map<string, NocturnalResult>();
     /** Maps workflowId → TrinityStageFailure[] (stored before async launch, used in notifyWaitResult) */
-    private pendingTrinityFailures = new Map<string, TrinityStageFailure[]>();
+    private readonly pendingTrinityFailures = new Map<string, TrinityStageFailure[]>();
     /** Maps workflowId → TrinityResult (needed by notifyWaitResult for artifact persistence) */
-    private pendingTrinityResults = new Map<string, TrinityResult>();
+    private readonly pendingTrinityResults = new Map<string, TrinityResult>();
 
     constructor(opts: NocturnalWorkflowOptions) {
         this.workspaceDir = opts.workspaceDir;
@@ -358,7 +358,9 @@ export class NocturnalWorkflowManager implements WorkflowManager {
                 const recoveredDreamerOutput = existingOutputs.find(o => o.stage === 'dreamer')?.output as DreamerOutput | undefined;
                 const recoveredPhilosopherOutput = existingOutputs.find(o => o.stage === 'philosopher')?.output as PhilosopherOutput | undefined;
 
+                // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in all branches
                 let dreamerOutput: DreamerOutput;
+                // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in all branches
                 let philosopherOutput: PhilosopherOutput;
 
                 // Step 2: Dreamer — skip if recovered (NOC-12 idempotency)
@@ -760,19 +762,19 @@ export class NocturnalWorkflowManager implements WorkflowManager {
      * Compute Trinity stage states from workflow events (NOC-16).
      * Derives current/completed/failed state for each Trinity stage.
      */
-    private computeTrinityStageStates(events: WorkflowEventRow[]): Array<{
+    private computeTrinityStageStates(events: WorkflowEventRow[]): {
         stage: 'dreamer' | 'philosopher' | 'scribe';
         status: 'pending' | 'running' | 'completed' | 'failed';
         reason?: string;
         completedAt?: number;
-    }> {
-        const stages: Array<'dreamer' | 'philosopher' | 'scribe'> = ['dreamer', 'philosopher', 'scribe'];
-        const result: Array<{
+    }[] {
+        const stages: ('dreamer' | 'philosopher' | 'scribe')[] = ['dreamer', 'philosopher', 'scribe'];
+        const result: {
             stage: 'dreamer' | 'philosopher' | 'scribe';
             status: 'pending' | 'running' | 'completed' | 'failed';
             reason?: string;
             completedAt?: number;
-        }> = [];
+        }[] = [];
 
         for (const stage of stages) {
             const startEvent = events.find(e => e.event_type === `trinity_${stage}_start`);
@@ -785,7 +787,7 @@ export class NocturnalWorkflowManager implements WorkflowManager {
             } else if (failedEvent) {
                 // Stage ran and failed
                 const payload = JSON.parse(failedEvent.payload_json || '{}') as Record<string, unknown>;
-                const failures = payload.failures as Array<{ reason?: string }> | undefined;
+                const failures = payload.failures as { reason?: string }[] | undefined;
                 result.push({
                     stage,
                     status: 'failed',

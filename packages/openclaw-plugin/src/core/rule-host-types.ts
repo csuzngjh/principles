@@ -76,5 +76,5 @@ export interface LoadedImplementation {
   implId: string;
   ruleId: string;
   meta: RuleHostMeta;
-  evaluate: (input: RuleHostInput) => RuleHostResult;
+  evaluate: (_input: RuleHostInput) => RuleHostResult;
 }

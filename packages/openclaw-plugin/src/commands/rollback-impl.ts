@@ -43,7 +43,7 @@ function getAllImplementations(stateDir: string): Implementation[] {
  */
 export function handleRollbackImplCommand(ctx: PluginCommandContext): PluginCommandResult {
   const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
-  const stateDir = WorkspaceContext.fromHookContext({ ...ctx, workspaceDir }).stateDir;
+  const {stateDir} = WorkspaceContext.fromHookContext({ ...ctx, workspaceDir });
   const lang = (ctx.config?.language as string) || 'en';
   const isZh = lang === 'zh';
 
@@ -52,7 +52,7 @@ export function handleRollbackImplCommand(ctx: PluginCommandContext): PluginComm
   // Parse args
   const subcommand = args.split(/\s+/)[0] || '';
   const implId = subcommand === 'list' ? '' : subcommand;
-  const reasonMatch = args.match(/--reason\s+"([^"]+)"/) || args.match(/--reason\s+(\S+)/);
+  const reasonMatch = (/--reason\s+"([^"]+)"/.exec(args)) || (/--reason\s+(\S+)/.exec(args));
   const reason = reasonMatch ? reasonMatch[1] : null;
 
   // List active
@@ -201,8 +201,8 @@ export function handleNaturalLanguageRollbackImpl(
   sessionId: string | undefined,
   reason: string
 ): { success: boolean; message: string } {
-  const isZh = reason.match(/[\u4e00-\u9fff]/) || false;
-  const stateDir = WorkspaceContext.fromHookContext({ workspaceDir }).stateDir;
+  const isZh = (/[\u4e00-\u9fff]/.exec(reason)) || false;
+  const {stateDir} = WorkspaceContext.fromHookContext({ workspaceDir });
 
   if (!sessionId) {
     return {

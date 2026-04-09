@@ -112,7 +112,7 @@ export function computePainScore(rc: number, isSpiral: boolean, missingTestComma
   return Math.min(100, score);
 }
 
-export function painSeverityLabel(painScore: number, isSpiral: boolean = false, projectDir?: string): string {
+export function painSeverityLabel(painScore: number, isSpiral = false, projectDir?: string): string {
   if (isSpiral) {
     return "critical";
   }
@@ -167,11 +167,11 @@ export function readPainFlagData(projectDir: string): Record<string, string> {
 export function trackPrincipleValue(
   workspaceDir: string,
   painData: { reason?: string; source?: string; score?: string },
-  getActivePrinciples: () => Array<{
+  getActivePrinciples: () => {
     id: string;
     trigger: string;
     valueMetrics?: { painPreventedCount: number; lastPainPreventedAt?: string; calculatedAt: string };
-  }>,
+  }[],
   updatePrincipleMetrics: (id: string, metrics: { painPreventedCount: number; lastPainPreventedAt: string; calculatedAt: string }) => void,
 ): void {
   try {

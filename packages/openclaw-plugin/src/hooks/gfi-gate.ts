@@ -24,7 +24,7 @@
 
 import { getSession } from '../core/session-tracker.js';
 import { estimateLineChanges } from '../core/risk-calculator.js';
-import { analyzeBashCommand, calculateDynamicThreshold, type DynamicThresholdConfig } from './bash-risk.js';
+import { analyzeBashCommand, calculateDynamicThreshold } from './bash-risk.js';
 import { BASH_TOOLS_SET, HIGH_RISK_TOOLS, LOW_RISK_WRITE_TOOLS, AGENT_TOOLS } from '../constants/tools.js';
 import { AGENT_SPAWN_GFI_THRESHOLD } from '../config/index.js';
 import { recordGateBlockAndReturn } from './gate-block-helper.js';
@@ -61,7 +61,8 @@ function block(
     toolName,
     sessionId,
     blockSource: 'gfi-gate',
-  }, logger || { warn: () => {}, error: () => {} });
+  }, logger || // eslint-disable-next-line @typescript-eslint/no-empty-function -- empty warn/error no-op
+  { warn: () => {}, error: () => {} } as const);
 }
 
 export function checkGfiGate(

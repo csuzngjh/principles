@@ -203,7 +203,7 @@ function parseBoundedAction(text: string): BoundedAction | null {
 
   // Pattern: "Read/Check/Verify X" or "X. Read/Check/Verify Y"
   const boundedPattern = /^([A-Za-z]+)\s+(?:the\s+)?([^\s.,]+(?:\s+[^\s.,]+){0,5})/i;
-  const match = trimmed.match(boundedPattern);
+  const match = boundedPattern.exec(trimmed);
 
   if (match) {
     const verb = match[1].toLowerCase();
@@ -216,7 +216,7 @@ function parseBoundedAction(text: string): BoundedAction | null {
 
   // Pattern: "[Verb] the [target]" — e.g., "read the file"
   const thePattern = /^(read|check|verify|edit|write|delete|search|grep|look|examine|inspect|review)\s+(?:the\s+)?(.+)/i;
-  const theMatch = lower.match(thePattern);
+  const theMatch = thePattern.exec(lower);
   if (theMatch) {
     return { verb: theMatch[1], target: theMatch[2].trim(), fullText: trimmed };
   }
@@ -294,7 +294,6 @@ export function validateExecutability(artifact: {
 
   // Check betterDecision is executable
   const boundedAction = parseBoundedAction(artifact.betterDecision);
-  const lowerBetter = artifact.betterDecision.toLowerCase();
 
   // Check 1: Not a hollow pattern
   if (containsHollowPattern(artifact.betterDecision)) {

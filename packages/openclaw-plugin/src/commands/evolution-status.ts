@@ -13,7 +13,7 @@ function formatNumber(value: number | null): string {
 }
 
 function formatSources(
-  sources: Array<{ source: string; score?: number }>,
+  sources: { source: string; score?: number }[],
 ): string {
   if (sources.length === 0) {
     return '--';

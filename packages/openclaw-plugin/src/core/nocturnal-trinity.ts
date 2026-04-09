@@ -268,25 +268,6 @@ If you cannot synthesize an artifact:
   }
 }`;
 
-const NOCTURNAL_REFLECTOR_PROMPT = `# Nocturnal Reflector Prompt
-
-> System prompt for single-reflector decision-point sample generation.
-
-## Role
-
-You are a principles analyst. Your task is to analyze a session trajectory and generate a structured decision-point correction sample for principle-based training.
-
-## Input
-
-You will receive:
-- A **target principle** (principle ID and description)
-- A **session trajectory snapshot** containing:
-  - Assistant turns (sanitized text, no raw content)
-  - User turns (correction cues only, no raw content)
-  - Tool calls with outcomes and error messages
-  - Pain events and gate blocks
-  - Session metadata
-
 ## Task
 
 Analyze the session and generate a **decision-point sample** that captures:
@@ -475,7 +456,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
         limit: 5,
       });
 
-      const outputText = this.extractAssistantText(messages.messages as Array<{ role: string; text?: string; content?: string }>);
+      const outputText = this.extractAssistantText(messages.messages as { role: string; text?: string; content?: string }[]);
       return this.parseDreamerOutput(outputText);
     } finally {
       await this.api.runtime.subagent.deleteSession({
@@ -522,7 +503,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
         limit: 5,
       });
 
-      const outputText = this.extractAssistantText(messages.messages as Array<{ role: string; text?: string; content?: string }>);
+      const outputText = this.extractAssistantText(messages.messages as { role: string; text?: string; content?: string }[]);
       return this.parsePhilosopherOutput(outputText);
     } finally {
       await this.api.runtime.subagent.deleteSession({
@@ -567,7 +548,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
         limit: 5,
       });
 
-      const outputText = this.extractAssistantText(messages.messages as Array<{ role: string; text?: string; content?: string }>);
+      const outputText = this.extractAssistantText(messages.messages as { role: string; text?: string; content?: string }[]);
       return this.parseScribeOutput(outputText, snapshot, principleId, telemetry);
     } finally {
       await this.api.runtime.subagent.deleteSession({
@@ -586,7 +567,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
   // ---------------------------------------------------------------------------
 
   private extractAssistantText(
-    messages: Array<{ role: string; text?: string; content?: string }>
+    messages: { role: string; text?: string; content?: string }[]
   ): string {
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i] as { role: string; text?: string; content?: string };
@@ -800,7 +781,7 @@ Select the best candidate (Philosopher's rank 1) and synthesize it into a final 
     }
 
     // Match triple-backtick JSON blocks
-    const codeBlockMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+    const codeBlockMatch = /```(?:json)?\s*\n?([\s\S]*?)\n?```/.exec(text);
     if (codeBlockMatch) {
       const extracted = codeBlockMatch[1].trim();
       try {
@@ -1273,7 +1254,7 @@ export function invokeStubScribe(
     return null;
   }
 
-  const winner = tournamentResult.winner;
+  const {winner} = tournamentResult;
 
   // Update telemetry with tournament info
   const updatedTelemetry: TrinityTelemetry = {

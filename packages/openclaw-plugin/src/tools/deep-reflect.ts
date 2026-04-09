@@ -175,7 +175,7 @@ export function createDeepReflectTool(api: OpenClawPluginApi) {
         async execute(
             _toolCallId: string,
             rawParams: Record<string, unknown>
-        ): Promise<{ content: Array<{ type: string; text: string }> }> {
+        ): Promise<{ content: { type: string; text: string }[] }> {
             const context = readStringParam(rawParams, 'context') || '';
             const depth = readNumberParam(rawParams, 'depth') ?? 2;
             const model_id = readStringParam(rawParams, 'model_id');
@@ -226,7 +226,7 @@ async function executeReflectionWorkflow(
     depth: number,
     model_id: string | undefined,
     api: OpenClawPluginApi,
-): Promise<{ content: Array<{ type: string; text: string }> }> {
+): Promise<{ content: { type: string; text: string }[] }> {
     const stateDir = resolvePdPath(effectiveWorkspaceDir, 'STATE_DIR');
     const eventLog = EventLogService.get(stateDir, api.logger);
     const parentSessionId = effectiveWorkspaceDir.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 64);
@@ -267,7 +267,7 @@ async function pollReflectionCompletion(
     context: string,
     model_id: string | undefined,
     depth: number,
-): Promise<{ content: Array<{ type: string; text: string }> }> {
+): Promise<{ content: { type: string; text: string }[] }> {
     const pollInterval = 500;
 
     while (Date.now() - startTime < timeoutMs) {
@@ -298,7 +298,7 @@ function formatReflectionSuccess(
     startTime: number,
     eventLog: ReturnType<typeof EventLogService.get>,
     workspaceDir: string,
-): { content: Array<{ type: string; text: string }> } {
+): { content: { type: string; text: string }[] } {
     const reflectionLogPath = resolvePdPath(workspaceDir, 'REFLECTION_LOG');
     let insights = '';
     if (fs.existsSync(reflectionLogPath)) {
@@ -349,7 +349,7 @@ function handleReflectionError(
     model_id: string | undefined,
     workspaceDir: string,
     api: OpenClawPluginApi,
-): { content: Array<{ type: string; text: string }> } {
+): { content: { type: string; text: string }[] } {
     const errorMsg = err instanceof Error ? err.message : String(err);
     safeLog(api, 'error', `[DeepReflect] Reflection failed: ${errorMsg}`);
 

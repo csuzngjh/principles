@@ -36,45 +36,6 @@ function getAllImplementations(stateDir: string): Implementation[] {
   return Object.values(ledger.tree.implementations);
 }
 
-export function handlePromoteImplCommand(ctx: PluginCommandContext): PluginCommandResult {
-  const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
-  const stateDir = WorkspaceContext.fromHookContext({ ...ctx, workspaceDir }).stateDir;
-  const lang = (ctx.config?.language as string) || 'en';
-  const isZh = lang === 'zh';
-
-  const args = (ctx.args || '').trim().split(/\s+/);
-  const subcommand = args[0] || '';
-  const implId = args[1] || '';
-
-  if (subcommand === 'list' || subcommand === '') {
-    return _handleListCandidates(stateDir, isZh);
-  }
-
-  if (subcommand === 'show') {
-    if (!implId) {
-      return {
-        text: isZh
-          ? '请指定要查看的实现ID: /pd-promote-impl show <implId>'
-          : 'Please specify an implementation ID: /pd-promote-impl show <implId>',
-      };
-    }
-    return _handleShowReport(stateDir, implId, isZh);
-  }
-
-  if (subcommand === 'eval') {
-    if (!implId) {
-      return {
-        text: isZh
-          ? '请指定要评估的实现ID: /pd-promote-impl eval <implId>'
-          : 'Please specify an implementation ID: /pd-promote-impl eval <implId>',
-      };
-    }
-    return _handleRunReplay(workspaceDir, stateDir, implId, isZh);
-  }
-
-  return _handlePromoteImpl(workspaceDir, stateDir, subcommand, isZh);
-}
-
 function _handleListCandidates(
   stateDir: string,
   isZh: boolean,
@@ -128,12 +89,15 @@ function _handleShowReport(
   return { text: formatReplayReport(report) };
 }
 
-function _handleRunReplay(
-  workspaceDir: string,
-  stateDir: string,
-  implId: string,
-  isZh: boolean,
-): PluginCommandResult {
+interface RunReplayOptions {
+  workspaceDir: string;
+  stateDir: string;
+  implId: string;
+  isZh: boolean;
+}
+
+function _handleRunReplay(options: RunReplayOptions): PluginCommandResult {
+  const { workspaceDir, stateDir, implId, isZh } = options;
   const engine = new ReplayEngine(workspaceDir, stateDir);
 
   try {
@@ -154,12 +118,15 @@ function _handleRunReplay(
   }
 }
 
-function _handlePromoteImpl(
-  workspaceDir: string,
-  stateDir: string,
-  implId: string,
-  isZh: boolean,
-): PluginCommandResult {
+interface PromoteImplOptions {
+  workspaceDir: string;
+  stateDir: string;
+  implId: string;
+  isZh: boolean;
+}
+
+function _handlePromoteImpl(options: PromoteImplOptions): PluginCommandResult {
+  const { workspaceDir, stateDir, implId, isZh } = options;
   const engine = new ReplayEngine('', stateDir);
   const allImpls = getAllImplementations(stateDir);
   const candidate = allImpls.find((i) => i.id === implId);
@@ -263,4 +230,43 @@ function _handlePromoteImpl(
     : `\n\n✅ Implementation promoted: ${implId}\n   State: candidate -> active`;
 
   return { text: output };
+}
+
+export function handlePromoteImplCommand(ctx: PluginCommandContext): PluginCommandResult {
+  const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
+  const {stateDir} = WorkspaceContext.fromHookContext({ ...ctx, workspaceDir });
+  const lang = (ctx.config?.language as string) || 'en';
+  const isZh = lang === 'zh';
+
+  const args = (ctx.args || '').trim().split(/\s+/);
+  const subcommand = args[0] || '';
+  const implId = args[1] || '';
+
+  if (subcommand === 'list' || subcommand === '') {
+    return _handleListCandidates(stateDir, isZh);
+  }
+
+  if (subcommand === 'show') {
+    if (!implId) {
+      return {
+        text: isZh
+          ? '请指定要查看的实现ID: /pd-promote-impl show <implId>'
+          : 'Please specify an implementation ID: /pd-promote-impl show <implId>',
+      };
+    }
+    return _handleShowReport(stateDir, implId, isZh);
+  }
+
+  if (subcommand === 'eval') {
+    if (!implId) {
+      return {
+        text: isZh
+          ? '请指定要评估的实现ID: /pd-promote-impl eval <implId>'
+          : 'Please specify an implementation ID: /pd-promote-impl eval <implId>',
+      };
+    }
+    return _handleRunReplay({ workspaceDir, stateDir, implId, isZh });
+  }
+
+  return _handlePromoteImpl({ workspaceDir, stateDir, implId: subcommand, isZh });
 }
