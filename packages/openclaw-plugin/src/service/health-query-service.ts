@@ -781,6 +781,7 @@ export class HealthQueryService {
     return [];
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: Private helper doesn't use instance state
   private getEventDedupKey(entry: EventLogEntry): string {
     const eventId = typeof entry.data?.eventId === 'string' ? entry.data.eventId : null;
     if (eventId) {
@@ -850,6 +851,7 @@ export class HealthQueryService {
     return fallbackStage;
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: Private helper doesn't use instance state
   private resolveGateType(row: GateBlockRow): string {
     if (typeof row.gate_type === 'string' && row.gate_type.trim().length > 0) {
       return row.gate_type;
@@ -873,12 +875,14 @@ export class HealthQueryService {
     return cached.has(columnName);
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: Private helper doesn't use instance state
   private scoreToStatus(score: number): string {
     if (score >= 70) return 'healthy';
     if (score >= 40) return 'warning';
     return 'critical';
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: Private helper doesn't use instance state
   private evolutionToStatus(tier: string, points: number): string {
     const lower = tier.toLowerCase();
     if (lower === 'forest' || lower === 'tree') return 'healthy';
@@ -886,7 +890,8 @@ export class HealthQueryService {
     return 'critical';
   }
 
-  private safeListFiles(dirPath: string, predicate: (name: string) => boolean): string[] {
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this, no-unused-vars -- Reason: Private helper doesn't use instance state
+  private safeListFiles(dirPath: string, predicate: (_name: string) => boolean): string[] {
     if (!fs.existsSync(dirPath)) return [];
     try {
       return fs.readdirSync(dirPath)
@@ -897,6 +902,7 @@ export class HealthQueryService {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: Private helper doesn't use instance state
   private readJsonFile<T>(filePath: string, fallback: T): T {
     if (!fs.existsSync(filePath)) return fallback;
     try {
@@ -906,10 +912,12 @@ export class HealthQueryService {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: Private helper doesn't use instance state
   private asNumber(value: unknown, fallback: number): number {
     return Number.isFinite(value) ? Number(value) : fallback;
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: Private helper doesn't use instance state
   private asNullableNumber(value: unknown): number | null {
     if (Number.isFinite(value)) return Number(value);
     if (typeof value === 'string' && value.trim().length > 0) {

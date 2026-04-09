@@ -333,6 +333,7 @@ async function copyCoreTemplates(options: CopyCoreTemplatesOptions): Promise<num
 /**
  * 复制身份层文件到工作区
  */
+// eslint-disable-next-line @typescript-eslint/max-params -- Reason: Installer function signature - parameters represent distinct configuration dimensions (source, language, destination, mode) that don't logically group into options object
 async function copyPrinciplesLayer(
   pluginDir: string,
   language: string,

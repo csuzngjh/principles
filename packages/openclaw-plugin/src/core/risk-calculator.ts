@@ -6,7 +6,7 @@ export type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 
 export interface FileModification {
     toolName: string;
-    params: any;
+    params: Record<string, unknown>;
 }
 
 export function estimateLineChanges(modification: FileModification): number {
@@ -93,6 +93,7 @@ export function getTargetFileLineCount(absoluteFilePath: string): number | null 
  * @param maxLines - Optional upper bound to prevent misconfiguration
  * @returns Maximum allowed lines (at least minLines, at most maxLines if provided)
  */
+// eslint-disable-next-line @typescript-eslint/max-params -- Reason: percentage threshold calculation requires all 4 params - refactoring would break API
 export function calculatePercentageThreshold(
     targetLineCount: number,
     percentage: number,

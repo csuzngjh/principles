@@ -351,6 +351,7 @@ export async function withAsyncLock<T>(
   try {
     return await fn();
   } finally {
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Reason: resolveRelease is assigned in Promise constructor before finally runs
     resolveRelease!();
     // 清理已完成的队列
     if (asyncLockQueues.get(lockPath) === currentQueue) {

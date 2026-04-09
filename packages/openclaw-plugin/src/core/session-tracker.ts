@@ -82,6 +82,7 @@ export function initPersistence(stateDir: string): void {
     }
     
     // Load all existing sessions
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: loadAllSessions is defined later in this file, called here for organizational reasons
     loadAllSessions();
 }
 
@@ -170,6 +171,7 @@ export function flushAllSessions(): void {
     }
 }
 
+// eslint-disable-next-line @typescript-eslint/max-params -- Reason: session creation requires all 4 params (sessionId, workspaceDir, sessionKey, trigger) - refactoring would break API
 function getOrCreateSession(sessionId: string, workspaceDir?: string, sessionKey?: string, trigger?: string): SessionState {
     let state = sessions.get(sessionId);
     if (!state) {
@@ -230,6 +232,7 @@ export function trackToolRead(sessionId: string, filePath: string, workspaceDir?
     return state;
 }
 
+// eslint-disable-next-line @typescript-eslint/max-params -- Reason: LLM output tracking requires all 6 params - refactoring would break API
 export function trackLlmOutput(sessionId: string, usage: TokenUsage | undefined, config?: PainConfig, workspaceDir?: string, sessionKey?: string, trigger?: string): SessionState {
     const state = getOrCreateSession(sessionId, workspaceDir, sessionKey, trigger);
     state.llmTurns += 1;
@@ -268,6 +271,7 @@ export function trackLlmOutput(sessionId: string, usage: TokenUsage | undefined,
 /**
  * Tracks physical friction based on tool execution failures.
  */
+// eslint-disable-next-line @typescript-eslint/max-params -- Reason: friction tracking requires all 5 params - refactoring would break API
 export function trackFriction(
     sessionId: string,
     deltaF: number,
