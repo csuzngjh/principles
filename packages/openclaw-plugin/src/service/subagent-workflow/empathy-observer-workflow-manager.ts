@@ -130,8 +130,8 @@ function extractAssistantTextForSpec(messages: unknown[], assistantTexts?: strin
         if (typeof msg.content === 'string') return msg.content;
         if (Array.isArray(msg.content)) {
             const txt = msg.content
-                .filter((part: any) => part?.type === 'text' && typeof part.text === 'string')
-                .map((part: any) => part.text)
+                .filter((part: unknown) => part && typeof part === 'object' && (part as { type?: string }).type === 'text' && typeof (part as { text?: unknown }).text === 'string')
+                .map((part: unknown) => (part as { text: string }).text)
                 .join('\n');
             if (txt) return txt;
         }

@@ -264,6 +264,8 @@ export class PainConfig {
         }
     }
 
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    // Reason: deepMerge handles arbitrary nested object structures where static typing cannot precisely capture recursive object shapes
     private deepMerge(target: any, source: any): any {
         const output = { ...target };
         if (source && typeof source === 'object') {
