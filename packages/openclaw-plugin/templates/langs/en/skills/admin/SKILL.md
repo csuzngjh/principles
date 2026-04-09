@@ -23,7 +23,6 @@ You are now the "Evolutionary System Administrator". Your responsibility is to m
 ### 2. `repair` (System Repair)
 **Action**: 
 - **Config Recovery**: If `PROFILE.json` is missing or corrupted, attempt recovery from `.claude/templates/PROFILE.json`.
-- **Rules Recovery**: If `00-kernel.md` is missing, recover from `.claude/templates/00-kernel.md`.
 - **Structure Completion**: Ensure `PLAN.md` contains `## Target Files` heading.
 - **Forced Cleanup**: Delete `.pain_flag`, `.verdict.json`, `.user_verdict.json`, `.pending_reflection` and other temporary markers.
 

@@ -55,7 +55,7 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
   // 3. 解析 CLI 选项
   const cliOptions: Partial<InstallOptions> = {
     language: options.lang as 'zh' | 'en',
-    workspaceDir: options.workspace,
+    workspaceDir: options.workspace as string,
   };
 
   // 确定安装模式
@@ -91,8 +91,7 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
   if (nonInteractive) {
     // 非交互模式：使用 CLI 参数或默认值
     const parsedFeatures = options.features
-      ? options.features.split(',').map((f: string) => f.trim().toLowerCase()).filter(Boolean)
-      : [...DEFAULT_FEATURES];
+      ? (options.features as string).split(',').map((f: string) => f.trim().toLowerCase()).filter(Boolean)      : [...DEFAULT_FEATURES];
 
     const uniqueFeatures: string[] = Array.from(new Set(parsedFeatures));
     const invalidFeatures = uniqueFeatures.filter((f) => !SUPPORTED_FEATURES.includes(f as (typeof SUPPORTED_FEATURES)[number]));
@@ -189,7 +188,7 @@ async function runUninstall(options: Record<string, unknown>): Promise<void> {
   logger.info('准备卸载 Principles Disciple...\n');
 
   const result = await uninstall({
-    force: options.force,
+    force: options.force as boolean,
   });
 
   if (!result.success) {
@@ -279,4 +278,4 @@ process.on('uncaughtException', (error) => {
 });
 
 // 解析参数
-program.parse(process.argv);
+program.parse(process.argv);;

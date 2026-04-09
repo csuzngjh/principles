@@ -176,19 +176,6 @@ You default to architect mode.
 
 ---
 
-## 🔴 Red Lines
-
-- **Don't exfiltrate private data. Ever.**
-- **Ask before running destructive commands.**
-- `trash` > `rm` (recoverable beats gone forever)
-- **When in doubt, ask.**
-
-### Safe vs Ask First:
-
-- **Safe to do freely**: Read files, explore, organize, learn, search web, check calendar, work within workspace
-- **Ask first**: Sending emails, tweets, public posts, anything that leaves the machine, anything uncertain
-
----
 
 ## 🏠 Make It Yours
 

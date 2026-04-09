@@ -468,6 +468,22 @@ export class NocturnalWorkflowManager implements WorkflowManager {
         this.markCompleted(workflowId);
     }
 
+    /**
+     * Force-expire a specific workflow by ID.
+     * Used by evolution-worker when a sleep_reflection task times out (#214).
+     */
+    expireWorkflow(workflowId: string, reason: string): void {
+        this.store.updateWorkflowState(workflowId, 'expired');
+        this.store.recordEvent(
+            workflowId,
+            'nocturnal_expired',
+            'active',
+            'expired',
+            reason,
+            { reason }
+        );
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // WorkflowManager Interface: sweepExpiredWorkflows (NOC-05)
     // ─────────────────────────────────────────────────────────────────────────

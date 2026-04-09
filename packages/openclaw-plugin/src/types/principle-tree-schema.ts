@@ -45,6 +45,7 @@ export interface Principle {
 
   // Core content
   text: string;                   // One-line abstract principle statement
+  coreAxiomId?: string;           // Associated core axiom (e.g., "T-01")
   triggerPattern: string;         // Regex/keywords for auto-matching pain signals
   action: string;                 // What to do when triggered
 

@@ -203,6 +203,14 @@ disable-model-invocation: true
    d. 如果完全不同 → 设置 `"duplicate": false`
    e. **`duplicate` 字段必须在输出中出现，不能省略**
 
+6. **归属判定**：必须根据 `THINKING_OS.md` 中的 8 大核心公理（T-01 至 T-08），挑选一项最契合的作为该原则的父级分类。
+
+   a. **逐条阅读** HEARTBEAT.md 中的 `**Existing Principles for Duplicate Detection**` 部分
+   b. 对每条现有原则，比较其 trigger/action/abstracted 与你提炼的原则
+   c. **如果核心含义相同或高度相似（>70% 重叠）** → 设置 `"duplicate": true`，`"duplicate_of"` 填写已有原则 ID
+   d. 如果完全不同 → 设置 `"duplicate": false`
+   e. **`duplicate` 字段必须在输出中出现，不能省略**
+
 **去重判断示例**：
 - 现有 P_060: "Documented intent without operational feedback is not evolution"
 - 你要提炼: "Documentation alone does not produce operational feedback"
@@ -217,6 +225,7 @@ disable-model-invocation: true
     "trigger_pattern": "regex 或关键词，用于自动匹配",
     "action": "具体的检查/拦截/提醒动作",
     "abstracted_principle": "高度抽象的原则陈述（40字以内，跨场景适用）",
+    "core_axiom_id": "T-01|T-02|T-03|T-04|T-05|T-06|T-07|T-08",
     "rationale": "为什么这个原则能防止问题",
     "duplicate": false,
     "duplicate_of": "如果发现已有原则与此相似，填写已有原则的 ID 和名称",

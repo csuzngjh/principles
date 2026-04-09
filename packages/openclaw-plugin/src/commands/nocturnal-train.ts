@@ -645,7 +645,7 @@ Next steps:
         : 'compare_only';
       let baselineScore = baselineScoreArg ? parseFloat(baselineScoreArg) : 0.5;
       let candidateScore = candidateScoreArg ? parseFloat(candidateScoreArg) : 0.5;
-      const mode = (modeArg === 'prompt_assisted' ? 'prompt_assisted' : 'reduced_prompt');
+      const mode: 'prompt_assisted' | 'reduced_prompt' = (modeArg === 'prompt_assisted' ? 'prompt_assisted' : 'reduced_prompt');
 
       // --- Run benchmark mode: execute real benchmark to get scores ---
       // This closes the gap in the attach-eval command chain.

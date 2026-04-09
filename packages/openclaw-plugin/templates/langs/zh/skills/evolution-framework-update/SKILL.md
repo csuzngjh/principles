@@ -22,7 +22,7 @@ bash scripts/update_agent_framework.sh
      ```bash
      find .claude -name "*.update"
      ```
-  2. 对于每一个冲突文件（例如 `rules/00-kernel.md` vs `rules/00-kernel.md.update`）：
+  2. 对于每一个冲突文件（例如 `THINKING_OS.md` vs `THINKING_OS.md.update`）：
      - **读取** 原文件和 `.update` 文件。
      - **分析** 差异：合入上游的新功能，保留本地的个性化配置。
      - **清理**：合并完成后删除 `.update` 文件。

@@ -43,7 +43,6 @@ export const PD_FILES = {
     PROFILE: posixJoin(PD_DIRS.IDENTITY, 'PROFILE.json'),
     PRINCIPLES: posixJoin(PD_DIRS.IDENTITY, 'PRINCIPLES.md'),
     THINKING_OS: posixJoin(PD_DIRS.IDENTITY, 'THINKING_OS.md'),
-    KERNEL: posixJoin(PD_DIRS.IDENTITY, '00-kernel.md'),
     DECISION_POLICY: posixJoin(PD_DIRS.IDENTITY, 'DECISION_POLICY.json'),
     MODELS_DIR: PD_DIRS.MODELS,
 

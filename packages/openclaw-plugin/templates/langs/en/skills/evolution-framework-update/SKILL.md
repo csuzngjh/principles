@@ -22,7 +22,7 @@ After script runs, check output:
      ```bash
      find .claude -name "*.update"
      ```
-  2. For each conflicting file (e.g., `rules/00-kernel.md` vs `rules/00-kernel.md.update`):
+  2. For each conflicting file (e.g., `THINKING_OS.md` vs `THINKING_OS.md.update`):
      - **Read** original file and `.update` file.
      - **Analyze** differences: merge upstream new features, preserve local personalized config.
      - **Cleanup**: Delete `.update` file after merge.
