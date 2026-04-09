@@ -403,6 +403,7 @@ export function computeConfigFingerprint(config: Partial<TrainingHyperparameters
  * If the file cannot be read, falls back to path+count hash (legacy behavior).
  */
 export function computeDatasetFingerprint(exportPath: string, sampleCount: number): string {
+  // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in try, catch has fallback return
   let contentHash: string;
   try {
     const content = fs.readFileSync(exportPath, 'utf-8');

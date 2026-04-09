@@ -9,8 +9,6 @@
  * from rollback.ts.
  */
 
-import { WorkspaceContext } from '../core/workspace-context.js';
-
 // ---------------------------------------------------------------------------
 // Natural Language Patterns
 // ---------------------------------------------------------------------------

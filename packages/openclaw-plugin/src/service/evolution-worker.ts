@@ -7,10 +7,10 @@ import { DetectionService } from '../core/detection-service.js';
 import { ensureStateTemplates } from '../core/init.js';
 import { SystemLogger } from '../core/system-logger.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
-import { EventLog } from '../core/event-log.js';
+import type { EventLog } from '../core/event-log.js';
 import { initPersistence, flushAllSessions } from '../core/session-tracker.js';
 import { acquireLockAsync, releaseLock, type LockContext } from '../utils/file-lock.js';
-import { addDiagnosticianTask, completeDiagnosticianTask, getPendingDiagnosticianTasks } from '../core/diagnostician-task-store.js';
+import { addDiagnosticianTask, completeDiagnosticianTask } from '../core/diagnostician-task-store.js';
 import { getEvolutionLogger, type EvolutionStage } from '../core/evolution-logger.js';
 import type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 export type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
@@ -353,7 +353,7 @@ async function requireQueueLock(resourcePath: string, logger: PluginLogger | { w
 
 export function extractEvolutionTaskId(task: string): string | null {
     if (!task) return null;
-    const match = task.match(/\[ID:\s*([A-Za-z0-9_-]+)\]/);
+    const match = /\[ID:\s*([A-Za-z0-9_-]+)\]/.exec(task);
     return match?.[1] || null;
 }
 
@@ -722,11 +722,11 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
             }
 
             // Markdown format support (pain skill writes **Source**: xxx format)
-            const mdSource = line.match(/\*\*Source\*\*:\s*(.+)/);
+            const mdSource = /\*\*Source\*\*:\s*(.+)/.exec(line);
             if (mdSource) source = mdSource[1].trim();
-            const mdReason = line.match(/\*\*Reason\*\*:\s*(.+)/);
+            const mdReason = /\*\*Reason\*\*:\s*(.+)/.exec(line);
             if (mdReason) reason = mdReason[1].trim();
-            const mdTime = line.match(/\*\*Time\*\*:\s*(.+)/);
+            const mdTime = /\*\*Time\*\*:\s*(.+)/.exec(line);
             if (mdTime) preview = `Human intervention at ${mdTime[1].trim()}`;
         }
 
@@ -795,7 +795,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
 
         let queueChanged = rawQueue.some(isLegacyQueueItem);
 
-        const config = wctx.config;
+        const {config} = wctx;
         const timeout = config.get('intervals.task_timeout_ms') || (60 * 60 * 1000); // Default 1 hour
 
         // V2: Recover stuck in_progress sleep_reflection tasks.
@@ -1178,8 +1178,8 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         
                         // Also try to extract failed tool context if this is a tool failure
                         if (highestScoreTask.source === 'tool_failure') {
-                            const toolMatch = highestScoreTask.reason?.match(/Tool ([\w-]+) failed/);
-                            const fileMatch = highestScoreTask.reason?.match(/on (.+?)(?=\s*Error:|$)/i);
+                            const toolMatch = /Tool ([\w-]+) failed/.exec(highestScoreTask.reason);
+                            const fileMatch = /on (.+?)(?=\s*Error:|$)/i.exec(highestScoreTask.reason);
                             if (toolMatch) {
                                 const toolContext = await extractFailedToolContext(
                                     highestScoreTask.session_id,
@@ -1333,6 +1333,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
 
                     // NOC-14: Use NocturnalWorkflowManager for sleep_reflection tasks
                     // Lazy-create manager (needs runtimeAdapter from api)
+                    // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in if block, else block continues
                     let nocturnalManager: NocturnalWorkflowManager | undefined;
                     if (api) {
                         nocturnalManager = new NocturnalWorkflowManager({
@@ -1352,6 +1353,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         continue;
                     }
 
+                    // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in both if/else branches
                     let workflowId: string;
 
                     if (isPollingTask) {
@@ -1362,6 +1364,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         // Pass taskId in metadata for correlation
 
                         // #181: Build a proper snapshot from trajectory.db instead of hardcoded zeros
+                        // eslint-disable-next-line @typescript-eslint/init-declarations -- undefined is valid zero value, assigned conditionally in if/fallback blocks
                         let snapshotData: Record<string, unknown> | undefined;
                         if (sleepTask.recentPainContext) {
                             try {
@@ -1552,7 +1555,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
 }
 
 async function processDetectionQueue(wctx: WorkspaceContext, api: OpenClawPluginApi, eventLog: EventLog) {
-    const logger = api.logger;
+    const {logger} = api;
     try {
         const funnel = DetectionService.get(wctx.stateDir);
         const queue = funnel.flushQueue();
@@ -1617,6 +1620,7 @@ export async function registerEvolutionTaskSession(
     const releaseLock = await requireQueueLock(queuePath, logger, 'registerEvolutionTaskSession');
 
     try {
+        // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in try, catch has early return
         let rawQueue: RawQueueItem[];
         try {
             rawQueue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
@@ -1731,7 +1735,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
 
     start(ctx: OpenClawPluginServiceContext): void {
         const logger = ctx?.logger || console;
-        const api = this.api;
+        const {api} = this;
         const workspaceDir = ctx?.workspaceDir;
 
         if (!workspaceDir) {
@@ -1743,9 +1747,9 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
         if (logger) logger.info(`[PD:EvolutionWorker] Starting with workspaceDir=${wctx.workspaceDir}, stateDir=${wctx.stateDir}`);
 
         initPersistence(wctx.stateDir);
-        const eventLog = wctx.eventLog;
+        const {eventLog} = wctx;
 
-        const config = wctx.config;
+        const {config} = wctx;
         const language = config.get('language') || 'en';
         ensureStateTemplates({ logger }, wctx.stateDir, language);
 

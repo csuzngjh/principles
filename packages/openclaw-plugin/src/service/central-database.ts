@@ -41,7 +41,7 @@ export class CentralDatabase {
     this.db.close();
   }
 
-  private tableExists(db: Database.Database, tableName: string): boolean {
+  private static tableExists(db: Database.Database, tableName: string): boolean {
     const result = db.prepare(`
       SELECT name FROM sqlite_master WHERE type='table' AND name=?
     `).get(tableName);
@@ -211,7 +211,7 @@ export class CentralDatabase {
       // Sync sessions
       const sessions = sourceDb.prepare(`
         SELECT session_id, started_at, updated_at FROM sessions
-      `).all() as Array<{session_id: string; started_at: string; updated_at: string}>;
+      `).all() as {session_id: string; started_at: string; updated_at: string}[];
       
       const insertSession = this.db.prepare(`
         INSERT OR REPLACE INTO aggregated_sessions (session_id, workspace, started_at, updated_at)
@@ -227,11 +227,11 @@ export class CentralDatabase {
       const toolCalls = sourceDb.prepare(`
         SELECT session_id, tool_name, outcome, duration_ms, error_type, error_message, created_at
         FROM tool_calls
-      `).all() as Array<{
+      `).all() as {
         session_id: string; tool_name: string; outcome: string; 
         duration_ms: number | null; error_type: string | null; 
         error_message: string | null; created_at: string
-      }>;
+      }[];
       
       const insertTool = this.db.prepare(`
         INSERT INTO aggregated_tool_calls 
@@ -250,10 +250,10 @@ export class CentralDatabase {
       // Sync pain_events
       const painEvents = sourceDb.prepare(`
         SELECT session_id, source, score, reason, created_at FROM pain_events
-      `).all() as Array<{
+      `).all() as {
         session_id: string; source: string; score: number; 
         reason: string | null; created_at: string
-      }>;
+      }[];
       
       const insertPain = this.db.prepare(`
         INSERT INTO aggregated_pain_events (workspace, session_id, source, score, reason, created_at)
@@ -269,9 +269,9 @@ export class CentralDatabase {
       const corrections = sourceDb.prepare(`
         SELECT session_id, correction_cue, created_at FROM user_turns
         WHERE correction_detected = 1
-      `).all() as Array<{
+      `).all() as {
         session_id: string; correction_cue: string | null; created_at: string
-      }>;
+      }[];
       
       const insertCorr = this.db.prepare(`
         INSERT INTO aggregated_user_corrections (workspace, session_id, correction_cue, created_at)
@@ -286,9 +286,9 @@ export class CentralDatabase {
       // Sync principle_events
       const principles = sourceDb.prepare(`
         SELECT principle_id, event_type, created_at FROM principle_events
-      `).all() as Array<{
+      `).all() as {
         principle_id: string | null; event_type: string; created_at: string
-      }>;
+      }[];
       
       const insertPrinciple = this.db.prepare(`
         INSERT INTO aggregated_principle_events (workspace, principle_id, event_type, created_at)
@@ -301,12 +301,12 @@ export class CentralDatabase {
       }
 
       // Sync thinking_model_events (may not exist in older workspaces)
-      if (this.tableExists(sourceDb, 'thinking_model_events')) {
+      if (CentralDatabase.tableExists(sourceDb, 'thinking_model_events')) {
         const thinking = sourceDb.prepare(`
           SELECT session_id, model_id, matched_pattern, created_at FROM thinking_model_events
-        `).all() as Array<{
+        `).all() as {
           session_id: string; model_id: string; matched_pattern: string; created_at: string
-        }>;
+        }[];
         
         const insertThinking = this.db.prepare(`
           INSERT INTO aggregated_thinking_events (workspace, session_id, model_id, matched_pattern, created_at)
@@ -323,10 +323,10 @@ export class CentralDatabase {
       const samples = sourceDb.prepare(`
         SELECT sample_id, session_id, bad_assistant_turn_id, quality_score, review_status, created_at
         FROM correction_samples
-      `).all() as Array<{
+      `).all() as {
         sample_id: string; session_id: string; bad_assistant_turn_id: number;
         quality_score: number | null; review_status: string | null; created_at: string
-      }>;
+      }[];
       
       const insertSample = this.db.prepare(`
         INSERT OR REPLACE INTO aggregated_correction_samples
@@ -345,9 +345,9 @@ export class CentralDatabase {
       // Sync task_outcomes
       const outcomes = sourceDb.prepare(`
         SELECT session_id, task_id, outcome, created_at FROM task_outcomes
-      `).all() as Array<{
+      `).all() as {
         session_id: string; task_id: string | null; outcome: string; created_at: string
-      }>;
+      }[];
       
       const insertOutcome = this.db.prepare(`
         INSERT INTO aggregated_task_outcomes (workspace, session_id, task_id, outcome, created_at)
@@ -475,7 +475,7 @@ export class CentralDatabase {
 
     const workspaces = this.db.prepare(`
       SELECT name FROM workspaces ORDER BY name
-    `).all() as Array<{ name: string }>;
+    `).all() as { name: string }[];
 
     const enabledConfigs = this.getWorkspaceConfigs().filter(c => c.enabled && c.syncEnabled);
     const enabledWorkspaceNames = enabledConfigs.map(c => c.workspaceName);
@@ -501,13 +501,13 @@ export class CentralDatabase {
   /**
    * Get daily trend data
    */
-  getDailyTrend(days: number = 7): Array<{
+  getDailyTrend(days = 7): {
     day: string;
     toolCalls: number;
     failures: number;
     userCorrections: number;
     thinkingTurns: number;
-  }> {
+  }[] {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - days);
     const cutoffStr = cutoffDate.toISOString().split('T')[0];
@@ -521,9 +521,9 @@ export class CentralDatabase {
       WHERE substr(created_at, 1, 10) >= ?
       GROUP BY substr(created_at, 1, 10)
       ORDER BY day
-    `).all(cutoffStr) as Array<{
+    `).all(cutoffStr) as {
       day: string; tool_calls: number; failures: number
-    }>;
+    }[];
 
     const correctionsDaily = this.db.prepare(`
       SELECT 
@@ -532,9 +532,9 @@ export class CentralDatabase {
       FROM aggregated_user_corrections
       WHERE substr(created_at, 1, 10) >= ?
       GROUP BY substr(created_at, 1, 10)
-    `).all(cutoffStr) as Array<{
+    `).all(cutoffStr) as {
       day: string; corrections: number
-    }>;
+    }[];
 
     const thinkingDaily = this.db.prepare(`
       SELECT 
@@ -543,9 +543,9 @@ export class CentralDatabase {
       FROM aggregated_thinking_events
       WHERE substr(created_at, 1, 10) >= ?
       GROUP BY substr(created_at, 1, 10)
-    `).all(cutoffStr) as Array<{
+    `).all(cutoffStr) as {
       day: string; thinking_turns: number
-    }>;
+    }[];
 
     // Merge all trends
     const dayMap = new Map<string, {
@@ -602,11 +602,11 @@ export class CentralDatabase {
   /**
    * Get top regressions
    */
-  getTopRegressions(limit: number = 5): Array<{
+  getTopRegressions(limit = 5): {
     toolName: string;
     errorType: string;
     occurrences: number;
-  }> {
+  }[] {
     return this.db.prepare(`
       SELECT 
         tool_name as toolName,
@@ -617,11 +617,11 @@ export class CentralDatabase {
       GROUP BY tool_name, error_type
       ORDER BY occurrences DESC
       LIMIT ?
-    `).all(limit) as Array<{
+    `).all(limit) as {
       toolName: string;
       errorType: string;
       occurrences: number;
-    }>;
+    }[];
   }
 
   /**
@@ -630,11 +630,11 @@ export class CentralDatabase {
   getThinkingModelStats(): {
     totalModels: number;
     activeModels: number;
-    models: Array<{
+    models: {
       modelId: string;
       hits: number;
       coverageRate: number;
-    }>;
+    }[];
   } {
     const totalModels = this.db.prepare(`
       SELECT COUNT(DISTINCT model_id) as count FROM aggregated_thinking_events
@@ -661,7 +661,7 @@ export class CentralDatabase {
       FROM aggregated_thinking_events
       GROUP BY model_id
       ORDER BY hits DESC
-    `).all() as Array<{ modelId: string; hits: number }>;
+    `).all() as { modelId: string; hits: number }[];
 
     const coverageRate = totalToolCalls.count > 0 
       ? models.reduce((sum, m) => sum + m.hits, 0) / totalToolCalls.count 
@@ -686,22 +686,22 @@ export class CentralDatabase {
     `).all() as WorkspaceInfo[];
   }
 
-  getWorkspaceConfigs(): Array<{
+  getWorkspaceConfigs(): {
     workspaceName: string;
     enabled: boolean;
     displayName: string | null;
     syncEnabled: boolean;
-  }> {
+  }[] {
     const configs = this.db.prepare(`
       SELECT workspace_name, enabled, display_name, sync_enabled 
       FROM workspace_config
       ORDER BY workspace_name
-    `).all() as Array<{
+    `).all() as {
       workspace_name: string;
       enabled: number;
       display_name: string | null;
       sync_enabled: number;
-    }>;
+    }[];
     
     return configs.map(c => ({
       workspaceName: c.workspace_name,

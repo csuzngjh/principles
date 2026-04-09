@@ -23,17 +23,17 @@ import { isCompleteDetectorMetadata } from './evolution-types.js';
 import { updateTrainingStore } from './principle-tree-ledger.js';
 
 export interface EvolutionReducer {
-  emit(event: EvolutionLoopEvent): void;
-  emitSync(event: EvolutionLoopEvent): void;
+  emit(_event: EvolutionLoopEvent): void;
+  emitSync(_event: EvolutionLoopEvent): void;
   getEventLog(): EvolutionLoopEvent[];
   getCandidatePrinciples(): Principle[];
   getProbationPrinciples(): Principle[];
   getActivePrinciples(): Principle[];
-  getPrincipleById(id: string): Principle | null;
-  promote(principleId: string, reason?: string): void;
-  deprecate(principleId: string, reason: string): void;
-  rollbackPrinciple(principleId: string, reason: string): void;
-  recordProbationFeedback(principleId: string, success: boolean): void;
+  getPrincipleById(_id: string): Principle | null;
+  promote(_principleId: string, _reason?: string): void;
+  deprecate(_principleId: string, _reason: string): void;
+  rollbackPrinciple(_principleId: string, _reason: string): void;
+  recordProbationFeedback(_principleId: string, _success: boolean): void;
   /**
    * Creates a new principle with generalized trigger/action from diagnostician.
    * Called after diagnostician analysis to create principle directly.
@@ -646,7 +646,7 @@ export class EvolutionReducerImpl implements EvolutionReducer {
     });
   }
 
-  private onPainDetected(data: PainDetectedData, eventTs: string): void {
+  private onPainDetected(data: PainDetectedData, _eventTs: string): void {
     const trigger = String(data.reason ?? data.source ?? 'unknown trigger');
 
     // Defense in depth: protocol/system tokens must never become principles,
@@ -737,15 +737,15 @@ export class EvolutionReducerImpl implements EvolutionReducer {
     fs.writeFileSync(this.blacklistPath, JSON.stringify(list, null, 2), 'utf8');
   }
 
-  private loadBlacklist(): Array<{ painId?: string; pattern?: string; reason: string; rolledBackAt: string }> {
+  private loadBlacklist(): { painId?: string; pattern?: string; reason: string; rolledBackAt: string }[] {
     if (!fs.existsSync(this.blacklistPath)) return [];
     try {
-      return JSON.parse(fs.readFileSync(this.blacklistPath, 'utf8')) as Array<{
+      return JSON.parse(fs.readFileSync(this.blacklistPath, 'utf8')) as {
         painId?: string;
         pattern?: string;
         reason: string;
         rolledBackAt: string;
-      }>;
+      }[];
     } catch (e) {
       SystemLogger.log(this.workspaceDir, 'EVOLUTION_WARN', `failed to parse blacklist: ${String(e)}`);
       return [];

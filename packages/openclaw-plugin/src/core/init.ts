@@ -34,7 +34,7 @@ function hasOutdatedCoreGuidance(file: string, content: string): boolean {
  * Ensures that the workspace has the necessary template files for Principles Disciple.
  * This function flattens 'core' templates to the root so OpenClaw can find them.
  */
-export function ensureWorkspaceTemplates(api: OpenClawPluginApi, workspaceDir: string, language: string = 'en') {
+export function ensureWorkspaceTemplates(api: OpenClawPluginApi, workspaceDir: string, language = 'en') {
     try {
         const __filename = fileURLToPath(import.meta.url);
         const __dirname = path.dirname(__filename);
@@ -140,7 +140,7 @@ function copyRecursiveSync(srcDir: string, destDir: string, api: OpenClawPluginA
 /**
  * Ensures that the state directory has the necessary files (like pain_dictionary.json).
  */
-export function ensureStateTemplates(ctx: { logger: PluginLogger }, stateDir: string, language: string = 'en') {
+export function ensureStateTemplates(ctx: { logger: PluginLogger }, stateDir: string, language = 'en') {
     try {
         const __filename = fileURLToPath(import.meta.url);
         const __dirname = path.dirname(__filename);

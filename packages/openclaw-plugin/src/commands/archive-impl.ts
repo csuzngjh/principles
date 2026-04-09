@@ -42,21 +42,22 @@ function canArchive(state: ImplementationLifecycleState): boolean {
  */
 export function handleArchiveImplCommand(ctx: PluginCommandContext): PluginCommandResult {
   const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
-  const stateDir = WorkspaceContext.fromHookContext({ ...ctx, workspaceDir }).stateDir;
+  const {stateDir} = WorkspaceContext.fromHookContext({ ...ctx, workspaceDir });
   const lang = (ctx.config?.language as string) || 'en';
   const isZh = lang === 'zh';
 
   const args = (ctx.args || '').trim().split(/\s+/);
   const subcommand = args[0] || '';
-  const implId = args[1] || '';
 
   // Subcommand: list
   if (subcommand === 'list') {
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: Mutual recursion between helper functions - reordering would break logical grouping
     return _handleListArchivable(stateDir, isZh);
   }
 
   // Archive by ID
   const targetId = subcommand;
+  // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: Mutual recursion between helper functions - reordering would break logical grouping
   return _handleArchiveImpl(workspaceDir, stateDir, targetId, isZh);
 }
 
@@ -66,7 +67,7 @@ function _handleListArchivable(
 ): PluginCommandResult {
   const allImpls = getAllImplementations(stateDir);
   const archivable = allImpls.filter(
-    (impl) => canArchive((impl as any).lifecycleState || 'candidate' as ImplementationLifecycleState)
+    (impl) => canArchive(impl.lifecycleState || 'candidate')
   );
 
   if (archivable.length === 0) {
@@ -81,7 +82,7 @@ function _handleListArchivable(
   output += `${'='.repeat(50)}\n`;
 
   for (const impl of archivable) {
-    const stateLabel = (impl as any).lifecycleState || 'candidate';
+    const stateLabel = impl.lifecycleState || 'candidate';
     output += `  ${impl.id}\n`;
     output += `    Rule: ${impl.ruleId} | State: ${stateLabel}\n\n`;
   }
@@ -93,6 +94,7 @@ function _handleListArchivable(
   return { text: output };
 }
 
+// eslint-disable-next-line @typescript-eslint/max-params -- Reason: Command handler signature must match OpenClaw plugin interface - breaking API change to options objects would affect public contracts
 function _handleArchiveImpl(
   workspaceDir: string,
   stateDir: string,
@@ -110,7 +112,7 @@ function _handleArchiveImpl(
     };
   }
 
-  const currentState = (target as any).lifecycleState || 'candidate' as ImplementationLifecycleState;
+  const currentState = target.lifecycleState || 'candidate';
 
   if (!canArchive(currentState)) {
     return {

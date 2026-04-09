@@ -36,7 +36,7 @@
  * - diagnostics: scoring and filtering details
  */
 
-import {
+import type {
   NocturnalTrajectoryExtractor,
   NocturnalSessionSummary,
 } from '../core/nocturnal-trajectory-extractor.js';

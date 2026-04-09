@@ -1,7 +1,7 @@
 /**
  * Extracts common phrases (N-grams) that appear in a majority of the given samples.
  */
-export function extractCommonPhrases(samples: string[], minOccurrence: number = 3): string[] {
+export function extractCommonPhrases(samples: string[], minOccurrence = 3): string[] {
     if (samples.length < minOccurrence) return [];
 
     const phrases = new Map<string, number>();

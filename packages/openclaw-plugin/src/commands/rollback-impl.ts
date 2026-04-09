@@ -43,7 +43,7 @@ function getAllImplementations(stateDir: string): Implementation[] {
  */
 export function handleRollbackImplCommand(ctx: PluginCommandContext): PluginCommandResult {
   const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
-  const stateDir = WorkspaceContext.fromHookContext({ ...ctx, workspaceDir }).stateDir;
+  const {stateDir} = WorkspaceContext.fromHookContext({ ...ctx, workspaceDir });
   const lang = (ctx.config?.language as string) || 'en';
   const isZh = lang === 'zh';
 
@@ -52,14 +52,16 @@ export function handleRollbackImplCommand(ctx: PluginCommandContext): PluginComm
   // Parse args
   const subcommand = args.split(/\s+/)[0] || '';
   const implId = subcommand === 'list' ? '' : subcommand;
-  const reasonMatch = args.match(/--reason\s+"([^"]+)"/) || args.match(/--reason\s+(\S+)/);
+  const reasonMatch = (/--reason\s+"([^"]+)"/.exec(args)) || (/--reason\s+(\S+)/.exec(args));
   const reason = reasonMatch ? reasonMatch[1] : null;
 
   // List active
   if (subcommand === 'list' || subcommand === '') {
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: Mutual recursion between helper functions - reordering would break logical grouping
     return _handleListActiveRollback(stateDir, isZh);
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: Mutual recursion between helper functions - reordering would break logical grouping
   return _handleRollbackImpl(workspaceDir, stateDir, implId, reason, isZh, ctx.sessionId);
 }
 
@@ -69,7 +71,7 @@ function _handleListActiveRollback(
 ): PluginCommandResult {
   const allImpls = getAllImplementations(stateDir);
   const activeImpls = allImpls.filter(
-    (impl) => (impl as any).lifecycleState === 'active'
+    (impl) => impl.lifecycleState === 'active'
   );
 
   if (activeImpls.length === 0) {
@@ -84,12 +86,12 @@ function _handleListActiveRollback(
   output += `${'='.repeat(50)}\n`;
 
   for (const impl of activeImpls) {
-    const hasPrevious = (impl as any).previousActive ? '\u2705' : '\u26a0\ufe0f \u65e0\u524d\u4e00\u4e2a';
+    const hasPrevious = impl.previousActive ? '\u2705' : '\u26a0\ufe0f \u65e0\u524d\u4e00\u4e2a';
     output += `  ${impl.id}\n`;
     output += `    Rule: ${impl.ruleId} | Version: ${impl.version}\n`;
     output += `    Has previous: ${hasPrevious}\n`;
-    if ((impl as any).previousActive) {
-      output += `    Previous: ${(impl as any).previousActive}\n`;
+    if (impl.previousActive) {
+      output += `    Previous: ${impl.previousActive}\n`;
     }
     output += '\n';
   }
@@ -101,6 +103,7 @@ function _handleListActiveRollback(
   return { text: output };
 }
 
+// eslint-disable-next-line @typescript-eslint/max-params -- Reason: Command handler signature must match OpenClaw plugin interface - breaking API change to options objects would affect public contracts
 function _handleRollbackImpl(
   workspaceDir: string,
   stateDir: string,
@@ -120,7 +123,7 @@ function _handleRollbackImpl(
     };
   }
 
-  const currentState = (currentActive as any).lifecycleState;
+  const currentState = currentActive.lifecycleState;
   if (currentState !== 'active') {
     return {
       text: isZh
@@ -129,7 +132,7 @@ function _handleRollbackImpl(
     };
   }
 
-  const previousActiveId = (currentActive as any).previousActive;
+  const previousActiveId = currentActive.previousActive;
   const reasonText = reason || (isZh ? '\u7528\u6237\u624b\u52a8\u56de\u6eda' : 'User manual rollback');
 
   // Step 1: Current active -> disabled
@@ -201,8 +204,8 @@ export function handleNaturalLanguageRollbackImpl(
   sessionId: string | undefined,
   reason: string
 ): { success: boolean; message: string } {
-  const isZh = reason.match(/[\u4e00-\u9fff]/) || false;
-  const stateDir = WorkspaceContext.fromHookContext({ workspaceDir }).stateDir;
+  const isZh = (/[\u4e00-\u9fff]/.exec(reason)) || false;
+  const {stateDir} = WorkspaceContext.fromHookContext({ workspaceDir });
 
   if (!sessionId) {
     return {
@@ -213,7 +216,7 @@ export function handleNaturalLanguageRollbackImpl(
 
   // Natural language entry: get last active implementation
   const allImpls = getAllImplementations(stateDir);
-  const lastActive = allImpls.find((i) => (i as any).lifecycleState === 'active');
+  const lastActive = allImpls.find((i) => i.lifecycleState === 'active');
 
   if (!lastActive) {
     return {

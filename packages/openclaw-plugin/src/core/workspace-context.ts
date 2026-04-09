@@ -1,13 +1,16 @@
-import { resolvePdPath, PD_FILES } from './paths.js';
+import type { PD_FILES } from './paths.js';
+import { resolvePdPath } from './paths.js';
 import { PathResolver } from './path-resolver.js';
 import { ConfigService } from './config-service.js';
-import { PainConfig } from './config.js';
-import { EventLogService, EventLog } from './event-log.js';
+import type { PainConfig } from './config.js';
+import type { EventLog } from './event-log.js';
+import { EventLogService } from './event-log.js';
 import { DictionaryService } from './dictionary-service.js';
-import { PainDictionary } from './dictionary.js';
+import type { PainDictionary } from './dictionary.js';
 import { HygieneTracker } from './hygiene/tracker.js';
 import { EvolutionReducerImpl } from './evolution-reducer.js';
-import { TrajectoryDatabase, TrajectoryRegistry, TrajectoryDatabaseOptions } from './trajectory.js';
+import type { TrajectoryDatabase, TrajectoryDatabaseOptions } from './trajectory.js';
+import { TrajectoryRegistry } from './trajectory.js';
 import { PrincipleLifecycleService } from './principle-internalization/principle-lifecycle-service.js';
 import {
     getPrincipleSubtree,
@@ -29,8 +32,8 @@ interface PrincipleTreeLedgerAccessor {
  * Implements a cached singleton pattern per workspace directory.
  */
 export class WorkspaceContext {
-    private static instances = new Map<string, WorkspaceContext>();
-    private static pathResolver = new PathResolver();
+    private static readonly instances = new Map<string, WorkspaceContext>();
+    private static readonly pathResolver = new PathResolver();
 
     public readonly workspaceDir: string;
     public readonly stateDir: string;
@@ -139,7 +142,7 @@ export class WorkspaceContext {
     /**
      * Retrieve active Principle -> Rule -> Implementation subtrees without bypassing reducer authority.
      */
-    getActivePrincipleSubtrees(): Array<{ principle: ActivePrinciple; subtree: PrincipleSubtree }> {
+    getActivePrincipleSubtrees(): { principle: ActivePrinciple; subtree: PrincipleSubtree }[] {
         return this.evolutionReducer
             .getActivePrinciples()
             .map((principle) => {
@@ -169,11 +172,11 @@ export class WorkspaceContext {
      * @throws Error if workspaceDir is missing and no fallback available.
      */
     static fromHookContext(ctx: any): WorkspaceContext {
-        const logger = ctx.logger;
+        const {logger} = ctx;
         const log = (msg: string) => logger?.info?.(msg);
         const logWarn = (msg: string) => logger?.warn?.(msg);
 
-        let workspaceDir = ctx.workspaceDir;
+        let {workspaceDir} = ctx;
         
         if (!workspaceDir) {
             logWarn('[PD:WorkspaceContext] workspaceDir not provided in context, using PathResolver fallback');
@@ -190,7 +193,7 @@ export class WorkspaceContext {
         const existing = this.instances.get(workspaceDir);
         if (existing) return existing;
 
-        let stateDir = ctx.stateDir;
+        let {stateDir} = ctx;
         if (!stateDir) {
             stateDir = resolvePdPath(workspaceDir, 'STATE_DIR');
             log(`[PD:WorkspaceContext] Computed stateDir: ${stateDir}`);

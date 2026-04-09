@@ -14,13 +14,13 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import {
+import type {
   EmpathyKeywordStore,
   EmpathyKeywordEntry,
   EmpathyKeywordStats,
   EmpathyMatchResult,
-  EmpathyKeywordConfig,
-  SeedKeywordEntry,
+  EmpathyKeywordConfig} from './empathy-types.js';
+import {
   EMPATHY_SEED_KEYWORDS,
   DEFAULT_EMPATHY_KEYWORD_CONFIG,
   scoreToSeverity,

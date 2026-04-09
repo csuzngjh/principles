@@ -71,10 +71,15 @@ function createValueMetrics(
 }
 
 export class PrincipleLifecycleService {
+  private readonly workspaceDir: string;
+  private readonly stateDir: string;
   constructor(
-    private readonly workspaceDir: string,
-    private readonly stateDir: string,
-  ) {}
+    workspaceDir: string,
+    stateDir: string,
+  ) {
+    this.workspaceDir = workspaceDir;
+    this.stateDir = stateDir;
+  }
 
   buildReadModel(): LifecycleReadModel {
     return buildLifecycleReadModel(this.workspaceDir, this.stateDir);

@@ -33,7 +33,7 @@ const MAX_INDEX_SIZE = 50 * 1024; // 50KB
  */
 function loadCustomConfig(wctx: WorkspaceContext): { modelsDir?: string } | undefined {
     try {
-        const config = wctx.config;
+        const {config} = wctx;
         const modelsDir = config.get('deep_reflection.modelsDir');
         if (typeof modelsDir === 'string' && modelsDir.trim()) {
             return { modelsDir: modelsDir.trim() };
@@ -61,6 +61,7 @@ export function loadModelIndex(
         const wctx = WorkspaceContext.fromHookContext({ workspaceDir });
         const customConfig = loadCustomConfig(wctx);
         
+        // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in both if/else branches
         let modelsDir: string;
         if (customConfig?.modelsDir) {
             modelsDir = path.isAbsolute(customConfig.modelsDir) 

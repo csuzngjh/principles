@@ -4,10 +4,9 @@
 import { existsSync, readdirSync, statSync, readFileSync, writeFileSync } from 'fs';
 import fse from 'fs-extra';
 import * as path from 'path';
-import * as os from 'os';
-import { execSync, ExecSyncOptions } from 'child_process';
+import { execSync } from 'child_process';
+import type { ExecSyncOptions } from 'child_process';
 import ora from 'ora';
-import pc from 'picocolors';
 import { logger } from './utils/logger.js';
 import { getOpenClawConfigDir, getPluginExtDir } from './utils/env.js';
 import type { InstallOptions } from './prompts.js';
@@ -141,6 +140,7 @@ async function installPlugin(pluginDir: string): Promise<void> {
 
 function verifyNativeModule(modulePath: string): boolean {
   try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- CommonJS require to verify module existence
     require(modulePath);
     return true;
   } catch {
@@ -285,31 +285,34 @@ async function copySkills(pluginDir: string, language: string, features: string[
   return count;
 }
 
+interface CopyCoreTemplatesOptions {
+  pluginDir: string;
+  language: string;
+  workspaceDir: string;
+  mode: 'smart' | 'force';
+}
+
 /**
  * 复制核心模板到工作区
  */
-async function copyCoreTemplates(
-  pluginDir: string,
-  language: string,
-  workspaceDir: string,
-  mode: 'smart' | 'force'
-): Promise<number> {
+async function copyCoreTemplates(options: CopyCoreTemplatesOptions): Promise<number> {
+  const { pluginDir, language, workspaceDir, mode } = options;
   logger.step('复制核心模板');
-  
+
   let count = 0;
   const coreSrc = path.join(getTemplatesDir(pluginDir, language), 'core');
-  
+
   if (!existsSync(coreSrc)) {
     logger.warn('核心模板目录不存在');
     return 0;
   }
-  
+
   const files = readdirSync(coreSrc).filter(f => f.endsWith('.md'));
-  
+
   for (const file of files) {
     const srcPath = path.join(coreSrc, file);
     const destPath = path.join(workspaceDir, file);
-    
+
     if (existsSync(destPath) && mode === 'smart') {
       // 智能模式：生成 .update 文件
       const updatePath = `${destPath}.update`;
@@ -322,7 +325,7 @@ async function copyCoreTemplates(
     }
     count++;
   }
-  
+
   logger.success(`已复制 ${count} 个核心模板`);
   return count;
 }
@@ -524,12 +527,12 @@ export async function install(options: InstallOptions, pluginDir: string): Promi
 
     // 6. 复制核心模板
     spinner.text = '复制核心模板...';
-    const templatesCount = await copyCoreTemplates(
+    const templatesCount = await copyCoreTemplates({
       pluginDir,
-      options.language,
-      options.workspaceDir,
-      options.mode
-    );
+      language: options.language,
+      workspaceDir: options.workspaceDir,
+      mode: options.mode,
+    });
 
     // 7. 复制身份层
     spinner.text = '复制身份层...';

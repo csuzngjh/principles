@@ -96,12 +96,12 @@ export interface ORPOExportManifest {
   datasetFingerprint: string;
   exportPath: string;
   manifestPath: string;
-  samples: Array<{
+  samples: {
     sampleFingerprint: string;
     artifactId: string;
     sessionId: string;
     principleId: string;
-  }>;
+  }[];
 }
 
 /**
@@ -194,6 +194,7 @@ export function exportORPOSamples(
     reviewStatus: 'approved_for_training',
   });
 
+  // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in both if/else branches
   let eligibleRecords: typeof allApprovedRecords;
 
   if (targetModelFamily !== undefined && targetModelFamily !== null) {
@@ -242,6 +243,7 @@ export function exportORPOSamples(
     }
 
     // Read artifact (throws on error — distinguishes read failure from missing artifact)
+    // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in try, catch continues to next iteration
     let artifact;
     try {
       artifact = readDatasetArtifact(workspaceDir, record.sampleFingerprint);

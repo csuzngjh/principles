@@ -20,7 +20,8 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { listSessions, SessionState } from '../core/session-tracker.js';
+import type { SessionState } from '../core/session-tracker.js';
+import { listSessions } from '../core/session-tracker.js';
 import { withLockAsync } from '../utils/file-lock.js';
 
 // ---------------------------------------------------------------------------
@@ -303,6 +304,7 @@ export function checkWorkspaceIdle(
         trajectoryGuardrailConfirmsIdle = trajectoryIdleFor > idleThresholdMs * 0.8;
     }
 
+    // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in all if/else branches
     let reason: string;
     if (mostRecentActivityAt === 0) {
         reason = 'No active sessions found — workspace is idle';
