@@ -98,6 +98,7 @@ function showStatus(workspaceDir: string, isZh: boolean): string {
 /**
  * Toggle a boolean setting
  */
+// eslint-disable-next-line @typescript-eslint/max-params -- Reason: Command handler signature requires specific params - refactoring would break public API contract
 function toggleSetting(
     workspaceDir: string,
     key: 'thinkingOs' | 'reflectionLog',
@@ -212,6 +213,7 @@ function applyPreset(
     preset: 'minimal' | 'standard' | 'full',
     isZh: boolean
 ): string {
+    // eslint-disable-next-line @typescript-eslint/init-declarations -- Reason: assigned in switch block immediately after declaration
     let config: ContextInjectionConfig;
     
     switch (preset) {
@@ -312,6 +314,7 @@ export function handleContextCommand(ctx: PluginCommandContext): PluginCommandRe
     // Detect language from context
     const isZh = (ctx.config?.language as string) === 'zh';
     
+    // eslint-disable-next-line @typescript-eslint/init-declarations -- Reason: assigned in switch block immediately after declaration
     let result: string;
     
     switch (subCommand) {

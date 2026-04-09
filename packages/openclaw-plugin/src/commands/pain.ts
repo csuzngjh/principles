@@ -89,11 +89,13 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
     const wctx = WorkspaceContext.fromHookContext({ workspaceDir, ...ctx.config });
     const lang = (ctx.config?.language as string) || 'en';
     const isZh = lang === 'zh';
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: sessionId injected by OpenClaw plugin framework - type not available in PluginCommandContext
     const {sessionId} = (ctx as any);
 
     const args = (ctx.args || '').trim();
 
     // Handle empathy subcommand
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between main handler and empathy subcommand handler - reordering would break logical grouping
     if (args.startsWith('empathy')) {
         return handleEmpathySubcommand(wctx, args, sessionId, isZh);
     }

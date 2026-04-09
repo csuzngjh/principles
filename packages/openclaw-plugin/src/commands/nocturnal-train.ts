@@ -229,7 +229,7 @@ Hardware tiers:
               : `Error: manifest missing datasetFingerprint: ${manifestPath}`,
           };
         }
-        datasetFingerprint = manifest.datasetFingerprint;
+        ({ datasetFingerprint } = manifest);
       }
 
       const benchmarkExportId = benchmarkExportIdArg || datasetExportId || 'benchmark-default';
@@ -270,10 +270,12 @@ Hardware tiers:
       // This closes the gap in the create-experiment -> trainer -> import-result chain.
       // NOTE: This blocks until training completes (could be minutes).
       if (runNow) {
+        // eslint-disable-next-line @typescript-eslint/no-shadow -- Reason: shadowing is intentional - inner block scoping for trainer execution
         const {spec} = createResult;
         const baseDir = TRAINER_SCRIPTS_DIR;
         const scriptPath = path.join(baseDir, 'main.py');
         const specPath = path.join(baseDir, `experiment-${spec.experimentId}.json`);
+        // eslint-disable-next-line @typescript-eslint/no-shadow -- Reason: shadowing is intentional - inner block scoping for trainer output directory
         const {outputDir} = spec;
         const resultFilePath = path.join(outputDir, `result-${spec.experimentId}.json`);
 
@@ -284,6 +286,7 @@ Hardware tiers:
         }
         fs.writeFileSync(specPath, JSON.stringify(spec, null, 2), 'utf-8');
 
+        // eslint-disable-next-line @typescript-eslint/init-declarations, @typescript-eslint/consistent-type-imports -- Reason: type assertion required - trainer result type from external contract module
         let trainerResult!: import('../core/external-training-contract.js').TrainingExperimentResult;
 
         try {
@@ -391,6 +394,7 @@ Hardware tiers:
 
         // Process trainer result (register checkpoint)
         // dry_run returns null (no checkpoint); other statuses throw on error
+        // eslint-disable-next-line @typescript-eslint/init-declarations -- Reason: assigned in try block immediately after declaration
         let processed: { checkpointId: string; checkpointRef: string } | null;
         try {
           processed = program.processResult({
@@ -491,7 +495,7 @@ Next steps:
 
     // ── Show Experiment ───────────────────────────────────────────────────
     if (subcommand === 'show-experiment') {
-      const experimentId = parts[1];
+      const [, experimentId] = parts;
       if (!experimentId) {
         return { text: zh ? '错误: 需要实验 ID' : 'Error: experiment ID required' };
       }
@@ -508,7 +512,7 @@ Next steps:
 
     // ── Import Result ─────────────────────────────────────────────────────
     if (subcommand === 'import-result') {
-      const experimentId = parts[1];
+      const [, experimentId] = parts;
       if (!experimentId) {
         return { text: zh ? '错误: 需要实验 ID' : 'Error: experiment ID required' };
       }
@@ -532,6 +536,7 @@ Next steps:
         }
       }
 
+      // eslint-disable-next-line @typescript-eslint/init-declarations, @typescript-eslint/no-explicit-any -- Reason: JSON.parse returns dynamic JSON - type unknown at parse time, narrowed via type narrowing below
       let result: any;
       try {
         result = JSON.parse(resultJson);
@@ -562,6 +567,7 @@ Next steps:
 
       // Process the result
       const program = new TrainingProgram(workspaceDir);
+      // eslint-disable-next-line @typescript-eslint/init-declarations -- Reason: assigned in try block immediately after declaration
       let processed: { checkpointId: string; checkpointRef: string } | null;
       try {
         processed = program.processResult({
@@ -685,7 +691,7 @@ Next steps:
         if (checkpoint.trainRunId) {
           const run = getTrainingRun(workspaceDir, checkpoint.trainRunId);
           if (run?.exportId) {
-            exportId = run.exportId;
+            ({ exportId } = run);
           }
         }
         const scorerType = 'local-model'; // Use real model scorer
@@ -748,11 +754,13 @@ Next steps:
           };
         }
 
-        delta = benchmarkResult.delta.delta;
-        baselineScore = benchmarkResult.delta.baselineScore;
-        candidateScore = benchmarkResult.delta.candidateScore;
-        benchmarkId = benchmarkResult.benchmarkId;
-        verdict = benchmarkResult.verdict;
+        ({
+          delta,
+          baselineScore,
+          candidateScore,
+          benchmarkId,
+          verdict,
+        } = benchmarkResult);
       } else {
         // Manual mode: require explicit delta and verdict
         if (!deltaArg || !verdictArg) {
@@ -823,7 +831,7 @@ Next steps:
 
     // ── Show Lineage ─────────────────────────────────────────────────────
     if (subcommand === 'show-lineage') {
-      const checkpointId = parts[1];
+      const [, checkpointId] = parts;
       if (!checkpointId) {
         return { text: zh ? '错误: 需要 checkpointId' : 'Error: checkpointId required' };
       }
