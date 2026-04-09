@@ -204,7 +204,7 @@ const plugin = {
     api.on(
       'llm_output',
       (event: PluginHookLlmOutputEvent, ctx: PluginHookAgentContext): void => {
-        const workspaceDir = resolveToolHookWorkspaceDir(ctx as any, api, 'llm_output');
+        const workspaceDir = resolveToolHookWorkspaceDir(ctx as unknown as Record<string, unknown>, api, 'llm_output');
         try {
           handleLlmOutput(event, { ...ctx, workspaceDir });
 
@@ -242,7 +242,7 @@ const plugin = {
       'llm_output',
       (event: PluginHookLlmOutputEvent, ctx: PluginHookAgentContext): void => {
         try {
-          const workspaceDir = resolveToolHookWorkspaceDir(ctx as any, api, 'trajectory.llm_output');
+          const workspaceDir = resolveToolHookWorkspaceDir(ctx as unknown as Record<string, unknown>, api, 'trajectory.llm_output');
           TrajectoryCollector.handleLlmOutput(event, { ...ctx, workspaceDir });
           // eslint-disable-next-line no-unused-vars, @typescript-eslint/no-unused-vars -- Reason: catch binding intentionally unused
         } catch (_err) {

@@ -34,14 +34,14 @@ export interface RetryOptions {
   operation?: string;
   /** Logger instance (optional, defaults to console) */
   logger?: RetryLogger;
-  /** Custom error filter - return true if error is retryable */
-  isRetryable?: (error: unknown) => boolean;
+  /* eslint-disable no-unused-vars -- Reason: callback param names are part of type signature, unused implementations are valid */
+  isRetryable?: (_error: unknown) => boolean;
 }
 
 export interface RetryLogger {
-  warn?: (message: string) => void;
-  info?: (message: string) => void;
-  debug?: (message: string) => void;
+  warn?: (_message: string) => void;
+  info?: (_message: string) => void;
+  debug?: (_message: string) => void;
 }
 
 export interface RetryResult<T> {
@@ -61,6 +61,13 @@ const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_INITIAL_DELAY_MS = 1000;
 const DEFAULT_MAX_DELAY_MS = 30_000;
 const DEFAULT_BACKOFF_MULTIPLIER = 2;
+
+/**
+ * Sleep for a given number of milliseconds.
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 // =========================================================================
 // Error Classification
@@ -171,7 +178,7 @@ export async function retryAsync<T>(
   } = options;
 
   const startTime = Date.now();
-  let lastError: unknown;
+  let lastError: unknown = undefined;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
@@ -527,7 +534,7 @@ export async function retryWithAdaptiveTimeout<T>(
   });
 
   const startTime = Date.now();
-  let lastError: unknown;
+  let lastError: unknown = undefined;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const timeoutMs = Math.min(
@@ -562,12 +569,4 @@ export async function retryWithAdaptiveTimeout<T>(
   }
 
   throw lastError;
-}
-
-// =========================================================================
-// Helpers
-// =========================================================================
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
 }

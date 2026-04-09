@@ -296,8 +296,8 @@ function readLedgerFromFile(filePath: string): HybridLedgerStore {
     // #219: Handle both formats:
     // - New format: { trainingStore: {...}, tree: {...} }
     // - Legacy format: { P_xxx: {...}, _tree: {...} }
-    const trainingStoreRaw = raw['trainingStore'] ?? raw;
-    const treeRaw = raw[TREE_NAMESPACE] ?? raw['tree'];
+    const trainingStoreRaw = raw.trainingStore ?? raw;
+    const treeRaw = raw[TREE_NAMESPACE] ?? raw.tree;
     return {
       trainingStore: parseLegacyTrainingStore(trainingStoreRaw),
       tree: parseTree(treeRaw),

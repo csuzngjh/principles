@@ -141,7 +141,7 @@ export class HealthQueryService {
   }
 
   getOverviewHealth(): {
-    gfi: { current: number; peakToday: number; threshold: number; trend: Array<{ hour: string; value: number }> };
+    gfi: { current: number; peakToday: number; threshold: number; trend: { hour: string; value: number }[] };
     trust: { stage: number; stageLabel: string; score: number };
     evolution: { tier: string; points: number };
     painFlag: { active: boolean; source: string | null; score: number | null };
@@ -158,7 +158,7 @@ export class HealthQueryService {
 
     // GFI: always read from SQLite (synced from session JSON at construction time)
     const gfiData = this.readGfiFromDb();
-    const currentGfi = gfiData.currentGfi;
+    const {currentGfi} = gfiData;
     const peakToday = gfiData.dailyGfiPeak;
 
     // GFI history trend: aggregate pain_events by hour
@@ -235,7 +235,7 @@ export class HealthQueryService {
    * Read GFI trend for a specific day by aggregating pain_events by hour.
    * Used by getOverviewHealth() to provide historical GFI context.
    */
-  private readGfiTrend(date: string): Array<{ hour: string; value: number }> {
+  private readGfiTrend(date: string): { hour: string; value: number }[] {
     try {
       const rows = this.uiDb.all<{ hour: string; value: number }>(`
         SELECT substr(created_at, 1, 13) || ':00:00Z' AS hour, ROUND(SUM(score), 2) AS value

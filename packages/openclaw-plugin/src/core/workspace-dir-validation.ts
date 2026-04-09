@@ -1,10 +1,12 @@
 /**
  * WorkspaceDir Validation Utilities
- * 
+ *
  * Provides runtime validation of workspaceDir to catch OpenClaw context bugs early.
  * When a hook receives an invalid workspaceDir, we warn immediately rather than
  * silently writing to the wrong directory.
  */
+
+/* eslint-disable no-unused-vars -- Reason: type definitions require param names that implementations may not use */
 
 import * as os from 'os';
 import type { PluginLogger } from '../openclaw-sdk.js';
