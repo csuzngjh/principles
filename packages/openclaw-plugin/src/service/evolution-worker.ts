@@ -802,6 +802,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
         // If the worker crashes or the result write-back fails after Phase 1 claimed
         // the task, it stays in_progress indefinitely. Detect via timeout and mark
         // as failed so a fresh task can be enqueued on the next idle cycle.
+        // #214: Also expire the underlying nocturnal workflow to prevent resource leaks.
         for (const task of queue.filter(t => t.status === 'in_progress' && t.taskKind === 'sleep_reflection')) {
             const startedAt = new Date(task.started_at || task.timestamp);
             const age = Date.now() - startedAt.getTime();
@@ -819,6 +820,35 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     resolution: 'manual',
                     durationMs: age,
                 });
+
+                // #214: Expire the underlying nocturnal workflow to prevent resource leak.
+                // The task's resultRef holds the workflowId if one was started.
+                if (task.resultRef && !task.resultRef.startsWith('trinity-draft')) {
+                    try {
+                        const nocturnalMgr = new NocturnalWorkflowManager({
+                            workspaceDir: wctx.workspaceDir,
+                            stateDir: wctx.stateDir,
+                            logger: api?.logger || logger,
+                        });
+                        try {
+                            // Force-expire this specific workflow regardless of TTL
+                            nocturnalMgr.store.updateWorkflowState(task.resultRef, 'expired');
+                            nocturnalMgr.store.recordEvent(
+                                task.resultRef,
+                                'nocturnal_expired',
+                                'active',
+                                'expired',
+                                `Sleep reflection task ${task.id} timed out after ${Math.round(age / 60000)} min`,
+                                { parentTaskId: task.id, timeoutMs: timeout }
+                            );
+                            logger?.info?.(`[PD:EvolutionWorker] Expired nocturnal workflow ${task.resultRef} for timed-out sleep task ${task.id}`);
+                        } finally {
+                            nocturnalMgr.dispose();
+                        }
+                    } catch (expireErr) {
+                        logger?.warn?.(`[PD:EvolutionWorker] Could not expire nocturnal workflow ${task.resultRef}: ${String(expireErr)}`);
+                    }
+                }
             }
         }
 
@@ -910,7 +940,11 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                                         triggerPattern: principle.trigger_pattern,
                                         action: principle.action,
                                         source: task.source || 'heartbeat_diagnostician',
-                                        evaluability: principle.evaluability || 'manual_only',
+                                        // #212: Default to weak_heuristic so principles are auto-evaluable
+                                        // without requiring full detectorMetadata from the diagnostician.
+                                        evaluability: principle.evaluability || 'weak_heuristic',
+                                        // Review fix: Accept both snake_case and camelCase from LLM output
+                                        detectorMetadata: principle.detector_metadata || principle.detectorMetadata,
                                         abstractedPrinciple: principle.abstracted_principle,
                                     });
                                     if (principleId) {
@@ -1003,7 +1037,10 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                                     triggerPattern: principle.trigger_pattern,
                                     action: principle.action,
                                     source: task.source || 'heartbeat_diagnostician',
-                                    evaluability: principle.evaluability || 'manual_only',
+                                    // #212: Default to weak_heuristic so principles are auto-evaluable.
+                                    evaluability: principle.evaluability || 'weak_heuristic',
+                                    // Review fix: Accept both snake_case and camelCase from LLM output
+                                    detectorMetadata: principle.detector_metadata || principle.detectorMetadata,
                                     abstractedPrinciple: principle.abstracted_principle,
                                 });
                                 if (principleId) {
@@ -1392,13 +1429,27 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             sleepTask.resultRef = summary.metadata?.nocturnalResult ? 'trinity-draft' : workflowId;
                             logger?.info?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} workflow completed`);
                         } else if (summary.state === 'terminal_error') {
-                            sleepTask.status = 'failed';
-                            sleepTask.completed_at = new Date().toISOString();
-                            sleepTask.resolution = 'failed_max_retries';
+                            // #208/#209: Classify terminal_error reason before hardcoding to failed.
+                            // The async executeNocturnalReflectionAsync catches subagent errors and
+                            // records them as terminal_error. Without this check, expected errors
+                            // (daemon mode, process isolation) would always become failed_max_retries.
                             const lastEvent = summary.recentEvents[summary.recentEvents.length - 1];
-                            sleepTask.lastError = `Workflow terminal_error: ${lastEvent?.reason ?? 'unknown'}`;
+                            const errorReason = lastEvent?.reason ?? 'unknown';
+                            sleepTask.lastError = `Workflow terminal_error: ${errorReason}`;
                             sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
-                            logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} workflow failed: ${sleepTask.lastError}`);
+
+                            if (isExpectedSubagentError(errorReason)) {
+                                // #202: Expected subagent unavailability — use stub fallback
+                                sleepTask.status = 'completed';
+                                sleepTask.completed_at = new Date().toISOString();
+                                sleepTask.resolution = 'stub_fallback';
+                                logger?.info?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} workflow completed with stub fallback (expected subagent error: ${errorReason})`);
+                            } else {
+                                sleepTask.status = 'failed';
+                                sleepTask.completed_at = new Date().toISOString();
+                                sleepTask.resolution = 'failed_max_retries';
+                                logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} workflow failed: ${sleepTask.lastError}`);
+                            }
                         } else {
                             // Workflow still active, keep task in_progress for next cycle
                             logger?.info?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} workflow ${summary.state}, will poll again next cycle`);
