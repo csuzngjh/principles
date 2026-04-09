@@ -185,6 +185,9 @@ export function listThinkingModels(workspaceDir?: string): ThinkingModelDefiniti
       for (const dir of directives) {
         const builtin = BUILTIN_PATTERN_MAP.get(dir.id);
         const patterns = builtin?.patterns ?? generateDetectionPatterns(dir.trigger);
+        if (patterns.length === 0) {
+          console.warn(`[PD:thinking-models] No detection patterns for ${dir.id}: "${dir.trigger}"`);
+        }
         models.push({
           id: dir.id,
           name: dir.name,

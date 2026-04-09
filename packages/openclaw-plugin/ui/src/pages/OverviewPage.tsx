@@ -285,6 +285,16 @@ function ThinkingModelDistribution({
   }
 
   const hitsMap = new Map(modelBreakdown?.map(m => [m.modelId, m.hits]) ?? []);
+  const hasAnyHits = [...hitsMap.values()].some(v => v > 0);
+
+  if (!hasAnyHits) {
+    return (
+      <div style={{ textAlign: 'center', padding: 'var(--space-3)', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+        暂无思维模型使用记录。AI 开始使用后这里会显示数据。
+      </div>
+    );
+  }
+
   const maxHits = Math.max(...definitions.map(d => hitsMap.get(d.modelId) ?? 0), 1);
 
   return (
