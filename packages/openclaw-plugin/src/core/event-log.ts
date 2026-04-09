@@ -104,6 +104,7 @@ export class EventLog {
     this.record('warn', 'failure', sessionId, { message, ...context });
   }
   
+  // eslint-disable-next-line @typescript-eslint/max-params -- Reason: event record requires type + category + session + data - refactoring would break internal API
   private record(
     type: EventType, 
     category: EventCategory, 
@@ -453,6 +454,7 @@ export class EventLog {
    * Rollback an empathy event by ID.
    * Returns the rolled back score, or 0 if event not found.
    */
+  // eslint-disable-next-line @typescript-eslint/max-params -- Reason: rollback requires eventId + sessionId + reason + triggeredBy - refactoring would break API
   rollbackEmpathyEvent(eventId: string, sessionId: string | undefined, reason: string, triggeredBy: 'user_command' | 'natural_language' | 'system'): number {
     const allEvents = this.getMergedEvents();
     let foundEvent: { entry: EventLogEntry; data: PainSignalEventData } | null = null;

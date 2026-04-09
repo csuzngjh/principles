@@ -323,6 +323,7 @@ export class EvolutionEngine {
 
   // ===== 事件管理 =====
 
+  // eslint-disable-next-line @typescript-eslint/max-params -- Reason: event creation requires all event fields - refactoring would break internal structure
   private createEvent(
     type: 'success' | 'failure',
     taskHash: string,
