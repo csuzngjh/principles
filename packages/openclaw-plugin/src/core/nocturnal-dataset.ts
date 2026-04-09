@@ -259,7 +259,7 @@ function writeRegistry(workspaceDir: string, records: NocturnalDatasetRecord[]):
  * Execute a read-modify-write on the registry under an exclusive lock.
  * This prevents concurrent writers from racing on the same file.
  */
-function withRegistryLock<T>(workspaceDir: string, fn: (records: NocturnalDatasetRecord[]) => T): T {
+function withRegistryLock<T>(workspaceDir: string, fn: (_records: NocturnalDatasetRecord[]) => T): T {
   const registryPath = getRegistryPath(workspaceDir);
   return withLock(registryPath, () => {
     const records = readRegistry(workspaceDir);

@@ -63,6 +63,7 @@ export function assessDeprecatedReadiness(
       adherence.repeatedErrorReductionScore * 0.15,
   );
 
+  // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in all if/else branches
   let status: DeprecatedReadinessStatus;
   if (blockingReasons.length === 0 && stableCoverageRatio === 1) {
     status = 'ready';

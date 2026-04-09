@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import type { PDTaskSpec, PDTaskMeta } from './pd-task-types.js';
+import type { PDTaskSpec } from './pd-task-types.js';
 import { withLockAsync } from '../utils/file-lock.js';
 
 const PD_TASKS_FILENAME = 'pd_tasks.json';

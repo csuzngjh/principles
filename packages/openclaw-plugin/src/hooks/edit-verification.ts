@@ -44,7 +44,7 @@ export function normalizeLine(line: string): string {
  * @param threshold - Match threshold (0-1)
  * @returns Match index or -1 if not found
  */
-export function findFuzzyMatch(lines: string[], oldLines: string[], threshold: number = 0.8): number {
+export function findFuzzyMatch(lines: string[], oldLines: string[], threshold = 0.8): number {
   if (oldLines.length === 0) return -1;  // P2 fix: empty array boundary check
 
   const normalizedLines = lines.map(normalizeLine);
@@ -75,7 +75,7 @@ export function findFuzzyMatch(lines: string[], oldLines: string[], threshold: n
  * @param threshold - Match threshold (0-1)
  * @returns Object with found status and corrected text if found
  */
-export function tryFuzzyMatch(currentContent: string, oldText: string, threshold: number = 0.8): { found: boolean; correctedText?: string } {
+export function tryFuzzyMatch(currentContent: string, oldText: string, threshold = 0.8): { found: boolean; correctedText?: string } {
   const lines = currentContent.split('\n');
   const oldLines = oldText.split('\n');
 
@@ -153,6 +153,7 @@ export function handleEditVerification(
   }
 
   // 2. Resolve and read file
+  // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in try, catch has early return
   let absolutePath: string;
   try {
     absolutePath = wctx.resolve(filePath);
@@ -219,6 +220,7 @@ export function handleEditVerification(
     }
 
     // 3. Read current file content with improved error handling
+    // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in try, all catch paths return early
     let currentContent: string;
     try {
       currentContent = fs.readFileSync(absolutePath, 'utf-8');

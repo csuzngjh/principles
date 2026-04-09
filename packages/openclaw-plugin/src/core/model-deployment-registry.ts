@@ -451,7 +451,7 @@ export function listDeployments(
   }
 ): Deployment[] {
   const registry = readRegistry(stateDir);
-  let deployments = registry.deployments;
+  let {deployments} = registry;
 
   if (filter?.workerProfile) {
     deployments = deployments.filter((d) => d.workerProfile === filter.workerProfile);
@@ -711,7 +711,7 @@ export function getDeploymentRegistryStats(
   profilesWithRoutingEnabled: number;
 } {
   const registry = readRegistry(stateDir);
-  const deployments = registry.deployments;
+  const {deployments} = registry;
 
   return {
     totalDeployments: deployments.length,

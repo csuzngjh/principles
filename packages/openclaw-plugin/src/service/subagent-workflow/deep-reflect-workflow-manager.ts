@@ -9,7 +9,7 @@ import type {
 
 // Re-export DeepReflectResult so index.ts can re-export it
 export type { DeepReflectResult } from './types.js';
-import { RuntimeDirectDriver } from './runtime-direct-driver.js';
+import type { RuntimeDirectDriver } from './runtime-direct-driver.js';
 import { isSubagentRuntimeAvailable } from '../../utils/subagent-probe.js';
 import { buildCritiquePromptV2 } from '../../tools/critique-prompt.js';
 import { WorkflowManagerBase } from './workflow-manager-base.js';
@@ -126,7 +126,7 @@ export const deepReflectWorkflowSpec: SubagentWorkflowSpec<DeepReflectResult> = 
             if (typeof lastMessage?.content === 'string') {
                 insights = lastMessage.content;
             } else if (Array.isArray(lastMessage?.content)) {
-                insights = (lastMessage.content as Array<{ type?: string; text?: string }>)
+                insights = (lastMessage.content as { type?: string; text?: string }[])
                     .filter((c) => c?.type === 'text' && typeof c.text === 'string')
                     .map((c) => c.text!)
                     .join('\n');

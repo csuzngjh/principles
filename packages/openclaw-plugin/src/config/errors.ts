@@ -15,6 +15,7 @@
 export class PdError extends Error {
   constructor(
     message: string,
+    // eslint-disable-next-line no-unused-vars -- public parameter property, accessed externally
     public readonly code: string,
     options?: { cause?: unknown }
   ) {

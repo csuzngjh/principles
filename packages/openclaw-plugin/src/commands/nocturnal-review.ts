@@ -27,7 +27,6 @@ import {
   getDatasetRecord,
   updateReviewStatus,
   updateTargetModelFamily,
-  readDatasetArtifact,
   getDatasetStats,
   type NocturnalDatasetRecord,
   type NocturnalReviewStatus,
@@ -53,7 +52,7 @@ function formatRecord(record: NocturnalDatasetRecord, includeDetails = false): s
   lines.push(`  createdAt: ${new Date(record.createdAt).toLocaleString('en-US')}`);
 
   if (includeDetails) {
-    const artifactPath = record.artifactPath;
+    const {artifactPath} = record;
     if (fs.existsSync(artifactPath)) {
       try {
         const content = fs.readFileSync(artifactPath, 'utf-8');

@@ -22,6 +22,7 @@ function createWorkflowManagerForType(
         info: (m: string) => logger.info(String(m)),
         warn: (m: string) => logger.warn(String(m)),
         error: (m: string) => logger.error(String(m)),
+        // eslint-disable-next-line @typescript-eslint/no-empty-function -- debug logger no-op
         debug: () => {},
     } as unknown as PluginLogger;
 
@@ -83,7 +84,7 @@ function emitSubagentPainEvent(
 function extractAgentIdFromSessionKey(sessionKey: string | undefined): string | undefined {
     // sessionKey format: "agent:{agentId}:{type}:{uuid}" or "agent:{agentId}:{uuid}"
     if (!sessionKey) return undefined;
-    const match = sessionKey.match(/^agent:([^:]+):/);
+    const match = /^agent:([^:]+):/.exec(sessionKey);
     return match ? match[1] : undefined;
 }
 
@@ -103,7 +104,7 @@ export async function handleSubagentEnded(
     ctx: SubagentEndedHookContext
 ): Promise<void> {
     const { outcome, targetSessionKey } = event;
-    const workspaceDir = ctx.workspaceDir;
+    const {workspaceDir} = ctx;
 
     if (!workspaceDir) return;
 
@@ -150,7 +151,7 @@ export async function handleSubagentEnded(
         }
     }
 
-    const config = wctx.config;
+    const {config} = wctx;
 
     // ── Outcome-based EP and Pain Signal handling ──
     // OpenClaw v2026.3.23 fixes: timeout may be false positive (fast-finishing workers)

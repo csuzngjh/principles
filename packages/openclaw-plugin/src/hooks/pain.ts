@@ -55,8 +55,8 @@ export function handleAfterToolCall(
   }
 
   const wctx = WorkspaceContext.fromHookContext({ ...ctx, workspaceDir: effectiveWorkspaceDir });
-  const config = wctx.config;
-  const eventLog = wctx.eventLog;
+  const {config} = wctx;
+  const {eventLog} = wctx;
   const sessionId = ctx.sessionId || 'unknown';
   const sessionState = ctx.sessionId ? getSession(ctx.sessionId) : undefined;
   const gfiBefore = sessionState?.currentGfi ?? 0;

@@ -22,27 +22,27 @@ export interface OverviewResponse {
     gateBlocks: number;
     taskOutcomes: number;
   };
-  dailyTrend: Array<{
+  dailyTrend: {
     day: string;
     toolCalls: number;
     failures: number;
     userCorrections: number;
     thinkingTurns: number;
-  }>;
-  topRegressions: Array<{
+  }[];
+  topRegressions: {
     toolName: string;
     errorType: string;
     occurrences: number;
-  }>;
+  }[];
   sampleQueue: {
     counters: Record<string, number>;
-    preview: Array<{
+    preview: {
       sampleId: string;
       sessionId: string;
       qualityScore: number;
       reviewStatus: string;
       createdAt: string;
-    }>;
+    }[];
   };
   thinkingSummary: {
     activeModels: number;
@@ -64,7 +64,7 @@ export interface SampleListFilters {
 
 export interface SamplesResponse {
   counters: Record<string, number>;
-  items: Array<{
+  items: {
     sampleId: string;
     sessionId: string;
     reviewStatus: string;
@@ -74,7 +74,7 @@ export interface SamplesResponse {
     createdAt: string;
     updatedAt: string;
     diffExcerpt: string;
-  }>;
+  }[];
   pagination: {
     page: number;
     pageSize: number;
@@ -102,13 +102,13 @@ export interface SampleDetailResponse {
     correctionCue: string | null;
     createdAt: string;
   };
-  recoveryToolSpan: Array<{ id: number; toolName: string }>;
-  relatedPrinciples: Array<{
+  recoveryToolSpan: { id: number; toolName: string }[];
+  relatedPrinciples: {
     principleId: string | null;
     eventType: string;
     createdAt: string;
-  }>;
-  relatedThinkingHits: Array<{
+  }[];
+  relatedThinkingHits: {
     id: number;
     modelId: string;
     modelName: string;
@@ -116,12 +116,12 @@ export interface SampleDetailResponse {
     scenarios: string[];
     createdAt: string;
     triggerExcerpt: string;
-  }>;
-  reviewHistory: Array<{
+  }[];
+  reviewHistory: {
     reviewStatus: string;
     note: string | null;
     createdAt: string;
-  }>;
+  }[];
 }
 
 export interface ThinkingModelSummary {
@@ -148,24 +148,24 @@ export interface ThinkingOverviewResponse {
     coverageRate: number;
   };
   topModels: ThinkingModelSummary[];
-  dormantModels: Array<{
+  dormantModels: {
     modelId: string;
     name: string;
     description: string;
-  }>;
+  }[];
   effectiveModels: ThinkingModelSummary[];
-  scenarioMatrix: Array<{
+  scenarioMatrix: {
     modelId: string;
     modelName: string;
     scenario: string;
     hits: number;
-  }>;
-  coverageTrend: Array<{
+  }[];
+  coverageTrend: {
     day: string;
     assistantTurns: number;
     thinkingTurns: number;
     coverageRate: number;
-  }>;
+  }[];
 }
 
 export interface ThinkingModelDetailResponse {
@@ -177,14 +177,14 @@ export interface ThinkingModelDetailResponse {
     coverageRate: number;
     recommendation: 'reinforce' | 'rework' | 'archive';
   };
-  usageTrend: Array<{
+  usageTrend: {
     day: string;
     hits: number;
-  }>;
-  scenarioDistribution: Array<{
+  }[];
+  scenarioDistribution: {
     scenario: string;
     hits: number;
-  }>;
+  }[];
   outcomeStats: {
     events: number;
     successRate: number;
@@ -193,16 +193,16 @@ export interface ThinkingModelDetailResponse {
     correctionRate: number;
     correctionSampleRate: number;
   };
-  recentEvents: Array<{
+  recentEvents: {
     id: number;
     createdAt: string;
     matchedPattern: string;
     scenarios: string[];
     triggerExcerpt: string;
-    toolContext: Array<{ toolName: string; outcome: string; errorType?: string | null }>;
-    painContext: Array<{ source: string; score: number }>;
-    principleContext: Array<{ principleId: string | null; eventType: string }>;
-  }>;
+    toolContext: { toolName: string; outcome: string; errorType?: string | null }[];
+    painContext: { source: string; score: number }[];
+    principleContext: { principleId: string | null; eventType: string }[];
+  }[];
 }
 
 function parseJson<T>(raw: string | null | undefined, fallback: T): T {
@@ -253,7 +253,7 @@ export class ControlUiQueryService {
     this.uiDb.dispose();
   }
 
-  getOverview(days: number = 30): OverviewResponse {
+  getOverview(days = 30): OverviewResponse {
     const stats = this.trajectory.getDataStats();
     const regressionRows = this.uiDb.all<{
       tool_name: string;
@@ -621,7 +621,7 @@ export class ControlUiQueryService {
         correctionCue: row.user_correction_cue,
         createdAt: row.user_created_at,
       },
-      recoveryToolSpan: parseJson<Array<{ id: number; toolName: string }>>(row.recovery_tool_span_json, []),
+      recoveryToolSpan: parseJson<{ id: number; toolName: string }[]>(row.recovery_tool_span_json, []),
       relatedPrinciples: [
         ...seededPrincipleIds,
         ...relatedPrinciples.map((item) => ({
@@ -822,9 +822,9 @@ export class ControlUiQueryService {
         matchedPattern: row.matched_pattern,
         scenarios: parseJson<string[]>(row.scenario_json, []),
         triggerExcerpt: row.trigger_excerpt,
-        toolContext: parseJson<Array<{ toolName: string; outcome: string; errorType?: string | null }>>(row.tool_context_json, []),
-        painContext: parseJson<Array<{ source: string; score: number }>>(row.pain_context_json, []),
-        principleContext: parseJson<Array<{ principleId: string | null; eventType: string }>>(row.principle_context_json, []),
+        toolContext: parseJson<{ toolName: string; outcome: string; errorType?: string | null }[]>(row.tool_context_json, []),
+        painContext: parseJson<{ source: string; score: number }[]>(row.pain_context_json, []),
+        principleContext: parseJson<{ principleId: string | null; eventType: string }[]>(row.principle_context_json, []),
       })),
     };
   }

@@ -27,7 +27,7 @@ export interface RuleImplementationValidationResult {
   meta?: RuleHostMeta;
 }
 
-const FORBIDDEN_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
+const FORBIDDEN_PATTERNS: { pattern: RegExp; label: string }[] = [
   { pattern: /\beval\s*\(/, label: 'eval' },
   { pattern: /\bFunction\s*\(/, label: 'Function' },
   { pattern: /\bimport\s*\(/, label: 'dynamic import' },
@@ -42,7 +42,7 @@ const FORBIDDEN_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
   { pattern: /\bnet\b/, label: 'net' },
 ];
 
-const HELPER_NAMES: Array<keyof RuleHostHelpers> = [
+const HELPER_NAMES: (keyof RuleHostHelpers)[] = [
   'isRiskPath',
   'getToolName',
   'getEstimatedLineChanges',
@@ -201,7 +201,7 @@ export function validateRuleImplementationCandidate(
   try {
     const moduleExports = loadRuleImplementationModule(normalizedSource, 'nocturnal-candidate.js') as {
       meta?: unknown;
-      evaluate?: (input: RuleHostInput, helpers: RuleHostHelpers) => unknown;
+      evaluate?: (_input: RuleHostInput, helpers: RuleHostHelpers) => unknown;
     };
 
     const metaFailures = validateMeta(moduleExports.meta);

@@ -3,7 +3,8 @@ import * as path from 'path';
 import type { PluginHookBeforePromptBuildEvent, PluginHookAgentContext, PluginHookBeforePromptBuildResult, PluginLogger, OpenClawPluginApi } from '../openclaw-sdk.js';
 import { clearInjectedProbationIds, getSession, resetFriction, setInjectedProbationIds, trackFriction } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
-import { ContextInjectionConfig, defaultContextConfig } from '../types.js';
+import type { ContextInjectionConfig} from '../types.js';
+import { defaultContextConfig } from '../types.js';
 import { classifyTask, type RoutingInput } from '../core/local-worker-routing.js';
 import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection, autoCompressFocus, safeReadCurrentFocus } from '../core/focus-history.js';
 import { EmpathyObserverWorkflowManager, empathyObserverWorkflowSpec, isExpectedSubagentError } from '../service/subagent-workflow/index.js';
@@ -21,23 +22,6 @@ import { severityToPenalty, DEFAULT_EMPATHY_KEYWORD_CONFIG } from '../core/empat
 // Module-level empathy state — shared across calls to avoid per-turn I/O
 let _empathyTurnCounter = 0;
 let _empathyKeywordCache: { store: ReturnType<typeof loadKeywordStore>; lang: string } | null = null;
-
-function logSubagentWorkflowError(
-  err: unknown,
-  context: string,
-  logger?: PluginLogger
-): void {
-  const errMsg = String(err);
-  const isExpectedGatewayRuntimeError =
-    errMsg.includes('Plugin runtime subagent methods are only available during a gateway request');
-
-  if (isExpectedGatewayRuntimeError) {
-    logger?.debug?.(`[PD:Empathy] ${context} skipped (subagent runtime unavailable in this session)`);
-    return;
-  }
-
-  logger?.warn?.(`[PD:Empathy] ${context} failed: ${errMsg}`);
-}
 
 /**
  * Model configuration with primary model and optional fallback models
@@ -229,7 +213,7 @@ export function loadContextInjectionConfig(workspaceDir: string): ContextInjecti
     }
   } catch (e) {
     // Failed to load config — continue with defaults, but log for diagnostics
-    // eslint-disable-next-line no-console
+     
     console.warn(`[PD:Prompt] Failed to load contextInjection config: ${String(e)}`);
   }
   
@@ -362,7 +346,7 @@ export async function handleBeforePromptBuild(
   event: PluginHookBeforePromptBuildEvent,
   ctx: PluginHookAgentContext & { api?: PromptHookApi }
 ): Promise<PluginHookBeforePromptBuildResult | void> {
-  const workspaceDir = ctx.workspaceDir;
+  const {workspaceDir} = ctx;
   const logger = ctx.api?.logger;
   logger?.info?.(`[PD:Prompt] handleBeforePromptBuild called: workspaceDir=${!!workspaceDir}, trigger=${ctx.trigger}, sessionId=${ctx.sessionId?.substring(0, 20)}`);
   if (!workspaceDir) {
@@ -481,17 +465,17 @@ The empathy observer subagent handles pain detection independently.
   // Try to extract actual user message from Feishu wrapper formats
   if (latestUserMessage.length > 50) {
     // Format 1: "Sender (untrusted metadata): ```json {...}```  user_message_text"
-    const senderMatch = latestUserMessage.match(/Sender \(untrusted metadata\):[\s\S]*?```json[\s\S]*?```\s*/);
+    const senderMatch = /Sender \(untrusted metadata\):[\s\S]*?```json[\s\S]*?```\s*/.exec(latestUserMessage);
     if (senderMatch) {
-      const afterSender = latestUserMessage.slice(senderMatch.index! + senderMatch[0].length).trim();
+      const afterSender = latestUserMessage.slice(senderMatch.index + senderMatch[0].length).trim();
       if (afterSender.length > 3) latestUserMessage = afterSender;
     }
 
     // Format 2: "Conversation info (untrusted metadata): ```json {...}```  user_message_text"
     if (latestUserMessage.length > 200 && latestUserMessage.includes('Conversation info')) {
-      const convInfoMatch = latestUserMessage.match(/Conversation info[\s\S]*?```json[\s\S]*?```\s*/);
+      const convInfoMatch = /Conversation info[\s\S]*?```json[\s\S]*?```\s*/.exec(latestUserMessage);
       if (convInfoMatch) {
-        const afterConvInfo = latestUserMessage.slice(convInfoMatch.index! + convInfoMatch[0].length).trim();
+        const afterConvInfo = latestUserMessage.slice(convInfoMatch.index + convInfoMatch[0].length).trim();
         if (afterConvInfo.length > 3) latestUserMessage = afterConvInfo;
       }
     }
@@ -644,7 +628,7 @@ The empathy observer subagent handles pain detection independently.
         // module-level state resets on plugin reload before reaching turn 50.
         if (matchResult.matched) {
           saveKeywordStore(wctx.stateDir, keywordStore);
-          const totalHits = keywordStore.stats.totalHits;
+          const {totalHits} = keywordStore.stats;
           logger?.info?.(`[PD:Empathy] Keyword store saved after match: terms=${matchResult.matchedTerms.join(',')}, totalHits=${totalHits}`);
         }
       } catch (e) {
@@ -787,7 +771,7 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
     if (currentFocus.trim()) {
       try {
         // 🚀 自动压缩门禁：检查文件大小，超过阈值自动压缩
-        const stateDir = wctx.stateDir;
+        const {stateDir} = wctx;
         const compressResult = autoCompressFocus(focusPath, workspaceDir, stateDir);
         if (compressResult.compressed) {
           logger?.info?.(`[PD:Prompt] Auto-compressed CURRENT_FOCUS: ${compressResult.oldLines} → ${compressResult.newLines} lines. Milestones archived: ${compressResult.milestonesArchived}`);
@@ -903,7 +887,7 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
 
       if (latestUserText && latestUserText.trim().length > 0) {
         // Infer requestedTools and requestedFiles from message content
-        const toolPatterns: Array<{ pattern: RegExp; tool: string }> = [
+        const toolPatterns: { pattern: RegExp; tool: string }[] = [
           { pattern: /\b(edit|replace|write|modify|update|fix|patch|add|remove|delete|insert)\b/gi, tool: 'edit' },
           { pattern: /\b(read|cat|view|show|get|find|search|grep|look|inspect|examine|list|head|tail|diff)\b/gi, tool: 'read' },
           { pattern: /\b(run|execute|exec|bash|shell|command)\b/gi, tool: 'bash' },
@@ -911,6 +895,7 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
         const filePattern = /\b([a-zA-Z]:\\?[^\s,]+\.[a-z]{2,10}|[./][^\s,]+\.[a-z]{2,10})\b/gi;
         const toolMatches = toolPatterns.flatMap(({ pattern, tool }) => {
           const matches: string[] = [];
+          // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in while loop condition
           let m;
           const r = new RegExp(pattern.source, pattern.flags);
           while ((m = r.exec(latestUserText)) !== null) matches.push(tool);

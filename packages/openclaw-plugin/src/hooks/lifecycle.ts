@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as readline from 'readline';
-import { computePainScore, buildPainFlag, writePainFlag } from '../core/pain.js';
+import { buildPainFlag, writePainFlag } from '../core/pain.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { PD_DIRS } from '../core/paths.js';
 import { 
@@ -55,7 +55,7 @@ interface JsonlMessage {
 
 export async function extractPainFromSessionFile(sessionFile: string, ctx: PluginHookAgentContext): Promise<void> {
   const painPoints: string[] = [];
-  const workspaceDir = ctx.workspaceDir;
+  const {workspaceDir} = ctx;
 
   if (!workspaceDir) return;
 

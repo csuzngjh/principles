@@ -30,45 +30,13 @@ function getAllImplementations(stateDir: string): Implementation[] {
   return Object.values(ledger.tree.implementations);
 }
 
-/**
- * Handle the /pd-disable-impl command.
- *
- * Usage:
- *   /pd-disable-impl list                        - List active implementations
- *   /pd-disable-impl <implId>                    - Disable an implementation
- *   /pd-disable-impl <implId> --reason "<reason>" - Disable with reason
- */
-export function handleDisableImplCommand(ctx: PluginCommandContext): PluginCommandResult {
-  const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
-  const stateDir = WorkspaceContext.fromHookContext({ ...ctx, workspaceDir }).stateDir;
-  const lang = (ctx.config?.language as string) || 'en';
-  const isZh = lang === 'zh';
-
-  const args = (ctx.args || '').trim();
-
-  // Parse args: [implId] [--reason "..."]
-  const parts = args.split(/\s+/);
-  const subcommand = parts[0] || '';
-  const implId = subcommand === 'list' ? '' : subcommand;
-  const reasonMatch = args.match(/--reason\s+"([^"]+)"/) || args.match(/--reason\s+(\S+)/);
-  const reason = reasonMatch ? reasonMatch[1] : null;
-
-  // Subcommand: list
-  if (subcommand === 'list' || subcommand === '') {
-    return _handleListActive(stateDir, isZh);
-  }
-
-  // Disable
-  return _handleDisableImpl(workspaceDir, stateDir, implId, reason, isZh, ctx.sessionId);
-}
-
 function _handleListActive(
   stateDir: string,
   isZh: boolean
 ): PluginCommandResult {
   const allImpls = getAllImplementations(stateDir);
   const activeImpls = allImpls.filter(
-    (impl) => (impl as any).lifecycleState === 'active' || (impl as any).lifecycleState === 'candidate'
+    (impl) => impl.lifecycleState === 'active' || impl.lifecycleState === 'candidate'
   );
 
   if (activeImpls.length === 0) {
@@ -85,11 +53,11 @@ function _handleListActive(
   output += `${'='.repeat(50)}\n`;
 
   for (const impl of activeImpls) {
-    const stateLabel = (impl as any).lifecycleState || 'candidate';
+    const stateLabel = impl.lifecycleState || 'candidate';
     output += `  ${impl.id}\n`;
     output += `    Rule: ${impl.ruleId} | State: ${stateLabel} | Version: ${impl.version}\n`;
-    if ((impl as any).disabledReason) {
-      output += `    Previous reason: ${(impl as any).disabledReason}\n`;
+    if (impl.disabledReason) {
+      output += `    Previous reason: ${impl.disabledReason}\n`;
     }
     output += '\n';
   }
@@ -101,6 +69,7 @@ function _handleListActive(
   return { text: output };
 }
 
+// eslint-disable-next-line @typescript-eslint/max-params -- Reason: Command handler signature must match OpenClaw plugin interface - breaking API change to options objects would affect public contracts
 function _handleDisableImpl(
   workspaceDir: string,
   stateDir: string,
@@ -120,7 +89,7 @@ function _handleDisableImpl(
     };
   }
 
-  const currentState = (target as any).lifecycleState || 'candidate';
+  const currentState = target.lifecycleState || 'candidate';
 
   // Validate: active -> disabled or candidate -> disabled
   if (currentState !== 'active' && currentState !== 'candidate') {
@@ -147,4 +116,36 @@ function _handleDisableImpl(
       ? `\n\u2705 \u5b9e\u73b0\u5df2\u7981\u7528: ${implId}\n   \u72b6\u6001: ${currentState} -> disabled\n   \u539f\u56e0: ${reasonText}`
       : `\n\u2705 Implementation disabled: ${implId}\n   State: ${currentState} -> disabled\n   Reason: ${reasonText}`,
   };
+}
+
+/**
+ * Handle the /pd-disable-impl command.
+ *
+ * Usage:
+ *   /pd-disable-impl list                        - List active implementations
+ *   /pd-disable-impl <implId>                    - Disable an implementation
+ *   /pd-disable-impl <implId> --reason "<reason>" - Disable with reason
+ */
+export function handleDisableImplCommand(ctx: PluginCommandContext): PluginCommandResult {
+  const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
+  const {stateDir} = WorkspaceContext.fromHookContext({ ...ctx, workspaceDir });
+  const lang = (ctx.config?.language as string) || 'en';
+  const isZh = lang === 'zh';
+
+  const args = (ctx.args || '').trim();
+
+  // Parse args: [implId] [--reason "..."]
+  const parts = args.split(/\s+/);
+  const subcommand = parts[0] || '';
+  const implId = subcommand === 'list' ? '' : subcommand;
+  const reasonMatch = (/--reason\s+"([^"]+)"/.exec(args)) || (/--reason\s+(\S+)/.exec(args));
+  const reason = reasonMatch ? reasonMatch[1] : null;
+
+  // Subcommand: list
+  if (subcommand === 'list' || subcommand === '') {
+    return _handleListActive(stateDir, isZh);
+  }
+
+  // Disable
+  return _handleDisableImpl(workspaceDir, stateDir, implId, reason, isZh, ctx.sessionId);
 }

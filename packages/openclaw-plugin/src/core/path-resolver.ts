@@ -8,10 +8,10 @@ export interface PathResolverOptions {
     workspaceDir?: string;
     normalizeWorkspace?: boolean;
     logger?: {
-        debug?: (msg: string) => void;
-        info?: (msg: string) => void;
-        warn?: (msg: string) => void;
-        error?: (msg: string) => void;
+        debug?: (_msg: string) => void;
+        info?: (_msg: string) => void;
+        warn?: (_msg: string) => void;
+        error?: (_msg: string) => void;
     };
 }
 
@@ -96,7 +96,6 @@ function findConfigFile(): string | null {
     return null;
 }
 
-/* eslint-disable no-console */
 function loadConfigFromFile(): PDConfig | null {
     const configPath = findConfigFile();
     if (!configPath) {
@@ -113,7 +112,6 @@ function loadConfigFromFile(): PDConfig | null {
         return null;
     }
 }
-/* eslint-enable no-console */
 
 export class PathResolver {
     private static extensionRoot: string | null = null;
@@ -359,7 +357,7 @@ export class PathResolver {
         const resolver = new PathResolver();
         
         if (ctx?.workspaceDir) {
-            let workspaceDir = ctx.workspaceDir;
+            let {workspaceDir} = ctx;
             
             if (resolver.normalizeWorkspace) {
                 workspaceDir = resolver.normalizePath(workspaceDir);

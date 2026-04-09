@@ -272,7 +272,7 @@ export class TrajectoryDatabase {
    * Search pain_events using FTS5 full-text search (MEM-04).
    * Returns pain events matching the query, ordered by relevance.
    */
-  searchPainEvents(query: string, limit: number = 10): Array<{
+  searchPainEvents(query: string, limit = 10): {
     id: number;
     sessionId: string;
     source: string;
@@ -283,7 +283,7 @@ export class TrajectoryDatabase {
     confidence: number | null;
     text: string | null;
     createdAt: string;
-  }> {
+  }[] {
     if (!query || query.trim().length === 0) {
       return [];
     }
@@ -299,7 +299,7 @@ export class TrajectoryDatabase {
         WHERE pain_events_fts MATCH ?
         ORDER BY bm25(pain_events_fts) DESC
         LIMIT ?
-      `).all(ftsQuery, limit) as Array<{
+      `).all(ftsQuery, limit) as {
         id: number;
         session_id: string;
         source: string;
@@ -310,7 +310,7 @@ export class TrajectoryDatabase {
         confidence: number | null;
         text: string | null;
         created_at: string;
-      }>;
+      }[];
 
       return results.map(row => ({
         id: row.id,
@@ -396,7 +396,7 @@ export class TrajectoryDatabase {
   recordEvolutionTask(input: EvolutionTaskInput): void {
     const now = nowIso();
     // Cast to V2 to access new fields
-    const v2 = input as EvolutionTaskInputV2;
+    const v2 = input;
     this.withWrite(() => {
       this.db.prepare(`
         INSERT INTO evolution_tasks (
@@ -442,7 +442,7 @@ export class TrajectoryDatabase {
   updateEvolutionTask(taskId: string, updates: Partial<Omit<EvolutionTaskInput, 'taskId' | 'traceId' | 'source'>>): void {
     const now = nowIso();
     // Cast to V2 to access new fields
-    const v2Updates = updates as Partial<Omit<EvolutionTaskInputV2, 'taskId' | 'traceId' | 'source'>>;
+    const v2Updates = updates;
     this.withWrite(() => {
       const setClauses: string[] = ['updated_at = ?'];
       const values: unknown[] = [now];
@@ -553,7 +553,7 @@ export class TrajectoryDatabase {
       ${whereClause}
       ORDER BY created_at DESC
       LIMIT ? OFFSET ?
-    `).all(...values, limit, offset) as Array<Record<string, unknown>>;
+    `).all(...values, limit, offset) as Record<string, unknown>[];
 
     return rows.map((row) => ({
       id: Number(row.id),
@@ -588,7 +588,8 @@ export class TrajectoryDatabase {
     const limit = filters.limit ?? 100;
     const offset = filters.offset ?? 0;
 
-    let rows: Array<Record<string, unknown>>;
+    // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in both if/else branches
+    let rows: Record<string, unknown>[];
     if (traceId) {
       rows = this.db.prepare(`
         SELECT id, trace_id, task_id, stage, level, message, summary, metadata_json, created_at
@@ -596,14 +597,14 @@ export class TrajectoryDatabase {
         WHERE trace_id = ?
         ORDER BY created_at ASC
         LIMIT ? OFFSET ?
-      `).all(traceId, limit, offset) as Array<Record<string, unknown>>;
+      `).all(traceId, limit, offset) as Record<string, unknown>[];
     } else {
       rows = this.db.prepare(`
         SELECT id, trace_id, task_id, stage, level, message, summary, metadata_json, created_at
         FROM evolution_events
         ORDER BY created_at DESC
         LIMIT ? OFFSET ?
-      `).all(limit, offset) as Array<Record<string, unknown>>;
+      `).all(limit, offset) as Record<string, unknown>[];
     }
 
     return rows.map((row) => ({
@@ -669,7 +670,7 @@ export class TrajectoryDatabase {
   getEvolutionStats(): { total: number; pending: number; inProgress: number; completed: number; failed: number } {
     const rows = this.db.prepare(`
       SELECT status, COUNT(*) as count FROM evolution_tasks GROUP BY status
-    `).all() as Array<{ status: string; count: number }>;
+    `).all() as { status: string; count: number }[];
 
     const stats = { total: 0, pending: 0, inProgress: 0, completed: 0, failed: 0 };
     for (const row of rows) {
@@ -691,7 +692,7 @@ export class TrajectoryDatabase {
    * @param options.dateFrom - Only return sessions updated after this date
    * @param options.dateTo - Only return sessions updated before this date
    */
-  listRecentSessions(options: { limit?: number; dateFrom?: string; dateTo?: string } = {}): Array<{ sessionId: string; startedAt: string; updatedAt: string }> {
+  listRecentSessions(options: { limit?: number; dateFrom?: string; dateTo?: string } = {}): { sessionId: string; startedAt: string; updatedAt: string }[] {
     const conditions: string[] = [];
     const values: unknown[] = [];
 
@@ -713,7 +714,7 @@ export class TrajectoryDatabase {
       ${whereClause}
       ORDER BY updated_at DESC
       LIMIT ?
-    `).all(...values, limit) as Array<Record<string, unknown>>;
+    `).all(...values, limit) as Record<string, unknown>[];
 
     return rows.map((row) => ({
       sessionId: String(row.session_id),
@@ -734,7 +735,7 @@ export class TrajectoryDatabase {
       FROM assistant_turns
       WHERE session_id = ?
       ORDER BY id ASC
-    `).all(sessionId) as Array<Record<string, unknown>>;
+    `).all(sessionId) as Record<string, unknown>[];
 
     return rows.map((row) => ({
       id: Number(row.id),
@@ -755,7 +756,7 @@ export class TrajectoryDatabase {
    * Returns: Analytics data aggregated from trajectory database.
    * Not: Runtime truth or real-time queue state.
    */
-  listToolCallsForSession(sessionId: string): Array<{
+  listToolCallsForSession(sessionId: string): {
     id: number;
     toolName: string;
     outcome: string;
@@ -767,14 +768,14 @@ export class TrajectoryDatabase {
     gfiBefore: number | null;
     gfiAfter: number | null;
     createdAt: string;
-  }> {
+  }[] {
     const rows = this.db.prepare(`
       SELECT id, tool_name, outcome, params_json, duration_ms, exit_code, error_type, error_message,
              gfi_before, gfi_after, created_at
       FROM tool_calls
       WHERE session_id = ?
       ORDER BY id ASC
-    `).all(sessionId) as Array<Record<string, unknown>>;
+    `).all(sessionId) as Record<string, unknown>[];
 
     return rows.map((row) => {
       // Extract filePath from params_json if present
@@ -811,7 +812,7 @@ export class TrajectoryDatabase {
    * Returns: Analytics data aggregated from trajectory database.
    * Not: Runtime truth or real-time queue state.
    */
-  listPainEventsForSession(sessionId: string): Array<{
+  listPainEventsForSession(sessionId: string): {
     id: number;
     source: string;
     score: number;
@@ -820,13 +821,13 @@ export class TrajectoryDatabase {
     origin: string | null;
     confidence: number | null;
     createdAt: string;
-  }> {
+  }[] {
     const rows = this.db.prepare(`
       SELECT id, source, score, reason, severity, origin, confidence, created_at
       FROM pain_events
       WHERE session_id = ?
       ORDER BY created_at ASC
-    `).all(sessionId) as Array<Record<string, unknown>>;
+    `).all(sessionId) as Record<string, unknown>[];
 
     return rows.map((row) => ({
       id: Number(row.id),
@@ -844,19 +845,19 @@ export class TrajectoryDatabase {
    * List user turns for a session.
    * Returns sanitized/reduced fields for nocturnal use — NO raw text.
    */
-  listUserTurnsForSession(sessionId: string): Array<{
+  listUserTurnsForSession(sessionId: string): {
     id: number;
     turnIndex: number;
     correctionDetected: boolean;
     correctionCue: string | null;
     createdAt: string;
-  }> {
+  }[] {
     const rows = this.db.prepare(`
       SELECT id, turn_index, correction_detected, correction_cue, created_at
       FROM user_turns
       WHERE session_id = ?
       ORDER BY turn_index ASC
-    `).all(sessionId) as Array<Record<string, unknown>>;
+    `).all(sessionId) as Record<string, unknown>[];
 
     return rows.map((row) => ({
       id: Number(row.id),
@@ -881,7 +882,7 @@ export class TrajectoryDatabase {
       FROM correction_samples
       WHERE review_status = ?
       ORDER BY created_at DESC
-    `).all(status) as Array<Record<string, unknown>>;
+    `).all(status) as Record<string, unknown>[];
 
     return rows.map((row) => ({
       sampleId: String(row.sample_id),
@@ -903,20 +904,20 @@ export class TrajectoryDatabase {
    * List gate blocks for a session.
    * Returns minimal fields for nocturnal use — no raw text.
    */
-  listGateBlocksForSession(sessionId: string): Array<{
+  listGateBlocksForSession(sessionId: string): {
     id: number;
     toolName: string;
     filePath: string | null;
     reason: string;
     planStatus: string | null;
     createdAt: string;
-  }> {
+  }[] {
     const rows = this.db.prepare(`
       SELECT id, tool_name, file_path, reason, plan_status, created_at
       FROM gate_blocks
       WHERE session_id = ?
       ORDER BY id ASC
-    `).all(sessionId) as Array<Record<string, unknown>>;
+    `).all(sessionId) as Record<string, unknown>[];
 
     return rows.map((row) => ({
       id: Number(row.id),
@@ -992,7 +993,7 @@ export class TrajectoryDatabase {
       JOIN user_turns ut ON ut.id = cs.user_correction_turn_id
       WHERE (? = 0 OR cs.review_status = 'approved')
       ORDER BY cs.created_at ASC
-    `).all(opts.approvedOnly ? 1 : 0) as Array<Record<string, unknown>>;
+    `).all(opts.approvedOnly ? 1 : 0) as Record<string, unknown>[];
 
     const exportPath = path.join(this.exportDir, `corrections-${Date.now()}-${opts.mode}.jsonl`);
     const lines = rows.map((row) => {
@@ -1509,7 +1510,7 @@ export class TrajectoryDatabase {
       WHERE session_id = ? AND outcome = 'success'
       ORDER BY id DESC
       LIMIT 3
-    `).all(sessionId) as Array<Record<string, unknown>>;
+    `).all(sessionId) as Record<string, unknown>[];
     if (successfulCalls.length === 0) return;
 
     const sampleId = `sample_${crypto.createHash('md5').update(`${sessionId}:${correctionTurn.id}:${successfulCalls[0].id}`).digest('hex').slice(0, 12)}`;
@@ -1595,7 +1596,7 @@ export class TrajectoryDatabase {
       SELECT blob_ref FROM assistant_turns WHERE blob_ref IS NOT NULL
       UNION
       SELECT blob_ref FROM user_turns WHERE blob_ref IS NOT NULL
-    `).all() as Array<{ blob_ref?: string | null }>;
+    `).all() as { blob_ref?: string | null }[];
     for (const row of rows) {
       if (row.blob_ref) referenced.add(String(row.blob_ref));
     }
@@ -1607,6 +1608,7 @@ export class TrajectoryDatabase {
     for (const entry of fs.readdirSync(this.blobDir)) {
       if (referenced.has(entry)) continue;
       const fullPath = path.join(this.blobDir, entry);
+      // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in try, catch continues
       let stat: fs.Stats;
       try {
         stat = fs.statSync(fullPath);
@@ -1629,7 +1631,7 @@ export class TrajectoryDatabase {
 }
 
 export class TrajectoryRegistry {
-  private static instances = new Map<string, TrajectoryDatabase>();
+  private static readonly instances = new Map<string, TrajectoryDatabase>();
 
   static get(workspaceDir: string, opts: Omit<TrajectoryDatabaseOptions, 'workspaceDir'> = {}): TrajectoryDatabase {
     const normalized = path.resolve(workspaceDir);
