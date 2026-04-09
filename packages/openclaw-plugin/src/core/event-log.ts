@@ -66,9 +66,12 @@ export class EventLog {
     this.record('rule_promotion', 'promoted', undefined, data);
   }
   
-  recordHookExecution(data: HookExecutionEventData): void {
+  recordHookExecution(data: HookExecutionEventData, opts?: { flushImmediately?: boolean }): void {
     const category = data.error ? 'failure' : 'success';
     this.record('hook_execution', category, undefined, data);
+    if (opts?.flushImmediately) {
+      this.flushEvents();
+    }
   }
   
   recordGateBlock(sessionId: string | undefined, data: GateBlockEventData): void {

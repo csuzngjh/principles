@@ -124,6 +124,11 @@ export interface NocturnalSessionSnapshot {
     totalGateBlocks: number;
     failureCount: number;
   };
+  /**
+   * #219: Marker for data source to identify fallback/partial stats.
+   * - 'pain_context_fallback': Stats derived from pain context only (trajectory extractor failed)
+   */
+  _dataSource?: 'pain_context_fallback';
 }
 
 /**
