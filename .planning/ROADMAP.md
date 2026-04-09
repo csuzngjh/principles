@@ -80,8 +80,8 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 19-01-PLAN.md — Verify /api/gate/stats and /api/gate/blocks backend service layer
-- [ ] 19-02-PLAN.md — Verify frontend TypeScript types and component field accessors
+- [x] 19-01-PLAN.md — Verify /api/gate/stats and /api/gate/blocks backend service layer
+- [x] 19-02-PLAN.md — Verify frontend TypeScript types and component field accessors
 
 ---
 
