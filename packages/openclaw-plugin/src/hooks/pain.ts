@@ -114,7 +114,7 @@ export function handleAfterToolCall(
   }
 
   // 1. Determine if this was a failure
-  const exitCode = (event.result && typeof event.result === 'object') ? (event.result as any).exitCode : 0;
+  const exitCode = (event.result && typeof event.result === 'object') ? (event.result as Record<string, unknown>).exitCode : 0;
   const isFailure = !!event.error || (exitCode !== 0 && exitCode !== undefined);
 
   if (isFailure) {

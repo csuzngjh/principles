@@ -6,7 +6,8 @@ export const TrajectoryService: OpenClawPluginService = {
   id: 'principles-disciple-trajectory',
   start(ctx: OpenClawPluginServiceContext): void {
     if (!ctx.workspaceDir) return;
-    WorkspaceContext.fromHookContext(ctx).trajectory;
+    // Trigger lazy initialization of trajectory registry
+    void WorkspaceContext.fromHookContext(ctx).trajectory;
   },
   stop(ctx: OpenClawPluginServiceContext): void {
     if (!ctx.workspaceDir) return;

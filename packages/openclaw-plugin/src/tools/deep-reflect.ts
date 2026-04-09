@@ -234,6 +234,7 @@ async function executeReflectionWorkflow(
     const manager = new DeepReflectWorkflowManager({
         workspaceDir: effectiveWorkspaceDir,
         logger: api.logger,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: api.runtime.subagent has structurally compatible shape but differs from PluginRuntimeSubagent due to optional provider/model fields
         subagent: api.runtime.subagent as any,
         agentSession: api.runtime.agent?.session,
     });
