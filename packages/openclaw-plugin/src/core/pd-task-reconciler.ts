@@ -72,6 +72,7 @@ export interface ReconcileResult {
 export interface ReconcileOptions {
   dryRun?: boolean;
   workspaceDir: string;
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: logger callback param names intentionally unused - callbacks only invoked for side effects
   logger?: { info?: (_: string) => void; warn?: (_: string) => void };
 }
 
@@ -155,6 +156,7 @@ function buildCronJob(
     wakeMode: 'now',
     payload: {
       kind: 'agentTurn',
+      // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: buildTaskPrompt is defined later in this file, called here for organizational reasons
       message: buildTaskPrompt(task, logger),
       lightContext: task.execution.lightContext ?? true,
       timeoutSeconds: task.execution.timeoutSeconds ?? 120,
@@ -288,6 +290,7 @@ export async function reconcilePDTasks(
   });
 
   const cronStore = await readCronStore(logger);
+  // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: healthCheck is defined later in this file, called here for organizational reasons
   const healthUpdated = healthCheck(declared, cronStore, logger);
   const actions = diff(healthUpdated, cronStore.jobs);
 
@@ -361,10 +364,12 @@ export async function reconcilePDTasks(
 }
 
  
+// eslint-disable-next-line @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: logger callback param names intentionally unused - callbacks only invoked for side effects
 function healthCheck(
   tasks: PDTaskSpec[],
   cronStore: CronStoreFile,
-  logger: { info?: (_: string) => void; warn?: (_: string) => void },
+  /* eslint-disable no-unused-vars -- Reason: callback type signature parameters */
+  logger: { info?: (_msg: string) => void; warn?: (_msg: string) => void },
 ): PDTaskSpec[] {
   const jobByName = new Map(cronStore.jobs.map((j) => [j.name, j]));
 

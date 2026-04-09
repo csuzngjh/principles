@@ -154,7 +154,7 @@ export function readPainFlagData(projectDir: string): Record<string, string> {
     }
     const content = fs.readFileSync(painFlagPath, "utf-8");
     return parseKvLines(content);
-  } catch (e) { // eslint-disable-line @typescript-eslint/no-unused-vars -- Reason: intentionally unused - returning empty object on error
+  } catch (e) { // eslint-disable-line @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: intentionally unused - returning empty object on error
     return {};
   }
 }
@@ -174,7 +174,7 @@ export function trackPrincipleValue(
     trigger: string;
     valueMetrics?: { painPreventedCount: number; lastPainPreventedAt?: string; calculatedAt: string };
   }[],
-  updatePrincipleMetrics: (id: string, metrics: { painPreventedCount: number; lastPainPreventedAt: string; calculatedAt: string }) => void,
+  updatePrincipleMetrics: (_id: string, _metrics: { painPreventedCount: number; lastPainPreventedAt: string; calculatedAt: string }) => void, // eslint-disable-line @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: callback params required by interface, actual values accessed via principle.id and principle.valueMetrics
 ): void {
   try {
     const activePrinciples = getActivePrinciples();

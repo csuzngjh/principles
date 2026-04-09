@@ -105,7 +105,8 @@ export function planStatus(projectDir: string): string {
         }
       }
     }
-  } catch (e) {
+  /* eslint-disable @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: Error is intentionally ignored for graceful degradation */
+  } catch (_e) {
     // Ignore read errors
   }
   return '';

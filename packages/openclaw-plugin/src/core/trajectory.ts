@@ -208,6 +208,7 @@ export class TrajectoryDatabase {
     const createdAt = input.createdAt ?? nowIso();
     // Extract filePath from paramsJson if provided and is an object with filePath
     const paramsObj = input.paramsJson as Record<string, unknown> | undefined;
+    /* eslint-disable @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: _filePath extracted for potential future use but currently unused */
     const _filePath = paramsObj && typeof paramsObj.filePath === 'string' ? paramsObj.filePath : null;
     const rowId = this.withWrite(() => {
       const result = this.db.prepare(`
@@ -1323,6 +1324,7 @@ export class TrajectoryDatabase {
     this.importLegacyEvolution();
   }
 
+  /* eslint-disable @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: _fromVersion reserved for future migration logic */
   private migrateSchema(_fromVersion?: number): void {
     this.db.exec(`
       DROP VIEW IF EXISTS v_daily_metrics;
@@ -1543,6 +1545,7 @@ export class TrajectoryDatabase {
     });
   }
 
+  /* eslint-disable @typescript-eslint/max-params -- Reason: Audit record requires exportKind, mode, approvedOnly, filePath, and rowCount */
   private recordExportAudit(
     exportKind: string,
     mode: CorrectionExportMode,
@@ -1657,7 +1660,8 @@ export class TrajectoryRegistry {
     this.instances.clear();
   }
 
-  static use<T>(workspaceDir: string, fn: (db: TrajectoryDatabase) => T, opts: Omit<TrajectoryDatabaseOptions, 'workspaceDir'> = {}): T {
+  /* eslint-disable @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: db parameter name in callback type signature */
+  static use<T>(workspaceDir: string, fn: (_db: TrajectoryDatabase) => T, opts: Omit<TrajectoryDatabaseOptions, 'workspaceDir'> = {}): T {
     const normalized = path.resolve(workspaceDir);
     const existing = this.instances.get(normalized);
     if (existing) {

@@ -157,7 +157,8 @@ export class EventLog {
     }
 
     if (entry.type === 'tool_call') {
-      const data = entry.data as unknown as ToolCallEventData;
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: data used for type narrowing only, actual fields accessed via stats
+      const _data = entry.data as unknown as ToolCallEventData;
       stats.tools.total++;
       if (entry.category === 'success') stats.tools.success++;
       else stats.tools.failure++;
@@ -239,6 +240,7 @@ export class EventLog {
     return this.eventBuffer.map((entry) => ({ ...entry, data: { ...entry.data } }));
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: getEventDedupKey is a pure key-generation function, no this reference needed
   private getEventDedupKey(entry: EventLogEntry): string {
     const eventId = typeof (entry.data as { eventId?: unknown } | undefined)?.eventId === 'string'
       ? String((entry.data as { eventId?: string }).eventId)

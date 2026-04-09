@@ -159,7 +159,7 @@ export function handleEditVerification(
   let absolutePath: string;
   try {
     absolutePath = wctx.resolve(filePath);
-  } catch (_error) { // eslint-disable-line @typescript-eslint/no-unused-vars -- Reason: intentionally unused - let it fail naturally on path resolution error
+  } catch (_error) { // eslint-disable-line @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: intentionally unused - let it fail naturally on path resolution error
     // Path resolution error, let it fail naturally
     return;
   }
@@ -203,7 +203,7 @@ export function handleEditVerification(
     } catch (statError) {
       // File stat error (e.g., permission denied)
       const errStr = statError instanceof Error ? statError.message : String(statError);
-      const errCode = (statError as NodeJS.ErrnoException).code;
+      const errCode = (statError as { code?: string }).code;
 
       if (errCode === 'EACCES' || errCode === 'EPERM') {
         logger?.error?.(`[PD_GATE:EDIT_VERIFY] Permission denied accessing file: ${path.basename(filePath)} (${errStr})`);
@@ -228,7 +228,7 @@ export function handleEditVerification(
       currentContent = fs.readFileSync(absolutePath, 'utf-8');
     } catch (readError) {
       const errStr = readError instanceof Error ? readError.message : String(readError);
-      const errCode = (readError as NodeJS.ErrnoException).code;
+      const errCode = (readError as { code?: string }).code;
 
       if (errCode === 'EACCES' || errCode === 'EPERM') {
         logger?.error?.(`[PD_GATE:EDIT_VERIFY] Permission denied reading file: ${path.basename(filePath)} (${errStr})`);

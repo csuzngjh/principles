@@ -565,6 +565,7 @@ export function processTrainerResult(
  * ```
  */
 export class TrainingProgram {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: stateDir is used via this.stateDir in createExperiment method
   constructor(private readonly stateDir: string) {}
 
   /**

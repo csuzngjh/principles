@@ -8,7 +8,7 @@
  * - getStats() - 获取统计数据
  */
 
-import type { TrajectoryDatabase, EvolutionTaskRecord, EvolutionEventRecord } from '../core/trajectory.js';
+import type { TrajectoryDatabase, EvolutionTaskRecord } from '../core/trajectory.js';
 import { STAGE_LABELS, STAGE_COLORS } from '../core/evolution-logger.js';
 
 export interface TaskListFilters {
@@ -154,6 +154,7 @@ export class EvolutionQueryService {
    * 释放资源
    * 注意：不关闭 trajectory，因为它是单例由 TrajectoryRegistry 管理
    */
+  /* eslint-disable @typescript-eslint/class-methods-use-this -- Reason: Delegates to TrajectoryRegistry lifecycle management */
   dispose(): void {
     // EvolutionQueryService 不拥有 trajectory，所以不关闭它
     // trajectory 是由 TrajectoryRegistry 管理的单例

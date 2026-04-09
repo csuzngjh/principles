@@ -67,8 +67,6 @@ export type LifecycleIntent = 'promote' | 'disable' | 'rollback' | null;
  * Returns the detected intent type or null.
  */
 export function detectLifecycleIntent(message: string): LifecycleIntent {
-  const lower = message.toLowerCase();
-
   // Check promote patterns
   for (const p of PROMOTE_PATTERNS_EN) {
     if (p.test(message)) return 'promote';

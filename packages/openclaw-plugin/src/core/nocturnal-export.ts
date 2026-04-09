@@ -183,7 +183,7 @@ function serializeORPOSample(
 export function exportORPOSamples(
   workspaceDir: string,
   targetModelFamily?: string | null,
-  _options: Record<string, never> = {} // eslint-disable-line @typescript-eslint/no-unused-vars -- Reason: options parameter intentionally unused
+  _options: Record<string, never> = {} // eslint-disable-line @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: options parameter intentionally unused
 ): ExportResult {
   const exportId = crypto.randomUUID();
   const now = new Date().toISOString();

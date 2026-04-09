@@ -255,6 +255,7 @@ export function handleLlmOutput(
     }
 
     // ═══ Thinking OS: Mental Model Usage Tracking ═══
+    /* eslint-disable @typescript-eslint/no-use-before-define -- Reason: trackThinkingModelUsage is defined later in this file */
     trackThinkingModelUsage({
         text,
         wctx,

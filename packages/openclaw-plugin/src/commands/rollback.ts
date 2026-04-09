@@ -46,8 +46,8 @@ Usage:
 
     // eslint-disable-next-line @typescript-eslint/init-declarations -- Reason: assigned immediately in if/else branches before use
     let eventId: string | null;
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Reason: triggerMethod is reserved for future extension - tracking rollback trigger source
-    const triggerMethod = 'user_command' as const;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: triggerMethod is reserved for future extension - tracking rollback trigger source
+    const _triggerMethod = 'user_command' as const;
 
     if (args === 'last') {
         // Find the last empathy event in current session

@@ -122,7 +122,7 @@ export async function extractPainFromSessionFile(sessionFile: string, ctx: Plugi
     try {
       rl.close();
       fileStream.destroy();
-    } catch (_e) { // eslint-disable-line @typescript-eslint/no-unused-vars -- Reason: intentionally unused - cleanup errors ignored
+    } catch (_e) { // eslint-disable-line @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: intentionally unused - cleanup errors ignored
       // Ignore cleanup errors
     }
   }
@@ -194,8 +194,9 @@ export async function handleBeforeCompaction(
   // 提取工作记忆（从 sessionFile）
   if (event.sessionFile) {
     await extractPainFromSessionFile(event.sessionFile, ctx);
-    
+
     // 新增：提取并保存工作记忆
+    /* eslint-disable @typescript-eslint/no-use-before-define -- Reason: extractAndSaveWorkingMemory is defined later in this file */
     await extractAndSaveWorkingMemory(event.sessionFile, ctx, wctx);
   }
 }

@@ -352,8 +352,9 @@ export function checkCooldown(
     } = {}
 ): CooldownCheckResult {
     const {
-        globalCooldownMs = DEFAULT_GLOBAL_COOLDOWN_MS,
-        principleCooldownMs = DEFAULT_PRINCIPLE_COOLDOWN_MS,
+        /* eslint-disable @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: Cooldown parameters reserved for future quota enforcement */
+        globalCooldownMs: _globalCooldownMs = DEFAULT_GLOBAL_COOLDOWN_MS,
+        principleCooldownMs: _principleCooldownMs = DEFAULT_PRINCIPLE_COOLDOWN_MS,
         maxRunsPerWindow = DEFAULT_MAX_RUNS_PER_WINDOW,
         quotaWindowMs = DEFAULT_QUOTA_WINDOW_MS,
     } = options;
@@ -539,6 +540,7 @@ export interface PreflightCheckResult {
  * @param trajectoryLastActivityAt - Optional trajectory timestamp as secondary guardrail
  * @param idleCheckOverride - Optional override for idle check result (for testing)
  */
+/* eslint-disable @typescript-eslint/max-params -- Reason: Preflight check requires workspace, state, principleId, trajectory timestamp, and idle override */
 export function checkPreflight(
     workspaceDir: string,
     stateDir: string,

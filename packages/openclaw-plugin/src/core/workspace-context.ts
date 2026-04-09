@@ -22,8 +22,11 @@ import type { Principle, PrincipleValueMetrics } from '../types/principle-tree-s
 import type { Principle as ActivePrinciple } from './evolution-types.js';
 
 interface PrincipleTreeLedgerAccessor {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: interface method param names intentionally unused - implementations provide actual names
     getPrincipleSubtree(_principleId: string): PrincipleSubtree | undefined;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: interface method param names intentionally unused - implementations provide actual names
     updatePrinciple(_principleId: string, updates: Partial<Principle>): Principle;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: interface method param names intentionally unused - implementations provide actual names
     updatePrincipleValueMetrics(principleId: string, metrics: PrincipleValueMetrics): PrincipleValueMetrics;
 }
 

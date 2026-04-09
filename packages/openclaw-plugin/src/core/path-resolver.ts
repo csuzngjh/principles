@@ -8,9 +8,13 @@ export interface PathResolverOptions {
     workspaceDir?: string;
     normalizeWorkspace?: boolean;
     logger?: {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: logger callback param names intentionally unused - callbacks only invoked for side effects
         debug?: (_msg: string) => void;
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: logger callback param names intentionally unused - callbacks only invoked for side effects
         info?: (_msg: string) => void;
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: logger callback param names intentionally unused - callbacks only invoked for side effects
         warn?: (_msg: string) => void;
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: logger callback param names intentionally unused - callbacks only invoked for side effects
         error?: (_msg: string) => void;
     };
 }
@@ -418,6 +422,7 @@ export function resolveWorkspaceDirFromApi(
     if (!api) return undefined;
 
     // 1. Official API: api.runtime.agent.resolveAgentWorkspaceDir
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: type callback params cfg/id unused - actual values passed are api.config and agentId
     const officialAgent = (api.runtime as { agent?: { resolveAgentWorkspaceDir?: (cfg: unknown, id: string) => string } }).agent;
     if (officialAgent?.resolveAgentWorkspaceDir) {
         try {

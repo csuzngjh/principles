@@ -854,9 +854,10 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
         const toolMatches = toolPatterns.flatMap(({ pattern, tool }) => {
           const matches: string[] = [];
           // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in while loop condition
-          let m;
+          let _m;
           const r = new RegExp(pattern.source, pattern.flags);
-          while ((m = r.exec(latestUserText)) !== null) matches.push(tool);
+          /* eslint-disable @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: regex exec side effect used, match variable intentionally unused */
+          while ((_m = r.exec(latestUserText)) !== null) matches.push(tool);
           return matches;
         });
         const fileMatches = latestUserText.match(filePattern) ?? [];

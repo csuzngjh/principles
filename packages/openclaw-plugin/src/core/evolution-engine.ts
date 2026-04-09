@@ -385,6 +385,7 @@ export class EvolutionEngine {
     return this.createNewScorecard();
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: createNewScorecard is a factory function, no this reference needed
   private createNewScorecard(): EvolutionScorecard {
     const now = new Date().toISOString();
     return {
@@ -443,7 +444,10 @@ export class EvolutionEngine {
     } catch (e) {
       console.error(`[Evolution] Failed to save scorecard: ${String(e)}`);
       this.scheduleRetrySave();
-      try { fs.unlinkSync(tempPath); } catch {}
+      /* eslint-disable @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: intentionally ignored - cleanup failure should not mask original error */
+      try { fs.unlinkSync(tempPath); } catch (_e) {
+        // Cleanup failure intentionally ignored - should not mask original error
+      }
     }
   }
 
@@ -523,6 +527,7 @@ export class EvolutionEngine {
 
   // ===== 工具方法 =====
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: generateId is a pure utility function, no this reference needed
   private generateId(): string {
     return `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
   }
