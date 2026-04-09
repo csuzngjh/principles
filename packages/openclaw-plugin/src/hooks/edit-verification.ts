@@ -126,9 +126,11 @@ This is enforced by P-03 (精确匹配前验证原则).`;
  * Handle edit tool verification before allowing operation
  * This enforces P-03 at the tool layer
  */
+// eslint-disable-next-line @typescript-eslint/max-params -- Reason: Hook handler signature requires event + context + config - refactoring would break plugin interface
 export function handleEditVerification(
   event: PluginHookBeforeToolCallEvent,
   wctx: WorkspaceContext,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: logger is typed as any by plugin framework - type not available
   ctx: { logger?: any; sessionId?: string },
   config: EditVerificationConfig = {}
 ): PluginHookBeforeToolCallResult | void {
@@ -157,7 +159,7 @@ export function handleEditVerification(
   let absolutePath: string;
   try {
     absolutePath = wctx.resolve(filePath);
-  } catch (error) {
+  } catch (_error) {
     // Path resolution error, let it fail naturally
     return;
   }
