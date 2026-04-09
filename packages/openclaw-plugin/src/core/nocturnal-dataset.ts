@@ -282,6 +282,7 @@ function withRegistryLock<T>(workspaceDir: string, fn: (_records: NocturnalDatas
  * @param classification - Optional replay classification
  * @returns RegisterSampleResult
  */
+// eslint-disable-next-line @typescript-eslint/max-params -- Reason: sample registration requires workspace + artifact + path + family - refactoring would break API
 export function registerSample(
   workspaceDir: string,
   artifact: NocturnalArtifact,
@@ -423,6 +424,7 @@ const VALID_TRANSITIONS: Record<NocturnalReviewStatus, NocturnalReviewStatus[]> 
  * @returns Updated record, or null if not found
  * @throws Error if transition is invalid
  */
+// eslint-disable-next-line @typescript-eslint/max-params -- Reason: status update requires workspace + fingerprint + status - refactoring would break API
 export function updateReviewStatus(
   workspaceDir: string,
   sampleFingerprint: string,

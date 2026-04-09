@@ -136,6 +136,7 @@ function computeDatasetFingerprint(sampleFingerprints: string[]): string {
  * Serialize a single dataset record + artifact to ORPO JSONL line.
  * Caller guarantees record.targetModelFamily is non-null.
  */
+// eslint-disable-next-line @typescript-eslint/max-params -- Reason: serialization requires record + artifact + export info - refactoring would break internal API
 function serializeORPOSample(
   record: NocturnalDatasetRecord,
   artifact: ReturnType<typeof readDatasetArtifact>,
