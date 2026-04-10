@@ -19,7 +19,7 @@ jobs:
           node-version: '22'
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci --ignore-scripts
 
       - name: Run ESLint
         run: npm run lint --if-present
@@ -40,7 +40,7 @@ jobs:
           node-version: ${{ matrix.node-version }}
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci --ignore-scripts
 
       - name: Run tests
         run: npm test --if-present
@@ -59,7 +59,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: packages/openclaw-plugin
-        run: npm install
+        run: npm ci --ignore-scripts
 
       - name: Build
         working-directory: packages/openclaw-plugin
@@ -87,7 +87,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: packages/openclaw-plugin
-        run: npm install
+        run: npm ci --ignore-scripts
 
       - name: Run tests
         working-directory: packages/openclaw-plugin
