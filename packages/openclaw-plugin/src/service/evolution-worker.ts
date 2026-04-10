@@ -181,6 +181,8 @@ export interface RecentPainContext {
     source: string;
     reason: string;
     timestamp: string;
+    /** Session ID where the pain occurred */
+    sessionId: string;
   } | null;
   /** Count of pain events in the recent window (for signal strength) */
   recentPainCount: number;
@@ -477,10 +479,11 @@ export function hasEquivalentPromotedRule(dictionary: { getAllRules(): Record<st
 
 /**
  * Read recent pain context from PAIN_FLAG file.
+ * Extracts session_id to link to trajectory DB.
  * Returns structured pain metadata for attaching to sleep_reflection tasks.
  * Returns null if no pain flag exists.
  */
-function readRecentPainContext(wctx: WorkspaceContext): RecentPainContext {
+export function readRecentPainContext(wctx: WorkspaceContext): RecentPainContext {
     const painFlagPath = wctx.resolve('PAIN_FLAG');
     if (!fs.existsSync(painFlagPath)) {
         return { mostRecent: null, recentPainCount: 0, recentMaxPainScore: 0 };
@@ -494,17 +497,19 @@ function readRecentPainContext(wctx: WorkspaceContext): RecentPainContext {
         let source = '';
         let reason = '';
         let timestamp = '';
+        let sessionId = '';
 
         for (const line of lines) {
             if (line.startsWith('score:')) score = parseInt(line.split(':', 2)[1].trim(), 10) || 0;
             if (line.startsWith('source:')) source = line.split(':', 2)[1].trim();
             if (line.startsWith('reason:')) reason = line.slice('reason:'.length).trim();
-            if (line.startsWith('timestamp:')) timestamp = line.slice('timestamp:'.length).trim();
+            if (line.startsWith('time:')) timestamp = line.slice('time:'.length).trim();
+            if (line.startsWith('session_id:')) sessionId = line.slice('session_id:'.length).trim();
         }
 
         if (score > 0) {
             return {
-                mostRecent: { score, source, reason, timestamp },
+                mostRecent: { score, source, reason, timestamp, sessionId },
                 recentPainCount: 1,
                 recentMaxPainScore: score,
             };
@@ -1402,16 +1407,23 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         workflowId = sleepTask.resultRef!;
                     } else {
                         // Phase 1: Build trajectory snapshot for Nocturnal pipeline
-                        // Try to find a real session from trajectory database first.
-                        // Task IDs (e.g., "22c571e1" or "manual_mnt0qm6j") are NOT session IDs,
-                        // so the initial lookup always fails. Fall back to most recent session.
+                        // Priority: Pain signal sessionId → Task ID → Recent session with violations
                         try {
                             const extractor = createNocturnalTrajectoryExtractor(wctx.workspaceDir);
 
-                            // Try task ID first (unlikely to match, but cheap to try)
-                            let fullSnapshot = extractor.getNocturnalSessionSnapshot(sleepTask.id);
+                            // 1. Try exact session ID from pain signal (most accurate)
+                            const painSessionId = sleepTask.recentPainContext?.mostRecent?.sessionId;
+                            let fullSnapshot = painSessionId ? extractor.getNocturnalSessionSnapshot(painSessionId) : undefined;
+                            if (fullSnapshot) {
+                                logger?.info?.(`[PD:EvolutionWorker] Task ${sleepTask.id} using exact session from pain signal: ${painSessionId}`);
+                            }
 
-                            // If no match, find most recent session WITH violation signals
+                            // 2. Try task ID (legacy compatibility, rarely matches)
+                            if (!fullSnapshot) {
+                                fullSnapshot = extractor.getNocturnalSessionSnapshot(sleepTask.id);
+                            }
+
+                            // 3. If no match, find most recent session WITH violation signals
                             if (!fullSnapshot) {
                                 const recentSessions = extractor.listRecentNocturnalCandidateSessions({ limit: 20, minToolCalls: 1 });
                                 // Filter to sessions with actual violations (pain, failures, or gate blocks)

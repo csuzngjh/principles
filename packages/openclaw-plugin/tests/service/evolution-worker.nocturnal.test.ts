@@ -48,7 +48,8 @@ vi.mock('../../src/core/nocturnal-trajectory-extractor.js', async () => {
   };
 });
 
-import { EvolutionWorkerService } from '../../src/service/evolution-worker.js';
+import { EvolutionWorkerService, readRecentPainContext } from '../../src/service/evolution-worker.js';
+import { WorkspaceContext } from '../../src/core/workspace-context.js';
 import { safeRmDir } from '../test-utils.js';
 
 function readQueue(stateDir: string) {
@@ -200,6 +201,122 @@ describe('EvolutionWorkerService nocturnal hardening', () => {
       expect(queue[0].status).toBe('failed');
       expect(queue[0].resolution).toBe('failed_max_retries');
       expect(queue[0].lastError).toContain('gateway request');
+    } finally {
+      EvolutionWorkerService.stop({ workspaceDir, stateDir, logger: console } as any);
+      safeRmDir(workspaceDir);
+    }
+  });
+
+  it('extracts session_id from .pain_flag file correctly', async () => {
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pain-session-'));
+    const stateDir = path.join(workspaceDir, '.state');
+    fs.mkdirSync(stateDir, { recursive: true });
+
+    // Write a pain flag WITH session_id
+    fs.writeFileSync(
+      path.join(stateDir, '.pain_flag'),
+      `source: test_pain
+score: 80
+reason: test reason
+time: 2026-04-10T00:00:00.000Z
+session_id: explicit-session-from-pain
+`,
+      'utf8'
+    );
+
+    // Create a WorkspaceContext to test the function
+    const wctx = WorkspaceContext.fromHookContext({ workspaceDir, stateDir, logger: console } as any);
+
+    try {
+      const context = readRecentPainContext(wctx);
+      
+      // Verify the session_id was extracted from the pain flag file
+      expect(context.mostRecent).toBeDefined();
+      expect(context.mostRecent.sessionId).toBe('explicit-session-from-pain');
+      expect(context.mostRecent.score).toBe(80);
+      expect(context.recentPainCount).toBe(1);
+    } finally {
+      safeRmDir(workspaceDir);
+    }
+  });
+
+  it('prioritizes pain signal session ID for snapshot extraction', async () => {
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pain-priority-'));
+    const stateDir = path.join(workspaceDir, '.state');
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.mkdirSync(path.join(stateDir, 'sessions'), { recursive: true });
+    fs.mkdirSync(path.join(stateDir, 'logs'), { recursive: true });
+
+    // Mock extractor to succeed ONLY for the pain session ID
+    mockGetNocturnalSessionSnapshot.mockImplementation((sessionId: string) => {
+      if (sessionId === 'pain-session-id') {
+        return {
+          sessionId: 'pain-session-id',
+          startedAt: '2026-04-10T00:00:00.000Z',
+          stats: { totalToolCalls: 10, totalAssistantTurns: 5, failureCount: 2 },
+          painEvents: [],
+          gateBlocks: [],
+        };
+      }
+      return null;
+    });
+
+    mockStartWorkflow.mockResolvedValue({ workflowId: 'wf-1', childSessionKey: 'child-1', state: 'active' });
+    mockGetWorkflowDebugSummary.mockResolvedValue({ state: 'active', metadata: {} });
+
+    EvolutionWorkerService.api = {
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+      runtime: {},
+    } as any;
+
+    // Create a queue with a task that HAS a pain session ID
+    const taskWithPainSession = {
+      id: 'task-with-pain',
+      taskKind: 'sleep_reflection',
+      priority: 'medium',
+      score: 50,
+      source: 'nocturnal',
+      reason: 'Sleep reflection',
+      timestamp: '2026-04-10T00:00:00.000Z',
+      enqueued_at: '2026-04-10T00:00:00.000Z',
+      status: 'pending',
+      retryCount: 0,
+      maxRetries: 1,
+      recentPainContext: {
+        mostRecent: { sessionId: 'pain-session-id', score: 80, source: 'test', reason: 'r', timestamp: 't' },
+        recentPainCount: 1,
+        recentMaxPainScore: 80,
+      },
+    };
+
+    fs.writeFileSync(
+      path.join(stateDir, 'evolution_queue.json'),
+      JSON.stringify([taskWithPainSession]),
+      'utf8'
+    );
+
+    try {
+      EvolutionWorkerService.start({
+        workspaceDir,
+        stateDir,
+        logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+        config: { get: () => 15000 },
+      } as any);
+
+      // Advance time to process the pending task
+      await vi.advanceTimersByTimeAsync(6000);
+
+      // Verify the extractor was called with the pain session ID first
+      expect(mockGetNocturnalSessionSnapshot).toHaveBeenCalledWith('pain-session-id');
+      
+      // Verify workflow started (meaning snapshot was found via pain session ID)
+      expect(mockStartWorkflow).toHaveBeenCalled();
+
+      // Verify task status updated
+      const queue = readQueue(stateDir);
+      expect(queue[0].status).toBe('in_progress');
+      expect(queue[0].resultRef).toBe('wf-1');
+
     } finally {
       EvolutionWorkerService.stop({ workspaceDir, stateDir, logger: console } as any);
       safeRmDir(workspaceDir);
