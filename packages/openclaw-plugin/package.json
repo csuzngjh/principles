@@ -33,7 +33,8 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "lint": "eslint src/",
-    "bootstrap-rules": "node scripts/bootstrap-rules.mjs"
+    "bootstrap-rules": "node scripts/bootstrap-rules.mjs",
+    "validate-live-path": "tsx scripts/validate-live-path.ts"
   },
   "devDependencies": {
     "@testing-library/react": "^16.3.0",
