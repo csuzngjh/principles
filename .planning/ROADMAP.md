@@ -164,7 +164,7 @@ Plans:
 **Coverage:** 12/12 requirements mapped
 
 - [x] **Phase 16: Nocturnal Snapshot and Runtime Hardening** - implemented locally; awaiting production evidence validation (SNAP-01, SNAP-02, SNAP-03, BG-01, BG-02, BG-03)
-- [ ] **Phase 17: Minimal Rule Bootstrap** - seed 1-3 production rules so the code implementation branch has live entities (BOOT-01, BOOT-02, BOOT-03)
+- [x] **Phase 17: Minimal Rule Bootstrap** - seed 1-3 production rules so the code implementation branch has live entities (BOOT-01, BOOT-02, BOOT-03) (completed 2026-04-10)
 - [ ] **Phase 18: Live Replay and Operator Validation** - prove one real replay/lifecycle path and align operator guidance with reality (LIVE-01, LIVE-02, LIVE-03)
 
 ### Phase 16: Nocturnal Snapshot and Runtime Hardening
@@ -202,10 +202,10 @@ Plans:
 2. At least one principle has valid `ruleIds` linkage.
 3. Bootstrap scope is documented and intentionally narrow.
 
-**Plans:** 1 plan
+**Plans:** 1/1 plans complete
 
 Plans:
-- [ ] 17-01-PLAN.md — Create bootstrap script with TDD workflow
+- [x] 17-01-PLAN.md — Create bootstrap script with TDD workflow
 
 ---
 
@@ -236,7 +236,7 @@ Plans:
 | 01 | v1.10 | 0/1 | Not started | - |
 | 02-08 | v1.10 | 0/7 | Not started | - |
 | 16 | v1.12 | 2/2 | Local complete | 2026-04-10 |
-| 17 | v1.12 | 0/1 | Not started | - |
+| 17 | v1.12 | 1/1 | Complete   | 2026-04-10 |
 | 18 | v1.12 | 0/1 | Not started | - |
 
 ---

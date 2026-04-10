@@ -2,14 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.10
 milestone_name: Thinking Models 页面优化
-status: defining
-last_updated: "2026-04-09"
+status: verifying
+last_updated: "2026-04-10T06:59:19.317Z"
+last_activity: 2026-04-10
 progress:
   total_phases: 8
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
-  percent: 0
+  total_plans: 2
+  completed_plans: 2
+  percent: 100
 ---
 
 # State: v1.10 Thinking Models 页面优化
@@ -21,7 +22,7 @@ See `.planning/PROJECT.md` (updated 2026-04-09)
 **Milestone:** v1.10
 **Name:** Thinking Models 页面优化
 **Core Value:** AI agents improve their own behavior through a structured evolution loop. pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
-**Current Focus:** Phase 01 — 基础可视化 (覆盖率趋势图、场景热力图、空状态优化)
+**Current Focus:** Phase 17 — Minimal Rule Bootstrap
 
 ## Previous Milestone (v1.9.3)
 
@@ -34,14 +35,15 @@ See `.planning/PROJECT.md` (updated 2026-04-09)
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-04-09 — Milestone v1.10 started
+Phase: 17 (Minimal Rule Bootstrap) — EXECUTING
+Plan: 1 of 1
+Status: Phase complete — ready for verification
+Last activity: 2026-04-10
 
 ## v1.10 Architecture
 
 ### Architecture
+
 - Frontend: React + TypeScript (`ui/src/pages/ThinkingModelsPage.tsx`)
 - API client: `ui/src/api.ts` (getThinkingOverview, getThinkingModelDetail)
 - Backend service: `src/service/control-ui-query-service.ts`
@@ -50,6 +52,7 @@ Last activity: 2026-04-09 — Milestone v1.10 started
 - Chart components available: `ui/src/charts.tsx` (Sparkline, LineChart, BulletChart, BarChart, etc.)
 
 ### Existing Data (Backend → Frontend Gap Analysis)
+
 - ✅ `scenarioMatrix` (model × scenario cross-tab) — fetched but NOT rendered
 - ✅ `coverageTrend` (daily coverage rate) — fetched but NOT rendered
 - ✅ `usageTrend` (daily hits per model) — fetched but NOT rendered
@@ -60,6 +63,7 @@ Last activity: 2026-04-09 — Milestone v1.10 started
 - ✅ `correctionSampleRate` — in summary but NOT rendered
 
 ### Current Page Limitations
+
 - No pagination, filtering, or search on model list
 - No loading states for detail transitions
 - "Back" button clears detail but doesn't deselect model (inconsistent UX)
@@ -68,12 +72,14 @@ Last activity: 2026-04-09 — Milestone v1.10 started
 - Events are plain `<pre>` cards (no context display)
 
 ### THINKING_OS.md
+
 - Single source of truth for 10 thinking model definitions (T-01~T-10)
 - Template currently has 8 directives, builtin has 10 — mismatch needs fixing
 - `antiPattern` (forbidden field) is lost in API response type
 - `trigger` text is used only for regex generation, never displayed
 
 ### Previous Milestones
+
 - v1.9.1: WebUI 数据源修复 — 4 pages fixed (Overview, Loop, Feedback, Gate Monitor)
 - v1.9.3: 剩余 Lint 修复 — COMPLETE (CI green)
 - All 50 open issues verified fixed and closed
