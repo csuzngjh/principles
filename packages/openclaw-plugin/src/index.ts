@@ -58,10 +58,30 @@ import { migrateDirectoryStructure } from './core/migration.js';
 import { SystemLogger } from './core/system-logger.js';
 import { createDeepReflectTool } from './tools/deep-reflect.js';
 import { PathResolver, resolveWorkspaceDirFromApi } from './core/path-resolver.js';
+import { validateWorkspaceDir } from './core/workspace-dir-validation.js';
 import { createPrinciplesConsoleRoute } from './http/principles-console-route.js';
 
 // Track initialization to avoid repeated calls
 let workspaceInitialized = false;
+
+/**
+ * Resolve workspaceDir for slash commands.
+ * Chain: ctx.workspaceDir → resolveWorkspaceDirFromApi (official OpenClaw API + env vars)
+ * NEVER uses api.resolvePath('.') — it returns user HOME dir, NOT workspace.
+ */
+function resolveCommandWorkspaceDir(
+  api: OpenClawPluginApi,
+  ctx: { workspaceDir?: string },
+): string | undefined {
+  // 1. Direct from command context (most reliable — set by OpenClaw for current session)
+  if (ctx.workspaceDir) {
+    const issue = validateWorkspaceDir(ctx.workspaceDir);
+    if (!issue) return ctx.workspaceDir;
+  }
+
+  // 2. Official OpenClaw API → env vars → config file (resolveWorkspaceDirFromApi handles all)
+  return resolveWorkspaceDirFromApi(api);
+}
 
 // Map from childSessionKey → shadowObservationId
 // Used to complete shadow observations when subagent ends
@@ -83,7 +103,7 @@ function computeRuntimeShadowTaskFingerprint(event: PluginHookSubagentSpawningEv
   return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex').slice(0, 16);
 }
 
-import { resolveValidWorkspaceDir, validateWorkspaceDir } from './core/workspace-dir-validation.js';
+import { resolveValidWorkspaceDir } from './core/workspace-dir-validation.js';
 
 function resolveToolHookWorkspaceDir(
   ctx: { workspaceDir?: string; agentId?: string },
@@ -472,7 +492,7 @@ const plugin = {
       acceptsArgs: true,
       handler: (ctx) => {
         try {
-          const workspaceDir = api.resolvePath('.');
+          const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
           // Ensure workspaceDir is in config for handlePainCommand
           if (ctx.config) ctx.config.workspaceDir = workspaceDir;
           return handlePainCommand(ctx);
@@ -489,7 +509,7 @@ const plugin = {
       acceptsArgs: true,
       handler: (ctx) => {
         try {
-          const workspaceDir = api.resolvePath('.');
+          const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
           if (ctx.config) ctx.config.workspaceDir = workspaceDir;
           return handleContextCommand(ctx);
         } catch (err) {
@@ -505,7 +525,7 @@ const plugin = {
       acceptsArgs: true,
       handler: (ctx) => {
         try {
-          const workspaceDir = api.resolvePath('.');
+          const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
           if (ctx.config) ctx.config.workspaceDir = workspaceDir;
           return handleFocusCommand(ctx, api);
         } catch (err) {
@@ -521,7 +541,7 @@ const plugin = {
       description: getCommandDescription('pd-evolution-status', language),
       handler: (ctx) => {
         try {
-          const workspaceDir = api.resolvePath('.');
+          const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
           if (ctx.config) ctx.config.workspaceDir = workspaceDir;
           return handleEvolutionStatusCommand(ctx);
         } catch (err) {
@@ -537,7 +557,7 @@ const plugin = {
       acceptsArgs: true,
       handler: (ctx) => {
         try {
-          const workspaceDir = api.resolvePath('.');
+          const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
           if (ctx.config) ctx.config.workspaceDir = workspaceDir;
           return handlePrincipleRollbackCommand(ctx);
         } catch (err) {
@@ -553,7 +573,7 @@ const plugin = {
       acceptsArgs: true,
       handler: (ctx) => {
         try {
-          const workspaceDir = api.resolvePath('.');
+          const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
           if (ctx.config) ctx.config.workspaceDir = workspaceDir;
           return handleRollbackCommand(ctx);
         } catch (err) {
@@ -570,7 +590,7 @@ const plugin = {
       acceptsArgs: true,
       handler: (ctx) => {
         try {
-          const workspaceDir = api.resolvePath('.');
+          const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
           if (ctx.config) ctx.config.workspaceDir = workspaceDir;
           return handleExportCommand(ctx);
         } catch (err) {
@@ -586,7 +606,7 @@ const plugin = {
       acceptsArgs: true,
       handler: (ctx) => {
         try {
-          const workspaceDir = api.resolvePath('.');
+          const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
           if (ctx.config) ctx.config.workspaceDir = workspaceDir;
           return handleSamplesCommand(ctx);
         } catch (err) {
@@ -602,7 +622,7 @@ const plugin = {
       acceptsArgs: true,
       handler: (ctx) => {
         try {
-          const workspaceDir = api.resolvePath('.');
+          const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
           if (ctx.config) ctx.config.workspaceDir = workspaceDir;
           return handleNocturnalReviewCommand(ctx);
         } catch (err) {
@@ -618,7 +638,7 @@ const plugin = {
       acceptsArgs: true,
       handler: (ctx) => {
         try {
-          const workspaceDir = api.resolvePath('.');
+          const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
           if (ctx.config) ctx.config.workspaceDir = workspaceDir;
           return handleNocturnalTrainCommand(ctx);
         } catch (err) {
@@ -634,7 +654,7 @@ const plugin = {
       acceptsArgs: true,
       handler: (ctx) => {
         try {
-          const workspaceDir = api.resolvePath('.');
+          const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
           if (ctx.config) ctx.config.workspaceDir = workspaceDir;
           return handleNocturnalRolloutCommand(ctx);
         } catch (err) {
@@ -650,7 +670,7 @@ const plugin = {
       acceptsArgs: true,
       handler: (ctx) => {
         try {
-          const workspaceDir = api.resolvePath('.');
+          const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
           if (ctx.config) ctx.config.workspaceDir = workspaceDir;
           return handleWorkflowDebugCommand(ctx);
         } catch (err) {
@@ -667,7 +687,7 @@ const plugin = {
       acceptsArgs: true,
       handler: (ctx) => {
         try {
-          const workspaceDir = api.resolvePath('.');
+          const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
           if (ctx.config) ctx.config.workspaceDir = workspaceDir;
           return handlePromoteImplCommand(ctx);
         } catch (err) {
@@ -683,7 +703,7 @@ const plugin = {
       acceptsArgs: true,
       handler: (ctx) => {
         try {
-          const workspaceDir = api.resolvePath('.');
+          const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
           if (ctx.config) ctx.config.workspaceDir = workspaceDir;
           return handleDisableImplCommand(ctx);
         } catch (err) {
@@ -699,7 +719,7 @@ const plugin = {
       acceptsArgs: true,
       handler: (ctx) => {
         try {
-          const workspaceDir = api.resolvePath('.');
+          const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
           if (ctx.config) ctx.config.workspaceDir = workspaceDir;
           return handleArchiveImplCommand(ctx);
         } catch (err) {
@@ -715,7 +735,7 @@ const plugin = {
       acceptsArgs: true,
       handler: (ctx) => {
         try {
-          const workspaceDir = api.resolvePath('.');
+          const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
           if (ctx.config) ctx.config.workspaceDir = workspaceDir;
           return handleRollbackImplCommand(ctx);
         } catch (err) {
