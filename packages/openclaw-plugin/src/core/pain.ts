@@ -58,16 +58,18 @@ export function buildPainFlag(input: {
   trace_id?: string;
   trigger_text_preview?: string;
 }): PainFlagData {
+  // Omit optional fields when not provided — prevents writing empty lines to disk
+  // which causes agent confusion (SKILL.md vs reality drift)
   return {
     source: input.source,
     score: input.score,
     time: input.time || new Date().toISOString(),
     reason: input.reason,
-    session_id: input.session_id || '',
-    agent_id: input.agent_id || '',
+    session_id: input.session_id ?? '',
+    agent_id: input.agent_id ?? '',
     is_risky: input.is_risky ? 'true' : 'false',
-    trace_id: input.trace_id || '',
-    trigger_text_preview: input.trigger_text_preview || '',
+    trace_id: input.trace_id ?? '',
+    trigger_text_preview: input.trigger_text_preview ?? '',
   };
 }
 
@@ -77,7 +79,9 @@ export function buildPainFlag(input: {
  */
 export function validatePainFlag(data: Record<string, string>): string[] {
   const missing: string[] = [];
-  const required = ['source', 'score', 'time', 'reason', 'session_id', 'agent_id'] as const;
+  // Only source/score/time/reason are truly required — session_id/agent_id
+  // may be empty in automated contexts (heartbeat, background workers)
+  const required = ['source', 'score', 'time', 'reason'] as const;
   for (const field of required) {
     if (!data[field] || data[field].trim() === '') {
       missing.push(field);

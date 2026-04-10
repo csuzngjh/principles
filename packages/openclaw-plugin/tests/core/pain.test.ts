@@ -107,13 +107,13 @@ describe('Pain Detection Module', () => {
       const missing = validatePainFlag({
         source: 'tool_failure',
         score: '70',
-        // missing time, reason, session_id, agent_id
+        // missing time, reason (session_id/agent_id are optional)
       });
 
       expect(missing).toContain('time');
       expect(missing).toContain('reason');
-      expect(missing).toContain('session_id');
-      expect(missing).toContain('agent_id');
+      expect(missing).not.toContain('session_id');
+      expect(missing).not.toContain('agent_id');
     });
 
     it('should report empty string fields as missing', () => {
@@ -126,7 +126,8 @@ describe('Pain Detection Module', () => {
         agent_id: 'main',
       });
 
-      expect(missing).toContain('session_id');
+      // session_id/agent_id are optional — empty values are acceptable
+      expect(missing).toEqual([]);
     });
   });
 });
