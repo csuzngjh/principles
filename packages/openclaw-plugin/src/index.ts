@@ -59,6 +59,7 @@ import { SystemLogger } from './core/system-logger.js';
 import { createDeepReflectTool } from './tools/deep-reflect.js';
 import { PathResolver, resolveWorkspaceDirFromApi } from './core/path-resolver.js';
 import { validateWorkspaceDir } from './core/workspace-dir-validation.js';
+import { resolveRequiredWorkspaceDir, resolveWorkspaceDir, type WorkspaceResolutionContext } from './core/workspace-dir-service.js';
 import { createPrinciplesConsoleRoute } from './http/principles-console-route.js';
 
 // Track initialization to avoid repeated calls
@@ -115,14 +116,19 @@ function computeRuntimeShadowTaskFingerprint(event: PluginHookSubagentSpawningEv
   return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex').slice(0, 16);
 }
 
-import { resolveValidWorkspaceDir } from './core/workspace-dir-validation.js';
+function resolveCommandWorkspaceDirStrict(
+  api: OpenClawPluginApi,
+  ctx: WorkspaceResolutionContext,
+): string {
+  return resolveRequiredWorkspaceDir(api, ctx, { source: 'command' });
+}
 
-function resolveToolHookWorkspaceDir(
-  ctx: { workspaceDir?: string; agentId?: string },
+function resolveToolHookWorkspaceDirSafe(
+  ctx: WorkspaceResolutionContext,
   api: OpenClawPluginApi,
   source: string,
-): string {
-  return resolveValidWorkspaceDir(ctx, api, { source });
+): string | undefined {
+  return resolveWorkspaceDir(api, ctx, { source });
 }
 
 const plugin = {
@@ -138,7 +144,7 @@ const plugin = {
     // Catches OpenClaw context bugs early (e.g., missing workspaceDir in tool hooks)
     setTimeout(() => {
       const testCtx = { agentId: 'main' };
-      const toolWorkspaceDir = resolveToolHookWorkspaceDir(testCtx, api, 'startup.health_check');
+      const toolWorkspaceDir = resolveToolHookWorkspaceDirSafe(testCtx, api, 'startup.health_check');
       const toolIssue = validateWorkspaceDir(toolWorkspaceDir);
       if (toolIssue) {
         api.logger.error(`[PD:health] Tool hook workspaceDir is INVALID: "${toolWorkspaceDir}" - ${toolIssue}`);
@@ -154,9 +160,10 @@ const plugin = {
     api.on(
       'before_prompt_build',
       async (event: PluginHookBeforePromptBuildEvent, ctx: PluginHookAgentContext): Promise<PluginHookBeforePromptBuildResult | void> => {
+        const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'before_prompt_build');
+        if (!workspaceDir) return;
         try {
-          const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
-          if (!workspaceInitialized && workspaceDir) {
+          if (!workspaceInitialized) {
             migrateDirectoryStructure(api, workspaceDir);
             ensureWorkspaceTemplates(api, workspaceDir, language);
             SystemLogger.log(workspaceDir, 'SYSTEM_BOOT', `Principles Disciple online. Language: ${language}`);
@@ -172,7 +179,6 @@ const plugin = {
           
           return result;
         } catch (err) {
-          const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
           WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
             hook: 'before_prompt_build',
             sessionId: ctx.sessionId,
@@ -187,7 +193,8 @@ const plugin = {
     api.on(
       'before_tool_call',
       (event: PluginHookBeforeToolCallEvent, ctx: PluginHookToolContext): PluginHookBeforeToolCallResult | void => {
-        const workspaceDir = resolveToolHookWorkspaceDir(ctx, api, 'before_tool_call');
+        const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'before_tool_call');
+        if (!workspaceDir) return;
         try {
           const pluginConfig = api.pluginConfig ?? {};
           const {logger} = api;
@@ -199,8 +206,7 @@ const plugin = {
 
           return result;
         } catch (err) {
-          const fallbackDir = resolveToolHookWorkspaceDir(ctx, api, 'before_tool_call');
-          WorkspaceContext.fromHookContext({ workspaceDir: fallbackDir }).eventLog.recordHookExecution({
+          WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
             hook: 'before_tool_call',
             error: String(err)
           }, { flushImmediately: true });
@@ -213,7 +219,8 @@ const plugin = {
     api.on(
       'after_tool_call',
       (event: PluginHookAfterToolCallEvent, ctx: PluginHookToolContext): void => {
-        const workspaceDir = resolveToolHookWorkspaceDir(ctx, api, 'after_tool_call');
+        const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'after_tool_call');
+        if (!workspaceDir) return;
         try {
           const pluginConfig = api.pluginConfig ?? {};
           // Pass api separately to handleAfterToolCall to maintain type safety
@@ -223,8 +230,7 @@ const plugin = {
             hook: 'after_tool_call'
           }, { flushImmediately: true });
         } catch (err) {
-          const fallbackDir = resolveToolHookWorkspaceDir(ctx, api, 'after_tool_call');
-          WorkspaceContext.fromHookContext({ workspaceDir: fallbackDir }).eventLog.recordHookExecution({
+          WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
             hook: 'after_tool_call',
             error: String(err)
           }, { flushImmediately: true });
@@ -237,7 +243,8 @@ const plugin = {
     api.on(
       'llm_output',
       (event: PluginHookLlmOutputEvent, ctx: PluginHookAgentContext): void => {
-        const workspaceDir = resolveToolHookWorkspaceDir(ctx as unknown as Record<string, unknown>, api, 'llm_output');
+        const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx as unknown as Record<string, unknown>, api, 'llm_output');
+        if (!workspaceDir) return;
         try {
           handleLlmOutput(event, { ...ctx, workspaceDir });
 
@@ -262,7 +269,8 @@ const plugin = {
       'after_tool_call',
       (event: PluginHookAfterToolCallEvent, ctx: PluginHookToolContext): void => {
         try {
-          const workspaceDir = resolveToolHookWorkspaceDir(ctx, api, 'trajectory.after_tool_call');
+          const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'trajectory.after_tool_call');
+          if (!workspaceDir) return;
           TrajectoryCollector.handleAfterToolCall(event, { ...ctx, workspaceDir });
           // eslint-disable-next-line no-unused-vars, @typescript-eslint/no-unused-vars -- Reason: catch binding intentionally unused
         } catch (_err) {
@@ -275,7 +283,8 @@ const plugin = {
       'llm_output',
       (event: PluginHookLlmOutputEvent, ctx: PluginHookAgentContext): void => {
         try {
-          const workspaceDir = resolveToolHookWorkspaceDir(ctx as unknown as Record<string, unknown>, api, 'trajectory.llm_output');
+          const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx as unknown as Record<string, unknown>, api, 'trajectory.llm_output');
+          if (!workspaceDir) return;
           TrajectoryCollector.handleLlmOutput(event, { ...ctx, workspaceDir });
           // eslint-disable-next-line no-unused-vars, @typescript-eslint/no-unused-vars -- Reason: catch binding intentionally unused
         } catch (_err) {
@@ -360,17 +369,20 @@ const plugin = {
 
     // ── Hook: Lifecycle ──
     api.on('before_reset', (event: PluginHookBeforeResetEvent, ctx: PluginHookAgentContext) => {
-      const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
+      const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'before_reset');
+      if (!workspaceDir) return;
       return handleBeforeReset(event, { ...ctx, workspaceDir });
     });
     
     api.on('before_compaction', (event: PluginHookBeforeCompactionEvent, ctx: PluginHookAgentContext) => {
-      const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
+      const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'before_compaction');
+      if (!workspaceDir) return;
       return handleBeforeCompaction(event, { ...ctx, workspaceDir });
     });
     
     api.on('after_compaction', (event: PluginHookAfterCompactionEvent, ctx: PluginHookAgentContext) => {
-      const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
+      const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'after_compaction');
+      if (!workspaceDir) return;
       return handleAfterCompaction(event, { ...ctx, workspaceDir });
     });
 
@@ -411,8 +423,8 @@ const plugin = {
     registerCommandWithAlias('pd-thinking', 'pdt', getCommandDescription('pd-thinking', language), (ctx: any) => handleThinkingOs(ctx), { acceptsArgs: true });
     registerCommandWithAlias('pd-reflect', 'pdrl', getCommandDescription('pd-reflect', language), (ctx: any) => {
       try {
-        (ctx as any).api = api;
-        return handlePdReflect.handler(ctx as any);
+        const workspaceDir = resolveCommandWorkspaceDirStrict(api, ctx);
+        return handlePdReflect.handler({ ...ctx, api, workspaceDir } as any);
       } catch (err) {
         api.logger.error(`[PD] Command /pd-reflect failed: ${String(err)}`);
         return { text: language === 'zh' ? "命令执行失败，请检查日志。" : "Command failed. Check logs." };
