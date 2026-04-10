@@ -668,6 +668,57 @@ function syncItem(item) {
 }
 
 /**
+ * Sync THINKING_OS.md templates to all workspace .principles/ directories.
+ * This ensures workspaces get the latest XML directive definitions when
+ * the plugin is updated. Skips workspaces that already have a THINKING_OS.md
+ * with the same directive count (avoids overwriting user-customized files).
+ */
+function syncThinkingOsToWorkspaces(lang) {
+    const sourcePath = join(SOURCE_DIR, 'templates', 'langs', lang, 'principles', 'THINKING_OS.md');
+    if (!existsSync(sourcePath)) return;
+
+    const sourceContent = readFileSync(sourcePath, 'utf-8');
+    const sourceDirectiveCount = (sourceContent.match(/<directive\s+id="/gi) || []).length;
+
+    // Scan all workspace directories under OPENCLAW_DIR
+    const workspacesDir = join(OPENCLAW_DIR);
+    if (!existsSync(workspacesDir)) return;
+
+    const entries = readdirSync(workspacesDir);
+    const workspaceDirs = entries.filter(e =>
+        e.startsWith('workspace-') || e === 'workspace'
+    );
+
+    let updated = 0;
+    let skipped = 0;
+
+    for (const ws of workspaceDirs) {
+        const principlesDir = join(workspacesDir, ws, '.principles');
+        const targetPath = join(principlesDir, 'THINKING_OS.md');
+
+        if (existsSync(targetPath)) {
+            const existing = readFileSync(targetPath, 'utf-8');
+            const existingCount = (existing.match(/<directive\s+id="/gi) || []).length;
+            if (existingCount >= sourceDirectiveCount) {
+                skipped++;
+                continue;
+            }
+        }
+
+        if (!existsSync(principlesDir)) {
+            mkdirSync(principlesDir, { recursive: true });
+        }
+
+        cpSync(sourcePath, targetPath, { force: true });
+        updated++;
+    }
+
+    if (updated > 0) {
+        console.log(`   📄 THINKING_OS.md → ${updated} workspace(s) (${skipped} up-to-date)`);
+    }
+}
+
+/**
  * Install production dependencies in target directory
  */
 function installTargetDependencies() {
@@ -824,6 +875,9 @@ function main() {
 
     // Step 7: Sync skills
     syncSkills(args.lang);
+
+    // Step 7.5: Sync THINKING_OS.md to all workspace .principles/ directories
+    syncThinkingOsToWorkspaces(args.lang);
 
     // Step 8: Install production dependencies in target (ALWAYS — cleanTargetDir wiped node_modules)
     // --skip-deps only applies to SOURCE directory deps, not the installed plugin.
