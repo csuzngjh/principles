@@ -45,9 +45,8 @@ import {
 // ---------------------------------------------------------------------------
 // Embedded Role Prompts
 // ---------------------------------------------------------------------------
-// These prompts are embedded at build time to eliminate file system dependency.
-// Previously loaded from src/agents/*.md at runtime — fragile because esbuild
-// did not copy the agents/ directory into the bundle.
+// These prompts are embedded at build time. The agents/ directory was removed
+// to eliminate fragile runtime file dependencies on the file system.
 
 const NOCTURNAL_DREAMER_PROMPT = `# Nocturnal Dreamer — Candidate Generation
 
