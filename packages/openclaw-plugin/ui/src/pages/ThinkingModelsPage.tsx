@@ -1,11 +1,32 @@
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
-import { ChevronLeft, Search, ArrowUpDown, X, Columns } from 'lucide-react';
+import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
+import { ChevronLeft, Search, ArrowUpDown, X, Columns, Wrench, Zap, ClipboardList, Loader2 } from 'lucide-react';
 import { api } from '../api';
 import type { ThinkingOverviewResponse, ThinkingModelDetailResponse, ThinkingModelSummary } from '../types';
 import { EmptyState, LineChart, StatusBadge, CollapsiblePanel, Sparkline, MiniBarChart } from '../charts';
 import { useI18n } from '../i18n/ui';
 import { formatPercent, formatDate } from '../utils/format';
 import { Loading, ErrorState } from '../components';
+
+// ---------------------------------------------------------------------------
+// Design tokens (mirrors CSS custom properties for inline fallback)
+// ---------------------------------------------------------------------------
+
+const TEXT = {
+  xs: '0.65rem',
+  sm: '0.7rem',
+  base: '0.75rem',
+  lg: '0.8rem',
+  xl: '0.85rem',
+} as const;
+
+const SPACE = {
+  1: 'var(--space-1, 4px)',
+  2: 'var(--space-2, 8px)',
+  3: 'var(--space-3, 12px)',
+  4: 'var(--space-4, 16px)',
+  5: 'var(--space-5, 24px)',
+  6: 'var(--space-6, 32px)',
+} as const;
 
 // ---------------------------------------------------------------------------
 // Recommendation badge helper
@@ -28,17 +49,34 @@ export function ThinkingModelsPage() {
   const [data, setData] = useState<ThinkingOverviewResponse | null>(null);
   const [detail, setDetail] = useState<ThinkingModelDetailResponse | null>(null);
   const [selectedModel, setSelectedModel] = useState('');
+  const [isLoadingDetail, setIsLoadingDetail] = useState(false);
   const [error, setError] = useState('');
 
   // Comparison mode state
   const [selectedForCompare, setSelectedForCompare] = useState<string[]>([]);
   const [comparisonDetails, setComparisonDetails] = useState<Map<string, ThinkingModelDetailResponse>>(new Map());
   const [isComparing, setIsComparing] = useState(false);
+  const [comparisonLoadingModels, setComparisonLoadingModels] = useState<Set<string>>(new Set());
 
   // Filters
   const [recFilter, setRecFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<'hits' | 'successRate' | 'name'>('hits');
+
+  // Debounced search
+  const searchTimer = useRef<ReturnType<typeof setTimeout>>();
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+
+  useEffect(() => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => setDebouncedSearch(search), 200);
+    return () => { if (searchTimer.current) clearTimeout(searchTimer.current); };
+  }, [search]);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => { if (searchTimer.current) clearTimeout(searchTimer.current); };
+  }, []);
 
   // Cache for detail lookups during comparison
   const detailCache = useMemo(() => {
@@ -57,7 +95,10 @@ export function ThinkingModelsPage() {
 
   useEffect(() => {
     if (!selectedModel) return;
-    api.getThinkingModelDetail(selectedModel).then(setDetail).catch((err) => setError(String(err)));
+    setIsLoadingDetail(true);
+    api.getThinkingModelDetail(selectedModel)
+      .then((d) => { setDetail(d); setIsLoadingDetail(false); })
+      .catch((err) => { setError(String(err)); setIsLoadingDetail(false); });
   }, [selectedModel]);
 
   // Comparison mode handlers
@@ -75,16 +116,25 @@ export function ThinkingModelsPage() {
     if (selectedForCompare.length < 2) return;
     setIsComparing(true);
     const newDetails = new Map(comparisonDetails);
-    const fetches = selectedForCompare
-      .filter(id => !newDetails.has(id))
-      .map(async (id) => {
-        try {
-          const d = await api.getThinkingModelDetail(id);
-          newDetails.set(id, d);
-        } catch {
-          // Skip failed fetches
-        }
-      });
+    const pending = selectedForCompare.filter(id => !newDetails.has(id));
+
+    // Track per-model loading state
+    setComparisonLoadingModels(new Set(pending));
+
+    const fetches = pending.map(async (id) => {
+      try {
+        const d = await api.getThinkingModelDetail(id);
+        newDetails.set(id, d);
+      } catch {
+        // Skip failed fetches
+      } finally {
+        setComparisonLoadingModels(prev => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      }
+    });
     await Promise.all(fetches);
     setComparisonDetails(newDetails);
   }, [selectedForCompare, comparisonDetails]);
@@ -93,6 +143,7 @@ export function ThinkingModelsPage() {
     setIsComparing(false);
     setSelectedForCompare([]);
     setComparisonDetails(new Map());
+    setComparisonLoadingModels(new Set());
   }, []);
 
   // Filtered + sorted model list
@@ -102,8 +153,8 @@ export function ThinkingModelsPage() {
     if (recFilter !== 'all') {
       models = models.filter(m => m.recommendation === recFilter);
     }
-    if (search) {
-      const q = search.toLowerCase();
+    if (debouncedSearch) {
+      const q = debouncedSearch.toLowerCase();
       models = models.filter(m =>
         m.name.toLowerCase().includes(q) ||
         (m.commonScenarios ?? []).some(s => s.toLowerCase().includes(q))
@@ -115,7 +166,7 @@ export function ThinkingModelsPage() {
       return a.name.localeCompare(b.name);
     });
     return models;
-  }, [data, recFilter, search, sortBy]);
+  }, [data, recFilter, debouncedSearch, sortBy]);
 
   // Scenario heatmap data
   const heatmapData = useMemo(() => {
@@ -143,8 +194,8 @@ export function ThinkingModelsPage() {
         <div>
           <h2>{t('thinkingModels.pageTitle')}</h2>
           {data.thinkingSummary?.modelDefinitions && data.thinkingSummary.modelDefinitions.length > 0 && (
-            <p style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', margin: '4px 0 0' }}>
-              {t('thinkingModels.thinkingOsSource')}: <code style={{ fontSize: '0.65rem', background: 'var(--bg-sunken)', padding: '1px 4px', borderRadius: 3 }}>THINKING_OS.md</code>
+            <p style={{ fontSize: TEXT.sm, color: 'var(--text-secondary)', margin: `${SPACE[1]} 0 0` }}>
+              {t('thinkingModels.thinkingOsSource')}: <code style={{ fontSize: TEXT.xs, background: 'var(--bg-sunken)', padding: '1px 4px', borderRadius: 3 }}>THINKING_OS.md</code>
             </p>
           )}
         </div>
@@ -158,20 +209,23 @@ export function ThinkingModelsPage() {
 
       {!hasData ? (
         /* ── No data yet: show model definitions grid ── */
-        <section className="panel" style={{ marginBottom: 'var(--space-4)' }}>
-          <div style={{ textAlign: 'center', padding: 'var(--space-5)', color: 'var(--text-secondary)' }}>
-            <div style={{ fontSize: '2rem', marginBottom: 8 }}>🧠</div>
-            <h3 style={{ marginBottom: 4 }}>{t('thinkingModels.noDataTitle') || '思维模型定义'}</h3>
-            <p style={{ fontSize: '0.85rem', maxWidth: 500, margin: '0 auto 24px' }}>
-              {t('thinkingModels.noDataDesc') || '以下是 10 个思维模型的定义。当 AI 开始使用后，这里会显示每个模型的使用统计。'}
+        <section className="panel" style={{ marginBottom: SPACE[4] }}>
+          <div style={{ textAlign: 'center', padding: SPACE[5], color: 'var(--text-secondary)' }}>
+            <div style={{ fontSize: '2rem', marginBottom: SPACE[2] }}>🧠</div>
+            <h3 style={{ marginBottom: SPACE[1] }}>{t('thinkingModels.noDataTitle')}</h3>
+            <p style={{ fontSize: TEXT.lg, maxWidth: 500, margin: `0 auto ${SPACE[5]}` }}>
+              {t('thinkingModels.noDataDesc')}
             </p>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: SPACE[3] }}>
             {data.topModels.map(model => (
               <div
                 key={model.modelId}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedModel(model.modelId); setDetail(null); } }}
                 style={{
-                  padding: 12,
+                  padding: SPACE[3],
                   border: '1px solid var(--border)',
                   borderRadius: 8,
                   background: 'var(--bg-sunken)',
@@ -179,16 +233,16 @@ export function ThinkingModelsPage() {
                 }}
                 onClick={() => { setSelectedModel(model.modelId); setDetail(null); }}
               >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
-                  <strong style={{ fontSize: '0.85rem' }}>{model.modelId}: {model.name}</strong>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: SPACE[2] }}>
+                  <strong style={{ fontSize: TEXT.xl }}>{model.modelId}: {model.name}</strong>
                 </div>
-                <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '0 0 8px', lineHeight: 1.4 }}>
+                <p style={{ fontSize: TEXT.base, color: 'var(--text-secondary)', margin: `0 0 ${SPACE[2]}`, lineHeight: 1.4 }}>
                   {model.description}
                 </p>
                 {model.commonScenarios.length > 0 && (
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: SPACE[1] }}>
                     {model.commonScenarios.slice(0, 3).map(s => (
-                      <span key={s} style={{ fontSize: '0.65rem', padding: '1px 6px', background: 'rgba(91,139,160,0.1)', borderRadius: 3, color: 'var(--info)' }}>
+                      <span key={s} style={{ fontSize: TEXT.xs, padding: '1px 6px', background: 'rgba(91,139,160,0.1)', borderRadius: 3, color: 'var(--info)' }}>
                         {s}
                       </span>
                     ))}
@@ -203,8 +257,8 @@ export function ThinkingModelsPage() {
         <>
           {/* Coverage Trend */}
           {data.coverageTrend.length >= 1 && (
-            <section className="panel" style={{ marginBottom: 'var(--space-4)' }}>
-              <h3 style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: 8 }}>
+            <section className="panel" style={{ marginBottom: SPACE[4] }}>
+              <h3 className="section-title">
                 {t('thinkingModels.coverageTrend')}
               </h3>
               <LineChart
@@ -220,40 +274,32 @@ export function ThinkingModelsPage() {
           )}
 
           {/* Search + Sort + Filter */}
-          <div style={{ display: 'flex', gap: 8, marginBottom: 'var(--space-3)', alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: SPACE[2], marginBottom: SPACE[3], alignItems: 'center', flexWrap: 'wrap' }}>
             <div style={{ position: 'relative', flex: '1 1 200px' }}>
-              <Search size={14} style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} />
+              <Search size={14} style={{ position: 'absolute', left: SPACE[2], top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)', pointerEvents: 'none' }} />
               <input
                 type="text"
                 placeholder={t('thinkingModels.searchPlaceholder')}
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                style={{ paddingLeft: 28, width: '100%', padding: '6px 8px 6px 28px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg-panel)', color: 'var(--text-primary)', fontSize: '0.8rem' }}
+                style={{ width: '100%', padding: `6px ${SPACE[2]} 6px 28px`, border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg-panel)', color: 'var(--text-primary)', fontSize: TEXT.lg }}
               />
             </div>
             <button
               onClick={() => setSortBy(prev => prev === 'hits' ? 'successRate' : prev === 'successRate' ? 'name' : 'hits')}
-              style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 10px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg-panel)', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '0.75rem' }}
+              className="sort-button"
             >
               <ArrowUpDown size={14} />
               {sortBy === 'hits' ? t('thinkingModels.sortByHits') : sortBy === 'successRate' ? t('thinkingModels.sortBySuccessRate') : t('thinkingModels.sortByName')}
             </button>
-            <div style={{ display: 'flex', gap: 4 }}>
+            <div style={{ display: 'flex', gap: SPACE[1] }}>
               {['all', 'reinforce', 'rework', 'archive'].map(key => (
                 <button
                   key={key}
                   onClick={() => setRecFilter(key)}
-                  style={{
-                    padding: '3px 8px',
-                    border: `1px solid ${recFilter === key ? 'var(--accent)' : 'var(--border)'}`,
-                    borderRadius: 4,
-                    background: recFilter === key ? 'rgba(91, 139, 160, 0.15)' : 'transparent',
-                    color: recFilter === key ? 'var(--accent)' : 'var(--text-secondary)',
-                    cursor: 'pointer',
-                    fontSize: '0.7rem',
-                  }}
+                  className={`filter-button ${recFilter === key ? 'active' : ''}`}
                 >
-                  {key === 'all' ? 'All' : REC_BADGE[key]?.label(t)}
+                  {key === 'all' ? t('thinkingModels.filterAll') : REC_BADGE[key]?.label(t)}
                 </button>
               ))}
             </div>
@@ -265,13 +311,13 @@ export function ThinkingModelsPage() {
             <section className="panel">
               {/* Compare button bar */}
               {selectedForCompare.length >= 2 && !isComparing && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', marginBottom: 8, background: 'rgba(91, 139, 160, 0.08)', borderRadius: 6, border: '1px solid var(--border)' }}>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                    {selectedForCompare.length} {t('thinkingModels.compareSelected') || 'selected'}
+                <div className="compare-bar">
+                  <span style={{ fontSize: TEXT.base, color: 'var(--text-secondary)' }}>
+                    {selectedForCompare.length} {t('thinkingModels.compareSelected')}
                   </span>
                   <button
                     onClick={startComparison}
-                    style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 12px', border: 'none', borderRadius: 4, background: 'var(--accent)', color: '#fff', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 600 }}
+                    className="compare-button"
                   >
                     <Columns size={14} />
                     {t('thinkingModels.compare')}
@@ -285,7 +331,7 @@ export function ThinkingModelsPage() {
                     <div
                       key={item.modelId}
                       className={`table-row ${selectedModel === item.modelId && !isComparing ? 'active' : ''}`}
-                      style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', ...(item.recommendation === 'reinforce' ? { borderLeft: '3px solid var(--success)', paddingLeft: 'calc(var(--space-2) - 3px)' } : {}) }}
+                      style={{ display: 'flex', alignItems: 'center', gap: SPACE[2], padding: `${SPACE[2]} ${SPACE[3]}`, ...(item.recommendation === 'reinforce' ? { borderLeft: '3px solid var(--success)', paddingLeft: `calc(${SPACE[2]} - 3px)` } : {}) }}
                     >
                       <input
                         type="checkbox"
@@ -293,20 +339,20 @@ export function ThinkingModelsPage() {
                         onChange={() => toggleCompareSelection(item.modelId)}
                         onClick={e => e.stopPropagation()}
                         style={{ accentColor: 'var(--accent)', cursor: 'pointer', flexShrink: 0 }}
-                        title={t('thinkingModels.compare') || 'Compare'}
+                        aria-label={`${t('thinkingModels.compare')}: ${item.name}`}
                       />
                       <button
                         onClick={() => { setSelectedModel(item.modelId); setDetail(null); setIsComparing(false); }}
-                        style={{ flex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: 'inherit', textAlign: 'left' }}
+                        className="model-list-button"
                       >
                         <div>
-                          <strong>{item.name}</strong>
-                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180, display: 'block' }}>
+                          <strong className="text-base">{item.name}</strong>
+                          <span className="scenario-ellipsis">
                             {item.commonScenarios.join(', ') || '—'}
                           </span>
                         </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <span style={{ fontWeight: 600, fontSize: '0.85rem' }}>{item.hits}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: SPACE[2] }}>
+                          <span className="hits-count">{item.hits}</span>
                           {REC_BADGE[item.recommendation] && (
                             <StatusBadge variant={REC_BADGE[item.recommendation].variant}>
                               {REC_BADGE[item.recommendation].label(t)}
@@ -331,35 +377,46 @@ export function ThinkingModelsPage() {
               {isComparing ? (
                 /* ── Comparison View ── */
                 <div className="comparison-view">
-                  <div className="detail-header" style={{ marginBottom: 16 }}>
-                    <button className="back-button" onClick={exitComparison} title={t('thinkingModels.exitCompare') || 'Exit Compare'}>
+                  <div className="detail-header" style={{ marginBottom: SPACE[4] }}>
+                    <button className="back-button" onClick={exitComparison} title={t('thinkingModels.exitCompare')}>
                       <X strokeWidth={1.75} size={18} />
                     </button>
                     <div>
                       <h3>{t('thinkingModels.comparisonTitle')}</h3>
-                      <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                        {selectedForCompare.length} {t('thinkingModels.compareSelected') || 'models'}
+                      <p style={{ fontSize: TEXT.lg, color: 'var(--text-secondary)' }}>
+                        {selectedForCompare.length} {t('thinkingModels.compareSelected')}
+                        {comparisonLoadingModels.size > 0 && (
+                          <span style={{ marginLeft: SPACE[2], color: 'var(--info)' }}>
+                            <Loader2 size={12} className="spin" /> {t('thinkingModels.loadingComparison')}
+                          </span>
+                        )}
                       </p>
                     </div>
                   </div>
 
                   {/* Comparison grid: side-by-side metrics */}
-                  <div style={{ display: 'grid', gridTemplateColumns: `repeat(${selectedForCompare.length}, 1fr)`, gap: 12, marginBottom: 16 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: `repeat(${selectedForCompare.length}, 1fr)`, gap: SPACE[3], marginBottom: SPACE[4] }}>
                     {selectedForCompare.map(modelId => {
                       const summary = data.topModels.find(m => m.modelId === modelId);
                       const det = comparisonDetails.get(modelId);
+                      const isLoading = comparisonLoadingModels.has(modelId);
                       if (!summary) return null;
                       return (
-                        <div key={modelId} style={{ padding: 12, border: '1px solid var(--border)', borderRadius: 8, background: 'var(--bg-sunken)' }}>
-                          <strong style={{ fontSize: '0.85rem', display: 'block', marginBottom: 8 }}>{summary.name}</strong>
-                          <div className="pill-row" style={{ flexWrap: 'wrap', marginBottom: 8 }}>
+                        <div key={modelId} style={{ padding: SPACE[3], border: '1px solid var(--border)', borderRadius: 8, background: 'var(--bg-sunken)', opacity: isLoading ? 0.6 : 1, position: 'relative' }}>
+                          <strong style={{ fontSize: TEXT.xl, display: 'block', marginBottom: SPACE[2] }}>{summary.name}</strong>
+                          {isLoading && (
+                            <div style={{ position: 'absolute', top: SPACE[2], right: SPACE[2] }}>
+                              <Loader2 size={14} className="spin" style={{ color: 'var(--info)' }} />
+                            </div>
+                          )}
+                          <div className="pill-row" style={{ flexWrap: 'wrap', marginBottom: SPACE[2] }}>
                             <span className="badge">{t('thinkingModels.hits')}: {summary.hits}</span>
                             <span className="badge">{t('thinkingModels.successRate')}: {formatPercent(summary.successRate)}</span>
                             <span className="badge">{t('thinkingModels.failureRate')}: {formatPercent(summary.failureRate)}</span>
                             <span className="badge">{t('thinkingModels.pain')}: {formatPercent(summary.painRate)}</span>
                           </div>
                           {det && det.outcomeStats && (
-                            <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginTop: 4 }}>
+                            <div style={{ fontSize: TEXT.sm, color: 'var(--text-secondary)', marginTop: SPACE[1] }}>
                               <div>{t('thinkingModels.correction')}: {formatPercent(det.outcomeStats.correctionRate)}</div>
                               <div>{t('thinkingModels.coverage')}: {formatPercent(det.modelMeta.coverageRate)}</div>
                             </div>
@@ -370,19 +427,19 @@ export function ThinkingModelsPage() {
                   </div>
 
                   {/* Usage Trends for each model */}
-                  <div style={{ display: 'grid', gridTemplateColumns: `repeat(${selectedForCompare.length}, 1fr)`, gap: 12 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: `repeat(${selectedForCompare.length}, 1fr)`, gap: SPACE[3] }}>
                     {selectedForCompare.map(modelId => {
                       const summary = data.topModels.find(m => m.modelId === modelId);
                       const det = comparisonDetails.get(modelId);
                       if (!det || det.usageTrend.length < 2) return null;
                       return (
-                        <article key={modelId} style={{ padding: 8, border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg-sunken)' }}>
-                          <h4 style={{ fontSize: '0.75rem', fontWeight: 600, marginBottom: 6 }}>
+                        <article key={modelId} style={{ padding: SPACE[2], border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg-sunken)' }}>
+                          <h4 className="text-sm text-semibold" style={{ marginBottom: SPACE[2] }}>
                             {summary?.name} — {t('thinkingModels.usageTrend')}
                           </h4>
                           <LineChart
                             data={det.usageTrend.map(d => ({ label: d.day.slice(5), value: d.hits }))}
-                            width={260}
+                            width="100%"
                             height={80}
                             color="var(--accent)"
                             showGrid={false}
@@ -396,16 +453,22 @@ export function ThinkingModelsPage() {
                 </div>
               ) : (
                 <>
-                  {!detail && <EmptyState title={t('thinkingModels.emptyTitle')} description={t('thinkingModels.emptyDesc')} />}
-                  {detail && (
+                  {isLoadingDetail && (
+                    <div style={{ textAlign: 'center', padding: SPACE[6], color: 'var(--text-secondary)' }}>
+                      <Loader2 size={24} className="spin" style={{ margin: `0 auto ${SPACE[2]}` }} />
+                      <p style={{ fontSize: TEXT.lg }}>{t('thinkingModels.loadingDetail')}</p>
+                    </div>
+                  )}
+                  {!isLoadingDetail && !detail && <EmptyState title={t('thinkingModels.emptyTitle')} description={t('thinkingModels.emptyDesc')} />}
+                  {!isLoadingDetail && detail && (
                 <div className="detail-stack">
                   <div className="detail-header">
-                    <button className="back-button" onClick={() => setDetail(null)} title="Back">
+                    <button className="back-button" onClick={() => { setDetail(null); setIsLoadingDetail(true); }} title={t('common.back')}>
                       <ChevronLeft strokeWidth={1.75} size={18} />
                     </button>
                     <div>
                       <h3>{detail.modelMeta.name}</h3>
-                      <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{detail.modelMeta.description}</p>
+                      <p style={{ fontSize: TEXT.lg, color: 'var(--text-secondary)' }}>{detail.modelMeta.description}</p>
                     </div>
                     {REC_BADGE[detail.modelMeta.recommendation] && (
                       <StatusBadge variant={REC_BADGE[detail.modelMeta.recommendation].variant}>
@@ -417,8 +480,8 @@ export function ThinkingModelsPage() {
                   {/* Trigger Conditions */}
                   {detail.modelMeta.trigger && (
                     <article>
-                      <h4>{t('thinkingModels.trigger')}</h4>
-                      <code style={{ fontSize: '0.75rem', whiteSpace: 'pre-wrap', wordBreak: 'break-word', background: 'var(--bg-sunken)', padding: '8px 10px', borderRadius: 6, display: 'block', lineHeight: 1.5 }}>
+                      <h4 className="text-base text-semibold">{t('thinkingModels.trigger')}</h4>
+                      <code className="code-block code-block-trigger">
                         {detail.modelMeta.trigger}
                       </code>
                     </article>
@@ -427,8 +490,8 @@ export function ThinkingModelsPage() {
                   {/* Anti-Patterns */}
                   {detail.modelMeta.antiPattern && (
                     <article>
-                      <h4 style={{ color: 'var(--error)' }}>{t('thinkingModels.antiPattern')}</h4>
-                      <code style={{ fontSize: '0.75rem', whiteSpace: 'pre-wrap', wordBreak: 'break-word', background: 'rgba(220,53,69,0.08)', padding: '8px 10px', borderRadius: 6, display: 'block', lineHeight: 1.5, color: 'var(--error)' }}>
+                      <h4 className="text-base text-semibold text-error">{t('thinkingModels.antiPattern')}</h4>
+                      <code className="code-block code-block-antipattern">
                         {detail.modelMeta.antiPattern}
                       </code>
                     </article>
@@ -437,7 +500,7 @@ export function ThinkingModelsPage() {
                   {/* Usage Trend */}
                   {detail.usageTrend.length >= 1 ? (
                     <article>
-                      <h4 style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: 8 }}>
+                      <h4 className="text-lg text-semibold" style={{ marginBottom: SPACE[2] }}>
                         {t('thinkingModels.usageTrend')}
                       </h4>
                       <LineChart
@@ -459,7 +522,7 @@ export function ThinkingModelsPage() {
 
                   {/* Outcome Stats */}
                   <article>
-                    <h4>{t('thinkingModels.outcomeStats')}</h4>
+                    <h4 className="text-base text-semibold">{t('thinkingModels.outcomeStats')}</h4>
                     <div className="pill-row">
                       <span className="badge">{t('thinkingModels.success')} {formatPercent(detail.outcomeStats.successRate)}</span>
                       <span className="badge">{t('thinkingModels.failure')} {formatPercent(detail.outcomeStats.failureRate)}</span>
@@ -471,11 +534,11 @@ export function ThinkingModelsPage() {
                   {/* Scenario Distribution */}
                   {detail.scenarioDistribution.length > 0 && (
                     <article>
-                      <h4>{t('thinkingModels.scenarioDistribution')}</h4>
+                      <h4 className="text-base text-semibold">{t('thinkingModels.scenarioDistribution')}</h4>
                       <div className="stack">
                         {detail.scenarioDistribution.map((item) => (
                           <div className="row-card" key={item.scenario}>
-                            <strong>{item.scenario}</strong>
+                            <strong className="text-base">{item.scenario}</strong>
                             <span>{item.hits}</span>
                           </div>
                         ))}
@@ -486,39 +549,39 @@ export function ThinkingModelsPage() {
                   {/* Recent Events */}
                   {detail.recentEvents.length > 0 && (
                     <article>
-                      <h4>{t('thinkingModels.recentEvents')}</h4>
+                      <h4 className="text-base text-semibold">{t('thinkingModels.recentEvents')}</h4>
                       <div className="stack">
                         {detail.recentEvents.map((event) => (
                           <div className="row-card vertical" key={event.id}>
                             <div>
-                              <strong>{formatDate(event.createdAt)}</strong>
-                              <span>{event.scenarios.join(', ') || '—'}</span>
+                              <strong className="text-base">{formatDate(event.createdAt)}</strong>
+                              <span className="text-sm">{event.scenarios.join(', ') || '—'}</span>
                             </div>
                             {event.toolContext?.length > 0 && (
-                              <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
-                                {'\u{1F6E0}'} {event.toolContext.map(tc => (
+                              <div className="event-context-tool" aria-label={t('thinkingModels.toolContext')}>
+                                <Wrench size={12} aria-hidden /> {event.toolContext.map(tc => (
                                   `${tc.toolName} (${tc.outcome}${tc.errorType ? `: ${tc.errorType}` : ''})`
                                 )).join(', ')}
                               </div>
                             )}
                             {event.painContext?.length > 0 && (
-                              <div style={{ fontSize: '0.7rem', color: 'var(--error)' }}>
-                                {'\u26A1'} {event.painContext.map(pc => `${pc.source} (${pc.score})`).join(', ')}
+                              <div className="event-context-pain" aria-label={t('thinkingModels.painContext')}>
+                                <Zap size={12} aria-hidden /> {event.painContext.map(pc => `${pc.source} (${pc.score})`).join(', ')}
                               </div>
                             )}
                             {event.principleContext?.length > 0 && (
-                              <div style={{ fontSize: '0.7rem', color: 'var(--info)' }}>
-                                {'\u{1F4CB}'} {event.principleContext.map(pr => (
+                              <div className="event-context-principle" aria-label={t('thinkingModels.principleContext')}>
+                                <ClipboardList size={12} aria-hidden /> {event.principleContext.map(pr => (
                                   `${pr.principleId ?? '—'} ${pr.eventType ? `(${pr.eventType})` : ''}`
                                 )).join(', ')}
                               </div>
                             )}
                             {event.matchedPattern && (
-                              <code style={{ fontSize: '0.65rem', color: 'var(--text-secondary)', background: 'var(--bg-sunken)', padding: '2px 6px', borderRadius: 3 }}>
+                              <code className="matched-pattern">
                                 /{event.matchedPattern}/
                               </code>
                             )}
-                            <pre style={{ fontSize: '0.7rem', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                            <pre className="event-trigger-excerpt">
                               {event.triggerExcerpt}
                             </pre>
                           </div>
@@ -540,19 +603,19 @@ export function ThinkingModelsPage() {
               badge={`${data.dormantModels.length}`}
               defaultCollapsed
             >
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 8, padding: '8px 0' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: SPACE[2], padding: `${SPACE[2]} 0` }}>
                 {data.dormantModels.map(model => (
                   <div
                     key={model.modelId}
                     style={{
-                      padding: '8px 10px',
+                      padding: `${SPACE[2]} ${SPACE[3]}`,
                       border: '1px solid var(--border)',
                       borderRadius: 6,
                       background: 'var(--bg-sunken)',
                     }}
                   >
-                    <strong style={{ fontSize: '0.8rem' }}>{model.name}</strong>
-                    <p style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', margin: '4px 0 0', lineHeight: 1.3 }}>
+                    <strong style={{ fontSize: TEXT.lg }}>{model.name}</strong>
+                    <p style={{ fontSize: TEXT.sm, color: 'var(--text-secondary)', margin: `${SPACE[1]} 0 0`, lineHeight: 1.3 }}>
                       {model.description}
                     </p>
                   </div>
@@ -575,14 +638,14 @@ export function ThinkingModelsPage() {
           {heatmapData ? (
             <CollapsiblePanel title={t('thinkingModels.scenarioHeatmap')}>
               <div style={{ overflowX: 'auto' }}>
-                <table style={{ borderCollapse: 'collapse', minWidth: '100%' }}>
+                <table className="heatmap-table">
                   <thead>
                     <tr>
-                      <th style={{ position: 'sticky', left: 0, background: 'var(--bg-panel)', zIndex: 1, minWidth: 100, textAlign: 'left', padding: '6px 8px', borderBottom: '1px solid var(--border)', fontSize: '0.75rem', fontWeight: 600 }}>
+                      <th className="heatmap-header heatmap-sticky">
                         Model
                       </th>
                       {heatmapData.allScenarios.map(sc => (
-                        <th key={sc} style={{ textAlign: 'center', fontSize: '0.65rem', padding: '4px 6px', writingMode: 'vertical-lr', transform: 'rotate(180deg)', height: 80, borderBottom: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
+                        <th key={sc} className="heatmap-header heatmap-scenario">
                           {sc}
                         </th>
                       ))}
@@ -591,26 +654,20 @@ export function ThinkingModelsPage() {
                   <tbody>
                     {heatmapData.models.map(model => (
                       <tr key={model.modelId}>
-                        <td style={{ position: 'sticky', left: 0, background: 'var(--bg-panel)', fontWeight: 500, fontSize: '0.75rem', padding: '4px 8px', borderTop: '1px solid var(--border)' }}>
+                        <td className="heatmap-model heatmap-sticky">
                           {model.name}
                         </td>
                         {heatmapData.allScenarios.map(sc => {
                           const hits = heatmapData.hitMap.get(`${model.modelId}::${sc}`) ?? 0;
+                          const intensity = hits / heatmapData.maxHits;
                           const bgColor = hits === 0
                             ? 'var(--bg-sunken)'
-                            : `rgba(91, 139, 160, ${Math.max(0.15, (hits / heatmapData.maxHits) * 0.55).toFixed(2)})`;
+                            : `rgba(91, 139, 160, ${Math.max(0.15, intensity * 0.55).toFixed(2)})`;
                           return (
                             <td
                               key={sc}
-                              style={{
-                                textAlign: 'center',
-                                backgroundColor: bgColor,
-                                padding: '4px 6px',
-                                fontSize: '0.7rem',
-                                fontWeight: hits > 0 ? 600 : 400,
-                                borderTop: '1px solid var(--border)',
-                                color: hits > 0 ? 'var(--text-primary)' : 'var(--text-secondary)',
-                              }}
+                              className="heatmap-cell"
+                              style={{ backgroundColor: bgColor }}
                             >
                               {hits}
                             </td>
