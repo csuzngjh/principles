@@ -188,6 +188,30 @@ export interface RecentPainContext {
   recentMaxPainScore: number;
 }
 
+function hasUsableNocturnalSnapshot(snapshotData: Record<string, unknown> | undefined): boolean {
+    if (!snapshotData || typeof snapshotData.sessionId !== 'string' || snapshotData.sessionId.length === 0) {
+        return false;
+    }
+
+    if (snapshotData._dataSource !== 'pain_context_fallback') {
+        return true;
+    }
+
+    const stats = (snapshotData.stats && typeof snapshotData.stats === 'object')
+        ? snapshotData.stats as Record<string, number | null | undefined>
+        : undefined;
+    const recentPain = Array.isArray(snapshotData.recentPain) ? snapshotData.recentPain.length : 0;
+    const hasNonZeroStats = !!stats && [
+        'totalAssistantTurns',
+        'totalToolCalls',
+        'failureCount',
+        'totalPainEvents',
+        'totalGateBlocks',
+    ].some((key) => Number(stats[key] ?? 0) > 0);
+
+    return hasNonZeroStats || recentPain > 0;
+}
+
 export interface EvolutionQueueItem {
     // Core identity
     id: string;
@@ -1367,42 +1391,16 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         logger?.info?.(`[PD:EvolutionWorker] Processing sleep_reflection task ${sleepTask.id}`);
                     }
 
-                    // NOC-14: Use NocturnalWorkflowManager for sleep_reflection tasks
-                    // Lazy-create manager (needs runtimeAdapter from api)
-                    // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in if block, else block continues
-                    let nocturnalManager: NocturnalWorkflowManager | undefined;
-                    if (api) {
-                        nocturnalManager = new NocturnalWorkflowManager({
-                            workspaceDir: wctx.workspaceDir,
-                            stateDir: wctx.stateDir,
-                            logger: api.logger,
-                            runtimeAdapter: new OpenClawTrinityRuntimeAdapter(api),
-                        });
-                    } else {
-                        // Cannot create manager without api (runtimeAdapter required)
-                        sleepTask.status = 'failed';
-                        sleepTask.completed_at = new Date().toISOString();
-                        sleepTask.resolution = 'failed_max_retries';
-                        sleepTask.lastError = 'No API available to create NocturnalWorkflowManager';
-                        sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
-                        logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} skipped: no API`);
-                        continue;
-                    }
-
-                    // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in both if/else branches
-                    let workflowId: string;
+                    let workflowId: string | undefined;
+                    // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned when runtime API is available
+                    let nocturnalManager: NocturnalWorkflowManager;
+                    // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned only for newly started workflows
+                    let snapshotData: Record<string, unknown> | undefined;
 
                     if (isPollingTask) {
-                        // Poll-only path: skip workflow start, use existing workflowId
-                        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Reason: isPollingTask flag is only set when resultRef is expected to be present
+                        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Reason: polling path requires existing resultRef
                         workflowId = sleepTask.resultRef!;
                     } else {
-                        // Start workflow via NocturnalWorkflowManager instead of direct executeNocturnalReflectionAsync
-                        // Pass taskId in metadata for correlation
-
-                        // #181: Build a proper snapshot from trajectory.db instead of hardcoded zeros
-                        // eslint-disable-next-line @typescript-eslint/init-declarations -- undefined is valid zero value, assigned conditionally in if/fallback blocks
-                        let snapshotData: Record<string, unknown> | undefined;
                         if (sleepTask.recentPainContext) {
                             try {
                                 const extractor = createNocturnalTrajectoryExtractor(wctx.workspaceDir);
@@ -1412,16 +1410,14 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                                         sessionId: fullSnapshot.sessionId,
                                         sessionStart: fullSnapshot.startedAt,
                                         stats: fullSnapshot.stats,
-                                        recentPain: fullSnapshot.painEvents.slice(-5), // last 5
+                                        recentPain: fullSnapshot.painEvents.slice(-5),
                                     };
                                 }
                             } catch (snapErr) {
                                 logger?.warn?.(`[PD:EvolutionWorker] Failed to build trajectory snapshot for ${sleepTask.id}: ${String(snapErr)}`);
                             }
                         }
-                        // Fallback: use pain context only if trajectory extractor failed
                         if (!snapshotData && sleepTask.recentPainContext) {
-                            // #200: Log fallback usage to make data gaps visible
                             logger?.warn?.(`[PD:EvolutionWorker] Using pain-context fallback for ${sleepTask.id}: trajectory stats unavailable (stats will be partial)`);
                             snapshotData = {
                                 sessionId: sleepTask.id,
@@ -1434,29 +1430,61 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                                     totalGateBlocks: 0,
                                 },
                                 recentPain: sleepTask.recentPainContext.mostRecent ? [sleepTask.recentPainContext.mostRecent] : [],
-                                // #200: Mark data source so downstream can handle appropriately
                                 _dataSource: 'pain_context_fallback',
                             };
                         }
 
+                        if (!hasUsableNocturnalSnapshot(snapshotData)) {
+                            sleepTask.status = 'failed';
+                            sleepTask.completed_at = new Date().toISOString();
+                            sleepTask.resolution = 'failed_max_retries';
+                            sleepTask.lastError = 'sleep_reflection failed: missing_usable_snapshot (skipReason: empty_fallback_snapshot)';
+                            sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
+                            logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} rejected: missing usable snapshot`);
+                            continue;
+                        }
+                    }
+
+                    if (!api) {
+                        sleepTask.status = 'failed';
+                        sleepTask.completed_at = new Date().toISOString();
+                        sleepTask.resolution = 'failed_max_retries';
+                        sleepTask.lastError = 'No API available to create NocturnalWorkflowManager';
+                        sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
+                        logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} skipped: no API`);
+                        continue;
+                    }
+
+                    nocturnalManager = new NocturnalWorkflowManager({
+                        workspaceDir: wctx.workspaceDir,
+                        stateDir: wctx.stateDir,
+                        logger: api.logger,
+                        runtimeAdapter: new OpenClawTrinityRuntimeAdapter(api),
+                    });
+
+                    if (!isPollingTask) {
                         const workflowHandle = await nocturnalManager.startWorkflow(nocturnalWorkflowSpec, {
                             parentSessionId: `sleep_reflection:${sleepTask.id}`,
                             workspaceDir: wctx.workspaceDir,
                             taskInput: {},
                             metadata: {
                                 snapshot: snapshotData,
-                                // #205: Remove hardcoded 'default' - let NocturnalTargetSelector choose
-                                // via executeNocturnalReflectionAsync when no principleId is provided
-                                taskId: sleepTask.id,  // NOC-14: correlation ID for evolution worker
-                                // Pass painContext to Selector for principle ranking bias
+                                taskId: sleepTask.id,
                                 painContext: sleepTask.recentPainContext,
                             },
                         });
-
-                        // Store workflowId on task for polling on subsequent cycles
                         sleepTask.resultRef = workflowHandle.workflowId;
-                        // eslint-disable-next-line @typescript-eslint/prefer-destructuring -- Reason: workflowId is reassignable outer let - destructuring would shadow
                         workflowId = workflowHandle.workflowId;
+                    }
+
+                    if (!workflowId) {
+                        sleepTask.status = 'failed';
+                        sleepTask.completed_at = new Date().toISOString();
+                        sleepTask.resolution = 'failed_max_retries';
+                        sleepTask.lastError = 'sleep_reflection failed: missing_workflow_id';
+                        sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
+                        logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} missing workflow id after startup`);
+                        continue;
                     }
 
                     // Workflow is running asynchronously. Check if it completed in this cycle
@@ -1490,16 +1518,12 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             sleepTask.lastError = detailedError;
                             sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
 
+                            sleepTask.status = 'failed';
+                            sleepTask.completed_at = new Date().toISOString();
+                            sleepTask.resolution = 'failed_max_retries';
                             if (isExpectedSubagentError(errorReason)) {
-                                // #202: Expected subagent unavailability — use stub fallback
-                                sleepTask.status = 'completed';
-                                sleepTask.completed_at = new Date().toISOString();
-                                sleepTask.resolution = 'stub_fallback';
-                                logger?.info?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} workflow completed with stub fallback (expected subagent error: ${errorReason})`);
+                                logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} background runtime unavailable: ${errorReason}`);
                             } else {
-                                sleepTask.status = 'failed';
-                                sleepTask.completed_at = new Date().toISOString();
-                                sleepTask.resolution = 'failed_max_retries';
                                 logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} workflow failed: ${sleepTask.lastError}`);
                             }
                         } else {
@@ -1511,18 +1535,14 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     // #202: Handle expected subagent unavailability (e.g., process isolation in daemon mode)
                     // When subagent is unavailable due to gateway running in separate process,
                     // use stub fallback instead of failing the task.
+                    sleepTask.status = 'failed';
+                    sleepTask.completed_at = new Date().toISOString();
+                    sleepTask.resolution = 'failed_max_retries';
+                    sleepTask.lastError = String(taskErr);
+                    sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
                     if (isExpectedSubagentError(taskErr)) {
-                        sleepTask.status = 'completed';
-                        sleepTask.completed_at = new Date().toISOString();
-                        sleepTask.resolution = 'stub_fallback';
-                        sleepTask.lastError = String(taskErr);
-                        logger?.info?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} completed with stub fallback (subagent unavailable)`);
+                        logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} background runtime unavailable: ${String(taskErr)}`);
                     } else {
-                        sleepTask.status = 'failed';
-                        sleepTask.completed_at = new Date().toISOString();
-                        sleepTask.resolution = 'failed_max_retries';
-                        sleepTask.lastError = String(taskErr);
-                        sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
                         logger?.error?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} threw: ${taskErr}`);
                     }
                 }
