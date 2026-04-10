@@ -17,7 +17,7 @@ export interface CentralHealthResponse {
  * Evolution, Principles, and Queue stats are workspace-specific.
  */
 export class CentralHealthService {
-  static getAllWorkspaceHealth(): CentralHealthResponse {
+  getAllWorkspaceHealth(): CentralHealthResponse {
     const centralDb = getCentralDatabase();
     const workspaces: WorkspaceHealthEntry[] = [];
     const enabled = centralDb.getEnabledWorkspaces();

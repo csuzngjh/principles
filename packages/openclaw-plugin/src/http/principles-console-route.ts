@@ -625,8 +625,8 @@ export function createPrinciplesConsoleRoutes(api: OpenClawPluginApi): OpenClawP
 
 // Legacy export for backwards compatibility
 export function createPrinciplesConsoleRoute(api: OpenClawPluginApi): OpenClawPluginHttpRouteParams {
-  /* eslint-disable @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: createPrinciplesConsoleRoutes called for side effects but result not needed here */
-  const _routes = createPrinciplesConsoleRoutes(api);
+  // Side effect: registers all console routes via createPrinciplesConsoleRoutes
+  createPrinciplesConsoleRoutes(api);
   // Return the combined behavior - this will be called from index.ts
   return {
     path: ROUTE_PREFIX,
