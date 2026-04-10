@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { PluginHookBeforePromptBuildEvent, PluginHookAgentContext, PluginHookBeforePromptBuildResult, PluginLogger, OpenClawPluginApi } from '../openclaw-sdk.js';
-import { clearInjectedProbationIds, getSession, resetFriction, setInjectedProbationIds, trackFriction } from '../core/session-tracker.js';
+import { clearInjectedProbationIds, getSession, resetFriction, setInjectedProbationIds, trackFriction, decayGfi, getGfiDecayElapsed } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import type { ContextInjectionConfig} from '../types.js';
 import { defaultContextConfig } from '../types.js';
@@ -612,6 +612,18 @@ The empathy observer subagent handles pain detection independently.
 
   // ──── 4. Heartbeat-specific checklist ────
   if (trigger === 'heartbeat') {
+    // ──── 4a. GFI Time-based Decay ────
+    // Apply segmented exponential decay to GFI on each heartbeat
+    if (sessionId) {
+      const elapsedMinutes = getGfiDecayElapsed(sessionId);
+      if (elapsedMinutes >= 1) {
+        const decayedState = decayGfi(sessionId, elapsedMinutes);
+        if (decayedState) {
+          logger?.info?.(`[PD:GFI] Heartbeat decay applied: ${elapsedMinutes}min elapsed, GFI now ${decayedState.currentGfi.toFixed(1)}`);
+        }
+      }
+    }
+    
     const heartbeatPath = wctx.resolve('HEARTBEAT');
     if (fs.existsSync(heartbeatPath)) {
       try {
