@@ -8,10 +8,12 @@ export interface PathResolverOptions {
     workspaceDir?: string;
     normalizeWorkspace?: boolean;
     logger?: {
+        /* eslint-disable no-unused-vars -- Reason: logger callback param names intentionally unused - callbacks only invoked for side effects */
         debug?: (_msg: string) => void;
         info?: (_msg: string) => void;
         warn?: (_msg: string) => void;
         error?: (_msg: string) => void;
+        /* eslint-enable no-unused-vars */
     };
 }
 
@@ -352,25 +354,25 @@ export class PathResolver {
         }
     }
 
-    static createFromHookContext(ctx: any): PathResolver {
+    static createFromHookContext(ctx: Record<string, unknown>): PathResolver {
         const resolver = new PathResolver();
-        
+
         if (ctx?.workspaceDir) {
-            let {workspaceDir} = ctx;
-            
+            let workspaceDir = String(ctx.workspaceDir);
+
             if (resolver.normalizeWorkspace) {
                 workspaceDir = resolver.normalizePath(workspaceDir);
             }
-            
+
             resolver.workspaceDir = workspaceDir;
             resolver.initialized = true;
             resolver.log('info', `Created from hook context with workspace: ${workspaceDir}`);
         }
-        
+
         if (ctx?.stateDir) {
-            resolver.stateDir = ctx.stateDir;
+            resolver.stateDir = String(ctx.stateDir);
         }
-        
+
         return resolver;
     }
 }
@@ -418,7 +420,9 @@ export function resolveWorkspaceDirFromApi(
     if (!api) return undefined;
 
     // 1. Official API: api.runtime.agent.resolveAgentWorkspaceDir
+    /* eslint-disable no-unused-vars -- Reason: type callback params cfg/id unused - actual values passed are api.config and agentId */
     const officialAgent = (api.runtime as { agent?: { resolveAgentWorkspaceDir?: (cfg: unknown, id: string) => string } }).agent;
+    /* eslint-enable no-unused-vars */
     if (officialAgent?.resolveAgentWorkspaceDir) {
         try {
             return officialAgent.resolveAgentWorkspaceDir(api.config, agentId ?? 'main');

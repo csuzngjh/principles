@@ -23,24 +23,25 @@ import { isCompleteDetectorMetadata } from './evolution-types.js';
 import { updateTrainingStore, createPrinciple } from './principle-tree-ledger.js';
 import type { LedgerPrinciple } from './principle-tree-ledger.js';
 
+/* eslint-disable no-unused-vars -- Reason: interface method params are type signatures, implementations use actual values */
 export interface EvolutionReducer {
-   
+
   emit(_event: EvolutionLoopEvent): void;
-   
+
   emitSync(_event: EvolutionLoopEvent): void;
   getEventLog(): EvolutionLoopEvent[];
   getCandidatePrinciples(): Principle[];
   getProbationPrinciples(): Principle[];
   getActivePrinciples(): Principle[];
-   
+
   getPrincipleById(_id: string): Principle | null;
-   
+
   promote(_principleId: string, _reason?: string): void;
-   
+
   deprecate(_principleId: string, _reason: string): void;
-   
+
   rollbackPrinciple(_principleId: string, _reason: string): void;
-   
+
   recordProbationFeedback(_principleId: string, _success: boolean): void;
   /**
    * Creates a new principle with generalized trigger/action from diagnostician.
@@ -72,6 +73,7 @@ export interface EvolutionReducer {
     lastPromotedAt: string | null;
   };
 }
+/* eslint-enable no-unused-vars */
 
 const PROBATION_SUCCESS_THRESHOLD = 3;
 const CIRCUIT_BREAKER_THRESHOLD = 3;
@@ -472,7 +474,7 @@ export class EvolutionReducerImpl implements EvolutionReducer {
 
         const header = `### ${principle.id}:`;
         const existingIdx = content.indexOf(header);
-        const formatted = this.formatPrincipleForFile(principle, content);
+        const formatted = EvolutionReducerImpl.formatPrincipleForFile(principle, content);
 
         if (existingIdx >= 0) {
           const nextPrincipleRe = /\n### [A-Za-z0-9_-]+:/g;
@@ -495,7 +497,7 @@ export class EvolutionReducerImpl implements EvolutionReducer {
     }
   }
 
-  private detectPrincipleLanguage(content: string): 'zh' | 'en' {
+  private static detectPrincipleLanguage(content: string): 'zh' | 'en' {
     if (!content) return 'zh';
     const zhMarkers = ['原则', '触发', '必须', '禁止', '验证', '例外', '来源'];
     const enMarkers = ['Trigger', 'Constraint', 'Must', 'Forbidden', 'Verification', 'Exceptions', 'Source'];
@@ -506,8 +508,8 @@ export class EvolutionReducerImpl implements EvolutionReducer {
     return zhCount >= enCount ? 'zh' : 'en';
   }
 
-  private formatPrincipleForFile(principle: Principle, existingContent: string): string {
-    const lang = this.detectPrincipleLanguage(existingContent);
+  private static formatPrincipleForFile(principle: Principle, existingContent: string): string {
+    const lang = EvolutionReducerImpl.detectPrincipleLanguage(existingContent);
     const title = principle.abstractedPrinciple
       ? (principle.abstractedPrinciple.length > 60 ? principle.abstractedPrinciple.slice(0, 57) + '...' : principle.abstractedPrinciple)
       : (principle.text.length > 60 ? principle.text.slice(0, 57) + '...' : principle.text);
@@ -688,6 +690,7 @@ export class EvolutionReducerImpl implements EvolutionReducer {
     });
   }
 
+  // eslint-disable-next-line no-unused-vars, @typescript-eslint/no-unused-vars -- Reason: event timestamp intentionally unused, only data payload matters
   private onPainDetected(data: PainDetectedData, _eventTs: string): void {
     const trigger = String(data.reason ?? data.source ?? 'unknown trigger');
 

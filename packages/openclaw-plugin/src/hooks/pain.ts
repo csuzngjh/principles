@@ -114,7 +114,7 @@ export function handleAfterToolCall(
   }
 
   // 1. Determine if this was a failure
-  const exitCode = (event.result && typeof event.result === 'object') ? (event.result as any).exitCode : 0;
+  const exitCode = (event.result && typeof event.result === 'object') ? (event.result as Record<string, unknown>).exitCode : 0;
   const isFailure = !!event.error || (exitCode !== 0 && exitCode !== undefined);
 
   if (isFailure) {
@@ -126,6 +126,7 @@ export function handleAfterToolCall(
     const updatedState = trackFriction(sessionId, deltaF, hash, effectiveWorkspaceDir);
     
     // ── Trust Engine: Record failure ──
+    /* eslint-disable @typescript-eslint/no-use-before-define -- Reason: extractErrorType is defined later in this file */
     const errorType = extractErrorType(event.error || errorText);
     const filePath = params.file_path || params.path || params.file;
     const relPath = typeof filePath === 'string' ? normalizePath(filePath, effectiveWorkspaceDir) : 'unknown';
@@ -157,14 +158,14 @@ export function handleAfterToolCall(
       errorType,
       gfi: updatedState.currentGfi,
       consecutiveErrors: updatedState.consecutiveErrors,
-      exitCode,
+      exitCode: exitCode as number | undefined,
     });
     wctx.trajectory?.recordToolCall?.({
       sessionId,
       toolName: event.toolName,
       outcome: 'failure',
       durationMs: event.durationMs,
-      exitCode,
+      exitCode: exitCode as number | undefined,
       errorType,
       errorMessage: event.error ? String(event.error) : undefined,
       gfiBefore,

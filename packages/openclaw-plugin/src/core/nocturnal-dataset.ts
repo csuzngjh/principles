@@ -259,6 +259,7 @@ function writeRegistry(workspaceDir: string, records: NocturnalDatasetRecord[]):
  * Execute a read-modify-write on the registry under an exclusive lock.
  * This prevents concurrent writers from racing on the same file.
  */
+/* eslint-disable no-unused-vars -- Reason: _records is a type signature parameter, unused by design in function type definition */
 function withRegistryLock<T>(workspaceDir: string, fn: (_records: NocturnalDatasetRecord[]) => T): T {
   const registryPath = getRegistryPath(workspaceDir);
   return withLock(registryPath, () => {

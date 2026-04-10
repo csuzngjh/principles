@@ -82,6 +82,7 @@ export async function addDiagnosticianTask(
 ): Promise<void> {
   const filePath = resolveTasksPath(stateDir);
   await withLockAsync(filePath, async () => {
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: function defined later in file, hoisting pattern
     const store = readTaskStoreSync(filePath);
     store.tasks[taskId] = {
       prompt,
@@ -104,6 +105,7 @@ export async function completeDiagnosticianTask(
 ): Promise<void> {
   const filePath = resolveTasksPath(stateDir);
   await withLockAsync(filePath, async () => {
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: function defined later in file, hoisting pattern
     const store = readTaskStoreSync(filePath);
     delete store.tasks[taskId];
     const tmpPath = filePath + '.tmp';

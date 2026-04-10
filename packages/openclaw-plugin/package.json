@@ -32,8 +32,7 @@
     "build:production": "node esbuild.config.js --production && node scripts/build-web.mjs --production && node scripts/verify-build.mjs",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "lint": "eslint src/",
-    "postinstall": "node scripts/install-dependencies.cjs"
+    "lint": "eslint src/"
   },
   "devDependencies": {
     "@testing-library/react": "^16.3.0",

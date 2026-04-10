@@ -2,10 +2,12 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 export interface PluginLogger {
+    /* eslint-disable no-unused-vars -- Reason: interface method params are type signatures, implementations use actual values */
     info(message: string, meta?: Record<string, unknown>): void;
     warn(message: string, meta?: Record<string, unknown>): void;
     error(message: string, meta?: Record<string, unknown>): void;
     debug(message: string, meta?: Record<string, unknown>): void;
+    /* eslint-enable no-unused-vars */
 }
 
 export interface PluginLoggerConfig {

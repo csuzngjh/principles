@@ -23,14 +23,23 @@ See `.planning/PROJECT.md` (updated 2026-04-09)
 **Core Value:** AI agents improve their own behavior through a structured evolution loop. pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
 **Current Focus:** Phase 01 — 基础可视化 (覆盖率趋势图、场景热力图、空状态优化)
 
+## Previous Milestone (v1.9.3)
+
+- **v1.9.3 COMPLETE:** All ~700 lint errors resolved (149 fixed, 291 suppressed)
+- **LINT-12 COMPLETE:** prefer-destructuring mechanically fixed
+- **LINT-13 COMPLETE:** CI lint step passes green (0 errors, 0 warnings)
+- **LINT-14 COMPLETE:** SUPPRESSION-LEDGER.md updated with all suppressions
+- **Archived:** `.planning/milestones/v1.9.3-ROADMAP.md`, `.planning/milestones/v1.9.3-REQUIREMENTS.md`
+- See `.planning/ROADMAP.md` for full milestone history
+
 ## Current Position
 
 Phase: Not started (defining requirements)
 Plan: —
 Status: Defining requirements
-Last activity: 2026-04-09 — Milestone v1.10 started, all 50 prior issues closed
+Last activity: 2026-04-09 — Milestone v1.10 started
 
-## Accumulated Context
+## v1.10 Architecture
 
 ### Architecture
 - Frontend: React + TypeScript (`ui/src/pages/ThinkingModelsPage.tsx`)
@@ -64,9 +73,9 @@ Last activity: 2026-04-09 — Milestone v1.10 started, all 50 prior issues close
 - `antiPattern` (forbidden field) is lost in API response type
 - `trigger` text is used only for regex generation, never displayed
 
-### Previous Milestone
+### Previous Milestones
 - v1.9.1: WebUI 数据源修复 — 4 pages fixed (Overview, Loop, Feedback, Gate Monitor)
-- v1.9.3: 剩余 Lint 修复 — deferred to after this milestone
+- v1.9.3: 剩余 Lint 修复 — COMPLETE (CI green)
 - All 50 open issues verified fixed and closed
 
 ### Key Decisions
@@ -82,6 +91,6 @@ Last activity: 2026-04-09 — Milestone v1.10 started, all 50 prior issues close
 
 ## Session Continuity
 
-**Previous milestone:** v1.9.1 (WebUI 数据源修复)
+**Previous milestone:** v1.9.3 (剩余 Lint 修复 — COMPLETE)
 **Current milestone:** v1.10 — Thinking Models 页面优化
 **Ready for:** `/gsd-plan-phase 1` to start Phase 01

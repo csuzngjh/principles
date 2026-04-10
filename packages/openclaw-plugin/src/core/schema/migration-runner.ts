@@ -10,11 +10,11 @@
  */
 
 import type { Migration } from './schema-definitions.js';
-import { getCatalog, DB_TYPES, type DbType } from './schema-definitions.js';
+import { getCatalog, type DbType } from './schema-definitions.js';
 import type { Db } from './db-types.js';
 
 export class MigrationRunner {
-  private db: Db;
+  private readonly db: Db;
 
   constructor(db: Db) {
     this.db = db;
@@ -24,7 +24,9 @@ export class MigrationRunner {
    * Run all pending migrations for a given database type.
    * @returns Array of migration names that were applied
    */
-  runMigrations(migrations: Migration[], dbType: DbType): string[] {
+  runMigrations(migrations: Migration[], _dbType: DbType): string[] {
+    // NOTE: _dbType is kept for API signature compatibility but migrations are pre-filtered by caller
+    void _dbType;
     // Ensure schema_version table exists before anything else
     this.ensureVersionTable();
 
@@ -37,7 +39,7 @@ export class MigrationRunner {
       .sort((a, b) => a.id.localeCompare(b.id));
 
     for (const migration of pending) {
-      // eslint-disable-next-line no-console -- Migration logging is intentional
+       
       console.log(`[MigrationRunner] Applying ${migration.id}-${migration.name}...`);
       try {
         migration.up(this.db);
@@ -45,13 +47,14 @@ export class MigrationRunner {
         applied.push(`${migration.id}-${migration.name}`);
       } catch (err) {
         throw new Error(
-          `Migration ${migration.id}-${migration.name} failed: ${String(err)}`
+          `Migration ${migration.id}-${migration.name} failed: ${String(err)}`,
+          { cause: err }
         );
       }
     }
 
     if (applied.length > 0) {
-      // eslint-disable-next-line no-console
+       
       console.log(`[MigrationRunner] Applied ${applied.length} migration(s): ${applied.join(', ')}`);
     }
 
@@ -73,14 +76,14 @@ export class MigrationRunner {
       try {
         this.db.exec(table.ddl);
       } catch (err) {
-        throw new Error(`Failed to create table ${key}: ${String(err)}`);
+        throw new Error(`Failed to create table ${key}: ${String(err)}`, { cause: err });
       }
       // Indexes
       for (const indexDdl of table.indexes ?? []) {
         try {
           this.db.exec(indexDdl);
         } catch (err) {
-          throw new Error(`Failed to create index for ${key}: ${String(err)}`);
+          throw new Error(`Failed to create index for ${key}: ${String(err)}`, { cause: err });
         }
       }
     }
@@ -90,7 +93,7 @@ export class MigrationRunner {
       try {
         this.db.exec(view.ddl);
       } catch (err) {
-        throw new Error(`Failed to create view ${key}: ${String(err)}`);
+        throw new Error(`Failed to create view ${key}: ${String(err)}`, { cause: err });
       }
     }
 
@@ -99,7 +102,7 @@ export class MigrationRunner {
       try {
         this.db.exec(fts.ddl);
       } catch (err) {
-        throw new Error(`Failed to create FTS table ${key}: ${String(err)}`);
+        throw new Error(`Failed to create FTS table ${key}: ${String(err)}`, { cause: err });
       }
     }
   }
@@ -122,11 +125,11 @@ export class MigrationRunner {
   /**
    * Get all available migration info for a database type.
    */
-  getMigrationInfo(migrations: Migration[], dbType: DbType): Array<{
+  getMigrationInfo(migrations: Migration[], dbType: DbType): {
     id: string;
     name: string;
     applied: boolean;
-  }> {
+  }[] {
     const currentVersion = this.getCurrentVersion();
     return migrations
       .filter(m => m.db === dbType)
@@ -153,7 +156,7 @@ export class MigrationRunner {
       throw new Error(`Migration ${migration.id}-${migration.name} has no down migration`);
     }
 
-    // eslint-disable-next-line no-console
+     
     console.log(`[MigrationRunner] Rolling back ${migration.id}-${migration.name}...`);
     migration.down(this.db);
 
@@ -164,7 +167,7 @@ export class MigrationRunner {
     const newVersion = previousMigrations[0]?.id ?? '000';
     this.setVersion(newVersion);
 
-    // eslint-disable-next-line no-console
+     
     console.log(`[MigrationRunner] Rolled back to ${newVersion}`);
     return migration.id;
   }

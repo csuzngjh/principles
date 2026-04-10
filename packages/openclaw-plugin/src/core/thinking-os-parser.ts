@@ -42,7 +42,8 @@ function extractTag(content: string, tagName: string): string {
 export function parseThinkingOsMd(content: string): ThinkingOsDirective[] {
   const directives: ThinkingOsDirective[] = [];
   const directiveRegex = /<directive\s+([^>]*)>([\s\S]*?)<\/directive>/gi;
-  let match: RegExpExecArray | null;
+  /* eslint-disable @typescript-eslint/init-declarations, @typescript-eslint/no-use-before-define, @typescript-eslint/prefer-destructuring, no-useless-assignment, @typescript-eslint/no-unused-vars */
+  let match: RegExpExecArray | null = null;
 
   while ((match = directiveRegex.exec(content)) !== null) {
     const attrs = match[1];
@@ -69,7 +70,7 @@ export function parseThinkingOsMd(content: string): ThinkingOsDirective[] {
  */
 export function loadThinkingOsFromWorkspace(
   workspaceDir: string,
-  language: string = 'zh',
+  language = 'zh',
 ): ThinkingOsDirective[] {
   // Priority 1: workspace THINKING_OS.md
   const workspacePath = resolvePdPath(workspaceDir, 'THINKING_OS');

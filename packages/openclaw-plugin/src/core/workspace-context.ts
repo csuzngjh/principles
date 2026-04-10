@@ -21,11 +21,13 @@ import {
 import type { Principle, PrincipleValueMetrics } from '../types/principle-tree-schema.js';
 import type { Principle as ActivePrinciple } from './evolution-types.js';
 
+/* eslint-disable no-unused-vars -- Reason: interface method param names intentionally unused - implementations provide actual names */
 interface PrincipleTreeLedgerAccessor {
     getPrincipleSubtree(_principleId: string): PrincipleSubtree | undefined;
     updatePrinciple(_principleId: string, updates: Partial<Principle>): Principle;
-    updatePrincipleValueMetrics(principleId: string, metrics: PrincipleValueMetrics): PrincipleValueMetrics;
+    updatePrincipleValueMetrics(principleId: string, _metrics: PrincipleValueMetrics): PrincipleValueMetrics;
 }
+/* eslint-enable no-unused-vars */
 
 /**
  * WorkspaceContext - Centralized management of workspace-specific paths and services.

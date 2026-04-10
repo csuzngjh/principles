@@ -77,6 +77,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/* eslint-disable @typescript-eslint/max-params -- Reason: Clamp function requires all parameters for safe numeric conversion */
 function clampFloat(value: unknown, min: number, max: number, fallback: number): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     return fallback;
@@ -84,6 +85,7 @@ function clampFloat(value: unknown, min: number, max: number, fallback: number):
   return Math.max(min, Math.min(max, value));
 }
 
+/* eslint-disable @typescript-eslint/max-params -- Reason: Clamp function requires all parameters for safe numeric conversion */
 function clampInt(value: unknown, min: number, max: number, fallback: number): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     return fallback;
@@ -294,8 +296,8 @@ function readLedgerFromFile(filePath: string): HybridLedgerStore {
     // #219: Handle both formats:
     // - New format: { trainingStore: {...}, tree: {...} }
     // - Legacy format: { P_xxx: {...}, _tree: {...} }
-    const trainingStoreRaw = raw['trainingStore'] ?? raw;
-    const treeRaw = raw[TREE_NAMESPACE] ?? raw['tree'];
+    const trainingStoreRaw = raw.trainingStore ?? raw;
+    const treeRaw = raw[TREE_NAMESPACE] ?? raw.tree;
     return {
       trainingStore: parseLegacyTrainingStore(trainingStoreRaw),
       tree: parseTree(treeRaw),
@@ -313,7 +315,9 @@ function writeLedgerUnlocked(filePath: string, store: HybridLedgerStore): void {
   fs.writeFileSync(filePath, serializeLedger(store), 'utf-8');
 }
 
+/* eslint-disable no-unused-vars -- Reason: callback parameter used via closure in inner function */
 function mutateLedger<T>(stateDir: string, mutate: (store: HybridLedgerStore) => T): T {
+  // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: function is defined later but called in this helper for consistency
   const filePath = getLedgerFilePath(stateDir);
   return withLock(filePath, () => {
     const store = readLedgerFromFile(filePath);
@@ -323,7 +327,9 @@ function mutateLedger<T>(stateDir: string, mutate: (store: HybridLedgerStore) =>
   });
 }
 
+/* eslint-disable no-unused-vars -- Reason: callback parameter used via closure in inner function */
 async function mutateLedgerAsync<T>(stateDir: string, mutate: (store: HybridLedgerStore) => Promise<T>): Promise<T> {
+  // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: function is defined later but called in this helper for consistency
   const filePath = getLedgerFilePath(stateDir);
   return withLockAsync(filePath, async () => {
     const store = readLedgerFromFile(filePath);
@@ -357,6 +363,7 @@ export async function saveLedgerAsync(stateDir: string, store: HybridLedgerStore
 
 export function updateTrainingStore(
   stateDir: string,
+  /* eslint-disable no-unused-vars -- Reason: callback parameter is forwarded to mutateLedger callback */
   mutate: (store: LegacyPrincipleTrainingStore) => void,
 ): void {
   mutateLedger(stateDir, (store) => {
@@ -669,9 +676,9 @@ export function transitionImplementationState(
       throw new Error(`Implementation not found: ${implementationId}`);
     }
 
-    const currentState = (impl as any).lifecycleState ?? 'candidate';
-    if (!isValidLifecycleTransition(currentState as ImplementationLifecycleState, newState)) {
-      const allowed = getAllowedTransitions(currentState as ImplementationLifecycleState);
+    const currentState = impl.lifecycleState ?? 'candidate';
+    if (!isValidLifecycleTransition(currentState, newState)) {
+      const allowed = getAllowedTransitions(currentState);
       throw new Error(
         `Invalid lifecycle transition: ${currentState} -> ${newState}. ` +
           `Allowed: ${allowed.length > 0 ? allowed.join(', ') : 'none (terminal state)'}`
@@ -698,7 +705,7 @@ export function listImplementationsByLifecycleState(
 ): Implementation[] {
   const ledger = loadLedger(stateDir);
   return Object.values(ledger.tree.implementations).filter(
-    (impl) => (impl as any).lifecycleState === state
+    (impl) => impl.lifecycleState === state
   );
 }
 
@@ -711,7 +718,7 @@ export function listRuleImplementationsByState(
   state: ImplementationLifecycleState
 ): Implementation[] {
   const implementations = listImplementationsForRule(stateDir, ruleId);
-  return implementations.filter((impl) => (impl as any).lifecycleState === state);
+  return implementations.filter((impl) => impl.lifecycleState === state);
 }
 
 /**
@@ -722,5 +729,5 @@ export function findActiveImplementation(
   ruleId: string
 ): Implementation | null {
   const implementations = listImplementationsForRule(stateDir, ruleId);
-  return implementations.find((impl) => (impl as any).lifecycleState === 'active') ?? null;
+  return implementations.find((impl) => impl.lifecycleState === 'active') ?? null;
 }
