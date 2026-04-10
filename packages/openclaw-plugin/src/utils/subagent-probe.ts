@@ -48,23 +48,18 @@ export function isSubagentRuntimeAvailable(
     const runFn = subagent.run;
     if (typeof runFn !== 'function') return false;
 
-    // In gateway mode, methods are AsyncFunction instances
-    // In embedded mode, methods are regular Function instances that throw
+    // Check 1: In gateway mode, methods are AsyncFunction instances
     const isAsync = runFn.constructor?.name === 'AsyncFunction';
-    
     if (isAsync) return true;
 
-    // Fallback: Check if it's a Proxy that might late-bind to the gateway subagent
-    // This handles the case where the plugin was loaded with allowGatewaySubagentBinding
-    // but the proxy hasn't resolved yet
-    const globalGateway = getGlobalGatewaySubagent();
-    if (globalGateway && typeof globalGateway.run === 'function') {
-      return globalGateway.run.constructor?.name === 'AsyncFunction';
-    }
-
-    return false;
+    // Check 2: OpenClaw may provide subagent.run as a regular Function that
+    // internally resolves to gateway context at call time. The function exists,
+    // so we should trust it and let it fail at runtime if truly unavailable.
+    // This is the case with the late-binding Proxy from OpenClaw's plugin runtime.
+    // eslint-disable-next-line no-console -- debug logging for critical path
+    console.warn('[PD:SubagentProbe] subagent.run exists but constructor is not AsyncFunction — assuming it is callable via late-binding proxy');
+    return true;
   } catch {
-    // Any error means unavailable
     return false;
   }
 }

@@ -308,6 +308,16 @@ export async function handleBeforePromptBuild(
     return;
   }
 
+  // ──── DEBUG: Verify subagent availability in this context ────
+  const subagent = ctx.api?.runtime?.subagent;
+  logger?.info?.(`[PD:DEBUG:SubagentCheck] trigger=${ctx.trigger}, subagent_exists=${!!subagent}, subagent.run_exists=${!!subagent?.run}`);
+  if (subagent?.run) {
+    const runFn = subagent.run;
+    const ctorName = runFn.constructor?.name ?? 'unknown';
+    const isAsyncFn = ctorName === 'AsyncFunction';
+    logger?.info?.(`[PD:DEBUG:SubagentCheck] run.constructor.name=${ctorName}, isAsyncFunction=${isAsyncFn}`);
+  }
+
   const wctx = WorkspaceContext.fromHookContext(ctx);
   const { trigger, sessionId, api } = ctx;
   if (sessionId) {
