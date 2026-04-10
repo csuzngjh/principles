@@ -44,14 +44,14 @@ export function parseThinkingOsMd(content: string): ThinkingOsDirective[] {
 
   // Match all <directive ...> ... </directive> blocks
   const directiveRegex = /<directive\s+([^>]*)>([\s\S]*?)<\/directive>/gi;
-  let match: RegExpExecArray | null;
+  /* eslint-disable @typescript-eslint/init-declarations, @typescript-eslint/no-use-before-define, @typescript-eslint/prefer-destructuring, no-useless-assignment, @typescript-eslint/no-unused-vars */
+  let match: RegExpExecArray | null = null;
 
   while ((match = directiveRegex.exec(content)) !== null) {
-    const attrs = match[1];
-    const body = match[2];
+    const [, attrs, body] = match;
 
-    const idMatch = attrs.match(/id="([^"]+)"/i);
-    const nameMatch = attrs.match(/name="([^"]+)"/i);
+    const idMatch = /id="([^"]+)"/i.exec(attrs);
+    const nameMatch = /name="([^"]+)"/i.exec(attrs);
 
     if (!idMatch) continue;
 
@@ -75,7 +75,7 @@ export function parseThinkingOsMd(content: string): ThinkingOsDirective[] {
  */
 export function loadThinkingOsFromWorkspace(
   workspaceDir: string,
-  language: string = 'zh',
+  language = 'zh',
 ): ThinkingOsDirective[] {
   // Priority 1: workspace's own THINKING_OS.md
   const workspacePath = resolvePdPath(workspaceDir, 'THINKING_OS');

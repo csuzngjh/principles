@@ -42,16 +42,12 @@ import type {
 } from '../core/nocturnal-trajectory-extractor.js';
 import {
   listEvaluablePrinciples,
-  loadStore,
   type PrincipleTrainingState,
 } from '../core/principle-training-state.js';
 import {
   checkWorkspaceIdle,
   checkCooldown,
-  checkPreflight,
   DEFAULT_IDLE_THRESHOLD_MS,
-  DEFAULT_PRINCIPLE_COOLDOWN_MS,
-  DEFAULT_GLOBAL_COOLDOWN_MS,
   type IdleCheckResult,
 } from './nocturnal-runtime.js';
 import { detectViolation } from '../core/nocturnal-compliance.js';
@@ -290,6 +286,7 @@ export class NocturnalTargetSelector {
     recentMaxPainScore: number;
   };
 
+  /* eslint-disable @typescript-eslint/max-params -- Reason: Constructor requires all parameters for proper initialization */
   constructor(
     workspaceDir: string,
     stateDir: string,
@@ -521,6 +518,7 @@ export class NocturnalTargetSelector {
  *
  * This is a convenience wrapper for the common case.
  */
+/* eslint-disable @typescript-eslint/max-params -- Reason: Function signature requires all parameters for type-safe selection */
 export function selectNocturnalTarget(
   workspaceDir: string,
   stateDir: string,

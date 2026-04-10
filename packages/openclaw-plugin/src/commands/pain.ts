@@ -218,6 +218,7 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
 /**
  * Handle /pd-status empathy subcommand
  */
+// eslint-disable-next-line @typescript-eslint/max-params -- Reason: empathy subcommand requires all 4 context params - refactoring would break API
 function handleEmpathySubcommand(
     wctx: WorkspaceContext,
     args: string,

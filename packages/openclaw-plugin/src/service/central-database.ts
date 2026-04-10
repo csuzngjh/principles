@@ -670,10 +670,6 @@ export class CentralDatabase {
       ORDER BY hits DESC
     `).all() as { modelId: string; hits: number }[];
 
-    const coverageRate = totalToolCalls.count > 0 
-      ? models.reduce((sum, m) => sum + m.hits, 0) / totalToolCalls.count 
-      : 0;
-
     return {
       totalModels: totalModels.count,
       activeModels: activeModels.count,

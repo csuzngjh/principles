@@ -1,14 +1,28 @@
-# Roadmap: v1.10 Thinking Models 页面优化
+# Roadmap: Principles Disciple
 
-## Overview
+## Milestones
+
+- ✅ **v1.9.3** — 剩余 Lint 修复 (Phase 03, shipped 2026-04-09)
+- 📋 **v1.10** — Thinking Models 页面优化 (8 phases, started 2026-04-09)
+- 📋 **Next** — TBD (see `.planning/milestones/` for archive)
+
+## Phases
+
+<details>
+<summary>✅ v1.9.3 剩余 Lint 修复 (Phase 03) — SHIPPED 2026-04-09</summary>
+
+- [x] Phase 03: Manual Remediation (1/1 plans) — completed 2026-04-09
+
+**Details:** Gap closure continuation from v1.9.2. Achieved CI green through mechanical fixes (~149) and documented suppressions (~291). All lint errors resolved, npm run lint exits 0.
+
+</details>
+
+### 📋 v1.10 Thinking Models 页面优化
 
 **Milestone:** v1.10
 **Goal:** 将 Thinking Models 页面从简单的列表/详情视图重构为功能完整的思维模型分析面板
 **Phases:** 8
-**Granularity:** Standard
 **Coverage:** 22/22 requirements mapped
-
-## Phases
 
 - [ ] **Phase 1: 基础可视化** - 覆盖率趋势图、场景热力图、空状态优化 (VIZ-01, VIZ-03, VIZ-04)
 - [ ] **Phase 2: 模型详情可视化** - 使用趋势图、事件上下文展开 (VIZ-02)
@@ -18,8 +32,6 @@
 - [ ] **Phase 6: 模型对比模式** - 多模型选择、并排比较、趋势叠加 (CMP-01, CMP-02, CMP-03)
 - [ ] **Phase 7: 搜索与过滤** - 文本搜索、排序切换 (SRCH-01, SRCH-02)
 - [ ] **Phase 8: THINKING_OS.md 一致性** - 模板补齐 10 个 directive (SYNC-01)
-
-## Phase Details
 
 ### Phase 1: 基础可视化
 
@@ -137,5 +149,21 @@
 - builtin patterns 与 THINKING_OS.md 内容一致
 
 ---
+
+### 📋 Next Milestone
+
+- [ ] Phase TBD: TBD (0/0 plans)
+
+## Progress
+
+| Phase | Milestone | Plans Complete | Status | Completed |
+|-------|-----------|----------------|--------|-----------|
+| 03 | v1.9.3 | 1/1 | Complete | 2026-04-09 |
+| 01-08 | v1.10 | 0/8 | Not started | - |
+
+---
+
+**For full milestone history, see:** `.planning/milestones/`
+
 *Roadmap created: 2026-04-09*
 *Last updated: 2026-04-09 after v1.10 milestone started*

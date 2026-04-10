@@ -16,10 +16,10 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci --ignore-scripts
 
       - name: Run ESLint
         run: npm run lint --if-present
@@ -40,7 +40,7 @@ jobs:
           node-version: ${{ matrix.node-version }}
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci --ignore-scripts
 
       - name: Run tests
         run: npm test --if-present
@@ -55,11 +55,11 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Install dependencies
         working-directory: packages/openclaw-plugin
-        run: npm install
+        run: npm ci --ignore-scripts
 
       - name: Build
         working-directory: packages/openclaw-plugin
@@ -67,7 +67,7 @@ jobs:
 
       - name: TypeScript Check
         working-directory: packages/openclaw-plugin
-        run: ./node_modules/.bin/tsc --noEmit
+        run: npx tsc --noEmit
 
       - name: Production Build & Verify
         working-directory: packages/openclaw-plugin
@@ -83,11 +83,11 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Install dependencies
         working-directory: packages/openclaw-plugin
-        run: npm install
+        run: npm ci --ignore-scripts
 
       - name: Run tests
         working-directory: packages/openclaw-plugin
