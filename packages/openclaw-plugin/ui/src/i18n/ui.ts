@@ -262,6 +262,8 @@ export const i18n = {
     // Empty state
     emptyTitle: { zh: '选择一个思维模型', en: 'Select a thinking model' },
     emptyDesc: { zh: '点击左侧列表中的模型，查看场景分布和最近事件', en: 'Click a model from the list to inspect scenario coverage and recent events' },
+    noDataTitle: { zh: '思维模型定义', en: 'Thinking Model Definitions' },
+    noDataDesc: { zh: '以下是 10 个思维模型的定义。当 AI 开始使用后，这里会显示每个模型的使用统计。', en: 'Below are 10 thinking model definitions. Usage statistics will appear once the AI starts working.' },
 
     // Table
     hits: { zh: '命中', en: 'Hits' },
