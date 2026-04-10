@@ -246,6 +246,7 @@ export const i18n = {
 
     // Detail sections
     outcomeStats: { zh: '效果统计', en: 'Outcome Stats' },
+    usageTrend: { zh: '使用趋势', en: 'Usage Trend' },
     success: { zh: '成功', en: 'Success' },
     failure: { zh: '失败', en: 'Failure' },
     pain: { zh: '痛点', en: 'Pain' },
