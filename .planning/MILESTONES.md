@@ -1,5 +1,19 @@
 # Milestones
 
+## v1.9.3 剩余 Lint 修复 (Shipped: 2026-04-09)
+
+**Phases completed:** 1 phases, 1 plans, 5 tasks
+
+**Key accomplishments:**
+
+- ESLint v10 flat config updated with globals.node (resolves no-undef for Node.js builtins) and ignores for parsing-error files
+- Reordered functions in create-principles-disciple to fix no-use-before-define, refactored copyCoreTemplates to options object to fix max-params
+- Note:
+- 1. [Rule 1 - Bug] Fixed init-declarations with try/catch patterns
+- Plan:
+
+---
+
 ## v1.9.0 Principle Internalization System (Shipped: 2026-04-08)
 
 **Phases completed:** 5 (Phase 11, 12, 13, 14, 15) | **Plans:** 10

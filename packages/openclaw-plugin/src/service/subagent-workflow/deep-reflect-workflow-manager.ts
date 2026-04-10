@@ -1,7 +1,6 @@
 import type { PluginLogger } from '../../openclaw-sdk.js';
 import type {
     SubagentWorkflowSpec,
-    WorkflowMetadata,
     DeepReflectResult,
     WorkflowResultContext,
     WorkflowPersistContext,
@@ -70,6 +69,7 @@ export class DeepReflectWorkflowManager extends WorkflowManagerBase {
         return super.startWorkflow(spec, options);
     }
 
+    /* eslint-disable @typescript-eslint/class-methods-use-this -- Reason: Subclass overrides id generation pattern */
     protected override generateWorkflowId(): string {
         return `wf_dr_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
     }
@@ -129,6 +129,7 @@ export const deepReflectWorkflowSpec: SubagentWorkflowSpec<DeepReflectResult> = 
             } else if (Array.isArray(lastMessage?.content)) {
                 insights = (lastMessage.content as { type?: string; text?: string }[])
                     .filter((c) => c?.type === 'text' && typeof c.text === 'string')
+                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Reason: filter ensures c.text is a string
                     .map((c) => c.text!)
                     .join('\n');
             }

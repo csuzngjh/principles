@@ -107,20 +107,6 @@ function readRecentEntries(filePath: string, count = 50): EventLogEntry[] {
 }
 
 /**
- * Count hooks in entries.
- */
-function countHooks(entries: EventLogEntry[]): Record<string, number> {
-  const counts: Record<string, number> = {};
-  for (const entry of entries) {
-    if (entry.type === 'hook_execution' && entry.data?.hook) {
-      const hook = entry.data.hook as string;
-      counts[hook] = (counts[hook] || 0) + 1;
-    }
-  }
-  return counts;
-}
-
-/**
  * Count all hooks in the entire file (for summary).
  */
 function countAllHooks(filePath: string): Record<string, number> {
@@ -170,8 +156,7 @@ export async function auditEventLogs(
       const stat = fs.statSync(filePath);
       const allCounts = countAllHooks(filePath);
       const recent = readRecentEntries(filePath, 30);
-      const recentCounts = countHooks(recent);
-      
+
       locations.push({
         path: filePath,
         lastModified: stat.mtime,

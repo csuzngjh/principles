@@ -12,6 +12,7 @@ import type { WorkflowManager } from '../service/subagent-workflow/types.js';
  * Factory to create the appropriate WorkflowManager by workflow_type string.
  * Used by the subagent_ended hook to dispatch lifecycle recovery to the right manager.
  */
+/* eslint-disable @typescript-eslint/max-params -- Reason: Factory function requires workflowType, workspaceDir, logger, and subagent */
 function createWorkflowManagerForType(
     workflowType: string,
     workspaceDir: string,

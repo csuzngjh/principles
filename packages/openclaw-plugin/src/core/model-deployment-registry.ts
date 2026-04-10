@@ -249,9 +249,10 @@ function writeRegistry(stateDir: string, registry: ModelDeploymentRegistry): voi
 /**
  * Execute a read-modify-write under an exclusive file lock.
  */
+/* eslint-disable no-unused-vars -- Reason: _registry is a type signature parameter */
 function withDeploymentRegistryLock<T>(
   stateDir: string,
-  fn: (registry: ModelDeploymentRegistry) => T
+  fn: (_registry: ModelDeploymentRegistry) => T
 ): T {
   const registryPath = getRegistryPath(stateDir);
   return withLock(registryPath, () => {

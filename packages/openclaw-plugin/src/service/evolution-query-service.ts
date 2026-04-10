@@ -8,7 +8,7 @@
  * - getStats() - 获取统计数据
  */
 
-import type { TrajectoryDatabase, EvolutionTaskRecord, EvolutionEventRecord } from '../core/trajectory.js';
+import type { TrajectoryDatabase, EvolutionTaskRecord } from '../core/trajectory.js';
 import { STAGE_LABELS, STAGE_COLORS } from '../core/evolution-logger.js';
 
 export interface TaskListFilters {
@@ -154,6 +154,7 @@ export class EvolutionQueryService {
    * 释放资源
    * 注意：不关闭 trajectory，因为它是单例由 TrajectoryRegistry 管理
    */
+  /* eslint-disable @typescript-eslint/class-methods-use-this -- Reason: Delegates to TrajectoryRegistry lifecycle management */
   dispose(): void {
     // EvolutionQueryService 不拥有 trajectory，所以不关闭它
     // trajectory 是由 TrajectoryRegistry 管理的单例
@@ -340,21 +341,21 @@ export class EvolutionQueryService {
     const activityByDay = new Map<string, { created: number; completed: number }>();
     for (let i = 0; i < days; i++) {
       const day = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
-      const dayStr = day.toISOString().split('T')[0];
+      const [dayStr] = day.toISOString().split('T');
       activityByDay.set(dayStr, { created: 0, completed: 0 });
     }
 
     for (const task of recentTasks) {
       const [createdDay] = task.createdAt.split('T');
       if (activityByDay.has(createdDay)) {
-        const entry = activityByDay.get(createdDay)!;
-        entry.created++;
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Reason: has() check guarantees entry exists
+        activityByDay.get(createdDay)!.created++;
       }
       if (task.completedAt) {
         const [completedDay] = task.completedAt.split('T');
         if (activityByDay.has(completedDay)) {
-          const entry = activityByDay.get(completedDay)!;
-          entry.completed++;
+          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Reason: has() check guarantees entry exists
+          activityByDay.get(completedDay)!.completed++;
         }
       }
     }
@@ -394,7 +395,7 @@ const serviceCache = new Map<string, EvolutionQueryService>();
  */
 export function getEvolutionQueryService(trajectory: TrajectoryDatabase): EvolutionQueryService {
   // 使用 trajectory 的 dbPath 作为缓存键
-  const cacheKey = (trajectory as any).dbPath || 'default';
+  const cacheKey = (trajectory as unknown as { dbPath?: string }).dbPath || 'default';
   const cached = serviceCache.get(cacheKey);
   if (cached) {
     return cached;

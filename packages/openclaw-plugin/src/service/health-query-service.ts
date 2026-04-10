@@ -141,7 +141,7 @@ export class HealthQueryService {
   }
 
   getOverviewHealth(): {
-    gfi: { current: number; peakToday: number; threshold: number; trend: Array<{ hour: string; value: number }> };
+    gfi: { current: number; peakToday: number; threshold: number; trend: { hour: string; value: number }[] };
     trust: { stage: number; stageLabel: string; score: number };
     evolution: { tier: string; points: number };
     painFlag: { active: boolean; source: string | null; score: number | null };
@@ -158,7 +158,7 @@ export class HealthQueryService {
 
     // GFI: always read from SQLite (synced from session JSON at construction time)
     const gfiData = this.readGfiFromDb();
-    const currentGfi = gfiData.currentGfi;
+    const {currentGfi} = gfiData;
     const peakToday = gfiData.dailyGfiPeak;
 
     // GFI history trend: aggregate pain_events by hour
@@ -235,7 +235,7 @@ export class HealthQueryService {
    * Read GFI trend for a specific day by aggregating pain_events by hour.
    * Used by getOverviewHealth() to provide historical GFI context.
    */
-  private readGfiTrend(date: string): Array<{ hour: string; value: number }> {
+  private readGfiTrend(date: string): { hour: string; value: number }[] {
     try {
       const rows = this.uiDb.all<{ hour: string; value: number }>(`
         SELECT substr(created_at, 1, 13) || ':00:00Z' AS hour, ROUND(SUM(score), 2) AS value
@@ -781,6 +781,7 @@ export class HealthQueryService {
     return [];
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: Private helper doesn't use instance state
   private getEventDedupKey(entry: EventLogEntry): string {
     const eventId = typeof entry.data?.eventId === 'string' ? entry.data.eventId : null;
     if (eventId) {
@@ -850,6 +851,7 @@ export class HealthQueryService {
     return fallbackStage;
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: Private helper doesn't use instance state
   private resolveGateType(row: GateBlockRow): string {
     if (typeof row.gate_type === 'string' && row.gate_type.trim().length > 0) {
       return row.gate_type;
@@ -873,12 +875,14 @@ export class HealthQueryService {
     return cached.has(columnName);
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: Private helper doesn't use instance state
   private scoreToStatus(score: number): string {
     if (score >= 70) return 'healthy';
     if (score >= 40) return 'warning';
     return 'critical';
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: Private helper doesn't use instance state
   private evolutionToStatus(tier: string, points: number): string {
     const lower = tier.toLowerCase();
     if (lower === 'forest' || lower === 'tree') return 'healthy';
@@ -886,7 +890,8 @@ export class HealthQueryService {
     return 'critical';
   }
 
-  private safeListFiles(dirPath: string, predicate: (name: string) => boolean): string[] {
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this, no-unused-vars -- Reason: Private helper doesn't use instance state
+  private safeListFiles(dirPath: string, predicate: (_name: string) => boolean): string[] {
     if (!fs.existsSync(dirPath)) return [];
     try {
       return fs.readdirSync(dirPath)
@@ -897,6 +902,7 @@ export class HealthQueryService {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: Private helper doesn't use instance state
   private readJsonFile<T>(filePath: string, fallback: T): T {
     if (!fs.existsSync(filePath)) return fallback;
     try {
@@ -906,10 +912,12 @@ export class HealthQueryService {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: Private helper doesn't use instance state
   private asNumber(value: unknown, fallback: number): number {
     return Number.isFinite(value) ? Number(value) : fallback;
   }
 
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: Private helper doesn't use instance state
   private asNullableNumber(value: unknown): number | null {
     if (Number.isFinite(value)) return Number(value);
     if (typeof value === 'string' && value.trim().length > 0) {

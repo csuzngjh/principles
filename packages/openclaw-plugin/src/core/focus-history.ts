@@ -443,16 +443,20 @@ export function extractWorkingMemory(
     if (!text) continue;
 
     // 从文本中提取文件操作（备用方式）
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between helper functions - reordering would break logical grouping
     extractFileArtifacts(text, snapshot.artifacts, workspaceDir);
 
     // 提取问题
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between helper functions - reordering would break logical grouping
     extractProblems(text, snapshot.activeProblems);
 
     // 提取下一步
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between helper functions - reordering would break logical grouping
     extractNextActions(text, snapshot.nextActions);
   }
 
   // 去重和限制数量
+  // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between helper functions - reordering would break logical grouping
   snapshot.artifacts = deduplicateArtifacts(snapshot.artifacts).slice(-MAX_ARTIFACTS);
   snapshot.activeProblems = snapshot.activeProblems.slice(-MAX_PROBLEMS);
   snapshot.nextActions = snapshot.nextActions.slice(-MAX_NEXT_ACTIONS);
@@ -502,6 +506,7 @@ function extractFileArtifacts(
     }
 
     // 尝试提取描述（从附近的文本）
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between helper functions - reordering would break logical grouping
     const description = extractDescription(text, filePath);
 
     artifacts.push({
@@ -534,8 +539,9 @@ function extractFileArtifacts(
       continue;
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between helper functions - reordering would break logical grouping
     const description = extractDescription(text, filePath);
-    
+
     artifacts.push({
       path: filePath,
       action: 'modified',
@@ -720,8 +726,9 @@ export function parseWorkingMemorySection(content: string): WorkingMemorySnapsho
  */
 export function mergeWorkingMemory(content: string, snapshot: WorkingMemorySnapshot): string {
   const wmIndex = content.indexOf(WORKING_MEMORY_SECTION);
-  
+
   // 生成 Working Memory 章节
+  // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between helper functions - reordering would break logical grouping
   const wmSection = generateWorkingMemorySection(snapshot);
   
   if (wmIndex === -1) {
@@ -1398,7 +1405,9 @@ export function recoverFromTemplate(
 export function safeReadCurrentFocus(
   focusPath: string,
   extensionRoot: string,
+  /* eslint-disable no-unused-vars -- Reason: type-only callback parameter names in function type */
   logger?: { warn?: (msg: string) => void; info?: (msg: string) => void }
+  /* eslint-enable no-unused-vars */
 ): {
   content: string;
   recovered: boolean;

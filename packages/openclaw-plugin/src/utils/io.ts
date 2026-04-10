@@ -74,6 +74,7 @@ export function parseKvLines(text: string): Record<string, string> {
   return result;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: serializeKvLines handles arbitrary object shapes for kv line serialization
 export function serializeKvLines(data: Record<string, any>): string {
   const lines: string[] = [];
   const keys = Object.keys(data).sort();
@@ -104,7 +105,8 @@ export function planStatus(projectDir: string): string {
         }
       }
     }
-  } catch (e) {
+  /* eslint-disable @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: Error is intentionally ignored for graceful degradation */
+  } catch (_e) {
     // Ignore read errors
   }
   return '';
