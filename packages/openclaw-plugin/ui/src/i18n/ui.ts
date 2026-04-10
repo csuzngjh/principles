@@ -71,6 +71,7 @@ export const i18n = {
     checking: { zh: '正在验证身份...', en: 'Verifying identity...' },
     loginTitle: { zh: 'Principles Console', en: 'Principles Console' },
     loginSubtitle: { zh: 'AI Agent 进化流程监控平台', en: 'AI Agent Evolution Monitoring Platform' },
+    tokenLabel: { zh: 'Gateway Token', en: 'Gateway Token' },
     tokenPlaceholder: { zh: '请输入您的 Gateway Token', en: 'Enter your Gateway Token' },
     tokenHint: { zh: '在服务器上运行 openclaw config get gateway.auth.token 获取 Token', en: 'Run openclaw config get gateway.auth.token on your server to get the Token' },
     loginButton: { zh: '登 录', en: 'Sign In' },
@@ -185,6 +186,11 @@ export const i18n = {
     createdAt: { zh: '创建时间', en: 'Created At' },
     failureMode: { zh: '失败模式', en: 'Failure Mode' },
     relatedThinking: { zh: '相关思维', en: 'Thinking Hits' },
+
+    // Missing i18n keys (previously hardcoded in components)
+    noGfiToday: { zh: '今日暂无 GFI 记录', en: 'No GFI data today' },
+    noWorkspacesFound: { zh: '未找到已启用的工作区', en: 'No enabled workspaces found' },
+    refreshing: { zh: '刷新中', en: 'Refreshing' },
   },
 
   // ========================================================================
@@ -214,6 +220,9 @@ export const i18n = {
     // Actions
     approve: { zh: '批准', en: 'Approve' },
     reject: { zh: '拒绝', en: 'Reject' },
+
+    // Error messages (previously hardcoded English)
+    reviewFailed: { zh: '审核操作失败', en: 'Review operation failed' },
   },
 
   // ========================================================================
@@ -325,6 +334,11 @@ export const i18n = {
       analyzing: { zh: '分析中', en: 'Analyzing' },
       principle_generated: { zh: '原则生成', en: 'Principle Generated' },
       completed: { zh: '已完成', en: 'Completed' },
+      // Principle status labels
+      candidate: { zh: '候选', en: 'Candidate' },
+      probation: { zh: '试用', en: 'Probation' },
+      active: { zh: '活跃', en: 'Active' },
+      deprecated: { zh: '废弃', en: 'Deprecated' },
     },
 
     // Status filter
@@ -355,6 +369,19 @@ export const i18n = {
     evolutionTimeline: { zh: '进化时间线', en: 'Evolution Timeline' },
     detailedEvents: { zh: '详细事件', en: 'Detailed Events' },
     reason: { zh: '原因', en: 'Reason' },
+
+    // EvolutionPage panel headers (previously hardcoded Chinese)
+    currentStage: { zh: '当前阶段', en: 'Current Stage' },
+    principleLifecycle: { zh: '原则生命周期', en: 'Principle Lifecycle' },
+    nocturnalTrainingStatus: { zh: '夜间训练状态', en: 'Nocturnal Training Status' },
+    trainingQueue: { zh: '训练队列', en: 'Training Queue' },
+    arbiterPassRate: { zh: 'Arbiter 通过率', en: 'Arbiter Pass Rate' },
+    orpoSampleCount: { zh: 'ORPO 样本数', en: 'ORPO Sample Count' },
+    modelDeployments: { zh: '模型部署', en: 'Model Deployments' },
+    deploymentCount: { zh: '个', en: 'deployments' },
+    pendingShort: { zh: '待', en: 'P' },
+    inProgressShort: { zh: '中', en: 'I' },
+    completedShort: { zh: '完', en: 'C' },
   },
 
   // ========================================================================
