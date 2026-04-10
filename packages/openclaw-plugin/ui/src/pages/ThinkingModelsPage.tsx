@@ -463,7 +463,6 @@ export function ThinkingModelsPage() {
                   {!isLoadingDetail && detail && (
                 <div className="detail-stack">
                   <div className="detail-header">
-<<<<<<< Updated upstream
                     <button className="back-button" onClick={() => { setDetail(null); setSelectedModel(''); setIsLoadingDetail(true); }} title={t('common.back')}>
                       <ChevronLeft strokeWidth={1.75} size={18} />
                     </button>
