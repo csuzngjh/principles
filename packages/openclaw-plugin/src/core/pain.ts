@@ -3,6 +3,7 @@ import * as path from 'path';
 import { serializeKvLines, parseKvLines } from '../utils/io.js';
 import { resolvePdPath } from './paths.js';
 import { ConfigService } from './config-service.js';
+import { SystemLogger } from './system-logger.js';
 
 // =========================================================================
 // Pain Flag Contract (Single Source of Truth)
@@ -150,15 +151,80 @@ export function writePainFlag(projectDir: string, painData: PainFlagData): void 
   fs.writeFileSync(painFlagPath, serializeKvLines(painData), "utf-8");
 }
 
+/**
+ * Reads and validates the pain flag file with auto-repair.
+ *
+ * - If file doesn't exist → returns {}
+ * - If file is JSON format (wrong) → converts to KV, logs warning, rewrites file
+ * - If file is KV format → validates required fields, logs warning if missing
+ * - If file has unknown fields → silently ignores them (forward-compatible)
+ */
 export function readPainFlagData(projectDir: string): Record<string, string> {
   const painFlagPath = resolvePdPath(projectDir, 'PAIN_FLAG');
   try {
     if (!fs.existsSync(painFlagPath)) {
       return {};
     }
-    const content = fs.readFileSync(painFlagPath, "utf-8");
-    return parseKvLines(content);
-  } catch (e) { // eslint-disable-line @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: intentionally unused - returning empty object on error
+    const content = fs.readFileSync(painFlagPath, "utf-8").trim();
+    if (!content) {
+      return {};
+    }
+
+    // Detect JSON format (wrong — should be KV)
+    if (content.startsWith('{')) {
+      let json: Record<string, unknown>;
+      try {
+        json = JSON.parse(content);
+      } catch {
+        SystemLogger.log(projectDir, 'PAIN_FLAG_CORRUPT', 'Pain flag file contains invalid JSON');
+        return {};
+      }
+
+      // Auto-repair: convert JSON to KV format
+      const kvData: Record<string, string> = {};
+      // Map known JSON fields to KV equivalents
+      const fieldMap: Record<string, string> = {
+        source: 'source',
+        score: 'score',
+        time: 'time',
+        timestamp: 'time',
+        reason: 'reason',
+        session_id: 'session_id',
+        sessionId: 'session_id',
+        agent_id: 'agent_id',
+        agentId: 'agent_id',
+        is_risky: 'is_risky',
+        isRisky: 'is_risky',
+        severity: 'severity',
+        painId: 'pain_id',
+      };
+      for (const [jsonKey, kvKey] of Object.entries(fieldMap)) {
+        if (json[jsonKey] !== undefined) {
+          kvData[kvKey] = String(json[jsonKey]);
+        }
+      }
+      // Keep any fields not in the map (forward-compatible)
+      for (const [key, value] of Object.entries(json)) {
+        if (fieldMap[key] === undefined && value !== undefined && value !== null) {
+          kvData[key] = String(value);
+        }
+      }
+
+      const repaired = serializeKvLines(kvData);
+      fs.writeFileSync(painFlagPath, repaired, 'utf-8');
+      SystemLogger.log(projectDir, 'PAIN_FLAG_AUTO_REPAIRED', `Auto-repaired pain flag from JSON to KV format (${Object.keys(json).length} fields)`);
+      return kvData;
+    }
+
+    // KV format — parse and validate
+    const data = parseKvLines(content);
+    const missing = validatePainFlag(data);
+    if (missing.length > 0) {
+      SystemLogger.log(projectDir, 'PAIN_FLAG_INCOMPLETE', `Pain flag missing required fields: ${missing.join(', ')}`);
+    }
+    return data;
+  } catch (e) {
+    SystemLogger.log(projectDir, 'PAIN_FLAG_READ_ERROR', `Failed to read pain flag: ${String(e)}`);
     return {};
   }
 }
