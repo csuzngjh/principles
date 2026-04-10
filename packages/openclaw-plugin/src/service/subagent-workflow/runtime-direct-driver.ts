@@ -206,6 +206,10 @@ export class RuntimeDirectDriver implements TransportDriver {
                 this.logger.info(`[PD:RuntimeDirectDriver] Gateway-scoped cleanup unavailable (${errMsg.split(':')[0]}), falling back to agent.session`);
                 await this.cleanupViaAgentSession(params.sessionKey);
                 this.logger.info(`[PD:RuntimeDirectDriver] Fallback cleanup succeeded`);
+            } else if (isNonGatewayContext && !this.agentSession) {
+                // #232: Both cleanup paths unavailable — this is an OpenClaw environment limitation,
+                // not a PD bug. Session will be cleaned up on next gateway request or TTL expiry.
+                this.logger.warn(`[PD:RuntimeDirectDriver] Session cleanup skipped (${errMsg.split(':')[0]}): no gateway context and agentSession unavailable — session will expire naturally`);
             } else {
                 this.logger.error(`[PD:RuntimeDirectDriver] Cleanup failed: ${errMsg}`);
                 throw error;
