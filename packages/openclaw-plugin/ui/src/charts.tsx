@@ -861,6 +861,7 @@ interface LineChartProps {
   showDots?: boolean;
   showArea?: boolean;
   unit?: string;
+  emptyText?: string;
 }
 
 export function LineChart({
@@ -872,11 +873,13 @@ export function LineChart({
   showDots = true,
   showArea = true,
   unit = '',
+  emptyText = '',
 }: LineChartProps) {
   if (!data || data.length === 0) {
+    if (!emptyText) return null;
     return (
       <div style={{ height, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-        暂无数据
+        {emptyText}
       </div>
     );
   }
