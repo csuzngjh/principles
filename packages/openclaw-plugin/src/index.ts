@@ -354,171 +354,108 @@ const plugin = {
     }
 
     // ── Slash Commands ──
-    api.registerCommand({
-      name: "pd-init",
-      description: getCommandDescription('pd-init', language),
-      handler: (ctx) => handleInitStrategy(ctx)
-    });
-
-    api.registerCommand({
-      name: "pd-okr",
-      description: getCommandDescription('pd-okr', language),
-      handler: (ctx) => handleManageOkr(ctx)
-    });
-
-    api.registerCommand({
-      name: "pd-bootstrap",
-      description: getCommandDescription('pd-bootstrap', language),
-      handler: (ctx) => handleBootstrapTools(ctx)
-    });
-
-    api.registerCommand({
-      name: "pd-research",
-      description: getCommandDescription('pd-research', language),
-      handler: (ctx) => handleResearchTools(ctx)
-    });
-
-    api.registerCommand({
-      name: "pd-thinking",
-      description: getCommandDescription('pd-thinking', language),
-      acceptsArgs: true,
-      handler: (ctx) => handleThinkingOs(ctx)
-    });
-
-    api.registerCommand({
-      name: "pd-reflect",
-      description: getCommandDescription('pd-reflect', language),
-      handler: (ctx) => handlePdReflect.handler(ctx)
-    });
-
-    api.registerCommand({
-      name: "pd-daily",
-      description: getCommandDescription('pd-daily', language),
-      handler: () => {
-        return { text: language === 'zh'
-          ? "请执行 pd-daily 技能来配置并发送进化日报。系统将引导你完成配置流程，包括发送时间、渠道和报告风格偏好。"
-          : "Please execute the pd-daily skill to configure and send your daily evolution report. The system will guide you through the configuration process." };
+    // Register command with optional short alias
+    const registerCommandWithAlias = (name: string, alias: string | null, desc: string, handler: any, opts?: { acceptsArgs?: boolean }) => {
+      const base = {
+        name,
+        description: desc,
+        handler,
+        ...(opts?.acceptsArgs ? { acceptsArgs: true } : {}),
+      };
+      api.registerCommand(base);
+      if (alias) {
+        api.registerCommand({
+          ...base,
+          name: alias,
+          description: `${desc} (alias of /${name})`,
+        });
       }
-    });
+    };
 
-    api.registerCommand({
-      name: "pd-grooming",
-      description: getCommandDescription('pd-grooming', language),
-      handler: () => {
-        return { text: language === 'zh'
-          ? "请执行 pd-grooming 技能来执行大扫除。例如输入: '执行 pd-grooming 技能'"
-          : "Please execute the pd-grooming skill to clean up. For example: 'Execute pd-grooming skill'" };
-      }
-    });
-
-    api.registerCommand({
-      name: "pd-help",
-      description: getCommandDescription('pd-help', language),
-      handler: () => {
+    registerCommandWithAlias('pd-init', 'pdi', getCommandDescription('pd-init', language), (ctx: any) => handleInitStrategy(ctx));
+    registerCommandWithAlias('pd-okr', 'pdk', getCommandDescription('pd-okr', language), (ctx: any) => handleManageOkr(ctx));
+    registerCommandWithAlias('pd-bootstrap', 'pdb', getCommandDescription('pd-bootstrap', language), (ctx: any) => handleBootstrapTools(ctx));
+    registerCommandWithAlias('pd-research', 'pdr', getCommandDescription('pd-research', language), (ctx: any) => handleResearchTools(ctx));
+    registerCommandWithAlias('pd-thinking', 'pdt', getCommandDescription('pd-thinking', language), (ctx: any) => handleThinkingOs(ctx), { acceptsArgs: true });
+    registerCommandWithAlias('pd-reflect', 'pdrl', getCommandDescription('pd-reflect', language), (ctx: any) => handlePdReflect.handler(ctx));
+    registerCommandWithAlias('pd-daily', 'pdd', getCommandDescription('pd-daily', language), () => ({
+      text: language === 'zh'
+        ? "请执行 pd-daily 技能来配置并发送进化日报。系统将引导你完成配置流程，包括发送时间、渠道和报告风格偏好。"
+        : "Please execute the pd-daily skill to configure and send your daily evolution report. The system will guide you through the configuration process."
+    }));
+    registerCommandWithAlias('pd-grooming', 'pdg', getCommandDescription('pd-grooming', language), () => ({
+      text: language === 'zh'
+        ? "请执行 pd-grooming 技能来执行大扫除。例如输入: '执行 pd-grooming 技能'"
+        : "Please execute the pd-grooming skill to clean up. For example: 'Execute pd-grooming skill'"
+    }));
+    registerCommandWithAlias('pd-help', 'pdh', getCommandDescription('pd-help', language), () => {
         if (language === 'zh') {
           return { text: `
 📖 **Principles Disciple 命令大全**
 
-## 🚀 快速开始
-| 命令 | 用途 | 使用时机 |
-|------|------|----------|
-| \`/pd-init\` | 初始化工作区 | 新项目开始时 |
-| \`/pd-bootstrap\` | 环境工具扫描 | 缺少开发工具时 |
+## 快速开始
+| 短命令 | 长命令 | 用途 |
+|--------|--------|------|
+| \`/pdi\` | \`/pd-init\` | 初始化工作区 |
+| \`/pdb\` | \`/pd-bootstrap\` | 环境工具扫描 |
+| \`/pdr\` | \`/pd-research\` | 研究工具方案 |
 
-## 📊 状态查询
-| 命令 | 用途 | 使用时机 |
-|------|------|----------|
-| \`/pd-status\` | 查看进化状态 | 想了解当前 GFI 和 Pain 情况 |
-| \`/pd-focus\` | 焦点文件管理 | 查看/压缩/回滚历史版本 |
-| \`/pd-export\` | 导出数据 | 导出 analytics/corrections/orpo |
-| \`/pd-samples\` | 审核纠错样本 | 查看待审核样本并批准/拒绝 |
-| \`/pd-nocturnal-review\` | 审核 nocturnal 样本 | 审核 nocturnal 训练样本并导出 ORPO |
+## 状态查询
+| 短命令 | 长命令 | 用途 |
+|--------|--------|------|
+| \`/pdk\` | \`/pd-okr\` | OKR 目标管理 |
+| \`/pdt\` | \`/pd-thinking\` | 思维模型管理 |
+| \`/pdrl\` | \`/pd-reflect\` | 手动触发反思 |
+| \`/pdd\` | \`/pd-daily\` | 进化日报 |
+| \`/pdg\` | \`/pd-grooming\` | 工作区清理 |
 
-## ⚙️ 配置管理
-| 命令 | 用途 | 使用时机 |
-|------|------|----------|
-| \`/pd-context\` | 控制上下文注入 | 想减少/增加注入内容 |
-| \`/pd-okr\` | OKR 目标管理 | 设置战略目标 |
-
-## 🧠 进化相关
-| 命令 | 用途 | 使用时机 |
-|------|------|----------|
-| \`/pd-thinking\` | 思维模型管理 | 更新 Thinking OS |
-| \`/pd-daily\` | 进化日报 | 每日回顾时 |
-| \`/pd-grooming\` | 工作区大扫除 | 定期清理 |
-
-## 💡 常用命令示例
-
-**减少 token 消耗：**
-\`\`\`
-/pd-context minimal
-\`\`\`
-
-**恢复完整上下文：**
-\`\`\`
-/pd-context full
-\`\`\`
-
-**查看当前配置：**
-\`\`\`
-/pd-context status
-\`\`\`
-
-🔍 输入任意命令后加 \`help\` 可查看详细帮助，如 \`/pd-context help\`
+## 其他命令
+| 命令 | 用途 |
+|------|------|
+| \`/pd-status\` | 查看系统状态 |
+| \`/pd-context\` | 控制上下文注入 |
+| \`/pd-focus\` | 焦点文件管理 |
+| \`/pd-export\` | 导出数据 |
+| \`/pd-samples\` | 审核纠错样本 |
+| \`/pd-nocturnal-review\` | 审核 nocturnal 样本 |
+| \`/pd-rollback\` | 回滚情绪事件惩罚 |
+| \`/pd-principle-rollback\` | 回滚原则 |
+| \`/pd-help\` | 显示本帮助 |
 `.trim() };
         } else {
           return { text: `
 📖 **Principles Disciple Command Reference**
 
-## 🚀 Quick Start
-| Command | Purpose | When to Use |
-|---------|---------|-------------|
-| \`/pd-init\` | Initialize workspace | Starting a new project |
-| \`/pd-bootstrap\` | Scan environment tools | Missing dev tools |
+## Quick Start
+| Short | Full | Purpose |
+|-------|------|---------|
+| \`/pdi\` | \`/pd-init\` | Initialize workspace |
+| \`/pdb\` | \`/pd-bootstrap\` | Scan environment tools |
+| \`/pdr\` | \`/pd-research\` | Research tool solutions |
 
-## 📊 Status Query
-| Command | Purpose | When to Use |
-|---------|---------|-------------|
-| \`/pd-status\` | View evolution status | Check GFI and Pain status |
-| \`/pd-focus\` | Focus file management | View/compress/rollback history |
-| \`/pd-export\` | Export data | Export analytics/corrections/orpo |
-| \`/pd-samples\` | Review correction samples | Review pending correction samples |
-| \`/pd-nocturnal-review\` | Review nocturnal samples | Review nocturnal training samples and export ORPO |
+## Status
+| Short | Full | Purpose |
+|-------|------|---------|
+| \`/pdk\` | \`/pd-okr\` | OKR goal management |
+| \`/pdt\` | \`/pd-thinking\` | Mental model management |
+| \`/pdrl\` | \`/pd-reflect\` | Manual reflection trigger |
+| \`/pdd\` | \`/pd-daily\` | Evolution report |
+| \`/pdg\` | \`/pd-grooming\` | Workspace cleanup |
 
-## ⚙️ Configuration
-| Command | Purpose | When to Use |
-|---------|---------|-------------|
-| \`/pd-context\` | Control context injection | Reduce/increase injected content |
-| \`/pd-okr\` | OKR goal management | Set strategic goals |
-
-## 🧠 Evolution
-| Command | Purpose | When to Use |
-|---------|---------|-------------|
-| \`/pd-thinking\` | Mental model management | Update Thinking OS |
-| \`/pd-daily\` | Evolution report | Daily review |
-| \`/pd-grooming\` | Workspace cleanup | Periodic cleanup |
-
-## 💡 Common Examples
-
-**Reduce token usage:**
-\`\`\`
-/pd-context minimal
-\`\`\`
-
-**Restore full context:**
-\`\`\`
-/pd-context full
-\`\`\`
-
-**View current config:**
-\`\`\`
-/pd-context status
-\`\`\`
-
-🔍 Add \`help\` after any command for details, e.g., \`/pd-context help\`
+## Other Commands
+| Command | Purpose |
+|---------|---------|
+| \`/pd-status\` | View system status |
+| \`/pd-context\` | Control context injection |
+| \`/pd-focus\` | Focus file management |
+| \`/pd-export\` | Export data |
+| \`/pd-samples\` | Review correction samples |
+| \`/pd-nocturnal-review\` | Review nocturnal samples |
+| \`/pd-rollback\` | Rollback empathy penalty |
+| \`/pd-principle-rollback\` | Rollback principle |
+| \`/pd-help\` | Show this help |
 `.trim() };
         }
-      }
     });
 
     api.registerCommand({
