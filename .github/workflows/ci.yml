@@ -67,7 +67,7 @@ jobs:
 
       - name: TypeScript Check
         working-directory: packages/openclaw-plugin
-        run: ./node_modules/.bin/tsc --noEmit
+        run: npx tsc --noEmit
 
       - name: Production Build & Verify
         working-directory: packages/openclaw-plugin
