@@ -668,54 +668,138 @@ function syncItem(item) {
 }
 
 /**
- * Sync THINKING_OS.md templates to all workspace .principles/ directories.
- * This ensures workspaces get the latest XML directive definitions when
- * the plugin is updated. Skips workspaces that already have a THINKING_OS.md
- * with the same directive count (avoids overwriting user-customized files).
+ * Sync workspace templates to all workspace directories.
+ * This ensures workspaces get the latest template files when the plugin is updated.
+ *
+ * Syncs:
+ *   - templates/workspace/** → workspace root (recursive)
+ *   - templates/langs/{lang}/core/** → workspace root (AGENTS.md, SOUL.md, etc.)
+ *   - templates/langs/{lang}/pain/** → .state/pain_samples/
+ *   - templates/langs/{lang}/principles/THINKING_OS.md → .principles/THINKING_OS.md
+ *
+ * Smart sync: skips files that already exist with identical content (by MD5).
+ * Overwrites files that differ.
  */
-function syncThinkingOsToWorkspaces(lang) {
-    const sourcePath = join(SOURCE_DIR, 'templates', 'langs', lang, 'principles', 'THINKING_OS.md');
-    if (!existsSync(sourcePath)) return;
+function syncWorkspaceTemplates(lang) {
+    const workspacesRoot = OPENCLAW_DIR;
+    if (!existsSync(workspacesRoot)) return;
 
-    const sourceContent = readFileSync(sourcePath, 'utf-8');
-    const sourceDirectiveCount = (sourceContent.match(/<directive\s+id="/gi) || []).length;
-
-    // Scan all workspace directories under OPENCLAW_DIR
-    const workspacesDir = join(OPENCLAW_DIR);
-    if (!existsSync(workspacesDir)) return;
-
-    const entries = readdirSync(workspacesDir);
+    const entries = readdirSync(workspacesRoot);
     const workspaceDirs = entries.filter(e =>
         e.startsWith('workspace-') || e === 'workspace'
     );
 
+    if (workspaceDirs.length === 0) return;
+
     let updated = 0;
-    let skipped = 0;
+
+    // Helper: compute MD5 of a file
+    function md5(filePath) {
+        try {
+            const content = readFileSyncRaw(filePath);
+            return createHash('md5').update(content).digest('hex');
+        } catch {
+            return null;
+        }
+    }
 
     for (const ws of workspaceDirs) {
-        const principlesDir = join(workspacesDir, ws, '.principles');
-        const targetPath = join(principlesDir, 'THINKING_OS.md');
+        const wsDir = join(workspacesRoot, ws);
 
-        if (existsSync(targetPath)) {
-            const existing = readFileSync(targetPath, 'utf-8');
-            const existingCount = (existing.match(/<directive\s+id="/gi) || []).length;
-            if (existingCount >= sourceDirectiveCount) {
-                skipped++;
-                continue;
+        // 1. templates/workspace/** → workspace root (recursive)
+        const workspaceTemplateDir = join(SOURCE_DIR, 'templates', 'workspace');
+        if (existsSync(workspaceTemplateDir)) {
+            updated += syncDirRecursive(workspaceTemplateDir, wsDir, md5);
+        }
+
+        // 2. templates/langs/{lang}/core/** → workspace root (flat)
+        const coreDir = join(SOURCE_DIR, 'templates', 'langs', lang, 'core');
+        if (existsSync(coreDir)) {
+            updated += syncDirFlat(coreDir, wsDir, md5);
+        } else {
+            const zhCoreDir = join(SOURCE_DIR, 'templates', 'langs', 'zh', 'core');
+            if (existsSync(zhCoreDir)) {
+                updated += syncDirFlat(zhCoreDir, wsDir, md5);
             }
         }
 
-        if (!existsSync(principlesDir)) {
-            mkdirSync(principlesDir, { recursive: true });
+        // 3. templates/langs/{lang}/pain/** → .state/pain_samples/
+        const painSrc = join(SOURCE_DIR, 'templates', 'langs', lang, 'pain');
+        const painDest = join(wsDir, '.state', 'pain_samples');
+        if (existsSync(painSrc)) {
+            updated += syncDirRecursive(painSrc, painDest, md5);
         }
 
-        cpSync(sourcePath, targetPath, { force: true });
-        updated++;
+        // 4. templates/langs/{lang}/principles/THINKING_OS.md → .principles/THINKING_OS.md
+        const thinkingOsSrc = join(SOURCE_DIR, 'templates', 'langs', lang, 'principles', 'THINKING_OS.md');
+        const thinkingOsDest = join(wsDir, '.principles', 'THINKING_OS.md');
+        if (existsSync(thinkingOsSrc)) {
+            const srcMd5 = md5(thinkingOsSrc);
+            const destMd5 = existsSync(thinkingOsDest) ? md5(thinkingOsDest) : null;
+            if (srcMd5 !== destMd5) {
+                if (!existsSync(join(wsDir, '.principles'))) {
+                    mkdirSync(join(wsDir, '.principles'), { recursive: true });
+                }
+                cpSync(thinkingOsSrc, thinkingOsDest, { force: true });
+                updated++;
+            }
+        }
     }
 
     if (updated > 0) {
-        console.log(`   📄 THINKING_OS.md → ${updated} workspace(s) (${skipped} up-to-date)`);
+        console.log(`   📄 Workspace templates → ${updated} file(s) synced across ${workspaceDirs.length} workspace(s)`);
     }
+}
+
+/**
+ * Recursively sync source dir to dest dir, only copying new/changed files.
+ */
+function syncDirRecursive(srcDir, destDir, md5Fn) {
+    let count = 0;
+    if (!existsSync(destDir)) {
+        mkdirSync(destDir, { recursive: true });
+    }
+
+    const items = readdirSync(srcDir);
+    for (const item of items) {
+        const srcPath = join(srcDir, item);
+        const destPath = join(destDir, item);
+        const stat = fs.statSync(srcPath);
+
+        if (stat.isDirectory()) {
+            count += syncDirRecursive(srcPath, destPath, md5Fn);
+        } else {
+            const srcMd5 = md5Fn(srcPath);
+            const destMd5 = existsSync(destPath) ? md5Fn(destPath) : null;
+            if (srcMd5 !== destMd5) {
+                cpSync(srcPath, destPath, { force: true });
+                count++;
+            }
+        }
+    }
+    return count;
+}
+
+/**
+ * Flat sync: copy all files from source dir directly to dest dir.
+ */
+function syncDirFlat(srcDir, destDir, md5Fn) {
+    let count = 0;
+    const items = readdirSync(srcDir);
+    for (const item of items) {
+        const srcPath = join(srcDir, item);
+        const destPath = join(destDir, item);
+        const stat = fs.statSync(srcPath);
+        if (stat.isDirectory()) continue;
+
+        const srcMd5 = md5Fn(srcPath);
+        const destMd5 = existsSync(destPath) ? md5Fn(destPath) : null;
+        if (srcMd5 !== destMd5) {
+            cpSync(srcPath, destPath, { force: true });
+            count++;
+        }
+    }
+    return count;
 }
 
 /**
