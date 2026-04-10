@@ -13,17 +13,17 @@ export function estimateLineChanges(modification: FileModification): number {
     const { toolName, params } = modification;
     
     if (toolName === 'write_file' || toolName === 'write') {
-        const content = params.content || '';
+        const content = (params.content as string) || '';
         return content.split('\n').length;
     }
     
     if (toolName === 'replace' || toolName === 'edit') {
-        const newContent = params.new_string || params.newText || '';
+        const newContent = (params.new_string as string) || (params.newText as string) || '';
         return newContent.split('\n').length;
     }
     
     if (toolName === 'apply_patch' || toolName === 'patch') {
-        const patch = params.patch || '';
+        const patch = (params.patch as string) || '';
         // Rough estimate for patch files
         return patch.split('\n').filter((l: string) => l.startsWith('+') || l.startsWith('-')).length;
     }

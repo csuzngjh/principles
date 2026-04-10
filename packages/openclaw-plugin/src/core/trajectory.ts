@@ -1272,7 +1272,7 @@ export class TrajectoryDatabase {
     ];
     for (const col of v2Columns) {
       const exists = this.db.prepare(`PRAGMA table_info(evolution_tasks)`).all()
-        .some((row: Record<string, unknown>) => row.name === col.name);
+        .some((row) => (row as Record<string, unknown>).name === col.name);
       if (!exists) {
         this.db.exec(`ALTER TABLE evolution_tasks ADD COLUMN ${col.name} ${col.type}`);
       }

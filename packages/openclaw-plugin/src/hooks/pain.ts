@@ -158,14 +158,14 @@ export function handleAfterToolCall(
       errorType,
       gfi: updatedState.currentGfi,
       consecutiveErrors: updatedState.consecutiveErrors,
-      exitCode,
+      exitCode: exitCode as number | undefined,
     });
     wctx.trajectory?.recordToolCall?.({
       sessionId,
       toolName: event.toolName,
       outcome: 'failure',
       durationMs: event.durationMs,
-      exitCode,
+      exitCode: exitCode as number | undefined,
       errorType,
       errorMessage: event.error ? String(event.error) : undefined,
       gfiBefore,

@@ -754,13 +754,12 @@ Next steps:
           };
         }
 
-        ({
-          delta,
-          baselineScore,
-          candidateScore,
-          benchmarkId,
-          verdict,
-        } = benchmarkResult);
+        // Destructure benchmark result - delta property contains the actual delta value
+        delta = benchmarkResult.delta.delta;
+        baselineScore = benchmarkResult.delta.baselineScore;
+        candidateScore = benchmarkResult.delta.candidateScore;
+        benchmarkId = benchmarkResult.benchmarkId;
+        verdict = benchmarkResult.verdict;
       } else {
         // Manual mode: require explicit delta and verdict
         if (!deltaArg || !verdictArg) {
