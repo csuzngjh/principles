@@ -377,7 +377,15 @@ const plugin = {
     registerCommandWithAlias('pd-bootstrap', 'pdb', getCommandDescription('pd-bootstrap', language), (ctx: any) => handleBootstrapTools(ctx));
     registerCommandWithAlias('pd-research', 'pdr', getCommandDescription('pd-research', language), (ctx: any) => handleResearchTools(ctx));
     registerCommandWithAlias('pd-thinking', 'pdt', getCommandDescription('pd-thinking', language), (ctx: any) => handleThinkingOs(ctx), { acceptsArgs: true });
-    registerCommandWithAlias('pd-reflect', 'pdrl', getCommandDescription('pd-reflect', language), (ctx: any) => handlePdReflect.handler(ctx));
+    registerCommandWithAlias('pd-reflect', 'pdrl', getCommandDescription('pd-reflect', language), (ctx: any) => {
+      try {
+        (ctx as any).api = api;
+        return handlePdReflect.handler(ctx as any);
+      } catch (err) {
+        api.logger.error(`[PD] Command /pd-reflect failed: ${String(err)}`);
+        return { text: language === 'zh' ? "命令执行失败，请检查日志。" : "Command failed. Check logs." };
+      }
+    });
     registerCommandWithAlias('pd-daily', 'pdd', getCommandDescription('pd-daily', language), () => ({
       text: language === 'zh'
         ? "请执行 pd-daily 技能来配置并发送进化日报。系统将引导你完成配置流程，包括发送时间、渠道和报告风格偏好。"

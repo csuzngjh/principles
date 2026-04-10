@@ -1401,22 +1401,50 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Reason: polling path requires existing resultRef
                         workflowId = sleepTask.resultRef!;
                     } else {
-                        if (sleepTask.recentPainContext) {
-                            try {
-                                const extractor = createNocturnalTrajectoryExtractor(wctx.workspaceDir);
-                                const fullSnapshot = extractor.getNocturnalSessionSnapshot(sleepTask.id);
-                                if (fullSnapshot) {
-                                    snapshotData = {
-                                        sessionId: fullSnapshot.sessionId,
-                                        sessionStart: fullSnapshot.startedAt,
-                                        stats: fullSnapshot.stats,
-                                        recentPain: fullSnapshot.painEvents.slice(-5),
-                                    };
+                        // Phase 1: Build trajectory snapshot for Nocturnal pipeline
+                        // Try to find a real session from trajectory database first.
+                        // Task IDs (e.g., "22c571e1" or "manual_mnt0qm6j") are NOT session IDs,
+                        // so the initial lookup always fails. Fall back to most recent session.
+                        try {
+                            const extractor = createNocturnalTrajectoryExtractor(wctx.workspaceDir);
+
+                            // Try task ID first (unlikely to match, but cheap to try)
+                            let fullSnapshot = extractor.getNocturnalSessionSnapshot(sleepTask.id);
+
+                            // If no match, find most recent session WITH violation signals
+                            if (!fullSnapshot) {
+                                const recentSessions = extractor.listRecentNocturnalCandidateSessions({ limit: 20, minToolCalls: 1 });
+                                // Filter to sessions with actual violations (pain, failures, or gate blocks)
+                                const sessionsWithViolations = recentSessions.filter(
+                                    s => s.failureCount > 0 || s.painEventCount > 0 || s.gateBlockCount > 0
+                                );
+                                if (sessionsWithViolations.length > 0) {
+                                    const targetSession = sessionsWithViolations[0];
+                                    logger?.info?.(`[PD:EvolutionWorker] Task ${sleepTask.id} using session with violations: ${targetSession.sessionId} (failed=${targetSession.failureCount}, pain=${targetSession.painEventCount}, gates=${targetSession.gateBlockCount})`);
+                                    fullSnapshot = extractor.getNocturnalSessionSnapshot(targetSession.sessionId);
+                                } else if (recentSessions.length > 0) {
+                                    // No sessions with violations, use most recent as last resort
+                                    const latestSession = recentSessions[0];
+                                    logger?.warn?.(`[PD:EvolutionWorker] Task ${sleepTask.id} no sessions with violations found, using most recent: ${latestSession.sessionId} (failed=${latestSession.failureCount}, pain=${latestSession.painEventCount}, gates=${latestSession.gateBlockCount})`);
+                                    fullSnapshot = extractor.getNocturnalSessionSnapshot(latestSession.sessionId);
+                                } else {
+                                    logger?.warn?.(`[PD:EvolutionWorker] Task ${sleepTask.id} no sessions with tool calls in trajectory DB`);
                                 }
-                            } catch (snapErr) {
-                                logger?.warn?.(`[PD:EvolutionWorker] Failed to build trajectory snapshot for ${sleepTask.id}: ${String(snapErr)}`);
                             }
+
+                            if (fullSnapshot) {
+                                snapshotData = {
+                                    sessionId: fullSnapshot.sessionId,
+                                    sessionStart: fullSnapshot.startedAt,
+                                    stats: fullSnapshot.stats,
+                                    recentPain: fullSnapshot.painEvents.slice(-5),
+                                };
+                            }
+                        } catch (snapErr) {
+                            logger?.warn?.(`[PD:EvolutionWorker] Failed to build trajectory snapshot for ${sleepTask.id}: ${String(snapErr)}`);
                         }
+
+                        // Phase 2: If no trajectory data, try pain-context fallback
                         if (!snapshotData && sleepTask.recentPainContext) {
                             logger?.warn?.(`[PD:EvolutionWorker] Using pain-context fallback for ${sleepTask.id}: trajectory stats unavailable (stats will be null)`);
                             snapshotData = {

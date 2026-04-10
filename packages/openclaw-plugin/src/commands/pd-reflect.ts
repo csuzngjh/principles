@@ -2,24 +2,31 @@
  * PD Reflect Command (/pd-reflect)
  *
  * Manually trigger a sleep_reflection task, bypassing idle check.
- * Useful for debugging Nocturnal pipeline without waiting for workspace to go idle.
+ * Uses resolveWorkspaceDirFromApi() to correctly resolve workspace directory.
+ * DO NOT use api.resolvePath('.') — it returns user HOME dir, NOT workspace.
  */
 
-import { PluginCommandDefinition, PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
-import { WorkspaceContext } from '../core/workspace-context.js';
+import { PluginCommandDefinition, PluginCommandContext, PluginCommandResult, OpenClawPluginApi } from '../openclaw-sdk.js';
+import { resolveWorkspaceDirFromApi } from '../core/path-resolver.js';
 import * as fs from 'fs';
 import * as path from 'path';
+
+interface PdReflectContext extends PluginCommandContext {
+  api?: OpenClawPluginApi;
+}
 
 export const handlePdReflect: PluginCommandDefinition = {
   name: 'pd-reflect',
   description: 'Manually trigger Nocturnal sleep reflection pipeline',
   acceptsArgs: false,
   requireAuth: false,
-  handler: async (ctx: PluginCommandContext): Promise<PluginCommandResult> => {
+  handler: async (ctx: PdReflectContext): Promise<PluginCommandResult> => {
     try {
-      const workspaceDir = (ctx as unknown as Record<string, unknown>).workspaceDir as string | undefined;
+      // Use the correct workspace resolution method
+      const workspaceDir = resolveWorkspaceDirFromApi(ctx.api, 'main');
+
       if (!workspaceDir) {
-        return { text: '❌ No workspace directory available.', isError: true };
+        return { text: '❌ Cannot determine workspace directory. Ensure you are in an active workspace.', isError: true };
       }
 
       const stateDir = path.join(workspaceDir, '.state');
