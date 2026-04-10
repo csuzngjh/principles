@@ -1,5 +1,16 @@
 # Milestones
 
+## v1.12 Nocturnal Production Stabilization (Shipped: 2026-04-10)
+
+**Phases completed:** 2 phases, 2 plans, 0 tasks
+
+**Key accomplishments:**
+
+- Status:
+- Plan:
+
+---
+
 ## v1.9.3 剩余 Lint 修复 (Shipped: 2026-04-09)
 
 **Phases completed:** 1 phases, 1 plans, 5 tasks
