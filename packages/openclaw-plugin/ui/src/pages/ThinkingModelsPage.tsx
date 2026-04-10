@@ -58,7 +58,7 @@ export function ThinkingModelsPage() {
       const q = search.toLowerCase();
       models = models.filter(m =>
         m.name.toLowerCase().includes(q) ||
-        m.commonScenarios.some(s => s.toLowerCase().includes(q))
+        (m.commonScenarios ?? []).some(s => s.toLowerCase().includes(q))
       );
     }
     models.sort((a, b) => {
