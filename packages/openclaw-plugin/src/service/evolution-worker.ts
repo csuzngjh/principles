@@ -126,9 +126,9 @@ async function runWorkflowWatchdog(
             if (dataSource === 'pain_context_fallback') {
               details.push(`fallback_snapshot: nocturnal workflow ${wf.workflow_id} uses pain-context fallback (stats may be incomplete)`);
             }
-            const stats = snapshot.stats as Record<string, number> | undefined;
-            if (stats && stats.totalAssistantTurns === 0 && stats.totalToolCalls === 0 && stats.totalPainEvents === 0 && stats.totalGateBlocks === 0) {
-              details.push(`empty_snapshot: nocturnal workflow ${wf.workflow_id} has all-zero stats`);
+            const stats = snapshot.stats as Record<string, number | null> | undefined;
+            if (stats && stats.totalAssistantTurns === null && stats.totalToolCalls === null && stats.totalPainEvents === 0 && stats.totalGateBlocks === null) {
+              details.push(`fallback_snapshot_stats: nocturnal workflow ${wf.workflow_id} has null stats (data unavailable)`);
             }
           }
         } catch { /* ignore malformed metadata */ }
@@ -1418,16 +1418,16 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             }
                         }
                         if (!snapshotData && sleepTask.recentPainContext) {
-                            logger?.warn?.(`[PD:EvolutionWorker] Using pain-context fallback for ${sleepTask.id}: trajectory stats unavailable (stats will be partial)`);
+                            logger?.warn?.(`[PD:EvolutionWorker] Using pain-context fallback for ${sleepTask.id}: trajectory stats unavailable (stats will be null)`);
                             snapshotData = {
                                 sessionId: sleepTask.id,
                                 sessionStart: sleepTask.timestamp,
                                 stats: {
-                                    totalAssistantTurns: 0,
-                                    totalToolCalls: 0,
-                                    failureCount: 0,
+                                    totalAssistantTurns: null,
+                                    totalToolCalls: null,
+                                    failureCount: null,
                                     totalPainEvents: sleepTask.recentPainContext.recentPainCount,
-                                    totalGateBlocks: 0,
+                                    totalGateBlocks: null,
                                 },
                                 recentPain: sleepTask.recentPainContext.mostRecent ? [sleepTask.recentPainContext.mostRecent] : [],
                                 _dataSource: 'pain_context_fallback',
