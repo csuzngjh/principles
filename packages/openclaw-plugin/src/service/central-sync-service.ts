@@ -9,7 +9,7 @@ import type { OpenClawPluginService, OpenClawPluginServiceContext, PluginLogger 
 import { CentralDatabase } from './central-database.js';
 
 let syncInterval: ReturnType<typeof setInterval> | null = null;
-let logger: PluginLogger | undefined;
+let logger: PluginLogger | undefined = undefined;
 let centralDb: CentralDatabase | null = null;
 
 /**
@@ -28,7 +28,7 @@ async function runSyncCycle(): Promise<void> {
     const results = centralDb.syncAll();
     const totalSynced = Array.from(results.values()).reduce((sum, count) => sum + count, 0);
     const workspacesSynced = Array.from(results.entries())
-      .filter(([_, count]) => count > 0)
+      .filter(([, count]) => count > 0)
       .map(([name, count]) => `${name}:${count}`)
       .join(', ');
     
@@ -46,10 +46,11 @@ export const CentralSyncService: OpenClawPluginService = {
   id: 'principles-central-sync',
 
   async start(ctx: OpenClawPluginServiceContext): Promise<void> {
-    logger = ctx.logger;
-    
-    const config = ctx.config as { intervals?: { central_sync_ms?: number } };
-    const intervalMs = config?.intervals?.central_sync_ms ?? DEFAULT_SYNC_INTERVAL_MS;
+    const { logger: ctxLogger, config } = ctx;
+    logger = ctxLogger;
+
+    const { intervals } = config as { intervals?: { central_sync_ms?: number } };
+    const intervalMs = intervals?.central_sync_ms ?? DEFAULT_SYNC_INTERVAL_MS;
 
     // Initialize CentralDatabase
     centralDb = new CentralDatabase();

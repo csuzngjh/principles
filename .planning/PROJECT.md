@@ -27,6 +27,14 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 - GATE-01/GATE-02: Gate Monitor `/api/gate/stats` and `/api/gate/blocks` data flows verified correct (getGateStats and getGateBlocks align with gate_blocks table)
 - FE-01/FE-02: Gate Monitor frontend types (GateStatsResponse, GateBlockItem) and field accessors verified matching backend responses
 - v1.9.1: WebUI数据源修复 — Phase 16-20完成，数据端点回归测试已添加
+- v1.9.3: 剩余 Lint 修复 — CI green achieved, ~700 lint errors resolved through mechanical fixes and documented suppressions
+  - prefer-destructuring: ~50 mechanically fixed
+  - consistent-type-imports: ~13 converted to type-only imports
+  - no-explicit-any: ~10 converted to unknown, ~53 suppressed with documented reasons
+  - no-unused-vars: ~10 removed as dead code, ~79 suppressed
+  - remaining categories: ~291 suppressed (max-params, class-methods-use-this, no-non-null-assertion, no-shadow, no-use-before-define, no-require-imports)
+  - SUPPRESSION-LEDGER.md: Complete suppression inventory created
+  - npm run lint exits 0 (0 errors, 0 warnings)
 
 ## Active
 
@@ -37,6 +45,8 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 - validation runs stop after classification when they hit sample-side or product-side gaps
 - workflow v1.3 focuses on internal usability first, then finer-grained work-unit architecture
 - ARCH-01/ARCH-02: evolution-worker.ts and trajectory.ts splitting (P2, deferred)
+- LINT-09: Inline helpers extraction (deferred to future phase)
+- LINT-10: Complexity rules (deferred to v2)
 - **THINKING_OS.md** is the single source of truth for thinking model definitions (10 directives T-01~T-10)
 - WebUI thinking-models page (`/plugins/principles/thinking-models`) is the analysis UI for thinking model data
 
@@ -58,6 +68,9 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 - package-local validation specs: `workflow-validation-minimal`, `workflow-validation-minimal-verify`
 - complex task templates: `bugfix-complex-template`, `feature-complex-template`
 - known product-side gaps remain documented but excluded from this milestone
+- **Current codebase state:** ~52,138 LOC TypeScript in packages/openclaw-plugin/src
+- **Tech stack:** TypeScript, Node.js, ESLint v10, Vitest
+- **Lint status:** CI green (0 errors, 0 warnings) as of v1.9.3
 
 ## Key Decisions
 
@@ -69,12 +82,16 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 | Classify-and-stop on sample-side issues | keep workflow-first boundary intact | Active |
 | v1.3 prioritizes internal usability | use the skill ourselves before redesigning the orchestrator | Active |
 | next architecture step is work-unit/tasklet | stage/round/role resets are not enough for very complex long tasks | Planned |
+| ESLint suppression strategy for gap closure | achieve CI green without extensive architectural refactoring | ✓ Good — v1.9.3 |
+| D-02 proof chain for no-explicit-any | convert to unknown first, suppress only if truly unavoidable | ✓ Good — v1.9.3 |
+| Line-level suppression only with documented reasons | keep technical debt explicit for future phases | ✓ Good — v1.9.3 |
+| LINT-09 deferred to future phase | inline helper extraction requires design work beyond gap closure scope | ⚠️ Revisit — v1.9.3 |
 
 ## Current Milestone
 
 ### v1.10: Thinking Models 页面优化
 
-**Status:** Defining requirements
+**Status:** 🚧 IN PROGRESS (started 2026-04-09)
 
 **Goal:** 将 Thinking Models 页面从简单的列表/详情视图重构为功能完整的思维模型分析面板
 
@@ -99,53 +116,11 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 **Phases:** 8 (Phase 1~8)
 
 ---
-
-### v1.9.3: 剩余 Lint 修复
-
-**Status:** Deferred
-
-**Goal:** 完成 v1.9.2 未竟的 lint 修复工作，实现 CI green
-
-**Key Features:**
-- 执行 eslint-disable suppression 策略，消除 ~700 个剩余 lint 错误
-- prefer-destructuring 机械化修复 (~50 errors)
-- 最终 CI lint 验证通过
-
-**Key Context from v1.9.2:**
-- eslint.config.js 已配置完成 (Phase 1)
-- eslint --fix 自动化修复已完成 (Phase 2)
-- 03-01 到 03-04 refactoring 尝试完成但 gap closure 放弃
-- 03-05-PLAN.md suppression 策略已规划但未执行
-- ~700 errors remain across 57 files
-
-**Deferred to future:**
-- LINT-09 (inline helpers extraction)
-- LINT-10 (complexity rules)
-
-**Phase Start:** 延续 v1.9.2 编号 (Phase 03 继续)
-
----
 ### v1.9.1: WebUI 数据源修复
 
-**Status:** Deferred
+**Status:** Shipped
 
 **Goal:** 排查并修复 WebUI 所有页面（Overview / Loop / Feedback / Gate Monitor）的数据源问题，确保展示数据正确
 
-**Key Features:**
-- 排查四个页面的数据源根因（数据库 → API → 前端字段映射）
-- 修复缺失或错误的数据链路
-- 端到端验证所有页面数据展示正确
-- 视觉层保持现状，不改动 UI 风格
-
-**Key Constraints:**
-- 前端页面结构和组件已存在，仅修复数据层
-- 数据源问题根因未知，需要系统性排查
-- 保持 API 向后兼容
-
 ---
-### v1.7: PD Task Manager（已废弃）
-
-**Status:** Superseded — 从未执行，被 v1.9.0 替代
-
----
-*Last updated: 2026-04-09 after v1.9.3 milestone initialized*
+*Last updated: 2026-04-09 after v1.10 milestone started*

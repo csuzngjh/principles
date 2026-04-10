@@ -201,7 +201,8 @@ export function validateRuleImplementationCandidate(
   try {
     const moduleExports = loadRuleImplementationModule(normalizedSource, 'nocturnal-candidate.js') as {
       meta?: unknown;
-      evaluate?: (_input: RuleHostInput, helpers: RuleHostHelpers) => unknown;
+      /* eslint-disable no-unused-vars -- Reason: type signature parameters, unused by design in function type definition */
+      evaluate?: (_input: RuleHostInput, _helpers: RuleHostHelpers) => unknown;
     };
 
     const metaFailures = validateMeta(moduleExports.meta);

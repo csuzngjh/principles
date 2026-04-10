@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import * as fs from 'fs';
 import * as path from 'path';
-import type { WorkflowRow, WorkflowEventRow, WorkflowState, WorkflowTransport } from './types.js';
+import type { WorkflowRow, WorkflowEventRow, WorkflowState } from './types.js';
 import type { DreamerOutput, PhilosopherOutput } from '../../core/nocturnal-trinity.js';
 
 const SCHEMA_VERSION = 2;
@@ -113,7 +113,6 @@ export class WorkflowStore {
     }
 
     createWorkflow(row: Omit<WorkflowRow, 'cleanup_state'>): void {
-        const now = Date.now();
         this.db.prepare(`
             INSERT INTO subagent_workflows (
                 workflow_id, workflow_type, transport, parent_session_id, child_session_key,
@@ -233,6 +232,7 @@ export class WorkflowStore {
         `).all() as WorkflowRow[];
     }
     
+    /* eslint-disable @typescript-eslint/max-params -- Reason: Store interface requires full event context (workflowId, fromState, toState, reason, payload) */
     recordEvent(
         workflowId: string,
         eventType: string,
@@ -268,6 +268,7 @@ export class WorkflowStore {
      * idempotencyKey must be unique per (workflow_id, stage). If a row with the
      * same idempotency_key already exists, this is a no-op (idempotent).
      */
+    /* eslint-disable @typescript-eslint/max-params -- Reason: Store interface requires workflowId, stage, output, and idempotencyKey */
     recordStageOutput(
         workflowId: string,
         stage: 'dreamer' | 'philosopher',

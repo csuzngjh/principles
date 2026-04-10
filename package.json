@@ -9,6 +9,8 @@
   ],
   "scripts": {
     "lint": "eslint packages/**/*.ts --ignore-pattern '**/*.test.ts' --ignore-pattern '**/*.spec.ts'",
+    "lint:fix": "eslint packages/**/*.ts --ignore-pattern '**/*.test.ts' --ignore-pattern '**/*.spec.ts' --fix",
+    "pre-commit": "lint-staged",
     "ai-sprint": "node packages/openclaw-plugin/templates/langs/zh/skills/ai-sprint-orchestration/scripts/run.mjs",
     "ai-sprint:test": "node --test packages/openclaw-plugin/templates/langs/zh/skills/ai-sprint-orchestration/test/*.mjs",
     "release": "semantic-release",
@@ -16,6 +18,9 @@
     "version:patch": "cd packages/openclaw-plugin && npm version patch",
     "version:minor": "cd packages/openclaw-plugin && npm version minor",
     "version:major": "cd packages/openclaw-plugin && npm version major"
+  },
+  "lint-staged": {
+    "*.ts": ["eslint --fix", "eslint"]
   },
   "devDependencies": {
     "@changesets/cli": "^2.30.0",
@@ -26,6 +31,7 @@
     "@typescript-eslint/parser": "^8.58.0",
     "eslint": "^10.1.0",
     "globals": "^17.4.0",
+    "lint-staged": "^16.4.0",
     "semantic-release": "^25.0.3"
   },
   "dependencies": {

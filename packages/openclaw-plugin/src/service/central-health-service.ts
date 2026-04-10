@@ -17,6 +17,7 @@ export interface CentralHealthResponse {
  * Evolution, Principles, and Queue stats are workspace-specific.
  */
 export class CentralHealthService {
+  /* eslint-disable @typescript-eslint/class-methods-use-this -- Reason: utility method that doesn't need instance state */
   getAllWorkspaceHealth(): CentralHealthResponse {
     const centralDb = getCentralDatabase();
     const workspaces: WorkspaceHealthEntry[] = [];

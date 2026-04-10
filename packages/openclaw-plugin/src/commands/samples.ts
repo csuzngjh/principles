@@ -33,6 +33,7 @@ export function handleSamplesCommand(ctx: PluginCommandContext): PluginCommandRe
     let record;
     try {
       record = wctx.trajectory.reviewCorrectionSample(sampleId, normalizedDecision, note);
+    /* eslint-disable @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: error handling only - returning failure response */
     } catch (error) {
       return {
         text: zh

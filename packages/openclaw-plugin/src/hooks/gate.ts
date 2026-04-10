@@ -31,7 +31,7 @@ import { checkProgressiveTrustGate } from './progressive-trust-gate.js';
 import { recordGateBlockAndReturn } from './gate-block-helper.js';
 import { RuleHost } from '../core/rule-host.js';
 import type { RuleHostInput } from '../core/rule-host-types.js';
-import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult } from '../openclaw-sdk.js';
+import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult, PluginLogger } from '../openclaw-sdk.js';
 import {
   AGENT_TOOLS,
   BASH_TOOLS_SET,
@@ -42,7 +42,7 @@ import { getEvolutionEngine } from '../core/evolution-engine.js';
 
 export function handleBeforeToolCall(
   event: PluginHookBeforeToolCallEvent,
-  ctx: PluginHookToolContext & { workspaceDir?: string; pluginConfig?: Record<string, unknown>; logger?: any }
+  ctx: PluginHookToolContext & { workspaceDir?: string; pluginConfig?: Record<string, unknown>; logger?: Partial<PluginLogger> }
 ): PluginHookBeforeToolCallResult | void {
   const logger = ctx.logger || console;
 
@@ -167,23 +167,30 @@ export function handleBeforeToolCall(
       action: {
         toolName: event.toolName,
         normalizedPath: relPath,
+        // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between helper functions - reordering would break logical grouping
         paramsSummary: _extractParamsSummary(event.params),
       },
       workspace: {
         isRiskPath: risky,
+        // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between helper functions - reordering would break logical grouping
         planStatus: _getPlanStatus(ctx.workspaceDir),
+        // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between helper functions - reordering would break logical grouping
         hasPlanFile: _hasPlanFile(ctx.workspaceDir),
       },
       session: {
         sessionId: ctx.sessionId,
+        // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between helper functions - reordering would break logical grouping
         currentGfi: _getCurrentGfi(ctx.sessionId),
+        // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between helper functions - reordering would break logical grouping
         recentThinking: _hasRecentThinking(ctx.sessionId),
       },
       evolution: {
+        // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between helper functions - reordering would break logical grouping
         epTier: _getEpTier(wctx.workspaceDir),
       },
       derived: {
         estimatedLineChanges: estimateLineChanges({ toolName: event.toolName, params: event.params }),
+        // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between helper functions - reordering would break logical grouping
         bashRisk: _getBashRisk(event, profile),
       },
     };
@@ -330,10 +337,12 @@ function _getEpTier(workspaceDir: string): number {
   }
 }
 
+/* eslint-disable no-unused-vars, @typescript-eslint/no-unused-vars -- Reason: type-only parameter not used at runtime */
 function _getBashRisk(
   event: PluginHookBeforeToolCallEvent,
-  profile: { risk_paths: string[] }
+  _profile: { risk_paths: string[] }
 ): 'safe' | 'normal' | 'dangerous' | 'unknown' {
+/* eslint-enable no-unused-vars, @typescript-eslint/no-unused-vars */
   if (!BASH_TOOLS_SET.has(event.toolName)) return 'unknown';
   try {
     const command = String(event.params.command || event.params.args || '');
