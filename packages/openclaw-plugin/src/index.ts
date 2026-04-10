@@ -38,6 +38,7 @@ import { handleFocusCommand } from './commands/focus.js';
 import { handleRollbackCommand } from './commands/rollback.js';
 import { handlePromoteImplCommand } from './commands/promote-impl.js';
 import { handleDisableImplCommand } from './commands/disable-impl.js';
+import { handlePdReflect } from './commands/pd-reflect.js';
 import { handleArchiveImplCommand } from './commands/archive-impl.js';
 import { handleRollbackImplCommand } from './commands/rollback-impl.js';
 import { handleEvolutionStatusCommand } from './commands/evolution-status.js';
@@ -382,6 +383,12 @@ const plugin = {
       description: getCommandDescription('pd-thinking', language),
       acceptsArgs: true,
       handler: (ctx) => handleThinkingOs(ctx)
+    });
+
+    api.registerCommand({
+      name: "pd-reflect",
+      description: getCommandDescription('pd-reflect', language),
+      handler: (ctx) => handlePdReflect.handler(ctx)
     });
 
     api.registerCommand({
