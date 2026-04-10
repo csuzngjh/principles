@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ChevronLeft } from 'lucide-react';
+import { ChevronLeft, Clock, Activity, Shield, Zap, BookOpen } from 'lucide-react';
 import { api } from '../api';
 import type {
   OverviewResponse,
