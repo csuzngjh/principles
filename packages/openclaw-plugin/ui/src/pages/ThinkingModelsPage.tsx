@@ -365,8 +365,8 @@ export function ThinkingModelsPage() {
                 })}
                 {filteredModels.length === 0 && (
                   <EmptyState
-                    title={t('thinkingModels.noModelsYet')}
-                    description={t('thinkingModels.noModelsYetDesc')}
+                    title={data.topModels.length > 0 ? (t('thinkingModels.noMatches') || 'No models match your filters.') : t('thinkingModels.noModelsYet')}
+                    description={data.topModels.length > 0 ? '' : t('thinkingModels.noModelsYetDesc')}
                   />
                 )}
               </div>
@@ -463,7 +463,8 @@ export function ThinkingModelsPage() {
                   {!isLoadingDetail && detail && (
                 <div className="detail-stack">
                   <div className="detail-header">
-                    <button className="back-button" onClick={() => { setDetail(null); setIsLoadingDetail(true); }} title={t('common.back')}>
+<<<<<<< Updated upstream
+                    <button className="back-button" onClick={() => { setDetail(null); setSelectedModel(''); setIsLoadingDetail(true); }} title={t('common.back')}>
                       <ChevronLeft strokeWidth={1.75} size={18} />
                     </button>
                     <div>
