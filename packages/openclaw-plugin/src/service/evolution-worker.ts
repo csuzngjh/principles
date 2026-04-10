@@ -1450,13 +1450,17 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     try {
                         logger?.info?.(`[PD:EvolutionWorker] Executing simplified single-step deep reflection for task ${sleepTask.id}`);
                         const prompt = `Analyze this long context snapshot and extract a single clear Principle to avoid future failures.\nPain Context: ${JSON.stringify(sleepTask.recentPainContext)}\nStats: ${JSON.stringify(snapshotData?.stats)}\nRecent Pain Events: ${JSON.stringify(snapshotData?.recentPain)}`;
-                        const response = await api.completeText({
-                            messages: [
-                                { role: "system", content: "You are a deep reflection agent for Principles Disciple. You must output a JSON string with a \"principle\" key." },
-                                { role: "user", content: prompt }
-                            ]
+
+                        const { runId } = await api.runtime.subagent.run({
+                            sessionKey: `sleep_reflection:${sleepTask.id}`,
+                            message: prompt,
+                            extraSystemPrompt: "You are a deep reflection agent for Principles Disciple. You must output a JSON string with a \"principle\" key.",
+                            lane: 'diagnostician'
                         });
-                        if (response && response.text) {
+
+                        const result = await api.runtime.subagent.waitForRun({ runId, timeoutMs: 60000 });
+
+                        if (result.status === 'ok') {
                             logger?.info?.(`[PD:EvolutionWorker] Reflection extracted principle for task ${sleepTask.id}`);
                             sleepTask.status = "completed";
                             sleepTask.completed_at = new Date().toISOString();
@@ -1464,7 +1468,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             sleepTask.resultRef = "trinity-draft";
                             logger?.info?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} workflow completed`);
                         } else {
-                            throw new Error("Empty response from LLM during single-step reflection");
+                            throw new Error(`LLM response failed with status: ${result.status}, error: ${result.error}`);
                         }
                     } catch (reflectionErr) {
                         sleepTask.status = "failed";

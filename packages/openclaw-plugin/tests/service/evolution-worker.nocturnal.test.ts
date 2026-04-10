@@ -158,8 +158,11 @@ describe('EvolutionWorkerService nocturnal hardening', () => {
 
     EvolutionWorkerService.api = {
       logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
-      completeText: vi.fn().mockRejectedValue(new Error("gateway request failed (subagent error)")),
-      runtime: {},
+      runtime: {
+        subagent: {
+          run: vi.fn().mockRejectedValue(new Error("gateway request failed (subagent error)")),
+        },
+      },
     } as any;
 
     fs.writeFileSync(
