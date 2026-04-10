@@ -48,6 +48,17 @@ function createRequest(method: string, url: string, body?: string, headers?: Rec
 }
 
 describe('principles-console-route', () => {
+  const createApi = () => ({
+    rootDir: '/plugin',
+    logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    runtime: {
+      agent: {
+        resolveAgentWorkspaceDir: vi.fn(() => '/workspace'),
+      },
+    },
+    config: {},
+  });
+
   it('serves overview JSON from the plugin API route', async () => {
     vi.mocked(ControlUiQueryService).mockImplementation(function MockControlUiQueryService() {
       return {
@@ -56,11 +67,8 @@ describe('principles-console-route', () => {
       } as any;
     } as any);
 
-    const route = createPrinciplesConsoleRoute({
-      rootDir: '/plugin',
-      resolvePath: vi.fn(() => '/workspace'),
-      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-    } as any);
+    const api = createApi();
+    const route = createPrinciplesConsoleRoute(api as any);
 
     const response = new MockResponse() as unknown as ServerResponse;
     const handled = await route.handler(
@@ -71,14 +79,11 @@ describe('principles-console-route', () => {
     expect(handled).toBe(true);
     expect((response as any).statusCode).toBe(200);
     expect((response as any).body).toContain('"workspaceDir": "/workspace"');
+    expect(api.runtime.agent.resolveAgentWorkspaceDir).toHaveBeenCalled();
   });
 
   it('rejects unsupported asset methods with 405', async () => {
-    const route = createPrinciplesConsoleRoute({
-      rootDir: '/plugin',
-      resolvePath: vi.fn(() => '/workspace'),
-      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-    } as any);
+    const route = createPrinciplesConsoleRoute(createApi() as any);
 
     const response = new MockResponse() as unknown as ServerResponse;
     const handled = await route.handler(
@@ -97,11 +102,7 @@ describe('principles-console-route', () => {
       } as any;
     } as any);
 
-    const route = createPrinciplesConsoleRoute({
-      rootDir: '/plugin',
-      resolvePath: vi.fn(() => '/workspace'),
-      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-    } as any);
+    const route = createPrinciplesConsoleRoute(createApi() as any);
 
     const response = new MockResponse() as unknown as ServerResponse;
     const handled = await route.handler(
@@ -122,11 +123,7 @@ describe('principles-console-route', () => {
       } as any;
     } as any);
 
-    const route = createPrinciplesConsoleRoute({
-      rootDir: '/plugin',
-      resolvePath: vi.fn(() => '/workspace'),
-      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-    } as any);
+    const route = createPrinciplesConsoleRoute(createApi() as any);
 
     const response = new MockResponse() as unknown as ServerResponse;
     const handled = await route.handler(
@@ -136,5 +133,30 @@ describe('principles-console-route', () => {
 
     expect(handled).toBe(true);
     expect((response as any).statusCode).toBe(404);
+  });
+
+  it('fails fast when workspace resolution is unavailable', async () => {
+    vi.mocked(ControlUiQueryService).mockImplementation(function MockControlUiQueryService() {
+      return {
+        getOverview: () => ({ workspaceDir: '/workspace', generatedAt: 'now', dataFreshness: null }),
+        dispose: vi.fn(),
+      } as any;
+    } as any);
+
+    const api = createApi();
+    api.runtime.agent.resolveAgentWorkspaceDir = vi.fn(() => {
+      throw new Error('workspace unavailable');
+    });
+    const route = createPrinciplesConsoleRoute(api as any);
+
+    const response = new MockResponse() as unknown as ServerResponse;
+    const handled = await route.handler(
+      createRequest('GET', '/plugins/principles/api/overview'),
+      response,
+    );
+
+    expect(handled).toBe(true);
+    expect((response as any).statusCode).toBe(500);
+    expect((response as any).body).toContain('unable to resolve a valid workspace directory');
   });
 });

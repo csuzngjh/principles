@@ -2,17 +2,16 @@
  * PD Reflect Command (/pd-reflect)
  *
  * Manually trigger a sleep_reflection task, bypassing idle check.
- * Uses resolveWorkspaceDirFromApi() to correctly resolve workspace directory.
- * DO NOT use api.resolvePath('.') — it returns user HOME dir, NOT workspace.
+ * This command must operate on an explicitly resolved active workspace.
  */
 
 import { PluginCommandDefinition, PluginCommandContext, PluginCommandResult, OpenClawPluginApi } from '../openclaw-sdk.js';
-import { resolveWorkspaceDirFromApi } from '../core/path-resolver.js';
 import * as fs from 'fs';
 import * as path from 'path';
 
 interface PdReflectContext extends PluginCommandContext {
   api?: OpenClawPluginApi;
+  workspaceDir?: string;
 }
 
 export const handlePdReflect: PluginCommandDefinition = {
@@ -22,11 +21,9 @@ export const handlePdReflect: PluginCommandDefinition = {
   requireAuth: false,
   handler: async (ctx: PdReflectContext): Promise<PluginCommandResult> => {
     try {
-      // Use the correct workspace resolution method
-      const workspaceDir = resolveWorkspaceDirFromApi(ctx.api, 'main');
-
+      const workspaceDir = ctx.workspaceDir;
       if (!workspaceDir) {
-        return { text: '❌ Cannot determine workspace directory. Ensure you are in an active workspace.', isError: true };
+        return { text: 'Cannot determine workspace directory. Ensure you are in an active workspace.', isError: true };
       }
 
       const stateDir = path.join(workspaceDir, '.state');
@@ -39,16 +36,14 @@ export const handlePdReflect: PluginCommandDefinition = {
         rawQueue = [];
       }
 
-      // Check for pending sleep_reflection tasks
       const hasPending = rawQueue.some((item: unknown) => {
-        const t = item as Record<string, string> | undefined;
-        return t?.taskKind === 'sleep_reflection' && (t?.status === 'pending' || t?.status === 'in_progress');
+        const task = item as Record<string, string> | undefined;
+        return task?.taskKind === 'sleep_reflection' && (task?.status === 'pending' || task?.status === 'in_progress');
       });
       if (hasPending) {
-        return { text: '⚠️ A sleep_reflection task is already pending. Wait for it to complete or fail.' };
+        return { text: 'A sleep_reflection task is already pending. Wait for it to complete or fail.' };
       }
 
-      // Create a new sleep_reflection task
       const now = new Date();
       const taskId = `manual_${now.getTime().toString(36).slice(-8)}`;
       const nowIso = now.toISOString();
@@ -72,12 +67,12 @@ export const handlePdReflect: PluginCommandDefinition = {
       fs.writeFileSync(queuePath, JSON.stringify(rawQueue, null, 2), 'utf8');
 
       return {
-        text: `✅ Nocturnal reflection task enqueued: \`${taskId}\`\n\nIt will be processed in the next evolution worker cycle (~15s). Check .state/nocturnal/samples/ for results.`
+        text: `Nocturnal reflection task enqueued: \`${taskId}\`\n\nIt will be processed in the next evolution worker cycle (~15s). Check .state/nocturnal/samples/ for results.`,
       };
-    } catch (err) {
+    } catch (error) {
       return {
-        text: `❌ Failed to trigger reflection: ${String(err)}`,
-        isError: true
+        text: `Failed to trigger reflection: ${String(error)}`,
+        isError: true,
       };
     }
   },

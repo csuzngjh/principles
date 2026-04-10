@@ -10,6 +10,8 @@ import { getEvolutionLogger, createTraceId } from '../core/evolution-logger.js';
 import { recordEvolutionSuccess, recordEvolutionFailure } from '../core/evolution-engine.js';
 import type { EvolutionLoopEvent } from '../core/evolution-types.js';
 import type { PluginHookAfterToolCallEvent, PluginHookToolContext, OpenClawPluginApi } from '../openclaw-sdk.js';
+import { validateWorkspaceDir } from '../core/workspace-dir-validation.js';
+import { resolveWorkspaceDir } from '../core/workspace-dir-service.js';
 
 /**
  * Interface for tool parameters to avoid 'any'
@@ -49,7 +51,9 @@ export function handleAfterToolCall(
   ctx: PluginHookToolContext & { workspaceDir?: string; pluginConfig?: Record<string, unknown> },
   api?: OpenClawPluginApi
 ): void {
-  const effectiveWorkspaceDir = ctx.workspaceDir || (api as unknown as { workspaceDir?: string })?.workspaceDir || api?.resolvePath?.('.');
+  const effectiveWorkspaceDir = api
+    ? resolveWorkspaceDir(api, ctx, { source: 'after_tool_call' })
+    : validateWorkspaceDir(ctx.workspaceDir) ? undefined : ctx.workspaceDir;
   if (!effectiveWorkspaceDir) {
     return;
   }
