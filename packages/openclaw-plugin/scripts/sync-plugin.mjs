@@ -671,14 +671,18 @@ function syncItem(item) {
  * Sync workspace templates to all workspace directories.
  * This ensures workspaces get the latest template files when the plugin is updated.
  *
+ * IMPORTANT SAFETY RULES:
+ * - Core files (AGENTS.md, SOUL.md, IDENTITY.md, USER.md, etc.) are NEVER overwritten.
+ *   They are only copied on first-time workspace creation (file doesn't exist).
+ *   Users heavily customize these files — overwriting would destroy their work.
+ * - Non-core templates (pain_samples, THINKING_OS.md, workspace boilerplate) are synced
+ *   via MD5 comparison (only update if template content changed and workspace hasn't diverged).
+ *
  * Syncs:
- *   - templates/workspace/** → workspace root (recursive)
- *   - templates/langs/{lang}/core/** → workspace root (AGENTS.md, SOUL.md, etc.)
+ *   - templates/workspace/** → workspace root (recursive, skip core files)
+ *   - templates/langs/{lang}/core/** → workspace root (ONLY if missing)
  *   - templates/langs/{lang}/pain/** → .state/pain_samples/
  *   - templates/langs/{lang}/principles/THINKING_OS.md → .principles/THINKING_OS.md
- *
- * Smart sync: skips files that already exist with identical content (by MD5).
- * Overwrites files that differ.
  */
 function syncWorkspaceTemplates(lang) {
     const workspacesRoot = OPENCLAW_DIR;
@@ -690,6 +694,13 @@ function syncWorkspaceTemplates(lang) {
     );
 
     if (workspaceDirs.length === 0) return;
+
+    // Core files that should NEVER be overwritten after creation
+    const CORE_FILES = new Set([
+        'AGENTS.md', 'SOUL.md', 'BOOT.md', 'BOOTSTRAP.md',
+        'IDENTITY.md', 'USER.md', 'TOOLS.md', 'HEARTBEAT.md',
+        'PRINCIPLES.md', 'PROFILE.json',
+    ]);
 
     let updated = 0;
 
@@ -709,17 +720,17 @@ function syncWorkspaceTemplates(lang) {
         // 1. templates/workspace/** → workspace root (recursive)
         const workspaceTemplateDir = join(SOURCE_DIR, 'templates', 'workspace');
         if (existsSync(workspaceTemplateDir)) {
-            updated += syncDirRecursive(workspaceTemplateDir, wsDir, md5);
+            updated += syncDirRecursive(workspaceTemplateDir, wsDir, md5, CORE_FILES);
         }
 
-        // 2. templates/langs/{lang}/core/** → workspace root (flat)
+        // 2. templates/langs/{lang}/core/** → workspace root (ONLY if file missing)
         const coreDir = join(SOURCE_DIR, 'templates', 'langs', lang, 'core');
         if (existsSync(coreDir)) {
-            updated += syncDirFlat(coreDir, wsDir, md5);
+            updated += syncCoreFiles(coreDir, wsDir);
         } else {
             const zhCoreDir = join(SOURCE_DIR, 'templates', 'langs', 'zh', 'core');
             if (existsSync(zhCoreDir)) {
-                updated += syncDirFlat(zhCoreDir, wsDir, md5);
+                updated += syncCoreFiles(zhCoreDir, wsDir);
             }
         }
 
@@ -727,7 +738,7 @@ function syncWorkspaceTemplates(lang) {
         const painSrc = join(SOURCE_DIR, 'templates', 'langs', lang, 'pain');
         const painDest = join(wsDir, '.state', 'pain_samples');
         if (existsSync(painSrc)) {
-            updated += syncDirRecursive(painSrc, painDest, md5);
+            updated += syncDirRecursive(painSrc, painDest, md5, CORE_FILES);
         }
 
         // 4. templates/langs/{lang}/principles/THINKING_OS.md → .principles/THINKING_OS.md
@@ -752,9 +763,34 @@ function syncWorkspaceTemplates(lang) {
 }
 
 /**
- * Recursively sync source dir to dest dir, only copying new/changed files.
+ * Sync core files ONLY if they don't exist yet.
+ * NEVER overwrites existing core files (user customizations).
  */
-function syncDirRecursive(srcDir, destDir, md5Fn) {
+function syncCoreFiles(srcDir, destDir) {
+    let count = 0;
+    if (!existsSync(srcDir)) return count;
+
+    const items = readdirSync(srcDir);
+    for (const item of items) {
+        const srcPath = join(srcDir, item);
+        const destPath = join(destDir, item);
+        const stat = statSync(srcPath);
+
+        if (stat.isDirectory()) continue;
+        // Core files: only copy if missing
+        if (!existsSync(destPath)) {
+            cpSync(srcPath, destPath, { force: false });
+            count++;
+        }
+    }
+    return count;
+}
+
+/**
+ * Recursively sync source dir to dest dir, skipping core files that already exist.
+ * Non-core files: only copy if missing or different (MD5).
+ */
+function syncDirRecursive(srcDir, destDir, md5Fn, coreFiles) {
     let count = 0;
     if (!existsSync(destDir)) {
         mkdirSync(destDir, { recursive: true });
@@ -767,36 +803,17 @@ function syncDirRecursive(srcDir, destDir, md5Fn) {
         const stat = statSync(srcPath);
 
         if (stat.isDirectory()) {
-            count += syncDirRecursive(srcPath, destPath, md5Fn);
+            count += syncDirRecursive(srcPath, destPath, md5Fn, coreFiles);
         } else {
+            // Skip core files that already exist
+            if (coreFiles.has(item) && existsSync(destPath)) continue;
+
             const srcMd5 = md5Fn(srcPath);
             const destMd5 = existsSync(destPath) ? md5Fn(destPath) : null;
             if (srcMd5 !== destMd5) {
                 cpSync(srcPath, destPath, { force: true });
                 count++;
             }
-        }
-    }
-    return count;
-}
-
-/**
- * Flat sync: copy all files from source dir directly to dest dir.
- */
-function syncDirFlat(srcDir, destDir, md5Fn) {
-    let count = 0;
-    const items = readdirSync(srcDir);
-    for (const item of items) {
-        const srcPath = join(srcDir, item);
-        const destPath = join(destDir, item);
-        const stat = statSync(srcPath);
-        if (stat.isDirectory()) continue;
-
-        const srcMd5 = md5Fn(srcPath);
-        const destMd5 = existsSync(destPath) ? md5Fn(destPath) : null;
-        if (srcMd5 !== destMd5) {
-            cpSync(srcPath, destPath, { force: true });
-            count++;
         }
     }
     return count;
