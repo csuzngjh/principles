@@ -13,7 +13,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import {
   loadLedger,
-  createPrinciple,
+  saveLedger,
   type LedgerPrinciple,
 } from './principle-tree-ledger.js';
 import type { LegacyPrincipleTrainingState } from './principle-tree-ledger.js';
@@ -123,7 +123,12 @@ export function migratePrincipleTree(
 
       try {
         const treePrinciple = trainingStateToTreePrinciple(principleId, state, now);
-        createPrinciple(stateDir, treePrinciple);
+        const nextLedger = loadLedger(stateDir);
+        if (!nextLedger.tree.principles[principleId]) {
+          nextLedger.tree.principles[principleId] = treePrinciple;
+          nextLedger.tree.lastUpdated = now;
+          saveLedger(stateDir, nextLedger);
+        }
 
         result.migratedCount++;
         result.details.push({
