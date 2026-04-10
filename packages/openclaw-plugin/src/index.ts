@@ -67,20 +67,32 @@ let workspaceInitialized = false;
 /**
  * Resolve workspaceDir for slash commands.
  * Chain: ctx.workspaceDir → resolveWorkspaceDirFromApi (official OpenClaw API + env vars)
- * NEVER uses api.resolvePath('.') — it returns user HOME dir, NOT workspace.
+ * 
+ * CRITICAL: Throws if workspaceDir cannot be resolved. Silent failures are dangerous
+ * because commands might operate on the wrong directory.
  */
 function resolveCommandWorkspaceDir(
   api: OpenClawPluginApi,
   ctx: { workspaceDir?: string },
-): string | undefined {
+): string {
   // 1. Direct from command context (most reliable — set by OpenClaw for current session)
   if (ctx.workspaceDir) {
     const issue = validateWorkspaceDir(ctx.workspaceDir);
     if (!issue) return ctx.workspaceDir;
+    api.logger.error(`[PD:Command] ctx.workspaceDir="${ctx.workspaceDir}" is invalid: ${issue}`);
   }
 
-  // 2. Official OpenClaw API → env vars → config file (resolveWorkspaceDirFromApi handles all)
-  return resolveWorkspaceDirFromApi(api);
+  // 2. Official OpenClaw API → env vars → config file
+  const resolved = resolveWorkspaceDirFromApi(api);
+  if (resolved) return resolved;
+
+  // CRITICAL FAILURE: Cannot determine workspace directory
+  const errorMsg = `[PD:Command] CRITICAL: Cannot resolve workspace directory. ` +
+    `ctx.workspaceDir="${ctx.workspaceDir}" is invalid, and all fallbacks failed. ` +
+    `Commands will NOT execute to prevent data corruption.`;
+  api.logger.error(errorMsg);
+  
+  throw new Error(errorMsg);
 }
 
 // Map from childSessionKey → shadowObservationId
