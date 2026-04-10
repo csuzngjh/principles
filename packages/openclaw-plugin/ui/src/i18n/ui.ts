@@ -246,6 +246,7 @@ export const i18n = {
     emptyAllActiveDesc: { zh: '没有休眠模型。', en: 'No dormant models.' },
     noModelsYet: { zh: '暂无思维模型数据', en: 'No thinking model data yet' },
     noModelsYetDesc: { zh: 'AI 开始使用后，这里会显示思维模型的使用情况。', en: 'Thinking model usage will appear here once AI starts working.' },
+    noMatches: { zh: '没有匹配的模型', en: 'No models match your filters.' },
 
     // Recommendations
     dormantModels: { zh: '休眠模型', en: 'Dormant Models' },
