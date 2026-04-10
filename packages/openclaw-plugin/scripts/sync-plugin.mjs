@@ -17,7 +17,7 @@
  *   --help             Show help message
  */
 
-import { copyFileSync, cpSync, existsSync, rmSync, readFileSync, readFileSync as readFileSyncRaw, mkdirSync, writeFileSync, readdirSync } from 'fs';
+import { copyFileSync, cpSync, existsSync, rmSync, readFileSync, readFileSync as readFileSyncRaw, mkdirSync, writeFileSync, readdirSync, statSync } from 'fs';
 import { createHash } from 'crypto';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -764,7 +764,7 @@ function syncDirRecursive(srcDir, destDir, md5Fn) {
     for (const item of items) {
         const srcPath = join(srcDir, item);
         const destPath = join(destDir, item);
-        const stat = fs.statSync(srcPath);
+        const stat = statSync(srcPath);
 
         if (stat.isDirectory()) {
             count += syncDirRecursive(srcPath, destPath, md5Fn);
@@ -789,7 +789,7 @@ function syncDirFlat(srcDir, destDir, md5Fn) {
     for (const item of items) {
         const srcPath = join(srcDir, item);
         const destPath = join(destDir, item);
-        const stat = fs.statSync(srcPath);
+        const stat = statSync(srcPath);
         if (stat.isDirectory()) continue;
 
         const srcMd5 = md5Fn(srcPath);
@@ -961,7 +961,7 @@ function main() {
     syncSkills(args.lang);
 
     // Step 7.5: Sync THINKING_OS.md to all workspace .principles/ directories
-    syncThinkingOsToWorkspaces(args.lang);
+    syncWorkspaceTemplates(args.lang);
 
     // Step 8: Install production dependencies in target (ALWAYS — cleanTargetDir wiped node_modules)
     // --skip-deps only applies to SOURCE directory deps, not the installed plugin.
