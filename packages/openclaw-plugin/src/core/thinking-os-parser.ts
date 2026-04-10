@@ -4,7 +4,7 @@
  * Parses THINKING_OS.md to extract directive definitions.
  * THINKING_OS.md is the single source of truth for thinking models.
  *
- * XML structure:
+ * Required XML structure:
  *   <directive id="T-01" name="MAP_BEFORE_TERRITORY">
  *     <trigger>...</trigger>
  *     <must>...</must>
@@ -37,47 +37,41 @@ function extractTag(content: string, tagName: string): string {
 
 /**
  * Parse THINKING_OS.md content and extract all <directive> blocks.
- * Returns empty array if no directives found.
+ * Returns empty array if no XML directives found.
  */
 export function parseThinkingOsMd(content: string): ThinkingOsDirective[] {
   const directives: ThinkingOsDirective[] = [];
-
-  // Match all <directive ...> ... </directive> blocks
   const directiveRegex = /<directive\s+([^>]*)>([\s\S]*?)<\/directive>/gi;
   let match: RegExpExecArray | null;
 
   while ((match = directiveRegex.exec(content)) !== null) {
     const attrs = match[1];
     const body = match[2];
-
     const idMatch = attrs.match(/id="([^"]+)"/i);
     const nameMatch = attrs.match(/name="([^"]+)"/i);
-
     if (!idMatch) continue;
 
-    const directive: ThinkingOsDirective = {
+    directives.push({
       id: idMatch[1],
       name: nameMatch ? nameMatch[1] : '',
       trigger: extractTag(body, 'trigger'),
       must: extractTag(body, 'must'),
       forbidden: extractTag(body, 'forbidden'),
-    };
-
-    directives.push(directive);
+    });
   }
 
   return directives;
 }
 
 /**
- * Load THINKING_OS.md from the plugin templates for a given language.
- * Falls back to the workspace THINKING_OS.md if it exists.
+ * Load THINKING_OS.md from the workspace.
+ * Falls back to plugin templates if workspace file doesn't exist or has no XML directives.
  */
 export function loadThinkingOsFromWorkspace(
   workspaceDir: string,
   language: string = 'zh',
 ): ThinkingOsDirective[] {
-  // Priority 1: workspace's own THINKING_OS.md
+  // Priority 1: workspace THINKING_OS.md
   const workspacePath = resolvePdPath(workspaceDir, 'THINKING_OS');
   if (fs.existsSync(workspacePath)) {
     try {
@@ -89,39 +83,21 @@ export function loadThinkingOsFromWorkspace(
     }
   }
 
-  // ES Module compatible __dirname (must be inside function for bundler)
-  const currentDir = path.dirname(fileURLToPath(import.meta.url));
-
   // Priority 2: plugin template for the given language
-  const templatePath = path.join(
-    path.dirname(path.dirname(path.dirname(currentDir))),
-    'templates',
-    'langs',
-    language,
-    'principles',
-    'THINKING_OS.md',
-  );
-
-  if (fs.existsSync(templatePath)) {
+  const templatePath = resolveTemplatePath(language);
+  if (templatePath) {
     try {
       const content = fs.readFileSync(templatePath, 'utf-8');
-      return parseThinkingOsMd(content);
+      const directives = parseThinkingOsMd(content);
+      if (directives.length > 0) return directives;
     } catch {
       // Fall through to zh template
     }
   }
 
   // Priority 3: zh template as ultimate fallback
-  const zhPath = path.join(
-    path.dirname(path.dirname(path.dirname(currentDir))),
-    'templates',
-    'langs',
-    'zh',
-    'principles',
-    'THINKING_OS.md',
-  );
-
-  if (fs.existsSync(zhPath)) {
+  const zhPath = resolveTemplatePath('zh');
+  if (zhPath) {
     try {
       const content = fs.readFileSync(zhPath, 'utf-8');
       return parseThinkingOsMd(content);
@@ -134,6 +110,22 @@ export function loadThinkingOsFromWorkspace(
 }
 
 /**
+ * Resolve the THINKING_OS.md template path for a given language.
+ */
+function resolveTemplatePath(language: string): string | null {
+  const currentDir = path.dirname(fileURLToPath(import.meta.url));
+  const templatePath = path.join(
+    path.dirname(path.dirname(path.dirname(currentDir))),
+    'templates',
+    'langs',
+    language,
+    'principles',
+    'THINKING_OS.md',
+  );
+  return fs.existsSync(templatePath) ? templatePath : null;
+}
+
+/**
  * Extract meaningful detection keywords from a trigger string.
  * Returns an array of regex patterns.
  */
@@ -142,14 +134,14 @@ export function generateDetectionPatterns(trigger: string): RegExp[] {
 
   const patterns: string[] = [];
 
-  // Extract Chinese phrases: 3-8 character sequences that are meaningful
+  // Extract Chinese phrases: 3-8 character sequences
   const chinesePattern = /[\u4e00-\u9fff]{3,8}/g;
   const chineseMatches = trigger.match(chinesePattern) ?? [];
   for (const phrase of chineseMatches) {
     patterns.push(phrase);
   }
 
-  // Extract English words/phrases: sequences of letters
+  // Extract English words/phrases
   const englishPattern = /[a-zA-Z]{3,20}(?:\s+[a-zA-Z]{3,20}){0,3}/g;
   const englishMatches = trigger.match(englishPattern) ?? [];
   for (const phrase of englishMatches) {
@@ -159,6 +151,5 @@ export function generateDetectionPatterns(trigger: string): RegExp[] {
     }
   }
 
-  // Convert to case-insensitive regexes
   return patterns.map(p => new RegExp(p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
 }
