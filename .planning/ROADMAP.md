@@ -4,7 +4,7 @@
 
 - ✅ **v1.9.3** — 剩余 Lint 修复 (Phase 03, shipped 2026-04-09)
 - 📋 **v1.10** — Thinking Models 页面优化 (8 phases, started 2026-04-09)
-- 📋 **Next** — TBD (see `.planning/milestones/` for archive)
+- 📋 **Next** — Live Replay and Operator Validation (Phase 18, started 2026-04-10)
 
 ## Phases
 
@@ -45,6 +45,11 @@
 - 覆盖率趋势图正确显示每日数据
 - 场景热力图显示模型×场景交叉数据
 - 空数据时显示友好提示
+
+**Plans:** 1 plan
+
+Plans:
+- [ ] 01-01-PLAN.md — Fix LineChart hardcoded Chinese bug + add coverage trend EmptyState
 
 ---
 
@@ -150,6 +155,21 @@
 
 ---
 
+### Phase 18: Live Replay and Operator Validation
+
+**Goal:** Run sleep_reflection end-to-end with bootstrapped principles and create operator validation script
+
+**Requirements:** LIVE-01, LIVE-02, LIVE-03
+
+**Depends on:** Phase 17 (bootstrap rules must exist)
+
+**Plans:** 1 plan
+
+Plans:
+- [ ] 18-01-PLAN.md — Create validate-live-path.ts script
+
+---
+
 ### 📋 Next Milestone
 
 - [ ] Phase TBD: TBD (0/0 plans)
@@ -159,11 +179,13 @@
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 03 | v1.9.3 | 1/1 | Complete | 2026-04-09 |
-| 01-08 | v1.10 | 0/8 | Not started | - |
+| 01 | v1.10 | 0/1 | Not started | - |
+| 02-08 | v1.10 | 0/7 | Not started | - |
+| 18 | Next | 0/1 | Not started | - |
 
 ---
 
 **For full milestone history, see:** `.planning/milestones/`
 
 *Roadmap created: 2026-04-09*
-*Last updated: 2026-04-09 after v1.10 milestone started*
+*Last updated: 2026-04-10 after Phase 1 planned*
