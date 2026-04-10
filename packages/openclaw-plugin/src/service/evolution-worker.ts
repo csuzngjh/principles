@@ -1831,6 +1831,16 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
 
         async function runCycle(): Promise<void> {
             const cycleStart = Date.now();
+
+            // ──── DEBUG: Verify subagent availability in heartbeat context ────
+            const hbSubagent = api?.runtime?.subagent;
+            logger?.info?.(`[PD:DEBUG:SubagentCheck:Heartbeat] api_exists=${!!api}, subagent_exists=${!!hbSubagent}, subagent.run_exists=${!!hbSubagent?.run}`);
+            if (hbSubagent?.run) {
+                const runFn = hbSubagent.run;
+                const ctorName = runFn.constructor?.name ?? 'unknown';
+                const isAsyncFn = ctorName === 'AsyncFunction';
+                logger?.info?.(`[PD:DEBUG:SubagentCheck:Heartbeat] run.constructor.name=${ctorName}, isAsyncFunction=${isAsyncFn}`);
+            }
             const cycleResult: {
                 timestamp: string;
                 cycle_start_ms: number;
@@ -2023,5 +2033,52 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
         if (ctx?.logger) ctx.logger.info('[PD:EvolutionWorker] Stopping background service...');
         if (timeoutId) clearTimeout(timeoutId);
         flushAllSessions();
+    },
+
+    /**
+     * Public API: Manually enqueue a sleep_reflection task.
+     * Used by /pd-reflect command to trigger nocturnal pipeline without waiting for idle.
+     */
+    async triggerManualReflection(wctx: WorkspaceContext, logger: PluginLogger): Promise<string | null> {
+        const queuePath = wctx.resolve('EVOLUTION_QUEUE');
+        try {
+            let rawQueue: RawQueueItem[] = [];
+            try {
+                rawQueue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
+            } catch {
+                rawQueue = [];
+            }
+            const queue: EvolutionQueueItem[] = migrateQueueToV2(rawQueue);
+            const hasPending = queue.some(t => t.taskKind === 'sleep_reflection' && (t.status === 'pending' || t.status === 'in_progress'));
+            if (hasPending) {
+                logger?.info?.('[PD:EvolutionWorker] sleep_reflection already pending');
+                return null;
+            }
+            const now = Date.now();
+            const taskId = createEvolutionTaskId('nocturnal', 50, 'manual trigger', 'Manual /pd-reflect command', now);
+            const nowIso = new Date(now).toISOString();
+            queue.push({
+                id: taskId,
+                taskKind: 'sleep_reflection',
+                priority: 'high',
+                score: 50,
+                source: 'manual',
+                reason: 'Manual reflection triggered via /pd-reflect',
+                trigger_text_preview: 'User commanded /pd-reflect',
+                timestamp: nowIso,
+                enqueued_at: nowIso,
+                status: 'pending',
+                traceId: taskId,
+                retryCount: 0,
+                maxRetries: 1,
+                recentPainContext: readRecentPainContext(wctx),
+            });
+            fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+            logger?.info?.(`[PD:EvolutionWorker] Manually enqueued sleep_reflection task ${taskId}`);
+            return taskId;
+        } catch (err) {
+            logger?.error?.(`[PD:EvolutionWorker] Failed to enqueue manual reflection: ${String(err)}`);
+            return null;
+        }
     }
 };
