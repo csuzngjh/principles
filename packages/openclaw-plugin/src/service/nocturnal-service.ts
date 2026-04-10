@@ -1152,7 +1152,8 @@ async function executeNocturnalReflectionWithAdapter(
         selectedSessionId = options.snapshotOverride.sessionId;
         snapshot = options.snapshotOverride;
         console.log(`[nocturnal-service] Using override: principleId=${selectedPrincipleId}, sessionId=${selectedSessionId}`);
-        // Calculate violation density from snapshot stats for meaningful diagnostics    const snapStats = options.snapshotOverride.stats;
+        // Calculate violation density from snapshot stats for meaningful diagnostics
+        const snapStats = options.snapshotOverride.stats;
     const totalToolCalls = snapStats?.totalToolCalls ?? 0;
     const failureCount = snapStats?.failureCount ?? 0;
     const violationDensity = totalToolCalls > 0 ? failureCount / totalToolCalls : 0;
