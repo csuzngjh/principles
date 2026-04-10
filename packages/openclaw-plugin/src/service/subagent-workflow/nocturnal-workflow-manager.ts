@@ -234,6 +234,7 @@ export class NocturnalWorkflowManager implements WorkflowManager {
         // When principleId is provided, we pass it as principleIdOverride to skip Selector.
         // When principleId is missing, Selector will choose a principle from training store.
         this.logger.info(`[PD:NocturnalWorkflow] Calling executeNocturnalReflectionAsync for full pipeline (principleId=${principleId ?? 'auto-select'})`);
+        const pipelineStart = Date.now();
 
         // #213: Wrap fire-and-forget Promise with .catch() to prevent
         // unhandled promise rejections if anything throws outside the try-catch
@@ -263,25 +264,32 @@ export class NocturnalWorkflowManager implements WorkflowManager {
                 );
 
                 if (result.success) {
+                    this.logger.info(`[PD:NocturnalWorkflow] [${workflowId}] Pipeline step 4/4: Completed successfully, artifactId=${result.diagnostics?.persistedPath}`);
+                    this.store.updateWorkflowState(workflowId, 'completed');
                     this.store.recordEvent(workflowId, 'nocturnal_completed', null, 'completed', 'Full pipeline completed via executeNocturnalReflectionAsync', {
                         artifactId: result.diagnostics?.persistedPath,
                     });
                     this.completedWorkflows.set(workflowId, Date.now());
                 } else {
                     const reason = result.noTargetSelected ? 'no_target_selected' : 'validation_failed';
+                    this.logger.warn(`[PD:NocturnalWorkflow] [${workflowId}] Pipeline failed: reason=${reason}, noTargetSelected=${result.noTargetSelected}, skipReason=${result.skipReason ?? 'none'}, validationFailures=${result.validationFailures?.length ?? 0}`);
+                    this.store.updateWorkflowState(workflowId, 'terminal_error');
                     this.store.recordEvent(workflowId, 'nocturnal_failed', null, 'terminal_error', reason, {
                         failures: result.validationFailures,
                         skipReason: result.skipReason,
                     });
                 }
             } catch (err) {
-                this.logger.error(`[PD:NocturnalWorkflow] executeNocturnalReflectionAsync threw: ${String(err)}`);
+                const errDuration = Date.now() - pipelineStart;
+                this.logger.error(`[PD:NocturnalWorkflow] [${workflowId}] executeNocturnalReflectionAsync threw after ${errDuration}ms: ${String(err)}`);
+                this.store.updateWorkflowState(workflowId, 'terminal_error');
                 this.store.recordEvent(workflowId, 'nocturnal_failed', null, 'terminal_error', String(err), { workflowId });
             }
         }).catch((err) => {
-            // #213: Outer catch — catches errors from the fire-and-forget promise
+            // #213: Outer catch – catches errors from the fire-and-forget promise
             // itself (e.g., if the async callback throws before entering try).
             this.logger.error(`[PD:NocturnalWorkflow] Unhandled error in async pipeline for ${workflowId}: ${String(err)}`);
+            this.store.updateWorkflowState(workflowId, 'terminal_error');
             this.store.recordEvent(workflowId, 'nocturnal_failed', null, 'terminal_error', String(err), { workflowId });
         });
 

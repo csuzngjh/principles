@@ -1174,7 +1174,15 @@ async function executeNocturnalReflectionWithAdapter(
         quotaCheckPassed: true,
       },
     };
-    diagnostics.idle = { isIdle: true, mostRecentActivityAt: 0, idleForMs: 0, userActiveSessions: 0, abandonedSessionIds: [], trajectoryGuardrailConfirmsIdle: true, reason: 'selector skipped (override provided)' };
+    diagnostics.idle = {
+      isIdle: true,
+      mostRecentActivityAt: 0,
+      idleForMs: 0,
+      userActiveSessions: 0,
+      abandonedSessionIds: [],
+      trajectoryGuardrailConfirmsIdle: true,
+      reason: 'selector skipped (override provided)',
+    };
   } else {
     // Normal Selector path
     const extractor = createNocturnalTrajectoryExtractor(workspaceDir, stateDir);
