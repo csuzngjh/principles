@@ -23,7 +23,7 @@ import { isCompleteDetectorMetadata } from './evolution-types.js';
 import { updateTrainingStore, createPrinciple } from './principle-tree-ledger.js';
 import type { LedgerPrinciple } from './principle-tree-ledger.js';
 
-/* eslint-disable no-unused-vars -- Reason: interface method params are type signatures, implementations use actual values */
+ 
 export interface EvolutionReducer {
 
   emit(_event: EvolutionLoopEvent): void;
@@ -73,7 +73,7 @@ export interface EvolutionReducer {
     lastPromotedAt: string | null;
   };
 }
-/* eslint-enable no-unused-vars */
+ 
 
 const PROBATION_SUCCESS_THRESHOLD = 3;
 const CIRCUIT_BREAKER_THRESHOLD = 3;
@@ -690,7 +690,7 @@ export class EvolutionReducerImpl implements EvolutionReducer {
     });
   }
 
-  // eslint-disable-next-line no-unused-vars, @typescript-eslint/no-unused-vars -- Reason: event timestamp intentionally unused, only data payload matters
+   
   private onPainDetected(data: PainDetectedData, _eventTs: string): void {
     const trigger = String(data.reason ?? data.source ?? 'unknown trigger');
 

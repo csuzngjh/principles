@@ -1146,13 +1146,13 @@ async function executeNocturnalReflectionWithAdapter(
   // eslint-disable-next-line no-useless-assignment -- Reason: initial value unused due to immediate reassignment in all branches
   let snapshot: NocturnalSessionSnapshot | null = null;
 
-  if (options.principleIdOverride && options.snapshotOverride) {
-    // Skip Selector: use provided principleId and snapshot directly
-    selectedPrincipleId = options.principleIdOverride;
-    selectedSessionId = options.snapshotOverride.sessionId;
-    snapshot = options.snapshotOverride;
-    // Calculate violation density from snapshot stats for meaningful diagnostics
-    const snapStats = options.snapshotOverride.stats;
+      if (options.principleIdOverride && options.snapshotOverride) {
+        // Skip Selector: use provided principleId and snapshot directly
+        selectedPrincipleId = options.principleIdOverride;
+        selectedSessionId = options.snapshotOverride.sessionId;
+        snapshot = options.snapshotOverride;
+        console.log(`[nocturnal-service] Using override: principleId=${selectedPrincipleId}, sessionId=${selectedSessionId}`);
+        // Calculate violation density from snapshot stats for meaningful diagnostics    const snapStats = options.snapshotOverride.stats;
     const totalToolCalls = snapStats?.totalToolCalls ?? 0;
     const failureCount = snapStats?.failureCount ?? 0;
     const violationDensity = totalToolCalls > 0 ? failureCount / totalToolCalls : 0;
@@ -1177,6 +1177,7 @@ async function executeNocturnalReflectionWithAdapter(
     diagnostics.idle = { isIdle: true, mostRecentActivityAt: 0, idleForMs: 0, userActiveSessions: 0, abandonedSessionIds: [], trajectoryGuardrailConfirmsIdle: true, reason: 'selector skipped (override provided)' };
   } else {
     // Normal Selector path
+    console.log(`[nocturnal-service] Step 2/7: Target selection (normal path)`);
     const extractor = createNocturnalTrajectoryExtractor(workspaceDir, stateDir);
     const selector = new NocturnalTargetSelector(workspaceDir, stateDir, extractor, {
       idleCheckOverride: options.idleCheckOverride,
@@ -1185,8 +1186,10 @@ async function executeNocturnalReflectionWithAdapter(
 
     const selection = selector.select();
     diagnostics.selection = selection;
+    console.log(`[nocturnal-service] Selector result: decision=${selection.decision}, skipReason=${selection.skipReason ?? 'none'}`);
 
     if (selection.decision === 'skip') {
+      console.warn(`[nocturnal-service] Target selection skipped: ${selection.skipReason}`);
       return {
         success: false,
         noTargetSelected: true,

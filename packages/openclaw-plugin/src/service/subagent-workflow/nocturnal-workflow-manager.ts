@@ -176,8 +176,14 @@ export class NocturnalWorkflowManager implements WorkflowManager {
         // Other workflow managers (empathy, deep-reflect) have this check
         // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: TrinityRuntimeAdapter interface doesn't expose api.runtime.subagent, but OpenClawTrinityRuntimeAdapter has it
         const subagent = (this.runtimeAdapter as any).api?.runtime?.subagent;
-        if (!isSubagentRuntimeAvailable(subagent)) {
-            this.logger.warn(`[PD:NocturnalWorkflow] Subagent runtime unavailable, skipping workflow`);
+        const apiAvailable = !!(this.runtimeAdapter as any).api;
+        const runtimeAvailable = !!(this.runtimeAdapter as any).api?.runtime;
+        const subagentAvailable = isSubagentRuntimeAvailable(subagent);
+        
+        this.logger.info(`[PD:NocturnalWorkflow] Subagent availability check: api=${apiAvailable}, runtime=${runtimeAvailable}, subagent=${subagentAvailable}`);
+        
+        if (!subagentAvailable) {
+            this.logger.warn(`[PD:NocturnalWorkflow] Subagent runtime unavailable (api=${apiAvailable}, runtime=${runtimeAvailable}), skipping workflow`);
             throw new Error(`NocturnalWorkflowManager: subagent runtime unavailable`);
         }
 
@@ -234,12 +240,15 @@ export class NocturnalWorkflowManager implements WorkflowManager {
         // When principleId is provided, we pass it as principleIdOverride to skip Selector.
         // When principleId is missing, Selector will choose a principle from training store.
         this.logger.info(`[PD:NocturnalWorkflow] Calling executeNocturnalReflectionAsync for full pipeline (principleId=${principleId ?? 'auto-select'})`);
+        const pipelineStart = Date.now();
 
         // #213: Wrap fire-and-forget Promise with .catch() to prevent
         // unhandled promise rejections if anything throws outside the try-catch
         // (e.g., during parameter construction or environment errors).
         Promise.resolve().then(async () => {
             try {
+                this.logger.info(`[PD:NocturnalWorkflow] [${workflowId}] Pipeline step 1/4: Starting executeNocturnalReflectionAsync`);
+                
                 const result = await executeNocturnalReflectionAsync(
                     this.workspaceDir,
                     this.stateDir,
@@ -262,20 +271,26 @@ export class NocturnalWorkflowManager implements WorkflowManager {
                     }
                 );
 
+                const pipelineDuration = Date.now() - pipelineStart;
+                this.logger.info(`[PD:NocturnalWorkflow] [${workflowId}] Pipeline completed in ${pipelineDuration}ms, success=${result.success}`);
+
                 if (result.success) {
+                    this.logger.info(`[PD:NocturnalWorkflow] [${workflowId}] Pipeline step 4/4: Completed successfully, artifactId=${result.diagnostics?.persistedPath}`);
                     this.store.recordEvent(workflowId, 'nocturnal_completed', null, 'completed', 'Full pipeline completed via executeNocturnalReflectionAsync', {
                         artifactId: result.diagnostics?.persistedPath,
                     });
                     this.completedWorkflows.set(workflowId, Date.now());
                 } else {
                     const reason = result.noTargetSelected ? 'no_target_selected' : 'validation_failed';
+                    this.logger.warn(`[PD:NocturnalWorkflow] [${workflowId}] Pipeline failed: reason=${reason}, noTargetSelected=${result.noTargetSelected}, skipReason=${result.skipReason ?? 'none'}, validationFailures=${result.validationFailures?.length ?? 0}`);
                     this.store.recordEvent(workflowId, 'nocturnal_failed', null, 'terminal_error', reason, {
                         failures: result.validationFailures,
                         skipReason: result.skipReason,
                     });
                 }
             } catch (err) {
-                this.logger.error(`[PD:NocturnalWorkflow] executeNocturnalReflectionAsync threw: ${String(err)}`);
+                const errDuration = Date.now() - pipelineStart;
+                this.logger.error(`[PD:NocturnalWorkflow] [${workflowId}] executeNocturnalReflectionAsync threw after ${errDuration}ms: ${String(err)}`);
                 this.store.recordEvent(workflowId, 'nocturnal_failed', null, 'terminal_error', String(err), { workflowId });
             }
         }).catch((err) => {

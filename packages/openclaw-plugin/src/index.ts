@@ -235,7 +235,7 @@ const plugin = {
         try {
           const workspaceDir = resolveToolHookWorkspaceDir(ctx, api, 'trajectory.after_tool_call');
           TrajectoryCollector.handleAfterToolCall(event, { ...ctx, workspaceDir });
-          // eslint-disable-next-line no-unused-vars, @typescript-eslint/no-unused-vars -- Reason: catch binding intentionally unused
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Reason: catch binding intentionally unused
         } catch (_err) {
           // Non-critical: don't log, just skip
         }
@@ -248,7 +248,7 @@ const plugin = {
         try {
           const workspaceDir = resolveToolHookWorkspaceDir(ctx as unknown as Record<string, unknown>, api, 'trajectory.llm_output');
           TrajectoryCollector.handleLlmOutput(event, { ...ctx, workspaceDir });
-          // eslint-disable-next-line no-unused-vars, @typescript-eslint/no-unused-vars -- Reason: catch binding intentionally unused
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Reason: catch binding intentionally unused
         } catch (_err) {
           // Non-critical: don't log, just skip
         }
@@ -258,7 +258,7 @@ const plugin = {
     // ── Hook: Subagent Loop Closure ──
     api.on(
       'subagent_spawning',
-      // eslint-disable-next-line no-unused-vars, @typescript-eslint/no-unused-vars -- Reason: ctx param required by hook callback signature but not used in this handler
+       
       (event: PluginHookSubagentSpawningEvent, _ctx: PluginHookSubagentContext): void | PluginHookSubagentSpawningResult => {
         try {
           // Resolve workspace via official API, falling back to PathResolver

@@ -1360,14 +1360,19 @@ export async function runTrinityAsync(options: RunTrinityOptions): Promise<Trini
 
   try {
     // Step 1: Dreamer — generate candidates via real subagent
+    const dreamerStart = Date.now();
+    console.log(`[Trinity] Step 1/3: Invoking Dreamer (principleId=${principleId}, maxCandidates=${config.maxCandidates})`);
     const dreamerOutput = await adapter.invokeDreamer(snapshot, principleId, config.maxCandidates);
+    console.log(`[Trinity] Dreamer completed in ${Date.now() - dreamerStart}ms, valid=${dreamerOutput.valid}, candidates=${dreamerOutput.candidates?.length ?? 0}`);
 
     if (!dreamerOutput.valid || dreamerOutput.candidates.length === 0) {
+      const reason = dreamerOutput.reason ?? 'No valid candidates generated';
+      console.warn(`[Trinity] Dreamer failed: ${reason}`);
       failures.push({
         stage: 'dreamer',
-        reason: dreamerOutput.reason ?? 'No valid candidates generated',
+        reason,
       });
-      telemetry.stageFailures.push(`Dreamer: ${dreamerOutput.reason ?? 'failed'}`);
+      telemetry.stageFailures.push(`Dreamer: ${reason}`);
       return { success: false, telemetry, failures, fallbackOccurred: false };
     }
 
@@ -1375,20 +1380,27 @@ export async function runTrinityAsync(options: RunTrinityOptions): Promise<Trini
     telemetry.candidateCount = dreamerOutput.candidates.length;
 
     // Step 2: Philosopher — rank candidates via real subagent
+    const philosopherStart = Date.now();
+    console.log(`[Trinity] Step 2/3: Invoking Philosopher (${dreamerOutput.candidates.length} candidates)`);
     const philosopherOutput = await adapter.invokePhilosopher(dreamerOutput, principleId);
+    console.log(`[Trinity] Philosopher completed in ${Date.now() - philosopherStart}ms, valid=${philosopherOutput.valid}, judgments=${philosopherOutput.judgments?.length ?? 0}`);
 
     if (!philosopherOutput.valid || philosopherOutput.judgments.length === 0) {
+      const reason = philosopherOutput.reason ?? 'No judgments produced';
+      console.warn(`[Trinity] Philosopher failed: ${reason}`);
       failures.push({
         stage: 'philosopher',
-        reason: philosopherOutput.reason ?? 'No judgments produced',
+        reason,
       });
-      telemetry.stageFailures.push(`Philosopher: ${philosopherOutput.reason ?? 'failed'}`);
+      telemetry.stageFailures.push(`Philosopher: ${reason}`);
       return { success: false, telemetry, failures, fallbackOccurred: false };
     }
 
     telemetry.philosopherPassed = true;
 
     // Step 3: Scribe — synthesize final artifact via real subagent
+    const scribeStart = Date.now();
+    console.log(`[Trinity] Step 3/3: Invoking Scribe (synthesizing artifact)`);
     const draftArtifact = await adapter.invokeScribe(
       dreamerOutput,
       philosopherOutput,
@@ -1397,8 +1409,10 @@ export async function runTrinityAsync(options: RunTrinityOptions): Promise<Trini
       telemetry,
       config
     );
+    console.log(`[Trinity] Scribe completed in ${Date.now() - scribeStart}ms, artifact=${!!draftArtifact}`);
 
     if (!draftArtifact) {
+      console.warn(`[Trinity] Scribe failed: Failed to synthesize artifact from candidates`);
       failures.push({ stage: 'scribe', reason: 'Failed to synthesize artifact from candidates' });
       telemetry.stageFailures.push('Scribe: synthesis failed');
       return { success: false, telemetry, failures, fallbackOccurred: false };
@@ -1406,6 +1420,7 @@ export async function runTrinityAsync(options: RunTrinityOptions): Promise<Trini
 
     telemetry.scribePassed = true;
     telemetry.selectedCandidateIndex = draftArtifact.selectedCandidateIndex;
+    console.log(`[Trinity] Trinity chain completed successfully: selectedCandidateIndex=${draftArtifact.selectedCandidateIndex}`);
 
     if (draftArtifact.telemetry) {
       telemetry.tournamentTrace = draftArtifact.telemetry.tournamentTrace;
