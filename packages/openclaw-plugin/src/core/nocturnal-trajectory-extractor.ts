@@ -116,13 +116,15 @@ export interface NocturnalSessionSnapshot {
   gateBlocks: NocturnalGateBlock[];
   /**
    * Summary statistics for quick triage.
+   * When _dataSource is 'pain_context_fallback', these fields are null
+   * to distinguish "no data" from "data is zero".
    */
   stats: {
-    totalAssistantTurns: number;
-    totalToolCalls: number;
+    totalAssistantTurns: number | null;
+    totalToolCalls: number | null;
     totalPainEvents: number;
-    totalGateBlocks: number;
-    failureCount: number;
+    totalGateBlocks: number | null;
+    failureCount: number | null;
   };
   /**
    * #219: Marker for data source to identify fallback/partial stats.

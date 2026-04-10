@@ -550,11 +550,11 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
 
 Session Snapshot:
 - Session ID: ${snapshot.sessionId}
-- Assistant Turns: ${snapshot.stats.totalAssistantTurns}
-- Tool Calls: ${snapshot.stats.totalToolCalls}
-- Failures: ${snapshot.stats.failureCount}
+- Assistant Turns: ${snapshot.stats.totalAssistantTurns ?? 'N/A (data unavailable)'}
+- Tool Calls: ${snapshot.stats.totalToolCalls ?? 'N/A (data unavailable)'}
+- Failures: ${snapshot.stats.failureCount ?? 'N/A (data unavailable)'}
 - Pain Events: ${snapshot.stats.totalPainEvents}
-- Gate Blocks: ${snapshot.stats.totalGateBlocks}
+- Gate Blocks: ${snapshot.stats.totalGateBlocks ?? 'N/A (data unavailable)'}
 
 Please analyze this session and generate ${maxCandidates} candidate corrections. Each candidate should identify a bad decision and propose a better alternative grounded in the target principle.
 
@@ -995,9 +995,9 @@ export function invokeStubDreamer(
   principleId: string,
   maxCandidates: number
 ): DreamerOutput {
-  const hasFailures = snapshot.stats.failureCount > 0;
+  const hasFailures = (snapshot.stats.failureCount ?? 0) > 0;
   const hasPain = snapshot.stats.totalPainEvents > 0;
-  const hasGateBlocks = snapshot.stats.totalGateBlocks > 0;
+  const hasGateBlocks = (snapshot.stats.totalGateBlocks ?? 0) > 0;
 
   // #219: Detect fallback data source - stats may be incomplete
   const isFallback = snapshot._dataSource === 'pain_context_fallback';

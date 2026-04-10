@@ -220,8 +220,8 @@ export function shouldRunArtificer(
 
   const signalCount =
     snapshot.stats.totalPainEvents +
-    snapshot.stats.totalGateBlocks +
-    snapshot.stats.failureCount;
+    (snapshot.stats.totalGateBlocks ?? 0) +
+    (snapshot.stats.failureCount ?? 0);
 
   return signalCount >= minimumSignalCount;
 }
