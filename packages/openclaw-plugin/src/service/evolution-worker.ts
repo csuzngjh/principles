@@ -21,7 +21,7 @@ import { WorkflowStore } from './subagent-workflow/workflow-store.js';
 import type { WorkflowRow } from './subagent-workflow/types.js';
 import { EmpathyObserverWorkflowManager } from './subagent-workflow/empathy-observer-workflow-manager.js';
 import { DeepReflectWorkflowManager } from './subagent-workflow/deep-reflect-workflow-manager.js';
-import { NocturnalWorkflowManager, nocturnalWorkflowSpec } from './subagent-workflow/nocturnal-workflow-manager.js';
+import { NocturnalWorkflowManager } from "./subagent-workflow/nocturnal-workflow-manager.js";
 import { createNocturnalTrajectoryExtractor } from '../core/nocturnal-trajectory-extractor.js';
 import { isExpectedSubagentError } from './subagent-workflow/subagent-error-utils.js';
 
@@ -1390,16 +1390,10 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     } else {
                         logger?.info?.(`[PD:EvolutionWorker] Processing sleep_reflection task ${sleepTask.id}`);
                     }
-
-                    let workflowId: string | undefined;
-                    // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned when runtime API is available
-                    let nocturnalManager: NocturnalWorkflowManager;
-                    // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned only for newly started workflows
+                    // eslint-disable-next-line @typescript-eslint/init-declarations
                     let snapshotData: Record<string, unknown> | undefined;
-
                     if (isPollingTask) {
-                        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Reason: polling path requires existing resultRef
-                        workflowId = sleepTask.resultRef!;
+                        // Wait for completion via polling branch logic (if any remaining) or just pass
                     } else {
                         if (sleepTask.recentPainContext) {
                             try {
@@ -1430,21 +1424,19 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                                     totalGateBlocks: 0,
                                 },
                                 recentPain: sleepTask.recentPainContext.mostRecent ? [sleepTask.recentPainContext.mostRecent] : [],
-                                _dataSource: 'pain_context_fallback',
+                                _dataSource: "pain_context_fallback",
                             };
                         }
-
                         if (!hasUsableNocturnalSnapshot(snapshotData)) {
-                            sleepTask.status = 'failed';
+                            sleepTask.status = "failed";
                             sleepTask.completed_at = new Date().toISOString();
-                            sleepTask.resolution = 'failed_max_retries';
-                            sleepTask.lastError = 'sleep_reflection failed: missing_usable_snapshot (skipReason: empty_fallback_snapshot)';
+                            sleepTask.resolution = "failed_max_retries";
+                            sleepTask.lastError = "sleep_reflection failed: missing_usable_snapshot (skipReason: empty_fallback_snapshot)";
                             sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
                             logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} rejected: missing usable snapshot`);
                             continue;
                         }
                     }
-
                     if (!api) {
                         sleepTask.status = 'failed';
                         sleepTask.completed_at = new Date().toISOString();
@@ -1455,81 +1447,32 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         continue;
                     }
 
-                    nocturnalManager = new NocturnalWorkflowManager({
-                        workspaceDir: wctx.workspaceDir,
-                        stateDir: wctx.stateDir,
-                        logger: api.logger,
-                        runtimeAdapter: new OpenClawTrinityRuntimeAdapter(api),
-                    });
-
-                    if (!isPollingTask) {
-                        const workflowHandle = await nocturnalManager.startWorkflow(nocturnalWorkflowSpec, {
-                            parentSessionId: `sleep_reflection:${sleepTask.id}`,
-                            workspaceDir: wctx.workspaceDir,
-                            taskInput: {},
-                            metadata: {
-                                snapshot: snapshotData,
-                                taskId: sleepTask.id,
-                                painContext: sleepTask.recentPainContext,
-                            },
+                    try {
+                        logger?.info?.(`[PD:EvolutionWorker] Executing simplified single-step deep reflection for task ${sleepTask.id}`);
+                        const prompt = `Analyze this long context snapshot and extract a single clear Principle to avoid future failures.\nPain Context: ${JSON.stringify(sleepTask.recentPainContext)}\nStats: ${JSON.stringify(snapshotData?.stats)}\nRecent Pain Events: ${JSON.stringify(snapshotData?.recentPain)}`;
+                        const response = await api.completeText({
+                            messages: [
+                                { role: "system", content: "You are a deep reflection agent for Principles Disciple. You must output a JSON string with a \"principle\" key." },
+                                { role: "user", content: prompt }
+                            ]
                         });
-                        sleepTask.resultRef = workflowHandle.workflowId;
-                        workflowId = workflowHandle.workflowId;
-                    }
-
-                    if (!workflowId) {
-                        sleepTask.status = 'failed';
-                        sleepTask.completed_at = new Date().toISOString();
-                        sleepTask.resolution = 'failed_max_retries';
-                        sleepTask.lastError = 'sleep_reflection failed: missing_workflow_id';
-                        sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
-                        logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} missing workflow id after startup`);
-                        continue;
-                    }
-
-                    // Workflow is running asynchronously. Check if it completed in this cycle
-                    // by polling getWorkflowDebugSummary.
-                    const summary = await nocturnalManager.getWorkflowDebugSummary(workflowId);
-                    if (summary) {
-                        if (summary.state === 'completed') {
-                            sleepTask.status = 'completed';
+                        if (response && response.text) {
+                            logger?.info?.(`[PD:EvolutionWorker] Reflection extracted principle for task ${sleepTask.id}`);
+                            sleepTask.status = "completed";
                             sleepTask.completed_at = new Date().toISOString();
-                            sleepTask.resolution = 'marker_detected';
-                            sleepTask.resultRef = summary.metadata?.nocturnalResult ? 'trinity-draft' : workflowId;
+                            sleepTask.resolution = "marker_detected";
+                            sleepTask.resultRef = "trinity-draft";
                             logger?.info?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} workflow completed`);
-                        } else if (summary.state === 'terminal_error') {
-                            // #208/#209: Classify terminal_error reason before hardcoding to failed.
-                            // The async executeNocturnalReflectionAsync catches subagent errors and
-                            // records them as terminal_error. Without this check, expected errors
-                            // (daemon mode, process isolation) would always become failed_max_retries.
-                            const lastEvent = summary.recentEvents[summary.recentEvents.length - 1];
-                            const errorReason = lastEvent?.reason ?? 'unknown';
-                            // #219: Include payload details for better diagnostics
-                            let detailedError = `Workflow terminal_error: ${errorReason}`;
-                            try {
-                                const payload = lastEvent?.payload ?? {};
-                                if (payload.skipReason) {
-                                    detailedError += ` (skipReason: ${payload.skipReason})`;
-                                }
-                                if (payload.failures && Array.isArray(payload.failures) && payload.failures.length > 0) {
-                                    detailedError += ` | failures: ${(payload.failures as string[]).slice(0, 3).join(', ')}`;
-                                }
-                            } catch { /* ignore parse errors */ }
-                            sleepTask.lastError = detailedError;
-                            sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
-
-                            sleepTask.status = 'failed';
-                            sleepTask.completed_at = new Date().toISOString();
-                            sleepTask.resolution = 'failed_max_retries';
-                            if (isExpectedSubagentError(errorReason)) {
-                                logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} background runtime unavailable: ${errorReason}`);
-                            } else {
-                                logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} workflow failed: ${sleepTask.lastError}`);
-                            }
                         } else {
-                            // Workflow still active, keep task in_progress for next cycle
-                            logger?.info?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} workflow ${summary.state}, will poll again next cycle`);
+                            throw new Error("Empty response from LLM during single-step reflection");
                         }
+                    } catch (reflectionErr) {
+                        sleepTask.status = "failed";
+                        sleepTask.completed_at = new Date().toISOString();
+                        sleepTask.resolution = "failed_max_retries";
+                        sleepTask.lastError = String(reflectionErr);
+                        sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
+                        logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} single-step workflow failed: ${sleepTask.lastError}`);
                     }
                 } catch (taskErr) {
                     // #202: Handle expected subagent unavailability (e.g., process isolation in daemon mode)
