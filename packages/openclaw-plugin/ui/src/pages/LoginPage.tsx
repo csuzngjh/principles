@@ -44,7 +44,7 @@ export function LoginPage() {
 
         <form className="login-form" onSubmit={handleSubmit}>
           <div className="form-group">
-            <label htmlFor="token">Gateway Token</label>
+            <label htmlFor="token">{t('auth.tokenLabel')}</label>
             <input
               id="token"
               type="password"
@@ -52,6 +52,7 @@ export function LoginPage() {
               onChange={(e) => setToken(e.target.value)}
               placeholder={t('auth.tokenPlaceholder')}
               autoComplete="off"
+              aria-label={t('auth.tokenLabel')}
             />
             <span className="form-hint">
               {t('auth.tokenHint')}
