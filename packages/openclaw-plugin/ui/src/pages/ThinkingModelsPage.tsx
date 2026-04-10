@@ -256,7 +256,7 @@ export function ThinkingModelsPage() {
         /* ── Has data: full dashboard ── */
         <>
           {/* Coverage Trend */}
-          {data.coverageTrend.length >= 1 && (
+          {data.coverageTrend.length >= 1 ? (
             <section className="panel" style={{ marginBottom: SPACE[4] }}>
               <h3 className="section-title">
                 {t('thinkingModels.coverageTrend')}
@@ -269,8 +269,14 @@ export function ThinkingModelsPage() {
                 showGrid
                 showDots
                 showArea
+                emptyText={t('common.noData')}
               />
             </section>
+          ) : (
+            <EmptyState
+              title={t('thinkingModels.emptyCoverageTrend')}
+              description={t('thinkingModels.emptyCoverageTrendDesc')}
+            />
           )}
 
           {/* Search + Sort + Filter */}
@@ -445,6 +451,7 @@ export function ThinkingModelsPage() {
                             showGrid={false}
                             showDots
                             showArea
+                            emptyText={t('common.noData')}
                           />
                         </article>
                       );
@@ -511,6 +518,7 @@ export function ThinkingModelsPage() {
                         showGrid
                         showDots
                         showArea
+                        emptyText={t('common.noData')}
                       />
                     </article>
                   ) : (
