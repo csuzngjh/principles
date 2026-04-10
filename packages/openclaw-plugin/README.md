@@ -17,12 +17,21 @@ This plugin integrates with OpenClaw to provide an evolutionary programming fram
 
 ### Slash Commands
 
+All commands support **short aliases** for easier input:
+
+| Short | Full Command | Description |
+|-------|--------------|-------------|
+| `/pdi` | `/pd-init` | Initialize workspace |
+| `/pdb` | `/pd-bootstrap` | Scan environment tools |
+| `/pdr` | `/pd-research` | Research tools and capabilities |
+| `/pdt` | `/pd-thinking` | Manage thinking models |
+| `/pdrl` | `/pd-reflect` | Manually trigger nocturnal reflection |
+| `/pdd` | `/pd-daily` | Configure and send daily report |
+| `/pdg` | `/pd-grooming` | Workspace cleanup |
+| `/pdh` | `/pd-help` | Show command reference |
+
 | Command | Description |
 |---------|-------------|
-| `/pd-init` | Initialize workspace |
-| `/pd-bootstrap` | Scan environment tools |
-| `/pd-research` | Research tools and capabilities |
-| `/pd-thinking` | Manage thinking models |
 | `/pd-status` | View evolution status |
 | `/pd-context` | Control context injection |
 | `/pd-focus` | Focus file management |
@@ -34,7 +43,6 @@ This plugin integrates with OpenClaw to provide an evolutionary programming fram
 | `/nocturnal-train` | Nocturnal training operations |
 | `/nocturnal-rollout` | Nocturnal rollout and promotion |
 | `/pd-workflow-debug` | Debug workflow state |
-| `/pd-help` | Show command reference |
 
 ### Tools
 
