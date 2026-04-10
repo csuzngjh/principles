@@ -196,11 +196,11 @@ function WorkspaceHealthPanel({ entry }: { entry: WorkspaceHealthEntry }) {
         {/* Full-width GFI trend chart */}
         <section style={{ marginTop: 'var(--space-4)', borderTop: '1px solid var(--border)', paddingTop: 'var(--space-4)' }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
-            <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-              📈 {t('overview.health.gfi')} · 今日趋势
+            <span className="text-lg text-semibold">
+              {t('overview.health.gfi')} · {t('overview.recentTrend')}
             </span>
-            <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
-              今日峰值: {h.gfi.peakToday}
+            <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+              {t('overview.health.peakToday')}: {h.gfi.peakToday}
             </span>
           </div>
           {h.gfi.trend.length >= 2 ? (
@@ -236,10 +236,11 @@ function ThinkingModelDistribution({
   modelBreakdown?: Array<{ modelId: string; hits: number }>;
   definitions?: Array<{ modelId: string; name: string; description: string }>;
 }) {
+  const { t } = useI18n();
   if (!definitions || definitions.length === 0) {
     return (
-      <div style={{ textAlign: 'center', padding: 'var(--space-3)', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-        暂无思维模型定义
+      <div className="text-center" style={{ padding: 'var(--space-3)', color: 'var(--text-secondary)', fontSize: 'var(--text-lg, 0.8rem)' }}>
+        {t('overview.noDefinitions')}
       </div>
     );
   }
@@ -249,8 +250,8 @@ function ThinkingModelDistribution({
 
   if (!hasAnyHits) {
     return (
-      <div style={{ textAlign: 'center', padding: 'var(--space-3)', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-        暂无思维模型使用记录。AI 开始使用后这里会显示数据。
+      <div className="text-center" style={{ padding: 'var(--space-3)', color: 'var(--text-secondary)', fontSize: 'var(--text-lg, 0.8rem)' }}>
+        {t('overview.noUsage')}
       </div>
     );
   }
@@ -472,7 +473,7 @@ export function OverviewPage() {
       ) : (
         <section className="panel" style={{ marginBottom: 'var(--space-4)' }}>
           <div style={{ textAlign: 'center', padding: 'var(--space-4)', color: 'var(--text-secondary)' }}>
-            {t('overview.health.noWorkspaces') || 'No enabled workspaces found'}
+            {t('overview.health.noWorkspaces') || t('overview.noWorkspacesFound')}
           </div>
         </section>
       )}

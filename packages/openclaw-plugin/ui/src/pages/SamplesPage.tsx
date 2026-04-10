@@ -46,7 +46,7 @@ export function SamplesPage() {
       setData(samples);
       setSelected(detail);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Review operation failed');
+      setError(err instanceof Error ? err.message : t('samples.reviewFailed'));
     }
   }
 
@@ -122,11 +122,11 @@ export function SamplesPage() {
               </div>
               <article>
                 <h4>{t('samples.badAttempt')}</h4>
-                <pre>{selected.badAttempt.rawText || selected.badAttempt.sanitizedText}</pre>
+                <pre className="sample-pre">{selected.badAttempt.rawText || selected.badAttempt.sanitizedText}</pre>
               </article>
               <article>
                 <h4>{t('samples.userCorrection')}</h4>
-                <pre>{selected.userCorrection.rawText}</pre>
+                <pre className="sample-pre">{selected.userCorrection.rawText}</pre>
               </article>
               <article>
                 <h4>{t('samples.recoveryToolSpan')}</h4>

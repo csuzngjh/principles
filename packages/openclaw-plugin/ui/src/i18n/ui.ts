@@ -52,6 +52,7 @@ export const i18n = {
     timeRange: { zh: '时间范围', en: 'Time Range' },
     total: { zh: '共', en: 'Total' },
     items: { zh: '条', en: 'items' },
+    search: { zh: '搜索...', en: 'Search...' },
   },
 
   // ========================================================================
@@ -70,6 +71,7 @@ export const i18n = {
     checking: { zh: '正在验证身份...', en: 'Verifying identity...' },
     loginTitle: { zh: 'Principles Console', en: 'Principles Console' },
     loginSubtitle: { zh: 'AI Agent 进化流程监控平台', en: 'AI Agent Evolution Monitoring Platform' },
+    tokenLabel: { zh: 'Gateway Token', en: 'Gateway Token' },
     tokenPlaceholder: { zh: '请输入您的 Gateway Token', en: 'Enter your Gateway Token' },
     tokenHint: { zh: '在服务器上运行 openclaw config get gateway.auth.token 获取 Token', en: 'Run openclaw config get gateway.auth.token on your server to get the Token' },
     loginButton: { zh: '登 录', en: 'Sign In' },
@@ -184,6 +186,11 @@ export const i18n = {
     createdAt: { zh: '创建时间', en: 'Created At' },
     failureMode: { zh: '失败模式', en: 'Failure Mode' },
     relatedThinking: { zh: '相关思维', en: 'Thinking Hits' },
+
+    // Missing i18n keys (previously hardcoded in components)
+    noGfiToday: { zh: '今日暂无 GFI 记录', en: 'No GFI data today' },
+    noWorkspacesFound: { zh: '未找到已启用的工作区', en: 'No enabled workspaces found' },
+    refreshing: { zh: '刷新中', en: 'Refreshing' },
   },
 
   // ========================================================================
@@ -213,6 +220,9 @@ export const i18n = {
     // Actions
     approve: { zh: '批准', en: 'Approve' },
     reject: { zh: '拒绝', en: 'Reject' },
+
+    // Error messages (previously hardcoded English)
+    reviewFailed: { zh: '审核操作失败', en: 'Review operation failed' },
   },
 
   // ========================================================================
@@ -225,26 +235,75 @@ export const i18n = {
     dormant: { zh: '休眠', en: 'Dormant' },
     effective: { zh: '有效', en: 'Effective' },
 
-    // Empty state
-    emptyTitle: { zh: '选择一个思维模型', en: 'Select a thinking model' },
-    emptyDesc: { zh: '点击左侧列表中的模型，查看场景分布和最近事件', en: 'Click a model from the list to inspect scenario coverage and recent events' },
+    // Charts and sections
+    coverageTrend: { zh: '覆盖率趋势', en: 'Coverage Trend' },
+    emptyCoverageTrend: { zh: '今日暂无覆盖率记录', en: 'No coverage data yet' },
+    emptyCoverageTrendDesc: { zh: '当 AI 开始执行任务后，覆盖率会自动记录。', en: 'Coverage is tracked automatically once AI starts working.' },
+    scenarioHeatmap: { zh: '场景热力图', en: 'Scenario Heatmap' },
+    emptyScenarioMatrix: { zh: '暂无场景数据', en: 'No scenario data yet' },
+    emptyScenarioMatrixDesc: { zh: '模型触发场景后会在此显示。', en: 'Scenarios will appear here when models are triggered.' },
+    emptyAllActive: { zh: '所有模型都在使用中', en: 'All models are active' },
+    emptyAllActiveDesc: { zh: '没有休眠模型。', en: 'No dormant models.' },
+    noModelsYet: { zh: '暂无思维模型数据', en: 'No thinking model data yet' },
+    noModelsYetDesc: { zh: 'AI 开始使用后，这里会显示思维模型的使用情况。', en: 'Thinking model usage will appear here once AI starts working.' },
+    noMatches: { zh: '没有匹配的模型', en: 'No models match your filters.' },
+
+    // Recommendations
+    dormantModels: { zh: '休眠模型', en: 'Dormant Models' },
+    reinforce: { zh: '保持', en: 'Reinforce' },
+    rework: { zh: '重构', en: 'Rework' },
+    archive: { zh: '归档', en: 'Archive' },
+    filterByRec: { zh: '按推荐过滤', en: 'Filter by Rec' },
 
     // Detail sections
-    outcomeStats: { zh: '结果统计', en: 'Outcome Stats' },
-    scenarioDistribution: { zh: '场景分布', en: 'Scenario Distribution' },
-    recentEvents: { zh: '最近事件', en: 'Recent Events' },
-    noScenariosYet: { zh: '暂无场景', en: 'No scenarios yet' },
-
-    // Outcome stats
+    outcomeStats: { zh: '效果统计', en: 'Outcome Stats' },
+    usageTrend: { zh: '使用趋势', en: 'Usage Trend' },
+    emptyUsageTrend: { zh: '暂无使用趋势记录', en: 'No usage trend data yet' },
+    emptyUsageTrendDesc: { zh: '该模型尚未被触发使用。', en: 'This model has not been triggered yet.' },
     success: { zh: '成功', en: 'Success' },
     failure: { zh: '失败', en: 'Failure' },
     pain: { zh: '痛点', en: 'Pain' },
     correction: { zh: '纠正', en: 'Correction' },
+    scenarioDistribution: { zh: '场景分布', en: 'Scenario Distribution' },
+    recentEvents: { zh: '最近事件', en: 'Recent Events' },
+    toolContext: { zh: '工具上下文', en: 'Tool Context' },
+    painContext: { zh: '痛点上下文', en: 'Pain Context' },
+    principleContext: { zh: '原则上下文', en: 'Principle Context' },
+    trigger: { zh: '触发条件', en: 'Trigger' },
+    antiPattern: { zh: '禁止行为', en: 'Anti-Pattern' },
+    thinkingOsSource: { zh: '思维模型定义来源', en: 'Thinking Model Source' },
+
+    // Empty state
+    emptyTitle: { zh: '选择一个思维模型', en: 'Select a thinking model' },
+    emptyDesc: { zh: '点击左侧列表中的模型，查看场景分布和最近事件', en: 'Click a model from the list to inspect scenario coverage and recent events' },
+    noDataTitle: { zh: '思维模型定义', en: 'Thinking Model Definitions' },
+    noDataDesc: { zh: '以下是 10 个思维模型的定义。当 AI 开始使用后，这里会显示每个模型的使用统计。', en: 'Below are 10 thinking model definitions. Usage statistics will appear once the AI starts working.' },
+    noUsageDataYet: { zh: '该模型暂无使用数据', en: 'No usage data for this model yet' },
+    noUsageDataDesc: { zh: '当模型被触发后，使用趋势和事件会在此显示。', en: 'Usage trends and events will appear once the model is triggered.' },
 
     // Table
     hits: { zh: '命中', en: 'Hits' },
     successRate: { zh: '成功率', en: 'Success Rate' },
     failureRate: { zh: '失败率', en: 'Failure Rate' },
+
+    // Comparison mode
+    compare: { zh: '对比', en: 'Compare' },
+    compareSelected: { zh: '对比选中', en: 'Compare Selected' },
+    exitCompare: { zh: '退出对比', en: 'Exit Compare' },
+    comparisonTitle: { zh: '模型对比', en: 'Model Comparison' },
+    comparisonEmpty: { zh: '请选择至少 2 个模型进行对比', en: 'Select at least 2 models to compare' },
+
+    // Search and sort
+    filterAll: { zh: '全部', en: 'All' },
+    searchPlaceholder: { zh: '按名称或场景搜索...', en: 'Search by name or scenario...' },
+    sortByHits: { zh: '命中数', en: 'Hits' },
+    sortBySuccessRate: { zh: '成功率', en: 'Success Rate' },
+    sortByName: { zh: '名称', en: 'Name' },
+
+    // Loading states
+    loadingDetail: { zh: '正在加载模型详情...', en: 'Loading model details...' },
+    loadingComparison: { zh: '正在加载对比数据...', en: 'Loading comparison data...' },
+    modelLoading: { zh: '加载中', en: 'Loading' },
   },
 
   // ========================================================================
@@ -276,6 +335,11 @@ export const i18n = {
       analyzing: { zh: '分析中', en: 'Analyzing' },
       principle_generated: { zh: '原则生成', en: 'Principle Generated' },
       completed: { zh: '已完成', en: 'Completed' },
+      // Principle status labels
+      candidate: { zh: '候选', en: 'Candidate' },
+      probation: { zh: '试用', en: 'Probation' },
+      active: { zh: '活跃', en: 'Active' },
+      deprecated: { zh: '废弃', en: 'Deprecated' },
     },
 
     // Status filter
@@ -306,6 +370,19 @@ export const i18n = {
     evolutionTimeline: { zh: '进化时间线', en: 'Evolution Timeline' },
     detailedEvents: { zh: '详细事件', en: 'Detailed Events' },
     reason: { zh: '原因', en: 'Reason' },
+
+    // EvolutionPage panel headers (previously hardcoded Chinese)
+    currentStage: { zh: '当前阶段', en: 'Current Stage' },
+    principleLifecycle: { zh: '原则生命周期', en: 'Principle Lifecycle' },
+    nocturnalTrainingStatus: { zh: '夜间训练状态', en: 'Nocturnal Training Status' },
+    trainingQueue: { zh: '训练队列', en: 'Training Queue' },
+    arbiterPassRate: { zh: 'Arbiter 通过率', en: 'Arbiter Pass Rate' },
+    orpoSampleCount: { zh: 'ORPO 样本数', en: 'ORPO Sample Count' },
+    modelDeployments: { zh: '模型部署', en: 'Model Deployments' },
+    deploymentCount: { zh: '个', en: 'deployments' },
+    pendingShort: { zh: '待', en: 'P' },
+    inProgressShort: { zh: '中', en: 'I' },
+    completedShort: { zh: '完', en: 'C' },
   },
 
   // ========================================================================

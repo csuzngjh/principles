@@ -136,5 +136,3 @@ export function FeedbackPage() {
     </div>
   );
 }
-
-// ===== Phase 6: Gate Monitor Page =====

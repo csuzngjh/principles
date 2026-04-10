@@ -80,7 +80,7 @@ export function GateMonitorPage() {
         <section className="panel">
           <h3>🔐 {t('gate.trustEngine')}</h3>
           <div style={{ padding: 'var(--space-3) 0' }}>
-            <div style={{ fontSize: '24px', fontWeight: 700 }}>Stage {gateStats.trust.stage}: {gateStats.trust.status}</div>
+            <div style={{ fontSize: '1.5rem', fontWeight: 700 }}>Stage {gateStats.trust.stage}: {gateStats.trust.status}</div>
             <div style={{ marginTop: 'var(--space-2)', width: '100%', height: '12px', background: 'var(--bg-sunken)', borderRadius: '6px' }}>
               <div style={{ width: `${gateStats.trust.score}%`, height: '100%', background: 'var(--info)', borderRadius: '6px' }} />
             </div>
@@ -92,11 +92,11 @@ export function GateMonitorPage() {
         <section className="panel">
           <h3>🌱 {t('gate.evolutionEngine')}</h3>
           <div style={{ padding: 'var(--space-3) 0' }}>
-            <div style={{ fontSize: '24px', fontWeight: 700 }}>{gateStats.evolution.tier} ({gateStats.evolution.status})</div>
+            <div style={{ fontSize: '1.5rem', fontWeight: 700 }}>{gateStats.evolution.tier} ({gateStats.evolution.status})</div>
             <div style={{ marginTop: 'var(--space-2)', width: '100%', height: '12px', background: 'var(--bg-sunken)', borderRadius: '6px' }}>
               <div style={{ width: `${Math.min(100, gateStats.evolution.points / 10)}%`, height: '100%', background: 'var(--success)', borderRadius: '6px' }} />
             </div>
-            <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: 'var(--space-1)' }}>
+            <div className="text-sm" style={{ color: 'var(--text-secondary)', marginTop: 'var(--space-1)' }}>
               {t('gate.points')}: {gateStats.evolution.points}
             </div>
           </div>

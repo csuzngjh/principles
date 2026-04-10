@@ -1,45 +1,34 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ChevronLeft } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { ChevronLeft, Clock, Activity, Shield, Zap, BookOpen } from 'lucide-react';
 import { api } from '../api';
 import type {
-  OverviewResponse,
-  SampleDetailResponse,
-  SamplesResponse,
-  ThinkingModelDetailResponse,
-  ThinkingOverviewResponse,
   EvolutionTasksResponse,
   EvolutionTraceResponse,
   EvolutionStatsResponse,
-  OverviewHealthResponse,
   EvolutionPrinciplesResponse,
-  FeedbackGfiResponse,
-  GateStatsResponse,
-  GateBlockItem,
-  EmpathyEvent,
-  FeedbackGateBlock,
 } from '../types';
-import { Sparkline, DonutChart, GroupedBarChart, TimeRangeSelector, CollapsiblePanel, StatusBadge, EmptyState } from '../charts';
+import { DonutChart, GroupedBarChart, TimeRangeSelector, StatusBadge, EmptyState } from '../charts';
 import { useI18n } from '../i18n/ui';
 import { formatPercent, formatDate, formatDuration } from '../utils/format';
 import { Loading, ErrorState } from '../components';
 
 const STAGE_COLORS: Record<string, string> = {
-  pain_detected: '#ef4444',
-  queued: '#f59e0b',
-  started: '#3b82f6',
+  pain_detected: 'var(--error)',
+  queued: 'var(--warning)',
+  started: 'var(--info)',
   analyzing: '#8b5cf6',
-  principle_generated: '#22c55e',
-  completed: '#22c55e',
+  principle_generated: 'var(--success)',
+  completed: 'var(--success)',
 };
 
-const STAGE_LABELS: Record<string, string> = {
-  pain_detected: '痛点检测',
-  queued: '已入队',
-  started: '开始处理',
-  analyzing: '分析中',
-  principle_generated: '原则生成',
-  completed: '已完成',
-};
+const STAGE_LABEL_KEYS: string[] = [
+  'pain_detected',
+  'queued',
+  'started',
+  'analyzing',
+  'principle_generated',
+  'completed',
+];
 
 export function EvolutionPage() {
   const { t } = useI18n();
@@ -86,10 +75,10 @@ export function EvolutionPage() {
 
   // Prepare donut chart data
   const statusSegments = [
-    { label: t('evolution.pending'), value: stats.pending, color: '#f59e0b' },
-    { label: t('evolution.inProgress'), value: stats.inProgress, color: '#3b82f6' },
-    { label: t('evolution.completed'), value: stats.completed, color: '#22c55e' },
-    { label: t('evolution.failed'), value: stats.failed, color: '#ef4444' },
+    { label: t('evolution.pending'), value: stats.pending, color: 'var(--warning)' },
+    { label: t('evolution.inProgress'), value: stats.inProgress, color: 'var(--info)' },
+    { label: t('evolution.completed'), value: stats.completed, color: 'var(--success)' },
+    { label: t('evolution.failed'), value: stats.failed, color: 'var(--error)' },
   ].filter(s => s.value > 0);
 
   return (
@@ -112,23 +101,15 @@ export function EvolutionPage() {
       {/* Current Stage Indicator */}
       {evoPrinciples && (
         <section className="panel" style={{ marginBottom: 'var(--space-5)' }}>
-          <h3>当前阶段</h3>
+          <h3>{t('evolution.currentStage')}</h3>
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', padding: 'var(--space-3) 0' }}>
-            <span style={{
-              padding: 'var(--space-2) var(--space-4)',
-              borderRadius: 'var(--radius-lg)',
-              fontSize: '15px',
-              fontWeight: 600,
-              background: 'var(--accent)',
-              color: '#fff',
-              border: '2px solid var(--accent)',
-            }}>
-              {evoPrinciples.activeStage === 'pending' ? <><Clock size={16} style={{marginRight: 6, verticalAlign: 'middle'}}/>{t('evolution.activeStage.pending')}</> :
-               evoPrinciples.activeStage === 'in_progress' ? <><Activity size={16} style={{marginRight: 6, verticalAlign: 'middle'}}/>{t('evolution.activeStage.in_progress')}</> :
-               evoPrinciples.activeStage === 'completed' ? <><Shield size={16} style={{marginRight: 6, verticalAlign: 'middle'}}/>{t('evolution.activeStage.completed')}</> :
-               evoPrinciples.activeStage === 'idle' ? <><Zap size={16} style={{marginRight: 6, verticalAlign: 'middle'}}/>{t('evolution.activeStage.idle')}</> : evoPrinciples.activeStage}
+            <span className="stage-badge">
+              {evoPrinciples.activeStage === 'pending' ? <><Clock size={16} /><span>{t('evolution.activeStage.pending')}</span></> :
+               evoPrinciples.activeStage === 'in_progress' ? <><Activity size={16} /><span>{t('evolution.activeStage.in_progress')}</span></> :
+               evoPrinciples.activeStage === 'completed' ? <><Shield size={16} /><span>{t('evolution.activeStage.completed')}</span></> :
+               evoPrinciples.activeStage === 'idle' ? <><Zap size={16} /><span>{t('evolution.activeStage.idle')}</span></> : evoPrinciples.activeStage}
             </span>
-            <span style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>
+            <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
               {t('evolution.enhancementLoopStatus')}
             </span>
           </div>
@@ -139,12 +120,12 @@ export function EvolutionPage() {
       {evoPrinciples && (
         <div className="grid two-columns" style={{ marginBottom: 'var(--space-5)' }}>
           <section className="panel">
-            <h3><BookOpen size={16} style={{marginRight: 6, verticalAlign: 'middle'}}/>原则生命周期</h3>
+            <h3><BookOpen size={16} />{t('evolution.principleLifecycle')}</h3>
             <div className="pill-row" style={{ marginBottom: 'var(--space-3)' }}>
-              <StatusBadge variant="warning">候选: {evoPrinciples.principles.summary.candidate}</StatusBadge>
-              <StatusBadge variant="info">试用: {evoPrinciples.principles.summary.probation}</StatusBadge>
-              <StatusBadge variant="success">活跃: {evoPrinciples.principles.summary.active}</StatusBadge>
-              <StatusBadge variant="error">废弃: {evoPrinciples.principles.summary.deprecated}</StatusBadge>
+              <StatusBadge variant="warning">{t('evolution.stageLabels.candidate')}: {evoPrinciples.principles.summary.candidate}</StatusBadge>
+              <StatusBadge variant="info">{t('evolution.stageLabels.probation')}: {evoPrinciples.principles.summary.probation}</StatusBadge>
+              <StatusBadge variant="success">{t('evolution.stageLabels.active')}: {evoPrinciples.principles.summary.active}</StatusBadge>
+              <StatusBadge variant="error">{t('evolution.stageLabels.deprecated')}: {evoPrinciples.principles.summary.deprecated}</StatusBadge>
             </div>
             {evoPrinciples.principles.recent.length > 0 && (
               <div className="stack">
@@ -161,23 +142,23 @@ export function EvolutionPage() {
             )}
           </section>
           <section className="panel">
-            <h3>💤 夜间训练状态</h3>
+            <h3>💤 {t('evolution.nocturnalTrainingStatus')}</h3>
             <div className="stack">
               <div className="row-card">
-                <strong>训练队列</strong>
-                <span>待: {evoPrinciples.nocturnalTraining.queue.pending} | 中: {evoPrinciples.nocturnalTraining.queue.inProgress} | 完: {evoPrinciples.nocturnalTraining.queue.completed}</span>
+                <strong>{t('evolution.trainingQueue')}</strong>
+                <span>{t('evolution.pendingShort')}: {evoPrinciples.nocturnalTraining.queue.pending} | {t('evolution.inProgressShort')}: {evoPrinciples.nocturnalTraining.queue.inProgress} | {t('evolution.completedShort')}: {evoPrinciples.nocturnalTraining.queue.completed}</span>
               </div>
               <div className="row-card">
-                <strong>Arbiter 通过率</strong>
+                <strong>{t('evolution.arbiterPassRate')}</strong>
                 <span>{(evoPrinciples.nocturnalTraining.arbiterPassRate * 100).toFixed(1)}%</span>
               </div>
               <div className="row-card">
-                <strong>ORPO 样本数</strong>
+                <strong>{t('evolution.orpoSampleCount')}</strong>
                 <span>{evoPrinciples.nocturnalTraining.orpoSampleCount}</span>
               </div>
               <div className="row-card">
-                <strong>模型部署</strong>
-                <span>{evoPrinciples.nocturnalTraining.deployments.length} 个</span>
+                <strong>{t('evolution.modelDeployments')}</strong>
+                <span>{evoPrinciples.nocturnalTraining.deployments.length} {t('evolution.deploymentCount')}</span>
               </div>
             </div>
           </section>
