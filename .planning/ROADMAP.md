@@ -4,6 +4,7 @@
 
 - ✅ **v1.9.3** — 剩余 Lint 修复 (Phase 03, shipped 2026-04-09)
 - 📋 **v1.10** — Thinking Models 页面优化 (8 phases, started 2026-04-09)
+- 📋 **v1.12** — Nocturnal Production Stabilization (3 phases, started 2026-04-10)
 - 📋 **Next** — Live Replay and Operator Validation (Phase 18, started 2026-04-10)
 
 ## Phases
@@ -155,6 +156,59 @@ Plans:
 
 ---
 
+### 📋 v1.12 Nocturnal Production Stabilization
+
+**Milestone:** v1.12
+**Goal:** Restore the production principle-internalization loop to a minimally real, observable, end-to-end working state
+**Phases:** 3
+**Coverage:** 12/12 requirements mapped
+
+- [x] **Phase 16: Nocturnal Snapshot and Runtime Hardening** - implemented locally; awaiting production evidence validation (SNAP-01, SNAP-02, SNAP-03, BG-01, BG-02, BG-03)
+- [ ] **Phase 17: Minimal Rule Bootstrap** - seed 1-3 production rules so the code implementation branch has live entities (BOOT-01, BOOT-02, BOOT-03)
+- [ ] **Phase 18: Live Replay and Operator Validation** - prove one real replay/lifecycle path and align operator guidance with reality (LIVE-01, LIVE-02, LIVE-03)
+
+### Phase 16: Nocturnal Snapshot and Runtime Hardening
+
+**Goal:** nocturnal should only run with real usable inputs and should terminate cleanly in background execution.
+
+**Depends on:** Nothing
+
+**Requirements:** SNAP-01, SNAP-02, SNAP-03, BG-01, BG-02, BG-03
+
+**Success Criteria:**
+1. Empty fallback snapshots no longer enter active nocturnal workflows.
+2. Missing evidence exits as explicit skip/failure reasons instead of 30-minute expiry noise.
+3. Background sleep reflection no longer uses gateway-only subagent methods.
+4. Queue state and workflow state agree on the actual terminal reason.
+
+**Plans:** 2 plans
+
+Plans:
+- [x] 16-01-PLAN.md — Snapshot ingress guardrails
+- [x] 16-02-PLAN.md — Background runtime and terminal-state alignment
+
+---
+
+### Phase 17: Minimal Rule Bootstrap
+
+**Goal:** create a small, reviewable set of live rules so the principle-internalization runtime has real objects to work with.
+
+**Depends on:** Phase 16
+
+**Requirements:** BOOT-01, BOOT-02, BOOT-03
+
+**Success Criteria:**
+1. Production-like state contains at least 1-3 explicit `Rule` entities.
+2. At least one principle has valid `ruleIds` linkage.
+3. Bootstrap scope is documented and intentionally narrow.
+
+**Plans:** 1 plan
+
+Plans:
+- [ ] 17-01-PLAN.md — Create bootstrap script with TDD workflow
+
+---
+
 ### Phase 18: Live Replay and Operator Validation
 
 **Goal:** Run sleep_reflection end-to-end with bootstrapped principles and create operator validation script
@@ -181,11 +235,13 @@ Plans:
 | 03 | v1.9.3 | 1/1 | Complete | 2026-04-09 |
 | 01 | v1.10 | 0/1 | Not started | - |
 | 02-08 | v1.10 | 0/7 | Not started | - |
-| 18 | Next | 0/1 | Not started | - |
+| 16 | v1.12 | 2/2 | Local complete | 2026-04-10 |
+| 17 | v1.12 | 0/1 | Not started | - |
+| 18 | v1.12 | 0/1 | Not started | - |
 
 ---
 
 **For full milestone history, see:** `.planning/milestones/`
 
 *Roadmap created: 2026-04-09*
-*Last updated: 2026-04-10 after Phase 1 planned*
+*Last updated: 2026-04-10 after Phase 17 planned*
