@@ -312,10 +312,7 @@ export async function handleBeforePromptBuild(
   const subagent = ctx.api?.runtime?.subagent;
   logger?.info?.(`[PD:DEBUG:SubagentCheck] trigger=${ctx.trigger}, subagent_exists=${!!subagent}, subagent.run_exists=${!!subagent?.run}`);
   if (subagent?.run) {
-    const runFn = subagent.run;
-    const ctorName = runFn.constructor?.name ?? 'unknown';
-    const isAsyncFn = ctorName === 'AsyncFunction';
-    logger?.info?.(`[PD:DEBUG:SubagentCheck] run.constructor.name=${ctorName}, isAsyncFunction=${isAsyncFn}`);
+    logger?.info?.('[PD:DEBUG:SubagentCheck] run entrypoint is callable');
   }
 
   const wctx = WorkspaceContext.fromHookContext(ctx);

@@ -173,7 +173,7 @@ let timeoutId: NodeJS.Timeout | null = null;
  * Old queue items (without taskKind) are migrated to pain_diagnosis for compatibility.
  */
 export type QueueStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'canceled';
-export type TaskResolution = 'marker_detected' | 'auto_completed_timeout' | 'failed_max_retries' | 'canceled' | 'late_marker_principle_created' | 'late_marker_no_principle' | 'stub_fallback';
+export type TaskResolution = 'marker_detected' | 'auto_completed_timeout' | 'failed_max_retries' | 'runtime_unavailable' | 'canceled' | 'late_marker_principle_created' | 'late_marker_no_principle' | 'stub_fallback';
 
 /**
  * Recent pain context attached to sleep_reflection tasks.
@@ -315,6 +315,24 @@ function isLegacyQueueItem(item: RawQueueItem): boolean {
  */
 function migrateQueueToV2(queue: RawQueueItem[]): EvolutionQueueItem[] {
     return queue.map(item => isLegacyQueueItem(item) ? migrateToV2(item as unknown as LegacyEvolutionQueueItem) : item as unknown as EvolutionQueueItem);
+}
+
+function isSessionAtOrBeforeTriggerTime(
+    session: { startedAt: string; updatedAt: string },
+    triggerTimeMs: number,
+): boolean {
+    const startedAtMs = new Date(session.startedAt).getTime();
+    const updatedAtMs = new Date(session.updatedAt).getTime();
+    if (!Number.isFinite(triggerTimeMs)) {
+        return true;
+    }
+    if (Number.isFinite(startedAtMs) && startedAtMs > triggerTimeMs) {
+        return false;
+    }
+    if (Number.isFinite(updatedAtMs) && updatedAtMs > triggerTimeMs) {
+        return false;
+    }
+    return true;
 }
 
 function buildFallbackNocturnalSnapshot(sleepTask: EvolutionQueueItem): NocturnalSessionSnapshot | null {
@@ -1465,7 +1483,12 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
 
                             // 3. If no match, find most recent session WITH violation signals
                             if (!fullSnapshot) {
-                                const recentSessions = extractor.listRecentNocturnalCandidateSessions({ limit: 20, minToolCalls: 1 });
+                                const taskTimeMs = new Date(sleepTask.enqueued_at || sleepTask.timestamp).getTime();
+                                const recentSessions = extractor.listRecentNocturnalCandidateSessions({
+                                    limit: 20,
+                                    minToolCalls: 1,
+                                    dateTo: sleepTask.enqueued_at || sleepTask.timestamp,
+                                }).filter((session) => isSessionAtOrBeforeTriggerTime(session, taskTimeMs));
                                 // Filter to sessions with actual violations (pain, failures, or gate blocks)
                                 const sessionsWithViolations = recentSessions.filter(
                                     s => s.failureCount > 0 || s.painEventCount > 0 || s.gateBlockCount > 0
@@ -1584,12 +1607,15 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             sleepTask.lastError = detailedError;
                             sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
 
-                            sleepTask.status = 'failed';
-                            sleepTask.completed_at = new Date().toISOString();
-                            sleepTask.resolution = 'failed_max_retries';
                             if (isExpectedSubagentError(errorReason)) {
+                                sleepTask.status = 'failed';
+                                sleepTask.completed_at = new Date().toISOString();
+                                sleepTask.resolution = 'runtime_unavailable';
                                 logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} background runtime unavailable: ${errorReason}`);
                             } else {
+                                sleepTask.status = 'failed';
+                                sleepTask.completed_at = new Date().toISOString();
+                                sleepTask.resolution = 'failed_max_retries';
                                 logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} workflow failed: ${sleepTask.lastError}`);
                             }
                         } else {
@@ -1601,14 +1627,17 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     // #202: Handle expected subagent unavailability (e.g., process isolation in daemon mode)
                     // When subagent is unavailable due to gateway running in separate process,
                     // use stub fallback instead of failing the task.
-                    sleepTask.status = 'failed';
-                    sleepTask.completed_at = new Date().toISOString();
-                    sleepTask.resolution = 'failed_max_retries';
                     sleepTask.lastError = String(taskErr);
                     sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
                     if (isExpectedSubagentError(taskErr)) {
+                        sleepTask.status = 'failed';
+                        sleepTask.completed_at = new Date().toISOString();
+                        sleepTask.resolution = 'runtime_unavailable';
                         logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} background runtime unavailable: ${String(taskErr)}`);
                     } else {
+                        sleepTask.status = 'failed';
+                        sleepTask.completed_at = new Date().toISOString();
+                        sleepTask.resolution = 'failed_max_retries';
                         logger?.error?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} threw: ${taskErr}`);
                     }
                 }
@@ -1902,10 +1931,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
             const hbSubagent = api?.runtime?.subagent;
             logger?.info?.(`[PD:DEBUG:SubagentCheck:Heartbeat] api_exists=${!!api}, subagent_exists=${!!hbSubagent}, subagent.run_exists=${!!hbSubagent?.run}`);
             if (hbSubagent?.run) {
-                const runFn = hbSubagent.run;
-                const ctorName = runFn.constructor?.name ?? 'unknown';
-                const isAsyncFn = ctorName === 'AsyncFunction';
-                logger?.info?.(`[PD:DEBUG:SubagentCheck:Heartbeat] run.constructor.name=${ctorName}, isAsyncFunction=${isAsyncFn}`);
+                logger?.info?.('[PD:DEBUG:SubagentCheck:Heartbeat] run entrypoint is callable');
             }
             const cycleResult: {
                 timestamp: string;
