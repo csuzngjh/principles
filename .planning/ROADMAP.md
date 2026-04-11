@@ -19,7 +19,7 @@
 - [x] **Phase 25: Pain Flag Detector Extraction** - Extract pain flag detection into PainFlagDetector with entry-point validation (completed 2026-04-11)
 - [ ] **Phase 26: Task Dispatcher Extraction** - Extract task dispatch and execution into EvolutionTaskDispatcher with entry-point validation
 - [ ] **Phase 27: Workflow Orchestrator Extraction** - Extract workflow watchdog and lifecycle into WorkflowOrchestrator with entry-point validation
-- [ ] **Phase 28: Context Builder + Service Slim + Fallback Audit** - Extract context building, slim the worker, and audit all 16 silent fallback points
+- [x] **Phase 28: Context Builder + Service Slim + Fallback Audit** - Extract context building, slim the worker, and audit all 16 silent fallback points (completed 2026-04-11)
 - [ ] **Phase 29: Integration Verification** - Verify end-to-end flow, public API preservation, test passing, and lifecycle correctness
 
 ## Phase Details
@@ -54,7 +54,7 @@ Plans:
 - [x] 28-01-PLAN.md — TaskContextBuilder class + EventLog recordSkip/recordDrop methods
 - [x] 28-02-PLAN.md — SessionTracker class wrapper
 - [x] 28-03-PLAN.md — Worker slim (evolution-worker.ts lifecycle orchestration only)
-- [ ] 28-04-PLAN.md — Fallback audit (all 16 fallback points classified)
+- [x] 28-04-PLAN.md — Fallback audit (all 16 fallback points classified)
 
 ### Phase 26: Task Dispatcher Extraction
 **Goal**: Task dispatch and execution logic for pain_diagnosis and sleep_reflection runs through a dedicated module
@@ -97,8 +97,8 @@ Plans:
 Plans:
 - [x] 28-01-PLAN.md — TaskContextBuilder class + EventLog recordSkip/recordDrop methods
 - [x] 28-02-PLAN.md — SessionTracker class wrapper
-- [ ] 28-03-PLAN.md — Worker slim (evolution-worker.ts lifecycle orchestration only)
-- [ ] 28-04-PLAN.md — Fallback audit (all 16 fallback points classified)
+- [x] 28-03-PLAN.md — Worker slim (evolution-worker.ts lifecycle orchestration only)
+- [x] 28-04-PLAN.md — Fallback audit (all 16 fallback points classified)
 
 ### Phase 29: Integration Verification
 **Goal**: The refactored worker passes all integration checks -- end-to-end flow works, public API unchanged, no resource leaks
@@ -122,7 +122,7 @@ Phases execute in numeric order: 24 -> 25 -> 26 -> 27 -> 28 -> 29
 | 25. Pain Flag Detector Extraction | v1.14 | 1/1 | Complete    | 2026-04-11 |
 | 26. Task Dispatcher Extraction | v1.14 | 0/? | Not started | - |
 | 27. Workflow Orchestrator Extraction | v1.14 | 1/1 | Planning complete | - |
-| 28. Context Builder + Service Slim + Fallback Audit | v1.14 | 3/4 | In Progress|  |
+| 28. Context Builder + Service Slim + Fallback Audit | v1.14 | 5/5 | Complete    | 2026-04-11 |
 | 29. Integration Verification | v1.14 | 0/? | Not started | - |
 
 *Last updated: 2026-04-11*
