@@ -116,7 +116,7 @@ Plans:
 - [x] 29-02-PLAN.md — Public API surface verification
 - [x] 29-03-PLAN.md — Nocturnal E2E pipeline verification
 - [x] 29-04-PLAN.md — Lifecycle verification (start/stop, no resource leaks)
-- [ ] 29-05-PLAN.md — Gap closure: correct INTEG-02 FallbackAudit documentation error
+- [x] 29-05-PLAN.md — Gap closure: correct INTEG-02 FallbackAudit documentation error
 
 ## Progress
 
@@ -130,6 +130,6 @@ Phases execute in numeric order: 24 -> 25 -> 26 -> 27 -> 28 -> 29
 | 26. Task Dispatcher Extraction | v1.14 | 0/? | Not started | - |
 | 27. Workflow Orchestrator Extraction | v1.14 | 1/1 | Planning complete | - |
 | 28. Context Builder + Service Slim + Fallback Audit | v1.14 | 5/5 | Complete    | 2026-04-11 |
-| 29. Integration Verification | v1.14 | 4/5 | Gap closure in progress | - |
+| 29. Integration Verification | v1.14 | 5/5 | Complete    | 2026-04-11 |
 
 *Last updated: 2026-04-11*
