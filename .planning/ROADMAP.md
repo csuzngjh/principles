@@ -34,7 +34,11 @@
   3. Queue items that fail validation on read are flagged before processing (migration or corruption caught)
   4. All lock acquisition and release for queue operations goes through EvolutionQueueStore -- no external lock calls for queue data
   5. Existing queue-dependent tests pass without modification
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 24-01-PLAN.md — Create EvolutionQueueStore with validation, migration, locking, and dedup
+- [ ] 24-02-PLAN.md — Wire worker and pd-reflect to store, remove inline queue I/O
 
 ### Phase 25: Pain Flag Detector Extraction
 **Goal**: Pain flag detection runs through a dedicated module with validated entry points
@@ -96,7 +100,7 @@ Phases execute in numeric order: 24 -> 25 -> 26 -> 27 -> 28 -> 29
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 24. Queue Store Extraction | v1.14 | 0/? | Not started | - |
+| 24. Queue Store Extraction | v1.14 | 0/2 | Planning complete | - |
 | 25. Pain Flag Detector Extraction | v1.14 | 0/? | Not started | - |
 | 26. Task Dispatcher Extraction | v1.14 | 0/? | Not started | - |
 | 27. Workflow Orchestrator Extraction | v1.14 | 0/? | Not started | - |
