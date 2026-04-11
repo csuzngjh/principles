@@ -23,6 +23,18 @@ This phase is complete only if malformed data is rejected at the boundary instea
 - `cd packages/openclaw-plugin && npx tsc --noEmit`
 - `cd packages/openclaw-plugin && npx vitest run tests/core/pain*.test.ts tests/service/evolution-worker*.test.ts tests/service/nocturnal-*.test.ts`
 
+## Execution Evidence
+
+- `2026-04-11`: `cd packages/openclaw-plugin && npx tsc --noEmit`
+- `2026-04-11`: `cd packages/openclaw-plugin && npx vitest run tests/core/pain.test.ts tests/core/pain-integration.test.ts tests/core/pain-auto-repair.test.ts tests/core/nocturnal-snapshot-contract.test.ts tests/service/evolution-worker.nocturnal.test.ts tests/service/nocturnal-runtime-hardening.test.ts tests/service/nocturnal-service-code-candidate.test.ts`
+- Result: 7 test files, 53 tests passed
+
+## Outcome Summary
+
+- `SCHEMA-01` closed with `readPainFlagContract()` and worker-side malformed `.pain_flag` rejection
+- `SCHEMA-02` closed with `validateNocturnalSnapshotIngress()` shared by worker, workflow manager, and nocturnal service
+- `SCHEMA-03` closed by replacing pseudo-snapshots and empty fallback objects with explicit failure reasons
+
 ## Reviewer Notes
 
 Do not accept "best effort" parsing here. The whole point of the phase is to stop trusting malformed boundary data.

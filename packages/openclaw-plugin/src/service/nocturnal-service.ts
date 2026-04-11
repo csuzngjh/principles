@@ -99,6 +99,7 @@ import {
 import { NocturnalPathResolver } from '../core/nocturnal-paths.js';
 import { registerSample } from '../core/nocturnal-dataset.js';
 import type { Implementation } from '../types/principle-tree-schema.js';
+import { validateNocturnalSnapshotIngress } from '../core/nocturnal-snapshot-contract.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -1147,12 +1148,28 @@ async function executeNocturnalReflectionWithAdapter(
   let snapshot: NocturnalSessionSnapshot | null = null;
 
   if (options.principleIdOverride && options.snapshotOverride) {
+    const snapshotValidation = validateNocturnalSnapshotIngress(options.snapshotOverride);
+    if (snapshotValidation.status !== 'valid' || !snapshotValidation.snapshot) {
+      return {
+        success: false,
+        skipReason: 'insufficient_snapshot_data',
+        noTargetSelected: true,
+        validationFailed: true,
+        validationFailures: snapshotValidation.reasons.length > 0
+          ? snapshotValidation.reasons
+          : ['invalid snapshot override'],
+        snapshot: undefined,
+        diagnostics,
+        trinityTelemetry: undefined,
+      };
+    }
+
     // Skip Selector: use provided principleId and snapshot directly
     selectedPrincipleId = options.principleIdOverride;
-    selectedSessionId = options.snapshotOverride.sessionId;
-    snapshot = options.snapshotOverride;
+    selectedSessionId = snapshotValidation.snapshot.sessionId;
+    snapshot = snapshotValidation.snapshot;
     // Calculate violation density from snapshot stats for meaningful diagnostics
-    const snapStats = options.snapshotOverride.stats;
+    const snapStats = snapshotValidation.snapshot.stats;
     const totalToolCalls = snapStats?.totalToolCalls ?? 0;
     const failureCount = snapStats?.failureCount ?? 0;
     const violationDensity = totalToolCalls > 0 ? failureCount / totalToolCalls : 0;

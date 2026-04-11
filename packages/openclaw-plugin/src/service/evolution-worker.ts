@@ -22,7 +22,12 @@ import type { WorkflowRow } from './subagent-workflow/types.js';
 import { EmpathyObserverWorkflowManager } from './subagent-workflow/empathy-observer-workflow-manager.js';
 import { DeepReflectWorkflowManager } from './subagent-workflow/deep-reflect-workflow-manager.js';
 import { NocturnalWorkflowManager, nocturnalWorkflowSpec } from './subagent-workflow/nocturnal-workflow-manager.js';
-import { createNocturnalTrajectoryExtractor } from '../core/nocturnal-trajectory-extractor.js';
+import {
+    createNocturnalTrajectoryExtractor,
+    type NocturnalPainEvent,
+    type NocturnalSessionSnapshot,
+} from '../core/nocturnal-trajectory-extractor.js';
+import { validateNocturnalSnapshotIngress } from '../core/nocturnal-snapshot-contract.js';
 import { isExpectedSubagentError } from './subagent-workflow/subagent-error-utils.js';
 import { readPainFlagContract } from '../core/pain.js';
 
@@ -191,30 +196,6 @@ export interface RecentPainContext {
   recentMaxPainScore: number;
 }
 
-function hasUsableNocturnalSnapshot(snapshotData: Record<string, unknown> | undefined): boolean {
-    if (!snapshotData || typeof snapshotData.sessionId !== 'string' || snapshotData.sessionId.length === 0) {
-        return false;
-    }
-
-    if (snapshotData._dataSource !== 'pain_context_fallback') {
-        return true;
-    }
-
-    const stats = (snapshotData.stats && typeof snapshotData.stats === 'object')
-        ? snapshotData.stats as Record<string, number | null | undefined>
-        : undefined;
-    const recentPain = Array.isArray(snapshotData.recentPain) ? snapshotData.recentPain.length : 0;
-    const hasNonZeroStats = !!stats && [
-        'totalAssistantTurns',
-        'totalToolCalls',
-        'failureCount',
-        'totalPainEvents',
-        'totalGateBlocks',
-    ].some((key) => Number(stats[key] ?? 0) > 0);
-
-    return hasNonZeroStats || recentPain > 0;
-}
-
 export interface EvolutionQueueItem {
     // Core identity
     id: string;
@@ -334,6 +315,40 @@ function isLegacyQueueItem(item: RawQueueItem): boolean {
  */
 function migrateQueueToV2(queue: RawQueueItem[]): EvolutionQueueItem[] {
     return queue.map(item => isLegacyQueueItem(item) ? migrateToV2(item as unknown as LegacyEvolutionQueueItem) : item as unknown as EvolutionQueueItem);
+}
+
+function buildFallbackNocturnalSnapshot(sleepTask: EvolutionQueueItem): NocturnalSessionSnapshot | null {
+    const painContext = sleepTask.recentPainContext;
+    if (!painContext) {
+        return null;
+    }
+
+    const fallbackPainEvents: NocturnalPainEvent[] = painContext.mostRecent ? [{
+        source: painContext.mostRecent.source,
+        score: painContext.mostRecent.score,
+        severity: null,
+        reason: painContext.mostRecent.reason,
+        createdAt: painContext.mostRecent.timestamp,
+    }] : [];
+
+    return {
+        sessionId: painContext.mostRecent?.sessionId || sleepTask.id,
+        startedAt: sleepTask.timestamp,
+        updatedAt: sleepTask.timestamp,
+        assistantTurns: [],
+        userTurns: [],
+        toolCalls: [],
+        painEvents: fallbackPainEvents,
+        gateBlocks: [],
+        stats: {
+            totalAssistantTurns: null,
+            totalToolCalls: null,
+            failureCount: null,
+            totalPainEvents: painContext.recentPainCount,
+            totalGateBlocks: null,
+        },
+        _dataSource: 'pain_context_fallback',
+    };
 }
 
 const PAIN_QUEUE_DEDUP_WINDOW_MS = 30 * 60 * 1000;
@@ -1425,7 +1440,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned when runtime API is available
                     let nocturnalManager: NocturnalWorkflowManager;
                     // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned only for newly started workflows
-                    let snapshotData: Record<string, unknown> | undefined;
+                    let snapshotData: NocturnalSessionSnapshot | undefined;
 
                     if (isPollingTask) {
                         // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Reason: polling path requires existing resultRef
@@ -1470,12 +1485,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             }
 
                             if (fullSnapshot) {
-                                snapshotData = {
-                                    sessionId: fullSnapshot.sessionId,
-                                    sessionStart: fullSnapshot.startedAt,
-                                    stats: fullSnapshot.stats,
-                                    recentPain: fullSnapshot.painEvents.slice(-5),
-                                };
+                                snapshotData = fullSnapshot;
                             }
                         } catch (snapErr) {
                             logger?.warn?.(`[PD:EvolutionWorker] Failed to build trajectory snapshot for ${sleepTask.id}: ${String(snapErr)}`);
@@ -1484,30 +1494,21 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         // Phase 2: If no trajectory data, try pain-context fallback
                         if (!snapshotData && sleepTask.recentPainContext) {
                             logger?.warn?.(`[PD:EvolutionWorker] Using pain-context fallback for ${sleepTask.id}: trajectory stats unavailable (stats will be null)`);
-                            snapshotData = {
-                                sessionId: sleepTask.id,
-                                sessionStart: sleepTask.timestamp,
-                                stats: {
-                                    totalAssistantTurns: null,
-                                    totalToolCalls: null,
-                                    failureCount: null,
-                                    totalPainEvents: sleepTask.recentPainContext.recentPainCount,
-                                    totalGateBlocks: null,
-                                },
-                                recentPain: sleepTask.recentPainContext.mostRecent ? [sleepTask.recentPainContext.mostRecent] : [],
-                                _dataSource: 'pain_context_fallback',
-                            };
+                            snapshotData = buildFallbackNocturnalSnapshot(sleepTask) ?? undefined;
                         }
 
-                        if (!hasUsableNocturnalSnapshot(snapshotData)) {
+                        const snapshotValidation = validateNocturnalSnapshotIngress(snapshotData);
+                        if (snapshotValidation.status !== 'valid') {
                             sleepTask.status = 'failed';
                             sleepTask.completed_at = new Date().toISOString();
                             sleepTask.resolution = 'failed_max_retries';
-                            sleepTask.lastError = 'sleep_reflection failed: missing_usable_snapshot (skipReason: empty_fallback_snapshot)';
+                            sleepTask.lastError = `sleep_reflection failed: invalid_snapshot_ingress (${snapshotValidation.reasons.join('; ') || 'missing snapshot'})`;
                             sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
-                            logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} rejected: missing usable snapshot`);
+                            logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} rejected: ${sleepTask.lastError}`);
                             continue;
                         }
+
+                        snapshotData = snapshotValidation.snapshot;
                     }
 
                     if (!api) {

@@ -17,7 +17,7 @@
 **Coverage:** 11 requirements mapped
 
 - [ ] **Phase 19: Unified Workspace Resolution Contract** - replace ad-hoc workspace resolution with one fail-fast service across hooks, commands, workers, and HTTP routes (BC-01, BC-02, BC-03)
-- [ ] **Phase 20: Critical Data Schema Validation** - centralize parsing and validation for `.pain_flag`, snapshot ingress, and related state-file reads (SCHEMA-01, SCHEMA-02, SCHEMA-03)
+- [x] **Phase 20: Critical Data Schema Validation** - centralize parsing and validation for `.pain_flag`, snapshot ingress, and related state-file reads (SCHEMA-01, SCHEMA-02, SCHEMA-03)
 - [ ] **Phase 21: Runtime Contract and End-to-End Hardening** - remove constructor-name capability guessing, bound session selection by time, and lock the main path with contract tests (RT-01, RT-02, RT-03, E2E-01, E2E-02, E2E-03)
 
 ### Phase 19: Unified Workspace Resolution Contract
@@ -73,7 +73,7 @@ This milestone is intentionally paused. It should not resume until the productio
 | 17 | v1.12 | 1/1 | Complete | 2026-04-10 |
 | 18 | v1.12 | 1/1 | Complete | 2026-04-10 |
 | 19 | v1.13 | 2/2 | Local execution complete | 2026-04-11 |
-| 20 | v1.13 | 0/2 | Planned | - |
+| 20 | v1.13 | 2/2 | Local execution complete | 2026-04-11 |
 | 21 | v1.13 | 0/1 | Not started | - |
 
-*Last updated: 2026-04-11 after v1.13 milestone started*
+*Last updated: 2026-04-11 after Phase 20 local execution*
