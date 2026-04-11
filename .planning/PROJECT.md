@@ -21,9 +21,9 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 
 ## Active
 
-- Evolution worker (2133 lines) must be decomposed before further contract hardening
+- Evolution worker slimmed to lifecycle orchestration (TaskContextBuilder + SessionTracker extracted) — contract hardening next
 - Queue persistence, pain detection, task dispatch, workflow orchestration, and context building each need dedicated modules with boundary contracts
-- 16 silent fallback points in evolution-worker need audit: distinguish fail-fast (boundary entry) from fail-visible (pipeline middle)
+- 16 silent fallback points in evolution-worker audited and classified (fail-fast vs fail-visible) — fully wired to EventLog
 - Replay engine input contracts remain deferred until worker decomposition is stable
 
 ## Out of Scope
