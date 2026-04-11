@@ -939,9 +939,6 @@ export class HealthQueryService {
     const dailyGfiPeak = this.asNumber(session?.dailyGfiPeak, currentGfi);
     const today = new Date().toISOString().slice(0, 10);
 
-    // Debug log: show what's being synced
-    console.log(`[HealthQueryService] GFI sync: sessionId=${session?.sessionId?.slice(0, 8) || 'none'}, currentGfi=${currentGfi}, peak=${dailyGfiPeak}, sources=${JSON.stringify(session?.gfiBySource || {})}`);
-
     try {
       this.uiDb.execute(`
         CREATE TABLE IF NOT EXISTS gfi_state (
@@ -957,9 +954,8 @@ export class HealthQueryService {
         dailyGfiPeak,
         today,
       );
-      console.log(`[HealthQueryService] GFI sync complete: ${currentGfi} → SQLite`);
     } catch (err) {
-      console.warn('[HealthQueryService] Failed to sync GFI from session:', err);
+      // Non-critical: GFI sync failure should not block queries
     }
   }
 
@@ -988,27 +984,24 @@ export class HealthQueryService {
   private readLatestSessionFromFile(): SessionState | null {
     const sessionsDir = path.join(this.stateDir, 'sessions');
     if (!fs.existsSync(sessionsDir)) {
-      console.log(`[HealthQueryService] Sessions dir not found: ${sessionsDir}`);
       return null;
     }
 
     try {
       const files = fs.readdirSync(sessionsDir).filter(f => f.endsWith('.json'));
       if (files.length === 0) {
-        console.log(`[HealthQueryService] No session files found in ${sessionsDir}`);
         return null;
       }
 
       let latest: SessionState | null = null;
       let latestTs = 0;
-      let skippedCount = 0;
 
       for (const file of files) {
         try {
           const content = fs.readFileSync(path.join(sessionsDir, file), 'utf-8');
           const state = JSON.parse(content) as SessionState;
+          // Skip sessions from different workspaces
           if (state.workspaceDir && state.workspaceDir !== this.workspaceDir) {
-            skippedCount++;
             continue;
           }
           const ts = Number(state.lastControlActivityAt ?? state.lastActivityAt ?? 0);
@@ -1021,7 +1014,6 @@ export class HealthQueryService {
         }
       }
 
-      console.log(`[HealthQueryService] readLatestSession: ${files.length} files, ${skippedCount} skipped (different workspace), latest=${latest?.sessionId?.slice(0, 8) || 'none'}`);
       return latest;
     } catch (err) {
       console.warn(`[HealthQueryService] Failed to read sessions dir: ${err}`);

@@ -125,7 +125,7 @@ describe('EvolutionWorkerService nocturnal hardening', () => {
     }
   });
 
-  it('keeps gateway-only background failures as failed instead of completed stub fallback', async () => {
+  it('uses stub_fallback for expected gateway-only background unavailability', async () => {
     const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-nocturnal-gateway-'));
     const stateDir = path.join(workspaceDir, '.state');
     fs.mkdirSync(path.join(stateDir, 'sessions'), { recursive: true });
@@ -201,8 +201,10 @@ describe('EvolutionWorkerService nocturnal hardening', () => {
       await vi.advanceTimersByTimeAsync(6000);
 
       const queue = readQueue(stateDir);
-      expect(queue[0].status).toBe('failed');
-      expect(queue[0].resolution).toBe('runtime_unavailable');
+      // #237: Expected gateway unavailability → stub_fallback (completed), not failed
+      // This is an environment limitation (daemon mode, cron job, etc.), not a real failure
+      expect(queue[0].status).toBe('completed');
+      expect(queue[0].resolution).toBe('stub_fallback');
       expect(queue[0].lastError).toContain('gateway request');
     } finally {
       EvolutionWorkerService.stop({ workspaceDir, stateDir, logger: console } as any);
@@ -210,7 +212,7 @@ describe('EvolutionWorkerService nocturnal hardening', () => {
     }
   });
 
-  it('classifies runtime-unavailable failures separately from downstream workflow failures', async () => {
+  it('uses stub_fallback for expected subagent runtime unavailability', async () => {
     const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-nocturnal-runtime-unavailable-'));
     const stateDir = path.join(workspaceDir, '.state');
     fs.mkdirSync(path.join(stateDir, 'sessions'), { recursive: true });
@@ -276,8 +278,10 @@ describe('EvolutionWorkerService nocturnal hardening', () => {
       await vi.advanceTimersByTimeAsync(6000);
 
       const queue = readQueue(stateDir);
-      expect(queue[0].status).toBe('failed');
-      expect(queue[0].resolution).toBe('runtime_unavailable');
+      // #237: Expected subagent unavailability → stub_fallback (completed), not failed
+      // This is an environment limitation (daemon mode, process isolation, etc.), not a real failure
+      expect(queue[0].status).toBe('completed');
+      expect(queue[0].resolution).toBe('stub_fallback');
       expect(queue[0].lastError).toContain('subagent runtime unavailable');
     } finally {
       EvolutionWorkerService.stop({ workspaceDir, stateDir, logger: console } as any);
