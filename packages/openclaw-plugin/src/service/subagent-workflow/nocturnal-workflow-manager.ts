@@ -40,7 +40,6 @@ import type { NocturnalSessionSnapshot } from '../../core/nocturnal-trajectory-e
 import type { RecentPainContext } from '../evolution-worker.js';
 import * as fs from 'fs';
 import * as path from 'path';
-import { isSubagentRuntimeAvailable } from '../../utils/subagent-probe.js';
 import { validateNocturnalSnapshotIngress } from '../../core/nocturnal-snapshot-contract.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -174,13 +173,9 @@ export class NocturnalWorkflowManager implements WorkflowManager {
         }
     ): Promise<WorkflowHandle> {
         // #179: Check subagent runtime availability before starting
-        // Other workflow managers (empathy, deep-reflect) have this check
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: TrinityRuntimeAdapter interface doesn't expose api.runtime.subagent, but OpenClawTrinityRuntimeAdapter has it
-        const subagent = (this.runtimeAdapter as any).api?.runtime?.subagent;
-        if (!isSubagentRuntimeAvailable(subagent)) {
-            this.logger.warn(`[PD:NocturnalWorkflow] Subagent runtime unavailable, skipping workflow`);
-            throw new Error(`NocturnalWorkflowManager: subagent runtime unavailable`);
-        }
+        // #243: After migrating to runEmbeddedPiAgent, we no longer need
+        // the subagent runtime check. runEmbeddedPiAgent works in any context.
+        // The adapter will handle availability at execution time.
 
         const workflowId = NocturnalWorkflowManager.generateWorkflowId();
         const now = Date.now();

@@ -14,7 +14,7 @@ import { SystemLogger } from './system-logger.js';
 
 export interface LogMeta {
   /** Source component (e.g., 'nocturnal', 'evolution-worker', 'pd-reflect') */
-  component: string;
+  component?: string;
   /** Session ID for context tracking */
   sessionId?: string;
   /** Agent ID for multi-agent scenarios */

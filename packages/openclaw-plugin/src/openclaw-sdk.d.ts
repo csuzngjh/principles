@@ -162,6 +162,31 @@ export interface PluginRuntimeAgent {
         saveSessionStore: (storePath: string, store: Record<string, unknown>) => Promise<void>;
         resolveSessionFilePath: (sessionKey: string) => string;
     };
+    /**
+     * Run an embedded PI agent without requiring gateway request scope.
+     * This method works in background contexts (services, cron, hooks).
+     * @param sessionId - Unique session identifier
+     * @param sessionFile - Path to a session file for storing conversation state
+     * @param prompt - The user message to send
+     * @param extraSystemPrompt - Optional system prompt to append
+     * @param config - OpenClaw config object for provider/model resolution
+     * @param timeoutMs - Timeout in milliseconds (required)
+     * @param runId - Unique run identifier
+     * @param disableTools - If true, the agent will not use any tools (pure LLM reasoning)
+     * @returns Promise with payloads array containing the response
+     */
+    runEmbeddedPiAgent: (opts: {
+        sessionId: string;
+        sessionFile: string;
+        prompt: string;
+        extraSystemPrompt?: string;
+        config?: unknown;
+        timeoutMs: number;
+        runId: string;
+        disableTools?: boolean;
+    }) => Promise<{
+        payloads?: Array<{ isError?: boolean; text?: string }>;
+    }>;
 }
 
 /**
