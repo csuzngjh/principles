@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import { EventLogService } from '../core/event-log.js';
 import { resolvePdPath } from '../core/paths.js';
 import { resolveWorkspaceDirFromApi } from '../core/path-resolver.js';
+import { WorkspaceNotFoundError } from '../config/index.js';
 import {
     DeepReflectWorkflowManager,
     deepReflectWorkflowSpec,
@@ -108,9 +109,6 @@ export function createDeepReflectTool(api: OpenClawPluginApi) {
 
             // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between helper functions - reordering would break logical grouping
             const effectiveWorkspaceDir = resolveReflectionWorkspace(api);
-            if (!effectiveWorkspaceDir) {
-                return { content: [{ type: 'text', text: '❌ 反思执行失败: Workspace directory is required for deep reflection。请检查 API 配置或网络连接。' }] };
-            }
 
             const config = loadConfig(effectiveWorkspaceDir, api);
             if (config.mode === 'disabled' || !config.enabled) {
@@ -135,10 +133,13 @@ export function createDeepReflectTool(api: OpenClawPluginApi) {
 /**
  * Resolve workspace directory for deep reflection tool.
  */
-function resolveReflectionWorkspace(api: OpenClawPluginApi): string | undefined {
-    return (api.config?.workspaceDir as string)
-        || resolveWorkspaceDirFromApi(api)
-        || api.resolvePath?.('.');
+function resolveReflectionWorkspace(api: OpenClawPluginApi): string {
+    const dir = (api.config?.workspaceDir as string)
+        || resolveWorkspaceDirFromApi(api);
+    if (!dir) {
+        throw new WorkspaceNotFoundError('deep-reflect: workspace directory could not be resolved via API or config');
+    }
+    return dir;
 }
 
 /**
