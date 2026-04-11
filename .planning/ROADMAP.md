@@ -20,7 +20,7 @@
 - [ ] **Phase 26: Task Dispatcher Extraction** - Extract task dispatch and execution into EvolutionTaskDispatcher with entry-point validation
 - [ ] **Phase 27: Workflow Orchestrator Extraction** - Extract workflow watchdog and lifecycle into WorkflowOrchestrator with entry-point validation
 - [x] **Phase 28: Context Builder + Service Slim + Fallback Audit** - Extract context building, slim the worker, and audit all 16 silent fallback points (completed 2026-04-11)
-- [ ] **Phase 29: Integration Verification** - Verify end-to-end flow, public API preservation, test passing, and lifecycle correctness
+- [x] **Phase 29: Integration Verification** - Verify end-to-end flow, public API preservation, test passing, and lifecycle correctness (completed 2026-04-11)
 
 ## Phase Details
 
@@ -109,13 +109,14 @@ Plans:
   2. Worker service public API is unchanged -- external callers (hooks, commands, HTTP routes) are unaffected
   3. Nocturnal pipeline end-to-end flow (pain -> queue -> nocturnal -> replay) runs correctly through refactored modules
   4. Worker startup/shutdown lifecycle preserves correctness -- no hanging resources or leaked locks
-**Plans**: 4 plans
+**Plans**: 5 plans
 
 Plans:
-- [ ] 29-01-PLAN.md — Fix backward-compat export (readRecentPainContext) + run full test suite
-- [ ] 29-02-PLAN.md — Public API surface verification
-- [ ] 29-03-PLAN.md — Nocturnal E2E pipeline verification
-- [ ] 29-04-PLAN.md — Lifecycle verification (start/stop, no resource leaks)
+- [x] 29-01-PLAN.md — Fix backward-compat export (readRecentPainContext) + run full test suite
+- [x] 29-02-PLAN.md — Public API surface verification
+- [x] 29-03-PLAN.md — Nocturnal E2E pipeline verification
+- [x] 29-04-PLAN.md — Lifecycle verification (start/stop, no resource leaks)
+- [ ] 29-05-PLAN.md — Gap closure: correct INTEG-02 FallbackAudit documentation error
 
 ## Progress
 
@@ -129,6 +130,6 @@ Phases execute in numeric order: 24 -> 25 -> 26 -> 27 -> 28 -> 29
 | 26. Task Dispatcher Extraction | v1.14 | 0/? | Not started | - |
 | 27. Workflow Orchestrator Extraction | v1.14 | 1/1 | Planning complete | - |
 | 28. Context Builder + Service Slim + Fallback Audit | v1.14 | 5/5 | Complete    | 2026-04-11 |
-| 29. Integration Verification | v1.14 | 0/4 | Planning complete | - |
+| 29. Integration Verification | v1.14 | 4/5 | Gap closure in progress | - |
 
 *Last updated: 2026-04-11*
