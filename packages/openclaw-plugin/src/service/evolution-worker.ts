@@ -34,8 +34,8 @@ export type { DispatchResult } from './evolution-task-dispatcher.js';
  * Process evolution queue — thin wrapper for backward compatibility.
  * Delegates to EvolutionTaskDispatcher.dispatchQueue().
  */
-async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogger, eventLog: EventLog, api?: OpenClawPluginApi): Promise<void> {
-    await new EvolutionTaskDispatcher(wctx.workspaceDir).dispatchQueue(wctx, logger, eventLog, api);
+async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogger, eventLog: EventLog, api?: OpenClawPluginApi): Promise<import('./evolution-task-dispatcher.js').DispatchResult> {
+    return await new EvolutionTaskDispatcher(wctx.workspaceDir).dispatchQueue(wctx, logger, eventLog, api);
 }
 
 const WORKFLOW_TTL_MS = 5 * 60 * 1000; // 5 minutes default TTL for helper workflows
@@ -193,13 +193,21 @@ export function purgeStaleFailedTasks(queue: EvolutionQueueItem[], logger: Plugi
   return store.purge(queue, logger);
 }
 
-
-
-
-
-
-
 /**
+ * Backward-compatible wrapper for pain flag detection.
+ * Delegates to PainFlagDetector.extractRecentPainContext().
+ */
+export function readRecentPainContext(wctx: WorkspaceContext): import('./evolution-queue-store.js').RecentPainContext {
+  return new PainFlagDetector(wctx.workspaceDir).extractRecentPainContext();
+}
+
+
+
+
+
+
+
+
 
 
 
@@ -398,7 +406,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                     await store.save(loadResult.queue);
                 }
 
-                const dispatchResult = await processEvolutionQueue(wctx, logger, eventLog, api);
+                const dispatchResult = await processEvolutionQueue(wctx, logger, eventLog, api ?? undefined);
                 cycleResult.queue = {
                     total: loadResult.queue.length,
                     pending: dispatchResult.painStats.pending + dispatchResult.sleepStats.pending,
@@ -548,7 +556,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                     store.purge(loadResult.queue, logger);
                     await store.save(loadResult.queue);
                 }
-                const dispatchResult = await processEvolutionQueue(wctx, logger, eventLog, api);
+                const dispatchResult = await processEvolutionQueue(wctx, logger, eventLog, api ?? undefined);
                 if (dispatchResult.errors.length > 0) {
                     dispatchResult.errors.forEach((e) => logger?.error?.(`[PD:EvolutionWorker] Startup cycle error: ${e}`));
                 }

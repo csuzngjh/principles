@@ -14,8 +14,9 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import type { PluginLogger } from '../openclaw-sdk.js';
-import type { OpenClawPluginApi, WorkspaceContext, EventLog } from '../openclaw-sdk.js';
+import type { PluginLogger, OpenClawPluginApi } from '../openclaw-sdk.js';
+import type { WorkspaceContext } from '../core/workspace-context.js';
+import type { EventLog } from '../core/event-log.js';
 import { SystemLogger } from '../core/system-logger.js';
 import { addDiagnosticianTask, completeDiagnosticianTask } from '../core/diagnostician-task-store.js';
 import { getEvolutionLogger } from '../core/evolution-logger.js';
@@ -30,6 +31,7 @@ import {
     type NocturnalPainEvent,
     type NocturnalSessionSnapshot,
 } from '../core/nocturnal-trajectory-extractor.js';
+import type { WorkflowEventRow } from './subagent-workflow/types.js';
 import { isExpectedSubagentError } from './subagent-workflow/subagent-error-utils.js';
 import type { EvolutionQueueItem } from './evolution-queue-store.js';
 
@@ -245,7 +247,7 @@ export class EvolutionTaskDispatcher {
                         const wfStore = new WorkflowStore({ workspaceDir: wctx.workspaceDir });
                         const events = wfStore.getEvents(task.resultRef);
                         // Find the most recent failure event
-                        const failureEvent = events.filter(e =>
+                        const failureEvent = events.filter((e: WorkflowEventRow) =>
                             e.event_type.includes('failed') || e.event_type.includes('error')
                         ).pop();
                         if (failureEvent) {
