@@ -246,9 +246,13 @@ export class EvolutionQueueStore {
     lockStaleMs: number;
   };
 
-  constructor(workspaceDir: string) {
+  /**
+   * @param workspaceDir - The workspace directory (used to compute default queue path)
+   * @param queuePathOverride - Optional: override the queue path (e.g., for test mocks or custom paths)
+   */
+  constructor(workspaceDir: string, queuePathOverride?: string) {
     this.workspaceDir = workspaceDir;
-    this.queuePath = resolvePdPath(workspaceDir, 'EVOLUTION_QUEUE');
+    this.queuePath = queuePathOverride ?? resolvePdPath(workspaceDir, 'EVOLUTION_QUEUE');
     this.lockOptions = {
       lockSuffix: LOCK_SUFFIX,
       maxRetries: LOCK_MAX_RETRIES,

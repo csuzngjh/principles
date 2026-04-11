@@ -1371,6 +1371,12 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
             return;
         }
 
+        // If we modified the queue (stuck recovery, pain_diagnosis) but had no sleep tasks
+        // to process, save the changes now.
+        if (queueChanged) {
+            await store.save(queue);
+        }
+
         // Pipeline observability: log stage-level summary at end of cycle
         const pendingPain = queue.filter((t) => t.status === 'pending' && t.taskKind === 'pain_diagnosis').length;
         const inProgressPain = queue.filter((t) => t.status === 'in_progress' && t.taskKind === 'pain_diagnosis').length;
@@ -1453,9 +1459,12 @@ export async function registerEvolutionTaskSession(
 ): Promise<boolean> {
     try {
         const queuePath = workspaceResolve('EVOLUTION_QUEUE');
-        const stateDir = path.dirname(queuePath);
-        const workspaceDir = path.dirname(stateDir);
-        const store = new EvolutionQueueStore(workspaceDir);
+        // Derive workspaceDir: queuePath = $workspaceDir/.state/evolution_queue.json
+        // path.dirname(queuePath) = $workspaceDir/.state
+        // path.dirname(path.dirname(queuePath)) = $workspaceDir
+        const workspaceDir = path.dirname(path.dirname(queuePath));
+        // Pass queuePathOverride so the store reads/writes the actual path from workspaceResolve
+        const store = new EvolutionQueueStore(workspaceDir, queuePath);
         return await store.registerSession(taskId, sessionKey, logger);
     } catch (e) {
         logger?.warn?.(`[PD:EvolutionWorker] registerEvolutionTaskSession error: ${String(e)}`);
