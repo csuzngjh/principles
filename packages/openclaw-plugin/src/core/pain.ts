@@ -3,6 +3,7 @@ import * as path from 'path';
 import { serializeKvLines, parseKvLines } from '../utils/io.js';
 import { resolvePdPath } from './paths.js';
 import { ConfigService } from './config-service.js';
+import { SystemLogger } from './system-logger.js';
 
 // =========================================================================
 // Pain Flag Contract (Single Source of Truth)
@@ -36,6 +37,13 @@ export interface PainFlagData {
   trigger_text_preview?: string;
 }
 
+export interface PainFlagContractResult {
+  status: 'missing' | 'valid' | 'invalid';
+  format: 'missing' | 'empty' | 'kv' | 'json' | 'invalid_json';
+  data: Record<string, string>;
+  missingFields: string[];
+}
+
 /**
  * Factory function — the ONLY way to construct pain flag data.
  *
@@ -58,16 +66,18 @@ export function buildPainFlag(input: {
   trace_id?: string;
   trigger_text_preview?: string;
 }): PainFlagData {
+  // Omit optional fields when not provided — prevents writing empty lines to disk
+  // which causes agent confusion (SKILL.md vs reality drift)
   return {
     source: input.source,
     score: input.score,
     time: input.time || new Date().toISOString(),
     reason: input.reason,
-    session_id: input.session_id || '',
-    agent_id: input.agent_id || '',
+    session_id: input.session_id ?? '',
+    agent_id: input.agent_id ?? '',
     is_risky: input.is_risky ? 'true' : 'false',
-    trace_id: input.trace_id || '',
-    trigger_text_preview: input.trigger_text_preview || '',
+    trace_id: input.trace_id ?? '',
+    trigger_text_preview: input.trigger_text_preview ?? '',
   };
 }
 
@@ -77,7 +87,9 @@ export function buildPainFlag(input: {
  */
 export function validatePainFlag(data: Record<string, string>): string[] {
   const missing: string[] = [];
-  const required = ['source', 'score', 'time', 'reason', 'session_id', 'agent_id'] as const;
+  // Only source/score/time/reason are truly required — session_id/agent_id
+  // may be empty in automated contexts (heartbeat, background workers)
+  const required = ['source', 'score', 'time', 'reason'] as const;
   for (const field of required) {
     if (!data[field] || data[field].trim() === '') {
       missing.push(field);
@@ -86,7 +98,6 @@ export function validatePainFlag(data: Record<string, string>): string[] {
   return missing;
 }
 
-// eslint-disable-next-line @typescript-eslint/max-params -- Reason: Score computation requires all 5 parameters - refactoring to options object would be breaking API change
 export function computePainScore(rc: number, isSpiral: boolean, missingTestCommand: boolean, softScore: number, projectDir?: string): number {
   let score = Math.max(0, softScore || 0);
   
@@ -146,17 +157,119 @@ export function writePainFlag(projectDir: string, painData: PainFlagData): void 
   fs.writeFileSync(painFlagPath, serializeKvLines(painData), "utf-8");
 }
 
+/**
+ * Converts a JSON pain flag object to KV format.
+ */
+function convertJsonToKv(json: Record<string, unknown>): Record<string, string> {
+  const kvData: Record<string, string> = {};
+  const fieldMap: Record<string, string> = {
+    source: 'source',
+    score: 'score',
+    time: 'time',
+    timestamp: 'time',
+    reason: 'reason',
+    session_id: 'session_id',
+    sessionId: 'session_id',
+    agent_id: 'agent_id',
+    agentId: 'agent_id',
+    is_risky: 'is_risky',
+    isRisky: 'is_risky',
+    severity: 'severity',
+    painId: 'pain_id',
+  };
+  for (const [jsonKey, kvKey] of Object.entries(fieldMap)) {
+    if (json[jsonKey] !== undefined) {
+      kvData[kvKey] = String(json[jsonKey]);
+    }
+  }
+  for (const [key, value] of Object.entries(json)) {
+    if (fieldMap[key] === undefined && value !== undefined && value !== null) {
+      kvData[key] = String(value);
+    }
+  }
+  return kvData;
+}
+
+/**
+ * Reads and validates the pain flag file with auto-repair.
+ *
+ * - If file doesn't exist → returns {}
+ * - If file is JSON format (wrong) → converts to KV, logs warning, rewrites file
+ * - If file is KV format → validates required fields, logs warning if missing
+ * - If file has unknown fields → silently ignores them (forward-compatible)
+ */
 export function readPainFlagData(projectDir: string): Record<string, string> {
   const painFlagPath = resolvePdPath(projectDir, 'PAIN_FLAG');
   try {
     if (!fs.existsSync(painFlagPath)) {
       return {};
     }
-    const content = fs.readFileSync(painFlagPath, "utf-8");
-    return parseKvLines(content);
-  } catch (e) { // eslint-disable-line @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: intentionally unused - returning empty object on error
+    const content = fs.readFileSync(painFlagPath, "utf-8").trim();
+    if (!content) {
+      return {};
+    }
+
+    // Detect JSON format (wrong — should be KV)
+    if (content.startsWith('{')) {
+      let json: Record<string, unknown>;
+      try {
+        json = JSON.parse(content);
+      } catch {
+        SystemLogger.log(projectDir, 'PAIN_FLAG_CORRUPT', 'Pain flag file contains invalid JSON');
+        return {};
+      }
+
+      // Auto-repair: convert JSON to KV format
+      const kvData = convertJsonToKv(json);
+
+      const repaired = serializeKvLines(kvData);
+      fs.writeFileSync(painFlagPath, repaired, 'utf-8');
+      SystemLogger.log(projectDir, 'PAIN_FLAG_AUTO_REPAIRED', `Auto-repaired pain flag from JSON to KV format (${Object.keys(json).length} fields)`);
+      return kvData;
+    }
+
+    // KV format — parse and validate
+    const data = parseKvLines(content);
+    const missing = validatePainFlag(data);
+    if (missing.length > 0) {
+      SystemLogger.log(projectDir, 'PAIN_FLAG_INCOMPLETE', `Pain flag missing required fields: ${missing.join(', ')}`);
+    }
+    return data;
+  } catch (e) {
+    SystemLogger.log(projectDir, 'PAIN_FLAG_READ_ERROR', `Failed to read pain flag: ${String(e)}`);
     return {};
   }
+}
+
+export function readPainFlagContract(projectDir: string): PainFlagContractResult {
+  const data = readPainFlagData(projectDir);
+
+  if (Object.keys(data).length === 0) {
+    const painFlagPath = resolvePdPath(projectDir, 'PAIN_FLAG');
+    if (!fs.existsSync(painFlagPath)) {
+      return { status: 'missing', format: 'missing', data: {}, missingFields: [] };
+    }
+
+    const raw = fs.readFileSync(painFlagPath, 'utf-8').trim();
+    if (!raw) {
+      return { status: 'missing', format: 'empty', data: {}, missingFields: [] };
+    }
+
+    return {
+      status: 'invalid',
+      format: raw.startsWith('{') ? 'invalid_json' : 'kv',
+      data: {},
+      missingFields: ['unparseable'],
+    };
+  }
+
+  const missing = validatePainFlag(data);
+  return {
+    status: missing.length > 0 ? 'invalid' : 'valid',
+    format: 'kv',
+    data,
+    missingFields: missing,
+  };
 }
 
 /**
@@ -165,7 +278,7 @@ export function readPainFlagData(projectDir: string): Record<string, string> {
  * If any principle matches the pain signal, its painPreventedCount is incremented.
  * Errors are silently ignored to avoid disrupting the pain pipeline.
  */
-// eslint-disable-next-line @typescript-eslint/max-params -- Reason: principle value tracking requires workspace + data + getters + updaters - refactoring would break API
+ 
 export function trackPrincipleValue(
   workspaceDir: string,
   painData: { reason?: string; source?: string; score?: string },
@@ -174,7 +287,7 @@ export function trackPrincipleValue(
     trigger: string;
     valueMetrics?: { painPreventedCount: number; lastPainPreventedAt?: string; calculatedAt: string };
   }[],
-  updatePrincipleMetrics: (_id: string, _metrics: { painPreventedCount: number; lastPainPreventedAt: string; calculatedAt: string }) => void, // eslint-disable-line no-unused-vars -- Reason: callback params required by interface, actual values accessed via principle.id and principle.valueMetrics
+  updatePrincipleMetrics: (_id: string, _metrics: { painPreventedCount: number; lastPainPreventedAt: string; calculatedAt: string }) => void,  
 ): void {
   try {
     const activePrinciples = getActivePrinciples();

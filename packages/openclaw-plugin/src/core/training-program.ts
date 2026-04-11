@@ -565,9 +565,9 @@ export function processTrainerResult(
  * ```
  */
 export class TrainingProgram {
-  /* eslint-disable no-unused-vars -- Reason: stateDir is used via this.stateDir in createExperiment method */
+   
   constructor(private readonly stateDir: string) {}
-  /* eslint-enable no-unused-vars */
+   
 
   /**
    * Create a new training experiment.

@@ -228,7 +228,7 @@ export function handleBeforeMessageWrite(
   // 提取文本内容
   let content = '';
   if (typeof msg.content === 'string') {
-    /* eslint-disable @typescript-eslint/prefer-destructuring */
+     
     // Reason: msg.content is string | ContentPart[]; destructuring would require renaming in the else branch
     content = msg.content;
   } else if (Array.isArray(msg.content)) {

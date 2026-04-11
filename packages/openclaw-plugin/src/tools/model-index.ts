@@ -61,7 +61,7 @@ export function loadModelIndex(
         const wctx = WorkspaceContext.fromHookContext({ workspaceDir });
         const customConfig = loadCustomConfig(wctx);
         
-        // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in both if/else branches
+         
         let modelsDir: string;
         if (customConfig?.modelsDir) {
             modelsDir = path.isAbsolute(customConfig.modelsDir) 

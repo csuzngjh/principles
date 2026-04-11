@@ -38,6 +38,7 @@ import { handleFocusCommand } from './commands/focus.js';
 import { handleRollbackCommand } from './commands/rollback.js';
 import { handlePromoteImplCommand } from './commands/promote-impl.js';
 import { handleDisableImplCommand } from './commands/disable-impl.js';
+import { handlePdReflect } from './commands/pd-reflect.js';
 import { handleArchiveImplCommand } from './commands/archive-impl.js';
 import { handleRollbackImplCommand } from './commands/rollback-impl.js';
 import { handleEvolutionStatusCommand } from './commands/evolution-status.js';
@@ -57,10 +58,43 @@ import { migrateDirectoryStructure } from './core/migration.js';
 import { SystemLogger } from './core/system-logger.js';
 import { createDeepReflectTool } from './tools/deep-reflect.js';
 import { PathResolver, resolveWorkspaceDirFromApi } from './core/path-resolver.js';
+import { validateWorkspaceDir } from './core/workspace-dir-validation.js';
+import { resolveRequiredWorkspaceDir, resolveWorkspaceDir, type WorkspaceResolutionContext } from './core/workspace-dir-service.js';
 import { createPrinciplesConsoleRoute } from './http/principles-console-route.js';
 
 // Track initialization to avoid repeated calls
 let workspaceInitialized = false;
+
+/**
+ * Resolve workspaceDir for slash commands.
+ * Chain: ctx.workspaceDir → resolveWorkspaceDirFromApi (official OpenClaw API + env vars)
+ * 
+ * CRITICAL: Throws if workspaceDir cannot be resolved. Silent failures are dangerous
+ * because commands might operate on the wrong directory.
+ */
+function resolveCommandWorkspaceDir(
+  api: OpenClawPluginApi,
+  ctx: { workspaceDir?: string },
+): string {
+  // 1. Direct from command context (most reliable — set by OpenClaw for current session)
+  if (ctx.workspaceDir) {
+    const issue = validateWorkspaceDir(ctx.workspaceDir);
+    if (!issue) return ctx.workspaceDir;
+    api.logger.error(`[PD:Command] ctx.workspaceDir="${ctx.workspaceDir}" is invalid: ${issue}`);
+  }
+
+  // 2. Official OpenClaw API → env vars → config file
+  const resolved = resolveWorkspaceDirFromApi(api);
+  if (resolved) return resolved;
+
+  // CRITICAL FAILURE: Cannot determine workspace directory
+  const errorMsg = `[PD:Command] CRITICAL: Cannot resolve workspace directory. ` +
+    `ctx.workspaceDir="${ctx.workspaceDir}" is invalid, and all fallbacks failed. ` +
+    `Commands will NOT execute to prevent data corruption.`;
+  api.logger.error(errorMsg);
+  
+  throw new Error(errorMsg);
+}
 
 // Map from childSessionKey → shadowObservationId
 // Used to complete shadow observations when subagent ends
@@ -82,14 +116,19 @@ function computeRuntimeShadowTaskFingerprint(event: PluginHookSubagentSpawningEv
   return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex').slice(0, 16);
 }
 
-import { resolveValidWorkspaceDir, validateWorkspaceDir } from './core/workspace-dir-validation.js';
+function resolveCommandWorkspaceDirStrict(
+  api: OpenClawPluginApi,
+  ctx: WorkspaceResolutionContext,
+): string {
+  return resolveRequiredWorkspaceDir(api, ctx, { source: 'command' });
+}
 
-function resolveToolHookWorkspaceDir(
-  ctx: { workspaceDir?: string; agentId?: string },
+function resolveToolHookWorkspaceDirSafe(
+  ctx: WorkspaceResolutionContext,
   api: OpenClawPluginApi,
   source: string,
-): string {
-  return resolveValidWorkspaceDir(ctx, api, { source });
+): string | undefined {
+  return resolveWorkspaceDir(api, ctx, { source });
 }
 
 const plugin = {
@@ -105,7 +144,7 @@ const plugin = {
     // Catches OpenClaw context bugs early (e.g., missing workspaceDir in tool hooks)
     setTimeout(() => {
       const testCtx = { agentId: 'main' };
-      const toolWorkspaceDir = resolveToolHookWorkspaceDir(testCtx, api, 'startup.health_check');
+      const toolWorkspaceDir = resolveToolHookWorkspaceDirSafe(testCtx, api, 'startup.health_check');
       const toolIssue = validateWorkspaceDir(toolWorkspaceDir);
       if (toolIssue) {
         api.logger.error(`[PD:health] Tool hook workspaceDir is INVALID: "${toolWorkspaceDir}" - ${toolIssue}`);
@@ -121,9 +160,10 @@ const plugin = {
     api.on(
       'before_prompt_build',
       async (event: PluginHookBeforePromptBuildEvent, ctx: PluginHookAgentContext): Promise<PluginHookBeforePromptBuildResult | void> => {
+        const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'before_prompt_build');
+        if (!workspaceDir) return;
         try {
-          const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
-          if (!workspaceInitialized && workspaceDir) {
+          if (!workspaceInitialized) {
             migrateDirectoryStructure(api, workspaceDir);
             ensureWorkspaceTemplates(api, workspaceDir, language);
             SystemLogger.log(workspaceDir, 'SYSTEM_BOOT', `Principles Disciple online. Language: ${language}`);
@@ -139,7 +179,6 @@ const plugin = {
           
           return result;
         } catch (err) {
-          const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
           WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
             hook: 'before_prompt_build',
             sessionId: ctx.sessionId,
@@ -154,7 +193,8 @@ const plugin = {
     api.on(
       'before_tool_call',
       (event: PluginHookBeforeToolCallEvent, ctx: PluginHookToolContext): PluginHookBeforeToolCallResult | void => {
-        const workspaceDir = resolveToolHookWorkspaceDir(ctx, api, 'before_tool_call');
+        const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'before_tool_call');
+        if (!workspaceDir) return;
         try {
           const pluginConfig = api.pluginConfig ?? {};
           const {logger} = api;
@@ -166,8 +206,7 @@ const plugin = {
 
           return result;
         } catch (err) {
-          const fallbackDir = resolveToolHookWorkspaceDir(ctx, api, 'before_tool_call');
-          WorkspaceContext.fromHookContext({ workspaceDir: fallbackDir }).eventLog.recordHookExecution({
+          WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
             hook: 'before_tool_call',
             error: String(err)
           }, { flushImmediately: true });
@@ -180,7 +219,8 @@ const plugin = {
     api.on(
       'after_tool_call',
       (event: PluginHookAfterToolCallEvent, ctx: PluginHookToolContext): void => {
-        const workspaceDir = resolveToolHookWorkspaceDir(ctx, api, 'after_tool_call');
+        const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'after_tool_call');
+        if (!workspaceDir) return;
         try {
           const pluginConfig = api.pluginConfig ?? {};
           // Pass api separately to handleAfterToolCall to maintain type safety
@@ -190,8 +230,7 @@ const plugin = {
             hook: 'after_tool_call'
           }, { flushImmediately: true });
         } catch (err) {
-          const fallbackDir = resolveToolHookWorkspaceDir(ctx, api, 'after_tool_call');
-          WorkspaceContext.fromHookContext({ workspaceDir: fallbackDir }).eventLog.recordHookExecution({
+          WorkspaceContext.fromHookContext({ workspaceDir }).eventLog.recordHookExecution({
             hook: 'after_tool_call',
             error: String(err)
           }, { flushImmediately: true });
@@ -204,7 +243,8 @@ const plugin = {
     api.on(
       'llm_output',
       (event: PluginHookLlmOutputEvent, ctx: PluginHookAgentContext): void => {
-        const workspaceDir = resolveToolHookWorkspaceDir(ctx as unknown as Record<string, unknown>, api, 'llm_output');
+        const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx as unknown as Record<string, unknown>, api, 'llm_output');
+        if (!workspaceDir) return;
         try {
           handleLlmOutput(event, { ...ctx, workspaceDir });
 
@@ -229,9 +269,10 @@ const plugin = {
       'after_tool_call',
       (event: PluginHookAfterToolCallEvent, ctx: PluginHookToolContext): void => {
         try {
-          const workspaceDir = resolveToolHookWorkspaceDir(ctx, api, 'trajectory.after_tool_call');
+          const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'trajectory.after_tool_call');
+          if (!workspaceDir) return;
           TrajectoryCollector.handleAfterToolCall(event, { ...ctx, workspaceDir });
-          // eslint-disable-next-line no-unused-vars, @typescript-eslint/no-unused-vars -- Reason: catch binding intentionally unused
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Reason: catch binding intentionally unused
         } catch (_err) {
           // Non-critical: don't log, just skip
         }
@@ -242,9 +283,10 @@ const plugin = {
       'llm_output',
       (event: PluginHookLlmOutputEvent, ctx: PluginHookAgentContext): void => {
         try {
-          const workspaceDir = resolveToolHookWorkspaceDir(ctx as unknown as Record<string, unknown>, api, 'trajectory.llm_output');
+          const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx as unknown as Record<string, unknown>, api, 'trajectory.llm_output');
+          if (!workspaceDir) return;
           TrajectoryCollector.handleLlmOutput(event, { ...ctx, workspaceDir });
-          // eslint-disable-next-line no-unused-vars, @typescript-eslint/no-unused-vars -- Reason: catch binding intentionally unused
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Reason: catch binding intentionally unused
         } catch (_err) {
           // Non-critical: don't log, just skip
         }
@@ -254,7 +296,7 @@ const plugin = {
     // ── Hook: Subagent Loop Closure ──
     api.on(
       'subagent_spawning',
-      // eslint-disable-next-line no-unused-vars, @typescript-eslint/no-unused-vars -- Reason: ctx param required by hook callback signature but not used in this handler
+       
       (event: PluginHookSubagentSpawningEvent, _ctx: PluginHookSubagentContext): void | PluginHookSubagentSpawningResult => {
         try {
           // Resolve workspace via official API, falling back to PathResolver
@@ -327,17 +369,20 @@ const plugin = {
 
     // ── Hook: Lifecycle ──
     api.on('before_reset', (event: PluginHookBeforeResetEvent, ctx: PluginHookAgentContext) => {
-      const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
+      const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'before_reset');
+      if (!workspaceDir) return;
       return handleBeforeReset(event, { ...ctx, workspaceDir });
     });
     
     api.on('before_compaction', (event: PluginHookBeforeCompactionEvent, ctx: PluginHookAgentContext) => {
-      const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
+      const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'before_compaction');
+      if (!workspaceDir) return;
       return handleBeforeCompaction(event, { ...ctx, workspaceDir });
     });
     
     api.on('after_compaction', (event: PluginHookAfterCompactionEvent, ctx: PluginHookAgentContext) => {
-      const workspaceDir = ctx.workspaceDir || api.resolvePath('.');
+      const workspaceDir = resolveToolHookWorkspaceDirSafe(ctx, api, 'after_compaction');
+      if (!workspaceDir) return;
       return handleAfterCompaction(event, { ...ctx, workspaceDir });
     });
 
@@ -353,165 +398,116 @@ const plugin = {
     }
 
     // ── Slash Commands ──
-    api.registerCommand({
-      name: "pd-init",
-      description: getCommandDescription('pd-init', language),
-      handler: (ctx) => handleInitStrategy(ctx)
-    });
+    // Register command with optional short alias
+    const registerCommandWithAlias = (name: string, alias: string | null, desc: string, handler: any, opts?: { acceptsArgs?: boolean }) => {
+      const base = {
+        name,
+        description: desc,
+        handler,
+        ...(opts?.acceptsArgs ? { acceptsArgs: true } : {}),
+      };
+      api.registerCommand(base);
+      if (alias) {
+        api.registerCommand({
+          ...base,
+          name: alias,
+          description: `${desc} (alias of /${name})`,
+        });
+      }
+    };
 
-    api.registerCommand({
-      name: "pd-okr",
-      description: getCommandDescription('pd-okr', language),
-      handler: (ctx) => handleManageOkr(ctx)
-    });
-
-    api.registerCommand({
-      name: "pd-bootstrap",
-      description: getCommandDescription('pd-bootstrap', language),
-      handler: (ctx) => handleBootstrapTools(ctx)
-    });
-
-    api.registerCommand({
-      name: "pd-research",
-      description: getCommandDescription('pd-research', language),
-      handler: (ctx) => handleResearchTools(ctx)
-    });
-
-    api.registerCommand({
-      name: "pd-thinking",
-      description: getCommandDescription('pd-thinking', language),
-      acceptsArgs: true,
-      handler: (ctx) => handleThinkingOs(ctx)
-    });
-
-    api.registerCommand({
-      name: "pd-daily",
-      description: getCommandDescription('pd-daily', language),
-      handler: () => {
-        return { text: language === 'zh'
-          ? "请执行 pd-daily 技能来配置并发送进化日报。系统将引导你完成配置流程，包括发送时间、渠道和报告风格偏好。"
-          : "Please execute the pd-daily skill to configure and send your daily evolution report. The system will guide you through the configuration process." };
+    registerCommandWithAlias('pd-init', 'pdi', getCommandDescription('pd-init', language), (ctx: any) => handleInitStrategy(ctx));
+    registerCommandWithAlias('pd-okr', 'pdk', getCommandDescription('pd-okr', language), (ctx: any) => handleManageOkr(ctx));
+    registerCommandWithAlias('pd-bootstrap', 'pdb', getCommandDescription('pd-bootstrap', language), (ctx: any) => handleBootstrapTools(ctx));
+    registerCommandWithAlias('pd-research', 'pdr', getCommandDescription('pd-research', language), (ctx: any) => handleResearchTools(ctx));
+    registerCommandWithAlias('pd-thinking', 'pdt', getCommandDescription('pd-thinking', language), (ctx: any) => handleThinkingOs(ctx), { acceptsArgs: true });
+    registerCommandWithAlias('pd-reflect', 'pdrl', getCommandDescription('pd-reflect', language), (ctx: any) => {
+      try {
+        const workspaceDir = resolveCommandWorkspaceDirStrict(api, ctx);
+        return handlePdReflect.handler({ ...ctx, api, workspaceDir } as any);
+      } catch (err) {
+        api.logger.error(`[PD] Command /pd-reflect failed: ${String(err)}`);
+        return { text: language === 'zh' ? "命令执行失败，请检查日志。" : "Command failed. Check logs." };
       }
     });
-
-    api.registerCommand({
-      name: "pd-grooming",
-      description: getCommandDescription('pd-grooming', language),
-      handler: () => {
-        return { text: language === 'zh'
-          ? "请执行 pd-grooming 技能来执行大扫除。例如输入: '执行 pd-grooming 技能'"
-          : "Please execute the pd-grooming skill to clean up. For example: 'Execute pd-grooming skill'" };
-      }
-    });
-
-    api.registerCommand({
-      name: "pd-help",
-      description: getCommandDescription('pd-help', language),
-      handler: () => {
+    registerCommandWithAlias('pd-daily', 'pdd', getCommandDescription('pd-daily', language), () => ({
+      text: language === 'zh'
+        ? "请执行 pd-daily 技能来配置并发送进化日报。系统将引导你完成配置流程，包括发送时间、渠道和报告风格偏好。"
+        : "Please execute the pd-daily skill to configure and send your daily evolution report. The system will guide you through the configuration process."
+    }));
+    registerCommandWithAlias('pd-grooming', 'pdg', getCommandDescription('pd-grooming', language), () => ({
+      text: language === 'zh'
+        ? "请执行 pd-grooming 技能来执行大扫除。例如输入: '执行 pd-grooming 技能'"
+        : "Please execute the pd-grooming skill to clean up. For example: 'Execute pd-grooming skill'"
+    }));
+    registerCommandWithAlias('pd-help', 'pdh', getCommandDescription('pd-help', language), () => {
         if (language === 'zh') {
           return { text: `
 📖 **Principles Disciple 命令大全**
 
-## 🚀 快速开始
-| 命令 | 用途 | 使用时机 |
-|------|------|----------|
-| \`/pd-init\` | 初始化工作区 | 新项目开始时 |
-| \`/pd-bootstrap\` | 环境工具扫描 | 缺少开发工具时 |
+## 快速开始
+| 短命令 | 长命令 | 用途 |
+|--------|--------|------|
+| \`/pdi\` | \`/pd-init\` | 初始化工作区 |
+| \`/pdb\` | \`/pd-bootstrap\` | 环境工具扫描 |
+| \`/pdr\` | \`/pd-research\` | 研究工具方案 |
 
-## 📊 状态查询
-| 命令 | 用途 | 使用时机 |
-|------|------|----------|
-| \`/pd-status\` | 查看进化状态 | 想了解当前 GFI 和 Pain 情况 |
-| \`/pd-focus\` | 焦点文件管理 | 查看/压缩/回滚历史版本 |
-| \`/pd-export\` | 导出数据 | 导出 analytics/corrections/orpo |
-| \`/pd-samples\` | 审核纠错样本 | 查看待审核样本并批准/拒绝 |
-| \`/pd-nocturnal-review\` | 审核 nocturnal 样本 | 审核 nocturnal 训练样本并导出 ORPO |
+## 状态查询
+| 短命令 | 长命令 | 用途 |
+|--------|--------|------|
+| \`/pdk\` | \`/pd-okr\` | OKR 目标管理 |
+| \`/pdt\` | \`/pd-thinking\` | 思维模型管理 |
+| \`/pdrl\` | \`/pd-reflect\` | 手动触发反思 |
+| \`/pdd\` | \`/pd-daily\` | 进化日报 |
+| \`/pdg\` | \`/pd-grooming\` | 工作区清理 |
 
-## ⚙️ 配置管理
-| 命令 | 用途 | 使用时机 |
-|------|------|----------|
-| \`/pd-context\` | 控制上下文注入 | 想减少/增加注入内容 |
-| \`/pd-okr\` | OKR 目标管理 | 设置战略目标 |
-
-## 🧠 进化相关
-| 命令 | 用途 | 使用时机 |
-|------|------|----------|
-| \`/pd-thinking\` | 思维模型管理 | 更新 Thinking OS |
-| \`/pd-daily\` | 进化日报 | 每日回顾时 |
-| \`/pd-grooming\` | 工作区大扫除 | 定期清理 |
-
-## 💡 常用命令示例
-
-**减少 token 消耗：**
-\`\`\`
-/pd-context minimal
-\`\`\`
-
-**恢复完整上下文：**
-\`\`\`
-/pd-context full
-\`\`\`
-
-**查看当前配置：**
-\`\`\`
-/pd-context status
-\`\`\`
-
-🔍 输入任意命令后加 \`help\` 可查看详细帮助，如 \`/pd-context help\`
+## 其他命令
+| 命令 | 用途 |
+|------|------|
+| \`/pd-status\` | 查看系统状态 |
+| \`/pd-context\` | 控制上下文注入 |
+| \`/pd-focus\` | 焦点文件管理 |
+| \`/pd-export\` | 导出数据 |
+| \`/pd-samples\` | 审核纠错样本 |
+| \`/pd-nocturnal-review\` | 审核 nocturnal 样本 |
+| \`/pd-rollback\` | 回滚情绪事件惩罚 |
+| \`/pd-principle-rollback\` | 回滚原则 |
+| \`/pd-help\` | 显示本帮助 |
 `.trim() };
         } else {
           return { text: `
 📖 **Principles Disciple Command Reference**
 
-## 🚀 Quick Start
-| Command | Purpose | When to Use |
-|---------|---------|-------------|
-| \`/pd-init\` | Initialize workspace | Starting a new project |
-| \`/pd-bootstrap\` | Scan environment tools | Missing dev tools |
+## Quick Start
+| Short | Full | Purpose |
+|-------|------|---------|
+| \`/pdi\` | \`/pd-init\` | Initialize workspace |
+| \`/pdb\` | \`/pd-bootstrap\` | Scan environment tools |
+| \`/pdr\` | \`/pd-research\` | Research tool solutions |
 
-## 📊 Status Query
-| Command | Purpose | When to Use |
-|---------|---------|-------------|
-| \`/pd-status\` | View evolution status | Check GFI and Pain status |
-| \`/pd-focus\` | Focus file management | View/compress/rollback history |
-| \`/pd-export\` | Export data | Export analytics/corrections/orpo |
-| \`/pd-samples\` | Review correction samples | Review pending correction samples |
-| \`/pd-nocturnal-review\` | Review nocturnal samples | Review nocturnal training samples and export ORPO |
+## Status
+| Short | Full | Purpose |
+|-------|------|---------|
+| \`/pdk\` | \`/pd-okr\` | OKR goal management |
+| \`/pdt\` | \`/pd-thinking\` | Mental model management |
+| \`/pdrl\` | \`/pd-reflect\` | Manual reflection trigger |
+| \`/pdd\` | \`/pd-daily\` | Evolution report |
+| \`/pdg\` | \`/pd-grooming\` | Workspace cleanup |
 
-## ⚙️ Configuration
-| Command | Purpose | When to Use |
-|---------|---------|-------------|
-| \`/pd-context\` | Control context injection | Reduce/increase injected content |
-| \`/pd-okr\` | OKR goal management | Set strategic goals |
-
-## 🧠 Evolution
-| Command | Purpose | When to Use |
-|---------|---------|-------------|
-| \`/pd-thinking\` | Mental model management | Update Thinking OS |
-| \`/pd-daily\` | Evolution report | Daily review |
-| \`/pd-grooming\` | Workspace cleanup | Periodic cleanup |
-
-## 💡 Common Examples
-
-**Reduce token usage:**
-\`\`\`
-/pd-context minimal
-\`\`\`
-
-**Restore full context:**
-\`\`\`
-/pd-context full
-\`\`\`
-
-**View current config:**
-\`\`\`
-/pd-context status
-\`\`\`
-
-🔍 Add \`help\` after any command for details, e.g., \`/pd-context help\`
+## Other Commands
+| Command | Purpose |
+|---------|---------|
+| \`/pd-status\` | View system status |
+| \`/pd-context\` | Control context injection |
+| \`/pd-focus\` | Focus file management |
+| \`/pd-export\` | Export data |
+| \`/pd-samples\` | Review correction samples |
+| \`/pd-nocturnal-review\` | Review nocturnal samples |
+| \`/pd-rollback\` | Rollback empathy penalty |
+| \`/pd-principle-rollback\` | Rollback principle |
+| \`/pd-help\` | Show this help |
 `.trim() };
         }
-      }
     });
 
     api.registerCommand({
@@ -520,7 +516,7 @@ const plugin = {
       acceptsArgs: true,
       handler: (ctx) => {
         try {
-          const workspaceDir = api.resolvePath('.');
+          const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
           // Ensure workspaceDir is in config for handlePainCommand
           if (ctx.config) ctx.config.workspaceDir = workspaceDir;
           return handlePainCommand(ctx);
@@ -537,7 +533,7 @@ const plugin = {
       acceptsArgs: true,
       handler: (ctx) => {
         try {
-          const workspaceDir = api.resolvePath('.');
+          const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
           if (ctx.config) ctx.config.workspaceDir = workspaceDir;
           return handleContextCommand(ctx);
         } catch (err) {
@@ -553,7 +549,7 @@ const plugin = {
       acceptsArgs: true,
       handler: (ctx) => {
         try {
-          const workspaceDir = api.resolvePath('.');
+          const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
           if (ctx.config) ctx.config.workspaceDir = workspaceDir;
           return handleFocusCommand(ctx, api);
         } catch (err) {
@@ -569,7 +565,7 @@ const plugin = {
       description: getCommandDescription('pd-evolution-status', language),
       handler: (ctx) => {
         try {
-          const workspaceDir = api.resolvePath('.');
+          const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
           if (ctx.config) ctx.config.workspaceDir = workspaceDir;
           return handleEvolutionStatusCommand(ctx);
         } catch (err) {
@@ -585,7 +581,7 @@ const plugin = {
       acceptsArgs: true,
       handler: (ctx) => {
         try {
-          const workspaceDir = api.resolvePath('.');
+          const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
           if (ctx.config) ctx.config.workspaceDir = workspaceDir;
           return handlePrincipleRollbackCommand(ctx);
         } catch (err) {
@@ -601,7 +597,7 @@ const plugin = {
       acceptsArgs: true,
       handler: (ctx) => {
         try {
-          const workspaceDir = api.resolvePath('.');
+          const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
           if (ctx.config) ctx.config.workspaceDir = workspaceDir;
           return handleRollbackCommand(ctx);
         } catch (err) {
@@ -618,7 +614,7 @@ const plugin = {
       acceptsArgs: true,
       handler: (ctx) => {
         try {
-          const workspaceDir = api.resolvePath('.');
+          const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
           if (ctx.config) ctx.config.workspaceDir = workspaceDir;
           return handleExportCommand(ctx);
         } catch (err) {
@@ -634,7 +630,7 @@ const plugin = {
       acceptsArgs: true,
       handler: (ctx) => {
         try {
-          const workspaceDir = api.resolvePath('.');
+          const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
           if (ctx.config) ctx.config.workspaceDir = workspaceDir;
           return handleSamplesCommand(ctx);
         } catch (err) {
@@ -650,7 +646,7 @@ const plugin = {
       acceptsArgs: true,
       handler: (ctx) => {
         try {
-          const workspaceDir = api.resolvePath('.');
+          const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
           if (ctx.config) ctx.config.workspaceDir = workspaceDir;
           return handleNocturnalReviewCommand(ctx);
         } catch (err) {
@@ -666,7 +662,7 @@ const plugin = {
       acceptsArgs: true,
       handler: (ctx) => {
         try {
-          const workspaceDir = api.resolvePath('.');
+          const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
           if (ctx.config) ctx.config.workspaceDir = workspaceDir;
           return handleNocturnalTrainCommand(ctx);
         } catch (err) {
@@ -682,7 +678,7 @@ const plugin = {
       acceptsArgs: true,
       handler: (ctx) => {
         try {
-          const workspaceDir = api.resolvePath('.');
+          const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
           if (ctx.config) ctx.config.workspaceDir = workspaceDir;
           return handleNocturnalRolloutCommand(ctx);
         } catch (err) {
@@ -698,7 +694,7 @@ const plugin = {
       acceptsArgs: true,
       handler: (ctx) => {
         try {
-          const workspaceDir = api.resolvePath('.');
+          const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
           if (ctx.config) ctx.config.workspaceDir = workspaceDir;
           return handleWorkflowDebugCommand(ctx);
         } catch (err) {
@@ -715,7 +711,7 @@ const plugin = {
       acceptsArgs: true,
       handler: (ctx) => {
         try {
-          const workspaceDir = api.resolvePath('.');
+          const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
           if (ctx.config) ctx.config.workspaceDir = workspaceDir;
           return handlePromoteImplCommand(ctx);
         } catch (err) {
@@ -731,7 +727,7 @@ const plugin = {
       acceptsArgs: true,
       handler: (ctx) => {
         try {
-          const workspaceDir = api.resolvePath('.');
+          const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
           if (ctx.config) ctx.config.workspaceDir = workspaceDir;
           return handleDisableImplCommand(ctx);
         } catch (err) {
@@ -747,7 +743,7 @@ const plugin = {
       acceptsArgs: true,
       handler: (ctx) => {
         try {
-          const workspaceDir = api.resolvePath('.');
+          const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
           if (ctx.config) ctx.config.workspaceDir = workspaceDir;
           return handleArchiveImplCommand(ctx);
         } catch (err) {
@@ -763,7 +759,7 @@ const plugin = {
       acceptsArgs: true,
       handler: (ctx) => {
         try {
-          const workspaceDir = api.resolvePath('.');
+          const workspaceDir = resolveCommandWorkspaceDir(api, ctx);
           if (ctx.config) ctx.config.workspaceDir = workspaceDir;
           return handleRollbackImplCommand(ctx);
         } catch (err) {

@@ -155,7 +155,7 @@ export abstract class WorkflowManagerBase implements WorkflowManager {
      * Create workflow metadata for store.createWorkflow().
      * Subclasses override to add type-specific fields.
      */
-    /* eslint-disable @typescript-eslint/class-methods-use-this -- Reason: Subclass hook that returns value via spec, not class state */
+     
     protected createWorkflowMetadata<TResult>(
         spec: SubagentWorkflowSpec<TResult>,
         options: {
@@ -181,7 +181,7 @@ export abstract class WorkflowManagerBase implements WorkflowManager {
      * Called after driver.run() succeeds.
      * Subclasses override to call store.createWorkflow() with type-specific metadata.
      */
-    /* eslint-disable @typescript-eslint/max-params -- Reason: Interface hook requires all params from caller context */
+     
     protected async createWorkflowRecord<TResult>(
         workflowId: string,
         childSessionKey: string,
@@ -213,7 +213,7 @@ export abstract class WorkflowManagerBase implements WorkflowManager {
 
     // ── Protected Helpers ────────────────────────────────────────────────────
 
-    /* eslint-disable @typescript-eslint/class-methods-use-this -- Reason: Helper method that delegates to spec.buildPrompt and driver.run */
+     
     protected buildRunParams<TResult>(
         spec: SubagentWorkflowSpec<TResult>,
         options: {
@@ -311,11 +311,11 @@ export abstract class WorkflowManagerBase implements WorkflowManager {
         status: 'ok' | 'error' | 'timeout',
         error?: string
     ): Promise<void> {
-        // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in try, catch has early returns
+         
         let workflow;
         try {
             workflow = this.store.getWorkflow(workflowId);
-        /* eslint-disable @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: Error is handled via early returns based on status, not error value */
+        /* eslint-disable @typescript-eslint/no-unused-vars -- Reason: Error is handled via early returns based on status, not error value */
         } catch (_dbError) {
             // Database connection closed (e.g., by lifecycle notification dispose).
             // If subagent succeeded, this is a known race condition — the workflow

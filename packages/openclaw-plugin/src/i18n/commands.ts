@@ -37,6 +37,10 @@ export const commandDescriptions: Record<string, Record<SupportedLanguage, strin
     zh: '管理思维模型 [status|propose|audit]',
     en: 'Manage Thinking OS [status|propose|audit]'
   },
+  'pd-reflect': {
+    zh: '手动触发 Nocturnal 睡眠反射（跳过 idle 检测）',
+    en: 'Manually trigger Nocturnal sleep reflection (bypass idle check)'
+  },
   'pd-daily': {
     zh: '配置并发送进化日报',
     en: 'Configure and send daily evolution report'

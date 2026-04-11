@@ -418,7 +418,7 @@ export class RuntimeSummaryService {
    * NOT a truth source for Phase 3 eligibility or decisions.
    * Queue is the only authoritative execution truth source.
    */
-  /* eslint-disable @typescript-eslint/max-params -- Reason: Directive summary requires queue, directive, timestamp, and warnings */
+   
   private static buildDirectiveSummary(
     queue: QueueItem[] | null,
     directive: DirectiveFile | null,

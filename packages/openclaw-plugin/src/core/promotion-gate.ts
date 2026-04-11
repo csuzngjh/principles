@@ -70,7 +70,7 @@ export const DEFAULT_ALLOWED_MARGIN = 0.05;
  * Allowed worker profiles for Phase 7 shadow rollout.
  * Only bounded local workers eligible. local-reader first, local-editor deferred.
  */
-// eslint-disable-next-line no-unused-vars, @typescript-eslint/no-unused-vars -- Reason: reserved for Phase 7 shadow rollout profile validation
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- Reason: reserved for Phase 7 shadow rollout profile validation
 const ALLOWED_ROLLOUT_PROFILES: readonly TrainableWorkerProfile[] = ['local-reader'];
 
 /**
@@ -233,7 +233,7 @@ function writeRegistry(stateDir: string, registry: PromotionRegistry): void {
  */
 function withPromotionRegistryLock<T>(
   stateDir: string,
-  // eslint-disable-next-line no-unused-vars -- Reason: callback parameter name is type documentation, actual value passed at call site
+   
   fn: (_registry: PromotionRegistry) => T
 ): T {
   const registryPath = getRegistryPath(stateDir);
@@ -318,7 +318,7 @@ export function evaluatePromotionGate(
 ): PromotionGateResult {
   const {
     checkpointId,
-    // eslint-disable-next-line no-unused-vars, @typescript-eslint/no-unused-vars -- Reason: reserved for Phase 7 profile-based targeting
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Reason: reserved for Phase 7 profile-based targeting
     targetProfile: _targetProfile,
     baselineMetrics,
     minDelta = DEFAULT_MIN_DELTA,
@@ -388,9 +388,9 @@ export function evaluatePromotionGate(
   // PREFER real shadow evidence over eval verdict proxy
   // Shadow evidence comes from actual runtime routing decisions
   const shadowStats = computeShadowStats(stateDir, { checkpointId });
-  // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in both if/else branches
+   
   let arbiterRejectRate: number;
-  // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in both if/else branches
+   
   let arbiterRejectSource: 'shadow' | 'eval-proxy';
 
   if (shadowStats && shadowStats.isStatisticallySignificant) {
@@ -424,9 +424,9 @@ export function evaluatePromotionGate(
 
   // --- Check 6: Executability reject rate constraint ---
   // PREFER real shadow evidence: escalation rate + profile rejection rate
-  // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in both if/else branches
+   
   let executabilityRejectRate: number;
-  // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in both if/else branches
+   
   let executabilityRejectSource: 'shadow' | 'eval-proxy';
 
   if (shadowStats && shadowStats.isStatisticallySignificant) {
@@ -484,7 +484,7 @@ export function evaluatePromotionGate(
     qualityCheck.passed;
 
   // --- Suggest state based on checks ---
-  // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in all branches
+   
   let suggestedState: PromotionState | undefined;
   if (allPassed) {
     suggestedState = 'candidate_only';
@@ -585,7 +585,7 @@ export function advancePromotion(
     // - rejected → candidate_only/shadow_ready: allowed via re-evaluation
     //   (new eval data may reverse a previous rejection)
     //
-    // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in all branches
+     
     let targetState: PromotionState;
     if (!gateResult.passes) {
       targetState = 'rejected';

@@ -44,7 +44,7 @@ export function parseThinkingOsMd(content: string): ThinkingOsDirective[] {
 
   // Match all <directive ...> ... </directive> blocks
   const directiveRegex = /<directive\s+([^>]*)>([\s\S]*?)<\/directive>/gi;
-  /* eslint-disable @typescript-eslint/init-declarations, @typescript-eslint/no-use-before-define, @typescript-eslint/prefer-destructuring, no-useless-assignment, @typescript-eslint/no-unused-vars */
+   
   let match: RegExpExecArray | null = null;
 
   while ((match = directiveRegex.exec(content)) !== null) {

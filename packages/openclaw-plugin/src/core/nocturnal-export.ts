@@ -136,7 +136,7 @@ function computeDatasetFingerprint(sampleFingerprints: string[]): string {
  * Serialize a single dataset record + artifact to ORPO JSONL line.
  * Caller guarantees record.targetModelFamily is non-null.
  */
-// eslint-disable-next-line @typescript-eslint/max-params -- Reason: serialization requires record + artifact + export info - refactoring would break internal API
+ 
 function serializeORPOSample(
   record: NocturnalDatasetRecord,
   artifact: ReturnType<typeof readDatasetArtifact>,
@@ -183,7 +183,7 @@ function serializeORPOSample(
 export function exportORPOSamples(
   workspaceDir: string,
   targetModelFamily?: string | null,
-  _options: Record<string, never> = {} // eslint-disable-line @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: options parameter intentionally unused
+  _options: Record<string, never> = {}  
 ): ExportResult {
   const exportId = crypto.randomUUID();
   const now = new Date().toISOString();
@@ -195,7 +195,7 @@ export function exportORPOSamples(
     reviewStatus: 'approved_for_training',
   });
 
-  // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in both if/else branches
+   
   let eligibleRecords: typeof allApprovedRecords;
 
   if (targetModelFamily !== undefined && targetModelFamily !== null) {
@@ -244,7 +244,7 @@ export function exportORPOSamples(
     }
 
     // Read artifact (throws on error — distinguishes read failure from missing artifact)
-    // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in try, catch continues to next iteration
+     
     let artifact;
     try {
       artifact = readDatasetArtifact(workspaceDir, record.sampleFingerprint);

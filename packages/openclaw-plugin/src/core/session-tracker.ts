@@ -33,6 +33,7 @@ export interface SessionState {
     lastErrorSource?: string;
     lastErrorHash: string;
     consecutiveErrors: number;
+    lastGfiDecayAt?: number;  // Timestamp of last GFI decay (for time-based decay)
     
     // Daily statistics (persisted)
     dailyToolCalls: number;
@@ -82,7 +83,7 @@ export function initPersistence(stateDir: string): void {
     }
     
     // Load all existing sessions
-    // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: loadAllSessions is defined later in this file, called here for organizational reasons
+     
     loadAllSessions();
 }
 
@@ -138,6 +139,14 @@ function persistSession(state: SessionState): void {
     
     try {
         fs.writeFileSync(sessionPath, JSON.stringify(state, null, 2), 'utf-8');
+        // Log successful persistence with GFI snapshot for debugging
+        if (state.currentGfi > 0) {
+            SystemLogger.log(
+                state.workspaceDir,
+                'GFI_PERSIST',
+                `Session ${state.sessionId.slice(0, 8)} persisted: GFI=${state.currentGfi.toFixed(1)}, sources=${JSON.stringify(state.gfiBySource)}`
+            );
+        }
     } catch (error) {
         logSessionTrackerWarning(`Failed to persist session ${state.sessionId}`, error);
     }
@@ -171,7 +180,7 @@ export function flushAllSessions(): void {
     }
 }
 
-// eslint-disable-next-line @typescript-eslint/max-params -- Reason: session creation requires all 4 params (sessionId, workspaceDir, sessionKey, trigger) - refactoring would break API
+ 
 function getOrCreateSession(sessionId: string, workspaceDir?: string, sessionKey?: string, trigger?: string): SessionState {
     let state = sessions.get(sessionId);
     if (!state) {
@@ -194,6 +203,7 @@ function getOrCreateSession(sessionId: string, workspaceDir?: string, sessionKey
             lastErrorSource: '',
             lastErrorHash: '',
             consecutiveErrors: 0,
+            lastGfiDecayAt: Date.now(),
             dailyToolCalls: 0,
             dailyToolFailures: 0,
             dailyPainSignals: 0,
@@ -232,7 +242,7 @@ export function trackToolRead(sessionId: string, filePath: string, workspaceDir?
     return state;
 }
 
-// eslint-disable-next-line @typescript-eslint/max-params -- Reason: LLM output tracking requires all 6 params - refactoring would break API
+ 
 export function trackLlmOutput(sessionId: string, usage: TokenUsage | undefined, config?: PainConfig, workspaceDir?: string, sessionKey?: string, trigger?: string): SessionState {
     const state = getOrCreateSession(sessionId, workspaceDir, sessionKey, trigger);
     state.llmTurns += 1;
@@ -271,7 +281,7 @@ export function trackLlmOutput(sessionId: string, usage: TokenUsage | undefined,
 /**
  * Tracks physical friction based on tool execution failures.
  */
-// eslint-disable-next-line @typescript-eslint/max-params -- Reason: friction tracking requires all 5 params - refactoring would break API
+ 
 export function trackFriction(
     sessionId: string,
     deltaF: number,
@@ -305,6 +315,8 @@ export function trackFriction(
     state.dailyGfiPeak = Math.max(state.dailyGfiPeak, state.currentGfi);
     
     // Schedule persistence
+    // Update decay anchor to prevent retroactive decay of the new friction
+    state.lastGfiDecayAt = Date.now();
     schedulePersistence(state);
     
     return state;
@@ -515,4 +527,84 @@ export function resetDailyStats(sessionId: string): void {
         state.dailyGfiPeak = 0;
         schedulePersistence(state);
     }
+}
+
+/**
+ * Apply time-based decay to GFI using segmented exponential decay.
+ * 
+ * Decay rates:
+ * - GFI >= 70 (severe): 3%/min - fast recovery to avoid prolonged blocking
+ * - GFI 40-70 (moderate): 2%/min - medium decay
+ * - GFI < 40 (mild): 1%/min - slow decay to retain as warning
+ * 
+ * Formula: GFI_new = GFI * (1 - λ)^elapsedMinutes
+ * 
+ * @param sessionId - The session to decay
+ * @param elapsedMinutes - Minutes since last decay
+ * @returns Updated session state, or undefined if session not found or GFI is 0
+ */
+export function decayGfi(sessionId: string, elapsedMinutes: number): SessionState | undefined {
+    const state = sessions.get(sessionId);
+    if (!state || state.currentGfi <= 0 || elapsedMinutes <= 0) return undefined;
+    
+    // Determine decay rate based on current GFI level (segmented)
+    let decayRate: number;
+    if (state.currentGfi >= 70) {
+      decayRate = 0.03;  // 3%/min for severe friction
+    } else if (state.currentGfi >= 40) {
+      decayRate = 0.02;  // 2%/min for moderate friction
+    } else {
+      decayRate = 0.01;  // 1%/min for mild friction
+    }
+    
+    // Exponential decay: GFI_new = GFI * (1-λ)^Δt
+    const decayFactor = Math.pow(1 - decayRate, elapsedMinutes);
+    const previousGfi = state.currentGfi;
+    state.currentGfi = Math.max(0, state.currentGfi * decayFactor);
+    
+    // Apply same decay factor to all sources
+    const ledger = ensureGfiLedger(state);
+    for (const source of Object.keys(ledger)) {
+      ledger[source] = Math.max(0, ledger[source] * decayFactor);
+      // Remove sources that have decayed below 0.1
+      if (ledger[source] < 0.1) {
+        delete ledger[source];
+      }
+    }
+    
+    // Round to 1 decimal place
+    state.currentGfi = Math.round(state.currentGfi * 10) / 10;
+    
+    // Update last decay timestamp
+    state.lastGfiDecayAt = Date.now();
+    
+    // Log if significant decay
+    const decayedAmount = previousGfi - state.currentGfi;
+    if (decayedAmount >= 1) {
+      SystemLogger.log(
+        state.workspaceDir,
+        'GFI_DECAY',
+        `GFI decayed by ${decayedAmount.toFixed(1)} (${elapsedMinutes}min at ${decayRate*100}%/min). ${previousGfi.toFixed(1)} → ${state.currentGfi.toFixed(1)}`
+      );
+    }
+    
+    schedulePersistence(state);
+    return state;
+}
+
+/**
+ * Check if GFI decay should be applied and return elapsed minutes since last decay.
+ * @param sessionId - The session to check
+ * @returns Elapsed minutes since last decay, or 0 if no decay needed
+ */
+export function getGfiDecayElapsed(sessionId: string): number {
+  const state = sessions.get(sessionId);
+  if (!state || state.currentGfi <= 0) return 0;
+  
+  const now = Date.now();
+  const lastDecay = state.lastGfiDecayAt || state.lastControlActivityAt || state.lastActivityAt || now;
+  const elapsedMs = now - lastDecay;
+  
+  // Return elapsed minutes (floor to whole minutes)
+  return Math.floor(elapsedMs / 60000);
 }

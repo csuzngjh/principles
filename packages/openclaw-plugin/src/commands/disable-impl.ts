@@ -69,7 +69,7 @@ function _handleListActive(
   return { text: output };
 }
 
-// eslint-disable-next-line @typescript-eslint/max-params -- Reason: Command handler signature must match OpenClaw plugin interface - breaking API change to options objects would affect public contracts
+ 
 function _handleDisableImpl(
   workspaceDir: string,
   stateDir: string,

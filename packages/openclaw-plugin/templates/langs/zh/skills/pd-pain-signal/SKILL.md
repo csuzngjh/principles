@@ -12,7 +12,7 @@ disable-model-invocation: true
 1. 将用户的反馈 `$ARGUMENTS` 作为一条**高优先级**的痛苦信号，写入 `.state/.pain_flag`。
 2. 告知用户信号已注入，并建议其等待下一个 Hook 触发（如 Stop 或 PreCompact）或手动运行 `/reflection-log`。
 
-**写入格式**（必须使用以下 KV 格式，与自动检测渠道保持一致）:
+**写入格式**（必须使用以下 KV 格式，字段按字母排序）:
 
 ```
 agent_id: <当前 agent ID，如 main/builder/diagnostician>
@@ -22,16 +22,17 @@ score: 80
 session_id: <当前 session ID>
 source: human_intervention
 time: <ISO 8601 时间>
-trace_id:
-trigger_text_preview:
 ```
 
-**字段说明**:
+**必填字段**（4 个）:
 - `source`: 固定为 `human_intervention`
 - `score`: 人工干预信号默认设为 `80`（高优先级）
-- `session_id`: 当前会话 ID（从上下文中获取）
-- `agent_id`: 当前智能体 ID（从上下文中获取）
-- `is_risky`: 固定为 `false`
-- `trace_id` / `trigger_text_preview`: 留空即可
+- `time`: ISO 8601 时间戳
+- `reason`: 用户反馈的原文
 
-**⚠️ 注意**: 不要使用其他格式（如只写 Source/Reason/Time 三行），下游诊断系统依赖完整的 KV 字段。
+**可选字段**（自动写入时由系统填充，人工注入时必须填写）:
+- `agent_id`: 当前智能体 ID（如 main/builder/diagnostician）
+- `session_id`: 当前会话 ID（从上下文中获取）
+- `is_risky`: 固定为 `false`
+
+**注意**: `trace_id` 和 `trigger_text_preview` 由系统自动生成，人工注入时**不需要**写这两个字段。

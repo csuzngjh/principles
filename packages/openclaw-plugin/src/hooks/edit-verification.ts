@@ -126,7 +126,7 @@ This is enforced by P-03 (精确匹配前验证原则).`;
  * Handle edit tool verification before allowing operation
  * This enforces P-03 at the tool layer
  */
-// eslint-disable-next-line @typescript-eslint/max-params -- Reason: Hook handler signature requires event + context + config - refactoring would break plugin interface
+ 
 export function handleEditVerification(
   event: PluginHookBeforeToolCallEvent,
   wctx: WorkspaceContext,
@@ -155,11 +155,11 @@ export function handleEditVerification(
   }
 
   // 2. Resolve and read file
-  // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in try, catch has early return
+   
   let absolutePath: string;
   try {
     absolutePath = wctx.resolve(filePath);
-  } catch (_error) { // eslint-disable-line @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: intentionally unused - let it fail naturally on path resolution error
+  } catch (_error) { // eslint-disable-line @typescript-eslint/no-unused-vars -- Reason: intentionally unused - let it fail naturally on path resolution error
     // Path resolution error, let it fail naturally
     return;
   }
@@ -222,7 +222,7 @@ export function handleEditVerification(
     }
 
     // 3. Read current file content with improved error handling
-    // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in try, all catch paths return early
+     
     let currentContent: string;
     try {
       currentContent = fs.readFileSync(absolutePath, 'utf-8');

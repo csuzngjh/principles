@@ -20,7 +20,7 @@ function formatState(state: string): string {
     return `${icon} ${state}`;
 }
 
-// eslint-disable-next-line @typescript-eslint/max-params -- Reason: debug output builder requires all context parameters - refactoring would break API
+ 
 function buildOutput(
     workflowId: string,
     summary: ReturnType<InstanceType<typeof WorkflowStore>['getWorkflow']>,

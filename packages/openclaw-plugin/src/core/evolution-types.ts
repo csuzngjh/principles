@@ -12,15 +12,15 @@
 
  
 export enum EvolutionTier {
-  // eslint-disable-next-line no-unused-vars -- Reason: enum members are used via EvolutionTier.Seed syntax - bare names unused but required for enum structure
+   
   Seed = 1,      // 起步：150行 + 3文件 + 子智能体（现代 AI 能力已足够强）
-  // eslint-disable-next-line no-unused-vars -- Reason: enum members are used via EvolutionTier.Sprout syntax - bare names unused but required for enum structure
+   
   Sprout = 2,    // 成长：300行 + 5文件
-  // eslint-disable-next-line no-unused-vars -- Reason: enum members are used via EvolutionTier.Sapling syntax - bare names unused but required for enum structure
+   
   Sapling = 3,   // 独当：500行 + 10文件 + 风险路径
-  // eslint-disable-next-line no-unused-vars -- Reason: enum members are used via EvolutionTier.Tree syntax - bare names unused but required for enum structure
+   
   Tree = 4,      // 专家：1000行 + 20文件
-  // eslint-disable-next-line no-unused-vars -- Reason: enum members are used via EvolutionTier.Forest syntax - bare names unused but required for enum structure
+   
   Forest = 5     // 大师：完全自主
 }
 
