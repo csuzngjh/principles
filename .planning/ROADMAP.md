@@ -58,7 +58,10 @@ Plans:
   1. pain_diagnosis and sleep_reflection task execution is dispatched by EvolutionTaskDispatcher -- no dispatch logic remains in the worker
   2. EvolutionTaskDispatcher validates task inputs at entry points (following v1.13 contract pattern)
   3. Existing task-execution tests pass without modification to test expectations
-**Plans**: TBD
+**Plans**: 1 plan
+
+Plans:
+- [ ] 26-01-PLAN.md — Extract task dispatch and execution into EvolutionTaskDispatcher
 
 ### Phase 27: Workflow Orchestrator Extraction
 **Goal**: Workflow watchdog, expiry cleanup, and manager lifecycle operate through a dedicated module
