@@ -11,6 +11,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import {
   buildPainFlag,
@@ -19,7 +20,7 @@ import {
   validatePainFlag,
 } from '../../src/core/pain.js';
 
-const TEST_DIR = '/tmp/test-pain-integration';
+const TEST_DIR = path.join(os.tmpdir(), 'test-pain-integration');
 const STATE_DIR = path.join(TEST_DIR, '.state');
 
 describe('Pain Flag Integration (real FS)', () => {

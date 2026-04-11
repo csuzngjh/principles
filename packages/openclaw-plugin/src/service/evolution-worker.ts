@@ -24,6 +24,7 @@ import { DeepReflectWorkflowManager } from './subagent-workflow/deep-reflect-wor
 import { NocturnalWorkflowManager, nocturnalWorkflowSpec } from './subagent-workflow/nocturnal-workflow-manager.js';
 import { createNocturnalTrajectoryExtractor } from '../core/nocturnal-trajectory-extractor.js';
 import { isExpectedSubagentError } from './subagent-workflow/subagent-error-utils.js';
+import { readPainFlagContract } from '../core/pain.js';
 
 const WORKFLOW_TTL_MS = 5 * 60 * 1000; // 5 minutes default TTL for helper workflows
 import { OpenClawTrinityRuntimeAdapter } from '../core/nocturnal-trinity.js';
@@ -484,28 +485,17 @@ export function hasEquivalentPromotedRule(dictionary: { getAllRules(): Record<st
  * Returns null if no pain flag exists.
  */
 export function readRecentPainContext(wctx: WorkspaceContext): RecentPainContext {
-    const painFlagPath = wctx.resolve('PAIN_FLAG');
-    if (!fs.existsSync(painFlagPath)) {
+    const contract = readPainFlagContract(wctx.workspaceDir);
+    if (contract.status !== 'valid') {
         return { mostRecent: null, recentPainCount: 0, recentMaxPainScore: 0 };
     }
 
     try {
-        const rawPain = fs.readFileSync(painFlagPath, 'utf8');
-        const lines = rawPain.split('\n');
-
-        let score = 0;
-        let source = '';
-        let reason = '';
-        let timestamp = '';
-        let sessionId = '';
-
-        for (const line of lines) {
-            if (line.startsWith('score:')) score = parseInt(line.split(':', 2)[1].trim(), 10) || 0;
-            if (line.startsWith('source:')) source = line.split(':', 2)[1].trim();
-            if (line.startsWith('reason:')) reason = line.slice('reason:'.length).trim();
-            if (line.startsWith('time:')) timestamp = line.slice('time:'.length).trim();
-            if (line.startsWith('session_id:')) sessionId = line.slice('session_id:'.length).trim();
-        }
+        const score = parseInt(contract.data.score ?? '0', 10) || 0;
+        const source = contract.data.source ?? '';
+        const reason = contract.data.reason ?? '';
+        const timestamp = contract.data.time ?? '';
+        const sessionId = contract.data.session_id ?? '';
 
         if (score > 0) {
             return {
@@ -669,6 +659,41 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
         if (!fs.existsSync(painFlagPath)) return result;
 
         const rawPain = fs.readFileSync(painFlagPath, 'utf8');
+        const contract = readPainFlagContract(wctx.workspaceDir);
+
+        if (contract.status === 'valid') {
+            const score = parseInt(contract.data.score ?? '0', 10) || 0;
+            const source = contract.data.source ?? 'unknown';
+            const reason = contract.data.reason ?? 'Systemic pain detected';
+            const preview = contract.data.trigger_text_preview ?? '';
+            const isQueued = contract.data.status === 'queued';
+            const traceId = contract.data.trace_id ?? '';
+            const sessionId = contract.data.session_id ?? '';
+            const agentId = contract.data.agent_id ?? '';
+
+            result.exists = true;
+            result.score = score;
+            result.source = source;
+            result.enqueued = isQueued;
+
+            if (isQueued) {
+                result.skipped_reason = 'already_queued';
+                if (logger) logger.info(`[PD:EvolutionWorker] Pain flag already queued (score=${score}, source=${source})`);
+                return result;
+            }
+
+            if (logger) logger.info(`[PD:EvolutionWorker] Detected pain flag (score: ${score}, source: ${source}). Enqueueing evolution task.`);
+            return doEnqueuePainTask(wctx, logger, painFlagPath, result, {
+                score, source, reason, preview, traceId, sessionId, agentId,
+            });
+        }
+
+        if (contract.status === 'invalid' && (contract.format === 'kv' || contract.format === 'json' || contract.format === 'invalid_json')) {
+            result.exists = true;
+            result.skipped_reason = `invalid_pain_flag (${contract.missingFields.join(', ') || contract.format})`;
+            if (logger) logger.warn(`[PD:EvolutionWorker] Invalid pain flag skipped: ${result.skipped_reason}`);
+            return result;
+        }
 
         // Try JSON format first (pain skill structured output)
         // The file may have 'status: queued' and 'task_id: xxx' appended after the JSON object.
