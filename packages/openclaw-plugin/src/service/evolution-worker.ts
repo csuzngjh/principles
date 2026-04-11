@@ -129,12 +129,17 @@ interface WorkerStatusReport {
     errors: string[];
 }
 
-function writeWorkerStatus(stateDir: string, report: WorkerStatusReport): void {
+function writeWorkerStatus(stateDir: string, report: WorkerStatusReport, eventLog: EventLog): void {
     try {
         const statusPath = path.join(stateDir, 'worker-status.json');
         fs.writeFileSync(statusPath, JSON.stringify(report, null, 2), 'utf8');
-    } catch {
+    } catch (err) {
         // Non-critical: worker-status.json is for monitoring, failure is acceptable
+        eventLog.recordSkip(undefined, {
+            reason: 'worker_status_write_failed',
+            fallback: 'none',
+            context: { error: String(err) },
+        });
     }
 }
 
@@ -338,7 +343,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                 }
 
                 cycleResult.duration_ms = Date.now() - cycleStart;
-                writeWorkerStatus(wctx.stateDir, cycleResult);
+                writeWorkerStatus(wctx.stateDir, cycleResult, eventLog);
             } catch (err) {
                 const errMsg = `Error in worker interval: ${String(err)}`;
                 if (logger) logger.error(`[PD:EvolutionWorker] ${errMsg}`);
@@ -349,7 +354,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                     pain_flag: { exists: false, score: null, source: null, enqueued: false, skipped_reason: null },
                     queue: { total: 0, pending: 0, in_progress: 0, completed_this_cycle: 0, failed_this_cycle: 0 },
                     errors: [errMsg],
-                });
+                }, eventLog);
             }
 
             timeoutId = setTimeout(runCycle, interval);
