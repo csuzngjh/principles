@@ -19,7 +19,7 @@
 - [x] **Phase 19: Unified Workspace Resolution Contract** - replace ad-hoc workspace resolution with one fail-fast service across hooks, commands, workers, and HTTP routes (BC-01, BC-02, BC-03)
 - [x] **Phase 20: Critical Data Schema Validation** - centralize parsing and validation for `.pain_flag`, snapshot ingress, and related state-file reads (SCHEMA-01, SCHEMA-02, SCHEMA-03)
 - [x] **Phase 21: Runtime Contract and End-to-End Hardening** - remove constructor-name capability guessing, bound session selection by time, and lock the main path with contract tests (RT-01, RT-02, RT-03, E2E-01, E2E-02, E2E-03)
-- [ ] **Phase 22: BC-02 Residual Fallback Cleanup** - remove remaining `api.resolvePath('.')` fallbacks from secondary tool files (BC-02)
+- [x] **Phase 22: BC-02 Residual Fallback Cleanup** - remove remaining `api.resolvePath('.')` fallbacks from secondary tool files (BC-02) (completed 2026-04-11)
 - [ ] **Phase 23: v1.13 Phase Verification Completion** - generate VERIFICATION.md and SUMMARY.md for phases 19-21 (BC-01, BC-02, BC-03, SCHEMA-01, SCHEMA-02, SCHEMA-03, RT-01, RT-02, RT-03, E2E-01, E2E-02, E2E-03)
 
 ### Phase 19: Unified Workspace Resolution Contract
@@ -70,10 +70,10 @@
 
 **Requirements:** BC-02
 
-**Plans:** 1 plan
+**Plans:** 1/1 plans complete
 
 Plans:
-- [ ] 22-01-PLAN.md — Remove resolvePath fallback from deep-reflect.ts and critique-prompt.ts
+- [x] 22-01-PLAN.md — Remove resolvePath fallback from deep-reflect.ts and critique-prompt.ts
 
 **UAT:**
 - `rg "api\.resolvePath" packages/openclaw-plugin/src` returns zero matches
@@ -108,7 +108,7 @@ This milestone is intentionally paused. It should not resume until the productio
 | 19 | v1.13 | 2/2 | Local execution complete | 2026-04-11 |
 | 20 | v1.13 | 2/2 | Local execution complete | 2026-04-11 |
 | 21 | v1.13 | 1/1 | Local execution complete | 2026-04-11 |
-| 22 | v1.13 | 0/1 | Gap closure (BC-02 residuals) | — |
+| 22 | v1.13 | 1/1 | Complete    | 2026-04-11 |
 | 23 | v1.13 | 0/1 | Gap closure (verification) | — |
 
 *Last updated: 2026-04-11 after gap closure planning*
