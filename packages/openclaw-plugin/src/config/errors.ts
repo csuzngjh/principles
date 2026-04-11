@@ -162,3 +162,41 @@ export class TrajectoryError extends PdError {
     this.name = 'TrajectoryError';
   }
 }
+
+/**
+ * Thrown when queue file is corrupted and cannot be parsed or validated.
+ * The corrupted file is backed up before throwing.
+ */
+export class QueueCorruptionError extends PdError {
+  constructor(
+    public readonly queuePath: string,
+    public readonly backupPath: string | undefined,
+    reasons: string[],
+    options?: { cause?: unknown }
+  ) {
+    super(
+      `[PD:Queue] Queue corrupted at ${queuePath}. ${reasons.join('; ')}`,
+      'QUEUE_CORRUPTION',
+      options
+    );
+    this.name = 'QueueCorruptionError';
+  }
+}
+
+/**
+ * Thrown when a queue item fails validation (missing required fields, invalid status).
+ */
+export class QueueValidationError extends PdError {
+  constructor(
+    public readonly itemId: string,
+    reasons: string[],
+    options?: { cause?: unknown }
+  ) {
+    super(
+      `[PD:Queue] Validation failed for item ${itemId}: ${reasons.join('; ')}`,
+      'QUEUE_VALIDATION',
+      options
+    );
+    this.name = 'QueueValidationError';
+  }
+}
