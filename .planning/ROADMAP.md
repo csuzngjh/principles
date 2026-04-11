@@ -48,7 +48,13 @@ Plans:
   1. Pain flag detection and parsing is handled entirely by PainFlagDetector -- no pain-parsing logic remains in the worker
   2. PainFlagDetector validates inputs at its entry points (following v1.13 contract pattern)
   3. Existing pain-detection tests pass without modification to test expectations
-**Plans**: TBD
+**Plans**: 4 plans
+
+Plans:
+- [x] 28-01-PLAN.md — TaskContextBuilder class + EventLog recordSkip/recordDrop methods
+- [x] 28-02-PLAN.md — SessionTracker class wrapper
+- [x] 28-03-PLAN.md — Worker slim (evolution-worker.ts lifecycle orchestration only)
+- [ ] 28-04-PLAN.md — Fallback audit (all 16 fallback points classified)
 
 ### Phase 26: Task Dispatcher Extraction
 **Goal**: Task dispatch and execution logic for pain_diagnosis and sleep_reflection runs through a dedicated module
@@ -86,7 +92,13 @@ Plans:
   3. Every extracted module has input validation at entry points following the v1.13 factory/validator pattern (CONTRACT-03 satisfied)
   4. All 16 silent fallback points are classified as either fail-fast (boundary entry) or fail-visible (pipeline middle)
   5. Fail-visible points emit structured skip/drop events that downstream diagnostics can consume
-**Plans**: TBD
+**Plans**: 4 plans
+
+Plans:
+- [x] 28-01-PLAN.md — TaskContextBuilder class + EventLog recordSkip/recordDrop methods
+- [x] 28-02-PLAN.md — SessionTracker class wrapper
+- [ ] 28-03-PLAN.md — Worker slim (evolution-worker.ts lifecycle orchestration only)
+- [ ] 28-04-PLAN.md — Fallback audit (all 16 fallback points classified)
 
 ### Phase 29: Integration Verification
 **Goal**: The refactored worker passes all integration checks -- end-to-end flow works, public API unchanged, no resource leaks
@@ -110,7 +122,7 @@ Phases execute in numeric order: 24 -> 25 -> 26 -> 27 -> 28 -> 29
 | 25. Pain Flag Detector Extraction | v1.14 | 1/1 | Complete    | 2026-04-11 |
 | 26. Task Dispatcher Extraction | v1.14 | 0/? | Not started | - |
 | 27. Workflow Orchestrator Extraction | v1.14 | 1/1 | Planning complete | - |
-| 28. Context Builder + Service Slim + Fallback Audit | v1.14 | 0/? | Not started | - |
+| 28. Context Builder + Service Slim + Fallback Audit | v1.14 | 3/4 | In Progress|  |
 | 29. Integration Verification | v1.14 | 0/? | Not started | - |
 
 *Last updated: 2026-04-11*
