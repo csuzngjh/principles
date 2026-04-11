@@ -43,7 +43,6 @@ packages/create-principles-disciple/plugin/
 # Local environment and state
 .claude/
 claude/
-.planning/  # GSD workflow files tracked in git for multi-env sync
 conductor/
 .principles/
 .state/
