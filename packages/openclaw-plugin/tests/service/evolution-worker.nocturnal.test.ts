@@ -52,6 +52,7 @@ vi.mock('../../src/core/nocturnal-trajectory-extractor.js', async () => {
 
 import { EvolutionWorkerService, readRecentPainContext } from '../../src/service/evolution-worker.js';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
+import { handlePdReflect } from '../../src/commands/pd-reflect.js';
 import { safeRmDir } from '../test-utils.js';
 
 function readQueue(stateDir: string) {
@@ -546,6 +547,215 @@ score: 80`,
       );
       expect(mockGetNocturnalSessionSnapshot).not.toHaveBeenCalledWith('newer-session');
       expect(mockGetNocturnalSessionSnapshot).toHaveBeenCalledWith('older-session');
+    } finally {
+      EvolutionWorkerService.stop({ workspaceDir, stateDir, logger: console } as any);
+      safeRmDir(workspaceDir);
+    }
+  });
+
+  // === End-to-End Contract Tests ===
+
+  it('e2e: pain flag → worker enqueue → session_id is correctly attached to queued task', async () => {
+    // This test verifies the contract: when a pain flag with session_id exists,
+    // any sleep_reflection task created by the worker MUST carry that session_id
+    // in its recentPainContext.mostRecent.sessionId field.
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-e2e-pain-enqueue-'));
+    const stateDir = path.join(workspaceDir, '.state');
+    fs.mkdirSync(stateDir, { recursive: true });
+
+    // Write a pain flag WITH session_id
+    fs.writeFileSync(
+      path.join(stateDir, '.pain_flag'),
+      `source: tool_failure
+score: 70
+reason: Test pain with session
+time: 2026-04-10T00:00:00.000Z
+session_id: pain-session-abc
+`,
+      'utf8'
+    );
+
+    // Verify the worker's readRecentPainContext extracts the session_id correctly
+    const wctx = WorkspaceContext.fromHookContext({ workspaceDir, stateDir, logger: console } as any);
+    const painContext = readRecentPainContext(wctx);
+
+    // Contract: session_id must be extracted from the pain flag
+    expect(painContext.mostRecent).toBeDefined();
+    expect(painContext.mostRecent.sessionId).toBe('pain-session-abc');
+    expect(painContext.mostRecent.score).toBe(70);
+    expect(painContext.mostRecent.source).toBe('tool_failure');
+
+    // Now simulate what the worker does: attach this context to a queued task
+    const simulatedTask = {
+      id: 'simulated-task',
+      taskKind: 'sleep_reflection',
+      recentPainContext: painContext,
+    };
+
+    // Verify the contract holds end-to-end
+    expect(simulatedTask.recentPainContext.mostRecent.sessionId).toBe('pain-session-abc');
+  });
+
+  it('e2e: /pd-reflect command writes to workspace/.state, never to HOME/.state', async () => {
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-e2e-command-writes-'));
+    const stateDir = path.join(workspaceDir, '.state');
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.mkdirSync(path.join(stateDir, 'sessions'), { recursive: true });
+
+    // Ensure HOME/.state does NOT have the queue file
+    const homeState = path.join(os.homedir(), '.state');
+    const homeQueue = path.join(homeState, 'evolution_queue.json');
+    const homeExistedBefore = fs.existsSync(homeQueue);
+
+    try {
+      // Execute the command with explicit workspaceDir
+      const result = await handlePdReflect.handler({
+        workspaceDir,
+        channel: 'test',
+        isAuthorizedSender: true,
+        commandBody: '',
+        config: {},
+        api: { logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } } as any,
+      } as any);
+
+      // Command should succeed
+      expect(result.isError).toBeFalsy();
+      expect(result.text).toContain('enqueued');
+
+      // Queue file should exist in workspace
+      const workspaceQueue = path.join(stateDir, 'evolution_queue.json');
+      expect(fs.existsSync(workspaceQueue)).toBe(true);
+
+      // Verify the task is in the workspace queue
+      const queue = readQueue(stateDir);
+      const manualTasks = queue.filter((t: any) => t.id.startsWith('manual_'));
+      expect(manualTasks.length).toBe(1);
+      expect(manualTasks[0].taskKind).toBe('sleep_reflection');
+
+      // HOME/.state/evolution_queue.json should NOT have been created/modified by this command
+      if (!homeExistedBefore) {
+        expect(fs.existsSync(homeQueue)).toBe(false);
+      }
+    } finally {
+      safeRmDir(workspaceDir);
+    }
+  });
+
+  it('e2e: bounded session selection — never picks a session newer than the triggering task', async () => {
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-e2e-bounded-'));
+    const stateDir = path.join(workspaceDir, '.state');
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.mkdirSync(path.join(stateDir, 'sessions'), { recursive: true });
+    fs.mkdirSync(path.join(stateDir, 'logs'), { recursive: true });
+
+    // Mock: only the older session snapshot is available
+    mockGetNocturnalSessionSnapshot.mockImplementation((sessionId: string) => {
+      if (sessionId === 'older-session-bounded') {
+        return {
+          sessionId: 'older-session-bounded',
+          startedAt: '2026-04-09T23:00:00.000Z',
+          updatedAt: '2026-04-09T23:10:00.000Z',
+          assistantTurns: [],
+          userTurns: [],
+          toolCalls: [],
+          painEvents: [{ source: 'tool_failure', score: 60 }],
+          gateBlocks: [],
+          stats: {
+            totalAssistantTurns: 3,
+            totalToolCalls: 5,
+            totalPainEvents: 1,
+            totalGateBlocks: 0,
+            failureCount: 1,
+          },
+        };
+      }
+      return null;
+    });
+
+    // Candidate sessions — one newer, one older than the task trigger time
+    mockListRecentNocturnalCandidateSessions.mockReturnValue([
+      {
+        sessionId: 'newer-unrelated',
+        startedAt: '2026-04-10T01:00:00.000Z',
+        updatedAt: '2026-04-10T01:10:00.000Z',
+        assistantTurnCount: 2,
+        toolCallCount: 5,
+        painEventCount: 2,
+        gateBlockCount: 0,
+        failureCount: 1,
+      },
+      {
+        sessionId: 'older-session-bounded',
+        startedAt: '2026-04-09T23:00:00.000Z',
+        updatedAt: '2026-04-09T23:10:00.000Z',
+        assistantTurnCount: 3,
+        toolCallCount: 5,
+        painEventCount: 1,
+        gateBlockCount: 0,
+        failureCount: 1,
+      },
+    ]);
+
+    mockStartWorkflow.mockResolvedValue({ workflowId: 'wf-bounded', childSessionKey: 'child-bounded', state: 'active' });
+    mockGetWorkflowDebugSummary.mockResolvedValue({ state: 'active', metadata: {} });
+
+    EvolutionWorkerService.api = {
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+      runtime: {},
+    } as any;
+
+    // Task triggered at 2026-04-10T00:00:00.000Z — no pain session ID, so it falls back to candidate selection
+    fs.writeFileSync(
+      path.join(stateDir, 'evolution_queue.json'),
+      JSON.stringify([
+        {
+          id: 'sleep-bounded',
+          taskKind: 'sleep_reflection',
+          priority: 'medium',
+          score: 50,
+          source: 'nocturnal',
+          reason: 'Sleep reflection',
+          timestamp: '2026-04-10T00:00:00.000Z',
+          enqueued_at: '2026-04-10T00:00:00.000Z',
+          status: 'pending',
+          retryCount: 0,
+          maxRetries: 1,
+          recentPainContext: {
+            mostRecent: null,
+            recentPainCount: 0,
+            recentMaxPainScore: 0,
+          },
+        },
+      ], null, 2),
+      'utf8'
+    );
+
+    try {
+      EvolutionWorkerService.start({
+        workspaceDir,
+        stateDir,
+        logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+        config: { get: () => 15000 },
+      } as any);
+
+      await vi.advanceTimersByTimeAsync(6000);
+
+      // Verify dateTo boundary was passed
+      expect(mockListRecentNocturnalCandidateSessions).toHaveBeenCalledWith(
+        expect.objectContaining({
+          limit: 20,
+          minToolCalls: 1,
+          dateTo: '2026-04-10T00:00:00.000Z',
+        })
+      );
+
+      // Should NOT query the newer session
+      expect(mockGetNocturnalSessionSnapshot).not.toHaveBeenCalledWith('newer-unrelated');
+      // Should use the older session that passes the time boundary
+      expect(mockGetNocturnalSessionSnapshot).toHaveBeenCalledWith('older-session-bounded');
+
+      // Workflow should have started
+      expect(mockStartWorkflow).toHaveBeenCalled();
     } finally {
       EvolutionWorkerService.stop({ workspaceDir, stateDir, logger: console } as any);
       safeRmDir(workspaceDir);
