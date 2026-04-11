@@ -25,10 +25,10 @@ export const SystemLogger = {
             const logEntry = `[${timestamp}] [${eventType.padEnd(15)}] ${message}\n`;
             
             // Use fire-and-forget async append to prevent blocking
-            fs.appendFile(logFile, logEntry, 'utf8', (_err) => { // eslint-disable-line @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: fire-and-forget, errors silently dropped
+            fs.appendFile(logFile, logEntry, 'utf8', (_err) => {  
                 // Silently drop errors (e.g. disk full) to not crash the gateway
             });
-        } catch (e) { // eslint-disable-line @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: intentionally unused - silently fail if we can't setup the log
+        } catch (e) { // eslint-disable-line @typescript-eslint/no-unused-vars -- Reason: intentionally unused - silently fail if we can't setup the log
             // Silently fail if we can't setup the log
         }
     }

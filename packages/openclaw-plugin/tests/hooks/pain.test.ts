@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { handleAfterToolCall } from '../../src/hooks/pain.js';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import * as ioUtils from '../../src/utils/io.js';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
 import { EventLogService } from '../../src/core/event-log.js';
@@ -80,6 +81,25 @@ describe('Post-Write Checks & Pain Hook', () => {
     expect(WorkspaceContext.fromHookContext).toHaveBeenCalled();
     expect(fs.writeFileSync).not.toHaveBeenCalled();
     expect(mockEmitSync).not.toHaveBeenCalled();
+  });
+
+  it('skips processing when no valid workspace can be resolved', () => {
+    const mockCtx = { workspaceDir: undefined, agentId: 'main', sessionId: 's-invalid' };
+    const mockEvent = { toolName: 'write', params: {}, result: { exitCode: 0 }, error: undefined };
+    const mockApi = {
+      runtime: {
+        agent: {
+          resolveAgentWorkspaceDir: vi.fn().mockReturnValue(os.homedir()),
+        },
+      },
+      config: {},
+      logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() },
+    };
+
+    handleAfterToolCall(mockEvent as any, mockCtx as any, mockApi as any);
+
+    expect(WorkspaceContext.fromHookContext).not.toHaveBeenCalled();
+    expect(mockApi.runtime.agent.resolveAgentWorkspaceDir).toHaveBeenCalledWith(mockApi.config, 'main');
   });
 
   it('should capture pain on tool error with correct source', () => {

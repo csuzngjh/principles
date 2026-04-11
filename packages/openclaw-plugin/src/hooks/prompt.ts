@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { PluginHookBeforePromptBuildEvent, PluginHookAgentContext, PluginHookBeforePromptBuildResult, PluginLogger, OpenClawPluginApi } from '../openclaw-sdk.js';
-import { clearInjectedProbationIds, getSession, resetFriction, setInjectedProbationIds, trackFriction } from '../core/session-tracker.js';
+import { clearInjectedProbationIds, getSession, resetFriction, setInjectedProbationIds, trackFriction, decayGfi, getGfiDecayElapsed } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import type { ContextInjectionConfig} from '../types.js';
 import { defaultContextConfig } from '../types.js';
@@ -308,6 +308,13 @@ export async function handleBeforePromptBuild(
     return;
   }
 
+  // ──── DEBUG: Verify subagent availability in this context ────
+  const subagent = ctx.api?.runtime?.subagent;
+  logger?.info?.(`[PD:DEBUG:SubagentCheck] trigger=${ctx.trigger}, subagent_exists=${!!subagent}, subagent.run_exists=${!!subagent?.run}`);
+  if (subagent?.run) {
+    logger?.info?.('[PD:DEBUG:SubagentCheck] run entrypoint is callable');
+  }
+
   const wctx = WorkspaceContext.fromHookContext(ctx);
   const { trigger, sessionId, api } = ctx;
   if (sessionId) {
@@ -358,7 +365,7 @@ export async function handleBeforePromptBuild(
   // appendSystemContext: Principles + Thinking OS + reflection_log + project_context (cacheable, WebUI-hidden)
   // prependContext: Only short dynamic directives: evolutionDirective + heartbeat
 
-  // eslint-disable-next-line no-useless-assignment -- Reason: initial value unused due to immediate reassignment
+   
   let prependSystemContext = '';
   let prependContext = '';
   let appendSystemContext = '';
@@ -612,6 +619,18 @@ The empathy observer subagent handles pain detection independently.
 
   // ──── 4. Heartbeat-specific checklist ────
   if (trigger === 'heartbeat') {
+    // ──── 4a. GFI Time-based Decay ────
+    // Apply segmented exponential decay to GFI on each heartbeat
+    if (sessionId) {
+      const elapsedMinutes = getGfiDecayElapsed(sessionId);
+      if (elapsedMinutes >= 1) {
+        const decayedState = decayGfi(sessionId, elapsedMinutes);
+        if (decayedState) {
+          logger?.info?.(`[PD:GFI] Heartbeat decay applied: ${elapsedMinutes}min elapsed, GFI now ${decayedState.currentGfi.toFixed(1)}`);
+        }
+      }
+    }
+    
     const heartbeatPath = wctx.resolve('HEARTBEAT');
     if (fs.existsSync(heartbeatPath)) {
       try {
@@ -628,7 +647,7 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
   }
 
   // ──── 6. Dynamic Attitude Matrix (based on GFI) ────
-  // eslint-disable-next-line no-useless-assignment -- Reason: initial value unused due to immediate reassignment
+   
   let attitudeDirective = '';
   const currentGfi = session?.currentGfi || 0;
   
@@ -853,10 +872,10 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
         const filePattern = /\b([a-zA-Z]:\\?[^\s,]+\.[a-z]{2,10}|[./][^\s,]+\.[a-z]{2,10})\b/gi;
         const toolMatches = toolPatterns.flatMap(({ pattern, tool }) => {
           const matches: string[] = [];
-          // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in while loop condition
+           
           let _m;
           const r = new RegExp(pattern.source, pattern.flags);
-          /* eslint-disable @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: regex exec side effect used, match variable intentionally unused */
+          /* eslint-disable @typescript-eslint/no-unused-vars -- Reason: regex exec side effect used, match variable intentionally unused */
           while ((_m = r.exec(latestUserText)) !== null) matches.push(tool);
           return matches;
         });

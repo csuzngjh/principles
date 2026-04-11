@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import { isRisky, normalizePath } from '../utils/io.js';
 import { normalizeProfile } from '../core/profile.js';
 import { computePainScore, buildPainFlag, writePainFlag, trackPrincipleValue } from '../core/pain.js';
-import { getSession, trackFriction, resetFriction, getInjectedProbationIds, clearInjectedProbationIds } from '../core/session-tracker.js';
+import { getSession, trackFriction, resetFriction, getInjectedProbationIds, clearInjectedProbationIds, type SessionState } from '../core/session-tracker.js';
 import { denoiseError, computeHash } from '../utils/hashing.js';
 import { SystemLogger } from '../core/system-logger.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
@@ -10,6 +10,8 @@ import { getEvolutionLogger, createTraceId } from '../core/evolution-logger.js';
 import { recordEvolutionSuccess, recordEvolutionFailure } from '../core/evolution-engine.js';
 import type { EvolutionLoopEvent } from '../core/evolution-types.js';
 import type { PluginHookAfterToolCallEvent, PluginHookToolContext, OpenClawPluginApi } from '../openclaw-sdk.js';
+import { validateWorkspaceDir } from '../core/workspace-dir-validation.js';
+import { resolveWorkspaceDir } from '../core/workspace-dir-service.js';
 
 /**
  * Interface for tool parameters to avoid 'any'
@@ -49,7 +51,9 @@ export function handleAfterToolCall(
   ctx: PluginHookToolContext & { workspaceDir?: string; pluginConfig?: Record<string, unknown> },
   api?: OpenClawPluginApi
 ): void {
-  const effectiveWorkspaceDir = ctx.workspaceDir || (api as unknown as { workspaceDir?: string })?.workspaceDir || api?.resolvePath?.('.');
+  const effectiveWorkspaceDir = api
+    ? resolveWorkspaceDir(api, ctx, { source: 'after_tool_call' })
+    : validateWorkspaceDir(ctx.workspaceDir) ? undefined : ctx.workspaceDir;
   if (!effectiveWorkspaceDir) {
     return;
   }
@@ -123,10 +127,10 @@ export function handleAfterToolCall(
     const hash = computeHash(denoised);
     
     const deltaF = config.get('scores.tool_failure_friction') || 30;
-    const updatedState = trackFriction(sessionId, deltaF, hash, effectiveWorkspaceDir);
+    const updatedState = trackFriction(sessionId, deltaF, hash, effectiveWorkspaceDir, { source: 'tool_failure' });
     
     // ── Trust Engine: Record failure ──
-    /* eslint-disable @typescript-eslint/no-use-before-define -- Reason: extractErrorType is defined later in this file */
+     
     const errorType = extractErrorType(event.error || errorText);
     const filePath = params.file_path || params.path || params.file;
     const relPath = typeof filePath === 'string' ? normalizePath(filePath, effectiveWorkspaceDir) : 'unknown';
@@ -184,7 +188,23 @@ export function handleAfterToolCall(
     clearInjectedProbationIds(sessionId, effectiveWorkspaceDir);
   } else {
     // ── SUCCESS BRANCH ──
-    const resetState = resetFriction(sessionId, effectiveWorkspaceDir);
+    // Only reduce tool_failure source GFI by 50%, preserve user_empathy and other sources
+    // This prevents "read file success" from wiping user frustration signals
+    const session = getSession(sessionId);
+    const toolFailureGfi = session?.gfiBySource?.['tool_failure'] || 0;
+    
+    let resetState: SessionState;
+    if (toolFailureGfi > 0) {
+      // Reduce tool_failure source by 50% (relief from successful tool execution)
+      const reliefAmount = toolFailureGfi * 0.5;
+      resetState = resetFriction(sessionId, effectiveWorkspaceDir, {
+        source: 'tool_failure',
+        amount: reliefAmount,
+      });
+    } else {
+      // No tool_failure GFI to reduce, just get current state
+      resetState = session || resetFriction(sessionId, effectiveWorkspaceDir);
+    }
     
     recordEvolutionSuccess(effectiveWorkspaceDir, event.toolName, {
         sessionId,

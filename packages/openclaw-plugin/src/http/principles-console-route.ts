@@ -9,6 +9,7 @@ import { TrajectoryRegistry } from '../core/trajectory.js';
 import { getCentralDatabase } from '../service/central-database.js';
 import { CentralOverviewService } from '../service/central-overview-service.js';
 import { CentralHealthService } from '../service/central-health-service.js';
+import { resolveRequiredWorkspaceDir } from '../core/workspace-dir-service.js';
 
 const ROUTE_PREFIX = '/plugins/principles';
 const API_PREFIX = `${ROUTE_PREFIX}/api`;
@@ -90,11 +91,11 @@ function serveFile(res: ServerResponse, filePath: string): boolean {
 }
 
 function createService(api: OpenClawPluginApi): ControlUiQueryService {
-  const workspaceDir = api.resolvePath('.');
+  const workspaceDir = resolveRequiredWorkspaceDir(api, { agentId: 'main' }, { source: 'principles_console.control_ui', fallbackAgentId: 'main' });
   return new ControlUiQueryService(workspaceDir);
 }
 
-/* eslint-disable @typescript-eslint/max-params -- Reason: Route handler requires api, pathname, req, and res */
+ 
 function handleApiRoute(
   api: OpenClawPluginApi,
   pathname: string,
@@ -102,13 +103,20 @@ function handleApiRoute(
   res: ServerResponse,
 ): Promise<boolean> | boolean {
   // Check authentication for API routes
-  /* eslint-disable @typescript-eslint/no-use-before-define -- Reason: validateGatewayAuth is defined later in the file */
+   
   if (!validateGatewayAuth(req)) {
     json(res, 401, { error: 'unauthorized', message: 'Valid Gateway token required.' });
     return true;
   }
 
-  const service = createService(api);
+  let service: ControlUiQueryService;
+  try {
+    service = createService(api);
+  } catch (error) {
+    api.logger.warn(`[PD:ControlUI] Failed to resolve workspace for ${pathname}: ${String(error)}`);
+    json(res, 500, { error: 'internal_error', message: String(error) });
+    return true;
+  }
   const url = new URL(req.url || pathname, 'http://127.0.0.1');
   const method = (req.method || 'GET').toUpperCase();
 
@@ -338,7 +346,7 @@ function handleApiRoute(
 
   // === Evolution API ===
   const evolutionService = () => {
-    const workspaceDir = api.resolvePath('.');
+    const workspaceDir = resolveRequiredWorkspaceDir(api, { agentId: 'main' }, { source: 'principles_console.evolution', fallbackAgentId: 'main' });
     const trajectory = TrajectoryRegistry.get(workspaceDir);
     return getEvolutionQueryService(trajectory);
   };
@@ -398,7 +406,7 @@ function handleApiRoute(
 
   // === Health Query API (v1.1 new endpoints) ===
   const healthService = () => {
-    const workspaceDir = api.resolvePath('.');
+    const workspaceDir = resolveRequiredWorkspaceDir(api, { agentId: 'main' }, { source: 'principles_console.health', fallbackAgentId: 'main' });
     return new HealthQueryService(workspaceDir);
   };
 

@@ -281,7 +281,7 @@ async function compressFocus(
   cleanupHistory(focusPath);
 
   // 5. 压缩内容
-  // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in both try and catch blocks
+   
   let compressedContent: string;
   try {
     compressedContent = compressFocusContent(oldContent, workspaceDir);
@@ -477,7 +477,7 @@ export async function handleFocusCommand(
   // 检测语言（与 context.ts 保持一致）
   const isZh = (ctx.config?.language as string) === 'zh';
 
-  // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in all switch cases
+   
   let result: string;
 
   switch (subCommand) {

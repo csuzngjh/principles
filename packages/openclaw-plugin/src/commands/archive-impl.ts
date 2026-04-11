@@ -51,13 +51,13 @@ export function handleArchiveImplCommand(ctx: PluginCommandContext): PluginComma
 
   // Subcommand: list
   if (subcommand === 'list') {
-    // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: Mutual recursion between helper functions - reordering would break logical grouping
+     
     return _handleListArchivable(stateDir, isZh);
   }
 
   // Archive by ID
   const targetId = subcommand;
-  // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: Mutual recursion between helper functions - reordering would break logical grouping
+   
   return _handleArchiveImpl(workspaceDir, stateDir, targetId, isZh);
 }
 
@@ -94,7 +94,7 @@ function _handleListArchivable(
   return { text: output };
 }
 
-// eslint-disable-next-line @typescript-eslint/max-params -- Reason: Command handler signature must match OpenClaw plugin interface - breaking API change to options objects would affect public contracts
+ 
 function _handleArchiveImpl(
   workspaceDir: string,
   stateDir: string,

@@ -156,7 +156,8 @@ export class HealthQueryService {
     const queue = this.readQueueStats();
     const painFlag = this.readPainFlag();
 
-    // GFI: always read from SQLite (synced from session JSON at construction time)
+    // GFI: Re-sync from session JSON on every request for real-time data
+    this.syncGfiFromSession();
     const gfiData = this.readGfiFromDb();
     const {currentGfi} = gfiData;
     const peakToday = gfiData.dailyGfiPeak;
@@ -277,7 +278,8 @@ export class HealthQueryService {
       ORDER BY total DESC
     `, today);
 
-    // GFI: read from SQLite (synced from session JSON at construction time)
+    // GFI: Re-sync from session JSON for real-time data
+    this.syncGfiFromSession();
     const gfiData = this.readGfiFromDb();
 
     return {
@@ -551,7 +553,7 @@ export class HealthQueryService {
     const streamPath = resolvePdPath(this.workspaceDir, 'EVOLUTION_STREAM');
     if (!fs.existsSync(streamPath)) return [];
 
-    // eslint-disable-next-line no-useless-assignment -- Reason: initial value unused due to immediate reassignment
+     
     let lines: string[] = [];
     try {
       const raw = fs.readFileSync(streamPath, 'utf8').trim();
@@ -563,7 +565,7 @@ export class HealthQueryService {
 
     const records: RecentPrincipleChange[] = [];
     for (const line of lines) {
-      // eslint-disable-next-line no-useless-assignment -- Reason: initial value unused due to immediate reassignment in try/catch
+       
       let event: EvolutionStreamRecord | null = null;
       try {
         event = JSON.parse(line) as EvolutionStreamRecord;
@@ -781,7 +783,7 @@ export class HealthQueryService {
     return [];
   }
 
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: Private helper doesn't use instance state
+   
   private getEventDedupKey(entry: EventLogEntry): string {
     const eventId = typeof entry.data?.eventId === 'string' ? entry.data.eventId : null;
     if (eventId) {
@@ -851,7 +853,7 @@ export class HealthQueryService {
     return fallbackStage;
   }
 
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: Private helper doesn't use instance state
+   
   private resolveGateType(row: GateBlockRow): string {
     if (typeof row.gate_type === 'string' && row.gate_type.trim().length > 0) {
       return row.gate_type;
@@ -875,14 +877,14 @@ export class HealthQueryService {
     return cached.has(columnName);
   }
 
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: Private helper doesn't use instance state
+   
   private scoreToStatus(score: number): string {
     if (score >= 70) return 'healthy';
     if (score >= 40) return 'warning';
     return 'critical';
   }
 
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: Private helper doesn't use instance state
+   
   private evolutionToStatus(tier: string, points: number): string {
     const lower = tier.toLowerCase();
     if (lower === 'forest' || lower === 'tree') return 'healthy';
@@ -890,7 +892,7 @@ export class HealthQueryService {
     return 'critical';
   }
 
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this, no-unused-vars -- Reason: Private helper doesn't use instance state
+   
   private safeListFiles(dirPath: string, predicate: (_name: string) => boolean): string[] {
     if (!fs.existsSync(dirPath)) return [];
     try {
@@ -902,7 +904,7 @@ export class HealthQueryService {
     }
   }
 
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: Private helper doesn't use instance state
+   
   private readJsonFile<T>(filePath: string, fallback: T): T {
     if (!fs.existsSync(filePath)) return fallback;
     try {
@@ -912,12 +914,12 @@ export class HealthQueryService {
     }
   }
 
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: Private helper doesn't use instance state
+   
   private asNumber(value: unknown, fallback: number): number {
     return Number.isFinite(value) ? Number(value) : fallback;
   }
 
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: Private helper doesn't use instance state
+   
   private asNullableNumber(value: unknown): number | null {
     if (Number.isFinite(value)) return Number(value);
     if (typeof value === 'string' && value.trim().length > 0) {
@@ -953,7 +955,7 @@ export class HealthQueryService {
         today,
       );
     } catch (err) {
-      console.warn('[HealthQueryService] Failed to sync GFI from session:', err);
+      // Non-critical: GFI sync failure should not block queries
     }
   }
 
@@ -981,11 +983,15 @@ export class HealthQueryService {
    */
   private readLatestSessionFromFile(): SessionState | null {
     const sessionsDir = path.join(this.stateDir, 'sessions');
-    if (!fs.existsSync(sessionsDir)) return null;
+    if (!fs.existsSync(sessionsDir)) {
+      return null;
+    }
 
     try {
       const files = fs.readdirSync(sessionsDir).filter(f => f.endsWith('.json'));
-      if (files.length === 0) return null;
+      if (files.length === 0) {
+        return null;
+      }
 
       let latest: SessionState | null = null;
       let latestTs = 0;
@@ -994,7 +1000,10 @@ export class HealthQueryService {
         try {
           const content = fs.readFileSync(path.join(sessionsDir, file), 'utf-8');
           const state = JSON.parse(content) as SessionState;
-          if (state.workspaceDir && state.workspaceDir !== this.workspaceDir) continue;
+          // Skip sessions from different workspaces
+          if (state.workspaceDir && state.workspaceDir !== this.workspaceDir) {
+            continue;
+          }
           const ts = Number(state.lastControlActivityAt ?? state.lastActivityAt ?? 0);
           if (ts > latestTs) {
             latestTs = ts;
@@ -1006,7 +1015,8 @@ export class HealthQueryService {
       }
 
       return latest;
-    } catch {
+    } catch (err) {
+      // Non-critical: failure to read session files should not crash the service
       return null;
     }
   }

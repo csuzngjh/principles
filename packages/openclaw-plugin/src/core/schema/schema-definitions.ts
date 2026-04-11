@@ -35,7 +35,7 @@ export interface Migration {
   name: string;
   /** Which database file this migration applies to */
   db: DbType;
-  /* eslint-disable no-unused-vars -- Reason: interface callback params are part of type signature */
+   
   /** Apply this migration */
   up: (_db: Db) => void;
   /** Revert this migration */

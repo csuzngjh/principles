@@ -22,8 +22,14 @@ import type { WorkflowRow } from './subagent-workflow/types.js';
 import { EmpathyObserverWorkflowManager } from './subagent-workflow/empathy-observer-workflow-manager.js';
 import { DeepReflectWorkflowManager } from './subagent-workflow/deep-reflect-workflow-manager.js';
 import { NocturnalWorkflowManager, nocturnalWorkflowSpec } from './subagent-workflow/nocturnal-workflow-manager.js';
-import { createNocturnalTrajectoryExtractor } from '../core/nocturnal-trajectory-extractor.js';
+import {
+    createNocturnalTrajectoryExtractor,
+    type NocturnalPainEvent,
+    type NocturnalSessionSnapshot,
+} from '../core/nocturnal-trajectory-extractor.js';
+import { validateNocturnalSnapshotIngress } from '../core/nocturnal-snapshot-contract.js';
 import { isExpectedSubagentError } from './subagent-workflow/subagent-error-utils.js';
+import { readPainFlagContract } from '../core/pain.js';
 
 const WORKFLOW_TTL_MS = 5 * 60 * 1000; // 5 minutes default TTL for helper workflows
 import { OpenClawTrinityRuntimeAdapter } from '../core/nocturnal-trinity.js';
@@ -126,9 +132,9 @@ async function runWorkflowWatchdog(
             if (dataSource === 'pain_context_fallback') {
               details.push(`fallback_snapshot: nocturnal workflow ${wf.workflow_id} uses pain-context fallback (stats may be incomplete)`);
             }
-            const stats = snapshot.stats as Record<string, number> | undefined;
-            if (stats && stats.totalAssistantTurns === 0 && stats.totalToolCalls === 0 && stats.totalPainEvents === 0 && stats.totalGateBlocks === 0) {
-              details.push(`empty_snapshot: nocturnal workflow ${wf.workflow_id} has all-zero stats`);
+            const stats = snapshot.stats as Record<string, number | null> | undefined;
+            if (stats && stats.totalAssistantTurns === null && stats.totalToolCalls === null && stats.totalPainEvents === 0 && stats.totalGateBlocks === null) {
+              details.push(`fallback_snapshot_stats: nocturnal workflow ${wf.workflow_id} has null stats (data unavailable)`);
             }
           }
         } catch { /* ignore malformed metadata */ }
@@ -167,7 +173,7 @@ let timeoutId: NodeJS.Timeout | null = null;
  * Old queue items (without taskKind) are migrated to pain_diagnosis for compatibility.
  */
 export type QueueStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'canceled';
-export type TaskResolution = 'marker_detected' | 'auto_completed_timeout' | 'failed_max_retries' | 'canceled' | 'late_marker_principle_created' | 'late_marker_no_principle' | 'stub_fallback';
+export type TaskResolution = 'marker_detected' | 'auto_completed_timeout' | 'failed_max_retries' | 'runtime_unavailable' | 'canceled' | 'late_marker_principle_created' | 'late_marker_no_principle' | 'stub_fallback';
 
 /**
  * Recent pain context attached to sleep_reflection tasks.
@@ -181,35 +187,13 @@ export interface RecentPainContext {
     source: string;
     reason: string;
     timestamp: string;
+    /** Session ID where the pain occurred */
+    sessionId: string;
   } | null;
   /** Count of pain events in the recent window (for signal strength) */
   recentPainCount: number;
   /** Highest pain score in the recent window */
   recentMaxPainScore: number;
-}
-
-function hasUsableNocturnalSnapshot(snapshotData: Record<string, unknown> | undefined): boolean {
-    if (!snapshotData || typeof snapshotData.sessionId !== 'string' || snapshotData.sessionId.length === 0) {
-        return false;
-    }
-
-    if (snapshotData._dataSource !== 'pain_context_fallback') {
-        return true;
-    }
-
-    const stats = (snapshotData.stats && typeof snapshotData.stats === 'object')
-        ? snapshotData.stats as Record<string, number | null | undefined>
-        : undefined;
-    const recentPain = Array.isArray(snapshotData.recentPain) ? snapshotData.recentPain.length : 0;
-    const hasNonZeroStats = !!stats && [
-        'totalAssistantTurns',
-        'totalToolCalls',
-        'failureCount',
-        'totalPainEvents',
-        'totalGateBlocks',
-    ].some((key) => Number(stats[key] ?? 0) > 0);
-
-    return hasNonZeroStats || recentPain > 0;
 }
 
 export interface EvolutionQueueItem {
@@ -333,6 +317,58 @@ function migrateQueueToV2(queue: RawQueueItem[]): EvolutionQueueItem[] {
     return queue.map(item => isLegacyQueueItem(item) ? migrateToV2(item as unknown as LegacyEvolutionQueueItem) : item as unknown as EvolutionQueueItem);
 }
 
+function isSessionAtOrBeforeTriggerTime(
+    session: { startedAt: string; updatedAt: string },
+    triggerTimeMs: number,
+): boolean {
+    const startedAtMs = new Date(session.startedAt).getTime();
+    const updatedAtMs = new Date(session.updatedAt).getTime();
+    if (!Number.isFinite(triggerTimeMs)) {
+        return true;
+    }
+    if (Number.isFinite(startedAtMs) && startedAtMs > triggerTimeMs) {
+        return false;
+    }
+    if (Number.isFinite(updatedAtMs) && updatedAtMs > triggerTimeMs) {
+        return false;
+    }
+    return true;
+}
+
+function buildFallbackNocturnalSnapshot(sleepTask: EvolutionQueueItem): NocturnalSessionSnapshot | null {
+    const painContext = sleepTask.recentPainContext;
+    if (!painContext) {
+        return null;
+    }
+
+    const fallbackPainEvents: NocturnalPainEvent[] = painContext.mostRecent ? [{
+        source: painContext.mostRecent.source,
+        score: painContext.mostRecent.score,
+        severity: null,
+        reason: painContext.mostRecent.reason,
+        createdAt: painContext.mostRecent.timestamp,
+    }] : [];
+
+    return {
+        sessionId: painContext.mostRecent?.sessionId || sleepTask.id,
+        startedAt: sleepTask.timestamp,
+        updatedAt: sleepTask.timestamp,
+        assistantTurns: [],
+        userTurns: [],
+        toolCalls: [],
+        painEvents: fallbackPainEvents,
+        gateBlocks: [],
+        stats: {
+            totalAssistantTurns: null,
+            totalToolCalls: null,
+            failureCount: null,
+            totalPainEvents: painContext.recentPainCount,
+            totalGateBlocks: null,
+        },
+        _dataSource: 'pain_context_fallback',
+    };
+}
+
 const PAIN_QUEUE_DEDUP_WINDOW_MS = 30 * 60 * 1000;
 
 // P0 fix: File lock constants and helper for queue operations (prevents TOCTOU race)
@@ -341,7 +377,7 @@ export const LOCK_MAX_RETRIES = 50;
 export const LOCK_RETRY_DELAY_MS = 50;
 export const LOCK_STALE_MS = 30_000;
 
-/* eslint-disable @typescript-eslint/max-params -- Reason: Function requires all parameters for unique task ID generation */
+ 
 export function createEvolutionTaskId(
     source: string,
     score: number,
@@ -357,7 +393,7 @@ export function createEvolutionTaskId(
         .substring(0, 8);
 }
 
-/* eslint-disable no-unused-vars -- Reason: type-level function parameter names in logger union type are documentation */
+ 
 export async function acquireQueueLock(resourcePath: string, logger: PluginLogger | { warn?: (message: string) => void; info?: (message: string) => void } | undefined, lockSuffix: string = EVOLUTION_QUEUE_LOCK_SUFFIX): Promise<() => void> {
     try {
         const ctx: LockContext = await acquireLockAsync(resourcePath, {
@@ -374,7 +410,7 @@ export async function acquireQueueLock(resourcePath: string, logger: PluginLogge
     }
 }
 
-/* eslint-disable no-unused-vars, @typescript-eslint/max-params -- Reason: type-level function parameter names in logger union type are documentation */
+ 
 async function requireQueueLock(resourcePath: string, logger: PluginLogger | { warn?: (message: string) => void; info?: (message: string) => void } | undefined, scope: string, lockSuffix: string = EVOLUTION_QUEUE_LOCK_SUFFIX): Promise<() => void> {
     try {
         return await acquireQueueLock(resourcePath, logger, lockSuffix);
@@ -389,7 +425,7 @@ export function extractEvolutionTaskId(task: string): string | null {
     return match?.[1] || null;
 }
 
-/* eslint-disable @typescript-eslint/max-params -- Reason: Function requires all parameters for duplicate detection */
+ 
 function findRecentDuplicateTask(
     queue: EvolutionQueueItem[],
     source: string,
@@ -397,13 +433,13 @@ function findRecentDuplicateTask(
     now: number,
     reason?: string
 ): EvolutionQueueItem | undefined {
-    // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: function is defined later in file but used in helper for consistency
+     
     const key = normalizePainDedupKey(source, preview, reason);
     return queue.find((task) => {
         if (task.status === 'completed') return false;
         const taskTime = new Date(task.enqueued_at || task.timestamp).getTime();
         if (!Number.isFinite(taskTime) || (now - taskTime) > PAIN_QUEUE_DEDUP_WINDOW_MS) return false;
-        // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: function is defined later in file but used in helper for consistency
+         
         return normalizePainDedupKey(task.source, task.trigger_text_preview || '', task.reason) === key;
     });
 }
@@ -456,7 +492,7 @@ function normalizePainDedupKey(source: string, preview: string, reason?: string)
     return `${source.trim().toLowerCase()}::${preview.trim().toLowerCase()}::${normalizedReason}`;
 }
 
-/* eslint-disable @typescript-eslint/max-params -- Reason: Function requires all parameters for duplicate detection */
+ 
 export function hasRecentDuplicateTask(queue: EvolutionQueueItem[], source: string, preview: string, now: number, reason?: string): boolean {
     return !!findRecentDuplicateTask(queue, source, preview, now, reason);
 }
@@ -477,34 +513,26 @@ export function hasEquivalentPromotedRule(dictionary: { getAllRules(): Record<st
 
 /**
  * Read recent pain context from PAIN_FLAG file.
+ * Extracts session_id to link to trajectory DB.
  * Returns structured pain metadata for attaching to sleep_reflection tasks.
  * Returns null if no pain flag exists.
  */
-function readRecentPainContext(wctx: WorkspaceContext): RecentPainContext {
-    const painFlagPath = wctx.resolve('PAIN_FLAG');
-    if (!fs.existsSync(painFlagPath)) {
+export function readRecentPainContext(wctx: WorkspaceContext): RecentPainContext {
+    const contract = readPainFlagContract(wctx.workspaceDir);
+    if (contract.status !== 'valid') {
         return { mostRecent: null, recentPainCount: 0, recentMaxPainScore: 0 };
     }
 
     try {
-        const rawPain = fs.readFileSync(painFlagPath, 'utf8');
-        const lines = rawPain.split('\n');
-
-        let score = 0;
-        let source = '';
-        let reason = '';
-        let timestamp = '';
-
-        for (const line of lines) {
-            if (line.startsWith('score:')) score = parseInt(line.split(':', 2)[1].trim(), 10) || 0;
-            if (line.startsWith('source:')) source = line.split(':', 2)[1].trim();
-            if (line.startsWith('reason:')) reason = line.slice('reason:'.length).trim();
-            if (line.startsWith('timestamp:')) timestamp = line.slice('timestamp:'.length).trim();
-        }
+        const score = parseInt(contract.data.score ?? '0', 10) || 0;
+        const source = contract.data.source ?? '';
+        const reason = contract.data.reason ?? '';
+        const timestamp = contract.data.time ?? '';
+        const sessionId = contract.data.session_id ?? '';
 
         if (score > 0) {
             return {
-                mostRecent: { score, source, reason, timestamp },
+                mostRecent: { score, source, reason, timestamp, sessionId },
                 recentPainCount: 1,
                 recentMaxPainScore: score,
             };
@@ -583,7 +611,7 @@ interface ParsedPainValues {
     traceId: string; sessionId: string; agentId: string;
 }
 
-/* eslint-disable @typescript-eslint/max-params -- Reason: Function requires all parameters for task enqueue */
+ 
 async function doEnqueuePainTask(
     wctx: WorkspaceContext, logger: PluginLogger, painFlagPath: string,
     result: WorkerStatusReport['pain_flag'], v: ParsedPainValues,
@@ -664,6 +692,41 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
         if (!fs.existsSync(painFlagPath)) return result;
 
         const rawPain = fs.readFileSync(painFlagPath, 'utf8');
+        const contract = readPainFlagContract(wctx.workspaceDir);
+
+        if (contract.status === 'valid') {
+            const score = parseInt(contract.data.score ?? '0', 10) || 0;
+            const source = contract.data.source ?? 'unknown';
+            const reason = contract.data.reason ?? 'Systemic pain detected';
+            const preview = contract.data.trigger_text_preview ?? '';
+            const isQueued = contract.data.status === 'queued';
+            const traceId = contract.data.trace_id ?? '';
+            const sessionId = contract.data.session_id ?? '';
+            const agentId = contract.data.agent_id ?? '';
+
+            result.exists = true;
+            result.score = score;
+            result.source = source;
+            result.enqueued = isQueued;
+
+            if (isQueued) {
+                result.skipped_reason = 'already_queued';
+                if (logger) logger.info(`[PD:EvolutionWorker] Pain flag already queued (score=${score}, source=${source})`);
+                return result;
+            }
+
+            if (logger) logger.info(`[PD:EvolutionWorker] Detected pain flag (score: ${score}, source: ${source}). Enqueueing evolution task.`);
+            return doEnqueuePainTask(wctx, logger, painFlagPath, result, {
+                score, source, reason, preview, traceId, sessionId, agentId,
+            });
+        }
+
+        if (contract.status === 'invalid' && (contract.format === 'kv' || contract.format === 'json' || contract.format === 'invalid_json')) {
+            result.exists = true;
+            result.skipped_reason = `invalid_pain_flag (${contract.missingFields.join(', ') || contract.format})`;
+            if (logger) logger.warn(`[PD:EvolutionWorker] Invalid pain flag skipped: ${result.skipped_reason}`);
+            return result;
+        }
 
         // Try JSON format first (pain skill structured output)
         // The file may have 'status: queued' and 'task_id: xxx' appended after the JSON object.
@@ -794,7 +857,7 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
     return result;
 }
 
-/* eslint-disable @typescript-eslint/max-params -- Reason: Function requires all parameters for queue processing */
+ 
 async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogger, eventLog: EventLog, api?: OpenClawPluginApi) {
     const queuePath = wctx.resolve('EVOLUTION_QUEUE');
     if (!fs.existsSync(queuePath)) {
@@ -1392,57 +1455,83 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     }
 
                     let workflowId: string | undefined;
-                    // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned when runtime API is available
+                     
                     let nocturnalManager: NocturnalWorkflowManager;
-                    // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned only for newly started workflows
-                    let snapshotData: Record<string, unknown> | undefined;
+                     
+                    let snapshotData: NocturnalSessionSnapshot | undefined;
 
                     if (isPollingTask) {
                         // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Reason: polling path requires existing resultRef
                         workflowId = sleepTask.resultRef!;
                     } else {
-                        if (sleepTask.recentPainContext) {
-                            try {
-                                const extractor = createNocturnalTrajectoryExtractor(wctx.workspaceDir);
-                                const fullSnapshot = extractor.getNocturnalSessionSnapshot(sleepTask.id);
-                                if (fullSnapshot) {
-                                    snapshotData = {
-                                        sessionId: fullSnapshot.sessionId,
-                                        sessionStart: fullSnapshot.startedAt,
-                                        stats: fullSnapshot.stats,
-                                        recentPain: fullSnapshot.painEvents.slice(-5),
-                                    };
-                                }
-                            } catch (snapErr) {
-                                logger?.warn?.(`[PD:EvolutionWorker] Failed to build trajectory snapshot for ${sleepTask.id}: ${String(snapErr)}`);
+                        // Phase 1: Build trajectory snapshot for Nocturnal pipeline
+                        // Priority: Pain signal sessionId → Task ID → Recent session with violations
+                        try {
+                            const extractor = createNocturnalTrajectoryExtractor(wctx.workspaceDir);
+
+                            // 1. Try exact session ID from pain signal (most accurate)
+                            const painSessionId = sleepTask.recentPainContext?.mostRecent?.sessionId;
+                            let fullSnapshot = painSessionId ? extractor.getNocturnalSessionSnapshot(painSessionId) : undefined;
+                            if (fullSnapshot) {
+                                logger?.info?.(`[PD:EvolutionWorker] Task ${sleepTask.id} using exact session from pain signal: ${painSessionId}`);
                             }
-                        }
-                        if (!snapshotData && sleepTask.recentPainContext) {
-                            logger?.warn?.(`[PD:EvolutionWorker] Using pain-context fallback for ${sleepTask.id}: trajectory stats unavailable (stats will be partial)`);
-                            snapshotData = {
-                                sessionId: sleepTask.id,
-                                sessionStart: sleepTask.timestamp,
-                                stats: {
-                                    totalAssistantTurns: 0,
-                                    totalToolCalls: 0,
-                                    failureCount: 0,
-                                    totalPainEvents: sleepTask.recentPainContext.recentPainCount,
-                                    totalGateBlocks: 0,
-                                },
-                                recentPain: sleepTask.recentPainContext.mostRecent ? [sleepTask.recentPainContext.mostRecent] : [],
-                                _dataSource: 'pain_context_fallback',
-                            };
+
+                            // 2. Try task ID (legacy compatibility, rarely matches)
+                            if (!fullSnapshot) {
+                                fullSnapshot = extractor.getNocturnalSessionSnapshot(sleepTask.id);
+                            }
+
+                            // 3. If no match, find most recent session WITH violation signals
+                            if (!fullSnapshot) {
+                                const taskTimeMs = new Date(sleepTask.enqueued_at || sleepTask.timestamp).getTime();
+                                const recentSessions = extractor.listRecentNocturnalCandidateSessions({
+                                    limit: 20,
+                                    minToolCalls: 1,
+                                    dateTo: sleepTask.enqueued_at || sleepTask.timestamp,
+                                }).filter((session) => isSessionAtOrBeforeTriggerTime(session, taskTimeMs));
+                                // Filter to sessions with actual violations (pain, failures, or gate blocks)
+                                const sessionsWithViolations = recentSessions.filter(
+                                    s => s.failureCount > 0 || s.painEventCount > 0 || s.gateBlockCount > 0
+                                );
+                                if (sessionsWithViolations.length > 0) {
+                                    const targetSession = sessionsWithViolations[0];
+                                    logger?.info?.(`[PD:EvolutionWorker] Task ${sleepTask.id} using session with violations: ${targetSession.sessionId} (failed=${targetSession.failureCount}, pain=${targetSession.painEventCount}, gates=${targetSession.gateBlockCount})`);
+                                    fullSnapshot = extractor.getNocturnalSessionSnapshot(targetSession.sessionId);
+                                } else if (recentSessions.length > 0) {
+                                    // No sessions with violations, use most recent as last resort
+                                    const latestSession = recentSessions[0];
+                                    logger?.warn?.(`[PD:EvolutionWorker] Task ${sleepTask.id} no sessions with violations found, using most recent: ${latestSession.sessionId} (failed=${latestSession.failureCount}, pain=${latestSession.painEventCount}, gates=${latestSession.gateBlockCount})`);
+                                    fullSnapshot = extractor.getNocturnalSessionSnapshot(latestSession.sessionId);
+                                } else {
+                                    logger?.warn?.(`[PD:EvolutionWorker] Task ${sleepTask.id} no sessions with tool calls in trajectory DB`);
+                                }
+                            }
+
+                            if (fullSnapshot) {
+                                snapshotData = fullSnapshot;
+                            }
+                        } catch (snapErr) {
+                            logger?.warn?.(`[PD:EvolutionWorker] Failed to build trajectory snapshot for ${sleepTask.id}: ${String(snapErr)}`);
                         }
 
-                        if (!hasUsableNocturnalSnapshot(snapshotData)) {
+                        // Phase 2: If no trajectory data, try pain-context fallback
+                        if (!snapshotData && sleepTask.recentPainContext) {
+                            logger?.warn?.(`[PD:EvolutionWorker] Using pain-context fallback for ${sleepTask.id}: trajectory stats unavailable (stats will be null)`);
+                            snapshotData = buildFallbackNocturnalSnapshot(sleepTask) ?? undefined;
+                        }
+
+                        const snapshotValidation = validateNocturnalSnapshotIngress(snapshotData);
+                        if (snapshotValidation.status !== 'valid') {
                             sleepTask.status = 'failed';
                             sleepTask.completed_at = new Date().toISOString();
                             sleepTask.resolution = 'failed_max_retries';
-                            sleepTask.lastError = 'sleep_reflection failed: missing_usable_snapshot (skipReason: empty_fallback_snapshot)';
+                            sleepTask.lastError = `sleep_reflection failed: invalid_snapshot_ingress (${snapshotValidation.reasons.join('; ') || 'missing snapshot'})`;
                             sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
-                            logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} rejected: missing usable snapshot`);
+                            logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} rejected: ${sleepTask.lastError}`);
                             continue;
                         }
+
+                        snapshotData = snapshotValidation.snapshot;
                     }
 
                     if (!api) {
@@ -1518,12 +1607,16 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             sleepTask.lastError = detailedError;
                             sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
 
-                            sleepTask.status = 'failed';
-                            sleepTask.completed_at = new Date().toISOString();
-                            sleepTask.resolution = 'failed_max_retries';
                             if (isExpectedSubagentError(errorReason)) {
-                                logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} background runtime unavailable: ${errorReason}`);
+                                // #237: Expected unavailability → stub fallback, not hard failure
+                                sleepTask.status = 'completed';
+                                sleepTask.completed_at = new Date().toISOString();
+                                sleepTask.resolution = 'stub_fallback';
+                                logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} background runtime unavailable, using stub fallback: ${errorReason}`);
                             } else {
+                                sleepTask.status = 'failed';
+                                sleepTask.completed_at = new Date().toISOString();
+                                sleepTask.resolution = 'failed_max_retries';
                                 logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} workflow failed: ${sleepTask.lastError}`);
                             }
                         } else {
@@ -1535,14 +1628,20 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     // #202: Handle expected subagent unavailability (e.g., process isolation in daemon mode)
                     // When subagent is unavailable due to gateway running in separate process,
                     // use stub fallback instead of failing the task.
-                    sleepTask.status = 'failed';
                     sleepTask.completed_at = new Date().toISOString();
-                    sleepTask.resolution = 'failed_max_retries';
                     sleepTask.lastError = String(taskErr);
                     sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
+
                     if (isExpectedSubagentError(taskErr)) {
-                        logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} background runtime unavailable: ${String(taskErr)}`);
+                        // #237: Expected unavailability → stub fallback, not hard failure
+                        sleepTask.status = 'completed';
+                        sleepTask.completed_at = new Date().toISOString();
+                        sleepTask.resolution = 'stub_fallback';
+                        logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} background runtime unavailable, using stub fallback: ${String(taskErr)}`);
                     } else {
+                        sleepTask.status = 'failed';
+                        sleepTask.completed_at = new Date().toISOString();
+                        sleepTask.resolution = 'failed_max_retries';
                         logger?.error?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} threw: ${taskErr}`);
                     }
                 }
@@ -1677,7 +1776,7 @@ async function processDetectionQueue(wctx: WorkspaceContext, api: OpenClawPlugin
 // PAIN_CANDIDATES system removed (D-05, D-06): trackPainCandidate and processPromotion deleted
 // Evolution queue is now the single active pain→principle path
 
-/* eslint-disable no-unused-vars, @typescript-eslint/max-params -- Reason: type-level function parameter names in logger union type and unused workspaceResolve key are documentation/signature */
+ 
 export async function registerEvolutionTaskSession(
     workspaceResolve: (key: string) => string,
     taskId: string,
@@ -1690,7 +1789,7 @@ export async function registerEvolutionTaskSession(
     const releaseLock = await requireQueueLock(queuePath, logger, 'registerEvolutionTaskSession');
 
     try {
-        // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in try, catch has early return
+         
         let rawQueue: RawQueueItem[];
         try {
             rawQueue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
@@ -1730,14 +1829,14 @@ export async function registerEvolutionTaskSession(
  * Production evidence shows directive stopped updating on 2026-03-22 and is stale.
  */
 
-/* eslint-disable no-unused-vars -- Reason: interface method parameters are type signatures */
+ 
 export interface ExtendedEvolutionWorkerService {
     id: string;
     api: OpenClawPluginApi | null;
     start: (ctx: OpenClawPluginServiceContext) => void | Promise<void>;
     stop?: (ctx: OpenClawPluginServiceContext) => void | Promise<void>;
 }
-/* eslint-enable no-unused-vars */
+ 
 
 interface WorkerStatusReport {
     timestamp: string;
@@ -1752,13 +1851,12 @@ function writeWorkerStatus(stateDir: string, report: WorkerStatusReport): void {
     try {
         const statusPath = path.join(stateDir, 'worker-status.json');
         fs.writeFileSync(statusPath, JSON.stringify(report, null, 2), 'utf8');
-    } catch (err) {
-        // Non-critical: worker-status.json is for monitoring, not core logic
-        console.warn(`[PD:EvolutionWorker] Failed to write worker-status.json: ${String(err)}`);
+    } catch {
+        // Non-critical: worker-status.json is for monitoring, failure is acceptable
     }
 }
 
-/* eslint-disable @typescript-eslint/max-params -- Reason: Function requires all parameters for queue processing */
+ 
 async function processEvolutionQueueWithResult(
     wctx: WorkspaceContext,
     logger: PluginLogger,
@@ -1831,6 +1929,13 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
 
         async function runCycle(): Promise<void> {
             const cycleStart = Date.now();
+
+            // ──── DEBUG: Verify subagent availability in heartbeat context ────
+            const hbSubagent = api?.runtime?.subagent;
+            logger?.info?.(`[PD:DEBUG:SubagentCheck:Heartbeat] api_exists=${!!api}, subagent_exists=${!!hbSubagent}, subagent.run_exists=${!!hbSubagent?.run}`);
+            if (hbSubagent?.run) {
+                logger?.info?.('[PD:DEBUG:SubagentCheck:Heartbeat] run entrypoint is callable');
+            }
             const cycleResult: {
                 timestamp: string;
                 cycle_start_ms: number;

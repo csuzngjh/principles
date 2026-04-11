@@ -23,14 +23,14 @@ export class CentralOverviewService {
     this.centralDb = getCentralDatabase();
   }
 
-  /* eslint-disable @typescript-eslint/class-methods-use-this -- Reason: intentionally no-op, centralDb is a process-wide singleton, see comment below */
+   
   dispose(): void {
     // Do NOT dispose centralDb — it's a singleton shared across all requests.
     // Individual services that open per-request connections (e.g. HealthQueryService)
     // must dispose their own connections, but the central aggregated DB lives for
     // the lifetime of the process.
   }
-  /* eslint-enable @typescript-eslint/class-methods-use-this */
+   
 
   getOverview(days = 30): CentralOverviewResponse {
     const stats = this.centralDb.getOverviewStats();
@@ -60,7 +60,7 @@ export class CentralOverviewService {
     // gate_blocks: no equivalent in aggregated DB schema; hardcode to 0
 
     // D-06: sampleQueue.counters from aggregated_correction_samples GROUP BY review_status
-    // eslint-disable-next-line no-useless-assignment -- Reason: initial value unused due to immediate reassignment in try/catch
+     
     let sampleCounters: Record<string, number> = {};
     try {
       sampleCounters = this.centralDb.getSampleCountersByStatus();

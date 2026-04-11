@@ -6,8 +6,7 @@ import { EmpathyObserverWorkflowManager } from '../../src/service/subagent-workf
 import type { SubagentWorkflowSpec } from '../../src/service/subagent-workflow/types.js';
 
 /**
- * Helper to create a mock function that properly reports as AsyncFunction.
- * This is required because isSubagentRuntimeAvailable() checks constructor.name === 'AsyncFunction'.
+ * Helper to create a mock async function for workflow-manager tests.
  */
 function mockAsyncFn<T extends (...args: any[]) => Promise<any>>(impl: (...args: any[]) => any) {
     const fn = vi.fn(impl) as unknown as T;

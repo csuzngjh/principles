@@ -83,9 +83,9 @@ export class MonitoringQueryService {
       const failedEvent = events.find(e => e.event_type === `trinity_${stage}_failed`);
 
       // Determine status
-      // eslint-disable-next-line @typescript-eslint/init-declarations
+       
       let status: 'pending' | 'running' | 'completed' | 'failed';
-      // eslint-disable-next-line @typescript-eslint/init-declarations
+       
       let reason: string | undefined;
 
       if (!startEvent) {
@@ -106,7 +106,7 @@ export class MonitoringQueryService {
       const outputCount = stageOutputs.filter(so => so.stage === stage).length;
 
       // Calculate duration if stage started and completed/failed
-      // eslint-disable-next-line @typescript-eslint/init-declarations
+       
       let duration: number | undefined;
       if (startEvent && (completeEvent || failedEvent)) {
         const endEvent = completeEvent || failedEvent;

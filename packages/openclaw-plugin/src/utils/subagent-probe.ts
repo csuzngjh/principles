@@ -1,11 +1,9 @@
 /**
  * Subagent Runtime Availability Probe
  *
- * OpenClaw has two runtime modes:
- * - Gateway mode: api.runtime.subagent methods are real async functions
- * - Embedded mode: api.runtime.subagent is a Proxy that throws synchronously
- *
- * This utility provides a reliable way to detect which mode we're in.
+ * This utility intentionally avoids inferring runtime availability from
+ * JavaScript implementation details like constructor names. The only contract
+ * we trust here is whether a callable `run` entrypoint exists.
  */
 
 import type { OpenClawPluginApi } from '../openclaw-sdk.js';
@@ -29,44 +27,33 @@ function getGlobalGatewaySubagent(): SubagentRuntime | null {
 }
 
 /**
- * Check if the subagent runtime is actually functional.
- *
- * In gateway mode, subagent.run is an AsyncFunction (constructor.name === 'AsyncFunction').
- * In embedded mode, subagent.run is a regular Function that throws synchronously.
- *
- * We use constructor check first because it's fast and has no side effects.
+ * Return a small, explicit availability assessment for the subagent runtime.
+ * This is a shape check only. Actual invocation failures are classified by the
+ * caller as runtime-unavailable vs downstream task failures.
  *
  * @param subagent - The subagent runtime object from api.runtime.subagent
- * @returns true if the runtime is functional (gateway mode), false otherwise
+ * @returns availability status and reason
  */
-export function isSubagentRuntimeAvailable(
+export function getSubagentRuntimeAvailability(
   subagent: { run?: unknown } | undefined
-): boolean {
-  if (!subagent) return false;
+): { available: boolean; reason: 'missing_runtime' | 'missing_run' | 'callable' } {
+  if (!subagent) return { available: false, reason: 'missing_runtime' };
 
   try {
     const runFn = subagent.run;
-    if (typeof runFn !== 'function') return false;
-
-    // In gateway mode, methods are AsyncFunction instances
-    // In embedded mode, methods are regular Function instances that throw
-    const isAsync = runFn.constructor?.name === 'AsyncFunction';
-    
-    if (isAsync) return true;
-
-    // Fallback: Check if it's a Proxy that might late-bind to the gateway subagent
-    // This handles the case where the plugin was loaded with allowGatewaySubagentBinding
-    // but the proxy hasn't resolved yet
-    const globalGateway = getGlobalGatewaySubagent();
-    if (globalGateway && typeof globalGateway.run === 'function') {
-      return globalGateway.run.constructor?.name === 'AsyncFunction';
+    if (typeof runFn !== 'function') {
+      return { available: false, reason: 'missing_run' };
     }
-
-    return false;
+    return { available: true, reason: 'callable' };
   } catch {
-    // Any error means unavailable
-    return false;
+    return { available: false, reason: 'missing_run' };
   }
+}
+
+export function isSubagentRuntimeAvailable(
+  subagent: { run?: unknown } | undefined
+): boolean {
+  return getSubagentRuntimeAvailability(subagent).available;
 }
 
 /**

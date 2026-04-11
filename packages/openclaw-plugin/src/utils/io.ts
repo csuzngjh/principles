@@ -16,7 +16,7 @@ export function normalizePath(filePath: string, projectDir: string): string {
     }
   }
 
-  // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in both if/else branches
+   
   let rel: string;
   if (projectIsWin) {
     const projectAbs = path.resolve(projectDir);
@@ -80,6 +80,11 @@ export function serializeKvLines(data: Record<string, any>): string {
   const keys = Object.keys(data).sort();
   for (const k of keys) {
     const v = data[k];
+    // Skip empty/undefined values — prevents writing blank lines that cause
+    // agent confusion (SKILL.md lists fields that aren't actually present on disk)
+    if (v === '' || v === undefined || v === null) {
+      continue;
+    }
     if (Array.isArray(v)) {
       lines.push(`${k}: ${v.join(',')}`);
     } else if (typeof v === 'object' && v !== null) {
@@ -105,7 +110,7 @@ export function planStatus(projectDir: string): string {
         }
       }
     }
-  /* eslint-disable @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: Error is intentionally ignored for graceful degradation */
+  /* eslint-disable @typescript-eslint/no-unused-vars -- Reason: Error is intentionally ignored for graceful degradation */
   } catch (_e) {
     // Ignore read errors
   }

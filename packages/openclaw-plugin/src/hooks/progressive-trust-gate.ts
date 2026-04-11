@@ -86,15 +86,15 @@ export function buildEvolutionGateReason(
 /**
  * Internal helper to call the shared block helper with progressive-trust-gate source tag.
  */
-/* eslint-disable @typescript-eslint/max-params -- Reason: Helper function requires all parameters for block recording */
+ 
 function block(
   filePath: string,
   reason: string,
   wctx: WorkspaceContext,
   toolName: string,
-  /* eslint-disable no-unused-vars -- Reason: type-only callback params in logger type */
+   
   logger: { warn?: (message: string) => void; error?: (message: string) => void },
-  /* eslint-enable no-unused-vars */
+   
   sessionId?: string
 ): PluginHookBeforeToolCallResult {
   return recordGateBlockAndReturn(wctx, {
@@ -119,16 +119,16 @@ function block(
  * @param profile - Gate profile containing risk_paths config
  * @returns PluginHookBeforeToolCallResult to block, or undefined to allow
  */
-/* eslint-disable @typescript-eslint/max-params -- Reason: Gate function requires all parameters for comprehensive checks */
+ 
 export function checkProgressiveTrustGate(
   event: PluginHookBeforeToolCallEvent,
   wctx: WorkspaceContext,
   relPath: string,
   risky: boolean,
   lineChanges: number,
-  /* eslint-disable no-unused-vars -- Reason: type-only callback params in logger type */
+   
   logger: { warn?: (message: string) => void; error?: (message: string) => void; info?: (message: string) => void },
-  /* eslint-enable no-unused-vars */
+   
   ctx: { workspaceDir?: string; sessionId?: string },
   profile?: { risk_paths: string[]; core_governance_files?: string[] }
 ): PluginHookBeforeToolCallResult | void {
@@ -151,7 +151,7 @@ export function checkProgressiveTrustGate(
   });
 
   const currentTier = epDecision.currentTier ?? 1;
-  // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between helper functions - reordering would break logical grouping
+   
   const tierName = getTierName(currentTier);
 
   logger.info?.(`[PD_GATE] EP Gate: Tier ${currentTier} (${tierName}), Tool: ${event.toolName}, Risk: ${risky}, Allowed: ${epDecision.allowed}`);

@@ -249,7 +249,7 @@ function writeRegistry(stateDir: string, registry: ModelTrainingRegistry): void 
  */
 function withRegistryLock<T>(
   stateDir: string,
-  // eslint-disable-next-line no-unused-vars -- parameter type annotation requires name
+   
   fn: (_: ModelTrainingRegistry) => T
 ): T {
   const registryPath = getRegistryPath(stateDir);
@@ -321,7 +321,7 @@ export function registerTrainingRun(
  *
  * @throws Error if run not found or transition is invalid
  */
-// eslint-disable-next-line @typescript-eslint/max-params -- Reason: status update requires state + runId + status - refactoring would break API
+ 
 export function updateTrainingRunStatus(
   stateDir: string,
   trainRunId: string,

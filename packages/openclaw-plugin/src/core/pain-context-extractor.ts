@@ -53,7 +53,7 @@ function getAgentsDir(): string {
 async function safeTail(filePath: string): Promise<string[]> {
   try {
     // Check existence and stats asynchronously
-    // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in try, catch has early return
+     
     let stat: fs.Stats;
     try {
       stat = await fsPromises.stat(filePath);
@@ -235,8 +235,8 @@ export async function extractRecentConversation(
 /**
  * Extracts failed tool call context with argument correlation.
  */
-/* eslint-disable @typescript-eslint/default-param-last */ // Reason: breaking API change - default param must precede required params for type inference compatibility
-// eslint-disable-next-line @typescript-eslint/max-params -- Reason: context extraction requires session + agent + tool + path - refactoring would break API
+  // Reason: breaking API change - default param must precede required params for type inference compatibility
+ 
 export async function extractFailedToolContext(
   sessionId: string,
   agentId = 'main',

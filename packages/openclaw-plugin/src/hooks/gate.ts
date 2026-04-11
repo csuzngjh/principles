@@ -134,7 +134,7 @@ export function handleBeforeToolCall(
     const mutationMatch = /(?:>|>>|sed\s+-i|rm|mv|mkdir|touch|cp)\s+(?:-[a-zA-Z]+\s+)*([^\s;&|<>]+)/.exec(command);
 
     if (mutationMatch) {
-      // eslint-disable-next-line @typescript-eslint/prefer-destructuring -- Reason: mutationMatch[1] assigned to reassignable outer let - destructuring would shadow outer variable
+       
       filePath = mutationMatch[1];
     } else {
       const hasRiskPath = profile.risk_paths.some(rp => command.includes(rp));
@@ -167,30 +167,30 @@ export function handleBeforeToolCall(
       action: {
         toolName: event.toolName,
         normalizedPath: relPath,
-        // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between helper functions - reordering would break logical grouping
+         
         paramsSummary: _extractParamsSummary(event.params),
       },
       workspace: {
         isRiskPath: risky,
-        // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between helper functions - reordering would break logical grouping
+         
         planStatus: _getPlanStatus(ctx.workspaceDir),
-        // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between helper functions - reordering would break logical grouping
+         
         hasPlanFile: _hasPlanFile(ctx.workspaceDir),
       },
       session: {
         sessionId: ctx.sessionId,
-        // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between helper functions - reordering would break logical grouping
+         
         currentGfi: _getCurrentGfi(ctx.sessionId),
-        // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between helper functions - reordering would break logical grouping
+         
         recentThinking: _hasRecentThinking(ctx.sessionId),
       },
       evolution: {
-        // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between helper functions - reordering would break logical grouping
+         
         epTier: _getEpTier(wctx.workspaceDir),
       },
       derived: {
         estimatedLineChanges: estimateLineChanges({ toolName: event.toolName, params: event.params }),
-        // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between helper functions - reordering would break logical grouping
+         
         bashRisk: _getBashRisk(event, profile),
       },
     };
@@ -337,12 +337,12 @@ function _getEpTier(workspaceDir: string): number {
   }
 }
 
-/* eslint-disable no-unused-vars, @typescript-eslint/no-unused-vars -- Reason: type-only parameter not used at runtime */
+ 
 function _getBashRisk(
   event: PluginHookBeforeToolCallEvent,
   _profile: { risk_paths: string[] }
 ): 'safe' | 'normal' | 'dangerous' | 'unknown' {
-/* eslint-enable no-unused-vars, @typescript-eslint/no-unused-vars */
+ 
   if (!BASH_TOOLS_SET.has(event.toolName)) return 'unknown';
   try {
     const command = String(event.params.command || event.params.args || '');
