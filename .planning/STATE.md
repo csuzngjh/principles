@@ -1,69 +1,102 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.13
-milestone_name: Boundary Contract Hardening
-status: executing
-last_updated: "2026-04-11T03:37:47.941Z"
+milestone: v1.14
+milestone_name: Evolution Worker Decomposition & Contract Hardening
+status: roadmap_created
+last_updated: "2026-04-11T04:30:00.000Z"
 last_activity: 2026-04-11
 progress:
-  total_phases: 4
-  completed_phases: 4
-  total_plans: 6
-  completed_plans: 6
-  percent: 100
+  total_phases: 6
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
-# State: v1.13 Boundary Contract Hardening
+# State: v1.14 Evolution Worker Decomposition & Contract Hardening
 
 ## Project Reference
 
 See `.planning/PROJECT.md` (updated 2026-04-11)
 
-**Milestone:** v1.13  
-**Name:** Boundary Contract Hardening  
-**Core Value:** AI agents improve their own behavior through a structured evolution loop. pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization  
-**Current Focus:** Phase 23 — v1.13 Phase Verification Completion
+**Milestone:** v1.14
+**Name:** Evolution Worker Decomposition & Contract Hardening
+**Core Value:** AI agents improve their own behavior through a structured evolution loop. pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
+**Current Focus:** Phase 24 -- Queue Store Extraction
 
-## Previous Milestone (v1.12)
+## Previous Milestone (v1.13)
 
-- **v1.12 COMPLETE:** Nocturnal Production Stabilization shipped
-- **Phase 16 COMPLETE:** Snapshot ingress and runtime hardening
-- **Phase 17 COMPLETE:** Minimal rule bootstrap
-- **Phase 18 COMPLETE:** Live replay and operator validation
+- **v1.13 COMPLETE:** Boundary Contract Hardening shipped (phases 19-23)
+- 12/12 requirements satisfied, 5 phases verified
+- Workspace resolution, schema validation, runtime capability, and E2E contracts established
 
 ## Current Position
 
-Phase: 23
-Plan: Not started
-Status: Executing Phase 23
-Last activity: 2026-04-11
+Phase: 24 of 29 (Queue Store Extraction)
+Plan: 0 of ? in current phase
+Status: Ready to plan
+Last activity: 2026-04-11 -- Roadmap created, 16/16 requirements mapped
 
-## v1.13 Architecture Focus
+Progress: [░░░░░░░░░░] 0%
+
+## v1.14 Architecture Focus
 
 ### Root Problem
 
-- The production loop still relies on implicit assumptions about OpenClaw runtime behavior, workspace resolution, and state-file formats.
-- When those assumptions are wrong, code often silently falls back instead of failing fast.
-- This causes wrong-workspace writes, empty snapshots, queue corruption risk, and misleading downstream failure signals.
+- `evolution-worker.ts` is 2133 lines with 9 responsibility clusters
+- Cannot safely add boundary contracts to a monolith of this size
+- 16 silent fallback points need classification (fail-fast vs fail-visible)
+- Queue corruption, task dispatch failures, and workflow expiry logic are all coupled
 
-### Hardening Targets
+### Decomposition Targets
 
-- Unified workspace resolution
-- Shared schema validation for critical files and snapshots
-- Runtime capability contract for background workflows
-- End-to-end contract tests instead of isolated bug-specific tests
+- EvolutionQueueStore -- queue persistence, V2 migration, file locking
+- PainFlagDetector -- pain flag detection and parsing
+- EvolutionTaskDispatcher -- task dispatch and execution
+- WorkflowOrchestrator -- workflow watchdog and cleanup
+- TaskContextBuilder -- context extraction and snapshot building
+
+### Extraction Order (by risk)
+
+1. Queue Store (lowest risk, clearest boundaries, most testable in isolation)
+2. Pain Flag Detector (already has contract dependency from v1.13)
+3. Task Dispatcher (largest extraction, most dispatch logic)
+4. Workflow Orchestrator (isolated watchdog responsibility)
+5. Context Builder + Service Slim (final cleanup)
+6. Integration Verification (full E2E validation)
+
+### Contract Pattern
+
+- Follow v1.13 templates: factory functions, structured validation results, fail-fast at entry points
+- New: fail-visible pattern for pipeline-middle operations (structured skip/drop events)
 
 ### Deferred Work
 
-- v1.10 Thinking Models page remains deferred until the production loop is trustworthy
+- Replay engine input contracts (next milestone)
+- Dictionary/rule matching contracts (lower priority)
 
-### Blockers
+## Accumulated Context
 
-- PR #238 review surfaced contract-level defects in paths, queue writes, runtime probing, and session selection
-- Current production confidence is low; correctness must come before feature expansion
+### Decisions
+
+Decisions are logged in PROJECT.md Key Decisions table.
+Recent decisions affecting current work:
+
+- v1.13: Fail-fast at boundary entry, fail-visible in pipeline middle
+- v1.13: Decompose before contracting -- cannot add contracts to a 2133-line monolith
+- v1.14: Queue store extracted first (lowest risk, clearest boundaries)
+- v1.14: Fallback audit deferred until all extractions complete (full picture)
+
+### Pending Todos
+
+None yet.
+
+### Blockers/Concerns
+
+None yet.
 
 ## Session Continuity
 
-**Previous milestone:** v1.12 (Nocturnal Production Stabilization - COMPLETE)  
-**Current milestone:** v1.13 - Boundary Contract Hardening  
-**Ready for:** `/gsd-audit-milestone` or `/gsd-complete-milestone`
+**Previous milestone:** v1.13 (Boundary Contract Hardening - COMPLETE)
+**Current milestone:** v1.14 - Evolution Worker Decomposition & Contract Hardening
+**Ready for:** `/gsd-plan-phase 24`

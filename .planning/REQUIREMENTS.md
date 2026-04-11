@@ -62,28 +62,28 @@ Deferred to future milestones.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DECOMP-01 | — | Pending |
-| DECOMP-02 | — | Pending |
-| DECOMP-03 | — | Pending |
-| DECOMP-04 | — | Pending |
-| DECOMP-05 | — | Pending |
-| DECOMP-06 | — | Pending |
-| CONTRACT-01 | — | Pending |
-| CONTRACT-02 | — | Pending |
-| CONTRACT-03 | — | Pending |
-| CONTRACT-04 | — | Pending |
-| CONTRACT-05 | — | Pending |
-| CONTRACT-06 | — | Pending |
-| INTEG-01 | — | Pending |
-| INTEG-02 | — | Pending |
-| INTEG-03 | — | Pending |
-| INTEG-04 | — | Pending |
+| DECOMP-01 | Phase 24 | Pending |
+| DECOMP-02 | Phase 25 | Pending |
+| DECOMP-03 | Phase 26 | Pending |
+| DECOMP-04 | Phase 27 | Pending |
+| DECOMP-05 | Phase 28 | Pending |
+| DECOMP-06 | Phase 28 | Pending |
+| CONTRACT-01 | Phase 24 | Pending |
+| CONTRACT-02 | Phase 24 | Pending |
+| CONTRACT-03 | Phase 28 | Pending |
+| CONTRACT-04 | Phase 28 | Pending |
+| CONTRACT-05 | Phase 28 | Pending |
+| CONTRACT-06 | Phase 24 | Pending |
+| INTEG-01 | Phase 29 | Pending |
+| INTEG-02 | Phase 29 | Pending |
+| INTEG-03 | Phase 29 | Pending |
+| INTEG-04 | Phase 29 | Pending |
 
 **Coverage:**
 - v1.14 requirements: 16 total
-- Mapped to phases: 0
-- Unmapped: 16 ⚠️
+- Mapped to phases: 16
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-04-11*
-*Last updated: 2026-04-11 after initial definition*
+*Last updated: 2026-04-11 after roadmap creation*

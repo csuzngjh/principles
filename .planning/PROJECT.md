@@ -16,26 +16,32 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 - Nocturnal background reflection pipeline exists and can emit production-facing artifacts
 - Minimal rule bootstrap and live replay validation shipped in `v1.12`
 - CI and lint baseline are green from `v1.9.3`
+- Boundary contracts for workspace resolution, pain flag, nocturnal snapshot, and runtime capability shipped in `v1.13`
+- Fail-fast pattern validated for system boundaries (path, schema, runtime)
 
 ## Active
 
-- Production stabilization is more important than new surface features
-- Boundary contracts around workspace resolution, runtime capability checks, and critical state-file parsing are the current bottleneck
-- End-to-end trust in nocturnal depends on fail-fast behavior, not silent fallback
+- Evolution worker (2133 lines) must be decomposed before further contract hardening
+- Queue persistence, pain detection, task dispatch, workflow orchestration, and context building each need dedicated modules with boundary contracts
+- 16 silent fallback points in evolution-worker need audit: distinguish fail-fast (boundary entry) from fail-visible (pipeline middle)
+- Replay engine input contracts remain deferred until worker decomposition is stable
 
 ## Out of Scope
 
-- Thinking Models page improvements during this milestone
+- Thinking Models page improvements
 - New UI/dashboard work
 - LoRA or full fine-tune internalization paths
 - General cleanup not tied to boundary risk reduction
+- Replay engine contract hardening (deferred to next milestone)
 
 ## Context
 
 - Main runtime lives in `packages/openclaw-plugin/src/`
 - Primary production path under scrutiny: pain -> queue -> nocturnal -> replay -> promotion
-- Recent production debugging showed repeated failures from wrong workspace resolution, runtime capability guessing, and format drift
-- Existing milestone state had drifted; `v1.13` resets planning to the actual current problem
+- v1.13 established boundary contracts at pain/nocturnal/workspace/runtime entry points
+- evolution-worker.ts (2133 lines) is the central nervous system — too large to safely add contracts to
+- Worker has 9 responsibility clusters, 16 silent fallback points, and natural seam points identified
+- Existing contract patterns (buildPainFlag, resolveRequiredWorkspaceDir, validateNocturnalSnapshotIngress) serve as templates for new contracts
 
 ## Key Decisions
 
@@ -45,16 +51,21 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 | Prefer fail-fast over fallback | Silent fallback caused hidden corruption and delayed failures | Active |
 | Introduce one contract per boundary type | Path, runtime, and schema logic must stop being reimplemented ad hoc | Active |
 | Use end-to-end tests for boundary protection | Unit tests did not catch integration drift with OpenClaw | Active |
+| Decompose before contracting | Cannot add contracts to a 2133-line monolith; responsibilities must be separated first | Active |
+| Fail-fast at boundary entry, fail-visible in pipeline middle | Background worker should not crash on bad data mid-stream, but must surface it structurally | Active |
 
-## Current Milestone: v1.13 Boundary Contract Hardening
+## Current Milestone: v1.14 Evolution Worker Decomposition & Contract Hardening
 
-**Goal:** Eliminate the recurring "implicit assumption + silent fallback" failure mode so nocturnal and principle-internalization flows fail fast, write to the correct workspace, and carry validated data end-to-end.
+**Goal:** Decompose the 2133-line evolution-worker.ts into focused modules and equip each with boundary contracts (input validation + fail-fast/fail-visible), making the production pipeline's central nervous system maintainable and trustworthy.
 
 **Target features:**
-- Single workspace resolution contract across hooks, commands, workers, and HTTP routes
-- Schema-validated parsing for critical state files and snapshot inputs
-- Runtime capability contract for background subagent usage without constructor-name guessing
-- End-to-end contract tests for pain -> queue -> nocturnal and command/hook workspace writes
+- EvolutionQueueStore — queue persistence, V2 migration, file locking (extracted from worker)
+- PainFlagDetector — pain flag detection and parsing (extracted from worker)
+- EvolutionTaskDispatcher — task dispatch and execution logic (extracted from worker)
+- WorkflowOrchestrator — workflow watchdog and expiry cleanup (extracted from worker)
+- TaskContextBuilder — context extraction and snapshot building (extracted from worker)
+- Boundary contracts on each extracted module (input validation + structured errors)
+- Audit of 16 silent fallback points: reclassify as fail-fast or fail-visible
 
 ## Evolution
 
@@ -73,4 +84,4 @@ This document evolves at phase transitions and milestone boundaries.
 3. Audit Out of Scope
 4. Update Context with current state
 
-*Last updated: 2026-04-11 after v1.13 milestone started*
+*Last updated: 2026-04-11 after v1.14 milestone started*

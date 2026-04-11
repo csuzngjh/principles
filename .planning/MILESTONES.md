@@ -1,18 +1,34 @@
 # Milestones
 
-## Current: v1.13 Boundary Contract Hardening (Started: 2026-04-11)
+## Current: v1.14 Evolution Worker Decomposition & Contract Hardening (Started: 2026-04-11)
 
 **Goal:**
 
-- remove the recurring "implicit assumption + silent fallback" failure mode from the production nocturnal path
-- unify workspace resolution, critical file parsing, and runtime capability checks under explicit contracts
-- add end-to-end contract tests so OpenClaw boundary drift breaks tests instead of silently corrupting state
+- decompose the 2133-line evolution-worker.ts into 5 focused modules with clear boundaries
+- equip each extracted module with boundary contracts (input validation + fail-fast/fail-visible)
+- audit and classify all 16 silent fallback points
+- preserve existing behavior: all tests pass, public API unchanged, lifecycle correct
 
 **Planned phases:**
 
-- Phase 19: Unified Workspace Resolution Contract
-- Phase 20: Critical Data Schema Validation
-- Phase 21: Runtime Contract and End-to-End Hardening
+- Phase 24: Queue Store Extraction (DECOMP-01, CONTRACT-01, CONTRACT-02, CONTRACT-06)
+- Phase 25: Pain Flag Detector Extraction (DECOMP-02)
+- Phase 26: Task Dispatcher Extraction (DECOMP-03)
+- Phase 27: Workflow Orchestrator Extraction (DECOMP-04)
+- Phase 28: Context Builder + Service Slim + Fallback Audit (DECOMP-05, DECOMP-06, CONTRACT-03, CONTRACT-04, CONTRACT-05)
+- Phase 29: Integration Verification (INTEG-01, INTEG-02, INTEG-03, INTEG-04)
+
+---
+
+## v1.13 Boundary Contract Hardening (Shipped: 2026-04-11)
+
+**Phases completed:** 5 phases (19-23)
+
+**Key accomplishments:**
+
+- Removed recurring "implicit assumption + silent fallback" failure mode from production nocturnal path
+- Unified workspace resolution, critical file parsing, and runtime capability checks under explicit contracts
+- Added end-to-end contract tests so OpenClaw boundary drift breaks tests instead of silently corrupting state
 
 ---
 
