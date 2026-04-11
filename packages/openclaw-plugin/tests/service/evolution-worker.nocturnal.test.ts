@@ -37,16 +37,19 @@ const { mockGetNocturnalSessionSnapshot, mockListRecentNocturnalCandidateSession
   mockGetNocturnalSessionSnapshot: vi.fn(),
   mockListRecentNocturnalCandidateSessions: vi.fn(() => []),
 }));
+
+// Create a shared mock extractor object so spy calls are tracked correctly
+const mockExtractorInstance = {
+  getNocturnalSessionSnapshot: mockGetNocturnalSessionSnapshot,
+  listRecentNocturnalCandidateSessions: mockListRecentNocturnalCandidateSessions,
+};
 vi.mock('../../src/core/nocturnal-trajectory-extractor.js', async () => {
   const actual = await vi.importActual<typeof import('../../src/core/nocturnal-trajectory-extractor.js')>(
     '../../src/core/nocturnal-trajectory-extractor.js'
   );
   return {
     ...actual,
-    createNocturnalTrajectoryExtractor: vi.fn(() => ({
-      getNocturnalSessionSnapshot: mockGetNocturnalSessionSnapshot,
-      listRecentNocturnalCandidateSessions: mockListRecentNocturnalCandidateSessions,
-    })),
+    createNocturnalTrajectoryExtractor: vi.fn(() => mockExtractorInstance),
   };
 });
 

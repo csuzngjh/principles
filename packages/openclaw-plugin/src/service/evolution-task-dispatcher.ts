@@ -206,6 +206,14 @@ export class EvolutionTaskDispatcher {
             if (logger) logger.warn(`[PD:EvolutionWorker] ${errMsg}`);
         }
 
+        // Final persistence: ensure ALL queue modifications are saved before returning.
+        // Individual methods (_recoverStuckSleepReflection, _dispatchSleepReflection) save their
+        // own changes, but this catch-all save ensures nothing is lost if multiple methods
+        // modify the queue without explicit saves.
+        if (result.queueChanged) {
+            await store.save(queue);
+        }
+
         return result;
     }
 
