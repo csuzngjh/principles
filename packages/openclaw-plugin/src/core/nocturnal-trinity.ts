@@ -378,13 +378,55 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
   }
 
   /**
-   * Create a unique session file path for runEmbeddedPiAgent.
+   * Create a valid JSONL session file for runEmbeddedPiAgent.
+   * The file must contain an initial model_change event to set provider/model,
+   * otherwise OpenClaw defaults to 'openai' provider which may not be configured.
    */
   private createSessionFile(stage: string): string {
     if (!fs.existsSync(this.tempDir)) {
       fs.mkdirSync(this.tempDir, { recursive: true });
     }
-    return path.join(this.tempDir, `${stage}-${randomUUID()}.json`);
+    const sessionFile = path.join(this.tempDir, `${stage}-${randomUUID()}.jsonl`);
+    
+    // Extract model config from api.config (agents.defaults.model)
+    const config = this.api.config as Record<string, unknown> | undefined;
+    const agents = config?.agents as Record<string, unknown> | undefined;
+    const defaults = agents?.defaults as Record<string, unknown> | undefined;
+    const modelConfig = defaults?.model;
+    
+    // Parse model string (format: "provider/model" or {primary: "...", fallbacks: [...]})
+    let provider = 'minimax-portal';  // sensible default
+    let modelId = 'MiniMax-M2.7';
+    
+    if (typeof modelConfig === 'string' && modelConfig.includes('/')) {
+      const parts = modelConfig.split('/');
+      provider = parts[0];
+      modelId = parts.slice(1).join('/');
+    } else if (modelConfig && typeof modelConfig === 'object') {
+      const mc = modelConfig as Record<string, unknown>;
+      const primary = mc.primary as string | undefined;
+      if (primary && primary.includes('/')) {
+        const parts = primary.split('/');
+        provider = parts[0];
+        modelId = parts.slice(1).join('/');
+      }
+    }
+    
+    // Write initial model_change event to JSONL
+    const modelChangeEvent = {
+      type: 'model_change',
+      id: randomUUID().slice(0, 8),
+      parentId: null,
+      timestamp: new Date().toISOString(),
+      provider,
+      modelId
+    };
+    
+    fs.writeFileSync(sessionFile, JSON.stringify(modelChangeEvent) + '\n');
+    
+    this.api.logger?.info(`[Trinity] Created session file for ${stage}: provider=${provider}, model=${modelId}`);
+    
+    return sessionFile;
   }
 
   /**
