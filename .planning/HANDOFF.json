@@ -1,23 +1,32 @@
 {
   "version": "1.0",
-  "timestamp": "2026-04-11T08:45:18.197Z",
-  "phase": "25",
-  "phase_name": "Pain Flag Detector Extraction",
-  "phase_dir": ".planning/phases/25-pain-flag-detector-extraction",
-  "plan": 1,
-  "task": 0,
+  "timestamp": "2026-04-11T09:43:42.683Z",
+  "phase": "26",
+  "phase_name": "task-dispatcher-extraction",
+  "phase_dir": ".planning/phases/26-task-dispatcher-extraction",
+  "plan": "01",
+  "task": 1,
   "total_tasks": 1,
   "status": "paused",
-  "completed_tasks": [],
-  "remaining_tasks": [
-    {"id": 1, "name": "Extract PainFlagDetector module", "status": "not_started"}
+  "completed_tasks": [
+    {"id": 1, "name": "Extract EvolutionTaskDispatcher", "status": "done", "commit": "b30763d"}
   ],
-  "blockers": [],
+  "remaining_tasks": [
+    {"id": 1, "name": "Fix test failures (11 failed, 15 passed)", "status": "in_progress"}
+  ],
+  "blockers": [
+    {
+      "description": "Tests fail: processEvolutionQueue now delegates to unmocked EvolutionTaskDispatcher. Fake timers work but the dispatcher private methods don't trigger expected state changes in queue.",
+      "type": "technical",
+      "workaround": "Queue object reference may not be shared correctly - load() returns queue but private methods modify in-place"
+    }
+  ],
   "human_actions_pending": [],
   "decisions": [
-    {"decision": "Phase 25 is infrastructure - discuss skipped, context auto-generated", "rationale": "Pure extraction refactor with no user-facing behavior", "phase": "25"}
+    {"decision": "Created thin processEvolutionQueue wrapper for backward compat", "rationale": "Tests call processEvolutionQueue directly", "phase": "26"},
+    {"decision": "Added store.save() after _recoverStuckSleepReflection", "rationale": "Recovery modifications were not persisted before", "phase": "26"}
   ],
   "uncommitted_files": [],
-  "next_action": "Execute 25-01-PLAN.md: Extract PainFlagDetector from evolution-worker.ts lines 251-564",
-  "context_notes": "Phase 24 just completed. Phase 25 plan exists at 25-01-PLAN.md. Need to extract pain flag detection logic (checkPainFlag, readRecentPainContext, doEnqueuePainTask) into new PainFlagDetector class. Pattern follows Phase 24 EvolutionQueueStore extraction."
+  "next_action": "Debug _recoverStuckSleepReflection: queue object reference from store.load() passed to private method - in-place modification should work but test shows status='in_progress' not 'failed'",
+  "context_notes": "The _recoverStuckSleepReflection modifies queue in-place and store.save() was called. But test still shows 'in_progress'. Possible issue: vi.useFakeTimers() may not control Date.now() inside the dispatcher's async call chain. The processEvolutionQueue wrapper is synchronous but dispatcher.dispatchQueue is async - test waits 5000ms with advanceTimersByTimeAsync but the async operations may not complete within fake time."
 }
