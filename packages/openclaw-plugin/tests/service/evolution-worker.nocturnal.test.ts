@@ -33,8 +33,9 @@ vi.mock('../../src/service/subagent-workflow/nocturnal-workflow-manager.js', () 
   },
 }));
 
-const { mockGetNocturnalSessionSnapshot } = vi.hoisted(() => ({
+const { mockGetNocturnalSessionSnapshot, mockListRecentNocturnalCandidateSessions } = vi.hoisted(() => ({
   mockGetNocturnalSessionSnapshot: vi.fn(),
+  mockListRecentNocturnalCandidateSessions: vi.fn(() => []),
 }));
 vi.mock('../../src/core/nocturnal-trajectory-extractor.js', async () => {
   const actual = await vi.importActual<typeof import('../../src/core/nocturnal-trajectory-extractor.js')>(
@@ -44,6 +45,7 @@ vi.mock('../../src/core/nocturnal-trajectory-extractor.js', async () => {
     ...actual,
     createNocturnalTrajectoryExtractor: vi.fn(() => ({
       getNocturnalSessionSnapshot: mockGetNocturnalSessionSnapshot,
+      listRecentNocturnalCandidateSessions: mockListRecentNocturnalCandidateSessions,
     })),
   };
 });
@@ -200,8 +202,83 @@ describe('EvolutionWorkerService nocturnal hardening', () => {
 
       const queue = readQueue(stateDir);
       expect(queue[0].status).toBe('failed');
-      expect(queue[0].resolution).toBe('failed_max_retries');
+      expect(queue[0].resolution).toBe('runtime_unavailable');
       expect(queue[0].lastError).toContain('gateway request');
+    } finally {
+      EvolutionWorkerService.stop({ workspaceDir, stateDir, logger: console } as any);
+      safeRmDir(workspaceDir);
+    }
+  });
+
+  it('classifies runtime-unavailable failures separately from downstream workflow failures', async () => {
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-nocturnal-runtime-unavailable-'));
+    const stateDir = path.join(workspaceDir, '.state');
+    fs.mkdirSync(path.join(stateDir, 'sessions'), { recursive: true });
+    fs.mkdirSync(path.join(stateDir, 'logs'), { recursive: true });
+
+    mockGetNocturnalSessionSnapshot.mockReturnValue({
+      sessionId: 'sleep-runtime',
+      startedAt: '2026-04-10T00:00:00.000Z',
+      updatedAt: '2026-04-10T00:01:00.000Z',
+      assistantTurns: [],
+      userTurns: [],
+      toolCalls: [],
+      painEvents: [],
+      gateBlocks: [],
+      stats: {
+        totalAssistantTurns: 1,
+        totalToolCalls: 1,
+        totalPainEvents: 0,
+        totalGateBlocks: 0,
+        failureCount: 0,
+      },
+    });
+    mockStartWorkflow.mockRejectedValue(new Error('NocturnalWorkflowManager: subagent runtime unavailable'));
+
+    EvolutionWorkerService.api = {
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+      runtime: {},
+    } as any;
+
+    fs.writeFileSync(
+      path.join(stateDir, 'evolution_queue.json'),
+      JSON.stringify([
+        {
+          id: 'sleep-runtime',
+          taskKind: 'sleep_reflection',
+          priority: 'medium',
+          score: 50,
+          source: 'nocturnal',
+          reason: 'Sleep reflection',
+          timestamp: '2026-04-10T00:00:00.000Z',
+          enqueued_at: '2026-04-10T00:00:00.000Z',
+          status: 'pending',
+          retryCount: 0,
+          maxRetries: 1,
+          recentPainContext: {
+            mostRecent: { score: 0.5, source: 'pain', reason: 'x', timestamp: '2026-04-10T00:00:00.000Z', sessionId: 'sleep-runtime' },
+            recentPainCount: 1,
+            recentMaxPainScore: 0.5,
+          },
+        },
+      ], null, 2),
+      'utf8'
+    );
+
+    try {
+      EvolutionWorkerService.start({
+        workspaceDir,
+        stateDir,
+        logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+        config: {},
+      } as any);
+
+      await vi.advanceTimersByTimeAsync(6000);
+
+      const queue = readQueue(stateDir);
+      expect(queue[0].status).toBe('failed');
+      expect(queue[0].resolution).toBe('runtime_unavailable');
+      expect(queue[0].lastError).toContain('subagent runtime unavailable');
     } finally {
       EvolutionWorkerService.stop({ workspaceDir, stateDir, logger: console } as any);
       safeRmDir(workspaceDir);
@@ -356,6 +433,115 @@ score: 80`,
       expect(queue[0].status).toBe('in_progress');
       expect(queue[0].resultRef).toBe('wf-1');
 
+    } finally {
+      EvolutionWorkerService.stop({ workspaceDir, stateDir, logger: console } as any);
+      safeRmDir(workspaceDir);
+    }
+  });
+
+  it('does not select fallback sessions newer than the triggering task timestamp', async () => {
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-nocturnal-bounded-'));
+    const stateDir = path.join(workspaceDir, '.state');
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.mkdirSync(path.join(stateDir, 'sessions'), { recursive: true });
+    fs.mkdirSync(path.join(stateDir, 'logs'), { recursive: true });
+
+    mockGetNocturnalSessionSnapshot.mockImplementation((sessionId: string) => {
+      if (sessionId === 'older-session') {
+        return {
+          sessionId: 'older-session',
+          startedAt: '2026-04-09T23:00:00.000Z',
+          updatedAt: '2026-04-09T23:10:00.000Z',
+          assistantTurns: [],
+          userTurns: [],
+          toolCalls: [],
+          painEvents: [],
+          gateBlocks: [],
+          stats: {
+            totalAssistantTurns: 1,
+            totalToolCalls: 1,
+            totalPainEvents: 0,
+            totalGateBlocks: 0,
+            failureCount: 1,
+          },
+        };
+      }
+      return null;
+    });
+    mockListRecentNocturnalCandidateSessions.mockReturnValue([
+      {
+        sessionId: 'newer-session',
+        startedAt: '2026-04-10T01:00:00.000Z',
+        updatedAt: '2026-04-10T01:10:00.000Z',
+        assistantTurnCount: 1,
+        toolCallCount: 2,
+        painEventCount: 1,
+        gateBlockCount: 0,
+        failureCount: 1,
+      },
+      {
+        sessionId: 'older-session',
+        startedAt: '2026-04-09T23:00:00.000Z',
+        updatedAt: '2026-04-09T23:10:00.000Z',
+        assistantTurnCount: 1,
+        toolCallCount: 2,
+        painEventCount: 1,
+        gateBlockCount: 0,
+        failureCount: 1,
+      },
+    ]);
+    mockStartWorkflow.mockResolvedValue({ workflowId: 'wf-bounded', childSessionKey: 'child-bounded', state: 'active' });
+    mockGetWorkflowDebugSummary.mockResolvedValue({ state: 'active', metadata: {} });
+
+    EvolutionWorkerService.api = {
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+      runtime: {},
+    } as any;
+
+    fs.writeFileSync(
+      path.join(stateDir, 'evolution_queue.json'),
+      JSON.stringify([
+        {
+          id: 'sleep-bounded',
+          taskKind: 'sleep_reflection',
+          priority: 'medium',
+          score: 50,
+          source: 'nocturnal',
+          reason: 'Sleep reflection',
+          timestamp: '2026-04-10T00:00:00.000Z',
+          enqueued_at: '2026-04-10T00:00:00.000Z',
+          status: 'pending',
+          retryCount: 0,
+          maxRetries: 1,
+          recentPainContext: {
+            mostRecent: null,
+            recentPainCount: 0,
+            recentMaxPainScore: 0,
+          },
+        },
+      ], null, 2),
+      'utf8'
+    );
+
+    try {
+      EvolutionWorkerService.start({
+        workspaceDir,
+        stateDir,
+        logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+        config: { get: () => 15000 },
+      } as any);
+
+      await vi.advanceTimersByTimeAsync(6000);
+
+      expect(mockListRecentNocturnalCandidateSessions).toHaveBeenCalledWith(
+        expect.objectContaining({
+          limit: 20,
+          minToolCalls: 1,
+          dateTo: '2026-04-10T00:00:00.000Z',
+        })
+      );
+      expect(mockGetNocturnalSessionSnapshot).not.toHaveBeenCalledWith('newer-session');
+      expect(mockGetNocturnalSessionSnapshot).toHaveBeenCalledWith('older-session');
     } finally {
       EvolutionWorkerService.stop({ workspaceDir, stateDir, logger: console } as any);
       safeRmDir(workspaceDir);
