@@ -79,7 +79,7 @@ describe('E2E: Tool Hooks workspaceDir Resolution', () => {
       expect(mockApi.runtime.agent.resolveAgentWorkspaceDir).toHaveBeenCalledWith(mockApi.config, 'test-agent');
     });
 
-    it('should fallback to resolvePath when agentId is also undefined', async () => {
+    it('should refuse to guess a workspace when agentId is also undefined', async () => {
       const { resolveValidWorkspaceDir } = await import('../../src/core/workspace-dir-validation.js');
       
       const mockApi = createMockApi(testWorkspaceDir);
@@ -90,8 +90,8 @@ describe('E2E: Tool Hooks workspaceDir Resolution', () => {
       
       const result = resolveValidWorkspaceDir(ctx, mockApi as any, { source: 'after_tool_call' });
       
-      expect(result).toBe(testWorkspaceDir);
-      expect(mockApi.resolvePath).toHaveBeenCalledWith('.');
+      expect(result).toBeUndefined();
+      expect(mockApi.resolvePath).not.toHaveBeenCalled();
     });
   });
 
@@ -129,26 +129,18 @@ describe('E2E: Tool Hooks workspaceDir Resolution', () => {
     });
   });
 
-  describe('Scenario 4: Warning is logged when workspaceDir resolution fails', () => {
-    it('should warn when falling back to resolvePath with invalid result', async () => {
+  describe('Scenario 4: Invalid workspace candidates are rejected', () => {
+    it('should return undefined when all workspace resolution candidates are invalid', async () => {
       const { resolveValidWorkspaceDir } = await import('../../src/core/workspace-dir-validation.js');
       
-      const mockApi = createMockApi(os.homedir()); // resolvePath returns home dir
-      mockApi.runtime.agent.resolveAgentWorkspaceDir.mockReturnValue(os.homedir()); // agentId also returns home
-      
-      const warningMessages: string[] = [];
-      const onWarning = (msg: string) => warningMessages.push(msg);
+      const mockApi = createMockApi(os.homedir());
+      mockApi.runtime.agent.resolveAgentWorkspaceDir.mockReturnValue(os.homedir());
       
       const ctx = { workspaceDir: undefined, agentId: 'test-agent' };
       
-      const result = resolveValidWorkspaceDir(ctx, mockApi as any, { 
-        source: 'test',
-        onWarning,
-      });
+      const result = resolveValidWorkspaceDir(ctx, mockApi as any, { source: 'test' });
       
-      // Should have warnings about invalid paths
-      expect(warningMessages.length).toBeGreaterThan(0);
-      expect(warningMessages.some(m => m.includes('FINAL FALLBACK') || m.includes('invalid'))).toBe(true);
+      expect(result).toBeUndefined();
     });
   });
 });

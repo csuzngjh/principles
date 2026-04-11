@@ -286,7 +286,7 @@ export class NocturnalTargetSelector {
     recentMaxPainScore: number;
   };
 
-  /* eslint-disable @typescript-eslint/max-params -- Reason: Constructor requires all parameters for proper initialization */
+   
   constructor(
     workspaceDir: string,
     stateDir: string,
@@ -518,7 +518,7 @@ export class NocturnalTargetSelector {
  *
  * This is a convenience wrapper for the common case.
  */
-/* eslint-disable @typescript-eslint/max-params -- Reason: Function signature requires all parameters for type-safe selection */
+ 
 export function selectNocturnalTarget(
   workspaceDir: string,
   stateDir: string,

@@ -69,7 +69,7 @@ export class DeepReflectWorkflowManager extends WorkflowManagerBase {
         return super.startWorkflow(spec, options);
     }
 
-    /* eslint-disable @typescript-eslint/class-methods-use-this -- Reason: Subclass overrides id generation pattern */
+     
     protected override generateWorkflowId(): string {
         return `wf_dr_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
     }

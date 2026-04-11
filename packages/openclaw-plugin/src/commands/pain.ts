@@ -96,7 +96,7 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
 
     // Handle empathy subcommand
     if (args.startsWith('empathy')) {
-        // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between main handler and empathy subcommand handler - reordering would break logical grouping
+         
         return handleEmpathySubcommand(wctx, args, sessionId, isZh);
     }
 
@@ -126,7 +126,7 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
     const gfiBar = createProgressBar(gfi, 100, 15);
     
     // Determine Mental Mode (aligned with prompt.ts logic)
-    // eslint-disable-next-line no-useless-assignment -- Reason: initial value unused due to immediate reassignment - keeping for type inference compatibility
+     
     let mentalMode = '';
     if (isZh) {
         if (gfi >= 70) mentalMode = '🚑 救赎模式 (HUMBLE_RECOVERY)';
@@ -139,7 +139,7 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
     }
     
     // Determine health status based on GFI
-    // eslint-disable-next-line no-useless-assignment -- Reason: initial values unused due to immediate reassignment in all branches
+     
     let healthLabel = 'Healthy';
     let suggestionText = '';
 
@@ -218,7 +218,7 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
 /**
  * Handle /pd-status empathy subcommand
  */
-// eslint-disable-next-line @typescript-eslint/max-params -- Reason: empathy subcommand requires all 4 context params - refactoring would break API
+ 
 function handleEmpathySubcommand(
     wctx: WorkspaceContext,
     args: string,

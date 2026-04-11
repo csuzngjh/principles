@@ -77,7 +77,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/* eslint-disable @typescript-eslint/max-params -- Reason: Clamp function requires all parameters for safe numeric conversion */
+ 
 function clampFloat(value: unknown, min: number, max: number, fallback: number): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     return fallback;
@@ -85,7 +85,7 @@ function clampFloat(value: unknown, min: number, max: number, fallback: number):
   return Math.max(min, Math.min(max, value));
 }
 
-/* eslint-disable @typescript-eslint/max-params -- Reason: Clamp function requires all parameters for safe numeric conversion */
+ 
 function clampInt(value: unknown, min: number, max: number, fallback: number): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     return fallback;
@@ -315,9 +315,9 @@ function writeLedgerUnlocked(filePath: string, store: HybridLedgerStore): void {
   fs.writeFileSync(filePath, serializeLedger(store), 'utf-8');
 }
 
-/* eslint-disable no-unused-vars -- Reason: callback parameter used via closure in inner function */
+ 
 function mutateLedger<T>(stateDir: string, mutate: (store: HybridLedgerStore) => T): T {
-  // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: function is defined later but called in this helper for consistency
+   
   const filePath = getLedgerFilePath(stateDir);
   return withLock(filePath, () => {
     const store = readLedgerFromFile(filePath);
@@ -327,9 +327,9 @@ function mutateLedger<T>(stateDir: string, mutate: (store: HybridLedgerStore) =>
   });
 }
 
-/* eslint-disable no-unused-vars -- Reason: callback parameter used via closure in inner function */
+ 
 async function mutateLedgerAsync<T>(stateDir: string, mutate: (store: HybridLedgerStore) => Promise<T>): Promise<T> {
-  // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: function is defined later but called in this helper for consistency
+   
   const filePath = getLedgerFilePath(stateDir);
   return withLockAsync(filePath, async () => {
     const store = readLedgerFromFile(filePath);
@@ -363,7 +363,7 @@ export async function saveLedgerAsync(stateDir: string, store: HybridLedgerStore
 
 export function updateTrainingStore(
   stateDir: string,
-  /* eslint-disable no-unused-vars -- Reason: callback parameter is forwarded to mutateLedger callback */
+   
   mutate: (store: LegacyPrincipleTrainingStore) => void,
 ): void {
   mutateLedger(stateDir, (store) => {

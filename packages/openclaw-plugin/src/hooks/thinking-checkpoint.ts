@@ -40,12 +40,12 @@ export interface ThinkingCheckpointConfig {
  * @param logger - Optional logger for info messages
  * @returns Block result if thinking required, undefined otherwise
  */
-/* eslint-disable @typescript-eslint/max-params -- Reason: Checkpoint function requires event, config, sessionId, and logger */
+ 
 export function checkThinkingCheckpoint(
   event: PluginHookBeforeToolCallEvent,
   config: ThinkingCheckpointConfig,
   sessionId: string | undefined,
-  /* eslint-disable no-unused-vars -- Reason: callback parameter in type annotation */
+   
   logger?: { info?: (message: string) => void }
 ): PluginHookBeforeToolCallResult | undefined {
   const enabled = config.enabled ?? false;

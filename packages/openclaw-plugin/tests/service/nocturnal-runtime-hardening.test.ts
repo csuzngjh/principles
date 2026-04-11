@@ -82,4 +82,37 @@ describe('NocturnalWorkflowManager runtime hardening', () => {
 
     manager.dispose();
   });
+
+  it('rejects malformed snapshot ingress before starting the async pipeline', async () => {
+    const manager = new NocturnalWorkflowManager({
+      workspaceDir,
+      stateDir,
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as any,
+      runtimeAdapter: {} as any,
+    });
+
+    const handle = await manager.startWorkflow(nocturnalWorkflowSpec, {
+      parentSessionId: 'sleep_reflection:test',
+      taskInput: {},
+      metadata: {
+        snapshot: {
+          sessionId: 'session-1',
+          stats: {
+            totalAssistantTurns: 1,
+            totalToolCalls: 1,
+            totalPainEvents: 0,
+            totalGateBlocks: 0,
+            failureCount: 0,
+          },
+        },
+      },
+    });
+
+    const summary = await manager.getWorkflowDebugSummary(handle.workflowId);
+    expect(summary?.state).toBe('terminal_error');
+    expect(summary?.recentEvents.some((event) => event.eventType === 'nocturnal_failed')).toBe(true);
+    expect(mockExecuteNocturnalReflectionAsync).not.toHaveBeenCalled();
+
+    manager.dispose();
+  });
 });

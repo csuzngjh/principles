@@ -72,14 +72,14 @@ export interface ReconcileResult {
 export interface ReconcileOptions {
   dryRun?: boolean;
   workspaceDir: string;
-  /* eslint-disable no-unused-vars -- Reason: logger callback param names intentionally unused - callbacks only invoked for side effects */
+   
   logger?: { info?: (_: string) => void; warn?: (_: string) => void };
-  /* eslint-enable no-unused-vars */
+   
 }
 
-/* eslint-disable no-unused-vars -- Reason: logger callbacks have unused param names in type */
+ 
 async function readCronStore(logger?: { info?: (_: string) => void; warn?: (_: string) => void }): Promise<CronStoreFile> {
-/* eslint-enable no-unused-vars */
+ 
   if (!fs.existsSync(CRON_STORE_PATH)) {
     logger?.info?.(`[PD:Reconciler] cron/jobs.json not found, starting with empty store`);
     return { version: 1, jobs: [] };
@@ -143,7 +143,7 @@ function diff(declared: PDTaskSpec[], actual: CronJob[]): DiffAction[] {
 function buildCronJob(
   task: PDTaskSpec,
   nowMs: number,
-  // eslint-disable-next-line no-unused-vars -- logger callback param unused in type
+   
   logger?: { info?: (_: string) => void },
 ): CronJob {
   logger?.info?.(`[PD:Reconciler] Building cron job: ${task.name} (id=${task.id}, interval=${task.schedule.everyMs}ms)`);
@@ -158,7 +158,7 @@ function buildCronJob(
     wakeMode: 'now',
     payload: {
       kind: 'agentTurn',
-      // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: buildTaskPrompt is defined later in this file, called here for organizational reasons
+       
       message: buildTaskPrompt(task, logger),
       lightContext: task.execution.lightContext ?? true,
       timeoutSeconds: task.execution.timeoutSeconds ?? 120,
@@ -177,7 +177,7 @@ function buildCronJob(
   };
 }
 
-// eslint-disable-next-line no-unused-vars -- logger callback param unused in type
+ 
 function buildTaskPrompt(task: PDTaskSpec, logger?: { info?: (_: string) => void }): string {
   if (task.id === 'empathy-optimizer') {
     logger?.info?.(`[PD:Reconciler] Building empathy optimizer prompt`);
@@ -292,7 +292,7 @@ export async function reconcilePDTasks(
   });
 
   const cronStore = await readCronStore(logger);
-  // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: healthCheck is defined later in this file, called here for organizational reasons
+   
   const healthUpdated = healthCheck(declared, cronStore, logger);
   const actions = diff(healthUpdated, cronStore.jobs);
 
@@ -369,9 +369,9 @@ export async function reconcilePDTasks(
 function healthCheck(
   tasks: PDTaskSpec[],
   cronStore: CronStoreFile,
-  /* eslint-disable no-unused-vars -- Reason: callback type signature parameters */
+   
   logger: { info?: (_msg: string) => void; warn?: (_msg: string) => void },
-  /* eslint-enable no-unused-vars */
+   
 ): PDTaskSpec[] {
   const jobByName = new Map(cronStore.jobs.map((j) => [j.name, j]));
 

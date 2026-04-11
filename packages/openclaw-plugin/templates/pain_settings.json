@@ -27,7 +27,7 @@
   "intervals": {
     "worker_poll_ms": 900000,
     "initial_delay_ms": 5000,
-    "task_timeout_ms": 1800000
+    "task_timeout_ms": 3600000
   },
   "trust": {
     "stages": {

@@ -45,9 +45,8 @@ import {
 // ---------------------------------------------------------------------------
 // Embedded Role Prompts
 // ---------------------------------------------------------------------------
-// These prompts are embedded at build time to eliminate file system dependency.
-// Previously loaded from src/agents/*.md at runtime — fragile because esbuild
-// did not copy the agents/ directory into the bundle.
+// These prompts are embedded at build time. The agents/ directory was removed
+// to eliminate fragile runtime file dependencies on the file system.
 
 const NOCTURNAL_DREAMER_PROMPT = `# Nocturnal Dreamer — Candidate Generation
 
@@ -276,7 +275,7 @@ If you cannot synthesize an artifact:
  * Interface for Trinity stage invocation.
  * Implementations can use real subagent runtimes or stubs.
  */
-/* eslint-disable no-unused-vars -- Reason: interface method params are type signatures, not implementations */
+ 
 export interface TrinityRuntimeAdapter {
   /**
    * Invoke the Dreamer stage.
@@ -327,7 +326,7 @@ export interface TrinityRuntimeAdapter {
    */
   close?(): Promise<void>;
 }
-/* eslint-enable no-unused-vars */
+ 
 
 // ---------------------------------------------------------------------------
 // OpenClaw Runtime Adapter
@@ -339,7 +338,7 @@ export interface TrinityRuntimeAdapter {
  * Does NOT depend on OpenClaw internals.
  */
 export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
-  /* eslint-disable no-unused-vars -- Reason: type-level function parameter names are documentation */
+   
   private readonly api: {
     runtime: {
       subagent: {
@@ -366,7 +365,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
       };
     };
   };
-  /* eslint-enable no-unused-vars */
+   
 
   private readonly stageTimeoutMs: number;
 
@@ -472,14 +471,14 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
     }
   }
 
-  // eslint-disable-next-line @typescript-eslint/max-params -- Reason: scribe invocation requires all context parameters - refactoring would break API
+   
   async invokeScribe(
     dreamerOutput: DreamerOutput,
     philosopherOutput: PhilosopherOutput,
     snapshot: NocturnalSessionSnapshot,
     principleId: string,
     telemetry: TrinityTelemetry,
-    // eslint-disable-next-line no-unused-vars, @typescript-eslint/no-unused-vars -- Reason: interface requires this param but implementation doesn't use it
+     
     _config: TrinityConfig
   ): Promise<TrinityDraftArtifact | null> {
     const sessionKey = `agent:main:subagent:ne-scribe-${randomUUID()}`;
@@ -519,7 +518,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
     }
   }
 
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: interface-required close() with no-op implementation
+   
   async close(): Promise<void> {
     // Nothing to clean up in this implementation
   }
@@ -528,7 +527,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
   // Private Helper Methods
   // ---------------------------------------------------------------------------
 
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: pure utility function that doesn't need instance state
+   
   private extractAssistantText(
     messages: { role: string; text?: string; content?: string }[]
   ): string {
@@ -541,7 +540,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
     return '';
   }
 
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: pure utility function that doesn't need instance state
+   
   private buildDreamerPrompt(
     snapshot: NocturnalSessionSnapshot,
     principleId: string,
@@ -551,18 +550,18 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
 
 Session Snapshot:
 - Session ID: ${snapshot.sessionId}
-- Assistant Turns: ${snapshot.stats.totalAssistantTurns}
-- Tool Calls: ${snapshot.stats.totalToolCalls}
-- Failures: ${snapshot.stats.failureCount}
+- Assistant Turns: ${snapshot.stats.totalAssistantTurns ?? 'N/A (data unavailable)'}
+- Tool Calls: ${snapshot.stats.totalToolCalls ?? 'N/A (data unavailable)'}
+- Failures: ${snapshot.stats.failureCount ?? 'N/A (data unavailable)'}
 - Pain Events: ${snapshot.stats.totalPainEvents}
-- Gate Blocks: ${snapshot.stats.totalGateBlocks}
+- Gate Blocks: ${snapshot.stats.totalGateBlocks ?? 'N/A (data unavailable)'}
 
 Please analyze this session and generate ${maxCandidates} candidate corrections. Each candidate should identify a bad decision and propose a better alternative grounded in the target principle.
 
 Respond with ONLY a valid JSON object matching the DreamerOutput contract.`;
   }
 
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: utility method doesn't require this - pure prompt building function
+   
   private buildPhilosopherPrompt(
     dreamerOutput: DreamerOutput,
     principleId: string
@@ -576,7 +575,7 @@ ${candidatesJson}
 Please evaluate each candidate and rank them by principle alignment, specificity, and actionability. Respond with ONLY a valid JSON object matching the PhilosopherOutput contract.`;
   }
 
-  /* eslint-disable @typescript-eslint/class-methods-use-this, @typescript-eslint/max-params -- Reason: helper function needs all 4 context params and doesn't use instance state */
+   
   private buildScribePrompt(
     dreamerOutput: DreamerOutput,
     philosopherOutput: PhilosopherOutput,
@@ -596,7 +595,7 @@ ${judgmentsJson}
 
 Select the best candidate (Philosopher's rank 1) and synthesize it into a final TrinityDraftArtifact. Respond with ONLY a valid JSON object.`;
   }
-  /* eslint-enable @typescript-eslint/class-methods-use-this, @typescript-eslint/max-params */
+   
 
   private parseDreamerOutput(text: string): DreamerOutput {
     const json = this.extractJson(text);
@@ -694,12 +693,12 @@ Select the best candidate (Philosopher's rank 1) and synthesize it into a final 
     }
   }
 
-  // eslint-disable-next-line @typescript-eslint/max-params -- Reason: output parsing requires text + snapshot + principleId + telemetry - refactoring would break API
+   
   private parseScribeOutput(
     text: string,
     snapshot: NocturnalSessionSnapshot,
     principleId: string,
-    // eslint-disable-next-line no-unused-vars, @typescript-eslint/no-unused-vars -- Reason: interface requires this param but implementation doesn't use it
+     
     _telemetry: TrinityTelemetry
   ): TrinityDraftArtifact | null {
     const json = this.extractJson(text);
@@ -740,7 +739,7 @@ Select the best candidate (Philosopher's rank 1) and synthesize it into a final 
   /**
    * Extract JSON object from text that may contain markdown code blocks.
    */
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: pure utility function that doesn't need instance state
+   
   private extractJson(text: string): string | null {
     // Try direct parse first
     try {
@@ -996,9 +995,9 @@ export function invokeStubDreamer(
   principleId: string,
   maxCandidates: number
 ): DreamerOutput {
-  const hasFailures = snapshot.stats.failureCount > 0;
+  const hasFailures = (snapshot.stats.failureCount ?? 0) > 0;
   const hasPain = snapshot.stats.totalPainEvents > 0;
-  const hasGateBlocks = snapshot.stats.totalGateBlocks > 0;
+  const hasGateBlocks = (snapshot.stats.totalGateBlocks ?? 0) > 0;
 
   // #219: Detect fallback data source - stats may be incomplete
   const isFallback = snapshot._dataSource === 'pain_context_fallback';
@@ -1126,7 +1125,7 @@ export function invokeStubDreamer(
  */
 export function invokeStubPhilosopher(
   dreamerOutput: DreamerOutput,
-  // eslint-disable-next-line no-unused-vars, @typescript-eslint/no-unused-vars -- Reason: interface requires this param but stub implementation doesn't use it
+   
   _principleId: string
 ): PhilosopherOutput {
   if (!dreamerOutput.valid || dreamerOutput.candidates.length === 0) {
@@ -1201,7 +1200,7 @@ export function invokeStubPhilosopher(
  * In production, this would call the actual Scribe subagent.
  * The stub uses tournament selection (scoring + thresholds) to pick the winner.
  */
-// eslint-disable-next-line @typescript-eslint/max-params -- Reason: stub scribe requires all context parameters - refactoring would break API
+ 
 export function invokeStubScribe(
   dreamerOutput: DreamerOutput,
   philosopherOutput: PhilosopherOutput,
@@ -1279,7 +1278,7 @@ export function runTrinity(options: RunTrinityOptions): TrinityResult {
 
   // Stub path: use synchronous stub implementations
   if (config.useStubs) {
-    // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: function is defined later in file but callback order makes this necessary
+     
     return runTrinityWithStubs(snapshot, principleId, config);
   }
 
@@ -1318,7 +1317,7 @@ export async function runTrinityAsync(options: RunTrinityOptions): Promise<Trini
 
   if (config.useStubs) {
     // Stub path: use synchronous stubs
-    // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: function is defined later in file but callback order makes this necessary
+     
     return runTrinityWithStubs(snapshot, principleId, config);
   }
 

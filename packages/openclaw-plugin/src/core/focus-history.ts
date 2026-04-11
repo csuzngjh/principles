@@ -428,7 +428,7 @@ export function extractWorkingMemory(
             toolUse.name === 'write_file' || toolUse.name === 'create_file' ? 'created' : 'modified';
           
           // 尝试从文本中提取描述
-          // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between helper functions - reordering would break logical grouping
+           
           const description = extractDescription(text, filePath);
           
           snapshot.artifacts.push({
@@ -443,20 +443,20 @@ export function extractWorkingMemory(
     if (!text) continue;
 
     // 从文本中提取文件操作（备用方式）
-    // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between helper functions - reordering would break logical grouping
+     
     extractFileArtifacts(text, snapshot.artifacts, workspaceDir);
 
     // 提取问题
-    // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between helper functions - reordering would break logical grouping
+     
     extractProblems(text, snapshot.activeProblems);
 
     // 提取下一步
-    // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between helper functions - reordering would break logical grouping
+     
     extractNextActions(text, snapshot.nextActions);
   }
 
   // 去重和限制数量
-  // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between helper functions - reordering would break logical grouping
+   
   snapshot.artifacts = deduplicateArtifacts(snapshot.artifacts).slice(-MAX_ARTIFACTS);
   snapshot.activeProblems = snapshot.activeProblems.slice(-MAX_PROBLEMS);
   snapshot.nextActions = snapshot.nextActions.slice(-MAX_NEXT_ACTIONS);
@@ -476,7 +476,7 @@ function extractFileArtifacts(
   // 格式: file_path: "/path/to/file" 或 absolute_path: "/path/to/file"
   const filePathRegex = /(?:file_path|absolute_path)["']?\s*[:=]\s*["']([^"']+\.(ts|js|json|md|yaml|yml|py|sh|mjs|cjs))["']/gi;
 
-  // eslint-disable-next-line @typescript-eslint/init-declarations -- Reason: assigned immediately in while loop condition before use
+   
   let match;
   while ((match = filePathRegex.exec(text)) !== null) {
     const [, filePath] = match;
@@ -506,7 +506,7 @@ function extractFileArtifacts(
     }
 
     // 尝试提取描述（从附近的文本）
-    // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between helper functions - reordering would break logical grouping
+     
     const description = extractDescription(text, filePath);
 
     artifacts.push({
@@ -539,7 +539,7 @@ function extractFileArtifacts(
       continue;
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between helper functions - reordering would break logical grouping
+     
     const description = extractDescription(text, filePath);
 
     artifacts.push({
@@ -587,7 +587,7 @@ function extractProblems(
 ): void {
   // 问题模式（匹配问题描述）
   const problemPattern = /(?:问题|problem|error|错误|失败|failed)[:：]\s*([^\n]{5,100})/gi;
-  // eslint-disable-next-line @typescript-eslint/init-declarations -- Reason: assigned immediately in while loop condition before use
+   
   let match;
   while ((match = problemPattern.exec(text)) !== null) {
     const content = match[1].trim();
@@ -630,7 +630,7 @@ function extractNextActions(text: string, actions: string[]): void {
   ];
 
   for (const pattern of patterns) {
-    // eslint-disable-next-line @typescript-eslint/init-declarations -- Reason: assigned immediately in while loop condition before use
+     
     let match;
     while ((match = pattern.exec(text)) !== null) {
       const action = match[1].trim();
@@ -689,7 +689,7 @@ export function parseWorkingMemorySection(content: string): WorkingMemorySnapsho
   // 解析文件记录表格
   // | 文件路径 | 操作 | 描述 |
   const tableRegex = /\|\s*`?([^`|\n]+)`?\s*\|\s*(created|modified|deleted)\s*\|\s*([^|\n]*)\s*\|/gi;
-  // eslint-disable-next-line @typescript-eslint/init-declarations -- Reason: assigned immediately in while loop condition before use
+   
   let match;
   while ((match = tableRegex.exec(wmContent)) !== null) {
     snapshot.artifacts.push({
@@ -728,7 +728,7 @@ export function mergeWorkingMemory(content: string, snapshot: WorkingMemorySnaps
   const wmIndex = content.indexOf(WORKING_MEMORY_SECTION);
 
   // 生成 Working Memory 章节
-  // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between helper functions - reordering would break logical grouping
+   
   const wmSection = generateWorkingMemorySection(snapshot);
   
   if (wmIndex === -1) {
@@ -1405,9 +1405,9 @@ export function recoverFromTemplate(
 export function safeReadCurrentFocus(
   focusPath: string,
   extensionRoot: string,
-  /* eslint-disable no-unused-vars -- Reason: type-only callback parameter names in function type */
+   
   logger?: { warn?: (msg: string) => void; info?: (msg: string) => void }
-  /* eslint-enable no-unused-vars */
+   
 ): {
   content: string;
   recovered: boolean;

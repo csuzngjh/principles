@@ -8,12 +8,12 @@ import type {
 import { isExpectedSubagentError } from './subagent-error-utils.js';
 
 export interface TransportDriver {
-    /* eslint-disable no-unused-vars -- Reason: interface method params are type signatures, implementations use actual values */
+     
     run(params: RunParams): Promise<RunResult>;
     wait(params: WaitParams): Promise<WaitResult>;
     getResult(params: GetResultParams): Promise<GetResultResult>;
     cleanup(params: CleanupParams): Promise<void>;
-    /* eslint-enable no-unused-vars */
+     
 }
 
 export interface RunParams {
@@ -55,7 +55,7 @@ export interface CleanupParams {
     deleteTranscript?: boolean;
 }
 
-/* eslint-disable no-unused-vars -- Reason: type method params are type signatures, implementations use actual values */
+ 
 type PluginRuntimeSubagent = {
     run: (params: {
         sessionKey: string;
@@ -79,21 +79,21 @@ type PluginRuntimeSubagent = {
         deleteTranscript?: boolean;
     }) => Promise<void>;
 };
-/* eslint-enable no-unused-vars */
+ 
 
 /**
  * OpenClaw plugin SDK's agent.session namespace — always available (not gateway-scoped).
  * These functions are imported directly from OpenClaw's session store module.
  */
 export type AgentSessionAPI = {
-    /* eslint-disable no-unused-vars -- Reason: type method params are type signatures, implementations use actual values */
+     
     resolveStorePath: () => string;
     loadSessionStore: (storePath: string, opts?: { skipCache?: boolean }) => Record<string, unknown>;
     saveSessionStore: (storePath: string, store: Record<string, unknown>) => Promise<void>;
     resolveSessionFilePath: (sessionKey: string) => string;
     /** Optional: OpenClaw config object needed for session path resolution */
     config?: unknown;
-    /* eslint-enable no-unused-vars */
+     
 };
 
 export class RuntimeDirectDriver implements TransportDriver {
@@ -206,6 +206,10 @@ export class RuntimeDirectDriver implements TransportDriver {
                 this.logger.info(`[PD:RuntimeDirectDriver] Gateway-scoped cleanup unavailable (${errMsg.split(':')[0]}), falling back to agent.session`);
                 await this.cleanupViaAgentSession(params.sessionKey);
                 this.logger.info(`[PD:RuntimeDirectDriver] Fallback cleanup succeeded`);
+            } else if (isNonGatewayContext && !this.agentSession) {
+                // #232: Both cleanup paths unavailable — this is an OpenClaw environment limitation,
+                // not a PD bug. Session will be cleaned up on next gateway request or TTL expiry.
+                this.logger.warn(`[PD:RuntimeDirectDriver] Session cleanup skipped (${errMsg.split(':')[0]}): no gateway context and agentSession unavailable — session will expire naturally`);
             } else {
                 this.logger.error(`[PD:RuntimeDirectDriver] Cleanup failed: ${errMsg}`);
                 throw error;

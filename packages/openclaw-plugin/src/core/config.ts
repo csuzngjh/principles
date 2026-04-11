@@ -290,7 +290,7 @@ export class PainConfig {
     /**
      * Basic validation for critical settings
      */
-    // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: validate is a pure validation function that modifies settings in place, no this reference needed
+     
     private validate(settings: PainSettings): void {
         // Ensure intervals are positive
         if (settings.intervals.worker_poll_ms < 1000) settings.intervals.worker_poll_ms = 15 * 60 * 1000;

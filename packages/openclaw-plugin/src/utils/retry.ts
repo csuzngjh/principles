@@ -34,7 +34,7 @@ export interface RetryOptions {
   operation?: string;
   /** Logger instance (optional, defaults to console) */
   logger?: RetryLogger;
-  /* eslint-disable no-unused-vars -- Reason: callback param names are part of type signature, unused implementations are valid */
+   
   isRetryable?: (_error: unknown) => boolean;
 }
 
@@ -424,7 +424,7 @@ export function computeDynamicTimeout(
   if (history.length < MIN_SAMPLES) {
     // Not enough data — use the spec's static timeout
     const fallback = clampTimeout(defaultTimeout);
-    // Use console.info since we don't have logger access here; this appears in journalctl
+    // eslint-disable-next-line no-console -- Monitoring output for fallback diagnostics
     console.info(`[PD:DynamicTimeout] Insufficient samples (${history.length} < ${MIN_SAMPLES}) for '${workflowType}', falling back to static timeout: ${fallback}ms`);
     return fallback;
   }
@@ -432,6 +432,7 @@ export function computeDynamicTimeout(
   const p95 = percentile(history, 95);
   const adaptive = p95 * SAFETY_MULTIPLIER;
   const result = clampTimeout(adaptive);
+  // eslint-disable-next-line no-console -- Monitoring output for adaptive timeout diagnostics
   console.info(`[PD:DynamicTimeout] Computed adaptive timeout for '${workflowType}': P95=${p95}ms (from ${history.length} samples) × ${SAFETY_MULTIPLIER} = ${result}ms`);
   return result;
 }

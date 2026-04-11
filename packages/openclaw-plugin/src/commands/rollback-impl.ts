@@ -57,11 +57,11 @@ export function handleRollbackImplCommand(ctx: PluginCommandContext): PluginComm
 
   // List active
   if (subcommand === 'list' || subcommand === '') {
-    // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: Mutual recursion between helper functions - reordering would break logical grouping
+     
     return _handleListActiveRollback(stateDir, isZh);
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: Mutual recursion between helper functions - reordering would break logical grouping
+   
   return _handleRollbackImpl(workspaceDir, stateDir, implId, reason, isZh, ctx.sessionId);
 }
 
@@ -103,7 +103,7 @@ function _handleListActiveRollback(
   return { text: output };
 }
 
-// eslint-disable-next-line @typescript-eslint/max-params -- Reason: Command handler signature must match OpenClaw plugin interface - breaking API change to options objects would affect public contracts
+ 
 function _handleRollbackImpl(
   workspaceDir: string,
   stateDir: string,
@@ -138,7 +138,7 @@ function _handleRollbackImpl(
   // Step 1: Current active -> disabled
   transitionImplementationState(stateDir, implId, 'disabled');
 
-  // eslint-disable-next-line @typescript-eslint/init-declarations -- Reason: assigned immediately in if/else branches before use
+   
   let restoredMessage: string;
 
   if (previousActiveId && allImpls.some((i) => i.id === previousActiveId)) {

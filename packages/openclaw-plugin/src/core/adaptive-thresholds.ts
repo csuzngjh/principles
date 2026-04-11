@@ -300,7 +300,7 @@ export function getEffectiveThresholds(stateDir: string): ThresholdValues {
  * @param reason - Reason for the adjustment (required for tracking)
  * @returns UpdateThresholdResult
  */
-// eslint-disable-next-line @typescript-eslint/max-params -- Reason: threshold state update requires all parameters - refactoring would break API
+ 
 export function updateThresholdState(
   stateDir: string,
   thresholdName: ThresholdName,

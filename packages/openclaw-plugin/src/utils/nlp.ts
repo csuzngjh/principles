@@ -19,7 +19,7 @@ export function extractCommonPhrases(samples: string[], minOccurrence = 3): stri
 
     // Filter phrases that meet the threshold
     return Array.from(phrases.entries())
-        /* eslint-disable @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: Destructuring with _placeholder for unused array element */
+         
         .filter(([_elem, count]) => count >= minOccurrence)
         .map(([phrase, _count]) => phrase);
 }

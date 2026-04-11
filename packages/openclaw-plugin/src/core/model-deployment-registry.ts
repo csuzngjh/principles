@@ -249,7 +249,7 @@ function writeRegistry(stateDir: string, registry: ModelDeploymentRegistry): voi
 /**
  * Execute a read-modify-write under an exclusive file lock.
  */
-/* eslint-disable no-unused-vars -- Reason: _registry is a type signature parameter */
+ 
 function withDeploymentRegistryLock<T>(
   stateDir: string,
   fn: (_registry: ModelDeploymentRegistry) => T
@@ -349,7 +349,7 @@ export function assertPromotionGatePassed(stateDir: string, checkpointId: string
  * @throws Error if checkpoint is not found or not deployable
  * @throws Error if checkpoint's targetModelFamily violates profile constraints
  */
-// eslint-disable-next-line @typescript-eslint/max-params -- Reason: checkpoint binding requires state + profile + checkpoint - refactoring would break API
+ 
 export function bindCheckpointToWorkerProfile(
   stateDir: string,
   workerProfile: WorkerProfile,
