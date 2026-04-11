@@ -23,6 +23,16 @@ import { WorkflowOrchestrator } from './workflow-orchestrator.js';
 export type { EvolutionQueueItem, QueueStatus, TaskResolution, RecentPainContext } from './evolution-queue-store.js';
 export { EvolutionQueueStore } from './evolution-queue-store.js';
 export { PainFlagDetector } from './pain-flag-detector.js';
+
+/**
+ * Backward-compatible wrapper for pain flag detection.
+ * Delegates to PainFlagDetector.extractRecentPainContext().
+ * Kept for backward compatibility with existing callers.
+ */
+export function readRecentPainContext(wctx: WorkspaceContext): RecentPainContext {
+  return new PainFlagDetector(wctx.workspaceDir).extractRecentPainContext();
+}
+
 export { EvolutionTaskDispatcher } from './evolution-task-dispatcher.js';
 export type { DispatchResult } from './evolution-task-dispatcher.js';
 export { WorkflowOrchestrator } from './workflow-orchestrator.js';
