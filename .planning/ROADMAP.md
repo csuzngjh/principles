@@ -16,7 +16,7 @@
 - Decimal phases (24.1, etc.): Urgent insertions (marked with INSERTED)
 
 - [ ] **Phase 24: Queue Store Extraction** - Extract queue persistence, locking, and migration into EvolutionQueueStore with read/write contracts
-- [ ] **Phase 25: Pain Flag Detector Extraction** - Extract pain flag detection into PainFlagDetector with entry-point validation
+- [x] **Phase 25: Pain Flag Detector Extraction** - Extract pain flag detection into PainFlagDetector with entry-point validation (completed 2026-04-11)
 - [ ] **Phase 26: Task Dispatcher Extraction** - Extract task dispatch and execution into EvolutionTaskDispatcher with entry-point validation
 - [ ] **Phase 27: Workflow Orchestrator Extraction** - Extract workflow watchdog and lifecycle into WorkflowOrchestrator with entry-point validation
 - [ ] **Phase 28: Context Builder + Service Slim + Fallback Audit** - Extract context building, slim the worker, and audit all 16 silent fallback points
@@ -101,7 +101,7 @@ Phases execute in numeric order: 24 -> 25 -> 26 -> 27 -> 28 -> 29
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 24. Queue Store Extraction | v1.14 | 0/2 | Planning complete | - |
-| 25. Pain Flag Detector Extraction | v1.14 | 0/? | Not started | - |
+| 25. Pain Flag Detector Extraction | v1.14 | 1/1 | Complete    | 2026-04-11 |
 | 26. Task Dispatcher Extraction | v1.14 | 0/? | Not started | - |
 | 27. Workflow Orchestrator Extraction | v1.14 | 0/? | Not started | - |
 | 28. Context Builder + Service Slim + Fallback Audit | v1.14 | 0/? | Not started | - |
