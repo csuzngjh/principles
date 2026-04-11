@@ -315,6 +315,8 @@ export function trackFriction(
     state.dailyGfiPeak = Math.max(state.dailyGfiPeak, state.currentGfi);
     
     // Schedule persistence
+    // Update decay anchor to prevent retroactive decay of the new friction
+    state.lastGfiDecayAt = Date.now();
     schedulePersistence(state);
     
     return state;
