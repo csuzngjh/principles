@@ -109,7 +109,13 @@ Plans:
   2. Worker service public API is unchanged -- external callers (hooks, commands, HTTP routes) are unaffected
   3. Nocturnal pipeline end-to-end flow (pain -> queue -> nocturnal -> replay) runs correctly through refactored modules
   4. Worker startup/shutdown lifecycle preserves correctness -- no hanging resources or leaked locks
-**Plans**: TBD
+**Plans**: 4 plans
+
+Plans:
+- [ ] 29-01-PLAN.md — Fix backward-compat export (readRecentPainContext) + run full test suite
+- [ ] 29-02-PLAN.md — Public API surface verification
+- [ ] 29-03-PLAN.md — Nocturnal E2E pipeline verification
+- [ ] 29-04-PLAN.md — Lifecycle verification (start/stop, no resource leaks)
 
 ## Progress
 
@@ -123,6 +129,6 @@ Phases execute in numeric order: 24 -> 25 -> 26 -> 27 -> 28 -> 29
 | 26. Task Dispatcher Extraction | v1.14 | 0/? | Not started | - |
 | 27. Workflow Orchestrator Extraction | v1.14 | 1/1 | Planning complete | - |
 | 28. Context Builder + Service Slim + Fallback Audit | v1.14 | 5/5 | Complete    | 2026-04-11 |
-| 29. Integration Verification | v1.14 | 0/? | Not started | - |
+| 29. Integration Verification | v1.14 | 0/4 | Planning complete | - |
 
 *Last updated: 2026-04-11*
