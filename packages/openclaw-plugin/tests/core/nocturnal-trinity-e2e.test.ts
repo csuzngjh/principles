@@ -121,7 +121,7 @@ function makeRealisticMockAdapter(): TrinityRuntimeAdapter {
       };
     },
 
-    async invokePhilosopher(dreamerOutput) {
+    async invokePhilosopher(dreamerOutput, _principleId, _snapshot) {
       const judgments = dreamerOutput.candidates.map((c, i) => ({
         candidateIndex: c.candidateIndex,
         critique: i === 0
@@ -186,7 +186,7 @@ function makePoorQualityAdapter(): TrinityRuntimeAdapter {
       };
     },
 
-    async invokePhilosopher() {
+    async invokePhilosopher(_dreamerOutput, _principleId, _snapshot) {
       return {
         valid: true,
         judgments: [
@@ -292,7 +292,7 @@ describe('Nocturnal Trinity E2E — Complete Chain', () => {
     expect(dreamerOutput.candidates[0].confidence).toBeLessThanOrEqual(1);
 
     // Stage 2: Philosopher
-    const philosopherOutput = await adapter.invokePhilosopher(dreamerOutput, 'P_001');
+    const philosopherOutput = await adapter.invokePhilosopher(dreamerOutput, 'P_001', snapshot);
     expect(philosopherOutput.valid).toBe(true);
     expect(philosopherOutput.judgments.length).toBe(dreamerOutput.candidates.length);
     expect(philosopherOutput.judgments[0].candidateIndex).toBe(0);
@@ -512,7 +512,7 @@ describe('Nocturnal Trinity E2E — Complete Chain', () => {
     const adapter = makeRealisticMockAdapter();
 
     const dreamerOutput = await adapter.invokeDreamer(snapshot, 'P_001', 2);
-    const philosopherOutput = await adapter.invokePhilosopher(dreamerOutput, 'P_001');
+    const philosopherOutput = await adapter.invokePhilosopher(dreamerOutput, 'P_001', snapshot);
     const scribeArtifact = await adapter.invokeScribe(
       dreamerOutput,
       philosopherOutput,

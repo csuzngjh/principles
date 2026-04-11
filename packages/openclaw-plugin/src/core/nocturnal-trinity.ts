@@ -300,11 +300,13 @@ export interface TrinityRuntimeAdapter {
    * Invoke the Philosopher stage.
    * @param dreamerOutput Dreamer's output
    * @param principleId Target principle ID
+   * @param snapshot Session snapshot (for violation evidence)
    * @returns Philosopher output JSON
    */
   invokePhilosopher(
     _dreamerOutput: DreamerOutput,
-    _principleId: string
+    _principleId: string,
+    _snapshot: NocturnalSessionSnapshot
   ): Promise<PhilosopherOutput>;
 
   /**
@@ -491,6 +493,9 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
         };
       }
 
+      // DEBUG: Log Dreamer's actual output
+      this.api.logger?.info(`[Trinity:Dreamer] Output preview: ${outputText.slice(0, 500)}`);
+
       return this.parseDreamerOutput(outputText);
     } catch (err) {
       return {
@@ -506,11 +511,12 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
 
   async invokePhilosopher(
     dreamerOutput: DreamerOutput,
-    principleId: string
+    principleId: string,
+    snapshot: NocturnalSessionSnapshot
   ): Promise<PhilosopherOutput> {
     const runId = `philosopher-${randomUUID()}`;
     const sessionFile = this.createSessionFile('philosopher');
-    const prompt = this.buildPhilosopherPrompt(dreamerOutput, principleId);
+    const prompt = this.buildPhilosopherPrompt(dreamerOutput, principleId, snapshot);
     const model = this.resolveModel();
 
     try {
@@ -537,6 +543,9 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
           generatedAt: new Date().toISOString(),
         };
       }
+
+      // DEBUG: Log Philosopher's actual output
+      this.api.logger?.info(`[Trinity:Philosopher] Output preview: ${outputText.slice(0, 500)}`);
 
       return this.parsePhilosopherOutput(outputText);
     } catch (err) {
@@ -586,6 +595,9 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
         return null;
       }
 
+      // DEBUG: Log Scribe's actual output
+      this.api.logger?.info(`[Trinity:Scribe] Output preview: ${outputText.slice(0, 800)}`);
+
       return this.parseScribeOutput(outputText, snapshot, principleId, telemetry);
     } catch (err) {
       return null;
@@ -618,33 +630,158 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
     principleId: string,
     maxCandidates: number
   ): string {
-    return `Target Principle: ${principleId}
+    // Build detailed tool failure list
+    const failures = snapshot.toolCalls
+      .filter(tc => tc.outcome === 'failure')
+      .map(tc => {
+        let desc = `- ${tc.toolName}`;
+        if (tc.filePath) desc += ` on ${tc.filePath}`;
+        desc += ` → FAILED: ${tc.errorMessage || 'unknown error'}`;
+        return desc;
+      });
 
-Session Snapshot:
-- Session ID: ${snapshot.sessionId}
-- Assistant Turns: ${snapshot.stats.totalAssistantTurns ?? 'N/A (data unavailable)'}
-- Tool Calls: ${snapshot.stats.totalToolCalls ?? 'N/A (data unavailable)'}
-- Failures: ${snapshot.stats.failureCount ?? 'N/A (data unavailable)'}
-- Pain Events: ${snapshot.stats.totalPainEvents}
-- Gate Blocks: ${snapshot.stats.totalGateBlocks ?? 'N/A (data unavailable)'}
+    // Build detailed pain event list
+    const pains = snapshot.painEvents
+      .filter(pe => pe.score >= 50)
+      .map(pe => `- Pain (score: ${pe.score}): ${pe.reason || 'no reason'} [source: ${pe.source}]`);
 
-Please analyze this session and generate ${maxCandidates} candidate corrections. Each candidate should identify a bad decision and propose a better alternative grounded in the target principle.
+    // Build gate block list
+    const blocks = snapshot.gateBlocks
+      .map(gb => `- Gate blocked ${gb.toolName}: ${gb.reason}`);
 
-Respond with ONLY a valid JSON object matching the DreamerOutput contract.`;
+    // Build assistant decision context (last 3 turns max)
+    const recentTurns = snapshot.assistantTurns
+      .slice(-3)
+      .map((t, i) => `[Turn ${i+1}] ${t.sanitizedText.slice(0, 300)}`)
+      .join('\n');
+
+    // Build user correction cues (if any)
+    const userCues = snapshot.userTurns
+      .filter(ut => ut.correctionDetected)
+      .map(ut => `- User correction: ${ut.correctionCue || 'detected'}`)
+      .join('\n');
+
+    const sections = [
+      `## Target Principle`,
+      `**Principle ID**: ${principleId}`,
+      ``,
+      `## Session Context`,
+      `**Session ID**: ${snapshot.sessionId}`,
+      ``,
+    ];
+
+    if (failures.length > 0) {
+      sections.push(`## Tool Failures (${failures.length})`);
+      sections.push(failures.join('\n'));
+      sections.push('');
+    }
+
+    if (pains.length > 0) {
+      sections.push(`## Pain Signals (${pains.length})`);
+      sections.push(pains.join('\n'));
+      sections.push('');
+    }
+
+    if (blocks.length > 0) {
+      sections.push(`## Gate Blocks (${blocks.length})`);
+      sections.push(blocks.join('\n'));
+      sections.push('');
+    }
+
+    if (recentTurns) {
+      sections.push(`## Assistant Decision Context`);
+      sections.push(recentTurns);
+      sections.push('');
+    }
+
+    if (userCues) {
+      sections.push(`## User Corrections`);
+      sections.push(userCues);
+      sections.push('');
+    }
+
+    sections.push(`## Task`,
+      `Analyze the above session and generate ${maxCandidates} candidate corrections.`,
+      `Each candidate must:`,
+      `1. Identify a specific bad decision from the session`,
+      `2. Propose a concrete better decision grounded in principle ${principleId}`,
+      `3. Explain the rationale referencing the principle`,
+      ``,
+      `Respond with ONLY a valid JSON object matching the DreamerOutput contract.`
+    );
+
+    return sections.join('\n');
   }
 
    
   private buildPhilosopherPrompt(
     dreamerOutput: DreamerOutput,
-    principleId: string
+    principleId: string,
+    snapshot: NocturnalSessionSnapshot
   ): string {
     const candidatesJson = JSON.stringify(dreamerOutput.candidates, null, 2);
-    return `Target Principle: ${principleId}
 
-Dreamer's Candidates:
-${candidatesJson}
+    // Build violation summary from snapshot for Philosopher to validate candidates
+    const failures = snapshot.toolCalls
+      .filter(tc => tc.outcome === 'failure')
+      .map(tc => `- ${tc.toolName}${tc.filePath ? ` on ${tc.filePath}` : ''} → FAILED: ${tc.errorMessage || 'unknown error'}`);
 
-Please evaluate each candidate and rank them by principle alignment, specificity, and actionability. Respond with ONLY a valid JSON object matching the PhilosopherOutput contract.`;
+    const pains = snapshot.painEvents
+      .filter(pe => pe.score >= 50)
+      .map(pe => `- Pain (score: ${pe.score}, severity: ${pe.severity || 'N/A'}): ${pe.reason || 'no reason'} [source: ${pe.source}]`);
+
+    const blocks = snapshot.gateBlocks
+      .map(gb => `- Gate blocked ${gb.toolName}: ${gb.reason}`);
+
+    const userCues = snapshot.userTurns
+      .filter(ut => ut.correctionDetected)
+      .map(ut => `- User correction: ${ut.correctionCue || 'detected'}`);
+
+    const sections = [
+      `## Target Principle`,
+      `**Principle ID**: ${principleId}`,
+      ``,
+      `## Session Violation Summary`,
+      `**Session ID**: ${snapshot.sessionId}`,
+    ];
+
+    if (failures.length > 0) {
+      sections.push(`\n### Tool Failures (${failures.length})`);
+      sections.push(failures.join('\n'));
+    }
+
+    if (pains.length > 0) {
+      sections.push(`\n### Pain Signals (${pains.length})`);
+      sections.push(pains.join('\n'));
+    }
+
+    if (blocks.length > 0) {
+      sections.push(`\n### Gate Blocks (${blocks.length})`);
+      sections.push(blocks.join('\n'));
+    }
+
+    if (userCues.length > 0) {
+      sections.push(`\n### User Corrections (${userCues.length})`);
+      sections.push(userCues.join('\n'));
+    }
+
+    sections.push(
+      ``,
+      `## Dreamer's Candidates`,
+      candidatesJson,
+      ``,
+      `## Task`,
+      `Evaluate each candidate against the violation summary above.`,
+      `For each candidate:`,
+      `1. Is the badDecision accurate — does it match the actual violations in the session?`,
+      `2. Is the betterDecision specific and actionable?`,
+      `3. Does the rationale correctly reference principle ${principleId}?`,
+      `4. Is the confidence score justified?`,
+      ``,
+      `Respond with ONLY a valid JSON object matching the PhilosopherOutput contract.`
+    );
+
+    return sections.join('\n');
   }
 
    
@@ -656,16 +793,56 @@ Please evaluate each candidate and rank them by principle alignment, specificity
   ): string {
     const candidatesJson = JSON.stringify(dreamerOutput.candidates, null, 2);
     const judgmentsJson = JSON.stringify(philosopherOutput.judgments, null, 2);
-    return `Target Principle: ${principleId}
-Session ID: ${snapshot.sessionId}
 
-Dreamer's Candidates:
-${candidatesJson}
+    // Build violation evidence for Scribe to ground the final artifact
+    const violations: string[] = [];
 
-Philosopher's Judgments:
-${judgmentsJson}
+    const failures = snapshot.toolCalls.filter(tc => tc.outcome === 'failure');
+    for (const tc of failures) {
+      violations.push(`- Tool failure: ${tc.toolName}${tc.filePath ? ` on ${tc.filePath}` : ''} → ${tc.errorMessage || 'unknown error'}`);
+    }
 
-Select the best candidate (Philosopher's rank 1) and synthesize it into a final TrinityDraftArtifact. Respond with ONLY a valid JSON object.`;
+    const pains = snapshot.painEvents.filter(pe => pe.score >= 50);
+    for (const pe of pains) {
+      violations.push(`- Pain signal (score: ${pe.score}): ${pe.reason || 'no reason'} [source: ${pe.source}]`);
+    }
+
+    const blocks = snapshot.gateBlocks;
+    for (const gb of blocks) {
+      violations.push(`- Gate blocked: ${gb.toolName} → ${gb.reason}`);
+    }
+
+    const sections = [
+      `## Target Principle`,
+      `**Principle ID**: ${principleId}`,
+      ``,
+      `## Original Violation Evidence`,
+      `**Session ID**: ${snapshot.sessionId}`,
+    ];
+
+    if (violations.length > 0) {
+      sections.push(violations.join('\n'));
+    } else {
+      sections.push(`(No specific violations found in snapshot)`);
+    }
+
+    sections.push(
+      ``,
+      `## Dreamer's Candidates`,
+      candidatesJson,
+      ``,
+      `## Philosopher's Judgments`,
+      judgmentsJson,
+      ``,
+      `## Task`,
+      `Select the best candidate (Philosopher's rank 1) and synthesize it into a final TrinityDraftArtifact.`,
+      `Use the Original Violation Evidence above to ensure your final badDecision and betterDecision`,
+      `are grounded in the actual session events, not just Dreamer's interpretation.`,
+      ``,
+      `Respond with ONLY a valid JSON object.`
+    );
+
+    return sections.join('\n');
   }
    
 
@@ -1197,8 +1374,8 @@ export function invokeStubDreamer(
  */
 export function invokeStubPhilosopher(
   dreamerOutput: DreamerOutput,
-   
-  _principleId: string
+  _principleId: string,
+  _snapshot: NocturnalSessionSnapshot
 ): PhilosopherOutput {
   if (!dreamerOutput.valid || dreamerOutput.candidates.length === 0) {
     return {
@@ -1446,7 +1623,7 @@ export async function runTrinityAsync(options: RunTrinityOptions): Promise<Trini
     telemetry.candidateCount = dreamerOutput.candidates.length;
 
     // Step 2: Philosopher — rank candidates via real subagent
-    const philosopherOutput = await adapter.invokePhilosopher(dreamerOutput, principleId);
+    const philosopherOutput = await adapter.invokePhilosopher(dreamerOutput, principleId, snapshot);
 
     if (!philosopherOutput.valid || philosopherOutput.judgments.length === 0) {
       failures.push({
@@ -1542,7 +1719,7 @@ function runTrinityWithStubs(
   telemetry.candidateCount = dreamerOutput.candidates.length;
 
   // Step 2: Philosopher — rank candidates (stub)
-  const philosopherOutput = invokeStubPhilosopher(dreamerOutput, principleId);
+  const philosopherOutput = invokeStubPhilosopher(dreamerOutput, principleId, snapshot);
 
   if (!philosopherOutput.valid || philosopherOutput.judgments.length === 0) {
     failures.push({
