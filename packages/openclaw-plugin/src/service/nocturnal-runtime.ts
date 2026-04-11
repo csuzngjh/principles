@@ -275,20 +275,45 @@ export function checkWorkspaceIdle(
     const abandonedSessions: string[] = [];
     let mostRecentActivityAt = 0;
     let userActiveSessions = 0;
+    
+    // Debug: count system sessions and track why
+    let systemSessionCount = 0;
+    const debugSystemSessions: string[] = [];
+    const debugUserSessions: string[] = [];
 
     for (const session of sessions) {
         // Skip system sessions (cron, boot, probe, subagent, acp) from idle determination
-        if (isSystemSession(session)) continue;
+        const isSystem = isSystemSession(session);
+        const reason = isSystem 
+            ? `trigger=${session.trigger || 'none'}, key=${(session.sessionKey || 'none').substring(0, 40)}, id=${session.sessionId?.substring(0, 20)}`
+            : null;
+        
+        if (isSystem) {
+            systemSessionCount++;
+            debugSystemSessions.push(reason || 'unknown');
+            continue;
+        }
 
         const inactiveFor = now - session.lastActivityAt;
         if (inactiveFor > abandonedThresholdMs) {
             abandonedSessions.push(session.sessionId);
         } else {
             userActiveSessions++;
+            debugUserSessions.push(`id=${session.sessionId?.substring(0, 20)} trigger=${session.trigger || 'NONE'} key=${(session.sessionKey || 'NONE').substring(0, 40)}`);
             if (session.lastActivityAt > mostRecentActivityAt) {
                 mostRecentActivityAt = session.lastActivityAt;
             }
         }
+    }
+    
+    // Debug logging for diagnosing idle detection issues
+    console.error(`[PD:IdleCheck] workspaceDir=${workspaceDir?.slice(-30)}`);
+    console.error(`[PD:IdleCheck] sessions: total=${sessions.length}, system=${systemSessionCount}, user=${userActiveSessions}, abandoned=${abandonedSessions.length}`);
+    if (debugSystemSessions.length <= 5) {
+        console.error(`[PD:IdleCheck] SYSTEM sessions: ${debugSystemSessions.join(' | ')}`);
+    }
+    if (userActiveSessions > 0 && debugUserSessions.length <= 10) {
+        console.error(`[PD:IdleCheck] USER sessions: ${debugUserSessions.join(' | ')}`);
     }
 
     const idleForMs = mostRecentActivityAt > 0 ? now - mostRecentActivityAt : now;
