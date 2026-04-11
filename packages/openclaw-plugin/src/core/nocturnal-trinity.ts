@@ -23,7 +23,10 @@
  * RUNTIME ADAPTER:
  *  - useStubs=true: uses synchronous stub implementations (no external calls)
  *  - useStubs=false: requires a TrinityRuntimeAdapter for real subagent execution
- *  - Adapter uses ONLY public plugin runtime APIs (api.runtime.subagent.*)
+ *  - Adapter uses api.runtime.agent.runEmbeddedPiAgent() which works in background contexts
+ *    (unlike api.runtime.subagent.* which requires gateway request scope)
+ *  - IMPORTANT: provider and model must be passed explicitly — runEmbeddedPiAgent does NOT
+ *    read config.agents.defaults.model and falls back to openai/gpt-5.4 if not specified
  */
 
 import { randomUUID } from 'crypto';
@@ -351,6 +354,8 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
           prompt: string;
           extraSystemPrompt?: string;
           config?: unknown;
+          provider?: string;
+          model?: string;
           timeoutMs: number;
           runId: string;
           disableTools?: boolean;
@@ -378,55 +383,43 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
   }
 
   /**
+   * Resolve the provider and model from the OpenClaw config.
+   * runEmbeddedPiAgent does NOT read config.agents.defaults.model —
+   * it requires explicit params.provider and params.model.
+   */
+  private resolveModel(): { provider: string; model: string } {
+    const config = this.api.config as Record<string, unknown> | undefined;
+    const agents = config?.agents as Record<string, unknown> | undefined;
+    const defaults = agents?.defaults as Record<string, unknown> | undefined;
+    const modelConfig = defaults?.model;
+
+    if (typeof modelConfig === 'string' && modelConfig.includes('/')) {
+      const parts = modelConfig.split('/');
+      return { provider: parts[0], model: parts.slice(1).join('/') };
+    }
+
+    if (modelConfig && typeof modelConfig === 'object') {
+      const mc = modelConfig as Record<string, unknown>;
+      const primary = mc.primary as string | undefined;
+      if (primary && primary.includes('/')) {
+        const parts = primary.split('/');
+        return { provider: parts[0], model: parts.slice(1).join('/') };
+      }
+    }
+
+    // Last resort fallback — minimax-portal is the configured provider on this system
+    this.api.logger?.warn?.('[Trinity] Could not resolve model from config, using minimax-portal fallback');
+    return { provider: 'minimax-portal', model: 'MiniMax-M2.7' };
+  }
+
+  /**
    * Create a valid JSONL session file for runEmbeddedPiAgent.
-   * The file must contain an initial model_change event to set provider/model,
-   * otherwise OpenClaw defaults to 'openai' provider which may not be configured.
    */
   private createSessionFile(stage: string): string {
     if (!fs.existsSync(this.tempDir)) {
       fs.mkdirSync(this.tempDir, { recursive: true });
     }
-    const sessionFile = path.join(this.tempDir, `${stage}-${randomUUID()}.jsonl`);
-    
-    // Extract model config from api.config (agents.defaults.model)
-    const config = this.api.config as Record<string, unknown> | undefined;
-    const agents = config?.agents as Record<string, unknown> | undefined;
-    const defaults = agents?.defaults as Record<string, unknown> | undefined;
-    const modelConfig = defaults?.model;
-    
-    // Parse model string (format: "provider/model" or {primary: "...", fallbacks: [...]})
-    let provider = 'minimax-portal';  // sensible default
-    let modelId = 'MiniMax-M2.7';
-    
-    if (typeof modelConfig === 'string' && modelConfig.includes('/')) {
-      const parts = modelConfig.split('/');
-      provider = parts[0];
-      modelId = parts.slice(1).join('/');
-    } else if (modelConfig && typeof modelConfig === 'object') {
-      const mc = modelConfig as Record<string, unknown>;
-      const primary = mc.primary as string | undefined;
-      if (primary && primary.includes('/')) {
-        const parts = primary.split('/');
-        provider = parts[0];
-        modelId = parts.slice(1).join('/');
-      }
-    }
-    
-    // Write initial model_change event to JSONL
-    const modelChangeEvent = {
-      type: 'model_change',
-      id: randomUUID().slice(0, 8),
-      parentId: null,
-      timestamp: new Date().toISOString(),
-      provider,
-      modelId
-    };
-    
-    fs.writeFileSync(sessionFile, JSON.stringify(modelChangeEvent) + '\n');
-    
-    this.api.logger?.info(`[Trinity] Created session file for ${stage}: provider=${provider}, model=${modelId}`);
-    
-    return sessionFile;
+    return path.join(this.tempDir, `${stage}-${randomUUID()}.jsonl`);
   }
 
   /**
@@ -448,6 +441,9 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
     const runId = `dreamer-${randomUUID()}`;
     const sessionFile = this.createSessionFile('dreamer');
     const prompt = this.buildDreamerPrompt(snapshot, principleId, maxCandidates);
+    const model = this.resolveModel();
+
+    this.api.logger?.info(`[Trinity:Dreamer] Using model: ${model.provider}/${model.model}`);
 
     try {
       const result = await this.api.runtime.agent.runEmbeddedPiAgent({
@@ -456,9 +452,11 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
         prompt,
         extraSystemPrompt: NOCTURNAL_DREAMER_PROMPT,
         config: this.api.config,
+        provider: model.provider,
+        model: model.model,
         timeoutMs: this.stageTimeoutMs,
         runId,
-        disableTools: true,  // Trinity stages are pure LLM reasoning, no tools needed
+        disableTools: true,
       });
 
       const outputText = this.extractPayloadText(result);
@@ -480,7 +478,6 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
         generatedAt: new Date().toISOString(),
       };
     } finally {
-      // Clean up session file
       try { fs.unlinkSync(sessionFile); } catch { /* ignore */ }
     }
   }
@@ -492,6 +489,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
     const runId = `philosopher-${randomUUID()}`;
     const sessionFile = this.createSessionFile('philosopher');
     const prompt = this.buildPhilosopherPrompt(dreamerOutput, principleId);
+    const model = this.resolveModel();
 
     try {
       const result = await this.api.runtime.agent.runEmbeddedPiAgent({
@@ -500,6 +498,8 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
         prompt,
         extraSystemPrompt: NOCTURNAL_PHILOSOPHER_PROMPT,
         config: this.api.config,
+        provider: model.provider,
+        model: model.model,
         timeoutMs: this.stageTimeoutMs,
         runId,
         disableTools: true,
@@ -537,12 +537,13 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
     snapshot: NocturnalSessionSnapshot,
     principleId: string,
     telemetry: TrinityTelemetry,
-     
+
     _config: TrinityConfig
   ): Promise<TrinityDraftArtifact | null> {
     const runId = `scribe-${randomUUID()}`;
     const sessionFile = this.createSessionFile('scribe');
     const prompt = this.buildScribePrompt(dreamerOutput, philosopherOutput, snapshot, principleId);
+    const model = this.resolveModel();
 
     try {
       const result = await this.api.runtime.agent.runEmbeddedPiAgent({
@@ -551,6 +552,8 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
         prompt,
         extraSystemPrompt: NOCTURNAL_SCRIBE_PROMPT,
         config: this.api.config,
+        provider: model.provider,
+        model: model.model,
         timeoutMs: this.stageTimeoutMs,
         runId,
         disableTools: true,

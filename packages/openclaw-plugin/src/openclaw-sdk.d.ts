@@ -170,6 +170,8 @@ export interface PluginRuntimeAgent {
      * @param prompt - The user message to send
      * @param extraSystemPrompt - Optional system prompt to append
      * @param config - OpenClaw config object for provider/model resolution
+     * @param provider - LLM provider (e.g., "minimax-portal", "openai"). Falls back to "openai" if not specified.
+     * @param model - Model name without provider prefix (e.g., "MiniMax-M2.7"). Falls back to "gpt-5.4" if not specified.
      * @param timeoutMs - Timeout in milliseconds (required)
      * @param runId - Unique run identifier
      * @param disableTools - If true, the agent will not use any tools (pure LLM reasoning)
@@ -181,6 +183,8 @@ export interface PluginRuntimeAgent {
         prompt: string;
         extraSystemPrompt?: string;
         config?: unknown;
+        provider?: string;
+        model?: string;
         timeoutMs: number;
         runId: string;
         disableTools?: boolean;
