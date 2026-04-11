@@ -41,6 +41,7 @@ import type { RecentPainContext } from '../evolution-worker.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import { isSubagentRuntimeAvailable } from '../../utils/subagent-probe.js';
+import { validateNocturnalSnapshotIngress } from '../../core/nocturnal-snapshot-contract.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // NocturnalResult Type Alias
@@ -212,15 +213,17 @@ export class NocturnalWorkflowManager implements WorkflowManager {
         this.store.recordEvent(workflowId, 'nocturnal_started', null, 'active', 'TrinityRuntimeAdapter invoked', { workflowType: 'nocturnal' });
 
         // Extract snapshot and principleId from taskInput.metadata (NOC-07: Trinity async path)
-        const snapshot = options.metadata?.snapshot as NocturnalSessionSnapshot | undefined;
+        const snapshotValidation = validateNocturnalSnapshotIngress(options.metadata?.snapshot);
+        const snapshot = snapshotValidation.snapshot;
         const principleId = options.metadata?.principleId as string | undefined;
         // Extract painContext for Selector ranking bias
         const painContext = options.metadata?.painContext as RecentPainContext | undefined;
 
-        // Validate required metadata (prevent runtime crashes from undefined snapshot)
-        if (!snapshot?.sessionId) {
-            this.logger.warn(`[PD:NocturnalWorkflow] Missing snapshot.sessionId in metadata for workflow=${workflowId}, terminating`);
-            this.store.recordEvent(workflowId, 'nocturnal_failed', null, 'terminal_error', 'Missing required metadata: snapshot.sessionId', { workflowId });
+        if (snapshotValidation.status !== 'valid' || !snapshot) {
+            const reason = `Invalid snapshot ingress: ${snapshotValidation.reasons.join('; ') || 'missing snapshot'}`;
+            this.logger.warn(`[PD:NocturnalWorkflow] ${reason} workflow=${workflowId}`);
+            this.store.updateWorkflowState(workflowId, 'terminal_error');
+            this.store.recordEvent(workflowId, 'nocturnal_failed', null, 'terminal_error', reason, { workflowId });
             return {
                 workflowId,
                 childSessionKey: `nocturnal:internal:${workflowId}`,

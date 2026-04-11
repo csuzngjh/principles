@@ -113,7 +113,8 @@ describe('EvolutionWorkerService nocturnal hardening', () => {
 
       const queue = readQueue(stateDir);
       expect(queue[0].status).toBe('failed');
-      expect(queue[0].lastError).toContain('missing_usable_snapshot');
+      expect(queue[0].lastError).toContain('invalid_snapshot_ingress');
+      expect(queue[0].lastError).toContain('fallback snapshot must contain at least one pain signal');
       expect(queue[0].resultRef).toBeFalsy();
       expect(mockStartWorkflow).not.toHaveBeenCalled();
     } finally {
@@ -276,9 +277,20 @@ score: 80`,
         return {
           sessionId: 'pain-session-id',
           startedAt: '2026-04-10T00:00:00.000Z',
-          stats: { totalToolCalls: 10, totalAssistantTurns: 5, failureCount: 2 },
+          updatedAt: '2026-04-10T00:01:00.000Z',
+          assistantTurns: [],
+          userTurns: [],
+          toolCalls: [],
           painEvents: [],
           gateBlocks: [],
+          stats: { totalToolCalls: 10, totalAssistantTurns: 5, failureCount: 2 },
+          stats: {
+            totalAssistantTurns: 5,
+            totalToolCalls: 10,
+            totalPainEvents: 0,
+            totalGateBlocks: 0,
+            failureCount: 2,
+          },
         };
       }
       return null;
@@ -334,6 +346,10 @@ score: 80`,
       
       // Verify workflow started (meaning snapshot was found via pain session ID)
       expect(mockStartWorkflow).toHaveBeenCalled();
+      const workflowStartInput = mockStartWorkflow.mock.calls[0][1];
+      expect(workflowStartInput.metadata.snapshot.startedAt).toBe('2026-04-10T00:00:00.000Z');
+      expect(Array.isArray(workflowStartInput.metadata.snapshot.assistantTurns)).toBe(true);
+      expect(Array.isArray(workflowStartInput.metadata.snapshot.toolCalls)).toBe(true);
 
       // Verify task status updated
       const queue = readQueue(stateDir);
