@@ -48,4 +48,21 @@ This milestone is intentionally narrow. It does not add new product features. It
 3. Background runtime checks stop guessing and produce explicit, causally correct states.
 4. End-to-end tests catch wrong-workspace writes, missing contract fields, and time-unbounded snapshot selection.
 
+## Traceability
+
+| REQ-ID | Description | Phase | Status |
+|--------|------------|-------|--------|
+| BC-01 | Shared workspace resolution contract | 19 → 23 | Implemented, Pending verification |
+| BC-02 | No api.resolvePath('.') fallback | 19 → 22 | Partial (2 residuals), Pending cleanup |
+| BC-03 | Explicit failure on workspace resolution failure | 19 → 23 | Implemented, Pending verification |
+| SCHEMA-01 | Shared .pain_flag parser/validator | 20 → 23 | Implemented, Pending verification |
+| SCHEMA-02 | Snapshot ingress schema-checked | 20 → 23 | Implemented, Pending verification |
+| SCHEMA-03 | Explicit failures for missing fields | 20 → 23 | Implemented, Pending verification |
+| RT-01 | No constructor.name capability checks | 21 → 23 | Implemented, Pending verification |
+| RT-02 | Runtime-unavailable vs downstream failure | 21 → 23 | Implemented, Pending verification |
+| RT-03 | Manual triggers use shared contracts | 21 → 23 | Implemented, Pending verification |
+| E2E-01 | Pain signal session_id preserved | 21 → 23 | Implemented, Pending verification |
+| E2E-02 | Writes stay under active workspace | 21 → 23 | Implemented, Pending verification |
+| E2E-03 | Time-bounded session selection | 21 → 23 | Implemented, Pending verification |
+
 *Last updated: 2026-04-11*
