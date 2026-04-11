@@ -344,7 +344,7 @@ export interface TrinityRuntimeAdapter {
  * (unlike api.runtime.subagent.* which requires gateway request scope).
  */
 export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
-   
+
   private readonly api: {
     runtime: {
       agent: {
@@ -362,6 +362,9 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
         }) => Promise<{
           payloads?: { isError?: boolean; text?: string }[];
         }>;
+      };
+      config?: {
+        loadConfig?: () => unknown;
       };
     };
     config?: unknown;
@@ -383,12 +386,31 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
   }
 
   /**
+   * Load the full OpenClaw config (including models.providers).
+   * this.api.config is the plugin config, not the full config.
+   * We need the full config to resolve provider/model definitions.
+   */
+  private loadFullConfig(): Record<string, unknown> | undefined {
+    // Try runtime.config.loadConfig() first (available in native plugin context)
+    const loadConfig = this.api.runtime?.config?.loadConfig;
+    if (loadConfig && typeof loadConfig === 'function') {
+      try {
+        return loadConfig() as Record<string, unknown> | undefined;
+      } catch (err) {
+        this.api.logger?.warn?.(`[Trinity] loadConfig() failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    // Fallback: use the plugin config (limited — won't have models.providers)
+    return this.api.config as Record<string, unknown> | undefined;
+  }
+
+  /**
    * Resolve the provider and model from the OpenClaw config.
    * runEmbeddedPiAgent does NOT read config.agents.defaults.model —
    * it requires explicit params.provider and params.model.
    */
   private resolveModel(): { provider: string; model: string } {
-    const config = this.api.config as Record<string, unknown> | undefined;
+    const config = this.loadFullConfig();
     const agents = config?.agents as Record<string, unknown> | undefined;
     const defaults = agents?.defaults as Record<string, unknown> | undefined;
     const modelConfig = defaults?.model;
@@ -451,7 +473,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
         sessionFile,
         prompt,
         extraSystemPrompt: NOCTURNAL_DREAMER_PROMPT,
-        config: this.api.config,
+        config: this.loadFullConfig(),
         provider: model.provider,
         model: model.model,
         timeoutMs: this.stageTimeoutMs,
@@ -497,7 +519,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
         sessionFile,
         prompt,
         extraSystemPrompt: NOCTURNAL_PHILOSOPHER_PROMPT,
-        config: this.api.config,
+        config: this.loadFullConfig(),
         provider: model.provider,
         model: model.model,
         timeoutMs: this.stageTimeoutMs,
@@ -551,7 +573,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
         sessionFile,
         prompt,
         extraSystemPrompt: NOCTURNAL_SCRIBE_PROMPT,
-        config: this.api.config,
+        config: this.loadFullConfig(),
         provider: model.provider,
         model: model.model,
         timeoutMs: this.stageTimeoutMs,
