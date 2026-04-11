@@ -17,6 +17,8 @@ import type {
   EvolutionTaskEventData,
   DeepReflectionEventData,
   EmpathyRollbackEventData,
+  SkipEventData,
+  DropEventData,
 } from '../types/event-types.js';
 import { createEmptyDailyStats } from '../types/event-types.js';
 import type { PluginLogger } from '../openclaw-sdk.js';
@@ -106,8 +108,16 @@ export class EventLog {
   recordWarn(sessionId: string | undefined, message: string, context?: Record<string, unknown>): void {
     this.record('warn', 'failure', sessionId, { message, ...context });
   }
-  
-   
+
+  recordSkip(sessionId: string | undefined, data: SkipEventData): void {
+    this.record('skip', 'skipped', sessionId, data);
+  }
+
+  recordDrop(sessionId: string | undefined, data: DropEventData): void {
+    this.record('drop', 'dropped', sessionId, data);
+  }
+
+
   private record(
     type: EventType, 
     category: EventCategory, 

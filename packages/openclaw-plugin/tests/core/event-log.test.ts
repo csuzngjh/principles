@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { EventLogService, EventLog } from '../../src/core/event-log.js';
-import type { DailyStats, DeepReflectionEventData } from '../../src/types/event-types.js';
+import type { DailyStats, DeepReflectionEventData, SkipEventData, DropEventData } from '../../src/types/event-types.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -176,6 +176,91 @@ describe('EventLog', () => {
 
       expect(stats.totalEvents).toBe(1);
       expect(stats.totalPenaltyScore).toBe(12);
+    });
+  });
+
+  describe('recordSkip', () => {
+    it('should record skip event with skip type and skipped category', () => {
+      const data: SkipEventData = {
+        reason: 'checkWorkspaceIdle_error',
+        fallback: 'default_idle_assumption',
+        context: { error: 'ENOENT' },
+      };
+
+      eventLog.recordSkip('session-1', data);
+      eventLog.flush();
+
+      const eventsFile = path.join(tempDir, 'logs', 'events.jsonl');
+      const content = fs.readFileSync(eventsFile, 'utf-8');
+      const event = JSON.parse(content.trim());
+
+      expect(event.type).toBe('skip');
+      expect(event.category).toBe('skipped');
+      expect(event.sessionId).toBe('session-1');
+      expect(event.data.reason).toBe('checkWorkspaceIdle_error');
+      expect(event.data.fallback).toBe('default_idle_assumption');
+      expect(event.data.context).toEqual({ error: 'ENOENT' });
+    });
+
+    it('should record skip event with undefined sessionId', () => {
+      const data: SkipEventData = {
+        reason: 'checkCooldown_error',
+        fallback: 'no_cooldown_assumption',
+      };
+
+      eventLog.recordSkip(undefined, data);
+      eventLog.flush();
+
+      const eventsFile = path.join(tempDir, 'logs', 'events.jsonl');
+      const content = fs.readFileSync(eventsFile, 'utf-8');
+      const event = JSON.parse(content.trim());
+
+      expect(event.type).toBe('skip');
+      expect(event.category).toBe('skipped');
+      expect(event.sessionId).toBeUndefined();
+      expect(event.data.reason).toBe('checkCooldown_error');
+    });
+  });
+
+  describe('recordDrop', () => {
+    it('should record drop event with drop type and dropped category', () => {
+      const data: DropEventData = {
+        reason: 'queue_corruption',
+        itemId: 'task-123',
+        context: { recovery: 'requeue' },
+      };
+
+      eventLog.recordDrop('session-2', data);
+      eventLog.flush();
+
+      const eventsFile = path.join(tempDir, 'logs', 'events.jsonl');
+      const content = fs.readFileSync(eventsFile, 'utf-8');
+      const event = JSON.parse(content.trim());
+
+      expect(event.type).toBe('drop');
+      expect(event.category).toBe('dropped');
+      expect(event.sessionId).toBe('session-2');
+      expect(event.data.reason).toBe('queue_corruption');
+      expect(event.data.itemId).toBe('task-123');
+      expect(event.data.context).toEqual({ recovery: 'requeue' });
+    });
+
+    it('should record drop event with minimal data', () => {
+      const data: DropEventData = {
+        reason: 'worker_shutdown',
+      };
+
+      eventLog.recordDrop(undefined, data);
+      eventLog.flush();
+
+      const eventsFile = path.join(tempDir, 'logs', 'events.jsonl');
+      const content = fs.readFileSync(eventsFile, 'utf-8');
+      const event = JSON.parse(content.trim());
+
+      expect(event.type).toBe('drop');
+      expect(event.category).toBe('dropped');
+      expect(event.data.reason).toBe('worker_shutdown');
+      expect(event.data.itemId).toBeUndefined();
     });
   });
 });

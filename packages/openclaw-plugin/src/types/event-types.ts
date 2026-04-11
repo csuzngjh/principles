@@ -18,7 +18,9 @@ export type EventType =
 
   | 'empathy_rollback'
   | 'error'
-  | 'warn';
+  | 'warn'
+  | 'skip'    // NEW — fail-visible skip events (FB-04, FB-05, etc.)
+  | 'drop';   // NEW — fail-visible drop events
 
 export type EventCategory =
   | 'success'
@@ -32,7 +34,9 @@ export type EventCategory =
   | 'promoted'
   | 'passed'
   | 'changed'
-  | 'rolled_back';
+  | 'rolled_back'
+  | 'skipped'  // NEW — paired with 'skip' EventType
+  | 'dropped'; // NEW — paired with 'drop' EventType
 
 /**
  * Base event structure for JSONL logging.
@@ -172,6 +176,18 @@ export interface EmpathyRollbackEventData {
   reason: string;
   /** Who initiated the rollback */
   triggeredBy: 'user_command' | 'natural_language' | 'system';
+}
+
+export interface SkipEventData {
+  reason: string;          // e.g., 'checkWorkspaceIdle_error', 'checkCooldown_error', 'pain_detector_error'
+  fallback: string;        // e.g., 'none', 'default_idle_assumption', 'diagnostician_on_next_cycle'
+  context?: Record<string, unknown>;
+}
+
+export interface DropEventData {
+  reason: string;           // e.g., 'queue_corruption', 'worker_shutdown', 'quota_exhausted'
+  itemId?: string;           // optional: queue item ID that was dropped
+  context?: Record<string, unknown>;
 }
 
 // ============== Daily Statistics ==============
