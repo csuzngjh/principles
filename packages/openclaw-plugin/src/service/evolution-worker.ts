@@ -30,6 +30,14 @@ export { PainFlagDetector } from './pain-flag-detector.js';
 export { EvolutionTaskDispatcher } from './evolution-task-dispatcher.js';
 export type { DispatchResult } from './evolution-task-dispatcher.js';
 
+/**
+ * Process evolution queue — thin wrapper for backward compatibility.
+ * Delegates to EvolutionTaskDispatcher.dispatchQueue().
+ */
+async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogger, eventLog: EventLog, api?: OpenClawPluginApi): Promise<void> {
+    await new EvolutionTaskDispatcher(wctx.workspaceDir).dispatchQueue(wctx, logger, eventLog, api);
+}
+
 const WORKFLOW_TTL_MS = 5 * 60 * 1000; // 5 minutes default TTL for helper workflows
 
 // ── Workflow Watchdog ────────────────────────────────────────────────────────
@@ -390,7 +398,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                     await store.save(loadResult.queue);
                 }
 
-                const dispatchResult = await new EvolutionTaskDispatcher(wctx.workspaceDir).dispatchQueue(wctx, logger, eventLog, api ?? undefined);
+                const dispatchResult = await processEvolutionQueue(wctx, logger, eventLog, api);
                 cycleResult.queue = {
                     total: loadResult.queue.length,
                     pending: dispatchResult.painStats.pending + dispatchResult.sleepStats.pending,
@@ -540,7 +548,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                     store.purge(loadResult.queue, logger);
                     await store.save(loadResult.queue);
                 }
-                const dispatchResult = await new EvolutionTaskDispatcher(wctx.workspaceDir).dispatchQueue(wctx, logger, eventLog, api ?? undefined);
+                const dispatchResult = await processEvolutionQueue(wctx, logger, eventLog, api);
                 if (dispatchResult.errors.length > 0) {
                     dispatchResult.errors.forEach((e) => logger?.error?.(`[PD:EvolutionWorker] Startup cycle error: ${e}`));
                 }

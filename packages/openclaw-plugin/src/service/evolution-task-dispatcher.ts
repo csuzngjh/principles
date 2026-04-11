@@ -161,6 +161,9 @@ export class EvolutionTaskDispatcher {
             // V2: Recover stuck in_progress sleep_reflection tasks
             const stuckRecoveryChanged = this._recoverStuckSleepReflection(queue, wctx, logger, api, timeout);
             result.queueChanged = result.queueChanged || stuckRecoveryChanged;
+            if (stuckRecoveryChanged) {
+                await store.save(queue);
+            }
 
             // V2: Process pain_diagnosis tasks FIRST (quick, inside lock),
             // then sleep_reflection tasks (slow, lock released during execution).
