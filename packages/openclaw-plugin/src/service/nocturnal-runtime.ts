@@ -60,6 +60,13 @@ function isSystemSession(state: SessionState): boolean {
     if (sessionId?.startsWith('boot-')) return true;
     if (sessionId?.startsWith('probe-')) return true;
 
+    // CRITICAL FIX: Legacy sessions from persistence may have missing trigger/sessionKey
+    // If both are missing, this is likely a legacy/orphan session from old persistence data
+    // Treat as system session to avoid blocking idle detection with unknown sessions
+    if (!trigger && !sessionKey) {
+        return true;  // Legacy/orphan session - don't block idle detection
+    }
+
     return false;
 }
 
@@ -309,7 +316,7 @@ export function checkWorkspaceIdle(
     // Debug logging for diagnosing idle detection issues
     console.error(`[PD:IdleCheck] workspaceDir=${workspaceDir?.slice(-30)}`);
     console.error(`[PD:IdleCheck] sessions: total=${sessions.length}, system=${systemSessionCount}, user=${userActiveSessions}, abandoned=${abandonedSessions.length}`);
-    if (debugSystemSessions.length <= 5) {
+    if (debugSystemSessions.length <= 8) {
         console.error(`[PD:IdleCheck] SYSTEM sessions: ${debugSystemSessions.join(' | ')}`);
     }
     if (userActiveSessions > 0 && debugUserSessions.length <= 10) {
