@@ -71,7 +71,10 @@ Plans:
   1. Workflow watchdog and expiry cleanup run through WorkflowOrchestrator -- no watchdog logic remains in the worker
   2. WorkflowOrchestrator validates inputs at entry points (following v1.13 contract pattern)
   3. Existing workflow lifecycle tests pass without modification to test expectations
-**Plans**: TBD
+**Plans**: 1 plan
+
+Plans:
+- [x] 27-01-PLAN.md — Extract workflow watchdog and sweep into WorkflowOrchestrator
 
 ### Phase 28: Context Builder + Service Slim + Fallback Audit
 **Goal**: Worker is reduced to lifecycle orchestration only, context building is extracted, and all silent fallback points are audited and classified
@@ -106,7 +109,7 @@ Phases execute in numeric order: 24 -> 25 -> 26 -> 27 -> 28 -> 29
 | 24. Queue Store Extraction | v1.14 | 0/2 | Planning complete | - |
 | 25. Pain Flag Detector Extraction | v1.14 | 1/1 | Complete    | 2026-04-11 |
 | 26. Task Dispatcher Extraction | v1.14 | 0/? | Not started | - |
-| 27. Workflow Orchestrator Extraction | v1.14 | 0/? | Not started | - |
+| 27. Workflow Orchestrator Extraction | v1.14 | 1/1 | Planning complete | - |
 | 28. Context Builder + Service Slim + Fallback Audit | v1.14 | 0/? | Not started | - |
 | 29. Integration Verification | v1.14 | 0/? | Not started | - |
 
