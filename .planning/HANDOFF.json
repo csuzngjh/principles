@@ -1,32 +1,37 @@
 {
   "version": "1.0",
-  "timestamp": "2026-04-11T09:43:42.683Z",
+  "timestamp": "2026-04-11T10:08:45.000Z",
   "phase": "26",
   "phase_name": "task-dispatcher-extraction",
   "phase_dir": ".planning/phases/26-task-dispatcher-extraction",
   "plan": "01",
   "task": 1,
   "total_tasks": 1,
-  "status": "paused",
+  "status": "in_progress",
   "completed_tasks": [
-    {"id": 1, "name": "Extract EvolutionTaskDispatcher", "status": "done", "commit": "b30763d"}
+    {"id": 1, "name": "Extract EvolutionTaskDispatcher", "status": "done", "commit": "b30763d"},
+    {"id": 1, "name": "Fix TypeScript compilation errors", "status": "done", "commit": "44249e7"},
+    {"id": 1, "name": "Fix backward-compat exports", "status": "done", "commit": "44249e7"}
   ],
   "remaining_tasks": [
-    {"id": 1, "name": "Fix test failures (11 failed, 15 passed)", "status": "in_progress"}
+    {"id": 1, "name": "Fix 8 remaining test failures (architecture mismatch)", "status": "in_progress"}
   ],
   "blockers": [
     {
-      "description": "Tests fail: processEvolutionQueue now delegates to unmocked EvolutionTaskDispatcher. Fake timers work but the dispatcher private methods don't trigger expected state changes in queue.",
+      "description": "Tests mock processEvolutionQueue and worker-level imports but dispatch logic moved to unmocked EvolutionTaskDispatcher. Mock setup doesn't reach dispatcher code paths.",
       "type": "technical",
-      "workaround": "Queue object reference may not be shared correctly - load() returns queue but private methods modify in-place"
+      "workaround": "Option A: Accept as architectural consequence. Option B: Mock EvolutionTaskDispatcher in tests."
     }
   ],
   "human_actions_pending": [],
   "decisions": [
     {"decision": "Created thin processEvolutionQueue wrapper for backward compat", "rationale": "Tests call processEvolutionQueue directly", "phase": "26"},
-    {"decision": "Added store.save() after _recoverStuckSleepReflection", "rationale": "Recovery modifications were not persisted before", "phase": "26"}
+    {"decision": "Added store.save() after _recoverStuckSleepReflection", "rationale": "Recovery modifications were not persisted before", "phase": "26"},
+    {"decision": "Added backward-compatible readRecentPainContext wrapper", "rationale": "Tests import this from worker but it was moved to PainFlagDetector", "phase": "26"},
+    {"decision": "Fixed stray /** comment hiding processDetectionQueue", "rationale": "TypeScript couldn't see the function definition", "phase": "26"},
+    {"decision": "Fixed WorkspaceContext/EventLog import paths in dispatcher", "rationale": "Were importing from openclaw-sdk.js but should be from core modules", "phase": "26"}
   ],
   "uncommitted_files": [],
-  "next_action": "Debug _recoverStuckSleepReflection: queue object reference from store.load() passed to private method - in-place modification should work but test shows status='in_progress' not 'failed'",
-  "context_notes": "The _recoverStuckSleepReflection modifies queue in-place and store.save() was called. But test still shows 'in_progress'. Possible issue: vi.useFakeTimers() may not control Date.now() inside the dispatcher's async call chain. The processEvolutionQueue wrapper is synchronous but dispatcher.dispatchQueue is async - test waits 5000ms with advanceTimersByTimeAsync but the async operations may not complete within fake time."
+  "next_action": "Decide: Accept 8 test failures as architectural consequence OR invest in mocking EvolutionTaskDispatcher at test level",
+  "context_notes": "Fixed 3 of 11 test failures: registerEvolutionTaskSession export, readRecentPainContext wrapper, TypeScript compilation. Remaining 8 failures are due to tests mocking at worker level but dispatcher running real unmocked code."
 }
