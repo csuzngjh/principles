@@ -302,7 +302,7 @@ export class NocturnalTargetSelector {
     this.recentPainContext = recentPainContext;
     this.opts = {
       minViolationDensity: restOptions.minViolationDensity ?? 0.1,
-      maxSessionCandidates: restOptions.maxSessionCandidates ?? 50,
+      maxSessionCandidates: restOptions.maxSessionCandidates ?? 300,  // TEMP: increased from 50 to cover real violations (#244)
       idleThresholdMs: restOptions.idleThresholdMs ?? DEFAULT_IDLE_THRESHOLD_MS,
     };
   }

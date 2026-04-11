@@ -1485,7 +1485,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             if (!fullSnapshot) {
                                 const taskTimeMs = new Date(sleepTask.enqueued_at || sleepTask.timestamp).getTime();
                                 const recentSessions = extractor.listRecentNocturnalCandidateSessions({
-                                    limit: 20,
+                                    limit: 300,  // #244: increased from 20 to cover real violations that may be older
                                     minToolCalls: 1,
                                     dateTo: sleepTask.enqueued_at || sleepTask.timestamp,
                                 }).filter((session) => isSessionAtOrBeforeTriggerTime(session, taskTimeMs));
