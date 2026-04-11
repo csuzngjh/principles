@@ -19,6 +19,8 @@
 - [x] **Phase 19: Unified Workspace Resolution Contract** - replace ad-hoc workspace resolution with one fail-fast service across hooks, commands, workers, and HTTP routes (BC-01, BC-02, BC-03)
 - [x] **Phase 20: Critical Data Schema Validation** - centralize parsing and validation for `.pain_flag`, snapshot ingress, and related state-file reads (SCHEMA-01, SCHEMA-02, SCHEMA-03)
 - [x] **Phase 21: Runtime Contract and End-to-End Hardening** - remove constructor-name capability guessing, bound session selection by time, and lock the main path with contract tests (RT-01, RT-02, RT-03, E2E-01, E2E-02, E2E-03)
+- [ ] **Phase 22: BC-02 Residual Fallback Cleanup** - remove remaining `api.resolvePath('.')` fallbacks from secondary tool files (BC-02)
+- [ ] **Phase 23: v1.13 Phase Verification Completion** - generate VERIFICATION.md and SUMMARY.md for phases 19-21 (BC-01, BC-02, BC-03, SCHEMA-01, SCHEMA-02, SCHEMA-03, RT-01, RT-02, RT-03, E2E-01, E2E-02, E2E-03)
 
 ### Phase 19: Unified Workspace Resolution Contract
 
@@ -60,6 +62,37 @@
 - Pain -> queue -> nocturnal flow and command/hook writes are covered by end-to-end contract tests
 - Candidate session selection cannot pull sessions from after the triggering pain/task time
 
+### Phase 22: BC-02 Residual Fallback Cleanup
+
+**Goal:** eliminate the last two `api.resolvePath('.')` fallbacks in secondary tool files so BC-02 is fully satisfied.
+
+**Depends on:** Phase 21
+
+**Requirements:** BC-02
+
+**Plans:** 1 plan
+
+Plans:
+- [ ] 22-01-PLAN.md — Remove resolvePath fallback from deep-reflect.ts and critique-prompt.ts
+
+**UAT:**
+- `rg "api\.resolvePath" packages/openclaw-plugin/src` returns zero matches
+- Both `deep-reflect.ts` and `critique-prompt.ts` use the shared workspace contract or fail explicitly
+
+### Phase 23: v1.13 Phase Verification Completion
+
+**Goal:** generate formal VERIFICATION.md and SUMMARY.md artifacts for phases 19-21 so all 11 milestone requirements move from "orphaned" to "satisfied."
+
+**Depends on:** Phase 22
+
+**Requirements:** BC-01, BC-02, BC-03, SCHEMA-01, SCHEMA-02, SCHEMA-03, RT-01, RT-02, RT-03, E2E-01, E2E-02, E2E-03
+
+**UAT:**
+- `.planning/phases/19-*/*-VERIFICATION.md` exists with `status: passed`
+- `.planning/phases/20-*/*-VERIFICATION.md` exists with `status: passed`
+- `.planning/phases/21-*/*-VERIFICATION.md` exists with `status: passed`
+- All phase SUMMARY.md files contain `requirements-completed` frontmatter listing assigned REQ-IDs
+
 ### Deferred: v1.10 Thinking Models Page Optimization
 
 This milestone is intentionally paused. It should not resume until the production nocturnal path is trustworthy.
@@ -75,5 +108,7 @@ This milestone is intentionally paused. It should not resume until the productio
 | 19 | v1.13 | 2/2 | Local execution complete | 2026-04-11 |
 | 20 | v1.13 | 2/2 | Local execution complete | 2026-04-11 |
 | 21 | v1.13 | 1/1 | Local execution complete | 2026-04-11 |
+| 22 | v1.13 | 0/1 | Gap closure (BC-02 residuals) | — |
+| 23 | v1.13 | 0/1 | Gap closure (verification) | — |
 
-*Last updated: 2026-04-11 after Phase 21 local execution*
+*Last updated: 2026-04-11 after gap closure planning*
