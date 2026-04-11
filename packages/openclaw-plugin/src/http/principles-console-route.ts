@@ -95,7 +95,7 @@ function createService(api: OpenClawPluginApi): ControlUiQueryService {
   return new ControlUiQueryService(workspaceDir);
 }
 
-/* eslint-disable @typescript-eslint/max-params -- Reason: Route handler requires api, pathname, req, and res */
+ 
 function handleApiRoute(
   api: OpenClawPluginApi,
   pathname: string,
@@ -103,7 +103,7 @@ function handleApiRoute(
   res: ServerResponse,
 ): Promise<boolean> | boolean {
   // Check authentication for API routes
-  /* eslint-disable @typescript-eslint/no-use-before-define -- Reason: validateGatewayAuth is defined later in the file */
+   
   if (!validateGatewayAuth(req)) {
     json(res, 401, { error: 'unauthorized', message: 'Valid Gateway token required.' });
     return true;

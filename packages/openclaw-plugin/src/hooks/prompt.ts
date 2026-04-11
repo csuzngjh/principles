@@ -365,7 +365,7 @@ export async function handleBeforePromptBuild(
   // appendSystemContext: Principles + Thinking OS + reflection_log + project_context (cacheable, WebUI-hidden)
   // prependContext: Only short dynamic directives: evolutionDirective + heartbeat
 
-  // eslint-disable-next-line no-useless-assignment -- Reason: initial value unused due to immediate reassignment
+   
   let prependSystemContext = '';
   let prependContext = '';
   let appendSystemContext = '';
@@ -647,7 +647,7 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
   }
 
   // ──── 6. Dynamic Attitude Matrix (based on GFI) ────
-  // eslint-disable-next-line no-useless-assignment -- Reason: initial value unused due to immediate reassignment
+   
   let attitudeDirective = '';
   const currentGfi = session?.currentGfi || 0;
   
@@ -872,10 +872,10 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
         const filePattern = /\b([a-zA-Z]:\\?[^\s,]+\.[a-z]{2,10}|[./][^\s,]+\.[a-z]{2,10})\b/gi;
         const toolMatches = toolPatterns.flatMap(({ pattern, tool }) => {
           const matches: string[] = [];
-          // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in while loop condition
+           
           let _m;
           const r = new RegExp(pattern.source, pattern.flags);
-          /* eslint-disable @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: regex exec side effect used, match variable intentionally unused */
+          /* eslint-disable @typescript-eslint/no-unused-vars -- Reason: regex exec side effect used, match variable intentionally unused */
           while ((_m = r.exec(latestUserText)) !== null) matches.push(tool);
           return matches;
         });

@@ -107,7 +107,7 @@ export class EventLog {
     this.record('warn', 'failure', sessionId, { message, ...context });
   }
   
-  // eslint-disable-next-line @typescript-eslint/max-params -- Reason: event record requires type + category + session + data - refactoring would break internal API
+   
   private record(
     type: EventType, 
     category: EventCategory, 
@@ -134,7 +134,7 @@ export class EventLog {
     }
   }
 
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: utility method doesn't require this - pure function
+   
   private formatDate(date: Date): string {
     return date.toISOString().split('T')[0];
   }
@@ -160,7 +160,7 @@ export class EventLog {
     }
 
     if (entry.type === 'tool_call') {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: data used for type narrowing only, actual fields accessed via stats
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Reason: data used for type narrowing only, actual fields accessed via stats
       const _data = entry.data as unknown as ToolCallEventData;
       stats.tools.total++;
       if (entry.category === 'success') stats.tools.success++;
@@ -243,7 +243,7 @@ export class EventLog {
     return this.eventBuffer.map((entry) => ({ ...entry, data: { ...entry.data } }));
   }
 
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: getEventDedupKey is a pure key-generation function, no this reference needed
+   
   private getEventDedupKey(entry: EventLogEntry): string {
     const eventId = typeof (entry.data as { eventId?: unknown } | undefined)?.eventId === 'string'
       ? String((entry.data as { eventId?: string }).eventId)
@@ -459,7 +459,7 @@ export class EventLog {
    * Rollback an empathy event by ID.
    * Returns the rolled back score, or 0 if event not found.
    */
-  // eslint-disable-next-line @typescript-eslint/max-params -- Reason: rollback requires eventId + sessionId + reason + triggeredBy - refactoring would break API
+   
   rollbackEmpathyEvent(eventId: string, sessionId: string | undefined, reason: string, triggeredBy: 'user_command' | 'natural_language' | 'system'): number {
     const allEvents = this.getMergedEvents();
     let foundEvent: { entry: EventLogEntry; data: PainSignalEventData } | null = null;

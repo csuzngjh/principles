@@ -334,7 +334,7 @@ export async function withAsyncLock<T>(
   let queue = asyncLockQueues.get(lockPath);
   
   // 创建新的 Promise 链
-  // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in Promise executor before use
+   
   let resolveRelease: () => void;
   const releasePromise = new Promise<void>(resolve => {
     resolveRelease = resolve;

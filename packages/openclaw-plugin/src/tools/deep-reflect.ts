@@ -106,7 +106,7 @@ export function createDeepReflectTool(api: OpenClawPluginApi) {
                 return { content: [{ type: 'text', text: '❌ 错误: 必须提供反思上下文 (context)。' }] };
             }
 
-            // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between helper functions - reordering would break logical grouping
+             
             const effectiveWorkspaceDir = resolveReflectionWorkspace(api);
             if (!effectiveWorkspaceDir) {
                 return { content: [{ type: 'text', text: '❌ 反思执行失败: Workspace directory is required for deep reflection。请检查 API 配置或网络连接。' }] };
@@ -122,10 +122,10 @@ export function createDeepReflectTool(api: OpenClawPluginApi) {
             }
 
             try {
-                // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between helper functions - reordering would break logical grouping
+                 
                 return await executeReflectionWorkflow(effectiveWorkspaceDir, config, context, depth, model_id, api);
             } catch (err) {
-                // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between helper functions - reordering would break logical grouping
+                 
                 return handleReflectionError(err, context, depth, model_id, effectiveWorkspaceDir, api);
             }
         }
@@ -144,7 +144,7 @@ function resolveReflectionWorkspace(api: OpenClawPluginApi): string | undefined 
 /**
  * Execute the deep reflection workflow: start, poll, collect results.
  */
-/* eslint-disable @typescript-eslint/max-params -- Reason: Function signature requires all parameters for type-safe reflection workflow */
+ 
 async function executeReflectionWorkflow(
     effectiveWorkspaceDir: string,
     config: DeepReflectionConfig,
@@ -175,7 +175,7 @@ async function executeReflectionWorkflow(
 
         const startTime = Date.now();
         const timeoutMs = config.timeout_ms ?? 60000;
-        // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between helper functions - reordering would break logical grouping
+         
         return await pollReflectionCompletion(manager, handle, timeoutMs, startTime, eventLog, effectiveWorkspaceDir, context, model_id, depth);
     } finally {
         manager.dispose();
@@ -185,7 +185,7 @@ async function executeReflectionWorkflow(
 /**
  * Poll the reflection workflow until completion, timeout, or error.
  */
-/* eslint-disable @typescript-eslint/max-params -- Reason: Function signature requires all parameters for type-safe polling */
+ 
 async function pollReflectionCompletion(
     manager: DeepReflectWorkflowManager,
     handle: { workflowId: string; childSessionKey: string },
@@ -205,7 +205,7 @@ async function pollReflectionCompletion(
         if (!workflowState) break;
 
         if (workflowState === 'completed') {
-            // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between helper functions - reordering would break logical grouping
+             
             return formatReflectionSuccess(handle, context, depth, model_id, startTime, eventLog, workspaceDir);
         }
 
@@ -220,7 +220,7 @@ async function pollReflectionCompletion(
 /**
  * Format the success response from a completed reflection.
  */
-/* eslint-disable @typescript-eslint/max-params -- Reason: Function signature requires all parameters for type-safe formatting */
+ 
 function formatReflectionSuccess(
     handle: { childSessionKey: string },
     context: string,
@@ -273,7 +273,7 @@ ${insights || '反思完成，详见 REFLECTION_LOG。'}
 /**
  * Handle reflection errors and format error response.
  */
-/* eslint-disable @typescript-eslint/max-params -- Reason: Function signature requires all parameters for type-safe error handling */
+ 
 function handleReflectionError(
     err: unknown,
     context: string,

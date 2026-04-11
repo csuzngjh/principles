@@ -232,7 +232,7 @@ export class WorkflowStore {
         `).all() as WorkflowRow[];
     }
     
-    /* eslint-disable @typescript-eslint/max-params -- Reason: Store interface requires full event context (workflowId, fromState, toState, reason, payload) */
+     
     recordEvent(
         workflowId: string,
         eventType: string,
@@ -268,7 +268,7 @@ export class WorkflowStore {
      * idempotencyKey must be unique per (workflow_id, stage). If a row with the
      * same idempotency_key already exists, this is a no-op (idempotent).
      */
-    /* eslint-disable @typescript-eslint/max-params -- Reason: Store interface requires workflowId, stage, output, and idempotencyKey */
+     
     recordStageOutput(
         workflowId: string,
         stage: 'dreamer' | 'philosopher',

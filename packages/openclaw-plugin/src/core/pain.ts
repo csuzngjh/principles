@@ -98,45 +98,6 @@ export function validatePainFlag(data: Record<string, string>): string[] {
   return missing;
 }
 
-function mapPainJsonToKvData(json: Record<string, unknown>): Record<string, string> {
-  const kvData: Record<string, string> = {};
-  const fieldMap: Record<string, string> = {
-    source: 'source',
-    score: 'score',
-    pain_score: 'score',
-    time: 'time',
-    timestamp: 'time',
-    reason: 'reason',
-    requested_action: 'reason',
-    session_id: 'session_id',
-    sessionId: 'session_id',
-    agent_id: 'agent_id',
-    agentId: 'agent_id',
-    is_risky: 'is_risky',
-    isRisky: 'is_risky',
-    severity: 'severity',
-    painId: 'pain_id',
-    trace_id: 'trace_id',
-    traceId: 'trace_id',
-    trigger_text_preview: 'trigger_text_preview',
-  };
-
-  for (const [jsonKey, kvKey] of Object.entries(fieldMap)) {
-    if (json[jsonKey] !== undefined && kvData[kvKey] === undefined) {
-      kvData[kvKey] = String(json[jsonKey]);
-    }
-  }
-
-  for (const [key, value] of Object.entries(json)) {
-    if (fieldMap[key] === undefined && value !== undefined && value !== null) {
-      kvData[key] = String(value);
-    }
-  }
-
-  return kvData;
-}
-
-// eslint-disable-next-line @typescript-eslint/max-params -- Reason: Score computation requires all 5 parameters - refactoring to options object would be breaking API change
 export function computePainScore(rc: number, isSpiral: boolean, missingTestCommand: boolean, softScore: number, projectDir?: string): number {
   let score = Math.max(0, softScore || 0);
   
@@ -197,6 +158,39 @@ export function writePainFlag(projectDir: string, painData: PainFlagData): void 
 }
 
 /**
+ * Converts a JSON pain flag object to KV format.
+ */
+function convertJsonToKv(json: Record<string, unknown>): Record<string, string> {
+  const kvData: Record<string, string> = {};
+  const fieldMap: Record<string, string> = {
+    source: 'source',
+    score: 'score',
+    time: 'time',
+    timestamp: 'time',
+    reason: 'reason',
+    session_id: 'session_id',
+    sessionId: 'session_id',
+    agent_id: 'agent_id',
+    agentId: 'agent_id',
+    is_risky: 'is_risky',
+    isRisky: 'is_risky',
+    severity: 'severity',
+    painId: 'pain_id',
+  };
+  for (const [jsonKey, kvKey] of Object.entries(fieldMap)) {
+    if (json[jsonKey] !== undefined) {
+      kvData[kvKey] = String(json[jsonKey]);
+    }
+  }
+  for (const [key, value] of Object.entries(json)) {
+    if (fieldMap[key] === undefined && value !== undefined && value !== null) {
+      kvData[key] = String(value);
+    }
+  }
+  return kvData;
+}
+
+/**
  * Reads and validates the pain flag file with auto-repair.
  *
  * - If file doesn't exist → returns {}
@@ -226,34 +220,7 @@ export function readPainFlagData(projectDir: string): Record<string, string> {
       }
 
       // Auto-repair: convert JSON to KV format
-      const kvData: Record<string, string> = {};
-      // Map known JSON fields to KV equivalents
-      const fieldMap: Record<string, string> = {
-        source: 'source',
-        score: 'score',
-        time: 'time',
-        timestamp: 'time',
-        reason: 'reason',
-        session_id: 'session_id',
-        sessionId: 'session_id',
-        agent_id: 'agent_id',
-        agentId: 'agent_id',
-        is_risky: 'is_risky',
-        isRisky: 'is_risky',
-        severity: 'severity',
-        painId: 'pain_id',
-      };
-      for (const [jsonKey, kvKey] of Object.entries(fieldMap)) {
-        if (json[jsonKey] !== undefined) {
-          kvData[kvKey] = String(json[jsonKey]);
-        }
-      }
-      // Keep any fields not in the map (forward-compatible)
-      for (const [key, value] of Object.entries(json)) {
-        if (fieldMap[key] === undefined && value !== undefined && value !== null) {
-          kvData[key] = String(value);
-        }
-      }
+      const kvData = convertJsonToKv(json);
 
       const repaired = serializeKvLines(kvData);
       fs.writeFileSync(painFlagPath, repaired, 'utf-8');
@@ -311,7 +278,7 @@ export function readPainFlagContract(projectDir: string): PainFlagContractResult
  * If any principle matches the pain signal, its painPreventedCount is incremented.
  * Errors are silently ignored to avoid disrupting the pain pipeline.
  */
-// eslint-disable-next-line @typescript-eslint/max-params -- Reason: principle value tracking requires workspace + data + getters + updaters - refactoring would break API
+ 
 export function trackPrincipleValue(
   workspaceDir: string,
   painData: { reason?: string; source?: string; score?: string },
@@ -320,7 +287,7 @@ export function trackPrincipleValue(
     trigger: string;
     valueMetrics?: { painPreventedCount: number; lastPainPreventedAt?: string; calculatedAt: string };
   }[],
-  updatePrincipleMetrics: (_id: string, _metrics: { painPreventedCount: number; lastPainPreventedAt: string; calculatedAt: string }) => void, // eslint-disable-line no-unused-vars -- Reason: callback params required by interface, actual values accessed via principle.id and principle.valueMetrics
+  updatePrincipleMetrics: (_id: string, _metrics: { painPreventedCount: number; lastPainPreventedAt: string; calculatedAt: string }) => void,  
 ): void {
   try {
     const activePrinciples = getActivePrinciples();

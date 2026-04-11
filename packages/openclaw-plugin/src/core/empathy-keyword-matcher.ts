@@ -80,7 +80,7 @@ export function loadKeywordStore(stateDir: string, language?: 'zh' | 'en'): Empa
   try {
     if (!fs.existsSync(filePath)) {
       const store = createDefaultKeywordStore(language);
-      // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: function defined later in file, hoisting pattern
+       
       saveKeywordStore(stateDir, store);
       return store;
     }
@@ -92,7 +92,7 @@ export function loadKeywordStore(stateDir: string, language?: 'zh' | 'en'): Empa
     if (!parsed.terms || !parsed.stats || !parsed.version) {
       console.warn('[PD:Empathy] Invalid keyword store format, creating default');
       const store = createDefaultKeywordStore(language);
-      // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: function defined later in file, hoisting pattern
+       
       saveKeywordStore(stateDir, store);
       return store;
     }
@@ -101,7 +101,7 @@ export function loadKeywordStore(stateDir: string, language?: 'zh' | 'en'): Empa
   } catch (e) {
     console.warn(`[PD:Empathy] Failed to load keyword store: ${e}`);
     const store = createDefaultKeywordStore(language);
-    // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: function defined later in file, hoisting pattern
+     
     saveKeywordStore(stateDir, store);
     return store;
   }

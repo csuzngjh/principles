@@ -8,12 +8,12 @@ export interface PathResolverOptions {
     workspaceDir?: string;
     normalizeWorkspace?: boolean;
     logger?: {
-        /* eslint-disable no-unused-vars -- Reason: logger callback param names intentionally unused - callbacks only invoked for side effects */
+         
         debug?: (_msg: string) => void;
         info?: (_msg: string) => void;
         warn?: (_msg: string) => void;
         error?: (_msg: string) => void;
-        /* eslint-enable no-unused-vars */
+         
     };
 }
 
@@ -420,9 +420,9 @@ export function resolveWorkspaceDirFromApi(
     if (!api) return undefined;
 
     // 1. Official API: api.runtime.agent.resolveAgentWorkspaceDir
-    /* eslint-disable no-unused-vars -- Reason: type callback params cfg/id unused - actual values passed are api.config and agentId */
+     
     const officialAgent = (api.runtime as { agent?: { resolveAgentWorkspaceDir?: (cfg: unknown, id: string) => string } }).agent;
-    /* eslint-enable no-unused-vars */
+     
     if (officialAgent?.resolveAgentWorkspaceDir) {
         try {
             return officialAgent.resolveAgentWorkspaceDir(api.config, agentId ?? 'main');

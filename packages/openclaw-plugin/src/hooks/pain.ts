@@ -130,7 +130,7 @@ export function handleAfterToolCall(
     const updatedState = trackFriction(sessionId, deltaF, hash, effectiveWorkspaceDir, { source: 'tool_failure' });
     
     // ── Trust Engine: Record failure ──
-    /* eslint-disable @typescript-eslint/no-use-before-define -- Reason: extractErrorType is defined later in this file */
+     
     const errorType = extractErrorType(event.error || errorText);
     const filePath = params.file_path || params.path || params.file;
     const relPath = typeof filePath === 'string' ? normalizePath(filePath, effectiveWorkspaceDir) : 'unknown';

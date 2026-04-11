@@ -83,7 +83,7 @@ export interface NocturnalWorkflowOptions {
  * - timeoutMs: 15 minutes (900000ms)
  * - ttlMs: 30 minutes (1800000ms)
  */
-/* eslint-disable no-unused-vars, @typescript-eslint/no-unused-vars -- Reason: spec methods intentionally receive unused params per interface contract */
+ 
 export const nocturnalWorkflowSpec: SubagentWorkflowSpec<NocturnalResult> = {
     workflowType: 'nocturnal',
     transport: 'runtime_direct',
@@ -116,7 +116,7 @@ export const nocturnalWorkflowSpec: SubagentWorkflowSpec<NocturnalResult> = {
         return status === 'ok';
     },
 };
-/* eslint-enable no-unused-vars */
+ 
 
 // ─────────────────────────────────────────────────────────────────────────────
 // NocturnalWorkflowManager
@@ -353,13 +353,13 @@ export class NocturnalWorkflowManager implements WorkflowManager {
         this.markCompleted(workflowId);
     }
 
-    // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: interface contract requires this method signature, implementation is a no-op per D-10
+     
     async notifyLifecycleEvent(
-        // eslint-disable-next-line no-unused-vars -- Reason: interface contract requires these params but NocturnalWorkflowManager is a no-op per D-10
+         
         _workflowId: string,
-        // eslint-disable-next-line no-unused-vars -- Reason: interface contract requires these params but NocturnalWorkflowManager is a no-op per D-10
+         
         _event: 'subagent_spawned' | 'subagent_ended',
-        // eslint-disable-next-line no-unused-vars -- Reason: interface contract requires these params but NocturnalWorkflowManager is a no-op per D-10
+         
         _data?: Record<string, unknown>
     ): Promise<void> {
         // D-10: No-op. NocturnalWorkflowManager does not use the wait-on-run pattern.
@@ -414,13 +414,13 @@ export class NocturnalWorkflowManager implements WorkflowManager {
         maxAgeMs = 30 * 60 * 1000,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: subagentRuntime param is intentionally any for backward compatibility with callers
         subagentRuntime?: any,
-        /* eslint-disable no-unused-vars -- Reason: type parameter names are documentation, not actual variables */
+         
         agentSession?: {
             resolveStorePath: () => string;
             loadSessionStore: (storePath: string, opts?: { skipCache?: boolean }) => Record<string, unknown>;
             saveSessionStore: (storePath: string, store: Record<string, unknown>) => Promise<void>;
         },
-        /* eslint-enable no-unused-vars */
+         
     ): Promise<number> {
         const expired = this.store.getExpiredWorkflows(maxAgeMs);
 

@@ -304,7 +304,7 @@ export function checkWorkspaceIdle(
         trajectoryGuardrailConfirmsIdle = trajectoryIdleFor > idleThresholdMs * 0.8;
     }
 
-    // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in all if/else branches
+     
     let reason: string;
     if (mostRecentActivityAt === 0) {
         reason = 'No active sessions found — workspace is idle';
@@ -352,7 +352,7 @@ export function checkCooldown(
     } = {}
 ): CooldownCheckResult {
     const {
-        /* eslint-disable @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: Cooldown parameters reserved for future quota enforcement */
+        /* eslint-disable @typescript-eslint/no-unused-vars -- Reason: Cooldown parameters reserved for future quota enforcement */
         globalCooldownMs: _globalCooldownMs = DEFAULT_GLOBAL_COOLDOWN_MS,
         principleCooldownMs: _principleCooldownMs = DEFAULT_PRINCIPLE_COOLDOWN_MS,
         maxRunsPerWindow = DEFAULT_MAX_RUNS_PER_WINDOW,
@@ -372,7 +372,7 @@ export function checkCooldown(
         if (cooldownEnd > now) {
             globalCooldownActive = true;
             globalCooldownRemainingMs = cooldownEnd - now;
-            globalCooldownUntil = state.globalCooldownUntil; // eslint-disable-line @typescript-eslint/prefer-destructuring -- Reason: globalCooldownUntil is reassignable outer let - destructuring would shadow
+            globalCooldownUntil = state.globalCooldownUntil;  
         }
     }
 
@@ -540,7 +540,7 @@ export interface PreflightCheckResult {
  * @param trajectoryLastActivityAt - Optional trajectory timestamp as secondary guardrail
  * @param idleCheckOverride - Optional override for idle check result (for testing)
  */
-/* eslint-disable @typescript-eslint/max-params -- Reason: Preflight check requires workspace, state, principleId, trajectory timestamp, and idle override */
+ 
 export function checkPreflight(
     workspaceDir: string,
     stateDir: string,

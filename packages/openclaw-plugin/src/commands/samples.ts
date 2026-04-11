@@ -29,11 +29,11 @@ export function handleSamplesCommand(ctx: PluginCommandContext): PluginCommandRe
     }
     const normalizedDecision = decision === 'approve' ? 'approved' : 'rejected';
     const note = noteParts.join(' ').trim();
-    // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in try block, catch has early return
+     
     let record;
     try {
       record = wctx.trajectory.reviewCorrectionSample(sampleId, normalizedDecision, note);
-    /* eslint-disable @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: error handling only - returning failure response */
+    /* eslint-disable @typescript-eslint/no-unused-vars -- Reason: error handling only - returning failure response */
     } catch (error) {
       return {
         text: zh

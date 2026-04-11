@@ -134,7 +134,7 @@ export function writeManifest(
   });
 }
 
-// eslint-disable-next-line @typescript-eslint/max-params -- Reason: entry source writer requires state + id + source - refactoring would break API
+ 
 export function writeEntrySource(
   stateDir: string,
   implId: string,
@@ -189,7 +189,7 @@ export function loadEntrySource(stateDir: string, implId: string): string | null
  *
  * Idempotent: calling again with the same implId will NOT overwrite an existing entry.js.
  */
-// eslint-disable-next-line @typescript-eslint/max-params -- Reason: asset dir creation requires state + id + version - refactoring would break API
+ 
 export function createImplementationAssetDir(
   stateDir: string,
   implId: string,

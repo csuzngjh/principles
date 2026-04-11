@@ -222,12 +222,12 @@ function writeRegistry(stateDir: string, registry: ShadowRegistry): void {
 /**
  * Execute a read-modify-write under an exclusive file lock.
  */
-/* eslint-disable no-unused-vars -- Reason: registry param name in type signature intentionally unused - actual function uses different param name */
+ 
 function withShadowRegistryLock<T>(
   stateDir: string,
   fn: (_registry: ShadowRegistry) => T
 ): T {
-/* eslint-enable no-unused-vars */
+ 
   const registryPath = getRegistryPath(stateDir);
   return withLock(registryPath, () => {
     const registry = readRegistry(stateDir);
@@ -341,7 +341,7 @@ export function completeShadowObservation(
  * @param failureSignals - Runtime failure signals
  * @returns The updated ShadowObservation, or null if not found
  */
-// eslint-disable-next-line @typescript-eslint/max-params -- Reason: shadow observation completion requires all 4 params - refactoring would break API
+ 
 export function completeShadowObservationByTask(
   stateDir: string,
   taskFingerprint: string,

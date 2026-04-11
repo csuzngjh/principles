@@ -8,12 +8,12 @@ import type {
 import { isExpectedSubagentError } from './subagent-error-utils.js';
 
 export interface TransportDriver {
-    /* eslint-disable no-unused-vars -- Reason: interface method params are type signatures, implementations use actual values */
+     
     run(params: RunParams): Promise<RunResult>;
     wait(params: WaitParams): Promise<WaitResult>;
     getResult(params: GetResultParams): Promise<GetResultResult>;
     cleanup(params: CleanupParams): Promise<void>;
-    /* eslint-enable no-unused-vars */
+     
 }
 
 export interface RunParams {
@@ -55,7 +55,7 @@ export interface CleanupParams {
     deleteTranscript?: boolean;
 }
 
-/* eslint-disable no-unused-vars -- Reason: type method params are type signatures, implementations use actual values */
+ 
 type PluginRuntimeSubagent = {
     run: (params: {
         sessionKey: string;
@@ -79,21 +79,21 @@ type PluginRuntimeSubagent = {
         deleteTranscript?: boolean;
     }) => Promise<void>;
 };
-/* eslint-enable no-unused-vars */
+ 
 
 /**
  * OpenClaw plugin SDK's agent.session namespace — always available (not gateway-scoped).
  * These functions are imported directly from OpenClaw's session store module.
  */
 export type AgentSessionAPI = {
-    /* eslint-disable no-unused-vars -- Reason: type method params are type signatures, implementations use actual values */
+     
     resolveStorePath: () => string;
     loadSessionStore: (storePath: string, opts?: { skipCache?: boolean }) => Record<string, unknown>;
     saveSessionStore: (storePath: string, store: Record<string, unknown>) => Promise<void>;
     resolveSessionFilePath: (sessionKey: string) => string;
     /** Optional: OpenClaw config object needed for session path resolution */
     config?: unknown;
-    /* eslint-enable no-unused-vars */
+     
 };
 
 export class RuntimeDirectDriver implements TransportDriver {

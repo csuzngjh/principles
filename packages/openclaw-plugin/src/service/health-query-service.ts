@@ -553,7 +553,7 @@ export class HealthQueryService {
     const streamPath = resolvePdPath(this.workspaceDir, 'EVOLUTION_STREAM');
     if (!fs.existsSync(streamPath)) return [];
 
-    // eslint-disable-next-line no-useless-assignment -- Reason: initial value unused due to immediate reassignment
+     
     let lines: string[] = [];
     try {
       const raw = fs.readFileSync(streamPath, 'utf8').trim();
@@ -565,7 +565,7 @@ export class HealthQueryService {
 
     const records: RecentPrincipleChange[] = [];
     for (const line of lines) {
-      // eslint-disable-next-line no-useless-assignment -- Reason: initial value unused due to immediate reassignment in try/catch
+       
       let event: EvolutionStreamRecord | null = null;
       try {
         event = JSON.parse(line) as EvolutionStreamRecord;
@@ -783,7 +783,7 @@ export class HealthQueryService {
     return [];
   }
 
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: Private helper doesn't use instance state
+   
   private getEventDedupKey(entry: EventLogEntry): string {
     const eventId = typeof entry.data?.eventId === 'string' ? entry.data.eventId : null;
     if (eventId) {
@@ -853,7 +853,7 @@ export class HealthQueryService {
     return fallbackStage;
   }
 
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: Private helper doesn't use instance state
+   
   private resolveGateType(row: GateBlockRow): string {
     if (typeof row.gate_type === 'string' && row.gate_type.trim().length > 0) {
       return row.gate_type;
@@ -877,14 +877,14 @@ export class HealthQueryService {
     return cached.has(columnName);
   }
 
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: Private helper doesn't use instance state
+   
   private scoreToStatus(score: number): string {
     if (score >= 70) return 'healthy';
     if (score >= 40) return 'warning';
     return 'critical';
   }
 
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: Private helper doesn't use instance state
+   
   private evolutionToStatus(tier: string, points: number): string {
     const lower = tier.toLowerCase();
     if (lower === 'forest' || lower === 'tree') return 'healthy';
@@ -892,7 +892,7 @@ export class HealthQueryService {
     return 'critical';
   }
 
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this, no-unused-vars -- Reason: Private helper doesn't use instance state
+   
   private safeListFiles(dirPath: string, predicate: (_name: string) => boolean): string[] {
     if (!fs.existsSync(dirPath)) return [];
     try {
@@ -904,7 +904,7 @@ export class HealthQueryService {
     }
   }
 
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: Private helper doesn't use instance state
+   
   private readJsonFile<T>(filePath: string, fallback: T): T {
     if (!fs.existsSync(filePath)) return fallback;
     try {
@@ -914,12 +914,12 @@ export class HealthQueryService {
     }
   }
 
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: Private helper doesn't use instance state
+   
   private asNumber(value: unknown, fallback: number): number {
     return Number.isFinite(value) ? Number(value) : fallback;
   }
 
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- Reason: Private helper doesn't use instance state
+   
   private asNullableNumber(value: unknown): number | null {
     if (Number.isFinite(value)) return Number(value);
     if (typeof value === 'string' && value.trim().length > 0) {
@@ -1016,7 +1016,7 @@ export class HealthQueryService {
 
       return latest;
     } catch (err) {
-      console.warn(`[HealthQueryService] Failed to read sessions dir: ${err}`);
+      // Non-critical: failure to read session files should not crash the service
       return null;
     }
   }

@@ -46,7 +46,7 @@ export class HygieneTracker {
           const backupPath = `${this.statsFile}.bak`;
           fs.renameSync(this.statsFile, backupPath);
           this.logger?.warn(`[PD] Corrupted hygiene stats backed up to ${backupPath}`);
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars, no-unused-vars -- Reason: catch parameter intentionally unused - error handling only
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Reason: catch parameter intentionally unused - error handling only
         } catch (_renameErr) {
           // Empty - corrupted stats backup is non-fatal
         }

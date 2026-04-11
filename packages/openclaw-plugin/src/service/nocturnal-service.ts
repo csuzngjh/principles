@@ -272,11 +272,11 @@ function invokeStubReflector(
   const hasGateBlocks = (snapshot.stats.totalGateBlocks ?? 0) > 0;
 
   // Detect what kind of signal is available and craft appropriate artifact
-  // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in all if/else branches
+   
   let badDecision: string;
-  // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in all if/else branches
+   
   let betterDecision: string;
-  // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in all if/else branches
+   
   let rationale: string;
 
   if (hasGateBlocks) {
@@ -363,7 +363,7 @@ function buildGateBlockRefs(snapshot: NocturnalSessionSnapshot): string[] {
   );
 }
 
-/* eslint-disable @typescript-eslint/max-params -- Reason: Function signature requires all parameters for type-safe artifact construction */
+ 
 function buildDefaultArtificerOutput(
   ruleId: string,
   artifact: NocturnalArtifact,
@@ -412,7 +412,7 @@ function buildDefaultArtificerOutput(
   };
 }
 
-/* eslint-disable @typescript-eslint/max-params -- Reason: Function signature requires all parameters for type-safe candidate persistence */
+ 
 function persistCodeCandidate(
   workspaceDir: string,
   stateDir: string,
@@ -504,7 +504,7 @@ function persistCodeCandidate(
   }
 }
 
-/* eslint-disable @typescript-eslint/max-params -- Reason: Function signature requires all parameters for type-safe candidate persistence */
+ 
 function maybePersistArtificerCandidate(
   workspaceDir: string,
   stateDir: string,
@@ -744,10 +744,10 @@ export function executeNocturnalReflection(
   // -------------------------------------------------------------------------
   // Step 5: Artifact generation (Trinity or single-reflector)
   // -------------------------------------------------------------------------
-  // eslint-disable-next-line no-useless-assignment -- Reason: initial value unused due to immediate reassignment in all branches
+   
   let trinityArtifact: TrinityDraftArtifact | null = null;
   let trinityResult: TrinityResult | null = null;
-  // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in all branches before use at line 884
+   
   let rawJson: string;
 
   if (options.skipReflector) {
@@ -967,7 +967,7 @@ export function executeNocturnalReflection(
     boundedAction: execResult.boundedAction,
   };
 
-  // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in try, catch has early return
+   
   let persistedPath: string;
   try {
     persistedPath = persistArtifact(workspaceDir, artifactWithBoundedAction);
@@ -1091,7 +1091,7 @@ export async function executeNocturnalReflectionAsync(
 
   // If runtime adapter is provided, use async Trinity path
   if (options.runtimeAdapter) {
-    // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: mutual recursion between helper functions - reordering would break logical grouping
+     
     return executeNocturnalReflectionWithAdapter(workspaceDir, stateDir, options);
   }
 
@@ -1140,11 +1140,11 @@ async function executeNocturnalReflectionWithAdapter(
   }
 
   // Step 2: Target selection (or use override to skip)
-  // eslint-disable-next-line @typescript-eslint/init-declarations -- Reason: assigned immediately in all branches before use
+   
   let selectedPrincipleId: string | undefined;
-  // eslint-disable-next-line @typescript-eslint/init-declarations -- Reason: assigned immediately in all branches before use
+   
   let selectedSessionId: string | undefined;
-  // eslint-disable-next-line no-useless-assignment -- Reason: initial value unused due to immediate reassignment in all branches
+   
   let snapshot: NocturnalSessionSnapshot | null = null;
 
   if (options.principleIdOverride && options.snapshotOverride) {
@@ -1222,9 +1222,9 @@ async function executeNocturnalReflectionWithAdapter(
       };
     }
 
-    // eslint-disable-next-line @typescript-eslint/prefer-destructuring -- Reason: selectedPrincipleId/selectedSessionId are reassignable outer lets - destructuring would shadow
+     
     selectedPrincipleId = selection.selectedPrincipleId;
-    // eslint-disable-next-line @typescript-eslint/prefer-destructuring -- Reason: selectedPrincipleId/selectedSessionId are reassignable outer lets - destructuring would shadow
+     
     selectedSessionId = selection.selectedSessionId;
 
     if (!selectedPrincipleId || !selectedSessionId) {
@@ -1257,10 +1257,10 @@ async function executeNocturnalReflectionWithAdapter(
   });
 
   // Step 4: Trinity execution via adapter (async)
-  // eslint-disable-next-line no-useless-assignment -- Reason: initial value unused due to immediate reassignment in all branches
+   
   let trinityArtifact: TrinityDraftArtifact | null = null;
   let trinityResult: TrinityResult | null = null;
-  // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in all branches before use
+   
   let rawJson: string;
 
   if (options.skipReflector) {
@@ -1365,7 +1365,7 @@ async function executeNocturnalReflectionWithAdapter(
 
   // Step 7: Persist artifact
   const artifactWithBoundedAction = { ...arbiterResult.artifact, boundedAction: execResult.boundedAction };
-  // eslint-disable-next-line @typescript-eslint/init-declarations -- assigned in try, catch has early return
+   
   let persistedPath: string;
   try {
     persistedPath = persistArtifact(workspaceDir, artifactWithBoundedAction);

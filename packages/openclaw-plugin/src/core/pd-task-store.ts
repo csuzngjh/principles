@@ -55,7 +55,7 @@ export function initTaskMeta(task: PDTaskSpec): PDTaskSpec {
   return task;
 }
 
-// eslint-disable-next-line @typescript-eslint/max-params -- Reason: sync meta update requires task + status + optional jobId + error - refactoring would break API
+ 
 export function updateSyncMeta(
   task: PDTaskSpec,
   status: 'ok' | 'error',

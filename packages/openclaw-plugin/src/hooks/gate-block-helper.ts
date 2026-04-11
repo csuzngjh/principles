@@ -48,9 +48,9 @@ export interface BlockContext {
 export function recordGateBlockAndReturn(
   wctx: WorkspaceContext,
   blockCtx: BlockContext,
-  /* eslint-disable no-unused-vars -- Reason: type-only callback parameters in logger type */
+   
   logger: { warn?: (_message: string) => void; error?: (_message: string) => void; info?: (_message: string) => void }
-  /* eslint-enable no-unused-vars */
+   
 ): PluginHookBeforeToolCallResult {
   const { filePath, reason, toolName, sessionId, blockSource } = blockCtx;
 
@@ -93,7 +93,7 @@ export function recordGateBlockAndReturn(
     wctx.trajectory?.recordGateBlock?.(trajectoryPayload);
   } catch (error: unknown) {
     logWarn(`[PD_GATE] Failed to record trajectory gate block: ${String(error)}`);
-    // eslint-disable-next-line @typescript-eslint/no-use-before-define -- Reason: function is defined later but called in this helper for retry logic
+     
     scheduleTrajectoryGateBlockRetry(wctx, trajectoryPayload, 1, logWarn, logError);
   }
 
@@ -133,7 +133,7 @@ This is a mandatory security gate. The operation was blocked because the modific
  * Uses exponential backoff with max retries.
  * Failures are logged but do not affect the runtime block decision.
  */
-/* eslint-disable @typescript-eslint/max-params, no-unused-vars -- Reason: Function requires all params for retry scheduling */
+ 
 function scheduleTrajectoryGateBlockRetry(
   wctx: WorkspaceContext,
   payload: {
