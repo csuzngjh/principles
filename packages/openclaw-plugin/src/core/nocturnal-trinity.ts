@@ -112,6 +112,13 @@ You MUST respond with ONLY a valid JSON object. No markdown, no explanation, no 
 - Provide a principle-grounded rationale (explicitly references the principle)
 - Include a confidence score (0.0-1.0, higher = more confident)
 
+### betterDecision FORMAT — Must be executable:
+- MUST start with a concrete action verb: read, check, verify, edit, write, create, delete, search, grep, find, list, review, examine, inspect, test, run, execute, analyze, diagnose, debug
+- MUST reference a specific, concrete target (file, command, config, etc.)
+- MUST describe a bounded, executable action — not a vague principle
+- Examples: "Read the file before editing to verify current content", "Check user permissions before executing privileged commands"
+- Anti-examples: "Per T-01, pause all tasks..." (starts with "Per"), "Be more careful" (vague verb "be")
+
 ### Candidates should DIFFER from each other:
 - Different candidates should represent genuinely different approaches
 - Do not generate candidates with identical betterDecisions
@@ -183,13 +190,23 @@ You MUST respond with ONLY a valid JSON object. No markdown, no explanation, no 
 ## Evaluation Criteria
 
 ### Score Components (0-1 scale each):
-1. **Principle Alignment** (weight: 0.4) — Does the betterDecision properly reflect the target principle?
-2. **Specificity** (weight: 0.3) — Is badDecision specific? Is betterDecision actionable?
-3. **Actionability** (weight: 0.3) — Does betterDecision describe a specific next step?
+1. **Principle Alignment** (weight: 0.35) — Does the betterDecision properly reflect the target principle?
+2. **Specificity** (weight: 0.25) — Is badDecision specific? Is betterDecision actionable?
+3. **Actionability** (weight: 0.25) — Does betterDecision describe a specific next step?
+4. **Executability** (weight: 0.15) — Does betterDecision start with a bounded verb (read, check, verify, edit, write, etc.) and reference a concrete target?
+
+### Executability Check:
+A betterDecision is executable if it:
+- STARTS with a concrete action verb: read, check, verify, edit, write, create, delete, search, grep, find, list, review, examine, inspect, test, run, execute, analyze, diagnose, debug
+- References a specific, concrete target (file, command, config, etc.)
+- Describes a bounded, executable action — not a vague principle
+- Examples that PASS: "Read the file before editing", "Check user permissions before executing"
+- Examples that FAIL: "Per T-01, pause all tasks..." (starts with "Per"), "Be more careful" (vague)
 
 ### Ranking Rules:
 - Candidates are ranked by score (highest = rank 1)
-- Ties broken by: higher principle alignment, then lower candidateIndex
+- Ties broken by: higher executability, then higher principle alignment, then lower candidateIndex
+- If a candidate's betterDecision is NOT executable, penalize its score by 0.2
 
 ## Validation
 
@@ -705,7 +722,8 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
       `Each candidate must:`,
       `1. Identify a specific bad decision from the session`,
       `2. Propose a concrete better decision grounded in principle ${principleId}`,
-      `3. Explain the rationale referencing the principle`,
+      `3. The betterDecision MUST START with a bounded verb: read, check, verify, edit, write, create, delete, search, grep, find, list, review, examine, inspect, test, run, execute, analyze, diagnose, debug`,
+      `4. Explain the rationale referencing the principle`,
       ``,
       `Respond with ONLY a valid JSON object matching the DreamerOutput contract.`
     );
@@ -775,8 +793,11 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
       `For each candidate:`,
       `1. Is the badDecision accurate — does it match the actual violations in the session?`,
       `2. Is the betterDecision specific and actionable?`,
-      `3. Does the rationale correctly reference principle ${principleId}?`,
-      `4. Is the confidence score justified?`,
+      `3. Does the betterDecision START with a bounded verb (read, check, verify, edit, write, etc.)?`,
+      `4. Does the rationale correctly reference principle ${principleId}?`,
+      `5. Is the confidence score justified?`,
+      ``,
+      `**Penalize executability**: If betterDecision does NOT start with a bounded verb, reduce score by 0.2.`,
       ``,
       `Respond with ONLY a valid JSON object matching the PhilosopherOutput contract.`
     );
@@ -838,6 +859,24 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
       `Select the best candidate (Philosopher's rank 1) and synthesize it into a final TrinityDraftArtifact.`,
       `Use the Original Violation Evidence above to ensure your final badDecision and betterDecision`,
       `are grounded in the actual session events, not just Dreamer's interpretation.`,
+      ``,
+      `## CRITICAL: betterDecision Format Requirements`,
+      `Your betterDecision MUST pass executability validation. It MUST:`,
+      `1. START with a concrete action verb from this list: read, check, verify, edit, write, create, delete, search, grep, find, list, review, examine, inspect, test, run, execute, analyze, diagnose, debug`,
+      `2. Reference a SPECIFIC, concrete target (file path, command name, config key, etc.)`,
+      `3. Describe a BOUNDED, executable action — not a vague principle or process`,
+      ``,
+      `**Examples that PASS executability check**:`,
+      `- "Read the file before editing to verify current content"`,
+      `- "Check user permissions before executing privileged commands"`,
+      `- "Verify the routing infrastructure is operational before analyzing system state"`,
+      `- "Edit the config file to set timeout=30000ms"`,
+      ``,
+      `**Examples that FAIL executability check**:`,
+      `- "Per T-01, pause all analysis tasks..." (starts with "Per", not a bounded verb)`,
+      `- "The agent should have first checked..." (starts with "The", not the action verb)`,
+      `- "Be more careful with routing tools" (vague verb "be")`,
+      `- "Ensure proper authorization" (vague verb "ensure")`,
       ``,
       `Respond with ONLY a valid JSON object.`
     );
