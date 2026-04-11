@@ -27,6 +27,9 @@
  */
 
 import { randomUUID } from 'crypto';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import type { NocturnalSessionSnapshot } from './nocturnal-trajectory-extractor.js';
 import { computeThinkingModelDelta } from './nocturnal-trajectory-extractor.js';
 import type { TrinityArtificerContext } from './nocturnal-artificer.js';
@@ -334,40 +337,35 @@ export interface TrinityRuntimeAdapter {
 
 /**
  * OpenClaw-backed Trinity runtime adapter.
- * Uses ONLY public plugin runtime APIs (api.runtime.subagent.*).
- * Does NOT depend on OpenClaw internals.
+ * Uses api.runtime.agent.runEmbeddedPiAgent() which works in background contexts
+ * (unlike api.runtime.subagent.* which requires gateway request scope).
  */
 export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
    
   private readonly api: {
     runtime: {
-      subagent: {
-        run: (_opts: {
-          sessionKey: string;
-          message: string;
+      agent: {
+        runEmbeddedPiAgent: (_opts: {
+          sessionId: string;
+          sessionFile: string;
+          prompt: string;
           extraSystemPrompt?: string;
-          deliver?: boolean;
-        }) => Promise<{ runId: string }>;
-        waitForRun: (_opts: { runId: string; timeoutMs: number }) => Promise<{
-          status: string;
-          error?: string;
-        }>;
-        getSessionMessages: (_opts: {
-          sessionKey: string;
-          limit: number;
+          config?: unknown;
+          timeoutMs: number;
+          runId: string;
+          disableTools?: boolean;
         }) => Promise<{
-          messages: unknown[];
+          payloads?: { isError?: boolean; text?: string }[];
         }>;
-        deleteSession: (_opts: {
-          sessionKey: string;
-          deleteTranscript?: boolean;
-        }) => Promise<void>;
       };
     };
+    config?: unknown;
+    logger?: { info: (msg: string) => void; warn: (msg: string) => void; error: (msg: string) => void };
   };
    
 
   private readonly stageTimeoutMs: number;
+  private readonly tempDir: string;
 
   constructor(
     api: OpenClawTrinityRuntimeAdapter['api'],
@@ -375,6 +373,29 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
   ) {
     this.api = api;
     this.stageTimeoutMs = stageTimeoutMs;
+    // Cross-platform temp directory for session files
+    this.tempDir = path.join(os.tmpdir(), `pd-trinity-${process.pid}`);
+  }
+
+  /**
+   * Create a unique session file path for runEmbeddedPiAgent.
+   */
+  private createSessionFile(stage: string): string {
+    if (!fs.existsSync(this.tempDir)) {
+      fs.mkdirSync(this.tempDir, { recursive: true });
+    }
+    return path.join(this.tempDir, `${stage}-${randomUUID()}.json`);
+  }
+
+  /**
+   * Extract text from runEmbeddedPiAgent result.
+   */
+  private extractPayloadText(result: { payloads?: { isError?: boolean; text?: string }[] }): string {
+    return (result.payloads ?? [])
+      .filter(p => !p.isError)
+      .map(p => p.text?.trim() ?? '')
+      .filter(Boolean)
+      .join('\n');
   }
 
   async invokeDreamer(
@@ -382,45 +403,43 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
     principleId: string,
     maxCandidates: number
   ): Promise<DreamerOutput> {
-    const sessionKey = `agent:main:subagent:ne-dreamer-${randomUUID()}`;
-    const systemPrompt = NOCTURNAL_DREAMER_PROMPT;
-
+    const runId = `dreamer-${randomUUID()}`;
+    const sessionFile = this.createSessionFile('dreamer');
     const prompt = this.buildDreamerPrompt(snapshot, principleId, maxCandidates);
 
     try {
-      const { runId } = await this.api.runtime.subagent.run({
-        sessionKey,
-        message: prompt,
-        extraSystemPrompt: systemPrompt,
-        deliver: false,
-      });
-
-      const result = await this.api.runtime.subagent.waitForRun({
-        runId,
+      const result = await this.api.runtime.agent.runEmbeddedPiAgent({
+        sessionId: runId,
+        sessionFile,
+        prompt,
+        extraSystemPrompt: NOCTURNAL_DREAMER_PROMPT,
+        config: this.api.config,
         timeoutMs: this.stageTimeoutMs,
+        runId,
+        disableTools: true,  // Trinity stages are pure LLM reasoning, no tools needed
       });
 
-      if (result.status !== 'ok') {
+      const outputText = this.extractPayloadText(result);
+      if (!outputText) {
         return {
           valid: false,
           candidates: [],
-          reason: `Dreamer subagent failed: ${result.error ?? result.status}`,
+          reason: 'Dreamer returned empty response',
           generatedAt: new Date().toISOString(),
         };
       }
 
-      const messages = await this.api.runtime.subagent.getSessionMessages({
-        sessionKey,
-        limit: 5,
-      });
-
-      const outputText = this.extractAssistantText(messages.messages as { role: string; text?: string; content?: string }[]);
       return this.parseDreamerOutput(outputText);
+    } catch (err) {
+      return {
+        valid: false,
+        candidates: [],
+        reason: `Dreamer failed: ${err instanceof Error ? err.message : String(err)}`,
+        generatedAt: new Date().toISOString(),
+      };
     } finally {
-      await this.api.runtime.subagent.deleteSession({
-        sessionKey,
-        deleteTranscript: true,
-      }).catch(() => { /* intentionally empty - fire-and-forget session cleanup */ });
+      // Clean up session file
+      try { fs.unlinkSync(sessionFile); } catch { /* ignore */ }
     }
   }
 
@@ -428,50 +447,48 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
     dreamerOutput: DreamerOutput,
     principleId: string
   ): Promise<PhilosopherOutput> {
-    const sessionKey = `agent:main:subagent:ne-philosopher-${randomUUID()}`;
-    const systemPrompt = NOCTURNAL_PHILOSOPHER_PROMPT;
-
+    const runId = `philosopher-${randomUUID()}`;
+    const sessionFile = this.createSessionFile('philosopher');
     const prompt = this.buildPhilosopherPrompt(dreamerOutput, principleId);
 
     try {
-      const { runId } = await this.api.runtime.subagent.run({
-        sessionKey,
-        message: prompt,
-        extraSystemPrompt: systemPrompt,
-        deliver: false,
-      });
-
-      const result = await this.api.runtime.subagent.waitForRun({
-        runId,
+      const result = await this.api.runtime.agent.runEmbeddedPiAgent({
+        sessionId: runId,
+        sessionFile,
+        prompt,
+        extraSystemPrompt: NOCTURNAL_PHILOSOPHER_PROMPT,
+        config: this.api.config,
         timeoutMs: this.stageTimeoutMs,
+        runId,
+        disableTools: true,
       });
 
-      if (result.status !== 'ok') {
+      const outputText = this.extractPayloadText(result);
+      if (!outputText) {
         return {
           valid: false,
           judgments: [],
           overallAssessment: '',
-          reason: `Philosopher subagent failed: ${result.error ?? result.status}`,
+          reason: 'Philosopher returned empty response',
           generatedAt: new Date().toISOString(),
         };
       }
 
-      const messages = await this.api.runtime.subagent.getSessionMessages({
-        sessionKey,
-        limit: 5,
-      });
-
-      const outputText = this.extractAssistantText(messages.messages as { role: string; text?: string; content?: string }[]);
       return this.parsePhilosopherOutput(outputText);
+    } catch (err) {
+      return {
+        valid: false,
+        judgments: [],
+        overallAssessment: '',
+        reason: `Philosopher failed: ${err instanceof Error ? err.message : String(err)}`,
+        generatedAt: new Date().toISOString(),
+      };
     } finally {
-      await this.api.runtime.subagent.deleteSession({
-        sessionKey,
-        deleteTranscript: true,
-      }).catch(() => { /* intentionally empty - fire-and-forget session cleanup */ });
+      try { fs.unlinkSync(sessionFile); } catch { /* ignore */ }
     }
   }
 
-   
+
   async invokeScribe(
     dreamerOutput: DreamerOutput,
     philosopherOutput: PhilosopherOutput,
@@ -481,64 +498,52 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
      
     _config: TrinityConfig
   ): Promise<TrinityDraftArtifact | null> {
-    const sessionKey = `agent:main:subagent:ne-scribe-${randomUUID()}`;
-    const systemPrompt = NOCTURNAL_SCRIBE_PROMPT;
-
+    const runId = `scribe-${randomUUID()}`;
+    const sessionFile = this.createSessionFile('scribe');
     const prompt = this.buildScribePrompt(dreamerOutput, philosopherOutput, snapshot, principleId);
 
     try {
-      const { runId } = await this.api.runtime.subagent.run({
-        sessionKey,
-        message: prompt,
-        extraSystemPrompt: systemPrompt,
-        deliver: false,
-      });
-
-      const result = await this.api.runtime.subagent.waitForRun({
-        runId,
+      const result = await this.api.runtime.agent.runEmbeddedPiAgent({
+        sessionId: runId,
+        sessionFile,
+        prompt,
+        extraSystemPrompt: NOCTURNAL_SCRIBE_PROMPT,
+        config: this.api.config,
         timeoutMs: this.stageTimeoutMs,
+        runId,
+        disableTools: true,
       });
 
-      if (result.status !== 'ok') {
+      const outputText = this.extractPayloadText(result);
+      if (!outputText) {
         return null;
       }
 
-      const messages = await this.api.runtime.subagent.getSessionMessages({
-        sessionKey,
-        limit: 5,
-      });
-
-      const outputText = this.extractAssistantText(messages.messages as { role: string; text?: string; content?: string }[]);
       return this.parseScribeOutput(outputText, snapshot, principleId, telemetry);
+    } catch (err) {
+      return null;
     } finally {
-      await this.api.runtime.subagent.deleteSession({
-        sessionKey,
-        deleteTranscript: true,
-      }).catch(() => { /* intentionally empty - fire-and-forget session cleanup */ });
+      try { fs.unlinkSync(sessionFile); } catch { /* ignore */ }
     }
   }
 
-   
+
   async close(): Promise<void> {
-    // Nothing to clean up in this implementation
+    // Clean up temp directory
+    try {
+      if (fs.existsSync(this.tempDir)) {
+        const files = fs.readdirSync(this.tempDir);
+        for (const file of files) {
+          fs.unlinkSync(path.join(this.tempDir, file));
+        }
+        fs.rmSync(this.tempDir, { recursive: true, force: true });
+      }
+    } catch { /* ignore cleanup errors */ }
   }
 
   // ---------------------------------------------------------------------------
   // Private Helper Methods
   // ---------------------------------------------------------------------------
-
-   
-  private extractAssistantText(
-    messages: { role: string; text?: string; content?: string }[]
-  ): string {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const msg = messages[i] as { role: string; text?: string; content?: string };
-      if (msg.role === 'assistant') {
-        return msg.text ?? msg.content ?? '';
-      }
-    }
-    return '';
-  }
 
    
   private buildDreamerPrompt(
