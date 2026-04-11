@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
-import { readPainFlagData, buildPainFlag, writePainFlag } from '../../src/core/pain.js';
+import { readPainFlagData, readPainFlagContract, buildPainFlag, writePainFlag } from '../../src/core/pain.js';
 
-const TEST_DIR = '/tmp/test-pain-auto-repair';
+const TEST_DIR = path.join(os.tmpdir(), 'test-pain-auto-repair');
 
 describe('Pain Flag Auto-Repair', () => {
   beforeEach(() => {
@@ -80,5 +81,16 @@ source: tool_failure`;
     expect(result.source).toBe('tool_failure');
     expect(result.score).toBe('50');
     // Missing time and reason — validation will log a warning
+  });
+  it('returns invalid contract result for missing required fields', () => {
+    const kvContent = `score: 50
+source: tool_failure`;
+    fs.writeFileSync(path.join(TEST_DIR, '.state/.pain_flag'), kvContent, 'utf-8');
+
+    const contract = readPainFlagContract(TEST_DIR);
+
+    expect(contract.status).toBe('invalid');
+    expect(contract.format).toBe('kv');
+    expect(contract.missingFields).toEqual(expect.arrayContaining(['time', 'reason']));
   });
 });

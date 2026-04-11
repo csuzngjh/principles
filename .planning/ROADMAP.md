@@ -72,7 +72,8 @@ This milestone is intentionally paused. It should not resume until the productio
 | 16 | v1.12 | 2/2 | Complete | 2026-04-10 |
 | 17 | v1.12 | 1/1 | Complete | 2026-04-10 |
 | 18 | v1.12 | 1/1 | Complete | 2026-04-10 |
-| 19 | v1.13 | 2/2 | Planned | - |
-| 20-21 | v1.13 | 0/2 | Not started | - |
+| 19 | v1.13 | 2/2 | Local execution complete | 2026-04-11 |
+| 20 | v1.13 | 0/2 | Planned | - |
+| 21 | v1.13 | 0/1 | Not started | - |
 
 *Last updated: 2026-04-11 after v1.13 milestone started*

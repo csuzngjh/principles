@@ -37,6 +37,13 @@ export interface PainFlagData {
   trigger_text_preview?: string;
 }
 
+export interface PainFlagContractResult {
+  status: 'missing' | 'valid' | 'invalid';
+  format: 'missing' | 'empty' | 'kv' | 'json' | 'invalid_json';
+  data: Record<string, string>;
+  missingFields: string[];
+}
+
 /**
  * Factory function — the ONLY way to construct pain flag data.
  *
@@ -89,6 +96,44 @@ export function validatePainFlag(data: Record<string, string>): string[] {
     }
   }
   return missing;
+}
+
+function mapPainJsonToKvData(json: Record<string, unknown>): Record<string, string> {
+  const kvData: Record<string, string> = {};
+  const fieldMap: Record<string, string> = {
+    source: 'source',
+    score: 'score',
+    pain_score: 'score',
+    time: 'time',
+    timestamp: 'time',
+    reason: 'reason',
+    requested_action: 'reason',
+    session_id: 'session_id',
+    sessionId: 'session_id',
+    agent_id: 'agent_id',
+    agentId: 'agent_id',
+    is_risky: 'is_risky',
+    isRisky: 'is_risky',
+    severity: 'severity',
+    painId: 'pain_id',
+    trace_id: 'trace_id',
+    traceId: 'trace_id',
+    trigger_text_preview: 'trigger_text_preview',
+  };
+
+  for (const [jsonKey, kvKey] of Object.entries(fieldMap)) {
+    if (json[jsonKey] !== undefined && kvData[kvKey] === undefined) {
+      kvData[kvKey] = String(json[jsonKey]);
+    }
+  }
+
+  for (const [key, value] of Object.entries(json)) {
+    if (fieldMap[key] === undefined && value !== undefined && value !== null) {
+      kvData[key] = String(value);
+    }
+  }
+
+  return kvData;
 }
 
 // eslint-disable-next-line @typescript-eslint/max-params -- Reason: Score computation requires all 5 parameters - refactoring to options object would be breaking API change
@@ -227,6 +272,37 @@ export function readPainFlagData(projectDir: string): Record<string, string> {
     SystemLogger.log(projectDir, 'PAIN_FLAG_READ_ERROR', `Failed to read pain flag: ${String(e)}`);
     return {};
   }
+}
+
+export function readPainFlagContract(projectDir: string): PainFlagContractResult {
+  const data = readPainFlagData(projectDir);
+
+  if (Object.keys(data).length === 0) {
+    const painFlagPath = resolvePdPath(projectDir, 'PAIN_FLAG');
+    if (!fs.existsSync(painFlagPath)) {
+      return { status: 'missing', format: 'missing', data: {}, missingFields: [] };
+    }
+
+    const raw = fs.readFileSync(painFlagPath, 'utf-8').trim();
+    if (!raw) {
+      return { status: 'missing', format: 'empty', data: {}, missingFields: [] };
+    }
+
+    return {
+      status: 'invalid',
+      format: raw.startsWith('{') ? 'invalid_json' : 'kv',
+      data: {},
+      missingFields: ['unparseable'],
+    };
+  }
+
+  const missing = validatePainFlag(data);
+  return {
+    status: missing.length > 0 ? 'invalid' : 'valid',
+    format: 'kv',
+    data,
+    missingFields: missing,
+  };
 }
 
 /**

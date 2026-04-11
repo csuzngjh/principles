@@ -240,6 +240,29 @@ session_id: explicit-session-from-pain
     }
   });
 
+  it('treats malformed pain flag data as unusable context', async () => {
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pain-invalid-'));
+    const stateDir = path.join(workspaceDir, '.state');
+    fs.mkdirSync(stateDir, { recursive: true });
+
+    fs.writeFileSync(
+      path.join(stateDir, '.pain_flag'),
+      `source: test_pain
+score: 80`,
+      'utf8'
+    );
+
+    const wctx = WorkspaceContext.fromHookContext({ workspaceDir, stateDir, logger: console } as any);
+
+    try {
+      const context = readRecentPainContext(wctx);
+      expect(context.mostRecent).toBeNull();
+      expect(context.recentPainCount).toBe(0);
+    } finally {
+      safeRmDir(workspaceDir);
+    }
+  });
+
   it('prioritizes pain signal session ID for snapshot extraction', async () => {
     const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pain-priority-'));
     const stateDir = path.join(workspaceDir, '.state');
