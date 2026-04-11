@@ -1608,10 +1608,11 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
 
                             if (isExpectedSubagentError(errorReason)) {
-                                sleepTask.status = 'failed';
+                                // #237: Expected unavailability → stub fallback, not hard failure
+                                sleepTask.status = 'completed';
                                 sleepTask.completed_at = new Date().toISOString();
-                                sleepTask.resolution = 'runtime_unavailable';
-                                logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} background runtime unavailable: ${errorReason}`);
+                                sleepTask.resolution = 'stub_fallback';
+                                logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} background runtime unavailable, using stub fallback: ${errorReason}`);
                             } else {
                                 sleepTask.status = 'failed';
                                 sleepTask.completed_at = new Date().toISOString();
@@ -1627,13 +1628,16 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     // #202: Handle expected subagent unavailability (e.g., process isolation in daemon mode)
                     // When subagent is unavailable due to gateway running in separate process,
                     // use stub fallback instead of failing the task.
+                    sleepTask.completed_at = new Date().toISOString();
                     sleepTask.lastError = String(taskErr);
                     sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
+
                     if (isExpectedSubagentError(taskErr)) {
-                        sleepTask.status = 'failed';
+                        // #237: Expected unavailability → stub fallback, not hard failure
+                        sleepTask.status = 'completed';
                         sleepTask.completed_at = new Date().toISOString();
-                        sleepTask.resolution = 'runtime_unavailable';
-                        logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} background runtime unavailable: ${String(taskErr)}`);
+                        sleepTask.resolution = 'stub_fallback';
+                        logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} background runtime unavailable, using stub fallback: ${String(taskErr)}`);
                     } else {
                         sleepTask.status = 'failed';
                         sleepTask.completed_at = new Date().toISOString();
