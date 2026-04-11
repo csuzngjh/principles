@@ -194,7 +194,7 @@ export class NocturnalWorkflowManager implements WorkflowManager {
             ...options.metadata,
         };
 
-        this.logger.info(`[PD:NocturnalWorkflow] Starting workflow: workflowId=${workflowId}, type=${spec.workflowType}`);
+        this.logger.info(`[PD:NocturnalWorkflow] Starting workflow: workflowId=${workflowId}, type=${spec.workflowType}, workspaceDir=${this.workspaceDir.slice(-40)}, stateDir=${this.stateDir.slice(-40)}`);
 
         // Record nocturnal_started event (NOC-03)
         this.store.createWorkflow({
@@ -275,11 +275,39 @@ export class NocturnalWorkflowManager implements WorkflowManager {
                     this.completedWorkflows.set(workflowId, Date.now());
                 } else {
                     const reason = result.noTargetSelected ? 'no_target_selected' : 'validation_failed';
-                    this.logger.warn(`[PD:NocturnalWorkflow] [${workflowId}] Pipeline failed: reason=${reason}, noTargetSelected=${result.noTargetSelected}, skipReason=${result.skipReason ?? 'none'}, validationFailures=${result.validationFailures?.length ?? 0}`);
+                    
+                    // Enhanced failure logging with diagnostics details
+                    const diag = result.diagnostics;
+                    const preflightInfo = diag?.preflight 
+                        ? `preflight.canRun=${diag.preflight.canRun}, blockers=${diag.preflight.blockers?.join(',') || 'none'}`
+                        : 'preflight=null';
+                    const idleInfo = diag?.idle
+                        ? `idle=${diag.idle.isIdle}, idleForMs=${diag.idle.idleForMs}, userActiveSessions=${diag.idle.userActiveSessions}`
+                        : 'idle=null';
+                    const selectionInfo = diag?.selection
+                        ? `decision=${diag.selection.decision}, skipReason=${diag.selection.skipReason || 'none'}`
+                        : 'selection=null';
+                    
+                    this.logger.warn(`[PD:NocturnalWorkflow] [${workflowId}] Pipeline failed: reason=${reason}, noTargetSelected=${result.noTargetSelected}, skipReason=${result.skipReason ?? 'none'}`);
+                    this.logger.warn(`[PD:NocturnalWorkflow] [${workflowId}] Diagnostics: ${preflightInfo}; ${idleInfo}; ${selectionInfo}`);
+                    
+                    if (result.validationFailures && result.validationFailures.length > 0) {
+                        this.logger.warn(`[PD:NocturnalWorkflow] [${workflowId}] Validation failures: ${result.validationFailures.join('; ')}`);
+                    }
+                    
                     this.store.updateWorkflowState(workflowId, 'terminal_error');
                     this.store.recordEvent(workflowId, 'nocturnal_failed', null, 'terminal_error', reason, {
                         failures: result.validationFailures,
                         skipReason: result.skipReason,
+                        preflight: diag?.preflight ? {
+                            canRun: diag.preflight.canRun,
+                            blockers: diag.preflight.blockers,
+                        } : null,
+                        idle: diag?.idle ? {
+                            isIdle: diag.idle.isIdle,
+                            idleForMs: diag.idle.idleForMs,
+                            userActiveSessions: diag.idle.userActiveSessions,
+                        } : null,
                     });
                 }
             } catch (err) {

@@ -49,6 +49,7 @@ export function resolveWorkspaceDir(
   if (ctx.workspaceDir) {
     const issue = validateWorkspaceDir(ctx.workspaceDir);
     if (!issue) {
+      logger.info(`[PD:WorkspaceDir] ${source}: resolved from ctx.workspaceDir=${ctx.workspaceDir.slice(-50)}`);
       return ctx.workspaceDir;
     }
     attempts.push(`ctx.workspaceDir invalid (${issue})`);
@@ -62,6 +63,7 @@ export function resolveWorkspaceDir(
   for (const agentId of agentCandidates) {
     const resolved = tryResolveFromAgent(api, agentId, attempts);
     if (resolved) {
+      logger.info(`[PD:WorkspaceDir] ${source}: resolved from agent:${agentId} -> ${resolved.slice(-50)}`);
       return resolved;
     }
   }
