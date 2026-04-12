@@ -325,7 +325,7 @@ export function buildStageBrief(spec, stage, round, previousDecision, handoff = 
     carryForward.trimEnd(),
     '',
     `## Constraints`,
-    ...spec.context.map((line) => `- ${line}`),
+    ...((spec.context ?? []).map((line) => `- ${line}`)),
     '',
     ...(spec.taskContract
       ? [
