@@ -435,7 +435,7 @@ describe('NocturnalExport JSONL parseability', () => {
     }
   });
 
-  it('prompt equals rejected (ORPO teaches to avoid badDecision)', () => {
+  it('new format has messages array with system and user roles', () => {
     setupExportReady(tmpDir, 'art-orpo-check', 'gpt-4');
 
     const result = exportORPOSamples(tmpDir, 'gpt-4');
@@ -443,8 +443,27 @@ describe('NocturnalExport JSONL parseability', () => {
     const lines = content.trim().split('\n').filter(Boolean);
     const sample = JSON.parse(lines[0]);
 
-    expect(sample.prompt).toBe(sample.rejected);
+    // New format has messages array
+    expect(Array.isArray(sample.messages)).toBe(true);
+    expect(sample.messages.length).toBeGreaterThanOrEqual(2);
+    expect(sample.messages[0].role).toBe('system');
+    expect(sample.messages[1].role).toBe('user');
+    expect(sample.messages[1].content).toContain('Principle');
+    expect(sample.messages[1].content).toContain('Session Context');
+    expect(sample.messages[1].content).toContain('Agent Behavior');
+    expect(sample.messages[1].content).toContain('Task');
+
+    // chosen and rejected are different (model learns preference)
     expect(sample.chosen).not.toBe(sample.rejected);
+
+    // chosen starts with negative verdict about agent behavior
+    expect(sample.chosen.toLowerCase()).toContain('did not follow');
+
+    // rejected starts with positive verdict about agent behavior
+    expect(sample.rejected.toLowerCase()).toContain('acceptable');
+
+    // Deprecated prompt field is still present for backward compatibility
+    expect(sample.prompt).toBeDefined();
   });
 
   it('export is reproducible with same dataset', () => {

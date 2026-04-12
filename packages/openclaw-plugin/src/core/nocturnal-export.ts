@@ -1,9 +1,9 @@
 /**
- * Nocturnal ORPO Export — Approved Dataset to Decision-Point JSONL
+ * Nocturnal ORPO Export — Approved Dataset to Principle-Review JSONL
  * =================================================================
  *
- * PURPOSE: Export approved nocturnal samples as ORPO-formatted decision-point
- * training JSONL, strictly separated from legacy correction export.
+ * PURPOSE: Export approved nocturnal samples as ORPO-formatted principle-review
+ * training JSONL. The format teaches models to review agent behavior against principles.
  *
  * ARCHITECTURE:
  *   - Export output: .state/exports/orpo/{exportId}.jsonl
@@ -17,18 +17,14 @@
  *     sessionId: string,
  *     principleId: string,
  *     targetModelFamily: string,
- *     prompt: string,        // badDecision (the wrong choice)
- *     chosen: string,        // betterDecision (the right choice)
- *     rejected: string,       // badDecision (for ORPO)
+ *     messages: [           // Full conversation trajectory
+ *       {role: "system", content: "You are a principle reviewer..."},
+ *       {role: "user", content: "## Principle P_001\n## Session Context\n## Agent Behavior\nReview..."}
+ *     ],
+ *     chosen: string,       // Correct principle review (from betterDecision + rationale)
+ *     rejected: string,     // Incorrect principle review (from badDecision)
  *     rationale: string,
- *     datasetMetadata: {
- *       sampleFingerprint: string,
- *       artifactPath: string,
- *       createdAt: string,
- *       exportedAt: string,
- *       exportId: string,
- *       datasetFingerprint: string
- *     }
+ *     datasetMetadata: {...}
  *   }
  *
  * EXPORT GATING (fail-closed):
@@ -59,7 +55,16 @@ import { NocturnalPathResolver } from './nocturnal-paths.js';
 // ---------------------------------------------------------------------------
 
 /**
- * A single ORPO training sample in JSONL format.
+ * A single message in the conversation trajectory.
+ */
+export interface ChatMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
+
+/**
+ * A single ORPO training sample in principle-review JSONL format.
+ * Teaches models to review agent behavior against principles.
  */
 export interface ORPOSample {
   sampleFingerprint: string;
@@ -67,13 +72,15 @@ export interface ORPOSample {
   sessionId: string;
   principleId: string;
   targetModelFamily: string;
-  /** The suboptimal decision (what the agent did wrong) */
-  prompt: string;
-  /** The correct decision (what should have been done) */
+  /** Full conversation trajectory: system → user prompt → (chosen or rejected) */
+  messages: ChatMessage[];
+  /** The correct principle review (teaches model what "good" looks like) */
   chosen: string;
-  /** The suboptimal decision (same as prompt, for ORPO structure) */
+  /** The incorrect principle review (teaches model what "bad" looks like) */
   rejected: string;
   rationale: string;
+  /** @deprecated Use messages instead. Kept for backward compatibility. */
+  prompt?: string;
   datasetMetadata: {
     sampleFingerprint: string;
     artifactPath: string;
@@ -129,14 +136,106 @@ function computeDatasetFingerprint(sampleFingerprints: string[]): string {
 }
 
 // ---------------------------------------------------------------------------
+// Helper Functions: Build Review Components
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the user message for a principle review task.
+ * Contains: principle definition + session context + agent behavior summary.
+ * Omits session IDs to prevent overfitting.
+ */
+function buildReviewUserMessage(
+  artifact: ReturnType<typeof readDatasetArtifact>
+): string {
+  const sections: string[] = [];
+
+  // Section 1: Principle
+  sections.push(`## Principle ${artifact.principleId}`);
+  sections.push(``);
+
+  // Section 2: Session context (aggregate stats only, no raw text)
+  sections.push(`## Session Context`);
+  sections.push(`- Tool calls: multiple operations on workspace files`);
+  sections.push(`- Failures: at least one tool operation failed`);
+  sections.push(`- Pain signals: at least one pain signal detected (score ≥ 50)`);
+  sections.push(``);
+
+  // Section 3: Agent behavior summary (from badDecision — what the agent actually did)
+  sections.push(`## Agent Behavior`);
+  // Strip session IDs from the badDecision text to prevent overfitting
+  const sanitizedBadDecision = artifact.badDecision
+    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '[session-id]')
+    .replace(/session [a-f0-9-]+/gi, 'session [id]');
+  sections.push(`The agent: ${sanitizedBadDecision}`);
+  sections.push(``);
+
+  // Section 4: Review task
+  sections.push(`## Task`);
+  sections.push(`Review whether the agent followed principle ${artifact.principleId} in this session.`);
+  sections.push(`Identify specific violations and propose concrete, actionable improvements.`);
+
+  return sections.join('\n');
+}
+
+/**
+ * Build the "chosen" response — the correct principle review.
+ * Derived from betterDecision + rationale + boundedAction.
+ */
+function buildReviewChosen(
+  artifact: ReturnType<typeof readDatasetArtifact>
+): string {
+  const parts: string[] = [];
+
+  // Verdict
+  parts.push(`The agent did NOT follow principle ${artifact.principleId} correctly.`);
+  parts.push('');
+
+  // Specific violation (from rationale, stripped of session IDs)
+  const sanitizedRationale = artifact.rationale
+    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '[session-id]')
+    .replace(/session [a-f0-9-]+/gi, 'session [id]');
+  parts.push(`**Violation**: ${sanitizedRationale}`);
+  parts.push('');
+
+  // Correct action (from betterDecision, stripped of session IDs)
+  const sanitizedBetter = artifact.betterDecision
+    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '[session-id]')
+    .replace(/session [a-f0-9-]+/gi, 'session [id]');
+  parts.push(`**Correct action**: ${sanitizedBetter}`);
+
+  return parts.join('\n');
+}
+
+/**
+ * Build the "rejected" response — a plausible but incorrect principle review.
+ * Derived from badDecision, framed as a review that ignores the violation.
+ */
+function buildReviewRejected(
+  artifact: ReturnType<typeof readDatasetArtifact>
+): string {
+  const parts: string[] = [];
+
+  // Verdict (reversed from reality)
+  parts.push(`The agent's behavior was acceptable under principle ${artifact.principleId}.`);
+  parts.push('');
+
+  // Plausible but wrong justification (from badDecision, reframed)
+  const sanitizedBad = artifact.badDecision
+    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '[session-id]')
+    .replace(/session [a-f0-9-]+/gi, 'session [id]');
+  parts.push(`**Justification**: ${sanitizedBad} This is a reasonable response given the circumstances.`);
+
+  return parts.join('\n');
+}
+
+// ---------------------------------------------------------------------------
 // Individual Sample Serialization
 // ---------------------------------------------------------------------------
 
 /**
- * Serialize a single dataset record + artifact to ORPO JSONL line.
+ * Serialize a single dataset record + artifact to ORPO principle-review JSONL line.
  * Caller guarantees record.targetModelFamily is non-null.
  */
- 
 function serializeORPOSample(
   record: NocturnalDatasetRecord,
   artifact: ReturnType<typeof readDatasetArtifact>,
@@ -145,18 +244,30 @@ function serializeORPOSample(
 ): ORPOSample {
   const now = new Date().toISOString();
 
+  // Build conversation trajectory
+  const systemMessage: ChatMessage = {
+    role: 'system',
+    content: `You are a principle reviewer. Your task is to review whether an agent's behavior followed a given principle. Provide specific violation identification and actionable improvement suggestions.`,
+  };
+
+  const userMessage: ChatMessage = {
+    role: 'user',
+    content: buildReviewUserMessage(artifact),
+  };
+
+  const messages: ChatMessage[] = [systemMessage, userMessage];
+
   return {
     sampleFingerprint: record.sampleFingerprint,
     artifactId: record.artifactId,
     sessionId: record.sessionId,
     principleId: record.principleId,
-    targetModelFamily: record.targetModelFamily as string, // validated non-null by caller
-    // For ORPO: prompt = badDecision, chosen = betterDecision, rejected = badDecision
-    // This teaches the model to prefer betterDecision over badDecision
-    prompt: artifact.badDecision,
-    chosen: artifact.betterDecision,
-    rejected: artifact.badDecision,
+    targetModelFamily: record.targetModelFamily as string,
+    messages,
+    chosen: buildReviewChosen(artifact),
+    rejected: buildReviewRejected(artifact),
     rationale: artifact.rationale,
+    prompt: artifact.badDecision, // @deprecated: kept for backward compatibility
     datasetMetadata: {
       sampleFingerprint: record.sampleFingerprint,
       artifactPath: record.artifactPath,
