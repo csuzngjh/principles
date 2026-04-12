@@ -183,6 +183,8 @@ export class TaskContextBuilder {
         ]
       : [];
 
+    // #246: Stats are always numeric — use 0 as default when trajectory data
+    // is unavailable. The snapshot contract validates all stats as finite numbers.
     return {
       sessionId: painContext.mostRecent?.sessionId || sleepTask.id,
       startedAt: sleepTask.timestamp,
@@ -193,11 +195,11 @@ export class TaskContextBuilder {
       painEvents: fallbackPainEvents,
       gateBlocks: [],
       stats: {
-        totalAssistantTurns: null,
-        totalToolCalls: null,
-        failureCount: null,
+        totalAssistantTurns: 0,
+        totalToolCalls: 0,
+        failureCount: 0,
         totalPainEvents: painContext.recentPainCount,
-        totalGateBlocks: null,
+        totalGateBlocks: 0,
       },
       _dataSource: 'pain_context_fallback',
     };

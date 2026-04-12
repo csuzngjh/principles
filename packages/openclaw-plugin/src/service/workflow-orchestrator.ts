@@ -146,13 +146,10 @@ export class WorkflowOrchestrator {
                         const snapshot = meta.snapshot as Record<string, unknown> | undefined;
                         if (snapshot) {
                             // #219: Check for fallback data source (partial stats from pain context)
+                            // #246: Stats are now always numeric (0 default), detect fallback via _dataSource marker
                             const dataSource = snapshot._dataSource as string | undefined;
                             if (dataSource === 'pain_context_fallback') {
                                 details.push(`fallback_snapshot: nocturnal workflow ${wf.workflow_id} uses pain-context fallback (stats may be incomplete)`);
-                            }
-                            const stats = snapshot.stats as Record<string, number | null> | undefined;
-                            if (stats && stats.totalAssistantTurns === null && stats.totalToolCalls === null && stats.totalPainEvents === 0 && stats.totalGateBlocks === null) {
-                                details.push(`fallback_snapshot_stats: nocturnal workflow ${wf.workflow_id} has null stats (data unavailable)`);
                             }
                         }
                     } catch { /* ignore malformed metadata */ }

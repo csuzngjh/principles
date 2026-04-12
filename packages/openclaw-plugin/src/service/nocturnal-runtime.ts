@@ -48,6 +48,13 @@ function isSystemSession(state: SessionState): boolean {
         return true;
     }
 
+    // CRITICAL FIX: Legacy sessions from persistence may have missing trigger/sessionKey
+    // If both are missing, this is likely a legacy/orphan session from old persistence data
+    // Treat as system session to avoid blocking idle detection with unknown sessions
+    if (!trigger && !sessionKey) {
+        return true;  // Legacy/orphan session - don't block idle detection
+    }
+
     // Secondary: sessionKey pattern matching
     if (sessionKey) {
         const raw = sessionKey.toLowerCase();

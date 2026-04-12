@@ -818,7 +818,7 @@ export class EvolutionTaskDispatcher {
                         if (!fullSnapshot) {
                             const taskTimeMs = new Date(sleepTask.enqueued_at || sleepTask.timestamp).getTime();
                             const recentSessions = extractor.listRecentNocturnalCandidateSessions({
-                                limit: 20,
+                                limit: 300,  // #244: increased from 20 to cover real violations that may be older
                                 minToolCalls: 1,
                                 dateTo: sleepTask.enqueued_at || sleepTask.timestamp,
                             }).filter((session) => this._isSessionAtOrBeforeTriggerTime(session, taskTimeMs));
@@ -1056,11 +1056,11 @@ export class EvolutionTaskDispatcher {
             painEvents: fallbackPainEvents,
             gateBlocks: [],
             stats: {
-                totalAssistantTurns: null,
-                totalToolCalls: null,
-                failureCount: null,
+                totalAssistantTurns: 0,
+                totalToolCalls: 0,
+                failureCount: 0,
                 totalPainEvents: painContext.recentPainCount,
-                totalGateBlocks: null,
+                totalGateBlocks: 0,
             },
             _dataSource: 'pain_context_fallback',
         };

@@ -435,7 +435,7 @@ describe('NocturnalExport JSONL parseability', () => {
     }
   });
 
-  it('prompt equals rejected (ORPO teaches to avoid badDecision)', () => {
+  it('prompt is deprecated backward-compat field, rejected is principle-review format', () => {
     setupExportReady(tmpDir, 'art-orpo-check', 'gpt-4');
 
     const result = exportORPOSamples(tmpDir, 'gpt-4');
@@ -443,8 +443,14 @@ describe('NocturnalExport JSONL parseability', () => {
     const lines = content.trim().split('\n').filter(Boolean);
     const sample = JSON.parse(lines[0]);
 
-    expect(sample.prompt).toBe(sample.rejected);
+    // #243: New principle-review format — rejected is now a formatted review, not raw badDecision
+    expect(sample.prompt).toBeDefined(); // @deprecated backward-compat
+    expect(sample.rejected).toContain('acceptable under principle');
+    expect(sample.chosen).toContain('did NOT follow principle');
     expect(sample.chosen).not.toBe(sample.rejected);
+    // messages field contains the full conversation trajectory
+    expect(sample.messages).toBeDefined();
+    expect(sample.messages.length).toBeGreaterThanOrEqual(2); // system + user
   });
 
   it('export is reproducible with same dataset', () => {
