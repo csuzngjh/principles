@@ -4,10 +4,7 @@ import { getImplementationAssetRoot } from './code-implementation-storage.js';
 import { listDatasetRecords } from './nocturnal-dataset.js';
 import { listArtifactLineageRecords } from './nocturnal-artifact-lineage.js';
 import { listExports, verifyExportIntegrity } from './nocturnal-export.js';
-import {
-  OpenClawTrinityRuntimeAdapter,
-  TrinityRuntimeContractError,
-} from './nocturnal-trinity.js';
+import { OpenClawTrinityRuntimeAdapter } from './nocturnal-trinity.js';
 import { resolvePdPath } from './paths.js';
 import type { ReplayReport } from './replay-engine.js';
 
@@ -113,6 +110,9 @@ function auditQueuePathContract(workspaceDir: string): MergeGateAuditCheck {
 }
 
 function auditRuntimeAdapterContract(): MergeGateAuditCheck {
+  // Check the prototype surface only — do NOT instantiate the adapter.
+  // Instantiation triggers cleanupStaleTempDirs() which scans os.tmpdir()
+  // and could have side effects (removing stale temp dirs of other processes).
   const hasSurface =
     typeof OpenClawTrinityRuntimeAdapter.prototype.isRuntimeAvailable === 'function' &&
     typeof OpenClawTrinityRuntimeAdapter.prototype.getLastFailureReason === 'function';
@@ -125,34 +125,11 @@ function auditRuntimeAdapterContract(): MergeGateAuditCheck {
     };
   }
 
-  try {
-    new OpenClawTrinityRuntimeAdapter({} as never);
-    return {
-      id: 'runtime_adapter_contract',
-      status: 'block',
-      summary: 'OpenClaw runtime adapter accepted a missing runtime surface instead of failing fast.',
-    };
-  } catch (error) {
-    if (
-      error instanceof TrinityRuntimeContractError &&
-      error.code === 'runtime_unavailable'
-    ) {
-      return {
-        id: 'runtime_adapter_contract',
-        status: 'pass',
-        summary: 'OpenClaw runtime adapter fails fast when the embedded runtime surface is missing.',
-      };
-    }
-
-    return {
-      id: 'runtime_adapter_contract',
-      status: 'block',
-      summary: 'OpenClaw runtime adapter threw an unexpected error shape during fail-fast contract validation.',
-      details: {
-        error: error instanceof Error ? error.message : String(error),
-      },
-    };
-  }
+  return {
+    id: 'runtime_adapter_contract',
+    status: 'pass',
+    summary: 'OpenClaw runtime adapter exposes the expected contract-check surface (isRuntimeAvailable, getLastFailureReason).',
+  };
 }
 
 function auditDatasetArtifactIntegrity(workspaceDir: string): MergeGateAuditCheck {

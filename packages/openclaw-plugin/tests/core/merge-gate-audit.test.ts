@@ -174,4 +174,111 @@ describe('merge-gate-audit', () => {
     expect(report.counts.defer).toBe(0);
     expect(formatMergeGateAuditReport(report)).toContain('Overall Status: PASS');
   });
+
+  it('blocks when dataset artifacts are missing', () => {
+    const artifactPath = path.join(
+      workspaceDir,
+      '.state',
+      'nocturnal',
+      'samples',
+      'artifact-missing.json',
+    );
+    fs.mkdirSync(path.dirname(artifactPath), { recursive: true });
+    const artifact = makeArtifact({ artifactId: 'artifact-missing' });
+    fs.writeFileSync(artifactPath, JSON.stringify(artifact, null, 2), 'utf-8');
+
+    const record = registerSample(workspaceDir, artifact, artifactPath, 'gpt-4').record;
+    updateReviewStatus(workspaceDir, record.sampleFingerprint, 'approved_for_training', 'approved');
+
+    // Append lineage pointing to a real file (so lineage passes)
+    appendArtifactLineageRecord(workspaceDir, {
+      artifactKind: 'behavioral-sample',
+      artifactId: record.artifactId,
+      principleId: record.principleId,
+      ruleId: null,
+      sessionId: record.sessionId,
+      sourceSnapshotRef: record.sourceSnapshotRef,
+      sourcePainIds: [],
+      sourceGateBlockIds: [],
+      storagePath: artifactPath,
+      implementationId: null,
+      createdAt: record.createdAt,
+    });
+
+    // Delete the artifact to simulate a missing file
+    fs.unlinkSync(artifactPath);
+
+    const report = runMergeGateAudit(workspaceDir, stateDir);
+    const datasetCheck = report.checks.find((c) => c.id === 'dataset_artifact_integrity');
+
+    expect(report.overallStatus).toBe('block');
+    expect(datasetCheck?.status).toBe('block');
+  });
+
+  it('blocks when artifact lineage storage paths are missing', () => {
+    const badPath = path.join(workspaceDir, '.state', 'nocturnal', 'samples', 'nonexistent.json');
+    appendArtifactLineageRecord(workspaceDir, {
+      artifactKind: 'behavioral-sample',
+      artifactId: 'lineage-missing',
+      principleId: 'T-08',
+      ruleId: null,
+      sessionId: 'session-1',
+      sourceSnapshotRef: 'snap-1',
+      sourcePainIds: [],
+      sourceGateBlockIds: [],
+      storagePath: badPath,
+      implementationId: null,
+      createdAt: new Date().toISOString(),
+    });
+
+    const report = runMergeGateAudit(workspaceDir, stateDir);
+    const lineageCheck = report.checks.find((c) => c.id === 'artifact_lineage_integrity');
+
+    expect(report.overallStatus).toBe('block');
+    expect(lineageCheck?.status).toBe('block');
+  });
+
+  it('blocks when replay reports are malformed', () => {
+    createImplementationAssetDir(stateDir, 'IMPL-BAD', '1.0.0');
+    const replayDir = path.join(getImplementationAssetRoot(stateDir, 'IMPL-BAD'), 'replays');
+    fs.mkdirSync(replayDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(replayDir, 'malformed.json'),
+      '{bad json',
+      'utf-8',
+    );
+
+    const report = runMergeGateAudit(workspaceDir, stateDir);
+    const replayCheck = report.checks.find((c) => c.id === 'replay_evidence_integrity');
+    const details = replayCheck?.details as Record<string, string[]> | undefined;
+
+    expect(report.overallStatus).toBe('block');
+    expect(replayCheck?.status).toBe('block');
+    expect(details?.malformedReports).toHaveLength(1);
+  });
+
+  it('blocks when replay reports have invalid evidenceSummary shape', () => {
+    createImplementationAssetDir(stateDir, 'IMPL-NOEVID', '1.0.0');
+    const replayDir = path.join(getImplementationAssetRoot(stateDir, 'IMPL-NOEVID'), 'replays');
+    fs.mkdirSync(replayDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(replayDir, 'bad-evidence.json'),
+      JSON.stringify({
+        overallDecision: 'pass',
+        blockers: [],
+        generatedAt: '2026-04-12T09:00:00.000Z',
+        implementationId: 'IMPL-NOEVID',
+        evidenceSummary: { evidenceStatus: 'observed' }, // missing totalSamples
+      }),
+      'utf-8',
+    );
+
+    const report = runMergeGateAudit(workspaceDir, stateDir);
+    const replayCheck = report.checks.find((c) => c.id === 'replay_evidence_integrity');
+    const details = replayCheck?.details as Record<string, string[]> | undefined;
+
+    expect(report.overallStatus).toBe('block');
+    expect(replayCheck?.status).toBe('block');
+    expect(details?.missingEvidenceSummary).toHaveLength(1);
+  });
 });

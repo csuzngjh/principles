@@ -1090,17 +1090,19 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
     text: string,
     snapshot: NocturnalSessionSnapshot,
     principleId: string,
-     
+
     _telemetry: TrinityTelemetry
   ): TrinityDraftArtifact | null {
     const json = this.extractJson(text);
     if (!json) {
+      this.recordFailure('runtime_run_failed', new Error('Scribe output contains no parseable JSON'));
       return null;
     }
 
     try {
       const parsed = JSON.parse(json);
       if (typeof parsed.selectedCandidateIndex !== 'number') {
+        this.recordFailure('runtime_run_failed', new Error(`Scribe output missing "selectedCandidateIndex" field: ${text.slice(0, 200)}`));
         return null;
       }
 
@@ -1114,7 +1116,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
         sourceSnapshotRef: `snapshot-${snapshot.sessionId}-${Date.now()}`,
         telemetry: {
           chainMode: 'trinity',
-          usedStubs: false,
+          usedStubs: _telemetry.usedStubs,
           dreamerPassed: true,
           philosopherPassed: true,
           scribePassed: true,
@@ -1124,6 +1126,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
         },
       };
     } catch {
+      this.recordFailure('runtime_run_failed', new Error(`Scribe output JSON parse error: ${json.slice(0, 200)}`));
       return null;
     }
   }
