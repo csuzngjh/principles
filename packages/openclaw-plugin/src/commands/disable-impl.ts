@@ -112,7 +112,7 @@ function _handleDisableImpl(
   try {
     refreshPrincipleLifecycle(workspaceDir, stateDir);
   } catch (err) {
-    console.warn(`[disable-impl] Lifecycle refresh failed: ${String(err)}`);
+    console.warn('[disable-impl] Lifecycle refresh failed:', err instanceof Error ? err.stack : err);
   }
 
   return {

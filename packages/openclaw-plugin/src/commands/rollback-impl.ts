@@ -188,7 +188,7 @@ function _handleRollbackImpl(
   try {
     refreshPrincipleLifecycle(workspaceDir, stateDir);
   } catch (err) {
-    console.warn(`[rollback-impl] Lifecycle refresh failed: ${String(err)}`);
+    console.warn('[rollback-impl] Lifecycle refresh failed:', err instanceof Error ? err.stack : err);
   }
 
   let output = isZh

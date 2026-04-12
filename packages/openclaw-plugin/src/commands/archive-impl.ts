@@ -129,7 +129,7 @@ function _handleArchiveImpl(
   try {
     refreshPrincipleLifecycle(workspaceDir, stateDir);
   } catch (err) {
-    console.warn(`[archive-impl] Lifecycle refresh failed: ${String(err)}`);
+    console.warn('[archive-impl] Lifecycle refresh failed:', err instanceof Error ? err.stack : err);
   }
 
   return {

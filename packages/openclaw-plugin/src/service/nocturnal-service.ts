@@ -112,7 +112,7 @@ function incrementGeneratedSampleCount(stateDir: string, principleId: string): v
     state.generatedSampleCount += 1;
     setPrincipleState(stateDir, state);
   } catch (err) {
-    console.warn(`[nocturnal-service] Failed to sync generatedSampleCount for ${principleId}: ${String(err)}`);
+    console.warn(`[nocturnal-service] Failed to sync generatedSampleCount for ${principleId}:`, err instanceof Error ? err.stack : err);
   }
 }
 
@@ -485,7 +485,7 @@ function persistCodeCandidate(
     try {
       refreshPrincipleLifecycle(workspaceDir, stateDir);
     } catch (err) {
-      console.warn(`[nocturnal-service] Lifecycle refresh failed after code candidate persistence: ${String(err)}`);
+      console.warn('[nocturnal-service] Lifecycle refresh failed after code candidate persistence:', err instanceof Error ? err.stack : err);
     }
     return {
       status: 'persisted_candidate',

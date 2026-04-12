@@ -175,7 +175,7 @@ function _handlePromoteImpl(options: PromoteImplOptions): PluginCommandResult {
     try {
       refreshPrincipleLifecycle(workspaceDir, stateDir);
     } catch (err) {
-      console.warn(`[promote-impl] Lifecycle refresh failed (re-enable): ${String(err)}`);
+      console.warn('[promote-impl] Lifecycle refresh failed (re-enable):', err instanceof Error ? err.stack : err);
     }
 
     output += isZh
@@ -232,7 +232,7 @@ function _handlePromoteImpl(options: PromoteImplOptions): PluginCommandResult {
   try {
     refreshPrincipleLifecycle(workspaceDir, stateDir);
   } catch (err) {
-    console.warn(`[promote-impl] Lifecycle refresh failed (promotion): ${String(err)}`);
+    console.warn('[promote-impl] Lifecycle refresh failed (promotion):', err instanceof Error ? err.stack : err);
   }
 
   output += isZh

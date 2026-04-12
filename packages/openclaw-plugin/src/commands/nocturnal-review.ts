@@ -203,7 +203,7 @@ export function handleNocturnalReviewCommand(ctx: PluginCommandContext): PluginC
         state.approvedSampleCount += 1;
         setPrincipleState(stateDir, state);
       } catch (err) {
-        console.warn(`[nocturnal-review] Failed to sync approvedSampleCount for ${updated.principleId}: ${String(err)}`);
+        console.warn(`[nocturnal-review] Failed to sync approvedSampleCount for ${updated.principleId}:`, err instanceof Error ? err.stack : err);
       }
 
       return {
