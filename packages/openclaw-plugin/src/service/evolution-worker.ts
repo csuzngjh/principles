@@ -135,9 +135,13 @@ async function runWorkflowWatchdog(
             const stats = snapshot.stats as Record<string, number> | undefined;
             // #246: Stats are now always number (never null). Detect "empty" fallback:
             // fallback + all counts zero means no real data was available.
+            // NOTE: totalAssistantTurns may be 0 even for valid sessions because
+            // listRecentNocturnalCandidateSessions (used in fallback path) does not
+            // populate assistantTurnCount (only getNocturnalSessionSnapshot does).
+            // We use totalToolCalls=0 as the primary indicator instead.
             if (stats && dataSource === 'pain_context_fallback' &&
-                stats.totalAssistantTurns === 0 && stats.totalToolCalls === 0 &&
-                stats.totalGateBlocks === 0 && stats.failureCount === 0) {
+                stats.totalToolCalls === 0 && stats.totalGateBlocks === 0 &&
+                stats.failureCount === 0) {
               details.push(`fallback_snapshot_stats: nocturnal workflow ${wf.workflow_id} has empty fallback stats (no trajectory data found)`);
             }
           }
@@ -363,7 +367,9 @@ function buildFallbackNocturnalSnapshot(
     let realStats: { totalAssistantTurns: number; totalToolCalls: number; failureCount: number; totalGateBlocks: number } | null = null;
     if (extractor && painContext.mostRecent?.sessionId) {
         try {
-            const summaries = extractor.listRecentNocturnalCandidateSessions({ limit: 300 });
+            // #246-fix: Use minToolCalls=0 to avoid filtering out sessions with 0 tool calls.
+            // The pain-triggering session may have no tool calls but still be worth tracking.
+            const summaries = extractor.listRecentNocturnalCandidateSessions({ limit: 300, minToolCalls: 0 });
             const match = summaries.find(s => s.sessionId === painContext.mostRecent!.sessionId);
             if (match) {
                 realStats = {
