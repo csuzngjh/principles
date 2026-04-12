@@ -7,10 +7,10 @@ last_updated: "2026-04-12T08:20:00.000Z"
 last_activity: 2026-04-12
 progress:
   total_phases: 4
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 7
-  completed_plans: 4
-  percent: 57
+  completed_plans: 5
+  percent: 71
 ---
 
 # State: v1.15 Runtime & Truth Contract Hardening
@@ -22,7 +22,7 @@ See `.planning/PROJECT.md` (updated 2026-04-12)
 **Milestone:** v1.15
 **Name:** Runtime & Truth Contract Hardening
 **Core Value:** AI agents improve their own behavior through a structured evolution loop. pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
-**Current Focus:** Phase 32 - evidence-bound-export-and-dataset-hardening
+**Current Focus:** Phase 33 - production-invariants-and-merge-gate-verification
 
 ## Previous Milestone (v1.14 baseline)
 
@@ -33,11 +33,11 @@ See `.planning/PROJECT.md` (updated 2026-04-12)
 ## Current Position
 
 Phase: 32
-Plan: 32-01 complete, 32-02 pending
-Status: Executing Phase 32
+Plan: Phase 32 complete
+Status: Ready for Phase 33
 Last activity: 2026-04-12
 
-Progress: [###--] 57%
+Progress: [####-] 71%
 
 ## v1.15 Architecture Focus
 
@@ -92,5 +92,5 @@ Recent decisions affecting current work:
 
 **Previous milestone:** v1.14 baseline complete on branch `fix/bugs-231-228` / PR #245
 **Current milestone:** v1.15 - Runtime & Truth Contract Hardening
-**Just completed:** `32-01 evidence-bound ORPO export hardening`
-**Ready for:** `32-02 promotion/report evidence-trace hardening`
+**Just completed:** `Phase 32 evidence-bound export and decision-surface hardening`
+**Ready for:** `/gsd-plan-phase 33`

@@ -63,6 +63,15 @@ export interface ReplayReport {
     principleAnchor: ClassificationSummary;
   };
   blockers: string[];
+  evidenceSummary: {
+    evidenceStatus: 'observed' | 'empty';
+    totalSamples: number;
+    classifiedCounts: {
+      painNegative: number;
+      successPositive: number;
+      principleAnchor: number;
+    };
+  };
   generatedAt: string;
   implementationId: string;
   sampleFingerprints: string[];
@@ -432,6 +441,11 @@ export class ReplayEngine {
     const successSummary = toSummary(successPositive);
     const anchorSummary = toSummary(principleAnchor);
     const blockers: string[] = [];
+    const totalSamples = results.length;
+
+    if (totalSamples === 0) {
+      blockers.push('NO REPLAY EVIDENCE: No classified replay samples were available. Report cannot justify promotion-quality conclusions.');
+    }
 
     for (const leak of painSummary.details.filter((result) => !result.passed)) {
       blockers.push(
@@ -459,6 +473,15 @@ export class ReplayEngine {
         principleAnchor: anchorSummary,
       },
       blockers,
+      evidenceSummary: {
+        evidenceStatus: totalSamples > 0 ? 'observed' : 'empty',
+        totalSamples,
+        classifiedCounts: {
+          painNegative: painSummary.total,
+          successPositive: successSummary.total,
+          principleAnchor: anchorSummary.total,
+        },
+      },
       generatedAt: new Date().toISOString(),
       implementationId,
       sampleFingerprints: results.map((result) => result.sampleFingerprint),
@@ -471,6 +494,7 @@ export class ReplayEngine {
     success: ClassificationSummary,
     anchor: ClassificationSummary
   ): 'pass' | 'fail' | 'needs-review' {
+    if (pain.total + success.total + anchor.total === 0) return 'needs-review';
     if (pain.failed > 0) return 'fail';
     if (anchor.failed > 0) return 'fail';
     if (success.failed > 0) return 'needs-review';
@@ -526,6 +550,7 @@ export function formatReplayReport(report: ReplayReport): string {
   output += `Implementation: ${report.implementationId}\n`;
   output += `Generated At:   ${report.generatedAt}\n`;
   output += `Overall Decision: [${decisionEmoji}]\n\n`;
+  output += `Evidence Status: ${report.evidenceSummary.evidenceStatus} (samples=${report.evidenceSummary.totalSamples})\n\n`;
 
   const formatSection = (
     label: string,

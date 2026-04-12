@@ -11,3 +11,8 @@
 
 - Promotion-facing narratives still need the same evidence-bound treatment
 - Dataset read/report helpers should expose evidence state directly instead of requiring export-time reconstruction
+- `32-02` replay/promotion evidence summary hardening completed
+- `npm test -- --run tests/core/replay-engine.test.ts tests/core/promotion-gate.test.ts tests/core/nocturnal-export.test.ts`
+  - Result: pass (`49 passed`)
+- `npm run build`
+  - Result: pass
