@@ -16,6 +16,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { PluginLogger } from '../openclaw-sdk.js';
 import { readPainFlagContract } from '../core/pain.js';
+import { resolvePdPath } from '../core/paths.js';
 import { EvolutionQueueStore } from './evolution-queue-store.js';
 import type { RecentPainContext } from './evolution-queue-store.js';
 
@@ -72,7 +73,7 @@ export class PainFlagDetector {
         };
 
         try {
-            const painFlagPath = path.join(this.workspaceDir, 'PAIN_FLAG');
+            const painFlagPath = resolvePdPath(this.workspaceDir, 'PAIN_FLAG');
 
             if (!fs.existsSync(painFlagPath)) {
                 return result;
