@@ -172,7 +172,11 @@ function _handlePromoteImpl(options: PromoteImplOptions): PluginCommandResult {
       disabledBy: undefined,
       disabledReason: undefined,
     });
-    refreshPrincipleLifecycle(workspaceDir, stateDir);
+    try {
+      refreshPrincipleLifecycle(workspaceDir, stateDir);
+    } catch (err) {
+      console.warn(`[promote-impl] Lifecycle refresh failed (re-enable): ${String(err)}`);
+    }
 
     output += isZh
       ? `\n✅ 实现已重新启用: ${implId}\n   状态: disabled -> active`
@@ -225,7 +229,11 @@ function _handlePromoteImpl(options: PromoteImplOptions): PluginCommandResult {
   withLock(eventPath, () => {
     fs.writeFileSync(eventPath, JSON.stringify(promotionEvent, null, 2), 'utf-8');
   });
-  refreshPrincipleLifecycle(workspaceDir, stateDir);
+  try {
+    refreshPrincipleLifecycle(workspaceDir, stateDir);
+  } catch (err) {
+    console.warn(`[promote-impl] Lifecycle refresh failed (promotion): ${String(err)}`);
+  }
 
   output += isZh
     ? `\n\n✅ 实现已晋升: ${implId}\n   状态: candidate -> active`

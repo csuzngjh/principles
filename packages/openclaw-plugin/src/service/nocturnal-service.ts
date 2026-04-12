@@ -98,8 +98,23 @@ import {
 } from './nocturnal-runtime.js';
 import { NocturnalPathResolver } from '../core/nocturnal-paths.js';
 import { registerSample } from '../core/nocturnal-dataset.js';
+import { getPrincipleState, setPrincipleState } from '../core/principle-training-state.js';
 import type { Implementation } from '../types/principle-tree-schema.js';
 import { validateNocturnalSnapshotIngress } from '../core/nocturnal-snapshot-contract.js';
+
+// ---------------------------------------------------------------------------
+// #251: Sync trainingStore sample counts after registration
+// ---------------------------------------------------------------------------
+
+function incrementGeneratedSampleCount(stateDir: string, principleId: string): void {
+  try {
+    const state = getPrincipleState(stateDir, principleId);
+    state.generatedSampleCount += 1;
+    setPrincipleState(stateDir, state);
+  } catch (err) {
+    console.warn(`[nocturnal-service] Failed to sync generatedSampleCount for ${principleId}: ${String(err)}`);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -467,7 +482,11 @@ function persistCodeCandidate(
       implementationId,
       createdAt: now,
     });
-    refreshPrincipleLifecycle(workspaceDir, stateDir);
+    try {
+      refreshPrincipleLifecycle(workspaceDir, stateDir);
+    } catch (err) {
+      console.warn(`[nocturnal-service] Lifecycle refresh failed after code candidate persistence: ${String(err)}`);
+    }
     return {
       status: 'persisted_candidate',
       ruleResolution: {
@@ -993,7 +1012,10 @@ export function executeNocturnalReflection(
   // Approved artifacts must enter the dataset registry so they can be reviewed
   // before export. Without this, new samples never appear in the review queue.
   try {
-    registerSample(workspaceDir, arbiterResult.artifact, persistedPath, null);
+    const regResult = registerSample(workspaceDir, arbiterResult.artifact, persistedPath, null);
+    if (regResult.isNew) {
+      incrementGeneratedSampleCount(stateDir, arbiterResult.artifact.principleId);
+    }
   } catch (err) {
     // Non-fatal: artifact is persisted, registry is secondary.
     // Log but don't fail the run.
@@ -1380,7 +1402,10 @@ async function executeNocturnalReflectionWithAdapter(
 
   // Step 8: Register in dataset lineage
   try {
-    registerSample(workspaceDir, arbiterResult.artifact, persistedPath, null);
+    const regResult = registerSample(workspaceDir, arbiterResult.artifact, persistedPath, null);
+    if (regResult.isNew) {
+      incrementGeneratedSampleCount(stateDir, arbiterResult.artifact.principleId);
+    }
   } catch (err) {
     console.warn(`[nocturnal-service] Failed to register sample in dataset registry: ${String(err)}`);
   }
