@@ -23,10 +23,16 @@
  * RUNTIME ADAPTER:
  *  - useStubs=true: uses synchronous stub implementations (no external calls)
  *  - useStubs=false: requires a TrinityRuntimeAdapter for real subagent execution
- *  - Adapter uses ONLY public plugin runtime APIs (api.runtime.subagent.*)
+ *  - Adapter uses api.runtime.agent.runEmbeddedPiAgent() which works in background contexts
+ *    (unlike api.runtime.subagent.* which requires gateway request scope)
+ *  - IMPORTANT: provider and model must be passed explicitly — runEmbeddedPiAgent does NOT
+ *    read config.agents.defaults.model and falls back to openai/gpt-5.4 if not specified
  */
 
 import { randomUUID } from 'crypto';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import type { NocturnalSessionSnapshot } from './nocturnal-trajectory-extractor.js';
 import { computeThinkingModelDelta } from './nocturnal-trajectory-extractor.js';
 import type { TrinityArtificerContext } from './nocturnal-artificer.js';
@@ -41,6 +47,13 @@ import {
   getEffectiveThresholds,
   type ThresholdValues,
 } from './adaptive-thresholds.js';
+
+// ---------------------------------------------------------------------------
+// Configurable Model Fallback (avoid hardcoded strings deep in adapters)
+// ---------------------------------------------------------------------------
+
+const FALLBACK_PROVIDER = process.env.OPENCLAW_DEFAULT_PROVIDER || 'minimax-portal';
+const FALLBACK_MODEL = process.env.OPENCLAW_DEFAULT_MODEL || 'MiniMax-M2.7';
 
 // ---------------------------------------------------------------------------
 // Embedded Role Prompts
@@ -105,6 +118,13 @@ You MUST respond with ONLY a valid JSON object. No markdown, no explanation, no 
 - Propose a specific, actionable betterDecision (contains an action verb)
 - Provide a principle-grounded rationale (explicitly references the principle)
 - Include a confidence score (0.0-1.0, higher = more confident)
+
+### betterDecision FORMAT — Must be executable:
+- MUST start with a concrete action verb: read, check, verify, edit, write, create, delete, search, grep, find, list, review, examine, inspect, test, run, execute, analyze, diagnose, debug
+- MUST reference a specific, concrete target (file, command, config, etc.)
+- MUST describe a bounded, executable action — not a vague principle
+- Examples: "Read the file before editing to verify current content", "Check user permissions before executing privileged commands"
+- Anti-examples: "Per T-01, pause all tasks..." (starts with "Per"), "Be more careful" (vague verb "be")
 
 ### Candidates should DIFFER from each other:
 - Different candidates should represent genuinely different approaches
@@ -177,13 +197,23 @@ You MUST respond with ONLY a valid JSON object. No markdown, no explanation, no 
 ## Evaluation Criteria
 
 ### Score Components (0-1 scale each):
-1. **Principle Alignment** (weight: 0.4) — Does the betterDecision properly reflect the target principle?
-2. **Specificity** (weight: 0.3) — Is badDecision specific? Is betterDecision actionable?
-3. **Actionability** (weight: 0.3) — Does betterDecision describe a specific next step?
+1. **Principle Alignment** (weight: 0.35) — Does the betterDecision properly reflect the target principle?
+2. **Specificity** (weight: 0.25) — Is badDecision specific? Is betterDecision actionable?
+3. **Actionability** (weight: 0.25) — Does betterDecision describe a specific next step?
+4. **Executability** (weight: 0.15) — Does betterDecision start with a bounded verb (read, check, verify, edit, write, etc.) and reference a concrete target?
+
+### Executability Check:
+A betterDecision is executable if it:
+- STARTS with a concrete action verb: read, check, verify, edit, write, create, delete, search, grep, find, list, review, examine, inspect, test, run, execute, analyze, diagnose, debug
+- References a specific, concrete target (file, command, config, etc.)
+- Describes a bounded, executable action — not a vague principle
+- Examples that PASS: "Read the file before editing", "Check user permissions before executing"
+- Examples that FAIL: "Per T-01, pause all tasks..." (starts with "Per"), "Be more careful" (vague)
 
 ### Ranking Rules:
 - Candidates are ranked by score (highest = rank 1)
-- Ties broken by: higher principle alignment, then lower candidateIndex
+- Ties broken by: higher executability, then higher principle alignment, then lower candidateIndex
+- If a candidate's betterDecision is NOT executable, penalize its score by 0.2
 
 ## Validation
 
@@ -294,11 +324,13 @@ export interface TrinityRuntimeAdapter {
    * Invoke the Philosopher stage.
    * @param dreamerOutput Dreamer's output
    * @param principleId Target principle ID
+   * @param snapshot Session snapshot (for violation evidence)
    * @returns Philosopher output JSON
    */
   invokePhilosopher(
     _dreamerOutput: DreamerOutput,
-    _principleId: string
+    _principleId: string,
+    _snapshot: NocturnalSessionSnapshot
   ): Promise<PhilosopherOutput>;
 
   /**
@@ -334,40 +366,40 @@ export interface TrinityRuntimeAdapter {
 
 /**
  * OpenClaw-backed Trinity runtime adapter.
- * Uses ONLY public plugin runtime APIs (api.runtime.subagent.*).
- * Does NOT depend on OpenClaw internals.
+ * Uses api.runtime.agent.runEmbeddedPiAgent() which works in background contexts
+ * (unlike api.runtime.subagent.* which requires gateway request scope).
  */
 export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
-   
+
   private readonly api: {
     runtime: {
-      subagent: {
-        run: (_opts: {
-          sessionKey: string;
-          message: string;
+      agent: {
+        runEmbeddedPiAgent: (_opts: {
+          sessionId: string;
+          sessionFile: string;
+          prompt: string;
           extraSystemPrompt?: string;
-          deliver?: boolean;
-        }) => Promise<{ runId: string }>;
-        waitForRun: (_opts: { runId: string; timeoutMs: number }) => Promise<{
-          status: string;
-          error?: string;
-        }>;
-        getSessionMessages: (_opts: {
-          sessionKey: string;
-          limit: number;
+          config?: unknown;
+          provider?: string;
+          model?: string;
+          timeoutMs: number;
+          runId: string;
+          disableTools?: boolean;
         }) => Promise<{
-          messages: unknown[];
+          payloads?: { isError?: boolean; text?: string }[];
         }>;
-        deleteSession: (_opts: {
-          sessionKey: string;
-          deleteTranscript?: boolean;
-        }) => Promise<void>;
+      };
+      config?: {
+        loadConfig?: () => unknown;
       };
     };
+    config?: unknown;
+    logger?: { info: (msg: string) => void; warn: (msg: string) => void; error: (msg: string) => void };
   };
    
 
   private readonly stageTimeoutMs: number;
+  private readonly tempDir: string;
 
   constructor(
     api: OpenClawTrinityRuntimeAdapter['api'],
@@ -375,6 +407,106 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
   ) {
     this.api = api;
     this.stageTimeoutMs = stageTimeoutMs;
+    // Cross-platform temp directory for session files
+    this.tempDir = path.join(os.tmpdir(), `pd-trinity-${process.pid}`);
+    // Clean up any stale temp files from previous crashed runs
+    this.cleanupStaleTempDirs();
+  }
+
+  /**
+   * Clean up temp directories from previous crashed runs.
+   * Matches pattern pd-trinity-* in the OS temp directory.
+   */
+  private cleanupStaleTempDirs(): void {
+    try {
+      const osTempDir = os.tmpdir();
+      if (!fs.existsSync(osTempDir)) return;
+      const entries = fs.readdirSync(osTempDir);
+      for (const entry of entries) {
+        if (entry.startsWith('pd-trinity-') && entry !== path.basename(this.tempDir)) {
+          const fullPath = path.join(osTempDir, entry);
+          fs.rmSync(fullPath, { recursive: true, force: true });
+        }
+      }
+    } catch {
+      // Non-fatal: stale temp files will be cleaned up eventually
+    }
+  }
+
+  /**
+   * Load the full OpenClaw config (including models.providers).
+   *
+   * Why: `this.api.config` is the plugin config, not the full OpenClaw config.
+   * It does NOT contain `models.providers`, which is needed to resolve provider
+   * model definitions. `api.runtime.config.loadConfig()` returns the full config.
+   *
+   * Fallback: If loadConfig() is unavailable, we return the plugin config.
+   * The caller (resolveModel) handles this with a minimax-portal fallback.
+   */
+  private loadFullConfig(): Record<string, unknown> | undefined {
+    // Try runtime.config.loadConfig() first (available in native plugin context)
+    const loadConfig = this.api.runtime?.config?.loadConfig;
+    if (loadConfig && typeof loadConfig === 'function') {
+      try {
+        return loadConfig() as Record<string, unknown> | undefined;
+      } catch (err) {
+        this.api.logger?.warn?.(`[Trinity] loadConfig() failed, falling back to plugin config: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    // Fallback: plugin config (limited — won't have models.providers)
+    // resolveModel() handles this with a minimax-portal/MiniMax-M2.7 fallback
+    return this.api.config as Record<string, unknown> | undefined;
+  }
+
+  /**
+   * Resolve the provider and model from the OpenClaw config.
+   * runEmbeddedPiAgent does NOT read config.agents.defaults.model —
+   * it requires explicit params.provider and params.model.
+   */
+  private resolveModel(): { provider: string; model: string } {
+    const config = this.loadFullConfig();
+    const agents = config?.agents as Record<string, unknown> | undefined;
+    const defaults = agents?.defaults as Record<string, unknown> | undefined;
+    const modelConfig = defaults?.model;
+
+    if (typeof modelConfig === 'string' && modelConfig.includes('/')) {
+      const parts = modelConfig.split('/');
+      return { provider: parts[0], model: parts.slice(1).join('/') };
+    }
+
+    if (modelConfig && typeof modelConfig === 'object') {
+      const mc = modelConfig as Record<string, unknown>;
+      const primary = mc.primary as string | undefined;
+      if (primary && primary.includes('/')) {
+        const parts = primary.split('/');
+        return { provider: parts[0], model: parts.slice(1).join('/') };
+      }
+    }
+
+    // Last resort fallback — read from env vars to avoid hardcoded strings
+    this.api.logger?.warn?.(`[Trinity] Could not resolve model from config, using fallback: ${FALLBACK_PROVIDER}/${FALLBACK_MODEL}`);
+    return { provider: FALLBACK_PROVIDER, model: FALLBACK_MODEL };
+  }
+
+  /**
+   * Create a valid JSONL session file for runEmbeddedPiAgent.
+   */
+  private createSessionFile(stage: string): string {
+    if (!fs.existsSync(this.tempDir)) {
+      fs.mkdirSync(this.tempDir, { recursive: true });
+    }
+    return path.join(this.tempDir, `${stage}-${randomUUID()}.jsonl`);
+  }
+
+  /**
+   * Extract text from runEmbeddedPiAgent result.
+   */
+  private extractPayloadText(result: { payloads?: { isError?: boolean; text?: string }[] }): string {
+    return (result.payloads ?? [])
+      .filter(p => !p.isError)
+      .map(p => p.text?.trim() ?? '')
+      .filter(Boolean)
+      .join('\n');
   }
 
   async invokeDreamer(
@@ -382,145 +514,162 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
     principleId: string,
     maxCandidates: number
   ): Promise<DreamerOutput> {
-    const sessionKey = `agent:main:subagent:ne-dreamer-${randomUUID()}`;
-    const systemPrompt = NOCTURNAL_DREAMER_PROMPT;
-
+    const runId = `dreamer-${randomUUID()}`;
+    const sessionFile = this.createSessionFile('dreamer');
     const prompt = this.buildDreamerPrompt(snapshot, principleId, maxCandidates);
+    const model = this.resolveModel();
+
+    this.api.logger?.info(`[Trinity:Dreamer] Using model: ${model.provider}/${model.model}`);
 
     try {
-      const { runId } = await this.api.runtime.subagent.run({
-        sessionKey,
-        message: prompt,
-        extraSystemPrompt: systemPrompt,
-        deliver: false,
-      });
-
-      const result = await this.api.runtime.subagent.waitForRun({
-        runId,
+      const result = await this.api.runtime.agent.runEmbeddedPiAgent({
+        sessionId: runId,
+        sessionFile,
+        prompt,
+        extraSystemPrompt: NOCTURNAL_DREAMER_PROMPT,
+        config: this.loadFullConfig(),
+        provider: model.provider,
+        model: model.model,
         timeoutMs: this.stageTimeoutMs,
+        runId,
+        disableTools: true,
       });
 
-      if (result.status !== 'ok') {
+      const outputText = this.extractPayloadText(result);
+      if (!outputText) {
         return {
           valid: false,
           candidates: [],
-          reason: `Dreamer subagent failed: ${result.error ?? result.status}`,
+          reason: 'Dreamer returned empty response',
           generatedAt: new Date().toISOString(),
         };
       }
 
-      const messages = await this.api.runtime.subagent.getSessionMessages({
-        sessionKey,
-        limit: 5,
-      });
+      // DEBUG: Log Dreamer's actual output
+      this.api.logger?.info(`[Trinity:Dreamer] Output preview: ${outputText.slice(0, 500)}`);
 
-      const outputText = this.extractAssistantText(messages.messages as { role: string; text?: string; content?: string }[]);
       return this.parseDreamerOutput(outputText);
+    } catch (err) {
+      return {
+        valid: false,
+        candidates: [],
+        reason: `Dreamer failed: ${err instanceof Error ? err.message : String(err)}`,
+        generatedAt: new Date().toISOString(),
+      };
     } finally {
-      await this.api.runtime.subagent.deleteSession({
-        sessionKey,
-        deleteTranscript: true,
-      }).catch(() => { /* intentionally empty - fire-and-forget session cleanup */ });
+      try { fs.unlinkSync(sessionFile); } catch { /* ignore */ }
     }
   }
 
   async invokePhilosopher(
     dreamerOutput: DreamerOutput,
-    principleId: string
+    principleId: string,
+    snapshot: NocturnalSessionSnapshot
   ): Promise<PhilosopherOutput> {
-    const sessionKey = `agent:main:subagent:ne-philosopher-${randomUUID()}`;
-    const systemPrompt = NOCTURNAL_PHILOSOPHER_PROMPT;
-
-    const prompt = this.buildPhilosopherPrompt(dreamerOutput, principleId);
+    const runId = `philosopher-${randomUUID()}`;
+    const sessionFile = this.createSessionFile('philosopher');
+    const prompt = this.buildPhilosopherPrompt(dreamerOutput, principleId, snapshot);
+    const model = this.resolveModel();
 
     try {
-      const { runId } = await this.api.runtime.subagent.run({
-        sessionKey,
-        message: prompt,
-        extraSystemPrompt: systemPrompt,
-        deliver: false,
-      });
-
-      const result = await this.api.runtime.subagent.waitForRun({
-        runId,
+      const result = await this.api.runtime.agent.runEmbeddedPiAgent({
+        sessionId: runId,
+        sessionFile,
+        prompt,
+        extraSystemPrompt: NOCTURNAL_PHILOSOPHER_PROMPT,
+        config: this.loadFullConfig(),
+        provider: model.provider,
+        model: model.model,
         timeoutMs: this.stageTimeoutMs,
+        runId,
+        disableTools: true,
       });
 
-      if (result.status !== 'ok') {
+      const outputText = this.extractPayloadText(result);
+      if (!outputText) {
         return {
           valid: false,
           judgments: [],
           overallAssessment: '',
-          reason: `Philosopher subagent failed: ${result.error ?? result.status}`,
+          reason: 'Philosopher returned empty response',
           generatedAt: new Date().toISOString(),
         };
       }
 
-      const messages = await this.api.runtime.subagent.getSessionMessages({
-        sessionKey,
-        limit: 5,
-      });
+      // DEBUG: Log Philosopher's actual output
+      this.api.logger?.info(`[Trinity:Philosopher] Output preview: ${outputText.slice(0, 500)}`);
 
-      const outputText = this.extractAssistantText(messages.messages as { role: string; text?: string; content?: string }[]);
       return this.parsePhilosopherOutput(outputText);
+    } catch (err) {
+      return {
+        valid: false,
+        judgments: [],
+        overallAssessment: '',
+        reason: `Philosopher failed: ${err instanceof Error ? err.message : String(err)}`,
+        generatedAt: new Date().toISOString(),
+      };
     } finally {
-      await this.api.runtime.subagent.deleteSession({
-        sessionKey,
-        deleteTranscript: true,
-      }).catch(() => { /* intentionally empty - fire-and-forget session cleanup */ });
+      try { fs.unlinkSync(sessionFile); } catch { /* ignore */ }
     }
   }
 
-   
+
   async invokeScribe(
     dreamerOutput: DreamerOutput,
     philosopherOutput: PhilosopherOutput,
     snapshot: NocturnalSessionSnapshot,
     principleId: string,
     telemetry: TrinityTelemetry,
-     
+
     _config: TrinityConfig
   ): Promise<TrinityDraftArtifact | null> {
-    const sessionKey = `agent:main:subagent:ne-scribe-${randomUUID()}`;
-    const systemPrompt = NOCTURNAL_SCRIBE_PROMPT;
-
+    const runId = `scribe-${randomUUID()}`;
+    const sessionFile = this.createSessionFile('scribe');
     const prompt = this.buildScribePrompt(dreamerOutput, philosopherOutput, snapshot, principleId);
+    const model = this.resolveModel();
 
     try {
-      const { runId } = await this.api.runtime.subagent.run({
-        sessionKey,
-        message: prompt,
-        extraSystemPrompt: systemPrompt,
-        deliver: false,
-      });
-
-      const result = await this.api.runtime.subagent.waitForRun({
-        runId,
+      const result = await this.api.runtime.agent.runEmbeddedPiAgent({
+        sessionId: runId,
+        sessionFile,
+        prompt,
+        extraSystemPrompt: NOCTURNAL_SCRIBE_PROMPT,
+        config: this.loadFullConfig(),
+        provider: model.provider,
+        model: model.model,
         timeoutMs: this.stageTimeoutMs,
+        runId,
+        disableTools: true,
       });
 
-      if (result.status !== 'ok') {
+      const outputText = this.extractPayloadText(result);
+      if (!outputText) {
         return null;
       }
 
-      const messages = await this.api.runtime.subagent.getSessionMessages({
-        sessionKey,
-        limit: 5,
-      });
+      // DEBUG: Log Scribe's actual output
+      this.api.logger?.info(`[Trinity:Scribe] Output preview: ${outputText.slice(0, 800)}`);
 
-      const outputText = this.extractAssistantText(messages.messages as { role: string; text?: string; content?: string }[]);
       return this.parseScribeOutput(outputText, snapshot, principleId, telemetry);
+    } catch (err) {
+      return null;
     } finally {
-      await this.api.runtime.subagent.deleteSession({
-        sessionKey,
-        deleteTranscript: true,
-      }).catch(() => { /* intentionally empty - fire-and-forget session cleanup */ });
+      try { fs.unlinkSync(sessionFile); } catch { /* ignore */ }
     }
   }
 
-   
+
   async close(): Promise<void> {
-    // Nothing to clean up in this implementation
+    // Clean up temp directory
+    try {
+      if (fs.existsSync(this.tempDir)) {
+        const files = fs.readdirSync(this.tempDir);
+        for (const file of files) {
+          fs.unlinkSync(path.join(this.tempDir, file));
+        }
+        fs.rmSync(this.tempDir, { recursive: true, force: true });
+      }
+    } catch { /* ignore cleanup errors */ }
   }
 
   // ---------------------------------------------------------------------------
@@ -528,51 +677,167 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
   // ---------------------------------------------------------------------------
 
    
-  private extractAssistantText(
-    messages: { role: string; text?: string; content?: string }[]
-  ): string {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const msg = messages[i] as { role: string; text?: string; content?: string };
-      if (msg.role === 'assistant') {
-        return msg.text ?? msg.content ?? '';
-      }
-    }
-    return '';
-  }
-
-   
   private buildDreamerPrompt(
     snapshot: NocturnalSessionSnapshot,
     principleId: string,
     maxCandidates: number
   ): string {
-    return `Target Principle: ${principleId}
+    // Build detailed tool failure list
+    const failures = snapshot.toolCalls
+      .filter(tc => tc.outcome === 'failure')
+      .map(tc => {
+        let desc = `- ${tc.toolName}`;
+        if (tc.filePath) desc += ` on ${tc.filePath}`;
+        desc += ` → FAILED: ${tc.errorMessage || 'unknown error'}`;
+        return desc;
+      });
 
-Session Snapshot:
-- Session ID: ${snapshot.sessionId}
-- Assistant Turns: ${snapshot.stats.totalAssistantTurns ?? 'N/A (data unavailable)'}
-- Tool Calls: ${snapshot.stats.totalToolCalls ?? 'N/A (data unavailable)'}
-- Failures: ${snapshot.stats.failureCount ?? 'N/A (data unavailable)'}
-- Pain Events: ${snapshot.stats.totalPainEvents}
-- Gate Blocks: ${snapshot.stats.totalGateBlocks ?? 'N/A (data unavailable)'}
+    // Build detailed pain event list
+    const pains = snapshot.painEvents
+      .filter(pe => pe.score >= 50)
+      .map(pe => `- Pain (score: ${pe.score}): ${pe.reason || 'no reason'} [source: ${pe.source}]`);
 
-Please analyze this session and generate ${maxCandidates} candidate corrections. Each candidate should identify a bad decision and propose a better alternative grounded in the target principle.
+    // Build gate block list
+    const blocks = snapshot.gateBlocks
+      .map(gb => `- Gate blocked ${gb.toolName}: ${gb.reason}`);
 
-Respond with ONLY a valid JSON object matching the DreamerOutput contract.`;
+    // Build assistant decision context (last 3 turns max)
+    const recentTurns = snapshot.assistantTurns
+      .slice(-3)
+      .map((t, i) => `[Turn ${i+1}] ${t.sanitizedText.slice(0, 300)}`)
+      .join('\n');
+
+    // Build user correction cues (if any)
+    const userCues = snapshot.userTurns
+      .filter(ut => ut.correctionDetected)
+      .map(ut => `- User correction: ${ut.correctionCue || 'detected'}`)
+      .join('\n');
+
+    const sections = [
+      `## Target Principle`,
+      `**Principle ID**: ${principleId}`,
+      ``,
+      `## Session Context`,
+      `**Session ID**: ${snapshot.sessionId}`,
+      ``,
+    ];
+
+    if (failures.length > 0) {
+      sections.push(`## Tool Failures (${failures.length})`);
+      sections.push(failures.join('\n'));
+      sections.push('');
+    }
+
+    if (pains.length > 0) {
+      sections.push(`## Pain Signals (${pains.length})`);
+      sections.push(pains.join('\n'));
+      sections.push('');
+    }
+
+    if (blocks.length > 0) {
+      sections.push(`## Gate Blocks (${blocks.length})`);
+      sections.push(blocks.join('\n'));
+      sections.push('');
+    }
+
+    if (recentTurns) {
+      sections.push(`## Assistant Decision Context`);
+      sections.push(recentTurns);
+      sections.push('');
+    }
+
+    if (userCues) {
+      sections.push(`## User Corrections`);
+      sections.push(userCues);
+      sections.push('');
+    }
+
+    sections.push(`## Task`,
+      `Analyze the above session and generate ${maxCandidates} candidate corrections.`,
+      `Each candidate must:`,
+      `1. Identify a specific bad decision from the session`,
+      `2. Propose a concrete better decision grounded in principle ${principleId}`,
+      `3. The betterDecision MUST START with a bounded verb: read, check, verify, edit, write, create, delete, search, grep, find, list, review, examine, inspect, test, run, execute, analyze, diagnose, debug`,
+      `4. Explain the rationale referencing the principle`,
+      ``,
+      `Respond with ONLY a valid JSON object matching the DreamerOutput contract.`
+    );
+
+    return sections.join('\n');
   }
 
    
   private buildPhilosopherPrompt(
     dreamerOutput: DreamerOutput,
-    principleId: string
+    principleId: string,
+    snapshot: NocturnalSessionSnapshot
   ): string {
     const candidatesJson = JSON.stringify(dreamerOutput.candidates, null, 2);
-    return `Target Principle: ${principleId}
 
-Dreamer's Candidates:
-${candidatesJson}
+    // Build violation summary from snapshot for Philosopher to validate candidates
+    const failures = snapshot.toolCalls
+      .filter(tc => tc.outcome === 'failure')
+      .map(tc => `- ${tc.toolName}${tc.filePath ? ` on ${tc.filePath}` : ''} → FAILED: ${tc.errorMessage || 'unknown error'}`);
 
-Please evaluate each candidate and rank them by principle alignment, specificity, and actionability. Respond with ONLY a valid JSON object matching the PhilosopherOutput contract.`;
+    const pains = snapshot.painEvents
+      .filter(pe => pe.score >= 50)
+      .map(pe => `- Pain (score: ${pe.score}, severity: ${pe.severity || 'N/A'}): ${pe.reason || 'no reason'} [source: ${pe.source}]`);
+
+    const blocks = snapshot.gateBlocks
+      .map(gb => `- Gate blocked ${gb.toolName}: ${gb.reason}`);
+
+    const userCues = snapshot.userTurns
+      .filter(ut => ut.correctionDetected)
+      .map(ut => `- User correction: ${ut.correctionCue || 'detected'}`);
+
+    const sections = [
+      `## Target Principle`,
+      `**Principle ID**: ${principleId}`,
+      ``,
+      `## Session Violation Summary`,
+      `**Session ID**: ${snapshot.sessionId}`,
+    ];
+
+    if (failures.length > 0) {
+      sections.push(`\n### Tool Failures (${failures.length})`);
+      sections.push(failures.join('\n'));
+    }
+
+    if (pains.length > 0) {
+      sections.push(`\n### Pain Signals (${pains.length})`);
+      sections.push(pains.join('\n'));
+    }
+
+    if (blocks.length > 0) {
+      sections.push(`\n### Gate Blocks (${blocks.length})`);
+      sections.push(blocks.join('\n'));
+    }
+
+    if (userCues.length > 0) {
+      sections.push(`\n### User Corrections (${userCues.length})`);
+      sections.push(userCues.join('\n'));
+    }
+
+    sections.push(
+      ``,
+      `## Dreamer's Candidates`,
+      candidatesJson,
+      ``,
+      `## Task`,
+      `Evaluate each candidate against the violation summary above.`,
+      `For each candidate:`,
+      `1. Is the badDecision accurate — does it match the actual violations in the session?`,
+      `2. Is the betterDecision specific and actionable?`,
+      `3. Does the betterDecision START with a bounded verb (read, check, verify, edit, write, etc.)?`,
+      `4. Does the rationale correctly reference principle ${principleId}?`,
+      `5. Is the confidence score justified?`,
+      ``,
+      `**Penalize executability**: If betterDecision does NOT start with a bounded verb, reduce score by 0.2.`,
+      ``,
+      `Respond with ONLY a valid JSON object matching the PhilosopherOutput contract.`
+    );
+
+    return sections.join('\n');
   }
 
    
@@ -584,16 +849,74 @@ Please evaluate each candidate and rank them by principle alignment, specificity
   ): string {
     const candidatesJson = JSON.stringify(dreamerOutput.candidates, null, 2);
     const judgmentsJson = JSON.stringify(philosopherOutput.judgments, null, 2);
-    return `Target Principle: ${principleId}
-Session ID: ${snapshot.sessionId}
 
-Dreamer's Candidates:
-${candidatesJson}
+    // Build violation evidence for Scribe to ground the final artifact
+    const violations: string[] = [];
 
-Philosopher's Judgments:
-${judgmentsJson}
+    const failures = snapshot.toolCalls.filter(tc => tc.outcome === 'failure');
+    for (const tc of failures) {
+      violations.push(`- Tool failure: ${tc.toolName}${tc.filePath ? ` on ${tc.filePath}` : ''} → ${tc.errorMessage || 'unknown error'}`);
+    }
 
-Select the best candidate (Philosopher's rank 1) and synthesize it into a final TrinityDraftArtifact. Respond with ONLY a valid JSON object.`;
+    const pains = snapshot.painEvents.filter(pe => pe.score >= 50);
+    for (const pe of pains) {
+      violations.push(`- Pain signal (score: ${pe.score}): ${pe.reason || 'no reason'} [source: ${pe.source}]`);
+    }
+
+    const blocks = snapshot.gateBlocks;
+    for (const gb of blocks) {
+      violations.push(`- Gate blocked: ${gb.toolName} → ${gb.reason}`);
+    }
+
+    const sections = [
+      `## Target Principle`,
+      `**Principle ID**: ${principleId}`,
+      ``,
+      `## Original Violation Evidence`,
+      `**Session ID**: ${snapshot.sessionId}`,
+    ];
+
+    if (violations.length > 0) {
+      sections.push(violations.join('\n'));
+    } else {
+      sections.push(`(No specific violations found in snapshot)`);
+    }
+
+    sections.push(
+      ``,
+      `## Dreamer's Candidates`,
+      candidatesJson,
+      ``,
+      `## Philosopher's Judgments`,
+      judgmentsJson,
+      ``,
+      `## Task`,
+      `Select the best candidate (Philosopher's rank 1) and synthesize it into a final TrinityDraftArtifact.`,
+      `Use the Original Violation Evidence above to ensure your final badDecision and betterDecision`,
+      `are grounded in the actual session events, not just Dreamer's interpretation.`,
+      ``,
+      `## CRITICAL: betterDecision Format Requirements`,
+      `Your betterDecision MUST pass executability validation. It MUST:`,
+      `1. START with a concrete action verb from this list: read, check, verify, edit, write, create, delete, search, grep, find, list, review, examine, inspect, test, run, execute, analyze, diagnose, debug`,
+      `2. Reference a SPECIFIC, concrete target (file path, command name, config key, etc.)`,
+      `3. Describe a BOUNDED, executable action — not a vague principle or process`,
+      ``,
+      `**Examples that PASS executability check**:`,
+      `- "Read the file before editing to verify current content"`,
+      `- "Check user permissions before executing privileged commands"`,
+      `- "Verify the routing infrastructure is operational before analyzing system state"`,
+      `- "Edit the config file to set timeout=30000ms"`,
+      ``,
+      `**Examples that FAIL executability check**:`,
+      `- "Per T-01, pause all analysis tasks..." (starts with "Per", not a bounded verb)`,
+      `- "The agent should have first checked..." (starts with "The", not the action verb)`,
+      `- "Be more careful with routing tools" (vague verb "be")`,
+      `- "Ensure proper authorization" (vague verb "ensure")`,
+      ``,
+      `Respond with ONLY a valid JSON object.`
+    );
+
+    return sections.join('\n');
   }
    
 
@@ -995,9 +1318,9 @@ export function invokeStubDreamer(
   principleId: string,
   maxCandidates: number
 ): DreamerOutput {
-  const hasFailures = (snapshot.stats.failureCount ?? 0) > 0;
+  const hasFailures = snapshot.stats.failureCount > 0;
   const hasPain = snapshot.stats.totalPainEvents > 0;
-  const hasGateBlocks = (snapshot.stats.totalGateBlocks ?? 0) > 0;
+  const hasGateBlocks = snapshot.stats.totalGateBlocks > 0;
 
   // #219: Detect fallback data source - stats may be incomplete
   const isFallback = snapshot._dataSource === 'pain_context_fallback';
@@ -1125,8 +1448,8 @@ export function invokeStubDreamer(
  */
 export function invokeStubPhilosopher(
   dreamerOutput: DreamerOutput,
-   
-  _principleId: string
+  _principleId: string,
+  _snapshot: NocturnalSessionSnapshot
 ): PhilosopherOutput {
   if (!dreamerOutput.valid || dreamerOutput.candidates.length === 0) {
     return {
@@ -1374,7 +1697,7 @@ export async function runTrinityAsync(options: RunTrinityOptions): Promise<Trini
     telemetry.candidateCount = dreamerOutput.candidates.length;
 
     // Step 2: Philosopher — rank candidates via real subagent
-    const philosopherOutput = await adapter.invokePhilosopher(dreamerOutput, principleId);
+    const philosopherOutput = await adapter.invokePhilosopher(dreamerOutput, principleId, snapshot);
 
     if (!philosopherOutput.valid || philosopherOutput.judgments.length === 0) {
       failures.push({
@@ -1470,7 +1793,7 @@ function runTrinityWithStubs(
   telemetry.candidateCount = dreamerOutput.candidates.length;
 
   // Step 2: Philosopher — rank candidates (stub)
-  const philosopherOutput = invokeStubPhilosopher(dreamerOutput, principleId);
+  const philosopherOutput = invokeStubPhilosopher(dreamerOutput, principleId, snapshot);
 
   if (!philosopherOutput.valid || philosopherOutput.judgments.length === 0) {
     failures.push({

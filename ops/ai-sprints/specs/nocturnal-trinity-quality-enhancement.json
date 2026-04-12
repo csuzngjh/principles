@@ -1,0 +1,103 @@
+{
+  "id": "nocturnal-trinity-quality-enhancement",
+  "description": "Enhance nocturnal Trinity prompt quality — add Dreamer perspective diversity constraints and Scribe rejected-decision analysis",
+  "workspace": "/home/csuzngjh/code/principles",
+  "branch": "fix/bugs-231-228",
+  "taskContract": {
+    "goal": "Improve nocturnal Trinity output quality by adding perspective diversity to Dreamer and rejected-decision analysis to Scribe",
+    "inScope": [
+      "nocturnal-trinity.ts prompt modifications",
+      "nocturnal-trinity.test.ts assertion updates",
+      "nocturnal-arbiter.ts compatibility verification"
+    ],
+    "outOfScope": [
+      "Runtime or infrastructure changes",
+      "New file creation",
+      "Non-Trinity prompt changes"
+    ],
+    "validationCommands": [
+      "npx vitest run packages/openclaw-plugin/tests/core/nocturnal --reporter=verbose"
+    ],
+    "expectedArtifacts": [
+      "packages/openclaw-plugin/src/core/nocturnal-trinity.ts"
+    ]
+  },
+  "producer": {
+    "agent": "iflow",
+    "model": "glm-5",
+    "timeoutSeconds": 1800
+  },
+  "reviewerA": {
+    "agent": "iflow",
+    "model": "glm-4.7",
+    "timeoutSeconds": 1200,
+    "role": "code-quality",
+    "focus": "Verify prompt changes are minimal, backward-compatible, and don't break existing arbiter validation"
+  },
+  "reviewerB": {
+    "agent": "iflow",
+    "model": "glm-4.7",
+    "timeoutSeconds": 1200,
+    "role": "functional-correctness",
+    "focus": "Verify tests pass and the new prompt constraints produce structurally valid Trinity output"
+  },
+  "escalationReviewer": {
+    "agent": "iflow",
+    "model": "glm-5",
+    "timeoutSeconds": 1800
+  },
+  "maxRoundsPerStage": 2,
+  "stageGoals": {
+    "investigate": [
+      "Read nocturnal-trinity.ts lines 64-298 (all three prompts) and nocturnal-trinity.test.ts",
+      "Identify exact insertion points for Dreamer diversity section and Scribe analysis section",
+      "List all test assertions that reference prompt content",
+      "Report findings in producer.md"
+    ],
+    "implement-pass-1": [
+      "Apply Dreamer perspective diversity constraints to NOCTURNAL_DREAMER_PROMPT",
+      "Apply Scribe rejected-decision analysis to NOCTURNAL_SCRIBE_PROMPT",
+      "Update test assertions in nocturnal-trinity.test.ts if needed",
+      "Run nocturnal-trinity and nocturnal-arbiter tests to verify no breakage"
+    ],
+    "verify": [
+      "Run full nocturnal test suite: npx vitest run packages/openclaw-plugin/tests/core/nocturnal --reporter=verbose",
+      "Verify all tests pass with 0 failures",
+      "Confirm arbiter validation is unchanged",
+      "Confirm no new files were created"
+    ]
+  },
+  "stageCriteria": {
+    "investigate": {
+      "scoringDimensions": [
+        "completeness",
+        "accuracy"
+      ],
+      "dimensionThreshold": 3,
+      "requiredDeliverables": [
+        "producer.md"
+      ]
+    },
+    "implement-pass-1": {
+      "scoringDimensions": [
+        "correctness",
+        "completeness"
+      ],
+      "dimensionThreshold": 3,
+      "requiredDeliverables": [
+        "producer.md",
+        "reviewer-a.md",
+        "reviewer-b.md"
+      ]
+    },
+    "verify": {
+      "scoringDimensions": [
+        "correctness"
+      ],
+      "dimensionThreshold": 3,
+      "requiredDeliverables": [
+        "producer.md"
+      ]
+    }
+  }
+}
