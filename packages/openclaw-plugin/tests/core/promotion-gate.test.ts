@@ -255,6 +255,11 @@ describe('promotion-gate', () => {
 
       expect(result.constraintChecks.length).toBeGreaterThan(0);
       expect(result.deltaCheck).toBeDefined();
+      expect(result.evidenceSummary).toEqual({
+        evidenceMode: 'eval-proxy',
+        shadowSampleCount: 0,
+        deltaSource: 'eval',
+      });
     });
   });
 

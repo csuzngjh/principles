@@ -277,6 +277,12 @@ export interface PromotionGateResult {
     threshold: number;
     passed: boolean;
   };
+
+  evidenceSummary: {
+    evidenceMode: 'shadow' | 'eval-proxy' | 'mixed';
+    shadowSampleCount: number;
+    deltaSource: 'eval';
+  };
 }
 
 /**
@@ -337,6 +343,11 @@ export function evaluatePromotionGate(
       blockers,
       constraintChecks: [],
       deltaCheck: { actual: 0, threshold: minDelta, passed: false },
+      evidenceSummary: {
+        evidenceMode: 'eval-proxy',
+        shadowSampleCount: 0,
+        deltaSource: 'eval',
+      },
     };
   }
 
@@ -351,6 +362,11 @@ export function evaluatePromotionGate(
       blockers,
       constraintChecks: [],
       deltaCheck: { actual: 0, threshold: minDelta, passed: false },
+      evidenceSummary: {
+        evidenceMode: 'eval-proxy',
+        shadowSampleCount: 0,
+        deltaSource: 'eval',
+      },
     };
   }
 
@@ -366,6 +382,11 @@ export function evaluatePromotionGate(
       blockers,
       constraintChecks: [],
       deltaCheck: { actual: 0, threshold: minDelta, passed: false },
+      evidenceSummary: {
+        evidenceMode: 'eval-proxy',
+        shadowSampleCount: 0,
+        deltaSource: 'eval',
+      },
     };
   }
 
@@ -496,12 +517,24 @@ export function evaluatePromotionGate(
     suggestedState = 'rejected';
   }
 
+  const evidenceMode =
+    arbiterRejectSource === 'shadow' && executabilityRejectSource === 'shadow'
+      ? 'shadow'
+      : arbiterRejectSource === 'eval-proxy' && executabilityRejectSource === 'eval-proxy'
+        ? 'eval-proxy'
+        : 'mixed';
+
   return {
     passes: allPassed,
     suggestedState,
     blockers,
     constraintChecks,
     deltaCheck,
+    evidenceSummary: {
+      evidenceMode,
+      shadowSampleCount: shadowStats?.totalCount ?? 0,
+      deltaSource: 'eval',
+    },
   };
 }
 
