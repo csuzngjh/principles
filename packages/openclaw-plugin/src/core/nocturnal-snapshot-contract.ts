@@ -14,11 +14,6 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
-function isNumberOrNull(value: unknown): value is number | null {
-  return value === null || (typeof value === 'number' && Number.isFinite(value));
-}
-
-// #246: Stats are now always numeric (no null). Fallback snapshots use 0 as default.
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
@@ -55,6 +50,37 @@ export function validateNocturnalSnapshotIngress(
     if (!Array.isArray(value[field])) {
       reasons.push(`snapshot.${field} must be an array`);
     }
+  }
+
+  // Validate critical array element structures to prevent silent downstream failures
+  if (Array.isArray(value.toolCalls)) {
+    value.toolCalls.forEach((tc: unknown, i: number) => {
+      if (!isObjectRecord(tc)) {
+        reasons.push(`snapshot.toolCalls[${i}] must be an object`);
+      } else {
+        if (!isNonEmptyString(tc.toolName)) {
+          reasons.push(`snapshot.toolCalls[${i}].toolName must be a non-empty string`);
+        }
+        if (!['success', 'failure', 'blocked'].includes(tc.outcome as string)) {
+          reasons.push(`snapshot.toolCalls[${i}].outcome must be one of: success, failure, blocked`);
+        }
+      }
+    });
+  }
+
+  if (Array.isArray(value.painEvents)) {
+    value.painEvents.forEach((pe: unknown, i: number) => {
+      if (!isObjectRecord(pe)) {
+        reasons.push(`snapshot.painEvents[${i}] must be an object`);
+      } else {
+        if (!isNonEmptyString(pe.source)) {
+          reasons.push(`snapshot.painEvents[${i}].source must be a non-empty string`);
+        }
+        if (!isFiniteNumber(pe.score)) {
+          reasons.push(`snapshot.painEvents[${i}].score must be a finite number`);
+        }
+      }
+    });
   }
 
   const stats = value.stats;

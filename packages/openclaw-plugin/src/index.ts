@@ -123,6 +123,17 @@ function resolveCommandWorkspaceDirStrict(
   return resolveRequiredWorkspaceDir(api, ctx, { source: 'command' });
 }
 
+/**
+ * Extract agentId from sessionKey format: "agent:{agentId}:..."
+ * Falls back to 'main' if sessionKey is missing or malformed.
+ */
+function extractAgentIdFromSessionKey(sessionKey: string | undefined): string {
+  if (!sessionKey) return 'main';
+  // Format: agent:{agentId}:{rest}
+  const match = /^agent:([^:]+):/.exec(sessionKey);
+  return match ? match[1] : 'main';
+}
+
 function resolveToolHookWorkspaceDirSafe(
   ctx: WorkspaceResolutionContext,
   api: OpenClawPluginApi,
@@ -423,11 +434,16 @@ const plugin = {
     registerCommandWithAlias('pd-thinking', 'pdt', getCommandDescription('pd-thinking', language), (ctx: any) => handleThinkingOs(ctx), { acceptsArgs: true });
     registerCommandWithAlias('pd-reflect', 'pdrl', getCommandDescription('pd-reflect', language), (ctx: any) => {
       try {
-        const workspaceDir = resolveCommandWorkspaceDirStrict(api, ctx);
+        // Resolve agentId from sessionKey (if available), fallback to 'main'
+        const agentId = extractAgentIdFromSessionKey(ctx.sessionKey);
+        api.logger.info(`[PD:pd-reflect] Context: sessionKey=${ctx.sessionKey?.slice(0, 50)}, agentId=${agentId}, ctx.agentId=${ctx?.agentId}`);
+        api.logger.info(`[PD:pd-reflect] API runtime.agent exists: ${!!api?.runtime?.agent}, resolveAgentWorkspaceDir exists: ${!!api?.runtime?.agent?.resolveAgentWorkspaceDir}`);
+        const workspaceDir = resolveRequiredWorkspaceDir(api, { ...ctx, agentId }, { source: 'pd-reflect', fallbackAgentId: 'main' });
+        api.logger.info(`[PD:pd-reflect] Resolved workspaceDir=${workspaceDir}`);
         return handlePdReflect.handler({ ...ctx, api, workspaceDir } as any);
       } catch (err) {
-        api.logger.error(`[PD] Command /pd-reflect failed: ${String(err)}`);
-        return { text: language === 'zh' ? "命令执行失败，请检查日志。" : "Command failed. Check logs." };
+        api.logger.error(`[PD:pd-reflect] Command failed: ${String(err)}`);
+        return { text: language === 'zh' ? `命令执行失败: ${String(err)}` : `Command failed: ${String(err)}` };
       }
     });
     registerCommandWithAlias('pd-daily', 'pdd', getCommandDescription('pd-daily', language), () => ({
