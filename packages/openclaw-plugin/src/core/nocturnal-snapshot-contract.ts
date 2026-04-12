@@ -14,8 +14,9 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
-function isNumberOrNull(value: unknown): value is number | null {
-  return value === null || (typeof value === 'number' && Number.isFinite(value));
+/** #246: Stats fields must now be finite numbers — null is no longer accepted. */
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
 }
 
 export function validateNocturnalSnapshotIngress(
@@ -56,20 +57,20 @@ export function validateNocturnalSnapshotIngress(
   if (!isObjectRecord(stats)) {
     reasons.push('snapshot.stats must be an object');
   } else {
-    if (!isNumberOrNull(stats.totalAssistantTurns)) {
-      reasons.push('snapshot.stats.totalAssistantTurns must be a number or null');
+    if (!isFiniteNumber(stats.totalAssistantTurns)) {
+      reasons.push('snapshot.stats.totalAssistantTurns must be a finite number');
     }
-    if (!isNumberOrNull(stats.totalToolCalls)) {
-      reasons.push('snapshot.stats.totalToolCalls must be a number or null');
+    if (!isFiniteNumber(stats.totalToolCalls)) {
+      reasons.push('snapshot.stats.totalToolCalls must be a finite number');
     }
-    if (typeof stats.totalPainEvents !== 'number' || !Number.isFinite(stats.totalPainEvents)) {
+    if (!isFiniteNumber(stats.totalPainEvents)) {
       reasons.push('snapshot.stats.totalPainEvents must be a finite number');
     }
-    if (!isNumberOrNull(stats.totalGateBlocks)) {
-      reasons.push('snapshot.stats.totalGateBlocks must be a number or null');
+    if (!isFiniteNumber(stats.totalGateBlocks)) {
+      reasons.push('snapshot.stats.totalGateBlocks must be a finite number');
     }
-    if (!isNumberOrNull(stats.failureCount)) {
-      reasons.push('snapshot.stats.failureCount must be a number or null');
+    if (!isFiniteNumber(stats.failureCount)) {
+      reasons.push('snapshot.stats.failureCount must be a finite number');
     }
   }
 
@@ -82,21 +83,6 @@ export function validateNocturnalSnapshotIngress(
     const hasPainSignal = value.painEvents.length > 0 || ((stats.totalPainEvents as number) > 0);
     if (!hasPainSignal) {
       reasons.push('fallback snapshot must contain at least one pain signal');
-    }
-  }
-
-  if (!isFallback && isObjectRecord(stats)) {
-    if (stats.totalAssistantTurns === null) {
-      reasons.push('non-fallback snapshot.stats.totalAssistantTurns must be a number');
-    }
-    if (stats.totalToolCalls === null) {
-      reasons.push('non-fallback snapshot.stats.totalToolCalls must be a number');
-    }
-    if (stats.totalGateBlocks === null) {
-      reasons.push('non-fallback snapshot.stats.totalGateBlocks must be a number');
-    }
-    if (stats.failureCount === null) {
-      reasons.push('non-fallback snapshot.stats.failureCount must be a number');
     }
   }
 
