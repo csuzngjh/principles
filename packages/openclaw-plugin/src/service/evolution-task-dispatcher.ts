@@ -435,13 +435,17 @@ export class EvolutionTaskDispatcher {
                 task.resolution = 'marker_detected';
                 try {
                     fs.unlinkSync(completeMarker);
-                } catch { /* marker may have been deleted already, not critical */ }
+                } catch (err) {
+                    logger?.debug?.(`[PD:EvolutionWorker] Marker deletion skipped for task ${task.id}: ${err instanceof Error ? err.message : String(err)}`);
+                }
 
                 // #190: Clean up diagnostician report file after processing
                 try {
                     const cleanupReportPath = path.join(wctx.stateDir, `.diagnostician_report_${task.id}.json`);
                     if (fs.existsSync(cleanupReportPath)) fs.unlinkSync(cleanupReportPath);
-                } catch { /* report may not exist, not critical */ }
+                } catch (err) {
+                    logger?.debug?.(`[PD:EvolutionWorker] Report deletion skipped for task ${task.id}: ${err instanceof Error ? err.message : String(err)}`);
+                }
 
                 // FIX (#187): Remove the task from the diagnostician task store
                 await completeDiagnosticianTask(wctx.stateDir, task.id);
@@ -514,12 +518,14 @@ export class EvolutionTaskDispatcher {
                     } catch (err) {
                         logger.warn(`[PD:EvolutionWorker] Failed to parse late diagnostician report for task ${task.id}: ${String(err)}`);
                     }
-                    try { fs.unlinkSync(completeMarker); } catch { /* marker may not exist, not critical */ }
+                    try { fs.unlinkSync(completeMarker); } catch (err) { logger?.debug?.(`[PD:EvolutionWorker] Late marker deletion skipped for task ${task.id}: ${err instanceof Error ? err.message : String(err)}`); }
                     // #190: Clean up diagnostician report file
                     try {
                         const lateReportPath = path.join(wctx.stateDir, `.diagnostician_report_${task.id}.json`);
                         if (fs.existsSync(lateReportPath)) fs.unlinkSync(lateReportPath);
-                    } catch { /* report may not exist, not critical */ }
+                    } catch (err) {
+                        logger?.debug?.(`[PD:EvolutionWorker] Late report deletion skipped for task ${task.id}: ${err instanceof Error ? err.message : String(err)}`);
+                    }
                     task.resolution = principleCreated ? 'late_marker_principle_created' : 'late_marker_no_principle';
                 } else {
                     if (logger) logger.info(`[PD:EvolutionWorker] Task ${task.id} auto-completed after ${timeoutMinutes} minute timeout`);
@@ -527,7 +533,9 @@ export class EvolutionTaskDispatcher {
                     try {
                         const autoTimeoutReportPath = path.join(wctx.stateDir, `.diagnostician_report_${task.id}.json`);
                         if (fs.existsSync(autoTimeoutReportPath)) fs.unlinkSync(autoTimeoutReportPath);
-                    } catch { /* report may not exist, not critical */ }
+                    } catch (err) {
+                        logger?.debug?.(`[PD:EvolutionWorker] Auto-timeout report deletion skipped for task ${task.id}: ${err instanceof Error ? err.message : String(err)}`);
+                    }
                     task.resolution = 'auto_completed_timeout';
                 }
 

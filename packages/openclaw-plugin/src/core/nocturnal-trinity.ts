@@ -49,6 +49,13 @@ import {
 } from './adaptive-thresholds.js';
 
 // ---------------------------------------------------------------------------
+// Configurable Model Fallback (avoid hardcoded strings deep in adapters)
+// ---------------------------------------------------------------------------
+
+const FALLBACK_PROVIDER = process.env.OPENCLAW_DEFAULT_PROVIDER || 'minimax-portal';
+const FALLBACK_MODEL = process.env.OPENCLAW_DEFAULT_MODEL || 'MiniMax-M2.7';
+
+// ---------------------------------------------------------------------------
 // Embedded Role Prompts
 // ---------------------------------------------------------------------------
 // These prompts are embedded at build time. The agents/ directory was removed
@@ -476,9 +483,9 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
       }
     }
 
-    // Last resort fallback — minimax-portal is the configured provider on this system
-    this.api.logger?.warn?.('[Trinity] Could not resolve model from config, using minimax-portal fallback');
-    return { provider: 'minimax-portal', model: 'MiniMax-M2.7' };
+    // Last resort fallback — read from env vars to avoid hardcoded strings
+    this.api.logger?.warn?.(`[Trinity] Could not resolve model from config, using fallback: ${FALLBACK_PROVIDER}/${FALLBACK_MODEL}`);
+    return { provider: FALLBACK_PROVIDER, model: FALLBACK_MODEL };
   }
 
   /**
