@@ -1,69 +1,98 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.13
-milestone_name: Boundary Contract Hardening
-status: executing
-last_updated: "2026-04-11T03:37:47.941Z"
-last_activity: 2026-04-11
+milestone: v1.15
+milestone_name: milestone
+status: in_progress
+last_updated: "2026-04-12T08:46:00.000Z"
+last_activity: 2026-04-12
 progress:
   total_phases: 4
   completed_phases: 4
-  total_plans: 6
-  completed_plans: 6
+  total_plans: 7
+  completed_plans: 7
   percent: 100
 ---
 
-# State: v1.13 Boundary Contract Hardening
+# State: v1.15 Runtime & Truth Contract Hardening
 
 ## Project Reference
 
-See `.planning/PROJECT.md` (updated 2026-04-11)
+See `.planning/PROJECT.md` (updated 2026-04-12)
 
-**Milestone:** v1.13  
-**Name:** Boundary Contract Hardening  
-**Core Value:** AI agents improve their own behavior through a structured evolution loop. pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization  
-**Current Focus:** Phase 23 — v1.13 Phase Verification Completion
+**Milestone:** v1.15
+**Name:** Runtime & Truth Contract Hardening
+**Core Value:** AI agents improve their own behavior through a structured evolution loop. pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
+**Current Focus:** Milestone wrap-up - merge audit result is defer pending persisted evidence
 
-## Previous Milestone (v1.12)
+## Previous Milestone (v1.14 baseline)
 
-- **v1.12 COMPLETE:** Nocturnal Production Stabilization shipped
-- **Phase 16 COMPLETE:** Snapshot ingress and runtime hardening
-- **Phase 17 COMPLETE:** Minimal rule bootstrap
-- **Phase 18 COMPLETE:** Live replay and operator validation
+- **v1.14 BASELINE COMPLETE ON BRANCH:** Evolution worker decomposition finished on `fix/bugs-231-228` / PR #245
+- Structural seams now exist for queue, pain, dispatcher, workflow, context, and fallback audit
+- Remaining work before `main` trust is no longer module decomposition; it is runtime and truth contract hardening on top of that baseline
 
 ## Current Position
 
-Phase: 23
-Plan: Not started
-Status: Executing Phase 23
-Last activity: 2026-04-11
+Phase: 33
+Plan: Phase 33 complete
+Status: Implementation complete, merge certification deferred by missing evidence
+Last activity: 2026-04-12
 
-## v1.13 Architecture Focus
+Progress: [#####] 100%
+
+## v1.15 Architecture Focus
 
 ### Root Problem
 
-- The production loop still relies on implicit assumptions about OpenClaw runtime behavior, workspace resolution, and state-file formats.
-- When those assumptions are wrong, code often silently falls back instead of failing fast.
-- This causes wrong-workspace writes, empty snapshots, queue corruption risk, and misleading downstream failure signals.
+- Production failures now come from guessed runtime semantics and overstated exported facts
+- Workspace/path boundaries were only the first layer; runtime adapters and evidence-bearing outputs are still under-contracted
+- The system still risks surviving on logs and fallback behavior instead of explicit machine-checkable invariants
 
 ### Hardening Targets
 
-- Unified workspace resolution
-- Shared schema validation for critical files and snapshots
-- Runtime capability contract for background workflows
-- End-to-end contract tests instead of isolated bug-specific tests
+- Runtime adapter boundary for OpenClaw-dependent execution semantics
+- Workspace/session/model/provider ingress contracts before runtime execution
+- Evidence-bound exports and datasets
+- Production invariants and merge-gate verification for the stacked baseline on `fix/bugs-231-228`
+
+### Planned Execution Order
+
+1. Phase 30: Freeze diagnosis into a contract matrix and merge-gate checklist
+2. Phase 31: Harden runtime adapters and add contract tests
+3. Phase 32: Harden export/dataset truth semantics
+4. Phase 33: Verify invariants and certify merge readiness
 
 ### Deferred Work
 
-- v1.10 Thinking Models page remains deferred until the production loop is trustworthy
+- Broad replay engine contract hardening
+- Dictionary/rule matching contracts
+- UI work and Thinking Models improvements
 
-### Blockers
+## Accumulated Context
 
-- PR #238 review surfaced contract-level defects in paths, queue writes, runtime probing, and session selection
-- Current production confidence is low; correctness must come before feature expansion
+### Decisions
+
+Decisions are logged in PROJECT.md Key Decisions table.
+Recent decisions affecting current work:
+
+- v1.13: Fail-fast at boundary entry, fail-visible in pipeline middle
+- v1.14: Keep the decomposition baseline; do not throw away PR #245
+- v1.15: Stack the next milestone on top of `fix/bugs-231-228` rather than creating a competing mainline
+- v1.15: Facts for training/promotion must be evidence-backed; unknown stays unknown
+
+### Pending Todos
+
+- Baseline merge-gate fixes on PR #245 are being handled separately and are a dependency for clean merge, but not a blocker for planning v1.15
+- Current audit result is `defer`: core path contracts pass, but local checked state lacks dataset/export/replay evidence needed for a `pass`
+
+### Blockers/Concerns
+
+- PR #245 still carries known merge-gate defects and is not mergeable yet
+- PR #243 and PR #245 are diverged; new work must stack on top of PR #245 instead of trying to merge both into main independently
+- Local audit does not show new blockers, but it also cannot certify merge safety until persisted evidence surfaces are populated
 
 ## Session Continuity
 
-**Previous milestone:** v1.12 (Nocturnal Production Stabilization - COMPLETE)  
-**Current milestone:** v1.13 - Boundary Contract Hardening  
-**Ready for:** `/gsd-audit-milestone` or `/gsd-complete-milestone`
+**Previous milestone:** v1.14 baseline complete on branch `fix/bugs-231-228` / PR #245
+**Current milestone:** v1.15 - Runtime & Truth Contract Hardening
+**Just completed:** `Phase 33 production invariants and operator-facing merge audit`
+**Ready for:** evidence collection on a real populated state snapshot, then rerun merge audit

@@ -15,6 +15,7 @@ import {
   updateReviewStatus,
   getDatasetRecord,
 } from '../../src/core/nocturnal-dataset.js';
+import { appendArtifactLineageRecord } from '../../src/core/nocturnal-artifact-lineage.js';
 import type { NocturnalDatasetRecord } from '../../src/core/nocturnal-dataset.js';
 
 // ---------------------------------------------------------------------------
@@ -123,7 +124,61 @@ describe('NocturnalExport exportORPOSamples', () => {
       expect(sample.rejected).toBeTruthy();
       expect(sample.rationale).toBeTruthy();
       expect(sample.datasetMetadata.exportId).toBe(result.manifest!.exportId);
+      expect(sample.datasetMetadata.evidenceSummary.lineageStatus).toBe('unknown');
     }
+  });
+
+  it('degrades to evidence-bounded neutral text when lineage is missing', () => {
+    setupExportReady(tmpDir, 'art-no-lineage', 'gpt-4');
+
+    const result = exportORPOSamples(tmpDir, 'gpt-4');
+
+    expect(result.success).toBe(true);
+    const [sample] = fs.readFileSync(result.manifest!.exportPath, 'utf-8').trim().split('\n').map((line) => JSON.parse(line));
+    expect(sample.prompt).toBe('Take the next action without verified source evidence.');
+    expect(sample.rejected).toBe('Take the next action without verified source evidence.');
+    expect(sample.rationale).toContain('Source evidence is unknown');
+    expect(sample.datasetMetadata.evidenceSummary).toEqual({
+      lineageStatus: 'unknown',
+      painSignals: { status: 'unknown', count: null, ids: [] },
+      gateBlocks: { status: 'unknown', count: null, ids: [] },
+    });
+  });
+
+  it('exports observed lineage evidence when available', () => {
+    const record = setupExportReady(tmpDir, 'art-with-lineage', 'gpt-4');
+    appendArtifactLineageRecord(tmpDir, {
+      artifactKind: 'behavioral-sample',
+      artifactId: record.artifactId,
+      principleId: record.principleId,
+      ruleId: null,
+      sessionId: record.sessionId,
+      sourceSnapshotRef: record.sourceSnapshotRef,
+      sourcePainIds: ['pain-1', 'pain-2'],
+      sourceGateBlockIds: ['gate-1'],
+      storagePath: record.artifactPath,
+      implementationId: null,
+      createdAt: record.createdAt,
+    });
+
+    const result = exportORPOSamples(tmpDir, 'gpt-4');
+
+    expect(result.success).toBe(true);
+    const [sample] = fs.readFileSync(result.manifest!.exportPath, 'utf-8').trim().split('\n').map((line) => JSON.parse(line));
+    expect(sample.prompt).toContain('2 observed pain signals');
+    expect(sample.rejected).toContain('1 observed gate blocks');
+    expect(sample.rationale).toContain('Observed source evidence: 2 pain signals and 1 gate blocks');
+    expect(sample.datasetMetadata.evidenceSummary.lineageStatus).toBe('observed');
+    expect(sample.datasetMetadata.evidenceSummary.painSignals).toEqual({
+      status: 'observed',
+      count: 2,
+      ids: ['pain-1', 'pain-2'],
+    });
+    expect(sample.datasetMetadata.evidenceSummary.gateBlocks).toEqual({
+      status: 'observed',
+      count: 1,
+      ids: ['gate-1'],
+    });
   });
 
   it('writes manifest alongside JSONL', () => {
