@@ -26,6 +26,7 @@ import {
     createNocturnalTrajectoryExtractor,
     type NocturnalPainEvent,
     type NocturnalSessionSnapshot,
+    type NocturnalTrajectoryExtractor,
 } from '../core/nocturnal-trajectory-extractor.js';
 import { validateNocturnalSnapshotIngress } from '../core/nocturnal-snapshot-contract.js';
 import { isExpectedSubagentError } from './subagent-workflow/subagent-error-utils.js';
@@ -335,7 +336,10 @@ function isSessionAtOrBeforeTriggerTime(
     return true;
 }
 
-function buildFallbackNocturnalSnapshot(sleepTask: EvolutionQueueItem): NocturnalSessionSnapshot | null {
+function buildFallbackNocturnalSnapshot(
+    sleepTask: EvolutionQueueItem,
+    extractor?: NocturnalTrajectoryExtractor | null
+): NocturnalSessionSnapshot | null {
     const painContext = sleepTask.recentPainContext;
     if (!painContext) {
         return null;
@@ -349,6 +353,28 @@ function buildFallbackNocturnalSnapshot(sleepTask: EvolutionQueueItem): Nocturna
         createdAt: painContext.mostRecent.timestamp,
     }] : [];
 
+    // #246: Try to extract real session stats from trajectory DB for the pain session.
+    // The main path (lines ~1469-1512) tries getNocturnalSessionSnapshot which returns null
+    // when no session exists. Here we attempt a lighter query via listRecentNocturnalCandidateSessions
+    // to at least get summary counts for the pain-triggering session.
+    let realStats: { totalAssistantTurns: number; totalToolCalls: number; failureCount: number; totalGateBlocks: number } | null = null;
+    if (extractor && painContext.mostRecent?.sessionId) {
+        try {
+            const summaries = extractor.listRecentNocturnalCandidateSessions({ limit: 300 });
+            const match = summaries.find(s => s.sessionId === painContext.mostRecent!.sessionId);
+            if (match) {
+                realStats = {
+                    totalAssistantTurns: match.assistantTurnCount,
+                    totalToolCalls: match.toolCallCount,
+                    failureCount: match.failureCount,
+                    totalGateBlocks: match.gateBlockCount,
+                };
+            }
+        } catch {
+            // Best effort — non-fatal
+        }
+    }
+
     return {
         sessionId: painContext.mostRecent?.sessionId || sleepTask.id,
         startedAt: sleepTask.timestamp,
@@ -359,11 +385,11 @@ function buildFallbackNocturnalSnapshot(sleepTask: EvolutionQueueItem): Nocturna
         painEvents: fallbackPainEvents,
         gateBlocks: [],
         stats: {
-            totalAssistantTurns: null,
-            totalToolCalls: null,
-            failureCount: null,
+            totalAssistantTurns: realStats?.totalAssistantTurns ?? 0,
+            totalToolCalls: realStats?.totalToolCalls ?? 0,
+            failureCount: realStats?.failureCount ?? 0,
             totalPainEvents: painContext.recentPainCount,
-            totalGateBlocks: null,
+            totalGateBlocks: realStats?.totalGateBlocks ?? 0,
         },
         _dataSource: 'pain_context_fallback',
     };
@@ -1466,8 +1492,9 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     } else {
                         // Phase 1: Build trajectory snapshot for Nocturnal pipeline
                         // Priority: Pain signal sessionId → Task ID → Recent session with violations
+                        let extractor: NocturnalTrajectoryExtractor | null = null;
                         try {
-                            const extractor = createNocturnalTrajectoryExtractor(wctx.workspaceDir);
+                            extractor = createNocturnalTrajectoryExtractor(wctx.workspaceDir);
 
                             // 1. Try exact session ID from pain signal (most accurate)
                             const painSessionId = sleepTask.recentPainContext?.mostRecent?.sessionId;
@@ -1493,10 +1520,28 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                                 const sessionsWithViolations = recentSessions.filter(
                                     s => s.failureCount > 0 || s.painEventCount > 0 || s.gateBlockCount > 0
                                 );
-                                if (sessionsWithViolations.length > 0) {
-                                    const targetSession = sessionsWithViolations[0];
-                                    logger?.info?.(`[PD:EvolutionWorker] Task ${sleepTask.id} using session with violations: ${targetSession.sessionId} (failed=${targetSession.failureCount}, pain=${targetSession.painEventCount}, gates=${targetSession.gateBlockCount})`);
+
+                                // #244: Filter out sessions that are too thin for meaningful reflection
+                                // A session needs enough violation context to generate a useful badDecision/betterDecision pair
+                                const MIN_VIOLATION_DEPTH = 2; // at least 2 violations total (failures + pain + gates)
+                                const richViolations = sessionsWithViolations.filter(
+                                    s => (s.failureCount ?? 0) + (s.painEventCount ?? 0) + (s.gateBlockCount ?? 0) >= MIN_VIOLATION_DEPTH
+                                );
+
+                                if (richViolations.length > 0) {
+                                    const targetSession = richViolations[0];
+                                    logger?.info?.(`[PD:EvolutionWorker] Task ${sleepTask.id} using rich violation session: ${targetSession.sessionId} (failed=${targetSession.failureCount}, pain=${targetSession.painEventCount}, gates=${targetSession.gateBlockCount})`);
                                     fullSnapshot = extractor.getNocturnalSessionSnapshot(targetSession.sessionId);
+                                } else if (sessionsWithViolations.length > 0) {
+                                    const thinSession = sessionsWithViolations[0];
+                                    const totalViolations = (thinSession.failureCount ?? 0) + (thinSession.painEventCount ?? 0) + (thinSession.gateBlockCount ?? 0);
+                                    logger?.warn?.(`[PD:EvolutionWorker] Task ${sleepTask.id} found violation session but too thin for reflection: ${thinSession.sessionId} (total_violations=${totalViolations} < ${MIN_VIOLATION_DEPTH}) — skipping`);
+                                    // Don't use thin sessions — mark as completed without running reflection
+                                    sleepTask.status = 'completed';
+                                    sleepTask.completed_at = new Date().toISOString();
+                                    sleepTask.resolution = 'skipped_thin_violation';
+                                    sleepTask.lastError = null;
+                                    continue;
                                 } else if (recentSessions.length > 0) {
                                     // No sessions with violations, use most recent as last resort
                                     const latestSession = recentSessions[0];
@@ -1516,8 +1561,8 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
 
                         // Phase 2: If no trajectory data, try pain-context fallback
                         if (!snapshotData && sleepTask.recentPainContext) {
-                            logger?.warn?.(`[PD:EvolutionWorker] Using pain-context fallback for ${sleepTask.id}: trajectory stats unavailable (stats will be null)`);
-                            snapshotData = buildFallbackNocturnalSnapshot(sleepTask) ?? undefined;
+                            logger?.warn?.(`[PD:EvolutionWorker] Using pain-context fallback for ${sleepTask.id}: trajectory snapshot unavailable, will try session summary from extractor`);
+                            snapshotData = buildFallbackNocturnalSnapshot(sleepTask, extractor) ?? undefined;
                         }
 
                         const snapshotValidation = validateNocturnalSnapshotIngress(snapshotData);

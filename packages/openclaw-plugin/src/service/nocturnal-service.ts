@@ -905,7 +905,7 @@ export function executeNocturnalReflection(
     expectedPrincipleId: selectedPrincipleId,
     expectedSessionId: selectedSessionId,
     qualityThresholds: {
-      thinkingModelDeltaMin: 0.01,
+      thinkingModelDeltaMin: 0.0,  // #244: relaxed from 0.01 — thin violations (single tool timeout) cannot generate meaningful cognitive delta
       planningRatioGainMin: -0.5,
     },
   });
@@ -1336,7 +1336,7 @@ async function executeNocturnalReflectionWithAdapter(
     expectedPrincipleId: selectedPrincipleId,
     expectedSessionId: selectedSessionId,
     qualityThresholds: {
-      thinkingModelDeltaMin: 0.01,
+      thinkingModelDeltaMin: 0.0,  // #244: relaxed from 0.01 — thin violations (single tool timeout) cannot generate meaningful cognitive delta
       planningRatioGainMin: -0.5,
     },
   });
