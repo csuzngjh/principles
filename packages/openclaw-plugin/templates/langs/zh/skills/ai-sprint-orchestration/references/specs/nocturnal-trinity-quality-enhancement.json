@@ -1,8 +1,17 @@
 {
   "id": "nocturnal-trinity-quality-enhancement",
+  "title": "Enhance nocturnal Trinity prompt quality",
   "description": "Enhance nocturnal Trinity prompt quality — add Dreamer perspective diversity constraints and Scribe rejected-decision analysis",
   "workspace": "/home/csuzngjh/code/principles",
   "branch": "fix/bugs-231-228",
+  "requiresTaskContract": true,
+  "maxRoundsPerStage": 2,
+  "maxRuntimeMinutes": 60,
+  "stages": [
+    "investigate",
+    "implement-pass-1",
+    "verify"
+  ],
   "taskContract": {
     "goal": "Improve nocturnal Trinity output quality by adding perspective diversity to Dreamer and rejected-decision analysis to Scribe",
     "inScope": [
@@ -46,7 +55,6 @@
     "model": "glm-5",
     "timeoutSeconds": 1800
   },
-  "maxRoundsPerStage": 2,
   "stageGoals": {
     "investigate": [
       "Read nocturnal-trinity.ts lines 64-298 (all three prompts) and nocturnal-trinity.test.ts",
