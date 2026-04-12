@@ -162,6 +162,24 @@ export interface PluginRuntimeAgent {
         saveSessionStore: (storePath: string, store: Record<string, unknown>) => Promise<void>;
         resolveSessionFilePath: (sessionKey: string) => string;
     };
+    /**
+     * Run an embedded PI agent without requiring gateway request scope.
+     * This method works in background contexts (services, cron, hooks).
+     */
+    runEmbeddedPiAgent: (opts: {
+        sessionId: string;
+        sessionFile: string;
+        prompt: string;
+        extraSystemPrompt?: string;
+        config?: unknown;
+        provider?: string;
+        model?: string;
+        timeoutMs: number;
+        runId: string;
+        disableTools?: boolean;
+    }) => Promise<{
+        payloads?: Array<{ isError?: boolean; text?: string }>;
+    }>;
 }
 
 /**

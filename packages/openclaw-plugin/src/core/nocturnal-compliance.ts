@@ -558,6 +558,7 @@ export function detectViolation(principleId: string, session: SessionEvents): Vi
     case 'T-09':
       return detectT09Violation(session);
     default:
+      console.warn(`[PD:Compliance] Unknown principle ID: ${principleId} — treating as no violation. Check for typos (P-001 vs P_001).`);
       return { violated: false, reason: `Unknown principle: ${principleId}` };
   }
 }

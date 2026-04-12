@@ -1,0 +1,15 @@
+# Lefthook configuration
+# https://github.com/evilmartians/lefthook/blob/master/docs/configuration.md
+
+pre-commit:
+  parallel: true
+  commands:
+    lint:
+      glob: "*.ts"
+      run: npx eslint --fix {staged_files}
+      stage_fixed: true
+
+pre-push:
+  commands:
+    protect-main:
+      run: node scripts/protect-branch.cjs
