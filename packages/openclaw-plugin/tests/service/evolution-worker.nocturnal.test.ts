@@ -540,7 +540,7 @@ score: 80`,
 
       expect(mockListRecentNocturnalCandidateSessions).toHaveBeenCalledWith(
         expect.objectContaining({
-          limit: 20,
+          limit: 300,  // #244: increased from 20 to cover real violations
           minToolCalls: 1,
           dateTo: '2026-04-10T00:00:00.000Z',
         })
@@ -743,7 +743,7 @@ session_id: pain-session-abc
       // Verify dateTo boundary was passed
       expect(mockListRecentNocturnalCandidateSessions).toHaveBeenCalledWith(
         expect.objectContaining({
-          limit: 20,
+          limit: 300,  // #244: increased from 20 to cover real violations
           minToolCalls: 1,
           dateTo: '2026-04-10T00:00:00.000Z',
         })
