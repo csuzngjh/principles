@@ -133,6 +133,21 @@ export const nocturnalWorkflowSpec: SubagentWorkflowSpec<NocturnalResult> = {
  * - notifyWaitResult and notifyLifecycleEvent are no-ops
  * - sweepExpiredWorkflows marks expired workflows and cleans partial artifacts
  */
+/**
+ * Guard: check if an unknown value satisfies the TrinityRuntimeAdapter contract.
+ * Requires all 3 stage methods (not just invokeDreamer) to reduce false positives
+ * from objects that happen to have a single matching property.
+ */
+function isTrinityRuntimeAdapterShape(value: unknown): value is TrinityRuntimeAdapter {
+  if (!value || typeof value !== 'object') return false;
+  const obj = value as Partial<TrinityRuntimeAdapter>;
+  return (
+    typeof obj.invokeDreamer === 'function' &&
+    typeof obj.invokePhilosopher === 'function' &&
+    typeof obj.invokeScribe === 'function'
+  );
+}
+
 export class NocturnalWorkflowManager implements WorkflowManager {
     private readonly workspaceDir: string;
     private readonly stateDir: string;
@@ -175,7 +190,7 @@ export class NocturnalWorkflowManager implements WorkflowManager {
         const runtimeAvailable =
             this.runtimeAdapter instanceof OpenClawTrinityRuntimeAdapter
                 ? this.runtimeAdapter.isRuntimeAvailable()
-                : typeof (this.runtimeAdapter as Partial<TrinityRuntimeAdapter>).invokeDreamer === 'function';
+                : isTrinityRuntimeAdapterShape(this.runtimeAdapter);
         if (!runtimeAvailable) {
             this.logger.warn(`[PD:NocturnalWorkflow] Subagent runtime unavailable, skipping workflow`);
             throw new Error(`NocturnalWorkflowManager: subagent runtime unavailable`);

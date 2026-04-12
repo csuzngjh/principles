@@ -19,7 +19,6 @@ import {
   readPainFlagData,
   validatePainFlag,
 } from '../../src/core/pain.js';
-import { PainFlagDetector } from '../../src/service/pain-flag-detector.js';
 
 const TEST_DIR = path.join(os.tmpdir(), 'test-pain-integration');
 const STATE_DIR = path.join(TEST_DIR, '.state');
@@ -481,7 +480,7 @@ unknown_meta: some data`;
       }
     });
 
-    it('PainFlagDetector.detect reads only the canonical .state/.pain_flag path', async () => {
+    it('readPainFlagData reads only the canonical .state/.pain_flag path', () => {
       const legacyRootPath = path.join(TEST_DIR, 'PAIN_FLAG');
       fs.writeFileSync(
         legacyRootPath,
@@ -500,12 +499,12 @@ time: 2026-04-10T09:00:00.000Z`,
         'utf-8',
       );
 
-      const detector = new PainFlagDetector(TEST_DIR);
-      const result = await detector.detect();
+      const result = readPainFlagData(TEST_DIR);
 
-      expect(result.exists).toBe(true);
       expect(result.source).toBe('canonical_state');
-      expect(result.enqueued).toBe(true);
+      expect(result.score).toBe('80');
+      const legacyResult = readPainFlagData(path.join(TEST_DIR, '..'));
+      expect(legacyResult.source).not.toBe('legacy_root');
     });
   });
 });

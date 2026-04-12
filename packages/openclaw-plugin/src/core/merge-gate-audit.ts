@@ -350,6 +350,7 @@ function auditReplayEvidenceIntegrity(stateDir: string): MergeGateAuditCheck {
   const malformedReports: string[] = [];
   const missingEvidenceSummary: string[] = [];
   const unsupportedPassingReports: string[] = [];
+  const emptyEvidenceNeedsReview: string[] = [];
 
   for (const reportPath of replayReportPaths) {
     try {
@@ -372,6 +373,10 @@ function auditReplayEvidenceIntegrity(stateDir: string): MergeGateAuditCheck {
       if (parsed.overallDecision === 'pass' && evidenceSummary.totalSamples === 0) {
         unsupportedPassingReports.push(reportPath);
       }
+
+      if (parsed.overallDecision === 'needs-review' && evidenceSummary.totalSamples === 0) {
+        emptyEvidenceNeedsReview.push(reportPath);
+      }
     } catch {
       malformedReports.push(reportPath);
     }
@@ -380,17 +385,19 @@ function auditReplayEvidenceIntegrity(stateDir: string): MergeGateAuditCheck {
   if (
     malformedReports.length > 0 ||
     missingEvidenceSummary.length > 0 ||
-    unsupportedPassingReports.length > 0
+    unsupportedPassingReports.length > 0 ||
+    emptyEvidenceNeedsReview.length > 0
   ) {
     return {
       id: 'replay_evidence_integrity',
       status: 'block',
-      summary: 'Replay reports contain malformed payloads or promotion-unsafe empty-evidence passes.',
+      summary: 'Replay reports contain malformed payloads, empty-evidence passes, or zero-evidence needs-review verdicts.',
       details: {
         reportCount: replayReportPaths.length,
         malformedReports,
         missingEvidenceSummary,
         unsupportedPassingReports,
+        emptyEvidenceNeedsReview,
       },
     };
   }
@@ -398,7 +405,7 @@ function auditReplayEvidenceIntegrity(stateDir: string): MergeGateAuditCheck {
   return {
     id: 'replay_evidence_integrity',
     status: 'pass',
-    summary: 'Replay reports include evidence summaries and no empty-evidence pass verdicts.',
+    summary: 'Replay reports include evidence summaries and no empty-evidence unsafe verdicts.',
     details: {
       reportCount: replayReportPaths.length,
     },

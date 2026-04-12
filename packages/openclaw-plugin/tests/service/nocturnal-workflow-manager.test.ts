@@ -2,13 +2,20 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { TrinityRuntimeAdapter } from '../../core/nocturnal-trinity.js';
 
 // Mock dependencies
-vi.mock('../../src/core/nocturnal-trinity.js', () => ({
-    runTrinityAsync: vi.fn(),
-    TrinityStageFailure: {
-        stage: 'dreamer',
-        reason: '',
-    },
-}));
+vi.mock('../../src/core/nocturnal-trinity.js', () => {
+    class MockOpenClawTrinityRuntimeAdapter {
+        isRuntimeAvailable() { return true; }
+        getLastFailureReason() { return null; }
+    }
+    return {
+        runTrinityAsync: vi.fn(),
+        TrinityStageFailure: {
+            stage: 'dreamer',
+            reason: '',
+        },
+        OpenClawTrinityRuntimeAdapter: MockOpenClawTrinityRuntimeAdapter,
+    };
+});
 
 vi.mock('../../src/core/nocturnal-paths.js', () => ({
     NocturnalPathResolver: {
