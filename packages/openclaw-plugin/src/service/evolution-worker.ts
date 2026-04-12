@@ -132,9 +132,13 @@ async function runWorkflowWatchdog(
             if (dataSource === 'pain_context_fallback') {
               details.push(`fallback_snapshot: nocturnal workflow ${wf.workflow_id} uses pain-context fallback (stats may be incomplete)`);
             }
-            const stats = snapshot.stats as Record<string, number | null> | undefined;
-            if (stats && stats.totalAssistantTurns === null && stats.totalToolCalls === null && stats.totalPainEvents === 0 && stats.totalGateBlocks === null) {
-              details.push(`fallback_snapshot_stats: nocturnal workflow ${wf.workflow_id} has null stats (data unavailable)`);
+            const stats = snapshot.stats as Record<string, number> | undefined;
+            // #246: Stats are now always number (never null). Detect "empty" fallback:
+            // fallback + all counts zero means no real data was available.
+            if (stats && dataSource === 'pain_context_fallback' &&
+                stats.totalAssistantTurns === 0 && stats.totalToolCalls === 0 &&
+                stats.totalGateBlocks === 0 && stats.failureCount === 0) {
+              details.push(`fallback_snapshot_stats: nocturnal workflow ${wf.workflow_id} has empty fallback stats (no trajectory data found)`);
             }
           }
         } catch { /* ignore malformed metadata */ }
@@ -335,7 +339,10 @@ function isSessionAtOrBeforeTriggerTime(
     return true;
 }
 
-function buildFallbackNocturnalSnapshot(sleepTask: EvolutionQueueItem): NocturnalSessionSnapshot | null {
+function buildFallbackNocturnalSnapshot(
+    sleepTask: EvolutionQueueItem,
+    extractor?: ReturnType<typeof createNocturnalTrajectoryExtractor> | null
+): NocturnalSessionSnapshot | null {
     const painContext = sleepTask.recentPainContext;
     if (!painContext) {
         return null;
@@ -349,6 +356,28 @@ function buildFallbackNocturnalSnapshot(sleepTask: EvolutionQueueItem): Nocturna
         createdAt: painContext.mostRecent.timestamp,
     }] : [];
 
+    // #246: Try to extract real session stats from trajectory DB for the pain session.
+    // The main path tries getNocturnalSessionSnapshot which returns null when no session
+    // exists. Here we attempt a lighter query via listRecentNocturnalCandidateSessions
+    // to at least get summary counts for the pain-triggering session.
+    let realStats: { totalAssistantTurns: number; totalToolCalls: number; failureCount: number; totalGateBlocks: number } | null = null;
+    if (extractor && painContext.mostRecent?.sessionId) {
+        try {
+            const summaries = extractor.listRecentNocturnalCandidateSessions({ limit: 300 });
+            const match = summaries.find(s => s.sessionId === painContext.mostRecent!.sessionId);
+            if (match) {
+                realStats = {
+                    totalAssistantTurns: match.assistantTurnCount,
+                    totalToolCalls: match.toolCallCount,
+                    failureCount: match.failureCount,
+                    totalGateBlocks: match.gateBlockCount,
+                };
+            }
+        } catch {
+            // Best effort — non-fatal
+        }
+    }
+
     return {
         sessionId: painContext.mostRecent?.sessionId || sleepTask.id,
         startedAt: sleepTask.timestamp,
@@ -359,11 +388,11 @@ function buildFallbackNocturnalSnapshot(sleepTask: EvolutionQueueItem): Nocturna
         painEvents: fallbackPainEvents,
         gateBlocks: [],
         stats: {
-            totalAssistantTurns: null,
-            totalToolCalls: null,
-            failureCount: null,
+            totalAssistantTurns: realStats?.totalAssistantTurns ?? 0,
+            totalToolCalls: realStats?.totalToolCalls ?? 0,
+            failureCount: realStats?.failureCount ?? 0,
             totalPainEvents: painContext.recentPainCount,
-            totalGateBlocks: null,
+            totalGateBlocks: realStats?.totalGateBlocks ?? 0,
         },
         _dataSource: 'pain_context_fallback',
     };
@@ -1466,8 +1495,9 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     } else {
                         // Phase 1: Build trajectory snapshot for Nocturnal pipeline
                         // Priority: Pain signal sessionId → Task ID → Recent session with violations
+                        let extractor: ReturnType<typeof createNocturnalTrajectoryExtractor> | null = null;
                         try {
-                            const extractor = createNocturnalTrajectoryExtractor(wctx.workspaceDir);
+                            extractor = createNocturnalTrajectoryExtractor(wctx.workspaceDir);
 
                             // 1. Try exact session ID from pain signal (most accurate)
                             const painSessionId = sleepTask.recentPainContext?.mostRecent?.sessionId;
@@ -1516,8 +1546,8 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
 
                         // Phase 2: If no trajectory data, try pain-context fallback
                         if (!snapshotData && sleepTask.recentPainContext) {
-                            logger?.warn?.(`[PD:EvolutionWorker] Using pain-context fallback for ${sleepTask.id}: trajectory stats unavailable (stats will be null)`);
-                            snapshotData = buildFallbackNocturnalSnapshot(sleepTask) ?? undefined;
+                            logger?.warn?.(`[PD:EvolutionWorker] Using pain-context fallback for ${sleepTask.id}: trajectory snapshot unavailable, will try session summary from extractor`);
+                            snapshotData = buildFallbackNocturnalSnapshot(sleepTask, extractor) ?? undefined;
                         }
 
                         const snapshotValidation = validateNocturnalSnapshotIngress(snapshotData);

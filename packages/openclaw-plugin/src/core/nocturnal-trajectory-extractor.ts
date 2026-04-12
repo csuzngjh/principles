@@ -116,15 +116,18 @@ export interface NocturnalSessionSnapshot {
   gateBlocks: NocturnalGateBlock[];
   /**
    * Summary statistics for quick triage.
-   * When _dataSource is 'pain_context_fallback', these fields are null
-   * to distinguish "no data" from "data is zero".
+   * #246: All fields are now number (never null).
+   * Previously null was used to mean "no trajectory data", but this caused
+   * downstream consumers to crash on arithmetic. The fallback path now
+   * queries the trajectory extractor for real data and falls back to 0.
+   * Use _dataSource === 'pain_context_fallback' to detect partial data.
    */
   stats: {
-    totalAssistantTurns: number | null;
-    totalToolCalls: number | null;
+    totalAssistantTurns: number;
+    totalToolCalls: number;
     totalPainEvents: number;
-    totalGateBlocks: number | null;
-    failureCount: number | null;
+    totalGateBlocks: number;
+    failureCount: number;
   };
   /**
    * #219: Marker for data source to identify fallback/partial stats.
