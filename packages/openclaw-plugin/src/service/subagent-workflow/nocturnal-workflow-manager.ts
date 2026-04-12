@@ -34,7 +34,7 @@ import {
     executeNocturnalReflectionAsync,
     type NocturnalRunResult,
 } from '../nocturnal-service.js';
-import { OpenClawTrinityRuntimeAdapter, type TrinityStageFailure, type TrinityResult } from '../../core/nocturnal-trinity.js';
+import { type TrinityStageFailure, type TrinityResult } from '../../core/nocturnal-trinity.js';
 import type { TrinityRuntimeAdapter } from '../../core/nocturnal-trinity.js';
 import type { NocturnalSessionSnapshot } from '../../core/nocturnal-trajectory-extractor.js';
 import type { RecentPainContext } from '../evolution-worker.js';
@@ -133,21 +133,6 @@ export const nocturnalWorkflowSpec: SubagentWorkflowSpec<NocturnalResult> = {
  * - notifyWaitResult and notifyLifecycleEvent are no-ops
  * - sweepExpiredWorkflows marks expired workflows and cleans partial artifacts
  */
-/**
- * Guard: check if an unknown value satisfies the TrinityRuntimeAdapter contract.
- * Requires all 3 stage methods (not just invokeDreamer) to reduce false positives
- * from objects that happen to have a single matching property.
- */
-function isTrinityRuntimeAdapterShape(value: unknown): value is TrinityRuntimeAdapter {
-  if (!value || typeof value !== 'object') return false;
-  const obj = value as Partial<TrinityRuntimeAdapter>;
-  return (
-    typeof obj.invokeDreamer === 'function' &&
-    typeof obj.invokePhilosopher === 'function' &&
-    typeof obj.invokeScribe === 'function'
-  );
-}
-
 export class NocturnalWorkflowManager implements WorkflowManager {
     private readonly workspaceDir: string;
     private readonly stateDir: string;
@@ -187,10 +172,7 @@ export class NocturnalWorkflowManager implements WorkflowManager {
             metadata?: Record<string, unknown>;
         }
     ): Promise<WorkflowHandle> {
-        const runtimeAvailable =
-            this.runtimeAdapter instanceof OpenClawTrinityRuntimeAdapter
-                ? this.runtimeAdapter.isRuntimeAvailable()
-                : isTrinityRuntimeAdapterShape(this.runtimeAdapter);
+        const runtimeAvailable = this.runtimeAdapter.isRuntimeAvailable();
         if (!runtimeAvailable) {
             this.logger.warn(`[PD:NocturnalWorkflow] Subagent runtime unavailable, skipping workflow`);
             throw new Error(`NocturnalWorkflowManager: subagent runtime unavailable`);

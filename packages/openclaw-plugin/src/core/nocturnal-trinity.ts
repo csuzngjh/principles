@@ -308,6 +308,17 @@ If you cannot synthesize an artifact:
  
 export interface TrinityRuntimeAdapter {
   /**
+   * Check if the runtime surface is available for Trinity stage execution.
+   * @returns true if the adapter can invoke stages
+   */
+  isRuntimeAvailable(): boolean;
+
+  /**
+   * Get the reason for the last runtime failure, or null if no failure.
+   */
+  getLastFailureReason(): string | null;
+
+  /**
    * Invoke the Dreamer stage.
    * @param snapshot Session trajectory snapshot
    * @param principleId Target principle ID

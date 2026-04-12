@@ -325,13 +325,22 @@ function auditReplayEvidenceIntegrity(stateDir: string): MergeGateAuditCheck {
   }
 
   const malformedReports: string[] = [];
+  const ioErrorReports: string[] = [];
   const missingEvidenceSummary: string[] = [];
   const unsupportedPassingReports: string[] = [];
   const emptyEvidenceNeedsReview: string[] = [];
 
   for (const reportPath of replayReportPaths) {
+    let rawContent: string;
     try {
-      const parsed = JSON.parse(fs.readFileSync(reportPath, 'utf-8')) as unknown;
+      rawContent = fs.readFileSync(reportPath, 'utf-8');
+    } catch {
+      ioErrorReports.push(reportPath);
+      continue;
+    }
+
+    try {
+      const parsed = JSON.parse(rawContent) as unknown;
       if (!isReplayReportShape(parsed)) {
         malformedReports.push(reportPath);
         continue;
@@ -361,6 +370,7 @@ function auditReplayEvidenceIntegrity(stateDir: string): MergeGateAuditCheck {
 
   if (
     malformedReports.length > 0 ||
+    ioErrorReports.length > 0 ||
     missingEvidenceSummary.length > 0 ||
     unsupportedPassingReports.length > 0 ||
     emptyEvidenceNeedsReview.length > 0
@@ -368,10 +378,11 @@ function auditReplayEvidenceIntegrity(stateDir: string): MergeGateAuditCheck {
     return {
       id: 'replay_evidence_integrity',
       status: 'block',
-      summary: 'Replay reports contain malformed payloads, empty-evidence passes, or zero-evidence needs-review verdicts.',
+      summary: 'Replay reports contain malformed payloads, I/O errors, empty-evidence passes, or zero-evidence needs-review verdicts.',
       details: {
         reportCount: replayReportPaths.length,
         malformedReports,
+        ioErrorReports,
         missingEvidenceSummary,
         unsupportedPassingReports,
         emptyEvidenceNeedsReview,

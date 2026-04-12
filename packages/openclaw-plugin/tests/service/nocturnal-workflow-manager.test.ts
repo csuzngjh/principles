@@ -2,20 +2,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { TrinityRuntimeAdapter } from '../../core/nocturnal-trinity.js';
 
 // Mock dependencies
-vi.mock('../../src/core/nocturnal-trinity.js', () => {
-    class MockOpenClawTrinityRuntimeAdapter {
-        isRuntimeAvailable() { return true; }
-        getLastFailureReason() { return null; }
-    }
-    return {
-        runTrinityAsync: vi.fn(),
-        TrinityStageFailure: {
-            stage: 'dreamer',
-            reason: '',
-        },
-        OpenClawTrinityRuntimeAdapter: MockOpenClawTrinityRuntimeAdapter,
-    };
-});
+vi.mock('../../src/core/nocturnal-trinity.js', () => ({
+    runTrinityAsync: vi.fn(),
+    TrinityStageFailure: {
+        stage: 'dreamer',
+        reason: '',
+    },
+}));
 
 vi.mock('../../src/core/nocturnal-paths.js', () => ({
     NocturnalPathResolver: {
@@ -36,6 +29,8 @@ const mockRunTrinityAsync = runTrinityAsync as ReturnType<typeof vi.fn>;
 
 function createMockRuntimeAdapter() {
     return {
+        isRuntimeAvailable: vi.fn(() => true),
+        getLastFailureReason: vi.fn(() => null),
         invokeDreamer: vi.fn<(snapshot: any, principleId: any, maxCandidates: any) => Promise<DreamerOutput>>(),
         invokePhilosopher: vi.fn<(dreamerOutput: any, principleId: any) => Promise<PhilosopherOutput>>(),
         invokeScribe: vi.fn<(dreamerOutput: any, philosopherOutput: any, snapshot: any, principleId: any, telemetry: any, config: any) => Promise<TrinityDraftArtifact | null>>(),

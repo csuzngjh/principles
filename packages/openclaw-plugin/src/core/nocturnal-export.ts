@@ -202,20 +202,23 @@ function buildEvidenceSummary(
     };
   }
 
-  const painCount = lineageRecord.sourcePainIds.length;
-  const gateCount = lineageRecord.sourceGateBlockIds.length;
+  // Defensive: old lineage files on disk may lack these fields
+  const painIds = lineageRecord.sourcePainIds ?? [];
+  const gateBlockIds = lineageRecord.sourceGateBlockIds ?? [];
+  const painCount = painIds.length;
+  const gateCount = gateBlockIds.length;
 
   return {
     lineageStatus: 'observed',
     painSignals: {
       status: painCount > 0 ? 'observed' : 'not_observed',
       count: painCount,
-      ids: [...lineageRecord.sourcePainIds],
+      ids: [...painIds],
     },
     gateBlocks: {
       status: gateCount > 0 ? 'observed' : 'not_observed',
       count: gateCount,
-      ids: [...lineageRecord.sourceGateBlockIds],
+      ids: [...gateBlockIds],
     },
   };
 }
