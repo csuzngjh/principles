@@ -267,9 +267,9 @@ function invokeStubReflector(
 
   // Build a plausible bad/better decision pair based on available snapshot data.
   // This is synthetic — real reflection would come from subagent analysis.
-  const hasFailures = (snapshot.stats.failureCount ?? 0) > 0;
+  const hasFailures = snapshot.stats.failureCount > 0;
   const hasPain = snapshot.stats.totalPainEvents > 0;
-  const hasGateBlocks = (snapshot.stats.totalGateBlocks ?? 0) > 0;
+  const hasGateBlocks = snapshot.stats.totalGateBlocks > 0;
 
   // Detect what kind of signal is available and craft appropriate artifact
    

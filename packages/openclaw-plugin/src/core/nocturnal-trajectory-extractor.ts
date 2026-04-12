@@ -115,16 +115,17 @@ export interface NocturnalSessionSnapshot {
   painEvents: NocturnalPainEvent[];
   gateBlocks: NocturnalGateBlock[];
   /**
-   * Summary statistics for quick triage.
-   * When _dataSource is 'pain_context_fallback', these fields are null
-   * to distinguish "no data" from "data is zero".
-   */
+  * Summary statistics for quick triage.
+  * Stats are always numeric — fallback snapshots use 0 as default when
+  * trajectory data is unavailable, or real counts when the session summary
+  * can be retrieved from the trajectory DB.
+  */
   stats: {
-    totalAssistantTurns: number | null;
-    totalToolCalls: number | null;
+    totalAssistantTurns: number;
+    totalToolCalls: number;
     totalPainEvents: number;
-    totalGateBlocks: number | null;
-    failureCount: number | null;
+    totalGateBlocks: number;
+    failureCount: number;
   };
   /**
    * #219: Marker for data source to identify fallback/partial stats.
