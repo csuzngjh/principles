@@ -312,16 +312,6 @@ export function checkWorkspaceIdle(
             }
         }
     }
-    
-    // Debug logging for diagnosing idle detection issues
-    console.error(`[PD:IdleCheck] workspaceDir=${workspaceDir?.slice(-30)}`);
-    console.error(`[PD:IdleCheck] sessions: total=${sessions.length}, system=${systemSessionCount}, user=${userActiveSessions}, abandoned=${abandonedSessions.length}`);
-    if (debugSystemSessions.length <= 8) {
-        console.error(`[PD:IdleCheck] SYSTEM sessions: ${debugSystemSessions.join(' | ')}`);
-    }
-    if (userActiveSessions > 0 && debugUserSessions.length <= 10) {
-        console.error(`[PD:IdleCheck] USER sessions: ${debugUserSessions.join(' | ')}`);
-    }
 
     const idleForMs = mostRecentActivityAt > 0 ? now - mostRecentActivityAt : now;
     const isIdle = mostRecentActivityAt === 0 || idleForMs > idleThresholdMs;

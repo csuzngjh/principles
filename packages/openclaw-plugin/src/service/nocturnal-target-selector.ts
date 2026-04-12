@@ -379,9 +379,6 @@ export class NocturnalTargetSelector {
       };
     }
 
-    // DEBUG: Log evaluable principles
-    console.log(`[PD:TargetSelector] Found ${evaluablePrinciples.length} evaluable principles: ${evaluablePrinciples.map(p => p.principleId).join(', ')}`);
-
     // Step 4: Score and filter candidates
     const scoredPrinciples: ScoredPrinciple[] = [];
 
@@ -434,8 +431,6 @@ export class NocturnalTargetSelector {
       minToolCalls: 1,
     });
 
-    console.log(`[PD:TargetSelector] Found ${recentSessions.length} recent sessions for principle ${selected.principleId}`);
-
     if (recentSessions.length === 0) {
       return {
         decision: 'skip',
@@ -448,11 +443,6 @@ export class NocturnalTargetSelector {
     const violatingSessions: ViolationSignal[] = recentSessions.map((session) => {
       const violationDensity = computeViolationDensity(session);
       const snapshot = this.extractor.getNocturnalSessionSnapshot(session.sessionId);
-
-      // DEBUG: Log snapshot info
-      if (snapshot) {
-        console.log(`[PD:TargetSelector] Session ${session.sessionId.slice(0, 20)}: toolCalls=${snapshot.toolCalls.length}, painEvents=${snapshot.painEvents.length}, gateBlocks=${snapshot.gateBlocks.length}`);
-      }
 
       // Use nocturnal-compliance to detect violations for the selected principle
       let hasViolation = false;
@@ -478,7 +468,6 @@ export class NocturnalTargetSelector {
           planApprovals: [],
         });
         hasViolation = violationResult.violated;
-        console.log(`[PD:TargetSelector] detectViolation(${selected.principleId}, ${session.sessionId.slice(0, 20)}): violated=${hasViolation}, reason=${violationResult.reason}`);
       }
 
       return {
