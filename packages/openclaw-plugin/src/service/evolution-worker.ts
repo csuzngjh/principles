@@ -1595,13 +1595,14 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             const errorReason = lastEvent?.reason ?? 'unknown';
                             // #219: Include payload details for better diagnostics
                             let detailedError = `Workflow terminal_error: ${errorReason}`;
+                            let payload: unknown = {};
                             try {
-                                const payload = lastEvent?.payload ?? {};
-                                if (payload.skipReason) {
-                                    detailedError += ` (skipReason: ${payload.skipReason})`;
+                                payload = lastEvent?.payload ?? {};
+                                if ((payload as any).skipReason) {
+                                    detailedError += ` (skipReason: ${(payload as any).skipReason})`;
                                 }
-                                if (payload.failures && Array.isArray(payload.failures) && payload.failures.length > 0) {
-                                    detailedError += ` | failures: ${(payload.failures as string[]).slice(0, 3).join(', ')}`;
+                                if ((payload as any).failures && Array.isArray((payload as any).failures) && (payload as any).failures.length > 0) {
+                                    detailedError += ` | failures: ${((payload as any).failures as string[]).slice(0, 3).join(', ')}`;
                                 }
                             } catch { /* ignore parse errors */ }
                             sleepTask.lastError = detailedError;
@@ -1613,7 +1614,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                                 sleepTask.completed_at = new Date().toISOString();
                                 sleepTask.resolution = 'stub_fallback';
                                 logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} background runtime unavailable, using stub fallback: ${errorReason}`);
-                            } else if (payload.skipReason === 'no_violating_sessions') {
+                            } else if ((payload as any).skipReason === 'no_violating_sessions') {
                                 // #244: No meaningful violations found (thin filter) → skip without failure
                                 sleepTask.status = 'completed';
                                 sleepTask.completed_at = new Date().toISOString();

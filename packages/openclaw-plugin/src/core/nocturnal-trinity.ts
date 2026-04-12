@@ -1318,9 +1318,9 @@ export function invokeStubDreamer(
   principleId: string,
   maxCandidates: number
 ): DreamerOutput {
-  const hasFailures = snapshot.stats.failureCount > 0;
+  const hasFailures = (snapshot.stats.failureCount ?? 0) > 0;
   const hasPain = snapshot.stats.totalPainEvents > 0;
-  const hasGateBlocks = snapshot.stats.totalGateBlocks > 0;
+  const hasGateBlocks = (snapshot.stats.totalGateBlocks ?? 0) > 0;
 
   // #219: Detect fallback data source - stats may be incomplete
   const isFallback = snapshot._dataSource === 'pain_context_fallback';
