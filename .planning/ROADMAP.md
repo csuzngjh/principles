@@ -70,7 +70,7 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 32-01-PLAN.md - Harden nocturnal export and dataset builders against fabricated facts
+- [x] 32-01-PLAN.md - Harden nocturnal export and dataset builders against fabricated facts
 - [ ] 32-02-PLAN.md - Add evidence-trace tests for export and promotion-facing artifacts
 
 ### Phase 33: Production Invariants and Merge-Gate Verification
@@ -97,7 +97,7 @@ Phases execute in numeric order: 30 -> 31 -> 32 -> 33
 |-------|-----------|----------------|--------|-----------|
 | 30. Runtime & Truth Contract Framing | v1.15 | 1/1 | Complete | 2026-04-12 |
 | 31. Runtime Adapter Contract Hardening | v1.15 | 2/2 | Complete | 2026-04-12 |
-| 32. Evidence-Bound Export and Dataset Hardening | v1.15 | 0/2 | Ready to plan | - |
+| 32. Evidence-Bound Export and Dataset Hardening | v1.15 | 1/2 | In progress | 2026-04-12 |
 | 33. Production Invariants and Merge-Gate Verification | v1.15 | 0/2 | Not started | - |
 
 *Last updated: 2026-04-12*

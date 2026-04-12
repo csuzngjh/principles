@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.15
 milestone_name: milestone
 status: in_progress
-last_updated: "2026-04-12T03:55:00.000Z"
+last_updated: "2026-04-12T08:20:00.000Z"
 last_activity: 2026-04-12
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 7
-  completed_plans: 3
-  percent: 43
+  completed_plans: 4
+  percent: 57
 ---
 
 # State: v1.15 Runtime & Truth Contract Hardening
@@ -33,11 +33,11 @@ See `.planning/PROJECT.md` (updated 2026-04-12)
 ## Current Position
 
 Phase: 32
-Plan: planning pending
-Status: Ready to plan
+Plan: 32-01 complete, 32-02 pending
+Status: Executing Phase 32
 Last activity: 2026-04-12
 
-Progress: [##---] 43%
+Progress: [###--] 57%
 
 ## v1.15 Architecture Focus
 
@@ -92,5 +92,5 @@ Recent decisions affecting current work:
 
 **Previous milestone:** v1.14 baseline complete on branch `fix/bugs-231-228` / PR #245
 **Current milestone:** v1.15 - Runtime & Truth Contract Hardening
-**Just completed:** `/gsd-execute-phase 31`
-**Ready for:** `/gsd-plan-phase 32`
+**Just completed:** `32-01 evidence-bound ORPO export hardening`
+**Ready for:** `32-02 promotion/report evidence-trace hardening`

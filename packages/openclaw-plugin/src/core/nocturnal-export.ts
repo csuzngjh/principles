@@ -52,6 +52,10 @@ import {
   readDatasetArtifact,
   type NocturnalDatasetRecord,
 } from './nocturnal-dataset.js';
+import {
+  listArtifactLineageRecords,
+  type ArtifactLineageRecord,
+} from './nocturnal-artifact-lineage.js';
 import { NocturnalPathResolver } from './nocturnal-paths.js';
 
 // ---------------------------------------------------------------------------
@@ -81,6 +85,23 @@ export interface ORPOSample {
     exportedAt: string;
     exportId: string;
     datasetFingerprint: string;
+    evidenceSummary: ORPOEvidenceSummary;
+  };
+}
+
+export type EvidenceState = 'observed' | 'not_observed' | 'unknown';
+
+export interface ORPOEvidenceSummary {
+  lineageStatus: 'observed' | 'unknown';
+  painSignals: {
+    status: EvidenceState;
+    count: number | null;
+    ids: string[];
+  };
+  gateBlocks: {
+    status: EvidenceState;
+    count: number | null;
+    ids: string[];
   };
 }
 
@@ -140,10 +161,12 @@ function computeDatasetFingerprint(sampleFingerprints: string[]): string {
 function serializeORPOSample(
   record: NocturnalDatasetRecord,
   artifact: ReturnType<typeof readDatasetArtifact>,
+  evidenceSummary: ORPOEvidenceSummary,
   exportId: string,
   datasetFingerprint: string
 ): ORPOSample {
   const now = new Date().toISOString();
+  const rejected = buildEvidenceBoundedRejected(artifact, evidenceSummary);
 
   return {
     sampleFingerprint: record.sampleFingerprint,
@@ -151,12 +174,11 @@ function serializeORPOSample(
     sessionId: record.sessionId,
     principleId: record.principleId,
     targetModelFamily: record.targetModelFamily as string, // validated non-null by caller
-    // For ORPO: prompt = badDecision, chosen = betterDecision, rejected = badDecision
-    // This teaches the model to prefer betterDecision over badDecision
-    prompt: artifact.badDecision,
+    // Export only evidence-bounded narratives. Free-form artifact text can overstate what was observed.
+    prompt: rejected,
     chosen: artifact.betterDecision,
-    rejected: artifact.badDecision,
-    rationale: artifact.rationale,
+    rejected,
+    rationale: buildEvidenceBoundedRationale(evidenceSummary),
     datasetMetadata: {
       sampleFingerprint: record.sampleFingerprint,
       artifactPath: record.artifactPath,
@@ -164,8 +186,78 @@ function serializeORPOSample(
       exportedAt: now,
       exportId,
       datasetFingerprint,
+      evidenceSummary,
     },
   };
+}
+
+function buildEvidenceSummary(
+  lineageRecord: ArtifactLineageRecord | null
+): ORPOEvidenceSummary {
+  if (!lineageRecord) {
+    return {
+      lineageStatus: 'unknown',
+      painSignals: { status: 'unknown', count: null, ids: [] },
+      gateBlocks: { status: 'unknown', count: null, ids: [] },
+    };
+  }
+
+  const painCount = lineageRecord.sourcePainIds.length;
+  const gateCount = lineageRecord.sourceGateBlockIds.length;
+
+  return {
+    lineageStatus: 'observed',
+    painSignals: {
+      status: painCount > 0 ? 'observed' : 'not_observed',
+      count: painCount,
+      ids: [...lineageRecord.sourcePainIds],
+    },
+    gateBlocks: {
+      status: gateCount > 0 ? 'observed' : 'not_observed',
+      count: gateCount,
+      ids: [...lineageRecord.sourceGateBlockIds],
+    },
+  };
+}
+
+function buildEvidenceBoundedRejected(
+  artifact: ReturnType<typeof readDatasetArtifact>,
+  evidenceSummary: ORPOEvidenceSummary
+): string {
+  if (evidenceSummary.lineageStatus === 'unknown') {
+    return 'Take the next action without verified source evidence.';
+  }
+
+  const clauses: string[] = [];
+  if (evidenceSummary.painSignals.status === 'observed' && evidenceSummary.painSignals.count) {
+    clauses.push(`continue despite ${evidenceSummary.painSignals.count} observed pain signals`);
+  }
+  if (evidenceSummary.gateBlocks.status === 'observed' && evidenceSummary.gateBlocks.count) {
+    clauses.push(`ignore ${evidenceSummary.gateBlocks.count} observed gate blocks`);
+  }
+
+  if (clauses.length === 0) {
+    return 'Proceed without first verifying the relevant state from the source session.';
+  }
+
+  const prefix = artifact.badDecision.trim().length > 0
+    ? 'Proceed with the rejected action and '
+    : 'Take the rejected action and ';
+  return `${prefix}${clauses.join(' and ')}.`;
+}
+
+function buildEvidenceBoundedRationale(evidenceSummary: ORPOEvidenceSummary): string {
+  if (evidenceSummary.lineageStatus === 'unknown') {
+    return 'Source evidence is unknown. Export uses a neutral rationale instead of narrating unverified failures or violations.';
+  }
+
+  const painCount = evidenceSummary.painSignals.count ?? 0;
+  const gateCount = evidenceSummary.gateBlocks.count ?? 0;
+  if (painCount === 0 && gateCount === 0) {
+    return 'Source lineage is present but records no pain signals or gate blocks. Export keeps the corrective preference while avoiding invented failure narratives.';
+  }
+
+  return `Observed source evidence: ${painCount} pain signals and ${gateCount} gate blocks. Prefer the bounded corrective action over repeating the rejected choice.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -187,6 +279,7 @@ export function exportORPOSamples(
 ): ExportResult {
   const exportId = crypto.randomUUID();
   const now = new Date().toISOString();
+  const lineageRecords = listArtifactLineageRecords(workspaceDir, 'behavioral-sample');
 
   // Step 1: Collect eligible records
   // Use listDatasetRecords directly to have full control over the family filter
@@ -253,8 +346,12 @@ export function exportORPOSamples(
       continue;
     }
 
+    const lineageRecord =
+      lineageRecords.find((candidate) => candidate.artifactId === record.artifactId) ?? null;
+    const evidenceSummary = buildEvidenceSummary(lineageRecord);
+
     // Serialize
-    orpoSamples.push(serializeORPOSample(record, artifact, exportId, ''));
+    orpoSamples.push(serializeORPOSample(record, artifact, evidenceSummary, exportId, ''));
   }
 
   // Step 4: Fail if all samples failed validation
