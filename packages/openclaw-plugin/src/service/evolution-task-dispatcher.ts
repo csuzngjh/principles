@@ -826,10 +826,27 @@ export class EvolutionTaskDispatcher {
                             const sessionsWithViolations = recentSessions.filter(
                                 s => s.failureCount > 0 || s.painEventCount > 0 || s.gateBlockCount > 0
                             );
-                            if (sessionsWithViolations.length > 0) {
-                                const targetSession = sessionsWithViolations[0];
-                                logger?.info?.(`[PD:EvolutionWorker] Task ${sleepTask.id} using session with violations: ${targetSession.sessionId} (failed=${targetSession.failureCount}, pain=${targetSession.painEventCount}, gates=${targetSession.gateBlockCount})`);
+
+                            // #244: Filter out sessions that are too thin for meaningful reflection
+                            // A session needs enough violation context to generate a useful badDecision/betterDecision pair
+                            const MIN_VIOLATION_DEPTH = 2; // at least 2 violations total (failures + pain + gates)
+                            const richViolations = sessionsWithViolations.filter(
+                                s => (s.failureCount ?? 0) + (s.painEventCount ?? 0) + (s.gateBlockCount ?? 0) >= MIN_VIOLATION_DEPTH
+                            );
+
+                            if (richViolations.length > 0) {
+                                const targetSession = richViolations[0];
+                                logger?.info?.(`[PD:EvolutionWorker] Task ${sleepTask.id} using rich violation session: ${targetSession.sessionId} (failed=${targetSession.failureCount}, pain=${targetSession.painEventCount}, gates=${targetSession.gateBlockCount})`);
                                 fullSnapshot = extractor.getNocturnalSessionSnapshot(targetSession.sessionId);
+                            } else if (sessionsWithViolations.length > 0) {
+                                const thinSession = sessionsWithViolations[0];
+                                const totalViolations = (thinSession.failureCount ?? 0) + (thinSession.painEventCount ?? 0) + (thinSession.gateBlockCount ?? 0);
+                                logger?.warn?.(`[PD:EvolutionWorker] Task ${sleepTask.id} found violation session but too thin for reflection: ${thinSession.sessionId} (total_violations=${totalViolations} < ${MIN_VIOLATION_DEPTH}) — skipping`);
+                                // Don't use thin sessions — mark as completed without running reflection
+                                sleepTask.status = 'completed';
+                                sleepTask.completed_at = new Date().toISOString();
+                                sleepTask.resolution = 'skipped_thin_violation';
+                                sleepTask.lastError = undefined;
                             } else if (recentSessions.length > 0) {
                                 const latestSession = recentSessions[0];
                                 logger?.warn?.(`[PD:EvolutionWorker] Task ${sleepTask.id} no sessions with violations found, using most recent: ${latestSession.sessionId} (failed=${latestSession.failureCount}, pain=${latestSession.painEventCount}, gates=${latestSession.gateBlockCount})`);

@@ -30,7 +30,8 @@ export type TaskResolution =
   | 'canceled'
   | 'late_marker_principle_created'
   | 'late_marker_no_principle'
-  | 'stub_fallback';
+  | 'stub_fallback'
+  | 'skipped_thin_violation';
 
 /**
  * Recent pain context attached to sleep_reflection tasks.
