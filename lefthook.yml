@@ -1,0 +1,15 @@
+# Lefthook configuration
+# https://github.com/evilmartians/lefthook/blob/master/docs/configuration.md
+
+pre-commit:
+  parallel: true
+  commands:
+    lint:
+      glob: "*.ts"
+      run: npx eslint --fix {staged_files}
+      stage_fixed: true
+
+pre-push:
+  commands:
+    protect-main:
+      run: node -e "const b=require('child_process').execSync('git rev-parse --abbrev-ref HEAD').toString().trim();if(b==='main'||b==='master'){console.error('⛔ 禁止直接推送到 '+b+' 分支\\n请创建分支并通过 PR 合并');process.exit(1)}"
