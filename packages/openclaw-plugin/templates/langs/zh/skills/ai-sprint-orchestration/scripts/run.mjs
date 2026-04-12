@@ -3413,7 +3413,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   main().catch((err) => {
     // main() is async and may throw. The try/catch inside main() handles
     // errors within its body, but rejections from the Promise itself land here.
-    console.error('Fatal error:', err.message);
+    console.error('Fatal error:', err.message, err.stack);
     process.exit(1);
   });
 }

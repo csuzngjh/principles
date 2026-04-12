@@ -302,7 +302,7 @@ export class NocturnalTargetSelector {
     this.recentPainContext = recentPainContext;
     this.opts = {
       minViolationDensity: restOptions.minViolationDensity ?? 0.1,
-      maxSessionCandidates: restOptions.maxSessionCandidates ?? 50,
+      maxSessionCandidates: restOptions.maxSessionCandidates ?? 300,
       idleThresholdMs: restOptions.idleThresholdMs ?? DEFAULT_IDLE_THRESHOLD_MS,
     };
   }
@@ -440,7 +440,14 @@ export class NocturnalTargetSelector {
     }
 
     // Compute violation signals for each session
-    const violatingSessions: ViolationSignal[] = recentSessions.map((session) => {
+    // #244: Filter out sessions that are too thin for meaningful reflection
+    // A session needs enough violation context (failures + pain + gates >= 2)
+    const MIN_VIOLATION_DEPTH = 2;
+    const richSessions = recentSessions.filter(
+      s => (s.failureCount ?? 0) + (s.painEventCount ?? 0) + (s.gateBlockCount ?? 0) >= MIN_VIOLATION_DEPTH
+    );
+
+    const violatingSessions: ViolationSignal[] = richSessions.map((session) => {
       const violationDensity = computeViolationDensity(session);
       const snapshot = this.extractor.getNocturnalSessionSnapshot(session.sessionId);
 

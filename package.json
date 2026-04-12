@@ -20,7 +20,10 @@
     "version:major": "cd packages/openclaw-plugin && npm version major"
   },
   "lint-staged": {
-    "*.ts": ["eslint --fix", "eslint"]
+    "*.ts": [
+      "eslint --fix",
+      "eslint"
+    ]
   },
   "devDependencies": {
     "@changesets/cli": "^2.30.0",
@@ -31,6 +34,7 @@
     "@typescript-eslint/parser": "^8.58.0",
     "eslint": "^10.1.0",
     "globals": "^17.4.0",
+    "lefthook": "^2.1.5",
     "lint-staged": "^16.4.0",
     "semantic-release": "^25.0.3"
   },
