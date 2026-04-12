@@ -12,4 +12,4 @@ pre-commit:
 pre-push:
   commands:
     protect-main:
-      run: node -e "const b=require('child_process').execSync('git rev-parse --abbrev-ref HEAD').toString().trim();if(b==='main'||b==='master'){console.error('⛔ 禁止直接推送到 '+b+' 分支\\n请创建分支并通过 PR 合并');process.exit(1)}"
+      run: node scripts/protect-branch.js
