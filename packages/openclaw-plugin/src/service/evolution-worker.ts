@@ -1540,7 +1540,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                                     sleepTask.status = 'completed';
                                     sleepTask.completed_at = new Date().toISOString();
                                     sleepTask.resolution = 'skipped_thin_violation';
-                                    sleepTask.lastError = null;
+                                    sleepTask.lastError = undefined;
                                     continue;
                                 } else if (recentSessions.length > 0) {
                                     // No sessions with violations, use most recent as last resort

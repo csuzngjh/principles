@@ -52,6 +52,37 @@ export function validateNocturnalSnapshotIngress(
     }
   }
 
+  // Validate critical array element structures to prevent silent downstream failures
+  if (Array.isArray(value.toolCalls)) {
+    value.toolCalls.forEach((tc: unknown, i: number) => {
+      if (!isObjectRecord(tc)) {
+        reasons.push(`snapshot.toolCalls[${i}] must be an object`);
+      } else {
+        if (!isNonEmptyString(tc.toolName)) {
+          reasons.push(`snapshot.toolCalls[${i}].toolName must be a non-empty string`);
+        }
+        if (!['success', 'failure', 'blocked'].includes(tc.outcome as string)) {
+          reasons.push(`snapshot.toolCalls[${i}].outcome must be one of: success, failure, blocked`);
+        }
+      }
+    });
+  }
+
+  if (Array.isArray(value.painEvents)) {
+    value.painEvents.forEach((pe: unknown, i: number) => {
+      if (!isObjectRecord(pe)) {
+        reasons.push(`snapshot.painEvents[${i}] must be an object`);
+      } else {
+        if (!isNonEmptyString(pe.source)) {
+          reasons.push(`snapshot.painEvents[${i}].source must be a non-empty string`);
+        }
+        if (!isFiniteNumber(pe.score)) {
+          reasons.push(`snapshot.painEvents[${i}].score must be a finite number`);
+        }
+      }
+    });
+  }
+
   const stats = value.stats;
   if (!isObjectRecord(stats)) {
     reasons.push('snapshot.stats must be an object');

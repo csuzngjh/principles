@@ -402,12 +402,39 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
     this.stageTimeoutMs = stageTimeoutMs;
     // Cross-platform temp directory for session files
     this.tempDir = path.join(os.tmpdir(), `pd-trinity-${process.pid}`);
+    // Clean up any stale temp files from previous crashed runs
+    this.cleanupStaleTempDirs();
+  }
+
+  /**
+   * Clean up temp directories from previous crashed runs.
+   * Matches pattern pd-trinity-* in the OS temp directory.
+   */
+  private cleanupStaleTempDirs(): void {
+    try {
+      const osTempDir = os.tmpdir();
+      if (!fs.existsSync(osTempDir)) return;
+      const entries = fs.readdirSync(osTempDir);
+      for (const entry of entries) {
+        if (entry.startsWith('pd-trinity-') && entry !== path.basename(this.tempDir)) {
+          const fullPath = path.join(osTempDir, entry);
+          fs.rmSync(fullPath, { recursive: true, force: true });
+        }
+      }
+    } catch {
+      // Non-fatal: stale temp files will be cleaned up eventually
+    }
   }
 
   /**
    * Load the full OpenClaw config (including models.providers).
-   * this.api.config is the plugin config, not the full config.
-   * We need the full config to resolve provider/model definitions.
+   *
+   * Why: `this.api.config` is the plugin config, not the full OpenClaw config.
+   * It does NOT contain `models.providers`, which is needed to resolve provider
+   * model definitions. `api.runtime.config.loadConfig()` returns the full config.
+   *
+   * Fallback: If loadConfig() is unavailable, we return the plugin config.
+   * The caller (resolveModel) handles this with a minimax-portal fallback.
    */
   private loadFullConfig(): Record<string, unknown> | undefined {
     // Try runtime.config.loadConfig() first (available in native plugin context)
@@ -416,10 +443,11 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
       try {
         return loadConfig() as Record<string, unknown> | undefined;
       } catch (err) {
-        this.api.logger?.warn?.(`[Trinity] loadConfig() failed: ${err instanceof Error ? err.message : String(err)}`);
+        this.api.logger?.warn?.(`[Trinity] loadConfig() failed, falling back to plugin config: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
-    // Fallback: use the plugin config (limited — won't have models.providers)
+    // Fallback: plugin config (limited — won't have models.providers)
+    // resolveModel() handles this with a minimax-portal/MiniMax-M2.7 fallback
     return this.api.config as Record<string, unknown> | undefined;
   }
 
