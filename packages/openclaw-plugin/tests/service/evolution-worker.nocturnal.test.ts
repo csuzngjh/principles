@@ -37,16 +37,20 @@ const { mockGetNocturnalSessionSnapshot, mockListRecentNocturnalCandidateSession
   mockGetNocturnalSessionSnapshot: vi.fn(),
   mockListRecentNocturnalCandidateSessions: vi.fn(() => []),
 }));
+
+// Create a shared mock extractor instance so spy calls are tracked correctly
+const mockExtractorInstance = {
+  getNocturnalSessionSnapshot: mockGetNocturnalSessionSnapshot,
+  listRecentNocturnalCandidateSessions: mockListRecentNocturnalCandidateSessions,
+};
+
 vi.mock('../../src/core/nocturnal-trajectory-extractor.js', async () => {
   const actual = await vi.importActual<typeof import('../../src/core/nocturnal-trajectory-extractor.js')>(
     '../../src/core/nocturnal-trajectory-extractor.js'
   );
   return {
     ...actual,
-    createNocturnalTrajectoryExtractor: vi.fn(() => ({
-      getNocturnalSessionSnapshot: mockGetNocturnalSessionSnapshot,
-      listRecentNocturnalCandidateSessions: mockListRecentNocturnalCandidateSessions,
-    })),
+    createNocturnalTrajectoryExtractor: vi.fn(() => mockExtractorInstance),
   };
 });
 
@@ -54,6 +58,17 @@ import { EvolutionWorkerService, readRecentPainContext } from '../../src/service
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
 import { handlePdReflect } from '../../src/commands/pd-reflect.js';
 import { safeRmDir } from '../test-utils.js';
+
+// Helper to create a mock API for E2E tests
+function createMockApi() {
+  return {
+    logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+    runtime: { agent: { runEmbeddedPiAgent: vi.fn() } },
+  } as any;
+}
+
+// Helper config for fast poll cycle
+const fastPollConfig = { get: (k: string) => k === 'intervals.worker_poll_ms' ? 100 : undefined };
 
 function readQueue(stateDir: string) {
   return JSON.parse(fs.readFileSync(path.join(stateDir, 'evolution_queue.json'), 'utf8'));
@@ -211,6 +226,361 @@ session_id: pain-session-abc
         expect(fs.existsSync(homeQueue)).toBe(false);
       }
     } finally {
+      safeRmDir(workspaceDir);
+    }
+  });
+
+  // === Nocturnal E2E Pipeline Tests (from PR #243) ===
+
+  it('does not start a nocturnal workflow when only an empty fallback snapshot is available', async () => {
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-nocturnal-empty-'));
+    const stateDir = path.join(workspaceDir, '.state');
+    fs.mkdirSync(path.join(stateDir, 'sessions'), { recursive: true });
+    fs.mkdirSync(path.join(stateDir, 'logs'), { recursive: true });
+
+    mockGetNocturnalSessionSnapshot.mockReturnValue(null);
+
+    fs.writeFileSync(
+      path.join(stateDir, 'evolution_queue.json'),
+      JSON.stringify([
+        {
+          id: 'sleep-empty',
+          taskKind: 'sleep_reflection',
+          priority: 'medium',
+          score: 50,
+          source: 'nocturnal',
+          reason: 'Sleep reflection',
+          timestamp: '2026-04-10T00:00:00.000Z',
+          enqueued_at: '2026-04-10T00:00:00.000Z',
+          status: 'pending',
+          retryCount: 0,
+          maxRetries: 1,
+          recentPainContext: {
+            mostRecent: null,
+            recentPainCount: 0,
+            recentMaxPainScore: 0,
+          },
+        },
+      ], null, 2),
+      'utf8'
+    );
+
+    const mockApi = createMockApi();
+    EvolutionWorkerService.api = mockApi;
+
+    try {
+      EvolutionWorkerService.start({
+        workspaceDir,
+        stateDir,
+        logger: mockApi.logger,
+        config: fastPollConfig,
+        api: mockApi,
+      } as any);
+
+      await vi.advanceTimersByTimeAsync(6000);
+
+      const queue = readQueue(stateDir);
+      expect(queue[0].status).toBe('failed');
+      expect(queue[0].lastError).toContain('invalid_snapshot_ingress');
+      expect(queue[0].lastError).toContain('fallback snapshot must contain at least one pain signal');
+      expect(queue[0].resultRef).toBeFalsy();
+      expect(mockStartWorkflow).not.toHaveBeenCalled();
+    } finally {
+      EvolutionWorkerService.stop({ workspaceDir, stateDir, logger: console } as any);
+      safeRmDir(workspaceDir);
+    }
+  });
+
+  it('uses stub_fallback for expected gateway-only background unavailability', async () => {
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-nocturnal-gateway-'));
+    const stateDir = path.join(workspaceDir, '.state');
+    fs.mkdirSync(path.join(stateDir, 'sessions'), { recursive: true });
+    fs.mkdirSync(path.join(stateDir, 'logs'), { recursive: true });
+
+    mockGetNocturnalSessionSnapshot.mockReturnValue({
+      sessionId: 'sleep-gateway',
+      startedAt: '2026-04-10T00:00:00.000Z',
+      updatedAt: '2026-04-10T00:01:00.000Z',
+      assistantTurns: [],
+      userTurns: [],
+      toolCalls: [],
+      painEvents: [],
+      gateBlocks: [],
+      stats: { totalAssistantTurns: 1, totalToolCalls: 1, totalPainEvents: 0, totalGateBlocks: 0, failureCount: 0 },
+    });
+    mockStartWorkflow.mockResolvedValue({ workflowId: 'wf-1', childSessionKey: 'child-1', state: 'active' });
+    mockGetWorkflowDebugSummary.mockResolvedValue({
+      state: 'terminal_error',
+      metadata: {},
+      recentEvents: [{ reason: 'Error: Plugin runtime subagent methods are only available during a gateway request.', payload: {} }],
+    });
+
+    fs.writeFileSync(
+      path.join(stateDir, 'evolution_queue.json'),
+      JSON.stringify([
+        {
+          id: 'sleep-gateway',
+          taskKind: 'sleep_reflection',
+          priority: 'medium',
+          score: 50,
+          source: 'nocturnal',
+          reason: 'Sleep reflection',
+          timestamp: '2026-04-10T00:00:00.000Z',
+          enqueued_at: '2026-04-10T00:00:00.000Z',
+          status: 'pending',
+          retryCount: 0,
+          maxRetries: 1,
+          recentPainContext: {
+            mostRecent: { source: 'test', score: 50, reason: 'test', timestamp: '2026-04-10T00:00:00.000Z', sessionId: 'sleep-gateway' },
+            recentPainCount: 1,
+            recentMaxPainScore: 50,
+          },
+        },
+      ], null, 2),
+      'utf8'
+    );
+
+    const mockApi = createMockApi();
+    EvolutionWorkerService.api = mockApi;
+
+    try {
+      EvolutionWorkerService.start({
+        workspaceDir,
+        stateDir,
+        logger: mockApi.logger,
+        config: fastPollConfig,
+        api: mockApi,
+      } as any);
+
+      await vi.advanceTimersByTimeAsync(6000);
+
+      const queue = readQueue(stateDir);
+      expect(queue[0].status).toBe('completed');
+      expect(queue[0].resolution).toBe('stub_fallback');
+    } finally {
+      EvolutionWorkerService.stop({ workspaceDir, stateDir, logger: console } as any);
+      safeRmDir(workspaceDir);
+    }
+  });
+
+  it('uses stub_fallback for expected subagent runtime unavailability', async () => {
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-nocturnal-subagent-'));
+    const stateDir = path.join(workspaceDir, '.state');
+    fs.mkdirSync(path.join(stateDir, 'sessions'), { recursive: true });
+    fs.mkdirSync(path.join(stateDir, 'logs'), { recursive: true });
+
+    mockGetNocturnalSessionSnapshot.mockReturnValue({
+      sessionId: 'sleep-subagent',
+      startedAt: '2026-04-10T00:00:00.000Z',
+      updatedAt: '2026-04-10T00:01:00.000Z',
+      assistantTurns: [],
+      userTurns: [],
+      toolCalls: [],
+      painEvents: [],
+      gateBlocks: [],
+      stats: { totalAssistantTurns: 1, totalToolCalls: 1, totalPainEvents: 0, totalGateBlocks: 0, failureCount: 0 },
+    });
+    mockStartWorkflow.mockRejectedValue(new Error('NocturnalWorkflowManager: subagent runtime unavailable'));
+
+    fs.writeFileSync(
+      path.join(stateDir, 'evolution_queue.json'),
+      JSON.stringify([
+        {
+          id: 'sleep-subagent',
+          taskKind: 'sleep_reflection',
+          priority: 'medium',
+          score: 50,
+          source: 'nocturnal',
+          reason: 'Sleep reflection',
+          timestamp: '2026-04-10T00:00:00.000Z',
+          enqueued_at: '2026-04-10T00:00:00.000Z',
+          status: 'pending',
+          retryCount: 0,
+          maxRetries: 1,
+          recentPainContext: {
+            mostRecent: { source: 'test', score: 50, reason: 'test', timestamp: '2026-04-10T00:00:00.000Z', sessionId: 'sleep-subagent' },
+            recentPainCount: 1,
+            recentMaxPainScore: 50,
+          },
+        },
+      ], null, 2),
+      'utf8'
+    );
+
+    const mockApi = createMockApi();
+    EvolutionWorkerService.api = mockApi;
+
+    try {
+      EvolutionWorkerService.start({
+        workspaceDir,
+        stateDir,
+        logger: mockApi.logger,
+        config: fastPollConfig,
+        api: mockApi,
+      } as any);
+
+      await vi.advanceTimersByTimeAsync(6000);
+
+      const queue = readQueue(stateDir);
+      expect(queue[0].status).toBe('completed');
+      expect(queue[0].resolution).toBe('stub_fallback');
+    } finally {
+      EvolutionWorkerService.stop({ workspaceDir, stateDir, logger: console } as any);
+      safeRmDir(workspaceDir);
+    }
+  });
+
+  it('prioritizes pain signal session ID for snapshot extraction', async () => {
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-nocturnal-pain-session-'));
+    const stateDir = path.join(workspaceDir, '.state');
+    fs.mkdirSync(path.join(stateDir, 'sessions'), { recursive: true });
+    fs.mkdirSync(path.join(stateDir, 'logs'), { recursive: true });
+
+    const painSessionId = 'pain-signal-session-123';
+
+    mockGetNocturnalSessionSnapshot.mockImplementation((sessionId: string) => {
+      if (sessionId === painSessionId) {
+        return {
+          sessionId: painSessionId,
+          startedAt: '2026-04-09T23:00:00.000Z',
+          updatedAt: '2026-04-09T23:01:00.000Z',
+          assistantTurns: [],
+          userTurns: [],
+          toolCalls: [],
+          painEvents: [{ source: 'tool_failure', score: 70, severity: null, reason: 'test', createdAt: '2026-04-09T23:00:00.000Z' }],
+          gateBlocks: [],
+          stats: { totalAssistantTurns: 1, totalToolCalls: 1, failureCount: 1, totalPainEvents: 1, totalGateBlocks: 0 },
+        };
+      }
+      return null;
+    });
+    mockStartWorkflow.mockResolvedValue({ workflowId: 'wf-pain', childSessionKey: 'child-pain', state: 'active' });
+
+    fs.writeFileSync(
+      path.join(stateDir, 'evolution_queue.json'),
+      JSON.stringify([
+        {
+          id: 'sleep-pain-priority',
+          taskKind: 'sleep_reflection',
+          priority: 'medium',
+          score: 50,
+          source: 'nocturnal',
+          reason: 'Sleep reflection',
+          timestamp: '2026-04-10T00:00:00.000Z',
+          enqueued_at: '2026-04-10T00:00:00.000Z',
+          status: 'pending',
+          retryCount: 0,
+          maxRetries: 1,
+          recentPainContext: {
+            mostRecent: { source: 'tool_failure', score: 70, reason: 'test', timestamp: '2026-04-10T00:00:00.000Z', sessionId: painSessionId },
+            recentPainCount: 1,
+            recentMaxPainScore: 70,
+          },
+        },
+      ], null, 2),
+      'utf8'
+    );
+
+    const mockApi = createMockApi();
+    EvolutionWorkerService.api = mockApi;
+
+    try {
+      EvolutionWorkerService.start({
+        workspaceDir,
+        stateDir,
+        logger: mockApi.logger,
+        config: fastPollConfig,
+        api: mockApi,
+      } as any);
+
+      await vi.advanceTimersByTimeAsync(6000);
+
+      expect(mockStartWorkflow).toHaveBeenCalledTimes(1);
+      const metadata = mockStartWorkflow.mock.calls[0][1].metadata;
+      expect(metadata.snapshot.sessionId).toBe(painSessionId);
+    } finally {
+      EvolutionWorkerService.stop({ workspaceDir, stateDir, logger: console } as any);
+      safeRmDir(workspaceDir);
+    }
+  });
+
+  it('e2e: bounded session selection — never picks a session newer than the triggering task', async () => {
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-nocturnal-e2e-bounded-'));
+    const stateDir = path.join(workspaceDir, '.state');
+    fs.mkdirSync(path.join(stateDir, 'sessions'), { recursive: true });
+    fs.mkdirSync(path.join(stateDir, 'logs'), { recursive: true });
+
+    const taskTimestamp = '2026-04-10T00:00:00.000Z';
+    const validSessionTimestamp = '2026-04-09T23:00:00.000Z';
+    const invalidSessionTimestamp = '2026-04-10T01:00:00.000Z';
+
+    mockGetNocturnalSessionSnapshot.mockImplementation((sessionId: string) => {
+      if (sessionId === 'valid-session') {
+        return {
+          sessionId: 'valid-session',
+          startedAt: validSessionTimestamp,
+          updatedAt: validSessionTimestamp,
+          assistantTurns: [],
+          userTurns: [],
+          toolCalls: [],
+          painEvents: [{ source: 'tool_failure', score: 50, severity: null, reason: 'test', createdAt: validSessionTimestamp }],
+          gateBlocks: [],
+          stats: { totalAssistantTurns: 1, totalToolCalls: 1, failureCount: 1, totalPainEvents: 1, totalGateBlocks: 0 },
+        };
+      }
+      return null;
+    });
+    mockListRecentNocturnalCandidateSessions.mockReturnValue([
+      { sessionId: 'valid-session', startedAt: validSessionTimestamp, failureCount: 1, painEventCount: 1, gateBlockCount: 0 },
+      { sessionId: 'invalid-session', startedAt: invalidSessionTimestamp, failureCount: 1, painEventCount: 0, gateBlockCount: 0 },
+    ]);
+    mockStartWorkflow.mockResolvedValue({ workflowId: 'wf-bounded', childSessionKey: 'child-bounded', state: 'active' });
+
+    fs.writeFileSync(
+      path.join(stateDir, 'evolution_queue.json'),
+      JSON.stringify([
+        {
+          id: 'sleep-e2e-bounded',
+          taskKind: 'sleep_reflection',
+          priority: 'medium',
+          score: 50,
+          source: 'nocturnal',
+          reason: 'Sleep reflection',
+          timestamp: taskTimestamp,
+          enqueued_at: taskTimestamp,
+          status: 'pending',
+          retryCount: 0,
+          maxRetries: 1,
+          recentPainContext: {
+            mostRecent: { source: 'test', score: 50, reason: 'test', timestamp: taskTimestamp, sessionId: 'pain-session' },
+            recentPainCount: 1,
+            recentMaxPainScore: 50,
+          },
+        },
+      ], null, 2),
+      'utf8'
+    );
+
+    const mockApi = createMockApi();
+    EvolutionWorkerService.api = mockApi;
+
+    try {
+      EvolutionWorkerService.start({
+        workspaceDir,
+        stateDir,
+        logger: mockApi.logger,
+        config: fastPollConfig,
+        api: mockApi,
+      } as any);
+
+      await vi.advanceTimersByTimeAsync(6000);
+
+      expect(mockStartWorkflow).toHaveBeenCalledTimes(1);
+      const metadata = mockStartWorkflow.mock.calls[0][1].metadata;
+      expect(metadata.snapshot.sessionId).toBe('valid-session');
+      expect(new Date(metadata.snapshot.startedAt).getTime()).toBeLessThanOrEqual(new Date(taskTimestamp).getTime());
+    } finally {
+      EvolutionWorkerService.stop({ workspaceDir, stateDir, logger: console } as any);
       safeRmDir(workspaceDir);
     }
   });
