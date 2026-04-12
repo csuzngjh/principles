@@ -109,7 +109,11 @@ function _handleDisableImpl(
     disabledBy: sessionId || 'manual',
     disabledReason: reasonText,
   });
-  refreshPrincipleLifecycle(workspaceDir, stateDir);
+  try {
+    refreshPrincipleLifecycle(workspaceDir, stateDir);
+  } catch (err) {
+    console.warn('[disable-impl] Lifecycle refresh failed:', err instanceof Error ? err.stack : err);
+  }
 
   return {
     text: isZh

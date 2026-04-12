@@ -11,6 +11,8 @@ export interface RuleMetricResult {
 }
 
 export interface PrincipleAdherenceResult {
+  /** True when no rules exist — all numeric fields are defaults, not computed values */
+  insufficientData?: boolean;
   adherenceRate: number;
   averageRuleCoverage: number;
   averageFalsePositiveRate: number;
@@ -108,6 +110,7 @@ export function computePrincipleAdherence(
 
   if (principle.rules.length === 0) {
     return {
+      insufficientData: true,
       adherenceRate: 0,
       averageRuleCoverage: 0,
       averageFalsePositiveRate: 0,

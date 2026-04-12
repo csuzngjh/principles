@@ -126,7 +126,11 @@ function _handleArchiveImpl(
   updateImplementation(stateDir, implId, {
     archivedAt: new Date().toISOString(),
   });
-  refreshPrincipleLifecycle(workspaceDir, stateDir);
+  try {
+    refreshPrincipleLifecycle(workspaceDir, stateDir);
+  } catch (err) {
+    console.warn('[archive-impl] Lifecycle refresh failed:', err instanceof Error ? err.stack : err);
+  }
 
   return {
     text: isZh
