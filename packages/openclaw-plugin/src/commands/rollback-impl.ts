@@ -185,7 +185,11 @@ function _handleRollbackImpl(
   withLock(rollbackPath, () => {
     fs.writeFileSync(rollbackPath, JSON.stringify(rollbackRecord, null, 2), 'utf-8');
   });
-  refreshPrincipleLifecycle(workspaceDir, stateDir);
+  try {
+    refreshPrincipleLifecycle(workspaceDir, stateDir);
+  } catch (err) {
+    console.warn('[rollback-impl] Lifecycle refresh failed:', err instanceof Error ? err.stack : err);
+  }
 
   let output = isZh
     ? `\n\u2705 \u56de\u6eda\u5b8c\u6210: ${implId}\n   \u72b6\u6001: active -> disabled\n   \u539f\u56e0: ${reasonText}`

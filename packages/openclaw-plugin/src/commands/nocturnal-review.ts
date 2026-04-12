@@ -22,6 +22,7 @@
  */
 
 import * as fs from 'fs';
+import * as path from 'path';
 import {
   listDatasetRecords,
   getDatasetRecord,
@@ -31,6 +32,7 @@ import {
   type NocturnalDatasetRecord,
   type NocturnalReviewStatus,
 } from '../core/nocturnal-dataset.js';
+import { getPrincipleState, setPrincipleState } from '../core/principle-training-state.js';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
 
 function isZh(ctx: PluginCommandContext): boolean {
@@ -193,6 +195,16 @@ export function handleNocturnalReviewCommand(ctx: PluginCommandContext): PluginC
       }
 
       const updated = updateReviewStatus(workspaceDir, fingerprint, 'approved_for_training', reason);
+
+      // #251: Sync approvedSampleCount in training store
+      try {
+        const stateDir = path.join(workspaceDir, '.state');
+        const state = getPrincipleState(stateDir, updated.principleId);
+        state.approvedSampleCount += 1;
+        setPrincipleState(stateDir, state);
+      } catch (err) {
+        console.warn(`[nocturnal-review] Failed to sync approvedSampleCount for ${updated.principleId}:`, err instanceof Error ? err.stack : err);
+      }
 
       return {
         text: zh

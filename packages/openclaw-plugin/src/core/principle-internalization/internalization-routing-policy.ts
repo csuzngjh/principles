@@ -121,14 +121,14 @@ export function recommendInternalizationRoute(
     principle.summary.repeatedErrorSignal === 0;
 
   if (principle.rules.length === 0) {
-    reasonCodes.push('no_material_rules');
+    reasonCodes.push('insufficient_data', 'no_material_rules');
     return {
       principleId: principle.principle.id,
       route: 'defer',
-      confidence: 95,
+      confidence: 50,
       reasonCodes,
       evidenceSummary,
-      nextAction: 'Define at least one concrete rule before choosing an internalization route.',
+      nextAction: 'No rules defined for this principle. Create at least one rule via pain→principle→rule pipeline before internalization routing can produce meaningful recommendations.',
     };
   }
 
