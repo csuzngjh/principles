@@ -25,8 +25,8 @@
 - [x] **Phase 29: Integration Verification** - Verify end-to-end flow, public API preservation, test passing, and lifecycle correctness (completed 2026-04-11)
 - [x] **Phase 30: Runtime & Truth Contract Framing** - Convert post-deployment failures into explicit boundary definitions, invariants, and merge-gate criteria (completed 2026-04-12)
 - [x] **Phase 31: Runtime Adapter Contract Hardening** - Contract embedded runtime invocation, model/provider resolution, workspace/session artifact ingress, and fail-fast behavior (completed 2026-04-12)
-- [ ] **Phase 32: Evidence-Bound Export and Dataset Hardening** - Ensure exports, datasets, and promotion-facing facts are grounded in observed evidence only
-- [ ] **Phase 33: Production Invariants and Merge-Gate Verification** - Verify invariants, replay key production flows, and certify the stacked baseline for merge
+- [x] **Phase 32: Evidence-Bound Export and Dataset Hardening** - Ensure exports, datasets, and promotion-facing facts are grounded in observed evidence only (completed 2026-04-12)
+- [x] **Phase 33: Production Invariants and Merge-Gate Verification** - Verify invariants, replay key production flows, and certify the stacked baseline for merge (completed 2026-04-12, audit result: defer)
 
 ## Phase Details
 
@@ -85,8 +85,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 33-01-PLAN.md - Implement invariant checks and focused end-to-end verification
-- [ ] 33-02-PLAN.md - Run merge-gate audit and produce operator-facing verification report
+- [x] 33-01-PLAN.md - Implement invariant checks and focused end-to-end verification
+- [x] 33-02-PLAN.md - Run merge-gate audit and produce operator-facing verification report
 
 ## Progress
 
@@ -98,6 +98,6 @@ Phases execute in numeric order: 30 -> 31 -> 32 -> 33
 | 30. Runtime & Truth Contract Framing | v1.15 | 1/1 | Complete | 2026-04-12 |
 | 31. Runtime Adapter Contract Hardening | v1.15 | 2/2 | Complete | 2026-04-12 |
 | 32. Evidence-Bound Export and Dataset Hardening | v1.15 | 2/2 | Complete | 2026-04-12 |
-| 33. Production Invariants and Merge-Gate Verification | v1.15 | 0/2 | Not started | - |
+| 33. Production Invariants and Merge-Gate Verification | v1.15 | 2/2 | Complete (audit=defer) | 2026-04-12 |
 
 *Last updated: 2026-04-12*

@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.15
 milestone_name: milestone
 status: in_progress
-last_updated: "2026-04-12T08:20:00.000Z"
+last_updated: "2026-04-12T08:46:00.000Z"
 last_activity: 2026-04-12
 progress:
   total_phases: 4
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 7
-  completed_plans: 5
-  percent: 71
+  completed_plans: 7
+  percent: 100
 ---
 
 # State: v1.15 Runtime & Truth Contract Hardening
@@ -22,7 +22,7 @@ See `.planning/PROJECT.md` (updated 2026-04-12)
 **Milestone:** v1.15
 **Name:** Runtime & Truth Contract Hardening
 **Core Value:** AI agents improve their own behavior through a structured evolution loop. pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
-**Current Focus:** Phase 33 - production-invariants-and-merge-gate-verification
+**Current Focus:** Milestone wrap-up - merge audit result is defer pending persisted evidence
 
 ## Previous Milestone (v1.14 baseline)
 
@@ -32,12 +32,12 @@ See `.planning/PROJECT.md` (updated 2026-04-12)
 
 ## Current Position
 
-Phase: 32
-Plan: Phase 32 complete
-Status: Ready for Phase 33
+Phase: 33
+Plan: Phase 33 complete
+Status: Implementation complete, merge certification deferred by missing evidence
 Last activity: 2026-04-12
 
-Progress: [####-] 71%
+Progress: [#####] 100%
 
 ## v1.15 Architecture Focus
 
@@ -82,15 +82,17 @@ Recent decisions affecting current work:
 ### Pending Todos
 
 - Baseline merge-gate fixes on PR #245 are being handled separately and are a dependency for clean merge, but not a blocker for planning v1.15
+- Current audit result is `defer`: core path contracts pass, but local checked state lacks dataset/export/replay evidence needed for a `pass`
 
 ### Blockers/Concerns
 
 - PR #245 still carries known merge-gate defects and is not mergeable yet
 - PR #243 and PR #245 are diverged; new work must stack on top of PR #245 instead of trying to merge both into main independently
+- Local audit does not show new blockers, but it also cannot certify merge safety until persisted evidence surfaces are populated
 
 ## Session Continuity
 
 **Previous milestone:** v1.14 baseline complete on branch `fix/bugs-231-228` / PR #245
 **Current milestone:** v1.15 - Runtime & Truth Contract Hardening
-**Just completed:** `Phase 32 evidence-bound export and decision-surface hardening`
-**Ready for:** `/gsd-plan-phase 33`
+**Just completed:** `Phase 33 production invariants and operator-facing merge audit`
+**Ready for:** evidence collection on a real populated state snapshot, then rerun merge audit
