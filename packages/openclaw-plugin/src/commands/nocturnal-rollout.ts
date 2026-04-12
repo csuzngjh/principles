@@ -222,6 +222,8 @@ Checkpoint: ${checkpointId.substring(0, 8)}...
 Profile: ${profile}
 Result: ${result.passes ? 'PASS' : 'FAIL'}
 Suggested State: ${result.suggestedState ? formatPromotionState(result.suggestedState, zh) : 'N/A'}
+Evidence Mode: ${result.evidenceSummary.evidenceMode}
+Shadow Samples: ${result.evidenceSummary.shadowSampleCount}
 
 --- Delta Check ---
 ${result.deltaCheck.passed ? 'PASS' : 'FAIL'} Delta: ${result.deltaCheck.actual >= 0 ? '+' : ''}${result.deltaCheck.actual.toFixed(4)} (threshold: ${result.deltaCheck.threshold.toFixed(4)})

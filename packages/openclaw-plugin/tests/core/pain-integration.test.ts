@@ -479,5 +479,32 @@ unknown_meta: some data`;
         fs.rmSync(freshDir, { recursive: true, force: true });
       }
     });
+
+    it('readPainFlagData reads only the canonical .state/.pain_flag path', () => {
+      const legacyRootPath = path.join(TEST_DIR, 'PAIN_FLAG');
+      fs.writeFileSync(
+        legacyRootPath,
+        `source: legacy_root
+score: 90
+reason: should be ignored
+time: 2026-04-10T09:00:00.000Z`,
+        'utf-8',
+      );
+      fs.writeFileSync(
+        path.join(STATE_DIR, '.pain_flag'),
+        `source: canonical_state
+score: 80
+reason: should be read
+time: 2026-04-10T09:00:00.000Z`,
+        'utf-8',
+      );
+
+      const result = readPainFlagData(TEST_DIR);
+
+      expect(result.source).toBe('canonical_state');
+      expect(result.score).toBe('80');
+      const legacyResult = readPainFlagData(path.join(TEST_DIR, '..'));
+      expect(legacyResult.source).not.toBe('legacy_root');
+    });
   });
 });

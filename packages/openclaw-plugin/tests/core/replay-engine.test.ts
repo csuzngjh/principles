@@ -231,4 +231,23 @@ describe('ReplayEngine', () => {
     expect(fs.existsSync(reportDir)).toBe(true);
     expect(fs.readdirSync(reportDir).some((file) => file.endsWith('.json'))).toBe(true);
   });
+
+  it('marks empty replay evidence as needs-review instead of pass', () => {
+    seedLedgerAndImplementation();
+
+    const engine = new ReplayEngine(workspaceDir, stateDir);
+    const report = engine.runReplayForImplementation('IMPL-1', ['pain-negative']);
+
+    expect(report.overallDecision).toBe('needs-review');
+    expect(report.evidenceSummary).toEqual({
+      evidenceStatus: 'empty',
+      totalSamples: 0,
+      classifiedCounts: {
+        painNegative: 0,
+        successPositive: 0,
+        principleAnchor: 0,
+      },
+    });
+    expect(report.blockers[0]).toContain('NO REPLAY EVIDENCE');
+  });
 });

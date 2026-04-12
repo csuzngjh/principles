@@ -29,6 +29,8 @@ const mockRunTrinityAsync = runTrinityAsync as ReturnType<typeof vi.fn>;
 
 function createMockRuntimeAdapter() {
     return {
+        isRuntimeAvailable: vi.fn(() => true),
+        getLastFailureReason: vi.fn(() => null),
         invokeDreamer: vi.fn<(snapshot: any, principleId: any, maxCandidates: any) => Promise<DreamerOutput>>(),
         invokePhilosopher: vi.fn<(dreamerOutput: any, principleId: any) => Promise<PhilosopherOutput>>(),
         invokeScribe: vi.fn<(dreamerOutput: any, philosopherOutput: any, snapshot: any, principleId: any, telemetry: any, config: any) => Promise<TrinityDraftArtifact | null>>(),
