@@ -5,6 +5,8 @@ import {
   validateDraftArtifact,
   draftToArtifact,
   DEFAULT_TRINITY_CONFIG,
+  OpenClawTrinityRuntimeAdapter,
+  TrinityRuntimeContractError,
   type TrinityConfig,
   type DreamerOutput,
   type PhilosopherOutput,
@@ -25,12 +27,16 @@ function makeSnapshot(overrides: Partial<{
   failureCount: number;
   totalPainEvents: number;
   totalGateBlocks: number;
-}> = {}): {
-  sessionId: string;
-  stats: { failureCount: number; totalPainEvents: number; totalGateBlocks: number; totalAssistantTurns: number; totalToolCalls: number };
-} {
+}> = {}) {
   return {
     sessionId: 'session-test-123',
+    startedAt: '2026-04-12T00:00:00.000Z',
+    updatedAt: '2026-04-12T00:05:00.000Z',
+    assistantTurns: [],
+    userTurns: [],
+    toolCalls: [],
+    painEvents: [],
+    gateBlocks: [],
     stats: {
       failureCount: overrides.failureCount ?? 0,
       totalPainEvents: overrides.totalPainEvents ?? 0,
@@ -233,6 +239,73 @@ describe('validateDreamerOutput', () => {
   it('rejects string input', () => {
     const result = validateDreamerOutput('not an object');
     expect(result.valid).toBe(false);
+  });
+});
+
+describe('OpenClawTrinityRuntimeAdapter contract hardening', () => {
+  function makeRuntimeApi(overrides: Partial<any> = {}) {
+    return {
+      runtime: {
+        agent: {
+          runEmbeddedPiAgent: vi.fn().mockResolvedValue({
+            payloads: [
+              { text: '{"valid":true,"candidates":[],"generatedAt":"2026-04-12T00:00:00.000Z"}' },
+            ],
+          }),
+        },
+        config: {
+          loadConfig: vi.fn().mockReturnValue({
+            agents: {
+              defaults: {
+                model: 'openai/gpt-5.4',
+              },
+            },
+          }),
+        },
+        ...overrides.runtime,
+      },
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+      },
+    };
+  }
+
+  it('rejects missing runtime.agent.runEmbeddedPiAgent contract explicitly', () => {
+    expect(() => new OpenClawTrinityRuntimeAdapter({ runtime: {} } as any)).toThrow(TrinityRuntimeContractError);
+    expect(() => new OpenClawTrinityRuntimeAdapter({ runtime: {} } as any)).toThrow(/runtime_unavailable/);
+  });
+
+  it('passes explicit provider/model overrides into runtime.agent.runEmbeddedPiAgent', async () => {
+    const api = makeRuntimeApi();
+    const adapter = new OpenClawTrinityRuntimeAdapter(api as any);
+
+    await adapter.invokeDreamer(makeSnapshot({ failureCount: 1 }) as any, 'T-08', 2);
+
+    expect(api.runtime.agent.runEmbeddedPiAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'openai',
+        model: 'gpt-5.4',
+      }),
+    );
+  });
+
+  it('returns stable failure classes when runtime invocation fails', async () => {
+    const api = makeRuntimeApi({
+      runtime: {
+        agent: {
+          runEmbeddedPiAgent: vi.fn().mockRejectedValue(new Error('gateway unavailable')),
+        },
+      },
+    });
+    const adapter = new OpenClawTrinityRuntimeAdapter(api as any);
+
+    const result = await adapter.invokeDreamer(makeSnapshot({ failureCount: 1 }) as any, 'T-08', 2);
+
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain('runtime_run_failed');
+    expect(adapter.getLastFailureReason()).toContain('runtime_run_failed');
   });
 });
 

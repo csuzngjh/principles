@@ -369,6 +369,29 @@ export interface TrinityRuntimeAdapter {
  * Uses api.runtime.agent.runEmbeddedPiAgent() which works in background contexts
  * (unlike api.runtime.subagent.* which requires gateway request scope).
  */
+export type TrinityRuntimeFailureCode =
+  | 'runtime_unavailable'
+  | 'invalid_runtime_request'
+  | 'runtime_run_failed'
+  | 'runtime_timeout'
+  | 'runtime_session_read_failed';
+
+export class TrinityRuntimeContractError extends Error {
+  readonly code: TrinityRuntimeFailureCode;
+  readonly diagnostics?: Record<string, unknown>;
+
+  constructor(
+    code: TrinityRuntimeFailureCode,
+    message: string,
+    diagnostics?: Record<string, unknown>
+  ) {
+    super(`${code}: ${message}`);
+    this.name = 'TrinityRuntimeContractError';
+    this.code = code;
+    this.diagnostics = diagnostics;
+  }
+}
+
 export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
 
   private readonly api: {
@@ -396,6 +419,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
     config?: unknown;
     logger?: { info: (msg: string) => void; warn: (msg: string) => void; error: (msg: string) => void };
   };
+  private lastFailureReason: string | null = null;
    
 
   private readonly stageTimeoutMs: number;
@@ -405,12 +429,27 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
     api: OpenClawTrinityRuntimeAdapter['api'],
     stageTimeoutMs = 300_000  // 5 min — increased from 3 min to accommodate slower LLM responses
   ) {
+    if (typeof api?.runtime?.agent?.runEmbeddedPiAgent !== 'function') {
+      throw new TrinityRuntimeContractError(
+        'runtime_unavailable',
+        'embedded runtime unavailable (missing runtime.agent.runEmbeddedPiAgent)',
+      );
+    }
+
     this.api = api;
     this.stageTimeoutMs = stageTimeoutMs;
     // Cross-platform temp directory for session files
     this.tempDir = path.join(os.tmpdir(), `pd-trinity-${process.pid}`);
     // Clean up any stale temp files from previous crashed runs
     this.cleanupStaleTempDirs();
+  }
+
+  isRuntimeAvailable(): boolean {
+    return true;
+  }
+
+  getLastFailureReason(): string | null {
+    return this.lastFailureReason;
   }
 
   /**
@@ -509,11 +548,17 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
       .join('\n');
   }
 
+  private classifyRuntimeError(error: unknown): TrinityRuntimeFailureCode {
+    const detail = error instanceof Error ? error.message : String(error);
+    return /timeout/i.test(detail) ? 'runtime_timeout' : 'runtime_run_failed';
+  }
+
   async invokeDreamer(
     snapshot: NocturnalSessionSnapshot,
     principleId: string,
     maxCandidates: number
   ): Promise<DreamerOutput> {
+    this.lastFailureReason = null;
     const runId = `dreamer-${randomUUID()}`;
     const sessionFile = this.createSessionFile('dreamer');
     const prompt = this.buildDreamerPrompt(snapshot, principleId, maxCandidates);
@@ -537,12 +582,10 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
 
       const outputText = this.extractPayloadText(result);
       if (!outputText) {
-        return {
-          valid: false,
-          candidates: [],
-          reason: 'Dreamer returned empty response',
-          generatedAt: new Date().toISOString(),
-        };
+        return this.buildRuntimeFailureDreamerOutput(
+          'runtime_session_read_failed',
+          'Dreamer returned empty response',
+        );
       }
 
       // DEBUG: Log Dreamer's actual output
@@ -550,12 +593,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
 
       return this.parseDreamerOutput(outputText);
     } catch (err) {
-      return {
-        valid: false,
-        candidates: [],
-        reason: `Dreamer failed: ${err instanceof Error ? err.message : String(err)}`,
-        generatedAt: new Date().toISOString(),
-      };
+      return this.buildRuntimeFailureDreamerOutput(this.classifyRuntimeError(err), err);
     } finally {
       try { fs.unlinkSync(sessionFile); } catch { /* ignore */ }
     }
@@ -566,6 +604,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
     principleId: string,
     snapshot: NocturnalSessionSnapshot
   ): Promise<PhilosopherOutput> {
+    this.lastFailureReason = null;
     const runId = `philosopher-${randomUUID()}`;
     const sessionFile = this.createSessionFile('philosopher');
     const prompt = this.buildPhilosopherPrompt(dreamerOutput, principleId, snapshot);
@@ -587,13 +626,10 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
 
       const outputText = this.extractPayloadText(result);
       if (!outputText) {
-        return {
-          valid: false,
-          judgments: [],
-          overallAssessment: '',
-          reason: 'Philosopher returned empty response',
-          generatedAt: new Date().toISOString(),
-        };
+        return this.buildRuntimeFailurePhilosopherOutput(
+          'runtime_session_read_failed',
+          'Philosopher returned empty response',
+        );
       }
 
       // DEBUG: Log Philosopher's actual output
@@ -601,13 +637,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
 
       return this.parsePhilosopherOutput(outputText);
     } catch (err) {
-      return {
-        valid: false,
-        judgments: [],
-        overallAssessment: '',
-        reason: `Philosopher failed: ${err instanceof Error ? err.message : String(err)}`,
-        generatedAt: new Date().toISOString(),
-      };
+      return this.buildRuntimeFailurePhilosopherOutput(this.classifyRuntimeError(err), err);
     } finally {
       try { fs.unlinkSync(sessionFile); } catch { /* ignore */ }
     }
@@ -623,6 +653,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
 
     _config: TrinityConfig
   ): Promise<TrinityDraftArtifact | null> {
+    this.lastFailureReason = null;
     const runId = `scribe-${randomUUID()}`;
     const sessionFile = this.createSessionFile('scribe');
     const prompt = this.buildScribePrompt(dreamerOutput, philosopherOutput, snapshot, principleId);
@@ -644,6 +675,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
 
       const outputText = this.extractPayloadText(result);
       if (!outputText) {
+        this.recordFailure('runtime_session_read_failed', 'Scribe returned empty response');
         return null;
       }
 
@@ -652,6 +684,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
 
       return this.parseScribeOutput(outputText, snapshot, principleId, telemetry);
     } catch (err) {
+      this.recordFailure(this.classifyRuntimeError(err), err);
       return null;
     } finally {
       try { fs.unlinkSync(sessionFile); } catch { /* ignore */ }
@@ -966,6 +999,19 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
     }
   }
 
+  private buildRuntimeFailureDreamerOutput(
+    code: TrinityRuntimeFailureCode,
+    error: unknown
+  ): DreamerOutput {
+    const reason = this.recordFailure(code, error);
+    return {
+      valid: false,
+      candidates: [],
+      reason,
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
   private parsePhilosopherOutput(text: string): PhilosopherOutput {
     const json = this.extractJson(text);
     if (!json) {
@@ -1014,6 +1060,29 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
         generatedAt: new Date().toISOString(),
       };
     }
+  }
+
+  private buildRuntimeFailurePhilosopherOutput(
+    code: TrinityRuntimeFailureCode,
+    error: unknown
+  ): PhilosopherOutput {
+    const reason = this.recordFailure(code, error);
+    return {
+      valid: false,
+      judgments: [],
+      overallAssessment: '',
+      reason,
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  private recordFailure(
+    code: TrinityRuntimeFailureCode,
+    error: unknown
+  ): string {
+    const detail = error instanceof Error ? error.message : String(error);
+    this.lastFailureReason = `${code}: ${detail}`;
+    return this.lastFailureReason;
   }
 
    

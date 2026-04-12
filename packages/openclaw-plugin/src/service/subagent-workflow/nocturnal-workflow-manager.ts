@@ -34,13 +34,12 @@ import {
     executeNocturnalReflectionAsync,
     type NocturnalRunResult,
 } from '../nocturnal-service.js';
-import { type TrinityStageFailure, type TrinityResult } from '../../core/nocturnal-trinity.js';
+import { OpenClawTrinityRuntimeAdapter, type TrinityStageFailure, type TrinityResult } from '../../core/nocturnal-trinity.js';
 import type { TrinityRuntimeAdapter } from '../../core/nocturnal-trinity.js';
 import type { NocturnalSessionSnapshot } from '../../core/nocturnal-trajectory-extractor.js';
 import type { RecentPainContext } from '../evolution-worker.js';
 import * as fs from 'fs';
 import * as path from 'path';
-import { isSubagentRuntimeAvailable } from '../../utils/subagent-probe.js';
 import { validateNocturnalSnapshotIngress } from '../../core/nocturnal-snapshot-contract.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -173,11 +172,11 @@ export class NocturnalWorkflowManager implements WorkflowManager {
             metadata?: Record<string, unknown>;
         }
     ): Promise<WorkflowHandle> {
-        // #179: Check subagent runtime availability before starting
-        // Other workflow managers (empathy, deep-reflect) have this check
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: TrinityRuntimeAdapter interface doesn't expose api.runtime.subagent, but OpenClawTrinityRuntimeAdapter has it
-        const subagent = (this.runtimeAdapter as any).api?.runtime?.subagent;
-        if (!isSubagentRuntimeAvailable(subagent)) {
+        const runtimeAvailable =
+            this.runtimeAdapter instanceof OpenClawTrinityRuntimeAdapter
+                ? this.runtimeAdapter.isRuntimeAvailable()
+                : typeof (this.runtimeAdapter as Partial<TrinityRuntimeAdapter>).invokeDreamer === 'function';
+        if (!runtimeAvailable) {
             this.logger.warn(`[PD:NocturnalWorkflow] Subagent runtime unavailable, skipping workflow`);
             throw new Error(`NocturnalWorkflowManager: subagent runtime unavailable`);
         }
