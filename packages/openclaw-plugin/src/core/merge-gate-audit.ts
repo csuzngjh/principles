@@ -287,34 +287,152 @@ function isReplayReportShape(value: unknown): value is ReplayReport {
   );
 }
 
-function auditReplayEvidenceIntegrity(stateDir: string): MergeGateAuditCheck {
+/**
+ * Collect all replay report file paths under the implementations directory.
+ */
+function collectReplayReportPaths(stateDir: string): string[] {
   const implementationsRoot = path.join(stateDir, 'principles', 'implementations');
-  if (!fs.existsSync(implementationsRoot)) {
-    return {
-      id: 'replay_evidence_integrity',
-      status: 'defer',
-      summary: 'No implementation storage found. Replay evidence cannot be verified yet.',
-    };
-  }
+  if (!fs.existsSync(implementationsRoot)) return [];
 
   const implementationIds = fs
     .readdirSync(implementationsRoot, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name);
 
-  const replayReportPaths: string[] = [];
-  for (const implementationId of implementationIds) {
-    const replaysDir = path.join(getImplementationAssetRoot(stateDir, implementationId), 'replays');
-    if (!fs.existsSync(replaysDir)) {
-      continue;
-    }
+  const paths: string[] = [];
+  for (const id of implementationIds) {
+    const replaysDir = path.join(getImplementationAssetRoot(stateDir, id), 'replays');
+    if (!fs.existsSync(replaysDir)) continue;
 
-    const reportFiles = fs
+    const files = fs
       .readdirSync(replaysDir, { withFileTypes: true })
       .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
       .map((entry) => path.join(replaysDir, entry.name));
-    replayReportPaths.push(...reportFiles);
+    paths.push(...files);
   }
+  return paths;
+}
+
+/**
+ * Result of validating a single replay report file.
+ */
+type ReplayValidationCategory =
+  | 'io_error'
+  | 'malformed'
+  | 'missing_evidence_summary'
+  | 'unsupported_pass'
+  | 'empty_needs_review'
+  | 'valid';
+
+/**
+ * Check if the parsed replay report has a valid evidenceSummary shape.
+ */
+function hasValidEvidenceSummary(parsed: unknown): boolean {
+  if (!parsed || typeof parsed !== 'object') return false;
+  const report = parsed as Partial<ReplayReport>;
+  const summary = report.evidenceSummary;
+  if (!summary) return false;
+  if (typeof (summary as Partial<ReplayReport['evidenceSummary']>).evidenceStatus !== 'string') {
+    return false;
+  }
+  return typeof (summary as Partial<ReplayReport['evidenceSummary']>).totalSamples === 'number';
+}
+
+/**
+ * Validate a single replay report file and return its category.
+ */
+function validateSingleReplayReport(reportPath: string): ReplayValidationCategory {
+  let rawContent: string;
+  try {
+    rawContent = fs.readFileSync(reportPath, 'utf-8');
+  } catch {
+    return 'io_error';
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawContent);
+  } catch {
+    return 'malformed';
+  }
+
+  if (!isReplayReportShape(parsed)) {
+    return 'malformed';
+  }
+
+  if (!hasValidEvidenceSummary(parsed)) {
+    return 'missing_evidence_summary';
+  }
+
+  const evidenceSummary = (parsed as ReplayReport).evidenceSummary;
+  if (parsed.overallDecision === 'pass' && evidenceSummary.totalSamples === 0) {
+    return 'unsupported_pass';
+  }
+
+  if (parsed.overallDecision === 'needs-review' && evidenceSummary.totalSamples === 0) {
+    return 'empty_needs_review';
+  }
+
+  return 'valid';
+}
+
+/**
+ * Categorize all replay report files by validation outcome.
+ */
+interface ReplayValidationResults {
+  ioErrorReports: string[];
+  malformedReports: string[];
+  missingEvidenceSummary: string[];
+  unsupportedPassingReports: string[];
+  emptyEvidenceNeedsReview: string[];
+}
+
+function categorizeReplayReports(reportPaths: string[]): ReplayValidationResults {
+  const results: ReplayValidationResults = {
+    ioErrorReports: [],
+    malformedReports: [],
+    missingEvidenceSummary: [],
+    unsupportedPassingReports: [],
+    emptyEvidenceNeedsReview: [],
+  };
+
+  for (const reportPath of reportPaths) {
+    const category = validateSingleReplayReport(reportPath);
+    switch (category) {
+      case 'io_error':
+        results.ioErrorReports.push(reportPath);
+        break;
+      case 'malformed':
+        results.malformedReports.push(reportPath);
+        break;
+      case 'missing_evidence_summary':
+        results.missingEvidenceSummary.push(reportPath);
+        break;
+      case 'unsupported_pass':
+        results.unsupportedPassingReports.push(reportPath);
+        break;
+      case 'empty_needs_review':
+        results.emptyEvidenceNeedsReview.push(reportPath);
+        break;
+      // 'valid' — no action needed
+    }
+  }
+
+  return results;
+}
+
+function hasValidationFailures(results: ReplayValidationResults): boolean {
+  return (
+    results.malformedReports.length > 0 ||
+    results.ioErrorReports.length > 0 ||
+    results.missingEvidenceSummary.length > 0 ||
+    results.unsupportedPassingReports.length > 0 ||
+    results.emptyEvidenceNeedsReview.length > 0
+  );
+}
+
+function auditReplayEvidenceIntegrity(stateDir: string): MergeGateAuditCheck {
+  const replayReportPaths = collectReplayReportPaths(stateDir);
 
   if (replayReportPaths.length === 0) {
     return {
@@ -324,68 +442,16 @@ function auditReplayEvidenceIntegrity(stateDir: string): MergeGateAuditCheck {
     };
   }
 
-  const malformedReports: string[] = [];
-  const ioErrorReports: string[] = [];
-  const missingEvidenceSummary: string[] = [];
-  const unsupportedPassingReports: string[] = [];
-  const emptyEvidenceNeedsReview: string[] = [];
+  const results = categorizeReplayReports(replayReportPaths);
 
-  for (const reportPath of replayReportPaths) {
-    let rawContent: string;
-    try {
-      rawContent = fs.readFileSync(reportPath, 'utf-8');
-    } catch {
-      ioErrorReports.push(reportPath);
-      continue;
-    }
-
-    try {
-      const parsed = JSON.parse(rawContent) as unknown;
-      if (!isReplayReportShape(parsed)) {
-        malformedReports.push(reportPath);
-        continue;
-      }
-
-      const evidenceSummary = parsed.evidenceSummary as ReplayReport['evidenceSummary'];
-      if (
-        !evidenceSummary ||
-        typeof evidenceSummary.evidenceStatus !== 'string' ||
-        typeof evidenceSummary.totalSamples !== 'number'
-      ) {
-        missingEvidenceSummary.push(reportPath);
-        continue;
-      }
-
-      if (parsed.overallDecision === 'pass' && evidenceSummary.totalSamples === 0) {
-        unsupportedPassingReports.push(reportPath);
-      }
-
-      if (parsed.overallDecision === 'needs-review' && evidenceSummary.totalSamples === 0) {
-        emptyEvidenceNeedsReview.push(reportPath);
-      }
-    } catch {
-      malformedReports.push(reportPath);
-    }
-  }
-
-  if (
-    malformedReports.length > 0 ||
-    ioErrorReports.length > 0 ||
-    missingEvidenceSummary.length > 0 ||
-    unsupportedPassingReports.length > 0 ||
-    emptyEvidenceNeedsReview.length > 0
-  ) {
+  if (hasValidationFailures(results)) {
     return {
       id: 'replay_evidence_integrity',
       status: 'block',
       summary: 'Replay reports contain malformed payloads, I/O errors, empty-evidence passes, or zero-evidence needs-review verdicts.',
       details: {
         reportCount: replayReportPaths.length,
-        malformedReports,
-        ioErrorReports,
-        missingEvidenceSummary,
-        unsupportedPassingReports,
-        emptyEvidenceNeedsReview,
+        ...results,
       },
     };
   }
