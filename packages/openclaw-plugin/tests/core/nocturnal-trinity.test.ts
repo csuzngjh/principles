@@ -8,6 +8,7 @@ import {
   OpenClawTrinityRuntimeAdapter,
   TrinityRuntimeContractError,
   NOCTURNAL_DREAMER_PROMPT,
+  formatReasoningContext,
   type TrinityConfig,
   type DreamerOutput,
   type DreamerCandidate,
@@ -1118,5 +1119,123 @@ describe('DreamerCandidate interface — optional fields', () => {
       };
       expect(candidate.strategicPerspective).toBe(perspective);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: buildDreamerPrompt — reasoning context injection (Task 2)
+// ---------------------------------------------------------------------------
+
+describe('buildDreamerPrompt — reasoning context injection', () => {
+  // Helper to create a minimal snapshot for reasoning context tests
+  function makeReasoningSnapshot(overrides: {
+    assistantTurns?: any[];
+    toolCalls?: any[];
+    userTurns?: any[];
+  } = {}) {
+    return {
+      sessionId: 'session-reasoning-test',
+      startedAt: '2026-04-13T00:00:00.000Z',
+      updatedAt: '2026-04-13T00:05:00.000Z',
+      assistantTurns: overrides.assistantTurns ?? [],
+      userTurns: overrides.userTurns ?? [],
+      toolCalls: overrides.toolCalls ?? [],
+      painEvents: [],
+      gateBlocks: [],
+      stats: {
+        failureCount: 0,
+        totalPainEvents: 0,
+        totalGateBlocks: 0,
+        totalAssistantTurns: overrides.assistantTurns?.length ?? 0,
+        totalToolCalls: overrides.toolCalls?.length ?? 0,
+      },
+    };
+  }
+
+  it('injects ## Reasoning Context section when assistant turns have thinking content', () => {
+    const snapshot = makeReasoningSnapshot({
+      assistantTurns: [
+        {
+          turnIndex: 0,
+          sanitizedText: '<thinking>I need to consider the implications carefully</thinking>',
+          createdAt: '2026-04-13T00:01:00.000Z',
+        },
+      ],
+    });
+
+    const result = formatReasoningContext(snapshot as any);
+    expect(result).toContain('## Reasoning Context');
+  });
+
+  it('includes uncertainty markers in reasoning context', () => {
+    const snapshot = makeReasoningSnapshot({
+      assistantTurns: [
+        {
+          turnIndex: 0,
+          sanitizedText: 'let me verify this first before proceeding with the change',
+          createdAt: '2026-04-13T00:01:00.000Z',
+        },
+      ],
+    });
+
+    const result = formatReasoningContext(snapshot as any);
+    expect(result).toContain('Uncertainty detected');
+  });
+
+  it('includes confidence signal when not high', () => {
+    const snapshot = makeReasoningSnapshot({
+      assistantTurns: [
+        {
+          turnIndex: 0,
+          sanitizedText: 'I should probably check this more thoroughly before continuing',
+          createdAt: '2026-04-13T00:01:00.000Z',
+        },
+      ],
+    });
+
+    const result = formatReasoningContext(snapshot as any);
+    // Low or medium confidence should be shown
+    expect(result).toMatch(/Confidence:\s*(low|medium)/);
+  });
+
+  it('includes contextual factors when present', () => {
+    const snapshot = makeReasoningSnapshot({
+      assistantTurns: [],
+      toolCalls: [
+        { toolName: 'Read', outcome: 'success', createdAt: '2026-04-13T00:01:00.000Z' },
+        { toolName: 'Edit', outcome: 'success', createdAt: '2026-04-13T00:02:00.000Z' },
+      ],
+    });
+
+    const result = formatReasoningContext(snapshot as any);
+    expect(result).toContain('File structure explored');
+  });
+
+  it('omits ## Reasoning Context when no reasoning signals exist', () => {
+    const snapshot = makeReasoningSnapshot({
+      assistantTurns: [],
+      toolCalls: [
+        { toolName: 'Edit', outcome: 'success', createdAt: '2026-04-13T00:01:00.000Z' },
+      ],
+    });
+
+    const result = formatReasoningContext(snapshot as any);
+    expect(result).toBeNull();
+  });
+
+  it('does not inject decisionPoints', () => {
+    const snapshot = makeReasoningSnapshot({
+      assistantTurns: [
+        {
+          turnIndex: 0,
+          sanitizedText: '<thinking>some thought</thinking>',
+          createdAt: '2026-04-13T00:01:00.000Z',
+        },
+      ],
+    });
+
+    const result = formatReasoningContext(snapshot as any);
+    expect(result).not.toContain('decisionPoint');
+    expect(result).not.toContain('DecisionPoint');
   });
 });
