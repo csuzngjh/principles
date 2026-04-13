@@ -511,6 +511,20 @@ export class EventLog {
   }
 
   /**
+   * Find the latest pain signal for a given session.
+   */
+  findLatestPainSignal(sessionId: string | undefined): PainSignalEventData | null {
+    const allEvents = this.getMergedEvents();
+    for (let i = allEvents.length - 1; i >= 0; i--) {
+      const entry = allEvents[i];
+      if (entry.sessionId === sessionId && entry.type === "pain_signal") {
+        return entry.data as unknown as PainSignalEventData;
+      }
+    }
+    return null;
+  }
+
+  /**
    * Dispose of the EventLog, flushing pending data and clearing timer.
    */
   dispose(): void {
