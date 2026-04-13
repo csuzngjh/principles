@@ -1310,6 +1310,22 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
         return null;
       }
 
+      // Validate contrastive analysis sub-fields (H-03): only include if structure is intact
+      const contrastiveAnalysis = parsed.contrastiveAnalysis
+        && typeof parsed.contrastiveAnalysis === 'object'
+        && typeof parsed.contrastiveAnalysis.criticalDifference === 'string'
+        ? parsed.contrastiveAnalysis : undefined;
+
+      const rejectedAnalysis = parsed.rejectedAnalysis
+        && typeof parsed.rejectedAnalysis === 'object'
+        && typeof parsed.rejectedAnalysis.whyRejected === 'string'
+        ? parsed.rejectedAnalysis : undefined;
+
+      const chosenJustification = parsed.chosenJustification
+        && typeof parsed.chosenJustification === 'object'
+        && typeof parsed.chosenJustification.whyChosen === 'string'
+        ? parsed.chosenJustification : undefined;
+
       return {
         selectedCandidateIndex: parsed.selectedCandidateIndex,
         badDecision: parsed.badDecision ?? '',
@@ -1328,9 +1344,9 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
           selectedCandidateIndex: parsed.selectedCandidateIndex,
           stageFailures: [],
         },
-        ...(parsed.contrastiveAnalysis ? { contrastiveAnalysis: parsed.contrastiveAnalysis } : {}),
-        ...(parsed.rejectedAnalysis ? { rejectedAnalysis: parsed.rejectedAnalysis } : {}),
-        ...(parsed.chosenJustification ? { chosenJustification: parsed.chosenJustification } : {}),
+        ...(contrastiveAnalysis ? { contrastiveAnalysis } : {}),
+        ...(rejectedAnalysis ? { rejectedAnalysis } : {}),
+        ...(chosenJustification ? { chosenJustification } : {}),
       };
     } catch {
       this.recordFailure('runtime_run_failed', new Error(`Scribe output JSON parse error: ${json.slice(0, 200)}`));

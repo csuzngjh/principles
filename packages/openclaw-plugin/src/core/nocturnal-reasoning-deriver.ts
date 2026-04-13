@@ -74,7 +74,7 @@ const UNCERTAINTY_PATTERNS: RegExp[] = [
   /not sure (if|whether|about)/gi,
 ];
 
-const THINKING_TAG_REGEX = /<thinking>([\s\S]*?)<\/thinking>/;
+const THINKING_TAG_REGEX = /<thinking>([\s\S]*?)<\/thinking>/g;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -120,9 +120,9 @@ export function deriveReasoningChain(assistantTurns: NocturnalAssistantTurn[]): 
   return assistantTurns.map(turn => {
     const text = turn.sanitizedText ?? '';
 
-    // Extract <thinking> content
-    const thinkingMatch = text.match(THINKING_TAG_REGEX);
-    const thinkingContent = thinkingMatch ? thinkingMatch[1].trim() : '';
+    // Extract all <thinking> content blocks (multiple blocks per turn possible)
+    const thinkingMatches = [...text.matchAll(THINKING_TAG_REGEX)];
+    const thinkingContent = thinkingMatches.map(m => m[1].trim()).join('\n');
 
     // Detect uncertainty markers (collect all unique matches across 3 patterns)
     const uncertaintyMarkers: string[] = [];
@@ -196,24 +196,29 @@ export function deriveDecisionPoints(
     }));
   }
 
-  // Sort assistant turns by createdAt for binary-style lookup
+  // Sort assistant turns by createdAt for binary search
   const sortedTurns = [...assistantTurns].sort(
     (a, b) => parseTs(a.createdAt) - parseTs(b.createdAt)
   );
 
-  return toolCalls.map(tc => {
-    const tcTime = parseTs(tc.createdAt);
-
-    // Find assistant turn immediately before tool call
-    // (highest createdAt that is strictly less than tool call's createdAt)
-    let beforeTurn: NocturnalAssistantTurn | undefined;
-    for (const turn of sortedTurns) {
-      if (parseTs(turn.createdAt) < tcTime) {
-        beforeTurn = turn;
+  // Binary search: find rightmost assistant turn with createdAt < tcTime
+  const findBeforeTurn = (tcTime: number): NocturnalAssistantTurn | undefined => {
+    let lo = 0, hi = sortedTurns.length - 1, result: NocturnalAssistantTurn | undefined;
+    while (lo <= hi) {
+      const mid = (lo + hi) >>> 1;
+      if (parseTs(sortedTurns[mid].createdAt) < tcTime) {
+        result = sortedTurns[mid];
+        lo = mid + 1;
       } else {
-        break;
+        hi = mid - 1;
       }
     }
+    return result;
+  };
+
+  return toolCalls.map(tc => {
+    const tcTime = parseTs(tc.createdAt);
+    const beforeTurn = findBeforeTurn(tcTime);
 
     const beforeContext = beforeTurn
       ? beforeTurn.sanitizedText.slice(-500)
