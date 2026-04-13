@@ -10,6 +10,7 @@ import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingM
 import { EmpathyObserverWorkflowManager, empathyObserverWorkflowSpec, isExpectedSubagentError } from '../service/subagent-workflow/index.js';
 import { PathResolver } from '../core/path-resolver.js';
 import { isSubagentRuntimeAvailable } from '../utils/subagent-probe.js';
+import { getPendingDiagnosticianTasks } from '../core/diagnostician-task-store.js';
 import {
   matchEmpathyKeywords,
   loadKeywordStore,
@@ -643,6 +644,39 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
       } catch (e) {
         logger?.error(`[PD:Prompt] Failed to read HEARTBEAT: ${String(e)}`);
       }
+    }
+
+    // ──── 4b. Inject pending diagnostician tasks ────
+    // FIX (#283): The evolution worker writes pain diagnosis tasks to
+    // diagnostician_tasks.json. The heartbeat prompt hook must read and inject
+    // them so the LLM (acting as diagnostician) can process them.
+    try {
+      const pendingTasks = getPendingDiagnosticianTasks(wctx.stateDir);
+      if (pendingTasks.length > 0) {
+        const taskBlocks = pendingTasks
+          .slice(0, 3)
+          .map(({ id, task }) => `<diagnostician_task id="${id}">\n${task.prompt}\n</diagnostician_task>`)
+          .join('\n\n');
+
+        const pendingCount = pendingTasks.length;
+        const processingNote = pendingCount > 3
+          ? `\n\nNOTE: ${pendingCount - 3} more tasks are queued. Process these 3 first; remaining tasks will be handled on subsequent heartbeats.`
+          : '';
+
+        prependContext += `<diagnostician_tasks pending="${pendingCount}">
+You are acting as a **Pain Diagnostician**. Process the following task(s) by:
+1. Analyzing the pain signal and its context
+2. Identifying the root cause and violated principles
+3. Writing a completion marker file: .evolution_complete_<TASK_ID>
+4. Writing a diagnostic report: .diagnostician_report_<TASK_ID>.json
+
+${taskBlocks}${processingNote}
+</diagnostician_tasks>\n`;
+
+        logger?.info?.(`[PD:Prompt] Injected ${Math.min(pendingCount, 3)}/${pendingCount} pending diagnostician task(s) into heartbeat prompt`);
+      }
+    } catch (e) {
+      logger?.warn?.(`[PD:Prompt] Failed to read diagnostician tasks: ${String(e)}`);
     }
   }
 
