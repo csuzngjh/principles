@@ -35,6 +35,10 @@ import * as os from 'os';
 import * as path from 'path';
 import type { NocturnalSessionSnapshot } from './nocturnal-trajectory-extractor.js';
 import { computeThinkingModelDelta } from './nocturnal-trajectory-extractor.js';
+import {
+  deriveReasoningChain,
+  deriveContextualFactors,
+} from './nocturnal-reasoning-deriver.js';
 import type { TrinityArtificerContext } from './nocturnal-artificer.js';
 import {
   runTournament,
@@ -420,6 +424,70 @@ export class TrinityRuntimeContractError extends Error {
     this.code = code;
     this.diagnostics = diagnostics;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Reasoning Context Serialization (D-03, D-04)
+// ---------------------------------------------------------------------------
+
+/**
+ * Format derived reasoning signals into a prompt section for Dreamer.
+ *
+ * Returns the formatted "## Reasoning Context" section as a string,
+ * or null if no meaningful reasoning content exists to include.
+ *
+ * Only reasoningChain + contextualFactors are serialized.
+ * DecisionPoints are NOT injected (reserved for Phase 37 Scribe per D-04).
+ */
+export function formatReasoningContext(snapshot: NocturnalSessionSnapshot): string | null {
+  const reasoningChain = deriveReasoningChain(snapshot.assistantTurns);
+  const contextualFactors = deriveContextualFactors(snapshot);
+
+  const hasReasoningContent = reasoningChain.length > 0 &&
+    reasoningChain.some(s => s.thinkingContent || s.uncertaintyMarkers.length > 0);
+
+  if (!hasReasoningContent && !contextualFactors.fileStructureKnown &&
+      !contextualFactors.errorHistoryPresent &&
+      !contextualFactors.userGuidanceAvailable &&
+      !contextualFactors.timePressure) {
+    return null;
+  }
+
+  const sections: string[] = ['## Reasoning Context', ''];
+
+  // Serialize reasoning chain (only turns with non-empty signals)
+  const significantTurns = reasoningChain.filter(
+    s => s.thinkingContent || s.uncertaintyMarkers.length > 0
+  );
+  for (const signal of significantTurns) {
+    if (signal.thinkingContent) {
+      sections.push(`- Turn ${signal.turnIndex}: Internal reasoning: "${signal.thinkingContent.slice(0, 200)}"`);
+    }
+    if (signal.uncertaintyMarkers.length > 0) {
+      sections.push(`- Turn ${signal.turnIndex}: Uncertainty detected: ${signal.uncertaintyMarkers.join(', ')}`);
+    }
+    if (signal.confidenceSignal !== 'high') {
+      sections.push(`- Turn ${signal.turnIndex}: Confidence: ${signal.confidenceSignal}`);
+    }
+  }
+
+  // Serialize contextual factors
+  const factorLabels: string[] = [];
+  if (contextualFactors.fileStructureKnown) factorLabels.push('File structure explored before modification');
+  if (contextualFactors.errorHistoryPresent) factorLabels.push('Prior error history present');
+  if (contextualFactors.userGuidanceAvailable) factorLabels.push('User guidance/corrections available');
+  if (contextualFactors.timePressure) factorLabels.push('Time pressure detected (rapid tool calls)');
+
+  if (factorLabels.length > 0) {
+    sections.push('');
+    sections.push('Environmental context:');
+    for (const label of factorLabels) {
+      sections.push(`- ${label}`);
+    }
+  }
+
+  sections.push('');
+  return sections.join('\n');
 }
 
 export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
@@ -813,6 +881,12 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
       sections.push(`## User Corrections`);
       sections.push(userCues);
       sections.push('');
+    }
+
+    // ## Reasoning Context — derived signals from Phase 34 deriver module (D-03, D-04)
+    const reasoningSection = formatReasoningContext(snapshot);
+    if (reasoningSection) {
+      sections.push(reasoningSection);
     }
 
     sections.push(`## Task`,
