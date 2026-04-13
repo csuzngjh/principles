@@ -129,20 +129,172 @@ export function deriveReasoningChain(assistantTurns: NocturnalAssistantTurn[]): 
 }
 
 // ---------------------------------------------------------------------------
-// Plan 02 implementations (stubs)
+// Helpers (Plan 02)
 // ---------------------------------------------------------------------------
 
-export function deriveDecisionPoints(
-  _assistantTurns: NocturnalAssistantTurn[],
-  _toolCalls: NocturnalToolCall[],
-): DerivedDecisionPoint[] {
-  // Plan 02: DERIV-02
-  return [];
+/**
+ * Convert confidence signal to numeric value for delta computation.
+ * high=1, medium=0.5, low=0
+ */
+function confidenceToNumber(signal: "high" | "medium" | "low"): number {
+  switch (signal) {
+    case "high": return 1;
+    case "medium": return 0.5;
+    case "low": return 0;
+  }
 }
 
+// ---------------------------------------------------------------------------
+// deriveDecisionPoints (DERIV-02)
+// ---------------------------------------------------------------------------
+
+/**
+ * Extract before-context and after-reflection for each tool call.
+ *
+ * DERIV-02: For each tool call, find the assistant turn immediately before it
+ * (by createdAt timestamp) and extract last 500 chars as beforeContext.
+ * On failure outcome, find the next assistant turn and extract first 300 chars
+ * as afterReflection. Compute confidence delta between before/after.
+ *
+ * Empty inputs return empty array. Never throws.
+ */
+export function deriveDecisionPoints(
+  assistantTurns: NocturnalAssistantTurn[],
+  toolCalls: NocturnalToolCall[],
+): DerivedDecisionPoint[] {
+  if (!toolCalls || toolCalls.length === 0) return [];
+  if (!assistantTurns || assistantTurns.length === 0) {
+    // Return decision points with empty beforeContext when no assistant turns
+    return toolCalls.map(tc => ({
+      toolName: tc.toolName,
+      outcome: tc.outcome,
+      beforeContext: '',
+    }));
+  }
+
+  // Sort assistant turns by createdAt for binary-style lookup
+  const sortedTurns = [...assistantTurns].sort(
+    (a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)
+  );
+
+  return toolCalls.map(tc => {
+    const tcTime = Date.parse(tc.createdAt);
+
+    // Find assistant turn immediately before tool call
+    // (highest createdAt that is strictly less than tool call's createdAt)
+    let beforeTurn: NocturnalAssistantTurn | undefined;
+    for (const turn of sortedTurns) {
+      if (Date.parse(turn.createdAt) < tcTime) {
+        beforeTurn = turn;
+      } else {
+        break;
+      }
+    }
+
+    const beforeContext = beforeTurn
+      ? beforeTurn.sanitizedText.slice(-500)
+      : '';
+
+    // On failure, find next assistant turn after tool call
+    let afterReflection: string | undefined;
+    let confidenceDelta: number | undefined;
+
+    if (tc.outcome === 'failure') {
+      const afterTurn = sortedTurns.find(
+        turn => Date.parse(turn.createdAt) > tcTime
+      );
+      if (afterTurn) {
+        afterReflection = afterTurn.sanitizedText.slice(0, 300);
+      }
+
+      // Compute confidence delta if both before and after turns exist
+      if (beforeTurn && afterTurn) {
+        const beforeConfidence = confidenceToNumber(
+          mapConfidenceSignal(computeThinkingModelActivation(beforeTurn.sanitizedText))
+        );
+        const afterConfidence = confidenceToNumber(
+          mapConfidenceSignal(computeThinkingModelActivation(afterTurn.sanitizedText))
+        );
+        confidenceDelta = Math.round((afterConfidence - beforeConfidence) * 100) / 100;
+      }
+    }
+
+    const result: DerivedDecisionPoint = {
+      toolName: tc.toolName,
+      outcome: tc.outcome,
+      beforeContext,
+    };
+    if (afterReflection !== undefined) result.afterReflection = afterReflection;
+    if (confidenceDelta !== undefined) result.confidenceDelta = confidenceDelta;
+    return result;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// deriveContextualFactors (DERIV-03)
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute contextual factors from session snapshot data.
+ *
+ * DERIV-03: Four boolean factors indicating the environment
+ * the agent was operating in. All derived from existing snapshot
+ * fields -- no schema changes.
+ *
+ * Empty/missing data returns all-false defaults. Never throws.
+ */
 export function deriveContextualFactors(
-  _snapshot: NocturnalSessionSnapshot,
+  snapshot: NocturnalSessionSnapshot,
 ): DerivedContextualFactors {
-  // Plan 02: DERIV-03
-  return { fileStructureKnown: false, errorHistoryPresent: false, userGuidanceAvailable: false, timePressure: false };
+  const defaults: DerivedContextualFactors = {
+    fileStructureKnown: false,
+    errorHistoryPresent: false,
+    userGuidanceAvailable: false,
+    timePressure: false,
+  };
+
+  if (!snapshot) return defaults;
+
+  const { toolCalls = [], userTurns = [] } = snapshot;
+
+  // fileStructureKnown: any Read tool precedes any Write tool in chronological order
+  let fileStructureKnown = false;
+  const isReadTool = (name: string) => /^(read|grep|search|find|inspect|look)/i.test(name);
+  const isWriteTool = (name: string) => /^(edit|write|create|delete|remove|move|rename)/i.test(name);
+  let hasSeenRead = false;
+  for (const tc of toolCalls) {
+    if (isReadTool(tc.toolName)) hasSeenRead = true;
+    if (isWriteTool(tc.toolName) && hasSeenRead) {
+      fileStructureKnown = true;
+      break;
+    }
+  }
+
+  // errorHistoryPresent: any tool call with outcome === 'failure'
+  const errorHistoryPresent = toolCalls.some(tc => tc.outcome === 'failure');
+
+  // userGuidanceAvailable: any user turn with correctionDetected === true
+  const userGuidanceAvailable = (userTurns || []).some(ut => ut.correctionDetected === true);
+
+  // timePressure: >50% of consecutive tool call pairs have < 2s gap
+  let timePressure = false;
+  if (toolCalls.length >= 2) {
+    const sorted = [...toolCalls].sort(
+      (a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)
+    );
+    let rapidGaps = 0;
+    for (let i = 0; i < sorted.length - 1; i++) {
+      const gap = Date.parse(sorted[i + 1].createdAt) - Date.parse(sorted[i].createdAt);
+      if (gap < 2000) rapidGaps++;
+    }
+    const totalPairs = sorted.length - 1;
+    timePressure = rapidGaps / totalPairs > 0.5;
+  }
+
+  return {
+    fileStructureKnown,
+    errorHistoryPresent,
+    userGuidanceAvailable,
+    timePressure,
+  };
 }
