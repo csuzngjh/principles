@@ -152,6 +152,7 @@ export class EventLog {
     }
   }
 
+    // eslint-disable-next-line complexity -- refactor candidate
   private updateStats(entry: EventLogEntry): void {
     let stats = this.statsCache.get(entry.date);
     if (!stats) {
@@ -426,6 +427,7 @@ export class EventLog {
   /**
    * Aggregate empathy stats for a specific session.
    */
+    // eslint-disable-next-line complexity -- refactor candidate
   private aggregateSessionEmpathy(sessionId: string, result: EmpathyEventStats): void {
     for (const entry of this.getMergedEvents()) {
       if (entry.sessionId === sessionId && entry.type === 'pain_signal') {

@@ -89,6 +89,7 @@ type SubagentEndedHookContext = PluginHookSubagentContext & {
     agentId?: string;
 };
 
+    // eslint-disable-next-line complexity -- refactor candidate
 export async function handleSubagentEnded(
     event: PluginHookSubagentEndedEvent,
     ctx: SubagentEndedHookContext

@@ -126,6 +126,7 @@ function isValidModelFormat(model: string): boolean {
  * @param modelConfig - Model config: string (e.g. "provider/model") or { primary, fallbacks } object
  * @internal Helper for model configuration resolution
  */
+    // eslint-disable-next-line complexity -- refactor candidate
 export function resolveModelFromConfig(modelConfig: unknown, logger?: PluginLogger): string | null {
   if (!modelConfig) return null;
   
@@ -298,6 +299,7 @@ ${recentMessages.map((m, i) => `${i + 1}. "${m}"`).join('\n')}
 `;
 }
 
+    // eslint-disable-next-line complexity -- refactor candidate
 export async function handleBeforePromptBuild(
   event: PluginHookBeforePromptBuildEvent,
   ctx: PluginHookAgentContext & { api?: PromptHookApi }

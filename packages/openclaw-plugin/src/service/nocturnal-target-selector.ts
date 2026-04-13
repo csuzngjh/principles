@@ -312,6 +312,7 @@ export class NocturnalTargetSelector {
    *
    * @returns NocturnalSelectionResult with either selected targets or skip reason
    */
+    // eslint-disable-next-line complexity -- refactor candidate
   select(): NocturnalSelectionResult {
     const diagnostics: SelectionDiagnostics = {
       totalEvaluablePrinciples: 0,

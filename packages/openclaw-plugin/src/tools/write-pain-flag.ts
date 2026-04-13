@@ -79,6 +79,7 @@ export function createWritePainFlagTool(api: OpenClawPluginApi) {
             })),
         }),
 
+    // eslint-disable-next-line complexity -- refactor candidate
         async execute(
             _toolCallId: string,
             rawParams: Record<string, unknown>

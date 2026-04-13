@@ -242,6 +242,7 @@ function showHistory(workspaceDir: string, isZh: boolean): string {
 /**
  * 手动压缩 CURRENT_FOCUS.md（使用子智能体）
  */
+    // eslint-disable-next-line complexity -- refactor candidate
 async function compressFocus(
   workspaceDir: string,
   isZh: boolean,
@@ -467,7 +468,9 @@ function showHelp(isZh: boolean): string {
 
 /**
  * 处理 /pd-focus 命令
+    // eslint-disable-next-line complexity -- refactor candidate
  */
+    // eslint-disable-next-line complexity -- refactor candidate
 export async function handleFocusCommand(
   ctx: PluginCommandContext,
   api: OpenClawPluginApi

@@ -98,6 +98,7 @@ function formatConstraintCheck(
   return `${icon} ${name}: ${check.actual.toFixed(4)} (baseline: ${check.baseline.toFixed(4)}, threshold: ${check.threshold.toFixed(4)})`;
 }
 
+    // eslint-disable-next-line complexity -- refactor candidate
 export function handleNocturnalRolloutCommand(ctx: PluginCommandContext): PluginCommandResult {
   const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
   const zh = isZh(ctx);

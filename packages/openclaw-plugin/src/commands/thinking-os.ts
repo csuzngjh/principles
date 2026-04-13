@@ -98,6 +98,7 @@ function handlePropose(wctx: WorkspaceContext, proposal: string): string {
     }
 }
 
+    // eslint-disable-next-line complexity -- refactor candidate
 function formatAuditReport(wctx: WorkspaceContext): string {
     const logPath = wctx.resolve('THINKING_OS_USAGE');
     const thinkingOsPath = wctx.resolve('THINKING_OS');

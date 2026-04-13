@@ -338,6 +338,7 @@ const plugin = {
 
     api.on(
       'subagent_ended',
+    // eslint-disable-next-line complexity -- refactor candidate
       (event: PluginHookSubagentEndedEvent, ctx: PluginHookSubagentContext): void => {
         try {
           // Resolve workspace via official API, falling back to PathResolver

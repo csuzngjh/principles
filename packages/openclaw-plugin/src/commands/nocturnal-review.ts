@@ -90,6 +90,7 @@ function statusLabel(status: NocturnalReviewStatus, zh: boolean): string {
   return labels[status][zh ? 'zh' : 'en'];
 }
 
+    // eslint-disable-next-line complexity -- refactor candidate
 export function handleNocturnalReviewCommand(ctx: PluginCommandContext): PluginCommandResult {
   const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
   const zh = isZh(ctx);

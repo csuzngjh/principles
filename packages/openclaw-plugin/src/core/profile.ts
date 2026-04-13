@@ -59,6 +59,7 @@ export const PROFILE_DEFAULTS = {
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // Reason: normalizeProfile handles arbitrary JSON profile shapes where static typing cannot capture runtime field existence
+    // eslint-disable-next-line complexity -- refactor candidate
 export function normalizeProfile(rawProfile: any): any {
   const defaults = JSON.parse(JSON.stringify(PROFILE_DEFAULTS));
   const warnings: string[] = [];

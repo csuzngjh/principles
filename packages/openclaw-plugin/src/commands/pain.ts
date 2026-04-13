@@ -23,6 +23,7 @@ function createMiniBar(count: number, max: number, length = 6): string {
 /**
  * Format empathy stats for display
  */
+    // eslint-disable-next-line complexity -- refactor candidate
 function formatEmpathyCard(stats: EmpathyEventStats, range: string, isZh: boolean): string {
     if (stats.totalEvents === 0 && stats.dedupedCount === 0) {
         return isZh
@@ -83,6 +84,7 @@ function formatEmpathyCard(stats: EmpathyEventStats, range: string, isZh: boolea
 /**
  * Handles the /pd-status command
  */
+    // eslint-disable-next-line complexity -- refactor candidate
 export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResult {
     const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
     

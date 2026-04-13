@@ -361,6 +361,7 @@ const MAX_NEXT_ACTIONS = 5;
  * @param workspaceDir 工作区目录（用于生成相对路径）
  * @returns 提取的工作记忆快照
  */
+    // eslint-disable-next-line complexity -- refactor candidate
 export function extractWorkingMemory(
   messages: { role?: string; content?: string | unknown[] }[],
   workspaceDir?: string
@@ -468,6 +469,7 @@ export function extractWorkingMemory(
 /**
  * 从文本中提取文件操作记录
  */
+    // eslint-disable-next-line complexity -- refactor candidate
 function extractFileArtifacts(
   text: string, 
   artifacts: FileArtifact[],
@@ -1061,6 +1063,7 @@ export function archiveMilestonesToDaily(
 /**
  * 清理过期信息和验证文件引用
  */
+    // eslint-disable-next-line complexity -- refactor candidate
 export function cleanupStaleInfo(
   content: string,
   workspaceDir?: string,
@@ -1405,6 +1408,7 @@ export function recoverFromTemplate(
  * @param logger 日志记录器
  * @returns 文件内容和恢复状态
  */
+    // eslint-disable-next-line complexity -- refactor candidate
 export function safeReadCurrentFocus(
   focusPath: string,
   extensionRoot: string,

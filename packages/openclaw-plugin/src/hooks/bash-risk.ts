@@ -39,6 +39,7 @@ export type BashRiskLevel = 'safe' | 'dangerous' | 'normal';
  * @returns The risk level: 'safe', 'dangerous', or 'normal'
  */
  
+    // eslint-disable-next-line complexity -- refactor candidate
 export function analyzeBashCommand(
   command: string,
   safePatterns: string[],

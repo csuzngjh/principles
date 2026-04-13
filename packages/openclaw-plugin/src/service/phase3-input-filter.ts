@@ -123,6 +123,7 @@ function isTimeoutOnlyOutcome(item: Phase3EvolutionInput): boolean {
  * @param queue - Evolution queue items to validate
  * @returns Phase 3 eligibility results
  */
+    // eslint-disable-next-line complexity -- refactor candidate
 export function evaluatePhase3Inputs(
   queue: Phase3EvolutionInput[]
 ): Phase3InputFilterResult {

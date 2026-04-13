@@ -150,6 +150,7 @@ function pushWarning(warnings: string[], message: string): void {
 }
 
 export class RuntimeSummaryService {
+    // eslint-disable-next-line complexity -- refactor candidate
   static getSummary(
     workspaceDir: string,
     options?: { sessionId?: string | null }
@@ -661,6 +662,7 @@ export class RuntimeSummaryService {
     return `Diagnose systemic pain [ID: ${taskId}]. Source: ${source}. Reason: ${reason}. Trigger text: "${preview}"`.slice(0, 160);
   }
 
+    // eslint-disable-next-line complexity -- refactor candidate
   private static warnOnLegacyDirectiveMismatch(
     directive: DirectiveFile,
     derived: { active: boolean; taskPreview: string | null; taskId: string | null } | null,

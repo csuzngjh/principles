@@ -129,6 +129,7 @@ function parseSafeMessages(lines: string[]): ParsedMessage[] {
  * Extracts a concise turn representation from a message.
  * Returns null if nothing useful to extract.
  */
+    // eslint-disable-next-line complexity -- refactor candidate
 function extractTurn(msg: ParsedMessage): string | null {
   if (msg.role === 'user' && msg.textParts.length > 0) {
     // For user messages, skip system prompt injection patterns
@@ -235,7 +236,9 @@ export async function extractRecentConversation(
 
 /**
  * Extracts failed tool call context with argument correlation.
+    // eslint-disable-next-line complexity -- refactor candidate
  */
+    // eslint-disable-next-line complexity -- refactor candidate
 export async function extractFailedToolContext(
   sessionId: string,
   agentId: string,

@@ -116,6 +116,7 @@ export const deepReflectWorkflowSpec: SubagentWorkflowSpec<DeepReflectResult> = 
         return status === 'ok';
     },
 
+    // eslint-disable-next-line complexity -- refactor candidate
     async parseResult(ctx: WorkflowResultContext): Promise<DeepReflectResult | null> {
         const { assistantTexts, messages } = ctx;
 

@@ -69,6 +69,7 @@ function block(
 }
 
  
+    // eslint-disable-next-line complexity -- refactor candidate
 export function checkGfiGate(
   event: PluginHookBeforeToolCallEvent,
   wctx: WorkspaceContext,

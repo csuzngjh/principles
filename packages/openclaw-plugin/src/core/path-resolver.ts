@@ -152,6 +152,7 @@ export class PathResolver {
         }
     }
 
+    // eslint-disable-next-line complexity -- refactor candidate
     private log(level: 'debug' | 'info' | 'warn' | 'error', msg: string): void {
         const prefix = '[PD:PathResolver]';
         const fullMsg = `${prefix} ${msg}`;

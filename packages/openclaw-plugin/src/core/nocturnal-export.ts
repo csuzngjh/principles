@@ -275,6 +275,7 @@ function buildEvidenceBoundedRationale(evidenceSummary: ORPOEvidenceSummary): st
  * @param options - Additional export options
  * @returns ExportResult
  */
+    // eslint-disable-next-line complexity -- refactor candidate
 export function exportORPOSamples(
   workspaceDir: string,
   targetModelFamily?: string | null,

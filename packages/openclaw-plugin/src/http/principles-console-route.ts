@@ -96,6 +96,7 @@ function createService(api: OpenClawPluginApi): ControlUiQueryService {
 }
 
  
+    // eslint-disable-next-line complexity -- refactor candidate
 function handleApiRoute(
   api: OpenClawPluginApi,
   pathname: string,

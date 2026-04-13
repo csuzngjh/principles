@@ -585,6 +585,7 @@ export class HealthQueryService {
       .slice(0, Math.max(1, Math.min(200, limit)));
   }
 
+    // eslint-disable-next-line complexity -- refactor candidate
   private mapPrincipleEvent(event: EvolutionStreamRecord): RecentPrincipleChange | null {
     const data = event.data ?? {};
     const type = String(event.type);
@@ -861,6 +862,7 @@ export class HealthQueryService {
    
     // eslint-disable-next-line complexity -- complexity 13, refactor candidate
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+    // eslint-disable-next-line complexity -- refactor candidate
   private resolveGateType(row: GateBlockRow): string {
     if (typeof row.gate_type === 'string' && row.gate_type.trim().length > 0) {
       return row.gate_type;

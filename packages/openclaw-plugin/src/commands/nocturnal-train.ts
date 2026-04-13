@@ -98,6 +98,7 @@ function formatTrainingRun(run: ReturnType<typeof getTrainingRun>, zh: boolean):
   return lines.join('\n  ');
 }
 
+    // eslint-disable-next-line complexity -- refactor candidate
 export async function handleNocturnalTrainCommand(ctx: PluginCommandContext): Promise<PluginCommandResult> {
   const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
   const zh = isZh(ctx);

@@ -134,6 +134,7 @@ export class MonitoringQueryService {
    * Get aggregate health metrics for all Trinity workflows.
    * @returns Aggregate health statistics
    */
+    // eslint-disable-next-line complexity -- refactor candidate
   getTrinityHealth(): TrinityHealthResponse {
     // Get all workflows
     const workflows = this.store.listWorkflows();

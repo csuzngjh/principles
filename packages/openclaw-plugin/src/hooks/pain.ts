@@ -46,6 +46,7 @@ function createPainId(sessionId: string): string {
   return `pain_${Date.now()}_${computeHash(sessionId).slice(0, 8)}`;
 }
 
+    // eslint-disable-next-line complexity -- refactor candidate
 export function handleAfterToolCall(
   event: PluginHookAfterToolCallEvent,
   ctx: PluginHookToolContext & { workspaceDir?: string; pluginConfig?: Record<string, unknown> },

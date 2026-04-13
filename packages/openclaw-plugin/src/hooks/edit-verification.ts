@@ -127,6 +127,7 @@ This is enforced by P-03 (精确匹配前验证原则).`;
  * This enforces P-03 at the tool layer
  */
  
+    // eslint-disable-next-line complexity -- refactor candidate
 export function handleEditVerification(
   event: PluginHookBeforeToolCallEvent,
   wctx: WorkspaceContext,

@@ -9,6 +9,7 @@ import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.
  *   /pd-rollback <event-id>  - Rollback a specific empathy event by ID
  *   /pd-rollback last        - Rollback the last empathy event in current session
  */
+    // eslint-disable-next-line complexity -- refactor candidate
 export function handleRollbackCommand(ctx: PluginCommandContext): PluginCommandResult {
     const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
     

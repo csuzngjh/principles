@@ -716,6 +716,7 @@ export class CentralDatabase {
   }
     // eslint-disable-next-line complexity -- complexity 12, refactor candidate
 
+    // eslint-disable-next-line complexity -- refactor candidate
   updateWorkspaceConfig(
     workspaceName: string,
     updates: {

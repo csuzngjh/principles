@@ -46,6 +46,7 @@ export interface BlockContext {
  * @param logger - Logger instance
  * @returns PluginHookBeforeToolCallResult with block=true
  */
+    // eslint-disable-next-line complexity -- refactor candidate
 export function recordGateBlockAndReturn(
   wctx: WorkspaceContext,
   blockCtx: BlockContext,

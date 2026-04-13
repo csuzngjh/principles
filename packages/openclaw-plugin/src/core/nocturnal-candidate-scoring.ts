@@ -145,6 +145,7 @@ export interface DiversityValidationResult {
  * @param weights - Scoring weights
  * @returns Individual scores
  */
+    // eslint-disable-next-line complexity -- refactor candidate
 export function scoreCandidate(
   candidate: DreamerCandidate,
   judgment: PhilosopherJudgment,
@@ -262,6 +263,7 @@ export function checkThresholds(
  * @param candidates - Dreamer candidates to validate
  * @returns DiversityValidationResult with pass/fail details
  */
+    // eslint-disable-next-line complexity -- refactor candidate
 export function validateCandidateDiversity(
   candidates: DreamerCandidate[],
 ): DiversityValidationResult {

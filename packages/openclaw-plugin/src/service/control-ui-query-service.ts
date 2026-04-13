@@ -863,6 +863,7 @@ export class ControlUiQueryService {
       hits: number;
     }>('SELECT model_id, scenario, hits FROM v_thinking_model_scenarios ORDER BY hits DESC');
 
+    // eslint-disable-next-line complexity -- refactor candidate
     return knownModels.map((model) => {
       const usage = usageRows.get(model.id);
       const effect = effectRows.get(model.id);

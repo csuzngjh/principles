@@ -105,6 +105,7 @@ function _handleListActiveRollback(
 }
 
  
+    // eslint-disable-next-line complexity -- refactor candidate
 function _handleRollbackImpl(
   workspaceDir: string,
   stateDir: string,

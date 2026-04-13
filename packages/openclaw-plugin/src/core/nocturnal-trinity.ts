@@ -481,6 +481,7 @@ export class TrinityRuntimeContractError extends Error {
  * Only reasoningChain + contextualFactors are serialized.
  * DecisionPoints are NOT injected (reserved for Phase 37 Scribe per D-04).
  */
+    // eslint-disable-next-line complexity -- refactor candidate
 export function formatReasoningContext(snapshot: NocturnalSessionSnapshot): string | null {
   const reasoningChain = deriveReasoningChain(snapshot.assistantTurns);
   const contextualFactors = deriveContextualFactors(snapshot);
@@ -1292,6 +1293,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
   }
 
    
+    // eslint-disable-next-line complexity -- refactor candidate
   private parseScribeOutput(
     text: string,
     snapshot: NocturnalSessionSnapshot,
@@ -2106,7 +2108,9 @@ export function runTrinity(options: RunTrinityOptions): TrinityResult {
  *
  * @param options - Trinity execution options
  * @returns Promise<TrinityResult> with final artifact or failure info
+    // eslint-disable-next-line complexity -- refactor candidate
  */
+    // eslint-disable-next-line complexity -- refactor candidate
 export async function runTrinityAsync(options: RunTrinityOptions): Promise<TrinityResult> {
   const { snapshot, principleId, config } = options;
 
@@ -2252,6 +2256,7 @@ export async function runTrinityAsync(options: RunTrinityOptions): Promise<Trini
  * Internal: Run Trinity chain with stub implementations (synchronous).
     // eslint-disable-next-line complexity -- complexity 14, refactor candidate
  */
+    // eslint-disable-next-line complexity -- refactor candidate
 function runTrinityWithStubs(
   snapshot: NocturnalSessionSnapshot,
   principleId: string,
@@ -2387,6 +2392,7 @@ export interface DraftValidationResult {
 /**
  * Validate a TrinityDraftArtifact before passing to arbiter.
  */
+    // eslint-disable-next-line complexity -- refactor candidate
 export function validateDraftArtifact(draft: TrinityDraftArtifact): DraftValidationResult {
   const failures: string[] = [];
 

@@ -52,6 +52,7 @@ interface JsonlMessage {
   __openclaw?: { truncated: boolean; reason: string };
 }
 
+    // eslint-disable-next-line complexity -- refactor candidate
 export async function extractPainFromSessionFile(sessionFile: string, ctx: PluginHookAgentContext): Promise<void> {
   const painPoints: string[] = [];
   const {workspaceDir} = ctx;
@@ -204,6 +205,7 @@ export async function handleBeforeCompaction(
 /**
  * 从会话文件提取工作记忆并保存到 CURRENT_FOCUS.md
  */
+    // eslint-disable-next-line complexity -- refactor candidate
 async function extractAndSaveWorkingMemory(
   sessionFile: string,
   ctx: PluginHookAgentContext,

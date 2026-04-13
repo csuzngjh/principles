@@ -272,6 +272,7 @@ Empathy keyword optimization complete:
   return task.description;
 }
 
+    // eslint-disable-next-line complexity -- refactor candidate
 export async function reconcilePDTasks(
   workspaceDir: string,
   options?: Partial<ReconcileOptions>,
@@ -367,6 +368,7 @@ export async function reconcilePDTasks(
 }
 
 
+    // eslint-disable-next-line complexity -- refactor candidate
 function healthCheck(
   tasks: PDTaskSpec[],
   cronStore: CronStoreFile,

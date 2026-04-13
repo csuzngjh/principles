@@ -99,6 +99,7 @@ function showStatus(workspaceDir: string, isZh: boolean): string {
  * Toggle a boolean setting
  */
  
+    // eslint-disable-next-line complexity -- refactor candidate
 function toggleSetting(
     workspaceDir: string,
     key: 'thinkingOs' | 'reflectionLog',

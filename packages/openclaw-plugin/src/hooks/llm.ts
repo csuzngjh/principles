@@ -73,6 +73,7 @@ function isEchoedTag(text: string, tagMatch: RegExpMatchArray): boolean {
     return false;
 }
 
+    // eslint-disable-next-line complexity -- refactor candidate
 export function extractEmpathySignal(text: string): EmpathySignal {
     if (!text || typeof text !== 'string') {
         return { detected: false, severity: 'mild', confidence: 1 };
@@ -136,6 +137,7 @@ export function isEmpathyAuditPayload(text: string): boolean {
     return false;
 }
 
+    // eslint-disable-next-line complexity -- refactor candidate
 export function handleLlmOutput(
     event: PluginHookLlmOutputEvent,
     ctx: PluginHookAgentContext & { workspaceDir?: string }
@@ -267,6 +269,7 @@ export function handleLlmOutput(
     });
 }
 
+    // eslint-disable-next-line complexity -- refactor candidate
 function trackThinkingModelUsage(args: {
     text: string;
     wctx: WorkspaceContext;

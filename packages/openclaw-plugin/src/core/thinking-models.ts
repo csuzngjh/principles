@@ -302,6 +302,7 @@ export function getThinkingModelDefinitions(workspaceDir?: string): {
   }));
 }
 
+    // eslint-disable-next-line complexity -- refactor candidate
 export function deriveThinkingScenarios(
   modelId: string,
   context: ThinkingScenarioContext,

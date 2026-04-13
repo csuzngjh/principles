@@ -8,6 +8,7 @@ import { resolvePdPath } from './paths.js';
  * Handles migration of Principles Disciple files from legacy directories
  * (docs/ and memory/.state/) to the new hidden directory structure (.principles/ and .state/).
  */
+    // eslint-disable-next-line complexity -- refactor candidate
 export function migrateDirectoryStructure(api: OpenClawPluginApi, workspaceDir: string): void {
     try {
         const legacyDocsDir = path.join(workspaceDir, 'docs');

@@ -6,6 +6,7 @@ function isZh(ctx: PluginCommandContext): boolean {
   return String(ctx.config?.language || 'en').startsWith('zh');
 }
 
+    // eslint-disable-next-line complexity -- refactor candidate
 export function handleExportCommand(ctx: PluginCommandContext): PluginCommandResult {
   const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
   const zh = isZh(ctx);

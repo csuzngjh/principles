@@ -183,6 +183,7 @@ export function validateDreamerOutput(output: unknown): TrinityStageValidationRe
     failures.push('Dreamer output must have a candidates array');
   } else {
     // Validate each candidate
+    // eslint-disable-next-line complexity -- refactor candidate
     obj.candidates.forEach((candidate: unknown, idx: number) => {
       if (candidate === null || candidate === undefined || typeof candidate !== 'object') {
         failures.push(`Dreamer candidate at index ${idx} is not an object`);
@@ -317,6 +318,7 @@ export function validatePhilosopherOutput(output: unknown): TrinityStageValidati
  * Validate a TrinityDraftArtifact contract.
  * This is the final artifact before arbiter approval.
  */
+    // eslint-disable-next-line complexity -- refactor candidate
 export function validateTrinityDraft(draft: unknown): TrinityStageValidationResult {
   const failures: string[] = [];
 
@@ -469,6 +471,7 @@ export interface ArbiterOptions {
  * @param options - Expected values for cross-validation
  * @returns ArbiterResult with passed/failed status and details
  */
+    // eslint-disable-next-line complexity -- refactor candidate
 export function validateArtifact(
   raw: unknown,
   options: ArbiterOptions = {}

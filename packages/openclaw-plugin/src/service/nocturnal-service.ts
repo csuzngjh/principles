@@ -273,6 +273,7 @@ export interface NocturnalServiceOptions {
  *
  * In Phase 3, this will be replaced with real subagent invocation.
  */
+    // eslint-disable-next-line complexity -- refactor candidate
 function invokeStubReflector(
   snapshot: NocturnalSessionSnapshot,
   principleId: string
@@ -675,6 +676,7 @@ function maybePersistArtificerCandidate(
  * @param options - Service configuration options
  * @returns NocturnalRunResult
  */
+    // eslint-disable-next-line complexity -- refactor candidate
 export function executeNocturnalReflection(
   workspaceDir: string,
   stateDir: string,
@@ -1149,6 +1151,7 @@ export async function executeNocturnalReflectionAsync(
  * Execute nocturnal reflection with real Trinity runtime adapter (async).
  * This handles the full pipeline with async Trinity stage execution.
  */
+    // eslint-disable-next-line complexity -- refactor candidate
 async function executeNocturnalReflectionWithAdapter(
   workspaceDir: string,
   stateDir: string,

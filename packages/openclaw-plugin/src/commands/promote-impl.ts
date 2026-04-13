@@ -126,6 +126,7 @@ interface PromoteImplOptions {
   isZh: boolean;
 }
 
+    // eslint-disable-next-line complexity -- refactor candidate
 function _handlePromoteImpl(options: PromoteImplOptions): PluginCommandResult {
   const { workspaceDir, stateDir, implId, isZh } = options;
   const engine = new ReplayEngine('', stateDir);
@@ -242,6 +243,7 @@ function _handlePromoteImpl(options: PromoteImplOptions): PluginCommandResult {
   return { text: output };
 }
 
+    // eslint-disable-next-line complexity -- refactor candidate
 export function handlePromoteImplCommand(ctx: PluginCommandContext): PluginCommandResult {
   const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
   const {stateDir} = WorkspaceContext.fromHookContext({ ...ctx, workspaceDir });

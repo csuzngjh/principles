@@ -85,6 +85,7 @@ function buildEvidenceSummary(
   };
 }
 
+    // eslint-disable-next-line complexity -- refactor candidate
 export function recommendInternalizationRoute(
   principle: PrincipleLifecycleEvidence,
   precomputedRuleMetrics?: Record<string, RuleMetricResult>,

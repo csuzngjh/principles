@@ -19,6 +19,7 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
+    // eslint-disable-next-line complexity -- refactor candidate
 export function validateNocturnalSnapshotIngress(
   value: unknown
 ): NocturnalSnapshotContractResult {

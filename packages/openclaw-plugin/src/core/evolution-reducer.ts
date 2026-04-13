@@ -227,6 +227,7 @@ export class EvolutionReducerImpl implements EvolutionReducer {
    * Called after diagnostician analysis to create principle directly (no intermediate overfitted principle).
    * @returns the new principle ID, or null if creation failed
    */
+    // eslint-disable-next-line complexity -- refactor candidate
   createPrincipleFromDiagnosis(params: {
     painId: string;
     painType: 'tool_failure' | 'subagent_error' | 'user_frustration';

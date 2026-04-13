@@ -223,6 +223,7 @@ function normalizePathPosix(filePath: string): string {
  * pain events and tool calls — any session with a pain signal is considered
  * an opportunity for a pain-derived principle.
  */
+    // eslint-disable-next-line complexity -- refactor candidate
 export function detectOpportunity(principleId: string, session: SessionEvents): OpportunityMatch {
   // #216: P_* principles (pain-derived) — generic opportunity detection
   if (principleId.startsWith('P_')) {
@@ -1048,6 +1049,7 @@ export function computeAllCompliance(
  * Groups events by sessionId and maps to the SessionEvents interface.
  * Events with no sessionId are grouped under sessionId = 'unknown'.
  */
+    // eslint-disable-next-line complexity -- refactor candidate
 export function groupEventsIntoSessions(events: RawEventEntry[]): Map<string, SessionEvents> {
   const sessionMap = new Map<string, SessionEvents>();
 

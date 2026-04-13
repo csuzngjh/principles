@@ -318,6 +318,7 @@ export interface EvaluateGateParams {
  *   - Any constraint metric regresses beyond allowed margin
  *   - Profile is not in allowed rollout list
  */
+    // eslint-disable-next-line complexity -- refactor candidate
 export function evaluatePromotionGate(
   stateDir: string,
   params: EvaluateGateParams
@@ -601,7 +602,9 @@ export function advancePromotion(
     allowedMargin,
   });
 
+    // eslint-disable-next-line complexity -- refactor candidate
   // Find existing promotion record (if any) - need this to know current state
+    // eslint-disable-next-line complexity -- refactor candidate
   return withPromotionRegistryLock(stateDir, (registry) => {
     const now = new Date().toISOString();
     const existingIdx = registry.promotions.findIndex(

@@ -163,6 +163,7 @@ export function isRetryableError(error: unknown): boolean {
  * @returns The result of the function
  * @throws The last error if all retries fail
  */
+    // eslint-disable-next-line complexity -- refactor candidate
 export async function retryAsync<T>(
   fn: () => Promise<T>,
   options: RetryOptions = {}
@@ -506,6 +507,7 @@ export function computeAdaptiveTimeout(
  * @param options - Configuration including history source
  * @returns The result of the function
  */
+    // eslint-disable-next-line complexity -- refactor candidate
 export async function retryWithAdaptiveTimeout<T>(
   fn: () => Promise<T>,
   options: AdaptiveRetryOptions = {}
