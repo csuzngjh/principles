@@ -1231,23 +1231,24 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
           ...(j.scores ? {
             scores: Object.fromEntries(
               (['principleAlignment', 'specificity', 'actionability', 'executability', 'safetyImpact', 'uxImpact'] as const)
-                .map(dim => [dim, j.scores![dim]])
+                .map(dim => [dim, (j.scores as Record<string, unknown>)[dim]])
                 .filter(([, v]) => typeof v === 'number')
                 .map(([dim, v]) => [dim, this.clamp01(v as number)])
             )
           } : {}),
           ...(j.risks ? (() => {
-            const fp = j.risks!.falsePositiveEstimate;
+            const risks = j.risks as Record<string, unknown>;
+            const fp = risks.falsePositiveEstimate;
             const hasFp = typeof fp === 'number';
             const risksObj: {
               falsePositiveEstimate?: number;
               implementationComplexity: string;
               breakingChangeRisk: boolean;
             } = {
-              implementationComplexity: j.risks!.implementationComplexity ?? 'medium',
-              breakingChangeRisk: Boolean(j.risks!.breakingChangeRisk),
+              implementationComplexity: (risks.implementationComplexity as string) ?? 'medium',
+              breakingChangeRisk: Boolean(risks.breakingChangeRisk),
             };
-            if (hasFp) risksObj.falsePositiveEstimate = this.clamp01(fp);
+            if (hasFp) risksObj.falsePositiveEstimate = this.clamp01(fp as number);
             return { risks: risksObj };
           })() : {}),
         })),
@@ -2199,7 +2200,7 @@ export async function runTrinityAsync(options: RunTrinityOptions): Promise<Trini
         avgScores[dim] = values.reduce((a, b) => a + b, 0) / values.length;
       }
       telemetry.philosopher6D = {
-        avgScores: avgScores as TrinityTelemetry['philosopher6D']['avgScores'],
+        avgScores: avgScores as NonNullable<TrinityTelemetry['philosopher6D']>['avgScores'],
         highRiskCount: philosopherOutput.judgments.filter(j => j.risks?.breakingChangeRisk).length,
       };
     }
@@ -2325,7 +2326,7 @@ function runTrinityWithStubs(
       avgScores[dim] = values.reduce((a, b) => a + b, 0) / values.length;
     }
     telemetry.philosopher6D = {
-      avgScores: avgScores as TrinityTelemetry['philosopher6D'] extends { avgScores: infer T } ? T : never,
+      avgScores: avgScores as NonNullable<TrinityTelemetry['philosopher6D']>['avgScores'],
       highRiskCount: philosopherOutput.judgments.filter(j => j.risks?.breakingChangeRisk).length,
     };
   }
