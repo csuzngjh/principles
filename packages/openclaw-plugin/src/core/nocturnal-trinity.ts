@@ -45,6 +45,7 @@ import {
   DEFAULT_SCORING_WEIGHTS,
   type ScoringWeights,
   type TournamentTraceEntry,
+  validateCandidateDiversity,
 } from './nocturnal-candidate-scoring.js';
 import {
   DEFAULT_THRESHOLDS,
@@ -1447,6 +1448,10 @@ export interface TrinityTelemetry {
   winnerThresholdPassed?: boolean;
   /** Number of eligible candidates after threshold check (optional) */
   eligibleCandidateCount?: number;
+  /** Whether Dreamer candidates passed diversity validation (DIVER-04) */
+  diversityCheckPassed?: boolean;
+  /** Risk levels assigned to Dreamer candidates (for telemetry) */
+  candidateRiskLevels?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -1518,6 +1523,8 @@ export function invokeStubDreamer(
       betterDecision: 'Review docs/gateblocks.md and verify authorization requirements first; based on the evidence, this irreversible action must be reviewed before proceeding',
       rationale: 'Respecting gate blocks prevents unintended system modifications',
       confidence: 0.95,
+      riskLevel: 'low' as const,
+      strategicPerspective: 'conservative_fix' as const,
     });
     if (maxCandidates >= 2) {
       candidates.push({
@@ -1526,6 +1533,8 @@ export function invokeStubDreamer(
         betterDecision: 'Check the gatekeeper source first to diagnose the block reason; this is irreversible, so we must be certain before proceeding',
         rationale: 'Understanding why a gate blocked prevents repeated blocks',
         confidence: 0.85,
+        riskLevel: 'low' as const,
+        strategicPerspective: 'conservative_fix' as const,
       });
     }
     if (maxCandidates >= 3) {
@@ -1535,6 +1544,8 @@ export function invokeStubDreamer(
         betterDecision: 'Review docs/auth.md first to understand the authorization structure, then request proper review before any change',
         rationale: 'Proper authorization ensures accountability and prevents unintended changes',
         confidence: 0.75,
+        riskLevel: 'low' as const,
+        strategicPerspective: 'conservative_fix' as const,
       });
     }
   } else if (hasPain) {
@@ -1544,6 +1555,8 @@ export function invokeStubDreamer(
       betterDecision: 'Check logs/pain.json first to analyze pain signals; this error indicates we should stop and reconsider before proceeding',
       rationale: 'Pain signals indicate accumulated friction or error conditions',
       confidence: 0.90,
+      riskLevel: 'medium' as const,
+      strategicPerspective: 'structural_improvement' as const,
     });
     if (maxCandidates >= 2) {
       candidates.push({
@@ -1552,6 +1565,8 @@ export function invokeStubDreamer(
         betterDecision: 'Review src/pain-detector.ts first; based on the evidence, this indicates a deeper issue we must not ignore',
         rationale: 'Addressing friction reduces error rates and improves outcomes',
         confidence: 0.80,
+        riskLevel: 'medium' as const,
+        strategicPerspective: 'structural_improvement' as const,
       });
     }
     if (maxCandidates >= 3) {
@@ -1561,6 +1576,8 @@ export function invokeStubDreamer(
         betterDecision: 'Analyze logs/errors.json first to identify the failure pattern; this suggests we should stop and rethink before retrying',
         rationale: 'Pattern analysis prevents recurring pain from the same source',
         confidence: 0.70,
+        riskLevel: 'medium' as const,
+        strategicPerspective: 'structural_improvement' as const,
       });
     }
   } else if (hasFailures) {
@@ -1570,6 +1587,8 @@ export function invokeStubDreamer(
       betterDecision: 'Verify config.json preconditions first, based on the error in logs/failure.json, before retrying',
       rationale: 'Diagnosing failures before retry prevents repeated failures',
       confidence: 0.92,
+      riskLevel: 'high' as const,
+      strategicPerspective: 'paradigm_shift' as const,
     });
     if (maxCandidates >= 2) {
       candidates.push({
@@ -1578,6 +1597,8 @@ export function invokeStubDreamer(
         betterDecision: 'Check docs/debugging.md first to diagnose what failed; we must not ignore this when the action is irreversible',
         rationale: 'Unaddressed failures compound and cause larger issues',
         confidence: 0.85,
+        riskLevel: 'high' as const,
+        strategicPerspective: 'paradigm_shift' as const,
       });
     }
     if (maxCandidates >= 3) {
@@ -1587,6 +1608,8 @@ export function invokeStubDreamer(
         betterDecision: 'Verify src/validator.ts state first; this error indicates a deeper problem before assuming resolution',
         rationale: 'Verification prevents cascading failures from unresolved issues',
         confidence: 0.78,
+        riskLevel: 'high' as const,
+        strategicPerspective: 'paradigm_shift' as const,
       });
     }
   } else {
@@ -1876,6 +1899,16 @@ export async function runTrinityAsync(options: RunTrinityOptions): Promise<Trini
     telemetry.dreamerPassed = true;
     telemetry.candidateCount = dreamerOutput.candidates.length;
 
+    // Diversity validation (DIVER-04): soft check, never gates pipeline
+    const diversityResult = validateCandidateDiversity(dreamerOutput.candidates);
+    telemetry.diversityCheckPassed = diversityResult.diversityCheckPassed;
+    telemetry.candidateRiskLevels = dreamerOutput.candidates
+      .map(c => c.riskLevel)
+      .filter((r): r is "low" | "medium" | "high" => typeof r === 'string');
+    if (!diversityResult.diversityCheckPassed) {
+      console.warn(`[Trinity] Diversity check failed: ${diversityResult.details}`);
+    }
+
     // Step 2: Philosopher — rank candidates via real subagent
     const philosopherOutput = await adapter.invokePhilosopher(dreamerOutput, principleId, snapshot);
 
@@ -1971,6 +2004,16 @@ function runTrinityWithStubs(
 
   telemetry.dreamerPassed = true;
   telemetry.candidateCount = dreamerOutput.candidates.length;
+
+  // Diversity validation (DIVER-04): soft check, never gates pipeline
+  const diversityResult = validateCandidateDiversity(dreamerOutput.candidates);
+  telemetry.diversityCheckPassed = diversityResult.diversityCheckPassed;
+  telemetry.candidateRiskLevels = dreamerOutput.candidates
+    .map(c => c.riskLevel)
+    .filter((r): r is "low" | "medium" | "high" => typeof r === 'string');
+  if (!diversityResult.diversityCheckPassed) {
+    console.warn(`[Trinity] Diversity check failed: ${diversityResult.details}`);
+  }
 
   // Step 2: Philosopher — rank candidates (stub)
   const philosopherOutput = invokeStubPhilosopher(dreamerOutput, principleId, snapshot);
