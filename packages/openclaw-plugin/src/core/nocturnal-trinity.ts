@@ -607,8 +607,8 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
           fs.rmSync(fullPath, { recursive: true, force: true });
         }
       }
-    } catch {
-      // Non-fatal: stale temp files will be cleaned up eventually
+    } catch (err) {
+      this.api.logger?.warn?.(`[Trinity] Failed to cleanup stale temp dirs: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -688,6 +688,12 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
       .join('\n');
   }
 
+  /** Clamp a value to [0, 1] range — used for LLM-produced scores that may be out of range */
+  private clamp01(val: unknown, fallback = 0): number {
+    if (typeof val !== 'number' || !Number.isFinite(val)) return fallback;
+    return Math.min(1, Math.max(0, val));
+  }
+
   private classifyRuntimeError(error: unknown): TrinityRuntimeFailureCode {
     const detail = error instanceof Error ? error.message : String(error);
     return /timeout/i.test(detail) ? 'runtime_timeout' : 'runtime_run_failed';
@@ -735,7 +741,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
     } catch (err) {
       return this.buildRuntimeFailureDreamerOutput(this.classifyRuntimeError(err), err);
     } finally {
-      try { fs.unlinkSync(sessionFile); } catch { /* ignore */ }
+      try { fs.unlinkSync(sessionFile); } catch (err) { this.api.logger?.warn?.(`[Trinity] Failed to delete session file: ${sessionFile}`); }
     }
   }
 
@@ -779,7 +785,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
     } catch (err) {
       return this.buildRuntimeFailurePhilosopherOutput(this.classifyRuntimeError(err), err);
     } finally {
-      try { fs.unlinkSync(sessionFile); } catch { /* ignore */ }
+      try { fs.unlinkSync(sessionFile); } catch (err) { this.api.logger?.warn?.(`[Trinity] Failed to delete session file: ${sessionFile}`); }
     }
   }
 
@@ -827,7 +833,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
       this.recordFailure(this.classifyRuntimeError(err), err);
       return null;
     } finally {
-      try { fs.unlinkSync(sessionFile); } catch { /* ignore */ }
+      try { fs.unlinkSync(sessionFile); } catch (err) { this.api.logger?.warn?.(`[Trinity] Failed to delete session file: ${sessionFile}`); }
     }
   }
 
@@ -1219,9 +1225,24 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
           principleAligned: j.principleAligned ?? false,
           score: j.score ?? 0,
           rank: j.rank ?? 0,
-          // Optional 6D scores and risk assessment (Phase 36)
-          ...(j.scores ? { scores: j.scores } : {}),
-          ...(j.risks ? { risks: j.risks } : {}),
+          // Optional 6D scores and risk assessment (Phase 36) — clamp to [0,1] for safety
+          ...(j.scores ? {
+            scores: {
+              principleAlignment: this.clamp01(j.scores.principleAlignment),
+              specificity: this.clamp01(j.scores.specificity),
+              actionability: this.clamp01(j.scores.actionability),
+              executability: this.clamp01(j.scores.executability),
+              safetyImpact: this.clamp01(j.scores.safetyImpact),
+              uxImpact: this.clamp01(j.scores.uxImpact),
+            }
+          } : {}),
+          ...(j.risks ? {
+            risks: {
+              falsePositiveEstimate: this.clamp01(j.risks.falsePositiveEstimate),
+              implementationComplexity: j.risks.implementationComplexity ?? 'medium',
+              breakingChangeRisk: Boolean(j.risks.breakingChangeRisk),
+            }
+          } : {}),
         })),
         overallAssessment: parsed.overallAssessment ?? '',
         reason: parsed.reason,
@@ -2150,11 +2171,11 @@ export async function runTrinityAsync(options: RunTrinityOptions): Promise<Trini
       const dims = ['principleAlignment', 'specificity', 'actionability', 'executability', 'safetyImpact', 'uxImpact'] as const;
       const avgScores: Record<string, number> = {};
       for (const dim of dims) {
-        const values = realJudgments6D.map(j => j.scores![dim]);
+        const values = realJudgments6D.map(j => j.scores?.[dim] ?? 0);
         avgScores[dim] = values.reduce((a, b) => a + b, 0) / values.length;
       }
       telemetry.philosopher6D = {
-        avgScores: avgScores as TrinityTelemetry['philosopher6D'] extends { avgScores: infer T } ? T : never,
+        avgScores: avgScores as TrinityTelemetry['philosopher6D']['avgScores'],
         highRiskCount: philosopherOutput.judgments.filter(j => j.risks?.breakingChangeRisk).length,
       };
     }
@@ -2276,7 +2297,7 @@ function runTrinityWithStubs(
     const dims = ['principleAlignment', 'specificity', 'actionability', 'executability', 'safetyImpact', 'uxImpact'] as const;
     const avgScores: Record<string, number> = {};
     for (const dim of dims) {
-      const values = judgments6D.map(j => j.scores![dim]);
+      const values = judgments6D.map(j => j.scores?.[dim] ?? 0);
       avgScores[dim] = values.reduce((a, b) => a + b, 0) / values.length;
     }
     telemetry.philosopher6D = {
