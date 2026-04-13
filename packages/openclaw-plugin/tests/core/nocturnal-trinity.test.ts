@@ -9,12 +9,14 @@ import {
   TrinityRuntimeContractError,
   NOCTURNAL_DREAMER_PROMPT,
   formatReasoningContext,
+  invokeStubDreamer,
   type TrinityConfig,
   type DreamerOutput,
   type DreamerCandidate,
   type PhilosopherOutput,
   type TrinityDraftArtifact,
   type TrinityRuntimeAdapter,
+  type TrinityTelemetry,
 } from '../../src/core/nocturnal-trinity.js';
 import {
   validateDreamerOutput,
@@ -1237,5 +1239,136 @@ describe('buildDreamerPrompt — reasoning context injection', () => {
     const result = formatReasoningContext(snapshot as any);
     expect(result).not.toContain('decisionPoint');
     expect(result).not.toContain('DecisionPoint');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: invokeStubDreamer — risk level and perspective mapping (D-07)
+// ---------------------------------------------------------------------------
+
+describe('invokeStubDreamer — risk level and perspective mapping (D-07)', () => {
+  it('gateBlocks candidates get conservative_fix/low', () => {
+    const snapshot = makeSnapshot({ totalGateBlocks: 2 });
+    const output = invokeStubDreamer(snapshot as any, 'T-03', 3);
+    expect(output.valid).toBe(true);
+    expect(output.candidates.length).toBeGreaterThan(0);
+    for (const candidate of output.candidates) {
+      expect(candidate.riskLevel).toBe('low');
+      expect(candidate.strategicPerspective).toBe('conservative_fix');
+    }
+  });
+
+  it('pain candidates get structural_improvement/medium', () => {
+    const snapshot = makeSnapshot({ totalPainEvents: 3 });
+    const output = invokeStubDreamer(snapshot as any, 'T-08', 3);
+    expect(output.valid).toBe(true);
+    expect(output.candidates.length).toBeGreaterThan(0);
+    for (const candidate of output.candidates) {
+      expect(candidate.riskLevel).toBe('medium');
+      expect(candidate.strategicPerspective).toBe('structural_improvement');
+    }
+  });
+
+  it('failure candidates get paradigm_shift/high', () => {
+    const snapshot = makeSnapshot({ failureCount: 2 });
+    const output = invokeStubDreamer(snapshot as any, 'T-08', 3);
+    expect(output.valid).toBe(true);
+    expect(output.candidates.length).toBeGreaterThan(0);
+    for (const candidate of output.candidates) {
+      expect(candidate.riskLevel).toBe('high');
+      expect(candidate.strategicPerspective).toBe('paradigm_shift');
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: runTrinity — diversity telemetry (DIVER-04)
+// ---------------------------------------------------------------------------
+
+describe('runTrinity — diversity telemetry (DIVER-04)', () => {
+  it('emits diversityCheckPassed=false when stub candidates all have same risk level', () => {
+    // Failure signal produces all paradigm_shift/high candidates → not diverse
+    const snapshot = makeSnapshot({ failureCount: 2 });
+    const config: TrinityConfig = {
+      useTrinity: true,
+      maxCandidates: 3,
+      useStubs: true,
+    };
+
+    const result = runTrinity({ snapshot: snapshot as any, principleId: 'T-08', config });
+
+    expect(result.success).toBe(true);
+    expect(result.telemetry.diversityCheckPassed).toBe(false);
+  });
+
+  it('emits candidateRiskLevels array matching stub mapping', () => {
+    const snapshot = makeSnapshot({ failureCount: 2 });
+    const config: TrinityConfig = {
+      useTrinity: true,
+      maxCandidates: 3,
+      useStubs: true,
+    };
+
+    const result = runTrinity({ snapshot: snapshot as any, principleId: 'T-08', config });
+
+    expect(result.success).toBe(true);
+    expect(result.telemetry.candidateRiskLevels).toBeDefined();
+    expect(result.telemetry.candidateRiskLevels!.length).toBeGreaterThan(0);
+    // All failure stub candidates should be 'high'
+    for (const level of result.telemetry.candidateRiskLevels!) {
+      expect(level).toBe('high');
+    }
+  });
+
+  it('pipeline completes even when diversity check fails (soft enforcement)', () => {
+    // Failure signal: all candidates have same risk → diversity fails
+    const snapshot = makeSnapshot({ failureCount: 2 });
+    const config: TrinityConfig = {
+      useTrinity: true,
+      maxCandidates: 3,
+      useStubs: true,
+    };
+
+    const result = runTrinity({ snapshot: snapshot as any, principleId: 'T-08', config });
+
+    expect(result.telemetry.diversityCheckPassed).toBe(false);
+    expect(result.success).toBe(true);
+    expect(result.artifact).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: TrinityTelemetry — diversity fields
+// ---------------------------------------------------------------------------
+
+describe('TrinityTelemetry — diversity fields', () => {
+  it('accepts optional diversityCheckPassed field', () => {
+    const telemetry: TrinityTelemetry = {
+      chainMode: 'trinity',
+      usedStubs: true,
+      dreamerPassed: true,
+      philosopherPassed: true,
+      scribePassed: true,
+      candidateCount: 2,
+      selectedCandidateIndex: 0,
+      stageFailures: [],
+      diversityCheckPassed: true,
+    };
+    expect(telemetry.diversityCheckPassed).toBe(true);
+  });
+
+  it('accepts optional candidateRiskLevels field', () => {
+    const telemetry: TrinityTelemetry = {
+      chainMode: 'trinity',
+      usedStubs: true,
+      dreamerPassed: true,
+      philosopherPassed: true,
+      scribePassed: true,
+      candidateCount: 2,
+      selectedCandidateIndex: 0,
+      stageFailures: [],
+      candidateRiskLevels: ['low', 'high'],
+    };
+    expect(telemetry.candidateRiskLevels).toEqual(['low', 'high']);
   });
 });
