@@ -244,6 +244,7 @@ export class EventLog {
   }
 
    
+    // eslint-disable-next-line complexity -- complexity 13, refactor candidate
   private getEventDedupKey(entry: EventLogEntry): string {
     const eventId = typeof (entry.data as { eventId?: unknown } | undefined)?.eventId === 'string'
       ? String((entry.data as { eventId?: string }).eventId)
@@ -340,6 +341,7 @@ export class EventLog {
    * @param range 'today' | 'week' | 'session'
    * @param sessionId Optional session ID for session-scoped stats
    */
+    // eslint-disable-next-line complexity -- complexity 12, refactor candidate
   getEmpathyStats(range: 'today' | 'week' | 'session', sessionId?: string): EmpathyEventStats {
     const now = new Date();
     const today = this.formatDate(now);

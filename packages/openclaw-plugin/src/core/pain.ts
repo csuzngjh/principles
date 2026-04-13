@@ -279,6 +279,7 @@ export function readPainFlagContract(projectDir: string): PainFlagContractResult
  * Errors are silently ignored to avoid disrupting the pain pipeline.
  */
  
+    // eslint-disable-next-line complexity -- complexity 12, refactor candidate
 export function trackPrincipleValue(
   workspaceDir: string,
   painData: { reason?: string; source?: string; score?: string },

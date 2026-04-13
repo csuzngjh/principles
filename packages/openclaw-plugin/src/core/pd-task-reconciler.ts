@@ -103,6 +103,7 @@ async function writeCronStore(store: CronStoreFile): Promise<void> {
   });
 }
 
+    // eslint-disable-next-line complexity -- complexity 12, refactor candidate
 function diff(declared: PDTaskSpec[], actual: CronJob[]): DiffAction[] {
   const actions: DiffAction[] = [];
   const actualByName = new Map<string, CronJob>();

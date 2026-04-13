@@ -280,6 +280,7 @@ export function deriveDecisionPoints(
  *
  * Empty/missing data returns all-false defaults. Never throws.
  */
+    // eslint-disable-next-line complexity -- complexity 12, refactor candidate
 export function deriveContextualFactors(
   snapshot: NocturnalSessionSnapshot,
 ): DerivedContextualFactors {

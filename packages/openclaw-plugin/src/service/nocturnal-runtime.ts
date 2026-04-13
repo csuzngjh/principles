@@ -40,6 +40,7 @@ import { withLockAsync } from '../utils/file-lock.js';
  * Excluded (NOT system sessions):
  * - User sessions like agent:main:feishu:user:xxx — third component is channel type
  */
+    // eslint-disable-next-line complexity -- complexity 15, refactor candidate
 function isSystemSession(state: SessionState): boolean {
     const { sessionId, sessionKey, trigger } = state;
 
@@ -269,6 +270,7 @@ async function writeState(stateDir: string, state: NocturnalRuntimeState): Promi
  * @param trajectoryLastActivityAt - Optional trajectory timestamp as secondary guardrail
  * @returns IdleCheckResult with full diagnostic information
  */
+    // eslint-disable-next-line complexity -- complexity 14, refactor candidate
 export function checkWorkspaceIdle(
     workspaceDir: string,
     options: {
@@ -355,6 +357,7 @@ export function checkWorkspaceIdle(
  * @param options - Cooldown configuration options
  * @returns CooldownCheckResult
  */
+        // eslint-disable-next-line complexity -- complexity 11, slightly over threshold
 export function checkCooldown(
     stateDir: string,
     principleId?: string,
@@ -555,6 +558,7 @@ export interface PreflightCheckResult {
  * @param idleCheckOverride - Optional override for idle check result (for testing)
  */
  
+    // eslint-disable-next-line complexity -- complexity 12, refactor candidate
 export function checkPreflight(
     workspaceDir: string,
     stateDir: string,

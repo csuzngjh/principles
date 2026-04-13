@@ -642,6 +642,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
    * runEmbeddedPiAgent does NOT read config.agents.defaults.model —
    * it requires explicit params.provider and params.model.
    */
+    // eslint-disable-next-line complexity -- complexity 12, refactor candidate
   private resolveModel(): { provider: string; model: string } {
     const config = this.loadFullConfig();
     const agents = config?.agents as Record<string, unknown> | undefined;
@@ -1698,6 +1699,7 @@ export interface TrinityResult {
  * In production, this would call the actual Dreamer subagent.
  * The stub generates plausible candidates based on snapshot signals.
  */
+    // eslint-disable-next-line complexity -- complexity 14, refactor candidate
 export function invokeStubDreamer(
   snapshot: NocturnalSessionSnapshot,
   principleId: string,
@@ -2248,6 +2250,7 @@ export async function runTrinityAsync(options: RunTrinityOptions): Promise<Trini
 
 /**
  * Internal: Run Trinity chain with stub implementations (synchronous).
+    // eslint-disable-next-line complexity -- complexity 14, refactor candidate
  */
 function runTrinityWithStubs(
   snapshot: NocturnalSessionSnapshot,

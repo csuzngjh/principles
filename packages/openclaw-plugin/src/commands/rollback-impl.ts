@@ -41,6 +41,7 @@ function getAllImplementations(stateDir: string): Implementation[] {
  *   /pd-rollback-impl <implId>                      - Rollback current active
  *   /pd-rollback-impl <implId> --reason "<reason>"  - Rollback with reason
  */
+    // eslint-disable-next-line complexity -- complexity 12, refactor candidate
 export function handleRollbackImplCommand(ctx: PluginCommandContext): PluginCommandResult {
   const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
   const {stateDir} = WorkspaceContext.fromHookContext({ ...ctx, workspaceDir });

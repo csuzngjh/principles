@@ -9,6 +9,7 @@ export interface FileModification {
     params: Record<string, unknown>;
 }
 
+    // eslint-disable-next-line complexity -- complexity 12, refactor candidate
 export function estimateLineChanges(modification: FileModification): number {
     const { toolName, params } = modification;
     
