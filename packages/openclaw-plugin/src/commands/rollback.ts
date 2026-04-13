@@ -45,8 +45,9 @@ Usage:
     }
 
      
+    // eslint-disable-next-line @typescript-eslint/init-declarations
     let eventId: string | null;
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Reason: triggerMethod is reserved for future extension - tracking rollback trigger source
+     
     const _triggerMethod = 'user_command' as const;
 
     if (args === 'last') {

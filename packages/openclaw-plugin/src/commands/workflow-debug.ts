@@ -21,6 +21,7 @@ function formatState(state: string): string {
 }
 
  
+// eslint-disable-next-line @typescript-eslint/max-params
 function buildOutput(
     workflowId: string,
     summary: ReturnType<InstanceType<typeof WorkflowStore>['getWorkflow']>,

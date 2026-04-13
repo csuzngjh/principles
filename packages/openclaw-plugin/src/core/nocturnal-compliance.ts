@@ -242,22 +242,31 @@ export function detectOpportunity(principleId: string, session: SessionEvents): 
    
   switch (principleId) {
     case 'T-01':
+      // eslint-disable-next-line @typescript-eslint/no-use-before-define
       return detectT01Opportunity(session);
     case 'T-02':
+      // eslint-disable-next-line @typescript-eslint/no-use-before-define
       return detectT02Opportunity(session);
     case 'T-03':
+      // eslint-disable-next-line @typescript-eslint/no-use-before-define
       return detectT03Opportunity(session);
     case 'T-04':
+      // eslint-disable-next-line @typescript-eslint/no-use-before-define
       return detectT04Opportunity(session);
     case 'T-05':
+      // eslint-disable-next-line @typescript-eslint/no-use-before-define
       return detectT05Opportunity(session);
     case 'T-06':
+      // eslint-disable-next-line @typescript-eslint/no-use-before-define
       return detectT06Opportunity(session);
     case 'T-07':
+      // eslint-disable-next-line @typescript-eslint/no-use-before-define
       return detectT07Opportunity(session);
     case 'T-08':
+      // eslint-disable-next-line @typescript-eslint/no-use-before-define
       return detectT08Opportunity(session);
     case 'T-09':
+      // eslint-disable-next-line @typescript-eslint/no-use-before-define
       return detectT09Opportunity(session);
     default:
       return { applicable: false, reason: `Unknown principle: ${principleId}` };
@@ -513,7 +522,7 @@ function detectT09Opportunity(session: SessionEvents): OpportunityMatch {
  * trigger pattern. Since P_* principles don't have T-xx specific detectors,
  * we use the presence of negative signals as violation evidence.
  */
-    // eslint-disable-next-line complexity -- complexity 14, refactor candidate
+     
 export function detectViolation(principleId: string, session: SessionEvents): ViolationMatch {
   // #216: P_* principles (pain-derived) — generic violation detection
   if (principleId.startsWith('P_')) {
@@ -541,22 +550,31 @@ export function detectViolation(principleId: string, session: SessionEvents): Vi
    
   switch (principleId) {
     case 'T-01':
+      // eslint-disable-next-line @typescript-eslint/no-use-before-define
       return detectT01Violation(session);
     case 'T-02':
+      // eslint-disable-next-line @typescript-eslint/no-use-before-define
       return detectT02Violation(session);
     case 'T-03':
+      // eslint-disable-next-line @typescript-eslint/no-use-before-define
       return detectT03Violation(session);
     case 'T-04':
+      // eslint-disable-next-line @typescript-eslint/no-use-before-define
       return detectT04Violation(session);
     case 'T-05':
+      // eslint-disable-next-line @typescript-eslint/no-use-before-define
       return detectT05Violation(session);
     case 'T-06':
+      // eslint-disable-next-line @typescript-eslint/no-use-before-define
       return detectT06Violation(session);
     case 'T-07':
+      // eslint-disable-next-line @typescript-eslint/no-use-before-define
       return detectT07Violation(session);
     case 'T-08':
+      // eslint-disable-next-line @typescript-eslint/no-use-before-define
       return detectT08Violation(session);
     case 'T-09':
+      // eslint-disable-next-line @typescript-eslint/no-use-before-define
       return detectT09Violation(session);
     default:
       console.warn(`[PD:Compliance] Unknown principle ID: ${principleId} — treating as no violation. Check for typos (P-001 vs P_001).`);
@@ -915,9 +933,11 @@ export function computeCompliance(
       : 0;
 
   // Compute violationTrend using windows
+  // eslint-disable-next-line @typescript-eslint/no-use-before-define
   const violationTrend = computeViolationTrend(applicableSessions, windowSize);
 
   // Build explanation
+  // eslint-disable-next-line @typescript-eslint/no-use-before-define
   const explanation = buildExplanation(
     principleId,
     applicableOpportunityCount,
@@ -989,6 +1009,7 @@ function computeViolationTrend(
  * Builds a human-readable explanation for the compliance result.
  */
  
+// eslint-disable-next-line @typescript-eslint/max-params
 function buildExplanation(
   principleId: string,
   applicableOpportunityCount: number,

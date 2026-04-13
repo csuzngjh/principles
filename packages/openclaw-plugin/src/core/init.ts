@@ -34,7 +34,7 @@ function hasOutdatedCoreGuidance(file: string, content: string): boolean {
  * Ensures that the workspace has the necessary template files for Principles Disciple.
  * This function flattens 'core' templates to the root so OpenClaw can find them.
  */
-    // eslint-disable-next-line complexity -- complexity 14, refactor candidate
+     
 export function ensureWorkspaceTemplates(api: OpenClawPluginApi, workspaceDir: string, language = 'en') {
     try {
         const __filename = fileURLToPath(import.meta.url);
@@ -45,6 +45,7 @@ export function ensureWorkspaceTemplates(api: OpenClawPluginApi, workspaceDir: s
         if (fs.existsSync(commonTemplatesDir)) {
             api.logger.info(`[PD] Syncing workspace templates: ${workspaceDir}...`);
              
+            // eslint-disable-next-line @typescript-eslint/no-use-before-define
             copyRecursiveSync(commonTemplatesDir, workspaceDir, api);
         }
 
@@ -87,6 +88,7 @@ export function ensureWorkspaceTemplates(api: OpenClawPluginApi, workspaceDir: s
                 fs.mkdirSync(painDestDir, { recursive: true });
             }
              
+            // eslint-disable-next-line @typescript-eslint/no-use-before-define
             copyRecursiveSync(painTemplatesDir, painDestDir, api);
         }
 

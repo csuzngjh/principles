@@ -63,6 +63,7 @@ export function createDefaultPrincipleState(principleId: string): PrincipleTrain
 
 export function loadStore(stateDir: string): PrincipleTrainingStore {
    
+  // eslint-disable-next-line @typescript-eslint/no-use-before-define
   return ledgerTrainingStore(stateDir);
 }
 
@@ -76,6 +77,7 @@ export function saveStore(stateDir: string, store: PrincipleTrainingStore): void
 
 export async function loadStoreAsync(stateDir: string): Promise<PrincipleTrainingStore> {
    
+  // eslint-disable-next-line @typescript-eslint/no-use-before-define
   return ledgerTrainingStore(stateDir);
 }
 

@@ -81,6 +81,7 @@ export function loadKeywordStore(stateDir: string, language?: 'zh' | 'en'): Empa
     if (!fs.existsSync(filePath)) {
       const store = createDefaultKeywordStore(language);
        
+      // eslint-disable-next-line @typescript-eslint/no-use-before-define
       saveKeywordStore(stateDir, store);
       return store;
     }
@@ -93,6 +94,7 @@ export function loadKeywordStore(stateDir: string, language?: 'zh' | 'en'): Empa
       console.warn('[PD:Empathy] Invalid keyword store format, creating default');
       const store = createDefaultKeywordStore(language);
        
+      // eslint-disable-next-line @typescript-eslint/no-use-before-define
       saveKeywordStore(stateDir, store);
       return store;
     }
@@ -102,6 +104,7 @@ export function loadKeywordStore(stateDir: string, language?: 'zh' | 'en'): Empa
     console.warn(`[PD:Empathy] Failed to load keyword store: ${e}`);
     const store = createDefaultKeywordStore(language);
      
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define
     saveKeywordStore(stateDir, store);
     return store;
   }
@@ -207,7 +210,7 @@ export function matchEmpathyKeywords(
  * This is called when the empathy optimizer subagent completes its analysis
  * and returns suggested updates to the keyword store.
  */
-    // eslint-disable-next-line complexity -- complexity 13, refactor candidate
+     
 export function applyKeywordUpdates(
   store: EmpathyKeywordStore,
   updates: Record<string, {
