@@ -299,7 +299,7 @@ FROM assistant_turns WHERE session_id = '${esc(s.sessionId)}' LIMIT 1;`);
     // 3. Tool calls
     for (const tc of s.toolCalls) {
       sql.push(`INSERT INTO tool_calls (session_id, tool_name, outcome, duration_ms, exit_code, error_type, error_message, gfi_before, gfi_after, params_json, created_at)
-VALUES ('${esc(s.sessionId)}', '${esc(tc.toolName)}', '${esc(tc.outcome)}', ${tc.durationMs ?? 100}, ${tc.exitCode !== undefined ? tc.exitCode : 'NULL'}, ${tc.errorType ? `'${esc(tc.errorType)}'` : 'NULL'}, ${tc.errorMessage ? `'${esc(tc.errorMessage)}'` : 'NULL'}, 0, 0, '${esc(tc.paramsJson)}', '${createdAt}');`);
+VALUES ('${esc(s.sessionId)}', '${esc(tc.toolName)}', '${esc(tc.outcome)}', ${tc.durationMs ?? 100}, ${tc.exitCode !== undefined ? tc.exitCode : 'NULL'}, ${tc.errorType ? `'${esc(tc.errorType)}'` : 'NULL'}, ${tc.errorMessage ? `'${esc(tc.errorMessage)}'` : 'NULL'}, 0, 0, ${tc.paramsJson ? `'${esc(tc.paramsJson)}'` : "'{}'"}, '${createdAt}');`);
     }
 
     // 4. Pain events
