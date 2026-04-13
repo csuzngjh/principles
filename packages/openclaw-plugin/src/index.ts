@@ -166,9 +166,18 @@ const plugin = {
         if (!workspaceDir) return;
         try {
           if (!workspaceInitialized) {
+            // ── Start Evolution Worker service ──
+            EvolutionWorkerService.api = api;
+            EvolutionWorkerService.start({
+              config: api.config,
+              workspaceDir,
+              stateDir: path.join(workspaceDir, '.state'),
+              logger: api.logger,
+            });
+
             migrateDirectoryStructure(api, workspaceDir);
             ensureWorkspaceTemplates(api, workspaceDir, language);
-            SystemLogger.log(workspaceDir, 'SYSTEM_BOOT', `Principles Disciple online. Language: ${language}`);
+            SystemLogger.log(workspaceDir, 'SYSTEM_BOOT', `Principles Disciple online. Language: ${language}. workspaceDir=${workspaceDir}`);
             workspaceInitialized = true;
           }
           const result = await handleBeforePromptBuild(event, { ...ctx, api, workspaceDir });
