@@ -53,7 +53,7 @@ export function validateNocturnalSnapshotIngress(
     }
   }
 
-  const stats = value.stats;
+  const { stats } = value;
   if (!isObjectRecord(stats)) {
     reasons.push('snapshot.stats must be an object');
   } else {

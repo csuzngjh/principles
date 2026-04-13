@@ -784,7 +784,8 @@ export class TrajectoryDatabase {
           const params = JSON.parse(row.params_json);
           if (params && typeof params.filePath === 'string') {
              
-            filePath = params.filePath;
+            const { filePath: fp } = params;
+            filePath = fp;
           }
         } catch {
           // Ignore malformed JSON

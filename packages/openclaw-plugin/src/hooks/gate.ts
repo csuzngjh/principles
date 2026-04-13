@@ -136,6 +136,7 @@ export function handleBeforeToolCall(
 
     if (mutationMatch) {
        
+      // eslint-disable-next-line @typescript-eslint/prefer-destructuring
       filePath = mutationMatch[1];
     } else {
       const hasRiskPath = profile.risk_paths.some(rp => command.includes(rp));

@@ -123,7 +123,7 @@ export function recordGateBlockAndReturn(
 
       // Write to pain flag file (merge with existing if present)
       try {
-        const workspaceDir = wctx.workspaceDir;
+        const { workspaceDir } = wctx;
         const currentFlag = wctx.eventLog.findLatestPainSignal(sessionId);
         const currentScore = currentFlag?.score ?? 0;
         if (currentScore < GATE_BLOCK_PAIN_SCORE) {

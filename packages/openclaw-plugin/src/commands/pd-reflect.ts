@@ -22,7 +22,7 @@ export const handlePdReflect: PluginCommandDefinition = {
   requireAuth: false,
   handler: async (ctx: PdReflectContext): Promise<PluginCommandResult> => {
     try {
-      const workspaceDir = ctx.workspaceDir;
+      const { workspaceDir } = ctx;
       if (!workspaceDir) {
         return { text: 'Cannot determine workspace directory. Ensure you are in an active workspace.', isError: true };
       }
