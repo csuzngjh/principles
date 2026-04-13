@@ -224,17 +224,18 @@ describe('deriveDecisionPoints', () => {
     expect(result[0].beforeContext).toBe('');
   });
 
-  it('computes confidenceDelta on failure', () => {
-    const beforeText = 'Let me plan this carefully. I need to analyze the structure first. ' +
-      'The approach should consider multiple perspectives. Let me think step by step. ' +
-      'I should verify my understanding. Breaking this down into parts helps.';
+  it('computes confidenceDelta on failure when turns have thinking tags', () => {
+    const beforeText = '<thinking>Let me plan this carefully. I need to analyze the structure first. ' +
+      'The approach should consider multiple perspectives.</thinking>';
+    const afterText = '<thinking>After the failure I need to reconsider the approach and try a different method. ' +
+      'Let me verify the root cause first.</thinking>';
     const turns = [
       makeAssistantTurn({ createdAt: '2026-04-12T10:00:00.000Z', sanitizedText: beforeText }),
-      makeAssistantTurn({ createdAt: '2026-04-12T10:02:00.000Z', sanitizedText: 'ok' }),
+      makeAssistantTurn({ createdAt: '2026-04-12T10:02:00.000Z', sanitizedText: afterText }),
     ];
     const toolCalls = [makeToolCall({ outcome: 'failure', createdAt: '2026-04-12T10:01:00.000Z' })];
     const result = deriveDecisionPoints(turns, toolCalls);
-    // confidenceDelta should be computed (defined) when both before and after turns exist
+    // confidenceDelta is defined only when both turns have <thinking> tags
     expect(result[0].confidenceDelta).toBeDefined();
     expect(typeof result[0].confidenceDelta).toBe('number');
   });

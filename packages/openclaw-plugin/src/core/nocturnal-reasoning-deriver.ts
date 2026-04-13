@@ -173,6 +173,7 @@ function confidenceToNumber(signal: "high" | "medium" | "low"): number {
     case "high": return 1;
     case "medium": return 0.5;
     case "low": return 0;
+    default: return 0; // exhaustive, but guard against unexpected inputs
   }
 }
 
@@ -244,15 +245,23 @@ export function deriveDecisionPoints(
         afterReflection = afterTurn.sanitizedText.slice(0, 300);
       }
 
-      // Compute confidence delta if both before and after turns exist
+      // Only compute confidence delta when both turns have actual thinking content.
+      // Without <thinking> tags we cannot derive a meaningful confidence signal,
+      // so a 'low'/'low' delta of 0 would be misleading.
       if (beforeTurn && afterTurn) {
-        const beforeConfidence = confidenceToNumber(
-          mapConfidenceSignal(computeThinkingModelActivation(beforeTurn.sanitizedText))
-        );
-        const afterConfidence = confidenceToNumber(
-          mapConfidenceSignal(computeThinkingModelActivation(afterTurn.sanitizedText))
-        );
-        confidenceDelta = Math.round((afterConfidence - beforeConfidence) * 100) / 100;
+        THINKING_TAG_REGEX.lastIndex = 0;
+        const beforeHasThinking = THINKING_TAG_REGEX.test(beforeTurn.sanitizedText);
+        THINKING_TAG_REGEX.lastIndex = 0;
+        const afterHasThinking = THINKING_TAG_REGEX.test(afterTurn.sanitizedText);
+        if (beforeHasThinking && afterHasThinking) {
+          const beforeConfidence = confidenceToNumber(
+            mapConfidenceSignal(computeThinkingModelActivation(beforeTurn.sanitizedText))
+          );
+          const afterConfidence = confidenceToNumber(
+            mapConfidenceSignal(computeThinkingModelActivation(afterTurn.sanitizedText))
+          );
+          confidenceDelta = Math.round((afterConfidence - beforeConfidence) * 100) / 100;
+        }
       }
     }
 
