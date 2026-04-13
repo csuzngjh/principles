@@ -513,6 +513,7 @@ function detectT09Opportunity(session: SessionEvents): OpportunityMatch {
  * trigger pattern. Since P_* principles don't have T-xx specific detectors,
  * we use the presence of negative signals as violation evidence.
  */
+    // eslint-disable-next-line complexity -- complexity 14, refactor candidate
 export function detectViolation(principleId: string, session: SessionEvents): ViolationMatch {
   // #216: P_* principles (pain-derived) — generic violation detection
   if (principleId.startsWith('P_')) {

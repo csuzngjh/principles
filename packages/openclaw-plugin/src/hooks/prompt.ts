@@ -202,6 +202,7 @@ export function loadContextInjectionConfig(workspaceDir: string): ContextInjecti
  * Falls back to main model if no diagnostician model is configured
  * @internal Helper for model configuration resolution
  */
+    // eslint-disable-next-line complexity -- complexity 12, refactor candidate
 export function getDiagnosticianModel(api: PromptHookApi | null, logger?: PluginLogger): string {
   // Determines logger: prefer api.logger, fallback to provided logger
   // 1. getDiagnosticianModel(api) - uses api.logger

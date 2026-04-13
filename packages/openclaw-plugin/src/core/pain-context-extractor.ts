@@ -203,6 +203,7 @@ function extractTurn(msg: ParsedMessage): string | null {
  * SAFETY: Tail-only read, skip oversized lines, cap output.
  * Returns empty string on any failure — caller should use pain reason as fallback.
  */
+    // eslint-disable-next-line complexity -- complexity 14, refactor candidate
 export async function extractRecentConversation(
   sessionId: string,
   agentId = 'main',

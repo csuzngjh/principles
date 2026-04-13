@@ -578,6 +578,7 @@ export function createPrinciplesConsoleRoutes(api: OpenClawPluginApi): OpenClawP
     path: ROUTE_PREFIX,
     auth: 'plugin',
     match: 'prefix',
+    // eslint-disable-next-line complexity -- complexity 13, refactor candidate
     async handler(req, res) {
       if (!api.rootDir) { text(res, 500, 'Plugin rootDir not available'); return true; }
       const url = new URL(req.url || ROUTE_PREFIX, 'http://127.0.0.1');
@@ -640,6 +641,7 @@ export function createPrinciplesConsoleRoute(api: OpenClawPluginApi): OpenClawPl
     path: ROUTE_PREFIX,
     auth: 'plugin',
     match: 'prefix',
+    // eslint-disable-next-line complexity -- complexity 15, refactor candidate
     async handler(req, res) {
       if (!api.rootDir) { text(res, 500, 'Plugin rootDir not available'); return true; }
       const url = new URL(req.url || ROUTE_PREFIX, 'http://127.0.0.1');

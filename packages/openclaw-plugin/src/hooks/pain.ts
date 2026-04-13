@@ -391,6 +391,7 @@ export function handleAfterToolCall(
   });
 }
 
+    // eslint-disable-next-line complexity -- complexity 15, refactor candidate
 function extractErrorType(error: unknown): string {
   if (!error) return 'Unknown';
   const msg = String(error);

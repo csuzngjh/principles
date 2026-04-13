@@ -243,6 +243,7 @@ export class NocturnalWorkflowManager implements WorkflowManager {
         // #213: Wrap fire-and-forget Promise with .catch() to prevent
         // unhandled promise rejections if anything throws outside the try-catch
         // (e.g., during parameter construction or environment errors).
+    // eslint-disable-next-line complexity -- complexity 15, refactor candidate
         Promise.resolve().then(async () => {
             try {
                 const result = await executeNocturnalReflectionAsync(
@@ -651,6 +652,7 @@ export class NocturnalWorkflowManager implements WorkflowManager {
      * Derives stage events from TrinityResult.telemetry and TrinityResult.failures.
      * Always records _start event for each stage that ran, plus _complete or _failed based on outcome.
      */
+    // eslint-disable-next-line complexity -- complexity 12, refactor candidate
     private recordStageEvents(workflowId: string, result: TrinityResult): void {
         const { telemetry, failures } = result;
 

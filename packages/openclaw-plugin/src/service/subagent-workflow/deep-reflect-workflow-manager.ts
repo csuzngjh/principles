@@ -150,6 +150,7 @@ export const deepReflectWorkflowSpec: SubagentWorkflowSpec<DeepReflectResult> = 
         };
     },
 
+    // eslint-disable-next-line complexity -- complexity 13, refactor candidate
     async persistResult(ctx: WorkflowPersistContext<DeepReflectResult>): Promise<void> {
         const { result, metadata, workspaceDir } = ctx;
 
