@@ -593,6 +593,8 @@ export function readRecentPainContext(wctx: WorkspaceContext): RecentPainContext
 /**
  * Enqueue a sleep_reflection task if one is not already pending.
  * Phase 2.4: Called when workspace is idle to trigger nocturnal reflection.
+ * Phase 3c: Dedup checks recent sleep_reflection tasks by pain source pattern
+ * to prevent redundant reflections of the same underlying issue.
  */
 async function enqueueSleepReflectionTask(
     wctx: WorkspaceContext,
@@ -621,12 +623,37 @@ async function enqueueSleepReflectionTask(
             return;
         }
 
+        // Phase 3c: Dedup — check if a recent sleep_reflection task with the same
+        // pain source pattern already completed within the dedup window.
+        // This prevents redundant reflections of the same underlying issue.
+        const recentPainContext = readRecentPainContext(wctx);
+        const painSourceKey = recentPainContext.mostRecent
+            ? `${recentPainContext.mostRecent.source}::${recentPainContext.mostRecent.reason?.slice(0, 50) ?? ''}`
+            : 'no_pain_context';
+
         const now = Date.now();
+        const DEDUP_WINDOW_MS = 4 * 60 * 60 * 1000; // 4 hours
+        const recentSimilarReflection = queue.find(t => {
+            if (t.taskKind !== 'sleep_reflection') return false;
+            if (t.status !== 'completed' && t.status !== 'failed') return false;
+            if (!t.completed_at) return false;
+            const age = now - new Date(t.completed_at).getTime();
+            if (age > DEDUP_WINDOW_MS) return false;
+            // Match by pain source pattern in the task's recentPainContext
+            const taskPainKey = t.recentPainContext?.mostRecent
+                ? `${t.recentPainContext.mostRecent.source}::${t.recentPainContext.mostRecent.reason?.slice(0, 50) ?? ''}`
+                : 'no_pain_context';
+            return taskPainKey === painSourceKey;
+        });
+
+        if (recentSimilarReflection) {
+            const completedTime = new Date(recentSimilarReflection.completed_at!).getTime();
+            logger?.debug?.(`[PD:EvolutionWorker] Skipping sleep_reflection — similar reflection completed ${Math.round((now - completedTime) / 60000)}min ago (same pain pattern: ${painSourceKey})`);
+            return;
+        }
+
         const taskId = createEvolutionTaskId('nocturnal', 50, 'idle workspace', 'Sleep-mode reflection', now);
         const nowIso = new Date(now).toISOString();
-
-        // Attach recent pain context if available
-        const recentPainContext = readRecentPainContext(wctx);
 
         queue.push({
             id: taskId,

@@ -394,6 +394,92 @@ function main() {
     }
   });
 
+  // ─────────────────────────────────────────────────────────
+  // CHECKPOINT 13: Correction samples (Phase 2b/3b)
+  // ─────────────────────────────────────────────────────────
+  check('13. Correction samples availability', () => {
+    // Read from trajectory.db using sqlite3 CLI
+    try {
+      const dbPath = join(stateDir, 'trajectory.db');
+      if (!existsSync(dbPath)) {
+        return { status: 'warn', detail: 'trajectory.db not found' };
+      }
+      const result = execSync(`sqlite3 '${dbPath}' "SELECT review_status, COUNT(*), AVG(quality_score) FROM correction_samples GROUP BY review_status;" 2>/dev/null || echo 'QUERY_FAILED'`, { encoding: 'utf-8', timeout: 5000 }).trim();
+      if (!result || result === 'QUERY_FAILED') {
+        return { status: 'warn', detail: 'Could not query correction samples' };
+      }
+      const pendingMatch = result.match(/pending\|(\d+)/);
+      const approvedMatch = result.match(/approved\|(\d+)/);
+      const rejectedMatch = result.match(/rejected\|(\d+)/);
+      const pending = pendingMatch ? parseInt(pendingMatch[1]) : 0;
+      const approved = approvedMatch ? parseInt(approvedMatch[1]) : 0;
+      const rejected = rejectedMatch ? parseInt(rejectedMatch[1]) : 0;
+      if (pending > 0) return `${pending} pending review, ${approved} approved, ${rejected} rejected`;
+      if (approved === 0 && rejected === 0) return { status: 'warn', detail: 'No correction samples exist — no user corrections detected yet' };
+      return `${approved} approved, ${rejected} rejected, ${pending} pending`;
+    } catch {
+      return { status: 'warn', detail: 'Could not query trajectory.db' };
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────
+  // CHECKPOINT 14: Signal diversity (Phase 3b)
+  // ─────────────────────────────────────────────────────────
+  check('14. Pain signal diversity', () => {
+    try {
+      const dbPath = join(stateDir, 'trajectory.db');
+      if (!existsSync(dbPath)) {
+        return { status: 'warn', detail: 'trajectory.db not found' };
+      }
+      const result = execSync(`sqlite3 '${dbPath}' "SELECT source, COUNT(*), ROUND(AVG(score),1) FROM pain_events GROUP BY source ORDER BY COUNT(*) DESC;" 2>/dev/null || echo 'QUERY_FAILED'`, { encoding: 'utf-8', timeout: 5000 }).trim();
+      if (!result || result === 'QUERY_FAILED') {
+        return { status: 'warn', detail: 'Could not query pain events' };
+      }
+      const sources = result.split('\n').filter(Boolean);
+      if (sources.length < 2) {
+        return { status: 'warn', detail: `Only ${sources.length} pain signal source(s) — low diversity. Expected: tool_failure, user_empathy, correction_rejected, gate_blocked` };
+      }
+      const summary = sources.map(s => {
+        const parts = s.split('|');
+        return `${parts[0]} (${parts[1]}, avg ${parts[2]})`;
+      }).join(', ');
+      return `${sources.length} sources: ${summary}`;
+    } catch {
+      return { status: 'warn', detail: 'Could not query trajectory.db' };
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────
+  // CHECKPOINT 15: Artifact quality (Phase 3)
+  // ─────────────────────────────────────────────────────────
+  check('15. Nocturnal artifact quality', () => {
+    const samplesDir = join(stateDir, 'nocturnal', 'samples');
+    if (!existsSync(samplesDir)) {
+      return { status: 'warn', detail: 'No samples directory' };
+    }
+    const files = readdirSync(samplesDir).filter(f => f.endsWith('.json'));
+    if (files.length === 0) return { status: 'warn', detail: 'No artifacts produced yet' };
+
+    // Check uniqueness of badDecision across recent artifacts
+    const recentFiles = files
+      .map(f => ({ name: f, mtime: statSync(join(samplesDir, f)).mtimeMs }))
+      .sort((a, b) => b.mtime - a.mtime)
+      .slice(0, 5);
+
+    const decisions = new Set();
+    for (const f of recentFiles) {
+      try {
+        const artifact = JSON.parse(readFileSync(join(samplesDir, f.name), 'utf-8'));
+        if (artifact.badDecision) decisions.add(artifact.badDecision);
+      } catch { /* skip */ }
+    }
+
+    if (decisions.size < recentFiles.length) {
+      return { status: 'warn', detail: `${recentFiles.length - decisions.size} duplicate decision(s) in last ${recentFiles.length} artifacts — stub reflector may not be content-aware` };
+    }
+    return `${files.length} total, last ${recentFiles.length} all unique decisions`;
+  });
+
   printReport();
 }
 
