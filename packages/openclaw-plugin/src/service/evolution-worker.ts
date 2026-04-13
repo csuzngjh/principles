@@ -2085,24 +2085,27 @@ async function processEvolutionQueueWithResult(
 export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
     id: 'principles-evolution-worker',
     api: null,
+    _startedWorkspaces: new Set<string>(),
 
     start(ctx: OpenClawPluginServiceContext): void {
-        // Guard: prevent duplicate starts (e.g., from health check + before_prompt_build race)
-        const existing = (EvolutionWorkerService as any)._started;
-        if (existing) {
-            ctx?.logger?.info?.(`[PD:EvolutionWorker] Already started, skipping duplicate call`);
+        const workspaceDir = ctx?.workspaceDir;
+
+        // Guard: prevent duplicate starts for the SAME workspace
+        const started = EvolutionWorkerService._startedWorkspaces;
+        if (started.has(workspaceDir)) {
+            ctx?.logger?.info?.(`[PD:EvolutionWorker] Already started for ${workspaceDir}, skipping`);
             return;
         }
-        (EvolutionWorkerService as any)._started = true;
 
         const logger = ctx?.logger || console;
         const {api} = this;
-        const workspaceDir = ctx?.workspaceDir;
 
         if (!workspaceDir) {
             if (logger) logger.warn('[PD:EvolutionWorker] workspaceDir not found in service config. Evolution cycle disabled.');
             return;
         }
+
+        started.add(workspaceDir);
 
         const wctx = WorkspaceContext.fromHookContext({ workspaceDir, ...ctx.config });
         if (logger) logger.info(`[PD:EvolutionWorker] Starting with workspaceDir=${wctx.workspaceDir}, stateDir=${wctx.stateDir}`);

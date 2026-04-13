@@ -66,6 +66,8 @@ import { extractAgentIdFromSessionKey } from './utils/session-key.js';
 
 // Track initialization to avoid repeated calls
 let workspaceInitialized = false;
+// Track started evolution workers — one per workspace
+const startedWorkspaces = new Set<string>();
 
 /**
  * Resolve workspaceDir for slash commands.
@@ -166,30 +168,28 @@ const plugin = {
         if (!workspaceDir) return;
         try {
           if (!workspaceInitialized) {
-            // ── Start Evolution Worker service ──
-            // OpenClaw calls startPluginServices() only once during Gateway startup.
-            // Our plugin is lazy-loaded (register() fires on first before_prompt_build),
-            // so EvolutionWorkerService.start() was never called automatically.
-            // Manually start it here using the configured default agent's workspaceDir.
-            const agentsConfig = (api.config as any)?.agents;
-            const defaultWorkspaceDir = agentsConfig?.defaults?.workspace;
-            if (defaultWorkspaceDir) {
-              EvolutionWorkerService.api = api;
-              EvolutionWorkerService.start({
-                config: api.config,
-                workspaceDir: defaultWorkspaceDir,
-                stateDir: path.join(defaultWorkspaceDir, '.state'),
-                logger: api.logger,
-              });
-            } else {
-              api.logger.error('[PD] EvolutionWorkerService.start skipped: agents.defaults.workspace not configured');
-            }
-
             migrateDirectoryStructure(api, workspaceDir);
             ensureWorkspaceTemplates(api, workspaceDir, language);
-            SystemLogger.log(workspaceDir, 'SYSTEM_BOOT', `Principles Disciple online. Language: ${language}. defaultWorkspaceDir=${defaultWorkspaceDir || '(unknown)'}`);
+            SystemLogger.log(workspaceDir, 'SYSTEM_BOOT', `Principles Disciple online. Language: ${language}`);
             workspaceInitialized = true;
           }
+
+          // ── Start EvolutionWorker for THIS workspace ──
+          // Each agent has its own heartbeat task. When before_prompt_build fires,
+          // it fires for the current agent's workspaceDir. Start one EvolutionWorker
+          // per workspace so each agent's pain signals are processed independently.
+          if (!startedWorkspaces.has(workspaceDir)) {
+            startedWorkspaces.add(workspaceDir);
+            EvolutionWorkerService.api = api;
+            EvolutionWorkerService.start({
+              config: api.config,
+              workspaceDir,
+              stateDir: path.join(workspaceDir, '.state'),
+              logger: api.logger,
+            });
+            api.logger.info(`[PD] EvolutionWorker started for workspace: ${workspaceDir}`);
+          }
+
           const result = await handleBeforePromptBuild(event, { ...ctx, api, workspaceDir });
           
           // Record success
