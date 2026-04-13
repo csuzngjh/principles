@@ -1238,16 +1238,20 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
           } : {}),
           ...(j.risks ? (() => {
             const fp = j.risks!.falsePositiveEstimate;
-            const hasFp = typeof fp === 'number';
+            const complexity = j.risks!.implementationComplexity;
+            const validComplexity = ['low', 'medium', 'high'].includes(complexity)
+              ? complexity as 'low' | 'medium' | 'high'
+              : 'medium';
             const risksObj: {
-              falsePositiveEstimate?: number;
-              implementationComplexity: string;
+              falsePositiveEstimate: number;
+              implementationComplexity: 'low' | 'medium' | 'high';
               breakingChangeRisk: boolean;
             } = {
-              implementationComplexity: j.risks!.implementationComplexity ?? 'medium',
+              // Default to 0 if LLM omitted the field (1B fix)
+              falsePositiveEstimate: typeof fp === 'number' ? this.clamp01(fp) : 0,
+              implementationComplexity: validComplexity,
               breakingChangeRisk: Boolean(j.risks!.breakingChangeRisk),
             };
-            if (hasFp) risksObj.falsePositiveEstimate = this.clamp01(fp);
             return { risks: risksObj };
           })() : {}),
         })),
@@ -1310,10 +1314,12 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
         return null;
       }
 
-      // Validate contrastive analysis sub-fields (H-03): only include if structure is intact
+      // Validate contrastive analysis sub-fields (H-03 + type-safety): all 3 required
       const contrastiveAnalysis = parsed.contrastiveAnalysis
         && typeof parsed.contrastiveAnalysis === 'object'
         && typeof parsed.contrastiveAnalysis.criticalDifference === 'string'
+        && typeof parsed.contrastiveAnalysis.decisionTrigger === 'string'
+        && typeof parsed.contrastiveAnalysis.preventionStrategy === 'string'
         ? parsed.contrastiveAnalysis : undefined;
 
       const rejectedAnalysis = parsed.rejectedAnalysis
@@ -1518,7 +1524,7 @@ export interface PhilosopherJudgment {
   /** Rank among all candidates (1 = best) */
   rank: number;
   /** Per-dimension scores (6D evaluation) — informational, not used for tournament ranking */
-  scores?: Philosopher6DScores;
+  scores?: Partial<Philosopher6DScores>;
   /** Risk assessment for this candidate — informational, consumed by Scribe (Phase 37) */
   risks?: PhilosopherRiskAssessment;
 }
