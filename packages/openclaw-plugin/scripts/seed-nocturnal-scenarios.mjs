@@ -275,11 +275,12 @@ function main() {
   for (const s of scenarios) {
     const createdAt = daysAgo(s.days);
 
-    // Check if session already exists
+    // Check if scenario already exists with complete data (pain_events, not just sessions)
+    // This prevents partial data if the script was interrupted mid-insert
     try {
-      const existing = execSync(`sqlite3 '${dbPath}' "SELECT COUNT(*) FROM sessions WHERE session_id = '${esc(s.sessionId)}';"`, { encoding: 'utf-8' }).trim();
+      const existing = execSync(`sqlite3 '${dbPath}' "SELECT COUNT(*) FROM pain_events WHERE session_id = '${esc(s.sessionId)}';"`, { encoding: 'utf-8' }).trim();
       if (parseInt(existing) > 0) {
-        console.log(`  ⏭️  Skipping ${s.sessionId} (already exists)`);
+        console.log(`  ⏭️  Skipping ${s.sessionId} (already exists with ${existing} pain events)`);
         skipped++;
         continue;
       }

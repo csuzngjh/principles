@@ -316,15 +316,31 @@ function main() {
 
     // Self-healing: fix [object Object] corruption caused by bash heredoc/toString
     if (content.includes('[object Object]')) {
-      // Try to parse as JSON if it looks like it, otherwise just delete the corrupted file
+      // Try to extract and parse JSON object from anywhere in the content
+      // The corruption might be at any position, not just the beginning
       try {
-        const json = JSON.parse(content.replace(/^active: /, ''));
-        // If we got a valid object, rewrite it properly
-        const kv = Object.entries(json)
-          .map(([k, v]) => `${k}: ${v === undefined ? '' : v}`)
-          .join('\n');
-        writeFileSync(painFlagPath, kv, 'utf-8');
-        return `Pain flag was corrupted ([object Object]), auto-repaired from JSON backup`;
+        // Attempt 1: Extract JSON object using regex (handles {...} anywhere)
+        const jsonMatch = content.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const json = JSON.parse(jsonMatch[0]);
+          // If we got a valid object, rewrite it properly as KV format
+          const kv = Object.entries(json)
+            .map(([k, v]) => `${k}: ${v === undefined ? '' : v}`)
+            .join('\n');
+          writeFileSync(painFlagPath, kv, 'utf-8');
+          return `Pain flag was corrupted ([object Object]), auto-repaired from JSON backup`;
+        }
+        // Attempt 2: Try parsing the whole content after removing common prefixes
+        const cleaned = content.replace(/^(active:\s*|source:\s*)/, '').trim();
+        if (cleaned.startsWith('{')) {
+          const json = JSON.parse(cleaned);
+          const kv = Object.entries(json)
+            .map(([k, v]) => `${k}: ${v === undefined ? '' : v}`)
+            .join('\n');
+          writeFileSync(painFlagPath, kv, 'utf-8');
+          return `Pain flag was corrupted ([object Object]), auto-repaired from JSON backup`;
+        }
+        throw new Error('No valid JSON found');
       } catch {
         // If not JSON, delete the corrupted file to unblock the system
         try {
