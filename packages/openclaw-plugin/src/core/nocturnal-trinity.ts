@@ -1514,6 +1514,20 @@ export interface TrinityTelemetry {
   diversityCheckPassed?: boolean;
   /** Risk levels assigned to Dreamer candidates (for telemetry) */
   candidateRiskLevels?: string[];
+  /** Aggregate 6D Philosopher evaluation metrics (informational) */
+  philosopher6D?: {
+    /** Average scores across all candidates per dimension */
+    avgScores: {
+      principleAlignment: number;
+      specificity: number;
+      actionability: number;
+      executability: number;
+      safetyImpact: number;
+      uxImpact: number;
+    };
+    /** Count of candidates with breakingChangeRisk = true */
+    highRiskCount: number;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1753,6 +1767,70 @@ export function invokeStubPhilosopher(
       principleAligned = false;
     }
 
+    // Deterministic 6D scores based on strategic perspective (Phase 35 D-07 mapping)
+    const perspective = candidate.strategicPerspective;
+    let sixDScores: Philosopher6DScores;
+    let riskAssessment: PhilosopherRiskAssessment;
+
+    if (perspective === 'conservative_fix') {
+      sixDScores = {
+        principleAlignment: 0.9,
+        specificity: 0.8,
+        actionability: 0.85,
+        executability: 0.9,
+        safetyImpact: 0.95,
+        uxImpact: 0.7,
+      };
+      riskAssessment = {
+        falsePositiveEstimate: 0.1,
+        implementationComplexity: 'low',
+        breakingChangeRisk: false,
+      };
+    } else if (perspective === 'structural_improvement') {
+      sixDScores = {
+        principleAlignment: 0.75,
+        specificity: 0.7,
+        actionability: 0.75,
+        executability: 0.7,
+        safetyImpact: 0.7,
+        uxImpact: 0.8,
+      };
+      riskAssessment = {
+        falsePositiveEstimate: 0.25,
+        implementationComplexity: 'medium',
+        breakingChangeRisk: false,
+      };
+    } else if (perspective === 'paradigm_shift') {
+      sixDScores = {
+        principleAlignment: 0.6,
+        specificity: 0.5,
+        actionability: 0.5,
+        executability: 0.45,
+        safetyImpact: 0.4,
+        uxImpact: 0.6,
+      };
+      riskAssessment = {
+        falsePositiveEstimate: 0.4,
+        implementationComplexity: 'high',
+        breakingChangeRisk: true,
+      };
+    } else {
+      // Fallback for candidates without strategicPerspective
+      sixDScores = {
+        principleAlignment: score,
+        specificity: score * 0.9,
+        actionability: score * 0.85,
+        executability: score * 0.8,
+        safetyImpact: score * 0.7,
+        uxImpact: score * 0.75,
+      };
+      riskAssessment = {
+        falsePositiveEstimate: 0.3,
+        implementationComplexity: 'medium',
+        breakingChangeRisk: false,
+      };
+    }
+
     return {
       candidateIndex: candidate.candidateIndex,
       critique: `Candidate ${candidate.candidateIndex} scored ${score.toFixed(2)}. ${
@@ -1763,6 +1841,8 @@ export function invokeStubPhilosopher(
       principleAligned,
       score: Math.min(1, Math.max(0, score)),
       rank: 0, // Will be set after sorting
+      scores: sixDScores,
+      risks: riskAssessment,
     };
   });
 
@@ -1985,6 +2065,21 @@ export async function runTrinityAsync(options: RunTrinityOptions): Promise<Trini
 
     telemetry.philosopherPassed = true;
 
+    // Aggregate 6D scores from Philosopher judgments (if available)
+    const realJudgments6D = philosopherOutput.judgments.filter(j => j.scores);
+    if (realJudgments6D.length > 0) {
+      const dims = ['principleAlignment', 'specificity', 'actionability', 'executability', 'safetyImpact', 'uxImpact'] as const;
+      const avgScores: Record<string, number> = {};
+      for (const dim of dims) {
+        const values = realJudgments6D.map(j => j.scores![dim]);
+        avgScores[dim] = values.reduce((a, b) => a + b, 0) / values.length;
+      }
+      telemetry.philosopher6D = {
+        avgScores: avgScores as TrinityTelemetry['philosopher6D'] extends { avgScores: infer T } ? T : never,
+        highRiskCount: philosopherOutput.judgments.filter(j => j.risks?.breakingChangeRisk).length,
+      };
+    }
+
     // Step 3: Scribe — synthesize final artifact via real subagent
     const draftArtifact = await adapter.invokeScribe(
       dreamerOutput,
@@ -2095,6 +2190,21 @@ function runTrinityWithStubs(
   }
 
   telemetry.philosopherPassed = true;
+
+  // Aggregate 6D scores from Philosopher judgments (if available)
+  const judgments6D = philosopherOutput.judgments.filter(j => j.scores);
+  if (judgments6D.length > 0) {
+    const dims = ['principleAlignment', 'specificity', 'actionability', 'executability', 'safetyImpact', 'uxImpact'] as const;
+    const avgScores: Record<string, number> = {};
+    for (const dim of dims) {
+      const values = judgments6D.map(j => j.scores![dim]);
+      avgScores[dim] = values.reduce((a, b) => a + b, 0) / values.length;
+    }
+    telemetry.philosopher6D = {
+      avgScores: avgScores as TrinityTelemetry['philosopher6D'] extends { avgScores: infer T } ? T : never,
+      highRiskCount: philosopherOutput.judgments.filter(j => j.risks?.breakingChangeRisk).length,
+    };
+  }
 
   // Step 3: Scribe — produce final artifact using tournament selection (stub)
   const draftArtifact = invokeStubScribe(dreamerOutput, philosopherOutput, snapshot, principleId, telemetry, config);
