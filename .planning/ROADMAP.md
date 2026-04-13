@@ -7,7 +7,7 @@
 - [x] **v1.13** - Boundary Contract Hardening (Phases 19-23, shipped 2026-04-11) - [Archive](milestones/v1.13/v1.13-ROADMAP.md)
 - [x] **v1.14** - Evolution Worker Decomposition & Contract Hardening (Phases 24-29, baseline complete on branch `fix/bugs-231-228` / PR #245)
 - [x] **v1.15** - Runtime & Truth Contract Hardening (Phases 30-33, shipped 2026-04-12)
-- [ ] **v1.16** - Trinity Training Trajectory Quality Enhancement (Phases 34-37, in progress)
+- [x] **v1.16** - Trinity Training Trajectory Quality Enhancement (Phases 34-37, shipped 2026-04-13)
 - [ ] **v1.10** - Thinking Models page optimization (deferred)
 
 ## Phases
@@ -116,4 +116,4 @@ Phases execute in numeric order: 34 -> 35 -> 36 -> 37
 | 36. Philosopher 6D Evaluation | v1.16 | 2/2 | Complete    | 2026-04-13 |
 | 37. Scribe Contrastive Analysis | v1.16 | 1/1 | Complete    | 2026-04-13 |
 
-*Last updated: 2026-04-12*
+*Last updated: 2026-04-13*
