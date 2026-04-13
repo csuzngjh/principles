@@ -39,7 +39,7 @@
 
 - [x] **Phase 34: Reasoning Deriver Module** - Build leaf module for runtime reasoning derivation from existing snapshot data (completed 2026-04-13)
 - [ ] **Phase 35: Dreamer Enhancement** - Enhance Dreamer prompt for candidate diversity with deriver integration and soft post-validation
-- [ ] **Phase 36: Philosopher 6D Evaluation** - Expand Philosopher evaluation to 6 dimensions with risk assessment
+- [x] **Phase 36: Philosopher 6D Evaluation** - Expand Philosopher evaluation to 6 dimensions with risk assessment (completed 2026-04-13)
 - [ ] **Phase 37: Scribe Contrastive Analysis** - Add contrastive analysis to Scribe output with backward-compatible optional fields
 
 ## Phase Details
@@ -86,8 +86,8 @@ Plans:
 **Plans**: TBD
 
 Plans:
-- [ ] 36-01: TBD
-- [ ] 36-02: TBD
+- [x] 36-01: TBD
+- [x] 36-02: TBD
 
 ### Phase 37: Scribe Contrastive Analysis
 **Goal**: Scribe produces contrastive analysis that distinguishes chosen vs rejected reasoning paths, enabling richer training signals
@@ -113,7 +113,7 @@ Phases execute in numeric order: 34 -> 35 -> 36 -> 37
 |-------|-----------|----------------|--------|-----------|
 | 34. Reasoning Deriver Module | v1.16 | 2/2 | Complete    | 2026-04-13 |
 | 35. Dreamer Enhancement | v1.16 | 0/2 | Not started | - |
-| 36. Philosopher 6D Evaluation | v1.16 | 0/2 | Not started | - |
+| 36. Philosopher 6D Evaluation | v1.16 | 2/2 | Complete    | 2026-04-13 |
 | 37. Scribe Contrastive Analysis | v1.16 | 0/2 | Not started | - |
 
 *Last updated: 2026-04-12*
