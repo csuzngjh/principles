@@ -65,7 +65,7 @@ function block(
     sessionId,
     blockSource: 'gfi-gate',
   }, logger ||  
-  { warn: () => {}, error: () => {} } as const);
+  { warn: () => { /* no-op */ }, error: () => { /* no-op */ } } as const);
 }
 
  

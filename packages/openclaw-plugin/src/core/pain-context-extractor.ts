@@ -235,11 +235,9 @@ export async function extractRecentConversation(
 /**
  * Extracts failed tool call context with argument correlation.
  */
-  // Reason: breaking API change - default param must precede required params for type inference compatibility
- 
 export async function extractFailedToolContext(
   sessionId: string,
-  agentId = 'main',
+  agentId: string,
   toolName: string,
   filePath?: string,
 ): Promise<string> {

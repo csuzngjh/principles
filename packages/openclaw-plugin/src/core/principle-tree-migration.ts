@@ -9,8 +9,6 @@
  *   - Or run manually: node scripts/migrate-principle-tree.mjs <workspace-dir>
  */
 
-import * as fs from 'fs';
-import * as path from 'path';
 import {
   loadLedger,
   saveLedger,
@@ -23,11 +21,11 @@ export interface PrincipleTreeMigrationResult {
   migratedCount: number;
   skippedCount: number;
   errorCount: number;
-  details: Array<{
+  details: {
     principleId: string;
     status: 'migrated' | 'skipped' | 'error';
     reason?: string;
-  }>;
+  }[];
 }
 
 /**

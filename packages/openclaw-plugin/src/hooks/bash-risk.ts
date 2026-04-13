@@ -66,7 +66,7 @@ export function analyzeBashCommand(
   // - Word joiner (U+2060)
   // - Zero-width invisible separator (U+FEFF)
    
-  const ZERO_WIDTH_CHARS = /[\u200B\u200C\u200D\u2060\uFEFF]/g;
+  const ZERO_WIDTH_CHARS = /\u200B|\u200C|\u200D|\u2060|\uFEFF/g;
   if (ZERO_WIDTH_CHARS.test(command)) {
     logger?.warn?.(`[PD_GATE] Bash command contains zero-width characters — blocking as dangerous`);
     return 'dangerous'; // Fail-closed: zero-width chars are suspicious
