@@ -1544,6 +1544,11 @@ export class TrajectoryDatabase {
     `).get(sessionId) as Record<string, unknown> | undefined;
     if (!correctionTurn || !correctionTurn.references_assistant_turn_id) return;
 
+    // #Phase2b-fix: Tool failure is NOT required for correction samples.
+    // User corrections are the highest-fidelity signal — they indicate the agent
+    // said or did something wrong, regardless of whether tool calls succeeded.
+    // Requiring tool failure excluded the most valuable cases: "agent did something
+    // that technically worked but violated a principle or was logically wrong."
     const failedCall = this.db.prepare(`
       SELECT id, tool_name, error_type, error_message
       FROM tool_calls
@@ -1551,25 +1556,36 @@ export class TrajectoryDatabase {
       ORDER BY id DESC
       LIMIT 1
     `).get(sessionId) as Record<string, unknown> | undefined;
-    if (!failedCall) return;
 
-    const successfulCalls = this.db.prepare(`
-      SELECT id, tool_name
+    const recentCalls = this.db.prepare(`
+      SELECT id, tool_name, outcome
       FROM tool_calls
-      WHERE session_id = ? AND outcome = 'success'
+      WHERE session_id = ?
       ORDER BY id DESC
-      LIMIT 3
+      LIMIT 5
     `).all(sessionId) as Record<string, unknown>[];
-    if (successfulCalls.length === 0) return;
 
-    const sampleId = `sample_${crypto.createHash('md5').update(`${sessionId}:${correctionTurn.id}:${successfulCalls[0].id}`).digest('hex').slice(0, 12)}`;
+    const successfulCalls = recentCalls.filter(c => c.outcome === 'success');
+
+    // Generate sample ID from correction turn + first recent call (or correction id if no calls)
+    const refForHash = successfulCalls[0]?.id ?? correctionTurn.id;
+    const sampleId = `sample_${crypto.createHash('md5').update(`${sessionId}:${correctionTurn.id}:${refForHash}`).digest('hex').slice(0, 12)}`;
     const userRawText = this.restoreRawText(correctionTurn.raw_text as string | null, correctionTurn.blob_ref as string | null);
+
+    // Quality scoring: correction cue is always valuable
+    // Tool failure adds context (20pts), successful calls add context (up to 15pts)
+    // Pure conversation corrections still score 55-75 (high enough to review)
     const qualityScore = [
       correctionTurn.references_assistant_turn_id ? 35 : 0,
       correctionTurn.correction_cue ? 20 : 0,
       failedCall ? 20 : 0,
-      successfulCalls.length > 0 ? 25 : 0,
+      Math.min(successfulCalls.length, 3) * 5,
     ].reduce((sum, value) => sum + value, 0);
+
+    // Diff excerpt: prefer user correction text, fallback to error info, fallback to cue
+    const diffText = userRawText
+      || (failedCall ? String(failedCall.error_message ?? failedCall.error_type ?? failedCall.tool_name) : '')
+      || String(correctionTurn.correction_cue ?? 'user correction');
 
     this.withWrite(() => {
       this.db.prepare(`
@@ -1583,8 +1599,8 @@ export class TrajectoryDatabase {
         sessionId,
         Number(correctionTurn.references_assistant_turn_id),
         Number(correctionTurn.id),
-        safeJson(successfulCalls.map((call) => ({ id: call.id, toolName: call.tool_name }))),
-        summarizeForDiff(userRawText || String(failedCall.error_message ?? failedCall.error_type ?? failedCall.tool_name)),
+        safeJson(successfulCalls.map((call) => ({ id: call.id, toolName: call.tool_name, outcome: call.outcome }))),
+        summarizeForDiff(diffText),
         '[]',
         qualityScore,
         nowIso(),
