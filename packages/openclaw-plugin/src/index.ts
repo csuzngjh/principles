@@ -118,7 +118,7 @@ function computeRuntimeShadowTaskFingerprint(event: PluginHookSubagentSpawningEv
   return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex').slice(0, 16);
 }
 
-function resolveCommandWorkspaceDirStrict(
+function _resolveCommandWorkspaceDirStrict(
   api: OpenClawPluginApi,
   ctx: WorkspaceResolutionContext,
 ): string {

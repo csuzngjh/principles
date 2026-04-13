@@ -127,20 +127,17 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
     
     // Determine Mental Mode (aligned with prompt.ts logic)
      
-    let mentalMode = '';
-    if (isZh) {
-        if (gfi >= 70) mentalMode = '🚑 救赎模式 (HUMBLE_RECOVERY)';
-        else if (gfi >= 40) mentalMode = '🤝 安抚模式 (CONCILIATORY)';
-        else mentalMode = '⚡ 高效模式 (EFFICIENT)';
-    } else {
-        if (gfi >= 70) mentalMode = '🚑 HUMBLE_RECOVERY';
-        else if (gfi >= 40) mentalMode = '🤝 CONCILIATORY';
-        else mentalMode = '⚡ EFFICIENT';
-    }
+    const mentalMode = isZh
+        ? gfi >= 70 ? '🚑 救赎模式 (HUMBLE_RECOVERY)'
+        : gfi >= 40 ? '🤝 安抚模式 (CONCILIATORY)'
+        : '⚡ 高效模式 (EFFICIENT)'
+        : gfi >= 70 ? '🚑 HUMBLE_RECOVERY'
+        : gfi >= 40 ? '🤝 CONCILIATORY'
+        : '⚡ EFFICIENT';
     
     // Determine health status based on GFI
      
-    let healthLabel = 'Healthy';
+    let healthLabel: string;
     let suggestionText = '';
 
     if (isZh) {

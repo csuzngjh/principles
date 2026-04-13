@@ -30,7 +30,7 @@ export interface BootstrapResult {
  * @returns Array of principle IDs sorted by observedViolationCount (descending)
  * @throws Error if no deterministic principles found
  */
-export function selectPrinciplesForBootstrap(stateDir: string, limit: number = 3): string[] {
+export function selectPrinciplesForBootstrap(stateDir: string, limit = 3): string[] {
   // Load training store to get evaluability and violation data
   const store = loadStore(stateDir);
 
@@ -76,7 +76,7 @@ export function selectPrinciplesForBootstrap(stateDir: string, limit: number = 3
  * @returns Array of results indicating created or skipped status
  * @throws Error if no deterministic principles found
  */
-export function bootstrapRules(stateDir: string, limit: number = 3): BootstrapResult[] {
+export function bootstrapRules(stateDir: string, limit = 3): BootstrapResult[] {
   // Select principles for bootstrap
   const selectedPrincipleIds = selectPrinciplesForBootstrap(stateDir, limit);
 
@@ -107,7 +107,7 @@ export function bootstrapRules(stateDir: string, limit: number = 3): BootstrapRe
 
     // Create stub rule
     const now = new Date().toISOString();
-    const rule = createRule(stateDir, {
+    createRule(stateDir, {
       id: ruleId,
       version: 1,
       name: `Stub bootstrap rule for ${principleId}`,

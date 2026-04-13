@@ -191,7 +191,7 @@ export function handleAfterToolCall(
     // Only reduce tool_failure source GFI by 50%, preserve user_empathy and other sources
     // This prevents "read file success" from wiping user frustration signals
     const session = getSession(sessionId);
-    const toolFailureGfi = session?.gfiBySource?.['tool_failure'] || 0;
+    const toolFailureGfi = session?.gfiBySource?.tool_failure || 0;
     
     let resetState: SessionState;
     if (toolFailureGfi > 0) {
