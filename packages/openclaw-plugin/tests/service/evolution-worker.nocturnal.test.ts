@@ -35,7 +35,7 @@ vi.mock('../../src/service/subagent-workflow/nocturnal-workflow-manager.js', () 
 
 const { mockGetNocturnalSessionSnapshot, mockListRecentNocturnalCandidateSessions } = vi.hoisted(() => ({
   mockGetNocturnalSessionSnapshot: vi.fn(),
-  mockListRecentNocturnalCandidateSessions: vi.fn(() => []),
+  mockListRecentNocturnalCandidateSessions: vi.fn(() => [] as Array<{ sessionId: string; startedAt: string; failureCount: number; painEventCount: number; gateBlockCount: number }>),
 }));
 
 // Create a shared mock extractor instance so spy calls are tracked correctly
@@ -108,11 +108,11 @@ session_id: explicit-session-from-pain
 
     try {
       const context = readRecentPainContext(wctx);
-      
+
       // Verify the session_id was extracted from the pain flag file
       expect(context.mostRecent).toBeDefined();
-      expect(context.mostRecent.sessionId).toBe('explicit-session-from-pain');
-      expect(context.mostRecent.score).toBe(80);
+      expect(context.mostRecent!.sessionId).toBe('explicit-session-from-pain');
+      expect(context.mostRecent!.score).toBe(80);
       expect(context.recentPainCount).toBe(1);
     } finally {
       safeRmDir(workspaceDir);
@@ -170,9 +170,9 @@ session_id: pain-session-abc
 
     // Contract: session_id must be extracted from the pain flag
     expect(painContext.mostRecent).toBeDefined();
-    expect(painContext.mostRecent.sessionId).toBe('pain-session-abc');
-    expect(painContext.mostRecent.score).toBe(70);
-    expect(painContext.mostRecent.source).toBe('tool_failure');
+    expect(painContext.mostRecent!.sessionId).toBe('pain-session-abc');
+    expect(painContext.mostRecent!.score).toBe(70);
+    expect(painContext.mostRecent!.source).toBe('tool_failure');
 
     // Now simulate what the worker does: attach this context to a queued task
     const simulatedTask = {
@@ -182,7 +182,7 @@ session_id: pain-session-abc
     };
 
     // Verify the contract holds end-to-end
-    expect(simulatedTask.recentPainContext.mostRecent.sessionId).toBe('pain-session-abc');
+    expect(simulatedTask.recentPainContext.mostRecent!.sessionId).toBe('pain-session-abc');
   });
 
   it('e2e: /pd-reflect command writes to workspace/.state, never to HOME/.state', async () => {
@@ -286,7 +286,7 @@ session_id: pain-session-abc
       expect(queue[0].resultRef).toBeFalsy();
       expect(mockStartWorkflow).not.toHaveBeenCalled();
     } finally {
-      EvolutionWorkerService.stop({ workspaceDir, stateDir, logger: console } as any);
+      EvolutionWorkerService.stop!({ workspaceDir, stateDir, logger: console } as any);
       safeRmDir(workspaceDir);
     }
   });
@@ -358,7 +358,7 @@ session_id: pain-session-abc
       expect(queue[0].status).toBe('completed');
       expect(queue[0].resolution).toBe('stub_fallback');
     } finally {
-      EvolutionWorkerService.stop({ workspaceDir, stateDir, logger: console } as any);
+      EvolutionWorkerService.stop!({ workspaceDir, stateDir, logger: console } as any);
       safeRmDir(workspaceDir);
     }
   });
@@ -425,7 +425,7 @@ session_id: pain-session-abc
       expect(queue[0].status).toBe('completed');
       expect(queue[0].resolution).toBe('stub_fallback');
     } finally {
-      EvolutionWorkerService.stop({ workspaceDir, stateDir, logger: console } as any);
+      EvolutionWorkerService.stop!({ workspaceDir, stateDir, logger: console } as any);
       safeRmDir(workspaceDir);
     }
   });
@@ -499,7 +499,7 @@ session_id: pain-session-abc
       const metadata = mockStartWorkflow.mock.calls[0][1].metadata;
       expect(metadata.snapshot.sessionId).toBe(painSessionId);
     } finally {
-      EvolutionWorkerService.stop({ workspaceDir, stateDir, logger: console } as any);
+      EvolutionWorkerService.stop!({ workspaceDir, stateDir, logger: console } as any);
       safeRmDir(workspaceDir);
     }
   });
@@ -580,7 +580,7 @@ session_id: pain-session-abc
       expect(metadata.snapshot.sessionId).toBe('valid-session');
       expect(new Date(metadata.snapshot.startedAt).getTime()).toBeLessThanOrEqual(new Date(taskTimestamp).getTime());
     } finally {
-      EvolutionWorkerService.stop({ workspaceDir, stateDir, logger: console } as any);
+      EvolutionWorkerService.stop!({ workspaceDir, stateDir, logger: console } as any);
       safeRmDir(workspaceDir);
     }
   });

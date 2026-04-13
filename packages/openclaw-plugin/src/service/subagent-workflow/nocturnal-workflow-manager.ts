@@ -254,16 +254,22 @@ export class NocturnalWorkflowManager implements WorkflowManager {
                         },
                         // Pass painContext for Selector ranking bias
                         painContext,
-                        // #244: Force idle check to pass for manual/test triggers
-                        idleCheckOverride: {
-                            isIdle: true,
-                            mostRecentActivityAt: Date.now() - 1800000,
-                            idleForMs: 1800000,
-                            userActiveSessions: 0,
-                            abandonedSessionIds: [],
-                            trajectoryGuardrailConfirmsIdle: true,
-                            reason: 'manual override',
-                        },
+                        // #244: Only skip preflight idle gate for manual/test triggers.
+                        // Automatic triggers must go through normal idle check.
+                        ...(((options.metadata as Record<string, unknown> | undefined)?.triggerSource === 'manual' ||
+                            (options.metadata as Record<string, unknown> | undefined)?.triggerSource === 'test')
+                          ? {
+                              idleCheckOverride: {
+                                  isIdle: true,
+                                  mostRecentActivityAt: Date.now() - 1800000,
+                                  idleForMs: 1800000,
+                                  userActiveSessions: 0,
+                                  abandonedSessionIds: [],
+                                  trajectoryGuardrailConfirmsIdle: true,
+                                  reason: 'manual/test override',
+                              },
+                            }
+                          : {}),
                         // Skip Selector if principleId and snapshot are provided
                         ...(principleId && snapshot ? {
                             principleIdOverride: principleId,

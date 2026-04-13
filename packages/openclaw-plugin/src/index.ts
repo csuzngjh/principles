@@ -125,13 +125,15 @@ function resolveCommandWorkspaceDirStrict(
 
 /**
  * Extract agentId from sessionKey format: "agent:{agentId}:..."
- * Falls back to 'main' if sessionKey is missing or malformed.
+ * Falls back to 'main' if sessionKey is missing, malformed, or has whitespace-only agentId.
  */
 function extractAgentIdFromSessionKey(sessionKey: string | undefined): string {
   if (!sessionKey) return 'main';
   // Format: agent:{agentId}:{rest}
   const match = /^agent:([^:]+):/.exec(sessionKey);
-  return match ? match[1] : 'main';
+  if (!match) return 'main';
+  const agentId = match[1].trim();
+  return agentId || 'main';
 }
 
 function resolveToolHookWorkspaceDirSafe(
@@ -440,7 +442,7 @@ const plugin = {
         return handlePdReflect.handler({ ...ctx, api, workspaceDir } as any);
       } catch (err) {
         api.logger.error(`[PD:pd-reflect] Command failed: ${String(err)}`);
-        return { text: language === 'zh' ? `命令执行失败: ${String(err)}` : `Command failed: ${String(err)}` };
+        return { text: language === 'zh' ? '命令执行失败，请查看日志。' : 'Command failed. Check logs.' };
       }
     });
     registerCommandWithAlias('pd-daily', 'pdd', getCommandDescription('pd-daily', language), () => ({
