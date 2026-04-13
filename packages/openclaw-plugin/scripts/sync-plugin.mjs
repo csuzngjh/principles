@@ -372,6 +372,7 @@ function verifyBundleContents() {
         { name: 'EvolutionWorkerService', reason: 'main plugin service export' },
         { name: 'checkPainFlag',          reason: 'pain flag detection' },
         { name: 'processEvolutionQueue',  reason: 'queue processing' },
+        { name: 'acquireQueueLock',       reason: 'queue lock for pd-reflect and worker' },
     ];
 
     const missing = [];
