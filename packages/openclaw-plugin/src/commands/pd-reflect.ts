@@ -5,7 +5,7 @@
  * This command must operate on an explicitly resolved active workspace.
  */
 
-import { PluginCommandDefinition, PluginCommandContext, PluginCommandResult, OpenClawPluginApi } from '../openclaw-sdk.js';
+import type { PluginCommandDefinition, PluginCommandContext, PluginCommandResult, OpenClawPluginApi } from '../openclaw-sdk.js';
 import { acquireQueueLock, EVOLUTION_QUEUE_LOCK_SUFFIX } from '../service/evolution-worker.js';
 import * as fs from 'fs';
 import * as path from 'path';

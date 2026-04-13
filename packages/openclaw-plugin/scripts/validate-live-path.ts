@@ -20,6 +20,7 @@
  *   WORKSPACE_DIR - Optional workspace directory (defaults to process.cwd())
  */
 
+import * as Database from 'better-sqlite3';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -33,7 +34,6 @@ const LOCK_STALE_MS = 30_000;
 const WORKSPACE_DIR = process.env.WORKSPACE_DIR || process.cwd();
 const STATE_DIR = path.join(WORKSPACE_DIR, '.state');
 const QUEUE_PATH = path.join(STATE_DIR, 'EVOLUTION_QUEUE');
-const QUEUE_LOCK_PATH = QUEUE_PATH + LOCK_SUFFIX;
 const LEDGER_PATH = path.join(STATE_DIR, 'principle_training_state.json');
 const DB_PATH = path.join(STATE_DIR, 'subagent_workflows.db');
 
@@ -80,17 +80,14 @@ async function acquireLockAsync(filePath: string, options: {
   baseRetryDelayMs?: number;
   lockStaleMs?: number;
 } = {}): Promise<LockContext> {
-  const opts = {
-    lockSuffix: LOCK_SUFFIX,
-    maxRetries: LOCK_MAX_RETRIES,
-    baseRetryDelayMs: LOCK_RETRY_DELAY_MS,
-    lockStaleMs: LOCK_STALE_MS,
-    ...options,
-  };
+  const lockSuffix = options.lockSuffix ?? LOCK_SUFFIX;
+  const maxRetries = options.maxRetries ?? LOCK_MAX_RETRIES;
+  const baseRetryDelayMs = options.baseRetryDelayMs ?? LOCK_RETRY_DELAY_MS;
+  const lockStaleMs = options.lockStaleMs ?? LOCK_STALE_MS;
   const { pid } = process;
-  const lockPath = filePath + opts.lockSuffix;
+  const lockPath = filePath + lockSuffix;
 
-  for (let attempt = 0; attempt < opts.maxRetries!; attempt++) {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
       // Check if lock file exists and is stale
       if (fs.existsSync(lockPath)) {
@@ -100,11 +97,11 @@ async function acquireLockAsync(filePath: string, options: {
         const lockAge = Date.now() - lockStats.mtimeMs;
 
         // Clean up stale lock
-        if (lockAge > opts.lockStaleMs!) {
+        if (lockAge > lockStaleMs) {
           fs.unlinkSync(lockPath);
         } else if (lockPid !== pid) {
           // Lock held by another process
-          await new Promise(resolve => setTimeout(resolve, opts.baseRetryDelayMs!));
+          await new Promise(resolve => setTimeout(resolve, baseRetryDelayMs));
           continue;
         }
       }
@@ -125,17 +122,20 @@ async function acquireLockAsync(filePath: string, options: {
         },
       };
     } catch (error: unknown) {
-      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-        if (attempt < opts.maxRetries! - 1) {
-          await new Promise(resolve => setTimeout(resolve, opts.baseRetryDelayMs!));
+      const err = error as { code?: string };
+      if (err.code === 'EEXIST') {
+        if (attempt < maxRetries - 1) {
+          await new Promise(resolve => setTimeout(resolve, baseRetryDelayMs));
           continue;
         }
       }
-      throw new Error(`Failed to acquire lock for ${filePath}: ${String(error)}`);
+      const lockError = new Error(`Failed to acquire lock for ${filePath}: ${String(error)}`);
+      lockError.cause = error;
+      throw lockError;
     }
   }
 
-  throw new Error(`Failed to acquire lock for ${filePath} after ${opts.maxRetries} attempts`);
+  throw new Error(`Failed to acquire lock for ${filePath} after ${maxRetries} attempts`);
 }
 
 function releaseLock(ctx: LockContext): void {
@@ -225,7 +225,6 @@ function listNocturnalWorkflows(): WorkflowRow[] {
     return [];
   }
 
-  const Database = require('better-sqlite3');
   const db = new Database(DB_PATH, { readonly: true });
   const rows = db.prepare(`
     SELECT workflow_id, workflow_type, state, metadata_json, created_at
@@ -279,6 +278,7 @@ async function main() {
   const verbose = process.argv.includes('--verbose');
 
   // 1. Check bootstrapped rules
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let rules: LedgerRule[];
   try {
     rules = loadBootstrappedRules();

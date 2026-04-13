@@ -366,7 +366,7 @@ export async function handleBeforePromptBuild(
   // prependContext: Only short dynamic directives: evolutionDirective + heartbeat
 
    
-  let prependSystemContext = '';
+  let prependSystemContext: string;
   let prependContext = '';
   let appendSystemContext = '';
 
@@ -648,7 +648,7 @@ ACTION: Run self-audit. If stable, reply ONLY with "HEARTBEAT_OK".
 
   // ──── 6. Dynamic Attitude Matrix (based on GFI) ────
    
-  let attitudeDirective = '';
+  let attitudeDirective: string;
   const currentGfi = session?.currentGfi || 0;
   
   if (currentGfi >= 70) {

@@ -30,6 +30,7 @@ import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.
 import {
   type TrainerBackendKind,
   type HardwareTier,
+  type TrainingExperimentResult,
 } from '../core/external-training-contract.js';
 import {
   TrainingProgram,
@@ -270,14 +271,11 @@ Hardware tiers:
       // This closes the gap in the create-experiment -> trainer -> import-result chain.
       // NOTE: This blocks until training completes (could be minutes).
       if (runNow) {
-         
-        const {spec} = createResult;
         const baseDir = TRAINER_SCRIPTS_DIR;
         const scriptPath = path.join(baseDir, 'main.py');
         const specPath = path.join(baseDir, `experiment-${spec.experimentId}.json`);
-         
-        const {outputDir} = spec;
-        const resultFilePath = path.join(outputDir, `result-${spec.experimentId}.json`);
+
+        const resultFilePath = path.join(spec.outputDir, `result-${spec.experimentId}.json`);
 
         // Write spec file
         const specDir = path.dirname(specPath);
@@ -287,7 +285,7 @@ Hardware tiers:
         fs.writeFileSync(specPath, JSON.stringify(spec, null, 2), 'utf-8');
 
          
-        let trainerResult!: import('../core/external-training-contract.js').TrainingExperimentResult;
+        let trainerResult!: TrainingExperimentResult;
 
         try {
           if (spec.backend === 'dry-run') {
