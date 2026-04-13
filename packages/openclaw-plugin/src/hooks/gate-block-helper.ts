@@ -118,23 +118,23 @@ export function recordGateBlockAndReturn(
         source: 'gate_blocked',
         score: GATE_BLOCK_PAIN_SCORE,
         reason,
-        sessionId,
       });
 
       // Write to pain flag file (merge with existing if present)
       try {
-        const stateDir = wctx.stateDir;
-        const currentFlag = wctx.eventLog.getActivePainFlag?.(sessionId);
-        if (!currentFlag || currentFlag.score < GATE_BLOCK_PAIN_SCORE) {
+        const workspaceDir = wctx.workspaceDir;
+        const currentFlag = wctx.eventLog.findLatestPainSignal?.(sessionId);
+        const currentScore = currentFlag?.score ?? 0;
+        if (currentScore < GATE_BLOCK_PAIN_SCORE) {
           const flag = buildPainFlag({
             source: 'gate_blocked',
-            score: GATE_BLOCK_PAIN_SCORE,
+            score: String(GATE_BLOCK_PAIN_SCORE),
             reason: `Gate blocked: ${reason}`,
-            sessionId,
-            agentId: 'main',
-            isRisky: false,
+            session_id: sessionId,
+            agent_id: 'main',
+            is_risky: false,
           });
-          writePainFlag(stateDir, flag);
+          writePainFlag(workspaceDir, flag);
         }
       } catch (flagErr) {
         logWarn(`[PD_GATE] Failed to update pain flag for gate block: ${String(flagErr)}`);

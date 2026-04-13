@@ -275,7 +275,7 @@ export interface NocturnalServiceOptions {
  */
 function invokeStubReflector(
   snapshot: NocturnalSessionSnapshot,
-  principleId
+  principleId: string
 ): string {
   const artifactId = randomUUID();
   const now = new Date().toISOString();
