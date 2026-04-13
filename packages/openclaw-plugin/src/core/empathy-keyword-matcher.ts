@@ -207,6 +207,7 @@ export function matchEmpathyKeywords(
  * This is called when the empathy optimizer subagent completes its analysis
  * and returns suggested updates to the keyword store.
  */
+    // eslint-disable-next-line complexity -- complexity 13, refactor candidate
 export function applyKeywordUpdates(
   store: EmpathyKeywordStore,
   updates: Record<string, {

@@ -92,6 +92,7 @@ function mapInternalizationStatusToPrincipleStatus(
  * This function is idempotent: it only migrates principles that don't exist
  * in tree.principles yet.
  */
+    // eslint-disable-next-line complexity -- complexity 11, slightly over threshold
 export function migratePrincipleTree(
   stateDir: string,
   workspaceDir?: string

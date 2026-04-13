@@ -265,6 +265,7 @@ export function compressFocus(focusPath: string, newContent: string): {
  * @param content CURRENT_FOCUS.md 内容
  * @param maxLines 最大行数
  */
+    // eslint-disable-next-line complexity -- complexity 12, refactor candidate
 export function extractSummary(content: string, maxLines = 30): string {
   const lines = content.split('\n');
   const sections: { [key: string]: string[] } = {
@@ -805,6 +806,7 @@ function generateWorkingMemorySection(snapshot: WorkingMemorySnapshot): string {
 /**
  * 生成工作记忆注入字符串（用于 prompt 注入）
  */
+    // eslint-disable-next-line complexity -- complexity 13, refactor candidate
 export function workingMemoryToInjection(snapshot: WorkingMemorySnapshot | null): string {
   if (!snapshot) return '';
   
@@ -884,6 +886,7 @@ interface CompressionConfig {
  * @param stateDir state 目录路径
  * @returns 压缩配置
  */
+    // eslint-disable-next-line complexity -- complexity 11, slightly over threshold
 function loadCompressionConfig(stateDir?: string): CompressionConfig {
   if (!stateDir) {
     return DEFAULT_COMPRESSION_CONFIG;

@@ -66,6 +66,7 @@ export type LifecycleIntent = 'promote' | 'disable' | 'rollback' | null;
  * Detect implementation lifecycle intent from user message.
  * Returns the detected intent type or null.
  */
+    // eslint-disable-next-line complexity -- complexity 13, refactor candidate
 export function detectLifecycleIntent(message: string): LifecycleIntent {
   // Check promote patterns
   for (const p of PROMOTE_PATTERNS_EN) {

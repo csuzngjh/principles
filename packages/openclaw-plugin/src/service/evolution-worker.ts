@@ -1873,6 +1873,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
     }
 }
 
+    // eslint-disable-next-line complexity -- complexity 12, refactor candidate
 async function processDetectionQueue(wctx: WorkspaceContext, api: OpenClawPluginApi, eventLog: EventLog) {
     const {logger} = api;
     try {

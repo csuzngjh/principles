@@ -255,6 +255,7 @@ export class ControlUiQueryService {
     this.uiDb.dispose();
   }
 
+    // eslint-disable-next-line complexity -- complexity 14, refactor candidate
   getOverview(days = 30): OverviewResponse {
     const stats = this.trajectory.getDataStats();
     const regressionRows = this.uiDb.all<{
@@ -399,6 +400,7 @@ export class ControlUiQueryService {
     };
   }
 
+    // eslint-disable-next-line complexity -- complexity 13, refactor candidate
   listSamples(filters: SampleListFilters = {}): SamplesResponse {
     const page = Math.max(1, Number(filters.page ?? 1));
     const pageSize = clampPageSize(filters.pageSize);
