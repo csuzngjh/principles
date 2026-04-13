@@ -25,7 +25,7 @@ function createWorkflowManagerForType(
         warn: (m: string) => logger.warn(String(m)),
         error: (m: string) => logger.error(String(m)),
          
-        debug: () => {},
+        debug: () => { /* no-op */ },
     } as unknown as PluginLogger;
 
     switch (workflowType) {
