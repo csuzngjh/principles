@@ -115,7 +115,7 @@ export class EventLog {
     data: object
   ): void {
     const now = new Date();
-    const date = this.formatDate(now);
+    const date = EventLog.formatDate(now);
     
     const entry: EventLogEntry = {
       ts: now.toISOString(),
@@ -135,7 +135,7 @@ export class EventLog {
   }
 
    
-  private formatDate(date: Date): string {
+  private static formatDate(date: Date): string {
     return date.toISOString().split('T')[0];
   }
 
@@ -244,7 +244,7 @@ export class EventLog {
   }
 
    
-  private getEventDedupKey(entry: EventLogEntry): string {
+  private static getEventDedupKey(entry: EventLogEntry): string {
     const eventId = typeof (entry.data as { eventId?: unknown } | undefined)?.eventId === 'string'
       ? String((entry.data as { eventId?: string }).eventId)
       : null;
@@ -290,7 +290,7 @@ export class EventLog {
   private getMergedEvents(): EventLogEntry[] {
     const merged = new Map<string, EventLogEntry>();
     for (const entry of [...this.readPersistedEvents(), ...this.getBufferedEvents()]) {
-      merged.set(this.getEventDedupKey(entry), entry);
+      merged.set(EventLog.getEventDedupKey(entry), entry);
     }
     return [...merged.values()].sort((a, b) => a.ts.localeCompare(b.ts));
   }
@@ -342,7 +342,7 @@ export class EventLog {
    */
   getEmpathyStats(range: 'today' | 'week' | 'session', sessionId?: string): EmpathyEventStats {
     const now = new Date();
-    const today = this.formatDate(now);
+    const today = EventLog.formatDate(now);
 
     // Aggregate stats based on range
     const result: EmpathyEventStats = {
@@ -368,7 +368,7 @@ export class EventLog {
       for (let i = 0; i < 7; i++) {
         const date = new Date(now);
         date.setDate(date.getDate() - i);
-        const dateStr = this.formatDate(date);
+        const dateStr = EventLog.formatDate(date);
         const stats = this.getDailyStats(dateStr);
 
         result.totalEvents += stats.empathy.totalEvents;

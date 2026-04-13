@@ -45,7 +45,7 @@ Usage:
     }
 
      
-    let eventId = '' as string | null;
+    let eventId: string | null;
      
     const _triggerMethod = 'user_command' as const;
 

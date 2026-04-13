@@ -30,7 +30,7 @@ export function handleSamplesCommand(ctx: PluginCommandContext): PluginCommandRe
     const normalizedDecision = decision === 'approve' ? 'approved' : 'rejected';
     const note = noteParts.join(' ').trim();
      
-    let record = null;
+    let record: Awaited<ReturnType<typeof wctx.trajectory.reviewCorrectionSample>>;
     try {
       record = wctx.trajectory.reviewCorrectionSample(sampleId, normalizedDecision, note);
     /* eslint-disable @typescript-eslint/no-unused-vars -- Reason: error handling only - returning failure response */

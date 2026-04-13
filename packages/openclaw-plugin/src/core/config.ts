@@ -241,7 +241,7 @@ export class PainConfig {
             try {
                 const loaded = JSON.parse(fs.readFileSync(this.filePath, 'utf8'));
                 this.settings = this.deepMerge(DEFAULT_SETTINGS, loaded);
-                this.validate(this.settings);
+                PainConfig.validate(this.settings);
             } catch {
                 console.error('[PD] Failed to parse pain_settings.json, using defaults.');
             }
@@ -291,7 +291,7 @@ export class PainConfig {
      * Basic validation for critical settings
      */
      
-    private validate(settings: PainSettings): void {
+    private static validate(settings: PainSettings): void {
         // Ensure intervals are positive
         if (settings.intervals.worker_poll_ms < 1000) settings.intervals.worker_poll_ms = 15 * 60 * 1000;
     }

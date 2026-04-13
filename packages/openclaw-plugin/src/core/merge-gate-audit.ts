@@ -342,14 +342,14 @@ function hasValidEvidenceSummary(parsed: unknown): boolean {
  * Validate a single replay report file and return its category.
  */
 function validateSingleReplayReport(reportPath: string): ReplayValidationCategory {
-  let rawContent = '' as string;
+  let rawContent: string;
   try {
     rawContent = fs.readFileSync(reportPath, 'utf-8');
   } catch {
     return 'io_error';
   }
 
-  let parsed = null as unknown;
+  let parsed: unknown;
   try {
     parsed = JSON.parse(rawContent);
   } catch {
