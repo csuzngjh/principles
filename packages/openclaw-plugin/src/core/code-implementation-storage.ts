@@ -135,6 +135,7 @@ export function writeManifest(
 }
 
  
+// eslint-disable-next-line @typescript-eslint/max-params
 export function writeEntrySource(
   stateDir: string,
   implId: string,
@@ -190,6 +191,7 @@ export function loadEntrySource(stateDir: string, implId: string): string | null
  * Idempotent: calling again with the same implId will NOT overwrite an existing entry.js.
  */
  
+// eslint-disable-next-line @typescript-eslint/max-params
 export function createImplementationAssetDir(
   stateDir: string,
   implId: string,

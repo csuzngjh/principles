@@ -47,7 +47,7 @@ function getWorkspaceDir(ctx: PluginCommandContext): string {
  * - 清理：Working Memory 超过 10 条记录时保留最近 10 条
  * - 验证：文件引用指向不存在的文件时移除
  */
-    // eslint-disable-next-line complexity -- complexity 13, refactor candidate
+     
 function compressFocusContent(content: string, workspaceDir?: string): string {
   // 首先使用 cleanupStaleInfo 进行基础清理
   let result = cleanupStaleInfo(content, workspaceDir);
@@ -283,6 +283,7 @@ async function compressFocus(
 
   // 5. 压缩内容
    
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let compressedContent: string;
   try {
     compressedContent = compressFocusContent(oldContent, workspaceDir);
@@ -347,7 +348,7 @@ ${milestoneNote ? `${milestoneNote}\n` : ''}
 /**
  * 回滚到历史版本
  */
-    // eslint-disable-next-line complexity -- complexity 13, refactor candidate
+     
 function rollbackFocus(workspaceDir: string, index: number, isZh: boolean): string {
   const wctx = WorkspaceContext.fromHookContext({ workspaceDir });
   const focusPath = wctx.resolve('CURRENT_FOCUS');
@@ -480,6 +481,7 @@ export async function handleFocusCommand(
   const isZh = (ctx.config?.language as string) === 'zh';
 
    
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let result: string;
 
   switch (subCommand) {

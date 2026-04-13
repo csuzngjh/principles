@@ -285,7 +285,7 @@ export interface ValidationResult {
  * @param result - The trainer result to validate
  * @returns ValidationResult indicating pass/fail and any errors
  */
-    // eslint-disable-next-line complexity -- complexity 11, slightly over threshold
+     
 export function validateTrainerResult(
   spec: TrainingExperimentSpec,
   result: TrainingExperimentResult
@@ -405,6 +405,7 @@ export function computeConfigFingerprint(config: Partial<TrainingHyperparameters
  */
 export function computeDatasetFingerprint(exportPath: string, sampleCount: number): string {
    
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let contentHash: string;
   try {
     const content = fs.readFileSync(exportPath, 'utf-8');

@@ -78,6 +78,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
  
+// eslint-disable-next-line @typescript-eslint/max-params
 function clampFloat(value: unknown, min: number, max: number, fallback: number): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     return fallback;
@@ -86,6 +87,7 @@ function clampFloat(value: unknown, min: number, max: number, fallback: number):
 }
 
  
+// eslint-disable-next-line @typescript-eslint/max-params
 function clampInt(value: unknown, min: number, max: number, fallback: number): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     return fallback;
@@ -318,6 +320,7 @@ function writeLedgerUnlocked(filePath: string, store: HybridLedgerStore): void {
  
 function mutateLedger<T>(stateDir: string, mutate: (store: HybridLedgerStore) => T): T {
    
+  // eslint-disable-next-line @typescript-eslint/no-use-before-define
   const filePath = getLedgerFilePath(stateDir);
   return withLock(filePath, () => {
     const store = readLedgerFromFile(filePath);
@@ -330,6 +333,7 @@ function mutateLedger<T>(stateDir: string, mutate: (store: HybridLedgerStore) =>
  
 async function mutateLedgerAsync<T>(stateDir: string, mutate: (store: HybridLedgerStore) => Promise<T>): Promise<T> {
    
+  // eslint-disable-next-line @typescript-eslint/no-use-before-define
   const filePath = getLedgerFilePath(stateDir);
   return withLockAsync(filePath, async () => {
     const store = readLedgerFromFile(filePath);

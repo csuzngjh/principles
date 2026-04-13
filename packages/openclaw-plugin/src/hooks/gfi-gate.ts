@@ -48,6 +48,7 @@ export interface GfiGateConfig {
  * Internal helper to call the shared block helper with gfi-gate source tag.
  */
  
+// eslint-disable-next-line @typescript-eslint/max-params
 function block(
   wctx: WorkspaceContext,
   filePath: string,
@@ -69,6 +70,7 @@ function block(
 }
 
  
+// eslint-disable-next-line @typescript-eslint/max-params
 export function checkGfiGate(
   event: PluginHookBeforeToolCallEvent,
   wctx: WorkspaceContext,

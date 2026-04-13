@@ -98,6 +98,7 @@ export function validatePainFlag(data: Record<string, string>): string[] {
   return missing;
 }
 
+// eslint-disable-next-line @typescript-eslint/max-params
 export function computePainScore(rc: number, isSpiral: boolean, missingTestCommand: boolean, softScore: number, projectDir?: string): number {
   let score = Math.max(0, softScore || 0);
   
@@ -211,6 +212,7 @@ export function readPainFlagData(projectDir: string): Record<string, string> {
 
     // Detect JSON format (wrong — should be KV)
     if (content.startsWith('{')) {
+      // eslint-disable-next-line @typescript-eslint/init-declarations
       let json: Record<string, unknown>;
       try {
         json = JSON.parse(content);
@@ -279,7 +281,7 @@ export function readPainFlagContract(projectDir: string): PainFlagContractResult
  * Errors are silently ignored to avoid disrupting the pain pipeline.
  */
  
-    // eslint-disable-next-line complexity -- complexity 12, refactor candidate
+    // eslint-disable-next-line @typescript-eslint/max-params -- complexity 12, refactor candidate
 export function trackPrincipleValue(
   workspaceDir: string,
   painData: { reason?: string; source?: string; score?: string },
