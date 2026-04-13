@@ -57,6 +57,7 @@ import { ensureWorkspaceTemplates } from './core/init.js';
 import { migrateDirectoryStructure } from './core/migration.js';
 import { SystemLogger } from './core/system-logger.js';
 import { createDeepReflectTool } from './tools/deep-reflect.js';
+import { createWritePainFlagTool } from './tools/write-pain-flag.js';
 import { PathResolver, resolveWorkspaceDirFromApi } from './core/path-resolver.js';
 import { validateWorkspaceDir } from './core/workspace-dir-validation.js';
 import { resolveRequiredWorkspaceDir, resolveWorkspaceDir, type WorkspaceResolutionContext } from './core/workspace-dir-service.js';
@@ -773,6 +774,7 @@ const plugin = {
     });
 
     api.registerTool(createDeepReflectTool(api));
+    api.registerTool(createWritePainFlagTool(api));
   }
 };
 
