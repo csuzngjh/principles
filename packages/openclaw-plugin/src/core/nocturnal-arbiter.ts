@@ -287,7 +287,7 @@ export function validatePhilosopherOutput(output: unknown): TrinityStageValidati
     // Check ranks are unique and sequential (1, 2, 3...)
     const ranks = (obj.judgments as Record<string, unknown>[])
       .map((j) => j.rank)
-      .filter((r) => typeof r === 'number')
+      .filter((r): r is number => typeof r === 'number')
       .sort((a, b) => a - b);
     for (let i = 0; i < ranks.length; i++) {
       if (ranks[i] !== i + 1) {

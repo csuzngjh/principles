@@ -11,7 +11,7 @@ function safeLog(
 ): void {
     try {
         if (api?.logger && typeof api.logger[level] === 'function') {
-            api.logger[level](message);
+            api.logger[level]!(message);
         }
     } catch {
         // Ignore logging errors
