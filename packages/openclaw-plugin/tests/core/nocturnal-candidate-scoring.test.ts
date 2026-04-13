@@ -5,6 +5,7 @@ import {
   rankCandidates,
   runTournament,
   DEFAULT_SCORING_WEIGHTS,
+  validateCandidateDiversity,
 } from '../../src/core/nocturnal-candidate-scoring.js';
 import type { DreamerCandidate, PhilosopherJudgment } from '../../src/core/nocturnal-trinity.js';
 import type { ThresholdValues } from '../../src/core/adaptive-thresholds.js';
@@ -396,5 +397,136 @@ describe('DEFAULT_SCORING_WEIGHTS', () => {
       expect(weight).toBeGreaterThanOrEqual(0);
       expect(weight).toBeLessThanOrEqual(1);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: validateCandidateDiversity
+// ---------------------------------------------------------------------------
+
+describe('validateCandidateDiversity', () => {
+  it('passes when candidates have 2+ distinct risk levels and low keyword overlap', () => {
+    const candidates: DreamerCandidate[] = [
+      makeCandidate({ candidateIndex: 0, riskLevel: 'low', betterDecision: 'Read config.json to verify settings' }),
+      makeCandidate({ candidateIndex: 1, riskLevel: 'high', betterDecision: 'Refactor the entire authentication module from scratch' }),
+    ];
+    const result = validateCandidateDiversity(candidates);
+    expect(result.diversityCheckPassed).toBe(true);
+    expect(result.riskLevelDiversity).toBe(true);
+    expect(result.keywordOverlapPassed).toBe(true);
+  });
+
+  it('fails when all candidates have the same risk level', () => {
+    const candidates: DreamerCandidate[] = [
+      makeCandidate({ candidateIndex: 0, riskLevel: 'low', betterDecision: 'Read file A to check settings' }),
+      makeCandidate({ candidateIndex: 1, riskLevel: 'low', betterDecision: 'Review file completely different approach' }),
+      makeCandidate({ candidateIndex: 2, riskLevel: 'low', betterDecision: 'Inspect another unique diagnostic method' }),
+    ];
+    const result = validateCandidateDiversity(candidates);
+    expect(result.diversityCheckPassed).toBe(false);
+    expect(result.riskLevelDiversity).toBe(false);
+  });
+
+  it('fails when candidate pair has keyword overlap > 0.8', () => {
+    const candidates: DreamerCandidate[] = [
+      makeCandidate({ candidateIndex: 0, riskLevel: 'low', betterDecision: 'Review the authentication configuration file before making any changes to the system' }),
+      makeCandidate({ candidateIndex: 1, riskLevel: 'high', betterDecision: 'Review the authentication configuration file before making any changes to the system' }),
+    ];
+    const result = validateCandidateDiversity(candidates);
+    expect(result.diversityCheckPassed).toBe(false);
+    expect(result.keywordOverlapPassed).toBe(false);
+    expect(result.maxOverlapScore).toBeGreaterThan(0.8);
+  });
+
+  it('passes for single candidate', () => {
+    const candidates: DreamerCandidate[] = [
+      makeCandidate({ candidateIndex: 0, riskLevel: 'low' }),
+    ];
+    const result = validateCandidateDiversity(candidates);
+    expect(result.diversityCheckPassed).toBe(true);
+    expect(result.details).toContain('Single candidate');
+  });
+
+  it('passes for empty array', () => {
+    const result = validateCandidateDiversity([]);
+    expect(result.diversityCheckPassed).toBe(true);
+    expect(result.details).toContain('No candidates');
+  });
+
+  it('passes when candidates lack riskLevel (graceful degradation)', () => {
+    const candidates: DreamerCandidate[] = [
+      makeCandidate({ candidateIndex: 0, betterDecision: 'Read config.json to verify settings' }),
+      makeCandidate({ candidateIndex: 1, betterDecision: 'Refactor the entire authentication module from scratch' }),
+    ];
+    // No riskLevel on any candidate - should pass (no risk levels to check)
+    const result = validateCandidateDiversity(candidates);
+    expect(result.diversityCheckPassed).toBe(true);
+    expect(result.riskLevelDiversity).toBe(true);
+  });
+
+  it('fails when some candidates have riskLevel but fewer than 2 distinct values', () => {
+    const candidates: DreamerCandidate[] = [
+      makeCandidate({ candidateIndex: 0, riskLevel: 'medium', betterDecision: 'Read config.json to verify settings' }),
+      makeCandidate({ candidateIndex: 1, betterDecision: 'Refactor the entire authentication module from scratch' }),
+    ];
+    // Only 1 candidate has riskLevel, so only 1 distinct value → fail
+    const result = validateCandidateDiversity(candidates);
+    expect(result.diversityCheckPassed).toBe(false);
+    expect(result.riskLevelDiversity).toBe(false);
+  });
+
+  it('uses max(|A|, |B|) as denominator for keyword overlap', () => {
+    // Short text A, long text B - overlap should use max as denominator
+    const candidates: DreamerCandidate[] = [
+      makeCandidate({ candidateIndex: 0, riskLevel: 'low', betterDecision: 'review authentication configuration' }),
+      makeCandidate({ candidateIndex: 1, riskLevel: 'high', betterDecision: 'review authentication configuration before proceeding with changes to the deployment pipeline infrastructure' }),
+    ];
+    const result = validateCandidateDiversity(candidates);
+    // "review", "authentication", "configuration" overlap in both
+    // Set A = {review, authentication, configuration} = 3
+    // Set B = {review, authentication, configuration, before, proceeding, with, changes, deployment, pipeline, infrastructure} = 10
+    // intersection = 3, max(3, 10) = 10, overlap = 3/10 = 0.3
+    expect(result.maxOverlapScore).toBeLessThanOrEqual(0.4);
+  });
+
+  it('ignores words <= 3 characters in keyword overlap', () => {
+    const candidates: DreamerCandidate[] = [
+      makeCandidate({ candidateIndex: 0, riskLevel: 'low', betterDecision: 'the and but for' }),
+      makeCandidate({ candidateIndex: 1, riskLevel: 'high', betterDecision: 'the and but for' }),
+    ];
+    // All words are <= 3 chars, so no keywords extracted → overlap = 0
+    const result = validateCandidateDiversity(candidates);
+    expect(result.keywordOverlapPassed).toBe(true);
+    expect(result.maxOverlapScore).toBe(0);
+  });
+
+  it('never throws on malformed input', () => {
+    // Undefined candidates
+    expect(() => validateCandidateDiversity(undefined as unknown as DreamerCandidate[])).not.toThrow();
+    // Null candidates
+    expect(() => validateCandidateDiversity(null as unknown as DreamerCandidate[])).not.toThrow();
+    // Candidates with undefined fields
+    expect(() => validateCandidateDiversity([
+      { candidateIndex: 0 } as DreamerCandidate,
+    ])).not.toThrow();
+    // Mixed valid and malformed
+    expect(() => validateCandidateDiversity([
+      makeCandidate({ candidateIndex: 0, riskLevel: 'low' }),
+      { candidateIndex: 1 } as DreamerCandidate,
+    ])).not.toThrow();
+  });
+
+  it('returns correct maxOverlapScore rounded to 2 decimal places', () => {
+    const candidates: DreamerCandidate[] = [
+      makeCandidate({ candidateIndex: 0, riskLevel: 'low', betterDecision: 'Review configuration settings before deployment' }),
+      makeCandidate({ candidateIndex: 1, riskLevel: 'high', betterDecision: 'Review configuration settings before deployment testing' }),
+    ];
+    const result = validateCandidateDiversity(candidates);
+    // Verify the maxOverlapScore is a number with at most 2 decimal places
+    const decimalPart = result.maxOverlapScore.toString().split('.')[1];
+    if (decimalPart) {
+      expect(decimalPart.length).toBeLessThanOrEqual(2);
+    }
+    expect(typeof result.maxOverlapScore).toBe('number');
   });
 });

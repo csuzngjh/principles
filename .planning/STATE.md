@@ -1,10 +1,10 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.15
-milestone_name: milestone
-status: in_progress
-last_updated: "2026-04-12T08:46:00.000Z"
-last_activity: 2026-04-12
+milestone: v1.16
+milestone_name: Trinity Training Trajectory Quality Enhancement
+status: complete
+last_updated: "2026-04-13T08:15:46.014Z"
+last_activity: 2026-04-13
 progress:
   total_phases: 4
   completed_phases: 4
@@ -13,59 +13,31 @@ progress:
   percent: 100
 ---
 
-# State: v1.15 Runtime & Truth Contract Hardening
+# State: v1.16 Trinity Training Trajectory Quality Enhancement
 
 ## Project Reference
 
 See `.planning/PROJECT.md` (updated 2026-04-12)
 
-**Milestone:** v1.15
-**Name:** Runtime & Truth Contract Hardening
+**Milestone:** v1.16
+**Name:** Trinity Training Trajectory Quality Enhancement
 **Core Value:** AI agents improve their own behavior through a structured evolution loop. pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
-**Current Focus:** Milestone wrap-up - merge audit result is defer pending persisted evidence
+**Current Focus:** v1.16 milestone complete — all 4 phases (34-37) finished
 
-## Previous Milestone (v1.14 baseline)
+## Previous Milestone (v1.15 baseline)
 
-- **v1.14 BASELINE COMPLETE ON BRANCH:** Evolution worker decomposition finished on `fix/bugs-231-228` / PR #245
-- Structural seams now exist for queue, pain, dispatcher, workflow, context, and fallback audit
-- Remaining work before `main` trust is no longer module decomposition; it is runtime and truth contract hardening on top of that baseline
+- v1.15 Runtime & Truth Contract Hardening complete (4 phases, 7 plans, 100%)
+- Runtime adapters, export/dataset truth semantics, and production invariants hardened
+- Merge audit deferred pending persisted evidence -- not a blocker for v1.16
 
 ## Current Position
 
-Phase: 33
-Plan: Phase 33 complete
-Status: Implementation complete, merge certification deferred by missing evidence
-Last activity: 2026-04-12
+Phase: 37 (complete)
+Plan: 37-01 (complete)
+Status: v1.16 Milestone Complete — 4/4 phases, 7/7 plans
+Last activity: 2026-04-13
 
-Progress: [#####] 100%
-
-## v1.15 Architecture Focus
-
-### Root Problem
-
-- Production failures now come from guessed runtime semantics and overstated exported facts
-- Workspace/path boundaries were only the first layer; runtime adapters and evidence-bearing outputs are still under-contracted
-- The system still risks surviving on logs and fallback behavior instead of explicit machine-checkable invariants
-
-### Hardening Targets
-
-- Runtime adapter boundary for OpenClaw-dependent execution semantics
-- Workspace/session/model/provider ingress contracts before runtime execution
-- Evidence-bound exports and datasets
-- Production invariants and merge-gate verification for the stacked baseline on `fix/bugs-231-228`
-
-### Planned Execution Order
-
-1. Phase 30: Freeze diagnosis into a contract matrix and merge-gate checklist
-2. Phase 31: Harden runtime adapters and add contract tests
-3. Phase 32: Harden export/dataset truth semantics
-4. Phase 33: Verify invariants and certify merge readiness
-
-### Deferred Work
-
-- Broad replay engine contract hardening
-- Dictionary/rule matching contracts
-- UI work and Thinking Models improvements
+Progress: [███████] 100%
 
 ## Accumulated Context
 
@@ -74,25 +46,22 @@ Progress: [#####] 100%
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
-- v1.13: Fail-fast at boundary entry, fail-visible in pipeline middle
-- v1.14: Keep the decomposition baseline; do not throw away PR #245
-- v1.15: Stack the next milestone on top of `fix/bugs-231-228` rather than creating a competing mainline
 - v1.15: Facts for training/promotion must be evidence-backed; unknown stays unknown
+- v1.16: Runtime derivation over snapshot schema change -- no migration risk
+- v1.16: Soft enforcement for Dreamer diversity -- flag not discard
+- v1.16: Deriver module first (leaf, zero dependencies) -> Dreamer -> Philosopher -> Scribe
 
 ### Pending Todos
 
-- Baseline merge-gate fixes on PR #245 are being handled separately and are a dependency for clean merge, but not a blocker for planning v1.15
-- Current audit result is `defer`: core path contracts pass, but local checked state lacks dataset/export/replay evidence needed for a `pass`
+- Merge audit for v1.15 still deferred pending persisted evidence (not blocking v1.16)
 
 ### Blockers/Concerns
 
-- PR #245 still carries known merge-gate defects and is not mergeable yet
-- PR #243 and PR #245 are diverged; new work must stack on top of PR #245 instead of trying to merge both into main independently
-- Local audit does not show new blockers, but it also cannot certify merge safety until persisted evidence surfaces are populated
+- None for v1.16 scope -- all changes are additive and backward compatible
 
 ## Session Continuity
 
-**Previous milestone:** v1.14 baseline complete on branch `fix/bugs-231-228` / PR #245
-**Current milestone:** v1.15 - Runtime & Truth Contract Hardening
-**Just completed:** `Phase 33 production invariants and operator-facing merge audit`
-**Ready for:** evidence collection on a real populated state snapshot, then rerun merge audit
+**Previous milestone:** v1.15 Runtime & Truth Contract Hardening
+**Current milestone:** v1.16 - Trinity Training Trajectory Quality Enhancement
+**Just completed:** Phase 37 — Scribe Contrastive Analysis (v1.16 done)
+**Ready for:** v1.16 merge to main — all 4 phases shipped

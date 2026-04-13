@@ -116,6 +116,23 @@ export const DEFAULT_SCORING_WEIGHTS: ScoringWeights = {
   confidence: 0.15,
 };
 
+/**
+ * Result of diversity validation on Dreamer candidates.
+ * Soft enforcement: result is informational, never gates the pipeline.
+ */
+export interface DiversityValidationResult {
+  /** Whether candidates passed diversity checks */
+  diversityCheckPassed: boolean;
+  /** Whether at least 2 distinct risk levels were present */
+  riskLevelDiversity: boolean;
+  /** Whether no candidate pair exceeded keyword overlap threshold */
+  keywordOverlapPassed: boolean;
+  /** Highest pairwise keyword overlap score (for telemetry) */
+  maxOverlapScore: number;
+  /** Human-readable summary of check results */
+  details: string;
+}
+
 // ---------------------------------------------------------------------------
 // Scoring Logic
 // ---------------------------------------------------------------------------
@@ -230,6 +247,120 @@ export function checkThresholds(
   }
 
   return [failedThresholds.length === 0, failedThresholds];
+}
+
+/**
+ * Validate that Dreamer candidates are strategically diverse.
+ *
+ * DIVER-03: Checks risk level diversity (Set.size >= 2 when candidates >= 2)
+ * and keyword overlap similarity (reject if intersection / max(|A|, |B|) > 0.8
+ * for words > 3 chars per D-05).
+ *
+ * This is SOFT enforcement: returns a result, never throws.
+ * Pipeline continues regardless of diversityCheckPassed value.
+ *
+ * @param candidates - Dreamer candidates to validate
+ * @returns DiversityValidationResult with pass/fail details
+ */
+export function validateCandidateDiversity(
+  candidates: DreamerCandidate[],
+): DiversityValidationResult {
+  // Edge cases: empty, null, or single candidate always passes
+  if (!candidates || candidates.length <= 1) {
+    return {
+      diversityCheckPassed: true,
+      riskLevelDiversity: true,
+      keywordOverlapPassed: true,
+      maxOverlapScore: 0,
+      details: candidates?.length === 1
+        ? 'Single candidate — diversity check not applicable'
+        : 'No candidates to validate',
+    };
+  }
+
+  // Check 1: Risk level diversity (D-05)
+  const riskLevels = new Set(
+    candidates
+      .map(c => c.riskLevel)
+      .filter((r): r is "low" | "medium" | "high" => typeof r === 'string')
+  );
+  // If NO candidates have riskLevel, skip risk diversity check (graceful degradation)
+  const riskLevelDiversity = riskLevels.size === 0 || riskLevels.size >= 2;
+
+  // Check 2: Keyword overlap (D-05: intersection / max(|A|, |B|) for words > 3 chars)
+  let maxOverlapScore = 0;
+  let keywordOverlapPassed = true;
+
+  for (let i = 0; i < candidates.length; i++) {
+    for (let j = i + 1; j < candidates.length; j++) {
+      const overlap = computeKeywordOverlap(
+        candidates[i].betterDecision ?? '',
+        candidates[j].betterDecision ?? '',
+      );
+      if (overlap > maxOverlapScore) {
+        maxOverlapScore = overlap;
+      }
+      if (overlap > 0.8) {
+        keywordOverlapPassed = false;
+      }
+    }
+  }
+
+  const diversityCheckPassed = riskLevelDiversity && keywordOverlapPassed;
+
+  // Build details string
+  const parts: string[] = [];
+  if (!riskLevelDiversity) {
+    parts.push(`Risk levels not diverse (found: ${[...riskLevels].join(', ') || 'none'})`);
+  }
+  if (!keywordOverlapPassed) {
+    parts.push(`Keyword overlap too high (max: ${maxOverlapScore.toFixed(2)})`);
+  }
+
+  return {
+    diversityCheckPassed,
+    riskLevelDiversity,
+    keywordOverlapPassed,
+    maxOverlapScore: Math.round(maxOverlapScore * 100) / 100,
+    details: diversityCheckPassed
+      ? 'Diversity check passed'
+      : parts.join('; '),
+  };
+}
+
+/**
+ * Compute keyword overlap between two strings.
+ * Algorithm: intersection / max(|A|, |B|) for words > 3 chars (per D-05).
+ * Returns value between 0 and 1.
+ */
+function computeKeywordOverlap(textA: string, textB: string): number {
+  const wordsA = extractKeywords(textA);
+  const wordsB = extractKeywords(textB);
+
+  if (wordsA.length === 0 && wordsB.length === 0) return 0;
+  if (wordsA.length === 0 || wordsB.length === 0) return 0;
+
+  const setA = new Set(wordsA);
+  const setB = new Set(wordsB);
+
+  let intersection = 0;
+  for (const word of setA) {
+    if (setB.has(word)) intersection++;
+  }
+
+  const denominator = Math.max(setA.size, setB.size);
+  return denominator === 0 ? 0 : intersection / denominator;
+}
+
+/**
+ * Extract keywords from text: words > 3 characters, lowercased.
+ */
+function extractKeywords(text: string): string[] {
+  if (!text) return [];
+  return text
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(w => w.length > 3);
 }
 
 /**
