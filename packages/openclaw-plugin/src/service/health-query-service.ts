@@ -994,7 +994,7 @@ export class HealthQueryService {
    * Read the most recent session JSON file from disk.
    * Used to sync GFI from session-tracker's persistence into SQLite.
    */
-        // eslint-disable-next-line complexity -- complexity 11, slightly over threshold
+    // eslint-disable-next-line complexity -- complexity 11, slightly over threshold
   private readLatestSessionFromFile(): SessionState | null {
     const sessionsDir = path.join(this.stateDir, 'sessions');
     if (!fs.existsSync(sessionsDir)) {

@@ -362,7 +362,7 @@ export class RuntimeSummaryService {
     return { session: sessions[0], reason: 'latest_active' };
   }
 
-        // eslint-disable-next-line complexity -- complexity 11, slightly over threshold
+    // eslint-disable-next-line complexity -- complexity 11, slightly over threshold
   private static mergeSessionSnapshots(
     persistedSessions: PersistedSessionState[],
     workspaceDir: string
@@ -511,9 +511,9 @@ export class RuntimeSummaryService {
       })
       .slice(-MAX_SOURCE_EVENTS)
       .reverse();
-        // eslint-disable-next-line complexity -- complexity 11, slightly over threshold
+    // eslint-disable-next-line complexity -- complexity 11, slightly over threshold
 
-        // eslint-disable-next-line complexity -- complexity 11
+    // eslint-disable-next-line complexity -- complexity 11
     return filtered.map((entry) => {
       if (entry.type === 'pain_signal') {
         return {

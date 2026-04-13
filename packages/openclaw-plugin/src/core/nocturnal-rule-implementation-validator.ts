@@ -85,7 +85,7 @@ function extractHelperUsage(sourceCode: string): string[] {
   );
 }
 
-        // eslint-disable-next-line complexity -- complexity 11, slightly over threshold
+    // eslint-disable-next-line complexity -- complexity 11, slightly over threshold
 function validateMeta(meta: unknown): RuleImplementationValidationFailure[] {
   if (!meta || typeof meta !== 'object') {
     return [

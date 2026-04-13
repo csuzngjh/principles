@@ -357,7 +357,7 @@ export function checkWorkspaceIdle(
  * @param options - Cooldown configuration options
  * @returns CooldownCheckResult
  */
-        // eslint-disable-next-line complexity -- complexity 11, slightly over threshold
+    // eslint-disable-next-line complexity -- complexity 11, slightly over threshold
 export function checkCooldown(
     stateDir: string,
     principleId?: string,

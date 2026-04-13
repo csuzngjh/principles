@@ -283,7 +283,7 @@ export function trackLlmOutput(sessionId: string, usage: TokenUsage | undefined,
  * Tracks physical friction based on tool execution failures.
  */
  
-        // eslint-disable-next-line complexity -- complexity 11, slightly over threshold
+    // eslint-disable-next-line complexity -- complexity 11, slightly over threshold
 export function trackFriction(
     sessionId: string,
     deltaF: number,

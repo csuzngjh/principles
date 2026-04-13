@@ -159,7 +159,7 @@ export interface TrinityStageValidationResult {
  * Validate a Dreamer output contract.
  * Ensures the output is well-formed before passing to Philosopher.
  */
-        // eslint-disable-next-line complexity -- complexity 11, slightly over threshold
+    // eslint-disable-next-line complexity -- complexity 11, slightly over threshold
 export function validateDreamerOutput(output: unknown): TrinityStageValidationResult {
   const failures: string[] = [];
 

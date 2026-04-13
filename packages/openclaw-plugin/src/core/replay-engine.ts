@@ -295,7 +295,7 @@ export class ReplayEngine {
   }
 
    
-        // eslint-disable-next-line complexity -- complexity 11, slightly over threshold
+    // eslint-disable-next-line complexity -- complexity 11, slightly over threshold
   private _selectToolCall(
     snapshot: NocturnalSessionSnapshot,
     classification: SampleClassification,
@@ -382,9 +382,9 @@ export class ReplayEngine {
     return toolCall.outcome === 'success' ? 'safe' : 'normal';
   }
 
-        // eslint-disable-next-line complexity -- complexity 11, slightly over threshold
+    // eslint-disable-next-line complexity -- complexity 11, slightly over threshold
    
-        // eslint-disable-next-line complexity -- complexity 11
+    // eslint-disable-next-line complexity -- complexity 11
   private _scoreEvaluation(
     sample: ReplaySample,
     result: RuleHostResult,

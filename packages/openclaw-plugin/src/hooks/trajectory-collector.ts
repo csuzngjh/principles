@@ -212,7 +212,7 @@ export function handleLlmOutput(
  * 消息写入前的处理
  * 记录：用户/助手消息内容
  */
-        // eslint-disable-next-line complexity -- complexity 11, slightly over threshold
+    // eslint-disable-next-line complexity -- complexity 11, slightly over threshold
 export function handleBeforeMessageWrite(
   event: PluginHookBeforeMessageWriteEvent,
   ctx: PluginHookAgentContext & { workspaceDir?: string }

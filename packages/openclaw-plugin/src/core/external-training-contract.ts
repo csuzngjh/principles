@@ -285,7 +285,7 @@ export interface ValidationResult {
  * @param result - The trainer result to validate
  * @returns ValidationResult indicating pass/fail and any errors
  */
-        // eslint-disable-next-line complexity -- complexity 11, slightly over threshold
+    // eslint-disable-next-line complexity -- complexity 11, slightly over threshold
 export function validateTrainerResult(
   spec: TrainingExperimentSpec,
   result: TrainingExperimentResult

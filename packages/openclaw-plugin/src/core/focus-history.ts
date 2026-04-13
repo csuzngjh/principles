@@ -886,7 +886,7 @@ interface CompressionConfig {
  * @param stateDir state 目录路径
  * @returns 压缩配置
  */
-        // eslint-disable-next-line complexity -- complexity 11, slightly over threshold
+    // eslint-disable-next-line complexity -- complexity 11, slightly over threshold
 function loadCompressionConfig(stateDir?: string): CompressionConfig {
   if (!stateDir) {
     return DEFAULT_COMPRESSION_CONFIG;

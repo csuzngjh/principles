@@ -182,7 +182,7 @@ export class RuleHost {
    * Uses the shared isolated runtime loader so candidate code does not execute
    * in the host global realm.
    */
-        // eslint-disable-next-line complexity -- complexity 11, slightly over threshold
+    // eslint-disable-next-line complexity -- complexity 11, slightly over threshold
   private _loadSingleImplementation(
     impl: Implementation
   ): LoadedImplementation | null {
