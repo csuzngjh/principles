@@ -1,0 +1,94 @@
+# Requirements: v1.16 Trinity Training Trajectory Quality Enhancement
+
+**Defined:** 2026-04-12
+**Core Value:** AI agents improve their own behavior through a structured evolution loop. pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
+
+## v1 Requirements
+
+Requirements for v1.16 milestone. Each maps to roadmap phases.
+
+### Dreamer Candidate Diversity
+
+- [ ] **DIVER-01**: Dreamer prompt includes strategic perspective requirements (conservative_fix / structural_improvement / paradigm_shift) with explicit anti-pattern warnings
+- [ ] **DIVER-02**: DreamerCandidate interface gains optional `riskLevel` ("low"|"medium"|"high") and `strategicPerspective` fields for backward-compatible schema evolution
+- [ ] **DIVER-03**: Post-generation `validateCandidateDiversity()` checks risk level diversity (Set.size >= 2) and keyword overlap similarity (reject at > 0.8)
+- [ ] **DIVER-04**: Diversity validation failures are logged as telemetry warnings with `diversityCheckPassed: false`, not hard gates — pipeline continues with best available candidate
+
+### Runtime Reasoning Derivation
+
+- [ ] **DERIV-01**: `deriveReasoningChain()` extracts thinking content (from `<thinking>` tags), uncertainty markers (3 regex patterns), and confidence signal (high/medium/low) from assistant turns
+- [ ] **DERIV-02**: `deriveDecisionPoints()` extracts before-context (last 500 chars), after-reflection (first 300 chars on failure), and confidence delta per tool call
+- [ ] **DERIV-03**: `deriveContextualFactors()` computes fileStructureKnown, errorHistoryPresent, userGuidanceAvailable, and timePressure from existing snapshot data
+- [ ] **DERIV-04**: Derived reasoning signals are injected into Dreamer prompt builder (reasoning chain + contextual factors) and Scribe prompt builder (decision points)
+
+### Philosopher Multi-Dimension Evaluation
+
+- [ ] **PHILO-01**: Philosopher prompt evaluates candidates across 6 dimensions with calibrated weights: Principle Alignment (0.20), Specificity (0.15), Actionability (0.15), Executability (0.15), Safety Impact (0.20), UX Impact (0.15)
+- [ ] **PHILO-02**: Philosopher output includes risk assessment per candidate: falsePositiveEstimate (0-1), implementationComplexity (low/medium/high), breakingChangeRisk (boolean)
+- [ ] **PHILO-03**: New PhilosopherJudgment fields (scores, risks) are optional — existing tournament scoring in nocturnal-candidate-scoring.ts continues unchanged
+
+### Scribe Contrastive Analysis
+
+- [ ] **SCRIBE-01**: Scribe generates rejectedAnalysis with whyRejected (mental model that led to mistake), warningSignals (observable caution triggers), correctiveThinking (correct reasoning path)
+- [ ] **SCRIBE-02**: Scribe generates chosenJustification with whyChosen (embodied principle), keyInsights (1-3 transferable insights), limitations (when approach doesn't apply)
+- [ ] **SCRIBE-03**: Scribe generates contrastiveAnalysis with criticalDifference (ONE key insight), decisionTrigger ("When X, do Y" pattern), preventionStrategy (systematic avoidance)
+- [ ] **SCRIBE-04**: ContrastiveAnalysis is optional on TrinityDraftArtifact — pre-enhancement artifacts export unchanged, backward compatible
+
+## v2 Requirements
+
+Deferred to future milestone. Tracked but not in current roadmap.
+
+### ORPO Export Integration
+
+- **SCRIBE-05**: ORPO export incorporates contrastive analysis into prompt (decisionTrigger), chosen (keyInsights), rejected (warningSignals), and rationale (criticalDifference) fields
+- **SCRIBE-06**: ORPO export validates contrastive analysis completeness before enrichment, falls back to base narrative gracefully
+
+### Advanced Features
+
+- **EXEC-01**: Execution feasibility validation — simulate whether betterDecision would prevent the observed error
+- **HIST-01**: Historical case retrieval — inject similar past artifacts into Dreamer prompt for pattern-based learning
+
+## Out of Scope
+
+| Feature | Reason |
+|---------|--------|
+| Snapshot schema changes | Design decision: runtime derivation preserves backward compatibility |
+| Nocturnal service orchestration changes | Deriver called from Trinity stage builders, not service layer |
+| Arbiter validation rule changes | New fields are optional; arbiter validates existing fields unchanged |
+| Stub implementation changes | New fields only used in real adapter path |
+| ORPO export integration (this milestone) | Deferred to v1.17 after contrastive analysis quality is validated |
+| Execution feasibility validation | P2 — deferred until Phase A/B results validated |
+| Historical case retrieval | P2 — deferred until Phase A/B results validated |
+| LLM prompt A/B testing framework | Valuable but not required for initial implementation |
+| Human feedback loop for artifacts | Valuable but orthogonal to pipeline quality |
+
+## Traceability
+
+Which phases cover which requirements. Updated during roadmap creation.
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| DIVER-01 | Phase 35 | Pending |
+| DIVER-02 | Phase 35 | Pending |
+| DIVER-03 | Phase 35 | Pending |
+| DIVER-04 | Phase 35 | Pending |
+| DERIV-01 | Phase 34 | Pending |
+| DERIV-02 | Phase 34 | Pending |
+| DERIV-03 | Phase 34 | Pending |
+| DERIV-04 | Phase 35 | Pending |
+| PHILO-01 | Phase 36 | Pending |
+| PHILO-02 | Phase 36 | Pending |
+| PHILO-03 | Phase 36 | Pending |
+| SCRIBE-01 | Phase 37 | Pending |
+| SCRIBE-02 | Phase 37 | Pending |
+| SCRIBE-03 | Phase 37 | Pending |
+| SCRIBE-04 | Phase 37 | Pending |
+
+**Coverage:**
+- v1 requirements: 15 total
+- Mapped to phases: 15
+- Unmapped: 0
+
+---
+*Requirements defined: 2026-04-12*
+*Last updated: 2026-04-12 after roadmap creation*
