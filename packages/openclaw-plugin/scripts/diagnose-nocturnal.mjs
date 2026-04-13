@@ -126,6 +126,9 @@ function main() {
         if (data.sessionId && data.lastActivityAt) validSessions++;
       } catch { /* corrupted, skip */ }
     }
+    if (validSessions === 0) {
+      return { status: 'warn', detail: `${files.length} session file(s) found but none are valid JSON — idle check will likely report idle immediately` };
+    }
     return `${files.length} session files, ${validSessions} valid with sessionId+lastActivityAt`;
   });
 
@@ -221,7 +224,7 @@ function main() {
     if (active.length > 0) {
       return { status: 'warn', detail: `${active.length} workflow(s) still active — may be in progress or stuck. IDs: ${active.map(w => w.workflow_id).join(', ')}` };
     }
-    return `${workflows.length} total: ${completed} completed, ${errored} errored, ${expired} expired`;
+    return `${workflows.length} total: ${completed.length} completed, ${errored.length} errored, ${expired.length} expired`;
   });
 
   // ─────────────────────────────────────────────────────────
@@ -318,10 +321,14 @@ function main() {
         fields[line.substring(0, colonIdx).trim()] = line.substring(colonIdx + 1).trim();
       }
     }
-    if (!fields.score || !fields.reason) {
-      return { status: 'warn', detail: 'Pain flag exists but is missing required fields (score, reason)' };
+    // Accept either the legacy contract (fields.score + fields.reason)
+    // or the current contract (active.source.score)
+    const legacy = fields.score && fields.reason;
+    const current = fields.active && fields.source && fields.score;
+    if (!legacy && !current) {
+      return { status: 'warn', detail: 'Pain flag exists but is missing required fields (need score + reason, or active.source.score)' };
     }
-    return `Pain flag active (score: ${fields.score}, source: ${fields.source || 'unknown'}, session: ${fields.session_id || 'none'})`;
+    return `Pain flag active (score: ${fields.score}, source: ${fields.source || fields.active?.source || 'unknown'}, session: ${fields.session_id || 'none'})`;
   });
 
   // ─────────────────────────────────────────────────────────
