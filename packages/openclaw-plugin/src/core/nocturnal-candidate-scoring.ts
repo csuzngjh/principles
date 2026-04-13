@@ -282,7 +282,7 @@ export function validateCandidateDiversity(
   const riskLevels = new Set(
     candidates
       .map(c => c.riskLevel)
-      .filter((r): r is string => typeof r === 'string')
+      .filter((r): r is "low" | "medium" | "high" => typeof r === 'string')
   );
   // If NO candidates have riskLevel, skip risk diversity check (graceful degradation)
   const riskLevelDiversity = riskLevels.size === 0 || riskLevels.size >= 2;
