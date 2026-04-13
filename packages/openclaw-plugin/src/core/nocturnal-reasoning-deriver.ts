@@ -15,6 +15,30 @@ import type { NocturnalAssistantTurn, NocturnalToolCall, NocturnalUserTurn, Noct
 import { detectThinkingModelMatches, listThinkingModels } from './thinking-models.js';
 
 // ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
+
+/** Parse an ISO 8601 timestamp, returning NaN for invalid formats. */
+function parseTs(ts: string): number {
+  // ISO 8601 strings without Z suffix or offset are treated as local time.
+  // Log a warning for ambiguous formats (missing timezone indicator).
+  if (
+    typeof ts === 'string' &&
+    !ts.endsWith('Z') &&
+    !ts.includes('+') &&
+    ts.includes('-', 4)
+  ) {
+    // Looks like an ISO date but no timezone — could be ambiguous
+    const bare = ts.slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(bare)) {
+      // Plain YYYY-MM-DD without time or Z — definitely ambiguous
+      console.warn(`[Deriver] Timestamp missing timezone: "${ts}"`);
+    }
+  }
+  return Date.parse(ts);
+}
+
+// ---------------------------------------------------------------------------
 // Shared types (used across all three derive functions)
 // ---------------------------------------------------------------------------
 
@@ -50,7 +74,7 @@ const UNCERTAINTY_PATTERNS: RegExp[] = [
   /not sure (if|whether|about)/gi,
 ];
 
-const THINKING_TAG_REGEX = /<thinking>([\s\S]*?)<\/thinking>/;
+const THINKING_TAG_REGEX = /<thinking>([\s\S]*?)<\/thinking>/g;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -96,9 +120,9 @@ export function deriveReasoningChain(assistantTurns: NocturnalAssistantTurn[]): 
   return assistantTurns.map(turn => {
     const text = turn.sanitizedText ?? '';
 
-    // Extract <thinking> content
-    const thinkingMatch = text.match(THINKING_TAG_REGEX);
-    const thinkingContent = thinkingMatch ? thinkingMatch[1].trim() : '';
+    // Extract all <thinking> content blocks (multiple blocks per turn possible)
+    const thinkingMatches = [...text.matchAll(THINKING_TAG_REGEX)];
+    const thinkingContent = thinkingMatches.map(m => m[1].trim()).join('\n');
 
     // Detect uncertainty markers (collect all unique matches across 3 patterns)
     const uncertaintyMarkers: string[] = [];
@@ -115,9 +139,17 @@ export function deriveReasoningChain(assistantTurns: NocturnalAssistantTurn[]): 
       }
     }
 
-    // Compute confidence signal using thinking model activation ratio
-    const activation = computeThinkingModelActivation(text);
-    const confidenceSignal = mapConfidenceSignal(activation);
+    // Confidence signal: only meaningful when <thinking> content exists.
+    // Without thinking tags we cannot extract a genuine reasoning trace, so
+    // we fall back to 'low' rather than misleading the downstream pipeline
+    // with activation derived from non-thinking patterns in the response text.
+    let confidenceSignal: "high" | "medium" | "low";
+    if (thinkingContent.length === 0) {
+      confidenceSignal = 'low';
+    } else {
+      const activation = computeThinkingModelActivation(text);
+      confidenceSignal = mapConfidenceSignal(activation);
+    }
 
     return {
       turnIndex: turn.turnIndex,
@@ -172,24 +204,29 @@ export function deriveDecisionPoints(
     }));
   }
 
-  // Sort assistant turns by createdAt for binary-style lookup
+  // Sort assistant turns by createdAt for binary search
   const sortedTurns = [...assistantTurns].sort(
-    (a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)
+    (a, b) => parseTs(a.createdAt) - parseTs(b.createdAt)
   );
 
-  return toolCalls.map(tc => {
-    const tcTime = Date.parse(tc.createdAt);
-
-    // Find assistant turn immediately before tool call
-    // (highest createdAt that is strictly less than tool call's createdAt)
-    let beforeTurn: NocturnalAssistantTurn | undefined;
-    for (const turn of sortedTurns) {
-      if (Date.parse(turn.createdAt) < tcTime) {
-        beforeTurn = turn;
+  // Binary search: find rightmost assistant turn with createdAt < tcTime
+  const findBeforeTurn = (tcTime: number): NocturnalAssistantTurn | undefined => {
+    let lo = 0, hi = sortedTurns.length - 1, result: NocturnalAssistantTurn | undefined;
+    while (lo <= hi) {
+      const mid = (lo + hi) >>> 1;
+      if (parseTs(sortedTurns[mid].createdAt) < tcTime) {
+        result = sortedTurns[mid];
+        lo = mid + 1;
       } else {
-        break;
+        hi = mid - 1;
       }
     }
+    return result;
+  };
+
+  return toolCalls.map(tc => {
+    const tcTime = parseTs(tc.createdAt);
+    const beforeTurn = findBeforeTurn(tcTime);
 
     const beforeContext = beforeTurn
       ? beforeTurn.sanitizedText.slice(-500)
@@ -201,7 +238,7 @@ export function deriveDecisionPoints(
 
     if (tc.outcome === 'failure') {
       const afterTurn = sortedTurns.find(
-        turn => Date.parse(turn.createdAt) > tcTime
+        turn => parseTs(turn.createdAt) > tcTime
       );
       if (afterTurn) {
         afterReflection = afterTurn.sanitizedText.slice(0, 300);
@@ -280,11 +317,11 @@ export function deriveContextualFactors(
   let timePressure = false;
   if (toolCalls.length >= 2) {
     const sorted = [...toolCalls].sort(
-      (a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)
+      (a, b) => parseTs(a.createdAt) - parseTs(b.createdAt)
     );
     let rapidGaps = 0;
     for (let i = 0; i < sorted.length - 1; i++) {
-      const gap = Date.parse(sorted[i + 1].createdAt) - Date.parse(sorted[i].createdAt);
+      const gap = parseTs(sorted[i + 1].createdAt) - parseTs(sorted[i].createdAt);
       if (gap < 2000) rapidGaps++;
     }
     const totalPairs = sorted.length - 1;

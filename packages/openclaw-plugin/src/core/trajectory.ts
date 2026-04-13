@@ -961,6 +961,17 @@ export class TrajectoryDatabase {
       throw new SampleNotFoundError(`${sampleId} (after update)`);
     }
 
+    // #Phase2b: Emit pain event for rejected corrections
+    if (status === 'rejected') {
+      this.recordCorrectionRejectedPain({
+        session_id: record.session_id,
+        quality_score: record.quality_score,
+        diff_excerpt: record.diff_excerpt,
+        principle_ids_json: record.principle_ids_json,
+        created_at: record.created_at,
+      });
+    }
+
     return {
       sampleId: String(record.sample_id),
       sessionId: String(record.session_id),
@@ -975,6 +986,43 @@ export class TrajectoryDatabase {
       createdAt: String(record.created_at),
       updatedAt: String(record.updated_at),
     };
+  }
+
+  /**
+   * When a correction sample is rejected, emit a pain event to the trajectory.
+   * This feeds rejected corrections into the nocturnal pipeline as a high-fidelity
+   * violation signal (human-verified, unlike heuristic pain detection).
+   */
+  private recordCorrectionRejectedPain(record: {
+    session_id: unknown;
+    quality_score: unknown;
+    diff_excerpt: unknown;
+    principle_ids_json: unknown;
+    created_at: unknown;
+  }): void {
+    const sessionId = String(record.session_id);
+    const qualityScore = Number(record.quality_score);
+    const diffExcerpt = String(record.diff_excerpt ?? '');
+    const principleIds = String(record.principle_ids_json ?? '[]');
+    // quality_score (0-100) from correction sample → pain score (0-100), clamped
+    const painScore = Math.max(0, Math.min(100, Math.round(Number(qualityScore) || 0)));
+    const reason = `Correction rejected (quality ${qualityScore.toFixed(2)}). Principles: ${principleIds}${diffExcerpt ? ` — ${diffExcerpt.slice(0, 120)}` : ''}`;
+
+    try {
+      this.recordPainEvent({
+        sessionId,
+        source: 'correction_rejected',
+        score: painScore,
+        reason,
+        severity: painScore >= 70 ? 'severe' : painScore >= 40 ? 'moderate' : 'mild',
+        origin: 'system_infer',
+        text: diffExcerpt || undefined,
+        createdAt: String(record.created_at),
+      });
+    } catch (err) {
+      // Non-fatal: pain event recording should not break the review flow
+      console.warn(`[Trajectory] Failed to record correction_rejected pain event: ${String(err)}`);
+    }
   }
 
   /**
@@ -1496,6 +1544,11 @@ export class TrajectoryDatabase {
     `).get(sessionId) as Record<string, unknown> | undefined;
     if (!correctionTurn || !correctionTurn.references_assistant_turn_id) return;
 
+    // #Phase2b-fix: Tool failure is NOT required for correction samples.
+    // User corrections are the highest-fidelity signal — they indicate the agent
+    // said or did something wrong, regardless of whether tool calls succeeded.
+    // Requiring tool failure excluded the most valuable cases: "agent did something
+    // that technically worked but violated a principle or was logically wrong."
     const failedCall = this.db.prepare(`
       SELECT id, tool_name, error_type, error_message
       FROM tool_calls
@@ -1503,25 +1556,36 @@ export class TrajectoryDatabase {
       ORDER BY id DESC
       LIMIT 1
     `).get(sessionId) as Record<string, unknown> | undefined;
-    if (!failedCall) return;
 
-    const successfulCalls = this.db.prepare(`
-      SELECT id, tool_name
+    const recentCalls = this.db.prepare(`
+      SELECT id, tool_name, outcome
       FROM tool_calls
-      WHERE session_id = ? AND outcome = 'success'
+      WHERE session_id = ?
       ORDER BY id DESC
-      LIMIT 3
+      LIMIT 5
     `).all(sessionId) as Record<string, unknown>[];
-    if (successfulCalls.length === 0) return;
 
-    const sampleId = `sample_${crypto.createHash('md5').update(`${sessionId}:${correctionTurn.id}:${successfulCalls[0].id}`).digest('hex').slice(0, 12)}`;
+    const successfulCalls = recentCalls.filter(c => c.outcome === 'success');
+
+    // Generate sample ID from correction turn + first recent call (or correction id if no calls)
+    const refForHash = successfulCalls[0]?.id ?? correctionTurn.id;
+    const sampleId = `sample_${crypto.createHash('md5').update(`${sessionId}:${correctionTurn.id}:${refForHash}`).digest('hex').slice(0, 12)}`;
     const userRawText = this.restoreRawText(correctionTurn.raw_text as string | null, correctionTurn.blob_ref as string | null);
+
+    // Quality scoring: correction cue is always valuable
+    // Tool failure adds context (20pts), successful calls add context (up to 15pts)
+    // Pure conversation corrections still score 55-75 (high enough to review)
     const qualityScore = [
       correctionTurn.references_assistant_turn_id ? 35 : 0,
       correctionTurn.correction_cue ? 20 : 0,
       failedCall ? 20 : 0,
-      successfulCalls.length > 0 ? 25 : 0,
+      Math.min(successfulCalls.length, 3) * 5,
     ].reduce((sum, value) => sum + value, 0);
+
+    // Diff excerpt: prefer user correction text, fallback to error info, fallback to cue
+    const diffText = userRawText
+      || (failedCall ? String(failedCall.error_message ?? failedCall.error_type ?? failedCall.tool_name) : '')
+      || String(correctionTurn.correction_cue ?? 'user correction');
 
     this.withWrite(() => {
       this.db.prepare(`
@@ -1535,8 +1599,8 @@ export class TrajectoryDatabase {
         sessionId,
         Number(correctionTurn.references_assistant_turn_id),
         Number(correctionTurn.id),
-        safeJson(successfulCalls.map((call) => ({ id: call.id, toolName: call.tool_name }))),
-        summarizeForDiff(userRawText || String(failedCall.error_message ?? failedCall.error_type ?? failedCall.tool_name)),
+        safeJson(successfulCalls.map((call) => ({ id: call.id, toolName: call.tool_name, outcome: call.outcome }))),
+        summarizeForDiff(diffText),
         '[]',
         qualityScore,
         nowIso(),

@@ -60,6 +60,20 @@ function isSystemSession(state: SessionState): boolean {
     if (sessionId?.startsWith('boot-')) return true;
     if (sessionId?.startsWith('probe-')) return true;
 
+    // CRITICAL FIX: Legacy sessions from persistence may have missing trigger/sessionKey
+    // If both are missing AND the session is old (inactive > abandoned threshold),
+    // treat as legacy/orphan to avoid blocking idle detection with unknown sessions.
+    // Recent sessions without trigger/sessionKey are likely real user sessions still
+    // being enriched — do NOT classify them as system sessions.
+    const ABANDONED_THRESHOLD_MS = 2 * 60 * 60 * 1000; // 2 hours
+    if (!trigger && !sessionKey) {
+        const inactiveFor = Date.now() - state.lastActivityAt;
+        if (inactiveFor > ABANDONED_THRESHOLD_MS) {
+            return true; // Legacy/orphan session — don't block idle detection
+        }
+        // Recent session without metadata — likely a real user session, let it through
+    }
+
     return false;
 }
 
@@ -546,7 +560,8 @@ export function checkPreflight(
     stateDir: string,
     principleId?: string,
     trajectoryLastActivityAt?: number,
-    idleCheckOverride?: IdleCheckResult
+    idleCheckOverride?: IdleCheckResult,
+    skipGatesForManualTrigger?: boolean
 ): PreflightCheckResult {
     const idle = idleCheckOverride ?? checkWorkspaceIdle(workspaceDir, {}, trajectoryLastActivityAt);
     const cooldown = checkCooldown(stateDir, principleId);
@@ -557,16 +572,20 @@ export function checkPreflight(
         blockers.push(`Workspace not idle (active for ${idle.idleForMs}ms, threshold=${DEFAULT_IDLE_THRESHOLD_MS}ms)`);
     }
 
-    if (cooldown.globalCooldownActive) {
-        blockers.push(`Global cooldown active until ${cooldown.globalCooldownUntil}`);
-    }
+    if (!skipGatesForManualTrigger) {
+        if (cooldown.globalCooldownActive) {
+            blockers.push(`Global cooldown active until ${cooldown.globalCooldownUntil}`);
+        }
 
-    if (cooldown.principleCooldownActive) {
-        blockers.push(`Principle cooldown active until ${cooldown.principleCooldownUntil}`);
-    }
+        if (cooldown.principleCooldownActive) {
+            blockers.push(`Principle cooldown active until ${cooldown.principleCooldownUntil}`);
+        }
 
-    if (cooldown.quotaExhausted) {
-        blockers.push(`Quota exhausted (${DEFAULT_MAX_RUNS_PER_WINDOW} runs per ${DEFAULT_QUOTA_WINDOW_MS / 3600000}h window)`);
+        if (cooldown.quotaExhausted) {
+            blockers.push(`Quota exhausted (${DEFAULT_MAX_RUNS_PER_WINDOW} runs per ${DEFAULT_QUOTA_WINDOW_MS / 3600000}h window)`);
+        }
+    } else if (cooldown.globalCooldownActive || cooldown.principleCooldownActive || cooldown.quotaExhausted) {
+        // Log that gates are being bypassed for manual trigger
     }
 
     if (idle.abandonedSessionIds.length > 0 && idle.userActiveSessions === 0) {

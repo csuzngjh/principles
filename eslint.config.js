@@ -68,7 +68,7 @@ export default defineConfig(
       '@typescript-eslint/no-shadow': 'error',
       '@typescript-eslint/no-unnecessary-type-assertion': 'error',
       '@typescript-eslint/no-unused-expressions': 'error',
-      '@typescript-eslint/no-unused-vars': 'error',
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
       '@typescript-eslint/no-use-before-define': 'error',
       '@typescript-eslint/no-useless-constructor': 'error',
       '@typescript-eslint/no-var-requires': 'error',
@@ -83,6 +83,7 @@ export default defineConfig(
       // Disable core rules that TypeScript handles better
       'no-redeclare': 'off',
       'no-shadow': 'off',
+      'no-unused-vars': 'off',
     },
   },
 

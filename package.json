@@ -1,6 +1,6 @@
 {
   "name": "principles-disciple-monorepo",
-  "version": "1.10.14",
+  "version": "1.10.20",
   "description": "Principles Disciple - OpenClaw Plugin Monorepo",
   "private": true,
   "type": "module",
@@ -8,8 +8,8 @@
     "packages/*"
   ],
   "scripts": {
-    "lint": "eslint packages/**/*.ts --ignore-pattern '**/*.test.ts' --ignore-pattern '**/*.spec.ts'",
-    "lint:fix": "eslint packages/**/*.ts --ignore-pattern '**/*.test.ts' --ignore-pattern '**/*.spec.ts' --fix",
+    "lint": "eslint 'packages/**/*.ts' --ignore-pattern '**/*.test.ts' --ignore-pattern '**/*.spec.ts'",
+    "lint:fix": "eslint 'packages/**/*.ts' --ignore-pattern '**/*.test.ts' --ignore-pattern '**/*.spec.ts' --fix",
     "pre-commit": "lint-staged",
     "ai-sprint": "node packages/openclaw-plugin/templates/langs/zh/skills/ai-sprint-orchestration/scripts/run.mjs",
     "ai-sprint:test": "node --test packages/openclaw-plugin/templates/langs/zh/skills/ai-sprint-orchestration/test/*.mjs",
@@ -33,7 +33,7 @@
     "@typescript-eslint/eslint-plugin": "^8.58.0",
     "@typescript-eslint/parser": "^8.58.0",
     "eslint": "^10.1.0",
-    "globals": "^17.4.0",
+    "globals": "^17.5.0",
     "lefthook": "^2.1.5",
     "lint-staged": "^16.4.0",
     "semantic-release": "^25.0.3"

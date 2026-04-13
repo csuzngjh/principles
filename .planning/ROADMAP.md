@@ -7,7 +7,7 @@
 - [x] **v1.13** - Boundary Contract Hardening (Phases 19-23, shipped 2026-04-11) - [Archive](milestones/v1.13/v1.13-ROADMAP.md)
 - [x] **v1.14** - Evolution Worker Decomposition & Contract Hardening (Phases 24-29, baseline complete on branch `fix/bugs-231-228` / PR #245)
 - [x] **v1.15** - Runtime & Truth Contract Hardening (Phases 30-33, shipped 2026-04-12)
-- [ ] **v1.16** - Trinity Training Trajectory Quality Enhancement (Phases 34-37, in progress)
+- [x] **v1.16** - Trinity Training Trajectory Quality Enhancement (Phases 34-37, shipped 2026-04-13)
 - [ ] **v1.10** - Thinking Models page optimization (deferred)
 
 ## Phases
@@ -38,9 +38,9 @@
 **Milestone Goal:** Improve Nocturnal Trinity pipeline's training artifact quality through Dreamer diversity, runtime reasoning derivation, Philosopher multi-dimension evaluation, and Scribe contrastive analysis.
 
 - [x] **Phase 34: Reasoning Deriver Module** - Build leaf module for runtime reasoning derivation from existing snapshot data (completed 2026-04-13)
-- [ ] **Phase 35: Dreamer Enhancement** - Enhance Dreamer prompt for candidate diversity with deriver integration and soft post-validation
-- [ ] **Phase 36: Philosopher 6D Evaluation** - Expand Philosopher evaluation to 6 dimensions with risk assessment
-- [ ] **Phase 37: Scribe Contrastive Analysis** - Add contrastive analysis to Scribe output with backward-compatible optional fields
+- [x] **Phase 35: Dreamer Enhancement** - Enhance Dreamer prompt for candidate diversity with deriver integration and soft post-validation (completed 2026-04-13)
+- [x] **Phase 36: Philosopher 6D Evaluation** - Expand Philosopher evaluation to 6 dimensions with risk assessment (completed 2026-04-13)
+- [x] **Phase 37: Scribe Contrastive Analysis** - Add contrastive analysis to Scribe output with backward-compatible optional fields (completed 2026-04-13)
 
 ## Phase Details
 
@@ -72,8 +72,8 @@ Plans:
 **Plans**: TBD
 
 Plans:
-- [ ] 35-01: TBD
-- [ ] 35-02: TBD
+- [x] 35-01: TBD
+- [x] 35-02: TBD
 
 ### Phase 36: Philosopher 6D Evaluation
 **Goal**: Philosopher evaluates candidates across 6 calibrated dimensions with per-candidate risk assessment
@@ -86,8 +86,8 @@ Plans:
 **Plans**: TBD
 
 Plans:
-- [ ] 36-01: TBD
-- [ ] 36-02: TBD
+- [x] 36-01: TBD
+- [x] 36-02: TBD
 
 ### Phase 37: Scribe Contrastive Analysis
 **Goal**: Scribe produces contrastive analysis that distinguishes chosen vs rejected reasoning paths, enabling richer training signals
@@ -101,7 +101,7 @@ Plans:
 **Plans**: TBD
 
 Plans:
-- [ ] 37-01: TBD
+- [x] 37-01: TBD
 - [ ] 37-02: TBD
 
 ## Progress
@@ -112,8 +112,8 @@ Phases execute in numeric order: 34 -> 35 -> 36 -> 37
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 34. Reasoning Deriver Module | v1.16 | 2/2 | Complete    | 2026-04-13 |
-| 35. Dreamer Enhancement | v1.16 | 0/2 | Not started | - |
-| 36. Philosopher 6D Evaluation | v1.16 | 0/2 | Not started | - |
-| 37. Scribe Contrastive Analysis | v1.16 | 0/2 | Not started | - |
+| 35. Dreamer Enhancement | v1.16 | 2/2 | Complete    | 2026-04-13 |
+| 36. Philosopher 6D Evaluation | v1.16 | 2/2 | Complete    | 2026-04-13 |
+| 37. Scribe Contrastive Analysis | v1.16 | 1/1 | Complete    | 2026-04-13 |
 
-*Last updated: 2026-04-12*
+*Last updated: 2026-04-13*
