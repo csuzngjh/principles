@@ -137,13 +137,12 @@ function main() {
     const bundlePath = join(PLUGIN_DIR, 'dist', 'bundle.js');
     const content = readFileSync(bundlePath, 'utf-8');
 
-    // These strings are stable across minification because they appear in error messages,
-    // log prefixes, or string literals that Terser/esbuild won't rename.
+    // Stable markers: log messages, object fields, event strings that survive minification.
     const markers = [
-      { name: 'Workspace is idle', reason: 'idle determination log message' },
-      { name: 'cron', reason: 'system session trigger check' },
-      { name: 'heartbeat', reason: 'system session trigger check' },
+      { name: 'Workspace not idle', reason: 'preflight idle check log message' },
+      { name: 'trigger', reason: 'system session detection (checks trigger field)' },
       { name: 'abandonedSessionIds', reason: 'IdleCheckResult field (preserved in object literal)' },
+      { name: 'trajectoryGuardrailConfirmsIdle', reason: 'IdleCheckResult field' },
     ];
     const missing = markers.filter(m => !content.includes(m.name));
     if (missing.length > 0) {
@@ -270,15 +269,15 @@ function main() {
     // Use a mix of exported symbols and stable string markers.
     // Class names and exported symbols survive minification; internal function names don't.
     const markers = [
-      'EvolutionWorkerService',  // exported class name
-      'checkPainFlag',            // exported function
-      'processEvolutionQueue',    // function reference
-      'NocturnalWorkflowManager', // exported class name
-      'executeNocturnalReflectionAsync', // function name (used in log)
-      'nocturnal_started',        // event type string
-      'nocturnal_completed',      // event type string
-      'nocturnal_fallback',       // event type string
-      'validateNocturnalSnapshotIngress', // function name (used in log)
+      'EvolutionWorkerService',       // exported class
+      'checkPainFlag',                 // exported function
+      'processEvolutionQueue',         // function reference
+      'NocturnalWorkflowManager',      // exported class
+      'executeNocturnalReflectionAsync', // used in log messages
+      'nocturnal_started',             // event type string
+      'nocturnal_completed',           // event type string
+      'nocturnal_failed',              // event type string
+      'nocturnal_expired',             // event type string
     ];
     const missing = markers.filter(m => !content.includes(m));
     if (missing.length > 0) throw new Error(`Missing critical symbols in bundle: ${missing.join(', ')}`);
