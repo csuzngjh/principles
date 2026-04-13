@@ -20,6 +20,7 @@
  *   WORKSPACE_DIR - Optional workspace directory (defaults to process.cwd())
  */
 
+import * as Database from 'better-sqlite3';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -122,13 +123,16 @@ async function acquireLockAsync(filePath: string, options: {
         },
       };
     } catch (error: unknown) {
-      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+      const err = error as { code?: string };
+      if (err.code === 'EEXIST') {
         if (attempt < maxRetries - 1) {
           await new Promise(resolve => setTimeout(resolve, baseRetryDelayMs));
           continue;
         }
       }
-      throw new Error(`Failed to acquire lock for ${filePath}: ${String(error)}`);
+      const lockError = new Error(`Failed to acquire lock for ${filePath}: ${String(error)}`);
+      lockError.cause = error;
+      throw lockError;
     }
   }
 
@@ -222,7 +226,6 @@ function listNocturnalWorkflows(): WorkflowRow[] {
     return [];
   }
 
-  const Database = require('better-sqlite3');
   const db = new Database(DB_PATH, { readonly: true });
   const rows = db.prepare(`
     SELECT workflow_id, workflow_type, state, metadata_json, created_at
