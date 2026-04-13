@@ -1598,7 +1598,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
 
                     let workflowId: string | undefined = '';
                     
-                    let nocturnalManager! NocturnalWorkflowManager = null as any;
+                    let nocturnalManager: NocturnalWorkflowManager = null as any;
                     
                     let snapshotData: NocturnalSessionSnapshot | undefined = undefined;
 
