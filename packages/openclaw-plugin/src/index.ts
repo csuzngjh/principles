@@ -166,9 +166,27 @@ const plugin = {
         if (!workspaceDir) return;
         try {
           if (!workspaceInitialized) {
+            // ── Start Evolution Worker service ──
+            // OpenClaw calls startPluginServices() only once during Gateway startup.
+            // Our plugin is lazy-loaded (register() fires on first before_prompt_build),
+            // so EvolutionWorkerService.start() was never called automatically.
+            // Manually start it here using the default agent's workspaceDir.
+            const defaultWorkspaceDir = resolveWorkspaceDirFromApi(api, 'main');
+            if (defaultWorkspaceDir) {
+              EvolutionWorkerService.api = api;
+              EvolutionWorkerService.start({
+                config: api.config,
+                workspaceDir: defaultWorkspaceDir,
+                stateDir: path.join(defaultWorkspaceDir, '.state'),
+                logger: api.logger,
+              });
+            } else {
+              api.logger.error('[PD] EvolutionWorkerService.start skipped: default workspaceDir unavailable');
+            }
+
             migrateDirectoryStructure(api, workspaceDir);
             ensureWorkspaceTemplates(api, workspaceDir, language);
-            SystemLogger.log(workspaceDir, 'SYSTEM_BOOT', `Principles Disciple online. Language: ${language}`);
+            SystemLogger.log(workspaceDir, 'SYSTEM_BOOT', `Principles Disciple online. Language: ${language}. defaultWorkspaceDir=${defaultWorkspaceDir || '(unknown)'}`);
             workspaceInitialized = true;
           }
           const result = await handleBeforePromptBuild(event, { ...ctx, api, workspaceDir });

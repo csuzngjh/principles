@@ -2087,6 +2087,14 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
     api: null,
 
     start(ctx: OpenClawPluginServiceContext): void {
+        // Guard: prevent duplicate starts (e.g., from health check + before_prompt_build race)
+        const existing = (EvolutionWorkerService as any)._started;
+        if (existing) {
+            ctx?.logger?.info?.(`[PD:EvolutionWorker] Already started, skipping duplicate call`);
+            return;
+        }
+        (EvolutionWorkerService as any)._started = true;
+
         const logger = ctx?.logger || console;
         const {api} = this;
         const workspaceDir = ctx?.workspaceDir;
