@@ -80,17 +80,14 @@ async function acquireLockAsync(filePath: string, options: {
   baseRetryDelayMs?: number;
   lockStaleMs?: number;
 } = {}): Promise<LockContext> {
-  const opts = {
-    lockSuffix: LOCK_SUFFIX,
-    maxRetries: LOCK_MAX_RETRIES,
-    baseRetryDelayMs: LOCK_RETRY_DELAY_MS,
-    lockStaleMs: LOCK_STALE_MS,
-    ...options,
-  };
+  const lockSuffix = options.lockSuffix ?? LOCK_SUFFIX;
+  const maxRetries = options.maxRetries ?? LOCK_MAX_RETRIES;
+  const baseRetryDelayMs = options.baseRetryDelayMs ?? LOCK_RETRY_DELAY_MS;
+  const lockStaleMs = options.lockStaleMs ?? LOCK_STALE_MS;
   const { pid } = process;
-  const lockPath = filePath + opts.lockSuffix;
+  const lockPath = filePath + lockSuffix;
 
-  for (let attempt = 0; attempt < opts.maxRetries!; attempt++) {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
       // Check if lock file exists and is stale
       if (fs.existsSync(lockPath)) {
@@ -100,11 +97,11 @@ async function acquireLockAsync(filePath: string, options: {
         const lockAge = Date.now() - lockStats.mtimeMs;
 
         // Clean up stale lock
-        if (lockAge > opts.lockStaleMs!) {
+        if (lockAge > lockStaleMs) {
           fs.unlinkSync(lockPath);
         } else if (lockPid !== pid) {
           // Lock held by another process
-          await new Promise(resolve => setTimeout(resolve, opts.baseRetryDelayMs!));
+          await new Promise(resolve => setTimeout(resolve, baseRetryDelayMs));
           continue;
         }
       }
@@ -126,8 +123,8 @@ async function acquireLockAsync(filePath: string, options: {
       };
     } catch (error: unknown) {
       if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-        if (attempt < opts.maxRetries! - 1) {
-          await new Promise(resolve => setTimeout(resolve, opts.baseRetryDelayMs!));
+        if (attempt < maxRetries - 1) {
+          await new Promise(resolve => setTimeout(resolve, baseRetryDelayMs));
           continue;
         }
       }
@@ -135,7 +132,7 @@ async function acquireLockAsync(filePath: string, options: {
     }
   }
 
-  throw new Error(`Failed to acquire lock for ${filePath} after ${opts.maxRetries} attempts`);
+  throw new Error(`Failed to acquire lock for ${filePath} after ${maxRetries} attempts`);
 }
 
 function releaseLock(ctx: LockContext): void {

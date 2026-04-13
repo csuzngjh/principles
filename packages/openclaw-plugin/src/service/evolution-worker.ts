@@ -381,7 +381,7 @@ function buildFallbackNocturnalSnapshot(
             // #246-fix: Use minToolCalls=0 to avoid filtering out sessions with 0 tool calls.
             // The pain-triggering session may have no tool calls but still be worth tracking.
             const summaries = extractor.listRecentNocturnalCandidateSessions({ limit: 300, minToolCalls: 0 });
-            const match = summaries.find(s => s.sessionId === painContext.mostRecent!.sessionId);
+            const match = summaries.find(s => s.sessionId === painContext.mostRecent?.sessionId);
             if (match) {
                 realStats = {
                     totalAssistantTurns: match.assistantTurnCount,
