@@ -356,7 +356,8 @@ function isSessionAtOrBeforeTriggerTime(
 
 function buildFallbackNocturnalSnapshot(
     sleepTask: EvolutionQueueItem,
-    extractor?: ReturnType<typeof createNocturnalTrajectoryExtractor> | null
+    extractor?: ReturnType<typeof createNocturnalTrajectoryExtractor> | null,
+    logger?: { warn?: (message: string) => void }
 ): NocturnalSessionSnapshot | null {
     const painContext = sleepTask.recentPainContext;
     if (!painContext) {
@@ -390,8 +391,10 @@ function buildFallbackNocturnalSnapshot(
                     totalGateBlocks: match.gateBlockCount,
                 };
             }
-        } catch {
-            // Best effort — non-fatal
+        } catch (err) {
+            // #260: Log extraction failures — silent swallowing makes debugging impossible
+            // and can mask systemic trajectory DB issues.
+            logger?.warn?.(`[PD:EvolutionWorker] Failed to extract real stats for session ${painContext.mostRecent?.sessionId} (falling back to zeros): ${String(err)}`);
         }
     }
 
@@ -1592,7 +1595,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         // Phase 2: If no trajectory data, try pain-context fallback
                         if (!snapshotData && sleepTask.recentPainContext) {
                             logger?.warn?.(`[PD:EvolutionWorker] Using pain-context fallback for ${sleepTask.id}: trajectory snapshot unavailable, will try session summary from extractor`);
-                            snapshotData = buildFallbackNocturnalSnapshot(sleepTask, extractor) ?? undefined;
+                            snapshotData = buildFallbackNocturnalSnapshot(sleepTask, extractor, logger) ?? undefined;
                         }
 
                         const snapshotValidation = validateNocturnalSnapshotIngress(snapshotData);
