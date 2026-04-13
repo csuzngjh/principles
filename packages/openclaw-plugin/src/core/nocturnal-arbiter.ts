@@ -623,11 +623,12 @@ export function validateArtifact(
   // Rule 11: Quality threshold gate — reject low-signal artifacts
   // A reflection artifact must show positive cognitive improvement (thinkingModelDelta > 0).
   // planningRatioGain must not show catastrophic regression (< -0.5).
+  // #244: Use strict < so thinkingModelDelta=threshold passes (thin violations allowed at boundary)
   if (
     options.qualityThresholds?.thinkingModelDeltaMin !== undefined &&
     thinkingModelDelta !== undefined &&
     typeof thinkingModelDelta === 'number' &&
-    thinkingModelDelta <= options.qualityThresholds.thinkingModelDeltaMin
+    thinkingModelDelta < options.qualityThresholds.thinkingModelDeltaMin
   ) {
     failures.push({
       reason: `thinkingModelDelta (${thinkingModelDelta}) does not meet minimum quality threshold (${options.qualityThresholds.thinkingModelDeltaMin}) — reflection shows no cognitive improvement`,

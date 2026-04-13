@@ -1596,6 +1596,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                                 snapshot: snapshotData,
                                 taskId: sleepTask.id,
                                 painContext: sleepTask.recentPainContext,
+                                triggerSource: sleepTask.source,
                             },
                         });
                         sleepTask.resultRef = workflowHandle.workflowId;
