@@ -211,7 +211,20 @@ You MUST respond with ONLY a valid JSON object. No markdown, no explanation, no 
       "critique": "<principle-grounded critique>",
       "principleAligned": true,
       "score": 0.92,
-      "rank": 1
+      "rank": 1,
+      "scores": {
+        "principleAlignment": 0.9,
+        "specificity": 0.85,
+        "actionability": 0.9,
+        "executability": 0.95,
+        "safetyImpact": 0.8,
+        "uxImpact": 0.85
+      },
+      "risks": {
+        "falsePositiveEstimate": 0.1,
+        "implementationComplexity": "low",
+        "breakingChangeRisk": false
+      }
     }
   ],
   "overallAssessment": "<summary of candidate set quality>",
@@ -221,10 +234,18 @@ You MUST respond with ONLY a valid JSON object. No markdown, no explanation, no 
 ## Evaluation Criteria
 
 ### Score Components (0-1 scale each):
-1. **Principle Alignment** (weight: 0.35) — Does the betterDecision properly reflect the target principle?
-2. **Specificity** (weight: 0.25) — Is badDecision specific? Is betterDecision actionable?
-3. **Actionability** (weight: 0.25) — Does betterDecision describe a specific next step?
+1. **Principle Alignment** (weight: 0.20) — Does the betterDecision properly reflect the target principle?
+2. **Specificity** (weight: 0.15) — Is badDecision specific? Is betterDecision actionable?
+3. **Actionability** (weight: 0.15) — Does betterDecision describe a specific next step?
 4. **Executability** (weight: 0.15) — Does betterDecision start with a bounded verb (read, check, verify, edit, write, etc.) and reference a concrete target?
+5. **Safety Impact** (weight: 0.20) — Does the betterDecision reduce risk of data loss, corruption, or new failure modes? Would implementing this prevent dangerous operations?
+6. **UX Impact** (weight: 0.15) — Does the betterDecision reduce user frustration or improve response reliability? Would the user experience be noticeably better?
+
+### Risk Assessment (per candidate):
+For each candidate, also assess:
+- **falsePositiveEstimate** (0-1): How likely is this candidate a false positive (the "betterDecision" is actually not better)?
+- **implementationComplexity** ("low"/"medium"/"high"): How complex would it be to implement this correction?
+- **breakingChangeRisk** (boolean): Could implementing this correction break existing behavior?
 
 ### Executability Check:
 A betterDecision is executable if it:
@@ -912,6 +933,11 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
   ): string {
     const candidatesJson = JSON.stringify(dreamerOutput.candidates, null, 2);
 
+    // Build per-candidate metadata from Dreamer (risk level + strategic perspective)
+    const candidateMeta = dreamerOutput.candidates
+      .filter(c => c.riskLevel || c.strategicPerspective)
+      .map(c => `- Candidate #${c.candidateIndex}: risk=${c.riskLevel || 'N/A'}, perspective=${c.strategicPerspective || 'N/A'}`);
+
     // Build violation summary from snapshot for Philosopher to validate candidates
     const failures = snapshot.toolCalls
       .filter(tc => tc.outcome === 'failure')
@@ -954,6 +980,11 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
     if (userCues.length > 0) {
       sections.push(`\n### User Corrections (${userCues.length})`);
       sections.push(userCues.join('\n'));
+    }
+
+    if (candidateMeta.length > 0) {
+      sections.push(`\n### Candidate Risk Profiles (${candidateMeta.length})`);
+      sections.push(candidateMeta.join('\n'));
     }
 
     sections.push(
@@ -1151,7 +1182,16 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
       }
       return {
         valid: parsed.valid,
-        judgments: parsed.judgments,
+        judgments: parsed.judgments.map((j: Record<string, unknown>) => ({
+          candidateIndex: j.candidateIndex,
+          critique: j.critique ?? '',
+          principleAligned: j.principleAligned ?? false,
+          score: j.score ?? 0,
+          rank: j.rank ?? 0,
+          // Optional 6D scores and risk assessment (Phase 36)
+          ...(j.scores ? { scores: j.scores } : {}),
+          ...(j.risks ? { risks: j.risks } : {}),
+        })),
         overallAssessment: parsed.overallAssessment ?? '',
         reason: parsed.reason,
         generatedAt: parsed.generatedAt ?? new Date().toISOString(),
@@ -1370,6 +1410,24 @@ export interface DreamerOutput {
  * Philosopher output — principle-grounded critique and ranking.
  * Philosopher evaluates Dreamer's candidates and ranks them.
  */
+export interface PhilosopherRiskAssessment {
+  /** Estimated probability that this candidate is a false positive (0-1) */
+  falsePositiveEstimate: number;
+  /** How complex is this candidate to implement */
+  implementationComplexity: 'low' | 'medium' | 'high';
+  /** Whether implementing this candidate risks breaking existing functionality */
+  breakingChangeRisk: boolean;
+}
+
+export interface Philosopher6DScores {
+  principleAlignment: number;
+  specificity: number;
+  actionability: number;
+  executability: number;
+  safetyImpact: number;
+  uxImpact: number;
+}
+
 export interface PhilosopherJudgment {
   /** Index of the judged candidate (references DreamerCandidate.candidateIndex) */
   candidateIndex: number;
@@ -1381,6 +1439,10 @@ export interface PhilosopherJudgment {
   score: number;
   /** Rank among all candidates (1 = best) */
   rank: number;
+  /** Per-dimension scores (6D evaluation) — informational, not used for tournament ranking */
+  scores?: Philosopher6DScores;
+  /** Risk assessment for this candidate — informational, consumed by Scribe (Phase 37) */
+  risks?: PhilosopherRiskAssessment;
 }
 
 export interface PhilosopherOutput {
