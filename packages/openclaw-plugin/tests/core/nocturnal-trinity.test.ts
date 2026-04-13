@@ -7,8 +7,10 @@ import {
   DEFAULT_TRINITY_CONFIG,
   OpenClawTrinityRuntimeAdapter,
   TrinityRuntimeContractError,
+  NOCTURNAL_DREAMER_PROMPT,
   type TrinityConfig,
   type DreamerOutput,
+  type DreamerCandidate,
   type PhilosopherOutput,
   type TrinityDraftArtifact,
   type TrinityRuntimeAdapter,
@@ -1022,5 +1024,99 @@ describe('runTrinityAsync — useStubs=true uses synchronous stubs', () => {
     expect(adapter.invokeDreamer).not.toHaveBeenCalled();  // Adapter NOT called
     expect(adapter.invokePhilosopher).not.toHaveBeenCalled();
     expect(adapter.invokeScribe).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: NOCTURNAL_DREAMER_PROMPT — strategic perspective requirements (Task 1)
+// ---------------------------------------------------------------------------
+
+describe('NOCTURNAL_DREAMER_PROMPT — strategic perspective requirements', () => {
+  it('contains "## Strategic Perspective Requirements" section', () => {
+    expect(NOCTURNAL_DREAMER_PROMPT).toContain('## Strategic Perspective Requirements');
+  });
+
+  it('mentions all three strategic perspectives', () => {
+    expect(NOCTURNAL_DREAMER_PROMPT).toContain('conservative_fix');
+    expect(NOCTURNAL_DREAMER_PROMPT).toContain('structural_improvement');
+    expect(NOCTURNAL_DREAMER_PROMPT).toContain('paradigm_shift');
+  });
+
+  it('contains ANTI-PATTERN warning', () => {
+    expect(NOCTURNAL_DREAMER_PROMPT).toContain('ANTI-PATTERN');
+  });
+
+  it('references riskLevel as required candidate field', () => {
+    expect(NOCTURNAL_DREAMER_PROMPT).toContain('riskLevel');
+  });
+
+  it('references strategicPerspective as required candidate field', () => {
+    expect(NOCTURNAL_DREAMER_PROMPT).toContain('strategicPerspective');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: DreamerCandidate interface — optional fields (Task 1)
+// ---------------------------------------------------------------------------
+
+describe('DreamerCandidate interface — optional fields', () => {
+  it('accepts a candidate with riskLevel and strategicPerspective', () => {
+    const candidate: DreamerCandidate = {
+      candidateIndex: 0,
+      badDecision: 'Did something wrong',
+      betterDecision: 'Do it right',
+      rationale: 'Because the principle says so',
+      confidence: 0.9,
+      riskLevel: 'medium',
+      strategicPerspective: 'structural_improvement',
+    };
+    expect(candidate.riskLevel).toBe('medium');
+    expect(candidate.strategicPerspective).toBe('structural_improvement');
+  });
+
+  it('accepts a candidate without riskLevel or strategicPerspective (backward compat)', () => {
+    const candidate: DreamerCandidate = {
+      candidateIndex: 0,
+      badDecision: 'Did something wrong',
+      betterDecision: 'Do it right',
+      rationale: 'Because the principle says so',
+      confidence: 0.9,
+    };
+    expect(candidate.riskLevel).toBeUndefined();
+    expect(candidate.strategicPerspective).toBeUndefined();
+  });
+
+  it('accepts all valid riskLevel values', () => {
+    const levels: Array<'low' | 'medium' | 'high'> = ['low', 'medium', 'high'];
+    for (const level of levels) {
+      const candidate: DreamerCandidate = {
+        candidateIndex: 0,
+        badDecision: 'Wrong',
+        betterDecision: 'Right',
+        rationale: 'Because',
+        confidence: 0.8,
+        riskLevel: level,
+      };
+      expect(candidate.riskLevel).toBe(level);
+    }
+  });
+
+  it('accepts all valid strategicPerspective values', () => {
+    const perspectives: Array<'conservative_fix' | 'structural_improvement' | 'paradigm_shift'> = [
+      'conservative_fix',
+      'structural_improvement',
+      'paradigm_shift',
+    ];
+    for (const perspective of perspectives) {
+      const candidate: DreamerCandidate = {
+        candidateIndex: 0,
+        badDecision: 'Wrong',
+        betterDecision: 'Right',
+        rationale: 'Because',
+        confidence: 0.8,
+        strategicPerspective: perspective,
+      };
+      expect(candidate.strategicPerspective).toBe(perspective);
+    }
   });
 });
