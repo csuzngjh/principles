@@ -686,7 +686,8 @@ export function executeNocturnalReflection(
     stateDir,
     undefined, // principleId
     undefined, // trajectoryLastActivityAt
-    options.idleCheckOverride
+    options.idleCheckOverride,
+    !!options.idleCheckOverride // skip cooldown/quota gates for manual/test triggers
   );
   diagnostics.preflight = preflight;
 
@@ -920,11 +921,15 @@ export function executeNocturnalReflection(
   // -------------------------------------------------------------------------
   // Step 6: Arbiter validation
   // -------------------------------------------------------------------------
+  // #256: Use 0 for thinkingModelDeltaMin — Trinity chain (Dreamer→Philosopher→Scribe)
+  // already ensures quality. A delta of 0 is valid when both bad and better decisions
+  // show equally well-reasoned thinking (the Scribe's job is to contrast decisions,
+  // not to make one sound more "cognitive" than the other).
   const arbiterResult = parseAndValidateArtifact(rawJson, {
     expectedPrincipleId: selectedPrincipleId,
     expectedSessionId: selectedSessionId,
     qualityThresholds: {
-      thinkingModelDeltaMin: 0.01,
+      thinkingModelDeltaMin: 0,
       planningRatioGainMin: -0.5,
     },
   });
@@ -1153,7 +1158,8 @@ async function executeNocturnalReflectionWithAdapter(
     stateDir,
     undefined,
     undefined,
-    options.idleCheckOverride
+    options.idleCheckOverride,
+    !!options.idleCheckOverride // skip cooldown/quota gates for manual/test triggers
   );
   diagnostics.preflight = preflight;
 
@@ -1354,11 +1360,12 @@ async function executeNocturnalReflectionWithAdapter(
   }
 
   // Step 5: Arbiter validation
+  // #256: Use 0 for thinkingModelDeltaMin — Trinity chain already ensures quality
   const arbiterResult = parseAndValidateArtifact(rawJson, {
     expectedPrincipleId: selectedPrincipleId,
     expectedSessionId: selectedSessionId,
     qualityThresholds: {
-      thinkingModelDeltaMin: 0.01,
+      thinkingModelDeltaMin: 0,
       planningRatioGainMin: -0.5,
     },
   });

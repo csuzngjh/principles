@@ -41,6 +41,7 @@ import type { RecentPainContext } from '../evolution-worker.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import { validateNocturnalSnapshotIngress } from '../../core/nocturnal-snapshot-contract.js';
+import { isSubagentRuntimeAvailable } from '../../utils/subagent-probe.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // NocturnalResult Type Alias
@@ -65,6 +66,8 @@ export interface NocturnalWorkflowOptions {
     logger: PluginLogger;
     /** Trinity runtime adapter for subagent execution */
     runtimeAdapter: TrinityRuntimeAdapter;
+    /** Subagent runtime for availability probing (#254) */
+    subagent?: { run?: unknown };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -138,6 +141,7 @@ export class NocturnalWorkflowManager implements WorkflowManager {
     private readonly stateDir: string;
     private readonly logger: PluginLogger;
     private readonly runtimeAdapter: TrinityRuntimeAdapter;
+    private readonly subagent: { run?: unknown } | undefined;
     private readonly store: WorkflowStore;
 
     /** Tracks completion timestamps for idempotency */
@@ -156,6 +160,7 @@ export class NocturnalWorkflowManager implements WorkflowManager {
         this.stateDir = opts.stateDir;
         this.logger = opts.logger;
         this.runtimeAdapter = opts.runtimeAdapter;
+        this.subagent = opts.subagent;
         this.store = new WorkflowStore({ workspaceDir: opts.workspaceDir });
     }
 
@@ -172,8 +177,9 @@ export class NocturnalWorkflowManager implements WorkflowManager {
             metadata?: Record<string, unknown>;
         }
     ): Promise<WorkflowHandle> {
-        const runtimeAvailable = this.runtimeAdapter.isRuntimeAvailable();
-        if (!runtimeAvailable) {
+        // #254: Use isSubagentRuntimeAvailable instead of runtimeAdapter.isRuntimeAvailable()
+        // (which always returns true in OpenClawTrinityRuntimeAdapter)
+        if (!isSubagentRuntimeAvailable(this.subagent)) {
             this.logger.warn(`[PD:NocturnalWorkflow] Subagent runtime unavailable, skipping workflow`);
             throw new Error(`NocturnalWorkflowManager: subagent runtime unavailable`);
         }
