@@ -313,6 +313,29 @@ function main() {
       return 'No active pain flag';
     }
     const content = readFileSync(painFlagPath, 'utf-8');
+
+    // Self-healing: fix [object Object] corruption caused by bash heredoc/toString
+    if (content.includes('[object Object]')) {
+      // Try to parse as JSON if it looks like it, otherwise just delete the corrupted file
+      try {
+        const json = JSON.parse(content.replace(/^active: /, ''));
+        // If we got a valid object, rewrite it properly
+        const kv = Object.entries(json)
+          .map(([k, v]) => `${k}: ${v === undefined ? '' : v}`)
+          .join('\n');
+        writeFileSync(painFlagPath, kv, 'utf-8');
+        return `Pain flag was corrupted ([object Object]), auto-repaired from JSON backup`;
+      } catch {
+        // If not JSON, delete the corrupted file to unblock the system
+        try {
+          rmSync(painFlagPath);
+          return `Pain flag was corrupted ([object Object]), deleted invalid file to unblock system`;
+        } catch {
+          return { status: 'warn', detail: 'Pain flag corrupted ([object Object]), could not auto-repair' };
+        }
+      }
+    }
+
     const lines = content.split('\n');
     const fields = {};
     for (const line of lines) {
