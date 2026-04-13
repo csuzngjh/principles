@@ -1507,13 +1507,14 @@ export function invokeStubDreamer(
   // Ensure we don't exceed maxCandidates
   const limitedCandidates = candidates.slice(0, Math.min(candidates.length, maxCandidates));
 
-  // #219: Add fallback warning to rationales if data source is fallback
-  const annotatedCandidates = isFallback
-    ? limitedCandidates.map((c) => ({
-        ...c,
-        rationale: c.rationale + fallbackWarning,
-      }))
-    : limitedCandidates;
+  // #219/#259: Annotate and downgrade confidence if data source is fallback
+  // Fallback data is incomplete (trajectory DB unavailable) — reduce confidence
+  // so reviewers don't over-trust low-quality candidates.
+  const annotatedCandidates = limitedCandidates.map((c) => ({
+    ...c,
+    rationale: isFallback ? c.rationale + fallbackWarning : c.rationale,
+    confidence: isFallback ? Math.round(c.confidence * 0.5 * 100) / 100 : c.confidence,
+  }));
 
   return {
     valid: annotatedCandidates.length > 0,
