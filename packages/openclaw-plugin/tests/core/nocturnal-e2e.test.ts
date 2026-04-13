@@ -100,7 +100,7 @@ describe('Phase 4b: Multi-signal session selection', () => {
   it('session with more failures has higher violation density', () => {
     // Create session A: just 1 failure
     trajectory.recordSession({ sessionId: 'session-a-pain-only', startedAt: new Date().toISOString() });
-    trajectory.recordAssistantTurn({
+    const atIdA = trajectory.recordAssistantTurn({
       sessionId: 'session-a-pain-only', runId: 'run-a', provider: 'local', model: 'main',
       rawText: 'Code here', sanitizedText: 'Code here', usageJson: {}, empathySignalJson: {},
       createdAt: new Date().toISOString(),
@@ -108,7 +108,7 @@ describe('Phase 4b: Multi-signal session selection', () => {
     trajectory.recordUserTurn({
       sessionId: 'session-a-pain-only', turnIndex: 1, rawText: '错了',
       correctionDetected: true, correctionCue: '错了',
-      referencesAssistantTurnId: 1, createdAt: new Date().toISOString(),
+      referencesAssistantTurnId: atIdA, createdAt: new Date().toISOString(),
     });
     trajectory.recordToolCall({
       sessionId: 'session-a-pain-only', toolName: 'write', outcome: 'failure',
@@ -117,7 +117,7 @@ describe('Phase 4b: Multi-signal session selection', () => {
 
     // Create session B: 2 failures
     trajectory.recordSession({ sessionId: 'session-b-multi', startedAt: new Date().toISOString() });
-    trajectory.recordAssistantTurn({
+    const atIdB = trajectory.recordAssistantTurn({
       sessionId: 'session-b-multi', runId: 'run-b', provider: 'local', model: 'main',
       rawText: 'Code here', sanitizedText: 'Code here', usageJson: {}, empathySignalJson: {},
       createdAt: new Date().toISOString(),
@@ -125,7 +125,7 @@ describe('Phase 4b: Multi-signal session selection', () => {
     trajectory.recordUserTurn({
       sessionId: 'session-b-multi', turnIndex: 1, rawText: '太复杂了',
       correctionDetected: true, correctionCue: '太复杂了',
-      referencesAssistantTurnId: 2, createdAt: new Date().toISOString(),
+      referencesAssistantTurnId: atIdB, createdAt: new Date().toISOString(),
     });
     trajectory.recordToolCall({
       sessionId: 'session-b-multi', toolName: 'edit', outcome: 'failure',
@@ -170,7 +170,7 @@ describe('Phase 4c: Boundary value tests', () => {
 
   it('session with correction cue is listed as candidate', () => {
     trajectory.recordSession({ sessionId: 'single-pain', startedAt: new Date().toISOString() });
-    trajectory.recordAssistantTurn({
+    const atIdC = trajectory.recordAssistantTurn({
       sessionId: 'single-pain', runId: 'run-c', provider: 'local', model: 'main',
       rawText: 'Agent response', sanitizedText: 'Agent response', usageJson: {}, empathySignalJson: {},
       createdAt: new Date().toISOString(),
@@ -178,7 +178,7 @@ describe('Phase 4c: Boundary value tests', () => {
     trajectory.recordUserTurn({
       sessionId: 'single-pain', turnIndex: 1, rawText: '错了',
       correctionDetected: true, correctionCue: '错了',
-      referencesAssistantTurnId: 1, createdAt: new Date().toISOString(),
+      referencesAssistantTurnId: atIdC, createdAt: new Date().toISOString(),
     });
 
     const extractor = new NocturnalTrajectoryExtractor(trajectory);

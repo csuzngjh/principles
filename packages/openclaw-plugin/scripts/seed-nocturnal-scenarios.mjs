@@ -40,7 +40,14 @@ function parseArgs() {
 }
 
 function esc(s) {
-  return String(s).replace(/'/g, "''");
+  // Comprehensive SQL escaping for SQLite string literals
+  // Handles: single quotes, newlines, carriage returns, backslashes, null bytes
+  return String(s)
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "''")
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r')
+    .replace(/\x00/g, '\\0');
 }
 
 function nowIso() {

@@ -2,6 +2,25 @@ import type { OpenClawPluginApi } from '../openclaw-sdk.js';
 import { Type } from '@sinclair/typebox';
 import { buildPainFlag, writePainFlag } from '../core/pain.js';
 import { resolveWorkspaceDirFromApi } from '../core/path-resolver.js';
+import * as fs from 'fs';
+import * as path from 'path';
+
+// Pain flag contract required fields
+const PAIN_FLAG_REQUIRED_FIELDS = ['source', 'score', 'time', 'reason'] as const;
+
+/**
+ * Atomic file write: write to temp file then rename.
+ * Prevents corruption if process crashes mid-write.
+ */
+function writePainFlagAtomic(filePath: string, content: string): void {
+    const dir = path.dirname(filePath);
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+    }
+    const tmpPath = `${filePath}.tmp.${Date.now()}.${process.pid}`;
+    fs.writeFileSync(tmpPath, content, 'utf-8');
+    fs.renameSync(tmpPath, filePath);
+}
 
 /**
  * Creates the `write_pain_flag` tool.
@@ -10,28 +29,53 @@ import { resolveWorkspaceDirFromApi } from '../core/path-resolver.js';
  * that it made a mistake, violated a principle, or needs to flag an issue
  * for later reflection.
  *
- * Usage (agent-side):
- *   write_pain_flag({ reason: "I forgot to check the file before editing", score: 70 })
+ * The tool wraps `buildPainFlag` + atomic `writePainFlag` to ensure:
+ * - Correct KV format serialization (never [object Object] corruption)
+ * - Atomic writes (temp file + rename, crash-safe)
+ * - Full contract compliance (source, score, time, reason)
  *
- * The tool wraps `buildPainFlag` + `writePainFlag` to ensure correct KV format
- * serialization — the agent never writes to .pain_flag directly.
+ * The agent should NEVER write to .pain_flag directly.
  */
 export function createWritePainFlagTool(api: OpenClawPluginApi) {
     return {
         name: 'write_pain_flag',
-        description: '记录一个痛苦信号，标记智能体犯了错误、违反了原则或需要后续反思的问题。不要直接写 .pain_flag 文件，使用此工具代替。',
+        description:
+            'Record a pain signal to flag mistakes, principle violations, or issues for later reflection. ' +
+            'Use this tool INSTEAD of writing .pain_flag directly. ' +
+            'Pain signals are processed by the evolution system on the next heartbeat cycle.',
         parameters: Type.Object({
-            reason: Type.String({ description: '痛苦的原因，描述具体发生了什么错误或不满足原则的地方。' }),
+            reason: Type.String({
+                description:
+                    'Describe specifically what went wrong. ' +
+                    'Include the error, the violated principle, or the issue. ' +
+                    'Be concrete: "I edited config.ts without reading it first, breaking the export" ' +
+                    'is better than "I made a mistake".',
+            }),
             score: Type.Optional(Type.Number({
-                description: '痛苦分数 (0-100)。默认 80。建议值：30-50 轻微问题，50-70 中等错误，70-100 严重违反原则。',
+                description:
+                    'Pain severity score (0-100). Default: 80. ' +
+                    'Guidelines: 30-50 (minor issue), 50-70 (moderate error), ' +
+                    '70-100 (severe principle violation or data loss risk).',
                 minimum: 0,
                 maximum: 100,
             })),
             source: Type.Optional(Type.String({
-                description: '痛苦来源。可选值: tool_failure(工具失败), user_empathy(用户不满), manual(手动标记), principle_violation(违反原则)。',
+                description:
+                    'Source of the pain signal. ' +
+                    'Values: manual (user flagged), tool_failure (tool error), ' +
+                    'user_empathy (user frustration), principle_violation (principle broken), ' +
+                    'human_intervention (user manually intervened). ' +
+                    'Default: manual.',
+            })),
+            session_id: Type.Optional(Type.String({
+                description:
+                    'Session ID where the pain occurred. ' +
+                    'If not provided, the system will use the current session.',
             })),
             is_risky: Type.Optional(Type.Boolean({
-                description: '是否是高风险操作（如写入敏感文件）。默认 false。',
+                description:
+                    'Whether this involves a high-risk operation (e.g., writing to sensitive files). ' +
+                    'Default: false.',
             })),
         }),
 
@@ -40,38 +84,107 @@ export function createWritePainFlagTool(api: OpenClawPluginApi) {
             rawParams: Record<string, unknown>
         ): Promise<{ content: { type: string; text: string }[] }> {
             const reason = typeof rawParams.reason === 'string' ? rawParams.reason.trim() : '';
-            const score = typeof rawParams.score === 'number' ? Math.max(0, Math.min(100, rawParams.score)) : 80;
-            const source = typeof rawParams.source === 'string' ? rawParams.source : 'manual';
+            const score = typeof rawParams.score === 'number' ? Math.max(0, Math.min(100, Math.round(rawParams.score))) : 80;
+            const source = typeof rawParams.source === 'string' && rawParams.source.trim() ? rawParams.source.trim() : 'manual';
+            const sessionId = typeof rawParams.session_id === 'string' ? rawParams.session_id.trim() : '';
             const isRisky = rawParams.is_risky === true;
 
+            // ── Validate required fields ──
             if (!reason) {
-                return { content: [{ type: 'text', text: '❌ 错误: 必须提供 reason 参数，描述痛苦的原因。' }] };
+                api.logger?.warn?.('[PD:write_pain_flag] Missing required field: reason');
+                return {
+                    content: [{
+                        type: 'text',
+                        text: '❌ Error: The `reason` parameter is required.\n' +
+                            'Describe specifically what went wrong. Example:\n' +
+                            '"I edited config.ts without reading it first, breaking the export"',
+                    }],
+                };
+            }
+
+            // ── Resolve workspace ──
+            const workspaceDir = resolveWorkspaceDirFromApi(api);
+            if (!workspaceDir) {
+                api.logger?.error?.('[PD:write_pain_flag] Cannot resolve workspace directory');
+                return {
+                    content: [{
+                        type: 'text',
+                        text: '❌ Error: Cannot determine the workspace directory. ' +
+                            'Please ensure you are in an active workspace.',
+                    }],
+                };
             }
 
             try {
-                const workspaceDir = resolveWorkspaceDirFromApi(api);
-                if (!workspaceDir) {
-                    return { content: [{ type: 'text', text: '❌ 错误: 无法确定工作目录。' }] };
-                }
-
+                // ── Build pain flag data (KV format) ──
                 const painData = buildPainFlag({
                     source,
                     score: String(score),
                     reason,
+                    session_id: sessionId,
                     is_risky: isRisky,
                 });
 
-                writePainFlag(workspaceDir, painData);
+                // ── Validate contract compliance ──
+                const missingFields: string[] = [];
+                for (const field of PAIN_FLAG_REQUIRED_FIELDS) {
+                    if (!painData[field] || painData[field].trim() === '') {
+                        missingFields.push(field);
+                    }
+                }
+                if (missingFields.length > 0) {
+                    api.logger?.error?.(`[PD:write_pain_flag] Pain flag missing required fields: ${missingFields.join(', ')}`);
+                    return {
+                        content: [{
+                            type: 'text',
+                            text: `❌ Error: Pain flag is missing required fields: ${missingFields.join(', ')}. ` +
+                                'This is an internal error — please report it.',
+                        }],
+                    };
+                }
+
+                // ── Atomic write (temp file + rename) ──
+                const painFlagPath = path.join(workspaceDir, '.state', '.pain_flag');
+                const { serializeKvLines } = await import('../utils/io.js');
+                const content = serializeKvLines(painData);
+                writePainFlagAtomic(painFlagPath, content);
+
+                // ── Log success ──
+                api.logger?.info?.(
+                    `[PD:write_pain_flag] Pain signal recorded: source=${source}, score=${score}, ` +
+                    `reason="${reason.slice(0, 80)}"${reason.length > 80 ? '...' : ''}"`
+                );
+
+                // ── Agent feedback ──
+                return {
+                    content: [{
+                        type: 'text',
+                        text: `✅ Pain signal recorded successfully.\n\n` +
+                            `- **Reason**: ${reason}\n` +
+                            `- **Score**: ${score}/100\n` +
+                            `- **Source**: ${source}\n` +
+                            `- **Risk**: ${isRisky ? 'Yes' : 'No'}\n` +
+                            `- **Session**: ${sessionId || '(current)'}\n\n` +
+                            `The evolution system will process this signal on the next heartbeat cycle ` +
+                            `(typically within 60 seconds).`,
+                    }],
+                };
+            } catch (err) {
+                // ── Log failure with stack trace ──
+                const errorMsg = err instanceof Error ? err.message : String(err);
+                const stack = err instanceof Error ? err.stack?.split('\n').slice(0, 3).join(' → ') : '';
+                api.logger?.error?.(
+                    `[PD:write_pain_flag] Failed to write pain flag: ${errorMsg}` +
+                    (stack ? `\n  Stack: ${stack}` : '')
+                );
 
                 return {
                     content: [{
                         type: 'text',
-                        text: `✅ 痛苦信号已记录。\n- 原因: ${reason}\n- 分数: ${score}\n- 来源: ${source}\n- 风险: ${isRisky ? '是' : '否'}\n\n进化系统将在下一个心跳周期处理此信号。`,
+                        text: `❌ Failed to record pain signal: ${errorMsg}\n\n` +
+                            'The error has been logged. Please try again or report this issue.',
                     }],
                 };
-            } catch (err) {
-                api.logger?.error?.(`[PD:write_pain_flag] Failed to write pain flag: ${String(err)}`);
-                return { content: [{ type: 'text', text: `❌ 记录痛苦信号失败: ${String(err)}` }] };
             }
         },
     };
