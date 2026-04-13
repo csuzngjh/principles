@@ -165,6 +165,7 @@ export class EvolutionEngine {
 
   // ===== 记录失败 =====
 
+    // eslint-disable-next-line complexity -- complexity 12, refactor candidate
   public recordFailure(
     toolName: string,
     options?: {

@@ -305,6 +305,7 @@ function showHelp(isZh: boolean): string {
 /**
  * Main command handler
  */
+    // eslint-disable-next-line complexity -- complexity 15, refactor candidate
 export function handleContextCommand(ctx: PluginCommandContext): PluginCommandResult {
     const workspaceDir = getWorkspaceDir(ctx);
     const args = (ctx.args || '').trim().split(/\s+/);

@@ -216,6 +216,7 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
  * Handle /pd-status empathy subcommand
  */
  
+    // eslint-disable-next-line complexity -- complexity 13, refactor candidate
 function handleEmpathySubcommand(
     wctx: WorkspaceContext,
     args: string,

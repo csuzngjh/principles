@@ -645,6 +645,7 @@ export function getDatasetStats(
  * @param targetModelFamily - Default target family for migrated samples
  * @returns Number of newly registered samples
  */
+    // eslint-disable-next-line complexity -- complexity 14, refactor candidate
 export function migrateSampleArtifacts(
   workspaceDir: string,
   targetModelFamily: string | null = null

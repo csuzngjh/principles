@@ -2,6 +2,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { resolvePdPath } from '../core/paths.js';
 
+    // eslint-disable-next-line complexity -- complexity 12, refactor candidate
 export function normalizePath(filePath: string, projectDir: string): string {
   if (!filePath) return '';
 

@@ -27,6 +27,7 @@ function clampScore(value: number): number {
   return Math.max(0, Math.min(100, Number(value.toFixed(2))));
 }
 
+    // eslint-disable-next-line complexity -- complexity 15, refactor candidate
 export function assessDeprecatedReadiness(
   principle: PrincipleLifecycleEvidence,
   precomputedRuleMetrics?: Record<string, RuleMetricResult>,

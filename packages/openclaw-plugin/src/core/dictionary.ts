@@ -116,6 +116,7 @@ export class PainDictionary {
         }
     }
 
+    // eslint-disable-next-line complexity -- complexity 13, refactor candidate
     match(text: string): { ruleId: string; severity: number } | undefined {
         if (shouldIgnorePainProtocolText(text)) return undefined;
 

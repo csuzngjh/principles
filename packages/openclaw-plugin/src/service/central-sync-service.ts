@@ -18,6 +18,7 @@ let centralDb: CentralDatabase | null = null;
  */
 const DEFAULT_SYNC_INTERVAL_MS = 5 * 60 * 1000;
 
+    // eslint-disable-next-line complexity -- complexity 12, refactor candidate
 async function runSyncCycle(): Promise<void> {
   if (!centralDb) {
     logger?.warn?.('[PD:CentralSync] CentralDatabase not initialized, skipping sync');

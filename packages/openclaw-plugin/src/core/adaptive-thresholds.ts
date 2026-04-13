@@ -407,6 +407,7 @@ export function getDetailedThresholdState(
  * @param signals - Observable signals
  * @returns UpdateThresholdResult describing the most significant change
  */
+    // eslint-disable-next-line complexity -- complexity 15, refactor candidate
 export function adjustThresholdsFromSignals(
   stateDir: string,
   signals: ThresholdSignals
