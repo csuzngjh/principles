@@ -1003,6 +1003,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             logger: api?.logger || logger,
                             // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Reason: api is guaranteed non-null in this recovery path where runtimeAdapter is required
                             runtimeAdapter: new OpenClawTrinityRuntimeAdapter(api!),
+                            subagent: api?.runtime?.subagent,
                         });
                         try {
                             // Force-expire this specific workflow regardless of TTL
@@ -1596,6 +1597,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         stateDir: wctx.stateDir,
                         logger: api.logger,
                         runtimeAdapter: new OpenClawTrinityRuntimeAdapter(api),
+                        subagent: api.runtime.subagent,
                     });
 
                     if (!isPollingTask) {
@@ -2096,6 +2098,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                                 stateDir: wctx.stateDir,
                                 logger: api.logger,
                                 runtimeAdapter: new OpenClawTrinityRuntimeAdapter(api),
+                                subagent: api.runtime.subagent,
                             });
                             swept += await nocturnalMgr.sweepExpiredWorkflows(WORKFLOW_TTL_MS, subagentRuntime, agentSession);
                             nocturnalMgr.dispose();

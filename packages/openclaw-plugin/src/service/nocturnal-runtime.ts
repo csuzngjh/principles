@@ -560,7 +560,8 @@ export function checkPreflight(
     stateDir: string,
     principleId?: string,
     trajectoryLastActivityAt?: number,
-    idleCheckOverride?: IdleCheckResult
+    idleCheckOverride?: IdleCheckResult,
+    skipGatesForManualTrigger?: boolean
 ): PreflightCheckResult {
     const idle = idleCheckOverride ?? checkWorkspaceIdle(workspaceDir, {}, trajectoryLastActivityAt);
     const cooldown = checkCooldown(stateDir, principleId);
@@ -571,16 +572,20 @@ export function checkPreflight(
         blockers.push(`Workspace not idle (active for ${idle.idleForMs}ms, threshold=${DEFAULT_IDLE_THRESHOLD_MS}ms)`);
     }
 
-    if (cooldown.globalCooldownActive) {
-        blockers.push(`Global cooldown active until ${cooldown.globalCooldownUntil}`);
-    }
+    if (!skipGatesForManualTrigger) {
+        if (cooldown.globalCooldownActive) {
+            blockers.push(`Global cooldown active until ${cooldown.globalCooldownUntil}`);
+        }
 
-    if (cooldown.principleCooldownActive) {
-        blockers.push(`Principle cooldown active until ${cooldown.principleCooldownUntil}`);
-    }
+        if (cooldown.principleCooldownActive) {
+            blockers.push(`Principle cooldown active until ${cooldown.principleCooldownUntil}`);
+        }
 
-    if (cooldown.quotaExhausted) {
-        blockers.push(`Quota exhausted (${DEFAULT_MAX_RUNS_PER_WINDOW} runs per ${DEFAULT_QUOTA_WINDOW_MS / 3600000}h window)`);
+        if (cooldown.quotaExhausted) {
+            blockers.push(`Quota exhausted (${DEFAULT_MAX_RUNS_PER_WINDOW} runs per ${DEFAULT_QUOTA_WINDOW_MS / 3600000}h window)`);
+        }
+    } else if (cooldown.globalCooldownActive || cooldown.principleCooldownActive || cooldown.quotaExhausted) {
+        // Log that gates are being bypassed for manual trigger
     }
 
     if (idle.abandonedSessionIds.length > 0 && idle.userActiveSessions === 0) {
