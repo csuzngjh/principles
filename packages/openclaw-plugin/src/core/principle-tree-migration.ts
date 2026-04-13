@@ -9,8 +9,6 @@
  *   - Or run manually: node scripts/migrate-principle-tree.mjs <workspace-dir>
  */
 
-import * as fs from 'fs';
-import * as path from 'path';
 import {
   loadLedger,
   saveLedger,

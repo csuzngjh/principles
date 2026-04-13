@@ -36,7 +36,6 @@ import {
 } from '../nocturnal-service.js';
 import { type TrinityStageFailure, type TrinityResult } from '../../core/nocturnal-trinity.js';
 import type { TrinityRuntimeAdapter } from '../../core/nocturnal-trinity.js';
-import type { NocturnalSessionSnapshot } from '../../core/nocturnal-trajectory-extractor.js';
 import type { RecentPainContext } from '../evolution-worker.js';
 import * as fs from 'fs';
 import * as path from 'path';
