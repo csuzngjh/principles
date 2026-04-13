@@ -1004,7 +1004,7 @@ export class TrajectoryDatabase {
     const qualityScore = Number(record.quality_score);
     const diffExcerpt = String(record.diff_excerpt ?? '');
     const principleIds = String(record.principle_ids_json ?? '[]');
-    // quality_score (0-1) → pain score (0-100)
+    // quality_score (0-100) from correction sample → pain score (0-100), clamped
     const painScore = Math.max(0, Math.min(100, Math.round(Number(qualityScore) || 0)));
     const reason = `Correction rejected (quality ${qualityScore.toFixed(2)}). Principles: ${principleIds}${diffExcerpt ? ` — ${diffExcerpt.slice(0, 120)}` : ''}`;
 
