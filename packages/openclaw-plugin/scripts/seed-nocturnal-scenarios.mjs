@@ -15,10 +15,32 @@
 import { existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { execSync } from 'child_process';
+import { execFileSync, execSync } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+// ─── Pre-flight: check sqlite3 CLI is available ───
+function ensureSqlite3() {
+  try {
+    execFileSync('sqlite3', ['--version'], { encoding: 'utf-8', timeout: 5000 });
+  } catch {
+    console.error('❌ sqlite3 CLI is required but not found in PATH');
+    console.error('   Install it: apt-get install sqlite3  |  brew install sqlite3  |  choco install sqlite');
+    process.exit(1);
+  }
+}
+
+/**
+ * Run a SQL query safely via execFileSync (no shell interpolation).
+ * Returns trimmed stdout string.
+ */
+function runSql(dbPath, sql) {
+  return execFileSync('sqlite3', [dbPath, sql], {
+    encoding: 'utf-8',
+    timeout: 5000,
+  }).trim();
+}
 
 // ─── Argument parsing ───
 function parseArgs() {
@@ -63,6 +85,8 @@ function daysAgo(days) {
 function main() {
   const { workspaceDir } = parseArgs();
   const dbPath = join(workspaceDir, '.state', 'trajectory.db');
+
+  ensureSqlite3();
 
   if (!existsSync(dbPath)) {
     console.error(`❌ trajectory.db not found at ${dbPath}`);
@@ -278,7 +302,7 @@ function main() {
     // Check if scenario already exists with complete data (pain_events, not just sessions)
     // This prevents partial data if the script was interrupted mid-insert
     try {
-      const existing = execSync(`sqlite3 '${dbPath}' "SELECT COUNT(*) FROM pain_events WHERE session_id = '${esc(s.sessionId)}';"`, { encoding: 'utf-8' }).trim();
+      const existing = runSql(dbPath, `SELECT COUNT(*) FROM pain_events WHERE session_id = '${esc(s.sessionId)}';`);
       if (parseInt(existing) > 0) {
         console.log(`  ⏭️  Skipping ${s.sessionId} (already exists with ${existing} pain events)`);
         skipped++;
@@ -316,10 +340,14 @@ VALUES ('${esc(s.sessionId)}', '${esc(tc.toolName)}', '${esc(tc.outcome)}', ${tc
 VALUES ('${esc(s.sessionId)}', '${esc(pe.source)}', ${pe.score}, '${esc(pe.reason)}', '${esc(pe.severity)}', '${esc(pe.origin)}', ${pe.confidence !== undefined ? pe.confidence : 'NULL'}, ${pe.text ? `'${esc(pe.text)}'` : 'NULL'}, '${createdAt}');`);
     }
 
-    // Execute all SQL in one transaction
+    // Execute all SQL in one transaction via stdin piping
     const fullSql = `BEGIN TRANSACTION;\n${sql.join('\n')}\nCOMMIT;`;
     try {
-      execSync(`sqlite3 '${dbPath}' <<'EOSQL'\n${fullSql}\nEOSQL`, { encoding: 'utf-8' });
+      execFileSync('sqlite3', [dbPath], {
+        input: fullSql,
+        encoding: 'utf-8',
+        timeout: 10000,
+      });
       inserted++;
       console.log(`  ✅ ${s.sessionId} — ${s.description}`);
     } catch (e) {
@@ -334,11 +362,11 @@ VALUES ('${esc(s.sessionId)}', '${esc(pe.source)}', ${pe.score}, '${esc(pe.reaso
 
   // Print signal diversity report
   try {
-    const painSummary = execSync(`sqlite3 -header -column '${dbPath}' "SELECT source, COUNT(*) as count, ROUND(AVG(score), 1) as avg_score FROM pain_events WHERE session_id LIKE 'seed-%' GROUP BY source;"`, { encoding: 'utf-8' });
+    const painSummary = runSql(dbPath, `.mode column\n.headers on\nSELECT source, COUNT(*) as count, ROUND(AVG(score), 1) as avg_score FROM pain_events WHERE session_id LIKE 'seed-%' GROUP BY source;`);
     console.log('\n📈 Signal diversity report (seed scenarios only):');
     console.log(painSummary);
 
-    const correctionSummary = execSync(`sqlite3 -header -column '${dbPath}' "SELECT COUNT(*) as total, SUM(CASE WHEN correction_detected = 1 THEN 1 ELSE 0 END) as with_correction FROM user_turns WHERE session_id LIKE 'seed-%';"`, { encoding: 'utf-8' });
+    const correctionSummary = runSql(dbPath, `.mode column\n.headers on\nSELECT COUNT(*) as total, SUM(CASE WHEN correction_detected = 1 THEN 1 ELSE 0 END) as with_correction FROM user_turns WHERE session_id LIKE 'seed-%';`);
     console.log('📝 Correction scenarios:');
     console.log(correctionSummary);
   } catch (e) {

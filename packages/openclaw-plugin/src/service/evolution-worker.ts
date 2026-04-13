@@ -594,6 +594,124 @@ export function readRecentPainContext(wctx: WorkspaceContext): RecentPainContext
 }
 
 /**
+ * Build a dedup key from pain context.
+ * Returns null when no pain context is available (bypasses dedup).
+ */
+function buildPainSourceKey(
+    painCtx: ReturnType<typeof readRecentPainContext>,
+): string | null {
+    if (!painCtx.mostRecent) return null;
+    return `${painCtx.mostRecent.source}::${painCtx.mostRecent.reason?.slice(0, 50) ?? ''}`;
+}
+
+/**
+ * Check whether a similar sleep_reflection task completed recently.
+ * Phase 3c: Prevents redundant reflections of the same underlying issue.
+ */
+function hasRecentSimilarReflection(
+    queue: EvolutionQueueItem[],
+    painSourceKey: string,
+    now: number,
+): EvolutionQueueItem | null {
+    const DEDUP_WINDOW_MS = 4 * 60 * 60 * 1000; // 4 hours
+    return queue.find((t) => {
+        if (t.taskKind !== 'sleep_reflection') return false;
+        // Only match completed tasks (exclude failed to allow retries)
+        if (t.status !== 'completed') return false;
+        if (!t.completed_at) return false;
+        const age = now - new Date(t.completed_at).getTime();
+        if (age > DEDUP_WINDOW_MS) return false;
+        const taskPainKey = buildPainSourceKey(t.recentPainContext ?? { mostRecent: null, recentPainCount: 0, recentMaxPainScore: 0 });
+        // If either side has no pain context, they don't match
+        if (!taskPainKey) return false;
+        return taskPainKey === painSourceKey;
+    }) ?? null;
+}
+
+/**
+ * Check whether a specific task kind has a pending or in-progress entry.
+ */
+function hasPendingTask(queue: EvolutionQueueItem[], taskKind: string): boolean {
+    return queue.some(
+        (t) => t.taskKind === taskKind && (t.status === 'pending' || t.status === 'in_progress'),
+    );
+}
+
+/**
+ * Decide whether to skip enqueuing due to a recent similar reflection.
+ * Returns true if skipped (with log), false if should proceed.
+ */
+function shouldSkipForDedup(
+    queue: EvolutionQueueItem[],
+    wctx: WorkspaceContext,
+    logger: PluginLogger,
+): boolean {
+    const recentPainContext = readRecentPainContext(wctx);
+    const painSourceKey = buildPainSourceKey(recentPainContext);
+
+    // Bypass dedup when there is no pain context — general idle reflections
+    // should not be throttled by the 'no_pain_context' sentinel.
+    if (!painSourceKey) return false;
+
+    const now = Date.now();
+    const recentSimilarReflection = hasRecentSimilarReflection(queue, painSourceKey, now);
+
+    if (recentSimilarReflection) {
+        const completedTime = new Date(recentSimilarReflection.completed_at!).getTime();
+        logger?.debug?.(`[PD:EvolutionWorker] Skipping sleep_reflection — similar reflection completed ${Math.round((now - completedTime) / 60000)}min ago (same pain pattern: ${painSourceKey})`);
+        return true;
+    }
+    return false;
+}
+
+/**
+ * Load and migrate the evolution queue. Returns empty array if file doesn't exist.
+ */
+function loadEvolutionQueue(queuePath: string): EvolutionQueueItem[] {
+    let rawQueue: RawQueueItem[] = [];
+    try {
+        rawQueue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
+    } catch {
+        // Queue doesn't exist yet - create empty array
+        rawQueue = [];
+    }
+    return migrateQueueToV2(rawQueue);
+}
+
+/**
+ * Build and persist a new sleep_reflection task.
+ */
+function enqueueNewSleepReflectionTask(
+    queue: EvolutionQueueItem[],
+    recentPainContext: ReturnType<typeof readRecentPainContext>,
+    queuePath: string,
+    logger: PluginLogger,
+): void {
+    const taskId = createEvolutionTaskId('nocturnal', 50, 'idle workspace', 'Sleep-mode reflection', Date.now());
+    const nowIso = new Date().toISOString();
+
+    queue.push({
+        id: taskId,
+        taskKind: 'sleep_reflection',
+        priority: 'medium',
+        score: 50,
+        source: 'nocturnal',
+        reason: 'Sleep-mode reflection triggered by idle workspace',
+        trigger_text_preview: 'Idle workspace detected',
+        timestamp: nowIso,
+        enqueued_at: nowIso,
+        status: 'pending',
+        traceId: taskId,
+        retryCount: 0,
+        maxRetries: 1, // sleep_reflection doesn't retry
+        recentPainContext,
+    });
+
+    fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+    logger?.info?.(`[PD:EvolutionWorker] Enqueued sleep_reflection task ${taskId}`);
+}
+
+/**
  * Enqueue a sleep_reflection task if one is not already pending.
  * Phase 2.4: Called when workspace is idle to trigger nocturnal reflection.
  * Phase 3c: Dedup checks recent sleep_reflection tasks by pain source pattern
@@ -601,82 +719,28 @@ export function readRecentPainContext(wctx: WorkspaceContext): RecentPainContext
  */
 async function enqueueSleepReflectionTask(
     wctx: WorkspaceContext,
-    logger: PluginLogger
+    logger: PluginLogger,
 ): Promise<void> {
     const queuePath = wctx.resolve('EVOLUTION_QUEUE');
     const releaseLock = await requireQueueLock(queuePath, logger, 'enqueueSleepReflection', EVOLUTION_QUEUE_LOCK_SUFFIX);
 
     try {
-        let rawQueue: RawQueueItem[] = [];
-        try {
-            rawQueue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
-        } catch {
-            // Queue doesn't exist yet - create empty array
-            rawQueue = [];
-        }
+        const queue = loadEvolutionQueue(queuePath);
 
-        const queue: EvolutionQueueItem[] = migrateQueueToV2(rawQueue);
-
-        // Check if a sleep_reflection task is already pending
-        const hasPendingSleepReflection = queue.some(
-            t => t.taskKind === 'sleep_reflection' && (t.status === 'pending' || t.status === 'in_progress')
-        );
-        if (hasPendingSleepReflection) {
+        // Guard 1: Skip if a sleep_reflection task is already pending/in-progress
+        if (hasPendingTask(queue, 'sleep_reflection')) {
             logger?.debug?.('[PD:EvolutionWorker] sleep_reflection task already pending/in-progress, skipping');
             return;
         }
 
-        // Phase 3c: Dedup — check if a recent sleep_reflection task with the same
-        // pain source pattern already completed within the dedup window.
-        // This prevents redundant reflections of the same underlying issue.
-        const recentPainContext = readRecentPainContext(wctx);
-        const painSourceKey = recentPainContext.mostRecent
-            ? `${recentPainContext.mostRecent.source}::${recentPainContext.mostRecent.reason?.slice(0, 50) ?? ''}`
-            : 'no_pain_context';
-
-        const now = Date.now();
-        const DEDUP_WINDOW_MS = 4 * 60 * 60 * 1000; // 4 hours
-        const recentSimilarReflection = queue.find(t => {
-            if (t.taskKind !== 'sleep_reflection') return false;
-            if (t.status !== 'completed' && t.status !== 'failed') return false;
-            if (!t.completed_at) return false;
-            const age = now - new Date(t.completed_at).getTime();
-            if (age > DEDUP_WINDOW_MS) return false;
-            // Match by pain source pattern in the task's recentPainContext
-            const taskPainKey = t.recentPainContext?.mostRecent
-                ? `${t.recentPainContext.mostRecent.source}::${t.recentPainContext.mostRecent.reason?.slice(0, 50) ?? ''}`
-                : 'no_pain_context';
-            return taskPainKey === painSourceKey;
-        });
-
-        if (recentSimilarReflection) {
-            const completedTime = new Date(recentSimilarReflection.completed_at!).getTime();
-            logger?.debug?.(`[PD:EvolutionWorker] Skipping sleep_reflection — similar reflection completed ${Math.round((now - completedTime) / 60000)}min ago (same pain pattern: ${painSourceKey})`);
+        // Guard 2: Dedup — skip if similar reflection completed recently
+        if (shouldSkipForDedup(queue, wctx, logger)) {
             return;
         }
 
-        const taskId = createEvolutionTaskId('nocturnal', 50, 'idle workspace', 'Sleep-mode reflection', now);
-        const nowIso = new Date(now).toISOString();
-
-        queue.push({
-            id: taskId,
-            taskKind: 'sleep_reflection',
-            priority: 'medium',
-            score: 50,
-            source: 'nocturnal',
-            reason: 'Sleep-mode reflection triggered by idle workspace',
-            trigger_text_preview: 'Idle workspace detected',
-            timestamp: nowIso,
-            enqueued_at: nowIso,
-            status: 'pending',
-            traceId: taskId,
-            retryCount: 0,
-            maxRetries: 1, // sleep_reflection doesn't retry
-            recentPainContext,
-        });
-
-        fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
-        logger?.info?.(`[PD:EvolutionWorker] Enqueued sleep_reflection task ${taskId}`);
+        // Enqueue the new task
+        const recentPainContext = readRecentPainContext(wctx);
+        enqueueNewSleepReflectionTask(queue, recentPainContext, queuePath, logger);
     } finally {
         releaseLock();
     }

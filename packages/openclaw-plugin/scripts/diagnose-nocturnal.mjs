@@ -12,10 +12,10 @@
  * Output: Structured report with pass/fail for each checkpoint.
  */
 
-import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { execSync } from 'child_process';
+import { execSync, execFileSync } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -443,8 +443,13 @@ function main() {
       if (!existsSync(dbPath)) {
         return { status: 'warn', detail: 'trajectory.db not found' };
       }
-      const result = execSync(`sqlite3 '${dbPath}' "SELECT review_status, COUNT(*), AVG(quality_score) FROM correction_samples GROUP BY review_status;" 2>/dev/null || echo 'QUERY_FAILED'`, { encoding: 'utf-8', timeout: 5000 }).trim();
-      if (!result || result === 'QUERY_FAILED') {
+      let result;
+      try {
+        result = execFileSync('sqlite3', [dbPath, 'SELECT review_status, COUNT(*), AVG(quality_score) FROM correction_samples GROUP BY review_status;'], { encoding: 'utf-8', timeout: 5000 }).trim();
+      } catch {
+        return { status: 'warn', detail: 'Could not query correction samples' };
+      }
+      if (!result) {
         return { status: 'warn', detail: 'Could not query correction samples' };
       }
       const pendingMatch = result.match(/pending\|(\d+)/);
@@ -453,7 +458,9 @@ function main() {
       const pending = pendingMatch ? parseInt(pendingMatch[1]) : 0;
       const approved = approvedMatch ? parseInt(approvedMatch[1]) : 0;
       const rejected = rejectedMatch ? parseInt(rejectedMatch[1]) : 0;
-      if (pending > 0) return `${pending} pending review, ${approved} approved, ${rejected} rejected`;
+      if (pending > 0) {
+        return { status: 'warn', detail: `${pending} pending review, ${approved} approved, ${rejected} rejected` };
+      }
       if (approved === 0 && rejected === 0) return { status: 'warn', detail: 'No correction samples exist — no user corrections detected yet' };
       return `${approved} approved, ${rejected} rejected, ${pending} pending`;
     } catch {
@@ -470,8 +477,13 @@ function main() {
       if (!existsSync(dbPath)) {
         return { status: 'warn', detail: 'trajectory.db not found' };
       }
-      const result = execSync(`sqlite3 '${dbPath}' "SELECT source, COUNT(*), ROUND(AVG(score),1) FROM pain_events GROUP BY source ORDER BY COUNT(*) DESC;" 2>/dev/null || echo 'QUERY_FAILED'`, { encoding: 'utf-8', timeout: 5000 }).trim();
-      if (!result || result === 'QUERY_FAILED') {
+      let result;
+      try {
+        result = execFileSync('sqlite3', [dbPath, 'SELECT source, COUNT(*), ROUND(AVG(score),1) FROM pain_events GROUP BY source ORDER BY COUNT(*) DESC;'], { encoding: 'utf-8', timeout: 5000 }).trim();
+      } catch {
+        return { status: 'warn', detail: 'Could not query pain events' };
+      }
+      if (!result) {
         return { status: 'warn', detail: 'Could not query pain events' };
       }
       const sources = result.split('\n').filter(Boolean);
