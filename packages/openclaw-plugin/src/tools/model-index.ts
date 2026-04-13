@@ -62,7 +62,7 @@ export function loadModelIndex(
         const customConfig = loadCustomConfig(wctx);
         
          
-        let modelsDir: string;
+        let modelsDir = '' as string;
         if (customConfig?.modelsDir) {
             modelsDir = path.isAbsolute(customConfig.modelsDir) 
                 ? customConfig.modelsDir 

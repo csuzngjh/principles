@@ -404,7 +404,7 @@ export function computeConfigFingerprint(config: Partial<TrainingHyperparameters
  */
 export function computeDatasetFingerprint(exportPath: string, sampleCount: number): string {
    
-  let contentHash: string;
+  let contentHash = '' as string;
   try {
     const content = fs.readFileSync(exportPath, 'utf-8');
     contentHash = crypto.createHash('sha256').update(content, 'utf8').digest('hex').slice(0, 16);

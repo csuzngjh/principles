@@ -367,7 +367,7 @@ export async function handleBeforePromptBuild(
   // prependContext: Only short dynamic directives: evolutionDirective + heartbeat
 
    
-  let prependSystemContext: string;
+  let prependSystemContext = '' as string;
   let prependContext = '';
   let appendSystemContext = '';
 
@@ -682,7 +682,7 @@ ${taskBlocks}${processingNote}
 
   // ──── 6. Dynamic Attitude Matrix (based on GFI) ────
    
-  let attitudeDirective: string;
+  let attitudeDirective = '' as string;
   const currentGfi = session?.currentGfi || 0;
   
   if (currentGfi >= 70) {
@@ -907,7 +907,7 @@ ${taskBlocks}${processingNote}
         const toolMatches = toolPatterns.flatMap(({ pattern, tool }) => {
           const matches: string[] = [];
            
-          let _m;
+          let _m = null;
           const r = new RegExp(pattern.source, pattern.flags);
           /* eslint-disable @typescript-eslint/no-unused-vars -- Reason: regex exec side effect used, match variable intentionally unused */
           while ((_m = r.exec(latestUserText)) !== null) matches.push(tool);

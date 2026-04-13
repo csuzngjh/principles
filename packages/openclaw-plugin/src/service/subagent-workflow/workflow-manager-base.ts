@@ -312,7 +312,7 @@ export abstract class WorkflowManagerBase implements WorkflowManager {
         error?: string
     ): Promise<void> {
          
-        let workflow;
+        let workflow = null;
         try {
             workflow = this.store.getWorkflow(workflowId);
         /* eslint-disable @typescript-eslint/no-unused-vars -- Reason: Error is handled via early returns based on status, not error value */

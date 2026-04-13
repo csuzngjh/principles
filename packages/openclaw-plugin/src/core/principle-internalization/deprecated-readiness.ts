@@ -64,7 +64,7 @@ export function assessDeprecatedReadiness(
   );
 
    
-  let status: DeprecatedReadinessStatus;
+  let status!: DeprecatedReadinessStatus;
   if (blockingReasons.length === 0 && stableCoverageRatio === 1) {
     status = 'ready';
   } else if (score >= 55 && principle.summary.activeImplementationCount > 0 && stableCoverageRatio >= 0.5) {

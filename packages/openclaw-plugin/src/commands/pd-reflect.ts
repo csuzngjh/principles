@@ -32,7 +32,7 @@ export const handlePdReflect: PluginCommandDefinition = {
 
       // Acquire lock before modifying queue
       const releaseLock = await acquireQueueLock(queuePath, ctx.api?.logger, EVOLUTION_QUEUE_LOCK_SUFFIX);
-      let taskId: string | undefined;
+      let taskId = '' as string | undefined;
       try {
         let rawQueue: unknown[] = [];
         try {

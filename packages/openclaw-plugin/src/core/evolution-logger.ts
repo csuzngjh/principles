@@ -265,7 +265,7 @@ export class EvolutionLogger {
     principlesGenerated?: number;
   }): void {
      
-    let summary: string;
+    let summary = '' as string;
     if (params.resolution === 'marker_detected' || params.resolution === 'late_marker_principle_created') {
       summary = `任务 ${params.taskId} 完成，已生成 ${params.principlesGenerated || 0} 条原则`;
     } else if (params.resolution === 'auto_completed_timeout' || params.resolution === 'late_marker_no_principle') {

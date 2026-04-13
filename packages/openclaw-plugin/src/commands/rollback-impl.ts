@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-use-before-define */
 /**
  * Rollback Implementation Command — CLI `/pd-rollback-impl`
  * ==========================================================
@@ -139,7 +140,7 @@ function _handleRollbackImpl(
   transitionImplementationState(stateDir, implId, 'disabled');
 
    
-  let restoredMessage: string;
+  let restoredMessage = '' as string;
 
   if (previousActiveId && allImpls.some((i) => i.id === previousActiveId)) {
     // Step 2: Restore previous active -> active

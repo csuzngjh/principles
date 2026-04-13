@@ -319,7 +319,7 @@ export function checkWorkspaceIdle(
     }
 
      
-    let reason: string;
+    let reason = '' as string;
     if (mostRecentActivityAt === 0) {
         reason = 'No active sessions found — workspace is idle';
     } else if (isIdle) {

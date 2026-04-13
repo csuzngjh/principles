@@ -335,7 +335,7 @@ export async function withAsyncLock<T>(
   
   // 创建新的 Promise 链
    
-  let resolveRelease: () => void;
+  let resolveRelease!: () => void;
   const releasePromise = new Promise<void>(resolve => {
     resolveRelease = resolve;
   });

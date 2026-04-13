@@ -156,7 +156,7 @@ export function handleEditVerification(
 
   // 2. Resolve and read file
    
-  let absolutePath: string;
+  let absolutePath = '' as string;
   try {
     absolutePath = wctx.resolve(filePath);
   } catch (_error) { // eslint-disable-line @typescript-eslint/no-unused-vars -- Reason: intentionally unused - let it fail naturally on path resolution error
@@ -223,7 +223,7 @@ export function handleEditVerification(
 
     // 3. Read current file content with improved error handling
      
-    let currentContent: string;
+    let currentContent = '' as string;
     try {
       currentContent = fs.readFileSync(absolutePath, 'utf-8');
     } catch (readError) {

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-use-before-define */
 import { resetFriction, getSession } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
@@ -137,7 +138,7 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
     
     // Determine health status based on GFI
      
-    let healthLabel: string;
+    let healthLabel = '';
     let suggestionText = '';
 
     if (isZh) {

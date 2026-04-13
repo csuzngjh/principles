@@ -410,9 +410,9 @@ export function evaluatePromotionGate(
   // Shadow evidence comes from actual runtime routing decisions
   const shadowStats = computeShadowStats(stateDir, { checkpointId });
    
-  let arbiterRejectRate: number;
+  let arbiterRejectRate = 0 as number;
    
-  let arbiterRejectSource: 'shadow' | 'eval-proxy';
+  let arbiterRejectSource!: 'shadow' | 'eval-proxy';
 
   if (shadowStats && shadowStats.isStatisticallySignificant) {
     // Use real shadow evidence: reject rate from shadow routing
@@ -446,9 +446,9 @@ export function evaluatePromotionGate(
   // --- Check 6: Executability reject rate constraint ---
   // PREFER real shadow evidence: escalation rate + profile rejection rate
    
-  let executabilityRejectRate: number;
+  let executabilityRejectRate = 0 as number;
    
-  let executabilityRejectSource: 'shadow' | 'eval-proxy';
+  let executabilityRejectSource!: 'shadow' | 'eval-proxy';
 
   if (shadowStats && shadowStats.isStatisticallySignificant) {
     // Use real shadow evidence: escalation + profile rejection from routing
@@ -506,7 +506,7 @@ export function evaluatePromotionGate(
 
   // --- Suggest state based on checks ---
    
-  let suggestedState: PromotionState | undefined;
+  let suggestedState!: PromotionState | undefined;
   if (allPassed) {
     suggestedState = 'candidate_only';
     // If delta is strong enough, could be shadow_ready directly
@@ -619,7 +619,7 @@ export function advancePromotion(
     //   (new eval data may reverse a previous rejection)
     //
      
-    let targetState: PromotionState;
+    let targetState!: PromotionState;
     if (!gateResult.passes) {
       targetState = 'rejected';
     } else if (!orchestratorReviewPassed) {

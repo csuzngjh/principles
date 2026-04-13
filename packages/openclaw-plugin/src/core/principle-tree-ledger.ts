@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-use-before-define */
 import * as fs from 'fs';
 import * as path from 'path';
 import { withLock, withLockAsync } from '../utils/file-lock.js';

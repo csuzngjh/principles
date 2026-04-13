@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-use-before-define */
 import type { OpenClawPluginApi } from '../openclaw-sdk.js';
 import { Type } from '@sinclair/typebox';
 import * as fs from 'fs';

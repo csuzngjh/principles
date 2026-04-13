@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-use-before-define */
 /**
  * Nocturnal ORPO Export — Approved Dataset to Decision-Point JSONL
  * =================================================================
@@ -292,7 +293,7 @@ export function exportORPOSamples(
   });
 
    
-  let eligibleRecords: typeof allApprovedRecords;
+  let eligibleRecords!: typeof allApprovedRecords;
 
   if (targetModelFamily !== undefined && targetModelFamily !== null) {
     // Specific family: check if ANY records (regardless of status) have this family
@@ -341,7 +342,7 @@ export function exportORPOSamples(
 
     // Read artifact (throws on error — distinguishes read failure from missing artifact)
      
-    let artifact;
+    let artifact = null;
     try {
       artifact = readDatasetArtifact(workspaceDir, record.sampleFingerprint);
     } catch {

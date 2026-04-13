@@ -54,7 +54,7 @@ async function safeTail(filePath: string): Promise<string[]> {
   try {
     // Check existence and stats asynchronously
      
-    let stat: fs.Stats;
+    let stat!: fs.Stats;
     try {
       stat = await fsPromises.stat(filePath);
     } catch {

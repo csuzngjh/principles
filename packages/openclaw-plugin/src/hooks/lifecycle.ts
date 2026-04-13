@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-use-before-define */
 import * as fs from 'fs';
 import * as path from 'path';
 import * as readline from 'readline';

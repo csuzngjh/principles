@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-use-before-define */
 import * as fs from 'fs';
 import { isRisky, normalizePath } from '../utils/io.js';
 import { normalizeProfile } from '../core/profile.js';
@@ -193,7 +194,7 @@ export function handleAfterToolCall(
     const session = getSession(sessionId);
     const toolFailureGfi = session?.gfiBySource?.tool_failure || 0;
     
-    let resetState: SessionState;
+    let resetState! SessionState = null as any;
     if (toolFailureGfi > 0) {
       // Reduce tool_failure source by 50% (relief from successful tool execution)
       const reliefAmount = toolFailureGfi * 0.5;

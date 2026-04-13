@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-use-before-define */
 /**
  * CURRENT_FOCUS 历史版本管理
  *
@@ -476,8 +477,8 @@ function extractFileArtifacts(
   // 格式: file_path: "/path/to/file" 或 absolute_path: "/path/to/file"
   const filePathRegex = /(?:file_path|absolute_path)["']?\s*[:=]\s*["']([^"']+\.(ts|js|json|md|yaml|yml|py|sh|mjs|cjs))["']/gi;
 
-   
-  let match;
+
+  let match: RegExpExecArray | null = null;
   while ((match = filePathRegex.exec(text)) !== null) {
     const [, filePath] = match;
     
@@ -587,8 +588,8 @@ function extractProblems(
 ): void {
   // 问题模式（匹配问题描述）
   const problemPattern = /(?:问题|problem|error|错误|失败|failed)[:：]\s*([^\n]{5,100})/gi;
-   
-  let match;
+
+  let match: RegExpExecArray | null = null;
   while ((match = problemPattern.exec(text)) !== null) {
     const content = match[1].trim();
     if (content.length > 5) {
@@ -630,8 +631,8 @@ function extractNextActions(text: string, actions: string[]): void {
   ];
 
   for (const pattern of patterns) {
-     
-    let match;
+
+    let match: RegExpExecArray | null = null;
     while ((match = pattern.exec(text)) !== null) {
       const action = match[1].trim();
       if (action.length > 5 && !actions.includes(action)) {
@@ -689,8 +690,8 @@ export function parseWorkingMemorySection(content: string): WorkingMemorySnapsho
   // 解析文件记录表格
   // | 文件路径 | 操作 | 描述 |
   const tableRegex = /\|\s*`?([^`|\n]+)`?\s*\|\s*(created|modified|deleted)\s*\|\s*([^|\n]*)\s*\|/gi;
-   
-  let match;
+
+  let match: RegExpExecArray | null = null;
   while ((match = tableRegex.exec(wmContent)) !== null) {
     snapshot.artifacts.push({
       path: match[1].trim(),

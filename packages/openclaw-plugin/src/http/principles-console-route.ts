@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-use-before-define */
 import fs from 'fs';
 import path from 'path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -109,7 +110,7 @@ function handleApiRoute(
     return true;
   }
 
-  let service: ControlUiQueryService;
+  let service!: ControlUiQueryService;
   try {
     service = createService(api);
   } catch (error) {

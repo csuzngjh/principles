@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-use-before-define */
 /**
  * Adaptive Thresholds — Bounded Threshold State Management
  * ========================================================

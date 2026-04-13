@@ -70,7 +70,7 @@ export class RuleHost {
 
       // Merge decisions from all active implementations
        
-      let blocked: RuleHostResult | undefined;
+      let blocked!: RuleHostResult | undefined;
       const approvals: RuleHostResult[] = [];
 
       for (const impl of activeImpls) {

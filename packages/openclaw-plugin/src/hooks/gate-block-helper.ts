@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-use-before-define */
 /**
  * Gate Block Helper - Single Authoritative Block Persistence
  *

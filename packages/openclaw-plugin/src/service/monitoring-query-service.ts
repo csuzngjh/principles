@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-use-before-define */
 import { WorkflowStore } from './subagent-workflow/workflow-store.js';
 
 /**
@@ -84,9 +85,9 @@ export class MonitoringQueryService {
 
       // Determine status
        
-      let status: 'pending' | 'running' | 'completed' | 'failed';
+      let status!: 'pending' | 'running' | 'completed' | 'failed';
        
-      let reason: string | undefined;
+      let reason = '' as string | undefined;
 
       if (!startEvent) {
         status = 'pending';
@@ -107,7 +108,7 @@ export class MonitoringQueryService {
 
       // Calculate duration if stage started and completed/failed
        
-      let duration: number | undefined;
+      let duration = 0 as number | undefined;
       if (startEvent && (completeEvent || failedEvent)) {
         const endEvent = completeEvent || failedEvent;
         if (endEvent) {

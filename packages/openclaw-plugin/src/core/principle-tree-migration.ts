@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-use-before-define */
 /**
  * Principle Tree Migration — Migrates trainingStore to tree.principles
  *

@@ -211,7 +211,7 @@ export function readPainFlagData(projectDir: string): Record<string, string> {
 
     // Detect JSON format (wrong — should be KV)
     if (content.startsWith('{')) {
-      let json: Record<string, unknown>;
+      let json: Record<string, unknown> = {};
       try {
         json = JSON.parse(content);
       } catch {

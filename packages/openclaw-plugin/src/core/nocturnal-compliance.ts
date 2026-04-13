@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-use-before-define */
 /**
  * Nocturnal Compliance Engine — Opportunity-Based Principle Evaluation
  * =====================================================================

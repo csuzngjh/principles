@@ -588,7 +588,7 @@ export class TrajectoryDatabase {
     const offset = filters.offset ?? 0;
 
      
-    let rows: Record<string, unknown>[];
+    let rows = '' as Record<string, unknown>[];
     if (traceId) {
       rows = this.db.prepare(`
         SELECT id, trace_id, task_id, stage, level, message, summary, metadata_json, created_at
@@ -1675,7 +1675,7 @@ export class TrajectoryDatabase {
       if (referenced.has(entry)) continue;
       const fullPath = path.join(this.blobDir, entry);
        
-      let stat: fs.Stats;
+      let stat!: fs.Stats;
       try {
         stat = fs.statSync(fullPath);
       } catch {

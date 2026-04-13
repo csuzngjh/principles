@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-use-before-define */
 /* global NodeJS */
 import * as fs from 'fs';
 import * as path from 'path';
@@ -1595,11 +1596,11 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         logger?.info?.(`[PD:EvolutionWorker] Processing sleep_reflection task ${sleepTask.id}`);
                     }
 
-                    let workflowId: string | undefined;
-                     
-                    let nocturnalManager: NocturnalWorkflowManager;
-                     
-                    let snapshotData: NocturnalSessionSnapshot | undefined;
+                    let workflowId: string | undefined = '';
+                    
+                    let nocturnalManager! NocturnalWorkflowManager = null as any;
+                    
+                    let snapshotData: NocturnalSessionSnapshot | undefined = undefined;
 
                     if (isPollingTask) {
                         // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Reason: polling path requires existing resultRef
@@ -1941,7 +1942,7 @@ export async function registerEvolutionTaskSession(
 
     try {
          
-        let rawQueue: RawQueueItem[];
+        let rawQueue: RawQueueItem[] = [];
         try {
             rawQueue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
         } catch (parseErr) {

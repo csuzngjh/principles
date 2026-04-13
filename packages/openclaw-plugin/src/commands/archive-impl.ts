@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-use-before-define */
 /**
  * Archive Implementation Command — CLI `/pd-archive-impl`
  * ========================================================

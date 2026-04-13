@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-use-before-define */
 import * as path from 'path';
 import * as fs from 'fs';
 import type { PainConfig } from './config.js';
@@ -548,7 +549,7 @@ export function decayGfi(sessionId: string, elapsedMinutes: number): SessionStat
     if (!state || state.currentGfi <= 0 || elapsedMinutes <= 0) return undefined;
     
     // Determine decay rate based on current GFI level (segmented)
-    let decayRate: number;
+    let decayRate = 0 as number;
     if (state.currentGfi >= 70) {
       decayRate = 0.03;  // 3%/min for severe friction
     } else if (state.currentGfi >= 40) {

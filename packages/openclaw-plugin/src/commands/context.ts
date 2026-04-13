@@ -214,7 +214,7 @@ function applyPreset(
     isZh: boolean
 ): string {
      
-    let config: ContextInjectionConfig;
+    let config!: ContextInjectionConfig;
     
     switch (preset) {
         case 'minimal':
@@ -315,7 +315,7 @@ export function handleContextCommand(ctx: PluginCommandContext): PluginCommandRe
     const isZh = (ctx.config?.language as string) === 'zh';
     
      
-    let result: string;
+    let result = '' as string;
     
     switch (subCommand) {
         case 'status':

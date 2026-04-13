@@ -285,7 +285,7 @@ Hardware tiers:
         fs.writeFileSync(specPath, JSON.stringify(spec, null, 2), 'utf-8');
 
          
-        let trainerResult!: TrainingExperimentResult;
+        let trainerResult! TrainingExperimentResult = null as any;
 
         try {
           if (spec.backend === 'dry-run') {
@@ -393,7 +393,7 @@ Hardware tiers:
         // Process trainer result (register checkpoint)
         // dry_run returns null (no checkpoint); other statuses throw on error
          
-        let processed: { checkpointId: string; checkpointRef: string } | null;
+        let processed = '' as { checkpointId: string; checkpointRef: string } | null;
         try {
           processed = program.processResult({
             spec: createResult.spec,
@@ -535,7 +535,7 @@ Next steps:
       }
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: JSON.parse returns dynamic JSON - type unknown at parse time, narrowed via type narrowing below
-      let result: any;
+      let result!: any;
       try {
         result = JSON.parse(resultJson);
       } catch {
@@ -566,7 +566,7 @@ Next steps:
       // Process the result
       const program = new TrainingProgram(workspaceDir);
        
-      let processed: { checkpointId: string; checkpointRef: string } | null;
+      let processed = '' as { checkpointId: string; checkpointRef: string } | null;
       try {
         processed = program.processResult({
           spec,

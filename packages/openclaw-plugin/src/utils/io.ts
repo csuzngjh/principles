@@ -17,7 +17,7 @@ export function normalizePath(filePath: string, projectDir: string): string {
   }
 
    
-  let rel: string;
+  let rel = '' as string;
   if (projectIsWin) {
     const projectAbs = path.resolve(projectDir);
     const fileAbs = path.isAbsolute(normalizedFilePath) ? normalizedFilePath : path.join(projectAbs, normalizedFilePath);
