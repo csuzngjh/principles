@@ -122,6 +122,7 @@ export class ReplayEngine {
   }
 
    
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   runSingleSample(sample: ReplaySample, evaluator: CandidateEvaluator): ReplayResult {
     const evaluation = evaluator.evaluate(sample);
     return {
@@ -236,7 +237,7 @@ export class ReplayEngine {
     };
   }
 
-    // eslint-disable-next-line complexity -- complexity 13, refactor candidate
+     
   private _buildRuleHostInput(sample: ReplaySample): RuleHostInput | null {
     const snapshot = getNocturnalSessionSnapshot(
       TrajectoryRegistry.get(this.workspaceDir),
@@ -295,7 +296,7 @@ export class ReplayEngine {
   }
 
    
-    // eslint-disable-next-line complexity -- complexity 11, slightly over threshold
+    // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- complexity 11, slightly over threshold
   private _selectToolCall(
     snapshot: NocturnalSessionSnapshot,
     classification: SampleClassification,
@@ -326,6 +327,7 @@ export class ReplayEngine {
   }
 
    
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   private _matchGateBlock(
     gateBlocks: NocturnalGateBlock[],
     toolCall: NocturnalToolCall,
@@ -363,6 +365,7 @@ export class ReplayEngine {
   }
 
    
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   private _estimateLineChanges(toolCall: NocturnalToolCall): number {
     if (toolCall.toolName === 'edit' || toolCall.toolName === 'write') {
       return 20;
@@ -371,6 +374,7 @@ export class ReplayEngine {
   }
 
    
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   private _inferBashRisk(toolCall: NocturnalToolCall): 'safe' | 'normal' | 'dangerous' | 'unknown' {
     if (toolCall.toolName !== 'bash' && toolCall.toolName !== 'run_shell_command') {
       return 'unknown';
@@ -382,9 +386,9 @@ export class ReplayEngine {
     return toolCall.outcome === 'success' ? 'safe' : 'normal';
   }
 
-    // eslint-disable-next-line complexity -- complexity 11, slightly over threshold
+     
    
-    // eslint-disable-next-line complexity -- complexity 11
+    // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- complexity 11
   private _scoreEvaluation(
     sample: ReplaySample,
     result: RuleHostResult,
@@ -493,6 +497,7 @@ export class ReplayEngine {
   }
 
    
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   private _determineDecision(
     pain: ClassificationSummary,
     success: ClassificationSummary,
@@ -524,6 +529,7 @@ export class ReplayEngine {
   }
 
    
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   private _deriveExpectedOutcome(
     record: NocturnalDatasetRecord,
   ): ReplaySample['expectedOutcome'] {

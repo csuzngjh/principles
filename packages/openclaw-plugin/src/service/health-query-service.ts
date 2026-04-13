@@ -337,7 +337,7 @@ export class HealthQueryService {
     }));
   }
 
-    // eslint-disable-next-line complexity -- complexity 13, refactor candidate
+     
   getGateStats(): {
     today: {
       gfiBlocks: number;
@@ -659,7 +659,7 @@ export class HealthQueryService {
     return null;
   }
 
-    // eslint-disable-next-line complexity -- complexity 14, refactor candidate
+     
   private readNocturnalTraining(): {
     queue: { pending: number; inProgress: number; completed: number };
     trinityRecords: { artifactId: string; status: string; createdAt: string }[];
@@ -787,8 +787,8 @@ export class HealthQueryService {
   }
 
    
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
-    // eslint-disable-next-line complexity -- complexity 15, refactor candidate
+   
+    // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- complexity 15, refactor candidate
   private getEventDedupKey(entry: EventLogEntry): string {
     const eventId = typeof entry.data?.eventId === 'string' ? entry.data.eventId : null;
     if (eventId) {
@@ -859,7 +859,7 @@ export class HealthQueryService {
   }
 
    
-    // eslint-disable-next-line complexity -- complexity 13, refactor candidate
+     
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   private resolveGateType(row: GateBlockRow): string {
     if (typeof row.gate_type === 'string' && row.gate_type.trim().length > 0) {
@@ -994,7 +994,7 @@ export class HealthQueryService {
    * Read the most recent session JSON file from disk.
    * Used to sync GFI from session-tracker's persistence into SQLite.
    */
-    // eslint-disable-next-line complexity -- complexity 11, slightly over threshold
+     
   private readLatestSessionFromFile(): SessionState | null {
     const sessionsDir = path.join(this.stateDir, 'sessions');
     if (!fs.existsSync(sessionsDir)) {

@@ -233,6 +233,7 @@ export class WorkflowStore {
     }
     
      
+    // eslint-disable-next-line @typescript-eslint/max-params
     recordEvent(
         workflowId: string,
         eventType: string,
@@ -269,6 +270,7 @@ export class WorkflowStore {
      * same idempotency_key already exists, this is a no-op (idempotent).
      */
      
+    // eslint-disable-next-line @typescript-eslint/max-params
     recordStageOutput(
         workflowId: string,
         stage: 'dreamer' | 'philosopher',

@@ -212,7 +212,7 @@ export function handleLlmOutput(
  * 消息写入前的处理
  * 记录：用户/助手消息内容
  */
-    // eslint-disable-next-line complexity -- complexity 11, slightly over threshold
+     
 export function handleBeforeMessageWrite(
   event: PluginHookBeforeMessageWriteEvent,
   ctx: PluginHookAgentContext & { workspaceDir?: string }
@@ -231,6 +231,7 @@ export function handleBeforeMessageWrite(
   if (typeof msg.content === 'string') {
      
     // Reason: msg.content is string | ContentPart[]; destructuring would require renaming in the else branch
+    // eslint-disable-next-line @typescript-eslint/prefer-destructuring
     content = msg.content;
   } else if (Array.isArray(msg.content)) {
     content = msg.content
