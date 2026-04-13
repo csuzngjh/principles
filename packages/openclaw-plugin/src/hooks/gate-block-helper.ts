@@ -17,6 +17,7 @@ import {
   TRAJECTORY_GATE_BLOCK_RETRY_DELAY_MS,
   TRAJECTORY_GATE_BLOCK_MAX_RETRIES
 } from '../config/index.js';
+import { buildPainFlag, writePainFlag } from '../core/pain.js';
 
 /**
  * Block context containing all information needed for block persistence
@@ -93,11 +94,57 @@ export function recordGateBlockAndReturn(
     wctx.trajectory?.recordGateBlock?.(trajectoryPayload);
   } catch (error: unknown) {
     logWarn(`[PD_GATE] Failed to record trajectory gate block: ${String(error)}`);
-     
+
     scheduleTrajectoryGateBlockRetry(wctx, trajectoryPayload, 1, logWarn, logError);
   }
 
-  // 5. Return consistent block result with operator guidance
+  // 5. Emit pain signal for gate block (#256)
+  // Gate blocks are a strong frustration signal — the agent tried to do something
+  // and was blocked by a principle gate. This should feed into the nocturnal pipeline.
+  if (sessionId) {
+    const GATE_BLOCK_PAIN_SCORE = 30; // Moderate — not a failure but a blocked intent
+    try {
+      wctx.trajectory?.recordPainEvent?.({
+        sessionId,
+        source: 'gate_blocked',
+        score: GATE_BLOCK_PAIN_SCORE,
+        reason: `Gate blocked ${toolName} on ${filePath}: ${reason}`,
+        severity: 'mild',
+        origin: 'system_infer',
+      });
+
+      // Update .pain_flag if score is significant
+      wctx.eventLog.recordPainSignal(sessionId, {
+        source: 'gate_blocked',
+        score: GATE_BLOCK_PAIN_SCORE,
+        reason,
+        sessionId,
+      });
+
+      // Write to pain flag file (merge with existing if present)
+      try {
+        const stateDir = wctx.stateDir;
+        const currentFlag = wctx.eventLog.getActivePainFlag?.(sessionId);
+        if (!currentFlag || currentFlag.score < GATE_BLOCK_PAIN_SCORE) {
+          const flag = buildPainFlag({
+            source: 'gate_blocked',
+            score: GATE_BLOCK_PAIN_SCORE,
+            reason: `Gate blocked: ${reason}`,
+            sessionId,
+            agentId: 'main',
+            isRisky: false,
+          });
+          writePainFlag(stateDir, flag);
+        }
+      } catch (flagErr) {
+        logWarn(`[PD_GATE] Failed to update pain flag for gate block: ${String(flagErr)}`);
+      }
+    } catch (painErr) {
+      logWarn(`[PD_GATE] Failed to record gate block pain signal: ${String(painErr)}`);
+    }
+  }
+
+  // 6. Return consistent block result with operator guidance
   return {
     block: true,
     blockReason: `[Principles Disciple] Security Gate Blocked this action.
