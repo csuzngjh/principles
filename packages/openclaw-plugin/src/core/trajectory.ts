@@ -961,6 +961,17 @@ export class TrajectoryDatabase {
       throw new SampleNotFoundError(`${sampleId} (after update)`);
     }
 
+    // #Phase2b: Emit pain event for rejected corrections
+    if (status === 'rejected') {
+      this.recordCorrectionRejectedPain({
+        session_id: record.session_id,
+        quality_score: record.quality_score,
+        diff_excerpt: record.diff_excerpt,
+        principle_ids_json: record.principle_ids_json,
+        created_at: record.created_at,
+      });
+    }
+
     return {
       sampleId: String(record.sample_id),
       sessionId: String(record.session_id),
@@ -975,6 +986,43 @@ export class TrajectoryDatabase {
       createdAt: String(record.created_at),
       updatedAt: String(record.updated_at),
     };
+  }
+
+  /**
+   * When a correction sample is rejected, emit a pain event to the trajectory.
+   * This feeds rejected corrections into the nocturnal pipeline as a high-fidelity
+   * violation signal (human-verified, unlike heuristic pain detection).
+   */
+  private recordCorrectionRejectedPain(record: {
+    session_id: unknown;
+    quality_score: unknown;
+    diff_excerpt: unknown;
+    principle_ids_json: unknown;
+    created_at: unknown;
+  }): void {
+    const sessionId = String(record.session_id);
+    const qualityScore = Number(record.quality_score);
+    const diffExcerpt = String(record.diff_excerpt ?? '');
+    const principleIds = String(record.principle_ids_json ?? '[]');
+    // quality_score (0-1) → pain score (0-100)
+    const painScore = Math.round(qualityScore * 100);
+    const reason = `Correction rejected (quality ${qualityScore.toFixed(2)}). Principles: ${principleIds}${diffExcerpt ? ` — ${diffExcerpt.slice(0, 120)}` : ''}`;
+
+    try {
+      this.recordPainEvent({
+        sessionId,
+        source: 'correction_rejected',
+        score: painScore,
+        reason,
+        severity: painScore >= 70 ? 'severe' : painScore >= 40 ? 'moderate' : 'mild',
+        origin: 'system_infer',
+        text: diffExcerpt || undefined,
+        createdAt: String(record.created_at),
+      });
+    } catch (err) {
+      // Non-fatal: pain event recording should not break the review flow
+      console.warn(`[Trajectory] Failed to record correction_rejected pain event: ${String(err)}`);
+    }
   }
 
   /**
