@@ -686,7 +686,8 @@ export function executeNocturnalReflection(
     stateDir,
     undefined, // principleId
     undefined, // trajectoryLastActivityAt
-    options.idleCheckOverride
+    options.idleCheckOverride,
+    !!options.idleCheckOverride // skip cooldown/quota gates for manual/test triggers
   );
   diagnostics.preflight = preflight;
 
@@ -1153,7 +1154,8 @@ async function executeNocturnalReflectionWithAdapter(
     stateDir,
     undefined,
     undefined,
-    options.idleCheckOverride
+    options.idleCheckOverride,
+    !!options.idleCheckOverride // skip cooldown/quota gates for manual/test triggers
   );
   diagnostics.preflight = preflight;
 
