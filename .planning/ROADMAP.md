@@ -38,7 +38,7 @@
 **Milestone Goal:** Improve Nocturnal Trinity pipeline's training artifact quality through Dreamer diversity, runtime reasoning derivation, Philosopher multi-dimension evaluation, and Scribe contrastive analysis.
 
 - [x] **Phase 34: Reasoning Deriver Module** - Build leaf module for runtime reasoning derivation from existing snapshot data (completed 2026-04-13)
-- [ ] **Phase 35: Dreamer Enhancement** - Enhance Dreamer prompt for candidate diversity with deriver integration and soft post-validation
+- [x] **Phase 35: Dreamer Enhancement** - Enhance Dreamer prompt for candidate diversity with deriver integration and soft post-validation (completed 2026-04-13)
 - [x] **Phase 36: Philosopher 6D Evaluation** - Expand Philosopher evaluation to 6 dimensions with risk assessment (completed 2026-04-13)
 - [ ] **Phase 37: Scribe Contrastive Analysis** - Add contrastive analysis to Scribe output with backward-compatible optional fields
 
@@ -72,8 +72,8 @@ Plans:
 **Plans**: TBD
 
 Plans:
-- [ ] 35-01: TBD
-- [ ] 35-02: TBD
+- [x] 35-01: TBD
+- [x] 35-02: TBD
 
 ### Phase 36: Philosopher 6D Evaluation
 **Goal**: Philosopher evaluates candidates across 6 calibrated dimensions with per-candidate risk assessment
@@ -112,7 +112,7 @@ Phases execute in numeric order: 34 -> 35 -> 36 -> 37
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 34. Reasoning Deriver Module | v1.16 | 2/2 | Complete    | 2026-04-13 |
-| 35. Dreamer Enhancement | v1.16 | 0/2 | Not started | - |
+| 35. Dreamer Enhancement | v1.16 | 2/2 | Complete    | 2026-04-13 |
 | 36. Philosopher 6D Evaluation | v1.16 | 2/2 | Complete    | 2026-04-13 |
 | 37. Scribe Contrastive Analysis | v1.16 | 0/2 | Not started | - |
 
