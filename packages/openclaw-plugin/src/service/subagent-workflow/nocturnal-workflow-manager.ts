@@ -210,7 +210,7 @@ export class NocturnalWorkflowManager implements WorkflowManager {
 
         // Extract snapshot and principleId from taskInput.metadata (NOC-07: Trinity async path)
         const snapshotValidation = validateNocturnalSnapshotIngress(options.metadata?.snapshot);
-        const snapshot = snapshotValidation.snapshot;
+        const {snapshot} = snapshotValidation;
         const principleId = options.metadata?.principleId as string | undefined;
         // Extract painContext for Selector ranking bias
         const painContext = options.metadata?.painContext as RecentPainContext | undefined;
@@ -256,8 +256,8 @@ export class NocturnalWorkflowManager implements WorkflowManager {
                         painContext,
                         // #244: Only skip preflight idle gate for manual/test triggers.
                         // Automatic triggers must go through normal idle check.
-                        ...(((options.metadata as Record<string, unknown> | undefined)?.triggerSource === 'manual' ||
-                            (options.metadata as Record<string, unknown> | undefined)?.triggerSource === 'test')
+                        ...(((options.metadata)?.triggerSource === 'manual' ||
+                            (options.metadata)?.triggerSource === 'test')
                           ? {
                               idleCheckOverride: {
                                   isIdle: true,

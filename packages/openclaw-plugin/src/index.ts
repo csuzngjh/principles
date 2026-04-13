@@ -61,6 +61,7 @@ import { PathResolver, resolveWorkspaceDirFromApi } from './core/path-resolver.j
 import { validateWorkspaceDir } from './core/workspace-dir-validation.js';
 import { resolveRequiredWorkspaceDir, resolveWorkspaceDir, type WorkspaceResolutionContext } from './core/workspace-dir-service.js';
 import { createPrinciplesConsoleRoute } from './http/principles-console-route.js';
+import { extractAgentIdFromSessionKey } from './utils/session-key.js';
 
 // Track initialization to avoid repeated calls
 let workspaceInitialized = false;
@@ -121,19 +122,6 @@ function resolveCommandWorkspaceDirStrict(
   ctx: WorkspaceResolutionContext,
 ): string {
   return resolveRequiredWorkspaceDir(api, ctx, { source: 'command' });
-}
-
-/**
- * Extract agentId from sessionKey format: "agent:{agentId}:..."
- * Falls back to 'main' if sessionKey is missing, malformed, or has whitespace-only agentId.
- */
-function extractAgentIdFromSessionKey(sessionKey: string | undefined): string {
-  if (!sessionKey) return 'main';
-  // Format: agent:{agentId}:{rest}
-  const match = /^agent:([^:]+):/.exec(sessionKey);
-  if (!match) return 'main';
-  const agentId = match[1].trim();
-  return agentId || 'main';
 }
 
 function resolveToolHookWorkspaceDirSafe(
@@ -437,9 +425,9 @@ const plugin = {
     registerCommandWithAlias('pd-reflect', 'pdrl', getCommandDescription('pd-reflect', language), (ctx: any) => {
       try {
         // Resolve agentId from sessionKey (if available), fallback to 'main'
-        const agentId = extractAgentIdFromSessionKey(ctx.sessionKey);
+        const agentId = extractAgentIdFromSessionKey(ctx.sessionKey) ?? 'main';
         const workspaceDir = resolveRequiredWorkspaceDir(api, { ...ctx, agentId }, { source: 'pd-reflect', fallbackAgentId: 'main' });
-        return handlePdReflect.handler({ ...ctx, api, workspaceDir } as any);
+        return handlePdReflect.handler({ ...ctx, api, workspaceDir });
       } catch (err) {
         api.logger.error(`[PD:pd-reflect] Command failed: ${String(err)}`);
         return { text: language === 'zh' ? '命令执行失败，请查看日志。' : 'Command failed. Check logs.' };
