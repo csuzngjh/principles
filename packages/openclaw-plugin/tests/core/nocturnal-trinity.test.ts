@@ -7,11 +7,22 @@ import {
   DEFAULT_TRINITY_CONFIG,
   OpenClawTrinityRuntimeAdapter,
   TrinityRuntimeContractError,
+  NOCTURNAL_DREAMER_PROMPT,
+  NOCTURNAL_PHILOSOPHER_PROMPT,
+  formatReasoningContext,
+  invokeStubDreamer,
+  invokeStubPhilosopher,
   type TrinityConfig,
   type DreamerOutput,
+  type DreamerCandidate,
   type PhilosopherOutput,
+  type PhilosopherJudgment,
   type TrinityDraftArtifact,
   type TrinityRuntimeAdapter,
+  type TrinityTelemetry,
+  type RejectedAnalysis,
+  type ChosenJustification,
+  type ContrastiveAnalysis,
 } from '../../src/core/nocturnal-trinity.js';
 import {
   validateDreamerOutput,
@@ -1022,5 +1033,785 @@ describe('runTrinityAsync — useStubs=true uses synchronous stubs', () => {
     expect(adapter.invokeDreamer).not.toHaveBeenCalled();  // Adapter NOT called
     expect(adapter.invokePhilosopher).not.toHaveBeenCalled();
     expect(adapter.invokeScribe).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: NOCTURNAL_DREAMER_PROMPT — strategic perspective requirements (Task 1)
+// ---------------------------------------------------------------------------
+
+describe('NOCTURNAL_DREAMER_PROMPT — strategic perspective requirements', () => {
+  it('contains "## Strategic Perspective Requirements" section', () => {
+    expect(NOCTURNAL_DREAMER_PROMPT).toContain('## Strategic Perspective Requirements');
+  });
+
+  it('mentions all three strategic perspectives', () => {
+    expect(NOCTURNAL_DREAMER_PROMPT).toContain('conservative_fix');
+    expect(NOCTURNAL_DREAMER_PROMPT).toContain('structural_improvement');
+    expect(NOCTURNAL_DREAMER_PROMPT).toContain('paradigm_shift');
+  });
+
+  it('contains ANTI-PATTERN warning', () => {
+    expect(NOCTURNAL_DREAMER_PROMPT).toContain('ANTI-PATTERN');
+  });
+
+  it('references riskLevel as required candidate field', () => {
+    expect(NOCTURNAL_DREAMER_PROMPT).toContain('riskLevel');
+  });
+
+  it('references strategicPerspective as required candidate field', () => {
+    expect(NOCTURNAL_DREAMER_PROMPT).toContain('strategicPerspective');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: DreamerCandidate interface — optional fields (Task 1)
+// ---------------------------------------------------------------------------
+
+describe('DreamerCandidate interface — optional fields', () => {
+  it('accepts a candidate with riskLevel and strategicPerspective', () => {
+    const candidate: DreamerCandidate = {
+      candidateIndex: 0,
+      badDecision: 'Did something wrong',
+      betterDecision: 'Do it right',
+      rationale: 'Because the principle says so',
+      confidence: 0.9,
+      riskLevel: 'medium',
+      strategicPerspective: 'structural_improvement',
+    };
+    expect(candidate.riskLevel).toBe('medium');
+    expect(candidate.strategicPerspective).toBe('structural_improvement');
+  });
+
+  it('accepts a candidate without riskLevel or strategicPerspective (backward compat)', () => {
+    const candidate: DreamerCandidate = {
+      candidateIndex: 0,
+      badDecision: 'Did something wrong',
+      betterDecision: 'Do it right',
+      rationale: 'Because the principle says so',
+      confidence: 0.9,
+    };
+    expect(candidate.riskLevel).toBeUndefined();
+    expect(candidate.strategicPerspective).toBeUndefined();
+  });
+
+  it('accepts all valid riskLevel values', () => {
+    const levels: Array<'low' | 'medium' | 'high'> = ['low', 'medium', 'high'];
+    for (const level of levels) {
+      const candidate: DreamerCandidate = {
+        candidateIndex: 0,
+        badDecision: 'Wrong',
+        betterDecision: 'Right',
+        rationale: 'Because',
+        confidence: 0.8,
+        riskLevel: level,
+      };
+      expect(candidate.riskLevel).toBe(level);
+    }
+  });
+
+  it('accepts all valid strategicPerspective values', () => {
+    const perspectives: Array<'conservative_fix' | 'structural_improvement' | 'paradigm_shift'> = [
+      'conservative_fix',
+      'structural_improvement',
+      'paradigm_shift',
+    ];
+    for (const perspective of perspectives) {
+      const candidate: DreamerCandidate = {
+        candidateIndex: 0,
+        badDecision: 'Wrong',
+        betterDecision: 'Right',
+        rationale: 'Because',
+        confidence: 0.8,
+        strategicPerspective: perspective,
+      };
+      expect(candidate.strategicPerspective).toBe(perspective);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: buildDreamerPrompt — reasoning context injection (Task 2)
+// ---------------------------------------------------------------------------
+
+describe('buildDreamerPrompt — reasoning context injection', () => {
+  // Helper to create a minimal snapshot for reasoning context tests
+  function makeReasoningSnapshot(overrides: {
+    assistantTurns?: any[];
+    toolCalls?: any[];
+    userTurns?: any[];
+  } = {}) {
+    return {
+      sessionId: 'session-reasoning-test',
+      startedAt: '2026-04-13T00:00:00.000Z',
+      updatedAt: '2026-04-13T00:05:00.000Z',
+      assistantTurns: overrides.assistantTurns ?? [],
+      userTurns: overrides.userTurns ?? [],
+      toolCalls: overrides.toolCalls ?? [],
+      painEvents: [],
+      gateBlocks: [],
+      stats: {
+        failureCount: 0,
+        totalPainEvents: 0,
+        totalGateBlocks: 0,
+        totalAssistantTurns: overrides.assistantTurns?.length ?? 0,
+        totalToolCalls: overrides.toolCalls?.length ?? 0,
+      },
+    };
+  }
+
+  it('injects ## Reasoning Context section when assistant turns have thinking content', () => {
+    const snapshot = makeReasoningSnapshot({
+      assistantTurns: [
+        {
+          turnIndex: 0,
+          sanitizedText: '<thinking>I need to consider the implications carefully</thinking>',
+          createdAt: '2026-04-13T00:01:00.000Z',
+        },
+      ],
+    });
+
+    const result = formatReasoningContext(snapshot as any);
+    expect(result).toContain('## Reasoning Context');
+  });
+
+  it('includes uncertainty markers in reasoning context', () => {
+    const snapshot = makeReasoningSnapshot({
+      assistantTurns: [
+        {
+          turnIndex: 0,
+          sanitizedText: 'let me verify this first before proceeding with the change',
+          createdAt: '2026-04-13T00:01:00.000Z',
+        },
+      ],
+    });
+
+    const result = formatReasoningContext(snapshot as any);
+    expect(result).toContain('Uncertainty detected');
+  });
+
+  it('includes confidence signal when not high', () => {
+    const snapshot = makeReasoningSnapshot({
+      assistantTurns: [
+        {
+          turnIndex: 0,
+          sanitizedText: 'I should probably check this more thoroughly before continuing',
+          createdAt: '2026-04-13T00:01:00.000Z',
+        },
+      ],
+    });
+
+    const result = formatReasoningContext(snapshot as any);
+    // Low or medium confidence should be shown
+    expect(result).toMatch(/Confidence:\s*(low|medium)/);
+  });
+
+  it('includes contextual factors when present', () => {
+    const snapshot = makeReasoningSnapshot({
+      assistantTurns: [],
+      toolCalls: [
+        { toolName: 'Read', outcome: 'success', createdAt: '2026-04-13T00:01:00.000Z' },
+        { toolName: 'Edit', outcome: 'success', createdAt: '2026-04-13T00:02:00.000Z' },
+      ],
+    });
+
+    const result = formatReasoningContext(snapshot as any);
+    expect(result).toContain('File structure explored');
+  });
+
+  it('omits ## Reasoning Context when no reasoning signals exist', () => {
+    const snapshot = makeReasoningSnapshot({
+      assistantTurns: [],
+      toolCalls: [
+        { toolName: 'Edit', outcome: 'success', createdAt: '2026-04-13T00:01:00.000Z' },
+      ],
+    });
+
+    const result = formatReasoningContext(snapshot as any);
+    expect(result).toBeNull();
+  });
+
+  it('does not inject decisionPoints', () => {
+    const snapshot = makeReasoningSnapshot({
+      assistantTurns: [
+        {
+          turnIndex: 0,
+          sanitizedText: '<thinking>some thought</thinking>',
+          createdAt: '2026-04-13T00:01:00.000Z',
+        },
+      ],
+    });
+
+    const result = formatReasoningContext(snapshot as any);
+    expect(result).not.toContain('decisionPoint');
+    expect(result).not.toContain('DecisionPoint');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: invokeStubDreamer — risk level and perspective mapping (D-07)
+// ---------------------------------------------------------------------------
+
+describe('invokeStubDreamer — risk level and perspective mapping (D-07)', () => {
+  it('gateBlocks candidates get conservative_fix/low', () => {
+    const snapshot = makeSnapshot({ totalGateBlocks: 2 });
+    const output = invokeStubDreamer(snapshot as any, 'T-03', 3);
+    expect(output.valid).toBe(true);
+    expect(output.candidates.length).toBeGreaterThan(0);
+    for (const candidate of output.candidates) {
+      expect(candidate.riskLevel).toBe('low');
+      expect(candidate.strategicPerspective).toBe('conservative_fix');
+    }
+  });
+
+  it('pain candidates get structural_improvement/medium', () => {
+    const snapshot = makeSnapshot({ totalPainEvents: 3 });
+    const output = invokeStubDreamer(snapshot as any, 'T-08', 3);
+    expect(output.valid).toBe(true);
+    expect(output.candidates.length).toBeGreaterThan(0);
+    for (const candidate of output.candidates) {
+      expect(candidate.riskLevel).toBe('medium');
+      expect(candidate.strategicPerspective).toBe('structural_improvement');
+    }
+  });
+
+  it('failure candidates get paradigm_shift/high', () => {
+    const snapshot = makeSnapshot({ failureCount: 2 });
+    const output = invokeStubDreamer(snapshot as any, 'T-08', 3);
+    expect(output.valid).toBe(true);
+    expect(output.candidates.length).toBeGreaterThan(0);
+    for (const candidate of output.candidates) {
+      expect(candidate.riskLevel).toBe('high');
+      expect(candidate.strategicPerspective).toBe('paradigm_shift');
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: runTrinity — diversity telemetry (DIVER-04)
+// ---------------------------------------------------------------------------
+
+describe('runTrinity — diversity telemetry (DIVER-04)', () => {
+  it('emits diversityCheckPassed=false when stub candidates all have same risk level', () => {
+    // Failure signal produces all paradigm_shift/high candidates → not diverse
+    const snapshot = makeSnapshot({ failureCount: 2 });
+    const config: TrinityConfig = {
+      useTrinity: true,
+      maxCandidates: 3,
+      useStubs: true,
+    };
+
+    const result = runTrinity({ snapshot: snapshot as any, principleId: 'T-08', config });
+
+    expect(result.success).toBe(true);
+    expect(result.telemetry.diversityCheckPassed).toBe(false);
+  });
+
+  it('emits candidateRiskLevels array matching stub mapping', () => {
+    const snapshot = makeSnapshot({ failureCount: 2 });
+    const config: TrinityConfig = {
+      useTrinity: true,
+      maxCandidates: 3,
+      useStubs: true,
+    };
+
+    const result = runTrinity({ snapshot: snapshot as any, principleId: 'T-08', config });
+
+    expect(result.success).toBe(true);
+    expect(result.telemetry.candidateRiskLevels).toBeDefined();
+    expect(result.telemetry.candidateRiskLevels!.length).toBeGreaterThan(0);
+    // All failure stub candidates should be 'high'
+    for (const level of result.telemetry.candidateRiskLevels!) {
+      expect(level).toBe('high');
+    }
+  });
+
+  it('pipeline completes even when diversity check fails (soft enforcement)', () => {
+    // Failure signal: all candidates have same risk → diversity fails
+    const snapshot = makeSnapshot({ failureCount: 2 });
+    const config: TrinityConfig = {
+      useTrinity: true,
+      maxCandidates: 3,
+      useStubs: true,
+    };
+
+    const result = runTrinity({ snapshot: snapshot as any, principleId: 'T-08', config });
+
+    expect(result.telemetry.diversityCheckPassed).toBe(false);
+    expect(result.success).toBe(true);
+    expect(result.artifact).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: TrinityTelemetry — diversity fields
+// ---------------------------------------------------------------------------
+
+describe('TrinityTelemetry — diversity fields', () => {
+  it('accepts optional diversityCheckPassed field', () => {
+    const telemetry: TrinityTelemetry = {
+      chainMode: 'trinity',
+      usedStubs: true,
+      dreamerPassed: true,
+      philosopherPassed: true,
+      scribePassed: true,
+      candidateCount: 2,
+      selectedCandidateIndex: 0,
+      stageFailures: [],
+      diversityCheckPassed: true,
+    };
+    expect(telemetry.diversityCheckPassed).toBe(true);
+  });
+
+  it('accepts optional candidateRiskLevels field', () => {
+    const telemetry: TrinityTelemetry = {
+      chainMode: 'trinity',
+      usedStubs: true,
+      dreamerPassed: true,
+      philosopherPassed: true,
+      scribePassed: true,
+      candidateCount: 2,
+      selectedCandidateIndex: 0,
+      stageFailures: [],
+      candidateRiskLevels: ['low', 'high'],
+    };
+    expect(telemetry.candidateRiskLevels).toEqual(['low', 'high']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: Philosopher 6D Evaluation (PHILO-01)
+// ---------------------------------------------------------------------------
+
+describe('Philosopher 6D Evaluation (PHILO-01)', () => {
+  it('NOCTURNAL_PHILOSOPHER_PROMPT contains 6 dimensions with calibrated weights', () => {
+    expect(NOCTURNAL_PHILOSOPHER_PROMPT).toContain('Safety Impact');
+    expect(NOCTURNAL_PHILOSOPHER_PROMPT).toContain('UX Impact');
+    expect(NOCTURNAL_PHILOSOPHER_PROMPT).toContain('(weight: 0.20)'); // Principle Alignment
+    expect(NOCTURNAL_PHILOSOPHER_PROMPT).toContain('(weight: 0.15)'); // Specificity
+    expect(NOCTURNAL_PHILOSOPHER_PROMPT).toContain('(weight: 0.15)'); // Actionability
+    expect(NOCTURNAL_PHILOSOPHER_PROMPT).toContain('(weight: 0.15)'); // Executability
+  });
+
+  it('prompt output format includes scores and risks objects', () => {
+    expect(NOCTURNAL_PHILOSOPHER_PROMPT).toContain('"scores"');
+    expect(NOCTURNAL_PHILOSOPHER_PROMPT).toContain('"principleAlignment"');
+    expect(NOCTURNAL_PHILOSOPHER_PROMPT).toContain('"safetyImpact"');
+    expect(NOCTURNAL_PHILOSOPHER_PROMPT).toContain('"uxImpact"');
+    expect(NOCTURNAL_PHILOSOPHER_PROMPT).toContain('"risks"');
+    expect(NOCTURNAL_PHILOSOPHER_PROMPT).toContain('"falsePositiveEstimate"');
+    expect(NOCTURNAL_PHILOSOPHER_PROMPT).toContain('"implementationComplexity"');
+    expect(NOCTURNAL_PHILOSOPHER_PROMPT).toContain('"breakingChangeRisk"');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: Philosopher Risk Assessment (PHILO-02)
+// ---------------------------------------------------------------------------
+
+describe('Philosopher Risk Assessment (PHILO-02)', () => {
+  it('invokeStubPhilosopher produces risk assessment per candidate', () => {
+    const dreamerOutput: DreamerOutput = {
+      valid: true,
+      candidates: [
+        {
+          candidateIndex: 0,
+          badDecision: 'Did something wrong',
+          betterDecision: 'Read the file before editing to verify content',
+          rationale: 'A good rationale that explains why this is better',
+          confidence: 0.9,
+          riskLevel: 'low',
+          strategicPerspective: 'conservative_fix',
+        },
+        {
+          candidateIndex: 1,
+          badDecision: 'Ignored error messages',
+          betterDecision: 'Challenge the original approach entirely',
+          rationale: 'A paradigm shift rationale for fundamentally different approach',
+          confidence: 0.6,
+          riskLevel: 'high',
+          strategicPerspective: 'paradigm_shift',
+        },
+      ],
+      generatedAt: new Date().toISOString(),
+    };
+    const result = invokeStubPhilosopher(dreamerOutput, 'T-01', makeSnapshot() as any);
+    expect(result.valid).toBe(true);
+    for (const j of result.judgments) {
+      expect(j.risks).toBeDefined();
+      expect(j.risks!.falsePositiveEstimate).toBeGreaterThanOrEqual(0);
+      expect(j.risks!.falsePositiveEstimate).toBeLessThanOrEqual(1);
+      expect(['low', 'medium', 'high']).toContain(j.risks!.implementationComplexity);
+      expect(typeof j.risks!.breakingChangeRisk).toBe('boolean');
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: Philosopher Backward Compatibility (PHILO-03)
+// ---------------------------------------------------------------------------
+
+describe('Philosopher Backward Compatibility (PHILO-03)', () => {
+  it('PhilosopherJudgment without scores/risks is valid', () => {
+    const judgment: PhilosopherJudgment = {
+      candidateIndex: 0,
+      critique: 'test',
+      principleAligned: true,
+      score: 0.8,
+      rank: 1,
+    };
+    expect(judgment.score).toBe(0.8);
+    expect(judgment.scores).toBeUndefined();
+    expect(judgment.risks).toBeUndefined();
+  });
+
+  it('runTrinity produces output with 6D scores when candidates have strategicPerspective', () => {
+    const snapshot = makeSnapshot({ failureCount: 2, totalPainEvents: 1 });
+    const config: TrinityConfig = {
+      useTrinity: true,
+      maxCandidates: 3,
+      useStubs: true,
+    };
+
+    const result = runTrinity({ snapshot: snapshot as any, principleId: 'T-08', config });
+    expect(result.success).toBe(true);
+    expect(result.artifact).toBeDefined();
+
+    // The stub philosopher should produce 6D scores for stub candidates
+    // (stub dreamer assigns strategicPerspective based on principleId)
+    if (result.telemetry.philosopher6D) {
+      const avgScores = result.telemetry.philosopher6D.avgScores;
+      expect(typeof avgScores.principleAlignment).toBe('number');
+      expect(typeof avgScores.specificity).toBe('number');
+      expect(typeof avgScores.actionability).toBe('number');
+      expect(typeof avgScores.executability).toBe('number');
+      expect(typeof avgScores.safetyImpact).toBe('number');
+      expect(typeof avgScores.uxImpact).toBe('number');
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: Stub Philosopher 6D Scoring (D-09)
+// ---------------------------------------------------------------------------
+
+describe('Stub Philosopher 6D Scoring (D-09)', () => {
+  it('conservative_fix candidates get high principleAlignment and low risk', () => {
+    const dreamerOutput: DreamerOutput = {
+      valid: true,
+      candidates: [
+        {
+          candidateIndex: 0,
+          badDecision: 'Did something wrong',
+          betterDecision: 'Read the file before editing to verify current content',
+          rationale: 'Following T-01 requires verifying content before making changes',
+          confidence: 0.9,
+          riskLevel: 'low',
+          strategicPerspective: 'conservative_fix',
+        },
+      ],
+      generatedAt: new Date().toISOString(),
+    };
+    const result = invokeStubPhilosopher(dreamerOutput, 'T-01', makeSnapshot() as any);
+    expect(result.valid).toBe(true);
+    const j = result.judgments[0];
+    expect(j.scores).toBeDefined();
+    expect(j.scores!.principleAlignment).toBeGreaterThanOrEqual(0.9);
+    expect(j.scores!.safetyImpact).toBeGreaterThanOrEqual(0.9);
+    expect(j.risks).toBeDefined();
+    expect(j.risks!.breakingChangeRisk).toBe(false);
+    expect(j.risks!.implementationComplexity).toBe('low');
+  });
+
+  it('paradigm_shift candidates get high breakingChangeRisk', () => {
+    const dreamerOutput: DreamerOutput = {
+      valid: true,
+      candidates: [
+        {
+          candidateIndex: 0,
+          badDecision: 'Ignored all errors',
+          betterDecision: 'Challenge the entire approach and redesign from scratch',
+          rationale: 'A paradigm shift rationale for a fundamentally different approach',
+          confidence: 0.5,
+          riskLevel: 'high',
+          strategicPerspective: 'paradigm_shift',
+        },
+      ],
+      generatedAt: new Date().toISOString(),
+    };
+    const result = invokeStubPhilosopher(dreamerOutput, 'T-08', makeSnapshot() as any);
+    expect(result.valid).toBe(true);
+    const j = result.judgments[0];
+    expect(j.scores).toBeDefined();
+    expect(j.scores!.safetyImpact).toBeLessThan(0.5);
+    expect(j.risks).toBeDefined();
+    expect(j.risks!.breakingChangeRisk).toBe(true);
+    expect(j.risks!.implementationComplexity).toBe('high');
+  });
+
+  it('structural_improvement candidates get medium across all dimensions', () => {
+    const dreamerOutput: DreamerOutput = {
+      valid: true,
+      candidates: [
+        {
+          candidateIndex: 0,
+          badDecision: 'Rushed through steps',
+          betterDecision: 'Reorder operations and introduce an intermediate checkpoint',
+          rationale: 'Structural improvement rationale to reorder operations properly',
+          confidence: 0.7,
+          riskLevel: 'medium',
+          strategicPerspective: 'structural_improvement',
+        },
+      ],
+      generatedAt: new Date().toISOString(),
+    };
+    const result = invokeStubPhilosopher(dreamerOutput, 'T-03', makeSnapshot() as any);
+    expect(result.valid).toBe(true);
+    const j = result.judgments[0];
+    expect(j.scores).toBeDefined();
+    // Medium scores should be between conservative and paradigm
+    expect(j.scores!.principleAlignment).toBeGreaterThanOrEqual(0.7);
+    expect(j.scores!.principleAlignment).toBeLessThanOrEqual(0.8);
+    expect(j.risks).toBeDefined();
+    expect(j.risks!.breakingChangeRisk).toBe(false);
+    expect(j.risks!.implementationComplexity).toBe('medium');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: TrinityTelemetry — philosopher6D field
+// ---------------------------------------------------------------------------
+
+describe('TrinityTelemetry — philosopher6D field', () => {
+  it('accepts optional philosopher6D field', () => {
+    const telemetry: TrinityTelemetry = {
+      chainMode: 'trinity',
+      usedStubs: true,
+      dreamerPassed: true,
+      philosopherPassed: true,
+      scribePassed: true,
+      candidateCount: 2,
+      selectedCandidateIndex: 0,
+      stageFailures: [],
+      philosopher6D: {
+        avgScores: {
+          principleAlignment: 0.85,
+          specificity: 0.75,
+          actionability: 0.8,
+          executability: 0.78,
+          safetyImpact: 0.7,
+          uxImpact: 0.72,
+        },
+        highRiskCount: 1,
+      },
+    };
+    expect(telemetry.philosopher6D).toBeDefined();
+    expect(telemetry.philosopher6D!.avgScores.principleAlignment).toBe(0.85);
+    expect(telemetry.philosopher6D!.highRiskCount).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: Scribe Contrastive Analysis (SCRIBE-01, SCRIBE-02, SCRIBE-03)
+// ---------------------------------------------------------------------------
+
+describe('Scribe Contrastive Analysis (SCRIBE-01, SCRIBE-02, SCRIBE-03)', () => {
+  function makeValidArtifact(overrides: Record<string, unknown> = {}): TrinityDraftArtifact {
+    return {
+      selectedCandidateIndex: 0,
+      badDecision: 'Did something wrong',
+      betterDecision: 'Do it right',
+      rationale: 'Because the principle says so and this is the right approach',
+      sessionId: 'session-test-123',
+      principleId: 'T-01',
+      sourceSnapshotRef: 'snapshot-test-001',
+      telemetry: {
+        chainMode: 'trinity',
+        usedStubs: false,
+        dreamerPassed: true,
+        philosopherPassed: true,
+        scribePassed: true,
+        candidateCount: 2,
+        selectedCandidateIndex: 0,
+        stageFailures: [],
+      },
+      ...overrides,
+    };
+  }
+
+  it('TrinityDraftArtifact accepts optional rejectedAnalysis fields (SCRIBE-01)', () => {
+    const artifact = makeValidArtifact({
+      rejectedAnalysis: {
+        whyRejected: 'Lower alignment score',
+        warningSignals: ['missed pain signal', 'ignored gate block'],
+        correctiveThinking: 'Should have verified the routing state before proceeding',
+      },
+    } as Record<string, unknown>);
+    expect(artifact.rejectedAnalysis).toBeDefined();
+    expect(artifact.rejectedAnalysis!.whyRejected).toBe('Lower alignment score');
+    expect(artifact.rejectedAnalysis!.warningSignals).toHaveLength(2);
+    expect(artifact.rejectedAnalysis!.correctiveThinking).toContain('Should have');
+  });
+
+  it('TrinityDraftArtifact accepts optional chosenJustification fields (SCRIBE-02)', () => {
+    const artifact = makeValidArtifact({
+      chosenJustification: {
+        whyChosen: 'Highest 6D composite score and low breakingChangeRisk',
+        keyInsights: ['Verify routing state before file operations', 'Check pain signals early'],
+        limitations: ['Does not apply when session has no pain history', 'Less relevant for conservative fixes'],
+      },
+    } as Record<string, unknown>);
+    expect(artifact.chosenJustification).toBeDefined();
+    expect(artifact.chosenJustification!.whyChosen).toContain('Highest');
+    expect(artifact.chosenJustification!.keyInsights).toHaveLength(2);
+    expect(artifact.chosenJustification!.limitations).toHaveLength(2);
+  });
+
+  it('TrinityDraftArtifact accepts optional contrastiveAnalysis fields (SCRIBE-03)', () => {
+    const artifact = makeValidArtifact({
+      contrastiveAnalysis: {
+        criticalDifference: 'Winner checked routing state; loser proceeded without verification',
+        decisionTrigger: 'When session has pain events and gate blocks, verify infrastructure before file operations',
+        preventionStrategy: 'Add a pre-flight check: read the routing status and confirm no pending failures',
+      },
+    } as Record<string, unknown>);
+    expect(artifact.contrastiveAnalysis).toBeDefined();
+    expect(artifact.contrastiveAnalysis!.criticalDifference).toContain('routing state');
+    expect(artifact.contrastiveAnalysis!.decisionTrigger).toContain('When');
+    expect(artifact.contrastiveAnalysis!.preventionStrategy).toContain('pre-flight');
+  });
+
+  it('validateDraftArtifact passes when all three analysis sections are present', () => {
+    const artifact = makeValidArtifact({
+      rejectedAnalysis: {
+        whyRejected: 'Lower score',
+        warningSignals: ['missed signal'],
+        correctiveThinking: 'Should have checked',
+      },
+      chosenJustification: {
+        whyChosen: 'Best score',
+        keyInsights: ['insight 1'],
+        limitations: ['limitation 1'],
+      },
+      contrastiveAnalysis: {
+        criticalDifference: 'key difference',
+        decisionTrigger: 'When X, do Y',
+        preventionStrategy: 'avoid the rejected path',
+      },
+    } as Record<string, unknown>);
+    const result = validateDraftArtifact(artifact);
+    expect(result.valid).toBe(true);
+    expect(result.failures).toHaveLength(0);
+  });
+
+  it('RejectedAnalysis interface accepts all required fields', () => {
+    const analysis: RejectedAnalysis = {
+      whyRejected: 'test reason',
+      warningSignals: ['signal 1', 'signal 2'],
+      correctiveThinking: 'correct path',
+    };
+    expect(analysis.whyRejected).toBe('test reason');
+    expect(analysis.warningSignals).toHaveLength(2);
+    expect(analysis.correctiveThinking).toBe('correct path');
+  });
+
+  it('ChosenJustification interface accepts all required fields', () => {
+    const justification: ChosenJustification = {
+      whyChosen: 'test reason',
+      keyInsights: ['insight 1', 'insight 2', 'insight 3'],
+      limitations: ['limitation 1'],
+    };
+    expect(justification.whyChosen).toBe('test reason');
+    expect(justification.keyInsights).toHaveLength(3);
+    expect(justification.limitations).toHaveLength(1);
+  });
+
+  it('ContrastiveAnalysis interface accepts all required fields', () => {
+    const analysis: ContrastiveAnalysis = {
+      criticalDifference: 'key insight',
+      decisionTrigger: 'When X, do Y',
+      preventionStrategy: 'avoid the rejected path',
+    };
+    expect(analysis.criticalDifference).toBe('key insight');
+    expect(analysis.decisionTrigger).toBe('When X, do Y');
+    expect(analysis.preventionStrategy).toBe('avoid the rejected path');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: Scribe Backward Compatibility (SCRIBE-04)
+// ---------------------------------------------------------------------------
+
+describe('Scribe Backward Compatibility (SCRIBE-04)', () => {
+  function makeValidArtifact(): TrinityDraftArtifact {
+    return {
+      selectedCandidateIndex: 0,
+      badDecision: 'Did something wrong',
+      betterDecision: 'Do it right',
+      rationale: 'Because the principle says so and this is the right approach',
+      sessionId: 'session-test-123',
+      principleId: 'T-01',
+      sourceSnapshotRef: 'snapshot-test-001',
+      telemetry: {
+        chainMode: 'trinity',
+        usedStubs: false,
+        dreamerPassed: true,
+        philosopherPassed: true,
+        scribePassed: true,
+        candidateCount: 2,
+        selectedCandidateIndex: 0,
+        stageFailures: [],
+      },
+    };
+  }
+
+  it('TrinityDraftArtifact without contrastiveAnalysis fields is valid', () => {
+    const artifact = makeValidArtifact();
+    expect(artifact.contrastiveAnalysis).toBeUndefined();
+    expect(artifact.rejectedAnalysis).toBeUndefined();
+    expect(artifact.chosenJustification).toBeUndefined();
+    const result = validateDraftArtifact(artifact);
+    expect(result.valid).toBe(true);
+    expect(result.failures).toHaveLength(0);
+  });
+
+  it('artifact without new fields produces identical output via draftToArtifact', () => {
+    const artifact = makeValidArtifact();
+    const nocturnalArtifact = draftToArtifact(artifact);
+    expect(nocturnalArtifact.badDecision).toBe('Did something wrong');
+    expect(nocturnalArtifact.betterDecision).toBe('Do it right');
+    expect(nocturnalArtifact.principleId).toBe('T-01');
+  });
+
+  it('runTrinity produces artifact without contrastiveAnalysis when useStubs=true', () => {
+    const snapshot = {
+      sessionId: 'session-backward-compat',
+      startedAt: '2026-04-13T00:00:00.000Z',
+      updatedAt: '2026-04-13T00:05:00.000Z',
+      assistantTurns: [],
+      userTurns: [],
+      toolCalls: [],
+      painEvents: [],
+      gateBlocks: [],
+      stats: {
+        failureCount: 1,
+        totalPainEvents: 0,
+        totalGateBlocks: 0,
+        totalAssistantTurns: 5,
+        totalToolCalls: 10,
+      },
+    };
+    const config: TrinityConfig = {
+      useTrinity: true,
+      maxCandidates: 3,
+      useStubs: true,
+    };
+
+    const result = runTrinity({ snapshot: snapshot as any, principleId: 'T-08', config });
+    expect(result.success).toBe(true);
+    expect(result.artifact).toBeDefined();
+    expect(result.artifact!.contrastiveAnalysis).toBeUndefined();
+    expect(result.artifact!.rejectedAnalysis).toBeUndefined();
+    expect(result.artifact!.chosenJustification).toBeUndefined();
   });
 });

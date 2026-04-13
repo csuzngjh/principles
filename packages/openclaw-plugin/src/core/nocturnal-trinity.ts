@@ -35,12 +35,17 @@ import * as os from 'os';
 import * as path from 'path';
 import type { NocturnalSessionSnapshot } from './nocturnal-trajectory-extractor.js';
 import { computeThinkingModelDelta } from './nocturnal-trajectory-extractor.js';
+import {
+  deriveReasoningChain,
+  deriveContextualFactors,
+} from './nocturnal-reasoning-deriver.js';
 import type { TrinityArtificerContext } from './nocturnal-artificer.js';
 import {
   runTournament,
   DEFAULT_SCORING_WEIGHTS,
   type ScoringWeights,
   type TournamentTraceEntry,
+  validateCandidateDiversity,
 } from './nocturnal-candidate-scoring.js';
 import {
   DEFAULT_THRESHOLDS,
@@ -61,7 +66,7 @@ const FALLBACK_MODEL = process.env.OPENCLAW_DEFAULT_MODEL || 'MiniMax-M2.7';
 // These prompts are embedded at build time. The agents/ directory was removed
 // to eliminate fragile runtime file dependencies on the file system.
 
-const NOCTURNAL_DREAMER_PROMPT = `# Nocturnal Dreamer — Candidate Generation
+export const NOCTURNAL_DREAMER_PROMPT = `# Nocturnal Dreamer — Candidate Generation
 
 > System prompt for Trinity Dreamer stage.
 > Role: Generate multiple alternative "better decision" candidates from a session snapshot.
@@ -104,7 +109,9 @@ You MUST respond with ONLY a valid JSON object. No markdown, no explanation, no 
       "badDecision": "<what the agent did wrong>",
       "betterDecision": "<what the agent should have done>",
       "rationale": "<why this is better>",
-      "confidence": 0.95
+      "confidence": 0.95,
+      "riskLevel": "low",
+      "strategicPerspective": "conservative_fix"
     }
   ],
   "generatedAt": "<ISO timestamp>"
@@ -131,6 +138,23 @@ You MUST respond with ONLY a valid JSON object. No markdown, no explanation, no 
 - Do not generate candidates with identical betterDecisions
 - Vary the confidence scores to reflect genuine uncertainty
 
+## Strategic Perspective Requirements
+
+Generate candidates from DISTINCT strategic perspectives:
+
+- **conservative_fix**: Minimal deviation from original approach. Add a
+  verification or validation step that was missing.
+- **structural_improvement**: Reorder operations or introduce an intermediate
+  checkpoint. Change HOW the goal is achieved.
+- **paradigm_shift**: Challenge whether the original goal was correct.
+  Consider a fundamentally different approach.
+
+Each candidate MUST specify \`riskLevel\` ("low"|"medium"|"high") and
+\`strategicPerspective\` matching one of the above.
+
+ANTI-PATTERN: Candidates that differ only in wording, not in substance,
+will be rejected.
+
 ### Candidates must NOT:
 - Contain raw user text or private content
 - Reference non-existent tools or impossible actions
@@ -148,7 +172,7 @@ If you cannot generate valid candidates (e.g., no clear violation found, insuffi
   "generatedAt": "<ISO timestamp>"
 }`;
 
-const NOCTURNAL_PHILOSOPHER_PROMPT = `# Nocturnal Philosopher — Candidate Evaluation and Ranking
+export const NOCTURNAL_PHILOSOPHER_PROMPT = `# Nocturnal Philosopher — Candidate Evaluation and Ranking
 
 > System prompt for Trinity Philosopher stage.
 > Role: Evaluate Dreamer's candidates and rank them by principle alignment and quality.
@@ -187,7 +211,20 @@ You MUST respond with ONLY a valid JSON object. No markdown, no explanation, no 
       "critique": "<principle-grounded critique>",
       "principleAligned": true,
       "score": 0.92,
-      "rank": 1
+      "rank": 1,
+      "scores": {
+        "principleAlignment": 0.9,
+        "specificity": 0.85,
+        "actionability": 0.9,
+        "executability": 0.95,
+        "safetyImpact": 0.8,
+        "uxImpact": 0.85
+      },
+      "risks": {
+        "falsePositiveEstimate": 0.1,
+        "implementationComplexity": "low",
+        "breakingChangeRisk": false
+      }
     }
   ],
   "overallAssessment": "<summary of candidate set quality>",
@@ -197,10 +234,18 @@ You MUST respond with ONLY a valid JSON object. No markdown, no explanation, no 
 ## Evaluation Criteria
 
 ### Score Components (0-1 scale each):
-1. **Principle Alignment** (weight: 0.35) — Does the betterDecision properly reflect the target principle?
-2. **Specificity** (weight: 0.25) — Is badDecision specific? Is betterDecision actionable?
-3. **Actionability** (weight: 0.25) — Does betterDecision describe a specific next step?
+1. **Principle Alignment** (weight: 0.20) — Does the betterDecision properly reflect the target principle?
+2. **Specificity** (weight: 0.15) — Is badDecision specific? Is betterDecision actionable?
+3. **Actionability** (weight: 0.15) — Does betterDecision describe a specific next step?
 4. **Executability** (weight: 0.15) — Does betterDecision start with a bounded verb (read, check, verify, edit, write, etc.) and reference a concrete target?
+5. **Safety Impact** (weight: 0.20) — Does the betterDecision reduce risk of data loss, corruption, or new failure modes? Would implementing this prevent dangerous operations?
+6. **UX Impact** (weight: 0.15) — Does the betterDecision reduce user frustration or improve response reliability? Would the user experience be noticeably better?
+
+### Risk Assessment (per candidate):
+For each candidate, also assess:
+- **falsePositiveEstimate** (0-1): How likely is this candidate a false positive (the "betterDecision" is actually not better)?
+- **implementationComplexity** ("low"/"medium"/"high"): How complex would it be to implement this correction?
+- **breakingChangeRisk** (boolean): Could implementing this correction break existing behavior?
 
 ### Executability Check:
 A betterDecision is executable if it:
@@ -243,13 +288,16 @@ and synthesize it into a final decision-point artifact that passes arbiter valid
 You will receive:
 - A **target principle** (principle ID and description)
 - A **session trajectory snapshot**
-- **Philosopher's judgments** — ranked candidates with critiques
+- **Philosopher's judgments** — ranked candidates with critiques and 6D scores
 - **Dreamer's candidates** — the original candidate list
+- **Philosopher's risk assessments** — falsePositiveEstimate, implementationComplexity, breakingChangeRisk per candidate
+
+Use the risk assessments to determine which candidates require deeper contrastive analysis. High-risk candidates (high breakingChangeRisk or implementationComplexity) warrant thorough rejectedAnalysis.
 
 ## Task
 
 Select the best candidate (Philosopher's rank 1) and synthesize it into
-a final TrinityDraftArtifact.
+a final TrinityDraftArtifact. Then produce a **Contrastive Analysis** that explains why the winner was chosen and what to learn from the runners-up.
 
 ## Output Format
 
@@ -271,8 +319,25 @@ You MUST respond with ONLY a valid JSON object. No markdown, no explanation, no 
     "candidateCount": 2,
     "selectedCandidateIndex": 0,
     "stageFailures": []
+  },
+  "rejectedAnalysis": {
+    "whyRejected": "<mental model that led to the rejected candidate>",
+    "warningSignals": ["<observable caution trigger 1>", "<trigger 2>"],
+    "correctiveThinking": "<correct reasoning path that should have been taken>"
+  },
+  "chosenJustification": {
+    "whyChosen": "<why this candidate was selected over others>",
+    "keyInsights": ["<transferable insight 1>", "<insight 2>", "<insight 3>"],
+    "limitations": ["<when this approach does NOT apply 1>", "<limitation 2>"]
+  },
+  "contrastiveAnalysis": {
+    "criticalDifference": "<ONE key insight distinguishing chosen from rejected>",
+    "decisionTrigger": "<When X, do Y pattern>",
+    "preventionStrategy": "<how to systematically avoid the rejected path>"
   }
 }
+
+All three analysis sections (rejectedAnalysis, chosenJustification, contrastiveAnalysis) are optional but recommended. When multiple candidates were evaluated, include them to provide richer training signals.
 
 ## Validation
 
@@ -403,6 +468,70 @@ export class TrinityRuntimeContractError extends Error {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Reasoning Context Serialization (D-03, D-04)
+// ---------------------------------------------------------------------------
+
+/**
+ * Format derived reasoning signals into a prompt section for Dreamer.
+ *
+ * Returns the formatted "## Reasoning Context" section as a string,
+ * or null if no meaningful reasoning content exists to include.
+ *
+ * Only reasoningChain + contextualFactors are serialized.
+ * DecisionPoints are NOT injected (reserved for Phase 37 Scribe per D-04).
+ */
+export function formatReasoningContext(snapshot: NocturnalSessionSnapshot): string | null {
+  const reasoningChain = deriveReasoningChain(snapshot.assistantTurns);
+  const contextualFactors = deriveContextualFactors(snapshot);
+
+  const hasReasoningContent = reasoningChain.length > 0 &&
+    reasoningChain.some(s => s.thinkingContent || s.uncertaintyMarkers.length > 0);
+
+  if (!hasReasoningContent && !contextualFactors.fileStructureKnown &&
+      !contextualFactors.errorHistoryPresent &&
+      !contextualFactors.userGuidanceAvailable &&
+      !contextualFactors.timePressure) {
+    return null;
+  }
+
+  const sections: string[] = ['## Reasoning Context', ''];
+
+  // Serialize reasoning chain (only turns with non-empty signals)
+  const significantTurns = reasoningChain.filter(
+    s => s.thinkingContent || s.uncertaintyMarkers.length > 0
+  );
+  for (const signal of significantTurns) {
+    if (signal.thinkingContent) {
+      sections.push(`- Turn ${signal.turnIndex}: Internal reasoning: "${signal.thinkingContent.slice(0, 200)}"`);
+    }
+    if (signal.uncertaintyMarkers.length > 0) {
+      sections.push(`- Turn ${signal.turnIndex}: Uncertainty detected: ${signal.uncertaintyMarkers.join(', ')}`);
+    }
+    if (signal.confidenceSignal !== 'high') {
+      sections.push(`- Turn ${signal.turnIndex}: Confidence: ${signal.confidenceSignal}`);
+    }
+  }
+
+  // Serialize contextual factors
+  const factorLabels: string[] = [];
+  if (contextualFactors.fileStructureKnown) factorLabels.push('File structure explored before modification');
+  if (contextualFactors.errorHistoryPresent) factorLabels.push('Prior error history present');
+  if (contextualFactors.userGuidanceAvailable) factorLabels.push('User guidance/corrections available');
+  if (contextualFactors.timePressure) factorLabels.push('Time pressure detected (rapid tool calls)');
+
+  if (factorLabels.length > 0) {
+    sections.push('');
+    sections.push('Environmental context:');
+    for (const label of factorLabels) {
+      sections.push(`- ${label}`);
+    }
+  }
+
+  sections.push('');
+  return sections.join('\n');
+}
+
 export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
 
   private readonly api: {
@@ -478,8 +607,8 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
           fs.rmSync(fullPath, { recursive: true, force: true });
         }
       }
-    } catch {
-      // Non-fatal: stale temp files will be cleaned up eventually
+    } catch (err) {
+      this.api.logger?.warn?.(`[Trinity] Failed to cleanup stale temp dirs: ${err instanceof Error ? err.message.replace(/([A-Za-z]:\\[^:\\s]+|\\\/[^\s:]+)/g, '[PATH]') : String(err)}`);
     }
   }
 
@@ -559,6 +688,12 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
       .join('\n');
   }
 
+  /** Clamp a value to [0, 1] range — used for LLM-produced scores that may be out of range */
+  private clamp01(val: unknown, fallback = 0): number {
+    if (typeof val !== 'number' || !Number.isFinite(val)) return fallback;
+    return Math.min(1, Math.max(0, val));
+  }
+
   private classifyRuntimeError(error: unknown): TrinityRuntimeFailureCode {
     const detail = error instanceof Error ? error.message : String(error);
     return /timeout/i.test(detail) ? 'runtime_timeout' : 'runtime_run_failed';
@@ -606,7 +741,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
     } catch (err) {
       return this.buildRuntimeFailureDreamerOutput(this.classifyRuntimeError(err), err);
     } finally {
-      try { fs.unlinkSync(sessionFile); } catch { /* ignore */ }
+      try { fs.unlinkSync(sessionFile); } catch (err) { this.api.logger?.warn?.(`[Trinity] Failed to delete session file: ${sessionFile}`); }
     }
   }
 
@@ -650,7 +785,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
     } catch (err) {
       return this.buildRuntimeFailurePhilosopherOutput(this.classifyRuntimeError(err), err);
     } finally {
-      try { fs.unlinkSync(sessionFile); } catch { /* ignore */ }
+      try { fs.unlinkSync(sessionFile); } catch (err) { this.api.logger?.warn?.(`[Trinity] Failed to delete session file: ${sessionFile}`); }
     }
   }
 
@@ -698,7 +833,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
       this.recordFailure(this.classifyRuntimeError(err), err);
       return null;
     } finally {
-      try { fs.unlinkSync(sessionFile); } catch { /* ignore */ }
+      try { fs.unlinkSync(sessionFile); } catch (err) { this.api.logger?.warn?.(`[Trinity] Failed to delete session file: ${sessionFile}`); }
     }
   }
 
@@ -796,6 +931,12 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
       sections.push('');
     }
 
+    // ## Reasoning Context — derived signals from Phase 34 deriver module (D-03, D-04)
+    const reasoningSection = formatReasoningContext(snapshot);
+    if (reasoningSection) {
+      sections.push(reasoningSection);
+    }
+
     sections.push(`## Task`,
       `Analyze the above session and generate ${maxCandidates} candidate corrections.`,
       `Each candidate must:`,
@@ -817,6 +958,11 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
     snapshot: NocturnalSessionSnapshot
   ): string {
     const candidatesJson = JSON.stringify(dreamerOutput.candidates, null, 2);
+
+    // Build per-candidate metadata from Dreamer (risk level + strategic perspective)
+    const candidateMeta = dreamerOutput.candidates
+      .filter(c => c.riskLevel || c.strategicPerspective)
+      .map(c => `- Candidate #${c.candidateIndex}: risk=${c.riskLevel || 'N/A'}, perspective=${c.strategicPerspective || 'N/A'}`);
 
     // Build violation summary from snapshot for Philosopher to validate candidates
     const failures = snapshot.toolCalls
@@ -860,6 +1006,11 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
     if (userCues.length > 0) {
       sections.push(`\n### User Corrections (${userCues.length})`);
       sections.push(userCues.join('\n'));
+    }
+
+    if (candidateMeta.length > 0) {
+      sections.push(`\n### Candidate Risk Profiles (${candidateMeta.length})`);
+      sections.push(candidateMeta.join('\n'));
     }
 
     sections.push(
@@ -926,18 +1077,29 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
       sections.push(`(No specific violations found in snapshot)`);
     }
 
+    // Build risk summary from Philosopher 6D judgments for Scribe contrastive analysis
+    const riskSummary = philosopherOutput.judgments
+      .map(j => {
+        const risk = j.risks ? ` [risks: fp=${j.risks.falsePositiveEstimate.toFixed(2)}, complexity=${j.risks.implementationComplexity}, breaking=${j.risks.breakingChangeRisk}]` : '';
+        return `  - candidate[${j.candidateIndex}] (rank ${j.rank}, score ${j.score?.toFixed(2) ?? 'n/a'}): ${j.principleAligned ? 'aligned' : 'not aligned'}${risk}`;
+      })
+      .join('\n');
+
     sections.push(
       ``,
       `## Dreamer's Candidates`,
       candidatesJson,
       ``,
-      `## Philosopher's Judgments`,
+      `## Philosopher's Judgments + Risk Assessments`,
       judgmentsJson,
+      ``,
+      `## Philosopher 6D Risk Summary`,
+      `Use this to determine contrastive depth — high-risk candidates need deeper analysis:`,
+      riskSummary,
       ``,
       `## Task`,
       `Select the best candidate (Philosopher's rank 1) and synthesize it into a final TrinityDraftArtifact.`,
-      `Use the Original Violation Evidence above to ensure your final badDecision and betterDecision`,
-      `are grounded in the actual session events, not just Dreamer's interpretation.`,
+      `Then produce contrastive analysis explaining why the winner was chosen and what the rejected candidates teach us.`,
       ``,
       `## CRITICAL: betterDecision Format Requirements`,
       `Your betterDecision MUST pass executability validation. It MUST:`,
@@ -1057,7 +1219,38 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
       }
       return {
         valid: parsed.valid,
-        judgments: parsed.judgments,
+        judgments: parsed.judgments.map((j: Record<string, unknown>) => ({
+          candidateIndex: j.candidateIndex,
+          critique: j.critique ?? '',
+          principleAligned: j.principleAligned ?? false,
+          score: j.score ?? 0,
+          rank: j.rank ?? 0,
+          // Optional 6D scores and risk assessment (Phase 36)
+          // Only include a dimension if the LLM actually returned a number (not undefined/null).
+          // This preserves the distinction between "LLM returned 0" vs "LLM omitted the field."
+          ...(j.scores ? {
+            scores: Object.fromEntries(
+              (['principleAlignment', 'specificity', 'actionability', 'executability', 'safetyImpact', 'uxImpact'] as const)
+                .map(dim => [dim, j.scores![dim]])
+                .filter(([, v]) => typeof v === 'number')
+                .map(([dim, v]) => [dim, this.clamp01(v as number)])
+            )
+          } : {}),
+          ...(j.risks ? (() => {
+            const fp = j.risks!.falsePositiveEstimate;
+            const hasFp = typeof fp === 'number';
+            const risksObj: {
+              falsePositiveEstimate?: number;
+              implementationComplexity: string;
+              breakingChangeRisk: boolean;
+            } = {
+              implementationComplexity: j.risks!.implementationComplexity ?? 'medium',
+              breakingChangeRisk: Boolean(j.risks!.breakingChangeRisk),
+            };
+            if (hasFp) risksObj.falsePositiveEstimate = this.clamp01(fp);
+            return { risks: risksObj };
+          })() : {}),
+        })),
         overallAssessment: parsed.overallAssessment ?? '',
         reason: parsed.reason,
         generatedAt: parsed.generatedAt ?? new Date().toISOString(),
@@ -1117,6 +1310,22 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
         return null;
       }
 
+      // Validate contrastive analysis sub-fields (H-03): only include if structure is intact
+      const contrastiveAnalysis = parsed.contrastiveAnalysis
+        && typeof parsed.contrastiveAnalysis === 'object'
+        && typeof parsed.contrastiveAnalysis.criticalDifference === 'string'
+        ? parsed.contrastiveAnalysis : undefined;
+
+      const rejectedAnalysis = parsed.rejectedAnalysis
+        && typeof parsed.rejectedAnalysis === 'object'
+        && typeof parsed.rejectedAnalysis.whyRejected === 'string'
+        ? parsed.rejectedAnalysis : undefined;
+
+      const chosenJustification = parsed.chosenJustification
+        && typeof parsed.chosenJustification === 'object'
+        && typeof parsed.chosenJustification.whyChosen === 'string'
+        ? parsed.chosenJustification : undefined;
+
       return {
         selectedCandidateIndex: parsed.selectedCandidateIndex,
         badDecision: parsed.badDecision ?? '',
@@ -1135,6 +1344,9 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
           selectedCandidateIndex: parsed.selectedCandidateIndex,
           stageFailures: [],
         },
+        ...(contrastiveAnalysis ? { contrastiveAnalysis } : {}),
+        ...(rejectedAnalysis ? { rejectedAnalysis } : {}),
+        ...(chosenJustification ? { chosenJustification } : {}),
       };
     } catch {
       this.recordFailure('runtime_run_failed', new Error(`Scribe output JSON parse error: ${json.slice(0, 200)}`));
@@ -1255,6 +1467,10 @@ export interface DreamerCandidate {
   rationale: string;
   /** Confidence that this candidate is valid (0-1) */
   confidence: number;
+  /** Risk level of this candidate's approach -- LLM-judged per D-02 */
+  riskLevel?: "low" | "medium" | "high";
+  /** Which strategic perspective this candidate embodies per D-01 */
+  strategicPerspective?: "conservative_fix" | "structural_improvement" | "paradigm_shift";
 }
 
 export interface DreamerOutput {
@@ -1272,6 +1488,24 @@ export interface DreamerOutput {
  * Philosopher output — principle-grounded critique and ranking.
  * Philosopher evaluates Dreamer's candidates and ranks them.
  */
+export interface PhilosopherRiskAssessment {
+  /** Estimated probability that this candidate is a false positive (0-1) */
+  falsePositiveEstimate: number;
+  /** How complex is this candidate to implement */
+  implementationComplexity: 'low' | 'medium' | 'high';
+  /** Whether implementing this candidate risks breaking existing functionality */
+  breakingChangeRisk: boolean;
+}
+
+export interface Philosopher6DScores {
+  principleAlignment: number;
+  specificity: number;
+  actionability: number;
+  executability: number;
+  safetyImpact: number;
+  uxImpact: number;
+}
+
 export interface PhilosopherJudgment {
   /** Index of the judged candidate (references DreamerCandidate.candidateIndex) */
   candidateIndex: number;
@@ -1283,6 +1517,10 @@ export interface PhilosopherJudgment {
   score: number;
   /** Rank among all candidates (1 = best) */
   rank: number;
+  /** Per-dimension scores (6D evaluation) — informational, not used for tournament ranking */
+  scores?: Philosopher6DScores;
+  /** Risk assessment for this candidate — informational, consumed by Scribe (Phase 37) */
+  risks?: PhilosopherRiskAssessment;
 }
 
 export interface PhilosopherOutput {
@@ -1296,6 +1534,45 @@ export interface PhilosopherOutput {
   reason?: string;
   /** Timestamp of generation */
   generatedAt: string;
+}
+
+/**
+ * Analysis of a rejected candidate — why it lost the tournament.
+ * Informs training signal for "what to avoid".
+ */
+export interface RejectedAnalysis {
+  /** Mental model that led to the rejected candidate */
+  whyRejected: string;
+  /** Observable caution triggers that were missed or ignored */
+  warningSignals: string[];
+  /** Correct reasoning path that should have been taken */
+  correctiveThinking: string;
+}
+
+/**
+ * Justification for the chosen candidate — why it won the tournament.
+ * Informs training signal for "what to do".
+ */
+export interface ChosenJustification {
+  /** Why this candidate was selected over others */
+  whyChosen: string;
+  /** 1-3 transferable insights from this decision */
+  keyInsights: string[];
+  /** When this approach does NOT apply */
+  limitations: string[];
+}
+
+/**
+ * Contrastive analysis: key differences between chosen and rejected paths.
+ * Synthesizes the core lesson from the tournament.
+ */
+export interface ContrastiveAnalysis {
+  /** ONE key insight distinguishing chosen from rejected */
+  criticalDifference: string;
+  /** Pattern: "When X, do Y" */
+  decisionTrigger: string;
+  /** How to systematically avoid the rejected path */
+  preventionStrategy: string;
 }
 
 /**
@@ -1325,6 +1602,12 @@ export interface TrinityDraftArtifact {
   planningRatioGain?: number;
   /** Optional routing context for a follow-on Artificer stage */
   artificerContext?: TrinityArtificerContext;
+  /** Contrastive analysis: chosen vs rejected reasoning paths (SCRIBE-03) */
+  contrastiveAnalysis?: ContrastiveAnalysis;
+  /** Analysis of the rejected candidates — why they lost the tournament (SCRIBE-01) */
+  rejectedAnalysis?: RejectedAnalysis;
+  /** Justification for the chosen candidate — why it won (SCRIBE-02) */
+  chosenJustification?: ChosenJustification;
 }
 
 export interface TrinityTelemetry {
@@ -1350,6 +1633,24 @@ export interface TrinityTelemetry {
   winnerThresholdPassed?: boolean;
   /** Number of eligible candidates after threshold check (optional) */
   eligibleCandidateCount?: number;
+  /** Whether Dreamer candidates passed diversity validation (DIVER-04) */
+  diversityCheckPassed?: boolean;
+  /** Risk levels assigned to Dreamer candidates (for telemetry) */
+  candidateRiskLevels?: string[];
+  /** Aggregate 6D Philosopher evaluation metrics (informational) */
+  philosopher6D?: {
+    /** Average scores across all candidates per dimension */
+    avgScores: {
+      principleAlignment: number;
+      specificity: number;
+      actionability: number;
+      executability: number;
+      safetyImpact: number;
+      uxImpact: number;
+    };
+    /** Count of candidates with breakingChangeRisk = true */
+    highRiskCount: number;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1421,6 +1722,8 @@ export function invokeStubDreamer(
       betterDecision: 'Review docs/gateblocks.md and verify authorization requirements first; based on the evidence, this irreversible action must be reviewed before proceeding',
       rationale: 'Respecting gate blocks prevents unintended system modifications',
       confidence: 0.95,
+      riskLevel: 'low' as const,
+      strategicPerspective: 'conservative_fix' as const,
     });
     if (maxCandidates >= 2) {
       candidates.push({
@@ -1429,6 +1732,8 @@ export function invokeStubDreamer(
         betterDecision: 'Check the gatekeeper source first to diagnose the block reason; this is irreversible, so we must be certain before proceeding',
         rationale: 'Understanding why a gate blocked prevents repeated blocks',
         confidence: 0.85,
+        riskLevel: 'low' as const,
+        strategicPerspective: 'conservative_fix' as const,
       });
     }
     if (maxCandidates >= 3) {
@@ -1438,6 +1743,8 @@ export function invokeStubDreamer(
         betterDecision: 'Review docs/auth.md first to understand the authorization structure, then request proper review before any change',
         rationale: 'Proper authorization ensures accountability and prevents unintended changes',
         confidence: 0.75,
+        riskLevel: 'low' as const,
+        strategicPerspective: 'conservative_fix' as const,
       });
     }
   } else if (hasPain) {
@@ -1447,6 +1754,8 @@ export function invokeStubDreamer(
       betterDecision: 'Check logs/pain.json first to analyze pain signals; this error indicates we should stop and reconsider before proceeding',
       rationale: 'Pain signals indicate accumulated friction or error conditions',
       confidence: 0.90,
+      riskLevel: 'medium' as const,
+      strategicPerspective: 'structural_improvement' as const,
     });
     if (maxCandidates >= 2) {
       candidates.push({
@@ -1455,6 +1764,8 @@ export function invokeStubDreamer(
         betterDecision: 'Review src/pain-detector.ts first; based on the evidence, this indicates a deeper issue we must not ignore',
         rationale: 'Addressing friction reduces error rates and improves outcomes',
         confidence: 0.80,
+        riskLevel: 'medium' as const,
+        strategicPerspective: 'structural_improvement' as const,
       });
     }
     if (maxCandidates >= 3) {
@@ -1464,6 +1775,8 @@ export function invokeStubDreamer(
         betterDecision: 'Analyze logs/errors.json first to identify the failure pattern; this suggests we should stop and rethink before retrying',
         rationale: 'Pattern analysis prevents recurring pain from the same source',
         confidence: 0.70,
+        riskLevel: 'medium' as const,
+        strategicPerspective: 'structural_improvement' as const,
       });
     }
   } else if (hasFailures) {
@@ -1473,6 +1786,8 @@ export function invokeStubDreamer(
       betterDecision: 'Verify config.json preconditions first, based on the error in logs/failure.json, before retrying',
       rationale: 'Diagnosing failures before retry prevents repeated failures',
       confidence: 0.92,
+      riskLevel: 'high' as const,
+      strategicPerspective: 'paradigm_shift' as const,
     });
     if (maxCandidates >= 2) {
       candidates.push({
@@ -1481,6 +1796,8 @@ export function invokeStubDreamer(
         betterDecision: 'Check docs/debugging.md first to diagnose what failed; we must not ignore this when the action is irreversible',
         rationale: 'Unaddressed failures compound and cause larger issues',
         confidence: 0.85,
+        riskLevel: 'high' as const,
+        strategicPerspective: 'paradigm_shift' as const,
       });
     }
     if (maxCandidates >= 3) {
@@ -1490,6 +1807,8 @@ export function invokeStubDreamer(
         betterDecision: 'Verify src/validator.ts state first; this error indicates a deeper problem before assuming resolution',
         rationale: 'Verification prevents cascading failures from unresolved issues',
         confidence: 0.78,
+        riskLevel: 'high' as const,
+        strategicPerspective: 'paradigm_shift' as const,
       });
     }
   } else {
@@ -1572,6 +1891,70 @@ export function invokeStubPhilosopher(
       principleAligned = false;
     }
 
+    // Deterministic 6D scores based on strategic perspective (Phase 35 D-07 mapping)
+    const perspective = candidate.strategicPerspective;
+    let sixDScores: Philosopher6DScores;
+    let riskAssessment: PhilosopherRiskAssessment;
+
+    if (perspective === 'conservative_fix') {
+      sixDScores = {
+        principleAlignment: 0.9,
+        specificity: 0.8,
+        actionability: 0.85,
+        executability: 0.9,
+        safetyImpact: 0.95,
+        uxImpact: 0.7,
+      };
+      riskAssessment = {
+        falsePositiveEstimate: 0.1,
+        implementationComplexity: 'low',
+        breakingChangeRisk: false,
+      };
+    } else if (perspective === 'structural_improvement') {
+      sixDScores = {
+        principleAlignment: 0.75,
+        specificity: 0.7,
+        actionability: 0.75,
+        executability: 0.7,
+        safetyImpact: 0.7,
+        uxImpact: 0.8,
+      };
+      riskAssessment = {
+        falsePositiveEstimate: 0.25,
+        implementationComplexity: 'medium',
+        breakingChangeRisk: false,
+      };
+    } else if (perspective === 'paradigm_shift') {
+      sixDScores = {
+        principleAlignment: 0.6,
+        specificity: 0.5,
+        actionability: 0.5,
+        executability: 0.45,
+        safetyImpact: 0.4,
+        uxImpact: 0.6,
+      };
+      riskAssessment = {
+        falsePositiveEstimate: 0.4,
+        implementationComplexity: 'high',
+        breakingChangeRisk: true,
+      };
+    } else {
+      // Fallback for candidates without strategicPerspective
+      sixDScores = {
+        principleAlignment: score,
+        specificity: score * 0.9,
+        actionability: score * 0.85,
+        executability: score * 0.8,
+        safetyImpact: score * 0.7,
+        uxImpact: score * 0.75,
+      };
+      riskAssessment = {
+        falsePositiveEstimate: 0.3,
+        implementationComplexity: 'medium',
+        breakingChangeRisk: false,
+      };
+    }
+
     return {
       candidateIndex: candidate.candidateIndex,
       critique: `Candidate ${candidate.candidateIndex} scored ${score.toFixed(2)}. ${
@@ -1582,6 +1965,8 @@ export function invokeStubPhilosopher(
       principleAligned,
       score: Math.min(1, Math.max(0, score)),
       rank: 0, // Will be set after sorting
+      scores: sixDScores,
+      risks: riskAssessment,
     };
   });
 
@@ -1780,6 +2165,16 @@ export async function runTrinityAsync(options: RunTrinityOptions): Promise<Trini
     telemetry.dreamerPassed = true;
     telemetry.candidateCount = dreamerOutput.candidates.length;
 
+    // Diversity validation (DIVER-04): soft check, never gates pipeline
+    const diversityResult = validateCandidateDiversity(dreamerOutput.candidates);
+    telemetry.diversityCheckPassed = diversityResult.diversityCheckPassed;
+    telemetry.candidateRiskLevels = dreamerOutput.candidates
+      .map(c => c.riskLevel)
+      .filter((r): r is "low" | "medium" | "high" => typeof r === 'string');
+    if (!diversityResult.diversityCheckPassed) {
+      console.warn(`[Trinity] Diversity check failed: ${diversityResult.details}`);
+    }
+
     // Step 2: Philosopher — rank candidates via real subagent
     const philosopherOutput = await adapter.invokePhilosopher(dreamerOutput, principleId, snapshot);
 
@@ -1793,6 +2188,21 @@ export async function runTrinityAsync(options: RunTrinityOptions): Promise<Trini
     }
 
     telemetry.philosopherPassed = true;
+
+    // Aggregate 6D scores from Philosopher judgments (if available)
+    const realJudgments6D = philosopherOutput.judgments.filter(j => j.scores);
+    if (realJudgments6D.length > 0) {
+      const dims = ['principleAlignment', 'specificity', 'actionability', 'executability', 'safetyImpact', 'uxImpact'] as const;
+      const avgScores: Record<string, number> = {};
+      for (const dim of dims) {
+        const values = realJudgments6D.map(j => j.scores?.[dim] ?? 0);
+        avgScores[dim] = values.reduce((a, b) => a + b, 0) / values.length;
+      }
+      telemetry.philosopher6D = {
+        avgScores: avgScores as TrinityTelemetry['philosopher6D']['avgScores'],
+        highRiskCount: philosopherOutput.judgments.filter(j => j.risks?.breakingChangeRisk).length,
+      };
+    }
 
     // Step 3: Scribe — synthesize final artifact via real subagent
     const draftArtifact = await adapter.invokeScribe(
@@ -1876,6 +2286,16 @@ function runTrinityWithStubs(
   telemetry.dreamerPassed = true;
   telemetry.candidateCount = dreamerOutput.candidates.length;
 
+  // Diversity validation (DIVER-04): soft check, never gates pipeline
+  const diversityResult = validateCandidateDiversity(dreamerOutput.candidates);
+  telemetry.diversityCheckPassed = diversityResult.diversityCheckPassed;
+  telemetry.candidateRiskLevels = dreamerOutput.candidates
+    .map(c => c.riskLevel)
+    .filter((r): r is "low" | "medium" | "high" => typeof r === 'string');
+  if (!diversityResult.diversityCheckPassed) {
+    console.warn(`[Trinity] Diversity check failed: ${diversityResult.details}`);
+  }
+
   // Step 2: Philosopher — rank candidates (stub)
   const philosopherOutput = invokeStubPhilosopher(dreamerOutput, principleId, snapshot);
 
@@ -1894,6 +2314,21 @@ function runTrinityWithStubs(
   }
 
   telemetry.philosopherPassed = true;
+
+  // Aggregate 6D scores from Philosopher judgments (if available)
+  const judgments6D = philosopherOutput.judgments.filter(j => j.scores);
+  if (judgments6D.length > 0) {
+    const dims = ['principleAlignment', 'specificity', 'actionability', 'executability', 'safetyImpact', 'uxImpact'] as const;
+    const avgScores: Record<string, number> = {};
+    for (const dim of dims) {
+      const values = judgments6D.map(j => j.scores?.[dim] ?? 0);
+      avgScores[dim] = values.reduce((a, b) => a + b, 0) / values.length;
+    }
+    telemetry.philosopher6D = {
+      avgScores: avgScores as TrinityTelemetry['philosopher6D'] extends { avgScores: infer T } ? T : never,
+      highRiskCount: philosopherOutput.judgments.filter(j => j.risks?.breakingChangeRisk).length,
+    };
+  }
 
   // Step 3: Scribe — produce final artifact using tournament selection (stub)
   const draftArtifact = invokeStubScribe(dreamerOutput, philosopherOutput, snapshot, principleId, telemetry, config);
