@@ -342,7 +342,7 @@ export function exportORPOSamples(
 
     // Read artifact (throws on error — distinguishes read failure from missing artifact)
      
-    let artifact = null;
+    let artifact;
     try {
       artifact = readDatasetArtifact(workspaceDir, record.sampleFingerprint);
     } catch {

@@ -61,7 +61,7 @@ export class CentralOverviewService {
 
     // D-06: sampleQueue.counters from aggregated_correction_samples GROUP BY review_status
      
-    let sampleCounters: Record<string, number> = {};
+    let sampleCounters: Record<string, number>;
     try {
       sampleCounters = this.centralDb.getSampleCountersByStatus();
     } catch {

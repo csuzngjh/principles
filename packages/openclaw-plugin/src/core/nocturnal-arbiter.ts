@@ -691,7 +691,7 @@ export function parseAndValidateArtifact(
 ): ArbiterResult {
   // Step 1: Parse JSON
    
-  let parsed = null as unknown;
+  let parsed: unknown;
   try {
     parsed = JSON.parse(jsonString);
   } catch (err) {

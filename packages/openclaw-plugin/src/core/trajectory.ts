@@ -588,7 +588,7 @@ export class TrajectoryDatabase {
     const offset = filters.offset ?? 0;
 
      
-    let rows = '' as Record<string, unknown>[];
+    let rows: Record<string, unknown>[];
     if (traceId) {
       rows = this.db.prepare(`
         SELECT id, trace_id, task_id, stage, level, message, summary, metadata_json, created_at

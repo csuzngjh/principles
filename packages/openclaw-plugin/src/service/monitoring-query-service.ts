@@ -87,7 +87,7 @@ export class MonitoringQueryService {
        
       let status!: 'pending' | 'running' | 'completed' | 'failed';
        
-      let reason = '' as string | undefined;
+      let reason: string | undefined;
 
       if (!startEvent) {
         status = 'pending';

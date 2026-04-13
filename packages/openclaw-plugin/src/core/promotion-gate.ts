@@ -410,7 +410,7 @@ export function evaluatePromotionGate(
   // Shadow evidence comes from actual runtime routing decisions
   const shadowStats = computeShadowStats(stateDir, { checkpointId });
    
-  let arbiterRejectRate = 0 as number;
+  let arbiterRejectRate: number;
    
   let arbiterRejectSource!: 'shadow' | 'eval-proxy';
 
@@ -446,7 +446,7 @@ export function evaluatePromotionGate(
   // --- Check 6: Executability reject rate constraint ---
   // PREFER real shadow evidence: escalation rate + profile rejection rate
    
-  let executabilityRejectRate = 0 as number;
+  let executabilityRejectRate: number;
    
   let executabilityRejectSource!: 'shadow' | 'eval-proxy';
 

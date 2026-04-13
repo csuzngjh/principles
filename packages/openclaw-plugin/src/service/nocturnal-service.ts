@@ -289,9 +289,9 @@ function invokeStubReflector(
   const hasPain = snapshot.stats.totalPainEvents > 0;
   const hasFailures = (snapshot.stats.failureCount ?? 0) > 0;
 
-  let badDecision = '';
-  let betterDecision = '';
-  let rationale = '';
+  let badDecision: string;
+  let betterDecision: string;
+  let rationale: string;
 
   if (hasGateBlocks && snapshot.gateBlocks.length > 0) {
     // Use actual gate block content
@@ -784,10 +784,10 @@ export function executeNocturnalReflection(
   // Step 5: Artifact generation (Trinity or single-reflector)
   // -------------------------------------------------------------------------
    
-  let trinityArtifact: TrinityDraftArtifact | null = null;
+  let trinityArtifact: TrinityDraftArtifact | null | undefined;
   let trinityResult: TrinityResult | null = null;
    
-  let rawJson = '' as string;
+  let rawJson: string;
 
   if (options.skipReflector) {
     // Caller provided explicit artifact — used for testing arbiter/executability
@@ -1011,7 +1011,7 @@ export function executeNocturnalReflection(
   };
 
    
-  let persistedPath = '' as string;
+  let persistedPath: string;
   try {
     persistedPath = persistArtifact(workspaceDir, artifactWithBoundedAction);
     diagnostics.persisted = true;
@@ -1188,11 +1188,11 @@ async function executeNocturnalReflectionWithAdapter(
 
   // Step 2: Target selection (or use override to skip)
    
-  let selectedPrincipleId = '' as string | undefined;
+  let selectedPrincipleId: string | undefined;
    
-  let selectedSessionId = '' as string | undefined;
+  let selectedSessionId: string | undefined;
    
-  let snapshot: NocturnalSessionSnapshot | null = null;
+  let snapshot: NocturnalSessionSnapshot | null | undefined;
 
   if (options.principleIdOverride && options.snapshotOverride) {
     const snapshotValidation = validateNocturnalSnapshotIngress(options.snapshotOverride);
@@ -1305,10 +1305,10 @@ async function executeNocturnalReflectionWithAdapter(
 
   // Step 4: Trinity execution via adapter (async)
    
-  let trinityArtifact: TrinityDraftArtifact | null = null;
+  let trinityArtifact: TrinityDraftArtifact | null | undefined;
   let trinityResult: TrinityResult | null = null;
    
-  let rawJson = '' as string;
+  let rawJson: string;
 
   if (options.skipReflector) {
     if (!options.reflectorOutputOverride) {
@@ -1414,7 +1414,7 @@ async function executeNocturnalReflectionWithAdapter(
   // Step 7: Persist artifact
   const artifactWithBoundedAction = { ...arbiterResult.artifact, boundedAction: execResult.boundedAction };
    
-  let persistedPath = '' as string;
+  let persistedPath: string;
   try {
     persistedPath = persistArtifact(workspaceDir, artifactWithBoundedAction);
     diagnostics.persisted = true;
