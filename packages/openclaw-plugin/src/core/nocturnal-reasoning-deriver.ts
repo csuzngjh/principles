@@ -15,6 +15,30 @@ import type { NocturnalAssistantTurn, NocturnalToolCall, NocturnalUserTurn, Noct
 import { detectThinkingModelMatches, listThinkingModels } from './thinking-models.js';
 
 // ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
+
+/** Parse an ISO 8601 timestamp, returning NaN for invalid formats. */
+function parseTs(ts: string): number {
+  // ISO 8601 strings without Z suffix or offset are treated as local time.
+  // Log a warning for ambiguous formats (missing timezone indicator).
+  if (
+    typeof ts === 'string' &&
+    !ts.endsWith('Z') &&
+    !ts.includes('+') &&
+    ts.includes('-', 4)
+  ) {
+    // Looks like an ISO date but no timezone — could be ambiguous
+    const bare = ts.slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(bare)) {
+      // Plain YYYY-MM-DD without time or Z — definitely ambiguous
+      console.warn(`[Deriver] Timestamp missing timezone: "${ts}"`);
+    }
+  }
+  return Date.parse(ts);
+}
+
+// ---------------------------------------------------------------------------
 // Shared types (used across all three derive functions)
 // ---------------------------------------------------------------------------
 
@@ -174,17 +198,17 @@ export function deriveDecisionPoints(
 
   // Sort assistant turns by createdAt for binary-style lookup
   const sortedTurns = [...assistantTurns].sort(
-    (a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)
+    (a, b) => parseTs(a.createdAt) - parseTs(b.createdAt)
   );
 
   return toolCalls.map(tc => {
-    const tcTime = Date.parse(tc.createdAt);
+    const tcTime = parseTs(tc.createdAt);
 
     // Find assistant turn immediately before tool call
     // (highest createdAt that is strictly less than tool call's createdAt)
     let beforeTurn: NocturnalAssistantTurn | undefined;
     for (const turn of sortedTurns) {
-      if (Date.parse(turn.createdAt) < tcTime) {
+      if (parseTs(turn.createdAt) < tcTime) {
         beforeTurn = turn;
       } else {
         break;
@@ -201,7 +225,7 @@ export function deriveDecisionPoints(
 
     if (tc.outcome === 'failure') {
       const afterTurn = sortedTurns.find(
-        turn => Date.parse(turn.createdAt) > tcTime
+        turn => parseTs(turn.createdAt) > tcTime
       );
       if (afterTurn) {
         afterReflection = afterTurn.sanitizedText.slice(0, 300);
@@ -280,11 +304,11 @@ export function deriveContextualFactors(
   let timePressure = false;
   if (toolCalls.length >= 2) {
     const sorted = [...toolCalls].sort(
-      (a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)
+      (a, b) => parseTs(a.createdAt) - parseTs(b.createdAt)
     );
     let rapidGaps = 0;
     for (let i = 0; i < sorted.length - 1; i++) {
-      const gap = Date.parse(sorted[i + 1].createdAt) - Date.parse(sorted[i].createdAt);
+      const gap = parseTs(sorted[i + 1].createdAt) - parseTs(sorted[i].createdAt);
       if (gap < 2000) rapidGaps++;
     }
     const totalPairs = sorted.length - 1;

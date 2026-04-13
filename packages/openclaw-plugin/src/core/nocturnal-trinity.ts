@@ -608,7 +608,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
         }
       }
     } catch (err) {
-      this.api.logger?.warn?.(`[Trinity] Failed to cleanup stale temp dirs: ${err instanceof Error ? err.message : String(err)}`);
+      this.api.logger?.warn?.(`[Trinity] Failed to cleanup stale temp dirs: ${err instanceof Error ? err.message.replace(/([A-Za-z]:\\[^:\\s]+|\\\/[^\s:]+)/g, '[PATH]') : String(err)}`);
     }
   }
 
@@ -1225,24 +1225,31 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
           principleAligned: j.principleAligned ?? false,
           score: j.score ?? 0,
           rank: j.rank ?? 0,
-          // Optional 6D scores and risk assessment (Phase 36) — clamp to [0,1] for safety
+          // Optional 6D scores and risk assessment (Phase 36)
+          // Only include a dimension if the LLM actually returned a number (not undefined/null).
+          // This preserves the distinction between "LLM returned 0" vs "LLM omitted the field."
           ...(j.scores ? {
-            scores: {
-              principleAlignment: this.clamp01(j.scores.principleAlignment),
-              specificity: this.clamp01(j.scores.specificity),
-              actionability: this.clamp01(j.scores.actionability),
-              executability: this.clamp01(j.scores.executability),
-              safetyImpact: this.clamp01(j.scores.safetyImpact),
-              uxImpact: this.clamp01(j.scores.uxImpact),
-            }
+            scores: Object.fromEntries(
+              (['principleAlignment', 'specificity', 'actionability', 'executability', 'safetyImpact', 'uxImpact'] as const)
+                .map(dim => [dim, j.scores![dim]])
+                .filter(([, v]) => typeof v === 'number')
+                .map(([dim, v]) => [dim, this.clamp01(v as number)])
+            )
           } : {}),
-          ...(j.risks ? {
-            risks: {
-              falsePositiveEstimate: this.clamp01(j.risks.falsePositiveEstimate),
-              implementationComplexity: j.risks.implementationComplexity ?? 'medium',
-              breakingChangeRisk: Boolean(j.risks.breakingChangeRisk),
-            }
-          } : {}),
+          ...(j.risks ? (() => {
+            const fp = j.risks!.falsePositiveEstimate;
+            const hasFp = typeof fp === 'number';
+            const risksObj: {
+              falsePositiveEstimate?: number;
+              implementationComplexity: string;
+              breakingChangeRisk: boolean;
+            } = {
+              implementationComplexity: j.risks!.implementationComplexity ?? 'medium',
+              breakingChangeRisk: Boolean(j.risks!.breakingChangeRisk),
+            };
+            if (hasFp) risksObj.falsePositiveEstimate = this.clamp01(fp);
+            return { risks: risksObj };
+          })() : {}),
         })),
         overallAssessment: parsed.overallAssessment ?? '',
         reason: parsed.reason,
