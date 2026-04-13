@@ -150,8 +150,10 @@ function main() {
     }
 
     // Check PR #256 fix: legacy session temporal guard
-    if (!content.includes('ABANDONED_THRESHOLD') && !content.includes('inactiveFor')) {
-      return { status: 'warn', detail: 'Legacy session temporal guard not found — old behavior may misclassify active sessions as system' };
+    // The fix adds `lastActivityAt` comparison before treating sessions as system sessions.
+    // In minified code this appears as a comparison involving `lastActivityAt`.
+    if (!content.includes('lastActivityAt')) {
+      return { status: 'warn', detail: 'lastActivityAt reference not found — temporal guard for legacy sessions may be missing' };
     }
     return 'Idle detection functions present (verified via stable string markers)';
   });
