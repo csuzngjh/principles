@@ -20,6 +20,9 @@ import {
   type TrinityDraftArtifact,
   type TrinityRuntimeAdapter,
   type TrinityTelemetry,
+  type RejectedAnalysis,
+  type ChosenJustification,
+  type ContrastiveAnalysis,
 } from '../../src/core/nocturnal-trinity.js';
 import {
   validateDreamerOutput,
@@ -1605,5 +1608,210 @@ describe('TrinityTelemetry — philosopher6D field', () => {
     expect(telemetry.philosopher6D).toBeDefined();
     expect(telemetry.philosopher6D!.avgScores.principleAlignment).toBe(0.85);
     expect(telemetry.philosopher6D!.highRiskCount).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: Scribe Contrastive Analysis (SCRIBE-01, SCRIBE-02, SCRIBE-03)
+// ---------------------------------------------------------------------------
+
+describe('Scribe Contrastive Analysis (SCRIBE-01, SCRIBE-02, SCRIBE-03)', () => {
+  function makeValidArtifact(overrides: Record<string, unknown> = {}): TrinityDraftArtifact {
+    return {
+      selectedCandidateIndex: 0,
+      badDecision: 'Did something wrong',
+      betterDecision: 'Do it right',
+      rationale: 'Because the principle says so and this is the right approach',
+      sessionId: 'session-test-123',
+      principleId: 'T-01',
+      sourceSnapshotRef: 'snapshot-test-001',
+      telemetry: {
+        chainMode: 'trinity',
+        usedStubs: false,
+        dreamerPassed: true,
+        philosopherPassed: true,
+        scribePassed: true,
+        candidateCount: 2,
+        selectedCandidateIndex: 0,
+        stageFailures: [],
+      },
+      ...overrides,
+    };
+  }
+
+  it('TrinityDraftArtifact accepts optional rejectedAnalysis fields (SCRIBE-01)', () => {
+    const artifact = makeValidArtifact({
+      rejectedAnalysis: {
+        whyRejected: 'Lower alignment score',
+        warningSignals: ['missed pain signal', 'ignored gate block'],
+        correctiveThinking: 'Should have verified the routing state before proceeding',
+      },
+    } as Record<string, unknown>);
+    expect(artifact.rejectedAnalysis).toBeDefined();
+    expect(artifact.rejectedAnalysis!.whyRejected).toBe('Lower alignment score');
+    expect(artifact.rejectedAnalysis!.warningSignals).toHaveLength(2);
+    expect(artifact.rejectedAnalysis!.correctiveThinking).toContain('Should have');
+  });
+
+  it('TrinityDraftArtifact accepts optional chosenJustification fields (SCRIBE-02)', () => {
+    const artifact = makeValidArtifact({
+      chosenJustification: {
+        whyChosen: 'Highest 6D composite score and low breakingChangeRisk',
+        keyInsights: ['Verify routing state before file operations', 'Check pain signals early'],
+        limitations: ['Does not apply when session has no pain history', 'Less relevant for conservative fixes'],
+      },
+    } as Record<string, unknown>);
+    expect(artifact.chosenJustification).toBeDefined();
+    expect(artifact.chosenJustification!.whyChosen).toContain('Highest');
+    expect(artifact.chosenJustification!.keyInsights).toHaveLength(2);
+    expect(artifact.chosenJustification!.limitations).toHaveLength(2);
+  });
+
+  it('TrinityDraftArtifact accepts optional contrastiveAnalysis fields (SCRIBE-03)', () => {
+    const artifact = makeValidArtifact({
+      contrastiveAnalysis: {
+        criticalDifference: 'Winner checked routing state; loser proceeded without verification',
+        decisionTrigger: 'When session has pain events and gate blocks, verify infrastructure before file operations',
+        preventionStrategy: 'Add a pre-flight check: read the routing status and confirm no pending failures',
+      },
+    } as Record<string, unknown>);
+    expect(artifact.contrastiveAnalysis).toBeDefined();
+    expect(artifact.contrastiveAnalysis!.criticalDifference).toContain('routing state');
+    expect(artifact.contrastiveAnalysis!.decisionTrigger).toContain('When');
+    expect(artifact.contrastiveAnalysis!.preventionStrategy).toContain('pre-flight');
+  });
+
+  it('validateDraftArtifact passes when all three analysis sections are present', () => {
+    const artifact = makeValidArtifact({
+      rejectedAnalysis: {
+        whyRejected: 'Lower score',
+        warningSignals: ['missed signal'],
+        correctiveThinking: 'Should have checked',
+      },
+      chosenJustification: {
+        whyChosen: 'Best score',
+        keyInsights: ['insight 1'],
+        limitations: ['limitation 1'],
+      },
+      contrastiveAnalysis: {
+        criticalDifference: 'key difference',
+        decisionTrigger: 'When X, do Y',
+        preventionStrategy: 'avoid the rejected path',
+      },
+    } as Record<string, unknown>);
+    const result = validateDraftArtifact(artifact);
+    expect(result.valid).toBe(true);
+    expect(result.failures).toHaveLength(0);
+  });
+
+  it('RejectedAnalysis interface accepts all required fields', () => {
+    const analysis: RejectedAnalysis = {
+      whyRejected: 'test reason',
+      warningSignals: ['signal 1', 'signal 2'],
+      correctiveThinking: 'correct path',
+    };
+    expect(analysis.whyRejected).toBe('test reason');
+    expect(analysis.warningSignals).toHaveLength(2);
+    expect(analysis.correctiveThinking).toBe('correct path');
+  });
+
+  it('ChosenJustification interface accepts all required fields', () => {
+    const justification: ChosenJustification = {
+      whyChosen: 'test reason',
+      keyInsights: ['insight 1', 'insight 2', 'insight 3'],
+      limitations: ['limitation 1'],
+    };
+    expect(justification.whyChosen).toBe('test reason');
+    expect(justification.keyInsights).toHaveLength(3);
+    expect(justification.limitations).toHaveLength(1);
+  });
+
+  it('ContrastiveAnalysis interface accepts all required fields', () => {
+    const analysis: ContrastiveAnalysis = {
+      criticalDifference: 'key insight',
+      decisionTrigger: 'When X, do Y',
+      preventionStrategy: 'avoid the rejected path',
+    };
+    expect(analysis.criticalDifference).toBe('key insight');
+    expect(analysis.decisionTrigger).toBe('When X, do Y');
+    expect(analysis.preventionStrategy).toBe('avoid the rejected path');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: Scribe Backward Compatibility (SCRIBE-04)
+// ---------------------------------------------------------------------------
+
+describe('Scribe Backward Compatibility (SCRIBE-04)', () => {
+  function makeValidArtifact(): TrinityDraftArtifact {
+    return {
+      selectedCandidateIndex: 0,
+      badDecision: 'Did something wrong',
+      betterDecision: 'Do it right',
+      rationale: 'Because the principle says so and this is the right approach',
+      sessionId: 'session-test-123',
+      principleId: 'T-01',
+      sourceSnapshotRef: 'snapshot-test-001',
+      telemetry: {
+        chainMode: 'trinity',
+        usedStubs: false,
+        dreamerPassed: true,
+        philosopherPassed: true,
+        scribePassed: true,
+        candidateCount: 2,
+        selectedCandidateIndex: 0,
+        stageFailures: [],
+      },
+    };
+  }
+
+  it('TrinityDraftArtifact without contrastiveAnalysis fields is valid', () => {
+    const artifact = makeValidArtifact();
+    expect(artifact.contrastiveAnalysis).toBeUndefined();
+    expect(artifact.rejectedAnalysis).toBeUndefined();
+    expect(artifact.chosenJustification).toBeUndefined();
+    const result = validateDraftArtifact(artifact);
+    expect(result.valid).toBe(true);
+    expect(result.failures).toHaveLength(0);
+  });
+
+  it('artifact without new fields produces identical output via draftToArtifact', () => {
+    const artifact = makeValidArtifact();
+    const nocturnalArtifact = draftToArtifact(artifact);
+    expect(nocturnalArtifact.badDecision).toBe('Did something wrong');
+    expect(nocturnalArtifact.betterDecision).toBe('Do it right');
+    expect(nocturnalArtifact.principleId).toBe('T-01');
+  });
+
+  it('runTrinity produces artifact without contrastiveAnalysis when useStubs=true', () => {
+    const snapshot = {
+      sessionId: 'session-backward-compat',
+      startedAt: '2026-04-13T00:00:00.000Z',
+      updatedAt: '2026-04-13T00:05:00.000Z',
+      assistantTurns: [],
+      userTurns: [],
+      toolCalls: [],
+      painEvents: [],
+      gateBlocks: [],
+      stats: {
+        failureCount: 1,
+        totalPainEvents: 0,
+        totalGateBlocks: 0,
+        totalAssistantTurns: 5,
+        totalToolCalls: 10,
+      },
+    };
+    const config: TrinityConfig = {
+      useTrinity: true,
+      maxCandidates: 3,
+      useStubs: true,
+    };
+
+    const result = runTrinity({ snapshot: snapshot as any, principleId: 'T-08', config });
+    expect(result.success).toBe(true);
+    expect(result.artifact).toBeDefined();
+    expect(result.artifact!.contrastiveAnalysis).toBeUndefined();
+    expect(result.artifact!.rejectedAnalysis).toBeUndefined();
+    expect(result.artifact!.chosenJustification).toBeUndefined();
   });
 });
