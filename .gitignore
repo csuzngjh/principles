@@ -24,6 +24,9 @@ packages/*/*.tgz
 node_modules/
 dist/
 
+# TypeScript build artifacts
+**/tsconfig.tsbuildinfo
+
 # Temp review files
 pr.txt
 pr.diff
