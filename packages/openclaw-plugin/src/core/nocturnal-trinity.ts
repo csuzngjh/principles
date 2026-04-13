@@ -288,13 +288,16 @@ and synthesize it into a final decision-point artifact that passes arbiter valid
 You will receive:
 - A **target principle** (principle ID and description)
 - A **session trajectory snapshot**
-- **Philosopher's judgments** — ranked candidates with critiques
+- **Philosopher's judgments** — ranked candidates with critiques and 6D scores
 - **Dreamer's candidates** — the original candidate list
+- **Philosopher's risk assessments** — falsePositiveEstimate, implementationComplexity, breakingChangeRisk per candidate
+
+Use the risk assessments to determine which candidates require deeper contrastive analysis. High-risk candidates (high breakingChangeRisk or implementationComplexity) warrant thorough rejectedAnalysis.
 
 ## Task
 
 Select the best candidate (Philosopher's rank 1) and synthesize it into
-a final TrinityDraftArtifact.
+a final TrinityDraftArtifact. Then produce a **Contrastive Analysis** that explains why the winner was chosen and what to learn from the runners-up.
 
 ## Output Format
 
@@ -316,8 +319,25 @@ You MUST respond with ONLY a valid JSON object. No markdown, no explanation, no 
     "candidateCount": 2,
     "selectedCandidateIndex": 0,
     "stageFailures": []
+  },
+  "rejectedAnalysis": {
+    "whyRejected": "<mental model that led to the rejected candidate>",
+    "warningSignals": ["<observable caution trigger 1>", "<trigger 2>"],
+    "correctiveThinking": "<correct reasoning path that should have been taken>"
+  },
+  "chosenJustification": {
+    "whyChosen": "<why this candidate was selected over others>",
+    "keyInsights": ["<transferable insight 1>", "<insight 2>", "<insight 3>"],
+    "limitations": ["<when this approach does NOT apply 1>", "<limitation 2>"]
+  },
+  "contrastiveAnalysis": {
+    "criticalDifference": "<ONE key insight distinguishing chosen from rejected>",
+    "decisionTrigger": "<When X, do Y pattern>",
+    "preventionStrategy": "<how to systematically avoid the rejected path>"
   }
 }
+
+All three analysis sections (rejectedAnalysis, chosenJustification, contrastiveAnalysis) are optional but recommended. When multiple candidates were evaluated, include them to provide richer training signals.
 
 ## Validation
 
@@ -1051,18 +1071,29 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
       sections.push(`(No specific violations found in snapshot)`);
     }
 
+    // Build risk summary from Philosopher 6D judgments for Scribe contrastive analysis
+    const riskSummary = philosopherOutput.judgments
+      .map(j => {
+        const risk = j.risks ? ` [risks: fp=${j.risks.falsePositiveEstimate.toFixed(2)}, complexity=${j.risks.implementationComplexity}, breaking=${j.risks.breakingChangeRisk}]` : '';
+        return `  - candidate[${j.candidateIndex}] (rank ${j.rank}, score ${j.score?.toFixed(2) ?? 'n/a'}): ${j.principleAligned ? 'aligned' : 'not aligned'}${risk}`;
+      })
+      .join('\n');
+
     sections.push(
       ``,
       `## Dreamer's Candidates`,
       candidatesJson,
       ``,
-      `## Philosopher's Judgments`,
+      `## Philosopher's Judgments + Risk Assessments`,
       judgmentsJson,
+      ``,
+      `## Philosopher 6D Risk Summary`,
+      `Use this to determine contrastive depth — high-risk candidates need deeper analysis:`,
+      riskSummary,
       ``,
       `## Task`,
       `Select the best candidate (Philosopher's rank 1) and synthesize it into a final TrinityDraftArtifact.`,
-      `Use the Original Violation Evidence above to ensure your final badDecision and betterDecision`,
-      `are grounded in the actual session events, not just Dreamer's interpretation.`,
+      `Then produce contrastive analysis explaining why the winner was chosen and what the rejected candidates teach us.`,
       ``,
       `## CRITICAL: betterDecision Format Requirements`,
       `Your betterDecision MUST pass executability validation. It MUST:`,
@@ -1459,6 +1490,45 @@ export interface PhilosopherOutput {
 }
 
 /**
+ * Analysis of a rejected candidate — why it lost the tournament.
+ * Informs training signal for "what to avoid".
+ */
+export interface RejectedAnalysis {
+  /** Mental model that led to the rejected candidate */
+  whyRejected: string;
+  /** Observable caution triggers that were missed or ignored */
+  warningSignals: string[];
+  /** Correct reasoning path that should have been taken */
+  correctiveThinking: string;
+}
+
+/**
+ * Justification for the chosen candidate — why it won the tournament.
+ * Informs training signal for "what to do".
+ */
+export interface ChosenJustification {
+  /** Why this candidate was selected over others */
+  whyChosen: string;
+  /** 1-3 transferable insights from this decision */
+  keyInsights: string[];
+  /** When this approach does NOT apply */
+  limitations: string[];
+}
+
+/**
+ * Contrastive analysis: key differences between chosen and rejected paths.
+ * Synthesizes the core lesson from the tournament.
+ */
+export interface ContrastiveAnalysis {
+  /** ONE key insight distinguishing chosen from rejected */
+  criticalDifference: string;
+  /** Pattern: "When X, do Y" */
+  decisionTrigger: string;
+  /** How to systematically avoid the rejected path */
+  preventionStrategy: string;
+}
+
+/**
  * Scribe output — final structured artifact draft.
  * Scribe synthesizes the best candidate into an approved artifact format.
  */
@@ -1485,6 +1555,12 @@ export interface TrinityDraftArtifact {
   planningRatioGain?: number;
   /** Optional routing context for a follow-on Artificer stage */
   artificerContext?: TrinityArtificerContext;
+  /** Contrastive analysis: chosen vs rejected reasoning paths (SCRIBE-03) */
+  contrastiveAnalysis?: ContrastiveAnalysis;
+  /** Analysis of the rejected candidates — why they lost the tournament (SCRIBE-01) */
+  rejectedAnalysis?: RejectedAnalysis;
+  /** Justification for the chosen candidate — why it won (SCRIBE-02) */
+  chosenJustification?: ChosenJustification;
 }
 
 export interface TrinityTelemetry {
