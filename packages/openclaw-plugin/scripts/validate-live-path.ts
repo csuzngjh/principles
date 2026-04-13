@@ -34,7 +34,6 @@ const LOCK_STALE_MS = 30_000;
 const WORKSPACE_DIR = process.env.WORKSPACE_DIR || process.cwd();
 const STATE_DIR = path.join(WORKSPACE_DIR, '.state');
 const QUEUE_PATH = path.join(STATE_DIR, 'EVOLUTION_QUEUE');
-const QUEUE_LOCK_PATH = QUEUE_PATH + LOCK_SUFFIX;
 const LEDGER_PATH = path.join(STATE_DIR, 'principle_training_state.json');
 const DB_PATH = path.join(STATE_DIR, 'subagent_workflows.db');
 
@@ -279,6 +278,7 @@ async function main() {
   const verbose = process.argv.includes('--verbose');
 
   // 1. Check bootstrapped rules
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let rules: LedgerRule[];
   try {
     rules = loadBootstrappedRules();

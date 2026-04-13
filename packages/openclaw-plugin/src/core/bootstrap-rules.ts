@@ -107,7 +107,7 @@ export function bootstrapRules(stateDir: string, limit = 3): BootstrapResult[] {
 
     // Create stub rule
     const now = new Date().toISOString();
-    const rule = createRule(stateDir, {
+    createRule(stateDir, {
       id: ruleId,
       version: 1,
       name: `Stub bootstrap rule for ${principleId}`,
