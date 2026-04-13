@@ -61,7 +61,7 @@ const FALLBACK_MODEL = process.env.OPENCLAW_DEFAULT_MODEL || 'MiniMax-M2.7';
 // These prompts are embedded at build time. The agents/ directory was removed
 // to eliminate fragile runtime file dependencies on the file system.
 
-const NOCTURNAL_DREAMER_PROMPT = `# Nocturnal Dreamer — Candidate Generation
+export const NOCTURNAL_DREAMER_PROMPT = `# Nocturnal Dreamer — Candidate Generation
 
 > System prompt for Trinity Dreamer stage.
 > Role: Generate multiple alternative "better decision" candidates from a session snapshot.
@@ -104,7 +104,9 @@ You MUST respond with ONLY a valid JSON object. No markdown, no explanation, no 
       "badDecision": "<what the agent did wrong>",
       "betterDecision": "<what the agent should have done>",
       "rationale": "<why this is better>",
-      "confidence": 0.95
+      "confidence": 0.95,
+      "riskLevel": "low",
+      "strategicPerspective": "conservative_fix"
     }
   ],
   "generatedAt": "<ISO timestamp>"
@@ -130,6 +132,23 @@ You MUST respond with ONLY a valid JSON object. No markdown, no explanation, no 
 - Different candidates should represent genuinely different approaches
 - Do not generate candidates with identical betterDecisions
 - Vary the confidence scores to reflect genuine uncertainty
+
+## Strategic Perspective Requirements
+
+Generate candidates from DISTINCT strategic perspectives:
+
+- **conservative_fix**: Minimal deviation from original approach. Add a
+  verification or validation step that was missing.
+- **structural_improvement**: Reorder operations or introduce an intermediate
+  checkpoint. Change HOW the goal is achieved.
+- **paradigm_shift**: Challenge whether the original goal was correct.
+  Consider a fundamentally different approach.
+
+Each candidate MUST specify \`riskLevel\` ("low"|"medium"|"high") and
+\`strategicPerspective\` matching one of the above.
+
+ANTI-PATTERN: Candidates that differ only in wording, not in substance,
+will be rejected.
 
 ### Candidates must NOT:
 - Contain raw user text or private content
@@ -1255,6 +1274,10 @@ export interface DreamerCandidate {
   rationale: string;
   /** Confidence that this candidate is valid (0-1) */
   confidence: number;
+  /** Risk level of this candidate's approach -- LLM-judged per D-02 */
+  riskLevel?: "low" | "medium" | "high";
+  /** Which strategic perspective this candidate embodies per D-01 */
+  strategicPerspective?: "conservative_fix" | "structural_improvement" | "paradigm_shift";
 }
 
 export interface DreamerOutput {
