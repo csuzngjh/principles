@@ -12,10 +12,10 @@
  * Output: Structured report with pass/fail for each checkpoint.
  */
 
-import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { execSync } from 'child_process';
+import { execSync, execFileSync } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -313,6 +313,45 @@ function main() {
       return 'No active pain flag';
     }
     const content = readFileSync(painFlagPath, 'utf-8');
+
+    // Self-healing: fix [object Object] corruption caused by bash heredoc/toString
+    if (content.includes('[object Object]')) {
+      // Try to extract and parse JSON object from anywhere in the content
+      // The corruption might be at any position, not just the beginning
+      try {
+        // Attempt 1: Extract JSON object using regex (handles {...} anywhere)
+        const jsonMatch = content.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const json = JSON.parse(jsonMatch[0]);
+          // If we got a valid object, rewrite it properly as KV format
+          const kv = Object.entries(json)
+            .map(([k, v]) => `${k}: ${v === undefined ? '' : v}`)
+            .join('\n');
+          writeFileSync(painFlagPath, kv, 'utf-8');
+          return `Pain flag was corrupted ([object Object]), auto-repaired from JSON backup`;
+        }
+        // Attempt 2: Try parsing the whole content after removing common prefixes
+        const cleaned = content.replace(/^(active:\s*|source:\s*)/, '').trim();
+        if (cleaned.startsWith('{')) {
+          const json = JSON.parse(cleaned);
+          const kv = Object.entries(json)
+            .map(([k, v]) => `${k}: ${v === undefined ? '' : v}`)
+            .join('\n');
+          writeFileSync(painFlagPath, kv, 'utf-8');
+          return `Pain flag was corrupted ([object Object]), auto-repaired from JSON backup`;
+        }
+        throw new Error('No valid JSON found');
+      } catch {
+        // If not JSON, delete the corrupted file to unblock the system
+        try {
+          rmSync(painFlagPath);
+          return `Pain flag was corrupted ([object Object]), deleted invalid file to unblock system`;
+        } catch {
+          return { status: 'warn', detail: 'Pain flag corrupted ([object Object]), could not auto-repair' };
+        }
+      }
+    }
+
     const lines = content.split('\n');
     const fields = {};
     for (const line of lines) {
@@ -392,6 +431,104 @@ function main() {
     } catch {
       return { status: 'warn', detail: 'Training store exists but is corrupted' };
     }
+  });
+
+  // ─────────────────────────────────────────────────────────
+  // CHECKPOINT 13: Correction samples (Phase 2b/3b)
+  // ─────────────────────────────────────────────────────────
+  check('13. Correction samples availability', () => {
+    // Read from trajectory.db using sqlite3 CLI
+    try {
+      const dbPath = join(stateDir, 'trajectory.db');
+      if (!existsSync(dbPath)) {
+        return { status: 'warn', detail: 'trajectory.db not found' };
+      }
+      let result;
+      try {
+        result = execFileSync('sqlite3', [dbPath, 'SELECT review_status, COUNT(*), AVG(quality_score) FROM correction_samples GROUP BY review_status;'], { encoding: 'utf-8', timeout: 5000 }).trim();
+      } catch {
+        return { status: 'warn', detail: 'Could not query correction samples' };
+      }
+      if (!result) {
+        return { status: 'warn', detail: 'Could not query correction samples' };
+      }
+      const pendingMatch = result.match(/pending\|(\d+)/);
+      const approvedMatch = result.match(/approved\|(\d+)/);
+      const rejectedMatch = result.match(/rejected\|(\d+)/);
+      const pending = pendingMatch ? parseInt(pendingMatch[1]) : 0;
+      const approved = approvedMatch ? parseInt(approvedMatch[1]) : 0;
+      const rejected = rejectedMatch ? parseInt(rejectedMatch[1]) : 0;
+      if (pending > 0) {
+        return { status: 'warn', detail: `${pending} pending review, ${approved} approved, ${rejected} rejected` };
+      }
+      if (approved === 0 && rejected === 0) return { status: 'warn', detail: 'No correction samples exist — no user corrections detected yet' };
+      return `${approved} approved, ${rejected} rejected, ${pending} pending`;
+    } catch {
+      return { status: 'warn', detail: 'Could not query trajectory.db' };
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────
+  // CHECKPOINT 14: Signal diversity (Phase 3b)
+  // ─────────────────────────────────────────────────────────
+  check('14. Pain signal diversity', () => {
+    try {
+      const dbPath = join(stateDir, 'trajectory.db');
+      if (!existsSync(dbPath)) {
+        return { status: 'warn', detail: 'trajectory.db not found' };
+      }
+      let result;
+      try {
+        result = execFileSync('sqlite3', [dbPath, 'SELECT source, COUNT(*), ROUND(AVG(score),1) FROM pain_events GROUP BY source ORDER BY COUNT(*) DESC;'], { encoding: 'utf-8', timeout: 5000 }).trim();
+      } catch {
+        return { status: 'warn', detail: 'Could not query pain events' };
+      }
+      if (!result) {
+        return { status: 'warn', detail: 'Could not query pain events' };
+      }
+      const sources = result.split('\n').filter(Boolean);
+      if (sources.length < 2) {
+        return { status: 'warn', detail: `Only ${sources.length} pain signal source(s) — low diversity. Expected: tool_failure, user_empathy, correction_rejected, gate_blocked` };
+      }
+      const summary = sources.map(s => {
+        const parts = s.split('|');
+        return `${parts[0]} (${parts[1]}, avg ${parts[2]})`;
+      }).join(', ');
+      return `${sources.length} sources: ${summary}`;
+    } catch {
+      return { status: 'warn', detail: 'Could not query trajectory.db' };
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────
+  // CHECKPOINT 15: Artifact quality (Phase 3)
+  // ─────────────────────────────────────────────────────────
+  check('15. Nocturnal artifact quality', () => {
+    const samplesDir = join(stateDir, 'nocturnal', 'samples');
+    if (!existsSync(samplesDir)) {
+      return { status: 'warn', detail: 'No samples directory' };
+    }
+    const files = readdirSync(samplesDir).filter(f => f.endsWith('.json'));
+    if (files.length === 0) return { status: 'warn', detail: 'No artifacts produced yet' };
+
+    // Check uniqueness of badDecision across recent artifacts
+    const recentFiles = files
+      .map(f => ({ name: f, mtime: statSync(join(samplesDir, f)).mtimeMs }))
+      .sort((a, b) => b.mtime - a.mtime)
+      .slice(0, 5);
+
+    const decisions = new Set();
+    for (const f of recentFiles) {
+      try {
+        const artifact = JSON.parse(readFileSync(join(samplesDir, f.name), 'utf-8'));
+        if (artifact.badDecision) decisions.add(artifact.badDecision);
+      } catch { /* skip */ }
+    }
+
+    if (decisions.size < recentFiles.length) {
+      return { status: 'warn', detail: `${recentFiles.length - decisions.size} duplicate decision(s) in last ${recentFiles.length} artifacts — stub reflector may not be content-aware` };
+    }
+    return `${files.length} total, last ${recentFiles.length} all unique decisions`;
   });
 
   printReport();
