@@ -57,10 +57,12 @@ import { ensureWorkspaceTemplates } from './core/init.js';
 import { migrateDirectoryStructure } from './core/migration.js';
 import { SystemLogger } from './core/system-logger.js';
 import { createDeepReflectTool } from './tools/deep-reflect.js';
+import { createWritePainFlagTool } from './tools/write-pain-flag.js';
 import { PathResolver, resolveWorkspaceDirFromApi } from './core/path-resolver.js';
 import { validateWorkspaceDir } from './core/workspace-dir-validation.js';
 import { resolveRequiredWorkspaceDir, resolveWorkspaceDir, type WorkspaceResolutionContext } from './core/workspace-dir-service.js';
 import { createPrinciplesConsoleRoute } from './http/principles-console-route.js';
+import { extractAgentIdFromSessionKey } from './utils/session-key.js';
 
 // Track initialization to avoid repeated calls
 let workspaceInitialized = false;
@@ -116,7 +118,7 @@ function computeRuntimeShadowTaskFingerprint(event: PluginHookSubagentSpawningEv
   return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex').slice(0, 16);
 }
 
-function resolveCommandWorkspaceDirStrict(
+function _resolveCommandWorkspaceDirStrict(
   api: OpenClawPluginApi,
   ctx: WorkspaceResolutionContext,
 ): string {
@@ -423,11 +425,13 @@ const plugin = {
     registerCommandWithAlias('pd-thinking', 'pdt', getCommandDescription('pd-thinking', language), (ctx: any) => handleThinkingOs(ctx), { acceptsArgs: true });
     registerCommandWithAlias('pd-reflect', 'pdrl', getCommandDescription('pd-reflect', language), (ctx: any) => {
       try {
-        const workspaceDir = resolveCommandWorkspaceDirStrict(api, ctx);
-        return handlePdReflect.handler({ ...ctx, api, workspaceDir } as any);
+        // Resolve agentId from sessionKey (if available), fallback to 'main'
+        const agentId = extractAgentIdFromSessionKey(ctx.sessionKey) ?? 'main';
+        const workspaceDir = resolveRequiredWorkspaceDir(api, { ...ctx, agentId }, { source: 'pd-reflect', fallbackAgentId: 'main' });
+        return handlePdReflect.handler({ ...ctx, api, workspaceDir });
       } catch (err) {
-        api.logger.error(`[PD] Command /pd-reflect failed: ${String(err)}`);
-        return { text: language === 'zh' ? "命令执行失败，请检查日志。" : "Command failed. Check logs." };
+        api.logger.error(`[PD:pd-reflect] Command failed: ${String(err)}`);
+        return { text: language === 'zh' ? '命令执行失败，请查看日志。' : 'Command failed. Check logs.' };
       }
     });
     registerCommandWithAlias('pd-daily', 'pdd', getCommandDescription('pd-daily', language), () => ({
@@ -770,6 +774,7 @@ const plugin = {
     });
 
     api.registerTool(createDeepReflectTool(api));
+    api.registerTool(createWritePainFlagTool(api));
   }
 };
 

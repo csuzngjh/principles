@@ -45,10 +45,10 @@ export function parseThinkingOsMd(content: string): ThinkingOsDirective[] {
   // Match all <directive ...> ... </directive> blocks
   const directiveRegex = /<directive\s+([^>]*)>([\s\S]*?)<\/directive>/gi;
    
-  let match: RegExpExecArray | null = null;
+  let _match: RegExpExecArray | null = null;
 
-  while ((match = directiveRegex.exec(content)) !== null) {
-    const [, attrs, body] = match;
+  while ((_match = directiveRegex.exec(content)) !== null) {
+    const [, attrs, body] = _match;
 
     const idMatch = /id="([^"]+)"/i.exec(attrs);
     const nameMatch = /name="([^"]+)"/i.exec(attrs);

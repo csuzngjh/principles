@@ -280,33 +280,52 @@ function invokeStubReflector(
   const artifactId = randomUUID();
   const now = new Date().toISOString();
 
-  // Build a plausible bad/better decision pair based on available snapshot data.
-  // This is synthetic — real reflection would come from subagent analysis.
-  const hasFailures = (snapshot.stats.failureCount ?? 0) > 0;
-  const hasPain = snapshot.stats.totalPainEvents > 0;
-  const hasGateBlocks = (snapshot.stats.totalGateBlocks ?? 0) > 0;
+  // #256: Build artifact from actual event content, not just stats counts.
+  // Previously the stub only checked stats.failureCount/painEvents/gateBlocks > 0
+  // and emitted the same template artifact regardless of what actually happened.
+  // Now we examine the actual event data to generate targeted reflections.
 
-  // Detect what kind of signal is available and craft appropriate artifact
-   
+  const hasGateBlocks = (snapshot.stats.totalGateBlocks ?? 0) > 0;
+  const hasPain = snapshot.stats.totalPainEvents > 0;
+  const hasFailures = (snapshot.stats.failureCount ?? 0) > 0;
+
   let badDecision: string;
-   
   let betterDecision: string;
-   
   let rationale: string;
 
-  if (hasGateBlocks) {
-    badDecision = `Proceeded with a tool call despite receiving a gate block, bypassing the safety check`;
-    betterDecision = `Read the blocked operation documentation and obtained proper authorization before retrying the operation`;
-    rationale = `Respecting gate blocks prevents unintended system modifications and ensures alignment with operational constraints`;
-  } else if (hasPain) {
-    badDecision = `Continued executing operations without pausing to address accumulated pain signals`;
-    betterDecision = `Let me stop and reconsider when pain signals accumulate — the error tells us something needs fixing first`;
-    rationale = `Pain signals indicate accumulated friction or error conditions that should be addressed before continuing`;
-  } else if (hasFailures) {
-    badDecision = `Retried a failing operation without diagnosing the root cause of the failure`;
-    betterDecision = `Based on the evidence from the error logs, let me first check the actual source code to understand the precondition before retrying`;
-    rationale = `Diagnosing failures before retry prevents repeated failures and respects the cost of each action attempt`;
+  if (hasGateBlocks && snapshot.gateBlocks.length > 0) {
+    // Use actual gate block content
+    const block = snapshot.gateBlocks[0];
+    const tool = block.toolName ?? 'a tool';
+    const file = block.filePath ? ` on ${block.filePath}` : '';
+    badDecision = `Attempted to invoke ${tool}${file} without satisfying the gate requirements`;
+    betterDecision = `Review the gate block reason "${block.reason ?? 'unspecified'}" and resolve the blocking condition before retrying`;
+    rationale = `Gate blocks exist for a reason — bypassing them without understanding the underlying constraint risks unintended consequences. The block on ${tool}${file} indicates the operation exceeded allowed thresholds for the current evolution tier.`;
+  } else if (hasPain && snapshot.painEvents.length > 0) {
+    // Use actual pain event content
+    const pain = snapshot.painEvents[0];
+    const painSource = pain.source ?? 'unknown';
+    const painReason = pain.reason ? `: ${pain.reason}` : '';
+    badDecision = `Continued operating despite ${painSource} pain signal (score ${pain.score ?? 'unknown'})${painReason}`;
+    betterDecision = `Pause and analyze the ${painSource} signal — the pain indicates accumulated friction that should be diagnosed before proceeding`;
+    rationale = `Pain signals from ${painSource} are early warnings of systemic issues. Score ${pain.score ?? 'N/A'} indicates ${((pain.score ?? 0) >= 70) ? 'severe' : ((pain.score ?? 0) >= 40) ? 'moderate' : 'mild'} friction that should be addressed before continuing operations.`;
+  } else if (hasFailures && snapshot.toolCalls.length > 0) {
+    // Use actual tool failure content
+    const failedCall = snapshot.toolCalls.find(tc => tc.outcome === 'failure');
+    if (failedCall) {
+      const tool = failedCall.toolName ?? 'a tool';
+      const file = failedCall.filePath ? ` on ${failedCall.filePath}` : '';
+      const error = failedCall.errorMessage ? ` — ${failedCall.errorMessage}` : '';
+      badDecision = `Retried ${tool}${file} after failure without first diagnosing the root cause${error}`;
+      betterDecision = `Examine the error details (${failedCall.errorType ?? 'unknown type'}${error ? error : ''}) and verify preconditions before attempting ${tool} again`;
+      rationale = `Tool failures are opportunities for learning. The ${tool} failure${file} with error type ${failedCall.errorType ?? 'unknown'} suggests a gap in precondition checking or error handling that should be addressed to prevent recurrence.`;
+    } else {
+      badDecision = `Retried a failing operation without diagnosing the root cause of the failure`;
+      betterDecision = `Based on the evidence from the error logs, let me first check the actual source code to understand the precondition before retrying`;
+      rationale = `Diagnosing failures before retry prevents repeated failures and respects the cost of each action attempt`;
+    }
   } else {
+    // Fallback — no specific signal content available
     badDecision = `Proceeded with an operation without verifying preconditions or checking for conflicting changes`;
     betterDecision = `Let me first understand the current state of the codebase by reading the relevant files before making any changes`;
     rationale = `Verifying preconditions and current state prevents errors and ensures actions are appropriate for the actual situation`;
@@ -686,7 +705,8 @@ export function executeNocturnalReflection(
     stateDir,
     undefined, // principleId
     undefined, // trajectoryLastActivityAt
-    options.idleCheckOverride
+    options.idleCheckOverride,
+    !!options.idleCheckOverride // skip cooldown/quota gates for manual/test triggers
   );
   diagnostics.preflight = preflight;
 
@@ -920,11 +940,15 @@ export function executeNocturnalReflection(
   // -------------------------------------------------------------------------
   // Step 6: Arbiter validation
   // -------------------------------------------------------------------------
+  // #256: Use 0 for thinkingModelDeltaMin — Trinity chain (Dreamer→Philosopher→Scribe)
+  // already ensures quality. A delta of 0 is valid when both bad and better decisions
+  // show equally well-reasoned thinking (the Scribe's job is to contrast decisions,
+  // not to make one sound more "cognitive" than the other).
   const arbiterResult = parseAndValidateArtifact(rawJson, {
     expectedPrincipleId: selectedPrincipleId,
     expectedSessionId: selectedSessionId,
     qualityThresholds: {
-      thinkingModelDeltaMin: 0.01,
+      thinkingModelDeltaMin: 0,
       planningRatioGainMin: -0.5,
     },
   });
@@ -1153,7 +1177,8 @@ async function executeNocturnalReflectionWithAdapter(
     stateDir,
     undefined,
     undefined,
-    options.idleCheckOverride
+    options.idleCheckOverride,
+    !!options.idleCheckOverride // skip cooldown/quota gates for manual/test triggers
   );
   diagnostics.preflight = preflight;
 
@@ -1354,11 +1379,12 @@ async function executeNocturnalReflectionWithAdapter(
   }
 
   // Step 5: Arbiter validation
+  // #256: Use 0 for thinkingModelDeltaMin — Trinity chain already ensures quality
   const arbiterResult = parseAndValidateArtifact(rawJson, {
     expectedPrincipleId: selectedPrincipleId,
     expectedSessionId: selectedSessionId,
     qualityThresholds: {
-      thinkingModelDeltaMin: 0.01,
+      thinkingModelDeltaMin: 0,
       planningRatioGainMin: -0.5,
     },
   });

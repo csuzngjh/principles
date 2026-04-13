@@ -347,11 +347,13 @@ export class NocturnalTargetSelector {
     }
 
     // Step 2: Cooldown and quota check
+    // #256: Skip cooldown/quota for manual/test triggers (idleCheckOverride present)
+    const skipGates = !!this.idleCheckOverride;
     const cooldownResult = checkCooldown(this.stateDir);
     diagnostics.cooldownCheckPassed = !cooldownResult.globalCooldownActive;
     diagnostics.quotaCheckPassed = !cooldownResult.quotaExhausted;
 
-    if (cooldownResult.globalCooldownActive) {
+    if (!skipGates && cooldownResult.globalCooldownActive) {
       return {
         decision: 'skip',
         skipReason: 'global_cooldown_active',
@@ -359,7 +361,7 @@ export class NocturnalTargetSelector {
       };
     }
 
-    if (cooldownResult.quotaExhausted) {
+    if (!skipGates && cooldownResult.quotaExhausted) {
       return {
         decision: 'skip',
         skipReason: 'quota_exhausted',
@@ -440,9 +442,9 @@ export class NocturnalTargetSelector {
     }
 
     // Compute violation signals for each session
-    // #244: Filter out sessions that are too thin for meaningful reflection
-    // A session needs enough violation context (failures + pain + gates >= 2)
-    const MIN_VIOLATION_DEPTH = 2;
+    // #256: Lowered from 2 to 1 — most sessions have exactly 1 failure + 1 pain event
+    // which is a high-quality candidate. Requiring >= 2 excluded the majority of meaningful sessions.
+    const MIN_VIOLATION_DEPTH = 1;
     const richSessions = recentSessions.filter(
       s => (s.failureCount ?? 0) + (s.painEventCount ?? 0) + (s.gateBlockCount ?? 0) >= MIN_VIOLATION_DEPTH
     );

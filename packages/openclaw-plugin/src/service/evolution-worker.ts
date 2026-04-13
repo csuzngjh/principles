@@ -71,6 +71,17 @@ async function runWorkflowWatchdog(
         for (const wf of staleActive) {
           const ageMin = Math.round((now - wf.created_at) / 60000);
           details.push(`stale_active: ${wf.workflow_id} (${wf.workflow_type}, ${ageMin}min old)`);
+
+          // #257: Check if the last recorded event reason indicates expected subagent unavailability.
+          // If so, skip marking as terminal_error — the workflow is stale because the subagent
+          // was expectedly unavailable (daemon mode, process isolation), not due to a hard failure.
+          const events = store.getEvents(wf.workflow_id);
+          const lastEventReason = events.length > 0 ? events[events.length - 1].reason : 'unknown';
+          if (isExpectedSubagentError(lastEventReason)) {
+            logger?.debug?.(`[PD:Watchdog] Skipping stale active workflow ${wf.workflow_id}: expected subagent error (${lastEventReason})`);
+            continue;
+          }
+
           store.updateWorkflowState(wf.workflow_id, 'terminal_error');
           store.recordEvent(wf.workflow_id, 'watchdog_timeout', 'active', 'terminal_error', `Stale active > ${staleThreshold / 60000}s`, { ageMs: now - wf.created_at });
 
@@ -345,7 +356,8 @@ function isSessionAtOrBeforeTriggerTime(
 
 function buildFallbackNocturnalSnapshot(
     sleepTask: EvolutionQueueItem,
-    extractor?: ReturnType<typeof createNocturnalTrajectoryExtractor> | null
+    extractor?: ReturnType<typeof createNocturnalTrajectoryExtractor> | null,
+    logger?: { warn?: (message: string) => void }
 ): NocturnalSessionSnapshot | null {
     const painContext = sleepTask.recentPainContext;
     if (!painContext) {
@@ -370,7 +382,7 @@ function buildFallbackNocturnalSnapshot(
             // #246-fix: Use minToolCalls=0 to avoid filtering out sessions with 0 tool calls.
             // The pain-triggering session may have no tool calls but still be worth tracking.
             const summaries = extractor.listRecentNocturnalCandidateSessions({ limit: 300, minToolCalls: 0 });
-            const match = summaries.find(s => s.sessionId === painContext.mostRecent!.sessionId);
+            const match = summaries.find(s => s.sessionId === painContext.mostRecent?.sessionId);
             if (match) {
                 realStats = {
                     totalAssistantTurns: match.assistantTurnCount,
@@ -379,8 +391,10 @@ function buildFallbackNocturnalSnapshot(
                     totalGateBlocks: match.gateBlockCount,
                 };
             }
-        } catch {
-            // Best effort — non-fatal
+        } catch (err) {
+            // #260: Log extraction failures — silent swallowing makes debugging impossible
+            // and can mask systemic trajectory DB issues.
+            logger?.warn?.(`[PD:EvolutionWorker] Failed to extract real stats for session ${painContext.mostRecent?.sessionId} (falling back to zeros): ${String(err)}`);
         }
     }
 
@@ -580,62 +594,153 @@ export function readRecentPainContext(wctx: WorkspaceContext): RecentPainContext
 }
 
 /**
+ * Build a dedup key from pain context.
+ * Returns null when no pain context is available (bypasses dedup).
+ */
+function buildPainSourceKey(
+    painCtx: ReturnType<typeof readRecentPainContext>,
+): string | null {
+    if (!painCtx.mostRecent) return null;
+    return `${painCtx.mostRecent.source}::${painCtx.mostRecent.reason?.slice(0, 50) ?? ''}`;
+}
+
+/**
+ * Check whether a similar sleep_reflection task completed recently.
+ * Phase 3c: Prevents redundant reflections of the same underlying issue.
+ */
+function hasRecentSimilarReflection(
+    queue: EvolutionQueueItem[],
+    painSourceKey: string,
+    now: number,
+): EvolutionQueueItem | null {
+    const DEDUP_WINDOW_MS = 4 * 60 * 60 * 1000; // 4 hours
+    return queue.find((t) => {
+        if (t.taskKind !== 'sleep_reflection') return false;
+        // Only match completed tasks (exclude failed to allow retries)
+        if (t.status !== 'completed') return false;
+        if (!t.completed_at) return false;
+        const age = now - new Date(t.completed_at).getTime();
+        if (age > DEDUP_WINDOW_MS) return false;
+        const taskPainKey = buildPainSourceKey(t.recentPainContext ?? { mostRecent: null, recentPainCount: 0, recentMaxPainScore: 0 });
+        // If either side has no pain context, they don't match
+        if (!taskPainKey) return false;
+        return taskPainKey === painSourceKey;
+    }) ?? null;
+}
+
+/**
+ * Check whether a specific task kind has a pending or in-progress entry.
+ */
+function hasPendingTask(queue: EvolutionQueueItem[], taskKind: string): boolean {
+    return queue.some(
+        (t) => t.taskKind === taskKind && (t.status === 'pending' || t.status === 'in_progress'),
+    );
+}
+
+/**
+ * Decide whether to skip enqueuing due to a recent similar reflection.
+ * Returns true if skipped (with log), false if should proceed.
+ */
+function shouldSkipForDedup(
+    queue: EvolutionQueueItem[],
+    wctx: WorkspaceContext,
+    logger: PluginLogger,
+): boolean {
+    const recentPainContext = readRecentPainContext(wctx);
+    const painSourceKey = buildPainSourceKey(recentPainContext);
+
+    // Bypass dedup when there is no pain context — general idle reflections
+    // should not be throttled by the 'no_pain_context' sentinel.
+    if (!painSourceKey) return false;
+
+    const now = Date.now();
+    const recentSimilarReflection = hasRecentSimilarReflection(queue, painSourceKey, now);
+
+    if (recentSimilarReflection) {
+        const completedTime = new Date(recentSimilarReflection.completed_at!).getTime();
+        logger?.debug?.(`[PD:EvolutionWorker] Skipping sleep_reflection — similar reflection completed ${Math.round((now - completedTime) / 60000)}min ago (same pain pattern: ${painSourceKey})`);
+        return true;
+    }
+    return false;
+}
+
+/**
+ * Load and migrate the evolution queue. Returns empty array if file doesn't exist.
+ */
+function loadEvolutionQueue(queuePath: string): EvolutionQueueItem[] {
+    let rawQueue: RawQueueItem[] = [];
+    try {
+        rawQueue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
+    } catch {
+        // Queue doesn't exist yet - create empty array
+        rawQueue = [];
+    }
+    return migrateQueueToV2(rawQueue);
+}
+
+/**
+ * Build and persist a new sleep_reflection task.
+ */
+function enqueueNewSleepReflectionTask(
+    queue: EvolutionQueueItem[],
+    recentPainContext: ReturnType<typeof readRecentPainContext>,
+    queuePath: string,
+    logger: PluginLogger,
+): void {
+    const taskId = createEvolutionTaskId('nocturnal', 50, 'idle workspace', 'Sleep-mode reflection', Date.now());
+    const nowIso = new Date().toISOString();
+
+    queue.push({
+        id: taskId,
+        taskKind: 'sleep_reflection',
+        priority: 'medium',
+        score: 50,
+        source: 'nocturnal',
+        reason: 'Sleep-mode reflection triggered by idle workspace',
+        trigger_text_preview: 'Idle workspace detected',
+        timestamp: nowIso,
+        enqueued_at: nowIso,
+        status: 'pending',
+        traceId: taskId,
+        retryCount: 0,
+        maxRetries: 1, // sleep_reflection doesn't retry
+        recentPainContext,
+    });
+
+    fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+    logger?.info?.(`[PD:EvolutionWorker] Enqueued sleep_reflection task ${taskId}`);
+}
+
+/**
  * Enqueue a sleep_reflection task if one is not already pending.
  * Phase 2.4: Called when workspace is idle to trigger nocturnal reflection.
+ * Phase 3c: Dedup checks recent sleep_reflection tasks by pain source pattern
+ * to prevent redundant reflections of the same underlying issue.
  */
 async function enqueueSleepReflectionTask(
     wctx: WorkspaceContext,
-    logger: PluginLogger
+    logger: PluginLogger,
 ): Promise<void> {
     const queuePath = wctx.resolve('EVOLUTION_QUEUE');
     const releaseLock = await requireQueueLock(queuePath, logger, 'enqueueSleepReflection', EVOLUTION_QUEUE_LOCK_SUFFIX);
 
     try {
-        let rawQueue: RawQueueItem[] = [];
-        try {
-            rawQueue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
-        } catch {
-            // Queue doesn't exist yet - create empty array
-            rawQueue = [];
-        }
+        const queue = loadEvolutionQueue(queuePath);
 
-        const queue: EvolutionQueueItem[] = migrateQueueToV2(rawQueue);
-
-        // Check if a sleep_reflection task is already pending
-        const hasPendingSleepReflection = queue.some(
-            t => t.taskKind === 'sleep_reflection' && (t.status === 'pending' || t.status === 'in_progress')
-        );
-        if (hasPendingSleepReflection) {
+        // Guard 1: Skip if a sleep_reflection task is already pending/in-progress
+        if (hasPendingTask(queue, 'sleep_reflection')) {
             logger?.debug?.('[PD:EvolutionWorker] sleep_reflection task already pending/in-progress, skipping');
             return;
         }
 
-        const now = Date.now();
-        const taskId = createEvolutionTaskId('nocturnal', 50, 'idle workspace', 'Sleep-mode reflection', now);
-        const nowIso = new Date(now).toISOString();
+        // Guard 2: Dedup — skip if similar reflection completed recently
+        if (shouldSkipForDedup(queue, wctx, logger)) {
+            return;
+        }
 
-        // Attach recent pain context if available
+        // Enqueue the new task
         const recentPainContext = readRecentPainContext(wctx);
-
-        queue.push({
-            id: taskId,
-            taskKind: 'sleep_reflection',
-            priority: 'medium',
-            score: 50,
-            source: 'nocturnal',
-            reason: 'Sleep-mode reflection triggered by idle workspace',
-            trigger_text_preview: 'Idle workspace detected',
-            timestamp: nowIso,
-            enqueued_at: nowIso,
-            status: 'pending',
-            traceId: taskId,
-            retryCount: 0,
-            maxRetries: 1, // sleep_reflection doesn't retry
-            recentPainContext,
-        });
-
-        fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
-        logger?.info?.(`[PD:EvolutionWorker] Enqueued sleep_reflection task ${taskId}`);
+        enqueueNewSleepReflectionTask(queue, recentPainContext, queuePath, logger);
     } finally {
         releaseLock();
     }
@@ -992,6 +1097,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             logger: api?.logger || logger,
                             // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Reason: api is guaranteed non-null in this recovery path where runtimeAdapter is required
                             runtimeAdapter: new OpenClawTrinityRuntimeAdapter(api!),
+                            subagent: api?.runtime?.subagent,
                         });
                         try {
                             // Force-expire this specific workflow regardless of TTL
@@ -1553,7 +1659,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         // Phase 2: If no trajectory data, try pain-context fallback
                         if (!snapshotData && sleepTask.recentPainContext) {
                             logger?.warn?.(`[PD:EvolutionWorker] Using pain-context fallback for ${sleepTask.id}: trajectory snapshot unavailable, will try session summary from extractor`);
-                            snapshotData = buildFallbackNocturnalSnapshot(sleepTask, extractor) ?? undefined;
+                            snapshotData = buildFallbackNocturnalSnapshot(sleepTask, extractor, logger) ?? undefined;
                         }
 
                         const snapshotValidation = validateNocturnalSnapshotIngress(snapshotData);
@@ -1585,6 +1691,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         stateDir: wctx.stateDir,
                         logger: api.logger,
                         runtimeAdapter: new OpenClawTrinityRuntimeAdapter(api),
+                        subagent: api.runtime.subagent,
                     });
 
                     if (!isPollingTask) {
@@ -1596,6 +1703,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                                 snapshot: snapshotData,
                                 taskId: sleepTask.id,
                                 painContext: sleepTask.recentPainContext,
+                                triggerSource: sleepTask.source,
                             },
                         });
                         sleepTask.resultRef = workflowHandle.workflowId;
@@ -2084,6 +2192,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                                 stateDir: wctx.stateDir,
                                 logger: api.logger,
                                 runtimeAdapter: new OpenClawTrinityRuntimeAdapter(api),
+                                subagent: api.runtime.subagent,
                             });
                             swept += await nocturnalMgr.sweepExpiredWorkflows(WORKFLOW_TTL_MS, subagentRuntime, agentSession);
                             nocturnalMgr.dispose();

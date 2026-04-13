@@ -1238,20 +1238,16 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
           } : {}),
           ...(j.risks ? (() => {
             const fp = j.risks!.falsePositiveEstimate;
-            const complexity = j.risks!.implementationComplexity;
-            const validComplexity = ['low', 'medium', 'high'].includes(complexity)
-              ? complexity as 'low' | 'medium' | 'high'
-              : 'medium';
+            const hasFp = typeof fp === 'number';
             const risksObj: {
-              falsePositiveEstimate: number;
-              implementationComplexity: 'low' | 'medium' | 'high';
+              falsePositiveEstimate?: number;
+              implementationComplexity: string;
               breakingChangeRisk: boolean;
             } = {
-              // Default to 0 if LLM omitted the field (1B fix)
-              falsePositiveEstimate: typeof fp === 'number' ? this.clamp01(fp) : 0,
-              implementationComplexity: validComplexity,
+              implementationComplexity: j.risks!.implementationComplexity ?? 'medium',
               breakingChangeRisk: Boolean(j.risks!.breakingChangeRisk),
             };
+            if (hasFp) risksObj.falsePositiveEstimate = this.clamp01(fp);
             return { risks: risksObj };
           })() : {}),
         })),
@@ -1314,12 +1310,10 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
         return null;
       }
 
-      // Validate contrastive analysis sub-fields (H-03 + type-safety): all 3 required
+      // Validate contrastive analysis sub-fields (H-03): only include if structure is intact
       const contrastiveAnalysis = parsed.contrastiveAnalysis
         && typeof parsed.contrastiveAnalysis === 'object'
         && typeof parsed.contrastiveAnalysis.criticalDifference === 'string'
-        && typeof parsed.contrastiveAnalysis.decisionTrigger === 'string'
-        && typeof parsed.contrastiveAnalysis.preventionStrategy === 'string'
         ? parsed.contrastiveAnalysis : undefined;
 
       const rejectedAnalysis = parsed.rejectedAnalysis
@@ -1524,7 +1518,7 @@ export interface PhilosopherJudgment {
   /** Rank among all candidates (1 = best) */
   rank: number;
   /** Per-dimension scores (6D evaluation) — informational, not used for tournament ranking */
-  scores?: Partial<Philosopher6DScores>;
+  scores?: Philosopher6DScores;
   /** Risk assessment for this candidate — informational, consumed by Scribe (Phase 37) */
   risks?: PhilosopherRiskAssessment;
 }
@@ -1832,13 +1826,14 @@ export function invokeStubDreamer(
   // Ensure we don't exceed maxCandidates
   const limitedCandidates = candidates.slice(0, Math.min(candidates.length, maxCandidates));
 
-  // #219: Add fallback warning to rationales if data source is fallback
-  const annotatedCandidates = isFallback
-    ? limitedCandidates.map((c) => ({
-        ...c,
-        rationale: c.rationale + fallbackWarning,
-      }))
-    : limitedCandidates;
+  // #219/#259: Annotate and downgrade confidence if data source is fallback
+  // Fallback data is incomplete (trajectory DB unavailable) — reduce confidence
+  // so reviewers don't over-trust low-quality candidates.
+  const annotatedCandidates = limitedCandidates.map((c) => ({
+    ...c,
+    rationale: isFallback ? c.rationale + fallbackWarning : c.rationale,
+    confidence: isFallback ? Math.round(c.confidence * 0.5 * 100) / 100 : c.confidence,
+  }));
 
   return {
     valid: annotatedCandidates.length > 0,

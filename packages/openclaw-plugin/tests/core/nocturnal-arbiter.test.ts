@@ -491,4 +491,61 @@ describe('Nocturnal Arbiter', () => {
       expect(result.artifact?.sourceSnapshotRef).toBe('');
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Tests: quality threshold gates (Rule 10/11)
+  // -------------------------------------------------------------------------
+
+  describe('quality threshold gates', () => {
+    const defaultThresholds = { thinkingModelDeltaMin: 0.05, planningRatioGainMin: -0.5 };
+
+    it('rejects when thinkingModelDelta is below threshold', () => {
+      const artifact = makeValidArtifact({ thinkingModelDelta: 0.03 });
+      const result = validateArtifact(artifact, { qualityThresholds: defaultThresholds });
+      expect(result.passed).toBe(false);
+      expect(result.failures).toHaveLength(1);
+      expect(result.failures[0].field).toBe('thinkingModelDelta');
+    });
+
+    it('passes when thinkingModelDelta equals threshold exactly (boundary value)', () => {
+      const artifact = makeValidArtifact({ thinkingModelDelta: 0.05 });
+      const result = validateArtifact(artifact, { qualityThresholds: defaultThresholds });
+      expect(result.passed).toBe(true);
+    });
+
+    it('passes when thinkingModelDelta exceeds threshold', () => {
+      const artifact = makeValidArtifact({ thinkingModelDelta: 0.15 });
+      const result = validateArtifact(artifact, { qualityThresholds: defaultThresholds });
+      expect(result.passed).toBe(true);
+    });
+
+    it('passes when thinkingModelDelta is absent (optional field)', () => {
+      const artifact = makeValidArtifact();
+      delete artifact.thinkingModelDelta;
+      const result = validateArtifact(artifact, { qualityThresholds: defaultThresholds });
+      expect(result.passed).toBe(true);
+    });
+
+    it('rejects when planningRatioGain is below threshold', () => {
+      const artifact = makeValidArtifact({ planningRatioGain: -0.6 });
+      const result = validateArtifact(artifact, { qualityThresholds: defaultThresholds });
+      expect(result.passed).toBe(false);
+      expect(result.failures.some(f => f.field === 'planningRatioGain')).toBe(true);
+    });
+
+    it('passes when planningRatioGain equals threshold exactly (boundary value)', () => {
+      const artifact = makeValidArtifact({ planningRatioGain: -0.5 });
+      const result = validateArtifact(artifact, { qualityThresholds: defaultThresholds });
+      expect(result.passed).toBe(true);
+    });
+
+    it('rejects both quality thresholds simultaneously', () => {
+      const artifact = makeValidArtifact({ thinkingModelDelta: 0.01, planningRatioGain: -0.8 });
+      const result = validateArtifact(artifact, { qualityThresholds: defaultThresholds });
+      expect(result.passed).toBe(false);
+      expect(result.failures.length).toBeGreaterThanOrEqual(2);
+      expect(result.failures.some(f => f.field === 'thinkingModelDelta')).toBe(true);
+      expect(result.failures.some(f => f.field === 'planningRatioGain')).toBe(true);
+    });
+  });
 });

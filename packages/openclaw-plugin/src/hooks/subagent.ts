@@ -1,6 +1,7 @@
 import type { PluginHookSubagentEndedEvent, PluginHookSubagentContext, PluginLogger, OpenClawPluginApi } from '../openclaw-sdk.js';
 import { buildPainFlag, writePainFlag } from '../core/pain.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
+import { extractAgentIdFromSessionKey } from '../utils/session-key.js';
 // No longer needed — diagnostician runs via HEARTBEAT, not subagent
 import { recordEvolutionSuccess } from '../core/evolution-engine.js';
 import { WorkflowStore } from '../service/subagent-workflow/workflow-store.js';
@@ -24,7 +25,7 @@ function createWorkflowManagerForType(
         warn: (m: string) => logger.warn(String(m)),
         error: (m: string) => logger.error(String(m)),
          
-        debug: () => {},
+        debug: () => { /* no-op */ },
     } as unknown as PluginLogger;
 
     switch (workflowType) {
@@ -80,18 +81,6 @@ function emitSubagentPainEvent(
         logger.warn(`[PD:Subagent] failed to emit evolution event: ${String(e)}`);
     }
 }
-
-
-function extractAgentIdFromSessionKey(sessionKey: string | undefined): string | undefined {
-    // sessionKey format: "agent:{agentId}:{type}:{uuid}" or "agent:{agentId}:{uuid}"
-    if (!sessionKey) return undefined;
-    const match = /^agent:([^:]+):/.exec(sessionKey);
-    return match ? match[1] : undefined;
-}
-
-
-
-
 
 type SubagentEndedHookContext = PluginHookSubagentContext & {
     api?: OpenClawPluginApi;

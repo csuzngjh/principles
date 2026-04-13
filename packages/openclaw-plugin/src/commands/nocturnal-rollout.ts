@@ -56,6 +56,11 @@ import {
 import {
   getCheckpoint,
 } from '../core/model-training-registry.js';
+import {
+  runMergeGateAudit,
+  formatMergeGateAuditReport,
+} from '../core/merge-gate-audit.js';
+import { resolvePdPath } from '../core/paths.js';
 
 function isZh(ctx: PluginCommandContext): boolean {
   return String(ctx.config?.language || 'en').startsWith('zh');
@@ -257,6 +262,14 @@ ${result.passes
       return { text };
     }
 
+    // ── Merge-Gate Audit ──────────────────────────────────────────────────
+    if (subcommand === 'audit') {
+      const stateDir = resolvePdPath(workspaceDir, 'STATE_DIR');
+      const report = runMergeGateAudit(workspaceDir, stateDir);
+      const formatted = formatMergeGateAuditReport(report);
+      return { text: formatted };
+    }
+
     // ── Advance Promotion ─────────────────────────────────────────────────
     if (subcommand === 'advance-promotion') {
       const checkpointId = parts[1] || checkpointIdArg;
@@ -267,6 +280,28 @@ ${result.passes
       const profile = parseProfile(profileArg);
       const hasReview = args.includes('--review');
       const noteArg = parts.find((p) => p.startsWith('--note='))?.split('=')[1];
+      const skipAudit = args.includes('--skip-audit');
+
+      // ── Merge-gate auto-gate: block advance-promotion if audit is BLOCK ──
+      if (!skipAudit) {
+        const stateDir = resolvePdPath(workspaceDir, 'STATE_DIR');
+        const auditReport = runMergeGateAudit(workspaceDir, stateDir);
+        if (auditReport.overallStatus === 'block') {
+          return {
+            text: zh
+              ? `❌ Merge-Gate 审计阻止了晋升：发现 ${auditReport.counts.block} 个阻断项
+
+${formatMergeGateAuditReport(auditReport)}
+
+如需强制晋升，请添加 --skip-audit 标志。`
+              : `❌ Merge-Gate audit blocked promotion: ${auditReport.counts.block} blocking issue(s) found
+
+${formatMergeGateAuditReport(auditReport)}
+
+To force promotion, add --skip-audit flag.`,
+          };
+        }
+      }
 
       try {
         const promotion = advancePromotion(workspaceDir, {

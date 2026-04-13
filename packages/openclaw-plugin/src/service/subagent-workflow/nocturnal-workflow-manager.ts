@@ -36,11 +36,11 @@ import {
 } from '../nocturnal-service.js';
 import { type TrinityStageFailure, type TrinityResult } from '../../core/nocturnal-trinity.js';
 import type { TrinityRuntimeAdapter } from '../../core/nocturnal-trinity.js';
-import type { NocturnalSessionSnapshot } from '../../core/nocturnal-trajectory-extractor.js';
 import type { RecentPainContext } from '../evolution-worker.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import { validateNocturnalSnapshotIngress } from '../../core/nocturnal-snapshot-contract.js';
+import { isSubagentRuntimeAvailable } from '../../utils/subagent-probe.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // NocturnalResult Type Alias
@@ -65,6 +65,8 @@ export interface NocturnalWorkflowOptions {
     logger: PluginLogger;
     /** Trinity runtime adapter for subagent execution */
     runtimeAdapter: TrinityRuntimeAdapter;
+    /** Subagent runtime for availability probing (#254) */
+    subagent?: { run?: unknown };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -138,6 +140,7 @@ export class NocturnalWorkflowManager implements WorkflowManager {
     private readonly stateDir: string;
     private readonly logger: PluginLogger;
     private readonly runtimeAdapter: TrinityRuntimeAdapter;
+    private readonly subagent: { run?: unknown } | undefined;
     private readonly store: WorkflowStore;
 
     /** Tracks completion timestamps for idempotency */
@@ -156,6 +159,7 @@ export class NocturnalWorkflowManager implements WorkflowManager {
         this.stateDir = opts.stateDir;
         this.logger = opts.logger;
         this.runtimeAdapter = opts.runtimeAdapter;
+        this.subagent = opts.subagent;
         this.store = new WorkflowStore({ workspaceDir: opts.workspaceDir });
     }
 
@@ -172,8 +176,9 @@ export class NocturnalWorkflowManager implements WorkflowManager {
             metadata?: Record<string, unknown>;
         }
     ): Promise<WorkflowHandle> {
-        const runtimeAvailable = this.runtimeAdapter.isRuntimeAvailable();
-        if (!runtimeAvailable) {
+        // #254: Use isSubagentRuntimeAvailable instead of runtimeAdapter.isRuntimeAvailable()
+        // (which always returns true in OpenClawTrinityRuntimeAdapter)
+        if (!isSubagentRuntimeAvailable(this.subagent)) {
             this.logger.warn(`[PD:NocturnalWorkflow] Subagent runtime unavailable, skipping workflow`);
             throw new Error(`NocturnalWorkflowManager: subagent runtime unavailable`);
         }
@@ -210,7 +215,7 @@ export class NocturnalWorkflowManager implements WorkflowManager {
 
         // Extract snapshot and principleId from taskInput.metadata (NOC-07: Trinity async path)
         const snapshotValidation = validateNocturnalSnapshotIngress(options.metadata?.snapshot);
-        const snapshot = snapshotValidation.snapshot;
+        const {snapshot} = snapshotValidation;
         const principleId = options.metadata?.principleId as string | undefined;
         // Extract painContext for Selector ranking bias
         const painContext = options.metadata?.painContext as RecentPainContext | undefined;
@@ -254,6 +259,22 @@ export class NocturnalWorkflowManager implements WorkflowManager {
                         },
                         // Pass painContext for Selector ranking bias
                         painContext,
+                        // #244: Only skip preflight idle gate for manual/test triggers.
+                        // Automatic triggers must go through normal idle check.
+                        ...(((options.metadata)?.triggerSource === 'manual' ||
+                            (options.metadata)?.triggerSource === 'test')
+                          ? {
+                              idleCheckOverride: {
+                                  isIdle: true,
+                                  mostRecentActivityAt: Date.now() - 1800000,
+                                  idleForMs: 1800000,
+                                  userActiveSessions: 0,
+                                  abandonedSessionIds: [],
+                                  trajectoryGuardrailConfirmsIdle: true,
+                                  reason: 'manual/test override',
+                              },
+                            }
+                          : {}),
                         // Skip Selector if principleId and snapshot are provided
                         ...(principleId && snapshot ? {
                             principleIdOverride: principleId,
