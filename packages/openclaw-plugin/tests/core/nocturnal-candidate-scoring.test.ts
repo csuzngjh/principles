@@ -430,7 +430,7 @@ describe('validateCandidateDiversity', () => {
   it('fails when candidate pair has keyword overlap > 0.8', () => {
     const candidates: DreamerCandidate[] = [
       makeCandidate({ candidateIndex: 0, riskLevel: 'low', betterDecision: 'Review the authentication configuration file before making any changes to the system' }),
-      makeCandidate({ candidateIndex: 1, riskLevel: 'high', betterDecision: 'Review the authentication configuration file before making any changes to the system with extra' }),
+      makeCandidate({ candidateIndex: 1, riskLevel: 'high', betterDecision: 'Review the authentication configuration file before making any changes to the system' }),
     ];
     const result = validateCandidateDiversity(candidates);
     expect(result.diversityCheckPassed).toBe(false);
