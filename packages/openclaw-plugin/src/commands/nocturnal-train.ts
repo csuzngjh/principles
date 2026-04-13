@@ -30,6 +30,7 @@ import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.
 import {
   type TrainerBackendKind,
   type HardwareTier,
+  type TrainingExperimentResult,
 } from '../core/external-training-contract.js';
 import {
   TrainingProgram,
@@ -287,7 +288,7 @@ Hardware tiers:
         fs.writeFileSync(specPath, JSON.stringify(spec, null, 2), 'utf-8');
 
          
-        let trainerResult!: import('../core/external-training-contract.js').TrainingExperimentResult;
+        let trainerResult!: TrainingExperimentResult;
 
         try {
           if (spec.backend === 'dry-run') {
