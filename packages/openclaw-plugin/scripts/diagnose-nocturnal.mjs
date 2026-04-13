@@ -98,10 +98,11 @@ function main() {
   // CHECKPOINT 1: State directory structure
   // ─────────────────────────────────────────────────────────
   check('1. State directory structure', () => {
-    const required = ['.state', 'sessions', 'logs', 'nocturnal', 'nocturnal/samples'];
+    // All state dirs are inside .state/
+    const required = ['sessions', 'logs', 'nocturnal', 'nocturnal/samples'];
     const missing = [];
     for (const rel of required) {
-      if (!existsSync(join(workspaceDir, rel))) missing.push(rel);
+      if (!existsSync(join(stateDir, rel))) missing.push(rel);
     }
     if (missing.length > 0) throw new Error(`Missing directories: ${missing.join(', ')}`);
     return 'All required directories present';
@@ -132,23 +133,26 @@ function main() {
   // CHECKPOINT 3: Idle detection logic
   // ─────────────────────────────────────────────────────────
   check('3. Idle detection (checkWorkspaceIdle)', () => {
-    // Run idle check via the built module
-    const idleResult = execSync(`node -e "
-      const path = require('path');
-      const mod = require('${join(PLUGIN_DIR, 'dist', 'bundle.js')}');
-      const fn = mod.checkWorkspaceIdle;
-      if (typeof fn !== 'function') { console.log(JSON.stringify({isIdle: true, idleForMs: 0, userActiveSessions: 0})); process.exit(0); }
-      const result = fn('${workspaceDir}');
-      console.log(JSON.stringify(result));
-    "`, { encoding: 'utf-8', timeout: 15000 });
-    const parsed = JSON.parse(idleResult);
-    if (parsed.isIdle) {
-      return `Workspace is IDLE (idle for ${Math.round(parsed.idleForMs / 60000)}min, ${parsed.userActiveSessions} active sessions)`;
+    // checkWorkspaceIdle is internal to the bundle (not exported).
+    // Verify it exists in the bundle source and that it references the right functions.
+    const bundlePath = join(PLUGIN_DIR, 'dist', 'bundle.js');
+    const content = readFileSync(bundlePath, 'utf-8');
+
+    if (!content.includes('checkWorkspaceIdle')) {
+      throw new Error('checkWorkspaceIdle not found in bundle');
     }
-    return {
-      status: 'warn',
-      detail: `Workspace is NOT idle (activity ${Math.round(parsed.idleForMs / 60000)}min ago, ${parsed.userActiveSessions} active sessions) — this is expected if you are actively using it`
-    };
+    if (!content.includes('checkPreflight')) {
+      throw new Error('checkPreflight (idle + cooldown + quota gate) not found in bundle');
+    }
+    if (!content.includes('isSystemSession')) {
+      throw new Error('isSystemSession (system session detection) not found in bundle');
+    }
+
+    // Check our PR #256 fix: legacy session temporal guard
+    if (!content.includes('inactiveFor') && !content.includes('ABANDONED_THRESHOLD')) {
+      return { status: 'warn', detail: 'Legacy session temporal guard not found — old behavior (all missing-trigger sessions = system) may block idle detection' };
+    }
+    return 'Idle detection functions present in bundle (checkWorkspaceIdle, checkPreflight, isSystemSession)';
   });
 
   // ─────────────────────────────────────────────────────────
@@ -260,15 +264,12 @@ function main() {
     if (!existsSync(bundlePath)) throw new Error('dist/bundle.js missing — run build first');
 
     const content = readFileSync(bundlePath, 'utf-8');
-    const symbols = ['EvolutionWorkerService', 'checkPainFlag', 'processEvolutionQueue'];
+    const symbols = ['EvolutionWorkerService', 'checkPainFlag', 'processEvolutionQueue',
+      'executeNocturnalReflectionAsync', 'NocturnalWorkflowManager', 'NocturnalTargetSelector'];
     const missing = symbols.filter(s => !content.includes(s));
     if (missing.length > 0) throw new Error(`Missing critical symbols in bundle: ${missing.join(', ')}`);
 
-    // Check for our recent fixes
-    const hasIdleCheckOverride = content.includes('idleCheckOverride');
-    const hasSessionKey = content.includes('extractAgentIdFromSessionKey');
-
-    return `Bundle OK (${Math.round(content.length / 1024)}KB), idleCheckOverride=${hasIdleCheckOverride}, sessionKey util=${hasSessionKey}`;
+    return `Bundle OK (${Math.round(content.length / 1024)}KB), all ${symbols.length} critical symbols present`;
   });
 
   // ─────────────────────────────────────────────────────────
@@ -314,8 +315,13 @@ function main() {
   check('11. Trajectory data availability', () => {
     const trajectoryPath = join(stateDir, 'trajectory.json');
     const trajectoryDir = join(stateDir, 'trajectory');
-    if (!existsSync(trajectoryPath) && !existsSync(trajectoryDir)) {
+    const trajectoryDb = join(stateDir, 'trajectory.db');
+    if (!existsSync(trajectoryPath) && !existsSync(trajectoryDir) && !existsSync(trajectoryDb)) {
       return { status: 'warn', detail: 'No trajectory data — snapshot extraction will use pain context fallback or fail' };
+    }
+    if (existsSync(trajectoryDb)) {
+      const stat = statSync(trajectoryDb);
+      return `Trajectory SQLite database present (${Math.round(stat.size / 1024)}KB)`;
     }
     // Check trajectory content
     if (existsSync(trajectoryPath)) {
@@ -338,9 +344,17 @@ function main() {
   // CHECKPOINT 12: Principle training state
   // ─────────────────────────────────────────────────────────
   check('12. Principle training state', () => {
-    const trainingPath = join(stateDir, 'nocturnal', 'training_store.json');
-    if (!existsSync(trainingPath)) {
-      return { status: 'warn', detail: 'No training_store.json — NocturnalTargetSelector may not find evaluable principles' };
+    // Check multiple possible locations
+    const candidates = [
+      join(stateDir, 'nocturnal', 'training_store.json'),
+      join(stateDir, 'principle_training_state.json'),
+    ];
+    let trainingPath = null;
+    for (const c of candidates) {
+      if (existsSync(c)) { trainingPath = c; break; }
+    }
+    if (!trainingPath) {
+      return { status: 'warn', detail: 'No training_store.json or principle_training_state.json — NocturnalTargetSelector may not find evaluable principles' };
     }
     try {
       const store = JSON.parse(readFileSync(trainingPath, 'utf-8'));
