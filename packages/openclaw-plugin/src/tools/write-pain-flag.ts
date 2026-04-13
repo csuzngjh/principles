@@ -1,6 +1,6 @@
 import type { OpenClawPluginApi } from '../openclaw-sdk.js';
 import { Type } from '@sinclair/typebox';
-import { buildPainFlag, writePainFlag } from '../core/pain.js';
+import { buildPainFlag } from '../core/pain.js';
 import { resolveWorkspaceDirFromApi } from '../core/path-resolver.js';
 import * as fs from 'fs';
 import * as path from 'path';

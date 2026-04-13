@@ -324,7 +324,7 @@ export function evaluatePromotionGate(
 ): PromotionGateResult {
   const {
     checkpointId,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Reason: reserved for Phase 7 profile-based targeting
+     
     targetProfile: _targetProfile,
     baselineMetrics,
     minDelta = DEFAULT_MIN_DELTA,

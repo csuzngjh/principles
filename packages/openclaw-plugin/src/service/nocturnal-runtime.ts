@@ -366,7 +366,7 @@ export function checkCooldown(
     } = {}
 ): CooldownCheckResult {
     const {
-        /* eslint-disable @typescript-eslint/no-unused-vars -- Reason: Cooldown parameters reserved for future quota enforcement */
+         
         globalCooldownMs: _globalCooldownMs = DEFAULT_GLOBAL_COOLDOWN_MS,
         principleCooldownMs: _principleCooldownMs = DEFAULT_PRINCIPLE_COOLDOWN_MS,
         maxRunsPerWindow = DEFAULT_MAX_RUNS_PER_WINDOW,

@@ -282,7 +282,7 @@ async function compressFocus(
 
   // 5. 压缩内容
    
-  let compressedContent = '' as string;
+  let compressedContent: string;
   try {
     compressedContent = compressFocusContent(oldContent, workspaceDir);
     api.logger?.info?.(`[PD:Focus] Compressed CURRENT_FOCUS from ${oldLines} lines`);
@@ -478,7 +478,7 @@ export async function handleFocusCommand(
   const isZh = (ctx.config?.language as string) === 'zh';
 
    
-  let result = '' as string;
+  let result: string;
 
   switch (subCommand) {
     case 'status':

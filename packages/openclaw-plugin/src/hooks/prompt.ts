@@ -909,7 +909,7 @@ ${taskBlocks}${processingNote}
            
           let _m = null;
           const r = new RegExp(pattern.source, pattern.flags);
-          /* eslint-disable @typescript-eslint/no-unused-vars -- Reason: regex exec side effect used, match variable intentionally unused */
+           
           while ((_m = r.exec(latestUserText)) !== null) matches.push(tool);
           return matches;
         });

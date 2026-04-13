@@ -160,7 +160,7 @@ export class EventLog {
     }
 
     if (entry.type === 'tool_call') {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Reason: data used for type narrowing only, actual fields accessed via stats
+       
       const _data = entry.data as unknown as ToolCallEventData;
       stats.tools.total++;
       if (entry.category === 'success') stats.tools.success++;

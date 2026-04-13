@@ -315,7 +315,7 @@ export function handleContextCommand(ctx: PluginCommandContext): PluginCommandRe
     const isZh = (ctx.config?.language as string) === 'zh';
     
      
-    let result = '' as string;
+    let result: string;
     
     switch (subCommand) {
         case 'status':

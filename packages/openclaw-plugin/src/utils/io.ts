@@ -17,22 +17,14 @@ export function normalizePath(filePath: string, projectDir: string): string {
   }
 
    
-  let rel = '' as string;
-  if (projectIsWin) {
-    const projectAbs = path.resolve(projectDir);
-    const fileAbs = path.isAbsolute(normalizedFilePath) ? normalizedFilePath : path.join(projectAbs, normalizedFilePath);
-    rel = path.relative(projectAbs, fileAbs);
-  } else {
-    const projectPosix = projectDir.replace(/\\/g, '/');
-    const filePosix = path.isAbsolute(normalizedFilePath) ? normalizedFilePath : path.posix.join(projectPosix, normalizedFilePath.replace(/\\/g, '/'));
-    rel = path.posix.relative(projectPosix, filePosix);
-  }
-
-  rel = rel.replace(/\\/g, '/');
-  if (rel.startsWith('../')) {
+  const rel = projectIsWin
+    ? path.relative(path.resolve(projectDir), path.isAbsolute(normalizedFilePath) ? normalizedFilePath : path.join(path.resolve(projectDir), normalizedFilePath))
+    : path.posix.relative(projectDir.replace(/\\/g, '/'), path.isAbsolute(normalizedFilePath) ? normalizedFilePath : path.posix.join(projectDir.replace(/\\/g, '/'), normalizedFilePath.replace(/\\/g, '/')));
+  const normalizedRel = rel.replace(/\\/g, '/');
+  if (normalizedRel.startsWith('../')) {
     return normalizedFilePath;
   }
-  return rel;
+  return normalizedRel;
 }
 
 export function normalizeRiskPath(p: string): string {

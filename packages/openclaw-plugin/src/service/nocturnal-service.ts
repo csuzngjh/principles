@@ -289,9 +289,9 @@ function invokeStubReflector(
   const hasPain = snapshot.stats.totalPainEvents > 0;
   const hasFailures = (snapshot.stats.failureCount ?? 0) > 0;
 
-  let badDecision: string = '';
-  let betterDecision: string = '';
-  let rationale: string = '';
+  let badDecision = '';
+  let betterDecision = '';
+  let rationale = '';
 
   if (hasGateBlocks && snapshot.gateBlocks.length > 0) {
     // Use actual gate block content

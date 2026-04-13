@@ -335,6 +335,7 @@ export async function withAsyncLock<T>(
   
   // 创建新的 Promise 链
    
+  // eslint-disable-next-line @typescript-eslint/init-declarations -- Assigned in Promise executor before use in finally block
   let resolveRelease!: () => void;
   const releasePromise = new Promise<void>(resolve => {
     resolveRelease = resolve;
@@ -351,8 +352,8 @@ export async function withAsyncLock<T>(
   try {
     return await fn();
   } finally {
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Reason: resolveRelease is assigned in Promise constructor before finally runs
-    resolveRelease!();
+     
+    resolveRelease();
     // 清理已完成的队列
     if (asyncLockQueues.get(lockPath) === currentQueue) {
       asyncLockQueues.delete(lockPath);

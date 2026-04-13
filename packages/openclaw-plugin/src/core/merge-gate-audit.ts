@@ -364,7 +364,7 @@ function validateSingleReplayReport(reportPath: string): ReplayValidationCategor
     return 'missing_evidence_summary';
   }
 
-  const evidenceSummary = parsed.evidenceSummary;
+  const {evidenceSummary} = parsed;
   if (parsed.overallDecision === 'pass' && evidenceSummary.totalSamples === 0) {
     return 'unsupported_pass';
   }

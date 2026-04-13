@@ -138,7 +138,7 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
     
     // Determine health status based on GFI
      
-    let healthLabel = '';
+    let healthLabel: string;
     let suggestionText = '';
 
     if (isZh) {
