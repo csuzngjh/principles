@@ -347,11 +347,13 @@ export class NocturnalTargetSelector {
     }
 
     // Step 2: Cooldown and quota check
+    // #256: Skip cooldown/quota for manual/test triggers (idleCheckOverride present)
+    const skipGates = !!this.idleCheckOverride;
     const cooldownResult = checkCooldown(this.stateDir);
     diagnostics.cooldownCheckPassed = !cooldownResult.globalCooldownActive;
     diagnostics.quotaCheckPassed = !cooldownResult.quotaExhausted;
 
-    if (cooldownResult.globalCooldownActive) {
+    if (!skipGates && cooldownResult.globalCooldownActive) {
       return {
         decision: 'skip',
         skipReason: 'global_cooldown_active',
@@ -359,7 +361,7 @@ export class NocturnalTargetSelector {
       };
     }
 
-    if (cooldownResult.quotaExhausted) {
+    if (!skipGates && cooldownResult.quotaExhausted) {
       return {
         decision: 'skip',
         skipReason: 'quota_exhausted',
