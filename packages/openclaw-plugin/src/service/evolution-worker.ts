@@ -71,6 +71,17 @@ async function runWorkflowWatchdog(
         for (const wf of staleActive) {
           const ageMin = Math.round((now - wf.created_at) / 60000);
           details.push(`stale_active: ${wf.workflow_id} (${wf.workflow_type}, ${ageMin}min old)`);
+
+          // #257: Check if the last recorded event reason indicates expected subagent unavailability.
+          // If so, skip marking as terminal_error — the workflow is stale because the subagent
+          // was expectedly unavailable (daemon mode, process isolation), not due to a hard failure.
+          const events = store.getEvents(wf.workflow_id);
+          const lastEventReason = events.length > 0 ? events[events.length - 1].reason : 'unknown';
+          if (isExpectedSubagentError(lastEventReason)) {
+            logger?.debug?.(`[PD:Watchdog] Skipping stale active workflow ${wf.workflow_id}: expected subagent error (${lastEventReason})`);
+            continue;
+          }
+
           store.updateWorkflowState(wf.workflow_id, 'terminal_error');
           store.recordEvent(wf.workflow_id, 'watchdog_timeout', 'active', 'terminal_error', `Stale active > ${staleThreshold / 60000}s`, { ageMs: now - wf.created_at });
 
