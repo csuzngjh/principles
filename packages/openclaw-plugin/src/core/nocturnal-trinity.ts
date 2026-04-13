@@ -1300,6 +1300,9 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
           selectedCandidateIndex: parsed.selectedCandidateIndex,
           stageFailures: [],
         },
+        ...(parsed.contrastiveAnalysis ? { contrastiveAnalysis: parsed.contrastiveAnalysis } : {}),
+        ...(parsed.rejectedAnalysis ? { rejectedAnalysis: parsed.rejectedAnalysis } : {}),
+        ...(parsed.chosenJustification ? { chosenJustification: parsed.chosenJustification } : {}),
       };
     } catch {
       this.recordFailure('runtime_run_failed', new Error(`Scribe output JSON parse error: ${json.slice(0, 200)}`));
