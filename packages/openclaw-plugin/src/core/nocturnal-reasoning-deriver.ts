@@ -139,9 +139,17 @@ export function deriveReasoningChain(assistantTurns: NocturnalAssistantTurn[]): 
       }
     }
 
-    // Compute confidence signal using thinking model activation ratio
-    const activation = computeThinkingModelActivation(text);
-    const confidenceSignal = mapConfidenceSignal(activation);
+    // Confidence signal: only meaningful when <thinking> content exists.
+    // Without thinking tags we cannot extract a genuine reasoning trace, so
+    // we fall back to 'low' rather than misleading the downstream pipeline
+    // with activation derived from non-thinking patterns in the response text.
+    let confidenceSignal: "high" | "medium" | "low";
+    if (thinkingContent.length === 0) {
+      confidenceSignal = 'low';
+    } else {
+      const activation = computeThinkingModelActivation(text);
+      confidenceSignal = mapConfidenceSignal(activation);
+    }
 
     return {
       turnIndex: turn.turnIndex,
