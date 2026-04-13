@@ -172,7 +172,7 @@ If you cannot generate valid candidates (e.g., no clear violation found, insuffi
   "generatedAt": "<ISO timestamp>"
 }`;
 
-const NOCTURNAL_PHILOSOPHER_PROMPT = `# Nocturnal Philosopher — Candidate Evaluation and Ranking
+export const NOCTURNAL_PHILOSOPHER_PROMPT = `# Nocturnal Philosopher — Candidate Evaluation and Ranking
 
 > System prompt for Trinity Philosopher stage.
 > Role: Evaluate Dreamer's candidates and rank them by principle alignment and quality.

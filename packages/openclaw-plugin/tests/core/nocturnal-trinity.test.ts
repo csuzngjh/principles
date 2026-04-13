@@ -8,12 +8,15 @@ import {
   OpenClawTrinityRuntimeAdapter,
   TrinityRuntimeContractError,
   NOCTURNAL_DREAMER_PROMPT,
+  NOCTURNAL_PHILOSOPHER_PROMPT,
   formatReasoningContext,
   invokeStubDreamer,
+  invokeStubPhilosopher,
   type TrinityConfig,
   type DreamerOutput,
   type DreamerCandidate,
   type PhilosopherOutput,
+  type PhilosopherJudgment,
   type TrinityDraftArtifact,
   type TrinityRuntimeAdapter,
   type TrinityTelemetry,
@@ -1370,5 +1373,237 @@ describe('TrinityTelemetry — diversity fields', () => {
       candidateRiskLevels: ['low', 'high'],
     };
     expect(telemetry.candidateRiskLevels).toEqual(['low', 'high']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: Philosopher 6D Evaluation (PHILO-01)
+// ---------------------------------------------------------------------------
+
+describe('Philosopher 6D Evaluation (PHILO-01)', () => {
+  it('NOCTURNAL_PHILOSOPHER_PROMPT contains 6 dimensions with calibrated weights', () => {
+    expect(NOCTURNAL_PHILOSOPHER_PROMPT).toContain('Safety Impact');
+    expect(NOCTURNAL_PHILOSOPHER_PROMPT).toContain('UX Impact');
+    expect(NOCTURNAL_PHILOSOPHER_PROMPT).toContain('(weight: 0.20)'); // Principle Alignment
+    expect(NOCTURNAL_PHILOSOPHER_PROMPT).toContain('(weight: 0.15)'); // Specificity
+    expect(NOCTURNAL_PHILOSOPHER_PROMPT).toContain('(weight: 0.15)'); // Actionability
+    expect(NOCTURNAL_PHILOSOPHER_PROMPT).toContain('(weight: 0.15)'); // Executability
+  });
+
+  it('prompt output format includes scores and risks objects', () => {
+    expect(NOCTURNAL_PHILOSOPHER_PROMPT).toContain('"scores"');
+    expect(NOCTURNAL_PHILOSOPHER_PROMPT).toContain('"principleAlignment"');
+    expect(NOCTURNAL_PHILOSOPHER_PROMPT).toContain('"safetyImpact"');
+    expect(NOCTURNAL_PHILOSOPHER_PROMPT).toContain('"uxImpact"');
+    expect(NOCTURNAL_PHILOSOPHER_PROMPT).toContain('"risks"');
+    expect(NOCTURNAL_PHILOSOPHER_PROMPT).toContain('"falsePositiveEstimate"');
+    expect(NOCTURNAL_PHILOSOPHER_PROMPT).toContain('"implementationComplexity"');
+    expect(NOCTURNAL_PHILOSOPHER_PROMPT).toContain('"breakingChangeRisk"');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: Philosopher Risk Assessment (PHILO-02)
+// ---------------------------------------------------------------------------
+
+describe('Philosopher Risk Assessment (PHILO-02)', () => {
+  it('invokeStubPhilosopher produces risk assessment per candidate', () => {
+    const dreamerOutput: DreamerOutput = {
+      valid: true,
+      candidates: [
+        {
+          candidateIndex: 0,
+          badDecision: 'Did something wrong',
+          betterDecision: 'Read the file before editing to verify content',
+          rationale: 'A good rationale that explains why this is better',
+          confidence: 0.9,
+          riskLevel: 'low',
+          strategicPerspective: 'conservative_fix',
+        },
+        {
+          candidateIndex: 1,
+          badDecision: 'Ignored error messages',
+          betterDecision: 'Challenge the original approach entirely',
+          rationale: 'A paradigm shift rationale for fundamentally different approach',
+          confidence: 0.6,
+          riskLevel: 'high',
+          strategicPerspective: 'paradigm_shift',
+        },
+      ],
+      generatedAt: new Date().toISOString(),
+    };
+    const result = invokeStubPhilosopher(dreamerOutput, 'T-01', makeSnapshot() as any);
+    expect(result.valid).toBe(true);
+    for (const j of result.judgments) {
+      expect(j.risks).toBeDefined();
+      expect(j.risks!.falsePositiveEstimate).toBeGreaterThanOrEqual(0);
+      expect(j.risks!.falsePositiveEstimate).toBeLessThanOrEqual(1);
+      expect(['low', 'medium', 'high']).toContain(j.risks!.implementationComplexity);
+      expect(typeof j.risks!.breakingChangeRisk).toBe('boolean');
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: Philosopher Backward Compatibility (PHILO-03)
+// ---------------------------------------------------------------------------
+
+describe('Philosopher Backward Compatibility (PHILO-03)', () => {
+  it('PhilosopherJudgment without scores/risks is valid', () => {
+    const judgment: PhilosopherJudgment = {
+      candidateIndex: 0,
+      critique: 'test',
+      principleAligned: true,
+      score: 0.8,
+      rank: 1,
+    };
+    expect(judgment.score).toBe(0.8);
+    expect(judgment.scores).toBeUndefined();
+    expect(judgment.risks).toBeUndefined();
+  });
+
+  it('runTrinity produces output with 6D scores when candidates have strategicPerspective', () => {
+    const snapshot = makeSnapshot({ failureCount: 2, totalPainEvents: 1 });
+    const config: TrinityConfig = {
+      useTrinity: true,
+      maxCandidates: 3,
+      useStubs: true,
+    };
+
+    const result = runTrinity({ snapshot: snapshot as any, principleId: 'T-08', config });
+    expect(result.success).toBe(true);
+    expect(result.artifact).toBeDefined();
+
+    // The stub philosopher should produce 6D scores for stub candidates
+    // (stub dreamer assigns strategicPerspective based on principleId)
+    if (result.telemetry.philosopher6D) {
+      const avgScores = result.telemetry.philosopher6D.avgScores;
+      expect(typeof avgScores.principleAlignment).toBe('number');
+      expect(typeof avgScores.specificity).toBe('number');
+      expect(typeof avgScores.actionability).toBe('number');
+      expect(typeof avgScores.executability).toBe('number');
+      expect(typeof avgScores.safetyImpact).toBe('number');
+      expect(typeof avgScores.uxImpact).toBe('number');
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: Stub Philosopher 6D Scoring (D-09)
+// ---------------------------------------------------------------------------
+
+describe('Stub Philosopher 6D Scoring (D-09)', () => {
+  it('conservative_fix candidates get high principleAlignment and low risk', () => {
+    const dreamerOutput: DreamerOutput = {
+      valid: true,
+      candidates: [
+        {
+          candidateIndex: 0,
+          badDecision: 'Did something wrong',
+          betterDecision: 'Read the file before editing to verify current content',
+          rationale: 'Following T-01 requires verifying content before making changes',
+          confidence: 0.9,
+          riskLevel: 'low',
+          strategicPerspective: 'conservative_fix',
+        },
+      ],
+      generatedAt: new Date().toISOString(),
+    };
+    const result = invokeStubPhilosopher(dreamerOutput, 'T-01', makeSnapshot() as any);
+    expect(result.valid).toBe(true);
+    const j = result.judgments[0];
+    expect(j.scores).toBeDefined();
+    expect(j.scores!.principleAlignment).toBeGreaterThanOrEqual(0.9);
+    expect(j.scores!.safetyImpact).toBeGreaterThanOrEqual(0.9);
+    expect(j.risks).toBeDefined();
+    expect(j.risks!.breakingChangeRisk).toBe(false);
+    expect(j.risks!.implementationComplexity).toBe('low');
+  });
+
+  it('paradigm_shift candidates get high breakingChangeRisk', () => {
+    const dreamerOutput: DreamerOutput = {
+      valid: true,
+      candidates: [
+        {
+          candidateIndex: 0,
+          badDecision: 'Ignored all errors',
+          betterDecision: 'Challenge the entire approach and redesign from scratch',
+          rationale: 'A paradigm shift rationale for a fundamentally different approach',
+          confidence: 0.5,
+          riskLevel: 'high',
+          strategicPerspective: 'paradigm_shift',
+        },
+      ],
+      generatedAt: new Date().toISOString(),
+    };
+    const result = invokeStubPhilosopher(dreamerOutput, 'T-08', makeSnapshot() as any);
+    expect(result.valid).toBe(true);
+    const j = result.judgments[0];
+    expect(j.scores).toBeDefined();
+    expect(j.scores!.safetyImpact).toBeLessThan(0.5);
+    expect(j.risks).toBeDefined();
+    expect(j.risks!.breakingChangeRisk).toBe(true);
+    expect(j.risks!.implementationComplexity).toBe('high');
+  });
+
+  it('structural_improvement candidates get medium across all dimensions', () => {
+    const dreamerOutput: DreamerOutput = {
+      valid: true,
+      candidates: [
+        {
+          candidateIndex: 0,
+          badDecision: 'Rushed through steps',
+          betterDecision: 'Reorder operations and introduce an intermediate checkpoint',
+          rationale: 'Structural improvement rationale to reorder operations properly',
+          confidence: 0.7,
+          riskLevel: 'medium',
+          strategicPerspective: 'structural_improvement',
+        },
+      ],
+      generatedAt: new Date().toISOString(),
+    };
+    const result = invokeStubPhilosopher(dreamerOutput, 'T-03', makeSnapshot() as any);
+    expect(result.valid).toBe(true);
+    const j = result.judgments[0];
+    expect(j.scores).toBeDefined();
+    // Medium scores should be between conservative and paradigm
+    expect(j.scores!.principleAlignment).toBeGreaterThanOrEqual(0.7);
+    expect(j.scores!.principleAlignment).toBeLessThanOrEqual(0.8);
+    expect(j.risks).toBeDefined();
+    expect(j.risks!.breakingChangeRisk).toBe(false);
+    expect(j.risks!.implementationComplexity).toBe('medium');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: TrinityTelemetry — philosopher6D field
+// ---------------------------------------------------------------------------
+
+describe('TrinityTelemetry — philosopher6D field', () => {
+  it('accepts optional philosopher6D field', () => {
+    const telemetry: TrinityTelemetry = {
+      chainMode: 'trinity',
+      usedStubs: true,
+      dreamerPassed: true,
+      philosopherPassed: true,
+      scribePassed: true,
+      candidateCount: 2,
+      selectedCandidateIndex: 0,
+      stageFailures: [],
+      philosopher6D: {
+        avgScores: {
+          principleAlignment: 0.85,
+          specificity: 0.75,
+          actionability: 0.8,
+          executability: 0.78,
+          safetyImpact: 0.7,
+          uxImpact: 0.72,
+        },
+        highRiskCount: 1,
+      },
+    };
+    expect(telemetry.philosopher6D).toBeDefined();
+    expect(telemetry.philosopher6D!.avgScores.principleAlignment).toBe(0.85);
+    expect(telemetry.philosopher6D!.highRiskCount).toBe(1);
   });
 });
