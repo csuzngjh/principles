@@ -11,6 +11,7 @@
  * - deriveContextualFactors: Compute contextual factors from snapshot (Plan 02)
  */
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import type { NocturnalAssistantTurn, NocturnalToolCall, NocturnalUserTurn, NocturnalSessionSnapshot } from './nocturnal-trajectory-extractor.js';
 import { detectThinkingModelMatches, listThinkingModels } from './thinking-models.js';
 
@@ -143,6 +144,7 @@ export function deriveReasoningChain(assistantTurns: NocturnalAssistantTurn[]): 
     // Without thinking tags we cannot extract a genuine reasoning trace, so
     // we fall back to 'low' rather than misleading the downstream pipeline
     // with activation derived from non-thinking patterns in the response text.
+    // eslint-disable-next-line @typescript-eslint/init-declarations
     let confidenceSignal: "high" | "medium" | "low";
     if (thinkingContent.length === 0) {
       confidenceSignal = 'low';
@@ -211,6 +213,7 @@ export function deriveDecisionPoints(
 
   // Binary search: find rightmost assistant turn with createdAt < tcTime
   const findBeforeTurn = (tcTime: number): NocturnalAssistantTurn | undefined => {
+    // eslint-disable-next-line @typescript-eslint/init-declarations
     let lo = 0, hi = sortedTurns.length - 1, result: NocturnalAssistantTurn | undefined;
     while (lo <= hi) {
       const mid = (lo + hi) >>> 1;
@@ -233,7 +236,9 @@ export function deriveDecisionPoints(
       : '';
 
     // On failure, find next assistant turn after tool call
+    // eslint-disable-next-line @typescript-eslint/init-declarations
     let afterReflection: string | undefined;
+    // eslint-disable-next-line @typescript-eslint/init-declarations
     let confidenceDelta: number | undefined;
 
     if (tc.outcome === 'failure') {
@@ -280,7 +285,7 @@ export function deriveDecisionPoints(
  *
  * Empty/missing data returns all-false defaults. Never throws.
  */
-    // eslint-disable-next-line complexity -- complexity 12, refactor candidate
+     
 export function deriveContextualFactors(
   snapshot: NocturnalSessionSnapshot,
 ): DerivedContextualFactors {

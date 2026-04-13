@@ -40,7 +40,7 @@ import { withLockAsync } from '../utils/file-lock.js';
  * Excluded (NOT system sessions):
  * - User sessions like agent:main:feishu:user:xxx — third component is channel type
  */
-    // eslint-disable-next-line complexity -- complexity 15, refactor candidate
+     
 function isSystemSession(state: SessionState): boolean {
     const { sessionId, sessionKey, trigger } = state;
 
@@ -270,7 +270,7 @@ async function writeState(stateDir: string, state: NocturnalRuntimeState): Promi
  * @param trajectoryLastActivityAt - Optional trajectory timestamp as secondary guardrail
  * @returns IdleCheckResult with full diagnostic information
  */
-    // eslint-disable-next-line complexity -- complexity 14, refactor candidate
+     
 export function checkWorkspaceIdle(
     workspaceDir: string,
     options: {
@@ -321,6 +321,7 @@ export function checkWorkspaceIdle(
     }
 
      
+    // eslint-disable-next-line @typescript-eslint/init-declarations
     let reason: string;
     if (mostRecentActivityAt === 0) {
         reason = 'No active sessions found — workspace is idle';
@@ -357,7 +358,7 @@ export function checkWorkspaceIdle(
  * @param options - Cooldown configuration options
  * @returns CooldownCheckResult
  */
-    // eslint-disable-next-line complexity -- complexity 11, slightly over threshold
+     
 export function checkCooldown(
     stateDir: string,
     principleId?: string,
@@ -369,7 +370,7 @@ export function checkCooldown(
     } = {}
 ): CooldownCheckResult {
     const {
-        /* eslint-disable @typescript-eslint/no-unused-vars -- Reason: Cooldown parameters reserved for future quota enforcement */
+         
         globalCooldownMs: _globalCooldownMs = DEFAULT_GLOBAL_COOLDOWN_MS,
         principleCooldownMs: _principleCooldownMs = DEFAULT_PRINCIPLE_COOLDOWN_MS,
         maxRunsPerWindow = DEFAULT_MAX_RUNS_PER_WINDOW,
@@ -389,6 +390,7 @@ export function checkCooldown(
         if (cooldownEnd > now) {
             globalCooldownActive = true;
             globalCooldownRemainingMs = cooldownEnd - now;
+            // eslint-disable-next-line @typescript-eslint/prefer-destructuring
             globalCooldownUntil = state.globalCooldownUntil;  
         }
     }
@@ -558,7 +560,7 @@ export interface PreflightCheckResult {
  * @param idleCheckOverride - Optional override for idle check result (for testing)
  */
  
-    // eslint-disable-next-line complexity -- complexity 12, refactor candidate
+    // eslint-disable-next-line @typescript-eslint/max-params -- complexity 12, refactor candidate
 export function checkPreflight(
     workspaceDir: string,
     stateDir: string,

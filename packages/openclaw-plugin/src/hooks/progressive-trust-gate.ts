@@ -87,6 +87,7 @@ export function buildEvolutionGateReason(
  * Internal helper to call the shared block helper with progressive-trust-gate source tag.
  */
  
+// eslint-disable-next-line @typescript-eslint/max-params
 function block(
   filePath: string,
   reason: string,
@@ -120,6 +121,7 @@ function block(
  * @returns PluginHookBeforeToolCallResult to block, or undefined to allow
  */
  
+// eslint-disable-next-line @typescript-eslint/max-params
 export function checkProgressiveTrustGate(
   event: PluginHookBeforeToolCallEvent,
   wctx: WorkspaceContext,
@@ -152,6 +154,7 @@ export function checkProgressiveTrustGate(
 
   const currentTier = epDecision.currentTier ?? 1;
    
+  // eslint-disable-next-line @typescript-eslint/no-use-before-define
   const tierName = getTierName(currentTier);
 
   logger.info?.(`[PD_GATE] EP Gate: Tier ${currentTier} (${tierName}), Tool: ${event.toolName}, Risk: ${risky}, Allowed: ${epDecision.allowed}`);

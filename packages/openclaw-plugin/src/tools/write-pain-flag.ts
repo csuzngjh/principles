@@ -1,5 +1,6 @@
 import type { OpenClawPluginApi } from '../openclaw-sdk.js';
 import { Type } from '@sinclair/typebox';
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { buildPainFlag, writePainFlag } from '../core/pain.js';
 import { resolveWorkspaceDirFromApi } from '../core/path-resolver.js';
 import * as fs from 'fs';

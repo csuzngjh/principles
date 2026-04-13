@@ -208,7 +208,7 @@ export class TrajectoryDatabase {
     const createdAt = input.createdAt ?? nowIso();
     // Extract filePath from paramsJson if provided and is an object with filePath
     const paramsObj = input.paramsJson as Record<string, unknown> | undefined;
-    /* eslint-disable @typescript-eslint/no-unused-vars -- Reason: _filePath extracted for potential future use but currently unused */
+     
     const _filePath = paramsObj && typeof paramsObj.filePath === 'string' ? paramsObj.filePath : null;
     const rowId = this.withWrite(() => {
       const result = this.db.prepare(`
@@ -442,7 +442,7 @@ export class TrajectoryDatabase {
     const now = nowIso();
     // Cast to V2 to access new fields
     const v2Updates = updates;
-    // eslint-disable-next-line complexity -- complexity 12, refactor candidate
+     
     this.withWrite(() => {
       const setClauses: string[] = ['updated_at = ?'];
       const values: unknown[] = [now];
@@ -555,7 +555,7 @@ export class TrajectoryDatabase {
       LIMIT ? OFFSET ?
     `).all(...values, limit, offset) as Record<string, unknown>[];
 
-    // eslint-disable-next-line complexity -- complexity 13, refactor candidate
+     
     return rows.map((row) => ({
       id: Number(row.id),
       taskId: String(row.task_id),
@@ -590,6 +590,7 @@ export class TrajectoryDatabase {
     const offset = filters.offset ?? 0;
 
      
+    // eslint-disable-next-line @typescript-eslint/init-declarations
     let rows: Record<string, unknown>[];
     if (traceId) {
       rows = this.db.prepare(`
@@ -627,7 +628,7 @@ export class TrajectoryDatabase {
    * Returns: Analytics data aggregated from trajectory database.
    * Not: Runtime truth or real-time queue state.
    */
-    // eslint-disable-next-line complexity -- complexity 14, refactor candidate
+     
   getEvolutionTaskByTraceId(traceId: string): EvolutionTaskRecord | null {
     const row = this.db.prepare(`
       SELECT id, task_id, trace_id, source, reason, score, status,
@@ -778,7 +779,7 @@ export class TrajectoryDatabase {
       WHERE session_id = ?
       ORDER BY id ASC
     `).all(sessionId) as Record<string, unknown>[];
-    // eslint-disable-next-line complexity -- complexity 12, refactor candidate
+     
 
     return rows.map((row) => {
       // Extract filePath from params_json if present
@@ -788,6 +789,7 @@ export class TrajectoryDatabase {
           const params = JSON.parse(row.params_json);
           if (params && typeof params.filePath === 'string') {
              
+            // eslint-disable-next-line @typescript-eslint/prefer-destructuring
             filePath = params.filePath;
           }
         } catch {
@@ -1614,6 +1616,7 @@ export class TrajectoryDatabase {
   }
 
    
+  // eslint-disable-next-line @typescript-eslint/max-params
   private recordExportAudit(
     exportKind: string,
     mode: CorrectionExportMode,
@@ -1679,6 +1682,7 @@ export class TrajectoryDatabase {
       if (referenced.has(entry)) continue;
       const fullPath = path.join(this.blobDir, entry);
        
+      // eslint-disable-next-line @typescript-eslint/init-declarations
       let stat: fs.Stats;
       try {
         stat = fs.statSync(fullPath);

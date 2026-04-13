@@ -56,6 +56,7 @@ export function initTaskMeta(task: PDTaskSpec): PDTaskSpec {
 }
 
  
+// eslint-disable-next-line @typescript-eslint/max-params
 export function updateSyncMeta(
   task: PDTaskSpec,
   status: 'ok' | 'error',

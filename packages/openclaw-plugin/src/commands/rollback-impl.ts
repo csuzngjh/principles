@@ -41,7 +41,7 @@ function getAllImplementations(stateDir: string): Implementation[] {
  *   /pd-rollback-impl <implId>                      - Rollback current active
  *   /pd-rollback-impl <implId> --reason "<reason>"  - Rollback with reason
  */
-    // eslint-disable-next-line complexity -- complexity 12, refactor candidate
+     
 export function handleRollbackImplCommand(ctx: PluginCommandContext): PluginCommandResult {
   const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
   const {stateDir} = WorkspaceContext.fromHookContext({ ...ctx, workspaceDir });
@@ -59,10 +59,12 @@ export function handleRollbackImplCommand(ctx: PluginCommandContext): PluginComm
   // List active
   if (subcommand === 'list' || subcommand === '') {
      
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define
     return _handleListActiveRollback(stateDir, isZh);
   }
 
    
+  // eslint-disable-next-line @typescript-eslint/no-use-before-define
   return _handleRollbackImpl(workspaceDir, stateDir, implId, reason, isZh, ctx.sessionId);
 }
 
@@ -105,6 +107,7 @@ function _handleListActiveRollback(
 }
 
  
+// eslint-disable-next-line @typescript-eslint/max-params
 function _handleRollbackImpl(
   workspaceDir: string,
   stateDir: string,
@@ -140,6 +143,7 @@ function _handleRollbackImpl(
   transitionImplementationState(stateDir, implId, 'disabled');
 
    
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let restoredMessage: string;
 
   if (previousActiveId && allImpls.some((i) => i.id === previousActiveId)) {

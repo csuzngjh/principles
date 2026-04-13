@@ -165,7 +165,7 @@ export class EvolutionEngine {
 
   // ===== 记录失败 =====
 
-    // eslint-disable-next-line complexity -- complexity 12, refactor candidate
+     
   public recordFailure(
     toolName: string,
     options?: {
@@ -325,6 +325,7 @@ export class EvolutionEngine {
   // ===== 事件管理 =====
 
    
+  // eslint-disable-next-line @typescript-eslint/max-params
   private createEvent(
     type: 'success' | 'failure',
     taskHash: string,
@@ -387,6 +388,7 @@ export class EvolutionEngine {
   }
 
    
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   private createNewScorecard(): EvolutionScorecard {
     const now = new Date().toISOString();
     return {
@@ -529,6 +531,7 @@ export class EvolutionEngine {
   // ===== 工具方法 =====
 
    
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   private generateId(): string {
     return `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
   }

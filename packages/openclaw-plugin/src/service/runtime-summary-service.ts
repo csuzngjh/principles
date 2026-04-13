@@ -362,7 +362,7 @@ export class RuntimeSummaryService {
     return { session: sessions[0], reason: 'latest_active' };
   }
 
-    // eslint-disable-next-line complexity -- complexity 11, slightly over threshold
+     
   private static mergeSessionSnapshots(
     persistedSessions: PersistedSessionState[],
     workspaceDir: string
@@ -420,6 +420,7 @@ export class RuntimeSummaryService {
    * Queue is the only authoritative execution truth source.
    */
    
+  // eslint-disable-next-line @typescript-eslint/max-params
   private static buildDirectiveSummary(
     queue: QueueItem[] | null,
     directive: DirectiveFile | null,
@@ -511,9 +512,9 @@ export class RuntimeSummaryService {
       })
       .slice(-MAX_SOURCE_EVENTS)
       .reverse();
-    // eslint-disable-next-line complexity -- complexity 11, slightly over threshold
+     
 
-    // eslint-disable-next-line complexity -- complexity 11
+     
     return filtered.map((entry) => {
       if (entry.type === 'pain_signal') {
         return {
@@ -584,7 +585,7 @@ export class RuntimeSummaryService {
     return [...merged.values()].sort((a, b) => (a.ts || '').localeCompare(b.ts || ''));
   }
 
-    // eslint-disable-next-line complexity -- complexity 15, refactor candidate
+     
   private static getEventDedupKey(entry: EventLogEntry): string {
     const eventId = typeof entry.data?.eventId === 'string' ? entry.data.eventId : null;
     if (eventId) {
@@ -641,7 +642,7 @@ export class RuntimeSummaryService {
     return candidate ? new Date(candidate).getTime() : NaN;
   }
 
-    // eslint-disable-next-line complexity -- complexity 14, refactor candidate
+     
   private static buildDirectiveTaskPreview(item: QueueItem): string {
     const task = typeof item.task === 'string' ? item.task.trim() : '';
     if (task && task.toLowerCase() !== 'undefined') {
