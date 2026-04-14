@@ -10,6 +10,10 @@ pre-commit:
       stage_fixed: true
 
 pre-push:
+  parallel: true
   commands:
     protect-main:
       run: node scripts/protect-branch.cjs
+    lint-all:
+      # Block ANY lint error from being pushed
+      run: npx eslint 'packages/**/*.ts' --ignore-pattern '**/*.test.ts' --ignore-pattern '**/*.spec.ts'
