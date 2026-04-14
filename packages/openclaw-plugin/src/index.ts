@@ -66,6 +66,8 @@ import { extractAgentIdFromSessionKey } from './utils/session-key.js';
 
 // Track initialization to avoid repeated calls
 let workspaceInitialized = false;
+// Track started evolution workers — one per workspace
+const startedWorkspaces = new Set<string>();
 
 /**
  * Resolve workspaceDir for slash commands.
@@ -171,6 +173,23 @@ const plugin = {
             SystemLogger.log(workspaceDir, 'SYSTEM_BOOT', `Principles Disciple online. Language: ${language}`);
             workspaceInitialized = true;
           }
+
+          // ── Start EvolutionWorker for THIS workspace ──
+          // Each agent has its own heartbeat task. When before_prompt_build fires,
+          // it fires for the current agent's workspaceDir. Start one EvolutionWorker
+          // per workspace so each agent's pain signals are processed independently.
+          if (!startedWorkspaces.has(workspaceDir)) {
+            startedWorkspaces.add(workspaceDir);
+            EvolutionWorkerService.api = api;
+            EvolutionWorkerService.start({
+              config: api.config,
+              workspaceDir,
+              stateDir: path.join(workspaceDir, '.state'),
+              logger: api.logger,
+            });
+            api.logger.info(`[PD] EvolutionWorker started for workspace: ${workspaceDir}`);
+          }
+
           const result = await handleBeforePromptBuild(event, { ...ctx, api, workspaceDir });
           
           // Record success
