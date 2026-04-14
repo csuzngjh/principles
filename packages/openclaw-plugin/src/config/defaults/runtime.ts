@@ -107,3 +107,16 @@ export const DEFAULT_QUOTA_WINDOW_MS = ONE_DAY_MS;
 
 /** Cool down period (30 minutes) */
 export const DEFAULT_COOLDOWN_MS = 30 * ONE_MINUTE_MS;
+
+// ── String & Size Limits ────────────────────────────────────────────────────────
+
+/** Max string length for trajectory/event logs */
+export const MAX_STRING_LENGTH = 1000;
+
+/** Default max file size (10MB) */
+export const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
+
+// ── Workflow TTL Settings ───────────────────────────────────────────────────────
+
+/** Deep-reflect workflow TTL (10 minutes) */
+export const DEEP_REFLECT_TTL_MS = 10 * ONE_MINUTE_MS;
