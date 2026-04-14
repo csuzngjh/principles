@@ -474,7 +474,10 @@ export class NocturnalTargetSelector {
             toolName: gb.toolName,
             reason: gb.reason,
           })),
-          userCorrections: [],
+          // #268: Use actual correction samples from snapshot instead of empty array
+          userCorrections: snapshot.userCorrections.map((uc) => ({
+            correctionCue: uc.correctionCue ?? undefined,
+          })),
           planApprovals: [],
         });
         hasViolation = violationResult.violated;

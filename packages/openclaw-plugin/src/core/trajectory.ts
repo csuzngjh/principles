@@ -935,6 +935,25 @@ export class TrajectoryDatabase {
     }));
   }
 
+  /**
+   * List correction samples for a specific session.
+   * Returns minimal fields for nocturnal use — correction cue only.
+   * #268: Wire correction_samples into nocturnal pipeline.
+   */
+  listCorrectionSamplesForSession(sessionId: string): { correctionCue: string | null }[] {
+    const rows = this.db.prepare(`
+      SELECT cs.sample_id, ut.correction_cue
+      FROM correction_samples cs
+      LEFT JOIN user_turns ut ON ut.id = cs.user_correction_turn_id
+      WHERE cs.session_id = ?
+      ORDER BY cs.created_at DESC
+    `).all(sessionId) as Record<string, unknown>[];
+
+    return rows.map((row) => ({
+      correctionCue: row.correction_cue ? String(row.correction_cue) : null,
+    }));
+  }
+
   reviewCorrectionSample(sampleId: string, status: Exclude<CorrectionSampleReviewStatus, 'pending'>, note?: string): CorrectionSampleRecord {
     const updatedAt = nowIso();
     const updated = this.withWrite(() => {

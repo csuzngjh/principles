@@ -17,6 +17,7 @@ import type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 export type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 import { LockUnavailableError } from '../config/index.js';
 import { checkWorkspaceIdle, checkCooldown } from './nocturnal-runtime.js';
+import { loadNocturnalConfig } from './nocturnal-config.js';
 import { WorkflowStore } from './subagent-workflow/workflow-store.js';
 import type { WorkflowRow } from './subagent-workflow/types.js';
 import { EmpathyObserverWorkflowManager } from './subagent-workflow/empathy-observer-workflow-manager.js';
@@ -407,6 +408,8 @@ function buildFallbackNocturnalSnapshot(
         toolCalls: [],
         painEvents: fallbackPainEvents,
         gateBlocks: [],
+        // #268: Empty corrections in fallback path (no trajectory data available)
+        userCorrections: [],
         stats: {
             totalAssistantTurns: realStats?.totalAssistantTurns ?? 0,
             totalToolCalls: realStats?.totalToolCalls ?? 0,
@@ -2120,12 +2123,16 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
         const initialDelay = 5000;
         const interval = config.get('intervals.worker_poll_ms') || (15 * 60 * 1000);
 
+        // Periodic trigger tracking
+        let heartbeatCounter = 0;
+
         async function runCycle(): Promise<void> {
             const cycleStart = Date.now();
+            heartbeatCounter++;
 
             // ──── DEBUG: Verify subagent availability in heartbeat context ────
             const hbSubagent = api?.runtime?.subagent;
-            logger?.info?.(`[PD:DEBUG:SubagentCheck:Heartbeat] api_exists=${!!api}, subagent_exists=${!!hbSubagent}, subagent.run_exists=${!!hbSubagent?.run}`);
+            logger?.info?.(`[PD:DEBUG:SubagentCheck:Heartbeat] api_exists=${!!api}, subagent_exists=${!!hbSubagent}, subagent.run_exists=${!!hbSubagent?.run}, heartbeatCounter=${heartbeatCounter}`);
             if (hbSubagent?.run) {
                 logger?.info?.('[PD:DEBUG:SubagentCheck:Heartbeat] run entrypoint is callable');
             }
@@ -2146,18 +2153,45 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
             };
 
             try {
+                // Load config on each cycle (supports runtime updates)
+                const sleepConfig = loadNocturnalConfig(wctx.stateDir);
+
                 const idleResult = checkWorkspaceIdle(wctx.workspaceDir, {});
-                logger?.info?.(`[PD:EvolutionWorker] HEARTBEAT cycle=${new Date().toISOString()} idle=${idleResult.isIdle} idleForMs=${idleResult.idleForMs} userActiveSessions=${idleResult.userActiveSessions} abandonedSessions=${idleResult.abandonedSessionIds.length} lastActivityEpoch=${idleResult.mostRecentActivityAt}`);
-                if (idleResult.isIdle) {
-                    logger?.debug?.(`[PD:EvolutionWorker] Workspace idle (${idleResult.idleForMs}ms since last activity)`);
-                    const cooldown = checkCooldown(wctx.stateDir);
+                logger?.info?.(`[PD:EvolutionWorker] HEARTBEAT cycle=${new Date().toISOString()} idle=${idleResult.isIdle} idleForMs=${idleResult.idleForMs} userActiveSessions=${idleResult.userActiveSessions} abandonedSessions=${idleResult.abandonedSessionIds.length} lastActivityEpoch=${idleResult.mostRecentActivityAt} triggerMode=${sleepConfig.trigger_mode}`);
+
+                let shouldTrySleepReflection = false;
+
+                // Path 1: Idle-based trigger (default mode)
+                if (idleResult.isIdle && sleepConfig.trigger_mode === 'idle') {
+                    logger?.info?.(`[PD:EvolutionWorker] Workspace idle (${idleResult.idleForMs}ms since last activity)`);
+                    shouldTrySleepReflection = true;
+                }
+
+                // Path 2: Periodic trigger (bypasses idle requirement — for debugging)
+                if (!idleResult.isIdle && sleepConfig.trigger_mode === 'periodic') {
+                    if (heartbeatCounter >= sleepConfig.period_heartbeats) {
+                        logger?.info?.(`[PD:EvolutionWorker] Periodic trigger: heartbeatCounter=${heartbeatCounter} >= period_heartbeats=${sleepConfig.period_heartbeats}`);
+                        shouldTrySleepReflection = true;
+                        heartbeatCounter = 0; // Reset counter
+                    } else {
+                        logger?.info?.(`[PD:EvolutionWorker] Periodic: ${heartbeatCounter}/${sleepConfig.period_heartbeats} heartbeats — waiting`);
+                    }
+                }
+
+                if (shouldTrySleepReflection) {
+                    const cooldown = checkCooldown(wctx.stateDir, undefined, {
+                        maxRunsPerWindow: sleepConfig.max_runs_per_day,
+                        quotaWindowMs: 24 * 60 * 60 * 1000,
+                    });
+                    logger?.info?.(`[PD:EvolutionWorker] Cooldown check: globalCooldownActive=${cooldown.globalCooldownActive} quotaExhausted=${cooldown.quotaExhausted} runsRemaining=${cooldown.runsRemaining}`);
                     if (!cooldown.globalCooldownActive && !cooldown.quotaExhausted) {
+                        logger?.info?.('[PD:EvolutionWorker] Attempting to enqueue sleep_reflection task...');
                         enqueueSleepReflectionTask(wctx, logger).catch((err) => {
                             logger?.error?.(`[PD:EvolutionWorker] Failed to enqueue sleep_reflection task: ${String(err)}`);
                         });
+                    } else {
+                        logger?.info?.(`[PD:EvolutionWorker] Skipping sleep_reflection: globalCooldown=${cooldown.globalCooldownActive} quotaExhausted=${cooldown.quotaExhausted}`);
                     }
-                } else {
-                    logger?.debug?.(`[PD:EvolutionWorker] Workspace active (last activity ${idleResult.idleForMs}ms ago)`);
                 }
 
                 const painCheckResult = await checkPainFlag(wctx, logger);
