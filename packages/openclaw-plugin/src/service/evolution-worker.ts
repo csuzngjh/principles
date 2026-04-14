@@ -36,9 +36,43 @@ import type { CorrectionObserverPayload } from './correction-observer-types.js';
 import { KeywordOptimizationService } from './keyword-optimization-service.js';
 import { TrajectoryRegistry } from '../core/trajectory.js';
 import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
+import { classifyFailure, type ClassifiableTaskKind } from './failure-classifier.js';
+import { recordPersistentFailure, resetFailureState, isTaskKindInCooldown } from './cooldown-strategy.js';
+import { loadCooldownEscalationConfig } from './nocturnal-config.js';
 
 const WORKFLOW_TTL_MS = 5 * 60 * 1000; // 5 minutes default TTL for helper workflows
 import { OpenClawTrinityRuntimeAdapter } from '../core/nocturnal-trinity.js';
+
+/**
+ * Phase 40: Handle failure classification after task outcome.
+ * On failure: classify and escalate if persistent.
+ * On success: reset failure state.
+ * Wrapped in try/catch to prevent classification errors from blocking task processing.
+ */
+async function handleTaskOutcome(
+    wctx: { stateDir: string },
+    queue: EvolutionQueueItem[],
+    taskKind: ClassifiableTaskKind,
+    succeeded: boolean,
+    logger?: PluginLogger,
+): Promise<void> {
+    try {
+        if (succeeded) {
+            await resetFailureState(wctx.stateDir, taskKind);
+        } else {
+            const result = classifyFailure(queue, taskKind);
+            if (result.classification === 'persistent') {
+                const config = loadCooldownEscalationConfig(wctx.stateDir);
+                await recordPersistentFailure(wctx.stateDir, taskKind, config);
+                logger?.warn?.(`[PD:EvolutionWorker] ${taskKind} persistent failure detected (${result.consecutiveFailures} consecutive), escalating cooldown`);
+            } else {
+                logger?.info?.(`[PD:EvolutionWorker] ${taskKind} transient failure (${result.consecutiveFailures} consecutive)`);
+            }
+        }
+    } catch (classErr) {
+        logger?.warn?.(`[PD:EvolutionWorker] Failure classification error (non-blocking): ${String(classErr)}`);
+    }
+}
 
 // ── Workflow Watchdog ────────────────────────────────────────────────────────
 // Detects stale/orphaned workflows, invalid results, and cleanup failures.
@@ -1646,7 +1680,13 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
         const pollingSleepTasks = queue.filter(t =>
             t.status === 'in_progress' && t.taskKind === 'sleep_reflection' && t.resultRef && !t.resultRef.startsWith('trinity-draft')
         );
-        const sleepReflectionTasks = [...pendingSleepTasks, ...pollingSleepTasks];
+        let sleepReflectionTasks = [...pendingSleepTasks, ...pollingSleepTasks];
+        // Phase 40: Check if sleep_reflection is in cooldown due to persistent failures
+        const sleepCooldown = isTaskKindInCooldown(wctx.stateDir, 'sleep_reflection');
+        if (sleepCooldown.inCooldown) {
+            logger?.info?.(`[PD:EvolutionWorker] sleep_reflection in cooldown (remaining ${Math.round(sleepCooldown.remainingMs / 60000)}min), skipping task processing`);
+            sleepReflectionTasks = [];
+        }
         if (sleepReflectionTasks.length > 0) {
             // --- Phase 1: Claim only pending tasks (inside lock) ---
             // in_progress tasks from previous cycles are already claimed, don't re-claim them
@@ -1661,6 +1701,8 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                 fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
             }
             releaseLock();
+            // Phase 40: Track outcomes for failure classification after queue write
+            const sleepOutcomes: Array<{ taskKind: ClassifiableTaskKind; succeeded: boolean }> = [];
             for (const sleepTask of sleepReflectionTasks) {
                 try {
                     // FIX: For in_progress tasks from a previous cycle, just poll the workflow.
@@ -1750,6 +1792,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             sleepTask.status = 'failed';
                             sleepTask.completed_at = new Date().toISOString();
                             sleepTask.resolution = 'failed_max_retries';
+                            sleepOutcomes.push({ taskKind: 'sleep_reflection', succeeded: false });
                             sleepTask.lastError = `sleep_reflection failed: invalid_snapshot_ingress (${snapshotValidation.reasons.join('; ') || 'missing snapshot'})`;
                             sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
                             logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} rejected: ${sleepTask.lastError}`);
@@ -1765,6 +1808,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         sleepTask.resolution = 'failed_max_retries';
                         sleepTask.lastError = 'No API available to create NocturnalWorkflowManager';
                         sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
+                        sleepOutcomes.push({ taskKind: 'sleep_reflection', succeeded: false });
                         logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} skipped: no API`);
                         continue;
                     }
@@ -1803,6 +1847,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         sleepTask.resolution = 'failed_max_retries';
                         sleepTask.lastError = 'sleep_reflection failed: missing_workflow_id';
                         sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
+                        sleepOutcomes.push({ taskKind: 'sleep_reflection', succeeded: false });
                         logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} missing workflow id after startup`);
                         continue;
                     }
@@ -1816,6 +1861,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             sleepTask.completed_at = new Date().toISOString();
                             sleepTask.resolution = 'marker_detected';
                             sleepTask.resultRef = summary.metadata?.nocturnalResult ? 'trinity-draft' : workflowId;
+                            sleepOutcomes.push({ taskKind: 'sleep_reflection', succeeded: true });
                             logger?.info?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} workflow completed`);
                         } else if (summary.state === 'terminal_error') {
                             // #208/#209: Classify terminal_error reason before hardcoding to failed.
@@ -1849,10 +1895,11 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             if (isExpectedSubagentError(errorReason)) {
                                 // #237: Expected unavailability → stub fallback, not hard failure
                                 sleepTask.status = 'completed';
-                                 
+
                                 sleepTask.completed_at = new Date().toISOString();
                                 sleepTask.resolution = 'stub_fallback';
-                                 
+                                sleepOutcomes.push({ taskKind: 'sleep_reflection', succeeded: true });
+
                                 logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} background runtime unavailable, using stub fallback: ${errorReason}`);
                             // eslint-disable-next-line @typescript-eslint/no-explicit-any
                             } else if ((payload as any).skipReason === 'no_violating_sessions') {
@@ -1860,11 +1907,13 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                                 sleepTask.status = 'completed';
                                 sleepTask.completed_at = new Date().toISOString();
                                 sleepTask.resolution = 'skipped_thin_violation';
+                                sleepOutcomes.push({ taskKind: 'sleep_reflection', succeeded: true });
                                 logger?.info?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} completed: no sessions with meaningful violations found`);
                             } else {
                                 sleepTask.status = 'failed';
                                 sleepTask.completed_at = new Date().toISOString();
                                 sleepTask.resolution = 'failed_max_retries';
+                                sleepOutcomes.push({ taskKind: 'sleep_reflection', succeeded: false });
                                 logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} workflow failed: ${sleepTask.lastError}`);
                             }
                         } else {
@@ -1885,11 +1934,13 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         sleepTask.status = 'completed';
                         sleepTask.completed_at = new Date().toISOString();
                         sleepTask.resolution = 'stub_fallback';
+                        sleepOutcomes.push({ taskKind: 'sleep_reflection', succeeded: true });
                         logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} background runtime unavailable, using stub fallback: ${String(taskErr)}`);
                     } else {
                         sleepTask.status = 'failed';
                         sleepTask.completed_at = new Date().toISOString();
                         sleepTask.resolution = 'failed_max_retries';
+                        sleepOutcomes.push({ taskKind: 'sleep_reflection', succeeded: false });
                         logger?.error?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} threw: ${taskErr}`);
                     }
                 }
@@ -1938,6 +1989,16 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                 logger?.warn?.(`[PD:EvolutionWorker] Failed to write sleep_reflection results back: ${String(resultLockErr)}`);
             }
 
+            // Phase 40: Process failure classification outcomes after queue write
+            try {
+                const freshQueueForClassify: EvolutionQueueItem[] = (() => {
+                    try { return JSON.parse(fs.readFileSync(queuePath, 'utf8')); } catch { return []; }
+                })();
+                for (const outcome of sleepOutcomes) {
+                    await handleTaskOutcome(wctx, freshQueueForClassify, outcome.taskKind, outcome.succeeded, logger);
+                }
+            } catch { /* classification errors are non-blocking */ }
+
             // Safe to return — pain_diagnosis was already processed above.
             lockReleased = true;
             return;
@@ -1955,6 +2016,20 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
             !t.resultRef.startsWith('trinity-draft')
         );
         const keywordOptTasks = [...pendingKeywordOptTasks, ...inProgressKeywordOptTasks];
+        // Phase 40: Check if keyword_optimization is in cooldown due to persistent failures
+        const kwOptCooldown = isTaskKindInCooldown(wctx.stateDir, 'keyword_optimization');
+        if (kwOptCooldown.inCooldown) {
+            logger?.info?.(`[PD:EvolutionWorker] keyword_optimization in cooldown (remaining ${Math.round(kwOptCooldown.remainingMs / 60000)}min), skipping task processing`);
+            if (keywordOptTasks.length > 0) {
+                // Skip all keyword_optimization tasks this cycle; release lock and return
+                if (queueChanged) {
+                    fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+                }
+                releaseLock();
+                lockReleased = true;
+                return;
+            }
+        }
         if (keywordOptTasks.length > 0) {
             // Claim pending tasks inside lock
             for (const koTask of pendingKeywordOptTasks) {
@@ -1968,6 +2043,8 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
             releaseLock();
             lockReleased = true;
 
+            // Phase 40: Track outcomes for failure classification after queue write
+            const kwOptOutcomes: Array<{ taskKind: ClassifiableTaskKind; succeeded: boolean }> = [];
             for (const koTask of keywordOptTasks) {
                 const isPolling = !!koTask.resultRef && !koTask.resultRef.startsWith('trinity-draft');
 
@@ -2043,11 +2120,13 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             koTask.status = 'completed';
                             koTask.completed_at = new Date().toISOString();
                             koTask.resolution = 'marker_detected';
+                            kwOptOutcomes.push({ taskKind: 'keyword_optimization', succeeded: true });
                             logger?.info?.(`[PD:EvolutionWorker] keyword_optimization task ${koTask.id} workflow completed`);
                         } else if (summary.state === 'terminal_error') {
                             koTask.status = 'failed';
                             koTask.completed_at = new Date().toISOString();
                             koTask.resolution = 'failed_max_retries';
+                            kwOptOutcomes.push({ taskKind: 'keyword_optimization', succeeded: false });
                             koTask.retryCount = (koTask.retryCount ?? 0) + 1;
                             const lastEvent = summary.recentEvents[summary.recentEvents.length - 1];
                             koTask.lastError = `keyword_optimization failed: ${lastEvent?.reason ?? 'unknown'}`;
@@ -2060,6 +2139,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     koTask.status = 'failed';
                     koTask.completed_at = new Date().toISOString();
                     koTask.resolution = 'failed_max_retries';
+                    kwOptOutcomes.push({ taskKind: 'keyword_optimization', succeeded: false });
                     koTask.lastError = String(koErr);
                     koTask.retryCount = (koTask.retryCount ?? 0) + 1;
                     logger?.error?.(`[PD:EvolutionWorker] keyword_optimization task ${koTask.id} threw: ${koErr}`);
@@ -2093,6 +2173,17 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
             } finally {
                 koResultLock();
             }
+
+            // Phase 40: Process failure classification outcomes after queue write
+            try {
+                const freshQueueForClassify: EvolutionQueueItem[] = (() => {
+                    try { return JSON.parse(fs.readFileSync(queuePath, 'utf8')); } catch { return []; }
+                })();
+                for (const outcome of kwOptOutcomes) {
+                    await handleTaskOutcome(wctx, freshQueueForClassify, outcome.taskKind, outcome.succeeded, logger);
+                }
+            } catch { /* classification errors are non-blocking */ }
+
             return;
         }
 
