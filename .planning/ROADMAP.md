@@ -48,8 +48,8 @@
 **Milestone Goal:** Ensure nocturnal pipeline state files are crash-safe through atomic writes, transient failure recovery, and startup reconciliation.
 
 - [x] **Phase 38: Atomic Write Utility** - Leaf utility with tmp+fsync+rename, Windows retry, orphan cleanup (completed 2026-04-14)
-- [ ] **Phase 39: Nocturnal Write Migration** - Migrate all writeFileSync call sites to atomic writes
-- [ ] **Phase 40: Failure Classification & Cooldown Recovery** - Classify failures as transient/persistent with appropriate cooldowns
+- [x] **Phase 39: Nocturnal Write Migration** - Migrate all writeFileSync call sites to atomic writes (completed 2026-04-14)
+- [x] **Phase 40: Failure Classification & Cooldown Recovery** - Classify failures as transient/persistent with appropriate cooldowns (completed 2026-04-14)
 - [ ] **Phase 41: Startup Reconciliation** - Validate state integrity, clear stale cooldowns, clean orphans on startup
 
 ## Phase Details
@@ -128,6 +128,43 @@ Plans:
 Plans:
 - [x] 38-01: Create Atomic Write Utility Module
 
+### Phase 39: Nocturnal Write Migration
+**Goal**: All writeFileSync call sites in the nocturnal pipeline use atomic writes via the Phase 38 utility
+**Depends on**: Phase 38 (Atomic Write Utility)
+**Success Criteria** (what must be TRUE):
+  1. All writeFileSync call sites in nocturnal pipeline modules migrated to atomicWriteJsonSync()
+  2. Existing nocturnal state files remain backward-compatible with the migration
+  3. All existing tests pass after migration
+**Plans**: 4/4 complete
+
+Plans:
+- [x] 39-01: TBD
+- [x] 39-02: TBD
+- [x] 39-03: TBD
+- [x] 39-04: TBD
+
+### Phase 40: Failure Classification & Cooldown Recovery
+**Goal**: Nocturnal pipeline task failures classified as transient or persistent with tiered cooldown escalation persisted to nocturnal-runtime.json
+**Depends on**: Phase 38 (Atomic Write Utility), Phase 39 (Nocturnal Write Migration)
+**Success Criteria** (what must be TRUE):
+  1. failure-classifier.ts classifies task failures as transient or persistent based on 3 consecutive failure threshold
+  2. cooldown-strategy.ts implements three-tier stepped escalation: 30min → 4h → 24h
+  3. Consecutive failure counters tracked per task kind (sleep_reflection, keyword_optimization, deep_reflect) independently
+  4. Counter resets to 0 on any successful task completion
+  5. Cooldown state persisted to nocturnal-runtime.json surviving process restarts
+  6. Integration with existing checkCooldown() in nocturnal-runtime.ts for enforcement
+**Plans**: TBD
+
+### Phase 41: Startup Reconciliation
+**Goal**: Validate state integrity, clear stale cooldowns, and clean orphan files on nocturnal pipeline startup
+**Depends on**: Phase 40 (Failure Classification provides cooldown state to reconcile)
+**Success Criteria** (what must be TRUE):
+  1. Startup validation checks integrity of all nocturnal state files
+  2. Stale/expired cooldowns cleared automatically on startup
+  3. Orphan .tmp files cleaned up on startup
+  4. Pipeline enters clean state before first heartbeat cycle
+**Plans**: TBD
+
 ## Progress
 
 **Execution Order:**
@@ -136,8 +173,8 @@ Phases execute in numeric order: 38 -> 39 -> 40 -> 41
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 38. Atomic Write Utility | v1.18 | 1/1 | Complete | 2026-04-14 |
-| 39. Nocturnal Write Migration | v1.18 | 0/? | Pending | |
-| 40. Failure Classification | v1.18 | 0/? | Pending | |
+| 39. Nocturnal Write Migration | v1.18 | 4/4 | Complete    | 2026-04-14 |
+| 40. Failure Classification | v1.18 | 3/3 | Complete    | 2026-04-14 |
 | 41. Startup Reconciliation | v1.18 | 0/? | Pending | |
 
 *Last updated: 2026-04-14*
