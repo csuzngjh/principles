@@ -311,7 +311,8 @@ export class NocturnalWorkflowManager implements WorkflowManager {
                         this.logger.warn(`[PD:NocturnalWorkflow] [${workflowId}] Arbiter result: passed=${result.diagnostics.arbiterResult.passed}, failures=${result.diagnostics.arbiterResult.failures.map(f => f.reason).join('; ')}`);
                     }
                     if (result.diagnostics?.selection) {
-                        this.logger.warn(`[PD:NocturnalWorkflow] [${workflowId}] Selection: decision=${result.diagnostics.selection.decision}, principleId=${result.diagnostics.selection.selectedPrincipleId ?? 'none'}, sessionId=${result.diagnostics.selection.selectedSessionId ?? 'none'}`);
+                        const sel = result.diagnostics.selection;
+                        this.logger.warn(`[PD:NocturnalWorkflow] [${workflowId}] Selection: decision=${sel.decision}, principleId=${sel.selectedPrincipleId ?? 'none'}, sessionId=${sel.selectedSessionId ?? 'none'}, totalEvaluable=${sel.totalEvaluablePrinciples}, filteredByCooldown=${sel.filteredByCooldown}, passed=${sel.passedPrinciples?.length ?? 0}`);
                     }
                     
                     this.store.updateWorkflowState(workflowId, 'terminal_error');
