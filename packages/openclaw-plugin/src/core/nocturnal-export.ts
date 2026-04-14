@@ -158,7 +158,7 @@ function computeDatasetFingerprint(sampleFingerprints: string[]): string {
  * Caller guarantees record.targetModelFamily is non-null.
  */
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 function serializeORPOSample(
   record: NocturnalDatasetRecord,
   artifact: ReturnType<typeof readDatasetArtifact>,
@@ -167,7 +167,7 @@ function serializeORPOSample(
   datasetFingerprint: string
 ): ORPOSample {
   const now = new Date().toISOString();
-  // eslint-disable-next-line @typescript-eslint/no-use-before-define
+   
   const rejected = buildEvidenceBoundedRejected(artifact, evidenceSummary);
 
   return {
@@ -180,7 +180,7 @@ function serializeORPOSample(
     prompt: rejected,
     chosen: artifact.betterDecision,
     rejected,
-    // eslint-disable-next-line @typescript-eslint/no-use-before-define
+     
     rationale: buildEvidenceBoundedRationale(evidenceSummary),
     datasetMetadata: {
       sampleFingerprint: record.sampleFingerprint,
@@ -295,7 +295,7 @@ export function exportORPOSamples(
   });
 
    
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let eligibleRecords: typeof allApprovedRecords;
 
   if (targetModelFamily !== undefined && targetModelFamily !== null) {
@@ -345,7 +345,7 @@ export function exportORPOSamples(
 
     // Read artifact (throws on error — distinguishes read failure from missing artifact)
      
-    // eslint-disable-next-line @typescript-eslint/init-declarations
+     
     let artifact;
     try {
       artifact = readDatasetArtifact(workspaceDir, record.sampleFingerprint);

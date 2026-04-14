@@ -301,7 +301,7 @@ export function getEffectiveThresholds(stateDir: string): ThresholdValues {
  * @returns UpdateThresholdResult
  */
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 export function updateThresholdState(
   stateDir: string,
   thresholdName: ThresholdName,

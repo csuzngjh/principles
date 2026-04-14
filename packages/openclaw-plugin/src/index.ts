@@ -17,6 +17,7 @@ import type {
   PluginHookSubagentContext,
 } from './openclaw-sdk.js';
 import * as crypto from 'crypto';
+import * as path from 'path';
 import type { WorkerProfile } from './core/model-deployment-registry.js';
 import { classifyTask } from './core/local-worker-routing.js';
 import { completeShadowObservation, recordShadowRouting } from './core/shadow-observation-registry.js';
@@ -420,7 +421,7 @@ const plugin = {
 
     // ── Slash Commands ──
     // Register command with optional short alias
-    // eslint-disable-next-line @typescript-eslint/max-params, @typescript-eslint/no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const registerCommandWithAlias = (name: string, alias: string | null, desc: string, handler: any, opts?: { acceptsArgs?: boolean }) => {
       const base = {
         name,

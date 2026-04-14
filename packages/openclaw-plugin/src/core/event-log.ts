@@ -108,7 +108,7 @@ export class EventLog {
   }
   
    
-  // eslint-disable-next-line @typescript-eslint/max-params
+   
   private record(
     type: EventType, 
     category: EventCategory, 
@@ -136,7 +136,7 @@ export class EventLog {
   }
 
    
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+   
   private formatDate(date: Date): string {
     return date.toISOString().split('T')[0];
   }
@@ -246,7 +246,7 @@ export class EventLog {
   }
 
    
-    // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- complexity 13, refactor candidate
+     
   private getEventDedupKey(entry: EventLogEntry): string {
     const eventId = typeof (entry.data as { eventId?: unknown } | undefined)?.eventId === 'string'
       ? String((entry.data as { eventId?: string }).eventId)
@@ -464,7 +464,7 @@ export class EventLog {
    * Returns the rolled back score, or 0 if event not found.
    */
    
-  // eslint-disable-next-line @typescript-eslint/max-params
+   
   rollbackEmpathyEvent(eventId: string, sessionId: string | undefined, reason: string, triggeredBy: 'user_command' | 'natural_language' | 'system'): number {
     const allEvents = this.getMergedEvents();
     let foundEvent: { entry: EventLogEntry; data: PainSignalEventData } | null = null;

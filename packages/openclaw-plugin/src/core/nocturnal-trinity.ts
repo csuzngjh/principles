@@ -584,7 +584,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
     this.cleanupStaleTempDirs();
   }
 
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+   
   isRuntimeAvailable(): boolean {
     return true;
   }
@@ -682,7 +682,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
   /**
    * Extract text from runEmbeddedPiAgent result.
    */
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+   
   private extractPayloadText(result: { payloads?: { isError?: boolean; text?: string }[] }): string {
     return (result.payloads ?? [])
       .filter(p => !p.isError)
@@ -692,13 +692,13 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
   }
 
   /** Clamp a value to [0, 1] range — used for LLM-produced scores that may be out of range */
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+   
   private clamp01(val: unknown, fallback = 0): number {
     if (typeof val !== 'number' || !Number.isFinite(val)) return fallback;
     return Math.min(1, Math.max(0, val));
   }
 
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+   
   private classifyRuntimeError(error: unknown): TrinityRuntimeFailureCode {
     const detail = error instanceof Error ? error.message : String(error);
     return /timeout/i.test(detail) ? 'runtime_timeout' : 'runtime_run_failed';
@@ -797,7 +797,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
   }
 
 
-  // eslint-disable-next-line @typescript-eslint/max-params
+   
   async invokeScribe(
     dreamerOutput: DreamerOutput,
     philosopherOutput: PhilosopherOutput,
@@ -865,7 +865,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
   // ---------------------------------------------------------------------------
 
    
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+   
   private buildDreamerPrompt(
     snapshot: NocturnalSessionSnapshot,
     principleId: string,
@@ -962,7 +962,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
   }
 
    
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+   
   private buildPhilosopherPrompt(
     dreamerOutput: DreamerOutput,
     principleId: string,
@@ -1048,7 +1048,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
  
 
    
-  // eslint-disable-next-line @typescript-eslint/max-params, @typescript-eslint/class-methods-use-this
+   
   private buildScribePrompt(
     dreamerOutput: DreamerOutput,
     philosopherOutput: PhilosopherOutput,
@@ -1262,7 +1262,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
               implementationComplexity: (risks.implementationComplexity as string) ?? 'medium',
               breakingChangeRisk: Boolean(risks.breakingChangeRisk),
             };
-            // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+             
             if (hasFp) risksObj.falsePositiveEstimate = this.clamp01(fp as number);
             return { risks: risksObj };
           })() : {}),
@@ -1306,7 +1306,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
   }
 
    
-  // eslint-disable-next-line @typescript-eslint/max-params
+   
   private parseScribeOutput(
     text: string,
     snapshot: NocturnalSessionSnapshot,
@@ -1375,7 +1375,7 @@ export class OpenClawTrinityRuntimeAdapter implements TrinityRuntimeAdapter {
    * Extract JSON object from text that may contain markdown code blocks.
    */
    
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+   
   private extractJson(text: string): string | null {
     // Try direct parse first
     try {
@@ -1912,9 +1912,9 @@ export function invokeStubPhilosopher(
 
     // Deterministic 6D scores based on strategic perspective (Phase 35 D-07 mapping)
     const perspective = candidate.strategicPerspective;
-    // eslint-disable-next-line @typescript-eslint/init-declarations
+     
     let sixDScores: Philosopher6DScores;
-    // eslint-disable-next-line @typescript-eslint/init-declarations
+     
     let riskAssessment: PhilosopherRiskAssessment;
 
     if (perspective === 'conservative_fix') {
@@ -2014,7 +2014,7 @@ export function invokeStubPhilosopher(
  * The stub uses tournament selection (scoring + thresholds) to pick the winner.
  */
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 export function invokeStubScribe(
   dreamerOutput: DreamerOutput,
   philosopherOutput: PhilosopherOutput,
@@ -2093,7 +2093,7 @@ export function runTrinity(options: RunTrinityOptions): TrinityResult {
   // Stub path: use synchronous stub implementations
   if (config.useStubs) {
      
-    // eslint-disable-next-line @typescript-eslint/no-use-before-define
+     
     return runTrinityWithStubs(snapshot, principleId, config);
   }
 
@@ -2133,7 +2133,7 @@ export async function runTrinityAsync(options: RunTrinityOptions): Promise<Trini
   if (config.useStubs) {
     // Stub path: use synchronous stubs
      
-    // eslint-disable-next-line @typescript-eslint/no-use-before-define
+     
     return runTrinityWithStubs(snapshot, principleId, config);
   }
 

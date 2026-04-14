@@ -197,7 +197,7 @@ export async function handleBeforeCompaction(
 
     // 新增：提取并保存工作记忆
      
-    // eslint-disable-next-line @typescript-eslint/no-use-before-define
+     
     await extractAndSaveWorkingMemory(event.sessionFile, ctx, wctx);
   }
 }
