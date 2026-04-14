@@ -41,8 +41,8 @@
 
 **Milestone Goal:** Create dynamic keyword learning mechanism for correction cue detection, reusing empathy engine abstraction patterns.
 
-- [ ] **Phase 38: Foundation** -- Seed store, atomic persistence, cache, integration entry point
-- [ ] **Phase 39: Learning Loop** -- FPR tracking, 6-hour optimization trigger, throttle, weight decay
+- [x] **Phase 38: Foundation** -- Seed store, atomic persistence, cache, integration entry point (completed 2026-04-14)
+- [x] **Phase 39: Learning Loop** -- FPR tracking, 6-hour optimization trigger, throttle, weight decay (completed 2026-04-14)
 - [ ] **Phase 40: LLM Discovery** -- LLM optimizer adds/updates/removes keywords, trajectory flag
 - [ ] **Phase 41: Testing** -- Integration test, atomic write recovery test
 
@@ -99,8 +99,8 @@ Phases execute in numeric order: 38 -> 39 -> 40 -> 41
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 38. Foundation | v1.17 | 0/N | Not started | - |
-| 39. Learning Loop | v1.17 | 0/N | Not started | - |
+| 38. Foundation | v1.17 | 2/2 | Complete    | 2026-04-14 |
+| 39. Learning Loop | v1.17 | 2/2 | Complete    | 2026-04-14 |
 | 40. LLM Discovery | v1.17 | 0/N | Not started | - |
 | 41. Testing | v1.17 | 0/N | Not started | - |
 
