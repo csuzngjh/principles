@@ -57,20 +57,20 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CORR-01 | Phase 1 | Pending |
-| CORR-02 | Phase 1 | Pending |
-| CORR-03 | Phase 1 | Pending |
-| CORR-04 | Phase 1 | Pending |
-| CORR-05 | Phase 1 | Pending |
-| CORR-06 | Phase 2 | Pending |
-| CORR-07 | Phase 2 | Pending |
-| CORR-08 | Phase 2 | Pending |
-| CORR-09 | Phase 3 | Pending |
-| CORR-10 | Phase 2 | Pending |
-| CORR-11 | Phase 1 | Pending |
-| CORR-12 | Phase 1 | Pending |
-| CORR-13 | Phase 4 | Pending |
-| CORR-14 | Phase 4 | Pending |
+| CORR-01 | Phase 38 | Pending |
+| CORR-02 | Phase 39 | Pending |
+| CORR-03 | Phase 38 | Pending |
+| CORR-04 | Phase 38 | Pending |
+| CORR-05 | Phase 38 | Pending |
+| CORR-06 | Phase 39 | Pending |
+| CORR-07 | Phase 39 | Pending |
+| CORR-08 | Phase 39 | Pending |
+| CORR-09 | Phase 40 | Pending |
+| CORR-10 | Phase 39 | Pending |
+| CORR-11 | Phase 38 | Pending |
+| CORR-12 | Phase 40 | Pending |
+| CORR-13 | Phase 41 | Pending |
+| CORR-14 | Phase 41 | Pending |
 
 **Coverage:**
 - v1 requirements: 14 total
@@ -79,4 +79,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-04-14*
-*Last updated: 2026-04-14 after initial definition*
+*Last updated: 2026-04-14 after roadmap creation*
