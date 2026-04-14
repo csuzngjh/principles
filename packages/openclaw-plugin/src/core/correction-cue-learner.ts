@@ -56,7 +56,7 @@ function createDefaultStore(): CorrectionKeywordStore {
     source: 'seed' as const,
     addedAt: now,
   }));
-  return { keywords, version: 1 };
+  return { keywords, version: 1, lastOptimizedAt: now };
 }
 
 // =========================================================================
@@ -152,11 +152,11 @@ export class CorrectionCueLearner {
 
     for (const keyword of this.store.keywords) {
       if (normalized.includes(keyword.term.toLowerCase())) {
-        return { matched: true, matchedTerms: [keyword.term], score: 1.0 };
+        return { matched: true, matchedTerms: [keyword.term], score: keyword.weight, confidence: 0.9 };
       }
     }
 
-    return { matched: false, matchedTerms: [], score: 0.0 };
+    return { matched: false, matchedTerms: [], score: 0.0, confidence: 0.0 };
   }
 
   /**
