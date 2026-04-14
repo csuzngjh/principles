@@ -17,6 +17,7 @@ import type {
   PluginHookSubagentContext,
 } from './openclaw-sdk.js';
 import * as crypto from 'crypto';
+import * as path from 'path';
 import type { WorkerProfile } from './core/model-deployment-registry.js';
 import { classifyTask } from './core/local-worker-routing.js';
 import { completeShadowObservation, recordShadowRouting } from './core/shadow-observation-registry.js';
