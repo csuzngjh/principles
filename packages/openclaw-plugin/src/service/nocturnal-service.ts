@@ -32,6 +32,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
 import type { RecentPainContext } from './subagent-workflow/types.js';
+import type { PluginLogger } from '../openclaw-sdk.js';
 import {
   createNocturnalTrajectoryExtractor,
   computeThinkingModelDelta,
@@ -268,6 +269,12 @@ export interface NocturnalServiceOptions {
    * When omitted, a deterministic local candidate is synthesized.
    */
   artificerOutputOverride?: string;
+
+  /**
+   * Logger for diagnostic output.
+   * When provided, warnings are logged via logger.warn instead of console.warn.
+   */
+  logger?: PluginLogger;
 }
 
 // ---------------------------------------------------------------------------
