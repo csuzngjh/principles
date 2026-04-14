@@ -36,18 +36,19 @@ export {
     type NocturnalResult,
 } from './nocturnal-workflow-manager.js';
 
-export {
-    CorrectionObserverWorkflowManager,
-    createCorrectionObserverWorkflowManager,
-    correctionObserverWorkflowSpec,
-    type CorrectionObserverWorkflowOptions,
-} from './correction-observer-workflow-manager.js';
+// TODO: correction-observer-workflow-manager.ts is missing from repo
+// export {
+//     CorrectionObserverWorkflowManager,
+//     createCorrectionObserverWorkflowManager,
+//     correctionObserverWorkflowSpec,
+//     type CorrectionObserverWorkflowOptions,
+// } from './correction-observer-workflow-manager.js';
 
-export type {
-    CorrectionObserverWorkflowSpec,
-    CorrectionObserverPayload,
-    CorrectionObserverResult,
-} from './correction-observer-types.js';
+// export type {
+//     CorrectionObserverWorkflowSpec,
+//     CorrectionObserverPayload,
+//     CorrectionObserverResult,
+// } from './correction-observer-types.js';
 
 export type {
     WorkflowState,
