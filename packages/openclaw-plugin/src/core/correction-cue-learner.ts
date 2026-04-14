@@ -13,13 +13,15 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import {
+import type {
   CorrectionKeyword,
   CorrectionKeywordStore,
-  CorrectionMatchResult,
+  CorrectionMatchResult} from './correction-types.js';
+import {
   CORRECTION_SEED_KEYWORDS,
   MAX_CORRECTION_KEYWORDS,
 } from './correction-types.js';
+import { checkCooldown, recordCooldown } from '../service/nocturnal-runtime.js';
 
 const KEYWORD_STORE_FILE = 'correction_keywords.json';
 
@@ -128,8 +130,8 @@ export function _resetCorrectionCueLearnerInstance(): void {
 // =========================================================================
 
 export class CorrectionCueLearner {
-  private store: CorrectionKeywordStore;
-  private stateDir: string;
+  private readonly store: CorrectionKeywordStore;
+  private readonly stateDir: string;
 
   constructor(stateDir: string) {
     this.stateDir = stateDir;
@@ -142,7 +144,7 @@ export class CorrectionCueLearner {
    * Checks whether text contains a correction cue (D-11).
    * Normalisation is equivalent to the original detectCorrectionCue():
    *   trim → lowercase → strip punctuation
-   * Returns the first matched term only (first-match semantics).
+   * Returns weighted score based on keyword accuracy (D-39-03, D-39-04).
    */
   match(text: string): CorrectionMatchResult {
     const normalized = text
@@ -150,13 +152,98 @@ export class CorrectionCueLearner {
       .toLowerCase()
       .replace(/[.,!?;:，。！？；：]/g, '');
 
+    const matchedTerms: string[] = [];
+    let totalScore = 0;
+
     for (const keyword of this.store.keywords) {
       if (normalized.includes(keyword.term.toLowerCase())) {
-        return { matched: true, matchedTerms: [keyword.term], score: keyword.weight, confidence: 0.9 };
+        // D-39-03, D-39-04: Weighted score formula
+        // score = weight x ((TP + 1) / (TP + FP + 2))
+        // +2 smoothing: new keywords (TP=0, FP=0) get accuracy=0.5
+        const tp = keyword.truePositiveCount ?? 0;
+        const fp = keyword.falsePositiveCount ?? 0;
+        const accuracy = (tp + 1) / (tp + fp + 2);
+        const score = keyword.weight * accuracy;
+
+        totalScore += score;
+        matchedTerms.push(keyword.term);
+
+        // Increment hitCount
+        keyword.hitCount = (keyword.hitCount ?? 0) + 1;
+        keyword.lastHitAt = new Date().toISOString();
       }
     }
 
-    return { matched: false, matchedTerms: [], score: 0.0, confidence: 0.0 };
+    const cappedScore = Math.min(1, totalScore);
+    const isMatched = matchedTerms.length > 0;
+
+    // D-39-04: Confidence derived from multiple signals
+    const termConfidence = Math.min(1, matchedTerms.length / 3);
+    const scoreConfidence = Math.min(1, cappedScore / 0.8);
+    const confidence = Math.max(termConfidence, scoreConfidence);
+
+    return {
+      matched: isMatched,
+      matchedTerms: matchedTerms.slice(0, 5),
+      score: cappedScore,
+      confidence,
+    };
+  }
+
+  /**
+   * Records a confirmed true positive for the given keyword term.
+   * Increments both hitCount and truePositiveCount.
+   */
+  recordTruePositive(term: string): void {
+    const keyword = this.store.keywords.find(k => k.term.toLowerCase() === term.toLowerCase());
+    if (!keyword) return;
+
+    keyword.truePositiveCount = (keyword.truePositiveCount ?? 0) + 1;
+    keyword.hitCount = (keyword.hitCount ?? 0) + 1;
+    keyword.lastHitAt = new Date().toISOString();
+
+    this.flush();
+  }
+
+  /**
+   * Records a confirmed false positive for the given keyword term.
+   * CORR-10: Decreases keyword weight by 20% (x0.8 multiplicative factor).
+   */
+  recordFalsePositive(term: string): void {
+    const keyword = this.store.keywords.find(k => k.term.toLowerCase() === term.toLowerCase());
+    if (!keyword) return;
+
+    keyword.falsePositiveCount = (keyword.falsePositiveCount ?? 0) + 1;
+    keyword.hitCount = (keyword.hitCount ?? 0) + 1;
+
+    // D-39-15: Multiplicative weight decay x0.8 on confirmed FP
+    keyword.weight = Math.max(0.1, keyword.weight * 0.8);
+    keyword.lastHitAt = new Date().toISOString();
+
+    this.flush();
+  }
+
+  /**
+   * Returns true if optimization is allowed (within daily throttle limit).
+   * CORR-08: Max 4 optimizations per day across all triggers.
+   */
+  canRunKeywordOptimization(): boolean {
+    // D-39-12, D-39-13: Per-workspace throttle, 4 calls/day
+    const cooldown = checkCooldown(this.stateDir, 'keyword_optimization', {
+      maxRunsPerWindow: 4,
+      quotaWindowMs: 24 * 60 * 60 * 1000,
+    });
+    return !cooldown.globalCooldownActive && !cooldown.quotaExhausted;
+  }
+
+  /**
+   * Records that an optimization was performed.
+   * Increments the daily throttle counter and updates lastOptimizedAt.
+   */
+  async recordOptimizationPerformed(): Promise<void> {
+    await recordCooldown(this.stateDir, 24 * 60 * 60 * 1000);
+    this.store.lastOptimizedAt = new Date().toISOString();
+    this.flush();
   }
 
   /**
@@ -177,9 +264,46 @@ export class CorrectionCueLearner {
     this.flush();
   }
 
+  /**
+   * Updates the weight of an existing keyword.
+   * Weight is clamped to 0.1-0.9 range.
+   * Throws if keyword not found.
+   */
+  updateWeight(term: string, weight: number): void {
+    const idx = this.store.keywords.findIndex(
+      k => k.term.toLowerCase() === term.toLowerCase()
+    );
+    if (idx < 0) {
+      throw new Error(`Keyword not found: ${term}`);
+    }
+
+    this.store.keywords[idx].weight = Math.max(0.1, Math.min(0.9, weight));
+    this.flush();
+  }
+
+  /**
+   * Removes a keyword from the store by term.
+   * Throws if keyword not found.
+   */
+  remove(term: string): void {
+    const idx = this.store.keywords.findIndex(
+      k => k.term.toLowerCase() === term.toLowerCase()
+    );
+    if (idx < 0) {
+      throw new Error(`Keyword not found: ${term}`);
+    }
+    this.store.keywords.splice(idx, 1);
+    this.flush();
+  }
+
   /** Returns a reference to the in-memory store. */
   getStore(): CorrectionKeywordStore {
     return this.store;
+  }
+
+  /** Returns the lastOptimizedAt timestamp. */
+  getLastOptimizedAt(): string {
+    return this.store.lastOptimizedAt;
   }
 
   /** Persists the current in-memory store to disk atomically. */

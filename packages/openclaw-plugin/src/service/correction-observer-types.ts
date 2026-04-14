@@ -29,6 +29,17 @@ export interface CorrectionObserverPayload {
   };
   /** Recent user messages for pattern analysis */
   recentMessages: string[];
+
+  /**
+   * Trajectory history: user turns where correctionDetected=true (D-40-08).
+   * Includes term matched, timestamp, sessionId for FPR trend analysis.
+   */
+  trajectoryHistory: Array<{
+    sessionId: string;
+    timestamp: string;
+    term: string;
+    userMessage: string;
+  }>;
 }
 
 /**

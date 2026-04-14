@@ -21,7 +21,6 @@ import { isSubagentRuntimeAvailable } from '../utils/subagent-probe.js';
 import type {
     CorrectionObserverPayload,
     CorrectionObserverResult,
-    CorrectionObserverWorkflowSpec,
 } from './correction-observer-types.js';
 
 const WORKFLOW_SESSION_PREFIX = 'agent:main:subagent:workflow-correction-';
@@ -92,7 +91,7 @@ export const correctionObserverWorkflowSpec: SubagentWorkflowSpec<CorrectionObse
 
     buildPrompt(taskInput: unknown, _metadata: WorkflowMetadata): string {
         const payload = taskInput as CorrectionObserverPayload;
-        const { keywordStoreSummary, recentMessages } = payload;
+        const { keywordStoreSummary, recentMessages, trajectoryHistory } = payload;
 
         const termsList = keywordStoreSummary.terms
             .map(t => `  - term="${t.term}", weight=${t.weight}, hits=${t.hitCount}, TP=${t.truePositiveCount}, FP=${t.falsePositiveCount}`)
@@ -100,6 +99,11 @@ export const correctionObserverWorkflowSpec: SubagentWorkflowSpec<CorrectionObse
 
         const messages = recentMessages.length > 0
             ? recentMessages.map(m => `  - ${JSON.stringify(m)}`).join('\n')
+            : '  (none)';
+
+        const trajectory = trajectoryHistory.length > 0
+            ? trajectoryHistory.map(t => `  - [${t.sessionId}] ${t.term} (${t.timestamp}): ${t.userMessage.substring(0, 80)}`)
+              .join('\n')
             : '  (none)';
 
         return [
@@ -114,6 +118,9 @@ export const correctionObserverWorkflowSpec: SubagentWorkflowSpec<CorrectionObse
             '',
             '## Recent User Messages (' + recentMessages.length + ' messages):',
             messages,
+            '',
+            '## Correction Trajectory (recent confirmed corrections, D-40-08):',
+            trajectory,
             '',
             '## Rules:',
             '- ADD: If a correction pattern is detected in messages but not in store',
@@ -187,7 +194,7 @@ export class CorrectionObserverWorkflowManager extends WorkflowManagerBase {
         return super.startWorkflow(spec, options);
     }
 
-    // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+     
     protected override createWorkflowMetadata<TResult>(
         spec: SubagentWorkflowSpec<TResult>,
         options: {
@@ -206,6 +213,28 @@ export class CorrectionObserverWorkflowManager extends WorkflowManagerBase {
             workflowType: spec.workflowType,
             ...options.metadata,
         };
+    }
+
+    /**
+     * Retrieves and parses the workflow result for a completed workflow.
+     * Called by evolution-worker.ts after getWorkflowDebugSummary reports state=completed.
+     */
+    async getWorkflowResult(workflowId: string): Promise<CorrectionObserverResult | null> {
+        const workflow = this.store.getWorkflow(workflowId);
+        if (!workflow) return null;
+
+        const result = await this.driver.getResult({
+            sessionKey: workflow.child_session_key,
+            limit: 20,
+        });
+
+        const metadata = JSON.parse(workflow.metadata_json) as WorkflowMetadata;
+        return correctionObserverWorkflowSpec.parseResult({
+            messages: result.messages,
+            assistantTexts: result.assistantTexts,
+            metadata,
+            waitStatus: 'ok',
+        });
     }
 }
 
