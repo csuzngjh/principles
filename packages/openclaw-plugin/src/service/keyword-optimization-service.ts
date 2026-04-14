@@ -18,9 +18,9 @@ import { TrajectoryRegistry } from '../core/trajectory.js';
  * - REMOVE: removes keyword from store
  */
 export class KeywordOptimizationService {
-  private stateDir: string;
-  private workspaceDir: string;
-  private logger: PluginLogger;
+  private readonly stateDir: string;
+  private readonly workspaceDir: string;
+  private readonly logger: PluginLogger;
 
   constructor(stateDir: string, workspaceDir: string, logger: PluginLogger) {
     this.stateDir = stateDir;

@@ -13,10 +13,11 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import {
+import type {
   CorrectionKeyword,
   CorrectionKeywordStore,
-  CorrectionMatchResult,
+  CorrectionMatchResult} from './correction-types.js';
+import {
   CORRECTION_SEED_KEYWORDS,
   MAX_CORRECTION_KEYWORDS,
 } from './correction-types.js';
@@ -26,7 +27,6 @@ const KEYWORD_STORE_FILE = 'correction_keywords.json';
 
 // CORR-08: Daily optimization throttle
 const THROTTLE_FILE = 'correction_optimization_throttle.json';
-const MAX_DAILY_OPTIMIZATIONS = 4;
 
 interface OptimizationThrottle {
   count: number;
@@ -139,11 +139,6 @@ function loadThrottle(stateDir: string): OptimizationThrottle {
   return { count: 0, date: today };
 }
 
-function canTriggerOptimization(stateDir: string): boolean {
-  const throttle = loadThrottle(stateDir);
-  return throttle.count < MAX_DAILY_OPTIMIZATIONS;
-}
-
 function recordOptimization(stateDir: string): void {
   const throttle = loadThrottle(stateDir);
   throttle.count++;
@@ -169,8 +164,8 @@ export function _resetCorrectionCueLearnerInstance(): void {
 // =========================================================================
 
 export class CorrectionCueLearner {
-  private store: CorrectionKeywordStore;
-  private stateDir: string;
+  private readonly store: CorrectionKeywordStore;
+  private readonly stateDir: string;
 
   constructor(stateDir: string) {
     this.stateDir = stateDir;
@@ -256,7 +251,7 @@ export class CorrectionCueLearner {
     keyword.hitCount = (keyword.hitCount ?? 0) + 1;
 
     // D-39-15: Multiplicative weight decay x0.8 on confirmed FP
-    keyword.weight = keyword.weight * 0.8;
+    keyword.weight = Math.max(0.1, keyword.weight * 0.8);
     keyword.lastHitAt = new Date().toISOString();
 
     this.flush();

@@ -33,7 +33,6 @@ import { isExpectedSubagentError } from './subagent-workflow/subagent-error-util
 import { readPainFlagContract } from '../core/pain.js';
 import { CorrectionObserverWorkflowManager, correctionObserverWorkflowSpec } from './subagent-workflow/correction-observer-workflow-manager.js';
 import type { CorrectionObserverPayload } from './subagent-workflow/correction-observer-types.js';
-import type { CorrectionObserverResult } from './subagent-workflow/correction-observer-types.js';
 import { KeywordOptimizationService } from './keyword-optimization-service.js';
 import { TrajectoryRegistry } from '../core/trajectory.js';
 import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
@@ -2027,11 +2026,11 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     }
 
                     // Poll workflow state
-                    const summary = await manager.getWorkflowDebugSummary(workflowId!);
+                    const summary = await manager.getWorkflowDebugSummary(workflowId);
                     if (summary) {
                         if (summary.state === 'completed') {
                             // Get parsed LLM result and apply mutations to keyword store (CORR-09)
-                            const parsedResult = await manager.getWorkflowResult(workflowId!);
+                            const parsedResult = await manager.getWorkflowResult(workflowId);
 
                             if (parsedResult?.updated) {
                                 koService.applyResult(parsedResult);
@@ -2088,7 +2087,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         freshQueue.push(koTask);
                     }
                 }
-                fs.writeFileSync(queuePath, JSON.stringify(freshQueue, null, 'utf8'));
+                fs.writeFileSync(queuePath, JSON.stringify(freshQueue, null, 2), 'utf8');
             } catch (koResultErr) {
                 logger?.warn?.(`[PD:EvolutionWorker] Failed to write keyword_optimization results: ${String(koResultErr)}`);
             } finally {
@@ -2391,7 +2390,17 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                 }
 
                 // Path 2: Periodic trigger (fires regardless of idle state)
+                // keyword_optimization fires every period_heartbeats (CORR-07).
+                // IMPORTANT: check keyword_optimization BEFORE resetting counter for sleep_reflection.
                 if (sleepConfig.trigger_mode === 'periodic') {
+                    // keyword_optimization check BEFORE counter reset (CORR-07 fix)
+                    if (heartbeatCounter > 0 && heartbeatCounter % sleepConfig.period_heartbeats === 0) {
+                        logger?.info?.(`[PD:EvolutionWorker] Periodic keyword_optimization trigger at heartbeat ${heartbeatCounter}`);
+                        enqueueKeywordOptimizationTask(wctx, logger).catch((err) => {
+                            logger?.error?.(`[PD:EvolutionWorker] Failed to enqueue keyword_optimization task: ${String(err)}`);
+                        });
+                    }
+
                     if (heartbeatCounter >= sleepConfig.period_heartbeats) {
                         logger?.info?.(`[PD:EvolutionWorker] Periodic trigger: heartbeatCounter=${heartbeatCounter} >= period_heartbeats=${sleepConfig.period_heartbeats}`);
                         shouldTrySleepReflection = true;
@@ -2416,15 +2425,6 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                     } else {
                         logger?.info?.(`[PD:EvolutionWorker] Skipping sleep_reflection: globalCooldown=${cooldown.globalCooldownActive} quotaExhausted=${cooldown.quotaExhausted}`);
                     }
-                }
-
-                // keyword_optimization fires every period_heartbeats (6-hour wall-clock equivalent, CORR-07)
-                // Uses separate throttle: max 4/day per workspace (CORR-08)
-                if (heartbeatCounter > 0 && heartbeatCounter % sleepConfig.period_heartbeats === 0) {
-                    logger?.info?.(`[PD:EvolutionWorker] Periodic keyword_optimization trigger at heartbeat ${heartbeatCounter}`);
-                    enqueueKeywordOptimizationTask(wctx, logger).catch((err) => {
-                        logger?.error?.(`[PD:EvolutionWorker] Failed to enqueue keyword_optimization task: ${String(err)}`);
-                    });
                 }
 
                 const painCheckResult = await checkPainFlag(wctx, logger);
