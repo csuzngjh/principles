@@ -2166,8 +2166,8 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                     shouldTrySleepReflection = true;
                 }
 
-                // Path 2: Periodic trigger (bypasses idle requirement — for debugging)
-                if (!idleResult.isIdle && sleepConfig.trigger_mode === 'periodic') {
+                // Path 2: Periodic trigger (fires regardless of idle state)
+                if (sleepConfig.trigger_mode === 'periodic') {
                     if (heartbeatCounter >= sleepConfig.period_heartbeats) {
                         logger?.info?.(`[PD:EvolutionWorker] Periodic trigger: heartbeatCounter=${heartbeatCounter} >= period_heartbeats=${sleepConfig.period_heartbeats}`);
                         shouldTrySleepReflection = true;
@@ -2179,6 +2179,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
 
                 if (shouldTrySleepReflection) {
                     const cooldown = checkCooldown(wctx.stateDir, undefined, {
+                        globalCooldownMs: sleepConfig.cooldown_ms,
                         maxRunsPerWindow: sleepConfig.max_runs_per_day,
                         quotaWindowMs: 24 * 60 * 60 * 1000,
                     });

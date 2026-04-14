@@ -63,7 +63,8 @@ export type SkipReason =
   | 'workspace_not_idle'            // Workspace is active, nocturnal not allowed
   | 'quota_exhausted'              // Max runs per quota window reached
   | 'insufficient_snapshot_data'    // Sessions exist but lack tool calls / events
-  | 'global_cooldown_active';       // Global cooldown is in effect
+  | 'global_cooldown_active'        // Global cooldown is in effect
+  | 'preflight_blocked';            // Preflight check blocked (idle/cooldown/quota)
 
 export interface SelectionDiagnostics {
   /** Total evaluable principles found */

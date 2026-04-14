@@ -436,10 +436,12 @@ export function checkCooldown(
  *
  * @param stateDir - State directory
  * @param principleId - Target principle ID for this run
+ * @param cooldownMs - Global cooldown duration in ms (default: 1 hour)
  */
 export async function recordRunStart(
     stateDir: string,
-    principleId: string
+    principleId: string,
+    cooldownMs: number = DEFAULT_GLOBAL_COOLDOWN_MS
 ): Promise<void> {
     const state = await readState(stateDir);
     const now = new Date().toISOString();
@@ -450,8 +452,8 @@ export async function recordRunStart(
         status: 'skipped', // Will be updated on completion
     };
 
-    // Set global cooldown
-    const cooldownUntil = new Date(Date.now() + DEFAULT_GLOBAL_COOLDOWN_MS).toISOString();
+    // Set global cooldown (use configured value, not hardcoded default)
+    const cooldownUntil = new Date(Date.now() + cooldownMs).toISOString();
     state.globalCooldownUntil = cooldownUntil;
 
     // Add to recent runs for quota tracking
