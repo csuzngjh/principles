@@ -19,6 +19,7 @@ import {
   getKeywordStoreSummary,
 } from '../core/empathy-keyword-matcher.js';
 import { severityToPenalty, DEFAULT_EMPATHY_KEYWORD_CONFIG } from '../core/empathy-types.js';
+import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
 
 // Module-level empathy state — shared across calls to avoid per-turn I/O
 let _empathyTurnCounter = 0;
@@ -351,6 +352,18 @@ export async function handleBeforePromptBuild(
         correctionCue,
         referencesAssistantTurnId,
       });
+
+      // D-39-07: Wire FPR feedback loop -- when a correction cue is detected,
+      // record it as a false positive so the weighted scoring formula has real data.
+      // This populates FPR counters that were previously always 0 in production.
+      if (correctionCue) {
+        try {
+          const learner = CorrectionCueLearner.get(wctx.stateDir);
+          learner.recordFalsePositive(correctionCue);
+        } catch {
+          // Non-critical: FPR feedback is best-effort, must not break prompt flow
+        }
+      }
     }
   }
 
