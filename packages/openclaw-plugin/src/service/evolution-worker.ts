@@ -2390,18 +2390,18 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                     shouldTrySleepReflection = true;
                 }
 
-                // Path 2: Periodic trigger (fires regardless of idle state)
-                // keyword_optimization fires every period_heartbeats (CORR-07).
-                // IMPORTANT: check keyword_optimization BEFORE resetting counter for sleep_reflection.
-                if (sleepConfig.trigger_mode === 'periodic') {
-                    // keyword_optimization check BEFORE counter reset (CORR-07 fix)
-                    if (kwOptConfig.enabled && heartbeatCounter > 0 && heartbeatCounter % kwOptConfig.period_heartbeats === 0) {
-                        logger?.info?.(`[PD:EvolutionWorker] Periodic keyword_optimization trigger at heartbeat ${heartbeatCounter}`);
-                        enqueueKeywordOptimizationTask(wctx, logger).catch((err) => {
-                            logger?.error?.(`[PD:EvolutionWorker] Failed to enqueue keyword_optimization task: ${String(err)}`);
-                        });
-                    }
+                // keyword_optimization: Independent periodic trigger (CORR-07).
+                // Fires every kwOptConfig.period_heartbeats regardless of trigger_mode.
+                // Has its own dedicated config (default 24 heartbeats = 6 hours).
+                if (kwOptConfig.enabled && heartbeatCounter > 0 && heartbeatCounter % kwOptConfig.period_heartbeats === 0) {
+                    logger?.info?.(`[PD:EvolutionWorker] keyword_optimization trigger at heartbeat ${heartbeatCounter} (trigger_mode=${sleepConfig.trigger_mode})`);
+                    enqueueKeywordOptimizationTask(wctx, logger).catch((err) => {
+                        logger?.error?.(`[PD:EvolutionWorker] Failed to enqueue keyword_optimization task: ${String(err)}`);
+                    });
+                }
 
+                // Path 2: Periodic trigger for sleep_reflection (fires regardless of idle state)
+                if (sleepConfig.trigger_mode === 'periodic') {
                     if (heartbeatCounter >= sleepConfig.period_heartbeats) {
                         logger?.info?.(`[PD:EvolutionWorker] Periodic trigger: heartbeatCounter=${heartbeatCounter} >= period_heartbeats=${sleepConfig.period_heartbeats}`);
                         shouldTrySleepReflection = true;
