@@ -228,9 +228,9 @@ export class CorrectionCueLearner {
     if (!keyword) return;
 
     keyword.falsePositiveCount = (keyword.falsePositiveCount ?? 0) + 1;
-    keyword.hitCount = (keyword.hitCount ?? 0) + 1;
 
     // D-39-15: Multiplicative weight decay x0.8 on confirmed FP
+    // Note: hitCount already incremented by match(), do not double-count
     keyword.weight = keyword.weight * 0.8;
     keyword.lastHitAt = new Date().toISOString();
 
