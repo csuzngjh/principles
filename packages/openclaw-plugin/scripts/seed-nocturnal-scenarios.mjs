@@ -299,12 +299,11 @@ function main() {
   for (const s of scenarios) {
     const createdAt = daysAgo(s.days);
 
-    // Check if scenario already exists with complete data (pain_events, not just sessions)
-    // This prevents partial data if the script was interrupted mid-insert
+    // Check if scenario already exists (check sessions table first since that's inserted first)
     try {
-      const existing = runSql(dbPath, `SELECT COUNT(*) FROM pain_events WHERE session_id = '${esc(s.sessionId)}';`);
+      const existing = runSql(dbPath, `SELECT COUNT(*) FROM sessions WHERE session_id = '${esc(s.sessionId)}';`);
       if (parseInt(existing) > 0) {
-        console.log(`  ⏭️  Skipping ${s.sessionId} (already exists with ${existing} pain events)`);
+        console.log(`  ⏭️  Skipping ${s.sessionId} (already exists)`);
         skipped++;
         continue;
       }
@@ -336,12 +335,12 @@ VALUES ('${esc(s.sessionId)}', '${esc(tc.toolName)}', '${esc(tc.outcome)}', ${tc
 
     // 4. Pain events
     for (const pe of s.painEvents) {
-      sql.push(`INSERT INTO pain_events (session_id, source, score, reason, severity, origin, confidence, text, created_at)
-VALUES ('${esc(s.sessionId)}', '${esc(pe.source)}', ${pe.score}, '${esc(pe.reason)}', '${esc(pe.severity)}', '${esc(pe.origin)}', ${pe.confidence !== undefined ? pe.confidence : 'NULL'}, ${pe.text ? `'${esc(pe.text)}'` : 'NULL'}, '${createdAt}');`);
+      sql.push(`INSERT INTO pain_events (session_id, source, score, reason, severity, origin, confidence, created_at)
+VALUES ('${esc(s.sessionId)}', '${esc(pe.source)}', ${pe.score}, '${esc(pe.reason)}', '${esc(pe.severity)}', '${esc(pe.origin)}', ${pe.confidence !== undefined ? pe.confidence : 'NULL'}, '${createdAt}');`);
     }
 
     // Execute all SQL in one transaction via stdin piping
-    const fullSql = `BEGIN TRANSACTION;\n${sql.join('\n')}\nCOMMIT;`;
+    const fullSql = `.bail on\nBEGIN TRANSACTION;\n${sql.join('\n')}\nCOMMIT;`;
     try {
       execFileSync('sqlite3', [dbPath], {
         input: fullSql,
@@ -362,11 +361,19 @@ VALUES ('${esc(s.sessionId)}', '${esc(pe.source)}', ${pe.score}, '${esc(pe.reaso
 
   // Print signal diversity report
   try {
-    const painSummary = runSql(dbPath, `.mode column\n.headers on\nSELECT source, COUNT(*) as count, ROUND(AVG(score), 1) as avg_score FROM pain_events WHERE session_id LIKE 'seed-%' GROUP BY source;`);
+    const painSummary = execFileSync('sqlite3', [dbPath], {
+      input: `.mode column\n.headers on\nSELECT source, COUNT(*) as count, ROUND(AVG(score), 1) as avg_score FROM pain_events WHERE session_id LIKE 'seed-%' GROUP BY source;`,
+      encoding: 'utf-8',
+      timeout: 5000,
+    });
     console.log('\n📈 Signal diversity report (seed scenarios only):');
     console.log(painSummary);
 
-    const correctionSummary = runSql(dbPath, `.mode column\n.headers on\nSELECT COUNT(*) as total, SUM(CASE WHEN correction_detected = 1 THEN 1 ELSE 0 END) as with_correction FROM user_turns WHERE session_id LIKE 'seed-%';`);
+    const correctionSummary = execFileSync('sqlite3', [dbPath], {
+      input: `.mode column\n.headers on\nSELECT COUNT(*) as total, SUM(CASE WHEN correction_detected = 1 THEN 1 ELSE 0 END) as with_correction FROM user_turns WHERE session_id LIKE 'seed-%';`,
+      encoding: 'utf-8',
+      timeout: 5000,
+    });
     console.log('📝 Correction scenarios:');
     console.log(correctionSummary);
   } catch (e) {
