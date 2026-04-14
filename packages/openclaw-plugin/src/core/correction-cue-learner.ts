@@ -197,10 +197,11 @@ export class CorrectionCueLearner {
     for (const keyword of this.store.keywords) {
       if (normalized.includes(keyword.term.toLowerCase())) {
         // D-39-03, D-39-04: Weighted score formula
-        // score = weight x (TP / (TP + FP + 1))
+        // score = weight x ((TP + 1) / (TP + FP + 2))
+        // +2 smoothing: new keywords (TP=0, FP=0) get accuracy=0.5
         const tp = keyword.truePositiveCount ?? 0;
         const fp = keyword.falsePositiveCount ?? 0;
-        const accuracy = tp / (tp + fp + 1); // +1 smoothing
+        const accuracy = (tp + 1) / (tp + fp + 2);
         const score = keyword.weight * accuracy;
 
         totalScore += score;

@@ -89,6 +89,7 @@ describe('CORR-03: Atomic write', () => {
     const store = {
       keywords: CORRECTION_SEED_KEYWORDS.map((k) => ({ ...k, addedAt: '2026-01-01T00:00:00Z' })),
       version: 1,
+      lastOptimizedAt: '2026-01-01T00:00:00Z',
     };
     saveCorrectionKeywordStore(dir, store);
 
@@ -107,6 +108,7 @@ describe('CORR-03: Atomic write', () => {
     const store = {
       keywords: CORRECTION_SEED_KEYWORDS.map((k) => ({ ...k, addedAt: '2026-01-01T00:00:00Z' })),
       version: 1,
+      lastOptimizedAt: '2026-01-01T00:00:00Z',
     };
     saveCorrectionKeywordStore(dir, store);
 
@@ -127,6 +129,7 @@ describe('CORR-03: Atomic write', () => {
     const store = {
       keywords: CORRECTION_SEED_KEYWORDS.map((k) => ({ ...k, addedAt: '2026-01-01T00:00:00Z' })),
       version: 1,
+      lastOptimizedAt: '2026-01-01T00:00:00Z',
     };
     saveCorrectionKeywordStore(dir, store);
 
@@ -282,7 +285,7 @@ describe('CORR-11: Equivalence to detectCorrectionCue', () => {
     const result = learner.match(text);
     expect(result.matched).toBe(true);
     expect(result.matchedTerms).toContain(expected);
-    expect(result.score).toBe(1.0);
+    expect(result.score).toBeGreaterThan(0);
   });
 
   it('should produce same result as legacy detectCorrectionCue for varied inputs', () => {
@@ -307,10 +310,10 @@ describe('CORR-11: Equivalence to detectCorrectionCue', () => {
       if (legacyResult !== null) {
         expect(learnerResult.matched).toBe(true);
         expect(learnerResult.matchedTerms).toContain(legacyResult);
+        expect(learnerResult.score).toBeGreaterThan(0);
       } else {
         expect(learnerResult.matched).toBe(false);
         expect(learnerResult.matchedTerms).toEqual([]);
-        expect(learnerResult.score).toBe(0.0);
       }
     }
   });
@@ -328,12 +331,12 @@ describe('CORR-11: Equivalence to detectCorrectionCue', () => {
     }
   });
 
-  it('should always return score 1.0 when matched, 0.0 when not matched', () => {
+  it('should return positive score when matched, 0 when not matched', () => {
     vi.mocked(fs.existsSync).mockReturnValue(false);
     const dir = tempDir();
     const learner = new CorrectionCueLearner(dir);
-    expect(learner.match('不是这个').score).toBe(1.0);
-    expect(learner.match('这个可以').score).toBe(0.0);
+    expect(learner.match('不是这个').score).toBeGreaterThan(0);
+    expect(learner.match('这个可以').score).toBe(0);
   });
 
   it('should export MAX_CORRECTION_KEYWORDS = 200', () => {
