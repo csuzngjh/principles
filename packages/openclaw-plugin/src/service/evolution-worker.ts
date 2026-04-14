@@ -32,6 +32,14 @@ import { validateNocturnalSnapshotIngress } from '../core/nocturnal-snapshot-con
 import { isExpectedSubagentError } from './subagent-workflow/subagent-error-utils.js';
 import { readPainFlagContract } from '../core/pain.js';
 
+// ── Atomic File Write ────────────────────────────────────────────────────────
+// Write to temp then rename — atomic on POSIX, prevents partial-write corruption on crash.
+function atomicWriteFileSync(filePath: string, data: string): void {
+    const tmpPath = filePath + '.tmp';
+    fs.writeFileSync(tmpPath, data, 'utf8');
+    fs.renameSync(tmpPath, filePath);
+}
+
 const WORKFLOW_TTL_MS = 5 * 60 * 1000; // 5 minutes default TTL for helper workflows
 import { OpenClawTrinityRuntimeAdapter } from '../core/nocturnal-trinity.js';
 
@@ -430,7 +438,7 @@ export const LOCK_RETRY_DELAY_MS = 50;
 export const LOCK_STALE_MS = 30_000;
 
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 export function createEvolutionTaskId(
     source: string,
     score: number,
@@ -464,7 +472,7 @@ export async function acquireQueueLock(resourcePath: string, logger: PluginLogge
 }
 
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 async function requireQueueLock(resourcePath: string, logger: PluginLogger | { warn?: (message: string) => void; info?: (message: string) => void } | undefined, scope: string, lockSuffix: string = EVOLUTION_QUEUE_LOCK_SUFFIX): Promise<() => void> {
     try {
         return await acquireQueueLock(resourcePath, logger, lockSuffix);
@@ -480,7 +488,7 @@ export function extractEvolutionTaskId(task: string): string | null {
 }
 
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 function findRecentDuplicateTask(
     queue: EvolutionQueueItem[],
     source: string,
@@ -488,14 +496,14 @@ function findRecentDuplicateTask(
     now: number,
     reason?: string
 ): EvolutionQueueItem | undefined {
-    // eslint-disable-next-line @typescript-eslint/no-use-before-define
+     
     const key = normalizePainDedupKey(source, preview, reason);
     return queue.find((task) => {
         if (task.status === 'completed') return false;
-        // eslint-disable-next-line @typescript-eslint/no-use-before-define
+         
         const taskTime = new Date(task.enqueued_at || task.timestamp).getTime();
         if (!Number.isFinite(taskTime) || (now - taskTime) > PAIN_QUEUE_DEDUP_WINDOW_MS) return false;
-        // eslint-disable-next-line @typescript-eslint/no-use-before-define
+         
         return normalizePainDedupKey(task.source, task.trigger_text_preview || '', task.reason) === key;
     });
 }
@@ -550,7 +558,7 @@ function normalizePainDedupKey(source: string, preview: string, reason?: string)
 
  
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 export function hasRecentDuplicateTask(queue: EvolutionQueueItem[], source: string, preview: string, now: number, reason?: string): boolean {
     return !!findRecentDuplicateTask(queue, source, preview, now, reason);
 }
@@ -678,7 +686,7 @@ function shouldSkipForDedup(
  * Load and migrate the evolution queue. Returns empty array if file doesn't exist.
  */
 function loadEvolutionQueue(queuePath: string): EvolutionQueueItem[] {
-    // eslint-disable-next-line @typescript-eslint/init-declarations, no-useless-assignment
+     
     let rawQueue: RawQueueItem[] = [];
     try {
         rawQueue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
@@ -693,7 +701,7 @@ function loadEvolutionQueue(queuePath: string): EvolutionQueueItem[] {
  * Build and persist a new sleep_reflection task.
  */
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 function enqueueNewSleepReflectionTask(
     queue: EvolutionQueueItem[],
     recentPainContext: ReturnType<typeof readRecentPainContext>,
@@ -720,7 +728,7 @@ function enqueueNewSleepReflectionTask(
         recentPainContext,
     });
 
-    fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+    atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
     logger?.info?.(`[PD:EvolutionWorker] Enqueued sleep_reflection task ${taskId}`);
 }
 
@@ -765,7 +773,7 @@ interface ParsedPainValues {
 }
 
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 async function doEnqueuePainTask(
     wctx: WorkspaceContext, logger: PluginLogger, painFlagPath: string,
     result: WorkerStatusReport['pain_flag'], v: ParsedPainValues,
@@ -811,7 +819,7 @@ async function doEnqueuePainTask(
             retryCount: 0, maxRetries: 3,
         });
 
-        fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+        atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
         fs.appendFileSync(painFlagPath, `\nstatus: queued\ntask_id: ${taskId}\n`, 'utf8');
         result.enqueued = true;
 
@@ -1012,7 +1020,7 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
 }
 
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogger, eventLog: EventLog, api?: OpenClawPluginApi) {
     const queuePath = wctx.resolve('EVOLUTION_QUEUE');
     if (!fs.existsSync(queuePath)) {
@@ -1595,7 +1603,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
 
             // Write claimed state (includes any pain changes from above) and release lock
             if (queueChanged) {
-                fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+                atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
             }
             releaseLock();
             for (const sleepTask of sleepReflectionTasks) {
@@ -1610,11 +1618,11 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         logger?.info?.(`[PD:EvolutionWorker] Processing sleep_reflection task ${sleepTask.id}`);
                     }
 
-                    // eslint-disable-next-line @typescript-eslint/init-declarations
+                     
                     let workflowId: string | undefined;
-                    // eslint-disable-next-line @typescript-eslint/init-declarations
+                     
                     let nocturnalManager: NocturnalWorkflowManager;
-                    // eslint-disable-next-line @typescript-eslint/init-declarations
+                     
                     let snapshotData: NocturnalSessionSnapshot | undefined;
 
                     if (isPollingTask) {
@@ -1652,13 +1660,13 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                                     s => s.failureCount > 0 || s.painEventCount > 0 || s.gateBlockCount > 0
                                 );
                                 if (sessionsWithViolations.length > 0) {
-                                    // eslint-disable-next-line @typescript-eslint/prefer-destructuring
+                                     
                                     const targetSession = sessionsWithViolations[0];
                                     logger?.info?.(`[PD:EvolutionWorker] Task ${sleepTask.id} using session with violations: ${targetSession.sessionId} (failed=${targetSession.failureCount}, pain=${targetSession.painEventCount}, gates=${targetSession.gateBlockCount})`);
                                     fullSnapshot = extractor.getNocturnalSessionSnapshot(targetSession.sessionId);
                                 } else if (recentSessions.length > 0) {
                                     // No sessions with violations, use most recent as last resort
-                                    // eslint-disable-next-line @typescript-eslint/prefer-destructuring
+                                     
                                     const latestSession = recentSessions[0];
                                     logger?.warn?.(`[PD:EvolutionWorker] Task ${sleepTask.id} no sessions with violations found, using most recent: ${latestSession.sessionId} (failed=${latestSession.failureCount}, pain=${latestSession.painEventCount}, gates=${latestSession.gateBlockCount})`);
                                     fullSnapshot = extractor.getNocturnalSessionSnapshot(latestSession.sessionId);
@@ -1728,7 +1736,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             },
                         });
                         sleepTask.resultRef = workflowHandle.workflowId;
-                        // eslint-disable-next-line @typescript-eslint/prefer-destructuring
+                         
                         workflowId = workflowHandle.workflowId;
                     }
 
@@ -1847,7 +1855,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             freshQueue[idx] = sleepTask;
                         }
                     }
-                    fs.writeFileSync(queuePath, JSON.stringify(freshQueue, null, 2), 'utf8');
+                    atomicWriteFileSync(queuePath, JSON.stringify(freshQueue, null, 2));
 
                     // Log completions to EvolutionLogger
                     for (const sleepTask of sleepReflectionTasks) {
@@ -1879,7 +1887,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
         }
 
         if (queueChanged) {
-            fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+            atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
         }
 
         // Pipeline observability: log stage-level summary at end of cycle
@@ -1961,7 +1969,7 @@ async function processDetectionQueue(wctx: WorkspaceContext, api: OpenClawPlugin
 // Evolution queue is now the single active pain→principle path
 
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 export async function registerEvolutionTaskSession(
     workspaceResolve: (key: string) => string,
     taskId: string,
@@ -1975,7 +1983,7 @@ export async function registerEvolutionTaskSession(
 
     try {
          
-        // eslint-disable-next-line @typescript-eslint/init-declarations
+         
         let rawQueue: RawQueueItem[];
         try {
             rawQueue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
@@ -1997,7 +2005,7 @@ export async function registerEvolutionTaskSession(
         if (!task.started_at) {
             task.started_at = new Date().toISOString();
         }
-        fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+        atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
         return true;
     } finally {
         releaseLock();
@@ -2037,14 +2045,14 @@ interface WorkerStatusReport {
 function writeWorkerStatus(stateDir: string, report: WorkerStatusReport): void {
     try {
         const statusPath = path.join(stateDir, 'worker-status.json');
-        fs.writeFileSync(statusPath, JSON.stringify(report, null, 2), 'utf8');
+        atomicWriteFileSync(statusPath, JSON.stringify(report, null, 2));
     } catch {
         // Non-critical: worker-status.json is for monitoring, failure is acceptable
     }
 }
 
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 async function processEvolutionQueueWithResult(
     wctx: WorkspaceContext,
     logger: PluginLogger,
@@ -2066,7 +2074,7 @@ async function processEvolutionQueueWithResult(
         const purgeResult = purgeStaleFailedTasks(queue, logger);
         if (purgeResult.purged > 0) {
             // Write back the cleaned queue
-            fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+            atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
         }
 
         queueResult.total = queue.length;
@@ -2209,23 +2217,21 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                 // with a diagnostician task, immediately trigger a heartbeat to start
                 // the diagnostician without waiting for the next 15-minute interval.
                 // Must run AFTER processEvolutionQueue — HEARTBEAT.md must be written first.
+                //
+                // P3 (#299): Use requestHeartbeatNow instead of runHeartbeatOnce.
+                // requestHeartbeatNow enters the wake layer which auto-retries on
+                // requests-in-flight (1s intervals). runHeartbeatOnce was a one-shot
+                // that got permanently skipped when agent was busy.
                 if (painCheckResult.enqueued) {
-                    const canTrigger = !!api?.runtime?.system?.runHeartbeatOnce;
-                    logger.info(`[PD:EvolutionWorker] Pain flag enqueued — runHeartbeatOnce available: ${canTrigger} (api=${!!api}, runtime=${!!api?.runtime}, system=${!!api?.runtime?.system})`);
+                    const canTrigger = !!api?.runtime?.system?.requestHeartbeatNow;
+                    logger.info(`[PD:EvolutionWorker] Pain flag enqueued — requestHeartbeatNow available: ${canTrigger}`);
                     if (canTrigger) {
-                        try {
-                            const hbResult = await api.runtime.system.runHeartbeatOnce({
-                                reason: `pd-pain-diagnosis: pain flag detected, starting diagnostician`,
-                            });
-                            logger.info(`[PD:EvolutionWorker] Immediate heartbeat result: status=${hbResult.status}${hbResult.status === 'ran' ? ` duration=${hbResult.durationMs}ms` : ''}${hbResult.status === 'skipped' || hbResult.status === 'failed' ? ` reason=${hbResult.reason}` : ''}`);
-                            if (hbResult.status === 'skipped' || hbResult.status === 'failed') {
-                                logger.warn(`[PD:EvolutionWorker] Immediate heartbeat was ${hbResult.status} (${hbResult.reason}). Diagnostician will start on next regular heartbeat cycle.`);
-                            }
-                        } catch (hbErr) {
-                            logger.warn(`[PD:EvolutionWorker] Failed to trigger immediate heartbeat: ${String(hbErr)}. Diagnostician will start on next regular heartbeat cycle.`);
-                        }
+                        api.runtime.system.requestHeartbeatNow({
+                            reason: `pd-pain-diagnosis: pain flag detected, starting diagnostician`,
+                        });
+                        logger.info(`[PD:EvolutionWorker] Heartbeat wake requested — wake layer will auto-retry if busy`);
                     } else {
-                        logger.warn(`[PD:EvolutionWorker] runHeartbeatOnce not available. Diagnostician will start on next regular heartbeat cycle.`);
+                        logger.warn(`[PD:EvolutionWorker] requestHeartbeatNow not available. Diagnostician will start on next regular heartbeat cycle.`);
                     }
                 }
 
