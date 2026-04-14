@@ -5,7 +5,7 @@ import { createHash } from 'crypto';
 import type { OpenClawPluginServiceContext, OpenClawPluginApi, PluginLogger } from '../openclaw-sdk.js';
 import { DictionaryService } from '../core/dictionary-service.js';
 import { DetectionService } from '../core/detection-service.js';
-import { ensureStateTemplates } from '../core/init.js';
+import { ensureStateTemplates, ensureCorePrinciples } from '../core/init.js';
 import { SystemLogger } from '../core/system-logger.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import type { EventLog } from '../core/event-log.js';
@@ -2121,6 +2121,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
         const {config} = wctx;
         const language = config.get('language') || 'en';
         ensureStateTemplates({ logger }, wctx.stateDir, language);
+        ensureCorePrinciples(wctx.stateDir, logger);
 
         const initialDelay = 5000;
         const interval = config.get('intervals.worker_poll_ms') || (15 * 60 * 1000);
