@@ -56,7 +56,7 @@ interface WatchdogResult {
   details: string[];
 }
 
-// eslint-disable-next-line complexity
+ 
 async function runWorkflowWatchdog(
   wctx: WorkspaceContext,
   api: OpenClawPluginApi | null,
@@ -98,7 +98,7 @@ async function runWorkflowWatchdog(
 
 // ── Watchdog helpers (extracted from runWorkflowWatchdog for complexity) ──
 
-// eslint-disable-next-line complexity
+ 
 async function cleanupStaleWorkflowSession(
   wf: WorkflowRow,
   subagentRuntime: { deleteSession: (opts: { sessionKey: string; deleteTranscript: boolean }) => Promise<void> } | undefined,
@@ -174,7 +174,7 @@ function runWorkflowWatchdogCheckUncleared(allWorkflows: WorkflowRow[], details:
   }
 }
 
-// eslint-disable-next-line complexity
+ 
 function runWorkflowWatchdogCheckNocturnal(allWorkflows: WorkflowRow[], details: string[]): void {
   for (const wf of allWorkflows) {
     if (wf.workflow_type !== 'nocturnal' || wf.state !== 'completed') continue;
@@ -208,7 +208,12 @@ let timeoutId: NodeJS.Timeout | null = null;
  * Old queue items (without taskKind) are migrated to pain_diagnosis for compatibility.
  */
 export type QueueStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'canceled';
-export type TaskResolution = 'marker_detected' | 'auto_completed_timeout' | 'failed_max_retries' | 'runtime_unavailable' | 'canceled' | 'late_marker_principle_created' | 'late_marker_no_principle' | 'stub_fallback' | 'skipped_thin_violation';
+export type TaskResolution = 'marker_detected' | 'auto_completed_timeout' | 'failed_max_retries' | 'runtime_unavailable' | 'canceled' | 'late_marker_principle_created' | 'late_marker_no_principle' | 'stub_fallback' | 'skipped_thin_violation' | 'diagnostician_timeout';
+
+/** Timeout for pain_diagnosis tasks (30 min) — separate from sleep_reflection timeout.
+ *  Pain diagnostics run via HEARTBEAT (main session LLM), not as a subagent.
+ *  If the agent is persistently busy, we don't want the task to starve indefinitely. */
+const PAIN_DIAGNOSIS_TIMEOUT_MS = 30 * 60 * 1000;
 
 /**
  * Recent pain context attached to sleep_reflection tasks.
@@ -370,7 +375,7 @@ function isSessionAtOrBeforeTriggerTime(
     return true;
 }
 
-// eslint-disable-next-line complexity
+ 
 function buildFallbackNocturnalSnapshot(
     sleepTask: EvolutionQueueItem,
     extractor?: ReturnType<typeof createNocturnalTrajectoryExtractor> | null,
@@ -782,7 +787,7 @@ interface ParsedPainValues {
 
  
  
-// eslint-disable-next-line complexity
+ 
 async function doEnqueuePainTask(
     wctx: WorkspaceContext, logger: PluginLogger, painFlagPath: string,
     result: WorkerStatusReport['pain_flag'], v: ParsedPainValues,
@@ -856,7 +861,7 @@ async function doEnqueuePainTask(
     return result;
 }
 
-// eslint-disable-next-line complexity
+ 
 async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Promise<WorkerStatusReport['pain_flag']> {
     const result: WorkerStatusReport['pain_flag'] = { exists: false, score: null, source: null, enqueued: false, skipped_reason: null };
     try {
@@ -1031,7 +1036,7 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
 
  
  
-// eslint-disable-next-line complexity
+ 
 async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogger, eventLog: EventLog, api?: OpenClawPluginApi) {
     const queuePath = wctx.resolve('EVOLUTION_QUEUE');
     if (!fs.existsSync(queuePath)) {
@@ -1309,8 +1314,8 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
             }
 
             const age = Date.now() - startedAt.getTime();
-            if (age > timeout) {
-                const timeoutMinutes = Math.round(timeout / 60000);
+            if (age > PAIN_DIAGNOSIS_TIMEOUT_MS) {
+                const timeoutMinutes = Math.round(PAIN_DIAGNOSIS_TIMEOUT_MS / 60000);
 
                 const timeoutCompleteMarker = path.join(wctx.stateDir, `.evolution_complete_${task.id}`);
                 const timeoutReportPath = path.join(wctx.stateDir, `.diagnostician_report_${task.id}.json`);
@@ -1358,13 +1363,13 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     } catch { /* report may not exist, not critical */ }
                     task.resolution = principleCreated ? 'late_marker_principle_created' : 'late_marker_no_principle';
                 } else {
-                    if (logger) logger.info(`[PD:EvolutionWorker] Task ${task.id} auto-completed after ${timeoutMinutes} minute timeout`);
+                    if (logger) logger.info(`[PD:EvolutionWorker] Pain diagnosis task ${task.id} timed out after ${timeoutMinutes} minutes`);
                     // #190: Clean up diagnostician report file even on timeout (may have been written late)
                     try {
                         const autoTimeoutReportPath = path.join(wctx.stateDir, `.diagnostician_report_${task.id}.json`);
                         if (fs.existsSync(autoTimeoutReportPath)) fs.unlinkSync(autoTimeoutReportPath);
                     } catch { /* report may not exist, not critical */ }
-                    task.resolution = 'auto_completed_timeout';
+                    task.resolution = 'diagnostician_timeout';
                 }
 
                 // Critical: mark task as completed so it doesn't get re-processed
@@ -1390,7 +1395,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     sessionId: task.assigned_session_key || 'heartbeat:diagnostician',
                     taskId: task.id,
                     outcome: 'timeout',
-                    summary: `Task ${task.id} auto-completed after ${timeoutMinutes} minute timeout.`
+                    summary: `Pain diagnosis task ${task.id} timed out after ${timeoutMinutes} minutes.`
                 });
                 queueChanged = true;
             }
@@ -1925,7 +1930,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
 }
 
      
-// eslint-disable-next-line complexity
+ 
 async function processDetectionQueue(wctx: WorkspaceContext, api: OpenClawPluginApi, eventLog: EventLog) {
     const {logger} = api;
     try {
@@ -2113,7 +2118,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
     api: null,
     _startedWorkspaces: new Set<string>(),
 
-    // eslint-disable-next-line complexity
+     
     start(ctx: OpenClawPluginServiceContext): void {
         const workspaceDir = ctx?.workspaceDir;
         const logger = ctx?.logger || console;
@@ -2150,7 +2155,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
         // Periodic trigger tracking
         let heartbeatCounter = 0;
 
-        // eslint-disable-next-line complexity
+         
         async function runCycle(): Promise<void> {
             const cycleStart = Date.now();
             heartbeatCounter++;
