@@ -28,6 +28,9 @@ const WORKFLOW_SESSION_PREFIX = 'agent:main:subagent:workflow-correction-';
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_TTL_MS = 5 * 60 * 1000;
 
+// Prompt formatting constants
+const MAX_TRAJECTORY_MESSAGE_LENGTH = 80;
+
 // ── Options ─────────────────────────────────────────────────────────────────
 
 export interface CorrectionObserverWorkflowOptions {
@@ -102,7 +105,7 @@ export const correctionObserverWorkflowSpec: SubagentWorkflowSpec<CorrectionObse
             : '  (none)';
 
         const trajectory = trajectoryHistory.length > 0
-            ? trajectoryHistory.map(t => `  - [${t.sessionId}] ${t.term} (${t.timestamp}): ${t.userMessage.substring(0, 80)}`)
+            ? trajectoryHistory.map(t => `  - [${t.sessionId}] ${t.term} (${t.timestamp}): ${t.userMessage.substring(0, MAX_TRAJECTORY_MESSAGE_LENGTH)}`)
               .join('\n')
             : '  (none)';
 

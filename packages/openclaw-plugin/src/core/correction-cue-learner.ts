@@ -25,13 +25,12 @@ import { checkCooldown } from '../service/nocturnal-runtime.js';
 
 const KEYWORD_STORE_FILE = 'correction_keywords.json';
 
-// CORR-08: Daily optimization throttle
-const THROTTLE_FILE = 'correction_optimization_throttle.json';
+// CORR-08: Daily optimization throttle (uses checkCooldown in nocturnal-runtime.ts)
+// Note: throttle state is stored in nocturnal-runtime.json, not a separate file.
 
-interface OptimizationThrottle {
-  count: number;
-  date: string; // YYYY-MM-DD
-}
+// Weight bounds for correction keywords (D-39-03, D-39-15)
+const MIN_KEYWORD_WEIGHT = 0.1;
+const MAX_KEYWORD_WEIGHT = 0.9;
 
 // =========================================================================
 // Module-level cache (D-04, D-05)
@@ -122,30 +121,6 @@ export function saveCorrectionKeywordStore(
 
 // =========================================================================
 // Throttle helpers (CORR-08)
-// =========================================================================
-
-function loadThrottle(stateDir: string): OptimizationThrottle {
-  const filePath = path.join(stateDir, THROTTLE_FILE);
-  const today = new Date().toISOString().split('T')[0];
-  try {
-    if (fs.existsSync(filePath)) {
-      const raw = fs.readFileSync(filePath, 'utf-8');
-      const throttle = JSON.parse(raw) as OptimizationThrottle;
-      if (throttle.date === today) {
-        return throttle;
-      }
-    }
-  } catch { /* ignore */ }
-  return { count: 0, date: today };
-}
-
-function recordOptimization(stateDir: string): void {
-  const throttle = loadThrottle(stateDir);
-  throttle.count++;
-  const filePath = path.join(stateDir, THROTTLE_FILE);
-  fs.writeFileSync(filePath, JSON.stringify(throttle), 'utf-8');
-}
-
 // =========================================================================
 // Singleton state
 // =========================================================================
@@ -251,7 +226,7 @@ export class CorrectionCueLearner {
     keyword.hitCount = (keyword.hitCount ?? 0) + 1;
 
     // D-39-15: Multiplicative weight decay x0.8 on confirmed FP
-    keyword.weight = Math.max(0.1, keyword.weight * 0.8);
+    keyword.weight = Math.max(MIN_KEYWORD_WEIGHT, keyword.weight * 0.8);
     keyword.lastHitAt = new Date().toISOString();
 
     this.flush();
@@ -272,10 +247,10 @@ export class CorrectionCueLearner {
 
   /**
    * Records that an optimization was performed.
-   * Increments the daily throttle counter and updates lastOptimizedAt.
+   * Updates lastOptimizedAt for the store. Throttle state is managed
+   * by checkCooldown() — no separate throttle file needed (CORR-08).
    */
   recordOptimizationPerformed(): void {
-    recordOptimization(this.stateDir);
     this.store.lastOptimizedAt = new Date().toISOString();
     this.flush();
   }
@@ -311,7 +286,7 @@ export class CorrectionCueLearner {
       throw new Error(`Keyword not found: ${term}`);
     }
 
-    keyword.weight = Math.max(0.1, Math.min(0.9, weight)); // Clamp to 0.1-0.9
+    keyword.weight = Math.max(MIN_KEYWORD_WEIGHT, Math.min(MAX_KEYWORD_WEIGHT, weight)); // Clamp to MIN-MAX_KEYWORD_WEIGHT
     const idx = this.store.keywords.findIndex(
       k => k.term.toLowerCase() === term.toLowerCase()
     );
