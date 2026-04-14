@@ -1722,6 +1722,9 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                                 taskId: sleepTask.id,
                                 painContext: sleepTask.recentPainContext,
                                 triggerSource: sleepTask.source,
+                                // #297: Configure which preflight gates to skip.
+                                // sleep_reflection uses periodic trigger which bypasses idle by design.
+                                skipPreflightGates: ['idle'],
                             },
                         });
                         sleepTask.resultRef = workflowHandle.workflowId;
