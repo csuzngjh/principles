@@ -116,7 +116,7 @@ export interface SubagentDeleteSessionParams {
 
 export interface PluginRuntimeSystem {
     enqueueSystemEvent: (event: unknown) => void;
-    requestHeartbeatNow: () => void;
+    requestHeartbeatNow: (opts?: { reason?: string; agentId?: string; sessionKey?: string }) => void;
     runHeartbeatOnce: (opts?: {
         reason?: string;
         agentId?: string;
