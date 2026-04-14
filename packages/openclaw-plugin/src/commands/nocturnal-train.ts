@@ -286,6 +286,7 @@ Hardware tiers:
 
          
          
+        // eslint-disable-next-line @typescript-eslint/init-declarations
         let trainerResult!: TrainingExperimentResult;
 
         try {

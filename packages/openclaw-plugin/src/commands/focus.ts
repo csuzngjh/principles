@@ -284,7 +284,8 @@ async function compressFocus(
   // 5. 压缩内容
    
    
-  let compressedContent: string;
+  // eslint-disable-next-line @typescript-eslint/init-declarations
+    let compressedContent: string;
   try {
     compressedContent = compressFocusContent(oldContent, workspaceDir);
     api.logger?.info?.(`[PD:Focus] Compressed CURRENT_FOCUS from ${oldLines} lines`);

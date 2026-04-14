@@ -47,6 +47,7 @@ function formatRouteRecommendations(
 
  
      
+// eslint-disable-next-line @typescript-eslint/max-params
 function buildEnglishOutput(
   workspaceDir: string,
   sessionId: string | null,
@@ -100,6 +101,7 @@ function buildEnglishOutput(
 
  
      
+// eslint-disable-next-line @typescript-eslint/max-params
 function buildChineseOutput(
   workspaceDir: string,
   sessionId: string | null,

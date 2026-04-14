@@ -71,6 +71,7 @@ function _handleListActive(
 
  
      
+    // eslint-disable-next-line @typescript-eslint/max-params
 function _handleDisableImpl(
   workspaceDir: string,
   stateDir: string,
