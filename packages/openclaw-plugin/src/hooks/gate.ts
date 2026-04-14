@@ -135,7 +135,7 @@ export function handleBeforeToolCall(
 
     if (mutationMatch) {
        
-       
+      // eslint-disable-next-line @typescript-eslint/prefer-destructuring
       filePath = mutationMatch[1];
     } else {
       const hasRiskPath = profile.risk_paths.some(rp => command.includes(rp));
@@ -169,36 +169,36 @@ export function handleBeforeToolCall(
         toolName: event.toolName,
         normalizedPath: relPath,
          
-         
+        // eslint-disable-next-line @typescript-eslint/no-use-before-define
         paramsSummary: _extractParamsSummary(event.params),
       },
       workspace: {
         isRiskPath: risky,
          
-         
+        // eslint-disable-next-line @typescript-eslint/no-use-before-define
         planStatus: _getPlanStatus(ctx.workspaceDir),
          
-         
+        // eslint-disable-next-line @typescript-eslint/no-use-before-define
         hasPlanFile: _hasPlanFile(ctx.workspaceDir),
       },
       session: {
         sessionId: ctx.sessionId,
          
-         
+        // eslint-disable-next-line @typescript-eslint/no-use-before-define
         currentGfi: _getCurrentGfi(ctx.sessionId),
          
-         
+        // eslint-disable-next-line @typescript-eslint/no-use-before-define
         recentThinking: _hasRecentThinking(ctx.sessionId),
       },
       evolution: {
          
-         
+        // eslint-disable-next-line @typescript-eslint/no-use-before-define
         epTier: _getEpTier(wctx.workspaceDir),
       },
       derived: {
         estimatedLineChanges: estimateLineChanges({ toolName: event.toolName, params: event.params }),
          
-         
+        // eslint-disable-next-line @typescript-eslint/no-use-before-define
         bashRisk: _getBashRisk(event, profile),
       },
     };

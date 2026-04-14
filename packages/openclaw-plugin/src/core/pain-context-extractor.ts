@@ -54,7 +54,7 @@ async function safeTail(filePath: string): Promise<string[]> {
   try {
     // Check existence and stats asynchronously
      
-     
+    // eslint-disable-next-line @typescript-eslint/init-declarations
     let stat: fs.Stats;
     try {
       stat = await fsPromises.stat(filePath);
@@ -237,7 +237,7 @@ export async function extractRecentConversation(
 /**
  * Extracts failed tool call context with argument correlation.
  */
- 
+// eslint-disable-next-line @typescript-eslint/max-params
 export async function extractFailedToolContext(
   sessionId: string,
   agentId: string,

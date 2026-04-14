@@ -45,7 +45,7 @@ export function ensureWorkspaceTemplates(api: OpenClawPluginApi, workspaceDir: s
         if (fs.existsSync(commonTemplatesDir)) {
             api.logger.info(`[PD] Syncing workspace templates: ${workspaceDir}...`);
              
-             
+            // eslint-disable-next-line @typescript-eslint/no-use-before-define
             copyRecursiveSync(commonTemplatesDir, workspaceDir, api);
         }
 
@@ -88,7 +88,7 @@ export function ensureWorkspaceTemplates(api: OpenClawPluginApi, workspaceDir: s
                 fs.mkdirSync(painDestDir, { recursive: true });
             }
              
-             
+            // eslint-disable-next-line @typescript-eslint/no-use-before-define
             copyRecursiveSync(painTemplatesDir, painDestDir, api);
         }
 

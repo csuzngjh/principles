@@ -2093,7 +2093,6 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
 
     start(ctx: OpenClawPluginServiceContext): void {
         const workspaceDir = ctx?.workspaceDir;
-
         const logger = ctx?.logger || console;
         const {api} = this;
 

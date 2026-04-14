@@ -36,7 +36,7 @@ export class MonitoringQueryService {
     const now = Date.now();
     const workflowsWithStuckDetection = workflows.map(wf => {
       // Parse metadata for timeout configuration
-       
+      // eslint-disable-next-line @typescript-eslint/no-use-before-define
       const metadata = parseWorkflowMetadata(wf.metadata_json);
       const timeoutMs = metadata.timeoutMs ?? 15 * 60 * 1000; // Default 15 minutes
 
@@ -85,10 +85,10 @@ export class MonitoringQueryService {
 
       // Determine status
        
-       
+      // eslint-disable-next-line @typescript-eslint/init-declarations
       let status: 'pending' | 'running' | 'completed' | 'failed';
        
-       
+      // eslint-disable-next-line @typescript-eslint/init-declarations
       let reason: string | undefined;
 
       if (!startEvent) {
@@ -110,7 +110,7 @@ export class MonitoringQueryService {
 
       // Calculate duration if stage started and completed/failed
        
-       
+      // eslint-disable-next-line @typescript-eslint/init-declarations
       let duration: number | undefined;
       if (startEvent && (completeEvent || failedEvent)) {
         const endEvent = completeEvent || failedEvent;

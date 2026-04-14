@@ -265,7 +265,7 @@ export class EvolutionLogger {
     principlesGenerated?: number;
   }): void {
      
-     
+    // eslint-disable-next-line @typescript-eslint/init-declarations
     let summary: string;
     if (params.resolution === 'marker_detected' || params.resolution === 'late_marker_principle_created') {
       summary = `任务 ${params.taskId} 完成，已生成 ${params.principlesGenerated || 0} 条原则`;

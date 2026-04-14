@@ -714,7 +714,7 @@ export class CentralDatabase {
       syncEnabled: c.sync_enabled === 1,
     }));
   }
-     
+    // eslint-disable-next-line complexity -- complexity 12, refactor candidate
 
   updateWorkspaceConfig(
     workspaceName: string,

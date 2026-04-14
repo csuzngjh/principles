@@ -289,16 +289,16 @@ function invokeStubReflector(
   const hasPain = snapshot.stats.totalPainEvents > 0;
   const hasFailures = (snapshot.stats.failureCount ?? 0) > 0;
 
-   
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let badDecision: string;
-   
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let betterDecision: string;
-   
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let rationale: string;
 
   if (hasGateBlocks && snapshot.gateBlocks.length > 0) {
     // Use actual gate block content
-     
+    // eslint-disable-next-line @typescript-eslint/prefer-destructuring
     const block = snapshot.gateBlocks[0];
     const tool = block.toolName ?? 'a tool';
     const file = block.filePath ? ` on ${block.filePath}` : '';
@@ -307,7 +307,7 @@ function invokeStubReflector(
     rationale = `Gate blocks exist for a reason — bypassing them without understanding the underlying constraint risks unintended consequences. The block on ${tool}${file} indicates the operation exceeded allowed thresholds for the current evolution tier.`;
   } else if (hasPain && snapshot.painEvents.length > 0) {
     // Use actual pain event content
-     
+    // eslint-disable-next-line @typescript-eslint/prefer-destructuring
     const pain = snapshot.painEvents[0];
     const painSource = pain.source ?? 'unknown';
     const painReason = pain.reason ? `: ${pain.reason}` : '';
@@ -403,7 +403,7 @@ function buildGateBlockRefs(snapshot: NocturnalSessionSnapshot): string[] {
 }
 
  
- 
+// eslint-disable-next-line @typescript-eslint/max-params
 function buildDefaultArtificerOutput(
   ruleId: string,
   artifact: NocturnalArtifact,
@@ -453,7 +453,7 @@ function buildDefaultArtificerOutput(
 }
 
  
- 
+// eslint-disable-next-line @typescript-eslint/max-params
 function persistCodeCandidate(
   workspaceDir: string,
   stateDir: string,
@@ -550,7 +550,7 @@ function persistCodeCandidate(
 }
 
  
- 
+// eslint-disable-next-line @typescript-eslint/max-params
 function maybePersistArtificerCandidate(
   workspaceDir: string,
   stateDir: string,
@@ -792,11 +792,11 @@ export function executeNocturnalReflection(
   // Step 5: Artifact generation (Trinity or single-reflector)
   // -------------------------------------------------------------------------
    
-   
+  // eslint-disable-next-line no-useless-assignment
   let trinityArtifact: TrinityDraftArtifact | null = null;
   let trinityResult: TrinityResult | null = null;
    
-   
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let rawJson: string;
 
   if (options.skipReflector) {
@@ -1021,7 +1021,7 @@ export function executeNocturnalReflection(
   };
 
    
-   
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let persistedPath: string;
   try {
     persistedPath = persistArtifact(workspaceDir, artifactWithBoundedAction);
@@ -1149,7 +1149,7 @@ export async function executeNocturnalReflectionAsync(
   // If runtime adapter is provided, use async Trinity path
   if (options.runtimeAdapter) {
      
-     
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define
     return executeNocturnalReflectionWithAdapter(workspaceDir, stateDir, options);
   }
 
@@ -1200,13 +1200,13 @@ async function executeNocturnalReflectionWithAdapter(
 
   // Step 2: Target selection (or use override to skip)
    
-   
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let selectedPrincipleId: string | undefined;
    
-   
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let selectedSessionId: string | undefined;
    
-   
+  // eslint-disable-next-line no-useless-assignment
   let snapshot: NocturnalSessionSnapshot | null = null;
 
   if (options.principleIdOverride && options.snapshotOverride) {
@@ -1229,7 +1229,7 @@ async function executeNocturnalReflectionWithAdapter(
     // Skip Selector: use provided principleId and snapshot directly
     selectedPrincipleId = options.principleIdOverride;
     selectedSessionId = snapshotValidation.snapshot.sessionId;
-     
+    // eslint-disable-next-line @typescript-eslint/prefer-destructuring
     snapshot = snapshotValidation.snapshot;
     // Calculate violation density from snapshot stats for meaningful diagnostics
     const snapStats = snapshotValidation.snapshot.stats;
@@ -1286,10 +1286,10 @@ async function executeNocturnalReflectionWithAdapter(
     }
 
      
-     
+    // eslint-disable-next-line @typescript-eslint/prefer-destructuring
     selectedPrincipleId = selection.selectedPrincipleId;
      
-     
+    // eslint-disable-next-line @typescript-eslint/prefer-destructuring
     selectedSessionId = selection.selectedSessionId;
 
     if (!selectedPrincipleId || !selectedSessionId) {
@@ -1323,11 +1323,11 @@ async function executeNocturnalReflectionWithAdapter(
 
   // Step 4: Trinity execution via adapter (async)
    
-   
+  // eslint-disable-next-line no-useless-assignment
   let trinityArtifact: TrinityDraftArtifact | null = null;
   let trinityResult: TrinityResult | null = null;
    
-   
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let rawJson: string;
 
   if (options.skipReflector) {
@@ -1434,7 +1434,7 @@ async function executeNocturnalReflectionWithAdapter(
   // Step 7: Persist artifact
   const artifactWithBoundedAction = { ...arbiterResult.artifact, boundedAction: execResult.boundedAction };
    
-   
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let persistedPath: string;
   try {
     persistedPath = persistArtifact(workspaceDir, artifactWithBoundedAction);

@@ -342,7 +342,7 @@ export function completeShadowObservation(
  * @returns The updated ShadowObservation, or null if not found
  */
  
- 
+// eslint-disable-next-line @typescript-eslint/max-params
 export function completeShadowObservationByTask(
   stateDir: string,
   taskFingerprint: string,

@@ -14,7 +14,7 @@ import type { WorkflowManager } from '../service/subagent-workflow/types.js';
  * Used by the subagent_ended hook to dispatch lifecycle recovery to the right manager.
  */
  
- 
+// eslint-disable-next-line @typescript-eslint/max-params
 function createWorkflowManagerForType(
     workflowType: string,
     workspaceDir: string,

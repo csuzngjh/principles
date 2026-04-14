@@ -71,7 +71,7 @@ export class RuleHost {
 
       // Merge decisions from all active implementations
        
-       
+      // eslint-disable-next-line @typescript-eslint/init-declarations
       let blocked: RuleHostResult | undefined;
       const approvals: RuleHostResult[] = [];
 
