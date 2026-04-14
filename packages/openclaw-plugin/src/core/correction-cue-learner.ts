@@ -33,6 +33,14 @@ const KEYWORD_STORE_FILE = 'correction_keywords.json';
  */
 let _correctionCueCache: CorrectionKeywordStore | null = null;
 
+/**
+ * Resets the module-level cache (for testing only).
+ * @internal
+ */
+export function _resetCorrectionCueCache(): void {
+  _correctionCueCache = null;
+}
+
 // =========================================================================
 // Default store factory
 // =========================================================================
@@ -108,6 +116,12 @@ export function saveCorrectionKeywordStore(
 
 let _instance: CorrectionCueLearner | null = null;
 let _lastStateDir: string | null = null;
+
+/** Resets singleton state (for testing only). @internal */
+export function _resetCorrectionCueLearnerInstance(): void {
+  _instance = null;
+  _lastStateDir = null;
+}
 
 // =========================================================================
 // CorrectionCueLearner class
