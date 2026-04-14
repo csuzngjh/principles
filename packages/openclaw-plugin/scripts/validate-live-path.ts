@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Validate Live Path Script (Phase 18)
+ * Validate Live Path Script (Phase 18) — with Data Flow Monitoring
  *
  * Validates the end-to-end nocturnal workflow path with bootstrapped principles.
  *
@@ -11,6 +11,7 @@
  * - Polls subagent_workflows.db directly for nocturnal workflows
  * - Correlates workflow to queue item via taskId
  * - Verifies state='completed' and explicit resolution (not 'expired')
+ * - Monitors data flow: queue state → workflow state → artifact persistence
  * - Outputs summary and exits 0 on success, non-zero on failure
  *
  * Usage:
@@ -36,6 +37,29 @@ const STATE_DIR = path.join(WORKSPACE_DIR, '.state');
 const QUEUE_PATH = path.join(STATE_DIR, 'EVOLUTION_QUEUE');
 const LEDGER_PATH = path.join(STATE_DIR, 'principle_training_state.json');
 const DB_PATH = path.join(STATE_DIR, 'subagent_workflows.db');
+const PAIN_FLAG_PATH = path.join(STATE_DIR, '.pain_flag');
+const SAMPLES_DIR = path.join(STATE_DIR, 'nocturnal', 'samples');
+
+// ─── Helpers ─────────────────────────────────────────────────────────────
+function timestamp(): string {
+  return new Date().toISOString();
+}
+
+function logStep(step: string, detail: string): void {
+  console.log(`[${timestamp()}] ▸ ${step}: ${detail}`);
+}
+
+function logData(label: string, data: unknown): void {
+  const display = typeof data === 'string' ? data : JSON.stringify(data).slice(0, 300);
+  console.log(`[${timestamp()}]   📦 ${label}: ${display}`);
+}
+
+function safeReadJson(filePath: string): unknown {
+  try {
+    if (!fs.existsSync(filePath)) return null;
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch { return null; }
+}
 
 // ─── Types ───────────────────────────────────────────────────────────────
 interface LedgerRule {
@@ -277,11 +301,39 @@ function verifyWorkflowCompletion(taskId: string): {
 async function main() {
   const verbose = process.argv.includes('--verbose');
 
+  console.log('╔══════════════════════════════════════════════════════════╗');
+  console.log('║     Nocturnal Live Path Validation + Data Flow Monitor  ║');
+  console.log('╚══════════════════════════════════════════════════════════╝');
+  logStep('WORKSPACE', WORKSPACE_DIR);
+
+  // 0. Baseline: snapshot current state
+  logStep('BASELINE', 'Capturing current state before validation');
+  const queueBefore = safeReadJson(QUEUE_PATH) as QueueItem[] | null;
+  logData('EVOLUTION_QUEUE (before)', queueBefore?.length ?? 0);
+  if (fs.existsSync(PAIN_FLAG_PATH)) {
+    logData('.pain_flag', 'EXISTS — ' + fs.readFileSync(PAIN_FLAG_PATH, 'utf8').slice(0, 100));
+  } else {
+    logData('.pain_flag', 'not present');
+  }
+  if (fs.existsSync(SAMPLES_DIR)) {
+    const samplesBefore = fs.readdirSync(SAMPLES_DIR).length;
+    logData('nocturnal/samples/', `${samplesBefore} files`);
+  } else {
+    logData('nocturnal/samples/', 'directory not present');
+  }
+  if (fs.existsSync(DB_PATH)) {
+    const wfCount = listNocturnalWorkflows().length;
+    logData('subagent_workflows.db', `${wfCount} nocturnal workflows`);
+  } else {
+    logData('subagent_workflows.db', 'not present');
+  }
+
   // 1. Check bootstrapped rules
   // eslint-disable-next-line @typescript-eslint/init-declarations
   let rules: LedgerRule[];
   try {
     rules = loadBootstrappedRules();
+    logStep('STEP 1', `Found ${rules.length} bootstrapped rule(s)`);
   } catch {
     console.error('FAIL: principle_training_state.json not found. Run Phase 17 bootstrap first: npm run bootstrap-rules');
     process.exit(1);
@@ -293,7 +345,6 @@ async function main() {
   }
 
   if (verbose) {
-    console.log(`Found ${rules.length} bootstrapped rule(s)`);
     for (const rule of rules) {
       console.log(`  - ${rule.id} (principleId=${rule.principleId}, action=${rule.action})`);
     }
@@ -304,33 +355,94 @@ async function main() {
 
   // 3. Build synthetic snapshot for validation
   const snapshot = buildSyntheticSnapshot(taskId);
-  if (verbose) {
-    console.log(`Created synthetic snapshot: sessionId=${snapshot.sessionId}`);
-  }
+  logStep('STEP 2', `Synthetic snapshot: sessionId=${snapshot.sessionId}`);
+  logData('snapshot.recentPain', JSON.stringify(snapshot.recentPain));
 
   // 4. Enqueue task (with lock acquisition)
   try {
     await enqueueSleepReflectionTask(taskId);
-    if (verbose) {
-      console.log(`Enqueued sleep_reflection task: ${taskId}`);
-    }
+    logStep('STEP 3', `Enqueued sleep_reflection task: ${taskId}`);
+
+    // Post-enqueue: verify queue state
+    const queueAfter = safeReadJson(QUEUE_PATH) as QueueItem[] | null;
+    const taskItem = queueAfter?.find(q => q.id === taskId);
+    logData('EVOLUTION_QUEUE (after)', `${queueAfter?.length ?? 0} tasks`);
+    logData(`task[${taskId}]`, taskItem ? JSON.stringify(taskItem) : 'NOT FOUND');
   } catch (error: unknown) {
     console.error('FAIL: Failed to enqueue sleep_reflection task:', String(error));
     process.exit(1);
   }
 
-  // 5. Poll for completion
+  // 5. Poll for completion — with data flow monitoring
   const deadline = Date.now() + POLL_TIMEOUT_MS;
-  if (verbose) {
-    console.log('Polling for workflow completion...');
-  }
+  let pollCount = 0;
+  let lastQueueStatus = 'unknown';
+  let lastWorkflowState = 'none';
+  logStep('STEP 4', `Polling for workflow completion (timeout: ${POLL_TIMEOUT_MS / 1000 / 60}min, interval: ${POLL_INTERVAL_MS / 1000}s)`);
 
   while (Date.now() < deadline) {
+    pollCount++;
     await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
 
+    // Capture queue state
+    const queueNow = safeReadJson(QUEUE_PATH) as QueueItem[] | null;
+    const taskNow = queueNow?.find(q => q.id === taskId);
+    const currentQueueStatus = taskNow?.status ?? 'not_in_queue';
+
+    // Capture workflow DB state
+    const workflows = listNocturnalWorkflows();
+    const matchingWf = workflows.find(w => {
+      try {
+        const meta = JSON.parse(w.metadata_json);
+        return meta.taskId === taskId;
+      } catch { return false; }
+    });
+    const currentWorkflowState = matchingWf?.state ?? 'not_in_db';
+
+    // Log state changes
+    if (currentQueueStatus !== lastQueueStatus || currentWorkflowState !== lastWorkflowState) {
+      logStep(`POLL #${pollCount}`, `queue=${currentQueueStatus}, workflow=${currentWorkflowState}`);
+      if (taskNow) logData('queue item', JSON.stringify({ status: taskNow.status, resolution: taskNow.resolution }));
+      if (matchingWf) logData('workflow', JSON.stringify({ state: matchingWf.state, type: matchingWf.workflow_type }));
+      lastQueueStatus = currentQueueStatus;
+      lastWorkflowState = currentWorkflowState;
+    } else if (verbose) {
+      process.stdout.write('.');
+    }
+
+    // Check for completion
     const result = verifyWorkflowCompletion(taskId);
     if (result) {
-      console.log(`RESULT: workflow=${result.workflowId} state=${result.state} resolution=${result.resolution} taskId=${taskId}`);
+      console.log(''); // newline if dots were printed
+      logStep('STEP 5', `Workflow completed!`);
+      logData('RESULT', `workflowId=${result.workflowId} state=${result.state} resolution=${result.resolution}`);
+
+      // Check artifact persistence
+      if (fs.existsSync(SAMPLES_DIR)) {
+        const newSamples = fs.readdirSync(SAMPLES_DIR).filter(f => {
+          const stat = fs.statSync(path.join(SAMPLES_DIR, f));
+          return stat.isFile() && f.endsWith('.json') && (Date.now() - stat.mtimeMs) < 60000; // created in last minute
+        });
+        if (newSamples.length > 0) {
+          logData('new artifacts', newSamples.join(', '));
+          const firstArtifact = safeReadJson(path.join(SAMPLES_DIR, newSamples[0]));
+          if (firstArtifact) logData('artifact content (first)', JSON.stringify(firstArtifact).slice(0, 300));
+        } else {
+          logData('new artifacts', 'none created in last 60s');
+        }
+      }
+
+      // Check pain_flag cleanup
+      if (fs.existsSync(PAIN_FLAG_PATH)) {
+        const flagContent = fs.readFileSync(PAIN_FLAG_PATH, 'utf8');
+        if (flagContent.includes('[object Object]')) {
+          logStep('⚠️ WARNING', 'pain_flag is corrupted ([object Object])');
+        } else {
+          logData('.pain_flag (after)', `still exists, ${flagContent.length} bytes`);
+        }
+      } else {
+        logData('.pain_flag (after)', 'cleaned up (file removed)');
+      }
 
       if (result.resolution === 'MISSING' || result.resolution === 'expired') {
         console.error('FAIL: resolution not explicit');
@@ -340,13 +452,25 @@ async function main() {
       console.log('PASS: Live path validation successful');
       process.exit(0);
     }
-
-    if (verbose) {
-      process.stdout.write('.');
-    }
   }
 
-  console.error('FAIL: Poll timeout — no completed nocturnal workflow found for taskId');
+  // Timeout — dump final state for debugging
+  console.log('');
+  logStep('TIMEOUT', `Poll timeout after ${pollCount} polls (${POLL_TIMEOUT_MS / 1000 / 60}min)`);
+  logData('FINAL queue status', lastQueueStatus);
+  logData('FINAL workflow state', lastWorkflowState);
+
+  // Dump full queue for debugging
+  const finalQueue = safeReadJson(QUEUE_PATH);
+  if (finalQueue) logData('FINAL queue dump', JSON.stringify(finalQueue).slice(0, 500));
+
+  // Dump full workflow DB for debugging
+  const finalWorkflows = listNocturnalWorkflows();
+  if (finalWorkflows.length > 0) {
+    logData('FINAL workflows', finalWorkflows.map(w => `${w.workflow_id}: state=${w.state}`).join(', '));
+  }
+
+  console.error('FAIL: No completed nocturnal workflow found for taskId');
   process.exit(1);
 }
 

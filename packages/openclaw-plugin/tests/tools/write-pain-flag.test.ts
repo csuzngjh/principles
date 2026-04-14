@@ -122,15 +122,28 @@ describe('write_pain_flag tool', () => {
     expect(api._logs.some((l: any) => l.level === 'warn')).toBe(true);
   });
 
-  it('returns clear error when workspace cannot be resolved', async () => {
-    const api = createMockApi('') as any;
+  it('falls back to PathResolver when config.workspaceDir is not set', async () => {
+    // Even without explicit workspaceDir, the tool should succeed
+    // by falling back to PathResolver (which finds default workspace)
+    const logs: { level: string; message: string }[] = [];
+    const api = {
+      config: {},
+      logger: {
+        info: (m: string) => logs.push({ level: 'info', message: m }),
+        warn: (m: string) => logs.push({ level: 'warn', message: m }),
+        error: (m: string) => logs.push({ level: 'error', message: m }),
+        debug: (m: string) => logs.push({ level: 'debug', message: m }),
+      },
+      runtime: { subagent: null, agent: null },
+      _logs: logs,
+    } as any;
+
     const tool = createWritePainFlagTool(api);
+    const result = await tool.execute('test-3', { reason: 'Test fallback' });
 
-    const result = await tool.execute('test-3', { reason: 'Test error' });
-
-    expect(result.content[0].text).toContain('❌');
-    expect(result.content[0].text).toContain('workspace');
-    expect(api._logs.some((l: any) => l.level === 'error')).toBe(true);
+    // Should succeed via PathResolver fallback
+    expect(result.content[0].text).toContain('✅');
+    expect(result.content[0].text).toContain('Test fallback');
   });
 
   // ─────────────────────────────────────────────────────────
@@ -209,16 +222,19 @@ describe('write_pain_flag tool', () => {
     expect(text).toContain('heartbeat');
   });
 
-  it('provides clear failure feedback with error message', async () => {
+  it('handles missing state directory by creating it automatically', async () => {
     const api = createMockApi(workspaceDir) as any;
-    // Simulate workspace resolution failure by removing the config
-    (api as any).config = {};
+    // Remove .state directory to test auto-creation
+    if (fs.existsSync(stateDir)) {
+      fs.rmSync(stateDir, { recursive: true, force: true });
+    }
 
     const tool = createWritePainFlagTool(api);
-    const result = await tool.execute('test-7', { reason: 'Should fail' });
+    const result = await tool.execute('test-auto', { reason: 'Auto-create state dir' });
 
-    expect(result.content[0].text).toContain('❌');
-    expect(result.content[0].text).toContain('workspace');
+    expect(result.content[0].text).toContain('✅');
+    const painFlagPath = path.join(stateDir, '.pain_flag');
+    expect(fs.existsSync(painFlagPath)).toBe(true);
   });
 
   // ─────────────────────────────────────────────────────────
