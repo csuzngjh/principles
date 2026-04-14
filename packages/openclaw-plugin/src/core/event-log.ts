@@ -23,30 +23,95 @@ import type { PluginLogger } from '../openclaw-sdk.js';
 
 /**
  * EventLog - Structured event logging with daily statistics aggregation.
+ *
+ * Log files are date-stamped: events_YYYY-MM-DD.jsonl
+ * Old event files are automatically cleaned up based on retention policy.
  */
+
+/**
+ * Event log retention in days.
+ * Files older than this are deleted on cleanup.
+ */
+const EVENT_LOG_RETENTION_DAYS = 7;
+
 export class EventLog {
-  private readonly eventsFile: string;
+  private readonly logsDir: string;
   private readonly statsFile: string;
   private readonly logger?: PluginLogger;
-  
+
   private readonly statsCache: Map<string, DailyStats> = new Map();
   private eventBuffer: EventLogEntry[] = [];
   private readonly maxBufferSize = 20;
   private readonly flushIntervalMs = 30000;
   private flushTimer?: ReturnType<typeof setInterval>;
-  
+
+  // Cached event file path for current date
+  private currentEventsFile: string | undefined;
+  private currentDate: string | undefined;
+
   constructor(stateDir: string, logger?: PluginLogger) {
-    const logsDir = path.join(stateDir, 'logs');
-    if (!fs.existsSync(logsDir)) {
-      fs.mkdirSync(logsDir, { recursive: true });
+    this.logsDir = path.join(stateDir, 'logs');
+    if (!fs.existsSync(this.logsDir)) {
+      fs.mkdirSync(this.logsDir, { recursive: true });
     }
-    
-    this.eventsFile = path.join(logsDir, 'events.jsonl');
-    this.statsFile = path.join(logsDir, 'daily-stats.json');
+
+    this.statsFile = path.join(this.logsDir, 'daily-stats.json');
     this.logger = logger;
-    
+
     this.loadStats();
     this.startFlushTimer();
+  }
+
+  /**
+   * Get the event file path for a given date.
+   */
+  private getEventsFile(date: string): string {
+    return path.join(this.logsDir, `events_${date}.jsonl`);
+  }
+
+  /**
+   * Get today's date string (YYYY-MM-DD).
+   */
+  private getTodayStr(): string {
+    return new Date().toISOString().split('T')[0];
+  }
+
+  /**
+   * Ensure we have the correct events file for today's date.
+   */
+  private ensureEventsFile(): string {
+    const today = this.getTodayStr();
+    if (this.currentDate !== today || !this.currentEventsFile) {
+      this.currentDate = today;
+      this.currentEventsFile = this.getEventsFile(today);
+      // Run cleanup if date changed
+      this.cleanupOldEventFiles(today);
+    }
+    return this.currentEventsFile;
+  }
+
+  /**
+   * Clean up event files older than EVENT_LOG_RETENTION_DAYS.
+   */
+  private cleanupOldEventFiles(today: string): void {
+    if (EVENT_LOG_RETENTION_DAYS <= 0) return;
+
+    try {
+      const cutoffMs = Date.now() - EVENT_LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+      const files = fs.readdirSync(this.logsDir);
+
+      for (const file of files) {
+        if (!file.startsWith('events_') || !file.endsWith('.jsonl')) continue;
+
+        const filePath = path.join(this.logsDir, file);
+        const stat = fs.statSync(filePath);
+        if (stat.mtimeMs < cutoffMs) {
+          fs.unlinkSync(filePath);
+        }
+      }
+    } catch {
+      // Silently fail cleanup
+    }
   }
   
   recordToolCall(sessionId: string | undefined, data: ToolCallEventData): void {
@@ -108,7 +173,7 @@ export class EventLog {
   }
   
    
-  // eslint-disable-next-line @typescript-eslint/max-params
+   
   private record(
     type: EventType, 
     category: EventCategory, 
@@ -136,7 +201,7 @@ export class EventLog {
   }
 
    
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+   
   private formatDate(date: Date): string {
     return date.toISOString().split('T')[0];
   }
@@ -246,7 +311,7 @@ export class EventLog {
   }
 
    
-    // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- complexity 13, refactor candidate
+     
   private getEventDedupKey(entry: EventLogEntry): string {
     const eventId = typeof (entry.data as { eventId?: unknown } | undefined)?.eventId === 'string'
       ? String((entry.data as { eventId?: string }).eventId)
@@ -268,10 +333,11 @@ export class EventLog {
   }
 
   private readPersistedEvents(): EventLogEntry[] {
-    if (!fs.existsSync(this.eventsFile)) return [];
+    const eventsFile = this.ensureEventsFile();
+    if (!fs.existsSync(eventsFile)) return [];
 
     try {
-      const content = fs.readFileSync(this.eventsFile, 'utf-8');
+      const content = fs.readFileSync(eventsFile, 'utf-8');
       return content
         .trim()
         .split('\n')
@@ -285,7 +351,7 @@ export class EventLog {
         })
         .filter((entry): entry is EventLogEntry => entry !== null);
     } catch (e) {
-      if (this.logger) this.logger.error(`[PD] Failed to read events.jsonl: ${String(e)}`);
+      if (this.logger) this.logger.error(`[PD] Failed to read events file: ${String(e)}`);
       return [];
     }
   }
@@ -300,13 +366,14 @@ export class EventLog {
 
   private flushEvents(): void {
     if (this.eventBuffer.length === 0) return;
-    
+
+    const eventsFile = this.ensureEventsFile();
     const lines = this.eventBuffer.map(e => JSON.stringify(e)).join('\n') + '\n';
     try {
-      fs.appendFileSync(this.eventsFile, lines, 'utf-8');
+      fs.appendFileSync(eventsFile, lines, 'utf-8');
       this.eventBuffer = [];
     } catch (e) {
-      if (this.logger) this.logger.error(`[PD] Failed to flush events.jsonl: ${String(e)}`);
+      if (this.logger) this.logger.error(`[PD] Failed to flush events: ${String(e)}`);
     }
   }
 
@@ -464,7 +531,7 @@ export class EventLog {
    * Returns the rolled back score, or 0 if event not found.
    */
    
-  // eslint-disable-next-line @typescript-eslint/max-params
+   
   rollbackEmpathyEvent(eventId: string, sessionId: string | undefined, reason: string, triggeredBy: 'user_command' | 'natural_language' | 'system'): number {
     const allEvents = this.getMergedEvents();
     let foundEvent: { entry: EventLogEntry; data: PainSignalEventData } | null = null;
