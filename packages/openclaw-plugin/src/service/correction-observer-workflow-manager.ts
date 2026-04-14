@@ -214,6 +214,28 @@ export class CorrectionObserverWorkflowManager extends WorkflowManagerBase {
             ...options.metadata,
         };
     }
+
+    /**
+     * Retrieves and parses the workflow result for a completed workflow.
+     * Called by evolution-worker.ts after getWorkflowDebugSummary reports state=completed.
+     */
+    async getWorkflowResult(workflowId: string): Promise<CorrectionObserverResult | null> {
+        const workflow = this.store.getWorkflow(workflowId);
+        if (!workflow) return null;
+
+        const result = await this.driver.getResult({
+            sessionKey: workflow.child_session_key,
+            limit: 20,
+        });
+
+        const metadata = JSON.parse(workflow.metadata_json) as WorkflowMetadata;
+        return correctionObserverWorkflowSpec.parseResult({
+            messages: result.messages,
+            assistantTexts: result.assistantTexts,
+            metadata,
+            waitStatus: 'ok',
+        });
+    }
 }
 
 // ── Factory ─────────────────────────────────────────────────────────────────

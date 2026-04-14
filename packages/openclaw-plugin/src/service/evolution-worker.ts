@@ -31,8 +31,8 @@ import {
 import { validateNocturnalSnapshotIngress } from '../core/nocturnal-snapshot-contract.js';
 import { isExpectedSubagentError } from './subagent-workflow/subagent-error-utils.js';
 import { readPainFlagContract } from '../core/pain.js';
-import { CorrectionObserverWorkflowManager, correctionObserverWorkflowSpec } from './subagent-workflow/correction-observer-workflow-manager.js';
-import type { CorrectionObserverPayload } from './subagent-workflow/correction-observer-types.js';
+import { CorrectionObserverWorkflowManager, correctionObserverWorkflowSpec } from './correction-observer-workflow-manager.js';
+import type { CorrectionObserverPayload } from './correction-observer-types.js';
 import { KeywordOptimizationService } from './keyword-optimization-service.js';
 import { TrajectoryRegistry } from '../core/trajectory.js';
 import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
