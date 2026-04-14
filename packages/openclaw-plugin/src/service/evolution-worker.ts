@@ -2087,7 +2087,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         freshQueue.push(koTask);
                     }
                 }
-                fs.writeFileSync(queuePath, JSON.stringify(freshQueue, null, 'utf8'));
+                fs.writeFileSync(queuePath, JSON.stringify(freshQueue, null, 2));
             } catch (koResultErr) {
                 logger?.warn?.(`[PD:EvolutionWorker] Failed to write keyword_optimization results: ${String(koResultErr)}`);
             } finally {
