@@ -721,7 +721,8 @@ export function executeNocturnalReflection(
   if (!preflight.canRun) {
     return {
       success: false,
-      noTargetSelected: false,
+      noTargetSelected: true,
+      skipReason: 'preflight_blocked',
       validationFailed: false,
       validationFailures: [],
       diagnostics,
@@ -1195,7 +1196,14 @@ async function executeNocturnalReflectionWithAdapter(
   diagnostics.preflight = preflight;
 
   if (!preflight.canRun) {
-    return { success: false, noTargetSelected: false, validationFailed: false, validationFailures: [], diagnostics };
+    return { 
+      success: false, 
+      noTargetSelected: true, 
+      skipReason: 'preflight_blocked',
+      validationFailed: false, 
+      validationFailures: [], 
+      diagnostics 
+    };
   }
 
   // Step 2: Target selection (or use override to skip)
