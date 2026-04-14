@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.17
 milestone_name: Keyword Learning Engine
-status: executing
-last_updated: "2026-04-14T08:03:58.337Z"
-last_activity: 2026-04-14 -- Phase 40 planning complete
+status: shipped
+last_updated: "2026-04-14T08:11:41.764Z"
+last_activity: 2026-04-14 -- Phase 40 llm-discovery complete
 progress:
   total_phases: 4
-  completed_phases: 2
+  completed_phases: 4
   total_plans: 5
-  completed_plans: 4
-  percent: 80
+  completed_plans: 5
+  percent: 100
 ---
 
 # State: v1.17 Keyword Learning Engine
@@ -22,7 +22,7 @@ See `.planning/PROJECT.md` (updated 2026-04-14)
 **Milestone:** v1.17
 **Name:** Keyword Learning Engine
 **Core Value:** AI agents improve their own behavior through a structured evolution loop. pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
-**Current Focus:** Phase 40 — LLM Discovery
+**Current Focus:** Phase 40 — llm-discovery
 
 ## Previous Milestone (v1.16)
 
@@ -31,12 +31,19 @@ See `.planning/PROJECT.md` (updated 2026-04-14)
 
 ## Current Position
 
-Phase: 40
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-04-14 -- Phase 40 planning complete
+Phase: v1.17 — **SHIPPED** (4/4 phases complete)
+Last activity: 2026-04-14 -- Phase 40 llm-discovery complete
+Phase 40 summary: `.planning/phases/40-llm-discovery/40-01-SUMMARY.md`
 
-Progress: [■-------] 25%
+Progress: [■■■■■■■■■■] 100%
+
+## Phase 40 Accomplishments
+
+- CORR-09: LLM optimizer dispatches subagent workflow via CorrectionObserverWorkflowManager, applies ADD/UPDATE/REMOVE mutations to keyword store
+- CORR-12: correctionDetected flag verified in prompt.ts:327 → trajectory.ts:857 → listUserTurnsForSession
+- keyword_optimization task fires every 6h via evolution-worker heartbeat cycle
+- Fire-and-poll: workflowId stored in task.resultRef, polled on subsequent cycles
+- trajectoryHistory field in CorrectionObserverPayload for FPR trend analysis
 
 ## Accumulated Context
 
@@ -56,6 +63,6 @@ None — Phase 39 context gathered
 
 **Previous milestone:** v1.16 Trinity Training Trajectory Quality Enhancement
 **Current milestone:** v1.17 Keyword Learning Engine
-**Just completed:** Phase 39 context gathered
-**Ready for:** `/gsd-plan-phase 39`
-**Context file:** `.planning/phases/39-learning-loop/39-CONTEXT.md`
+**Just completed:** Phase 40 llm-discovery — v1.17 shipped
+**Ready for:** `/gsd-complete-milestone` or `/gsd-new-milestone`
+**Summary:** `.planning/phases/40-llm-discovery/40-01-SUMMARY.md`
