@@ -123,6 +123,7 @@ function incrementGeneratedSampleCount(stateDir: string, principleId: string): v
     state.generatedSampleCount += 1;
     setPrincipleState(stateDir, state);
   } catch (err) {
+    // eslint-disable-next-line no-console -- Non-critical warning in helper function
     console.warn(`[nocturnal-service] Failed to sync generatedSampleCount for ${principleId}:`, err instanceof Error ? err.stack : err);
   }
 }
@@ -528,6 +529,7 @@ function persistCodeCandidate(
     try {
       refreshPrincipleLifecycle(workspaceDir, stateDir);
     } catch (err) {
+      // eslint-disable-next-line no-console -- Non-critical warning in helper function
       console.warn('[nocturnal-service] Lifecycle refresh failed after code candidate persistence:', err instanceof Error ? err.stack : err);
     }
     return {
@@ -705,6 +707,11 @@ export function executeNocturnalReflection(
   stateDir: string,
   options: NocturnalServiceOptions = {}
 ): NocturnalRunResult {
+  // Use provided logger or fallback to console
+  const logger = options.logger;
+  // eslint-disable-next-line no-console -- Intentional console fallback when no logger provided
+  const warn = logger?.warn?.bind(logger) ?? console.warn.bind(console);
+
   const diagnostics: NocturnalRunDiagnostics = {
     preflight: null,
     selection: null,
@@ -804,7 +811,7 @@ export function executeNocturnalReflection(
   // The async version would be used in real worker integration
   const config = loadNocturnalConfig(stateDir);
   void recordRunStart(stateDir, selectedPrincipleId, config.cooldown_ms).catch((err) => {
-    console.warn(`[nocturnal-service] Failed to record run start: ${String(err)}`);
+    warn(`[nocturnal-service] Failed to record run start: ${String(err)}`);
   });
 
   // -------------------------------------------------------------------------
@@ -841,7 +848,7 @@ export function executeNocturnalReflection(
       // Trinity failed — fail closed (same semantics as production)
       const failures = trinityResult.failures.map((f) => `${f.stage}: ${f.reason}`);
       void recordRunEnd(stateDir, 'failed', { reason: `Trinity override failed: ${failures.join('; ')}` }).catch((err) => {
-        console.warn(`[nocturnal-service] Failed to record run end: ${String(err)}`);
+        warn(`[nocturnal-service] Failed to record run end: ${String(err)}`);
       });
       // Emit threshold signals: malformed Trinity override is a strong signal
       adjustThresholdsFromSignals(stateDir, {
@@ -864,7 +871,7 @@ export function executeNocturnalReflection(
       if (!draftValidation.valid) {
         const {failures} = draftValidation;
         void recordRunEnd(stateDir, 'failed', { reason: `Trinity draft invalid: ${failures.join('; ')}` }).catch((err) => {
-          console.warn(`[nocturnal-service] Failed to record run end: ${String(err)}`);
+          warn(`[nocturnal-service] Failed to record run end: ${String(err)}`);
         });
         // Emit threshold signals: malformed draft content is a strong signal
         adjustThresholdsFromSignals(stateDir, {
@@ -915,7 +922,7 @@ export function executeNocturnalReflection(
           // Trinity draft invalid — fail closed
           const {failures} = draftValidation;
           void recordRunEnd(stateDir, 'failed', { reason: `Trinity draft invalid: ${failures.join('; ')}` }).catch((err) => {
-            console.warn(`[nocturnal-service] Failed to record run end: ${String(err)}`);
+            warn(`[nocturnal-service] Failed to record run end: ${String(err)}`);
           });
           // Emit threshold signals: malformed draft content is a strong signal
           adjustThresholdsFromSignals(stateDir, {
@@ -942,7 +949,7 @@ export function executeNocturnalReflection(
         // Phase 6 requirement: malformed Trinity stage output fails closed
         const failures = trinityResult.failures.map((f) => `${f.stage}: ${f.reason}`);
         void recordRunEnd(stateDir, 'failed', { reason: `Trinity chain failed: ${failures.join('; ')}` }).catch((err) => {
-          console.warn(`[nocturnal-service] Failed to record run end: ${String(err)}`);
+          warn(`[nocturnal-service] Failed to record run end: ${String(err)}`);
         });
         // Emit threshold signals: malformed Trinity is the strongest signal for tightening schema threshold
         adjustThresholdsFromSignals(stateDir, {
@@ -986,7 +993,7 @@ export function executeNocturnalReflection(
   if (!arbiterResult.passed || !arbiterResult.artifact) {
     const failures = arbiterResult.failures.map((f) => f.reason);
     void recordRunEnd(stateDir, 'failed', { reason: failures.join('; ') }).catch((err) => {
-      console.warn(`[nocturnal-service] Failed to record run end (arbiter failed): ${String(err)}`);
+      warn(`[nocturnal-service] Failed to record run end (arbiter failed): ${String(err)}`);
     });
     // Emit threshold signals: arbiter rejection indicates principle alignment issues
     adjustThresholdsFromSignals(stateDir, {
@@ -1012,7 +1019,7 @@ export function executeNocturnalReflection(
   if (!execResult.executable) {
     const failures = execResult.failures.map((f) => f.reason);
     void recordRunEnd(stateDir, 'failed', { reason: failures.join('; ') }).catch((err) => {
-      console.warn(`[nocturnal-service] Failed to record run end (executability failed): ${String(err)}`);
+      warn(`[nocturnal-service] Failed to record run end (executability failed): ${String(err)}`);
     });
     // Emit threshold signals: executability rejection indicates action quality issues
     adjustThresholdsFromSignals(stateDir, {
@@ -1048,7 +1055,7 @@ export function executeNocturnalReflection(
     diagnostics.persistedPath = persistedPath;
   } catch (err) {
     void recordRunEnd(stateDir, 'failed', { reason: `persistence error: ${String(err)}` }).catch((e) => {
-      console.warn(`[nocturnal-service] Failed to record run end (persistence failed): ${String(e)}`);
+      warn(`[nocturnal-service] Failed to record run end (persistence failed): ${String(e)}`);
     });
     return {
       success: false,
@@ -1073,7 +1080,7 @@ export function executeNocturnalReflection(
   } catch (err) {
     // Non-fatal: artifact is persisted, registry is secondary.
     // Log but don't fail the run.
-    console.warn(`[nocturnal-service] Failed to register sample in dataset registry: ${String(err)}`);
+    warn(`[nocturnal-service] Failed to register sample in dataset registry: ${String(err)}`);
   }
 
   try {
@@ -1091,7 +1098,7 @@ export function executeNocturnalReflection(
       createdAt: arbiterResult.artifact.createdAt,
     });
   } catch (err) {
-    console.warn(`[nocturnal-service] Failed to append behavioral artifact lineage: ${String(err)}`);
+    warn(`[nocturnal-service] Failed to append behavioral artifact lineage: ${String(err)}`);
   }
 
   diagnostics.artificer = maybePersistArtificerCandidate(
@@ -1108,7 +1115,7 @@ export function executeNocturnalReflection(
   // Step 9: Record run success
   // -------------------------------------------------------------------------
   void recordRunEnd(stateDir, 'success', { sampleCount: 1 }).catch((err) => {
-    console.warn(`[nocturnal-service] Failed to record run end (success): ${String(err)}`);
+    warn(`[nocturnal-service] Failed to record run end (success): ${String(err)}`);
   });
 
   // -------------------------------------------------------------------------
@@ -1185,6 +1192,11 @@ async function executeNocturnalReflectionWithAdapter(
   stateDir: string,
   options: NocturnalServiceOptions
 ): Promise<NocturnalRunResult> {
+  // Use provided logger or fallback to console
+  const logger = options.logger;
+  // eslint-disable-next-line no-console -- Intentional console fallback when no logger provided
+  const warn = logger?.warn?.bind(logger) ?? console.warn.bind(console);
+
   const diagnostics: NocturnalRunDiagnostics = {
     preflight: null,
     selection: null,
@@ -1345,7 +1357,7 @@ async function executeNocturnalReflectionWithAdapter(
   // Step 3: Record run start
   const config = loadNocturnalConfig(stateDir);
   void recordRunStart(stateDir, selectedPrincipleId, config.cooldown_ms).catch((err) => {
-    console.warn(`[nocturnal-service] Failed to record run start: ${String(err)}`);
+    warn(`[nocturnal-service] Failed to record run start: ${String(err)}`);
   });
 
   // Step 4: Trinity execution via adapter (async)
@@ -1377,7 +1389,7 @@ async function executeNocturnalReflectionWithAdapter(
     if (!trinityResult.success) {
       const failures = trinityResult.failures.map((f) => `${f.stage}: ${f.reason}`);
       void recordRunEnd(stateDir, 'failed', { reason: `Trinity override failed: ${failures.join('; ')}` }).catch((err) => {
-        console.warn(`[nocturnal-service] Failed to record run end: ${String(err)}`);
+        warn(`[nocturnal-service] Failed to record run end: ${String(err)}`);
       });
       adjustThresholdsFromSignals(stateDir, { malformedRate: 1.0, arbiterRejectRate: 0.0, executabilityRejectRate: 0.0, qualityDelta: 0.0 });
       return { success: false, noTargetSelected: false, validationFailed: true, validationFailures: [`Trinity override failed: ${failures.join('; ')}`], snapshot, diagnostics };
@@ -1404,7 +1416,7 @@ async function executeNocturnalReflectionWithAdapter(
         if (!draftValidation.valid) {
           const {failures} = draftValidation;
           void recordRunEnd(stateDir, 'failed', { reason: `Trinity draft invalid: ${failures.join('; ')}` }).catch((err) => {
-            console.warn(`[nocturnal-service] Failed to record run end: ${String(err)}`);
+            warn(`[nocturnal-service] Failed to record run end: ${String(err)}`);
           });
           adjustThresholdsFromSignals(stateDir, { malformedRate: 1.0, arbiterRejectRate: 0.0, executabilityRejectRate: 0.0, qualityDelta: 0.0 });
           return { success: false, noTargetSelected: false, validationFailed: true, validationFailures: failures, snapshot, diagnostics };
@@ -1415,7 +1427,7 @@ async function executeNocturnalReflectionWithAdapter(
       } else {
         const failures = trinityResult.failures.map((f) => `${f.stage}: ${f.reason}`);
         void recordRunEnd(stateDir, 'failed', { reason: `Trinity chain failed: ${failures.join('; ')}` }).catch((err) => {
-          console.warn(`[nocturnal-service] Failed to record run end: ${String(err)}`);
+          warn(`[nocturnal-service] Failed to record run end: ${String(err)}`);
         });
         adjustThresholdsFromSignals(stateDir, { malformedRate: 1.0, arbiterRejectRate: 0.0, executabilityRejectRate: 0.0, qualityDelta: 0.0 });
         return { success: false, noTargetSelected: false, validationFailed: true, validationFailures: [`Trinity chain failed: ${failures.join('; ')}`], snapshot, diagnostics };
@@ -1440,7 +1452,7 @@ async function executeNocturnalReflectionWithAdapter(
   if (!arbiterResult.passed || !arbiterResult.artifact) {
     const failures = arbiterResult.failures.map((f) => f.reason);
     void recordRunEnd(stateDir, 'failed', { reason: failures.join('; ') }).catch((err) => {
-      console.warn(`[nocturnal-service] Failed to record run end (arbiter failed): ${String(err)}`);
+      warn(`[nocturnal-service] Failed to record run end (arbiter failed): ${String(err)}`);
     });
     adjustThresholdsFromSignals(stateDir, { malformedRate: 0.0, arbiterRejectRate: 1.0, executabilityRejectRate: 0.0, qualityDelta: 0.0 });
     return { success: false, noTargetSelected: false, validationFailed: true, validationFailures: failures, diagnostics };
@@ -1451,7 +1463,7 @@ async function executeNocturnalReflectionWithAdapter(
   if (!execResult.executable) {
     const failures = execResult.failures.map((f) => f.reason);
     void recordRunEnd(stateDir, 'failed', { reason: failures.join('; ') }).catch((err) => {
-      console.warn(`[nocturnal-service] Failed to record run end (executability failed): ${String(err)}`);
+      warn(`[nocturnal-service] Failed to record run end (executability failed): ${String(err)}`);
     });
     adjustThresholdsFromSignals(stateDir, { malformedRate: 0.0, arbiterRejectRate: 0.0, executabilityRejectRate: 1.0, qualityDelta: 0.0 });
     return { success: false, noTargetSelected: false, validationFailed: true, validationFailures: failures, diagnostics };
@@ -1469,7 +1481,7 @@ async function executeNocturnalReflectionWithAdapter(
     diagnostics.persistedPath = persistedPath;
   } catch (err) {
     void recordRunEnd(stateDir, 'failed', { reason: `persistence error: ${String(err)}` }).catch((e) => {
-      console.warn(`[nocturnal-service] Failed to record run end (persistence failed): ${String(e)}`);
+      warn(`[nocturnal-service] Failed to record run end (persistence failed): ${String(e)}`);
     });
     return { success: false, noTargetSelected: false, validationFailed: true, validationFailures: [`Failed to persist artifact: ${String(err)}`], snapshot, diagnostics };
   }
@@ -1481,7 +1493,7 @@ async function executeNocturnalReflectionWithAdapter(
       incrementGeneratedSampleCount(stateDir, arbiterResult.artifact.principleId);
     }
   } catch (err) {
-    console.warn(`[nocturnal-service] Failed to register sample in dataset registry: ${String(err)}`);
+    warn(`[nocturnal-service] Failed to register sample in dataset registry: ${String(err)}`);
   }
 
   try {
@@ -1499,7 +1511,7 @@ async function executeNocturnalReflectionWithAdapter(
       createdAt: arbiterResult.artifact.createdAt,
     });
   } catch (err) {
-    console.warn(`[nocturnal-service] Failed to append behavioral artifact lineage: ${String(err)}`);
+    warn(`[nocturnal-service] Failed to append behavioral artifact lineage: ${String(err)}`);
   }
 
   diagnostics.artificer = maybePersistArtificerCandidate(
@@ -1514,7 +1526,7 @@ async function executeNocturnalReflectionWithAdapter(
 
   // Step 9: Record run success
   void recordRunEnd(stateDir, 'success', { sampleCount: 1 }).catch((err) => {
-    console.warn(`[nocturnal-service] Failed to record run end (success): ${String(err)}`);
+    warn(`[nocturnal-service] Failed to record run end (success): ${String(err)}`);
   });
 
   // Step 10: Adaptive threshold adjustment
