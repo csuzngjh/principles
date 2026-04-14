@@ -96,6 +96,7 @@ import {
   type IdleCheckResult,
   type PreflightCheckResult,
 } from './nocturnal-runtime.js';
+import { loadNocturnalConfig } from './nocturnal-config.js';
 import { NocturnalPathResolver } from '../core/nocturnal-paths.js';
 import { registerSample } from '../core/nocturnal-dataset.js';
 import { getPrincipleState, setPrincipleState } from '../core/principle-training-state.js';
@@ -785,7 +786,8 @@ export function executeNocturnalReflection(
   // -------------------------------------------------------------------------
   // Note: We use a sync approximation here since this is called from sync context
   // The async version would be used in real worker integration
-  void recordRunStart(stateDir, selectedPrincipleId).catch((err) => {
+  const config = loadNocturnalConfig(stateDir);
+  void recordRunStart(stateDir, selectedPrincipleId, config.cooldown_ms).catch((err) => {
     console.warn(`[nocturnal-service] Failed to record run start: ${String(err)}`);
   });
 
@@ -1325,7 +1327,8 @@ async function executeNocturnalReflectionWithAdapter(
   }
 
   // Step 3: Record run start
-  void recordRunStart(stateDir, selectedPrincipleId).catch((err) => {
+  const config = loadNocturnalConfig(stateDir);
+  void recordRunStart(stateDir, selectedPrincipleId, config.cooldown_ms).catch((err) => {
     console.warn(`[nocturnal-service] Failed to record run start: ${String(err)}`);
   });
 
