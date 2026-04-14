@@ -8,14 +8,15 @@
 - [x] **v1.14** - Evolution Worker Decomposition & Contract Hardening (Phases 24-29, baseline complete on branch `fix/bugs-231-228` / PR #245)
 - [x] **v1.15** - Runtime & Truth Contract Hardening (Phases 30-33, shipped 2026-04-12)
 - [x] **v1.16** - Trinity Training Trajectory Quality Enhancement (Phases 34-37, shipped 2026-04-13)
+- [ ] **v1.18** - Nocturnal State Safety & Recovery (Phases 38-41)
 - [ ] **v1.10** - Thinking Models page optimization (deferred)
 
 ## Phases
 
 **Phase Numbering:**
 - Integer phases (30-33): v1.15 Runtime & Truth Contract Hardening (shipped)
-- Integer phases (34-37): v1.16 Trinity Training Trajectory Quality Enhancement (current)
-- Decimal phases: Urgent insertions (marked with INSERTED)
+- Integer phases (34-37): v1.16 Trinity Training Trajectory Quality Enhancement (shipped)
+- Integer phases (38-41): v1.18 Nocturnal State Safety & Recovery (current)
 
 <details>
 <summary>Shipped milestones (Phases 1-33)</summary>
@@ -41,6 +42,15 @@
 - [x] **Phase 35: Dreamer Enhancement** - Enhance Dreamer prompt for candidate diversity with deriver integration and soft post-validation (completed 2026-04-13)
 - [x] **Phase 36: Philosopher 6D Evaluation** - Expand Philosopher evaluation to 6 dimensions with risk assessment (completed 2026-04-13)
 - [x] **Phase 37: Scribe Contrastive Analysis** - Add contrastive analysis to Scribe output with backward-compatible optional fields (completed 2026-04-13)
+
+### v1.18 Nocturnal State Safety & Recovery (In Progress)
+
+**Milestone Goal:** Ensure nocturnal pipeline state files are crash-safe through atomic writes, transient failure recovery, and startup reconciliation.
+
+- [x] **Phase 38: Atomic Write Utility** - Leaf utility with tmp+fsync+rename, Windows retry, orphan cleanup (completed 2026-04-14)
+- [ ] **Phase 39: Nocturnal Write Migration** - Migrate all writeFileSync call sites to atomic writes
+- [ ] **Phase 40: Failure Classification & Cooldown Recovery** - Classify failures as transient/persistent with appropriate cooldowns
+- [ ] **Phase 41: Startup Reconciliation** - Validate state integrity, clear stale cooldowns, clean orphans on startup
 
 ## Phase Details
 
@@ -104,16 +114,30 @@ Plans:
 - [x] 37-01: TBD
 - [ ] 37-02: TBD
 
+### Phase 38: Atomic Write Utility
+**Goal**: Crash-safe JSON file writes via tmp+fsync+rename with Windows NTFS retry and orphan cleanup
+**Depends on**: Nothing (leaf utility)
+**Requirements**: AW-01, AW-02, AW-04
+**Success Criteria** (what must be TRUE):
+  1. `atomicWriteJsonSync()` writes via tmp+fsync+rename so a crash mid-write never leaves a partial state file
+  2. `atomicWriteJsonSync()` retries EPERM/EACCES/EBUSY up to 3 times with 100/200/400ms exponential backoff
+  3. On write failure, the orphan .tmp file is deleted before AtomicWriteError propagates
+  4. `cleanupOrphanTmpFiles(dir)` removes .tmp files where age > 30s OR PID is dead, returns list of deleted files
+  5. `AtomicWriteError` includes filePath, originalError, retryAttempts, and code fields
+
+Plans:
+- [x] 38-01: Create Atomic Write Utility Module
+
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 34 -> 35 -> 36 -> 37
+Phases execute in numeric order: 38 -> 39 -> 40 -> 41
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 34. Reasoning Deriver Module | v1.16 | 2/2 | Complete    | 2026-04-13 |
-| 35. Dreamer Enhancement | v1.16 | 2/2 | Complete    | 2026-04-13 |
-| 36. Philosopher 6D Evaluation | v1.16 | 2/2 | Complete    | 2026-04-13 |
-| 37. Scribe Contrastive Analysis | v1.16 | 1/1 | Complete    | 2026-04-13 |
+| 38. Atomic Write Utility | v1.18 | 1/1 | Complete | 2026-04-14 |
+| 39. Nocturnal Write Migration | v1.18 | 0/? | Pending | |
+| 40. Failure Classification | v1.18 | 0/? | Pending | |
+| 41. Startup Reconciliation | v1.18 | 0/? | Pending | |
 
-*Last updated: 2026-04-13*
+*Last updated: 2026-04-14*
