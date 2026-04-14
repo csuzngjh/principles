@@ -103,6 +103,15 @@ import { getPrincipleState, setPrincipleState } from '../core/principle-training
 import type { Implementation } from '../types/principle-tree-schema.js';
 import { validateNocturnalSnapshotIngress } from '../core/nocturnal-snapshot-contract.js';
 
+/**
+ * Atomic file write — write to temp then rename to prevent partial writes on crash.
+ */
+function atomicWriteFileSync(filePath: string, data: string): void {
+  const tmpPath = filePath + '.tmp';
+  fs.writeFileSync(tmpPath, data, 'utf8');
+  fs.renameSync(tmpPath, filePath);
+}
+
 // ---------------------------------------------------------------------------
 // #251: Sync trainingStore sample counts after registration
 // ---------------------------------------------------------------------------
@@ -385,7 +394,7 @@ function persistArtifact(
     fs.mkdirSync(dir, { recursive: true });
   }
 
-  fs.writeFileSync(artifactPath, JSON.stringify(sampleRecord, null, 2), 'utf-8');
+  atomicWriteFileSync(artifactPath, JSON.stringify(sampleRecord, null, 2));
   return artifactPath;
 }
 
