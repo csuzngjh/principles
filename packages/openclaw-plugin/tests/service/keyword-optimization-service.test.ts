@@ -1,29 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { CorrectionObserverResult } from '../../src/service/subagent-workflow/correction-observer-types.js';
 
+// Shared mock objects so tests can mutate them after vi.mock runs
+const mockLearner = { add: vi.fn(), updateWeight: vi.fn(), remove: vi.fn(), getStore: vi.fn(() => ({ keywords: [] })) };
+const mockDb = { listUserTurnsForSession: vi.fn(() => []), listRecentSessions: vi.fn(() => []) };
+
 // Mock the CorrectionCueLearner dependency
 vi.mock('../../src/core/correction-cue-learner.js', () => ({
-  CorrectionCueLearner: {
-    get: vi.fn(() => ({
-      add: vi.fn(),
-      updateWeight: vi.fn(),
-      remove: vi.fn(),
-    })),
-  },
+  CorrectionCueLearner: { get: vi.fn(() => mockLearner) },
 }));
 
-// Mock the trajectory dependency
+// Mock the trajectory dependency — return shared mock objects so tests can configure them
 vi.mock('../../src/core/trajectory.js', () => ({
-  TrajectoryRegistry: {
-    get: vi.fn(() => ({
-      listUserTurnsForSession: vi.fn(() => []),
-      listRecentSessions: vi.fn(() => []),
-    })),
-  },
+  TrajectoryRegistry: { get: vi.fn(() => mockDb) },
 }));
 
-import { CorrectionCueLearner } from '../../src/core/correction-cue-learner.js';
-import { TrajectoryRegistry } from '../../src/core/trajectory.js';
 import { KeywordOptimizationService } from '../../src/service/keyword-optimization-service.js';
 
 describe('KeywordOptimizationService', () => {
@@ -47,8 +38,7 @@ describe('KeywordOptimizationService', () => {
         updates: { 'test-term': { action: 'add', weight: 0.6, reasoning: 'test' } },
       } as any;
       service.applyResult(result);
-      const learner = CorrectionCueLearner.get('/tmp/test-state');
-      expect(learner.add).toHaveBeenCalledWith({ term: 'test-term', weight: 0.6, source: 'llm_optimization' });
+      expect(mockLearner.add).toHaveBeenCalledWith({ term: 'test-term', weight: 0.6, source: 'llm' });
     });
 
     it('UPDATE: calls learner.updateWeight() with clamped weight', () => {
@@ -57,8 +47,7 @@ describe('KeywordOptimizationService', () => {
         updates: { 'existing-term': { action: 'update', weight: 0.85, reasoning: 'test' } },
       } as any;
       service.applyResult(result);
-      const learner = CorrectionCueLearner.get('/tmp/test-state');
-      expect(learner.updateWeight).toHaveBeenCalledWith('existing-term', 0.85);
+      expect(mockLearner.updateWeight).toHaveBeenCalledWith('existing-term', 0.85);
     });
 
     it('REMOVE: calls learner.remove() with term', () => {
@@ -67,36 +56,30 @@ describe('KeywordOptimizationService', () => {
         updates: { 'old-term': { action: 'remove', reasoning: 'test' } },
       } as any;
       service.applyResult(result);
-      const learner = CorrectionCueLearner.get('/tmp/test-state');
-      expect(learner.remove).toHaveBeenCalledWith('old-term');
+      expect(mockLearner.remove).toHaveBeenCalledWith('old-term');
     });
 
     it('skips when result.updated is false', () => {
       const result: CorrectionObserverResult = { updated: false, updates: {}, summary: '' } as any;
       service.applyResult(result);
-      const learner = CorrectionCueLearner.get('/tmp/test-state');
-      expect(learner.add).not.toHaveBeenCalled();
+      expect(mockLearner.add).not.toHaveBeenCalled();
     });
 
     it('skips when result.updates is undefined', () => {
       const result: CorrectionObserverResult = { updated: true, updates: undefined as any, summary: '' };
       service.applyResult(result);
-      const learner = CorrectionCueLearner.get('/tmp/test-state');
-      expect(learner.add).not.toHaveBeenCalled();
+      expect(mockLearner.add).not.toHaveBeenCalled();
     });
   });
 
   describe('updateWeight() clamp behavior', () => {
     it('clamps weight to 0.1-0.9 range via CorrectionCueLearner', () => {
-      // CorrectionCueLearner.updateWeight clamps values internally
       const result: CorrectionObserverResult = {
         updated: true,
         updates: { 'existing-term': { action: 'update', weight: 1.5, reasoning: 'test' } },
       } as any;
       service.applyResult(result);
-      const learner = CorrectionCueLearner.get('/tmp/test-state');
-      // updateWeight is called with the raw value; clamping is handled by CorrectionCueLearner
-      expect(learner.updateWeight).toHaveBeenCalledWith('existing-term', 1.5);
+      expect(mockLearner.updateWeight).toHaveBeenCalledWith('existing-term', 1.5);
     });
   });
 
@@ -107,12 +90,11 @@ describe('KeywordOptimizationService', () => {
     });
 
     it('filters to correctionDetected=true turns only', async () => {
-      const mockDb = TrajectoryRegistry.get('/tmp/test-state');
       mockDb.listUserTurnsForSession = vi.fn(() => [
         { id: 1, turnIndex: 0, correctionDetected: false, correctionCue: null, createdAt: '2024-01-01T00:00:00Z' },
         { id: 2, turnIndex: 1, correctionDetected: true, correctionCue: 'wrong', createdAt: '2024-01-01T00:01:00Z' },
         { id: 3, turnIndex: 2, correctionDetected: true, correctionCue: 'error', createdAt: '2024-01-01T00:02:00Z' },
-      ]);
+      ] as any);
 
       const history = await service.buildTrajectoryHistory(['session-1']);
 
@@ -122,7 +104,6 @@ describe('KeywordOptimizationService', () => {
     });
 
     it('caps at 50 events', async () => {
-      const mockDb = TrajectoryRegistry.get('/tmp/test-state');
       const manyTurns = Array.from({ length: 60 }, (_, i) => ({
         id: i,
         turnIndex: i,
@@ -130,7 +111,7 @@ describe('KeywordOptimizationService', () => {
         correctionCue: `term-${i}`,
         createdAt: new Date(i * 1000).toISOString(),
       }));
-      mockDb.listUserTurnsForSession = vi.fn(() => manyTurns);
+      mockDb.listUserTurnsForSession = vi.fn(() => manyTurns as any);
 
       const history = await service.buildTrajectoryHistory(['session-1']);
 
