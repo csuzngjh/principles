@@ -99,6 +99,7 @@ function showStatus(workspaceDir: string, isZh: boolean): string {
  * Toggle a boolean setting
  */
  
+// eslint-disable-next-line @typescript-eslint/max-params
 function toggleSetting(
     workspaceDir: string,
     key: 'thinkingOs' | 'reflectionLog',
@@ -214,6 +215,7 @@ function applyPreset(
     isZh: boolean
 ): string {
      
+    // eslint-disable-next-line @typescript-eslint/init-declarations
     let config: ContextInjectionConfig;
     
     switch (preset) {
@@ -305,6 +307,7 @@ function showHelp(isZh: boolean): string {
 /**
  * Main command handler
  */
+     
 export function handleContextCommand(ctx: PluginCommandContext): PluginCommandResult {
     const workspaceDir = getWorkspaceDir(ctx);
     const args = (ctx.args || '').trim().split(/\s+/);
@@ -315,6 +318,7 @@ export function handleContextCommand(ctx: PluginCommandContext): PluginCommandRe
     const isZh = (ctx.config?.language as string) === 'zh';
     
      
+    // eslint-disable-next-line @typescript-eslint/init-declarations
     let result: string;
     
     switch (subCommand) {

@@ -265,6 +265,7 @@ export function compressFocus(focusPath: string, newContent: string): {
  * @param content CURRENT_FOCUS.md 内容
  * @param maxLines 最大行数
  */
+     
 export function extractSummary(content: string, maxLines = 30): string {
   const lines = content.split('\n');
   const sections: { [key: string]: string[] } = {
@@ -429,6 +430,7 @@ export function extractWorkingMemory(
           
           // 尝试从文本中提取描述
            
+          // eslint-disable-next-line @typescript-eslint/no-use-before-define
           const description = extractDescription(text, filePath);
           
           snapshot.artifacts.push({
@@ -444,19 +446,23 @@ export function extractWorkingMemory(
 
     // 从文本中提取文件操作（备用方式）
      
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define
     extractFileArtifacts(text, snapshot.artifacts, workspaceDir);
 
     // 提取问题
      
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define
     extractProblems(text, snapshot.activeProblems);
 
     // 提取下一步
      
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define
     extractNextActions(text, snapshot.nextActions);
   }
 
   // 去重和限制数量
    
+  // eslint-disable-next-line @typescript-eslint/no-use-before-define
   snapshot.artifacts = deduplicateArtifacts(snapshot.artifacts).slice(-MAX_ARTIFACTS);
   snapshot.activeProblems = snapshot.activeProblems.slice(-MAX_PROBLEMS);
   snapshot.nextActions = snapshot.nextActions.slice(-MAX_NEXT_ACTIONS);
@@ -477,6 +483,7 @@ function extractFileArtifacts(
   const filePathRegex = /(?:file_path|absolute_path)["']?\s*[:=]\s*["']([^"']+\.(ts|js|json|md|yaml|yml|py|sh|mjs|cjs))["']/gi;
 
    
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let match;
   while ((match = filePathRegex.exec(text)) !== null) {
     const [, filePath] = match;
@@ -507,6 +514,7 @@ function extractFileArtifacts(
 
     // 尝试提取描述（从附近的文本）
      
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define
     const description = extractDescription(text, filePath);
 
     artifacts.push({
@@ -540,6 +548,7 @@ function extractFileArtifacts(
     }
 
      
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define
     const description = extractDescription(text, filePath);
 
     artifacts.push({
@@ -588,6 +597,7 @@ function extractProblems(
   // 问题模式（匹配问题描述）
   const problemPattern = /(?:问题|problem|error|错误|失败|failed)[:：]\s*([^\n]{5,100})/gi;
    
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let match;
   while ((match = problemPattern.exec(text)) !== null) {
     const content = match[1].trim();
@@ -631,6 +641,7 @@ function extractNextActions(text: string, actions: string[]): void {
 
   for (const pattern of patterns) {
      
+    // eslint-disable-next-line @typescript-eslint/init-declarations
     let match;
     while ((match = pattern.exec(text)) !== null) {
       const action = match[1].trim();
@@ -690,6 +701,7 @@ export function parseWorkingMemorySection(content: string): WorkingMemorySnapsho
   // | 文件路径 | 操作 | 描述 |
   const tableRegex = /\|\s*`?([^`|\n]+)`?\s*\|\s*(created|modified|deleted)\s*\|\s*([^|\n]*)\s*\|/gi;
    
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let match;
   while ((match = tableRegex.exec(wmContent)) !== null) {
     snapshot.artifacts.push({
@@ -729,6 +741,7 @@ export function mergeWorkingMemory(content: string, snapshot: WorkingMemorySnaps
 
   // 生成 Working Memory 章节
    
+  // eslint-disable-next-line @typescript-eslint/no-use-before-define
   const wmSection = generateWorkingMemorySection(snapshot);
   
   if (wmIndex === -1) {
@@ -805,6 +818,7 @@ function generateWorkingMemorySection(snapshot: WorkingMemorySnapshot): string {
 /**
  * 生成工作记忆注入字符串（用于 prompt 注入）
  */
+     
 export function workingMemoryToInjection(snapshot: WorkingMemorySnapshot | null): string {
   if (!snapshot) return '';
   
@@ -884,6 +898,7 @@ interface CompressionConfig {
  * @param stateDir state 目录路径
  * @returns 压缩配置
  */
+     
 function loadCompressionConfig(stateDir?: string): CompressionConfig {
   if (!stateDir) {
     return DEFAULT_COMPRESSION_CONFIG;

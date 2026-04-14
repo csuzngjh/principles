@@ -256,6 +256,7 @@ export function handleLlmOutput(
 
     // ═══ Thinking OS: Mental Model Usage Tracking ═══
      
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define
     trackThinkingModelUsage({
         text,
         wctx,

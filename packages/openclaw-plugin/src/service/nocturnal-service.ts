@@ -96,6 +96,7 @@ import {
   type IdleCheckResult,
   type PreflightCheckResult,
 } from './nocturnal-runtime.js';
+import { loadNocturnalConfig } from './nocturnal-config.js';
 import { NocturnalPathResolver } from '../core/nocturnal-paths.js';
 import { registerSample } from '../core/nocturnal-dataset.js';
 import { getPrincipleState, setPrincipleState } from '../core/principle-training-state.js';
@@ -289,12 +290,16 @@ function invokeStubReflector(
   const hasPain = snapshot.stats.totalPainEvents > 0;
   const hasFailures = (snapshot.stats.failureCount ?? 0) > 0;
 
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let badDecision: string;
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let betterDecision: string;
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let rationale: string;
 
   if (hasGateBlocks && snapshot.gateBlocks.length > 0) {
     // Use actual gate block content
+    // eslint-disable-next-line @typescript-eslint/prefer-destructuring
     const block = snapshot.gateBlocks[0];
     const tool = block.toolName ?? 'a tool';
     const file = block.filePath ? ` on ${block.filePath}` : '';
@@ -303,6 +308,7 @@ function invokeStubReflector(
     rationale = `Gate blocks exist for a reason — bypassing them without understanding the underlying constraint risks unintended consequences. The block on ${tool}${file} indicates the operation exceeded allowed thresholds for the current evolution tier.`;
   } else if (hasPain && snapshot.painEvents.length > 0) {
     // Use actual pain event content
+    // eslint-disable-next-line @typescript-eslint/prefer-destructuring
     const pain = snapshot.painEvents[0];
     const painSource = pain.source ?? 'unknown';
     const painReason = pain.reason ? `: ${pain.reason}` : '';
@@ -398,6 +404,7 @@ function buildGateBlockRefs(snapshot: NocturnalSessionSnapshot): string[] {
 }
 
  
+// eslint-disable-next-line @typescript-eslint/max-params
 function buildDefaultArtificerOutput(
   ruleId: string,
   artifact: NocturnalArtifact,
@@ -447,6 +454,7 @@ function buildDefaultArtificerOutput(
 }
 
  
+// eslint-disable-next-line @typescript-eslint/max-params
 function persistCodeCandidate(
   workspaceDir: string,
   stateDir: string,
@@ -543,6 +551,7 @@ function persistCodeCandidate(
 }
 
  
+// eslint-disable-next-line @typescript-eslint/max-params
 function maybePersistArtificerCandidate(
   workspaceDir: string,
   stateDir: string,
@@ -713,7 +722,8 @@ export function executeNocturnalReflection(
   if (!preflight.canRun) {
     return {
       success: false,
-      noTargetSelected: false,
+      noTargetSelected: true,
+      skipReason: 'preflight_blocked',
       validationFailed: false,
       validationFailures: [],
       diagnostics,
@@ -776,7 +786,8 @@ export function executeNocturnalReflection(
   // -------------------------------------------------------------------------
   // Note: We use a sync approximation here since this is called from sync context
   // The async version would be used in real worker integration
-  void recordRunStart(stateDir, selectedPrincipleId).catch((err) => {
+  const config = loadNocturnalConfig(stateDir);
+  void recordRunStart(stateDir, selectedPrincipleId, config.cooldown_ms).catch((err) => {
     console.warn(`[nocturnal-service] Failed to record run start: ${String(err)}`);
   });
 
@@ -784,9 +795,11 @@ export function executeNocturnalReflection(
   // Step 5: Artifact generation (Trinity or single-reflector)
   // -------------------------------------------------------------------------
    
+  // eslint-disable-next-line no-useless-assignment
   let trinityArtifact: TrinityDraftArtifact | null = null;
   let trinityResult: TrinityResult | null = null;
    
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let rawJson: string;
 
   if (options.skipReflector) {
@@ -1011,6 +1024,7 @@ export function executeNocturnalReflection(
   };
 
    
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let persistedPath: string;
   try {
     persistedPath = persistArtifact(workspaceDir, artifactWithBoundedAction);
@@ -1138,6 +1152,7 @@ export async function executeNocturnalReflectionAsync(
   // If runtime adapter is provided, use async Trinity path
   if (options.runtimeAdapter) {
      
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define
     return executeNocturnalReflectionWithAdapter(workspaceDir, stateDir, options);
   }
 
@@ -1183,15 +1198,25 @@ async function executeNocturnalReflectionWithAdapter(
   diagnostics.preflight = preflight;
 
   if (!preflight.canRun) {
-    return { success: false, noTargetSelected: false, validationFailed: false, validationFailures: [], diagnostics };
+    return { 
+      success: false, 
+      noTargetSelected: true, 
+      skipReason: 'preflight_blocked',
+      validationFailed: false, 
+      validationFailures: [], 
+      diagnostics 
+    };
   }
 
   // Step 2: Target selection (or use override to skip)
    
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let selectedPrincipleId: string | undefined;
    
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let selectedSessionId: string | undefined;
    
+  // eslint-disable-next-line no-useless-assignment
   let snapshot: NocturnalSessionSnapshot | null = null;
 
   if (options.principleIdOverride && options.snapshotOverride) {
@@ -1214,6 +1239,7 @@ async function executeNocturnalReflectionWithAdapter(
     // Skip Selector: use provided principleId and snapshot directly
     selectedPrincipleId = options.principleIdOverride;
     selectedSessionId = snapshotValidation.snapshot.sessionId;
+    // eslint-disable-next-line @typescript-eslint/prefer-destructuring
     snapshot = snapshotValidation.snapshot;
     // Calculate violation density from snapshot stats for meaningful diagnostics
     const snapStats = snapshotValidation.snapshot.stats;
@@ -1270,8 +1296,10 @@ async function executeNocturnalReflectionWithAdapter(
     }
 
      
+    // eslint-disable-next-line @typescript-eslint/prefer-destructuring
     selectedPrincipleId = selection.selectedPrincipleId;
      
+    // eslint-disable-next-line @typescript-eslint/prefer-destructuring
     selectedSessionId = selection.selectedSessionId;
 
     if (!selectedPrincipleId || !selectedSessionId) {
@@ -1299,15 +1327,18 @@ async function executeNocturnalReflectionWithAdapter(
   }
 
   // Step 3: Record run start
-  void recordRunStart(stateDir, selectedPrincipleId).catch((err) => {
+  const config = loadNocturnalConfig(stateDir);
+  void recordRunStart(stateDir, selectedPrincipleId, config.cooldown_ms).catch((err) => {
     console.warn(`[nocturnal-service] Failed to record run start: ${String(err)}`);
   });
 
   // Step 4: Trinity execution via adapter (async)
    
+  // eslint-disable-next-line no-useless-assignment
   let trinityArtifact: TrinityDraftArtifact | null = null;
   let trinityResult: TrinityResult | null = null;
    
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let rawJson: string;
 
   if (options.skipReflector) {
@@ -1414,6 +1445,7 @@ async function executeNocturnalReflectionWithAdapter(
   // Step 7: Persist artifact
   const artifactWithBoundedAction = { ...arbiterResult.artifact, boundedAction: execResult.boundedAction };
    
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let persistedPath: string;
   try {
     persistedPath = persistArtifact(workspaceDir, artifactWithBoundedAction);

@@ -59,6 +59,7 @@ export class RuleHost {
    *   - { decision: 'block', ... } when any implementation returns block (short-circuits)
    *   - { decision: 'requireApproval', ... } when any implementation returns requireApproval
    */
+     
   evaluate(input: RuleHostInput): RuleHostResult | undefined {
     try {
       // Load active code implementations from the ledger
@@ -70,6 +71,7 @@ export class RuleHost {
 
       // Merge decisions from all active implementations
        
+      // eslint-disable-next-line @typescript-eslint/init-declarations
       let blocked: RuleHostResult | undefined;
       const approvals: RuleHostResult[] = [];
 
@@ -181,6 +183,7 @@ export class RuleHost {
    * Uses the shared isolated runtime loader so candidate code does not execute
    * in the host global realm.
    */
+     
   private _loadSingleImplementation(
     impl: Implementation
   ): LoadedImplementation | null {

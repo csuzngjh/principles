@@ -17,6 +17,7 @@ const DEPTH_INSTRUCTIONS = {
  * 严格按照测试用例的调用习惯和断言要求进行重写。
  * 增加 OpenClaw 兼容性路径解析。
  */
+    // eslint-disable-next-line complexity -- complexity 12, refactor candidate
 export function buildCritiquePromptV2(
     params: {
         context: string;

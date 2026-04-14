@@ -159,6 +159,7 @@ export interface TrinityStageValidationResult {
  * Validate a Dreamer output contract.
  * Ensures the output is well-formed before passing to Philosopher.
  */
+     
 export function validateDreamerOutput(output: unknown): TrinityStageValidationResult {
   const failures: string[] = [];
 
@@ -237,6 +238,7 @@ export function validateDreamerOutput(output: unknown): TrinityStageValidationRe
  * Validate a Philosopher output contract.
  * Ensures the output is well-formed before passing to Scribe.
  */
+     
 export function validatePhilosopherOutput(output: unknown): TrinityStageValidationResult {
   const failures: string[] = [];
 
@@ -260,6 +262,7 @@ export function validatePhilosopherOutput(output: unknown): TrinityStageValidati
     failures.push('Philosopher output must have a judgments array');
   } else {
     // Validate each judgment
+     
     obj.judgments.forEach((judgment: unknown, idx: number) => {
       if (judgment === null || judgment === undefined || typeof judgment !== 'object') {
         failures.push(`Philosopher judgment at index ${idx} is not an object`);
@@ -691,6 +694,7 @@ export function parseAndValidateArtifact(
 ): ArbiterResult {
   // Step 1: Parse JSON
    
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let parsed: unknown;
   try {
     parsed = JSON.parse(jsonString);

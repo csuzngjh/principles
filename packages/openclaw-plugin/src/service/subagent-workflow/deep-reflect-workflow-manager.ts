@@ -70,6 +70,7 @@ export class DeepReflectWorkflowManager extends WorkflowManagerBase {
     }
 
      
+    // eslint-disable-next-line @typescript-eslint/class-methods-use-this
     protected override generateWorkflowId(): string {
         return `wf_dr_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
     }
@@ -150,6 +151,7 @@ export const deepReflectWorkflowSpec: SubagentWorkflowSpec<DeepReflectResult> = 
         };
     },
 
+     
     async persistResult(ctx: WorkflowPersistContext<DeepReflectResult>): Promise<void> {
         const { result, metadata, workspaceDir } = ctx;
 

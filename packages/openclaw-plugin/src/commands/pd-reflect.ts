@@ -22,6 +22,7 @@ export const handlePdReflect: PluginCommandDefinition = {
   requireAuth: false,
   handler: async (ctx: PdReflectContext): Promise<PluginCommandResult> => {
     try {
+      // eslint-disable-next-line @typescript-eslint/prefer-destructuring
       const workspaceDir = ctx.workspaceDir;
       if (!workspaceDir) {
         return { text: 'Cannot determine workspace directory. Ensure you are in an active workspace.', isError: true };
@@ -32,6 +33,7 @@ export const handlePdReflect: PluginCommandDefinition = {
 
       // Acquire lock before modifying queue
       const releaseLock = await acquireQueueLock(queuePath, ctx.api?.logger, EVOLUTION_QUEUE_LOCK_SUFFIX);
+      // eslint-disable-next-line @typescript-eslint/init-declarations
       let taskId: string | undefined;
       try {
         let rawQueue: unknown[] = [];

@@ -208,7 +208,7 @@ export class TrajectoryDatabase {
     const createdAt = input.createdAt ?? nowIso();
     // Extract filePath from paramsJson if provided and is an object with filePath
     const paramsObj = input.paramsJson as Record<string, unknown> | undefined;
-    /* eslint-disable @typescript-eslint/no-unused-vars -- Reason: _filePath extracted for potential future use but currently unused */
+     
     const _filePath = paramsObj && typeof paramsObj.filePath === 'string' ? paramsObj.filePath : null;
     const rowId = this.withWrite(() => {
       const result = this.db.prepare(`
@@ -442,6 +442,7 @@ export class TrajectoryDatabase {
     const now = nowIso();
     // Cast to V2 to access new fields
     const v2Updates = updates;
+     
     this.withWrite(() => {
       const setClauses: string[] = ['updated_at = ?'];
       const values: unknown[] = [now];
@@ -554,6 +555,7 @@ export class TrajectoryDatabase {
       LIMIT ? OFFSET ?
     `).all(...values, limit, offset) as Record<string, unknown>[];
 
+     
     return rows.map((row) => ({
       id: Number(row.id),
       taskId: String(row.task_id),
@@ -588,6 +590,7 @@ export class TrajectoryDatabase {
     const offset = filters.offset ?? 0;
 
      
+    // eslint-disable-next-line @typescript-eslint/init-declarations
     let rows: Record<string, unknown>[];
     if (traceId) {
       rows = this.db.prepare(`
@@ -625,6 +628,7 @@ export class TrajectoryDatabase {
    * Returns: Analytics data aggregated from trajectory database.
    * Not: Runtime truth or real-time queue state.
    */
+     
   getEvolutionTaskByTraceId(traceId: string): EvolutionTaskRecord | null {
     const row = this.db.prepare(`
       SELECT id, task_id, trace_id, source, reason, score, status,
@@ -775,6 +779,7 @@ export class TrajectoryDatabase {
       WHERE session_id = ?
       ORDER BY id ASC
     `).all(sessionId) as Record<string, unknown>[];
+     
 
     return rows.map((row) => {
       // Extract filePath from params_json if present
@@ -784,6 +789,7 @@ export class TrajectoryDatabase {
           const params = JSON.parse(row.params_json);
           if (params && typeof params.filePath === 'string') {
              
+            // eslint-disable-next-line @typescript-eslint/prefer-destructuring
             filePath = params.filePath;
           }
         } catch {
@@ -926,6 +932,25 @@ export class TrajectoryDatabase {
       reason: String(row.reason),
       planStatus: row.plan_status ? String(row.plan_status) : null,
       createdAt: String(row.created_at),
+    }));
+  }
+
+  /**
+   * List correction samples for a specific session.
+   * Returns minimal fields for nocturnal use — correction cue only.
+   * #268: Wire correction_samples into nocturnal pipeline.
+   */
+  listCorrectionSamplesForSession(sessionId: string): { correctionCue: string | null }[] {
+    const rows = this.db.prepare(`
+      SELECT cs.sample_id, ut.correction_cue
+      FROM correction_samples cs
+      LEFT JOIN user_turns ut ON ut.id = cs.user_correction_turn_id
+      WHERE cs.session_id = ?
+      ORDER BY cs.created_at DESC
+    `).all(sessionId) as Record<string, unknown>[];
+
+    return rows.map((row) => ({
+      correctionCue: row.correction_cue ? String(row.correction_cue) : null,
     }));
   }
 
@@ -1610,6 +1635,7 @@ export class TrajectoryDatabase {
   }
 
    
+  // eslint-disable-next-line @typescript-eslint/max-params
   private recordExportAudit(
     exportKind: string,
     mode: CorrectionExportMode,
@@ -1675,6 +1701,7 @@ export class TrajectoryDatabase {
       if (referenced.has(entry)) continue;
       const fullPath = path.join(this.blobDir, entry);
        
+      // eslint-disable-next-line @typescript-eslint/init-declarations
       let stat: fs.Stats;
       try {
         stat = fs.statSync(fullPath);

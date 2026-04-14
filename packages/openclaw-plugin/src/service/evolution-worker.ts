@@ -17,6 +17,7 @@ import type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 export type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 import { LockUnavailableError } from '../config/index.js';
 import { checkWorkspaceIdle, checkCooldown } from './nocturnal-runtime.js';
+import { loadNocturnalConfig } from './nocturnal-config.js';
 import { WorkflowStore } from './subagent-workflow/workflow-store.js';
 import type { WorkflowRow } from './subagent-workflow/types.js';
 import { EmpathyObserverWorkflowManager } from './subagent-workflow/empathy-observer-workflow-manager.js';
@@ -407,6 +408,8 @@ function buildFallbackNocturnalSnapshot(
         toolCalls: [],
         painEvents: fallbackPainEvents,
         gateBlocks: [],
+        // #268: Empty corrections in fallback path (no trajectory data available)
+        userCorrections: [],
         stats: {
             totalAssistantTurns: realStats?.totalAssistantTurns ?? 0,
             totalToolCalls: realStats?.totalToolCalls ?? 0,
@@ -427,6 +430,7 @@ export const LOCK_RETRY_DELAY_MS = 50;
 export const LOCK_STALE_MS = 30_000;
 
  
+// eslint-disable-next-line @typescript-eslint/max-params
 export function createEvolutionTaskId(
     source: string,
     score: number,
@@ -460,6 +464,7 @@ export async function acquireQueueLock(resourcePath: string, logger: PluginLogge
 }
 
  
+// eslint-disable-next-line @typescript-eslint/max-params
 async function requireQueueLock(resourcePath: string, logger: PluginLogger | { warn?: (message: string) => void; info?: (message: string) => void } | undefined, scope: string, lockSuffix: string = EVOLUTION_QUEUE_LOCK_SUFFIX): Promise<() => void> {
     try {
         return await acquireQueueLock(resourcePath, logger, lockSuffix);
@@ -475,6 +480,7 @@ export function extractEvolutionTaskId(task: string): string | null {
 }
 
  
+// eslint-disable-next-line @typescript-eslint/max-params
 function findRecentDuplicateTask(
     queue: EvolutionQueueItem[],
     source: string,
@@ -482,13 +488,14 @@ function findRecentDuplicateTask(
     now: number,
     reason?: string
 ): EvolutionQueueItem | undefined {
-     
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define
     const key = normalizePainDedupKey(source, preview, reason);
     return queue.find((task) => {
         if (task.status === 'completed') return false;
+        // eslint-disable-next-line @typescript-eslint/no-use-before-define
         const taskTime = new Date(task.enqueued_at || task.timestamp).getTime();
         if (!Number.isFinite(taskTime) || (now - taskTime) > PAIN_QUEUE_DEDUP_WINDOW_MS) return false;
-         
+        // eslint-disable-next-line @typescript-eslint/no-use-before-define
         return normalizePainDedupKey(task.source, task.trigger_text_preview || '', task.reason) === key;
     });
 }
@@ -542,6 +549,8 @@ function normalizePainDedupKey(source: string, preview: string, reason?: string)
 }
 
  
+ 
+// eslint-disable-next-line @typescript-eslint/max-params
 export function hasRecentDuplicateTask(queue: EvolutionQueueItem[], source: string, preview: string, now: number, reason?: string): boolean {
     return !!findRecentDuplicateTask(queue, source, preview, now, reason);
 }
@@ -657,6 +666,7 @@ function shouldSkipForDedup(
     const recentSimilarReflection = hasRecentSimilarReflection(queue, painSourceKey, now);
 
     if (recentSimilarReflection) {
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
         const completedTime = new Date(recentSimilarReflection.completed_at!).getTime();
         logger?.debug?.(`[PD:EvolutionWorker] Skipping sleep_reflection — similar reflection completed ${Math.round((now - completedTime) / 60000)}min ago (same pain pattern: ${painSourceKey})`);
         return true;
@@ -668,6 +678,7 @@ function shouldSkipForDedup(
  * Load and migrate the evolution queue. Returns empty array if file doesn't exist.
  */
 function loadEvolutionQueue(queuePath: string): EvolutionQueueItem[] {
+    // eslint-disable-next-line @typescript-eslint/init-declarations, no-useless-assignment
     let rawQueue: RawQueueItem[] = [];
     try {
         rawQueue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
@@ -681,6 +692,8 @@ function loadEvolutionQueue(queuePath: string): EvolutionQueueItem[] {
 /**
  * Build and persist a new sleep_reflection task.
  */
+ 
+// eslint-disable-next-line @typescript-eslint/max-params
 function enqueueNewSleepReflectionTask(
     queue: EvolutionQueueItem[],
     recentPainContext: ReturnType<typeof readRecentPainContext>,
@@ -752,6 +765,7 @@ interface ParsedPainValues {
 }
 
  
+// eslint-disable-next-line @typescript-eslint/max-params
 async function doEnqueuePainTask(
     wctx: WorkspaceContext, logger: PluginLogger, painFlagPath: string,
     result: WorkerStatusReport['pain_flag'], v: ParsedPainValues,
@@ -998,6 +1012,7 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
 }
 
  
+// eslint-disable-next-line @typescript-eslint/max-params
 async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogger, eventLog: EventLog, api?: OpenClawPluginApi) {
     const queuePath = wctx.resolve('EVOLUTION_QUEUE');
     if (!fs.existsSync(queuePath)) {
@@ -1595,10 +1610,11 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         logger?.info?.(`[PD:EvolutionWorker] Processing sleep_reflection task ${sleepTask.id}`);
                     }
 
+                    // eslint-disable-next-line @typescript-eslint/init-declarations
                     let workflowId: string | undefined;
-                     
+                    // eslint-disable-next-line @typescript-eslint/init-declarations
                     let nocturnalManager: NocturnalWorkflowManager;
-                     
+                    // eslint-disable-next-line @typescript-eslint/init-declarations
                     let snapshotData: NocturnalSessionSnapshot | undefined;
 
                     if (isPollingTask) {
@@ -1636,11 +1652,13 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                                     s => s.failureCount > 0 || s.painEventCount > 0 || s.gateBlockCount > 0
                                 );
                                 if (sessionsWithViolations.length > 0) {
+                                    // eslint-disable-next-line @typescript-eslint/prefer-destructuring
                                     const targetSession = sessionsWithViolations[0];
                                     logger?.info?.(`[PD:EvolutionWorker] Task ${sleepTask.id} using session with violations: ${targetSession.sessionId} (failed=${targetSession.failureCount}, pain=${targetSession.painEventCount}, gates=${targetSession.gateBlockCount})`);
                                     fullSnapshot = extractor.getNocturnalSessionSnapshot(targetSession.sessionId);
                                 } else if (recentSessions.length > 0) {
                                     // No sessions with violations, use most recent as last resort
+                                    // eslint-disable-next-line @typescript-eslint/prefer-destructuring
                                     const latestSession = recentSessions[0];
                                     logger?.warn?.(`[PD:EvolutionWorker] Task ${sleepTask.id} no sessions with violations found, using most recent: ${latestSession.sessionId} (failed=${latestSession.failureCount}, pain=${latestSession.painEventCount}, gates=${latestSession.gateBlockCount})`);
                                     fullSnapshot = extractor.getNocturnalSessionSnapshot(latestSession.sessionId);
@@ -1704,9 +1722,13 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                                 taskId: sleepTask.id,
                                 painContext: sleepTask.recentPainContext,
                                 triggerSource: sleepTask.source,
+                                // #297: Configure which preflight gates to skip.
+                                // sleep_reflection uses periodic trigger which bypasses idle by design.
+                                skipPreflightGates: ['idle'],
                             },
                         });
                         sleepTask.resultRef = workflowHandle.workflowId;
+                        // eslint-disable-next-line @typescript-eslint/prefer-destructuring
                         workflowId = workflowHandle.workflowId;
                     }
 
@@ -1739,13 +1761,20 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             const errorReason = lastEvent?.reason ?? 'unknown';
                             // #219: Include payload details for better diagnostics
                             let detailedError = `Workflow terminal_error: ${errorReason}`;
+                             
                             let payload: unknown = {};
+                             
                             try {
                                 payload = lastEvent?.payload ?? {};
+                                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                                 if ((payload as any).skipReason) {
+                                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
                                     detailedError += ` (skipReason: ${(payload as any).skipReason})`;
+                                 
                                 }
+                                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                                 if ((payload as any).failures && Array.isArray((payload as any).failures) && (payload as any).failures.length > 0) {
+                                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
                                     detailedError += ` | failures: ${((payload as any).failures as string[]).slice(0, 3).join(', ')}`;
                                 }
                             } catch { /* ignore parse errors */ }
@@ -1755,9 +1784,12 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             if (isExpectedSubagentError(errorReason)) {
                                 // #237: Expected unavailability → stub fallback, not hard failure
                                 sleepTask.status = 'completed';
+                                 
                                 sleepTask.completed_at = new Date().toISOString();
                                 sleepTask.resolution = 'stub_fallback';
+                                 
                                 logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} background runtime unavailable, using stub fallback: ${errorReason}`);
+                            // eslint-disable-next-line @typescript-eslint/no-explicit-any
                             } else if ((payload as any).skipReason === 'no_violating_sessions') {
                                 // #244: No meaningful violations found (thin filter) → skip without failure
                                 sleepTask.status = 'completed';
@@ -1873,6 +1905,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
     }
 }
 
+     
 async function processDetectionQueue(wctx: WorkspaceContext, api: OpenClawPluginApi, eventLog: EventLog) {
     const {logger} = api;
     try {
@@ -1928,6 +1961,7 @@ async function processDetectionQueue(wctx: WorkspaceContext, api: OpenClawPlugin
 // Evolution queue is now the single active pain→principle path
 
  
+// eslint-disable-next-line @typescript-eslint/max-params
 export async function registerEvolutionTaskSession(
     workspaceResolve: (key: string) => string,
     taskId: string,
@@ -1941,6 +1975,7 @@ export async function registerEvolutionTaskSession(
 
     try {
          
+        // eslint-disable-next-line @typescript-eslint/init-declarations
         let rawQueue: RawQueueItem[];
         try {
             rawQueue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
@@ -1984,6 +2019,7 @@ export async function registerEvolutionTaskSession(
 export interface ExtendedEvolutionWorkerService {
     id: string;
     api: OpenClawPluginApi | null;
+    _startedWorkspaces: Set<string>;
     start: (ctx: OpenClawPluginServiceContext) => void | Promise<void>;
     stop?: (ctx: OpenClawPluginServiceContext) => void | Promise<void>;
 }
@@ -2008,6 +2044,7 @@ function writeWorkerStatus(stateDir: string, report: WorkerStatusReport): void {
 }
 
  
+// eslint-disable-next-line @typescript-eslint/max-params
 async function processEvolutionQueueWithResult(
     wctx: WorkspaceContext,
     logger: PluginLogger,
@@ -2054,16 +2091,26 @@ async function processEvolutionQueueWithResult(
 export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
     id: 'principles-evolution-worker',
     api: null,
+    _startedWorkspaces: new Set<string>(),
 
     start(ctx: OpenClawPluginServiceContext): void {
+        const workspaceDir = ctx?.workspaceDir;
         const logger = ctx?.logger || console;
         const {api} = this;
-        const workspaceDir = ctx?.workspaceDir;
 
         if (!workspaceDir) {
             if (logger) logger.warn('[PD:EvolutionWorker] workspaceDir not found in service config. Evolution cycle disabled.');
             return;
         }
+
+        // Guard: prevent duplicate starts for the SAME workspace
+        const started = EvolutionWorkerService._startedWorkspaces;
+        if (started.has(workspaceDir)) {
+            ctx?.logger?.info?.(`[PD:EvolutionWorker] Already started for ${workspaceDir}, skipping`);
+            return;
+        }
+
+        started.add(workspaceDir);
 
         const wctx = WorkspaceContext.fromHookContext({ workspaceDir, ...ctx.config });
         if (logger) logger.info(`[PD:EvolutionWorker] Starting with workspaceDir=${wctx.workspaceDir}, stateDir=${wctx.stateDir}`);
@@ -2078,12 +2125,16 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
         const initialDelay = 5000;
         const interval = config.get('intervals.worker_poll_ms') || (15 * 60 * 1000);
 
+        // Periodic trigger tracking
+        let heartbeatCounter = 0;
+
         async function runCycle(): Promise<void> {
             const cycleStart = Date.now();
+            heartbeatCounter++;
 
             // ──── DEBUG: Verify subagent availability in heartbeat context ────
             const hbSubagent = api?.runtime?.subagent;
-            logger?.info?.(`[PD:DEBUG:SubagentCheck:Heartbeat] api_exists=${!!api}, subagent_exists=${!!hbSubagent}, subagent.run_exists=${!!hbSubagent?.run}`);
+            logger?.info?.(`[PD:DEBUG:SubagentCheck:Heartbeat] api_exists=${!!api}, subagent_exists=${!!hbSubagent}, subagent.run_exists=${!!hbSubagent?.run}, heartbeatCounter=${heartbeatCounter}`);
             if (hbSubagent?.run) {
                 logger?.info?.('[PD:DEBUG:SubagentCheck:Heartbeat] run entrypoint is callable');
             }
@@ -2104,18 +2155,46 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
             };
 
             try {
+                // Load config on each cycle (supports runtime updates)
+                const sleepConfig = loadNocturnalConfig(wctx.stateDir);
+
                 const idleResult = checkWorkspaceIdle(wctx.workspaceDir, {});
-                logger?.info?.(`[PD:EvolutionWorker] HEARTBEAT cycle=${new Date().toISOString()} idle=${idleResult.isIdle} idleForMs=${idleResult.idleForMs} userActiveSessions=${idleResult.userActiveSessions} abandonedSessions=${idleResult.abandonedSessionIds.length} lastActivityEpoch=${idleResult.mostRecentActivityAt}`);
-                if (idleResult.isIdle) {
-                    logger?.debug?.(`[PD:EvolutionWorker] Workspace idle (${idleResult.idleForMs}ms since last activity)`);
-                    const cooldown = checkCooldown(wctx.stateDir);
+                logger?.info?.(`[PD:EvolutionWorker] HEARTBEAT cycle=${new Date().toISOString()} idle=${idleResult.isIdle} idleForMs=${idleResult.idleForMs} userActiveSessions=${idleResult.userActiveSessions} abandonedSessions=${idleResult.abandonedSessionIds.length} lastActivityEpoch=${idleResult.mostRecentActivityAt} triggerMode=${sleepConfig.trigger_mode}`);
+
+                let shouldTrySleepReflection = false;
+
+                // Path 1: Idle-based trigger (default mode)
+                if (idleResult.isIdle && sleepConfig.trigger_mode === 'idle') {
+                    logger?.info?.(`[PD:EvolutionWorker] Workspace idle (${idleResult.idleForMs}ms since last activity)`);
+                    shouldTrySleepReflection = true;
+                }
+
+                // Path 2: Periodic trigger (fires regardless of idle state)
+                if (sleepConfig.trigger_mode === 'periodic') {
+                    if (heartbeatCounter >= sleepConfig.period_heartbeats) {
+                        logger?.info?.(`[PD:EvolutionWorker] Periodic trigger: heartbeatCounter=${heartbeatCounter} >= period_heartbeats=${sleepConfig.period_heartbeats}`);
+                        shouldTrySleepReflection = true;
+                        heartbeatCounter = 0; // Reset counter
+                    } else {
+                        logger?.info?.(`[PD:EvolutionWorker] Periodic: ${heartbeatCounter}/${sleepConfig.period_heartbeats} heartbeats — waiting`);
+                    }
+                }
+
+                if (shouldTrySleepReflection) {
+                    const cooldown = checkCooldown(wctx.stateDir, undefined, {
+                        globalCooldownMs: sleepConfig.cooldown_ms,
+                        maxRunsPerWindow: sleepConfig.max_runs_per_day,
+                        quotaWindowMs: 24 * 60 * 60 * 1000,
+                    });
+                    logger?.info?.(`[PD:EvolutionWorker] Cooldown check: globalCooldownActive=${cooldown.globalCooldownActive} quotaExhausted=${cooldown.quotaExhausted} runsRemaining=${cooldown.runsRemaining}`);
                     if (!cooldown.globalCooldownActive && !cooldown.quotaExhausted) {
+                        logger?.info?.('[PD:EvolutionWorker] Attempting to enqueue sleep_reflection task...');
                         enqueueSleepReflectionTask(wctx, logger).catch((err) => {
                             logger?.error?.(`[PD:EvolutionWorker] Failed to enqueue sleep_reflection task: ${String(err)}`);
                         });
+                    } else {
+                        logger?.info?.(`[PD:EvolutionWorker] Skipping sleep_reflection: globalCooldown=${cooldown.globalCooldownActive} quotaExhausted=${cooldown.quotaExhausted}`);
                     }
-                } else {
-                    logger?.debug?.(`[PD:EvolutionWorker] Workspace active (last activity ${idleResult.idleForMs}ms ago)`);
                 }
 
                 const painCheckResult = await checkPainFlag(wctx, logger);

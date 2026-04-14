@@ -17,6 +17,7 @@ import type {
   PluginHookSubagentContext,
 } from './openclaw-sdk.js';
 import * as crypto from 'crypto';
+import * as path from 'path';
 import type { WorkerProfile } from './core/model-deployment-registry.js';
 import { classifyTask } from './core/local-worker-routing.js';
 import { completeShadowObservation, recordShadowRouting } from './core/shadow-observation-registry.js';
@@ -66,6 +67,8 @@ import { extractAgentIdFromSessionKey } from './utils/session-key.js';
 
 // Track initialization to avoid repeated calls
 let workspaceInitialized = false;
+// Track started evolution workers — one per workspace
+const startedWorkspaces = new Set<string>();
 
 /**
  * Resolve workspaceDir for slash commands.
@@ -171,6 +174,23 @@ const plugin = {
             SystemLogger.log(workspaceDir, 'SYSTEM_BOOT', `Principles Disciple online. Language: ${language}`);
             workspaceInitialized = true;
           }
+
+          // ── Start EvolutionWorker for THIS workspace ──
+          // Each agent has its own heartbeat task. When before_prompt_build fires,
+          // it fires for the current agent's workspaceDir. Start one EvolutionWorker
+          // per workspace so each agent's pain signals are processed independently.
+          if (!startedWorkspaces.has(workspaceDir)) {
+            startedWorkspaces.add(workspaceDir);
+            EvolutionWorkerService.api = api;
+            EvolutionWorkerService.start({
+              config: api.config,
+              workspaceDir,
+              stateDir: path.join(workspaceDir, '.state'),
+              logger: api.logger,
+            });
+            api.logger.info(`[PD] EvolutionWorker started for workspace: ${workspaceDir}`);
+          }
+
           const result = await handleBeforePromptBuild(event, { ...ctx, api, workspaceDir });
           
           // Record success
@@ -401,6 +421,7 @@ const plugin = {
 
     // ── Slash Commands ──
     // Register command with optional short alias
+    // eslint-disable-next-line @typescript-eslint/max-params, @typescript-eslint/no-explicit-any
     const registerCommandWithAlias = (name: string, alias: string | null, desc: string, handler: any, opts?: { acceptsArgs?: boolean }) => {
       const base = {
         name,
@@ -418,11 +439,17 @@ const plugin = {
       }
     };
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     registerCommandWithAlias('pd-init', 'pdi', getCommandDescription('pd-init', language), (ctx: any) => handleInitStrategy(ctx));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     registerCommandWithAlias('pd-okr', 'pdk', getCommandDescription('pd-okr', language), (ctx: any) => handleManageOkr(ctx));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     registerCommandWithAlias('pd-bootstrap', 'pdb', getCommandDescription('pd-bootstrap', language), (ctx: any) => handleBootstrapTools(ctx));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     registerCommandWithAlias('pd-research', 'pdr', getCommandDescription('pd-research', language), (ctx: any) => handleResearchTools(ctx));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     registerCommandWithAlias('pd-thinking', 'pdt', getCommandDescription('pd-thinking', language), (ctx: any) => handleThinkingOs(ctx), { acceptsArgs: true });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     registerCommandWithAlias('pd-reflect', 'pdrl', getCommandDescription('pd-reflect', language), (ctx: any) => {
       try {
         // Resolve agentId from sessionKey (if available), fallback to 'main'

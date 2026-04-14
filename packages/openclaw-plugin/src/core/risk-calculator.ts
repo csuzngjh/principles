@@ -9,6 +9,7 @@ export interface FileModification {
     params: Record<string, unknown>;
 }
 
+     
 export function estimateLineChanges(modification: FileModification): number {
     const { toolName, params } = modification;
     
@@ -94,6 +95,7 @@ export function getTargetFileLineCount(absoluteFilePath: string): number | null 
  * @returns Maximum allowed lines (at least minLines, at most maxLines if provided)
  */
  
+// eslint-disable-next-line @typescript-eslint/max-params
 export function calculatePercentageThreshold(
     targetLineCount: number,
     percentage: number,

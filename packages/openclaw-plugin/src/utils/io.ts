@@ -2,6 +2,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { resolvePdPath } from '../core/paths.js';
 
+     
 export function normalizePath(filePath: string, projectDir: string): string {
   if (!filePath) return '';
 
@@ -17,6 +18,7 @@ export function normalizePath(filePath: string, projectDir: string): string {
   }
 
    
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let rel: string;
   if (projectIsWin) {
     const projectAbs = path.resolve(projectDir);

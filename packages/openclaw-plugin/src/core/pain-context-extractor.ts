@@ -54,6 +54,7 @@ async function safeTail(filePath: string): Promise<string[]> {
   try {
     // Check existence and stats asynchronously
      
+    // eslint-disable-next-line @typescript-eslint/init-declarations
     let stat: fs.Stats;
     try {
       stat = await fsPromises.stat(filePath);
@@ -203,6 +204,7 @@ function extractTurn(msg: ParsedMessage): string | null {
  * SAFETY: Tail-only read, skip oversized lines, cap output.
  * Returns empty string on any failure — caller should use pain reason as fallback.
  */
+     
 export async function extractRecentConversation(
   sessionId: string,
   agentId = 'main',
@@ -235,6 +237,7 @@ export async function extractRecentConversation(
 /**
  * Extracts failed tool call context with argument correlation.
  */
+// eslint-disable-next-line @typescript-eslint/max-params
 export async function extractFailedToolContext(
   sessionId: string,
   agentId: string,

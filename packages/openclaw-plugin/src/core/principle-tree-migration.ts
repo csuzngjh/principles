@@ -50,6 +50,7 @@ function trainingStateToTreePrinciple(
     text: `Principle ${principleId}`, // Minimal text, will be enriched from PRINCIPLES.md if available
     triggerPattern: '', // Unknown from legacy data
     action: '', // Unknown from legacy data
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define
     status: mapInternalizationStatusToPrincipleStatus(state.internalizationStatus),
     priority: 'P1', // Default priority
     scope: 'general',
@@ -92,6 +93,7 @@ function mapInternalizationStatusToPrincipleStatus(
  * This function is idempotent: it only migrates principles that don't exist
  * in tree.principles yet.
  */
+     
 export function migratePrincipleTree(
   stateDir: string,
   workspaceDir?: string

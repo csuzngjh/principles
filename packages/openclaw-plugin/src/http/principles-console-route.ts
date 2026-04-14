@@ -96,6 +96,7 @@ function createService(api: OpenClawPluginApi): ControlUiQueryService {
 }
 
  
+// eslint-disable-next-line @typescript-eslint/max-params
 function handleApiRoute(
   api: OpenClawPluginApi,
   pathname: string,
@@ -104,11 +105,13 @@ function handleApiRoute(
 ): Promise<boolean> | boolean {
   // Check authentication for API routes
    
+  // eslint-disable-next-line @typescript-eslint/no-use-before-define
   if (!validateGatewayAuth(req)) {
     json(res, 401, { error: 'unauthorized', message: 'Valid Gateway token required.' });
     return true;
   }
 
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let service: ControlUiQueryService;
   try {
     service = createService(api);
@@ -578,6 +581,7 @@ export function createPrinciplesConsoleRoutes(api: OpenClawPluginApi): OpenClawP
     path: ROUTE_PREFIX,
     auth: 'plugin',
     match: 'prefix',
+     
     async handler(req, res) {
       if (!api.rootDir) { text(res, 500, 'Plugin rootDir not available'); return true; }
       const url = new URL(req.url || ROUTE_PREFIX, 'http://127.0.0.1');
@@ -640,6 +644,7 @@ export function createPrinciplesConsoleRoute(api: OpenClawPluginApi): OpenClawPl
     path: ROUTE_PREFIX,
     auth: 'plugin',
     match: 'prefix',
+     
     async handler(req, res) {
       if (!api.rootDir) { text(res, 500, 'Plugin rootDir not available'); return true; }
       const url = new URL(req.url || ROUTE_PREFIX, 'http://127.0.0.1');

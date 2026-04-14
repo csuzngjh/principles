@@ -1,164 +1,212 @@
 # Project Research Summary
 
-**Project:** NocturnalWorkflowManager (v1.5)
-**Domain:** Multi-stage subagent workflow orchestration (Trinity 3-stage chain)
-**Researched:** 2026-04-05
+**Project:** KeywordLearningEngine for Correction Cues (v1.14)
+**Domain:** Dynamic keyword learning for AI agent correction signal detection
+**Researched:** 2026-04-14
 **Confidence:** HIGH
 
 ## Executive Summary
 
-NocturnalWorkflowManager is a new WorkflowManager implementation that wraps Trinity (Dreamer -> Philosopher -> Scribe) to integrate it into the existing subagent-workflow helper system. Trinity was designed as a standalone pipeline that bypasses the WorkflowManager state machine entirely; this integration bridges that gap by recording Trinity stage events to the shared WorkflowStore and providing the same lifecycle interface (startWorkflow, notifyWaitResult, finalizeOnce, sweepExpiredWorkflows) used by EmpathyObserver and DeepReflect.
+The KeywordLearningEngine replaces 15 hardcoded static correction-cue keywords with a learnable store that tracks false positive rate (FPR) and uses an LLM optimizer for continuous improvement. The existing codebase already contains a production-validated pattern in `empathy-keyword-matcher.ts` -- the correction cue system reuses this exact architecture with different seed keywords and a separate store file. No new dependencies are required.
 
-The recommended approach is composition over adaptation: NocturnalWorkflowManager composes TrinityRuntimeAdapter directly rather than forcing Trinity into the TransportDriver abstraction. No new dependencies are needed -- all required modules (TrinityRuntimeAdapter, WorkflowStore, WorkflowManager interface) already exist. The key architectural constraint is that NocturnalWorkflowManager is a net-new file that implements WorkflowManager independently; it does NOT extend EmpathyObserverWorkflowManager because Trinity has fundamentally different lifecycle semantics (3 sequential stages, no single runId, fire-and-forget async).
-
-The primary risk is that Trinity stages currently bypass the WorkflowManager state machine entirely, leaving workflows stuck in "active" forever. This must be addressed in the initial implementation, not added later. The secondary risk is missing idempotency for Philosopher and Scribe stages, which could cause non-deterministic artifacts on retry.
+The core insight from research: the empathy keyword system proves the pattern works with existing infrastructure (Node.js fs, OpenClaw subagent workflows). The KeywordLearningEngine for correction cues simply mirrors this pattern. However, seven pitfall categories were identified -- most critically, FPR calculation assumes verified labels that the system does not currently collect, and the learning loop can reinforce false positives rather than reduce them if FPR verification is not built into Phase 1.
 
 ## Key Findings
 
-### Recommended Stack
+### From STACK.md: Technology Stack
 
-No new external dependencies. NocturnalWorkflowManager composes existing validated modules from the plugin codebase. The key architectural decision is bypassing TransportDriver entirely -- TrinityRuntimeAdapter handles its own session lifecycle internally, so forcing it into RuntimeDirectDriver would be anti-architectural.
+| Technology | Decision | Rationale |
+|------------|----------|-----------|
+| TypeScript ^6.0.2 | Use existing | Already in plugin, no change needed |
+| Node.js fs module | Use existing | empathy-keyword-matcher.ts already uses this pattern |
+| OpenClaw Subagent Workflow | Reuse existing | Same pattern as empathy optimizer |
+| JSON file storage | Use existing | `correction_keywords.json` parallel to `empathy_keywords.json` |
+| No new dependencies | Confirmed | Empathy pattern proves this works without new packages |
 
-**Core technologies:**
-- `TrinityRuntimeAdapter` (via `OpenClawTrinityRuntimeAdapter`) -- stage invocation interface for Dreamer/Philosopher/Scribe; already production-ready, no changes needed
-- `WorkflowStore` -- SQLite event persistence reused for Trinity stage events; no schema changes needed
-- `WorkflowManager` interface (from `types.ts`) -- NocturnalWorkflowManager implements this contract
-- `runTrinityAsync` (from `nocturnal-service.ts`) -- async Trinity execution path with adapter; the manager calls this, not the polling-based driver pattern
+**Seed keywords** (15 terms migrated from detectCorrectionCue):
+- High-specificity: '搞错了', '理解错了', '你理解错了' (weight 0.7-0.8, FPR 0.1-0.15)
+- Medium-specificity: '不是这个', '不对', '错了', '重新来', 'you are wrong', 'redo' (weight 0.5-0.6, FPR 0.2-0.25)
+- High-genericity: 'again', 'not this' (weight 0.3-0.4, FPR 0.35-0.4)
 
-**What to build:**
-- New file: `nocturnal-workflow-manager.ts` implementing WorkflowManager, composing TrinityRuntimeAdapter
-- New type: `NocturnalWorkflowResult` wrapping `TrinityResult` for workflow spec contract
-- New `TrinityStageEvent` payload types for WorkflowStore event recording
-- Do NOT add `'trinity'` to `WorkflowTransport` union type -- that type is for runtime_direct paradigm only
+### From FEATURES.md: Feature Landscape
 
-### Expected Features
+**Table stakes (must-have for v1):**
+- Static keyword store with seed keywords migrated from detectCorrectionCue
+- Basic keyword matching replacing detectCorrectionCue()
+- Correction store persistence to `correction_keywords.json`
+- In-memory cache parallel to `_empathyKeywordCache`
 
-**Must have (table stakes):**
-- Single-reflector fallback mode -- wraps existing `invokeStubReflector`; reuses `TrinityConfig.useTrinity: false` path from service (LOW complexity)
-- Basic workflow lifecycle -- implements `startWorkflow`, `notifyWaitResult`, `finalizeOnce`, `sweepExpiredWorkflows` using existing WorkflowStore and patterns (LOW complexity)
-- Trinity stage result parsing -- adapter already extracts DreamerOutput/PhilosopherOutput/Scribe artifact; manager routes through arbiter/executability pipeline (MEDIUM complexity)
-- Trinity telemetry propagation -- `TrinityTelemetry` already constructed by `runTrinityAsync`; manager passes through `NocturnalRunDiagnostics` (LOW complexity)
+**Differentiators (add after validation):**
+- Subagent optimization trigger (every 50 turns or 6 hours)
+- FPR feedback integration with trajectory recording
+- LLM-discovered new correction expressions
 
-**Should have (competitive):**
-- Full Trinity chain with real subagent execution -- requires runtimeAdapter in options; `runTrinityAsync` with `OpenClawTrinityRuntimeAdapter` (HIGH complexity but adapter already exists)
-- Tournament selection with threshold validation -- deterministic winner from ranked candidates via `runTournament()` (MEDIUM complexity, internal to stub Scribe)
-- Multi-stage progress tracking -- track Dreamer -> Philosopher -> Scribe separately with fail-closed on stage failure (MEDIUM complexity)
+**Anti-features (avoid):**
+- Real-time FPR updates (too noisy; batch via subagent instead)
+- Fuzzy/approximate matching (increases false positives dramatically)
+- Keyword auto-removal (premature removal risk; LLM should decide)
+- Per-user keyword stores (complexity explosion; defer to v2)
 
-**Defer (v2+):**
-- Real-time stage progress callbacks -- requires extending WorkflowManager interface or adding callbacks; not aligned with current API patterns
-- Partial result salvage on Philosopher failure -- would add complexity; current design is fail-closed intentionally
-- Tournament trace visibility -- `TournamentTraceEntry[]` in workflow debug summary for explainability
+**Priority:**
+- P1: Seed store + basic matching + persistence + cache
+- P2: Subagent optimization + FPR feedback + LLM discovery
 
-### Architecture Approach
+### From ARCHITECTURE.md: System Design
 
-NocturnalWorkflowManager is a net-new file in `subagent-workflow/` that implements WorkflowManager independently from EmpathyObserver/DeepReflect. The core architectural constraint: Trinity is a 3-stage pipeline with fundamentally different lifecycle semantics than single-shot workflows -- it has no single runId, uses fire-and-forget async, and NocturnalService handles its own artifact persistence. Attempting to extend RuntimeDirectDriver or force Trinity into TransportDriver creates anti-patterns.
+**Location:** `packages/openclaw-plugin/src/core/` alongside existing empathy modules
 
-**Major components:**
-1. `NocturnalWorkflowManager` (NEW) -- implements WorkflowManager, composes TrinityRuntimeAdapter, records Trinity stage events to WorkflowStore, manages outer lifecycle (pending -> active -> finalizing -> completed/terminal_error)
-2. `NocturnalService` (existing) -- owns Trinity pipeline orchestration and artifact persistence; wrapped by manager, NOT modified in behavior
-3. `OpenClawTrinityRuntimeAdapter` (existing) -- adapts plugin subagent API to TrinityRuntimeAdapter interface; creates/waits/deletes sessions per stage internally
-4. `WorkflowStore` (existing) -- SQLite persistence reused for Trinity stage events (trinity_dreamer_start, trinity_philosopher_complete, etc.)
+**Two-layer design:**
+```
+KeywordLearner (base)
+├── match(), load(), save(), shouldOptimize(), applyUpdates()
+└── CorrectionCueLearner (subclass)
+    ├── seed keywords (15 terms)
+    └── binary detection (no severity mapping)
+```
 
-### Critical Pitfalls
+**Proposed new files:**
+| File | Purpose |
+|------|---------|
+| `core/keyword-types.ts` | Generic types extractable from empathy-types.ts |
+| `core/keyword-learner.ts` | Base class ported from empathy pattern |
+| `core/correction-cue-matcher.ts` | Correction-specific learner with seed keywords |
 
-1. **Trinity bypasses WorkflowManager state machine** -- Trinity's OpenClawTrinityRuntimeAdapter executes stages without recording state transitions. Workflows stay "active" forever. Prevention: NocturnalWorkflowManager must call recordEvent() after each stage and update workflow state appropriately.
+**Integration:** In `prompt.ts`:
+- Replace `detectCorrectionCue()` with `CorrectionCueLearner.match()`
+- Module-level cache: `_correctionCueCache`
+- Trigger optimization via existing `EmpathyObserverWorkflowManager` pattern
 
-2. **Stage failure leaves workflow stuck in "active"** -- if Philosopher fails, runTrinityAsync returns early with success:false but WorkflowStore never updates. Prevention: implement stage-level failure handling that transitions workflow to terminal_error and records TrinityStageFailure[].
+**Build order:** types -> base class -> subclass -> prompt.ts integration -> optimization trigger -> testing
 
-3. **No idempotency for Philosopher and Scribe** -- only Dreamer session uses idempotencyKey. If Philosopher times out but succeeded server-side, re-invoking creates duplicate rankings. Prevention: derive idempotency keys per-stage from parent workflow + stage + input hash.
+### From PITFALLS.md: Critical Risks
 
-4. **No intermediate result persistence between stages** -- DreamerOutput passed in-memory to Philosopher. Crash after Dreamer success loses output, re-running regenerates new candidates. Prevention: persist each stage output to WorkflowStore after completion; reload on restart.
+**Top 5 pitfalls requiring prevention:**
 
-5. **No observable chain execution for external monitors** -- runTrinityAsync is fire-and-forget; external callers see no progress between "active" and finalization. Prevention: emit lifecycle events after each stage (stage_dreamer_completed, etc.).
+| Pitfall | Severity | Prevention |
+|---------|----------|------------|
+| FPR calculation assumes verified labels (never actually calculated from labeled data) | CRITICAL | Add explicit verification step; track truePositiveCount vs falsePositiveCount separately |
+| Learning loop reinforces false positives (hitCount conflates TP and FP) | CRITICAL | Distinguish hitCount from truePositiveCount; lower weight on confirmed FP |
+| Per-message keyword matching causes latency at scale (O(n) scan over all terms) | CRITICAL | Trie or Bloom filter; cap store at 200 terms |
+| State file corruption from unsafe writes (writeFileSync crash = JSON parse failure) | CRITICAL | Temp-file-then-rename atomic write pattern |
+| Module-level cache causes stale state across reloads (cache not invalidated on disk update) | CRITICAL | Invalidate cache after saveKeywordStore |
+
+**Phase mapping (critical items must be in Phase 1):**
+- Phase 1: FPR verification infrastructure, atomic writes, cache invalidation, store size limits, performance baseline
+- Phase 2: Feedback collection, throttle logic (depends on Phase 1 infrastructure)
 
 ## Implications for Roadmap
 
-Based on research, suggested phase structure:
+### Suggested Phase Structure
 
-### Phase 1: Foundation and Single-Reflector Mode
-**Rationale:** Start with the lowest-risk path that validates the manager pattern works. Single-reflector mode (useTrinity: false) reuses existing invokeStubReflector logic and does not require TrinityRuntimeAdapter integration. This establishes the WorkflowManager interface contract without multi-stage complexity.
+**Phase 1: Foundation -- Seed Store and Safe Persistence**
+*Rationale:* Before any learning can work, the infrastructure must be correct. FPR tracking, atomic writes, cache invalidation, and store size limits are all prerequisite to learning. Cannot skip to optimization without this.
 
-**Delivers:** NocturnalWorkflowManager implementing WorkflowManager with single-reflector path. Basic lifecycle (startWorkflow, finalizeOnce, sweepExpiredWorkflows). Same artifact persistence pattern as service.
+**Delivers:**
+- `correction-keyword-matcher.ts` with seed keywords migrated from detectCorrectionCue
+- Atomic write (temp-file-then-rename) for correction_keywords.json
+- Cache invalidation after save
+- Store size limit (200 terms hard cap)
+- Performance baseline benchmark (matching latency with 50/100/200 terms)
+- Remove redundant detectCorrectionCue (ensure seed coverage of all 15 terms)
 
-**Addresses:** Single-reflector NocturnalWorkflowManager (P1), Basic workflow lifecycle (P1), Nocturnal artifact persistence (P1) from FEATURES.
+**Avoids:** Pitfall 4 (state file corruption), Pitfall 7 (stale cache), Pitfall 5 (unbounded growth), Pitfall 3 (latency at scale)
 
-**Avoids:** Stage-related pitfalls (2-5) are not yet relevant; no multi-stage execution yet.
+**Research flag:** None needed -- existing empathy-keyword-matcher.ts provides exact pattern to follow.
 
-### Phase 2: Trinity Integration with Event Recording
-**Rationale:** Now integrate real Trinity via runTrinityAsync. The critical implementation requirement: every Trinity stage must record events to WorkflowStore. This addresses Pitfall 1 (Trinity bypasses state machine) and sets up stage failure handling. Cannot skip this because workflows would be stuck active forever.
+---
 
-**Delivers:** NocturnalWorkflowManager with TrinityRuntimeAdapter injection. Trinity stage events recorded (trinity_dreamer_start, trinity_dreamer_complete, trinity_philosopher_start, etc.). Workflow state transitions (active -> finalizing -> completed/terminal_error). Basic stage failure handling.
+**Phase 2: Learning Loop -- FPR Feedback and Optimization Trigger**
+*Rationale:* Once persistence infrastructure exists, implement the feedback loop. FPR must be calculated from verified labels, not LLM guesses. This phase requires Phase 1's atomic writes and cache invalidation.
 
-**Uses:** OpenClawTrinityRuntimeAdapter, runTrinityAsync, WorkflowStore recordEvent().
+**Delivers:**
+- FPR verification infrastructure (truePositiveCount / falsePositiveCount tracking)
+- Subagent validation step (confirm when keyword match was actually a correction)
+- shouldTriggerOptimization() with time-based throttle (not turn-based)
+- Correction-specific optimization prompt builder
+- Optimization call throttling (max N per day)
 
-**Avoids:** Pitfall 1 (Trinity bypasses state machine) -- each stage now records events. Pitfall 7 (no observability) -- stage events enable external monitoring.
+**Avoids:** Pitfall 1 (FPR drift from unverified labels), Pitfall 2 (learning reinforces FP), Pitfall 6 (optimization cost abuse)
 
-**Research flag:** Phase 2 likely needs deeper research on stage failure recovery paths (exact state transitions when Philosopher fails mid-chain).
+**Research flag:** Phase 2 needs validation of exact verification mechanism -- how does subagent confirm whether a keyword match was actually a correction vs a false positive?
 
-### Phase 3: Intermediate Persistence and Idempotency
-**Rationale:** After Trinity integration works end-to-end, add crash recovery capability. Persist DreamerOutput and PhilosopherOutput to WorkflowStore so restart/retry does not regenerate candidates. Add per-stage idempotency keys. This addresses Pitfalls 3 and 4 which are not acceptable for production.
+---
 
-**Delivers:** Stage output persistence to WorkflowStore. Per-stage idempotency keys. Crash-recovery path that resumes from last completed stage.
+**Phase 3: LLM Discovery and Full Integration**
+*Rationale:* After feedback loop works, add LLM-based keyword discovery. The subagent analyzes recent messages and proposes add/update/remove actions. This completes the learning loop.
 
-**Avoids:** Pitfall 3 (no idempotency for Philosopher/Scribe). Pitfall 4 (no intermediate persistence). Dreamer output loss on crash.
+**Delivers:**
+- buildCorrectionOptimizationPrompt() function
+- applyCorrectionUpdates() with add/update/remove rules
+- LLM-discovered keywords added to store
+- Integration test with trajectory recording (correctionDetected flag feeds back)
 
-**Research flag:** Phase 3 needs validation of idempotency assumptions (are Philosopher/Scribe truly idempotent with same inputs?).
+**Avoids:** Remaining feature gaps from FEATURES.md differentiators
 
-### Phase 4: Fallback and Evolution Worker Integration
-**Rationale:** Replace direct executeNocturnalReflectionAsync call in evolution-worker.ts with NocturnalWorkflowManager.startWorkflow(). Define fallback behavior when Trinity fails. Current design falls back to stubs within Trinity, not to single-stage WorkflowManager -- Phase 4 should decide if this is acceptable or if fallback should delegate to EmpathyObserver/DeepReflect.
+**Research flag:** None needed -- empathyObserverWorkflowSpec pattern is well-established.
 
-**Delivers:** EvolutionWorker uses NocturnalWorkflowManager exclusively for sleep_reflection tasks. Fallback behavior documented and implemented. getWorkflowDebugSummary includes Trinity stage status.
+---
 
-**Avoids:** Pitfall 5 (fallback bypasses single-stage manager) -- either document as acceptable or implement proper delegation.
+**Phase 4: Testing and Validation**
+*Rationale:* Complete validation before v1.14 ships. Integration tests verify all pipeline components work together.
+
+**Delivers:**
+- Integration tests: matching + optimization + persistence cycle
+- FPR verification test: confirm FP match reduces keyword weight
+- Atomic write recovery test: kill process mid-save, verify recoverable
+- Store size limit test: attempt to exceed cap, verify enforcement
+
+**Research flag:** None.
 
 ### Phase Ordering Rationale
 
-- Phase 1 (single-reflector) before Phase 2 (Trinity) -- validate manager contract without multi-stage complexity
-- Phase 2 before Phase 3 -- must have working Trinity before worrying about crash recovery
-- Phase 3 before Phase 4 -- idempotency and persistence must exist before integrating into evolution worker
-- All phases use existing modules (no new dependencies), so no separate dependency resolution phase needed
+1. **Phase 1 before Phase 2:** FPR verification infrastructure requires atomic writes and cache invalidation. Learning loop cannot work without safe persistence.
+2. **Phase 2 before Phase 3:** Optimization depends on feedback collection. LLM discovery without verified FPR values produces the same drift problem.
+3. **Phase 3 before Phase 4:** Full integration must exist before testing.
+4. **No separate dependency phase:** All technologies already exist in plugin. No new packages to resolve.
 
 ### Research Flags
 
-Phases likely needing deeper research during planning:
-- **Phase 3:** Stage idempotency validation -- need to verify Philosopher/Scribe produce same output on re-invocation with same inputs. May need code changes to adapter if not currently deterministic.
-- **Phase 4:** Fallback behavior decision -- current design (stub-only fallback) may be intentional; needs explicit decision from product requirements.
+**Needs research during planning:**
+- **Phase 2:** Exact FPR verification mechanism -- how does the system confirm whether a match was a true positive or false positive? Current empathy system does not actually do this verification (stats.totalFalsePositives is always 0). This needs a product decision.
 
-Phases with standard patterns (skip research-phase):
-- **Phase 1:** Single-reflector workflow lifecycle follows established EmpathyObserver/DeepReflect patterns exactly.
-- **Phase 2:** Trinity stage event recording follows existing WorkflowStore event pattern; state machine transitions are well-defined in types.ts.
+**Phases with standard patterns (skip research):**
+- **Phase 1:** File persistence, cache invalidation, store size limits -- all follow existing empathy-keyword-matcher.ts patterns exactly.
+- **Phase 3:** LLM optimization workflow -- follows existing EmpathyObserverWorkflowManager pattern exactly.
+- **Phase 4:** Testing patterns -- existing test files in plugin.
 
 ## Confidence Assessment
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack | HIGH | All modules exist and are production-validated; no new dependencies. Architecture decision (bypass TransportDriver) is well-reasoned in STACK.md |
-| Features | HIGH | Based on code analysis of existing nocturnal-service.ts, nocturnal-trinity.ts, empathy-observer-workflow-manager.ts |
-| Architecture | HIGH | Clear component boundaries; build order (types -> manager -> evolution-worker) is logical and non-cyclic |
-| Pitfalls | HIGH | Based on code analysis of runtime-direct-driver.ts, nocturnal-trinity.ts, and review of runtime_path_closure (4/5) |
+| Stack | HIGH | No new dependencies; empathy-keyword-matcher.ts proves pattern works with existing infrastructure |
+| Features | HIGH | Based on existing empathy integration analysis and PROJECT.md v1.14 milestone |
+| Architecture | HIGH | Clear two-layer design; build order is logical and non-cyclic; existing pattern to follow |
+| Pitfalls | HIGH | Based on code analysis of empathy-keyword-matcher.ts, empathy-types.ts, prompt.ts |
 
 **Overall confidence:** HIGH
 
 ### Gaps to Address
 
-- **TrinityRuntimeAdapter idempotency for Philosopher/Scribe:** Current adapter was not analyzed for idempotent re-invocation. Phase 3 must validate or implement this.
-- **Fallback behavior specification:** Whether Trinity failure should fall back to single-stage workflow manager is an open product decision, not a technical gap. Needs requirements input.
-- **Stage timeout configuration:** Trinity stage timeout is 180s per stage (per FEATURES). Not clear if this is configurable or hardcoded. Should be surfaced in options.
+| Gap | Impact | Resolution |
+|-----|--------|------------|
+| FPR verification mechanism not implemented in empathy system | HIGH -- FPR values are currently LLM guesses, not calculated from data | Phase 2 must design and implement explicit verification step |
+| Keyword count discrepancy (15 in PROJECT.md vs 16 counted from code) | LOW -- minor seed keyword count issue | Verify exact seed list during Phase 1 implementation |
+| Per-user keyword adaptation deferred to v2 | MEDIUM -- some users may have different correction styles | Document as v2 feature; design should not preclude it |
 
 ## Sources
 
 ### Primary (HIGH confidence)
-- `packages/openclaw-plugin/src/core/nocturnal-trinity.ts` -- TrinityRuntimeAdapter interface, OpenClawTrinityRuntimeAdapter, runTrinityAsync (1300+ lines)
-- `packages/openclaw-plugin/src/service/nocturnal-service.ts` -- executeNocturnalReflectionAsync, Trinity vs single-reflector decision logic
-- `packages/openclaw-plugin/src/service/subagent-workflow/types.ts` -- WorkflowManager interface, SubagentWorkflowSpec
-- `packages/openclaw-plugin/src/service/subagent-workflow/empathy-observer-workflow-manager.ts` -- Existing WorkflowManager implementation pattern
-- `packages/openclaw-plugin/src/service/subagent-workflow/workflow-store.ts` -- SQLite schema, event recording
-- `packages/openclaw-plugin/src/service/subagent-workflow/runtime-direct-driver.ts` -- TransportDriver pattern
+- `packages/openclaw-plugin/src/core/empathy-keyword-matcher.ts` -- existing learning pattern (335 lines)
+- `packages/openclaw-plugin/src/core/empathy-types.ts` -- data model template
+- `packages/openclaw-plugin/src/hooks/prompt.ts:87-111` -- current detectCorrectionCue with hardcoded keywords
+- `packages/openclaw-plugin/src/hooks/prompt.ts:461-604` -- empathy keyword integration pattern
+- `packages/openclaw-plugin/src/service/subagent-workflow/` -- optimization workflow
 
 ### Secondary (HIGH confidence)
-- `ops/ai-sprints/.../reviewer-b.md` -- runtime_path_closure: 4/5, relevant architectural review findings
-- `docs/design/2026-03-31-subagent-workflow-helper-design.md` -- referenced design doc for workflow helper system
+- `.planning/PROJECT.md` -- v1.14 milestone definition
+- `packages/openclaw-plugin/package.json` -- current dependencies and versions
 
 ---
-*Research completed: 2026-04-05*
+
+*Research completed: 2026-04-14*
 *Ready for roadmap: yes*

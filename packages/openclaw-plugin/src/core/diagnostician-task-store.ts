@@ -83,6 +83,7 @@ export async function addDiagnosticianTask(
   const filePath = resolveTasksPath(stateDir);
   await withLockAsync(filePath, async () => {
      
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define
     const store = readTaskStoreSync(filePath);
     store.tasks[taskId] = {
       prompt,
@@ -106,6 +107,7 @@ export async function completeDiagnosticianTask(
   const filePath = resolveTasksPath(stateDir);
   await withLockAsync(filePath, async () => {
      
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define
     const store = readTaskStoreSync(filePath);
     delete store.tasks[taskId];
     const tmpPath = filePath + '.tmp';

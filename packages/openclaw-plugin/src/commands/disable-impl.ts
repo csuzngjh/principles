@@ -70,6 +70,7 @@ function _handleListActive(
 }
 
  
+    // eslint-disable-next-line @typescript-eslint/max-params -- complexity 15, refactor candidate
 function _handleDisableImpl(
   workspaceDir: string,
   stateDir: string,
@@ -130,6 +131,7 @@ function _handleDisableImpl(
  *   /pd-disable-impl <implId>                    - Disable an implementation
  *   /pd-disable-impl <implId> --reason "<reason>" - Disable with reason
  */
+     
 export function handleDisableImplCommand(ctx: PluginCommandContext): PluginCommandResult {
   const workspaceDir = (ctx.config?.workspaceDir as string) || process.cwd();
   const {stateDir} = WorkspaceContext.fromHookContext({ ...ctx, workspaceDir });

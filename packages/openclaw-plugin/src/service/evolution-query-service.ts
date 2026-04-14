@@ -155,6 +155,7 @@ export class EvolutionQueryService {
    * 注意：不关闭 trajectory，因为它是单例由 TrajectoryRegistry 管理
    */
    
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   dispose(): void {
     // EvolutionQueryService 不拥有 trajectory，所以不关闭它
     // trajectory 是由 TrajectoryRegistry 管理的单例

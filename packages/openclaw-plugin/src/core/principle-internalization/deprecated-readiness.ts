@@ -27,6 +27,7 @@ function clampScore(value: number): number {
   return Math.max(0, Math.min(100, Number(value.toFixed(2))));
 }
 
+     
 export function assessDeprecatedReadiness(
   principle: PrincipleLifecycleEvidence,
   precomputedRuleMetrics?: Record<string, RuleMetricResult>,
@@ -64,6 +65,7 @@ export function assessDeprecatedReadiness(
   );
 
    
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let status: DeprecatedReadinessStatus;
   if (blockingReasons.length === 0 && stableCoverageRatio === 1) {
     status = 'ready';

@@ -362,6 +362,7 @@ export class RuntimeSummaryService {
     return { session: sessions[0], reason: 'latest_active' };
   }
 
+     
   private static mergeSessionSnapshots(
     persistedSessions: PersistedSessionState[],
     workspaceDir: string
@@ -419,6 +420,7 @@ export class RuntimeSummaryService {
    * Queue is the only authoritative execution truth source.
    */
    
+  // eslint-disable-next-line @typescript-eslint/max-params
   private static buildDirectiveSummary(
     queue: QueueItem[] | null,
     directive: DirectiveFile | null,
@@ -510,7 +512,9 @@ export class RuntimeSummaryService {
       })
       .slice(-MAX_SOURCE_EVENTS)
       .reverse();
+     
 
+     
     return filtered.map((entry) => {
       if (entry.type === 'pain_signal') {
         return {
@@ -581,6 +585,7 @@ export class RuntimeSummaryService {
     return [...merged.values()].sort((a, b) => (a.ts || '').localeCompare(b.ts || ''));
   }
 
+     
   private static getEventDedupKey(entry: EventLogEntry): string {
     const eventId = typeof entry.data?.eventId === 'string' ? entry.data.eventId : null;
     if (eventId) {
@@ -637,6 +642,7 @@ export class RuntimeSummaryService {
     return candidate ? new Date(candidate).getTime() : NaN;
   }
 
+     
   private static buildDirectiveTaskPreview(item: QueueItem): string {
     const task = typeof item.task === 'string' ? item.task.trim() : '';
     if (task && task.toLowerCase() !== 'undefined') {

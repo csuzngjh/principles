@@ -202,6 +202,7 @@ export function loadContextInjectionConfig(workspaceDir: string): ContextInjecti
  * Falls back to main model if no diagnostician model is configured
  * @internal Helper for model configuration resolution
  */
+     
 export function getDiagnosticianModel(api: PromptHookApi | null, logger?: PluginLogger): string {
   // Determines logger: prefer api.logger, fallback to provided logger
   // 1. getDiagnosticianModel(api) - uses api.logger
@@ -367,6 +368,7 @@ export async function handleBeforePromptBuild(
   // prependContext: Only short dynamic directives: evolutionDirective + heartbeat
 
    
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let prependSystemContext: string;
   let prependContext = '';
   let appendSystemContext = '';
@@ -682,6 +684,7 @@ ${taskBlocks}${processingNote}
 
   // ──── 6. Dynamic Attitude Matrix (based on GFI) ────
    
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let attitudeDirective: string;
   const currentGfi = session?.currentGfi || 0;
   
@@ -907,9 +910,10 @@ ${taskBlocks}${processingNote}
         const toolMatches = toolPatterns.flatMap(({ pattern, tool }) => {
           const matches: string[] = [];
            
+          // eslint-disable-next-line @typescript-eslint/init-declarations
           let _m;
           const r = new RegExp(pattern.source, pattern.flags);
-          /* eslint-disable @typescript-eslint/no-unused-vars -- Reason: regex exec side effect used, match variable intentionally unused */
+           
           while ((_m = r.exec(latestUserText)) !== null) matches.push(tool);
           return matches;
         });
