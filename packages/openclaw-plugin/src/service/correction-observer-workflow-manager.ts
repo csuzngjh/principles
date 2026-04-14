@@ -7,7 +7,7 @@
  * Follows the established WorkflowManagerBase pattern from EmpathyObserverWorkflowManager.
  */
 
-import type { PluginLogger } from '../../openclaw-sdk.js';
+import type { PluginLogger } from '../openclaw-sdk.js';
 import type {
     SubagentWorkflowSpec,
     WorkflowMetadata,
@@ -15,9 +15,9 @@ import type {
     WorkflowPersistContext,
     WorkflowHandle,
 } from './subagent-workflow/types.js';
-import type { RuntimeDirectDriver } from './runtime-direct-driver.js';
-import { WorkflowManagerBase } from './workflow-manager-base.js';
-import { isSubagentRuntimeAvailable } from '../../utils/subagent-probe.js';
+import type { RuntimeDirectDriver } from './subagent-workflow/runtime-direct-driver.js';
+import { WorkflowManagerBase } from './subagent-workflow/workflow-manager-base.js';
+import { isSubagentRuntimeAvailable } from '../utils/subagent-probe.js';
 import type {
     CorrectionObserverPayload,
     CorrectionObserverResult,

@@ -385,7 +385,10 @@ function persistArtifact(
     fs.mkdirSync(dir, { recursive: true });
   }
 
-  atomicWriteFileSync(artifactPath, JSON.stringify(sampleRecord, null, 2));
+  // Atomic write: temp file + rename prevents corruption on crash
+  const tmpPath = artifactPath + '.tmp';
+  fs.writeFileSync(tmpPath, JSON.stringify(sampleRecord, null, 2), 'utf8');
+  fs.renameSync(tmpPath, artifactPath);
   return artifactPath;
 }
 
