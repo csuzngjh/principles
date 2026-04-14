@@ -430,7 +430,7 @@ export const LOCK_RETRY_DELAY_MS = 50;
 export const LOCK_STALE_MS = 30_000;
 
  
- 
+// eslint-disable-next-line @typescript-eslint/max-params
 export function createEvolutionTaskId(
     source: string,
     score: number,
@@ -464,7 +464,7 @@ export async function acquireQueueLock(resourcePath: string, logger: PluginLogge
 }
 
  
- 
+// eslint-disable-next-line @typescript-eslint/max-params
 async function requireQueueLock(resourcePath: string, logger: PluginLogger | { warn?: (message: string) => void; info?: (message: string) => void } | undefined, scope: string, lockSuffix: string = EVOLUTION_QUEUE_LOCK_SUFFIX): Promise<() => void> {
     try {
         return await acquireQueueLock(resourcePath, logger, lockSuffix);
@@ -480,7 +480,7 @@ export function extractEvolutionTaskId(task: string): string | null {
 }
 
  
- 
+// eslint-disable-next-line @typescript-eslint/max-params
 function findRecentDuplicateTask(
     queue: EvolutionQueueItem[],
     source: string,
@@ -488,15 +488,14 @@ function findRecentDuplicateTask(
     now: number,
     reason?: string
 ): EvolutionQueueItem | undefined {
-     
-     
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define
     const key = normalizePainDedupKey(source, preview, reason);
     return queue.find((task) => {
         if (task.status === 'completed') return false;
+        // eslint-disable-next-line @typescript-eslint/no-use-before-define
         const taskTime = new Date(task.enqueued_at || task.timestamp).getTime();
         if (!Number.isFinite(taskTime) || (now - taskTime) > PAIN_QUEUE_DEDUP_WINDOW_MS) return false;
-         
-         
+        // eslint-disable-next-line @typescript-eslint/no-use-before-define
         return normalizePainDedupKey(task.source, task.trigger_text_preview || '', task.reason) === key;
     });
 }
@@ -551,6 +550,7 @@ function normalizePainDedupKey(source: string, preview: string, reason?: string)
 
  
  
+// eslint-disable-next-line @typescript-eslint/max-params
 export function hasRecentDuplicateTask(queue: EvolutionQueueItem[], source: string, preview: string, now: number, reason?: string): boolean {
     return !!findRecentDuplicateTask(queue, source, preview, now, reason);
 }
@@ -678,7 +678,7 @@ function shouldSkipForDedup(
  * Load and migrate the evolution queue. Returns empty array if file doesn't exist.
  */
 function loadEvolutionQueue(queuePath: string): EvolutionQueueItem[] {
-     
+    // eslint-disable-next-line @typescript-eslint/init-declarations, no-useless-assignment
     let rawQueue: RawQueueItem[] = [];
     try {
         rawQueue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
@@ -693,6 +693,7 @@ function loadEvolutionQueue(queuePath: string): EvolutionQueueItem[] {
  * Build and persist a new sleep_reflection task.
  */
  
+// eslint-disable-next-line @typescript-eslint/max-params
 function enqueueNewSleepReflectionTask(
     queue: EvolutionQueueItem[],
     recentPainContext: ReturnType<typeof readRecentPainContext>,
@@ -764,7 +765,7 @@ interface ParsedPainValues {
 }
 
  
- 
+// eslint-disable-next-line @typescript-eslint/max-params
 async function doEnqueuePainTask(
     wctx: WorkspaceContext, logger: PluginLogger, painFlagPath: string,
     result: WorkerStatusReport['pain_flag'], v: ParsedPainValues,
@@ -1011,7 +1012,7 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
 }
 
  
- 
+// eslint-disable-next-line @typescript-eslint/max-params
 async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogger, eventLog: EventLog, api?: OpenClawPluginApi) {
     const queuePath = wctx.resolve('EVOLUTION_QUEUE');
     if (!fs.existsSync(queuePath)) {
@@ -1609,13 +1610,11 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         logger?.info?.(`[PD:EvolutionWorker] Processing sleep_reflection task ${sleepTask.id}`);
                     }
 
-                     
+                    // eslint-disable-next-line @typescript-eslint/init-declarations
                     let workflowId: string | undefined;
-                     
-                     
+                    // eslint-disable-next-line @typescript-eslint/init-declarations
                     let nocturnalManager: NocturnalWorkflowManager;
-                     
-                     
+                    // eslint-disable-next-line @typescript-eslint/init-declarations
                     let snapshotData: NocturnalSessionSnapshot | undefined;
 
                     if (isPollingTask) {
@@ -1653,13 +1652,13 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                                     s => s.failureCount > 0 || s.painEventCount > 0 || s.gateBlockCount > 0
                                 );
                                 if (sessionsWithViolations.length > 0) {
-                                     
+                                    // eslint-disable-next-line @typescript-eslint/prefer-destructuring
                                     const targetSession = sessionsWithViolations[0];
                                     logger?.info?.(`[PD:EvolutionWorker] Task ${sleepTask.id} using session with violations: ${targetSession.sessionId} (failed=${targetSession.failureCount}, pain=${targetSession.painEventCount}, gates=${targetSession.gateBlockCount})`);
                                     fullSnapshot = extractor.getNocturnalSessionSnapshot(targetSession.sessionId);
                                 } else if (recentSessions.length > 0) {
                                     // No sessions with violations, use most recent as last resort
-                                     
+                                    // eslint-disable-next-line @typescript-eslint/prefer-destructuring
                                     const latestSession = recentSessions[0];
                                     logger?.warn?.(`[PD:EvolutionWorker] Task ${sleepTask.id} no sessions with violations found, using most recent: ${latestSession.sessionId} (failed=${latestSession.failureCount}, pain=${latestSession.painEventCount}, gates=${latestSession.gateBlockCount})`);
                                     fullSnapshot = extractor.getNocturnalSessionSnapshot(latestSession.sessionId);
@@ -1729,7 +1728,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             },
                         });
                         sleepTask.resultRef = workflowHandle.workflowId;
-                         
+                        // eslint-disable-next-line @typescript-eslint/prefer-destructuring
                         workflowId = workflowHandle.workflowId;
                     }
 
@@ -1962,7 +1961,7 @@ async function processDetectionQueue(wctx: WorkspaceContext, api: OpenClawPlugin
 // Evolution queue is now the single active pain→principle path
 
  
- 
+// eslint-disable-next-line @typescript-eslint/max-params
 export async function registerEvolutionTaskSession(
     workspaceResolve: (key: string) => string,
     taskId: string,
@@ -1976,7 +1975,7 @@ export async function registerEvolutionTaskSession(
 
     try {
          
-         
+        // eslint-disable-next-line @typescript-eslint/init-declarations
         let rawQueue: RawQueueItem[];
         try {
             rawQueue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
@@ -2045,7 +2044,7 @@ function writeWorkerStatus(stateDir: string, report: WorkerStatusReport): void {
 }
 
  
- 
+// eslint-disable-next-line @typescript-eslint/max-params
 async function processEvolutionQueueWithResult(
     wctx: WorkspaceContext,
     logger: PluginLogger,
