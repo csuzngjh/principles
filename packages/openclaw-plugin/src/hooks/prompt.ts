@@ -19,6 +19,7 @@ import {
   getKeywordStoreSummary,
 } from '../core/empathy-keyword-matcher.js';
 import { severityToPenalty, DEFAULT_EMPATHY_KEYWORD_CONFIG } from '../core/empathy-types.js';
+import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
 
 // Module-level empathy state — shared across calls to avoid per-turn I/O
 let _empathyTurnCounter = 0;
@@ -84,31 +85,6 @@ function getTextContent(message: unknown): string {
   return '';
 }
 
-function detectCorrectionCue(text: string): string | null {
-  const normalized = text
-    .trim()
-    .toLowerCase()
-    .replace(/[.,!?;:，。！？；：]/g, '');
-  const cues = [
-    '不是这个',
-    '不对',
-    '错了',
-    '搞错了',
-    '理解错了',
-    '你理解错了',
-    '重新来',
-    '再试一次',
-    'you are wrong',
-    'wrong file',
-    'not this',
-    'redo',
-    'try again',
-    'again',
-    'please redo',
-    'please try again',
-  ];
-  return cues.find((cue) => normalized.includes(cue)) ?? null;
-}
 
 /**
  * Validates model format, expects "provider/model" format
@@ -331,7 +307,8 @@ export async function handleBeforePromptBuild(
 
     if (latestUserIndex) {
       const userText = getTextContent(latestUserIndex.message);
-      const correctionCue = detectCorrectionCue(userText);
+      const correctionCueResult = CorrectionCueLearner.get(wctx.stateDir).match(userText);
+      const correctionCue = correctionCueResult.matched ? correctionCueResult.matchedTerms[0] : null;
       let referencesAssistantTurnId: number | null = null;
       const hasPriorAssistant = event.messages
         .slice(0, latestUserIndex.index)
