@@ -101,8 +101,12 @@ if (painCheckResult.enqueued) {
 
 ## 验证清单
 
-- [ ] P1: 超时清理生效，30 分钟后的卡住任务被标记为 failed
-- [ ] P2: 双 store 状态一致，不再有分裂
-- [ ] P3: agent 繁忙时 wake layer 自动重试，诊断任务最终被执行
-- [ ] CI: tsc-plugin + Lint 全部通过
-- [ ] E2E: 创建 PR 并合并到 main
+- [x] P1: 超时清理生效，30 分钟后的卡住任务被标记为 completed + `diagnostician_timeout`
+- [x] P1: `.diagnostician_report_*.json` 文件在超时时被自动清理
+- [x] P1: sleep_reflection 超时保持 60 分钟默认值，resolution = `failed_max_retries`
+- [x] P1: 单元测试 4 个用例全部通过 (evolution-worker.timeout.test.ts)
+- [x] P3: `requestHeartbeatNow` 替代 `runHeartbeatOnce`，日志确认 `available: true` + `Heartbeat wake requested`
+- [x] Watchdog 重构为 3 个子函数 (CheckStale, CheckUncleared, CheckNocturnal)
+- [x] CI: tsc-plugin + Lint 全部通过 (0 errors)
+- [x] E2E: 运行时注入 61 分钟陈旧任务，确认超时机制正确触发
+- [ ] P2: 统一状态源（待后续实现 — 双 store 分裂根治）
