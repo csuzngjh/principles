@@ -19,6 +19,14 @@ export interface CorrectionKeyword {
   source: 'seed' | 'llm' | 'user';
   /** ISO 8601 timestamp of when this keyword was added */
   addedAt: string;
+  /** Total times this keyword has matched (default: 0) */
+  hitCount?: number;
+  /** Confirmed correct matches (default: 0) */
+  truePositiveCount?: number;
+  /** Confirmed incorrect matches (default: 0) */
+  falsePositiveCount?: number;
+  /** Last time this keyword matched (ISO timestamp) */
+  lastHitAt?: string;
 }
 
 export interface CorrectionKeywordStore {
@@ -26,6 +34,8 @@ export interface CorrectionKeywordStore {
   keywords: CorrectionKeyword[];
   /** Schema version */
   version: number;
+  /** Last time keyword optimization was performed (ISO timestamp) */
+  lastOptimizedAt: string;
 }
 
 // =========================================================================
@@ -37,8 +47,10 @@ export interface CorrectionMatchResult {
   matched: boolean;
   /** The first matched term (empty array when no match) */
   matchedTerms: string[];
-  /** 1.0 if matched, 0.0 if not (binary match semantics) */
+  /** Weighted score (0-1) based on keyword weight and accuracy */
   score: number;
+  /** Confidence in the match result (0-1) */
+  confidence: number;
 }
 
 // =========================================================================
