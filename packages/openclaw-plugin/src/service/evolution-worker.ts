@@ -2034,7 +2034,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
 
                             if (parsedResult?.updated) {
                                 koService.applyResult(parsedResult);
-                                learner.recordOptimizationPerformed();
+                                await learner.recordOptimizationPerformed();
                                 logger?.info?.(`[PD:EvolutionWorker] keyword_optimization applied mutations: ${parsedResult.summary}`);
                             } else {
                                 logger?.info?.(`[PD:EvolutionWorker] keyword_optimization completed with no updates`);
