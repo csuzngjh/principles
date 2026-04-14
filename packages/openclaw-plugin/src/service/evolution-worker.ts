@@ -5,7 +5,7 @@ import { createHash } from 'crypto';
 import type { OpenClawPluginServiceContext, OpenClawPluginApi, PluginLogger } from '../openclaw-sdk.js';
 import { DictionaryService } from '../core/dictionary-service.js';
 import { DetectionService } from '../core/detection-service.js';
-import { ensureStateTemplates, ensureCorePrinciples } from '../core/init.js';
+import { ensureStateTemplates } from '../core/init.js';
 import { SystemLogger } from '../core/system-logger.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import type { EventLog } from '../core/event-log.js';
@@ -31,14 +31,11 @@ import {
 import { validateNocturnalSnapshotIngress } from '../core/nocturnal-snapshot-contract.js';
 import { isExpectedSubagentError } from './subagent-workflow/subagent-error-utils.js';
 import { readPainFlagContract } from '../core/pain.js';
-
-// ── Atomic File Write ────────────────────────────────────────────────────────
-// Write to temp then rename — atomic on POSIX, prevents partial-write corruption on crash.
-function atomicWriteFileSync(filePath: string, data: string): void {
-    const tmpPath = filePath + '.tmp';
-    fs.writeFileSync(tmpPath, data, 'utf8');
-    fs.renameSync(tmpPath, filePath);
-}
+import { CorrectionObserverWorkflowManager, correctionObserverWorkflowSpec } from './subagent-workflow/correction-observer-workflow-manager.js';
+import type { CorrectionObserverPayload } from './subagent-workflow/correction-observer-types.js';
+import { KeywordOptimizationService } from './keyword-optimization-service.js';
+import { TrajectoryRegistry } from '../core/trajectory.js';
+import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
 
 const WORKFLOW_TTL_MS = 5 * 60 * 1000; // 5 minutes default TTL for helper workflows
 import { OpenClawTrinityRuntimeAdapter } from '../core/nocturnal-trinity.js';
@@ -56,7 +53,6 @@ interface WatchdogResult {
   details: string[];
 }
 
-// eslint-disable-next-line complexity
 async function runWorkflowWatchdog(
   wctx: WorkspaceContext,
   api: OpenClawPluginApi | null,
@@ -72,10 +68,104 @@ async function runWorkflowWatchdog(
     try {
       const allWorkflows: WorkflowRow[] = store.listWorkflows();
 
-      runWorkflowWatchdogCheckStale(allWorkflows, store, now, details, subagentRuntime, agentSession, logger);
-      runWorkflowWatchdogCheckUncleared(allWorkflows, details);
-      runWorkflowWatchdogCheckNocturnal(allWorkflows, details);
+      // Check 1: Stale active workflows (active > 2x TTL)
+      const staleThreshold = WORKFLOW_TTL_MS * 2;
+      const staleActive = allWorkflows.filter(
+        (wf: WorkflowRow) => wf.state === 'active' && (now - wf.created_at) > staleThreshold,
+      );
+      if (staleActive.length > 0) {
+        for (const wf of staleActive) {
+          const ageMin = Math.round((now - wf.created_at) / 60000);
+          details.push(`stale_active: ${wf.workflow_id} (${wf.workflow_type}, ${ageMin}min old)`);
 
+          // #257: Check if the last recorded event reason indicates expected subagent unavailability.
+          // If so, skip marking as terminal_error — the workflow is stale because the subagent
+          // was expectedly unavailable (daemon mode, process isolation), not due to a hard failure.
+          const events = store.getEvents(wf.workflow_id);
+          const lastEventReason = events.length > 0 ? events[events.length - 1].reason : 'unknown';
+          if (isExpectedSubagentError(lastEventReason)) {
+            logger?.debug?.(`[PD:Watchdog] Skipping stale active workflow ${wf.workflow_id}: expected subagent error (${lastEventReason})`);
+            continue;
+          }
+
+          store.updateWorkflowState(wf.workflow_id, 'terminal_error');
+          store.recordEvent(wf.workflow_id, 'watchdog_timeout', 'active', 'terminal_error', `Stale active > ${staleThreshold / 60000}s`, { ageMs: now - wf.created_at });
+
+          // Cleanup session if possible (#188: gateway-safe fallback)
+          if (wf.child_session_key) {
+            try {
+              if (subagentRuntime) {
+                await subagentRuntime.deleteSession({ sessionKey: wf.child_session_key, deleteTranscript: true });
+                logger?.info?.(`[PD:Watchdog] Cleaned up stale session: ${wf.child_session_key}`);
+              } else if (agentSession) {
+                const storePath = agentSession.resolveStorePath();
+                const sessionStore = agentSession.loadSessionStore(storePath, { skipCache: true });
+                const normalizedKey = wf.child_session_key.toLowerCase();
+                if (sessionStore[normalizedKey]) {
+                  delete sessionStore[normalizedKey];
+                  await agentSession.saveSessionStore(storePath, sessionStore);
+                  logger?.info?.(`[PD:Watchdog] Cleaned up stale session via agentSession fallback: ${wf.child_session_key}`);
+                }
+              }
+            } catch (cleanupErr) {
+              const errMsg = String(cleanupErr);
+              if (errMsg.includes('gateway request') && agentSession) {
+                const storePath = agentSession.resolveStorePath();
+                const sessionStore = agentSession.loadSessionStore(storePath, { skipCache: true });
+                const normalizedKey = wf.child_session_key.toLowerCase();
+                if (sessionStore[normalizedKey]) {
+                  delete sessionStore[normalizedKey];
+                  await agentSession.saveSessionStore(storePath, sessionStore);
+                  logger?.info?.(`[PD:Watchdog] Cleaned up stale session via agentSession fallback after gateway error: ${wf.child_session_key}`);
+                }
+              } else {
+                logger?.warn?.(`[PD:Watchdog] Failed to cleanup session ${wf.child_session_key}: ${errMsg}`);
+              }
+            }
+          }
+        }
+      }
+
+      // Check 2: Workflows in terminal_error/expired without cleanup
+      const unclearedTerminal = allWorkflows.filter(
+        (wf: WorkflowRow) => (wf.state === 'terminal_error' || wf.state === 'expired') && wf.cleanup_state === 'pending',
+      );
+      if (unclearedTerminal.length > 0) {
+        details.push(`uncleared_terminal: ${unclearedTerminal.length} workflows (will be swept next cycle)`);
+      }
+
+      // Check 3: Nocturnal workflow result validation (#181 pattern)
+      const nocturnalCompleted = allWorkflows.filter(
+        (wf: WorkflowRow) => wf.workflow_type === 'nocturnal' && wf.state === 'completed',
+      );
+      for (const wf of nocturnalCompleted) {
+        // Check if the metadata snapshot has all zeros (invalid data)
+        try {
+          const meta = JSON.parse(wf.metadata_json) as Record<string, unknown>;
+          const snapshot = meta.snapshot as Record<string, unknown> | undefined;
+          if (snapshot) {
+            // #219: Check for fallback data source (partial stats from pain context)
+            const dataSource = snapshot._dataSource as string | undefined;
+            if (dataSource === 'pain_context_fallback') {
+              details.push(`fallback_snapshot: nocturnal workflow ${wf.workflow_id} uses pain-context fallback (stats may be incomplete)`);
+            }
+            const stats = snapshot.stats as Record<string, number> | undefined;
+            // #246: Stats are now always number (never null). Detect "empty" fallback:
+            // fallback + all counts zero means no real data was available.
+            // NOTE: totalAssistantTurns may be 0 even for valid sessions because
+            // listRecentNocturnalCandidateSessions (used in fallback path) does not
+            // populate assistantTurnCount (only getNocturnalSessionSnapshot does).
+            // We use totalToolCalls=0 as the primary indicator instead.
+            if (stats && dataSource === 'pain_context_fallback' &&
+                stats.totalToolCalls === 0 && stats.totalGateBlocks === 0 &&
+                stats.failureCount === 0) {
+              details.push(`fallback_snapshot_stats: nocturnal workflow ${wf.workflow_id} has empty fallback stats (no trajectory data found)`);
+            }
+          }
+        } catch { /* ignore malformed metadata */ }
+      }
+
+      // Summary
       const stateCounts: Record<string, number> = {};
       for (const wf of allWorkflows) {
         stateCounts[wf.state] = (stateCounts[wf.state] || 0) + 1;
@@ -95,106 +185,6 @@ async function runWorkflowWatchdog(
 
   return { anomalies: details.length, details };
 }
-
-// ── Watchdog helpers (extracted from runWorkflowWatchdog for complexity) ──
-
-// eslint-disable-next-line complexity
-async function cleanupStaleWorkflowSession(
-  wf: WorkflowRow,
-  subagentRuntime: { deleteSession: (opts: { sessionKey: string; deleteTranscript: boolean }) => Promise<void> } | undefined,
-  agentSession: { resolveStorePath: () => string; loadSessionStore: (p: string, o: { skipCache: boolean }) => Record<string, unknown>; saveSessionStore: (p: string, s: Record<string, unknown>) => Promise<void> } | undefined,
-  logger?: PluginLogger,
-): Promise<void> {
-  if (!wf.child_session_key) return;
-  try {
-    if (subagentRuntime) {
-      await subagentRuntime.deleteSession({ sessionKey: wf.child_session_key, deleteTranscript: true });
-      logger?.info?.(`[PD:Watchdog] Cleaned up stale session: ${wf.child_session_key}`);
-    } else if (agentSession) {
-      const storePath = agentSession.resolveStorePath();
-      const sessionStore = agentSession.loadSessionStore(storePath, { skipCache: true });
-      const normalizedKey = wf.child_session_key.toLowerCase();
-      if (sessionStore[normalizedKey]) {
-        delete sessionStore[normalizedKey];
-        await agentSession.saveSessionStore(storePath, sessionStore);
-        logger?.info?.(`[PD:Watchdog] Cleaned up stale session via agentSession fallback: ${wf.child_session_key}`);
-      }
-    }
-  } catch (cleanupErr) {
-    const errMsg = String(cleanupErr);
-    if (errMsg.includes('gateway request') && agentSession) {
-      const storePath = agentSession.resolveStorePath();
-      const sessionStore = agentSession.loadSessionStore(storePath, { skipCache: true });
-      const normalizedKey = wf.child_session_key.toLowerCase();
-      if (sessionStore[normalizedKey]) {
-        delete sessionStore[normalizedKey];
-        await agentSession.saveSessionStore(storePath, sessionStore);
-        logger?.info?.(`[PD:Watchdog] Cleaned up stale session via agentSession fallback after gateway error: ${wf.child_session_key}`);
-      }
-    } else {
-      logger?.warn?.(`[PD:Watchdog] Failed to cleanup session ${wf.child_session_key}: ${errMsg}`);
-    }
-  }
-}
-
-function runWorkflowWatchdogCheckStale(
-  allWorkflows: WorkflowRow[],
-  store: WorkflowStore,
-  now: number,
-  details: string[],
-  subagentRuntime: { deleteSession: (opts: { sessionKey: string; deleteTranscript: boolean }) => Promise<void> } | undefined,
-  agentSession: { resolveStorePath: () => string; loadSessionStore: (p: string, o: { skipCache: boolean }) => Record<string, unknown>; saveSessionStore: (p: string, s: Record<string, unknown>) => Promise<void> } | undefined,
-  logger?: PluginLogger,
-): void {
-  const staleThreshold = WORKFLOW_TTL_MS * 2;
-  for (const wf of allWorkflows) {
-    if (wf.state !== 'active' || (now - wf.created_at) <= staleThreshold) continue;
-    const ageMin = Math.round((now - wf.created_at) / 60000);
-    details.push(`stale_active: ${wf.workflow_id} (${wf.workflow_type}, ${ageMin}min old)`);
-
-    const events = store.getEvents(wf.workflow_id);
-    const lastEventReason = events.length > 0 ? events[events.length - 1].reason : 'unknown';
-    if (isExpectedSubagentError(lastEventReason)) {
-      logger?.debug?.(`[PD:Watchdog] Skipping stale active workflow ${wf.workflow_id}: expected subagent error (${lastEventReason})`);
-      continue;
-    }
-
-    store.updateWorkflowState(wf.workflow_id, 'terminal_error');
-    store.recordEvent(wf.workflow_id, 'watchdog_timeout', 'active', 'terminal_error', `Stale active > ${staleThreshold / 60000}s`, { ageMs: now - wf.created_at });
-    void cleanupStaleWorkflowSession(wf, subagentRuntime, agentSession, logger);
-  }
-}
-
-function runWorkflowWatchdogCheckUncleared(allWorkflows: WorkflowRow[], details: string[]): void {
-  const unclearedTerminal = allWorkflows.filter(
-    (wf: WorkflowRow) => (wf.state === 'terminal_error' || wf.state === 'expired') && wf.cleanup_state === 'pending',
-  );
-  if (unclearedTerminal.length > 0) {
-    details.push(`uncleared_terminal: ${unclearedTerminal.length} workflows (will be swept next cycle)`);
-  }
-}
-
-// eslint-disable-next-line complexity
-function runWorkflowWatchdogCheckNocturnal(allWorkflows: WorkflowRow[], details: string[]): void {
-  for (const wf of allWorkflows) {
-    if (wf.workflow_type !== 'nocturnal' || wf.state !== 'completed') continue;
-    try {
-      const meta = JSON.parse(wf.metadata_json) as Record<string, unknown>;
-      const snapshot = meta.snapshot as Record<string, unknown> | undefined;
-      if (!snapshot) continue;
-      const dataSource = snapshot._dataSource as string | undefined;
-      if (dataSource === 'pain_context_fallback') {
-        details.push(`fallback_snapshot: nocturnal workflow ${wf.workflow_id} uses pain-context fallback (stats may be incomplete)`);
-        const stats = snapshot.stats as Record<string, number> | undefined;
-        if (stats && stats.totalToolCalls === 0 && stats.totalGateBlocks === 0 && stats.failureCount === 0) {
-          details.push(`fallback_snapshot_stats: nocturnal workflow ${wf.workflow_id} has empty fallback stats (no trajectory data found)`);
-        }
-      }
-    } catch { /* ignore malformed metadata */ }
-  }
-}
-
-// ── End watchdog helpers ──
 
 let timeoutId: NodeJS.Timeout | null = null;
 
@@ -370,7 +360,6 @@ function isSessionAtOrBeforeTriggerTime(
     return true;
 }
 
-// eslint-disable-next-line complexity
 function buildFallbackNocturnalSnapshot(
     sleepTask: EvolutionQueueItem,
     extractor?: ReturnType<typeof createNocturnalTrajectoryExtractor> | null,
@@ -505,12 +494,13 @@ function findRecentDuplicateTask(
     reason?: string
 ): EvolutionQueueItem | undefined {
      
+     
     const key = normalizePainDedupKey(source, preview, reason);
     return queue.find((task) => {
         if (task.status === 'completed') return false;
-         
         const taskTime = new Date(task.enqueued_at || task.timestamp).getTime();
         if (!Number.isFinite(taskTime) || (now - taskTime) > PAIN_QUEUE_DEDUP_WINDOW_MS) return false;
+         
          
         return normalizePainDedupKey(task.source, task.trigger_text_preview || '', task.reason) === key;
     });
@@ -564,7 +554,6 @@ function normalizePainDedupKey(source: string, preview: string, reason?: string)
     return `${source.trim().toLowerCase()}::${preview.trim().toLowerCase()}::${normalizedReason}`;
 }
 
- 
  
  
 export function hasRecentDuplicateTask(queue: EvolutionQueueItem[], source: string, preview: string, now: number, reason?: string): boolean {
@@ -709,7 +698,6 @@ function loadEvolutionQueue(queuePath: string): EvolutionQueueItem[] {
  * Build and persist a new sleep_reflection task.
  */
  
- 
 function enqueueNewSleepReflectionTask(
     queue: EvolutionQueueItem[],
     recentPainContext: ReturnType<typeof readRecentPainContext>,
@@ -736,7 +724,7 @@ function enqueueNewSleepReflectionTask(
         recentPainContext,
     });
 
-    atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
+    fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
     logger?.info?.(`[PD:EvolutionWorker] Enqueued sleep_reflection task ${taskId}`);
 }
 
@@ -775,6 +763,60 @@ async function enqueueSleepReflectionTask(
     }
 }
 
+/**
+ * Enqueue a keyword_optimization task if one is not already pending/in-progress (CORR-08).
+ * Dispatches LLM subagent via CorrectionObserverWorkflowManager to optimize
+ * correction keywords based on FPR and match history.
+ */
+async function enqueueKeywordOptimizationTask(
+    wctx: WorkspaceContext,
+    logger: PluginLogger,
+): Promise<void> {
+    const queuePath = wctx.resolve('EVOLUTION_QUEUE');
+    const releaseLock = await requireQueueLock(queuePath, logger, 'enqueueKeywordOpt', EVOLUTION_QUEUE_LOCK_SUFFIX);
+
+    try {
+        const queue = loadEvolutionQueue(queuePath);
+
+        // Guard: Skip if a keyword_optimization task is already pending/in-progress (CORR-08)
+        if (hasPendingTask(queue, 'keyword_optimization')) {
+            logger?.debug?.('[PD:EvolutionWorker] keyword_optimization task already pending/in-progress, skipping');
+            return;
+        }
+
+        // Guard: Skip if daily optimization throttle is exhausted (CORR-08)
+        const learner = CorrectionCueLearner.get(wctx.stateDir);
+        if (!learner.canRunKeywordOptimization()) {
+            logger?.debug?.('[PD:EvolutionWorker] keyword_optimization throttle exhausted, skipping');
+            return;
+        }
+
+        const taskId = createEvolutionTaskId('keyword_optimization', 50, 'keyword optimization', 'Keyword optimization via LLM', Date.now());
+        const nowIso = new Date().toISOString();
+
+        queue.push({
+            id: taskId,
+            taskKind: 'keyword_optimization',
+            priority: 'medium',
+            score: 50,
+            source: 'correction',
+            reason: 'Keyword optimization triggered by heartbeat',
+            trigger_text_preview: 'Keyword optimization via LLM',
+            timestamp: nowIso,
+            enqueued_at: nowIso,
+            status: 'pending',
+            traceId: taskId,
+            retryCount: 0,
+            maxRetries: 1,
+        });
+
+        fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+        logger?.info?.(`[PD:EvolutionWorker] Enqueued keyword_optimization task ${taskId}`);
+    } finally {
+        releaseLock();
+    }
+}
+
 interface ParsedPainValues {
     score: number; source: string; reason: string; preview: string;
     traceId: string; sessionId: string; agentId: string;
@@ -782,7 +824,6 @@ interface ParsedPainValues {
 
  
  
-// eslint-disable-next-line complexity
 async function doEnqueuePainTask(
     wctx: WorkspaceContext, logger: PluginLogger, painFlagPath: string,
     result: WorkerStatusReport['pain_flag'], v: ParsedPainValues,
@@ -828,7 +869,7 @@ async function doEnqueuePainTask(
             retryCount: 0, maxRetries: 3,
         });
 
-        atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
+        fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
         fs.appendFileSync(painFlagPath, `\nstatus: queued\ntask_id: ${taskId}\n`, 'utf8');
         result.enqueued = true;
 
@@ -856,7 +897,6 @@ async function doEnqueuePainTask(
     return result;
 }
 
-// eslint-disable-next-line complexity
 async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Promise<WorkerStatusReport['pain_flag']> {
     const result: WorkerStatusReport['pain_flag'] = { exists: false, score: null, source: null, enqueued: false, skipped_reason: null };
     try {
@@ -1031,7 +1071,6 @@ async function checkPainFlag(wctx: WorkspaceContext, logger: PluginLogger): Prom
 
  
  
-// eslint-disable-next-line complexity
 async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogger, eventLog: EventLog, api?: OpenClawPluginApi) {
     const queuePath = wctx.resolve('EVOLUTION_QUEUE');
     if (!fs.existsSync(queuePath)) {
@@ -1068,6 +1107,11 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
         const queue: EvolutionQueueItem[] = migrateQueueToV2(rawQueue);
 
         let queueChanged = rawQueue.some(isLegacyQueueItem);
+
+        // Guard: Skip keyword_optimization if one is already pending/in-progress (CORR-08)
+        if (hasPendingTask(queue, 'keyword_optimization')) {
+            logger?.debug?.('[PD:EvolutionWorker] keyword_optimization task already pending/in-progress, skipping enqueue');
+        }
 
         const {config} = wctx;
         const timeout = config.get('intervals.task_timeout_ms') || (60 * 60 * 1000); // Default 1 hour
@@ -1614,7 +1658,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
 
             // Write claimed state (includes any pain changes from above) and release lock
             if (queueChanged) {
-                atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
+                fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
             }
             releaseLock();
             for (const sleepTask of sleepReflectionTasks) {
@@ -1632,7 +1676,9 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                      
                     let workflowId: string | undefined;
                      
+                     
                     let nocturnalManager: NocturnalWorkflowManager;
+                     
                      
                     let snapshotData: NocturnalSessionSnapshot | undefined;
 
@@ -1866,7 +1912,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             freshQueue[idx] = sleepTask;
                         }
                     }
-                    atomicWriteFileSync(queuePath, JSON.stringify(freshQueue, null, 2));
+                    fs.writeFileSync(queuePath, JSON.stringify(freshQueue, null, 2), 'utf8');
 
                     // Log completions to EvolutionLogger
                     for (const sleepTask of sleepReflectionTasks) {
@@ -1897,8 +1943,161 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
             return;
         }
 
+        // ── keyword_optimization task processing ──────────────────────────────
+        // Process keyword_optimization tasks independently of sleep_reflection.
+        // Uses CorrectionObserverWorkflowManager to dispatch LLM subagent and
+        // KeywordOptimizationService to apply mutations to keyword store (CORR-09).
+        const pendingKeywordOptTasks = queue.filter(t => t.status === 'pending' && t.taskKind === 'keyword_optimization');
+        const inProgressKeywordOptTasks = queue.filter(t =>
+            t.status === 'in_progress' &&
+            t.taskKind === 'keyword_optimization' &&
+            t.resultRef &&
+            !t.resultRef.startsWith('trinity-draft')
+        );
+        const keywordOptTasks = [...pendingKeywordOptTasks, ...inProgressKeywordOptTasks];
+        if (keywordOptTasks.length > 0) {
+            // Claim pending tasks inside lock
+            for (const koTask of pendingKeywordOptTasks) {
+                koTask.status = 'in_progress';
+                koTask.started_at = new Date().toISOString();
+            }
+            queueChanged = queueChanged || pendingKeywordOptTasks.length > 0;
+
+            // Release lock during LLM dispatch (long-running)
+            fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+            releaseLock();
+            lockReleased = true;
+
+            for (const koTask of keywordOptTasks) {
+                const isPolling = !!koTask.resultRef && !koTask.resultRef.startsWith('trinity-draft');
+
+                if (isPolling) {
+                    logger?.debug?.(`[PD:EvolutionWorker] Polling existing keyword_optimization task ${koTask.id}`);
+                } else {
+                    logger?.info?.(`[PD:EvolutionWorker] Processing keyword_optimization task ${koTask.id}`);
+                }
+
+                try {
+                    // Build trajectoryHistory via KeywordOptimizationService
+                    const koService = KeywordOptimizationService.get(wctx.stateDir, wctx.workspaceDir, logger);
+                    const db = TrajectoryRegistry.get(wctx.workspaceDir);
+                    const recentSessionIds = db.listRecentSessions({ limit: 10 }).map(s => s.sessionId);
+                    const trajectoryHistory = await koService.buildTrajectoryHistory(recentSessionIds);
+
+                    // Build full payload (CORR-09, D-40-07, D-40-08)
+                    const learner = CorrectionCueLearner.get(wctx.stateDir);
+                    const store = learner.getStore();
+                    const payload: CorrectionObserverPayload = {
+                        workspaceDir: wctx.workspaceDir,
+                        parentSessionId: `keyword_optimization:${koTask.id}`,
+                        keywordStoreSummary: {
+                            totalKeywords: store.keywords.length,
+                            terms: store.keywords.map(k => ({
+                                term: k.term,
+                                weight: k.weight,
+                                hitCount: k.hitCount ?? 0,
+                                truePositiveCount: k.truePositiveCount ?? 0,
+                                falsePositiveCount: k.falsePositiveCount ?? 0,
+                            })),
+                        },
+                        recentMessages: [],
+                        trajectoryHistory,
+                    };
+
+                    // Dispatch LLM subagent via CorrectionObserverWorkflowManager
+                    const manager = new CorrectionObserverWorkflowManager({
+                        workspaceDir: wctx.workspaceDir,
+                        logger,
+                        subagent: api?.runtime?.subagent!,
+                        agentSession: api?.runtime?.agent?.session,
+                    });
+
+                    let workflowId: string | undefined;
+                    if (!isPolling) {
+                        const handle = await manager.startWorkflow(correctionObserverWorkflowSpec, {
+                            parentSessionId: `keyword_optimization:${koTask.id}`,
+                            workspaceDir: wctx.workspaceDir,
+                            taskInput: payload,
+                        });
+                        workflowId = handle.workflowId;
+                        koTask.resultRef = workflowId;
+                    } else {
+                        workflowId = koTask.resultRef!;
+                    }
+
+                    // Poll workflow state
+                    const summary = await manager.getWorkflowDebugSummary(workflowId);
+                    if (summary) {
+                        if (summary.state === 'completed') {
+                            // Get parsed LLM result and apply mutations to keyword store (CORR-09)
+                            const parsedResult = await manager.getWorkflowResult(workflowId);
+
+                            if (parsedResult?.updated) {
+                                koService.applyResult(parsedResult);
+                                learner.recordOptimizationPerformed();
+                                logger?.info?.(`[PD:EvolutionWorker] keyword_optimization applied mutations: ${parsedResult.summary}`);
+                            } else {
+                                logger?.info?.(`[PD:EvolutionWorker] keyword_optimization completed with no updates`);
+                            }
+
+                            koTask.status = 'completed';
+                            koTask.completed_at = new Date().toISOString();
+                            koTask.resolution = 'marker_detected';
+                            logger?.info?.(`[PD:EvolutionWorker] keyword_optimization task ${koTask.id} workflow completed`);
+                        } else if (summary.state === 'terminal_error') {
+                            koTask.status = 'failed';
+                            koTask.completed_at = new Date().toISOString();
+                            koTask.resolution = 'failed_max_retries';
+                            koTask.retryCount = (koTask.retryCount ?? 0) + 1;
+                            const lastEvent = summary.recentEvents[summary.recentEvents.length - 1];
+                            koTask.lastError = `keyword_optimization failed: ${lastEvent?.reason ?? 'unknown'}`;
+                            logger?.warn?.(`[PD:EvolutionWorker] keyword_optimization task ${koTask.id} workflow terminal_error: ${koTask.lastError}`);
+                        } else {
+                            logger?.info?.(`[PD:EvolutionWorker] keyword_optimization task ${koTask.id} workflow ${summary.state}, will poll again next cycle`);
+                        }
+                    }
+                } catch (koErr) {
+                    koTask.status = 'failed';
+                    koTask.completed_at = new Date().toISOString();
+                    koTask.resolution = 'failed_max_retries';
+                    koTask.lastError = String(koErr);
+                    koTask.retryCount = (koTask.retryCount ?? 0) + 1;
+                    logger?.error?.(`[PD:EvolutionWorker] keyword_optimization task ${koTask.id} threw: ${koErr}`);
+                }
+            }
+
+            // Re-acquire lock to write results
+            const koResultLock = await requireQueueLock(queuePath, logger, 'keywordOptResult');
+            try {
+                let freshQueue: (RawQueueItem | EvolutionQueueItem)[] = [];
+                try {
+                    freshQueue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
+                } catch (readErr) {
+                    // Queue file corrupted — log warning but preserve in-memory task state
+                    logger?.warn?.(`[PD:EvolutionWorker] Queue file corrupted (${String(readErr)}), preserving in-memory state`);
+                    freshQueue = [];
+                }
+
+                // Append or replace keyword_optimization tasks
+                for (const koTask of keywordOptTasks) {
+                    const idx = freshQueue.findIndex((t) => (t as { id?: string }).id === koTask.id);
+                    if (idx >= 0) {
+                        freshQueue[idx] = koTask;
+                    } else {
+                        freshQueue.push(koTask);
+                    }
+                }
+                fs.writeFileSync(queuePath, JSON.stringify(freshQueue, null, 2), 'utf8');
+            } catch (koResultErr) {
+                logger?.warn?.(`[PD:EvolutionWorker] Failed to write keyword_optimization results: ${String(koResultErr)}`);
+            } finally {
+                koResultLock();
+            }
+            return;
+        }
+
         if (queueChanged) {
-            atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
+            fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
         }
 
         // Pipeline observability: log stage-level summary at end of cycle
@@ -1925,7 +2124,6 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
 }
 
      
-// eslint-disable-next-line complexity
 async function processDetectionQueue(wctx: WorkspaceContext, api: OpenClawPluginApi, eventLog: EventLog) {
     const {logger} = api;
     try {
@@ -2017,7 +2215,7 @@ export async function registerEvolutionTaskSession(
         if (!task.started_at) {
             task.started_at = new Date().toISOString();
         }
-        atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
+        fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
         return true;
     } finally {
         releaseLock();
@@ -2057,9 +2255,11 @@ interface WorkerStatusReport {
 function writeWorkerStatus(stateDir: string, report: WorkerStatusReport): void {
     try {
         const statusPath = path.join(stateDir, 'worker-status.json');
-        atomicWriteFileSync(statusPath, JSON.stringify(report, null, 2));
-    } catch {
+        fs.writeFileSync(statusPath, JSON.stringify(report, null, 2), 'utf8');
+    } catch (statusErr) {
         // Non-critical: worker-status.json is for monitoring, failure is acceptable
+        // (no logger available in this standalone helper)
+        void statusErr;
     }
 }
 
@@ -2086,7 +2286,7 @@ async function processEvolutionQueueWithResult(
         const purgeResult = purgeStaleFailedTasks(queue, logger);
         if (purgeResult.purged > 0) {
             // Write back the cleaned queue
-            atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
+            fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
         }
 
         queueResult.total = queue.length;
@@ -2113,7 +2313,6 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
     api: null,
     _startedWorkspaces: new Set<string>(),
 
-    // eslint-disable-next-line complexity
     start(ctx: OpenClawPluginServiceContext): void {
         const workspaceDir = ctx?.workspaceDir;
         const logger = ctx?.logger || console;
@@ -2142,7 +2341,6 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
         const {config} = wctx;
         const language = config.get('language') || 'en';
         ensureStateTemplates({ logger }, wctx.stateDir, language);
-        ensureCorePrinciples(wctx.stateDir, logger);
 
         const initialDelay = 5000;
         const interval = config.get('intervals.worker_poll_ms') || (15 * 60 * 1000);
@@ -2150,7 +2348,6 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
         // Periodic trigger tracking
         let heartbeatCounter = 0;
 
-        // eslint-disable-next-line complexity
         async function runCycle(): Promise<void> {
             const cycleStart = Date.now();
             heartbeatCounter++;
@@ -2193,7 +2390,17 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                 }
 
                 // Path 2: Periodic trigger (fires regardless of idle state)
+                // keyword_optimization fires every period_heartbeats (CORR-07).
+                // IMPORTANT: check keyword_optimization BEFORE resetting counter for sleep_reflection.
                 if (sleepConfig.trigger_mode === 'periodic') {
+                    // keyword_optimization check BEFORE counter reset (CORR-07 fix)
+                    if (heartbeatCounter > 0 && heartbeatCounter % sleepConfig.period_heartbeats === 0) {
+                        logger?.info?.(`[PD:EvolutionWorker] Periodic keyword_optimization trigger at heartbeat ${heartbeatCounter}`);
+                        enqueueKeywordOptimizationTask(wctx, logger).catch((err) => {
+                            logger?.error?.(`[PD:EvolutionWorker] Failed to enqueue keyword_optimization task: ${String(err)}`);
+                        });
+                    }
+
                     if (heartbeatCounter >= sleepConfig.period_heartbeats) {
                         logger?.info?.(`[PD:EvolutionWorker] Periodic trigger: heartbeatCounter=${heartbeatCounter} >= period_heartbeats=${sleepConfig.period_heartbeats}`);
                         shouldTrySleepReflection = true;
@@ -2231,21 +2438,23 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                 // with a diagnostician task, immediately trigger a heartbeat to start
                 // the diagnostician without waiting for the next 15-minute interval.
                 // Must run AFTER processEvolutionQueue — HEARTBEAT.md must be written first.
-                //
-                // P3 (#299): Use requestHeartbeatNow instead of runHeartbeatOnce.
-                // requestHeartbeatNow enters the wake layer which auto-retries on
-                // requests-in-flight (1s intervals). runHeartbeatOnce was a one-shot
-                // that got permanently skipped when agent was busy.
                 if (painCheckResult.enqueued) {
-                    const canTrigger = !!api?.runtime?.system?.requestHeartbeatNow;
-                    logger.info(`[PD:EvolutionWorker] Pain flag enqueued — requestHeartbeatNow available: ${canTrigger}`);
+                    const canTrigger = !!api?.runtime?.system?.runHeartbeatOnce;
+                    logger.info(`[PD:EvolutionWorker] Pain flag enqueued — runHeartbeatOnce available: ${canTrigger} (api=${!!api}, runtime=${!!api?.runtime}, system=${!!api?.runtime?.system})`);
                     if (canTrigger) {
-                        api.runtime.system.requestHeartbeatNow({
-                            reason: `pd-pain-diagnosis: pain flag detected, starting diagnostician`,
-                        });
-                        logger.info(`[PD:EvolutionWorker] Heartbeat wake requested — wake layer will auto-retry if busy`);
+                        try {
+                            const hbResult = await api.runtime.system.runHeartbeatOnce({
+                                reason: `pd-pain-diagnosis: pain flag detected, starting diagnostician`,
+                            });
+                            logger.info(`[PD:EvolutionWorker] Immediate heartbeat result: status=${hbResult.status}${hbResult.status === 'ran' ? ` duration=${hbResult.durationMs}ms` : ''}${hbResult.status === 'skipped' || hbResult.status === 'failed' ? ` reason=${hbResult.reason}` : ''}`);
+                            if (hbResult.status === 'skipped' || hbResult.status === 'failed') {
+                                logger.warn(`[PD:EvolutionWorker] Immediate heartbeat was ${hbResult.status} (${hbResult.reason}). Diagnostician will start on next regular heartbeat cycle.`);
+                            }
+                        } catch (hbErr) {
+                            logger.warn(`[PD:EvolutionWorker] Failed to trigger immediate heartbeat: ${String(hbErr)}. Diagnostician will start on next regular heartbeat cycle.`);
+                        }
                     } else {
-                        logger.warn(`[PD:EvolutionWorker] requestHeartbeatNow not available. Diagnostician will start on next regular heartbeat cycle.`);
+                        logger.warn(`[PD:EvolutionWorker] runHeartbeatOnce not available. Diagnostician will start on next regular heartbeat cycle.`);
                     }
                 }
 
