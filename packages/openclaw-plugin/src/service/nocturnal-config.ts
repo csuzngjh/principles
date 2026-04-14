@@ -24,6 +24,19 @@ export interface KeywordOptimizationConfig {
 export interface NocturnalConfig {
     sleep_reflection?: Partial<SleepReflectionConfig>;
     keyword_optimization?: Partial<KeywordOptimizationConfig>;
+    cooldown_escalation?: Partial<CooldownEscalationConfig>;
+}
+
+/** Cooldown escalation configuration (Phase 40: Failure Classification) */
+export interface CooldownEscalationConfig {
+    /** Cooldown duration for Tier 1 escalation (ms). Default: 30 minutes */
+    tier1_ms: number;
+    /** Cooldown duration for Tier 2 escalation (ms). Default: 4 hours */
+    tier2_ms: number;
+    /** Cooldown duration for Tier 3+ escalation (ms). Default: 24 hours (cap) */
+    tier3_ms: number;
+    /** Consecutive failure threshold to trigger persistent detection. Default: 3 */
+    consecutive_threshold: number;
 }
 
 const DEFAULT_SLEEP_REFLECTION: SleepReflectionConfig = {
@@ -37,6 +50,13 @@ const DEFAULT_SLEEP_REFLECTION: SleepReflectionConfig = {
 const DEFAULT_KEYWORD_OPTIMIZATION: KeywordOptimizationConfig = {
     period_heartbeats: 24,    // 6 hours at 15-min heartbeat interval (24 * 15min = 360min = 6h)
     enabled: true,
+};
+
+const DEFAULT_COOLDOWN_ESCALATION: CooldownEscalationConfig = {
+    tier1_ms: 30 * 60 * 1000,      // 30 minutes = 1,800,000 ms
+    tier2_ms: 4 * 60 * 60 * 1000,  // 4 hours = 14,400,000 ms
+    tier3_ms: 24 * 60 * 60 * 1000, // 24 hours = 86,400,000 ms
+    consecutive_threshold: 3,
 };
 
 const CONFIG_FILENAME = 'nocturnal-config.json';
@@ -110,5 +130,40 @@ export function loadKeywordOptimizationConfig(stateDir: string): KeywordOptimiza
         enabled: typeof fileKwOpt.enabled === 'boolean'
             ? fileKwOpt.enabled
             : DEFAULT_KEYWORD_OPTIMIZATION.enabled,
+    };
+}
+
+/**
+ * Load cooldown escalation config from .state/nocturnal-config.json.
+ * Returns default config if file doesn't exist or is malformed.
+ */
+export function loadCooldownEscalationConfig(stateDir: string): CooldownEscalationConfig {
+    const configPath = resolveConfigPath(stateDir);
+    let fileConfig: NocturnalConfig = {};
+
+    if (fs.existsSync(configPath)) {
+        try {
+            const raw = fs.readFileSync(configPath, 'utf8');
+            fileConfig = JSON.parse(raw);
+        } catch {
+            // Malformed config — continue with defaults
+        }
+    }
+
+    const fileCooldown = fileConfig.cooldown_escalation || {};
+
+    return {
+        tier1_ms: typeof fileCooldown.tier1_ms === 'number' && fileCooldown.tier1_ms > 0
+            ? fileCooldown.tier1_ms
+            : DEFAULT_COOLDOWN_ESCALATION.tier1_ms,
+        tier2_ms: typeof fileCooldown.tier2_ms === 'number' && fileCooldown.tier2_ms > 0
+            ? fileCooldown.tier2_ms
+            : DEFAULT_COOLDOWN_ESCALATION.tier2_ms,
+        tier3_ms: typeof fileCooldown.tier3_ms === 'number' && fileCooldown.tier3_ms > 0
+            ? fileCooldown.tier3_ms
+            : DEFAULT_COOLDOWN_ESCALATION.tier3_ms,
+        consecutive_threshold: typeof fileCooldown.consecutive_threshold === 'number' && fileCooldown.consecutive_threshold > 0
+            ? fileCooldown.consecutive_threshold
+            : DEFAULT_COOLDOWN_ESCALATION.consecutive_threshold,
     };
 }
