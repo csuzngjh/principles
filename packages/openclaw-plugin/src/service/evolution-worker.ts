@@ -39,6 +39,7 @@ import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
 import { classifyFailure, type ClassifiableTaskKind } from './failure-classifier.js';
 import { recordPersistentFailure, resetFailureState, isTaskKindInCooldown } from './cooldown-strategy.js';
 import { loadCooldownEscalationConfig } from './nocturnal-config.js';
+import { reconcileStartup } from './startup-reconciler.js';
 
 const WORKFLOW_TTL_MS = 5 * 60 * 1000; // 5 minutes default TTL for helper workflows
 import { OpenClawTrinityRuntimeAdapter } from '../core/nocturnal-trinity.js';
@@ -2659,6 +2660,18 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
 
         timeoutId = setTimeout(() => {
             void (async () => {
+                // Phase 41: Startup reconciliation — validate state, clear stale cooldowns, clean orphans
+                try {
+                    const reconResult = await reconcileStartup(wctx.stateDir);
+                    if (reconResult.cooldownsCleared > 0 || reconResult.orphansRemoved.length > 0 || reconResult.stateReset) {
+                        logger?.info?.(`[PD:EvolutionWorker] Startup reconciliation: ${reconResult.cooldownsCleared} stale cooldowns cleared, ${reconResult.orphansRemoved.length} orphan files removed, stateReset=${reconResult.stateReset}`);
+                    } else {
+                        logger?.debug?.('[PD:EvolutionWorker] Startup reconciliation: clean state, no action needed');
+                    }
+                } catch (reconErr) {
+                    logger?.warn?.(`[PD:EvolutionWorker] Startup reconciliation failed (non-blocking): ${String(reconErr)}`);
+                }
+
                 await checkPainFlag(wctx, logger);
                 // Use the same pipeline as regular cycles (includes purge + observability)
                 const queueResult = await processEvolutionQueueWithResult(wctx, logger, eventLog, api ?? undefined);
