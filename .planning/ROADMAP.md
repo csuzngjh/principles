@@ -50,7 +50,7 @@
 - [x] **Phase 38: Atomic Write Utility** - Leaf utility with tmp+fsync+rename, Windows retry, orphan cleanup (completed 2026-04-14)
 - [x] **Phase 39: Nocturnal Write Migration** - Migrate all writeFileSync call sites to atomic writes (completed 2026-04-14)
 - [x] **Phase 40: Failure Classification & Cooldown Recovery** - Classify failures as transient/persistent with appropriate cooldowns (completed 2026-04-14)
-- [ ] **Phase 41: Startup Reconciliation** - Validate state integrity, clear stale cooldowns, clean orphans on startup
+- [x] **Phase 41: Startup Reconciliation** - Validate state integrity, clear stale cooldowns, clean orphans on startup (completed 2026-04-14)
 
 ## Phase Details
 
@@ -175,6 +175,6 @@ Phases execute in numeric order: 38 -> 39 -> 40 -> 41
 | 38. Atomic Write Utility | v1.18 | 1/1 | Complete | 2026-04-14 |
 | 39. Nocturnal Write Migration | v1.18 | 4/4 | Complete    | 2026-04-14 |
 | 40. Failure Classification | v1.18 | 3/3 | Complete    | 2026-04-14 |
-| 41. Startup Reconciliation | v1.18 | 0/? | Pending | |
+| 41. Startup Reconciliation | v1.18 | 2/2 | Complete    | 2026-04-14 |
 
 *Last updated: 2026-04-14*
