@@ -40,6 +40,15 @@ import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
 const WORKFLOW_TTL_MS = 5 * 60 * 1000; // 5 minutes default TTL for helper workflows
 import { OpenClawTrinityRuntimeAdapter } from '../core/nocturnal-trinity.js';
 
+/**
+ * Atomic file write — write to temp then rename to prevent partial writes on crash.
+ */
+function atomicWriteFileSync(filePath: string, data: string): void {
+  const tmpPath = filePath + '.tmp';
+  fs.writeFileSync(tmpPath, data, 'utf8');
+  fs.renameSync(tmpPath, filePath);
+}
+
 // ── Workflow Watchdog ────────────────────────────────────────────────────────
 // Detects stale/orphaned workflows, invalid results, and cleanup failures.
 // Runs every heartbeat cycle, catching bugs like:
@@ -683,7 +692,7 @@ function shouldSkipForDedup(
  * Load and migrate the evolution queue. Returns empty array if file doesn't exist.
  */
 function loadEvolutionQueue(queuePath: string): EvolutionQueueItem[] {
-     
+    // eslint-disable-next-line no-useless-assignment
     let rawQueue: RawQueueItem[] = [];
     try {
         rawQueue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
@@ -724,7 +733,7 @@ function enqueueNewSleepReflectionTask(
         recentPainContext,
     });
 
-    fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+    atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
     logger?.info?.(`[PD:EvolutionWorker] Enqueued sleep_reflection task ${taskId}`);
 }
 
@@ -869,7 +878,7 @@ async function doEnqueuePainTask(
             retryCount: 0, maxRetries: 3,
         });
 
-        fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+        atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
         fs.appendFileSync(painFlagPath, `\nstatus: queued\ntask_id: ${taskId}\n`, 'utf8');
         result.enqueued = true;
 
@@ -1658,7 +1667,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
 
             // Write claimed state (includes any pain changes from above) and release lock
             if (queueChanged) {
-                fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+                atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
             }
             releaseLock();
             for (const sleepTask of sleepReflectionTasks) {
@@ -1912,7 +1921,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             freshQueue[idx] = sleepTask;
                         }
                     }
-                    fs.writeFileSync(queuePath, JSON.stringify(freshQueue, null, 2), 'utf8');
+                    atomicWriteFileSync(queuePath, JSON.stringify(freshQueue, null, 2));
 
                     // Log completions to EvolutionLogger
                     for (const sleepTask of sleepReflectionTasks) {
@@ -2097,7 +2106,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
         }
 
         if (queueChanged) {
-            fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+            atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
         }
 
         // Pipeline observability: log stage-level summary at end of cycle
@@ -2215,7 +2224,7 @@ export async function registerEvolutionTaskSession(
         if (!task.started_at) {
             task.started_at = new Date().toISOString();
         }
-        fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+        atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
         return true;
     } finally {
         releaseLock();
@@ -2255,7 +2264,7 @@ interface WorkerStatusReport {
 function writeWorkerStatus(stateDir: string, report: WorkerStatusReport): void {
     try {
         const statusPath = path.join(stateDir, 'worker-status.json');
-        fs.writeFileSync(statusPath, JSON.stringify(report, null, 2), 'utf8');
+        atomicWriteFileSync(statusPath, JSON.stringify(report, null, 2));
     } catch (statusErr) {
         // Non-critical: worker-status.json is for monitoring, failure is acceptable
         // (no logger available in this standalone helper)
@@ -2286,7 +2295,7 @@ async function processEvolutionQueueWithResult(
         const purgeResult = purgeStaleFailedTasks(queue, logger);
         if (purgeResult.purged > 0) {
             // Write back the cleaned queue
-            fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+            atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
         }
 
         queueResult.total = queue.length;
