@@ -17,7 +17,7 @@ import type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 export type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 import { LockUnavailableError } from '../config/index.js';
 import { checkWorkspaceIdle, checkCooldown } from './nocturnal-runtime.js';
-import { loadNocturnalConfig } from './nocturnal-config.js';
+import { loadNocturnalConfig, loadKeywordOptimizationConfig } from './nocturnal-config.js';
 import { WorkflowStore } from './subagent-workflow/workflow-store.js';
 import type { WorkflowRow } from './subagent-workflow/types.js';
 import { EmpathyObserverWorkflowManager } from './subagent-workflow/empathy-observer-workflow-manager.js';
@@ -2377,6 +2377,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
             try {
                 // Load config on each cycle (supports runtime updates)
                 const sleepConfig = loadNocturnalConfig(wctx.stateDir);
+                const kwOptConfig = loadKeywordOptimizationConfig(wctx.stateDir);
 
                 const idleResult = checkWorkspaceIdle(wctx.workspaceDir, {});
                 logger?.info?.(`[PD:EvolutionWorker] HEARTBEAT cycle=${new Date().toISOString()} idle=${idleResult.isIdle} idleForMs=${idleResult.idleForMs} userActiveSessions=${idleResult.userActiveSessions} abandonedSessions=${idleResult.abandonedSessionIds.length} lastActivityEpoch=${idleResult.mostRecentActivityAt} triggerMode=${sleepConfig.trigger_mode}`);
@@ -2394,7 +2395,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                 // IMPORTANT: check keyword_optimization BEFORE resetting counter for sleep_reflection.
                 if (sleepConfig.trigger_mode === 'periodic') {
                     // keyword_optimization check BEFORE counter reset (CORR-07 fix)
-                    if (heartbeatCounter > 0 && heartbeatCounter % sleepConfig.period_heartbeats === 0) {
+                    if (kwOptConfig.enabled && heartbeatCounter > 0 && heartbeatCounter % kwOptConfig.period_heartbeats === 0) {
                         logger?.info?.(`[PD:EvolutionWorker] Periodic keyword_optimization trigger at heartbeat ${heartbeatCounter}`);
                         enqueueKeywordOptimizationTask(wctx, logger).catch((err) => {
                             logger?.error?.(`[PD:EvolutionWorker] Failed to enqueue keyword_optimization task: ${String(err)}`);
