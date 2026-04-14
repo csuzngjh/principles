@@ -1,163 +1,181 @@
-# Stack Research: NocturnalWorkflowManager
+# Stack Research: KeywordLearningEngine
 
-**Domain:** Multi-stage subagent workflow orchestration (Trinity 3-stage chain)
-**Researched:** 2026-04-05
+**Domain:** Dynamic keyword learning with false positive rate tracking and LLM-based optimization
+**Researched:** 2026-04-14
 **Confidence:** HIGH
 
 ## Recommended Stack
 
 ### Core Technologies
 
-No new external dependencies. NocturnalWorkflowManager composes existing validated capabilities:
-
 | Technology | Version | Purpose | Why Recommended |
 |------------|---------|---------|-----------------|
-| `TrinityRuntimeAdapter` | existing (nocturnal-trinity.ts) | Stage invocation interface | Already implemented; OpenClawTrinityRuntimeAdapter is the production adapter |
-| `WorkflowStore` | existing (workflow-store.ts) | SQLite event persistence | Already validated; reuse for workflow state machine |
-| `WorkflowManager` | existing (types.ts) | Workflow lifecycle interface | Already defined; NocturnalWorkflowManager implements it |
-| `RuntimeDirectDriver` | existing (runtime-direct-driver.ts) | Session primitive reuse | Reuse `run()`/`wait()`/`getResult()`/`cleanup()` patterns if adapter delegates to subagent runtime |
+| TypeScript | ^6.0.2 | Language | Already in plugin (package.json); no change needed |
+| Node.js fs module | built-in | JSON persistence | empathy-keyword-matcher.ts already uses this pattern; no new dependencies |
+| OpenClaw Subagent Workflow | existing | LLM-based optimization | Same pattern as empathy optimizer (EmpathyObserverWorkflowManager); no new infrastructure |
+
+**No new dependencies required.** The empathy keyword matcher provides the complete learning engine pattern using only existing infrastructure.
 
 ### Supporting Libraries
 
-No new supporting libraries needed. All required modules already exist in the codebase:
+| Library | Version | Purpose | When to Use |
+|---------|---------|---------|-------------|
+| @sinclair/typebox | ^0.34.48 | JSON schema validation | Only if runtime schema validation needed beyond TypeScript types |
+| micromatch | ^4.0.8 | Pattern matching | Only if keyword terms need glob-style wildcards (not needed for 15 hardcoded keywords) |
 
-| Library | Purpose | When to Use |
-|---------|---------|-------------|
-| `WorkflowStore` | SQLite workflow event persistence | Always — reuse existing, no changes needed |
-| `RuntimeDirectDriver` | Session primitive re-use | Only if adapter needs to delegate session management; not required |
-| `nocturnal-trinity.ts` | TrinityRuntimeAdapter + runTrinityAsync | Always — core production artifact |
-| `nocturnal-candidate-scoring.ts` | Tournament selection | Already called by stub Scribe; no changes |
+### Development Tools
 
-## What to Build
+| Tool | Purpose | Notes |
+|------|---------|-------|
+| TypeScript (existing) | Type checking | Already configured in plugin |
+| vitest (existing) | Testing | Already configured in plugin |
+| eslint (existing) | Linting | Already configured in plugin |
 
-### 1. New File: `nocturnal-workflow-manager.ts`
+## Existing Pattern to Reuse
 
-Implements `WorkflowManager` interface. Composes `TrinityRuntimeAdapter` rather than wrapping it as a `TransportDriver`.
+The `empathy-keyword-matcher.ts` (335 lines) provides the complete learning engine pattern. The KeywordLearningEngine for correction cues should follow this same architecture:
 
-**Key design points:**
-- `startWorkflow()` calls `runTrinityAsync()` (async, not polling-based)
-- Does NOT use `RuntimeDirectDriver` polling loop — Trinity stages handle their own session lifecycle internally
-- `startWorkflow()` returns immediately with a `WorkflowHandle`; actual Trinity execution is fire-and-forget
-- Result is `TrinityResult` (from nocturnal-trinity.ts), not a single-shot parse
+```
+src/core/correction-keyword-matcher.ts
+├── createDefaultCorrectionStore()      // Initialize with 15 seed keywords
+├── loadCorrectionStore()              // Load from stateDir/correction_keywords.json
+├── saveCorrectionStore()              // Persist to disk
+├── matchCorrectionKeywords()           // Fast keyword matching (replaces detectCorrectionCue)
+├── shouldTriggerOptimization()         // Decide when to optimize via subagent
+├── applyCorrectionUpdates()            // Apply LLM-generated updates
+└── getCorrectionStoreSummary()         // Debug/monitoring helper
+```
 
+**Data model (reuse/extend empathy-types.ts):**
 ```typescript
-// Structure
-export interface NocturnalWorkflowOptions {
-  workspaceDir: string;
-  logger: PluginLogger;
-  runtimeAdapter: TrinityRuntimeAdapter;  // OpenClawTrinityRuntimeAdapter
+interface CorrectionKeywordStore {
+  version: number;
+  lastUpdated: string;
+  lastOptimizedAt: string;
+  terms: Record<string, CorrectionKeywordEntry>;
+  stats: CorrectionKeywordStats;
 }
 
-export class NocturnalWorkflowManager implements WorkflowManager {
-  // startWorkflow: calls runTrinityAsync(), stores workflow in WorkflowStore
-  // notifyWaitResult: not used (Trinity stages are not polling-based)
-  // notifyLifecycleEvent: used for Trinity failure reporting
-  // finalizeOnce: reads TrinityResult from store, persists TrinityDraftArtifact
-  // sweepExpiredWorkflows: reuses existing WorkflowStore sweep logic
-  // getWorkflowDebugSummary: reuses existing WorkflowStore query logic
-  // dispose: clears timers, disposes store
+interface CorrectionKeywordEntry {
+  weight: number;           // 0-1, contribution to correction detection
+  source: 'seed' | 'llm_discovered' | 'user_reported';
+  hitCount: number;
+  lastHitAt?: string;
+  falsePositiveRate: number; // 0-1, validated via subagent
+  examples?: string[];
+  discoveredAt?: string;
 }
 ```
 
-### 2. New Type: `NocturnalWorkflowResult`
+## Seed Keywords (from detectCorrectionCue)
 
-Wraps `TrinityResult` (already defined in nocturnal-trinity.ts) for the workflow spec contract:
+These 15 hardcoded keywords should become seed entries with differentiated weights and false positive rates:
 
 ```typescript
-export interface NocturnalWorkflowResult {
-  success: boolean;
-  artifact?: TrinityDraftArtifact;
-  telemetry?: TrinityResult['telemetry'];
-  failures: TrinityStageFailure[];
-}
+// High-specificity (low FPR)
+'搞错了'     // weight: 0.7, FPR: 0.15
+'理解错了'   // weight: 0.7, FPR: 0.15
+'你理解错了' // weight: 0.8, FPR: 0.1
+
+// Medium-specificity (medium FPR)
+'不是这个'   // weight: 0.6, FPR: 0.2
+'不对'       // weight: 0.5, FPR: 0.25
+'错了'       // weight: 0.5, FPR: 0.25
+'重新来'     // weight: 0.6, FPR: 0.2
+'再试一次'   // weight: 0.5, FPR: 0.2
+'you are wrong'  // weight: 0.7, FPR: 0.15
+'wrong file'     // weight: 0.7, FPR: 0.15
+'redo'           // weight: 0.6, FPR: 0.2
+'try again'      // weight: 0.5, FPR: 0.2
+
+// High-genericity (higher FPR)
+'not this'       // weight: 0.4, FPR: 0.35
+'again'          // weight: 0.3, FPR: 0.4
+'please redo'    // weight: 0.5, FPR: 0.25
+'please try again' // weight: 0.5, FPR: 0.25
 ```
 
-### 3. Workflow State Machine (reuse existing states)
+## Installation
 
-Reuse `WorkflowState` from `types.ts`. Trinity chain maps to these states:
-- `pending` → workflow created, Trinity not yet started
-- `active` → Trinity running (Dreamer/Philosopher/Scribe stages)
-- `wait_result` → Trinity completed, waiting to finalize
-- `finalizing` → parsing result, persisting artifact
-- `completed` / `terminal_error` → terminal states
+**No new packages needed.**
 
-### 4. New `WorkflowTransport` variant? No.
-
-`NocturnalWorkflowManager` does NOT use `TransportDriver`. It calls `TrinityRuntimeAdapter` directly. Adding a `'trinity'` transport variant to `WorkflowTransport` would imply a new driver, which is unnecessary. The manager bypasses `TransportDriver` entirely.
-
-**Do NOT add `'trinity'` to `WorkflowTransport` union type.** That type is for the existing `runtime_direct` paradigm.
+```bash
+# No dependency changes required
+# Just add new source files:
+src/core/correction-keyword-matcher.ts  # Main engine
+src/core/correction-types.ts           # Or extend empathy-types.ts
+```
 
 ## Integration Points
 
-### TrinityRuntimeAdapter (existing)
-
-`OpenClawTrinityRuntimeAdapter` is the production adapter. It already:
-- Creates ephemeral sessions per stage (`ne-dreamer-`, `ne-philosopher-`, `ne-scribe-`)
-- Runs `run()` → `waitForRun()` → `getSessionMessages()` → `deleteSession()` per stage
-- Handles JSON extraction and parsing for each stage output
-
-No changes needed to `TrinityRuntimeAdapter` or `OpenClawTrinityRuntimeAdapter`.
-
-### nocturnal-service.ts (existing)
-
-`executeNocturnalReflectionAsync()` already accepts `runtimeAdapter: TrinityRuntimeAdapter`. The new `NocturnalWorkflowManager` is a parallel integration path — it wraps the adapter as a `WorkflowManager` rather than being called from `nocturnal-service.ts` directly.
-
-The evolution worker will likely call `NocturnalWorkflowManager.startWorkflow()` instead of (or in addition to) `executeNocturnalReflectionAsync()`.
-
-### WorkflowStore (existing)
-
-Reuse existing `WorkflowStore`:
-- `createWorkflow()` — for initial workflow record
-- `recordEvent()` — for stage transitions (dreamer_started, philosopher_started, scribe_started, etc.)
-- `updateWorkflowState()` — for state transitions
-- `getWorkflow()` / `getEvents()` — for `getWorkflowDebugSummary()`
-- `getExpiredWorkflows()` — for `sweepExpiredWorkflows()`
-
-No changes to `WorkflowStore` schema.
-
-## Driver Architecture Decision: Extend RuntimeDirectDriver vs. New Class
-
-**Decision: Neither — NocturnalWorkflowManager bypasses TransportDriver entirely.**
-
-Rationale:
-
-1. **TransportDriver is single-shot.** `run()` → `wait()` → `getResult()` → `cleanup()` is a 1:1 mapping between workflow and session. Trinity is 3 sequential stages, each with its own session managed internally by `OpenClawTrinityRuntimeAdapter`.
-
-2. **OpenClawTrinityRuntimeAdapter already handles session lifecycle.** It creates, waits, reads, and deletes sessions for each stage internally. Exposing it as a `TransportDriver` would require unwinding its internal session management, which is anti-architectural.
-
-3. **No polling needed.** `EmpathyObserverWorkflowManager` uses `scheduleWaitPoll()` because it needs to poll for a single subagent completion. Trinity stages each call `waitForRun()` internally during `invokeDreamer()`/`invokePhilosopher()`/`invokeScribe()`. The manager just calls `runTrinityAsync()` and waits for the Promise.
-
-4. **TrinityRuntimeAdapter is already the right abstraction.** It has `invokeDreamer`, `invokePhilosopher`, `invokeScribe` — exactly what the manager needs. Forcing it into `TransportDriver` would be a square-peg/round-hole problem.
-
-**What this means:**
-- No new `MultiStageDriver` class
-- No extension of `RuntimeDirectDriver`
-- `NocturnalWorkflowManager` directly composes `TrinityRuntimeAdapter` and calls `runTrinityAsync()`
+| Component | Integration Method | Notes |
+|-----------|-------------------|-------|
+| hooks/prompt.ts | Replace `detectCorrectionCue()` call with `matchCorrectionKeywords()` | Returns rich result (score, matchedTerms, severity) instead of just cue string |
+| OpenClaw subagent | Reuse EmpathyObserverWorkflowManager or create CorrectionOptimizationWorkflowManager | Empathy pattern already spawns optimization subagent; same pattern |
+| State storage | `stateDir/correction_keywords.json` | Parallel to `stateDir/empathy_keywords.json` |
+| Config | Add `correction_engine.enabled` similar to `empathy_engine.enabled` | Separate concern from empathy |
 
 ## Alternatives Considered
 
-| Approach | Verdict | Why |
-|----------|---------|-----|
-| Extend `RuntimeDirectDriver` for multi-stage | Avoid | Driver is single-shot by design; multi-stage would require reworking the polling model entirely |
-| Create `MultiStageDriver` implementing `TransportDriver` | Avoid | TrinityAdapter manages sessions internally; exposing as driver would require unwinding session lifecycle |
-| Force TrinityRuntimeAdapter to implement TransportDriver | Avoid | 3-stage chain semantics don't map to run/wait/getResult/cleanup; adapter would become incoherent |
-| New `'trinity'` transport type | Avoid | No existing driver would use it; adds complexity without benefit |
+| Recommended | Alternative | When to Use Alternative |
+|-------------|-------------|-------------------------|
+| JSON file storage | SQLite/better-sqlite3 | Only if store grows to 10K+ terms with complex queries. Currently 15 seed terms, JSON is sufficient |
+| Subagent optimization | Direct LLM API calls | Subagent workflow already handles rate limiting, retries, context management |
+| Extend empathy-types.ts | Separate correction-types.ts | Extend empathy-types.ts to reuse shared interfaces and reduce duplication |
 
-## What NOT to Add
+## What NOT to Use
 
 | Avoid | Why | Use Instead |
 |-------|-----|-------------|
-| `MultiStageDriver` class | Unnecessary indirection; TrinityAdapter already handles multi-stage | `NocturnalWorkflowManager` composes `TrinityRuntimeAdapter` directly |
-| `'trinity'` in `WorkflowTransport` union | No driver would use it; adds type complexity | Bypass `TransportDriver` entirely |
-| Changes to `TrinityRuntimeAdapter` or `OpenClawTrinityRuntimeAdapter` | Already production-ready | No changes needed |
-| New `WorkflowStore` schema fields | Existing schema is sufficient | Reuse as-is |
-| Polling loop in `NocturnalWorkflowManager` | Trinity stages poll internally via `waitForRun()` | `runTrinityAsync()` returns a Promise; just await it |
+| External ML libraries (tensorflow, transformers) | Overkill for keyword matching; 15-50 terms max; adds large dependency | Simple weighted scoring with false positive rate adjustment |
+| Separate database | Unnecessary complexity for this scale | JSON file in stateDir (same as empathy keywords) |
+| Real-time streaming to LLM | Cost, latency, rate limits | Periodic subagent batch optimization (same as empathy engine) |
+| Separate correction_types.ts | Duplication of empathy-types interfaces | Extend empathy-types.ts with correction-specific additions |
 
-## Phase-Specific Notes
+## Stack Patterns by Variant
 
-**For this milestone (adding NocturnalWorkflowManager to existing subagent-workflow helper system):**
+**If adding new keyword categories beyond correction cues:**
+- Extend empathy-types.ts with shared interfaces
+- One keyword store per category (correction_keywords.json, empathy_keywords.json)
 
-1. No new dependencies — entirely composes existing validated modules
-2. Reuse `WorkflowManager` interface, `WorkflowStore`, and `TrinityRuntimeAdapter`
-3. Do NOT try to fit Trinity into `SubagentWorkflowSpec` — Trinity is not a single-shot workflow; it has fundamentally different lifecycle semantics
-4. The key architectural choice is composition over adaptation: manager → TrinityRuntimeAdapter directly, bypassing `TransportDriver`
+**If keyword store exceeds 1000 terms:**
+- Consider better-sqlite3 (already in dependencies) for query performance
+- Current correction store has 15 seed terms, no migration needed soon
+
+## Version Compatibility
+
+| Package | Compatible With | Notes |
+|---------|-----------------|-------|
+| TypeScript ^6.0.2 | Existing plugin | No changes |
+| @sinclair/typebox ^0.34.48 | Existing plugin | Only needed if adding runtime validation |
+| micromatch ^4.0.8 | Existing plugin | Only needed if glob patterns required for keywords |
+
+## Sources
+
+- `packages/openclaw-plugin/src/core/empathy-keyword-matcher.ts` — HIGH confidence, existing pattern to replicate for correction keywords
+- `packages/openclaw-plugin/src/core/empathy-types.ts` — HIGH confidence, data model template
+- `packages/openclaw-plugin/src/hooks/prompt.ts` (line 87-111) — HIGH confidence, current detectCorrectionCue with 15 hardcoded keywords
+- `packages/openclaw-plugin/package.json` — HIGH confidence, current dependencies and versions
+
+## Comparison with Empathy Keyword Engine
+
+| Aspect | Empathy Engine | Correction Engine (planned) |
+|--------|--------------|----------------------------|
+| Seed keywords | ~50 terms across 4 categories | 15 terms (Chinese + English) |
+| State file | empathy_keywords.json | correction_keywords.json |
+| Workflow | EmpathyObserverWorkflowManager | CorrectionOptimizationWorkflowManager (reuse pattern) |
+| Trigger | 30% boundary / 5% random sampling | Likely similar to empathy (periodic + threshold) |
+| Config | empathy_engine.enabled | correction_engine.enabled (new) |
+
+## Confidence Assessment
+
+| Area | Confidence | Notes |
+|------|------------|-------|
+| No new dependencies | HIGH | empathy-keyword-matcher proves pattern works with existing infrastructure |
+| Reuse architecture | HIGH | Exact pattern exists and is production-validated |
+| Integration approach | HIGH | Same hook integration point (prompt.ts), just replace detectCorrectionCue call |
+| Learning algorithm | MEDIUM | Empathy pattern is proven; correction may need tuning of thresholds and FPR calibration |
+
+---
+*Stack research for: KeywordLearningEngine*
+*Researched: 2026-04-14*
