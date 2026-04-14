@@ -23,7 +23,7 @@
  * PHASE 6 ONLY — No real training, no automatic deployment
  */
 
-import type { DreamerCandidate, PhilosopherJudgment } from './nocturnal-trinity.js';
+import type { DreamerCandidate, PhilosopherJudgment } from './nocturnal-trinity-types.js';
 import type { ThresholdValues } from './adaptive-thresholds.js';
 
 // ---------------------------------------------------------------------------
@@ -293,7 +293,7 @@ export function validateCandidateDiversity(
 
   for (let i = 0; i < candidates.length; i++) {
     for (let j = i + 1; j < candidates.length; j++) {
-      // eslint-disable-next-line @typescript-eslint/no-use-before-define
+       
       const overlap = computeKeywordOverlap(
         candidates[i].betterDecision ?? '',
         candidates[j].betterDecision ?? '',
@@ -335,9 +335,9 @@ export function validateCandidateDiversity(
  * Returns value between 0 and 1.
  */
 function computeKeywordOverlap(textA: string, textB: string): number {
-  // eslint-disable-next-line @typescript-eslint/no-use-before-define
+   
   const wordsA = extractKeywords(textA);
-  // eslint-disable-next-line @typescript-eslint/no-use-before-define
+   
   const wordsB = extractKeywords(textB);
 
   if (wordsA.length === 0 && wordsB.length === 0) return 0;
@@ -376,7 +376,7 @@ function extractKeywords(text: string): string[] {
  * @returns All scored and ranked candidates
  */
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 export function rankCandidates(
   candidates: DreamerCandidate[],
   judgments: PhilosopherJudgment[],
@@ -464,7 +464,7 @@ export function rankCandidates(
  * @returns Tournament result with winner
  */
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 export function runTournament(
   candidates: DreamerCandidate[],
   judgments: PhilosopherJudgment[],

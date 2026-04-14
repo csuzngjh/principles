@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as os from 'os';
-import { validateWorkspaceDir, resolveValidWorkspaceDir, logWorkspaceDirHealth } from '../../src/core/workspace-dir-validation.js';
+import { validateWorkspaceDir, resolveValidWorkspaceDir, logWorkspaceDirHealth } from '../../src/core/workspace-dir-service.js';
 
 const homeDir = os.homedir();
 
