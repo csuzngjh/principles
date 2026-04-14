@@ -303,6 +303,44 @@ export class CorrectionCueLearner {
     this.flush();
   }
 
+  /**
+   * Updates the weight of an existing keyword.
+   * Weight is clamped to 0.1-0.9 range.
+   * Throws if keyword not found.
+   */
+  updateWeight(term: string, weight: number): void {
+    const keyword = this.store.keywords.find(
+      k => k.term.toLowerCase() === term.toLowerCase()
+    );
+    if (!keyword) {
+      throw new Error(`Keyword not found: ${term}`);
+    }
+
+    keyword.weight = Math.max(0.1, Math.min(0.9, weight)); // Clamp to 0.1-0.9
+    const idx = this.store.keywords.findIndex(
+      k => k.term.toLowerCase() === term.toLowerCase()
+    );
+    if (idx >= 0) {
+      this.store.keywords[idx] = { ...keyword };
+    }
+    this.flush();
+  }
+
+  /**
+   * Removes a keyword from the store by term.
+   * Throws if keyword not found.
+   */
+  remove(term: string): void {
+    const idx = this.store.keywords.findIndex(
+      k => k.term.toLowerCase() === term.toLowerCase()
+    );
+    if (idx < 0) {
+      throw new Error(`Keyword not found: ${term}`);
+    }
+    this.store.keywords.splice(idx, 1);
+    this.flush();
+  }
+
   /** Returns a reference to the in-memory store. */
   getStore(): CorrectionKeywordStore {
     return this.store;
