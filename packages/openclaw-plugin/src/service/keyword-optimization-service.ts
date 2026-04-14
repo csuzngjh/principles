@@ -38,7 +38,7 @@ export class KeywordOptimizationService {
       switch (update.action) {
         case 'add': {
           const weight = update.weight ?? 0.5;
-          learner.add({ term, weight, source: 'llm_optimization' });
+          learner.add({ term, weight, source: 'llm' });
           this.logger?.info?.(`[KeywordOptimizationService] ADD term="${term}" weight=${weight}`);
           break;
         }
@@ -65,7 +65,7 @@ export class KeywordOptimizationService {
    * - Returns last 50 correction events
    */
   async buildTrajectoryHistory(sessionIds: string[]): Promise<TrajectoryHistoryEntry[]> {
-    const history: CorrectionObserverPayload['trajectoryHistory'] = [];
+    const history: TrajectoryHistoryEntry[] = [];
     const db = TrajectoryRegistry.get(this.stateDir);
 
     for (const sessionId of sessionIds.slice(0, 10)) { // Last 10 sessions
@@ -93,16 +93,16 @@ export class KeywordOptimizationService {
   private static _lastStateDir: string | null = null;
 
   static get(stateDir: string, logger: PluginLogger): KeywordOptimizationService {
-    if (!_instance || _lastStateDir !== stateDir) {
-      _instance = new KeywordOptimizationService(stateDir, logger);
-      _lastStateDir = stateDir;
+    if (!KeywordOptimizationService._instance || KeywordOptimizationService._lastStateDir !== stateDir) {
+      KeywordOptimizationService._instance = new KeywordOptimizationService(stateDir, logger);
+      KeywordOptimizationService._lastStateDir = stateDir;
     }
-    return _instance;
+    return KeywordOptimizationService._instance;
   }
 
   static reset(): void {
-    _instance = null;
-    _lastStateDir = null;
+    KeywordOptimizationService._instance = null;
+    KeywordOptimizationService._lastStateDir = null;
   }
 }
 

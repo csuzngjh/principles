@@ -117,7 +117,7 @@ export interface TrajectorySessionInput {
 }
 
 // V2: Task kind and priority types for queue schema
-export type TaskKind = 'pain_diagnosis' | 'sleep_reflection' | 'model_eval';
+export type TaskKind = 'pain_diagnosis' | 'sleep_reflection' | 'model_eval' | 'keyword_optimization';
 export type TaskPriority = 'high' | 'medium' | 'low';
 
 // V2: EvolutionTaskInput with all V2 fields

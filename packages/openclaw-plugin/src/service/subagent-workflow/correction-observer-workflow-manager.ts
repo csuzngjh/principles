@@ -187,6 +187,24 @@ export class CorrectionObserverWorkflowManager extends WorkflowManagerBase {
         return super.startWorkflow(spec, options);
     }
 
+    /**
+     * Get the parsed workflow result for a completed workflow.
+     * Used by callers (evolution-worker.ts) to retrieve LLM optimization results
+     * after the workflow completes, so mutations can be applied to the keyword store.
+     */
+    async getWorkflowResult(workflowId: string): Promise<CorrectionObserverResult | null> {
+        const workflow = this.store.getWorkflow(workflowId);
+        if (!workflow) return null;
+
+        const result = await this.driver.getResult({ sessionKey: workflow.child_session_key, limit: 20 });
+        return correctionObserverWorkflowSpec.parseResult({
+            messages: result.messages,
+            assistantTexts: result.assistantTexts,
+            metadata: JSON.parse(workflow.metadata_json) as WorkflowMetadata,
+            waitStatus: 'ok',
+        });
+    }
+
     // eslint-disable-next-line @typescript-eslint/class-methods-use-this
     protected override createWorkflowMetadata<TResult>(
         spec: SubagentWorkflowSpec<TResult>,

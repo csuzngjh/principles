@@ -31,6 +31,12 @@ import {
 import { validateNocturnalSnapshotIngress } from '../core/nocturnal-snapshot-contract.js';
 import { isExpectedSubagentError } from './subagent-workflow/subagent-error-utils.js';
 import { readPainFlagContract } from '../core/pain.js';
+import { CorrectionObserverWorkflowManager, correctionObserverWorkflowSpec } from './subagent-workflow/correction-observer-workflow-manager.js';
+import type { CorrectionObserverPayload } from './subagent-workflow/correction-observer-types.js';
+import type { CorrectionObserverResult } from './subagent-workflow/correction-observer-types.js';
+import { KeywordOptimizationService } from './keyword-optimization-service.js';
+import { TrajectoryRegistry } from '../core/trajectory.js';
+import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
 
 const WORKFLOW_TTL_MS = 5 * 60 * 1000; // 5 minutes default TTL for helper workflows
 import { OpenClawTrinityRuntimeAdapter } from '../core/nocturnal-trinity.js';
@@ -758,6 +764,53 @@ async function enqueueSleepReflectionTask(
     }
 }
 
+/**
+ * Enqueue a keyword_optimization task if one is not already pending/in-progress (CORR-08).
+ * Dispatches LLM subagent via CorrectionObserverWorkflowManager to optimize
+ * correction keywords based on FPR and match history.
+ */
+async function enqueueKeywordOptimizationTask(
+    wctx: WorkspaceContext,
+    logger: PluginLogger,
+): Promise<void> {
+    const queuePath = wctx.resolve('EVOLUTION_QUEUE');
+    const releaseLock = await requireQueueLock(queuePath, logger, 'enqueueKeywordOpt', EVOLUTION_QUEUE_LOCK_SUFFIX);
+
+    try {
+        const queue = loadEvolutionQueue(queuePath);
+
+        // Guard: Skip if a keyword_optimization task is already pending/in-progress (CORR-08)
+        if (hasPendingTask(queue, 'keyword_optimization')) {
+            logger?.debug?.('[PD:EvolutionWorker] keyword_optimization task already pending/in-progress, skipping');
+            return;
+        }
+
+        const taskId = createEvolutionTaskId('keyword_optimization', 50, 'keyword optimization', 'Keyword optimization via LLM', Date.now());
+        const nowIso = new Date().toISOString();
+
+        queue.push({
+            id: taskId,
+            taskKind: 'keyword_optimization',
+            priority: 'medium',
+            score: 50,
+            source: 'correction',
+            reason: 'Keyword optimization triggered by heartbeat',
+            trigger_text_preview: 'Keyword optimization via LLM',
+            timestamp: nowIso,
+            enqueued_at: nowIso,
+            status: 'pending',
+            traceId: taskId,
+            retryCount: 0,
+            maxRetries: 1,
+        });
+
+        fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+        logger?.info?.(`[PD:EvolutionWorker] Enqueued keyword_optimization task ${taskId}`);
+    } finally {
+        releaseLock();
+    }
+}
+
 interface ParsedPainValues {
     score: number; source: string; reason: string; preview: string;
     traceId: string; sessionId: string; agentId: string;
@@ -1048,6 +1101,11 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
         const queue: EvolutionQueueItem[] = migrateQueueToV2(rawQueue);
 
         let queueChanged = rawQueue.some(isLegacyQueueItem);
+
+        // Guard: Skip keyword_optimization if one is already pending/in-progress (CORR-08)
+        if (hasPendingTask(queue, 'keyword_optimization')) {
+            logger?.debug?.('[PD:EvolutionWorker] keyword_optimization task already pending/in-progress, skipping enqueue');
+        }
 
         const {config} = wctx;
         const timeout = config.get('intervals.task_timeout_ms') || (60 * 60 * 1000); // Default 1 hour
@@ -1879,6 +1937,152 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
             return;
         }
 
+        // ── keyword_optimization task processing ──────────────────────────────
+        // Process keyword_optimization tasks independently of sleep_reflection.
+        // Uses CorrectionObserverWorkflowManager to dispatch LLM subagent and
+        // KeywordOptimizationService to apply mutations to keyword store (CORR-09).
+        const pendingKeywordOptTasks = queue.filter(t => t.status === 'pending' && t.taskKind === 'keyword_optimization');
+        const inProgressKeywordOptTasks = queue.filter(t =>
+            t.status === 'in_progress' &&
+            t.taskKind === 'keyword_optimization' &&
+            t.resultRef &&
+            !t.resultRef.startsWith('trinity-draft')
+        );
+        const keywordOptTasks = [...pendingKeywordOptTasks, ...inProgressKeywordOptTasks];
+        if (keywordOptTasks.length > 0) {
+            // Claim pending tasks inside lock
+            for (const koTask of pendingKeywordOptTasks) {
+                koTask.status = 'in_progress';
+                koTask.started_at = new Date().toISOString();
+            }
+            queueChanged = queueChanged || pendingKeywordOptTasks.length > 0;
+
+            // Release lock during LLM dispatch (long-running)
+            fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+            releaseLock();
+            lockReleased = true;
+
+            for (const koTask of keywordOptTasks) {
+                const isPolling = !!koTask.resultRef && !koTask.resultRef.startsWith('trinity-draft');
+
+                if (isPolling) {
+                    logger?.debug?.(`[PD:EvolutionWorker] Polling existing keyword_optimization task ${koTask.id}`);
+                } else {
+                    logger?.info?.(`[PD:EvolutionWorker] Processing keyword_optimization task ${koTask.id}`);
+                }
+
+                try {
+                    // Build trajectoryHistory via KeywordOptimizationService
+                    const koService = KeywordOptimizationService.get(wctx.stateDir, logger);
+                    const db = TrajectoryRegistry.get(wctx.workspaceDir);
+                    const recentSessionIds = db.listRecentSessions({ limit: 10 }).map(s => s.sessionId);
+                    const trajectoryHistory = await koService.buildTrajectoryHistory(recentSessionIds);
+
+                    // Build full payload (CORR-09, D-40-07, D-40-08)
+                    const learner = CorrectionCueLearner.get(wctx.stateDir);
+                    const store = learner.getStore();
+                    const payload: CorrectionObserverPayload = {
+                        workspaceDir: wctx.workspaceDir,
+                        parentSessionId: `keyword_optimization:${koTask.id}`,
+                        keywordStoreSummary: {
+                            totalKeywords: store.keywords.length,
+                            terms: store.keywords.map(k => ({
+                                term: k.term,
+                                weight: k.weight,
+                                hitCount: k.hitCount ?? 0,
+                                truePositiveCount: k.truePositiveCount ?? 0,
+                                falsePositiveCount: k.falsePositiveCount ?? 0,
+                            })),
+                        },
+                        recentMessages: [],
+                        trajectoryHistory,
+                    };
+
+                    // Dispatch LLM subagent via CorrectionObserverWorkflowManager
+                    const manager = new CorrectionObserverWorkflowManager({
+                        workspaceDir: wctx.workspaceDir,
+                        logger,
+                        subagent: api?.runtime?.subagent!,
+                        agentSession: api?.runtime?.agent?.session,
+                    });
+
+                    let workflowId: string | undefined;
+                    if (!isPolling) {
+                        const handle = await manager.startWorkflow(correctionObserverWorkflowSpec, {
+                            parentSessionId: `keyword_optimization:${koTask.id}`,
+                            workspaceDir: wctx.workspaceDir,
+                            taskInput: payload,
+                        });
+                        workflowId = handle.workflowId;
+                        koTask.resultRef = workflowId;
+                    } else {
+                        workflowId = koTask.resultRef!;
+                    }
+
+                    // Poll workflow state
+                    const summary = await manager.getWorkflowDebugSummary(workflowId!);
+                    if (summary) {
+                        if (summary.state === 'completed') {
+                            // Get parsed LLM result and apply mutations to keyword store (CORR-09)
+                            const parsedResult = await manager.getWorkflowResult(workflowId!);
+
+                            if (parsedResult?.updated) {
+                                koService.applyResult(parsedResult);
+                                learner.recordOptimizationPerformed();
+                                logger?.info?.(`[PD:EvolutionWorker] keyword_optimization applied mutations: ${parsedResult.summary}`);
+                            } else {
+                                logger?.info?.(`[PD:EvolutionWorker] keyword_optimization completed with no updates`);
+                            }
+
+                            koTask.status = 'completed';
+                            koTask.completed_at = new Date().toISOString();
+                            koTask.resolution = 'marker_detected';
+                            logger?.info?.(`[PD:EvolutionWorker] keyword_optimization task ${koTask.id} workflow completed`);
+                        } else if (summary.state === 'terminal_error') {
+                            koTask.status = 'failed';
+                            koTask.completed_at = new Date().toISOString();
+                            koTask.resolution = 'failed_max_retries';
+                            koTask.retryCount = (koTask.retryCount ?? 0) + 1;
+                            const lastEvent = summary.recentEvents[summary.recentEvents.length - 1];
+                            koTask.lastError = `keyword_optimization failed: ${lastEvent?.reason ?? 'unknown'}`;
+                            logger?.warn?.(`[PD:EvolutionWorker] keyword_optimization task ${koTask.id} workflow terminal_error: ${koTask.lastError}`);
+                        } else {
+                            logger?.info?.(`[PD:EvolutionWorker] keyword_optimization task ${koTask.id} workflow ${summary.state}, will poll again next cycle`);
+                        }
+                    }
+                } catch (koErr) {
+                    koTask.status = 'failed';
+                    koTask.completed_at = new Date().toISOString();
+                    koTask.resolution = 'failed_max_retries';
+                    koTask.lastError = String(koErr);
+                    koTask.retryCount = (koTask.retryCount ?? 0) + 1;
+                    logger?.error?.(`[PD:EvolutionWorker] keyword_optimization task ${koTask.id} threw: ${koErr}`);
+                }
+            }
+
+            // Re-acquire lock to write results
+            const koResultLock = await requireQueueLock(queuePath, logger, 'keywordOptResult');
+            try {
+                let freshQueue: (RawQueueItem | EvolutionQueueItem)[] = [];
+                try {
+                    freshQueue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
+                } catch { /* empty */ }
+
+                for (const koTask of keywordOptTasks) {
+                    const idx = freshQueue.findIndex((t) => (t as { id?: string }).id === koTask.id);
+                    if (idx >= 0) {
+                        freshQueue[idx] = koTask;
+                    }
+                }
+                fs.writeFileSync(queuePath, JSON.stringify(freshQueue, null, 2), 'utf8');
+            } catch (koResultErr) {
+                logger?.warn?.(`[PD:EvolutionWorker] Failed to write keyword_optimization results: ${String(koResultErr)}`);
+            } finally {
+                koResultLock();
+            }
+            return;
+        }
+
         if (queueChanged) {
             fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
         }
@@ -2196,6 +2400,15 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                     } else {
                         logger?.info?.(`[PD:EvolutionWorker] Skipping sleep_reflection: globalCooldown=${cooldown.globalCooldownActive} quotaExhausted=${cooldown.quotaExhausted}`);
                     }
+                }
+
+                // keyword_optimization fires every period_heartbeats (6-hour wall-clock equivalent, CORR-07)
+                // Uses separate throttle: max 4/day per workspace (CORR-08)
+                if (heartbeatCounter > 0 && heartbeatCounter % sleepConfig.period_heartbeats === 0) {
+                    logger?.info?.(`[PD:EvolutionWorker] Periodic keyword_optimization trigger at heartbeat ${heartbeatCounter}`);
+                    enqueueKeywordOptimizationTask(wctx, logger).catch((err) => {
+                        logger?.error?.(`[PD:EvolutionWorker] Failed to enqueue keyword_optimization task: ${String(err)}`);
+                    });
                 }
 
                 const painCheckResult = await checkPainFlag(wctx, logger);
