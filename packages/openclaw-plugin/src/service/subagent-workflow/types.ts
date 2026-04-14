@@ -367,6 +367,27 @@ export type { PluginLogger } from '../../openclaw-sdk.js';
 // ── Nocturnal Workflow Types ───────────────────────────────────────────────────
 
 /**
+ * Recent pain context for sleep_reflection tasks.
+ * Used by target selector for ranking bias and context enrichment.
+ * Originally from evolution-worker.ts, moved here to break circular dependency.
+ */
+export interface RecentPainContext {
+    /** Most recent unresolved pain event */
+    mostRecent: {
+        score: number;
+        source: string;
+        reason: string;
+        timestamp: string;
+        /** Session ID where the pain occurred */
+        sessionId: string;
+    } | null;
+    /** Count of pain events in the recent window (for signal strength) */
+    recentPainCount: number;
+    /** Highest pain score in the recent window */
+    recentMaxPainScore: number;
+}
+
+/**
  * Nocturnal workflow result type.
  * Mirrors NocturnalRunResult from nocturnal-service.ts (per D-02).
  */

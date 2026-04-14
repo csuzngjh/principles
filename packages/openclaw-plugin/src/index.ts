@@ -60,8 +60,8 @@ import { SystemLogger } from './core/system-logger.js';
 import { createDeepReflectTool } from './tools/deep-reflect.js';
 import { createWritePainFlagTool } from './tools/write-pain-flag.js';
 import { PathResolver, resolveWorkspaceDirFromApi } from './core/path-resolver.js';
-import { validateWorkspaceDir } from './core/workspace-dir-validation.js';
-import { resolveRequiredWorkspaceDir, resolveWorkspaceDir, type WorkspaceResolutionContext } from './core/workspace-dir-service.js';
+import { validateWorkspaceDir, type WorkspaceResolutionContext } from './core/workspace-dir-validation.js';
+import { resolveRequiredWorkspaceDir, resolveWorkspaceDir } from './core/workspace-dir-service.js';
 import { createPrinciplesConsoleRoute } from './http/principles-console-route.js';
 import { extractAgentIdFromSessionKey } from './utils/session-key.js';
 
@@ -421,7 +421,7 @@ const plugin = {
 
     // ── Slash Commands ──
     // Register command with optional short alias
-    // eslint-disable-next-line @typescript-eslint/max-params, @typescript-eslint/no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const registerCommandWithAlias = (name: string, alias: string | null, desc: string, handler: any, opts?: { acceptsArgs?: boolean }) => {
       const base = {
         name,

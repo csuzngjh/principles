@@ -19,7 +19,7 @@ import { LockUnavailableError } from '../config/index.js';
 import { checkWorkspaceIdle, checkCooldown } from './nocturnal-runtime.js';
 import { loadNocturnalConfig } from './nocturnal-config.js';
 import { WorkflowStore } from './subagent-workflow/workflow-store.js';
-import type { WorkflowRow } from './subagent-workflow/types.js';
+import type { WorkflowRow, RecentPainContext } from './subagent-workflow/types.js';
 import { EmpathyObserverWorkflowManager } from './subagent-workflow/empathy-observer-workflow-manager.js';
 import { DeepReflectWorkflowManager } from './subagent-workflow/deep-reflect-workflow-manager.js';
 import { NocturnalWorkflowManager, nocturnalWorkflowSpec } from './subagent-workflow/nocturnal-workflow-manager.js';
@@ -208,27 +208,6 @@ let timeoutId: NodeJS.Timeout | null = null;
  */
 export type QueueStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'canceled';
 export type TaskResolution = 'marker_detected' | 'auto_completed_timeout' | 'failed_max_retries' | 'runtime_unavailable' | 'canceled' | 'late_marker_principle_created' | 'late_marker_no_principle' | 'stub_fallback' | 'skipped_thin_violation';
-
-/**
- * Recent pain context attached to sleep_reflection tasks.
- * Carries explicit recent pain signal metadata without being a separate task kind.
- * Used by NocturnalTargetSelector for ranking bias and context enrichment.
- */
-export interface RecentPainContext {
-  /** Most recent unresolved pain event */
-  mostRecent: {
-    score: number;
-    source: string;
-    reason: string;
-    timestamp: string;
-    /** Session ID where the pain occurred */
-    sessionId: string;
-  } | null;
-  /** Count of pain events in the recent window (for signal strength) */
-  recentPainCount: number;
-  /** Highest pain score in the recent window */
-  recentMaxPainScore: number;
-}
 
 export interface EvolutionQueueItem {
     // Core identity
@@ -692,7 +671,7 @@ function shouldSkipForDedup(
  * Load and migrate the evolution queue. Returns empty array if file doesn't exist.
  */
 function loadEvolutionQueue(queuePath: string): EvolutionQueueItem[] {
-    // eslint-disable-next-line no-useless-assignment
+     
     let rawQueue: RawQueueItem[] = [];
     try {
         rawQueue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
