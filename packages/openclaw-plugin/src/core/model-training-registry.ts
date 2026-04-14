@@ -322,7 +322,7 @@ export function registerTrainingRun(
  * @throws Error if run not found or transition is invalid
  */
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 export function updateTrainingRunStatus(
   stateDir: string,
   trainRunId: string,

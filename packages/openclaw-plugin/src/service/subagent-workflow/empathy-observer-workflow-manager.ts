@@ -71,7 +71,7 @@ export class EmpathyObserverWorkflowManager extends WorkflowManagerBase {
     }
 
      
-    // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+     
     protected override createWorkflowMetadata<TResult>(
         spec: SubagentWorkflowSpec<TResult>,
         options: {
@@ -105,7 +105,7 @@ export class EmpathyObserverWorkflowManager extends WorkflowManagerBase {
     }
 
      
-    // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+     
     protected override generateWorkflowId(): string {
         return `wf_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
     }

@@ -283,7 +283,7 @@ async function compressFocus(
 
   // 5. 压缩内容
    
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let compressedContent: string;
   try {
     compressedContent = compressFocusContent(oldContent, workspaceDir);
@@ -481,7 +481,7 @@ export async function handleFocusCommand(
   const isZh = (ctx.config?.language as string) === 'zh';
 
    
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let result: string;
 
   switch (subCommand) {

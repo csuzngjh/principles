@@ -96,7 +96,7 @@ function createService(api: OpenClawPluginApi): ControlUiQueryService {
 }
 
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 function handleApiRoute(
   api: OpenClawPluginApi,
   pathname: string,
@@ -105,13 +105,13 @@ function handleApiRoute(
 ): Promise<boolean> | boolean {
   // Check authentication for API routes
    
-  // eslint-disable-next-line @typescript-eslint/no-use-before-define
+   
   if (!validateGatewayAuth(req)) {
     json(res, 401, { error: 'unauthorized', message: 'Valid Gateway token required.' });
     return true;
   }
 
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let service: ControlUiQueryService;
   try {
     service = createService(api);

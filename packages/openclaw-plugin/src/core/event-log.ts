@@ -108,7 +108,7 @@ export class EventLog {
   }
   
    
-  // eslint-disable-next-line @typescript-eslint/max-params
+   
   private record(
     type: EventType, 
     category: EventCategory, 
@@ -136,7 +136,7 @@ export class EventLog {
   }
 
    
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+   
   private formatDate(date: Date): string {
     return date.toISOString().split('T')[0];
   }
@@ -246,7 +246,7 @@ export class EventLog {
   }
 
    
-    // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- complexity 13, refactor candidate
+     
   private getEventDedupKey(entry: EventLogEntry): string {
     const eventId = typeof (entry.data as { eventId?: unknown } | undefined)?.eventId === 'string'
       ? String((entry.data as { eventId?: string }).eventId)
@@ -344,12 +344,32 @@ export class EventLog {
    * @param sessionId Optional session ID for session-scoped stats
    */
      
-  getEmpathyStats(range: 'today' | 'week' | 'session', sessionId?: string): EmpathyEventStats {
-    const now = new Date();
-    const today = this.formatDate(now);
+  private _aggregateDailyStats(result: EmpathyEventStats, stats: DailyStats): void {
+    result.totalEvents += stats.empathy.totalEvents;
+    result.dedupedCount += stats.empathy.dedupedCount;
+    result.totalPenaltyScore += stats.empathy.totalPenaltyScore;
+    result.rolledBackScore += stats.empathy.rolledBackScore;
+    result.rollbackCount += stats.empathy.rollbackCount;
 
-    // Aggregate stats based on range
-    const result: EmpathyEventStats = {
+    for (const sev of ['mild', 'moderate', 'severe'] as const) {
+      result.bySeverity[sev] += stats.empathy.bySeverity[sev];
+      result.scoreBySeverity[sev] += stats.empathy.scoreBySeverity[sev];
+    }
+
+    result.byDetectionMode.structured += stats.empathy.byDetectionMode.structured;
+    result.byDetectionMode.legacy_tag += stats.empathy.byDetectionMode.legacy_tag;
+
+    for (const org of ['assistant_self_report', 'user_manual', 'system_infer'] as const) {
+      result.byOrigin[org] += stats.empathy.byOrigin[org];
+    }
+
+    result.confidenceDistribution.high += stats.empathy.confidenceDistribution.high;
+    result.confidenceDistribution.medium += stats.empathy.confidenceDistribution.medium;
+    result.confidenceDistribution.low += stats.empathy.confidenceDistribution.low;
+  }
+
+  private _getEmptyEmpathyStats(): EmpathyEventStats {
+    return {
       totalEvents: 0,
       dedupedCount: 0,
       dedupeHitRate: 0,
@@ -363,59 +383,20 @@ export class EventLog {
       confidenceDistribution: { high: 0, medium: 0, low: 0 },
       dailyTrend: [],
     };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- extracted helpers
+  getEmpathyStats(range: 'today' | 'week' | 'session', sessionId?: string): EmpathyEventStats {
+    const now = new Date();
+    const today = this.formatDate(now);
+    const result = this._getEmptyEmpathyStats();
 
     if (range === 'session' && sessionId) {
-      // For session range, scan event buffer and events file
       this.aggregateSessionEmpathy(sessionId, result);
     } else if (range === 'week') {
-      // For week range, aggregate last 7 days
-      for (let i = 0; i < 7; i++) {
-        const date = new Date(now);
-        date.setDate(date.getDate() - i);
-        const dateStr = this.formatDate(date);
-        const stats = this.getDailyStats(dateStr);
-
-        result.totalEvents += stats.empathy.totalEvents;
-        result.dedupedCount += stats.empathy.dedupedCount;
-        result.totalPenaltyScore += stats.empathy.totalPenaltyScore;
-        result.rolledBackScore += stats.empathy.rolledBackScore;
-        result.rollbackCount += stats.empathy.rollbackCount;
-
-        for (const sev of ['mild', 'moderate', 'severe'] as const) {
-          result.bySeverity[sev] += stats.empathy.bySeverity[sev];
-          result.scoreBySeverity[sev] += stats.empathy.scoreBySeverity[sev];
-        }
-
-        result.byDetectionMode.structured += stats.empathy.byDetectionMode.structured;
-        result.byDetectionMode.legacy_tag += stats.empathy.byDetectionMode.legacy_tag;
-
-        for (const org of ['assistant_self_report', 'user_manual', 'system_infer'] as const) {
-          result.byOrigin[org] += stats.empathy.byOrigin[org];
-        }
-
-        result.confidenceDistribution.high += stats.empathy.confidenceDistribution.high;
-        result.confidenceDistribution.medium += stats.empathy.confidenceDistribution.medium;
-        result.confidenceDistribution.low += stats.empathy.confidenceDistribution.low;
-
-        if (stats.empathy.totalEvents > 0 || stats.empathy.dedupedCount > 0) {
-          result.dailyTrend.push({
-            date: dateStr,
-            count: stats.empathy.totalEvents,
-            score: stats.empathy.totalPenaltyScore,
-          });
-        }
-      }
+      this._aggregateWeekStats(now, result);
     } else {
-      // Today only
-      const stats = this.getDailyStats(today);
-      Object.assign(result, stats.empathy);
-      if (stats.empathy.totalEvents > 0 || stats.empathy.dedupedCount > 0) {
-        result.dailyTrend = [{
-          date: today,
-          count: stats.empathy.totalEvents,
-          score: stats.empathy.totalPenaltyScore,
-        }];
-      }
+      this._aggregateTodayStats(today, result);
     }
 
     // Calculate dedupe hit rate
@@ -423,6 +404,37 @@ export class EventLog {
     result.dedupeHitRate = total > 0 ? result.dedupedCount / total : 0;
 
     return result;
+  }
+
+  private _aggregateWeekStats(now: Date, result: EmpathyEventStats): void {
+    for (let i = 0; i < 7; i++) {
+      const date = new Date(now);
+      date.setDate(date.getDate() - i);
+      const dateStr = this.formatDate(date);
+      const stats = this.getDailyStats(dateStr);
+
+      this._aggregateDailyStats(result, stats);
+
+      if (stats.empathy.totalEvents > 0 || stats.empathy.dedupedCount > 0) {
+        result.dailyTrend.push({
+          date: dateStr,
+          count: stats.empathy.totalEvents,
+          score: stats.empathy.totalPenaltyScore,
+        });
+      }
+    }
+  }
+
+  private _aggregateTodayStats(today: string, result: EmpathyEventStats): void {
+    const stats = this.getDailyStats(today);
+    Object.assign(result, stats.empathy);
+    if (stats.empathy.totalEvents > 0 || stats.empathy.dedupedCount > 0) {
+      result.dailyTrend = [{
+        date: today,
+        count: stats.empathy.totalEvents,
+        score: stats.empathy.totalPenaltyScore,
+      }];
+    }
   }
 
   /**
@@ -464,7 +476,7 @@ export class EventLog {
    * Returns the rolled back score, or 0 if event not found.
    */
    
-  // eslint-disable-next-line @typescript-eslint/max-params
+   
   rollbackEmpathyEvent(eventId: string, sessionId: string | undefined, reason: string, triggeredBy: 'user_command' | 'natural_language' | 'system'): number {
     const allEvents = this.getMergedEvents();
     let foundEvent: { entry: EventLogEntry; data: PainSignalEventData } | null = null;

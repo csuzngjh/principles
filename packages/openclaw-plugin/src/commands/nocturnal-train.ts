@@ -285,7 +285,7 @@ Hardware tiers:
         fs.writeFileSync(specPath, JSON.stringify(spec, null, 2), 'utf-8');
 
          
-        // eslint-disable-next-line @typescript-eslint/init-declarations
+         
         let trainerResult!: TrainingExperimentResult;
 
         try {
@@ -394,7 +394,7 @@ Hardware tiers:
         // Process trainer result (register checkpoint)
         // dry_run returns null (no checkpoint); other statuses throw on error
          
-        // eslint-disable-next-line @typescript-eslint/init-declarations
+         
         let processed: { checkpointId: string; checkpointRef: string } | null;
         try {
           processed = program.processResult({
@@ -536,7 +536,7 @@ Next steps:
         }
       }
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/init-declarations -- Reason: JSON.parse returns dynamic JSON - type unknown at parse time, narrowed via type narrowing below
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: JSON.parse returns dynamic JSON - type unknown at parse time, narrowed via type narrowing below
       let result: any;
       try {
         result = JSON.parse(resultJson);
@@ -568,7 +568,7 @@ Next steps:
       // Process the result
       const program = new TrainingProgram(workspaceDir);
        
-      // eslint-disable-next-line @typescript-eslint/init-declarations
+       
       let processed: { checkpointId: string; checkpointRef: string } | null;
       try {
         processed = program.processResult({
@@ -756,15 +756,15 @@ Next steps:
         }
 
         // Destructure benchmark result - delta property contains the actual delta value
-        // eslint-disable-next-line @typescript-eslint/prefer-destructuring
+         
         delta = benchmarkResult.delta.delta;
-        // eslint-disable-next-line @typescript-eslint/prefer-destructuring
+         
         baselineScore = benchmarkResult.delta.baselineScore;
-        // eslint-disable-next-line @typescript-eslint/prefer-destructuring
+         
         candidateScore = benchmarkResult.delta.candidateScore;
-        // eslint-disable-next-line @typescript-eslint/prefer-destructuring
+         
         benchmarkId = benchmarkResult.benchmarkId;
-        // eslint-disable-next-line @typescript-eslint/prefer-destructuring
+         
         verdict = benchmarkResult.verdict;
       } else {
         // Manual mode: require explicit delta and verdict

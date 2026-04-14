@@ -321,7 +321,7 @@ export function checkWorkspaceIdle(
     }
 
      
-    // eslint-disable-next-line @typescript-eslint/init-declarations
+     
     let reason: string;
     if (mostRecentActivityAt === 0) {
         reason = 'No active sessions found — workspace is idle';
@@ -390,7 +390,7 @@ export function checkCooldown(
         if (cooldownEnd > now) {
             globalCooldownActive = true;
             globalCooldownRemainingMs = cooldownEnd - now;
-            // eslint-disable-next-line @typescript-eslint/prefer-destructuring
+             
             globalCooldownUntil = state.globalCooldownUntil;  
         }
     }
@@ -562,7 +562,7 @@ export interface PreflightCheckResult {
  * @param idleCheckOverride - Optional override for idle check result (for testing)
  */
  
-    // eslint-disable-next-line @typescript-eslint/max-params -- complexity 12, refactor candidate
+     
 export function checkPreflight(
     workspaceDir: string,
     stateDir: string,

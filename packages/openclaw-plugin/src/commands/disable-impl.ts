@@ -70,7 +70,7 @@ function _handleListActive(
 }
 
  
-    // eslint-disable-next-line @typescript-eslint/max-params -- complexity 15, refactor candidate
+     
 function _handleDisableImpl(
   workspaceDir: string,
   stateDir: string,
