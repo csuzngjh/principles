@@ -21,17 +21,9 @@ import {
   CORRECTION_SEED_KEYWORDS,
   MAX_CORRECTION_KEYWORDS,
 } from './correction-types.js';
-import { checkCooldown } from '../service/nocturnal-runtime.js';
+import { checkCooldown, recordCooldown } from '../service/nocturnal-runtime.js';
 
 const KEYWORD_STORE_FILE = 'correction_keywords.json';
-
-// CORR-08: Daily optimization throttle
-const THROTTLE_FILE = 'correction_optimization_throttle.json';
-
-interface OptimizationThrottle {
-  count: number;
-  date: string; // YYYY-MM-DD
-}
 
 // =========================================================================
 // Module-level cache (D-04, D-05)
@@ -118,32 +110,6 @@ export function saveCorrectionKeywordStore(
 
   // Invalidate cache so the next read re-loads from disk (D-05)
   _correctionCueCache = null;
-}
-
-// =========================================================================
-// Throttle helpers (CORR-08)
-// =========================================================================
-
-function loadThrottle(stateDir: string): OptimizationThrottle {
-  const filePath = path.join(stateDir, THROTTLE_FILE);
-  const today = new Date().toISOString().split('T')[0];
-  try {
-    if (fs.existsSync(filePath)) {
-      const raw = fs.readFileSync(filePath, 'utf-8');
-      const throttle = JSON.parse(raw) as OptimizationThrottle;
-      if (throttle.date === today) {
-        return throttle;
-      }
-    }
-  } catch { /* ignore */ }
-  return { count: 0, date: today };
-}
-
-function recordOptimization(stateDir: string): void {
-  const throttle = loadThrottle(stateDir);
-  throttle.count++;
-  const filePath = path.join(stateDir, THROTTLE_FILE);
-  fs.writeFileSync(filePath, JSON.stringify(throttle), 'utf-8');
 }
 
 // =========================================================================
@@ -274,8 +240,8 @@ export class CorrectionCueLearner {
    * Records that an optimization was performed.
    * Increments the daily throttle counter and updates lastOptimizedAt.
    */
-  recordOptimizationPerformed(): void {
-    recordOptimization(this.stateDir);
+  async recordOptimizationPerformed(): Promise<void> {
+    await recordCooldown(this.stateDir, 24 * 60 * 60 * 1000);
     this.store.lastOptimizedAt = new Date().toISOString();
     this.flush();
   }
@@ -304,20 +270,14 @@ export class CorrectionCueLearner {
    * Throws if keyword not found.
    */
   updateWeight(term: string, weight: number): void {
-    const keyword = this.store.keywords.find(
-      k => k.term.toLowerCase() === term.toLowerCase()
-    );
-    if (!keyword) {
-      throw new Error(`Keyword not found: ${term}`);
-    }
-
-    keyword.weight = Math.max(0.1, Math.min(0.9, weight)); // Clamp to 0.1-0.9
     const idx = this.store.keywords.findIndex(
       k => k.term.toLowerCase() === term.toLowerCase()
     );
-    if (idx >= 0) {
-      this.store.keywords[idx] = { ...keyword };
+    if (idx < 0) {
+      throw new Error(`Keyword not found: ${term}`);
     }
+
+    this.store.keywords[idx].weight = Math.max(0.1, Math.min(0.9, weight));
     this.flush();
   }
 
