@@ -96,6 +96,14 @@ export interface NocturnalGateBlock {
 }
 
 /**
+ * User correction sample for nocturnal snapshot.
+ * #268: Wire correction_samples into nocturnal pipeline.
+ */
+export interface NocturnalUserCorrection {
+  correctionCue: string | null;
+}
+
+/**
  * A structured nocturnal session snapshot.
  * Contains all information needed for a reflector to generate decision-point samples.
  *
@@ -114,6 +122,8 @@ export interface NocturnalSessionSnapshot {
   toolCalls: NocturnalToolCall[];
   painEvents: NocturnalPainEvent[];
   gateBlocks: NocturnalGateBlock[];
+  /** #268: User corrections from correction_samples table */
+  userCorrections: NocturnalUserCorrection[];
   /**
    * Summary statistics for quick triage.
    * #246: All fields are now number (never null).
@@ -281,6 +291,8 @@ export class NocturnalTrajectoryExtractor {
     const toolCalls = this.trajectory.listToolCallsForSession(sessionId);
     const painEvents = this.trajectory.listPainEventsForSession(sessionId);
     const gateBlocks = this.trajectory.listGateBlocksForSession(sessionId);
+    // #268: Fetch correction samples for this session
+    const correctionSamples = this.trajectory.listCorrectionSamplesForSession(sessionId);
 
     // Map to sanitized structures
     // SECURITY: Only sanitizedText from assistant turns
@@ -346,6 +358,10 @@ export class NocturnalTrajectoryExtractor {
       toolCalls: nocturnalToolCalls,
       painEvents: nocturnalPainEvents,
       gateBlocks: nocturnalGateBlocks,
+      // #268: Map correction samples to nocturnal format
+      userCorrections: correctionSamples.map((cs: { correctionCue: string | null }) => ({
+        correctionCue: cs.correctionCue,
+      })),
       stats: {
         totalAssistantTurns: sanitizedAssistantTurns.length,
         totalToolCalls: nocturnalToolCalls.length,
