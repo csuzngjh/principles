@@ -353,13 +353,14 @@ export async function handleBeforePromptBuild(
         referencesAssistantTurnId,
       });
 
-      // D-39-07: Wire FPR feedback loop -- when a correction cue is detected,
-      // record it as a false positive so the weighted scoring formula has real data.
-      // This populates FPR counters that were previously always 0 in production.
+      // CR-01 fix: When a correction cue is detected, the keyword match is a
+      // confirmed true positive (the keyword correctly identified a correction pattern).
+      // Record as TP to increment accuracy counters. FP would apply x0.8 weight decay
+      // on correct detections, progressively suppressing valid keywords.
       if (correctionCue) {
         try {
           const learner = CorrectionCueLearner.get(wctx.stateDir);
-          learner.recordFalsePositive(correctionCue);
+          learner.recordTruePositive(correctionCue);
         } catch {
           // Non-critical: FPR feedback is best-effort, must not break prompt flow
         }
