@@ -36,8 +36,7 @@ import type { CorrectionObserverPayload } from './correction-observer-types.js';
 import { KeywordOptimizationService } from './keyword-optimization-service.js';
 import { TrajectoryRegistry } from '../core/trajectory.js';
 import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
-
-const WORKFLOW_TTL_MS = 5 * 60 * 1000; // 5 minutes default TTL for helper workflows
+import { WORKFLOW_TTL_MS } from '../config/defaults/runtime.js';
 import { OpenClawTrinityRuntimeAdapter } from '../core/nocturnal-trinity.js';
 
 /**
@@ -1993,10 +1992,14 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     };
 
                     // Dispatch LLM subagent via CorrectionObserverWorkflowManager
+                    const subagent = api?.runtime?.subagent;
+                    if (!subagent) {
+                        throw new Error('[PD:EvolutionWorker] subagent runtime not available for keyword_optimization');
+                    }
                     const manager = new CorrectionObserverWorkflowManager({
                         workspaceDir: wctx.workspaceDir,
                         logger,
-                        subagent: api?.runtime?.subagent!,
+                        subagent,
                         agentSession: api?.runtime?.agent?.session,
                     });
 
@@ -2010,7 +2013,11 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         workflowId = handle.workflowId;
                         koTask.resultRef = workflowId;
                     } else {
-                        workflowId = koTask.resultRef!;
+                        // isPolling implies resultRef exists (checked above)
+                        workflowId = koTask.resultRef;
+                        if (!workflowId) {
+                            throw new Error(`[PD:EvolutionWorker] keyword_optimization task ${koTask.id} has no resultRef in polling mode`);
+                        }
                     }
 
                     // Poll workflow state
