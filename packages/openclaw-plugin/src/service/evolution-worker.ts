@@ -16,6 +16,7 @@ import { getEvolutionLogger } from '../core/evolution-logger.js';
 import type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 export type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 import { LockUnavailableError } from '../config/index.js';
+import { PAIN_QUEUE_DEDUP_WINDOW_MS } from '../config/defaults/runtime.js';
 import { checkWorkspaceIdle, checkCooldown } from './nocturnal-runtime.js';
 import { loadNocturnalConfig } from './nocturnal-config.js';
 import { WorkflowStore } from './subagent-workflow/workflow-store.js';
@@ -413,7 +414,6 @@ function buildFallbackNocturnalSnapshot(
     };
 }
 
-const PAIN_QUEUE_DEDUP_WINDOW_MS = 30 * 60 * 1000;
 
 // P0 fix: File lock constants and helper for queue operations (prevents TOCTOU race)
 export const EVOLUTION_QUEUE_LOCK_SUFFIX = '.lock';
