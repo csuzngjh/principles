@@ -22,7 +22,7 @@ See `.planning/PROJECT.md` (updated 2026-04-14)
 **Milestone:** v1.17
 **Name:** Keyword Learning Engine
 **Core Value:** AI agents improve their own behavior through a structured evolution loop. pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
-**Current Focus:** Phase 39 — learning-loop
+**Current Focus:** Phase 40 — LLM Discovery
 
 ## Previous Milestone (v1.16)
 
