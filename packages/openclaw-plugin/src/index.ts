@@ -421,7 +421,7 @@ const plugin = {
 
     // ── Slash Commands ──
     // Register command with optional short alias
-    // eslint-disable-next-line @typescript-eslint/max-params, @typescript-eslint/no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const registerCommandWithAlias = (name: string, alias: string | null, desc: string, handler: any, opts?: { acceptsArgs?: boolean }) => {
       const base = {
         name,

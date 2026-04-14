@@ -163,26 +163,30 @@ export class EvolutionEngine {
     return { pointsAwarded: points, isDoubleReward, newTier };
   }
 
-  // ===== 记录失败 =====
-
-     
-  public recordFailure(
+  private _recordExploratoryFailure(
     toolName: string,
-    options?: {
-      filePath?: string;
-      difficulty?: TaskDifficulty;
-      reason?: string;
-      sessionId?: string;
-    }
+    options?: { filePath?: string; reason?: string; sessionId?: string }
   ): { pointsAwarded: number; lessonRecorded: boolean } {
-    // 探索性工具失败：记录但几乎不影响
-    if (EXPLORATORY_TOOLS.has(toolName)) {
-      const event = this.createEvent('failure', EvolutionEngine.computeTaskHash(toolName, options?.filePath), 'trivial', toolName, options?.filePath, options?.reason, 0, false, options?.sessionId);
-      this.addEvent(event);
-      this.saveScorecard();
-      return { pointsAwarded: 0, lessonRecorded: true };
-    }
+    const event = this.createEvent(
+      'failure',
+      EvolutionEngine.computeTaskHash(toolName, options?.filePath),
+      'trivial',
+      toolName,
+      options?.filePath,
+      options?.reason,
+      0,
+      false,
+      options?.sessionId
+    );
+    this.addEvent(event);
+    this.saveScorecard();
+    return { pointsAwarded: 0, lessonRecorded: true };
+  }
 
+  private _recordNormalFailure(
+    toolName: string,
+    options?: { filePath?: string; difficulty?: TaskDifficulty; reason?: string; sessionId?: string }
+  ): { pointsAwarded: number; lessonRecorded: boolean } {
     const difficulty = options?.difficulty || EvolutionEngine.inferDifficulty(toolName);
     const taskHash = EvolutionEngine.computeTaskHash(toolName, options?.filePath);
 
@@ -197,10 +201,25 @@ export class EvolutionEngine {
     // 记录事件（0分）
     const event = this.createEvent('failure', taskHash, difficulty, toolName, options?.filePath, options?.reason, 0, false, options?.sessionId);
     this.addEvent(event);
-
     this.saveScorecard();
 
     return { pointsAwarded: 0, lessonRecorded: true };
+  }
+
+  public recordFailure(
+    toolName: string,
+    options?: {
+      filePath?: string;
+      difficulty?: TaskDifficulty;
+      reason?: string;
+      sessionId?: string;
+    }
+  ): { pointsAwarded: number; lessonRecorded: boolean } {
+    // 探索性工具失败：记录但几乎不影响
+    if (EXPLORATORY_TOOLS.has(toolName)) {
+      return this._recordExploratoryFailure(toolName, options);
+    }
+    return this._recordNormalFailure(toolName, options);
   }
 
   // ===== Gate 集成 =====
@@ -325,7 +344,7 @@ export class EvolutionEngine {
   // ===== 事件管理 =====
 
    
-  // eslint-disable-next-line @typescript-eslint/max-params
+   
   private createEvent(
     type: 'success' | 'failure',
     taskHash: string,
@@ -388,7 +407,7 @@ export class EvolutionEngine {
   }
 
    
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+   
   private createNewScorecard(): EvolutionScorecard {
     const now = new Date().toISOString();
     return {
@@ -531,7 +550,7 @@ export class EvolutionEngine {
   // ===== 工具方法 =====
 
    
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+   
   private generateId(): string {
     return `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
   }

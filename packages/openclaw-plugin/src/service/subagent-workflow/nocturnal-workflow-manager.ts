@@ -372,7 +372,7 @@ export class NocturnalWorkflowManager implements WorkflowManager {
     }
 
      
-    // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+     
     async notifyLifecycleEvent(
          
         _workflowId: string,

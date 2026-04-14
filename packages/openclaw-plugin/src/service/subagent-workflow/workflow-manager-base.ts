@@ -156,7 +156,7 @@ export abstract class WorkflowManagerBase implements WorkflowManager {
      * Subclasses override to add type-specific fields.
      */
      
-    // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+     
     protected createWorkflowMetadata<TResult>(
         spec: SubagentWorkflowSpec<TResult>,
         options: {
@@ -183,7 +183,7 @@ export abstract class WorkflowManagerBase implements WorkflowManager {
      * Subclasses override to call store.createWorkflow() with type-specific metadata.
      */
      
-    // eslint-disable-next-line @typescript-eslint/max-params
+     
     protected async createWorkflowRecord<TResult>(
         workflowId: string,
         childSessionKey: string,
@@ -216,7 +216,7 @@ export abstract class WorkflowManagerBase implements WorkflowManager {
     // ── Protected Helpers ────────────────────────────────────────────────────
 
      
-    // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+     
     protected buildRunParams<TResult>(
         spec: SubagentWorkflowSpec<TResult>,
         options: {
@@ -315,7 +315,7 @@ export abstract class WorkflowManagerBase implements WorkflowManager {
         error?: string
     ): Promise<void> {
          
-        // eslint-disable-next-line @typescript-eslint/init-declarations
+         
         let workflow;
         try {
             workflow = this.store.getWorkflow(workflowId);
@@ -454,34 +454,30 @@ export abstract class WorkflowManagerBase implements WorkflowManager {
     }
 
          
-    async sweepExpiredWorkflows(maxAgeMs?: number): Promise<number> {
-        const ttl = maxAgeMs ?? this.defaultTtlMs;
-        const expired = this.store.getExpiredWorkflows(ttl);
+    private async _sweepSingleWorkflow(workflow: { workflow_id: string; child_session_key: string; state: string }): Promise<void> {
+        try {
+            this.logger.info(`[PD:${this.workflowType}] Sweeping expired workflow: ${workflow.workflow_id}`);
 
-        this.logger.info(`[PD:${this.workflowType}] sweepExpiredWorkflows: found ${expired.length} expired`);
-
-        for (const workflow of expired) {
-            try {
-                this.logger.info(`[PD:${this.workflowType}] Sweeping expired workflow: ${workflow.workflow_id}`);
-
-                await this.driver.cleanup({ sessionKey: workflow.child_session_key });
-                this.store.updateCleanupState(workflow.workflow_id, 'completed');
-                this.store.updateWorkflowState(workflow.workflow_id, 'expired');
-                this.store.recordEvent(workflow.workflow_id, 'swept', workflow.state, 'expired', 'TTL expired', {});
-
-            } catch (error) {
-                this.logger.error(`[PD:${this.workflowType}] Sweep cleanup failed for ${workflow.workflow_id}: ${String(error)}`);
-                this.store.updateCleanupState(workflow.workflow_id, 'failed');
-            }
+            await this.driver.cleanup({ sessionKey: workflow.child_session_key });
+            this.store.updateCleanupState(workflow.workflow_id, 'completed');
+            this.store.updateWorkflowState(workflow.workflow_id, 'expired');
+            this.store.recordEvent(workflow.workflow_id, 'swept', workflow.state, 'expired', 'TTL expired', {});
+        } catch (error) {
+            this.logger.error(`[PD:${this.workflowType}] Sweep cleanup failed for ${workflow.workflow_id}: ${String(error)}`);
+            this.store.updateCleanupState(workflow.workflow_id, 'failed');
         }
+    }
 
-        // Clean up memory Maps to prevent leaks
+    private _cleanupMemoryMaps(): void {
+        // Clean up completedWorkflows Map to prevent leaks
         const cutoff = Date.now() - 60_000;
         for (const [id, timestamp] of this.completedWorkflows) {
             if (timestamp < cutoff) {
                 this.completedWorkflows.delete(id);
             }
         }
+
+        // Clean up activeWorkflows Map
         for (const [id, timeout] of this.activeWorkflows) {
             const wf = this.store.getWorkflow(id);
             if (!wf || wf.state === 'expired' || wf.state === 'completed' || wf.state === 'terminal_error') {
@@ -489,7 +485,19 @@ export abstract class WorkflowManagerBase implements WorkflowManager {
                 this.activeWorkflows.delete(id);
             }
         }
+    }
 
+    async sweepExpiredWorkflows(maxAgeMs?: number): Promise<number> {
+        const ttl = maxAgeMs ?? this.defaultTtlMs;
+        const expired = this.store.getExpiredWorkflows(ttl);
+
+        this.logger.info(`[PD:${this.workflowType}] sweepExpiredWorkflows: found ${expired.length} expired`);
+
+        for (const workflow of expired) {
+            await this._sweepSingleWorkflow(workflow);
+        }
+
+        this._cleanupMemoryMaps();
         return expired.length;
     }
 
@@ -527,7 +535,7 @@ export abstract class WorkflowManagerBase implements WorkflowManager {
 
     // ── Private Helpers ───────────────────────────────────────────────────────
 
-    // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+     
     protected generateWorkflowId(): string {
         // Subclasses override the prefix part via wf_ prefix pattern
         return `wf_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;

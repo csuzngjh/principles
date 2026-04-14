@@ -284,7 +284,7 @@ function withRegistryLock<T>(workspaceDir: string, fn: (_records: NocturnalDatas
  * @returns RegisterSampleResult
  */
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 export function registerSample(
   workspaceDir: string,
   artifact: NocturnalArtifact,
@@ -427,7 +427,7 @@ const VALID_TRANSITIONS: Record<NocturnalReviewStatus, NocturnalReviewStatus[]> 
  * @throws Error if transition is invalid
  */
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 export function updateReviewStatus(
   workspaceDir: string,
   sampleFingerprint: string,

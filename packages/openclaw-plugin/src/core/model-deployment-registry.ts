@@ -350,7 +350,7 @@ export function assertPromotionGatePassed(stateDir: string, checkpointId: string
  * @throws Error if checkpoint's targetModelFamily violates profile constraints
  */
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 export function bindCheckpointToWorkerProfile(
   stateDir: string,
   workerProfile: WorkerProfile,

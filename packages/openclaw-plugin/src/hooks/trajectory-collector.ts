@@ -231,7 +231,7 @@ export function handleBeforeMessageWrite(
   if (typeof msg.content === 'string') {
      
     // Reason: msg.content is string | ContentPart[]; destructuring would require renaming in the else branch
-    // eslint-disable-next-line @typescript-eslint/prefer-destructuring
+     
     content = msg.content;
   } else if (Array.isArray(msg.content)) {
     content = msg.content
