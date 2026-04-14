@@ -420,18 +420,24 @@ export function resolveWorkspaceDirFromApi(
     if (!api) return undefined;
 
     // 1. Official API: api.runtime.agent.resolveAgentWorkspaceDir
-     
+
     const officialAgent = (api.runtime as { agent?: { resolveAgentWorkspaceDir?: (cfg: unknown, id: string) => string } }).agent;
-     
+
     if (officialAgent?.resolveAgentWorkspaceDir) {
         try {
             return officialAgent.resolveAgentWorkspaceDir(api.config, agentId ?? 'main');
         } catch {
-            // Fall through to PathResolver
+            // Fall through to config check
         }
     }
 
-    // 2. Fallback: PathResolver (PD_WORKSPACE_DIR env, config file, default)
+    // 2. Direct config workspaceDir (for tests and programmatic usage)
+    const cfgWorkspaceDir = (api.config as { workspaceDir?: string })?.workspaceDir;
+    if (cfgWorkspaceDir && cfgWorkspaceDir.trim()) {
+        return cfgWorkspaceDir.trim();
+    }
+
+    // 3. Fallback: PathResolver (PD_WORKSPACE_DIR env, config file, default)
     try {
         const pr = new PathResolver();
         return pr.getWorkspaceDir();

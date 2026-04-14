@@ -40,6 +40,11 @@ describe('Phase 4a: Correction rejected integration', () => {
       correctionDetected: true, correctionCue: '错了',
       referencesAssistantTurnId: atId, createdAt: new Date().toISOString(),
     });
+    // Tool call triggers maybeCreateCorrectionSample on success
+    trajectory.recordToolCall({
+      sessionId: 'corr-session', toolName: 'read', outcome: 'success',
+      createdAt: new Date().toISOString(),
+    });
 
     // Verify sample was created
     const samples = trajectory.listCorrectionSamples('pending');
@@ -67,6 +72,11 @@ describe('Phase 4a: Correction rejected integration', () => {
       sessionId: 'approved-session', turnIndex: 1, rawText: 'Looks better',
       correctionDetected: true, correctionCue: '改进',
       referencesAssistantTurnId: atId, createdAt: new Date().toISOString(),
+    });
+    // Tool call triggers maybeCreateCorrectionSample on success
+    trajectory.recordToolCall({
+      sessionId: 'approved-session', toolName: 'read', outcome: 'success',
+      createdAt: new Date().toISOString(),
     });
 
     const samples = trajectory.listCorrectionSamples('pending');
