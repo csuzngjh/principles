@@ -19,10 +19,12 @@ import { TrajectoryRegistry } from '../core/trajectory.js';
  */
 export class KeywordOptimizationService {
   private stateDir: string;
+  private workspaceDir: string;
   private logger: PluginLogger;
 
-  constructor(stateDir: string, logger: PluginLogger) {
+  constructor(stateDir: string, workspaceDir: string, logger: PluginLogger) {
     this.stateDir = stateDir;
+    this.workspaceDir = workspaceDir;
     this.logger = logger;
   }
 
@@ -66,7 +68,7 @@ export class KeywordOptimizationService {
    */
   async buildTrajectoryHistory(sessionIds: string[]): Promise<TrajectoryHistoryEntry[]> {
     const history: TrajectoryHistoryEntry[] = [];
-    const db = TrajectoryRegistry.get(this.stateDir);
+    const db = TrajectoryRegistry.get(this.workspaceDir);
 
     for (const sessionId of sessionIds.slice(0, 10)) { // Last 10 sessions
       const turns = db.listUserTurnsForSession(sessionId);
@@ -91,11 +93,13 @@ export class KeywordOptimizationService {
 
   private static _instance: KeywordOptimizationService | null = null;
   private static _lastStateDir: string | null = null;
+  private static _lastWorkspaceDir: string | null = null;
 
-  static get(stateDir: string, logger: PluginLogger): KeywordOptimizationService {
-    if (!KeywordOptimizationService._instance || KeywordOptimizationService._lastStateDir !== stateDir) {
-      KeywordOptimizationService._instance = new KeywordOptimizationService(stateDir, logger);
+  static get(stateDir: string, workspaceDir: string, logger: PluginLogger): KeywordOptimizationService {
+    if (!KeywordOptimizationService._instance || KeywordOptimizationService._lastStateDir !== stateDir || KeywordOptimizationService._lastWorkspaceDir !== workspaceDir) {
+      KeywordOptimizationService._instance = new KeywordOptimizationService(stateDir, workspaceDir, logger);
       KeywordOptimizationService._lastStateDir = stateDir;
+      KeywordOptimizationService._lastWorkspaceDir = workspaceDir;
     }
     return KeywordOptimizationService._instance;
   }
@@ -103,6 +107,7 @@ export class KeywordOptimizationService {
   static reset(): void {
     KeywordOptimizationService._instance = null;
     KeywordOptimizationService._lastStateDir = null;
+    KeywordOptimizationService._lastWorkspaceDir = null;
   }
 }
 

@@ -23,7 +23,7 @@ describe('KeywordOptimizationService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     KeywordOptimizationService.reset();
-    service = KeywordOptimizationService.get('/tmp/test-state', {
+    service = KeywordOptimizationService.get('/tmp/test-state', '/tmp/test-state', {
       info: vi.fn(),
       debug: vi.fn(),
       warn: vi.fn(),

@@ -1973,7 +1973,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
 
                 try {
                     // Build trajectoryHistory via KeywordOptimizationService
-                    const koService = KeywordOptimizationService.get(wctx.stateDir, logger);
+                    const koService = KeywordOptimizationService.get(wctx.stateDir, wctx.workspaceDir, logger);
                     const db = TrajectoryRegistry.get(wctx.workspaceDir);
                     const recentSessionIds = db.listRecentSessions({ limit: 10 }).map(s => s.sessionId);
                     const trajectoryHistory = await koService.buildTrajectoryHistory(recentSessionIds);
