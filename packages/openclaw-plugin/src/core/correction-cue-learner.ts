@@ -158,11 +158,11 @@ export class CorrectionCueLearner {
     for (const keyword of this.store.keywords) {
       if (normalized.includes(keyword.term.toLowerCase())) {
         // D-39-03, D-39-04: Weighted score formula
-        // score = weight x ((TP + 1) / (TP + FP + 2))
-        // +2 smoothing: new keywords (TP=0, FP=0) get accuracy=0.5
+        // score = weight x (TP / (TP + FP + 1))
+        // +1 smoothing in denominator avoids division by zero
         const tp = keyword.truePositiveCount ?? 0;
         const fp = keyword.falsePositiveCount ?? 0;
-        const accuracy = (tp + 1) / (tp + fp + 2);
+        const accuracy = tp / (tp + fp + 1);
         const score = keyword.weight * accuracy;
 
         totalScore += score;
@@ -171,6 +171,15 @@ export class CorrectionCueLearner {
         // Increment hitCount
         keyword.hitCount = (keyword.hitCount ?? 0) + 1;
         keyword.lastHitAt = new Date().toISOString();
+      }
+    }
+
+    // Persist hitCount updates in store for next flush
+    for (const term of matchedTerms) {
+      const keywordIndex = this.store.keywords.findIndex(k => k.term.toLowerCase() === term.toLowerCase());
+      if (keywordIndex >= 0) {
+        const kw = this.store.keywords[keywordIndex];
+        this.store.keywords[keywordIndex] = { ...kw };
       }
     }
 
@@ -192,15 +201,19 @@ export class CorrectionCueLearner {
 
   /**
    * Records a confirmed true positive for the given keyword term.
-   * Increments both hitCount and truePositiveCount.
+   * Increments truePositiveCount atomically.
    */
   recordTruePositive(term: string): void {
     const keyword = this.store.keywords.find(k => k.term.toLowerCase() === term.toLowerCase());
     if (!keyword) return;
 
     keyword.truePositiveCount = (keyword.truePositiveCount ?? 0) + 1;
-    keyword.hitCount = (keyword.hitCount ?? 0) + 1;
-    keyword.lastHitAt = new Date().toISOString();
+
+    // Update in-store reference
+    const keywordIndex = this.store.keywords.findIndex(k => k.term.toLowerCase() === term.toLowerCase());
+    if (keywordIndex >= 0) {
+      this.store.keywords[keywordIndex] = { ...keyword };
+    }
 
     this.flush();
   }
@@ -208,6 +221,7 @@ export class CorrectionCueLearner {
   /**
    * Records a confirmed false positive for the given keyword term.
    * CORR-10: Decreases keyword weight by 20% (x0.8 multiplicative factor).
+   * D-39-17: Keywords at very low weight (<0.1) still match but contribute minimally.
    */
   recordFalsePositive(term: string): void {
     const keyword = this.store.keywords.find(k => k.term.toLowerCase() === term.toLowerCase());
@@ -217,9 +231,16 @@ export class CorrectionCueLearner {
     keyword.hitCount = (keyword.hitCount ?? 0) + 1;
 
     // D-39-15: Multiplicative weight decay x0.8 on confirmed FP
-    keyword.weight = Math.max(0.1, keyword.weight * 0.8);
+    keyword.weight = keyword.weight * 0.8;
     keyword.lastHitAt = new Date().toISOString();
 
+    // Update in-store reference
+    const keywordIndex = this.store.keywords.findIndex(k => k.term.toLowerCase() === term.toLowerCase());
+    if (keywordIndex >= 0) {
+      this.store.keywords[keywordIndex] = { ...keyword };
+    }
+
+    // D-39-16: Apply decay BEFORE flush to disk
     this.flush();
   }
 
