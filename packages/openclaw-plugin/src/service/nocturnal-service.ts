@@ -385,7 +385,7 @@ function persistArtifact(
     fs.mkdirSync(dir, { recursive: true });
   }
 
-  fs.writeFileSync(artifactPath, JSON.stringify(sampleRecord, null, 2), 'utf-8');
+  atomicWriteFileSync(artifactPath, JSON.stringify(sampleRecord, null, 2));
   return artifactPath;
 }
 
