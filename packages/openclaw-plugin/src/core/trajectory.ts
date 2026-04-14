@@ -590,7 +590,7 @@ export class TrajectoryDatabase {
     const offset = filters.offset ?? 0;
 
      
-     
+    // eslint-disable-next-line @typescript-eslint/init-declarations
     let rows: Record<string, unknown>[];
     if (traceId) {
       rows = this.db.prepare(`
@@ -789,7 +789,7 @@ export class TrajectoryDatabase {
           const params = JSON.parse(row.params_json);
           if (params && typeof params.filePath === 'string') {
              
-             
+            // eslint-disable-next-line @typescript-eslint/prefer-destructuring
             filePath = params.filePath;
           }
         } catch {
@@ -1635,7 +1635,7 @@ export class TrajectoryDatabase {
   }
 
    
-   
+  // eslint-disable-next-line @typescript-eslint/max-params
   private recordExportAudit(
     exportKind: string,
     mode: CorrectionExportMode,
@@ -1701,7 +1701,7 @@ export class TrajectoryDatabase {
       if (referenced.has(entry)) continue;
       const fullPath = path.join(this.blobDir, entry);
        
-       
+      // eslint-disable-next-line @typescript-eslint/init-declarations
       let stat: fs.Stats;
       try {
         stat = fs.statSync(fullPath);

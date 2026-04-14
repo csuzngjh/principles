@@ -63,7 +63,8 @@ export type SkipReason =
   | 'workspace_not_idle'            // Workspace is active, nocturnal not allowed
   | 'quota_exhausted'              // Max runs per quota window reached
   | 'insufficient_snapshot_data'    // Sessions exist but lack tool calls / events
-  | 'global_cooldown_active';       // Global cooldown is in effect
+  | 'global_cooldown_active'        // Global cooldown is in effect
+  | 'preflight_blocked';            // Preflight check blocked (idle/cooldown/quota)
 
 export interface SelectionDiagnostics {
   /** Total evaluable principles found */
@@ -287,7 +288,7 @@ export class NocturnalTargetSelector {
   };
 
    
-   
+  // eslint-disable-next-line @typescript-eslint/max-params
   constructor(
     workspaceDir: string,
     stateDir: string,
@@ -532,7 +533,7 @@ export class NocturnalTargetSelector {
  * This is a convenience wrapper for the common case.
  */
  
- 
+// eslint-disable-next-line @typescript-eslint/max-params
 export function selectNocturnalTarget(
   workspaceDir: string,
   stateDir: string,

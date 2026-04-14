@@ -160,7 +160,7 @@ function buildCronJob(
     payload: {
       kind: 'agentTurn',
        
-       
+      // eslint-disable-next-line @typescript-eslint/no-use-before-define
       message: buildTaskPrompt(task, logger),
       lightContext: task.execution.lightContext ?? true,
       timeoutSeconds: task.execution.timeoutSeconds ?? 120,
@@ -295,7 +295,7 @@ export async function reconcilePDTasks(
 
   const cronStore = await readCronStore(logger);
    
-   
+  // eslint-disable-next-line @typescript-eslint/no-use-before-define
   const healthUpdated = healthCheck(declared, cronStore, logger);
   const actions = diff(healthUpdated, cronStore.jobs);
 

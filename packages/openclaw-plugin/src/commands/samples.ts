@@ -30,7 +30,7 @@ export function handleSamplesCommand(ctx: PluginCommandContext): PluginCommandRe
     const normalizedDecision = decision === 'approve' ? 'approved' : 'rejected';
     const note = noteParts.join(' ').trim();
      
-     
+    // eslint-disable-next-line @typescript-eslint/init-declarations
     let record;
     try {
       record = wctx.trajectory.reviewCorrectionSample(sampleId, normalizedDecision, note);

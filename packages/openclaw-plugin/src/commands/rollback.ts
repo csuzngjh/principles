@@ -45,7 +45,7 @@ Usage:
     }
 
      
-     
+    // eslint-disable-next-line @typescript-eslint/init-declarations
     let eventId: string | null;
      
     const _triggerMethod = 'user_command' as const;

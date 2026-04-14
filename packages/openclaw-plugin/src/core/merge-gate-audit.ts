@@ -342,7 +342,7 @@ function hasValidEvidenceSummary(parsed: unknown): boolean {
  * Validate a single replay report file and return its category.
  */
 function validateSingleReplayReport(reportPath: string): ReplayValidationCategory {
-   
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let rawContent: string;
   try {
     rawContent = fs.readFileSync(reportPath, 'utf-8');
@@ -350,7 +350,7 @@ function validateSingleReplayReport(reportPath: string): ReplayValidationCategor
     return 'io_error';
   }
 
-   
+  // eslint-disable-next-line @typescript-eslint/init-declarations
   let parsed: unknown;
   try {
     parsed = JSON.parse(rawContent);
@@ -366,7 +366,7 @@ function validateSingleReplayReport(reportPath: string): ReplayValidationCategor
     return 'missing_evidence_summary';
   }
 
-   
+  // eslint-disable-next-line @typescript-eslint/prefer-destructuring
   const evidenceSummary = parsed.evidenceSummary;
   if (parsed.overallDecision === 'pass' && evidenceSummary.totalSamples === 0) {
     return 'unsupported_pass';

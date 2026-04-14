@@ -262,8 +262,10 @@ export class NocturnalWorkflowManager implements WorkflowManager {
                         painContext,
                         // #244: Only skip preflight idle gate for manual/test triggers.
                         // Automatic triggers must go through normal idle check.
+                        // #292: Periodic triggers (source='nocturnal') also bypass idle check for debugging
                         ...(((options.metadata)?.triggerSource === 'manual' ||
-                            (options.metadata)?.triggerSource === 'test')
+                            (options.metadata)?.triggerSource === 'test' ||
+                            (options.metadata)?.triggerSource === 'nocturnal')
                           ? {
                               idleCheckOverride: {
                                   isIdle: true,
@@ -272,7 +274,7 @@ export class NocturnalWorkflowManager implements WorkflowManager {
                                   userActiveSessions: 0,
                                   abandonedSessionIds: [],
                                   trajectoryGuardrailConfirmsIdle: true,
-                                  reason: 'manual/test override',
+                                  reason: `${(options.metadata)?.triggerSource ?? 'manual'}.test override`,
                               },
                             }
                           : {}),
@@ -293,7 +295,28 @@ export class NocturnalWorkflowManager implements WorkflowManager {
                     this.completedWorkflows.set(workflowId, Date.now());
                 } else {
                     const reason = result.noTargetSelected ? 'no_target_selected' : 'validation_failed';
-                    this.logger.warn(`[PD:NocturnalWorkflow] [${workflowId}] Pipeline failed: reason=${reason}, noTargetSelected=${result.noTargetSelected}, skipReason=${result.skipReason ?? 'none'}, validationFailures=${result.validationFailures?.length ?? 0}`);
+                    const failuresSummary = result.validationFailures?.length > 0 
+                        ? result.validationFailures.join('; ') 
+                        : (result.skipReason ?? 'none');
+                    this.logger.warn(`[PD:NocturnalWorkflow] [${workflowId}] Pipeline failed: reason=${reason}, noTargetSelected=${result.noTargetSelected}, skipReason=${result.skipReason ?? 'none'}, validationFailures=${result.validationFailures?.length ?? 0}, details=${failuresSummary}`);
+                    
+                    // Log full result structure for debugging
+                    this.logger.warn(`[PD:NocturnalWorkflow] [${workflowId}] Full result: success=${result.success}, validationFailed=${result.validationFailed}, noTargetSelected=${result.noTargetSelected}`);
+                    
+                    // Log diagnostics for debugging
+                    if (result.diagnostics?.trinityResult) {
+                        this.logger.warn(`[PD:NocturnalWorkflow] [${workflowId}] Trinity result: success=${result.diagnostics.trinityResult.success}, chainMode=${result.diagnostics.chainModeUsed ?? 'unknown'}`);
+                        if (!result.diagnostics.trinityResult.success) {
+                            this.logger.warn(`[PD:NocturnalWorkflow] [${workflowId}] Trinity failures: ${result.diagnostics.trinityResult.failures.map(f => `${f.stage}: ${f.reason}`).join('; ')}`);
+                        }
+                    }
+                    if (result.diagnostics?.arbiterResult) {
+                        this.logger.warn(`[PD:NocturnalWorkflow] [${workflowId}] Arbiter result: passed=${result.diagnostics.arbiterResult.passed}, failures=${result.diagnostics.arbiterResult.failures.map(f => f.reason).join('; ')}`);
+                    }
+                    if (result.diagnostics?.selection) {
+                        this.logger.warn(`[PD:NocturnalWorkflow] [${workflowId}] Selection: decision=${result.diagnostics.selection.decision}, principleId=${result.diagnostics.selection.selectedPrincipleId ?? 'none'}, sessionId=${result.diagnostics.selection.selectedSessionId ?? 'none'}`);
+                    }
+                    
                     this.store.updateWorkflowState(workflowId, 'terminal_error');
                     this.store.recordEvent(workflowId, 'nocturnal_failed', null, 'terminal_error', reason, {
                         failures: result.validationFailures,
@@ -372,7 +395,7 @@ export class NocturnalWorkflowManager implements WorkflowManager {
     }
 
      
-     
+    // eslint-disable-next-line @typescript-eslint/class-methods-use-this
     async notifyLifecycleEvent(
          
         _workflowId: string,

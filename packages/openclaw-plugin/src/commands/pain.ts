@@ -97,7 +97,7 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
     // Handle empathy subcommand
     if (args.startsWith('empathy')) {
          
-         
+        // eslint-disable-next-line @typescript-eslint/no-use-before-define
         return handleEmpathySubcommand(wctx, args, sessionId, isZh);
     }
 
@@ -138,7 +138,7 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
     
     // Determine health status based on GFI
      
-     
+    // eslint-disable-next-line @typescript-eslint/init-declarations
     let healthLabel: string;
     let suggestionText = '';
 
@@ -218,7 +218,7 @@ export function handlePainCommand(ctx: PluginCommandContext): PluginCommandResul
  * Handle /pd-status empathy subcommand
  */
  
-     
+    // eslint-disable-next-line @typescript-eslint/max-params -- complexity 13, refactor candidate
 function handleEmpathySubcommand(
     wctx: WorkspaceContext,
     args: string,

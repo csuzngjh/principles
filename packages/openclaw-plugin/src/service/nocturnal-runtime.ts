@@ -321,7 +321,7 @@ export function checkWorkspaceIdle(
     }
 
      
-     
+    // eslint-disable-next-line @typescript-eslint/init-declarations
     let reason: string;
     if (mostRecentActivityAt === 0) {
         reason = 'No active sessions found — workspace is idle';
@@ -390,7 +390,7 @@ export function checkCooldown(
         if (cooldownEnd > now) {
             globalCooldownActive = true;
             globalCooldownRemainingMs = cooldownEnd - now;
-             
+            // eslint-disable-next-line @typescript-eslint/prefer-destructuring
             globalCooldownUntil = state.globalCooldownUntil;  
         }
     }
@@ -436,10 +436,12 @@ export function checkCooldown(
  *
  * @param stateDir - State directory
  * @param principleId - Target principle ID for this run
+ * @param cooldownMs - Global cooldown duration in ms (default: 1 hour)
  */
 export async function recordRunStart(
     stateDir: string,
-    principleId: string
+    principleId: string,
+    cooldownMs: number = DEFAULT_GLOBAL_COOLDOWN_MS
 ): Promise<void> {
     const state = await readState(stateDir);
     const now = new Date().toISOString();
@@ -450,8 +452,8 @@ export async function recordRunStart(
         status: 'skipped', // Will be updated on completion
     };
 
-    // Set global cooldown
-    const cooldownUntil = new Date(Date.now() + DEFAULT_GLOBAL_COOLDOWN_MS).toISOString();
+    // Set global cooldown (use configured value, not hardcoded default)
+    const cooldownUntil = new Date(Date.now() + cooldownMs).toISOString();
     state.globalCooldownUntil = cooldownUntil;
 
     // Add to recent runs for quota tracking
@@ -560,7 +562,7 @@ export interface PreflightCheckResult {
  * @param idleCheckOverride - Optional override for idle check result (for testing)
  */
  
-     
+    // eslint-disable-next-line @typescript-eslint/max-params -- complexity 12, refactor candidate
 export function checkPreflight(
     workspaceDir: string,
     stateDir: string,

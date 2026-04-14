@@ -39,7 +39,7 @@ export type BashRiskLevel = 'safe' | 'dangerous' | 'normal';
  * @returns The risk level: 'safe', 'dangerous', or 'normal'
  */
  
- 
+// eslint-disable-next-line @typescript-eslint/max-params
 export function analyzeBashCommand(
   command: string,
   safePatterns: string[],
@@ -154,7 +154,7 @@ export interface DynamicThresholdConfig {
  * @param config - Configuration with large_change_lines and ep_tier_multipliers
  * @returns The adjusted threshold (minimum 0)
  */
- 
+// eslint-disable-next-line @typescript-eslint/max-params
 export function calculateDynamicThreshold(
   baseThreshold: number,
   epTier: number,

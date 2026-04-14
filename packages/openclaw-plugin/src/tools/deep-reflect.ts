@@ -108,7 +108,7 @@ export function createDeepReflectTool(api: OpenClawPluginApi) {
             }
 
              
-             
+            // eslint-disable-next-line @typescript-eslint/no-use-before-define
             const effectiveWorkspaceDir = resolveReflectionWorkspace(api);
 
             const config = loadConfig(effectiveWorkspaceDir, api);
@@ -122,11 +122,11 @@ export function createDeepReflectTool(api: OpenClawPluginApi) {
 
             try {
                  
-                 
+                // eslint-disable-next-line @typescript-eslint/no-use-before-define
                 return await executeReflectionWorkflow(effectiveWorkspaceDir, config, context, depth, model_id, api);
             } catch (err) {
                  
-                 
+                // eslint-disable-next-line @typescript-eslint/no-use-before-define
                 return handleReflectionError(err, context, depth, model_id, effectiveWorkspaceDir, api);
             }
         }
@@ -149,7 +149,7 @@ function resolveReflectionWorkspace(api: OpenClawPluginApi): string {
  * Execute the deep reflection workflow: start, poll, collect results.
  */
  
- 
+// eslint-disable-next-line @typescript-eslint/max-params
 async function executeReflectionWorkflow(
     effectiveWorkspaceDir: string,
     config: DeepReflectionConfig,
@@ -181,7 +181,7 @@ async function executeReflectionWorkflow(
         const startTime = Date.now();
         const timeoutMs = config.timeout_ms ?? 60000;
          
-         
+        // eslint-disable-next-line @typescript-eslint/no-use-before-define
         return await pollReflectionCompletion(manager, handle, timeoutMs, startTime, eventLog, effectiveWorkspaceDir, context, model_id, depth);
     } finally {
         manager.dispose();
@@ -192,7 +192,7 @@ async function executeReflectionWorkflow(
  * Poll the reflection workflow until completion, timeout, or error.
  */
  
- 
+// eslint-disable-next-line @typescript-eslint/max-params
 async function pollReflectionCompletion(
     manager: DeepReflectWorkflowManager,
     handle: { workflowId: string; childSessionKey: string },
@@ -213,7 +213,7 @@ async function pollReflectionCompletion(
 
         if (workflowState === 'completed') {
              
-             
+            // eslint-disable-next-line @typescript-eslint/no-use-before-define
             return formatReflectionSuccess(handle, context, depth, model_id, startTime, eventLog, workspaceDir);
         }
 
@@ -229,7 +229,7 @@ async function pollReflectionCompletion(
  * Format the success response from a completed reflection.
  */
  
- 
+// eslint-disable-next-line @typescript-eslint/max-params
 function formatReflectionSuccess(
     handle: { childSessionKey: string },
     context: string,
@@ -283,7 +283,7 @@ ${insights || '反思完成，详见 REFLECTION_LOG。'}
  * Handle reflection errors and format error response.
  */
  
- 
+// eslint-disable-next-line @typescript-eslint/max-params
 function handleReflectionError(
     err: unknown,
     context: string,

@@ -3,43 +3,38 @@ import * as fs from 'fs';
 import { resolvePdPath } from '../core/paths.js';
 
      
-function _isWindowsPath(p: string): boolean {
-  return p.includes('\\') || (p.length >= 2 && p[1] === ':');
-}
-
-function _convertWinToWsl(filePath: string): string {
-  return `/mnt/${filePath.charAt(0).toLowerCase()}${filePath.slice(2).replace(/\\/g, '/')}`;
-}
-
-function _getRelativePathWin(projectDir: string, filePath: string): string {
-  const projectAbs = path.resolve(projectDir);
-  const fileAbs = path.isAbsolute(filePath) ? filePath : path.join(projectAbs, filePath);
-  return path.relative(projectAbs, fileAbs);
-}
-
-function _getRelativePathPosix(projectDir: string, filePath: string): string {
-  const projectPosix = projectDir.replace(/\\/g, '/');
-  const filePosix = path.isAbsolute(filePath) ? filePath : path.posix.join(projectPosix, filePath.replace(/\\/g, '/'));
-  return path.posix.relative(projectPosix, filePosix);
-}
-
 export function normalizePath(filePath: string, projectDir: string): string {
   if (!filePath) return '';
 
-  const projectIsWin = _isWindowsPath(projectDir);
-  const fileIsWin = _isWindowsPath(filePath);
+  const projectIsWin = projectDir.includes('\\') || (projectDir.length >= 2 && projectDir[1] === ':');
+  const fileIsWin = filePath.includes('\\') || (filePath.length >= 2 && filePath[1] === ':');
 
   let normalizedFilePath = filePath;
-  if (projectIsWin !== fileIsWin && fileIsWin) {
-    normalizedFilePath = _convertWinToWsl(filePath);
+  if (projectIsWin !== fileIsWin) {
+    if (fileIsWin) {
+      // Basic WSL conversion D:\path -> /mnt/d/path
+      normalizedFilePath = `/mnt/${filePath.charAt(0).toLowerCase()}${filePath.slice(2).replace(/\\/g, '/')}`;
+    }
   }
 
-  const rel = projectIsWin
-    ? _getRelativePathWin(projectDir, normalizedFilePath)
-    : _getRelativePathPosix(projectDir, normalizedFilePath);
+   
+  // eslint-disable-next-line @typescript-eslint/init-declarations
+  let rel: string;
+  if (projectIsWin) {
+    const projectAbs = path.resolve(projectDir);
+    const fileAbs = path.isAbsolute(normalizedFilePath) ? normalizedFilePath : path.join(projectAbs, normalizedFilePath);
+    rel = path.relative(projectAbs, fileAbs);
+  } else {
+    const projectPosix = projectDir.replace(/\\/g, '/');
+    const filePosix = path.isAbsolute(normalizedFilePath) ? normalizedFilePath : path.posix.join(projectPosix, normalizedFilePath.replace(/\\/g, '/'));
+    rel = path.posix.relative(projectPosix, filePosix);
+  }
 
-  const normalized = rel.replace(/\\/g, '/');
-  return normalized.startsWith('../') ? normalizedFilePath : normalized;
+  rel = rel.replace(/\\/g, '/');
+  if (rel.startsWith('../')) {
+    return normalizedFilePath;
+  }
+  return rel;
 }
 
 export function normalizeRiskPath(p: string): string {

@@ -122,7 +122,7 @@ export class ReplayEngine {
   }
 
    
-   
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   runSingleSample(sample: ReplaySample, evaluator: CandidateEvaluator): ReplayResult {
     const evaluation = evaluator.evaluate(sample);
     return {
@@ -295,17 +295,8 @@ export class ReplayEngine {
     };
   }
 
-  private _findToolCallByOutcome(
-    toolCalls: NocturnalToolCall[],
-    outcomes: ('success' | 'failure' | 'blocked')[],
-  ): NocturnalToolCall | null {
-    for (const outcome of outcomes) {
-      const found = toolCalls.find((tc) => tc.outcome === outcome);
-      if (found) return found;
-    }
-    return toolCalls[0] ?? null;
-  }
-
+   
+    // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- complexity 11, slightly over threshold
   private _selectToolCall(
     snapshot: NocturnalSessionSnapshot,
     classification: SampleClassification,
@@ -315,18 +306,28 @@ export class ReplayEngine {
     );
 
     if (classification === 'pain-negative') {
-      return this._findToolCallByOutcome(byNewest, ['blocked', 'failure']);
+      return (
+        byNewest.find((toolCall) => toolCall.outcome === 'blocked') ??
+        byNewest.find((toolCall) => toolCall.outcome === 'failure') ??
+        byNewest[0] ??
+        null
+      );
     }
 
     if (classification === 'success-positive' || classification === 'principle-anchor') {
-      return this._findToolCallByOutcome(byNewest, ['success', 'failure']);
+      return (
+        byNewest.find((toolCall) => toolCall.outcome === 'success') ??
+        byNewest.find((toolCall) => toolCall.outcome === 'failure') ??
+        byNewest[0] ??
+        null
+      );
     }
 
     return byNewest[0] ?? null;
   }
 
    
-   
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   private _matchGateBlock(
     gateBlocks: NocturnalGateBlock[],
     toolCall: NocturnalToolCall,
@@ -364,7 +365,7 @@ export class ReplayEngine {
   }
 
    
-   
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   private _estimateLineChanges(toolCall: NocturnalToolCall): number {
     if (toolCall.toolName === 'edit' || toolCall.toolName === 'write') {
       return 20;
@@ -373,7 +374,7 @@ export class ReplayEngine {
   }
 
    
-   
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   private _inferBashRisk(toolCall: NocturnalToolCall): 'safe' | 'normal' | 'dangerous' | 'unknown' {
     if (toolCall.toolName !== 'bash' && toolCall.toolName !== 'run_shell_command') {
       return 'unknown';
@@ -387,45 +388,39 @@ export class ReplayEngine {
 
      
    
-     
-  private _scorePainNegative(result: RuleHostResult): { passed: boolean; reason?: string; decision: string } {
-    const passed = result.decision === 'block' || result.decision === 'requireApproval';
-    return {
-      passed,
-      reason: passed ? undefined : `Expected block/requireApproval but received ${result.decision}.`,
-      decision: result.decision,
-    };
-  }
-
-  private _scoreSuccessPositive(result: RuleHostResult): { passed: boolean; reason?: string; decision: string } {
-    const passed = result.decision === 'allow' || !result.matched;
-    return {
-      passed,
-      reason: passed ? undefined : `Expected allow/no-match but received ${result.decision}.`,
-      decision: result.decision,
-    };
-  }
-
-  private _scorePrincipleAnchor(result: RuleHostResult): { passed: boolean; reason?: string; decision: string } {
-    const passed = result.decision !== 'block';
-    return {
-      passed,
-      reason: passed ? undefined : 'Principle-anchor sample should not regress to a hard block.',
-      decision: result.decision,
-    };
-  }
-
+    // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- complexity 11
   private _scoreEvaluation(
     sample: ReplaySample,
     result: RuleHostResult,
   ): { passed: boolean; reason?: string; decision: string } {
     switch (sample.classification) {
       case 'pain-negative':
-        return this._scorePainNegative(result);
+        return {
+          passed: result.decision === 'block' || result.decision === 'requireApproval',
+          reason:
+            result.decision === 'block' || result.decision === 'requireApproval'
+              ? undefined
+              : `Expected block/requireApproval but received ${result.decision}.`,
+          decision: result.decision,
+        };
       case 'success-positive':
-        return this._scoreSuccessPositive(result);
+        return {
+          passed: result.decision === 'allow' || !result.matched,
+          reason:
+            result.decision === 'allow' || !result.matched
+              ? undefined
+              : `Expected allow/no-match but received ${result.decision}.`,
+          decision: result.decision,
+        };
       case 'principle-anchor':
-        return this._scorePrincipleAnchor(result);
+        return {
+          passed: result.decision !== 'block',
+          reason:
+            result.decision !== 'block'
+              ? undefined
+              : 'Principle-anchor sample should not regress to a hard block.',
+          decision: result.decision,
+        };
       default:
         return {
           passed: false,
@@ -502,7 +497,7 @@ export class ReplayEngine {
   }
 
    
-   
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   private _determineDecision(
     pain: ClassificationSummary,
     success: ClassificationSummary,
@@ -534,7 +529,7 @@ export class ReplayEngine {
   }
 
    
-   
+  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   private _deriveExpectedOutcome(
     record: NocturnalDatasetRecord,
   ): ReplaySample['expectedOutcome'] {
