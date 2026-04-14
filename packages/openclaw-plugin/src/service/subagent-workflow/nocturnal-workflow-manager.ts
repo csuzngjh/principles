@@ -260,12 +260,9 @@ export class NocturnalWorkflowManager implements WorkflowManager {
                         },
                         // Pass painContext for Selector ranking bias
                         painContext,
-                        // #244: Only skip preflight idle gate for manual/test triggers.
-                        // Automatic triggers must go through normal idle check.
-                        // #292: Periodic triggers (source='nocturnal') also bypass idle check for debugging
-                        ...(((options.metadata)?.triggerSource === 'manual' ||
-                            (options.metadata)?.triggerSource === 'test' ||
-                            (options.metadata)?.triggerSource === 'nocturnal')
+                        // #244: Skip preflight gates as configured by caller (e.g. manual/test/sleep_reflection).
+                        // Gates not in skipPreflightGates go through normal checks.
+                        ...(((options.metadata)?.skipPreflightGates as string[] | undefined)?.includes('idle')
                           ? {
                               idleCheckOverride: {
                                   isIdle: true,
@@ -274,7 +271,7 @@ export class NocturnalWorkflowManager implements WorkflowManager {
                                   userActiveSessions: 0,
                                   abandonedSessionIds: [],
                                   trajectoryGuardrailConfirmsIdle: true,
-                                  reason: `${(options.metadata)?.triggerSource ?? 'manual'}.test override`,
+                                  reason: 'skipPreflightGates override',
                               },
                             }
                           : {}),
