@@ -785,6 +785,13 @@ async function enqueueKeywordOptimizationTask(
             return;
         }
 
+        // Guard: Skip if daily optimization throttle is exhausted (CORR-08)
+        const learner = CorrectionCueLearner.get(wctx.stateDir);
+        if (!learner.canRunKeywordOptimization()) {
+            logger?.debug?.('[PD:EvolutionWorker] keyword_optimization throttle exhausted, skipping');
+            return;
+        }
+
         const taskId = createEvolutionTaskId('keyword_optimization', 50, 'keyword optimization', 'Keyword optimization via LLM', Date.now());
         const nowIso = new Date().toISOString();
 
@@ -2066,15 +2073,22 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                 let freshQueue: (RawQueueItem | EvolutionQueueItem)[] = [];
                 try {
                     freshQueue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
-                } catch { /* empty */ }
+                } catch (readErr) {
+                    // Queue file corrupted — log warning but preserve in-memory task state
+                    logger?.warn?.(`[PD:EvolutionWorker] Queue file corrupted (${String(readErr)}), preserving in-memory state`);
+                    freshQueue = [];
+                }
 
+                // Append or replace keyword_optimization tasks
                 for (const koTask of keywordOptTasks) {
                     const idx = freshQueue.findIndex((t) => (t as { id?: string }).id === koTask.id);
                     if (idx >= 0) {
                         freshQueue[idx] = koTask;
+                    } else {
+                        freshQueue.push(koTask);
                     }
                 }
-                fs.writeFileSync(queuePath, JSON.stringify(freshQueue, null, 2), 'utf8');
+                fs.writeFileSync(queuePath, JSON.stringify(freshQueue, null, 'utf8'));
             } catch (koResultErr) {
                 logger?.warn?.(`[PD:EvolutionWorker] Failed to write keyword_optimization results: ${String(koResultErr)}`);
             } finally {
@@ -2243,8 +2257,10 @@ function writeWorkerStatus(stateDir: string, report: WorkerStatusReport): void {
     try {
         const statusPath = path.join(stateDir, 'worker-status.json');
         fs.writeFileSync(statusPath, JSON.stringify(report, null, 2), 'utf8');
-    } catch {
+    } catch (statusErr) {
         // Non-critical: worker-status.json is for monitoring, failure is acceptable
+        // (no logger available in this standalone helper)
+        void statusErr;
     }
 }
 

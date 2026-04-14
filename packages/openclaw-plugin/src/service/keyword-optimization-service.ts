@@ -37,25 +37,32 @@ export class KeywordOptimizationService {
     }
 
     for (const [term, update] of Object.entries(result.updates)) {
-      switch (update.action) {
-        case 'add': {
-          const weight = update.weight ?? 0.5;
-          learner.add({ term, weight, source: 'llm' });
-          this.logger?.info?.(`[KeywordOptimizationService] ADD term="${term}" weight=${weight}`);
-          break;
-        }
-        case 'update': {
-          if (update.weight !== undefined) {
-            learner.updateWeight(term, update.weight);
-            this.logger?.info?.(`[KeywordOptimizationService] UPDATE term="${term}" weight=${update.weight}`);
+      try {
+        switch (update.action) {
+          case 'add': {
+            const weight = update.weight !== undefined
+              ? Math.max(0.1, Math.min(0.9, update.weight))
+              : 0.5;
+            learner.add({ term, weight, source: 'llm' });
+            this.logger?.info?.(`[KeywordOptimizationService] ADD term="${term}" weight=${weight}`);
+            break;
           }
-          break;
+          case 'update': {
+            if (update.weight !== undefined) {
+              learner.updateWeight(term, update.weight);
+              this.logger?.info?.(`[KeywordOptimizationService] UPDATE term="${term}" weight=${update.weight}`);
+            }
+            break;
+          }
+          case 'remove': {
+            learner.remove(term);
+            this.logger?.info?.(`[KeywordOptimizationService] REMOVE term="${term}"`);
+            break;
+          }
         }
-        case 'remove': {
-          learner.remove(term);
-          this.logger?.info?.(`[KeywordOptimizationService] REMOVE term="${term}"`);
-          break;
-        }
+      } catch (opErr) {
+        // Log and skip individual operation failures — don't fail the whole batch
+        this.logger?.warn?.(`[KeywordOptimizationService] ${update.action.toUpperCase()} failed for term="${term}": ${String(opErr)}`);
       }
     }
   }
@@ -71,17 +78,22 @@ export class KeywordOptimizationService {
     const db = TrajectoryRegistry.get(this.workspaceDir);
 
     for (const sessionId of sessionIds.slice(0, 10)) { // Last 10 sessions
-      const turns = db.listUserTurnsForSession(sessionId);
-      for (const turn of turns) {
-        if (turn.correctionDetected) {
-          history.push({
-            sessionId,
-            timestamp: turn.createdAt,
-            term: turn.correctionCue ?? 'unknown',
-            userMessage: turn.correctionCue ?? '',
-          });
+      try {
+        const turns = db.listUserTurnsForSession(sessionId);
+        for (const turn of turns) {
+          if (turn.correctionDetected) {
+            history.push({
+              sessionId,
+              timestamp: turn.createdAt,
+              term: turn.correctionCue ?? 'unknown',
+              userMessage: turn.correctionCue ?? '',
+            });
+          }
+          if (history.length >= 50) break; // Cap at 50 events
         }
-        if (history.length >= 50) break; // Cap at 50 events
+      } catch (dbErr) {
+        // Skip individual session DB errors — try remaining sessions
+        this.logger?.warn?.(`[KeywordOptimizationService] Failed to read trajectory for session ${sessionId}: ${String(dbErr)}`);
       }
       if (history.length >= 50) break;
     }
