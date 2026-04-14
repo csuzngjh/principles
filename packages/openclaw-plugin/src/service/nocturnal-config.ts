@@ -14,8 +14,16 @@ export interface SleepReflectionConfig {
     enabled: boolean;
 }
 
+export interface KeywordOptimizationConfig {
+    /** Periodic trigger interval in heartbeat cycles. Default 24 = 6 hours at 15-min heartbeat. */
+    period_heartbeats: number;
+    /** Whether keyword_optimization periodic trigger is enabled */
+    enabled: boolean;
+}
+
 export interface NocturnalConfig {
     sleep_reflection?: Partial<SleepReflectionConfig>;
+    keyword_optimization?: Partial<KeywordOptimizationConfig>;
 }
 
 const DEFAULT_SLEEP_REFLECTION: SleepReflectionConfig = {
@@ -23,6 +31,11 @@ const DEFAULT_SLEEP_REFLECTION: SleepReflectionConfig = {
     period_heartbeats: 4,       // ~1 hour at 15-min heartbeat interval
     cooldown_ms: 30 * 60 * 1000, // 30 minutes
     max_runs_per_day: 3,
+    enabled: true,
+};
+
+const DEFAULT_KEYWORD_OPTIMIZATION: KeywordOptimizationConfig = {
+    period_heartbeats: 24,    // 6 hours at 15-min heartbeat interval (24 * 15min = 360min = 6h)
     enabled: true,
 };
 
@@ -68,5 +81,34 @@ export function loadNocturnalConfig(stateDir: string): SleepReflectionConfig {
         enabled: typeof fileSleep.enabled === 'boolean'
             ? fileSleep.enabled
             : DEFAULT_SLEEP_REFLECTION.enabled,
+    };
+}
+
+/**
+ * Load keyword_optimization config from .state/nocturnal-config.json.
+ * Returns default config if file doesn't exist or is malformed.
+ */
+export function loadKeywordOptimizationConfig(stateDir: string): KeywordOptimizationConfig {
+    const configPath = resolveConfigPath(stateDir);
+    let fileConfig: NocturnalConfig = {};
+
+    if (fs.existsSync(configPath)) {
+        try {
+            const raw = fs.readFileSync(configPath, 'utf8');
+            fileConfig = JSON.parse(raw);
+        } catch {
+            // Malformed config — continue with defaults
+        }
+    }
+
+    const fileKwOpt = fileConfig.keyword_optimization || {};
+
+    return {
+        period_heartbeats: typeof fileKwOpt.period_heartbeats === 'number' && fileKwOpt.period_heartbeats > 0
+            ? fileKwOpt.period_heartbeats
+            : DEFAULT_KEYWORD_OPTIMIZATION.period_heartbeats,
+        enabled: typeof fileKwOpt.enabled === 'boolean'
+            ? fileKwOpt.enabled
+            : DEFAULT_KEYWORD_OPTIMIZATION.enabled,
     };
 }
