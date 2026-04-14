@@ -2017,6 +2017,7 @@ export async function registerEvolutionTaskSession(
 export interface ExtendedEvolutionWorkerService {
     id: string;
     api: OpenClawPluginApi | null;
+    _startedWorkspaces: Set<string>;
     start: (ctx: OpenClawPluginServiceContext) => void | Promise<void>;
     stop?: (ctx: OpenClawPluginServiceContext) => void | Promise<void>;
 }
@@ -2093,18 +2094,18 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
     start(ctx: OpenClawPluginServiceContext): void {
         const workspaceDir = ctx?.workspaceDir;
 
-        // Guard: prevent duplicate starts for the SAME workspace
-        const started = EvolutionWorkerService._startedWorkspaces;
-        if (started.has(workspaceDir)) {
-            ctx?.logger?.info?.(`[PD:EvolutionWorker] Already started for ${workspaceDir}, skipping`);
-            return;
-        }
-
         const logger = ctx?.logger || console;
         const {api} = this;
 
         if (!workspaceDir) {
             if (logger) logger.warn('[PD:EvolutionWorker] workspaceDir not found in service config. Evolution cycle disabled.');
+            return;
+        }
+
+        // Guard: prevent duplicate starts for the SAME workspace
+        const started = EvolutionWorkerService._startedWorkspaces;
+        if (started.has(workspaceDir)) {
+            ctx?.logger?.info?.(`[PD:EvolutionWorker] Already started for ${workspaceDir}, skipping`);
             return;
         }
 
