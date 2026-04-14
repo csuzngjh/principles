@@ -1,22 +1,31 @@
-# Feature Research
+# Feature Research: KeywordLearningEngine for Correction Cues
 
-**Domain:** NocturnalWorkflowManager - multi-stage nocturnal reflection helper
-**Researched:** 2026-04-05
-**Confidence:** HIGH (code analysis of existing implementations)
+**Domain:** Dynamic keyword learning for AI agent correction signal detection
+**Researched:** 2026-04-14
+**Confidence:** HIGH (based on existing empathy implementation analysis)
+
+## Executive Summary
+
+The KeywordLearningEngine extends the existing `empathy-keyword-matcher.ts` pattern to correction cue detection. The existing codebase already has a production-ready implementation for empathy keywords with FPR tracking, LLM-based optimization, and persistent storage. The correction cue system reuses this exact pattern but with different seed keywords and a separate store file.
+
+The current `detectCorrectionCue()` in `prompt.ts:87-111` uses 15 hardcoded static keywords. The KeywordLearningEngine replaces this with the dynamic keyword store pattern, enabling:
+1. Learning from false positives (user said "not this" but was not frustrated)
+2. Weight adjustment based on actual hit frequency
+3. LLM-discovered new correction expressions
+4. Separate `correction_keywords.json` store
 
 ## Feature Landscape
 
 ### Table Stakes (Users Expect These)
 
-Features users assume exist. Missing these = product feels incomplete.
+Features users assume exist. Missing these = product feels broken.
 
 | Feature | Why Expected | Complexity | Notes |
 |---------|--------------|------------|-------|
-| Single-reflector fallback mode | Phase 6 design: Trinity must degrade gracefully when `useTrinity: false` | LOW | Reuses `invokeStubReflector` from `nocturnal-service.ts`. Uses same `TrinityConfig.useTrinity: false` path. |
-| Basic workflow lifecycle management | Existing helpers (EmpathyObserver, DeepReflect) all implement `WorkflowManager` interface with `startWorkflow`, `notifyWaitResult`, `finalizeOnce`, `sweepExpiredWorkflows` | LOW | `NocturnalWorkflowManager` must implement same interface for consistency |
-| Trinity stage result parsing | Trinity output is structured JSON (DreamerOutput, PhilosopherOutput, Scribe artifact). `OpenClawTrinityRuntimeAdapter.parseDreamerOutput`, `parsePhilosopherOutput`, `parseScribeOutput` extract results | MEDIUM | Parse logic already exists in adapter. Manager needs to route parsed results through arbiter/executability pipeline |
-| Trinity telemetry recording | `TrinityTelemetry` tracks `chainMode`, `dreamerPassed`, `philosopherPassed`, `scribePassed`, `candidateCount`, `stageFailures` | LOW | Telemetry already constructed by `runTrinity` / `runTrinityAsync`. Manager just needs to propagate it through `NocturnalRunDiagnostics` |
-| Async Trinity execution | Real subagent execution via `runTrinityAsync` + `TrinityRuntimeAdapter`. `executeNocturnalReflectionAsync` in service shows the pattern | MEDIUM | Requires adapter to be passed through manager options. Sync path (`runTrinity`) only works with stubs |
+| Keyword matching | Users expect the system to detect when they are correcting the agent | LOW | Simple substring match (existing pattern: `text.includes(term)`) |
+| FPR tracking | Overly aggressive detection creates user annoyance | MEDIUM | Track when keywords fire but user was not actually correcting |
+| Persistence across restarts | Keyword store must survive plugin reload | LOW | JSON file in stateDir |
+| Basic severity mapping | Not all corrections are equal | LOW | Score thresholds already exist in empathy-types.ts |
 
 ### Differentiators (Competitive Advantage)
 
@@ -24,10 +33,10 @@ Features that set the product apart. Not required, but valuable.
 
 | Feature | Value Proposition | Complexity | Notes |
 |---------|-------------------|------------|-------|
-| Full Trinity chain with real subagent execution | Dreamer generates candidates, Philosopher ranks them, Scribe synthesizes. Higher quality artifacts than single-reflector | HIGH | Requires `TrinityRuntimeAdapter` (already exists as `OpenClawTrinityRuntimeAdapter`). Not stub-only. Stage timeout is 180s per stage |
-| Tournament selection with threshold validation | Deterministic winner selection from ranked candidates. `runTournament()` in `nocturnal-candidate-scoring.ts` applies `ScoringWeights` + threshold checks | MEDIUM | Tournament is internal to stub Scribe. Real adapter Scribe does synthesis, not tournament (tournament logic stays in stub path) |
-| Multi-stage progress tracking | Track Dreamer → Philosopher → Scribe separately. Fail fast on stage failure (fail-closed design) | MEDIUM | Current `WorkflowManager` interface has no multi-stage concept. Each Trinity stage is a separate subagent invocation with its own session |
-| Configurable chain mode | `useTrinity: true/false` controls whether multi-stage or single-reflector. `maxCandidates` controls candidate count | LOW | Already in `TrinityConfig`. Manager just needs to accept and pass through config |
+| LLM-based keyword discovery | System learns new correction expressions from actual user language | MEDIUM | Subagent workflow triggers optimization every 50 turns or 6 hours |
+| Adaptive weight adjustment | Frequently matched keywords become more sensitive; rarely matched become less | MEDIUM | Weight * (1 - FPR) formula in matchEmpathyKeywords |
+| Feedback loop integration | Trajectory recording with correctionDetected flag feeds back into keyword learning | MEDIUM | Requires subagent validation to mark false positives |
+| Multi-language support | Both Chinese and English correction cues | LOW | Language-filtered seed keywords in createDefaultKeywordStore |
 
 ### Anti-Features (Commonly Requested, Often Problematic)
 
@@ -35,129 +44,186 @@ Features that seem good but create problems.
 
 | Feature | Why Requested | Why Problematic | Alternative |
 |---------|---------------|-----------------|-------------|
-| Reusing single-stage `WorkflowManager` for Trinity | Apparent code reuse, simpler implementation | Trinity is a 3-stage pipeline, not 3 separate single-stage workflows. State machine, timeouts, and finalization all differ fundamentally | Create separate `NocturnalWorkflowManager` that wraps Trinity internally, not extending existing managers |
-| Trinity-to-single-reflector fallback on stage failure | Resilience, "something works" mentality | Phase 6 design: malformed Trinity output fails the entire chain closed. This is intentional - low quality from fallback is worse than no artifact | Let Trinity fail. `nocturnal-service.ts` already implements fail-closed. Manager should not implement fallback |
-| Managing Trinity stages as independent `WorkflowHandle`s | Makes each stage independently observable | Stages are dependent - Philosopher needs Dreamer output, Scribe needs both. Independent handles break the dependency chain | Single `WorkflowHandle` for the whole Trinity run. Internal stage status tracked in `TrinityTelemetry` not in workflow store |
-| Real-time streaming of stage outputs | Better UX, visibility into progress | Current runtime API (`waitForRun`) is blocking. Streaming would require different API surface. Not aligned with existing patterns | Log stage completion at INFO level. Telemetry records stage outcomes |
+| Real-time FPR updates after every message | "Immediate feedback" seems good | Too noisy; single messages cannot establish reliable FPR | Batch updates every N turns via subagent |
+| Fuzzy/approximate matching | "What if user types 'thsi' instead of 'this'?" | Dramatically increases false positives, performance cost | Accept exact match with LLM discovery of typos |
+| Keyword auto-removal | "Let the system clean itself up" | May remove important keywords prematurely | LLM subagent makes deliberate removal decisions with reasoning |
+| Per-user keyword stores | "Each user has different expressions" | Complexity explosion, cold-start problem | Global store with per-user feedback weighting (defer to v2) |
 
 ## Feature Dependencies
 
 ```
-[TrinityRuntimeAdapter]
-    └──provides──> [invokeDreamer / invokePhilosopher / invokeScribe]
+[Match Keywords] ──requires──> [Load Keyword Store]
+[LLM Optimization] ──requires──> [Match Keywords]
+[LLM Optimization] ──requires──> [Trajectory Feedback]
+[FPR Tracking] ──requires──> [Subagent Validation]
+[FPR Tracking] ──enhances──> [Match Keywords]
+[Save Keyword Store] ──requires──> [Match Keywords]
 
-[NocturnalWorkflowManager]
-    └──uses──> [TrinityRuntimeAdapter] (when useStubs: false)
-    └──uses──> [runTrinityAsync] (async path with adapter)
-    └──uses──> [runTrinity] (sync path, stubs only)
-
-[NocturnalService]
-    └──calls──> [NocturnalWorkflowManager.startWorkflow]
-    └──calls──> [TrinityRuntimeAdapter.invokeDreamer/Philosopher/Scribe] (via runTrinityAsync)
-
-[Single-reflector mode]
-    └──uses──> [invokeStubReflector] (not a workflow, direct call in service)
-
-[Trinity chain] ──conflicts──> [Single-reflector fallback]
-    (cannot run both simultaneously; useTrinity flag selects one)
+[correction_keywords.json] (new) ──mirrors──> [empathy_keywords.json] (existing)
 ```
 
 ### Dependency Notes
 
-- **TrinityRuntimeAdapter requires RuntimeDirectDriver-subagent:** `OpenClawTrinityRuntimeAdapter` uses `api.runtime.subagent.run/waitForRun/getSessionMessages/deleteSession`. This is the same API surface as `RuntimeDirectDriver` but wrapped differently
-- **NocturnalWorkflowManager needs TrinityRuntimeAdapter:** Unlike EmpathyObserver/DeepReflect which use `RuntimeDirectDriver` directly, Nocturnal wraps Trinity which wraps the adapter
-- **Single-reflector bypasses manager:** When `useTrinity: false`, `nocturnal-service.ts` calls `invokeStubReflector` directly, not `NocturnalWorkflowManager`. This is an internal service call, not a workflow
-- **Trinity fail-closed eliminates manager fallback responsibility:** Manager does not need to implement fallback logic - the service already fails the chain if Trinity fails
+- **Match Keywords requires Load Keyword Store:** The `matchEmpathyKeywords` function requires a loaded `EmpathyKeywordStore`. This store is cached in module-level `_empathyKeywordCache` in prompt.ts.
+- **LLM Optimization requires Trajectory Feedback:** The optimization subagent prompt uses recent messages to identify new patterns. The trajectory system records whether each user turn had a correction detected.
+- **FPR Tracking enhances Match Keywords:** FPR directly adjusts the effective weight via `adjustedWeight = entry.weight * (1 - entry.falsePositiveRate)`. Higher FPR = lower effective weight.
+- **correction_keywords.json mirrors empathy_keywords.json:** The correction store reuses the exact same `EmpathyKeywordStore` interface and `empathy-keyword-matcher.ts` functions, just with different seed keywords.
 
 ## MVP Definition
 
 ### Launch With (v1)
 
-Minimum viable product - what is needed to validate the concept.
+Minimum viable product -- what is needed to validate the concept.
 
-- [ ] **Single-reflector NocturnalWorkflowManager** - Wraps existing `invokeStubReflector` behavior. Implements `WorkflowManager` interface. `workflowType: 'nocturnal-single'`. Minimal since this path already exists in service
-- [ ] **Basic workflow lifecycle** - `startWorkflow`, `notifyWaitResult`, `finalizeOnce`, `sweepExpiredWorkflows` using existing `WorkflowStore` and `RuntimeDirectDriver` patterns
-- [ ] **Nocturnal artifact persistence** - Same as service: write approved artifact to `.state/nocturnal/samples/{artifactId}.json`, register via `registerSample`
+- [ ] **Static keyword store with seed keywords** -- Copy the 15 hardcoded keywords from `detectCorrectionCue()` into `EMPATHY_SEED_KEYWORDS`-style seed list. Reuse existing `EmpathyKeywordStore` interface.
+- [ ] **Basic keyword matching** -- Replace `detectCorrectionCue()` with `matchEmpathyKeywords()` call against the correction store. `matched: true` = correction detected.
+- [ ] **Correction store persistence** -- Save to `correction_keywords.json` (separate from empathy store). Use existing `loadKeywordStore`/`saveKeywordStore` functions.
+- [ ] **In-memory cache** -- Cache correction keyword store in `_correctionKeywordCache` (parallel to `_empathyKeywordCache`).
 
 ### Add After Validation (v1.x)
 
 Features to add once core is working.
 
-- [ ] **Async Trinity with runtimeAdapter** - When `runtimeAdapter` is provided in options, NocturnalWorkflowManager calls `runTrinityAsync` instead of stub path. Pass adapter through manager options
-- [ ] **Trinity telemetry propagation** - Expose `TrinityTelemetry` through `NocturnalRunDiagnostics` in workflow result. Already constructed by `runTrinity` - manager just needs to pass it through
-- [ ] **Multi-stage session cleanup** - Each Trinity stage (`ne-dreamer-*`, `ne-philosopher-*`, `ne-scribe-*`) creates and deletes its own session. Already handled by `OpenClawTrinityRuntimeAdapter.close()`
+- [ ] **Subagent optimization trigger** -- Implement `shouldTriggerOptimization()` for correction store. Trigger every 50 turns or 6 hours. Reuse `EmpathyObserverWorkflowManager` pattern.
+- [ ] **FPR feedback integration** -- When trajectory shows `correctionDetected: true` but user was not actually correcting (via subagent validation), update the keyword's FPR upward.
+- [ ] **LLM-discovered keywords** -- Add new correction expressions discovered by the optimization subagent to the store.
 
 ### Future Consideration (v2+)
 
 Features to defer until product-market fit is established.
 
-- [ ] **Real-time stage progress callbacks** - Notify caller as each Trinity stage completes (Dreamer done, Philosopher done, Scribe done). Would require extending `WorkflowManager` interface or adding callbacks
-- [ ] **Partial result salvage on Philosopher failure** - If Philosopher fails but Dreamer produced valid candidates, could retry Philosopher with same Dreamer output. Currently fail-closed, but could be a config option
-- [ ] **Tournament trace visibility** - Expose `TournamentTraceEntry[]` in workflow debug summary for explainability
+- [ ] **Per-user keyword adaptation** -- Different users may have different correction styles. Requires user identification and per-user stores.
+- [ ] **Multi-word pattern matching** -- Support phrases like "that is not what I asked for" as a single keyword entry.
+- [ ] **Stemming/lemmatization** -- Reduce keywords needed by matching word roots. Adds complexity, test burden.
 
 ## Feature Prioritization Matrix
 
 | Feature | User Value | Implementation Cost | Priority |
 |---------|------------|---------------------|----------|
-| Single-reflector NocturnalWorkflowManager | HIGH - validates manager pattern works | LOW - reuses existing service logic | P1 |
-| Basic workflow lifecycle | HIGH - required for evolution worker integration | LOW - copy from EmpathyObserver/DeepReflect | P1 |
-| Nocturnal artifact persistence | HIGH - core value delivery | LOW - same as service persistence | P1 |
-| Async Trinity with runtimeAdapter | MEDIUM - full Trinity value | MEDIUM - adapter already exists, needs wiring | P2 |
-| Trinity telemetry propagation | MEDIUM - debugging, observability | LOW - pass-through | P2 |
-| Multi-stage session cleanup | MEDIUM - resource management | LOW - adapter.close() already handles | P2 |
-| Stage progress callbacks | LOW - nice visibility | HIGH - interface change needed | P3 |
-| Partial result salvage | LOW - edge case | MEDIUM - would add complexity | P3 |
+| Static keyword store with seeds | HIGH | LOW | P1 |
+| Basic keyword matching replacement | HIGH | LOW | P1 |
+| Correction store persistence | HIGH | LOW | P1 |
+| In-memory cache | MEDIUM | LOW | P1 |
+| Subagent optimization trigger | MEDIUM | MEDIUM | P2 |
+| FPR feedback integration | MEDIUM | MEDIUM | P2 |
+| LLM-discovered keywords | MEDIUM | MEDIUM | P2 |
 
 **Priority key:**
 - P1: Must have for launch
 - P2: Should have, add when possible
 - P3: Nice to have, future consideration
 
+## Technical Implementation Details (from existing codebase)
+
+### Matching Algorithm (from empathy-keyword-matcher.ts:139-201)
+
+```typescript
+// Simple substring match with FPR-adjusted weight
+const lowerText = text.toLowerCase();
+for (const [term, entry] of Object.entries(store.terms)) {
+  if (lowerText.includes(term.toLowerCase())) {
+    const adjustedWeight = entry.weight * (1 - entry.falsePositiveRate);
+    totalScore += adjustedWeight;
+    matchedTerms.push(term);
+  }
+}
+const cappedScore = Math.min(1, totalScore);
+const isMatched = cappedScore >= config.matchThreshold && matchedTerms.length > 0;
+```
+
+**Key characteristics:**
+- Case-insensitive via `toLowerCase()`
+- No stemming or fuzzy matching
+- FPR-adjusted weight: higher FPR = lower effective weight
+- Score capped at 1.0
+- Match threshold default: 0.3
+
+### Seed Keywords (from current detectCorrectionCue vs empathy pattern)
+
+Current hardcoded correction cues (15):
+```
+'不是这个', '不对', '错了', '搞错了', '理解错了', '你理解错了',
+'重新来', '再试一次', 'you are wrong', 'wrong file', 'not this',
+'redo', 'try again', 'again', 'please redo', 'please try again'
+```
+
+Note: The current list has 16 entries (I count 16), but PROJECT.md says "15 hardcoded keywords". The discrepancy should be verified during implementation.
+
+### FPR Tracking (from empathy-types.ts)
+
+```typescript
+interface EmpathyKeywordEntry {
+  weight: number;                    // 0-1, contribution when matched
+  source: 'seed' | 'llm_discovered' | 'user_reported';
+  hitCount: number;                  // Total times matched
+  lastHitAt?: string;               // Last match timestamp
+  falsePositiveRate: number;        // 0-1, from subagent validation
+  examples?: string[];              // Example contexts
+  discoveredAt?: string;             // When LLM discovered this
+}
+```
+
+**FPR update mechanism:**
+- FPR is NOT updated in real-time
+- FPR is updated by the LLM optimization subagent after analyzing recent messages
+- FPR affects weight: `adjustedWeight = weight * (1 - FPR)`
+- Range: 0.05 (specific anger signals) to 0.5 (generic negation)
+
+### LLM Optimization (from prompt.ts:269-299)
+
+```typescript
+// Triggered every 50 turns OR 6 hours
+const optimizationPrompt = buildOptimizationPrompt(keywordStore, recentMessages);
+// Subagent returns JSON: {"updates": {"TERM": {"action": "add|update|remove", ...}}}
+// Applied via applyKeywordUpdates()
+```
+
+**Optimization rules:**
+- ADD: If a message contains correction signals not in current terms
+- UPDATE: If a term's weight should change (high hits -> increase, low hits -> decrease)
+- REMOVE: If a term has 0 hits after many turns AND high FPR (>0.3)
+
+### Persistence (from empathy-keyword-matcher.ts:77-127)
+
+```typescript
+const KEYWORD_STORE_FILE = 'empathy_keywords.json';
+// For correction: 'correction_keywords.json'
+
+export function loadKeywordStore(stateDir: string, lang?: 'zh' | 'en'): EmpathyKeywordStore
+export function saveKeywordStore(stateDir: string, store: EmpathyKeywordStore): void
+```
+
+**File format:** JSON with `version`, `lastUpdated`, `lastOptimizedAt`, `terms`, `stats`.
+
+### Learning Loop (from prompt.ts:461-604)
+
+The empathy system uses a hybrid approach:
+1. **Every turn:** Fast keyword matching (sub-millisecond)
+2. **10% sampling:** Subagent called for verification on boundary cases
+3. **5% random:** Subagent called randomly to discover new patterns
+4. **Every 50 turns / 6 hours:** Optimization subagent updates weights and discovers new terms
+
+For correction cues, the loop would be similar but simpler (correction detection is binary, not severity-scored).
+
 ## Competitor Feature Analysis
 
-This is internal infrastructure (plugin helper system), not a user-facing product. Competitor analysis is N/A for this domain.
+| Feature | GitHub Copilot | Cursor | Claude Code | Our Approach |
+|---------|---------------|---------|-------------|--------------|
+| Error correction detection | Implicit via feedback loops | Implicit via teacher mode | Explicit "redo" commands | Dynamic keyword learning with FPR |
+| False positive handling | Unknown | Unknown | Unknown | FPR tracking + LLM optimization |
+| User expression learning | No public evidence | No public evidence | No public evidence | LLM subagent discovers new expressions |
+| Persistence | Unknown | Unknown | Unknown | JSON file per workspace |
 
-Instead, the relevant comparison is **Trinity vs Single-Reflector**:
-
-| Aspect | Trinity | Single-Reflector |
-|--------|---------|-------------------|
-| Stages | 3 (Dreamer, Philosopher, Scribe) | 1 (stub reflector) |
-| Candidate generation | Multiple alternatives (up to 3) | Single artifact |
-| Selection mechanism | Philosopher ranking + tournament | Direct generation |
-| Quality | Higher (principle-grounded critique) | Lower (synthetic, no critique) |
-| Failure mode | Fail-closed on any stage malformation | Fallback to synthetic |
-| Real execution | Requires runtimeAdapter | Always available (stub) |
-| Complexity | HIGH (3 subagent invocations) | LOW (direct generation) |
-
-## Key Architectural Differences from Existing Helpers
-
-### EmpathyObserverWorkflowManager / DeepReflectWorkflowManager
-- Single subagent invocation
-- `RuntimeDirectDriver` manages lifecycle directly
-- `SubagentWorkflowSpec` drives prompt building, parsing, persistence
-- `shouldFinalizeOnWaitStatus: (status) => status === 'ok'`
-
-### NocturnalWorkflowManager (Trinity mode)
-- Three sequential subagent invocations via `TrinityRuntimeAdapter`
-- `runTrinityAsync` orchestrates the chain internally
-- Does NOT use `SubagentWorkflowSpec` (Trinity has its own config/spec system)
-- Does NOT use `RuntimeDirectDriver` directly (adapter wraps it)
-- Result is `NocturnalRunResult` (includes artifact, diagnostics, telemetry)
-- Arbiter + executability validation happens inside service, not manager
-
-### NocturnalWorkflowManager (Single-reflector mode)
-- Can reuse `invokeStubReflector` directly (no subagent call needed)
-- OR can wrap in single-shot workflow using `RuntimeDirectDriver`
-- Simpler than Trinity mode
+No direct competitor publicly describes their correction cue detection mechanism in detail.
 
 ## Sources
 
-- `packages/openclaw-plugin/src/core/nocturnal-trinity.ts` - TrinityRuntimeAdapter interface, stage contracts, runTrinityAsync
-- `packages/openclaw-plugin/src/service/nocturnal-service.ts` - Pipeline orchestration, stub reflector, Trinity vs single-reflector decision logic
-- `packages/openclaw-plugin/src/service/subagent-workflow/empathy-observer-workflow-manager.ts` - Existing WorkflowManager pattern
-- `packages/openclaw-plugin/src/service/subagent-workflow/deep-reflect-workflow-manager.ts` - Second existing WorkflowManager pattern
-- `packages/openclaw-plugin/src/service/subagent-workflow/types.ts` - SubagentWorkflowSpec, WorkflowManager interface
+- Existing implementation: `packages/openclaw-plugin/src/core/empathy-keyword-matcher.ts`
+- Existing types: `packages/openclaw-plugin/src/core/empathy-types.ts`
+- Existing integration: `packages/openclaw-plugin/src/hooks/prompt.ts:87-111` (detectCorrectionCue) and :461-604 (empathy keyword integration)
+- Existing tests: `packages/openclaw-plugin/tests/core/empathy-keyword-matcher.test.ts`
+- Project context: `.planning/PROJECT.md` (v1.14 milestone definition)
 
 ---
-*Feature research for: NocturnalWorkflowManager - Trinity multi-stage helper*
-*Researched: 2026-04-05*
+*Feature research for: KeywordLearningEngine for correction cues*
+*Researched: 2026-04-14*

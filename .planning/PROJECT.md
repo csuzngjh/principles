@@ -46,15 +46,15 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 | Introduce one contract per boundary type | Path, runtime, and schema logic must stop being reimplemented ad hoc | Active |
 | Use end-to-end tests for boundary protection | Unit tests did not catch integration drift with OpenClaw | Active |
 
-## Current Milestone: v1.13 Boundary Contract Hardening
+## Current Milestone: v1.14 Keyword Learning Engine
 
-**Goal:** Eliminate the recurring "implicit assumption + silent fallback" failure mode so nocturnal and principle-internalization flows fail fast, write to the correct workspace, and carry validated data end-to-end.
+**Goal:** 为 correction cue 检测创建动态关键词学习机制，复用 empathy engine 的抽象模式
 
 **Target features:**
-- Single workspace resolution contract across hooks, commands, workers, and HTTP routes
-- Schema-validated parsing for critical state files and snapshot inputs
-- Runtime capability contract for background subagent usage without constructor-name guessing
-- End-to-end contract tests for pain -> queue -> nocturnal and command/hook workspace writes
+- 创建 `KeywordLearningEngine` 抽象层，支持多类型关键词（empathy、correction）
+- correction cue 替换硬编码关键词为动态存储
+- 实现学习循环：匹配 → 反馈 → FPR 跟踪 → LLM 优化
+- 持久化到 `correction_keywords.json`
 
 ## Evolution
 
@@ -73,4 +73,4 @@ This document evolves at phase transitions and milestone boundaries.
 3. Audit Out of Scope
 4. Update Context with current state
 
-*Last updated: 2026-04-11 after v1.13 milestone started*
+*Last updated: 2026-04-14 after v1.14 milestone started*
