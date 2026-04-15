@@ -87,7 +87,7 @@ const plugin = {
 
     // ── Startup Health Check: Verify workspaceDir resolution ──
     // Catches OpenClaw context bugs early (e.g., missing workspaceDir in tool hooks)
-    setTimeout(() => {
+    const healthCheckTimer = setTimeout(() => {
       const testCtx = { agentId: 'main' };
       const toolWorkspaceDir = resolveToolHookWorkspaceDirSafe(testCtx, api, 'startup.health_check');
       const toolIssue = validateWorkspaceDir(toolWorkspaceDir);
@@ -98,6 +98,7 @@ const plugin = {
         api.logger.info(`[PD:health] Tool hook workspaceDir OK: "${toolWorkspaceDir}"`);
       }
     }, 1000);
+    healthCheckTimer.unref(); // Don't keep process alive for health check
 
     const language = (api.pluginConfig?.language as string) || 'en';
 
