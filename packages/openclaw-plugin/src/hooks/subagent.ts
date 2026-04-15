@@ -14,7 +14,7 @@ import type { WorkflowManager } from '../service/subagent-workflow/types.js';
  * Used by the subagent_ended hook to dispatch lifecycle recovery to the right manager.
  */
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 function createWorkflowManagerForType(
     workflowType: string,
     workspaceDir: string,
@@ -25,9 +25,8 @@ function createWorkflowManagerForType(
         info: (m: string) => logger.info(String(m)),
         warn: (m: string) => logger.warn(String(m)),
         error: (m: string) => logger.error(String(m)),
-         
         debug: () => { /* no-op */ },
-    } as unknown as PluginLogger;
+    };
 
     switch (workflowType) {
         case 'empathy-observer':
