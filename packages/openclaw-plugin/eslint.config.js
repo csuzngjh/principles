@@ -18,7 +18,8 @@ export default [
     rules: {
       'no-empty': 'error',
       'no-console': 'warn',
-      'complexity': 'off',
+      'complexity': ['error', { max: 15 }],
+      'max-lines': ['error', { max: 500 }],
       '@typescript-eslint/no-explicit-any': 'warn',
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
       '@typescript-eslint/no-non-null-assertion': 'warn',
