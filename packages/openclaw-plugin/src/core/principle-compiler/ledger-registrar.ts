@@ -82,7 +82,7 @@ export function registerCompiledRule(stateDir: string, input: RegisterInput): Re
       version: '1',
       coversCondition,
       coveragePercentage: 100,
-      lifecycleState: 'candidate' as const,
+      lifecycleState: 'active' as const,
       createdAt: now,
       updatedAt: now,
     };

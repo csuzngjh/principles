@@ -132,7 +132,7 @@ describe('PrincipleCompiler', () => {
 
     const impl = ledger.tree.implementations['IMPL_P_066_auto'];
     expect(impl).toBeDefined();
-    expect(impl.lifecycleState).toBe('candidate');
+    expect(impl.lifecycleState).toBe('active');
   });
 
   // -----------------------------------------------------------------------

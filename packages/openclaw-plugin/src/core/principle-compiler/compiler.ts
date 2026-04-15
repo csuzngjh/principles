@@ -15,6 +15,7 @@ import { ReflectionContextCollector } from '../reflection/reflection-context.js'
 import { validateGeneratedCode } from './code-validator.js';
 import { generateFromTemplate, type PainPattern } from './template-generator.js';
 import { registerCompiledRule } from './ledger-registrar.js';
+import { createImplementationAssetDir } from '../code-implementation-storage.js';
 import type { TrajectoryDatabase } from '../trajectory.js';
 
 // ---------------------------------------------------------------------------
@@ -209,6 +210,11 @@ export class PrincipleCompiler {
       principleId,
       codeContent: code,
       coversCondition,
+    });
+
+    // Step 6: Persist code to disk so RuleHost can load it
+    createImplementationAssetDir(this.stateDir, registration.implementationId, '1', {
+      entrySource: code,
     });
 
     return {

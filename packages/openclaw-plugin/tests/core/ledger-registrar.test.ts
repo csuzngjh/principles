@@ -118,7 +118,7 @@ describe('ledger-registrar', () => {
       expect(impl.ruleId).toBe('R_P_001_auto');
       expect(impl.type).toBe('code');
       expect(impl.coversCondition).toBe('file_write');
-      expect(impl.lifecycleState).toBe('candidate');
+      expect(impl.lifecycleState).toBe('active');
 
       // Verify principle linked to rule
       const principle = ledger.tree.principles['P_001'];
