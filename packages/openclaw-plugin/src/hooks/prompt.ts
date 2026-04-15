@@ -20,6 +20,17 @@ import {
 } from '../core/empathy-keyword-matcher.js';
 import { severityToPenalty, DEFAULT_EMPATHY_KEYWORD_CONFIG } from '../core/empathy-types.js';
 import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
+import type { PluginRuntimeSubagent } from '../service/subagent-workflow/runtime-direct-driver.js';
+
+/**
+ * Type assertion: OpenClaw SDK subagent -> workflow manager subagent type.
+ * Both types are structurally identical but come from different import paths.
+ */
+function toWorkflowSubagent(
+  subagent: NonNullable<OpenClawPluginApi['runtime']>['subagent']
+): PluginRuntimeSubagent {
+  return subagent as unknown as PluginRuntimeSubagent;
+}
 
 // ---------------------------------------------------------------------------
 // Static file cache — avoids re-reading rarely-changing files every message
@@ -590,8 +601,8 @@ The empathy observer subagent handles pain detection independently.
           const empathyManager = new EmpathyObserverWorkflowManager({
             workspaceDir,
             logger: api.logger ?? console,
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: runtimeSubagent has structurally compatible shape but differs from workflow manager's subagent type
-            subagent: runtimeSubagent as any,
+             
+            subagent: toWorkflowSubagent(runtimeSubagent),
           });
           empathyManager.startWorkflow(empathyObserverWorkflowSpec, {
             parentSessionId: sessionId,
@@ -626,8 +637,8 @@ The empathy observer subagent handles pain detection independently.
             const empathyManager = new EmpathyObserverWorkflowManager({
               workspaceDir,
               logger: api.logger ?? console,
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: api.runtime.subagent has structurally compatible shape but differs from workflow manager's subagent type
-              subagent: api.runtime.subagent as any,
+               
+              subagent: toWorkflowSubagent(api.runtime.subagent),
             });
             
             empathyManager.startWorkflow(empathyObserverWorkflowSpec, {
