@@ -339,11 +339,12 @@ export async function handleBeforePromptBuild(
         const matchResult = learner.match(userText);
         if (matchResult.matched) {
           correctionCue = matchResult.matchedTerms[0] ?? null;
-          // Record hit for all matched terms (hitCount tracking for FPR analysis)
           learner.recordHits(matchResult.matchedTerms);
-          // Record TP only for high-confidence matches (confidence ≥ 0.5)
+          // TP for high-confidence; flush hitCount for low-confidence
           if (correctionCue && matchResult.confidence >= 0.5) {
             learner.recordTruePositive(correctionCue);
+          } else {
+            learner.flush();
           }
         }
       } catch {
