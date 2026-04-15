@@ -295,6 +295,9 @@ export class EventLog {
 
   private startFlushTimer(): void {
     this.flushTimer = setInterval(() => this.flush(), this.flushIntervalMs);
+    // Don't keep the process alive just for this timer
+    // This allows tests and CLI to exit without waiting for flush
+    this.flushTimer.unref();
   }
 
   flush(): void {
