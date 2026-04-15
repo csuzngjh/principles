@@ -1,94 +1,88 @@
-# Requirements: v1.16 Trinity Training Trajectory Quality Enhancement
+# Requirements: v1.19 Tech Debt Remediation
 
-**Defined:** 2026-04-12
-**Core Value:** AI agents improve their own behavior through a structured evolution loop. pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> internalization
+**Milestone:** v1.19 Tech Debt Remediation
+**Date:** 2026-04-15
+**Status:** Draft
 
-## v1 Requirements
+---
 
-Requirements for v1.16 milestone. Each maps to roadmap phases.
+## v1.19 Scope
 
-### Dreamer Candidate Diversity
+### Quick Wins (Phase 0)
 
-- [ ] **DIVER-01**: Dreamer prompt includes strategic perspective requirements (conservative_fix / structural_improvement / paradigm_shift) with explicit anti-pattern warnings
-- [ ] **DIVER-02**: DreamerCandidate interface gains optional `riskLevel` ("low"|"medium"|"high") and `strategicPerspective` fields for backward-compatible schema evolution
-- [ ] **DIVER-03**: Post-generation `validateCandidateDiversity()` checks risk level diversity (Set.size >= 2) and keyword overlap similarity (reject at > 0.8)
-- [ ] **DIVER-04**: Diversity validation failures are logged as telemetry warnings with `diversityCheckPassed: false`, not hard gates — pipeline continues with best available candidate
+- [ ] **QW-01**: Replace busy-wait spin loop in `src/utils/io.ts` with `setTimeout`-based delay for Windows EPERM/EBUSY retry
+- [ ] **QW-02**: Add JSON structure validation before `JSON.parse()` on queue failure event payload
+- [ ] **QW-03**: Replace string comparison with constant-time comparison (`crypto.timingSafeEqual`) for Bearer token auth in HTTP route
 
-### Runtime Reasoning Derivation
+### Type Safety (Phase 1-3)
 
-- [ ] **DERIV-01**: `deriveReasoningChain()` extracts thinking content (from `<thinking>` tags), uncertainty markers (3 regex patterns), and confidence signal (high/medium/low) from assistant turns
-- [ ] **DERIV-02**: `deriveDecisionPoints()` extracts before-context (last 500 chars), after-reflection (first 300 chars on failure), and confidence delta per tool call
-- [ ] **DERIV-03**: `deriveContextualFactors()` computes fileStructureKnown, errorHistoryPresent, userGuidanceAvailable, and timePressure from existing snapshot data
-- [ ] **DERIV-04**: Derived reasoning signals are injected into Dreamer prompt builder (reasoning chain + contextual factors) and Scribe prompt builder (decision points)
+- [ ] **TYPE-01**: Define `src/types/queue.ts` with branded types for `QueueItemId`, `WorkflowId`, `SessionKey`
+- [ ] **TYPE-02**: Define `src/types/event-payload.ts` with discriminated union types for dynamic event payloads (replacing `as any` on event payloads)
+- [ ] **TYPE-03**: Replace `as any` casts in `src/hooks/prompt.ts` with proper type predicates
+- [ ] **TYPE-04**: Replace `as any` casts in `src/hooks/subagent.ts` with module augmentation
+- [ ] **TYPE-05**: Audit and replace `as any` casts across all 6 files (prompt.ts, subagent.ts, evolution-worker.ts, promote-impl.ts, rollback.ts, pain.ts)
 
-### Philosopher Multi-Dimension Evaluation
+### Queue Migration Tests (Phase 4)
 
-- [ ] **PHILO-01**: Philosopher prompt evaluates candidates across 6 dimensions with calibrated weights: Principle Alignment (0.20), Specificity (0.15), Actionability (0.15), Executability (0.15), Safety Impact (0.20), UX Impact (0.15)
-- [ ] **PHILO-02**: Philosopher output includes risk assessment per candidate: falsePositiveEstimate (0-1), implementationComplexity (low/medium/high), breakingChangeRisk (boolean)
-- [ ] **PHILO-03**: New PhilosopherJudgment fields (scores, risks) are optional — existing tournament scoring in nocturnal-candidate-scoring.ts continues unchanged
+- [ ] **QTEST-01**: Add integration tests for `migrateToV2` with `legacy-queue-v1.json` fixture
+- [ ] **QTEST-02**: Add unit tests for `loadEvolutionQueue` / `saveEvolutionQueue` with fake timers (ViTest `vi.useFakeTimers()`)
+- [ ] **QTEST-03**: Add tests for deduplication logic (`purgeStaleFailedTasks`, `hasRecentDuplicateTask`)
+- [ ] **QTEST-04**: Add concurrency tests for `asyncLockQueues` — clear Map state between tests, use `Promise.all` for race detection
+- [ ] **QTEST-05**: Add snapshot tests for queue migration state transitions
 
-### Scribe Contrastive Analysis
+### God Class Split (Phase 5)
 
-- [ ] **SCRIBE-01**: Scribe generates rejectedAnalysis with whyRejected (mental model that led to mistake), warningSignals (observable caution triggers), correctiveThinking (correct reasoning path)
-- [ ] **SCRIBE-02**: Scribe generates chosenJustification with whyChosen (embodied principle), keyInsights (1-3 transferable insights), limitations (when approach doesn't apply)
-- [ ] **SCRIBE-03**: Scribe generates contrastiveAnalysis with criticalDifference (ONE key insight), decisionTrigger ("When X, do Y" pattern), preventionStrategy (systematic avoidance)
-- [ ] **SCRIBE-04**: ContrastiveAnalysis is optional on TrinityDraftArtifact — pre-enhancement artifacts export unchanged, backward compatible
+- [ ] **SPLIT-01**: Extract `queue-migration.ts` from `evolution-worker.ts` (most isolated, smallest boundary)
+- [ ] **SPLIT-02**: Extract `workflow-watchdog.ts` — well-bounded health monitoring concern
+- [ ] **SPLIT-03**: Extract `queue-io.ts` — file I/O for queue persistence, encapsulate all queue writes
+- [ ] **SPLIT-04**: Add `withQueueLock()` RAII-style guard to prevent lock-leak bugs
+- [ ] **SPLIT-05**: Extract `sleep-cycle.ts` — orchestrator for enqueue/keyword-optimization tasks
+- [ ] **SPLIT-06**: Keep `evolution-worker.ts` as permanent facade/re-export layer (stable import point)
+- [ ] **SPLIT-07**: Defer `nocturnal-trinity.ts` split to future milestone (internally cleaner than evolution-worker.ts)
 
-## v2 Requirements
+### Known Bugs Fix (Cross-cutting)
 
-Deferred to future milestone. Tracked but not in current roadmap.
+- [ ] **BUG-01**: Fix #185 — ensure watchdog marks stale workflows as `terminal_error` after 2x TTL, add test for silent subagent failure path
+- [ ] **BUG-02**: Fix #188 — add gateway-safe fallback for child session cleanup
+- [ ] **BUG-03**: Verify #214/#219 timeout recovery logic still works after queue split
 
-### ORPO Export Integration
+### Infrastructure (Cross-cutting)
 
-- **SCRIBE-05**: ORPO export incorporates contrastive analysis into prompt (decisionTrigger), chosen (keyInsights), rejected (warningSignals), and rationale (criticalDifference) fields
-- **SCRIBE-06**: ORPO export validates contrastive analysis completeness before enrichment, falls back to base narrative gracefully
+- [ ] **INFRA-01**: Pre-split inventory — document all module-level mutable state in `evolution-worker.ts`, draw import graph before splitting
+- [ ] **INFRA-02**: Add `complexity_max: 15` and `max_file_lines: 500` to eslint config as debt prevention gates
+- [ ] **INFRA-03**: Evaluate `node:sqlite` replacement for `better-sqlite3` (only if Node 22+ is targeted — defer otherwise)
 
-### Advanced Features
-
-- **EXEC-01**: Execution feasibility validation — simulate whether betterDecision would prevent the observed error
-- **HIST-01**: Historical case retrieval — inject similar past artifacts into Dreamer prompt for pattern-based learning
-
-## Out of Scope
-
-| Feature | Reason |
-|---------|--------|
-| Snapshot schema changes | Design decision: runtime derivation preserves backward compatibility |
-| Nocturnal service orchestration changes | Deriver called from Trinity stage builders, not service layer |
-| Arbiter validation rule changes | New fields are optional; arbiter validates existing fields unchanged |
-| Stub implementation changes | New fields only used in real adapter path |
-| ORPO export integration (this milestone) | Deferred to v1.17 after contrastive analysis quality is validated |
-| Execution feasibility validation | P2 — deferred until Phase A/B results validated |
-| Historical case retrieval | P2 — deferred until Phase A/B results validated |
-| LLM prompt A/B testing framework | Valuable but not required for initial implementation |
-| Human feedback loop for artifacts | Valuable but orthogonal to pipeline quality |
+---
 
 ## Traceability
 
-Which phases cover which requirements. Updated during roadmap creation.
-
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DIVER-01 | Phase 35 | Pending |
-| DIVER-02 | Phase 35 | Pending |
-| DIVER-03 | Phase 35 | Pending |
-| DIVER-04 | Phase 35 | Pending |
-| DERIV-01 | Phase 34 | Pending |
-| DERIV-02 | Phase 34 | Pending |
-| DERIV-03 | Phase 34 | Pending |
-| DERIV-04 | Phase 35 | Pending |
-| PHILO-01 | Phase 36 | Pending |
-| PHILO-02 | Phase 36 | Pending |
-| PHILO-03 | Phase 36 | Pending |
-| SCRIBE-01 | Phase 37 | Pending |
-| SCRIBE-02 | Phase 37 | Pending |
-| SCRIBE-03 | Phase 37 | Pending |
-| SCRIBE-04 | Phase 37 | Pending |
-
-**Coverage:**
-- v1 requirements: 15 total
-- Mapped to phases: 15
-- Unmapped: 0
+| QW-01..03 | Phase 0 (Quick Wins) | Not started |
+| TYPE-01..05 | Phase 1-3 (Type Safety) | Not started |
+| QTEST-01..05 | Phase 4 (Queue Tests) | Not started |
+| SPLIT-01..07 | Phase 5 (God Class Split) | Not started |
+| BUG-01..03 | Cross-cutting | Not started |
+| INFRA-01..03 | Cross-cutting | Not started |
 
 ---
-*Requirements defined: 2026-04-12*
-*Last updated: 2026-04-12 after roadmap creation*
+
+## Out of Scope
+
+- nocturnal-trinity.ts split in this milestone (lower priority, internally cleaner)
+- node:sqlite migration (defer unless Node 22+ target confirmed)
+- New UI/dashboard work
+- LoRA or full fine-tune internalization
+- New feature surface areas
+
+## Dependencies
+
+- QTEST-01..05 require SPLIT-01..03 (queue modules must be extractable first)
+- TYPE-01..02 must complete before SPLIT-01..07 (type boundaries needed for safe extraction)
+- BUG-01..03 should be verified after SPLIT-01..07 (queue split may affect workflow watchdog)
+
+## Assumptions
+
+- Project targets Node.js version that supports `crypto.timingSafeEqual` (all modern Node.js)
+- Vitest with `pool: 'threads'` already configured for better-sqlite3 compatibility
+- Node version target to be confirmed before INFRA-03 evaluation
