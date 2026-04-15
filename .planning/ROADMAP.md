@@ -8,13 +8,15 @@
 - [x] **v1.14** - Evolution Worker Decomposition & Contract Hardening (Phases 24-29, baseline complete on branch `fix/bugs-231-228` / PR #245)
 - [x] **v1.15** - Runtime & Truth Contract Hardening (Phases 30-33, shipped 2026-04-12)
 - [x] **v1.16** - Trinity Training Trajectory Quality Enhancement (Phases 34-37, shipped 2026-04-13)
-- [ ] **v1.17** - Keyword Learning Engine (Phases 38-41, current)
+- [x] **v1.17** - Keyword Learning Engine (Phases 38-41, shipped 2026-04-14)
+- [x] **v1.18** - Nocturnal State Safety & Recovery (shipped 2026-04-14)
+- [ ] **v1.19** - Tech Debt Remediation (Phases 42-46, current)
 - [ ] **v1.10** - Thinking Models page optimization (deferred)
 
 ## Phases
 
 **Phase Numbering:**
-- Integer phases (38-41): v1.17 Keyword Learning Engine (current)
+- Integer phases (42-46): v1.19 Tech Debt Remediation (current)
 - Decimal phases: Urgent insertions (marked with INSERTED)
 
 <details>
@@ -37,86 +39,52 @@
 
 </details>
 
-### v1.17 Keyword Learning Engine (In Progress)
+### v1.17 Keyword Learning Engine (Shipped 2026-04-14)
 
 **Milestone Goal:** Create dynamic keyword learning mechanism for correction cue detection, reusing empathy engine abstraction patterns.
 
 - [x] **Phase 38: Foundation** -- Seed store, atomic persistence, cache, integration entry point (completed 2026-04-14)
 - [x] **Phase 39: Learning Loop** -- FPR tracking, 6-hour optimization trigger, throttle, weight decay (completed 2026-04-14)
-- [ ] **Phase 40: LLM Discovery** -- LLM optimizer adds/updates/removes keywords, trajectory flag
-- [ ] **Phase 41: Testing** -- Integration test, atomic write recovery test
+- [x] **Phase 40: LLM Discovery** -- LLM optimizer adds/updates/removes keywords, trajectory flag (completed 2026-04-14)
+- [x] **Phase 41: Testing** -- Integration test, atomic write recovery test (completed 2026-04-14)
 
-## Phase Details
+### v1.19 Tech Debt Remediation (In Progress)
 
-### Phase 38: Foundation
-**Goal**: Keyword store persists to disk with atomic writes, seed keywords load on startup, cache stays consistent, and CorrectionCueLearner replaces detectCorrectionCue.
-**Depends on**: Nothing (first phase)
-**Requirements**: CORR-01, CORR-03, CORR-04, CORR-05, CORR-11
-**Success Criteria** (what must be TRUE):
-  1. Seed 15 correction keywords from detectCorrectionCue are persisted to `correction_keywords.json` on first load
-  2. Keyword store loads from disk on startup with in-memory cache fully populated
-  3. Cache reflects disk state after every write (cache invalidation confirmed on disk write)
-  4. Store rejects keyword additions beyond 200 terms maximum
-  5. Calling `CorrectionCueLearner.match()` in prompt.ts returns results equivalent to original `detectCorrectionCue()`
-**Plans**: TBD
+**Milestone Goal:** 逐步清理技术债：拆分 god classes、修复 type safety、添加 queue integration tests、强化安全
 
-### Phase 39: Learning Loop
-**Goal**: Match calls track FPR feedback separately, optimization triggers time-based every 6 hours, throttle enforces max 4 calls per day, and confirmed false positives decay keyword weight.
-**Depends on**: Phase 38
-**Requirements**: CORR-02, CORR-06, CORR-07, CORR-08, CORR-10
-**Success Criteria** (what must be TRUE):
-  1. `match()` returns match result with confidence score derived from keyword weights
-  2. Each keyword tracks `hitCount`, `truePositiveCount`, and `falsePositiveCount` as separate counters
-  3. LLM optimization subagent workflow triggers every 6 hours based on wall-clock time (not turn-based)
-  4. Optimization calls are throttled to maximum 4 per day across all triggers
-  5. Keyword weight decreases when confirmed false positive is recorded
-**Plans**: TBD
-
-### Phase 40: LLM Discovery
-**Goal**: LLM optimizer can mutate keyword set based on match history and FPR, and trajectory recording includes correction detection flag.
-**Depends on**: Phase 39
-**Requirements**: CORR-09, CORR-12
-**Success Criteria** (what must be TRUE):
-  1. LLM optimizer receives match history and FPR statistics and returns keyword mutations (add/update/remove)
-  2. Mutated keyword set is persisted and immediately available for matching
-  3. Trajectory records include `correctionDetected: boolean` flag from keyword matcher
-**Plans**: TBD
-
-### Phase 41: Testing
-**Goal**: Full integration cycle verifiable, atomic write recovery verified.
-**Depends on**: Phase 40
-**Requirements**: CORR-13, CORR-14
-**Success Criteria** (what must be TRUE):
-  1. Integration test runs complete cycle: matching -> feedback tracking -> optimization trigger -> persistence -> reload
-  2. Atomic write recovery test kills process mid-save, verifies `correction_keywords.json` is recoverable via temp-file rename
-  3. All 14 v1 requirements are verifiable end-to-end
-**Plans**: TBD
+- [ ] **Phase 42: Quick Wins** -- busy-wait loop fix, JSON validation, constant-time token compare
+- [ ] **Phase 43: Type Safety** -- branded types, discriminated unions, replace `as any` casts
+- [ ] **Phase 44: Pre-Split Inventory** -- document module-level mutable state, draw import graph
+- [ ] **Phase 45: Queue Tests** -- migration tests, fake-timers unit tests, concurrency tests
+- [ ] **Phase 46: God Class Split** -- extract queue-migration, workflow-watchdog, queue-io, sleep-cycle modules
 
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 38 -> 39 -> 40 -> 41
+Phases execute in numeric order: 42 -> 43 -> 44 -> 45 -> 46
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 38. Foundation | v1.17 | 2/2 | Complete    | 2026-04-14 |
-| 39. Learning Loop | v1.17 | 2/2 | Complete    | 2026-04-14 |
-| 40. LLM Discovery | v1.17 | 0/N | Not started | - |
-| 41. Testing | v1.17 | 0/N | Not started | - |
+| 42. Quick Wins | v1.19 | 0/N | Not started | - |
+| 43. Type Safety | v1.19 | 0/N | Not started | - |
+| 44. Pre-Split Inventory | v1.19 | 0/N | Not started | - |
+| 45. Queue Tests | v1.19 | 0/N | Not started | - |
+| 46. God Class Split | v1.19 | 0/N | Not started | - |
 
 ## Coverage
 
-**v1.17 Requirements:** 14 total (CORR-01 through CORR-14)
+**v1.19 Requirements:** 23 total (QW-01..03, TYPE-01..05, QTEST-01..05, SPLIT-01..07, BUG-01..03, INFRA-01..03)
 
 | Phase | Requirements |
 |-------|--------------|
-| Phase 38: Foundation | CORR-01, CORR-03, CORR-04, CORR-05, CORR-11 |
-| Phase 39: Learning Loop | CORR-02, CORR-06, CORR-07, CORR-08, CORR-10 |
-| Phase 40: LLM Discovery | CORR-09, CORR-12 |
-| Phase 41: Testing | CORR-13, CORR-14 |
+| Phase 42: Quick Wins | QW-01, QW-02, QW-03 |
+| Phase 43: Type Safety | TYPE-01, TYPE-02, TYPE-03, TYPE-04, TYPE-05 |
+| Phase 44: Pre-Split Inventory | INFRA-01, INFRA-02 |
+| Phase 45: Queue Tests | QTEST-01, QTEST-02, QTEST-03, QTEST-04, QTEST-05 |
+| Phase 46: God Class Split | SPLIT-01, SPLIT-02, SPLIT-03, SPLIT-04, SPLIT-05, SPLIT-06, SPLIT-07, BUG-01, BUG-02, BUG-03 |
 
-**Coverage:** 14/14 requirements mapped
+**Coverage:** 23/23 requirements mapped
 
 ---
 
-*Last updated: 2026-04-14*
+*Last updated: 2026-04-15*
