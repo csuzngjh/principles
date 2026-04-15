@@ -52,7 +52,7 @@
 
 **Milestone Goal:** 逐步清理技术债：拆分 god classes、修复 type safety、添加 queue integration tests、强化安全
 
-- [ ] **Phase 42: Quick Wins** -- busy-wait loop fix, JSON validation, constant-time token compare
+- [x] **Phase 42: Quick Wins** -- busy-wait loop fix, JSON validation, constant-time token compare (completed 2026-04-15)
 - [x] **Phase 43: Type Safety** -- branded types, discriminated unions, replace `as any` casts (completed 2026-04-15)
 - [ ] **Phase 44: Pre-Split Inventory** -- document module-level mutable state, draw import graph
 - [ ] **Phase 45: Queue Tests** -- migration tests, fake-timers unit tests, concurrency tests
@@ -65,9 +65,9 @@ Phases execute in numeric order: 42 -> 43 -> 44 -> 45 -> 46
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 42. Quick Wins | v1.19 | 1/1 | In progress | - |
+| 42. Quick Wins | v1.19 | 1/1 | Complete    | 2026-04-15 |
 | 43. Type Safety | v1.19 | 2/2 | Complete    | 2026-04-15 |
-| 44. Pre-Split Inventory | v1.19 | 0/N | Not started | - |
+| 44. Pre-Split Inventory | v1.19 | 2/2 | Ready to execute | - |
 | 45. Queue Tests | v1.19 | 0/N | Not started | - |
 | 46. God Class Split | v1.19 | 0/N | Not started | - |
 
@@ -82,7 +82,7 @@ Phases execute in numeric order: 42 -> 43 -> 44 -> 45 -> 46
   2. Queue event payload `JSON.parse()` guarded by structure validation checking required fields (`type`, `workspaceId`) before returning parsed object
   3. `principles-console-route.ts` Bearer token comparison uses `crypto.timingSafeEqual` with `Buffer` comparison
 **Plans:**
-- [x] `42-01-PLAN.md` — QW-01 busy-wait fix, QW-02 JSON validation, QW-03 timing-safe compare
+1/1 plans complete
 
 ### Phase 44: Pre-Split Inventory
 **Goal**: Document module-level mutable state and draw import graph before Phase 46 god class split — pure analysis, no implementation changes
@@ -92,6 +92,9 @@ Phases execute in numeric order: 42 -> 43 -> 44 -> 45 -> 46
   1. Markdown tables list all module-level mutable state (file, export name, type, initialization, mutation pattern)
   2. Mermaid flowchart shows file-level import dependencies for god class candidates
   3. ESLint config has `complexity_max: 15` and `max_file_lines: 500` applied to `packages/openclaw-plugin/src/`
+**Plans:**
+- [ ] 44-01-PLAN.md — Add ESLint debt gates (complexity_max: 15, max_file_lines: 500)
+- [ ] 44-02-PLAN.md — Create mutable state inventory and Mermaid import graph
 
 ### Phase 45: Queue Tests
 **Goal**: Add integration and unit tests for queue enqueue/dequeue/migration paths — catch bugs in queue logic before they reach production
