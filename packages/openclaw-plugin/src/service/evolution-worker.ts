@@ -1939,8 +1939,8 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
             }
 
             // Safe to return — pain_diagnosis was already processed above.
+            // Note: keyword_optimization tasks are handled below (both branches can execute).
             lockReleased = true;
-            return;
         }
 
         // ── keyword_optimization task processing ──────────────────────────────

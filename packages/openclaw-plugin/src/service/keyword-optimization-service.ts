@@ -40,11 +40,20 @@ export class KeywordOptimizationService {
       try {
         switch (update.action) {
           case 'add': {
+            const normalizedTerm = term.trim().toLowerCase();
+            // Check for existing normalized term to avoid duplicates
+            const existing = learner.getStore().keywords.find(
+              k => k.term.toLowerCase() === normalizedTerm
+            );
+            if (existing) {
+              this.logger?.info?.(`[KeywordOptimizationService] ADD skipped: "${term}" already exists as "${existing.term}"`);
+              break;
+            }
             const weight = update.weight !== undefined
               ? Math.max(0.1, Math.min(0.9, update.weight))
               : 0.5;
-            learner.add({ term, weight, source: 'llm' });
-            this.logger?.info?.(`[KeywordOptimizationService] ADD term="${term}" weight=${weight}`);
+            learner.add({ term: normalizedTerm, weight, source: 'llm' });
+            this.logger?.info?.(`[KeywordOptimizationService] ADD term="${normalizedTerm}" weight=${weight}`);
             break;
           }
           case 'update': {
@@ -84,9 +93,12 @@ export class KeywordOptimizationService {
           if (turn.correctionDetected) {
             history.push({
               sessionId,
-              timestamp: turn.createdAt,
+              timestamp: turn.createdAt ?? new Date().toISOString(),
               term: turn.correctionCue ?? 'unknown',
-              userMessage: turn.correctionCue ?? '',
+              // Note: rawText is not available from listUserTurnsForSession (privacy: no raw text stored).
+              // userMessage left empty — trajectory section is used for FPR trend analysis,
+              // not for understanding user intent (correctionCue term is sufficient).
+              userMessage: '',
             });
           }
           if (history.length >= 50) break; // Cap at 50 events
@@ -103,23 +115,18 @@ export class KeywordOptimizationService {
 
   // ── Singleton factory ───────────────────────────────────────────────────
 
-  private static _instance: KeywordOptimizationService | null = null;
-  private static _lastStateDir: string | null = null;
-  private static _lastWorkspaceDir: string | null = null;
+  private static _instances = new Map<string, KeywordOptimizationService>();
 
   static get(stateDir: string, workspaceDir: string, logger: PluginLogger): KeywordOptimizationService {
-    if (!KeywordOptimizationService._instance || KeywordOptimizationService._lastStateDir !== stateDir || KeywordOptimizationService._lastWorkspaceDir !== workspaceDir) {
-      KeywordOptimizationService._instance = new KeywordOptimizationService(stateDir, workspaceDir, logger);
-      KeywordOptimizationService._lastStateDir = stateDir;
-      KeywordOptimizationService._lastWorkspaceDir = workspaceDir;
+    const key = `${stateDir}::${workspaceDir}`;
+    if (!KeywordOptimizationService._instances.has(key)) {
+      KeywordOptimizationService._instances.set(key, new KeywordOptimizationService(stateDir, workspaceDir, logger));
     }
-    return KeywordOptimizationService._instance;
+    return KeywordOptimizationService._instances.get(key)!;
   }
 
   static reset(): void {
-    KeywordOptimizationService._instance = null;
-    KeywordOptimizationService._lastStateDir = null;
-    KeywordOptimizationService._lastWorkspaceDir = null;
+    KeywordOptimizationService._instances.clear();
   }
 }
 
