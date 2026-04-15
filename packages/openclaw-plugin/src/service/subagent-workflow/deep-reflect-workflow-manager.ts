@@ -98,7 +98,7 @@ export const deepReflectWorkflowSpec: SubagentWorkflowSpec<DeepReflectResult> = 
     workflowType: 'deep-reflect',
     transport: 'runtime_direct',
     timeoutMs: 60_000,
-    ttlMs: 10 * 60 * 1000,
+    ttlMs: DEEP_REFLECT_TTL_MS,
     shouldDeleteSessionAfterFinalize: true,
 
     buildPrompt(taskInput: unknown, ctx: DeepReflectBuildPromptContext): string {
