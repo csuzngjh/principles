@@ -25,6 +25,7 @@ function copyRecursive(src, dest) {
 
 async function bundlePlugin() {
   try {
+    // 1. Build the main bundle for OpenClaw
     await build({
       entryPoints: ['src/index.ts'],
       outfile: 'dist/bundle.js',
@@ -44,7 +45,35 @@ async function bundlePlugin() {
       metafile: true,
     });
 
-    console.log('Bundle created: dist/bundle.js');
+    console.log('Main bundle created: dist/bundle.js');
+
+    // 2. Build core tools for CLI usage (bootstrap-rules, etc)
+    // We keep these separate and un-minified for easier debugging and CLI importing
+    await build({
+      entryPoints: {
+        'core/bootstrap-rules': 'src/core/bootstrap-rules.ts',
+        'core/principle-tree-ledger': 'src/core/principle-tree-ledger.ts',
+        'core/principle-training-state': 'src/core/principle-training-state.ts',
+        'core/principle-compiler/index': 'src/core/principle-compiler/index.ts',
+        'core/trajectory/index': 'src/core/trajectory.ts',
+      },
+      outdir: 'dist',
+      bundle: true,
+      platform: 'node',
+      target: 'node20',
+      format: 'esm',
+      outbase: 'src',
+      external: [
+        'openclaw',
+        '@openclaw/sdk',
+        '@openclaw/plugin-kit',
+        'better-sqlite3',
+      ],
+      sourcemap: false,
+      minify: false,
+    });
+
+    console.log('Core CLI tools built in dist/core/');
 
     const staticFiles = ['templates', 'openclaw.plugin.json'];
     const distDir = 'dist';
@@ -65,9 +94,9 @@ async function bundlePlugin() {
       console.log(`Copied: ${file} -> dist/${file}`);
     }
 
-    console.log('\nPlugin bundle ready for distribution.');
+    console.log('\nPlugin build ready for distribution.');
   } catch (error) {
-    console.error('Bundle failed:', error);
+    console.error('Build failed:', error);
     process.exit(1);
   }
 }

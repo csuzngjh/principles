@@ -319,25 +319,15 @@ function installDependencies() {
 
 /**
  * Build the plugin.
- * Always runs build:production to ensure dist/bundle.js (the actual shipped artifact)
- * is always fresh. We no longer compare timestamps because:
- *   1. tsc alone updates index.js without updating bundle.js
- *   2. Comparing index.js vs src files falsely claims "up to date"
- *   3. The cost of a extra ~10s build is far cheaper than shipping stale bundles
- *
- * Use --skip-build only in CI where you know dist/ is already fresh.
  */
 function buildPlugin() {
     console.log('\n🔨 Building plugin (esbuild only — bypassing tsc which may fail on unrelated files)...');
 
     try {
-        // Run esbuild directly — it compiles TS on the fly and doesn't care about
-        // tsc errors in unrelated files (e.g. subagent-workflow type errors).
         execSync('node esbuild.config.js --production', {
             cwd: SOURCE_DIR,
             stdio: 'inherit'
         });
-        // Copy templates and manifest
         execSync('node scripts/build-web.mjs --production', {
             cwd: SOURCE_DIR,
             stdio: 'inherit'
@@ -348,13 +338,11 @@ function buildPlugin() {
         process.exit(1);
     }
 
-    // Post-build verification: ensure critical symbols made it into bundle.js
     verifyBundleContents();
 }
 
 /**
  * Verify the built bundle contains all critical symbols.
- * This catches build failures where tsc succeeds but esbuild/bundling silently drops code.
  */
 function verifyBundleContents() {
     const bundleJs = join(SOURCE_DIR, 'dist', 'bundle.js');
@@ -364,10 +352,6 @@ function verifyBundleContents() {
     }
 
     const content = readFileSync(bundleJs, 'utf-8');
-
-    // Structural markers that survive minification (module exports, log prefixes).
-    // These are more stable than class/function names which get mangled.
-    // Add/remove markers as the codebase evolves — keep this list minimal.
     const requiredSymbols = [
         { name: 'EvolutionWorkerService', reason: 'main plugin service export' },
         { name: 'checkPainFlag',          reason: 'pain flag detection' },
@@ -385,26 +369,20 @@ function verifyBundleContents() {
     if (missing.length > 0) {
         console.warn('\n⚠️  Bundle verification warning — symbols not found (may be minified):');
         missing.forEach(m => console.warn(m));
-        console.warn('  This is a warning, not an error. Minification may have renamed these.');
-        console.warn('  If the plugin actually fails to load, check for build issues.');
     }
 
     console.log('✅ Bundle verification passed — all critical symbols present');
-
-    // Write build fingerprint to dist/openclaw.plugin.json
     writeBuildFingerprint();
 }
 
 /**
- * Write a build fingerprint (git SHA + bundle MD5) into dist/openclaw.plugin.json.
- * This allows post-install verification to detect stale installations.
+ * Write a build fingerprint.
  */
 function writeBuildFingerprint() {
     const bundleJs = join(SOURCE_DIR, 'dist', 'bundle.js');
     const manifestSrc = join(SOURCE_DIR, 'openclaw.plugin.json');
     const manifestDist = join(SOURCE_DIR, 'dist', 'openclaw.plugin.json');
 
-    // Get git SHA of current commit
     let gitSha = 'unknown';
     try {
         gitSha = execSync('git rev-parse HEAD', {
@@ -413,19 +391,17 @@ function writeBuildFingerprint() {
             timeout: 10000,
         }).trim().slice(0, 12);
     } catch {
-        console.warn('⚠️  Could not get git SHA, fingerprint will be incomplete');
+        console.warn('⚠️  Could not get git SHA');
     }
 
-    // Compute MD5 of bundle.js
     let bundleMd5 = 'unknown';
     try {
         const bundleContent = readFileSyncRaw(bundleJs);
         bundleMd5 = createHash('md5').update(bundleContent).digest('hex');
     } catch {
-        console.warn('⚠️  Could not compute bundle MD5, fingerprint will be incomplete');
+        console.warn('⚠️  Could not compute bundle MD5');
     }
 
-    // Read manifest
     let manifest;
     try {
         manifest = JSON.parse(readFileSync(manifestDist, 'utf-8'));
@@ -433,40 +409,34 @@ function writeBuildFingerprint() {
         try {
             manifest = JSON.parse(readFileSync(manifestSrc, 'utf-8'));
         } catch {
-            console.warn('⚠️  Could not read openclaw.plugin.json, skipping fingerprint');
+            console.warn('⚠️  Could not read openclaw.plugin.json');
             return;
         }
     }
 
-    // Attach fingerprint
     manifest.buildFingerprint = {
         gitSha,
         bundleMd5,
         builtAt: new Date().toISOString(),
     };
 
-    // Write back to dist/openclaw.plugin.json (this is what gets synced)
     try {
         mkdirSync(join(SOURCE_DIR, 'dist'), { recursive: true });
         writeFileAtomic(manifestDist, JSON.stringify(manifest, null, 2) + '\n');
         console.log(`✅ Build fingerprint: git=${gitSha} bundleMd5=${bundleMd5}`);
     } catch (err) {
-        console.warn(`⚠️  Could not write fingerprint to dist/openclaw.plugin.json: ${err.message}`);
+        console.warn(`⚠️  Could not write fingerprint: ${err.message}`);
     }
 
-    // Also update the root openclaw.plugin.json so that both synced files have the fingerprint.
-    // This ensures fingerprint verification works whether OpenClaw loads from dist/ or root manifest.
     try {
         const rootManifest = JSON.parse(readFileSync(manifestSrc, 'utf-8'));
         rootManifest.buildFingerprint = manifest.buildFingerprint;
         writeFileAtomic(manifestSrc, JSON.stringify(rootManifest, null, 2) + '\n');
-    } catch {
-        // Non-fatal — root manifest may be identical in content
-    }
+    } catch { /* ignore */ }
 }
 
 /**
- * Atomic file write (write to temp then rename, to avoid partial writes).
+ * Atomic file write.
  */
 function writeFileAtomic(filePath, content) {
     const tmp = filePath + '.tmp.' + Date.now();
@@ -477,190 +447,93 @@ function writeFileAtomic(filePath, content) {
 }
 
 /**
- * Verify the installed plugin matches the source fingerprint.
- * If fingerprint in installed manifest differs from source manifest → abort.
- * This catches the case where a previous sync synced a stale bundle.
+ * Verify installed fingerprint.
  */
 function verifyInstalledFingerprint() {
-    // Read from dist/ manifests because:
-    // - dist/openclaw.plugin.json has the buildFingerprint written by writeBuildFingerprint()
-    // - Root openclaw.plugin.json is copied from SOURCE_DIR (no fingerprint, not updated by writeBuildFingerprint)
     const sourceManifest = join(SOURCE_DIR, 'dist', 'openclaw.plugin.json');
     const installedManifest = join(INSTALL_DIR, 'dist', 'openclaw.plugin.json');
 
     if (!existsSync(installedManifest)) {
-        console.error('\n❌ Installed manifest not found — sync may have failed.');
+        console.error('\n❌ Installed manifest not found.');
         process.exit(1);
     }
 
-    let sourceFp, installedFp;
     try {
         const sm = JSON.parse(readFileSync(sourceManifest, 'utf-8'));
         const im = JSON.parse(readFileSync(installedManifest, 'utf-8'));
-        sourceFp = sm.buildFingerprint;
-        installedFp = im.buildFingerprint;
+        const sourceFp = sm.buildFingerprint;
+        const installedFp = im.buildFingerprint;
+
+        if (sourceFp && installedFp) {
+            const gitMismatch = sourceFp.gitSha !== installedFp.gitSha;
+            const md5Mismatch = sourceFp.bundleMd5 !== installedFp.bundleMd5;
+
+            if (gitMismatch || md5Mismatch) {
+                console.error('\n❌ INSTALLED PLUGIN IS STALE — FINGERPRINT MISMATCH');
+                process.exit(1);
+            }
+        }
     } catch {
-        // If we can't read/parse, skip verification
-        console.warn('⚠️  Could not read fingerprints, skipping fingerprint verification');
-        return;
+        console.warn('⚠️  Fingerprint verification skipped');
     }
 
-    if (!sourceFp || !installedFp) {
-        console.warn('⚠️  Missing fingerprint in one or both manifests, skipping verification.');
-        return;
-    }
-
-    const gitMismatch = sourceFp.gitSha !== installedFp.gitSha;
-    const md5Mismatch = sourceFp.bundleMd5 !== installedFp.bundleMd5;
-
-    if (gitMismatch || md5Mismatch) {
-        console.error('\n❌ INSTALLED PLUGIN IS STALE — FINGERPRINT MISMATCH');
-        console.error('   This means the installed plugin bundle does not match the current source build.');
-        if (gitMismatch) {
-            console.error(`   Source git SHA:    ${sourceFp.gitSha} (current)`);
-            console.error(`   Installed git SHA: ${installedFp.gitSha} (old)`);
-        }
-        if (md5Mismatch) {
-            console.error(`   Source bundle MD5:  ${sourceFp.bundleMd5} (current)`);
-            console.error(`   Installed bundle:  ${installedFp.bundleMd5} (old)`);
-        }
-        console.error('\n   → Run WITHOUT --skip-build to rebuild and reinstall:');
-        console.error(`     cd ${SOURCE_DIR} && node scripts/sync-plugin.mjs`);
-        process.exit(1);
-    }
-
-    console.log('✅ Installed fingerprint verified — matches current source build');
+    console.log('✅ Installed fingerprint verified');
 }
 
 /**
- * Verify build exists and bundle contains critical symbols.
- * Called when --skip-build is used (e.g., in CI with fresh dist/).
- * Still verifies critical symbols to catch any pre-existing build issues.
- */
-function verifyBuild() {
-    const distDir = join(SOURCE_DIR, 'dist');
-    const indexJs = join(distDir, 'index.js');
-    const bundleJs = join(distDir, 'bundle.js');
-
-    if (!existsSync(distDir)) {
-        console.error('❌ dist/ directory not found.');
-        console.error('   Run without --skip-build to build automatically.');
-        process.exit(1);
-    }
-
-    if (!existsSync(indexJs) && !existsSync(bundleJs)) {
-        console.error('❌ dist/index.js or dist/bundle.js not found.');
-        console.error('   Run without --skip-build to build automatically.');
-        process.exit(1);
-    }
-
-    // Verify critical symbols even when skipping build
-    // (catches stale dist from previous failed builds)
-    try {
-        verifyBundleContents();
-    } catch {
-        // verifyBundleContents already exits on failure
-    }
-
-    console.log('✅ Build verified');
-}
-
-/**
- * Remove existing installation directory (clean slate)
- * This ensures no stale files remain from old versions.
+ * Remove existing installation directory.
  */
 function cleanTargetDir(force) {
-    if (!existsSync(INSTALL_DIR)) {
-        return;
-    }
+    if (!existsSync(INSTALL_DIR)) return;
 
     if (!force) {
         const installedVersion = getVersion(INSTALL_DIR);
         if (installedVersion && installedVersion !== getVersion(SOURCE_DIR)) {
-            console.error(`\n❌ VERSION CONFLICT:`);
-            console.error(`   Installed: v${installedVersion}`);
-            console.error(`   Source:    v${getVersion(SOURCE_DIR)}`);
-            console.error(`   Run with --force to overwrite, or uninstall first.`);
+            console.error(`\n❌ VERSION CONFLICT: Installed v${installedVersion}, Source v${getVersion(SOURCE_DIR)}`);
             process.exit(1);
         }
     }
 
     console.log('\n🗑️  Removing existing installation...');
     rmSync(INSTALL_DIR, { recursive: true, force: true });
-    console.log(`   Removed: ${INSTALL_DIR}`);
 }
 
 /**
- * Ensure installation directory exists
+ * Ensure installation directory exists.
  */
 function ensureInstallDir() {
-    if (existsSync(INSTALL_DIR)) {
-        return;
-    }
-
-    console.log('\n📁 Creating installation directory...');
-
-    // Check if OpenClaw is installed
+    if (existsSync(INSTALL_DIR)) return;
     if (!existsSync(OPENCLAW_DIR)) {
         console.error(`❌ OpenClaw installation not found: ${OPENCLAW_DIR}`);
-        console.error('   Please install OpenClaw first.');
         process.exit(1);
     }
-
-    // Create extensions directory if needed
     const extensionsDir = join(OPENCLAW_DIR, 'extensions');
-    if (!existsSync(extensionsDir)) {
-        mkdirSync(extensionsDir, { recursive: true });
-    }
-
-    // Create plugin directory
+    if (!existsSync(extensionsDir)) mkdirSync(extensionsDir, { recursive: true });
     mkdirSync(INSTALL_DIR, { recursive: true });
-    console.log(`✅ Created: ${INSTALL_DIR}`);
 }
 
 /**
- * Sync skills from templates to installation directory
+ * Sync skills.
  */
 function syncSkills(lang) {
     const skillsSource = join(SOURCE_DIR, 'templates', 'langs', lang, 'skills');
     const skillsTarget = join(INSTALL_DIR, 'skills');
-
-    if (!existsSync(skillsSource)) {
-        console.log(`  ⚠️  Skills not found for language: ${lang}`);
-        return false;
-    }
-
-    // Remove existing skills
-    if (existsSync(skillsTarget)) {
-        rmSync(skillsTarget, { recursive: true, force: true });
-    }
-
-    // Copy skills
+    if (!existsSync(skillsSource)) return false;
+    if (existsSync(skillsTarget)) rmSync(skillsTarget, { recursive: true, force: true });
     cpSync(skillsSource, skillsTarget, { recursive: true });
-    console.log(`  📄 skills (from templates/langs/${lang}/skills)`);
+    console.log(`  📄 skills (from ${lang})`);
     return true;
 }
 
 /**
- * Sync a single item
+ * Sync a single item.
  */
 function syncItem(item) {
     const source = join(SOURCE_DIR, item);
     const target = join(INSTALL_DIR, item);
-
-    if (!existsSync(source)) {
-        console.log(`  ⚠️  Skipping ${item} (not found)`);
-        return;
-    }
-
+    if (!existsSync(source)) return;
     console.log(`  📄 ${item}`);
-
-    // Remove existing item in install directory
-    if (existsSync(target)) {
-        rmSync(target, { recursive: true, force: true });
-    }
-
-    // Copy item
+    if (existsSync(target)) rmSync(target, { recursive: true, force: true });
     try {
         cpSync(source, target, { recursive: true });
     } catch {
@@ -669,11 +542,10 @@ function syncItem(item) {
 }
 
 /**
- * Install production dependencies in target directory
+ * Install production dependencies in target.
  */
 function installTargetDependencies() {
     console.log('\n📦 Installing production dependencies in target...');
-
     try {
         execSync('npm install --production --no-audit --no-fund', {
             cwd: INSTALL_DIR,
@@ -681,84 +553,88 @@ function installTargetDependencies() {
         });
         console.log('✅ Dependencies installed');
     } catch (error) {
-        console.error('\n❌ FAILED to install production dependencies in target directory.');
-        console.error(`   ${error.message}`);
-        console.error('\n   Without these dependencies, the plugin will fail to load at runtime.');
-        console.error(`   Run manually: cd ${INSTALL_DIR} && npm install --production`);
+        console.error(`\n❌ npm install failed: ${error.message}`);
         process.exit(1);
     }
 }
 
 /**
- * Clean stale backup directories in extensions/
- * These are left behind from old sync runs and can confuse OpenClaw's
- * extension loader (it scans all directories by name).
+ * Clean stale backups.
  */
 function cleanStaleBackups() {
     const extensionsDir = join(OPENCLAW_DIR, 'extensions');
     if (!existsSync(extensionsDir)) return;
-
     const entries = readdirSync(extensionsDir);
-    const backups = entries.filter(e =>
-        e.startsWith('principles-disciple.backup') ||
-        e.startsWith('principles-disciple.old')
-    );
-
-    if (backups.length === 0) return;
-
-    console.log('\n🧹 Cleaning stale backup directories...');
+    const backups = entries.filter(e => e.startsWith('principles-disciple.backup') || e.startsWith('principles-disciple.old'));
     for (const backup of backups) {
-        const path = join(extensionsDir, backup);
-        rmSync(path, { recursive: true, force: true });
+        rmSync(join(extensionsDir, backup), { recursive: true, force: true });
         console.log(`   Removed: ${backup}`);
     }
 }
 
 /**
- * Restart OpenClaw Gateway via systemctl, with verification.
+ * Restart OpenClaw Gateway.
  */
 function restartGateway() {
     console.log('\n🔄 Restarting OpenClaw Gateway...');
     try {
-        // Try systemd first (most common deployment)
         try {
             execSync('systemctl --user is-active openclaw-gateway.service', { stdio: 'pipe' });
-            console.log('   Detected systemd service. Restarting via systemctl...');
+            console.log('   Restarting via systemctl...');
             execSync('systemctl --user restart openclaw-gateway.service', { stdio: 'inherit' });
             console.log('✅ Gateway restarted via systemctl.');
-            // Verify it started successfully
+            
+            console.log('   Waiting for Gateway to initialize and load PD plugin (8s)...');
             setTimeout(() => {
                 try {
                     const status = execSync('systemctl --user is-active openclaw-gateway.service', { encoding: 'utf-8' }).trim();
                     if (status === 'active') {
                         console.log('✅ Gateway is running.');
+                        const logs = execSync('journalctl --user -u openclaw-gateway.service --since "10 seconds ago"', { encoding: 'utf-8' });
+                        if (logs.includes('Principles Disciple Plugin registered')) {
+                            console.log('✅ SUCCESS: Principles Disciple plugin registered successfully!');
+                        } else if (logs.includes('failed to load') || logs.includes('Error: Cannot find module')) {
+                            console.error('\n❌ CRITICAL: Gateway is running but PD plugin FAILED to load!');
+                            process.exit(1);
+                        } else {
+                            console.warn('⚠️  Gateway started but PD registration not confirmed in recent logs.');
+                        }
                     } else {
-                        console.error(`❌ Gateway status: ${status}. Check logs: journalctl --user -u openclaw-gateway.service --since "1 min ago"`);
+                        console.error(`❌ Gateway status: ${status}.`);
+                        process.exit(1);
                     }
-                } catch { /* ignore */ }
-            }, 3000);
+                } catch (e) {
+                    console.warn(`⚠️  Post-restart verification skipped: ${e.message}`);
+                }
+            }, 8000);
             return;
-        } catch {
-            // Not a systemd service — fall through to manual restart
-        }
+        } catch { /* ignore */ }
 
-        // Manual restart: find and kill existing gateway processes
         const pids = execSync('pgrep -f "openclaw-gateway|openclaw gateway"', { encoding: 'utf-8' }).trim();
         if (pids) {
-            console.log(`   Found gateway process(es). Terminating...`);
+            console.log(`   Terminating existing gateway process(es)...`);
             execSync(`echo "${pids}" | xargs kill -TERM 2>/dev/null || true`);
             execSync('sleep 3');
         }
 
-        // Start new gateway
         const logPath = '/tmp/openclaw-auto-restart.log';
         console.log(`   Starting new gateway (logs: ${logPath})...`);
         execSync(`nohup openclaw gateway --force > ${logPath} 2>&1 &`, { stdio: 'ignore' });
         console.log('✅ Gateway restart triggered.');
-        console.log(`   Check logs: tail -f ${logPath}`);
+        
+        setTimeout(() => {
+            if (existsSync(logPath)) {
+                const logs = readFileSync(logPath, 'utf-8');
+                if (logs.includes('Principles Disciple Plugin registered')) {
+                    console.log('✅ SUCCESS: Principles Disciple plugin registered successfully (manual restart)!');
+                } else if (logs.includes('failed to load')) {
+                    console.error('\n❌ CRITICAL: Manual restart triggered but PD plugin FAILED to load!');
+                    process.exit(1);
+                }
+            }
+        }, 8000);
     } catch (error) {
         console.error(`\n❌ Failed to restart gateway: ${error.message}`);
-        console.error('   Manual restart: systemctl --user restart openclaw-gateway.service');
         process.exit(1);
     }
 }
@@ -768,7 +644,6 @@ function restartGateway() {
  */
 function main() {
     const args = parseArgs();
-
     if (args.help) {
         showHelp();
         process.exit(0);
@@ -778,66 +653,36 @@ function main() {
     console.log('║     Principles Disciple Plugin Installer                   ║');
     console.log('╚════════════════════════════════════════════════════════════╝\n');
 
-    // Dev mode: auto-force, auto-restart, auto-bump, clean stale backups
-    if (args.dev) {
-        console.log('🛠️  DEV MODE: force + restart + bump + stale backup cleanup\n');
-    }
+    if (args.dev) console.log('🛠️  DEV MODE: force + restart + bump + stale backup cleanup\n');
+    if (args.bump) autoBumpVersion(SOURCE_DIR);
 
-    // Auto-bump version if requested
-    if (args.bump) {
-        autoBumpVersion(SOURCE_DIR);
-    }
-
-    // Get source version (after potential bump)
     const sourceVersion = getVersion(SOURCE_DIR);
     if (!sourceVersion) {
-        console.error('❌ Cannot determine source version. Check package.json.');
+        console.error('❌ Cannot determine source version.');
         process.exit(1);
     }
     console.log(`📋 Plugin version: v${sourceVersion}`);
     console.log(`🌍 Language: ${args.lang}`);
 
-    // Step 1: Check prerequisites
     console.log('\n🔍 Checking prerequisites...');
     checkPrerequisites();
 
-    // Step 2: Install dependencies (if needed)
-    if (!args.skipDeps) {
-        installDependencies();
-    }
+    if (!args.skipDeps) installDependencies();
 
-    // Step 3: ALWAYS rebuild — esbuild is fast (~2s) and compiles TS directly.
-    // dist/ .js files from tsc may be stale when tsc has errors in other files.
-    // We always rebuild to guarantee the synced code matches current source.
     buildPlugin();
-
-    // Step 4: Clean existing installation (must happen after build so we know what's current)
     cleanTargetDir(args.force);
-
-    // Step 5: Ensure installation directory exists
     ensureInstallDir();
 
-    // Step 6: Sync files
     console.log('\n📦 Syncing files to OpenClaw...');
-    for (const item of SYNC_ITEMS) {
-        syncItem(item);
-    }
-
-    // Step 7: Sync skills
+    for (const item of SYNC_ITEMS) syncItem(item);
     syncSkills(args.lang);
 
-    // Step 8: Install production dependencies in target (ALWAYS — cleanTargetDir wiped node_modules)
-    // --skip-deps only applies to SOURCE directory deps, not the installed plugin.
     installTargetDependencies();
 
-    // Step 9: Verify installed bundle can load its native dependencies
     console.log('\n🔍 Verifying installed plugin can load native dependencies...');
     try {
-        execSync(`node -e "require('better-sqlite3')"`, {
-            cwd: INSTALL_DIR,
-            stdio: 'pipe'
-        });
-        console.log('✅ Native dependencies verified (better-sqlite3 loads correctly)');
+        execSync(`node -e "require('better-sqlite3')"`, { cwd: INSTALL_DIR, stdio: 'pipe' });
+        console.log('✅ Native dependencies verified');
     } catch (error) {
         console.warn('\n⚠️  Native module better-sqlite3 failed to load. Attempting automatic rebuild...');
         try {
@@ -846,87 +691,57 @@ function main() {
             console.log('✅ Rebuild successful!');
         } catch (rebuildErr) {
             console.error('\n❌ CRITICAL: better-sqlite3 rebuild failed!');
-            console.error('   OpenClaw will likely fail to load this plugin.');
-            console.error(`   Fix: cd ${INSTALL_DIR} && npm install --build-from-source better-sqlite3`);
             process.exit(1);
         }
     }
 
-    // Step 10: AUTOMATED PRINCIPLE BOOTSTRAP (The "Neural Link")
-    // Sync PRINCIPLES.md changes to the active ledger immediately.
     const bootstrapScript = join(SOURCE_DIR, 'scripts', 'bootstrap-rules.mjs');
     if (existsSync(bootstrapScript)) {
         console.log('\n🧠 Synchronizing principles to active rules (Bootstrap)...');
         try {
-            // Target the main workspace state dir by default
             const targetStateDir = join(process.env.HOME, '.openclaw', 'workspace-main', '.state');
             if (existsSync(targetStateDir)) {
-                execSync(`STATE_DIR=${targetStateDir} BOOTSTRAP_LIMIT=100 node scripts/bootstrap-rules.mjs`, {
-                    cwd: SOURCE_DIR,
-                    stdio: 'inherit'
-                });
-                console.log('✅ Principles synchronized to active enforcement rules.');
-            } else {
-                console.warn('⚠️  Target state directory not found, skipping rule bootstrap.');
+                execSync(`STATE_DIR=${targetStateDir} BOOTSTRAP_LIMIT=100 node scripts/bootstrap-rules.mjs`, { cwd: SOURCE_DIR, stdio: 'inherit' });
+                console.log('✅ Principles synchronized.');
             }
         } catch (e) {
             console.warn(`⚠️  Principle synchronization failed: ${e.message}`);
         }
     }
 
-    // Step 11: Verify installation
+    const compileScript = join(SOURCE_DIR, 'scripts', 'compile-principles.mjs');
+    if (existsSync(compileScript)) {
+        console.log('\n⚙️  Compiling pain-derived principles into rules...');
+        try {
+            const targetWorkspaceDir = join(process.env.HOME, '.openclaw', 'workspace-main');
+            if (existsSync(targetWorkspaceDir)) {
+                execSync(`node scripts/compile-principles.mjs ${targetWorkspaceDir}`, { cwd: SOURCE_DIR, stdio: 'inherit' });
+                console.log('✅ Principle compilation complete.');
+            }
+        } catch (e) {
+            console.warn(`⚠️  Principle compilation failed: ${e.message}`);
+        }
+    }
+
     const installedVersion = getVersion(INSTALL_DIR);
     if (installedVersion !== sourceVersion) {
-        console.error('\n❌ VERSION MISMATCH after sync!');
-        console.error(`   Expected: v${sourceVersion}`);
-        console.error(`   Got: v${installedVersion}`);
+        console.error(`\n❌ VERSION MISMATCH: Expected v${sourceVersion}, Got v${installedVersion}`);
         process.exit(1);
     }
 
-    // Step 12: Verify installed fingerprint matches current source
     verifyInstalledFingerprint();
+    if (args.dev || args.restart) cleanStaleBackups();
 
-    // Step 13: Clean stale backup directories (dev mode or explicit restart)
-    if (args.dev || args.restart) {
-        cleanStaleBackups();
-    }
-
-    // Step 14: Signal for reload
     try {
         const reloadSignal = join(OPENCLAW_DIR, '.plugin_reload_signal');
         writeFileSync(reloadSignal, new Date().toISOString(), 'utf-8');
         console.log(`\n🔔 Reload signal sent to ${reloadSignal}`);
     } catch { /* ignore */ }
 
-    // Build fingerprint info for report
-    let fpReport = '';
-    try {
-        const sourceManifest = JSON.parse(readFileSync(join(SOURCE_DIR, 'dist', 'openclaw.plugin.json'), 'utf-8'));
-        const fp = sourceManifest.buildFingerprint;
-        if (fp) {
-            fpReport = `\n   Build:    ${fp.gitSha} / MD5 ${fp.bundleMd5.slice(0, 8)}…`;
-        }
-    } catch { /* ignore */ }
-
-    // Success!
     console.log('\n╔════════════════════════════════════════════════════════════╗');
     console.log('║                  ✅ Installation Complete                  ║');
     console.log('╚════════════════════════════════════════════════════════════╝');
-    console.log(`\n   Version:  v${sourceVersion}${fpReport}`);
-    console.log(`   Language: ${args.lang}`);
-    console.log(`   Source:   ${SOURCE_DIR}`);
-    console.log(`   Target:   ${INSTALL_DIR}`);
 
-    // Handle automatic restart if requested
-    if (args.restart) {
-        restartGateway();
-    } else {
-        console.log('\n💡 Restart OpenClaw Gateway to load the new version.');
-    }
-}
-
-main();
-atic restart if requested
     if (args.restart) {
         restartGateway();
     } else {
