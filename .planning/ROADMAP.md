@@ -65,7 +65,7 @@ Phases execute in numeric order: 42 -> 43 -> 44 -> 45 -> 46
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 42. Quick Wins | v1.19 | 0/N | Not started | - |
+| 42. Quick Wins | v1.19 | 1/1 | In progress | - |
 | 43. Type Safety | v1.19 | 2/2 | Complete    | 2026-04-15 |
 | 44. Pre-Split Inventory | v1.19 | 0/N | Not started | - |
 | 45. Queue Tests | v1.19 | 0/N | Not started | - |
@@ -81,6 +81,8 @@ Phases execute in numeric order: 42 -> 43 -> 44 -> 45 -> 46
   1. `src/utils/io.ts`: EPERM/EBUSY retry uses `setTimeout`-based exponential backoff instead of spin loop — synchronous signature preserved
   2. Queue event payload `JSON.parse()` guarded by structure validation checking required fields (`type`, `workspaceId`) before returning parsed object
   3. `principles-console-route.ts` Bearer token comparison uses `crypto.timingSafeEqual` with `Buffer` comparison
+**Plans:**
+- [x] `42-01-PLAN.md` — QW-01 busy-wait fix, QW-02 JSON validation, QW-03 timing-safe compare
 
 ### Phase 44: Pre-Split Inventory
 **Goal**: Document module-level mutable state and draw import graph before Phase 46 god class split — pure analysis, no implementation changes
