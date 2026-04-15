@@ -45,7 +45,7 @@ export interface CorrectionKeywordStore {
 export interface CorrectionMatchResult {
   /** Whether any keyword matched */
   matched: boolean;
-  /** The first matched term (empty array when no match) */
+  /** Matched terms (empty array when no match; may be truncated to first N items) */
   matchedTerms: string[];
   /** Weighted score (0-1) based on keyword weight and accuracy */
   score: number;
