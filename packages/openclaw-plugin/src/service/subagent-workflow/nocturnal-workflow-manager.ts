@@ -36,7 +36,7 @@ import {
 } from '../nocturnal-service.js';
 import { type TrinityStageFailure, type TrinityResult } from '../../core/nocturnal-trinity.js';
 import type { TrinityRuntimeAdapter } from '../../core/nocturnal-trinity.js';
-import type { RecentPainContext } from '../evolution-worker.js';
+import type { RecentPainContext } from './types.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import { validateNocturnalSnapshotIngress } from '../../core/nocturnal-snapshot-contract.js';
@@ -394,7 +394,7 @@ export class NocturnalWorkflowManager implements WorkflowManager {
     }
 
      
-    // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+     
     async notifyLifecycleEvent(
          
         _workflowId: string,

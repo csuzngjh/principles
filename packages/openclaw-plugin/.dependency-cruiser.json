@@ -1,0 +1,19 @@
+{
+  "forbidden": [
+    {
+      "name": "no-circular",
+      "severity": "error",
+      "comment": "Cycles hurt maintainability and testability.",
+      "from": {},
+      "to": {
+        "circular": true
+      }
+    }
+  ],
+  "options": {
+    "tsPreCompilationDeps": true,
+    "enhancedResolveOptions": {
+      "extensions": [".ts", ".tsx", ".js", ".jsx", ".json"]
+    }
+  }
+}
