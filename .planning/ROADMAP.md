@@ -53,7 +53,7 @@
 **Milestone Goal:** 逐步清理技术债：拆分 god classes、修复 type safety、添加 queue integration tests、强化安全
 
 - [ ] **Phase 42: Quick Wins** -- busy-wait loop fix, JSON validation, constant-time token compare
-- [ ] **Phase 43: Type Safety** -- branded types, discriminated unions, replace `as any` casts
+- [x] **Phase 43: Type Safety** -- branded types, discriminated unions, replace `as any` casts (completed 2026-04-15)
 - [ ] **Phase 44: Pre-Split Inventory** -- document module-level mutable state, draw import graph
 - [ ] **Phase 45: Queue Tests** -- migration tests, fake-timers unit tests, concurrency tests
 - [ ] **Phase 46: God Class Split** -- extract queue-migration, workflow-watchdog, queue-io, sleep-cycle modules
@@ -66,7 +66,7 @@ Phases execute in numeric order: 42 -> 43 -> 44 -> 45 -> 46
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 42. Quick Wins | v1.19 | 0/N | Not started | - |
-| 43. Type Safety | v1.19 | 0/N | Not started | - |
+| 43. Type Safety | v1.19 | 2/2 | Complete    | 2026-04-15 |
 | 44. Pre-Split Inventory | v1.19 | 0/N | Not started | - |
 | 45. Queue Tests | v1.19 | 0/N | Not started | - |
 | 46. God Class Split | v1.19 | 0/N | Not started | - |
