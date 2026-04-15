@@ -57,6 +57,8 @@ export const CentralSyncService: OpenClawPluginService = {
 
     // Schedule periodic sync
     syncInterval = setInterval(runSyncCycle, intervalMs);
+    // Don't keep the process alive just for this timer
+    syncInterval.unref();
     
     logger?.info?.(`[PD:CentralSync] Service started, syncing every ${intervalMs / 1000}s`);
   },

@@ -2563,6 +2563,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
             }
 
             timeoutId = setTimeout(runCycle, interval);
+            timeoutId.unref();
         }
 
         timeoutId = setTimeout(() => {
@@ -2578,11 +2579,14 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                 }
                 // processPromotion removed (D-06)
                 timeoutId = setTimeout(runCycle, interval);
+                timeoutId.unref();
             })().catch((err) => {
                 if (logger) logger.error(`[PD:EvolutionWorker] Startup worker cycle failed: ${String(err)}`);
                 timeoutId = setTimeout(runCycle, interval);
+                timeoutId.unref();
             });
         }, initialDelay);
+        timeoutId.unref();
     },
 
     stop(ctx: OpenClawPluginServiceContext): void {
