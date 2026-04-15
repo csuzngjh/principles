@@ -2,6 +2,15 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { resolvePdPath } from '../core/paths.js';
 
+/**
+ * Atomic file write — write to temp then rename to prevent partial writes on crash.
+ */
+export function atomicWriteFileSync(filePath: string, data: string): void {
+    const tmpPath = filePath + '.tmp';
+    fs.writeFileSync(tmpPath, data, 'utf8');
+    fs.renameSync(tmpPath, filePath);
+}
+
      
 export function normalizePath(filePath: string, projectDir: string): string {
   if (!filePath) return '';
@@ -18,7 +27,7 @@ export function normalizePath(filePath: string, projectDir: string): string {
   }
 
    
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let rel: string;
   if (projectIsWin) {
     const projectAbs = path.resolve(projectDir);

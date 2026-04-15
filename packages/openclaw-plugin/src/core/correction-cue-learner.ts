@@ -201,7 +201,8 @@ export class CorrectionCueLearner {
   /**
    * Records a keyword hit (for hitCount/FPR tracking).
    * Increments hitCount and updates lastHitAt for all matched terms.
-   * Call this for EVERY match — regardless of confidence.
+   * Intentionally does NOT flush — hitCount is best-effort analytics,
+   * persisted by the next recordTruePositive() or flush() call.
    */
   recordHits(terms: string[]): void {
     for (const term of terms) {
@@ -210,7 +211,6 @@ export class CorrectionCueLearner {
       keyword.hitCount = (keyword.hitCount ?? 0) + 1;
       keyword.lastHitAt = new Date().toISOString();
     }
-    this.flush();
   }
 
   /**

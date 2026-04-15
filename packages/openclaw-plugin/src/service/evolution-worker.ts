@@ -16,6 +16,7 @@ import { getEvolutionLogger } from '../core/evolution-logger.js';
 import type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 export type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 import { LockUnavailableError } from '../config/index.js';
+import { atomicWriteFileSync } from '../utils/io.js';
 import { checkWorkspaceIdle, checkCooldown, recordCooldown } from './nocturnal-runtime.js';
 import { loadNocturnalConfig, loadKeywordOptimizationConfig, loadCooldownEscalationConfig } from './nocturnal-config.js';
 import { WorkflowStore } from './subagent-workflow/workflow-store.js';
@@ -41,15 +42,6 @@ import { recordPersistentFailure, resetFailureState, isTaskKindInCooldown } from
 import { reconcileStartup } from './startup-reconciler.js';
 import { WORKFLOW_TTL_MS } from '../config/defaults/runtime.js';
 import { OpenClawTrinityRuntimeAdapter } from '../core/nocturnal-trinity.js';
-
-/**
- * Atomic file write — write to temp then rename to prevent partial writes on crash.
- */
-function atomicWriteFileSync(filePath: string, data: string): void {
-    const tmpPath = filePath + '.tmp';
-    fs.writeFileSync(tmpPath, data, 'utf8');
-    fs.renameSync(tmpPath, filePath);
-}
 
 /**
  * Phase 40: Handle failure classification after task outcome.
@@ -1999,11 +1991,8 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
 
             // Phase 40: Process failure classification outcomes after queue write
             try {
-                const freshQueueForClassify: EvolutionQueueItem[] = (() => {
-                    try { return JSON.parse(fs.readFileSync(queuePath, 'utf8')); } catch { return []; }
-                })();
                 for (const outcome of sleepOutcomes) {
-                    await handleTaskOutcome(wctx, freshQueueForClassify, outcome.taskKind, outcome.succeeded, logger);
+                    await handleTaskOutcome(wctx, queue, outcome.taskKind, outcome.succeeded, logger);
                 }
             } catch { /* classification errors are non-blocking */ }
 
@@ -2186,13 +2175,13 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                 koResultLock();
             }
 
-            // Phase 40: Process failure classification outcomes after queue write
+            // Phase 40: Process failure classification outcomes
             try {
-                const freshQueueForClassify: EvolutionQueueItem[] = (() => {
-                    try { return JSON.parse(fs.readFileSync(queuePath, 'utf8')); } catch { return []; }
-                })();
+                const queueForClassify = keywordOptTasks.length > 0
+                    ? (JSON.parse(fs.readFileSync(queuePath, 'utf8')) as EvolutionQueueItem[])
+                    : queue;
                 for (const outcome of kwOptOutcomes) {
-                    await handleTaskOutcome(wctx, freshQueueForClassify, outcome.taskKind, outcome.succeeded, logger);
+                    await handleTaskOutcome(wctx, queueForClassify, outcome.taskKind, outcome.succeeded, logger);
                 }
             } catch { /* classification errors are non-blocking */ }
 
