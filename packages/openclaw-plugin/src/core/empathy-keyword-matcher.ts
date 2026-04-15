@@ -14,6 +14,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { atomicWriteFileSync } from '../utils/io.js';
 import type {
   EmpathyKeywordStore,
   EmpathyKeywordEntry,
@@ -81,7 +82,7 @@ export function loadKeywordStore(stateDir: string, language?: 'zh' | 'en'): Empa
     if (!fs.existsSync(filePath)) {
       const store = createDefaultKeywordStore(language);
        
-      // eslint-disable-next-line @typescript-eslint/no-use-before-define
+       
       saveKeywordStore(stateDir, store);
       return store;
     }
@@ -94,7 +95,7 @@ export function loadKeywordStore(stateDir: string, language?: 'zh' | 'en'): Empa
       console.warn('[PD:Empathy] Invalid keyword store format, creating default');
       const store = createDefaultKeywordStore(language);
        
-      // eslint-disable-next-line @typescript-eslint/no-use-before-define
+       
       saveKeywordStore(stateDir, store);
       return store;
     }
@@ -104,7 +105,7 @@ export function loadKeywordStore(stateDir: string, language?: 'zh' | 'en'): Empa
     console.warn(`[PD:Empathy] Failed to load keyword store: ${e}`);
     const store = createDefaultKeywordStore(language);
      
-    // eslint-disable-next-line @typescript-eslint/no-use-before-define
+     
     saveKeywordStore(stateDir, store);
     return store;
   }
@@ -123,7 +124,7 @@ export function saveKeywordStore(stateDir: string, store: EmpathyKeywordStore): 
   }
 
   store.lastUpdated = new Date().toISOString();
-  fs.writeFileSync(filePath, JSON.stringify(store, null, 2), 'utf8');
+  atomicWriteFileSync(filePath, JSON.stringify(store, null, 2));
 }
 
 // =========================================================================
