@@ -17,6 +17,11 @@ import type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 export type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 import { LockUnavailableError } from '../config/index.js';
 import { atomicWriteFileSync } from '../utils/io.js';
+
+// Re-export queue I/O (extracted to queue-io.ts)
+export { loadEvolutionQueue, saveEvolutionQueue, withQueueLock, acquireQueueLock } from './queue-io.js';
+export { EVOLUTION_QUEUE_LOCK_SUFFIX, LOCK_MAX_RETRIES, LOCK_RETRY_DELAY_MS, LOCK_STALE_MS } from './queue-io.js';
+import { loadEvolutionQueue, saveEvolutionQueue, acquireQueueLock, EVOLUTION_QUEUE_LOCK_SUFFIX } from './queue-io.js';
 import { checkWorkspaceIdle, checkCooldown, recordCooldown } from './nocturnal-runtime.js';
 import { loadCooldownEscalationConfig, loadNocturnalConfigMerged } from './nocturnal-config.js';
 import { WorkflowStore } from './subagent-workflow/workflow-store.js';
@@ -245,13 +250,8 @@ function buildFallbackNocturnalSnapshot(
 const PAIN_QUEUE_DEDUP_WINDOW_MS = 30 * 60 * 1000;
 
 // P0 fix: File lock constants and helper for queue operations (prevents TOCTOU race)
-export const EVOLUTION_QUEUE_LOCK_SUFFIX = '.lock';
-export const LOCK_MAX_RETRIES = 50;
-export const LOCK_RETRY_DELAY_MS = 50;
-export const LOCK_STALE_MS = 30_000;
+// Re-exported from queue-io.ts: EVOLUTION_QUEUE_LOCK_SUFFIX, LOCK_MAX_RETRIES, LOCK_RETRY_DELAY_MS, LOCK_STALE_MS
 
- 
- 
 export function createEvolutionTaskId(
     source: string,
     score: number,
@@ -268,24 +268,9 @@ export function createEvolutionTaskId(
 }
 
  
-export async function acquireQueueLock(resourcePath: string, logger: PluginLogger | { warn?: (message: string) => void; info?: (message: string) => void } | undefined, lockSuffix: string = EVOLUTION_QUEUE_LOCK_SUFFIX): Promise<() => void> {
-    try {
-        const ctx: LockContext = await acquireLockAsync(resourcePath, {
-            lockSuffix,
-            maxRetries: LOCK_MAX_RETRIES,
-            baseRetryDelayMs: LOCK_RETRY_DELAY_MS,
-            lockStaleMs: LOCK_STALE_MS,
-        });
-        return () => releaseImportedLock(ctx);
-    } catch (error: unknown) {
-        const warn = logger?.warn;
-        warn?.(`[PD:EvolutionWorker] Failed to acquire lock for ${resourcePath}: ${String(error)}`);
-        throw error;
-    }
-}
+// acquireQueueLock is re-exported from queue-io.ts
 
- 
- 
+// Thin wrapper that adds LockUnavailableError — kept inline to avoid circular dep
 async function requireQueueLock(resourcePath: string, logger: PluginLogger | { warn?: (message: string) => void; info?: (message: string) => void } | undefined, scope: string, lockSuffix: string = EVOLUTION_QUEUE_LOCK_SUFFIX): Promise<() => void> {
     try {
         return await acquireQueueLock(resourcePath, logger, lockSuffix);
@@ -498,17 +483,7 @@ function shouldSkipForDedup(
 /**
  * Load and migrate the evolution queue. Returns empty array if file doesn't exist.
  */
-export function loadEvolutionQueue(queuePath: string): EvolutionQueueItem[] {
-     
-    let rawQueue: RawQueueItem[] = [];
-    try {
-        rawQueue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
-    } catch {
-        // Queue doesn't exist yet - create empty array
-        rawQueue = [];
-    }
-    return migrateQueueToV2(rawQueue) as unknown as EvolutionQueueItem[];
-}
+// loadEvolutionQueue is now imported from ./queue-io.js
 
 /**
  * Build and persist a new sleep_reflection task.
@@ -540,7 +515,7 @@ function enqueueNewSleepReflectionTask(
         recentPainContext,
     });
 
-    atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
+    saveEvolutionQueue(queuePath, queue);
     logger?.info?.(`[PD:EvolutionWorker] Enqueued sleep_reflection task ${taskId}`);
 }
 
@@ -626,7 +601,7 @@ async function enqueueKeywordOptimizationTask(
             maxRetries: 1,
         });
 
-        atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
+        saveEvolutionQueue(queuePath, queue);
         logger?.info?.(`[PD:EvolutionWorker] Enqueued keyword_optimization task ${taskId}`);
     } finally {
         releaseLock();
@@ -685,7 +660,7 @@ async function doEnqueuePainTask(
             retryCount: 0, maxRetries: 3,
         });
 
-        atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
+        saveEvolutionQueue(queuePath, queue);
         fs.appendFileSync(painFlagPath, `\nstatus: queued\ntask_id: ${taskId}\n`, 'utf8');
         result.enqueued = true;
 
@@ -1480,7 +1455,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
 
             // Write claimed state (includes any pain changes from above) and release lock
             if (queueChanged) {
-                atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
+                saveEvolutionQueue(queuePath, queue);
             }
             releaseLock();
             // Phase 40: Track outcomes for failure classification after queue write
@@ -1816,7 +1791,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
             if (keywordOptTasks.length > 0) {
                 // Skip all keyword_optimization tasks this cycle; release lock and return
                 if (queueChanged) {
-                    atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
+                    saveEvolutionQueue(queuePath, queue);
                 }
                 releaseLock();
                 lockReleased = true;
@@ -1832,7 +1807,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
             queueChanged = queueChanged || pendingKeywordOptTasks.length > 0;
 
             // Release lock during LLM dispatch (long-running)
-            atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
+            saveEvolutionQueue(queuePath, queue);
             releaseLock();
             lockReleased = true;
 
@@ -1993,7 +1968,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
         }
 
         if (queueChanged) {
-            atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
+            saveEvolutionQueue(queuePath, queue);
         }
 
         // Pipeline observability: log stage-level summary at end of cycle
@@ -2111,7 +2086,7 @@ export async function registerEvolutionTaskSession(
         if (!task.started_at) {
             task.started_at = new Date().toISOString();
         }
-        atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
+        saveEvolutionQueue(queuePath, queue);
         return true;
     } finally {
         releaseLock();
@@ -2182,7 +2157,7 @@ async function processEvolutionQueueWithResult(
         const purgeResult = purgeStaleFailedTasks(queue, logger);
         if (purgeResult.purged > 0) {
             // Write back the cleaned queue
-            atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
+            saveEvolutionQueue(queuePath, queue);
         }
 
         queueResult.total = queue.length;
