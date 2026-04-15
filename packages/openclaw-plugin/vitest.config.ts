@@ -51,11 +51,8 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
-    // Use threads pool - better-sqlite3 native handles don't clean up properly
-    // in fork subprocesses, causing teardown hangs. Threads pool handles this correctly.
     pool: 'threads',
     teardownTimeout: 15000,
-    globalSetup: ['./tests/globalSetup.ts'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html'],
@@ -67,5 +64,25 @@ export default defineConfig({
         statements: 70,
       },
     },
+    // Workspace projects for layered testing
+    projects: [
+      {
+        test: {
+          name: 'unit',
+          include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
+          exclude: integrationTests,
+          pool: 'threads',
+          globalSetup: ['./tests/globalSetup.ts'],
+        },
+      },
+      {
+        test: {
+          name: 'integration',
+          include: integrationTests,
+          pool: 'threads',
+          globalSetup: ['./tests/globalSetup.ts'],
+        },
+      },
+    ],
   },
 });
