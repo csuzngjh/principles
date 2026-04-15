@@ -80,7 +80,8 @@ export default defineConfig({
         test: {
           name: 'integration',
           include: integrationTests,
-          pool: 'threads',
+          // Use forks pool for integration tests too - better-sqlite3 cleanup issues
+          pool: 'forks',
         },
       },
     ],
