@@ -73,7 +73,7 @@ const DEFAULT_MAX_RETRIES = 3;
 
 export { DEFAULT_TASK_KIND, DEFAULT_PRIORITY, DEFAULT_MAX_RETRIES };
 
-type RawQueueItem = Record<string, unknown>;
+export type RawQueueItem = Record<string, unknown>;
 
 /**
  * Migrate a legacy queue item to V2 schema.
