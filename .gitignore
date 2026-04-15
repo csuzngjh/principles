@@ -82,3 +82,6 @@ docs/design/gfi-trust-capability-simplification-2026-03-20.md
 
 .qwen/
 gha-creds-*.json
+
+# Git worktrees
+.worktrees/
