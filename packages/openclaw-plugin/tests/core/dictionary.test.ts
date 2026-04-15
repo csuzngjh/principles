@@ -162,7 +162,10 @@ describe('PainDictionary', () => {
 
         expect(fs.writeFileSync).toHaveBeenCalled();
         const callArgs = vi.mocked(fs.writeFileSync).mock.calls[0];
-        expect(callArgs[0].toString()).toBe(dictPath);
+        // atomicWriteFileSync writes to .tmp first
+        expect(callArgs[0].toString()).toBe(dictPath + '.tmp');
         expect(JSON.parse(callArgs[1] as string).rules.TEST.hits).toBe(1);
+        // Verify atomic rename
+        expect(fs.renameSync).toHaveBeenCalledWith(dictPath + '.tmp', dictPath);
     });
 });

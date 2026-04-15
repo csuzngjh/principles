@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
+import { atomicWriteFileSync } from '../utils/io.js';
 import type { ContextInjectionConfig} from '../types.js';
 import { defaultContextConfig } from '../types.js';
 import { loadContextInjectionConfig } from '../hooks/prompt.js';
@@ -40,7 +41,7 @@ function saveConfig(workspaceDir: string, config: ContextInjectionConfig): boole
         profile.contextInjection = config;
         
         // Write back
-        fs.writeFileSync(profilePath, JSON.stringify(profile, null, 2), 'utf-8');
+        atomicWriteFileSync(profilePath, JSON.stringify(profile, null, 2));
         return true;
     } catch (e) {
         console.error(`[PD:Context] Failed to save config: ${String(e)}`);
@@ -99,7 +100,7 @@ function showStatus(workspaceDir: string, isZh: boolean): string {
  * Toggle a boolean setting
  */
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 function toggleSetting(
     workspaceDir: string,
     key: 'thinkingOs' | 'reflectionLog',
@@ -215,7 +216,7 @@ function applyPreset(
     isZh: boolean
 ): string {
      
-    // eslint-disable-next-line @typescript-eslint/init-declarations
+     
     let config: ContextInjectionConfig;
     
     switch (preset) {
@@ -318,7 +319,7 @@ export function handleContextCommand(ctx: PluginCommandContext): PluginCommandRe
     const isZh = (ctx.config?.language as string) === 'zh';
     
      
-    // eslint-disable-next-line @typescript-eslint/init-declarations
+     
     let result: string;
     
     switch (subCommand) {

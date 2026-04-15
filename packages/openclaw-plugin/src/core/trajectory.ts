@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { withLock } from '../utils/file-lock.js';
+import { atomicWriteFileSync } from '../utils/io.js';
 import { resolvePdPath } from './paths.js';
 import { SampleNotFoundError } from '../config/index.js';
 import type {
@@ -590,7 +591,7 @@ export class TrajectoryDatabase {
     const offset = filters.offset ?? 0;
 
      
-    // eslint-disable-next-line @typescript-eslint/init-declarations
+     
     let rows: Record<string, unknown>[];
     if (traceId) {
       rows = this.db.prepare(`
@@ -789,7 +790,7 @@ export class TrajectoryDatabase {
           const params = JSON.parse(row.params_json);
           if (params && typeof params.filePath === 'string') {
              
-            // eslint-disable-next-line @typescript-eslint/prefer-destructuring
+             
             filePath = params.filePath;
           }
         } catch {
@@ -1092,7 +1093,7 @@ export class TrajectoryDatabase {
       });
     });
 
-    fs.writeFileSync(exportPath, `${lines.join('\n')}${lines.length > 0 ? '\n' : ''}`, 'utf8');
+    atomicWriteFileSync(exportPath, `${lines.join('\n')}${lines.length > 0 ? '\n' : ''}`);
     this.recordExportAudit('corrections', opts.mode, opts.approvedOnly, exportPath, rows.length);
     return { filePath: exportPath, count: rows.length, mode: opts.mode };
   }
@@ -1113,7 +1114,7 @@ export class TrajectoryDatabase {
       sampleQueue: this.db.prepare('SELECT * FROM v_sample_queue').all(),
     };
     const exportPath = path.join(this.exportDir, `analytics-${Date.now()}.json`);
-    fs.writeFileSync(exportPath, JSON.stringify(payload, null, 2), 'utf8');
+    atomicWriteFileSync(exportPath, JSON.stringify(payload, null, 2));
     this.recordExportAudit('analytics', 'raw', true, exportPath, Array.isArray(payload.dailyMetrics) ? payload.dailyMetrics.length : 0);
     return { filePath: exportPath, count: Array.isArray(payload.dailyMetrics) ? payload.dailyMetrics.length : 0 };
   }
@@ -1635,7 +1636,7 @@ export class TrajectoryDatabase {
   }
 
    
-  // eslint-disable-next-line @typescript-eslint/max-params
+   
   private recordExportAudit(
     exportKind: string,
     mode: CorrectionExportMode,
@@ -1661,7 +1662,7 @@ export class TrajectoryDatabase {
     const relativePath = `${kind}-${hash}.txt`;
     const fullPath = path.join(this.blobDir, relativePath);
     if (!fs.existsSync(fullPath)) {
-      fs.writeFileSync(fullPath, text, 'utf8');
+      atomicWriteFileSync(fullPath, text);
     }
     return { inlineText: null, blobRef: relativePath, excerpt };
   }
@@ -1701,7 +1702,7 @@ export class TrajectoryDatabase {
       if (referenced.has(entry)) continue;
       const fullPath = path.join(this.blobDir, entry);
        
-      // eslint-disable-next-line @typescript-eslint/init-declarations
+       
       let stat: fs.Stats;
       try {
         stat = fs.statSync(fullPath);

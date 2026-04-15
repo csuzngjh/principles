@@ -22,6 +22,7 @@ import {
   MAX_CORRECTION_KEYWORDS,
 } from './correction-types.js';
 import { checkCooldown } from '../service/nocturnal-runtime.js';
+import { atomicWriteFileSync } from '../utils/io.js';
 
 const KEYWORD_STORE_FILE = 'correction_keywords.json';
 
@@ -109,11 +110,9 @@ export function saveCorrectionKeywordStore(
   store: CorrectionKeywordStore
 ): void {
   const filePath = path.join(stateDir, KEYWORD_STORE_FILE);
-  const tmpPath = filePath + '.tmp';
 
   fs.mkdirSync(stateDir, { recursive: true });
-  fs.writeFileSync(tmpPath, JSON.stringify(store, null, 2), 'utf-8');
-  fs.renameSync(tmpPath, filePath);
+  atomicWriteFileSync(filePath, JSON.stringify(store, null, 2));
 
   // Invalidate cache so the next read re-loads from disk (D-05)
   _correctionCueCache = null;
@@ -151,9 +150,12 @@ export class CorrectionCueLearner {
 
   /**
    * Checks whether text contains a correction cue (D-11).
+   * Pure read-only — does NOT modify the store.
    * Normalisation is equivalent to the original detectCorrectionCue():
    *   trim → lowercase → strip punctuation
    * Returns weighted score based on keyword accuracy (D-39-03, D-39-04).
+   *
+   * To record hits/TPs, call recordHit() and recordTruePositive() separately.
    */
   match(text: string): CorrectionMatchResult {
     const normalized = text
@@ -167,19 +169,15 @@ export class CorrectionCueLearner {
     for (const keyword of this.store.keywords) {
       if (normalized.includes(keyword.term.toLowerCase())) {
         // D-39-03, D-39-04: Weighted score formula
-        // score = weight x ((TP + 1) / (TP + FP + 2))
-        // +2 smoothing: new keywords (TP=0, FP=0) get accuracy=0.5
+        // No history (tp=0, fp=0) → accuracy = 1 (trust raw weight)
+        // Has history → accuracy = tp / (tp + fp) (proportional to true positive rate)
         const tp = keyword.truePositiveCount ?? 0;
         const fp = keyword.falsePositiveCount ?? 0;
-        const accuracy = (tp + 1) / (tp + fp + 2);
+        const accuracy = (tp + fp) > 0 ? tp / (tp + fp) : 1;
         const score = keyword.weight * accuracy;
 
         totalScore += score;
         matchedTerms.push(keyword.term);
-
-        // Increment hitCount
-        keyword.hitCount = (keyword.hitCount ?? 0) + 1;
-        keyword.lastHitAt = new Date().toISOString();
       }
     }
 
@@ -200,16 +198,39 @@ export class CorrectionCueLearner {
   }
 
   /**
+   * Records a keyword hit (for hitCount/FPR tracking).
+   * Increments hitCount and updates lastHitAt for all matched terms.
+   * Intentionally does NOT flush — hitCount is best-effort analytics,
+   * persisted by the next recordTruePositive() or flush() call.
+   */
+  recordHits(terms: string[]): void {
+    for (const term of terms) {
+      const keywordIndex = this.store.keywords.findIndex(k => k.term.toLowerCase() === term.toLowerCase());
+      if (keywordIndex < 0) continue;
+      const keyword = this.store.keywords[keywordIndex];
+      this.store.keywords[keywordIndex] = {
+        ...keyword,
+        hitCount: (keyword.hitCount ?? 0) + 1,
+        lastHitAt: new Date().toISOString(),
+      };
+    }
+  }
+
+  /**
    * Records a confirmed true positive for the given keyword term.
-   * Increments both hitCount and truePositiveCount.
+   * Increments truePositiveCount atomically.
    */
   recordTruePositive(term: string): void {
     const keyword = this.store.keywords.find(k => k.term.toLowerCase() === term.toLowerCase());
     if (!keyword) return;
 
     keyword.truePositiveCount = (keyword.truePositiveCount ?? 0) + 1;
-    keyword.hitCount = (keyword.hitCount ?? 0) + 1;
-    keyword.lastHitAt = new Date().toISOString();
+
+    // Update in-store reference
+    const keywordIndex = this.store.keywords.findIndex(k => k.term.toLowerCase() === term.toLowerCase());
+    if (keywordIndex >= 0) {
+      this.store.keywords[keywordIndex] = { ...keyword };
+    }
 
     this.flush();
   }
@@ -217,18 +238,25 @@ export class CorrectionCueLearner {
   /**
    * Records a confirmed false positive for the given keyword term.
    * CORR-10: Decreases keyword weight by 20% (x0.8 multiplicative factor).
+   * D-39-17: Keywords at very low weight (<0.1) still match but contribute minimally.
    */
   recordFalsePositive(term: string): void {
     const keyword = this.store.keywords.find(k => k.term.toLowerCase() === term.toLowerCase());
     if (!keyword) return;
 
     keyword.falsePositiveCount = (keyword.falsePositiveCount ?? 0) + 1;
-    keyword.hitCount = (keyword.hitCount ?? 0) + 1;
 
     // D-39-15: Multiplicative weight decay x0.8 on confirmed FP
     keyword.weight = Math.max(MIN_KEYWORD_WEIGHT, keyword.weight * 0.8);
     keyword.lastHitAt = new Date().toISOString();
 
+    // Update in-store reference
+    const keywordIndex = this.store.keywords.findIndex(k => k.term.toLowerCase() === term.toLowerCase());
+    if (keywordIndex >= 0) {
+      this.store.keywords[keywordIndex] = { ...keyword };
+    }
+
+    // D-39-16: Apply decay BEFORE flush to disk
     this.flush();
   }
 

@@ -17,6 +17,12 @@ pain -> diagnosis -> principle -> gate -> active -> reflection -> training -> in
 - Minimal rule bootstrap and live replay validation shipped in `v1.12`
 - CI and lint baseline are green from `v1.9.3`
 
+## Validated (Phase 39)
+
+- Correction keyword learning loop: FPR/TP counters, weighted confidence scoring, CorrectionObserverWorkflowManager, keyword_optimization trigger system
+- CR-01 fix: correction cue detection correctly records true positives (not false positives)
+- keyword_optimization periodic trigger fires independently of trigger_mode
+
 ## Active
 
 - Production stabilization is more important than new surface features
@@ -73,4 +79,4 @@ This document evolves at phase transitions and milestone boundaries.
 3. Audit Out of Scope
 4. Update Context with current state
 
-*Last updated: 2026-04-14 after v1.14 milestone started*
+*Last updated: 2026-04-14 after Phase 39 (learning-loop) completion*

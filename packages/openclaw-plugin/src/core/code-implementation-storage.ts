@@ -18,6 +18,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { withLock } from '../utils/file-lock.js';
+import { atomicWriteFileSync } from '../utils/io.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -130,12 +131,12 @@ export function writeManifest(
   const manifestPath = path.join(assetRoot, MANIFEST_FILENAME);
   ensureDir(assetRoot);
   withLock(manifestPath, () => {
-    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
+    atomicWriteFileSync(manifestPath, JSON.stringify(manifest, null, 2));
   });
 }
 
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 export function writeEntrySource(
   stateDir: string,
   implId: string,
@@ -147,7 +148,7 @@ export function writeEntrySource(
   const entryPath = path.join(assetRoot, entryFile);
   ensureDir(assetRoot);
   withLock(entryPath, () => {
-    fs.writeFileSync(entryPath, sourceCode, 'utf-8');
+    atomicWriteFileSync(entryPath, sourceCode);
   });
 }
 
@@ -191,7 +192,7 @@ export function loadEntrySource(stateDir: string, implId: string): string | null
  * Idempotent: calling again with the same implId will NOT overwrite an existing entry.js.
  */
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 export function createImplementationAssetDir(
   stateDir: string,
   implId: string,
@@ -219,7 +220,7 @@ export function createImplementationAssetDir(
     ensureDir(assetRoot);
     ensureDir(replaysDir);
     if (!fs.existsSync(entryPath)) {
-      fs.writeFileSync(entryPath, entrySource, 'utf-8');
+      atomicWriteFileSync(entryPath, entrySource);
     }
   });
 

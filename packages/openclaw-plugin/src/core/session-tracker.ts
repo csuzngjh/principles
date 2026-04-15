@@ -1,5 +1,6 @@
 import * as path from 'path';
 import * as fs from 'fs';
+import { atomicWriteFileSync } from '../utils/io.js';
 import type { PainConfig } from './config.js';
 import { SystemLogger } from './system-logger.js';
 import { TWO_HOURS_MS } from '../config/defaults/runtime.js';
@@ -140,7 +141,7 @@ function persistSession(state: SessionState): void {
     if (!sessionPath) return;
     
     try {
-        fs.writeFileSync(sessionPath, JSON.stringify(state, null, 2), 'utf-8');
+        atomicWriteFileSync(sessionPath, JSON.stringify(state, null, 2));
         // Log successful persistence with GFI snapshot for debugging
         if (state.currentGfi > 0) {
             SystemLogger.log(
