@@ -10,12 +10,8 @@ import { SystemLogger } from '../core/system-logger.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import type { EventLog } from '../core/event-log.js';
 import { initPersistence, flushAllSessions } from '../core/session-tracker.js';
-import { acquireLockAsync, releaseLock as releaseImportedLock, type LockContext } from '../utils/file-lock.js';
 import { addDiagnosticianTask, completeDiagnosticianTask } from '../core/diagnostician-task-store.js';
 import { getEvolutionLogger } from '../core/evolution-logger.js';
-import type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
-export type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
-import { LockUnavailableError } from '../config/index.js';
 import { checkWorkspaceIdle, checkCooldown } from './nocturnal-runtime.js';
 import { loadNocturnalConfig } from './nocturnal-config.js';
 import { WorkflowStore } from './subagent-workflow/workflow-store.js';
@@ -36,6 +32,12 @@ import type { CorrectionObserverPayload } from './subagent-workflow/correction-o
 import { KeywordOptimizationService } from './keyword-optimization-service.js';
 import { TrajectoryRegistry } from '../core/trajectory.js';
 import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
+import { migrateToV2, isLegacyQueueItem, migrateQueueToV2, type RawQueueItem, type TaskKind, type TaskPriority } from './evolution-queue-migration.js';
+export type { TaskKind, TaskPriority } from './evolution-queue-migration.js';
+export { acquireQueueLock, requireQueueLock, EVOLUTION_QUEUE_LOCK_SUFFIX, LOCK_MAX_RETRIES, LOCK_RETRY_DELAY_MS, LOCK_STALE_MS } from './evolution-queue-lock.js';
+import { acquireQueueLock, requireQueueLock, EVOLUTION_QUEUE_LOCK_SUFFIX } from './evolution-queue-lock.js';
+import { readRecentPainContext, buildPainSourceKey, hasRecentSimilarReflection } from './evolution-pain-context.js';
+import { hasRecentDuplicateTask, findRecentDuplicateTask, hasEquivalentPromotedRule, PAIN_QUEUE_DEDUP_WINDOW_MS } from './evolution-dedup.js';
 
 const WORKFLOW_TTL_MS = 5 * 60 * 1000; // 5 minutes default TTL for helper workflows
 import { OpenClawTrinityRuntimeAdapter } from '../core/nocturnal-trinity.js';
@@ -287,61 +289,6 @@ interface LegacyEvolutionQueueItem {
     resultRef?: string;
 }
 
-/**
- * Default values for new V2 fields when migrating legacy items.
- */
-const DEFAULT_TASK_KIND: TaskKind = 'pain_diagnosis';
-const DEFAULT_PRIORITY: TaskPriority = 'medium';
-const DEFAULT_MAX_RETRIES = 3;
-
-/**
- * Migrate a legacy queue item to V2 schema.
- * Old items without taskKind are assumed to be pain_diagnosis for backward compatibility.
- */
-function migrateToV2(item: LegacyEvolutionQueueItem): EvolutionQueueItem {
-    return {
-        id: item.id,
-        taskKind: (item.taskKind as TaskKind) || DEFAULT_TASK_KIND,
-        priority: (item.priority as TaskPriority) || DEFAULT_PRIORITY,
-        source: item.source,
-        traceId: item.traceId,
-        task: item.task,
-        score: item.score,
-        reason: item.reason,
-        timestamp: item.timestamp,
-        enqueued_at: item.enqueued_at,
-        started_at: item.started_at,
-        completed_at: item.completed_at,
-        assigned_session_key: item.assigned_session_key,
-        trigger_text_preview: item.trigger_text_preview,
-        status: (item.status as QueueStatus) || 'pending',
-        resolution: item.resolution as TaskResolution | undefined,
-        session_id: item.session_id,
-        agent_id: item.agent_id,
-        retryCount: item.retryCount || 0,
-        maxRetries: item.maxRetries || DEFAULT_MAX_RETRIES,
-        lastError: item.lastError,
-        resultRef: item.resultRef,
-    };
-}
-
-type RawQueueItem = Record<string, unknown>;
-
-/**
- * Check if an item is a legacy (pre-V2) queue item.
- */
-function isLegacyQueueItem(item: RawQueueItem): boolean {
-    return item && typeof item === 'object' && !('taskKind' in item);
-}
-
-/**
- * Migrate entire queue to V2 schema if needed.
- * Returns a new array with all items migrated to V2 format.
- */
-function migrateQueueToV2(queue: RawQueueItem[]): EvolutionQueueItem[] {
-    return queue.map(item => isLegacyQueueItem(item) ? migrateToV2(item as unknown as LegacyEvolutionQueueItem) : item as unknown as EvolutionQueueItem);
-}
-
 function isSessionAtOrBeforeTriggerTime(
     session: { startedAt: string; updatedAt: string },
     triggerTimeMs: number,
@@ -426,16 +373,6 @@ function buildFallbackNocturnalSnapshot(
     };
 }
 
-const PAIN_QUEUE_DEDUP_WINDOW_MS = 30 * 60 * 1000;
-
-// P0 fix: File lock constants and helper for queue operations (prevents TOCTOU race)
-export const EVOLUTION_QUEUE_LOCK_SUFFIX = '.lock';
-export const LOCK_MAX_RETRIES = 50;
-export const LOCK_RETRY_DELAY_MS = 50;
-export const LOCK_STALE_MS = 30_000;
-
- 
- 
 export function createEvolutionTaskId(
     source: string,
     score: number,
@@ -451,59 +388,10 @@ export function createEvolutionTaskId(
         .substring(0, 8);
 }
 
- 
-export async function acquireQueueLock(resourcePath: string, logger: PluginLogger | { warn?: (message: string) => void; info?: (message: string) => void } | undefined, lockSuffix: string = EVOLUTION_QUEUE_LOCK_SUFFIX): Promise<() => void> {
-    try {
-        const ctx: LockContext = await acquireLockAsync(resourcePath, {
-            lockSuffix,
-            maxRetries: LOCK_MAX_RETRIES,
-            baseRetryDelayMs: LOCK_RETRY_DELAY_MS,
-            lockStaleMs: LOCK_STALE_MS,
-        });
-        return () => releaseImportedLock(ctx);
-    } catch (error: unknown) {
-        const warn = logger?.warn;
-        warn?.(`[PD:EvolutionWorker] Failed to acquire lock for ${resourcePath}: ${String(error)}`);
-        throw error;
-    }
-}
-
- 
- 
-async function requireQueueLock(resourcePath: string, logger: PluginLogger | { warn?: (message: string) => void; info?: (message: string) => void } | undefined, scope: string, lockSuffix: string = EVOLUTION_QUEUE_LOCK_SUFFIX): Promise<() => void> {
-    try {
-        return await acquireQueueLock(resourcePath, logger, lockSuffix);
-    } catch (err) {
-        throw new LockUnavailableError(resourcePath, scope, { cause: err });
-    }
-}
-
 export function extractEvolutionTaskId(task: string): string | null {
     if (!task) return null;
     const match = /\[ID:\s*([A-Za-z0-9_-]+)\]/.exec(task);
     return match?.[1] || null;
-}
-
- 
- 
-function findRecentDuplicateTask(
-    queue: EvolutionQueueItem[],
-    source: string,
-    preview: string,
-    now: number,
-    reason?: string
-): EvolutionQueueItem | undefined {
-     
-     
-    const key = normalizePainDedupKey(source, preview, reason);
-    return queue.find((task) => {
-        if (task.status === 'completed') return false;
-        const taskTime = new Date(task.enqueued_at || task.timestamp).getTime();
-        if (!Number.isFinite(taskTime) || (now - taskTime) > PAIN_QUEUE_DEDUP_WINDOW_MS) return false;
-         
-         
-        return normalizePainDedupKey(task.source, task.trigger_text_preview || '', task.reason) === key;
-    });
 }
 
 /**
@@ -547,100 +435,6 @@ export function purgeStaleFailedTasks(
     return { purged: purged.length, remaining: queue.length, byReason };
 }
 
-function normalizePainDedupKey(source: string, preview: string, reason?: string): string {
-    // Include reason in dedup key to match createEvolutionTaskId() behavior
-    // Different reasons for the same source/preview should create different tasks
-    const normalizedReason = (reason || '').trim().toLowerCase();
-    return `${source.trim().toLowerCase()}::${preview.trim().toLowerCase()}::${normalizedReason}`;
-}
-
- 
- 
-export function hasRecentDuplicateTask(queue: EvolutionQueueItem[], source: string, preview: string, now: number, reason?: string): boolean {
-    return !!findRecentDuplicateTask(queue, source, preview, now, reason);
-}
-
-export function hasEquivalentPromotedRule(dictionary: { getAllRules(): Record<string, { type: string; phrases?: string[]; pattern?: string; status: string; }> }, phrase: string): boolean {
-    const normalizedPhrase = phrase.trim().toLowerCase();
-    return Object.values(dictionary.getAllRules()).some((rule) => {
-        if (rule.status !== 'active') return false;
-        if (rule.type === 'exact_match' && Array.isArray(rule.phrases)) {
-            return rule.phrases.some((candidate) => candidate.trim().toLowerCase() === normalizedPhrase);
-        }
-        if (rule.type === 'regex' && typeof rule.pattern === 'string') {
-            return rule.pattern.trim().toLowerCase() === normalizedPhrase;
-        }
-        return false;
-    });
-}
-
-/**
- * Read recent pain context from PAIN_FLAG file.
- * Extracts session_id to link to trajectory DB.
- * Returns structured pain metadata for attaching to sleep_reflection tasks.
- * Returns null if no pain flag exists.
- */
-export function readRecentPainContext(wctx: WorkspaceContext): RecentPainContext {
-    const contract = readPainFlagContract(wctx.workspaceDir);
-    if (contract.status !== 'valid') {
-        return { mostRecent: null, recentPainCount: 0, recentMaxPainScore: 0 };
-    }
-
-    try {
-        const score = parseInt(contract.data.score ?? '0', 10) || 0;
-        const source = contract.data.source ?? '';
-        const reason = contract.data.reason ?? '';
-        const timestamp = contract.data.time ?? '';
-        const sessionId = contract.data.session_id ?? '';
-
-        if (score > 0) {
-            return {
-                mostRecent: { score, source, reason, timestamp, sessionId },
-                recentPainCount: 1,
-                recentMaxPainScore: score,
-            };
-        }
-    } catch {
-        // Best effort — non-fatal
-    }
-
-    return { mostRecent: null, recentPainCount: 0, recentMaxPainScore: 0 };
-}
-
-/**
- * Build a dedup key from pain context.
- * Returns null when no pain context is available (bypasses dedup).
- */
-function buildPainSourceKey(
-    painCtx: ReturnType<typeof readRecentPainContext>,
-): string | null {
-    if (!painCtx.mostRecent) return null;
-    return `${painCtx.mostRecent.source}::${painCtx.mostRecent.reason?.slice(0, 50) ?? ''}`;
-}
-
-/**
- * Check whether a similar sleep_reflection task completed recently.
- * Phase 3c: Prevents redundant reflections of the same underlying issue.
- */
-function hasRecentSimilarReflection(
-    queue: EvolutionQueueItem[],
-    painSourceKey: string,
-    now: number,
-): EvolutionQueueItem | null {
-    const DEDUP_WINDOW_MS = 4 * 60 * 60 * 1000; // 4 hours
-    return queue.find((t) => {
-        if (t.taskKind !== 'sleep_reflection') return false;
-        // Only match completed tasks (exclude failed to allow retries)
-        if (t.status !== 'completed') return false;
-        if (!t.completed_at) return false;
-        const age = now - new Date(t.completed_at).getTime();
-        if (age > DEDUP_WINDOW_MS) return false;
-        const taskPainKey = buildPainSourceKey(t.recentPainContext ?? { mostRecent: null, recentPainCount: 0, recentMaxPainScore: 0 });
-        // If either side has no pain context, they don't match
-        if (!taskPainKey) return false;
-        return taskPainKey === painSourceKey;
-    }) ?? null;
-}
 
 /**
  * Check whether a specific task kind has a pending or in-progress entry.
