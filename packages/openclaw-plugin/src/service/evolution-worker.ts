@@ -240,28 +240,6 @@ export function extractEvolutionTaskId(task: string): string | null {
     return match?.[1] || null;
 }
 
- 
- 
-function findRecentDuplicateTask(
-    queue: EvolutionQueueItem[],
-    source: string,
-    preview: string,
-    now: number,
-    reason?: string
-): EvolutionQueueItem | undefined {
-     
-     
-    const key = normalizePainDedupKey(source, preview, reason);
-    return queue.find((task) => {
-        if (task.status === 'completed') return false;
-        const taskTime = new Date(task.enqueued_at || task.timestamp).getTime();
-        if (!Number.isFinite(taskTime) || (now - taskTime) > PAIN_QUEUE_DEDUP_WINDOW_MS) return false;
-         
-         
-        return normalizePainDedupKey(task.source, task.trigger_text_preview || '', task.reason) === key;
-    });
-}
-
 /**
  * Purge stale failed tasks from the queue.
  * Failed tasks older than the threshold are noise — they won't auto-recover
@@ -2157,6 +2135,7 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
             }
 
             timeoutId = setTimeout(runCycle, interval);
+            timeoutId.unref();
         }
 
         timeoutId = setTimeout(() => {
@@ -2184,11 +2163,14 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                 }
                 // processPromotion removed (D-06)
                 timeoutId = setTimeout(runCycle, interval);
+                timeoutId.unref();
             })().catch((err) => {
                 if (logger) logger.error(`[PD:EvolutionWorker] Startup worker cycle failed: ${String(err)}`);
                 timeoutId = setTimeout(runCycle, interval);
+                timeoutId.unref();
             });
         }, initialDelay);
+        timeoutId.unref();
     },
 
     stop(ctx: OpenClawPluginServiceContext): void {

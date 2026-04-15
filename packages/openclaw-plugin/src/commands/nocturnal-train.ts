@@ -334,6 +334,7 @@ Hardware tiers:
                 proc.kill();
                 reject(new Error(`Trainer timed out after ${timeoutMs}ms`));
               }, timeoutMs);
+              timer.unref(); // Don't keep process alive for timeout
 
               proc.on('close', (code) => {
                 clearTimeout(timer);

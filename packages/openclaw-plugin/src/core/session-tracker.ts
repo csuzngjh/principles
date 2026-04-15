@@ -167,6 +167,7 @@ function schedulePersistence(state: SessionState): void {
         persistSession(state);
         persistTimers.delete(state.sessionId);
     }, 1000);  // 1 second debounce
+    timer.unref(); // Don't keep process alive for persistence
     persistTimers.set(state.sessionId, timer);
 }
 
