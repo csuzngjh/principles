@@ -73,10 +73,11 @@ jobs:
         working-directory: packages/openclaw-plugin
         run: npm run build:production
 
-  test-openclaw-plugin:
-    name: Test OpenClaw Plugin
+  test-openclaw-plugin-unit:
+    name: Test OpenClaw Plugin (unit)
     runs-on: ubuntu-latest
     needs: build-openclaw-plugin
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
 
@@ -87,8 +88,29 @@ jobs:
 
       - name: Install dependencies
         working-directory: packages/openclaw-plugin
-        run: npm ci --ignore-scripts
+        run: npm ci
 
-      - name: Run tests
+      - name: Run unit tests
         working-directory: packages/openclaw-plugin
-        run: npm test
+        run: npm run test:unit
+
+  test-openclaw-plugin-integration:
+    name: Test OpenClaw Plugin (integration)
+    runs-on: ubuntu-latest
+    needs: build-openclaw-plugin
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        working-directory: packages/openclaw-plugin
+        run: npm ci
+
+      - name: Run integration tests
+        working-directory: packages/openclaw-plugin
+        run: npm run test:integration

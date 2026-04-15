@@ -16,9 +16,7 @@ import type {
   PluginHookSubagentSpawningResult,
   PluginHookSubagentContext,
 } from './openclaw-sdk.js';
-import * as crypto from 'crypto';
 import * as path from 'path';
-import type { WorkerProfile } from './core/model-deployment-registry.js';
 import { classifyTask } from './core/local-worker-routing.js';
 import { completeShadowObservation, recordShadowRouting } from './core/shadow-observation-registry.js';
 import { getCommandDescription } from './i18n/commands.js';
@@ -59,82 +57,24 @@ import { migrateDirectoryStructure } from './core/migration.js';
 import { SystemLogger } from './core/system-logger.js';
 import { createDeepReflectTool } from './tools/deep-reflect.js';
 import { createWritePainFlagTool } from './tools/write-pain-flag.js';
-import { PathResolver, resolveWorkspaceDirFromApi } from './core/path-resolver.js';
-import { validateWorkspaceDir } from './core/workspace-dir-validation.js';
-import { resolveRequiredWorkspaceDir, resolveWorkspaceDir, type WorkspaceResolutionContext } from './core/workspace-dir-service.js';
+import { PathResolver } from './core/path-resolver.js';
 import { createPrinciplesConsoleRoute } from './http/principles-console-route.js';
 import { extractAgentIdFromSessionKey } from './utils/session-key.js';
+import { resolveCommandWorkspaceDir, resolveToolHookWorkspaceDirSafe } from './utils/workspace-resolver.js';
+import { computeRuntimeShadowTaskFingerprint, PD_LOCAL_PROFILES } from './utils/shadow-fingerprint.js';
+import type { WorkerProfile } from './core/model-deployment-registry.js';
+import { validateWorkspaceDir } from './core/workspace-dir-validation.js';
+import { resolveWorkspaceDirFromApi } from './core/path-resolver.js';
+import { resolveRequiredWorkspaceDir } from './core/workspace-dir-service.js';
 
 // Track initialization to avoid repeated calls
 let workspaceInitialized = false;
 // Track started evolution workers — one per workspace
 const startedWorkspaces = new Set<string>();
 
-/**
- * Resolve workspaceDir for slash commands.
- * Chain: ctx.workspaceDir → resolveWorkspaceDirFromApi (official OpenClaw API + env vars)
- * 
- * CRITICAL: Throws if workspaceDir cannot be resolved. Silent failures are dangerous
- * because commands might operate on the wrong directory.
- */
-function resolveCommandWorkspaceDir(
-  api: OpenClawPluginApi,
-  ctx: { workspaceDir?: string },
-): string {
-  // 1. Direct from command context (most reliable — set by OpenClaw for current session)
-  if (ctx.workspaceDir) {
-    const issue = validateWorkspaceDir(ctx.workspaceDir);
-    if (!issue) return ctx.workspaceDir;
-    api.logger.error(`[PD:Command] ctx.workspaceDir="${ctx.workspaceDir}" is invalid: ${issue}`);
-  }
-
-  // 2. Official OpenClaw API → env vars → config file
-  const resolved = resolveWorkspaceDirFromApi(api);
-  if (resolved) return resolved;
-
-  // CRITICAL FAILURE: Cannot determine workspace directory
-  const errorMsg = `[PD:Command] CRITICAL: Cannot resolve workspace directory. ` +
-    `ctx.workspaceDir="${ctx.workspaceDir}" is invalid, and all fallbacks failed. ` +
-    `Commands will NOT execute to prevent data corruption.`;
-  api.logger.error(errorMsg);
-  
-  throw new Error(errorMsg);
-}
-
 // Map from childSessionKey → shadowObservationId
 // Used to complete shadow observations when subagent ends
 const pendingShadowObservations = new Map<string, string>();
-
-// PD local worker profiles that are managed by the shadow routing policy
-const PD_LOCAL_PROFILES = new Set<WorkerProfile>(['local-reader', 'local-editor']);
-
-function computeRuntimeShadowTaskFingerprint(event: PluginHookSubagentSpawningEvent): string {
-  const payload = {
-    childSessionKey: event.childSessionKey,
-    agentId: event.agentId,
-    label: event.label ?? '',
-    mode: event.mode,
-    threadRequested: event.threadRequested,
-    requesterChannel: event.requester?.channel ?? '',
-    requesterThreadId: event.requester?.threadId ?? '',
-  };
-  return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex').slice(0, 16);
-}
-
-function _resolveCommandWorkspaceDirStrict(
-  api: OpenClawPluginApi,
-  ctx: WorkspaceResolutionContext,
-): string {
-  return resolveRequiredWorkspaceDir(api, ctx, { source: 'command' });
-}
-
-function resolveToolHookWorkspaceDirSafe(
-  ctx: WorkspaceResolutionContext,
-  api: OpenClawPluginApi,
-  source: string,
-): string | undefined {
-  return resolveWorkspaceDir(api, ctx, { source });
-}
 
 const plugin = {
   name: "Principles Disciple",
@@ -147,7 +87,7 @@ const plugin = {
 
     // ── Startup Health Check: Verify workspaceDir resolution ──
     // Catches OpenClaw context bugs early (e.g., missing workspaceDir in tool hooks)
-    setTimeout(() => {
+    const healthCheckTimer = setTimeout(() => {
       const testCtx = { agentId: 'main' };
       const toolWorkspaceDir = resolveToolHookWorkspaceDirSafe(testCtx, api, 'startup.health_check');
       const toolIssue = validateWorkspaceDir(toolWorkspaceDir);
@@ -158,6 +98,7 @@ const plugin = {
         api.logger.info(`[PD:health] Tool hook workspaceDir OK: "${toolWorkspaceDir}"`);
       }
     }, 1000);
+    healthCheckTimer.unref(); // Don't keep process alive for health check
 
     const language = (api.pluginConfig?.language as string) || 'en';
 
@@ -421,7 +362,7 @@ const plugin = {
 
     // ── Slash Commands ──
     // Register command with optional short alias
-    // eslint-disable-next-line @typescript-eslint/max-params, @typescript-eslint/no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const registerCommandWithAlias = (name: string, alias: string | null, desc: string, handler: any, opts?: { acceptsArgs?: boolean }) => {
       const base = {
         name,

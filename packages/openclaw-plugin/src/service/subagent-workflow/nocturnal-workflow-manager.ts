@@ -36,7 +36,7 @@ import {
 } from '../nocturnal-service.js';
 import { type TrinityStageFailure, type TrinityResult } from '../../core/nocturnal-trinity.js';
 import type { TrinityRuntimeAdapter } from '../../core/nocturnal-trinity.js';
-import type { RecentPainContext } from '../evolution-worker.js';
+import type { RecentPainContext } from './types.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import { validateNocturnalSnapshotIngress } from '../../core/nocturnal-snapshot-contract.js';
@@ -311,7 +311,9 @@ export class NocturnalWorkflowManager implements WorkflowManager {
                         this.logger.warn(`[PD:NocturnalWorkflow] [${workflowId}] Arbiter result: passed=${result.diagnostics.arbiterResult.passed}, failures=${result.diagnostics.arbiterResult.failures.map(f => f.reason).join('; ')}`);
                     }
                     if (result.diagnostics?.selection) {
-                        this.logger.warn(`[PD:NocturnalWorkflow] [${workflowId}] Selection: decision=${result.diagnostics.selection.decision}, principleId=${result.diagnostics.selection.selectedPrincipleId ?? 'none'}, sessionId=${result.diagnostics.selection.selectedSessionId ?? 'none'}`);
+                        const sel = result.diagnostics.selection;
+                        const diag = sel.diagnostics;
+                        this.logger.warn(`[PD:NocturnalWorkflow] [${workflowId}] Selection: decision=${sel.decision}, principleId=${sel.selectedPrincipleId ?? 'none'}, sessionId=${sel.selectedSessionId ?? 'none'}, totalEvaluable=${diag.totalEvaluablePrinciples ?? 0}, filteredByCooldown=${diag.filteredByCooldown ?? 0}, passed=${diag.passedPrinciples?.length ?? 0}`);
                     }
                     
                     this.store.updateWorkflowState(workflowId, 'terminal_error');
@@ -392,7 +394,7 @@ export class NocturnalWorkflowManager implements WorkflowManager {
     }
 
      
-    // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+     
     async notifyLifecycleEvent(
          
         _workflowId: string,

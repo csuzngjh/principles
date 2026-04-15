@@ -23,6 +23,7 @@ import * as path from 'path';
 import type { SessionState } from '../core/session-tracker.js';
 import { listSessions } from '../core/session-tracker.js';
 import { withLockAsync } from '../utils/file-lock.js';
+import { atomicWriteFileSync } from '../utils/io.js';
 
 // ---------------------------------------------------------------------------
 // System Session Detection
@@ -107,6 +108,16 @@ export const DEFAULT_ABANDONED_THRESHOLD_MS = 2 * 60 * 60 * 1000; // 2 hours
 // Types
 // ---------------------------------------------------------------------------
 
+/** Per-task-kind failure tracking for cooldown escalation (Phase 40) */
+export interface TaskFailureState {
+    /** Number of consecutive failures for this task kind */
+    consecutiveFailures: number;
+    /** Current escalation tier: 0=none, 1=30min, 2=4h, 3=24h (cap) */
+    escalationTier: number;
+    /** Cooldown deadline as ISO string, undefined if not in cooldown */
+    cooldownUntil?: string;
+}
+
 /**
  * Persisted state for nocturnal runtime bookkeeping.
  * Stored in {stateDir}/nocturnal-runtime.json
@@ -140,6 +151,13 @@ export interface NocturnalRuntimeState {
         status: 'success' | 'failed' | 'skipped';
         reason?: string;
     };
+
+    /**
+     * Per-task-kind failure tracking for cooldown escalation.
+     * Key: taskKind string (e.g. 'sleep_reflection', 'keyword_optimization')
+     * Value: failure state with consecutive count, tier, and cooldown deadline
+     */
+    taskFailureState?: Record<string, TaskFailureState>;
 }
 
 /** Result of an idle check */
@@ -195,7 +213,7 @@ function createDefaultState(): NocturnalRuntimeState {
 // File Operations (with locking)
 // ---------------------------------------------------------------------------
 
-async function readState(stateDir: string): Promise<NocturnalRuntimeState> {
+export async function readState(stateDir: string): Promise<NocturnalRuntimeState> {
     const filePath = path.join(stateDir, NOCTURNAL_RUNTIME_FILE);
     if (!fs.existsSync(filePath)) {
         return createDefaultState();
@@ -211,6 +229,7 @@ async function readState(stateDir: string): Promise<NocturnalRuntimeState> {
             lastSuccessfulRunAt: parsed.lastSuccessfulRunAt,
             globalCooldownUntil: parsed.globalCooldownUntil,
             lastRunMeta: parsed.lastRunMeta,
+            taskFailureState: parsed.taskFailureState,
         };
     } catch {
         // Corrupted file — start fresh
@@ -218,7 +237,7 @@ async function readState(stateDir: string): Promise<NocturnalRuntimeState> {
     }
 }
 
-function readStateSync(stateDir: string): NocturnalRuntimeState {
+export function readStateSync(stateDir: string): NocturnalRuntimeState {
     const filePath = path.join(stateDir, NOCTURNAL_RUNTIME_FILE);
     if (!fs.existsSync(filePath)) {
         return createDefaultState();
@@ -233,6 +252,7 @@ function readStateSync(stateDir: string): NocturnalRuntimeState {
             lastSuccessfulRunAt: parsed.lastSuccessfulRunAt,
             globalCooldownUntil: parsed.globalCooldownUntil,
             lastRunMeta: parsed.lastRunMeta,
+            taskFailureState: parsed.taskFailureState,
         };
     } catch (err) {
         console.warn(`[nocturnal-runtime] State file corrupted, resetting: ${err instanceof Error ? err.message : String(err)}`);
@@ -240,14 +260,14 @@ function readStateSync(stateDir: string): NocturnalRuntimeState {
     }
 }
 
-async function writeState(stateDir: string, state: NocturnalRuntimeState): Promise<void> {
+export async function writeState(stateDir: string, state: NocturnalRuntimeState): Promise<void> {
     const filePath = path.join(stateDir, NOCTURNAL_RUNTIME_FILE);
     const stateDirPath = path.dirname(filePath);
     if (!fs.existsSync(stateDirPath)) {
         fs.mkdirSync(stateDirPath, { recursive: true });
     }
     await withLockAsync(filePath, async () => {
-        fs.writeFileSync(filePath, JSON.stringify(state, null, 2), 'utf-8');
+        atomicWriteFileSync(filePath, JSON.stringify(state, null, 2));
     });
 }
 
@@ -321,7 +341,7 @@ export function checkWorkspaceIdle(
     }
 
      
-    // eslint-disable-next-line @typescript-eslint/init-declarations
+     
     let reason: string;
     if (mostRecentActivityAt === 0) {
         reason = 'No active sessions found — workspace is idle';
@@ -390,7 +410,7 @@ export function checkCooldown(
         if (cooldownEnd > now) {
             globalCooldownActive = true;
             globalCooldownRemainingMs = cooldownEnd - now;
-            // eslint-disable-next-line @typescript-eslint/prefer-destructuring
+             
             globalCooldownUntil = state.globalCooldownUntil;  
         }
     }
@@ -428,6 +448,33 @@ export function checkCooldown(
         quotaExhausted,
         runsRemaining,
     };
+}
+
+/**
+ * Records a cooldown event for quota tracking (keyword_optimization etc.).
+ * Adds a timestamp to recentRunTimestamps and prunes entries outside the window.
+ * Does NOT set globalCooldownUntil — callers that need it should call recordRunStart.
+ *
+ * @param stateDir - State directory
+ * @param quotaWindowMs - Window size in ms (default: 24 hours)
+ */
+export async function recordCooldown(
+    stateDir: string,
+    quotaWindowMs: number = 24 * 60 * 60 * 1000
+): Promise<void> {
+    const state = await readState(stateDir);
+    const now = new Date().toISOString();
+
+    state.recentRunTimestamps.push(now);
+
+    // Prune old timestamps outside the window
+    const windowStart = Date.now() - quotaWindowMs;
+    state.recentRunTimestamps = state.recentRunTimestamps
+        .map(ts => new Date(ts).getTime())
+        .filter(ts => ts > windowStart)
+        .map(ts => new Date(ts).toISOString());
+
+    await writeState(stateDir, state);
 }
 
 /**
@@ -562,7 +609,7 @@ export interface PreflightCheckResult {
  * @param idleCheckOverride - Optional override for idle check result (for testing)
  */
  
-    // eslint-disable-next-line @typescript-eslint/max-params -- complexity 12, refactor candidate
+     
 export function checkPreflight(
     workspaceDir: string,
     stateDir: string,

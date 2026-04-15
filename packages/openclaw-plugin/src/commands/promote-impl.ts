@@ -30,6 +30,7 @@ import { WorkspaceContext } from '../core/workspace-context.js';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
 import type { Implementation } from '../types/principle-tree-schema.js';
 import { withLock } from '../utils/file-lock.js';
+import { atomicWriteFileSync } from '../utils/io.js';
 
 function getAllImplementations(stateDir: string): Implementation[] {
   const ledger = loadLedger(stateDir);
@@ -227,7 +228,7 @@ function _handlePromoteImpl(options: PromoteImplOptions): PluginCommandResult {
     promotedAt: new Date().toISOString(),
   };
   withLock(eventPath, () => {
-    fs.writeFileSync(eventPath, JSON.stringify(promotionEvent, null, 2), 'utf-8');
+    atomicWriteFileSync(eventPath, JSON.stringify(promotionEvent, null, 2));
   });
   try {
     refreshPrincipleLifecycle(workspaceDir, stateDir);

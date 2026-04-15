@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { withLock, withLockAsync } from '../utils/file-lock.js';
+import { atomicWriteFileSync } from '../utils/io.js';
 import type {
   Implementation,
   ImplementationLifecycleState,
@@ -78,7 +79,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 function clampFloat(value: unknown, min: number, max: number, fallback: number): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     return fallback;
@@ -87,7 +88,7 @@ function clampFloat(value: unknown, min: number, max: number, fallback: number):
 }
 
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 function clampInt(value: unknown, min: number, max: number, fallback: number): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     return fallback;
@@ -314,13 +315,13 @@ function readLedgerFromFile(filePath: string): HybridLedgerStore {
 
 function writeLedgerUnlocked(filePath: string, store: HybridLedgerStore): void {
   ensureParentDir(filePath);
-  fs.writeFileSync(filePath, serializeLedger(store), 'utf-8');
+  atomicWriteFileSync(filePath, serializeLedger(store));
 }
 
  
 function mutateLedger<T>(stateDir: string, mutate: (store: HybridLedgerStore) => T): T {
    
-  // eslint-disable-next-line @typescript-eslint/no-use-before-define
+   
   const filePath = getLedgerFilePath(stateDir);
   return withLock(filePath, () => {
     const store = readLedgerFromFile(filePath);
@@ -333,7 +334,7 @@ function mutateLedger<T>(stateDir: string, mutate: (store: HybridLedgerStore) =>
  
 async function mutateLedgerAsync<T>(stateDir: string, mutate: (store: HybridLedgerStore) => Promise<T>): Promise<T> {
    
-  // eslint-disable-next-line @typescript-eslint/no-use-before-define
+   
   const filePath = getLedgerFilePath(stateDir);
   return withLockAsync(filePath, async () => {
     const store = readLedgerFromFile(filePath);

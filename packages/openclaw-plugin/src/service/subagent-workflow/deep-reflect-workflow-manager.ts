@@ -13,11 +13,11 @@ import type { RuntimeDirectDriver } from './runtime-direct-driver.js';
 import { isSubagentRuntimeAvailable } from '../../utils/subagent-probe.js';
 import { buildCritiquePromptV2 } from '../../tools/critique-prompt.js';
 import { WorkflowManagerBase } from './workflow-manager-base.js';
+import { DEEP_REFLECT_TTL_MS } from '../../config/defaults/runtime.js';
 
 const WORKFLOW_SESSION_PREFIX = 'agent:main:subagent:workflow-';
 
 const DEFAULT_TIMEOUT_MS = 60_000; // Deep-reflect needs more time than empathy
-const DEFAULT_TTL_MS = 10 * 60 * 1000;
 
 export interface DeepReflectWorkflowOptions {
     workspaceDir: string;
@@ -37,7 +37,7 @@ export class DeepReflectWorkflowManager extends WorkflowManagerBase {
             workflowType: 'deep-reflect',
             sessionPrefix: WORKFLOW_SESSION_PREFIX,
             defaultTimeoutMs: DEFAULT_TIMEOUT_MS,
-            defaultTtlMs: DEFAULT_TTL_MS,
+            defaultTtlMs: DEEP_REFLECT_TTL_MS,
         });
     }
 
@@ -70,7 +70,7 @@ export class DeepReflectWorkflowManager extends WorkflowManagerBase {
     }
 
      
-    // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+     
     protected override generateWorkflowId(): string {
         return `wf_dr_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
     }
@@ -98,7 +98,7 @@ export const deepReflectWorkflowSpec: SubagentWorkflowSpec<DeepReflectResult> = 
     workflowType: 'deep-reflect',
     transport: 'runtime_direct',
     timeoutMs: 60_000,
-    ttlMs: 10 * 60 * 1000,
+    ttlMs: DEEP_REFLECT_TTL_MS,
     shouldDeleteSessionAfterFinalize: true,
 
     buildPrompt(taskInput: unknown, ctx: DeepReflectBuildPromptContext): string {

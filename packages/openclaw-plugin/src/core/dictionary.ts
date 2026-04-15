@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { atomicWriteFileSync } from '../utils/io.js';
 
 export type RuleType = 'regex' | 'exact_match';
 
@@ -116,7 +117,7 @@ export class PainDictionary {
         }
     }
 
-    // eslint-disable-next-line complexity -- complexity 13, refactor candidate
+     
     match(text: string): { ruleId: string; severity: number } | undefined {
         if (shouldIgnorePainProtocolText(text)) return undefined;
 
@@ -154,7 +155,7 @@ export class PainDictionary {
             if (!fs.existsSync(this.stateDir)) {
                 fs.mkdirSync(this.stateDir, { recursive: true });
             }
-            fs.writeFileSync(this.filePath, JSON.stringify(this.data, null, 2), 'utf8');
+            atomicWriteFileSync(this.filePath, JSON.stringify(this.data, null, 2));
         } catch (e) {
             console.error('[PD] Failed to flush pain_dictionary.json:', e);
         }

@@ -31,11 +31,17 @@ const createMockApi = (workspaceDir: string) => ({
   pluginConfig: {},
 });
 
+// Helper to get today's events file path (EventLog uses date-stamped files)
+const getTodayEventsFile = (logsDir: string) => {
+  const today = new Date().toISOString().split('T')[0];
+  return path.join(logsDir, `events_${today}.jsonl`);
+};
+
 describe('E2E: Tool Hooks workspaceDir Resolution', () => {
   const testWorkspaceDir = path.join(os.tmpdir(), 'pd-tool-hooks-e2e-test');
   const stateDir = path.join(testWorkspaceDir, '.state');
   const logsDir = path.join(stateDir, 'logs');
-  const eventsFile = path.join(logsDir, 'events.jsonl');
+  const eventsFile = getTodayEventsFile(logsDir);
 
   beforeAll(() => {
     // Create test workspace structure
@@ -65,7 +71,7 @@ describe('E2E: Tool Hooks workspaceDir Resolution', () => {
 
   describe('Scenario 2: ctx.workspaceDir is undefined (current OpenClaw behavior)', () => {
     it('should fallback to agentId resolution', async () => {
-      const { resolveValidWorkspaceDir } = await import('../../src/core/workspace-dir-validation.js');
+      const { resolveValidWorkspaceDir } = await import('../../src/core/workspace-dir-service.js');
       
       const mockApi = createMockApi(testWorkspaceDir);
       const ctx = { 
@@ -80,7 +86,7 @@ describe('E2E: Tool Hooks workspaceDir Resolution', () => {
     });
 
     it('should refuse to guess a workspace when agentId is also undefined', async () => {
-      const { resolveValidWorkspaceDir } = await import('../../src/core/workspace-dir-validation.js');
+      const { resolveValidWorkspaceDir } = await import('../../src/core/workspace-dir-service.js');
       
       const mockApi = createMockApi(testWorkspaceDir);
       const ctx = { 
@@ -131,7 +137,7 @@ describe('E2E: Tool Hooks workspaceDir Resolution', () => {
 
   describe('Scenario 4: Invalid workspace candidates are rejected', () => {
     it('should return undefined when all workspace resolution candidates are invalid', async () => {
-      const { resolveValidWorkspaceDir } = await import('../../src/core/workspace-dir-validation.js');
+      const { resolveValidWorkspaceDir } = await import('../../src/core/workspace-dir-service.js');
       
       const mockApi = createMockApi(os.homedir());
       mockApi.runtime.agent.resolveAgentWorkspaceDir.mockReturnValue(os.homedir());
@@ -149,7 +155,7 @@ describe('E2E: EventLog flushImmediately', () => {
   const testWorkspaceDir = path.join(os.tmpdir(), 'pd-eventlog-flush-test');
   const stateDir = path.join(testWorkspaceDir, '.state');
   const logsDir = path.join(stateDir, 'logs');
-  const eventsFile = path.join(logsDir, 'events.jsonl');
+  const eventsFile = getTodayEventsFile(logsDir);
 
   beforeAll(() => {
     fs.mkdirSync(logsDir, { recursive: true });

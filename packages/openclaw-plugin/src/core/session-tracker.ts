@@ -1,7 +1,9 @@
 import * as path from 'path';
 import * as fs from 'fs';
+import { atomicWriteFileSync } from '../utils/io.js';
 import type { PainConfig } from './config.js';
 import { SystemLogger } from './system-logger.js';
+import { TWO_HOURS_MS } from '../config/defaults/runtime.js';
 
 export interface TokenUsage {
     input?: number;
@@ -84,7 +86,7 @@ export function initPersistence(stateDir: string): void {
     
     // Load all existing sessions
      
-    // eslint-disable-next-line @typescript-eslint/no-use-before-define
+     
     loadAllSessions();
 }
 
@@ -107,7 +109,7 @@ function loadAllSessions(): void {
     try {
         const files = fs.readdirSync(persistDir).filter(f => f.endsWith('.json'));
         const now = Date.now();
-        const twoHoursAgo = now - 2 * 60 * 60 * 1000;
+        const twoHoursAgo = now - TWO_HOURS_MS;
         
         for (const file of files) {
             try {
@@ -139,7 +141,7 @@ function persistSession(state: SessionState): void {
     if (!sessionPath) return;
     
     try {
-        fs.writeFileSync(sessionPath, JSON.stringify(state, null, 2), 'utf-8');
+        atomicWriteFileSync(sessionPath, JSON.stringify(state, null, 2));
         // Log successful persistence with GFI snapshot for debugging
         if (state.currentGfi > 0) {
             SystemLogger.log(
@@ -165,6 +167,7 @@ function schedulePersistence(state: SessionState): void {
         persistSession(state);
         persistTimers.delete(state.sessionId);
     }, 1000);  // 1 second debounce
+    timer.unref(); // Don't keep process alive for persistence
     persistTimers.set(state.sessionId, timer);
 }
 
@@ -182,7 +185,7 @@ export function flushAllSessions(): void {
 }
 
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 function getOrCreateSession(sessionId: string, workspaceDir?: string, sessionKey?: string, trigger?: string): SessionState {
     let state = sessions.get(sessionId);
     if (!state) {
@@ -245,7 +248,7 @@ export function trackToolRead(sessionId: string, filePath: string, workspaceDir?
 }
 
  
-    // eslint-disable-next-line @typescript-eslint/max-params -- complexity 12, refactor candidate
+     
 export function trackLlmOutput(sessionId: string, usage: TokenUsage | undefined, config?: PainConfig, workspaceDir?: string, sessionKey?: string, trigger?: string): SessionState {
     const state = getOrCreateSession(sessionId, workspaceDir, sessionKey, trigger);
     state.llmTurns += 1;
@@ -285,7 +288,7 @@ export function trackLlmOutput(sessionId: string, usage: TokenUsage | undefined,
  * Tracks physical friction based on tool execution failures.
  */
  
-    // eslint-disable-next-line @typescript-eslint/max-params -- complexity 11, slightly over threshold
+     
 export function trackFriction(
     sessionId: string,
     deltaF: number,
@@ -552,7 +555,7 @@ export function decayGfi(sessionId: string, elapsedMinutes: number): SessionStat
     if (!state || state.currentGfi <= 0 || elapsedMinutes <= 0) return undefined;
     
     // Determine decay rate based on current GFI level (segmented)
-    // eslint-disable-next-line @typescript-eslint/init-declarations
+     
     let decayRate: number;
     if (state.currentGfi >= 70) {
       decayRate = 0.03;  // 3%/min for severe friction
