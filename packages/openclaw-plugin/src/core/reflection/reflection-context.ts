@@ -160,52 +160,69 @@ export class ReflectionContextCollector {
   /**
    * Attempt to resolve painIds to actual pain events and a session.
    *
-   * Known gap: The derivedFromPainIds stored in the ledger are opaque string
-   * identifiers. They may correspond to pain event text, evolution queue entries,
-   * or other identifiers. Direct resolution to trajectory pain_events rows is
-   * not always possible.
-   *
-   * Strategy: Search recent sessions for pain events whose text or reason
-   * contains any of the sourcePainIds. This is a heuristic.
+   * Two-phase strategy:
+   * 1. Exact ID match: sourcePainIds are stringified pain_events row IDs.
+   *    If any match String(pe.id) exactly, use those and stop.
+   * 2. Heuristic fallback: substring match on reason/origin fields.
+   *    Only used when no exact matches are found.
    */
   private resolvePainEvents(sourcePainIds: string[]): {
     painEvents: NocturnalPainEvent[];
     sessionId: string | null;
   } {
-    // Get recent sessions to search through
     const sessions = this.trajectory.listRecentSessions({ limit: 100 });
+    const sourcePainIdSet = new Set(sourcePainIds);
 
-    const matchedPainEvents: NocturnalPainEvent[] = [];
-    let matchedSessionId: string | null = null;
+    const exactMatches: NocturnalPainEvent[] = [];
+    const heuristicMatches: NocturnalPainEvent[] = [];
+    let exactSessionId: string | null = null;
+    let heuristicSessionId: string | null = null;
 
     for (const session of sessions) {
       const sessionPainEvents = this.trajectory.listPainEventsForSession(session.sessionId);
 
       for (const pe of sessionPainEvents) {
-        // Check if any sourcePainId matches this pain event's text, reason, or id
-        const peText = [pe.reason, pe.origin, String(pe.id)].filter(Boolean);
-        const isMatch = sourcePainIds.some((painId) =>
-          peText.some((field) => field?.includes(painId)),
-        );
-
-        if (isMatch) {
-          matchedPainEvents.push({
+        // Phase 1: exact ID match
+        if (sourcePainIdSet.has(String(pe.id))) {
+          exactMatches.push({
             source: pe.source,
             score: pe.score,
             severity: pe.severity,
             reason: pe.reason,
             createdAt: pe.createdAt,
           });
-          if (!matchedSessionId) {
-            matchedSessionId = session.sessionId;
+          if (!exactSessionId) {
+            exactSessionId = session.sessionId;
+          }
+          continue;
+        }
+
+        // Phase 2: heuristic substring match on reason/origin only
+        const peText = [pe.reason, pe.origin].filter(Boolean);
+        const isMatch = sourcePainIds.some((painId) =>
+          peText.some((field) => field?.includes(painId)),
+        );
+
+        if (isMatch) {
+          heuristicMatches.push({
+            source: pe.source,
+            score: pe.score,
+            severity: pe.severity,
+            reason: pe.reason,
+            createdAt: pe.createdAt,
+          });
+          if (!heuristicSessionId) {
+            heuristicSessionId = session.sessionId;
           }
         }
       }
     }
 
-    return {
-      painEvents: matchedPainEvents,
-      sessionId: matchedSessionId,
-    };
+    // Prefer exact matches over heuristic matches
+    if (exactMatches.length > 0) {
+      return { painEvents: exactMatches, sessionId: exactSessionId };
+    }
+
+    return { painEvents: heuristicMatches, sessionId: heuristicSessionId };
   }
 }

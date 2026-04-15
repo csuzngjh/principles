@@ -269,6 +269,55 @@ describe('ReflectionContextCollector', () => {
   // -----------------------------------------------------------------------
 
   describe('edge cases', () => {
+    it('prefers exact ID match over substring heuristic', () => {
+      // Create two pain events in a new session.
+      // After earlier tests, these will get auto-increment IDs (e.g., 4 and 5).
+      // We'll use the SECOND event's ID for matching, then verify only that
+      // ONE event matches (not both by substring).
+      const sessionId = 'sess_exact_match';
+      setupSession(sessionId, [
+        { source: 'gate_block', score: 90, reason: 'exact_match_target', severity: 'severe' },
+        { source: 'gate_block', score: 50, reason: 'exact_match_target_10', severity: 'moderate' },
+      ]);
+
+      // Find the actual ID of the first pain event in this session
+      const sessionPainEvents = trajectory.listPainEventsForSession(sessionId);
+      expect(sessionPainEvents.length).toBeGreaterThanOrEqual(2);
+      const targetId = String(sessionPainEvents[0].id);
+
+      // If substring matching were used, the painId (e.g., "4") could match
+      // strings containing "4" in other sessions. Exact match prevents this.
+      setupLedger([
+        makePrinciple('P_EXACT', { derivedFromPainIds: [targetId] }),
+      ]);
+
+      const result = collector.collect('P_EXACT');
+
+      expect(result).not.toBeNull();
+      // Exact match: only ONE pain event should match
+      expect(result!.painEvents).toHaveLength(1);
+      expect(result!.painEvents[0].reason).toBe('exact_match_target');
+      expect(result!.lineage.sessionId).toBe(sessionId);
+    });
+
+    it('falls back to substring heuristic when no exact ID match', () => {
+      const sessionId = 'sess_heuristic';
+      setupSession(sessionId, [
+        { source: 'gate_block', score: 80, reason: 'UNIQUE_SUBSTRING_xyz write', severity: 'severe' },
+      ]);
+
+      // No pain event has this as its row ID, but substring "UNIQUE_SUBSTRING_xyz" is in the reason
+      setupLedger([
+        makePrinciple('P_HEUR', { derivedFromPainIds: ['UNIQUE_SUBSTRING_xyz'] }),
+      ]);
+
+      const result = collector.collect('P_HEUR');
+
+      expect(result).not.toBeNull();
+      expect(result!.painEvents.length).toBeGreaterThanOrEqual(1);
+      expect(result!.painEvents.some(pe => pe.reason === 'UNIQUE_SUBSTRING_xyz write')).toBe(true);
+    });
+
     it('handles empty derivedFromPainIds array (not undefined)', () => {
       setupLedger([
         makePrinciple('P_EMPTY', { derivedFromPainIds: [] }),
