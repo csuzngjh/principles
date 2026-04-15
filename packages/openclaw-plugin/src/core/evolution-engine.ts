@@ -325,7 +325,7 @@ export class EvolutionEngine {
   // ===== 事件管理 =====
 
    
-  // eslint-disable-next-line @typescript-eslint/max-params
+   
   private createEvent(
     type: 'success' | 'failure',
     taskHash: string,
@@ -388,7 +388,7 @@ export class EvolutionEngine {
   }
 
    
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+   
   private createNewScorecard(): EvolutionScorecard {
     const now = new Date().toISOString();
     return {
@@ -469,6 +469,7 @@ export class EvolutionEngine {
       this.retryTimer = setTimeout(() => {
         this.processRetryQueue();
       }, 1000);
+      this.retryTimer.unref(); // Don't keep process alive for retry
     }
   }
 
@@ -531,7 +532,7 @@ export class EvolutionEngine {
   // ===== 工具方法 =====
 
    
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+   
   private generateId(): string {
     return `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
   }

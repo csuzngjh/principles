@@ -2,6 +2,48 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { resolvePdPath } from '../core/paths.js';
 
+/**
+ * Atomic file write — write to temp then rename to prevent partial writes on crash.
+ *
+ * On Windows, renameSync can fail with EPERM/EBUSY if the file is temporarily
+ * locked by antivirus software or another process. Retries with exponential
+ * backoff to handle transient locks.
+ */
+const RENAME_MAX_RETRIES = 3;
+const RENAME_BASE_DELAY_MS = 50;
+
+export function atomicWriteFileSync(filePath: string, data: string): void {
+    const tmpPath = filePath + '.tmp';
+    fs.writeFileSync(tmpPath, data, 'utf8');
+
+    let lastError: Error | undefined;
+    for (let attempt = 0; attempt < RENAME_MAX_RETRIES; attempt++) {
+        try {
+            fs.renameSync(tmpPath, filePath);
+            return;
+        } catch (err) {
+            lastError = err as Error;
+            const code = (err as NodeJS.ErrnoException).code;
+            // Only retry on Windows transient lock errors
+            if (code === 'EPERM' || code === 'EBUSY' || code === 'EACCES') {
+                if (attempt < RENAME_MAX_RETRIES - 1) {
+                    const delay = RENAME_BASE_DELAY_MS * Math.pow(2, attempt);
+                    // Busy-wait is acceptable for very short delays (50-200ms)
+                    const end = Date.now() + delay;
+                    while (Date.now() < end) { /* spin */ }
+                }
+                continue;
+            }
+            // Non-retryable error — throw immediately
+            break;
+        }
+    }
+
+    // Clean up temp file on failure
+    try { fs.unlinkSync(tmpPath); } catch { /* best effort */ }
+    throw lastError;
+}
+
      
 export function normalizePath(filePath: string, projectDir: string): string {
   if (!filePath) return '';
@@ -18,7 +60,7 @@ export function normalizePath(filePath: string, projectDir: string): string {
   }
 
    
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let rel: string;
   if (projectIsWin) {
     const projectAbs = path.resolve(projectDir);

@@ -98,20 +98,13 @@ import {
   type PreflightCheckResult,
 } from './nocturnal-runtime.js';
 import { loadNocturnalConfig } from './nocturnal-config.js';
+import { atomicWriteFileSync } from '../utils/io.js';
 import { NocturnalPathResolver } from '../core/nocturnal-paths.js';
 import { registerSample } from '../core/nocturnal-dataset.js';
 import { getPrincipleState, setPrincipleState } from '../core/principle-training-state.js';
 import type { Implementation } from '../types/principle-tree-schema.js';
 import { validateNocturnalSnapshotIngress } from '../core/nocturnal-snapshot-contract.js';
 
-/**
- * Atomic file write — write to temp then rename to prevent partial writes on crash.
- */
-function atomicWriteFileSync(filePath: string, data: string): void {
-  const tmpPath = filePath + '.tmp';
-  fs.writeFileSync(tmpPath, data, 'utf8');
-  fs.renameSync(tmpPath, filePath);
-}
 
 // ---------------------------------------------------------------------------
 // #251: Sync trainingStore sample counts after registration
