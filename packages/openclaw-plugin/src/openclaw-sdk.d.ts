@@ -429,7 +429,7 @@ export interface PluginHookBeforePromptBuildResult {
 
 export interface PluginHookBeforeToolCallEvent {
     toolName: string;
-    params: Record<string, unknown>;
+    params: Record<string, any>;
     runId?: string;
     toolCallId?: string;
 }
@@ -446,7 +446,7 @@ export type PluginApprovalResolution =
     | 'cancelled';
 
 export interface PluginHookBeforeToolCallResult {
-    params?: Record<string, unknown>;
+    params?: Record<string, any>;
     block?: boolean;
     blockReason?: string;
     /**
@@ -471,7 +471,7 @@ export interface PluginHookBeforeToolCallResult {
 
 export interface PluginHookAfterToolCallEvent {
     toolName: string;
-    params: Record<string, unknown>;
+    params: Record<string, any>;
     runId?: string;
     toolCallId?: string;
     result?: unknown;
@@ -496,14 +496,14 @@ export interface PluginHookLlmOutputEvent {
 }
 
 export interface PluginHookBeforeMessageWriteEvent {
-    message: unknown;
+    message: any;
     sessionKey?: string;
     agentId?: string;
 }
 
 export interface PluginHookBeforeMessageWriteResult {
     block?: boolean;
-    message?: unknown;
+    message?: any;
 }
 
 export interface PluginHookSubagentEndedEvent {
