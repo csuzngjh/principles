@@ -7,7 +7,7 @@
 - [x] **v1.13** - Boundary Contract Hardening (Phases 19-23, shipped 2026-04-11) - [Archive](milestones/v1.13/v1.13-ROADMAP.md)
 - [x] **v1.14** - Evolution Worker Decomposition & Contract Hardening (Phases 24-29, baseline complete on branch `fix/bugs-231-228` / PR #245)
 - [x] **v1.15** - Runtime & Truth Contract Hardening (Phases 30-33, shipped 2026-04-12)
-- [x] **v1.16** - Trinity Training Trajectory Quality Enhancement (Phases 34-37, shipped 2026-04-13)
+- [x] **v1.16** - Trinity Training Trajectory Quality Enhancement (Phases 34-37, shipped 2026-04-14)
 - [x] **v1.18** - Nocturnal State Safety & Recovery (Phases 38-41, shipped 2026-04-15) - [Archive](milestones/v1.18-ROADMAP.md)
 - [ ] **v1.10** - Thinking Models page optimization (deferred)
 
@@ -16,7 +16,7 @@
 **Phase Numbering:**
 - Integer phases (30-33): v1.15 Runtime & Truth Contract Hardening (shipped)
 - Integer phases (34-37): v1.16 Trinity Training Trajectory Quality Enhancement (shipped)
-- Integer phases (38-41): v1.18 Nocturnal State Safety & Recovery (current)
+- Integer phases (38-41): v1.18 Nocturnal State Safety & Recovery (shipped)
 
 <details>
 <summary>Shipped milestones (Phases 1-33)</summary>
@@ -34,16 +34,16 @@
 
 </details>
 
-### v1.16 Trinity Training Trajectory Quality Enhancement (In Progress)
+### v1.16 Trinity Training Trajectory Quality Enhancement (SHIPPED 2026-04-14)
 
 **Milestone Goal:** Improve Nocturnal Trinity pipeline's training artifact quality through Dreamer diversity, runtime reasoning derivation, Philosopher multi-dimension evaluation, and Scribe contrastive analysis.
 
-- [x] **Phase 34: Reasoning Deriver Module** - Build leaf module for runtime reasoning derivation from existing snapshot data (completed 2026-04-13)
-- [x] **Phase 35: Dreamer Enhancement** - Enhance Dreamer prompt for candidate diversity with deriver integration and soft post-validation (completed 2026-04-13)
-- [x] **Phase 36: Philosopher 6D Evaluation** - Expand Philosopher evaluation to 6 dimensions with risk assessment (completed 2026-04-13)
-- [x] **Phase 37: Scribe Contrastive Analysis** - Add contrastive analysis to Scribe output with backward-compatible optional fields (completed 2026-04-13)
+- [x] **Phase 34: Reasoning Deriver Module** - Build leaf module for runtime reasoning derivation from existing snapshot data (completed 2026-04-14)
+- [x] **Phase 35: Dreamer Enhancement** - Enhance Dreamer prompt for candidate diversity with deriver integration and soft post-validation (completed 2026-04-14)
+- [x] **Phase 36: Philosopher 6D Evaluation** - Expand Philosopher evaluation to 6 dimensions with risk assessment (completed 2026-04-14)
+- [x] **Phase 37: Scribe Contrastive Analysis** - Add contrastive analysis to Scribe output with backward-compatible optional fields (completed 2026-04-14)
 
-### v1.18 Nocturnal State Safety & Recovery (In Progress)
+### v1.18 Nocturnal State Safety & Recovery (SHIPPED 2026-04-15)
 
 **Milestone Goal:** Ensure nocturnal pipeline state files are crash-safe through atomic writes, transient failure recovery, and startup reconciliation.
 
@@ -173,8 +173,8 @@ Phases execute in numeric order: 38 -> 39 -> 40 -> 41
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 38. Atomic Write Utility | v1.18 | 1/1 | Complete | 2026-04-14 |
-| 39. Nocturnal Write Migration | v1.18 | 4/4 | Complete    | 2026-04-14 |
-| 40. Failure Classification | v1.18 | 3/3 | Complete    | 2026-04-14 |
-| 41. Startup Reconciliation | v1.18 | 2/2 | Complete    | 2026-04-14 |
+| 39. Nocturnal Write Migration | v1.18 | 4/4 | Complete | 2026-04-14 |
+| 40. Failure Classification | v1.18 | 3/3 | Complete | 2026-04-14 |
+| 41. Startup Reconciliation | v1.18 | 2/2 | Complete | 2026-04-14 |
 
-*Last updated: 2026-04-14*
+*Last updated: 2026-04-15*
