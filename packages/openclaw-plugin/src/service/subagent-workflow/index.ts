@@ -65,3 +65,16 @@ export type {
     WorkflowEventRow,
     WorkflowDebugSummary,
 } from './types.js';
+
+export {
+    CorrectionObserverWorkflowManager,
+    createCorrectionObserverWorkflowManager,
+    correctionObserverWorkflowSpec,
+    type CorrectionObserverWorkflowOptions,
+} from './correction-observer-workflow-manager.js';
+
+export type {
+    CorrectionObserverPayload,
+    CorrectionObserverResult,
+    CorrectionObserverWorkflowSpec,
+} from './correction-observer-types.js';

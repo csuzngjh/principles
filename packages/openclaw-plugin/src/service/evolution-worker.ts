@@ -16,11 +16,10 @@ import { getEvolutionLogger } from '../core/evolution-logger.js';
 import type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 export type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 import { LockUnavailableError } from '../config/index.js';
-import { PAIN_QUEUE_DEDUP_WINDOW_MS } from '../config/defaults/runtime.js';
 import { checkWorkspaceIdle, checkCooldown } from './nocturnal-runtime.js';
 import { loadNocturnalConfig } from './nocturnal-config.js';
 import { WorkflowStore } from './subagent-workflow/workflow-store.js';
-import type { WorkflowRow, RecentPainContext } from './subagent-workflow/types.js';
+import type { WorkflowRow } from './subagent-workflow/types.js';
 import { EmpathyObserverWorkflowManager } from './subagent-workflow/empathy-observer-workflow-manager.js';
 import { DeepReflectWorkflowManager } from './subagent-workflow/deep-reflect-workflow-manager.js';
 import { NocturnalWorkflowManager, nocturnalWorkflowSpec } from './subagent-workflow/nocturnal-workflow-manager.js';
@@ -32,22 +31,14 @@ import {
 import { validateNocturnalSnapshotIngress } from '../core/nocturnal-snapshot-contract.js';
 import { isExpectedSubagentError } from './subagent-workflow/subagent-error-utils.js';
 import { readPainFlagContract } from '../core/pain.js';
-import { CorrectionObserverWorkflowManager, correctionObserverWorkflowSpec } from './correction-observer-workflow-manager.js';
-import type { CorrectionObserverPayload } from './correction-observer-types.js';
+import { CorrectionObserverWorkflowManager, correctionObserverWorkflowSpec } from './subagent-workflow/correction-observer-workflow-manager.js';
+import type { CorrectionObserverPayload } from './subagent-workflow/correction-observer-types.js';
 import { KeywordOptimizationService } from './keyword-optimization-service.js';
 import { TrajectoryRegistry } from '../core/trajectory.js';
 import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
-import { WORKFLOW_TTL_MS } from '../config/defaults/runtime.js';
-import { OpenClawTrinityRuntimeAdapter } from '../core/nocturnal-trinity.js';
 
-/**
- * Atomic file write — write to temp then rename to prevent partial writes on crash.
- */
-function atomicWriteFileSync(filePath: string, data: string): void {
-  const tmpPath = filePath + '.tmp';
-  fs.writeFileSync(tmpPath, data, 'utf8');
-  fs.renameSync(tmpPath, filePath);
-}
+const WORKFLOW_TTL_MS = 5 * 60 * 1000; // 5 minutes default TTL for helper workflows
+import { OpenClawTrinityRuntimeAdapter } from '../core/nocturnal-trinity.js';
 
 // ── Workflow Watchdog ────────────────────────────────────────────────────────
 // Detects stale/orphaned workflows, invalid results, and cleanup failures.
@@ -208,6 +199,27 @@ let timeoutId: NodeJS.Timeout | null = null;
  */
 export type QueueStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'canceled';
 export type TaskResolution = 'marker_detected' | 'auto_completed_timeout' | 'failed_max_retries' | 'runtime_unavailable' | 'canceled' | 'late_marker_principle_created' | 'late_marker_no_principle' | 'stub_fallback' | 'skipped_thin_violation';
+
+/**
+ * Recent pain context attached to sleep_reflection tasks.
+ * Carries explicit recent pain signal metadata without being a separate task kind.
+ * Used by NocturnalTargetSelector for ranking bias and context enrichment.
+ */
+export interface RecentPainContext {
+  /** Most recent unresolved pain event */
+  mostRecent: {
+    score: number;
+    source: string;
+    reason: string;
+    timestamp: string;
+    /** Session ID where the pain occurred */
+    sessionId: string;
+  } | null;
+  /** Count of pain events in the recent window (for signal strength) */
+  recentPainCount: number;
+  /** Highest pain score in the recent window */
+  recentMaxPainScore: number;
+}
 
 export interface EvolutionQueueItem {
     // Core identity
@@ -414,6 +426,7 @@ function buildFallbackNocturnalSnapshot(
     };
 }
 
+const PAIN_QUEUE_DEDUP_WINDOW_MS = 30 * 60 * 1000;
 
 // P0 fix: File lock constants and helper for queue operations (prevents TOCTOU race)
 export const EVOLUTION_QUEUE_LOCK_SUFFIX = '.lock';
@@ -711,7 +724,7 @@ function enqueueNewSleepReflectionTask(
         recentPainContext,
     });
 
-    atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
+    fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
     logger?.info?.(`[PD:EvolutionWorker] Enqueued sleep_reflection task ${taskId}`);
 }
 
@@ -856,7 +869,7 @@ async function doEnqueuePainTask(
             retryCount: 0, maxRetries: 3,
         });
 
-        atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
+        fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
         fs.appendFileSync(painFlagPath, `\nstatus: queued\ntask_id: ${taskId}\n`, 'utf8');
         result.enqueued = true;
 
@@ -1645,7 +1658,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
 
             // Write claimed state (includes any pain changes from above) and release lock
             if (queueChanged) {
-                atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
+                fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
             }
             releaseLock();
             for (const sleepTask of sleepReflectionTasks) {
@@ -1899,7 +1912,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             freshQueue[idx] = sleepTask;
                         }
                     }
-                    atomicWriteFileSync(queuePath, JSON.stringify(freshQueue, null, 2));
+                    fs.writeFileSync(queuePath, JSON.stringify(freshQueue, null, 2), 'utf8');
 
                     // Log completions to EvolutionLogger
                     for (const sleepTask of sleepReflectionTasks) {
@@ -1992,14 +2005,10 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     };
 
                     // Dispatch LLM subagent via CorrectionObserverWorkflowManager
-                    const subagent = api?.runtime?.subagent;
-                    if (!subagent) {
-                        throw new Error('[PD:EvolutionWorker] subagent runtime not available for keyword_optimization');
-                    }
                     const manager = new CorrectionObserverWorkflowManager({
                         workspaceDir: wctx.workspaceDir,
                         logger,
-                        subagent,
+                        subagent: api?.runtime?.subagent!,
                         agentSession: api?.runtime?.agent?.session,
                     });
 
@@ -2013,11 +2022,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         workflowId = handle.workflowId;
                         koTask.resultRef = workflowId;
                     } else {
-                        // isPolling implies resultRef exists (checked above)
-                        workflowId = koTask.resultRef;
-                        if (!workflowId) {
-                            throw new Error(`[PD:EvolutionWorker] keyword_optimization task ${koTask.id} has no resultRef in polling mode`);
-                        }
+                        workflowId = koTask.resultRef!;
                     }
 
                     // Poll workflow state
@@ -2029,7 +2034,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
 
                             if (parsedResult?.updated) {
                                 koService.applyResult(parsedResult);
-                                await learner.recordOptimizationPerformed();
+                                learner.recordOptimizationPerformed();
                                 logger?.info?.(`[PD:EvolutionWorker] keyword_optimization applied mutations: ${parsedResult.summary}`);
                             } else {
                                 logger?.info?.(`[PD:EvolutionWorker] keyword_optimization completed with no updates`);
@@ -2082,7 +2087,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         freshQueue.push(koTask);
                     }
                 }
-                fs.writeFileSync(queuePath, JSON.stringify(freshQueue, null, 2));
+                fs.writeFileSync(queuePath, JSON.stringify(freshQueue, null, 2), 'utf8');
             } catch (koResultErr) {
                 logger?.warn?.(`[PD:EvolutionWorker] Failed to write keyword_optimization results: ${String(koResultErr)}`);
             } finally {
@@ -2092,7 +2097,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
         }
 
         if (queueChanged) {
-            atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
+            fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
         }
 
         // Pipeline observability: log stage-level summary at end of cycle
@@ -2210,7 +2215,7 @@ export async function registerEvolutionTaskSession(
         if (!task.started_at) {
             task.started_at = new Date().toISOString();
         }
-        atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
+        fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
         return true;
     } finally {
         releaseLock();
@@ -2250,7 +2255,7 @@ interface WorkerStatusReport {
 function writeWorkerStatus(stateDir: string, report: WorkerStatusReport): void {
     try {
         const statusPath = path.join(stateDir, 'worker-status.json');
-        atomicWriteFileSync(statusPath, JSON.stringify(report, null, 2));
+        fs.writeFileSync(statusPath, JSON.stringify(report, null, 2), 'utf8');
     } catch (statusErr) {
         // Non-critical: worker-status.json is for monitoring, failure is acceptable
         // (no logger available in this standalone helper)
@@ -2281,7 +2286,7 @@ async function processEvolutionQueueWithResult(
         const purgeResult = purgeStaleFailedTasks(queue, logger);
         if (purgeResult.purged > 0) {
             // Write back the cleaned queue
-            atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
+            fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
         }
 
         queueResult.total = queue.length;
