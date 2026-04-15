@@ -51,8 +51,9 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
-    pool: 'threads',
-    teardownTimeout: 15000,
+    // Use forks pool to avoid threads pool issues
+    pool: 'forks',
+    teardownTimeout: 30000,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html'],
@@ -64,26 +65,5 @@ export default defineConfig({
         statements: 70,
       },
     },
-    // Workspace projects for layered testing
-    projects: [
-      {
-        test: {
-          name: 'unit',
-          include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
-          exclude: integrationTests,
-          // Use forks pool to avoid better-sqlite3 teardown hangs
-          // Native modules don't clean up properly in threads pool
-          pool: 'forks',
-        },
-      },
-      {
-        test: {
-          name: 'integration',
-          include: integrationTests,
-          // Use forks pool for integration tests too - better-sqlite3 cleanup issues
-          pool: 'forks',
-        },
-      },
-    ],
   },
 });
