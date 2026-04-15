@@ -1,7 +1,6 @@
 /* global NodeJS */
 import * as fs from 'fs';
 import * as path from 'path';
-import { createHash } from 'crypto';
 import type { OpenClawPluginServiceContext, OpenClawPluginApi, PluginLogger } from '../openclaw-sdk.js';
 import { DictionaryService } from '../core/dictionary-service.js';
 import { DetectionService } from '../core/detection-service.js';
@@ -10,18 +9,19 @@ import { SystemLogger } from '../core/system-logger.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import type { EventLog } from '../core/event-log.js';
 import { initPersistence, flushAllSessions } from '../core/session-tracker.js';
-import { acquireLockAsync, releaseLock as releaseImportedLock, type LockContext } from '../utils/file-lock.js';
 import { addDiagnosticianTask, completeDiagnosticianTask } from '../core/diagnostician-task-store.js';
 import { getEvolutionLogger } from '../core/evolution-logger.js';
 import type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 export type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
-import { LockUnavailableError } from '../config/index.js';
 import { atomicWriteFileSync } from '../utils/io.js';
 
 // Re-export queue I/O (extracted to queue-io.ts)
-export { loadEvolutionQueue, saveEvolutionQueue, withQueueLock, acquireQueueLock } from './queue-io.js';
+export { loadEvolutionQueue, saveEvolutionQueue, withQueueLock, acquireQueueLock, requireQueueLock } from './queue-io.js';
+export { enqueueSleepReflectionTask, enqueueKeywordOptimizationTask } from './queue-io.js';
 export { EVOLUTION_QUEUE_LOCK_SUFFIX, LOCK_MAX_RETRIES, LOCK_RETRY_DELAY_MS, LOCK_STALE_MS } from './queue-io.js';
-import { loadEvolutionQueue, saveEvolutionQueue, acquireQueueLock, EVOLUTION_QUEUE_LOCK_SUFFIX } from './queue-io.js';
+import { loadEvolutionQueue, saveEvolutionQueue, requireQueueLock, hasPendingTask, shouldSkipForDedup, enqueueSleepReflectionTask, enqueueKeywordOptimizationTask, createEvolutionTaskId } from './queue-io.js';
+import type { RecentPainContext } from './queue-io.js';
+export type { RecentPainContext } from './queue-io.js';
 import { checkWorkspaceIdle, checkCooldown, recordCooldown } from './nocturnal-runtime.js';
 import { loadCooldownEscalationConfig, loadNocturnalConfigMerged } from './nocturnal-config.js';
 import { WorkflowStore } from './subagent-workflow/workflow-store.js';
@@ -99,27 +99,6 @@ let timeoutId: NodeJS.Timeout | null = null;
  */
 export type QueueStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'canceled';
 export type TaskResolution = 'marker_detected' | 'auto_completed_timeout' | 'failed_max_retries' | 'runtime_unavailable' | 'canceled' | 'late_marker_principle_created' | 'late_marker_no_principle' | 'stub_fallback' | 'skipped_thin_violation';
-
-/**
- * Recent pain context attached to sleep_reflection tasks.
- * Carries explicit recent pain signal metadata without being a separate task kind.
- * Used by NocturnalTargetSelector for ranking bias and context enrichment.
- */
-export interface RecentPainContext {
-  /** Most recent unresolved pain event */
-  mostRecent: {
-    score: number;
-    source: string;
-    reason: string;
-    timestamp: string;
-    /** Session ID where the pain occurred */
-    sessionId: string;
-  } | null;
-  /** Count of pain events in the recent window (for signal strength) */
-  recentPainCount: number;
-  /** Highest pain score in the recent window */
-  recentMaxPainScore: number;
-}
 
 export interface EvolutionQueueItem {
     // Core identity
@@ -249,35 +228,7 @@ function buildFallbackNocturnalSnapshot(
 
 const PAIN_QUEUE_DEDUP_WINDOW_MS = 30 * 60 * 1000;
 
-// P0 fix: File lock constants and helper for queue operations (prevents TOCTOU race)
-// Re-exported from queue-io.ts: EVOLUTION_QUEUE_LOCK_SUFFIX, LOCK_MAX_RETRIES, LOCK_RETRY_DELAY_MS, LOCK_STALE_MS
-
-export function createEvolutionTaskId(
-    source: string,
-    score: number,
-    preview: string,
-    reason: string,
-    now: number
-): string {
-    // Keep ids short for prompt injection, but include enough entropy to avoid
-    // collisions between different pain events that share the same source/score/preview.
-    return createHash('md5')
-        .update(`${source}:${score}:${preview}:${reason}:${now}`)
-        .digest('hex')
-        .substring(0, 8);
-}
-
- 
-// acquireQueueLock is re-exported from queue-io.ts
-
-// Thin wrapper that adds LockUnavailableError — kept inline to avoid circular dep
-async function requireQueueLock(resourcePath: string, logger: PluginLogger | { warn?: (message: string) => void; info?: (message: string) => void } | undefined, scope: string, lockSuffix: string = EVOLUTION_QUEUE_LOCK_SUFFIX): Promise<() => void> {
-    try {
-        return await acquireQueueLock(resourcePath, logger, lockSuffix);
-    } catch (err) {
-        throw new LockUnavailableError(resourcePath, scope, { cause: err });
-    }
-}
+// Queue lock constants and requireQueueLock are imported from queue-io.ts
 
 export function extractEvolutionTaskId(task: string): string | null {
     if (!task) return null;
@@ -373,239 +324,6 @@ export function hasEquivalentPromotedRule(dictionary: { getAllRules(): Record<st
         }
         return false;
     });
-}
-
-/**
- * Read recent pain context from PAIN_FLAG file.
- * Extracts session_id to link to trajectory DB.
- * Returns structured pain metadata for attaching to sleep_reflection tasks.
- * Returns null if no pain flag exists.
- */
-export function readRecentPainContext(wctx: WorkspaceContext): RecentPainContext {
-    const contract = readPainFlagContract(wctx.workspaceDir);
-    if (contract.status !== 'valid') {
-        return { mostRecent: null, recentPainCount: 0, recentMaxPainScore: 0 };
-    }
-
-    try {
-        const score = parseInt(contract.data.score ?? '0', 10) || 0;
-        const source = contract.data.source ?? '';
-        const reason = contract.data.reason ?? '';
-        const timestamp = contract.data.time ?? '';
-        const sessionId = contract.data.session_id ?? '';
-
-        if (score > 0) {
-            return {
-                mostRecent: { score, source, reason, timestamp, sessionId },
-                recentPainCount: 1,
-                recentMaxPainScore: score,
-            };
-        }
-    } catch {
-        // Best effort — non-fatal
-    }
-
-    return { mostRecent: null, recentPainCount: 0, recentMaxPainScore: 0 };
-}
-
-/**
- * Build a dedup key from pain context.
- * Returns null when no pain context is available (bypasses dedup).
- */
-function buildPainSourceKey(
-    painCtx: ReturnType<typeof readRecentPainContext>,
-): string | null {
-    if (!painCtx.mostRecent) return null;
-    return `${painCtx.mostRecent.source}::${painCtx.mostRecent.reason?.slice(0, 50) ?? ''}`;
-}
-
-/**
- * Check whether a similar sleep_reflection task completed recently.
- * Phase 3c: Prevents redundant reflections of the same underlying issue.
- */
-function hasRecentSimilarReflection(
-    queue: EvolutionQueueItem[],
-    painSourceKey: string,
-    now: number,
-): EvolutionQueueItem | null {
-    const DEDUP_WINDOW_MS = 4 * 60 * 60 * 1000; // 4 hours
-    return queue.find((t) => {
-        if (t.taskKind !== 'sleep_reflection') return false;
-        // Only match completed tasks (exclude failed to allow retries)
-        if (t.status !== 'completed') return false;
-        if (!t.completed_at) return false;
-        const age = now - new Date(t.completed_at).getTime();
-        if (age > DEDUP_WINDOW_MS) return false;
-        const taskPainKey = buildPainSourceKey(t.recentPainContext ?? { mostRecent: null, recentPainCount: 0, recentMaxPainScore: 0 });
-        // If either side has no pain context, they don't match
-        if (!taskPainKey) return false;
-        return taskPainKey === painSourceKey;
-    }) ?? null;
-}
-
-/**
- * Check whether a specific task kind has a pending or in-progress entry.
- */
-function hasPendingTask(queue: EvolutionQueueItem[], taskKind: string): boolean {
-    return queue.some(
-        (t) => t.taskKind === taskKind && (t.status === 'pending' || t.status === 'in_progress'),
-    );
-}
-
-/**
- * Decide whether to skip enqueuing due to a recent similar reflection.
- * Returns true if skipped (with log), false if should proceed.
- */
-function shouldSkipForDedup(
-    queue: EvolutionQueueItem[],
-    wctx: WorkspaceContext,
-    logger: PluginLogger,
-): boolean {
-    const recentPainContext = readRecentPainContext(wctx);
-    const painSourceKey = buildPainSourceKey(recentPainContext);
-
-    // Bypass dedup when there is no pain context — general idle reflections
-    // should not be throttled by the 'no_pain_context' sentinel.
-    if (!painSourceKey) return false;
-
-    const now = Date.now();
-    const recentSimilarReflection = hasRecentSimilarReflection(queue, painSourceKey, now);
-
-    if (recentSimilarReflection) {
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        const completedTime = new Date(recentSimilarReflection.completed_at!).getTime();
-        logger?.debug?.(`[PD:EvolutionWorker] Skipping sleep_reflection — similar reflection completed ${Math.round((now - completedTime) / 60000)}min ago (same pain pattern: ${painSourceKey})`);
-        return true;
-    }
-    return false;
-}
-
-/**
- * Load and migrate the evolution queue. Returns empty array if file doesn't exist.
- */
-// loadEvolutionQueue is now imported from ./queue-io.js
-
-/**
- * Build and persist a new sleep_reflection task.
- */
- 
-function enqueueNewSleepReflectionTask(
-    queue: EvolutionQueueItem[],
-    recentPainContext: ReturnType<typeof readRecentPainContext>,
-    queuePath: string,
-    logger: PluginLogger,
-): void {
-    const taskId = createEvolutionTaskId('nocturnal', 50, 'idle workspace', 'Sleep-mode reflection', Date.now());
-    const nowIso = new Date().toISOString();
-
-    queue.push({
-        id: taskId,
-        taskKind: 'sleep_reflection',
-        priority: 'medium',
-        score: 50,
-        source: 'nocturnal',
-        reason: 'Sleep-mode reflection triggered by idle workspace',
-        trigger_text_preview: 'Idle workspace detected',
-        timestamp: nowIso,
-        enqueued_at: nowIso,
-        status: 'pending',
-        traceId: taskId,
-        retryCount: 0,
-        maxRetries: 1, // sleep_reflection doesn't retry
-        recentPainContext,
-    });
-
-    saveEvolutionQueue(queuePath, queue);
-    logger?.info?.(`[PD:EvolutionWorker] Enqueued sleep_reflection task ${taskId}`);
-}
-
-/**
- * Enqueue a sleep_reflection task if one is not already pending.
- * Phase 2.4: Called when workspace is idle to trigger nocturnal reflection.
- * Phase 3c: Dedup checks recent sleep_reflection tasks by pain source pattern
- * to prevent redundant reflections of the same underlying issue.
- */
-async function enqueueSleepReflectionTask(
-    wctx: WorkspaceContext,
-    logger: PluginLogger,
-): Promise<void> {
-    const queuePath = wctx.resolve('EVOLUTION_QUEUE');
-    const releaseLock = await requireQueueLock(queuePath, logger, 'enqueueSleepReflection', EVOLUTION_QUEUE_LOCK_SUFFIX);
-
-    try {
-        const queue = loadEvolutionQueue(queuePath);
-
-        // Guard 1: Skip if a sleep_reflection task is already pending/in-progress
-        if (hasPendingTask(queue, 'sleep_reflection')) {
-            logger?.debug?.('[PD:EvolutionWorker] sleep_reflection task already pending/in-progress, skipping');
-            return;
-        }
-
-        // Guard 2: Dedup — skip if similar reflection completed recently
-        if (shouldSkipForDedup(queue, wctx, logger)) {
-            return;
-        }
-
-        // Enqueue the new task
-        const recentPainContext = readRecentPainContext(wctx);
-        enqueueNewSleepReflectionTask(queue, recentPainContext, queuePath, logger);
-    } finally {
-        releaseLock();
-    }
-}
-
-/**
- * Enqueue a keyword_optimization task if one is not already pending/in-progress (CORR-08).
- * Dispatches LLM subagent via CorrectionObserverWorkflowManager to optimize
- * correction keywords based on FPR and match history.
- */
-async function enqueueKeywordOptimizationTask(
-    wctx: WorkspaceContext,
-    logger: PluginLogger,
-): Promise<void> {
-    const queuePath = wctx.resolve('EVOLUTION_QUEUE');
-    const releaseLock = await requireQueueLock(queuePath, logger, 'enqueueKeywordOpt', EVOLUTION_QUEUE_LOCK_SUFFIX);
-
-    try {
-        const queue = loadEvolutionQueue(queuePath);
-
-        // Guard: Skip if a keyword_optimization task is already pending/in-progress (CORR-08)
-        if (hasPendingTask(queue, 'keyword_optimization')) {
-            logger?.debug?.('[PD:EvolutionWorker] keyword_optimization task already pending/in-progress, skipping');
-            return;
-        }
-
-        // Guard: Skip if daily optimization throttle is exhausted (CORR-08)
-        const learner = CorrectionCueLearner.get(wctx.stateDir);
-        if (!learner.canRunKeywordOptimization()) {
-            logger?.debug?.('[PD:EvolutionWorker] keyword_optimization throttle exhausted, skipping');
-            return;
-        }
-
-        const taskId = createEvolutionTaskId('keyword_optimization', 50, 'keyword optimization', 'Keyword optimization via LLM', Date.now());
-        const nowIso = new Date().toISOString();
-
-        queue.push({
-            id: taskId,
-            taskKind: 'keyword_optimization',
-            priority: 'medium',
-            score: 50,
-            source: 'correction',
-            reason: 'Keyword optimization triggered by heartbeat',
-            trigger_text_preview: 'Keyword optimization via LLM',
-            timestamp: nowIso,
-            enqueued_at: nowIso,
-            status: 'pending',
-            traceId: taskId,
-            retryCount: 0,
-            maxRetries: 1,
-        });
-
-        saveEvolutionQueue(queuePath, queue);
-        logger?.info?.(`[PD:EvolutionWorker] Enqueued keyword_optimization task ${taskId}`);
-    } finally {
-        releaseLock();
-    }
 }
 
 interface ParsedPainValues {
