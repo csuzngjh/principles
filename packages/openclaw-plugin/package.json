@@ -30,10 +30,11 @@
     "build:web": "node scripts/build-web.mjs",
     "build:bundle": "node esbuild.config.js && node scripts/build-web.mjs",
     "build:production": "node esbuild.config.js --production && node scripts/build-web.mjs --production && node scripts/verify-build.mjs",
-    "test": "vitest run",
+    "test": "vitest run --project=unit",
     "test:unit": "vitest run --project=unit",
     "test:integration": "vitest run --project=integration",
-    "test:coverage": "vitest run --coverage",
+    "test:coverage": "vitest run --project=unit --coverage",
+    "test:all": "vitest run",
     "lint": "eslint src/",
     "bootstrap-rules": "node scripts/bootstrap-rules.mjs",
     "validate-live-path": "tsx scripts/validate-live-path.ts"
