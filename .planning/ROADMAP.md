@@ -10,13 +10,13 @@
 - [x] **v1.16** - Trinity Training Trajectory Quality Enhancement (Phases 34-37, shipped 2026-04-13)
 - [x] **v1.17** - Keyword Learning Engine (Phases 38-41, shipped 2026-04-14)
 - [x] **v1.18** - Nocturnal State Safety & Recovery (shipped 2026-04-14)
-- [ ] **v1.19** - Tech Debt Remediation (Phases 42-46, current)
+- [x] **v1.19** - Tech Debt Remediation (Phases 42-46, shipped 2026-04-15)
 - [ ] **v1.10** - Thinking Models page optimization (deferred)
 
 ## Phases
 
 **Phase Numbering:**
-- Integer phases (42-46): v1.19 Tech Debt Remediation (current)
+- Integer phases (42-46): v1.19 Tech Debt Remediation (shipped)
 - Decimal phases: Urgent insertions (marked with INSERTED)
 
 <details>
@@ -48,15 +48,18 @@
 - [x] **Phase 40: LLM Discovery** -- LLM optimizer adds/updates/removes keywords, trajectory flag (completed 2026-04-14)
 - [x] **Phase 41: Testing** -- Integration test, atomic write recovery test (completed 2026-04-14)
 
-### v1.19 Tech Debt Remediation (In Progress)
+<details>
+<summary>✅ v1.19 Tech Debt Remediation (Phases 42-46) — SHIPPED 2026-04-15</summary>
 
 **Milestone Goal:** 逐步清理技术债：拆分 god classes、修复 type safety、添加 queue integration tests、强化安全
 
-- [x] **Phase 42: Quick Wins** -- busy-wait loop fix, JSON validation, constant-time token compare (completed 2026-04-15)
-- [x] **Phase 43: Type Safety** -- branded types, discriminated unions, replace `as any` casts (completed 2026-04-15)
-- [x] **Phase 44: Pre-Split Inventory** -- document module-level mutable state, draw import graph (completed 2026-04-15)
-- [ ] **Phase 45: Queue Tests** -- migration tests, fake-timers unit tests, concurrency tests
-- [ ] **Phase 46: God Class Split** -- extract queue-migration, workflow-watchdog, queue-io, sleep-cycle modules
+- [x] **Phase 42: Quick Wins** (1/1 plans) — busy-wait loop fix, JSON validation, constant-time token compare (completed 2026-04-15)
+- [x] **Phase 43: Type Safety** (2/2 plans) — branded types, discriminated unions, replace `as any` casts (completed 2026-04-15)
+- [x] **Phase 44: Pre-Split Inventory** (2/2 plans) — document module-level mutable state, draw import graph (completed 2026-04-15)
+- [x] **Phase 45: Queue Tests** (2/2 plans) — migration tests, fake-timers unit tests, concurrency tests (completed 2026-04-15)
+- [x] **Phase 46: God Class Split** (5/5 plans) — extract queue-migration, workflow-watchdog, queue-io, sleep-cycle modules (completed 2026-04-15)
+
+</details>
 
 ## Progress
 
@@ -67,80 +70,10 @@ Phases execute in numeric order: 42 -> 43 -> 44 -> 45 -> 46
 |-------|-----------|----------------|--------|-----------|
 | 42. Quick Wins | v1.19 | 1/1 | Complete    | 2026-04-15 |
 | 43. Type Safety | v1.19 | 2/2 | Complete    | 2026-04-15 |
-| 44. Pre-Split Inventory | v1.19 | 2/1 | Complete    | 2026-04-15 |
-| 45. Queue Tests | v1.19 | 2/2 | Planned | - |
-| 46. God Class Split | v1.19 | 0/N | Not started | - |
-
-## Phase Details
-
-### Phase 42: Quick Wins
-**Goal**: Fix 3 reliability and security issues: replace busy-wait spin loop with setTimeout backoff, add JSON structure validation before parse, replace string token comparison with constant-time comparison
-**Depends on**: Nothing (standalone fixes)
-**Requirements**: QW-01, QW-02, QW-03
-**Success Criteria** (what must be TRUE):
-  1. `src/utils/io.ts`: EPERM/EBUSY retry uses `setTimeout`-based exponential backoff instead of spin loop — synchronous signature preserved
-  2. Queue event payload `JSON.parse()` guarded by structure validation checking required fields (`type`, `workspaceId`) before returning parsed object
-  3. `principles-console-route.ts` Bearer token comparison uses `crypto.timingSafeEqual` with `Buffer` comparison
-**Plans:**
-1/1 plans complete
-
-### Phase 44: Pre-Split Inventory
-**Goal**: Document module-level mutable state and draw import graph before Phase 46 god class split — pure analysis, no implementation changes
-**Depends on**: Phase 43 (type safety types needed for safe extraction boundaries)
-**Requirements**: INFRA-01, INFRA-02
-**Success Criteria** (what must be TRUE):
-  1. Markdown tables list all module-level mutable state (file, export name, type, initialization, mutation pattern)
-  2. Mermaid flowchart shows file-level import dependencies for god class candidates
-  3. ESLint config has `complexity_max: 15` and `max_file_lines: 500` applied to `packages/openclaw-plugin/src/`
-**Plans:**
-2/1 plans complete
-- [x] 44-02-PLAN.md — Create mutable state inventory and Mermaid import graph
-
-### Phase 45: Queue Tests
-**Goal**: Add integration and unit tests for queue enqueue/dequeue/migration paths — catch bugs in queue logic before they reach production
-**Depends on**: Phase 44 (inventory ensures modules are cleanly separable for testing)
-**Requirements**: QTEST-01, QTEST-02, QTEST-03, QTEST-04, QTEST-05
-**Success Criteria** (what must be TRUE):
-  1. `migrateToV2` integration test uses `legacy-queue-v1.json` fixture
-  2. `loadEvolutionQueue`/`saveEvolutionQueue` unit tests use `vi.useFakeTimers()`
-  3. `purgeStaleFailedTasks` deduplication logic has explicit test coverage
-  4. `asyncLockQueues` concurrency tests use `Promise.all` for race detection and clear Map state between tests
-  5. Snapshot tests verify queue migration state transitions
-**Plans:**
-2/2 plans complete
-- [x] 45-01-PLAN.md — Core migration tests (QTEST-01, QTEST-05): legacy-queue-v1.json fixture + migrateToV2 integration + state transitions
-- [x] 45-02-PLAN.md — Queue operations tests (QTEST-02, QTEST-03, QTEST-04): loadEvolutionQueue/saveEvolutionQueue + purgeStaleFailedTasks + asyncLockQueues
-
-### Phase 46: God Class Split
-**Goal**: Extract focused modules from `evolution-worker.ts` (2689L) and improve queue file I/O isolation — enable independent testing and reduce merge conflicts
-**Depends on**: Phase 44 (inventory), Phase 45 (tests validate extracted behavior)
-**Requirements**: SPLIT-01, SPLIT-02, SPLIT-03, SPLIT-04, SPLIT-05, SPLIT-06, SPLIT-07, BUG-01, BUG-02, BUG-03
-**Success Criteria** (what must be TRUE):
-  1. `queue-migration.ts` extracted from `evolution-worker.ts` (most isolated concern, smallest boundary)
-  2. `workflow-watchdog.ts` extracted (well-bounded health monitoring, separate from queue logic)
-  3. `queue-io.ts` extracted (file I/O for queue persistence — encapsulate all queue writes)
-  4. `withQueueLock()` RAII-style guard prevents lock-leak bugs
-  5. `sleep-cycle.ts` extracted (orchestrator for enqueue/keyword-optimization tasks)
-  6. `evolution-worker.ts` becomes permanent facade/re-export layer (stable import point, no new logic)
-  7. `nocturnal-trinity.ts` split deferred to future milestone (internally cleaner than evolution-worker.ts)
-  8. BUG-01: #185 — watchdog marks stale workflows as `terminal_error` after 2x TTL; silent subagent failure path has test
-  9. BUG-02: #188 — gateway-safe fallback for child session cleanup
-  10. BUG-03: #214/#219 — timeout recovery logic verified still works after queue split
-
-## Coverage
-
-**v1.19 Requirements:** 23 total (QW-01..03, TYPE-01..05, QTEST-01..05, SPLIT-01..07, BUG-01..03, INFRA-01..03)
-
-| Phase | Requirements |
-|-------|--------------|
-| Phase 42: Quick Wins | QW-01, QW-02, QW-03 |
-| Phase 43: Type Safety | TYPE-01, TYPE-02, TYPE-03, TYPE-04, TYPE-05 |
-| Phase 44: Pre-Split Inventory | INFRA-01, INFRA-02 |
-| Phase 45: Queue Tests | QTEST-01, QTEST-02, QTEST-03, QTEST-04, QTEST-05 |
-| Phase 46: God Class Split | SPLIT-01, SPLIT-02, SPLIT-03, SPLIT-04, SPLIT-05, SPLIT-06, SPLIT-07, BUG-01, BUG-02, BUG-03 |
-
-**Coverage:** 23/23 requirements mapped
+| 44. Pre-Split Inventory | v1.19 | 2/2 | Complete    | 2026-04-15 |
+| 45. Queue Tests | v1.19 | 2/2 | Complete    | 2026-04-15 |
+| 46. God Class Split | v1.19 | 5/5 | Complete    | 2026-04-15 |
 
 ---
 
-*Last updated: 2026-04-15*
+*Last updated: 2026-04-15 after v1.19 milestone shipped*
