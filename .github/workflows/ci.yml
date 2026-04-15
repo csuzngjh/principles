@@ -107,7 +107,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: packages/openclaw-plugin
-        run: npm ci --ignore-scripts
+        run: npm ci
 
       - name: Run integration tests
         working-directory: packages/openclaw-plugin
