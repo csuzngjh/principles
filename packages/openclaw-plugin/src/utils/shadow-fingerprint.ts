@@ -10,7 +10,17 @@ import type { PluginHookSubagentSpawningEvent } from '../openclaw-sdk.js';
 /**
  * PD local worker profiles that are managed by the shadow routing policy.
  */
-export const PD_LOCAL_PROFILES = new Set(['local-reader', 'local-editor']);
+const _pdLocalProfiles = new Set(['local-reader', 'local-editor']);
+export const PD_LOCAL_PROFILES: ReadonlySet<string> = _pdLocalProfiles;
+
+/**
+ * Check if a profile is a local PD profile.
+ */
+export function isLocalProfile(profile: string): boolean {
+  return _pdLocalProfiles.has(profile);
+}
+
+const RUNTIME_SHADOW_FINGERPRINT_HEX_LENGTH = 16;
 
 /**
  * Compute a fingerprint for runtime shadow task tracking.
@@ -28,5 +38,5 @@ export function computeRuntimeShadowTaskFingerprint(
     requesterChannel: event.requester?.channel ?? '',
     requesterThreadId: event.requester?.threadId ?? '',
   };
-  return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex').slice(0, 16);
+  return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex').slice(0, RUNTIME_SHADOW_FINGERPRINT_HEX_LENGTH);
 }
