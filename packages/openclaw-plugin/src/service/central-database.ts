@@ -925,7 +925,7 @@ export function getCentralDatabase(): CentralDatabase {
  */
 export function resetCentralDatabase(): void {
   if (centralDbInstance && !centralDbInstance.isClosed) {
-    centralDbInstance.close();
+    centralDbInstance.dispose();
   }
   centralDbInstance = null;
 }
