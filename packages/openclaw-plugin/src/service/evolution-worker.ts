@@ -294,89 +294,10 @@ export interface EvolutionQueueItem {
     recentPainContext?: RecentPainContext;
 }
 
-/**
- * Legacy queue item shape (pre-V2) for migration compatibility.
- * These items lack taskKind, priority, retryCount, maxRetries, lastError fields.
- */
-export interface LegacyEvolutionQueueItem {
-    id: string;
-    task?: string;
-    score: number;
-    source: string;
-    reason: string;
-    timestamp: string;
-    enqueued_at?: string;
-    started_at?: string;
-    completed_at?: string;
-    assigned_session_key?: string;
-    trigger_text_preview?: string;
-    status?: string;
-    resolution?: string;
-    session_id?: string;
-    agent_id?: string;
-    traceId?: string;
-    taskKind?: string;
-    priority?: string;
-    retryCount?: number;
-    maxRetries?: number;
-    lastError?: string;
-    resultRef?: string;
-}
-
-/**
- * Default values for new V2 fields when migrating legacy items.
- */
-const DEFAULT_TASK_KIND: TaskKind = 'pain_diagnosis';
-const DEFAULT_PRIORITY: TaskPriority = 'medium';
-const DEFAULT_MAX_RETRIES = 3;
-
-/**
- * Migrate a legacy queue item to V2 schema.
- * Old items without taskKind are assumed to be pain_diagnosis for backward compatibility.
- */
-export function migrateToV2(item: LegacyEvolutionQueueItem): EvolutionQueueItem {
-    return {
-        id: item.id,
-        taskKind: (item.taskKind as TaskKind) || DEFAULT_TASK_KIND,
-        priority: (item.priority as TaskPriority) || DEFAULT_PRIORITY,
-        source: item.source,
-        traceId: item.traceId,
-        task: item.task,
-        score: item.score,
-        reason: item.reason,
-        timestamp: item.timestamp,
-        enqueued_at: item.enqueued_at,
-        started_at: item.started_at,
-        completed_at: item.completed_at,
-        assigned_session_key: item.assigned_session_key,
-        trigger_text_preview: item.trigger_text_preview,
-        status: (item.status as QueueStatus) || 'pending',
-        resolution: item.resolution as TaskResolution | undefined,
-        session_id: item.session_id,
-        agent_id: item.agent_id,
-        retryCount: item.retryCount || 0,
-        maxRetries: item.maxRetries || DEFAULT_MAX_RETRIES,
-        lastError: item.lastError,
-        resultRef: item.resultRef,
-    };
-}
-
-type RawQueueItem = Record<string, unknown>;
-
-/**
- * Check if an item is a legacy (pre-V2) queue item.
- */
-export function isLegacyQueueItem(item: RawQueueItem): boolean {
-    return item && typeof item === 'object' && !('taskKind' in item);
-}
-
-/**
- * Migrate entire queue to V2 schema if needed.
- * Returns a new array with all items migrated to V2 format.
- */
-export function migrateQueueToV2(queue: RawQueueItem[]): EvolutionQueueItem[] {
-    return queue.map(item => isLegacyQueueItem(item) ? migrateToV2(item as unknown as LegacyEvolutionQueueItem) : item as unknown as EvolutionQueueItem);
-}
+// ── Queue Migration (extracted to queue-migration.ts) ────────────────────────
+import { migrateToV2, isLegacyQueueItem, migrateQueueToV2, LegacyEvolutionQueueItem, DEFAULT_TASK_KIND, DEFAULT_PRIORITY, DEFAULT_MAX_RETRIES, type RawQueueItem } from './queue-migration.js';
+export { migrateToV2, isLegacyQueueItem, migrateQueueToV2, LegacyEvolutionQueueItem, DEFAULT_TASK_KIND, DEFAULT_PRIORITY, DEFAULT_MAX_RETRIES };
+export type { RawQueueItem };
 
 function isSessionAtOrBeforeTriggerTime(
     session: { startedAt: string; updatedAt: string },
@@ -727,7 +648,7 @@ export function loadEvolutionQueue(queuePath: string): EvolutionQueueItem[] {
         // Queue doesn't exist yet - create empty array
         rawQueue = [];
     }
-    return migrateQueueToV2(rawQueue);
+    return migrateQueueToV2(rawQueue) as unknown as EvolutionQueueItem[];
 }
 
 /**
@@ -1140,7 +1061,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
         }
 
         // V2: Migrate queue to current schema if needed
-        const queue: EvolutionQueueItem[] = migrateQueueToV2(rawQueue);
+        const queue: EvolutionQueueItem[] = migrateQueueToV2(rawQueue) as unknown as EvolutionQueueItem[];
 
         let queueChanged = rawQueue.some(isLegacyQueueItem);
 
@@ -2319,8 +2240,8 @@ export async function registerEvolutionTaskSession(
         }
         
         // V2: Migrate queue to current schema
-        const queue: EvolutionQueueItem[] = migrateQueueToV2(rawQueue);
-        
+        const queue: EvolutionQueueItem[] = migrateQueueToV2(rawQueue) as unknown as EvolutionQueueItem[];
+
         const task = queue.find((item) => item.id === taskId && item.status === 'in_progress');
         if (!task) {
             logger?.warn?.(`[PD:EvolutionWorker] Could not find in-progress evolution task ${taskId} for session assignment`);
