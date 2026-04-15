@@ -210,5 +210,5 @@ function scheduleTrajectoryGateBlockRetry(
       logWarn(`[PD_GATE] Retrying trajectory gate block persistence (attempt ${attempt + 1}): ${String(error)}`);
       scheduleTrajectoryGateBlockRetry(wctx, payload, attempt + 1, logWarn, logError);
     }
-  }, TRAJECTORY_GATE_BLOCK_RETRY_DELAY_MS * attempt);
+  }, TRAJECTORY_GATE_BLOCK_RETRY_DELAY_MS * attempt).unref();
 }
