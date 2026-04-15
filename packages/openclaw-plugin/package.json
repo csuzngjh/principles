@@ -31,7 +31,7 @@
     "build:bundle": "node esbuild.config.js && node scripts/build-web.mjs",
     "build:production": "node esbuild.config.js --production && node scripts/build-web.mjs --production && node scripts/verify-build.mjs",
     "test": "vitest run",
-    "test:unit": "vitest run --exclude 'tests/integration/**'",
+    "test:unit": "vitest run tests/core tests/service tests/hooks tests/commands tests/utils tests/scripts",
     "test:integration": "vitest run tests/integration/",
     "test:coverage": "vitest run --coverage",
     "test:all": "vitest run",
