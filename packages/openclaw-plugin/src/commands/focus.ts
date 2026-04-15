@@ -12,6 +12,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { PluginCommandContext, PluginCommandResult, OpenClawPluginApi } from '../openclaw-sdk.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
+import { atomicWriteFileSync } from '../utils/io.js';
 import {
   getHistoryDir,
   backupToHistory,
@@ -283,7 +284,7 @@ async function compressFocus(
 
   // 5. 压缩内容
    
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let compressedContent: string;
   try {
     compressedContent = compressFocusContent(oldContent, workspaceDir);
@@ -304,7 +305,7 @@ async function compressFocus(
   const newLines = newContent.split('\n').length;
   const savedLines = oldLines - newLines;
 
-  fs.writeFileSync(focusPath, newContent, 'utf-8');
+  atomicWriteFileSync(focusPath, newContent);
 
   const milestoneNote = milestonesArchived
     ? isZh
@@ -410,7 +411,7 @@ function rollbackFocus(workspaceDir: string, index: number, isZh: boolean): stri
       `**状态**: ROLLBACK (from v${restoredVersion})`
     );
 
-  fs.writeFileSync(focusPath, restoredContent, 'utf-8');
+  atomicWriteFileSync(focusPath, restoredContent);
 
   if (isZh) {
     return `✅ **回滚成功**
@@ -481,7 +482,7 @@ export async function handleFocusCommand(
   const isZh = (ctx.config?.language as string) === 'zh';
 
    
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let result: string;
 
   switch (subCommand) {

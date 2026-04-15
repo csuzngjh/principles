@@ -34,6 +34,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { withLock } from '../utils/file-lock.js';
+import { atomicWriteFileSync } from '../utils/io.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -214,9 +215,7 @@ function readRegistry(stateDir: string): ShadowRegistry {
 function writeRegistry(stateDir: string, registry: ShadowRegistry): void {
   ensureRegistryDir(stateDir);
   const registryPath = getRegistryPath(stateDir);
-  const tmpPath = `${registryPath}.tmp`;
-  fs.writeFileSync(tmpPath, JSON.stringify(registry, null, 2), 'utf-8');
-  fs.renameSync(tmpPath, registryPath);
+  atomicWriteFileSync(registryPath, JSON.stringify(registry, null, 2));
 }
 
 /**
@@ -342,7 +341,7 @@ export function completeShadowObservation(
  * @returns The updated ShadowObservation, or null if not found
  */
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 export function completeShadowObservationByTask(
   stateDir: string,
   taskFingerprint: string,

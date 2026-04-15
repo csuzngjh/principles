@@ -34,6 +34,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { withLock } from '../utils/file-lock.js';
+import { atomicWriteFileSync } from '../utils/io.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -239,9 +240,7 @@ function readRegistry(stateDir: string): ModelTrainingRegistry {
 function writeRegistry(stateDir: string, registry: ModelTrainingRegistry): void {
   ensureRegistryDir(stateDir);
   const registryPath = getRegistryPath(stateDir);
-  const tmpPath = `${registryPath}.tmp`;
-  fs.writeFileSync(tmpPath, JSON.stringify(registry, null, 2), 'utf-8');
-  fs.renameSync(tmpPath, registryPath);
+  atomicWriteFileSync(registryPath, JSON.stringify(registry, null, 2));
 }
 
 /**
@@ -322,7 +321,7 @@ export function registerTrainingRun(
  * @throws Error if run not found or transition is invalid
  */
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 export function updateTrainingRunStatus(
   stateDir: string,
   trainRunId: string,

@@ -215,7 +215,7 @@ export class CorrectionObserverWorkflowManager extends WorkflowManagerBase {
         });
     }
 
-    // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+     
     protected override createWorkflowMetadata<TResult>(
         spec: SubagentWorkflowSpec<TResult>,
         options: {

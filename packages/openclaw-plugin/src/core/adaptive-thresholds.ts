@@ -24,6 +24,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { withLock } from '../utils/file-lock.js';
+import { atomicWriteFileSync } from '../utils/io.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -227,9 +228,7 @@ function writeState(stateDir: string, state: ThresholdPersistenceState): void {
   }
 
   withLock(statePath, () => {
-    const tmpPath = `${statePath}.tmp`;
-    fs.writeFileSync(tmpPath, JSON.stringify(state, null, 2), 'utf-8');
-    fs.renameSync(tmpPath, statePath);
+    atomicWriteFileSync(statePath, JSON.stringify(state, null, 2));
   });
 }
 
@@ -301,7 +300,7 @@ export function getEffectiveThresholds(stateDir: string): ThresholdValues {
  * @returns UpdateThresholdResult
  */
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 export function updateThresholdState(
   stateDir: string,
   thresholdName: ThresholdName,

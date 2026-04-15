@@ -5,6 +5,7 @@ import type { OpenClawPluginApi, PluginLogger } from '../openclaw-sdk.js';
 import { PD_DIRS } from './paths.js';
 import { defaultContextConfig } from '../types.js';
 import { loadStore, setPrincipleState, type PrincipleTrainingState } from './principle-training-state.js';
+import { atomicWriteFileSync } from '../utils/io.js';
 
 /**
  * Default PROFILE.json content
@@ -102,7 +103,7 @@ export function ensureWorkspaceTemplates(api: OpenClawPluginApi, workspaceDir: s
             if (!fs.existsSync(principlesDir)) {
                 fs.mkdirSync(principlesDir, { recursive: true });
             }
-            fs.writeFileSync(profilePath, JSON.stringify(DEFAULT_PROFILE, null, 2), 'utf-8');
+            atomicWriteFileSync(profilePath, JSON.stringify(DEFAULT_PROFILE, null, 2));
             api.logger.info(`[PD] Initialized PROFILE.json with default contextInjection config`);
         }
     } catch (err) {

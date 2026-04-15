@@ -26,6 +26,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { execFileSync, spawn } from 'child_process';
 import { fileURLToPath } from 'url';
+import { atomicWriteFileSync } from '../utils/io.js';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
 import {
   type TrainerBackendKind,
@@ -264,8 +265,8 @@ Hardware tiers:
       if (!fs.existsSync(workspaceCheckpointsDir)) {
         fs.mkdirSync(workspaceCheckpointsDir, { recursive: true });
       }
-      fs.writeFileSync(trainerSpecPath, JSON.stringify(spec, null, 2), 'utf-8');
-      fs.writeFileSync(workspaceSpecPath, JSON.stringify(spec, null, 2), 'utf-8');
+      atomicWriteFileSync(trainerSpecPath, JSON.stringify(spec, null, 2));
+      atomicWriteFileSync(workspaceSpecPath, JSON.stringify(spec, null, 2));
 
       // --- Auto-run mode: execute trainer immediately ---
       // This closes the gap in the create-experiment -> trainer -> import-result chain.
@@ -282,10 +283,10 @@ Hardware tiers:
         if (!fs.existsSync(specDir)) {
           fs.mkdirSync(specDir, { recursive: true });
         }
-        fs.writeFileSync(specPath, JSON.stringify(spec, null, 2), 'utf-8');
+        atomicWriteFileSync(specPath, JSON.stringify(spec, null, 2));
 
          
-        // eslint-disable-next-line @typescript-eslint/init-declarations
+         
         let trainerResult!: TrainingExperimentResult;
 
         try {
@@ -395,7 +396,7 @@ Hardware tiers:
         // Process trainer result (register checkpoint)
         // dry_run returns null (no checkpoint); other statuses throw on error
          
-        // eslint-disable-next-line @typescript-eslint/init-declarations
+         
         let processed: { checkpointId: string; checkpointRef: string } | null;
         try {
           processed = program.processResult({
@@ -537,7 +538,7 @@ Next steps:
         }
       }
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/init-declarations -- Reason: JSON.parse returns dynamic JSON - type unknown at parse time, narrowed via type narrowing below
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: JSON.parse returns dynamic JSON - type unknown at parse time, narrowed via type narrowing below
       let result: any;
       try {
         result = JSON.parse(resultJson);
@@ -569,7 +570,7 @@ Next steps:
       // Process the result
       const program = new TrainingProgram(workspaceDir);
        
-      // eslint-disable-next-line @typescript-eslint/init-declarations
+       
       let processed: { checkpointId: string; checkpointRef: string } | null;
       try {
         processed = program.processResult({
@@ -757,15 +758,15 @@ Next steps:
         }
 
         // Destructure benchmark result - delta property contains the actual delta value
-        // eslint-disable-next-line @typescript-eslint/prefer-destructuring
+         
         delta = benchmarkResult.delta.delta;
-        // eslint-disable-next-line @typescript-eslint/prefer-destructuring
+         
         baselineScore = benchmarkResult.delta.baselineScore;
-        // eslint-disable-next-line @typescript-eslint/prefer-destructuring
+         
         candidateScore = benchmarkResult.delta.candidateScore;
-        // eslint-disable-next-line @typescript-eslint/prefer-destructuring
+         
         benchmarkId = benchmarkResult.benchmarkId;
-        // eslint-disable-next-line @typescript-eslint/prefer-destructuring
+         
         verdict = benchmarkResult.verdict;
       } else {
         // Manual mode: require explicit delta and verdict

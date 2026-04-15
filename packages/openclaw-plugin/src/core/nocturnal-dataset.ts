@@ -31,6 +31,7 @@ import * as crypto from 'crypto';
 import { NocturnalPathResolver, resolveNocturnalDir } from './nocturnal-paths.js';
 import type { NocturnalArtifact } from './nocturnal-arbiter.js';
 import { withLock } from '../utils/file-lock.js';
+import { atomicWriteFileSync } from '../utils/io.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -246,9 +247,7 @@ function readRegistry(workspaceDir: string): NocturnalDatasetRecord[] {
 function writeRegistry(workspaceDir: string, records: NocturnalDatasetRecord[]): void {
   ensureRegistryDir(workspaceDir);
   const registryPath = getRegistryPath(workspaceDir);
-  const tmpPath = `${registryPath}.tmp`;
-  fs.writeFileSync(tmpPath, JSON.stringify(records, null, 2), 'utf-8');
-  fs.renameSync(tmpPath, registryPath);
+  atomicWriteFileSync(registryPath, JSON.stringify(records, null, 2));
 }
 
 // ---------------------------------------------------------------------------
@@ -284,7 +283,7 @@ function withRegistryLock<T>(workspaceDir: string, fn: (_records: NocturnalDatas
  * @returns RegisterSampleResult
  */
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 export function registerSample(
   workspaceDir: string,
   artifact: NocturnalArtifact,
@@ -427,7 +426,7 @@ const VALID_TRANSITIONS: Record<NocturnalReviewStatus, NocturnalReviewStatus[]> 
  * @throws Error if transition is invalid
  */
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 export function updateReviewStatus(
   workspaceDir: string,
   sampleFingerprint: string,

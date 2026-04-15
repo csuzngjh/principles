@@ -16,6 +16,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { withLock } from '../utils/file-lock.js';
+import { atomicWriteFileSync } from '../utils/io.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { refreshPrincipleLifecycle } from '../core/principle-internalization/lifecycle-refresh.js';
 import {
@@ -59,12 +60,12 @@ export function handleRollbackImplCommand(ctx: PluginCommandContext): PluginComm
   // List active
   if (subcommand === 'list' || subcommand === '') {
      
-    // eslint-disable-next-line @typescript-eslint/no-use-before-define
+     
     return _handleListActiveRollback(stateDir, isZh);
   }
 
    
-  // eslint-disable-next-line @typescript-eslint/no-use-before-define
+   
   return _handleRollbackImpl(workspaceDir, stateDir, implId, reason, isZh, ctx.sessionId);
 }
 
@@ -107,7 +108,7 @@ function _handleListActiveRollback(
 }
 
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 function _handleRollbackImpl(
   workspaceDir: string,
   stateDir: string,
@@ -143,7 +144,7 @@ function _handleRollbackImpl(
   transitionImplementationState(stateDir, implId, 'disabled');
 
    
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let restoredMessage: string;
 
   if (previousActiveId && allImpls.some((i) => i.id === previousActiveId)) {
@@ -188,7 +189,7 @@ function _handleRollbackImpl(
   const rollbackTimestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const rollbackPath = path.join(rollbackDir, `${rollbackTimestamp}.json`);
   withLock(rollbackPath, () => {
-    fs.writeFileSync(rollbackPath, JSON.stringify(rollbackRecord, null, 2), 'utf-8');
+    atomicWriteFileSync(rollbackPath, JSON.stringify(rollbackRecord, null, 2));
   });
   try {
     refreshPrincipleLifecycle(workspaceDir, stateDir);
