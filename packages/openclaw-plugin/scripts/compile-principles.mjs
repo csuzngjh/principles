@@ -18,8 +18,6 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const PROJECT_ROOT = join(__dirname, '..');
-
 // Resolve workspace directory: CLI arg > env var > default
 const WORKSPACE_DIR = process.argv[2]
   || process.env.WORKSPACE_DIR

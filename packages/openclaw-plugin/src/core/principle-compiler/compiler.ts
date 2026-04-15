@@ -38,7 +38,7 @@ export interface CompileResult {
 const KNOWN_TOOLS = ['bash', 'write', 'edit', 'read', 'grep', 'glob', 'mcp'] as const;
 
 /** Regex to extract file paths from reason text */
-const PATH_REGEX = /(?:\/[\w.-]+){2,}/g;
+const PATH_REGEX = /(?:\/[\w.-]+){2,}/;
 
 // ---------------------------------------------------------------------------
 // Pattern Extraction
@@ -137,7 +137,6 @@ function inferToolName(text: string): string | null {
  * Returns the first path found, or null.
  */
 function extractPathRegex(text: string): string | null {
-  PATH_REGEX.lastIndex = 0;
   const match = PATH_REGEX.exec(text);
   if (match) {
     return escapeRegex(match[0]);
