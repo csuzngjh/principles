@@ -66,7 +66,7 @@ export function validateGeneratedCode(code: string): ValidationResult {
     new nodeVm.Script(normalized, { filename: 'code-validator-syntax.js' });
   } catch (err) {
     errors.push(`Syntax error: ${(err as Error).message}`);
-    return { valid: false, errors };
+    return { valid: false, errors, warnings };
   }
 
   // --- Check 2: Forbidden patterns ---
@@ -77,7 +77,7 @@ export function validateGeneratedCode(code: string): ValidationResult {
   }
 
   if (errors.length > 0) {
-    return { valid: false, errors };
+    return { valid: false, errors, warnings };
   }
 
   // --- Check 3: Sandbox load + export check ---
@@ -86,7 +86,7 @@ export function validateGeneratedCode(code: string): ValidationResult {
     moduleExports = loadRuleImplementationModule(code, 'code-validator-candidate.js');
   } catch (err) {
     errors.push(`Sandbox compilation error: ${(err as Error).message}`);
-    return { valid: false, errors };
+    return { valid: false, errors, warnings };
   }
 
   if (!moduleExports.meta || typeof moduleExports.meta !== 'object') {
@@ -98,7 +98,7 @@ export function validateGeneratedCode(code: string): ValidationResult {
   }
 
   if (errors.length > 0) {
-    return { valid: false, errors };
+    return { valid: false, errors, warnings };
   }
 
   // --- Check 4: Return shape ---
