@@ -54,7 +54,7 @@
 
 - [x] **Phase 42: Quick Wins** -- busy-wait loop fix, JSON validation, constant-time token compare (completed 2026-04-15)
 - [x] **Phase 43: Type Safety** -- branded types, discriminated unions, replace `as any` casts (completed 2026-04-15)
-- [ ] **Phase 44: Pre-Split Inventory** -- document module-level mutable state, draw import graph
+- [x] **Phase 44: Pre-Split Inventory** -- document module-level mutable state, draw import graph (completed 2026-04-15)
 - [ ] **Phase 45: Queue Tests** -- migration tests, fake-timers unit tests, concurrency tests
 - [ ] **Phase 46: God Class Split** -- extract queue-migration, workflow-watchdog, queue-io, sleep-cycle modules
 
@@ -67,8 +67,8 @@ Phases execute in numeric order: 42 -> 43 -> 44 -> 45 -> 46
 |-------|-----------|----------------|--------|-----------|
 | 42. Quick Wins | v1.19 | 1/1 | Complete    | 2026-04-15 |
 | 43. Type Safety | v1.19 | 2/2 | Complete    | 2026-04-15 |
-| 44. Pre-Split Inventory | v1.19 | 2/2 | Ready to execute | - |
-| 45. Queue Tests | v1.19 | 0/N | Not started | - |
+| 44. Pre-Split Inventory | v1.19 | 2/1 | Complete    | 2026-04-15 |
+| 45. Queue Tests | v1.19 | 2/2 | Planned | - |
 | 46. God Class Split | v1.19 | 0/N | Not started | - |
 
 ## Phase Details
@@ -93,8 +93,8 @@ Phases execute in numeric order: 42 -> 43 -> 44 -> 45 -> 46
   2. Mermaid flowchart shows file-level import dependencies for god class candidates
   3. ESLint config has `complexity_max: 15` and `max_file_lines: 500` applied to `packages/openclaw-plugin/src/`
 **Plans:**
-- [ ] 44-01-PLAN.md — Add ESLint debt gates (complexity_max: 15, max_file_lines: 500)
-- [ ] 44-02-PLAN.md — Create mutable state inventory and Mermaid import graph
+2/1 plans complete
+- [x] 44-02-PLAN.md — Create mutable state inventory and Mermaid import graph
 
 ### Phase 45: Queue Tests
 **Goal**: Add integration and unit tests for queue enqueue/dequeue/migration paths — catch bugs in queue logic before they reach production
@@ -106,6 +106,10 @@ Phases execute in numeric order: 42 -> 43 -> 44 -> 45 -> 46
   3. `purgeStaleFailedTasks` deduplication logic has explicit test coverage
   4. `asyncLockQueues` concurrency tests use `Promise.all` for race detection and clear Map state between tests
   5. Snapshot tests verify queue migration state transitions
+**Plans:**
+2/2 plans complete
+- [x] 45-01-PLAN.md — Core migration tests (QTEST-01, QTEST-05): legacy-queue-v1.json fixture + migrateToV2 integration + state transitions
+- [x] 45-02-PLAN.md — Queue operations tests (QTEST-02, QTEST-03, QTEST-04): loadEvolutionQueue/saveEvolutionQueue + purgeStaleFailedTasks + asyncLockQueues
 
 ### Phase 46: God Class Split
 **Goal**: Extract focused modules from `evolution-worker.ts` (2689L) and improve queue file I/O isolation — enable independent testing and reduce merge conflicts
