@@ -55,7 +55,9 @@ export default defineConfig({
           name: 'unit',
           include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
           exclude: integrationTests,
-          pool: 'threads',
+          // Use forks pool to avoid better-sqlite3 teardown hangs
+          // Native modules don't clean up properly in threads pool
+          pool: 'forks',
         },
       },
       {
