@@ -1,5 +1,27 @@
 # Milestones
 
+## v1.18 Nocturnal State Safety & Recovery (Shipped: 2026-04-14)
+
+**Phases completed:** 22 phases, 33 plans, 34 tasks
+
+**Key accomplishments:**
+
+- Plan:
+- One-liner:
+- One-liner:
+- deriveReasoningChain() extracting thinking content, uncertainty markers, and confidence signals from assistant turns with 3 exported interfaces
+- Full implementations replacing stubs: deriveDecisionPoints correlates tool calls with surrounding assistant turns by timestamp, deriveContextualFactors computes 4 environmental boolean signals
+- Extended Dreamer prompt with strategic perspective requirements, optional riskLevel/strategicPerspective fields on DreamerCandidate, and reasoning context injection via formatReasoningContext helper
+- Extended Philosopher from 4D to 6D evaluation with Safety Impact and UX Impact dimensions, added risk assessment fields, and wired Dreamer risk profiles into the prompt builder
+- Added deterministic 6D scoring and risk assessment to invokeStubPhilosopher, wired philosopher6D aggregation into both stub and real Trinity pipelines, and wrote 9 comprehensive tests covering all PHILO requirements
+- RejectedAnalysis
+- FPR-weighted confidence scoring with x0.8 decay on false positives and per-workspace 4/day optimization throttle for correction cue keywords
+- LLM-driven keyword optimization workflow manager extending WorkflowManagerBase with prompt template, result parsing, and barrel exports for correction observer dispatch
+- Dedicated 6-hour keyword_optimization interval and prompt.ts FPR feedback loop wiring, closing CORR-07
+- Fixed CR-01 semantic bug (recordFalsePositive -> recordTruePositive) and extracted keyword_optimization trigger outside trigger_mode guard for default idle mode reachability
+
+---
+
 ## Current: v1.13 Boundary Contract Hardening (Started: 2026-04-11)
 
 **Goal:**

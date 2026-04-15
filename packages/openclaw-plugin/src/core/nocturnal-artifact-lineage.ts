@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { resolveNocturnalDir } from './nocturnal-paths.js';
 import { withLock } from '../utils/file-lock.js';
+import { atomicWriteFileSync } from '../utils/io.js';
 
 export type ArtifactKind = 'behavioral-sample' | 'rule-implementation-candidate';
 
@@ -56,9 +57,7 @@ function writeArtifactLineageRegistry(
 ): void {
   const registryPath = getLineageRegistryPath(workspaceDir);
   fs.mkdirSync(path.dirname(registryPath), { recursive: true });
-  const tmpPath = `${registryPath}.tmp`;
-  fs.writeFileSync(tmpPath, JSON.stringify(records, null, 2), 'utf-8');
-  fs.renameSync(tmpPath, registryPath);
+  atomicWriteFileSync(registryPath, JSON.stringify(records, null, 2));
 }
 
 export function appendArtifactLineageRecord(

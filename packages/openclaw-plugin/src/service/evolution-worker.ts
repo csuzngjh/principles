@@ -16,8 +16,9 @@ import { getEvolutionLogger } from '../core/evolution-logger.js';
 import type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 export type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 import { LockUnavailableError } from '../config/index.js';
-import { checkWorkspaceIdle, checkCooldown } from './nocturnal-runtime.js';
-import { loadNocturnalConfig } from './nocturnal-config.js';
+import { atomicWriteFileSync } from '../utils/io.js';
+import { checkWorkspaceIdle, checkCooldown, recordCooldown } from './nocturnal-runtime.js';
+import { loadCooldownEscalationConfig, loadNocturnalConfigMerged } from './nocturnal-config.js';
 import { WorkflowStore } from './subagent-workflow/workflow-store.js';
 import type { WorkflowRow } from './subagent-workflow/types.js';
 import { EmpathyObserverWorkflowManager } from './subagent-workflow/empathy-observer-workflow-manager.js';
@@ -36,8 +37,10 @@ import type { CorrectionObserverPayload } from './subagent-workflow/correction-o
 import { KeywordOptimizationService } from './keyword-optimization-service.js';
 import { TrajectoryRegistry } from '../core/trajectory.js';
 import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
-
-const WORKFLOW_TTL_MS = 5 * 60 * 1000; // 5 minutes default TTL for helper workflows
+import { classifyFailure, type ClassifiableTaskKind } from './failure-classifier.js';
+import { recordPersistentFailure, resetFailureState, isTaskKindInCooldown } from './cooldown-strategy.js';
+import { reconcileStartup } from './startup-reconciler.js';
+import { WORKFLOW_TTL_MS } from '../config/defaults/runtime.js';
 import { OpenClawTrinityRuntimeAdapter } from '../core/nocturnal-trinity.js';
 
 // ── Workflow Watchdog ────────────────────────────────────────────────────────
@@ -724,7 +727,7 @@ function enqueueNewSleepReflectionTask(
         recentPainContext,
     });
 
-    fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+    atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
     logger?.info?.(`[PD:EvolutionWorker] Enqueued sleep_reflection task ${taskId}`);
 }
 
@@ -810,7 +813,7 @@ async function enqueueKeywordOptimizationTask(
             maxRetries: 1,
         });
 
-        fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+        atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
         logger?.info?.(`[PD:EvolutionWorker] Enqueued keyword_optimization task ${taskId}`);
     } finally {
         releaseLock();
@@ -869,7 +872,7 @@ async function doEnqueuePainTask(
             retryCount: 0, maxRetries: 3,
         });
 
-        fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+        atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
         fs.appendFileSync(painFlagPath, `\nstatus: queued\ntask_id: ${taskId}\n`, 'utf8');
         result.enqueued = true;
 
@@ -1646,7 +1649,13 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
         const pollingSleepTasks = queue.filter(t =>
             t.status === 'in_progress' && t.taskKind === 'sleep_reflection' && t.resultRef && !t.resultRef.startsWith('trinity-draft')
         );
-        const sleepReflectionTasks = [...pendingSleepTasks, ...pollingSleepTasks];
+        let sleepReflectionTasks = [...pendingSleepTasks, ...pollingSleepTasks];
+        // Phase 40: Check if sleep_reflection is in cooldown due to persistent failures
+        const sleepCooldown = isTaskKindInCooldown(wctx.stateDir, 'sleep_reflection');
+        if (sleepCooldown.inCooldown) {
+            logger?.info?.(`[PD:EvolutionWorker] sleep_reflection in cooldown (remaining ${Math.round(sleepCooldown.remainingMs / 60000)}min), skipping task processing`);
+            sleepReflectionTasks = [];
+        }
         if (sleepReflectionTasks.length > 0) {
             // --- Phase 1: Claim only pending tasks (inside lock) ---
             // in_progress tasks from previous cycles are already claimed, don't re-claim them
@@ -1658,9 +1667,11 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
 
             // Write claimed state (includes any pain changes from above) and release lock
             if (queueChanged) {
-                fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+                atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
             }
             releaseLock();
+            // Phase 40: Track outcomes for failure classification after queue write
+            const sleepOutcomes: Array<{ taskKind: ClassifiableTaskKind; succeeded: boolean }> = [];
             for (const sleepTask of sleepReflectionTasks) {
                 try {
                     // FIX: For in_progress tasks from a previous cycle, just poll the workflow.
@@ -1750,6 +1761,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             sleepTask.status = 'failed';
                             sleepTask.completed_at = new Date().toISOString();
                             sleepTask.resolution = 'failed_max_retries';
+                            sleepOutcomes.push({ taskKind: 'sleep_reflection', succeeded: false });
                             sleepTask.lastError = `sleep_reflection failed: invalid_snapshot_ingress (${snapshotValidation.reasons.join('; ') || 'missing snapshot'})`;
                             sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
                             logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} rejected: ${sleepTask.lastError}`);
@@ -1765,6 +1777,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         sleepTask.resolution = 'failed_max_retries';
                         sleepTask.lastError = 'No API available to create NocturnalWorkflowManager';
                         sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
+                        sleepOutcomes.push({ taskKind: 'sleep_reflection', succeeded: false });
                         logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} skipped: no API`);
                         continue;
                     }
@@ -1803,6 +1816,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         sleepTask.resolution = 'failed_max_retries';
                         sleepTask.lastError = 'sleep_reflection failed: missing_workflow_id';
                         sleepTask.retryCount = (sleepTask.retryCount ?? 0) + 1;
+                        sleepOutcomes.push({ taskKind: 'sleep_reflection', succeeded: false });
                         logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} missing workflow id after startup`);
                         continue;
                     }
@@ -1816,6 +1830,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             sleepTask.completed_at = new Date().toISOString();
                             sleepTask.resolution = 'marker_detected';
                             sleepTask.resultRef = summary.metadata?.nocturnalResult ? 'trinity-draft' : workflowId;
+                            sleepOutcomes.push({ taskKind: 'sleep_reflection', succeeded: true });
                             logger?.info?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} workflow completed`);
                         } else if (summary.state === 'terminal_error') {
                             // #208/#209: Classify terminal_error reason before hardcoding to failed.
@@ -1849,10 +1864,11 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             if (isExpectedSubagentError(errorReason)) {
                                 // #237: Expected unavailability → stub fallback, not hard failure
                                 sleepTask.status = 'completed';
-                                 
+
                                 sleepTask.completed_at = new Date().toISOString();
                                 sleepTask.resolution = 'stub_fallback';
-                                 
+                                sleepOutcomes.push({ taskKind: 'sleep_reflection', succeeded: true });
+
                                 logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} background runtime unavailable, using stub fallback: ${errorReason}`);
                             // eslint-disable-next-line @typescript-eslint/no-explicit-any
                             } else if ((payload as any).skipReason === 'no_violating_sessions') {
@@ -1860,11 +1876,13 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                                 sleepTask.status = 'completed';
                                 sleepTask.completed_at = new Date().toISOString();
                                 sleepTask.resolution = 'skipped_thin_violation';
+                                sleepOutcomes.push({ taskKind: 'sleep_reflection', succeeded: true });
                                 logger?.info?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} completed: no sessions with meaningful violations found`);
                             } else {
                                 sleepTask.status = 'failed';
                                 sleepTask.completed_at = new Date().toISOString();
                                 sleepTask.resolution = 'failed_max_retries';
+                                sleepOutcomes.push({ taskKind: 'sleep_reflection', succeeded: false });
                                 logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} workflow failed: ${sleepTask.lastError}`);
                             }
                         } else {
@@ -1885,11 +1903,13 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         sleepTask.status = 'completed';
                         sleepTask.completed_at = new Date().toISOString();
                         sleepTask.resolution = 'stub_fallback';
+                        sleepOutcomes.push({ taskKind: 'sleep_reflection', succeeded: true });
                         logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} background runtime unavailable, using stub fallback: ${String(taskErr)}`);
                     } else {
                         sleepTask.status = 'failed';
                         sleepTask.completed_at = new Date().toISOString();
                         sleepTask.resolution = 'failed_max_retries';
+                        sleepOutcomes.push({ taskKind: 'sleep_reflection', succeeded: false });
                         logger?.error?.(`[PD:EvolutionWorker] sleep_reflection task ${sleepTask.id} threw: ${taskErr}`);
                     }
                 }
@@ -1912,7 +1932,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             freshQueue[idx] = sleepTask;
                         }
                     }
-                    fs.writeFileSync(queuePath, JSON.stringify(freshQueue, null, 2), 'utf8');
+                    atomicWriteFileSync(queuePath, JSON.stringify(freshQueue, null, 2));
 
                     // Log completions to EvolutionLogger
                     for (const sleepTask of sleepReflectionTasks) {
@@ -1938,7 +1958,28 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                 logger?.warn?.(`[PD:EvolutionWorker] Failed to write sleep_reflection results back: ${String(resultLockErr)}`);
             }
 
+            // Phase 40: Process failure classification — evaluate once per taskKind,
+            // not per-outcome, to prevent tier escalation from firing N times for N failures.
+            try {
+                const hadAnySuccess = sleepOutcomes.some(o => o.succeeded);
+                const hadAnyFailure = sleepOutcomes.some(o => !o.succeeded);
+                if (hadAnySuccess) {
+                    await resetFailureState(wctx.stateDir, 'sleep_reflection');
+                }
+                if (hadAnyFailure) {
+                    const config = loadCooldownEscalationConfig(wctx.stateDir);
+                    const result = classifyFailure(queue, 'sleep_reflection', config.consecutive_threshold);
+                    if (result.classification === 'persistent') {
+                        await recordPersistentFailure(wctx.stateDir, 'sleep_reflection', config, result.consecutiveFailures);
+                        logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection persistent failure (${result.consecutiveFailures} consecutive), escalating cooldown`);
+                    }
+                }
+            } catch { /* classification errors are non-blocking */ }
+
             // Safe to return — pain_diagnosis was already processed above.
+            // keyword_optimization tasks are deferred to the next heartbeat cycle.
+            // Running both in the same cycle causes stale queue overwrite and
+            // double lock release (lock was released at line ~1703).
             lockReleased = true;
             return;
         }
@@ -1955,6 +1996,20 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
             !t.resultRef.startsWith('trinity-draft')
         );
         const keywordOptTasks = [...pendingKeywordOptTasks, ...inProgressKeywordOptTasks];
+        // Phase 40: Check if keyword_optimization is in cooldown due to persistent failures
+        const kwOptCooldown = isTaskKindInCooldown(wctx.stateDir, 'keyword_optimization');
+        if (kwOptCooldown.inCooldown) {
+            logger?.info?.(`[PD:EvolutionWorker] keyword_optimization in cooldown (remaining ${Math.round(kwOptCooldown.remainingMs / 60000)}min), skipping task processing`);
+            if (keywordOptTasks.length > 0) {
+                // Skip all keyword_optimization tasks this cycle; release lock and return
+                if (queueChanged) {
+                    atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
+                }
+                releaseLock();
+                lockReleased = true;
+                return;
+            }
+        }
         if (keywordOptTasks.length > 0) {
             // Claim pending tasks inside lock
             for (const koTask of pendingKeywordOptTasks) {
@@ -1964,10 +2019,12 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
             queueChanged = queueChanged || pendingKeywordOptTasks.length > 0;
 
             // Release lock during LLM dispatch (long-running)
-            fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+            atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
             releaseLock();
             lockReleased = true;
 
+            // Phase 40: Track outcomes for failure classification after queue write
+            const kwOptOutcomes: Array<{ taskKind: ClassifiableTaskKind; succeeded: boolean }> = [];
             for (const koTask of keywordOptTasks) {
                 const isPolling = !!koTask.resultRef && !koTask.resultRef.startsWith('trinity-draft');
 
@@ -2043,11 +2100,17 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                             koTask.status = 'completed';
                             koTask.completed_at = new Date().toISOString();
                             koTask.resolution = 'marker_detected';
+                            kwOptOutcomes.push({ taskKind: 'keyword_optimization', succeeded: true });
+                            // CORR-08: Record throttle quota (max 4/day)
+                            recordCooldown(wctx.stateDir).catch(err =>
+                                logger?.warn?.(`[PD:EvolutionWorker] recordCooldown failed (non-blocking): ${String(err)}`)
+                            );
                             logger?.info?.(`[PD:EvolutionWorker] keyword_optimization task ${koTask.id} workflow completed`);
                         } else if (summary.state === 'terminal_error') {
                             koTask.status = 'failed';
                             koTask.completed_at = new Date().toISOString();
                             koTask.resolution = 'failed_max_retries';
+                            kwOptOutcomes.push({ taskKind: 'keyword_optimization', succeeded: false });
                             koTask.retryCount = (koTask.retryCount ?? 0) + 1;
                             const lastEvent = summary.recentEvents[summary.recentEvents.length - 1];
                             koTask.lastError = `keyword_optimization failed: ${lastEvent?.reason ?? 'unknown'}`;
@@ -2060,6 +2123,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     koTask.status = 'failed';
                     koTask.completed_at = new Date().toISOString();
                     koTask.resolution = 'failed_max_retries';
+                    kwOptOutcomes.push({ taskKind: 'keyword_optimization', succeeded: false });
                     koTask.lastError = String(koErr);
                     koTask.retryCount = (koTask.retryCount ?? 0) + 1;
                     logger?.error?.(`[PD:EvolutionWorker] keyword_optimization task ${koTask.id} threw: ${koErr}`);
@@ -2087,17 +2151,36 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         freshQueue.push(koTask);
                     }
                 }
-                fs.writeFileSync(queuePath, JSON.stringify(freshQueue, null, 2), 'utf8');
+                atomicWriteFileSync(queuePath, JSON.stringify(freshQueue, null, 2));
             } catch (koResultErr) {
                 logger?.warn?.(`[PD:EvolutionWorker] Failed to write keyword_optimization results: ${String(koResultErr)}`);
             } finally {
                 koResultLock();
             }
+
+            // Phase 40: Process failure classification — evaluate once per taskKind
+            try {
+                const hadAnySuccess = kwOptOutcomes.some(o => o.succeeded);
+                const hadAnyFailure = kwOptOutcomes.some(o => !o.succeeded);
+                if (hadAnySuccess) {
+                    await resetFailureState(wctx.stateDir, 'keyword_optimization');
+                }
+                if (hadAnyFailure) {
+                    const config = loadCooldownEscalationConfig(wctx.stateDir);
+                    const freshQueue = JSON.parse(fs.readFileSync(queuePath, 'utf8')) as EvolutionQueueItem[];
+                    const result = classifyFailure(freshQueue, 'keyword_optimization', config.consecutive_threshold);
+                    if (result.classification === 'persistent') {
+                        await recordPersistentFailure(wctx.stateDir, 'keyword_optimization', config, result.consecutiveFailures);
+                        logger?.warn?.(`[PD:EvolutionWorker] keyword_optimization persistent failure (${result.consecutiveFailures} consecutive), escalating cooldown`);
+                    }
+                }
+            } catch { /* classification errors are non-blocking */ }
+
             return;
         }
 
         if (queueChanged) {
-            fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+            atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
         }
 
         // Pipeline observability: log stage-level summary at end of cycle
@@ -2215,7 +2298,7 @@ export async function registerEvolutionTaskSession(
         if (!task.started_at) {
             task.started_at = new Date().toISOString();
         }
-        fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+        atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
         return true;
     } finally {
         releaseLock();
@@ -2255,7 +2338,7 @@ interface WorkerStatusReport {
 function writeWorkerStatus(stateDir: string, report: WorkerStatusReport): void {
     try {
         const statusPath = path.join(stateDir, 'worker-status.json');
-        fs.writeFileSync(statusPath, JSON.stringify(report, null, 2), 'utf8');
+        atomicWriteFileSync(statusPath, JSON.stringify(report, null, 2));
     } catch (statusErr) {
         // Non-critical: worker-status.json is for monitoring, failure is acceptable
         // (no logger available in this standalone helper)
@@ -2286,7 +2369,7 @@ async function processEvolutionQueueWithResult(
         const purgeResult = purgeStaleFailedTasks(queue, logger);
         if (purgeResult.purged > 0) {
             // Write back the cleaned queue
-            fs.writeFileSync(queuePath, JSON.stringify(queue, null, 2), 'utf8');
+            atomicWriteFileSync(queuePath, JSON.stringify(queue, null, 2));
         }
 
         queueResult.total = queue.length;
@@ -2375,8 +2458,9 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
             };
 
             try {
-                // Load config on each cycle (supports runtime updates)
-                const sleepConfig = loadNocturnalConfig(wctx.stateDir);
+                // Load config on each cycle (supports runtime updates) — single file read
+                const mergedConfig = loadNocturnalConfigMerged(wctx.stateDir);
+                const { sleepReflection: sleepConfig, keywordOptimization: kwOptConfig } = mergedConfig;
 
                 const idleResult = checkWorkspaceIdle(wctx.workspaceDir, {});
                 logger?.info?.(`[PD:EvolutionWorker] HEARTBEAT cycle=${new Date().toISOString()} idle=${idleResult.isIdle} idleForMs=${idleResult.idleForMs} userActiveSessions=${idleResult.userActiveSessions} abandonedSessions=${idleResult.abandonedSessionIds.length} lastActivityEpoch=${idleResult.mostRecentActivityAt} triggerMode=${sleepConfig.trigger_mode}`);
@@ -2389,18 +2473,18 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
                     shouldTrySleepReflection = true;
                 }
 
-                // Path 2: Periodic trigger (fires regardless of idle state)
-                // keyword_optimization fires every period_heartbeats (CORR-07).
-                // IMPORTANT: check keyword_optimization BEFORE resetting counter for sleep_reflection.
-                if (sleepConfig.trigger_mode === 'periodic') {
-                    // keyword_optimization check BEFORE counter reset (CORR-07 fix)
-                    if (heartbeatCounter > 0 && heartbeatCounter % sleepConfig.period_heartbeats === 0) {
-                        logger?.info?.(`[PD:EvolutionWorker] Periodic keyword_optimization trigger at heartbeat ${heartbeatCounter}`);
-                        enqueueKeywordOptimizationTask(wctx, logger).catch((err) => {
-                            logger?.error?.(`[PD:EvolutionWorker] Failed to enqueue keyword_optimization task: ${String(err)}`);
-                        });
-                    }
+                // keyword_optimization: Independent periodic trigger (CORR-07).
+                // Fires every kwOptConfig.period_heartbeats regardless of trigger_mode.
+                // Has its own dedicated config (default 24 heartbeats = 6 hours).
+                if (kwOptConfig.enabled && heartbeatCounter > 0 && heartbeatCounter % kwOptConfig.period_heartbeats === 0) {
+                    logger?.info?.(`[PD:EvolutionWorker] keyword_optimization trigger at heartbeat ${heartbeatCounter} (trigger_mode=${sleepConfig.trigger_mode})`);
+                    enqueueKeywordOptimizationTask(wctx, logger).catch((err) => {
+                        logger?.error?.(`[PD:EvolutionWorker] Failed to enqueue keyword_optimization task: ${String(err)}`);
+                    });
+                }
 
+                // Path 2: Periodic trigger for sleep_reflection (fires regardless of idle state)
+                if (sleepConfig.trigger_mode === 'periodic') {
                     if (heartbeatCounter >= sleepConfig.period_heartbeats) {
                         logger?.info?.(`[PD:EvolutionWorker] Periodic trigger: heartbeatCounter=${heartbeatCounter} >= period_heartbeats=${sleepConfig.period_heartbeats}`);
                         shouldTrySleepReflection = true;
@@ -2568,6 +2652,18 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
 
         timeoutId = setTimeout(() => {
             void (async () => {
+                // Phase 41: Startup reconciliation — validate state, clear stale cooldowns, clean orphans
+                try {
+                    const reconResult = await reconcileStartup(wctx.stateDir);
+                    if (reconResult.cooldownsCleared > 0 || reconResult.orphansRemoved.length > 0 || reconResult.stateReset) {
+                        logger?.info?.(`[PD:EvolutionWorker] Startup reconciliation: ${reconResult.cooldownsCleared} stale cooldowns cleared, ${reconResult.orphansRemoved.length} orphan files removed, stateReset=${reconResult.stateReset}`);
+                    } else {
+                        logger?.debug?.('[PD:EvolutionWorker] Startup reconciliation: clean state, no action needed');
+                    }
+                } catch (reconErr) {
+                    logger?.warn?.(`[PD:EvolutionWorker] Startup reconciliation failed (non-blocking): ${String(reconErr)}`);
+                }
+
                 await checkPainFlag(wctx, logger);
                 // Use the same pipeline as regular cycles (includes purge + observability)
                 const queueResult = await processEvolutionQueueWithResult(wctx, logger, eventLog, api ?? undefined);

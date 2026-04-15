@@ -31,6 +31,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
+import { atomicWriteFileSync } from '../utils/io.js';
 import {
   type TrainingExperimentSpec,
   type TrainingExperimentResult,
@@ -307,7 +308,7 @@ export async function executeTrainer(
   if (!fs.existsSync(specDir)) {
     fs.mkdirSync(specDir, { recursive: true });
   }
-  fs.writeFileSync(specPath, specJson, 'utf-8');
+  atomicWriteFileSync(specPath, specJson);
 
   // Result file path (written by trainer to output dir)
   const resultFilePath = path.join(spec.outputDir, `result-${spec.experimentId}.json`);

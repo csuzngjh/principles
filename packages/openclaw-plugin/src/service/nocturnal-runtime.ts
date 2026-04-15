@@ -23,6 +23,7 @@ import * as path from 'path';
 import type { SessionState } from '../core/session-tracker.js';
 import { listSessions } from '../core/session-tracker.js';
 import { withLockAsync } from '../utils/file-lock.js';
+import { atomicWriteFileSync } from '../utils/io.js';
 
 // ---------------------------------------------------------------------------
 // System Session Detection
@@ -107,6 +108,16 @@ export const DEFAULT_ABANDONED_THRESHOLD_MS = 2 * 60 * 60 * 1000; // 2 hours
 // Types
 // ---------------------------------------------------------------------------
 
+/** Per-task-kind failure tracking for cooldown escalation (Phase 40) */
+export interface TaskFailureState {
+    /** Number of consecutive failures for this task kind */
+    consecutiveFailures: number;
+    /** Current escalation tier: 0=none, 1=30min, 2=4h, 3=24h (cap) */
+    escalationTier: number;
+    /** Cooldown deadline as ISO string, undefined if not in cooldown */
+    cooldownUntil?: string;
+}
+
 /**
  * Persisted state for nocturnal runtime bookkeeping.
  * Stored in {stateDir}/nocturnal-runtime.json
@@ -140,6 +151,13 @@ export interface NocturnalRuntimeState {
         status: 'success' | 'failed' | 'skipped';
         reason?: string;
     };
+
+    /**
+     * Per-task-kind failure tracking for cooldown escalation.
+     * Key: taskKind string (e.g. 'sleep_reflection', 'keyword_optimization')
+     * Value: failure state with consecutive count, tier, and cooldown deadline
+     */
+    taskFailureState?: Record<string, TaskFailureState>;
 }
 
 /** Result of an idle check */
@@ -195,7 +213,7 @@ function createDefaultState(): NocturnalRuntimeState {
 // File Operations (with locking)
 // ---------------------------------------------------------------------------
 
-async function readState(stateDir: string): Promise<NocturnalRuntimeState> {
+export async function readState(stateDir: string): Promise<NocturnalRuntimeState> {
     const filePath = path.join(stateDir, NOCTURNAL_RUNTIME_FILE);
     if (!fs.existsSync(filePath)) {
         return createDefaultState();
@@ -211,6 +229,7 @@ async function readState(stateDir: string): Promise<NocturnalRuntimeState> {
             lastSuccessfulRunAt: parsed.lastSuccessfulRunAt,
             globalCooldownUntil: parsed.globalCooldownUntil,
             lastRunMeta: parsed.lastRunMeta,
+            taskFailureState: parsed.taskFailureState,
         };
     } catch {
         // Corrupted file — start fresh
@@ -218,7 +237,7 @@ async function readState(stateDir: string): Promise<NocturnalRuntimeState> {
     }
 }
 
-function readStateSync(stateDir: string): NocturnalRuntimeState {
+export function readStateSync(stateDir: string): NocturnalRuntimeState {
     const filePath = path.join(stateDir, NOCTURNAL_RUNTIME_FILE);
     if (!fs.existsSync(filePath)) {
         return createDefaultState();
@@ -233,6 +252,7 @@ function readStateSync(stateDir: string): NocturnalRuntimeState {
             lastSuccessfulRunAt: parsed.lastSuccessfulRunAt,
             globalCooldownUntil: parsed.globalCooldownUntil,
             lastRunMeta: parsed.lastRunMeta,
+            taskFailureState: parsed.taskFailureState,
         };
     } catch (err) {
         console.warn(`[nocturnal-runtime] State file corrupted, resetting: ${err instanceof Error ? err.message : String(err)}`);
@@ -240,14 +260,14 @@ function readStateSync(stateDir: string): NocturnalRuntimeState {
     }
 }
 
-async function writeState(stateDir: string, state: NocturnalRuntimeState): Promise<void> {
+export async function writeState(stateDir: string, state: NocturnalRuntimeState): Promise<void> {
     const filePath = path.join(stateDir, NOCTURNAL_RUNTIME_FILE);
     const stateDirPath = path.dirname(filePath);
     if (!fs.existsSync(stateDirPath)) {
         fs.mkdirSync(stateDirPath, { recursive: true });
     }
     await withLockAsync(filePath, async () => {
-        fs.writeFileSync(filePath, JSON.stringify(state, null, 2), 'utf-8');
+        atomicWriteFileSync(filePath, JSON.stringify(state, null, 2));
     });
 }
 

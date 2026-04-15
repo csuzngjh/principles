@@ -47,6 +47,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
+import { atomicWriteFileSync } from '../utils/io.js';
 import {
   listDatasetRecords,
   readDatasetArtifact,
@@ -158,7 +159,7 @@ function computeDatasetFingerprint(sampleFingerprints: string[]): string {
  * Caller guarantees record.targetModelFamily is non-null.
  */
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 function serializeORPOSample(
   record: NocturnalDatasetRecord,
   artifact: ReturnType<typeof readDatasetArtifact>,
@@ -167,7 +168,7 @@ function serializeORPOSample(
   datasetFingerprint: string
 ): ORPOSample {
   const now = new Date().toISOString();
-  // eslint-disable-next-line @typescript-eslint/no-use-before-define
+   
   const rejected = buildEvidenceBoundedRejected(artifact, evidenceSummary);
 
   return {
@@ -180,7 +181,7 @@ function serializeORPOSample(
     prompt: rejected,
     chosen: artifact.betterDecision,
     rejected,
-    // eslint-disable-next-line @typescript-eslint/no-use-before-define
+     
     rationale: buildEvidenceBoundedRationale(evidenceSummary),
     datasetMetadata: {
       sampleFingerprint: record.sampleFingerprint,
@@ -295,7 +296,7 @@ export function exportORPOSamples(
   });
 
    
-  // eslint-disable-next-line @typescript-eslint/init-declarations
+   
   let eligibleRecords: typeof allApprovedRecords;
 
   if (targetModelFamily !== undefined && targetModelFamily !== null) {
@@ -345,7 +346,7 @@ export function exportORPOSamples(
 
     // Read artifact (throws on error — distinguishes read failure from missing artifact)
      
-    // eslint-disable-next-line @typescript-eslint/init-declarations
+     
     let artifact;
     try {
       artifact = readDatasetArtifact(workspaceDir, record.sampleFingerprint);
@@ -385,7 +386,7 @@ export function exportORPOSamples(
   const exportsDir = NocturnalPathResolver.exportsDir(workspaceDir);
   const jsonlPath = path.join(exportsDir, `${exportId}.jsonl`);
   const lines = orpoSamples.map((s) => JSON.stringify(s)).join('\n') + '\n';
-  fs.writeFileSync(jsonlPath, lines, 'utf-8');
+  atomicWriteFileSync(jsonlPath, lines);
 
   // Step 8: Write manifest
   const manifest: ORPOExportManifest = {
@@ -404,7 +405,7 @@ export function exportORPOSamples(
     })),
   };
 
-  fs.writeFileSync(manifest.manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
+  atomicWriteFileSync(manifest.manifestPath, JSON.stringify(manifest, null, 2));
 
   return {
     success: true,

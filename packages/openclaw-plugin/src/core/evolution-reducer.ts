@@ -2,6 +2,7 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { withLock } from '../utils/file-lock.js';
+import { atomicWriteFileSync } from '../utils/io.js';
 import { PathResolver } from './path-resolver.js';
 import { SystemLogger } from './system-logger.js';
 import { shouldIgnorePainProtocolText } from './dictionary.js';
@@ -441,7 +442,7 @@ export class EvolutionReducerImpl implements EvolutionReducer {
           if (!fs.existsSync(parentDir)) {
             fs.mkdirSync(parentDir, { recursive: true });
           }
-          fs.writeFileSync(this.principlesPath, content, 'utf8');
+          atomicWriteFileSync(this.principlesPath, content);
           SystemLogger.log(this.workspaceDir, 'PRINCIPLES_CREATED', `Created PRINCIPLES.md`);
         }
 
@@ -460,7 +461,7 @@ export class EvolutionReducerImpl implements EvolutionReducer {
           content = content + separator + formatted;
         }
 
-        fs.writeFileSync(this.principlesPath, content, 'utf8');
+        atomicWriteFileSync(this.principlesPath, content);
         SystemLogger.log(this.workspaceDir, 'PRINCIPLE_SYNCED', `Principle ${principle.id} synced to PRINCIPLES.md`);
       }, { lockStaleMs: 10000 });
       return true;
@@ -752,7 +753,7 @@ export class EvolutionReducerImpl implements EvolutionReducer {
   private persistBlacklist(entry: { painId?: string; pattern?: string; reason: string; rolledBackAt: string }): void {
     const list = this.loadBlacklist();
     list.push(entry);
-    fs.writeFileSync(this.blacklistPath, JSON.stringify(list, null, 2), 'utf8');
+    atomicWriteFileSync(this.blacklistPath, JSON.stringify(list, null, 2));
   }
 
   private loadBlacklist(): { painId?: string; pattern?: string; reason: string; rolledBackAt: string }[] {
