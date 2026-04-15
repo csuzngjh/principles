@@ -56,7 +56,7 @@ export interface CleanupParams {
 }
 
  
-type PluginRuntimeSubagent = {
+export type PluginRuntimeSubagent = {
     run: (params: {
         sessionKey: string;
         message: string;

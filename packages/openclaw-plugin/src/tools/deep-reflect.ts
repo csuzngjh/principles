@@ -1,4 +1,5 @@
 import type { OpenClawPluginApi } from '../openclaw-sdk.js';
+import type { PluginRuntimeSubagent } from '../service/subagent-workflow/runtime-direct-driver.js';
 import { Type } from '@sinclair/typebox';
 import * as fs from 'fs';
 import { EventLogService } from '../core/event-log.js';
@@ -21,6 +22,16 @@ interface DeepReflectionConfig {
     };
     modelsDir?: string;
     timeout_ms?: number;
+}
+
+/**
+ * Type assertion: OpenClaw SDK subagent -> workflow manager subagent type.
+ * Both types are structurally identical but come from different import paths.
+ */
+function toWorkflowSubagent(
+  subagent: NonNullable<OpenClawPluginApi['runtime']>['subagent']
+): PluginRuntimeSubagent {
+  return subagent as unknown as PluginRuntimeSubagent;
 }
 
 const DEFAULT_CONFIG: DeepReflectionConfig = {
@@ -108,7 +119,7 @@ export function createDeepReflectTool(api: OpenClawPluginApi) {
             }
 
              
-            // eslint-disable-next-line @typescript-eslint/no-use-before-define
+             
             const effectiveWorkspaceDir = resolveReflectionWorkspace(api);
 
             const config = loadConfig(effectiveWorkspaceDir, api);
@@ -122,11 +133,11 @@ export function createDeepReflectTool(api: OpenClawPluginApi) {
 
             try {
                  
-                // eslint-disable-next-line @typescript-eslint/no-use-before-define
+                 
                 return await executeReflectionWorkflow(effectiveWorkspaceDir, config, context, depth, model_id, api);
             } catch (err) {
                  
-                // eslint-disable-next-line @typescript-eslint/no-use-before-define
+                 
                 return handleReflectionError(err, context, depth, model_id, effectiveWorkspaceDir, api);
             }
         }
@@ -149,7 +160,7 @@ function resolveReflectionWorkspace(api: OpenClawPluginApi): string {
  * Execute the deep reflection workflow: start, poll, collect results.
  */
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 async function executeReflectionWorkflow(
     effectiveWorkspaceDir: string,
     config: DeepReflectionConfig,
@@ -165,8 +176,8 @@ async function executeReflectionWorkflow(
     const manager = new DeepReflectWorkflowManager({
         workspaceDir: effectiveWorkspaceDir,
         logger: api.logger,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: api.runtime.subagent has structurally compatible shape but differs from PluginRuntimeSubagent due to optional provider/model fields
-        subagent: api.runtime.subagent as any,
+         
+        subagent: toWorkflowSubagent(api.runtime.subagent),
         agentSession: api.runtime.agent?.session,
     });
 
@@ -181,7 +192,7 @@ async function executeReflectionWorkflow(
         const startTime = Date.now();
         const timeoutMs = config.timeout_ms ?? 60000;
          
-        // eslint-disable-next-line @typescript-eslint/no-use-before-define
+         
         return await pollReflectionCompletion(manager, handle, timeoutMs, startTime, eventLog, effectiveWorkspaceDir, context, model_id, depth);
     } finally {
         manager.dispose();
@@ -192,7 +203,7 @@ async function executeReflectionWorkflow(
  * Poll the reflection workflow until completion, timeout, or error.
  */
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 async function pollReflectionCompletion(
     manager: DeepReflectWorkflowManager,
     handle: { workflowId: string; childSessionKey: string },
@@ -213,7 +224,7 @@ async function pollReflectionCompletion(
 
         if (workflowState === 'completed') {
              
-            // eslint-disable-next-line @typescript-eslint/no-use-before-define
+             
             return formatReflectionSuccess(handle, context, depth, model_id, startTime, eventLog, workspaceDir);
         }
 
@@ -229,7 +240,7 @@ async function pollReflectionCompletion(
  * Format the success response from a completed reflection.
  */
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 function formatReflectionSuccess(
     handle: { childSessionKey: string },
     context: string,
@@ -283,7 +294,7 @@ ${insights || '反思完成，详见 REFLECTION_LOG。'}
  * Handle reflection errors and format error response.
  */
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 function handleReflectionError(
     err: unknown,
     context: string,
