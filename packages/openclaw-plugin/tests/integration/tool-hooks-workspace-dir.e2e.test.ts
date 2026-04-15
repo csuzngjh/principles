@@ -65,7 +65,7 @@ describe('E2E: Tool Hooks workspaceDir Resolution', () => {
 
   describe('Scenario 2: ctx.workspaceDir is undefined (current OpenClaw behavior)', () => {
     it('should fallback to agentId resolution', async () => {
-      const { resolveValidWorkspaceDir } = await import('../../src/core/workspace-dir-validation.js');
+      const { resolveValidWorkspaceDir } = await import('../../src/core/workspace-dir-service.js');
       
       const mockApi = createMockApi(testWorkspaceDir);
       const ctx = { 
@@ -80,7 +80,7 @@ describe('E2E: Tool Hooks workspaceDir Resolution', () => {
     });
 
     it('should refuse to guess a workspace when agentId is also undefined', async () => {
-      const { resolveValidWorkspaceDir } = await import('../../src/core/workspace-dir-validation.js');
+      const { resolveValidWorkspaceDir } = await import('../../src/core/workspace-dir-service.js');
       
       const mockApi = createMockApi(testWorkspaceDir);
       const ctx = { 
@@ -131,7 +131,7 @@ describe('E2E: Tool Hooks workspaceDir Resolution', () => {
 
   describe('Scenario 4: Invalid workspace candidates are rejected', () => {
     it('should return undefined when all workspace resolution candidates are invalid', async () => {
-      const { resolveValidWorkspaceDir } = await import('../../src/core/workspace-dir-validation.js');
+      const { resolveValidWorkspaceDir } = await import('../../src/core/workspace-dir-service.js');
       
       const mockApi = createMockApi(os.homedir());
       mockApi.runtime.agent.resolveAgentWorkspaceDir.mockReturnValue(os.homedir());

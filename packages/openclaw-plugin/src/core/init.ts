@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import type { OpenClawPluginApi, PluginLogger } from '../openclaw-sdk.js';
 import { PD_DIRS } from './paths.js';
 import { defaultContextConfig } from '../types.js';
+import { loadStore, setPrincipleState, type PrincipleTrainingState } from './principle-training-state.js';
 
 /**
  * Default PROFILE.json content
@@ -45,7 +46,7 @@ export function ensureWorkspaceTemplates(api: OpenClawPluginApi, workspaceDir: s
         if (fs.existsSync(commonTemplatesDir)) {
             api.logger.info(`[PD] Syncing workspace templates: ${workspaceDir}...`);
              
-            // eslint-disable-next-line @typescript-eslint/no-use-before-define
+             
             copyRecursiveSync(commonTemplatesDir, workspaceDir, api);
         }
 
@@ -88,7 +89,7 @@ export function ensureWorkspaceTemplates(api: OpenClawPluginApi, workspaceDir: s
                 fs.mkdirSync(painDestDir, { recursive: true });
             }
              
-            // eslint-disable-next-line @typescript-eslint/no-use-before-define
+             
             copyRecursiveSync(painTemplatesDir, painDestDir, api);
         }
 
@@ -141,6 +142,72 @@ function copyRecursiveSync(srcDir: string, destDir: string, api: OpenClawPluginA
             }
         }
     }
+}
+
+/**
+ * Core thinking model definitions (T-01 through T-10).
+ * These are the built-in cognitive patterns that every workspace should have.
+ */
+const CORE_THINKING_MODELS: Array<{
+  id: string;
+  name: string;
+  description: string;
+}> = [
+  { id: 'T-01', name: 'Survey Before Acting', description: 'Understand the structure first before making changes.' },
+  { id: 'T-02', name: 'Respect Constraints', description: 'Trust files, not your context window. Write conclusions to files.' },
+  { id: 'T-03', name: 'Evidence Over Assumption', description: 'Use logs, code, and outputs before inferring causes.' },
+  { id: 'T-04', name: 'Reversible First', description: 'Prefer changes that are safe to roll back when risk is high.' },
+  { id: 'T-05', name: 'Safety Rails', description: 'Call out guardrails, prohibitions, and failure-prevention constraints.' },
+  { id: 'T-06', name: 'Simplicity First', description: 'Prefer the smallest understandable solution over over-engineering.' },
+  { id: 'T-07', name: 'Minimal Change Surface', description: 'Limit the blast radius and touch only what is necessary.' },
+  { id: 'T-08', name: 'Pain As Signal', description: 'Treat failures and friction as clues to step back and rethink.' },
+  { id: 'T-09', name: 'Divide And Conquer', description: 'Split the task into smaller phases before execution.' },
+  { id: 'T-10', name: 'Memory Externalization', description: 'Write intermediate conclusions to files for persistence.' },
+];
+
+/**
+ * Initialize core thinking models into the training store if it's empty.
+ * This ensures every workspace has evaluable principles for nocturnal reflection.
+ *
+ * @param stateDir - State directory path
+ * @param logger - Plugin logger
+ * @returns true if initialization was performed, false if already had principles
+ */
+export function ensureCorePrinciples(stateDir: string, logger: PluginLogger): boolean {
+  try {
+    const store = loadStore(stateDir);
+    const existingIds = Object.keys(store).filter(k => k !== '_tree');
+
+    // If already has principles, skip initialization
+    if (existingIds.length > 0) {
+      return false;
+    }
+
+    logger.info(`[PD] Initializing core thinking models (${CORE_THINKING_MODELS.length} principles) into training store`);
+
+    for (const model of CORE_THINKING_MODELS) {
+      const state: PrincipleTrainingState = {
+        principleId: model.id,
+        evaluability: 'deterministic',
+        applicableOpportunityCount: 0,
+        observedViolationCount: 0,
+        complianceRate: 0,
+        violationTrend: 0,
+        generatedSampleCount: 0,
+        approvedSampleCount: 0,
+        includedTrainRunIds: [],
+        deployedCheckpointIds: [],
+        internalizationStatus: 'needs_training',
+      };
+      setPrincipleState(stateDir, state);
+    }
+
+    logger.info(`[PD] Initialized ${CORE_THINKING_MODELS.length} core thinking models: T-01 through T-10`);
+    return true;
+  } catch (err) {
+    logger.error(`[PD] Failed to initialize core principles: ${String(err)}`);
+    return false;
+  }
 }
 
 /**

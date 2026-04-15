@@ -321,7 +321,7 @@ export function checkWorkspaceIdle(
     }
 
      
-    // eslint-disable-next-line @typescript-eslint/init-declarations
+     
     let reason: string;
     if (mostRecentActivityAt === 0) {
         reason = 'No active sessions found — workspace is idle';
@@ -390,7 +390,7 @@ export function checkCooldown(
         if (cooldownEnd > now) {
             globalCooldownActive = true;
             globalCooldownRemainingMs = cooldownEnd - now;
-            // eslint-disable-next-line @typescript-eslint/prefer-destructuring
+             
             globalCooldownUntil = state.globalCooldownUntil;  
         }
     }
@@ -428,6 +428,33 @@ export function checkCooldown(
         quotaExhausted,
         runsRemaining,
     };
+}
+
+/**
+ * Records a cooldown event for quota tracking (keyword_optimization etc.).
+ * Adds a timestamp to recentRunTimestamps and prunes entries outside the window.
+ * Does NOT set globalCooldownUntil — callers that need it should call recordRunStart.
+ *
+ * @param stateDir - State directory
+ * @param quotaWindowMs - Window size in ms (default: 24 hours)
+ */
+export async function recordCooldown(
+    stateDir: string,
+    quotaWindowMs: number = 24 * 60 * 60 * 1000
+): Promise<void> {
+    const state = await readState(stateDir);
+    const now = new Date().toISOString();
+
+    state.recentRunTimestamps.push(now);
+
+    // Prune old timestamps outside the window
+    const windowStart = Date.now() - quotaWindowMs;
+    state.recentRunTimestamps = state.recentRunTimestamps
+        .map(ts => new Date(ts).getTime())
+        .filter(ts => ts > windowStart)
+        .map(ts => new Date(ts).toISOString());
+
+    await writeState(stateDir, state);
 }
 
 /**
@@ -562,7 +589,7 @@ export interface PreflightCheckResult {
  * @param idleCheckOverride - Optional override for idle check result (for testing)
  */
  
-    // eslint-disable-next-line @typescript-eslint/max-params -- complexity 12, refactor candidate
+     
 export function checkPreflight(
     workspaceDir: string,
     stateDir: string,
