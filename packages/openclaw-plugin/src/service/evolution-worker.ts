@@ -298,7 +298,7 @@ export interface EvolutionQueueItem {
  * Legacy queue item shape (pre-V2) for migration compatibility.
  * These items lack taskKind, priority, retryCount, maxRetries, lastError fields.
  */
-interface LegacyEvolutionQueueItem {
+export interface LegacyEvolutionQueueItem {
     id: string;
     task?: string;
     score: number;
@@ -334,7 +334,7 @@ const DEFAULT_MAX_RETRIES = 3;
  * Migrate a legacy queue item to V2 schema.
  * Old items without taskKind are assumed to be pain_diagnosis for backward compatibility.
  */
-function migrateToV2(item: LegacyEvolutionQueueItem): EvolutionQueueItem {
+export function migrateToV2(item: LegacyEvolutionQueueItem): EvolutionQueueItem {
     return {
         id: item.id,
         taskKind: (item.taskKind as TaskKind) || DEFAULT_TASK_KIND,
@@ -366,7 +366,7 @@ type RawQueueItem = Record<string, unknown>;
 /**
  * Check if an item is a legacy (pre-V2) queue item.
  */
-function isLegacyQueueItem(item: RawQueueItem): boolean {
+export function isLegacyQueueItem(item: RawQueueItem): boolean {
     return item && typeof item === 'object' && !('taskKind' in item);
 }
 
@@ -374,7 +374,7 @@ function isLegacyQueueItem(item: RawQueueItem): boolean {
  * Migrate entire queue to V2 schema if needed.
  * Returns a new array with all items migrated to V2 format.
  */
-function migrateQueueToV2(queue: RawQueueItem[]): EvolutionQueueItem[] {
+export function migrateQueueToV2(queue: RawQueueItem[]): EvolutionQueueItem[] {
     return queue.map(item => isLegacyQueueItem(item) ? migrateToV2(item as unknown as LegacyEvolutionQueueItem) : item as unknown as EvolutionQueueItem);
 }
 
@@ -718,7 +718,7 @@ function shouldSkipForDedup(
 /**
  * Load and migrate the evolution queue. Returns empty array if file doesn't exist.
  */
-function loadEvolutionQueue(queuePath: string): EvolutionQueueItem[] {
+export function loadEvolutionQueue(queuePath: string): EvolutionQueueItem[] {
      
     let rawQueue: RawQueueItem[] = [];
     try {
