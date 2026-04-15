@@ -3,6 +3,14 @@ import { resetFriction } from '../core/session-tracker.js';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
 
 /**
+ * Extended context interface that includes sessionId injected by the plugin framework.
+ * PluginCommandContext does not include sessionId in its type definition.
+ */
+interface SessionAwareCommandContext extends PluginCommandContext {
+  sessionId: string;
+}
+
+/**
  * Handles the /pd-rollback command
  * 
  * Usage:
@@ -15,8 +23,7 @@ export function handleRollbackCommand(ctx: PluginCommandContext): PluginCommandR
     const wctx = WorkspaceContext.fromHookContext({ workspaceDir, ...ctx.config });
     const lang = (ctx.config?.language as string) || 'en';
     const isZh = lang === 'zh';
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: sessionId injected by OpenClaw plugin framework - type not available in PluginCommandContext
-    const {sessionId} = (ctx as any);
+    const { sessionId } = ctx as SessionAwareCommandContext;
 
     const args = (ctx.args || '').trim();
 
@@ -45,7 +52,7 @@ Usage:
     }
 
      
-    // eslint-disable-next-line @typescript-eslint/init-declarations
+     
     let eventId: string | null;
      
     const _triggerMethod = 'user_command' as const;
