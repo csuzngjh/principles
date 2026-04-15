@@ -28,7 +28,7 @@ import {
 } from '../core/principle-tree-ledger.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
-import type { Implementation } from '../types/principle-tree-schema.js';
+import type { Implementation, ImplementationLifecycleState } from '../types/principle-tree-schema.js';
 import { withLock } from '../utils/file-lock.js';
 import { atomicWriteFileSync } from '../utils/io.js';
 
@@ -37,16 +37,23 @@ function getAllImplementations(stateDir: string): Implementation[] {
   return Object.values(ledger.tree.implementations);
 }
 
+/**
+ * Type predicate: true if impl has lifecycleState of 'candidate' or 'disabled'.
+ * The ledger adds lifecycleState at runtime beyond what's in the manifest interface.
+ */
+function isCandidateOrDisabled(
+  impl: Implementation
+): impl is Implementation & { lifecycleState: ImplementationLifecycleState } {
+  return impl.lifecycleState === 'candidate' || impl.lifecycleState === 'disabled';
+}
+
 function _handleListCandidates(
   stateDir: string,
   isZh: boolean,
 ): PluginCommandResult {
   const engine = new ReplayEngine('', stateDir);
   const allImpls = getAllImplementations(stateDir);
-  const candidates = allImpls.filter(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: lifecycleState is a dynamic property added by the system - type not in official interface
-    (impl) => (impl as any).lifecycleState === 'candidate',
-  );
+  const candidates = allImpls.filter(isCandidateOrDisabled);
 
   if (candidates.length === 0) {
     return {
@@ -141,8 +148,7 @@ function _handlePromoteImpl(options: PromoteImplOptions): PluginCommandResult {
     };
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: lifecycleState is a dynamic property added by the system - type not in official interface
-  const currentState = (candidate as any).lifecycleState || 'candidate';
+  const currentState = candidate.lifecycleState || 'candidate';
 
   if (currentState !== 'candidate' && currentState !== 'disabled') {
     return {
