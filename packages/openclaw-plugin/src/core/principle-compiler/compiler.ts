@@ -226,6 +226,12 @@ export class PrincipleCompiler {
    */
   compileAll(): CompileResult[] {
     const contexts = this.collector.collectBatch();
-    return contexts.map((ctx) => this.compileOne(ctx.principle.id));
+    return contexts.map((ctx) => {
+      try {
+        return this.compileOne(ctx.principle.id);
+      } catch (e) {
+        return { success: false, principleId: ctx.principle.id, reason: `unhandled: ${(e as Error).message}` };
+      }
+    });
   }
 }

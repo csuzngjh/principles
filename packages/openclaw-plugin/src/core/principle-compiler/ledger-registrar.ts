@@ -5,11 +5,11 @@
  * 1. Creates a LedgerRule with type 'gate', enforcement 'block', status 'proposed'
  * 2. Creates an Implementation with type 'code', lifecycleState 'candidate'
  *
- * Uses createRule() and createImplementation() from principle-tree-ledger
- * so linking (ruleIds, implementationIds) is handled automatically.
+ * IDEMPOTENCY: If the rule already exists, returns existing registration.
+ * ROLLBACK: If implementation creation fails after rule creation, attempts cleanup.
  */
 
-import { createRule, createImplementation, type LedgerRule } from '../principle-tree-ledger.js';
+import { createRule, createImplementation, loadLedger, deleteRule, type LedgerRule } from '../principle-tree-ledger.js';
 
 export interface RegisterInput {
   principleId: string;
@@ -27,11 +27,8 @@ export interface RegisterResult {
 /**
  * Register a compiled rule for a principle in the ledger.
  *
- * Creates:
- * - Rule `R_{principleId}_auto` with type='gate', enforcement='block', status='proposed'
- * - Implementation `IMPL_{principleId}_auto` with type='code', lifecycleState='candidate'
- *
- * Throws if the principle does not exist (enforced by createRule).
+ * Idempotent: if rule already exists, returns existing registration.
+ * Atomic: if implementation creation fails, rolls back the rule.
  */
 export function registerCompiledRule(stateDir: string, input: RegisterInput): RegisterResult {
   const { principleId, codeContent, coversCondition } = input;
@@ -40,9 +37,21 @@ export function registerCompiledRule(stateDir: string, input: RegisterInput): Re
   const implementationId = `IMPL_${principleId}_auto`;
   const codePath = `compiled-rules/${principleId}/rule.ts`;
 
+  // Idempotency: skip if rule already exists
+  const existingLedger = loadLedger(stateDir);
+  if (existingLedger.tree.rules[ruleId]) {
+    const existingRule = existingLedger.tree.rules[ruleId];
+    return {
+      success: true,
+      ruleId,
+      implementationId: existingRule.implementationIds[0] ?? implementationId,
+      codePath,
+    };
+  }
+
   const now = new Date().toISOString();
 
-  // Step 1: Create the rule in the ledger (links to principle via createRule)
+  // Step 1: Create the rule
   const rule: LedgerRule = {
     id: ruleId,
     version: 1,
@@ -63,21 +72,31 @@ export function registerCompiledRule(stateDir: string, input: RegisterInput): Re
 
   createRule(stateDir, rule);
 
-  // Step 2: Create the implementation (links to rule via createImplementation)
-  const implementation = {
-    id: implementationId,
-    ruleId,
-    type: 'code' as const,
-    path: codePath,
-    version: '1',
-    coversCondition,
-    coveragePercentage: 100,
-    lifecycleState: 'candidate' as const,
-    createdAt: now,
-    updatedAt: now,
-  };
+  // Step 2: Create the implementation (with rollback on failure)
+  try {
+    const implementation = {
+      id: implementationId,
+      ruleId,
+      type: 'code' as const,
+      path: codePath,
+      version: '1',
+      coversCondition,
+      coveragePercentage: 100,
+      lifecycleState: 'candidate' as const,
+      createdAt: now,
+      updatedAt: now,
+    };
 
-  createImplementation(stateDir, implementation);
+    createImplementation(stateDir, implementation);
+  } catch (implError) {
+    // Rollback: remove the orphaned rule
+    try {
+      deleteRule(stateDir, ruleId);
+    } catch {
+      // Best-effort rollback — log but don't mask the original error
+    }
+    throw implError;
+  }
 
   return {
     success: true,

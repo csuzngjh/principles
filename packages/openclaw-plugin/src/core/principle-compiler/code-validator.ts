@@ -19,6 +19,7 @@ import { loadRuleImplementationModule } from '../rule-implementation-runtime.js'
 export interface ValidationResult {
   valid: boolean;
   errors: string[];
+  warnings: string[];
 }
 
 const FORBIDDEN_PATTERNS: { pattern: RegExp; label: string }[] = [
@@ -29,6 +30,15 @@ const FORBIDDEN_PATTERNS: { pattern: RegExp; label: string }[] = [
   { pattern: /\bFunction\s*\(/, label: 'Function' },
   { pattern: /\bprocess\b/, label: 'process' },
   { pattern: /\bglobalThis\b/, label: 'globalThis' },
+  { pattern: /\bglobal\b/, label: 'global' },
+  { pattern: /\bReflect\b/, label: 'Reflect' },
+  { pattern: /\bProxy\b/, label: 'Proxy' },
+  { pattern: /\bconstructor\b/, label: 'constructor' },
+  { pattern: /\bBuffer\b/, label: 'Buffer' },
+  { pattern: /\bsetTimeout\b/, label: 'setTimeout' },
+  { pattern: /\bsetInterval\b/, label: 'setInterval' },
+  // Bracket notation access to globals
+  { pattern: /\[\s*['"](require|import|fetch|eval|process|globalThis|global|Reflect|Proxy|Buffer|Function)\s*['"]\s*\]/, label: 'bracket access to forbidden global' },
 ];
 
 const MOCK_INPUT = {
@@ -45,6 +55,7 @@ const MOCK_INPUT = {
 
 export function validateGeneratedCode(code: string): ValidationResult {
   const errors: string[] = [];
+  const warnings: string[] = [];
 
   // --- Check 1: Syntax ---
   // Normalize export keywords so vm.Script can parse ES module source
@@ -98,10 +109,12 @@ export function validateGeneratedCode(code: string): ValidationResult {
     } else if (typeof (result as Record<string, unknown>).matched !== 'boolean') {
       errors.push('evaluate must return { matched: boolean }');
     }
-  } catch {
+  } catch (evalWarning) {
     // evaluate throwing on mock input is acceptable — the function exists and
-    // has the right signature, it just can't handle our mock data
+    // has the right signature, it just can't handle our generic mock data.
+    // Track as a non-blocking warning so operators know the rule may be fragile.
+    warnings.push(`evaluate() threw on mock input: ${(evalWarning as Error).message}`);
   }
 
-  return { valid: errors.length === 0, errors };
+  return { valid: errors.length === 0, errors, warnings };
 }
