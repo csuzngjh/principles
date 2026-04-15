@@ -51,10 +51,9 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
-    // Use threads pool for better performance
-    pool: 'threads',
+    // Use forks pool to avoid threads pool issues
+    pool: 'forks',
     teardownTimeout: 30000,
-    globalSetup: ['./tests/globalSetup.ts'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html'],
