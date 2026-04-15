@@ -1,15 +1,15 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.16
-milestone_name: Trinity Training Trajectory Quality Enhancement
-status: executing
-last_updated: "2026-04-14T16:29:19.548Z"
-last_activity: 2026-04-14
+milestone: v1.18
+milestone_name: Nocturnal State Safety & Recovery
+status: shipped
+last_updated: "2026-04-15"
+last_activity: 2026-04-15 — Milestone v1.18 shipped
 progress:
-  total_phases: 22
-  completed_phases: 18
-  total_plans: 33
-  completed_plans: 35
+  total_phases: 4
+  completed_phases: 4
+  total_plans: 10
+  completed_plans: 10
   percent: 100
 ---
 
@@ -21,36 +21,31 @@ See `.planning/PROJECT.md` (updated 2026-04-14)
 
 **Core Value:** AI agents improve their own behavior through a structured evolution loop
 
-**Current Focus:** Phase 40 — Failure Classification & Cooldown Recovery
+**Current Focus:** Awaiting next milestone definition
 
 ## Current Position
 
-Phase: 41
-Plan: Not started
-Status: Executing Phase 40
-Last activity: 2026-04-14
+Milestone v1.18 shipped. All phases complete (4/4 phases, 10/10 plans).
 
-Progress: [==░░░░░░░░] 25%
-
-## Performance Metrics
-
-**Velocity:**
-
-- Total plans completed: 10 (for v1.18)
-- Phase 38: 1 plan, 6 commits
+Progress: [████████████████████] 100%
 
 ## Accumulated Context
 
-### Decisions
+### Accomplishments
 
-- [Roadmap]: AW-03 (full write migration) assigned as standalone phase (39)
-- [Roadmap]: Failure classification separated from write migration
-- [Roadmap]: Startup reconciliation is last (depends on Phase 39 + 40)
+- Atomic Write Utility (Phase 38): crash-safe writes via tmp+fsync+rename
+- Nocturnal Write Migration (Phase 39): all writeFileSync sites migrated to atomic writes
+- Failure Classification & Cooldown Recovery (Phase 40): transient/persistent classification, tiered escalation
+- Startup Reconciliation (Phase 41): state validation, stale cooldown cleanup, orphan removal
+- Reasoning Deriver Module (Phase 34): deriveReasoningChain, deriveDecisionPoints, deriveContextualFactors
+- Dreamer Enhancement (Phase 35): strategic perspectives, riskLevel, validateCandidateDiversity
+- Philosopher 6D Evaluation (Phase 36): 6-dimension scoring, risk assessment
+- Scribe Contrastive Analysis (Phase 37): rejectedAnalysis, chosenJustification, contrastiveAnalysis
 
 ### Pending Todos
 
-None.
+Next milestone not yet defined. Run `/gsd-new-milestone` to start.
 
 ### Blockers/Concerns
 
-None for v1.18 scope.
+None
