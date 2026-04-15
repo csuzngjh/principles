@@ -79,6 +79,10 @@ async function run() {
     if (results.length === 0) {
       console.log('  No eligible principles found for compilation.');
     }
+
+    if (failed.length > 0) {
+      process.exitCode = 1;
+    }
   } finally {
     trajectory.dispose();
   }
