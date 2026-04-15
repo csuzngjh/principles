@@ -1,12 +1,15 @@
 /**
  * Evolution Points System V2.0 - MVP
- * 
+ *
  * Core Philosophy: Growth-driven替代Penalty-driven
  * - 起点0分，只能增加，不扣分
  * - 失败记录教训，不扣分
  * - 同类任务失败后首次成功 = 双倍奖励（1小时冷却）
  * - 5级成长路径：Seed → Forest
  */
+
+// V2 queue types require TaskKind/TaskPriority from trajectory-types
+import type { TaskKind, TaskPriority } from './trajectory-types.js';
 
 // ===== 等级定义 =====
 
@@ -464,3 +467,32 @@ export type EvolutionLoopEvent =
   | { ts: string; type: 'principle_rolled_back'; data: PrincipleRolledBackData }
   | { ts: string; type: 'circuit_breaker_opened'; data: CircuitBreakerOpenedData }
   | { ts: string; type: 'legacy_import'; data: LegacyImportData };
+
+// V2 Queue Types (moved from evolution-worker.ts for shared use)
+export type QueueStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'canceled';
+export type TaskResolution = 'marker_detected' | 'auto_completed_timeout' | 'failed_max_retries' | 'runtime_unavailable' | 'canceled' | 'late_marker_principle_created' | 'late_marker_no_principle' | 'stub_fallback' | 'skipped_thin_violation' | 'success' | 'failure' | 'skipped';
+
+export interface EvolutionQueueItem {
+  id: string;
+  taskKind: TaskKind;
+  priority: TaskPriority;
+  source: string;
+  traceId?: string;
+  task?: string;
+  score: number;
+  reason: string;
+  timestamp: string;
+  enqueued_at?: string;
+  started_at?: string;
+  completed_at?: string;
+  assigned_session_key?: string;
+  trigger_text_preview?: string;
+  status: QueueStatus;
+  resolution?: TaskResolution;
+  session_id?: string;
+  agent_id?: string;
+  retryCount: number;
+  maxRetries: number;
+  lastError?: string;
+  resultRef?: string;
+}
