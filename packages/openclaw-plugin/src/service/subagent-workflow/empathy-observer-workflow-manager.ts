@@ -14,11 +14,11 @@ import { trackFriction } from '../../core/session-tracker.js';
 import { isSubagentRuntimeAvailable } from '../../utils/subagent-probe.js';
 import { WorkflowManagerBase } from './workflow-manager-base.js';
 import { normalizeSeverity } from '../../core/empathy-types.js';
+import { WORKFLOW_TTL_MS } from '../../config/defaults/runtime.js';
 
 const WORKFLOW_SESSION_PREFIX = 'agent:main:subagent:workflow-';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
-const DEFAULT_TTL_MS = 5 * 60 * 1000;
 
 export interface EmpathyObserverWorkflowOptions {
     workspaceDir: string;
@@ -38,7 +38,7 @@ export class EmpathyObserverWorkflowManager extends WorkflowManagerBase {
             workflowType: 'empathy-observer',
             sessionPrefix: WORKFLOW_SESSION_PREFIX,
             defaultTimeoutMs: DEFAULT_TIMEOUT_MS,
-            defaultTtlMs: DEFAULT_TTL_MS,
+            defaultTtlMs: WORKFLOW_TTL_MS,
         });
     }
 
@@ -71,7 +71,7 @@ export class EmpathyObserverWorkflowManager extends WorkflowManagerBase {
     }
 
      
-    // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+     
     protected override createWorkflowMetadata<TResult>(
         spec: SubagentWorkflowSpec<TResult>,
         options: {
@@ -105,7 +105,7 @@ export class EmpathyObserverWorkflowManager extends WorkflowManagerBase {
     }
 
      
-    // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+     
     protected override generateWorkflowId(): string {
         return `wf_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
     }

@@ -29,9 +29,7 @@ Milestone v1.16 shipped. All phases complete (4/4 phases, 7/7 plans).
 
 Progress: [████████████████████] 100%
 
-## Accumulated Context
-
-### Accomplishments
+## Accomplishments
 
 - Reasoning Deriver Module (Phase 34): deriveReasoningChain, deriveDecisionPoints, deriveContextualFactors
 - Dreamer Enhancement (Phase 35): strategic perspectives, riskLevel, validateCandidateDiversity
@@ -39,11 +37,10 @@ Progress: [████████████████████] 100%
 - Scribe Contrastive Analysis (Phase 37): rejectedAnalysis, chosenJustification, contrastiveAnalysis
 - Keyword Learning Engine (PR #313): correction-cue-learner, CorrectionObserverWorkflow, trajectoryHistory
 
-### Pending Todos
+## Pending Todos
 
 Next milestone not yet defined. Run `/gsd-new-milestone` to start.
 
-### Blockers/Concerns
+## Blockers/Concerns
 
 None
-
