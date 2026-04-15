@@ -51,7 +51,8 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
-    pool: 'threads',
+    // Use forks pool to avoid teardown hangs
+    pool: 'forks',
     teardownTimeout: 15000,
     globalSetup: ['./tests/globalSetup.ts'],
     coverage: {
