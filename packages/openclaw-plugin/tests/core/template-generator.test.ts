@@ -13,9 +13,9 @@ describe('generateFromTemplate', () => {
     expect(result).toContain("export const meta");
     expect(result).toContain("export function evaluate(input)");
     expect(result).toContain("name: 'Auto_P_066'");
-    expect(result).toContain("ruleId: 'R_P066_auto'");
+    expect(result).toContain("ruleId: 'R_P_066_auto'");
     expect(result).toContain("sourcePrincipleId: 'P_066'");
-    expect(result).toContain("coversCondition: 'Writing to secrets directory'");
+    expect(result).toContain('coversCondition: "Writing to secrets directory"');
     expect(result).toContain("input.action.toolName === 'write'");
     expect(result).toContain("secrets/.*\\.env");
     expect(result).toContain("input.action.normalizedPath");
@@ -85,7 +85,7 @@ describe('generateFromTemplate', () => {
     expect(result).toMatch(/export const meta = \{/);
     expect(result).toMatch(/name: 'Auto_P_050'/);
     expect(result).toMatch(/version: '1\.0\.0'/);
-    expect(result).toMatch(/ruleId: 'R_P050_auto'/);
+    expect(result).toMatch(/ruleId: 'R_P_050_auto'/);
     expect(result).toMatch(/sourcePrincipleId: 'P_050'/);
     expect(result).toMatch(/compiledAt: '\d{4}-\d{2}-\d{2}T/);
 

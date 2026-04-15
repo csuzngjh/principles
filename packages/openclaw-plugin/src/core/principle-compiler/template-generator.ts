@@ -24,11 +24,10 @@ function toAutoName(principleId: string): string {
 
 /**
  * Derives the auto-rule ID from a principle ID.
- * "P_066" => "R_P066_auto", "P_010" => "R_P010_auto"
+ * Must match ledger-registrar convention: "P_066" => "R_P_066_auto"
  */
 function toAutoRuleId(principleId: string): string {
-  const num = principleId.replace(/^P_/, '');
-  return `R_P${num}_auto`;
+  return `R_${principleId}_auto`;
 }
 
 /**
@@ -98,7 +97,7 @@ export function generateFromTemplate(
     `  name: '${name}',\n` +
     `  version: '1.0.0',\n` +
     `  ruleId: '${ruleId}',\n` +
-    `  coversCondition: '${coversCondition}',\n` +
+    `  coversCondition: ${JSON.stringify(coversCondition)},\n` +
     `  compiledAt: '${compiledAt}',\n` +
     `  sourcePrincipleId: '${principleId}',\n` +
     `};\n\n` +

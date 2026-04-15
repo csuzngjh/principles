@@ -276,7 +276,7 @@ function autoBumpVersion(sourceDir) {
         }
 
         // Update README_ZH.md
-        const readmePath = join(readmePath, 'README_ZH.md');
+        const readmePath = join(rootDir, 'README_ZH.md');
         if (existsSync(readmePath)) {
             let readme = readFileSync(readmePath, 'utf-8');
             readme = readme.replace(/v\d+\.\d+\.\d+/g, `v${newVersion}`);
