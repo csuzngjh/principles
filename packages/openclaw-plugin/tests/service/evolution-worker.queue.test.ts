@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { loadEvolutionQueue } from '../../src/service/evolution-worker.js';
+import { loadEvolutionQueue, validateQueueEventPayload } from '../../src/service/evolution-worker.js';
 
 describe('loadEvolutionQueue', () => {
   let tempDir: string;
@@ -259,5 +259,38 @@ describe('loadEvolutionQueue', () => {
     expect(loaded[0].score).toBe(originalQueue[0].score);
     expect(loaded[0].source).toBe(originalQueue[0].source);
     expect(loaded[0].status).toBe(originalQueue[0].status);
+  });
+});
+
+describe('validateQueueEventPayload', () => {
+  it('returns empty object for null/undefined', () => {
+    expect(validateQueueEventPayload(null)).toEqual({});
+    expect(validateQueueEventPayload(undefined)).toEqual({});
+  });
+
+  it('throws for non-string input', () => {
+    expect(() => (validateQueueEventPayload as any)(123)).toThrow('must be a string');
+    expect(() => (validateQueueEventPayload as any)({})).toThrow('must be a string');
+  });
+
+  it('throws for JSON that is not an object', () => {
+    // Primitive JSON values pass typeof check but fail the object/null guard
+    expect(() => validateQueueEventPayload('"string"')).toThrow('must be a JSON object');
+    // Arrays pass typeof === 'object' check so they reach required fields check first
+    expect(() => validateQueueEventPayload('[1,2,3]')).toThrow('missing required fields');
+  });
+
+  it('throws for object missing required fields', () => {
+    expect(() => validateQueueEventPayload('{"type":"x"}')).toThrow('missing required fields');
+    expect(() => validateQueueEventPayload('{"workspaceId":"x"}')).toThrow('missing required fields');
+  });
+
+  it('returns parsed object for valid payload', () => {
+    const valid = '{"type":"test","workspaceId":"ws-001"}';
+    expect(validateQueueEventPayload(valid)).toEqual({ type: 'test', workspaceId: 'ws-001' });
+  });
+
+  it('throws wrapped SyntaxError for invalid JSON', () => {
+    expect(() => validateQueueEventPayload('not json')).toThrow('Invalid JSON');
   });
 });

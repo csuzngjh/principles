@@ -110,8 +110,8 @@ export class EventLog {
           fs.unlinkSync(filePath);
         }
       }
-    } catch {
-      // Silently fail cleanup
+    } catch (err) {
+      this.logger?.debug?.(`[PD] Event file cleanup failed (non-blocking): ${String(err)}`);
     }
   }
   
@@ -346,7 +346,8 @@ export class EventLog {
         .map((line) => {
           try {
             return JSON.parse(line) as EventLogEntry;
-          } catch {
+          } catch (err) {
+            this.logger?.warn?.(`[PD] Corrupted event line skipped: ${String(err).slice(0, 100)}`);
             return null;
           }
         })

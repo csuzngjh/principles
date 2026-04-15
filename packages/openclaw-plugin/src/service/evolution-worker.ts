@@ -81,6 +81,9 @@ function validateQueueEventPayload(payload: string | null | undefined): Record<s
     }
 }
 
+/* istanbul ignore next — test export for validateQueueEventPayload */
+export { validateQueueEventPayload };
+
 // Re-export workflow watchdog (extracted to workflow-watchdog.ts)
 import { runWorkflowWatchdog, type WatchdogResult } from './workflow-watchdog.js';
 export { runWorkflowWatchdog };

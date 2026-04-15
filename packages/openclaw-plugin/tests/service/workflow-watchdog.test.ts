@@ -365,7 +365,8 @@ describe('runWorkflowWatchdog', () => {
                 mockLogger,
             );
 
-            expect(result.anomalies).toBe(0);
+            expect(result.anomalies).toBe(1);
+            expect(result.details.some((d: string) => d.includes('malformed_metadata'))).toBe(true);
         });
     });
 });

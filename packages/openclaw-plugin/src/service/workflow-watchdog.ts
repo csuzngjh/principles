@@ -26,6 +26,8 @@ import { WORKFLOW_TTL_MS } from '../config/defaults/runtime.js';
 export interface WatchdogResult {
   anomalies: number;
   details: string[];
+  /** Set when the watchdog scan itself failed (e.g., store errors). Undefined means scan succeeded. */
+  scanError?: string;
 }
 
 export async function runWorkflowWatchdog(
@@ -137,7 +139,9 @@ export async function runWorkflowWatchdog(
               details.push(`fallback_snapshot_stats: nocturnal workflow ${wf.workflow_id} has empty fallback stats (no trajectory data found)`);
             }
           }
-        } catch { /* ignore malformed metadata */ }
+        } catch (err) {
+          details.push(`malformed_metadata: workflow ${wf.workflow_id} has unparseable metadata: ${String(err).slice(0, 100)}`);
+        }
       }
 
       // Summary
@@ -156,6 +160,7 @@ export async function runWorkflowWatchdog(
     }
   } catch (err) {
     logger?.warn?.(`[PD:Watchdog] Failed to scan workflows: ${String(err)}`);
+    return { anomalies: -1, details: [], scanError: String(err) };
   }
 
   return { anomalies: details.length, details };

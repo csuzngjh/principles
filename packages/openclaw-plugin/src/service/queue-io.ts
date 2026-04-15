@@ -158,8 +158,9 @@ export function readRecentPainContext(wctx: WorkspaceContext): RecentPainContext
                 recentMaxPainScore: score,
             };
         }
-    } catch {
-        // Best effort — non-fatal
+    } catch (err) {
+      // Best effort — non-fatal, but surface unexpected errors
+      console.warn(`[queue-io] Failed to read pain context (non-fatal): ${String(err)}`);
     }
 
     return { mostRecent: null, recentPainCount: 0, recentMaxPainScore: 0 };
@@ -349,9 +350,15 @@ export function loadEvolutionQueue(queuePath: string): EvolutionQueueItem[] {
     let rawQueue: RawQueueItem[] = [];
     try {
         rawQueue = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
-    } catch {
-        // Queue doesn't exist yet - create empty array
-        rawQueue = [];
+    } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+            // Queue doesn't exist yet - create empty array
+            rawQueue = [];
+        } else {
+            // Corrupted JSON or other read error — warn and recover with empty queue
+            console.warn(`[queue-io] Failed to load evolution queue (recovering with empty): ${String(err)}`);
+            rawQueue = [];
+        }
     }
     return migrateQueueToV2(rawQueue) as unknown as EvolutionQueueItem[];
 }

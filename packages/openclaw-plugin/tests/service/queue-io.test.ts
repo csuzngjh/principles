@@ -15,7 +15,14 @@ import {
     LOCK_MAX_RETRIES,
     LOCK_RETRY_DELAY_MS,
     LOCK_STALE_MS,
+    readRecentPainContext,
 } from '../../src/service/queue-io.js';
+import { readPainFlagContract } from '../../src/core/pain.js';
+
+// Mock readPainFlagContract for readRecentPainContext tests
+vi.mock('../../src/core/pain.js', () => ({
+    readPainFlagContract: vi.fn(),
+}));
 
 let tmpDir: string;
 beforeEach(() => {
@@ -88,6 +95,14 @@ describe('loadEvolutionQueue', () => {
         expect(result).toHaveLength(1);
         expect(result[0]).toMatchObject({ id: 'item-2', taskKind: 'principle_generation', priority: 'high' });
     });
+
+    it('recovers with empty array when file contains corrupted JSON', () => {
+        const corruptFile = path.join(tmpDir, 'corrupt-queue.json');
+        fs.writeFileSync(corruptFile, '{ invalid json }', 'utf8');
+        const result = loadEvolutionQueue(corruptFile);
+        // Should recover gracefully with empty array (warns but doesn't throw)
+        expect(result).toEqual([]);
+    });
 });
 
 describe('saveEvolutionQueue', () => {
@@ -157,4 +172,58 @@ describe('withQueueLock RAII', () => {
         const release = await acquireQueueLock(lockFile, undefined, '.lock');
         release();
     });
+});
+
+describe('readRecentPainContext', () => {
+  // readPainFlagContract is mocked via vi.mock above
+  const mockWctx = { workspaceDir: '/fake/workspace' } as any;
+
+  it('returns null context when contract status is not valid', () => {
+    vi.mocked(readPainFlagContract).mockReturnValueOnce({
+      status: 'missing',
+      format: 'missing',
+      data: {},
+      missingFields: [],
+    } as any);
+    const result = readRecentPainContext(mockWctx);
+    expect(result.mostRecent).toBeNull();
+    expect(result.recentPainCount).toBe(0);
+  });
+
+  it('returns null context when score parses to 0', () => {
+    vi.mocked(readPainFlagContract).mockReturnValueOnce({
+      status: 'valid',
+      format: 'kv',
+      data: { score: '0', source: 'tool_failure', reason: 'err', time: '2026-04-14T00:00:00Z', session_id: 's1' },
+      missingFields: [],
+    } as any);
+    const result = readRecentPainContext(mockWctx);
+    expect(result.mostRecent).toBeNull();
+  });
+
+  it('returns mostRecent with valid score > 0', () => {
+    vi.mocked(readPainFlagContract).mockReturnValueOnce({
+      status: 'valid',
+      format: 'kv',
+      data: { score: '75', source: 'tool_failure', reason: 'File write failed', time: '2026-04-14T10:00:00Z', session_id: 'sess-001' },
+      missingFields: [],
+    } as any);
+    const result = readRecentPainContext(mockWctx);
+    expect(result.mostRecent).not.toBeNull();
+    expect(result.mostRecent!.score).toBe(75);
+    expect(result.mostRecent!.source).toBe('tool_failure');
+    expect(result.recentPainCount).toBe(1);
+    expect(result.recentMaxPainScore).toBe(75);
+  });
+
+  it('returns null context when contract data is empty object', () => {
+    vi.mocked(readPainFlagContract).mockReturnValueOnce({
+      status: 'valid',
+      format: 'empty',
+      data: {},
+      missingFields: [],
+    } as any);
+    const result = readRecentPainContext(mockWctx);
+    expect(result.mostRecent).toBeNull();
+  });
 });
