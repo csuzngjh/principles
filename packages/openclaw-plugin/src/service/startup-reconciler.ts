@@ -13,7 +13,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { readState, writeState, readStateSync } from './nocturnal-runtime.js';
+import { writeState, readStateSync } from './nocturnal-runtime.js';
 
 export interface ReconciliationResult {
     /** Number of expired cooldown entries cleared */
