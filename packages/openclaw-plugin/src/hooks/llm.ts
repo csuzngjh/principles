@@ -9,6 +9,7 @@ import { DetectionService } from '../core/detection-service.js';
 import { detectThinkingModelMatches, deriveThinkingScenarios } from '../core/thinking-models.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { sanitizeAssistantText } from './message-sanitize.js';
+import { atomicWriteFileSync } from '../utils/io.js';
 
 export interface EmpathySignal {
     detected: boolean;
@@ -256,7 +257,7 @@ export function handleLlmOutput(
 
     // ═══ Thinking OS: Mental Model Usage Tracking ═══
      
-    // eslint-disable-next-line @typescript-eslint/no-use-before-define
+     
     trackThinkingModelUsage({
         text,
         wctx,
@@ -300,7 +301,7 @@ function trackThinkingModelUsage(args: {
     usageLog._total_turns = (usageLog._total_turns || 0) + 1;
 
     try {
-        fs.writeFileSync(logPath, JSON.stringify(usageLog, null, 2), 'utf8');
+        atomicWriteFileSync(logPath, JSON.stringify(usageLog, null, 2));
     } catch (e) {
         logger?.error?.(`[PD:LLM] Failed to write thinking OS usage log: ${String(e)}`);
     }

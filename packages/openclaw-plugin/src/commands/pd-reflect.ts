@@ -7,6 +7,7 @@
 
 import type { PluginCommandDefinition, PluginCommandContext, PluginCommandResult, OpenClawPluginApi } from '../openclaw-sdk.js';
 import { acquireQueueLock, EVOLUTION_QUEUE_LOCK_SUFFIX } from '../service/evolution-worker.js';
+import { atomicWriteFileSync } from '../utils/io.js';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -22,7 +23,7 @@ export const handlePdReflect: PluginCommandDefinition = {
   requireAuth: false,
   handler: async (ctx: PdReflectContext): Promise<PluginCommandResult> => {
     try {
-      // eslint-disable-next-line @typescript-eslint/prefer-destructuring
+       
       const workspaceDir = ctx.workspaceDir;
       if (!workspaceDir) {
         return { text: 'Cannot determine workspace directory. Ensure you are in an active workspace.', isError: true };
@@ -33,7 +34,7 @@ export const handlePdReflect: PluginCommandDefinition = {
 
       // Acquire lock before modifying queue
       const releaseLock = await acquireQueueLock(queuePath, ctx.api?.logger, EVOLUTION_QUEUE_LOCK_SUFFIX);
-      // eslint-disable-next-line @typescript-eslint/init-declarations
+       
       let taskId: string | undefined;
       try {
         let rawQueue: unknown[] = [];
@@ -71,7 +72,7 @@ export const handlePdReflect: PluginCommandDefinition = {
           maxRetries: 1,
         });
 
-        fs.writeFileSync(queuePath, JSON.stringify(rawQueue, null, 2), 'utf8');
+        atomicWriteFileSync(queuePath, JSON.stringify(rawQueue, null, 2));
       } finally {
         releaseLock();
       }

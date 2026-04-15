@@ -19,6 +19,7 @@ import type {
   EmpathyRollbackEventData,
 } from '../types/event-types.js';
 import { createEmptyDailyStats } from '../types/event-types.js';
+import { atomicWriteFileSync } from '../utils/io.js';
 import type { PluginLogger } from '../openclaw-sdk.js';
 
 /**
@@ -386,7 +387,7 @@ export class EventLog {
     });
     
     try {
-      fs.writeFileSync(this.statsFile, JSON.stringify(data, null, 2), 'utf-8');
+      atomicWriteFileSync(this.statsFile, JSON.stringify(data, null, 2));
     } catch (e) {
       if (this.logger) this.logger.error(`[PD] Failed to flush daily-stats.json: ${String(e)}`);
     }

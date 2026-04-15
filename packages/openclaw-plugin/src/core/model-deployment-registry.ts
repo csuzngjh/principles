@@ -33,6 +33,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { withLock } from '../utils/file-lock.js';
+import { atomicWriteFileSync } from '../utils/io.js';
 import type { Checkpoint } from './model-training-registry.js';
 import {
   getCheckpoint,
@@ -241,9 +242,7 @@ function readRegistry(stateDir: string): ModelDeploymentRegistry {
 function writeRegistry(stateDir: string, registry: ModelDeploymentRegistry): void {
   ensureRegistryDir(stateDir);
   const registryPath = getRegistryPath(stateDir);
-  const tmpPath = `${registryPath}.tmp`;
-  fs.writeFileSync(tmpPath, JSON.stringify(registry, null, 2), 'utf-8');
-  fs.renameSync(tmpPath, registryPath);
+  atomicWriteFileSync(registryPath, JSON.stringify(registry, null, 2));
 }
 
 /**
@@ -350,7 +349,7 @@ export function assertPromotionGatePassed(stateDir: string, checkpointId: string
  * @throws Error if checkpoint's targetModelFamily violates profile constraints
  */
  
-// eslint-disable-next-line @typescript-eslint/max-params
+ 
 export function bindCheckpointToWorkerProfile(
   stateDir: string,
   workerProfile: WorkerProfile,

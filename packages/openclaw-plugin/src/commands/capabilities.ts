@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { PluginCommandContext, PluginCommandResult } from '../openclaw-sdk.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
+import { atomicWriteFileSync } from '../utils/io.js';
 
 const TOOLS_TO_SCAN = [
   { name: 'rg', cmd: ['rg', '--version'] },
@@ -43,7 +44,7 @@ function scanEnvironment(wctx: WorkspaceContext): any {
   if (!fs.existsSync(capsDir)) {
     fs.mkdirSync(capsDir, { recursive: true });
   }
-  fs.writeFileSync(capsPath, JSON.stringify(capabilities, null, 2), 'utf8');
+  atomicWriteFileSync(capsPath, JSON.stringify(capabilities, null, 2));
 
   return capabilities;
 }

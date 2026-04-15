@@ -21,6 +21,48 @@ import {
 import { severityToPenalty, DEFAULT_EMPATHY_KEYWORD_CONFIG } from '../core/empathy-types.js';
 import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
 
+// ---------------------------------------------------------------------------
+// Static file cache — avoids re-reading rarely-changing files every message
+// ---------------------------------------------------------------------------
+const STATIC_FILE_TTL_MS = 60_000; // 1 minute
+
+interface CachedFile {
+  content: string;
+  mtime: number;   // file modification time at read
+  loadedAt: number; // when we cached it
+}
+
+const _staticFileCache = new Map<string, CachedFile>();
+
+/**
+ * Reads a file with TTL-based caching.
+ * Returns cached content if:
+ *   1. Cache entry exists and was loaded < TTL_MS ago, AND
+ *   2. File mtime hasn't changed (detects external edits)
+ * Otherwise re-reads from disk.
+ */
+function cachedReadFile(filePath: string): string {
+  const now = Date.now();
+  const cached = _staticFileCache.get(filePath);
+
+  try {
+    const stat = fs.statSync(filePath);
+    const mtime = stat.mtimeMs;
+
+    if (cached && (now - cached.loadedAt) < STATIC_FILE_TTL_MS && cached.mtime === mtime) {
+      return cached.content;
+    }
+
+    const content = fs.readFileSync(filePath, 'utf8');
+    _staticFileCache.set(filePath, { content, mtime, loadedAt: now });
+    return content;
+  } catch {
+    // File doesn't exist or unreadable — invalidate cache
+    _staticFileCache.delete(filePath);
+    return '';
+  }
+}
+
 // Module-level empathy state — shared across calls to avoid per-turn I/O
 let _empathyTurnCounter = 0;
 let _empathyKeywordCache: { store: ReturnType<typeof loadKeywordStore>; lang: string } | null = null;
@@ -171,10 +213,10 @@ export function resolveModelFromConfig(modelConfig: unknown, logger?: PluginLogg
  */
 export function loadContextInjectionConfig(workspaceDir: string): ContextInjectionConfig {
   const profilePath = path.join(workspaceDir, '.principles', 'PROFILE.json');
-  
+
   try {
-    if (fs.existsSync(profilePath)) {
-      const raw = fs.readFileSync(profilePath, 'utf-8');
+    const raw = cachedReadFile(profilePath);
+    if (raw) {
       const profile = JSON.parse(raw);
       if (profile.contextInjection) {
         const contextInjection = profile.contextInjection as Partial<ContextInjectionConfig>;
@@ -758,12 +800,11 @@ ${taskBlocks}${processingNote}
   let thinkingOsContent = '';
   if (contextConfig.thinkingOs) {
     const thinkingOsPath = wctx.resolve('THINKING_OS');
-    if (fs.existsSync(thinkingOsPath)) {
-      try {
-        thinkingOsContent = fs.readFileSync(thinkingOsPath, 'utf8').trim();
-      } catch (e) {
-        logger?.error(`[PD:Prompt] Failed to read THINKING_OS: ${String(e)}`);
-      }
+    try {
+      const cached = cachedReadFile(thinkingOsPath);
+      if (cached) thinkingOsContent = cached.trim();
+    } catch (e) {
+      logger?.error(`[PD:Prompt] Failed to read THINKING_OS: ${String(e)}`);
     }
   }
 
@@ -771,12 +812,11 @@ ${taskBlocks}${processingNote}
   let reflectionLogContent = '';
   if (contextConfig.reflectionLog) {
     const reflectionLogPath = wctx.resolve('REFLECTION_LOG');
-    if (fs.existsSync(reflectionLogPath)) {
-      try {
-        reflectionLogContent = fs.readFileSync(reflectionLogPath, 'utf8').trim();
-      } catch (e) {
-        logger?.error(`[PD:Prompt] Failed to read REFLECTION_LOG: ${String(e)}`);
-      }
+    try {
+      const cached = cachedReadFile(reflectionLogPath);
+      if (cached) reflectionLogContent = cached.trim();
+    } catch (e) {
+      logger?.error(`[PD:Prompt] Failed to read REFLECTION_LOG: ${String(e)}`);
     }
   }
 
@@ -812,8 +852,8 @@ ${taskBlocks}${processingNote}
           logger?.debug?.(`[PD:Prompt] Auto-compress skipped: ${compressResult.reason}`);
         }
 
-        // 重新读取（可能被压缩更新了）
-        const finalContent = fs.readFileSync(focusPath, 'utf8').trim();
+        // Use compressResult.newContent when available, else fall back to currentFocus
+        const finalContent = compressResult.newContent?.trim() || currentFocus.trim();
         if (finalContent) {
           // 解析工作记忆部分（用于独立注入）
           const workingMemorySnapshot = parseWorkingMemorySection(finalContent);

@@ -85,21 +85,27 @@ export async function reconcileStartup(stateDir: string): Promise<Reconciliation
     }
 
     // Step 3: Remove orphan .tmp files
+    let files: string[];
     try {
-        const files = fs.readdirSync(stateDir);
-        for (const file of files) {
-            if (file.endsWith('.tmp')) {
-                const targetFile = file.slice(0, -4); // Remove .tmp suffix
-                const targetPath = path.join(stateDir, targetFile);
-                // Orphan = .tmp file whose target doesn't exist
-                if (!fs.existsSync(targetPath)) {
+        files = fs.readdirSync(stateDir);
+    } catch {
+        // Directory read failure — non-blocking
+        return result;
+    }
+    for (const file of files) {
+        if (file.endsWith('.tmp')) {
+            const targetFile = file.slice(0, -4); // Remove .tmp suffix
+            const targetPath = path.join(stateDir, targetFile);
+            // Orphan = .tmp file whose target doesn't exist
+            if (!fs.existsSync(targetPath)) {
+                try {
                     fs.unlinkSync(path.join(stateDir, file));
                     result.orphansRemoved.push(file);
+                } catch {
+                    // Individual file deletion failure — continue cleaning others
                 }
             }
         }
-    } catch {
-        // Directory read failure — non-blocking
     }
 
     return result;

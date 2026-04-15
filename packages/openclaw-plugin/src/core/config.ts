@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { atomicWriteFileSync } from '../utils/io.js';
 
 export interface DeepReflectionSettings {
     enabled: boolean;
@@ -257,7 +258,7 @@ export class PainConfig {
             if (!fs.existsSync(dir)) {
                 fs.mkdirSync(dir, { recursive: true });
             }
-            fs.writeFileSync(this.filePath, JSON.stringify(this.settings, null, 2), 'utf8');
+            atomicWriteFileSync(this.filePath, JSON.stringify(this.settings, null, 2));
             console.log(`[PD:Config] Settings saved to ${this.filePath}`);
         } catch (e) {
             console.error(`[PD:Config] Failed to save settings: ${String(e)}`);
@@ -291,7 +292,7 @@ export class PainConfig {
      * Basic validation for critical settings
      */
      
-    // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+     
     private validate(settings: PainSettings): void {
         // Ensure intervals are positive
         if (settings.intervals.worker_poll_ms < 1000) settings.intervals.worker_poll_ms = 15 * 60 * 1000;

@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { withLock } from '../utils/file-lock.js';
-import { normalizePath, isRisky, planStatus as getPlanStatus } from '../utils/io.js';
+import { normalizePath, isRisky, planStatus as getPlanStatus, atomicWriteFileSync } from '../utils/io.js';
 import {
   listSamplesByClassification,
   loadSampleContent,
@@ -122,7 +122,7 @@ export class ReplayEngine {
   }
 
    
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+   
   runSingleSample(sample: ReplaySample, evaluator: CandidateEvaluator): ReplayResult {
     const evaluation = evaluator.evaluate(sample);
     return {
@@ -296,7 +296,7 @@ export class ReplayEngine {
   }
 
    
-    // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- complexity 11, slightly over threshold
+     
   private _selectToolCall(
     snapshot: NocturnalSessionSnapshot,
     classification: SampleClassification,
@@ -327,7 +327,7 @@ export class ReplayEngine {
   }
 
    
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+   
   private _matchGateBlock(
     gateBlocks: NocturnalGateBlock[],
     toolCall: NocturnalToolCall,
@@ -365,7 +365,7 @@ export class ReplayEngine {
   }
 
    
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+   
   private _estimateLineChanges(toolCall: NocturnalToolCall): number {
     if (toolCall.toolName === 'edit' || toolCall.toolName === 'write') {
       return 20;
@@ -374,7 +374,7 @@ export class ReplayEngine {
   }
 
    
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+   
   private _inferBashRisk(toolCall: NocturnalToolCall): 'safe' | 'normal' | 'dangerous' | 'unknown' {
     if (toolCall.toolName !== 'bash' && toolCall.toolName !== 'run_shell_command') {
       return 'unknown';
@@ -388,7 +388,7 @@ export class ReplayEngine {
 
      
    
-    // eslint-disable-next-line @typescript-eslint/class-methods-use-this -- complexity 11
+     
   private _scoreEvaluation(
     sample: ReplaySample,
     result: RuleHostResult,
@@ -497,7 +497,7 @@ export class ReplayEngine {
   }
 
    
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+   
   private _determineDecision(
     pain: ClassificationSummary,
     success: ClassificationSummary,
@@ -524,12 +524,12 @@ export class ReplayEngine {
     const reportPath = path.join(reportDir, `${timestamp}.json`);
 
     withLock(reportPath, () => {
-      fs.writeFileSync(reportPath, JSON.stringify(report, null, 2), 'utf-8');
+      atomicWriteFileSync(reportPath, JSON.stringify(report, null, 2));
     });
   }
 
    
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+   
   private _deriveExpectedOutcome(
     record: NocturnalDatasetRecord,
   ): ReplaySample['expectedOutcome'] {

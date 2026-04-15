@@ -29,6 +29,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { withLockAsync } from '../utils/file-lock.js';
+import { atomicWriteFileSync } from '../utils/io.js';
 
 const DIAGNOSTICIAN_TASKS_FILE = 'diagnostician_tasks.json';
 
@@ -83,16 +84,14 @@ export async function addDiagnosticianTask(
   const filePath = resolveTasksPath(stateDir);
   await withLockAsync(filePath, async () => {
      
-    // eslint-disable-next-line @typescript-eslint/no-use-before-define
+     
     const store = readTaskStoreSync(filePath);
     store.tasks[taskId] = {
       prompt,
       createdAt: new Date().toISOString(),
       status: 'pending',
     };
-    const tmpPath = filePath + '.tmp';
-    fs.writeFileSync(tmpPath, JSON.stringify(store, null, 2), 'utf8');
-    fs.renameSync(tmpPath, filePath);
+    atomicWriteFileSync(filePath, JSON.stringify(store, null, 2));
   });
 }
 
@@ -106,13 +105,11 @@ export async function completeDiagnosticianTask(
 ): Promise<void> {
   const filePath = resolveTasksPath(stateDir);
   await withLockAsync(filePath, async () => {
+
      
-    // eslint-disable-next-line @typescript-eslint/no-use-before-define
     const store = readTaskStoreSync(filePath);
     delete store.tasks[taskId];
-    const tmpPath = filePath + '.tmp';
-    fs.writeFileSync(tmpPath, JSON.stringify(store, null, 2), 'utf8');
-    fs.renameSync(tmpPath, filePath);
+    atomicWriteFileSync(filePath, JSON.stringify(store, null, 2));
   });
 }
 

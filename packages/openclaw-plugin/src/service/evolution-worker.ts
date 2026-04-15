@@ -18,7 +18,7 @@ export type { TaskKind, TaskPriority } from '../core/trajectory-types.js';
 import { LockUnavailableError } from '../config/index.js';
 import { atomicWriteFileSync } from '../utils/io.js';
 import { checkWorkspaceIdle, checkCooldown, recordCooldown } from './nocturnal-runtime.js';
-import { loadNocturnalConfig, loadKeywordOptimizationConfig, loadCooldownEscalationConfig } from './nocturnal-config.js';
+import { loadCooldownEscalationConfig, loadNocturnalConfigMerged } from './nocturnal-config.js';
 import { WorkflowStore } from './subagent-workflow/workflow-store.js';
 import type { WorkflowRow } from './subagent-workflow/types.js';
 import { EmpathyObserverWorkflowManager } from './subagent-workflow/empathy-observer-workflow-manager.js';
@@ -42,37 +42,6 @@ import { recordPersistentFailure, resetFailureState, isTaskKindInCooldown } from
 import { reconcileStartup } from './startup-reconciler.js';
 import { WORKFLOW_TTL_MS } from '../config/defaults/runtime.js';
 import { OpenClawTrinityRuntimeAdapter } from '../core/nocturnal-trinity.js';
-
-/**
- * Phase 40: Handle failure classification after task outcome.
- * On failure: classify and escalate if persistent.
- * On success: reset failure state.
- * Wrapped in try/catch to prevent classification errors from blocking task processing.
- */
-async function handleTaskOutcome(
-    wctx: { stateDir: string },
-    queue: EvolutionQueueItem[],
-    taskKind: ClassifiableTaskKind,
-    succeeded: boolean,
-    logger?: PluginLogger,
-): Promise<void> {
-    try {
-        if (succeeded) {
-            await resetFailureState(wctx.stateDir, taskKind);
-        } else {
-            const config = loadCooldownEscalationConfig(wctx.stateDir);
-            const result = classifyFailure(queue, taskKind, config.consecutive_threshold);
-            if (result.classification === 'persistent') {
-                await recordPersistentFailure(wctx.stateDir, taskKind, config, result.consecutiveFailures);
-                logger?.warn?.(`[PD:EvolutionWorker] ${taskKind} persistent failure detected (${result.consecutiveFailures} consecutive), escalating cooldown`);
-            } else {
-                logger?.info?.(`[PD:EvolutionWorker] ${taskKind} transient failure (${result.consecutiveFailures} consecutive)`);
-            }
-        }
-    } catch (classErr) {
-        logger?.warn?.(`[PD:EvolutionWorker] Failure classification error (non-blocking): ${String(classErr)}`);
-    }
-}
 
 // ── Workflow Watchdog ────────────────────────────────────────────────────────
 // Detects stale/orphaned workflows, invalid results, and cleanup failures.
@@ -1989,16 +1958,30 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                 logger?.warn?.(`[PD:EvolutionWorker] Failed to write sleep_reflection results back: ${String(resultLockErr)}`);
             }
 
-            // Phase 40: Process failure classification outcomes after queue write
+            // Phase 40: Process failure classification — evaluate once per taskKind,
+            // not per-outcome, to prevent tier escalation from firing N times for N failures.
             try {
-                for (const outcome of sleepOutcomes) {
-                    await handleTaskOutcome(wctx, queue, outcome.taskKind, outcome.succeeded, logger);
+                const hadAnySuccess = sleepOutcomes.some(o => o.succeeded);
+                const hadAnyFailure = sleepOutcomes.some(o => !o.succeeded);
+                if (hadAnySuccess) {
+                    await resetFailureState(wctx.stateDir, 'sleep_reflection');
+                }
+                if (hadAnyFailure) {
+                    const config = loadCooldownEscalationConfig(wctx.stateDir);
+                    const result = classifyFailure(queue, 'sleep_reflection', config.consecutive_threshold);
+                    if (result.classification === 'persistent') {
+                        await recordPersistentFailure(wctx.stateDir, 'sleep_reflection', config, result.consecutiveFailures);
+                        logger?.warn?.(`[PD:EvolutionWorker] sleep_reflection persistent failure (${result.consecutiveFailures} consecutive), escalating cooldown`);
+                    }
                 }
             } catch { /* classification errors are non-blocking */ }
 
             // Safe to return — pain_diagnosis was already processed above.
-            // Note: keyword_optimization tasks are handled below (both branches can execute).
+            // keyword_optimization tasks are deferred to the next heartbeat cycle.
+            // Running both in the same cycle causes stale queue overwrite and
+            // double lock release (lock was released at line ~1703).
             lockReleased = true;
+            return;
         }
 
         // ── keyword_optimization task processing ──────────────────────────────
@@ -2175,13 +2158,21 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                 koResultLock();
             }
 
-            // Phase 40: Process failure classification outcomes
+            // Phase 40: Process failure classification — evaluate once per taskKind
             try {
-                const queueForClassify = keywordOptTasks.length > 0
-                    ? (JSON.parse(fs.readFileSync(queuePath, 'utf8')) as EvolutionQueueItem[])
-                    : queue;
-                for (const outcome of kwOptOutcomes) {
-                    await handleTaskOutcome(wctx, queueForClassify, outcome.taskKind, outcome.succeeded, logger);
+                const hadAnySuccess = kwOptOutcomes.some(o => o.succeeded);
+                const hadAnyFailure = kwOptOutcomes.some(o => !o.succeeded);
+                if (hadAnySuccess) {
+                    await resetFailureState(wctx.stateDir, 'keyword_optimization');
+                }
+                if (hadAnyFailure) {
+                    const config = loadCooldownEscalationConfig(wctx.stateDir);
+                    const freshQueue = JSON.parse(fs.readFileSync(queuePath, 'utf8')) as EvolutionQueueItem[];
+                    const result = classifyFailure(freshQueue, 'keyword_optimization', config.consecutive_threshold);
+                    if (result.classification === 'persistent') {
+                        await recordPersistentFailure(wctx.stateDir, 'keyword_optimization', config, result.consecutiveFailures);
+                        logger?.warn?.(`[PD:EvolutionWorker] keyword_optimization persistent failure (${result.consecutiveFailures} consecutive), escalating cooldown`);
+                    }
                 }
             } catch { /* classification errors are non-blocking */ }
 
@@ -2467,9 +2458,9 @@ export const EvolutionWorkerService: ExtendedEvolutionWorkerService = {
             };
 
             try {
-                // Load config on each cycle (supports runtime updates)
-                const sleepConfig = loadNocturnalConfig(wctx.stateDir);
-                const kwOptConfig = loadKeywordOptimizationConfig(wctx.stateDir);
+                // Load config on each cycle (supports runtime updates) — single file read
+                const mergedConfig = loadNocturnalConfigMerged(wctx.stateDir);
+                const { sleepReflection: sleepConfig, keywordOptimization: kwOptConfig } = mergedConfig;
 
                 const idleResult = checkWorkspaceIdle(wctx.workspaceDir, {});
                 logger?.info?.(`[PD:EvolutionWorker] HEARTBEAT cycle=${new Date().toISOString()} idle=${idleResult.isIdle} idleForMs=${idleResult.idleForMs} userActiveSessions=${idleResult.userActiveSessions} abandonedSessions=${idleResult.abandonedSessionIds.length} lastActivityEpoch=${idleResult.mostRecentActivityAt} triggerMode=${sleepConfig.trigger_mode}`);

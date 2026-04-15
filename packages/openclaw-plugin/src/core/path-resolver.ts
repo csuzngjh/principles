@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as fs from 'fs';
 import type { OpenClawPluginApi } from '../openclaw-sdk.js';
 import { PathResolutionError } from '../config/index.js';
+import { atomicWriteFileSync } from '../utils/io.js';
 
 export interface PathResolverOptions {
     workspaceDir?: string;
@@ -391,7 +392,7 @@ export function createDefaultConfig(targetPath?: string): string {
         fs.mkdirSync(dir, { recursive: true });
     }
     
-    fs.writeFileSync(target, JSON.stringify(defaultConfig, null, 2), 'utf8');
+    atomicWriteFileSync(target, JSON.stringify(defaultConfig, null, 2));
     
     console.log(`✅ Created default config at: ${target}`);
     console.log(`   You can edit this file to customize paths.`);

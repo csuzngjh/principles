@@ -22,6 +22,7 @@ import {
   MAX_CORRECTION_KEYWORDS,
 } from './correction-types.js';
 import { checkCooldown } from '../service/nocturnal-runtime.js';
+import { atomicWriteFileSync } from '../utils/io.js';
 
 const KEYWORD_STORE_FILE = 'correction_keywords.json';
 
@@ -109,11 +110,9 @@ export function saveCorrectionKeywordStore(
   store: CorrectionKeywordStore
 ): void {
   const filePath = path.join(stateDir, KEYWORD_STORE_FILE);
-  const tmpPath = filePath + '.tmp';
 
   fs.mkdirSync(stateDir, { recursive: true });
-  fs.writeFileSync(tmpPath, JSON.stringify(store, null, 2), 'utf-8');
-  fs.renameSync(tmpPath, filePath);
+  atomicWriteFileSync(filePath, JSON.stringify(store, null, 2));
 
   // Invalidate cache so the next read re-loads from disk (D-05)
   _correctionCueCache = null;
@@ -206,10 +205,14 @@ export class CorrectionCueLearner {
    */
   recordHits(terms: string[]): void {
     for (const term of terms) {
-      const keyword = this.store.keywords.find(k => k.term.toLowerCase() === term.toLowerCase());
-      if (!keyword) continue;
-      keyword.hitCount = (keyword.hitCount ?? 0) + 1;
-      keyword.lastHitAt = new Date().toISOString();
+      const keywordIndex = this.store.keywords.findIndex(k => k.term.toLowerCase() === term.toLowerCase());
+      if (keywordIndex < 0) continue;
+      const keyword = this.store.keywords[keywordIndex];
+      this.store.keywords[keywordIndex] = {
+        ...keyword,
+        hitCount: (keyword.hitCount ?? 0) + 1,
+        lastHitAt: new Date().toISOString(),
+      };
     }
   }
 

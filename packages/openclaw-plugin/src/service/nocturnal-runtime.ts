@@ -23,6 +23,7 @@ import * as path from 'path';
 import type { SessionState } from '../core/session-tracker.js';
 import { listSessions } from '../core/session-tracker.js';
 import { withLockAsync } from '../utils/file-lock.js';
+import { atomicWriteFileSync } from '../utils/io.js';
 
 // ---------------------------------------------------------------------------
 // System Session Detection
@@ -266,9 +267,7 @@ export async function writeState(stateDir: string, state: NocturnalRuntimeState)
         fs.mkdirSync(stateDirPath, { recursive: true });
     }
     await withLockAsync(filePath, async () => {
-        const tmpPath = filePath + '.tmp';
-        fs.writeFileSync(tmpPath, JSON.stringify(state, null, 2), 'utf-8');
-        fs.renameSync(tmpPath, filePath);
+        atomicWriteFileSync(filePath, JSON.stringify(state, null, 2));
     });
 }
 
