@@ -12,9 +12,16 @@ import type { EvolutionQueueItem } from './evolution-queue-migration.js';
  */
 export const PAIN_QUEUE_DEDUP_WINDOW_MS = 30 * 60 * 1000;
 
+/**
+ * Maximum length for dedup key components to prevent memory/performance issues
+ * from extremely long source or preview strings during queue scanning.
+ */
+const MAX_DEDUP_KEY_COMPONENT_LENGTH = 200;
+
 function normalizePainDedupKey(source: string, preview: string, reason?: string): string {
-    const normalizedReason = (reason || '').trim().toLowerCase();
-    return `${source.trim().toLowerCase()}::${preview.trim().toLowerCase()}::${normalizedReason}`;
+    const truncate = (s: string) => s.slice(0, MAX_DEDUP_KEY_COMPONENT_LENGTH);
+    const normalizedReason = (reason || '').trim().toLowerCase().slice(0, 50);
+    return `${truncate(source.trim().toLowerCase())}::${truncate(preview.trim().toLowerCase())}::${normalizedReason}`;
 }
 
 export function findRecentDuplicateTask(
