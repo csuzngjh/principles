@@ -1,6 +1,6 @@
 ---
 phase: 40
-slug: failure-classification-cooldown-recovery
+slug: llm-discovery
 status: draft
 nyquist_compliant: false
 wave_0_complete: false
@@ -17,20 +17,20 @@ created: 2026-04-14
 
 | Property | Value |
 |----------|-------|
-| **Framework** | vitest 4.1.4 |
+| **Framework** | vitest |
 | **Config file** | packages/openclaw-plugin/vitest.config.ts |
-| **Quick run command** | `npx vitest run tests/service/failure-classifier.test.ts tests/service/cooldown-strategy.test.ts` |
-| **Full suite command** | `npx vitest run` |
-| **Estimated runtime** | ~5 seconds |
+| **Quick run command** | `cd packages/openclaw-plugin && npx vitest run tests/core/correction-cue-learner.test.ts` |
+| **Full suite command** | `cd packages/openclaw-plugin && npx vitest run` |
+| **Estimated runtime** | ~15 seconds |
 
 ---
 
 ## Sampling Rate
 
-- **After every task commit:** Run `npx vitest run tests/service/failure-classifier.test.ts tests/service/cooldown-strategy.test.ts`
-- **After every plan wave:** Run `npx vitest run`
+- **After every task commit:** Run `cd packages/openclaw-plugin && npx vitest run tests/core/correction-cue-learner.test.ts`
+- **After every plan wave:** Run `cd packages/openclaw-plugin && npx vitest run`
 - **Before `/gsd-verify-work`:** Full suite must be green
-- **Max feedback latency:** 5 seconds
+- **Max feedback latency:** 20 seconds
 
 ---
 
@@ -38,21 +38,21 @@ created: 2026-04-14
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 40-01-01 | 01 | 1 | SC-1, SC-3 | T-40-01 | TaskKind validated against known string values | unit | `npx vitest run tests/service/failure-classifier.test.ts` | W0 | pending |
-| 40-01-02 | 01 | 1 | SC-4 | — | Counter resets on success | unit | `npx vitest run tests/service/failure-classifier.test.ts` | W0 | pending |
-| 40-02-01 | 02 | 1 | SC-2 | T-40-02 | Escalation tier clamped to [0,3] | unit | `npx vitest run tests/service/cooldown-strategy.test.ts` | W0 | pending |
-| 40-02-02 | 02 | 1 | SC-5, SC-6 | T-40-03 | State file in workspace-controlled directory | unit | `npx vitest run tests/service/cooldown-strategy.test.ts` | W0 | pending |
+| 40-01-01 | 01 | 1 | CORR-12 | — | trajectoryHistory only contains correctionDetected turns | build | `cd packages/openclaw-plugin && npx tsc --noEmit -p tsconfig.json` | ❌ W0 | ⬜ pending |
+| 40-01-02 | 01 | 1 | CORR-09 | T-40-01 | Only add/update/remove actions accepted; invalid actions skipped | unit | `cd packages/openclaw-plugin && npx vitest run tests/service/keyword-optimization-service.test.ts` | ❌ W0 | ⬜ pending |
+| 40-01-03 | 01 | 1 | CORR-09 | — | updateWeight() and remove() mutate store and flush to disk | unit | `cd packages/openclaw-plugin && npx vitest run tests/core/correction-cue-learner.test.ts` | ✅ | ⬜ pending |
+| 40-01-04 | 01 | 1 | CORR-09 | T-40-02 | keyword_optimization task type present in evolution-worker.ts | build | `cd packages/openclaw-plugin && npx tsc --noEmit -p tsconfig.json && grep -q "keyword_optimization" packages/openclaw-plugin/src/service/evolution-worker.ts` | ✅ | ⬜ pending |
 
-*Status: pending / green / red / flaky*
+*Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
 ---
 
 ## Wave 0 Requirements
 
-- [ ] `packages/openclaw-plugin/tests/service/failure-classifier.test.ts` — stubs for SC-1, SC-3, SC-4
-- [ ] `packages/openclaw-plugin/tests/service/cooldown-strategy.test.ts` — stubs for SC-2, SC-5, SC-6
-- [ ] `packages/openclaw-plugin/src/service/failure-classifier.ts` — NEW: failure classification module
-- [ ] `packages/openclaw-plugin/src/service/cooldown-strategy.ts` — NEW: cooldown escalation module
+- [ ] `packages/openclaw-plugin/tests/service/keyword-optimization-service.test.ts` — unit tests for applyResult() (ADD/UPDATE/REMOVE), updateWeight() clamp, remove() not-found throw
+- [ ] `packages/openclaw-plugin/tests/core/correction-cue-learner.test.ts` — extend existing tests with updateWeight() and remove() coverage
+
+*Existing vitest infrastructure covers the framework requirement.*
 
 ---
 
@@ -60,9 +60,7 @@ created: 2026-04-14
 
 | Behavior | Requirement | Why Manual | Test Instructions |
 |----------|-------------|------------|-------------------|
-| None | — | — | — |
-
-All phase behaviors have automated verification.
+| evolution-worker heartbeat triggers keyword_optimization every 6h | CORR-07 | Requires real-time clock or mock; heartbeat loop not unit-testable | Start worker, wait for `keyword_optimization` log line after period_heartbeats cycles |
 
 ---
 
@@ -72,7 +70,7 @@ All phase behaviors have automated verification.
 - [ ] Sampling continuity: no 3 consecutive tasks without automated verify
 - [ ] Wave 0 covers all MISSING references
 - [ ] No watch-mode flags
-- [ ] Feedback latency < 5s
+- [ ] Feedback latency < 20s
 - [ ] `nyquist_compliant: true` set in frontmatter
 
 **Approval:** pending

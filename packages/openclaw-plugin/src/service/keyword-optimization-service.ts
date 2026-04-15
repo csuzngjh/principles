@@ -7,7 +7,7 @@
  */
 
 import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
-import type { CorrectionObserverResult } from './correction-observer-types.js';
+import type { CorrectionObserverResult } from './subagent-workflow/correction-observer-types.js';
 import type { PluginLogger } from '../openclaw-sdk.js';
 import { TrajectoryRegistry } from '../core/trajectory.js';
 
@@ -144,4 +144,4 @@ export type TrajectoryHistoryEntry = {
 };
 
 /** Re-export CorrectionObserverPayload for convenience */
-export type { CorrectionObserverPayload } from './correction-observer-types.js';
+export type { CorrectionObserverPayload } from './subagent-workflow/correction-observer-types.js';

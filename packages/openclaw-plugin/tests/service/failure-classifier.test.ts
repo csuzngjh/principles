@@ -3,19 +3,19 @@ import { classifyFailure, type ClassifiableTaskKind, type FailureClassificationR
 import type { EvolutionQueueItem } from '../../src/service/evolution-worker.js';
 
 function makeItem(overrides: Partial<EvolutionQueueItem> & { taskKind: ClassifiableTaskKind }): EvolutionQueueItem {
-    return {
-        id: overrides.id ?? `task-${Math.random().toString(36).slice(2, 8)}`,
+    const base: EvolutionQueueItem = {
+        id: `task-${Math.random().toString(36).slice(2, 8)}`,
         taskKind: overrides.taskKind,
-        priority: 'normal',
+        priority: 'medium',
         source: 'test',
         score: 0,
         reason: 'test',
-        timestamp: overrides.timestamp ?? new Date().toISOString(),
-        status: overrides.status ?? 'pending',
-        retryCount: overrides.retryCount ?? 0,
+        timestamp: new Date().toISOString(),
+        status: 'pending',
+        retryCount: 0,
         maxRetries: 3,
-        ...overrides,
     };
+    return { ...base, ...overrides } as EvolutionQueueItem;
 }
 
 describe('failure-classifier', () => {

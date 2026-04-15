@@ -1,109 +1,69 @@
-# Phase 40: Failure Classification & Cooldown Recovery - Discussion Log
+# Phase 40: LLM Discovery - Discussion Log
 
 > **Audit trail only.** Do not use as input to planning, research, or execution agents.
 > Decisions are captured in CONTEXT.md — this log preserves the alternatives considered.
 
 **Date:** 2026-04-14
 **Phase:** 40-llm-discovery
-**Areas discussed:** 故障分类范围, 瞬态 vs 持久判定策略, 冷却升级机制
+**Areas discussed:** Mutation application, Trigger wiring, LLM input data, Feedback integration
 
 ---
 
-## 故障分类范围
+## Mutation Application
 
 | Option | Description | Selected |
 |--------|-------------|----------|
-| Nocturnal 任务范围 | 仅 sleep_reflection / keyword_optimization / deep_reflect | ✓ |
-| Nocturnal + LLM + 文件操作 | 扩展到 LLM 调用和文件操作失败 | |
-| 全局故障分类框架 | 统一覆盖所有 evolution-worker 故障 | |
+| A: evolution-worker.ts 直接调用 | Worker 读取结果后直接调用 add/update/remove | |
+| B: KeywordOptimizationService | 独立服务，解耦，测试方便 | ✓ |
+| C: Workflow manager persistResult | 自包含 | |
 
-**User's choice:** Nocturnal 任务范围 (Recommended)
-**Notes:** 聚焦 nocturnal 三类任务，复用现有 retry.ts 处理瞬时故障
+**User's choice:** B — KeywordOptimizationService
+**Notes:** 解耦优先，evolution-worker.ts 不直接操作 CorrectionCueLearner
 
 ---
 
-## 瞬态 vs 持久判定策略
-
-### 判定标准
+## Trigger Wiring
 
 | Option | Description | Selected |
 |--------|-------------|----------|
-| 连续失败次数 | 同一任务连续失败 N 次升级 | ✓ |
-| 滑动窗口失败率 | 24h 内失败率超过阈值 | |
-| 错误类型映射表 | 按错误类型硬编码分类 | |
+| A: 新增 keyword_optimization task type | 职责清晰，独立配置 | ✓ |
+| B: 复用 sleep_reflection handler | 改动小但逻辑混杂 | |
+| C: 独立 scheduleNextOptimization 循环 | 完全解耦但增加复杂度 | |
 
-**User's choice:** 连续失败次数 (Recommended)
-
-### 升级阈值
-
-| Option | Description | Selected |
-|--------|-------------|----------|
-| 2 次连续失败 | 快速响应 | |
-| 3 次连续失败 | 平衡重试和响应速度 | ✓ |
-| 4 次连续失败 | 给足重试空间 | |
-| Claude 决定 | 按任务类型决定 | |
-
-**User's choice:** 3 次连续失败 (Recommended)
-
-### 计数器重置策略
-
-| Option | Description | Selected |
-|--------|-------------|----------|
-| 成功即重置 | 每次成功归零 | ✓ |
-| 带时间窗口的重置 | 24h 窗口内累计 | |
-| Claude 决定 | 按任务类型选择 | |
-
-**User's choice:** 成功即重置 (Recommended)
+**User's choice:** A — 新增 task type，keyword_optimization 独立
+**Notes:** 保持 keyword_optimization 与 sleep_reflection 解耦
 
 ---
 
-## 冷却升级机制
-
-### 架构选择
+## LLM Input Data
 
 | Option | Description | Selected |
 |--------|-------------|----------|
-| 扩展现有模块 | 改 retry.ts + checkCooldown() + evolution-worker.ts | |
-| 新建独立模块 | failure-classifier.ts + cooldown-strategy.ts | ✓ |
-| Claude 决定 | 根据代码分析选择 | |
+| A: keywordStoreSummary + recentMessages（现状） | 简单，LLM 能推断 | |
+| B: + trajectory 历史（correctionDetected 记录） | LLM 知道真实触发频率 | ✓ |
+| C: + 每次 correction 后的用户反馈 | 最准确但需要 feedback 记录未实现 | |
 
-**User's choice:** 新建独立模块
-**Notes:** Phase 31 决策倾向显式适配器模式
-
-### 升级策略
-
-| Option | Description | Selected |
-|--------|-------------|----------|
-| 线性升级 | 30/60/120min | |
-| 指数升级 | 15min/1h/4h | |
-| 阶梯升级 | 30min/4h/24h 三档 | ✓ |
-| Claude 决定 | 按任务类型选择 | |
-
-**User's choice:** 阶梯升级 30min → 4h → 24h (Recommended)
-
-### 状态持久化
-
-| Option | Description | Selected |
-|--------|-------------|----------|
-| 持久化到 state 文件 | 写入 nocturnal-runtime.json | ✓ |
-| 仅内存状态 | 重启后冷却重置 | |
-| Claude 决定 | 根据实际需要选择 | |
-
-**User's choice:** 持久化到 state 文件 (Recommended)
-**Notes:** Phase 41 负责启动时清理过期冷却
+**User's choice:** B — trajectory 历史加入 payload
+**Notes:** trajectory.listUserTurnsForSession() 已返回 correctionDetected，KeywordOptimizationService 读取并传给 LLM
 
 ---
 
-## Claude's Discretion
+## Feedback Integration
 
-- 新模块内部文件结构和模块边界
-- 失败计数器如何集成 evolution-worker.ts 任务状态机
-- cooldown-strategy.ts 是扩展还是包装现有 checkCooldown()
-- 日志和诊断输出格式
+| Option | Description | Selected |
+|--------|-------------|----------|
+| A: 用户显式否定时立即调用 | 简单直接，可能误判 | |
+| B: trajectory 回放时推断 | 更准确但需要回放逻辑 | |
+| C: LLM 优化时自动判断 | 全自动 | ✓ |
+| D: prompt.ts 中 correction 匹配后立即调用 + 确认满意信号 | 在 prompt.ts 中立即调用 recordFalsePositive()，用户继续正常对话 N 轮后调用 recordTruePositive() | |
+
+**User's choice:** D — prompt.ts 中 correction 匹配后立即调用 + 确认满意信号
+**Notes:** 需要定义"确认满意"的窗口（N 轮无 further correction cues）
+
+---
 
 ## Deferred Ideas
 
-- LLM 调用失败分类（超出 retry.ts 范围）— 未来 LLM 弹性阶段
-- 文件操作失败分类 — Phase 38-39 原子写入已处理
-- 基于失败率趋势的自适应冷却 — Phase 41 验证基础后考虑
-- 全局故障监控面板 — 生产可观测性范畴
+- recordTruePositive() 确认窗口的精确 N 值（实现时决定）
+- CORR-12 trajectory flag 已部分实现，新工作是让 LLM 能访问这些数据
+

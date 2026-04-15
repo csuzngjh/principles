@@ -21,9 +21,16 @@ import {
   CORRECTION_SEED_KEYWORDS,
   MAX_CORRECTION_KEYWORDS,
 } from './correction-types.js';
-import { checkCooldown, recordCooldown } from '../service/nocturnal-runtime.js';
+import { checkCooldown } from '../service/nocturnal-runtime.js';
 
 const KEYWORD_STORE_FILE = 'correction_keywords.json';
+
+// CORR-08: Daily optimization throttle (uses checkCooldown in nocturnal-runtime.ts)
+// Note: throttle state is stored in nocturnal-runtime.json, not a separate file.
+
+// Weight bounds for correction keywords (D-39-03, D-39-15)
+const MIN_KEYWORD_WEIGHT = 0.1;
+const MAX_KEYWORD_WEIGHT = 0.9;
 
 // =========================================================================
 // Module-level cache (D-04, D-05)
@@ -112,6 +119,8 @@ export function saveCorrectionKeywordStore(
   _correctionCueCache = null;
 }
 
+// =========================================================================
+// Throttle helpers (CORR-08)
 // =========================================================================
 // Singleton state
 // =========================================================================
@@ -230,8 +239,7 @@ export class CorrectionCueLearner {
     keyword.falsePositiveCount = (keyword.falsePositiveCount ?? 0) + 1;
 
     // D-39-15: Multiplicative weight decay x0.8 on confirmed FP
-    // Note: hitCount already incremented by match(), do not double-count
-    keyword.weight = keyword.weight * 0.8;
+    keyword.weight = Math.max(MIN_KEYWORD_WEIGHT, keyword.weight * 0.8);
     keyword.lastHitAt = new Date().toISOString();
 
     // Update in-store reference
@@ -259,10 +267,10 @@ export class CorrectionCueLearner {
 
   /**
    * Records that an optimization was performed.
-   * Increments the daily throttle counter and updates lastOptimizedAt.
+   * Updates lastOptimizedAt for the store. Throttle state is managed
+   * by checkCooldown() — no separate throttle file needed (CORR-08).
    */
-  async recordOptimizationPerformed(): Promise<void> {
-    await recordCooldown(this.stateDir, 24 * 60 * 60 * 1000);
+  recordOptimizationPerformed(): void {
     this.store.lastOptimizedAt = new Date().toISOString();
     this.flush();
   }
@@ -291,14 +299,20 @@ export class CorrectionCueLearner {
    * Throws if keyword not found.
    */
   updateWeight(term: string, weight: number): void {
-    const idx = this.store.keywords.findIndex(
+    const keyword = this.store.keywords.find(
       k => k.term.toLowerCase() === term.toLowerCase()
     );
-    if (idx < 0) {
+    if (!keyword) {
       throw new Error(`Keyword not found: ${term}`);
     }
 
-    this.store.keywords[idx].weight = Math.max(0.1, Math.min(0.9, weight));
+    keyword.weight = Math.max(MIN_KEYWORD_WEIGHT, Math.min(MAX_KEYWORD_WEIGHT, weight)); // Clamp to MIN-MAX_KEYWORD_WEIGHT
+    const idx = this.store.keywords.findIndex(
+      k => k.term.toLowerCase() === term.toLowerCase()
+    );
+    if (idx >= 0) {
+      this.store.keywords[idx] = { ...keyword };
+    }
     this.flush();
   }
 
