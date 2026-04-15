@@ -29,9 +29,7 @@ Milestone v1.18 shipped. All phases complete (4/4 phases, 10/10 plans).
 
 Progress: [████████████████████] 100%
 
-## Accumulated Context
-
-### Accomplishments
+## Accomplishments
 
 - Atomic Write Utility (Phase 38): crash-safe writes via tmp+fsync+rename
 - Nocturnal Write Migration (Phase 39): all writeFileSync sites migrated to atomic writes
@@ -42,10 +40,10 @@ Progress: [████████████████████] 100%
 - Philosopher 6D Evaluation (Phase 36): 6-dimension scoring, risk assessment
 - Scribe Contrastive Analysis (Phase 37): rejectedAnalysis, chosenJustification, contrastiveAnalysis
 
-### Pending Todos
+## Pending Todos
 
 Next milestone not yet defined. Run `/gsd-new-milestone` to start.
 
-### Blockers/Concerns
+## Blockers/Concerns
 
 None

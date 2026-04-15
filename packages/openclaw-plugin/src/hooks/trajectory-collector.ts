@@ -7,21 +7,21 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import type { 
-  PluginHookAfterToolCallEvent, 
-  PluginHookToolContext, 
-  PluginHookLlmOutputEvent, 
+import type {
+  PluginHookAfterToolCallEvent,
+  PluginHookToolContext,
+  PluginHookLlmOutputEvent,
   PluginHookAgentContext,
   PluginHookBeforeMessageWriteEvent
 } from '../openclaw-sdk.js';
+import { MAX_STRING_LENGTH } from '../config/defaults/runtime.js';
 
 const TRAJECTORY_DIR = 'memory/trajectories/';
 
 // 敏感字段匹配正则
 const SENSITIVE_KEY_PATTERN = /password|token|authorization|secret|api[_-]?key|credential|cookie|session/i;
 
-// 最大字符串长度
-const MAX_STRING_LENGTH = 1000;
+// 最大结果长度（不同于 MAX_STRING_LENGTH）
 const MAX_RESULT_LENGTH = 500;
 
 /**
@@ -231,7 +231,7 @@ export function handleBeforeMessageWrite(
   if (typeof msg.content === 'string') {
      
     // Reason: msg.content is string | ContentPart[]; destructuring would require renaming in the else branch
-    // eslint-disable-next-line @typescript-eslint/prefer-destructuring
+     
     content = msg.content;
   } else if (Array.isArray(msg.content)) {
     content = msg.content

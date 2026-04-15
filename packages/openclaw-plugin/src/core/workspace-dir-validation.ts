@@ -6,8 +6,11 @@
  */
 
 import * as os from 'os';
-import type { PluginLogger } from '../openclaw-sdk.js';
-import { resolveWorkspaceDir, type WorkspaceResolutionContext } from './workspace-dir-service.js';
+
+export interface WorkspaceResolutionContext {
+  workspaceDir?: string;
+  agentId?: string;
+}
 
 export function validateWorkspaceDir(dir: string | undefined): string | null {
   if (!dir) {
@@ -37,39 +40,4 @@ export function validateWorkspaceDir(dir: string | undefined): string | null {
   }
 
   return null;
-}
-
-export function resolveValidWorkspaceDir(
-  ctx: WorkspaceResolutionContext,
-  api: {
-    runtime: { agent: { resolveAgentWorkspaceDir: (config: unknown, agentId: string) => string } };
-    config: unknown;
-    logger: PluginLogger;
-  },
-  options?: { source?: string; fallbackAgentId?: string },
-): string | undefined {
-  return resolveWorkspaceDir(api as never, ctx, {
-    source: options?.source,
-    fallbackAgentId: options?.fallbackAgentId,
-    logger: api.logger,
-  });
-}
-
-export function logWorkspaceDirHealth(
-  ctx: WorkspaceResolutionContext,
-  source: string,
-  api: {
-    runtime: { agent: { resolveAgentWorkspaceDir: (config: unknown, agentId: string) => string } };
-    config: unknown;
-    logger: PluginLogger;
-  },
-): void {
-  const resolved = resolveValidWorkspaceDir(ctx, api, { source, fallbackAgentId: 'main' });
-  const issue = validateWorkspaceDir(resolved);
-
-  if (issue) {
-    api.logger.error(`[PD:health] ${source}: workspaceDir="${resolved}" - ${issue}`);
-  } else {
-    api.logger.info(`[PD:health] ${source}: workspaceDir="${resolved}" OK`);
-  }
 }

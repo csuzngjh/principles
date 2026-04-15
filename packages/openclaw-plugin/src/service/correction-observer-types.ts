@@ -48,8 +48,8 @@ export interface CorrectionObserverPayload {
 export interface CorrectionObserverResult {
   /** Whether any changes were made */
   updated: boolean;
-  /** The optimization decisions returned by the LLM */
-  updates: Record<string, {
+  /** The optimization decisions returned by the LLM (optional if updated=false) */
+  updates?: Record<string, {
     action: 'add' | 'update' | 'remove';
     weight?: number;
     falsePositiveRate?: number;
