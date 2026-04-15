@@ -33,7 +33,8 @@ describe('EventLog', () => {
       eventLog.recordDeepReflection('session-1', data);
       eventLog.flush();
 
-      const eventsFile = path.join(tempDir, 'logs', 'events.jsonl');
+      const today = new Date().toISOString().slice(0, 10);
+      const eventsFile = path.join(tempDir, 'logs', `events_${today}.jsonl`);
       const content = fs.readFileSync(eventsFile, 'utf-8');
       const event = JSON.parse(content.trim());
 

@@ -54,7 +54,8 @@ vi.mock('../../src/core/nocturnal-trajectory-extractor.js', async () => {
   };
 });
 
-import { EvolutionWorkerService, readRecentPainContext } from '../../src/service/evolution-worker.js';
+import { EvolutionWorkerService } from '../../src/service/evolution-worker.js';
+import { readRecentPainContext } from '../../src/service/evolution-pain-context.js';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
 import { handlePdReflect } from '../../src/commands/pd-reflect.js';
 import { safeRmDir } from '../test-utils.js';
