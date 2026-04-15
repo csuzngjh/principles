@@ -156,7 +156,7 @@ export abstract class WorkflowManagerBase implements WorkflowManager {
      * Subclasses override to add type-specific fields.
      */
      
-    // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+     
     protected createWorkflowMetadata<TResult>(
         spec: SubagentWorkflowSpec<TResult>,
         options: {
@@ -183,7 +183,7 @@ export abstract class WorkflowManagerBase implements WorkflowManager {
      * Subclasses override to call store.createWorkflow() with type-specific metadata.
      */
      
-    // eslint-disable-next-line @typescript-eslint/max-params
+     
     protected async createWorkflowRecord<TResult>(
         workflowId: string,
         childSessionKey: string,
@@ -216,7 +216,7 @@ export abstract class WorkflowManagerBase implements WorkflowManager {
     // ── Protected Helpers ────────────────────────────────────────────────────
 
      
-    // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+     
     protected buildRunParams<TResult>(
         spec: SubagentWorkflowSpec<TResult>,
         options: {
@@ -316,7 +316,7 @@ export abstract class WorkflowManagerBase implements WorkflowManager {
         error?: string
     ): Promise<void> {
          
-        // eslint-disable-next-line @typescript-eslint/init-declarations
+         
         let workflow;
         try {
             workflow = this.store.getWorkflow(workflowId);
@@ -528,7 +528,7 @@ export abstract class WorkflowManagerBase implements WorkflowManager {
 
     // ── Private Helpers ───────────────────────────────────────────────────────
 
-    // eslint-disable-next-line @typescript-eslint/class-methods-use-this
+     
     protected generateWorkflowId(): string {
         // Subclasses override the prefix part via wf_ prefix pattern
         return `wf_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
