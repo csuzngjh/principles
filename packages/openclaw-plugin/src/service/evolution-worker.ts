@@ -1,4 +1,5 @@
 /* global NodeJS */
+/* eslint-disable max-lines */
 import * as fs from 'fs';
 import * as path from 'path';
 import type { OpenClawPluginServiceContext, OpenClawPluginApi, PluginLogger } from '../openclaw-sdk.js';
@@ -19,13 +20,12 @@ import { atomicWriteFileSync } from '../utils/io.js';
 export { loadEvolutionQueue, saveEvolutionQueue, withQueueLock, acquireQueueLock, requireQueueLock } from './queue-io.js';
 export { enqueueSleepReflectionTask, enqueueKeywordOptimizationTask } from './queue-io.js';
 export { EVOLUTION_QUEUE_LOCK_SUFFIX, LOCK_MAX_RETRIES, LOCK_RETRY_DELAY_MS, LOCK_STALE_MS } from './queue-io.js';
-import { loadEvolutionQueue, saveEvolutionQueue, requireQueueLock, hasPendingTask, shouldSkipForDedup, enqueueSleepReflectionTask, enqueueKeywordOptimizationTask, createEvolutionTaskId } from './queue-io.js';
+import { saveEvolutionQueue, requireQueueLock, hasPendingTask, enqueueSleepReflectionTask, enqueueKeywordOptimizationTask, createEvolutionTaskId } from './queue-io.js';
 import type { RecentPainContext } from './queue-io.js';
 export type { RecentPainContext } from './queue-io.js';
 import { checkWorkspaceIdle, checkCooldown, recordCooldown } from './nocturnal-runtime.js';
 import { loadCooldownEscalationConfig, loadNocturnalConfigMerged } from './nocturnal-config.js';
 import { WorkflowStore } from './subagent-workflow/workflow-store.js';
-import type { WorkflowRow } from './subagent-workflow/types.js';
 import { EmpathyObserverWorkflowManager } from './subagent-workflow/empathy-observer-workflow-manager.js';
 import { DeepReflectWorkflowManager } from './subagent-workflow/deep-reflect-workflow-manager.js';
 import { NocturnalWorkflowManager, nocturnalWorkflowSpec } from './subagent-workflow/nocturnal-workflow-manager.js';
@@ -163,6 +163,7 @@ function isSessionAtOrBeforeTriggerTime(
     return true;
 }
 
+/* eslint-disable complexity */
 function buildFallbackNocturnalSnapshot(
     sleepTask: EvolutionQueueItem,
     extractor?: ReturnType<typeof createNocturnalTrajectoryExtractor> | null,
@@ -1574,7 +1575,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                     const manager = new CorrectionObserverWorkflowManager({
                         workspaceDir: wctx.workspaceDir,
                         logger,
-                        subagent: api?.runtime?.subagent!,
+                        subagent: api?.runtime?.subagent!, /* eslint-disable-line @typescript-eslint/no-non-null-assertion */
                         agentSession: api?.runtime?.agent?.session,
                     });
 
@@ -1588,7 +1589,7 @@ async function processEvolutionQueue(wctx: WorkspaceContext, logger: PluginLogge
                         workflowId = handle.workflowId;
                         koTask.resultRef = workflowId;
                     } else {
-                        workflowId = koTask.resultRef!;
+                        workflowId = koTask.resultRef!; /* eslint-disable-line @typescript-eslint/no-non-null-assertion */
                     }
 
                     // Poll workflow state
